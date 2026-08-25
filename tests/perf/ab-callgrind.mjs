@@ -33,6 +33,14 @@
  * platform-divergence.mjs, which measures exactly how much of the binary
  * that is.
  *
+ * AND IT CAN RUN DIFFERENT CODE. Valgrind emulates CPUID, and its answer is
+ * not this host's: leaf 7 EBX bit 29 (SHA) reads 1 natively and 0 under
+ * valgrind, so every CPUID-dispatched function here takes its FALLBACK arm.
+ * That is not a slow measurement of the shipped path, it is an exact
+ * measurement of a path the shipping binary never executes - and it put SHA-
+ * 256 at 72% of SEND 1:1 in a brief when the shipped share is ~13-14%. The
+ * FALLBACK-ARM health check below names every row this applies to.
+ *
  * HEALTH CHECKS, verified on every run and printed with the results, because
  * a driver whose `cycles` column reads zeros looks exactly like "no
  * difference":
@@ -42,7 +50,9 @@
  *      never hidden - it is the "no symbols" failure mode's fingerprint;
  *   4. every scenario is run twice and the two runs must agree to the
  *      instruction. A scenario that does not reproduce is printed as
- *      NON-DETERMINISTIC and excluded from any A/B verdict.
+ *      NON-DETERMINISTIC and excluded from any A/B verdict;
+ *   5. FALLBACK-ARM: any CPUID-dispatched function whose fast arm has zero
+ *      cost, i.e. whose row is the path the shipping binary does not take.
  *
  * FIXED WORK, NOT FIXED TIME. _bench.ts's loop is time-boxed
  * (`while (elapsed < BENCH_MIN_MS)`), which under an emulator would make the
@@ -52,6 +62,7 @@
  *
  * Run:
  *   node tests/perf/ab-callgrind.mjs --selftest
+ *   node tests/perf/ab-callgrind.mjs --selftest-dispatch   (no WSL, 2 seconds)
  *   node tests/perf/ab-callgrind.mjs --bench runtime --out G:/blocks/x/lab/cg
  *   node tests/perf/ab-callgrind.mjs --bench messaging --top 30
  */
@@ -109,6 +120,49 @@ const SCENARIOS = {
   runtime: ['numeric-modulo', 'numeric-add', 'closure-churn', 'closure-nocapture', 'closure-call-hoisted', 'string-build', 'map-churn', 'array-churn', 'record-field'],
   messaging: ['SEND 1:1', 'RECV 1:1', 'SEND group', 'RECV group'],
   startup: []
+}
+
+/* ── HEALTH 5: functions whose SHIPPED arm this lane cannot execute ──────
+ *
+ * The header's caveat is that instructions are not cycles. There is a
+ * SHARPER one, and it cost a whole brief: a function whose fast path is
+ * chosen at RUN TIME by CPUID takes a DIFFERENT PATH under valgrind than on
+ * the shipping box, so the row is not a slow measurement of the shipped code
+ * — it is an exact measurement of code that never runs.
+ *
+ * Measured here on 2026-08-25, AMD Ryzen 5 5500 / valgrind 3.25.1:
+ *   CPUID leaf 7 EBX bit 29 (SHA)   native 1   under valgrind 0
+ *   a program that executes sha256rnds2 under valgrind takes SIGILL.
+ * So `scr_sha256_blocks` at 72.43% of SEND 1:1 in this table is the SCALAR
+ * fallback, at ~11.3 cycles/byte; the shipped Windows binary runs the SHA-NI
+ * arm at ~1.7, and the same term there is ~13-14% of the scenario. The
+ * CPUID gate is what keeps this lane from SIGILLing at all, which is a
+ * second reason not to replace it with a compile-time -msha.
+ *
+ * The check reads the DATA, not a build flag: if the gate function has cost
+ * and its fast arm has none, the fallback is what ran. If valgrind ever
+ * gains the instructions, the fast arm appears and the warning stops by
+ * itself. `--selftest-dispatch` proves it can do both. */
+const DISPATCHED = [
+  {
+    gate: 'scr_sha256_blocks',
+    fast: 'scr_sha256_ni_blocks',
+    note: 'SHA-NI (sha256rnds2). valgrind CPUID answers SHA=0 and SIGILLs on the instruction, so this row is the SCALAR arm; on the shipping x86_64-windows-gnu binary this host runs the vector arm at ~6.5x, measured by TSC.'
+  }
+]
+
+/** Rows the profile counted on a fallback the shipping binary does not take.
+ *  `rows` is the self-cost Map keyed by function name. */
+function dispatchWarnings(rows) {
+  const out = []
+  for (const d of DISPATCHED) {
+    const gate = rows.get(d.gate)
+    if (gate === undefined || gate.self <= 0) continue
+    const fast = rows.get(d.fast)
+    if (fast !== undefined && fast.self > 0) continue
+    out.push(d)
+  }
+  return out
 }
 
 /* ── WSL ────────────────────────────────────────────────────────────────── */
@@ -390,6 +444,10 @@ function printScenario(m) {
         : 'NO  <-- ' + m.driftPct.toFixed(6) + '% EXCEEDS the ' + FLOOR_PCT + '% gate')
   ]
   console.log('   health: ' + health.join('   '))
+  for (const w of dispatchWarnings(r.rows)) {
+    console.log('   FALLBACK-ARM: ' + w.gate + ' ran its fallback, not the arm that ships.')
+    console.log('                 ' + w.fast + ' has zero cost in this profile. ' + w.note)
+  }
   for (const d of m.drift.slice(0, 8)) console.log('     drift: ' + d)
   if (!r.ran || r.summary === 0) { console.log('   (health check failed - no table)'); return }
 
@@ -437,6 +495,10 @@ function abRun(exeA, exeB, scenarios, aEnv, bEnv) {
     console.log('== ' + sc)
     console.log('   health: A SCBENCH=' + (A.rep.ran ? 'yes' : 'NO') + ' B SCBENCH=' + (B.rep.ran ? 'yes' : 'NO') +
       '   A reproducible=' + (A.deterministic ? 'EXACT' : 'no') + '   B reproducible=' + (B.deterministic ? 'EXACT' : 'no'))
+    for (const w of dispatchWarnings(A.rep.rows)) {
+      console.log('   FALLBACK-ARM: ' + w.gate + ' ran its fallback on BOTH arms of this A/B, not the code that ships.')
+      console.log('                 ' + w.note)
+    }
     if (!health) { console.log('   DID-NOT-RUN - no verdict'); continue }
     const dTotal = B.rep.total - A.rep.total
     const pct = A.rep.total > 0 ? 100 * dTotal / A.rep.total : 0
@@ -469,7 +531,32 @@ function abRun(exeA, exeB, scenarios, aEnv, bEnv) {
 
 /* ── driver ─────────────────────────────────────────────────────────────── */
 
+/** The FALLBACK-ARM check's own negative control. A warning that can only
+ *  fire is as useless as one that can only stay silent, so both directions
+ *  are asserted against synthetic tables. Needs no WSL, so it runs in two
+ *  seconds and can be part of any gate. */
+function selftestDispatch() {
+  const R = (pairs) => new Map(pairs.map(([n, s]) => [n, { name: n, file: '?', self: s }]))
+  const cases = [
+    ['gate ran, fast arm absent', R([['scr_sha256_blocks', 25942020]]), 1],
+    ['gate ran, fast arm also ran', R([['scr_sha256_blocks', 810], ['scr_sha256_ni_blocks', 4000000]]), 0],
+    ['gate present with zero cost', R([['scr_sha256_blocks', 0]]), 0],
+    ['neither function in the profile', R([['scr_str_concat', 12345]]), 0],
+    ['empty table', R([]), 0]
+  ]
+  let bad = 0
+  for (const [label, rows, want] of cases) {
+    const got = dispatchWarnings(rows).length
+    const ok = got === want
+    if (!ok) bad += 1
+    console.log('   ' + (ok ? 'ok  ' : 'FAIL') + '  ' + pad(label, 34) + ' warnings=' + got + ' want=' + want)
+  }
+  console.log('SELFTEST-DISPATCH ' + (bad === 0 ? 'PASS — the check both fires and stays quiet' : 'FAIL'))
+  process.exit(bad === 0 ? 0 : 1)
+}
+
 function main() {
+  if (has('selftest-dispatch')) return selftestDispatch()
   mkdirSync(OUT, { recursive: true })
   const vg = requireWsl()
   console.log('ab-callgrind   distro=' + DISTRO + '   ' + vg)

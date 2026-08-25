@@ -3278,6 +3278,15 @@ scr_sha256_ni_blocks(uint32_t state[8], const unsigned char *data, size_t nblk) 
 /* nblk consecutive 64-byte blocks. The ONE place the two arms meet; with
  * SCR_SHA256_NI=0 this is the plain loop the digest used to inline. */
 static void scr_sha256_blocks(uint32_t h[8], const unsigned char *p, size_t nblk) {
+#ifdef SCR_SHACEN_ON
+  /* the arm is read from the dispatch's OWN memo, not from the build flags:
+   * "SHA-NI is compiled in" and "SHA-NI ran" are different claims. */
+#if SCR_SHA256_NI
+  scr_shacen_note_blocks((long long)nblk, scr_sha256_have_ni());
+#else
+  scr_shacen_note_blocks((long long)nblk, -1);
+#endif
+#endif
 #if SCR_SHA256_NI
   if (scr_sha256_have_ni()) {
     scr_sha256_ni_blocks(h, p, nblk);
@@ -3290,6 +3299,12 @@ static void scr_sha256_blocks(uint32_t h[8], const unsigned char *p, size_t nblk
 /* Final block(s) shared shape: the 0x80 terminator, zero padding, 64-bit
  * big-endian bit length (FIPS 180-4 — SHA-1 and SHA-256 pad alike). */
 static size_t scr_sha256_digest(const unsigned char *data, size_t len, unsigned char out[32]) {
+#ifdef SCR_SHACEN_ON
+  /* tests/perf/shacensus/scr_sha_census.h. Inert — the switch is undefined —
+   * unless that header is -include'd, which is the only way to answer "what
+   * does the REAL program hash, and how big". */
+  scr_shacen_note(SCR_SHACEN_SHA256, (long long)len);
+#endif
   uint32_t h[8] = {0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a,
                    0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19};
   size_t nblk = len / 64;
@@ -3309,6 +3324,23 @@ static size_t scr_sha256_digest(const unsigned char *data, size_t len, unsigned 
   }
   return 32;
 }
+
+#ifdef SCR_SHACEN_ON
+/* The census's POSITIVE CONTROL lives here and not in the header, because
+ * scr_sha256_digest is static to this file. SCR_SHACEN_ARM=<n> hashes n
+ * copies of a fixed 137-byte message before main runs; the report's sha256
+ * row 137 must then read exactly n. Without it a report of zero digests and
+ * a census that never compiled in look the same. */
+__attribute__((constructor)) static void scr_shacen_plant_ctor(void) {
+  const char *v = getenv("SCR_SHACEN_ARM");
+  long n = (v && *v) ? strtol(v, 0, 10) : 0;
+  unsigned char msg[137], out[32];
+  long i;
+  memset(msg, 0xa7, sizeof msg);
+  for (i = 0; i < n; i++) scr_sha256_digest(msg, sizeof msg, out);
+  scr_shacen_planted = (int)n;
+}
+#endif
 
 /* ── SHA-1 (FIPS 180-4) — the RFC 6455 Sec-WebSocket-Accept hash ────── */
 
@@ -3336,6 +3368,9 @@ static void scr_sha1_block(uint32_t h[5], const unsigned char *p) {
 }
 
 static size_t scr_sha1_digest(const unsigned char *data, size_t len, unsigned char out[32]) {
+#ifdef SCR_SHACEN_ON
+  scr_shacen_note(SCR_SHACEN_SHA1, (long long)len);
+#endif
   uint32_t h[5] = {0x67452301, 0xefcdab89, 0x98badcfe, 0x10325476, 0xc3d2e1f0};
   size_t i = 0;
   for (; i + 64 <= len; i += 64) scr_sha1_block(h, data + i);
@@ -3422,6 +3457,9 @@ static void scr_sha512_block(uint64_t h[8], const unsigned char *p) {
 }
 
 static size_t scr_sha512_digest(const unsigned char *data, size_t len, unsigned char out[64]) {
+#ifdef SCR_SHACEN_ON
+  scr_shacen_note(SCR_SHACEN_SHA512, (long long)len);
+#endif
   uint64_t h[8] = {0x6a09e667f3bcc908ULL, 0xbb67ae8584caa73bULL, 0x3c6ef372fe94f82bULL,
                    0xa54ff53a5f1d36f1ULL, 0x510e527fade682d1ULL, 0x9b05688c2b3e6c1fULL,
                    0x1f83d9abfb41bd6bULL, 0x5be0cd19137e2179ULL};
@@ -3516,6 +3554,9 @@ static void scr_md5_block(uint32_t h[4], const unsigned char *p) {
 }
 
 static size_t scr_md5_digest(const unsigned char *data, size_t len, unsigned char out[32]) {
+#ifdef SCR_SHACEN_ON
+  scr_shacen_note(SCR_SHACEN_MD5, (long long)len);
+#endif
   uint32_t h[4] = {0x67452301, 0xefcdab89, 0x98badcfe, 0x10325476};
   size_t i = 0;
   for (; i + 64 <= len; i += 64) scr_md5_block(h, data + i);
@@ -3551,6 +3592,10 @@ size_t scr_crypto_hmac_raw(const char *alg, const unsigned char *key, size_t key
                            const unsigned char *data, size_t len, unsigned char out[32]) {
   unsigned char kblock[64];
   unsigned char kd[32];
+#ifdef SCR_SHACEN_ON
+  scr_shacen_note(SCR_SHACEN_HMAC, (long long)len);
+  scr_shacen_note(SCR_SHACEN_HMACKEY, (long long)keylen);
+#endif
   if (keylen > 64) {
     size_t kn = scr_crypto_digest_raw(alg, key, keylen, kd);
     if (kn == 0) return 0;
@@ -3799,6 +3844,10 @@ ScrHmac *scr_hmac_update_bytes(ScrHmac *h, ScrBytes *data) {
 
 static size_t scr_hmac_finish(ScrHmac *h, unsigned char out[64]) {
   const size_t block = h->alg == SCR_HASH_SHA512 ? 128u : 64u;
+#ifdef SCR_SHACEN_ON
+  scr_shacen_note(SCR_SHACEN_HMAC, (long long)h->len);
+  scr_shacen_note(SCR_SHACEN_HMACKEY, (long long)h->keylen);
+#endif
   unsigned char k0[128];
   memset(k0, 0, block);
   if (h->keylen > block) {
