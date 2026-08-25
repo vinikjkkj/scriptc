@@ -102,6 +102,7 @@ declare module "better-sqlite3" {
     loadExtension(path: string, entryPoint?: string): Database;
     unsafeMode(enabled?: boolean): Database;
     defaultSafeIntegers(toggle?: boolean): Database;
+    explain(source?: string): Statement;
   }
 
   /* The module's default export: better-sqlite3's `Database` works with
