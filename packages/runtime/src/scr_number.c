@@ -223,26 +223,63 @@ static const char scr_dec2[201] =
     "80818283848586878889"
     "90919293949596979899";
 
-/* Decimal digits of u >= 1 into out, two at a time; returns the count.
-   u < 2^53 so at most 16 digits, and tmp[20] cannot overflow. */
+/* 10^i, for the branchless decimal length below. */
+static const uint64_t scr_p10[20] = {
+    1ull, 10ull, 100ull, 1000ull, 10000ull, 100000ull, 1000000ull,
+    10000000ull, 100000000ull, 1000000000ull, 10000000000ull,
+    100000000000ull, 1000000000000ull, 10000000000000ull,
+    100000000000000ull, 1000000000000000ull, 10000000000000000ull,
+    100000000000000000ull, 1000000000000000000ull, 10000000000000000000ull};
+
+/* How many decimal digits u has, in a fixed number of instructions.
+ *
+ * (64 - clz(v)) * 1233 >> 12 is floor(log10(2) * bitlength), which is the
+ * digit count or one less, and the single compare against 10^t corrects it.
+ * ryu's decimalLength17 answers the same question with a compare chain from
+ * 17 downwards -- right for ryu, whose average output is 16.38 digits, and
+ * wrong here: the census says 99.9% of the values this function formats have
+ * three to five digits, which that chain reaches after thirteen comparisons.
+ *
+ * v = u | 1 keeps the function TOTAL. clzll(0) is undefined and 10^0 is the
+ * one odd power of ten, so setting the low bit answers 1 for u == 0 and
+ * changes nothing for u >= 1: it moves no value across an even power of ten,
+ * and it cannot move the top set bit. */
+static int scr_u64_len(uint64_t u) {
+  const uint64_t v = u | 1u;
+  const int t = (int)(((64 - __builtin_clzll(v)) * 1233) >> 12);
+  return t + (v >= scr_p10[t] ? 1 : 0);
+}
+
+/* Decimal digits of u into out, two at a time, written BACK TO FRONT.
+ *
+ * The shipped shape generated digits low-to-high into a local tmp[20] and
+ * then copied them out reversed, and that copy was measured at 38.85 of the
+ * function's 135.81 instructions per call (28.6%) on a five-digit integer --
+ * clang vectorises the reversal, so five bytes cost a 4-byte SSE byte-swap
+ * plus twelve instructions of loop setup plus a scalar tail. Knowing the
+ * length up front lets the digits land where they belong the first time: no
+ * temporary, no second pass, no reversal.
+ *
+ * u < 2^53, so at most 16 digits. */
 static int scr_u64_digits(char *out, uint64_t u) {
-  char tmp[20];
-  int n = 0;
+  const int len = scr_u64_len(u);
+  char *p = out + len;
   while (u >= 100) {
-    uint32_t r = (uint32_t)(u % 100);
+    const uint32_t r = (uint32_t)(u % 100);
     u /= 100;
-    tmp[n++] = scr_dec2[r * 2 + 1];
-    tmp[n++] = scr_dec2[r * 2];
+    p -= 2;
+    p[0] = scr_dec2[r * 2];
+    p[1] = scr_dec2[r * 2 + 1];
   }
   if (u >= 10) {
-    uint32_t r = (uint32_t)u;
-    tmp[n++] = scr_dec2[r * 2 + 1];
-    tmp[n++] = scr_dec2[r * 2];
+    const uint32_t r = (uint32_t)u;
+    p -= 2;
+    p[0] = scr_dec2[r * 2];
+    p[1] = scr_dec2[r * 2 + 1];
   } else {
-    tmp[n++] = (char)('0' + (uint32_t)u);
+    *--p = (char)('0' + (uint32_t)u);
   }
-  for (int i = n - 1; i >= 0; i--) *out++ = tmp[i];
-  return n;
+  return len;
 }
 #endif
 
@@ -300,34 +337,17 @@ static void scr_f64_census(double x) {
 }
 #endif
 
-size_t scr_f64_to_str(double x, char *buf) {
-#ifdef SCR_F64_CENSUS
-  scr_f64_census(x);
-#endif
-  if (isnan(x)) return (size_t)(stpcpy(buf, "NaN") - buf);
-  if (x == 0) return (size_t)(stpcpy(buf, "0") - buf); /* covers -0 */
-  if (isinf(x)) {
-    return (size_t)(stpcpy(buf, x < 0 ? "-Infinity" : "Infinity") - buf);
-  }
-
-  char *out = buf;
-  if (x < 0) {
-    *out++ = '-';
-    x = -x;
-  }
-
-#if SCR_F64_FAST_INT
-  /* x is finite, strictly positive and sign-stripped here. */
-  if (x < 9007199254740992.0) { /* 2^53 */
-    uint64_t u = (uint64_t)x;
-    if ((double)u == x) {
-      out += scr_u64_digits(out, u);
-      *out = 0;
-      return (size_t)(out - buf);
-    }
-  }
-#endif
-
+/* The shortest-round-trip tail: ryu digit generation plus the ECMA-262
+ * 6.1.6.1.20 placement arms. COLD and NOINLINE, and both halves are
+ * measured. Inlined here it costs the fast path a frame it never uses:
+ * the four placement arms need enough live registers that the prologue
+ * saved six callee-saved registers and the fast path paid 17 instructions
+ * of push/pop per call plus 8 more of spill glue, for an integer whose
+ * whole formatting is a division loop. scr_array.c already does this for
+ * the same reason (SCR_ARR_COLD).
+ *
+ * out is buf, or buf + 1 when the sign was already written. */
+static __attribute__((noinline, cold)) size_t scr_f64_to_str_slow(double x, char *buf, char *out) {
   char digits[18];
   int n;
   int k = scr_f64_digits(x, digits, &n);
@@ -373,4 +393,54 @@ size_t scr_f64_to_str(double x, char *buf) {
   }
   *out = '\0';
   return (size_t)(out - buf);
+}
+
+size_t scr_f64_to_str(double x, char *buf) {
+#ifdef SCR_F64_CENSUS
+  scr_f64_census(x);
+#endif
+  /* Zero, NaN and both infinities out of ONE load of the bits.
+   *
+   * isnan()/isinf() are the only reason this function is platform-divergent:
+   * mingw expands them to __isnan()/__fpclassify() calls where glibc expands
+   * them to __builtin_isnan/__builtin_isinf_sign, and
+   * tests/perf/platform-divergence.mjs listed scr_f64_to_str as one of the
+   * two DIVERGENT functions in this file at every tier. Shifting the sign
+   * out leaves the magnitude: 0 is the two zeros, 0x7ff<<53 is the two
+   * infinities, and anything above it is a NaN. Same answers, no libm macro,
+   * one platform. */
+  uint64_t bits;
+  memcpy(&bits, &x, sizeof bits);
+  const uint64_t mag = bits << 1; /* sign shifted out */
+  if (mag == 0) return (size_t)(stpcpy(buf, "0") - buf); /* covers -0 */
+  if (mag >= 0xffe0000000000000ull) {
+    if (mag > 0xffe0000000000000ull) return (size_t)(stpcpy(buf, "NaN") - buf);
+    return (size_t)(stpcpy(buf, (bits >> 63) != 0 ? "-Infinity" : "Infinity") - buf);
+  }
+
+  char *out = buf;
+  if ((bits >> 63) != 0) {
+    *out++ = '-';
+    x = -x;
+  }
+
+#if SCR_F64_FAST_INT
+  /* x is finite, strictly positive and sign-stripped here. */
+  if (x < 9007199254740992.0) { /* 2^53 */
+    /* SIGNED, deliberately. x is strictly positive and below 2^53 here, so
+     * both directions are exact either way -- but double -> uint64_t is
+     * eight instructions on x86-64 (the compare-against-2^63 dance) and
+     * uint64_t -> double is nine (punpckldq/subpd/unpckhpd/addsd), against
+     * one cvttsd2si and one cvtsi2sd for the signed pair. Measured at 21.00
+     * of the function's 135.81 instructions per call. */
+    const int64_t i = (int64_t)x;
+    if ((double)i == x) {
+      out += scr_u64_digits(out, (uint64_t)i);
+      *out = 0;
+      return (size_t)(out - buf);
+    }
+  }
+#endif
+
+  return scr_f64_to_str_slow(x, buf, out);
 }
