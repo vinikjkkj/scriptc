@@ -77,8 +77,14 @@ for (const name of readdirSync(dst)) {
 /* Positive control: the patch must have fired, and the phrase it removed
  * must be gone. A silent no-op copy would produce an "unmasked" lane
  * identical to the masked one and nobody would know why. */
+/* Only a quoted SPECIFIER counts as a leftover. The phrase also appears in
+ * prose — messaging.bench.ts documents its profiler wrapper, and the stub's
+ * own header says what it stands in for — and a check that cannot tell a
+ * comment from an import fails on a tree that is completely patched. */
 const leftovers = readdirSync(dst).filter(
-  (n) => n.endsWith(".ts") && /node:inspector/.test(readFileSync(join(dst, n), "utf8")),
+  (n) =>
+    n.endsWith(".ts") &&
+    /(['"])node:inspector(\/promises)?\1/.test(readFileSync(join(dst, n), "utf8")),
 );
 console.log(`unmasked ${DEST}: patched ${patched} file(s) [${touched.join(", ")}], leftovers ${leftovers.length}`);
 if (patched === 0 || leftovers.length > 0) {
