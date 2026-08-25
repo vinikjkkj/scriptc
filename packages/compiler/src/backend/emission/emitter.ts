@@ -2271,6 +2271,8 @@ export class CEmitter {
       case "secureCtx":
       case "abortController":
       case "fsWatcher":
+      case "sqliteDb":
+      case "sqliteStmt":
       case "childStream":
       case "bytes":
       case "func":

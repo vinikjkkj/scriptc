@@ -63,6 +63,7 @@ import {
   cjsExportAssignmentOf,
   cjsExportDiscardReason,
   fallbackDtsPath,
+  sqliteDtsPath,
   isCjsExportTableLiteral,
   isJsSourceFile,
   isNodeEsmFile,
@@ -1566,6 +1567,10 @@ export class Lowerer {
   readonly ambient = ambientDtsPath();
   readonly overridesAmbient = overridesDtsPath();
   readonly fallbackAmbient = fallbackDtsPath();
+  /** The shipped better-sqlite3 declarations, when they ship — the file
+   * is a program root only for a project with no better-sqlite3 types of
+   * its own, so this path may name no source file at all. */
+  readonly sqliteAmbient = sqliteDtsPath();
   /** The one mapType context: registries + hooks, assembled in the
    * constructor (typeParamResolver reads the CURRENT instantiation bindings
    * through `this`, so the same ctx serves generic bodies too). */
@@ -12042,6 +12047,11 @@ export class Lowerer {
     sf.fileName === this.ambient ||
     sf.fileName === this.overridesAmbient ||
     sf.fileName === this.fallbackAmbient ||
+    // The shipped better-sqlite3 module. It resolves through
+    // @scriptc/compiler, so WITHOUT this row it classifies as an npm
+    // declaration file and every use of it meets the SC2013 fence the
+    // whole unit exists to answer.
+    sf.fileName === this.sqliteAmbient ||
     this.program.isSourceFileDefaultLibrary(sf) ||
     (sf.isDeclarationFile && isNodeTypesPath(sf.fileName));
 

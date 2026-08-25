@@ -75,6 +75,26 @@ export function fallbackDtsPath(): string {
   return tsgoPath(require.resolve("@scriptc/compiler/scriptc-node-fallback.d.ts"));
 }
 
+/** Path of the shipped `better-sqlite3` declarations — part of the
+ * program only when the project resolves no better-sqlite3 types of its
+ * own, the fallback arrangement one function up and for its reason (with
+ * `@types/better-sqlite3` installed, TypeScript resolves the import to
+ * that package and this ambient module would be dead weight at best and a
+ * merge conflict at worst). The lowering recognizes EITHER declaration
+ * source by provenance. */
+export function sqliteDtsPath(): string {
+  return tsgoPath(require.resolve("@scriptc/compiler/scriptc-sqlite.d.ts"));
+}
+
+/** True for a declaration file belonging to better-sqlite3's own type
+ * surface — the package itself or its DefinitelyTyped stubs. The npm half
+ * of the SQLite provenance check; the ambient half (scriptc's own shipped
+ * module declaration) is a file-identity test in the lowerer. */
+export function isSqliteTypesPath(file: string): boolean {
+  const pkg = npmPackageNameOf(file);
+  return pkg === "better-sqlite3" || pkg === "@types/better-sqlite3";
+}
+
 /** True for files belonging to the adopted Node type surface: the
  * @types/node package itself and undici-types (its dependency — the
  * web-platform globals: fetch/Response/AbortSignal/ReadableStream/...).
