@@ -570,6 +570,8 @@ describe("LLVM backend declares match scr_runtime.h prototypes", () => {
     // should be written down where the adapters are checked, not assumed.
     request: { kind: "request" },
     fsWatcher: { kind: "fsWatcher" },
+    sqliteDb: { kind: "sqliteDb" },
+    sqliteStmt: { kind: "sqliteStmt" },
     childStream: { kind: "childStream" },
     func: { kind: "func", params: [], ret: { kind: "void" } },
     classval: { kind: "classval", className: "C" },

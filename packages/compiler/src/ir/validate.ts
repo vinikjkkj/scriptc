@@ -104,8 +104,10 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
    * a non-literal option value reaches it as a computed f64. */
   "sqlite.open": { argTypes: [STRING, BOOL, BOOL, F64], result: SQLITEDB_T },
   "sqlite.prepare": { argTypes: [SQLITEDB_T, STRING], result: SQLITESTMT_T },
-  "sqlite.exec": { argTypes: [SQLITEDB_T, STRING], result: VOID },
-  "sqlite.close": { argTypes: [SQLITEDB_T], result: VOID },
+  // Both answer the DATABASE (+1), because better-sqlite3's wrappers
+  // return `this` and `db.exec(a).exec(b)` is a real spelling.
+  "sqlite.exec": { argTypes: [SQLITEDB_T, STRING], result: SQLITEDB_T },
+  "sqlite.close": { argTypes: [SQLITEDB_T], result: SQLITEDB_T },
   "sqlite.pragma": { argTypes: [SQLITEDB_T, STRING, BOOL], result: DYN },
   "sqlite.dbName": { argTypes: [SQLITEDB_T], result: STRING },
   "sqlite.dbOpen": { argTypes: [SQLITEDB_T], result: BOOL },

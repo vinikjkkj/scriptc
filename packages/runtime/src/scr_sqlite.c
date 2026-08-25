@@ -476,14 +476,18 @@ static bool scr_sqlite_require_open(ScrSqliteDb *db) {
   return false;
 }
 
-void scr_sqlite_close(ScrSqliteDb *db) {
-  if (!db->open) return; /* JS_close is idempotent: `if (db->open) ...` */
+/* Answers the DATABASE, not void: lib/methods/wrappers.js returns `this`
+ * from close() and exec(), so `db.exec(a).exec(b)` is a real spelling and
+ * the shipped declarations say so. */
+ScrSqliteDb *scr_sqlite_close(ScrSqliteDb *db) {
+  if (!db->open) return scr_sqlite_db_retain(db); /* idempotent, like JS_close */
   db->open = false;
   /* sqlite3_close_v2 defers the real close until the last statement is
    * finalized, which is what makes a statement outliving its database
    * safe here without better-sqlite3's statement registry. */
   sqlite3_close_v2(db->h);
   db->h = NULL;
+  return scr_sqlite_db_retain(db);
 }
 
 bool scr_sqlite_db_open(const ScrSqliteDb *db) { return db->open; }
@@ -1039,19 +1043,19 @@ ScrDyn *scr_sqlite_stmt_columns(ScrSqliteStmt *st) {
  * Database::JS_exec's own loop, not sqlite3_exec: the difference is
  * observable, because JS_exec prepares each statement itself and reports
  * the error through the same SqliteError path. */
-void scr_sqlite_exec(ScrSqliteDb *db, const ScrStr *sql) {
+ScrSqliteDb *scr_sqlite_exec(ScrSqliteDb *db, const ScrStr *sql) {
   char *buf;
   const char *p;
   const char *tail;
   sqlite3_stmt *h = NULL;
   int status = SQLITE_OK;
 
-  if (!scr_sqlite_require_open(db)) return;
+  if (!scr_sqlite_require_open(db)) return NULL;
 
   buf = (char *)malloc(sql->len + 1);
   if (buf == NULL) {
     scr_trap("scriptc: out of memory in db.exec\n");
-    return;
+    return NULL;
   }
   memcpy(buf, sql->data, sql->len);
   buf[sql->len] = '\0';
@@ -1071,7 +1075,11 @@ void scr_sqlite_exec(ScrSqliteDb *db, const ScrStr *sql) {
   }
 
   free(buf);
-  if (status != SQLITE_OK) scr_sqlite_throw_db(db->h);
+  if (status != SQLITE_OK) {
+    scr_sqlite_throw_db(db->h);
+    return NULL;
+  }
+  return scr_sqlite_db_retain(db);
 }
 
 /* ── pragma ───────────────────────────────────────────────────────────

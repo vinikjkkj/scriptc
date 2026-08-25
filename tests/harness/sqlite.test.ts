@@ -59,9 +59,12 @@
  *   a second statement silently run    prepare() takes exactly one, but a
  *                                      trailing comment is not a second
  *
- * The LLVM backend is not compared: it refuses the surface by name
- * (`llvm refused: libCall:sqlite.open`) and falls back to C, which the
- * last test asserts is still a REFUSAL and not a miscompile.
+ * BOTH BACKENDS run, for fetch-static.test.ts's reason: the LLVM lane
+ * keeps its own may-throw bookkeeping and has shipped wrong while the C
+ * twin was right. The first cut of this surface REFUSED there
+ * (`llvm refused: libCall:sqlite.open`) and fell back to C silently,
+ * which is the one outcome a comparison must never accept — a lane that
+ * quietly did not run looks exactly like a lane that passed.
  */
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -193,37 +196,42 @@ describe("better-sqlite3 over the vendored SQLite amalgamation", () => {
     expect(live.split("\n")).toEqual(golden);
   });
 
-  test(
-    "every cell of the compiled binary matches the recorded answers",
-    async () => {
-      const outDir = join(workDir, "c");
-      mkdirSync(outDir, { recursive: true });
-      const built = await compile(join(fixtureDir, "main.ts"), {
-        outPath: join(outDir, exeName("program")),
-        outDir,
-        backend: "c",
-        sanitize,
-      });
-      expect(
-        built.ok,
-        "the sqlite fixture must COMPILE — a refusal here is the row this file exists to keep closed:\n" +
-          (built.diagnostics ?? []).map((d) => `${d.code}: ${d.message}`).join("\n"),
-      ).toBe(true);
-      const native = await run(built.binaryPath!, [join(outDir, "fixture.db")], outDir);
-      const lines = native.stdout.split("\n");
-      const keyOf = (l: string): string => l.split(" ")[0] ?? "";
-      for (const line of golden) {
-        const key = keyOf(line);
-        if (key === "") continue;
-        const mine = lines.find((l) => keyOf(l) === key);
-        expect(mine, `'${key}' never ran (better-sqlite3 answered: ${line})`).toBeDefined();
-        expect(mine, `'${key}' differs from better-sqlite3`).toBe(line);
-      }
-      expect(native.stdout.split("\n")).toEqual(golden);
-      expect(native.exitCode).toBe(0);
-    },
-    900_000,
-  );
+  for (const backend of ["c", "llvm"] as const) {
+    test(
+      `${backend}: every cell matches the recorded answers`,
+      async () => {
+        const outDir = join(workDir, backend);
+        mkdirSync(outDir, { recursive: true });
+        const built = await compile(join(fixtureDir, "main.ts"), {
+          outPath: join(outDir, exeName("program")),
+          outDir,
+          backend,
+          sanitize,
+        });
+        expect(
+          built.ok,
+          `the sqlite fixture must COMPILE on ${backend} — a refusal here is the row this file exists to keep closed:\n` +
+            (built.diagnostics ?? []).map((d) => `${d.code}: ${d.message}`).join("\n"),
+        ).toBe(true);
+        // A FRESH database per backend: the fixture creates its own
+        // tables, so a reused file kills the second lane on "table t
+        // already exists" and reads as a codegen difference.
+        const native = await run(built.binaryPath!, [join(outDir, "fixture.db")], outDir);
+        const lines = native.stdout.split("\n");
+        const keyOf = (l: string): string => l.split(" ")[0] ?? "";
+        for (const line of golden) {
+          const key = keyOf(line);
+          if (key === "") continue;
+          const mine = lines.find((l) => keyOf(l) === key);
+          expect(mine, `${backend}: '${key}' never ran (better-sqlite3 answered: ${line})`).toBeDefined();
+          expect(mine, `${backend}: '${key}' differs from better-sqlite3`).toBe(line);
+        }
+        expect(native.stdout.split("\n")).toEqual(golden);
+        expect(native.exitCode).toBe(0);
+      },
+      900_000,
+    );
+  }
 });
 
 describe("the link gate", () => {

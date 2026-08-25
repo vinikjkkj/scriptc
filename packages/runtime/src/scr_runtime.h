@@ -9023,9 +9023,9 @@ void *scr_sqlite_stmt_retain_v(void *p);
 void scr_sqlite_stmt_release_v(void *p);
 
 ScrSqliteDb *scr_sqlite_open(const ScrStr *path, bool readonly, bool must_exist, double timeout);
-void scr_sqlite_close(ScrSqliteDb *db);
+ScrSqliteDb *scr_sqlite_close(ScrSqliteDb *db);
 ScrSqliteStmt *scr_sqlite_prepare(ScrSqliteDb *db, const ScrStr *sql);
-void scr_sqlite_exec(ScrSqliteDb *db, const ScrStr *sql);
+ScrSqliteDb *scr_sqlite_exec(ScrSqliteDb *db, const ScrStr *sql);
 ScrDyn *scr_sqlite_pragma(ScrSqliteDb *db, const ScrStr *source, bool simple);
 ScrStr *scr_sqlite_db_name(const ScrSqliteDb *db);
 bool scr_sqlite_db_open(const ScrSqliteDb *db);
