@@ -8605,6 +8605,28 @@ export function moduleEmbedsBuiltin(mod: IrModule, builtin: string): boolean {
   return mod.embedded !== undefined && mod.embedded.edges.some((e) => e.to === builtin);
 }
 
+/** The ONE predicate for the island's socket bridge (scr_net_island.c).
+ *
+ * It has to be one, because it is read in three places that must agree:
+ * index.ts's `netIsland` link switch, and BOTH backends' emitted `main`,
+ * which calls `scr_net_island_install()`. They did not agree. The link
+ * switch listed all four socket builtins; the two emitters listed
+ * node:http and node:https only. A graph whose only builtin edge is
+ * node:net — which is EVERY TCP database driver, and every raw-socket
+ * program — linked the bridge and never registered it, so
+ * `isl_netmod_attach` stayed NULL and the island denied a builtin it was
+ * carrying: "the island does not provide the 'node:net' builtin". Adding
+ * one unused `require('http')` to the same program made it work, on a
+ * binary of the same size. */
+export function moduleEmbedsNetIsland(mod: IrModule): boolean {
+  return (
+    moduleEmbedsBuiltin(mod, "node:http") ||
+    moduleEmbedsBuiltin(mod, "node:https") ||
+    moduleEmbedsBuiltin(mod, "node:net") ||
+    moduleEmbedsBuiltin(mod, "node:tls")
+  );
+}
+
 /** Embedded module texts at least this long are DEFLATE-compressed into
  * the emitted C (emit-island.ts; each stays plain when deflate does not
  * shrink it) and inflated lazily by the island's module loader at first
