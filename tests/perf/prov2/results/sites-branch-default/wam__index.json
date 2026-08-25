@@ -1,0 +1,919 @@
+{
+ "entry": "G:/blocks/prov2/lab/app/pkgs/wam/index.ts",
+ "flags": [],
+ "elapsedMs": 26639,
+ "preflightFailed": false,
+ "stats": {
+  "statementsTotal": 130,
+  "statementsFailed": 73,
+  "statementsIsland": 0,
+  "functionsSkipped": 0
+ },
+ "npmStatic": null,
+ "provenanceNotes": null,
+ "sites": [
+  {
+   "section": "blocker",
+   "code": "SC2013",
+   "message": "importing '@vinikjkkj/wa-wam' requires the embedded dynamic engine, which this build does not include — the package's implementation runs there",
+   "file": "G:/blocks/prov2/lab/app/pkgs/wam/registry.ts",
+   "line": 1
+  },
+  {
+   "section": "blocker",
+   "code": "SC2013",
+   "message": "importing 'zapo-js' requires the embedded dynamic engine, which this build does not include — the package's implementation runs there",
+   "file": "G:/blocks/prov2/lab/app/pkgs/wam/registry.ts",
+   "line": 8
+  },
+  {
+   "section": "blocker",
+   "code": "SC2013",
+   "message": "importing '@vinikjkkj/wa-wam' requires the embedded dynamic engine, which this build does not include — the package's implementation runs there",
+   "file": "G:/blocks/prov2/lab/app/pkgs/wam/globals.ts",
+   "line": 1
+  },
+  {
+   "section": "blocker",
+   "code": "SC2013",
+   "message": "importing 'zapo-js' requires the embedded dynamic engine, which this build does not include — the package's implementation runs there",
+   "file": "G:/blocks/prov2/lab/app/pkgs/wam/globals.ts",
+   "line": 2
+  },
+  {
+   "section": "blocker",
+   "code": "SC2013",
+   "message": "importing 'zapo-js' requires the embedded dynamic engine, which this build does not include — the package's implementation runs there",
+   "file": "G:/blocks/prov2/lab/app/pkgs/wam/globals.ts",
+   "line": 3
+  },
+  {
+   "section": "blocker",
+   "code": "SC2013",
+   "message": "importing 'zapo-js' requires the embedded dynamic engine, which this build does not include — the package's implementation runs there",
+   "file": "G:/blocks/prov2/lab/app/pkgs/wam/send-parse.ts",
+   "line": 2
+  },
+  {
+   "section": "blocker",
+   "code": "SC2013",
+   "message": "importing 'zapo-js' requires the embedded dynamic engine, which this build does not include — the package's implementation runs there",
+   "file": "G:/blocks/prov2/lab/app/pkgs/wam/send-parse.ts",
+   "line": 3
+  },
+  {
+   "section": "blocker",
+   "code": "SC2013",
+   "message": "importing 'zapo-js' requires the embedded dynamic engine, which this build does not include — the package's implementation runs there",
+   "file": "G:/blocks/prov2/lab/app/pkgs/wam/synthetic/random.ts",
+   "line": 1
+  },
+  {
+   "section": "blocker",
+   "code": "SC2013",
+   "message": "importing 'zapo-js' requires the embedded dynamic engine, which this build does not include — the package's implementation runs there",
+   "file": "G:/blocks/prov2/lab/app/pkgs/wam/synthetic/WaWamSyntheticUi.ts",
+   "line": 3
+  },
+  {
+   "section": "blocker",
+   "code": "SC2013",
+   "message": "importing 'zapo-js' requires the embedded dynamic engine, which this build does not include — the package's implementation runs there",
+   "file": "G:/blocks/prov2/lab/app/pkgs/wam/WaWamAutoEmitter.ts",
+   "line": 1
+  },
+  {
+   "section": "blocker",
+   "code": "SC2013",
+   "message": "importing 'zapo-js' requires the embedded dynamic engine, which this build does not include — the package's implementation runs there",
+   "file": "G:/blocks/prov2/lab/app/pkgs/wam/WaWamAutoEmitter.ts",
+   "line": 16
+  },
+  {
+   "section": "blocker",
+   "code": "SC2013",
+   "message": "importing 'zapo-js' requires the embedded dynamic engine, which this build does not include — the package's implementation runs there",
+   "file": "G:/blocks/prov2/lab/app/pkgs/wam/WaWamAutoEmitter.ts",
+   "line": 30
+  },
+  {
+   "section": "blocker",
+   "code": "SC2013",
+   "message": "importing 'zapo-js' requires the embedded dynamic engine, which this build does not include — the package's implementation runs there",
+   "file": "G:/blocks/prov2/lab/app/pkgs/wam/WaWamUploader.ts",
+   "line": 2
+  },
+  {
+   "section": "blocker",
+   "code": "SC2013",
+   "message": "importing 'zapo-js' requires the embedded dynamic engine, which this build does not include — the package's implementation runs there",
+   "file": "G:/blocks/prov2/lab/app/pkgs/wam/WaWamUploader.ts",
+   "line": 3
+  },
+  {
+   "section": "blocker",
+   "code": "SC2013",
+   "message": "importing 'zapo-js' requires the embedded dynamic engine, which this build does not include — the package's implementation runs there",
+   "file": "G:/blocks/prov2/lab/app/pkgs/wam/wire/binary-writer.ts",
+   "line": 1
+  },
+  {
+   "section": "blocker",
+   "code": "SC2013",
+   "message": "importing '@vinikjkkj/wa-wam' requires the embedded dynamic engine, which this build does not include — the package's implementation runs there",
+   "file": "G:/blocks/prov2/lab/app/pkgs/wam/wire/encoder.ts",
+   "line": 1
+  },
+  {
+   "section": "blocker",
+   "code": "SC2013",
+   "message": "importing 'zapo-js' requires the embedded dynamic engine, which this build does not include — the package's implementation runs there",
+   "file": "G:/blocks/prov2/lab/app/pkgs/wam/wire/encoder.ts",
+   "line": 2
+  },
+  {
+   "section": "blocker",
+   "code": "SC2013",
+   "message": "importing '@vinikjkkj/wa-wam' requires the embedded dynamic engine, which this build does not include — the package's implementation runs there",
+   "file": "G:/blocks/prov2/lab/app/pkgs/wam/wire/WamBatch.ts",
+   "line": 1
+  },
+  {
+   "section": "blocker",
+   "code": "SC2013",
+   "message": "importing '@vinikjkkj/wa-wam' requires the embedded dynamic engine, which this build does not include — the package's implementation runs there",
+   "file": "G:/blocks/prov2/lab/app/pkgs/wam/WaWamCoordinator.ts",
+   "line": 1
+  },
+  {
+   "section": "blocker",
+   "code": "SC2013",
+   "message": "importing 'zapo-js' requires the embedded dynamic engine, which this build does not include — the package's implementation runs there",
+   "file": "G:/blocks/prov2/lab/app/pkgs/wam/WaWamCoordinator.ts",
+   "line": 9
+  },
+  {
+   "section": "blocker",
+   "code": "SC2013",
+   "message": "importing 'zapo-js' requires the embedded dynamic engine, which this build does not include — the package's implementation runs there",
+   "file": "G:/blocks/prov2/lab/app/pkgs/wam/plugin.ts",
+   "line": 1
+  },
+  {
+   "section": "blocker",
+   "code": "SC2020",
+   "message": "'Uint8Array.from' is part of the standard library types but has no scriptc lowering yet",
+   "file": "G:/blocks/prov2/lab/app/pkgs/wam/synthetic/random.ts",
+   "line": 20
+  },
+  {
+   "section": "blocker",
+   "code": "SC2013",
+   "message": "values from the 'zapo-js' package run in the embedded dynamic engine, which this build does not include",
+   "file": "G:/blocks/prov2/lab/app/pkgs/wam/synthetic/random.ts",
+   "line": 21
+  },
+  {
+   "section": "blocker",
+   "code": "SC2013",
+   "message": "values from the 'zapo-js' package run in the embedded dynamic engine, which this build does not include",
+   "file": "G:/blocks/prov2/lab/app/pkgs/wam/WaWamCoordinator.ts",
+   "line": 53
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "file": "G:/blocks/prov2/lab/app/pkgs/wam/synthetic/fabrications.ts",
+   "line": 31
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "file": "G:/blocks/prov2/lab/app/pkgs/wam/synthetic/fabrications.ts",
+   "line": 43
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "file": "G:/blocks/prov2/lab/app/pkgs/wam/synthetic/fabrications.ts",
+   "line": 57
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "file": "G:/blocks/prov2/lab/app/pkgs/wam/synthetic/fabrications.ts",
+   "line": 70
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "file": "G:/blocks/prov2/lab/app/pkgs/wam/synthetic/fabrications.ts",
+   "line": 80
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "file": "G:/blocks/prov2/lab/app/pkgs/wam/synthetic/fabrications.ts",
+   "line": 94
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "file": "G:/blocks/prov2/lab/app/pkgs/wam/synthetic/fabrications.ts",
+   "line": 109
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "file": "G:/blocks/prov2/lab/app/pkgs/wam/synthetic/fabrications.ts",
+   "line": 123
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "file": "G:/blocks/prov2/lab/app/pkgs/wam/synthetic/fabrications.ts",
+   "line": 136
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "file": "G:/blocks/prov2/lab/app/pkgs/wam/synthetic/fabrications.ts",
+   "line": 148
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "file": "G:/blocks/prov2/lab/app/pkgs/wam/synthetic/fabrications.ts",
+   "line": 162
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "file": "G:/blocks/prov2/lab/app/pkgs/wam/synthetic/fabrications.ts",
+   "line": 174
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "file": "G:/blocks/prov2/lab/app/pkgs/wam/synthetic/fabrications.ts",
+   "line": 188
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "file": "G:/blocks/prov2/lab/app/pkgs/wam/synthetic/fabrications.ts",
+   "line": 194
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "file": "G:/blocks/prov2/lab/app/pkgs/wam/synthetic/fabrications.ts",
+   "line": 206
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "file": "G:/blocks/prov2/lab/app/pkgs/wam/synthetic/fabrications.ts",
+   "line": 218
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "file": "G:/blocks/prov2/lab/app/pkgs/wam/synthetic/fabrications.ts",
+   "line": 237
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "file": "G:/blocks/prov2/lab/app/pkgs/wam/synthetic/fabrications.ts",
+   "line": 252
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "file": "G:/blocks/prov2/lab/app/pkgs/wam/synthetic/fabrications.ts",
+   "line": 257
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "file": "G:/blocks/prov2/lab/app/pkgs/wam/synthetic/fabrications.ts",
+   "line": 270
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "file": "G:/blocks/prov2/lab/app/pkgs/wam/synthetic/fabrications.ts",
+   "line": 279
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "file": "G:/blocks/prov2/lab/app/pkgs/wam/synthetic/fabrications.ts",
+   "line": 294
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "file": "G:/blocks/prov2/lab/app/pkgs/wam/synthetic/fabrications.ts",
+   "line": 305
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "file": "G:/blocks/prov2/lab/app/pkgs/wam/synthetic/fabrications.ts",
+   "line": 314
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "file": "G:/blocks/prov2/lab/app/pkgs/wam/synthetic/fabrications.ts",
+   "line": 325
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "file": "G:/blocks/prov2/lab/app/pkgs/wam/synthetic/fabrications.ts",
+   "line": 337
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "file": "G:/blocks/prov2/lab/app/pkgs/wam/synthetic/fabrications.ts",
+   "line": 352
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "file": "G:/blocks/prov2/lab/app/pkgs/wam/synthetic/fabrications.ts",
+   "line": 367
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "file": "G:/blocks/prov2/lab/app/pkgs/wam/synthetic/fabrications.ts",
+   "line": 381
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "file": "G:/blocks/prov2/lab/app/pkgs/wam/synthetic/fabrications.ts",
+   "line": 395
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "file": "G:/blocks/prov2/lab/app/pkgs/wam/synthetic/fabrications.ts",
+   "line": 416
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "file": "G:/blocks/prov2/lab/app/pkgs/wam/synthetic/fabrications.ts",
+   "line": 426
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "file": "G:/blocks/prov2/lab/app/pkgs/wam/synthetic/fabrications.ts",
+   "line": 436
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "file": "G:/blocks/prov2/lab/app/pkgs/wam/synthetic/fabrications.ts",
+   "line": 453
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "file": "G:/blocks/prov2/lab/app/pkgs/wam/synthetic/fabrications.ts",
+   "line": 473
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "file": "G:/blocks/prov2/lab/app/pkgs/wam/synthetic/fabrications.ts",
+   "line": 483
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "file": "G:/blocks/prov2/lab/app/pkgs/wam/synthetic/fabrications.ts",
+   "line": 497
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "file": "G:/blocks/prov2/lab/app/pkgs/wam/synthetic/fabrications.ts",
+   "line": 504
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "file": "G:/blocks/prov2/lab/app/pkgs/wam/synthetic/fabrications.ts",
+   "line": 519
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "file": "G:/blocks/prov2/lab/app/pkgs/wam/synthetic/fabrications.ts",
+   "line": 537
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "file": "G:/blocks/prov2/lab/app/pkgs/wam/synthetic/fabrications.ts",
+   "line": 554
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "file": "G:/blocks/prov2/lab/app/pkgs/wam/synthetic/fabrications.ts",
+   "line": 564
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "file": "G:/blocks/prov2/lab/app/pkgs/wam/synthetic/fabrications.ts",
+   "line": 573
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "file": "G:/blocks/prov2/lab/app/pkgs/wam/synthetic/fabrications.ts",
+   "line": 583
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "file": "G:/blocks/prov2/lab/app/pkgs/wam/synthetic/fabrications.ts",
+   "line": 600
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "file": "G:/blocks/prov2/lab/app/pkgs/wam/synthetic/fabrications.ts",
+   "line": 614
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "file": "G:/blocks/prov2/lab/app/pkgs/wam/synthetic/fabrications.ts",
+   "line": 635
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "file": "G:/blocks/prov2/lab/app/pkgs/wam/synthetic/fabrications.ts",
+   "line": 648
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "file": "G:/blocks/prov2/lab/app/pkgs/wam/synthetic/fabrications.ts",
+   "line": 684
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "file": "G:/blocks/prov2/lab/app/pkgs/wam/synthetic/fabrications.ts",
+   "line": 693
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "file": "G:/blocks/prov2/lab/app/pkgs/wam/synthetic/fabrications.ts",
+   "line": 708
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "file": "G:/blocks/prov2/lab/app/pkgs/wam/synthetic/fabrications.ts",
+   "line": 719
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "file": "G:/blocks/prov2/lab/app/pkgs/wam/synthetic/fabrications.ts",
+   "line": 731
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "file": "G:/blocks/prov2/lab/app/pkgs/wam/synthetic/fabrications.ts",
+   "line": 738
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "file": "G:/blocks/prov2/lab/app/pkgs/wam/synthetic/fabrications.ts",
+   "line": 758
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "file": "G:/blocks/prov2/lab/app/pkgs/wam/synthetic/fabrications.ts",
+   "line": 770
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "file": "G:/blocks/prov2/lab/app/pkgs/wam/synthetic/fabrications.ts",
+   "line": 781
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "file": "G:/blocks/prov2/lab/app/pkgs/wam/synthetic/fabrications.ts",
+   "line": 792
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "file": "G:/blocks/prov2/lab/app/pkgs/wam/synthetic/fabrications.ts",
+   "line": 802
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "file": "G:/blocks/prov2/lab/app/pkgs/wam/synthetic/fabrications.ts",
+   "line": 815
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "file": "G:/blocks/prov2/lab/app/pkgs/wam/synthetic/fabrications.ts",
+   "line": 828
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "file": "G:/blocks/prov2/lab/app/pkgs/wam/synthetic/fabrications.ts",
+   "line": 839
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "file": "G:/blocks/prov2/lab/app/pkgs/wam/synthetic/fabrications.ts",
+   "line": 849
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "file": "G:/blocks/prov2/lab/app/pkgs/wam/synthetic/fabrications.ts",
+   "line": 862
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "file": "G:/blocks/prov2/lab/app/pkgs/wam/synthetic/fabrications.ts",
+   "line": 873
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "file": "G:/blocks/prov2/lab/app/pkgs/wam/synthetic/fabrications.ts",
+   "line": 889
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "file": "G:/blocks/prov2/lab/app/pkgs/wam/synthetic/fabrications.ts",
+   "line": 897
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "file": "G:/blocks/prov2/lab/app/pkgs/wam/synthetic/fabrications.ts",
+   "line": 907
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "file": "G:/blocks/prov2/lab/app/pkgs/wam/synthetic/fabrications.ts",
+   "line": 916
+  },
+  {
+   "section": "blocker",
+   "code": "SC2013",
+   "message": "values from the '@vinikjkkj/wa-wam' package run in the embedded dynamic engine, which this build does not include",
+   "file": "G:/blocks/prov2/lab/app/pkgs/wam/wire/encoder.ts",
+   "line": 9
+  },
+  {
+   "section": "blocker",
+   "code": "SC2013",
+   "message": "values from the '@vinikjkkj/wa-wam' package run in the embedded dynamic engine, which this build does not include",
+   "file": "G:/blocks/prov2/lab/app/pkgs/wam/wire/encoder.ts",
+   "line": 10
+  },
+  {
+   "section": "unreached",
+   "code": "SC2013",
+   "message": "values from the 'zapo-js' package run in the embedded dynamic engine, which this build does not include",
+   "file": "G:/blocks/prov2/lab/app/pkgs/wam/registry.ts",
+   "line": 16
+  },
+  {
+   "section": "unreached",
+   "code": "SC2013",
+   "message": "values from the '@vinikjkkj/wa-wam' package run in the embedded dynamic engine, which this build does not include",
+   "file": "G:/blocks/prov2/lab/app/pkgs/wam/registry.ts",
+   "line": 42
+  },
+  {
+   "section": "unreached",
+   "code": "SC2013",
+   "message": "values from the '@vinikjkkj/wa-wam' package run in the embedded dynamic engine, which this build does not include",
+   "file": "G:/blocks/prov2/lab/app/pkgs/wam/registry.ts",
+   "line": 56
+  },
+  {
+   "section": "unreached",
+   "code": "SC2020",
+   "message": "'Number of unknown values' is part of the standard library types but has no scriptc lowering yet",
+   "file": "G:/blocks/prov2/lab/app/pkgs/wam/registry.ts",
+   "line": 77
+  },
+  {
+   "section": "unreached",
+   "code": "SC2013",
+   "message": "values from the 'zapo-js' package run in the embedded dynamic engine, which this build does not include",
+   "file": "G:/blocks/prov2/lab/app/pkgs/wam/globals.ts",
+   "line": 38
+  },
+  {
+   "section": "unreached",
+   "code": "SC2013",
+   "message": "values from the 'zapo-js' package run in the embedded dynamic engine, which this build does not include",
+   "file": "G:/blocks/prov2/lab/app/pkgs/wam/globals.ts",
+   "line": 42
+  },
+  {
+   "section": "unreached",
+   "code": "SC2013",
+   "message": "values from the '@vinikjkkj/wa-wam' package run in the embedded dynamic engine, which this build does not include",
+   "file": "G:/blocks/prov2/lab/app/pkgs/wam/globals.ts",
+   "line": 67
+  },
+  {
+   "section": "unreached",
+   "code": "SC2013",
+   "message": "values from the 'zapo-js' package run in the embedded dynamic engine, which this build does not include",
+   "file": "G:/blocks/prov2/lab/app/pkgs/wam/send-parse.ts",
+   "line": 48
+  },
+  {
+   "section": "unreached",
+   "code": "SC2013",
+   "message": "values from the 'zapo-js' package run in the embedded dynamic engine, which this build does not include",
+   "file": "G:/blocks/prov2/lab/app/pkgs/wam/send-parse.ts",
+   "line": 58
+  },
+  {
+   "section": "unreached",
+   "code": "SC2013",
+   "message": "values from the 'zapo-js' package run in the embedded dynamic engine, which this build does not include",
+   "file": "G:/blocks/prov2/lab/app/pkgs/wam/send-parse.ts",
+   "line": 73
+  },
+  {
+   "section": "unreached",
+   "code": "SC2013",
+   "message": "values from the 'zapo-js' package run in the embedded dynamic engine, which this build does not include",
+   "file": "G:/blocks/prov2/lab/app/pkgs/wam/send-parse.ts",
+   "line": 74
+  },
+  {
+   "section": "unreached",
+   "code": "SC2013",
+   "message": "values from the 'zapo-js' package run in the embedded dynamic engine, which this build does not include",
+   "file": "G:/blocks/prov2/lab/app/pkgs/wam/send-parse.ts",
+   "line": 75
+  },
+  {
+   "section": "unreached",
+   "code": "SC2013",
+   "message": "values from the 'zapo-js' package run in the embedded dynamic engine, which this build does not include",
+   "file": "G:/blocks/prov2/lab/app/pkgs/wam/send-parse.ts",
+   "line": 100
+  },
+  {
+   "section": "unreached",
+   "code": "SC2013",
+   "message": "values from the 'zapo-js' package run in the embedded dynamic engine, which this build does not include",
+   "file": "G:/blocks/prov2/lab/app/pkgs/wam/WaWamAutoEmitter.ts",
+   "line": 89
+  },
+  {
+   "section": "unreached",
+   "code": "SC2013",
+   "message": "values from the 'zapo-js' package run in the embedded dynamic engine, which this build does not include",
+   "file": "G:/blocks/prov2/lab/app/pkgs/wam/WaWamAutoEmitter.ts",
+   "line": 90
+  },
+  {
+   "section": "unreached",
+   "code": "SC2013",
+   "message": "values from the 'zapo-js' package run in the embedded dynamic engine, which this build does not include",
+   "file": "G:/blocks/prov2/lab/app/pkgs/wam/WaWamAutoEmitter.ts",
+   "line": 96
+  },
+  {
+   "section": "unreached",
+   "code": "SC2013",
+   "message": "values from the 'zapo-js' package run in the embedded dynamic engine, which this build does not include",
+   "file": "G:/blocks/prov2/lab/app/pkgs/wam/WaWamAutoEmitter.ts",
+   "line": 100
+  },
+  {
+   "section": "unreached",
+   "code": "SC2013",
+   "message": "values from the 'zapo-js' package run in the embedded dynamic engine, which this build does not include",
+   "file": "G:/blocks/prov2/lab/app/pkgs/wam/WaWamAutoEmitter.ts",
+   "line": 101
+  },
+  {
+   "section": "unreached",
+   "code": "SC2013",
+   "message": "values from the 'zapo-js' package run in the embedded dynamic engine, which this build does not include",
+   "file": "G:/blocks/prov2/lab/app/pkgs/wam/WaWamAutoEmitter.ts",
+   "line": 102
+  },
+  {
+   "section": "unreached",
+   "code": "SC2013",
+   "message": "values from the 'zapo-js' package run in the embedded dynamic engine, which this build does not include",
+   "file": "G:/blocks/prov2/lab/app/pkgs/wam/WaWamAutoEmitter.ts",
+   "line": 110
+  },
+  {
+   "section": "unreached",
+   "code": "SC2013",
+   "message": "values from the 'zapo-js' package run in the embedded dynamic engine, which this build does not include",
+   "file": "G:/blocks/prov2/lab/app/pkgs/wam/WaWamUploader.ts",
+   "line": 87
+  },
+  {
+   "section": "unreached",
+   "code": "SC2012",
+   "message": "'Number.parseInt' runs in the embedded dynamic engine, which this build does not include",
+   "file": "G:/blocks/prov2/lab/app/pkgs/wam/WaWamUploader.ts",
+   "line": 88
+  },
+  {
+   "section": "unreached",
+   "code": "SC2013",
+   "message": "values from the 'zapo-js' package run in the embedded dynamic engine, which this build does not include",
+   "file": "G:/blocks/prov2/lab/app/pkgs/wam/wire/binary-writer.ts",
+   "line": 82
+  },
+  {
+   "section": "unreached",
+   "code": "SC2013",
+   "message": "values from the 'zapo-js' package run in the embedded dynamic engine, which this build does not include",
+   "file": "G:/blocks/prov2/lab/app/pkgs/wam/wire/encoder.ts",
+   "line": 54
+  },
+  {
+   "section": "unreached",
+   "code": "SC2004",
+   "message": "uses of 'bytes' inherit the blocker on its declaration",
+   "file": "G:/blocks/prov2/lab/app/pkgs/wam/wire/encoder.ts",
+   "line": 55
+  },
+  {
+   "section": "unreached",
+   "code": "SC2004",
+   "message": "uses of 'length' inherit the blocker on its declaration",
+   "file": "G:/blocks/prov2/lab/app/pkgs/wam/wire/encoder.ts",
+   "line": 56
+  },
+  {
+   "section": "unreached",
+   "code": "SC2004",
+   "message": "uses of 'bytes' inherit the blocker on its declaration",
+   "file": "G:/blocks/prov2/lab/app/pkgs/wam/wire/encoder.ts",
+   "line": 66
+  },
+  {
+   "section": "unreached",
+   "code": "SC2013",
+   "message": "values from the '@vinikjkkj/wa-wam' package run in the embedded dynamic engine, which this build does not include",
+   "file": "G:/blocks/prov2/lab/app/pkgs/wam/wire/WamBatch.ts",
+   "line": 39
+  },
+  {
+   "section": "unreached",
+   "code": "SC2013",
+   "message": "values from the '@vinikjkkj/wa-wam' package run in the embedded dynamic engine, which this build does not include",
+   "file": "G:/blocks/prov2/lab/app/pkgs/wam/wire/WamBatch.ts",
+   "line": 42
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "comparisons of union-typed values (narrow first: check a discriminant field, or compare with '!== undefined'/'!== null' for unit arms) are not supported yet",
+   "file": "G:/blocks/prov2/lab/app/pkgs/wam/wire/WamBatch.ts",
+   "line": 51
+  },
+  {
+   "section": "unreached",
+   "code": "SC2013",
+   "message": "values from the 'zapo-js' package run in the embedded dynamic engine, which this build does not include",
+   "file": "G:/blocks/prov2/lab/app/pkgs/wam/synthetic/WaWamSyntheticUi.ts",
+   "line": 190
+  },
+  {
+   "section": "unreached",
+   "code": "SC2013",
+   "message": "values from the 'zapo-js' package run in the embedded dynamic engine, which this build does not include",
+   "file": "G:/blocks/prov2/lab/app/pkgs/wam/WaWamAutoEmitter.ts",
+   "line": 129
+  },
+  {
+   "section": "unreached",
+   "code": "SC2013",
+   "message": "values from the 'zapo-js' package run in the embedded dynamic engine, which this build does not include",
+   "file": "G:/blocks/prov2/lab/app/pkgs/wam/WaWamUploader.ts",
+   "line": 31
+  },
+  {
+   "section": "unreached",
+   "code": "SC2008",
+   "message": "values of type 'WaClientPluginDefinition & { readonly exposeAs: \"wam\"; readonly setup: (ctx: WaClientPluginContext) => WaWamCoordinator; readonly __pluginEvents?: {} | undefined; }' cannot be compiled: this intersection resolves to no runtime shape",
+   "file": "G:/blocks/prov2/lab/app/pkgs/wam/plugin.ts",
+   "line": 27
+  }
+ ]
+}

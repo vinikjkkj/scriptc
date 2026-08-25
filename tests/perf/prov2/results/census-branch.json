@@ -1,0 +1,1099 @@
+{
+ "compiler": "G:/blocks/prov2/wt",
+ "modules": {
+  "G:/blocks/prov2/lab/app/pkgs/media-utils/ffmpeg.ts": {
+   "ms": 1131,
+   "packages": [
+    {
+     "name": "zapo-js",
+     "version": "1.6.2",
+     "dir": "G:/blocks/prov2/cache/provenance/250f9af5229a545eec28ddbd3e8774a397cdb0bb",
+     "entries": {
+      "zapo-js": {
+       "file": "G:\\blocks\\prov2\\cache\\provenance\\250f9af5229a545eec28ddbd3e8774a397cdb0bb\\src\\index.ts",
+       "exists": true
+      },
+      "zapo-js/media": {
+       "file": "G:\\blocks\\prov2\\cache\\provenance\\250f9af5229a545eec28ddbd3e8774a397cdb0bb\\src\\media\\index.ts",
+       "exists": true
+      }
+     }
+    }
+   ],
+   "notes": [
+    "sharp@0.33.5: no provenance attestation published; island path used",
+    "argo-codec: not installed under the entry's node_modules; island path used"
+   ]
+  },
+  "G:/blocks/prov2/lab/app/pkgs/media-utils/index.ts": {
+   "ms": 659,
+   "packages": [
+    {
+     "name": "zapo-js",
+     "version": "1.6.2",
+     "dir": "G:/blocks/prov2/cache/provenance/250f9af5229a545eec28ddbd3e8774a397cdb0bb",
+     "entries": {
+      "zapo-js/util": {
+       "file": "G:\\blocks\\prov2\\cache\\provenance\\250f9af5229a545eec28ddbd3e8774a397cdb0bb\\src\\util\\index.ts",
+       "exists": true
+      },
+      "zapo-js/media": {
+       "file": "G:\\blocks\\prov2\\cache\\provenance\\250f9af5229a545eec28ddbd3e8774a397cdb0bb\\src\\media\\index.ts",
+       "exists": true
+      },
+      "zapo-js": {
+       "file": "G:\\blocks\\prov2\\cache\\provenance\\250f9af5229a545eec28ddbd3e8774a397cdb0bb\\src\\index.ts",
+       "exists": true
+      }
+     }
+    }
+   ],
+   "notes": [
+    "argo-codec: not installed under the entry's node_modules; island path used",
+    "file-type@19.6.0: no provenance attestation published; island path used",
+    "sharp@0.33.5: no provenance attestation published; island path used"
+   ]
+  },
+  "G:/blocks/prov2/lab/app/pkgs/media-utils/sharp.ts": {
+   "ms": 83,
+   "packages": [
+    {
+     "name": "zapo-js",
+     "version": "1.6.2",
+     "dir": "G:/blocks/prov2/cache/provenance/250f9af5229a545eec28ddbd3e8774a397cdb0bb",
+     "entries": {
+      "zapo-js/media": {
+       "file": "G:\\blocks\\prov2\\cache\\provenance\\250f9af5229a545eec28ddbd3e8774a397cdb0bb\\src\\media\\index.ts",
+       "exists": true
+      }
+     }
+    }
+   ],
+   "notes": [
+    "sharp@0.33.5: no provenance attestation published; island path used"
+   ]
+  },
+  "G:/blocks/prov2/lab/app/pkgs/media-utils/types.ts": {
+   "ms": 1,
+   "packages": [],
+   "notes": []
+  },
+  "G:/blocks/prov2/lab/app/pkgs/voip/WaVoipCoordinator.ts": {
+   "ms": 651,
+   "packages": [
+    {
+     "name": "zapo-js",
+     "version": "1.6.2",
+     "dir": "G:/blocks/prov2/cache/provenance/250f9af5229a545eec28ddbd3e8774a397cdb0bb",
+     "entries": {
+      "zapo-js": {
+       "file": "G:\\blocks\\prov2\\cache\\provenance\\250f9af5229a545eec28ddbd3e8774a397cdb0bb\\src\\index.ts",
+       "exists": true
+      },
+      "zapo-js/protocol": {
+       "file": "G:\\blocks\\prov2\\cache\\provenance\\250f9af5229a545eec28ddbd3e8774a397cdb0bb\\src\\protocol\\index.ts",
+       "exists": true
+      },
+      "zapo-js/transport": {
+       "file": "G:\\blocks\\prov2\\cache\\provenance\\250f9af5229a545eec28ddbd3e8774a397cdb0bb\\src\\transport\\index.ts",
+       "exists": true
+      },
+      "zapo-js/util": {
+       "file": "G:\\blocks\\prov2\\cache\\provenance\\250f9af5229a545eec28ddbd3e8774a397cdb0bb\\src\\util\\index.ts",
+       "exists": true
+      },
+      "zapo-js/crypto": {
+       "file": "G:\\blocks\\prov2\\cache\\provenance\\250f9af5229a545eec28ddbd3e8774a397cdb0bb\\src\\crypto\\index.ts",
+       "exists": true
+      },
+      "zapo-js/proto": {
+       "file": "G:\\blocks\\prov2\\cache\\provenance\\250f9af5229a545eec28ddbd3e8774a397cdb0bb\\src\\proto.ts",
+       "exists": true
+      }
+     }
+    }
+   ],
+   "notes": [
+    "argo-codec: not installed under the entry's node_modules; island path used",
+    "libmlow-wasm@0.1.1: no provenance attestation published; island path used",
+    "@roamhq/wrtc@0.10.0: no provenance attestation published; island path used"
+   ]
+  },
+  "G:/blocks/prov2/lab/app/pkgs/voip/bytes.ts": {
+   "ms": 11,
+   "packages": [
+    {
+     "name": "zapo-js",
+     "version": "1.6.2",
+     "dir": "G:/blocks/prov2/cache/provenance/250f9af5229a545eec28ddbd3e8774a397cdb0bb",
+     "entries": {
+      "zapo-js/util": {
+       "file": "G:\\blocks\\prov2\\cache\\provenance\\250f9af5229a545eec28ddbd3e8774a397cdb0bb\\src\\util\\index.ts",
+       "exists": true
+      }
+     }
+    }
+   ],
+   "notes": []
+  },
+  "G:/blocks/prov2/lab/app/pkgs/voip/call/WaCallManager.ts": {
+   "ms": 622,
+   "packages": [
+    {
+     "name": "zapo-js",
+     "version": "1.6.2",
+     "dir": "G:/blocks/prov2/cache/provenance/250f9af5229a545eec28ddbd3e8774a397cdb0bb",
+     "entries": {
+      "zapo-js": {
+       "file": "G:\\blocks\\prov2\\cache\\provenance\\250f9af5229a545eec28ddbd3e8774a397cdb0bb\\src\\index.ts",
+       "exists": true
+      },
+      "zapo-js/protocol": {
+       "file": "G:\\blocks\\prov2\\cache\\provenance\\250f9af5229a545eec28ddbd3e8774a397cdb0bb\\src\\protocol\\index.ts",
+       "exists": true
+      },
+      "zapo-js/transport": {
+       "file": "G:\\blocks\\prov2\\cache\\provenance\\250f9af5229a545eec28ddbd3e8774a397cdb0bb\\src\\transport\\index.ts",
+       "exists": true
+      },
+      "zapo-js/util": {
+       "file": "G:\\blocks\\prov2\\cache\\provenance\\250f9af5229a545eec28ddbd3e8774a397cdb0bb\\src\\util\\index.ts",
+       "exists": true
+      },
+      "zapo-js/crypto": {
+       "file": "G:\\blocks\\prov2\\cache\\provenance\\250f9af5229a545eec28ddbd3e8774a397cdb0bb\\src\\crypto\\index.ts",
+       "exists": true
+      },
+      "zapo-js/proto": {
+       "file": "G:\\blocks\\prov2\\cache\\provenance\\250f9af5229a545eec28ddbd3e8774a397cdb0bb\\src\\proto.ts",
+       "exists": true
+      }
+     }
+    }
+   ],
+   "notes": [
+    "argo-codec: not installed under the entry's node_modules; island path used",
+    "libmlow-wasm@0.1.1: no provenance attestation published; island path used",
+    "@roamhq/wrtc@0.10.0: no provenance attestation published; island path used"
+   ]
+  },
+  "G:/blocks/prov2/lab/app/pkgs/voip/call/WaCallMediaSession.ts": {
+   "ms": 665,
+   "packages": [
+    {
+     "name": "zapo-js",
+     "version": "1.6.2",
+     "dir": "G:/blocks/prov2/cache/provenance/250f9af5229a545eec28ddbd3e8774a397cdb0bb",
+     "entries": {
+      "zapo-js/protocol": {
+       "file": "G:\\blocks\\prov2\\cache\\provenance\\250f9af5229a545eec28ddbd3e8774a397cdb0bb\\src\\protocol\\index.ts",
+       "exists": true
+      },
+      "zapo-js/transport": {
+       "file": "G:\\blocks\\prov2\\cache\\provenance\\250f9af5229a545eec28ddbd3e8774a397cdb0bb\\src\\transport\\index.ts",
+       "exists": true
+      },
+      "zapo-js/util": {
+       "file": "G:\\blocks\\prov2\\cache\\provenance\\250f9af5229a545eec28ddbd3e8774a397cdb0bb\\src\\util\\index.ts",
+       "exists": true
+      },
+      "zapo-js/crypto": {
+       "file": "G:\\blocks\\prov2\\cache\\provenance\\250f9af5229a545eec28ddbd3e8774a397cdb0bb\\src\\crypto\\index.ts",
+       "exists": true
+      },
+      "zapo-js": {
+       "file": "G:\\blocks\\prov2\\cache\\provenance\\250f9af5229a545eec28ddbd3e8774a397cdb0bb\\src\\index.ts",
+       "exists": true
+      },
+      "zapo-js/proto": {
+       "file": "G:\\blocks\\prov2\\cache\\provenance\\250f9af5229a545eec28ddbd3e8774a397cdb0bb\\src\\proto.ts",
+       "exists": true
+      }
+     }
+    }
+   ],
+   "notes": [
+    "argo-codec: not installed under the entry's node_modules; island path used",
+    "libmlow-wasm@0.1.1: no provenance attestation published; island path used",
+    "@roamhq/wrtc@0.10.0: no provenance attestation published; island path used"
+   ]
+  },
+  "G:/blocks/prov2/lab/app/pkgs/voip/call/call-state.ts": {
+   "ms": 519,
+   "packages": [
+    {
+     "name": "zapo-js",
+     "version": "1.6.2",
+     "dir": "G:/blocks/prov2/cache/provenance/250f9af5229a545eec28ddbd3e8774a397cdb0bb",
+     "entries": {
+      "zapo-js": {
+       "file": "G:\\blocks\\prov2\\cache\\provenance\\250f9af5229a545eec28ddbd3e8774a397cdb0bb\\src\\index.ts",
+       "exists": true
+      },
+      "zapo-js/transport": {
+       "file": "G:\\blocks\\prov2\\cache\\provenance\\250f9af5229a545eec28ddbd3e8774a397cdb0bb\\src\\transport\\index.ts",
+       "exists": true
+      }
+     }
+    }
+   ],
+   "notes": [
+    "argo-codec: not installed under the entry's node_modules; island path used"
+   ]
+  },
+  "G:/blocks/prov2/lab/app/pkgs/voip/crypto/encryption.ts": {
+   "ms": 559,
+   "packages": [
+    {
+     "name": "zapo-js",
+     "version": "1.6.2",
+     "dir": "G:/blocks/prov2/cache/provenance/250f9af5229a545eec28ddbd3e8774a397cdb0bb",
+     "entries": {
+      "zapo-js/crypto": {
+       "file": "G:\\blocks\\prov2\\cache\\provenance\\250f9af5229a545eec28ddbd3e8774a397cdb0bb\\src\\crypto\\index.ts",
+       "exists": true
+      },
+      "zapo-js/util": {
+       "file": "G:\\blocks\\prov2\\cache\\provenance\\250f9af5229a545eec28ddbd3e8774a397cdb0bb\\src\\util\\index.ts",
+       "exists": true
+      },
+      "zapo-js": {
+       "file": "G:\\blocks\\prov2\\cache\\provenance\\250f9af5229a545eec28ddbd3e8774a397cdb0bb\\src\\index.ts",
+       "exists": true
+      },
+      "zapo-js/transport": {
+       "file": "G:\\blocks\\prov2\\cache\\provenance\\250f9af5229a545eec28ddbd3e8774a397cdb0bb\\src\\transport\\index.ts",
+       "exists": true
+      }
+     }
+    }
+   ],
+   "notes": [
+    "argo-codec: not installed under the entry's node_modules; island path used"
+   ]
+  },
+  "G:/blocks/prov2/lab/app/pkgs/voip/crypto/primitives.ts": {
+   "ms": 8,
+   "packages": [
+    {
+     "name": "zapo-js",
+     "version": "1.6.2",
+     "dir": "G:/blocks/prov2/cache/provenance/250f9af5229a545eec28ddbd3e8774a397cdb0bb",
+     "entries": {
+      "zapo-js/util": {
+       "file": "G:\\blocks\\prov2\\cache\\provenance\\250f9af5229a545eec28ddbd3e8774a397cdb0bb\\src\\util\\index.ts",
+       "exists": true
+      }
+     }
+    }
+   ],
+   "notes": []
+  },
+  "G:/blocks/prov2/lab/app/pkgs/voip/crypto/srtp.ts": {
+   "ms": 490,
+   "packages": [
+    {
+     "name": "zapo-js",
+     "version": "1.6.2",
+     "dir": "G:/blocks/prov2/cache/provenance/250f9af5229a545eec28ddbd3e8774a397cdb0bb",
+     "entries": {
+      "zapo-js/util": {
+       "file": "G:\\blocks\\prov2\\cache\\provenance\\250f9af5229a545eec28ddbd3e8774a397cdb0bb\\src\\util\\index.ts",
+       "exists": true
+      },
+      "zapo-js": {
+       "file": "G:\\blocks\\prov2\\cache\\provenance\\250f9af5229a545eec28ddbd3e8774a397cdb0bb\\src\\index.ts",
+       "exists": true
+      },
+      "zapo-js/transport": {
+       "file": "G:\\blocks\\prov2\\cache\\provenance\\250f9af5229a545eec28ddbd3e8774a397cdb0bb\\src\\transport\\index.ts",
+       "exists": true
+      }
+     }
+    }
+   ],
+   "notes": [
+    "argo-codec: not installed under the entry's node_modules; island path used"
+   ]
+  },
+  "G:/blocks/prov2/lab/app/pkgs/voip/crypto/ssrc.ts": {
+   "ms": 22,
+   "packages": [
+    {
+     "name": "zapo-js",
+     "version": "1.6.2",
+     "dir": "G:/blocks/prov2/cache/provenance/250f9af5229a545eec28ddbd3e8774a397cdb0bb",
+     "entries": {
+      "zapo-js/crypto": {
+       "file": "G:\\blocks\\prov2\\cache\\provenance\\250f9af5229a545eec28ddbd3e8774a397cdb0bb\\src\\crypto\\index.ts",
+       "exists": true
+      },
+      "zapo-js/util": {
+       "file": "G:\\blocks\\prov2\\cache\\provenance\\250f9af5229a545eec28ddbd3e8774a397cdb0bb\\src\\util\\index.ts",
+       "exists": true
+      }
+     }
+    }
+   ],
+   "notes": []
+  },
+  "G:/blocks/prov2/lab/app/pkgs/voip/events.ts": {
+   "ms": 501,
+   "packages": [
+    {
+     "name": "zapo-js",
+     "version": "1.6.2",
+     "dir": "G:/blocks/prov2/cache/provenance/250f9af5229a545eec28ddbd3e8774a397cdb0bb",
+     "entries": {
+      "zapo-js": {
+       "file": "G:\\blocks\\prov2\\cache\\provenance\\250f9af5229a545eec28ddbd3e8774a397cdb0bb\\src\\index.ts",
+       "exists": true
+      },
+      "zapo-js/transport": {
+       "file": "G:\\blocks\\prov2\\cache\\provenance\\250f9af5229a545eec28ddbd3e8774a397cdb0bb\\src\\transport\\index.ts",
+       "exists": true
+      }
+     }
+    }
+   ],
+   "notes": [
+    "argo-codec: not installed under the entry's node_modules; island path used"
+   ]
+  },
+  "G:/blocks/prov2/lab/app/pkgs/voip/index.ts": {
+   "ms": 588,
+   "packages": [
+    {
+     "name": "zapo-js",
+     "version": "1.6.2",
+     "dir": "G:/blocks/prov2/cache/provenance/250f9af5229a545eec28ddbd3e8774a397cdb0bb",
+     "entries": {
+      "zapo-js": {
+       "file": "G:\\blocks\\prov2\\cache\\provenance\\250f9af5229a545eec28ddbd3e8774a397cdb0bb\\src\\index.ts",
+       "exists": true
+      },
+      "zapo-js/protocol": {
+       "file": "G:\\blocks\\prov2\\cache\\provenance\\250f9af5229a545eec28ddbd3e8774a397cdb0bb\\src\\protocol\\index.ts",
+       "exists": true
+      },
+      "zapo-js/transport": {
+       "file": "G:\\blocks\\prov2\\cache\\provenance\\250f9af5229a545eec28ddbd3e8774a397cdb0bb\\src\\transport\\index.ts",
+       "exists": true
+      },
+      "zapo-js/util": {
+       "file": "G:\\blocks\\prov2\\cache\\provenance\\250f9af5229a545eec28ddbd3e8774a397cdb0bb\\src\\util\\index.ts",
+       "exists": true
+      },
+      "zapo-js/crypto": {
+       "file": "G:\\blocks\\prov2\\cache\\provenance\\250f9af5229a545eec28ddbd3e8774a397cdb0bb\\src\\crypto\\index.ts",
+       "exists": true
+      },
+      "zapo-js/proto": {
+       "file": "G:\\blocks\\prov2\\cache\\provenance\\250f9af5229a545eec28ddbd3e8774a397cdb0bb\\src\\proto.ts",
+       "exists": true
+      }
+     }
+    }
+   ],
+   "notes": [
+    "argo-codec: not installed under the entry's node_modules; island path used",
+    "libmlow-wasm@0.1.1: no provenance attestation published; island path used",
+    "@roamhq/wrtc@0.10.0: no provenance attestation published; island path used"
+   ]
+  },
+  "G:/blocks/prov2/lab/app/pkgs/voip/media/WaAudioEngine.ts": {
+   "ms": 525,
+   "packages": [
+    {
+     "name": "zapo-js",
+     "version": "1.6.2",
+     "dir": "G:/blocks/prov2/cache/provenance/250f9af5229a545eec28ddbd3e8774a397cdb0bb",
+     "entries": {
+      "zapo-js": {
+       "file": "G:\\blocks\\prov2\\cache\\provenance\\250f9af5229a545eec28ddbd3e8774a397cdb0bb\\src\\index.ts",
+       "exists": true
+      },
+      "zapo-js/util": {
+       "file": "G:\\blocks\\prov2\\cache\\provenance\\250f9af5229a545eec28ddbd3e8774a397cdb0bb\\src\\util\\index.ts",
+       "exists": true
+      },
+      "zapo-js/transport": {
+       "file": "G:\\blocks\\prov2\\cache\\provenance\\250f9af5229a545eec28ddbd3e8774a397cdb0bb\\src\\transport\\index.ts",
+       "exists": true
+      }
+     }
+    }
+   ],
+   "notes": [
+    "argo-codec: not installed under the entry's node_modules; island path used"
+   ]
+  },
+  "G:/blocks/prov2/lab/app/pkgs/voip/media/mlow-codec.ts": {
+   "ms": 39,
+   "packages": [],
+   "notes": [
+    "libmlow-wasm@0.1.1: no provenance attestation published; island path used"
+   ]
+  },
+  "G:/blocks/prov2/lab/app/pkgs/voip/media/rtp.ts": {
+   "ms": 483,
+   "packages": [
+    {
+     "name": "zapo-js",
+     "version": "1.6.2",
+     "dir": "G:/blocks/prov2/cache/provenance/250f9af5229a545eec28ddbd3e8774a397cdb0bb",
+     "entries": {
+      "zapo-js/util": {
+       "file": "G:\\blocks\\prov2\\cache\\provenance\\250f9af5229a545eec28ddbd3e8774a397cdb0bb\\src\\util\\index.ts",
+       "exists": true
+      },
+      "zapo-js": {
+       "file": "G:\\blocks\\prov2\\cache\\provenance\\250f9af5229a545eec28ddbd3e8774a397cdb0bb\\src\\index.ts",
+       "exists": true
+      },
+      "zapo-js/transport": {
+       "file": "G:\\blocks\\prov2\\cache\\provenance\\250f9af5229a545eec28ddbd3e8774a397cdb0bb\\src\\transport\\index.ts",
+       "exists": true
+      }
+     }
+    }
+   ],
+   "notes": [
+    "argo-codec: not installed under the entry's node_modules; island path used"
+   ]
+  },
+  "G:/blocks/prov2/lab/app/pkgs/voip/plugin.ts": {
+   "ms": 594,
+   "packages": [
+    {
+     "name": "zapo-js",
+     "version": "1.6.2",
+     "dir": "G:/blocks/prov2/cache/provenance/250f9af5229a545eec28ddbd3e8774a397cdb0bb",
+     "entries": {
+      "zapo-js": {
+       "file": "G:\\blocks\\prov2\\cache\\provenance\\250f9af5229a545eec28ddbd3e8774a397cdb0bb\\src\\index.ts",
+       "exists": true
+      },
+      "zapo-js/protocol": {
+       "file": "G:\\blocks\\prov2\\cache\\provenance\\250f9af5229a545eec28ddbd3e8774a397cdb0bb\\src\\protocol\\index.ts",
+       "exists": true
+      },
+      "zapo-js/transport": {
+       "file": "G:\\blocks\\prov2\\cache\\provenance\\250f9af5229a545eec28ddbd3e8774a397cdb0bb\\src\\transport\\index.ts",
+       "exists": true
+      },
+      "zapo-js/util": {
+       "file": "G:\\blocks\\prov2\\cache\\provenance\\250f9af5229a545eec28ddbd3e8774a397cdb0bb\\src\\util\\index.ts",
+       "exists": true
+      },
+      "zapo-js/crypto": {
+       "file": "G:\\blocks\\prov2\\cache\\provenance\\250f9af5229a545eec28ddbd3e8774a397cdb0bb\\src\\crypto\\index.ts",
+       "exists": true
+      },
+      "zapo-js/proto": {
+       "file": "G:\\blocks\\prov2\\cache\\provenance\\250f9af5229a545eec28ddbd3e8774a397cdb0bb\\src\\proto.ts",
+       "exists": true
+      }
+     }
+    }
+   ],
+   "notes": [
+    "argo-codec: not installed under the entry's node_modules; island path used",
+    "libmlow-wasm@0.1.1: no provenance attestation published; island path used",
+    "@roamhq/wrtc@0.10.0: no provenance attestation published; island path used"
+   ]
+  },
+  "G:/blocks/prov2/lab/app/pkgs/voip/relay/WaSctpRelay.ts": {
+   "ms": 454,
+   "packages": [
+    {
+     "name": "zapo-js",
+     "version": "1.6.2",
+     "dir": "G:/blocks/prov2/cache/provenance/250f9af5229a545eec28ddbd3e8774a397cdb0bb",
+     "entries": {
+      "zapo-js": {
+       "file": "G:\\blocks\\prov2\\cache\\provenance\\250f9af5229a545eec28ddbd3e8774a397cdb0bb\\src\\index.ts",
+       "exists": true
+      },
+      "zapo-js/util": {
+       "file": "G:\\blocks\\prov2\\cache\\provenance\\250f9af5229a545eec28ddbd3e8774a397cdb0bb\\src\\util\\index.ts",
+       "exists": true
+      }
+     }
+    }
+   ],
+   "notes": [
+    "@roamhq/wrtc@0.10.0: no provenance attestation published; island path used",
+    "argo-codec: not installed under the entry's node_modules; island path used"
+   ]
+  },
+  "G:/blocks/prov2/lab/app/pkgs/voip/relay/relay-ack.ts": {
+   "ms": 418,
+   "packages": [
+    {
+     "name": "zapo-js",
+     "version": "1.6.2",
+     "dir": "G:/blocks/prov2/cache/provenance/250f9af5229a545eec28ddbd3e8774a397cdb0bb",
+     "entries": {
+      "zapo-js/transport": {
+       "file": "G:\\blocks\\prov2\\cache\\provenance\\250f9af5229a545eec28ddbd3e8774a397cdb0bb\\src\\transport\\index.ts",
+       "exists": true
+      },
+      "zapo-js/util": {
+       "file": "G:\\blocks\\prov2\\cache\\provenance\\250f9af5229a545eec28ddbd3e8774a397cdb0bb\\src\\util\\index.ts",
+       "exists": true
+      },
+      "zapo-js": {
+       "file": "G:\\blocks\\prov2\\cache\\provenance\\250f9af5229a545eec28ddbd3e8774a397cdb0bb\\src\\index.ts",
+       "exists": true
+      }
+     }
+    }
+   ],
+   "notes": [
+    "argo-codec: not installed under the entry's node_modules; island path used"
+   ]
+  },
+  "G:/blocks/prov2/lab/app/pkgs/voip/relay/stun.ts": {
+   "ms": 8,
+   "packages": [
+    {
+     "name": "zapo-js",
+     "version": "1.6.2",
+     "dir": "G:/blocks/prov2/cache/provenance/250f9af5229a545eec28ddbd3e8774a397cdb0bb",
+     "entries": {
+      "zapo-js/util": {
+       "file": "G:\\blocks\\prov2\\cache\\provenance\\250f9af5229a545eec28ddbd3e8774a397cdb0bb\\src\\util\\index.ts",
+       "exists": true
+      }
+     }
+    }
+   ],
+   "notes": []
+  },
+  "G:/blocks/prov2/lab/app/pkgs/voip/signaling/bridge.ts": {
+   "ms": 527,
+   "packages": [
+    {
+     "name": "zapo-js",
+     "version": "1.6.2",
+     "dir": "G:/blocks/prov2/cache/provenance/250f9af5229a545eec28ddbd3e8774a397cdb0bb",
+     "entries": {
+      "zapo-js": {
+       "file": "G:\\blocks\\prov2\\cache\\provenance\\250f9af5229a545eec28ddbd3e8774a397cdb0bb\\src\\index.ts",
+       "exists": true
+      },
+      "zapo-js/protocol": {
+       "file": "G:\\blocks\\prov2\\cache\\provenance\\250f9af5229a545eec28ddbd3e8774a397cdb0bb\\src\\protocol\\index.ts",
+       "exists": true
+      },
+      "zapo-js/transport": {
+       "file": "G:\\blocks\\prov2\\cache\\provenance\\250f9af5229a545eec28ddbd3e8774a397cdb0bb\\src\\transport\\index.ts",
+       "exists": true
+      },
+      "zapo-js/util": {
+       "file": "G:\\blocks\\prov2\\cache\\provenance\\250f9af5229a545eec28ddbd3e8774a397cdb0bb\\src\\util\\index.ts",
+       "exists": true
+      },
+      "zapo-js/crypto": {
+       "file": "G:\\blocks\\prov2\\cache\\provenance\\250f9af5229a545eec28ddbd3e8774a397cdb0bb\\src\\crypto\\index.ts",
+       "exists": true
+      },
+      "zapo-js/proto": {
+       "file": "G:\\blocks\\prov2\\cache\\provenance\\250f9af5229a545eec28ddbd3e8774a397cdb0bb\\src\\proto.ts",
+       "exists": true
+      }
+     }
+    }
+   ],
+   "notes": [
+    "argo-codec: not installed under the entry's node_modules; island path used",
+    "libmlow-wasm@0.1.1: no provenance attestation published; island path used",
+    "@roamhq/wrtc@0.10.0: no provenance attestation published; island path used"
+   ]
+  },
+  "G:/blocks/prov2/lab/app/pkgs/voip/signaling/signaling.ts": {
+   "ms": 408,
+   "packages": [
+    {
+     "name": "zapo-js",
+     "version": "1.6.2",
+     "dir": "G:/blocks/prov2/cache/provenance/250f9af5229a545eec28ddbd3e8774a397cdb0bb",
+     "entries": {
+      "zapo-js": {
+       "file": "G:\\blocks\\prov2\\cache\\provenance\\250f9af5229a545eec28ddbd3e8774a397cdb0bb\\src\\index.ts",
+       "exists": true
+      },
+      "zapo-js/proto": {
+       "file": "G:\\blocks\\prov2\\cache\\provenance\\250f9af5229a545eec28ddbd3e8774a397cdb0bb\\src\\proto.ts",
+       "exists": true
+      },
+      "zapo-js/protocol": {
+       "file": "G:\\blocks\\prov2\\cache\\provenance\\250f9af5229a545eec28ddbd3e8774a397cdb0bb\\src\\protocol\\index.ts",
+       "exists": true
+      },
+      "zapo-js/transport": {
+       "file": "G:\\blocks\\prov2\\cache\\provenance\\250f9af5229a545eec28ddbd3e8774a397cdb0bb\\src\\transport\\index.ts",
+       "exists": true
+      },
+      "zapo-js/util": {
+       "file": "G:\\blocks\\prov2\\cache\\provenance\\250f9af5229a545eec28ddbd3e8774a397cdb0bb\\src\\util\\index.ts",
+       "exists": true
+      }
+     }
+    }
+   ],
+   "notes": [
+    "argo-codec: not installed under the entry's node_modules; island path used"
+   ]
+  },
+  "G:/blocks/prov2/lab/app/pkgs/voip/types.ts": {
+   "ms": 414,
+   "packages": [
+    {
+     "name": "zapo-js",
+     "version": "1.6.2",
+     "dir": "G:/blocks/prov2/cache/provenance/250f9af5229a545eec28ddbd3e8774a397cdb0bb",
+     "entries": {
+      "zapo-js": {
+       "file": "G:\\blocks\\prov2\\cache\\provenance\\250f9af5229a545eec28ddbd3e8774a397cdb0bb\\src\\index.ts",
+       "exists": true
+      },
+      "zapo-js/transport": {
+       "file": "G:\\blocks\\prov2\\cache\\provenance\\250f9af5229a545eec28ddbd3e8774a397cdb0bb\\src\\transport\\index.ts",
+       "exists": true
+      }
+     }
+    }
+   ],
+   "notes": [
+    "argo-codec: not installed under the entry's node_modules; island path used"
+   ]
+  },
+  "G:/blocks/prov2/lab/app/pkgs/wam/WaWamAutoEmitter.ts": {
+   "ms": 498,
+   "packages": [
+    {
+     "name": "zapo-js",
+     "version": "1.6.2",
+     "dir": "G:/blocks/prov2/cache/provenance/250f9af5229a545eec28ddbd3e8774a397cdb0bb",
+     "entries": {
+      "zapo-js": {
+       "file": "G:\\blocks\\prov2\\cache\\provenance\\250f9af5229a545eec28ddbd3e8774a397cdb0bb\\src\\index.ts",
+       "exists": true
+      },
+      "zapo-js/protocol": {
+       "file": "G:\\blocks\\prov2\\cache\\provenance\\250f9af5229a545eec28ddbd3e8774a397cdb0bb\\src\\protocol\\index.ts",
+       "exists": true
+      },
+      "zapo-js/transport": {
+       "file": "G:\\blocks\\prov2\\cache\\provenance\\250f9af5229a545eec28ddbd3e8774a397cdb0bb\\src\\transport\\index.ts",
+       "exists": true
+      },
+      "zapo-js/proto": {
+       "file": "G:\\blocks\\prov2\\cache\\provenance\\250f9af5229a545eec28ddbd3e8774a397cdb0bb\\src\\proto.ts",
+       "exists": true
+      },
+      "zapo-js/util": {
+       "file": "G:\\blocks\\prov2\\cache\\provenance\\250f9af5229a545eec28ddbd3e8774a397cdb0bb\\src\\util\\index.ts",
+       "exists": true
+      }
+     }
+    }
+   ],
+   "notes": [
+    "argo-codec: not installed under the entry's node_modules; island path used",
+    "@vinikjkkj/wa-wam@2.3000.1041713829-1ec0d3b: no source mapping for '@vinikjkkj/wa-wam' (published target: index.js); island path used"
+   ]
+  },
+  "G:/blocks/prov2/lab/app/pkgs/wam/WaWamCoordinator.ts": {
+   "ms": 481,
+   "packages": [
+    {
+     "name": "zapo-js",
+     "version": "1.6.2",
+     "dir": "G:/blocks/prov2/cache/provenance/250f9af5229a545eec28ddbd3e8774a397cdb0bb",
+     "entries": {
+      "zapo-js/util": {
+       "file": "G:\\blocks\\prov2\\cache\\provenance\\250f9af5229a545eec28ddbd3e8774a397cdb0bb\\src\\util\\index.ts",
+       "exists": true
+      },
+      "zapo-js": {
+       "file": "G:\\blocks\\prov2\\cache\\provenance\\250f9af5229a545eec28ddbd3e8774a397cdb0bb\\src\\index.ts",
+       "exists": true
+      },
+      "zapo-js/protocol": {
+       "file": "G:\\blocks\\prov2\\cache\\provenance\\250f9af5229a545eec28ddbd3e8774a397cdb0bb\\src\\protocol\\index.ts",
+       "exists": true
+      },
+      "zapo-js/transport": {
+       "file": "G:\\blocks\\prov2\\cache\\provenance\\250f9af5229a545eec28ddbd3e8774a397cdb0bb\\src\\transport\\index.ts",
+       "exists": true
+      },
+      "zapo-js/proto": {
+       "file": "G:\\blocks\\prov2\\cache\\provenance\\250f9af5229a545eec28ddbd3e8774a397cdb0bb\\src\\proto.ts",
+       "exists": true
+      }
+     }
+    }
+   ],
+   "notes": [
+    "@vinikjkkj/wa-wam@2.3000.1041713829-1ec0d3b: no source mapping for '@vinikjkkj/wa-wam' (published target: index.js); island path used",
+    "argo-codec: not installed under the entry's node_modules; island path used"
+   ]
+  },
+  "G:/blocks/prov2/lab/app/pkgs/wam/WaWamUploader.ts": {
+   "ms": 434,
+   "packages": [
+    {
+     "name": "zapo-js",
+     "version": "1.6.2",
+     "dir": "G:/blocks/prov2/cache/provenance/250f9af5229a545eec28ddbd3e8774a397cdb0bb",
+     "entries": {
+      "zapo-js/protocol": {
+       "file": "G:\\blocks\\prov2\\cache\\provenance\\250f9af5229a545eec28ddbd3e8774a397cdb0bb\\src\\protocol\\index.ts",
+       "exists": true
+      },
+      "zapo-js/util": {
+       "file": "G:\\blocks\\prov2\\cache\\provenance\\250f9af5229a545eec28ddbd3e8774a397cdb0bb\\src\\util\\index.ts",
+       "exists": true
+      },
+      "zapo-js": {
+       "file": "G:\\blocks\\prov2\\cache\\provenance\\250f9af5229a545eec28ddbd3e8774a397cdb0bb\\src\\index.ts",
+       "exists": true
+      }
+     }
+    }
+   ],
+   "notes": [
+    "argo-codec: not installed under the entry's node_modules; island path used"
+   ]
+  },
+  "G:/blocks/prov2/lab/app/pkgs/wam/globals.ts": {
+   "ms": 402,
+   "packages": [
+    {
+     "name": "zapo-js",
+     "version": "1.6.2",
+     "dir": "G:/blocks/prov2/cache/provenance/250f9af5229a545eec28ddbd3e8774a397cdb0bb",
+     "entries": {
+      "zapo-js": {
+       "file": "G:\\blocks\\prov2\\cache\\provenance\\250f9af5229a545eec28ddbd3e8774a397cdb0bb\\src\\index.ts",
+       "exists": true
+      },
+      "zapo-js/protocol": {
+       "file": "G:\\blocks\\prov2\\cache\\provenance\\250f9af5229a545eec28ddbd3e8774a397cdb0bb\\src\\protocol\\index.ts",
+       "exists": true
+      },
+      "zapo-js/util": {
+       "file": "G:\\blocks\\prov2\\cache\\provenance\\250f9af5229a545eec28ddbd3e8774a397cdb0bb\\src\\util\\index.ts",
+       "exists": true
+      }
+     }
+    }
+   ],
+   "notes": [
+    "@vinikjkkj/wa-wam@2.3000.1041713829-1ec0d3b: no source mapping for '@vinikjkkj/wa-wam' (published target: index.js); island path used",
+    "argo-codec: not installed under the entry's node_modules; island path used"
+   ]
+  },
+  "G:/blocks/prov2/lab/app/pkgs/wam/index.ts": {
+   "ms": 474,
+   "packages": [
+    {
+     "name": "zapo-js",
+     "version": "1.6.2",
+     "dir": "G:/blocks/prov2/cache/provenance/250f9af5229a545eec28ddbd3e8774a397cdb0bb",
+     "entries": {
+      "zapo-js": {
+       "file": "G:\\blocks\\prov2\\cache\\provenance\\250f9af5229a545eec28ddbd3e8774a397cdb0bb\\src\\index.ts",
+       "exists": true
+      },
+      "zapo-js/util": {
+       "file": "G:\\blocks\\prov2\\cache\\provenance\\250f9af5229a545eec28ddbd3e8774a397cdb0bb\\src\\util\\index.ts",
+       "exists": true
+      },
+      "zapo-js/protocol": {
+       "file": "G:\\blocks\\prov2\\cache\\provenance\\250f9af5229a545eec28ddbd3e8774a397cdb0bb\\src\\protocol\\index.ts",
+       "exists": true
+      },
+      "zapo-js/transport": {
+       "file": "G:\\blocks\\prov2\\cache\\provenance\\250f9af5229a545eec28ddbd3e8774a397cdb0bb\\src\\transport\\index.ts",
+       "exists": true
+      },
+      "zapo-js/proto": {
+       "file": "G:\\blocks\\prov2\\cache\\provenance\\250f9af5229a545eec28ddbd3e8774a397cdb0bb\\src\\proto.ts",
+       "exists": true
+      }
+     }
+    }
+   ],
+   "notes": [
+    "argo-codec: not installed under the entry's node_modules; island path used",
+    "@vinikjkkj/wa-wam@2.3000.1041713829-1ec0d3b: no source mapping for '@vinikjkkj/wa-wam' (published target: index.js); island path used"
+   ]
+  },
+  "G:/blocks/prov2/lab/app/pkgs/wam/plugin.ts": {
+   "ms": 480,
+   "packages": [
+    {
+     "name": "zapo-js",
+     "version": "1.6.2",
+     "dir": "G:/blocks/prov2/cache/provenance/250f9af5229a545eec28ddbd3e8774a397cdb0bb",
+     "entries": {
+      "zapo-js": {
+       "file": "G:\\blocks\\prov2\\cache\\provenance\\250f9af5229a545eec28ddbd3e8774a397cdb0bb\\src\\index.ts",
+       "exists": true
+      },
+      "zapo-js/util": {
+       "file": "G:\\blocks\\prov2\\cache\\provenance\\250f9af5229a545eec28ddbd3e8774a397cdb0bb\\src\\util\\index.ts",
+       "exists": true
+      },
+      "zapo-js/protocol": {
+       "file": "G:\\blocks\\prov2\\cache\\provenance\\250f9af5229a545eec28ddbd3e8774a397cdb0bb\\src\\protocol\\index.ts",
+       "exists": true
+      },
+      "zapo-js/transport": {
+       "file": "G:\\blocks\\prov2\\cache\\provenance\\250f9af5229a545eec28ddbd3e8774a397cdb0bb\\src\\transport\\index.ts",
+       "exists": true
+      },
+      "zapo-js/proto": {
+       "file": "G:\\blocks\\prov2\\cache\\provenance\\250f9af5229a545eec28ddbd3e8774a397cdb0bb\\src\\proto.ts",
+       "exists": true
+      }
+     }
+    }
+   ],
+   "notes": [
+    "argo-codec: not installed under the entry's node_modules; island path used",
+    "@vinikjkkj/wa-wam@2.3000.1041713829-1ec0d3b: no source mapping for '@vinikjkkj/wa-wam' (published target: index.js); island path used"
+   ]
+  },
+  "G:/blocks/prov2/lab/app/pkgs/wam/registry.ts": {
+   "ms": 43,
+   "packages": [
+    {
+     "name": "zapo-js",
+     "version": "1.6.2",
+     "dir": "G:/blocks/prov2/cache/provenance/250f9af5229a545eec28ddbd3e8774a397cdb0bb",
+     "entries": {
+      "zapo-js/util": {
+       "file": "G:\\blocks\\prov2\\cache\\provenance\\250f9af5229a545eec28ddbd3e8774a397cdb0bb\\src\\util\\index.ts",
+       "exists": true
+      }
+     }
+    }
+   ],
+   "notes": [
+    "@vinikjkkj/wa-wam@2.3000.1041713829-1ec0d3b: no source mapping for '@vinikjkkj/wa-wam' (published target: index.js); island path used"
+   ]
+  },
+  "G:/blocks/prov2/lab/app/pkgs/wam/send-parse.ts": {
+   "ms": 444,
+   "packages": [
+    {
+     "name": "zapo-js",
+     "version": "1.6.2",
+     "dir": "G:/blocks/prov2/cache/provenance/250f9af5229a545eec28ddbd3e8774a397cdb0bb",
+     "entries": {
+      "zapo-js/proto": {
+       "file": "G:\\blocks\\prov2\\cache\\provenance\\250f9af5229a545eec28ddbd3e8774a397cdb0bb\\src\\proto.ts",
+       "exists": true
+      },
+      "zapo-js/protocol": {
+       "file": "G:\\blocks\\prov2\\cache\\provenance\\250f9af5229a545eec28ddbd3e8774a397cdb0bb\\src\\protocol\\index.ts",
+       "exists": true
+      },
+      "zapo-js": {
+       "file": "G:\\blocks\\prov2\\cache\\provenance\\250f9af5229a545eec28ddbd3e8774a397cdb0bb\\src\\index.ts",
+       "exists": true
+      }
+     }
+    }
+   ],
+   "notes": [
+    "argo-codec: not installed under the entry's node_modules; island path used"
+   ]
+  },
+  "G:/blocks/prov2/lab/app/pkgs/wam/synthetic/WaWamSyntheticUi.ts": {
+   "ms": 493,
+   "packages": [
+    {
+     "name": "zapo-js",
+     "version": "1.6.2",
+     "dir": "G:/blocks/prov2/cache/provenance/250f9af5229a545eec28ddbd3e8774a397cdb0bb",
+     "entries": {
+      "zapo-js/protocol": {
+       "file": "G:\\blocks\\prov2\\cache\\provenance\\250f9af5229a545eec28ddbd3e8774a397cdb0bb\\src\\protocol\\index.ts",
+       "exists": true
+      },
+      "zapo-js/proto": {
+       "file": "G:\\blocks\\prov2\\cache\\provenance\\250f9af5229a545eec28ddbd3e8774a397cdb0bb\\src\\proto.ts",
+       "exists": true
+      },
+      "zapo-js/util": {
+       "file": "G:\\blocks\\prov2\\cache\\provenance\\250f9af5229a545eec28ddbd3e8774a397cdb0bb\\src\\util\\index.ts",
+       "exists": true
+      },
+      "zapo-js": {
+       "file": "G:\\blocks\\prov2\\cache\\provenance\\250f9af5229a545eec28ddbd3e8774a397cdb0bb\\src\\index.ts",
+       "exists": true
+      },
+      "zapo-js/transport": {
+       "file": "G:\\blocks\\prov2\\cache\\provenance\\250f9af5229a545eec28ddbd3e8774a397cdb0bb\\src\\transport\\index.ts",
+       "exists": true
+      }
+     }
+    }
+   ],
+   "notes": [
+    "argo-codec: not installed under the entry's node_modules; island path used",
+    "@vinikjkkj/wa-wam@2.3000.1041713829-1ec0d3b: no source mapping for '@vinikjkkj/wa-wam' (published target: index.js); island path used"
+   ]
+  },
+  "G:/blocks/prov2/lab/app/pkgs/wam/synthetic/fabrications.ts": {
+   "ms": 459,
+   "packages": [
+    {
+     "name": "zapo-js",
+     "version": "1.6.2",
+     "dir": "G:/blocks/prov2/cache/provenance/250f9af5229a545eec28ddbd3e8774a397cdb0bb",
+     "entries": {
+      "zapo-js/util": {
+       "file": "G:\\blocks\\prov2\\cache\\provenance\\250f9af5229a545eec28ddbd3e8774a397cdb0bb\\src\\util\\index.ts",
+       "exists": true
+      },
+      "zapo-js": {
+       "file": "G:\\blocks\\prov2\\cache\\provenance\\250f9af5229a545eec28ddbd3e8774a397cdb0bb\\src\\index.ts",
+       "exists": true
+      },
+      "zapo-js/protocol": {
+       "file": "G:\\blocks\\prov2\\cache\\provenance\\250f9af5229a545eec28ddbd3e8774a397cdb0bb\\src\\protocol\\index.ts",
+       "exists": true
+      },
+      "zapo-js/transport": {
+       "file": "G:\\blocks\\prov2\\cache\\provenance\\250f9af5229a545eec28ddbd3e8774a397cdb0bb\\src\\transport\\index.ts",
+       "exists": true
+      },
+      "zapo-js/proto": {
+       "file": "G:\\blocks\\prov2\\cache\\provenance\\250f9af5229a545eec28ddbd3e8774a397cdb0bb\\src\\proto.ts",
+       "exists": true
+      }
+     }
+    }
+   ],
+   "notes": [
+    "@vinikjkkj/wa-wam@2.3000.1041713829-1ec0d3b: no source mapping for '@vinikjkkj/wa-wam' (published target: index.js); island path used",
+    "argo-codec: not installed under the entry's node_modules; island path used"
+   ]
+  },
+  "G:/blocks/prov2/lab/app/pkgs/wam/synthetic/index.ts": {
+   "ms": 439,
+   "packages": [
+    {
+     "name": "zapo-js",
+     "version": "1.6.2",
+     "dir": "G:/blocks/prov2/cache/provenance/250f9af5229a545eec28ddbd3e8774a397cdb0bb",
+     "entries": {
+      "zapo-js/protocol": {
+       "file": "G:\\blocks\\prov2\\cache\\provenance\\250f9af5229a545eec28ddbd3e8774a397cdb0bb\\src\\protocol\\index.ts",
+       "exists": true
+      },
+      "zapo-js/proto": {
+       "file": "G:\\blocks\\prov2\\cache\\provenance\\250f9af5229a545eec28ddbd3e8774a397cdb0bb\\src\\proto.ts",
+       "exists": true
+      },
+      "zapo-js/util": {
+       "file": "G:\\blocks\\prov2\\cache\\provenance\\250f9af5229a545eec28ddbd3e8774a397cdb0bb\\src\\util\\index.ts",
+       "exists": true
+      },
+      "zapo-js": {
+       "file": "G:\\blocks\\prov2\\cache\\provenance\\250f9af5229a545eec28ddbd3e8774a397cdb0bb\\src\\index.ts",
+       "exists": true
+      },
+      "zapo-js/transport": {
+       "file": "G:\\blocks\\prov2\\cache\\provenance\\250f9af5229a545eec28ddbd3e8774a397cdb0bb\\src\\transport\\index.ts",
+       "exists": true
+      }
+     }
+    }
+   ],
+   "notes": [
+    "argo-codec: not installed under the entry's node_modules; island path used",
+    "@vinikjkkj/wa-wam@2.3000.1041713829-1ec0d3b: no source mapping for '@vinikjkkj/wa-wam' (published target: index.js); island path used"
+   ]
+  },
+  "G:/blocks/prov2/lab/app/pkgs/wam/synthetic/random.ts": {
+   "ms": 7,
+   "packages": [
+    {
+     "name": "zapo-js",
+     "version": "1.6.2",
+     "dir": "G:/blocks/prov2/cache/provenance/250f9af5229a545eec28ddbd3e8774a397cdb0bb",
+     "entries": {
+      "zapo-js/util": {
+       "file": "G:\\blocks\\prov2\\cache\\provenance\\250f9af5229a545eec28ddbd3e8774a397cdb0bb\\src\\util\\index.ts",
+       "exists": true
+      }
+     }
+    }
+   ],
+   "notes": []
+  },
+  "G:/blocks/prov2/lab/app/pkgs/wam/wire/WamBatch.ts": {
+   "ms": 39,
+   "packages": [
+    {
+     "name": "zapo-js",
+     "version": "1.6.2",
+     "dir": "G:/blocks/prov2/cache/provenance/250f9af5229a545eec28ddbd3e8774a397cdb0bb",
+     "entries": {
+      "zapo-js/util": {
+       "file": "G:\\blocks\\prov2\\cache\\provenance\\250f9af5229a545eec28ddbd3e8774a397cdb0bb\\src\\util\\index.ts",
+       "exists": true
+      }
+     }
+    }
+   ],
+   "notes": [
+    "@vinikjkkj/wa-wam@2.3000.1041713829-1ec0d3b: no source mapping for '@vinikjkkj/wa-wam' (published target: index.js); island path used"
+   ]
+  },
+  "G:/blocks/prov2/lab/app/pkgs/wam/wire/binary-writer.ts": {
+   "ms": 8,
+   "packages": [
+    {
+     "name": "zapo-js",
+     "version": "1.6.2",
+     "dir": "G:/blocks/prov2/cache/provenance/250f9af5229a545eec28ddbd3e8774a397cdb0bb",
+     "entries": {
+      "zapo-js/util": {
+       "file": "G:\\blocks\\prov2\\cache\\provenance\\250f9af5229a545eec28ddbd3e8774a397cdb0bb\\src\\util\\index.ts",
+       "exists": true
+      }
+     }
+    }
+   ],
+   "notes": []
+  },
+  "G:/blocks/prov2/lab/app/pkgs/wam/wire/encoder.ts": {
+   "ms": 38,
+   "packages": [
+    {
+     "name": "zapo-js",
+     "version": "1.6.2",
+     "dir": "G:/blocks/prov2/cache/provenance/250f9af5229a545eec28ddbd3e8774a397cdb0bb",
+     "entries": {
+      "zapo-js/util": {
+       "file": "G:\\blocks\\prov2\\cache\\provenance\\250f9af5229a545eec28ddbd3e8774a397cdb0bb\\src\\util\\index.ts",
+       "exists": true
+      }
+     }
+    }
+   ],
+   "notes": [
+    "@vinikjkkj/wa-wam@2.3000.1041713829-1ec0d3b: no source mapping for '@vinikjkkj/wa-wam' (published target: index.js); island path used"
+   ]
+  }
+ }
+}

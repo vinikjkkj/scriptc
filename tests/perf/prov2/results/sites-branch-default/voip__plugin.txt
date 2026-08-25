@@ -1,0 +1,2 @@
+G:/blocks/prov2/lab/app/pkgs/voip/plugin.ts sites=3 preflightFailed=true 842ms
+EXIT=0

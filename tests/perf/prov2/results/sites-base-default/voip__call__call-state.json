@@ -1,0 +1,23 @@
+{
+ "entry": "G:/blocks/prov2/lab/app/pkgs/voip/call/call-state.ts",
+ "flags": [],
+ "elapsedMs": 757,
+ "preflightFailed": false,
+ "stats": {
+  "statementsTotal": 12,
+  "statementsFailed": 0,
+  "statementsIsland": 0,
+  "functionsSkipped": 0
+ },
+ "npmStatic": null,
+ "provenanceNotes": null,
+ "sites": [
+  {
+   "section": "unreached",
+   "code": "SC2009",
+   "message": "values of type 'CallStateData' cannot be compiled: the record shape is supported, but its member 'connectedAt' has type 'Date | undefined', which does not compile",
+   "file": "G:/blocks/prov2/lab/app/pkgs/voip/call/call-state.ts",
+   "line": 30
+  }
+ ]
+}
