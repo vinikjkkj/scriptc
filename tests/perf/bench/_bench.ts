@@ -56,7 +56,11 @@ export function envStr(name: string, fallback: string): string {
 // JSON.stringify, so the two lanes cannot diverge on key order or on
 // number formatting inside an object.
 
-function jstr(s: string): string {
+// Exported because the bench files emit their own control lines, and a
+// Windows path in one of them is a backslash storm: an unescaped
+// G:\x\y.db is not JSON, and the driver's parse throws on a line
+// that is otherwise a perfectly good measurement.
+export function jstr(s: string): string {
   let out = ""
   for (let i = 0; i < s.length; i++) {
     const c = s.charAt(i)
