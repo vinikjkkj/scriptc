@@ -69,7 +69,6 @@ import {
   SQLITESTMT_T,
   SrcLoc,
   STRING,
-  VOID,
 } from "../../ir/nodes.js";
 import { locOf } from "../program.js";
 
@@ -348,22 +347,22 @@ export function lowerSqliteMethodCall(
           loc,
         };
       case "exec":
-        /* exec() answers the database for chaining under Node. The
-         * result is VOID here and the STATEMENT form is what lowers —
-         * `db.exec(a).exec(b)` refuses at the second call rather than
-         * pretending, because a void value has no member to read. */
+        // Answers the DATABASE, like better-sqlite3's wrapper: the
+        // declared type and the IR type must agree about the same
+        // expression, or `const x = db.exec(s)` is a disagreement
+        // between the checker and the backend.
         return {
           kind: "libCall",
           fn: "sqlite.exec",
           args: [db, oneString(L, call, "Database.exec")],
-          type: VOID,
+          type: SQLITEDB_T,
           loc,
         };
       case "close":
         if (call.arguments.length !== 0) {
           L.noLowering("Database.close with arguments", call, "close() takes none");
         }
-        return { kind: "libCall", fn: "sqlite.close", args: [db], type: VOID, loc };
+        return { kind: "libCall", fn: "sqlite.close", args: [db], type: SQLITEDB_T, loc };
       case "pragma": {
         if (call.arguments.length < 1 || call.arguments.length > 2) {
           L.noLowering(

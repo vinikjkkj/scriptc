@@ -203,7 +203,15 @@ err("e.twoobj", () => void db.prepare("select :a as a, :b as b").get({ a: 1 }, {
 // A trailing comment is NOT a second statement.
 show("comment", String(db.prepare("select 1 as one -- trailing\n").pluck().get()));
 
-db.close();
-show("closed.open", String(db.open));
+// exec() and close() answer the DATABASE, so both chain — the shipped
+// declarations say so and the lowering must agree, or `const x =
+// db.exec(s)` is a disagreement between the checker and the backend
+// about one expression.
+db.exec("create table chain1(x)").exec("create table chain2(y)");
+show(
+  "chain",
+  String(db.prepare("select count(*) as c from sqlite_master where name like 'chain%'").pluck().get()),
+);
+show("closed.open", String(db.close().open));
 err("e.closed", () => void db.prepare("select 1").get());
 show("END", "done");

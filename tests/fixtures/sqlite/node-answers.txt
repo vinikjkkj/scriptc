@@ -58,6 +58,7 @@ e.named RangeError|undefined|Missing named parameter "a"
 e.bool TypeError|undefined|SQLite3 can only bind numbers, strings, bigints, buffers, and null
 e.twoobj RangeError|undefined|Missing named parameter "b"
 comment 1
+chain 2
 closed.open false
 e.closed TypeError|undefined|The database connection is not open
 END done
