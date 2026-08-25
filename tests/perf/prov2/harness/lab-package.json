@@ -1,0 +1,14 @@
+{
+  "name": "prov2-lab",
+  "private": true,
+  "version": "0.0.0",
+  "dependencies": {
+    "@roamhq/wrtc": "^0.10.0",
+    "@types/node": "^24.0.0",
+    "@vinikjkkj/wa-wam": "2.3000.1041713829-1ec0d3b",
+    "file-type": "^19.0.0",
+    "libmlow-wasm": "^0.1.1",
+    "sharp": "^0.33.0",
+    "zapo-js": "1.6.2"
+  }
+}
