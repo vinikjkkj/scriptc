@@ -306,15 +306,14 @@ import { PoisonError, dynUndefinedExpr, newFnCtx, own } from "./lowerer.js";
        * (lower-sqlite.ts). A static `import` of it binds a compiler-known
        * surface and the island owns nothing (lower-modules' twin arm);
        * `import()` names the SAME package, so it answers the SAME
-       * namespace, through an already-resolved promise. The value is a
-       * null-prototype object with no own properties — which is what a
-       * module namespace IS in Node, and what `typeof` answers "object"
-       * for. It carries no members on purpose: every use of this namespace
-       * is decided by TYPE, not by the value. `new ns.default(path)` is
-       * claimed by its RESULT type (lowerSqliteNew never lowers the
-       * callee), and `ns.default` as a VALUE is refused by name — the
-       * same SC2020 a static `import * as` namespace gives for the same
-       * spelling. Nothing reads a property off this object and lives.
+       * namespace, through an already-resolved promise. Every use of the
+       * namespace is decided by TYPE, not by the value: `new
+       * ns.default(path)` is claimed by its RESULT type (lowerSqliteNew
+       * never lowers the callee), and `ns.default` as a VALUE is refused
+       * by name — the same SC2020 a static `import * as` namespace gives
+       * for the same spelling. What the value still has to get right is
+       * everything a program can ask of the namespace OBJECT without
+       * reading a member, which is the note on the literal below.
        *
        * The guard is the CHECKER's type, not our fold: only
        * `import("better-sqlite3")` — a STRING LITERAL — types as the
