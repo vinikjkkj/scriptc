@@ -1,0 +1,37 @@
+{
+ "entry": "<blocks>/prov2/lab/app/pkgs/voip/WaVoipCoordinator.ts",
+ "flags": [],
+ "elapsedMs": 1321,
+ "preflightFailed": true,
+ "stats": {
+  "statementsTotal": 0,
+  "statementsFailed": 0,
+  "statementsIsland": 0,
+  "functionsSkipped": 0
+ },
+ "npmStatic": null,
+ "provenanceNotes": null,
+ "sites": [
+  {
+   "section": "blocker",
+   "code": "SC0001",
+   "message": "Cannot find name 'RTCPeerConnection'.",
+   "file": "<blocks>/prov2/lab/app/pkgs/voip/relay/WaSctpRelay.ts",
+   "line": 30
+  },
+  {
+   "section": "blocker",
+   "code": "SC0001",
+   "message": "Cannot find name 'RTCDataChannel'.",
+   "file": "<blocks>/prov2/lab/app/pkgs/voip/relay/WaSctpRelay.ts",
+   "line": 31
+  },
+  {
+   "section": "blocker",
+   "code": "SC1012",
+   "message": "default exports/imports are not supported yet",
+   "file": "<blocks>/prov2/lab/app/pkgs/voip/relay/WaSctpRelay.ts",
+   "line": 1
+  }
+ ]
+}

@@ -1,0 +1,9 @@
+{
+  "packages": {
+    "dualdist": {
+      "dir": "./attested-src/dualdist",
+      "commit": "1111111111111111111111111111111111111111",
+      "repo": "https://github.com/example/dualdist"
+    }
+  }
+}
