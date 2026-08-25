@@ -23,7 +23,9 @@
  *            through @scr_dyn_fn_sig_of and its siblings, because a
  *            hardcoded copy of a layout this file does not own is what
  *            made the 16-byte cycle header three bugs instead of one.
- *   ScrDynEntry { char *key; size_t key_len; ScrDyn *value; } — 24 bytes.
+ *   ScrDynEntry { char *key; uint32_t key_len; uint32_t key_static;
+ *                 ScrDyn *value; } — 24 bytes, key +0, key_len +8 (i32),
+ *                 value +16.
  *   ScrDynKind: NULL=0 BOOL=1 NUM=2 STR=3 ARR=4 OBJ=5 UNDEF=6 BYTES=7
  *               FUNC=8 HANDLE=9.
  *   ScrBytes { rc +0; len +8; elem +16; data +24 }.
@@ -230,7 +232,14 @@ export class LlDyn {
   }
 
   /** Object entry field addresses: entries + i*24 (+0 key, +8 key_len,
-   * +16 value). */
+   * +16 value).
+   *
+   * `key_len` is a 32-bit field, not a 64-bit one: ScrDynEntry spends the
+   * other four bytes on the flag that says whether the key bytes are a
+   * compiler-emitted literal (stored by pointer, never freed) or a
+   * malloc'd copy. The struct is still 24 bytes and `key` and `value` are
+   * still at +0 and +16, which is why the flag went where it did. This is
+   * the ONLY place in this backend that reads the entry layout. */
   private entryAt(B: BlockBuilder, entries: string, i: string): { key: string; keyLen: string; value: string } {
     const off = B.tmp();
     const base = B.tmp();
@@ -241,7 +250,9 @@ export class LlDyn {
     const klp = B.tmp();
     const keyLen = B.tmp();
     B.line(`${klp} = getelementptr inbounds i8, ptr ${base}, i64 8`);
-    B.line(`${keyLen} = load i64, ptr ${klp}`);
+    const keyLen32 = B.tmp();
+    B.line(`${keyLen32} = load i32, ptr ${klp} ; ScrDynEntry.key_len is 32-bit`);
+    B.line(`${keyLen} = zext i32 ${keyLen32} to i64`);
     const vp = B.tmp();
     const value = B.tmp();
     B.line(`${vp} = getelementptr inbounds i8, ptr ${base}, i64 16`);
@@ -2115,6 +2126,7 @@ export class LlDyn {
           return b;
         };
         host.declare(`declare void @scr_dyn_obj_set(ptr, ptr, i64, ptr)`);
+        host.declare(`declare void @scr_dyn_obj_set_lit(ptr, ptr, i64, ptr)`);
         // CYCLE-CAPABLE shapes guard the deep copy: enter TRAPS on a value
         // already being converted (a cyclic value has no finite dyn copy —
         // SEMANTICS.md; the C emitter's contract exactly).
@@ -2243,10 +2255,10 @@ export class LlDyn {
           const maskBitF = maskKeyBit(shape, f.name);
           const setPresent = (): void => {
             if (isUndefinedArmedUnion(f.type, (id: string) => this.host.unionsById.get(id))) {
-              host.declare(`declare void @scr_dyn_obj_set_present(ptr, ptr, i64, ptr)`);
-              B.line(`call void @scr_dyn_obj_set_present(ptr ${d}, ptr ${host.cstr(f.name)}, i64 ${klen}, ptr ${conv}) ; ${f.name}`);
+              host.declare(`declare void @scr_dyn_obj_set_present_lit(ptr, ptr, i64, ptr)`);
+              B.line(`call void @scr_dyn_obj_set_present_lit(ptr ${d}, ptr ${host.cstr(f.name)}, i64 ${klen}, ptr ${conv}) ; ${f.name}`);
             } else {
-              B.line(`call void @scr_dyn_obj_set(ptr ${d}, ptr ${host.cstr(f.name)}, i64 ${klen}, ptr ${conv}) ; ${f.name}`);
+              B.line(`call void @scr_dyn_obj_set_lit(ptr ${d}, ptr ${host.cstr(f.name)}, i64 ${klen}, ptr ${conv}) ; ${f.name}`);
             }
           };
           if (maskBitF === null) {
@@ -2286,7 +2298,7 @@ export class LlDyn {
             const lD = B.newLabel("tdm.d");
             B.condBr(own, lS, lD);
             B.startBlock(lS);
-            B.line(`call void @scr_dyn_obj_set(ptr ${d}, ptr ${host.cstr(f.name)}, i64 ${klen}, ptr ${conv}) ; ${f.name}`);
+            B.line(`call void @scr_dyn_obj_set_lit(ptr ${d}, ptr ${host.cstr(f.name)}, i64 ${klen}, ptr ${conv}) ; ${f.name}`);
             B.br(lE);
             B.startBlock(lD);
             // AN INHERITED MEMBER IS DEMOTED, NOT DELETED — emit-walkers.ts
@@ -2348,7 +2360,7 @@ export class LlDyn {
               B.startBlock(lPut);
               const pp = B.tmp();
               B.line(`${pp} = load ptr, ptr ${protoSlot}`);
-              B.line(`call void @scr_dyn_obj_set(ptr ${pp}, ptr ${host.cstr(f.name)}, i64 ${klen}, ptr ${conv}) ; inherited .${f.name}`);
+              B.line(`call void @scr_dyn_obj_set_lit(ptr ${pp}, ptr ${host.cstr(f.name)}, i64 ${klen}, ptr ${conv}) ; inherited .${f.name}`);
               B.br(lE);
             }
             B.startBlock(lB);
@@ -3191,7 +3203,7 @@ export class LlDyn {
     const host = this.host;
     const kg = this.dynKeyGetHelper();
     host.declare(`declare ptr @scr_dyn_new_obj()`);
-    host.declare(`declare void @scr_dyn_obj_set(ptr, ptr, i64, ptr)`);
+    host.declare(`declare void @scr_dyn_obj_set_lit(ptr, ptr, i64, ptr)`);
     host.declare(`declare ptr @scr_str_new(ptr, i64)`);
     host.declare(`declare void @scr_str_release(ptr)`);
     host.declare(`declare void @scr_dyn_release(ptr)`);
@@ -3264,7 +3276,7 @@ export class LlDyn {
         B.line(`call void @scr_dyn_release(ptr ${v}) ; absent -> the OBJ body decides`);
         brNext();
         B.startBlock(lS);
-        B.line(`call void @scr_dyn_obj_set(ptr ${o}, ptr ${kdata}, i64 ${klen}, ptr ${v}) ; takes ownership`);
+        B.line(`call void @scr_dyn_obj_set_lit(ptr ${o}, ptr ${kdata}, i64 ${klen}, ptr ${v}) ; takes ownership; the key table is static`);
       });
       B.terminate(`ret ptr ${o}`);
       this.defs.push(

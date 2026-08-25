@@ -1666,11 +1666,11 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
       `     * required field takes the documented "got undefined" refusal, an`,
       `     * optional-flavored one takes the undefined arm. So the key is`,
       `     * simply not written, and no second stance is invented here. */`,
-      `    /* scr_dyn_obj_set OWNS the value it is handed (the static->dyn`,
+      `    /* scr_dyn_obj_set_lit OWNS the value it is handed (the static->dyn`,
       `     * converters push +1 into it and never release), so the +1 the`,
       `     * read answered moves in on the write path and is dropped by hand`,
       `     * on the other. */`,
-      `    if (v->kind != SCR_DYN_UNDEF) scr_dyn_obj_set(o, keys[i], lens[i], v);`,
+      `    if (v->kind != SCR_DYN_UNDEF) scr_dyn_obj_set_lit(o, keys[i], lens[i], v);`,
       `    else scr_dyn_release(v);`,
       `  }`,
       `  return o;`,
@@ -2787,14 +2787,14 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
               continue;
             }
             const setBase = isUndefinedArmedUnion(f.type, (id) => E.unionsById.get(id))
-              ? `scr_dyn_obj_set_present(d, ${keyLit}, ${keyLen}, sc_fv);`
-              : `scr_dyn_obj_set(d, ${keyLit}, ${keyLen}, sc_fv);`;
+              ? `scr_dyn_obj_set_present_lit(d, ${keyLit}, ${keyLen}, sc_fv);`
+              : `scr_dyn_obj_set_lit(d, ${keyLit}, ${keyLen}, sc_fv);`;
             const bit = ownMaskKeyBit(shape, f.name);
             if (!bit) {
               d.push(
                 isUndefinedArmedUnion(f.type, (id) => E.unionsById.get(id))
-                  ? `  scr_dyn_obj_set_present(d, ${keyLit}, ${keyLen}, ${fv});`
-                  : `  scr_dyn_obj_set(d, ${keyLit}, ${keyLen}, ${fv});`,
+                  ? `  scr_dyn_obj_set_present_lit(d, ${keyLit}, ${keyLen}, ${fv});`
+                  : `  scr_dyn_obj_set_lit(d, ${keyLit}, ${keyLen}, ${fv});`,
               );
             } else {
               // The crossing MATERIALISES the key list, so it is the last
@@ -2825,7 +2825,7 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
               d.push(`    ScrDyn *sc_fv = ${fv};`);
               d.push(`    if (${m}[0]) {`);
               d.push(`      if (${m}[${bit.byte}] & ${bit.bit}) {`);
-              d.push(`        scr_dyn_obj_set(d, ${keyLit}, ${keyLen}, sc_fv);`);
+              d.push(`        scr_dyn_obj_set_lit(d, ${keyLit}, ${keyLen}, sc_fv);`);
               d.push(`      } else if (sc_fv != NULL && sc_fv->kind != SCR_DYN_UNDEF) {`);
               if (shape.srcproto) {
                 // The SOURCE's own chain still answers this member, so
@@ -2843,11 +2843,11 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
                 // is demoted the old way and the source's chain is linked
                 // BEHIND the synthesised object.
                 d.push(`          if (sc_proto == NULL) sc_proto = scr_dyn_new_obj(); /* not on the source's chain */`);
-                d.push(`          scr_dyn_obj_set(sc_proto, ${keyLit}, ${keyLen}, sc_fv);`);
+                d.push(`          scr_dyn_obj_set_lit(sc_proto, ${keyLit}, ${keyLen}, sc_fv);`);
                 d.push(`        }`);
               } else {
                 d.push(`        if (sc_proto == NULL) sc_proto = scr_dyn_new_obj(); /* inherited members */`);
-                d.push(`        scr_dyn_obj_set(sc_proto, ${keyLit}, ${keyLen}, sc_fv);`);
+                d.push(`        scr_dyn_obj_set_lit(sc_proto, ${keyLit}, ${keyLen}, sc_fv);`);
               }
               d.push(`      } else {`);
               d.push(`        scr_dyn_release(sc_fv); /* absent on the source object entirely */`);

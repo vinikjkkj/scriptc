@@ -24,6 +24,8 @@ export function parse(text) {
   const r = {
     layout: null, arm: new Map(), counts: new Map(),
     peak: new Map(), exit: new Map(), curve: [], total: null,
+    keytab: new Map(), keytop: new Map(), grow: new Map(),
+    shrinks: null, poolMismatch: null, korigin: null,
   };
   for (const raw of text.split(/\r?\n/)) {
     const line = raw.trim();
@@ -59,9 +61,60 @@ export function parse(text) {
       r.curve.push({ i: +sp[1], ord: +sp[2], live: +sp[3], t: +sp[4] });
       continue;
     }
+    if (tag === "DYNCEN-PEAK-PHYS" || tag === "DYNCEN-EXIT-PHYS") {
+      const into = tag === "DYNCEN-PEAK-PHYS" ? r.peak : r.exit;
+      const row = into.get(+sp[1]);
+      if (row) Object.assign(row, kvPrefixed(sp.slice(2), "phys"));
+      continue;
+    }
+    if (tag === "DYNCEN-PEAK-CAP" || tag === "DYNCEN-EXIT-CAP") {
+      const into = tag === "DYNCEN-PEAK-CAP" ? r.peak : r.exit;
+      const row = into.get(+sp[1]);
+      // n/capSum/lenSum per capacity class, as three parallel arrays
+      if (row) {
+        row.capHist = sp.slice(2).map((t) => Number(t.split("/")[0]));
+        row.capCapSum = sp.slice(2).map((t) => Number(t.split("/")[1]));
+        row.capLenSum = sp.slice(2).map((t) => Number(t.split("/")[2]));
+      }
+      continue;
+    }
+    if (tag === "DYNCEN-KEYTAB") { r.keytab.set(sp[1], kv(sp.slice(2))); continue; }
+    if (tag === "DYNCEN-KEYTOP") {
+      const list = r.keytop.get(sp[1]) ?? [];
+      list.push({ n: +sp[2], len: +sp[3], trunc: +sp[4], key: sp.slice(5).join(" ") });
+      r.keytop.set(sp[1], list);
+      continue;
+    }
+    if (tag === "DYNCEN-GROW") {
+      const kvs = kv(sp.slice(2 + CAPS));
+      r.grow.set(sp[1], { hist: sp.slice(2, 2 + CAPS).map(Number), ...kvs });
+      continue;
+    }
+    if (tag === "DYNCEN-KORIGIN") { r.korigin = sp.slice(1).map(Number); continue; }
+    if (tag === "DYNCEN-SHRINK") {
+      r.shrinks = +sp[1];
+      r.poolMismatch = Number((sp[2] ?? "poolMismatch=0").split("=")[1]);
+      continue;
+    }
     if (tag === "DYNCEN-TOTAL") { r.total = kv(sp.slice(1)); continue; }
   }
   return r;
+}
+
+/* Capacity classes, mirroring scr_dyncen_capclass: 0,1,2,3,4 exactly, then
+ * a class per doubling. The upper bound of each class is what a spare-
+ * capacity figure is charged against. */
+const CAPS = 14;
+const CAP_LABELS = ["0", "1", "2", "3", "4", "5-8", "9-16", "17-32", "33-64",
+  "65-128", "129-256", "257-512", "513-1024", "1025+"];
+
+function kvPrefixed(parts, prefix) {
+  const o = {};
+  for (const p of parts) {
+    const i = p.indexOf("=");
+    if (i > 0) o[prefix + p[0].toUpperCase() + p.slice(1, i)] = Number(p.slice(i + 1));
+  }
+  return o;
 }
 
 function kv(parts) {
@@ -171,7 +224,63 @@ export function check(r) {
         if (s !== 0 && s + row.emptyBuf !== row.n)
           bad.push(`${tag} ${name(k)}: string histogram sums to ${s} (+${row.emptyBuf} empty), row n is ${row.n}`);
       }
+      // 7b. the capacity cross-tab is the SAME population, resliced: every
+      //     object must appear in exactly one class and the two sums it
+      //     carries must reproduce the row's own totals. A cross-tab that
+      //     merely looked plausible is the whole failure mode here.
+      if (row.capHist) {
+        const cn = row.capHist.reduce((a, b) => a + b, 0);
+        const cc = row.capCapSum.reduce((a, b) => a + b, 0);
+        const cl = row.capLenSum.reduce((a, b) => a + b, 0);
+        if (cn !== 0 || row.capSum !== 0) {
+          if (cn !== row.n)
+            bad.push(`${tag} ${name(k)}: cap cross-tab counts ${cn} objects, row n is ${row.n}`);
+          if (cc !== row.capSum)
+            bad.push(`${tag} ${name(k)}: cap cross-tab cap sum ${cc} != row capSum ${row.capSum}`);
+          if (cl !== row.lenSum)
+            bad.push(`${tag} ${name(k)}: cap cross-tab len sum ${cl} != row lenSum ${row.lenSum}`);
+        }
+      }
+      // 7c. physical bytes are what the allocator charges, so they can
+      //     never be BELOW what the caller asked for. Below means the
+      //     model or the walk is wrong, and both produce a smaller and
+      //     more flattering number.
+      if (row.physSide !== undefined && row.physSide < row.side)
+        bad.push(`${tag} ${name(k)}: physSide ${row.physSide} < requested side ${row.side}`);
+      if (row.physKey !== undefined && row.physKey < row.keyBytes)
+        bad.push(`${tag} ${name(k)}: physKey ${row.physKey} < pooled keyBytes ${row.keyBytes}`);
+      // 7d. a literal key costs no block, so it must be excluded from the
+      //     byte columns AND it can never outnumber the keys themselves.
+      if (row.keyStatic > row.keyN)
+        bad.push(`${tag} ${name(k)}: keyStatic ${row.keyStatic} > keyN ${row.keyN}`);
     }
+  }
+
+  // 8. the mirrored pool rounding in the -include'd half agrees with the
+  //    real scr_pool_bytes. A stale mirror moves every key figure by a
+  //    whole size class and nothing else would show it.
+  if (r.poolMismatch > 0)
+    bad.push(`poolMismatch=${r.poolMismatch}: the census's mirrored scr_pool_bytes disagrees with the runtime's`);
+
+  // 9. the key tables. `full` means the table saturated and stopped
+  //    inserting, so `distinct` is a FLOOR and the dedup figure computed
+  //    from it is an understatement presented as a measurement.
+  for (const [tag, t] of r.keytab) {
+    if (t.full > 0)
+      bad.push(`key table ${tag}: full=${t.full} — the table saturated, so distinct=${t.distinct} is a lower bound, not a count`);
+    if (t.distinct > t.total)
+      bad.push(`key table ${tag}: distinct ${t.distinct} > total ${t.total}`);
+    if (t.distPhys > t.occPhys)
+      bad.push(`key table ${tag}: distinct blocks ${t.distPhys} cost more than all occurrences ${t.occPhys}`);
+  }
+  // and the walk-fed tables must hold exactly the keys the rows counted
+  for (const [tag, rows] of [["PEAK", r.peak], ["EXIT", r.exit]]) {
+    const t = r.keytab.get(tag);
+    if (!t) continue;
+    let keyN = 0;
+    for (const [k, row] of rows) { if (k !== ARM_ROW) keyN += row.keyN ?? 0; }
+    if (t.total !== keyN)
+      bad.push(`key table ${tag}: fed ${t.total} keys but the ${tag} rows counted ${keyN}`);
   }
   return bad;
 }
@@ -244,6 +353,71 @@ export function render(r) {
     out.push(`FUNC at the peak: ${n(peakFn.n)} boxes; sig ${n(peakFn.fnSig)}  name ${n(peakFn.fnName)}  src ${n(peakFn.fnSrc)}  arityMax ${peakFn.fnArityMax}`);
   }
   out.push("");
+
+  // ── rank 2: the buffers, and how much of them is capacity nobody filled
+  for (const [tag, rows] of [["AT THE PEAK", r.peak], ["AT EXIT", r.exit]]) {
+    for (const [k, label] of [[5, "OBJ entries"], [4, "ARR items"]]) {
+      const row = rows.get(k);
+      if (!row || !row.capHist) continue;
+      const elem = k === 5 ? L.sizeofEntry : 8;
+      out.push(`SPARE CAPACITY ${label} ${tag}: cap ${n(row.capSum)} holding ${n(row.lenSum)} — ` +
+        `${n(row.capSum - row.lenSum)} unfilled slots = ${n((row.capSum - row.lenSum) * elem)} B requested, ` +
+        `and the buffers cost ${n(row.physSide ?? 0)} B physical against ${n(row.side)} B requested`);
+      out.push(`  class       objects       cap       len    unfilled   B unfilled   waste%`);
+      for (let c = 0; c < CAPS; c++) {
+        if (!row.capHist[c]) continue;
+        const un = row.capCapSum[c] - row.capLenSum[c];
+        out.push(`  ${CAP_LABELS[c].padEnd(9)} ${n(row.capHist[c]).padStart(9)} ${n(row.capCapSum[c]).padStart(9)} ` +
+          `${n(row.capLenSum[c]).padStart(9)} ${n(un).padStart(11)} ${n(un * elem).padStart(12)} ` +
+          `${pct(un, row.capCapSum[c]).padStart(8)}`);
+      }
+      out.push("");
+    }
+  }
+
+  // ── the growth policy as it ran, not as the source reads
+  if (r.grow.size) {
+    out.push(`GROWTH REQUESTS over the whole run (every realloc at the two growth sites):`);
+    for (const [what, g] of r.grow) {
+      const tot = g.hist.reduce((a, b) => a + b, 0);
+      out.push(`  ${what.padEnd(4)} ${n(tot).padStart(9)} growths, ${n(g.bytes)} B asked for, ${n(g.phys)} B charged ` +
+        `(+${pct(g.phys - g.bytes, g.bytes)} allocator tax)`);
+      out.push(`       to cap: ` + g.hist.map((c, i) => (c ? `${CAP_LABELS[i]}:${n(c)}` : null)).filter(Boolean).join("  "));
+    }
+    out.push(`  capacities that ever went DOWN: ${n(r.shrinks ?? 0)}` +
+      (r.shrinks === 0 ? "  — nothing in this runtime shrinks a dyn buffer, ever" : ""));
+    out.push("");
+  }
+
+  // ── rank 3: the keys, and how many of them are the same name again
+  for (const tag of ["PEAK", "EXIT", "RUN"]) {
+    const t = r.keytab.get(tag);
+    if (!t || !t.total) continue;
+    const what = tag === "RUN" ? "every key ever stored" : `the keys live objects hold ${tag === "PEAK" ? "at the peak" : "at exit"}`;
+    out.push(`KEYS ${tag} — ${what}: ${n(t.total)} keys, ${n(t.distinct)} DISTINCT names ` +
+      `(${pct(t.distinct, t.total)}), so ${pct(t.total - t.distinct, t.total)} of them are a name already stored`);
+    out.push(`   blocks: ${n(t.occPhys)} B as stored, ${n(t.distPhys)} B if one block per distinct name — ` +
+      `${n(t.occPhys - t.distPhys)} B (${pct(t.occPhys - t.distPhys, t.occPhys)}) is duplication` +
+      (t.trunc ? `; ${n(t.trunc)} names stored TRUNCATED past ${48} bytes` : ""));
+    if (tag !== "RUN") {
+      let kn = 0, ks = 0;
+      const rows = tag === "PEAK" ? r.peak : r.exit;
+      for (const [k, row] of rows) { if (k === ARM_ROW) continue; kn += row.keyN ?? 0; ks += row.keyStatic ?? 0; }
+      if (ks) out.push(`   ${n(ks)} of the ${n(kn)} (${pct(ks, kn)}) are compiler LITERALS stored by pointer: no block at all`);
+    }
+    const top = r.keytop.get(tag);
+    if (top) out.push(`   commonest: ` + top.slice(0, 12).map((x) => `${x.key}:${n(x.n)}`).join("  "));
+    out.push("");
+  }
+
+  if (r.korigin) {
+    const [set, keyset, parse, hidden, copy] = r.korigin;
+    const lit = set - keyset - copy;
+    out.push(`KEY ORIGIN over the run: scr_dyn_obj_set ${n(set)} (of which key_set ${n(keyset)} and copy ${n(copy)} carry a RUN-TIME key, ` +
+      `so ${n(lit)} could be a literal), JSON.parse ${n(parse)}, hidden table ${n(hidden)}`);
+    out.push("");
+  }
+
   out.push(`MAXIMA a narrowing would have to survive (this run only — a bound, not a proof):`);
   const maxima = { rc: 0, objLen: 0, objCap: 0, arrLen: 0, arrCap: 0, keyLen: 0, strLen: 0, arity: 0 };
   for (const rows of [r.peak, r.exit]) for (const [k, v] of rows) {
@@ -280,7 +454,7 @@ function base() {
     const d = {
       n: 0, rcSum: 0, rcMax: 0, fBuf: 0, fNullProto: 0, fStaticCopy: 0, lenSum: 0, capSum: 0,
       lenMax: 0, capMax: 0, side: 0, emptyBuf: 0, proto: 0, cname: 0, hidden: 0, slots: 0,
-      anyExtra: 0, keyN: 0, keyBytes: 0, keyMax: 0, keyLe7: 0, keyLe15: 0, keyLe23: 0,
+      anyExtra: 0, keyN: 0, keyBytes: 0, keyMax: 0, keyStatic: 0, keyLe7: 0, keyLe15: 0, keyLe23: 0,
       keyLe31: 0, strLenSum: 0, strLenMax: 0, strPhys: 0, strLe7: 0, strLe15: 0, strLe23: 0,
       strLe31: 0, fnSig: 0, fnName: 0, fnSrc: 0, fnArityMax: 0, aux: 0, ...o,
     };
@@ -307,6 +481,34 @@ function base() {
   lines.push(row("EXIT", ARM_ROW, { n: 32, rcSum: 96, rcMax: 3, fBuf: 32 }));
   lines.push(hist("EXIT", ARM_ROW, [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]));
   lines.push(shist("EXIT", ARM_ROW, [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]));
+  // the capacity cross-tab, the physical-byte columns and the three key
+  // tables, all consistent with the rows above: 52 OBJ at cap 4 holding 2
+  // members each, 104 keys of which 4 are distinct names.
+  const capRow = (tag, k, arr) => `DYNCEN-${tag}-CAP ${k} ` + arr.join(" ");
+  const zeroCaps = () => Array.from({ length: CAPS }, () => "0/0/0");
+  const objCaps = (nObj, capSum, lenSum) => {
+    const a = zeroCaps();
+    a[4] = `${nObj}/${capSum}/${lenSum}`; // class "4"
+    return a;
+  };
+  lines.push(`DYNCEN-PEAK-PHYS 3 side=0 key=0`);
+  lines.push(capRow("PEAK", 3, zeroCaps()));
+  lines.push(`DYNCEN-PEAK-PHYS 5 side=5824 key=1664`);
+  lines.push(capRow("PEAK", 5, objCaps(52, 208, 104)));
+  lines.push(`DYNCEN-EXIT-PHYS 3 side=0 key=0`);
+  lines.push(capRow("EXIT", 3, zeroCaps()));
+  lines.push(`DYNCEN-EXIT-PHYS 5 side=5600 key=1600`);
+  lines.push(capRow("EXIT", 5, objCaps(50, 200, 100)));
+  lines.push("DYNCEN-KEYTAB PEAK distinct=4 total=104 full=0 trunc=0 lenSum=416 distLenSum=16 distPhys=64 occPhys=1664 slots=16384");
+  lines.push("DYNCEN-KEYTOP PEAK 26 4 0 aaaa");
+  lines.push("DYNCEN-KEYTAB EXIT distinct=4 total=100 full=0 trunc=0 lenSum=400 distLenSum=16 distPhys=64 occPhys=1600 slots=16384");
+  lines.push("DYNCEN-KEYTOP EXIT 25 4 0 aaaa");
+  lines.push("DYNCEN-KEYTAB RUN distinct=4 total=300 full=0 trunc=0 lenSum=1200 distLenSum=16 distPhys=64 occPhys=4800 slots=16384");
+  lines.push("DYNCEN-KEYTOP RUN 75 4 0 aaaa");
+  lines.push("DYNCEN-GROW obj 0 0 0 0 52 0 0 0 0 0 0 0 0 0 bytes=4992 phys=5824");
+  lines.push("DYNCEN-GROW arr 0 0 0 0 0 0 0 0 0 0 0 0 0 0 bytes=0 phys=0");
+  lines.push("DYNCEN-SHRINK 0 poolMismatch=0");
+  lines.push("DYNCEN-KORIGIN 104 4 0 0 0 0 0 0");
   lines.push("DYNCEN-CURVE 0 500 60 0");
   lines.push("DYNCEN-TOTAL allocs=154 deaths=52 liveN=102 livePeak=104 snapN=104 snapOrd=140 snapT=1 snaps=3 snapBand=256 walks=3 walkReads=300 lost=0 ptrLost=0 deadUnknown=0 armN=32 pslots=262144 tableBytes=2097152");
   return lines.join("\n");
@@ -323,6 +525,12 @@ function selfTest() {
   ok(g.peak.get(5).lenHist[2] === 52, "peak OBJ histogram parsed");
   ok(render(g).includes("OBJ"), "render names OBJ");
   ok(render(g).includes("MAXIMA"), "render prints the maxima block");
+  ok(render(g).includes("SPARE CAPACITY"), "render prices the unfilled capacity");
+  ok(render(g).includes("GROWTH REQUESTS"), "render prints the growth histogram");
+  ok(render(g).includes("KEYS RUN"), "render prints the run-long key duplication");
+  ok(render(g).includes("KEY ORIGIN"), "render prints where the keys came from");
+  ok(/96\.15%|96\.2/.test(render(g)) || render(g).includes("a name already stored"),
+    "render states the duplication rate");
 
   const neg = [
     ["a kind past the row table reads as a missing kind, not a zero",
@@ -354,6 +562,28 @@ function selfTest() {
       (s) => s.replace("DYNCEN-ARM 5 56\n", ""), /no recorded union-arm width/],
     ["books that do not balance",
       (s) => s.replace("allocs=154", "allocs=155"), /allocs/],
+    // the terms this block added, each with the way it can be wrong while
+    // still printing a plausible number
+    ["a mirrored scr_pool_bytes that has drifted from the runtime's",
+      (s) => s.replace("poolMismatch=0", "poolMismatch=6"), /poolMismatch=6/],
+    ["a key table that saturated, so `distinct` is a floor and not a count",
+      (s) => s.replace("DYNCEN-KEYTAB RUN distinct=4 total=300 full=0", "DYNCEN-KEYTAB RUN distinct=4 total=300 full=9"), /saturated/],
+    ["a key table fed fewer keys than the rows counted",
+      (s) => s.replace("DYNCEN-KEYTAB PEAK distinct=4 total=104", "DYNCEN-KEYTAB PEAK distinct=4 total=90"), /fed 90 keys/],
+    ["a dedup figure that claims the distinct blocks cost more than all of them",
+      (s) => s.replace("distPhys=64 occPhys=1664", "distPhys=9000 occPhys=1664"), /cost more than all occurrences/],
+    ["a cap cross-tab that counts a different population from its own row",
+      (s) => s.replace("0/0/0 52/208/104", "0/0/0 40/208/104"), /cross-tab counts 40 objects/],
+    ["a cap cross-tab whose capacities do not reproduce the row's capSum",
+      (s) => s.replace("52/208/104", "52/900/104"), /cross-tab cap sum 900/],
+    ["a cap cross-tab whose lengths do not reproduce the row's lenSum",
+      (s) => s.replace("52/208/104", "52/208/77"), /cross-tab len sum 77/],
+    ["physical bytes BELOW the bytes actually requested",
+      (s) => s.replace("DYNCEN-PEAK-PHYS 5 side=5824", "DYNCEN-PEAK-PHYS 5 side=10"), /physSide 10 </],
+    ["more literal keys than keys",
+      (s) => s.replace("keyMax=6 keyStatic=0 keyLe7=104", "keyMax=6 keyStatic=999 keyLe7=104"), /keyStatic 999 > keyN/],
+    ["a key block figure below the pooled figure it is charged on top of",
+      (s) => s.replace("DYNCEN-PEAK-PHYS 5 side=5824 key=1664", "DYNCEN-PEAK-PHYS 5 side=5824 key=3"), /physKey 3 </],
   ];
   for (const [what, mutate, want] of neg) {
     const bad = check(parse(mutate(good)));

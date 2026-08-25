@@ -27,7 +27,14 @@
  */
 static void scr_dyncen_walk(ScrDynCenKind *rows) {
   unsigned j;
+  /* The key table belongs to the same population as the rows: a walk into
+   * `snap` refills the peak key table, a walk into `exit` the exit one, so
+   * neither is a mixture of two snapshots. */
+  ScrDynCenKeyTab *kt = rows == scr_dyncen_snap ? &scr_dyncen_keysnap
+                      : rows == scr_dyncen_exit ? &scr_dyncen_keyexit
+                                                : NULL;
   memset(rows, 0, sizeof(ScrDynCenKind) * SCR_DYNCEN_KINDS);
+  if (kt) scr_dyncen_key_reset(kt);
   scr_dyncen_walks++;
   for (j = 0; j < SCR_DYNCEN_PSLOTS; j++) {
     const ScrDyn *d = (const ScrDyn *)scr_dyncen_ptbl[j];
@@ -53,8 +60,17 @@ static void scr_dyncen_walk(ScrDynCenKind *rows) {
       if (len > r->len_max) r->len_max = len;
       if (cap > r->cap_max) r->cap_max = cap;
       r->len_hist[scr_dyncen_bucket(len)]++;
+      {
+        int cc = scr_dyncen_capclass(cap);
+        r->cap_hist[cc]++;
+        r->cap_cap_sum[cc] += cap;
+        r->cap_len_sum[cc] += len;
+      }
       if (!d->v.obj.entries) { r->n_empty_buf++; }
-      else r->side_bytes += cap * (long long)sizeof(ScrDynEntry);
+      else {
+        r->side_bytes += cap * (long long)sizeof(ScrDynEntry);
+        r->phys_side += scr_dyncen_phys(cap * (long long)sizeof(ScrDynEntry));
+      }
       /* Through scr_dyn_ext, never through four fields: they moved
        * behind one lazily allocated pointer BECAUSE of what this census
        * measured about them, and a lane that still spelled them inline
@@ -67,15 +83,37 @@ static void scr_dyncen_walk(ScrDynCenKind *rows) {
         if (x->hidden) r->has_hidden++;
         if (x->slots) r->has_slots++;
         if (x->proto || x->cname || x->hidden || x->slots) r->has_any_extra++;
-        if (d->v.obj.ext != NULL) r->side_bytes += (long long)sizeof(ScrDynObjExt);
+        if (d->v.obj.ext != NULL) {
+          r->side_bytes += (long long)sizeof(ScrDynObjExt);
+          r->phys_side += scr_dyncen_phys((long long)sizeof(ScrDynObjExt));
+        }
       }
       for (i = 0; d->v.obj.entries && i < d->v.obj.len; i++) {
         long long kl = (long long)d->v.obj.entries[i].key_len;
         r->key_n++;
+        /* A literal key is not a block: it is bytes the image already
+         * carried, so it must NOT be added to key_bytes or phys_key --
+         * counting it there would report the change as having saved
+         * nothing while the process had stopped allocating it. */
+        if (d->v.obj.entries[i].key_static) {
+          r->key_static++;
+          if (kl > r->key_max) r->key_max = kl;
+          if (kl <= 7) r->key_le7++;
+          if (kl <= 15) r->key_le15++;
+          if (kl <= 23) r->key_le23++;
+          if (kl <= 31) r->key_le31++;
+          if (kt) scr_dyncen_key_note(kt, d->v.obj.entries[i].key, kl);
+          continue;
+        }
         /* the POOLED size, which is what the key really costs: every key
          * allocation in scr_json.c goes through scr_json_key_alloc, which
          * rounds key_len+1 up to SCR_POOL_GRAIN. */
         r->key_bytes += (long long)scr_pool_bytes((size_t)kl + 1);
+        /* and what the ALLOCATOR charges for that same block: the pool is
+         * a freelist over ordinary mallocs, so every key carries a block
+         * header and the 16-byte rounding on top of the pool's 8. */
+        r->phys_key += scr_dyncen_phys((long long)scr_pool_bytes((size_t)kl + 1));
+        if (kt) scr_dyncen_key_note(kt, d->v.obj.entries[i].key, kl);
         if (kl > r->key_max) r->key_max = kl;
         if (kl <= 7) r->key_le7++;
         if (kl <= 15) r->key_le15++;
@@ -91,8 +129,17 @@ static void scr_dyncen_walk(ScrDynCenKind *rows) {
       if (len > r->len_max) r->len_max = len;
       if (cap > r->cap_max) r->cap_max = cap;
       r->len_hist[scr_dyncen_bucket(len)]++;
+      {
+        int cc = scr_dyncen_capclass(cap);
+        r->cap_hist[cc]++;
+        r->cap_cap_sum[cc] += cap;
+        r->cap_len_sum[cc] += len;
+      }
       if (!d->v.arr.items) r->n_empty_buf++;
-      else r->side_bytes += cap * (long long)sizeof(ScrDyn *);
+      else {
+        r->side_bytes += cap * (long long)sizeof(ScrDyn *);
+        r->phys_side += scr_dyncen_phys(cap * (long long)sizeof(ScrDyn *));
+      }
       break;
     }
     case SCR_DYN_STR: {
@@ -242,6 +289,16 @@ __attribute__((constructor)) static void scr_dyncen_stamp(void) {
   scr_dyncen_arm_bytes[SCR_DYN_OBJINST] = (long long)sizeof(probe.v.inst);
   scr_dyncen_arm_bytes[SCR_DYN_BIG] = (long long)sizeof(probe.v.big);
   scr_dyncen_arm_bytes[SCR_DYN_MAP] = (long long)sizeof(probe.v.map);
+  /* The -include'd half mirrors scr_pool_bytes because it is read before
+   * scr_runtime.h. Here the real one is visible: check every size a key
+   * can be, so a changed SCR_POOL_GRAIN cannot leave the mirror quietly
+   * one class off. The reader refuses on a non-zero mismatch. */
+  {
+    long long n;
+    for (n = 0; n <= 512; n++)
+      if (scr_dyncen_pool_bytes(n) != (long long)scr_pool_bytes((size_t)n))
+        scr_dyncen_pool_mismatch++;
+  }
   scr_dyncen_walk_fn = &scr_dyncen_walk;
 }
 
