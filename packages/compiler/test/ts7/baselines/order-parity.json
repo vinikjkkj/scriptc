@@ -9472,6 +9472,24 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/6640-class-field-outside-ctor-any.js": {
+   "order": [
+    "<repo>/tests/corpus/6640-class-field-outside-ctor-any.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/6641-class-field-outside-ctor-shapes.js": {
+   "order": [
+    "<repo>/tests/corpus/6641-class-field-outside-ctor-shapes.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/6642-class-field-read-before-its-assignment.js": {
+   "order": [
+    "<repo>/tests/corpus/6642-class-field-read-before-its-assignment.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/700-classes-basic.ts": {
    "order": [
     "<repo>/tests/corpus/700-classes-basic.ts"
@@ -11588,6 +11606,12 @@
   "<repo>/tests/fixtures/npm/cases/namespace/main.ts": {
    "order": [
     "<repo>/tests/fixtures/npm/cases/namespace/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/fixtures/npm/cases/net-island-install/main.ts": {
+   "order": [
+    "<repo>/tests/fixtures/npm/cases/net-island-install/main.ts"
    ],
    "diags": []
   },

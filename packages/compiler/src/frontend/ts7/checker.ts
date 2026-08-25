@@ -165,14 +165,28 @@ export class CheckerFacade {
   }
 
   /** 5.9.3's symbol.declarations (never undefined here: 7 answers an empty
-   * array where 5.9.3 answered undefined — callers treat them alike). */
+   * array where 5.9.3 answered undefined — callers treat them alike).
+   *
+   * The facade is also handed SENTINEL symbols the lowerer mints for
+   * bindings the language has but the symbol table does not — THIS_BINDING
+   * and ARGUMENTS_BINDING are `{ escapedName }` object literals cast to
+   * ts.Symbol, with no `declarations` field at all. Reading `.map` off
+   * that undefined was an ICE (`Cannot read properties of undefined`) on
+   * every diagnostic that tried to blame such a binding's declaration —
+   * which is to say, on the fence a real npm package walks into. A symbol
+   * with no declarations is an ANSWER (the empty array), never a crash. */
   declarationsOf(symbol: Ts7Symbol): readonly Node[] {
     let decls = this.declsOf.get(symbol);
     if (decls === undefined) {
-      const project = this.requireProject();
-      decls = symbol.declarations
-        .map((h) => h.resolve(project))
-        .filter((n): n is Node => n !== undefined);
+      const handles = symbol.declarations as typeof symbol.declarations | undefined;
+      if (handles === undefined) {
+        decls = [];
+      } else {
+        const project = this.requireProject();
+        decls = handles
+          .map((h) => h.resolve(project))
+          .filter((n): n is Node => n !== undefined);
+      }
       this.declsOf.set(symbol, decls);
     }
     return decls;
