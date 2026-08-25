@@ -1,0 +1,64 @@
+open true
+readonly false
+memory false
+inTransaction false
+pragma.journal wal
+pragma.busy 5000
+pragma.fk 1
+pragma.rows 1:0
+stmt.source insert into t values(?,?,?,?,?)
+stmt.reader false
+stmt.readonly false
+stmt.busy false
+run.changes 1
+run.rowid 1
+row.i 42
+row.r 1.5
+row.tx str
+row.typeof integer,real,text,blob,null
+blob.len 3
+blob.hex 00feff
+blob.isBuffer true
+blob.isView true
+affinity real
+all.length 3
+all.0 1/two
+all.1 3/four
+all.2 5/six
+pluck 1
+raw.length 2
+raw.0 1
+raw.1 two
+expand 1
+pluck.off 1
+safe 9007199254740993
+unsafe 9007199254740992
+bigbind 9007199254740995
+columns.length 2
+columns.0 alias|i|t|main|INTEGER
+columns.1 lit|null|null|null|null
+get.none undefined
+all.none 0
+tx.in true
+tx.out false
+tx.rows 3
+upsert.changes 1
+upsert.count 2
+upsert.hex 09
+blobkey.count 2
+blobkey.lookup 2
+e.notable SqliteError|SQLITE_ERROR|no such table: nope
+e.unique SqliteError|SQLITE_CONSTRAINT_PRIMARYKEY|UNIQUE constraint failed: u.id
+e.few RangeError|undefined|Too few parameter values were provided
+e.many RangeError|undefined|Too many parameter values were provided
+e.nodata TypeError|undefined|This statement does not return data. Use run() instead
+e.two RangeError|undefined|The supplied SQL string contains more than one statement
+e.empty RangeError|undefined|The supplied SQL string contains no statements
+e.named RangeError|undefined|Missing named parameter "a"
+e.bool TypeError|undefined|SQLite3 can only bind numbers, strings, bigints, buffers, and null
+e.twoobj RangeError|undefined|Missing named parameter "b"
+comment 1
+chain 2
+closed.open false
+e.closed TypeError|undefined|The database connection is not open
+END done

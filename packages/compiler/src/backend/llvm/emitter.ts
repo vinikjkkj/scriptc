@@ -664,6 +664,35 @@ const LIB_FN_SYMS: Record<string, string> = {
   // the generic path emits the standard pending check). typeof and the
   // ambient-this read never throw. The fs dyn read is the sync-fs story.
   "json.parse": "scr_json_parse",
+  /* better-sqlite3 over the vendored amalgamation (scr_sqlite.c). Every
+   * one of the executors and the two lifecycle members is in the
+   * may-throw seed set: the binder raises before the engine is reached
+   * and the engine raises the SqliteError-shaped throw, and a missing
+   * seed here is a NULL the generic path never checks. */
+  "sqlite.open": "scr_sqlite_open",
+  "sqlite.close": "scr_sqlite_close",
+  "sqlite.prepare": "scr_sqlite_prepare",
+  "sqlite.exec": "scr_sqlite_exec",
+  "sqlite.pragma": "scr_sqlite_pragma",
+  "sqlite.dbName": "scr_sqlite_db_name",
+  "sqlite.dbOpen": "scr_sqlite_db_open",
+  "sqlite.dbReadonly": "scr_sqlite_db_readonly",
+  "sqlite.dbMemory": "scr_sqlite_db_memory",
+  "sqlite.dbInTx": "scr_sqlite_db_in_transaction",
+  "sqlite.argsNew": "scr_sqlite_args_new",
+  "sqlite.argsPush": "scr_sqlite_args_push",
+  "sqlite.run": "scr_sqlite_run",
+  "sqlite.get": "scr_sqlite_get",
+  "sqlite.all": "scr_sqlite_all",
+  "sqlite.pluck": "scr_sqlite_stmt_pluck",
+  "sqlite.raw": "scr_sqlite_stmt_raw",
+  "sqlite.expand": "scr_sqlite_stmt_expand",
+  "sqlite.safeIntegers": "scr_sqlite_stmt_safe_ints",
+  "sqlite.columns": "scr_sqlite_stmt_columns",
+  "sqlite.stmtSource": "scr_sqlite_stmt_source",
+  "sqlite.stmtReader": "scr_sqlite_stmt_reader",
+  "sqlite.stmtReadonly": "scr_sqlite_stmt_readonly",
+  "sqlite.stmtBusy": "scr_sqlite_stmt_busy",
   "dyn.keySet": "scr_dyn_key_set",
   "dyn.expandoBind": "scr_dyn_expando_bind",
   "dyn.keyDelete": "scr_dyn_key_delete",
@@ -3340,6 +3369,8 @@ class LlEmitter {
       // The same ScrGen pointer as the synchronous flavour, and a JS
       // object either way.
       case "asyncGenerator":
+      case "sqliteDb":
+      case "sqliteStmt":
       case "fsWatcher": {
         // JS objects are ALWAYS truthy; the honest constant reads as a
         // pointer test, exactly the C emitter's `!= NULL`.
@@ -3437,6 +3468,8 @@ class LlEmitter {
             case "childStream":
             case "generator":
             case "fsWatcher":
+            case "sqliteDb":
+            case "sqliteStmt":
             case "abortSignal":
             case "abortController":
             case "response":

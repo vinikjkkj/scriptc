@@ -270,6 +270,17 @@ export interface FileParts {
           continue;
         }
         const spec = specNode.text;
+        /* better-sqlite3 in a STATIC build: the compiler serves the
+         * package's surface itself over the vendored SQLite amalgamation
+         * (lower-sqlite.ts, scr_sqlite.c), so the import binds a
+         * compiler-known value and the island owns nothing — exactly the
+         * --npm-static arm below, minus the package's JS. Under
+         * --dynamic the package's own code is what an import reaches, so
+         * this steps aside and the historical path runs.
+         *
+         * Without this arm the import line itself reports SC2013 and the
+         * program never reaches the lowering that would serve it. */
+        if (!L.dynamic && spec === "better-sqlite3") continue;
         const npm = resolveNpmImport(fp.sf.fileName, spec);
         // --npm-static: an opted-in package that made it through preflight
         // is a PROGRAM-MODULE dependency — its entry sits in the module

@@ -208,6 +208,22 @@ export type IrType =
    * header. Same container rules as child: union arms fine (the
    * `FSWatcher | null` polling-fallback local), arrays/maps/JSON fenced. */
   | { kind: "fsWatcher" }
+  /** A better-sqlite3 `Database` handle (scr_sqlite.c over the vendored
+   * SQLite amalgamation — linked only when the IR uses one). Heap,
+   * refcounted, MUTABLE (open/closed, and the engine's own page cache
+   * behind it). Holds no reference to any program value — never part of
+   * a cycle, no trace header. Union arms fine (`Database | null` is the
+   * lazily-opened-connection idiom); arrays/maps/JSON fenced like every
+   * other handle. */
+  | { kind: "sqliteDb" }
+  /** A better-sqlite3 `Statement` handle (scr_sqlite.c). Heap,
+   * refcounted, MUTABLE — pluck/raw/expand/safeIntegers set a mode on it
+   * and each answers the SAME statement, which is what makes
+   * `db.prepare(s).pluck().get()` one object and not three. RETAINS its
+   * database, so a statement outliving the binding that opened the
+   * database still has a live sqlite3*; better-sqlite3 keeps the same
+   * edge through its frozen `stmt.database`. */
+  | { kind: "sqliteStmt" }
   /** A tls.SecureContext handle (scr_tls.c): heap, refcounted, IMMUTABLE —
    * a parsed cert/key pair (tls.createSecureContext({ cert, key })) that
    * an SNI callback answers per-servername. Holds no references — never
@@ -466,6 +482,8 @@ export const REF_TRUTHY_KINDS: ReadonlySet<string> = new Set([
   "fileHandle",
   "netServer", "netSocket", "http2Session", "http2Stream", "dgramSocket", "testCtx", "httpReq", "httpRes", "httpClientReq",
   "secureCtx", "abortSignal", "abortController", "fsWatcher", "childStream", "procStream", "bytes", "func", "object", "record", "promise",
+  // A Database and a Statement are JS objects: always truthy.
+  "sqliteDb", "sqliteStmt",
   // A Response and a Headers view are JS objects: always truthy.
   "response", "headers",
   // A RequestInit is a JS object, and a Request would be one.
@@ -514,6 +532,8 @@ export const HEADERS_T: IrType = { kind: "headers" };
 export const REQUESTINIT_T: IrType = { kind: "requestInit" };
 export const REQUEST_T: IrType = { kind: "request" };
 export const FSWATCHER_T: IrType = { kind: "fsWatcher" };
+export const SQLITEDB_T: IrType = { kind: "sqliteDb" };
+export const SQLITESTMT_T: IrType = { kind: "sqliteStmt" };
 export const CHILDSTREAM_T: IrType = { kind: "childStream" };
 export const PROCSTREAM_T: IrType = { kind: "procStream" };
 export const VOID: IrType = { kind: "void" };
@@ -780,6 +800,8 @@ export function typeKey(t: IrType): string {
     case "httpClientReq":
     case "secureCtx":
     case "fsWatcher":
+    case "sqliteDb":
+    case "sqliteStmt":
     case "childStream":
     case "procStream":
     case "dyn":
@@ -1006,6 +1028,11 @@ export function isRefCounted(t: IrType): boolean {
     // FSWatcher handles are refcounted like child (listeners drop at
     // close, so lean allocation — see the IrType comment).
     t.kind === "fsWatcher" ||
+    // The two SQLite handles are refcounted like every other opaque
+    // engine handle; neither can point back at a program value, so both
+    // keep the lean 1-word header.
+    t.kind === "sqliteDb" ||
+    t.kind === "sqliteStmt" ||
     // Child-output streams are refcounted like child (listeners drop at
     // EOF — see the IrType comment).
     t.kind === "childStream" ||
@@ -2562,6 +2589,46 @@ export type IrLibFn =
    * --dynamic only. */
   | "island.castFail"
   | "json.parse"
+  /* ── better-sqlite3 over the vendored amalgamation (scr_sqlite.c) ────
+   * The whole surface the static lane serves, and nothing beside it: a
+   * member with no entry here has no lowering, and lower-sqlite.ts
+   * refuses it BY NAME rather than answering undefined.
+   *
+   * `run` / `get` / `all` take the call's ARGUMENT LIST as a static
+   * `dyn[]` — one element per argument the site wrote. That is the
+   * static lane's spelling of the `arguments` object better-sqlite3's
+   * Binder walks, and it is what lets one lowering serve all three
+   * documented call forms (varargs, one array, one named-parameter
+   * object) without a variadic libCall.
+   *
+   * Every one of the three answers DYN, because a row's shape is a
+   * property of the SQL text and not of the program's types — the same
+   * honest boundary json.parse takes, and the same `as T` checked cast
+   * gets a typed value back out of it. */
+  | "sqlite.open"
+  | "sqlite.prepare"
+  | "sqlite.exec"
+  | "sqlite.close"
+  | "sqlite.pragma"
+  | "sqlite.dbName"
+  | "sqlite.dbOpen"
+  | "sqlite.dbReadonly"
+  | "sqlite.dbMemory"
+  | "sqlite.dbInTx"
+  | "sqlite.argsNew"
+  | "sqlite.argsPush"
+  | "sqlite.run"
+  | "sqlite.get"
+  | "sqlite.all"
+  | "sqlite.pluck"
+  | "sqlite.raw"
+  | "sqlite.expand"
+  | "sqlite.safeIntegers"
+  | "sqlite.columns"
+  | "sqlite.stmtSource"
+  | "sqlite.stmtReader"
+  | "sqlite.stmtReadonly"
+  | "sqlite.stmtBusy"
   /** Keyed WRITE on a dyn value — `h.onDone = cb` / `h["k"] = v` on a
    * checked-dynamic object (args: receiver, key string, value — all
    * borrowed; the runtime copies the key and retains the value in). An
@@ -7085,6 +7152,10 @@ function isJsonSafeAt(
     case "httpClientReq":
     case "secureCtx":
     case "fsWatcher":
+    // A Database / Statement stringifies as the same "{}" husk in Node —
+    // every data property lives on an internal slot. Rejected like Maps.
+    case "sqliteDb":
+    case "sqliteStmt":
     case "childStream":
     case "procStream":
     case "dyn":
@@ -8230,6 +8301,46 @@ export function moduleUsesFetchStatic(mod: IrModule): boolean {
       typeof rec.fn === "string" &&
       (rec.fn.startsWith("fetch.") || rec.fn.startsWith("resp.") || rec.fn.startsWith("headers."))
     ) {
+      found = true;
+      return;
+    }
+    for (const x of Object.values(v as Record<string, unknown>)) visit(x);
+  };
+  visit(mod);
+  return found;
+}
+
+/** True when the module holds a SQLite handle or calls one of the
+ * `sqlite.*` libCalls — the link switch for scr_sqlite.c AND for the
+ * vendored amalgamation's object (cc.ts).
+ *
+ * This gate carries more weight than any other in the file. sqlite3.c is
+ * 269,649 lines; its object is larger than every other runtime unit put
+ * together, so a program that never touches SQLite must not link one byte
+ * of it — proved by md5 against the same program built before the unit
+ * existed, not asserted.
+ *
+ * BOTH halves are needed, for moduleUsesFetchStatic's reason: a fenced
+ * statement can leave a `sqliteDb` TYPE behind with no libCall beside it
+ * (the emitted release still names scr_sqlite_db_release), and a
+ * `db.exec(sql)` whose result nothing binds is a libCall with no typed
+ * slot. Same generic JSON walk, and the same reason it cannot
+ * false-positive on user strings: `kind`/`fn` discriminants live only on
+ * IR objects. */
+export function moduleUsesSqlite(mod: IrModule): boolean {
+  let found = false;
+  const visit = (v: unknown): void => {
+    if (found || v === null || typeof v !== "object") return;
+    if (Array.isArray(v)) {
+      for (const item of v) visit(item);
+      return;
+    }
+    const rec = v as { kind?: unknown; fn?: unknown };
+    if (rec.kind === "sqliteDb" || rec.kind === "sqliteStmt") {
+      found = true;
+      return;
+    }
+    if (rec.kind === "libCall" && typeof rec.fn === "string" && rec.fn.startsWith("sqlite.")) {
       found = true;
       return;
     }
@@ -10198,6 +10309,8 @@ const LIB_MODE_REFUSED_KINDS: ReadonlyMap<string, string> = new Map([
   ["http2Stream", "the node:http2 surface"],
   ["dgramSocket", "the node:dgram surface"],
   ["fsWatcher", "fs.watch"],
+  ["sqliteDb", "the better-sqlite3 surface"],
+  ["sqliteStmt", "the better-sqlite3 surface"],
   ["testCtx", "the node:test surface"],
   ["httpReq", "the node:http surface"],
   ["httpRes", "the node:http surface"],
@@ -10602,6 +10715,27 @@ export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   "island.import",
   "island.castFail",
   "json.parse",
+  /* Every SQLite entry point that reaches the engine can raise the
+   * SqliteError-shaped throw, and the binder can raise the TypeError and
+   * the two RangeErrors before the engine is reached. The four pure
+   * getters below it (dbOpen/dbReadonly/dbMemory/stmtReader/
+   * stmtReadonly/stmtBusy/dbName/stmtSource) read a field and never
+   * throw, so they stay out — a seed that is wider than the truth costs
+   * every caller a landing pad. */
+  "sqlite.open",
+  "sqlite.prepare",
+  "sqlite.exec",
+  "sqlite.close",
+  "sqlite.pragma",
+  "sqlite.dbInTx",
+  "sqlite.run",
+  "sqlite.get",
+  "sqlite.all",
+  "sqlite.pluck",
+  "sqlite.raw",
+  "sqlite.expand",
+  "sqlite.safeIntegers",
+  "sqlite.columns",
   // decodeURIComponent throws the spec's URIError on bad hex/invalid
   // UTF-8 octets (encodeURIComponent never throws — see the IrLibFn doc).
   "str.decodeUriComponent",

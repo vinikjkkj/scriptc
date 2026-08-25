@@ -10,6 +10,7 @@ import type { Lowerer, WidthLift } from "./lowerer.js";
 import { BIGINT, BOOL, CAUGHT, DYN, type IrBytesElem, type IrLibFn, type IrNumBinOp, DYN_HANDLE_KINDS, F64, IrExpr, IrFunction, IrJsOp, IrLocal, IrRecordShape, IrStmt, IrType, JSVAL, KEYOBJ, NULL_T, REF_TRUTHY_KINDS, REGEX, RUNTIME_ERROR_CLASSES, SEARCH_PARAMS_T, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, canAdaptDynFuncTo, canBoxFuncIntoDyn, canDynCheckTo, funcOf, isDynBytes, isJsonSafeType, isRefCounted, isUnitType, jsOpResultKind, httpReqIsReadableIn, shapeHasAccessorSlots, streamDuplexWidensToWritable, typeEquals, typeKey, unionFuncSetArmsOk } from "../../ir/nodes.js";
 import { lowerAbortProperty } from "./lower-abort.js";
 import { lowerFetchProperty, lowerRequestInitLiteral } from "./lower-fetch.js";
+import { lowerSqliteProperty } from "./lower-sqlite.js";
 import { builtinFnValueOf, builtinMemberFnValueOf } from "./lower-fnvalue.js";
 import { requireFnValueOf, requireMemberFence } from "./lower-builtins.js";
 import { funcObjectPropOf } from "./lower-fnprops.js";
@@ -2326,6 +2327,11 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
         // Its own entry for the same reason the abort row above is: a
         // handle receiver never reaches lowerIntrinsicProperty's switch.
         lowerFetchProperty(L, expr) ??
+        // db.name/.open/.inTransaction/.readonly/.memory and the
+        // statement's reader/readonly/busy/source. Its own entry for the
+        // reason the two rows above have one: a handle receiver never
+        // reaches lowerIntrinsicProperty's switch.
+        lowerSqliteProperty(L, expr) ??
         L.lowerNumberStaticProperty(expr) ??
         // The composed default-locale form
         // `Intl.DateTimeFormat().resolvedOptions().locale` — claimed at

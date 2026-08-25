@@ -59,6 +59,49 @@ HEADERS ONLY — no curl C source is vendored and none is ever compiled. These h
 
 The stub builds lazily on the first flag-selected fetch cross compile into `.cache/curl-stub-<flavor>/` next to this file (the zlib-objects pattern). Default builds never see any of this, and no build ever compiles curl itself.
 
+## sqlite/
+
+- Project: https://sqlite.org/
+- Version: 3.53.4 (release amalgamation `2026/sqlite-amalgamation-3530400.zip`, **SHA3-256 `628a44cfe82c66aed1ccbbe85a562d2e33ebe64b3288981ed76285612227934e`**, 2 946 650 bytes — the hash and size published on sqlite.org/download.html, both re-computed here after download rather than trusted; Fossil check-in `bf7c7f30031888f4e796e429ab3978879485`)
+- License: PUBLIC DOMAIN (the blessing is in the header of `sqlite3.c` itself; SQLite ships no LICENSE file)
+
+The database engine behind `better-sqlite3` in the STATIC lane (see the
+design note atop packages/runtime/src/scr_sqlite.c). Two files —
+`sqlite3.c` and `sqlite3.h` — from the release amalgamation zip;
+`shell.c` (the CLI) and `sqlite3ext.h` (the loadable-extension API, which
+this build omits) are not vendored. No vendored file is modified. To
+update: re-fetch the release amalgamation, verify its published SHA3-256,
+copy the same two files, and bump `SQLITE_VERSION` in
+packages/compiler/src/backend/cc.ts.
+
+Chosen over `libsql` and `sqlite3mc`: neither is meaningfully better for
+this workload, and the amalgamation is by a wide margin the most tested C
+in existence — the fork's value would be features (replication,
+encryption) that a WhatsApp client's local store does not use, paid for
+with a smaller test corpus. It is also the version `better-sqlite3`
+13.0.3 itself ships, which is measured rather than assumed:
+`db.pragma("compile_options")` on the prebuilt addon reports 3.53.4, so
+the differential harness compares against the SAME engine and any
+divergence it finds is ours.
+
+The compile-time configuration lives in `SQLITE_DEFINES` in cc.ts and
+matches better-sqlite3's own reported `compile_options` for every
+OBSERVABLE flag (DQS=0, DEFAULT_FOREIGN_KEYS, ENABLE_COLUMN_METADATA,
+LIKE_DOESNT_MATCH_BLOBS, the ENABLE_* SQL surface, USE_URI, the cache and
+WAL defaults), with two named divergences: `THREADSAFE=0` where
+better-sqlite3 ships 2 (a compiled binary has one thread), and
+LOAD_EXTENSION stays omitted because `loadExtension` is refused by name.
+
+The object builds lazily on the first SQLite-using compile into
+`.cache/sqlite-<version>-<flavor>/sqlite3.o` next to this file — one
+flavor per driver/target, the zlib-objects pattern. **SQLite-free
+binaries never compile or link any of this, and that is the point:** the
+amalgamation is 269,649 lines and its object is larger than every other
+runtime unit put together, so the gate (`moduleUsesSqlite`) is what keeps
+a hello-world's image at exactly the size it had before this directory
+existed — proved per-section against a build of the same entry at the
+previous revision, not asserted.
+
 ## mbedtls/
 
 - Project: https://github.com/Mbed-TLS/mbedtls

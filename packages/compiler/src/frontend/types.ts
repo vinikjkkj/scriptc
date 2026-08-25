@@ -3,6 +3,7 @@ import type { IrBuiltinRendering, IrRecordShape, IrType, IrUnionDef } from "../i
 import { ABORTCONTROLLER_T, ABORTSIGNAL_T, BIGINT, HEADERS_T, REQUEST_T, REQUESTINIT_T, RESPONSE_T, arrayOf, BOOL, bytesOf, canConvertToDyn, CHILD_T, DYN, F64, funcOf, isSupportedIndexValue, isSupportedMapKey, isSupportedMapValue, isSupportedSetElem, isUnitType, JSVAL, mapOf, NULL_T, PROCSTREAM_T, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, setOf, STRING, SYMBOL_T, typeEquals, typeKey, UNDEFINED_T, VOID } from "../ir/nodes.js";
 
 import { isJsSourceFile } from "./program.js";
+import { isSqliteTypesPath } from "./shared.js";
 import { accessorSlotProp, armDiscrimLits, armLitsConflict, builtinRenderingKey, internalFieldNamesOf, mergeArmLitSets, wsGlobalPlan } from "../ir/nodes.js";
 // typeKey moved to ir/nodes.ts (the backend needs it too, for per-type
 // helper interning); re-exported here so frontend call sites keep their
@@ -825,6 +826,10 @@ function formatIrTypeInner(t: IrType, shapes: ShapeRegistry, unions: UnionRegist
       return "SecureContext";
     case "fsWatcher":
       return "FSWatcher";
+    case "sqliteDb":
+      return "Database";
+    case "sqliteStmt":
+      return "Statement";
     case "childStream":
       return "Readable";
     case "procStream":
@@ -1967,6 +1972,8 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
       elem.kind === "httpClientReq" ||
       elem.kind === "secureCtx" ||
       elem.kind === "fsWatcher" ||
+      elem.kind === "sqliteDb" ||
+      elem.kind === "sqliteStmt" ||
       elem.kind === "childStream" ||
       elem.kind === "procStream" ||
       elem.kind === "generator"
@@ -3138,6 +3145,30 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
     )
   ) {
     return { kind: "fsWatcher" };
+  }
+  // better-sqlite3's Database and Statement — the ONE npm package the
+  // static lane serves itself (packages/runtime/src/scr_sqlite.c over the
+  // vendored amalgamation; the ambient declarations' header says why).
+  //
+  // Provenance takes BOTH declaration sources, because both are real: the
+  // shipped ambient module (a stdlib file here, and the one that ships
+  // when the project installs nothing), and better-sqlite3's own or
+  // DefinitelyTyped's declarations under node_modules (which WIN
+  // resolution when they exist, so the ambient module stands down and
+  // this arm is the only one left). The module/package check is what
+  // keeps some other library's `Database` interface from capturing the
+  // kind — the name is common enough that an unqualified match would.
+  if (
+    (psym?.name === "Database" || psym?.name === "Statement") &&
+    checker.declarationsOf(psym).some(
+      (d) =>
+        (ts.isInterfaceDeclaration(d) || ts.isClassDeclaration(d)) &&
+        ((ctx.isStdlibFile(d.getSourceFile()) &&
+          isDeclaredInAmbientModule(d, "better-sqlite3")) ||
+          isSqliteTypesPath(d.getSourceFile().fileName)),
+    )
+  ) {
+    return psym.name === "Database" ? { kind: "sqliteDb" } : { kind: "sqliteStmt" };
   }
   // fs/promises FileHandle: the handle fsPromises.open() resolves to.
   // Module-checked like FSWatcher — @types/node declares
