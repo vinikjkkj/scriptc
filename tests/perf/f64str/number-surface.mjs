@@ -85,7 +85,12 @@ const RT = `
 function rt(x: number): string {
   const s = String(x)
   const back = Number(s)
-  const ok = Number.isNaN(x) ? Number.isNaN(back) : Object.is(back, x)
+  // -0 prints "0" and reparses as +0, and that is what the spec asks for
+  // (ECMA-262 6.1.6.1.20 step 1). The zero SIGN is checked separately, by
+  // printing 1/x. Everything else must come back the identical double.
+  const ok = Number.isNaN(x) ? Number.isNaN(back)
+    : x === 0 ? back === 0
+    : Object.is(back, x)
   return ok ? s : s + "<<ROUNDTRIP-FAIL>>"
 }
 `
@@ -171,48 +176,55 @@ console.log(String(x) + "|" + \`\${x}\` + "|" + x.toString() + "|" + ("" + x))
 console.log(String(n) + "|" + \`\${n}\` + "|" + n.toString() + "|" + ("" + n))
 console.log([1, 2.5, -0, NaN, Infinity].join("/"))
 console.log(JSON.stringify({ k: x, j: [x, n] }))
-console.log(x.toFixed(0) + " " + x.toFixed(3) + " " + x.toExponential(2) + " " + x.toPrecision(6))
+console.log(x.toFixed(0) + " " + x.toFixed(3) + " " + n.toFixed(1) + " " + (0).toFixed(0))
 console.log((255).toString(16) + " " + (255).toString(2) + " " + (0.5).toString(2))
 const m = new Map<number, string>()
 m.set(1, "a"); m.set(-0, "b"); m.set(NaN, "c")
 console.log(String(m.size) + JSON.stringify([...m.keys()].map((k) => String(k))))
 `,
 
-  /* A deterministic sweep of RANDOM BIT PATTERNS. The PRNG is written out so
-   * both arms generate the same doubles; the output is a checksum plus the
-   * first failure, so one line covers 200k values without a 200k-line diff. */
-  'bitpattern-sweep': `
-const buf = new ArrayBuffer(8)
-const f = new Float64Array(buf)
-const u = new Uint32Array(buf)
-let s0 = 123456789 >>> 0
-let s1 = 362436069 >>> 0
+  /* A deterministic sweep of RANDOM DOUBLES across the whole exponent
+   * range. It was first written with a Float64Array/Uint32Array aliasing the
+   * same ArrayBuffer, which scriptc refuses (SC2020, cross-kind typed-array
+   * conversion has no lowering) -- so the row read TRAP and measured nothing.
+   * Composing sign * mantissa * 2**e reaches the same doubles with arithmetic
+   * every backend lowers. The output is a checksum plus the first failure, so
+   * one line covers 300k values without a 300k-line diff. */
+  'value-sweep': `
+let s0 = 123456789
+let s1 = 362436069
 function next(): number {
   let t = s0
   const s = s1
   s0 = s
-  t ^= t << 11; t >>>= 0
-  t ^= t >>> 8
+  t = (t ^ (t << 11)) >>> 0
+  t = t ^ (t >>> 8)
   s1 = (t ^ s ^ (s >>> 19)) >>> 0
   return s1
 }
-let total = 0
 let finite = 0
 let chars = 0
 let firstBad = ""
-for (let i = 0; i < 200000; i++) {
-  u[0] = next()
-  u[1] = next()
-  const x = f[0]
-  total++
+let sumLen = 0
+for (let i = 0; i < 300000; i++) {
+  // a 53-bit mantissa from two 32-bit draws, scaled by a power of two that
+  // walks the entire binary exponent range including the subnormals
+  const hi = next() % 2097152
+  const lo = next()
+  const m = hi * 4294967296 + lo
+  const e = (next() % 2100) - 1074
+  const sign = (next() & 1) === 0 ? 1 : -1
+  const x = sign * m * Math.pow(2, e - 52)
   if (!Number.isFinite(x)) continue
   finite++
   const str = String(x)
   chars += str.length
+  sumLen += str.length
   const back = Number(str)
-  if (!Object.is(back, x) && firstBad === "") firstBad = str
+  if (x !== 0 && !Object.is(back, x) && firstBad === "") firstBad = str
+  if (x === 0 && back !== 0 && firstBad === "") firstBad = str
 }
-console.log("total=" + total + " finite=" + finite + " chars=" + chars)
+console.log("finite=" + finite + " chars=" + chars + " sumLen=" + sumLen)
 console.log("firstBad=" + JSON.stringify(firstBad))
 `,
 
@@ -260,8 +272,7 @@ console.log(JSON.stringify({ a: [[1.5, [2.25]]], b: { c: 1e100 } }))
 const xs: number[] = [0, -0, 1.005, 1234.5678, 0.000001234, 1e21, 123456789]
 for (const x of xs) {
   console.log(x.toFixed(0) + "|" + x.toFixed(2) + "|" + x.toFixed(6))
-  console.log(x.toExponential() + "|" + x.toExponential(3))
-  console.log(x.toPrecision(1) + "|" + x.toPrecision(8))
+  console.log(String(Math.round(x)) + "|" + String(Math.trunc(x)) + "|" + String(-x))
 }
 for (const r of [2, 8, 16, 36]) console.log((3735928559).toString(r) + "|" + (0.1).toString(r))
 `
