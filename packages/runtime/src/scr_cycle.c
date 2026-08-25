@@ -62,46 +62,150 @@ static ScrPool scr_cyc_blocks;
 #define SCR_CYC_ZERO_WHOLE 0
 #endif
 
-void *scr_cyc_alloc(size_t size, ScrTraceFn trace, ScrCycFreeFn free_fn) {
-  size_t phys = scr_pool_bytes(sizeof(ScrCycHdr) + size);
-  ScrCycHdr *h = scr_pool_take(&scr_cyc_blocks, phys);
+/* The census hook, as one macro rather than an #ifdef inside each arm of
+ * the allocator below. With tests/perf/cycensus/scr_cyc_census.h absent
+ * this expands to nothing, which is what makes an ordinary build carry no
+ * trace of it -- the property that header's comment checks by diffing the
+ * two objects. */
 #ifdef SCR_CYCEN_ON
-  /* tests/perf/cycensus/scr_cyc_census.h, -include'd. Defined only when
-   * that header is, so an ordinary build has no trace of these four lines
-   * — verified by building both ways and diffing the binary. */
-  const int scr_cycen_pooled = (h != NULL);
-#endif
-  if (h) {
-    /* calloc's contract, kept, but only where it is observable. Four of
-     * the header's six fields are assigned unconditionally below and the
-     * other two are assigned here, so zeroing the header as well as the
-     * payload wrote 32 of every 80 bytes twice. The OBJECT is what the
-     * callers read before writing (scr_box_new leaves `slot` at zero and
-     * scr_box_trace's "freshly-created boxes hold NULL" rule depends on
-     * it), so the payload zeroing is NOT optional and is kept exactly.
-     * SCR_CYC_ZERO_WHOLE=1 restores the old single memset. */
-#if SCR_CYC_ZERO_WHOLE
-    memset(h, 0, phys);
+#define SCR_CYCEN_NOTE_ALLOC(h, phys, size, fn, pooled) \
+  scr_cycen_alloc_note((h), (phys), (size), (const void *)(fn), (pooled))
+static inline void scr_cycen_alloc_note(ScrCycHdr *h, size_t phys, size_t size,
+                                        const void *fn, int pooled) {
+  scr_cycen_hdr_bytes = (long long)sizeof(ScrCycHdr);
+  scr_cycen_note_alloc(h, phys, size, fn, pooled, scr_cyc_live);
+}
 #else
-    memset(h + 1, 0, phys - sizeof(ScrCycHdr));
-    h->buffered = 0;
-    h->buf_index = 0;
+#define SCR_CYCEN_NOTE_ALLOC(h, phys, size, fn, pooled) ((void)0)
 #endif
-  } else {
-    h = calloc(1, phys);
-    if (!h) scr_cyc_oom();
-  }
+
+/* The four header fields every arm writes. `blk` is an ARGUMENT and not
+ * recomputed here, because the two arms know different things about it:
+ * a block scr_pool_take returned is in range by construction, while a
+ * calloc'd one may not be. Folding that into one conditional cost five
+ * instructions (`shr / xor / cmp / cmovb / mov`) on the path that already
+ * knows the answer. */
+static inline void scr_cyc_stamp(ScrCycHdr *h, ScrTraceFn trace,
+                                 ScrCycFreeFn free_fn, uint8_t blk) {
   h->trace_off = scr_cyc_off((const void *)trace);
   h->free_off = scr_cyc_off((const void *)free_fn);
   h->color = SCR_CYC_BLACK;
-  h->blk = phys <= SCR_POOL_MAX ? (uint8_t)(phys / SCR_POOL_GRAIN) : 0u;
+  h->blk = blk;
+}
+
+/* The pool miss, and DELIBERATELY the whole of it: the calloc, the stamp,
+ * the counter and the return. On closure-churn this runs 5 times in
+ * 800,031.
+ *
+ * Both halves of that are load-bearing and both were measured. `noinline`
+ * alone is not enough - with only the calloc out of line, clang still
+ * kept `trace`, `free_fn` and `phys` in callee-saved registers across the
+ * cold call, and the hot path paid 5 pushes and 5 pops for a path it
+ * essentially never takes: 43 instructions per call rather than 33.
+ * Taking the SAME three arguments this function does makes the miss a
+ * TAIL call, so the hot path holds nothing across anything and needs no
+ * frame at all. `phys` is recomputed here rather than passed for the same
+ * reason - a fourth argument would be a register shuffle in the caller. */
+static __attribute__((noinline)) void *scr_cyc_alloc_miss(size_t size,
+                                                          ScrTraceFn trace,
+                                                          ScrCycFreeFn free_fn) {
+  size_t phys = scr_pool_bytes(sizeof(ScrCycHdr) + size);
+  ScrCycHdr *h = calloc(1, phys);
+  if (h == NULL) scr_cyc_oom();
+  /* calloc zeroed the whole block, `buffered` and `buf_index` included. */
+  scr_cyc_stamp(h, trace, free_fn,
+                phys <= SCR_POOL_MAX ? (uint8_t)(phys / SCR_POOL_GRAIN) : 0u);
   scr_cyc_live++; /* the pacing denominator; see below */
-#ifdef SCR_CYCEN_ON
-  scr_cycen_hdr_bytes = (long long)sizeof(ScrCycHdr);
-  scr_cycen_note_alloc(h, phys, size, (const void *)free_fn, scr_cycen_pooled,
-                       scr_cyc_live);
-#endif
+  SCR_CYCEN_NOTE_ALLOC(h, phys, size, free_fn, 0);
   return h + 1;
+}
+
+/* WHERE THE 60 INSTRUCTIONS WENT, and where the 33 go now. Read off the
+ * disassembly by tests/perf/cycalloc/isa.mjs: x86_64-linux-gnu -O2,
+ * closure-churn under callgrind, 800,031 calls, every count exact and
+ * reproduced to the instruction by an A/A pair.
+ *
+ *                                              before  after
+ *   the stack frame                              16      3
+ *   staging arguments into surviving registers    3      2
+ *   scr_pool_bytes' round-up                      3      3
+ *   the pool's range check                        3      3
+ *   the size-class index                          5      1
+ *   the pool pop (head, test, unlink, n--)        7      7
+ *   the header stamp, five fields                 8      7
+ *   the blk stamp                                 5      1
+ *   scr_cyc_live++                                1      1
+ *   the object pointer, h + 1                     1      1
+ *   memset's arguments                            4      2
+ *   the call to memset                            2      2   a tail jmp now
+ *   restoring h across that call                  1      0
+ *   the branch merge                              1      0
+ *   SELF                                         60     33
+ *   memset itself, inside libc, NOT self         12     12
+ *
+ * THE STACK FRAME WAS THE LARGEST SINGLE TERM, 16 of 60 -- seven pushes,
+ * seven pops, an rsp alignment and the frame pointer. It is 3 now, and all
+ * three are the frame pointer this toolchain does not omit. Two things
+ * caused it and neither is the allocation:
+ *
+ *   the ORDER. The body zeroed the payload FIRST and stamped the header
+ *   after, so `trace`, `free_fn` and `phys` all had to survive the memset
+ *   and clang put them in callee-saved registers. Stamping first leaves
+ *   nothing live across it, and `memset` RETURNS ITS DESTINATION, which is
+ *   exactly this function's return value -- so the memset becomes a tail
+ *   call and there is nothing to unwind.
+ *
+ *   the MISS. calloc on the cold path is a second call, so the same
+ *   registers had to survive that too. Moving the whole miss out of line
+ *   with the same three arguments makes it a tail call as well.
+ *
+ * The other two terms are one line each. The size-class index cost 5
+ * because `int c` made `p->head[c]` a signed index (see scr_pool_take);
+ * `blk` cost 5 because it recomputed `phys / GRAIN` and re-tested a range
+ * the pooled arm had already proved. Both are 1 now.
+ *
+ * WHAT DID NOT MOVE, and the brief guessed some of these: the pool pop is
+ * 7 and was 7, the round-up and range check are 6 and were 6, and the
+ * memset is 12 instructions inside libc that no amount of inlining can
+ * remove -- zeroing 64 bytes is real work. 33 of the remaining 33 are
+ * arithmetic and stores on the object; there is no dispatch, no boxing and
+ * no tagged round-trip in this function at all.
+ *
+ * Zeroed allocation with a cycle header in front; returns the OBJECT
+ * pointer (header at scr_cyc_hdr). Aborts on OOM. */
+void *scr_cyc_alloc(size_t size, ScrTraceFn trace, ScrCycFreeFn free_fn) {
+  size_t phys = scr_pool_bytes(sizeof(ScrCycHdr) + size);
+  ScrCycHdr *h = scr_pool_take(&scr_cyc_blocks, phys);
+  if (h == NULL) return scr_cyc_alloc_miss(size, trace, free_fn);
+  /* The pooled arm. scr_pool_take only returns a block whose physical size
+   * is in range, so `blk` needs no test, and `phys / SCR_POOL_GRAIN` is the
+   * class index it just computed. */
+#if SCR_CYC_ZERO_WHOLE
+  memset(h, 0, phys);
+#endif
+  scr_cyc_stamp(h, trace, free_fn, (uint8_t)(phys / SCR_POOL_GRAIN));
+#if !SCR_CYC_ZERO_WHOLE
+  /* calloc's contract, kept, but only where it is observable. Four of the
+   * header's six fields are assigned by the stamp and the other two are
+   * assigned here, so zeroing the header as well as the payload wrote 16 of
+   * every 80 bytes twice. The OBJECT is what the callers read before
+   * writing (scr_box_new leaves `slot` at zero and scr_box_trace's
+   * "freshly-created boxes hold NULL" rule depends on it), so the payload
+   * zeroing is NOT optional and is kept exactly. SCR_CYC_ZERO_WHOLE=1
+   * restores the old single memset. */
+  h->buffered = 0;
+  h->buf_index = 0;
+#endif
+  scr_cyc_live++;
+  SCR_CYCEN_NOTE_ALLOC(h, phys, size, free_fn, 1);
+#if SCR_CYC_ZERO_WHOLE
+  return h + 1;
+#else
+  /* The tail call. memset returns its destination, so this IS `return
+   * h + 1` with the zeroing folded into it, and clang emits `jmp memset`.
+   * Nothing above is live here, which is why there is no frame to unwind. */
+  return memset(h + 1, 0, phys - sizeof(ScrCycHdr));
+#endif
 }
 
 void scr_cyc_free(void *obj) {
