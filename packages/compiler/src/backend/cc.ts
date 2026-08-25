@@ -1673,6 +1673,26 @@ export async function pruneCacheOnce(root: string): Promise<void> {
     }
   }
   await reclaimDeadObjectKeys(objRoot, files);
+  await sweepAbandonedStaging(stagingRoot);
+}
+
+/** Staging directories left by builds that died before their `finally` ran.
+ *
+ * Moving staging out of the swept tree is what stops a sweep from deleting an
+ * object out of a running compile — but it also means nothing reclaims a
+ * staging directory whose process was killed, and processes here are killed
+ * routinely. So it is swept on its own terms: whole directories, and only
+ * those nothing has written to in six hours. No compile runs for six hours;
+ * a directory that old has no process behind it. */
+async function sweepAbandonedStaging(stagingRoot: string): Promise<void> {
+  const entries = await readdir(stagingRoot, { withFileTypes: true }).catch(() => []);
+  const abandoned = Date.now() - 6 * 60 * 60 * 1000;
+  for (const ent of entries) {
+    if (!ent.isDirectory()) continue;
+    const dir = join(stagingRoot, ent.name);
+    const s = await stat(dir).catch(() => null);
+    if (s !== null && s.mtimeMs < abandoned) await rm(dir, { recursive: true, force: true }).catch(() => undefined);
+  }
 }
 
 /** obj/ is spared by the sweep above, which on its own would let it grow
