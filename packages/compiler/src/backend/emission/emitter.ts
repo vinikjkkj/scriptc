@@ -33,7 +33,7 @@ import type {
   IrUnionDef,
   SrcLoc,
 } from "../../ir/nodes.js";
-import { DYN, funcOf, isRefCounted, isUnitType, mapOf, moduleEmbedsCompressedNpm, moduleUsesAbortSignal, moduleUsesChildStream, moduleUsesDgram, moduleEmbedsBuiltin, moduleUsesFetch, moduleUsesFetchStatic, moduleUsesFetchDispatch, moduleUsesFsWatch, moduleUsesHttp2, moduleUsesHttpServer, moduleUsesNet, moduleUsesRegex, moduleUsesWsGlobal, moduleUsesNodeTest, moduleUsesProcessEvents, moduleUsesStream, RUNTIME_EMITTER_CLASS, STRING, VOID } from "../../ir/nodes.js";
+import { DYN, funcOf, isRefCounted, isUnitType, mapOf, moduleEmbedsCompressedNpm, moduleUsesAbortSignal, moduleUsesChildStream, moduleUsesDgram, moduleEmbedsBuiltin, moduleEmbedsNetIsland, moduleUsesFetch, moduleUsesFetchStatic, moduleUsesFetchDispatch, moduleUsesFsWatch, moduleUsesHttp2, moduleUsesHttpServer, moduleUsesNet, moduleUsesRegex, moduleUsesWsGlobal, moduleUsesNodeTest, moduleUsesProcessEvents, moduleUsesStream, RUNTIME_EMITTER_CLASS, STRING, VOID } from "../../ir/nodes.js";
 import { readKindgateDials } from "../kindgate.js";
 import {
   mangleAsyncSpawn,
@@ -1324,13 +1324,14 @@ export class CEmitter {
       // scr_zlib_island.c (cc.ts compiles it on the same predicate), so
       // zlib-free dynamic builds keep the island's clear refusal.
       ...(moduleEmbedsBuiltin(this.mod, "node:zlib") ? [`  scr_zlib_island_install();`] : []),
-      // Embedded graphs that import node:http/https register the island's
-      // http client bridge (scr_net_island.c — cc.ts compiles it and the
-      // socket units on the same predicate; native-fetch builds also
-      // register it from scr_fetch_install, idempotently).
-      ...(moduleEmbedsBuiltin(this.mod, "node:http") || moduleEmbedsBuiltin(this.mod, "node:https")
-        ? [`  scr_net_island_install();`]
-        : []),
+      // Embedded graphs that import any of node:http/https/net/tls register
+      // the island's socket bridge (scr_net_island.c — cc.ts compiles it
+      // and the socket units on the SAME predicate, moduleEmbedsNetIsland;
+      // native-fetch builds also register it from scr_fetch_install,
+      // idempotently). This line used to test http/https only while the
+      // link switch tested all four, so a node:net-only graph linked the
+      // bridge and never installed it.
+      ...(moduleEmbedsNetIsland(this.mod) ? [`  scr_net_island_install();`] : []),
       // Event-surface programs (signal/exit listeners, stdin events) fill
       // the loop's nullable event hooks before %main — the events unit
       // (scr_events.c) links only when this line is emitted (cc.ts gates
