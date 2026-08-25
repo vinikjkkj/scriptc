@@ -1619,12 +1619,14 @@ async function objectsStillPresent(objects: Map<string, string>): Promise<boolea
  *   obj/      — the runtime object sets. They are the expensive half to
  *               rebuild (a cold set is ~40 s; the binaries it protects are
  *               ~1 s each to relink) and the cheap half to keep: on the host
- *               that reported this, obj/ was 69 MB of a 3,995 MB tree while
- *               bin/ was 3,897 MB in 5,198 entries. Evicting from bin/ first
- *               frees ~56× more per entry and leaves the objects that every
- *               concurrent build is CURRENTLY linking against alone. Their
- *               bytes still count toward `total`, so bin/ is trimmed enough
- *               to bring the whole tree under the cap.
+ *               that reported this, obj/ was 69 MB in 601 objects of a
+ *               3,995 MB tree, while bin/ was 3,897 MB in 5,198 entries —
+ *               56x the bytes, in entries averaging 768 KB against the
+ *               objects' 118 KB. Evicting from bin/ first frees 6.5x more
+ *               per entry and leaves alone the objects that every concurrent
+ *               build is CURRENTLY holding open by path. Their bytes still
+ *               count toward `total`, so bin/ is trimmed enough to bring the
+ *               whole tree under the cap.
  *
  * If bin/ alone cannot reach the target the sweep stops there rather than
  * reaching into obj/: a cache that is merely too big is a tuning problem,
