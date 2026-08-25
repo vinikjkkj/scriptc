@@ -385,19 +385,48 @@ function publishedTargetOf(pkgJson: Record<string, unknown>, subpath: string): s
   return "index.js";
 }
 
+/** The leading build-output segment of a published target. */
+const BUILD_DIR_RE = /^(dist|lib|build|out|output|dist-node|dist-src)\//;
+
+/** A MODULE-FLAVOR segment, which a package that publishes more than one
+ * flavor puts underneath its build directory.
+ *
+ * zapo-js's "exports" is the shape: `require` → ./dist/util/index.js,
+ * `import` → ./dist/esm/util/index.js, one source twin at
+ * src/util/index.ts behind both. Stripping only the build segment leaves
+ * src/esm/util/index.js, which exists in no source tree, so EVERY
+ * subpath of such a package misses at once and the whole package falls
+ * to the island — the root entry surviving only on the src/index.ts
+ * fallback below. */
+const FLAVOR_DIR_RE =
+  /^(esm|esm5|esm2015|es|es5|es6|es2015|es2017|es2020|esnext|module|mjs|cjs|commonjs|umd|node|browser)\//;
+
 /** dist target → source file, heuristically: the built path's leading
- * dist/lib/build segment rewrites to src (or drops), extensions rewrite
- * to their TypeScript twins, and the root entry falls back to the
- * conventional src/index.ts homes. First existing candidate wins. */
+ * dist/lib/build segment rewrites to src (or drops), a module-flavor
+ * segment under it drops too, extensions rewrite to their TypeScript
+ * twins, and the root entry falls back to the conventional src/index.ts
+ * homes. First existing candidate wins — the flavor-stripped stems are
+ * appended, so a target that maps today keeps mapping to the same file.
+ *
+ * Nothing here invents a file: every candidate is probed with isFile and
+ * a subpath whose source twin is absent still maps to null, which the
+ * caller turns into a named island-fallback note. */
 function mapEntryToSource(pkgDir: string, target: string, subpath: string): string | null {
   const rel = target.replace(/^\.\//, "");
   const stems = new Set<string>([rel]);
-  const distRe = /^(dist|lib|build|out|output|dist-node|dist-src)\//;
-  if (distRe.test(rel)) {
-    stems.add(rel.replace(distRe, "src/"));
-    stems.add(rel.replace(distRe, ""));
+  /* The build-relative tails to look for under src/ and at the root, in
+   * candidate order: the plain strip first (today's behavior), then the
+   * flavor-stripped one. */
+  const tails: string[] = [];
+  if (BUILD_DIR_RE.test(rel)) {
+    tails.push(rel.replace(BUILD_DIR_RE, ""));
   } else {
-    stems.add(`src/${rel}`);
+    tails.push(rel);
+  }
+  if (FLAVOR_DIR_RE.test(tails[0]!)) tails.push(tails[0]!.replace(FLAVOR_DIR_RE, ""));
+  for (const tail of tails) {
+    stems.add(`src/${tail}`);
+    stems.add(tail);
   }
   const candidates: string[] = [];
   for (const stem of stems) {
