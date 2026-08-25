@@ -201,11 +201,11 @@ const platform = process.platform;
 
 /** A default-built hello-world: no regex, no engine. */
 export const STATIC_CLASS_MAX =
-  platform === "linux" ? 397_632 : platform === "win32" ? 664_576 : 366_632;
+  platform === "linux" ? 397_632 : platform === "win32" ? 661_504 : 366_632;
 
 /** A program that uses regex: libregexp + libunicode, never the engine. */
 export const REGEX_CLASS_MAX =
-  platform === "linux" ? 552_680 : platform === "win32" ? 806_912 : 519_680;
+  platform === "linux" ? 552_680 : platform === "win32" ? 803_840 : 519_680;
 
 /* ── the ARMED half of the guard ───────────────────────────────────────
  *
@@ -727,14 +727,59 @@ export const SIZE_DRIFT_PAGE = 4_096;
  * weighs that much is exactly the loose canary the entries above keep
  * warning about, and this is the first entry in the file where the
  * measurement moved in that direction.
+ *
+ * 2026-08-25 - scr_utf16_units grew a pure-ASCII fast answer, and BOTH
+ * CLASSES SHRINK AGAIN. Measured A/B on the two worktrees at the same
+ * commit, same shell, same toolchain (x86_64-windows-gnu, zig cc 0.16.0,
+ * -O2, SCRIPTC_NO_CACHE=1), the two class programs built with default
+ * options (G:/blocks/utf16len/lab/size/measure.mjs):
+ *
+ *   base 53c25c72   656,384 static   798,720 regex
+ *   this change     653,312 static   795,648 regex
+ *                    -3,072           -3,072
+ *
+ * BASE REPRODUCES BOTH RECORDED ANCHORS TO THE BYTE this time, which is
+ * worth saying because it was not true an hour earlier. Measured against
+ * 4e1fa8dc the same two programs weighed 655,360 and 797,184 -- 1,024 and
+ * 1,536 under the anchors, silently, both inside the page. scr_cyc_alloc's
+ * change (53c25c72) put them back exactly. The first draft of this entry
+ * recorded 651,776 / 794,112 off that stale base and would have shipped a
+ * pair 1,536 bytes low; re-measuring after the rebase is what caught it,
+ * and it is the reason this file keeps insisting the base arm be weighed in
+ * the same session as the branch arm.
+ *
+ * WHAT THE BYTES BOUGHT -- or rather, stopped paying for, because this is a
+ * DE-DUPLICATION and not a deletion. The classification loop is still in
+ * the binary; there is now ONE copy of it instead of five. Measured on the
+ * x86_64-linux-gnu cross build of the same runtime, per-symbol from
+ * `nm --print-size`, .text 139,251 -> 136,211 and .rodata unchanged:
+ *
+ *   scr_str_utf16_len     839 ->   169    -670
+ *   scr_str_substring     983 ->   314    -669
+ *   scr_str_index_of    1,713 -> 1,083    -630
+ *   scr_str_slice       2,080 -> 1,424    -656
+ *   scr_pad_impl        2,372 -> 1,021  -1,351
+ *   scr_sidx_len            - >   936  (new, out of line)
+ *
+ * scr_sidx_len used to inline into every one of those five always-linked
+ * callers, carrying the word loop, the popcount classification AND the
+ * autovectorised tail with it each time. Adding the fast answer pushed the
+ * function over the inliner's threshold, so LLVM emitted it once and the
+ * five callers now call it. The .rodata figure is the check on that story:
+ * the SSE tail loads three 16-byte constant vectors, and if the shrink were
+ * the vectoriser giving up they would have gone with it. They did not.
+ *
+ * THE MAX CEILINGS MOVE with them, by the same rule:
+ *
+ *     661,504 = 653,312 + 8,192      803,840 = 795,648 + 8,192
  */
-export const STATIC_CLASS_RECORDED = platform === "win32" ? 656_384 : null;
+export const STATIC_CLASS_RECORDED = platform === "win32" ? 653_312 : null;
 
 /** The regex program, same run, same tree. Deliberately NOT derived from
  * the static delta - and the 2026-08-24 entry is why: that change moved the
  * two classes by -7,680 and -6,656, so deriving either from the other would
  * have been 1,024 bytes wrong. */
-export const REGEX_CLASS_RECORDED = platform === "win32" ? 798_720 : null;
+export const REGEX_CLASS_RECORDED = platform === "win32" ? 795_648 : null;
 
 /** The complaint a recorded-figure check makes, or null when the size is
  * within one page of what was recorded. A string rather than a thrown
