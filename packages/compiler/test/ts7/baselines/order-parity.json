@@ -9448,6 +9448,18 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/6400-string-length-utf16-units.ts": {
+   "order": [
+    "<repo>/tests/corpus/6400-string-length-utf16-units.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/6401-string-length-against-indexing.ts": {
+   "order": [
+    "<repo>/tests/corpus/6401-string-length-against-indexing.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/700-classes-basic.ts": {
    "order": [
     "<repo>/tests/corpus/700-classes-basic.ts"
