@@ -1661,13 +1661,61 @@ export async function pruneCacheOnce(root: string): Promise<void> {
   };
   await walk(root);
   let total = files.reduce((n, f) => n + f.size, 0);
-  if (total <= capBytes) return;
-  const candidates = files.filter((f) => f.evictable).sort((a, b) => a.mtimeMs - b.mtimeMs);
   const recent = Date.now() - 60 * 60 * 1000; // never evict anything a live run may be using
-  for (const f of candidates) {
-    if (total <= capBytes * 0.75 || f.mtimeMs > recent) break;
-    await unlink(f.path).catch(() => undefined);
-    total -= f.size;
+  if (total > capBytes) {
+    const candidates = files.filter((f) => f.evictable).sort((a, b) => a.mtimeMs - b.mtimeMs);
+    for (const f of candidates) {
+      if (total <= capBytes * 0.75 || f.mtimeMs > recent) break;
+      await unlink(f.path).catch(() => undefined);
+      total -= f.size;
+    }
+  }
+  await reclaimDeadObjectKeys(objRoot, files);
+}
+
+/** obj/ is spared by the sweep above, which on its own would let it grow
+ * without bound: every runtime or vendor edit mints a fresh fingerprint and
+ * so a fresh key directory, and the old one is never revisited. Trading a
+ * wrong answer for a disk leak is not a fix either.
+ *
+ * So obj/ gets its own, much more careful reclamation:
+ *
+ *   - whole KEY DIRECTORIES, never individual objects. A key is all-or-
+ *     nothing, so no build can ever meet a half-populated one;
+ *   - only keys whose NEWEST file is more than a day old. Object hits bump
+ *     mtimes now, so that timestamp is a true last-used time: a day-old key
+ *     is one that no build has wanted since yesterday, not merely one that
+ *     was written long ago — which is exactly the distinction the old sweep
+ *     could not make, and why it ate the hottest objects in the tree;
+ *   - and only above obj/'s own budget, so the common case does nothing.
+ *
+ * Even if this did race a build that had already resolved such a key, the
+ * pre-link re-check turns it into a recompile rather than a link error. */
+async function reclaimDeadObjectKeys(
+  objRoot: string,
+  files: { path: string; size: number; mtimeMs: number }[],
+): Promise<void> {
+  const capBytes = Number(process.env["SCRIPTC_OBJ_CACHE_MAX_MB"] ?? "512") * 1024 * 1024;
+  if (!Number.isFinite(capBytes) || capBytes <= 0) return;
+  const keys = new Map<string, { size: number; newestMs: number }>();
+  const prefix = `${objRoot}${sep}`;
+  for (const f of files) {
+    if (!f.path.startsWith(prefix)) continue;
+    const rest = f.path.slice(prefix.length);
+    const cut = rest.indexOf(sep);
+    if (cut <= 0) continue; // a stray file directly under obj/, not a key
+    const dir = join(objRoot, rest.slice(0, cut));
+    const prev = keys.get(dir) ?? { size: 0, newestMs: 0 };
+    keys.set(dir, { size: prev.size + f.size, newestMs: Math.max(prev.newestMs, f.mtimeMs) });
+  }
+  let total = [...keys.values()].reduce((n, k) => n + k.size, 0);
+  if (total <= capBytes) return;
+  const dead = Date.now() - 24 * 60 * 60 * 1000;
+  const oldestFirst = [...keys.entries()].sort((a, b) => a[1].newestMs - b[1].newestMs);
+  for (const [dir, info] of oldestFirst) {
+    if (total <= capBytes * 0.75 || info.newestMs > dead) break;
+    await rm(dir, { recursive: true, force: true }).catch(() => undefined);
+    total -= info.size;
   }
 }
 
