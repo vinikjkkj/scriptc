@@ -201,11 +201,11 @@ const platform = process.platform;
 
 /** A default-built hello-world: no regex, no engine. */
 export const STATIC_CLASS_MAX =
-  platform === "linux" ? 397_632 : platform === "win32" ? 664_576 : 366_632;
+  platform === "linux" ? 397_632 : platform === "win32" ? 659_968 : 366_632;
 
 /** A program that uses regex: libregexp + libunicode, never the engine. */
 export const REGEX_CLASS_MAX =
-  platform === "linux" ? 552_680 : platform === "win32" ? 806_912 : 519_680;
+  platform === "linux" ? 552_680 : platform === "win32" ? 802_304 : 519_680;
 
 /* ── the ARMED half of the guard ───────────────────────────────────────
  *
@@ -727,14 +727,59 @@ export const SIZE_DRIFT_PAGE = 4_096;
  * weighs that much is exactly the loose canary the entries above keep
  * warning about, and this is the first entry in the file where the
  * measurement moved in that direction.
+ *
+ * 2026-08-25 - scr_utf16_units grew a pure-ASCII fast answer, and BOTH
+ * CLASSES SHRINK AGAIN. Measured A/B on the two worktrees at the same
+ * commit, same shell, same toolchain (x86_64-windows-gnu, zig cc 0.16.0,
+ * -O2, SCRIPTC_NO_CACHE=1), the two class programs built with default
+ * options (G:/blocks/utf16len/lab/size/measure.mjs):
+ *
+ *   base 4e1fa8dc   655,360 static   797,184 regex
+ *   this change     651,776 static   794,112 regex
+ *                    -3,584           -3,072
+ *
+ * BASE DOES NOT REPRODUCE THE RECORDED ANCHORS, and by the now-familiar
+ * amount: the recorded pair was 656,384 / 798,720 and base measures
+ * 655,360 / 797,184, so 1,024 and 1,536 bytes had already drifted off
+ * unrelated merges, silently, because both are inside the page. The
+ * complaint the harness actually made was the SUM: -4,608 on the static
+ * class, of which this branch is 3,584. Note that the regex class moved by
+ * the same -4,608 from ITS anchor and would have failed too; it never
+ * reported because vitest stops a test at its first failed expect and the
+ * regex-free program is weighed first.
+ *
+ * WHAT THE BYTES BOUGHT -- or rather, stopped paying for, because this is a
+ * DE-DUPLICATION and not a deletion. The classification loop is still in
+ * the binary; there is now ONE copy of it instead of five. Measured on the
+ * x86_64-linux-gnu cross build of the same runtime, per-symbol from
+ * `nm --print-size`, .text 139,251 -> 136,211 and .rodata unchanged:
+ *
+ *   scr_str_utf16_len     839 ->   169    -670
+ *   scr_str_substring     983 ->   314    -669
+ *   scr_str_index_of    1,713 -> 1,083    -630
+ *   scr_str_slice       2,080 -> 1,424    -656
+ *   scr_pad_impl        2,372 -> 1,021  -1,351
+ *   scr_sidx_len            - >   936  (new, out of line)
+ *
+ * scr_sidx_len used to inline into every one of those five always-linked
+ * callers, carrying the word loop, the popcount classification AND the
+ * autovectorised tail with it each time. Adding the fast answer pushed the
+ * function over the inliner's threshold, so LLVM emitted it once and the
+ * five callers now call it. The .rodata figure is the check on that story:
+ * the SSE tail loads three 16-byte constant vectors, and if the shrink were
+ * the vectoriser giving up they would have gone with it. They did not.
+ *
+ * THE MAX CEILINGS MOVE with them, by the same rule:
+ *
+ *     659,968 = 651,776 + 8,192      802,304 = 794,112 + 8,192
  */
-export const STATIC_CLASS_RECORDED = platform === "win32" ? 656_384 : null;
+export const STATIC_CLASS_RECORDED = platform === "win32" ? 651_776 : null;
 
 /** The regex program, same run, same tree. Deliberately NOT derived from
  * the static delta - and the 2026-08-24 entry is why: that change moved the
  * two classes by -7,680 and -6,656, so deriving either from the other would
  * have been 1,024 bytes wrong. */
-export const REGEX_CLASS_RECORDED = platform === "win32" ? 798_720 : null;
+export const REGEX_CLASS_RECORDED = platform === "win32" ? 794_112 : null;
 
 /** The complaint a recorded-figure check makes, or null when the size is
  * within one page of what was recorded. A string rather than a thrown
