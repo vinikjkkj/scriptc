@@ -11302,9 +11302,16 @@ export class Lowerer {
 
   /** Lexical `this` — the enclosing method's this-param, possibly captured
    * through arrows (function expressions/declarations reset `this` in JS;
-   * their bodies never see an enclosing method's binding). */
-  resolveThis(): IrLocal | null {
-    return this.resolveKey(THIS_BINDING);
+   * their bodies never see an enclosing method's binding).
+   *
+   * `at` is a BLAME-ONLY node: the `this` token being lowered. It never
+   * reaches the predeclare-and-retry arms (a sentinel binding has no
+   * declaration to predeclare); it only gives resolveKey's capture fences
+   * a source position. Without it those fences fell back to
+   * `declarationsOf(THIS_BINDING)`, and THIS_BINDING is an object literal
+   * cast to ts.Symbol with no declarations array — the ICE. */
+  resolveThis(at?: ts.Node): IrLocal | null {
+    return this.resolveKey(THIS_BINDING, undefined, at);
   }
 
   /** READ-ONLY twin of resolveThis: does ANY frame on the stack carry a
@@ -11378,9 +11385,15 @@ export class Lowerer {
     return null;
   }
 
-  resolveKey(symbol: ts.Symbol, blame?: ts.Node): IrLocal | null {
+  resolveKey(symbol: ts.Symbol, blame?: ts.Node, diagAt?: ts.Node): IrLocal | null {
     const direct = this.bindingIn(this.ctx, symbol);
     if (direct) return direct;
+    // The node a capture fence blames. `blame` doubles as the
+    // predeclare-and-retry switch, so a SENTINEL binding (THIS_BINDING,
+    // ARGUMENTS_BINDING — no declaration to predeclare) hands its position
+    // in separately.
+    const fenceAt = (): ts.Node =>
+      blame ?? diagAt ?? this.checker.declarationsOf(symbol)[0] ?? this.entry;
 
     // Search enclosing functions, innermost first.
     for (let depth = this.fnStack.length - 2; depth >= 0; depth--) {
@@ -11410,7 +11423,7 @@ export class Lowerer {
         if (twin === undefined) {
           this.unsupported(
             "SC1090",
-            blame ?? this.checker.declarationsOf(symbol)[0] ?? this.entry,
+            fenceAt(),
             "closures capturing catch bindings (narrow into a typed local first)",
           );
         }
@@ -11436,8 +11449,12 @@ export class Lowerer {
           if (ctx.captures === null) {
             this.unsupported(
               "SC1090",
-              blame ?? this.checker.declarationsOf(symbol)[0] ?? this.entry,
-              `the binding '${origin.name}' captured through a plain nested function (the declaration has no static storage a capture can thread — bind the value through a typed const, or read it in the declaring scope)`,
+              fenceAt(),
+              symbol === THIS_BINDING
+                ? "the enclosing method's 'this' captured through a plain nested function (the declaration has no static storage a capture can thread — bind it through a `const self = this` in the declaring scope)"
+                : symbol === ARGUMENTS_BINDING
+                  ? "the enclosing function's 'arguments' captured through a plain nested function (the declaration has no static storage a capture can thread — copy it into a typed const in the declaring scope)"
+                  : `the binding '${origin.name}' captured through a plain nested function (the declaration has no static storage a capture can thread — bind the value through a typed const, or read it in the declaring scope)`,
             );
           }
           const count = ctx.localCounters.get(origin.name) ?? 0;
