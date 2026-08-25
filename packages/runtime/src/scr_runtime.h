@@ -251,7 +251,10 @@ enum { SCR_CYC_BLACK = 0, SCR_CYC_PURPLE = 1, SCR_CYC_GRAY = 2, SCR_CYC_WHITE = 
  * manners - peak RSS is one of the compiled binary's real wins (14-27x
  * better than Node) and an unbounded free list would spend it. At
  * SCR_POOL_DEPTH 64 and 32 classes the worst case a pool can hold is
- * 64 * (8 + 16 + ... + 256) = 270 KiB, and there are two pools.
+ * 64 * (8 + 16 + ... + 256) = 270 KiB, and there are FOUR pools, not
+ * the two this line said until the byte budget was measured:
+ * scr_cyc_blocks (scr_cycle.c), scr_str_blocks (scr_string.c), and
+ * scr_json_key_blocks and scr_dyn_ext_blocks (both scr_json.c).
  *
  * THE GRAIN IS 8, NOT 16, AND THAT WAS MEASURED. 16 is the obvious
  * choice - it is malloc's own alignment - and it is 7% faster here
@@ -273,10 +276,22 @@ enum { SCR_CYC_BLACK = 0, SCR_CYC_PURPLE = 1, SCR_CYC_GRAY = 2, SCR_CYC_WHITE = 
  * times and the pool answers 18,056,662 of them - 80.4% - so the site is
  * the RESIDUE, not the allocator.
  *
- * On zapo, paired, a whole session (76 of 76 stanzas): 44,577 calls,
- * 43,128 pool hits, 96.75%, and the depth cap rejects a give 58 times in
- * 46,884 - 0.12%. There is nothing on the real workload for a wider
- * bound to catch.
+ * THE "58 GIVES ON ZAPO" FIGURE BELONGS TO ONE POOL OF FOUR, AND THE
+ * OTHER THREE ARE WHERE THE DEPTH CAP ACTUALLY BINDS. 44,577 calls /
+ * 43,128 hits / 96.75% / 58 rejected gives in 46,884 is scr_str_blocks
+ * and only scr_str_blocks. Counted per pool over one paired session
+ * (76 of 76 stanzas, tests/perf/poolstat), the depth cap rejects:
+ *                   gives     rejected      hit rate
+ *     cyc          80,136    20,184  25.19%    39.69%
+ *     jsonkey      17,946     1,192   6.64%    50.50%
+ *     dynext        1,722        15   0.87%    63.00%
+ *     str          35,521         0   0.00%    98.54%
+ *     TOTAL       135,325    21,391  15.81%
+ * -- 21,391 rejected gives on the real workload, not 58, and the
+ * string pool (the one that was counted) is the ONLY one that never
+ * saturates. The cycle pool's free lists want to be thousands deep:
+ * its 64-byte class reaches 6,556 blocks under a budget against a cap
+ * of 64.
  *
  * On the messaging bench there is, and it is one shape: a `store.clear()`
  * of 200,000 entries frees 200,000 blocks of one class at once, so the
@@ -296,11 +311,31 @@ enum { SCR_CYC_BLACK = 0, SCR_CYC_PURPLE = 1, SCR_CYC_GRAY = 2, SCR_CYC_WHITE = 
  * the process peaked at anyway; what it does not bound is the
  * cross-class fragmentation a different phase would pay for.
  *
- * It is NOT shipped, and the reason is the zapo line above: a byte-budget
- * field costs one add and one subtract on take and on give - the two
- * hottest functions in the runtime - to buy 58 gives on the workload
- * this compiler exists for. The knob is written down here so the next
- * block does not re-derive the curve, not because 64 is magic.
+ * IT IS SHIPPED NOW, at 16 MiB, and the depth cap is the fallback
+ * (-DSCR_POOL_BUDGET=0). Three measurements moved it, all on zapo:
+ *   * the budget is NEVER REACHED. Zero rejected gives on all four
+ *     pools at 16 MiB, and zero at 1 MiB; the largest pool's byte
+ *     high-water is 614,880 B, 3.67% of the bound. So on the workload
+ *     this compiler exists for the bound is not a bound at all -- it
+ *     is the depth cap coming off.
+ *   * the depth cap DOES bind, 21,391 times (table above), and taking
+ *     it off removes 21,391 free() calls and 11,976 misses (hit rate
+ *     39.69% -> 46.90% on the cycle pool) from a 46-second session.
+ *   * the peak-RSS price is ~50 KiB. Pool retention rises 41.0 KiB ->
+ *     616.7 KiB, +575.7 KiB, and 12 paired ABBA runs of each arm move
+ *     peak working set by +48 KiB of 27,906 KiB (+0.172%), against an
+ *     A/A floor of +0.316% taken in the same session and a KNOWN
+ *     +123 KiB image perturbation recovered as +124 KiB. About a
+ *     TWELFTH of the retained bytes become resident pages, because the
+ *     rest are pages the process had already faulted in -- which is
+ *     the bench claim above, now measured on the deliverable.
+ * Against that, the closure axis pays +0.760407% of closure-churn's
+ * instructions and +0.617281% of closure-nocapture's, and messaging
+ * gains -1.47%/-1.74%/-1.76% of instructions and -22.086% of cycles on
+ * SEND group at +0.121% peak RSS (estado-cycalloc, inherited).
+ *
+ * The shipped struct also SHRINKS: unsigned n[32] is 128 bytes and
+ * size_t bytes is 8, so each pool loses 120 bytes of BSS.
  *
  * DISABLED UNDER SCR_RC_AUDIT, exactly like scr_string.c's one-slot
  * spare block above it: the audit lane exists to prove every logical
@@ -336,12 +371,32 @@ enum { SCR_CYC_BLACK = 0, SCR_CYC_PURPLE = 1, SCR_CYC_GRAY = 2, SCR_CYC_WHITE = 
  * shape and its knee is the burst itself. 200,000 * 64 B is 12.8 MiB and
  * the measured hit rate goes 52.21% at depth 64 to 96.45% at 16 MiB.
  *
- * It was declined for want of a CPU instrument: the trade is "one add and
- * one subtract on take and on give" against 58 rejected gives on zapo.
- * tests/perf/cycalloc/isa.mjs prices it exactly now -- see the numbers in
- * scr_string.c beside scr_str_alloc. */
+ * It was declined twice, both times on numbers that turned out to be
+ * about a different thing. The price -- "one add and one subtract on
+ * take and on give" -- is zero instructions on take and one on give,
+ * because the byte counter REPLACES the per-class depth counter rather
+ * than adding to it (tests/perf/cycalloc/isa.mjs). The benefit -- "58
+ * gives on zapo" -- is 21,391 gives on zapo, because 58 was one pool of
+ * four (tests/perf/poolstat).
+ *
+ * 16777216 is 16 MiB per pool. It is chosen from the BENCH, not from
+ * zapo: zapo is unchanged anywhere from 1 MiB upward (zero rejected
+ * gives, 614,880 B high-water), so the bound is free to be whatever the
+ * 200,000-block burst needs, and that is 12.8 MiB. A bound can only ever
+ * hold blocks the program itself allocated and freed, so it cannot
+ * exceed that program's own past live peak in the <= SCR_POOL_MAX size
+ * classes; what it does not bound is cross-phase fragmentation.
+ *
+ * 0 restores the per-class depth cap, and the two are exclusive: the
+ * depth counter is not declared under a budget and the byte counter is
+ * not declared without one, so neither arm carries the other's field.
+ *
+ * NOT EXERCISED BY THE SANITIZED LANE. The whole pool is disabled under
+ * SCR_RC_AUDIT (see scr_pool_take), so SCRIPTC_SAN=1 tests the arm with
+ * no pool at all. The differential suites on the default lane are what
+ * cover this. */
 #ifndef SCR_POOL_BUDGET
-#define SCR_POOL_BUDGET 0
+#define SCR_POOL_BUDGET 16777216
 #endif
 
 typedef struct ScrPool {
