@@ -109,6 +109,12 @@ static ScrSidx *scr_sidx(const ScrStr *s) {
  * block below, which is why the spare could never touch it. */
 static ScrPool scr_str_blocks;
 
+#ifdef SCR_POOLSTAT_ON
+__attribute__((constructor)) static void scr_poolstat_reg_string(void) {
+  scr_poolstat_name(&scr_str_blocks, "str");
+}
+#endif
+
 static ScrStr *scr_str_alloc(size_t len, size_t cap) {
   /* The one fence every heap string passes through. len <= cap at every call
    * site, but checking both costs one predictable branch and makes the

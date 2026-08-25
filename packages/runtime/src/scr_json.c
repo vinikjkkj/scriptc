@@ -77,6 +77,12 @@ static void scr_json_oom(void) {
 
 #if SCR_JSON_KEY_POOL
 static ScrPool scr_json_key_blocks;
+
+#ifdef SCR_POOLSTAT_ON
+__attribute__((constructor)) static void scr_poolstat_reg_jsonkey(void) {
+  scr_poolstat_name(&scr_json_key_blocks, "jsonkey");
+}
+#endif
 #endif
 
 static char *scr_json_key_alloc(size_t key_len) {
@@ -120,6 +126,12 @@ const ScrDynObjExt scr_dyn_obj_ext_none = {NULL, NULL, NULL, NULL};
 
 #if SCR_JSON_KEY_POOL
 static ScrPool scr_dyn_ext_blocks;
+
+#ifdef SCR_POOLSTAT_ON
+__attribute__((constructor)) static void scr_poolstat_reg_dynext(void) {
+  scr_poolstat_name(&scr_dyn_ext_blocks, "dynext");
+}
+#endif
 #endif
 
 ScrDynObjExt *scr_dyn_ext_w(ScrDyn *d) {
