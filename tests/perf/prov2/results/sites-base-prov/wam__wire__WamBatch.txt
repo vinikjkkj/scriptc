@@ -1,0 +1,2 @@
+G:/blocks/prov2/lab/app/pkgs/wam/wire/WamBatch.ts sites=14 preflightFailed=false 3205ms
+EXIT=0

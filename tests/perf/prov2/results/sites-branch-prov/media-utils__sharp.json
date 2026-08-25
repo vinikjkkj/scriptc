@@ -1,0 +1,69 @@
+{
+ "entry": "G:/blocks/prov2/lab/app/pkgs/media-utils/sharp.ts",
+ "flags": [
+  "--provenance-sources"
+ ],
+ "elapsedMs": 57231,
+ "preflightFailed": false,
+ "stats": {
+  "statementsTotal": 1,
+  "statementsFailed": 0,
+  "statementsIsland": 0,
+  "functionsSkipped": 0
+ },
+ "npmStatic": null,
+ "provenanceNotes": [
+  "sharp@0.33.5: no provenance attestation published; island path used"
+ ],
+ "sites": [
+  {
+   "section": "blocker",
+   "code": "SC1012",
+   "message": "default exports/imports are not supported yet",
+   "file": "G:/blocks/prov2/cache/provenance/250f9af5229a545eec28ddbd3e8774a397cdb0bb/src/media/transfer/WaMediaTransferClient.ts",
+   "line": 1
+  },
+  {
+   "section": "blocker",
+   "code": "SC1012",
+   "message": "default exports/imports are not supported yet",
+   "file": "G:/blocks/prov2/cache/provenance/250f9af5229a545eec28ddbd3e8774a397cdb0bb/src/media/transfer/WaMediaTransferClient.ts",
+   "line": 2
+  },
+  {
+   "section": "blocker",
+   "code": "SC2013",
+   "message": "importing 'sharp' requires the embedded dynamic engine, which this build does not include — the package's implementation runs there",
+   "file": "G:/blocks/prov2/lab/app/pkgs/media-utils/sharp.ts",
+   "line": 1
+  },
+  {
+   "section": "unreached",
+   "code": "SC1031",
+   "message": "object destructuring of non-record values (the source is dyn-typed) are not supported yet",
+   "file": "G:/blocks/prov2/lab/app/pkgs/media-utils/sharp.ts",
+   "line": 22
+  },
+  {
+   "section": "unreached",
+   "code": "SC2004",
+   "message": "uses of 'data' inherit the blocker on its declaration",
+   "file": "G:/blocks/prov2/lab/app/pkgs/media-utils/sharp.ts",
+   "line": 28
+  },
+  {
+   "section": "unreached",
+   "code": "SC1031",
+   "message": "object destructuring of non-record values (the source is dyn-typed) are not supported yet",
+   "file": "G:/blocks/prov2/lab/app/pkgs/media-utils/sharp.ts",
+   "line": 38
+  },
+  {
+   "section": "unreached",
+   "code": "SC2004",
+   "message": "uses of 'data' inherit the blocker on its declaration",
+   "file": "G:/blocks/prov2/lab/app/pkgs/media-utils/sharp.ts",
+   "line": 43
+  }
+ ]
+}

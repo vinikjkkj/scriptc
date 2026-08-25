@@ -1,0 +1,48 @@
+{
+ "entry": "G:/blocks/prov2/lab/app/pkgs/media-utils/sharp.ts",
+ "flags": [
+  "--provenance-sources"
+ ],
+ "elapsedMs": 428,
+ "preflightFailed": false,
+ "stats": {
+  "statementsTotal": 1,
+  "statementsFailed": 0,
+  "statementsIsland": 0,
+  "functionsSkipped": 0
+ },
+ "npmStatic": null,
+ "provenanceNotes": [
+  "sharp@0.33.5: no provenance attestation published; island path used"
+ ],
+ "sites": [
+  {
+   "section": "blocker",
+   "code": "SC2013",
+   "message": "importing 'sharp' requires the embedded dynamic engine, which this build does not include — the package's implementation runs there",
+   "file": "G:/blocks/prov2/lab/app/pkgs/media-utils/sharp.ts",
+   "line": 1
+  },
+  {
+   "section": "unreached",
+   "code": "SC2013",
+   "message": "values from the 'zapo-js' package run in the embedded dynamic engine, which this build does not include",
+   "file": "G:/blocks/prov2/lab/app/pkgs/media-utils/sharp.ts",
+   "line": 10
+  },
+  {
+   "section": "unreached",
+   "code": "SC2013",
+   "message": "values from the 'zapo-js' package run in the embedded dynamic engine, which this build does not include",
+   "file": "G:/blocks/prov2/lab/app/pkgs/media-utils/sharp.ts",
+   "line": 18
+  },
+  {
+   "section": "unreached",
+   "code": "SC2013",
+   "message": "values from the 'zapo-js' package run in the embedded dynamic engine, which this build does not include",
+   "file": "G:/blocks/prov2/lab/app/pkgs/media-utils/sharp.ts",
+   "line": 35
+  }
+ ]
+}

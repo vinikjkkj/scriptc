@@ -1,0 +1,41 @@
+{
+ "entry": "G:/blocks/prov2/lab/app/pkgs/voip/media/mlow-codec.ts",
+ "flags": [
+  "--provenance-sources"
+ ],
+ "elapsedMs": 1276,
+ "preflightFailed": false,
+ "stats": {
+  "statementsTotal": 7,
+  "statementsFailed": 1,
+  "statementsIsland": 0,
+  "functionsSkipped": 0
+ },
+ "npmStatic": null,
+ "provenanceNotes": [
+  "libmlow-wasm@0.1.1: no provenance attestation published; island path used"
+ ],
+ "sites": [
+  {
+   "section": "blocker",
+   "code": "SC2009",
+   "message": "values of type 'Promise<MlowModule> | null' cannot be compiled: the union shape is supported, but its arm 'Promise<MlowModule>' does not compile",
+   "file": "G:/blocks/prov2/lab/app/pkgs/voip/media/mlow-codec.ts",
+   "line": 26
+  },
+  {
+   "section": "unreached",
+   "code": "SC2009",
+   "message": "values of type 'MlowEncoder | null' cannot be compiled: the union shape is supported, but its arm 'MlowEncoder' does not compile",
+   "file": "G:/blocks/prov2/lab/app/pkgs/voip/media/mlow-codec.ts",
+   "line": 51
+  },
+  {
+   "section": "unreached",
+   "code": "SC2009",
+   "message": "values of type 'Promise<MlowModule>' cannot be compiled: the Promise shape is supported, but its value type 'MlowModule' does not compile",
+   "file": "G:/blocks/prov2/lab/app/pkgs/voip/media/mlow-codec.ts",
+   "line": 28
+  }
+ ]
+}

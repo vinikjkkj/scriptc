@@ -1,0 +1,127 @@
+{
+ "entry": "G:/blocks/prov2/lab/app/pkgs/wam/synthetic/WaWamSyntheticUi.ts",
+ "flags": [
+  "--provenance-sources"
+ ],
+ "elapsedMs": 14569,
+ "preflightFailed": false,
+ "stats": {
+  "statementsTotal": 22,
+  "statementsFailed": 3,
+  "statementsIsland": 0,
+  "functionsSkipped": 0
+ },
+ "npmStatic": null,
+ "provenanceNotes": [
+  "zapo-js@1.6.2: no source mapping for 'zapo-js/protocol' (published target: ./dist/esm/protocol/index.js); island path used",
+  "zapo-js@1.6.2: no source mapping for 'zapo-js/proto' (published target: ./dist/esm/proto.js); island path used",
+  "zapo-js@1.6.2: no source mapping for 'zapo-js/util' (published target: ./dist/esm/util/index.js); island path used"
+ ],
+ "sites": [
+  {
+   "section": "blocker",
+   "code": "SC2009",
+   "message": "values of type 'AmbientFab[]' cannot be compiled: the array shape is supported, but its element type 'AmbientFab' does not compile",
+   "file": "G:/blocks/prov2/lab/app/pkgs/wam/synthetic/fabrications.ts",
+   "line": 26
+  },
+  {
+   "section": "blocker",
+   "code": "SC2013",
+   "message": "importing 'zapo-js' requires the embedded dynamic engine, which this build does not include — the package's implementation runs there",
+   "file": "G:/blocks/prov2/lab/app/pkgs/wam/send-parse.ts",
+   "line": 2
+  },
+  {
+   "section": "blocker",
+   "code": "SC2013",
+   "message": "importing 'zapo-js' requires the embedded dynamic engine, which this build does not include — the package's implementation runs there",
+   "file": "G:/blocks/prov2/lab/app/pkgs/wam/send-parse.ts",
+   "line": 3
+  },
+  {
+   "section": "blocker",
+   "code": "SC2013",
+   "message": "importing 'zapo-js' requires the embedded dynamic engine, which this build does not include — the package's implementation runs there",
+   "file": "G:/blocks/prov2/lab/app/pkgs/wam/synthetic/random.ts",
+   "line": 1
+  },
+  {
+   "section": "blocker",
+   "code": "SC2013",
+   "message": "importing 'zapo-js' requires the embedded dynamic engine, which this build does not include — the package's implementation runs there",
+   "file": "G:/blocks/prov2/lab/app/pkgs/wam/synthetic/WaWamSyntheticUi.ts",
+   "line": 3
+  },
+  {
+   "section": "blocker",
+   "code": "SC2020",
+   "message": "'Uint8Array.from' is part of the standard library types but has no scriptc lowering yet",
+   "file": "G:/blocks/prov2/lab/app/pkgs/wam/synthetic/random.ts",
+   "line": 20
+  },
+  {
+   "section": "blocker",
+   "code": "SC2013",
+   "message": "values from the 'zapo-js' package run in the embedded dynamic engine, which this build does not include",
+   "file": "G:/blocks/prov2/lab/app/pkgs/wam/synthetic/random.ts",
+   "line": 21
+  },
+  {
+   "section": "blocker",
+   "code": "SC2009",
+   "message": "values of type 'AmbientFab[]' cannot be compiled: the array shape is supported, but its element type 'AmbientFab' does not compile",
+   "file": "G:/blocks/prov2/lab/app/pkgs/wam/synthetic/fabrications.ts",
+   "line": 26
+  },
+  {
+   "section": "unreached",
+   "code": "SC2013",
+   "message": "values from the 'zapo-js' package run in the embedded dynamic engine, which this build does not include",
+   "file": "G:/blocks/prov2/lab/app/pkgs/wam/send-parse.ts",
+   "line": 48
+  },
+  {
+   "section": "unreached",
+   "code": "SC2013",
+   "message": "values from the 'zapo-js' package run in the embedded dynamic engine, which this build does not include",
+   "file": "G:/blocks/prov2/lab/app/pkgs/wam/send-parse.ts",
+   "line": 58
+  },
+  {
+   "section": "unreached",
+   "code": "SC2013",
+   "message": "values from the 'zapo-js' package run in the embedded dynamic engine, which this build does not include",
+   "file": "G:/blocks/prov2/lab/app/pkgs/wam/send-parse.ts",
+   "line": 73
+  },
+  {
+   "section": "unreached",
+   "code": "SC2013",
+   "message": "values from the 'zapo-js' package run in the embedded dynamic engine, which this build does not include",
+   "file": "G:/blocks/prov2/lab/app/pkgs/wam/send-parse.ts",
+   "line": 74
+  },
+  {
+   "section": "unreached",
+   "code": "SC2013",
+   "message": "values from the 'zapo-js' package run in the embedded dynamic engine, which this build does not include",
+   "file": "G:/blocks/prov2/lab/app/pkgs/wam/send-parse.ts",
+   "line": 75
+  },
+  {
+   "section": "unreached",
+   "code": "SC2013",
+   "message": "values from the 'zapo-js' package run in the embedded dynamic engine, which this build does not include",
+   "file": "G:/blocks/prov2/lab/app/pkgs/wam/send-parse.ts",
+   "line": 100
+  },
+  {
+   "section": "unreached",
+   "code": "SC2009",
+   "message": "values of type 'WaWamCoordinator' cannot be compiled: the record shape is supported, but its member 'logger' has type 'Logger', which does not compile",
+   "file": "G:/blocks/prov2/lab/app/pkgs/wam/synthetic/WaWamSyntheticUi.ts",
+   "line": 147
+  }
+ ]
+}
