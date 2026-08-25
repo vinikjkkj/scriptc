@@ -82,7 +82,7 @@ const ISLAND_CODES = new Set(["SC2013", "SC1010"]);
  * `dist/esm/...` target, and the dist-stripping regex handles `dist/` but
  * not `dist/esm/`. */
 const ZAPO_SUBPATH = /'zapo-js\/[\w.-]+'/;
-const ZAPO_ANY = /'zapo-js(\/[\w.-]+)?'|the 'zapo-js' package/;
+const ZAPO_ANY = /'zapo-js(\/[\w.-]+)?'|\bthe 'zapo-js' package\b/;
 
 function bucketOf(site) {
   /* prov2 owns a site when the reason it exists is that a `zapo-js`
