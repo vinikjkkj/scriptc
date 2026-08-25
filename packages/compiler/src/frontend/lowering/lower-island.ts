@@ -328,7 +328,33 @@ import { PoisonError, dynUndefinedExpr, newFnCtx, own } from "./lowerer.js";
        * keeps the loud failure below, with a message that names the
        * spelling that works. */
       if (spec === "better-sqlite3" && arg !== undefined && ts.isStringLiteralLike(arg)) {
-        const ns: IrExpr = { kind: "libCall", fn: "dyn.objCreateNullProto", args: [], type: DYN, loc };
+        // The namespace OBJECT, key for key. Node builds this one by
+        // running cjs-module-lexer over the package's entry, so it is
+        // three keys in this order — better-sqlite3's detected named
+        // export, the default, and the `module.exports` alias the lexer
+        // adds for a whole-export replacement. The VALUES are absent
+        // (`undefined`), which is not a shortcut: every read of a member
+        // as a VALUE is refused by name at its type, so nothing here can
+        // escape into a program. What the values must not break is what a
+        // program CAN legally ask of the namespace itself, and an
+        // undefined-valued own property answers all of it the way Node
+        // does — `Object.keys` lists it, `in` finds it, and
+        // JSON.stringify skips it exactly as it skips Node's
+        // function-valued ones. An EMPTY object was the first cut and it
+        // is a silent wrong answer twice over: `Object.keys(ns)` came back
+        // `[]` where Node says three, and `"default" in ns` came back
+        // false. The fixture pins all four cells against the real
+        // package.
+        const nsKey = (name: string): { key: IrExpr; value: IrExpr } => ({
+          key: { kind: "strLit", value: name, type: STRING, loc },
+          value: dynUndefinedExpr(loc),
+        });
+        const ns: IrExpr = {
+          kind: "dynObjLit",
+          fields: [nsKey("SqliteError"), nsKey("default"), nsKey("module.exports")],
+          type: DYN,
+          loc,
+        };
         return {
           kind: "intrinsic",
           name: "promise.resolve",

@@ -1,4 +1,8 @@
 ns.typeof object
+ns.keys SqliteError,default,module.exports
+ns.json {}
+ns.hasDefault true
+ns.hasInherited false
 open true
 readonly false
 memory false
