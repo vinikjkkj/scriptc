@@ -31,3 +31,6 @@ tmp-*/
 .claude/
 .vercel/
 .env.local
+
+# bench databases (group-matrix.mjs --db-dir default)
+.bench-db/

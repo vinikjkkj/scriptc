@@ -39,6 +39,38 @@
 //                       because zapo's store-sqlite issues its bare
 //                       writes OUTSIDE a transaction and the honest
 //                       default is the shape the consumer actually has.
+//   BENCH_GROUP_BOUND   how the group scenarios ask "am I over 200,000
+//                       entries yet". Default "tracked"; "count"
+//                       reproduces the first version of this file.
+//
+// WHY THAT KNOB EXISTS, measured and not supposed. The first version of
+// this file spelled the group scenarios' 200,000-entry bound as
+// `select count(*) from kv`, once per message, "kept so the two files do
+// the same amount of work per batch". That sentence is false, and it is
+// the single most expensive line in the file. The sibling's `store.size`
+// is O(1) and free; `count(*)` is a full scan of the primary-key index,
+// and at 200,000 rows with the default 2 MiB page cache the scan does not
+// fit in cache, so each of the 1,000 calls per batch re-reads the index
+// off disk. Measured on this host, compiled lane, SEND group, one batch:
+//
+//   bound = count,   cache 2 MiB     24,462 ms/batch     41 msgs/s
+//   bound = count,   cache 200 MiB    3,042 ms/batch    329 msgs/s
+//   bound = tracked, cache 2 MiB         see the report; the inserts alone
+//
+// So as first shipped, "SEND group over SQLite" measured `count(*)` and a
+// thrashing page cache, not the store. The default is now the O(1)
+// counter, which is what any real store keeps and what the sibling's Map
+// gets for free — and it is the only spelling in which the two files
+// differ ONLY in the store. `count` is retained so the old number can be
+// reproduced rather than merely asserted.
+//
+// The counter is exact rather than an estimate: every key this file
+// writes is fresh (`seq` is global and strictly increasing, and the group
+// keys carry a "|" the 1:1 keys do not), so an upsert never collides and
+// one increment per `run` is the row count. The ARMED CONTROL below
+// checks that against a real `count(*)` at the end of the process and
+// prints both, because an instrument that writes nothing and an
+// instrument that writes and reports zero look identical from outside.
 
 import { createHash } from "node:crypto"
 import Database from "better-sqlite3"
@@ -51,6 +83,7 @@ const MESSAGES = envInt("ZAPO_BENCH_MESSAGES", 1000)
 const dbPath = envStr("BENCH_SQLITE_PATH", "bench-messaging.db")
 const cacheKiB = envInt("BENCH_SQLITE_CACHE", 2000)
 const useTx = envStr("BENCH_SQLITE_TX", "0") === "1"
+const boundByCount = envStr("BENCH_GROUP_BOUND", "tracked") === "count"
 
 const db = new Database(dbPath)
 db.pragma("journal_mode = WAL")
@@ -66,6 +99,25 @@ const kvSet = db.prepare("insert into kv (k, v) values (?, ?) on conflict(k) do 
 const kvGet = db.prepare("select v from kv where k = ?").pluck()
 const kvSize = db.prepare("select count(*) as c from kv").pluck()
 const kvClear = db.prepare("delete from kv")
+
+// The O(1) row count a real store keeps. Every write goes through kvPut so
+// the counter cannot drift from the table; kvOver() is the group bound.
+let rows = 0
+
+function kvPut(k: string, v: string): void {
+  kvSet.run(k, v)
+  rows++
+}
+
+function kvOver(limit: number): boolean {
+  if (boundByCount) return (kvSize.get() as number) > limit
+  return rows > limit
+}
+
+function kvWipe(): void {
+  kvClear.run()
+  rows = 0
+}
 
 function txBegin(): void {
   if (useTx) db.exec("BEGIN")
@@ -103,7 +155,7 @@ runScenario("SEND 1:1", "msgs", MESSAGES, () => {
     const to = jids[seq % jids.length]
     const id = "3EB0" + seq
     const wire = encodeMessage(to, "hello-" + seq, id)
-    kvSet.run(id, digest(wire))
+    kvPut(id, digest(wire))
   }
   txEnd()
 })
@@ -118,7 +170,7 @@ runScenario("RECV 1:1", "msgs", MESSAGES, () => {
     const wire = encodeMessage(from, "inbound-" + seq, id)
     const parsed = JSON.parse(wire) as { key: { id: string } }
     const rid = parsed.key.id
-    kvSet.run(rid, digest(rid))
+    kvPut(rid, digest(rid))
     kvGet.get(rid)
   }
   txEnd()
@@ -133,12 +185,13 @@ runScenario("SEND group", "msgs", MESSAGES, () => {
     const wire = encodeMessage(groupJid, "group-" + seq, "3EB0" + seq)
     const d = digest(wire)
     for (let m = 0; m < members.length; m++) {
-      kvSet.run(members[m] + "|" + seq, d)
+      kvPut(members[m] + "|" + seq, d)
     }
-    // The sibling's `store.size > 200000` bound, kept so the two files
-    // do the same amount of work per batch. A real store would not do
-    // this at all; the point of the pair is that only the STORE differs.
-    if ((kvSize.get() as number) > 200000) kvClear.run()
+    // The sibling's `store.size > 200000` bound. Under the default
+    // "tracked" spelling this is the same O(1) question the Map answers;
+    // under "count" it is the full-scan version the file first shipped
+    // with. See the header for what that difference costs.
+    if (kvOver(200000)) kvWipe()
   }
   txEnd()
 })
@@ -151,11 +204,28 @@ runScenario("RECV group", "msgs", MESSAGES, () => {
     const wire = encodeMessage(groupJid, "grecv-" + seq, "3EB0" + seq)
     const parsed = JSON.parse(wire) as { message: { conversation: string } }
     const text = parsed.message.conversation
-    kvSet.run(groupJid + "|" + seq, digest(text))
-    if ((kvSize.get() as number) > 200000) kvClear.run()
+    kvPut(groupJid + "|" + seq, digest(text))
+    if (kvOver(200000)) kvWipe()
   }
   txEnd()
 })
+
+// ── the armed control ────────────────────────────────────────────────
+// An inert instrument and a true zero are indistinguishable without one.
+// This asks the DATABASE how many rows are really in it, next to the
+// counter the run maintained, and prints the file it wrote to.
+const realRows = kvSize.get() as number
+console.log(
+  "SCBENCH-ROWS {" +
+    '"path":"' + dbPath + '"' +
+    ',"rowsTracked":' + rows +
+    ',"rowsInTable":' + realRows +
+    ',"agree":' + (rows === realRows ? "true" : "false") +
+    ',"bound":"' + (boundByCount ? "count" : "tracked") + '"' +
+    ',"tx":' + (useTx ? "1" : "0") +
+    ',"cacheKiB":' + cacheKiB +
+    "}"
+)
 
 db.close()
 benchEnd()
