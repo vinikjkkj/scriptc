@@ -9448,6 +9448,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/6360-bitwise-toint32-minefield.ts": {
+   "order": [
+    "<repo>/tests/corpus/6360-bitwise-toint32-minefield.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/6400-string-length-utf16-units.ts": {
    "order": [
     "<repo>/tests/corpus/6400-string-length-utf16-units.ts"
