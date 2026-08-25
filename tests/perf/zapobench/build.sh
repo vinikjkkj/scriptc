@@ -2,10 +2,11 @@
 # build.sh <compilerRoot> <tag> <cacheDirName> — build ixmax3.ts from THE ONE
 # app directory.  Every arm uses G:/zapo-work/zapobench-artifacts/app; arms
 # differ only by the output binary's NAME, because the app path is baked into
-# the emitted TU ~94,000 times and two directories make the md5s always differ.
+# the emitted TU about 94,000 times and two directories make the md5s always
+# differ and the byte counts never do.
 set -u
 . /g/blocks/zapobench/lab/env.sh
-CC_ROOT="$1"; TAG="$2"; CDIR="$3"
+CC_ROOT="$1"; TAG="$2"; CDIR="$3"; PROV="$4"
 APP=/g/zapo-work/zapobench-artifacts/app
 OUT=/g/zapo-work/zapobench-artifacts
 LOG=/g/blocks/zapobench/lab/build-$TAG.log
@@ -13,11 +14,12 @@ LOG=/g/blocks/zapobench/lab/build-$TAG.log
 # key directories, and stale objects under live keys), and a control taken
 # through a poisoned cache is not a control.
 export SCRIPTC_CACHE_DIR='G:\blocks\zapobench\'"$CDIR"
-export SCRIPTC_PROVENANCE_CACHE='G:\blocks\zapobench\'"$CDIR"'\prov'
+export SCRIPTC_PROVENANCE_CACHE="$PROV"
 export SCRIPTC_TRAP_TRACE=1
-mkdir -p "/g/blocks/zapobench/$CDIR/prov"
-echo "SCRIPTC_CACHE_DIR=$SCRIPTC_CACHE_DIR" > "$LOG"
-rm -f "$APP/ixmax3.c"
+mkdir -p "/g/blocks/zapobench/$CDIR" "$OUT/tu" "$OUT/exe"
+echo "SCRIPTC_CACHE_DIR=$SCRIPTC_CACHE_DIR SCRIPTC_PROVENANCE_CACHE=$SCRIPTC_PROVENANCE_CACHE" > "$LOG"
+# --keep-c writes the emitted C beside the -o TARGET, not in the app dir.
+rm -f "$OUT/exe/ixmax3.c"
 cd "$APP" || exit 1
 START=$(date +%s)
 node "$CC_ROOT/packages/cli/dist/main.js" build ixmax3.ts \
@@ -26,7 +28,7 @@ node "$CC_ROOT/packages/cli/dist/main.js" build ixmax3.ts \
 RC=$?
 END=$(date +%s)
 echo "EXIT=$RC WALL=$((END-START))s" >> "$LOG"
-if [ -f "$APP/ixmax3.c" ]; then mv "$APP/ixmax3.c" "$OUT/tu/$TAG.c"; fi
+if [ -f "$OUT/exe/ixmax3.c" ]; then mv "$OUT/exe/ixmax3.c" "$OUT/tu/$TAG.c"; fi
 echo "tag=$TAG exit=$RC wall=$((END-START))s"
-[ -f "$OUT/exe/$TAG.exe" ] && ls -l "$OUT/exe/$TAG.exe"
-[ -f "$OUT/tu/$TAG.c" ] && { stat -c "TU %s bytes" "$OUT/tu/$TAG.c"; md5sum "$OUT/tu/$TAG.c"; }
+if [ -f "$OUT/exe/$TAG.exe" ]; then wc -c < "$OUT/exe/$TAG.exe" | tr -d ' ' | sed 's/^/exe bytes /'; fi
+if [ -f "$OUT/tu/$TAG.c" ]; then wc -c < "$OUT/tu/$TAG.c" | tr -d ' ' | sed 's/^/TU bytes /'; md5sum "$OUT/tu/$TAG.c"; fi

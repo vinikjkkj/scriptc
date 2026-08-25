@@ -35,3 +35,29 @@ version: zig 0.16.0 from `G:\zapo-work\tools\zig` must come first on `PATH`,
 `SCRIPTC_TARGET=x86_64-windows-gnu`, `SCRIPTC_GENERIC_SLOT=1`, `--best-effort`,
 and **both** `ZIG_GLOBAL_CACHE_DIR` and `ZIG_LOCAL_CACHE_DIR` pointed off C:,
 because zig ignores `TMP`.
+
+## What it measured, at `fc8677b1` against `756add37`
+
+| lane | peak working set, median of 5 | min-max | spread |
+|---|---:|---:|---:|
+| scriptc `fc8677b1` | **29,245,440** | 28,807,168 - 29,409,280 | 2.09% |
+| node **v25.9.0** | **125,403,136** | 124,796,928 - 129,908,736 | 4.10% |
+| node **v22.18.0** (n=3) | **137,256,960** | 136,998,912 - 137,822,208 | 0.60% |
+| scriptc `756add37` | 29,999,104 | 29,806,592 - 30,609,408 | 2.69% |
+
+**4.29x smaller than node v25.9.0.** All 18 runs answered 76 stanzas with the
+same tag multiset and exited 0. `gate.sh` is the vitest gate exactly as run.
+
+Two things this directory exists to stop the next block repeating:
+
+* **The harness's oracle is `PATH`'s `node`, not `process.execPath`.**
+  `server.test.ts`, `npm.test.ts` and `node-test.test.ts` spawn the literal
+  string `"node"`. Running vitest *under* v25.9.0 is not enough. With v22.18.0
+  first on `PATH` the gate came back **18 failed** — `node:test` reporter
+  format, `util.inspect` symbol-key rendering, a TLS message whose newer Node
+  appends `--use-system-ca` — every one of which reads as a scriptc
+  regression. With v25.9.0 first: **18 -> 1**, and that one passed 3/3 on
+  repeat. `gate.sh` puts it there and says why.
+* **`SCRIPTC_PROVENANCE_CACHE`'s path is baked into the emitted TU**, twelve
+  times, exactly like the app directory. Give every arm the SAME provenance
+  cache and a SEPARATE object cache, or the two TUs differ on the path alone.
