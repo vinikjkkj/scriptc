@@ -342,7 +342,17 @@ static inline void *scr_pool_take(ScrPool *p, size_t n) {
 #else
   size_t r = scr_pool_bytes(n);
   if (r == 0 || r > SCR_POOL_MAX) return NULL;
-  int c = (int)(r / SCR_POOL_GRAIN) - 1;
+  /* size_t rather than int, and that is worth five instructions here.
+   * `int c` makes `p->head[c]` a SIGNED index, so clang must sign-extend
+   * it before it can scale by 8 -- and because `r` is itself derived from
+   * a shift it fuses the two into `shl $0x1d / movabs / add / sar $0x20`,
+   * four instructions plus the shift, on the hottest path in the runtime.
+   * Unsigned, the same index is `shr $0x3` and a decrement folded into the
+   * addressing mode, and it CSEs with the `phys / SCR_POOL_GRAIN` the
+   * caller needs for ScrCycHdr::blk. `r` is non-zero and a multiple of the
+   * grain by the two lines above, so the subtraction cannot wrap.
+   * Read out of scr_cyc_alloc's disassembly, tests/perf/cycalloc/isa.mjs. */
+  size_t c = r / SCR_POOL_GRAIN - 1u;
   void *b = p->head[c];
   if (!b) return NULL;
   /* the free-list link lives in the block's first word; every class is
@@ -363,7 +373,7 @@ static inline bool scr_pool_give(ScrPool *p, void *b, size_t n) {
 #else
   size_t r = scr_pool_bytes(n);
   if (r == 0 || r > SCR_POOL_MAX) return false;
-  int c = (int)(r / SCR_POOL_GRAIN) - 1;
+  size_t c = r / SCR_POOL_GRAIN - 1u;  /* unsigned; see scr_pool_take */
   if (p->n[c] >= SCR_POOL_DEPTH) return false;
   __builtin_memcpy(b, &p->head[c], sizeof(void *));
   p->head[c] = b;
