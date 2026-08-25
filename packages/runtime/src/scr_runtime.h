@@ -321,9 +321,36 @@ enum { SCR_CYC_BLACK = 0, SCR_CYC_PURPLE = 1, SCR_CYC_GRAY = 2, SCR_CYC_WHITE = 
 #define SCR_POOL_DEPTH 64
 #endif
 
+/* SCR_POOL_BUDGET: the total PHYSICAL BYTES one pool may hold across all
+ * classes, as an alternative bound to the per-class depth above. 0, the
+ * default, is the shipped behaviour and compiles to the same code it always
+ * did -- the depth field is not even declared under a budget, and the
+ * budget field is not declared without one, so neither arm carries the
+ * other's cost.
+ *
+ * The curve this exists to price is the block comment above: on the
+ * messaging bench a `store.clear()` frees 200,000 blocks of ONE class at
+ * once, the class saturates at the first SCR_POOL_DEPTH and every
+ * allocation after the burst misses. Depth is the wrong knob because the
+ * burst is 200,000 wide; a byte budget shared across classes is the right
+ * shape and its knee is the burst itself. 200,000 * 64 B is 12.8 MiB and
+ * the measured hit rate goes 52.21% at depth 64 to 96.45% at 16 MiB.
+ *
+ * It was declined for want of a CPU instrument: the trade is "one add and
+ * one subtract on take and on give" against 58 rejected gives on zapo.
+ * tests/perf/cycalloc/isa.mjs prices it exactly now -- see the numbers in
+ * scr_string.c beside scr_str_alloc. */
+#ifndef SCR_POOL_BUDGET
+#define SCR_POOL_BUDGET 0
+#endif
+
 typedef struct ScrPool {
   void *head[SCR_POOL_CLASSES];
+#if SCR_POOL_BUDGET
+  size_t bytes; /* physical bytes held, all classes */
+#else
   unsigned n[SCR_POOL_CLASSES];
+#endif
 } ScrPool;
 
 /* The physical size of the block backing a request of n bytes. Callers
@@ -360,7 +387,11 @@ static inline void *scr_pool_take(ScrPool *p, size_t n) {
   void *next;
   __builtin_memcpy(&next, b, sizeof next);
   p->head[c] = next;
+#if SCR_POOL_BUDGET
+  p->bytes -= r;
+#else
   p->n[c]--;
+#endif
   return b;
 #endif
 }
@@ -374,10 +405,19 @@ static inline bool scr_pool_give(ScrPool *p, void *b, size_t n) {
   size_t r = scr_pool_bytes(n);
   if (r == 0 || r > SCR_POOL_MAX) return false;
   size_t c = r / SCR_POOL_GRAIN - 1u;  /* unsigned; see scr_pool_take */
+#if SCR_POOL_BUDGET
+  size_t held = p->bytes + r;
+  if (held > (size_t)SCR_POOL_BUDGET) return false;
+#else
   if (p->n[c] >= SCR_POOL_DEPTH) return false;
+#endif
   __builtin_memcpy(b, &p->head[c], sizeof(void *));
   p->head[c] = b;
+#if SCR_POOL_BUDGET
+  p->bytes = held;
+#else
   p->n[c]++;
+#endif
   return true;
 #endif
 }
