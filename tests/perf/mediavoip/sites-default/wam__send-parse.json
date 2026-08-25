@@ -1,0 +1,72 @@
+{
+ "entry": "G:/blocks/mediavoip/lab/app/pkgs/wam/send-parse.ts",
+ "flags": [],
+ "elapsedMs": 1641,
+ "preflightFailed": false,
+ "stats": {
+  "statementsTotal": 1,
+  "statementsFailed": 0,
+  "statementsIsland": 0,
+  "functionsSkipped": 0
+ },
+ "npmStatic": null,
+ "provenanceNotes": null,
+ "sites": [
+  {
+   "section": "blocker",
+   "code": "SC2013",
+   "message": "importing 'zapo-js' requires the embedded dynamic engine, which this build does not include — the package's implementation runs there",
+   "file": "G:/blocks/mediavoip/lab/app/pkgs/wam/send-parse.ts",
+   "line": 2
+  },
+  {
+   "section": "blocker",
+   "code": "SC2013",
+   "message": "importing 'zapo-js' requires the embedded dynamic engine, which this build does not include — the package's implementation runs there",
+   "file": "G:/blocks/mediavoip/lab/app/pkgs/wam/send-parse.ts",
+   "line": 3
+  },
+  {
+   "section": "unreached",
+   "code": "SC2013",
+   "message": "values from the 'zapo-js' package run in the embedded dynamic engine, which this build does not include",
+   "file": "G:/blocks/mediavoip/lab/app/pkgs/wam/send-parse.ts",
+   "line": 48
+  },
+  {
+   "section": "unreached",
+   "code": "SC2013",
+   "message": "values from the 'zapo-js' package run in the embedded dynamic engine, which this build does not include",
+   "file": "G:/blocks/mediavoip/lab/app/pkgs/wam/send-parse.ts",
+   "line": 58
+  },
+  {
+   "section": "unreached",
+   "code": "SC2013",
+   "message": "values from the 'zapo-js' package run in the embedded dynamic engine, which this build does not include",
+   "file": "G:/blocks/mediavoip/lab/app/pkgs/wam/send-parse.ts",
+   "line": 73
+  },
+  {
+   "section": "unreached",
+   "code": "SC2013",
+   "message": "values from the 'zapo-js' package run in the embedded dynamic engine, which this build does not include",
+   "file": "G:/blocks/mediavoip/lab/app/pkgs/wam/send-parse.ts",
+   "line": 74
+  },
+  {
+   "section": "unreached",
+   "code": "SC2013",
+   "message": "values from the 'zapo-js' package run in the embedded dynamic engine, which this build does not include",
+   "file": "G:/blocks/mediavoip/lab/app/pkgs/wam/send-parse.ts",
+   "line": 75
+  },
+  {
+   "section": "unreached",
+   "code": "SC2013",
+   "message": "values from the 'zapo-js' package run in the embedded dynamic engine, which this build does not include",
+   "file": "G:/blocks/mediavoip/lab/app/pkgs/wam/send-parse.ts",
+   "line": 100
+  }
+ ]
+}

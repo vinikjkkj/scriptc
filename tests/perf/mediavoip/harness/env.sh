@@ -1,0 +1,15 @@
+export TMP='G:\blocks\mediavoip\tmp'
+export TEMP='G:\blocks\mediavoip\tmp'
+export TMPDIR='G:\blocks\mediavoip\tmp'
+export SCRIPTC_CACHE_DIR='G:\blocks\mediavoip\cache'
+export SCRIPTC_PROVENANCE_CACHE='G:\blocks\mediavoip\cache\provenance'
+export ZIG_GLOBAL_CACHE_DIR='G:\blocks\mediavoip\zig'
+export ZIG_LOCAL_CACHE_DIR='G:\blocks\mediavoip\zig\local'
+export SCRIPTC_CC=zigcc
+export SCRIPTC_TEST_CC="zig cc"
+export SCRIPTC_TARGET=x86_64-windows-gnu
+export SCRIPTC_TEST_WORKERS=2
+export WT='G:/blocks/mediavoip/wt'
+export LAB='G:/blocks/mediavoip/lab'
+export ZPKG='G:/zapo-work/caches/provenance/250f9af5229a545eec28ddbd3e8774a397cdb0bb/packages'
+export PATH="/g/zapo-work/tools/zig:$PATH"
