@@ -58,6 +58,43 @@ static size_t scr_cyc_live = 0;
  * their own size. */
 static ScrPool scr_cyc_blocks;
 
+#ifdef SCR_POOLSTAT_ON
+/* tests/perf/poolstat/scr_pool_stat.h is -include'd BEFORE this file's own
+ * headers, so it cannot see SCR_POOL_* or ScrPool. This TU can: it hands the
+ * lane the build's pool configuration and names the pool it owns. Absent the
+ * -include the symbol is undefined and this whole block is not compiled. */
+__attribute__((constructor)) static void scr_poolstat_reg_cycle(void) {
+  scr_poolstat_cfg(SCR_POOL_GRAIN, SCR_POOL_MAX, SCR_POOL_DEPTH, SCR_POOL_BUDGET);
+  scr_poolstat_name(&scr_cyc_blocks, "cyc");
+#ifdef SCR_POOLSTAT_ARM
+  /* THE ARM. N real gives then N real takes of one known size through a real
+   * pool, over the same scr_pool_give/scr_pool_take every other row is
+   * counted by. Expected, and it is arithmetic rather than a hope:
+   *   budget off, depth D:  gives=N accepts=D rejects=N-D hits=D
+   *   budget B (>= N*sz):   gives=N accepts=N rejects=0   hits=N
+   * An instrument that cannot tell those two apart cannot adjudicate the
+   * question this lane exists for. */
+  {
+    static ScrPool scr_poolstat_armpool;
+    const size_t sz = SCR_POOL_GRAIN * 2u;
+    long i;
+    scr_poolstat_name(&scr_poolstat_armpool, "ARM");
+    for (i = 0; i < (long)(SCR_POOLSTAT_ARM); i++) {
+      void *b = malloc(sz);
+      if (!b) break;
+      if (!scr_pool_give(&scr_poolstat_armpool, b, sz)) free(b);
+    }
+    for (i = 0; i < (long)(SCR_POOLSTAT_ARM); i++) {
+      void *b = scr_pool_take(&scr_poolstat_armpool, sz);
+      if (!b) break;
+      free(b);
+    }
+    scr_poolstat_arm_ran = (unsigned long long)(SCR_POOLSTAT_ARM);
+  }
+#endif
+}
+#endif
+
 #ifndef SCR_CYC_ZERO_WHOLE
 #define SCR_CYC_ZERO_WHOLE 0
 #endif
