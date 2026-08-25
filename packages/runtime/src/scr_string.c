@@ -426,6 +426,56 @@ static uint32_t scr_utf8_decode(const char *p, size_t *adv) {
          ((unsigned char)p[3] & 0x3F);
 }
 
+/* Is every byte of [d, d+n) below 0x80? Then the string is pure ASCII, and
+ * its UTF-16 length is n with no classification work at all.
+ *
+ * WHY THE SHORT CASES CARRY NO LOOP, measured rather than assumed. On the
+ * string-build scenario scr_str_utf16_len costs 133.3 instructions per call
+ * over strings whose mean length is 5.83 bytes — thirteen instructions per
+ * byte. Callgrind, per instruction, puts 56.9 of them in ONE region: LLVM
+ * autovectorises the trailing byte loop of scr_utf16_units below, and the
+ * vector body it emits is ~40 SSE instructions to classify FOUR bytes. A
+ * six-byte string enters that body once and leaves two bytes to the scalar
+ * loop, which costs a further 20.4. The bytes are not the expense; the LOOP
+ * is, and no amount of tuning inside it helps a string this short.
+ *
+ * So 0..16 bytes are answered by at most two OVERLAPPING unaligned loads and
+ * no loop of any kind. Re-reading a few bytes is free and both loads stay
+ * strictly inside the string, which matters: an ScrStr is allocated as
+ * sizeof(ScrStr) + cap + 1 and an interned literal is a bare `char data[n]`,
+ * so there is no padding to read into. Below four bytes, d[0], d[n/2] and
+ * d[n-1] cover every byte of a 1-, 2- or 3-byte string exactly. Above
+ * sixteen the trip count is large enough that a loop earns its prologue. */
+static bool scr_utf8_all_ascii(const unsigned char *d, size_t n) {
+  const uint64_t hibits = 0x8080808080808080ull;
+  uint64_t a, b;
+  if (n <= 16) {
+    if (n >= 8) {
+      memcpy(&a, d, 8);
+      memcpy(&b, d + n - 8, 8);
+      return ((a | b) & hibits) == 0;
+    }
+    if (n >= 4) {
+      uint32_t x, y;
+      memcpy(&x, d, 4);
+      memcpy(&y, d + n - 4, 4);
+      return ((x | y) & 0x80808080u) == 0;
+    }
+    if (n == 0) return true;
+    return ((unsigned)d[0] | d[n >> 1] | d[n - 1]) < 0x80u;
+  }
+  {
+    uint64_t acc = 0;
+    size_t i = 0;
+    for (; i + 8 <= n; i += 8) {
+      memcpy(&a, d + i, 8);
+      acc |= a;
+    }
+    memcpy(&b, d + n - 8, 8); /* n > 16, so this overlaps rather than overruns */
+    return ((acc | b) & hibits) == 0;
+  }
+}
+
 /* Number of UTF-16 code units in s (BMP char = 1, astral char = 2).
  * Byte-classification is position-independent (well-formed UTF-8):
  * units = #bytes - #continuation-bytes + #4-byte-leads, so the word-wise
@@ -435,6 +485,10 @@ static size_t scr_utf16_units(const ScrStr *s) {
   const unsigned char *d = (const unsigned char *)s->data;
   const uint64_t hibits = 0x8080808080808080ull;
   size_t units = 0, i = 0;
+  /* Pure ASCII answers itself: every byte is one code unit, so units is the
+   * byte length. Every population this project has censused is 100% ASCII,
+   * and the classification below cannot be cheaper than not running. */
+  if (scr_utf8_all_ascii(d, s->len)) return s->len;
   while (i + 8 <= s->len) {
     uint64_t w;
     memcpy(&w, d + i, 8);
