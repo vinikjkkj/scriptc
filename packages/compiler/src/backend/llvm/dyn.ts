@@ -249,15 +249,17 @@ export class LlDyn {
     return { key, keyLen, value };
   }
 
-  /** An ScrStr's (len, data) pair — len via the %ScrStr header, data the
-   * flexible tail at +24. */
+  /** An ScrStr's (len, data) pair — len via the %ScrStr header (a u32,
+   * widened to i64 for every consumer), data the flexible tail at +12. */
   private strParts(B: BlockBuilder, s: string): { len: string; data: string } {
     const lp = B.tmp();
+    const rawLen = B.tmp();
     const len = B.tmp();
     const data = B.tmp();
     B.line(`${lp} = getelementptr inbounds %ScrStr, ptr ${s}, i64 0, i32 1`);
-    B.line(`${len} = load i64, ptr ${lp}`);
-    B.line(`${data} = getelementptr inbounds i8, ptr ${s}, i64 24 ; ->data`);
+    B.line(`${rawLen} = load i32, ptr ${lp}`);
+    B.line(`${len} = zext i32 ${rawLen} to i64`);
+    B.line(`${data} = getelementptr inbounds i8, ptr ${s}, i64 12 ; ->data`);
     return { len, data };
   }
 
@@ -830,11 +832,13 @@ export class LlDyn {
       B.startBlock(lStr);
       const s = this.payloadOf(B, m, "ptr");
       const lenp = B.tmp();
+      const rawLen = B.tmp();
       const len = B.tmp();
-      B.line(`${lenp} = getelementptr inbounds i8, ptr ${s}, i64 8 ; ScrStr->len`);
-      B.line(`${len} = load i64, ptr ${lenp}`);
+      B.line(`${lenp} = getelementptr inbounds i8, ptr ${s}, i64 4 ; ScrStr->len`);
+      B.line(`${rawLen} = load i32, ptr ${lenp}`);
+      B.line(`${len} = zext i32 ${rawLen} to i64`);
       const datap = B.tmp();
-      B.line(`${datap} = getelementptr inbounds i8, ptr ${s}, i64 24 ; ScrStr->data`);
+      B.line(`${datap} = getelementptr inbounds i8, ptr ${s}, i64 12 ; ScrStr->data`);
       // SET membership: one length-and-memcmp per member of the arm's own
       // value set, any hit continuing to the next field. The C twin's
       // `||` chain, spelled as blocks.

@@ -27,9 +27,12 @@
 //     take the _Exit path and skip the audit entirely.
 //
 // The pooled range is `sizeof(ScrStr) + cap + 1` <= SCR_POOL_MAX (256) with
-// a 24-byte header, i.e. caps up to 231 bytes. The lengths below run 1..300
-// so the range is covered AND overrun on both sides: the classes above 256
-// are the never-pooled arm, which must keep working identically.
+// a 12-byte header, i.e. caps up to 243 bytes. That boundary MOVES with the
+// header width - it was 231 when the header was 24 - so a dozen capacities
+// change from never-pooled to pooled, and `scr_pool_bytes` reclassifies
+// every one of them. The lengths below run 1..300 so the range is covered
+// AND overrun on both sides, under both widths: the classes above 256 are
+// the never-pooled arm, which must keep working identically.
 
 function make(len: number, seed: number): string {
   // A value that depends on BOTH the length and the seed, so a block handed

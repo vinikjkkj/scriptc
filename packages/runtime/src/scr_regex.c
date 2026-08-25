@@ -1158,7 +1158,7 @@ ScrStr *scr_regexp_escape(ScrStr *s) {
     first = false;
     i += adv;
   }
-  out->len = out_len;
+  out->len = (uint32_t)out_len;
   out->data[out_len] = '\0';
   return out;
 }
@@ -1222,7 +1222,7 @@ static ScrDyn *scr_regex_dynh_to_string(const ScrRegex *re) {
   w += re->source->len;
   *w++ = '/';
   memcpy(w, re->flags->data, re->flags->len);
-  out->len = len;
+  out->len = (uint32_t)len;
   out->data[len] = '\0';
   ScrDyn *d = scr_dyn_new_str(out);
   scr_str_release(out);

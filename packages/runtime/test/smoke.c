@@ -10,10 +10,10 @@
  */
 #include "../src/scr_runtime.h"
 
-static struct { size_t rc; size_t len; size_t cap; char data[6]; } lit_hello = {SIZE_MAX, 5, 5, "hello"};
-static struct { size_t rc; size_t len; size_t cap; char data[6]; } lit_world = {SIZE_MAX, 5, 5, "world"};
-static struct { size_t rc; size_t len; size_t cap; char data[5]; } lit_n_eq = {SIZE_MAX, 4, 4, "n = "};
-static struct { size_t rc; size_t len; size_t cap; char data[8]; } lit_flag = {SIZE_MAX, 7, 7, " flag ="};
+static SCR_STR_LIT(6) lit_hello = {SCR_STR_IMMORTAL, 5, 5, "hello"};
+static SCR_STR_LIT(6) lit_world = {SCR_STR_IMMORTAL, 5, 5, "world"};
+static SCR_STR_LIT(5) lit_n_eq = {SCR_STR_IMMORTAL, 4, 4, "n = "};
+static SCR_STR_LIT(8) lit_flag = {SCR_STR_IMMORTAL, 7, 7, " flag ="};
 
 int main(void) {
   scr_init();

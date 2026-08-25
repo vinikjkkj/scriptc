@@ -1023,10 +1023,21 @@ export class CEmitter {
       );
     }
     for (const [text, sym] of this.literals) {
+      // The SHAPE is scr_runtime.h's SCR_STR_LIT macro, not a struct spelled
+      // out here, and that is deliberate. An ScrStr has a flexible array
+      // member, so no literal can be declared with the type itself: every one
+      // is an anonymous struct cast to `ScrStr *`, and nothing in C checks
+      // that the two agree. This table used to spell `size_t rc; size_t len;
+      // size_t cap;` inline, three field widths that had to match a header in
+      // another package by hand. When those widths changed, every string
+      // literal in every compiled program would have been read at the wrong
+      // offset, with no diagnostic from either compiler. The macro makes the
+      // layout single-sourced and scr_runtime.h static-asserts it against the
+      // real type.
       const bytes = Buffer.from(text, "utf8");
       out.push(
-        `static struct { size_t rc; size_t len; size_t cap; char data[${bytes.length + 1}]; } ${sym} =`,
-        `    { SIZE_MAX, ${bytes.length}, ${bytes.length}, ${cStringLiteral(bytes)} };`,
+        `static SCR_STR_LIT(${bytes.length + 1}) ${sym} =`,
+        `    { SCR_STR_IMMORTAL, ${bytes.length}, ${bytes.length}, ${cStringLiteral(bytes)} };`,
       );
     }
     if (this.literals.size > 0) out.push("");
