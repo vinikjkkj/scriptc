@@ -502,7 +502,8 @@ void scr_ws_global_close(ScrWsGlobal *g, bool has_code, double code, const ScrSt
   if (reason != NULL && reason->len > 123) {
     char m[96];
     int n = snprintf(m, sizeof m,
-                     "Reason must be less than 123 bytes; received %zu", reason->len);
+                     "Reason must be less than 123 bytes; received %zu",
+                     (size_t)reason->len);
     wsg_syntax(m, (size_t)n);
     return;
   }

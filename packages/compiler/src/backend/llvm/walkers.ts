@@ -74,11 +74,13 @@ export class LlWalkers {
   /** Appends an ScrStr's bytes: for (j < s->len) putc(s->data[j]). */
   private putScrStr(B: BlockBuilder, buf: string, s: string): void {
     const lenp = B.tmp();
+    const rawLen = B.tmp();
     const len = B.tmp();
     const data = B.tmp();
     B.line(`${lenp} = getelementptr inbounds %ScrStr, ptr ${s}, i64 0, i32 1`);
-    B.line(`${len} = load i64, ptr ${lenp}`);
-    B.line(`${data} = getelementptr inbounds i8, ptr ${s}, i64 24 ; ->data`);
+    B.line(`${rawLen} = load i32, ptr ${lenp}`);
+    B.line(`${len} = zext i32 ${rawLen} to i64`);
+    B.line(`${data} = getelementptr inbounds i8, ptr ${s}, i64 12 ; ->data`);
     const jSlot = B.slot();
     B.entryAllocas.push(`${jSlot} = alloca i64`);
     B.line(`store i64 0, ptr ${jSlot}`);
@@ -609,11 +611,13 @@ export class LlWalkers {
     B.line(`store i1 false, ptr ${instr}`);
     B.line(`store i64 0, ptr ${iSlot}`);
     const np = B.tmp();
+    const rawN = B.tmp();
     const n = B.tmp();
     const data = B.tmp();
     B.line(`${np} = getelementptr inbounds %ScrStr, ptr %compact, i64 0, i32 1`);
-    B.line(`${n} = load i64, ptr ${np}`);
-    B.line(`${data} = getelementptr inbounds i8, ptr %compact, i64 24 ; ->data`);
+    B.line(`${rawN} = load i32, ptr ${np}`);
+    B.line(`${n} = zext i32 ${rawN} to i64`);
+    B.line(`${data} = getelementptr inbounds i8, ptr %compact, i64 12 ; ->data`);
 
     const loop = B.newLabel("ji.c");
     const body = B.newLabel("ji.b");

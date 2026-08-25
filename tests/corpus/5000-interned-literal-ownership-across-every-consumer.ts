@@ -1,8 +1,10 @@
 // An interned string literal is an IMMORTAL static: the emitter writes it
-// as `static struct { size_t rc; ... } sc_lit_N = { SIZE_MAX, ... }`, and
-// both `scr_str_retain` (`if (o && o->rc != SIZE_MAX) o->rc++`) and
-// `scr_str_release` (`if (!o || o->rc == SIZE_MAX) return`) are exactly
-// no-ops on it. So the emitter binds a strLit into a temp that carries NO
+// as `static SCR_STR_LIT(N) sc_lit_N = { SCR_STR_IMMORTAL, ... }` - the
+// layout macro scr_runtime.h owns and static-asserts against the real
+// ScrStr - and both `scr_str_retain`
+// (`if (o && o->rc != SCR_STR_IMMORTAL) o->rc++`) and `scr_str_release`
+// (`if (!o || o->rc == SCR_STR_IMMORTAL) return`) are exactly no-ops on
+// it. So the emitter binds a strLit into a temp that carries NO
 // +1 and that `releaseFrame` writes no release for (Temp.immortal,
 // emitter.ts).
 //

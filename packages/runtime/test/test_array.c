@@ -104,10 +104,10 @@ static void test_str_rc(void) {
   scr_str_release(popped);
 
   /* immortal literals in arrays: retain/release must stay no-ops */
-  static struct { size_t rc; size_t len; size_t cap; char data[4]; } lit = {SIZE_MAX, 3, 3, "lit"};
+  static SCR_STR_LIT(4) lit = {SCR_STR_IMMORTAL, 3, 3, "lit"};
   scr_arr_push_ref(a, (ScrStr *)&lit);
   ScrStr *l = (ScrStr *)scr_arr_get_ref(a, 1);
-  check(l->rc == SIZE_MAX, "immortal element stays immortal");
+  check(l->rc == SCR_STR_IMMORTAL, "immortal element stays immortal");
 
   scr_arr_release(a); /* must release "uno" (and skip the literal) */
 #ifdef SCR_RC_AUDIT

@@ -189,7 +189,15 @@ static void scr_jb_grow(ScrJsonBuf *b, size_t need) {
     return;
   }
   size_t cap = b->cap;
-  while (cap < b->len + need) cap *= 2;
+  /* The doubling had no ceiling. With a 32-bit ScrStr::cap it needs one, and
+   * the fence belongs HERE rather than in scr_str_regrow: the builder's own
+   * len/cap are size_t, so it would otherwise walk past the representable
+   * range and hand regrow a number that had already wrapped. */
+  while (cap < b->len + need) {
+    if (cap > SCR_STR_MAX_LEN / 2) { cap = SCR_STR_MAX_LEN; break; }
+    cap *= 2;
+  }
+  scr_str_size_check(b->len + need);
   ScrStr *s = scr_str_regrow(SCR_JB_STR(b), cap);
   b->data = s->data;
   b->cap = cap;
@@ -272,7 +280,7 @@ ScrStr *scr_jb_finish(ScrJsonBuf *b) {
   b->seen_cap = 0;
   if (!b->data) return scr_str_new("", 0);
   ScrStr *s = SCR_JB_STR(b);
-  s->len = b->len;
+  s->len = (uint32_t)b->len;
   s->data[b->len] = '\0';
   /* Remember the size class for the next buffer (bounded so one giant
    * document cannot pin big allocations forever). */
