@@ -1182,6 +1182,9 @@ void scr_process_exit(double code) {
    * Node), and the RC audit is meaningless mid-program (live values are
    * expected). scr_init's flush-at-exit is also skipped — flush here. */
   fflush(stdout);
+#ifdef SCR_F64_CENSUS
+  { extern void scr_f64_census_flush(void); scr_f64_census_flush(); }
+#endif
   _Exit((int)code);
 }
 
