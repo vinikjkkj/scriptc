@@ -1,0 +1,85 @@
+/* better-sqlite3 reached through a DYNAMIC import — one program, two
+ * runtimes.
+ *
+ * Under Node this is an ordinary `await import("better-sqlite3")`: the
+ * addon loads and `ns.default` is the Database constructor. Compiled in
+ * the static lane there is no loader and no package — the import answers
+ * the namespace the compiler serves itself, and `new ns.default(path)` is
+ * claimed by its RESULT type and lowered onto the vendored SQLite
+ * amalgamation. Every line printed here is a cell the harness compares.
+ *
+ * The point of the fixture is the SEAM, not the driver: sqlite.test.ts
+ * already pins 64 cells of the driver through the static import. What is
+ * new here is that the same answers come out the other side of an
+ * `await import()`, and that `typeof ns` is the namespace's answer
+ * ("object") rather than the constructor's ("function") — the one cell
+ * that would be silently wrong if the namespace were lowered to the
+ * constructor, or to nothing.
+ *
+ * The database path arrives in argv so the file-backed half runs against
+ * a real file. Nothing PATH-dependent is printed.
+ */
+
+function show(label: string, v: string): void {
+  console.log(label + " " + v);
+}
+
+async function main(): Promise<void> {
+  const path = process.argv[2] as string;
+
+  const ns = await import("better-sqlite3");
+  show("ns.typeof", typeof ns);
+
+  const db = new ns.default(path);
+  show("open", String(db.open));
+  show("readonly", String(db.readonly));
+  show("memory", String(db.memory));
+
+  db.exec("create table t(k text primary key, i integer, r real, bl blob, nu)");
+
+  const ins = db.prepare("insert into t values(?,?,?,?,?)");
+  const info = ins.run("a", 42, 1.5, new Uint8Array([0, 254, 255]), null) as {
+    changes: number;
+    lastInsertRowid: number;
+  };
+  show("run.changes", String(info.changes));
+  show("run.rowid", String(info.lastInsertRowid));
+
+  const row = db
+    .prepare("select k, i, r, typeof(i) as ti, typeof(r) as tr, typeof(bl) as tb, typeof(nu) as tn from t where k = ?")
+    .get("a") as { k: string; i: number; r: number; ti: string; tr: string; tb: string; tn: string };
+  show("get.k", row.k);
+  show("get.i", String(row.i));
+  show("get.r", String(row.r));
+  show("get.types", row.ti + "/" + row.tr + "/" + row.tb + "/" + row.tn);
+
+  const blob = db.prepare("select bl from t where k = ?").get("a") as { bl: Uint8Array };
+  show("blob.len", String(blob.bl.length));
+  show("blob.isBuffer", String(Buffer.isBuffer(blob.bl)));
+  show("blob.bytes", String(blob.bl[0]) + "," + String(blob.bl[1]) + "," + String(blob.bl[2]));
+
+  ins.run("b", 7, 0.5, new Uint8Array([1]), null);
+  const all = db.prepare("select k from t order by k").all() as { k: string }[];
+  show("all.len", String(all.length));
+  show("all.keys", all[0].k + "," + all[1].k);
+
+  const missing = db.prepare("select k from t where k = ?").get("zz");
+  show("get.missing", String(missing));
+
+  // The error surface, through the same handle: name, EXTENDED code, text.
+  try {
+    ins.run("a", 1, 1, new Uint8Array([1]), null);
+    show("err.unique", "NO THROW");
+  } catch (e) {
+    const x = e as NodeJS.ErrnoException;
+    show("err.unique", x.name + "/" + String(x.code) + "/" + x.message);
+  }
+
+  show("pragma.journal", String(db.pragma("journal_mode = WAL", { simple: true })));
+
+  db.close();
+  show("closed", String(db.open));
+  show("END", "done");
+}
+
+void main();
