@@ -186,6 +186,33 @@ describe("the LRU sweep spares what a live build is linking", () => {
    * saw first and read as a code regression. With obj/ spared the sweep runs
    * out of candidates instead — a cache that is merely over its cap, rather
    * than one that deleted what a running link was about to open. */
+  /* Moving staging out of the swept tree is what stops a sweep from deleting
+   * an object out of a live compile — and it would leak a staging directory
+   * every time a build is killed, which on this host is routine. */
+  test("staging is reclaimed only once nothing has written to it for hours", async () => {
+    const root = await tmp("scr-staging-");
+    await mkdir(join(root, "bin"), { recursive: true });
+    const live = join(root, "staging", "build-live");
+    const dead = join(root, "staging", "build-dead");
+    await mkdir(live, { recursive: true });
+    await mkdir(dead, { recursive: true });
+    await writeFile(join(live, "a.o"), Buffer.alloc(1024));
+    await writeFile(join(dead, "a.o"), Buffer.alloc(1024));
+    const old = new Date(Date.now() - 9 * 60 * 60 * 1000);
+    await utimes(dead, old, old);
+
+    const prev = process.env["SCRIPTC_CACHE_MAX_MB"];
+    process.env["SCRIPTC_CACHE_MAX_MB"] = "4096";
+    try {
+      await pruneCacheOnce(root);
+    } finally {
+      if (prev === undefined) delete process.env["SCRIPTC_CACHE_MAX_MB"];
+      else process.env["SCRIPTC_CACHE_MAX_MB"] = prev;
+    }
+    const left = await readdir(join(root, "staging"));
+    expect(left).toEqual(["build-live"]); // the running compile is untouched
+  });
+
   /* Sparing obj/ from the byte sweep must not become a disk leak: every
    * runtime or vendor edit mints a fresh key and never revisits the old one.
    * The reclamation that stops that has to tell a DEAD key from a merely old
