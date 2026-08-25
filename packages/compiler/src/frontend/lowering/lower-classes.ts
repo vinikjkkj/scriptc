@@ -855,16 +855,124 @@ export interface GenericClassInfo {
     return irName ? (L.classes.get(irName) ?? null) : null;
   }
 
+/** Does the constructor READ `this.<name>` at a source position before
+   * `declStart`, the assignment that declares the field? Lexical and
+   * constructor-local by design: a read from a method the constructor
+   * calls, or from a base constructor's virtual dispatch through
+   * `super()`, is not decidable here and keeps today's behaviour. The LHS
+   * of a plain `=` is a write, not a read; `this.x += 1` is both, and
+   * counts. */
+  function ctorReadsBeforeDeclaration(body: ts.Block, name: string, declStart: number): boolean {
+    let found = false;
+    const visit = (n: ts.Node): void => {
+      if (found) return;
+      if (
+        ts.isPropertyAccessExpression(n) &&
+        n.expression.kind === ts.SyntaxKind.ThisKeyword &&
+        ts.isIdentifier(n.name) &&
+        n.name.text === name &&
+        n.getStart() < declStart
+      ) {
+        const parent = n.parent as ts.Node | undefined;
+        const isWriteTarget =
+          parent !== undefined &&
+          ts.isBinaryExpression(parent) &&
+          parent.left === n &&
+          parent.operatorToken.kind === ts.SyntaxKind.EqualsToken;
+        if (!isWriteTarget) {
+          found = true;
+          return;
+        }
+      }
+      ts.forEachChild(n, visit);
+    };
+    ts.forEachChild(body, visit);
+    return found;
+  }
+
+/** Can a CHECKED-DYNAMIC box stand in for this inference without
+   * inventing an answer? The dyn tree's native shapes are the primitives,
+   * plain objects and real arrays: keyed reads and writes on them do what
+   * JS does. It has NO method table for built-in class instances — a Map
+   * in a dyn box answers `m.set is not a function` (measured, on
+   * `this.m = new Map()`), which is a wrong answer standing where a
+   * refusal belonged. So the box stands in for `any`/`unknown`, the
+   * primitives and units, arrays, and plain ANONYMOUS object shapes with
+   * no call or construct signatures — RECURSIVELY, because a Map nested
+   * inside a plain object is the same wrong answer one level down — and
+   * for nothing else. A cyclic shape is admitted at the back-edge (the
+   * arms that close the cycle were judged on the way in) and the depth cap
+   * makes a pathological nesting a refusal, never a hang. */
+  function dynBoxIsFaithful(L: Lowerer, t: ts.Type, seen = new Set<ts.Type>(), depth = 0): boolean {
+    if (depth > 6) return false;
+    const arms: readonly ts.Type[] = t.isUnionType() ? t.getTypes() : [t];
+    return arms.every((a) => {
+      if (seen.has(a)) return true;
+      seen.add(a);
+      if ((a.flags & DYN_FAITHFUL_PRIMITIVES) !== 0) return true;
+      if ((a.flags & ts.TypeFlags.Object) === 0) return false;
+      if (L.checker.isArrayType(a)) {
+        const elem = L.checker.getTypeArguments(a as ts.TypeReference)[0];
+        return elem === undefined || dynBoxIsFaithful(L, elem, seen, depth + 1);
+      }
+      const objectFlags = (a as ts.ObjectType).objectFlags;
+      if ((objectFlags & (ts.ObjectFlags.Anonymous | ts.ObjectFlags.ObjectLiteral)) === 0) return false;
+      if (L.checker.getCallSignatures(a).length > 0) return false;
+      if (L.checker.getConstructSignatures(a).length > 0) return false;
+      return L.checker
+        .getPropertiesOfType(a)
+        .every((m) => dynBoxIsFaithful(L, L.checker.getTypeOfSymbol(m), seen, depth + 1));
+    });
+  }
+
+  /** The flag set dynBoxIsFaithful admits outright: everything whose whole
+   * runtime representation already IS a dyn payload. */
+  const DYN_FAITHFUL_PRIMITIVES =
+    ts.TypeFlags.Any |
+    ts.TypeFlags.Unknown |
+    ts.TypeFlags.Undefined |
+    ts.TypeFlags.Null |
+    ts.TypeFlags.Never |
+    ts.TypeFlags.StringLike |
+    ts.TypeFlags.NumberLike |
+    ts.TypeFlags.BooleanLike |
+    ts.TypeFlags.BigIntLike;
+
 /** The undefined-armed union of a JS class property's inferred type — the
    * honest slot for a field first assigned outside the constructor's top
    * level (undefined until the write runs, Node-exact). Null when the
-   * inference is unmappable, checked-dynamic (dyn stays out of class
-   * fields — KEEP NARROW), or an arm-less kind that cannot join a union
-   * (genResultRecord's list). */
+   * inference is unmappable or an arm-less kind that cannot join a union
+   * (genResultRecord's list).
+   *
+   * A CHECKED-DYNAMIC inference is NOT one of those: `dyn` already carries
+   * undefined as a value, and both backends' undefined-field initializers
+   * already store `scr_dyn_undefined()` into a dyn field (the
+   * `class C { u?: unknown; n: number }` case they were written for), so a
+   * dyn slot IS the undefined-armed representation — no union needed. The
+   * old blanket exclusion is what fenced the commonest JS shape there is:
+   * a field assigned from an UNTYPED parameter outside the constructor's
+   * top level (`this._connectionCallback = callback` — pg's terminal
+   * blocker), where the property's inferred type is implicit `any`. The
+   * constructor's own top-level scan has declared such fields dyn all
+   * along; the two scans now agree.
+   *
+   * What does NOT get this treatment: every OTHER unmappable inference.
+   * Routing all of them through dynFallbackType was measured and REVERTED
+   * — `if (f) this.m = new Map()` types the property `Map<any, any>`,
+   * which maps to nothing, and the dyn slot then answered
+   * "y.m.set is not a function" at run time: a loud refusal replaced by a
+   * wrong answer, which is the one trade this project never makes. Only
+   * `any` itself, whose whole representation IS the checked-dynamic box,
+   * takes the fallback, plus the plain shapes dynBoxIsFaithful admits. */
   function undefArmedFieldType(L: Lowerer, p: ts.Symbol): IrType | null {
     const t = L.checker.getTypeOfSymbol(p);
     const mapped = L.mapTypeOf(t);
-    if (!mapped || mapped.kind === "void" || mapped.kind === "dyn") return null;
+    // The checked-dynamic fallback, for the inferences a dyn box
+    // represents FAITHFULLY (dynBoxIsFaithful). Implicit `any` — the
+    // untyped-parameter shape — is the arm that fires on real packages.
+    if (mapped === null && dynBoxIsFaithful(L, t)) return DYN;
+    if (!mapped || mapped.kind === "void") return null;
+    if (mapped.kind === "dyn") return mapped;
     const byKey = new Map<string, IrType>();
     const arms = mapped.kind === "union" ? (L.unions.get(mapped.unionId)?.arms ?? []) : [mapped];
     for (const a of arms) {
@@ -2622,11 +2730,22 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
               {
                 const rhsT = L.typeOf(((stmt as ts.ExpressionStatement).expression as ts.BinaryExpression).right);
                 const assignsUndef = (rhsT.flags & ts.TypeFlags.Undefined) !== 0;
+                // A READ of the field EARLIER IN THIS CONSTRUCTOR than the
+                // assignment that declares it. In Node the property does not
+                // exist yet and the read answers `undefined`; a plain static
+                // slot answers the calloc zero instead — measured, `0`
+                // against Node's `undefined`, which is the zeroed-memory
+                // trap this whole scan exists to avoid, firing inside the
+                // supported form. The slot takes the undefined arm for the
+                // same reason the JSDoc-contradiction case above does.
+                const readsFirst =
+                  ctor?.body !== undefined &&
+                  ctorReadsBeforeDeclaration(ctor.body, name, assign.getStart());
                 const admitsUndef =
                   type.kind === "dyn" ||
                   isUnitType(type) ||
                   (type.kind === "union" && L.armTag(type.unionId, UNDEFINED_T) >= 0);
-                if (assignsUndef && !admitsUndef) {
+                if ((assignsUndef || readsFirst) && !admitsUndef) {
                   const widened = L.withUndefinedArmOf(type);
                   if (widened !== null) type = widened;
                 }

@@ -1722,7 +1722,7 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
       // Only arrows can see an enclosing method's `this` (JS lexical-this);
       // `this` in plain nested functions is already a tsc error under
       // noImplicitThis, so the generic scope walk here is preflight-safe.
-      const local = L.resolveThis();
+      const local = L.resolveThis(expr);
       if (local) return { kind: "varRef", localId: local.id, type: local.type, loc };
       // `this` in a plain JS FUNCTION (not a method): the AMBIENT
       // RECEIVER (libCall dyn.this — scr_dyn_this_get). Firing sites bind
