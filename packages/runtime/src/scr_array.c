@@ -12,14 +12,24 @@ static long scr_live_arrays = 0;
 long scr_arr_live_count(void) { return scr_live_arrays; }
 #endif
 
-static void scr_arr_oom(void) {
+/* `cold` keeps a refusal path out of the hot path's stack frame; clang and
+ * gcc both take it, and a compiler that knows neither attribute still
+ * compiles this file (the spelling degrades to nothing). */
+#if defined(__GNUC__) || defined(__clang__)
+#define SCR_ARR_COLD __attribute__((noinline, cold))
+#else
+#define SCR_ARR_COLD
+#endif
+#define SCR_ARR_COLD_TRAP SCR_ARR_COLD _Noreturn
+
+SCR_ARR_COLD_TRAP static void scr_arr_oom(void) {
   scr_trap("scriptc: out of memory\n");
 }
 
 /* JS would return undefined for an OOB read and create holes for a far OOB
  * write; both are unrepresentable here (see SEMANTICS.md), so any invalid
  * index — negative, fractional, NaN, or past the allowed end — traps. */
-static void scr_arr_trap_oob(double i, size_t len) {
+SCR_ARR_COLD_TRAP static void scr_arr_trap_oob(double i, size_t len) {
   char buf[32];
   scr_f64_to_str(i, buf);
   scr_trap_fmt("scriptc: RangeError: array index %s out of bounds (length %zu)\n",
@@ -38,7 +48,7 @@ static void scr_arr_trap_oob(double i, size_t len) {
  * the program died on a field load, with no index, no length and no line;
  * `pop()` handed it to a typed local where `=== null` folds to the
  * constant false, which is a silent wrong answer rather than a crash. */
-static void scr_arr_trap_absent(size_t i, size_t len) {
+SCR_ARR_COLD_TRAP static void scr_arr_trap_absent(size_t i, size_t len) {
   scr_trap_fmt("scriptc: TypeError: array element %zu is absent (length %zu) "
                "-- the slot was never assigned, or was cleared with null; "
                "JS reads undefined from a hole\n",
@@ -47,13 +57,61 @@ static void scr_arr_trap_absent(size_t i, size_t len) {
 
 /* Validate i as an element index. limit is a->len for reads, a->len + 1 for
  * writes (i == len appends). NaN fails the >= 0 test; fractional indices
- * fail the trunc test. */
-static size_t scr_arr_check_index(const ScrArr *a, double i, bool allow_append) {
-  size_t limit = a->len + (allow_append ? 1 : 0);
+ * fail the integrality test.
+ *
+ * TWO ARMS, AND THE SECOND ONE IS THE FIRST ONE'S SPELLING UNCHANGED.
+ * callgrind priced scr_arr_get_f64 at 39 self instructions per read plus a
+ * 3-Ir `call trunc@plt` into libm -- 32.49% of the numeric-add bench
+ * scenario, 22.03% of record-field, 22.59% of array-churn -- and isa.mjs
+ * accounted for all 39, of which exactly ONE is the load:
+ *
+ *    9  the stack frame, which exists only because the body CALLS
+ *    2  `call trunc@plt` (+3 more inside libm), because `i != trunc(i)`
+ *       is a LIBRARY CALL on a baseline x86-64 target with no SSE4.1
+ *    2  spilling `i` and `a` across that call
+ *    6  u64 -> double for `limit` (punpckldq/subpd/movapd/unpckhpd/addsd
+ *       and the compare), because the comparison is done in DOUBLES
+ *    7  double -> u64 for `i` (cvttsd2si twice, sar/subsd/and/or) -- an
+ *       UNSIGNED conversion is not one instruction here
+ *   11  the remaining compares, branches and the two header loads
+ *    1  movsd (%rax,%rsi,8)
+ *
+ * For 0 <= i < 2^53 none of that is needed: (int64_t)i truncates exactly
+ * and is defined (the window sits far inside int64), one cvtsi2sd comes
+ * back, equality with i IS integrality, and the bound then compares as
+ * INTEGERS so `limit` never becomes a double. Nothing else changes: every
+ * value the fast window does not accept -- NaN, negatives, fractions, both
+ * infinities, |i| >= 2^53, and every out-of-range index -- falls into
+ * scr_arr_check_index_slow, whose test is this function's ORIGINAL
+ * EXPRESSION character for character. The fast arm accepts a strict subset
+ * of what that expression accepts and returns the same (size_t)i for it, so
+ * the answer is unchanged for every double on both arms.
+ *
+ * The slow arm is `cold` and `noinline` for the same measurement: while it
+ * was inline, its `char buf[32]` and its two calls put a 48-byte frame and
+ * three callee-saved pushes on the HOT path. Out of line, the fast arm
+ * calls nothing. 39 self + 3 libm becomes 25 self and no libm.
+ *
+ * WHAT DID NOT WORK, so nobody pays for it twice: making only the traps
+ * `noinline cold` and leaving trunc() in place shrank the frame from 48
+ * bytes to 16 and moved the instruction count by ZERO. The frame is the
+ * call's, not the buffer's. */
+#define SCR_ARR_FAST_MAX 9007199254740992.0 /* 2^53 */
+
+SCR_ARR_COLD static size_t scr_arr_check_index_slow(const ScrArr *a, double i, size_t limit) {
   if (!(i >= 0) || i != trunc(i) || i >= (double)limit) {
     scr_arr_trap_oob(i, a->len);
   }
   return (size_t)i;
+}
+
+static size_t scr_arr_check_index(const ScrArr *a, double i, bool allow_append) {
+  size_t limit = a->len + (allow_append ? 1 : 0);
+  if (i >= 0.0 && i < SCR_ARR_FAST_MAX) {
+    int64_t n = (int64_t)i;
+    if ((double)n == i && (uint64_t)n < (uint64_t)limit) return (size_t)n;
+  }
+  return scr_arr_check_index_slow(a, i, limit);
 }
 
 /* ── slot packing: 8-byte slots hold doubles, bools, or pointers ───────── */
