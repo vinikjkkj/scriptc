@@ -230,8 +230,14 @@ function classifyStage(res, diags, exePath) {
  * the exit code does not mention. */
 const FENCE_RE = /scr_throw_error_msg_code\(SCR_ERR_ERROR,\s*"((?:[^"\\]|\\.)*)",\s*\d+,\s*"(SC\d+)"\)/g;
 
-function liveness(exePath) {
-  const cPath = exePath.replace(/\.exe$/i, "") + ".c";
+/* The emitted C is named after the ENTRY's stem, not after `-o`: the CLI
+ * takes `basename(input)` for the stem and only the directory from the
+ * output path. Deriving the C path from the exe name works exactly when
+ * those two happen to agree, which is true for every bench entry and
+ * false for every probe — which is how the self-test found this. */
+function liveness(exePath, entryRel) {
+  const stem = entryRel.split("/").join("\\").split("\\").pop().replace(/\.(ts|tsx|js|mjs|cjs|c|ll)$/, "");
+  const cPath = join(dirname(exePath), `${stem}.c`);
   if (!existsSync(cPath)) return null;
   let c;
   try {
@@ -365,9 +371,9 @@ function selfTest() {
     const iExe = join(probeDir, "inert.exe");
     rmSync(iExe, { force: true });
     const ib = runBuild("__fb_probe_inert.ts", iExe, join(probeDir, "inert.log"));
-    const iLive = liveness(iExe);
+    const iLive = liveness(iExe, "__fb_probe_inert.ts");
     rmSync(inert, { force: true });
-    const gLive = liveness(join(probeDir, "green.exe"));
+    const gLive = liveness(join(probeDir, "green.exe"), "__fb_probe_green.ts");
     results.liveness = {
       inertStatus: ib.status,
       inertFunctions: iLive?.functions ?? null,
@@ -453,7 +459,7 @@ function main() {
       ),
     ];
 
-    const live = liveness(exe);
+    const live = liveness(exe, rel);
 
     let ran = null;
     if (stage === "built") {
@@ -512,7 +518,7 @@ function main() {
           stage: classifyStage(lRes, lDiags, lExe),
           diagCount: lDiags.length,
           diagnostics: lDiags,
-          liveness: liveness(lExe),
+          liveness: liveness(lExe, drvName),
         };
       }
     }
