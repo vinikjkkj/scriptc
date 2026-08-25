@@ -9460,6 +9460,18 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/6480-sha256-padding-and-streaming.ts": {
+   "order": [
+    "<repo>/tests/corpus/6480-sha256-padding-and-streaming.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/6481-hmac-key-and-message-bounds.ts": {
+   "order": [
+    "<repo>/tests/corpus/6481-hmac-key-and-message-bounds.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/700-classes-basic.ts": {
    "order": [
     "<repo>/tests/corpus/700-classes-basic.ts"

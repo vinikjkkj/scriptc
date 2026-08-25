@@ -2962,6 +2962,39 @@ ScrStr *scr_crypto_random_string(double n, ScrStr *enc) {
  * implementation; the differential corpus pins it against Node's own
  * digests. */
 
+/* Big-endian word access, in ONE place.
+ *
+ * FIPS 180-4 messages and digests are big-endian byte strings. The
+ * shift-and-or form these replace was endian-NEUTRAL, so a bare
+ * __builtin_bswap would have been a silent correctness regression on a
+ * big-endian target rather than a speed-up: the byte order is therefore a
+ * compile-time branch, and on every target this project builds for it
+ * compiles to one `movbe`-class instruction. */
+#if defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
+#define SCR_HOST_BIG_ENDIAN 1
+#else
+#define SCR_HOST_BIG_ENDIAN 0
+#endif
+
+static uint32_t scr_be32_load(const unsigned char *p) {
+  uint32_t v;
+  memcpy(&v, p, 4);
+  return SCR_HOST_BIG_ENDIAN ? v : __builtin_bswap32(v);
+}
+static void scr_be32_store(unsigned char *p, uint32_t v) {
+  uint32_t o = SCR_HOST_BIG_ENDIAN ? v : __builtin_bswap32(v);
+  memcpy(p, &o, 4);
+}
+static uint64_t scr_be64_load(const unsigned char *p) {
+  uint64_t v;
+  memcpy(&v, p, 8);
+  return SCR_HOST_BIG_ENDIAN ? v : __builtin_bswap64(v);
+}
+static void scr_be64_store(unsigned char *p, uint64_t v) {
+  uint64_t o = SCR_HOST_BIG_ENDIAN ? v : __builtin_bswap64(v);
+  memcpy(p, &o, 8);
+}
+
 static const uint32_t scr_sha256_k[64] = {
     0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1,
     0x923f82a4, 0xab1c5ed5, 0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3,
@@ -2984,11 +3017,7 @@ static void scr_sha256_block(uint32_t h[8], const unsigned char *p) {
   /* One unaligned load and one byte swap per word. The shift-and-or form
    * this replaces is four byte loads, three shifts and three ors, and
    * isa.mjs prices it at 2.22% of this function on the lane that runs it. */
-  for (int i = 0; i < 16; i++) {
-    uint32_t v;
-    memcpy(&v, p + i * 4, 4);
-    w[i] = __builtin_bswap32(v);
-  }
+  for (int i = 0; i < 16; i++) w[i] = scr_be32_load(p + i * 4);
   for (int i = 16; i < 64; i++) {
     uint32_t s0 = scr_sha256_rotr(w[i - 15], 7) ^ scr_sha256_rotr(w[i - 15], 18) ^ (w[i - 15] >> 3);
     uint32_t s1 = scr_sha256_rotr(w[i - 2], 17) ^ scr_sha256_rotr(w[i - 2], 19) ^ (w[i - 2] >> 10);
@@ -3328,15 +3357,11 @@ static size_t scr_sha256_digest(const unsigned char *data, size_t len, unsigned 
   else memset(tail, 0, 128);
   memcpy(tail, data + i, rem);
   tail[rem] = 0x80;
-  uint64_t bits_be = __builtin_bswap64((uint64_t)len * 8);
-  memcpy(tail + pad - 8, &bits_be, 8);
+  scr_be64_store(tail + pad - 8, (uint64_t)len * 8);
   scr_sha256_blocks(h, tail, pad / 64);
-  /* The digest is eight big-endian words: one byte swap and one 4-byte
-   * store each, in place of 32 shift-and-store steps. */
-  for (int j = 0; j < 8; j++) {
-    uint32_t w = __builtin_bswap32(h[j]);
-    memcpy(out + j * 4, &w, 4);
-  }
+  /* The digest is eight big-endian words: one store each, in place of 32
+   * shift-and-store steps. */
+  for (int j = 0; j < 8; j++) scr_be32_store(out + j * 4, h[j]);
   return 32;
 }
 
@@ -3449,11 +3474,7 @@ static void scr_sha512_block(uint64_t h[8], const unsigned char *p) {
   /* Eight byte loads and eight shift-or steps per word became one load and
    * one swap. SHA-512 has no hardware on this host, so unlike SHA-256 it is
    * still the scalar code that ships here. */
-  for (int i = 0; i < 16; i++) {
-    uint64_t v;
-    memcpy(&v, p + i * 8, 8);
-    w[i] = __builtin_bswap64(v);
-  }
+  for (int i = 0; i < 16; i++) w[i] = scr_be64_load(p + i * 8);
   for (int i = 16; i < 80; i++) {
     uint64_t s0 = scr_sha512_rotr(w[i - 15], 1) ^ scr_sha512_rotr(w[i - 15], 8) ^ (w[i - 15] >> 7);
     uint64_t s1 = scr_sha512_rotr(w[i - 2], 19) ^ scr_sha512_rotr(w[i - 2], 61) ^ (w[i - 2] >> 6);
@@ -3491,14 +3512,10 @@ static size_t scr_sha512_digest(const unsigned char *data, size_t len, unsigned 
   else memset(tail, 0, 256);
   memcpy(tail, data + i, rem);
   tail[rem] = 0x80;
-  uint64_t bits_be = __builtin_bswap64((uint64_t)len * 8);
-  memcpy(tail + pad - 8, &bits_be, 8);
+  scr_be64_store(tail + pad - 8, (uint64_t)len * 8);
   scr_sha512_block(h, tail);
   if (pad == 256) scr_sha512_block(h, tail + 128);
-  for (int j = 0; j < 8; j++) {
-    uint64_t w = __builtin_bswap64(h[j]);
-    memcpy(out + j * 8, &w, 8);
-  }
+  for (int j = 0; j < 8; j++) scr_be64_store(out + j * 8, h[j]);
   return 64;
 }
 
@@ -3512,17 +3529,12 @@ static ScrStr *scr_digest_encode(const unsigned char *d, size_t n, const ScrStr 
      * -> 38.1. Writing the two characters into a `char[2]` and memcpy'ing
      * THAT is the portable-looking version and clang does not merge it:
      * measured 87.4, slower than the loop it replaces. So the word is built
-     * explicitly, and the byte order is a compile-time branch rather than
-     * an assumption — on a big-endian target the high nibble is the high
-     * byte and this must not silently emit a byte-swapped digest. */
+     * explicitly, with the same endianness branch the digests use. */
     for (size_t i = 0; i < n; i++) {
       unsigned hi = (unsigned char)hex[d[i] >> 4];
       unsigned lo = (unsigned char)hex[d[i] & 0x0f];
-#if defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
-      uint16_t pair = (uint16_t)((hi << 8) | lo);
-#else
-      uint16_t pair = (uint16_t)(hi | (lo << 8));
-#endif
+      uint16_t pair = SCR_HOST_BIG_ENDIAN ? (uint16_t)((hi << 8) | lo)
+                                          : (uint16_t)(hi | (lo << 8));
       memcpy(buf + i * 2, &pair, 2);
     }
     return scr_str_new(buf, n * 2);
