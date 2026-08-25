@@ -3524,18 +3524,18 @@ static ScrStr *scr_digest_encode(const unsigned char *d, size_t n, const ScrStr 
   if (enc->len == 3 && memcmp(enc->data, "hex", 3) == 0) {
     static const char hex[] = "0123456789abcdef";
     char buf[128]; /* the widest digest is SHA-512's 64 bytes */
-    /* Both nibbles as ONE 16-bit store rather than two byte stores to
-     * adjacent addresses. Measured on this host over 32 bytes: 65.0 ticks
-     * -> 38.1. Writing the two characters into a `char[2]` and memcpy'ing
-     * THAT is the portable-looking version and clang does not merge it:
-     * measured 87.4, slower than the loop it replaces. So the word is built
-     * explicitly, with the same endianness branch the digests use. */
+    /* Two byte stores per digest byte, and it is left alone DELIBERATELY.
+     * Building the pair as one 16-bit word and storing that reads like the
+     * obvious win and measures 0.93-1.03x here — nothing, or slightly worse
+     * (lab/shalab/hexship.c, proved equal over all 256 byte values first).
+     * The version that IS faster, 1.8x, is a 256-entry uint16 table; it is
+     * not here because the only caller that reaches it is `.digest("hex")`,
+     * which zapo never calls — every zapo digest goes through `.digest()`
+     * to a Buffer — and 25 ticks on the messaging bench is under that
+     * lane's code-layout floor. */
     for (size_t i = 0; i < n; i++) {
-      unsigned hi = (unsigned char)hex[d[i] >> 4];
-      unsigned lo = (unsigned char)hex[d[i] & 0x0f];
-      uint16_t pair = SCR_HOST_BIG_ENDIAN ? (uint16_t)((hi << 8) | lo)
-                                          : (uint16_t)(hi | (lo << 8));
-      memcpy(buf + i * 2, &pair, 2);
+      buf[i * 2] = hex[d[i] >> 4];
+      buf[i * 2 + 1] = hex[d[i] & 0x0f];
     }
     return scr_str_new(buf, n * 2);
   }
