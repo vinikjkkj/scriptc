@@ -498,8 +498,11 @@ function main() {
           drv,
           [
             `import { ${exports.join(", ")} } from '${relImport}'`,
-            `const kept: unknown[] = [${exports.join(", ")}]`,
-            `console.log('FBLIVE ' + String(kept.length))`,
+            /* `typeof`, not an `unknown[]`: an array of unknown is itself a
+             * refusal (SC1101, "converting typed values to 'unknown'"), and
+             * the driver's own fence would then be reported as the subject
+             * file's. Measured: it was, once. */
+            `console.log('FBLIVE ' + ${exports.map((e) => `typeof ${e}`).join(" + ' ' + ")})`,
             "",
           ].join("\n"),
         );
