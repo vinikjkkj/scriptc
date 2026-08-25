@@ -1498,13 +1498,18 @@ async function fingerprintInputs(dir: string, rel: string, out: [string, string]
  * ~26 MB content hash behind it runs once per process and again only when a
  * source actually changes. */
 let rtFingerprintMemo: { sig: string; hash: string } | null = null;
-async function runtimeFingerprint(rtDir: string): Promise<string> {
+export async function runtimeFingerprint(rtDir: string): Promise<string> {
   const inputs: [string, string][] = [];
   await fingerprintInputs(rtDir, "src", inputs);
   await fingerprintInputs(join(rtDir, "..", "vendor"), "vendor", inputs);
   inputs.sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
   const stats = await Promise.all(inputs.map(([, p]) => stat(p)));
-  const sig = stats.map((s, i) => `${inputs[i]?.[0] ?? ""}:${s.size}:${s.mtimeMs}`).join("|");
+  // rtDir leads the signature: the per-file entries are RELATIVE names, so
+  // two different runtime trees of the same shape would otherwise share one
+  // memo slot. Production only ever sees one rtDir per process; a test that
+  // builds two of them would have read the first one's hash for the second.
+  const sig =
+    `${rtDir} ` + stats.map((s, i) => `${inputs[i]?.[0] ?? ""}:${s.size}:${s.mtimeMs}`).join("|");
   if (rtFingerprintMemo !== null && rtFingerprintMemo.sig === sig) return rtFingerprintMemo.hash;
   const h = createHash("sha256").update(QJS_COMMIT).update(MBEDTLS_VERSION).update(ZLIB_VERSION).update(SQLITE_VERSION);
   for (const [name, path] of inputs) h.update(name).update("\0").update(await readFile(path)).update("\0");
@@ -1628,6 +1633,14 @@ let pruneDone = false;
 async function pruneCache(root: string): Promise<void> {
   if (pruneDone) return;
   pruneDone = true;
+  await pruneCacheOnce(root);
+}
+
+/** The sweep itself, without the once-per-process latch — the latch is a
+ * cost control, and a test that could only ever run it once could not show
+ * that it both spares obj/ AND still evicts from bin/. A sweep that evicted
+ * nothing would make every race test pass for the wrong reason. */
+export async function pruneCacheOnce(root: string): Promise<void> {
   const capBytes = Number(process.env["SCRIPTC_CACHE_MAX_MB"] ?? "4096") * 1024 * 1024;
   if (!Number.isFinite(capBytes) || capBytes <= 0) return;
   const objRoot = join(root, "obj");
