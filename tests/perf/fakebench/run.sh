@@ -14,8 +14,13 @@
 # be installed before the compiler can be asked anything about it.
 set -uo pipefail
 
-ROOT="${1:?usage: run.sh <root> <worktree>}"
-WT="${2:?usage: run.sh <root> <worktree>}"
+ROOT="${1:?usage: run.sh <root> <worktree> [tools-dir] [out-suffix]}"
+WT="${2:?usage: run.sh <root> <worktree> [tools-dir] [out-suffix]}"
+# The tools live on THIS branch; <worktree> is the compiler under test. For
+# an A/B they are different checkouts, so the tool directory is separate
+# from the compiler directory.
+TOOLS="${3:-$WT/tests/perf/fakebench}"
+SUF="${4:-}"
 APP="$ROOT/app"
 PROV_COMMIT="${FB_PROV_COMMIT:-250f9af5229a545eec28ddbd3e8774a397cdb0bb}"
 ZAPO_SRC="${FB_ZAPO_SRC:-/g/zapo-work/caches/provenance/$PROV_COMMIT}"
@@ -74,23 +79,43 @@ JSON
   (cd "$APP" && npm install --prefer-offline --legacy-peer-deps) || exit 1
 fi
 
+mkdir -p "$ROOT/out$SUF" "$ROOT/survey$SUF"
+
+# FB_LANES selects which lanes run (default all). The A/B side only needs
+# the flag lane and the build survey; re-running the control lanes against
+# a compiler that cannot move them measures nothing twice.
+LANES="${FB_LANES:-closure,asgiven,unmasked,noprov,survey}"
+has() { case ",$LANES," in *",$1,"*) return 0;; *) return 1;; esac; }
+
+if has unmasked; then
 echo "== unmask"
-node "$WT/tests/perf/fakebench/unmask.mjs" || exit 1
+node "$TOOLS/unmask.mjs" || exit 1
+fi
 
+if has closure; then
 echo "== closure census"
-FB_OUT="$ROOT/out" node "$WT/tests/perf/fakebench/closure.mjs" | tee "$ROOT/out/closure.md"
+FB_OUT="$ROOT/out$SUF" node "$TOOLS/closure.mjs" | tee "$ROOT/out$SUF/closure.md"
+fi
 
+if has asgiven; then
 echo "== blocker census (as given)"
-FB_OUT="$ROOT/out" FB_TAG=asgiven node "$WT/tests/perf/fakebench/census.mjs"
+FB_OUT="$ROOT/out$SUF" FB_TAG=asgiven node "$TOOLS/census.mjs"
+fi
 
+if has unmasked; then
 echo "== blocker census (unmasked)"
-FB_OUT="$ROOT/out" FB_TAG=unmasked FB_BENCH=tree/packages/fake-server/bench-unmasked \
-  node "$WT/tests/perf/fakebench/census.mjs"
+FB_OUT="$ROOT/out$SUF" FB_TAG=unmasked FB_BENCH=tree/packages/fake-server/bench-unmasked \
+  node "$TOOLS/census.mjs"
+fi
 
+if has noprov; then
 echo "== blocker census (no --provenance-sources)"
-FB_OUT="$ROOT/out" FB_TAG=noprov FB_NO_PROVENANCE=1 node "$WT/tests/perf/fakebench/census.mjs"
+FB_OUT="$ROOT/out$SUF" FB_TAG=noprov FB_NO_PROVENANCE=1 node "$TOOLS/census.mjs"
+fi
 
+if has survey; then
 echo "== build survey"
-FB_OUT="$ROOT/survey" FB_TIMEOUT_S=2400 node "$WT/tests/perf/fakebench/survey.mjs"
+FB_OUT="$ROOT/survey$SUF" FB_TIMEOUT_S=2400 node "$TOOLS/survey.mjs"
+fi
 
-echo "== done; artifacts under $ROOT/out and $ROOT/survey"
+echo "== done; artifacts under $ROOT/out$SUF and $ROOT/survey$SUF"
