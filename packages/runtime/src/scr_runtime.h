@@ -368,6 +368,9 @@ static inline void *scr_pool_take(ScrPool *p, size_t n) {
   return NULL;
 #else
   size_t r = scr_pool_bytes(n);
+#ifdef SCR_POOLSTAT_ON
+  scr_poolstat_take_call(p, r);
+#endif
   if (r == 0 || r > SCR_POOL_MAX) return NULL;
   /* size_t rather than int, and that is worth five instructions here.
    * `int c` makes `p->head[c]` a SIGNED index, so clang must sign-extend
@@ -392,6 +395,9 @@ static inline void *scr_pool_take(ScrPool *p, size_t n) {
 #else
   p->n[c]--;
 #endif
+#ifdef SCR_POOLSTAT_ON
+  scr_poolstat_hit(p, r);
+#endif
   return b;
 #endif
 }
@@ -403,13 +409,26 @@ static inline bool scr_pool_give(ScrPool *p, void *b, size_t n) {
   return false;
 #else
   size_t r = scr_pool_bytes(n);
+#ifdef SCR_POOLSTAT_ON
+  scr_poolstat_give_call(p, r);
+#endif
   if (r == 0 || r > SCR_POOL_MAX) return false;
   size_t c = r / SCR_POOL_GRAIN - 1u;  /* unsigned; see scr_pool_take */
 #if SCR_POOL_BUDGET
   size_t held = p->bytes + r;
-  if (held > (size_t)SCR_POOL_BUDGET) return false;
+  if (held > (size_t)SCR_POOL_BUDGET) {
+#ifdef SCR_POOLSTAT_ON
+    scr_poolstat_reject(p);
+#endif
+    return false;
+  }
 #else
-  if (p->n[c] >= SCR_POOL_DEPTH) return false;
+  if (p->n[c] >= SCR_POOL_DEPTH) {
+#ifdef SCR_POOLSTAT_ON
+    scr_poolstat_reject(p);
+#endif
+    return false;
+  }
 #endif
   __builtin_memcpy(b, &p->head[c], sizeof(void *));
   p->head[c] = b;
@@ -417,6 +436,9 @@ static inline bool scr_pool_give(ScrPool *p, void *b, size_t n) {
   p->bytes = held;
 #else
   p->n[c]++;
+#endif
+#ifdef SCR_POOLSTAT_ON
+  scr_poolstat_accept(p, r);
 #endif
   return true;
 #endif
