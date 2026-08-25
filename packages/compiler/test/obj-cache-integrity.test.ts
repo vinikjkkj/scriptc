@@ -186,6 +186,75 @@ describe("the LRU sweep spares what a live build is linking", () => {
    * saw first and read as a code regression. With obj/ spared the sweep runs
    * out of candidates instead — a cache that is merely over its cap, rather
    * than one that deleted what a running link was about to open. */
+  /* Sparing obj/ from the byte sweep must not become a disk leak: every
+   * runtime or vendor edit mints a fresh key and never revisits the old one.
+   * The reclamation that stops that has to tell a DEAD key from a merely old
+   * one — which is the same distinction the original sweep got wrong. */
+  describe("dead object keys are reclaimed, live ones are not", () => {
+    /** `keys` describes one key directory each: [objects, ageHours]. */
+    async function objCache(keys: [number, number][], bytes = 64 * 1024): Promise<string> {
+      const root = await tmp("scr-objcap-");
+      const blob = Buffer.alloc(bytes, 3);
+      for (const [i, [objs, ageHours]] of keys.entries()) {
+        const dir = join(root, "obj", String(i).repeat(24).slice(0, 24));
+        await mkdir(dir, { recursive: true });
+        const when = new Date(Date.now() - ageHours * 60 * 60 * 1000);
+        for (let o = 0; o < objs; o++) {
+          const p = join(dir, `o${o}.o`);
+          await writeFile(p, blob);
+          await utimes(p, when, when);
+        }
+      }
+      return root;
+    }
+    const withCaps = async (root: string, objMB: string, fn: () => Promise<void>) => {
+      const prevAll = process.env["SCRIPTC_CACHE_MAX_MB"];
+      const prevObj = process.env["SCRIPTC_OBJ_CACHE_MAX_MB"];
+      process.env["SCRIPTC_CACHE_MAX_MB"] = "4096"; // the byte sweep must not be what acts
+      process.env["SCRIPTC_OBJ_CACHE_MAX_MB"] = objMB;
+      try {
+        await fn();
+      } finally {
+        if (prevAll === undefined) delete process.env["SCRIPTC_CACHE_MAX_MB"];
+        else process.env["SCRIPTC_CACHE_MAX_MB"] = prevAll;
+        if (prevObj === undefined) delete process.env["SCRIPTC_OBJ_CACHE_MAX_MB"];
+        else process.env["SCRIPTC_OBJ_CACHE_MAX_MB"] = prevObj;
+      }
+      void root;
+    };
+
+    test("a key untouched for days goes when obj/ is over budget", async () => {
+      const root = await objCache([
+        [20, 72], // dead: nothing has wanted it in three days
+        [20, 0.1], // live: a build touched it minutes ago
+      ]);
+      await withCaps(root, "0.5", () => pruneCacheOnce(root));
+      const left = await readdir(join(root, "obj"));
+      expect(left).toHaveLength(1);
+      expect(await count(join(root, "obj", left[0] as string))).toBe(20); // whole, not half
+    });
+
+    test("a key used within the day is kept even over budget", async () => {
+      // Both keys are recent: an over-budget obj/ is a tuning problem, and
+      // deleting what a build used an hour ago is not the answer to it.
+      const root = await objCache([
+        [20, 2],
+        [20, 3],
+      ]);
+      await withCaps(root, "0.5", () => pruneCacheOnce(root));
+      expect(await readdir(join(root, "obj"))).toHaveLength(2);
+    });
+
+    test("under budget, nothing is reclaimed however old", async () => {
+      const root = await objCache([
+        [20, 500],
+        [20, 500],
+      ]);
+      await withCaps(root, "4096", () => pruneCacheOnce(root));
+      expect(await readdir(join(root, "obj"))).toHaveLength(2);
+    });
+  });
+
   test("a sweep that cannot reach its target still empties no key directory", async () => {
     const root = await fakeCache(2, 20);
     const prev = process.env["SCRIPTC_CACHE_MAX_MB"];
