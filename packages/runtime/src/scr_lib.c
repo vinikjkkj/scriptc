@@ -4211,9 +4211,6 @@ ScrStr *scr_crypto_x509_valid_to_str(ScrStr *pem) {
 
 /* ── String surface (fromCharCode / lastIndexOf) ─────────────────────── */
 
-/* Forward declaration — scr_to_uint32 lives with the bitwise operators
- * below (ToUint16 is its low 16 bits, per spec). */
-static uint32_t scr_to_uint32(double d);
 
 /* String.fromCharCode core over n UTF-16 code units read through
  * `unit(src, i)` (already ToUint16'd): combine adjacent surrogate pairs,
@@ -4261,7 +4258,7 @@ static ScrStr *scr_str_from_units(size_t n, uint32_t (*unit)(void *, size_t), vo
 }
 
 static uint32_t scr_fcc_arr_unit(void *src, size_t i) {
-  return scr_to_uint32(scr_arr_get_f64((ScrArr *)src, (double)i)) & 0xFFFFu;
+  return scr_to_uint32_inl(scr_arr_get_f64((ScrArr *)src, (double)i)) & 0xFFFFu;
 }
 
 /* String.fromCharCode(...codes) over ONE packed f64[]. */
@@ -4270,7 +4267,7 @@ ScrStr *scr_str_from_char_code(ScrArr *codes) {
 }
 
 static uint32_t scr_fcc_bytes_unit(void *src, size_t i) {
-  return scr_to_uint32(scr_bytes_get((const ScrBytes *)src, (double)i)) & 0xFFFFu;
+  return scr_to_uint32_inl(scr_bytes_get((const ScrBytes *)src, (double)i)) & 0xFFFFu;
 }
 
 /* String.fromCharCode(...bytes) — a spread typed array/Buffer source (the
@@ -4989,16 +4986,25 @@ bool scr_num_is_safe_integer(double x) {
   return isfinite(x) && trunc(x) == x && fabs(x) <= 9007199254740991.0;
 }
 
-/* ── bitwise operators ─────────────────────────────────────────────────
- * JS-exact (scr_runtime.h has the contract). ToUint32 is the primitive —
- * ToInt32 and the Int32-typed results are the same 32 bits reinterpreted
- * as two's complement, spelled portably (no implementation-defined
- * narrowing casts, no UB shifts of signed values).
+/* ── bitwise operators ─────────────────────────────────────────────────────
+ * JS-exact (scr_runtime.h has the contract AND, since the 30-instruction
+ * measurement, the implementation: the seven are static inline twins there,
+ * so a `&` the C backend emits is not a call any more).
+ *
+ * What stays here is the pair the inline path cannot be: the COLD ToUint32,
+ * which is too big to inline and is never reached for |d| < 2^32; and the
+ * seven EXTERNAL symbols, which the LLVM backend emits calls to by name
+ * (llvm/emitter.ts maps "&" to scr_bit_and). Each is a one-line delegation,
+ * so there is exactly one implementation of the semantics and both backends
+ * answer from it.
  */
 
-/* The general case: NaN, both infinities, and any |d| >= 2^32. Kept
- * out of line so the fast path below stays a compare and a convert. */
-static uint32_t scr_to_uint32_slow(double d) {
+/* The general case: NaN, both infinities, and any |d| >= 2^32. Kept out of
+ * line so the header's fast path stays a compare and a convert. trunc() and
+ * fmod() are LIBRARY CALLS on a baseline x86-64 target (no SSE4.1 roundsd,
+ * no frem lowering), which is why this is the cold arm and not the whole of
+ * ToUint32: before the split a single `&` cost FOUR libm calls. */
+uint32_t scr_to_uint32_slow(double d) {
   if (!isfinite(d)) return 0; /* NaN, +Infinity, -Infinity */
   double t = trunc(d);
   t = fmod(t, 4294967296.0); /* exact for doubles; result in (-2^32, 2^32) */
@@ -5006,80 +5012,19 @@ static uint32_t scr_to_uint32_slow(double d) {
   return (uint32_t)t;
 }
 
-/* ToUint32's HOT path, and the number that bought it: `x & y` on this
- * backend is an out-of-line scr_bit_and, and scr_bit_and is two
- * ToUint32s. The general form above is not two instructions -- trunc()
- * and fmod() are LIBRARY CALLS on a baseline x86-64 target (no SSE4.1
- * roundsd, no frem lowering), so a single `&` cost FOUR libm calls. A
- * per-function cycle profile of the closure axis put scr_bit_and +
- * scr_to_uint32 + scr_bits_as_int32 at 10.9% of the whole run on a loop
- * whose only bitwise operator is an array index mask.
- *
- * For any d with |d| < 2^32 the whole of ToUint32 is ONE truncating
- * conversion, and each step of the general form collapses:
- *   trunc(d)              == (int64_t)d, exactly (|d| < 2^63)
- *   fmod(t, 2^32)         == t, the identity in this range
- *   (t < 0) ? t + 2^32    == the modulo-2^32 wrap that conversion of a
- *                            negative integer to an unsigned type IS
- * NaN and both infinities fail both comparisons and fall through to the
- * slow path, which still returns 0 for them. The two boundary values
- * +-2^32 are deliberately EXCLUDED from the fast path (the comparisons
- * are strict) so the wrap is never at the edge of the int64 conversion.
- *
- * SCR_FAST_UINT32=0 restores the old body verbatim, which is how the A/B
- * that priced this was run without editing the file between builds. */
-#ifndef SCR_FAST_UINT32
-#define SCR_FAST_UINT32 1
-#endif
+double scr_bit_and(double a, double b) { return scr_bit_and_inl(a, b); }
 
-static uint32_t scr_to_uint32(double d) {
-#if SCR_FAST_UINT32
-  if (d > -4294967296.0 && d < 4294967296.0) return (uint32_t)(int64_t)d;
-#endif
-  return scr_to_uint32_slow(d);
-}
+double scr_bit_or(double a, double b) { return scr_bit_or_inl(a, b); }
 
-/* The 32 bits as a SIGNED (Int32) JS number. */
-static double scr_bits_as_int32(uint32_t u) {
-  return u >= UINT32_C(0x80000000)
-             ? (double)(int32_t)(u - UINT32_C(0x80000000)) + (double)INT32_MIN
-             : (double)u;
-}
+double scr_bit_xor(double a, double b) { return scr_bit_xor_inl(a, b); }
 
-double scr_bit_and(double a, double b) {
-  return scr_bits_as_int32(scr_to_uint32(a) & scr_to_uint32(b));
-}
+double scr_bit_shl(double a, double b) { return scr_bit_shl_inl(a, b); }
 
-double scr_bit_or(double a, double b) {
-  return scr_bits_as_int32(scr_to_uint32(a) | scr_to_uint32(b));
-}
+double scr_bit_shr(double a, double b) { return scr_bit_shr_inl(a, b); }
 
-double scr_bit_xor(double a, double b) {
-  return scr_bits_as_int32(scr_to_uint32(a) ^ scr_to_uint32(b));
-}
+double scr_bit_ushr(double a, double b) { return scr_bit_ushr_inl(a, b); }
 
-double scr_bit_shl(double a, double b) {
-  return scr_bits_as_int32(scr_to_uint32(a) << (scr_to_uint32(b) & 31u));
-}
-
-double scr_bit_shr(double a, double b) {
-  uint32_t u = scr_to_uint32(a);
-  uint32_t s = scr_to_uint32(b) & 31u;
-  uint32_t r = u >> s;
-  if ((u & UINT32_C(0x80000000)) != 0 && s != 0) {
-    r |= ~(UINT32_C(0xffffffff) >> s); /* arithmetic shift: sign-fill */
-  }
-  return scr_bits_as_int32(r);
-}
-
-double scr_bit_ushr(double a, double b) {
-  /* The one Uint32-typed result: (-1 >>> 0) === 4294967295. */
-  return (double)(scr_to_uint32(a) >> (scr_to_uint32(b) & 31u));
-}
-
-double scr_bit_not(double a) {
-  return scr_bits_as_int32(~scr_to_uint32(a));
-}
+double scr_bit_not(double a) { return scr_bit_not_inl(a); }
 
 /* ── checked catch-binding cast (`e as C`) ────────────────────────────
  * The caught analog of the dyn boundary's checked casts: an OBJ payload

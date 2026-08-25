@@ -7102,6 +7102,105 @@ double scr_bit_shr(double a, double b);
 double scr_bit_ushr(double a, double b);
 double scr_bit_not(double a);
 
+/* The same seven, INLINE, and the measurement that put them here. The C
+ * backend emits a CALL for every `&`, and callgrind priced that call at
+ * exactly 30 instructions per AND on x86_64-linux-gnu -- 33.89% of the
+ * record-field bench scenario, 29.40% of closure-call-hoisted, 24.99% of
+ * numeric-add. The disassembly says where the 30 go, and only ONE of them
+ * is the AND:
+ *
+ *   12  the stack frame: push rbp/r15/r14/rbx, sub rsp, and the five pops
+ *       plus ret -- the price of being out of line, nothing else
+ *    9  the two ToUint32 range checks (andpd abs-mask, ucomisd, jbe, x2)
+ *    4  two cvttsd2si, and two jmp over the cold path
+ *    2  two movabs of the SLOW path's isfinite bit-masks, hoisted by the
+ *       register allocator into the hot path where they are never read
+ *    2  xorps + cvtsi2sd, the Int32 result back to double
+ *    1  and %ebx,%eax
+ *
+ * 16 of the 30 exist only because the operation is a function call. These
+ * inline twins delete that half and let the C compiler see through the
+ * rest: `x & 7` folds the literal operand's ToUint32 away entirely, and a
+ * loop-invariant mask hoists.
+ *
+ * WHY TWINS AND NOT `static inline double scr_bit_and(...)`. The LLVM
+ * backend emits calls to the SYMBOL scr_bit_and (llvm/emitter.ts), so the
+ * seven out-of-line definitions must keep both their names and their
+ * external linkage. C99 `inline` cannot bridge the two either: an inline
+ * definition with external linkage may not reference an identifier with
+ * internal linkage (C11 6.7.4p3), which rules out sharing the static
+ * ToUint32 core. So: one implementation, here, inline; scr_lib.c's seven
+ * externs are one-line delegations to it, and the LLVM lane is untouched.
+ */
+
+/* ToUint32's COLD case: NaN, both infinities, and any |d| >= 2^32. Out of
+ * line so the inline fast path below stays a compare and a convert. */
+uint32_t scr_to_uint32_slow(double d);
+
+/* SCR_FAST_UINT32=0 restores the general form for every value, which is how
+ * the A/B that priced the fast path was run without editing a file between
+ * builds. It is NOT a semantic switch: both arms answer the same u32. */
+#ifndef SCR_FAST_UINT32
+#define SCR_FAST_UINT32 1
+#endif
+
+/* For any d with |d| < 2^32 the whole of ToUint32 is ONE truncating
+ * conversion: trunc(d) == (int64_t)d exactly, fmod(t, 2^32) is the identity
+ * in this range, and the negative wrap IS conversion to an unsigned type.
+ * NaN and both infinities fail both comparisons and fall to the cold path,
+ * which still answers 0. The two boundary values +-2^32 are deliberately
+ * EXCLUDED (the comparisons are strict) so the wrap is never at the edge of
+ * the int64 conversion. */
+static inline uint32_t scr_to_uint32_inl(double d) {
+#if SCR_FAST_UINT32
+  if (d > -4294967296.0 && d < 4294967296.0) return (uint32_t)(int64_t)d;
+#endif
+  return scr_to_uint32_slow(d);
+}
+
+/* The 32 bits as a SIGNED (Int32) JS number. */
+static inline double scr_bits_as_int32_inl(uint32_t u) {
+  return u >= UINT32_C(0x80000000)
+             ? (double)(int32_t)(u - UINT32_C(0x80000000)) + (double)INT32_MIN
+             : (double)u;
+}
+
+static inline double scr_bit_and_inl(double a, double b) {
+  return scr_bits_as_int32_inl(scr_to_uint32_inl(a) & scr_to_uint32_inl(b));
+}
+
+static inline double scr_bit_or_inl(double a, double b) {
+  return scr_bits_as_int32_inl(scr_to_uint32_inl(a) | scr_to_uint32_inl(b));
+}
+
+static inline double scr_bit_xor_inl(double a, double b) {
+  return scr_bits_as_int32_inl(scr_to_uint32_inl(a) ^ scr_to_uint32_inl(b));
+}
+
+static inline double scr_bit_shl_inl(double a, double b) {
+  return scr_bits_as_int32_inl(scr_to_uint32_inl(a)
+                               << (scr_to_uint32_inl(b) & 31u));
+}
+
+static inline double scr_bit_shr_inl(double a, double b) {
+  uint32_t u = scr_to_uint32_inl(a);
+  uint32_t s = scr_to_uint32_inl(b) & 31u;
+  uint32_t r = u >> s;
+  if ((u & UINT32_C(0x80000000)) != 0 && s != 0) {
+    r |= ~(UINT32_C(0xffffffff) >> s); /* arithmetic shift: sign-fill */
+  }
+  return scr_bits_as_int32_inl(r);
+}
+
+static inline double scr_bit_ushr_inl(double a, double b) {
+  /* The one Uint32-typed result: (-1 >>> 0) === 4294967295. */
+  return (double)(scr_to_uint32_inl(a) >> (scr_to_uint32_inl(b) & 31u));
+}
+
+static inline double scr_bit_not_inl(double a) {
+  return scr_bits_as_int32_inl(~scr_to_uint32_inl(a));
+}
+
 /* ── typed arrays / Buffer (scr_bytes.c) ──────────────────────────────
  * ONE runtime representation for Uint8Array/Uint32Array/Float32Array,
  * Node's Buffer (a Uint8Array subclass), and DataView: a refcounted,
