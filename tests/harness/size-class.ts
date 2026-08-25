@@ -201,11 +201,11 @@ const platform = process.platform;
 
 /** A default-built hello-world: no regex, no engine. */
 export const STATIC_CLASS_MAX =
-  platform === "linux" ? 397_632 : platform === "win32" ? 659_968 : 366_632;
+  platform === "linux" ? 397_632 : platform === "win32" ? 661_504 : 366_632;
 
 /** A program that uses regex: libregexp + libunicode, never the engine. */
 export const REGEX_CLASS_MAX =
-  platform === "linux" ? 552_680 : platform === "win32" ? 802_304 : 519_680;
+  platform === "linux" ? 552_680 : platform === "win32" ? 803_840 : 519_680;
 
 /* ── the ARMED half of the guard ───────────────────────────────────────
  *
@@ -734,19 +734,19 @@ export const SIZE_DRIFT_PAGE = 4_096;
  * -O2, SCRIPTC_NO_CACHE=1), the two class programs built with default
  * options (G:/blocks/utf16len/lab/size/measure.mjs):
  *
- *   base 4e1fa8dc   655,360 static   797,184 regex
- *   this change     651,776 static   794,112 regex
- *                    -3,584           -3,072
+ *   base 53c25c72   656,384 static   798,720 regex
+ *   this change     653,312 static   795,648 regex
+ *                    -3,072           -3,072
  *
- * BASE DOES NOT REPRODUCE THE RECORDED ANCHORS, and by the now-familiar
- * amount: the recorded pair was 656,384 / 798,720 and base measures
- * 655,360 / 797,184, so 1,024 and 1,536 bytes had already drifted off
- * unrelated merges, silently, because both are inside the page. The
- * complaint the harness actually made was the SUM: -4,608 on the static
- * class, of which this branch is 3,584. Note that the regex class moved by
- * the same -4,608 from ITS anchor and would have failed too; it never
- * reported because vitest stops a test at its first failed expect and the
- * regex-free program is weighed first.
+ * BASE REPRODUCES BOTH RECORDED ANCHORS TO THE BYTE this time, which is
+ * worth saying because it was not true an hour earlier. Measured against
+ * 4e1fa8dc the same two programs weighed 655,360 and 797,184 -- 1,024 and
+ * 1,536 under the anchors, silently, both inside the page. scr_cyc_alloc's
+ * change (53c25c72) put them back exactly. The first draft of this entry
+ * recorded 651,776 / 794,112 off that stale base and would have shipped a
+ * pair 1,536 bytes low; re-measuring after the rebase is what caught it,
+ * and it is the reason this file keeps insisting the base arm be weighed in
+ * the same session as the branch arm.
  *
  * WHAT THE BYTES BOUGHT -- or rather, stopped paying for, because this is a
  * DE-DUPLICATION and not a deletion. The classification loop is still in
@@ -771,15 +771,15 @@ export const SIZE_DRIFT_PAGE = 4_096;
  *
  * THE MAX CEILINGS MOVE with them, by the same rule:
  *
- *     659,968 = 651,776 + 8,192      802,304 = 794,112 + 8,192
+ *     661,504 = 653,312 + 8,192      803,840 = 795,648 + 8,192
  */
-export const STATIC_CLASS_RECORDED = platform === "win32" ? 651_776 : null;
+export const STATIC_CLASS_RECORDED = platform === "win32" ? 653_312 : null;
 
 /** The regex program, same run, same tree. Deliberately NOT derived from
  * the static delta - and the 2026-08-24 entry is why: that change moved the
  * two classes by -7,680 and -6,656, so deriving either from the other would
  * have been 1,024 bytes wrong. */
-export const REGEX_CLASS_RECORDED = platform === "win32" ? 794_112 : null;
+export const REGEX_CLASS_RECORDED = platform === "win32" ? 795_648 : null;
 
 /** The complaint a recorded-figure check makes, or null when the size is
  * within one page of what was recorded. A string rather than a thrown
