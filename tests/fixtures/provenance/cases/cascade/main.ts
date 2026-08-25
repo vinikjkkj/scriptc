@@ -2,11 +2,18 @@
  * SUBPATH of a dist/esm package. Both defects at once — the subpath does
  * not map, and the type-only import never registers the specifier — so
  * the field is an island value, the class has no compiled declaration,
- * and every call of its generic method refuses. */
+ * and every call of its generic method refuses.
+ *
+ * No constructor parameter property: Node's strip-only mode rejects one,
+ * and Node running this file is the oracle. */
 import type { Logger } from "dualdist/util";
 
 export class Coord {
-  constructor(readonly logger: Logger) {}
+  readonly logger: Logger;
+
+  constructor(logger: Logger) {
+    this.logger = logger;
+  }
 
   commit<K extends string>(key: K, fields: Record<string, number>): string {
     this.logger.warn(key);

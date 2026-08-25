@@ -129,8 +129,9 @@ function resolveAliasTarget(target: string): string | null {
   return null;
 }
 
-/** Every bare (non-relative, non-builtin, non-"#") VALUE specifier the
- * relative closure of `roots` imports, in first-encounter order.
+/** Every bare (non-relative, non-builtin, non-"#") specifier the relative
+ * closure of `roots` imports, in first-encounter order — the ones a VALUE
+ * import reaches first, then the ones only ever reached by `import type`.
  *
  * `aliases` (a source tree's own tsconfig paths, absolute) keeps the walk
  * INSIDE the tree: a matching specifier resolves to its source file and
@@ -168,13 +169,30 @@ function bareImportsOf(
   return bareImportsWalk(roots, viaAlias);
 }
 
+/* A TYPE-ONLY edge is still an edge for this walk.
+ *
+ * `import type { Logger } from 'zapo-js'` registers no specifier if the
+ * prescan drops it, so the flag cannot reach the package at all and its
+ * types stay island types — and an island type is not inert. A class
+ * field typed from an island package leaves the class with no compiled
+ * declaration, and then every call of every generic method on that class
+ * refuses (SC1090) somewhere else entirely. The refusals land nowhere
+ * near the import that caused them.
+ *
+ * The cost is that a package imported only for its types now takes the
+ * attestation round-trip. MAX_PACKAGES is the hard cap that bounds it,
+ * and the ordering below is the guard on the cap: a value import is what
+ * a static build cannot proceed without, so value specifiers claim their
+ * slots before type-only ones. */
 function bareImportsWalk(
   roots: readonly string[],
   viaAlias: (spec: string) => string | null,
 ): string[] {
   const seenFiles = new Set<string>();
-  const bare: string[] = [];
-  const bareSeen = new Set<string>();
+  const value: string[] = [];
+  const typeOnlyBare: string[] = [];
+  const valueSeen = new Set<string>();
+  const typeSeen = new Set<string>();
   const queue = [...roots];
   while (queue.length > 0) {
     const file = resolve(queue.shift()!);
@@ -187,7 +205,6 @@ function bareImportsWalk(
       continue;
     }
     for (const { spec, typeOnly } of moduleSpecifiersLite(text, file)) {
-      if (typeOnly) continue;
       if (spec.startsWith("./") || spec.startsWith("../")) {
         const dep = resolveRelativeModule(file, spec);
         if (dep !== null && !dep.endsWith(".json") && !dep.endsWith(".d.ts")) queue.push(dep);
@@ -200,13 +217,18 @@ function bareImportsWalk(
         queue.push(aliased);
         continue;
       }
-      if (!bareSeen.has(spec)) {
-        bareSeen.add(spec);
-        bare.push(spec);
+      if (typeOnly) {
+        if (!typeSeen.has(spec)) {
+          typeSeen.add(spec);
+          typeOnlyBare.push(spec);
+        }
+      } else if (!valueSeen.has(spec)) {
+        valueSeen.add(spec);
+        value.push(spec);
       }
     }
   }
-  return bare;
+  return [...value, ...typeOnlyBare.filter((spec) => !valueSeen.has(spec))];
 }
 
 /* ── installed-package lookup (name/version/published entry) ──────────── */
