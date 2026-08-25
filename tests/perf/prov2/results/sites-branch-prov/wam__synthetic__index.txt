@@ -1,0 +1,2 @@
+G:/blocks/prov2/lab/app/pkgs/wam/synthetic/index.ts sites=5 preflightFailed=true 63813ms
+EXIT=0

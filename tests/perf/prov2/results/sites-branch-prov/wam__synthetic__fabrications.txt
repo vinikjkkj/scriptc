@@ -1,0 +1,2 @@
+G:/blocks/prov2/lab/app/pkgs/wam/synthetic/fabrications.ts sites=4 preflightFailed=true 63261ms
+EXIT=0

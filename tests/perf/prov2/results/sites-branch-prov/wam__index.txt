@@ -1,0 +1,2 @@
+G:/blocks/prov2/lab/app/pkgs/wam/index.ts sites=4 preflightFailed=true 76931ms
+EXIT=0

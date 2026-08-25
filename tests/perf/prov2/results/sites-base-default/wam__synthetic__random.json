@@ -1,0 +1,37 @@
+{
+ "entry": "G:/blocks/prov2/lab/app/pkgs/wam/synthetic/random.ts",
+ "flags": [],
+ "elapsedMs": 650,
+ "preflightFailed": false,
+ "stats": {
+  "statementsTotal": 10,
+  "statementsFailed": 2,
+  "statementsIsland": 0,
+  "functionsSkipped": 0
+ },
+ "npmStatic": null,
+ "provenanceNotes": null,
+ "sites": [
+  {
+   "section": "blocker",
+   "code": "SC2013",
+   "message": "importing 'zapo-js' requires the embedded dynamic engine, which this build does not include — the package's implementation runs there",
+   "file": "G:/blocks/prov2/lab/app/pkgs/wam/synthetic/random.ts",
+   "line": 1
+  },
+  {
+   "section": "blocker",
+   "code": "SC2020",
+   "message": "'Uint8Array.from' is part of the standard library types but has no scriptc lowering yet",
+   "file": "G:/blocks/prov2/lab/app/pkgs/wam/synthetic/random.ts",
+   "line": 20
+  },
+  {
+   "section": "blocker",
+   "code": "SC2013",
+   "message": "values from the 'zapo-js' package run in the embedded dynamic engine, which this build does not include",
+   "file": "G:/blocks/prov2/lab/app/pkgs/wam/synthetic/random.ts",
+   "line": 21
+  }
+ ]
+}

@@ -1,0 +1,15 @@
+{
+ "entry": "G:/blocks/prov2/lab/app/pkgs/voip/types.ts",
+ "flags": [],
+ "elapsedMs": 667,
+ "preflightFailed": false,
+ "stats": {
+  "statementsTotal": 12,
+  "statementsFailed": 0,
+  "statementsIsland": 0,
+  "functionsSkipped": 0
+ },
+ "npmStatic": null,
+ "provenanceNotes": null,
+ "sites": []
+}

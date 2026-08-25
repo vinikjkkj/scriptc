@@ -1,0 +1,525 @@
+{
+ "compiler": "G:/blocks/prov2/base",
+ "modules": {
+  "G:/blocks/prov2/lab/app/pkgs/media-utils/ffmpeg.ts": {
+   "ms": 233,
+   "packages": [],
+   "notes": [
+    "sharp@0.33.5: no provenance attestation published; island path used"
+   ]
+  },
+  "G:/blocks/prov2/lab/app/pkgs/media-utils/index.ts": {
+   "ms": 131,
+   "packages": [],
+   "notes": [
+    "zapo-js@1.6.2: no source mapping for 'zapo-js/util' (published target: ./dist/esm/util/index.js); island path used",
+    "file-type@19.6.0: no provenance attestation published; island path used",
+    "sharp@0.33.5: no provenance attestation published; island path used"
+   ]
+  },
+  "G:/blocks/prov2/lab/app/pkgs/media-utils/sharp.ts": {
+   "ms": 35,
+   "packages": [],
+   "notes": [
+    "sharp@0.33.5: no provenance attestation published; island path used"
+   ]
+  },
+  "G:/blocks/prov2/lab/app/pkgs/media-utils/types.ts": {
+   "ms": 2,
+   "packages": [],
+   "notes": []
+  },
+  "G:/blocks/prov2/lab/app/pkgs/voip/WaVoipCoordinator.ts": {
+   "ms": 835,
+   "packages": [
+    {
+     "name": "zapo-js",
+     "version": "1.6.2",
+     "dir": "G:/blocks/prov2/cache/provenance/250f9af5229a545eec28ddbd3e8774a397cdb0bb",
+     "entries": {
+      "zapo-js": {
+       "file": "G:\\blocks\\prov2\\cache\\provenance\\250f9af5229a545eec28ddbd3e8774a397cdb0bb\\src\\index.ts",
+       "exists": true
+      }
+     }
+    }
+   ],
+   "notes": [
+    "zapo-js@1.6.2: no source mapping for 'zapo-js/protocol' (published target: ./dist/esm/protocol/index.js); island path used",
+    "zapo-js@1.6.2: no source mapping for 'zapo-js/transport' (published target: ./dist/esm/transport/index.js); island path used",
+    "zapo-js@1.6.2: no source mapping for 'zapo-js/util' (published target: ./dist/esm/util/index.js); island path used",
+    "zapo-js@1.6.2: no source mapping for 'zapo-js/crypto' (published target: ./dist/esm/crypto/index.js); island path used",
+    "zapo-js@1.6.2: no source mapping for 'zapo-js/proto' (published target: ./dist/esm/proto.js); island path used",
+    "argo-codec: not installed under the entry's node_modules; island path used",
+    "libmlow-wasm@0.1.1: no provenance attestation published; island path used",
+    "@roamhq/wrtc@0.10.0: no provenance attestation published; island path used"
+   ]
+  },
+  "G:/blocks/prov2/lab/app/pkgs/voip/bytes.ts": {
+   "ms": 4,
+   "packages": [],
+   "notes": [
+    "zapo-js@1.6.2: no source mapping for 'zapo-js/util' (published target: ./dist/esm/util/index.js); island path used"
+   ]
+  },
+  "G:/blocks/prov2/lab/app/pkgs/voip/call/WaCallManager.ts": {
+   "ms": 495,
+   "packages": [
+    {
+     "name": "zapo-js",
+     "version": "1.6.2",
+     "dir": "G:/blocks/prov2/cache/provenance/250f9af5229a545eec28ddbd3e8774a397cdb0bb",
+     "entries": {
+      "zapo-js": {
+       "file": "G:\\blocks\\prov2\\cache\\provenance\\250f9af5229a545eec28ddbd3e8774a397cdb0bb\\src\\index.ts",
+       "exists": true
+      }
+     }
+    }
+   ],
+   "notes": [
+    "zapo-js@1.6.2: no source mapping for 'zapo-js/protocol' (published target: ./dist/esm/protocol/index.js); island path used",
+    "zapo-js@1.6.2: no source mapping for 'zapo-js/transport' (published target: ./dist/esm/transport/index.js); island path used",
+    "zapo-js@1.6.2: no source mapping for 'zapo-js/util' (published target: ./dist/esm/util/index.js); island path used",
+    "zapo-js@1.6.2: no source mapping for 'zapo-js/crypto' (published target: ./dist/esm/crypto/index.js); island path used",
+    "zapo-js@1.6.2: no source mapping for 'zapo-js/proto' (published target: ./dist/esm/proto.js); island path used",
+    "argo-codec: not installed under the entry's node_modules; island path used",
+    "libmlow-wasm@0.1.1: no provenance attestation published; island path used",
+    "@roamhq/wrtc@0.10.0: no provenance attestation published; island path used"
+   ]
+  },
+  "G:/blocks/prov2/lab/app/pkgs/voip/call/WaCallMediaSession.ts": {
+   "ms": 487,
+   "packages": [
+    {
+     "name": "zapo-js",
+     "version": "1.6.2",
+     "dir": "G:/blocks/prov2/cache/provenance/250f9af5229a545eec28ddbd3e8774a397cdb0bb",
+     "entries": {
+      "zapo-js": {
+       "file": "G:\\blocks\\prov2\\cache\\provenance\\250f9af5229a545eec28ddbd3e8774a397cdb0bb\\src\\index.ts",
+       "exists": true
+      }
+     }
+    }
+   ],
+   "notes": [
+    "zapo-js@1.6.2: no source mapping for 'zapo-js/protocol' (published target: ./dist/esm/protocol/index.js); island path used",
+    "zapo-js@1.6.2: no source mapping for 'zapo-js/transport' (published target: ./dist/esm/transport/index.js); island path used",
+    "zapo-js@1.6.2: no source mapping for 'zapo-js/util' (published target: ./dist/esm/util/index.js); island path used",
+    "zapo-js@1.6.2: no source mapping for 'zapo-js/crypto' (published target: ./dist/esm/crypto/index.js); island path used",
+    "zapo-js@1.6.2: no source mapping for 'zapo-js/proto' (published target: ./dist/esm/proto.js); island path used",
+    "argo-codec: not installed under the entry's node_modules; island path used",
+    "libmlow-wasm@0.1.1: no provenance attestation published; island path used",
+    "@roamhq/wrtc@0.10.0: no provenance attestation published; island path used"
+   ]
+  },
+  "G:/blocks/prov2/lab/app/pkgs/voip/call/call-state.ts": {
+   "ms": 3,
+   "packages": [],
+   "notes": []
+  },
+  "G:/blocks/prov2/lab/app/pkgs/voip/crypto/encryption.ts": {
+   "ms": 5,
+   "packages": [],
+   "notes": [
+    "zapo-js@1.6.2: no source mapping for 'zapo-js/crypto' (published target: ./dist/esm/crypto/index.js); island path used",
+    "zapo-js@1.6.2: no source mapping for 'zapo-js/util' (published target: ./dist/esm/util/index.js); island path used"
+   ]
+  },
+  "G:/blocks/prov2/lab/app/pkgs/voip/crypto/primitives.ts": {
+   "ms": 2,
+   "packages": [],
+   "notes": [
+    "zapo-js@1.6.2: no source mapping for 'zapo-js/util' (published target: ./dist/esm/util/index.js); island path used"
+   ]
+  },
+  "G:/blocks/prov2/lab/app/pkgs/voip/crypto/srtp.ts": {
+   "ms": 7,
+   "packages": [],
+   "notes": [
+    "zapo-js@1.6.2: no source mapping for 'zapo-js/util' (published target: ./dist/esm/util/index.js); island path used"
+   ]
+  },
+  "G:/blocks/prov2/lab/app/pkgs/voip/crypto/ssrc.ts": {
+   "ms": 4,
+   "packages": [],
+   "notes": [
+    "zapo-js@1.6.2: no source mapping for 'zapo-js/crypto' (published target: ./dist/esm/crypto/index.js); island path used",
+    "zapo-js@1.6.2: no source mapping for 'zapo-js/util' (published target: ./dist/esm/util/index.js); island path used"
+   ]
+  },
+  "G:/blocks/prov2/lab/app/pkgs/voip/events.ts": {
+   "ms": 1,
+   "packages": [],
+   "notes": []
+  },
+  "G:/blocks/prov2/lab/app/pkgs/voip/index.ts": {
+   "ms": 521,
+   "packages": [
+    {
+     "name": "zapo-js",
+     "version": "1.6.2",
+     "dir": "G:/blocks/prov2/cache/provenance/250f9af5229a545eec28ddbd3e8774a397cdb0bb",
+     "entries": {
+      "zapo-js": {
+       "file": "G:\\blocks\\prov2\\cache\\provenance\\250f9af5229a545eec28ddbd3e8774a397cdb0bb\\src\\index.ts",
+       "exists": true
+      }
+     }
+    }
+   ],
+   "notes": [
+    "zapo-js@1.6.2: no source mapping for 'zapo-js/protocol' (published target: ./dist/esm/protocol/index.js); island path used",
+    "zapo-js@1.6.2: no source mapping for 'zapo-js/transport' (published target: ./dist/esm/transport/index.js); island path used",
+    "zapo-js@1.6.2: no source mapping for 'zapo-js/util' (published target: ./dist/esm/util/index.js); island path used",
+    "zapo-js@1.6.2: no source mapping for 'zapo-js/crypto' (published target: ./dist/esm/crypto/index.js); island path used",
+    "zapo-js@1.6.2: no source mapping for 'zapo-js/proto' (published target: ./dist/esm/proto.js); island path used",
+    "argo-codec: not installed under the entry's node_modules; island path used",
+    "libmlow-wasm@0.1.1: no provenance attestation published; island path used",
+    "@roamhq/wrtc@0.10.0: no provenance attestation published; island path used"
+   ]
+  },
+  "G:/blocks/prov2/lab/app/pkgs/voip/media/WaAudioEngine.ts": {
+   "ms": 409,
+   "packages": [
+    {
+     "name": "zapo-js",
+     "version": "1.6.2",
+     "dir": "G:/blocks/prov2/cache/provenance/250f9af5229a545eec28ddbd3e8774a397cdb0bb",
+     "entries": {
+      "zapo-js": {
+       "file": "G:\\blocks\\prov2\\cache\\provenance\\250f9af5229a545eec28ddbd3e8774a397cdb0bb\\src\\index.ts",
+       "exists": true
+      }
+     }
+    }
+   ],
+   "notes": [
+    "zapo-js@1.6.2: no source mapping for 'zapo-js/util' (published target: ./dist/esm/util/index.js); island path used",
+    "argo-codec: not installed under the entry's node_modules; island path used"
+   ]
+  },
+  "G:/blocks/prov2/lab/app/pkgs/voip/media/mlow-codec.ts": {
+   "ms": 29,
+   "packages": [],
+   "notes": [
+    "libmlow-wasm@0.1.1: no provenance attestation published; island path used"
+   ]
+  },
+  "G:/blocks/prov2/lab/app/pkgs/voip/media/rtp.ts": {
+   "ms": 6,
+   "packages": [],
+   "notes": [
+    "zapo-js@1.6.2: no source mapping for 'zapo-js/util' (published target: ./dist/esm/util/index.js); island path used"
+   ]
+  },
+  "G:/blocks/prov2/lab/app/pkgs/voip/plugin.ts": {
+   "ms": 492,
+   "packages": [
+    {
+     "name": "zapo-js",
+     "version": "1.6.2",
+     "dir": "G:/blocks/prov2/cache/provenance/250f9af5229a545eec28ddbd3e8774a397cdb0bb",
+     "entries": {
+      "zapo-js": {
+       "file": "G:\\blocks\\prov2\\cache\\provenance\\250f9af5229a545eec28ddbd3e8774a397cdb0bb\\src\\index.ts",
+       "exists": true
+      }
+     }
+    }
+   ],
+   "notes": [
+    "zapo-js@1.6.2: no source mapping for 'zapo-js/protocol' (published target: ./dist/esm/protocol/index.js); island path used",
+    "zapo-js@1.6.2: no source mapping for 'zapo-js/transport' (published target: ./dist/esm/transport/index.js); island path used",
+    "zapo-js@1.6.2: no source mapping for 'zapo-js/util' (published target: ./dist/esm/util/index.js); island path used",
+    "zapo-js@1.6.2: no source mapping for 'zapo-js/crypto' (published target: ./dist/esm/crypto/index.js); island path used",
+    "zapo-js@1.6.2: no source mapping for 'zapo-js/proto' (published target: ./dist/esm/proto.js); island path used",
+    "argo-codec: not installed under the entry's node_modules; island path used",
+    "libmlow-wasm@0.1.1: no provenance attestation published; island path used",
+    "@roamhq/wrtc@0.10.0: no provenance attestation published; island path used"
+   ]
+  },
+  "G:/blocks/prov2/lab/app/pkgs/voip/relay/WaSctpRelay.ts": {
+   "ms": 389,
+   "packages": [
+    {
+     "name": "zapo-js",
+     "version": "1.6.2",
+     "dir": "G:/blocks/prov2/cache/provenance/250f9af5229a545eec28ddbd3e8774a397cdb0bb",
+     "entries": {
+      "zapo-js": {
+       "file": "G:\\blocks\\prov2\\cache\\provenance\\250f9af5229a545eec28ddbd3e8774a397cdb0bb\\src\\index.ts",
+       "exists": true
+      }
+     }
+    }
+   ],
+   "notes": [
+    "@roamhq/wrtc@0.10.0: no provenance attestation published; island path used",
+    "zapo-js@1.6.2: no source mapping for 'zapo-js/util' (published target: ./dist/esm/util/index.js); island path used",
+    "argo-codec: not installed under the entry's node_modules; island path used"
+   ]
+  },
+  "G:/blocks/prov2/lab/app/pkgs/voip/relay/relay-ack.ts": {
+   "ms": 3,
+   "packages": [],
+   "notes": [
+    "zapo-js@1.6.2: no source mapping for 'zapo-js/transport' (published target: ./dist/esm/transport/index.js); island path used",
+    "zapo-js@1.6.2: no source mapping for 'zapo-js/util' (published target: ./dist/esm/util/index.js); island path used"
+   ]
+  },
+  "G:/blocks/prov2/lab/app/pkgs/voip/relay/stun.ts": {
+   "ms": 4,
+   "packages": [],
+   "notes": [
+    "zapo-js@1.6.2: no source mapping for 'zapo-js/util' (published target: ./dist/esm/util/index.js); island path used"
+   ]
+  },
+  "G:/blocks/prov2/lab/app/pkgs/voip/signaling/bridge.ts": {
+   "ms": 400,
+   "packages": [
+    {
+     "name": "zapo-js",
+     "version": "1.6.2",
+     "dir": "G:/blocks/prov2/cache/provenance/250f9af5229a545eec28ddbd3e8774a397cdb0bb",
+     "entries": {
+      "zapo-js": {
+       "file": "G:\\blocks\\prov2\\cache\\provenance\\250f9af5229a545eec28ddbd3e8774a397cdb0bb\\src\\index.ts",
+       "exists": true
+      }
+     }
+    }
+   ],
+   "notes": [
+    "zapo-js@1.6.2: no source mapping for 'zapo-js/protocol' (published target: ./dist/esm/protocol/index.js); island path used",
+    "zapo-js@1.6.2: no source mapping for 'zapo-js/transport' (published target: ./dist/esm/transport/index.js); island path used",
+    "zapo-js@1.6.2: no source mapping for 'zapo-js/util' (published target: ./dist/esm/util/index.js); island path used",
+    "argo-codec: not installed under the entry's node_modules; island path used"
+   ]
+  },
+  "G:/blocks/prov2/lab/app/pkgs/voip/signaling/signaling.ts": {
+   "ms": 393,
+   "packages": [
+    {
+     "name": "zapo-js",
+     "version": "1.6.2",
+     "dir": "G:/blocks/prov2/cache/provenance/250f9af5229a545eec28ddbd3e8774a397cdb0bb",
+     "entries": {
+      "zapo-js": {
+       "file": "G:\\blocks\\prov2\\cache\\provenance\\250f9af5229a545eec28ddbd3e8774a397cdb0bb\\src\\index.ts",
+       "exists": true
+      }
+     }
+    }
+   ],
+   "notes": [
+    "zapo-js@1.6.2: no source mapping for 'zapo-js/proto' (published target: ./dist/esm/proto.js); island path used",
+    "zapo-js@1.6.2: no source mapping for 'zapo-js/protocol' (published target: ./dist/esm/protocol/index.js); island path used",
+    "zapo-js@1.6.2: no source mapping for 'zapo-js/transport' (published target: ./dist/esm/transport/index.js); island path used",
+    "zapo-js@1.6.2: no source mapping for 'zapo-js/util' (published target: ./dist/esm/util/index.js); island path used",
+    "argo-codec: not installed under the entry's node_modules; island path used"
+   ]
+  },
+  "G:/blocks/prov2/lab/app/pkgs/voip/types.ts": {
+   "ms": 1,
+   "packages": [],
+   "notes": []
+  },
+  "G:/blocks/prov2/lab/app/pkgs/wam/WaWamAutoEmitter.ts": {
+   "ms": 455,
+   "packages": [
+    {
+     "name": "zapo-js",
+     "version": "1.6.2",
+     "dir": "G:/blocks/prov2/cache/provenance/250f9af5229a545eec28ddbd3e8774a397cdb0bb",
+     "entries": {
+      "zapo-js": {
+       "file": "G:\\blocks\\prov2\\cache\\provenance\\250f9af5229a545eec28ddbd3e8774a397cdb0bb\\src\\index.ts",
+       "exists": true
+      }
+     }
+    }
+   ],
+   "notes": [
+    "zapo-js@1.6.2: no source mapping for 'zapo-js/protocol' (published target: ./dist/esm/protocol/index.js); island path used",
+    "zapo-js@1.6.2: no source mapping for 'zapo-js/transport' (published target: ./dist/esm/transport/index.js); island path used",
+    "zapo-js@1.6.2: no source mapping for 'zapo-js/proto' (published target: ./dist/esm/proto.js); island path used",
+    "argo-codec: not installed under the entry's node_modules; island path used"
+   ]
+  },
+  "G:/blocks/prov2/lab/app/pkgs/wam/WaWamCoordinator.ts": {
+   "ms": 1485,
+   "packages": [
+    {
+     "name": "zapo-js",
+     "version": "1.6.2",
+     "dir": "G:/blocks/prov2/cache/provenance/250f9af5229a545eec28ddbd3e8774a397cdb0bb",
+     "entries": {
+      "zapo-js": {
+       "file": "G:\\blocks\\prov2\\cache\\provenance\\250f9af5229a545eec28ddbd3e8774a397cdb0bb\\src\\index.ts",
+       "exists": true
+      }
+     }
+    }
+   ],
+   "notes": [
+    "@vinikjkkj/wa-wam@2.3000.1041713829-1ec0d3b: no source mapping for '@vinikjkkj/wa-wam' (published target: index.js); island path used",
+    "zapo-js@1.6.2: no source mapping for 'zapo-js/util' (published target: ./dist/esm/util/index.js); island path used",
+    "zapo-js@1.6.2: no source mapping for 'zapo-js/protocol' (published target: ./dist/esm/protocol/index.js); island path used",
+    "zapo-js@1.6.2: no source mapping for 'zapo-js/transport' (published target: ./dist/esm/transport/index.js); island path used",
+    "zapo-js@1.6.2: no source mapping for 'zapo-js/proto' (published target: ./dist/esm/proto.js); island path used",
+    "argo-codec: not installed under the entry's node_modules; island path used"
+   ]
+  },
+  "G:/blocks/prov2/lab/app/pkgs/wam/WaWamUploader.ts": {
+   "ms": 3,
+   "packages": [],
+   "notes": [
+    "zapo-js@1.6.2: no source mapping for 'zapo-js/protocol' (published target: ./dist/esm/protocol/index.js); island path used",
+    "zapo-js@1.6.2: no source mapping for 'zapo-js/util' (published target: ./dist/esm/util/index.js); island path used"
+   ]
+  },
+  "G:/blocks/prov2/lab/app/pkgs/wam/globals.ts": {
+   "ms": 380,
+   "packages": [
+    {
+     "name": "zapo-js",
+     "version": "1.6.2",
+     "dir": "G:/blocks/prov2/cache/provenance/250f9af5229a545eec28ddbd3e8774a397cdb0bb",
+     "entries": {
+      "zapo-js": {
+       "file": "G:\\blocks\\prov2\\cache\\provenance\\250f9af5229a545eec28ddbd3e8774a397cdb0bb\\src\\index.ts",
+       "exists": true
+      }
+     }
+    }
+   ],
+   "notes": [
+    "@vinikjkkj/wa-wam@2.3000.1041713829-1ec0d3b: no source mapping for '@vinikjkkj/wa-wam' (published target: index.js); island path used",
+    "zapo-js@1.6.2: no source mapping for 'zapo-js/protocol' (published target: ./dist/esm/protocol/index.js); island path used",
+    "zapo-js@1.6.2: no source mapping for 'zapo-js/util' (published target: ./dist/esm/util/index.js); island path used",
+    "argo-codec: not installed under the entry's node_modules; island path used"
+   ]
+  },
+  "G:/blocks/prov2/lab/app/pkgs/wam/index.ts": {
+   "ms": 423,
+   "packages": [
+    {
+     "name": "zapo-js",
+     "version": "1.6.2",
+     "dir": "G:/blocks/prov2/cache/provenance/250f9af5229a545eec28ddbd3e8774a397cdb0bb",
+     "entries": {
+      "zapo-js": {
+       "file": "G:\\blocks\\prov2\\cache\\provenance\\250f9af5229a545eec28ddbd3e8774a397cdb0bb\\src\\index.ts",
+       "exists": true
+      }
+     }
+    }
+   ],
+   "notes": [
+    "zapo-js@1.6.2: no source mapping for 'zapo-js/util' (published target: ./dist/esm/util/index.js); island path used",
+    "zapo-js@1.6.2: no source mapping for 'zapo-js/protocol' (published target: ./dist/esm/protocol/index.js); island path used",
+    "zapo-js@1.6.2: no source mapping for 'zapo-js/transport' (published target: ./dist/esm/transport/index.js); island path used",
+    "zapo-js@1.6.2: no source mapping for 'zapo-js/proto' (published target: ./dist/esm/proto.js); island path used",
+    "argo-codec: not installed under the entry's node_modules; island path used",
+    "@vinikjkkj/wa-wam@2.3000.1041713829-1ec0d3b: no source mapping for '@vinikjkkj/wa-wam' (published target: index.js); island path used"
+   ]
+  },
+  "G:/blocks/prov2/lab/app/pkgs/wam/plugin.ts": {
+   "ms": 457,
+   "packages": [
+    {
+     "name": "zapo-js",
+     "version": "1.6.2",
+     "dir": "G:/blocks/prov2/cache/provenance/250f9af5229a545eec28ddbd3e8774a397cdb0bb",
+     "entries": {
+      "zapo-js": {
+       "file": "G:\\blocks\\prov2\\cache\\provenance\\250f9af5229a545eec28ddbd3e8774a397cdb0bb\\src\\index.ts",
+       "exists": true
+      }
+     }
+    }
+   ],
+   "notes": [
+    "zapo-js@1.6.2: no source mapping for 'zapo-js/util' (published target: ./dist/esm/util/index.js); island path used",
+    "zapo-js@1.6.2: no source mapping for 'zapo-js/protocol' (published target: ./dist/esm/protocol/index.js); island path used",
+    "zapo-js@1.6.2: no source mapping for 'zapo-js/transport' (published target: ./dist/esm/transport/index.js); island path used",
+    "zapo-js@1.6.2: no source mapping for 'zapo-js/proto' (published target: ./dist/esm/proto.js); island path used",
+    "argo-codec: not installed under the entry's node_modules; island path used",
+    "@vinikjkkj/wa-wam@2.3000.1041713829-1ec0d3b: no source mapping for '@vinikjkkj/wa-wam' (published target: index.js); island path used"
+   ]
+  },
+  "G:/blocks/prov2/lab/app/pkgs/wam/registry.ts": {
+   "ms": 39,
+   "packages": [],
+   "notes": [
+    "@vinikjkkj/wa-wam@2.3000.1041713829-1ec0d3b: no source mapping for '@vinikjkkj/wa-wam' (published target: index.js); island path used",
+    "zapo-js@1.6.2: no source mapping for 'zapo-js/util' (published target: ./dist/esm/util/index.js); island path used"
+   ]
+  },
+  "G:/blocks/prov2/lab/app/pkgs/wam/send-parse.ts": {
+   "ms": 3,
+   "packages": [],
+   "notes": [
+    "zapo-js@1.6.2: no source mapping for 'zapo-js/proto' (published target: ./dist/esm/proto.js); island path used",
+    "zapo-js@1.6.2: no source mapping for 'zapo-js/protocol' (published target: ./dist/esm/protocol/index.js); island path used"
+   ]
+  },
+  "G:/blocks/prov2/lab/app/pkgs/wam/synthetic/WaWamSyntheticUi.ts": {
+   "ms": 13,
+   "packages": [],
+   "notes": [
+    "zapo-js@1.6.2: no source mapping for 'zapo-js/protocol' (published target: ./dist/esm/protocol/index.js); island path used",
+    "zapo-js@1.6.2: no source mapping for 'zapo-js/proto' (published target: ./dist/esm/proto.js); island path used",
+    "zapo-js@1.6.2: no source mapping for 'zapo-js/util' (published target: ./dist/esm/util/index.js); island path used"
+   ]
+  },
+  "G:/blocks/prov2/lab/app/pkgs/wam/synthetic/fabrications.ts": {
+   "ms": 4,
+   "packages": [],
+   "notes": [
+    "zapo-js@1.6.2: no source mapping for 'zapo-js/util' (published target: ./dist/esm/util/index.js); island path used"
+   ]
+  },
+  "G:/blocks/prov2/lab/app/pkgs/wam/synthetic/index.ts": {
+   "ms": 13,
+   "packages": [],
+   "notes": [
+    "zapo-js@1.6.2: no source mapping for 'zapo-js/protocol' (published target: ./dist/esm/protocol/index.js); island path used",
+    "zapo-js@1.6.2: no source mapping for 'zapo-js/proto' (published target: ./dist/esm/proto.js); island path used",
+    "zapo-js@1.6.2: no source mapping for 'zapo-js/util' (published target: ./dist/esm/util/index.js); island path used"
+   ]
+  },
+  "G:/blocks/prov2/lab/app/pkgs/wam/synthetic/random.ts": {
+   "ms": 2,
+   "packages": [],
+   "notes": [
+    "zapo-js@1.6.2: no source mapping for 'zapo-js/util' (published target: ./dist/esm/util/index.js); island path used"
+   ]
+  },
+  "G:/blocks/prov2/lab/app/pkgs/wam/wire/WamBatch.ts": {
+   "ms": 38,
+   "packages": [],
+   "notes": [
+    "@vinikjkkj/wa-wam@2.3000.1041713829-1ec0d3b: no source mapping for '@vinikjkkj/wa-wam' (published target: index.js); island path used",
+    "zapo-js@1.6.2: no source mapping for 'zapo-js/util' (published target: ./dist/esm/util/index.js); island path used"
+   ]
+  },
+  "G:/blocks/prov2/lab/app/pkgs/wam/wire/binary-writer.ts": {
+   "ms": 2,
+   "packages": [],
+   "notes": [
+    "zapo-js@1.6.2: no source mapping for 'zapo-js/util' (published target: ./dist/esm/util/index.js); island path used"
+   ]
+  },
+  "G:/blocks/prov2/lab/app/pkgs/wam/wire/encoder.ts": {
+   "ms": 48,
+   "packages": [],
+   "notes": [
+    "@vinikjkkj/wa-wam@2.3000.1041713829-1ec0d3b: no source mapping for '@vinikjkkj/wa-wam' (published target: index.js); island path used",
+    "zapo-js@1.6.2: no source mapping for 'zapo-js/util' (published target: ./dist/esm/util/index.js); island path used"
+   ]
+  }
+ }
+}

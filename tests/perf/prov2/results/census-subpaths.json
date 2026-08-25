@@ -1,0 +1,77 @@
+{
+ "compiler": "G:/blocks/prov2/wt",
+ "modules": {
+  "G:/blocks/prov2/lab/app/probe/all-subpaths.ts": {
+   "ms": 717,
+   "packages": [
+    {
+     "name": "zapo-js",
+     "version": "1.6.2",
+     "dir": "G:/blocks/prov2/cache/provenance/250f9af5229a545eec28ddbd3e8774a397cdb0bb",
+     "entries": {
+      "zapo-js": {
+       "file": "G:\\blocks\\prov2\\cache\\provenance\\250f9af5229a545eec28ddbd3e8774a397cdb0bb\\src\\index.ts",
+       "exists": true
+      },
+      "zapo-js/client": {
+       "file": "G:\\blocks\\prov2\\cache\\provenance\\250f9af5229a545eec28ddbd3e8774a397cdb0bb\\src\\client\\index.ts",
+       "exists": true
+      },
+      "zapo-js/appstate": {
+       "file": "G:\\blocks\\prov2\\cache\\provenance\\250f9af5229a545eec28ddbd3e8774a397cdb0bb\\src\\appstate\\index.ts",
+       "exists": true
+      },
+      "zapo-js/auth": {
+       "file": "G:\\blocks\\prov2\\cache\\provenance\\250f9af5229a545eec28ddbd3e8774a397cdb0bb\\src\\auth\\index.ts",
+       "exists": true
+      },
+      "zapo-js/crypto": {
+       "file": "G:\\blocks\\prov2\\cache\\provenance\\250f9af5229a545eec28ddbd3e8774a397cdb0bb\\src\\crypto\\index.ts",
+       "exists": true
+      },
+      "zapo-js/media": {
+       "file": "G:\\blocks\\prov2\\cache\\provenance\\250f9af5229a545eec28ddbd3e8774a397cdb0bb\\src\\media\\index.ts",
+       "exists": true
+      },
+      "zapo-js/message": {
+       "file": "G:\\blocks\\prov2\\cache\\provenance\\250f9af5229a545eec28ddbd3e8774a397cdb0bb\\src\\message\\index.ts",
+       "exists": true
+      },
+      "zapo-js/signal": {
+       "file": "G:\\blocks\\prov2\\cache\\provenance\\250f9af5229a545eec28ddbd3e8774a397cdb0bb\\src\\signal\\index.ts",
+       "exists": true
+      },
+      "zapo-js/store": {
+       "file": "G:\\blocks\\prov2\\cache\\provenance\\250f9af5229a545eec28ddbd3e8774a397cdb0bb\\src\\store\\index.ts",
+       "exists": true
+      },
+      "zapo-js/transport": {
+       "file": "G:\\blocks\\prov2\\cache\\provenance\\250f9af5229a545eec28ddbd3e8774a397cdb0bb\\src\\transport\\index.ts",
+       "exists": true
+      },
+      "zapo-js/protocol": {
+       "file": "G:\\blocks\\prov2\\cache\\provenance\\250f9af5229a545eec28ddbd3e8774a397cdb0bb\\src\\protocol\\index.ts",
+       "exists": true
+      },
+      "zapo-js/retry": {
+       "file": "G:\\blocks\\prov2\\cache\\provenance\\250f9af5229a545eec28ddbd3e8774a397cdb0bb\\src\\retry\\index.ts",
+       "exists": true
+      },
+      "zapo-js/util": {
+       "file": "G:\\blocks\\prov2\\cache\\provenance\\250f9af5229a545eec28ddbd3e8774a397cdb0bb\\src\\util\\index.ts",
+       "exists": true
+      },
+      "zapo-js/proto": {
+       "file": "G:\\blocks\\prov2\\cache\\provenance\\250f9af5229a545eec28ddbd3e8774a397cdb0bb\\src\\proto.ts",
+       "exists": true
+      }
+     }
+    }
+   ],
+   "notes": [
+    "zapo-js@1.6.2: no source mapping for 'zapo-js/does-not-exist' (published target: unexported); island path used",
+    "argo-codec: not installed under the entry's node_modules; island path used"
+   ]
+  }
+ }
+}

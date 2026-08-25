@@ -1,0 +1,63 @@
+{
+ "entry": "G:/blocks/prov2/lab/app/pkgs/wam/registry.ts",
+ "flags": [
+  "--provenance-sources"
+ ],
+ "elapsedMs": 79615,
+ "preflightFailed": false,
+ "stats": {
+  "statementsTotal": 0,
+  "statementsFailed": 0,
+  "statementsIsland": 0,
+  "functionsSkipped": 0
+ },
+ "npmStatic": null,
+ "provenanceNotes": [
+  "@vinikjkkj/wa-wam@2.3000.1041713829-1ec0d3b: no source mapping for '@vinikjkkj/wa-wam' (published target: index.js); island path used",
+  "zapo-js@1.6.2: no source mapping for 'zapo-js/util' (published target: ./dist/esm/util/index.js); island path used"
+ ],
+ "sites": [
+  {
+   "section": "blocker",
+   "code": "SC2013",
+   "message": "importing '@vinikjkkj/wa-wam' requires the embedded dynamic engine, which this build does not include — the package's implementation runs there",
+   "file": "G:/blocks/prov2/lab/app/pkgs/wam/registry.ts",
+   "line": 1
+  },
+  {
+   "section": "blocker",
+   "code": "SC2013",
+   "message": "importing 'zapo-js' requires the embedded dynamic engine, which this build does not include — the package's implementation runs there",
+   "file": "G:/blocks/prov2/lab/app/pkgs/wam/registry.ts",
+   "line": 8
+  },
+  {
+   "section": "unreached",
+   "code": "SC2013",
+   "message": "values from the 'zapo-js' package run in the embedded dynamic engine, which this build does not include",
+   "file": "G:/blocks/prov2/lab/app/pkgs/wam/registry.ts",
+   "line": 16
+  },
+  {
+   "section": "unreached",
+   "code": "SC2013",
+   "message": "values from the '@vinikjkkj/wa-wam' package run in the embedded dynamic engine, which this build does not include",
+   "file": "G:/blocks/prov2/lab/app/pkgs/wam/registry.ts",
+   "line": 42
+  },
+  {
+   "section": "unreached",
+   "code": "SC2013",
+   "message": "values from the '@vinikjkkj/wa-wam' package run in the embedded dynamic engine, which this build does not include",
+   "file": "G:/blocks/prov2/lab/app/pkgs/wam/registry.ts",
+   "line": 56
+  },
+  {
+   "section": "unreached",
+   "code": "SC2020",
+   "message": "'Number of unknown values' is part of the standard library types but has no scriptc lowering yet",
+   "file": "G:/blocks/prov2/lab/app/pkgs/wam/registry.ts",
+   "line": 77
+  }
+ ]
+}

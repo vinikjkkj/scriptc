@@ -1,0 +1,25 @@
+{
+ "entry": "G:/blocks/prov2/lab/app/pkgs/wam/wire/binary-writer.ts",
+ "flags": [
+  "--provenance-sources"
+ ],
+ "elapsedMs": 45799,
+ "preflightFailed": false,
+ "stats": {
+  "statementsTotal": 29,
+  "statementsFailed": 0,
+  "statementsIsland": 0,
+  "functionsSkipped": 0
+ },
+ "npmStatic": null,
+ "provenanceNotes": [],
+ "sites": [
+  {
+   "section": "unreached",
+   "code": "SC2020",
+   "message": "'globalThis' is part of the standard library types but has no scriptc lowering yet",
+   "file": "G:/blocks/prov2/cache/provenance/250f9af5229a545eec28ddbd3e8774a397cdb0bb/src/util/runtime.ts",
+   "line": 20
+  }
+ ]
+}

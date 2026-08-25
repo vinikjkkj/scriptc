@@ -1,0 +1,19 @@
+{
+  "name": "dualdist",
+  "version": "2.0.0",
+  "type": "commonjs",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "require": "./dist/index.js",
+      "import": "./dist/esm/index.js",
+      "default": "./dist/index.js"
+    },
+    "./util": {
+      "types": "./dist/util/index.d.ts",
+      "require": "./dist/util/index.js",
+      "import": "./dist/esm/util/index.js",
+      "default": "./dist/util/index.js"
+    }
+  }
+}

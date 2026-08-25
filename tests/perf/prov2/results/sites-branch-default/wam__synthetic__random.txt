@@ -1,0 +1,2 @@
+G:/blocks/prov2/lab/app/pkgs/wam/synthetic/random.ts sites=3 preflightFailed=false 679ms
+EXIT=0
