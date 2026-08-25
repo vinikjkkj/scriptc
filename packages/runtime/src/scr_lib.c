@@ -2981,9 +2981,13 @@ static uint32_t scr_sha256_rotr(uint32_t x, unsigned n) {
 
 static void scr_sha256_block(uint32_t h[8], const unsigned char *p) {
   uint32_t w[64];
+  /* One unaligned load and one byte swap per word. The shift-and-or form
+   * this replaces is four byte loads, three shifts and three ors, and
+   * isa.mjs prices it at 2.22% of this function on the lane that runs it. */
   for (int i = 0; i < 16; i++) {
-    w[i] = ((uint32_t)p[i * 4] << 24) | ((uint32_t)p[i * 4 + 1] << 16) |
-           ((uint32_t)p[i * 4 + 2] << 8) | (uint32_t)p[i * 4 + 3];
+    uint32_t v;
+    memcpy(&v, p + i * 4, 4);
+    w[i] = __builtin_bswap32(v);
   }
   for (int i = 16; i < 64; i++) {
     uint32_t s0 = scr_sha256_rotr(w[i - 15], 7) ^ scr_sha256_rotr(w[i - 15], 18) ^ (w[i - 15] >> 3);
@@ -3312,15 +3316,26 @@ static size_t scr_sha256_digest(const unsigned char *data, size_t len, unsigned 
   size_t i = nblk * 64;
   unsigned char tail[128];
   size_t rem = len - i;
+  size_t pad = (rem + 1 + 8 <= 64) ? 64 : 128;
+  /* Clear the WHOLE tail at a size the compiler knows, then copy over it.
+   * The gap between the terminator and the length field is a run-time
+   * length, so `memset(tail + rem + 1, 0, ...)` is a call into libc; 64 or
+   * 128 constant zero bytes is four or eight stores emitted inline. It
+   * costs rem bytes written twice, which are stores that were happening
+   * anyway. This mattered nothing when the compression was 4,300
+   * instructions a block and matters now that it is ~110 cycles. */
+  if (pad == 64) memset(tail, 0, 64);
+  else memset(tail, 0, 128);
   memcpy(tail, data + i, rem);
   tail[rem] = 0x80;
-  size_t pad = (rem + 1 + 8 <= 64) ? 64 : 128;
-  memset(tail + rem + 1, 0, pad - rem - 1 - 8);
-  uint64_t bits = (uint64_t)len * 8;
-  for (int b = 0; b < 8; b++) tail[pad - 1 - b] = (unsigned char)(bits >> (8 * b));
+  uint64_t bits_be = __builtin_bswap64((uint64_t)len * 8);
+  memcpy(tail + pad - 8, &bits_be, 8);
   scr_sha256_blocks(h, tail, pad / 64);
+  /* The digest is eight big-endian words: one byte swap and one 4-byte
+   * store each, in place of 32 shift-and-store steps. */
   for (int j = 0; j < 8; j++) {
-    for (int b = 0; b < 4; b++) out[j * 4 + b] = (unsigned char)(h[j] >> (24 - 8 * b));
+    uint32_t w = __builtin_bswap32(h[j]);
+    memcpy(out + j * 4, &w, 4);
   }
   return 32;
 }
@@ -3431,9 +3446,13 @@ static uint64_t scr_sha512_rotr(uint64_t x, unsigned n) {
 
 static void scr_sha512_block(uint64_t h[8], const unsigned char *p) {
   uint64_t w[80];
+  /* Eight byte loads and eight shift-or steps per word became one load and
+   * one swap. SHA-512 has no hardware on this host, so unlike SHA-256 it is
+   * still the scalar code that ships here. */
   for (int i = 0; i < 16; i++) {
-    w[i] = 0;
-    for (int b = 0; b < 8; b++) w[i] = (w[i] << 8) | (uint64_t)p[i * 8 + b];
+    uint64_t v;
+    memcpy(&v, p + i * 8, 8);
+    w[i] = __builtin_bswap64(v);
   }
   for (int i = 16; i < 80; i++) {
     uint64_t s0 = scr_sha512_rotr(w[i - 15], 1) ^ scr_sha512_rotr(w[i - 15], 8) ^ (w[i - 15] >> 7);
@@ -3467,16 +3486,18 @@ static size_t scr_sha512_digest(const unsigned char *data, size_t len, unsigned 
   for (; i + 128 <= len; i += 128) scr_sha512_block(h, data + i);
   unsigned char tail[256];
   size_t rem = len - i;
+  size_t pad = (rem + 1 + 16 <= 128) ? 128 : 256;
+  if (pad == 128) memset(tail, 0, 128); /* see scr_sha256_digest */
+  else memset(tail, 0, 256);
   memcpy(tail, data + i, rem);
   tail[rem] = 0x80;
-  size_t pad = (rem + 1 + 16 <= 128) ? 128 : 256;
-  memset(tail + rem + 1, 0, pad - rem - 1);
-  uint64_t bits = (uint64_t)len * 8;
-  for (int b = 0; b < 8; b++) tail[pad - 1 - b] = (unsigned char)(bits >> (8 * b));
+  uint64_t bits_be = __builtin_bswap64((uint64_t)len * 8);
+  memcpy(tail + pad - 8, &bits_be, 8);
   scr_sha512_block(h, tail);
   if (pad == 256) scr_sha512_block(h, tail + 128);
   for (int j = 0; j < 8; j++) {
-    for (int b = 0; b < 8; b++) out[j * 8 + b] = (unsigned char)(h[j] >> (56 - 8 * b));
+    uint64_t w = __builtin_bswap64(h[j]);
+    memcpy(out + j * 8, &w, 8);
   }
   return 64;
 }
@@ -3486,9 +3507,23 @@ static ScrStr *scr_digest_encode(const unsigned char *d, size_t n, const ScrStr 
   if (enc->len == 3 && memcmp(enc->data, "hex", 3) == 0) {
     static const char hex[] = "0123456789abcdef";
     char buf[128]; /* the widest digest is SHA-512's 64 bytes */
+    /* Both nibbles as ONE 16-bit store rather than two byte stores to
+     * adjacent addresses. Measured on this host over 32 bytes: 65.0 ticks
+     * -> 38.1. Writing the two characters into a `char[2]` and memcpy'ing
+     * THAT is the portable-looking version and clang does not merge it:
+     * measured 87.4, slower than the loop it replaces. So the word is built
+     * explicitly, and the byte order is a compile-time branch rather than
+     * an assumption — on a big-endian target the high nibble is the high
+     * byte and this must not silently emit a byte-swapped digest. */
     for (size_t i = 0; i < n; i++) {
-      buf[i * 2] = hex[d[i] >> 4];
-      buf[i * 2 + 1] = hex[d[i] & 0x0f];
+      unsigned hi = (unsigned char)hex[d[i] >> 4];
+      unsigned lo = (unsigned char)hex[d[i] & 0x0f];
+#if defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
+      uint16_t pair = (uint16_t)((hi << 8) | lo);
+#else
+      uint16_t pair = (uint16_t)(hi | (lo << 8));
+#endif
+      memcpy(buf + i * 2, &pair, 2);
     }
     return scr_str_new(buf, n * 2);
   }
@@ -3587,6 +3622,15 @@ size_t scr_crypto_digest_raw(const char *alg, const unsigned char *data, size_t 
   return 0;
 }
 
+/* How much of `ipad || message` an HMAC builds on the stack before it asks
+ * the heap. 512 bytes covers a 128-byte SHA-512 block plus a 384-byte
+ * message. Sized from a measured distribution rather than guessed: in a full
+ * paired zapo session (tests/perf/shacensus) all 276 HMAC messages are 333
+ * bytes or shorter, 87% are 57 or shorter, and the single commonest length
+ * is ONE byte. The heap arm is not dead code — a longer message takes it,
+ * and tests/corpus/6481 hashes messages on both sides of this bound. */
+#define SCR_HMAC_INNER_STACK 512
+
 /* HMAC (RFC 2104) over the same digests — block size 64 for all three. */
 size_t scr_crypto_hmac_raw(const char *alg, const unsigned char *key, size_t keylen,
                            const unsigned char *data, size_t len, unsigned char out[32]) {
@@ -3605,13 +3649,19 @@ size_t scr_crypto_hmac_raw(const char *alg, const unsigned char *key, size_t key
     memset(kblock, 0, 64);
     memcpy(kblock, key, keylen);
   }
-  unsigned char *inner = malloc(64 + len);
-  if (!inner) return 0;
+  unsigned char istack[SCR_HMAC_INNER_STACK];
+  unsigned char *iheap = NULL;
+  unsigned char *inner = istack;
+  if (64 + len > sizeof istack) {
+    iheap = malloc(64 + len);
+    if (!iheap) return 0;
+    inner = iheap;
+  }
   for (int i = 0; i < 64; i++) inner[i] = kblock[i] ^ 0x36;
   memcpy(inner + 64, data, len);
   unsigned char ih[32];
   size_t in = scr_crypto_digest_raw(alg, inner, 64 + len, ih);
-  free(inner);
+  free(iheap);
   if (in == 0) return 0;
   unsigned char outer[96];
   for (int i = 0; i < 64; i++) outer[i] = kblock[i] ^ 0x5c;
@@ -3858,13 +3908,23 @@ static size_t scr_hmac_finish(ScrHmac *h, unsigned char out[64]) {
   } else if (h->keylen > 0) {
     memcpy(k0, h->key, h->keylen);
   }
-  unsigned char *inner = malloc(block + h->len);
+  /* ipad || message. This was a malloc and a free on EVERY hmac, which on
+   * this host is ~115 cycles against ~550 for the two digests themselves —
+   * a sixth of an HMAC, spent on a buffer that is almost always tiny. See
+   * SCR_HMAC_INNER_STACK for the measured distribution it is sized from. */
+  unsigned char istack[SCR_HMAC_INNER_STACK];
+  unsigned char *iheap = NULL;
+  unsigned char *inner = istack;
+  if (block + h->len > sizeof istack) {
+    iheap = (unsigned char *)malloc(block + h->len);
+    inner = iheap;
+  }
   if (!inner) scr_trap("scriptc: out of memory\n");
   for (size_t i = 0; i < block; i++) inner[i] = (unsigned char)(k0[i] ^ 0x36);
   if (h->len > 0) memcpy(inner + block, h->msg, h->len);
   unsigned char ih[64];
   size_t in = scr_digest_by_id(h->alg, inner, block + h->len, ih);
-  free(inner);
+  free(iheap); /* NULL when the stack arm was taken; never `inner` */
   unsigned char outer[128 + 64];
   for (size_t i = 0; i < block; i++) outer[i] = (unsigned char)(k0[i] ^ 0x5c);
   memcpy(outer + block, ih, in);
