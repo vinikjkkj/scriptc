@@ -1509,7 +1509,7 @@ export async function runtimeFingerprint(rtDir: string): Promise<string> {
   // memo slot. Production only ever sees one rtDir per process; a test that
   // builds two of them would have read the first one's hash for the second.
   const sig =
-    `${rtDir} ` + stats.map((s, i) => `${inputs[i]?.[0] ?? ""}:${s.size}:${s.mtimeMs}`).join("|");
+    `${rtDir}\0` + stats.map((s, i) => `${inputs[i]?.[0] ?? ""}:${s.size}:${s.mtimeMs}`).join("|");
   if (rtFingerprintMemo !== null && rtFingerprintMemo.sig === sig) return rtFingerprintMemo.hash;
   const h = createHash("sha256").update(QJS_COMMIT).update(MBEDTLS_VERSION).update(ZLIB_VERSION).update(SQLITE_VERSION);
   for (const [name, path] of inputs) h.update(name).update("\0").update(await readFile(path)).update("\0");
