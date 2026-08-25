@@ -855,6 +855,41 @@ export interface GenericClassInfo {
     return irName ? (L.classes.get(irName) ?? null) : null;
   }
 
+/** Does the constructor READ `this.<name>` at a source position before
+   * `declStart`, the assignment that declares the field? Lexical and
+   * constructor-local by design: a read from a method the constructor
+   * calls, or from a base constructor's virtual dispatch through
+   * `super()`, is not decidable here and keeps today's behaviour. The LHS
+   * of a plain `=` is a write, not a read; `this.x += 1` is both, and
+   * counts. */
+  function ctorReadsBeforeDeclaration(body: ts.Block, name: string, declStart: number): boolean {
+    let found = false;
+    const visit = (n: ts.Node): void => {
+      if (found) return;
+      if (
+        ts.isPropertyAccessExpression(n) &&
+        n.expression.kind === ts.SyntaxKind.ThisKeyword &&
+        ts.isIdentifier(n.name) &&
+        n.name.text === name &&
+        n.getStart() < declStart
+      ) {
+        const parent = n.parent as ts.Node | undefined;
+        const isWriteTarget =
+          parent !== undefined &&
+          ts.isBinaryExpression(parent) &&
+          parent.left === n &&
+          parent.operatorToken.kind === ts.SyntaxKind.EqualsToken;
+        if (!isWriteTarget) {
+          found = true;
+          return;
+        }
+      }
+      ts.forEachChild(n, visit);
+    };
+    ts.forEachChild(body, visit);
+    return found;
+  }
+
 /** Can a CHECKED-DYNAMIC box stand in for this inference without
    * inventing an answer? The dyn tree's native shapes are the primitives,
    * plain objects and real arrays: keyed reads and writes on them do what
@@ -2695,11 +2730,22 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
               {
                 const rhsT = L.typeOf(((stmt as ts.ExpressionStatement).expression as ts.BinaryExpression).right);
                 const assignsUndef = (rhsT.flags & ts.TypeFlags.Undefined) !== 0;
+                // A READ of the field EARLIER IN THIS CONSTRUCTOR than the
+                // assignment that declares it. In Node the property does not
+                // exist yet and the read answers `undefined`; a plain static
+                // slot answers the calloc zero instead — measured, `0`
+                // against Node's `undefined`, which is the zeroed-memory
+                // trap this whole scan exists to avoid, firing inside the
+                // supported form. The slot takes the undefined arm for the
+                // same reason the JSDoc-contradiction case above does.
+                const readsFirst =
+                  ctor?.body !== undefined &&
+                  ctorReadsBeforeDeclaration(ctor.body, name, assign.getStart());
                 const admitsUndef =
                   type.kind === "dyn" ||
                   isUnitType(type) ||
                   (type.kind === "union" && L.armTag(type.unionId, UNDEFINED_T) >= 0);
-                if (assignsUndef && !admitsUndef) {
+                if ((assignsUndef || readsFirst) && !admitsUndef) {
                   const widened = L.withUndefinedArmOf(type);
                   if (widened !== null) type = widened;
                 }
