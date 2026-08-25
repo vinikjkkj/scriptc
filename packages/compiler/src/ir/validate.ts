@@ -18,7 +18,7 @@ import type {
   IrUnionDef,
   SrcLoc,
 } from "./nodes.js";
-import { settleOrValuePromiseTag, arrayOf, BOOL, BYTES_U8, bytesOf, canAdaptDynFuncTo, canDynCheckTo, canConvertToDyn, canExitIslandToType, canMarshalIntoIsland, canMarshalTypedFuncIntoIsland, CHILD_T, CHILDSTREAM_T, DGRAMSOCK_T, DV_BIG_SET_METHODS, DYN, DYN_HANDLE_KINDS, F64, ABORTCONTROLLER_T, ABORTSIGNAL_T, FILEHANDLE_T, FSWATCHER_T, HTTP2SESSION_T, HTTP2STREAM_T, HTTPCLIENTREQ_T, HTTPREQ_T, HTTPRES_T, HEADERS_T, REQUESTINIT_T, RESPONSE_T, islandPromisePayloadTag, isJsonSafeType, isRefCounted, isSupportedIndexValue, isSupportedMapKey, isSupportedMapValue, isSupportedSetElem, isUnitType, jsOpResultKind, JSVAL, NETSERVER_T, NETSOCKET_T, PROCSTREAM_T, REF_TRUTHY_KINDS, REGEX, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, SEARCH_PARAMS_T, SECURECTX_T, SPAWNRES_T, STATS_T, streamDuplexWidensToWritable, STRING, SYMBOL_T, TESTCTX_T, typeEquals, typeKey, unionFuncSetArmsOk, URL_T, VOID, wsGlobalPlan } from "./nodes.js";
+import { settleOrValuePromiseTag, arrayOf, BOOL, BYTES_U8, bytesOf, canAdaptDynFuncTo, canDynCheckTo, canConvertToDyn, canExitIslandToType, canMarshalIntoIsland, canMarshalTypedFuncIntoIsland, CHILD_T, CHILDSTREAM_T, DGRAMSOCK_T, DV_BIG_SET_METHODS, DYN, DYN_HANDLE_KINDS, F64, ABORTCONTROLLER_T, ABORTSIGNAL_T, FILEHANDLE_T, FSWATCHER_T, HTTP2SESSION_T, HTTP2STREAM_T, HTTPCLIENTREQ_T, HTTPREQ_T, HTTPRES_T, HEADERS_T, REQUESTINIT_T, RESPONSE_T, islandPromisePayloadTag, isJsonSafeType, isRefCounted, isSupportedIndexValue, isSupportedMapKey, isSupportedMapValue, isSupportedSetElem, isUnitType, jsOpResultKind, JSVAL, NETSERVER_T, NETSOCKET_T, PROCSTREAM_T, REF_TRUTHY_KINDS, REGEX, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, SEARCH_PARAMS_T, SECURECTX_T, SPAWNRES_T, SQLITEDB_T, SQLITESTMT_T, STATS_T, streamDuplexWidensToWritable, STRING, SYMBOL_T, TESTCTX_T, typeEquals, typeKey, unionFuncSetArmsOk, URL_T, VOID, wsGlobalPlan } from "./nodes.js";
 
 /** Per-method signature for strIntrinsic: `argTypes` lists every argument
  * position (optional ones included); `minArgs` is how many may be omitted
@@ -98,6 +98,42 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   // checked in the libCall case, like error.new.
   "island.castFail": { argTypes: [JSVAL, STRING], result: VOID },
   "json.parse": { argTypes: [STRING], result: DYN },
+  /* better-sqlite3 (scr_sqlite.c). open's three flags are the option
+   * record's readonly / fileMustExist / timeout, already folded to
+   * literals by the lowering — the runtime re-validates timeout because
+   * a non-literal option value reaches it as a computed f64. */
+  "sqlite.open": { argTypes: [STRING, BOOL, BOOL, F64], result: SQLITEDB_T },
+  "sqlite.prepare": { argTypes: [SQLITEDB_T, STRING], result: SQLITESTMT_T },
+  "sqlite.exec": { argTypes: [SQLITEDB_T, STRING], result: VOID },
+  "sqlite.close": { argTypes: [SQLITEDB_T], result: VOID },
+  "sqlite.pragma": { argTypes: [SQLITEDB_T, STRING, BOOL], result: DYN },
+  "sqlite.dbName": { argTypes: [SQLITEDB_T], result: STRING },
+  "sqlite.dbOpen": { argTypes: [SQLITEDB_T], result: BOOL },
+  "sqlite.dbReadonly": { argTypes: [SQLITEDB_T], result: BOOL },
+  "sqlite.dbMemory": { argTypes: [SQLITEDB_T], result: BOOL },
+  "sqlite.dbInTx": { argTypes: [SQLITEDB_T], result: BOOL },
+  /* The call's ARGUMENT LIST as a checked-dynamic array: argsNew mints
+   * it, one argsPush per argument written fills it, and the three
+   * executors read it. See the IrLibFn comment for why the list is one
+   * value and not a variadic tail — and scr_sqlite.c's argsNew for why
+   * it is a DYN array and not a `dyn[]` (an array whose element is dyn
+   * IS a dyn value here, with no ScrArr representation at all). */
+  "sqlite.argsNew": { argTypes: [], result: DYN },
+  "sqlite.argsPush": { argTypes: [DYN, DYN], result: DYN },
+  "sqlite.run": { argTypes: [SQLITESTMT_T, DYN], result: DYN },
+  "sqlite.get": { argTypes: [SQLITESTMT_T, DYN], result: DYN },
+  "sqlite.all": { argTypes: [SQLITESTMT_T, DYN], result: DYN },
+  // The four mode setters answer the SAME statement (+1), which is what
+  // makes `stmt.pluck().get()` read one object.
+  "sqlite.pluck": { argTypes: [SQLITESTMT_T, BOOL], result: SQLITESTMT_T },
+  "sqlite.raw": { argTypes: [SQLITESTMT_T, BOOL], result: SQLITESTMT_T },
+  "sqlite.expand": { argTypes: [SQLITESTMT_T, BOOL], result: SQLITESTMT_T },
+  "sqlite.safeIntegers": { argTypes: [SQLITESTMT_T, BOOL], result: SQLITESTMT_T },
+  "sqlite.columns": { argTypes: [SQLITESTMT_T], result: DYN },
+  "sqlite.stmtSource": { argTypes: [SQLITESTMT_T], result: STRING },
+  "sqlite.stmtReader": { argTypes: [SQLITESTMT_T], result: BOOL },
+  "sqlite.stmtReadonly": { argTypes: [SQLITESTMT_T], result: BOOL },
+  "sqlite.stmtBusy": { argTypes: [SQLITESTMT_T], result: BOOL },
   "dyn.keySet": { argTypes: [DYN, STRING, DYN], result: VOID },
   "dyn.expandoBind": { argTypes: [DYN, STRING, DYN, DYN], result: VOID },
   "dyn.keyDelete": { argTypes: [DYN, STRING], result: BOOL },

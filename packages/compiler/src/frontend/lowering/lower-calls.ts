@@ -19,6 +19,7 @@ import type { ScrDiagnostic } from "../../diagnostics/diagnostic.js";
 import { mixinFnShapeOf } from "./lower-mixins.js";
 import { bufEncoding, dynStringReceiver, lowerArrayFromCall, lowerBytesStaticFromCall, lowerDynArrayFilterCall, lowerDynArrayFlatMapCall, lowerGroupByStaticCall, lowerIteratorHelperCall, lowerObjectAssignIndexShape, lowerObjectFromEntriesCall, lowerObjectIterOverIndexShape, lowerRegexMethodCall, lowerStringMethodCall, lowerTupleReadMethodCall } from "./lower-containers.js";
 import { lowerBareRequireCall, lowerChildStreamMethodCall, lowerCreateRequireCall, lowerDiffieHellmanCallbackCall, lowerDirentMethodCall, lowerPerfHooksCall, lowerProcStreamMethodCall, lowerReflectApplyCall, lowerStringFromCharCodeApply, lowerWatcherMethodCall } from "./lower-builtins.js";
+import { lowerSqliteMethodCall, lowerSqliteNew } from "./lower-sqlite.js";
 import { classHasKeyHelper, classInMemberNames, droppableStatic, dynAssertionReceiver, fnOwnCounters, keyedCalleeAtUndefinedArm, unionArmBridge, fnOwnPropBox, fnOwnRoutableKey, fnOwnWhy, lowerPromiseAllTupleCall, lowerPromiseRejectCall, narrowBridgeDyn, probeLower, recordArmStringable, templateRawTextOf } from "./lower-exprs.js";
 import { httpClientFnBindingOf, isStreamUndefCallExpr, lowerHttpClientFnCall } from "./lower-server.js";
 import { CLASS_PROPS_FIELD, EMITTER_API_MEMBERS, definePropSlotSiteOf, definePropTableSiteOf, exactInstanceClassOf, findGenericMethodOn, lowerClassGenericMethodCall, lowerStaticMethodCall, type ClassInfo } from "./lower-classes.js";
@@ -4968,6 +4969,9 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
         lowerProcStreamMethodCall(L, expr, expr.expression) ??
         // FSWatcher receivers — close() (fs.watch's handle).
         lowerWatcherMethodCall(L, expr, expr.expression) ??
+        // better-sqlite3 Database / Statement receivers. The ONE npm
+        // package the static lane serves itself — see lower-sqlite.ts.
+        lowerSqliteMethodCall(L, expr, expr.expression) ??
         // Atomics.wait — the synchronous-sleep idiom (no threads exist,
         // so the compare-then-sleep lowering IS the spec's behavior).
         L.lowerAtomicsCall(expr, expr.expression) ??

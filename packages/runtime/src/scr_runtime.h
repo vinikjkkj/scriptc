@@ -8998,6 +8998,61 @@ long scr_dgram_live_count(void);
  * hook's exact shape, one more nullable slot set. */
 void scr_loop_set_dgram(bool (*pending)(void), void (*dispatch)(void), int (*pollfd)(void));
 
+/* ── better-sqlite3 (scr_sqlite.c — compiled only when the program uses
+ * it, ALONGSIDE the vendored SQLite amalgamation; design note atop the
+ * file, which also lists the surface refused by name rather than served
+ * partially).
+ *
+ * Two opaque refcounted handles. Every entry point BORROWS its arguments
+ * and returns +1, the libCall convention; the ones that can raise leave
+ * NULL with a catchable exception pending (SqliteError-shaped: an Error
+ * whose `name` reads "SqliteError" and whose `code` is the extended
+ * result code's name). The dyn-returning three answer the row shape,
+ * because a row's members are a property of the SQL text and not of the
+ * program's types. */
+typedef struct ScrSqliteDb ScrSqliteDb;
+typedef struct ScrSqliteStmt ScrSqliteStmt;
+
+ScrSqliteDb *scr_sqlite_db_retain(ScrSqliteDb *d);
+void scr_sqlite_db_release(ScrSqliteDb *d);
+void *scr_sqlite_db_retain_v(void *p);
+void scr_sqlite_db_release_v(void *p);
+ScrSqliteStmt *scr_sqlite_stmt_retain(ScrSqliteStmt *s);
+void scr_sqlite_stmt_release(ScrSqliteStmt *s);
+void *scr_sqlite_stmt_retain_v(void *p);
+void scr_sqlite_stmt_release_v(void *p);
+
+ScrSqliteDb *scr_sqlite_open(const ScrStr *path, bool readonly, bool must_exist, double timeout);
+void scr_sqlite_close(ScrSqliteDb *db);
+ScrSqliteStmt *scr_sqlite_prepare(ScrSqliteDb *db, const ScrStr *sql);
+void scr_sqlite_exec(ScrSqliteDb *db, const ScrStr *sql);
+ScrDyn *scr_sqlite_pragma(ScrSqliteDb *db, const ScrStr *source, bool simple);
+ScrStr *scr_sqlite_db_name(const ScrSqliteDb *db);
+bool scr_sqlite_db_open(const ScrSqliteDb *db);
+bool scr_sqlite_db_readonly(const ScrSqliteDb *db);
+bool scr_sqlite_db_memory(const ScrSqliteDb *db);
+bool scr_sqlite_db_in_transaction(const ScrSqliteDb *db);
+
+/* The call site's ARGUMENT LIST — better-sqlite3's Binder walks the JS
+ * `arguments` object, and this is that object as a checked-dynamic
+ * array, built by one argsNew and one argsPush per argument written. */
+ScrDyn *scr_sqlite_args_new(void);
+ScrDyn *scr_sqlite_args_push(ScrDyn *args, ScrDyn *v);
+
+ScrDyn *scr_sqlite_run(ScrSqliteStmt *st, const ScrDyn *args);
+ScrDyn *scr_sqlite_get(ScrSqliteStmt *st, const ScrDyn *args);
+ScrDyn *scr_sqlite_all(ScrSqliteStmt *st, const ScrDyn *args);
+
+ScrSqliteStmt *scr_sqlite_stmt_pluck(ScrSqliteStmt *st, bool use);
+ScrSqliteStmt *scr_sqlite_stmt_expand(ScrSqliteStmt *st, bool use);
+ScrSqliteStmt *scr_sqlite_stmt_raw(ScrSqliteStmt *st, bool use);
+ScrSqliteStmt *scr_sqlite_stmt_safe_ints(ScrSqliteStmt *st, bool use);
+ScrDyn *scr_sqlite_stmt_columns(ScrSqliteStmt *st);
+ScrStr *scr_sqlite_stmt_source(const ScrSqliteStmt *st);
+bool scr_sqlite_stmt_reader(const ScrSqliteStmt *st);
+bool scr_sqlite_stmt_readonly(const ScrSqliteStmt *st);
+bool scr_sqlite_stmt_busy(const ScrSqliteStmt *st);
+
 /* ── fs.watch (scr_watch.c — compiled only when the program uses it;
  * design note atop the file). FSWatcher handles over the unit's own
  * event backend (kqueue EVFILT_VNODE on macOS/BSD, inotify on Linux):
