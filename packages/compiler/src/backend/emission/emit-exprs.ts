@@ -152,26 +152,34 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
           case "!==":
             return E.newTemp(e.type, `${l.name} != ${r.name}`);
           // The bitwise six ride runtime helpers (ToInt32/ToUint32 wrap,
-          // 5-bit shift masks, exact C-portable arithmetic shifts).
+          // 5-bit shift masks, exact C-portable arithmetic shifts) -- the
+          // `_inl` twins, which are static inline in scr_runtime.h. The
+          // out-of-line scr_bit_* symbols still exist and still carry the
+          // same semantics, but callgrind priced a CALL to one of them at
+          // exactly 30 instructions per AND, 16 of which are the stack
+          // frame and the jumps around it. The C compiler sees through the
+          // inline form: a literal operand's ToUint32 folds away and an
+          // invariant mask hoists. The LLVM backend keeps calling the
+          // out-of-line symbol, so only this lane changes.
           case "&":
-            return E.newTemp(e.type, `scr_bit_and(${l.name}, ${r.name})`);
+            return E.newTemp(e.type, `scr_bit_and_inl(${l.name}, ${r.name})`);
           case "|":
-            return E.newTemp(e.type, `scr_bit_or(${l.name}, ${r.name})`);
+            return E.newTemp(e.type, `scr_bit_or_inl(${l.name}, ${r.name})`);
           case "^":
-            return E.newTemp(e.type, `scr_bit_xor(${l.name}, ${r.name})`);
+            return E.newTemp(e.type, `scr_bit_xor_inl(${l.name}, ${r.name})`);
           case "<<":
-            return E.newTemp(e.type, `scr_bit_shl(${l.name}, ${r.name})`);
+            return E.newTemp(e.type, `scr_bit_shl_inl(${l.name}, ${r.name})`);
           case ">>":
-            return E.newTemp(e.type, `scr_bit_shr(${l.name}, ${r.name})`);
+            return E.newTemp(e.type, `scr_bit_shr_inl(${l.name}, ${r.name})`);
           case ">>>":
-            return E.newTemp(e.type, `scr_bit_ushr(${l.name}, ${r.name})`);
+            return E.newTemp(e.type, `scr_bit_ushr_inl(${l.name}, ${r.name})`);
           default:
             return E.newTemp(e.type, `${l.name} ${e.op} ${r.name}`);
         }
       }
       case "unary": {
         const v = E.emitExpr(e.operand);
-        if (e.op === "~") return E.newTemp(e.type, `scr_bit_not(${v.name})`);
+        if (e.op === "~") return E.newTemp(e.type, `scr_bit_not_inl(${v.name})`);
         return E.newTemp(e.type, `${e.op}${v.name}`);
       }
       case "incDec": {
@@ -1830,13 +1838,13 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
               nativeArgs.push(`(uint8_t)(${arg.name} ? 1 : 0)`);
               break;
             case "u8":
-              nativeArgs.push(`(uint8_t)(uint32_t)scr_bit_ushr(${arg.name}, 0.0)`);
+              nativeArgs.push(`(uint8_t)(uint32_t)scr_bit_ushr_inl(${arg.name}, 0.0)`);
               break;
             case "u32":
-              nativeArgs.push(`(uint32_t)scr_bit_ushr(${arg.name}, 0.0)`);
+              nativeArgs.push(`(uint32_t)scr_bit_ushr_inl(${arg.name}, 0.0)`);
               break;
             case "i32":
-              nativeArgs.push(`(int32_t)scr_bit_or(${arg.name}, 0.0)`);
+              nativeArgs.push(`(int32_t)scr_bit_or_inl(${arg.name}, 0.0)`);
               break;
             case "string":
               nativeArgs.push(`(const uint8_t *)${arg.name}->data`, `${arg.name}->len`);
