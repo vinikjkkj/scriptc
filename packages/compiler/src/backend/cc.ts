@@ -1,9 +1,9 @@
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { createRequire } from "node:module";
-import { chmod, copyFile, mkdir, mkdtemp, readdir, readFile, rename, rm, stat, unlink, utimes, writeFile } from "node:fs/promises";
+import { chmod, copyFile, mkdir, mkdtemp, readdir, readFile, rename, rm, rmdir, stat, unlink, utimes, writeFile } from "node:fs/promises";
 import { availableParallelism, tmpdir } from "node:os";
-import { basename, dirname, join } from "node:path";
+import { basename, dirname, join, sep } from "node:path";
 import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
@@ -1457,22 +1457,68 @@ function ccacheAvailable(): Promise<boolean> {
   return ccacheMemo;
 }
 
-/** Content hash of every .c/.h in the runtime src dir plus the vendor pin —
- * everything a binary links that the emitted C bytes don't already cover
- * (npm-embedded C rides inside the emitted C; the engine archive and lre
- * objects are pinned by QJS_COMMIT, the same trust their own caches use).
- * Memoized behind a stat signature so watch-mode edits re-hash. */
+/** Every .c/.h the compiler can feed a compile, relative to the runtime
+ * package root: the runtime src dir AND the vendored tree beside it. Sorted,
+ * so the fingerprint below is order-stable.
+ *
+ * `.cache` is excluded because it is build OUTPUT living inside the vendored
+ * tree (libqjs.a, the lre/zlib/sqlite object sets); hashing it would make the
+ * fingerprint depend on its own products. */
+async function fingerprintInputs(dir: string, rel: string, out: [string, string][]): Promise<void> {
+  let entries;
+  try {
+    entries = await readdir(dir, { withFileTypes: true });
+  } catch {
+    return; // a vendored tree that is not checked out contributes nothing
+  }
+  for (const ent of entries) {
+    if (ent.name === ".cache" || ent.name === "node_modules") continue;
+    const child = `${rel}/${ent.name}`;
+    if (ent.isDirectory()) await fingerprintInputs(join(dir, ent.name), child, out);
+    else if (ent.isFile() && (ent.name.endsWith(".c") || ent.name.endsWith(".h"))) out.push([child, join(dir, ent.name)]);
+  }
+}
+
+/** Content hash of every C source and header a build can compile: the runtime
+ * src dir AND the vendored sources beside it, plus the vendor version pins.
+ *
+ * The vendored half is not decoration. `scr_number.c` textually `#include`s
+ * `../vendor/ryu/d2s.c`, and monocypher's two TUs are handed to `rt()` like
+ * any runtime source — so both land in the object cache under a key that,
+ * before this covered them, moved for a `src/` edit and NOT for theirs. The
+ * result was the worst failure a cache can have: a stale object under a live
+ * key, linked into a binary that built clean, ran, and printed wrong numbers.
+ * A key that cannot see one of its inputs must not be trusted to be a hit.
+ *
+ * The version pins stay because they cover what content hashing here cannot:
+ * the CMake-configured engine archive and the per-target vendor object sets,
+ * whose own caches key on the same strings.
+ *
+ * Cost: the stat signature (~440 files) is a few ms and runs per build; the
+ * ~26 MB content hash behind it runs once per process and again only when a
+ * source actually changes. */
 let rtFingerprintMemo: { sig: string; hash: string } | null = null;
 async function runtimeFingerprint(rtDir: string): Promise<string> {
-  const names = (await readdir(rtDir)).filter((n) => n.endsWith(".c") || n.endsWith(".h")).sort();
-  const stats = await Promise.all(names.map((n) => stat(join(rtDir, n))));
-  const sig = stats.map((s, i) => `${names[i] ?? ""}:${s.size}:${s.mtimeMs}`).join("|");
+  const inputs: [string, string][] = [];
+  await fingerprintInputs(rtDir, "src", inputs);
+  await fingerprintInputs(join(rtDir, "..", "vendor"), "vendor", inputs);
+  inputs.sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
+  const stats = await Promise.all(inputs.map(([, p]) => stat(p)));
+  const sig = stats.map((s, i) => `${inputs[i]?.[0] ?? ""}:${s.size}:${s.mtimeMs}`).join("|");
   if (rtFingerprintMemo !== null && rtFingerprintMemo.sig === sig) return rtFingerprintMemo.hash;
   const h = createHash("sha256").update(QJS_COMMIT).update(MBEDTLS_VERSION).update(ZLIB_VERSION).update(SQLITE_VERSION);
-  for (const n of names) h.update(n).update("\0").update(await readFile(join(rtDir, n))).update("\0");
+  for (const [name, path] of inputs) h.update(name).update("\0").update(await readFile(path)).update("\0");
   const hash = h.digest("hex");
   rtFingerprintMemo = { sig, hash };
   return hash;
+}
+
+/** Staging for in-progress object compiles. Deliberately NOT under `obj/`:
+ * pruneCache walks the whole cache root, and a staging directory inside the
+ * swept tree means a sweep can delete an object out of a compile that is
+ * still running. `obj/` now holds published objects only. */
+function objStagingRoot(root: string): string {
+  return join(root, "staging");
 }
 
 /** The cached .o set for one flag flavor, compiled on first need. Concurrent
@@ -1494,12 +1540,21 @@ async function ensureRuntimeObjects(
   const objOf = (src: string): string => join(objDir, `${basename(src, ".c")}.o`);
   const present = await Promise.all(sources.map((s) => fileExists(objOf(s))));
   const missing = sources.filter((_, i) => !present[i]);
+  // An object HIT bumps its mtime, exactly as a binary hit does. Without this
+  // the LRU sweep read "oldest" as "coldest" and evicted the hottest objects
+  // in the tree first — they are written once and then only ever read, so
+  // their mtime never moved again no matter how many builds depended on them.
+  const now = new Date();
+  await Promise.all(
+    sources.filter((_, i) => present[i]).map((s) => utimes(objOf(s), now, now).catch(() => undefined)),
+  );
   if (missing.length > 0) {
     // ccache wraps only the default clang driver — multi-word drivers
     // (`zig cc`) run bare; their object sets are keyed apart anyway.
     const useCcache = ccArgv.length === 1 && ccArgv[0] === "clang" && (await ccacheAvailable());
     await mkdir(objDir, { recursive: true });
-    const tmpDir = await mkdtemp(join(root, "obj", "build-"));
+    await mkdir(objStagingRoot(root), { recursive: true });
+    const tmpDir = await mkdtemp(join(objStagingRoot(root), "build-"));
     try {
       // Modest parallelism: a flavor's objects build once, but several cold
       // workers can race here — keep each build's CPU footprint small.
@@ -1514,6 +1569,17 @@ async function ensureRuntimeObjects(
           }),
         );
       }
+    } catch (err) {
+      // A compile that threw leaves behind the key directory it pre-created.
+      // An empty key is already a MISS — the presence check is per FILE, not
+      // per directory — but an empty directory is what a reader of this cache
+      // sees first, and 61 of them once read as a code regression. Take it
+      // back out, but only on this path: a concurrent first build may be
+      // renaming its objects into the very same directory, and an
+      // unconditional rmdir in `finally` would pull it out from under that
+      // build's rename. rmdir is a no-op the moment anything is in there.
+      await rmdir(objDir).catch(() => undefined);
+      throw err;
     } finally {
       await rm(tmpDir, { recursive: true, force: true });
     }
@@ -1521,33 +1587,71 @@ async function ensureRuntimeObjects(
   return new Map(sources.map((s) => [s, objOf(s)]));
 }
 
+/** Every cached object the link is about to open, still there?
+ *
+ * ensureRuntimeObjects checks existence and then RETURNS paths; the linker
+ * opens them some hundreds of milliseconds later. Any concurrent sweep — or
+ * a hand `rm` — in that window turned into `lld-link: error: could not open
+ * '…/scr_number.o'`, a wall of link errors carrying no assertion text that
+ * reads exactly like a code regression. Re-checking immediately before the
+ * link closes the window: a missing object becomes a recompile (below), and
+ * in the worst case a slower but CORRECT build. */
+async function objectsStillPresent(objects: Map<string, string>): Promise<boolean> {
+  const paths = [...new Set(objects.values())];
+  return (await Promise.all(paths.map(fileExists))).every(Boolean);
+}
+
 /** Size-capped LRU sweep of the whole cache root, at most once per process
  * and only after a write. Oldest-mtime files go first until the tree is back
- * under 75% of the cap; read hits bump mtimes so hot entries survive. */
+ * under 75% of the cap; read hits bump mtimes so hot entries survive.
+ *
+ * Two things this sweep must not touch, both learned the hard way:
+ *
+ *   staging/  — in-progress compiles. A sweep that deletes a half-written
+ *               object out from under the compiler is a build failure with
+ *               no cause visible anywhere near it.
+ *
+ *   obj/      — the runtime object sets. They are the expensive half to
+ *               rebuild (a cold set is ~40 s; the binaries it protects are
+ *               ~1 s each to relink) and the cheap half to keep: on the host
+ *               that reported this, obj/ was 69 MB of a 3,995 MB tree while
+ *               bin/ was 3,897 MB in 5,198 entries. Evicting from bin/ first
+ *               frees ~56× more per entry and leaves the objects that every
+ *               concurrent build is CURRENTLY linking against alone. Their
+ *               bytes still count toward `total`, so bin/ is trimmed enough
+ *               to bring the whole tree under the cap.
+ *
+ * If bin/ alone cannot reach the target the sweep stops there rather than
+ * reaching into obj/: a cache that is merely too big is a tuning problem,
+ * and a cache that deletes what a running link is about to open is not. */
 let pruneDone = false;
 async function pruneCache(root: string): Promise<void> {
   if (pruneDone) return;
   pruneDone = true;
   const capBytes = Number(process.env["SCRIPTC_CACHE_MAX_MB"] ?? "4096") * 1024 * 1024;
   if (!Number.isFinite(capBytes) || capBytes <= 0) return;
-  const files: { path: string; size: number; mtimeMs: number }[] = [];
+  const objRoot = join(root, "obj");
+  const stagingRoot = objStagingRoot(root);
+  const files: { path: string; size: number; mtimeMs: number; evictable: boolean }[] = [];
   const walk = async (dir: string): Promise<void> => {
+    if (dir === stagingRoot) return; // live compiles: never walked, never swept
+    const evictable = dir !== objRoot && !dir.startsWith(`${objRoot}${sep}`);
     const entries = await readdir(dir, { withFileTypes: true }).catch(() => []);
     for (const ent of entries) {
       const p = join(dir, ent.name);
       if (ent.isDirectory()) await walk(p);
       else if (ent.isFile()) {
         const s = await stat(p).catch(() => null);
-        if (s !== null) files.push({ path: p, size: s.size, mtimeMs: s.mtimeMs });
+        if (s !== null) files.push({ path: p, size: s.size, mtimeMs: s.mtimeMs, evictable });
       }
     }
   };
   await walk(root);
   let total = files.reduce((n, f) => n + f.size, 0);
   if (total <= capBytes) return;
-  files.sort((a, b) => a.mtimeMs - b.mtimeMs);
+  const candidates = files.filter((f) => f.evictable).sort((a, b) => a.mtimeMs - b.mtimeMs);
   const recent = Date.now() - 60 * 60 * 1000; // never evict anything a live run may be using
-  for (const f of files) {
+  for (const f of candidates) {
     if (total <= capBytes * 0.75 || f.mtimeMs > recent) break;
     await unlink(f.path).catch(() => undefined);
     total -= f.size;
@@ -2041,8 +2145,22 @@ export async function compileC(opts: CcOptions): Promise<void> {
     return p;
   });
   let objects: Map<string, string> | null = null;
+  const objKeyPrefix = `obj-v2\0${ccName}\0${cv}\0${fingerprint}\0`;
   try {
-    objects = await ensureRuntimeObjects(root, driver.argv, cflags, rtInputs, `obj-v1\0${ccName}\0${cv}\0${fingerprint}\0`);
+    objects = await ensureRuntimeObjects(root, driver.argv, cflags, rtInputs, objKeyPrefix);
+    // Between the presence check inside ensureRuntimeObjects and the link
+    // below there is a window of a few hundred milliseconds. A concurrent
+    // sweep in that window used to surface as a screenful of `lld-link:
+    // error: could not open '…/scr_number.o'` — no assertion text, no named
+    // cause, and indistinguishable from a code regression. Re-check, and
+    // give the set exactly one chance to be recompiled.
+    if (!(await objectsStillPresent(objects))) {
+      objects = await ensureRuntimeObjects(root, driver.argv, cflags, rtInputs, objKeyPrefix);
+      // Still gone: something is actively deleting this cache. Drop the
+      // substitution entirely and compile the historical way — slower, and
+      // right, which is the trade this whole file is about.
+      if (!(await objectsStillPresent(objects))) objects = null;
+    }
   } catch {
     objects = null; // cache trouble is never a build failure
   }
