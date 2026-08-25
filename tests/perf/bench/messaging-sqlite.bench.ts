@@ -74,7 +74,7 @@
 
 import { createHash } from "node:crypto"
 import Database from "better-sqlite3"
-import { runScenario, benchEnd, envInt, envStr } from "./_bench.ts"
+import { runScenario, benchEnd, envInt, envStr, jstr } from "./_bench.ts"
 
 const CONTACTS = envInt("ZAPO_BENCH_CONTACTS", 1000)
 const GROUP_MEMBERS = envInt("ZAPO_BENCH_GROUP_MEMBERS", 500)
@@ -217,11 +217,11 @@ runScenario("RECV group", "msgs", MESSAGES, () => {
 const realRows = kvSize.get() as number
 console.log(
   "SCBENCH-ROWS {" +
-    '"path":"' + dbPath + '"' +
+    '"path":' + jstr(dbPath) +
     ',"rowsTracked":' + rows +
     ',"rowsInTable":' + realRows +
     ',"agree":' + (rows === realRows ? "true" : "false") +
-    ',"bound":"' + (boundByCount ? "count" : "tracked") + '"' +
+    ',"bound":' + jstr(boundByCount ? "count" : "tracked") +
     ',"tx":' + (useTx ? "1" : "0") +
     ',"cacheKiB":' + cacheKiB +
     "}"

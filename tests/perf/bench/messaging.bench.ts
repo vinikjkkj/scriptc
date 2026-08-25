@@ -21,7 +21,7 @@
 // the report.
 
 import { createHash } from "node:crypto"
-import { runScenario, benchEnd, envInt, envStr } from "./_bench.ts"
+import { runScenario, benchEnd, envInt, envStr, jstr } from "./_bench.ts"
 
 const CONTACTS = envInt("ZAPO_BENCH_CONTACTS", 1000)
 const GROUP_MEMBERS = envInt("ZAPO_BENCH_GROUP_MEMBERS", 500)
@@ -127,11 +127,11 @@ runScenario("RECV group", "msgs", MESSAGES, () => {
 // store itself says it holds.
 console.log(
   "SCBENCH-ROWS {" +
-    '"path":"(map)"' +
+    '"path":' + jstr("(map)") +
     ',"rowsTracked":' + rows +
     ',"rowsInTable":' + store.size +
     ',"agree":' + (rows === store.size ? "true" : "false") +
-    ',"bound":"' + (boundByCount ? "count" : "tracked") + '"' +
+    ',"bound":' + jstr(boundByCount ? "count" : "tracked") +
     "}"
 )
 

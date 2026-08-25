@@ -159,7 +159,9 @@ function runOnce(scenario, runtimeKey, storeKey, runIdx) {
   const st = STORES[storeKey]
   const batches = BATCHES[scenario]
 
-  const dbPath = path.join(DBDIR, `${storeKey}-${runtimeKey}-${scenario.replace(/[^a-z0-9]+/gi, '-')}.db`)
+  // Forward slashes on purpose: the path is echoed back inside a JSON
+  // control line and also has to be readable in a report.
+  const dbPath = path.join(DBDIR, `${storeKey}-${runtimeKey}-${scenario.replace(/[^a-z0-9]+/gi, '-')}.db`).split(path.sep).join('/')
   if (storeKey === 'sqlite') {
     mkdirSync(DBDIR, { recursive: true })
     // WAL and shm siblings survive a crash and would be read back in.
