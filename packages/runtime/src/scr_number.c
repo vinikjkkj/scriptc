@@ -246,7 +246,64 @@ static int scr_u64_digits(char *out, uint64_t u) {
 }
 #endif
 
+/* ── SCR_F64_CENSUS: what values does this function actually see? ─────
+ * Off unless -DSCR_F64_CENSUS is on the command line, in which case the
+ * build-cache key differs and an instrumented binary never shares an
+ * entry with a clean one (backend/cc.ts, SCRIPTC_PROF_CFLAGS).
+ *
+ * Reported through atexit(), NOT __attribute__((destructor)): these PE
+ * binaries have no .CRT section and a destructor never runs, while its
+ * format string stays in the image so a byte scan calls it present.
+ * process.exit() ends in _Exit(), which skips atexit as well, so
+ * scr_process_exit calls the flush directly under the same #ifdef.
+ * scr_f64_census_flush is idempotent: whichever path fires first wins.
+ *
+ * The line is deliberately unlike anything a program prints, on stderr,
+ * so it can never be confused with the workload's own output. A run that
+ * prints no SCF64 line at all is DID-NOT-RUN, not "zero calls". */
+#ifdef SCR_F64_CENSUS
+#include <stdlib.h>
+static unsigned long long scr_f64c_total, scr_f64c_nan, scr_f64c_inf, scr_f64c_zero,
+    scr_f64c_neg, scr_f64c_int, scr_f64c_big, scr_f64c_frac;
+static unsigned long long scr_f64c_dig[20];
+static int scr_f64c_done;
+
+void scr_f64_census_flush(void);
+void scr_f64_census_flush(void) {
+  if (scr_f64c_done) return;
+  scr_f64c_done = 1;
+  fprintf(stderr,
+          "SCF64 total=%llu nan=%llu inf=%llu zero=%llu neg=%llu int=%llu frac=%llu big=%llu\n",
+          scr_f64c_total, scr_f64c_nan, scr_f64c_inf, scr_f64c_zero, scr_f64c_neg,
+          scr_f64c_int, scr_f64c_frac, scr_f64c_big);
+  fprintf(stderr, "SCF64 intdigits");
+  for (int i = 1; i <= 17; i++) fprintf(stderr, " %d:%llu", i, scr_f64c_dig[i]);
+  fprintf(stderr, "\n");
+  fflush(stderr);
+}
+
+static void scr_f64_census(double x) {
+  if (scr_f64c_total == 0) atexit(scr_f64_census_flush);
+  scr_f64c_total++;
+  if (isnan(x)) { scr_f64c_nan++; return; }
+  if (x == 0) { scr_f64c_zero++; return; }
+  if (isinf(x)) { scr_f64c_inf++; return; }
+  double a = x;
+  if (a < 0) { scr_f64c_neg++; a = -a; }
+  if (a >= 9007199254740992.0) { scr_f64c_big++; return; }
+  unsigned long long u = (unsigned long long)a;
+  if ((double)u != a) { scr_f64c_frac++; return; }
+  scr_f64c_int++;
+  int d = 1;
+  while (u >= 10) { u /= 10; d++; }
+  scr_f64c_dig[d]++;
+}
+#endif
+
 size_t scr_f64_to_str(double x, char *buf) {
+#ifdef SCR_F64_CENSUS
+  scr_f64_census(x);
+#endif
   if (isnan(x)) return (size_t)(stpcpy(buf, "NaN") - buf);
   if (x == 0) return (size_t)(stpcpy(buf, "0") - buf); /* covers -0 */
   if (isinf(x)) {
