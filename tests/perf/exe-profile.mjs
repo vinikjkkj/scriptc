@@ -31,15 +31,32 @@
  *   symbols           the PE has no COFF symbol table (nsyms=0) in any
  *                     variant, and -g leaves no .debug_* section
  *   ASan              no __asan_init on this target, on base too
- *   perf / massif /   Linux only. SCRIPTC_TARGET does cross-compile to
- *   heaptrack         x86_64-linux-gnu and WSL2/Arch is present (but with
- *                     none of the tools installed). Even so: scr_lib.c's
- *                     Windows arm is hand-rolled kernel32
- *                     (K32GetProcessMemoryInfo, GetProcessTimes) where the
- *                     Linux arm is getrusage/clock_gettime, so a Linux
- *                     profile attributes to DIFFERENT functions than the
- *                     shipped Windows binary. Attribution of a binary
- *                     nobody ships is not attribution.
+ *   perf / massif /   Linux only. SUPERSEDED, 2026-08-24 - see below.
+ *   heaptrack
+ *
+ * THE LINUX PARAGRAPH THAT USED TO BE HERE WAS WRONG, and it is left in
+ * outline because the shape of the error is worth keeping. It said: scr_lib.c's
+ * Windows arm is hand-rolled kernel32 (K32GetProcessMemoryInfo,
+ * GetProcessTimes) where the Linux arm is getrusage/clock_gettime, so a Linux
+ * profile attributes to DIFFERENT functions than the shipped Windows binary,
+ * and attribution of a binary nobody ships is not attribution.
+ *
+ * The premise is true. The conclusion generalised from one file to the whole
+ * program without measuring, and tests/perf/platform-divergence.mjs now
+ * measures it. Preprocessing every runtime TU for both targets and comparing
+ * function bodies: 88.12% of 3,392 functions are the SAME C, and scr_lib.c is
+ * indeed the worst unit at 60.15%. Weighted by the cost that actually lands on
+ * them (tests/perf/ab-callgrind.mjs), across nine runtime.bench and four
+ * messaging scenarios, the share of instructions executing a
+ * platform-exclusive function is 0.00% in EVERY ONE, and the emitted TU - the
+ * program itself - is byte-identical for the two targets.
+ *
+ * So the Linux lane exists: ab-callgrind.mjs. It is not a replacement for this
+ * file or for ab-cpu.mjs. CALLGRIND PROPOSES, CPUPROBE DISPOSES - instructions
+ * counted by an emulator on a cross build find WHERE the cost is; only the
+ * Windows lane on the shipped binary can say whether moving it moved the
+ * clock. This file's call counts are the third leg: xlane-calls.mjs joins them
+ * to callgrind's, and on numeric-modulo 43 functions agree EXACTLY.
  *
  * That is why the alloc lane keys on source strings and needs no
  * symboliser, and why the cpu lane can only report rvas. The limitation is
