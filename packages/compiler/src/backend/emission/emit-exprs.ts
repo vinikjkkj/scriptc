@@ -2996,6 +2996,57 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             // Borrows the text; returns +1 on a fresh dyn, or throws a
             // catchable SyntaxError-shaped string (may-throw seed set).
             return finish(`scr_json_parse(${arg(0)})`);
+          /* better-sqlite3 (scr_sqlite.c + the vendored amalgamation).
+           * Every one borrows and answers +1, and the may-throw members
+           * leave NULL with the SqliteError-shaped exception pending. */
+          case "sqlite.open":
+            return finish(`scr_sqlite_open(${arg(0)}, ${arg(1)}, ${arg(2)}, ${arg(3)})`);
+          case "sqlite.close":
+            return finish(`scr_sqlite_close(${arg(0)})`);
+          case "sqlite.prepare":
+            return finish(`scr_sqlite_prepare(${arg(0)}, ${arg(1)})`);
+          case "sqlite.exec":
+            return finish(`scr_sqlite_exec(${arg(0)}, ${arg(1)})`);
+          case "sqlite.pragma":
+            return finish(`scr_sqlite_pragma(${arg(0)}, ${arg(1)}, ${arg(2)})`);
+          case "sqlite.dbName":
+            return finish(`scr_sqlite_db_name(${arg(0)})`);
+          case "sqlite.dbOpen":
+            return finish(`scr_sqlite_db_open(${arg(0)})`);
+          case "sqlite.dbReadonly":
+            return finish(`scr_sqlite_db_readonly(${arg(0)})`);
+          case "sqlite.dbMemory":
+            return finish(`scr_sqlite_db_memory(${arg(0)})`);
+          case "sqlite.dbInTx":
+            return finish(`scr_sqlite_db_in_transaction(${arg(0)})`);
+          case "sqlite.argsNew":
+            return finish(`scr_sqlite_args_new()`);
+          case "sqlite.argsPush":
+            return finish(`scr_sqlite_args_push(${arg(0)}, ${arg(1)})`);
+          case "sqlite.run":
+            return finish(`scr_sqlite_run(${arg(0)}, ${arg(1)})`);
+          case "sqlite.get":
+            return finish(`scr_sqlite_get(${arg(0)}, ${arg(1)})`);
+          case "sqlite.all":
+            return finish(`scr_sqlite_all(${arg(0)}, ${arg(1)})`);
+          case "sqlite.pluck":
+            return finish(`scr_sqlite_stmt_pluck(${arg(0)}, ${arg(1)})`);
+          case "sqlite.raw":
+            return finish(`scr_sqlite_stmt_raw(${arg(0)}, ${arg(1)})`);
+          case "sqlite.expand":
+            return finish(`scr_sqlite_stmt_expand(${arg(0)}, ${arg(1)})`);
+          case "sqlite.safeIntegers":
+            return finish(`scr_sqlite_stmt_safe_ints(${arg(0)}, ${arg(1)})`);
+          case "sqlite.columns":
+            return finish(`scr_sqlite_stmt_columns(${arg(0)})`);
+          case "sqlite.stmtSource":
+            return finish(`scr_sqlite_stmt_source(${arg(0)})`);
+          case "sqlite.stmtReader":
+            return finish(`scr_sqlite_stmt_reader(${arg(0)})`);
+          case "sqlite.stmtReadonly":
+            return finish(`scr_sqlite_stmt_readonly(${arg(0)})`);
+          case "sqlite.stmtBusy":
+            return finish(`scr_sqlite_stmt_busy(${arg(0)})`);
           case "dyn.defineProps":
             // Object.defineProperties over dyn values: both borrowed,
             // result the target (+1); throws catchably (may-throw seed).

@@ -73,6 +73,13 @@ const RUNTIME_UNIT_DEPS: Readonly<Record<string, readonly string[]>> = {
   "scr_regex.c": ["scr_assert.c"],
   "scr_stream.c": ["scr_events_emitter.c"],
   "scr_symbol.c": ["scr_assert.c"],
+  // safeIntegers() answers a real BigInt and binds one back, so the
+  // SQLite gate owes the linker the bigint unit — scr_big_parse,
+  // scr_big_eq, scr_big_low_u64, scr_big_release, scr_dyn_from_big.
+  // The alternative was to refuse safeIntegers, which would have made
+  // every INTEGER past 2^53 read back as a rounded double: a wrong
+  // answer where better-sqlite3 has a right one.
+  "scr_sqlite.c": ["scr_bigint.c"],
   // scr_url_params.c retains/releases the ScrUrl its getter came off, so
   // the searchParams gate implies the url one. Measured: scr_url_release,
   // scr_url_retain.
@@ -161,6 +168,10 @@ const MBEDTLS_VERSION = "3.6.7";
  * they keep the historical system `-lz` link; the vendored copy exists so
  * zlib-using programs CROSS-compile (zig has no target sysroot libz). */
 const ZLIB_VERSION = "1.3.1";
+/** The vendored SQLite amalgamation's version — see vendor/README.md for
+ * the release's published SHA3-256 and how it was checked. Bumping this
+ * re-keys the object cache; the source itself must be re-fetched. */
+const SQLITE_VERSION = "3.53.4";
 
 export interface CcOptions {
   /** Path of the generated (or hand-written) program TU: a .c file, or the
@@ -433,6 +444,18 @@ export interface CcOptions {
    * surface (a dyn object per request, ten dyn closures per hop), and a
    * fetch program with no proxy must not pay for any of it. */
   fetchDispatch?: boolean;
+  /** The program holds a SQLite handle or calls one of the `sqlite.*`
+   * libCalls (moduleUsesSqlite on the IR): compiles scr_sqlite.c AND the
+   * vendored SQLite amalgamation (vendor/sqlite/sqlite3.c, cached per
+   * flavor like zlib's objects).
+   *
+   * No gate in this table matters more. The amalgamation is 269,649
+   * lines and its object is larger than every other runtime unit put
+   * together — an unconditional link would roughly double a hello-world.
+   * A SQLite-free program must produce a byte-identical binary to the
+   * one it produced before this option existed, which is proved by md5
+   * against a build of the same entry at the previous revision. */
+  sqlite?: boolean;
 }
 
 /** Structured compiler-driver failure. Most callers still let this surface
@@ -944,6 +967,116 @@ async function ensureZlibObjects(sanitize: boolean, driver: CcDriver): Promise<s
   return objects;
 }
 
+function vendorSqliteDir(): string {
+  return join(runtimeSrcDir(), "..", "vendor", "sqlite");
+}
+
+/* The compile-time configuration of the vendored engine.
+ *
+ * These are not preferences. Nine of them are OBSERVABLE through the
+ * better-sqlite3 surface, and every one is set to the value
+ * better-sqlite3's own prebuilt binary reports from
+ * `db.pragma("compile_options")` (read off better-sqlite3 13.0.3 on this
+ * host, not off its build script):
+ *
+ *   DQS=0                    a double-quoted string is an error, not a
+ *                            silently-accepted identifier fallback
+ *   DEFAULT_FOREIGN_KEYS     foreign keys are ON without a pragma
+ *   DEFAULT_RECURSIVE_TRIGGERS, DEFAULT_CACHE_SIZE=-16000,
+ *   DEFAULT_WAL_SYNCHRONOUS=1, DEFAULT_MEMSTATUS=0
+ *   LIKE_DOESNT_MATCH_BLOBS  LIKE over a BLOB is false, not a coercion
+ *   ENABLE_COLUMN_METADATA   what makes stmt.columns() answerable at all
+ *   ENABLE_MATH_FUNCTIONS, ENABLE_FTS3/4/5, ENABLE_RTREE, ENABLE_GEOPOLY,
+ *   ENABLE_STAT4, ENABLE_DBSTAT_VTAB, ENABLE_UPDATE_DELETE_LIMIT,
+ *   SOUNDEX                  SQL surface a program can call
+ *   USE_URI                  `file:...?mode=ro` filenames resolve
+ *
+ * Two DELIBERATE divergences, both named rather than drifted into:
+ * THREADSAFE=0 where better-sqlite3 ships 2 (a compiled binary here has
+ * one thread and no way to make another reach a handle, and the mutex
+ * calls are pure cost), and LOAD_EXTENSION stays omitted because
+ * loadExtension is refused by name. Both are visible only to a program
+ * that reads `pragma("compile_options")`, which also sees a different
+ * COMPILER= line no configuration could match.
+ *
+ * SQLITE_OMIT_AUTOINIT is NOT here, and its absence is load-bearing: with
+ * it, a missed sqlite3_initialize() is a null-dereference at the first
+ * open — measured, exit 139, no message. */
+const SQLITE_DEFINES = [
+  "-DSQLITE_THREADSAFE=0",
+  "-DSQLITE_DEFAULT_MEMSTATUS=0",
+  "-DSQLITE_DEFAULT_CACHE_SIZE=-16000",
+  "-DSQLITE_DEFAULT_FOREIGN_KEYS=1",
+  "-DSQLITE_DEFAULT_RECURSIVE_TRIGGERS=1",
+  "-DSQLITE_DEFAULT_WAL_SYNCHRONOUS=1",
+  "-DSQLITE_DQS=0",
+  "-DSQLITE_LIKE_DOESNT_MATCH_BLOBS",
+  "-DSQLITE_OMIT_DEPRECATED",
+  "-DSQLITE_OMIT_LOAD_EXTENSION",
+  "-DSQLITE_OMIT_PROGRESS_CALLBACK",
+  "-DSQLITE_OMIT_SHARED_CACHE",
+  "-DSQLITE_OMIT_TCL_VARIABLE",
+  "-DSQLITE_ENABLE_COLUMN_METADATA",
+  "-DSQLITE_ENABLE_MATH_FUNCTIONS",
+  "-DSQLITE_ENABLE_FTS3",
+  "-DSQLITE_ENABLE_FTS3_PARENTHESIS",
+  "-DSQLITE_ENABLE_FTS4",
+  "-DSQLITE_ENABLE_FTS5",
+  "-DSQLITE_ENABLE_RTREE",
+  "-DSQLITE_ENABLE_GEOPOLY",
+  "-DSQLITE_ENABLE_STAT4",
+  "-DSQLITE_ENABLE_DBSTAT_VTAB",
+  "-DSQLITE_ENABLE_UPDATE_DELETE_LIMIT",
+  "-DSQLITE_SOUNDEX",
+  "-DSQLITE_USE_URI=1",
+];
+
+/** The vendored SQLite object for one flavor, compiled lazily on the
+ * first SQLite-using build and cached like the zlib objects —
+ * vendor/.cache/sqlite-<version>-<flavor>/sqlite3.o — with the same
+ * atomic-rename publish. ONE translation unit, which is the whole point
+ * of an amalgamation: it takes a while (roughly a minute at -Os on this
+ * host) and then never again for that flavor.
+ *
+ * -Os, not -O2: the amalgamation's object dominates the image of any
+ * binary that links it, and this project's size discipline is measured in
+ * kilobytes on hello-world. asan matches the final link so the sanitized
+ * lane instruments the engine too. */
+async function ensureSqliteObjects(sanitize: boolean, driver: CcDriver): Promise<string[]> {
+  const flavor =
+    (sanitize ? "asan" : "plain") +
+    (driver.argv.length === 1 && driver.argv[0] === "clang" ? "" : "-zigcc") +
+    (driver.target !== null ? `-${driver.target}` : "");
+  const vendor = vendorSqliteDir();
+  const cacheRoot = join(vendor, "..", ".cache");
+  const cacheDir = join(cacheRoot, `sqlite-${SQLITE_VERSION}-${flavor}`);
+  const objects = [join(cacheDir, "sqlite3.o")];
+  if ((await Promise.all(objects.map(fileExists))).every(Boolean)) return objects;
+
+  await mkdir(cacheRoot, { recursive: true });
+  const buildDir = await mkdtemp(join(cacheRoot, `build-sqlite-${flavor}-`));
+  try {
+    await execFileAsync(
+      driver.argv[0] ?? "clang",
+      [
+        ...driver.argv.slice(1),
+        "-std=c11",
+        ...driver.targetArgs,
+        ...(sanitize ? ["-O1", "-fsanitize=address"] : ["-Os"]),
+        ...SQLITE_DEFINES,
+        "-I", vendor,
+        "-c", join(vendor, "sqlite3.c"),
+        "-o", join(buildDir, "sqlite3.o"),
+      ],
+      { cwd: buildDir },
+    );
+    await rename(buildDir, cacheDir).catch(() => undefined);
+  } finally {
+    await rm(buildDir, { recursive: true, force: true });
+  }
+  return objects;
+}
+
 function vendorCurlDir(): string {
   return join(runtimeSrcDir(), "..", "vendor", "curl");
 }
@@ -1335,7 +1468,7 @@ async function runtimeFingerprint(rtDir: string): Promise<string> {
   const stats = await Promise.all(names.map((n) => stat(join(rtDir, n))));
   const sig = stats.map((s, i) => `${names[i] ?? ""}:${s.size}:${s.mtimeMs}`).join("|");
   if (rtFingerprintMemo !== null && rtFingerprintMemo.sig === sig) return rtFingerprintMemo.hash;
-  const h = createHash("sha256").update(QJS_COMMIT).update(MBEDTLS_VERSION).update(ZLIB_VERSION);
+  const h = createHash("sha256").update(QJS_COMMIT).update(MBEDTLS_VERSION).update(ZLIB_VERSION).update(SQLITE_VERSION);
   for (const n of names) h.update(n).update("\0").update(await readFile(join(rtDir, n))).update("\0");
   const hash = h.digest("hex");
   rtFingerprintMemo = { sig, hash };
@@ -1475,6 +1608,11 @@ export async function compileC(opts: CcOptions): Promise<void> {
   // whenever a signal is in the program, because the seam names
   // scr_http_client_signal, which lives behind the abortHttp gate.
   const fetchStatic = (opts.fetchStatic ?? false) && !dynamic;
+  /* better-sqlite3. Static-lane only, like fetchStatic: under --dynamic
+   * the package's own JS is what an import reaches (the island path), and
+   * two implementations of one specifier in one binary would be a
+   * question with no right answer. */
+  const sqlite = (opts.sqlite ?? false) && !dynamic;
   const fetchAbort = fetchStatic && (opts.abortSignal ?? false);
   const fetchDispatch = (opts.fetchDispatch ?? false) && fetchStatic;
   const abortHttp = (opts.abortHttp ?? false) || fetchAbort;
@@ -1551,6 +1689,9 @@ export async function compileC(opts: CcOptions): Promise<void> {
     ((opts.zlib ?? false) || nativeFetch || (opts.fetchStatic ?? false)) && driver.target !== null
       ? await ensureZlibObjects(opts.sanitize ?? false, driver)
       : [];
+  // The vendored database engine — one object, both host and cross (the
+  // amalgamation is plain C with no system dependency to substitute).
+  const sqliteObjects = sqlite ? await ensureSqliteObjects(opts.sanitize ?? false, driver) : [];
   // The libcurl import stub is likewise CROSS-only — host builds keep the
   // exact historical system `-lcurl` link (see CcOptions.fetch). Curl
   // reference builds only.
@@ -1592,7 +1733,16 @@ export async function compileC(opts: CcOptions): Promise<void> {
     ...(regex
       ? ["-I", vendorEngineDir(), rt(join(rtDir, "scr_regex.c")), ...lreObjects]
       : []),
-    ...(opts.bigint ? [rt(join(rtDir, "scr_bigint.c"))] : []),
+    ...(opts.bigint || sqlite ? [rt(join(rtDir, "scr_bigint.c"))] : []),
+    // The database engine: the interception unit plus the vendored
+    // amalgamation's cached object. Both ride the one gate.
+    ...(sqlite
+      ? [
+          "-I", vendorSqliteDir(),
+          rt(join(rtDir, "scr_sqlite.c")),
+          ...sqliteObjects,
+        ]
+      : []),
     ...(opts.asym
       ? [
           "-I", vendorMonocypherDir(),
@@ -1878,6 +2028,7 @@ export async function compileC(opts: CcOptions): Promise<void> {
     "-I", rtDir,
     ...(regex || dynamic ? ["-I", vendorEngineDir()] : []),
     ...(zlibObjects.length > 0 ? ["-I", vendorZlibDir()] : []),
+    ...(sqliteObjects.length > 0 ? ["-I", vendorSqliteDir()] : []),
     ...(curlStubDir !== null ? ["-I", join(vendorCurlDir(), "include")] : []),
     ...(tlsArchive !== null ? ["-I", join(vendorTlsDir(), "include")] : []),
     ...(dynamic ? ["-DSCR_DYNAMIC"] : []),

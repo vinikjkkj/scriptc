@@ -65,6 +65,8 @@ import {
   isJsSourceFileName,
   isNodeTypesPath,
   isRelativeSpecifier,
+  isSqliteTypesPath,
+  sqliteDtsPath,
   isWorkspacePackageName,
   JS_ANY_OPERATOR_CODES,
   JS_RELAXED_TSC_CODES,
@@ -174,6 +176,16 @@ function resolveNodeTypes7(entryPath: string): string | null {
   return file !== null && isNodeTypesPath(file) ? file : null;
 }
 
+/** True when the project resolves better-sqlite3's OWN types — either the
+ * package or its DefinitelyTyped stubs. The shipped ambient module stands
+ * down then, exactly as scriptc-node-fallback.d.ts does with @types/node
+ * present: TypeScript resolves the import to the real package, and a
+ * second `declare module "better-sqlite3"` beside it can only collide. */
+function projectHasSqliteTypes(entryPath: string): boolean {
+  const npm = resolveNpmImport7(entryPath, "better-sqlite3");
+  return npm !== null && isSqliteTypesPath(npm.typesFile);
+}
+
 export interface LoadResult {
   program: ts.Program;
   entry: ts.SourceFile;
@@ -230,7 +242,16 @@ function loadProgram7(host: ts.Ts7Host, entryPath: string): LoadResult & { dispo
   // driver against the package's real TypeScript, not its shipped .d.ts.
   const paths = provenancePaths();
   if (paths !== null) options = { ...options, paths };
-  const coreRoots = [entryPath, ambientDtsPath(), nodeTypes ?? fallbackDtsPath()];
+  const coreRoots = [
+    entryPath,
+    ambientDtsPath(),
+    nodeTypes ?? fallbackDtsPath(),
+    // better-sqlite3 is the ONE npm package the static lane serves
+    // itself (scriptc-sqlite.d.ts's header says why). The declarations
+    // ride as an extra root so an import of it typechecks with nothing
+    // installed; with the real types present they stand down.
+    ...(projectHasSqliteTypes(entryPath) ? [] : [sqliteDtsPath()]),
+  ];
   // --npm-static: an explicitly-named package joins the program even when
   // no static import statement names it — the optional-dependency shape
   // (`const WS = 'ws'; await import(WS)`): the specifier appears only at
@@ -1742,6 +1763,24 @@ function preflight7(load: LoadResult): {
     );
 
   const ambientModules = new Set<string>(SUPPORTED_NODE_MODULES);
+  /* better-sqlite3, when the project installs nothing.
+   *
+   * It is the ONE npm package the static lane serves itself — over the
+   * vendored SQLite amalgamation, because the package has no JS worth
+   * compiling (see ambient/scriptc-sqlite.d.ts). The shipped ambient
+   * module IS the specifier's declaration then, so the import must not
+   * meet the "Cannot find package" startup crash Node would report for a
+   * package that is genuinely absent: nothing has to be installed for a
+   * compiled binary to talk to SQLite, and requiring an install just to
+   * satisfy a resolver the binary never runs would be theatre.
+   *
+   * Conditional on the package NOT resolving, deliberately: with
+   * better-sqlite3 (or @types/better-sqlite3) installed, resolution
+   * answers it and every path here is exactly what it was — the
+   * interception happens later, at lowering, on the mapped handle type. */
+  if (resolveNpmImport7(entry.fileName, "better-sqlite3") === null) {
+    ambientModules.add("better-sqlite3");
+  }
 
   // Ambient `declare module "name"` declarations anywhere in the program —
   // exact names and `*` patterns — so the import fence can say "type
@@ -2079,7 +2118,14 @@ function preflight7(load: LoadResult): {
         const interopOn = opts.esModuleInterop === true || opts.allowSyntheticDefaultImports === true;
         const defaultOk =
           builtinDefaultImportModule(spec) !== null ||
-          ((isJsSourceFileName(sf.fileName) || interopOn) && canonicalBuiltinModule(spec) !== null);
+          ((isJsSourceFileName(sf.fileName) || interopOn) && canonicalBuiltinModule(spec) !== null) ||
+          // better-sqlite3's module object IS its Database constructor
+          // (`module.exports = createDatabase(...)`), so the default
+          // import is not merely legal there — it is the ONLY spelling
+          // the package documents, and the shipped declarations export
+          // exactly that. The callable-module-object row above under a
+          // different name.
+          spec === "better-sqlite3";
         if (clause.name && !isJson && dep === null && !defaultOk) {
           diags.push(unsupportedDiag("SC1012", locOf7(clause.name)));
         }
@@ -2637,6 +2683,7 @@ export {
   isNodeTypesPath,
   npmPackageNameOf,
   overridesDtsPath,
+  sqliteDtsPath,
   SUPPORTED_BUILTIN_MODULES,
   workspacePackageOfPath,
 } from "./shared.js";

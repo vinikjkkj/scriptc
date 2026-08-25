@@ -96,6 +96,10 @@ export function cType(t: IrType): string {
       return "ScrAbortController *";
     case "fsWatcher":
       return "ScrWatcher *";
+    case "sqliteDb":
+      return "ScrSqliteDb *";
+    case "sqliteStmt":
+      return "ScrSqliteStmt *";
     case "childStream":
       return "ScrChildStream *";
     case "procStream":
@@ -226,6 +230,10 @@ export function retainCallC(type: IrType, expr: string): string {
       return `scr_abort_controller_retain(${expr})`;
     case "fsWatcher":
       return `scr_watcher_retain(${expr})`;
+    case "sqliteDb":
+      return `scr_sqlite_db_retain(${expr})`;
+    case "sqliteStmt":
+      return `scr_sqlite_stmt_retain(${expr})`;
     case "childStream":
       return `scr_child_stream_retain(${expr})`;
     case "func":
@@ -331,6 +339,10 @@ export function releaseCallC(type: IrType, expr: string): string {
       return `scr_abort_controller_release(${expr})`;
     case "fsWatcher":
       return `scr_watcher_release(${expr})`;
+    case "sqliteDb":
+      return `scr_sqlite_db_release(${expr})`;
+    case "sqliteStmt":
+      return `scr_sqlite_stmt_release(${expr})`;
     case "childStream":
       return `scr_child_stream_release(${expr})`;
     case "func":
@@ -406,6 +418,8 @@ export function boxKindC(t: IrType): string {
     case "httpClientReq":
     case "secureCtx":
     case "fsWatcher":
+    case "sqliteDb":
+    case "sqliteStmt":
     case "childStream":
     case "abortSignal":
     case "abortController":
@@ -555,6 +569,10 @@ export function rcAdapters(t: IrType): RcAdapters | null {
       return rt("scr_abort_controller_retain_v", "scr_abort_controller_release_v");
     case "fsWatcher":
       return rt("scr_watcher_retain_v", "scr_watcher_release_v");
+    case "sqliteDb":
+      return rt("scr_sqlite_db_retain_v", "scr_sqlite_db_release_v");
+    case "sqliteStmt":
+      return rt("scr_sqlite_stmt_retain_v", "scr_sqlite_stmt_release_v");
     case "childStream":
       return rt("scr_child_stream_retain_v", "scr_child_stream_release_v");
     case "func":
@@ -744,6 +762,8 @@ export function elemKindC(elem: IrType): string {
     case "httpClientReq":
     case "secureCtx":
     case "fsWatcher":
+    case "sqliteDb":
+    case "sqliteStmt":
     case "childStream":
     case "procStream":
     case "dyn":

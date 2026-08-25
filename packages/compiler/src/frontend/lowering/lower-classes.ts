@@ -15,6 +15,7 @@ import { bufEncoding, lowerMapCloneNew, lowerMapSeedArrayNew } from "./lower-con
 import { fnOwnCounters, fnOwnPropBox, fnOwnWhy, probeLower, pureReemittable } from "./lower-exprs.js";
 import { lowerSearchParamsNew } from "./lower-builtins.js";
 import { requiresDynamicPackageDiag, unsupportedDiag } from "../../diagnostics/diagnostic.js";
+import { lowerSqliteNew } from "./lower-sqlite.js";
 import { STREAM_API_MEMBERS, STREAM_PROP_MEMBERS, UNDERSCORE_METHODS, lowerStreamNew, lowerStreamSuperCall, streamCtorShape } from "./lower-stream.js";
 import { erasableSuperDelegation } from "./lower-emitter.js";
 import { emitOverrideShapeReason, emitSpecSuperForward, emitterRooted, lowerEmitterSuperCall, type EmitOverrideRec } from "./lower-emitter.js";
@@ -5826,6 +5827,15 @@ function executorResolveAdoptionUnion(
 
 export function lowerNew(L: Lowerer, expr: ts.NewExpression): IrExpr {
     const loc = locOf(expr);
+    /* better-sqlite3's `new Database(path, options?)` — the ONE npm
+     * package the static lane serves itself. AHEAD of the npm fence
+     * below, which is what it exists to answer: with
+     * @types/better-sqlite3 installed the callee IS a package-declared
+     * value, and the generic requires-dynamic diagnostic would win. */
+    if (!L.dynamic) {
+      const sqlite = lowerSqliteNew(L, expr);
+      if (sqlite !== null) return sqlite;
+    }
     // `new X(...)` where X is a package-declared class, in a static build:
     // the per-package requires-dynamic diagnostic (the constructor runs in
     // the embedded engine). Under --dynamic, X is jsval-typed and lowers
