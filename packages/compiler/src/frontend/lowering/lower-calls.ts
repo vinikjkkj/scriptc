@@ -11213,6 +11213,35 @@ export function lowerFunction(L: Lowerer, decl: ts.FunctionDeclaration): IrFunct
     return null;
   }
 
+/** The defining object literal reached through the RECEIVER rather than
+   * through the member's own symbol: `const c: I = { m<T>(x) {...} }`
+   * declares `m` on the literal, while the checker's property symbol for
+   * `c.m` is `I`'s signature-only MethodSignature. Resolves an identifier
+   * receiver to a variable declaration whose initializer is an object
+   * literal, and asks objLitGenericFnNodeOf about THAT member. Null for
+   * anything else — requireObjLitGenericReceiver still has the last word
+   * on whether the receiver provably IS the literal. */
+  function objLitGenericFnViaReceiver(L: Lowerer, recvExpr: ts.Expression, name: string,): { fnNode: ts.MethodDeclaration | ts.FunctionExpression | ts.ArrowFunction; literal: ts.ObjectLiteralExpression } | null {
+    let recv: ts.Expression = recvExpr;
+    while (ts.isParenthesizedExpression(recv)) recv = recv.expression;
+    if (!ts.isIdentifier(recv)) return null;
+    const sym = L.resolveValueSymbol(recv);
+    const decl = sym ? L.checker.valueDeclarationOf(sym) : undefined;
+    if (!decl || !ts.isVariableDeclaration(decl) || decl.initializer === undefined) return null;
+    let init: ts.Expression = decl.initializer;
+    while (ts.isParenthesizedExpression(init)) init = init.expression;
+    if (!ts.isObjectLiteralExpression(init)) return null;
+    for (const prop of init.properties) {
+      if (ts.isSpreadAssignment(prop)) continue;
+      const propName = prop.name;
+      if (propName === undefined || !ts.isIdentifier(propName) || propName.text !== name) continue;
+      const memberSym = L.checker.getSymbolAtLocation(propName);
+      if (memberSym === undefined) return null;
+      return objLitGenericFnNodeOf(L, memberSym);
+    }
+    return null;
+  }
+
 /** The interned GenericFnInfo for one object-literal generic method, with
    * the supportability fences applied ONCE per declaration: the defining
    * literal must sit at module scope (the compiled instance is a plain
@@ -11934,7 +11963,18 @@ export function lowerFunction(L: Lowerer, decl: ts.FunctionDeclaration): IrFunct
         }
       }
     }
-    const found = objLitGenericFnNodeOf(L, propSym);
+    // The property symbol the CHECKER answers is the one the receiver's
+    // TYPE declares, and for an annotated binding that is the interface's
+    // MethodSignature — signature-only, no body, nothing to monomorphize.
+    // The defining literal is still right there: `const c: I = { m<T>(x)
+    // {...} }` is a never-reassigned const whose initializer declares the
+    // body. Resolve through the RECEIVER when the type's own symbol has
+    // none; requireObjLitGenericReceiver below then re-proves the receiver
+    // IS that literal, so the annotation buys no laxity — it is the same
+    // discipline the unannotated spelling already passes, and the two
+    // spellings disagreeing was the whole defect (`{ m<T>(x) {...} }`
+    // compiled and `const c: I = { m<T>(x) {...} }` did not).
+    const found = objLitGenericFnNodeOf(L, propSym) ?? objLitGenericFnViaReceiver(L, access.expression, name);
     if (!found) {
       // Function.prototype.apply/call/bind spelled through a FUNCTION
       // receiver: compiled functions are direct calls with no runtime
