@@ -1,0 +1,49 @@
+{
+ "entry": "G:\\blocks\\wamvoip\\lab\\app\\pkgs\\media-utils\\index.ts",
+ "ms": 1462,
+ "provenance": [],
+ "preflightFailed": false,
+ "stats": {
+  "statements": 11,
+  "failed": 1,
+  "island": 0
+ },
+ "npmStatic": null,
+ "sites": [
+  {
+   "code": "SC2020",
+   "file": "G:/blocks/wamvoip/lab/app/pkgs/media-utils/ffmpeg.ts",
+   "start": 1311,
+   "end": 1329,
+   "message": "'WeakMap<Logger, Set<string>>' is part of the standard library types but has no scriptc lowering yet",
+   "hint": "the type checker sees the full standard library, but only the supported surface compiles (https://scriptc.dev/limitations)"
+  },
+  {
+   "code": "SC2013",
+   "file": "G:/blocks/wamvoip/lab/app/pkgs/media-utils/sharp.ts",
+   "start": 0,
+   "end": 25,
+   "message": "importing 'sharp' requires the embedded dynamic engine, which this build does not include — the package's implementation runs there",
+   "hint": "build with --dynamic to run npm package code in the embedded engine (adds ~620KB to the binary); static builds never include it"
+  },
+  {
+   "code": "SC2013",
+   "file": "G:/blocks/wamvoip/lab/app/pkgs/media-utils/index.ts",
+   "start": 118,
+   "end": 156,
+   "message": "importing 'zapo-js' requires the embedded dynamic engine, which this build does not include — the package's implementation runs there",
+   "hint": "build with --dynamic to run npm package code in the embedded engine (adds ~620KB to the binary); static builds never include it"
+  },
+  {
+   "code": "SC2020",
+   "file": "G:/blocks/wamvoip/lab/app/pkgs/media-utils/ffmpeg.ts",
+   "start": 1332,
+   "end": 1366,
+   "message": "'new WeakMap' is part of the standard library types but has no scriptc lowering yet",
+   "hint": "weak collections observe garbage collection, which reference counting never exposes — a strong Map behaves identically in-language: use Map"
+  }
+ ],
+ "runtimeFences": [],
+ "ice": [],
+ "unreachedFailed": 2
+}

@@ -1,0 +1,81 @@
+{
+ "entry": "G:\\blocks\\wamvoip\\lab\\app\\pkgs\\voipshim\\index.ts",
+ "ms": 1076,
+ "provenance": [],
+ "preflightFailed": true,
+ "stats": {
+  "statements": 0,
+  "failed": 0,
+  "island": 0
+ },
+ "npmStatic": null,
+ "sites": [
+  {
+   "code": "SC0001",
+   "file": "G:/blocks/wamvoip/lab/app/pkgs/voipshim/relay/WaSctpRelay.ts",
+   "line": null,
+   "col": null,
+   "message": "Property 'onicegatheringstatechange' does not exist on type 'RTCPeerConnection'.",
+   "hint": null
+  },
+  {
+   "code": "SC0001",
+   "file": "G:/blocks/wamvoip/lab/app/pkgs/voipshim/relay/WaSctpRelay.ts",
+   "line": null,
+   "col": null,
+   "message": "Property 'iceGatheringState' does not exist on type 'RTCPeerConnection'.",
+   "hint": null
+  },
+  {
+   "code": "SC0001",
+   "file": "G:/blocks/wamvoip/lab/app/pkgs/voipshim/relay/WaSctpRelay.ts",
+   "line": null,
+   "col": null,
+   "message": "Property 'onsignalingstatechange' does not exist on type 'RTCPeerConnection'.",
+   "hint": null
+  },
+  {
+   "code": "SC0001",
+   "file": "G:/blocks/wamvoip/lab/app/pkgs/voipshim/relay/WaSctpRelay.ts",
+   "line": null,
+   "col": null,
+   "message": "Property 'signalingState' does not exist on type 'RTCPeerConnection'.",
+   "hint": null
+  },
+  {
+   "code": "SC0001",
+   "file": "G:/blocks/wamvoip/lab/app/pkgs/voipshim/relay/WaSctpRelay.ts",
+   "line": null,
+   "col": null,
+   "message": "Type '(ev: MessageEvent) => void' is not assignable to type '(e: unknown) => void'.\n  Types of parameters 'ev' and 'e' are incompatible.\n    Type 'unknown' is not assignable to type 'MessageEvent'.",
+   "hint": null
+  },
+  {
+   "code": "SC0001",
+   "file": "G:/blocks/wamvoip/lab/app/pkgs/voipshim/relay/WaSctpRelay.ts",
+   "line": null,
+   "col": null,
+   "message": "Type '(event: MessageEvent) => void' is not assignable to type '(e: unknown) => void'.\n  Types of parameters 'event' and 'e' are incompatible.\n    Type 'unknown' is not assignable to type 'MessageEvent'.",
+   "hint": null
+  },
+  {
+   "code": "SC0001",
+   "file": "G:/blocks/wamvoip/lab/app/pkgs/voipshim/relay/WaSctpRelay.ts",
+   "line": null,
+   "col": null,
+   "message": "'offer' is of type 'unknown'.",
+   "hint": null
+  },
+  {
+   "code": "SC0001",
+   "file": "G:/blocks/wamvoip/lab/app/pkgs/voipshim/relay/WaSctpRelay.ts",
+   "line": null,
+   "col": null,
+   "message": "'offer' is of type 'unknown'.",
+   "hint": null
+  }
+ ],
+ "runtimeFences": [],
+ "ice": [],
+ "unreachedFailed": null
+}

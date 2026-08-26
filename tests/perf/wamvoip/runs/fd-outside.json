@@ -1,0 +1,16 @@
+{
+ "entry": "G:\\blocks\\wamvoip-tmp\\fdrepro\\main.ts",
+ "ms": 1110,
+ "provenance": [],
+ "preflightFailed": false,
+ "stats": {
+  "statements": 210,
+  "failed": 0,
+  "island": 0
+ },
+ "npmStatic": null,
+ "sites": [],
+ "runtimeFences": [],
+ "ice": [],
+ "unreachedFailed": 0
+}

@@ -1,0 +1,25 @@
+{
+ "entry": "G:\\blocks\\wamvoip\\lab\\app\\pkgs\\media-utils\\index.ts",
+ "ms": 961,
+ "provenance": [],
+ "preflightFailed": true,
+ "stats": {
+  "statements": 0,
+  "failed": 0,
+  "island": 0
+ },
+ "npmStatic": null,
+ "sites": [
+  {
+   "code": "SC0001",
+   "file": "G:/blocks/wamvoip/lab/app/pkgs/media-utils/index.ts",
+   "line": null,
+   "col": null,
+   "message": "Property 'fileTypeFromFile' does not exist on type 'typeof import(\"G:/blocks/wamvoip/lab/app/node_modules/file-type/core\")'. Did you mean 'fileTypeFromBlob'?",
+   "hint": null
+  }
+ ],
+ "runtimeFences": [],
+ "ice": [],
+ "unreachedFailed": null
+}

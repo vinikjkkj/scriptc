@@ -1,0 +1,33 @@
+{
+ "entry": "G:\\blocks\\wamvoip\\lab\\app\\pkgs\\voip\\index.ts",
+ "ms": 1120,
+ "provenance": [],
+ "preflightFailed": true,
+ "stats": {
+  "statements": 0,
+  "failed": 0,
+  "island": 0
+ },
+ "npmStatic": null,
+ "sites": [
+  {
+   "code": "SC0001",
+   "file": "G:/blocks/wamvoip/lab/app/pkgs/voip/relay/WaSctpRelay.ts",
+   "line": null,
+   "col": null,
+   "message": "Cannot find name 'RTCPeerConnection'.",
+   "hint": null
+  },
+  {
+   "code": "SC0001",
+   "file": "G:/blocks/wamvoip/lab/app/pkgs/voip/relay/WaSctpRelay.ts",
+   "line": null,
+   "col": null,
+   "message": "Cannot find name 'RTCDataChannel'.",
+   "hint": null
+  }
+ ],
+ "runtimeFences": [],
+ "ice": [],
+ "unreachedFailed": null
+}

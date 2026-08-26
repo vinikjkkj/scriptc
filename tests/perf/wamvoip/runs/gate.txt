@@ -1,0 +1,35 @@
+ Test Files  3 failed | 138 passed | 7 skipped (148)
+      Tests  9 failed | 5581 passed | 54 skipped (5644)
+   Duration  3501.19s (transform 6.25s, setup 0ms, collect 124.61s, tests 6817.27s, environment 36ms, prepare 24.05s)
+VITEST_EXIT=1  13:52:53
+   × differential corpus (1675 programs) > 1360-spawn-sync.ts 1320ms (retry x1)
+   × differential corpus (1675 programs) > 1482-spawnsync-error.ts 1718ms (retry x1)
+   × differential corpus (1675 programs) > 1537-os-release-spawnsync-stdio.ts 1389ms (retry x1)
+   × differential corpus (1675 programs) > 2390-dot-requires\main.cjs 1193ms (retry x1)
+   × llvm differential corpus (1675 programs) > 1360-spawn-sync.ts 1543ms
+   × llvm differential corpus (1675 programs) > 1482-spawnsync-error.ts 1554ms
+   × llvm differential corpus (1675 programs) > 1537-os-release-spawnsync-stdio.ts 1565ms
+   × llvm differential corpus (1675 programs) > 2390-dot-requires\main.cjs 1273ms
+   × unreached blockers report in their own group 205ms
+        ×1  for-in over class instances (which keys exist on an instance depends on runtime property creation the class model does not track — for-in over records and arrays compiles)  SC1052
+        ×1  'break outer' targeting this statement form (the labeled statement lowers through a desugar that has no label point)  SC1050
+
+--- attribution ---
+The 8 differential failures are the brief's named baseline, identical by name on
+BOTH backends: 1360-spawn-sync.ts, 1482-spawnsync-error.ts,
+1537-os-release-spawnsync-stdio.ts, 2390-dot-requires\main.cjs.
+
+The 9th, coverage.test.ts > "unreached blockers report in their own group", is
+NOT in that baseline and is NOT this branch's. Proven by compiling: with this
+branch's three source edits stashed (src at base 763155c0) the same snapshot
+fails with the IDENTICAL diff --
+
+    -   statements analyzed   8      +   statements analyzed   10
+    -   compile statically    6 (75%) +   compile statically    8 (80%)
+    -       x1  async generators (async function*)   SC1071
+
+Async-generator lowering landed on main after the snapshot was last absorbed
+(its own last commit is bf69b2fa "test(coverage): absorb the static frontier
+that moved, snapshots only"). tests/coverage-fixtures/unreached.ts imports
+nothing at all, so a module-resolution change cannot reach it. Stale snapshot
+on main; the base failure set in this environment is NINE, not eight.

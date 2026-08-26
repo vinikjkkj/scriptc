@@ -29,6 +29,11 @@ export function options5(): ts5.CompilerOptions {
     target: ts5.ScriptTarget.ESNext,
     module: ts5.ModuleKind.ESNext,
     moduleResolution: ts5.ModuleResolutionKind.Bundler,
+    // Mirrors FORCED_OPTIONS: scriptc compiles for Node, so bundler
+    // resolution runs with the "node" condition enabled. Resolution
+    // depends on it (a `{ node, default }` exports map answers a
+    // different file), which is why it is spelled here and `lib` is not.
+    customConditions: ["node"],
     lib: ["lib.es2023.d.ts"],
     types: [],
     allowImportingTsExtensions: true,
@@ -45,6 +50,7 @@ export function options7(): ad.Ts7CompilerOptions {
     target: ad.ScriptTarget.ESNext as number,
     module: ad.ModuleKind.ESNext as number,
     moduleResolution: ad.ModuleResolutionKind.Bundler as number,
+    customConditions: ["node"],
     lib: ["lib.es2023.d.ts"],
     types: [],
     allowImportingTsExtensions: true,
