@@ -9171,6 +9171,10 @@ bool scr_sqlite_db_in_transaction(const ScrSqliteDb *db);
  * array, built by one argsNew and one argsPush per argument written. */
 ScrDyn *scr_sqlite_args_new(void);
 ScrDyn *scr_sqlite_args_push(ScrDyn *args, ScrDyn *v);
+/* A spread argument: the source's elements each become their own entry,
+ * so the spread's run-time length is the call's argument count. May throw
+ * the spread-call TypeError. */
+ScrDyn *scr_sqlite_args_push_spread(ScrDyn *args, const ScrDyn *src, const ScrStr *what);
 
 ScrDyn *scr_sqlite_run(ScrSqliteStmt *st, const ScrDyn *args);
 ScrDyn *scr_sqlite_get(ScrSqliteStmt *st, const ScrDyn *args);

@@ -1,0 +1,20 @@
+dyn-rest-spread-sources.ts:19:6 - error SC1090: spreading 'Map<string, number>' into a dynamic rest parameter (the spread source has to reach the checked-dynamic tier as an array, a string or a Uint8Array: those are the kinds its run-time walk can step) is not supported yet
+
+  18 | const mp = new Map<string, number>([["a", 1]]);
+  19 | take(...mp);
+     |      ^~~~~
+  20 | 
+
+dyn-rest-spread-sources.ts:26:6 - error SC1090: spreading 'Generator<string, void, unknown>' into a dynamic rest parameter (the spread source has to reach the checked-dynamic tier as an array, a string or a Uint8Array: those are the kinds its run-time walk can step) is not supported yet
+
+  25 | }
+  26 | take(...gen());
+     |      ^~~~~~~~
+  27 | 
+
+dyn-rest-spread-sources.ts:32:6 - error SC1090: spreading 'Promise<number>' into a dynamic rest parameter (the spread source has to reach the checked-dynamic tier as an array, a string or a Uint8Array: those are the kinds its run-time walk can step) is not supported yet
+
+  31 | const p: Promise<number> = Promise.resolve(1);
+  32 | take(...(p as unknown as unknown[]));
+     |      ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  33 | 

@@ -366,30 +366,89 @@ describe("the surface refused by name", () => {
     900_000,
   );
 
-  test(
-    "a spread argument refuses and names the array form that replaces it",
-    async () => {
-      const dir = join(workDir, "refuse-spread");
-      mkdirSync(dir, { recursive: true });
-      writeFileSync(join(dir, "tsconfig.json"), TSCONFIG);
-      writeFileSync(
-        join(dir, "main.ts"),
-        'import Database from "better-sqlite3";\n' +
-          'const db = new Database(":memory:");\n' +
-          "const ps: unknown[] = [1];\n" +
-          'void (db.prepare("select ?").get(...ps));\n',
-      );
-      const built = await compile(join(dir, "main.ts"), {
-        outPath: join(dir, exeName("program")),
-        outDir: dir,
-        backend: "c",
-        sanitize,
-      });
-      expect(built.ok).toBe(false);
-      const d = (built.diagnostics ?? []).find((x) => x.message.includes("spread"));
-      expect(d, "the refusal must name the spread").toBeDefined();
-      expect(d!.hint ?? "").toContain("binds an array argument positionally");
-    },
-    900_000,
-  );
+});
+
+/* The spread argument this file used to pin as a REFUSAL.
+ *
+ * The refusal advised `stmt.run(params)` as "the same call". It is not,
+ * and the last cell below is the proof: ONE OBJECT element binds NAMED
+ * parameters when SPREAD, and is an unbindable positional value when
+ * NESTED. So the advice silently changed the call for exactly the shape
+ * a caller is most likely to have.
+ *
+ * ORACLE: recorded from a LIVE better-sqlite3 13.0.3 under Node v22.18.0,
+ * the same reason the fixture above records rather than spawns -- the
+ * addon reports NODE_MODULE_VERSION 127 and will not load on the Node 25
+ * this repository gates under. Every line is an answer the package gave,
+ * not a hand-written expectation.
+ *
+ * Both backends, because the two emitters carry separate spread paths. */
+describe("a spread argument into a prepared statement", () => {
+  const ORACLE = ["rows 1:x 2:y 7:z", "get x", "nested threw", "closed"];
+
+  const PROGRAM =
+    'import Database from "better-sqlite3";\n' +
+    'const db = new Database(":memory:");\n' +
+    'db.exec("create table t (a, b)");\n' +
+    'const ins = db.prepare("insert into t (a, b) values (?, ?)");\n' +
+    "const two: unknown[] = [1, \"x\"];\n" +
+    "ins.run(...two);\n" +
+    "const none: unknown[] = [];\n" +
+    "db.prepare(\"insert into t (a, b) values (7, 'z')\").run(...none);\n" +
+    'const named = db.prepare("insert into t (a, b) values (@a, @b)");\n' +
+    'const one: unknown[] = [{ a: 2, b: "y" }];\n' +
+    "named.run(...one);\n" +
+    'const rows = db.prepare("select a, b from t order by a").all() as { a: number; b: string }[];\n' +
+    'let out = "";\n' +
+    'for (const r of rows) out += String(r.a) + ":" + r.b + " ";\n' +
+    'console.log("rows " + out.trim());\n' +
+    'const got = db.prepare("select b from t where a = ?").get(...([1] as unknown[])) as { b: string };\n' +
+    'console.log("get " + got.b);\n' +
+    'const nested = db.prepare("insert into t (a, b) values (@a, @b)");\n' +
+    "try {\n" +
+    "  nested.run(one);\n" +
+    '  console.log("nested ok");\n' +
+    "} catch {\n" +
+    '  console.log("nested threw");\n' +
+    "}\n" +
+    "db.close();\n" +
+    'console.log("closed");\n';
+
+  test("the recorded answers are complete", () => {
+    // Without this a PROGRAM edited down to nothing would report a green
+    // comparison over an empty list.
+    expect(ORACLE.length).toBe(4);
+    expect(ORACLE.at(-1)).toBe("closed");
+    // The cell that carries the whole argument: if the nested spelling
+    // stopped throwing, the refusal's advice would have been right and
+    // this suite should say so out loud.
+    expect(ORACLE).toContain("nested threw");
+  });
+
+  for (const backend of ["c", "llvm"] as const) {
+    test(
+      `${backend}: stmt.run/get/all take a spread, and it is not the array form`,
+      async () => {
+        const dir = join(workDir, `spread-${backend}`);
+        mkdirSync(dir, { recursive: true });
+        writeFileSync(join(dir, "tsconfig.json"), TSCONFIG);
+        writeFileSync(join(dir, "main.ts"), PROGRAM);
+        const built = await compile(join(dir, "main.ts"), {
+          outPath: join(dir, exeName("program")),
+          outDir: dir,
+          backend,
+          sanitize,
+        });
+        expect(
+          built.ok,
+          `the spread must COMPILE on ${backend}:\n` +
+            (built.diagnostics ?? []).map((d) => `${d.code}: ${d.message}`).join("\n"),
+        ).toBe(true);
+        const native = await run(built.binaryPath!, [], dir);
+        expect(native.stdout.split("\n").filter((l) => l !== "")).toEqual(ORACLE);
+        expect(native.exitCode).toBe(0);
+      },
+      900_000,
+    );
+  }
 });
