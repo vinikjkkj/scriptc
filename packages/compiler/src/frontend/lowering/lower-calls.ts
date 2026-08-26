@@ -538,6 +538,46 @@ export interface GenericInstance {
     return { kind: "call", callee: name, args: [], type: resultT, loc };
   }
 
+/** The DYN rest pack, spreads included — the one call-completion slot
+   * whose arity is allowed to be a runtime fact.
+   *
+   * Every other parameter slot is a fixed ABI position, so a spread into
+   * one has no home (the compile-time completion would have to know the
+   * array's length). A dyn rest slot is different in kind: the callee
+   * receives ONE checked-dynamic array and reads its `length` and indices
+   * through the keyed-dyn paths, so the pack's length IS the call's arity
+   * and the ABI never changes shape. Spreads therefore flatten INTO the
+   * pack at run time (dynArrLit's `spreads`, emitted as
+   * scr_dyn_arr_push_spread — arrays element-by-element, strings by code
+   * point, engine values through their own iterator protocol, everything
+   * else V8's spread-call TypeError).
+   *
+   * A spread source that cannot become a dyn value at all keeps a refusal
+   * naming its type: there would be nothing to walk. */
+  function dynRestPack(L: Lowerer, sources: readonly (ts.Expression | { ir: IrExpr })[],
+    blame: ts.Node, loc: SrcLoc,): IrExpr {
+    const isIr = (s: ts.Expression | { ir: IrExpr }): s is { ir: IrExpr } => !("kind" in s);
+    const spreads: { at: number; what: string }[] = [];
+    const elems = sources.map((a, i): IrExpr => {
+      if (isIr(a)) return L.coerceInto(blame, a.ir, DYN);
+      if (ts.isSpreadElement(a)) {
+        const src = L.lowerExpr(a.expression);
+        if (src.type.kind !== "dyn" && !canConvertToDyn(src.type, (id) => L.shapes.get(id), (id) => L.unions.get(id))) {
+          L.unsupported(
+            "SC1090",
+            a,
+            `spreading '${L.fmt(src.type)}' into a dynamic rest parameter (the spread source must be a value the ` +
+              `checked-dynamic tier can hold, so its elements can be walked at run time)`,
+          );
+        }
+        spreads.push({ at: i, what: a.expression.getText() });
+        return L.coerceInto(a.expression, src, DYN);
+      }
+      return L.lowerExprExpecting(a, DYN);
+    });
+    return { kind: "dynArrLit", elems, ...(spreads.length > 0 ? { spreads } : {}), type: DYN, loc };
+  }
+
 /** CALL-SITE COMPLETION — the frontend half of the one-signature contract
    * (docs/ir.md): every call lowers to exactly the callee's full ABI
    * parameter list, so backends and the validator stay count-exact and no
@@ -615,26 +655,12 @@ export interface GenericInstance {
       // type, or the synthetic `arguments` slot): surplus arguments
       // convert through the dyn boundary into one fresh dyn array —
       // exactly what the boxed call thunk builds for indirect calls.
-      const elems = sources.slice(restAt).map((a): IrExpr => {
-        if (isIr(a)) return L.coerceInto(blame, a.ir, DYN);
-        if (ts.isSpreadElement(a)) {
-          L.unsupported("SC1090", a, "spread arguments into a dynamic rest parameter");
-        }
-        return L.lowerExprExpecting(a, DYN);
-      });
-      out.push({ kind: "dynArrLit", elems, type: DYN, loc });
+      out.push(dynRestPack(L, sources.slice(restAt), blame, loc));
     } else if (restAt >= 0 && shapes[restAt]!.type.kind === "dyn") {
       // A SPELLED `...args: unknown[]`: the slot is the checked-dynamic
       // array (dynRest's literal, but a real declared parameter — the
       // callee reads length/index through the same keyed-dyn paths).
-      const elems = sources.slice(restAt).map((a): IrExpr => {
-        if (isIr(a)) return L.coerceInto(blame, a.ir, DYN);
-        if (ts.isSpreadElement(a)) {
-          L.unsupported("SC1090", a, "spread arguments into a dynamic rest parameter");
-        }
-        return L.lowerExprExpecting(a, DYN);
-      });
-      out.push({ kind: "dynArrLit", elems, type: DYN, loc });
+      out.push(dynRestPack(L, sources.slice(restAt), blame, loc));
     } else if (restAt >= 0) {
       const restType = shapes[restAt]!.type;
       // A TUPLE-typed rest (`(...[x, y]: [number, number])` — the pattern
@@ -801,13 +827,18 @@ export interface GenericInstance {
     if (!restDecl || !ts.isParameter(restDecl) || restDecl.dotDotDotToken === undefined) return null;
     const fixed = params.length - 1;
     if (expr.arguments.length < fixed) return null;
-    if (expr.arguments.some((a) => ts.isSpreadElement(a))) return null;
+    // A spread landing on a FIXED position keeps its refusal — only the
+    // rest tail can take a runtime arity, and only when the slot is dyn
+    // (a typed array slot's pack is same-element, which completeArgs'
+    // array branch owns; here there is no declaration to read).
+    if (expr.arguments.slice(0, fixed).some((a) => ts.isSpreadElement(a))) return null;
+    const tailSpread = expr.arguments.slice(fixed).some((a) => ts.isSpreadElement(a));
+    if (tailSpread && restT.kind !== "dyn") return null;
     const out = expr.arguments
       .slice(0, fixed)
       .map((a, i) => L.lowerArgExpecting(a, params[i]));
     if (restT.kind === "dyn") {
-      const dynElems = expr.arguments.slice(fixed).map((a) => L.lowerExprExpecting(a, DYN));
-      out.push({ kind: "dynArrLit", elems: dynElems, type: DYN, loc });
+      out.push(dynRestPack(L, expr.arguments.slice(fixed), expr, loc));
       return out;
     }
     const elems = expr.arguments.slice(fixed).map((a) => L.lowerExprExpecting(a, restT.elem));
