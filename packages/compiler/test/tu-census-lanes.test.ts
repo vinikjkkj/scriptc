@@ -113,8 +113,8 @@ const PLANTS: readonly {
   {
     name: "a2-untagged",
     ext: "ts",
-    want: { "REFUSAL.untagged": 1 },
-    what: "fenceClosureProbe: an unlowerable method emitted as a VALUE in an object literal (zapo's own construct)",
+    want: { "REFUSAL.untagged": 1, STRAND: 1 },
+    what: "fenceClosureProbe: an unlowerable method emitted as a VALUE in an object literal (zapo's own construct) -- and, MEASURED, one representability strand trap alongside it",
     src: [
       "import { EventEmitter } from \"node:events\";",
       "interface Deps { emitEvent: (name: string, ...args: unknown[]) => boolean }",
