@@ -60,6 +60,7 @@
  */
 import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
+import { dynSpreadSource } from "./lower-calls.js";
 import {
   BOOL,
   DYN,
@@ -278,15 +279,7 @@ function paramsArray(L: Lowerer, call: ts.CallExpression, method: string, loc: S
   const spreadCount = call.arguments.filter((a) => ts.isSpreadElement(a)).length;
   for (const a of call.arguments) {
     if (ts.isSpreadElement(a)) {
-      const src = L.lowerExpr(a.expression);
-      if (!L.dynConvertible(src.type)) {
-        L.noLowering(
-          `a spread of '${L.fmt(src.type)}' into Statement.${method}`,
-          a,
-          "the spread source has to be a value the checked-dynamic tier can hold, so its elements can be" +
-            " walked at run time",
-        );
-      }
+      const src = dynSpreadSource(L, a, L.lowerExpr(a.expression), `Statement.${method}`);
       const asDyn: IrExpr =
         src.type.kind === "dyn" ? src : { kind: "dynFrom", value: src, type: DYN, loc: locOf(a) };
       args = {

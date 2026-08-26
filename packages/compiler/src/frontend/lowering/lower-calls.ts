@@ -554,6 +554,65 @@ export interface GenericInstance {
    *
    * A spread source that cannot become a dyn value at all keeps a refusal
    * naming its type: there would be nothing to walk. */
+
+/** The SOURCE of a spread that the checked-dynamic tier will walk at RUN
+ * time, normalized to something the walk can actually iterate.
+ *
+ * scr_dyn_arr_push_spread iterates exactly three dyn kinds without an
+ * engine: ARR, STR and BYTES. `canConvertToDyn` is a far wider door — a
+ * Set, a Map, a class instance, a promise and a func all box by
+ * REFERENCE and convert perfectly well, and then the walk reaches a box
+ * it cannot step and throws V8's spread-call TypeError at a call Node
+ * completes. Admitting those was a wrong answer, not a missing feature.
+ *
+ * So the statically-ITERABLE kinds drain into a fresh array here first,
+ * exactly as an array literal's spread drains them (setIntrinsic
+ * toArray, classIteratorDrainCall, bytesIntrinsic toArray for the wider
+ * views), and everything left that would box unwalkable refuses by
+ * NAME. A `dyn` source stays as it is: what it holds is a run-time fact,
+ * and the walk's own texts are the answer. */
+export function dynSpreadSource(L: Lowerer, blame: ts.Node, src: IrExpr, where: string): IrExpr {
+  const loc = src.loc;
+  if (src.type.kind === "set") {
+    src = { kind: "setIntrinsic", method: "toArray", receiver: src, args: [], type: arrayOf(src.type.elem), loc };
+  } else if (src.type.kind === "object") {
+    const drained = L.classIteratorDrainCall(src, loc);
+    if (drained) src = drained;
+  } else if (src.type.kind === "bytes" && src.type.elem !== "u8" && src.type.elem !== "buf") {
+    // The wider views are dense numeric iterables; only bytes<u8> has a
+    // dyn box the walk steps directly (SCR_DYN_BYTES, byte by byte).
+    src = { kind: "bytesIntrinsic", method: "toArray", receiver: src, args: [], type: arrayOf(F64), loc };
+  }
+  if (!spreadWalkableAsDyn(src.type)) {
+    L.unsupported(
+      "SC1090",
+      blame,
+      `spreading '${L.fmt(src.type)}' into ${where} (the spread source has to reach the checked-dynamic tier as ` +
+        `an array, a string or a Uint8Array: those are the kinds its run-time walk can step)`,
+    );
+  }
+  if (src.type.kind !== "dyn" && !canConvertToDyn(src.type, (id) => L.shapes.get(id), (id) => L.unions.get(id))) {
+    L.unsupported(
+      "SC1090",
+      blame,
+      `spreading '${L.fmt(src.type)}' into ${where} (the spread source must be a value the checked-dynamic tier ` +
+        `can hold, so its elements can be walked at run time)`,
+    );
+  }
+  return src;
+}
+
+/** Whether a dyn BOX of this type is a kind scr_dyn_arr_push_spread
+ * steps: an array (SCR_DYN_ARR), a string (SCR_DYN_STR), bytes<u8>
+ * (SCR_DYN_BYTES), or a dyn value whose kind is only known at run time.
+ * A union boxes its ACTIVE arm, so it is walkable exactly when every arm
+ * is. */
+function spreadWalkableAsDyn(t: IrType): boolean {
+  if (t.kind === "dyn") return true;
+  if (t.kind === "array" || t.kind === "string") return true;
+  if (t.kind === "bytes") return t.elem === "u8";
+  return false;
+}
   function dynRestPack(L: Lowerer, sources: readonly (ts.Expression | { ir: IrExpr })[],
     blame: ts.Node, loc: SrcLoc,): IrExpr {
     const isIr = (s: ts.Expression | { ir: IrExpr }): s is { ir: IrExpr } => !("kind" in s);
@@ -567,15 +626,7 @@ export interface GenericInstance {
     const elems = sources.map((a, i): IrExpr => {
       if (isIr(a)) return L.coerceInto(blame, a.ir, DYN);
       if (ts.isSpreadElement(a)) {
-        const src = L.lowerExpr(a.expression);
-        if (src.type.kind !== "dyn" && !canConvertToDyn(src.type, (id) => L.shapes.get(id), (id) => L.unions.get(id))) {
-          L.unsupported(
-            "SC1090",
-            a,
-            `spreading '${L.fmt(src.type)}' into a dynamic rest parameter (the spread source must be a value the ` +
-              `checked-dynamic tier can hold, so its elements can be walked at run time)`,
-          );
-        }
+        const src = dynSpreadSource(L, a, L.lowerExpr(a.expression), "a dynamic rest parameter");
         const optimized = spreadCount === 1 && i === sources.length - 1;
         spreads.push({ at: i, what: optimized ? a.expression.getText() : null });
         return L.coerceInto(a.expression, src, DYN);
