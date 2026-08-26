@@ -193,7 +193,12 @@ export interface FileParts {
   export function collectProgram(L: Lowerer, parts: FileParts[]): void {
     L.collecting = true;
     try {
-      for (const fp of parts) for (const decl of fp.classDecls) L.collectClassShape(decl);
+      L.collectingClassDecls = true;
+      try {
+        for (const fp of parts) for (const decl of fp.classDecls) L.collectClassShape(decl);
+      } finally {
+        L.collectingClassDecls = false;
+      }
       for (const fp of parts) for (const decl of fp.fnDecls) L.collectSignature(decl);
     } finally {
       L.collecting = false;

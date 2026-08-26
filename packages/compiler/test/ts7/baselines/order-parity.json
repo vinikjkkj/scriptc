@@ -9645,6 +9645,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/7240-number-predicates-over-dyn.ts": {
+   "order": [
+    "<repo>/tests/corpus/7240-number-predicates-over-dyn.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/750-cycle-closure-box.ts": {
    "order": [
     "<repo>/tests/corpus/750-cycle-closure-box.ts"
