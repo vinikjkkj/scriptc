@@ -413,17 +413,24 @@ export const UNSUPPORTED: Record<string, UnsupportedEntry> = {
     hint: "export declarations directly: export function f() {}",
   },
   SC1015: { feature: "dynamic import()", milestone: "M4" },
-  // Benign cycles are ADMITTED (Node runs them as cache hits): cycles of
-  // ES modules whose top levels are declaration-only and whose
-  // cycle-crossing bindings are used only inside function bodies (mutual
-  // recursion, cross-module class references), plus closing edges that
-  // bind nothing readable. SC1016 remains for exactly the cycles where
-  // Node's partial initialization is observable — the message names the
-  // offending binding or top-level statement.
+  // Benign cycles are ADMITTED (Node runs them as cache hits), under two
+  // rules that share this code but not their construct — read the MESSAGE,
+  // which names which one refused and where:
+  //  - ES-MODULE cycles: every cluster member's top level is
+  //    declaration-only, and the closing edge's bindings are used only
+  //    inside function bodies (mutual recursion, cross-module class
+  //    references), plus closing edges that bind nothing readable.
+  //  - COMMONJS cycles: the back edge's require binding is read only
+  //    inside function bodies, and the required module does not REPLACE
+  //    its export object (`module.exports = ...`) after handing the edge
+  //    the old one — Node's partial-init hazard there is a stale object,
+  //    not a temporal dead zone, and no read position rescues it.
+  // SC1016 remains for exactly the cycles where Node's partial
+  // initialization is observable.
   SC1016: {
     feature: "circular imports",
     milestone: "later",
-    hint: "cycles of ES modules with declaration-only top levels whose cycle-crossing bindings are only used inside function bodies compile as-is; move the named top-level read or call into a function body (or break the named edge) so nothing runs during the cycle's init window",
+    hint: "ES-module cycles with declaration-only top levels compile as-is, and so do CommonJS cycles whose cycle-crossing require bindings are read only inside function bodies; the fix depends on which the message names — move the named read or call into a function body, attach members to 'exports' instead of replacing 'module.exports', or break the named edge",
   },
   // Class DECLARATIONS shipped; SC1020's remaining use is class expressions.
   SC1020: { feature: "class expressions", milestone: "later" },

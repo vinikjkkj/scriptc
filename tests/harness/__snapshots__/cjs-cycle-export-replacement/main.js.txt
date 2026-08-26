@@ -1,0 +1,7 @@
+cjs-cycle-export-replacement/a.js:1:1 - error SC1016: circular imports (cjs-cycle-export-replacement/a.js → cjs-cycle-export-replacement/b.js → cjs-cycle-export-replacement/a.js; cjs-cycle-export-replacement/a.js:4 replaces the module's export object after this edge read it — the binding keeps the OLD object for the rest of the program (Node), which a require binding with no storage of its own cannot represent) are not supported yet
+
+  1 | 'use strict';
+    | ^
+  2 | console.log('a start');
+
+  hint: ES-module cycles with declaration-only top levels compile as-is, and so do CommonJS cycles whose cycle-crossing require bindings are read only inside function bodies; the fix depends on which the message names — move the named read or call into a function body, attach members to 'exports' instead of replacing 'module.exports', or break the named edge
