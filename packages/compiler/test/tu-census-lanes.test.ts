@@ -130,8 +130,8 @@ const PLANTS: readonly {
   {
     name: "a3-stranded",
     ext: "ts",
-    want: { "REFUSAL.untagged": 1 },
-    what: "a stranded dyn func thunk (SC2009, coded and BRACKETLESS: the box is interned per SIGNATURE, so it has no one source location)",
+    want: { "REFUSAL.untagged": 1, STRAND: 1 },
+    what: "a stranded dyn func thunk (SC2009, coded and BRACKETLESS: the box is interned per SIGNATURE, so it has no one source location) -- and, MEASURED, one representability strand trap alongside it",
     src: [
       "interface Api { load: (p: Promise<number>) => void }",
       "const api: Api = { load: (p: Promise<number>) => { void p; } };",
@@ -189,8 +189,8 @@ const PLANTS: readonly {
     // on its first line is the corpus contract for the one planted refusal.
     name: "a7-corpus5510",
     ext: "js",
-    want: { "REFUSAL.tagged": 1, "ABORT.structural": 1, BOILERPLATE: 1 },
-    what: "corpus 5510: one deferred fence, one SC9002 fall-through and one OOM guard, all on paths the program never takes",
+    want: { "REFUSAL.tagged": 1, "ABORT.structural": 1, BOILERPLATE: 1, STRAND: 1 },
+    what: "corpus 5510: one deferred fence, one SC9002 fall-through, one OOM guard and -- MEASURED, and one its header never declared -- one representability strand trap, all on paths the program never takes",
     src: readFileSync(
       join(repoRoot, "tests/corpus/5510-a-census-population-on-untaken-paths.js"),
       "utf8",
@@ -225,8 +225,8 @@ const PLANTS: readonly {
   {
     name: "a6-parity",
     ext: "js",
-    want: { PARITY: 1 },
-    what: "SC1031 destructuring a null match - Node throws a TypeError here too; correct, and not a refusal",
+    want: { PARITY: 1, STRAND: 1 },
+    what: "SC1031 destructuring a null match - Node throws a TypeError here too; correct, and not a refusal -- plus, MEASURED, one representability strand trap from the same `string | null` match result",
     src: [
       "const m = \"abc\".match(/b/);",
       "const [x] = m;",
