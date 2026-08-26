@@ -1,0 +1,7 @@
+cycle-barrel-declarer-unevaluated/constants.ts:1:1 - error SC1016: circular imports (cycle-barrel-declarer-unevaluated/constants.ts → cycle-barrel-declarer-unevaluated/bot.ts → cycle-barrel-declarer-unevaluated/jid.ts → cycle-barrel-declarer-unevaluated/constants.ts; top-level code at cycle-barrel-declarer-unevaluated/jid.ts:2 can run user code during the cycle's init window — only declaration-only module bodies are admitted) are not supported yet
+
+  1 | /* The barrel re-exports bot.ts BEFORE defaults.ts, so the walk enters the
+    | ^
+  2 |  * cluster with defaults.ts still unevaluated — jid.ts's top-level read of
+
+  hint: cycles of ES modules with declaration-only top levels whose cycle-crossing bindings are only used inside function bodies compile as-is; move the named top-level read or call into a function body (or break the named edge) so nothing runs during the cycle's init window

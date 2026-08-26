@@ -15,7 +15,7 @@ import { invalidJsonModuleDiag, npmEmbedFailedDiag, requiresDynamicImportDiag } 
 import { BOOL, DYN, IrClassDef, IrExpr, IrFunction, IrGlobal, IrLocal, IrRecordShape, IrStmt, IrType, IrUnionDef, JSVAL, RUNTIME_ERROR_CLASSES, STRING, SrcLoc, VOID, arrayOf, canConvertToDyn, isUnitType } from "../../ir/nodes.js";
 import { ENTRY_NAME, PoisonError, boundIdentifiersOf, dynFallbackType, dynUndefinedExpr, importCallHandleType, newFnCtx, uncheckedOverloadHandleCall } from "./lowerer.js";
 import { builtinMemberRequireDecl, builtinNamespaceDestructureModuleOf, createRequireBindingDecl, createRequireNamespaceDecl, createRequireSpecOf, isPromisifyCall, requireFnValueDeclType } from "./lower-builtins.js";
-import { bindingContextualGenericFnNodeOf, bindingGenericFnAliasInfoOf, bindingGenericFnInfoOf, bindingGenericFnNodeOf, deadUnmappableBinding, implicitLocalFnInfoOf, implicitLocalFnNodeOf, islandRestSlotType, nullishGenericBindingUnitOf } from "./lower-calls.js";
+import { bindingContextualGenericFnNodeOf, bindingGenericFnAliasInfoOf, bindingGenericFnInfoOf, bindingGenericFnNodeOf, deadUnmappableBinding, implicitLocalFnInfoOf, implicitLocalFnNodeOf, islandRestSlotType, nullishGenericBindingUnitOf, hasOwnPropertyAliasDecl } from "./lower-calls.js";
 import { dynAliasBindingIsDyn, isVarDeclared, jsEvolvingObjectLiteralInit, keyedReadGlobalArmedType, keyedReadGlobalIsDyn, numericIteratorSourceOf, provenanceElidedConstDecl } from "./lower-stmts.js";
 import { streamClassAliasDecl } from "./lower-stream.js";
 import { diffieHellmanFnValueDeclType, objectStaticFnValueDeclType, stdlibGlobalAliasDecl } from "./surfaces.js";
@@ -932,10 +932,23 @@ function isBindingWriteTarget(n: ts.Identifier): boolean {
  * write that can run later — the function may be called from anywhere — and
  * refuses, as does any write after the export. That is the write analysis
  * the `const` keyword stands in for, decided instead of assumed. */
-function wholeExportRootRebindable(L: Lowerer, root: ts.Identifier, exportExpr: ts.BinaryExpression): boolean {
+export function wholeExportRootRebindable(
+  L: Lowerer,
+  root: ts.Identifier,
+  exportExpr: ts.BinaryExpression,
+  /** The VALUE symbol to track, when `root` is not itself spelled as one.
+   * A shorthand property name (`module.exports = { user }`) binds to the
+   * PROPERTY symbol under getSymbolAtLocation, so tracking that symbol
+   * finds no writes at all and every rebindable binding would come back
+   * clean -- a silent wrong answer where the fence belongs. Callers in
+   * that position resolve the value symbol themselves and pass it. */
+  valueSym?: ts.Symbol,
+): boolean {
   const sf = root.getSourceFile();
-  const sym = L.checker.getSymbolAtLocation(root);
+  const sym = valueSym ?? L.checker.getSymbolAtLocation(root);
   if (!sym) return true;
+  const symOf = (n: ts.Identifier): ts.Symbol | undefined =>
+    valueSym === undefined ? L.checker.getSymbolAtLocation(n) : (L.resolveValueSymbol(n) ?? undefined);
   const exportPos = exportExpr.getStart(sf);
   const runsBeforeTheExport = (n: ts.Node): boolean => {
     for (let p: ts.Node | undefined = n.parent; p !== undefined; p = p.parent) {
@@ -956,7 +969,7 @@ function wholeExportRootRebindable(L: Lowerer, root: ts.Identifier, exportExpr: 
     if (rebindable) return;
     if (
       ts.isIdentifier(n) && n !== root && n.text === root.text &&
-      isBindingWriteTarget(n) && L.checker.getSymbolAtLocation(n) === sym &&
+      isBindingWriteTarget(n) && symOf(n) === sym &&
       !runsBeforeTheExport(n)
     ) {
       rebindable = true;
@@ -1553,6 +1566,10 @@ export function collectGlobals(L: Lowerer, sf: ts.SourceFile, topStmts: ts.State
         // `const fs = require("node:fs")` through that binding at file
         // scope — a namespace import in const clothing, same story.
         if (isConst && createRequireNamespaceDecl(L, decl.name, decl.initializer)) continue;
+        // `var hasOwnProperty = Object.prototype.hasOwnProperty` at file
+        // scope: compile-time plumbing, no global storage; the statement
+        // lowering skips it by the same test.
+        if (hasOwnPropertyAliasDecl(L, decl.name, decl.initializer)) continue;
         // `const { createSign } = crypto` over a builtin NAMESPACE binding
         // at file scope: alias plumbing like the destructured-require form
         // — no storage (the statement lowering skips by the same test).

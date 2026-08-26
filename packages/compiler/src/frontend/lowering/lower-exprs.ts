@@ -3910,6 +3910,26 @@ function instanceofGuardArm(L: Lowerer, rhs: ts.Expression, unionId: string): Ir
       if (narrowed?.kind === "object" && narrowed.className === "%Error") {
         return { kind: "dynCheck", value: expr, type: narrowed, loc: expr.loc };
       }
+      // A narrowing to a class the PROGRAM declares. `var p` with no
+      // initializer is implicitly `any` in JS -- a dyn slot -- and tsc's
+      // control flow narrows every read after `p = new C(...)` to C. The
+      // written cast `(p as C).f` already extracts exactly this, through
+      // exactly this dynCheck, preserving identity and mutation (the box
+      // holds the instance; the extraction unboxes it rather than
+      // rebuilding it, unlike the %Error arm above). The narrowing is the
+      // same extraction with the cast left unspelled, so it bridges the
+      // same way: VALIDATED, so a value that is not really a C throws a
+      // catchable TypeError instead of being misread.
+      //
+      // What this replaces is not a fence but an internal error --
+      // fieldTarget built a class fieldGet on the narrowed type while the
+      // value stayed dyn, and the module failed IR validation. postgres-array's
+      // `var parser` / `parser = new ArrayParser(...)` / `parser.position`
+      // is the shape, and it is the ordinary spelling of an optional local
+      // in hand-written JS.
+      if (narrowed?.kind === "object" && L.classes.get(narrowed.className) !== undefined) {
+        return { kind: "dynCheck", value: expr, type: narrowed, loc: expr.loc };
+      }
       return expr;
     }
     // Checker-driven narrowing for classes: tsc types this USE as a
@@ -18656,6 +18676,16 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
       const fieldType = info.fields.get(access.name.text);
       if (fieldType) {
         const obj = L.lowerExpr(access.expression);
+        // The checker says the receiver is that class; the VALUE says dyn.
+        // A JS `var p` with no initializer is implicitly `any`, so its
+        // storage is a dyn slot -- and tsc's control flow still NARROWS the
+        // read after `p = new C(...)` to C. Building the class fieldGet on
+        // that narrowed type put a dyn where the IR requires an object, and
+        // the module failed IR validation with an internal error instead of
+        // compiling or refusing. Decline exactly as the record arm below
+        // declines its own dyn-valued receiver: the dyn keyed read answers,
+        // and where it cannot, its fence names the construct.
+        if (obj.type.kind !== "object") return null;
         return { container: "class", obj, className: receiverIr.className, field: access.name.text, fieldType };
       }
       // Accessor property: either half declared anywhere on the chain
@@ -18665,6 +18695,8 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
       const setF = L.findMethodOn(info, `set:${access.name.text}`);
       if (getF || setF) {
         const obj = L.lowerExpr(access.expression);
+        // Same narrowed-checker / dyn-value split as the field arm above.
+        if (obj.type.kind !== "object") return null;
         return {
           container: "accessor",
           obj,
