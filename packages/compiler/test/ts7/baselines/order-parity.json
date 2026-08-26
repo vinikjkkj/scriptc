@@ -9572,6 +9572,19 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/7162-js-var-narrowed-to-a-class.js": {
+   "order": [
+    "<repo>/tests/corpus/7162-js-var-narrowed-to-a-class.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/7163-cjs-export-a-settled-let/main.js": {
+   "order": [
+    "<repo>/tests/corpus/7163-cjs-export-a-settled-let/defaults.js",
+    "<repo>/tests/corpus/7163-cjs-export-a-settled-let/main.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/720-accessors-basics.ts": {
    "order": [
     "<repo>/tests/corpus/720-accessors-basics.ts"
