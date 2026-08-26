@@ -7,7 +7,7 @@
 import * as ts from "../ts7/adapter.js";
 import { dirname, relative } from "node:path";
 import type { Lowerer, WidthLift } from "./lowerer.js";
-import { BIGINT, BOOL, CAUGHT, DYN, type IrBytesElem, type IrLibFn, type IrNumBinOp, DYN_HANDLE_KINDS, F64, IrExpr, IrFunction, IrJsOp, IrLocal, IrRecordShape, IrStmt, IrType, JSVAL, KEYOBJ, NULL_T, REF_TRUTHY_KINDS, REGEX, RUNTIME_ERROR_CLASSES, SEARCH_PARAMS_T, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, canAdaptDynFuncTo, canBoxFuncIntoDyn, canDynCheckTo, funcOf, isDynBytes, isJsonSafeType, isRefCounted, isUnitType, jsOpResultKind, httpReqIsReadableIn, shapeHasAccessorSlots, streamDuplexWidensToWritable, typeEquals, typeKey, unionFuncSetArmsOk } from "../../ir/nodes.js";
+import { strandTrap, BIGINT, BOOL, CAUGHT, DYN, type IrBytesElem, type IrLibFn, type IrNumBinOp, DYN_HANDLE_KINDS, F64, IrExpr, IrFunction, IrJsOp, IrLocal, IrRecordShape, IrStmt, IrType, JSVAL, KEYOBJ, NULL_T, REF_TRUTHY_KINDS, REGEX, RUNTIME_ERROR_CLASSES, SEARCH_PARAMS_T, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, canAdaptDynFuncTo, canBoxFuncIntoDyn, canDynCheckTo, funcOf, isDynBytes, isJsonSafeType, isRefCounted, isUnitType, jsOpResultKind, httpReqIsReadableIn, shapeHasAccessorSlots, streamDuplexWidensToWritable, typeEquals, typeKey, unionFuncSetArmsOk } from "../../ir/nodes.js";
 import { lowerAbortProperty } from "./lower-abort.js";
 import { lowerFetchProperty, lowerRequestInitLiteral } from "./lower-fetch.js";
 import { lowerSqliteProperty } from "./lower-sqlite.js";
@@ -11966,24 +11966,12 @@ function rejectThisInObjectMethodIn(L: Lowerer, node: ts.Node, mayStop: boolean)
         else_: null,
         loc,
       }));
-      body.push({
-        kind: "throw",
-        value: {
-          kind: "libCall",
-          fn: "error.new",
-          args: [
-            {
-              kind: "strLit",
-              value: `a keyed read proven to '${names.join("' | '")}' received a different key (a value narrowed or asserted past the key's type still held it)`,
-              type: STRING,
-              loc,
-            },
-          ],
-          type: { kind: "object", className: "%TypeError" },
+      body.push(
+        strandTrap(
+          `a keyed read proven to '${names.join("' | '")}' received a different key (a value narrowed or asserted past the key's type still held it)`,
           loc,
-        },
-        loc,
-      });
+        ),
+      );
       L.liftedFns.push({
         name,
         params: [

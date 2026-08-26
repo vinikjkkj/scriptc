@@ -2108,8 +2108,18 @@ export type IrStmt =
    * `code` carries the SC diagnostic code; unwinds exactly like `throw`.
    * TypeScript sources produce it only as the tsc-unreachable fallthrough
    * trap (appendImplicitUndefinedReturn's SC9002) — their construct fences
-   * stay compile errors. */
-  | { kind: "runtimeFence"; code: string; message: string; loc: SrcLoc }
+   * stay compile errors.
+   *
+   * `errKind` picks the runtime error CLASS. It defaults to `Error` — the
+   * deferred construct fence's own class. `"type"` exists for the
+   * representability strand traps (SC9004), which were `throw new
+   * TypeError(...)` built out of `error.new` before they were coded: they
+   * keep TypeError so no program that catches one sees a different class,
+   * and they gain the code that makes them visible to
+   * scripts/tu-census.mjs and to SCRIPTC_TRAP_TRACE (whose only hook,
+   * scr_trap_trace_note, is called from scr_throw_error_msg_code and
+   * nowhere else). */
+  | { kind: "runtimeFence"; code: string; message: string; errKind?: "type"; loc: SrcLoc }
   /** Rethrow of a catch binding (`throw e` where e is the binding):
    * re-raises the SAVED exception exactly — kind and payload preserved,
    * payload retained (the binding stays live until its scope exits).
@@ -10053,6 +10063,40 @@ export function dispatcherCallPlan(
  */
 export function wsRefusalText(msg: string, site: string | undefined): string {
   return site === undefined ? msg : `${msg} [SC2020 at ${site}]`;
+}
+
+/** The code every REPRESENTABILITY STRAND TRAP carries.
+ *
+ * A strand trap is the statement the lowering plants where a value flowed
+ * into a slot, a union arm, a class or a function signature that cannot
+ * hold it. The construct COMPILED; what the trap reports is a state the
+ * program reached, so — exactly like SC9003's keyed-read abort — the code
+ * belongs to the SC9xxx family and has no FENCE_CODES registry entry: it
+ * is not a surface the compiler declined at compile time.
+ *
+ * WHY IT EXISTS AT ALL. Every one of these was `throw new TypeError(msg)`
+ * built out of `error.new` + `scr_throw_obj`. In the emitted TU that is
+ * byte-for-byte a USER's `throw new TypeError(...)`, so:
+ *   - scripts/tu-census.mjs counted it under "the program's own throw",
+ *     a category it explicitly never counts as a compiler failure, and
+ *     exited 0 reporting zero refusals;
+ *   - SCRIPTC_TRAP_TRACE could not see it either, because its only hook
+ *     (scr_trap_trace_note) is called from scr_throw_error_msg_code and
+ *     nowhere else.
+ * A refusal no instrument can see is a refusal that cannot be counted, and
+ * every "N refusals left" number this project has quoted was produced by
+ * an instrument with this hole in it.
+ *
+ * The class stays TypeError (errKind "type") so no program that catches
+ * one observes a different error; what changes is that the throw now
+ * carries a code. */
+export const STRAND_TRAP_CODE = "SC9004";
+
+/** `throw new TypeError(message)` as a CODED fence — the one constructor
+ * for a representability strand trap, so no site can reintroduce the
+ * uncoded spelling by copying its neighbour. */
+export function strandTrap(message: string, loc: SrcLoc): IrStmt {
+  return { kind: "runtimeFence", code: STRAND_TRAP_CODE, message, errKind: "type", loc };
 }
 
 /** Structural proof that `t` is the WebSocket global's construct
