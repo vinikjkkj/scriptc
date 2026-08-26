@@ -2375,16 +2375,26 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
           // instance per call-site type tuple (the untyped params ARE the
           // type parameters; see lower-calls' implicit section). DECLINES
           // (falls through to the normal all-dyn ABI) wherever the two
-          // dispatch worlds could meet: an inherited declaration of the
-          // name (the override stays on the vtable), a shadowed field, or
-          // a generic-class instantiation's member.
+          // dispatch worlds could meet: an inherited VTABLE declaration of
+          // the name (the override belongs on the slot), a shadowed field,
+          // or a generic-class instantiation's member.
+          //
+          // An inherited GENERIC declaration is NOT such a meeting: neither
+          // end owns a vtable slot, so both dispatch statically and the
+          // whole family stays in one world. Overriding it collects here
+          // too — `genericOverrideBelow` is what keeps that sound, fencing
+          // by name at any call whose receiver's runtime class could be the
+          // subclass without the static type proving it (see
+          // lowerClassGenericMethodCall). This is the shape mysql2's
+          // `PoolConnection.end(callback)` over `BaseConnection.end(callback)`
+          // has, and every JS class hierarchy that overrides an untyped
+          // method has it.
           if (
             implicitMonoFile(decl.getSourceFile()) &&
             ts.isIdentifier(member.name) &&
             inst === undefined && decl.typeParameters === undefined &&
             !fields.has(member.name.text) &&
-            !L.findMethodOn(base, member.name.text) &&
-            !findGenericMethodOn(L, base, member.name.text)
+            !L.findMethodOn(base, member.name.text)
           ) {
             const implicit = implicitAnyParamSymbolsOf(L, member);
             if (implicit) {
@@ -5542,7 +5552,12 @@ export function lowerClassMembers(L: Lowerer, info: ClassInfo): IrFunction[] {
       if (gfound) {
         const thisL = L.resolveThis();
         if (!thisL) L.unsupported("SC1080", access);
-        const instance = genericCallInstance(L, call, gfound.info);
+        // An IMPLICIT-any method instantiates over the call's ARGUMENT
+        // types — there is no resolved generic signature to read type
+        // arguments off. The same split lowerClassGenericMethodCall makes.
+        const instance = gfound.info.implicitParams
+          ? implicitCallInstance(L, call, gfound.info)
+          : genericCallInstance(L, call, gfound.info);
         const loc = locOf(call);
         const thisRef: IrExpr = { kind: "varRef", localId: thisL.id, type: thisL.type, loc };
         const args = L.completeArgs(call.arguments, instance.params, loc, call);
