@@ -9520,6 +9520,18 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/7040-in-over-a-field-the-constructor-may-not-assign.js": {
+   "order": [
+    "<repo>/tests/corpus/7040-in-over-a-field-the-constructor-may-not-assign.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/7041-this-inside-a-nested-function-that-captures.js": {
+   "order": [
+    "<repo>/tests/corpus/7041-this-inside-a-nested-function-that-captures.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/710-inheritance-basics.ts": {
    "order": [
     "<repo>/tests/corpus/710-inheritance-basics.ts"

@@ -7,7 +7,7 @@
 import * as ts from "../ts7/adapter.js";
 import { dirname, relative } from "node:path";
 import type { Lowerer, WidthLift } from "./lowerer.js";
-import { BIGINT, BOOL, CAUGHT, DYN, type IrBytesElem, type IrLibFn, type IrNumBinOp, DYN_HANDLE_KINDS, F64, IrExpr, IrFunction, IrJsOp, IrLocal, IrRecordShape, IrStmt, IrType, JSVAL, KEYOBJ, NULL_T, REF_TRUTHY_KINDS, REGEX, RUNTIME_ERROR_CLASSES, SEARCH_PARAMS_T, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, canAdaptDynFuncTo, canBoxFuncIntoDyn, canDynCheckTo, funcOf, isDynBytes, isJsonSafeType, isRefCounted, isUnitType, jsOpResultKind, httpReqIsReadableIn, shapeHasAccessorSlots, streamDuplexWidensToWritable, typeEquals, typeKey, unionFuncSetArmsOk } from "../../ir/nodes.js";
+import { strandTrap, BIGINT, BOOL, CAUGHT, DYN, type IrBytesElem, type IrLibFn, type IrNumBinOp, DYN_HANDLE_KINDS, F64, IrExpr, IrFunction, IrJsOp, IrLocal, IrRecordShape, IrStmt, IrType, JSVAL, KEYOBJ, NULL_T, REF_TRUTHY_KINDS, REGEX, RUNTIME_ERROR_CLASSES, SEARCH_PARAMS_T, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, canAdaptDynFuncTo, canBoxFuncIntoDyn, canDynCheckTo, funcOf, isDynBytes, isJsonSafeType, isRefCounted, isUnitType, jsOpResultKind, httpReqIsReadableIn, shapeHasAccessorSlots, streamDuplexWidensToWritable, typeEquals, typeKey, unionFuncSetArmsOk } from "../../ir/nodes.js";
 import { lowerAbortProperty } from "./lower-abort.js";
 import { lowerFetchProperty, lowerRequestInitLiteral } from "./lower-fetch.js";
 import { lowerSqliteProperty } from "./lower-sqlite.js";
@@ -11966,24 +11966,12 @@ function rejectThisInObjectMethodIn(L: Lowerer, node: ts.Node, mayStop: boolean)
         else_: null,
         loc,
       }));
-      body.push({
-        kind: "throw",
-        value: {
-          kind: "libCall",
-          fn: "error.new",
-          args: [
-            {
-              kind: "strLit",
-              value: `a keyed read proven to '${names.join("' | '")}' received a different key (a value narrowed or asserted past the key's type still held it)`,
-              type: STRING,
-              loc,
-            },
-          ],
-          type: { kind: "object", className: "%TypeError" },
+      body.push(
+        strandTrap(
+          `a keyed read proven to '${names.join("' | '")}' received a different key (a value narrowed or asserted past the key's type still held it)`,
           loc,
-        },
-        loc,
-      });
+        ),
+      );
       L.liftedFns.push({
         name,
         params: [
@@ -16729,24 +16717,70 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
     return names;
   }
 
+/** `key in recv` where the class slot named by `key` is UNDEFINED-ARMED:
+   * the presence answer is the slot's own arm test, not the layout. Null
+   * when the slot is not armed (an ordinary field, a method, an accessor,
+   * an Object.prototype name) and the caller's constant `true` stands.
+   *
+   * Both representations an armed slot can take are answered: the
+   * undefined-armed UNION (undefArmedFieldType's ordinary result) and the
+   * checked-dynamic box (its result for an implicit-`any` field, where
+   * `undefined` is a dyn KIND rather than a union arm). */
+  function undefinedArmedInAnswer(
+    L: Lowerer,
+    recv: IrExpr,
+    className: string,
+    key: string,
+    loc: SrcLoc,
+  ): IrExpr | null {
+    const info = L.classes.get(className);
+    // ONLY a COLLECTED field. A field the class body declares exists on the
+    // instance from construction even with nothing assigned to it (class
+    // fields define, they do not merely reserve), so Node answers `true`
+    // for `optional?: string` and for a `!`-asserted declaration before any
+    // write -- tests/corpus/4272. Keying this on "the slot has an undefined
+    // arm" instead answered `false` for both, which is how a MATCH became a
+    // WRONG on the branch's own differential run.
+    if (info?.collectedFields?.has(key) !== true) return null;
+    const fieldT = info.fields.get(key);
+    if (fieldT === undefined) return null;
+    const read = (): IrExpr => ({ kind: "fieldGet", obj: recv, className, field: key, type: fieldT, loc });
+    if (fieldT.kind === "dyn") {
+      return { kind: "dynTest", test: "undefined", negated: true, value: read(), type: BOOL, loc };
+    }
+    if (fieldT.kind !== "union") return null;
+    const tag = L.armTag(fieldT.unionId, UNDEFINED_T);
+    if (tag < 0) return null;
+    return { kind: "unionIsTag", unionId: fieldT.unionId, tag, negated: true, value: read(), type: BOOL, loc };
+  }
+
 /** The interned per-class key-presence helper the RUNTIME-key `in` calls:
    * `%cls.haskey.<n>(k)` — a string-equality chain over the closed member
    * set. The answer depends on the KEY alone (unlike a record's, no
    * optional slot decides per value), so the receiver is not a parameter;
    * the call site still evaluates it, because JS does. */
-  export function classHasKeyHelper(L: Lowerer, className: string, members: ReadonlySet<string>, loc: SrcLoc): string {
+  export function classHasKeyHelper(L: Lowerer, className: string, members: ReadonlySet<string>, recvT: IrType, loc: SrcLoc): string {
     const hkey = `clshaskey:${className}`;
     const existing = L.widthHelpers.get(hkey);
     if (existing) return existing;
     const helper = `%cls.haskey.${L.widthHelpers.size}`;
     L.widthHelpers.set(hkey, helper);
     const k: IrExpr = { kind: "varRef", localId: "k.0", type: STRING, loc };
+    // The receiver IS a parameter now. It was not, and could not be, while
+    // every declared name answered `true`: the answer depended on the key
+    // alone. An UNDEFINED-ARMED slot breaks that -- the field does not
+    // exist until its first write, so the answer for that one name depends
+    // on the value. The literal-key fold learned this first; a runtime key
+    // reaching the same class had to keep answering `true` until the
+    // helper could see the object.
+    const o: IrExpr = { kind: "varRef", localId: "o.0", type: recvT, loc };
     const body: IrStmt[] = [];
     for (const name of members) {
+      const armed = undefinedArmedInAnswer(L, o, className, name, loc);
       body.push({
         kind: "if",
         cond: { kind: "strEq", negated: false, left: k, right: { kind: "strLit", value: name, type: STRING, loc }, type: BOOL, loc },
-        then: [{ kind: "return", value: { kind: "boolLit", value: true, type: BOOL, loc }, loc }],
+        then: [{ kind: "return", value: armed ?? { kind: "boolLit", value: true, type: BOOL, loc }, loc }],
         else_: null,
         loc,
       });
@@ -16754,9 +16788,15 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
     body.push({ kind: "return", value: { kind: "boolLit", value: false, type: BOOL, loc }, loc });
     L.liftedFns.push({
       name: helper,
-      params: [{ localId: "k.0", name: "k", type: STRING }],
+      params: [
+        { localId: "k.0", name: "k", type: STRING },
+        { localId: "o.0", name: "o", type: recvT },
+      ],
       returnType: BOOL,
-      locals: [{ id: "k.0", name: "k", type: STRING, mutable: true }],
+      locals: [
+        { id: "k.0", name: "k", type: STRING, mutable: true },
+        { id: "o.0", name: "o", type: recvT, mutable: false },
+      ],
       body,
       loc,
     });
@@ -16834,7 +16874,7 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
         if (probed?.type.kind === "object" && L.mapTypeOf(L.typeOf(expr.left))?.kind === "string") {
           const members = classInMemberNames(L, probed.type.className);
           if (members) {
-            const helper = classHasKeyHelper(L, probed.type.className, members, loc);
+            const helper = classHasKeyHelper(L, probed.type.className, members, probed.type, loc);
             // JS evaluates the key, then the receiver — and the receiver
             // is evaluated even though the answer does not read it.
             const keyIr = L.lowerExprExpecting(expr.left, STRING);
@@ -16842,7 +16882,8 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
             const recvIr = L.lowerExpr(expr.right);
             const rTmp = L.declareHiddenLocal("%inRecv", recvIr.type);
             const kRef = (): IrExpr => ({ kind: "varRef", localId: kTmp.id, type: STRING, loc });
-            const declared: IrExpr = { kind: "call", callee: helper, args: [kRef()], type: BOOL, loc };
+            const rRef = (): IrExpr => ({ kind: "varRef", localId: rTmp.id, type: recvIr.type, loc });
+            const declared: IrExpr = { kind: "call", callee: helper, args: [kRef(), rRef()], type: BOOL, loc };
             // …OR the instance's RUN-TIME property table, when the class
             // has one. The closed-member-set argument above rests on
             // "every construct which could ADD a member to an instance
@@ -16973,7 +17014,28 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
             // …)` can have put `plug` there, and a constant-folded
             // `false` would be exactly the silent wrong answer the
             // closed-member-set comment warns about.
-            if (members.has(key)) return { kind: "boolLit", value: true, type: BOOL, loc };
+            if (members.has(key)) {
+              // ...unless the slot is UNDEFINED-ARMED. A field first
+              // assigned in a method or in a conditional constructor
+              // position collects into an undefined-armed slot precisely
+              // because it does not exist until the write runs, and Node
+              // answers `false` for it until then. Folding to the constant
+              // `true` because the LAYOUT has a slot answered a question
+              // about the static shape, not about the object:
+              //
+              //   class C { constructor(f){ if (f) { this.b = 1 } this.a = 0 } }
+              //   'b' in new C(false)      // Node false, this compiler true
+              //
+              // The answer is the one the RECORD path already gives an
+              // optional slot -- the undefined arm reads absent (stance 55)
+              // -- so a class field and a record field now say the same
+              // thing about the same value. It diverges from Node only
+              // where a field is EXPLICITLY assigned `undefined`, which is
+              // stance 55's own recorded divergence and not a new one.
+              const armed = undefinedArmedInAnswer(L, recv, recv.type.className, key, loc);
+              if (armed) return armed;
+              return { kind: "boolLit", value: true, type: BOOL, loc };
+            }
             const cinfo = L.classes.get(recv.type.className);
             if (cinfo?.hasPropsTable !== true) return { kind: "boolLit", value: false, type: BOOL, loc };
             return {

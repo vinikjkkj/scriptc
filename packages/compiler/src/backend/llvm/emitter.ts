@@ -4617,11 +4617,13 @@ class LlEmitter {
       case "runtimeFence": {
         // The deferred JS compile fence: throw a catchable Error naming
         // the construct (message) with the SC code stamped on `code`,
-        // then unwind exactly like `throw`. SCR_ERR_ERROR = 0.
+        // then unwind exactly like `throw`. SCR_ERR_ERROR = 0, SCR_ERR_TYPE = 1
+        // (the strand traps keep the TypeError class they threw before they
+        // were coded).
         const bytes = Buffer.byteLength(s.message, "utf8");
         this.declare(`declare void @scr_throw_error_msg_code(i32, ptr, i64, ptr)`);
         B.line(
-          `call void @scr_throw_error_msg_code(i32 0, ptr ${this.cstr(s.message)}, i64 ${bytes}, ptr ${this.cstr(s.code)})`,
+          `call void @scr_throw_error_msg_code(i32 ${s.errKind === "type" ? 1 : 0}, ptr ${this.cstr(s.message)}, i64 ${bytes}, ptr ${this.cstr(s.code)})`,
         );
         this.emitUnwind();
         break;

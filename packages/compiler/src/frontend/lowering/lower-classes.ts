@@ -80,6 +80,22 @@ export interface ClassInfo {
    * unassigned read throws the catchable TypeError instead of yielding
    * an undefined the declared type cannot hold (SEMANTICS.md). */
   deferredInitFields?: Set<string>;
+  /** JS instance properties this class has ONLY because the constructor
+   * scan COLLECTED them: assigned in a method, or in a conditional
+   * constructor position, and never declared in the class body. They are
+   * the only fields whose slot can be occupied while the PROPERTY does not
+   * exist -- Node creates it at the first write -- so they are the only
+   * ones for which `k in instance` has to read the slot's undefined arm
+   * instead of folding to the layout's constant `true`.
+   *
+   * A DECLARED field is not one of these, and the distinction is the whole
+   * point. `class D { optional?: string }` defines `optional` on every
+   * instance as `undefined` under class-fields semantics, so Node answers
+   * `true` for it before anything is assigned; tests/corpus/4272 asserts
+   * exactly that, and an `in` rule keyed on "the slot has an undefined
+   * arm" got it wrong. Inherited entries are carried down like
+   * deferredInitFields'. */
+  collectedFields?: Set<string>;
   /** null for the builtin error classes (runtime-provided; no source).
    * Class EXPRESSIONS carry their ts.ClassExpression here — members,
    * accessors, and locs read identically off either form. */
@@ -2573,6 +2589,7 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
       // all) leaves a window where Node reads undefined and these layouts
       // would read zeroed memory, so it fences instead.
       const deferredInitFields = new Set<string>(base?.deferredInitFields ?? []);
+      const collectedFields = new Set<string>(base?.collectedFields ?? []);
       if (unguardedFields.length > 0) {
         const topAssigned = new Set<string>();
         for (const stmt of ctor?.body?.statements ?? []) {
@@ -2850,6 +2867,7 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
             if (armed !== null) {
               fields.set(p.name, armed);
               fieldOrder.push({ name: p.name, type: armed, initializer: undefined });
+              collectedFields.add(p.name);
               continue;
             }
           }
@@ -3019,6 +3037,7 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
         ...(hasPropsTable ? { hasPropsTable: true as const } : {}),
         ...(classDecoratorNodes.length > 0 ? { classDecorators: { nodes: classDecoratorNodes } } : {}),
         ...(deferredInitFields.size > 0 ? { deferredInitFields } : {}),
+        ...(collectedFields.size > 0 ? { collectedFields } : {}),
       };
       // GENERIC members get their declaring-class backlink now that the
       // info exists (instance lowering reads it for `this` typing and the
@@ -6636,6 +6655,13 @@ export function lowerNew(L: Lowerer, expr: ts.NewExpression): IrExpr {
           targs.length > 0 &&
           targs.every((t) => (t.flags & ts.TypeFlags.Any) !== 0)
         ) {
+          // SCRIPTC_MAPBOX_WHY=1: count the escape hatch.  Every one of these
+          // is a value on which `.set`/`.get`/`.size` answers V8's own
+          // "is not a function" -- a wrong answer for a method Node HAS -- and
+          // no instrument in this project could say how many a program has.
+          if (process.env["SCRIPTC_MAPBOX_WHY"] !== undefined) {
+            process.stderr.write(`[mapbox] ${L.checker.typeToString(tsType)} at ${loc.file}:${loc.start}\n`);
+          }
           return { kind: "dynObjLit", type: DYN, loc };
         }
         // A WeakMap that does NOT ride the identity-keyed Map (types.ts's

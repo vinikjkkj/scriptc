@@ -41,7 +41,7 @@ import type { Lowerer } from "./lowerer.js";
 import { dynFallbackType, newFnCtx } from "./lowerer.js";
 import type { ClassInfo } from "./lower-classes.js";
 import { isJsSourceFile, locOf } from "../program.js";
-import { arrayOf, BOOL, canBoxFuncIntoDyn, canConvertToDyn, canDynCheckTo, DYN, F64, IrExpr, IrFunction, IrLocal, IrParam, IrStmt, IrType, isUnitType, STRING, SrcLoc, typeEquals, typeKey, VOID } from "../../ir/nodes.js";
+import { strandTrap, arrayOf, BOOL, canBoxFuncIntoDyn, canConvertToDyn, canDynCheckTo, DYN, F64, IrExpr, IrFunction, IrLocal, IrParam, IrStmt, IrType, isUnitType, STRING, SrcLoc, typeEquals, typeKey, VOID } from "../../ir/nodes.js";
 import { streamForcedTuple, streamSidesOf } from "./lower-stream.js";
 import { handlerFnTypeNodeOf } from "../types.js";
 
@@ -1930,23 +1930,12 @@ function keyMapArity(L: Lowerer, map: ts.Type, key: string): number | null {
  * lying-assertion stance, worded like narrowedArmHelper's so the family
  * reads as one thing. Node has no equivalent: it hands the listener the
  * wrong object and lets the reads answer undefined. */
-function notInTarget(L: Lowerer, from: IrType, to: IrType, loc: SrcLoc): IrExpr {
-  return {
-    kind: "libCall",
-    fn: "error.new",
-    args: [
-      {
-        kind: "strLit",
-        value:
-          `a '${L.fmt(from)}' payload is not representable as '${L.fmt(to)}' ` +
-          `(an emit named an event whose payload array held a different tuple)`,
-        type: STRING,
-        loc,
-      },
-    ],
-    type: { kind: "object", className: "%TypeError" },
+function notInTarget(L: Lowerer, from: IrType, to: IrType, loc: SrcLoc): IrStmt {
+  return strandTrap(
+    `a '${L.fmt(from)}' payload is not representable as '${L.fmt(to)}' ` +
+      `(an emit named an event whose payload array held a different tuple)`,
     loc,
-  };
+  );
 }
 
 /** The wording the dispatcher's checked extractions carry — what a failing
@@ -2048,7 +2037,7 @@ function unionRegroupHelper(
   body.push({
     kind: "if",
     cond: { kind: "unary", op: "!", operand: anyTagTest(from, v, lastTags.length > 0 ? lastTags : [tags[toArms.length - 1]!], loc), type: BOOL, loc },
-    then: [{ kind: "throw", value: notInTarget(L, from, to, loc), loc }],
+    then: [notInTarget(L, from, to, loc)],
     else_: null,
     loc,
   });
