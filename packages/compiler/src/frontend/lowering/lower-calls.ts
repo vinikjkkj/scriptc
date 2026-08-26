@@ -867,10 +867,39 @@ export interface GenericInstance {
     };
   }
 
+/** The contextual type of an OBJECT-LITERAL METHOD's value, which
+   * `getContextualType` cannot answer: a MethodDeclaration is not an
+   * Expression, so tsc has no contextual query for it. The literal itself
+   * does have one, and the member's own type is that record's property —
+   * `const c: Conn = { run(sql, params?) {...} }` gives `run` the slot
+   * `Conn.run` declares. Null when the literal is unannotated (the
+   * inferred type IS the value, so there is nothing to check against) or
+   * the target has no such property. */
+  function objLitMemberTargetType(L: Lowerer, node: ts.Node): ts.Type | null {
+    if (!ts.isMethodDeclaration(node)) return null;
+    const parent: ts.Node | undefined = node.parent;
+    if (parent === undefined || !ts.isObjectLiteralExpression(parent)) return null;
+    const name = node.name;
+    const key = ts.isIdentifier(name)
+      ? name.text
+      : ts.isStringLiteral(name)
+        ? name.text
+        : null;
+    if (key === null) return null;
+    const objT = L.checker.getContextualType(parent);
+    if (objT === undefined) return null;
+    const sym = L.checker.getPropertyOfType(objT, key);
+    if (sym === undefined) return null;
+    return L.checker.getTypeOfSymbol(sym);
+  }
+
   export function requireExactArityValue(L: Lowerer, blame: ts.Node,
     contextual: ts.Expression | null,
     shapes: readonly ParamShape[],
-    funcType: IrType,): void {
+    funcType: IrType,
+    /** A target type the caller resolved itself, for value positions
+     * `getContextualType` has no query for (an object-literal method). */
+    resolvedTarget?: ts.Type | null,): void {
     // dynRest params ride the boxed thunk (JS arity — no completed-ABI
     // spelling exists or is needed); they don't gate the value form.
     // Dynamic-tier omittable params (`{} = a` with `a: any` — jsval/dyn
@@ -903,7 +932,9 @@ export interface GenericInstance {
     // optional/defaulted params spell their `T | undefined` slots (mapType's
     // completed-signature contract), so omitted trailing args complete with
     // the undefined arm like any direct call.
-    const target = contextual ? L.checker.getContextualType(contextual) : undefined;
+    const target = contextual
+      ? L.checker.getContextualType(contextual)
+      : (resolvedTarget ?? undefined);
     const mapped = target
       ? L.mapTypeOf(target)
       : contextual
@@ -7145,7 +7176,7 @@ const inliningPredicates = new Set<ts.Symbol>();
     ) {
       L.unsupported("SC1071", node, "async generators (async function*)");
     }
-    if (node.typeParameters) {
+    if (node.typeParameters && !L.erasedGenericMethods.has(node)) {
       // Generic function-like forms monomorphize only where a static home
       // exists: top-level generic function declarations, generic methods
       // (class and object-literal), and module-scope never-reassigned
@@ -7153,6 +7184,14 @@ const inliningPredicates = new Set<ts.Symbol>();
       // all collected before this path. Everything else lambda-shaped
       // (arguments, IIFEs, default exports, nested declarations) has no
       // per-instantiation story and stays out.
+      //
+      // ...and one form that does not monomorphize at all: an
+      // object-literal generic METHOD whose record slot the shape KEPT at
+      // the member's constraint instantiation. There is nothing to
+      // monomorphize against — every call reads the field and invokes the
+      // one closure the slot holds — so the method lowers ONCE at the
+      // erasure, exactly like the arrow spelling of the same member
+      // (lowerLambda installs the bindings and registers the node here).
       L.unsupported(
         "SC1090",
         node,
@@ -7582,9 +7621,30 @@ const inliningPredicates = new Set<ts.Symbol>();
       }
       return null;
     };
-    if (!ts.isArrowFunction(node) && !ts.isFunctionExpression(node)) return null;
-    if (node.typeParameters !== undefined) return null;
-    const ctxType = L.checker.getContextualType(node);
+    // THE FOURTH PRODUCER: an object-literal METHOD that declares the
+    // slot's type parameters itself (`{ get<T extends Record<string,
+    // unknown>>(sql, params?) {...} }` — zapo's WaSqliteConnection). It is
+    // the same shape as the arrow above with the type parameters WRITTEN
+    // OUT, and it took the identical slot; only the arrow half existed, so
+    // the two spellings of one member disagreed. A MethodDeclaration is not
+    // an Expression, so the erasure reads the slot the way
+    // objLitMemberTargetType does, and the bindings come from the METHOD's
+    // OWN type-parameter declarations — tsc has already checked the method
+    // against the slot, so the two parameter lists correspond one for one,
+    // and reading the method's own constraints keeps the recipe identical
+    // to mapTypeInner's (`constraintErasedCtx` reads the DECLARATION's
+    // constraints too).
+    const objLitMethod =
+      ts.isMethodDeclaration(node) &&
+      node.parent !== undefined &&
+      ts.isObjectLiteralExpression(node.parent) &&
+      node.typeParameters !== undefined &&
+      node.typeParameters.length > 0;
+    if (!objLitMethod && !ts.isArrowFunction(node) && !ts.isFunctionExpression(node)) return null;
+    if (!objLitMethod && (node as ts.SignatureDeclaration).typeParameters !== undefined) return null;
+    const ctxType = objLitMethod
+      ? (objLitMemberTargetType(L, node) ?? undefined)
+      : L.checker.getContextualType(node);
     if (ctxType === undefined) return null;
     const sigs = L.checker.getCallSignatures(L.checker.getNonNullableType(ctxType));
     if (sigs.length !== 1) return null;
@@ -7594,6 +7654,16 @@ const inliningPredicates = new Set<ts.Symbol>();
     const sigDecl = L.checker.signatureDeclaration(sig);
     const tpDecls = sigDecl !== undefined && ts.isFunctionLike(sigDecl) ? sigDecl.typeParameters : undefined;
     if (tpDecls === undefined || tpDecls.length !== tps.length) return why("no type-parameter declarations");
+    // The method's own type parameters are the ones its BODY reads; the
+    // slot's are what the constraint erasure was computed from. Bind both
+    // sets to the same constraint types, so the body and the slot are
+    // erased by one recipe. The counts must agree — a method that declares
+    // a different arity than the slot it fills has no correspondence to
+    // bind, and keeps the fence.
+    const ownDecls = objLitMethod ? (node as ts.MethodDeclaration).typeParameters : undefined;
+    if (objLitMethod && (ownDecls === undefined || ownDecls.length !== tps.length)) {
+      return why("object-literal method's type-parameter arity differs from the slot's");
+    }
     const ir = new Map<ts.Symbol, IrType>();
     const tsMap = new Map<ts.Symbol, ts.Type>();
     for (const [i, tp] of tps.entries()) {
@@ -7612,6 +7682,15 @@ const inliningPredicates = new Set<ts.Symbol>();
       }
       ir.set(sym, mapped);
       tsMap.set(sym, srcT);
+      // The method's OWN parameter at this position, bound to the SAME
+      // constraint — the body names that symbol, not the slot's.
+      if (ownDecls !== undefined) {
+        const ownName = ownDecls[i]?.name;
+        const ownSym = ownName !== undefined ? L.checker.getSymbolAtLocation(ownName) : undefined;
+        if (ownSym === undefined) return why("object-literal method's type parameter has no symbol");
+        ir.set(ownSym, mapped);
+        tsMap.set(ownSym, srcT);
+      }
     }
     if (process.env["SCRIPTC_ERASELAMBDA_WHY"] !== undefined) {
       const sf = node.getSourceFile();
@@ -7647,6 +7726,12 @@ const inliningPredicates = new Set<ts.Symbol>();
     // and a rest tuple comes from the erasure.
     L.typeCtx.indexUnionOk = true;
     L.typeCtx.restTupleFromErasure = true;
+    // An object-literal generic METHOD is erased with its OWN type
+    // parameters bound; lambdaSignature's generic fence stands down for
+    // this node alone (see Lowerer.erasedGenericMethods).
+    const ownGeneric =
+      ts.isMethodDeclaration(node) && node.typeParameters !== undefined && node.typeParameters.length > 0;
+    if (ownGeneric) L.erasedGenericMethods.add(node);
     try {
       return lowerLambdaInner(L, node);
     } finally {
@@ -7654,6 +7739,7 @@ const inliningPredicates = new Set<ts.Symbol>();
       L.typeParamTsBindings = prevTs;
       L.typeCtx.indexUnionOk = prevIndexUnion;
       L.typeCtx.restTupleFromErasure = prevRestTuple;
+      if (ownGeneric) L.erasedGenericMethods.delete(node);
     }
   }
 
@@ -7663,13 +7749,25 @@ const inliningPredicates = new Set<ts.Symbol>();
     // A lambda IS a value: the exact-arity rule applies at birth. The
     // contextual (target) type decides — `(x?: number) => void` may flow
     // into a slot annotated `(x: number | undefined) => void` (same ABI
-    // signature), anything else is fenced. Nested function declarations and
-    // object-literal shorthand methods aren't expressions — always fenced.
+    // signature), anything else is fenced. Nested function declarations
+    // aren't expressions and have no target — always fenced.
+    //
+    // An OBJECT-LITERAL METHOD is not an expression either, and used to be
+    // fenced with them — but it is not in the same position. It HAS a
+    // target: the record slot the annotated literal fills, which is
+    // exactly the "(x: T | undefined) => R" spelling the rule already
+    // admits from an arrow in the same property. `{ run(sql, params?) }`
+    // and `{ run: (sql, params?) => ... }` are one type two ways, and only
+    // the arrow compiled. objLitMemberTargetType resolves the slot the way
+    // getContextualType would if a MethodDeclaration were an Expression;
+    // when the literal is unannotated it answers null and the fence stands
+    // as before.
     L.requireExactArityValue(
       node,
       ts.isArrowFunction(node) || ts.isFunctionExpression(node) ? node : null,
       shapes,
       funcType,
+      objLitMemberTargetType(L, node),
     );
     const nameIdent =
       !ts.isArrowFunction(node) && node.name && ts.isIdentifier(node.name) ? node.name : null;
@@ -11115,6 +11213,35 @@ export function lowerFunction(L: Lowerer, decl: ts.FunctionDeclaration): IrFunct
     return null;
   }
 
+/** The defining object literal reached through the RECEIVER rather than
+   * through the member's own symbol: `const c: I = { m<T>(x) {...} }`
+   * declares `m` on the literal, while the checker's property symbol for
+   * `c.m` is `I`'s signature-only MethodSignature. Resolves an identifier
+   * receiver to a variable declaration whose initializer is an object
+   * literal, and asks objLitGenericFnNodeOf about THAT member. Null for
+   * anything else — requireObjLitGenericReceiver still has the last word
+   * on whether the receiver provably IS the literal. */
+  function objLitGenericFnViaReceiver(L: Lowerer, recvExpr: ts.Expression, name: string,): { fnNode: ts.MethodDeclaration | ts.FunctionExpression | ts.ArrowFunction; literal: ts.ObjectLiteralExpression } | null {
+    let recv: ts.Expression = recvExpr;
+    while (ts.isParenthesizedExpression(recv)) recv = recv.expression;
+    if (!ts.isIdentifier(recv)) return null;
+    const sym = L.resolveValueSymbol(recv);
+    const decl = sym ? L.checker.valueDeclarationOf(sym) : undefined;
+    if (!decl || !ts.isVariableDeclaration(decl) || decl.initializer === undefined) return null;
+    let init: ts.Expression = decl.initializer;
+    while (ts.isParenthesizedExpression(init)) init = init.expression;
+    if (!ts.isObjectLiteralExpression(init)) return null;
+    for (const prop of init.properties) {
+      if (ts.isSpreadAssignment(prop)) continue;
+      const propName = prop.name;
+      if (propName === undefined || !ts.isIdentifier(propName) || propName.text !== name) continue;
+      const memberSym = L.checker.getSymbolAtLocation(propName);
+      if (memberSym === undefined) return null;
+      return objLitGenericFnNodeOf(L, memberSym);
+    }
+    return null;
+  }
+
 /** The interned GenericFnInfo for one object-literal generic method, with
    * the supportability fences applied ONCE per declaration: the defining
    * literal must sit at module scope (the compiled instance is a plain
@@ -11836,7 +11963,18 @@ export function lowerFunction(L: Lowerer, decl: ts.FunctionDeclaration): IrFunct
         }
       }
     }
-    const found = objLitGenericFnNodeOf(L, propSym);
+    // The property symbol the CHECKER answers is the one the receiver's
+    // TYPE declares, and for an annotated binding that is the interface's
+    // MethodSignature — signature-only, no body, nothing to monomorphize.
+    // The defining literal is still right there: `const c: I = { m<T>(x)
+    // {...} }` is a never-reassigned const whose initializer declares the
+    // body. Resolve through the RECEIVER when the type's own symbol has
+    // none; requireObjLitGenericReceiver below then re-proves the receiver
+    // IS that literal, so the annotation buys no laxity — it is the same
+    // discipline the unannotated spelling already passes, and the two
+    // spellings disagreeing was the whole defect (`{ m<T>(x) {...} }`
+    // compiled and `const c: I = { m<T>(x) {...} }` did not).
+    const found = objLitGenericFnNodeOf(L, propSym) ?? objLitGenericFnViaReceiver(L, access.expression, name);
     if (!found) {
       // Function.prototype.apply/call/bind spelled through a FUNCTION
       // receiver: compiled functions are direct calls with no runtime
@@ -12249,6 +12387,39 @@ export function lowerFunction(L: Lowerer, decl: ts.FunctionDeclaration): IrFunct
             d.kind === ts.SyntaxKind.MethodSignature,
         );
       if (onInterface) {
+        // WHY the member has no slot decides which advice is followable.
+        // A record member whose type parameters all carry CONSTRAINTS maps
+        // to one closure at the constraint instantiation, and any of the
+        // four producers fills it — the receiver's class never enters it.
+        // An UNCONSTRAINED parameter has no widest honest binding, so the
+        // member leaves the shape entirely and the only remaining home is
+        // static monomorphization, which is what needs a provable
+        // receiver. Naming the constraint is the actionable half:
+        // `runInTransaction<T>` on zapo's WaSqliteConnection is reached
+        // through a record built by a factory, so "bind it to a `new`"
+        // cannot be followed and reads as a dead end.
+        const unconstrained = (() => {
+          const sig = L.checker.getCallSignatures(L.checker.getTypeOfSymbol(propSym))[0];
+          const decl = sig !== undefined ? L.checker.signatureDeclaration(sig) : undefined;
+          const tps = decl !== undefined && ts.isFunctionLike(decl) ? decl.typeParameters : undefined;
+          return tps === undefined
+            ? []
+            : tps.filter((tp) => tp.constraint === undefined && tp.defaultType === undefined)
+                .map((tp) => tp.name.text);
+        })();
+        if (unconstrained.length > 0) {
+          L.unsupported(
+            "SC1090",
+            call,
+            `calls of the generic method '${name}' through this receiver ` +
+              `(its type parameter${unconstrained.length > 1 ? "s" : ""} ` +
+              `${unconstrained.map((t) => `'${t}'`).join(", ")} ` +
+              `${unconstrained.length > 1 ? "carry" : "carries"} no constraint, so the member has no single closure ` +
+              `slot to hold — a CONSTRAINED type parameter maps at its constraint and any producer fills the slot; ` +
+              `without one the only home is static monomorphization, which needs the receiver's own declaration: ` +
+              `a const bound to the defining object literal, or to a 'new' expression)`,
+          );
+        }
         L.unsupported(
           "SC1090",
           call,

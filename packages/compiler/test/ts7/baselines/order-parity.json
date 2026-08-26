@@ -9550,6 +9550,36 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/7120-record-member-optional-parameter.ts": {
+   "order": [
+    "<repo>/tests/corpus/7120-record-member-optional-parameter.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/7121-record-member-generic-method.ts": {
+   "order": [
+    "<repo>/tests/corpus/7121-record-member-generic-method.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/7122-annotated-literal-generic-method.ts": {
+   "order": [
+    "<repo>/tests/corpus/7122-annotated-literal-generic-method.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/7123-record-member-defaulted-parameter.ts": {
+   "order": [
+    "<repo>/tests/corpus/7123-record-member-defaulted-parameter.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/7124-return-typed-literal-optional-method.ts": {
+   "order": [
+    "<repo>/tests/corpus/7124-return-typed-literal-optional-method.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/713-inheritance-rc-stress.ts": {
    "order": [
     "<repo>/tests/corpus/713-inheritance-rc-stress.ts"
