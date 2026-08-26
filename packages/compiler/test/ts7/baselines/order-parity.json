@@ -9711,6 +9711,18 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/7313-a-dataview-spread-source-is-not-iterable.ts": {
+   "order": [
+    "<repo>/tests/corpus/7313-a-dataview-spread-source-is-not-iterable.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/7314-a-dataview-destructured-is-not-iterable.ts": {
+   "order": [
+    "<repo>/tests/corpus/7314-a-dataview-destructured-is-not-iterable.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/750-cycle-closure-box.ts": {
    "order": [
     "<repo>/tests/corpus/750-cycle-closure-box.ts"
