@@ -97,5 +97,7 @@ return `WRONG`, it reports `3/4` and exits 1.
     runs/node-*.txt        the oracle transcripts
     runs/{pre,post}-*.json the scored cells
 
-`pre-*` is the compiler at main `52e9dd38`; `post-*` is this branch. Both
-backends were scored and they agree on all 1,160 cells.
+`pre-*` is the compiler at `52e9dd38`, the revision the defect was found on;
+`post-*` is this branch, rebased onto main `6a8fb0a8` and re-measured there.
+The rebase moved no cell: the AFTER tallies are identical before and after it,
+on both backends, and both backends agree on all 1,160 cells.

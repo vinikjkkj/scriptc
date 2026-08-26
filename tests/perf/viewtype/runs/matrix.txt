@@ -1,6 +1,9 @@
 # The instanceof matrix, scored against node v25.9.0
+#
+# BEFORE: the compiler at 52e9dd38, the revision the defect was found on.
+# AFTER:  this branch, rebased onto main 6a8fb0a8 and re-measured there.
 
-## BEFORE — the compiler at main 52e9dd38
+## BEFORE
 
 ### shape D   {"MATCH":62,"WRONG":1,"TRAP":193,"DID-NOT-RUN":0,"NO-ORACLE":0}   (runs/pre-D-llvm.json)
 cell key:  T=true  f=false  .=refused (TRAP)  !=WRONG  ?=did-not-run
@@ -87,7 +90,7 @@ dv      !t/f    f    .    .    .    f    f    f    f    .    .    .    f    .   
 buf        T    f    .    .    .    f    f    f    f    .    .    .    f    .    .    .
 sub        T    f    .    .    .    f    f    f    f    .    .    .    f    .    .    .
 
-## AFTER — this branch
+## AFTER
 
 ### shape D   {"MATCH":63,"WRONG":0,"TRAP":193,"DID-NOT-RUN":0,"NO-ORACLE":0}   (runs/post-D-llvm.json)
 cell key:  T=true  f=false  .=refused (TRAP)  !=WRONG  ?=did-not-run
