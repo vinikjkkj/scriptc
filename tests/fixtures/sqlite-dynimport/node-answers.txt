@@ -3,6 +3,9 @@ ns.keys SqliteError,default,module.exports
 ns.json {}
 ns.hasDefault true
 ns.hasInherited false
+ns.typeof.default function
+ns.typeof.SqliteError function
+ns.typeof.absent undefined
 open true
 readonly false
 memory false

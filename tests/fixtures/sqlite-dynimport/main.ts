@@ -16,6 +16,15 @@
  * that would be silently wrong if the namespace were lowered to the
  * constructor, or to nothing.
  *
+ * The namespace cells come in two groups and the second is the one that
+ * bites. `Object.keys` / `in` / `JSON.stringify` / `typeof ns` are all
+ * answered correctly by a namespace whose properties are UNDEFINED. What
+ * that stand-in gets wrong is `typeof ns.default`, which reads
+ * "undefined" where Node reads "function" — and that is the exact probe
+ * every optional-driver loader in the wild performs, so the wrong arm is
+ * taken and the program reports "no driver" at exit 0. Both groups are
+ * printed below.
+ *
  * The database path arrives in argv so the file-backed half runs against
  * a real file. Nothing PATH-dependent is printed.
  */
@@ -38,6 +47,21 @@ async function main(): Promise<void> {
   show("ns.json", JSON.stringify(ns));
   show("ns.hasDefault", String("default" in ns));
   show("ns.hasInherited", String("toString" in ns));
+
+  // The exports read as VALUES, through a WIDENING. Off the typed
+  // namespace each of these is refused by name (SC2020); a real program
+  // reaches them anyway, because the idiomatic optional-driver loader
+  // stores the namespace first (`let loaded: unknown = await
+  // import(...)` — zapo store-sqlite/src/connection.ts:301) and probes
+  // it with `typeof`. Every cell above passes with undefined-valued
+  // properties, and these three do not: they are the ones that decide
+  // whether the probe takes the right arm. `ns.json {}` above is what
+  // proves the recording's own values are functions and not data — a
+  // JSON-visible value would print here.
+  const wide: unknown = ns;
+  show("ns.typeof.default", typeof (wide as { default?: unknown }).default);
+  show("ns.typeof.SqliteError", typeof (wide as { SqliteError?: unknown }).SqliteError);
+  show("ns.typeof.absent", typeof (wide as Record<string, unknown>)["nosuchexport"]);
 
   const db = new ns.default(path);
   show("open", String(db.open));
