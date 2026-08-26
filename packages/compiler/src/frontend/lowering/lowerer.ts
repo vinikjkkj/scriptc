@@ -1690,6 +1690,16 @@ export class Lowerer {
    * deferred diagnostics (collection itself resolves symbols — extends
    * clauses — and collection order must not decide what reports). */
   collecting = false;
+  /** True only while collectProgram's CLASS-DECLARATION loop runs -- the
+   * window in which the whole program's class hierarchy is being built.
+   * `subclasses` is complete for every class collected in it, so the
+   * whole-program queries that read it (overrideBelow, genericOverrideBelow)
+   * are answerable. A class EXPRESSION, or a class declared inside a
+   * function body, is collected later -- when its containing statement
+   * lowers -- and by then a call that needed the answer may already have
+   * compiled against an incomplete one, which is why an override of an
+   * inherited GENERIC method refuses outside this window (lower-classes). */
+  collectingClassDecls = false;
   /** Non-null redirects pushDiag into a capture buffer (the deferred
    * collection wrapper). */
   diagSink: ScrDiagnostic[] | null = null;

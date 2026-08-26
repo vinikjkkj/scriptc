@@ -157,6 +157,18 @@ describe(`npm-static pilots${sanitize ? " (sanitized)" : ""}`, () => {
     // modules cross-require through the thunk, so the differential also
     // pins that each body runs exactly once, in first-call order.
     ["modtable", "modtable-cli.ts"],
+    // poolish is mysql2's connection hierarchy reduced to its dispatch
+    // shape: an untyped `end(callback)` on the base, no `end` on the
+    // middle class, and an OVERRIDE two links down — the one construct
+    // between mysql2 and a native binary. Untyped methods monomorphize
+    // per call-site argument tuple and own no vtable slot, so the whole
+    // family dispatches statically; this program drives every receiver
+    // class, three argument tuples per body, the `super.end` forward, an
+    // ordinary vtable method overridden in the SAME hierarchy, and an
+    // untyped method nobody overrides. Calls whose receiver's runtime
+    // class the static type does not pin refuse by name instead
+    // (tests/diagnostics/generic-override-inexact-receiver).
+    ["poolish", "poolish-cli.ts"],
   ] as const)("%s compiles statically and byte-matches Node", async ([pkg, file]) => {
     const entry = join(pilotRoot, file);
     const binary = await buildStatic(entry, [pkg]);
@@ -166,6 +178,73 @@ describe(`npm-static pilots${sanitize ? " (sanitized)" : ""}`, () => {
     ]);
     expect(nativeRes.stdout.toString("utf8")).toBe(nodeRes.stdout.toString("utf8"));
     expect(nativeRes.exitCode).toBe(nodeRes.exitCode);
+  }, 120_000);
+
+  // poolish's NEGATIVE control, and the reason admitting the override is
+  // not a licence to guess. An untyped method owns no vtable slot, so a
+  // call resolves on the receiver's STATIC class; where a subclass
+  // redeclares the name and the static type does not pin the runtime
+  // class, there is nothing to sort the two bodies out at run time. The
+  // call must refuse BY NAME rather than quietly running the base body —
+  // Node prints the override's answer here, and a silent base call would
+  // print a different string at exit 0.
+  //
+  // The refusal is a DEFERRED fence (the npm-static contract: an
+  // unlowerable statement in an opted-in package becomes a runtime throw),
+  // so the program builds and then stops loudly at the named site.
+  test("a receiver whose runtime class may override an untyped method refuses by name", async () => {
+    const entry = join(pilotRoot, "poolish-inexact.ts");
+    const { coverage } = analyze(entry, { npmStatic: ["poolish"] });
+    expect(coverage.preflightFailed).toBe(false);
+    expect(coverage.npmStatic).toEqual([{ package: "poolish", status: "static" }]);
+    expect(coverage.diagnostics).toHaveLength(0); // builds — the fence is runtime
+    const fences = (coverage.runtimeFences ?? []).filter((f) =>
+      /generic method 'end' through a receiver whose runtime class may override it/.test(f.message),
+    );
+    expect(fences).toHaveLength(1);
+    // …and the binary really stops there: Node prints three lines, the
+    // compiled program prints none of them and exits non-zero.
+    const binary = await buildStatic(entry, ["poolish"]);
+    const [nodeRes, nativeRes] = await Promise.all([
+      runBinary("node", [entry]),
+      runBinary(binary, []),
+    ]);
+    expect(nodeRes.exitCode).toBe(0);
+    expect(nodeRes.stdout.toString("utf8")).toContain("Pooled.end[Base.end<p9>]");
+    expect(nativeRes.exitCode).not.toBe(0);
+    expect(nativeRes.stdout.toString("utf8")).not.toContain("Base.end");
+  }, 120_000);
+
+  // poolish's ORDER control, and the second reason admitting the override
+  // is not a licence to guess. `genericOverrideBelow` reads the subclass
+  // list, which is complete only for classes the whole-program collect pass
+  // walked: module top-level class DECLARATIONS. A class EXPRESSION -- or a
+  // class declared inside a function -- registers with its base when its
+  // containing statement lowers, by which time a call to the method may
+  // already have compiled against a base that had no override yet. That is
+  // a silent wrong answer, and it was one: this program built clean and
+  // printed the BASE's answer for the subclass instance at exit 0 before
+  // the guard. It refuses at the class expression now.
+  test("an override of an untyped method from a class expression refuses by name", async () => {
+    const entry = join(pilotRoot, "poolish-late.ts");
+    const { coverage } = analyze(entry, { npmStatic: ["poolish"] });
+    expect(coverage.preflightFailed).toBe(false);
+    expect(coverage.diagnostics).toHaveLength(0); // builds -- the fence is runtime
+    const fences = (coverage.runtimeFences ?? []).filter((f) =>
+      /overriding the inherited generic method 'end' from a class expression/.test(f.message),
+    );
+    expect(fences).toHaveLength(1);
+    const binary = await buildStatic(entry, ["poolish"]);
+    const [nodeRes, nativeRes] = await Promise.all([
+      runBinary("node", [entry]),
+      runBinary(binary, []),
+    ]);
+    expect(nodeRes.exitCode).toBe(0);
+    expect(nodeRes.stdout.toString("utf8")).toContain("Late.end<L>");
+    expect(nativeRes.exitCode).not.toBe(0);
+    // the wrong answer this guard exists to prevent, spelled out
+    expect(nativeRes.stdout.toString("utf8")).not.toContain("LateBase.end<L>");
+    expect(nativeRes.stdout.toString("utf8")).not.toContain("Late.end<L>");
   }, 120_000);
 
   // Tier 1, auto mode: the eligibility heuristics pick escape-string-regexp
