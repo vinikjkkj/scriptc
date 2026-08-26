@@ -118,6 +118,17 @@ test("JS inference gaps land where 'any' lands: SC2011 static, island dynamic", 
   );
 });
 
+test("dyn object-literal accessors: what lowers, and what refuses by name", async () => {
+  // A get/set accessor in a CHECKED-DYNAMIC object literal lowers (one
+  // dyn.defineProp per accessor key, carrying the literal's own enumerable
+  // and configurable descriptor). This fixture holds only the shapes that
+  // still REFUSE, and pins each message: the fold would otherwise put the
+  // key in a position, or under a definition rule, Node does not.
+  await expect(report(fixture("dyn-object-literal-accessors.js"))).toMatchFileSnapshot(
+    "__snapshots__/coverage-dyn-object-literal-accessors.txt",
+  );
+});
+
 test("npm package sites attribute per package", async () => {
   // Every site of a package-declared value groups into one SC2013 line
   // naming the package ("values from the 'mathkit' package ..."), inside
