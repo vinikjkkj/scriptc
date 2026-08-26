@@ -7176,7 +7176,7 @@ const inliningPredicates = new Set<ts.Symbol>();
     ) {
       L.unsupported("SC1071", node, "async generators (async function*)");
     }
-    if (node.typeParameters) {
+    if (node.typeParameters && !L.erasedGenericMethods.has(node)) {
       // Generic function-like forms monomorphize only where a static home
       // exists: top-level generic function declarations, generic methods
       // (class and object-literal), and module-scope never-reassigned
@@ -7184,6 +7184,14 @@ const inliningPredicates = new Set<ts.Symbol>();
       // all collected before this path. Everything else lambda-shaped
       // (arguments, IIFEs, default exports, nested declarations) has no
       // per-instantiation story and stays out.
+      //
+      // ...and one form that does not monomorphize at all: an
+      // object-literal generic METHOD whose record slot the shape KEPT at
+      // the member's constraint instantiation. There is nothing to
+      // monomorphize against — every call reads the field and invokes the
+      // one closure the slot holds — so the method lowers ONCE at the
+      // erasure, exactly like the arrow spelling of the same member
+      // (lowerLambda installs the bindings and registers the node here).
       L.unsupported(
         "SC1090",
         node,
@@ -7613,9 +7621,30 @@ const inliningPredicates = new Set<ts.Symbol>();
       }
       return null;
     };
-    if (!ts.isArrowFunction(node) && !ts.isFunctionExpression(node)) return null;
-    if (node.typeParameters !== undefined) return null;
-    const ctxType = L.checker.getContextualType(node);
+    // THE FOURTH PRODUCER: an object-literal METHOD that declares the
+    // slot's type parameters itself (`{ get<T extends Record<string,
+    // unknown>>(sql, params?) {...} }` — zapo's WaSqliteConnection). It is
+    // the same shape as the arrow above with the type parameters WRITTEN
+    // OUT, and it took the identical slot; only the arrow half existed, so
+    // the two spellings of one member disagreed. A MethodDeclaration is not
+    // an Expression, so the erasure reads the slot the way
+    // objLitMemberTargetType does, and the bindings come from the METHOD's
+    // OWN type-parameter declarations — tsc has already checked the method
+    // against the slot, so the two parameter lists correspond one for one,
+    // and reading the method's own constraints keeps the recipe identical
+    // to mapTypeInner's (`constraintErasedCtx` reads the DECLARATION's
+    // constraints too).
+    const objLitMethod =
+      ts.isMethodDeclaration(node) &&
+      node.parent !== undefined &&
+      ts.isObjectLiteralExpression(node.parent) &&
+      node.typeParameters !== undefined &&
+      node.typeParameters.length > 0;
+    if (!objLitMethod && !ts.isArrowFunction(node) && !ts.isFunctionExpression(node)) return null;
+    if (!objLitMethod && (node as ts.SignatureDeclaration).typeParameters !== undefined) return null;
+    const ctxType = objLitMethod
+      ? (objLitMemberTargetType(L, node) ?? undefined)
+      : L.checker.getContextualType(node);
     if (ctxType === undefined) return null;
     const sigs = L.checker.getCallSignatures(L.checker.getNonNullableType(ctxType));
     if (sigs.length !== 1) return null;
@@ -7625,6 +7654,16 @@ const inliningPredicates = new Set<ts.Symbol>();
     const sigDecl = L.checker.signatureDeclaration(sig);
     const tpDecls = sigDecl !== undefined && ts.isFunctionLike(sigDecl) ? sigDecl.typeParameters : undefined;
     if (tpDecls === undefined || tpDecls.length !== tps.length) return why("no type-parameter declarations");
+    // The method's own type parameters are the ones its BODY reads; the
+    // slot's are what the constraint erasure was computed from. Bind both
+    // sets to the same constraint types, so the body and the slot are
+    // erased by one recipe. The counts must agree — a method that declares
+    // a different arity than the slot it fills has no correspondence to
+    // bind, and keeps the fence.
+    const ownDecls = objLitMethod ? (node as ts.MethodDeclaration).typeParameters : undefined;
+    if (objLitMethod && (ownDecls === undefined || ownDecls.length !== tps.length)) {
+      return why("object-literal method's type-parameter arity differs from the slot's");
+    }
     const ir = new Map<ts.Symbol, IrType>();
     const tsMap = new Map<ts.Symbol, ts.Type>();
     for (const [i, tp] of tps.entries()) {
@@ -7643,6 +7682,15 @@ const inliningPredicates = new Set<ts.Symbol>();
       }
       ir.set(sym, mapped);
       tsMap.set(sym, srcT);
+      // The method's OWN parameter at this position, bound to the SAME
+      // constraint — the body names that symbol, not the slot's.
+      if (ownDecls !== undefined) {
+        const ownName = ownDecls[i]?.name;
+        const ownSym = ownName !== undefined ? L.checker.getSymbolAtLocation(ownName) : undefined;
+        if (ownSym === undefined) return why("object-literal method's type parameter has no symbol");
+        ir.set(ownSym, mapped);
+        tsMap.set(ownSym, srcT);
+      }
     }
     if (process.env["SCRIPTC_ERASELAMBDA_WHY"] !== undefined) {
       const sf = node.getSourceFile();
@@ -7678,6 +7726,12 @@ const inliningPredicates = new Set<ts.Symbol>();
     // and a rest tuple comes from the erasure.
     L.typeCtx.indexUnionOk = true;
     L.typeCtx.restTupleFromErasure = true;
+    // An object-literal generic METHOD is erased with its OWN type
+    // parameters bound; lambdaSignature's generic fence stands down for
+    // this node alone (see Lowerer.erasedGenericMethods).
+    const ownGeneric =
+      ts.isMethodDeclaration(node) && node.typeParameters !== undefined && node.typeParameters.length > 0;
+    if (ownGeneric) L.erasedGenericMethods.add(node);
     try {
       return lowerLambdaInner(L, node);
     } finally {
@@ -7685,6 +7739,7 @@ const inliningPredicates = new Set<ts.Symbol>();
       L.typeParamTsBindings = prevTs;
       L.typeCtx.indexUnionOk = prevIndexUnion;
       L.typeCtx.restTupleFromErasure = prevRestTuple;
+      if (ownGeneric) L.erasedGenericMethods.delete(node);
     }
   }
 
