@@ -7,6 +7,7 @@ import type { Lowerer } from "./lowerer.js";
 import { lowerForAwaitAsyncGenerator, lowerForOfGenerator, lowerYieldStarStatement } from "./lower-generators.js";
 import { BIGINT, type IrLibFn, BOOL, isRefCounted, BYTES_U8, CAUGHT, DYN, F64, IrExpr, IrGlobal, IrJsOp, IrLocal, type IrRecordShape, IrStmt, IrType, JSVAL, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, isUnitType, shapeHasAccessorSlots, typeEquals } from "../../ir/nodes.js";
 import { PoisonError, boundIdentifiersOf, dynFallbackType, dynUndefinedExpr, importCallHandleType, neverTaintedJsType, nodeThrowExpr, stmtUsesIsland, uncheckedOverloadHandleCall } from "./lowerer.js";
+import { wholeExportRootRebindable } from "./lower-modules.js";
 import { enforceLibBoundary } from "./lib-boundary.js";
 import { recordKeyReadRow } from "./keyread-census.js";
 import { cjsExportAssignmentOf, cjsExportDiscardReason, cjsExportTargetLiteral, commaWholeExportRecordOf, isCjsJsFile, isCjsWholeExportAssign, isJsSourceFile, locOf, requireSpecOf, topLevelJsStatementOf } from "../program.js";
@@ -6120,11 +6121,28 @@ function isEsModuleStamp(expr: ts.Expression): boolean {
       const sym = L.resolveValueSymbol(nameNode);
       const g = sym ? L.globalsBySymbol.get(sym) : undefined;
       if (g?.mutable) {
-        L.unsupported(
-          "SC1090",
-          nameNode,
-          `exporting the mutable 'let' binding '${nameNode.text}' by reference (Node copies its VALUE at this statement — declare it const, or export a function that reads it)`,
-        );
+        // ...unless nothing can REBIND it after this statement. The
+        // divergence is a later write the copy would not see; a binding
+        // whose every write provably runs before the export statement has
+        // already taken its final value there, so the copy and the
+        // by-reference alias read the same thing forever. That is exactly
+        // the soundness condition the WHOLE-export root already answers
+        // (wholeExportRootRebindable, the `module.exports = j` arm), and
+        // exactly the same question -- the table entry simply never asked
+        // it. Writes inside any function body stay rebindable whatever
+        // their position, and a top-level write at or below the export is
+        // a real live-binding difference; both keep the fence.
+        //
+        // pg/lib/defaults.js opens with `let user` assigned inside a
+        // top-level try and exported as a shorthand entry, so the fence
+        // took the whole `pg` package at run time.
+        if (wholeExportRootRebindable(L, nameNode, cjs.expr, sym ?? undefined)) {
+          L.unsupported(
+            "SC1090",
+            nameNode,
+            `exporting the mutable 'let' binding '${nameNode.text}' by reference (Node copies its VALUE at this statement — declare it const, or export a function that reads it)`,
+          );
+        }
       }
     };
     for (const prop of table.properties) {
