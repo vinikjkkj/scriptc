@@ -7861,7 +7861,13 @@ function dynAccessorPlan(
     }
     plain.set(k, prop);
   }
-  for (const [key, prop] of creator) {
+  // A DEFENSIVE boundary, not a reachable diagnostic: TypeScript's own
+  // checker rejects "an object literal cannot have property and accessor
+  // with the same name" first, in every spelling including a computed
+  // string-literal key, and scriptc only lowers programs that typecheck.
+  // It stays because the fold below would be WRONG without it -- the run
+  // after an accessor folds through dyn.assign, which is [[Set]].
+  for (const key of creator.keys()) {
     const clash = plain.get(key);
     if (clash !== undefined) {
       L.unsupported(
@@ -7870,7 +7876,6 @@ function dynAccessorPlan(
         `the key '${key}' spelled both as a get/set accessor and as a data member of the same dyn object literal (JS redefines the property in place; this fold would define the two by different rules and list the key in the wrong position)`,
       );
     }
-    void prop;
   }
   const plan = new Map<ts.ObjectLiteralElementLike, DynAccGroup>();
   for (const [key, node] of creator) plan.set(node, groups.get(key)!);
