@@ -96,6 +96,33 @@ export interface ClassInfo {
    * arm" got it wrong. Inherited entries are carried down like
    * deferredInitFields'. */
   collectedFields?: Set<string>;
+  /** The subset of `collectedFields` whose undefined arm means ABSENT and
+   * nothing else — the slots every ENUMERATION surface has to skip while
+   * the arm is live, because in Node the property does not exist until its
+   * write runs (`util.inspect` prints `C { a: 1 }`, not
+   * `C { a: 1, b: undefined }`).
+   *
+   * Membership is decided by the program's ASSIGNMENTS, not by the
+   * property's type — see undefArmIsAbsenceOnly and
+   * undefWrittenPropNames. The checker's own type cannot decide it: tsc
+   * arms a conditionally-assigned JS property itself (`if (f) this.b = 2`
+   * types `b` as `number | undefined`), so an undefined arm there says
+   * "the write may not have run", which is the very thing the slot
+   * represents rather than evidence against it.
+   *
+   * The two kinds deliberately left out both keep printing the arm,
+   * because a wrong answer in the other direction is no better than the
+   * one this fixes:
+   *
+   *   - a CHECKED-DYNAMIC slot (the implicit-`any` field —
+   *     `this._connectionCallback = callback`), where `undefined` is a dyn
+   *     KIND that an explicit `obj.connect(undefined)` writes just as the
+   *     initializer does, and nothing distinguishes them;
+   *   - a name some assignment ANYWHERE in the program can store
+   *     undefined into, including from outside the class.
+   *
+   * Inherited entries seed from the base like `collectedFields`. */
+  absentTrackedFields?: Set<string>;
   /** null for the builtin error classes (runtime-provided; no source).
    * Class EXPRESSIONS carry their ts.ClassExpression here — members,
    * accessors, and locs read identically off either form. */
@@ -1000,6 +1027,147 @@ export interface GenericClassInfo {
     byKey.set(typeKey(UNDEFINED_T), UNDEFINED_T);
     const sorted = [...byKey.values()].sort((a, b) => (typeKey(a) < typeKey(b) ? -1 : 1));
     return { kind: "union", unionId: L.unions.intern(sorted) };
+  }
+
+/** Builtins whose whole value IS a method table the checked-dynamic tree
+   * does not carry. A dyn box holds JSON-shaped data plus functions,
+   * promises and handles; it has no `set`, no `add`, no `getTime`, no
+   * `test`. Boxing one of these answers `m.set is not a function` where
+   * Node answers a value — measured, on `this.m = new Map()` at a
+   * constructor's top level. */
+  const DYN_LOSES_METHODS: ReadonlySet<string> = new Set([
+    "Map", "ReadonlyMap", "Set", "ReadonlySet", "WeakMap", "WeakSet", "WeakRef",
+    "Date", "RegExp",
+  ]);
+
+/** Would a checked-dynamic box LOSE this inference's method table?
+   * The narrow, name-and-provenance-checked complement of the fallback:
+   * only a reference to one of the stdlib's method-table builtins counts,
+   * so plain object shapes — including ones whose members are functions,
+   * which a dyn box does carry — keep the fallback they have always had.
+   *
+   * Deliberately NOT `dynBoxIsFaithful`, the method scan's whitelist.
+   * That predicate excludes anonymous shapes with call signatures, and
+   * routing the CONSTRUCTOR scan through it refused
+   * `mysql2/lib/base/connection.js:83` — an LRU record whose members are
+   * methods — which poisoned BaseConnection and took mysql2's whole
+   * `extends` chain down with it. A driver that reaches a native binary
+   * today must keep reaching one; the wrong answer being closed here is
+   * the method table, and only the method table.
+   *
+   * A union is checked ARM BY ARM: one Map arm is enough, and it is the
+   * same wrong answer whichever arm the value takes. */
+  function dynBoxLosesMethodTable(L: Lowerer, t: ts.Type): boolean {
+    const arms: readonly ts.Type[] = t.isUnionType() ? t.getTypes() : [t];
+    return arms.some((a) => {
+      const sym = a.getSymbol();
+      if (sym === undefined || !DYN_LOSES_METHODS.has(sym.name)) return false;
+      // A user's own `class Map` is not this: only the standard library's
+      // declaration of the name counts, exactly as the container
+      // diagnostics decide it.
+      return L.checker
+        .declarationsOf(sym)
+        .some((d) =>
+          (ts.isInterfaceDeclaration(d) || ts.isClassDeclaration(d)) &&
+          L.isStdlibFile(d.getSourceFile()),
+        );
+    });
+  }
+
+/** Does the undefined arm of a COLLECTED field's slot mean ABSENT and
+   * nothing else? Only then may an enumeration surface read the arm as
+   * "the property does not exist yet" — see ClassInfo.absentTrackedFields
+   * for why this is a proof and not a guess.
+   *
+   * Three clauses, and each one excludes a slot where a live `undefined`
+   * could be a VALUE the source stored:
+   *
+   *  - the armed slot must be a UNION. A dyn slot carries undefined as a
+   *    kind, and `this.cb = cb` with an undefined argument writes exactly
+   *    the kind the initializer wrote.
+   *  - the property's OWN inferred type must map. An unmapped inference
+   *    reached the dyn fallback, which is the clause above.
+   *  - and it must not already carry undefined. A JS class property's type
+   *    is inferred FROM its assignments, so an undefined arm in the
+   *    checker's own answer says the source assigns undefined somewhere;
+   *    the arm can no longer tell absence from that write. */
+  function undefArmIsAbsenceOnly(L: Lowerer, p: ts.Symbol, armed: IrType): boolean {
+    if (armed.kind !== "union") return false;
+    if (L.armTag(armed.unionId, UNDEFINED_T) < 0) return false;
+    const pre = L.mapTypeOf(L.checker.getTypeOfSymbol(p));
+    if (pre === null || pre.kind === "dyn" || pre.kind === "void") return false;
+    const written = undefWrittenPropNames(L);
+    return !written.has("*") && !written.has(p.name);
+  }
+
+/** Every property NAME the program can assign an undefined value to, over
+   * any receiver — the conservative disqualifier behind
+   * ClassInfo.absentTrackedFields.
+   *
+   * The checker's own property type cannot answer this. For a JS field
+   * assigned in a conditional position tsc ARMS the inference itself
+   * (`if (f) this.b = 2` types `b` as `number | undefined`), so an
+   * undefined arm there says "the write may not have run", which is the
+   * very thing being represented, not "a write stores undefined". The
+   * assignments are what distinguish the two, and the disqualifying one
+   * need not be inside the class: `c.b = undefined` from outside is a
+   * write tsc allows through the armed slot, and it MATCHES Node today
+   * (`C { a: 1, b: undefined }`). Skipping the entry for that instance
+   * would trade one wrong answer for another.
+   *
+   * By NAME, over the whole program, and counting `any`/`unknown` as
+   * possibly-undefined: a name-keyed over-approximation costs some class
+   * an entry it could have skipped, which is exactly today's behaviour,
+   * while a receiver-precise one that misses a write is a wrong answer.
+   * Walked once per lowering pass and cached. */
+  const undefWrittenCache = new WeakMap<Lowerer, ReadonlySet<string>>();
+  function undefWrittenPropNames(L: Lowerer): ReadonlySet<string> {
+    const hit = undefWrittenCache.get(L);
+    if (hit) return hit;
+    const names = new Set<string>();
+    const rhsMayBeUndefined = (rhs: ts.Expression): boolean => {
+      const mapped = L.mapTypeOf(L.checker.getBaseTypeOfLiteralType(L.checker.getTypeAtLocation(rhs)));
+      if (mapped === null) return true;
+      if (mapped.kind === "dyn" || mapped.kind === "undefinedT" || mapped.kind === "void") return true;
+      return mapped.kind === "union" && L.armTag(mapped.unionId, UNDEFINED_T) >= 0;
+    };
+    const visit = (n: ts.Node): void => {
+      if (ts.isBinaryExpression(n) && ts.isPropertyAccessExpression(n.left) && ts.isIdentifier(n.left.name)) {
+        const op = n.operatorToken.kind;
+        // Every ASSIGNMENT spelling, not just `=`: `c.b ??= u` and
+        // `c.b ||= u` store their right operand too.
+        const isAssign =
+          op === ts.SyntaxKind.EqualsToken ||
+          op === ts.SyntaxKind.QuestionQuestionEqualsToken ||
+          op === ts.SyntaxKind.BarBarEqualsToken ||
+          op === ts.SyntaxKind.AmpersandAmpersandEqualsToken;
+        if (isAssign && rhsMayBeUndefined(n.right)) names.add(n.left.name.text);
+      }
+      // A COMPUTED key names no member statically, so any such write is a
+      // write to every name (`c[k] = undefined`).
+      if (
+        ts.isBinaryExpression(n) && ts.isElementAccessExpression(n.left) &&
+        n.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
+        !ts.isStringLiteralLike(n.left.argumentExpression) && rhsMayBeUndefined(n.right)
+      ) {
+        names.add("*");
+      }
+      if (
+        ts.isBinaryExpression(n) && ts.isElementAccessExpression(n.left) &&
+        n.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
+        ts.isStringLiteralLike(n.left.argumentExpression) && rhsMayBeUndefined(n.right)
+      ) {
+        names.add(n.left.argumentExpression.text);
+      }
+      ts.forEachChild(n, visit);
+    };
+    for (const sf of L.moduleOrder) visit(sf);
+    // `delete c.b` makes the property genuinely absent again, which the
+    // arm cannot represent either way; it already refuses over a class
+    // receiver, so nothing is recorded for it.
+    const result: ReadonlySet<string> = names.has("*") ? new Set(["*"]) : names;
+    undefWrittenCache.set(L, result);
+    return result;
   }
 
 /** The emitter ClassInfo a VALUE symbol refers to (`new EventEmitter`,
@@ -2640,6 +2808,7 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
       // would read zeroed memory, so it fences instead.
       const deferredInitFields = new Set<string>(base?.deferredInitFields ?? []);
       const collectedFields = new Set<string>(base?.collectedFields ?? []);
+      const absentTrackedFields = new Set<string>(base?.absentTrackedFields ?? []);
       if (unguardedFields.length > 0) {
         const topAssigned = new Set<string>();
         for (const stmt of ctor?.body?.statements ?? []) {
@@ -2785,7 +2954,28 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
               // box, reads validate per use, writes convert in (dynFrom).
               // TS-annotated `unknown` fields keep their fence (KEEP NARROW
               // applies where an annotation could say better).
-              let type = t ? (L.mapTypeOf(t) ?? dynFallbackType(L, assign, t)) : null;
+              // ...but ONLY where a dyn box represents the inference
+              // (dynBoxIsFaithful). The method scan below has admitted
+              // exactly this set since it started collecting, and this
+              // scan admitted EVERYTHING — so `this.m = new Map()` at the
+              // constructor's top level took a dyn slot, which has no
+              // method table, and answered `m.size` as `undefined` and
+              // `m.set(...)` as "this.m.set is not a function" at run
+              // time. Node says `0` and `1`.
+              //
+              // That was not just a wrong answer, it was the wrong answer
+              // this fence's own REMEDY produced: `SC1090 fields assigned
+              // outside the constructor's top level` refuses the same
+              // `this.m = new Map()` in a method and tells the reader to
+              // "assign it unconditionally at the top of the
+              // constructor" — into the slot that silently misbehaves.
+              // The two scans now agree in both directions, and the
+              // refusal that lands here names the real blocker (Map keys
+              // are limited to numbers and strings), which a JSDoc `@type`
+              // on the field can answer.
+              let type = t
+                ? (L.mapTypeOf(t) ?? (dynBoxLosesMethodTable(L, t) ? null : dynFallbackType(L, assign, t)))
+                : null;
               if (!type || type.kind === "void") L.badType(assign, t ?? L.typeOf(assign));
               // A JSDoc claim the BODY contradicts (`@type {Command}`
               // assigned `undefined` — the lazy-init idiom): the
@@ -2918,8 +3108,24 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
               fields.set(p.name, armed);
               fieldOrder.push({ name: p.name, type: armed, initializer: undefined });
               collectedFields.add(p.name);
+              if (undefArmIsAbsenceOnly(L, p, armed)) absentTrackedFields.add(p.name);
               continue;
             }
+          }
+          // The remedy this fence names — "assign it unconditionally at the
+          // top of the constructor" — has to be a remedy that WORKS. For a
+          // Map/Set/Date/RegExp field it is not one: the top-level scan
+          // refuses the same inference there (dynBoxLosesMethodTable), so
+          // the reader would move the line and meet a second refusal about
+          // something else. Name the real blocker instead, and the
+          // annotation that answers it.
+          const propT = L.checker.getTypeOfSymbol(p);
+          if (dynBoxLosesMethodTable(L, propT)) {
+            L.unsupported(
+              "SC1090",
+              site,
+              `fields holding a '${L.checker.typeToString(propT)}' the inference cannot compile (moving the assignment to the constructor's top level does NOT help — that slot would be checked-dynamic, which carries no method table for this builtin; annotate the element/key types with a JSDoc '@type' on the declaring assignment so the container itself compiles)`,
+            );
           }
           L.unsupported(
             "SC1090",
@@ -3088,6 +3294,7 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
         ...(classDecoratorNodes.length > 0 ? { classDecorators: { nodes: classDecoratorNodes } } : {}),
         ...(deferredInitFields.size > 0 ? { deferredInitFields } : {}),
         ...(collectedFields.size > 0 ? { collectedFields } : {}),
+        ...(absentTrackedFields.size > 0 ? { absentTrackedFields } : {}),
       };
       // GENERIC members get their declaring-class backlink now that the
       // info exists (instance lowering reads it for `this` typing and the
