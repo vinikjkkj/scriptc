@@ -215,6 +215,38 @@ describe(`npm-static pilots${sanitize ? " (sanitized)" : ""}`, () => {
     expect(nativeRes.stdout.toString("utf8")).not.toContain("Base.end");
   }, 120_000);
 
+  // poolish's ORDER control, and the second reason admitting the override
+  // is not a licence to guess. `genericOverrideBelow` reads the subclass
+  // list, which is complete only for classes the whole-program collect pass
+  // walked: module top-level class DECLARATIONS. A class EXPRESSION -- or a
+  // class declared inside a function -- registers with its base when its
+  // containing statement lowers, by which time a call to the method may
+  // already have compiled against a base that had no override yet. That is
+  // a silent wrong answer, and it was one: this program built clean and
+  // printed the BASE's answer for the subclass instance at exit 0 before
+  // the guard. It refuses at the class expression now.
+  test("an override of an untyped method from a class expression refuses by name", async () => {
+    const entry = join(pilotRoot, "poolish-late.ts");
+    const { coverage } = analyze(entry, { npmStatic: ["poolish"] });
+    expect(coverage.preflightFailed).toBe(false);
+    expect(coverage.diagnostics).toHaveLength(0); // builds -- the fence is runtime
+    const fences = (coverage.runtimeFences ?? []).filter((f) =>
+      /overriding the inherited generic method 'end' from a class expression/.test(f.message),
+    );
+    expect(fences).toHaveLength(1);
+    const binary = await buildStatic(entry, ["poolish"]);
+    const [nodeRes, nativeRes] = await Promise.all([
+      runBinary("node", [entry]),
+      runBinary(binary, []),
+    ]);
+    expect(nodeRes.exitCode).toBe(0);
+    expect(nodeRes.stdout.toString("utf8")).toContain("Late.end<L>");
+    expect(nativeRes.exitCode).not.toBe(0);
+    // the wrong answer this guard exists to prevent, spelled out
+    expect(nativeRes.stdout.toString("utf8")).not.toContain("LateBase.end<L>");
+    expect(nativeRes.stdout.toString("utf8")).not.toContain("Late.end<L>");
+  }, 120_000);
+
   // Tier 1, auto mode: the eligibility heuristics pick escape-string-regexp
   // (own .d.ts, unminified, no transform markers) without naming it.
   test("--npm-static=auto opts the eligible pilot in", () => {
