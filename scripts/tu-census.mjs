@@ -22,6 +22,21 @@
 //     .untagged    coded SCxxxx, no bracket                  (invisible to census.mjs)
 //     .uncoded     no SC code at all                         (invisible to BOTH,
 //                                                             and to SCRIPTC_TRAP_TRACE)
+//   STRAND       a REPRESENTABILITY guard: the lowering planted a throw where a
+//                value flowed into a slot, a union arm, a class or a function
+//                signature that cannot hold it (SC9004, ir/nodes.ts strandTrap).
+//                Compiler-planted, so NOT the program's own throw -- but not a
+//                refusal either: the construct COMPILED, and almost every one
+//                of these sits on the arm the type system says cannot happen.
+//                Its own row, deliberately NOT summed into REFUSALS: a zapo QR
+//                TU carries ~1,900 of them against 76 refusals, and folding
+//                them in would destroy the one number this project steers by.
+//
+//                They were `throw new TypeError(msg)` built from error.new +
+//                scr_throw_obj until SC9004, which in the TU is byte-for-byte
+//                a USER throw -- so this census counted every one of them
+//                under USERTHROW, "never counted as a compiler failure", and
+//                exited 0.  That was the hole; this row is the fix.
 //   ABORT        an uncatchable process abort (scr_trap / scr_trap_fmt,
 //                0xC0000409).  Past every catch clause.
 //     .real        `record has no key` — reachable on ordinary input
@@ -277,6 +292,10 @@ const UNCODED_REFUSAL = [
   { re: /cannot be called through it \(its parameters have no checked-dynamic form\)/,
     site: "emit-walkers.ts:2077 strandedDynFuncBoxHelper (pre-SC2009 spelling)" },
 ];
+/** ir/nodes.ts STRAND_TRAP_CODE.  Kept as a constant so the two spellings
+ * cannot drift: the compiler stamps it, this reads it. */
+const STRAND_CODE = "SC9004";
+
 const UNCODED_PARITY = [
   { re: /^a 'data' listener declaring a (Buffer chunk received a string|string chunk received a Buffer)/,
     site: "emit-async.ts:1105/1114" },
@@ -299,6 +318,12 @@ const classifyCoded = (msg, code, hostAt) => {
   const tag = TAGRE.exec(msg);
   if (tag) return { cat: "REFUSAL.tagged", site: `SC${tag[1]} at ${tag[2]}` };
   if (code === "SC9002" && SC9002_MSG.test(msg)) return { cat: "BOILERPLATE", site: "lower-calls.ts:1028 SC9002" };
+  // The representability strand traps carry ONE code and no bracket: the
+  // helper is interned per (target type, source type), so it has no single
+  // source location to anchor to -- the same reason the stranded dyn func
+  // thunk is bracketless.  Classified by CODE, never by message: the message
+  // interpolates two rendered types and there are hundreds of spellings.
+  if (code === STRAND_CODE) return { cat: "STRAND", site: "ir/nodes.ts strandTrap (lowerer.ts strand helpers)" };
   const p = PARITY_CODED.find((x) => x.re.test(msg));
   if (p) return { cat: "PARITY", site: p.site };
   const u = UNTAGGED_REFUSAL_SITES.find((x) => x.re.test(msg));
@@ -721,7 +746,7 @@ say(`untagged.mjs TRAP STATEMENTS ${nTrapCalls}   'record has no key' STATEMENTS
 say("");
 say("=== THE WHOLE POPULATION, BY CATEGORY ==========================");
 say("                          statements   ways-to-die   (a stub counts once per caller)");
-const order = ["REFUSAL.tagged", "REFUSAL.untagged", "REFUSAL.uncoded", "ABORT.real",
+const order = ["REFUSAL.tagged", "REFUSAL.untagged", "REFUSAL.uncoded", "STRAND", "ABORT.real",
                "ABORT.structural", "BOILERPLATE", "PARITY", "UNKNOWN"];
 for (const c of order) {
   const n = byCat.get(c) ?? 0;
@@ -734,7 +759,22 @@ const refusalStmts = (byCat.get("REFUSAL.tagged") ?? 0) + (byCat.get("REFUSAL.un
 const refusalWays = (waysByCat.get("REFUSAL.tagged") ?? 0) + (waysByCat.get("REFUSAL.untagged") ?? 0) + (waysByCat.get("REFUSAL.uncoded") ?? 0);
 say(`REFUSALS (all three kinds)   ${refusalStmts} statements / ${refusalWays} ways to die`);
 say(`ABORTS   (real, uncatchable) ${(byCat.get("ABORT.real") ?? 0)} statements / ${(waysByCat.get("ABORT.real") ?? 0)} call sites`);
+say(`STRAND   (representability)  ${(byCat.get("STRAND") ?? 0)} statements / ${(waysByCat.get("STRAND") ?? 0)} ways to die`);
 say("");
+// The strand population is far too large to list row by row on a real
+// program, and its site is always the same one constructor, so the useful
+// breakdown is by MESSAGE -- which names the two types that would not meet.
+const strandRows = rows.filter((r) => r.cat === "STRAND");
+if (strandRows.length > 0) {
+  say("=== STRAND, BY MESSAGE (top 10 of the representability guards) ==");
+  const byStrandMsg = new Map();
+  for (const r of strandRows) bump(byStrandMsg, r.msg.length > 96 ? r.msg.slice(0, 96) + "..." : r.msg);
+  say(`  ${byStrandMsg.size} distinct messages over ${strandRows.length} statements`);
+  for (const [m, n] of [...byStrandMsg].sort((a, b) => b[1] - a[1]).slice(0, 10)) {
+    say(`  ${String(n).padStart(6)}  ${m}`);
+  }
+  say("");
+}
 say("=== EVERY REFUSAL THE OLD TRAP CENSUS CANNOT SEE ===============");
 const invisible = rows.filter((r) => r.cat === "REFUSAL.untagged" || r.cat === "REFUSAL.uncoded");
 if (invisible.length === 0) say("  (none)");
@@ -769,7 +809,7 @@ say(`  Node-parity throws        scr_throw_error_named ${ctx.PARITY_named}   scr
 say(`  dyn boundary validator    scr_dyn_check_fail ${ctx.DYNCHECK}   (catchable; "expected X at $, got Y")`);
 say("");
 say("=== ACCOUNTING =================================================");
-say(`  coded throws ${nCodedCalls} = tagged ${byCat.get("REFUSAL.tagged") ?? 0} + untagged ${byCat.get("REFUSAL.untagged") ?? 0} + SC9002 ${byCat.get("BOILERPLATE") ?? 0} + parity ${rows.filter((r) => r.family === "coded" && r.cat === "PARITY").length} + unknown ${rows.filter((r) => r.family === "coded" && r.cat === "UNKNOWN").length}`);
+say(`  coded throws ${nCodedCalls} = tagged ${byCat.get("REFUSAL.tagged") ?? 0} + untagged ${byCat.get("REFUSAL.untagged") ?? 0} + strand ${byCat.get("STRAND") ?? 0} + SC9002 ${byCat.get("BOILERPLATE") ?? 0} + parity ${rows.filter((r) => r.family === "coded" && r.cat === "PARITY").length} + unknown ${rows.filter((r) => r.family === "coded" && r.cat === "UNKNOWN").length}`);
 say(`  uncoded throws ${nUncodedCalls} = refusal ${byCat.get("REFUSAL.uncoded") ?? 0} + parity ${rows.filter((r) => r.family === "uncoded" && r.cat === "PARITY").length} + unknown ${rows.filter((r) => r.family === "uncoded" && r.cat === "UNKNOWN").length}`);
 say(`  traps ${nTrapCalls} = real ${byCat.get("ABORT.real") ?? 0} + structural ${byCat.get("ABORT.structural") ?? 0} + unknown ${rows.filter((r) => r.family === "trap" && r.cat === "UNKNOWN").length}`);
 say(`  bracket occurrences ${oldTraps} == ${isLl ? `DISTINCT tagged messages ${taggedDistinct} (statements ${taggedRows})` : `tagged coded throws ${taggedRows}`}`);

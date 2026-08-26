@@ -56,6 +56,7 @@ type Cat =
   | "REFUSAL.tagged"
   | "REFUSAL.untagged"
   | "REFUSAL.uncoded"
+  | "STRAND"
   | "ABORT.real"
   | "ABORT.structural"
   | "BOILERPLATE"
@@ -65,6 +66,7 @@ const CATS: readonly Cat[] = [
   "REFUSAL.tagged",
   "REFUSAL.untagged",
   "REFUSAL.uncoded",
+  "STRAND",
   "ABORT.real",
   "ABORT.structural",
   "BOILERPLATE",
@@ -141,8 +143,8 @@ const PLANTS: readonly {
   {
     name: "a4-abort",
     ext: "ts",
-    want: { "ABORT.real": 1, "ABORT.structural": 1 },
-    what: "an index-signature keyed read whose miss cannot be represented, flowing into a bare `string` parameter (uncatchable), and an OOM guard",
+    want: { "ABORT.real": 1, "ABORT.structural": 1, STRAND: 2 },
+    what: "an index-signature keyed read whose miss cannot be represented, flowing into a bare `string` parameter (uncatchable), an OOM guard, and -- MEASURED, not designed -- the two representability strand traps the same `bag[key]` plants: the keyed read's own result and the `string` parameter it flows into",
     // TWO reads of the SAME result type, on purpose. Both emitters lift the
     // keyed read into ONE shared helper -- `sc_rkg_N` per result type on the C
     // lane, the single `sc_bad_key` on the LLVM one -- so this plant is one
@@ -193,6 +195,32 @@ const PLANTS: readonly {
       join(repoRoot, "tests/corpus/5510-a-census-population-on-untaken-paths.js"),
       "utf8",
     ),
+  },
+  {
+    // The category that did not exist until SC9004, because until SC9004 its
+    // members were `throw new TypeError(msg)` built from error.new -- in the
+    // TU byte-for-byte a USER throw, so the census filed all of them under
+    // "the program's own throw, never counted as a compiler failure" and
+    // exited 0.  One real zapo QR TU carries 1,886 of them against 76
+    // refusals.  A field written ONLY inside an arrow the constructor may not
+    // call is the smallest program that plants one: the field's type has no
+    // undefined arm, so the never-written read has to coerce `undefined`
+    // into it, and the strand helper is where that lands.
+    name: "a8-strand",
+    ext: "js",
+    want: { STRAND: 1 },
+    what: "a representability strand trap (SC9004, coded and BRACKETLESS: the helper is interned per type PAIR, so it has no one source location)",
+    src: [
+      "class C {",
+      "  constructor(f) {",
+      "    const g = () => { this.b = 2 };",
+      "    if (f) g();",
+      "  }",
+      "}",
+      "const c = new C(false);",
+      "console.log('b', c.b);",
+      "",
+    ].join("\n"),
   },
   {
     name: "a6-parity",
@@ -385,6 +413,11 @@ describe("the census reads the LLVM lane", () => {
         "REFUSAL.tagged": 1,
         "REFUSAL.untagged": 0,
         "REFUSAL.uncoded": 0,
+        // MEASURED: 5510 plants one strand trap too. Before SC9004 it was
+        // invisible -- filed under "the program's own throw" -- so the
+        // fixture's header could describe a population that was one short
+        // and every instrument agreed with it.
+        STRAND: 1,
         "ABORT.real": 0,
         "ABORT.structural": 1,
         BOILERPLATE: 1,
