@@ -841,6 +841,28 @@ ScrDyn *scr_sqlite_args_push(ScrDyn *args, ScrDyn *v) {
   return scr_dyn_retain(args);
 }
 
+/* A SPREAD argument -- `stmt.run(...params)`. Every element of the source
+ * becomes its OWN entry in this list, which is what the spread means: the
+ * Binder below then sees exactly the arguments `run(params[0], params[1],
+ * ...)` would have written.
+ *
+ * That is NOT the same call as `stmt.run(params)`, which the old refusal
+ * advised as an equivalent. Passing the array itself makes ONE argument
+ * whose elements the Binder spreads positionally -- so the two agree only
+ * while every element is a bindable scalar. A single OBJECT element binds
+ * NAMED parameters when spread and is an unbindable positional value when
+ * nested; a nested ARRAY element spreads one level when spread and is
+ * unbindable when nested. Flattening here is the only spelling that is
+ * the same call for every element kind.
+ *
+ * Borrows both, answers +1 like its plain twin. MAY THROW the spread-call
+ * TypeError for a non-iterable source (pending; `what` spells the
+ * expression for the nullish form). */
+ScrDyn *scr_sqlite_args_push_spread(ScrDyn *args, const ScrDyn *src, const ScrStr *what) {
+  scr_dyn_arr_push_spread(args, src, what == NULL ? "" : what->data);
+  return scr_dyn_retain(args);
+}
+
 /* Binder::BindArgs over that list. */
 static bool scr_sqlite_bind(sqlite3_stmt *h, const ScrDyn *args) {
   int param_count = sqlite3_bind_parameter_count(h);

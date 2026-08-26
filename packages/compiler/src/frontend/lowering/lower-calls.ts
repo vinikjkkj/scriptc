@@ -538,6 +538,110 @@ export interface GenericInstance {
     return { kind: "call", callee: name, args: [], type: resultT, loc };
   }
 
+/** The SOURCE of a spread that the checked-dynamic tier will walk at RUN
+ * time, normalized to something the walk can actually iterate.
+ *
+ * scr_dyn_arr_push_spread iterates exactly three dyn kinds without an
+ * engine: ARR, STR and BYTES. `canConvertToDyn` is a far wider door — a
+ * Set, a Map, a class instance, a promise and a func all box by
+ * REFERENCE and convert perfectly well, and then the walk reaches a box
+ * it cannot step and throws V8's spread-call TypeError at a call Node
+ * completes. Admitting those was a wrong answer, not a missing feature.
+ *
+ * So the statically-ITERABLE kinds drain into a fresh array here first,
+ * exactly as an array literal's spread drains them (setIntrinsic
+ * toArray, classIteratorDrainCall, bytesIntrinsic toArray for the wider
+ * views), and everything left that would box unwalkable refuses by
+ * NAME. A `dyn` source stays as it is: what it holds is a run-time fact,
+ * and the walk's own texts are the answer. */
+export function dynSpreadSource(L: Lowerer, blame: ts.Node, src: IrExpr, where: string): IrExpr {
+  const loc = src.loc;
+  if (src.type.kind === "set") {
+    src = { kind: "setIntrinsic", method: "toArray", receiver: src, args: [], type: arrayOf(src.type.elem), loc };
+  } else if (src.type.kind === "object") {
+    const drained = L.classIteratorDrainCall(src, loc);
+    if (drained) src = drained;
+  } else if (src.type.kind === "bytes" && src.type.elem !== "u8" && src.type.elem !== "buf") {
+    // The wider views are dense numeric iterables; only bytes<u8> has a
+    // dyn box the walk steps directly (SCR_DYN_BYTES, byte by byte).
+    src = { kind: "bytesIntrinsic", method: "toArray", receiver: src, args: [], type: arrayOf(F64), loc };
+  }
+  if (!spreadWalkableAsDyn(L, src.type)) {
+    L.unsupported(
+      "SC1090",
+      blame,
+      `spreading '${L.fmt(src.type)}' into ${where} (the spread source has to reach the checked-dynamic tier as ` +
+        `an array, a string or a Uint8Array: those are the kinds its run-time walk can step)`,
+    );
+  }
+  if (src.type.kind !== "dyn" && !canConvertToDyn(src.type, (id) => L.shapes.get(id), (id) => L.unions.get(id))) {
+    L.unsupported(
+      "SC1090",
+      blame,
+      `spreading '${L.fmt(src.type)}' into ${where} (the spread source must be a value the checked-dynamic tier ` +
+        `can hold, so its elements can be walked at run time)`,
+    );
+  }
+  return src;
+}
+
+/** Whether a dyn BOX of this type is a kind scr_dyn_arr_push_spread
+ * steps: an array (SCR_DYN_ARR), a string (SCR_DYN_STR), bytes<u8>
+ * (SCR_DYN_BYTES), or a dyn value whose kind is only known at run time.
+ * A union boxes its ACTIVE arm, so it is walkable exactly when every arm
+ * is. */
+function spreadWalkableAsDyn(L: Lowerer, t: IrType): boolean {
+  if (t.kind === "dyn") return true;
+  if (t.kind === "array" || t.kind === "string") return true;
+  if (t.kind === "bytes") return t.elem === "u8";
+  if (t.kind === "union") {
+    const def = L.unions.get(t.unionId);
+    return def !== undefined && def.arms.length > 0 &&
+      def.arms.every((a) => spreadWalkableAsDyn(L, a));
+  }
+  return false;
+}
+
+/** The DYN rest pack, spreads included — the one call-completion slot
+   * whose arity is allowed to be a runtime fact.
+   *
+   * Every other parameter slot is a fixed ABI position, so a spread into
+   * one has no home (the compile-time completion would have to know the
+   * array's length). A dyn rest slot is different in kind: the callee
+   * receives ONE checked-dynamic array and reads its `length` and indices
+   * through the keyed-dyn paths, so the pack's length IS the call's arity
+   * and the ABI never changes shape. Spreads therefore flatten INTO the
+   * pack at run time (dynArrLit's `spreads`, emitted as
+   * scr_dyn_arr_push_spread — arrays element-by-element, strings by code
+   * point, bytes by byte, everything else V8's spread-call TypeError).
+   *
+   * Every SOURCE goes through dynSpreadSource first, which is what makes
+   * the walk's three kinds enough: the statically-iterable ones drain
+   * into an array there, and a source that would box unwalkable refuses
+   * by name rather than reaching a box the walk cannot step. */
+  function dynRestPack(L: Lowerer, sources: readonly (ts.Expression | { ir: IrExpr })[],
+    blame: ts.Node, loc: SrcLoc,): IrExpr {
+    const isIr = (s: ts.Expression | { ir: IrExpr }): s is { ir: IrExpr } => !("kind" in s);
+    // WHICH TypeError text a non-iterable source throws depends on the
+    // spread's syntactic position — V8 takes the optimized apply-path
+    // text only for a SOLE spread in LAST position, and drives the real
+    // iterator protocol (whose texts describe the value) otherwise. Same
+    // rule, same measurement, as the variadic Object.assign pack.
+    const spreadCount = sources.filter((s) => "kind" in s && ts.isSpreadElement(s as ts.Node)).length;
+    const spreads: { at: number; what: string | null }[] = [];
+    const elems = sources.map((a, i): IrExpr => {
+      if (isIr(a)) return L.coerceInto(blame, a.ir, DYN);
+      if (ts.isSpreadElement(a)) {
+        const src = dynSpreadSource(L, a, L.lowerExpr(a.expression), "a dynamic rest parameter");
+        const optimized = spreadCount === 1 && i === sources.length - 1;
+        spreads.push({ at: i, what: optimized ? a.expression.getText() : null });
+        return L.coerceInto(a.expression, src, DYN);
+      }
+      return L.lowerExprExpecting(a, DYN);
+    });
+    return { kind: "dynArrLit", elems, ...(spreads.length > 0 ? { spreads } : {}), type: DYN, loc };
+  }
+
 /** CALL-SITE COMPLETION — the frontend half of the one-signature contract
    * (docs/ir.md): every call lowers to exactly the callee's full ABI
    * parameter list, so backends and the validator stay count-exact and no
@@ -615,26 +719,12 @@ export interface GenericInstance {
       // type, or the synthetic `arguments` slot): surplus arguments
       // convert through the dyn boundary into one fresh dyn array —
       // exactly what the boxed call thunk builds for indirect calls.
-      const elems = sources.slice(restAt).map((a): IrExpr => {
-        if (isIr(a)) return L.coerceInto(blame, a.ir, DYN);
-        if (ts.isSpreadElement(a)) {
-          L.unsupported("SC1090", a, "spread arguments into a dynamic rest parameter");
-        }
-        return L.lowerExprExpecting(a, DYN);
-      });
-      out.push({ kind: "dynArrLit", elems, type: DYN, loc });
+      out.push(dynRestPack(L, sources.slice(restAt), blame, loc));
     } else if (restAt >= 0 && shapes[restAt]!.type.kind === "dyn") {
       // A SPELLED `...args: unknown[]`: the slot is the checked-dynamic
       // array (dynRest's literal, but a real declared parameter — the
       // callee reads length/index through the same keyed-dyn paths).
-      const elems = sources.slice(restAt).map((a): IrExpr => {
-        if (isIr(a)) return L.coerceInto(blame, a.ir, DYN);
-        if (ts.isSpreadElement(a)) {
-          L.unsupported("SC1090", a, "spread arguments into a dynamic rest parameter");
-        }
-        return L.lowerExprExpecting(a, DYN);
-      });
-      out.push({ kind: "dynArrLit", elems, type: DYN, loc });
+      out.push(dynRestPack(L, sources.slice(restAt), blame, loc));
     } else if (restAt >= 0) {
       const restType = shapes[restAt]!.type;
       // A TUPLE-typed rest (`(...[x, y]: [number, number])` — the pattern
@@ -801,13 +891,18 @@ export interface GenericInstance {
     if (!restDecl || !ts.isParameter(restDecl) || restDecl.dotDotDotToken === undefined) return null;
     const fixed = params.length - 1;
     if (expr.arguments.length < fixed) return null;
-    if (expr.arguments.some((a) => ts.isSpreadElement(a))) return null;
+    // A spread landing on a FIXED position keeps its refusal — only the
+    // rest tail can take a runtime arity, and only when the slot is dyn
+    // (a typed array slot's pack is same-element, which completeArgs'
+    // array branch owns; here there is no declaration to read).
+    if (expr.arguments.slice(0, fixed).some((a) => ts.isSpreadElement(a))) return null;
+    const tailSpread = expr.arguments.slice(fixed).some((a) => ts.isSpreadElement(a));
+    if (tailSpread && restT.kind !== "dyn") return null;
     const out = expr.arguments
       .slice(0, fixed)
       .map((a, i) => L.lowerArgExpecting(a, params[i]));
     if (restT.kind === "dyn") {
-      const dynElems = expr.arguments.slice(fixed).map((a) => L.lowerExprExpecting(a, DYN));
-      out.push({ kind: "dynArrLit", elems: dynElems, type: DYN, loc });
+      out.push(dynRestPack(L, expr.arguments.slice(fixed), expr, loc));
       return out;
     }
     const elems = expr.arguments.slice(fixed).map((a) => L.lowerExprExpecting(a, restT.elem));

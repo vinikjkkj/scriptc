@@ -122,6 +122,12 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
    * IS a dyn value here, with no ScrArr representation at all). */
   "sqlite.argsNew": { argTypes: [], result: DYN },
   "sqlite.argsPush": { argTypes: [DYN, DYN], result: DYN },
+  /* A SPREAD argument (`stmt.run(...params)`): the source's elements each
+   * become their own entry in the list, so the run-time length of the
+   * spread IS the call's argument count -- which this list can carry and
+   * a fixed ABI could not. The string spells the spread expression for
+   * V8's nullish spread-call TypeError. */
+  "sqlite.argsPushSpread": { argTypes: [DYN, DYN, STRING], result: DYN },
   "sqlite.run": { argTypes: [SQLITESTMT_T, DYN], result: DYN },
   "sqlite.get": { argTypes: [SQLITESTMT_T, DYN], result: DYN },
   "sqlite.all": { argTypes: [SQLITESTMT_T, DYN], result: DYN },
@@ -3631,6 +3637,18 @@ function validateFunction(
         for (const el of e.elems) {
           checkExpr(el);
           if (el.type.kind !== "dyn") err(`dynArrLit element of kind ${el.type.kind} (must be dyn)`, e.loc);
+        }
+        // A spread index names an element that FLATTENS; out-of-range or
+        // duplicated indices would silently drop or duplicate an argument
+        // at the one place in the compiler where arity is a runtime fact,
+        // which is the worst outcome this construct has.
+        const seen = new Set<number>();
+        for (const s of e.spreads ?? []) {
+          if (!Number.isInteger(s.at) || s.at < 0 || s.at >= e.elems.length) {
+            err(`dynArrLit spread index ${s.at} out of range (${e.elems.length} elements)`, e.loc);
+          }
+          if (seen.has(s.at)) err(`dynArrLit spread index ${s.at} listed twice`, e.loc);
+          seen.add(s.at);
         }
         break;
       }

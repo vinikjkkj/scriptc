@@ -1337,6 +1337,18 @@ static void scr_dyn_iter_kind_word(ScrJsonBuf *b, const ScrDyn *src) {
   }
 }
 
+/* A DataView rides the SAME SCR_DYN_BYTES kind as a Uint8Array (types.ts
+ * maps it to bytes<u8> so the view can alias its owner's storage), and
+ * the flavor the payload carries is the only discriminator -- the same
+ * one scr_dyn_is_u8array reads. It matters to every walk below because a
+ * DataView is NOT ITERABLE in JS: `[...new DataView(b)]` throws where
+ * `[...new Uint8Array(b)]` yields the bytes. Walking it would answer the
+ * bytes at exit 0 where Node throws. */
+static bool dyn_bytes_is_dataview(const ScrDyn *d) {
+  return d != NULL && d->kind == SCR_DYN_BYTES && d->v.bytes != NULL &&
+         d->v.bytes->flavor == SCR_BF_DATAVIEW;
+}
+
 /* Spread completion for a runtime-arity argument list (`f(...xs)` in the
  * checked-dynamic tier): JS's spread over the checked-dynamic tree's iterable kinds —
  * arrays element-by-element (retained), strings by code POINT (the string
@@ -1353,12 +1365,14 @@ void scr_dyn_arr_push_spread(ScrDyn *arr, const ScrDyn *src, const char *what) {
     }
     return;
   }
-  if (src->kind == SCR_DYN_BYTES) {
+  if (src->kind == SCR_DYN_BYTES && !dyn_bytes_is_dataview(src)) {
     for (size_t i = 0; i < src->v.bytes->len; i++) {
       scr_dyn_arr_push(arr, scr_dyn_new_num((double)src->v.bytes->data[i]));
     }
     return;
   }
+  /* A DATAVIEW falls through to the non-iterable text below, which is
+   * what Node throws for it. */
   if (src->kind == SCR_DYN_STR) {
     double len = scr_str_utf16_len(src->v.str);
     for (double at = 0; at < len;) {
@@ -1409,7 +1423,8 @@ void scr_dyn_arr_push_spread(ScrDyn *arr, const ScrDyn *src, const char *what) {
  * undefined no kind prefix, null V8's "object null"). Borrows both; +1 or
  * NULL with the TypeError pending. */
 ScrDyn *scr_dyn_iter_pack(const ScrDyn *src, const ScrStr *msg) {
-  if (src->kind == SCR_DYN_ARR || src->kind == SCR_DYN_BYTES || src->kind == SCR_DYN_STR) {
+  if ((src->kind == SCR_DYN_ARR || src->kind == SCR_DYN_BYTES || src->kind == SCR_DYN_STR) &&
+      !dyn_bytes_is_dataview(src)) {
     ScrDyn *out = scr_dyn_new_arr();
     scr_dyn_arr_push_spread(out, src, ""); /* iterable kinds never consult `what` */
     return out;
@@ -8605,11 +8620,13 @@ void scr_dyn_pack_push_spread(ScrDyn *pack, const ScrDyn *src, const ScrStr *wha
  * Symbol(Symbol.iterator))". The compiler picks the variant by the
  * spread's syntactic position. MAY THROW (pending). Borrows src. */
 void scr_dyn_pack_push_spread_iter(ScrDyn *pack, const ScrDyn *src) {
-  if (src->kind == SCR_DYN_ARR || src->kind == SCR_DYN_BYTES ||
-      src->kind == SCR_DYN_STR) {
+  if ((src->kind == SCR_DYN_ARR || src->kind == SCR_DYN_BYTES ||
+       src->kind == SCR_DYN_STR) && !dyn_bytes_is_dataview(src)) {
     scr_dyn_arr_push_spread(pack, src, ""); /* iterable kinds never throw */
     return;
   }
+  /* A DATAVIEW is not one of them: it falls to the kind-word text
+   * below, and "object" is exactly what Node calls it there. */
   if (src->kind == SCR_DYN_JSVAL) {
     /* A wrapped engine value on the ITERATED path: the engine's own
      * protocol drains (the kind wording on a non-iterable — the

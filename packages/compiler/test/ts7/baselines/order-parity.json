@@ -9711,6 +9711,96 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/7300-dyn-rest-spread-boundary-arities.ts": {
+   "order": [
+    "<repo>/tests/corpus/7300-dyn-rest-spread-boundary-arities.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/7301-dyn-rest-spread-argument-order.ts": {
+   "order": [
+    "<repo>/tests/corpus/7301-dyn-rest-spread-argument-order.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/7302-dyn-rest-spread-source-mutates.ts": {
+   "order": [
+    "<repo>/tests/corpus/7302-dyn-rest-spread-source-mutates.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/7303-dyn-rest-spread-string-by-code-point.ts": {
+   "order": [
+    "<repo>/tests/corpus/7303-dyn-rest-spread-string-by-code-point.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/7304-dyn-rest-spread-of-a-set.ts": {
+   "order": [
+    "<repo>/tests/corpus/7304-dyn-rest-spread-of-a-set.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/7305-dyn-rest-spread-of-a-class-iterable.ts": {
+   "order": [
+    "<repo>/tests/corpus/7305-dyn-rest-spread-of-a-class-iterable.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/7306-dyn-rest-spread-non-iterable-texts.ts": {
+   "order": [
+    "<repo>/tests/corpus/7306-dyn-rest-spread-non-iterable-texts.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/7307-dyn-rest-spread-of-a-typed-array.ts": {
+   "order": [
+    "<repo>/tests/corpus/7307-dyn-rest-spread-of-a-typed-array.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/7308-dyn-rest-spread-of-a-float64array.ts": {
+   "order": [
+    "<repo>/tests/corpus/7308-dyn-rest-spread-of-a-float64array.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/7309-dyn-rest-spread-through-a-func-value.ts": {
+   "order": [
+    "<repo>/tests/corpus/7309-dyn-rest-spread-through-a-func-value.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/7310-dyn-rest-spread-forwarded-twice.ts": {
+   "order": [
+    "<repo>/tests/corpus/7310-dyn-rest-spread-forwarded-twice.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/7311-dyn-rest-spread-super-and-cast-member.ts": {
+   "order": [
+    "<repo>/tests/corpus/7311-dyn-rest-spread-super-and-cast-member.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/7312-dyn-rest-spread-of-a-union-source.ts": {
+   "order": [
+    "<repo>/tests/corpus/7312-dyn-rest-spread-of-a-union-source.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/7313-a-dataview-spread-source-is-not-iterable.ts": {
+   "order": [
+    "<repo>/tests/corpus/7313-a-dataview-spread-source-is-not-iterable.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/7314-a-dataview-destructured-is-not-iterable.ts": {
+   "order": [
+    "<repo>/tests/corpus/7314-a-dataview-destructured-is-not-iterable.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/750-cycle-closure-box.ts": {
    "order": [
     "<repo>/tests/corpus/750-cycle-closure-box.ts"
@@ -10542,6 +10632,12 @@
   "<repo>/tests/diagnostics/dyn-import-cycle-tdz/main.ts": {
    "order": [
     "<repo>/tests/diagnostics/dyn-import-cycle-tdz/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/dyn-rest-spread-sources.ts": {
+   "order": [
+    "<repo>/tests/diagnostics/dyn-rest-spread-sources.ts"
    ],
    "diags": []
   },
