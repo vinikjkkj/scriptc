@@ -1,0 +1,17 @@
+export TMP='G:\blocks\remeasure\tmp'
+export TEMP='G:\blocks\remeasure\tmp'
+export TMPDIR='G:\blocks\remeasure\tmp'
+export SCRIPTC_CACHE_DIR='G:\blocks\remeasure\cache'
+export SCRIPTC_PROVENANCE_CACHE='G:\blocks\remeasure\prov'
+export ZIG_GLOBAL_CACHE_DIR='G:\blocks\remeasure\zig'
+export ZIG_LOCAL_CACHE_DIR='G:\blocks\remeasure\zig\local'
+export SCRIPTC_CC=zigcc
+export SCRIPTC_TEST_CC="zig cc"
+export SCRIPTC_TARGET=x86_64-windows-gnu
+export SCRIPTC_TEST_WORKERS=2
+export WT='G:/blocks/remeasure/wt'
+export LAB='G:/blocks/remeasure/lab'
+export ZSRC='G:/zapo-work/caches/provenance/250f9af5229a545eec28ddbd3e8774a397cdb0bb'
+export ZPKG="$ZSRC/packages"
+export PATH="/g/zapo-work/tools/zig:$PATH"
+export NODE25='/c/Users/vinicius/AppData/Local/nvm/v25.9.0'

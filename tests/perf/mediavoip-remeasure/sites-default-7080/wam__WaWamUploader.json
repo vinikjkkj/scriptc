@@ -1,0 +1,51 @@
+{
+ "entry": "G:/blocks/remeasure/lab/app/pkgs/wam/WaWamUploader.ts",
+ "flags": [],
+ "elapsedMs": 578,
+ "preflightFailed": false,
+ "stats": {
+  "statementsTotal": 2,
+  "statementsFailed": 0,
+  "statementsIsland": 0,
+  "functionsSkipped": 0
+ },
+ "npmStatic": null,
+ "provenanceNotes": null,
+ "sites": [
+  {
+   "section": "blocker",
+   "code": "SC2013",
+   "message": "importing 'zapo-js' requires the embedded dynamic engine, which this build does not include — the package's implementation runs there",
+   "file": "G:/blocks/remeasure/lab/app/pkgs/wam/WaWamUploader.ts",
+   "line": 2
+  },
+  {
+   "section": "blocker",
+   "code": "SC2013",
+   "message": "importing 'zapo-js' requires the embedded dynamic engine, which this build does not include — the package's implementation runs there",
+   "file": "G:/blocks/remeasure/lab/app/pkgs/wam/WaWamUploader.ts",
+   "line": 3
+  },
+  {
+   "section": "unreached",
+   "code": "SC2013",
+   "message": "values from the 'zapo-js' package run in the embedded dynamic engine, which this build does not include",
+   "file": "G:/blocks/remeasure/lab/app/pkgs/wam/WaWamUploader.ts",
+   "line": 87
+  },
+  {
+   "section": "unreached",
+   "code": "SC2012",
+   "message": "'Number.parseInt' runs in the embedded dynamic engine, which this build does not include",
+   "file": "G:/blocks/remeasure/lab/app/pkgs/wam/WaWamUploader.ts",
+   "line": 88
+  },
+  {
+   "section": "unreached",
+   "code": "SC2013",
+   "message": "values from the 'zapo-js' package run in the embedded dynamic engine, which this build does not include",
+   "file": "G:/blocks/remeasure/lab/app/pkgs/wam/WaWamUploader.ts",
+   "line": 31
+  }
+ ]
+}

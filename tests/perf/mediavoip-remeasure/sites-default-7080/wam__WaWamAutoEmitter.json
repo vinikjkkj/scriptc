@@ -1,0 +1,149 @@
+{
+ "entry": "G:/blocks/remeasure/lab/app/pkgs/wam/WaWamAutoEmitter.ts",
+ "flags": [],
+ "elapsedMs": 6385,
+ "preflightFailed": false,
+ "stats": {
+  "statementsTotal": 6,
+  "statementsFailed": 0,
+  "statementsIsland": 0,
+  "functionsSkipped": 0
+ },
+ "npmStatic": null,
+ "provenanceNotes": null,
+ "sites": [
+  {
+   "section": "blocker",
+   "code": "SC2013",
+   "message": "importing 'zapo-js' requires the embedded dynamic engine, which this build does not include — the package's implementation runs there",
+   "file": "G:/blocks/remeasure/lab/app/pkgs/wam/send-parse.ts",
+   "line": 2
+  },
+  {
+   "section": "blocker",
+   "code": "SC2013",
+   "message": "importing 'zapo-js' requires the embedded dynamic engine, which this build does not include — the package's implementation runs there",
+   "file": "G:/blocks/remeasure/lab/app/pkgs/wam/send-parse.ts",
+   "line": 3
+  },
+  {
+   "section": "blocker",
+   "code": "SC2013",
+   "message": "importing 'zapo-js' requires the embedded dynamic engine, which this build does not include — the package's implementation runs there",
+   "file": "G:/blocks/remeasure/lab/app/pkgs/wam/WaWamAutoEmitter.ts",
+   "line": 1
+  },
+  {
+   "section": "blocker",
+   "code": "SC2013",
+   "message": "importing 'zapo-js' requires the embedded dynamic engine, which this build does not include — the package's implementation runs there",
+   "file": "G:/blocks/remeasure/lab/app/pkgs/wam/WaWamAutoEmitter.ts",
+   "line": 16
+  },
+  {
+   "section": "blocker",
+   "code": "SC2013",
+   "message": "importing 'zapo-js' requires the embedded dynamic engine, which this build does not include — the package's implementation runs there",
+   "file": "G:/blocks/remeasure/lab/app/pkgs/wam/WaWamAutoEmitter.ts",
+   "line": 30
+  },
+  {
+   "section": "unreached",
+   "code": "SC2013",
+   "message": "values from the 'zapo-js' package run in the embedded dynamic engine, which this build does not include",
+   "file": "G:/blocks/remeasure/lab/app/pkgs/wam/send-parse.ts",
+   "line": 48
+  },
+  {
+   "section": "unreached",
+   "code": "SC2013",
+   "message": "values from the 'zapo-js' package run in the embedded dynamic engine, which this build does not include",
+   "file": "G:/blocks/remeasure/lab/app/pkgs/wam/send-parse.ts",
+   "line": 58
+  },
+  {
+   "section": "unreached",
+   "code": "SC2013",
+   "message": "values from the 'zapo-js' package run in the embedded dynamic engine, which this build does not include",
+   "file": "G:/blocks/remeasure/lab/app/pkgs/wam/send-parse.ts",
+   "line": 73
+  },
+  {
+   "section": "unreached",
+   "code": "SC2013",
+   "message": "values from the 'zapo-js' package run in the embedded dynamic engine, which this build does not include",
+   "file": "G:/blocks/remeasure/lab/app/pkgs/wam/send-parse.ts",
+   "line": 74
+  },
+  {
+   "section": "unreached",
+   "code": "SC2013",
+   "message": "values from the 'zapo-js' package run in the embedded dynamic engine, which this build does not include",
+   "file": "G:/blocks/remeasure/lab/app/pkgs/wam/send-parse.ts",
+   "line": 75
+  },
+  {
+   "section": "unreached",
+   "code": "SC2013",
+   "message": "values from the 'zapo-js' package run in the embedded dynamic engine, which this build does not include",
+   "file": "G:/blocks/remeasure/lab/app/pkgs/wam/send-parse.ts",
+   "line": 100
+  },
+  {
+   "section": "unreached",
+   "code": "SC2013",
+   "message": "values from the 'zapo-js' package run in the embedded dynamic engine, which this build does not include",
+   "file": "G:/blocks/remeasure/lab/app/pkgs/wam/WaWamAutoEmitter.ts",
+   "line": 89
+  },
+  {
+   "section": "unreached",
+   "code": "SC2013",
+   "message": "values from the 'zapo-js' package run in the embedded dynamic engine, which this build does not include",
+   "file": "G:/blocks/remeasure/lab/app/pkgs/wam/WaWamAutoEmitter.ts",
+   "line": 90
+  },
+  {
+   "section": "unreached",
+   "code": "SC2013",
+   "message": "values from the 'zapo-js' package run in the embedded dynamic engine, which this build does not include",
+   "file": "G:/blocks/remeasure/lab/app/pkgs/wam/WaWamAutoEmitter.ts",
+   "line": 96
+  },
+  {
+   "section": "unreached",
+   "code": "SC2013",
+   "message": "values from the 'zapo-js' package run in the embedded dynamic engine, which this build does not include",
+   "file": "G:/blocks/remeasure/lab/app/pkgs/wam/WaWamAutoEmitter.ts",
+   "line": 100
+  },
+  {
+   "section": "unreached",
+   "code": "SC2013",
+   "message": "values from the 'zapo-js' package run in the embedded dynamic engine, which this build does not include",
+   "file": "G:/blocks/remeasure/lab/app/pkgs/wam/WaWamAutoEmitter.ts",
+   "line": 101
+  },
+  {
+   "section": "unreached",
+   "code": "SC2013",
+   "message": "values from the 'zapo-js' package run in the embedded dynamic engine, which this build does not include",
+   "file": "G:/blocks/remeasure/lab/app/pkgs/wam/WaWamAutoEmitter.ts",
+   "line": 102
+  },
+  {
+   "section": "unreached",
+   "code": "SC2013",
+   "message": "values from the 'zapo-js' package run in the embedded dynamic engine, which this build does not include",
+   "file": "G:/blocks/remeasure/lab/app/pkgs/wam/WaWamAutoEmitter.ts",
+   "line": 110
+  },
+  {
+   "section": "unreached",
+   "code": "SC2013",
+   "message": "values from the 'zapo-js' package run in the embedded dynamic engine, which this build does not include",
+   "file": "G:/blocks/remeasure/lab/app/pkgs/wam/WaWamAutoEmitter.ts",
+   "line": 129
+  }
+ ]
+}

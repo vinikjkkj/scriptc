@@ -1,0 +1,23 @@
+{
+ "entry": "G:/blocks/remeasure/lab/app/pkgs/media-utils/index.ts",
+ "flags": [],
+ "elapsedMs": 495,
+ "preflightFailed": true,
+ "stats": {
+  "statementsTotal": 0,
+  "statementsFailed": 0,
+  "statementsIsland": 0,
+  "functionsSkipped": 0
+ },
+ "npmStatic": null,
+ "provenanceNotes": null,
+ "sites": [
+  {
+   "section": "blocker",
+   "code": "SC0001",
+   "message": "Property 'fileTypeFromFile' does not exist on type 'typeof import(\"G:/blocks/remeasure/lab/app/node_modules/file-type/core\")'. Did you mean 'fileTypeFromBlob'?",
+   "file": "G:/blocks/remeasure/lab/app/pkgs/media-utils/index.ts",
+   "line": 104
+  }
+ ]
+}
