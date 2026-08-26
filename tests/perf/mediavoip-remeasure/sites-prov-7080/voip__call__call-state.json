@@ -1,0 +1,27 @@
+{
+ "entry": "G:/blocks/remeasure/lab/app/pkgs/voip/call/call-state.ts",
+ "flags": [
+  "--provenance-sources"
+ ],
+ "elapsedMs": 26681,
+ "preflightFailed": false,
+ "stats": {
+  "statementsTotal": 12,
+  "statementsFailed": 0,
+  "statementsIsland": 0,
+  "functionsSkipped": 0
+ },
+ "npmStatic": null,
+ "provenanceNotes": [
+  "argo-codec@0.2.1: no provenance attestation published; island path used"
+ ],
+ "sites": [
+  {
+   "section": "unreached",
+   "code": "SC2009",
+   "message": "values of type 'CallStateData' cannot be compiled: the record shape is supported, but its member 'connectedAt' has type 'Date | undefined', which does not compile",
+   "file": "G:/blocks/remeasure/lab/app/pkgs/voip/call/call-state.ts",
+   "line": 30
+  }
+ ]
+}

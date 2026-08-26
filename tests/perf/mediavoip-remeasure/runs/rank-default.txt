@@ -1,0 +1,91 @@
+LANE: DEFAULT (no flags), main 5d0e8427
+dir : G:/blocks/remeasure/lab/sites-default-2
+unique sites: 234   distinct causes: 33
+
+--- ownership rule table (a rule matching 0 is printed, not hidden) ---
+  zapo-js-island-value      85  provenance package path (fixed: 1c201e7f and the two before it)
+  zapo-js-island-import     31  provenance package path (fixed: 1c201e7f and the two before it)
+  wawam-island-value         7  --npm-static type surface (open, named in estado-mediavoip section 4)
+  wawam-island-import        5  --npm-static type surface (open, named in estado-mediavoip section 4)
+  binarywriter-cascade       7  cascade of the wa-wam island (estado-mediavoip row 4)
+  union-eq                   1  SC1090 union-typed comparison (open, predicted by name)
+  commit-cascade            69  cascade of a type-only island import (estado-mediavoip row 2)
+  lib-forced                 2  program.ts:82 forces lib (open, estado-mediavoip section 2)
+  filetype-cond              1  moduleResolution forced to Bundler (open, estado-mediavoip section 2)
+  __never__                  0  (control)
+
+CONTROL must-not-match __never__ = 0 (must be 0)
+CONTROL rules that fired: 9 of 9
+
+owned  :  208 sites (88.9%) over 10 causes
+unowned:   26 sites (11.1%) over 23 causes
+
+--- UNOWNED, ranked ---
+  1.    2    0.9%  SC2020  [unreached]
+      'child_process.execFile' is typed by @types/node but has no scriptc lowering yet
+  2.    2    0.9%  SC1090  [unreached]
+      compound array-element assignment through this target (supported: a numeric array or typed array, a bare identifier receiver, and an index that can be evaluated twice —
+  3.    2    0.9%  SC2004  [unreached]
+      uses of 'bytes' inherit the blocker on its declaration
+  4.    1    0.4%  SC2020  [blocker]
+      'WeakMap<Logger, Set<string>>' is part of the standard library types but has no scriptc lowering yet
+  5.    1    0.4%  SC2013  [blocker]
+      importing 'sharp' requires the embedded dynamic engine, which this build does not include — the package's implementation runs there
+  6.    1    0.4%  SC2020  [blocker]
+      'new WeakMap' is part of the standard library types but has no scriptc lowering yet
+  7.    1    0.4%  SC1090  [unreached]
+      'Uint8Array' values where 'string' is expected is not supported yet
+  8.    1    0.4%  SC2020  [unreached]
+      'ArrayBufferLike.byteLength' is part of the standard library types but has no scriptc lowering yet
+  9.    1    0.4%  SC1090  [unreached]
+      '.buffer' outside new DataView(x.buffer, ...) / Buffer.from(x.buffer, ...) (no free-standing ArrayBuffer value exists; subarray() answers an aliasing view directly) is no
+ 10.    1    0.4%  SC2009  [unreached]
+      values of type 'CallStateData' cannot be compiled: the record shape is supported, but its member 'connectedAt' has type 'Date | undefined', which does not compile
+ 11.    1    0.4%  SC2020  [unreached]
+      'createCipheriv with this algorithm' is part of the standard library types but has no scriptc lowering yet
+ 12.    1    0.4%  SC2001  [unreached]
+      values of type 'bigint' cannot be compiled yet (supported: number, string, boolean, arrays, Maps, Sets, RegExp, functions, classes, records, unions of those, and 'unknown
+ 13.    1    0.4%  SC2009  [blocker]
+      values of type 'Promise<MlowModule> | null' cannot be compiled: the union shape is supported, but its arm 'Promise<MlowModule>' does not compile
+ 14.    1    0.4%  SC2009  [unreached]
+      values of type 'MlowEncoder | null' cannot be compiled: the union shape is supported, but its arm 'MlowEncoder' does not compile
+ 15.    1    0.4%  SC2009  [unreached]
+      values of type 'Promise<MlowModule>' cannot be compiled: the Promise shape is supported, but its value type 'MlowModule' does not compile
+ 16.    1    0.4%  SC2011  [unreached]
+      values of type 'any' run in the embedded dynamic engine, which this build does not include
+ 17.    1    0.4%  SC2020  [blocker]
+      'Uint8Array.from' is part of the standard library types but has no scriptc lowering yet
+ 18.    1    0.4%  SC2020  [unreached]
+      'Number of unknown values' is part of the standard library types but has no scriptc lowering yet
+ 19.    1    0.4%  SC2012  [unreached]
+      'Number.parseInt' runs in the embedded dynamic engine, which this build does not include
+ 20.    1    0.4%  SC2004  [unreached]
+      uses of 'length' inherit the blocker on its declaration
+ 21.    1    0.4%  SC2008  [unreached]
+      values of type 'WaClientPluginDefinition & { readonly exposeAs: "wam"; readonly setup: (ctx: WaClientPluginContext) => WaWamCoordinator; readonly __pluginEvents?: {} | un
+ 22.    1    0.4%  SC2009  [blocker]
+      values of type 'AmbientFab[]' cannot be compiled: the array shape is supported, but its element type 'AmbientFab' does not compile
+ 23.    1    0.4%  SC2009  [unreached]
+      values of type 'WaWamCoordinator' cannot be compiled: the record shape is supported, but its member 'logger' has type 'Logger', which does not compile
+
+--- OWNED, ranked ---
+  1.   85  SC2013  -> provenance package path (fixed: 1c201e7f and the two before it)
+      values from the 'zapo-js' package run in the embedded dynamic engine, which this build does not include
+  2.   69  SC1090  -> cascade of a type-only island import (estado-mediavoip row 2)
+      calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' a
+  3.   31  SC2013  -> provenance package path (fixed: 1c201e7f and the two before it)
+      importing 'zapo-js' requires the embedded dynamic engine, which this build does not include — the package's implementation runs there
+  4.    7  SC2013  -> --npm-static type surface (open, named in estado-mediavoip section 4)
+      values from the '@vinikjkkj/wa-wam' package run in the embedded dynamic engine, which this build does not include
+  5.    7  SC2001  -> cascade of the wa-wam island (estado-mediavoip row 4)
+      values of type 'BinaryWriter' cannot be compiled yet (supported: number, string, boolean, arrays, Maps, Sets, RegExp, functions, classes, records, uni
+  6.    5  SC2013  -> --npm-static type surface (open, named in estado-mediavoip section 4)
+      importing '@vinikjkkj/wa-wam' requires the embedded dynamic engine, which this build does not include — the package's implementation runs there
+  7.    1  SC0001  -> moduleResolution forced to Bundler (open, estado-mediavoip section 2)
+      Property 'fileTypeFromFile' does not exist on type 'typeof import("node_modules/file-type/core")'. Did you mean 'fileTypeFromBlob'?
+  8.    1  SC0001  -> program.ts:82 forces lib (open, estado-mediavoip section 2)
+      Cannot find name 'RTCPeerConnection'.
+  9.    1  SC0001  -> program.ts:82 forces lib (open, estado-mediavoip section 2)
+      Cannot find name 'RTCDataChannel'.
+ 10.    1  SC1090  -> SC1090 union-typed comparison (open, predicted by name)
+      comparisons of union-typed values (narrow first: check a discriminant field, or compare with '!== undefined'/'!== null' for unit arms) are not support
