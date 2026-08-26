@@ -15,7 +15,7 @@ import { invalidJsonModuleDiag, npmEmbedFailedDiag, requiresDynamicImportDiag } 
 import { BOOL, DYN, IrClassDef, IrExpr, IrFunction, IrGlobal, IrLocal, IrRecordShape, IrStmt, IrType, IrUnionDef, JSVAL, RUNTIME_ERROR_CLASSES, STRING, SrcLoc, VOID, arrayOf, canConvertToDyn, isUnitType } from "../../ir/nodes.js";
 import { ENTRY_NAME, PoisonError, boundIdentifiersOf, dynFallbackType, dynUndefinedExpr, importCallHandleType, newFnCtx, uncheckedOverloadHandleCall } from "./lowerer.js";
 import { builtinMemberRequireDecl, builtinNamespaceDestructureModuleOf, createRequireBindingDecl, createRequireNamespaceDecl, createRequireSpecOf, isPromisifyCall, requireFnValueDeclType } from "./lower-builtins.js";
-import { bindingContextualGenericFnNodeOf, bindingGenericFnAliasInfoOf, bindingGenericFnInfoOf, bindingGenericFnNodeOf, deadUnmappableBinding, implicitLocalFnInfoOf, implicitLocalFnNodeOf, islandRestSlotType, nullishGenericBindingUnitOf } from "./lower-calls.js";
+import { bindingContextualGenericFnNodeOf, bindingGenericFnAliasInfoOf, bindingGenericFnInfoOf, bindingGenericFnNodeOf, deadUnmappableBinding, implicitLocalFnInfoOf, implicitLocalFnNodeOf, islandRestSlotType, nullishGenericBindingUnitOf, hasOwnPropertyAliasDecl } from "./lower-calls.js";
 import { dynAliasBindingIsDyn, isVarDeclared, jsEvolvingObjectLiteralInit, keyedReadGlobalArmedType, keyedReadGlobalIsDyn, numericIteratorSourceOf, provenanceElidedConstDecl } from "./lower-stmts.js";
 import { streamClassAliasDecl } from "./lower-stream.js";
 import { diffieHellmanFnValueDeclType, objectStaticFnValueDeclType, stdlibGlobalAliasDecl } from "./surfaces.js";
@@ -1566,6 +1566,10 @@ export function collectGlobals(L: Lowerer, sf: ts.SourceFile, topStmts: ts.State
         // `const fs = require("node:fs")` through that binding at file
         // scope — a namespace import in const clothing, same story.
         if (isConst && createRequireNamespaceDecl(L, decl.name, decl.initializer)) continue;
+        // `var hasOwnProperty = Object.prototype.hasOwnProperty` at file
+        // scope: compile-time plumbing, no global storage; the statement
+        // lowering skips it by the same test.
+        if (hasOwnPropertyAliasDecl(L, decl.name, decl.initializer)) continue;
         // `const { createSign } = crypto` over a builtin NAMESPACE binding
         // at file scope: alias plumbing like the destructured-require form
         // — no storage (the statement lowering skips by the same test).
