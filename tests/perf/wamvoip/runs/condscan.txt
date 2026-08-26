@@ -1,0 +1,17 @@
+packages scanned (name@version, deduped): 608
+packages whose exports mention "node": 9
+packages whose RESOLUTION changes:      4
+
+consola@3.4.2
+    .                            ./dist/browser.d.mts  ->  ./dist/index.d.mts
+    ./basic                      ./dist/browser.d.mts  ->  ./dist/basic.d.mts
+file-type@19.6.0
+    .                            ./core.d.ts  ->  ./index.d.ts
+lru-cache@11.5.2
+    ./raw                        ./dist/esm/index.d.ts  ->  ./dist/esm/node/index.d.ts
+    .                            ./dist/esm/index.d.ts  ->  ./dist/esm/node/index.d.ts
+strtok3@9.1.1
+    .                            ./lib/core.js  ->  ./lib/index.js
+CONTROL ok    positive: file-type '.'  core -> index
+CONTROL ok    negative: zapo-js seen, unmoved
+CONTROLS PASS

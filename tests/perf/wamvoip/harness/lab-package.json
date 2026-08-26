@@ -1,0 +1,20 @@
+{
+  "name": "wamvoip-lab",
+  "private": true,
+  "type": "module",
+  "version": "1.0.0",
+  "dependencies": {
+    "@roamhq/wrtc": "^0.10.0",
+    "@types/node": "24.13.3",
+    "@vinikjkkj/wa-wam": "2.3000.1041713829-1ec0d3b",
+    "argo-codec": "*",
+    "file-type": "^19.0.0",
+    "libmlow-wasm": "^0.1.1",
+    "pino": "*",
+    "pino-pretty": "*",
+    "sharp": "^0.33.0",
+    "tsx": "^4.23.12",
+    "ws": "*",
+    "zapo-js": "1.6.2"
+  }
+}
