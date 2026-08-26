@@ -357,9 +357,43 @@ function loadAsJsDirectory(base: string): string | null {
  * failedLookupLocations there), so substitution maps .js targets to their
  * declaration twins only. */
 
-/** The conditions 5.9.3's bundler resolution enables for import sites
- * (probed: "module"/"node"/"browser"/"bundler" keys are NOT matched). */
-const EXPORT_CONDITIONS = new Set(["types", "import", "default"]);
+/** The conditions this resolver enables for import sites.
+ *
+ * 5.9.3's BUNDLER resolution enables {types, import, default} and matches
+ * neither "module"/"node"/"browser" nor "bundler" (probed). "node" is here
+ * anyway, and deliberately, because scriptc compiles for NODE and the two
+ * resolvers on the other side of this file already say so:
+ *
+ *   - npm.ts's resolveExports — the RUNTIME resolution, what the island
+ *     loads and what an import edge is judged against — enables
+ *     {mode, "node", "default"};
+ *   - npm-static.ts's npmStaticTransformPkgJson HOISTS the "node" target
+ *     into its key position before the opted-in lookup runs, so a
+ *     --npm-static package compiles the node entry too, and its comment
+ *     spells out why: the browser dist "is a DIFFERENT artifact".
+ *
+ * Without "node" here, a package whose "." is
+ * `{ node: {...}, default: {...} }` — no "./node" subpath to spell
+ * instead — had its TYPES read off the browser/default entry while its
+ * VALUES came from the node entry. resolveBareModule's own comment
+ * requires that not happen ("the two resolvers must answer one file");
+ * file-type@19 is where it did: types ./core.d.ts, runtime ./index.js,
+ * and `fileTypeFromFile` exists only in the latter.
+ *
+ * The set is membership only — condition objects are still matched in
+ * OBJECT KEY order, first resolvable wins — so a package that lists
+ * "types" ahead of "node" is unmoved. Measured over 608 installed
+ * packages (the three zapo packages, the store drivers pg / mysql2 /
+ * mongodb / bson / ioredis / better-sqlite3, and this repo's own tree,
+ * pnpm's .pnpm content store included — a scan that walks only the
+ * top-level symlink farm sees a fraction of a pnpm tree and reported 3
+ * of 565 before that was fixed): 9 mention "node", 4 resolve differently
+ * — file-type, strtok3, consola, lru-cache — and every one moves from a
+ * browser/default entry to the node entry Node itself loads, with an
+ * export surface that is a superset of, or identical to, the entry it
+ * replaces. tests/perf/wamvoip/harness/condscan.mjs is the scan, with
+ * both armed controls. */
+const EXPORT_CONDITIONS = new Set(["types", "node", "import", "default"]);
 
 /** The bundler condition set minus "types" — what an opted-in --npm-static
  * package resolves with (its declarations are hidden from resolution; the
