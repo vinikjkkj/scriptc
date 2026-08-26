@@ -684,6 +684,7 @@ const LIB_FN_SYMS: Record<string, string> = {
   "sqlite.dbInTx": "scr_sqlite_db_in_transaction",
   "sqlite.argsNew": "scr_sqlite_args_new",
   "sqlite.argsPush": "scr_sqlite_args_push",
+  "sqlite.argsPushSpread": "scr_sqlite_args_push_spread",
   "sqlite.run": "scr_sqlite_run",
   "sqlite.get": "scr_sqlite_get",
   "sqlite.all": "scr_sqlite_all",
@@ -7633,15 +7634,22 @@ class LlEmitter {
         this.declare(`declare ptr @scr_dyn_new_arr()`);
         this.declare(`declare void @scr_dyn_arr_push(ptr, ptr)`);
         const spreadAt = new Map((e.spreads ?? []).map((s) => [s.at, s.what]));
-        if (spreadAt.size > 0) this.declare(`declare void @scr_dyn_arr_push_spread(ptr, ptr, ptr)`);
+        if (spreadAt.size > 0) {
+          this.declare(`declare void @scr_dyn_arr_push_spread(ptr, ptr, ptr)`);
+          this.declare(`declare void @scr_dyn_pack_push_spread_iter(ptr, ptr)`);
+        }
         const arr = B.tmp();
         B.line(`${arr} = call ptr @scr_dyn_new_arr()`);
         const out = this.own({ name: arr, type: e.type });
         e.elems.forEach((el, i) => {
           const v = this.emitExpr(el);
-          const what = spreadAt.get(i);
-          if (what !== undefined) {
-            B.line(`call void @scr_dyn_arr_push_spread(ptr ${arr}, ptr ${v.name}, ptr ${this.cstr(what)})`);
+          if (spreadAt.has(i)) {
+            const what = spreadAt.get(i)!;
+            B.line(
+              what === null
+                ? `call void @scr_dyn_pack_push_spread_iter(ptr ${arr}, ptr ${v.name})`
+                : `call void @scr_dyn_arr_push_spread(ptr ${arr}, ptr ${v.name}, ptr ${this.cstr(what)})`,
+            );
             this.emitPendingCheck();
             return;
           }
