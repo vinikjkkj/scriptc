@@ -60,7 +60,12 @@ let rebindable = { m<T>(x: T): T { return x; } };
 console.log(rebindable.m(4));
 rebindable = { m<T>(x: T): T { return x; } };
 
-// An interface-typed receiver has no defining object literal to resolve.
+// An interface-typed receiver: the checker's property symbol is the
+// interface's signature-only MethodSignature, but the BINDING still names
+// the defining literal, and the receiver rule above is what proves it.
+// Resolving through the receiver compiles this one — the annotation was
+// never what decided, the never-reassigned-const-holding-the-literal rule
+// is (corpus 7122).
 interface HasGeneric {
   m<T>(x: T): T;
 }
