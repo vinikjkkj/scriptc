@@ -7498,8 +7498,27 @@ function rejectSuperInObjectMethod(L: Lowerer, node: ts.Node): void {
    * bundled module. `this` and `super` stay fenced: a dyn object is not a
    * receiver the method could bind either to.
    *
-   * Spreads and accessors stay fenced (an accessor is not a data
-   * property; the dyn object has no getter machinery to define it into). */
+   * ACCESSORS lower (dynObjLitRun): the dyn object DOES have getter
+   * machinery to define them into now — scr_dyn_obj_define_accessor stores
+   * a real accessor property whose reads call the getter with the receiver
+   * bound, and an ENUMERABLE one takes a position slot in the member table,
+   * so Object.keys, for…in and JSON.stringify list the name where Node
+   * lists it. Five shapes stay fenced BY NAME rather than answered: a
+   * COMPUTED accessor key, an accessor sharing its key with any other
+   * member of the same literal, an accessor in a literal that also
+   * SPREADS, `super`, and `this` under an enclosing receiver. Each is a
+   * case where this fold would put the key in a position, or under a
+   * definition rule, that Node does not — dynObjLitAccessors says why for
+   * each.
+   *
+   * SPREADS stay fenced HERE and only here. A literal whose SLOT is dyn,
+   * or one of whose spread sources is a checked-dynamic member chain,
+   * never reaches this function at all — it routes to
+   * lowerDynSpreadObjectLiteral, which folds each spread through
+   * dyn.assign. What is left for this fence is the road that carries every
+   * member of a literal straight in: the non-folding COMPUTED KEY
+   * (`{ [k]: 1, ...src }` bound to a plain local) and the Object.create
+   * descriptor map. */
   /** One RUN of ordinary properties of a dyn object literal, lowered to the
    * key/value pairs a `dynObjLit` holds. Split out of lowerDynObjectLiteral so
    * lowerDynSpreadObjectLiteral can build the runs BETWEEN spreads with the
@@ -7516,10 +7535,18 @@ function rejectSuperInObjectMethod(L: Lowerer, node: ts.Node): void {
     for (const prop of props) {
       const isMethod = ts.isMethodDeclaration(prop) && prop.body !== undefined;
       if (!ts.isPropertyAssignment(prop) && !ts.isShorthandPropertyAssignment(prop) && !isMethod) {
+        // Accessors are peeled off before this loop can see them
+        // (dynObjLitRun), so the member form that reaches here is a SPREAD
+        // on a road that carries the whole literal in — and the message
+        // names that one construct instead of a list the site no longer
+        // refuses. The `else` arm is a defensive boundary, not a shape any
+        // road produces today.
         L.unsupported(
           "SC1090",
           prop,
-          "spreads and accessors in a dyn object literal (methods lower)",
+          ts.isSpreadAssignment(prop)
+            ? "a spread in a dyn object literal whose keys are run-time values (methods and get/set accessors lower; the spread would have to copy onto a table whose key order is not a compile-time fact)"
+            : `'${ts.SyntaxKind[prop.kind]}' members of a dyn object literal (properties, methods and get/set accessors lower)`,
         );
       }
       if (isMethod) {
@@ -7690,8 +7717,243 @@ function rejectSuperInObjectMethod(L: Lowerer, node: ts.Node): void {
     return fields;
   }
 
+
+/** A get/set accessor member of an object literal. */
+type DynAccessor = ts.GetAccessorDeclaration | ts.SetAccessorDeclaration;
+
+function isDynAccessor(p: ts.ObjectLiteralElementLike): p is DynAccessor {
+  return ts.isGetAccessorDeclaration(p) || ts.isSetAccessorDeclaration(p);
+}
+
+/** ONE accessor PROPERTY of a dyn object literal: both halves under one
+ * key, and the position the key is created at. */
+type DynAccGroup = { key: string; getter: ts.GetAccessorDeclaration | null; setter: ts.SetAccessorDeclaration | null };
+
+/** The STATIC key a member names, or null when the key is a run-time
+ * value. Numeric names canonicalize the way dynObjLitFields does. */
+function dynStaticKeyOf(L: Lowerer, prop: ts.ObjectLiteralElementLike): string | null {
+  if (ts.isSpreadAssignment(prop)) return null;
+  const name = prop.name;
+  if (name === undefined) return null;
+  if (ts.isIdentifier(name) || ts.isStringLiteral(name)) return name.text;
+  if (ts.isNumericLiteral(name)) return String(Number(name.text));
+  if (ts.isComputedPropertyName(name)) return literalComputedKey(L, name);
+  return null;
+}
+
+/** `this` inside a dyn object literal's ACCESSOR body.
+ *
+ * It does not need a fence of its own in the ordinary case, and that is
+ * the difference between an accessor and a METHOD here. A method's value
+ * is a plain boxed closure and nothing binds a receiver around a call to
+ * it; an accessor is invoked BY the runtime, which pushes the receiver
+ * (scr_dyn_obj_entry_read and the [[Set]] accessor arm both wrap the call
+ * in scr_dyn_this_push_dyn/scr_dyn_this_pop), and `this` in a plain JS
+ * function lowers to exactly that ambient read — `dyn.this`.
+ *
+ * The one case that must stay LOUD is an ENCLOSING receiver: inside a
+ * class method, `L.resolveThis` answers that method's own `this` local
+ * before the ambient read is ever reached, so the getter would silently
+ * read the OUTER object where Node reads the literal. That is the exact
+ * shape of the wrong answer the method fence was written for, so it keeps
+ * the same walk — nested constructs that rebind `this` are stepped over,
+ * because their `this` is their own. */
+function rejectThisInDynAccessor(L: Lowerer, node: ts.Node): void {
+  if (node.kind === ts.SyntaxKind.ThisKeyword) {
+    L.unsupported(
+      "SC1090",
+      node,
+      "'this' in a get/set accessor of a dyn object literal written inside a method (the enclosing method's receiver would be captured instead of the object the accessor is read through — read a captured binding instead)",
+    );
+  }
+  ts.forEachChild(node, (child) => {
+    if (resetsThis(child)) return;
+    rejectThisInDynAccessor(L, child);
+  });
+}
+
+/** The accessor PLAN for a dyn object literal: one group per accessor key,
+ * indexed by the member that CREATES the key, or null when the literal has
+ * no accessor at all (the overwhelmingly common case, and one that pays a
+ * single `.some`).
+ *
+ * Everything this function refuses, it refuses because the fold below would
+ * otherwise answer a key ORDER or a definition RULE that Node does not:
+ *
+ *   a SPREAD in the same literal   the spread copies keys this compiler
+ *     cannot name, so it cannot be checked against the accessor's key. A
+ *     spread that happens to carry that key makes Node redefine the
+ *     property IN PLACE while scr_dyn_obj_define_accessor drops the member
+ *     and re-adds a slot at the END — `{...{a:1,b:2}, get a(){}}` would
+ *     answer keys b,a for Node's a,b. Unknowable, so loud.
+ *
+ *   an accessor key SHARED with another member. Same position rule in the
+ *     one direction, and a worse one in the other: the run after an
+ *     accessor is folded through dyn.assign, which is [[Set]], so
+ *     `{get a(){}, a: 1}` would RUN the accessor's setter (or throw on a
+ *     getter-only property) where JS's literal simply defines a data
+ *     property over it.
+ *
+ *   a member whose key is a RUN-TIME value, beside an accessor. The
+ *     collision above cannot be ruled out, so it is assumed.
+ *
+ *   a COMPUTED accessor key. Its position among the data keys, and its
+ *     collisions, are the same unknowable question, and the key expression
+ *     would additionally have to evaluate at the accessor's own point in
+ *     source order.
+ *
+ *   `super` in an accessor body, for the reason the method fence gives:
+ *     the [[HomeObject]] the call machinery wants is a class body's. */
+function dynAccessorPlan(
+  L: Lowerer,
+  expr: ts.ObjectLiteralExpression,
+): Map<ts.ObjectLiteralElementLike, DynAccGroup> | null {
+  const props = expr.properties;
+  if (!props.some(isDynAccessor)) return null;
+  const spread = props.find(ts.isSpreadAssignment);
+  if (spread !== undefined) {
+    L.unsupported(
+      "SC1090",
+      spread,
+      "a spread beside a get/set accessor in the same dyn object literal (the accessor is defined onto the copy, and a key the spread also carries would be listed in the wrong place — spread into a separate object first)",
+    );
+  }
+  const groups = new Map<string, DynAccGroup>();
+  const creator = new Map<string, ts.ObjectLiteralElementLike>();
+  const plain = new Map<string, ts.ObjectLiteralElementLike>();
+  for (const prop of props) {
+    if (isDynAccessor(prop)) {
+      const name = prop.name;
+      if (ts.isComputedPropertyName(name) && literalComputedKey(L, name) === null) {
+        L.unsupported(
+          "SC1090",
+          prop,
+          "a COMPUTED-key get/set accessor in a dyn object literal (the key is a run-time value, so neither its position among the data keys nor its collisions can be settled here — a fixed key lowers)",
+        );
+      }
+      const key = dynStaticKeyOf(L, prop);
+      if (key === null) {
+        L.unsupported("SC1090", prop, "non-identifier get/set accessor names in a dyn object literal");
+      }
+      if (prop.body === undefined) {
+        L.unsupported("SC1090", prop, "a bodyless get/set accessor in a dyn object literal");
+      }
+      rejectSuperInObjectMethod(L, prop.body);
+      if (L.peekThis() !== null) rejectThisInDynAccessor(L, prop.body);
+      let g = groups.get(key);
+      if (g === undefined) {
+        g = { key, getter: null, setter: null };
+        groups.set(key, g);
+        creator.set(key, prop);
+      }
+      // A repeated half wins LAST, exactly as a repeated data key does.
+      if (ts.isGetAccessorDeclaration(prop)) g.getter = prop;
+      else g.setter = prop;
+      continue;
+    }
+    const k = dynStaticKeyOf(L, prop);
+    if (k === null) {
+      L.unsupported(
+        "SC1090",
+        prop,
+        "a run-time-keyed member beside a get/set accessor in the same dyn object literal (the key cannot be checked against the accessor's, and a collision would define the two properties by different rules)",
+      );
+    }
+    plain.set(k, prop);
+  }
+  for (const [key, prop] of creator) {
+    const clash = plain.get(key);
+    if (clash !== undefined) {
+      L.unsupported(
+        "SC1090",
+        clash,
+        `the key '${key}' spelled both as a get/set accessor and as a data member of the same dyn object literal (JS redefines the property in place; this fold would define the two by different rules and list the key in the wrong position)`,
+      );
+    }
+    void prop;
+  }
+  const plan = new Map<ts.ObjectLiteralElementLike, DynAccGroup>();
+  for (const [key, node] of creator) plan.set(node, groups.get(key)!);
+  return plan;
+}
+
+/** ONE accessor property installed onto the value built so far.
+ *
+ * The descriptor is the object literal's own: ENUMERABLE and CONFIGURABLE,
+ * which is what `{ get a() {} }` creates and is NOT what
+ * `Object.defineProperty` defaults to — spelling both flags is the
+ * difference between a key Object.keys lists and one it does not.
+ *
+ * A one-sided accessor OMITS the other half rather than passing
+ * `undefined` for it, which is the same descriptor Node builds and which
+ * dyn_define_one reads with HasProperty, not a function test.
+ *
+ * Both halves of a key ride ONE call. scr_dyn_obj_define_accessor writes
+ * the whole pair, so a second call naming only `set` would store
+ * `undefined` over the getter it already holds — the getter silently
+ * lost, which is precisely the failure this grouping exists to prevent.
+ * Emitting the group at the FIRST member's position, with a later half
+ * folded in, is unobservable: creating a closure evaluates nothing (the
+ * record path writes the same reasoning down for accessor position). */
+function dynAccessorDefine(L: Lowerer, base: IrExpr, g: DynAccGroup, loc: SrcLoc): IrExpr {
+  const str = (s: string): IrExpr => ({ kind: "strLit", value: s, type: STRING, loc });
+  const yes = (): IrExpr => L.coerceToExpected({ kind: "boolLit", value: true, type: BOOL, loc }, DYN);
+  const fields: { key: IrExpr; value: IrExpr }[] = [];
+  if (g.getter !== null) fields.push({ key: str("get"), value: L.coerceToExpected(L.lowerLambda(g.getter), DYN) });
+  if (g.setter !== null) fields.push({ key: str("set"), value: L.coerceToExpected(L.lowerLambda(g.setter), DYN) });
+  fields.push({ key: str("enumerable"), value: yes() });
+  fields.push({ key: str("configurable"), value: yes() });
+  const desc: IrExpr = { kind: "dynObjLit", fields, type: DYN, loc };
+  return { kind: "libCall", fn: "dyn.defineProp", args: [base, str(g.key), desc], type: DYN, loc };
+}
+
+/** One RUN of members with no spread in it, lowered onto `base` (null for
+ * the first contributor). Ordinary properties go in as `dynObjLit` fields;
+ * each accessor GROUP interrupts the run with a `dyn.defineProp`, so every
+ * member still evaluates exactly once, in source order, and every key is
+ * created where JS creates it. */
+function dynObjLitRun(
+  L: Lowerer,
+  expr: ts.ObjectLiteralExpression,
+  props: readonly ts.ObjectLiteralElementLike[],
+  base: IrExpr | null,
+  plan: Map<ts.ObjectLiteralElementLike, DynAccGroup> | null,
+): IrExpr {
+  const loc = locOf(expr);
+  const lit = (ps: readonly ts.ObjectLiteralElementLike[]): IrExpr => ({
+    kind: "dynObjLit",
+    fields: dynObjLitFields(L, expr, ps),
+    type: DYN,
+    loc,
+  });
+  const join = (b: IrExpr | null, next: IrExpr): IrExpr =>
+    b === null ? next : { kind: "libCall", fn: "dyn.assign", args: [b, next], type: DYN, loc };
+  if (plan === null) return join(base, lit(props));
+  let acc = base;
+  let run: ts.ObjectLiteralElementLike[] = [];
+  const flush = (): void => {
+    if (run.length === 0) return;
+    const ps = run;
+    run = [];
+    acc = join(acc, lit(ps));
+  };
+  for (const prop of props) {
+    if (isDynAccessor(prop)) {
+      const g = plan.get(prop);
+      // The SECOND half of a pair: already carried by its group's call.
+      if (g === undefined) continue;
+      flush();
+      acc = dynAccessorDefine(L, acc ?? { kind: "dynObjLit", fields: [], type: DYN, loc }, g, loc);
+      continue;
+    }
+    run.push(prop);
+  }
+  flush();
+  return acc ?? { kind: "dynObjLit", fields: [], type: DYN, loc };
+}
+
   export function lowerDynObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression): IrExpr {
-    return { kind: "dynObjLit", fields: dynObjLitFields(L, expr, expr.properties), type: DYN, loc: locOf(expr) };
+    return dynObjLitRun(L, expr, expr.properties, null, dynAccessorPlan(L, expr));
   }
 
 /** A JS object literal one of whose SPREADS names a checked-dynamic value.
@@ -7721,6 +7983,10 @@ function rejectSuperInObjectMethod(L: Lowerer, node: ts.Node): void {
  * must not move — a binding that NAMES a value links, a spread that COPIES one
  * copies, and the two answers come from different rules on purpose. */
   export function lowerDynSpreadObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression): IrExpr {
+    // An ACCESSOR beside a spread has no answer this fold can give, and
+    // the plan says so by name rather than letting the run builder below
+    // reach the generic member fence.
+    dynAccessorPlan(L, expr);
     const loc = locOf(expr);
     let acc: IrExpr | null = null;
     let run: ts.ObjectLiteralElementLike[] = [];
