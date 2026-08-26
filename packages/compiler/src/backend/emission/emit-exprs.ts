@@ -2334,17 +2334,23 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
       case "dynArrLit": {
         // A dyn array built element-by-element: ownership of each dyn
         // element MOVES into the array (scr_dyn_arr_push's contract).
-        // A SPREAD element flattens instead (push_spread RETAINS what it
-        // copies in, so its temp keeps its own reference and releases with
+        // A SPREAD element flattens instead (both walks RETAIN what they
+        // copy in, so its temp keeps its own reference and releases with
         // the frame) and can throw V8's spread TypeError, so the pending
         // check runs after each one — JS's ArgumentListEvaluation order.
+        // A null `what` is the iterator-protocol variant (the spread is
+        // not the sole trailing one), whose texts describe the value.
         const spreadAt = new Map((e.spreads ?? []).map((s) => [s.at, s.what]));
         const arr = E.newTemp(e.type, "scr_dyn_new_arr()");
         e.elems.forEach((el, i) => {
           const v = E.emitExpr(el);
-          const what = spreadAt.get(i);
-          if (what !== undefined) {
-            E.line(`scr_dyn_arr_push_spread(${arr.name}, ${v.name}, ${cStringLiteral(Buffer.from(what, "utf8"))});`);
+          if (spreadAt.has(i)) {
+            const what = spreadAt.get(i)!;
+            E.line(
+              what === null
+                ? `scr_dyn_pack_push_spread_iter(${arr.name}, ${v.name});`
+                : `scr_dyn_arr_push_spread(${arr.name}, ${v.name}, ${cStringLiteral(Buffer.from(what, "utf8"))});`,
+            );
             E.emitPendingCheck();
             return;
           }
@@ -3048,6 +3054,12 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             return finish(`scr_sqlite_args_new()`);
           case "sqlite.argsPush":
             return finish(`scr_sqlite_args_push(${arg(0)}, ${arg(1)})`);
+          case "sqlite.argsPushSpread":
+            // A spread argument flattens INTO the list: every element
+            // becomes its own argument, which is what the spread means to
+            // better-sqlite3's Binder. May throw V8's spread-call
+            // TypeError (seed set).
+            return finish(`scr_sqlite_args_push_spread(${arg(0)}, ${arg(1)}, ${arg(2)})`);
           case "sqlite.run":
             return finish(`scr_sqlite_run(${arg(0)}, ${arg(1)})`);
           case "sqlite.get":

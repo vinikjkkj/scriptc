@@ -557,7 +557,13 @@ export interface GenericInstance {
   function dynRestPack(L: Lowerer, sources: readonly (ts.Expression | { ir: IrExpr })[],
     blame: ts.Node, loc: SrcLoc,): IrExpr {
     const isIr = (s: ts.Expression | { ir: IrExpr }): s is { ir: IrExpr } => !("kind" in s);
-    const spreads: { at: number; what: string }[] = [];
+    // WHICH TypeError text a non-iterable source throws depends on the
+    // spread's syntactic position — V8 takes the optimized apply-path
+    // text only for a SOLE spread in LAST position, and drives the real
+    // iterator protocol (whose texts describe the value) otherwise. Same
+    // rule, same measurement, as the variadic Object.assign pack.
+    const spreadCount = sources.filter((s) => "kind" in s && ts.isSpreadElement(s as ts.Node)).length;
+    const spreads: { at: number; what: string | null }[] = [];
     const elems = sources.map((a, i): IrExpr => {
       if (isIr(a)) return L.coerceInto(blame, a.ir, DYN);
       if (ts.isSpreadElement(a)) {
@@ -570,7 +576,8 @@ export interface GenericInstance {
               `checked-dynamic tier can hold, so its elements can be walked at run time)`,
           );
         }
-        spreads.push({ at: i, what: a.expression.getText() });
+        const optimized = spreadCount === 1 && i === sources.length - 1;
+        spreads.push({ at: i, what: optimized ? a.expression.getText() : null });
         return L.coerceInto(a.expression, src, DYN);
       }
       return L.lowerExprExpecting(a, DYN);

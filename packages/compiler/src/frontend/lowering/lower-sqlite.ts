@@ -260,20 +260,43 @@ export function lowerSqliteNew(L: Lowerer, expr: ts.NewExpression | ts.CallExpre
  * `dyn[]`, one element per argument the site wrote — which is why the
  * three executors take one array and not a variadic tail.
  *
- * SPREAD arguments (`stmt.run(...params)`) have no lowering anywhere in
- * this compiler, so they refuse at the spread with the array form named:
- * `stmt.run(params)` binds an array positionally and is the same call.
+ * A SPREAD argument (`stmt.run(...params)`) is the one call shape whose
+ * argument COUNT is a run-time fact, and this list is exactly where that
+ * can be carried: argsPushSpread flattens the source's elements into it,
+ * one entry each, so the Binder below sees what `run(params[0],
+ * params[1], ...)` would have written.
+ *
+ * The refusal this replaced advised `stmt.run(params)` as the same call.
+ * It is not, in general: passing the array makes ONE argument whose
+ * elements the Binder spreads positionally, which agrees with the spread
+ * only while every element is a bindable scalar. A single OBJECT element
+ * binds NAMED parameters when spread and is an unbindable positional
+ * value when nested.
  */
 function paramsArray(L: Lowerer, call: ts.CallExpression, method: string, loc: SrcLoc): IrExpr {
   let args: IrExpr = { kind: "libCall", fn: "sqlite.argsNew", args: [], type: DYN, loc };
+  const spreadCount = call.arguments.filter((a) => ts.isSpreadElement(a)).length;
   for (const a of call.arguments) {
     if (ts.isSpreadElement(a)) {
-      L.noLowering(
-        `a spread argument to Statement.${method}`,
-        a,
-        "pass the array itself — better-sqlite3 binds an array argument positionally, so stmt." +
-          method + "(params) is the same call as stmt." + method + "(...params)",
-      );
+      const src = L.lowerExpr(a.expression);
+      if (!L.dynConvertible(src.type)) {
+        L.noLowering(
+          `a spread of '${L.fmt(src.type)}' into Statement.${method}`,
+          a,
+          "the spread source has to be a value the checked-dynamic tier can hold, so its elements can be" +
+            " walked at run time",
+        );
+      }
+      const asDyn: IrExpr =
+        src.type.kind === "dyn" ? src : { kind: "dynFrom", value: src, type: DYN, loc: locOf(a) };
+      args = {
+        kind: "libCall",
+        fn: "sqlite.argsPushSpread",
+        args: [args, asDyn, { kind: "strLit", value: a.expression.getText(), type: STRING, loc: locOf(a) }],
+        type: DYN,
+        loc: locOf(a),
+      };
+      continue;
     }
     const lowered = L.lowerExpr(a);
     if (!L.dynConvertible(lowered.type)) L.badType(a, L.typeOf(a));

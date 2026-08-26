@@ -122,6 +122,12 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
    * IS a dyn value here, with no ScrArr representation at all). */
   "sqlite.argsNew": { argTypes: [], result: DYN },
   "sqlite.argsPush": { argTypes: [DYN, DYN], result: DYN },
+  /* A SPREAD argument (`stmt.run(...params)`): the source's elements each
+   * become their own entry in the list, so the run-time length of the
+   * spread IS the call's argument count -- which this list can carry and
+   * a fixed ABI could not. The string spells the spread expression for
+   * V8's nullish spread-call TypeError. */
+  "sqlite.argsPushSpread": { argTypes: [DYN, DYN, STRING], result: DYN },
   "sqlite.run": { argTypes: [SQLITESTMT_T, DYN], result: DYN },
   "sqlite.get": { argTypes: [SQLITESTMT_T, DYN], result: DYN },
   "sqlite.all": { argTypes: [SQLITESTMT_T, DYN], result: DYN },

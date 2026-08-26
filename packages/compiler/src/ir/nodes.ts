@@ -2627,6 +2627,7 @@ export type IrLibFn =
   | "sqlite.dbInTx"
   | "sqlite.argsNew"
   | "sqlite.argsPush"
+  | "sqlite.argsPushSpread"
   | "sqlite.run"
   | "sqlite.get"
   | "sqlite.all"
@@ -6497,15 +6498,20 @@ export type IrExpr =
    * An element listed in `spreads` FLATTENS instead of being pushed: its
    * dyn value is walked by JS's spread rule (arrays element-by-element,
    * strings by code point, bytes by byte, engine values through their own
-   * iterator protocol) and every element lands in this array. `what` is
-   * the source's spelling, which rides along for V8's spread-call
-   * TypeError text ("v is not iterable (cannot read property
-   * undefined)"); a non-iterable dyn kind throws it, so a spread element
-   * — and ONLY a spread element — can throw. This is the runtime-arity
-   * form of a DYN rest pack: `f(...params)` where the callee's rest slot
-   * is one checked-dynamic array, so the array's length is the call's
-   * arity and no fixed ABI slot has to be decided at compile time. */
-  | { kind: "dynArrLit"; elems: IrExpr[]; spreads?: { at: number; what: string }[]; type: IrType; loc: SrcLoc }
+   * iterator protocol) and every element lands in this array. A
+   * non-iterable dyn kind throws, so a spread element — and ONLY a spread
+   * element — can throw, and WHICH text it throws depends on the spread's
+   * syntactic position, exactly as the variadic Object.assign pack picks
+   * it: `what` spells the spread expression for V8's optimized apply-path
+   * text ("v is not iterable (cannot read property undefined)"), taken
+   * only when this is the sole spread AND the last element; `null` selects
+   * the iterator-protocol texts, which describe the VALUE instead.
+   *
+   * This is the runtime-arity form of a DYN rest pack: `f(...params)`
+   * where the callee's rest slot is one checked-dynamic array, so the
+   * array's length is the call's arity and no fixed ABI slot has to be
+   * decided at compile time. */
+  | { kind: "dynArrLit"; elems: IrExpr[]; spreads?: { at: number; what: string | null }[]; type: IrType; loc: SrcLoc }
   /** The `Array` CONSTRUCTOR over a runtime-arity length — the dyn twin of
    * arrayNewLen, for `new Array(n)` where the element type has no static
    * home (`any[]` in a JavaScript source, an `unknown[]` slot). `arg` is
@@ -10890,6 +10896,9 @@ export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   // TypeErrors; the final copy throws ToObject on a nullish target
   "dyn.packPushSpread",
   "dyn.packPushSpreadIter",
+  // a spread argument to a prepared statement flattens through the same
+  // walk, so it throws the same V8 spread-call TypeErrors
+  "sqlite.argsPushSpread",
   "dyn.assignAll",
   "dyn.objValues",
   "dyn.objEntries",
