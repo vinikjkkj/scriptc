@@ -12347,6 +12347,39 @@ export function lowerFunction(L: Lowerer, decl: ts.FunctionDeclaration): IrFunct
             d.kind === ts.SyntaxKind.MethodSignature,
         );
       if (onInterface) {
+        // WHY the member has no slot decides which advice is followable.
+        // A record member whose type parameters all carry CONSTRAINTS maps
+        // to one closure at the constraint instantiation, and any of the
+        // four producers fills it — the receiver's class never enters it.
+        // An UNCONSTRAINED parameter has no widest honest binding, so the
+        // member leaves the shape entirely and the only remaining home is
+        // static monomorphization, which is what needs a provable
+        // receiver. Naming the constraint is the actionable half:
+        // `runInTransaction<T>` on zapo's WaSqliteConnection is reached
+        // through a record built by a factory, so "bind it to a `new`"
+        // cannot be followed and reads as a dead end.
+        const unconstrained = (() => {
+          const sig = L.checker.getCallSignatures(L.checker.getTypeOfSymbol(propSym))[0];
+          const decl = sig !== undefined ? L.checker.signatureDeclaration(sig) : undefined;
+          const tps = decl !== undefined && ts.isFunctionLike(decl) ? decl.typeParameters : undefined;
+          return tps === undefined
+            ? []
+            : tps.filter((tp) => tp.constraint === undefined && tp.defaultType === undefined)
+                .map((tp) => tp.name.text);
+        })();
+        if (unconstrained.length > 0) {
+          L.unsupported(
+            "SC1090",
+            call,
+            `calls of the generic method '${name}' through this receiver ` +
+              `(its type parameter${unconstrained.length > 1 ? "s" : ""} ` +
+              `${unconstrained.map((t) => `'${t}'`).join(", ")} ` +
+              `${unconstrained.length > 1 ? "carry" : "carries"} no constraint, so the member has no single closure ` +
+              `slot to hold — a CONSTRAINED type parameter maps at its constraint and any producer fills the slot; ` +
+              `without one the only home is static monomorphization, which needs the receiver's own declaration: ` +
+              `a const bound to the defining object literal, or to a 'new' expression)`,
+          );
+        }
         L.unsupported(
           "SC1090",
           call,
