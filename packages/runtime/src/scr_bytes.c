@@ -89,6 +89,11 @@ ScrBytes *scr_bytes_stamp_plain(ScrBytes *b) {
   return b;
 }
 
+ScrBytes *scr_bytes_stamp_dataview(ScrBytes *b) {
+  if (b) b->flavor = SCR_BF_DATAVIEW;
+  return b;
+}
+
 /* The libCall convention: the argument is BORROWED and the result OWNED,
  * so the stamp answers a RETAINED reference to the same value. */
 ScrBytes *scr_bytes_mark_buffer(ScrBytes *b) {
@@ -99,7 +104,35 @@ ScrBytes *scr_bytes_mark_plain(ScrBytes *b) {
   return scr_bytes_retain(scr_bytes_stamp_plain(b));
 }
 
+ScrBytes *scr_bytes_mark_dataview(ScrBytes *b) {
+  return scr_bytes_retain(scr_bytes_stamp_dataview(b));
+}
+
+bool scr_bytes_is_dataview(const ScrBytes *b) {
+  return b != NULL && b->flavor == SCR_BF_DATAVIEW;
+}
+
+bool scr_bytes_is_plain_u8(const ScrBytes *b, const ScrStr *why) {
+  if (b != NULL) {
+    if (b->flavor == SCR_BF_PLAIN) return true;
+    /* Buffer and DataView are both NOT-Uint8Array here, for different
+     * reasons: a Buffer's constructor is Buffer, a DataView's is
+     * DataView. Answering `!is_buffer` -- which is what this replaced --
+     * got the DataView case wrong the moment DataView acquired a flavor,
+     * because the question is three-way and the old spelling was two. */
+    if (b->flavor == SCR_BF_BUFFER || b->flavor == SCR_BF_DATAVIEW) return false;
+  }
+  /* UNCLASSIFIED: the same loud refusal is_buffer raises, naming the same
+   * read site, because the value's producer still has not said. */
+  scr_bytes_is_buffer(b, why);
+  return false;
+}
+
 bool scr_bytes_is_buffer(const ScrBytes *b, const ScrStr *why) {
+  /* A DataView IS classified, and its answer here is a plain false --
+   * `dv.constructor === Buffer` is false in Node and now it is false
+   * here too, instead of the throw an unstamped value used to take. */
+  if (b && b->flavor == SCR_BF_DATAVIEW) return false;
   if (!b || b->flavor == SCR_BF_UNKNOWN) {
     /* No producer classified this value, so neither answer is honest.
      * Refuse at the READ, naming it — a missed producer has to be
@@ -392,7 +425,10 @@ ScrBytes *scr_dataview_new(ScrBytes *src, double byte_off, bool has_len, double 
    * the spelling knows which, so the frontend stamps the two it can name
    * and a bare DataView stays UNCLASSIFIED — DataView is neither of the
    * two constructors this flag distinguishes, and guessing one would be
-   * the wrong answer for both. */
+   * the wrong answer for both. The DataView spelling now has a flavor of
+   * its OWN (SCR_BF_DATAVIEW) and lowerDataViewNew stamps it over this
+   * one; the default stays UNKNOWN so the other two spellings, which
+   * stamp their own, are unaffected. */
   v->flavor = SCR_BF_UNKNOWN;
   v->data = owner->data + (size_t)off;
   v->backing = scr_bytes_retain(owner);

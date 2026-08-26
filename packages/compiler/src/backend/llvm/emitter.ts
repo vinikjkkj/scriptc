@@ -408,7 +408,10 @@ const LIB_FN_SYMS: Record<string, string> = {
   // distinction the ONE representation erases, carried by the value.
   "bytes.markBuffer": "scr_bytes_mark_buffer",
   "bytes.markPlain": "scr_bytes_mark_plain",
+  "bytes.markDataView": "scr_bytes_mark_dataview",
   "bytes.isBuffer": "scr_bytes_is_buffer",
+  "bytes.isDataView": "scr_bytes_is_dataview",
+  "bytes.isPlainU8": "scr_bytes_is_plain_u8",
   "buffer.newStringFail": "scr_buffer_new_string_fail",
   "fs.toUnixTimestamp": "scr_fs_to_unix_timestamp",
   "fs.existsChk": "scr_fs_exists_async",
@@ -7912,6 +7915,15 @@ class LlEmitter {
             test = orIsl(oneOf([DK.ARR]), "scr_dyn_isl_is_array");
           } else if (e.test === "function") {
             test = orIsl(oneOf([DK.FUNC]), "scr_dyn_isl_typeof_is", this.cstr("function"));
+          } else if (e.test === "u8array") {
+            // `u instanceof Uint8Array`: the DK.BYTES compare is not the
+            // answer on its own, because a boxed DataView rides the same
+            // kind (types.ts maps DataView to bytes<u8>). ONE runtime
+            // predicate, shared with the C lane so the two cannot answer
+            // differently. Borrowed; never throws.
+            this.declare(`declare zeroext i1 @scr_dyn_is_u8array(ptr)`);
+            test = B.tmp();
+            B.line(`${test} = call zeroext i1 @scr_dyn_is_u8array(ptr ${d.name})`);
           } else {
             const kindOf: Record<string, number> = {
               string: DK.STR,

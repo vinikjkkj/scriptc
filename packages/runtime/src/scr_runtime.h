@@ -4494,6 +4494,13 @@ bool scr_dyn_error_proto_in_chain(const ScrDyn *d);
  * than two - and for an island-held engine Error. %Error.prototype%
  * itself answers false, like Node's. */
 bool scr_dyn_instanceof_error(const ScrDyn *d);
+
+/* `u instanceof Uint8Array` over a checked-dynamic value -- the kind
+ * compare AND the DataView flavor, because DataView shares SCR_DYN_BYTES
+ * with the typed array and Node keeps them apart. Borrows; never throws.
+ * Both backends call this one function so the two lanes cannot answer
+ * differently. */
+bool scr_dyn_is_u8array(const ScrDyn *d);
 /* Is this dyn value the runtime's ERROR ENCODING (scr_dyn_from_error's
  * product, or any object whose [[Prototype]] chain reaches
  * %Error.prototype%)? THE test - every consumer asks through this, in the
@@ -7260,6 +7267,16 @@ typedef enum ScrBytesFlavor {
   SCR_BF_UNKNOWN = 0,
   SCR_BF_PLAIN = 1,  /* the elem's own typed array (Uint8Array, Uint32Array, ...) */
   SCR_BF_BUFFER = 2, /* node:buffer's Buffer */
+  /* DataView -- the THIRD u8 spelling, and the one that made this flag
+   * more than a Buffer bit. types.ts maps DataView to bytes<u8> so a
+   * view can alias its owner's storage for free, and that erases the one
+   * thing `x instanceof Uint8Array` still had to answer: a DataView is
+   * NOT a Uint8Array and Node says false. With no flavor of its own a
+   * DataView was indistinguishable from a plain u8 and the test answered
+   * TRUE -- no diagnostic, no fence, exit 0. Measured, not assumed
+   * (estado-viewtype.md). Stamped by the ONE producer that knows,
+   * lowerDataViewNew; read by scr_bytes_is_dataview. */
+  SCR_BF_DATAVIEW = 3,
 } ScrBytesFlavor;
 
 typedef struct ScrBytes {
@@ -7288,6 +7305,7 @@ size_t scr_bytes_elem_size(ScrBytesElem elem); /* 1, 4, 4, 4, 8 */
  * their OWN fresh allocation, keeping its single reference. */
 ScrBytes *scr_bytes_stamp_buffer(ScrBytes *b);
 ScrBytes *scr_bytes_stamp_plain(ScrBytes *b);
+ScrBytes *scr_bytes_stamp_dataview(ScrBytes *b);
 
 /* The same stamp under the LIBCALL convention — argument BORROWED, result
  * OWNED (+1) — because that is what the emitter assumes of every libFn:
@@ -7296,11 +7314,27 @@ ScrBytes *scr_bytes_stamp_plain(ScrBytes *b);
  * is how the first draft of this failed. */
 ScrBytes *scr_bytes_mark_buffer(ScrBytes *b);
 ScrBytes *scr_bytes_mark_plain(ScrBytes *b);
+ScrBytes *scr_bytes_mark_dataview(ScrBytes *b);
 
 /* `x.constructor === Buffer` — the flavor the producer stamped. THROWS a
  * catchable Error naming `why` (the read site) when the value is
  * UNCLASSIFIED: no producer said, so there is no honest answer. Borrows. */
 bool scr_bytes_is_buffer(const ScrBytes *b, const ScrStr *why);
+
+/* `x instanceof Uint8Array` where the value COULD be a DataView -- the
+ * companion read, and unlike is_buffer it never throws. An UNCLASSIFIED
+ * value answers false here, which is exact rather than a guess: the
+ * DataView flavor has exactly one producer, so a value nobody stamped
+ * DATAVIEW is not a DataView. (is_buffer cannot do that, because both of
+ * ITS answers have real producers and neither is the default.) Borrows. */
+bool scr_bytes_is_dataview(const ScrBytes *b);
+
+/* `x.constructor === Uint8Array` -- the POSITIVE half, and it has to be
+ * its own read because the question is three-way. `!is_buffer` was the
+ * old spelling and it answered TRUE for a DataView the moment DataView
+ * got a flavor of its own. PLAIN is true; BUFFER and DATAVIEW are false;
+ * UNCLASSIFIED takes is_buffer's throw, naming the same read. */
+bool scr_bytes_is_plain_u8(const ScrBytes *b, const ScrStr *why);
 
 /* node:string_decoder's StringDecoder (scr_bytes.c, beside the decoders
  * it shares): the decoder value is a record holding the CANONICAL
