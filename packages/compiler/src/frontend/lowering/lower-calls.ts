@@ -538,23 +538,6 @@ export interface GenericInstance {
     return { kind: "call", callee: name, args: [], type: resultT, loc };
   }
 
-/** The DYN rest pack, spreads included — the one call-completion slot
-   * whose arity is allowed to be a runtime fact.
-   *
-   * Every other parameter slot is a fixed ABI position, so a spread into
-   * one has no home (the compile-time completion would have to know the
-   * array's length). A dyn rest slot is different in kind: the callee
-   * receives ONE checked-dynamic array and reads its `length` and indices
-   * through the keyed-dyn paths, so the pack's length IS the call's arity
-   * and the ABI never changes shape. Spreads therefore flatten INTO the
-   * pack at run time (dynArrLit's `spreads`, emitted as
-   * scr_dyn_arr_push_spread — arrays element-by-element, strings by code
-   * point, engine values through their own iterator protocol, everything
-   * else V8's spread-call TypeError).
-   *
-   * A spread source that cannot become a dyn value at all keeps a refusal
-   * naming its type: there would be nothing to walk. */
-
 /** The SOURCE of a spread that the checked-dynamic tier will walk at RUN
  * time, normalized to something the walk can actually iterate.
  *
@@ -583,7 +566,7 @@ export function dynSpreadSource(L: Lowerer, blame: ts.Node, src: IrExpr, where: 
     // dyn box the walk steps directly (SCR_DYN_BYTES, byte by byte).
     src = { kind: "bytesIntrinsic", method: "toArray", receiver: src, args: [], type: arrayOf(F64), loc };
   }
-  if (!spreadWalkableAsDyn(src.type)) {
+  if (!spreadWalkableAsDyn(L, src.type)) {
     L.unsupported(
       "SC1090",
       blame,
@@ -607,12 +590,35 @@ export function dynSpreadSource(L: Lowerer, blame: ts.Node, src: IrExpr, where: 
  * (SCR_DYN_BYTES), or a dyn value whose kind is only known at run time.
  * A union boxes its ACTIVE arm, so it is walkable exactly when every arm
  * is. */
-function spreadWalkableAsDyn(t: IrType): boolean {
+function spreadWalkableAsDyn(L: Lowerer, t: IrType): boolean {
   if (t.kind === "dyn") return true;
   if (t.kind === "array" || t.kind === "string") return true;
   if (t.kind === "bytes") return t.elem === "u8";
+  if (t.kind === "union") {
+    const def = L.unions.get(t.unionId);
+    return def !== undefined && def.arms.length > 0 &&
+      def.arms.every((a) => spreadWalkableAsDyn(L, a));
+  }
   return false;
 }
+
+/** The DYN rest pack, spreads included — the one call-completion slot
+   * whose arity is allowed to be a runtime fact.
+   *
+   * Every other parameter slot is a fixed ABI position, so a spread into
+   * one has no home (the compile-time completion would have to know the
+   * array's length). A dyn rest slot is different in kind: the callee
+   * receives ONE checked-dynamic array and reads its `length` and indices
+   * through the keyed-dyn paths, so the pack's length IS the call's arity
+   * and the ABI never changes shape. Spreads therefore flatten INTO the
+   * pack at run time (dynArrLit's `spreads`, emitted as
+   * scr_dyn_arr_push_spread — arrays element-by-element, strings by code
+   * point, bytes by byte, everything else V8's spread-call TypeError).
+   *
+   * Every SOURCE goes through dynSpreadSource first, which is what makes
+   * the walk's three kinds enough: the statically-iterable ones drain
+   * into an array there, and a source that would box unwalkable refuses
+   * by name rather than reaching a box the walk cannot step. */
   function dynRestPack(L: Lowerer, sources: readonly (ts.Expression | { ir: IrExpr })[],
     blame: ts.Node, loc: SrcLoc,): IrExpr {
     const isIr = (s: ts.Expression | { ir: IrExpr }): s is { ir: IrExpr } => !("kind" in s);
