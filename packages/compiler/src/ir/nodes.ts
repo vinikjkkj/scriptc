@@ -592,6 +592,20 @@ export function bytesOf(elem: IrBytesElem): IrType {
   return { kind: "bytes", elem };
 }
 
+/** The VIEW each bytes elem is spelled as in a diagnostic. Exhaustive by
+ * construction: the chain this replaced ended in a DEFAULT arm, so a
+ * Float64Array and an Int8Array both read "Float32Array" wherever a
+ * message formatted one. */
+export const BYTES_ELEM_NAMES: Readonly<Record<IrBytesElem, string>> = {
+  u8: "Uint8Array",
+  i8: "Int8Array",
+  u32: "Uint32Array",
+  i32: "Int32Array",
+  f32: "Float32Array",
+  f64: "Float64Array",
+  buf: "ArrayBuffer",
+};
+
 export function mapOf(key: IrType, value: IrType): IrType {
   return { kind: "map", key, value };
 }
