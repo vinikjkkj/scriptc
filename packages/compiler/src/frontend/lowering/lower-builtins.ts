@@ -8536,6 +8536,19 @@ const NUMBER_PREDICATE_FN_T: IrType = funcOf([DYN], BOOL);
     const ft = L.mapTypeOf(L.typeOf(expr));
     if (ft === null || ft === undefined || !typeEquals(ft, NUMBER_PREDICATE_FN_T)) return null;
     const loc = locOf(expr);
+    const name = numberPredicateLift(L, member, fn, loc);
+    return { kind: "closure", fnName: name, captures: [], type: NUMBER_PREDICATE_FN_T, loc };
+  }
+
+/** The lifted `(dyn) => bool` body for one predicate, interned per program
+   * and per member: `function (v) { if (typeof v === "number") return
+   * <number.isX>(v); return false; }`.
+   *
+   * Both the VALUE position above and the CALL form's dyn argument want
+   * exactly this function -- the statics never coerce, so `false` for every
+   * non-number kind is the specified answer and the f64 arm is the same
+   * static a spelled-out f64 call site gets. Returns the lift's name. */
+  function numberPredicateLift(L: Lowerer, member: string, fn: IrLibFn, loc: SrcLoc): string {
     const name = `%number.${member}.value`;
     if (!L.liftedFns.some((f) => f.name === name)) {
       const argId = "v.0";
@@ -8573,7 +8586,7 @@ const NUMBER_PREDICATE_FN_T: IrType = funcOf([DYN], BOOL);
     if (process.env["SCRIPTC_NUMFNVALUE_WHY"] !== undefined) {
       console.error(`[numfnvalue] lift ${loc.file}:${loc.start} ${name}`);
     }
-    return { kind: "closure", fnName: name, captures: [], type: NUMBER_PREDICATE_FN_T, loc };
+    return name;
   }
 
 /** The Number constants, baked as literals — non-finite ones included
@@ -8652,6 +8665,22 @@ const NUMBER_CONSTANTS: Record<string, number | undefined> = {
             loc,
           };
           return { kind: "libCall", fn, args: [coerced], type: BOOL, loc };
+        }
+        // A CHECKED-DYNAMIC argument is the one non-f64 kind that can be
+        // ANSWERED rather than fenced. The side-effect worry the fence
+        // above exists for does not apply: `arg` is already the lowered
+        // value, so nothing is skipped by testing its kind, and the
+        // statics never coerce — `false` for every non-number kind is
+        // the specified answer, not a fallback. The body is the lift the
+        // value position already uses, so the two spellings of the same
+        // question compile to the same code.
+        //
+        // This is `Number.isInteger(max)` over a destructured untyped
+        // option (mysql2 → lru.min's `createLRU`), and the shape every
+        // untyped JS argument validator has.
+        if (arg.type.kind === "dyn") {
+          const lift = numberPredicateLift(L, member, fn, loc);
+          return { kind: "call", callee: lift, args: [arg], type: BOOL, loc };
         }
         L.noLowering(
           `Number.${member} of '${L.fmt(arg.type)}' values`,
