@@ -1,0 +1,121 @@
+P:u8:isView	true
+P:u8:isBuffer	false
+P:u8:toStringTag	[object Uint8Array]
+P:u8:ctorName	Uint8Array
+P:u8:ctorIsU8	true
+P:u8:typeof	object
+P:u8:byteLength	3
+P:u8:isArray	false
+P:u8:clonedTag	[object Uint8Array]
+P:u8:clonedIsU8	true
+P:u8:dynCtorName	Uint8Array
+P:u8:dynCtorIsU8	true
+P:u8:dynCtorIsBuffer	false
+P:u8:dynByteLength	3
+P:u8:dynLength	3
+P:i8:isView	true
+P:i8:isBuffer	false
+P:i8:toStringTag	[object Int8Array]
+P:i8:ctorName	Int8Array
+P:i8:ctorIsU8	false
+P:i8:typeof	object
+P:i8:byteLength	3
+P:i8:isArray	false
+P:i8:clonedTag	[object Int8Array]
+P:i8:clonedIsU8	false
+P:i8:dynCtorName	Int8Array
+P:i8:dynCtorIsU8	false
+P:i8:dynCtorIsBuffer	false
+P:i8:dynByteLength	3
+P:i8:dynLength	3
+P:i32:isView	true
+P:i32:isBuffer	false
+P:i32:toStringTag	[object Int32Array]
+P:i32:ctorName	Int32Array
+P:i32:ctorIsU8	false
+P:i32:typeof	object
+P:i32:byteLength	8
+P:i32:isArray	false
+P:i32:clonedTag	[object Int32Array]
+P:i32:clonedIsU8	false
+P:i32:dynCtorName	Int32Array
+P:i32:dynCtorIsU8	false
+P:i32:dynCtorIsBuffer	false
+P:i32:dynByteLength	8
+P:i32:dynLength	2
+P:f64:isView	true
+P:f64:isBuffer	false
+P:f64:toStringTag	[object Float64Array]
+P:f64:ctorName	Float64Array
+P:f64:ctorIsU8	false
+P:f64:typeof	object
+P:f64:byteLength	16
+P:f64:isArray	false
+P:f64:clonedTag	[object Float64Array]
+P:f64:clonedIsU8	false
+P:f64:dynCtorName	Float64Array
+P:f64:dynCtorIsU8	false
+P:f64:dynCtorIsBuffer	false
+P:f64:dynByteLength	16
+P:f64:dynLength	2
+P:dv:isView	true
+P:dv:isBuffer	false
+P:dv:toStringTag	[object DataView]
+P:dv:ctorName	DataView
+P:dv:ctorIsU8	false
+P:dv:typeof	object
+P:dv:byteLength	8
+P:dv:isArray	false
+P:dv:clonedTag	[object DataView]
+P:dv:clonedIsU8	false
+P:dv:dynCtorName	DataView
+P:dv:dynCtorIsU8	false
+P:dv:dynCtorIsBuffer	false
+P:dv:dynByteLength	8
+P:dv:dynLength	undefined
+P:ab:isView	false
+P:ab:isBuffer	false
+P:ab:toStringTag	[object ArrayBuffer]
+P:ab:ctorName	ArrayBuffer
+P:ab:ctorIsU8	false
+P:ab:typeof	object
+P:ab:byteLength	8
+P:ab:isArray	false
+P:ab:clonedTag	[object ArrayBuffer]
+P:ab:clonedIsU8	false
+P:ab:dynCtorName	ArrayBuffer
+P:ab:dynCtorIsU8	false
+P:ab:dynCtorIsBuffer	false
+P:ab:dynByteLength	8
+P:ab:dynLength	undefined
+P:buf:isView	true
+P:buf:isBuffer	true
+P:buf:toStringTag	[object Uint8Array]
+P:buf:ctorName	Buffer
+P:buf:ctorIsU8	false
+P:buf:typeof	object
+P:buf:byteLength	3
+P:buf:isArray	false
+P:buf:clonedTag	[object Uint8Array]
+P:buf:clonedIsU8	true
+P:buf:dynCtorName	Buffer
+P:buf:dynCtorIsU8	false
+P:buf:dynCtorIsBuffer	true
+P:buf:dynByteLength	3
+P:buf:dynLength	3
+P:sub:isView	true
+P:sub:isBuffer	false
+P:sub:toStringTag	[object Uint8Array]
+P:sub:ctorName	Uint8Array
+P:sub:ctorIsU8	true
+P:sub:typeof	object
+P:sub:byteLength	2
+P:sub:isArray	false
+P:sub:clonedTag	[object Uint8Array]
+P:sub:clonedIsU8	true
+P:sub:dynCtorName	Uint8Array
+P:sub:dynCtorIsU8	true
+P:sub:dynCtorIsBuffer	false
+P:sub:dynByteLength	2
+P:sub:dynLength	2
+MATRIX-END

@@ -15576,12 +15576,24 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
         type: STRING,
         loc,
       };
-      const isBuf: IrExpr = { kind: "libCall", fn: "bytes.isBuffer", args: [value, why], type: BOOL, loc };
-      // `=== Uint8Array` is the NEGATION of Buffer-ness, `=== Buffer` is
-      // Buffer-ness itself; `!==` flips whichever it was.
-      return wantBuffer === negated
-        ? { kind: "unary", op: "!", operand: isBuf, type: BOOL, loc }
-        : isBuf;
+      // `=== Buffer` asks Buffer-ness; `=== Uint8Array` asks PLAIN-ness,
+      // and those stopped being each other's negation when DataView got
+      // a flavor of its own. The question is three-way now -- Uint8Array,
+      // Buffer, DataView -- so the Uint8Array side reads the positive
+      // fact instead of negating the other one. `!bytes.isBuffer` on a
+      // DataView answered `dv.constructor === Uint8Array` TRUE, where
+      // Node answers false: the same silent shape this whole change is
+      // about, arriving through the predicate the flavor was invented
+      // for. Measured on the fixed compiler before it shipped.
+      const flavor: IrExpr = {
+        kind: "libCall",
+        fn: wantBuffer ? "bytes.isBuffer" : "bytes.isPlainU8",
+        args: [value, why],
+        type: BOOL,
+        loc,
+      };
+      // `!==` flips whichever fact was asked; `===` takes it as it is.
+      return negated ? { kind: "unary", op: "!", operand: flavor, type: BOOL, loc } : flavor;
     }
     return null;
   }
@@ -16011,6 +16023,33 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
    * classes are unrelated (a standalone class has no other relatives).
    * Folding is limited to side-effect-free operands — dropping a computed
    * operand would skip its effects, so those are rejected instead. */
+  /** Can this operand's CHECKER type hold a DataView?
+   *
+   * types.ts maps DataView -- and the abstract ArrayBufferView it
+   * satisfies -- to bytes<u8>, the SAME IR type as Uint8Array, so that a
+   * view can alias its owner's storage with no representation of its
+   * own. The price lands on exactly one question: `x instanceof
+   * Uint8Array` is false for a DataView in Node and the IR type cannot
+   * say so. The VALUE can (SCR_BF_DATAVIEW), and this predicate decides
+   * where to ask it -- an operand the checker says can never be a
+   * DataView keeps the constant fold it always had, so the runtime read
+   * appears only on the slots that actually admit one.
+   *
+   * Provenance, not the name: a user's own `class DataView` is a class
+   * like any other and reaches none of this. */
+  function couldBeDataView(L: Lowerer, t: ts.Type): boolean {
+    const parts = t.isUnionType() ? t.getTypes() : [t];
+    return parts.some((p: ts.Type) => {
+      const sym = p.getSymbol() ?? p.getAliasSymbol();
+      if (!sym || (sym.name !== "DataView" && sym.name !== "ArrayBufferView")) return false;
+      return L.checker.declarationsOf(sym).some(
+        (d) =>
+          (ts.isInterfaceDeclaration(d) || ts.isClassDeclaration(d)) &&
+          L.isStdlibFile(d.getSourceFile()),
+      );
+    });
+  }
+
   export function lowerInstanceOf(L: Lowerer, expr: ts.BinaryExpression, loc: SrcLoc): IrExpr {
     // `x instanceof net.Socket` over a union with a netSocket arm — the
     // h2 compat 'connect' narrowing (lower-server.ts): a union tag test.
@@ -16105,7 +16144,12 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
       ) {
         const left = L.lowerExpr(expr.left);
         if (left.type.kind === "dyn") {
-          return { kind: "dynTest", test: "bytes", value: left, type: BOOL, loc };
+          // `u8array`, not `bytes`: SCR_DYN_BYTES carries DataViews too
+          // (DataView maps to bytes<u8>), so the bare kind compare said
+          // TRUE for a boxed DataView where Node says false. The test
+          // reads the payload's flavor; `bytes` keeps its meaning for
+          // every narrowing extraction that wants "this dyn holds u8".
+          return { kind: "dynTest", test: "u8array", value: left, type: BOOL, loc };
         }
       }
       // `u instanceof ArrayBuffer` on an `unknown` value: the SIBLING of
@@ -16235,13 +16279,37 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
             : undefined;
         if (want !== undefined) {
           const left = L.lowerExpr(expr.left);
+          // The DataView hole in the flavor test, and the ONE cell of the
+          // typed-array lattice that used to answer wrongly instead of
+          // refusing (estado-viewtype.md: 1,056 cells, 5 wrong, all of
+          // them this one in a different slot shape).
+          //
+          // `bytes<u8>` is Uint8Array AND Buffer AND DataView. For Buffer
+          // that union is CORRECT -- a Buffer really is an instance of
+          // Uint8Array, which is why one representation works. For
+          // DataView it is not: Node answers false, and the elem compare
+          // below answered true, silently, with exit 0.
+          //
+          // So when the checker admits a DataView the answer comes from
+          // the VALUE (bytes.isDataView, the markBuffer/markPlain
+          // machinery's third flavor) instead of from the type. When it
+          // does not -- every operand in the corpus and every
+          // Uint8Array/Buffer slot in zapo -- nothing changes at all.
+          const dvRisk = want === "u8" && couldBeDataView(L, L.typeOf(expr.left));
+          const notDataView = (v: IrExpr): IrExpr => ({
+            kind: "unary",
+            op: "!",
+            operand: { kind: "libCall", fn: "bytes.isDataView", args: [v], type: BOOL, loc },
+            type: BOOL,
+            loc,
+          });
           if (left.type.kind === "union") {
             const def = L.unions.get(left.type.unionId);
             const tag = (def?.arms ?? []).findIndex(
               (a) => a.kind === "bytes" && a.elem === want,
             );
             if (tag >= 0) {
-              return {
+              const tagTest: IrExpr = {
                 kind: "unionIsTag",
                 unionId: left.type.unionId,
                 tag,
@@ -16250,6 +16318,39 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
                 type: BOOL,
                 loc,
               };
+              if (!dvRisk) return tagTest;
+              // The u8 ARM carries both spellings -- `Uint8Array |
+              // ArrayBuffer | ArrayBufferView` (zapo's own toBytesView
+              // parameter) has TWO arms, not three, because the view
+              // types collapse into the u8 one. So the tag is necessary
+              // and not sufficient, and the payload has to be asked.
+              //
+              // Reading the payload means reading the operand a second
+              // time, so only a pure read qualifies; `&&` short-circuits,
+              // so the narrow is reached only where the tag already
+              // matched and its trust-the-checker extraction is sound.
+              const pure =
+                left.kind === "varRef" ||
+                (left.kind === "unionNarrow" && left.value.kind === "varRef") ||
+                narrowBridgeArm(left)?.kind === "varRef";
+              if (!pure) {
+                L.unsupported(
+                  "SC1090",
+                  expr,
+                  "'instanceof Uint8Array' on a computed operand whose type also admits a DataView " +
+                    "(bind it to a variable first — a DataView shares the Uint8Array byte representation, " +
+                    "so the answer is a flavor read of the value and this operand would have to evaluate twice)",
+                );
+              }
+              const payload: IrExpr = {
+                kind: "unionNarrow",
+                unionId: left.type.unionId,
+                tag,
+                value: L.lowerExpr(expr.left),
+                type: def!.arms[tag]!,
+                loc,
+              };
+              return { kind: "logical", op: "&&", left: tagTest, right: notDataView(payload), type: BOOL, loc };
             }
             // No such arm: the checker already knows the answer is false,
             // and the operand still has to evaluate.
@@ -16267,6 +16368,14 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
           // the fold is: the bridge's arm is the one the constant answers
           // for, so a value that would fail the check is a value whose
           // enclosing narrowing already misread it.
+          // A DataView-admitting bytes<u8> operand: the flavor read, and
+          // it needs no purity rule because the operand still evaluates
+          // exactly once (it is the argument). `dv instanceof Int8Array`
+          // and friends keep the elem compare below -- that answer was
+          // never wrong, because only the u8 elem is shared.
+          if (left.type.kind === "bytes" && dvRisk && left.type.elem === want) {
+            return notDataView(left);
+          }
           const pureRead =
             left.kind === "varRef" ||
             (left.kind === "unionNarrow" && left.value.kind === "varRef") ||

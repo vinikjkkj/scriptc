@@ -1,0 +1,1803 @@
+{
+ "tally": {
+  "MATCH": 63,
+  "WRONG": 0,
+  "TRAP": 193,
+  "DID-NOT-RUN": 0,
+  "NO-ORACLE": 0
+ },
+ "rows": [
+  {
+   "id": "D:u8:Uint8Array",
+   "verdict": "MATCH",
+   "node": "true",
+   "got": "true",
+   "reason": null
+  },
+  {
+   "id": "D:u8:Int8Array",
+   "verdict": "MATCH",
+   "node": "false",
+   "got": "false",
+   "reason": null
+  },
+  {
+   "id": "D:u8:Uint8ClampedArray",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC1090: 'instanceof' right-hand sides other than classes declared in the program is not supported yet"
+  },
+  {
+   "id": "D:u8:Int16Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC1090: 'instanceof' right-hand sides other than classes declared in the program is not supported yet"
+  },
+  {
+   "id": "D:u8:Uint16Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC1090: 'instanceof' right-hand sides other than classes declared in the program is not supported yet"
+  },
+  {
+   "id": "D:u8:Int32Array",
+   "verdict": "MATCH",
+   "node": "false",
+   "got": "false",
+   "reason": null
+  },
+  {
+   "id": "D:u8:Uint32Array",
+   "verdict": "MATCH",
+   "node": "false",
+   "got": "false",
+   "reason": null
+  },
+  {
+   "id": "D:u8:Float32Array",
+   "verdict": "MATCH",
+   "node": "false",
+   "got": "false",
+   "reason": null
+  },
+  {
+   "id": "D:u8:Float64Array",
+   "verdict": "MATCH",
+   "node": "false",
+   "got": "false",
+   "reason": null
+  },
+  {
+   "id": "D:u8:BigInt64Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC1090: 'instanceof' right-hand sides other than classes declared in the program is not supported yet"
+  },
+  {
+   "id": "D:u8:BigUint64Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC1090: 'instanceof' right-hand sides other than classes declared in the program is not supported yet"
+  },
+  {
+   "id": "D:u8:DataView",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC1090: 'instanceof' right-hand sides other than classes declared in the program is not supported yet"
+  },
+  {
+   "id": "D:u8:ArrayBuffer",
+   "verdict": "MATCH",
+   "node": "false",
+   "got": "false",
+   "reason": null
+  },
+  {
+   "id": "D:u8:SharedArrayBuffer",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC1090: 'instanceof' right-hand sides other than classes declared in the program is not supported yet"
+  },
+  {
+   "id": "D:u8:Buffer",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC0001: The right-hand side of an 'instanceof' expression must be either of type 'any', a class, function, or other type assignable to the 'Function' interface type, or an object type with a 'Symbol.hasInstance' method."
+  },
+  {
+   "id": "D:u8:Object",
+   "verdict": "TRAP",
+   "node": "true",
+   "got": null,
+   "reason": "SC1090: 'instanceof' right-hand sides other than classes declared in the program is not supported yet"
+  },
+  {
+   "id": "D:i8:Uint8Array",
+   "verdict": "MATCH",
+   "node": "false",
+   "got": "false",
+   "reason": null
+  },
+  {
+   "id": "D:i8:Int8Array",
+   "verdict": "MATCH",
+   "node": "true",
+   "got": "true",
+   "reason": null
+  },
+  {
+   "id": "D:i8:Uint8ClampedArray",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC1090: 'instanceof' right-hand sides other than classes declared in the program is not supported yet"
+  },
+  {
+   "id": "D:i8:Int16Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC1090: 'instanceof' right-hand sides other than classes declared in the program is not supported yet"
+  },
+  {
+   "id": "D:i8:Uint16Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC1090: 'instanceof' right-hand sides other than classes declared in the program is not supported yet"
+  },
+  {
+   "id": "D:i8:Int32Array",
+   "verdict": "MATCH",
+   "node": "false",
+   "got": "false",
+   "reason": null
+  },
+  {
+   "id": "D:i8:Uint32Array",
+   "verdict": "MATCH",
+   "node": "false",
+   "got": "false",
+   "reason": null
+  },
+  {
+   "id": "D:i8:Float32Array",
+   "verdict": "MATCH",
+   "node": "false",
+   "got": "false",
+   "reason": null
+  },
+  {
+   "id": "D:i8:Float64Array",
+   "verdict": "MATCH",
+   "node": "false",
+   "got": "false",
+   "reason": null
+  },
+  {
+   "id": "D:i8:BigInt64Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC1090: 'instanceof' right-hand sides other than classes declared in the program is not supported yet"
+  },
+  {
+   "id": "D:i8:BigUint64Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC1090: 'instanceof' right-hand sides other than classes declared in the program is not supported yet"
+  },
+  {
+   "id": "D:i8:DataView",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC1090: 'instanceof' right-hand sides other than classes declared in the program is not supported yet"
+  },
+  {
+   "id": "D:i8:ArrayBuffer",
+   "verdict": "MATCH",
+   "node": "false",
+   "got": "false",
+   "reason": null
+  },
+  {
+   "id": "D:i8:SharedArrayBuffer",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC1090: 'instanceof' right-hand sides other than classes declared in the program is not supported yet"
+  },
+  {
+   "id": "D:i8:Buffer",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC0001: The right-hand side of an 'instanceof' expression must be either of type 'any', a class, function, or other type assignable to the 'Function' interface type, or an object type with a 'Symbol.hasInstance' method."
+  },
+  {
+   "id": "D:i8:Object",
+   "verdict": "TRAP",
+   "node": "true",
+   "got": null,
+   "reason": "SC1090: 'instanceof' right-hand sides other than classes declared in the program is not supported yet"
+  },
+  {
+   "id": "D:u8c:Uint8Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2020: 'new Uint8ClampedArray' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "D:u8c:Int8Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2020: 'new Uint8ClampedArray' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "D:u8c:Uint8ClampedArray",
+   "verdict": "TRAP",
+   "node": "true",
+   "got": null,
+   "reason": "SC2020: 'new Uint8ClampedArray' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "D:u8c:Int16Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2020: 'new Uint8ClampedArray' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "D:u8c:Uint16Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2020: 'new Uint8ClampedArray' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "D:u8c:Int32Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2020: 'new Uint8ClampedArray' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "D:u8c:Uint32Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2020: 'new Uint8ClampedArray' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "D:u8c:Float32Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2020: 'new Uint8ClampedArray' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "D:u8c:Float64Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2020: 'new Uint8ClampedArray' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "D:u8c:BigInt64Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2020: 'new Uint8ClampedArray' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "D:u8c:BigUint64Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2020: 'new Uint8ClampedArray' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "D:u8c:DataView",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2020: 'new Uint8ClampedArray' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "D:u8c:ArrayBuffer",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2020: 'new Uint8ClampedArray' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "D:u8c:SharedArrayBuffer",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2020: 'new Uint8ClampedArray' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "D:u8c:Buffer",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC0001: The right-hand side of an 'instanceof' expression must be either of type 'any', a class, function, or other type assignable to the 'Function' interface type, or an object type with a 'Symbol.hasInstance' method."
+  },
+  {
+   "id": "D:u8c:Object",
+   "verdict": "TRAP",
+   "node": "true",
+   "got": null,
+   "reason": "SC2020: 'new Uint8ClampedArray' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "D:i16:Uint8Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2020: 'new Int16Array' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "D:i16:Int8Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2020: 'new Int16Array' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "D:i16:Uint8ClampedArray",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2020: 'new Int16Array' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "D:i16:Int16Array",
+   "verdict": "TRAP",
+   "node": "true",
+   "got": null,
+   "reason": "SC2020: 'new Int16Array' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "D:i16:Uint16Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2020: 'new Int16Array' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "D:i16:Int32Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2020: 'new Int16Array' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "D:i16:Uint32Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2020: 'new Int16Array' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "D:i16:Float32Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2020: 'new Int16Array' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "D:i16:Float64Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2020: 'new Int16Array' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "D:i16:BigInt64Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2020: 'new Int16Array' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "D:i16:BigUint64Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2020: 'new Int16Array' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "D:i16:DataView",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2020: 'new Int16Array' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "D:i16:ArrayBuffer",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2020: 'new Int16Array' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "D:i16:SharedArrayBuffer",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2020: 'new Int16Array' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "D:i16:Buffer",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC0001: The right-hand side of an 'instanceof' expression must be either of type 'any', a class, function, or other type assignable to the 'Function' interface type, or an object type with a 'Symbol.hasInstance' method."
+  },
+  {
+   "id": "D:i16:Object",
+   "verdict": "TRAP",
+   "node": "true",
+   "got": null,
+   "reason": "SC2020: 'new Int16Array' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "D:u16:Uint8Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2020: 'new Uint16Array' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "D:u16:Int8Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2020: 'new Uint16Array' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "D:u16:Uint8ClampedArray",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2020: 'new Uint16Array' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "D:u16:Int16Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2020: 'new Uint16Array' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "D:u16:Uint16Array",
+   "verdict": "TRAP",
+   "node": "true",
+   "got": null,
+   "reason": "SC2020: 'new Uint16Array' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "D:u16:Int32Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2020: 'new Uint16Array' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "D:u16:Uint32Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2020: 'new Uint16Array' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "D:u16:Float32Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2020: 'new Uint16Array' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "D:u16:Float64Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2020: 'new Uint16Array' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "D:u16:BigInt64Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2020: 'new Uint16Array' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "D:u16:BigUint64Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2020: 'new Uint16Array' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "D:u16:DataView",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2020: 'new Uint16Array' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "D:u16:ArrayBuffer",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2020: 'new Uint16Array' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "D:u16:SharedArrayBuffer",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2020: 'new Uint16Array' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "D:u16:Buffer",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC0001: The right-hand side of an 'instanceof' expression must be either of type 'any', a class, function, or other type assignable to the 'Function' interface type, or an object type with a 'Symbol.hasInstance' method."
+  },
+  {
+   "id": "D:u16:Object",
+   "verdict": "TRAP",
+   "node": "true",
+   "got": null,
+   "reason": "SC2020: 'new Uint16Array' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "D:i32:Uint8Array",
+   "verdict": "MATCH",
+   "node": "false",
+   "got": "false",
+   "reason": null
+  },
+  {
+   "id": "D:i32:Int8Array",
+   "verdict": "MATCH",
+   "node": "false",
+   "got": "false",
+   "reason": null
+  },
+  {
+   "id": "D:i32:Uint8ClampedArray",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC1090: 'instanceof' right-hand sides other than classes declared in the program is not supported yet"
+  },
+  {
+   "id": "D:i32:Int16Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC1090: 'instanceof' right-hand sides other than classes declared in the program is not supported yet"
+  },
+  {
+   "id": "D:i32:Uint16Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC1090: 'instanceof' right-hand sides other than classes declared in the program is not supported yet"
+  },
+  {
+   "id": "D:i32:Int32Array",
+   "verdict": "MATCH",
+   "node": "true",
+   "got": "true",
+   "reason": null
+  },
+  {
+   "id": "D:i32:Uint32Array",
+   "verdict": "MATCH",
+   "node": "false",
+   "got": "false",
+   "reason": null
+  },
+  {
+   "id": "D:i32:Float32Array",
+   "verdict": "MATCH",
+   "node": "false",
+   "got": "false",
+   "reason": null
+  },
+  {
+   "id": "D:i32:Float64Array",
+   "verdict": "MATCH",
+   "node": "false",
+   "got": "false",
+   "reason": null
+  },
+  {
+   "id": "D:i32:BigInt64Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC1090: 'instanceof' right-hand sides other than classes declared in the program is not supported yet"
+  },
+  {
+   "id": "D:i32:BigUint64Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC1090: 'instanceof' right-hand sides other than classes declared in the program is not supported yet"
+  },
+  {
+   "id": "D:i32:DataView",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC1090: 'instanceof' right-hand sides other than classes declared in the program is not supported yet"
+  },
+  {
+   "id": "D:i32:ArrayBuffer",
+   "verdict": "MATCH",
+   "node": "false",
+   "got": "false",
+   "reason": null
+  },
+  {
+   "id": "D:i32:SharedArrayBuffer",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC1090: 'instanceof' right-hand sides other than classes declared in the program is not supported yet"
+  },
+  {
+   "id": "D:i32:Buffer",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC0001: The right-hand side of an 'instanceof' expression must be either of type 'any', a class, function, or other type assignable to the 'Function' interface type, or an object type with a 'Symbol.hasInstance' method."
+  },
+  {
+   "id": "D:i32:Object",
+   "verdict": "TRAP",
+   "node": "true",
+   "got": null,
+   "reason": "SC1090: 'instanceof' right-hand sides other than classes declared in the program is not supported yet"
+  },
+  {
+   "id": "D:u32:Uint8Array",
+   "verdict": "MATCH",
+   "node": "false",
+   "got": "false",
+   "reason": null
+  },
+  {
+   "id": "D:u32:Int8Array",
+   "verdict": "MATCH",
+   "node": "false",
+   "got": "false",
+   "reason": null
+  },
+  {
+   "id": "D:u32:Uint8ClampedArray",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC1090: 'instanceof' right-hand sides other than classes declared in the program is not supported yet"
+  },
+  {
+   "id": "D:u32:Int16Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC1090: 'instanceof' right-hand sides other than classes declared in the program is not supported yet"
+  },
+  {
+   "id": "D:u32:Uint16Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC1090: 'instanceof' right-hand sides other than classes declared in the program is not supported yet"
+  },
+  {
+   "id": "D:u32:Int32Array",
+   "verdict": "MATCH",
+   "node": "false",
+   "got": "false",
+   "reason": null
+  },
+  {
+   "id": "D:u32:Uint32Array",
+   "verdict": "MATCH",
+   "node": "true",
+   "got": "true",
+   "reason": null
+  },
+  {
+   "id": "D:u32:Float32Array",
+   "verdict": "MATCH",
+   "node": "false",
+   "got": "false",
+   "reason": null
+  },
+  {
+   "id": "D:u32:Float64Array",
+   "verdict": "MATCH",
+   "node": "false",
+   "got": "false",
+   "reason": null
+  },
+  {
+   "id": "D:u32:BigInt64Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC1090: 'instanceof' right-hand sides other than classes declared in the program is not supported yet"
+  },
+  {
+   "id": "D:u32:BigUint64Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC1090: 'instanceof' right-hand sides other than classes declared in the program is not supported yet"
+  },
+  {
+   "id": "D:u32:DataView",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC1090: 'instanceof' right-hand sides other than classes declared in the program is not supported yet"
+  },
+  {
+   "id": "D:u32:ArrayBuffer",
+   "verdict": "MATCH",
+   "node": "false",
+   "got": "false",
+   "reason": null
+  },
+  {
+   "id": "D:u32:SharedArrayBuffer",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC1090: 'instanceof' right-hand sides other than classes declared in the program is not supported yet"
+  },
+  {
+   "id": "D:u32:Buffer",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC0001: The right-hand side of an 'instanceof' expression must be either of type 'any', a class, function, or other type assignable to the 'Function' interface type, or an object type with a 'Symbol.hasInstance' method."
+  },
+  {
+   "id": "D:u32:Object",
+   "verdict": "TRAP",
+   "node": "true",
+   "got": null,
+   "reason": "SC1090: 'instanceof' right-hand sides other than classes declared in the program is not supported yet"
+  },
+  {
+   "id": "D:f32:Uint8Array",
+   "verdict": "MATCH",
+   "node": "false",
+   "got": "false",
+   "reason": null
+  },
+  {
+   "id": "D:f32:Int8Array",
+   "verdict": "MATCH",
+   "node": "false",
+   "got": "false",
+   "reason": null
+  },
+  {
+   "id": "D:f32:Uint8ClampedArray",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC1090: 'instanceof' right-hand sides other than classes declared in the program is not supported yet"
+  },
+  {
+   "id": "D:f32:Int16Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC1090: 'instanceof' right-hand sides other than classes declared in the program is not supported yet"
+  },
+  {
+   "id": "D:f32:Uint16Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC1090: 'instanceof' right-hand sides other than classes declared in the program is not supported yet"
+  },
+  {
+   "id": "D:f32:Int32Array",
+   "verdict": "MATCH",
+   "node": "false",
+   "got": "false",
+   "reason": null
+  },
+  {
+   "id": "D:f32:Uint32Array",
+   "verdict": "MATCH",
+   "node": "false",
+   "got": "false",
+   "reason": null
+  },
+  {
+   "id": "D:f32:Float32Array",
+   "verdict": "MATCH",
+   "node": "true",
+   "got": "true",
+   "reason": null
+  },
+  {
+   "id": "D:f32:Float64Array",
+   "verdict": "MATCH",
+   "node": "false",
+   "got": "false",
+   "reason": null
+  },
+  {
+   "id": "D:f32:BigInt64Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC1090: 'instanceof' right-hand sides other than classes declared in the program is not supported yet"
+  },
+  {
+   "id": "D:f32:BigUint64Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC1090: 'instanceof' right-hand sides other than classes declared in the program is not supported yet"
+  },
+  {
+   "id": "D:f32:DataView",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC1090: 'instanceof' right-hand sides other than classes declared in the program is not supported yet"
+  },
+  {
+   "id": "D:f32:ArrayBuffer",
+   "verdict": "MATCH",
+   "node": "false",
+   "got": "false",
+   "reason": null
+  },
+  {
+   "id": "D:f32:SharedArrayBuffer",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC1090: 'instanceof' right-hand sides other than classes declared in the program is not supported yet"
+  },
+  {
+   "id": "D:f32:Buffer",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC0001: The right-hand side of an 'instanceof' expression must be either of type 'any', a class, function, or other type assignable to the 'Function' interface type, or an object type with a 'Symbol.hasInstance' method."
+  },
+  {
+   "id": "D:f32:Object",
+   "verdict": "TRAP",
+   "node": "true",
+   "got": null,
+   "reason": "SC1090: 'instanceof' right-hand sides other than classes declared in the program is not supported yet"
+  },
+  {
+   "id": "D:f64:Uint8Array",
+   "verdict": "MATCH",
+   "node": "false",
+   "got": "false",
+   "reason": null
+  },
+  {
+   "id": "D:f64:Int8Array",
+   "verdict": "MATCH",
+   "node": "false",
+   "got": "false",
+   "reason": null
+  },
+  {
+   "id": "D:f64:Uint8ClampedArray",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC1090: 'instanceof' right-hand sides other than classes declared in the program is not supported yet"
+  },
+  {
+   "id": "D:f64:Int16Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC1090: 'instanceof' right-hand sides other than classes declared in the program is not supported yet"
+  },
+  {
+   "id": "D:f64:Uint16Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC1090: 'instanceof' right-hand sides other than classes declared in the program is not supported yet"
+  },
+  {
+   "id": "D:f64:Int32Array",
+   "verdict": "MATCH",
+   "node": "false",
+   "got": "false",
+   "reason": null
+  },
+  {
+   "id": "D:f64:Uint32Array",
+   "verdict": "MATCH",
+   "node": "false",
+   "got": "false",
+   "reason": null
+  },
+  {
+   "id": "D:f64:Float32Array",
+   "verdict": "MATCH",
+   "node": "false",
+   "got": "false",
+   "reason": null
+  },
+  {
+   "id": "D:f64:Float64Array",
+   "verdict": "MATCH",
+   "node": "true",
+   "got": "true",
+   "reason": null
+  },
+  {
+   "id": "D:f64:BigInt64Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC1090: 'instanceof' right-hand sides other than classes declared in the program is not supported yet"
+  },
+  {
+   "id": "D:f64:BigUint64Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC1090: 'instanceof' right-hand sides other than classes declared in the program is not supported yet"
+  },
+  {
+   "id": "D:f64:DataView",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC1090: 'instanceof' right-hand sides other than classes declared in the program is not supported yet"
+  },
+  {
+   "id": "D:f64:ArrayBuffer",
+   "verdict": "MATCH",
+   "node": "false",
+   "got": "false",
+   "reason": null
+  },
+  {
+   "id": "D:f64:SharedArrayBuffer",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC1090: 'instanceof' right-hand sides other than classes declared in the program is not supported yet"
+  },
+  {
+   "id": "D:f64:Buffer",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC0001: The right-hand side of an 'instanceof' expression must be either of type 'any', a class, function, or other type assignable to the 'Function' interface type, or an object type with a 'Symbol.hasInstance' method."
+  },
+  {
+   "id": "D:f64:Object",
+   "verdict": "TRAP",
+   "node": "true",
+   "got": null,
+   "reason": "SC1090: 'instanceof' right-hand sides other than classes declared in the program is not supported yet"
+  },
+  {
+   "id": "D:bi64:Uint8Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2020: 'new BigInt64Array' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "D:bi64:Int8Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2020: 'new BigInt64Array' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "D:bi64:Uint8ClampedArray",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2020: 'new BigInt64Array' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "D:bi64:Int16Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2020: 'new BigInt64Array' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "D:bi64:Uint16Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2020: 'new BigInt64Array' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "D:bi64:Int32Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2020: 'new BigInt64Array' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "D:bi64:Uint32Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2020: 'new BigInt64Array' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "D:bi64:Float32Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2020: 'new BigInt64Array' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "D:bi64:Float64Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2020: 'new BigInt64Array' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "D:bi64:BigInt64Array",
+   "verdict": "TRAP",
+   "node": "true",
+   "got": null,
+   "reason": "SC2020: 'new BigInt64Array' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "D:bi64:BigUint64Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2020: 'new BigInt64Array' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "D:bi64:DataView",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2020: 'new BigInt64Array' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "D:bi64:ArrayBuffer",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2020: 'new BigInt64Array' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "D:bi64:SharedArrayBuffer",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2020: 'new BigInt64Array' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "D:bi64:Buffer",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC0001: The right-hand side of an 'instanceof' expression must be either of type 'any', a class, function, or other type assignable to the 'Function' interface type, or an object type with a 'Symbol.hasInstance' method."
+  },
+  {
+   "id": "D:bi64:Object",
+   "verdict": "TRAP",
+   "node": "true",
+   "got": null,
+   "reason": "SC2020: 'new BigInt64Array' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "D:bu64:Uint8Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2020: 'new BigUint64Array' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "D:bu64:Int8Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2020: 'new BigUint64Array' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "D:bu64:Uint8ClampedArray",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2020: 'new BigUint64Array' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "D:bu64:Int16Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2020: 'new BigUint64Array' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "D:bu64:Uint16Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2020: 'new BigUint64Array' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "D:bu64:Int32Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2020: 'new BigUint64Array' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "D:bu64:Uint32Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2020: 'new BigUint64Array' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "D:bu64:Float32Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2020: 'new BigUint64Array' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "D:bu64:Float64Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2020: 'new BigUint64Array' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "D:bu64:BigInt64Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2020: 'new BigUint64Array' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "D:bu64:BigUint64Array",
+   "verdict": "TRAP",
+   "node": "true",
+   "got": null,
+   "reason": "SC2020: 'new BigUint64Array' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "D:bu64:DataView",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2020: 'new BigUint64Array' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "D:bu64:ArrayBuffer",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2020: 'new BigUint64Array' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "D:bu64:SharedArrayBuffer",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2020: 'new BigUint64Array' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "D:bu64:Buffer",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC0001: The right-hand side of an 'instanceof' expression must be either of type 'any', a class, function, or other type assignable to the 'Function' interface type, or an object type with a 'Symbol.hasInstance' method."
+  },
+  {
+   "id": "D:bu64:Object",
+   "verdict": "TRAP",
+   "node": "true",
+   "got": null,
+   "reason": "SC2020: 'new BigUint64Array' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "D:dv:Uint8Array",
+   "verdict": "MATCH",
+   "node": "false",
+   "got": "false",
+   "reason": null
+  },
+  {
+   "id": "D:dv:Int8Array",
+   "verdict": "MATCH",
+   "node": "false",
+   "got": "false",
+   "reason": null
+  },
+  {
+   "id": "D:dv:Uint8ClampedArray",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC1090: 'instanceof' right-hand sides other than classes declared in the program is not supported yet"
+  },
+  {
+   "id": "D:dv:Int16Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC1090: 'instanceof' right-hand sides other than classes declared in the program is not supported yet"
+  },
+  {
+   "id": "D:dv:Uint16Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC1090: 'instanceof' right-hand sides other than classes declared in the program is not supported yet"
+  },
+  {
+   "id": "D:dv:Int32Array",
+   "verdict": "MATCH",
+   "node": "false",
+   "got": "false",
+   "reason": null
+  },
+  {
+   "id": "D:dv:Uint32Array",
+   "verdict": "MATCH",
+   "node": "false",
+   "got": "false",
+   "reason": null
+  },
+  {
+   "id": "D:dv:Float32Array",
+   "verdict": "MATCH",
+   "node": "false",
+   "got": "false",
+   "reason": null
+  },
+  {
+   "id": "D:dv:Float64Array",
+   "verdict": "MATCH",
+   "node": "false",
+   "got": "false",
+   "reason": null
+  },
+  {
+   "id": "D:dv:BigInt64Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC1090: 'instanceof' right-hand sides other than classes declared in the program is not supported yet"
+  },
+  {
+   "id": "D:dv:BigUint64Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC1090: 'instanceof' right-hand sides other than classes declared in the program is not supported yet"
+  },
+  {
+   "id": "D:dv:DataView",
+   "verdict": "TRAP",
+   "node": "true",
+   "got": null,
+   "reason": "SC1090: 'instanceof' right-hand sides other than classes declared in the program is not supported yet"
+  },
+  {
+   "id": "D:dv:ArrayBuffer",
+   "verdict": "MATCH",
+   "node": "false",
+   "got": "false",
+   "reason": null
+  },
+  {
+   "id": "D:dv:SharedArrayBuffer",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC1090: 'instanceof' right-hand sides other than classes declared in the program is not supported yet"
+  },
+  {
+   "id": "D:dv:Buffer",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC0001: The right-hand side of an 'instanceof' expression must be either of type 'any', a class, function, or other type assignable to the 'Function' interface type, or an object type with a 'Symbol.hasInstance' method."
+  },
+  {
+   "id": "D:dv:Object",
+   "verdict": "TRAP",
+   "node": "true",
+   "got": null,
+   "reason": "SC1090: 'instanceof' right-hand sides other than classes declared in the program is not supported yet"
+  },
+  {
+   "id": "D:ab:Uint8Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC1090: '.buffer' outside new DataView(x.buffer, ...) / Buffer.from(x.buffer, ...) (no free-standing ArrayBuffer value exists; subarray() answers an aliasing view directly) is not supported yet"
+  },
+  {
+   "id": "D:ab:Int8Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC1090: '.buffer' outside new DataView(x.buffer, ...) / Buffer.from(x.buffer, ...) (no free-standing ArrayBuffer value exists; subarray() answers an aliasing view directly) is not supported yet"
+  },
+  {
+   "id": "D:ab:Uint8ClampedArray",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC1090: '.buffer' outside new DataView(x.buffer, ...) / Buffer.from(x.buffer, ...) (no free-standing ArrayBuffer value exists; subarray() answers an aliasing view directly) is not supported yet"
+  },
+  {
+   "id": "D:ab:Int16Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC1090: '.buffer' outside new DataView(x.buffer, ...) / Buffer.from(x.buffer, ...) (no free-standing ArrayBuffer value exists; subarray() answers an aliasing view directly) is not supported yet"
+  },
+  {
+   "id": "D:ab:Uint16Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC1090: '.buffer' outside new DataView(x.buffer, ...) / Buffer.from(x.buffer, ...) (no free-standing ArrayBuffer value exists; subarray() answers an aliasing view directly) is not supported yet"
+  },
+  {
+   "id": "D:ab:Int32Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC1090: '.buffer' outside new DataView(x.buffer, ...) / Buffer.from(x.buffer, ...) (no free-standing ArrayBuffer value exists; subarray() answers an aliasing view directly) is not supported yet"
+  },
+  {
+   "id": "D:ab:Uint32Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC1090: '.buffer' outside new DataView(x.buffer, ...) / Buffer.from(x.buffer, ...) (no free-standing ArrayBuffer value exists; subarray() answers an aliasing view directly) is not supported yet"
+  },
+  {
+   "id": "D:ab:Float32Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC1090: '.buffer' outside new DataView(x.buffer, ...) / Buffer.from(x.buffer, ...) (no free-standing ArrayBuffer value exists; subarray() answers an aliasing view directly) is not supported yet"
+  },
+  {
+   "id": "D:ab:Float64Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC1090: '.buffer' outside new DataView(x.buffer, ...) / Buffer.from(x.buffer, ...) (no free-standing ArrayBuffer value exists; subarray() answers an aliasing view directly) is not supported yet"
+  },
+  {
+   "id": "D:ab:BigInt64Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC1090: '.buffer' outside new DataView(x.buffer, ...) / Buffer.from(x.buffer, ...) (no free-standing ArrayBuffer value exists; subarray() answers an aliasing view directly) is not supported yet"
+  },
+  {
+   "id": "D:ab:BigUint64Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC1090: '.buffer' outside new DataView(x.buffer, ...) / Buffer.from(x.buffer, ...) (no free-standing ArrayBuffer value exists; subarray() answers an aliasing view directly) is not supported yet"
+  },
+  {
+   "id": "D:ab:DataView",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC1090: '.buffer' outside new DataView(x.buffer, ...) / Buffer.from(x.buffer, ...) (no free-standing ArrayBuffer value exists; subarray() answers an aliasing view directly) is not supported yet"
+  },
+  {
+   "id": "D:ab:ArrayBuffer",
+   "verdict": "TRAP",
+   "node": "true",
+   "got": null,
+   "reason": "SC1090: '.buffer' outside new DataView(x.buffer, ...) / Buffer.from(x.buffer, ...) (no free-standing ArrayBuffer value exists; subarray() answers an aliasing view directly) is not supported yet"
+  },
+  {
+   "id": "D:ab:SharedArrayBuffer",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC1090: '.buffer' outside new DataView(x.buffer, ...) / Buffer.from(x.buffer, ...) (no free-standing ArrayBuffer value exists; subarray() answers an aliasing view directly) is not supported yet"
+  },
+  {
+   "id": "D:ab:Buffer",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC0001: The right-hand side of an 'instanceof' expression must be either of type 'any', a class, function, or other type assignable to the 'Function' interface type, or an object type with a 'Symbol.hasInstance' method."
+  },
+  {
+   "id": "D:ab:Object",
+   "verdict": "TRAP",
+   "node": "true",
+   "got": null,
+   "reason": "SC1090: '.buffer' outside new DataView(x.buffer, ...) / Buffer.from(x.buffer, ...) (no free-standing ArrayBuffer value exists; subarray() answers an aliasing view directly) is not supported yet"
+  },
+  {
+   "id": "D:sab:Uint8Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2020: 'new SharedArrayBuffer' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "D:sab:Int8Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2020: 'new SharedArrayBuffer' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "D:sab:Uint8ClampedArray",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2020: 'new SharedArrayBuffer' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "D:sab:Int16Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2020: 'new SharedArrayBuffer' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "D:sab:Uint16Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2020: 'new SharedArrayBuffer' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "D:sab:Int32Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2020: 'new SharedArrayBuffer' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "D:sab:Uint32Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2020: 'new SharedArrayBuffer' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "D:sab:Float32Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2020: 'new SharedArrayBuffer' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "D:sab:Float64Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2020: 'new SharedArrayBuffer' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "D:sab:BigInt64Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2020: 'new SharedArrayBuffer' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "D:sab:BigUint64Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2020: 'new SharedArrayBuffer' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "D:sab:DataView",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2020: 'new SharedArrayBuffer' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "D:sab:ArrayBuffer",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2020: 'new SharedArrayBuffer' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "D:sab:SharedArrayBuffer",
+   "verdict": "TRAP",
+   "node": "true",
+   "got": null,
+   "reason": "SC2020: 'new SharedArrayBuffer' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "D:sab:Buffer",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC0001: The right-hand side of an 'instanceof' expression must be either of type 'any', a class, function, or other type assignable to the 'Function' interface type, or an object type with a 'Symbol.hasInstance' method."
+  },
+  {
+   "id": "D:sab:Object",
+   "verdict": "TRAP",
+   "node": "true",
+   "got": null,
+   "reason": "SC2020: 'new SharedArrayBuffer' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "D:buf:Uint8Array",
+   "verdict": "MATCH",
+   "node": "true",
+   "got": "true",
+   "reason": null
+  },
+  {
+   "id": "D:buf:Int8Array",
+   "verdict": "MATCH",
+   "node": "false",
+   "got": "false",
+   "reason": null
+  },
+  {
+   "id": "D:buf:Uint8ClampedArray",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC1090: 'instanceof' right-hand sides other than classes declared in the program is not supported yet"
+  },
+  {
+   "id": "D:buf:Int16Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC1090: 'instanceof' right-hand sides other than classes declared in the program is not supported yet"
+  },
+  {
+   "id": "D:buf:Uint16Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC1090: 'instanceof' right-hand sides other than classes declared in the program is not supported yet"
+  },
+  {
+   "id": "D:buf:Int32Array",
+   "verdict": "MATCH",
+   "node": "false",
+   "got": "false",
+   "reason": null
+  },
+  {
+   "id": "D:buf:Uint32Array",
+   "verdict": "MATCH",
+   "node": "false",
+   "got": "false",
+   "reason": null
+  },
+  {
+   "id": "D:buf:Float32Array",
+   "verdict": "MATCH",
+   "node": "false",
+   "got": "false",
+   "reason": null
+  },
+  {
+   "id": "D:buf:Float64Array",
+   "verdict": "MATCH",
+   "node": "false",
+   "got": "false",
+   "reason": null
+  },
+  {
+   "id": "D:buf:BigInt64Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC1090: 'instanceof' right-hand sides other than classes declared in the program is not supported yet"
+  },
+  {
+   "id": "D:buf:BigUint64Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC1090: 'instanceof' right-hand sides other than classes declared in the program is not supported yet"
+  },
+  {
+   "id": "D:buf:DataView",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC1090: 'instanceof' right-hand sides other than classes declared in the program is not supported yet"
+  },
+  {
+   "id": "D:buf:ArrayBuffer",
+   "verdict": "MATCH",
+   "node": "false",
+   "got": "false",
+   "reason": null
+  },
+  {
+   "id": "D:buf:SharedArrayBuffer",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC1090: 'instanceof' right-hand sides other than classes declared in the program is not supported yet"
+  },
+  {
+   "id": "D:buf:Buffer",
+   "verdict": "TRAP",
+   "node": "true",
+   "got": null,
+   "reason": "SC0001: The right-hand side of an 'instanceof' expression must be either of type 'any', a class, function, or other type assignable to the 'Function' interface type, or an object type with a 'Symbol.hasInstance' method."
+  },
+  {
+   "id": "D:buf:Object",
+   "verdict": "TRAP",
+   "node": "true",
+   "got": null,
+   "reason": "SC1090: 'instanceof' right-hand sides other than classes declared in the program is not supported yet"
+  },
+  {
+   "id": "D:sub:Uint8Array",
+   "verdict": "MATCH",
+   "node": "true",
+   "got": "true",
+   "reason": null
+  },
+  {
+   "id": "D:sub:Int8Array",
+   "verdict": "MATCH",
+   "node": "false",
+   "got": "false",
+   "reason": null
+  },
+  {
+   "id": "D:sub:Uint8ClampedArray",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC1090: 'instanceof' right-hand sides other than classes declared in the program is not supported yet"
+  },
+  {
+   "id": "D:sub:Int16Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC1090: 'instanceof' right-hand sides other than classes declared in the program is not supported yet"
+  },
+  {
+   "id": "D:sub:Uint16Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC1090: 'instanceof' right-hand sides other than classes declared in the program is not supported yet"
+  },
+  {
+   "id": "D:sub:Int32Array",
+   "verdict": "MATCH",
+   "node": "false",
+   "got": "false",
+   "reason": null
+  },
+  {
+   "id": "D:sub:Uint32Array",
+   "verdict": "MATCH",
+   "node": "false",
+   "got": "false",
+   "reason": null
+  },
+  {
+   "id": "D:sub:Float32Array",
+   "verdict": "MATCH",
+   "node": "false",
+   "got": "false",
+   "reason": null
+  },
+  {
+   "id": "D:sub:Float64Array",
+   "verdict": "MATCH",
+   "node": "false",
+   "got": "false",
+   "reason": null
+  },
+  {
+   "id": "D:sub:BigInt64Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC1090: 'instanceof' right-hand sides other than classes declared in the program is not supported yet"
+  },
+  {
+   "id": "D:sub:BigUint64Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC1090: 'instanceof' right-hand sides other than classes declared in the program is not supported yet"
+  },
+  {
+   "id": "D:sub:DataView",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC1090: 'instanceof' right-hand sides other than classes declared in the program is not supported yet"
+  },
+  {
+   "id": "D:sub:ArrayBuffer",
+   "verdict": "MATCH",
+   "node": "false",
+   "got": "false",
+   "reason": null
+  },
+  {
+   "id": "D:sub:SharedArrayBuffer",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC1090: 'instanceof' right-hand sides other than classes declared in the program is not supported yet"
+  },
+  {
+   "id": "D:sub:Buffer",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC0001: The right-hand side of an 'instanceof' expression must be either of type 'any', a class, function, or other type assignable to the 'Function' interface type, or an object type with a 'Symbol.hasInstance' method."
+  },
+  {
+   "id": "D:sub:Object",
+   "verdict": "TRAP",
+   "node": "true",
+   "got": null,
+   "reason": "SC1090: 'instanceof' right-hand sides other than classes declared in the program is not supported yet"
+  }
+ ]
+}

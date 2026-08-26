@@ -968,7 +968,10 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   // refusal an UNCLASSIFIED value raises.
   "bytes.markBuffer": { argTypes: [BYTES_U8], result: BYTES_U8 },
   "bytes.markPlain": { argTypes: [BYTES_U8], result: BYTES_U8 },
+  "bytes.markDataView": { argTypes: [BYTES_U8], result: BYTES_U8 },
   "bytes.isBuffer": { argTypes: [BYTES_U8, STRING], result: BOOL },
+  "bytes.isDataView": { argTypes: [BYTES_U8], result: BOOL },
+  "bytes.isPlainU8": { argTypes: [BYTES_U8, STRING], result: BOOL },
   // The checked-dynamic compare/equals validators (Node's argument
   // ladders over dyn-boxed invalid-input probes).
   "buffer.compareChk": { argTypes: [DYN, DYN], result: F64 },

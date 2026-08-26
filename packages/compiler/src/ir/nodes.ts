@@ -4083,6 +4083,37 @@ export type IrLibFn =
   | "bytes.markBuffer"
   | "bytes.markPlain"
   | "bytes.isBuffer"
+  /** The THIRD u8 spelling, and the one `instanceof` needs.
+   *
+   * DataView maps to bytes<u8> (types.ts: "the ONE view kind") so a view
+   * aliases its owner's storage for free. That erased the only question
+   * `instanceof Uint8Array` still had to answer over a u8 value -- a
+   * DataView is NOT a Uint8Array, and Node says false -- and the answer
+   * came back TRUE with no diagnostic and exit 0, in the default static
+   * lane with no flags. Measured across 1,056 (value, slot shape,
+   * constructor) cells: it was the ONLY silently wrong cell in the whole
+   * typed-array lattice, and it was wrong in all five slot shapes
+   * (estado-viewtype.md).
+   *
+   * markDataView stamps a freshly constructed view, on the markBuffer/
+   * markPlain footing exactly (borrowed argument, owned result, fresh
+   * constructions only). isDataView reads it and, unlike isBuffer, never
+   * throws on an UNCLASSIFIED value: this flavor has exactly ONE
+   * producer, so "nobody stamped it" IS the answer "not a DataView" --
+   * where isBuffer's two answers both have producers and neither is the
+   * default. That is what lets `instanceof Uint8Array` keep answering
+   * for the unstamped values it already answered for. */
+  | "bytes.markDataView"
+  | "bytes.isDataView"
+  /** `x.constructor === Uint8Array` -- the POSITIVE half of the flavor
+   * read, and its own libFn because the question became three-way.
+   *
+   * It used to be spelled `!bytes.isBuffer`, which was exact while u8
+   * meant Uint8Array-or-Buffer. It stopped being exact the moment
+   * DataView acquired a flavor: `!isBuffer` answers TRUE for a DataView,
+   * where Node answers false. May-throw, exactly like isBuffer and for
+   * the same reason -- an UNCLASSIFIED value has no honest answer. */
+  | "bytes.isPlainU8"
   /** The deprecated `new Buffer(number, 'enc')` string-arm rejection:
    * always throws Node's ERR_INVALID_ARG_TYPE ("The \"string\" argument
    * must be of type string. Received ..."). Borrowed dyn; may-throw. */
@@ -6529,7 +6560,13 @@ export type IrExpr =
    * `data instanceof ArrayBuffer` that every WebSocket message handler
    * writes was a refusal, and the `instanceof Uint8Array` line ABOVE it
    * silently decided the dispatch on its own. */
-  | { kind: "dynTest"; test: "string" | "number" | "boolean" | "undefined" | "null" | "nullish" | "bytes" | "arraybuffer" | "object" | "array" | "truthy" | "error" | "function" | "bigint"; negated?: true; value: IrExpr; type: IrType; loc: SrcLoc }
+  /** `u8array` is `bytes` MINUS the DataViews: SCR_DYN_BYTES carries both
+   * (DataView maps to bytes<u8>), so the bare kind compare answers TRUE
+   * for a boxed DataView where Node's `instanceof Uint8Array` answers
+   * false. `bytes` keeps its meaning -- "this dyn holds u8 bytes", which
+   * is what every narrowing extraction wants -- and the instanceof site
+   * uses the flavor-aware one. */
+  | { kind: "dynTest"; test: "string" | "number" | "boolean" | "undefined" | "null" | "nullish" | "bytes" | "u8array" | "arraybuffer" | "object" | "array" | "truthy" | "error" | "function" | "bigint"; negated?: true; value: IrExpr; type: IrType; loc: SrcLoc }
   /** Keyed read on a dyn value — `pkg.name` / `pkg["k"]` / the
    * `pkg?.scripts` chain step on a JSON.parse result. `key` is
    * string-typed (a strLit for the dot form); `type` is always dyn. An
@@ -10965,6 +11002,7 @@ export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   // the honest answer is a refusal, and it is a RUNTIME one because the
   // flavor is a runtime property. The two marks never throw.
   "bytes.isBuffer",
+  "bytes.isPlainU8",
   "buffer.newStringFail",
   "fs.toUnixTimestamp",
   "fs.existsChk",

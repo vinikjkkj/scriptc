@@ -1,0 +1,851 @@
+{
+ "tally": {
+  "MATCH": 39,
+  "WRONG": 9,
+  "TRAP": 72,
+  "DID-NOT-RUN": 0,
+  "NO-ORACLE": 0
+ },
+ "rows": [
+  {
+   "id": "P:u8:isView",
+   "verdict": "MATCH",
+   "node": "true",
+   "got": "true",
+   "reason": null
+  },
+  {
+   "id": "P:u8:isBuffer",
+   "verdict": "MATCH",
+   "node": "false",
+   "got": "false",
+   "reason": null
+  },
+  {
+   "id": "P:u8:toStringTag",
+   "verdict": "TRAP",
+   "node": "[object Uint8Array]",
+   "got": null,
+   "reason": "SC1090: Function.prototype.call on a compiled function value (compiled calls are direct — no runtime 'this' or arguments object exists to re-route; spell the call directly: 'Object.prototype.toString(...)') is not supported yet"
+  },
+  {
+   "id": "P:u8:ctorName",
+   "verdict": "TRAP",
+   "node": "Uint8Array",
+   "got": null,
+   "reason": "SC2020: 'Function.name' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "P:u8:ctorIsU8",
+   "verdict": "MATCH",
+   "node": "true",
+   "got": "true",
+   "reason": null
+  },
+  {
+   "id": "P:u8:typeof",
+   "verdict": "MATCH",
+   "node": "object",
+   "got": "object",
+   "reason": null
+  },
+  {
+   "id": "P:u8:byteLength",
+   "verdict": "MATCH",
+   "node": "3",
+   "got": "3",
+   "reason": null
+  },
+  {
+   "id": "P:u8:isArray",
+   "verdict": "MATCH",
+   "node": "false",
+   "got": "false",
+   "reason": null
+  },
+  {
+   "id": "P:u8:clonedTag",
+   "verdict": "TRAP",
+   "node": "[object Uint8Array]",
+   "got": null,
+   "reason": "SC1090: Function.prototype.call on a compiled function value (compiled calls are direct — no runtime 'this' or arguments object exists to re-route; spell the call directly: 'Object.prototype.toString(...)') is not supported yet"
+  },
+  {
+   "id": "P:u8:clonedIsU8",
+   "verdict": "TRAP",
+   "node": "true",
+   "got": null,
+   "reason": "SC1090: 'instanceof Uint8Array' on this operand (supported: a union carrying the flavor as an arm, or a bound value of a bytes type — an 'unknown' operand needs a runtime flavor test the checked-dynamic tree does not carry yet: it tags bytes as one kind, and only Uint8Array reads that tag) is not supported yet"
+  },
+  {
+   "id": "P:u8:dynCtorName",
+   "verdict": "MATCH",
+   "node": "Uint8Array",
+   "got": "Uint8Array",
+   "reason": null
+  },
+  {
+   "id": "P:u8:dynCtorIsU8",
+   "verdict": "TRAP",
+   "node": "true",
+   "got": null,
+   "reason": "SC2020: 'Uint8Array' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "P:u8:dynCtorIsBuffer",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2020: 'Buffer' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "P:u8:dynByteLength",
+   "verdict": "WRONG",
+   "node": "3",
+   "got": "undefined",
+   "reason": null
+  },
+  {
+   "id": "P:u8:dynLength",
+   "verdict": "MATCH",
+   "node": "3",
+   "got": "3",
+   "reason": null
+  },
+  {
+   "id": "P:i8:isView",
+   "verdict": "MATCH",
+   "node": "true",
+   "got": "true",
+   "reason": null
+  },
+  {
+   "id": "P:i8:isBuffer",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2020: 'Buffer.isBuffer of 'Float32Array' values' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "P:i8:toStringTag",
+   "verdict": "TRAP",
+   "node": "[object Int8Array]",
+   "got": null,
+   "reason": "SC1090: Function.prototype.call on a compiled function value (compiled calls are direct — no runtime 'this' or arguments object exists to re-route; spell the call directly: 'Object.prototype.toString(...)') is not supported yet"
+  },
+  {
+   "id": "P:i8:ctorName",
+   "verdict": "TRAP",
+   "node": "Int8Array",
+   "got": null,
+   "reason": "SC2020: 'Function.name' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "P:i8:ctorIsU8",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2020: 'Int8Array<ArrayBuffer>.constructor' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "P:i8:typeof",
+   "verdict": "MATCH",
+   "node": "object",
+   "got": "object",
+   "reason": null
+  },
+  {
+   "id": "P:i8:byteLength",
+   "verdict": "MATCH",
+   "node": "3",
+   "got": "3",
+   "reason": null
+  },
+  {
+   "id": "P:i8:isArray",
+   "verdict": "MATCH",
+   "node": "false",
+   "got": "false",
+   "reason": null
+  },
+  {
+   "id": "P:i8:clonedTag",
+   "verdict": "TRAP",
+   "node": "[object Int8Array]",
+   "got": null,
+   "reason": "SC1090: Function.prototype.call on a compiled function value (compiled calls are direct — no runtime 'this' or arguments object exists to re-route; spell the call directly: 'Object.prototype.toString(...)') is not supported yet"
+  },
+  {
+   "id": "P:i8:clonedIsU8",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2020: 'structuredClone with a 'Float32Array' argument' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "P:i8:dynCtorName",
+   "verdict": "TRAP",
+   "node": "Int8Array",
+   "got": null,
+   "reason": "SC1101: converting typed values to 'unknown' is not supported yet"
+  },
+  {
+   "id": "P:i8:dynCtorIsU8",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC1101: converting typed values to 'unknown' is not supported yet"
+  },
+  {
+   "id": "P:i8:dynCtorIsBuffer",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC1101: converting typed values to 'unknown' is not supported yet"
+  },
+  {
+   "id": "P:i8:dynByteLength",
+   "verdict": "TRAP",
+   "node": "3",
+   "got": null,
+   "reason": "SC1101: converting typed values to 'unknown' is not supported yet"
+  },
+  {
+   "id": "P:i8:dynLength",
+   "verdict": "TRAP",
+   "node": "3",
+   "got": null,
+   "reason": "SC1101: converting typed values to 'unknown' is not supported yet"
+  },
+  {
+   "id": "P:i32:isView",
+   "verdict": "MATCH",
+   "node": "true",
+   "got": "true",
+   "reason": null
+  },
+  {
+   "id": "P:i32:isBuffer",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2020: 'Buffer.isBuffer of 'Int32Array' values' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "P:i32:toStringTag",
+   "verdict": "TRAP",
+   "node": "[object Int32Array]",
+   "got": null,
+   "reason": "SC1090: Function.prototype.call on a compiled function value (compiled calls are direct — no runtime 'this' or arguments object exists to re-route; spell the call directly: 'Object.prototype.toString(...)') is not supported yet"
+  },
+  {
+   "id": "P:i32:ctorName",
+   "verdict": "TRAP",
+   "node": "Int32Array",
+   "got": null,
+   "reason": "SC2020: 'Function.name' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "P:i32:ctorIsU8",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2020: 'Int32Array<ArrayBuffer>.constructor' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "P:i32:typeof",
+   "verdict": "MATCH",
+   "node": "object",
+   "got": "object",
+   "reason": null
+  },
+  {
+   "id": "P:i32:byteLength",
+   "verdict": "MATCH",
+   "node": "8",
+   "got": "8",
+   "reason": null
+  },
+  {
+   "id": "P:i32:isArray",
+   "verdict": "MATCH",
+   "node": "false",
+   "got": "false",
+   "reason": null
+  },
+  {
+   "id": "P:i32:clonedTag",
+   "verdict": "TRAP",
+   "node": "[object Int32Array]",
+   "got": null,
+   "reason": "SC1090: Function.prototype.call on a compiled function value (compiled calls are direct — no runtime 'this' or arguments object exists to re-route; spell the call directly: 'Object.prototype.toString(...)') is not supported yet"
+  },
+  {
+   "id": "P:i32:clonedIsU8",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2020: 'structuredClone with a 'Int32Array' argument' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "P:i32:dynCtorName",
+   "verdict": "TRAP",
+   "node": "Int32Array",
+   "got": null,
+   "reason": "SC1101: converting typed values to 'unknown' is not supported yet"
+  },
+  {
+   "id": "P:i32:dynCtorIsU8",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC1101: converting typed values to 'unknown' is not supported yet"
+  },
+  {
+   "id": "P:i32:dynCtorIsBuffer",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC1101: converting typed values to 'unknown' is not supported yet"
+  },
+  {
+   "id": "P:i32:dynByteLength",
+   "verdict": "TRAP",
+   "node": "8",
+   "got": null,
+   "reason": "SC1101: converting typed values to 'unknown' is not supported yet"
+  },
+  {
+   "id": "P:i32:dynLength",
+   "verdict": "TRAP",
+   "node": "2",
+   "got": null,
+   "reason": "SC1101: converting typed values to 'unknown' is not supported yet"
+  },
+  {
+   "id": "P:f64:isView",
+   "verdict": "MATCH",
+   "node": "true",
+   "got": "true",
+   "reason": null
+  },
+  {
+   "id": "P:f64:isBuffer",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2020: 'Buffer.isBuffer of 'Float32Array' values' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "P:f64:toStringTag",
+   "verdict": "TRAP",
+   "node": "[object Float64Array]",
+   "got": null,
+   "reason": "SC1090: Function.prototype.call on a compiled function value (compiled calls are direct — no runtime 'this' or arguments object exists to re-route; spell the call directly: 'Object.prototype.toString(...)') is not supported yet"
+  },
+  {
+   "id": "P:f64:ctorName",
+   "verdict": "TRAP",
+   "node": "Float64Array",
+   "got": null,
+   "reason": "SC2020: 'Function.name' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "P:f64:ctorIsU8",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2020: 'Float64Array<ArrayBuffer>.constructor' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "P:f64:typeof",
+   "verdict": "MATCH",
+   "node": "object",
+   "got": "object",
+   "reason": null
+  },
+  {
+   "id": "P:f64:byteLength",
+   "verdict": "MATCH",
+   "node": "16",
+   "got": "16",
+   "reason": null
+  },
+  {
+   "id": "P:f64:isArray",
+   "verdict": "MATCH",
+   "node": "false",
+   "got": "false",
+   "reason": null
+  },
+  {
+   "id": "P:f64:clonedTag",
+   "verdict": "TRAP",
+   "node": "[object Float64Array]",
+   "got": null,
+   "reason": "SC1090: Function.prototype.call on a compiled function value (compiled calls are direct — no runtime 'this' or arguments object exists to re-route; spell the call directly: 'Object.prototype.toString(...)') is not supported yet"
+  },
+  {
+   "id": "P:f64:clonedIsU8",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2020: 'structuredClone with a 'Float32Array' argument' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "P:f64:dynCtorName",
+   "verdict": "TRAP",
+   "node": "Float64Array",
+   "got": null,
+   "reason": "SC1101: converting typed values to 'unknown' is not supported yet"
+  },
+  {
+   "id": "P:f64:dynCtorIsU8",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC1101: converting typed values to 'unknown' is not supported yet"
+  },
+  {
+   "id": "P:f64:dynCtorIsBuffer",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC1101: converting typed values to 'unknown' is not supported yet"
+  },
+  {
+   "id": "P:f64:dynByteLength",
+   "verdict": "TRAP",
+   "node": "16",
+   "got": null,
+   "reason": "SC1101: converting typed values to 'unknown' is not supported yet"
+  },
+  {
+   "id": "P:f64:dynLength",
+   "verdict": "TRAP",
+   "node": "2",
+   "got": null,
+   "reason": "SC1101: converting typed values to 'unknown' is not supported yet"
+  },
+  {
+   "id": "P:dv:isView",
+   "verdict": "MATCH",
+   "node": "true",
+   "got": "true",
+   "reason": null
+  },
+  {
+   "id": "P:dv:isBuffer",
+   "verdict": "WRONG",
+   "node": "false",
+   "got": "THROW",
+   "reason": null
+  },
+  {
+   "id": "P:dv:toStringTag",
+   "verdict": "TRAP",
+   "node": "[object DataView]",
+   "got": null,
+   "reason": "SC1090: Function.prototype.call on a compiled function value (compiled calls are direct — no runtime 'this' or arguments object exists to re-route; spell the call directly: 'Object.prototype.toString(...)') is not supported yet"
+  },
+  {
+   "id": "P:dv:ctorName",
+   "verdict": "TRAP",
+   "node": "DataView",
+   "got": null,
+   "reason": "SC2020: 'Function.name' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "P:dv:ctorIsU8",
+   "verdict": "WRONG",
+   "node": "false",
+   "got": "THROW",
+   "reason": null
+  },
+  {
+   "id": "P:dv:typeof",
+   "verdict": "MATCH",
+   "node": "object",
+   "got": "object",
+   "reason": null
+  },
+  {
+   "id": "P:dv:byteLength",
+   "verdict": "MATCH",
+   "node": "8",
+   "got": "8",
+   "reason": null
+  },
+  {
+   "id": "P:dv:isArray",
+   "verdict": "MATCH",
+   "node": "false",
+   "got": "false",
+   "reason": null
+  },
+  {
+   "id": "P:dv:clonedTag",
+   "verdict": "TRAP",
+   "node": "[object DataView]",
+   "got": null,
+   "reason": "SC1090: Function.prototype.call on a compiled function value (compiled calls are direct — no runtime 'this' or arguments object exists to re-route; spell the call directly: 'Object.prototype.toString(...)') is not supported yet"
+  },
+  {
+   "id": "P:dv:clonedIsU8",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC1090: 'instanceof Uint8Array' on this operand (supported: a union carrying the flavor as an arm, or a bound value of a bytes type — an 'unknown' operand needs a runtime flavor test the checked-dynamic tree does not carry yet: it tags bytes as one kind, and only Uint8Array reads that tag) is not supported yet"
+  },
+  {
+   "id": "P:dv:dynCtorName",
+   "verdict": "WRONG",
+   "node": "DataView",
+   "got": "Uint8Array",
+   "reason": null
+  },
+  {
+   "id": "P:dv:dynCtorIsU8",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2020: 'Uint8Array' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "P:dv:dynCtorIsBuffer",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2020: 'Buffer' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "P:dv:dynByteLength",
+   "verdict": "WRONG",
+   "node": "8",
+   "got": "undefined",
+   "reason": null
+  },
+  {
+   "id": "P:dv:dynLength",
+   "verdict": "WRONG",
+   "node": "undefined",
+   "got": "8",
+   "reason": null
+  },
+  {
+   "id": "P:ab:isView",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC1090: '.buffer' outside new DataView(x.buffer, ...) / Buffer.from(x.buffer, ...) (no free-standing ArrayBuffer value exists; subarray() answers an aliasing view directly) is not supported yet"
+  },
+  {
+   "id": "P:ab:isBuffer",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC1090: '.buffer' outside new DataView(x.buffer, ...) / Buffer.from(x.buffer, ...) (no free-standing ArrayBuffer value exists; subarray() answers an aliasing view directly) is not supported yet"
+  },
+  {
+   "id": "P:ab:toStringTag",
+   "verdict": "TRAP",
+   "node": "[object ArrayBuffer]",
+   "got": null,
+   "reason": "SC1090: '.buffer' outside new DataView(x.buffer, ...) / Buffer.from(x.buffer, ...) (no free-standing ArrayBuffer value exists; subarray() answers an aliasing view directly) is not supported yet"
+  },
+  {
+   "id": "P:ab:ctorName",
+   "verdict": "TRAP",
+   "node": "ArrayBuffer",
+   "got": null,
+   "reason": "SC1090: '.buffer' outside new DataView(x.buffer, ...) / Buffer.from(x.buffer, ...) (no free-standing ArrayBuffer value exists; subarray() answers an aliasing view directly) is not supported yet"
+  },
+  {
+   "id": "P:ab:ctorIsU8",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC1090: '.buffer' outside new DataView(x.buffer, ...) / Buffer.from(x.buffer, ...) (no free-standing ArrayBuffer value exists; subarray() answers an aliasing view directly) is not supported yet"
+  },
+  {
+   "id": "P:ab:typeof",
+   "verdict": "TRAP",
+   "node": "object",
+   "got": null,
+   "reason": "SC1090: '.buffer' outside new DataView(x.buffer, ...) / Buffer.from(x.buffer, ...) (no free-standing ArrayBuffer value exists; subarray() answers an aliasing view directly) is not supported yet"
+  },
+  {
+   "id": "P:ab:byteLength",
+   "verdict": "TRAP",
+   "node": "8",
+   "got": null,
+   "reason": "SC1090: '.buffer' outside new DataView(x.buffer, ...) / Buffer.from(x.buffer, ...) (no free-standing ArrayBuffer value exists; subarray() answers an aliasing view directly) is not supported yet"
+  },
+  {
+   "id": "P:ab:isArray",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC1090: '.buffer' outside new DataView(x.buffer, ...) / Buffer.from(x.buffer, ...) (no free-standing ArrayBuffer value exists; subarray() answers an aliasing view directly) is not supported yet"
+  },
+  {
+   "id": "P:ab:clonedTag",
+   "verdict": "TRAP",
+   "node": "[object ArrayBuffer]",
+   "got": null,
+   "reason": "SC1090: '.buffer' outside new DataView(x.buffer, ...) / Buffer.from(x.buffer, ...) (no free-standing ArrayBuffer value exists; subarray() answers an aliasing view directly) is not supported yet"
+  },
+  {
+   "id": "P:ab:clonedIsU8",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC1090: '.buffer' outside new DataView(x.buffer, ...) / Buffer.from(x.buffer, ...) (no free-standing ArrayBuffer value exists; subarray() answers an aliasing view directly) is not supported yet"
+  },
+  {
+   "id": "P:ab:dynCtorName",
+   "verdict": "TRAP",
+   "node": "ArrayBuffer",
+   "got": null,
+   "reason": "SC1090: '.buffer' outside new DataView(x.buffer, ...) / Buffer.from(x.buffer, ...) (no free-standing ArrayBuffer value exists; subarray() answers an aliasing view directly) is not supported yet"
+  },
+  {
+   "id": "P:ab:dynCtorIsU8",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC1090: '.buffer' outside new DataView(x.buffer, ...) / Buffer.from(x.buffer, ...) (no free-standing ArrayBuffer value exists; subarray() answers an aliasing view directly) is not supported yet"
+  },
+  {
+   "id": "P:ab:dynCtorIsBuffer",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC1090: '.buffer' outside new DataView(x.buffer, ...) / Buffer.from(x.buffer, ...) (no free-standing ArrayBuffer value exists; subarray() answers an aliasing view directly) is not supported yet"
+  },
+  {
+   "id": "P:ab:dynByteLength",
+   "verdict": "TRAP",
+   "node": "8",
+   "got": null,
+   "reason": "SC1090: '.buffer' outside new DataView(x.buffer, ...) / Buffer.from(x.buffer, ...) (no free-standing ArrayBuffer value exists; subarray() answers an aliasing view directly) is not supported yet"
+  },
+  {
+   "id": "P:ab:dynLength",
+   "verdict": "TRAP",
+   "node": "undefined",
+   "got": null,
+   "reason": "SC1090: '.buffer' outside new DataView(x.buffer, ...) / Buffer.from(x.buffer, ...) (no free-standing ArrayBuffer value exists; subarray() answers an aliasing view directly) is not supported yet"
+  },
+  {
+   "id": "P:buf:isView",
+   "verdict": "MATCH",
+   "node": "true",
+   "got": "true",
+   "reason": null
+  },
+  {
+   "id": "P:buf:isBuffer",
+   "verdict": "MATCH",
+   "node": "true",
+   "got": "true",
+   "reason": null
+  },
+  {
+   "id": "P:buf:toStringTag",
+   "verdict": "TRAP",
+   "node": "[object Uint8Array]",
+   "got": null,
+   "reason": "SC1090: Function.prototype.call on a compiled function value (compiled calls are direct — no runtime 'this' or arguments object exists to re-route; spell the call directly: 'Object.prototype.toString(...)') is not supported yet"
+  },
+  {
+   "id": "P:buf:ctorName",
+   "verdict": "TRAP",
+   "node": "Buffer",
+   "got": null,
+   "reason": "SC2020: 'Function.name' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "P:buf:ctorIsU8",
+   "verdict": "MATCH",
+   "node": "false",
+   "got": "false",
+   "reason": null
+  },
+  {
+   "id": "P:buf:typeof",
+   "verdict": "MATCH",
+   "node": "object",
+   "got": "object",
+   "reason": null
+  },
+  {
+   "id": "P:buf:byteLength",
+   "verdict": "MATCH",
+   "node": "3",
+   "got": "3",
+   "reason": null
+  },
+  {
+   "id": "P:buf:isArray",
+   "verdict": "MATCH",
+   "node": "false",
+   "got": "false",
+   "reason": null
+  },
+  {
+   "id": "P:buf:clonedTag",
+   "verdict": "TRAP",
+   "node": "[object Uint8Array]",
+   "got": null,
+   "reason": "SC1090: Function.prototype.call on a compiled function value (compiled calls are direct — no runtime 'this' or arguments object exists to re-route; spell the call directly: 'Object.prototype.toString(...)') is not supported yet"
+  },
+  {
+   "id": "P:buf:clonedIsU8",
+   "verdict": "TRAP",
+   "node": "true",
+   "got": null,
+   "reason": "SC1090: 'instanceof Uint8Array' on this operand (supported: a union carrying the flavor as an arm, or a bound value of a bytes type — an 'unknown' operand needs a runtime flavor test the checked-dynamic tree does not carry yet: it tags bytes as one kind, and only Uint8Array reads that tag) is not supported yet"
+  },
+  {
+   "id": "P:buf:dynCtorName",
+   "verdict": "WRONG",
+   "node": "Buffer",
+   "got": "THROW",
+   "reason": null
+  },
+  {
+   "id": "P:buf:dynCtorIsU8",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2020: 'Uint8Array' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "P:buf:dynCtorIsBuffer",
+   "verdict": "TRAP",
+   "node": "true",
+   "got": null,
+   "reason": "SC2020: 'Buffer' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "P:buf:dynByteLength",
+   "verdict": "WRONG",
+   "node": "3",
+   "got": "undefined",
+   "reason": null
+  },
+  {
+   "id": "P:buf:dynLength",
+   "verdict": "MATCH",
+   "node": "3",
+   "got": "3",
+   "reason": null
+  },
+  {
+   "id": "P:sub:isView",
+   "verdict": "MATCH",
+   "node": "true",
+   "got": "true",
+   "reason": null
+  },
+  {
+   "id": "P:sub:isBuffer",
+   "verdict": "MATCH",
+   "node": "false",
+   "got": "false",
+   "reason": null
+  },
+  {
+   "id": "P:sub:toStringTag",
+   "verdict": "TRAP",
+   "node": "[object Uint8Array]",
+   "got": null,
+   "reason": "SC1090: Function.prototype.call on a compiled function value (compiled calls are direct — no runtime 'this' or arguments object exists to re-route; spell the call directly: 'Object.prototype.toString(...)') is not supported yet"
+  },
+  {
+   "id": "P:sub:ctorName",
+   "verdict": "TRAP",
+   "node": "Uint8Array",
+   "got": null,
+   "reason": "SC2020: 'Function.name' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "P:sub:ctorIsU8",
+   "verdict": "MATCH",
+   "node": "true",
+   "got": "true",
+   "reason": null
+  },
+  {
+   "id": "P:sub:typeof",
+   "verdict": "MATCH",
+   "node": "object",
+   "got": "object",
+   "reason": null
+  },
+  {
+   "id": "P:sub:byteLength",
+   "verdict": "MATCH",
+   "node": "2",
+   "got": "2",
+   "reason": null
+  },
+  {
+   "id": "P:sub:isArray",
+   "verdict": "MATCH",
+   "node": "false",
+   "got": "false",
+   "reason": null
+  },
+  {
+   "id": "P:sub:clonedTag",
+   "verdict": "TRAP",
+   "node": "[object Uint8Array]",
+   "got": null,
+   "reason": "SC1090: Function.prototype.call on a compiled function value (compiled calls are direct — no runtime 'this' or arguments object exists to re-route; spell the call directly: 'Object.prototype.toString(...)') is not supported yet"
+  },
+  {
+   "id": "P:sub:clonedIsU8",
+   "verdict": "TRAP",
+   "node": "true",
+   "got": null,
+   "reason": "SC1090: 'instanceof Uint8Array' on this operand (supported: a union carrying the flavor as an arm, or a bound value of a bytes type — an 'unknown' operand needs a runtime flavor test the checked-dynamic tree does not carry yet: it tags bytes as one kind, and only Uint8Array reads that tag) is not supported yet"
+  },
+  {
+   "id": "P:sub:dynCtorName",
+   "verdict": "MATCH",
+   "node": "Uint8Array",
+   "got": "Uint8Array",
+   "reason": null
+  },
+  {
+   "id": "P:sub:dynCtorIsU8",
+   "verdict": "TRAP",
+   "node": "true",
+   "got": null,
+   "reason": "SC2020: 'Uint8Array' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "P:sub:dynCtorIsBuffer",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2020: 'Buffer' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "P:sub:dynByteLength",
+   "verdict": "WRONG",
+   "node": "2",
+   "got": "undefined",
+   "reason": null
+  },
+  {
+   "id": "P:sub:dynLength",
+   "verdict": "MATCH",
+   "node": "2",
+   "got": "2",
+   "reason": null
+  }
+ ]
+}
