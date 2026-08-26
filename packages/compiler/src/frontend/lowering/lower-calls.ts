@@ -867,10 +867,39 @@ export interface GenericInstance {
     };
   }
 
+/** The contextual type of an OBJECT-LITERAL METHOD's value, which
+   * `getContextualType` cannot answer: a MethodDeclaration is not an
+   * Expression, so tsc has no contextual query for it. The literal itself
+   * does have one, and the member's own type is that record's property —
+   * `const c: Conn = { run(sql, params?) {...} }` gives `run` the slot
+   * `Conn.run` declares. Null when the literal is unannotated (the
+   * inferred type IS the value, so there is nothing to check against) or
+   * the target has no such property. */
+  function objLitMemberTargetType(L: Lowerer, node: ts.Node): ts.Type | null {
+    if (!ts.isMethodDeclaration(node)) return null;
+    const parent: ts.Node | undefined = node.parent;
+    if (parent === undefined || !ts.isObjectLiteralExpression(parent)) return null;
+    const name = node.name;
+    const key = ts.isIdentifier(name)
+      ? name.text
+      : ts.isStringLiteral(name)
+        ? name.text
+        : null;
+    if (key === null) return null;
+    const objT = L.checker.getContextualType(parent);
+    if (objT === undefined) return null;
+    const sym = L.checker.getPropertyOfType(objT, key);
+    if (sym === undefined) return null;
+    return L.checker.getTypeOfSymbol(sym);
+  }
+
   export function requireExactArityValue(L: Lowerer, blame: ts.Node,
     contextual: ts.Expression | null,
     shapes: readonly ParamShape[],
-    funcType: IrType,): void {
+    funcType: IrType,
+    /** A target type the caller resolved itself, for value positions
+     * `getContextualType` has no query for (an object-literal method). */
+    resolvedTarget?: ts.Type | null,): void {
     // dynRest params ride the boxed thunk (JS arity — no completed-ABI
     // spelling exists or is needed); they don't gate the value form.
     // Dynamic-tier omittable params (`{} = a` with `a: any` — jsval/dyn
@@ -903,7 +932,9 @@ export interface GenericInstance {
     // optional/defaulted params spell their `T | undefined` slots (mapType's
     // completed-signature contract), so omitted trailing args complete with
     // the undefined arm like any direct call.
-    const target = contextual ? L.checker.getContextualType(contextual) : undefined;
+    const target = contextual
+      ? L.checker.getContextualType(contextual)
+      : (resolvedTarget ?? undefined);
     const mapped = target
       ? L.mapTypeOf(target)
       : contextual
@@ -7663,13 +7694,25 @@ const inliningPredicates = new Set<ts.Symbol>();
     // A lambda IS a value: the exact-arity rule applies at birth. The
     // contextual (target) type decides — `(x?: number) => void` may flow
     // into a slot annotated `(x: number | undefined) => void` (same ABI
-    // signature), anything else is fenced. Nested function declarations and
-    // object-literal shorthand methods aren't expressions — always fenced.
+    // signature), anything else is fenced. Nested function declarations
+    // aren't expressions and have no target — always fenced.
+    //
+    // An OBJECT-LITERAL METHOD is not an expression either, and used to be
+    // fenced with them — but it is not in the same position. It HAS a
+    // target: the record slot the annotated literal fills, which is
+    // exactly the "(x: T | undefined) => R" spelling the rule already
+    // admits from an arrow in the same property. `{ run(sql, params?) }`
+    // and `{ run: (sql, params?) => ... }` are one type two ways, and only
+    // the arrow compiled. objLitMemberTargetType resolves the slot the way
+    // getContextualType would if a MethodDeclaration were an Expression;
+    // when the literal is unannotated it answers null and the fence stands
+    // as before.
     L.requireExactArityValue(
       node,
       ts.isArrowFunction(node) || ts.isFunctionExpression(node) ? node : null,
       shapes,
       funcType,
+      objLitMemberTargetType(L, node),
     );
     const nameIdent =
       !ts.isArrowFunction(node) && node.name && ts.isIdentifier(node.name) ? node.name : null;
