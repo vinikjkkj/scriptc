@@ -1,0 +1,104 @@
+BEFORE G:/blocks/remeasure/lab/sites-default-2: 234 unique sites, 33 causes, 40 modules
+AFTER  G:/blocks/remeasure/lab/sites-prov: 105 unique sites, 62 causes, 40 modules
+
+CONTROL must-match : PRESENT in both -> pkgs/media-utils/ffmpeg.ts:30 SC2020
+CONTROL must-not    : synthetic key in A=False B=False (both must be False)
+
+sites only in BEFORE (fixed): 192
+sites only in AFTER  (new):   63
+
+code     before  after   delta  message
+SC1090        0     12     +12  calls of the generic method 'on' with no defining object literal (the declaration is signature-only — only methods dec
+SC2020        0      4      +4  'ChildProcess.stdin' is typed by @types/node but has no scriptc lowering yet
+SC2013        7      9      +2  values from the '@vinikjkkj/wa-wam' package run in the embedded dynamic engine, which this build does not include
+SC1031        0      2      +2  object destructuring of non-record values (the source is dyn-typed) are not supported yet
+SC2020        0      2      +2  'child.on("close", ...)' is part of the standard library types but has no scriptc lowering yet
+SC2003        0      2      +2  union types must match exactly: expected 'Readable', got 'Readable | null' (a union re-tags into another union only when
+SC2004        0      2      +2  uses of 'data' inherit the blocker on its declaration
+SC2020        0      2      +2  'ReadableStream.destroy' is typed by @types/node but has no scriptc lowering yet
+SC2020        0      2      +2  'spawn with this stdin slot' is part of the standard library types but has no scriptc lowering yet
+SC1090        0      2      +2  dynamic keyed reads of '{ child: ({ [key: string]: unknown }) => ... | undefined; debug: (unknown) => void; error: (unkn
+SC1090        0      2      +2  calls of the generic method 'off' with no defining object literal (the declaration is signature-only — only methods de
+SC2020        2      3      +1  'child_process.execFile' is typed by @types/node but has no scriptc lowering yet
+SC2020        0      1      +1  'spawn option 'timeout'' is part of the standard library types but has no scriptc lowering yet
+SC1090        0      1      +1  constructing values other than classes declared in the program is not supported yet
+SC2009        0      1      +1  values of type 'WaWamCoordinator' cannot be compiled: the record shape is supported, but its member 'uploader' has type 
+SC2020        0      1      +1  'stream.on("close", ...)' is part of the standard library types but has no scriptc lowering yet
+SC6003        0      1      +1  this projection of '%m101.WaMobileTcpSocket' COPIES the field 'readyState', and a method of '%m101.WaMobileTcpSocket' wr
+SC2020        0      1      +1  'clearTimeout of 'number | undefined' handles' is part of the standard library types but has no scriptc lowering yet
+SC2020        0      1      +1  'emit('debug_transport_node_out') with 1 arguments where the event's tuple has 0' is part of the standard library types 
+SC2020        0      1      +1  'fs/promises.rename' is typed by @types/node but has no scriptc lowering yet
+SC2020        0      1      +1  'Readable.from over a '(Uint8Array | string)[]' source' is part of the standard library types but has no scriptc lowerin
+SC1016        0      1      +1  circular imports (prov:src/protocol/constants.ts → prov:src/protocol/bot.ts → prov:src/protocol/jid.ts → prov:src/
+SC1063        0      1      +1  this use of a catch binding is not supported yet
+SC2020        0      1      +1  'ChildProcessByStdio<null, Readable, null>.on' is typed by @types/node but has no scriptc lowering yet
+SC2020        0      1      +1  'the promisified deflate with this argument shape' is part of the standard library types but has no scriptc lowering yet
+SC2020        0      1      +1  'require() with a run-time specifier' is part of the standard library types but has no scriptc lowering yet
+SC2020        0      1      +1  'new Set(values)' is part of the standard library types but has no scriptc lowering yet
+SC2013        0      1      +1  values from the '@vinikjkkj/wa-wam' package run in the embedded dynamic engine, which this build does not include (insta
+SC2020        0      1      +1  'writeFile with 3 arguments' is part of the standard library types but has no scriptc lowering yet
+SC2020        0      1      +1  'Math.max' is part of the standard library types but has no scriptc lowering yet
+SC1090        0      1      +1  'instanceof' on values other than class instances (narrow union-typed values first) are not supported yet
+SC1090        0      1      +1  Function.prototype.call on a compiled function value (compiled calls are direct — no runtime 'this' or arguments objec
+SC2020        0      1      +1  'globalThis' is part of the standard library types but has no scriptc lowering yet
+SC1090        0      1      +1  'Promise<{ fileEncSha256: Uint8Array; fileSha256: Uint8Array; firstFrameSidecar: Uint8Array | undefined; plaintextLength
+SC2020        0      1      +1  'Date.getHours' is part of the standard library types but has no scriptc lowering yet
+SC2020        0      1      +1  'emit('debug_transport_node_in') with 1 arguments where the event's tuple has 0' is part of the standard library types b
+SC6003        0      1      +1  this projection of '%m103.WaMobileTcpSocket' COPIES the field 'readyState', and a method of '%m103.WaMobileTcpSocket' wr
+SC2020        0      1      +1  'ChildProcessByStdio<null, Readable, null>.stdout' is typed by @types/node but has no scriptc lowering yet
+SC2003        0      1      +1  union types must match exactly: expected 'null | Readable', got 'Readable | null' (a union re-tags into another union on
+SC2020        0      1      +1  'Int16Array<ArrayBufferLike>' is part of the standard library types but has no scriptc lowering yet
+SC2004        1      0      -1  uses of 'length' inherit the blocker on its declaration
+SC2009        1      0      -1  values of type 'WaWamCoordinator' cannot be compiled: the record shape is supported, but its member 'logger' has type 'L
+SC2020        1      0      -1  'new WeakMap' is part of the standard library types but has no scriptc lowering yet
+SC2020        1      0      -1  'WeakMap<Logger, Set<string>>' is part of the standard library types but has no scriptc lowering yet
+SC2011        1      0      -1  values of type 'any' run in the embedded dynamic engine, which this build does not include
+SC2004        2      0      -2  uses of 'bytes' inherit the blocker on its declaration
+SC2013       31      0     -31  importing 'zapo-js' requires the embedded dynamic engine, which this build does not include — the package's implementa
+SC1090       69      0     -69  calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here
+SC2013       85      0     -85  values from the 'zapo-js' package run in the embedded dynamic engine, which this build does not include
+
+unchanged causes: 22
+
+--- per-module ---
+module                                       before      after  preflight
+media-utils__ffmpeg                              14         27 False->False  st 1/11 -> 0/11  <<<
+media-utils__index                                1          1 True->True  st 0/0 -> 0/0
+media-utils__sharp                                4          5 False->False  st 0/1 -> 0/1  <<<
+media-utils__types                                0          0 False->False  st 0/0 -> 0/0
+voip__WaVoipCoordinator                           2          3 True->True  st 0/0 -> 0/0  <<<
+voip__bytes                                       3          3 False->False  st 0/0 -> 0/29
+voip__call__WaCallManager                         2          2 True->True  st 0/0 -> 0/0
+voip__call__WaCallMediaSession                    2          3 True->True  st 0/0 -> 0/0  <<<
+voip__call__call-state                            1          1 False->False  st 0/12 -> 0/12
+voip__crypto__encryption                         10          4 False->False  st 0/0 -> 0/303  <<<
+voip__crypto__primitives                          5          2 False->False  st 0/0 -> 0/29  <<<
+voip__crypto__srtp                               14          7 False->False  st 0/16 -> 0/45  <<<
+voip__crypto__ssrc                                7          3 False->False  st 0/0 -> 0/303  <<<
+voip__events                                      0          0 False->False  st 0/0 -> 0/0
+voip__index                                       2          2 True->True  st 0/0 -> 0/0
+voip__media__WaAudioEngine                        7         19 False->False  st 0/18 -> 1/45645  <<<
+voip__media__mlow-codec                           3          3 False->False  st 1/7 -> 1/7
+voip__media__rtp                                  9          4 False->False  st 0/14 -> 0/43  <<<
+voip__plugin                                      2          2 True->True  st 0/0 -> 0/0
+voip__relay__WaSctpRelay                          2          2 True->True  st 0/0 -> 0/0
+voip__relay__relay-ack                           15          1 False->True  st 0/0 -> 0/0  <<<
+voip__relay__stun                                28          4 False->False  st 0/19 -> 0/48  <<<
+voip__signaling__bridge                           2          2 True->True  st 0/0 -> 0/0
+voip__signaling__signaling                       24         16 False->False  st 0/3 -> 1/45630  <<<
+voip__types                                       0          0 False->False  st 0/12 -> 0/12
+wam__WaWamAutoEmitter                            19         18 False->False  st 0/6 -> 3/45633  <<<
+wam__WaWamCoordinator                           127         52 False->False  st 73/130 -> 14/46013  <<<
+wam__WaWamUploader                                5          1 False->True  st 0/2 -> 0/0  <<<
+wam__globals                                     12         21 False->False  st 0/0 -> 1/45627  <<<
+wam__index                                      129         53 False->False  st 73/130 -> 14/46013  <<<
+wam__plugin                                     129         53 False->False  st 73/130 -> 14/46013  <<<
+wam__registry                                     6          5 False->False  st 0/0 -> 0/29  <<<
+wam__send-parse                                   8          1 False->True  st 0/1 -> 0/0  <<<
+wam__synthetic__WaWamSyntheticUi                 15          1 False->True  st 3/22 -> 0/0  <<<
+wam__synthetic__fabrications                      5          4 False->False  st 3/11 -> 2/73  <<<
+wam__synthetic__index                            15          1 False->True  st 3/22 -> 0/0  <<<
+wam__synthetic__random                            3          2 False->False  st 2/10 -> 1/72  <<<
+wam__wire__WamBatch                              14          8 False->False  st 2/5 -> 2/34  <<<
+wam__wire__binary-writer                          2          1 False->False  st 0/0 -> 0/29  <<<
+wam__wire__encoder                               11         11 False->False  st 2/4 -> 2/33

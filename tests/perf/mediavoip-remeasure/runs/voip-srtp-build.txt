@@ -1,0 +1,38 @@
+provenance: zapo-js@1.6.2 ← https://github.com/vinikjkkj/zapo@refs/tags/v1.6.2 @ 250f9af5229a (source compiles statically)
+provenance: argo-codec@0.2.1: no provenance attestation published; island path used
+G:/blocks/remeasure/lab/app/pkgs/voip/crypto/primitives.ts:27:20 - error SC2020: 'createCipheriv with this algorithm' is part of the standard library types but has no scriptc lowering yet
+
+  26 | export function aesCtr128(key: Uint8Array, iv: Uint8Array, data: Uint8Array): Uint8Array {
+  27 |     const cipher = createCipheriv('aes-128-ctr', key, iv)
+     |                    ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  28 |     const output = toBytesView(cipher.update(data))
+
+  hint: aes-256-gcm, aes-256-cbc and aes-256-ctr are the lowered ciphers (the options argument has no lowering either)
+
+G:/blocks/remeasure/lab/app/pkgs/voip/crypto/srtp.ts:83:74 - error SC2001: values of type 'bigint' cannot be compiled yet (supported: number, string, boolean, arrays, Maps, Sets, RegExp, functions, classes, records, unions of those, and 'unknown')
+
+  82 |         if (this.isReplayed(index)) {
+  83 |             throw new SrtpError('replay', `SRTP replay detected: index ${index}`)
+     |                                                                          ^~~~~
+  84 |         }
+
+G:/blocks/remeasure/lab/app/pkgs/voip/crypto/srtp.ts:175:13 - error SC1090: compound array-element assignment through this target (supported: a numeric array or typed array, a bare identifier receiver, and an index that can be evaluated twice — a literal, an identifier, or arithmetic over those) is not supported yet
+
+  174 |         for (let i = 0; i < 4; i++) {
+  175 |             this.ivBuffer[4 + i] ^= this.ssrcBuffer[i]
+      |             ^~~~~~~~~~~~~~~~~~~~
+  176 |         }
+
+G:/blocks/remeasure/lab/app/pkgs/voip/crypto/srtp.ts:180:13 - error SC1090: compound array-element assignment through this target (supported: a numeric array or typed array, a bare identifier receiver, and an index that can be evaluated twice — a literal, an identifier, or arithmetic over those) is not supported yet
+
+  179 |         for (let i = 0; i < 6; i++) {
+  180 |             this.ivBuffer[8 + i] ^= this.indexBuffer[2 + i]
+      |             ^~~~~~~~~~~~~~~~~~~~
+  181 |         }
+
+4 errors.
+
+real	0m35.656s
+user	0m0.015s
+sys	0m0.076s
+EXIT=1

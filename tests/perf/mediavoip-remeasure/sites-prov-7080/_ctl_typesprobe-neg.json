@@ -1,0 +1,25 @@
+{
+ "entry": "G:/blocks/remeasure/lab/app/typesprobe-neg.ts",
+ "flags": [
+  "--provenance-sources"
+ ],
+ "elapsedMs": 300,
+ "preflightFailed": true,
+ "stats": {
+  "statementsTotal": 0,
+  "statementsFailed": 0,
+  "statementsIsland": 0,
+  "functionsSkipped": 0
+ },
+ "npmStatic": null,
+ "provenanceNotes": null,
+ "sites": [
+  {
+   "section": "blocker",
+   "code": "SC0001",
+   "message": "Type 'string' is not assignable to type 'number'.",
+   "file": "G:/blocks/remeasure/lab/app/typesprobe-neg.ts",
+   "line": 5
+  }
+ ]
+}

@@ -1,0 +1,6 @@
+# bytesview-repro.exe -- coverage says 45 statements, 0 failed, no blockers
+case 1: plain Uint8Array
+  -> 010203
+case 2: DataView window
+Uncaught Error: the Buffer-ness of this value is unknown (its producer stamps no flavor): Uint8Array at G:/blocks/remeasure/prov/250f9af5229a545eec28ddbd3e8774a397cdb0bb/src/util/bytes.ts:252
+RUN_EXIT=1

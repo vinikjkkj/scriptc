@@ -1,0 +1,15 @@
+# gate at 0603b0de (branch block/remeasure, main base 5d0e8427)
+# npx vitest run tests/harness packages/compiler/test packages/runtime/test \
+#   --exclude '**/coverage.test.ts' --exclude '**/differential.test.ts' \
+#   --exclude '**/llvm-differential.test.ts'
+node: v25.9.0
+SCRIPTC_TEST_WORKERS=2
+HEAD: 0603b0de
+
+ Test Files  136 passed | 7 skipped (143)
+      Tests  2206 passed | 54 skipped (2260)
+   Duration  1444.18s (transform 6.25s, setup 0ms, collect 134.57s, tests 2687.19s, environment 40ms, prepare 26.31s)
+VITEST_EXIT=0
+
+# no 'Timeout calling onTaskUpdate', no re-run needed:
+0

@@ -1,0 +1,46 @@
+{
+ "entry": "G:/blocks/remeasure/lab/app/pkgs/voip/relay/stun.ts",
+ "flags": [
+  "--provenance-sources"
+ ],
+ "elapsedMs": 24897,
+ "preflightFailed": false,
+ "stats": {
+  "statementsTotal": 48,
+  "statementsFailed": 0,
+  "statementsIsland": 0,
+  "functionsSkipped": 0
+ },
+ "npmStatic": null,
+ "provenanceNotes": [],
+ "sites": [
+  {
+   "section": "unreached",
+   "code": "SC2020",
+   "message": "'globalThis' is part of the standard library types but has no scriptc lowering yet",
+   "file": "G:/blocks/remeasure/prov/250f9af5229a545eec28ddbd3e8774a397cdb0bb/src/util/runtime.ts",
+   "line": 20
+  },
+  {
+   "section": "unreached",
+   "code": "SC2020",
+   "message": "'ArrayBufferLike.byteLength' is part of the standard library types but has no scriptc lowering yet",
+   "file": "G:/blocks/remeasure/lab/app/pkgs/voip/bytes.ts",
+   "line": 94
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "'.buffer' outside new DataView(x.buffer, ...) / Buffer.from(x.buffer, ...) (no free-standing ArrayBuffer value exists; subarray() answers an aliasing view directly) is not supported yet",
+   "file": "G:/blocks/remeasure/lab/app/pkgs/voip/bytes.ts",
+   "line": 99
+  },
+  {
+   "section": "unreached",
+   "code": "SC2020",
+   "message": "'createCipheriv with this algorithm' is part of the standard library types but has no scriptc lowering yet",
+   "file": "G:/blocks/remeasure/lab/app/pkgs/voip/crypto/primitives.ts",
+   "line": 27
+  }
+ ]
+}

@@ -1,0 +1,55 @@
+BEFORE G:/blocks/remeasure/wt/tests/perf/mediavoip/sites-default: 234 unique sites, 33 causes, 40 modules
+AFTER  G:/blocks/remeasure/lab/sites-default-2: 234 unique sites, 33 causes, 40 modules
+
+CONTROL must-match : PRESENT in both -> pkgs/media-utils/ffmpeg.ts:23 SC2013
+CONTROL must-not    : synthetic key in A=False B=False (both must be False)
+
+sites only in BEFORE (fixed): 0
+sites only in AFTER  (new):   0
+
+code     before  after   delta  message
+
+unchanged causes: 33
+
+--- per-module ---
+module                                       before      after  preflight
+media-utils__ffmpeg                              14         14 False->False  st 1/11 -> 1/11
+media-utils__index                                1          1 True->True  st 0/0 -> 0/0
+media-utils__sharp                                4          4 False->False  st 0/1 -> 0/1
+media-utils__types                                0          0 False->False  st 0/0 -> 0/0
+voip__WaVoipCoordinator                           2          2 True->True  st 0/0 -> 0/0
+voip__bytes                                       3          3 False->False  st 0/0 -> 0/0
+voip__call__WaCallManager                         2          2 True->True  st 0/0 -> 0/0
+voip__call__WaCallMediaSession                    2          2 True->True  st 0/0 -> 0/0
+voip__call__call-state                            1          1 False->False  st 0/12 -> 0/12
+voip__crypto__encryption                         10         10 False->False  st 0/0 -> 0/0
+voip__crypto__primitives                          5          5 False->False  st 0/0 -> 0/0
+voip__crypto__srtp                               14         14 False->False  st 0/16 -> 0/16
+voip__crypto__ssrc                                7          7 False->False  st 0/0 -> 0/0
+voip__events                                      0          0 False->False  st 0/0 -> 0/0
+voip__index                                       2          2 True->True  st 0/0 -> 0/0
+voip__media__WaAudioEngine                        7          7 False->False  st 0/18 -> 0/18
+voip__media__mlow-codec                           3          3 False->False  st 1/7 -> 1/7
+voip__media__rtp                                  9          9 False->False  st 0/14 -> 0/14
+voip__plugin                                      2          2 True->True  st 0/0 -> 0/0
+voip__relay__WaSctpRelay                          2          2 True->True  st 0/0 -> 0/0
+voip__relay__relay-ack                           15         15 False->False  st 0/0 -> 0/0
+voip__relay__stun                                28         28 False->False  st 0/19 -> 0/19
+voip__signaling__bridge                           2          2 True->True  st 0/0 -> 0/0
+voip__signaling__signaling                       24         24 False->False  st 0/3 -> 0/3
+voip__types                                       0          0 False->False  st 0/12 -> 0/12
+wam__WaWamAutoEmitter                            19         19 False->False  st 0/6 -> 0/6
+wam__WaWamCoordinator                           127        127 False->False  st 73/130 -> 73/130
+wam__WaWamUploader                                5          5 False->False  st 0/2 -> 0/2
+wam__globals                                     12         12 False->False  st 0/0 -> 0/0
+wam__index                                      129        129 False->False  st 73/130 -> 73/130
+wam__plugin                                     129        129 False->False  st 73/130 -> 73/130
+wam__registry                                     6          6 False->False  st 0/0 -> 0/0
+wam__send-parse                                   8          8 False->False  st 0/1 -> 0/1
+wam__synthetic__WaWamSyntheticUi                 15         15 False->False  st 3/22 -> 3/22
+wam__synthetic__fabrications                      5          5 False->False  st 3/11 -> 3/11
+wam__synthetic__index                            15         15 False->False  st 3/22 -> 3/22
+wam__synthetic__random                            3          3 False->False  st 2/10 -> 2/10
+wam__wire__WamBatch                              14         14 False->False  st 2/5 -> 2/5
+wam__wire__binary-writer                          2          2 False->False  st 0/0 -> 0/0
+wam__wire__encoder                               11         11 False->False  st 2/4 -> 2/4

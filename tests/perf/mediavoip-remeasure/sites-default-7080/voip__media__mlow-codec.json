@@ -1,0 +1,37 @@
+{
+ "entry": "G:/blocks/remeasure/lab/app/pkgs/voip/media/mlow-codec.ts",
+ "flags": [],
+ "elapsedMs": 338,
+ "preflightFailed": false,
+ "stats": {
+  "statementsTotal": 7,
+  "statementsFailed": 1,
+  "statementsIsland": 0,
+  "functionsSkipped": 0
+ },
+ "npmStatic": null,
+ "provenanceNotes": null,
+ "sites": [
+  {
+   "section": "blocker",
+   "code": "SC2009",
+   "message": "values of type 'Promise<MlowModule> | null' cannot be compiled: the union shape is supported, but its arm 'Promise<MlowModule>' does not compile",
+   "file": "G:/blocks/remeasure/lab/app/pkgs/voip/media/mlow-codec.ts",
+   "line": 26
+  },
+  {
+   "section": "unreached",
+   "code": "SC2009",
+   "message": "values of type 'MlowEncoder | null' cannot be compiled: the union shape is supported, but its arm 'MlowEncoder' does not compile",
+   "file": "G:/blocks/remeasure/lab/app/pkgs/voip/media/mlow-codec.ts",
+   "line": 51
+  },
+  {
+   "section": "unreached",
+   "code": "SC2009",
+   "message": "values of type 'Promise<MlowModule>' cannot be compiled: the Promise shape is supported, but its value type 'MlowModule' does not compile",
+   "file": "G:/blocks/remeasure/lab/app/pkgs/voip/media/mlow-codec.ts",
+   "line": 28
+  }
+ ]
+}

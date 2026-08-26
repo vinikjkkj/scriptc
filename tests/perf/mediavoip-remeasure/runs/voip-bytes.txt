@@ -1,0 +1,13 @@
+# voip-bytes.exe -- voip/bytes.ts, static lane, 823,296 bytes
+# oracle: packages/voip/src/__tests__/bytes.test.ts
+ok   writeUInt16BE bytes = abcd
+ok   readUInt16BE round-trip = abcd
+ok   writeUInt32BE bytes = 12345678
+ok   readUInt32BE round-trip = 12345678
+ok   writeUInt32LE bytes = efcdab89
+ok   readUInt32LE round-trip = 89abcdef
+ok   writeBigUInt64BE bytes = 0123456789abcdef
+ok   readBigUInt64BE round-trip = 123456789abcdef
+ok   concatBytes order = 010203
+Uncaught Error: the Buffer-ness of this value is unknown (its producer stamps no flavor): Uint8Array at G:/blocks/remeasure/prov/250f9af5229a545eec28ddbd3e8774a397cdb0bb/src/util/bytes.ts:252
+RUN_EXIT=1

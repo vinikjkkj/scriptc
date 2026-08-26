@@ -1,0 +1,7 @@
+SELFTEST G:/blocks/remeasure/lab/sites-prov
+  PASS A: 40 module JSONs present
+  PASS B: all 40 logs EXIT=0
+  PASS C: log site= matches json for all 40
+  PASS D: positive control clean and names @types/node: 'child_process.execFile' is typed by @types/node but has no scriptc lo
+  PASS E: negative control reports SC0001: Type 'string' is not assignable to type 'number'.
+SELFTEST_RESULT=PASS

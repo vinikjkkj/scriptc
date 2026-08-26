@@ -1,0 +1,149 @@
+LANE: PROVENANCE (--provenance-sources), main 5d0e8427
+dir : G:/blocks/remeasure/lab/sites-prov
+unique sites: 105   distinct causes: 62
+
+--- ownership rule table (a rule matching 0 is printed, not hidden) ---
+  zapo-js-island-value       0  provenance package path (fixed: 1c201e7f and the two before it)
+  zapo-js-island-import      0  provenance package path (fixed: 1c201e7f and the two before it)
+  wawam-island-value        10  --npm-static type surface (open, named in estado-mediavoip section 4)
+  wawam-island-import        5  --npm-static type surface (open, named in estado-mediavoip section 4)
+  binarywriter-cascade       7  cascade of the wa-wam island (estado-mediavoip row 4)
+  union-eq                   1  SC1090 union-typed comparison (open, predicted by name)
+  commit-cascade             0  cascade of a type-only island import (estado-mediavoip row 2)
+  lib-forced                 2  program.ts:82 forces lib (open, estado-mediavoip section 2)
+  filetype-cond              1  moduleResolution forced to Bundler (open, estado-mediavoip section 2)
+  __never__                  0  (control)
+
+CONTROL must-not-match __never__ = 0 (must be 0)
+CONTROL rules that fired: 6 of 9
+
+owned  :   26 sites (24.8%) over 8 causes
+unowned:   79 sites (75.2%) over 54 causes
+
+--- UNOWNED, ranked ---
+  1.   12   11.4%  SC1090  [unreached]
+      calls of the generic method 'on' with no defining object literal (the declaration is signature-only — only methods declared with a body in an object literal monomorphiz
+  2.    4    3.8%  SC2020  [unreached]
+      'ChildProcess.stdin' is typed by @types/node but has no scriptc lowering yet
+  3.    3    2.9%  SC2020  [unreached]
+      'child_process.execFile' is typed by @types/node but has no scriptc lowering yet
+  4.    2    1.9%  SC1031  [unreached]
+      object destructuring of non-record values (the source is dyn-typed) are not supported yet
+  5.    2    1.9%  SC2004  [unreached]
+      uses of 'data' inherit the blocker on its declaration
+  6.    2    1.9%  SC2020  [unreached]
+      'spawn with this stdin slot' is part of the standard library types but has no scriptc lowering yet
+  7.    2    1.9%  SC2003  [unreached]
+      union types must match exactly: expected 'Readable', got 'Readable | null' (a union re-tags into another union only when every arm of the source has an identical arm in t
+  8.    2    1.9%  SC2020  [unreached]
+      'child.on("close", ...)' is part of the standard library types but has no scriptc lowering yet
+  9.    2    1.9%  SC2020  [unreached]
+      'ReadableStream.destroy' is typed by @types/node but has no scriptc lowering yet
+ 10.    2    1.9%  SC1090  [unreached]
+      compound array-element assignment through this target (supported: a numeric array or typed array, a bare identifier receiver, and an index that can be evaluated twice —
+ 11.    2    1.9%  SC1090  [unreached]
+      dynamic keyed reads of '{ child: ({ [key: string]: unknown }) => ... | undefined; debug: (unknown) => void; error: (unknown) => void; info: (unknown) => void; level: stri
+ 12.    2    1.9%  SC1090  [unreached]
+      calls of the generic method 'off' with no defining object literal (the declaration is signature-only — only methods declared with a body in an object literal monomorphi
+ 13.    1    1.0%  SC2013  [blocker]
+      importing 'sharp' requires the embedded dynamic engine, which this build does not include — the package's implementation runs there
+ 14.    1    1.0%  SC1090  [unreached]
+      'instanceof' on values other than class instances (narrow union-typed values first) are not supported yet
+ 15.    1    1.0%  SC2020  [unreached]
+      'Readable.from over a '(Uint8Array | string)[]' source' is part of the standard library types but has no scriptc lowering yet
+ 16.    1    1.0%  SC1090  [unreached]
+      'Uint8Array' values where 'string' is expected is not supported yet
+ 17.    1    1.0%  SC2020  [unreached]
+      'spawn option 'timeout'' is part of the standard library types but has no scriptc lowering yet
+ 18.    1    1.0%  SC2020  [unreached]
+      'ChildProcessByStdio<null, Readable, null>.stdout' is typed by @types/node but has no scriptc lowering yet
+ 19.    1    1.0%  SC2020  [unreached]
+      'ChildProcessByStdio<null, Readable, null>.on' is typed by @types/node but has no scriptc lowering yet
+ 20.    1    1.0%  SC2020  [unreached]
+      'stream.on("close", ...)' is part of the standard library types but has no scriptc lowering yet
+ 21.    1    1.0%  SC2003  [unreached]
+      union types must match exactly: expected 'null | Readable', got 'Readable | null' (a union re-tags into another union only when every arm of the source has an identical a
+ 22.    1    1.0%  SC1016  [blocker]
+      circular imports (prov:src/protocol/constants.ts → prov:src/protocol/bot.ts → prov:src/protocol/jid.ts → prov:src/protocol/constants.ts; the cycle-crossing binding 
+ 23.    1    1.0%  SC2020  [unreached]
+      'globalThis' is part of the standard library types but has no scriptc lowering yet
+ 24.    1    1.0%  SC2020  [unreached]
+      'ArrayBufferLike.byteLength' is part of the standard library types but has no scriptc lowering yet
+ 25.    1    1.0%  SC1090  [unreached]
+      '.buffer' outside new DataView(x.buffer, ...) / Buffer.from(x.buffer, ...) (no free-standing ArrayBuffer value exists; subarray() answers an aliasing view directly) is no
+ 26.    1    1.0%  SC2009  [unreached]
+      values of type 'CallStateData' cannot be compiled: the record shape is supported, but its member 'connectedAt' has type 'Date | undefined', which does not compile
+ 27.    1    1.0%  SC2020  [unreached]
+      'createCipheriv with this algorithm' is part of the standard library types but has no scriptc lowering yet
+ 28.    1    1.0%  SC2001  [unreached]
+      values of type 'bigint' cannot be compiled yet (supported: number, string, boolean, arrays, Maps, Sets, RegExp, functions, classes, records, unions of those, and 'unknown
+ 29.    1    1.0%  SC2020  [deferred]
+      'require() with a run-time specifier' is part of the standard library types but has no scriptc lowering yet
+ 30.    1    1.0%  SC1090  [deferred]
+      constructing values other than classes declared in the program is not supported yet
+ 31.    1    1.0%  SC6003  [advice]
+      this projection of '%m101.WaMobileTcpSocket' COPIES the field 'readyState', and a method of '%m101.WaMobileTcpSocket' writes it
+ 32.    1    1.0%  SC1090  [unreached]
+      'Promise<{ fileEncSha256: Uint8Array; fileSha256: Uint8Array; firstFrameSidecar: Uint8Array | undefined; plaintextLength: number; streamingSidecar: Uint8Array | undefined
+ 33.    1    1.0%  SC2020  [unreached]
+      'the promisified deflate with this argument shape' is part of the standard library types but has no scriptc lowering yet
+ 34.    1    1.0%  SC2020  [unreached]
+      'clearTimeout of 'number | undefined' handles' is part of the standard library types but has no scriptc lowering yet
+ 35.    1    1.0%  SC2020  [unreached]
+      'new Set(values)' is part of the standard library types but has no scriptc lowering yet
+ 36.    1    1.0%  SC2020  [unreached]
+      'Math.max' is part of the standard library types but has no scriptc lowering yet
+ 37.    1    1.0%  SC1063  [unreached]
+      this use of a catch binding is not supported yet
+ 38.    1    1.0%  SC2020  [unreached]
+      'writeFile with 3 arguments' is part of the standard library types but has no scriptc lowering yet
+ 39.    1    1.0%  SC2020  [unreached]
+      'fs/promises.rename' is typed by @types/node but has no scriptc lowering yet
+ 40.    1    1.0%  SC1090  [unreached]
+      Function.prototype.call on a compiled function value (compiled calls are direct — no runtime 'this' or arguments object exists to re-route; spell the call directly: 'Ob
+ 41.    1    1.0%  SC2020  [unreached]
+      'Int16Array<ArrayBufferLike>' is part of the standard library types but has no scriptc lowering yet
+ 42.    1    1.0%  SC2009  [blocker]
+      values of type 'Promise<MlowModule> | null' cannot be compiled: the union shape is supported, but its arm 'Promise<MlowModule>' does not compile
+ 43.    1    1.0%  SC2009  [unreached]
+      values of type 'MlowEncoder | null' cannot be compiled: the union shape is supported, but its arm 'MlowEncoder' does not compile
+ 44.    1    1.0%  SC2009  [unreached]
+      values of type 'Promise<MlowModule>' cannot be compiled: the Promise shape is supported, but its value type 'MlowModule' does not compile
+ 45.    1    1.0%  SC2020  [blocker]
+      'emit('debug_transport_node_in') with 1 arguments where the event's tuple has 0' is part of the standard library types but has no scriptc lowering yet
+ 46.    1    1.0%  SC2020  [blocker]
+      'emit('debug_transport_node_out') with 1 arguments where the event's tuple has 0' is part of the standard library types but has no scriptc lowering yet
+ 47.    1    1.0%  SC2009  [unreached]
+      values of type 'WaWamCoordinator' cannot be compiled: the record shape is supported, but its member 'uploader' has type 'WaWamUploader', which does not compile
+ 48.    1    1.0%  SC2020  [blocker/unreached]
+      'Number of unknown values' is part of the standard library types but has no scriptc lowering yet
+ 49.    1    1.0%  SC2012  [blocker]
+      'Number.parseInt' runs in the embedded dynamic engine, which this build does not include
+ 50.    1    1.0%  SC2020  [blocker]
+      'Uint8Array.from' is part of the standard library types but has no scriptc lowering yet
+ 51.    1    1.0%  SC6003  [advice]
+      this projection of '%m103.WaMobileTcpSocket' COPIES the field 'readyState', and a method of '%m103.WaMobileTcpSocket' writes it
+ 52.    1    1.0%  SC2020  [unreached]
+      'Date.getHours' is part of the standard library types but has no scriptc lowering yet
+ 53.    1    1.0%  SC2008  [unreached]
+      values of type 'WaClientPluginDefinition & { readonly exposeAs: "wam"; readonly setup: (ctx: WaClientPluginContext) => WaWamCoordinator; readonly __pluginEvents?: {} | un
+ 54.    1    1.0%  SC2009  [blocker]
+      values of type 'AmbientFab[]' cannot be compiled: the array shape is supported, but its element type 'AmbientFab' does not compile
+
+--- OWNED, ranked ---
+  1.    9  SC2013  -> --npm-static type surface (open, named in estado-mediavoip section 4)
+      values from the '@vinikjkkj/wa-wam' package run in the embedded dynamic engine, which this build does not include
+  2.    7  SC2001  -> cascade of the wa-wam island (estado-mediavoip row 4)
+      values of type 'BinaryWriter' cannot be compiled yet (supported: number, string, boolean, arrays, Maps, Sets, RegExp, functions, classes, records, uni
+  3.    5  SC2013  -> --npm-static type surface (open, named in estado-mediavoip section 4)
+      importing '@vinikjkkj/wa-wam' requires the embedded dynamic engine, which this build does not include — the package's implementation runs there
+  4.    1  SC0001  -> moduleResolution forced to Bundler (open, estado-mediavoip section 2)
+      Property 'fileTypeFromFile' does not exist on type 'typeof import("node_modules/file-type/core")'. Did you mean 'fileTypeFromBlob'?
+  5.    1  SC0001  -> program.ts:82 forces lib (open, estado-mediavoip section 2)
+      Cannot find name 'RTCPeerConnection'.
+  6.    1  SC0001  -> program.ts:82 forces lib (open, estado-mediavoip section 2)
+      Cannot find name 'RTCDataChannel'.
+  7.    1  SC2013  -> --npm-static type surface (open, named in estado-mediavoip section 4)
+      values from the '@vinikjkkj/wa-wam' package run in the embedded dynamic engine, which this build does not include (instantiating 'commit' with <string
+  8.    1  SC1090  -> SC1090 union-typed comparison (open, predicted by name)
+      comparisons of union-typed values (narrow first: check a discriminant field, or compare with '!== undefined'/'!== null' for unit arms) are not support

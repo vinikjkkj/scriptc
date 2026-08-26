@@ -1,0 +1,32 @@
+  PASS recorded sites == 234                          got=234 want=234
+  PASS default sites == 234                           got=234 want=234
+  PASS default causes == 33                           got=33 want=33
+  PASS recorded == default, fixed                     got=0 want=0
+  PASS recorded == default, new                       got=0 want=0
+  PASS prov sites == 105                              got=105 want=105
+  PASS prov causes == 62                              got=62 want=62
+  PASS sites fixed by prov == 192                     got=192 want=192
+  PASS sites new in prov == 63                        got=63 want=63
+  PASS default modules == 40                          got=40 want=40
+  PASS prov modules == 40                             got=40 want=40
+  PASS default statements == 586                      got=586 want=586
+  PASS prov statements == 321687                      got=321687 want=321687
+  PASS default failed == 236                          got=236 want=236
+  PASS prov failed == 56                              got=56 want=56
+  PASS default preflight fails == 8                   got=8 want=8
+  PASS prov preflight fails == 13                     got=13 want=13
+  PASS default raw sites == 659                       got=659 want=659
+  PASS prov raw sites == 348                          got=348 want=348
+  PASS prov zapo-js value island == 0                 got=0 want=0
+  PASS prov zapo-js import island == 0                got=0 want=0
+  PASS prov commit cascade == 0                       got=0 want=0
+  PASS prov 'on' cascade == 12                        got=12 want=12
+  PASS prov SC1016 sites == 1                         got=1 want=1
+  PASS prov wa-wam value island == 10                 got=10 want=10
+  PASS default wa-wam value island == 7               got=7 want=7
+  PASS prov BinaryWriter cascade == 7                 got=7 want=7
+  PASS AmbientFab survives prov == 1                  got=1 want=1
+  PASS default zapo-js family sums to 189             got=189 want=189
+  CTL  CONTROL, must not match: default == 999        got=234 want=999
+
+REPORT_NUMBERS=ALL VERIFIED

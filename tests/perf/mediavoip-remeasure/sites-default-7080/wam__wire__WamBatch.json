@@ -1,0 +1,114 @@
+{
+ "entry": "G:/blocks/remeasure/lab/app/pkgs/wam/wire/WamBatch.ts",
+ "flags": [],
+ "elapsedMs": 932,
+ "preflightFailed": false,
+ "stats": {
+  "statementsTotal": 5,
+  "statementsFailed": 2,
+  "statementsIsland": 0,
+  "functionsSkipped": 0
+ },
+ "npmStatic": null,
+ "provenanceNotes": null,
+ "sites": [
+  {
+   "section": "blocker",
+   "code": "SC2013",
+   "message": "importing 'zapo-js' requires the embedded dynamic engine, which this build does not include — the package's implementation runs there",
+   "file": "G:/blocks/remeasure/lab/app/pkgs/wam/wire/binary-writer.ts",
+   "line": 1
+  },
+  {
+   "section": "blocker",
+   "code": "SC2013",
+   "message": "importing '@vinikjkkj/wa-wam' requires the embedded dynamic engine, which this build does not include — the package's implementation runs there",
+   "file": "G:/blocks/remeasure/lab/app/pkgs/wam/wire/encoder.ts",
+   "line": 1
+  },
+  {
+   "section": "blocker",
+   "code": "SC2013",
+   "message": "importing 'zapo-js' requires the embedded dynamic engine, which this build does not include — the package's implementation runs there",
+   "file": "G:/blocks/remeasure/lab/app/pkgs/wam/wire/encoder.ts",
+   "line": 2
+  },
+  {
+   "section": "blocker",
+   "code": "SC2013",
+   "message": "importing '@vinikjkkj/wa-wam' requires the embedded dynamic engine, which this build does not include — the package's implementation runs there",
+   "file": "G:/blocks/remeasure/lab/app/pkgs/wam/wire/WamBatch.ts",
+   "line": 1
+  },
+  {
+   "section": "blocker",
+   "code": "SC2013",
+   "message": "values from the '@vinikjkkj/wa-wam' package run in the embedded dynamic engine, which this build does not include",
+   "file": "G:/blocks/remeasure/lab/app/pkgs/wam/wire/encoder.ts",
+   "line": 9
+  },
+  {
+   "section": "blocker",
+   "code": "SC2013",
+   "message": "values from the '@vinikjkkj/wa-wam' package run in the embedded dynamic engine, which this build does not include",
+   "file": "G:/blocks/remeasure/lab/app/pkgs/wam/wire/encoder.ts",
+   "line": 10
+  },
+  {
+   "section": "unreached",
+   "code": "SC2013",
+   "message": "values from the 'zapo-js' package run in the embedded dynamic engine, which this build does not include",
+   "file": "G:/blocks/remeasure/lab/app/pkgs/wam/wire/binary-writer.ts",
+   "line": 82
+  },
+  {
+   "section": "unreached",
+   "code": "SC2013",
+   "message": "values from the 'zapo-js' package run in the embedded dynamic engine, which this build does not include",
+   "file": "G:/blocks/remeasure/lab/app/pkgs/wam/wire/encoder.ts",
+   "line": 54
+  },
+  {
+   "section": "unreached",
+   "code": "SC2004",
+   "message": "uses of 'bytes' inherit the blocker on its declaration",
+   "file": "G:/blocks/remeasure/lab/app/pkgs/wam/wire/encoder.ts",
+   "line": 55
+  },
+  {
+   "section": "unreached",
+   "code": "SC2004",
+   "message": "uses of 'length' inherit the blocker on its declaration",
+   "file": "G:/blocks/remeasure/lab/app/pkgs/wam/wire/encoder.ts",
+   "line": 56
+  },
+  {
+   "section": "unreached",
+   "code": "SC2004",
+   "message": "uses of 'bytes' inherit the blocker on its declaration",
+   "file": "G:/blocks/remeasure/lab/app/pkgs/wam/wire/encoder.ts",
+   "line": 66
+  },
+  {
+   "section": "unreached",
+   "code": "SC2013",
+   "message": "values from the '@vinikjkkj/wa-wam' package run in the embedded dynamic engine, which this build does not include",
+   "file": "G:/blocks/remeasure/lab/app/pkgs/wam/wire/WamBatch.ts",
+   "line": 39
+  },
+  {
+   "section": "unreached",
+   "code": "SC2013",
+   "message": "values from the '@vinikjkkj/wa-wam' package run in the embedded dynamic engine, which this build does not include",
+   "file": "G:/blocks/remeasure/lab/app/pkgs/wam/wire/WamBatch.ts",
+   "line": 42
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "comparisons of union-typed values (narrow first: check a discriminant field, or compare with '!== undefined'/'!== null' for unit arms) are not supported yet",
+   "file": "G:/blocks/remeasure/lab/app/pkgs/wam/wire/WamBatch.ts",
+   "line": 51
+  }
+ ]
+}

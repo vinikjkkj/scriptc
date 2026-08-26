@@ -1,0 +1,15 @@
+# wire-probe.exe -- the same path with ONE source change, --best-effort, 2,809,344 bytes
+ok   BinaryWriter big-endian + utf8 = 0501020a0b0c0dff6869
+ok   BinaryWriter zero capacity = 0a0b0c0d
+ok   global int zero = 1005
+ok   global int one = 2005
+ok   global int8 = 300564
+ok   global int16 = 4005012c
+ok   global string short = 8005026869
+ok   global null = 0005
+ok   global bool true = 2005
+ok   global extended id = 28012c
+ok   batch hasEvents = true
+ok   batch header+event+field = 57414d0507000100302f642901d8360103
+Uncaught Error: comparisons of union-typed values (narrow first: check a discriminant field, or compare with '!== undefined'/'!== null' for unit arms) are not supported yet [SC1090 at G:/blocks/remeasure/lab/app/probe-wire/WamBatch.ts:57]
+RUN_EXIT=1

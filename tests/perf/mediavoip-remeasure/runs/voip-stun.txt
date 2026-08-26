@@ -1,0 +1,11 @@
+# voip-stun.exe -- voip/relay/stun.ts, static lane, 811,008 bytes
+# oracle: the same module under node v25.9.0 (drivers/voip-stun-oracle.ts)
+ok   buildWhatsAppPing length = 20
+ok   buildWhatsAppPing header + magic cookie = 080100002112a442
+ok   isStunPacket accepts it = true
+ok   isStunPacket rejects non-STUN = false
+ok   transaction id is random = differ
+ok   buildSenderSubscriptions 0x11223344 = 0a0a18c4e688890128003000
+ok   buildSenderSubscriptions 1 = 0a06180128003000
+VOIP-STUN: ALL PASS
+RUN_EXIT=0
