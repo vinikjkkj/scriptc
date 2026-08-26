@@ -9771,7 +9771,7 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
     const members = classInMemberNames(L, recvIr.className);
     if (!members) return null;
     const loc = locOf(call);
-    const helper = classHasKeyHelper(L, recvIr.className, members, loc);
+    const helper = classHasKeyHelper(L, recvIr.className, members, recvIr, loc);
     // The receiver goes through ONE hidden local (the `in` lowering's
     // %inRecv, same reason): it is read three times — ensure's load,
     // ensure's store and the define's load — and a module-level `const`
@@ -9814,7 +9814,7 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
             table(),
             kRef(),
             { kind: "varRef", localId: dTmp.id, type: DYN, loc },
-            { kind: "call", callee: helper, args: [kRef()], type: BOOL, loc },
+            { kind: "call", callee: helper, args: [kRef(), obj()], type: BOOL, loc },
             { kind: "strLit", value: info.decl?.name?.text ?? info.def.name.replace(/^%/, ""), type: STRING, loc },
           ],
           type: VOID,

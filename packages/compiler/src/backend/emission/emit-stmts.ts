@@ -749,8 +749,9 @@ export function emitStmt(E: CEmitter, s: IrStmt): void {
         // the construct (message) with the SC code stamped on `code`,
         // then unwind exactly like `throw`.
         const bytes = Buffer.from(s.message, "utf8");
+        const errKind = s.errKind === "type" ? "SCR_ERR_TYPE" : "SCR_ERR_ERROR";
         E.line(
-          `scr_throw_error_msg_code(SCR_ERR_ERROR, ${cStringLiteral(bytes)}, ${bytes.length}, "${s.code}");${E.srcComment(s.loc)}`,
+          `scr_throw_error_msg_code(${errKind}, ${cStringLiteral(bytes)}, ${bytes.length}, "${s.code}");${E.srcComment(s.loc)}`,
         );
         E.emitUnwind();
         break;
