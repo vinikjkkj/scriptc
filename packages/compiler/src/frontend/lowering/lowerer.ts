@@ -1192,6 +1192,13 @@ export class Lowerer {
    * the body needs — indexed accesses (`T[K]` needs K's literal key) and
    * keyed record reads (`o[k]` where k's type is a literal-bound K). */
   typeParamTsBindings: Map<ts.Symbol, ts.Type> | null = null;
+  /** Object-literal GENERIC METHODS currently lowering under the
+   * contextual constraint erasure (lowerLambda). Their own type
+   * parameters are bound in typeParamBindings for the extent of the
+   * lowering, so lambdaSignature's generic fence stands down for exactly
+   * these nodes — and for no other generic form, which is why this is a
+   * node set and not a flag. */
+  readonly erasedGenericMethods = new Set<ts.Node>();
   /** The current instantiation's symbolic→resolved side table, installed
    * only while that instance's body lowers (lowerGenericInstance). Null
    * everywhere else, which makes symbolicTsResolver inert. */
