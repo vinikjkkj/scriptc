@@ -1,0 +1,25 @@
+{
+  "name": "hub",
+  "version": "3.0.0",
+  "type": "commonjs",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "require": "./dist/index.js",
+      "import": "./dist/esm/index.js",
+      "default": "./dist/index.js"
+    },
+    "./util": {
+      "types": "./dist/util/index.d.ts",
+      "require": "./dist/util/index.js",
+      "import": "./dist/esm/util/index.js",
+      "default": "./dist/util/index.js"
+    },
+    "./deep": {
+      "types": "./dist/deep/index.d.ts",
+      "require": "./dist/deep/index.js",
+      "import": "./dist/esm/deep/index.js",
+      "default": "./dist/deep/index.js"
+    }
+  }
+}
