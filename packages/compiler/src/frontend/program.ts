@@ -1202,6 +1202,31 @@ function chainRoot7(e: ts.Expression): ts.Expression {
   return root;
 }
 
+/** True when every declaration of `sym` (following the alias chain, so a
+ * re-export barrel in the middle is transparent exactly as it is to Node)
+ * lives in a declaration file or in a module the walk has already
+ * finished evaluating — the binding's storage is initialized before the
+ * importer's own body runs, so no read of it can observe a partially
+ * initialized module. A symbol with NO declarations answers false: an
+ * unknown provenance is not evidence of safety. */
+function declarerAlreadyEvaluated7(
+  checker: ts.TypeChecker,
+  sym: ts.Symbol,
+  evaluated: (f: ts.SourceFile) => boolean,
+): boolean {
+  let target = sym;
+  if (target.flags & ts.SymbolFlags.Alias) {
+    const aliased = checker.getAliasedSymbol(target);
+    if (aliased !== undefined) target = aliased;
+  }
+  const decls = checker.declarationsOf(target);
+  if (decls.length === 0) return false;
+  return decls.every((d) => {
+    const f = d.getSourceFile();
+    return f.isDeclarationFile || evaluated(f);
+  });
+}
+
 /** The first use of a binding this cycle-closing import introduces that
  * sits OUTSIDE a deferred position (a read there can observe the
  * partially-initialized exporter), or null when every use defers.
@@ -1212,6 +1237,8 @@ function backEdgeUseOffence7(
   program: ts.Program,
   sf: ts.SourceFile,
   stmt: ts.ImportDeclaration | ts.ExportDeclaration,
+  /** Modules the caller's walk has already FINISHED evaluating. */
+  evaluated: (f: ts.SourceFile) => boolean,
 ): { name: string; node: ts.Node } | null {
   if (!ts.isImportDeclaration(stmt) || stmt.importClause === undefined) return null;
   const checker = program.getTypeChecker();
@@ -1225,6 +1252,19 @@ function backEdgeUseOffence7(
   for (const bindingName of bindingNames) {
     const sym = checker.getSymbolAtLocation(bindingName);
     if (sym === undefined) continue;
+    // The BARREL exemption. An import specifier names the module the read
+    // goes THROUGH; the alias names the module the storage lives in. When
+    // every declaration of the aliased symbol sits in a declaration file
+    // or in a module the walk already FINISHED, the slot is initialized
+    // before any code of this importer runs — the read cannot observe a
+    // partial initialization even at the top level, exactly as Node's
+    // resolved binding reads the declarer's cell and not the barrel's.
+    // A declarer still inside the cluster is never "done" (a done module
+    // could not reach the still-visiting importer), so this never lets a
+    // real mid-cycle read through. Conservative: a declarer the walk has
+    // not reached yet keeps the fence even where it would in fact finish
+    // first.
+    if (declarerAlreadyEvaluated7(checker, sym, evaluated)) continue;
     let offence: { name: string; node: ts.Node } | null = null;
     const visit = (node: ts.Node): void => {
       if (offence !== null || ts.isImportDeclaration(node)) return;
@@ -1386,7 +1426,7 @@ export function makeCycleAdmission(
     }
     const clusterReason = sccVerdict.get(comp)!;
     if (clusterReason !== null) return clusterReason;
-    const use = backEdgeUseOffence7(program, importer, e.stmt);
+    const use = backEdgeUseOffence7(program, importer, e.stmt, evaluated);
     if (use !== null) {
       return `the cycle-crossing binding '${use.name}' is read at ${lineOf(use.node)}, outside any function body — a read during the init window observes the partially-initialized module (Node's TDZ ReferenceError / stale var), which is not modeled`;
     }
