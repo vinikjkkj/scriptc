@@ -1,0 +1,10 @@
+# voip-ssrc.exe -- voip/crypto/ssrc.ts, static lane, 925,696 bytes
+# oracle: the same module run under node v25.9.0 against the installed zapo-js
+ok   counter 0 = 2332697488
+ok   counter 1 = 2008900944
+ok   counter 2 = 2689934163
+ok   other call id = 316901375
+ok   other jid = 3154953451
+ok   deterministic for fixed inputs = 1
+VOIP-SSRC: ALL PASS
+RUN_EXIT=0

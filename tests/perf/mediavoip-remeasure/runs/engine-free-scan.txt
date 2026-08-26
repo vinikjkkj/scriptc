@@ -1,0 +1,25 @@
+# Armed byte scan for the embedded engine.
+# dyn-control.exe is a two-line --dynamic build and is the POSITIVE CONTROL:
+# a marker that reads 0 there cannot be used to call any binary engine-free.
+
+marker          dyn-control.exe     wire-probe2.exe     wire-probe.exe      voip-bytes.exe      bytesview-repro.exe 
+quickjs         1                   0                   0                   0                   0                   DISCRIMINATES
+ScrDyn          1                   0                   0                   0                   0                   DISCRIMINATES
+JS_NewRuntime   0                   0                   0                   0                   0                   INERT
+JS_Eval         0                   0                   0                   0                   0                   INERT
+__island_eval   0                   0                   0                   0                   0                   INERT
+
+size (bytes)    2144768             2811392             2809344             823296              803840              
+
+# The 28,759-line @vinikjkkj/wa-wam table as program code, with a must-not marker.
+deepest name    0                   1                   1                   0                   0                   
+control name    0                   0                   0                   0                   0                   must be 0 everywhere
+
+# second pass, with the two voip binaries added
+marker          dyn-control.exe     voip-ssrc.exe       voip-stun.exe       
+quickjs         1                   0                   0                   DISCRIMINATES
+ScrDyn          1                   0                   0                   DISCRIMINATES
+JS_NewRuntime   0                   0                   0                   INERT
+JS_Eval         0                   0                   0                   INERT
+__island_eval   0                   0                   0                   INERT
+size (bytes)    2144768             925696              811008              
