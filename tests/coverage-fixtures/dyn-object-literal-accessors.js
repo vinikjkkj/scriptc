@@ -56,3 +56,18 @@ function spreadUnderRuntimeKey(key, src) {
   return JSON.stringify(o);
 }
 console.log(spreadUnderRuntimeKey("q", { z: 9 }));
+
+// `this` carried into a nested FUNCTION or ARROW. Only the accessor's own
+// body reads the receiver the runtime pushes for it, and the two nested
+// forms fail in opposite directions. An ARROW is a VALUE the accessor can
+// return, store or defer, and the receiver is popped when the accessor
+// returns: measured before the fence, Node answered 7 and both backends
+// threw `Cannot read properties of undefined`. A plain FUNCTION has its
+// OWN `this` in JS but runs while the push is still standing, so the
+// ambient read hands it the ACCESSOR'S receiver: measured, `this === self`
+// answered false in Node and true on both backends, at exit 0.
+const escaping = take({ a: 7, get f() { return () => this.a; } });
+console.log(String(escaping.f()));
+
+const nestedFn = take({ a: 7, get g() { const f = function () { return this; }; return f(); } });
+console.log(String(typeof nestedFn.g));

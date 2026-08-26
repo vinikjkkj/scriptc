@@ -7743,34 +7743,100 @@ function dynStaticKeyOf(L: Lowerer, prop: ts.ObjectLiteralElementLike): string |
 
 /** `this` inside a dyn object literal's ACCESSOR body.
  *
- * It does not need a fence of its own in the ordinary case, and that is
- * the difference between an accessor and a METHOD here. A method's value
- * is a plain boxed closure and nothing binds a receiver around a call to
- * it; an accessor is invoked BY the runtime, which pushes the receiver
- * (scr_dyn_obj_entry_read and the [[Set]] accessor arm both wrap the call
- * in scr_dyn_this_push_dyn/scr_dyn_this_pop), and `this` in a plain JS
- * function lowers to exactly that ambient read — `dyn.this`.
+ * A DIRECT `this` needs no fence, and that is the difference between an
+ * accessor and a METHOD here. A method's value is a plain boxed closure
+ * and nothing binds a receiver around a call to it; an accessor is
+ * invoked BY the runtime, which pushes the receiver
+ * (scr_dyn_obj_entry_read and the [[Set]] accessor arm both wrap the
+ * call in scr_dyn_this_push_dyn/scr_dyn_this_pop), and `this` in a plain
+ * JS function lowers to exactly that ambient read — `dyn.this`.
  *
- * The one case that must stay LOUD is an ENCLOSING receiver: inside a
- * class method, `L.resolveThis` answers that method's own `this` local
- * before the ambient read is ever reached, so the getter would silently
- * read the OUTER object where Node reads the literal. That is the exact
- * shape of the wrong answer the method fence was written for, so it keeps
- * the same walk — nested constructs that rebind `this` are stepped over,
- * because their `this` is their own. */
-function rejectThisInDynAccessor(L: Lowerer, node: ts.Node): void {
-  if (node.kind === ts.SyntaxKind.ThisKeyword) {
+ * That argument is about WHICH read and WHEN, and it holds only for a
+ * `this` written in the accessor's OWN function scope while the receiver
+ * is pushed. Three shapes leave that window, and all three stay LOUD.
+ * Each was measured by compiling it, not argued:
+ *
+ *   an ENCLOSING receiver. Inside a class method, `L.resolveThis`
+ *     answers that method's own `this` local before the ambient read is
+ *     ever reached, so the getter would silently read the OUTER object
+ *     where Node reads the literal — the exact shape of the wrong
+ *     answer the method fence was written for.
+ *
+ *   an ARROW nested in the body. An arrow does not rebind `this`, so its
+ *     `this` IS the accessor's — but the arrow is a VALUE the accessor
+ *     can return, store or defer, and `dyn.this` inside it is read when
+ *     the ARROW runs, which may be after scr_dyn_this_pop.
+ *     `{ a: 7, get f() { return () => this.a } }` answers 7 in Node and
+ *     threw `Cannot read properties of undefined (reading 'a')` on both
+ *     backends. An arrow invoked BEFORE the accessor returns is correct
+ *     today and is refused with it: whether the value escapes is a
+ *     dataflow question this walk cannot ask, and the ambient read gives
+ *     no signal when it is answered too late.
+ *
+ *   a plain nested FUNCTION in the body. Its `this` is its OWN — never
+ *     the accessor's — and this is the opposite failure: the receiver is
+ *     still pushed while that function runs, so the ambient read hands it
+ *     the ACCESSOR'S receiver. Node hands it globalThis in a sloppy
+ *     script and undefined under strict, and it is never the receiver.
+ *     Measured: `get b() { const self = this; const f = function () {
+ *     return this === self }; return f() }` answered `false` in Node and
+ *     `true` on both backends — a SILENT wrong value at exit 0, which is
+ *     why this one is worth the reach it costs.
+ *
+ * A construct that gets a REAL receiver of its own from the class
+ * machinery — a nested class, its methods, its accessors, its
+ * constructor, a static block — is stepped over: `resolveThis` answers
+ * those out of a `this` local, not the ambient slot.
+ *
+ * The fix that would answer the first two is to materialize the pushed
+ * receiver into a local at accessor entry and let `L.resolveThis` hand
+ * THAT to the capture. It is not taken here: that edits this-resolution,
+ * which another block owns. */
+function rejectThisInDynAccessor(L: Lowerer, node: ts.Node, all: boolean, nested: boolean): void {
+  if (node.kind === ts.SyntaxKind.ThisKeyword && (all || nested)) {
     L.unsupported(
       "SC1090",
       node,
-      "'this' in a get/set accessor of a dyn object literal written inside a method (the enclosing method's receiver would be captured instead of the object the accessor is read through — read a captured binding instead)",
+      all
+        ? "'this' in a get/set accessor of a dyn object literal written inside a method (the enclosing method's receiver would be captured instead of the object the accessor is read through — read a captured binding instead)"
+        : "'this' inside a function or arrow nested in a get/set accessor of a dyn object literal (only the accessor's own body reads the receiver the runtime pushes for it: an arrow can outlive the call, and a plain function would be handed the accessor's receiver where JS hands it globalThis or undefined — read `this` into a `const` in the accessor body and capture that)",
     );
   }
   ts.forEachChild(node, (child) => {
-    if (resetsThis(child)) return;
-    rejectThisInDynAccessor(L, child);
+    if (ownsItsReceiver(child)) return;
+    rejectThisInDynAccessor(L, child, all, nested || readsAmbientThis(child));
   });
 }
+
+/** A nested construct the CLASS machinery gives a real receiver to, which
+ * `L.resolveThis` answers out of a `this` local rather than the ambient
+ * slot. `resetsThis` also lists plain functions, which is right for the
+ * METHOD walk and wrong for this one: a plain function nested in an
+ * accessor resets `this` in JS but NOT in the runtime, whose push is still
+ * standing when it runs. */
+function ownsItsReceiver(n: ts.Node): boolean {
+  const k = n.kind;
+  return (
+    k === ts.SyntaxKind.ClassDeclaration ||
+    k === ts.SyntaxKind.ClassExpression ||
+    k === ts.SyntaxKind.MethodDeclaration ||
+    k === ts.SyntaxKind.GetAccessor ||
+    k === ts.SyntaxKind.SetAccessor ||
+    k === ts.SyntaxKind.Constructor ||
+    k === ts.SyntaxKind.ClassStaticBlockDeclaration
+  );
+}
+
+/** A nested construct whose `this` the runtime answers out of the AMBIENT
+ * slot the accessor's receiver is pushed into: an arrow, because JS gives
+ * it no `this` of its own, and a plain function, because the runtime gives
+ * it none either even though JS does. Deliberately NOT ts.isFunctionLike,
+ * which also answers true for the methods and accessors this walk steps
+ * over. */
+function readsAmbientThis(n: ts.Node): boolean {
+  return ts.isArrowFunction(n) || ts.isFunctionExpression(n) || ts.isFunctionDeclaration(n);
+}
+
 
 /** The accessor PLAN for a dyn object literal: one group per accessor key,
  * indexed by the member that CREATES the key, or null when the literal has
@@ -7839,7 +7905,12 @@ function dynAccessorPlan(
         L.unsupported("SC1090", prop, "a bodyless get/set accessor in a dyn object literal");
       }
       rejectSuperInObjectMethod(L, prop.body);
-      if (L.peekThis() !== null) rejectThisInDynAccessor(L, prop.body);
+      // Two modes, and both walk. peekThis() !== null means an enclosing
+      // frame carries a `this` local that resolveThis would answer with,
+      // so EVERY `this` in the body is refused. Otherwise only a `this`
+      // written inside a nested function or arrow is — the direct read is
+      // the ambient one the runtime pushes the receiver for.
+      rejectThisInDynAccessor(L, prop.body, L.peekThis() !== null, false);
       let g = groups.get(key);
       if (g === undefined) {
         g = { key, getter: null, setter: null };
