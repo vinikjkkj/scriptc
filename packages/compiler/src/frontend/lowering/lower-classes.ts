@@ -5,7 +5,7 @@
  * hierarchy registration. */
 import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
-import { BOOL, CLASS_PROPS_FIELD as IR_CLASS_PROPS_FIELD, DYN, F64, bytesOf, IrClassDef, IrExpr, IrFunction, IrLocal, IrParam, IrStmt, IrType, JSVAL, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, STRING, SrcLoc, UNDEFINED_T, URL_T, VOID, arrayOf, isRefCounted, isSupportedMapKey, isUnitType, typeEquals } from "../../ir/nodes.js";
+import { BOOL, CLASS_PROPS_FIELD as IR_CLASS_PROPS_FIELD, DYN, F64, bytesOf, IrClassDef, IrExpr, IrFunction, IrLocal, IrParam, IrStmt, IrType, JSVAL, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, STRING, SrcLoc, UNDEFINED_T, URL_T, VOID, arrayOf, isRefCounted, isSupportedMapKey, isSupportedMapValue, isSupportedSetElem, isUnitType, mapOf, setOf, typeEquals } from "../../ir/nodes.js";
 import { lowerAbortControllerNew } from "./lower-abort.js";
 import { MAX_GENERIC_INSTANCES, bindingNeverReassigned, genericCallInstance, implicitAnyParamSymbolsOf, implicitCallInstance, implicitMonoFile, omittedArgFor, type GenericFnInfo, type ParamShape } from "./lower-calls.js";
 import { isGenericCallableMemberType, runtimeStreamClassOf, typeKey } from "../types.js";
@@ -1072,6 +1072,154 @@ export interface GenericClassInfo {
           L.isStdlibFile(d.getSourceFile()),
         );
     });
+  }
+
+/** The members a Map/Set binding may be used through and still be a
+   * container this pass can type. Anything NOT here — including a bare
+   * reference that hands the value to someone else — ends the inference,
+   * because a value that escapes can be written through a name this scan
+   * never sees. */
+  const MAP_USE_MEMBERS: ReadonlySet<string> = new Set([
+    "set", "get", "has", "delete", "clear", "size", "forEach", "keys", "values", "entries",
+  ]);
+  const SET_USE_MEMBERS: ReadonlySet<string> = new Set([
+    "add", "has", "delete", "clear", "size", "forEach", "keys", "values", "entries",
+  ]);
+  /** The members whose FIRST argument is a key (Map) or an element (Set). */
+  const KEYED_MEMBERS: ReadonlySet<string> = new Set(["set", "get", "has", "delete", "add"]);
+
+/** JavaScript has no type-argument syntax, so `const m = new Map()` types
+   * `Map<any, any>` however the program goes on to use it, and `any` is
+   * not a supported map key — the container has no static home and the
+   * value falls to the checked-dynamic escape hatch, which carries no
+   * method table and answers V8's own `m.set is not a function` for a
+   * method Node HAS.
+   *
+   * The PROGRAM says what the annotation would have said. This reads the
+   * key and value types off the binding's OWN uses: a `const` local whose
+   * every reference is a member operation on the container itself, with
+   * one supported key type and one supported value type across every
+   * `set`, is exactly the `Map<K, V>` a JSDoc `@type` would have written
+   * — and that spelling already compiles (the contextual-type arm below
+   * adopts it), so this pass reaches an existing representation rather
+   * than inventing one.
+   *
+   * Every clause below is a REFUSAL to guess, and each has a wrong answer
+   * behind it:
+   *
+   *  - `const` only. The adopt-the-initializer rule in lower-stmts.ts
+   *    that carries this type onto the binding is `!isLet`; a `let` may
+   *    be reassigned a different shape later, and the binding would keep
+   *    a map type the second initializer never had.
+   *  - the value must NOT ESCAPE. One bare reference — passed as an
+   *    argument, returned, stored, compared — and some other name can
+   *    write a key kind this scan never counted. Closure capture is fine
+   *    and is the shape lru.min is written in: a nested function reading
+   *    `keyMap.get(k)` is still a member operation on the container.
+   *  - at least one `set`/`add`. With no write there is no evidence, and
+   *    a program that only constructs the map is exactly what the escape
+   *    hatch below exists to keep working.
+   *  - one key type and one value type, both supported. Node's Map takes
+   *    mixed kinds (`m.set(1, x); m.set("1", y)` is two entries); ScrMap
+   *    fixes ONE key kind at construction, so a mixed-kind inference
+   *    would answer `size` as 1 where Node says 2. Disagreement refuses
+   *    and the value keeps the escape hatch it has today. */
+  function inferContainerTypeFromUses(
+    L: Lowerer,
+    expr: ts.NewExpression,
+    flavor: "map" | "set",
+  ): IrType | null {
+    const decl = expr.parent;
+    if (
+      !ts.isVariableDeclaration(decl) || decl.initializer !== expr ||
+      !ts.isIdentifier(decl.name) || decl.type !== undefined
+    ) return null;
+    if (!ts.isVariableDeclarationList(decl.parent)) return null;
+    if ((decl.parent.flags & ts.NodeFlags.Const) === 0) return null;
+    if (!isJsSourceFile(expr.getSourceFile())) return null;
+    const sym = L.checker.getSymbolAtLocation(decl.name);
+    if (!sym) return null;
+
+    const members = flavor === "map" ? MAP_USE_MEMBERS : SET_USE_MEMBERS;
+    const writer = flavor === "map" ? "set" : "add";
+    const keyArgs: ts.Expression[] = [];
+    const valArgs: ts.Expression[] = [];
+    let writes = 0;
+    let escaped = false;
+
+    const visit = (node: ts.Node): void => {
+      if (escaped) return;
+      if (ts.isIdentifier(node) && node !== decl.name &&
+          L.checker.getSymbolAtLocation(node) === sym) {
+        const p = node.parent;
+        // `for (const [k, v] of m)` — iteration over the container is a
+        // read of the container, not a handing-out of it.
+        if (ts.isForOfStatement(p) && p.expression === node) return;
+        if (ts.isTypeOfExpression(p)) return;
+        if (!ts.isPropertyAccessExpression(p) || p.expression !== node) { escaped = true; return; }
+        const name = p.name.text;
+        if (!members.has(name)) { escaped = true; return; }
+        const call = p.parent;
+        const isCall = ts.isCallExpression(call) && call.expression === p;
+        if (KEYED_MEMBERS.has(name)) {
+          if (!isCall) { escaped = true; return; }
+          const a0 = call.arguments[0];
+          if (a0 === undefined) { escaped = true; return; }
+          keyArgs.push(a0);
+          if (name === writer) {
+            writes++;
+            if (flavor === "map") {
+              const a1 = call.arguments[1];
+              if (a1 === undefined) { escaped = true; return; }
+              valArgs.push(a1);
+            }
+          }
+        }
+        return;
+      }
+      ts.forEachChild(node, visit);
+    };
+    for (const sf of L.moduleOrder) { visit(sf); if (escaped) return null; }
+    if (escaped || writes === 0) return null;
+
+    const oneOf = (nodes: readonly ts.Expression[]): IrType | null => {
+      let acc: IrType | null = null;
+      for (const a of nodes) {
+        const t = L.mapTypeOf(L.checker.getBaseTypeOfLiteralType(L.checker.getTypeAtLocation(a)));
+        if (t === null) return null;
+        if (acc === null) acc = t;
+        else if (!typeEquals(acc, t)) return null;
+      }
+      return acc;
+    };
+    const key = oneOf(keyArgs);
+    if (key === null) return null;
+    // STRICTER than isSupportedMapKey/isSupportedSetElem on purpose. Those
+    // admit records and class instances, keyed by REFERENCE identity, and
+    // they are right to: an annotated `Map<Conn, T>` is a type the program
+    // ASKED for, and reference identity is what JS gives it.
+    //
+    // An INFERRED key is a guess, and this one is measurably wrong. A
+    // record is a VALUE here — a width coercion copies it — so the address
+    // that goes into the map is not the address a later `get` presents,
+    // and `m.set(k1, "a"); m.get(k1)` answered `undefined` where Node
+    // answers `a`. Measured on corpus m32, which the base LOUDLY refused
+    // and the first draft of this inference turned into
+    // `undefined undefined undefined` AT EXIT 0 — a silent wrong answer
+    // where there had been a crash, which is the trade this project never
+    // makes, in the direction it least tolerates.
+    //
+    // f64 and string are the two ScrMap key kinds whose SameValueZero IS
+    // value equality, so an inferred container over them cannot disagree
+    // with Node about what is in it. Everything else keeps the named
+    // refusal at the use site (untypedContainerUseFence) and the JSDoc
+    // remedy, which can still spell the reference-keyed map by hand.
+    if (key.kind !== "f64" && key.kind !== "string") return null;
+    if (flavor === "set") return isSupportedSetElem(key) ? setOf(key) : null;
+    if (!isSupportedMapKey(key)) return null;
+    const value = oneOf(valArgs);
+    if (value === null || !isSupportedMapValue(value)) return null;
+    return mapOf(key, value);
   }
 
 /** Does the undefined arm of a COLLECTED field's slot mean ABSENT and
@@ -6870,6 +7018,26 @@ export function lowerNew(L: Lowerer, expr: ts.NewExpression): IrExpr {
             mapped = ctxMapped;
           }
         }
+        // ...and with no annotation and no contextual type, the binding's
+        // own USES carry the key and value types a JSDoc `@type` would
+        // have spelled (inferContainerTypeFromUses). Only `new Map()`:
+        // the WeakMap symbol shares this branch and has no static
+        // container to infer INTO.
+        if (mapped?.kind !== "map" && symbol?.name === "Map" && seedArg === null) {
+          const inferred = inferContainerTypeFromUses(L, expr, "map");
+          if (inferred !== null) {
+            // SCRIPTC_MAPBOX_WHY=1 counts BOTH halves: an inferred site is
+            // one the escape hatch below no longer has to swallow, and the
+            // two counts together are the reach of this pass over a real
+            // package.
+            if (process.env["SCRIPTC_MAPBOX_WHY"] !== undefined) {
+              process.stderr.write(
+                `[mapbox] inferred ${L.fmt(inferred)} at ${loc.file}:${loc.start}\n`,
+              );
+            }
+            mapped = inferred;
+          }
+        }
         if (seedArg && !entriesLit && mapped?.kind === "map") {
           const seeded = lowerMapSeedArrayNew(L, seedArg, mapped);
           if (seeded) return seeded;
@@ -6989,7 +7157,22 @@ export function lowerNew(L: Lowerer, expr: ts.NewExpression): IrExpr {
       // are named specifically.
       if (symbol?.name === "Set" && L.isStdlibSymbol(symbol)) {
         const tsType = L.typeOf(expr);
-        const mapped = L.mapTypeOf(tsType);
+        let mapped = L.mapTypeOf(tsType);
+        // `const s = new Set()` in JAVASCRIPT: no type-argument syntax, so
+        // the element type never resolves past `any` and the container has
+        // no static home. The binding's own uses carry it — Map's story,
+        // one type slot narrower (inferContainerTypeFromUses).
+        if (mapped === null && (expr.arguments?.length ?? 0) === 0) {
+          const inferred = inferContainerTypeFromUses(L, expr, "set");
+          if (inferred !== null) {
+            if (process.env["SCRIPTC_MAPBOX_WHY"] !== undefined) {
+              process.stderr.write(
+                `[mapbox] inferred ${L.fmt(inferred)} at ${locOf(expr).file}:${locOf(expr).start}\n`,
+              );
+            }
+            mapped = inferred;
+          }
+        }
         if (mapped?.kind === "set" && (expr.arguments?.length ?? 0) === 1) {
           const argNode = expr.arguments![0]!;
           // An array LITERAL seed builds element-wise (its contextual type

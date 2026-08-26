@@ -6502,6 +6502,18 @@ export function lowerOptionalChain(L: Lowerer, expr: ts.CallExpression | ts.Prop
       const probe = L.lowerExpr(expr.expression);
       if (probe.type.kind === "array") kind = "array";
     }
+    // `m.size` on a JS `const m = new Map()`. JavaScript has no
+    // type-argument syntax, so the checker says `Map<any, any>` — which
+    // maps to nothing — while the VALUE lowered as a real Map off the
+    // binding’s own uses (inferContainerTypeFromUses). The lowered
+    // value’s kind is the honest one, the same bridge the call path takes
+    // in lowerMapMethodCall. Gated to `size` because it is the only
+    // container member this value-position path answers at all: the
+    // methods below it are the "call it directly" refusal either way.
+    if (kind === undefined && expr.name.text === "size" && isJsSourceFile(expr.getSourceFile())) {
+      const probe = probeLower(L, expr.expression);
+      if (probe?.type.kind === "map" || probe?.type.kind === "set") kind = probe.type.kind;
+    }
     // The MIRROR of that bridge, inside a MONOMORPHIZED generic body. The
     // checker keeps reporting the DECLARED types there, so a member
     // reached through a type parameter's APPARENT type reads as the
