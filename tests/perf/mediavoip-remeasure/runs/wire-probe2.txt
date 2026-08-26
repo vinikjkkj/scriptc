@@ -1,0 +1,19 @@
+# wire-probe2.exe -- the WAM wire path, static lane, 2,811,392 bytes
+# built: scriptc build drivers/wam-wire-probe2.ts --provenance-sources --npm-static '@vinikjkkj/wa-wam'
+# oracle: packages/wam/src/wire/__tests__/wire.test.ts
+ok   BinaryWriter big-endian + utf8 = 0501020a0b0c0dff6869
+ok   BinaryWriter zero capacity = 0a0b0c0d
+ok   global int zero = 1005
+ok   global int one = 2005
+ok   global int8 = 300564
+ok   global int16 = 4005012c
+ok   global string short = 8005026869
+ok   global null = 0005
+ok   global bool true = 2005
+ok   global extended id = 28012c
+ok   batch hasEvents = true
+ok   batch header+event+field = 57414d0507000100302f642901d8360103
+ok   delta: unchanged global not re-emitted = same
+ok   delta: changed global re-emitted = grew
+WAM-WIRE: ALL PASS
+RUN_EXIT=0
