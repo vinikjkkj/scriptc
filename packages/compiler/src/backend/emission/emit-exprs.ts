@@ -2690,9 +2690,15 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
                         // the emitter's (dynMatch says it at length), and
                         // it holds only while every PRODUCER of a dyn
                         // ArrayBuffer builds the ARRBUF kind.
-                        `${d.name}->kind == ${
-                          { string: "SCR_DYN_STR", number: "SCR_DYN_NUM", boolean: "SCR_DYN_BOOL", undefined: "SCR_DYN_UNDEF", null: "SCR_DYN_NULL", bytes: "SCR_DYN_BYTES", arraybuffer: "SCR_DYN_ARRBUF", bigint: "SCR_DYN_BIG" }[e.test]
-                        }`;
+                        e.test === "u8array"
+                          ? // `instanceof Uint8Array`: the kind compare is
+                            // not enough on its own -- a boxed DataView
+                            // rides SCR_DYN_BYTES too. One runtime
+                            // predicate, shared with the LLVM lane.
+                            `scr_dyn_is_u8array(${d.name})`
+                          : `${d.name}->kind == ${
+                              { string: "SCR_DYN_STR", number: "SCR_DYN_NUM", boolean: "SCR_DYN_BOOL", undefined: "SCR_DYN_UNDEF", null: "SCR_DYN_NULL", bytes: "SCR_DYN_BYTES", arraybuffer: "SCR_DYN_ARRBUF", bigint: "SCR_DYN_BIG" }[e.test]
+                            }`;
         return E.newTemp(e.type, e.negated ? `!(${test})` : test);
       }
       case "unionEq": {
@@ -5772,8 +5778,16 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             return finish(`scr_bytes_mark_buffer(${arg(0)})`);
           case "bytes.markPlain":
             return finish(`scr_bytes_mark_plain(${arg(0)})`);
+          // The DataView flavor: the third u8 spelling. isDataView never
+          // throws -- one producer, so unstamped means "not one".
+          case "bytes.markDataView":
+            return finish(`scr_bytes_mark_dataview(${arg(0)})`);
+          case "bytes.isDataView":
+            return finish(`scr_bytes_is_dataview(${arg(0)})`);
           case "bytes.isBuffer":
             return finish(`scr_bytes_is_buffer(${arg(0)}, ${arg(1)})`);
+          case "bytes.isPlainU8":
+            return finish(`scr_bytes_is_plain_u8(${arg(0)}, ${arg(1)})`);
           // The checked-dynamic compare/equals validators
           // (scr_bytes_io.c): Node's argument ladders throw catchably
           // (may-throw seed set); all dyn args borrowed.

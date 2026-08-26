@@ -9627,6 +9627,30 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/7200-dataview-is-not-a-uint8array.ts": {
+   "order": [
+    "<repo>/tests/corpus/7200-dataview-is-not-a-uint8array.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/7201-bytes-view-union-discriminates-a-dataview.ts": {
+   "order": [
+    "<repo>/tests/corpus/7201-bytes-view-union-discriminates-a-dataview.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/7202-dataview-through-an-unknown-slot.ts": {
+   "order": [
+    "<repo>/tests/corpus/7202-dataview-through-an-unknown-slot.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/7203-dataview-flavor-siblings.ts": {
+   "order": [
+    "<repo>/tests/corpus/7203-dataview-flavor-siblings.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/721-accessors-eval-order.ts": {
    "order": [
     "<repo>/tests/corpus/721-accessors-eval-order.ts"

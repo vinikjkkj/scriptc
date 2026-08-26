@@ -1,0 +1,1691 @@
+{
+ "tally": {
+  "MATCH": 27,
+  "WRONG": 1,
+  "TRAP": 212,
+  "DID-NOT-RUN": 0,
+  "NO-ORACLE": 0
+ },
+ "rows": [
+  {
+   "id": "U:u8:Uint8Array",
+   "verdict": "MATCH",
+   "node": "true",
+   "got": "true",
+   "reason": null
+  },
+  {
+   "id": "U:u8:Int8Array",
+   "verdict": "MATCH",
+   "node": "false",
+   "got": "false",
+   "reason": null
+  },
+  {
+   "id": "U:u8:Uint8ClampedArray",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC1090: 'instanceof' right-hand sides other than classes declared in the program is not supported yet"
+  },
+  {
+   "id": "U:u8:Int16Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC1090: 'instanceof' right-hand sides other than classes declared in the program is not supported yet"
+  },
+  {
+   "id": "U:u8:Uint16Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC1090: 'instanceof' right-hand sides other than classes declared in the program is not supported yet"
+  },
+  {
+   "id": "U:u8:Int32Array",
+   "verdict": "MATCH",
+   "node": "false",
+   "got": "false",
+   "reason": null
+  },
+  {
+   "id": "U:u8:Uint32Array",
+   "verdict": "MATCH",
+   "node": "false",
+   "got": "false",
+   "reason": null
+  },
+  {
+   "id": "U:u8:Float32Array",
+   "verdict": "MATCH",
+   "node": "false",
+   "got": "false",
+   "reason": null
+  },
+  {
+   "id": "U:u8:Float64Array",
+   "verdict": "MATCH",
+   "node": "false",
+   "got": "false",
+   "reason": null
+  },
+  {
+   "id": "U:u8:BigInt64Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC1090: 'instanceof' right-hand sides other than classes declared in the program is not supported yet"
+  },
+  {
+   "id": "U:u8:BigUint64Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC1090: 'instanceof' right-hand sides other than classes declared in the program is not supported yet"
+  },
+  {
+   "id": "U:u8:DataView",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC1090: 'instanceof' right-hand sides other than classes declared in the program is not supported yet"
+  },
+  {
+   "id": "U:u8:ArrayBuffer",
+   "verdict": "MATCH",
+   "node": "false",
+   "got": "false",
+   "reason": null
+  },
+  {
+   "id": "U:u8:SharedArrayBuffer",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC1090: 'instanceof' right-hand sides other than classes declared in the program is not supported yet"
+  },
+  {
+   "id": "U:u8:Buffer",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC0001: The right-hand side of an 'instanceof' expression must be either of type 'any', a class, function, or other type assignable to the 'Function' interface type, or an object type with a 'Symbol.hasInstance' method."
+  },
+  {
+   "id": "U:u8:Object",
+   "verdict": "TRAP",
+   "node": "true",
+   "got": null,
+   "reason": "SC1090: 'instanceof' right-hand sides other than classes declared in the program is not supported yet"
+  },
+  {
+   "id": "U:i8:Uint8Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2003: union types must match exactly: expected 'ArrayBuffer | Uint8Array', got 'Float32Array' (a union re-tags into another union only when every arm of the source has an identical arm in the destination, or is a record/array that width-coerces into exactly one destination arm)"
+  },
+  {
+   "id": "U:i8:Int8Array",
+   "verdict": "TRAP",
+   "node": "true",
+   "got": null,
+   "reason": "SC2003: union types must match exactly: expected 'ArrayBuffer | Uint8Array', got 'Float32Array' (a union re-tags into another union only when every arm of the source has an identical arm in the destination, or is a record/array that width-coerces into exactly one destination arm)"
+  },
+  {
+   "id": "U:i8:Uint8ClampedArray",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2003: union types must match exactly: expected 'ArrayBuffer | Uint8Array', got 'Float32Array' (a union re-tags into another union only when every arm of the source has an identical arm in the destination, or is a record/array that width-coerces into exactly one destination arm)"
+  },
+  {
+   "id": "U:i8:Int16Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2003: union types must match exactly: expected 'ArrayBuffer | Uint8Array', got 'Float32Array' (a union re-tags into another union only when every arm of the source has an identical arm in the destination, or is a record/array that width-coerces into exactly one destination arm)"
+  },
+  {
+   "id": "U:i8:Uint16Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2003: union types must match exactly: expected 'ArrayBuffer | Uint8Array', got 'Float32Array' (a union re-tags into another union only when every arm of the source has an identical arm in the destination, or is a record/array that width-coerces into exactly one destination arm)"
+  },
+  {
+   "id": "U:i8:Int32Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2003: union types must match exactly: expected 'ArrayBuffer | Uint8Array', got 'Float32Array' (a union re-tags into another union only when every arm of the source has an identical arm in the destination, or is a record/array that width-coerces into exactly one destination arm)"
+  },
+  {
+   "id": "U:i8:Uint32Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2003: union types must match exactly: expected 'ArrayBuffer | Uint8Array', got 'Float32Array' (a union re-tags into another union only when every arm of the source has an identical arm in the destination, or is a record/array that width-coerces into exactly one destination arm)"
+  },
+  {
+   "id": "U:i8:Float32Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2003: union types must match exactly: expected 'ArrayBuffer | Uint8Array', got 'Float32Array' (a union re-tags into another union only when every arm of the source has an identical arm in the destination, or is a record/array that width-coerces into exactly one destination arm)"
+  },
+  {
+   "id": "U:i8:Float64Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2003: union types must match exactly: expected 'ArrayBuffer | Uint8Array', got 'Float32Array' (a union re-tags into another union only when every arm of the source has an identical arm in the destination, or is a record/array that width-coerces into exactly one destination arm)"
+  },
+  {
+   "id": "U:i8:BigInt64Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2003: union types must match exactly: expected 'ArrayBuffer | Uint8Array', got 'Float32Array' (a union re-tags into another union only when every arm of the source has an identical arm in the destination, or is a record/array that width-coerces into exactly one destination arm)"
+  },
+  {
+   "id": "U:i8:BigUint64Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2003: union types must match exactly: expected 'ArrayBuffer | Uint8Array', got 'Float32Array' (a union re-tags into another union only when every arm of the source has an identical arm in the destination, or is a record/array that width-coerces into exactly one destination arm)"
+  },
+  {
+   "id": "U:i8:DataView",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2003: union types must match exactly: expected 'ArrayBuffer | Uint8Array', got 'Float32Array' (a union re-tags into another union only when every arm of the source has an identical arm in the destination, or is a record/array that width-coerces into exactly one destination arm)"
+  },
+  {
+   "id": "U:i8:ArrayBuffer",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2003: union types must match exactly: expected 'ArrayBuffer | Uint8Array', got 'Float32Array' (a union re-tags into another union only when every arm of the source has an identical arm in the destination, or is a record/array that width-coerces into exactly one destination arm)"
+  },
+  {
+   "id": "U:i8:SharedArrayBuffer",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2003: union types must match exactly: expected 'ArrayBuffer | Uint8Array', got 'Float32Array' (a union re-tags into another union only when every arm of the source has an identical arm in the destination, or is a record/array that width-coerces into exactly one destination arm)"
+  },
+  {
+   "id": "U:i8:Buffer",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC0001: The right-hand side of an 'instanceof' expression must be either of type 'any', a class, function, or other type assignable to the 'Function' interface type, or an object type with a 'Symbol.hasInstance' method."
+  },
+  {
+   "id": "U:i8:Object",
+   "verdict": "TRAP",
+   "node": "true",
+   "got": null,
+   "reason": "SC2003: union types must match exactly: expected 'ArrayBuffer | Uint8Array', got 'Float32Array' (a union re-tags into another union only when every arm of the source has an identical arm in the destination, or is a record/array that width-coerces into exactly one destination arm)"
+  },
+  {
+   "id": "U:u8c:Uint8Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2020: 'new Uint8ClampedArray' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "U:u8c:Int8Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2020: 'new Uint8ClampedArray' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "U:u8c:Uint8ClampedArray",
+   "verdict": "TRAP",
+   "node": "true",
+   "got": null,
+   "reason": "SC2020: 'new Uint8ClampedArray' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "U:u8c:Int16Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2020: 'new Uint8ClampedArray' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "U:u8c:Uint16Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2020: 'new Uint8ClampedArray' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "U:u8c:Int32Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2020: 'new Uint8ClampedArray' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "U:u8c:Uint32Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2020: 'new Uint8ClampedArray' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "U:u8c:Float32Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2020: 'new Uint8ClampedArray' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "U:u8c:Float64Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2020: 'new Uint8ClampedArray' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "U:u8c:BigInt64Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2020: 'new Uint8ClampedArray' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "U:u8c:BigUint64Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2020: 'new Uint8ClampedArray' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "U:u8c:DataView",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2020: 'new Uint8ClampedArray' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "U:u8c:ArrayBuffer",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2020: 'new Uint8ClampedArray' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "U:u8c:SharedArrayBuffer",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2020: 'new Uint8ClampedArray' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "U:u8c:Buffer",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC0001: The right-hand side of an 'instanceof' expression must be either of type 'any', a class, function, or other type assignable to the 'Function' interface type, or an object type with a 'Symbol.hasInstance' method."
+  },
+  {
+   "id": "U:u8c:Object",
+   "verdict": "TRAP",
+   "node": "true",
+   "got": null,
+   "reason": "SC2020: 'new Uint8ClampedArray' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "U:i16:Uint8Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2020: 'new Int16Array' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "U:i16:Int8Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2020: 'new Int16Array' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "U:i16:Uint8ClampedArray",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2020: 'new Int16Array' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "U:i16:Int16Array",
+   "verdict": "TRAP",
+   "node": "true",
+   "got": null,
+   "reason": "SC2020: 'new Int16Array' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "U:i16:Uint16Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2020: 'new Int16Array' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "U:i16:Int32Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2020: 'new Int16Array' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "U:i16:Uint32Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2020: 'new Int16Array' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "U:i16:Float32Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2020: 'new Int16Array' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "U:i16:Float64Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2020: 'new Int16Array' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "U:i16:BigInt64Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2020: 'new Int16Array' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "U:i16:BigUint64Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2020: 'new Int16Array' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "U:i16:DataView",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2020: 'new Int16Array' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "U:i16:ArrayBuffer",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2020: 'new Int16Array' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "U:i16:SharedArrayBuffer",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2020: 'new Int16Array' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "U:i16:Buffer",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC0001: The right-hand side of an 'instanceof' expression must be either of type 'any', a class, function, or other type assignable to the 'Function' interface type, or an object type with a 'Symbol.hasInstance' method."
+  },
+  {
+   "id": "U:i16:Object",
+   "verdict": "TRAP",
+   "node": "true",
+   "got": null,
+   "reason": "SC2020: 'new Int16Array' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "U:u16:Uint8Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2020: 'new Uint16Array' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "U:u16:Int8Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2020: 'new Uint16Array' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "U:u16:Uint8ClampedArray",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2020: 'new Uint16Array' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "U:u16:Int16Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2020: 'new Uint16Array' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "U:u16:Uint16Array",
+   "verdict": "TRAP",
+   "node": "true",
+   "got": null,
+   "reason": "SC2020: 'new Uint16Array' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "U:u16:Int32Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2020: 'new Uint16Array' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "U:u16:Uint32Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2020: 'new Uint16Array' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "U:u16:Float32Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2020: 'new Uint16Array' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "U:u16:Float64Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2020: 'new Uint16Array' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "U:u16:BigInt64Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2020: 'new Uint16Array' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "U:u16:BigUint64Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2020: 'new Uint16Array' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "U:u16:DataView",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2020: 'new Uint16Array' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "U:u16:ArrayBuffer",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2020: 'new Uint16Array' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "U:u16:SharedArrayBuffer",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2020: 'new Uint16Array' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "U:u16:Buffer",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC0001: The right-hand side of an 'instanceof' expression must be either of type 'any', a class, function, or other type assignable to the 'Function' interface type, or an object type with a 'Symbol.hasInstance' method."
+  },
+  {
+   "id": "U:u16:Object",
+   "verdict": "TRAP",
+   "node": "true",
+   "got": null,
+   "reason": "SC2020: 'new Uint16Array' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "U:i32:Uint8Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2003: union types must match exactly: expected 'ArrayBuffer | Uint8Array', got 'Int32Array' (a union re-tags into another union only when every arm of the source has an identical arm in the destination, or is a record/array that width-coerces into exactly one destination arm)"
+  },
+  {
+   "id": "U:i32:Int8Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2003: union types must match exactly: expected 'ArrayBuffer | Uint8Array', got 'Int32Array' (a union re-tags into another union only when every arm of the source has an identical arm in the destination, or is a record/array that width-coerces into exactly one destination arm)"
+  },
+  {
+   "id": "U:i32:Uint8ClampedArray",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2003: union types must match exactly: expected 'ArrayBuffer | Uint8Array', got 'Int32Array' (a union re-tags into another union only when every arm of the source has an identical arm in the destination, or is a record/array that width-coerces into exactly one destination arm)"
+  },
+  {
+   "id": "U:i32:Int16Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2003: union types must match exactly: expected 'ArrayBuffer | Uint8Array', got 'Int32Array' (a union re-tags into another union only when every arm of the source has an identical arm in the destination, or is a record/array that width-coerces into exactly one destination arm)"
+  },
+  {
+   "id": "U:i32:Uint16Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2003: union types must match exactly: expected 'ArrayBuffer | Uint8Array', got 'Int32Array' (a union re-tags into another union only when every arm of the source has an identical arm in the destination, or is a record/array that width-coerces into exactly one destination arm)"
+  },
+  {
+   "id": "U:i32:Int32Array",
+   "verdict": "TRAP",
+   "node": "true",
+   "got": null,
+   "reason": "SC2003: union types must match exactly: expected 'ArrayBuffer | Uint8Array', got 'Int32Array' (a union re-tags into another union only when every arm of the source has an identical arm in the destination, or is a record/array that width-coerces into exactly one destination arm)"
+  },
+  {
+   "id": "U:i32:Uint32Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2003: union types must match exactly: expected 'ArrayBuffer | Uint8Array', got 'Int32Array' (a union re-tags into another union only when every arm of the source has an identical arm in the destination, or is a record/array that width-coerces into exactly one destination arm)"
+  },
+  {
+   "id": "U:i32:Float32Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2003: union types must match exactly: expected 'ArrayBuffer | Uint8Array', got 'Int32Array' (a union re-tags into another union only when every arm of the source has an identical arm in the destination, or is a record/array that width-coerces into exactly one destination arm)"
+  },
+  {
+   "id": "U:i32:Float64Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2003: union types must match exactly: expected 'ArrayBuffer | Uint8Array', got 'Int32Array' (a union re-tags into another union only when every arm of the source has an identical arm in the destination, or is a record/array that width-coerces into exactly one destination arm)"
+  },
+  {
+   "id": "U:i32:BigInt64Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2003: union types must match exactly: expected 'ArrayBuffer | Uint8Array', got 'Int32Array' (a union re-tags into another union only when every arm of the source has an identical arm in the destination, or is a record/array that width-coerces into exactly one destination arm)"
+  },
+  {
+   "id": "U:i32:BigUint64Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2003: union types must match exactly: expected 'ArrayBuffer | Uint8Array', got 'Int32Array' (a union re-tags into another union only when every arm of the source has an identical arm in the destination, or is a record/array that width-coerces into exactly one destination arm)"
+  },
+  {
+   "id": "U:i32:DataView",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2003: union types must match exactly: expected 'ArrayBuffer | Uint8Array', got 'Int32Array' (a union re-tags into another union only when every arm of the source has an identical arm in the destination, or is a record/array that width-coerces into exactly one destination arm)"
+  },
+  {
+   "id": "U:i32:ArrayBuffer",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2003: union types must match exactly: expected 'ArrayBuffer | Uint8Array', got 'Int32Array' (a union re-tags into another union only when every arm of the source has an identical arm in the destination, or is a record/array that width-coerces into exactly one destination arm)"
+  },
+  {
+   "id": "U:i32:SharedArrayBuffer",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2003: union types must match exactly: expected 'ArrayBuffer | Uint8Array', got 'Int32Array' (a union re-tags into another union only when every arm of the source has an identical arm in the destination, or is a record/array that width-coerces into exactly one destination arm)"
+  },
+  {
+   "id": "U:i32:Buffer",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC0001: The right-hand side of an 'instanceof' expression must be either of type 'any', a class, function, or other type assignable to the 'Function' interface type, or an object type with a 'Symbol.hasInstance' method."
+  },
+  {
+   "id": "U:i32:Object",
+   "verdict": "TRAP",
+   "node": "true",
+   "got": null,
+   "reason": "SC2003: union types must match exactly: expected 'ArrayBuffer | Uint8Array', got 'Int32Array' (a union re-tags into another union only when every arm of the source has an identical arm in the destination, or is a record/array that width-coerces into exactly one destination arm)"
+  },
+  {
+   "id": "U:u32:Uint8Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2003: union types must match exactly: expected 'ArrayBuffer | Uint8Array', got 'Uint32Array' (a union re-tags into another union only when every arm of the source has an identical arm in the destination, or is a record/array that width-coerces into exactly one destination arm)"
+  },
+  {
+   "id": "U:u32:Int8Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2003: union types must match exactly: expected 'ArrayBuffer | Uint8Array', got 'Uint32Array' (a union re-tags into another union only when every arm of the source has an identical arm in the destination, or is a record/array that width-coerces into exactly one destination arm)"
+  },
+  {
+   "id": "U:u32:Uint8ClampedArray",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2003: union types must match exactly: expected 'ArrayBuffer | Uint8Array', got 'Uint32Array' (a union re-tags into another union only when every arm of the source has an identical arm in the destination, or is a record/array that width-coerces into exactly one destination arm)"
+  },
+  {
+   "id": "U:u32:Int16Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2003: union types must match exactly: expected 'ArrayBuffer | Uint8Array', got 'Uint32Array' (a union re-tags into another union only when every arm of the source has an identical arm in the destination, or is a record/array that width-coerces into exactly one destination arm)"
+  },
+  {
+   "id": "U:u32:Uint16Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2003: union types must match exactly: expected 'ArrayBuffer | Uint8Array', got 'Uint32Array' (a union re-tags into another union only when every arm of the source has an identical arm in the destination, or is a record/array that width-coerces into exactly one destination arm)"
+  },
+  {
+   "id": "U:u32:Int32Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2003: union types must match exactly: expected 'ArrayBuffer | Uint8Array', got 'Uint32Array' (a union re-tags into another union only when every arm of the source has an identical arm in the destination, or is a record/array that width-coerces into exactly one destination arm)"
+  },
+  {
+   "id": "U:u32:Uint32Array",
+   "verdict": "TRAP",
+   "node": "true",
+   "got": null,
+   "reason": "SC2003: union types must match exactly: expected 'ArrayBuffer | Uint8Array', got 'Uint32Array' (a union re-tags into another union only when every arm of the source has an identical arm in the destination, or is a record/array that width-coerces into exactly one destination arm)"
+  },
+  {
+   "id": "U:u32:Float32Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2003: union types must match exactly: expected 'ArrayBuffer | Uint8Array', got 'Uint32Array' (a union re-tags into another union only when every arm of the source has an identical arm in the destination, or is a record/array that width-coerces into exactly one destination arm)"
+  },
+  {
+   "id": "U:u32:Float64Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2003: union types must match exactly: expected 'ArrayBuffer | Uint8Array', got 'Uint32Array' (a union re-tags into another union only when every arm of the source has an identical arm in the destination, or is a record/array that width-coerces into exactly one destination arm)"
+  },
+  {
+   "id": "U:u32:BigInt64Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2003: union types must match exactly: expected 'ArrayBuffer | Uint8Array', got 'Uint32Array' (a union re-tags into another union only when every arm of the source has an identical arm in the destination, or is a record/array that width-coerces into exactly one destination arm)"
+  },
+  {
+   "id": "U:u32:BigUint64Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2003: union types must match exactly: expected 'ArrayBuffer | Uint8Array', got 'Uint32Array' (a union re-tags into another union only when every arm of the source has an identical arm in the destination, or is a record/array that width-coerces into exactly one destination arm)"
+  },
+  {
+   "id": "U:u32:DataView",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2003: union types must match exactly: expected 'ArrayBuffer | Uint8Array', got 'Uint32Array' (a union re-tags into another union only when every arm of the source has an identical arm in the destination, or is a record/array that width-coerces into exactly one destination arm)"
+  },
+  {
+   "id": "U:u32:ArrayBuffer",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2003: union types must match exactly: expected 'ArrayBuffer | Uint8Array', got 'Uint32Array' (a union re-tags into another union only when every arm of the source has an identical arm in the destination, or is a record/array that width-coerces into exactly one destination arm)"
+  },
+  {
+   "id": "U:u32:SharedArrayBuffer",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2003: union types must match exactly: expected 'ArrayBuffer | Uint8Array', got 'Uint32Array' (a union re-tags into another union only when every arm of the source has an identical arm in the destination, or is a record/array that width-coerces into exactly one destination arm)"
+  },
+  {
+   "id": "U:u32:Buffer",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC0001: The right-hand side of an 'instanceof' expression must be either of type 'any', a class, function, or other type assignable to the 'Function' interface type, or an object type with a 'Symbol.hasInstance' method."
+  },
+  {
+   "id": "U:u32:Object",
+   "verdict": "TRAP",
+   "node": "true",
+   "got": null,
+   "reason": "SC2003: union types must match exactly: expected 'ArrayBuffer | Uint8Array', got 'Uint32Array' (a union re-tags into another union only when every arm of the source has an identical arm in the destination, or is a record/array that width-coerces into exactly one destination arm)"
+  },
+  {
+   "id": "U:f32:Uint8Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2003: union types must match exactly: expected 'ArrayBuffer | Uint8Array', got 'Float32Array' (a union re-tags into another union only when every arm of the source has an identical arm in the destination, or is a record/array that width-coerces into exactly one destination arm)"
+  },
+  {
+   "id": "U:f32:Int8Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2003: union types must match exactly: expected 'ArrayBuffer | Uint8Array', got 'Float32Array' (a union re-tags into another union only when every arm of the source has an identical arm in the destination, or is a record/array that width-coerces into exactly one destination arm)"
+  },
+  {
+   "id": "U:f32:Uint8ClampedArray",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2003: union types must match exactly: expected 'ArrayBuffer | Uint8Array', got 'Float32Array' (a union re-tags into another union only when every arm of the source has an identical arm in the destination, or is a record/array that width-coerces into exactly one destination arm)"
+  },
+  {
+   "id": "U:f32:Int16Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2003: union types must match exactly: expected 'ArrayBuffer | Uint8Array', got 'Float32Array' (a union re-tags into another union only when every arm of the source has an identical arm in the destination, or is a record/array that width-coerces into exactly one destination arm)"
+  },
+  {
+   "id": "U:f32:Uint16Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2003: union types must match exactly: expected 'ArrayBuffer | Uint8Array', got 'Float32Array' (a union re-tags into another union only when every arm of the source has an identical arm in the destination, or is a record/array that width-coerces into exactly one destination arm)"
+  },
+  {
+   "id": "U:f32:Int32Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2003: union types must match exactly: expected 'ArrayBuffer | Uint8Array', got 'Float32Array' (a union re-tags into another union only when every arm of the source has an identical arm in the destination, or is a record/array that width-coerces into exactly one destination arm)"
+  },
+  {
+   "id": "U:f32:Uint32Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2003: union types must match exactly: expected 'ArrayBuffer | Uint8Array', got 'Float32Array' (a union re-tags into another union only when every arm of the source has an identical arm in the destination, or is a record/array that width-coerces into exactly one destination arm)"
+  },
+  {
+   "id": "U:f32:Float32Array",
+   "verdict": "TRAP",
+   "node": "true",
+   "got": null,
+   "reason": "SC2003: union types must match exactly: expected 'ArrayBuffer | Uint8Array', got 'Float32Array' (a union re-tags into another union only when every arm of the source has an identical arm in the destination, or is a record/array that width-coerces into exactly one destination arm)"
+  },
+  {
+   "id": "U:f32:Float64Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2003: union types must match exactly: expected 'ArrayBuffer | Uint8Array', got 'Float32Array' (a union re-tags into another union only when every arm of the source has an identical arm in the destination, or is a record/array that width-coerces into exactly one destination arm)"
+  },
+  {
+   "id": "U:f32:BigInt64Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2003: union types must match exactly: expected 'ArrayBuffer | Uint8Array', got 'Float32Array' (a union re-tags into another union only when every arm of the source has an identical arm in the destination, or is a record/array that width-coerces into exactly one destination arm)"
+  },
+  {
+   "id": "U:f32:BigUint64Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2003: union types must match exactly: expected 'ArrayBuffer | Uint8Array', got 'Float32Array' (a union re-tags into another union only when every arm of the source has an identical arm in the destination, or is a record/array that width-coerces into exactly one destination arm)"
+  },
+  {
+   "id": "U:f32:DataView",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2003: union types must match exactly: expected 'ArrayBuffer | Uint8Array', got 'Float32Array' (a union re-tags into another union only when every arm of the source has an identical arm in the destination, or is a record/array that width-coerces into exactly one destination arm)"
+  },
+  {
+   "id": "U:f32:ArrayBuffer",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2003: union types must match exactly: expected 'ArrayBuffer | Uint8Array', got 'Float32Array' (a union re-tags into another union only when every arm of the source has an identical arm in the destination, or is a record/array that width-coerces into exactly one destination arm)"
+  },
+  {
+   "id": "U:f32:SharedArrayBuffer",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2003: union types must match exactly: expected 'ArrayBuffer | Uint8Array', got 'Float32Array' (a union re-tags into another union only when every arm of the source has an identical arm in the destination, or is a record/array that width-coerces into exactly one destination arm)"
+  },
+  {
+   "id": "U:f32:Buffer",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC0001: The right-hand side of an 'instanceof' expression must be either of type 'any', a class, function, or other type assignable to the 'Function' interface type, or an object type with a 'Symbol.hasInstance' method."
+  },
+  {
+   "id": "U:f32:Object",
+   "verdict": "TRAP",
+   "node": "true",
+   "got": null,
+   "reason": "SC2003: union types must match exactly: expected 'ArrayBuffer | Uint8Array', got 'Float32Array' (a union re-tags into another union only when every arm of the source has an identical arm in the destination, or is a record/array that width-coerces into exactly one destination arm)"
+  },
+  {
+   "id": "U:f64:Uint8Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2003: union types must match exactly: expected 'ArrayBuffer | Uint8Array', got 'Float32Array' (a union re-tags into another union only when every arm of the source has an identical arm in the destination, or is a record/array that width-coerces into exactly one destination arm)"
+  },
+  {
+   "id": "U:f64:Int8Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2003: union types must match exactly: expected 'ArrayBuffer | Uint8Array', got 'Float32Array' (a union re-tags into another union only when every arm of the source has an identical arm in the destination, or is a record/array that width-coerces into exactly one destination arm)"
+  },
+  {
+   "id": "U:f64:Uint8ClampedArray",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2003: union types must match exactly: expected 'ArrayBuffer | Uint8Array', got 'Float32Array' (a union re-tags into another union only when every arm of the source has an identical arm in the destination, or is a record/array that width-coerces into exactly one destination arm)"
+  },
+  {
+   "id": "U:f64:Int16Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2003: union types must match exactly: expected 'ArrayBuffer | Uint8Array', got 'Float32Array' (a union re-tags into another union only when every arm of the source has an identical arm in the destination, or is a record/array that width-coerces into exactly one destination arm)"
+  },
+  {
+   "id": "U:f64:Uint16Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2003: union types must match exactly: expected 'ArrayBuffer | Uint8Array', got 'Float32Array' (a union re-tags into another union only when every arm of the source has an identical arm in the destination, or is a record/array that width-coerces into exactly one destination arm)"
+  },
+  {
+   "id": "U:f64:Int32Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2003: union types must match exactly: expected 'ArrayBuffer | Uint8Array', got 'Float32Array' (a union re-tags into another union only when every arm of the source has an identical arm in the destination, or is a record/array that width-coerces into exactly one destination arm)"
+  },
+  {
+   "id": "U:f64:Uint32Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2003: union types must match exactly: expected 'ArrayBuffer | Uint8Array', got 'Float32Array' (a union re-tags into another union only when every arm of the source has an identical arm in the destination, or is a record/array that width-coerces into exactly one destination arm)"
+  },
+  {
+   "id": "U:f64:Float32Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2003: union types must match exactly: expected 'ArrayBuffer | Uint8Array', got 'Float32Array' (a union re-tags into another union only when every arm of the source has an identical arm in the destination, or is a record/array that width-coerces into exactly one destination arm)"
+  },
+  {
+   "id": "U:f64:Float64Array",
+   "verdict": "TRAP",
+   "node": "true",
+   "got": null,
+   "reason": "SC2003: union types must match exactly: expected 'ArrayBuffer | Uint8Array', got 'Float32Array' (a union re-tags into another union only when every arm of the source has an identical arm in the destination, or is a record/array that width-coerces into exactly one destination arm)"
+  },
+  {
+   "id": "U:f64:BigInt64Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2003: union types must match exactly: expected 'ArrayBuffer | Uint8Array', got 'Float32Array' (a union re-tags into another union only when every arm of the source has an identical arm in the destination, or is a record/array that width-coerces into exactly one destination arm)"
+  },
+  {
+   "id": "U:f64:BigUint64Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2003: union types must match exactly: expected 'ArrayBuffer | Uint8Array', got 'Float32Array' (a union re-tags into another union only when every arm of the source has an identical arm in the destination, or is a record/array that width-coerces into exactly one destination arm)"
+  },
+  {
+   "id": "U:f64:DataView",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2003: union types must match exactly: expected 'ArrayBuffer | Uint8Array', got 'Float32Array' (a union re-tags into another union only when every arm of the source has an identical arm in the destination, or is a record/array that width-coerces into exactly one destination arm)"
+  },
+  {
+   "id": "U:f64:ArrayBuffer",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2003: union types must match exactly: expected 'ArrayBuffer | Uint8Array', got 'Float32Array' (a union re-tags into another union only when every arm of the source has an identical arm in the destination, or is a record/array that width-coerces into exactly one destination arm)"
+  },
+  {
+   "id": "U:f64:SharedArrayBuffer",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2003: union types must match exactly: expected 'ArrayBuffer | Uint8Array', got 'Float32Array' (a union re-tags into another union only when every arm of the source has an identical arm in the destination, or is a record/array that width-coerces into exactly one destination arm)"
+  },
+  {
+   "id": "U:f64:Buffer",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC0001: The right-hand side of an 'instanceof' expression must be either of type 'any', a class, function, or other type assignable to the 'Function' interface type, or an object type with a 'Symbol.hasInstance' method."
+  },
+  {
+   "id": "U:f64:Object",
+   "verdict": "TRAP",
+   "node": "true",
+   "got": null,
+   "reason": "SC2003: union types must match exactly: expected 'ArrayBuffer | Uint8Array', got 'Float32Array' (a union re-tags into another union only when every arm of the source has an identical arm in the destination, or is a record/array that width-coerces into exactly one destination arm)"
+  },
+  {
+   "id": "U:bi64:Uint8Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2020: 'new BigInt64Array' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "U:bi64:Int8Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2020: 'new BigInt64Array' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "U:bi64:Uint8ClampedArray",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2020: 'new BigInt64Array' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "U:bi64:Int16Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2020: 'new BigInt64Array' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "U:bi64:Uint16Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2020: 'new BigInt64Array' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "U:bi64:Int32Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2020: 'new BigInt64Array' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "U:bi64:Uint32Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2020: 'new BigInt64Array' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "U:bi64:Float32Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2020: 'new BigInt64Array' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "U:bi64:Float64Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2020: 'new BigInt64Array' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "U:bi64:BigInt64Array",
+   "verdict": "TRAP",
+   "node": "true",
+   "got": null,
+   "reason": "SC2020: 'new BigInt64Array' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "U:bi64:BigUint64Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2020: 'new BigInt64Array' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "U:bi64:DataView",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2020: 'new BigInt64Array' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "U:bi64:ArrayBuffer",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2020: 'new BigInt64Array' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "U:bi64:SharedArrayBuffer",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2020: 'new BigInt64Array' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "U:bi64:Buffer",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC0001: The right-hand side of an 'instanceof' expression must be either of type 'any', a class, function, or other type assignable to the 'Function' interface type, or an object type with a 'Symbol.hasInstance' method."
+  },
+  {
+   "id": "U:bi64:Object",
+   "verdict": "TRAP",
+   "node": "true",
+   "got": null,
+   "reason": "SC2020: 'new BigInt64Array' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "U:bu64:Uint8Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2020: 'new BigUint64Array' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "U:bu64:Int8Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2020: 'new BigUint64Array' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "U:bu64:Uint8ClampedArray",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2020: 'new BigUint64Array' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "U:bu64:Int16Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2020: 'new BigUint64Array' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "U:bu64:Uint16Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2020: 'new BigUint64Array' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "U:bu64:Int32Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2020: 'new BigUint64Array' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "U:bu64:Uint32Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2020: 'new BigUint64Array' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "U:bu64:Float32Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2020: 'new BigUint64Array' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "U:bu64:Float64Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2020: 'new BigUint64Array' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "U:bu64:BigInt64Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2020: 'new BigUint64Array' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "U:bu64:BigUint64Array",
+   "verdict": "TRAP",
+   "node": "true",
+   "got": null,
+   "reason": "SC2020: 'new BigUint64Array' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "U:bu64:DataView",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2020: 'new BigUint64Array' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "U:bu64:ArrayBuffer",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2020: 'new BigUint64Array' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "U:bu64:SharedArrayBuffer",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC2020: 'new BigUint64Array' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "U:bu64:Buffer",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC0001: The right-hand side of an 'instanceof' expression must be either of type 'any', a class, function, or other type assignable to the 'Function' interface type, or an object type with a 'Symbol.hasInstance' method."
+  },
+  {
+   "id": "U:bu64:Object",
+   "verdict": "TRAP",
+   "node": "true",
+   "got": null,
+   "reason": "SC2020: 'new BigUint64Array' is part of the standard library types but has no scriptc lowering yet"
+  },
+  {
+   "id": "U:dv:Uint8Array",
+   "verdict": "WRONG",
+   "node": "false",
+   "got": "true",
+   "reason": null
+  },
+  {
+   "id": "U:dv:Int8Array",
+   "verdict": "MATCH",
+   "node": "false",
+   "got": "false",
+   "reason": null
+  },
+  {
+   "id": "U:dv:Uint8ClampedArray",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC1090: 'instanceof' right-hand sides other than classes declared in the program is not supported yet"
+  },
+  {
+   "id": "U:dv:Int16Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC1090: 'instanceof' right-hand sides other than classes declared in the program is not supported yet"
+  },
+  {
+   "id": "U:dv:Uint16Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC1090: 'instanceof' right-hand sides other than classes declared in the program is not supported yet"
+  },
+  {
+   "id": "U:dv:Int32Array",
+   "verdict": "MATCH",
+   "node": "false",
+   "got": "false",
+   "reason": null
+  },
+  {
+   "id": "U:dv:Uint32Array",
+   "verdict": "MATCH",
+   "node": "false",
+   "got": "false",
+   "reason": null
+  },
+  {
+   "id": "U:dv:Float32Array",
+   "verdict": "MATCH",
+   "node": "false",
+   "got": "false",
+   "reason": null
+  },
+  {
+   "id": "U:dv:Float64Array",
+   "verdict": "MATCH",
+   "node": "false",
+   "got": "false",
+   "reason": null
+  },
+  {
+   "id": "U:dv:BigInt64Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC1090: 'instanceof' right-hand sides other than classes declared in the program is not supported yet"
+  },
+  {
+   "id": "U:dv:BigUint64Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC1090: 'instanceof' right-hand sides other than classes declared in the program is not supported yet"
+  },
+  {
+   "id": "U:dv:DataView",
+   "verdict": "TRAP",
+   "node": "true",
+   "got": null,
+   "reason": "SC1090: 'instanceof' right-hand sides other than classes declared in the program is not supported yet"
+  },
+  {
+   "id": "U:dv:ArrayBuffer",
+   "verdict": "MATCH",
+   "node": "false",
+   "got": "false",
+   "reason": null
+  },
+  {
+   "id": "U:dv:SharedArrayBuffer",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC1090: 'instanceof' right-hand sides other than classes declared in the program is not supported yet"
+  },
+  {
+   "id": "U:dv:Buffer",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC0001: The right-hand side of an 'instanceof' expression must be either of type 'any', a class, function, or other type assignable to the 'Function' interface type, or an object type with a 'Symbol.hasInstance' method."
+  },
+  {
+   "id": "U:dv:Object",
+   "verdict": "TRAP",
+   "node": "true",
+   "got": null,
+   "reason": "SC1090: 'instanceof' right-hand sides other than classes declared in the program is not supported yet"
+  },
+  {
+   "id": "U:ab:Uint8Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC1090: '.buffer' outside new DataView(x.buffer, ...) / Buffer.from(x.buffer, ...) (no free-standing ArrayBuffer value exists; subarray() answers an aliasing view directly) is not supported yet"
+  },
+  {
+   "id": "U:ab:Int8Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC1090: '.buffer' outside new DataView(x.buffer, ...) / Buffer.from(x.buffer, ...) (no free-standing ArrayBuffer value exists; subarray() answers an aliasing view directly) is not supported yet"
+  },
+  {
+   "id": "U:ab:Uint8ClampedArray",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC1090: '.buffer' outside new DataView(x.buffer, ...) / Buffer.from(x.buffer, ...) (no free-standing ArrayBuffer value exists; subarray() answers an aliasing view directly) is not supported yet"
+  },
+  {
+   "id": "U:ab:Int16Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC1090: '.buffer' outside new DataView(x.buffer, ...) / Buffer.from(x.buffer, ...) (no free-standing ArrayBuffer value exists; subarray() answers an aliasing view directly) is not supported yet"
+  },
+  {
+   "id": "U:ab:Uint16Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC1090: '.buffer' outside new DataView(x.buffer, ...) / Buffer.from(x.buffer, ...) (no free-standing ArrayBuffer value exists; subarray() answers an aliasing view directly) is not supported yet"
+  },
+  {
+   "id": "U:ab:Int32Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC1090: '.buffer' outside new DataView(x.buffer, ...) / Buffer.from(x.buffer, ...) (no free-standing ArrayBuffer value exists; subarray() answers an aliasing view directly) is not supported yet"
+  },
+  {
+   "id": "U:ab:Uint32Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC1090: '.buffer' outside new DataView(x.buffer, ...) / Buffer.from(x.buffer, ...) (no free-standing ArrayBuffer value exists; subarray() answers an aliasing view directly) is not supported yet"
+  },
+  {
+   "id": "U:ab:Float32Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC1090: '.buffer' outside new DataView(x.buffer, ...) / Buffer.from(x.buffer, ...) (no free-standing ArrayBuffer value exists; subarray() answers an aliasing view directly) is not supported yet"
+  },
+  {
+   "id": "U:ab:Float64Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC1090: '.buffer' outside new DataView(x.buffer, ...) / Buffer.from(x.buffer, ...) (no free-standing ArrayBuffer value exists; subarray() answers an aliasing view directly) is not supported yet"
+  },
+  {
+   "id": "U:ab:BigInt64Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC1090: '.buffer' outside new DataView(x.buffer, ...) / Buffer.from(x.buffer, ...) (no free-standing ArrayBuffer value exists; subarray() answers an aliasing view directly) is not supported yet"
+  },
+  {
+   "id": "U:ab:BigUint64Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC1090: '.buffer' outside new DataView(x.buffer, ...) / Buffer.from(x.buffer, ...) (no free-standing ArrayBuffer value exists; subarray() answers an aliasing view directly) is not supported yet"
+  },
+  {
+   "id": "U:ab:DataView",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC1090: '.buffer' outside new DataView(x.buffer, ...) / Buffer.from(x.buffer, ...) (no free-standing ArrayBuffer value exists; subarray() answers an aliasing view directly) is not supported yet"
+  },
+  {
+   "id": "U:ab:ArrayBuffer",
+   "verdict": "TRAP",
+   "node": "true",
+   "got": null,
+   "reason": "SC1090: '.buffer' outside new DataView(x.buffer, ...) / Buffer.from(x.buffer, ...) (no free-standing ArrayBuffer value exists; subarray() answers an aliasing view directly) is not supported yet"
+  },
+  {
+   "id": "U:ab:SharedArrayBuffer",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC1090: '.buffer' outside new DataView(x.buffer, ...) / Buffer.from(x.buffer, ...) (no free-standing ArrayBuffer value exists; subarray() answers an aliasing view directly) is not supported yet"
+  },
+  {
+   "id": "U:ab:Buffer",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC0001: The right-hand side of an 'instanceof' expression must be either of type 'any', a class, function, or other type assignable to the 'Function' interface type, or an object type with a 'Symbol.hasInstance' method."
+  },
+  {
+   "id": "U:ab:Object",
+   "verdict": "TRAP",
+   "node": "true",
+   "got": null,
+   "reason": "SC1090: '.buffer' outside new DataView(x.buffer, ...) / Buffer.from(x.buffer, ...) (no free-standing ArrayBuffer value exists; subarray() answers an aliasing view directly) is not supported yet"
+  },
+  {
+   "id": "U:buf:Uint8Array",
+   "verdict": "MATCH",
+   "node": "true",
+   "got": "true",
+   "reason": null
+  },
+  {
+   "id": "U:buf:Int8Array",
+   "verdict": "MATCH",
+   "node": "false",
+   "got": "false",
+   "reason": null
+  },
+  {
+   "id": "U:buf:Uint8ClampedArray",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC1090: 'instanceof' right-hand sides other than classes declared in the program is not supported yet"
+  },
+  {
+   "id": "U:buf:Int16Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC1090: 'instanceof' right-hand sides other than classes declared in the program is not supported yet"
+  },
+  {
+   "id": "U:buf:Uint16Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC1090: 'instanceof' right-hand sides other than classes declared in the program is not supported yet"
+  },
+  {
+   "id": "U:buf:Int32Array",
+   "verdict": "MATCH",
+   "node": "false",
+   "got": "false",
+   "reason": null
+  },
+  {
+   "id": "U:buf:Uint32Array",
+   "verdict": "MATCH",
+   "node": "false",
+   "got": "false",
+   "reason": null
+  },
+  {
+   "id": "U:buf:Float32Array",
+   "verdict": "MATCH",
+   "node": "false",
+   "got": "false",
+   "reason": null
+  },
+  {
+   "id": "U:buf:Float64Array",
+   "verdict": "MATCH",
+   "node": "false",
+   "got": "false",
+   "reason": null
+  },
+  {
+   "id": "U:buf:BigInt64Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC1090: 'instanceof' right-hand sides other than classes declared in the program is not supported yet"
+  },
+  {
+   "id": "U:buf:BigUint64Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC1090: 'instanceof' right-hand sides other than classes declared in the program is not supported yet"
+  },
+  {
+   "id": "U:buf:DataView",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC1090: 'instanceof' right-hand sides other than classes declared in the program is not supported yet"
+  },
+  {
+   "id": "U:buf:ArrayBuffer",
+   "verdict": "MATCH",
+   "node": "false",
+   "got": "false",
+   "reason": null
+  },
+  {
+   "id": "U:buf:SharedArrayBuffer",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC1090: 'instanceof' right-hand sides other than classes declared in the program is not supported yet"
+  },
+  {
+   "id": "U:buf:Buffer",
+   "verdict": "TRAP",
+   "node": "true",
+   "got": null,
+   "reason": "SC0001: The right-hand side of an 'instanceof' expression must be either of type 'any', a class, function, or other type assignable to the 'Function' interface type, or an object type with a 'Symbol.hasInstance' method."
+  },
+  {
+   "id": "U:buf:Object",
+   "verdict": "TRAP",
+   "node": "true",
+   "got": null,
+   "reason": "SC1090: 'instanceof' right-hand sides other than classes declared in the program is not supported yet"
+  },
+  {
+   "id": "U:sub:Uint8Array",
+   "verdict": "MATCH",
+   "node": "true",
+   "got": "true",
+   "reason": null
+  },
+  {
+   "id": "U:sub:Int8Array",
+   "verdict": "MATCH",
+   "node": "false",
+   "got": "false",
+   "reason": null
+  },
+  {
+   "id": "U:sub:Uint8ClampedArray",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC1090: 'instanceof' right-hand sides other than classes declared in the program is not supported yet"
+  },
+  {
+   "id": "U:sub:Int16Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC1090: 'instanceof' right-hand sides other than classes declared in the program is not supported yet"
+  },
+  {
+   "id": "U:sub:Uint16Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC1090: 'instanceof' right-hand sides other than classes declared in the program is not supported yet"
+  },
+  {
+   "id": "U:sub:Int32Array",
+   "verdict": "MATCH",
+   "node": "false",
+   "got": "false",
+   "reason": null
+  },
+  {
+   "id": "U:sub:Uint32Array",
+   "verdict": "MATCH",
+   "node": "false",
+   "got": "false",
+   "reason": null
+  },
+  {
+   "id": "U:sub:Float32Array",
+   "verdict": "MATCH",
+   "node": "false",
+   "got": "false",
+   "reason": null
+  },
+  {
+   "id": "U:sub:Float64Array",
+   "verdict": "MATCH",
+   "node": "false",
+   "got": "false",
+   "reason": null
+  },
+  {
+   "id": "U:sub:BigInt64Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC1090: 'instanceof' right-hand sides other than classes declared in the program is not supported yet"
+  },
+  {
+   "id": "U:sub:BigUint64Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC1090: 'instanceof' right-hand sides other than classes declared in the program is not supported yet"
+  },
+  {
+   "id": "U:sub:DataView",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC1090: 'instanceof' right-hand sides other than classes declared in the program is not supported yet"
+  },
+  {
+   "id": "U:sub:ArrayBuffer",
+   "verdict": "MATCH",
+   "node": "false",
+   "got": "false",
+   "reason": null
+  },
+  {
+   "id": "U:sub:SharedArrayBuffer",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC1090: 'instanceof' right-hand sides other than classes declared in the program is not supported yet"
+  },
+  {
+   "id": "U:sub:Buffer",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC0001: The right-hand side of an 'instanceof' expression must be either of type 'any', a class, function, or other type assignable to the 'Function' interface type, or an object type with a 'Symbol.hasInstance' method."
+  },
+  {
+   "id": "U:sub:Object",
+   "verdict": "TRAP",
+   "node": "true",
+   "got": null,
+   "reason": "SC1090: 'instanceof' right-hand sides other than classes declared in the program is not supported yet"
+  }
+ ]
+}

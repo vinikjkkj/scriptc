@@ -6653,11 +6653,11 @@ let bytesViewCtors = 0;
  * Only u8 carries the ambiguity. Every other elem names exactly one
  * constructor, so the runtime classifies those at construction and a
  * mark here would be noise. */
-function markFlavor(v: IrExpr, flavor: "buffer" | "plain", loc: SrcLoc): IrExpr {
+function markFlavor(v: IrExpr, flavor: "buffer" | "plain" | "dataview", loc: SrcLoc): IrExpr {
   if (v.type.kind !== "bytes" || v.type.elem !== "u8") return v;
   return {
     kind: "libCall",
-    fn: flavor === "buffer" ? "bytes.markBuffer" : "bytes.markPlain",
+    fn: flavor === "buffer" ? "bytes.markBuffer" : flavor === "dataview" ? "bytes.markDataView" : "bytes.markPlain",
     args: [v],
     type: v.type,
     loc,
@@ -6937,7 +6937,8 @@ export const BYTES_CTORS: Record<string, IrBytesElem | undefined> = {
       const count: IrExpr = { kind: "numLit", value: byteLen, type: F64, loc };
       const receiver: IrExpr = { kind: "bytesNew", source: count, type: BYTES_U8, loc };
       const idxArgs = args.slice(1).map((a) => L.lowerExprExpecting(a, F64));
-      return { kind: "bytesIntrinsic", method: "dataViewNew", receiver, args: idxArgs, type: BYTES_U8, loc };
+      const fresh: IrExpr = { kind: "bytesIntrinsic", method: "dataViewNew", receiver, args: idxArgs, type: BYTES_U8, loc };
+      return markFlavor(fresh, "dataview", loc);
     }
     const hint =
       "views compile over a typed array's own storage — new DataView(x.buffer, byteOffset?, byteLength?) " +
@@ -6956,12 +6957,25 @@ export const BYTES_CTORS: Record<string, IrBytesElem | undefined> = {
     }
     const receiver = L.lowerExpr(bufNode.expression);
     const idxArgs = args.slice(1).map((a) => L.lowerExprExpecting(a, F64));
-    // NOT markFlavor'd, and neither is the fresh-buffer form above: a
-    // DataView is neither Uint8Array nor Buffer, so the value stays
-    // UNCLASSIFIED and a `.constructor` read of one refuses rather than
-    // picking one of two wrong answers. DataView-ness would be a third
-    // flavor; nothing in zapo or the corpus asks for it.
-    return { kind: "bytesIntrinsic", method: "dataViewNew", receiver, args: idxArgs, type: BYTES_U8, loc };
+    // markFlavor'd "dataview", like the fresh-buffer form above.
+    //
+    // This used to be deliberately UNCLASSIFIED, on the argument that a
+    // DataView is neither Uint8Array nor Buffer so neither answer is
+    // honest and a `.constructor` read should refuse. The argument was
+    // right about `.constructor` and wrong about the cost: leaving it
+    // unstamped ALSO left `x instanceof Uint8Array` with nothing to read,
+    // and that test does not refuse -- it folds from the IR type, which
+    // is bytes<u8> for a DataView, and answers TRUE where Node answers
+    // false. Silently. The old note said "DataView-ness would be a third
+    // flavor; nothing in zapo or the corpus asks for it": the corpus does
+    // now (7200-7207), and it is a wrong answer, not a missing feature.
+    //
+    // `scr_dataview_new` is shared by three spellings (`new DataView`,
+    // `new Uint8Array(x.buffer, ..)`, `Buffer.from(x.buffer, ..)`), so
+    // the stamp belongs HERE, at the one spelling that knows -- exactly
+    // where the other two stamp theirs.
+    const view: IrExpr = { kind: "bytesIntrinsic", method: "dataViewNew", receiver, args: idxArgs, type: BYTES_U8, loc };
+    return markFlavor(view, "dataview", loc);
   }
 
 /** Method calls on typed-array/Buffer receivers: slice and subarray (BOTH

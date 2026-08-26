@@ -1737,6 +1737,20 @@ static bool dyn_bytes_is_buffer(const ScrBytes *b) {
   return b != NULL && b->flavor == SCR_BF_BUFFER;
 }
 
+/* `u instanceof Uint8Array` over a checked-dynamic value.
+ *
+ * SCR_DYN_BYTES is not the answer on its own: DataView rides the SAME
+ * u8 kind (types.ts maps it to bytes<u8> so the view can alias its
+ * owner's storage), so a boxed DataView used to answer TRUE here where
+ * Node answers false -- silently. The flavor the payload carries is the
+ * discriminator, and it survives both boxing constructors (ref retains,
+ * copy preserves). Never throws: DATAVIEW has exactly one producer, so
+ * anything not stamped with it is not a DataView. */
+bool scr_dyn_is_u8array(const ScrDyn *d) {
+  return d != NULL && d->kind == SCR_DYN_BYTES && d->v.bytes != NULL &&
+         d->v.bytes->flavor != SCR_BF_DATAVIEW;
+}
+
 ScrDyn *scr_dyn_new_bytes_copy(const ScrBytes *b) {
   ScrDyn *d = scr_dyn_alloc(SCR_DYN_BYTES);
   d->v.bytes = scr_bytes_copy(b); /* the CLONING constructor (flavor rides along) */
@@ -7854,6 +7868,17 @@ ScrDyn *scr_dyn_uint8array_of(void) {
  * answering the Uint8Array one — the two disagree about `toString`,
  * `inspect` and their own `.constructor`. */
 ScrDyn *scr_dyn_bytes_constructor(const ScrDyn *d) {
+  /* A DataView's constructor is DataView, which is no more a value in
+   * this tier than Buffer is. It used to answer the Uint8Array one --
+   * the wrong function, silently. Refuse by name instead. */
+  if (d->v.bytes != NULL && d->v.bytes->flavor == SCR_BF_DATAVIEW) {
+    static const char dvmsg[] =
+        "reading 'constructor' off a DataView is not supported yet"
+        " (the DataView constructor is not a value in a static build; answering the"
+        " Uint8Array one would be wrong -- a DataView is not one of its instances)";
+    scr_throw_error_msg(SCR_ERR_ERROR, dvmsg, sizeof dvmsg - 1);
+    return NULL;
+  }
   if (d->buffer || d->v.bytes->flavor == SCR_BF_BUFFER) {
     static const char msg[] =
         "reading 'constructor' off a Buffer is not supported yet"

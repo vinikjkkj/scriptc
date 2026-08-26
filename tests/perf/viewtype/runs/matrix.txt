@@ -1,0 +1,178 @@
+# The instanceof matrix, scored against node v25.9.0
+#
+# BEFORE: the compiler at 52e9dd38, the revision the defect was found on.
+# AFTER:  this branch, rebased onto main 6a8fb0a8 and re-measured there.
+
+## BEFORE
+
+### shape D   {"MATCH":62,"WRONG":1,"TRAP":193,"DID-NOT-RUN":0,"NO-ORACLE":0}   (runs/pre-D-llvm.json)
+cell key:  T=true  f=false  .=refused (TRAP)  !=WRONG  ?=did-not-run
+value     u8   i8  u8c  i16  u16  i32  u32  f32  f64 bi64 bu64   DV   AB  SAB  Buf  Obj
+u8         T    f    .    .    .    f    f    f    f    .    .    .    f    .    .    .
+i8         f    T    .    .    .    f    f    f    f    .    .    .    f    .    .    .
+u8c        .    .    .    .    .    .    .    .    .    .    .    .    .    .    .    .
+i16        .    .    .    .    .    .    .    .    .    .    .    .    .    .    .    .
+u16        .    .    .    .    .    .    .    .    .    .    .    .    .    .    .    .
+i32        f    f    .    .    .    T    f    f    f    .    .    .    f    .    .    .
+u32        f    f    .    .    .    f    T    f    f    .    .    .    f    .    .    .
+f32        f    f    .    .    .    f    f    T    f    .    .    .    f    .    .    .
+f64        f    f    .    .    .    f    f    f    T    .    .    .    f    .    .    .
+bi64       .    .    .    .    .    .    .    .    .    .    .    .    .    .    .    .
+bu64       .    .    .    .    .    .    .    .    .    .    .    .    .    .    .    .
+dv      !t/f    f    .    .    .    f    f    f    f    .    .    .    f    .    .    .
+ab         .    .    .    .    .    .    .    .    .    .    .    .    .    .    .    .
+sab        .    .    .    .    .    .    .    .    .    .    .    .    .    .    .    .
+buf        T    f    .    .    .    f    f    f    f    .    .    .    f    .    .    .
+sub        T    f    .    .    .    f    f    f    f    .    .    .    f    .    .    .
+
+### shape U   {"MATCH":27,"WRONG":1,"TRAP":212,"DID-NOT-RUN":0,"NO-ORACLE":0}   (runs/pre-U-llvm.json)
+cell key:  T=true  f=false  .=refused (TRAP)  !=WRONG  ?=did-not-run
+value     u8   i8  u8c  i16  u16  i32  u32  f32  f64 bi64 bu64   DV   AB  SAB  Buf  Obj
+u8         T    f    .    .    .    f    f    f    f    .    .    .    f    .    .    .
+i8         .    .    .    .    .    .    .    .    .    .    .    .    .    .    .    .
+u8c        .    .    .    .    .    .    .    .    .    .    .    .    .    .    .    .
+i16        .    .    .    .    .    .    .    .    .    .    .    .    .    .    .    .
+u16        .    .    .    .    .    .    .    .    .    .    .    .    .    .    .    .
+i32        .    .    .    .    .    .    .    .    .    .    .    .    .    .    .    .
+u32        .    .    .    .    .    .    .    .    .    .    .    .    .    .    .    .
+f32        .    .    .    .    .    .    .    .    .    .    .    .    .    .    .    .
+f64        .    .    .    .    .    .    .    .    .    .    .    .    .    .    .    .
+bi64       .    .    .    .    .    .    .    .    .    .    .    .    .    .    .    .
+bu64       .    .    .    .    .    .    .    .    .    .    .    .    .    .    .    .
+dv      !t/f    f    .    .    .    f    f    f    f    .    .    .    f    .    .    .
+ab         .    .    .    .    .    .    .    .    .    .    .    .    .    .    .    .
+buf        T    f    .    .    .    f    f    f    f    .    .    .    f    .    .    .
+sub        T    f    .    .    .    f    f    f    f    .    .    .    f    .    .    .
+
+### shape K   {"MATCH":7,"WRONG":1,"TRAP":248,"DID-NOT-RUN":0,"NO-ORACLE":0}   (runs/pre-K-llvm.json)
+cell key:  T=true  f=false  .=refused (TRAP)  !=WRONG  ?=did-not-run
+value     u8   i8  u8c  i16  u16  i32  u32  f32  f64 bi64 bu64   DV   AB  SAB  Buf  Obj
+u8         T    .    .    .    .    .    .    .    .    .    .    .    f    .    .    .
+i8         .    .    .    .    .    .    .    .    .    .    .    .    .    .    .    .
+u8c        .    .    .    .    .    .    .    .    .    .    .    .    .    .    .    .
+i16        .    .    .    .    .    .    .    .    .    .    .    .    .    .    .    .
+u16        .    .    .    .    .    .    .    .    .    .    .    .    .    .    .    .
+i32        .    .    .    .    .    .    .    .    .    .    .    .    .    .    .    .
+u32        .    .    .    .    .    .    .    .    .    .    .    .    .    .    .    .
+f32        .    .    .    .    .    .    .    .    .    .    .    .    .    .    .    .
+f64        .    .    .    .    .    .    .    .    .    .    .    .    .    .    .    .
+bi64       .    .    .    .    .    .    .    .    .    .    .    .    .    .    .    .
+bu64       .    .    .    .    .    .    .    .    .    .    .    .    .    .    .    .
+dv      !t/f    .    .    .    .    .    .    .    .    .    .    .    f    .    .    .
+ab         .    .    .    .    .    .    .    .    .    .    .    .    .    .    .    .
+sab        .    .    .    .    .    .    .    .    .    .    .    .    .    .    .    .
+buf        T    .    .    .    .    .    .    .    .    .    .    .    f    .    .    .
+sub        T    .    .    .    .    .    .    .    .    .    .    .    f    .    .    .
+
+### shape V   {"MATCH":27,"WRONG":1,"TRAP":36,"DID-NOT-RUN":0,"NO-ORACLE":0}   (runs/pre-V-llvm.json)
+cell key:  T=true  f=false  .=refused (TRAP)  !=WRONG  ?=did-not-run
+value     u8   i8  u8c  i16  u16  i32  u32  f32  f64 bi64 bu64   DV   AB  SAB  Buf  Obj
+u8         T    f    .    .    .    f    f    f    f    .    .    .    f    .    .    .
+dv      !t/f    f    .    .    .    f    f    f    f    .    .    .    f    .    .    .
+buf        T    f    .    .    .    f    f    f    f    .    .    .    f    .    .    .
+sub        T    f    .    .    .    f    f    f    f    .    .    .    f    .    .    .
+
+### shape W   {"MATCH":27,"WRONG":1,"TRAP":196,"DID-NOT-RUN":0,"NO-ORACLE":0}   (runs/pre-W-llvm.json)
+cell key:  T=true  f=false  .=refused (TRAP)  !=WRONG  ?=did-not-run
+value     u8   i8  u8c  i16  u16  i32  u32  f32  f64 bi64 bu64   DV   AB  SAB  Buf  Obj
+u8         T    f    .    .    .    f    f    f    f    .    .    .    f    .    .    .
+i8         .    .    .    .    .    .    .    .    .    .    .    .    .    .    .    .
+u8c        .    .    .    .    .    .    .    .    .    .    .    .    .    .    .    .
+i16        .    .    .    .    .    .    .    .    .    .    .    .    .    .    .    .
+u16        .    .    .    .    .    .    .    .    .    .    .    .    .    .    .    .
+i32        .    .    .    .    .    .    .    .    .    .    .    .    .    .    .    .
+u32        .    .    .    .    .    .    .    .    .    .    .    .    .    .    .    .
+f32        .    .    .    .    .    .    .    .    .    .    .    .    .    .    .    .
+f64        .    .    .    .    .    .    .    .    .    .    .    .    .    .    .    .
+bi64       .    .    .    .    .    .    .    .    .    .    .    .    .    .    .    .
+bu64       .    .    .    .    .    .    .    .    .    .    .    .    .    .    .    .
+dv      !t/f    f    .    .    .    f    f    f    f    .    .    .    f    .    .    .
+buf        T    f    .    .    .    f    f    f    f    .    .    .    f    .    .    .
+sub        T    f    .    .    .    f    f    f    f    .    .    .    f    .    .    .
+
+## AFTER
+
+### shape D   {"MATCH":63,"WRONG":0,"TRAP":193,"DID-NOT-RUN":0,"NO-ORACLE":0}   (runs/post-D-llvm.json)
+cell key:  T=true  f=false  .=refused (TRAP)  !=WRONG  ?=did-not-run
+value     u8   i8  u8c  i16  u16  i32  u32  f32  f64 bi64 bu64   DV   AB  SAB  Buf  Obj
+u8         T    f    .    .    .    f    f    f    f    .    .    .    f    .    .    .
+i8         f    T    .    .    .    f    f    f    f    .    .    .    f    .    .    .
+u8c        .    .    .    .    .    .    .    .    .    .    .    .    .    .    .    .
+i16        .    .    .    .    .    .    .    .    .    .    .    .    .    .    .    .
+u16        .    .    .    .    .    .    .    .    .    .    .    .    .    .    .    .
+i32        f    f    .    .    .    T    f    f    f    .    .    .    f    .    .    .
+u32        f    f    .    .    .    f    T    f    f    .    .    .    f    .    .    .
+f32        f    f    .    .    .    f    f    T    f    .    .    .    f    .    .    .
+f64        f    f    .    .    .    f    f    f    T    .    .    .    f    .    .    .
+bi64       .    .    .    .    .    .    .    .    .    .    .    .    .    .    .    .
+bu64       .    .    .    .    .    .    .    .    .    .    .    .    .    .    .    .
+dv         f    f    .    .    .    f    f    f    f    .    .    .    f    .    .    .
+ab         .    .    .    .    .    .    .    .    .    .    .    .    .    .    .    .
+sab        .    .    .    .    .    .    .    .    .    .    .    .    .    .    .    .
+buf        T    f    .    .    .    f    f    f    f    .    .    .    f    .    .    .
+sub        T    f    .    .    .    f    f    f    f    .    .    .    f    .    .    .
+
+### shape U   {"MATCH":28,"WRONG":0,"TRAP":212,"DID-NOT-RUN":0,"NO-ORACLE":0}   (runs/post-U-llvm.json)
+cell key:  T=true  f=false  .=refused (TRAP)  !=WRONG  ?=did-not-run
+value     u8   i8  u8c  i16  u16  i32  u32  f32  f64 bi64 bu64   DV   AB  SAB  Buf  Obj
+u8         T    f    .    .    .    f    f    f    f    .    .    .    f    .    .    .
+i8         .    .    .    .    .    .    .    .    .    .    .    .    .    .    .    .
+u8c        .    .    .    .    .    .    .    .    .    .    .    .    .    .    .    .
+i16        .    .    .    .    .    .    .    .    .    .    .    .    .    .    .    .
+u16        .    .    .    .    .    .    .    .    .    .    .    .    .    .    .    .
+i32        .    .    .    .    .    .    .    .    .    .    .    .    .    .    .    .
+u32        .    .    .    .    .    .    .    .    .    .    .    .    .    .    .    .
+f32        .    .    .    .    .    .    .    .    .    .    .    .    .    .    .    .
+f64        .    .    .    .    .    .    .    .    .    .    .    .    .    .    .    .
+bi64       .    .    .    .    .    .    .    .    .    .    .    .    .    .    .    .
+bu64       .    .    .    .    .    .    .    .    .    .    .    .    .    .    .    .
+dv         f    f    .    .    .    f    f    f    f    .    .    .    f    .    .    .
+ab         .    .    .    .    .    .    .    .    .    .    .    .    .    .    .    .
+buf        T    f    .    .    .    f    f    f    f    .    .    .    f    .    .    .
+sub        T    f    .    .    .    f    f    f    f    .    .    .    f    .    .    .
+
+### shape K   {"MATCH":8,"WRONG":0,"TRAP":248,"DID-NOT-RUN":0,"NO-ORACLE":0}   (runs/post-K-llvm.json)
+cell key:  T=true  f=false  .=refused (TRAP)  !=WRONG  ?=did-not-run
+value     u8   i8  u8c  i16  u16  i32  u32  f32  f64 bi64 bu64   DV   AB  SAB  Buf  Obj
+u8         T    .    .    .    .    .    .    .    .    .    .    .    f    .    .    .
+i8         .    .    .    .    .    .    .    .    .    .    .    .    .    .    .    .
+u8c        .    .    .    .    .    .    .    .    .    .    .    .    .    .    .    .
+i16        .    .    .    .    .    .    .    .    .    .    .    .    .    .    .    .
+u16        .    .    .    .    .    .    .    .    .    .    .    .    .    .    .    .
+i32        .    .    .    .    .    .    .    .    .    .    .    .    .    .    .    .
+u32        .    .    .    .    .    .    .    .    .    .    .    .    .    .    .    .
+f32        .    .    .    .    .    .    .    .    .    .    .    .    .    .    .    .
+f64        .    .    .    .    .    .    .    .    .    .    .    .    .    .    .    .
+bi64       .    .    .    .    .    .    .    .    .    .    .    .    .    .    .    .
+bu64       .    .    .    .    .    .    .    .    .    .    .    .    .    .    .    .
+dv         f    .    .    .    .    .    .    .    .    .    .    .    f    .    .    .
+ab         .    .    .    .    .    .    .    .    .    .    .    .    .    .    .    .
+sab        .    .    .    .    .    .    .    .    .    .    .    .    .    .    .    .
+buf        T    .    .    .    .    .    .    .    .    .    .    .    f    .    .    .
+sub        T    .    .    .    .    .    .    .    .    .    .    .    f    .    .    .
+
+### shape V   {"MATCH":28,"WRONG":0,"TRAP":36,"DID-NOT-RUN":0,"NO-ORACLE":0}   (runs/post-V-llvm.json)
+cell key:  T=true  f=false  .=refused (TRAP)  !=WRONG  ?=did-not-run
+value     u8   i8  u8c  i16  u16  i32  u32  f32  f64 bi64 bu64   DV   AB  SAB  Buf  Obj
+u8         T    f    .    .    .    f    f    f    f    .    .    .    f    .    .    .
+dv         f    f    .    .    .    f    f    f    f    .    .    .    f    .    .    .
+buf        T    f    .    .    .    f    f    f    f    .    .    .    f    .    .    .
+sub        T    f    .    .    .    f    f    f    f    .    .    .    f    .    .    .
+
+### shape W   {"MATCH":28,"WRONG":0,"TRAP":196,"DID-NOT-RUN":0,"NO-ORACLE":0}   (runs/post-W-llvm.json)
+cell key:  T=true  f=false  .=refused (TRAP)  !=WRONG  ?=did-not-run
+value     u8   i8  u8c  i16  u16  i32  u32  f32  f64 bi64 bu64   DV   AB  SAB  Buf  Obj
+u8         T    f    .    .    .    f    f    f    f    .    .    .    f    .    .    .
+i8         .    .    .    .    .    .    .    .    .    .    .    .    .    .    .    .
+u8c        .    .    .    .    .    .    .    .    .    .    .    .    .    .    .    .
+i16        .    .    .    .    .    .    .    .    .    .    .    .    .    .    .    .
+u16        .    .    .    .    .    .    .    .    .    .    .    .    .    .    .    .
+i32        .    .    .    .    .    .    .    .    .    .    .    .    .    .    .    .
+u32        .    .    .    .    .    .    .    .    .    .    .    .    .    .    .    .
+f32        .    .    .    .    .    .    .    .    .    .    .    .    .    .    .    .
+f64        .    .    .    .    .    .    .    .    .    .    .    .    .    .    .    .
+bi64       .    .    .    .    .    .    .    .    .    .    .    .    .    .    .    .
+bu64       .    .    .    .    .    .    .    .    .    .    .    .    .    .    .    .
+dv         f    f    .    .    .    f    f    f    f    .    .    .    f    .    .    .
+buf        T    f    .    .    .    f    f    f    f    .    .    .    f    .    .    .
+sub        T    f    .    .    .    f    f    f    f    .    .    .    f    .    .    .
