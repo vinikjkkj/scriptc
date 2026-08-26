@@ -2155,6 +2155,25 @@ const SYMBOLIC_PAIR_BUDGET = 256;
       }
       inst.returnType = final;
     }
+    // Unit kinds live inside unions only (the IR invariant validate checks),
+    // so a settled BARE unit is not a type any function can carry. A body
+    // gets one when its single valued return is `return null` and every
+    // OTHER return fenced to a runtime throw -- which is what a JS source
+    // does with a statement it cannot lower, so the fence removed the arm
+    // that would have widened the join. The result was an internal error on
+    // the whole module (`return type is bare unit type nullT`, then `bare
+    // unitLit 'null' outside a unionWrap`) rather than a build or a named
+    // refusal.
+    //
+    // DYN is the answer, not a fallback: the function really does return
+    // `null` and its caller reads it through the checked-dynamic slot, which
+    // is where an implicit-any JS return lives already. The wrap pass below
+    // rides each return through dynFrom, the same wrapper the implicit
+    // `return undefined` uses. pg-types' `parseJsonArray` is the shape.
+    if (isUnitType(final)) {
+      final = DYN;
+      if (!inst.returnPinned) inst.returnType = final;
+    }
     // The wrap pass: settle every recorded return onto `final`, in place.
     for (const e of infer.entries) {
       if (e.stmt.kind !== "return") continue;
