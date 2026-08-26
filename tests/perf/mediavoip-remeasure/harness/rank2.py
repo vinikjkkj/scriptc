@@ -10,11 +10,20 @@ printed with its match count, so a rule that matches NOTHING is visible rather
 than silently absent -- an ownership rule that can never fire is exactly the
 kind of dead branch this survey is supposed to catch.
 
-CONTROLS, printed every run:
-  * a rule that MUST match at least one site in a default-lane sweep
-    (`zapo-js island import`), and
-  * a rule that MUST NOT match anything in any lane (`__never__`).
-Both are asserted; the run exits non-zero if either fails.
+CONTROLS:
+  * `__never__` is a rule whose text no compiler emits. It MUST match zero in
+    every lane, and that one IS asserted -- a non-zero count exits non-zero.
+  * The rule table itself is the positive control, and it is only meaningful in
+    the DEFAULT lane, where all nine rules must fire. Run the default lane
+    first: nine of nine firing there is what proves no rule is dead. In the
+    provenance lane most of them legitimately match zero, because the refusals
+    they name are the ones provenance removed -- a zero there is the RESULT,
+    not a broken rule, and the two readings are only distinguishable because
+    the same table was run against both.
+
+    This is deliberately weaker than "both controls are asserted every run",
+    which is what an earlier draft of this docstring claimed and the code never
+    did.
 """
 
 import json
