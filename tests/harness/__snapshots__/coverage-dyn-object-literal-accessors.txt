@@ -1,0 +1,12 @@
+scriptc coverage tests/coverage-fixtures/dyn-object-literal-accessors.js
+
+  statements analyzed   16
+  compile statically    9  (56%)
+
+  deferred to runtime   7 sites (JS statements that throw their fence if executed)
+      ×2  uses of 'o' inherit the blocker on its declaration                                                    SC2004
+      ×1  a COMPUTED-key get/set accessor in a dyn object literal (the key is a run-time value, so neither its position among the data keys nor its collisions can be settled here — a fixed key lowers)  SC1090
+      ×1  a run-time-keyed member beside a get/set accessor in the same dyn object literal (the key cannot be checked against the accessor's, and a collision would define the two properties by different rules)  SC1090
+      ×1  a spread in a dyn object literal whose keys are run-time values (methods and get/set accessors lower; the spread would have to copy onto a table whose key order is not a compile-time fact)  SC1090
+      ×1  'this' in a get/set accessor of a dyn object literal written inside a method (the enclosing method's receiver would be captured instead of the object the accessor is read through — read a captured binding instead)  SC1090
+      ×1  a spread beside a get/set accessor in the same dyn object literal (the accessor is defined onto the copy, and a key the spread also carries would be listed in the wrong place — spread into a separate object first)  SC1090
