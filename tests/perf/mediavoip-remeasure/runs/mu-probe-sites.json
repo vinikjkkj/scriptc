@@ -1,0 +1,225 @@
+{
+ "entry": "G:/blocks/remeasure/lab/app/probe-mu/index.ts",
+ "flags": [
+  "--provenance-sources"
+ ],
+ "elapsedMs": 256036,
+ "preflightFailed": false,
+ "stats": {
+  "statementsTotal": 40,
+  "statementsFailed": 0,
+  "statementsIsland": 0,
+  "functionsSkipped": 0
+ },
+ "npmStatic": null,
+ "provenanceNotes": [
+  "argo-codec@0.2.1: no provenance attestation published; island path used",
+  "file-type@19.6.0: no provenance attestation published; island path used",
+  "sharp@0.33.5: no provenance attestation published; island path used"
+ ],
+ "sites": [
+  {
+   "section": "blocker",
+   "code": "SC2013",
+   "message": "importing 'sharp' requires the embedded dynamic engine, which this build does not include — the package's implementation runs there",
+   "file": "G:/blocks/remeasure/lab/app/probe-mu/sharp.ts",
+   "line": 1
+  },
+  {
+   "section": "unreached",
+   "code": "SC2020",
+   "message": "'globalThis' is part of the standard library types but has no scriptc lowering yet",
+   "file": "G:/blocks/remeasure/prov/250f9af5229a545eec28ddbd3e8774a397cdb0bb/src/util/runtime.ts",
+   "line": 20
+  },
+  {
+   "section": "unreached",
+   "code": "SC1031",
+   "message": "object destructuring of non-record values (the source is dyn-typed) are not supported yet",
+   "file": "G:/blocks/remeasure/lab/app/probe-mu/sharp.ts",
+   "line": 22
+  },
+  {
+   "section": "unreached",
+   "code": "SC2004",
+   "message": "uses of 'data' inherit the blocker on its declaration",
+   "file": "G:/blocks/remeasure/lab/app/probe-mu/sharp.ts",
+   "line": 28
+  },
+  {
+   "section": "unreached",
+   "code": "SC1031",
+   "message": "object destructuring of non-record values (the source is dyn-typed) are not supported yet",
+   "file": "G:/blocks/remeasure/lab/app/probe-mu/sharp.ts",
+   "line": 38
+  },
+  {
+   "section": "unreached",
+   "code": "SC2004",
+   "message": "uses of 'data' inherit the blocker on its declaration",
+   "file": "G:/blocks/remeasure/lab/app/probe-mu/sharp.ts",
+   "line": 43
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "'instanceof' on values other than class instances (narrow union-typed values first) are not supported yet",
+   "file": "G:/blocks/remeasure/lab/app/probe-mu/ffmpeg.ts",
+   "line": 24
+  },
+  {
+   "section": "unreached",
+   "code": "SC2020",
+   "message": "'Readable.from over a '(Uint8Array | string)[]' source' is part of the standard library types but has no scriptc lowering yet",
+   "file": "G:/blocks/remeasure/lab/app/probe-mu/ffmpeg.ts",
+   "line": 25
+  },
+  {
+   "section": "unreached",
+   "code": "SC2020",
+   "message": "'child_process.execFile' is typed by @types/node but has no scriptc lowering yet",
+   "file": "G:/blocks/remeasure/lab/app/probe-mu/ffmpeg.ts",
+   "line": 30
+  },
+  {
+   "section": "unreached",
+   "code": "SC2020",
+   "message": "'child_process.execFile' is typed by @types/node but has no scriptc lowering yet",
+   "file": "G:/blocks/remeasure/lab/app/probe-mu/ffmpeg.ts",
+   "line": 96
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "'Uint8Array' values where 'string' is expected is not supported yet",
+   "file": "G:/blocks/remeasure/lab/app/probe-mu/ffmpeg.ts",
+   "line": 135
+  },
+  {
+   "section": "unreached",
+   "code": "SC2020",
+   "message": "'spawn option 'timeout'' is part of the standard library types but has no scriptc lowering yet",
+   "file": "G:/blocks/remeasure/lab/app/probe-mu/ffmpeg.ts",
+   "line": 180
+  },
+  {
+   "section": "unreached",
+   "code": "SC2020",
+   "message": "'ChildProcessByStdio<null, Readable, null>.stdout' is typed by @types/node but has no scriptc lowering yet",
+   "file": "G:/blocks/remeasure/lab/app/probe-mu/ffmpeg.ts",
+   "line": 183
+  },
+  {
+   "section": "unreached",
+   "code": "SC2020",
+   "message": "'ChildProcessByStdio<null, Readable, null>.on' is typed by @types/node but has no scriptc lowering yet",
+   "file": "G:/blocks/remeasure/lab/app/probe-mu/ffmpeg.ts",
+   "line": 187
+  },
+  {
+   "section": "unreached",
+   "code": "SC2020",
+   "message": "'spawn with this stdin slot' is part of the standard library types but has no scriptc lowering yet",
+   "file": "G:/blocks/remeasure/lab/app/probe-mu/ffmpeg.ts",
+   "line": 227
+  },
+  {
+   "section": "unreached",
+   "code": "SC2003",
+   "message": "union types must match exactly: expected 'Readable', got 'Readable | null' (a union re-tags into another union only when every arm of the source has an identical arm in the destination, or is a record/array that width-coerces into exactly one destination arm)",
+   "file": "G:/blocks/remeasure/lab/app/probe-mu/ffmpeg.ts",
+   "line": 237
+  },
+  {
+   "section": "unreached",
+   "code": "SC2020",
+   "message": "'child.on(\"close\", ...)' is part of the standard library types but has no scriptc lowering yet",
+   "file": "G:/blocks/remeasure/lab/app/probe-mu/ffmpeg.ts",
+   "line": 289
+  },
+  {
+   "section": "unreached",
+   "code": "SC2020",
+   "message": "'ChildProcess.stdin' is typed by @types/node but has no scriptc lowering yet",
+   "file": "G:/blocks/remeasure/lab/app/probe-mu/ffmpeg.ts",
+   "line": 306
+  },
+  {
+   "section": "unreached",
+   "code": "SC2020",
+   "message": "'ChildProcess.stdin' is typed by @types/node but has no scriptc lowering yet",
+   "file": "G:/blocks/remeasure/lab/app/probe-mu/ffmpeg.ts",
+   "line": 307
+  },
+  {
+   "section": "unreached",
+   "code": "SC2020",
+   "message": "'spawn with this stdin slot' is part of the standard library types but has no scriptc lowering yet",
+   "file": "G:/blocks/remeasure/lab/app/probe-mu/ffmpeg.ts",
+   "line": 369
+  },
+  {
+   "section": "unreached",
+   "code": "SC2003",
+   "message": "union types must match exactly: expected 'Readable', got 'Readable | null' (a union re-tags into another union only when every arm of the source has an identical arm in the destination, or is a record/array that width-coerces into exactly one destination arm)",
+   "file": "G:/blocks/remeasure/lab/app/probe-mu/ffmpeg.ts",
+   "line": 374
+  },
+  {
+   "section": "unreached",
+   "code": "SC2020",
+   "message": "'ReadableStream.destroy' is typed by @types/node but has no scriptc lowering yet",
+   "file": "G:/blocks/remeasure/lab/app/probe-mu/ffmpeg.ts",
+   "line": 383
+  },
+  {
+   "section": "unreached",
+   "code": "SC2020",
+   "message": "'ChildProcess.stdin' is typed by @types/node but has no scriptc lowering yet",
+   "file": "G:/blocks/remeasure/lab/app/probe-mu/ffmpeg.ts",
+   "line": 386
+  },
+  {
+   "section": "unreached",
+   "code": "SC2020",
+   "message": "'ChildProcess.stdin' is typed by @types/node but has no scriptc lowering yet",
+   "file": "G:/blocks/remeasure/lab/app/probe-mu/ffmpeg.ts",
+   "line": 387
+  },
+  {
+   "section": "unreached",
+   "code": "SC2020",
+   "message": "'ReadableStream.destroy' is typed by @types/node but has no scriptc lowering yet",
+   "file": "G:/blocks/remeasure/lab/app/probe-mu/ffmpeg.ts",
+   "line": 391
+  },
+  {
+   "section": "unreached",
+   "code": "SC2020",
+   "message": "'child.on(\"close\", ...)' is part of the standard library types but has no scriptc lowering yet",
+   "file": "G:/blocks/remeasure/lab/app/probe-mu/ffmpeg.ts",
+   "line": 394
+  },
+  {
+   "section": "unreached",
+   "code": "SC2020",
+   "message": "'stream.on(\"close\", ...)' is part of the standard library types but has no scriptc lowering yet",
+   "file": "G:/blocks/remeasure/lab/app/probe-mu/ffmpeg.ts",
+   "line": 405
+  },
+  {
+   "section": "unreached",
+   "code": "SC2003",
+   "message": "union types must match exactly: expected 'null | Readable', got 'Readable | null' (a union re-tags into another union only when every arm of the source has an identical arm in the destination, or is a record/array that width-coerces into exactly one destination arm)",
+   "file": "G:/blocks/remeasure/lab/app/probe-mu/ffmpeg.ts",
+   "line": 410
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "functions with optional or defaulted parameters as values, except where the target type spells the completed signature with required parameters (a '(x?: T) => R' function flows into a '(x: T | undefined) => R' slot, and a package/'any' slot takes any signature that can cross the island boundary; otherwise call the function directly) are not supported yet",
+   "file": "G:/blocks/remeasure/lab/app/probe-mu/index.ts",
+   "line": 59
+  }
+ ]
+}
