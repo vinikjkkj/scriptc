@@ -11292,6 +11292,25 @@ export class Lowerer {
       const ctx = this.fnStack[j]!;
       if (ctx.captureBySymbol.has(THIS_BINDING)) continue;
       if (ctx.captures === null) return true;
+      // A LIFTED frame that is not an arrow rebinds `this` exactly as much as
+      // a plain declared one does -- JS binds it afresh in every non-arrow
+      // function and only arrows inherit it. Testing "takes no captures"
+      // closed the crash and the commonest shape and left this one open:
+      //
+      //   class C { constructor(){ this.tag = 'x' }
+      //             go(){ const seen = []
+      //                   function h(){ seen.push(1); return this.tag }
+      //                   try { return 'got:' + h() }
+      //                   catch (e) { return 'threw:' + (e instanceof TypeError) } } }
+      //
+      // `h` takes a capture (`seen`), so the walk ran on and threaded `this`
+      // through it. Node prints `threw:true` -- class bodies are strict, so
+      // h's `this` is undefined and the property read throws -- and the
+      // compiler printed `got:x`. The question the walk has to ask is what
+      // KIND of function the frame is, not whether it happens to close over
+      // something. Checked before any capture state is mutated, like the
+      // test above it.
+      if (!ctx.isArrow) return true;
     }
     return false;
   }
