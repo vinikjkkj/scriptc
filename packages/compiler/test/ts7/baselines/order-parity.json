@@ -9675,6 +9675,30 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/7250-dyn-objlit-accessors.js": {
+   "order": [
+    "<repo>/tests/corpus/7250-dyn-objlit-accessors.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/7251-dyn-objlit-accessor-factory.js": {
+   "order": [
+    "<repo>/tests/corpus/7251-dyn-objlit-accessor-factory.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/7252-dyn-objlit-accessor-this-and-effects.js": {
+   "order": [
+    "<repo>/tests/corpus/7252-dyn-objlit-accessor-this-and-effects.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/7253-dyn-objlit-accessor-key-position.js": {
+   "order": [
+    "<repo>/tests/corpus/7253-dyn-objlit-accessor-key-position.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/750-cycle-closure-box.ts": {
    "order": [
     "<repo>/tests/corpus/750-cycle-closure-box.ts"
