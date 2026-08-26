@@ -830,6 +830,16 @@ function inspectHelper(L: Lowerer, t: IrType, loc: SrcLoc): string {
       // second approximation traded for the first.
       const presentTest = (field: string, type: IrType): IrExpr | null => {
         if (info.absentTrackedFields?.has(field) !== true) return null;
+        // A CHECKED-DYNAMIC slot answers presence by its dyn KIND, which is
+        // exactly how `in` has always answered it (undefinedArmedInAnswer's
+        // dyn arm). Membership in absentTrackedFields is the proof that the
+        // kind can only mean absence for this field; the arm itself is the
+        // same test. Without it the two surfaces contradicted each other on
+        // one slot — `'cb' in b` answered false while inspect printed
+        // `cb: undefined` — and inspect was the one that was wrong.
+        if (type.kind === "dyn") {
+          return { kind: "dynTest", test: "undefined", negated: true, value: get(field, type), type: BOOL, loc };
+        }
         if (type.kind !== "union") return null;
         const tag = L.armTag(type.unionId, UNDEFINED_T);
         if (tag < 0) return null;
