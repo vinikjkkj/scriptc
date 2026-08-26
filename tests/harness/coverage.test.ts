@@ -176,6 +176,25 @@ test("a whole-export root that is REBOUND after the export keeps its fence", () 
   expect(out).toContain("exporting the mutable 'let' binding 'j' by reference");
 });
 
+test("a module.exports TABLE entry over a rebindable let keeps its fence", () => {
+  // The table entry asks the same question the whole-export root asks, and
+  // for the same reason: Node copies the binding's VALUE into the table at
+  // the export statement while this lowering exports it by REFERENCE, so
+  // the two part company exactly when something assigns the binding later.
+  // A binding whose every write provably runs before the export compiles
+  // (corpus 7163-cjs-export-a-settled-let); these two do not.
+  //
+  // The fixture exists because the shared analysis is symbol-sensitive: a
+  // SHORTHAND property name binds to the PROPERTY symbol, so tracking that
+  // symbol finds no writes in either file and both would compile -- and
+  // both would print a value Node does not print, silently.
+  const out = report(fixture("cjs-table-export-mutable/main.cjs"));
+  expect(out).toContain("exporting the mutable 'let' binding 'n' by reference");
+  // Both sites, grouped: one for the rebound let, one for the function write.
+  expect(out).toContain("2 sites");
+  expect(out).toMatch(/×2\s+exporting the mutable 'let' binding 'n' by reference/);
+});
+
 test("type errors block analysis", () => {
   const out = report(fixture("type-errors.ts"));
   expect(out).toContain("not analyzable");

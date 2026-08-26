@@ -2155,6 +2155,25 @@ const SYMBOLIC_PAIR_BUDGET = 256;
       }
       inst.returnType = final;
     }
+    // Unit kinds live inside unions only (the IR invariant validate checks),
+    // so a settled BARE unit is not a type any function can carry. A body
+    // gets one when its single valued return is `return null` and every
+    // OTHER return fenced to a runtime throw -- which is what a JS source
+    // does with a statement it cannot lower, so the fence removed the arm
+    // that would have widened the join. The result was an internal error on
+    // the whole module (`return type is bare unit type nullT`, then `bare
+    // unitLit 'null' outside a unionWrap`) rather than a build or a named
+    // refusal.
+    //
+    // DYN is the answer, not a fallback: the function really does return
+    // `null` and its caller reads it through the checked-dynamic slot, which
+    // is where an implicit-any JS return lives already. The wrap pass below
+    // rides each return through dynFrom, the same wrapper the implicit
+    // `return undefined` uses. pg-types' `parseJsonArray` is the shape.
+    if (isUnitType(final)) {
+      final = DYN;
+      if (!inst.returnPinned) inst.returnType = final;
+    }
     // The wrap pass: settle every recorded return onto `final`, in place.
     for (const e of infer.entries) {
       if (e.stmt.kind !== "return") continue;
@@ -9165,6 +9184,54 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
    * as NOT own exactly like Node's absent key. Tuple, index-signature
    * (overflow membership lives in the runtime map), accessor-carrying
    * shapes and every other receiver kind keep the fence. */
+/** `Object.prototype.hasOwnProperty` written as a member access -- the
+   * expression, not the call. `isStdlibSymbol` is what makes it sound: the
+   * member must resolve to the library declaration, so a receiver that
+   * SHADOWS hasOwnProperty with its own is not this. */
+  function stdlibHasOwnMemberOf(L: Lowerer, e: ts.Expression | undefined): boolean {
+    if (e === undefined) return false;
+    let x: ts.Expression = e;
+    while (ts.isParenthesizedExpression(x) || ts.isAsExpression(x) || ts.isNonNullExpression(x)) x = x.expression;
+    if (!ts.isPropertyAccessExpression(x) || x.name.text !== "hasOwnProperty") return false;
+    return L.isStdlibSymbol(
+      L.checker.getSymbolAtLocation(x.name) ??
+        L.checker.getPropertyOfType(L.typeOf(x.expression), "hasOwnProperty") ??
+        undefined,
+    );
+  }
+
+/** A never-reassigned binding whose initializer IS that member access:
+   * `var hasOwnProperty = Object.prototype.hasOwnProperty` at the top of a
+   * file, then `hasOwnProperty.call(o, k)` inside the functions. The
+   * hoisted-alias spelling of the same idiom, and the one every small CJS
+   * utility uses (xtend/mutable.js, which pg reaches through
+   * postgres-interval, is three lines of it). Reassignable bindings stay
+   * out: the alias would be a lie the moment anything rebinds them. */
+  export function hasOwnPropertyAliasBinding(L: Lowerer, e: ts.Expression): boolean {
+    if (!ts.isIdentifier(e)) return false;
+    const sym = L.resolveValueSymbol(e) ?? L.checker.getSymbolAtLocation(e);
+    if (sym === undefined || sym === null) return false;
+    const decls = L.checker.declarationsOf(sym);
+    if (decls.length !== 1) return false;
+    const d = decls[0]!;
+    if (!ts.isVariableDeclaration(d) || !ts.isIdentifier(d.name)) return false;
+    if (!stdlibHasOwnMemberOf(L, d.initializer)) return false;
+    return bindingNeverReassigned(L, sym, d);
+  }
+
+/** The DECLARATION half, for lowerVarDecl and collectGlobals: the binding
+   * is compile-time plumbing, so it needs no storage and emits no code --
+   * every use is either a `.call(o, k)` this file lowers or an ordinary
+   * fence at the use's own line. */
+  export function hasOwnPropertyAliasDecl(L: Lowerer, nameNode: ts.Node, init: ts.Expression | undefined): boolean {
+    if (!ts.isIdentifier(nameNode) || !stdlibHasOwnMemberOf(L, init)) return false;
+    const sym = L.resolveValueSymbol(nameNode) ?? L.checker.getSymbolAtLocation(nameNode);
+    if (sym === undefined || sym === null) return false;
+    const decls = L.checker.declarationsOf(sym);
+    if (decls.length !== 1) return false;
+    return bindingNeverReassigned(L, sym, decls[0]!);
+  }
+
   export function lowerHasOwnOver(L: Lowerer, call: ts.CallExpression, recvNode: ts.Expression,
     keyNode: ts.Expression,): IrExpr | null {
     const probed = probeLower(L, recvNode);
@@ -11904,13 +11971,7 @@ export function lowerFunction(L: Lowerer, decl: ts.FunctionDeclaration): IrFunct
       // hasOwnProperty with its own is not this call and keeps the fence.
       if (
         name === "call" &&
-        ts.isPropertyAccessExpression(access.expression) &&
-        access.expression.name.text === "hasOwnProperty" &&
-        L.isStdlibSymbol(
-          L.checker.getSymbolAtLocation(access.expression.name) ??
-            L.checker.getPropertyOfType(L.typeOf(access.expression.expression), "hasOwnProperty") ??
-            undefined,
-        ) &&
+        (stdlibHasOwnMemberOf(L, access.expression) || hasOwnPropertyAliasBinding(L, access.expression)) &&
         call.arguments.length === 2 &&
         !call.arguments.some((a) => ts.isSpreadElement(a))
       ) {
