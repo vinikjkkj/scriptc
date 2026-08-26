@@ -85,6 +85,27 @@ const FORCED_OPTIONS: ts.Ts7CompilerOptions = {
   target: ts.ScriptTarget.ESNext as number,
   module: ts.ModuleKind.ESNext as number,
   moduleResolution: ts.ModuleResolutionKind.Bundler,
+  /* The CHECKER's resolution is tsgo's own, server-side, and bundler
+   * resolution matches neither "node" nor "browser". scriptc compiles for
+   * NODE, so the "node" condition is enabled here — the supported way to
+   * add one without changing the resolution ALGORITHM (extension rules,
+   * impliedNodeFormat and the rest stay bundler's).
+   *
+   * This is not a widening for its own sake: it makes the checker agree
+   * with the two resolvers that already enable "node" —
+   * npm.ts's resolveExports ({mode, "node", "default"}: what the island
+   * loads and what an import edge is judged against) and
+   * npm-static.ts's npmStaticTransformPkgJson (which HOISTS the node
+   * target before the opted-in lookup, because the browser dist "is a
+   * DIFFERENT artifact"). resolve.ts's EXPORT_CONDITIONS carries the
+   * matching membership so scriptc's own resolver answers the same file.
+   *
+   * Without it, a package whose "." is `{ node: {…}, default: {…} }` —
+   * file-type@19 is one, and it publishes no "./node" subpath to spell
+   * instead — had its TYPES read off the default/browser entry while its
+   * VALUES came from the node entry: `fileTypeFromFile` refused to exist
+   * on a module the island then loaded it from. */
+  customConditions: ["node"],
   lib: ["lib.es2025.d.ts"],
   types: [],
   allowImportingTsExtensions: true,
