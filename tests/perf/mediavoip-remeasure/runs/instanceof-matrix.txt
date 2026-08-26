@@ -1,0 +1,14 @@
+# scriptc run drivers/instanceof-matrix.ts -- default static lane, no flags
+ok    Uint8Array    got=true  node=true 
+WRONG DataView      got=true  node=false
+ok    subarray      got=true  node=true 
+WRONG REPORTER      got=true  node=false
+INSTANCEOF-MATRIX: reached the end
+RUN_EXIT=0
+
+# node v25.9.0, the oracle
+ok    Uint8Array    got=true  node=true 
+ok    DataView      got=false node=false
+ok    subarray      got=true  node=true 
+WRONG REPORTER      got=true  node=false
+INSTANCEOF-MATRIX: reached the end
