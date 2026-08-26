@@ -320,37 +320,81 @@ import { PoisonError, dynUndefinedExpr, newFnCtx, own } from "./lowerer.js";
        * module namespace. `import(CONST)`, the named-constant idiom
        * dynamicImportSpecOf accepts, does NOT: TypeScript leaves the
        * awaited value `any`, and under `any` none of the type-directed
-       * machinery fires — the `new` site would not be claimed, the
-       * `.default` refusal would not fire, and the program would read
-       * `undefined` out of a namespace-shaped object. That is the silent
-       * wrong answer this compiler exists to refuse, so the constant form
-       * keeps the loud failure below, with a message that names the
-       * spelling that works. */
+       * machinery fires — the `new` site would not be claimed and the
+       * `.default` refusal would not fire, so the program would reach the
+       * namespace VALUE for a construction the compiler never compiled.
+       * (Measured, on typescript 5.9.3 AND on the 7.0.2 checker this
+       * build uses: `import(SPEC)` types as `any` for a `const SPEC =
+       * "better-sqlite3"`, and so does `import(SPEC_LIT)` for a
+       * `declare const SPEC_LIT: "better-sqlite3"`. The fold is not the
+       * constraint; the CHECKER is.) The values below make that reach a
+       * named refusal rather than a wrong answer, but a refusal at the
+       * construction is still worse than a build that works, so the
+       * constant form keeps the loud failure below, with a message that
+       * names the spelling that works. */
       if (spec === "better-sqlite3" && arg !== undefined && ts.isStringLiteralLike(arg)) {
         // The namespace OBJECT, key for key. Node builds this one by
         // running cjs-module-lexer over the package's entry, so it is
         // three keys in this order — better-sqlite3's detected named
         // export, the default, and the `module.exports` alias the lexer
-        // adds for a whole-export replacement. The VALUES are absent
-        // (`undefined`), which is not a shortcut: every read of a member
-        // as a VALUE is refused by name at its type, so nothing here can
-        // escape into a program. What the values must not break is what a
-        // program CAN legally ask of the namespace itself, and an
-        // undefined-valued own property answers all of it the way Node
-        // does — `Object.keys` lists it, `in` finds it, and
-        // JSON.stringify skips it exactly as it skips Node's
-        // function-valued ones. An EMPTY object was the first cut and it
-        // is a silent wrong answer twice over: `Object.keys(ns)` came back
-        // `[]` where Node says three, and `"default" in ns` came back
-        // false. The fixture pins all four cells against the real
-        // package.
-        const nsKey = (name: string): { key: IrExpr; value: IrExpr } => ({
+        // adds for a whole-export replacement. (That third key is NODE
+        // VERSION dependent — v25 emits it, v22 does not — so the
+        // recording it is pinned against names its Node; see the fixture.)
+        //
+        // Every read of a member as a VALUE is refused by name at its
+        // type — but ONLY while the namespace still HAS that type. `let
+        // loaded: unknown = await import("better-sqlite3")` widens it in
+        // one step, and from there every read is a plain checked-dynamic
+        // member access that no type-directed fence can claim. So what
+        // these values answer is not a formality: it is the whole
+        // boundary, for any program that stores the namespace before
+        // using it (zapo's store-sqlite/src/connection.ts:301 declares
+        // exactly that `let loaded: unknown`, and its
+        // connection.ts:72-83 then probes it with `typeof`).
+        //
+        // Each of the three is a FUNCTION under Node — better-sqlite3's
+        // entry is a whole-export replacement (`module.exports =
+        // Database`), so the lexer's named export, the interop `default`,
+        // and the `module.exports` alias are all the constructor or the
+        // error class. They ride here as TRAP functions (dynTrapFnValue,
+        // the --npm-static namespace's own stance one arm below): `typeof`
+        // answers "function" the way Node does, `Object.keys` lists them,
+        // `in` finds them, and JSON.stringify skips them — and only
+        // INVOKING one throws, with the spelling that works named in the
+        // message.
+        //
+        // Two earlier cuts, both silent wrong answers. An EMPTY object
+        // failed twice over: `Object.keys(ns)` came back `[]` where Node
+        // says three, and `"default" in ns` came back false.
+        // UNDEFINED-valued own properties fixed those four cells and left
+        // a fifth broken — `typeof ns.default` read "undefined" where
+        // Node reads "function", so the standard optional-driver probe
+        // (`typeof candidate === 'function'`) took the wrong arm and the
+        // program reported "invalid sqlite driver export" at exit 0. A
+        // trap function answers that cell correctly and turns the use
+        // into a named refusal.
+        const nsKey = (name: string, what: string): { key: IrExpr; value: IrExpr } => ({
           key: { kind: "strLit", value: name, type: STRING, loc },
-          value: dynUndefinedExpr(loc),
+          value: dynTrapFnValue(
+            L,
+            `the better-sqlite3 namespace's '${name}' export is ${what}, which the ` +
+              `static lane serves by TYPE and not as a value — the namespace reached ` +
+              `this call through a widening (unknown/any), and nothing left in it ` +
+              `names the compiler-served surface. Keep the namespace's type and ` +
+              `construct AT the site: \`const ns = await import("better-sqlite3"); ` +
+              `const db = new ns.default(path);\` — with no \`: unknown\` (or other ` +
+              `annotation) on the binding in between, and no annotation on what ` +
+              `\`db.prepare()\` returns`,
+            loc,
+          ),
         });
         const ns: IrExpr = {
           kind: "dynObjLit",
-          fields: [nsKey("SqliteError"), nsKey("default"), nsKey("module.exports")],
+          fields: [
+            nsKey("SqliteError", "the error class"),
+            nsKey("default", "the Database constructor"),
+            nsKey("module.exports", "the Database constructor (the lexer's whole-export alias)"),
+          ],
           type: DYN,
           loc,
         };
@@ -406,11 +450,21 @@ import { PoisonError, dynUndefinedExpr, newFnCtx, own } from "./lowerer.js";
               // use of a better-sqlite3 namespace is type-directed, so a
               // constant-folded specifier has nothing to bind against. Naming
               // the spelling beats naming the package.
+              //
+              // The advice used to end "or build with --dynamic". It was
+              // RUN, and it is a dead end: under --dynamic the engine loads
+              // the real package, but the very use this message names —
+              // `new ns.default(path)` — is SC1090 ("constructing values
+              // other than classes declared in the program"), so the reader
+              // trades a rejected promise for a build error one line later.
+              // Only the literal spelling actually gets a database open.
               `Cannot load module 'better-sqlite3': the static lane serves this ` +
               `package itself, but only through a STRING LITERAL specifier — ` +
               `import(<const>) leaves the namespace untyped, and every use of it ` +
-              `(new ns.default(path)) is decided by type (write ` +
-              `import("better-sqlite3") at the site, or build with --dynamic)`
+              `(new ns.default(path)) is decided by type. Write ` +
+              `import("better-sqlite3") at the site and keep the namespace's ` +
+              `type: \`const ns = await import("better-sqlite3"); const db = ` +
+              `new ns.default(path);\``
             : `Cannot load module '${spec}': dynamic import() of npm packages runs in the ` +
               `embedded dynamic engine, which this build does not include ` +
               `(compile it statically with --npm-static ${spec}, or build with --dynamic)`;

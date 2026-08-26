@@ -5,11 +5,14 @@
  * static `import Database from "better-sqlite3"`. This file pins the
  * OTHER way in. The static lane serves better-sqlite3 itself over the
  * vendored amalgamation, so an `import()` of it names the same package
- * and answers the same namespace — a resolved promise of a
- * null-prototype object with no own properties, because every use of the
- * namespace is decided by TYPE and never by the value: `new
+ * and answers the same namespace — a resolved promise of an object with
+ * better-sqlite3's three export names on it, each a TRAP function. Every
+ * use of the namespace is decided by TYPE and never by the value: `new
  * ns.default(path)` is claimed by its result type (lowerSqliteNew never
- * lowers its callee) and `ns.default` as a VALUE is refused by name.
+ * lowers its callee) and `ns.default` as a VALUE is refused by name —
+ * but only while the namespace still HAS that type. One `: unknown`
+ * annotation on the binding and every read is a plain dynamic member
+ * access, which is why the VALUES have to be right too.
  *
  * ── the row this file exists to keep closed ───────────────────────────
  *
@@ -26,9 +29,10 @@
  *                  loadable in the same test — so "the decoy did not
  *                  load" cannot be an inert instrument.
  *   the link gate  an `await import("better-sqlite3")` whose namespace is
- *                  never constructed costs EXACTLY what `await
- *                  Promise.resolve(Object.create(null))` costs, to the
- *                  byte, and not one byte of the engine; adding `new
+ *                  never constructed costs what `await
+ *                  Promise.resolve(Object.create(null))` costs plus the
+ *                  three export TRAPS (2,048 bytes, measured) and not one
+ *                  byte of the engine or the amalgamation; adding `new
  *                  ns.default(":memory:")` costs the amalgamation.
  *   the cells      every line matches better-sqlite3 13.0.3, on BOTH
  *                  backends. A driver that half-answered would diverge
@@ -43,14 +47,29 @@
  * dynamicImportSpecOf folds but TypeScript does NOT type — compiles to a
  * rejected promise whose message names the spelling that works. The
  * second is the subtle one: under a folded constant the awaited value is
- * `any`, so none of the type-directed machinery above fires and a
- * namespace-shaped object would read `undefined` at every member. That
- * is the silent wrong answer, and it is why the fold is not the guard.
+ * `any`, so none of the type-directed machinery above fires and the
+ * construction the message names is never claimed. Measured on BOTH
+ * checkers (typescript 5.9.3 and the 7.0.2 this build uses): a `const M =
+ * "better-sqlite3"` and even a `declare const M: "better-sqlite3"` type
+ * `import(M)` as `any`. The compiler's own dynamicImportSpecOf folds the
+ * specifier fine — the fold is not the constraint, and that is why it is
+ * not the guard either.
  *
  * The oracle is RECORDED, for sqlite.test.ts's reason (the gate needs no
  * native dependency installed in this repo) and re-checked against a live
  * addon whenever one resolves — reported, never passed quietly, when it
  * cannot.
+ *
+ * PROVENANCE of the recording: re-verified line for line against a live
+ * better-sqlite3 13.0.3 under Node v25.9.0 on 2026-08-26. Note for
+ * whoever re-records it: `ns.keys` is NODE-VERSION dependent. The same
+ * installed 13.0.3 answers `SqliteError,default,module.exports` under
+ * v25.9.0 and `SqliteError,default` under v22.18.0 — the `module.exports`
+ * alias key is newer interop, not a property of the package. Record under
+ * the Node this repository GATES under, or this cell reads as a
+ * regression that is really an oracle swap. (13.0.3 ships Node-API
+ * prebuilds and loads on both; the ABI-locked NODE_MODULE_VERSION 127
+ * story belongs to node-gyp builds from source, not to this package.)
  */
 import { spawn } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
@@ -163,6 +182,16 @@ describe("better-sqlite3 through a dynamic import", () => {
     expect(nonEmpty).toContain("ns.json {}");
     expect(nonEmpty).toContain("ns.hasDefault true");
     expect(nonEmpty).toContain("ns.hasInherited false");
+    // ...and the three that the four above CANNOT distinguish: an
+    // undefined-valued stand-in passes all four and answers "undefined"
+    // here, which is the arm the standard optional-driver probe
+    // (`typeof candidate === 'function'`) reads as "no driver".
+    expect(nonEmpty).toContain("ns.typeof.default function");
+    expect(nonEmpty).toContain("ns.typeof.SqliteError function");
+    // The negative control for those two: a key the namespace does NOT
+    // have must still answer "undefined", or the stand-in is answering
+    // "function" to everything and proves nothing.
+    expect(nonEmpty).toContain("ns.typeof.absent undefined");
     // ...and armed: the same comparison, against one mutated cell.
     const mutated = [...golden];
     mutated[0] = "ns.typeof function";
@@ -275,8 +304,25 @@ describe("the link gate, through import()", () => {
         expect(built.ok, `the ${name} gate program must compile`).toBe(true);
         sizes[name] = readFileSync(built.binaryPath!).length;
       }
-      expect(sizes["unused"]).toBe(sizes["control"]);
+      // The namespace's three exports are TRAP functions, so that
+      // `typeof ns.default` answers "function" the way Node does even
+      // after the namespace is widened past its type. Three lifted
+      // zero-parameter fences and their messages are what the
+      // unconstructed namespace costs over the control: MEASURED at 2,048
+      // bytes on the C backend, bounded generously here because the
+      // number this gate exists to exclude is six hundred THOUSAND. The
+      // strong form ("to the byte") held only while the exports were
+      // undefined-valued, which is the silent wrong answer this fixture
+      // now pins the other way.
+      const nsCost = sizes["unused"]! - sizes["control"]!;
+      expect(nsCost, "the unconstructed namespace must cost the trap closures and nothing else").toBeLessThanOrEqual(
+        16_384,
+      );
+      expect(nsCost, "the trap closures are not free — a zero here means they stopped being emitted").toBeGreaterThan(0);
+      // Neither the amalgamation nor the engine is linked until the
+      // namespace is CONSTRUCTED from.
       expect(sizes["used"]! - sizes["control"]!).toBeGreaterThan(600_000);
+      expect(sizes["used"]! - sizes["unused"]!).toBeGreaterThan(600_000);
     },
     900_000,
   );
