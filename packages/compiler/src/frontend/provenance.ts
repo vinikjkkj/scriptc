@@ -560,17 +560,47 @@ function readManifest(): Map<string, ManifestEntry> {
   return out;
 }
 
+/** One package whose attested source tree has been LOCATED. The tree is
+ * fetched once, but its `entries` map is not final when it is first
+ * built — see `expand` and the fixed point below. */
+interface MappedTree {
+  installed: InstalledPackage;
+  dir: string;
+  repo: string;
+  commit: string;
+  aliases: Record<string, string[]> | undefined;
+  /** specifier → mapped source file. Grows across rounds. */
+  entries: Record<string, string>;
+  /** Driver-resolved externals of everything in `entries`. Grows likewise. */
+  external: Record<string, string>;
+  /** Specifiers whose mapping has been ATTEMPTED — mapped or noted. The
+   * pending set is `specifiersByPackage.get(name)` minus this. */
+  considered: Set<string>;
+  /** Set once the tree maps its first entry (the point at which it
+   * becomes a ProvenancePackageSource and claims its import order). */
+  announced: boolean;
+  sourceVersion?: string;
+}
+
+/** Bound on the specifier-discovery fixed point. Each round attempts at
+ * least one previously-unattempted specifier, and the specifier set is
+ * finite, so this is insurance against a pathological graph rather than
+ * the termination argument. Reaching it is noted, never silent. */
+const MAX_ROUNDS = 32;
+
 /** Resolves provenance sources for everything the entry's module graph
- * imports (one transitive round per newly-mapped tree: source imports of
- * OTHER packages try the pipeline too). Never throws for a package
- * failure — those become notes and the package keeps its island path. */
+ * imports, to a FIXED POINT: a mapped tree's own source imports feed back
+ * in, both as new packages and as new SUBPATHS of packages already
+ * mapped. Never throws for a package failure — those become notes and the
+ * package keeps its island path. */
 export async function resolveProvenanceSources(entryPath: string): Promise<ProvenanceSources> {
   const entry = resolve(entryPath);
   const manifest = readManifest();
-  const packages: ProvenancePackageSource[] = [];
   const notes: string[] = [];
-  /** package name → mapped package (or null after a noted failure). */
-  const processed = new Map<string, ProvenancePackageSource | null>();
+  /** package name → located tree (or null after a noted failure). */
+  const processed = new Map<string, MappedTree | null>();
+  /** Names in the order their tree mapped its first entry. */
+  const mappedOrder: string[] = [];
 
   /** All specifiers seen so far, grouped by package name. */
   const specifiersByPackage = new Map<string, Set<string>>();
@@ -586,6 +616,80 @@ export async function resolveProvenanceSources(entryPath: string): Promise<Prove
       set.add(spec);
     }
     return newNames;
+  };
+
+  /** Maps every specifier of `name` not yet attempted, then walks what
+   * the newly mapped source files import. Returns the package names that
+   * walk saw for the FIRST time; new specifiers of packages already
+   * located stay in `specifiersByPackage` for the next round.
+   *
+   * This is why a located package is re-entered at all. `entries` used to
+   * be built once, from the specifiers known at that instant, and a
+   * subpath first imported by ANOTHER package's source arrives strictly
+   * later — so the same specifier resolved or refused depending on which
+   * file the compiler was pointed at. */
+  const expand = async (name: string, tree: MappedTree): Promise<string[]> => {
+    const known = specifiersByPackage.get(name);
+    const pending = known === undefined ? [] : [...known].filter((s) => !tree.considered.has(s));
+    if (pending.length === 0) return [];
+    const added: string[] = [];
+    for (const spec of pending) {
+      tree.considered.add(spec);
+      const parts = spec.split("/");
+      const nameLen = spec.startsWith("@") ? 2 : 1;
+      const subpath = parts.length === nameLen ? "." : `./${parts.slice(nameLen).join("/")}`;
+      const target = publishedTargetOf(tree.installed.pkgJson, subpath);
+      const source = target === null ? null : mapEntryToSource(tree.dir, target, subpath);
+      if (source === null) {
+        notes.push(
+          `${name}@${tree.installed.version}: no source mapping for '${spec}' (published target: ${target ?? "unexported"}); island path used`,
+        );
+        continue;
+      }
+      if (tree.entries[spec] === source) continue;
+      tree.entries[spec] = source;
+      added.push(source);
+    }
+    if (added.length === 0) return [];
+    if (!tree.announced) {
+      tree.announced = true;
+      mappedOrder.push(name);
+      const srcPkg = readJson(join(tree.dir, "package.json"));
+      const sourceVersion = typeof srcPkg?.["version"] === "string" ? srcPkg["version"] : undefined;
+      if (sourceVersion !== undefined && sourceVersion !== tree.installed.version) {
+        tree.sourceVersion = sourceVersion;
+        notes.push(
+          `${name}: source tree's package.json says ${sourceVersion}, installed is ${tree.installed.version} (release tooling that bumps at publish) — the behavior differential is the check`,
+        );
+      }
+    }
+    // Only the newly mapped roots are walked — the earlier ones' bare
+    // imports are already in `external` and in specifiersByPackage. The
+    // tree's remaining bare imports resolve against the DRIVER's installed
+    // tree: the checkout in the source cache has no node_modules, so
+    // nothing resolves from where these files sit.
+    const treeBare = bareImportsOf(added, tree.aliases);
+    for (const spec of treeBare) {
+      if (Object.hasOwn(tree.external, spec)) continue;
+      const r = resolveBareModule(entry, spec);
+      if (r !== null) tree.external[spec] = tsgoPath(r.typesFile);
+    }
+    // The mapped source's own bare imports try the pipeline too (versions
+    // resolve from the DRIVER's tree — a prototype heuristic; production
+    // wants the package's lockfile).
+    return enqueue(treeBare);
+  };
+
+  /** `expand`, with the pipeline's never-throw contract around it. */
+  const expandSafely = async (name: string, tree: MappedTree): Promise<string[]> => {
+    try {
+      return await expand(name, tree);
+    } catch (e) {
+      notes.push(
+        `${name}@${tree.installed.version}: ${e instanceof Error ? e.message : String(e)}; island path used`,
+      );
+      return [];
+    }
   };
 
   const mapOne = async (name: string): Promise<void> => {
@@ -622,68 +726,79 @@ export async function resolveProvenanceSources(entryPath: string): Promise<Prove
         }
         dir = located;
       }
-      const entries: Record<string, string> = {};
-      for (const spec of specifiersByPackage.get(name) ?? []) {
-        const parts = spec.split("/");
-        const nameLen = spec.startsWith("@") ? 2 : 1;
-        const subpath = parts.length === nameLen ? "." : `./${parts.slice(nameLen).join("/")}`;
-        const target = publishedTargetOf(installed.pkgJson, subpath);
-        const source = target === null ? null : mapEntryToSource(dir, target, subpath);
-        if (source === null) {
-          notes.push(
-            `${name}@${installed.version}: no source mapping for '${spec}' (published target: ${target ?? "unexported"}); island path used`,
-          );
-          continue;
-        }
-        entries[spec] = source;
-      }
-      if (Object.keys(entries).length === 0) return;
-      const srcPkg = readJson(join(dir, "package.json"));
-      const sourceVersion = typeof srcPkg?.["version"] === "string" ? srcPkg["version"] : undefined;
-      const aliases = sourceAliasesOf(dir);
-      // The tree's remaining bare imports resolve against the DRIVER's
-      // installed tree: the checkout in the source cache has no
-      // node_modules, so nothing resolves from where these files sit.
-      const treeBare = bareImportsOf(Object.values(entries), aliases);
-      const external: Record<string, string> = {};
-      for (const spec of treeBare) {
-        const r = resolveBareModule(entry, spec);
-        if (r !== null) external[spec] = tsgoPath(r.typesFile);
-      }
-      const pkg: ProvenancePackageSource = {
-        name: installed.name,
-        version: installed.version,
-        ...(sourceVersion !== undefined && sourceVersion !== installed.version ? { sourceVersion } : {}),
-        repo,
-        commit,
-        dir,
-        // Where these files SIT when Node runs the program. Node's own
-        // require resolution is asked from here, not from the cache
-        // checkout, which has no node_modules of its own.
-        installedDir: tsgoPath(installed.dir),
-        entries,
-        ...(aliases !== undefined ? { aliases } : {}),
-        ...(Object.keys(external).length > 0 ? { external } : {}),
-      };
-      if (pkg.sourceVersion !== undefined) {
-        notes.push(
-          `${name}: source tree's package.json says ${pkg.sourceVersion}, installed is ${installed.version} (release tooling that bumps at publish) — the behavior differential is the check`,
-        );
-      }
-      packages.push(pkg);
-      processed.set(name, pkg);
-      // One transitive round: the mapped source's own bare imports try
-      // the pipeline too (versions resolve from the DRIVER's tree — a
-      // prototype heuristic; production wants the package's lockfile).
-      const inner = enqueue(treeBare);
-      for (const n of inner) await mapOne(n);
     } catch (e) {
       notes.push(`${name}@${installed.version}: ${e instanceof Error ? e.message : String(e)}; island path used`);
+      return;
     }
+    const tree: MappedTree = {
+      installed,
+      dir,
+      repo,
+      commit,
+      aliases: sourceAliasesOf(dir),
+      entries: {},
+      external: {},
+      considered: new Set(),
+      announced: false,
+    };
+    processed.set(name, tree);
+    for (const n of await expandSafely(name, tree)) await mapOne(n);
   };
 
   for (const name of enqueue(bareImportsOf([entry]))) {
     await mapOne(name);
+  }
+
+  // The fixed point. A located package's specifier set keeps growing as
+  // OTHER trees are walked, and every one of those specifiers has to be
+  // mapped or refused by name — otherwise a subpath is invisible forever
+  // purely because of the order the graph was discovered in.
+  let rounds = 0;
+  for (;;) {
+    let grew = false;
+    for (const [name, tree] of [...processed]) {
+      if (tree === null) continue;
+      const known = specifiersByPackage.get(name);
+      if (known === undefined) continue;
+      let pending = false;
+      for (const spec of known) {
+        if (!tree.considered.has(spec)) {
+          pending = true;
+          break;
+        }
+      }
+      if (!pending) continue;
+      grew = true;
+      for (const n of await expandSafely(name, tree)) await mapOne(n);
+    }
+    if (!grew) break;
+    if (++rounds >= MAX_ROUNDS) {
+      notes.push(
+        `specifier discovery stopped after ${MAX_ROUNDS} rounds; subpaths found later keep the island path`,
+      );
+      break;
+    }
+  }
+
+  const packages: ProvenancePackageSource[] = [];
+  for (const name of mappedOrder) {
+    const tree = processed.get(name);
+    if (tree === null || tree === undefined) continue;
+    packages.push({
+      name: tree.installed.name,
+      version: tree.installed.version,
+      ...(tree.sourceVersion !== undefined ? { sourceVersion: tree.sourceVersion } : {}),
+      repo: tree.repo,
+      commit: tree.commit,
+      dir: tree.dir,
+      // Where these files SIT when Node runs the program. Node's own
+      // require resolution is asked from here, not from the cache
+      // checkout, which has no node_modules of its own.
+      installedDir: tsgoPath(tree.installed.dir),
+      entries: tree.entries,
+      ...(tree.aliases !== undefined ? { aliases: tree.aliases } : {}),
+      ...(Object.keys(tree.external).length > 0 ? { external: tree.external } : {}),
+    });
   }
   return { packages, notes };
 }

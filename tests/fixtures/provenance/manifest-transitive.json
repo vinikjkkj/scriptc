@@ -1,0 +1,19 @@
+{
+  "packages": {
+    "hub": {
+      "dir": "./attested-src/hub",
+      "commit": "2222222222222222222222222222222222222222",
+      "repo": "https://github.com/example/hub"
+    },
+    "spoke": {
+      "dir": "./attested-src/spoke",
+      "commit": "3333333333333333333333333333333333333333",
+      "repo": "https://github.com/example/spoke"
+    },
+    "ghosty": {
+      "dir": "./attested-src/ghosty",
+      "commit": "4444444444444444444444444444444444444444",
+      "repo": "https://github.com/example/ghosty"
+    }
+  }
+}
