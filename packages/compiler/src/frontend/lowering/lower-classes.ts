@@ -6636,6 +6636,13 @@ export function lowerNew(L: Lowerer, expr: ts.NewExpression): IrExpr {
           targs.length > 0 &&
           targs.every((t) => (t.flags & ts.TypeFlags.Any) !== 0)
         ) {
+          // SCRIPTC_MAPBOX_WHY=1: count the escape hatch.  Every one of these
+          // is a value on which `.set`/`.get`/`.size` answers V8's own
+          // "is not a function" -- a wrong answer for a method Node HAS -- and
+          // no instrument in this project could say how many a program has.
+          if (process.env["SCRIPTC_MAPBOX_WHY"] !== undefined) {
+            process.stderr.write(`[mapbox] ${L.checker.typeToString(tsType)} at ${loc.file}:${loc.start}\n`);
+          }
           return { kind: "dynObjLit", type: DYN, loc };
         }
         // A WeakMap that does NOT ride the identity-keyed Map (types.ts's
