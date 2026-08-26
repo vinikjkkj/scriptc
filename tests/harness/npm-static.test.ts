@@ -169,6 +169,25 @@ describe(`npm-static pilots${sanitize ? " (sanitized)" : ""}`, () => {
     // class the static type does not pin refuse by name instead
     // (tests/diagnostics/generic-override-inexact-receiver).
     ["poolish", "poolish-cli.ts"],
+    // ctorfn is `pg/lib/type-overrides.js` reduced to the shape that
+    // CRASHED the compiler — the one the field-outside-constructor
+    // diagnostic's own remedy walked into, reported with no code and no
+    // location (`TypeError: Cannot read properties of undefined (reading
+    // 'map')` in the checker facade). An ES5 constructor FUNCTION with an
+    // untyped parameter is an implicit-any generic, not a class; its own
+    // module's `F.prototype.m = ...` reads it as a VALUE, which compiles
+    // the body as a monomorphized instance that takes no captures and owns
+    // no `this`; and `this.x = v` in STATEMENT position inside it is
+    // probed for a dyn receiver, so the walk reached the ENCLOSING class
+    // constructor's `this` and computed its blame from a sentinel symbol
+    // with no declarations array.
+    //
+    // It lives HERE and not in tests/corpus because the corpus cannot
+    // hold it: the identical source as a program module is recognised as
+    // a JS constructor-function class and never takes the function-VALUE
+    // path. That asymmetry is exactly why the survey that found the crash
+    // reported it as needing pg's real context and shipped no repro.
+    ["ctorfn", "ctorfn-cli.ts"],
   ] as const)("%s compiles statically and byte-matches Node", async ([pkg, file]) => {
     const entry = join(pilotRoot, file);
     const binary = await buildStatic(entry, [pkg]);

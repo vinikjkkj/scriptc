@@ -36,7 +36,7 @@
 import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
 import { isJsSourceFile } from "../program.js";
-import { BOOL, DYN, F64, internalSlotFields, IrExpr, IrStmt, IrType, RUNTIME_ERROR_CLASSES, STRING, SrcLoc, shapeHasAccessorSlots, typeKey } from "../../ir/nodes.js";
+import { BOOL, DYN, F64, internalSlotFields, IrExpr, IrStmt, IrType, RUNTIME_ERROR_CLASSES, STRING, SrcLoc, UNDEFINED_T, shapeHasAccessorSlots, typeKey } from "../../ir/nodes.js";
 import { CLASS_PROPS_FIELD, type ClassInfo } from "./lower-classes.js";
 import { pureReemittable } from "./lower-exprs.js";
 import { lowerPromisifiedDiffieHellmanValue } from "./lower-builtins.js";
@@ -819,6 +819,22 @@ function inspectHelper(L: Lowerer, t: IrType, loc: SrcLoc): string {
         (f) => !f.name.startsWith("#") && f.name !== CLASS_PROPS_FIELD && hidden?.has(f.name) !== true,
       );
       const get = (field: string, type: IrType): IrExpr => ({ kind: "fieldGet", obj: v(), className: t.className, field, type, loc });
+      // ABSENT-TRACKED slots (ClassInfo.absentTrackedFields): a JS field
+      // first assigned outside the constructor's top level does not EXIST
+      // on the instance until its write runs, so Node prints
+      // `Loop { count: 0 }` where the layout — which always has the cell —
+      // printed `Loop { count: 0, last: undefined }`. The slot's own
+      // undefined arm is the presence answer, exactly as `in` already
+      // reads it (undefinedArmedInAnswer), and the set is restricted to
+      // the slots where that arm can ONLY mean absence, so this is not a
+      // second approximation traded for the first.
+      const presentTest = (field: string, type: IrType): IrExpr | null => {
+        if (info.absentTrackedFields?.has(field) !== true) return null;
+        if (type.kind !== "union") return null;
+        const tag = L.armTag(type.unionId, UNDEFINED_T);
+        if (tag < 0) return null;
+        return { kind: "unionIsTag", unionId: type.unionId, tag, negated: true, value: get(field, type), type: BOOL, loc };
+      };
       const propsRef = (): IrExpr => get(CLASS_PROPS_FIELD, DYN);
       // TWO calls, not one, and the declared fields go between them:
       // OrdinaryOwnPropertyKeys lists every ARRAY-INDEX key ahead of
@@ -859,6 +875,28 @@ function inspectHelper(L: Lowerer, t: IrType, loc: SrcLoc): string {
           loc,
         });
       }
+      // Every visible slot ABSENT-TRACKED and no run-time table: whether
+      // the instance has any key at all is a run-time question, the same
+      // one the keyless-class arm above asks, and it has to be asked in
+      // the same place — BEFORE the depth gate, because Node prints
+      // `C {}` for a keyless object however deep it is and `[C]` only for
+      // one with keys. insp.end cannot answer it later: with no entries
+      // pushed it renders `C {  }`.
+      const allTracked =
+        visible.length > 0 && !propsTable &&
+        visible.every((f) => presentTest(f.name, f.type) !== null);
+      if (allTracked) {
+        const anyPresent = visible
+          .map((f) => presentTest(f.name, f.type)!)
+          .reduce((a, b): IrExpr => ({ kind: "logical", op: "||", left: a, right: b, type: BOOL, loc }));
+        body.push({
+          kind: "if",
+          cond: { kind: "unary", op: "!", operand: anyPresent, type: BOOL, loc },
+          then: [ret(str(`${display} {}`, loc))],
+          else_: null,
+          loc,
+        });
+      }
       body.push(depthGate(`[${display}]`), ...begin());
       if (propsTable) body.push(propsEntries(true));
       // def.fields carries layout order: the base chain first, then own —
@@ -875,9 +913,9 @@ function inspectHelper(L: Lowerer, t: IrType, loc: SrcLoc): string {
       ];
       for (const f of ordered) {
         const key = symNames.has(f.name) ? f.name : inspectKey(f.name);
-        body.push(
-          entry(concatAll([str(`${key}: `, loc), child(f.type, get(f.name, f.type))], loc), boolLit(false, loc)),
-        );
+        const one = entry(concatAll([str(`${key}: `, loc), child(f.type, get(f.name, f.type))], loc), boolLit(false, loc));
+        const present = presentTest(f.name, f.type);
+        body.push(present === null ? one : { kind: "if", cond: present, then: [one], else_: null, loc });
       }
       // The run-time table's entries come AFTER the declared fields, and
       // that IS Node's order: the table can only be filled once the

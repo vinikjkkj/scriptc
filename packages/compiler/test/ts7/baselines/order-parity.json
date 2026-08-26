@@ -9496,6 +9496,18 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/6712-class-field-absent-until-written.js": {
+   "order": [
+    "<repo>/tests/corpus/6712-class-field-absent-until-written.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/6713-class-map-field-jsdoc-annotated.js": {
+   "order": [
+    "<repo>/tests/corpus/6713-class-map-field-jsdoc-annotated.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/700-classes-basic.ts": {
    "order": [
     "<repo>/tests/corpus/700-classes-basic.ts"
