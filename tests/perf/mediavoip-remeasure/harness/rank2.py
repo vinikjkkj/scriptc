@@ -48,6 +48,29 @@ OWNED = [
 ]
 
 
+import re
+
+_PATHISH = re.compile(r"[A-Za-z]:[\\/][^\s'\"()]*")
+_COMMIT = re.compile(r"/[0-9a-f]{40}/")
+
+
+def _norm_path(p):
+    p = p.replace(chr(92), "/")
+    m = _COMMIT.search(p)
+    if m is not None:
+        return "prov:" + p[m.end():]
+    i = p.find("/app/")
+    return p[i + 5:] if i >= 0 else p
+
+
+def nmsg(m):
+    """Diagnostic text with block-specific absolute paths folded away, so a
+    cause counted here is the same cause counted from another block root."""
+    if m is None:
+        return None
+    return _PATHISH.sub(lambda mo: _norm_path(mo.group(0)), m)
+
+
 def load(d):
     sites = {}
     for f in sorted(glob.glob(os.path.join(d, "*.json"))):
@@ -55,7 +78,7 @@ def load(d):
             continue
         j = json.load(open(f))
         for s in j["sites"]:
-            sites.setdefault((s["file"], s["line"], s["code"], s["message"]), set()).add(s["section"])
+            sites.setdefault((s["file"], s["line"], s["code"], nmsg(s["message"])), set()).add(s["section"])
     return sites
 
 
@@ -127,4 +150,5 @@ def main():
         sys.exit(1)
 
 
-main()
+if __name__ == "__main__":
+    main()

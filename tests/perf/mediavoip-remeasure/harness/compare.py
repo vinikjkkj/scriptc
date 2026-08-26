@@ -47,6 +47,23 @@ def norm(p):
     return p[i + 5:] if i >= 0 else p
 
 
+_PATHISH = re.compile(r"[A-Za-z]:[\\/][^\s'\"()]*")
+
+
+def nmsg(m):
+    """Diagnostic text with block-specific absolute paths folded away.
+
+    Two diagnostics quote absolute paths: the SC0001 that names a node_modules
+    module, and the SC1016 that spells a whole import cycle inside the
+    provenance cache. Keyed raw, they make one cause look like two whenever the
+    block root differs -- which it always does between blocks. Folding them is
+    what lets a re-run from a different root be compared at all.
+    """
+    if m is None:
+        return None
+    return _PATHISH.sub(lambda mo: norm(mo.group(0)), m)
+
+
 def load(d):
     sites = {}
     stats = {}
@@ -62,7 +79,7 @@ def load(d):
             "prov": j.get("provenanceNotes"),
         }
         for s in j["sites"]:
-            key = (norm(s["file"]), s["line"], s["code"], s["message"])
+            key = (norm(s["file"]), s["line"], s["code"], nmsg(s["message"]))
             sites.setdefault(key, set()).add(s["section"])
     return sites, stats
 
@@ -129,4 +146,5 @@ def main():
             sb.get("statementsFailed"), sb.get("statementsTotal"), mark))
 
 
-main()
+if __name__ == "__main__":
+    main()
