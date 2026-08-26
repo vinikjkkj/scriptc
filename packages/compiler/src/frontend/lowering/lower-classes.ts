@@ -4869,6 +4869,22 @@ export function lowerClassMembers(L: Lowerer, info: ClassInfo): IrFunction[] {
     }
   }
 
+/** The well-known Symbol keys that get a RESERVED method slot instead of
+   * the computed-name fence. The slot name ("sym:iterator") is unspellable
+   * as a user identifier, the accessor "get:x" convention.
+   *
+   * `iterator` is DISPATCHED: for-of, spreads and array destructuring
+   * desugar to it (classIteratorOf). `dispose` and `asyncDispose` are
+   * DECLARED ONLY -- the explicit-resource-management proposal calls them
+   * from `using`/`await using` blocks, which this compiler does not lower,
+   * and an explicit `x[Symbol.dispose]()` keeps the symbol-keyed access
+   * fence. So a class carrying one compiles and the method is simply never
+   * reached, which is what a program that never writes `using` does in Node
+   * too. Real packages hang their whole class on this: mysql2's
+   * Connection, Pool and PromiseConnection each declare one, and before
+   * this the declaration alone refused the file. */
+  const WELL_KNOWN_SYMBOL_SLOTS = new Set(["iterator", "dispose", "asyncDispose"]);
+
 /** The lowered method-map name of a class member: identifier text, a
    * COMPUTED name that folds to one compile-time string
    * (foldedStringKeyOf — the object-literal computed-key machinery
@@ -4886,8 +4902,9 @@ export function lowerClassMembers(L: Lowerer, info: ClassInfo): IrFunction[] {
     if (!ts.isComputedPropertyName(name)) return null;
     let e = name.expression;
     while (ts.isParenthesizedExpression(e)) e = e.expression;
-    if (ts.isPropertyAccessExpression(e) && L.stdlibGlobalMember(e, "Symbol") === "iterator") {
-      return "sym:iterator";
+    if (ts.isPropertyAccessExpression(e)) {
+      const wellKnown = L.stdlibGlobalMember(e, "Symbol");
+      if (wellKnown !== null && WELL_KNOWN_SYMBOL_SLOTS.has(wellKnown)) return `sym:${wellKnown}`;
     }
     return L.foldedStringKeyOf(name.expression);
   }
