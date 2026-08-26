@@ -968,7 +968,70 @@ export interface GenericClassInfo {
     });
   }
 
-  /** The flag set dynBoxIsFaithful admits outright: everything whose whole
+  /** IS THIS THE DEFERRED-CALLBACK FIELD? — a field whose whole inference is
+   * "a callback, or not written yet": every arm is either a PURE
+   * single-call-signature function type (dynFallbackType's own gate — no
+   * properties, no construct signatures, no type parameters, no rest or
+   * `arguments` params) or a unit meaning absent (undefined/null/never).
+   * At least one arm must be a function, so this never widens a
+   * plain-unit inference that has its own answer.
+   *
+   * `this.resolve = resolve` inside a `new Promise(...)` executor is the
+   * shape, in both spellings the checker produces for it: bare
+   * `(value: any) => void` when the write is lexically inside the
+   * constructor, and `((value: any) => void) | undefined` when the write
+   * sits in a method the constructor calls (ioredis's `initPromise`,
+   * which is how `built/Command.js:303` actually reads). The two spell
+   * one construct and had to answer alike; keying on the bare form alone
+   * admitted the reduction and still refused the real package.
+   *
+   * The arms are asked ONE BY ONE and unions are never passed whole to
+   * dynFallbackType, because that function answers a blanket `dyn` for
+   * every union it does not recognize — a `Map<any, any> | undefined`
+   * field included. Routing that to a dyn box is the regression this
+   * file's history records twice (`m.set is not a function` where Node
+   * answers a value), and asking per arm is what keeps this rule from
+   * being that change wearing a narrower name. */
+/** Is this write LEXICALLY inside a CALLBACK rather than in the
+   * constructor's or a method's own body? Walks out of the assignment until
+   * it meets either a function that could be the callback, or the member
+   * that contains it.
+   *
+   * The distinction decides which remedy the fence below can honestly name,
+   * and both arms were compiled and run before being written into a
+   * message. A value produced INSIDE a callback is usually made out of the
+   * callback's own parameters (`this.resolve = resolve`), so "move the
+   * assignment to the top of the constructor" names something no reader can
+   * do — the parameter does not exist there. Every other position really
+   * can be moved, and moving it really does compile: a generator-valued
+   * field assigned in a method refuses here and runs byte-exact once the
+   * assignment sits at the constructor's top level. */
+  function assignedInsideCallback(site: ts.Node): boolean {
+    for (let n: ts.Node | undefined = site.parent; n !== undefined; n = n.parent) {
+      if (ts.isArrowFunction(n) || ts.isFunctionExpression(n) || ts.isFunctionDeclaration(n)) return true;
+      if (
+        ts.isConstructorDeclaration(n) || ts.isMethodDeclaration(n) ||
+        ts.isGetAccessorDeclaration(n) || ts.isSetAccessorDeclaration(n) ||
+        ts.isClassDeclaration(n) || ts.isClassExpression(n) || ts.isSourceFile(n)
+      ) {
+        return false;
+      }
+    }
+    return false;
+  }
+
+  function isDeferredCallbackField(L: Lowerer, site: ts.Node, t: ts.Type): boolean {
+    const arms: readonly ts.Type[] = t.isUnionType() ? t.getTypes() : [t];
+    let sawFn = false;
+    for (const a of arms) {
+      if ((a.flags & (ts.TypeFlags.Undefined | ts.TypeFlags.Null | ts.TypeFlags.Never)) !== 0) continue;
+      if (dynFallbackType(L, site, a)?.kind !== "func") return false;
+      sawFn = true;
+    }
+    return sawFn;
+  }
+
+/** The flag set dynBoxIsFaithful admits outright: everything whose whole
    * runtime representation already IS a dyn payload. */
   const DYN_FAITHFUL_PRIMITIVES =
     ts.TypeFlags.Any |
@@ -1007,13 +1070,50 @@ export interface GenericClassInfo {
    * wrong answer, which is the one trade this project never makes. Only
    * `any` itself, whose whole representation IS the checked-dynamic box,
    * takes the fallback, plus the plain shapes dynBoxIsFaithful admits. */
-  function undefArmedFieldType(L: Lowerer, p: ts.Symbol): IrType | null {
+  function undefArmedFieldType(L: Lowerer, p: ts.Symbol, site: ts.Node): IrType | null {
     const t = L.checker.getTypeOfSymbol(p);
     const mapped = L.mapTypeOf(t);
     // The checked-dynamic fallback, for the inferences a dyn box
     // represents FAITHFULLY (dynBoxIsFaithful). Implicit `any` — the
     // untyped-parameter shape — is the arm that fires on real packages.
     if (mapped === null && dynBoxIsFaithful(L, t)) return DYN;
+    // THE DEFERRED-CALLBACK FIELD: a field whose inference is a PURE
+    // single-call-signature function type — `this.resolve = resolve`
+    // inside a `new Promise(...)` executor (ioredis's
+    // `built/Command.js:303`, and every deferred/latch/settler shape
+    // after it).
+    //
+    // This is the one shape whose fence had no followable remedy. The
+    // message below says "assign it unconditionally at the top of the
+    // constructor"; the value here IS the executor's own parameter, which
+    // does not exist at the top of the constructor, so the line cannot be
+    // moved. Measured, the nearest followable spellings each stop
+    // somewhere else: a bare `this.resolve = undefined` placeholder makes
+    // the slot a checked-dynamic one through the TOP-LEVEL scan and then
+    // refuses the CALL, and only a JSDoc `@type` on the placeholder
+    // reached a binary. A diagnostic whose advice cannot be followed is
+    // worse than the refusal it replaces.
+    //
+    // The representation is the checked-dynamic box, not an
+    // undefined-armed func union, and that is load-bearing: the box
+    // ALREADY carries undefined as a value, so a read before the write
+    // answers `undefined` exactly like Node (p02's `before: undefined`),
+    // and `dynCall` — the same boundary an implicit-any JS callee uses —
+    // validates the callee and throws Node's catchable
+    // "<name> is not a function" when the write never ran. The armed-union
+    // spelling was built first and refused every call site instead.
+    //
+    // dynBoxIsFaithful above deliberately answers false for call
+    // signatures, and that stays right for OBJECT shapes that are also
+    // callable (the chalk hybrid, which has no representation). A pure
+    // function type is not one of those: `dynConvertible` boxes it as the
+    // checked-dynamic tree's callable kind with identity preserved.
+    // Anything isDeferredCallbackField does not admit — a Map, a Set, a
+    // Date, an overloaded, generic, or rest-parameter signature, a union
+    // carrying any arm that is neither a callback nor absent — falls
+    // through unchanged to the fences below, so the method-table refusal
+    // beneath this one keeps every site it had.
+    if (mapped === null && isDeferredCallbackField(L, site, t)) return DYN;
     if (!mapped || mapped.kind === "void") return null;
     if (mapped.kind === "dyn") return mapped;
     const byKey = new Map<string, IrType>();
@@ -1091,13 +1191,33 @@ export interface GenericClassInfo {
    *    is inferred FROM its assignments, so an undefined arm in the
    *    checker's own answer says the source assigns undefined somewhere;
    *    the arm can no longer tell absence from that write. */
-  function undefArmIsAbsenceOnly(L: Lowerer, p: ts.Symbol, armed: IrType): boolean {
+  function undefArmIsAbsenceOnly(L: Lowerer, p: ts.Symbol, armed: IrType, site: ts.Node): boolean {
+    // Clause 3 first, because it is the one clause every arm needs: a name
+    // some assignment ANYWHERE can store undefined into can never tell
+    // absence from that write.
+    const written = undefWrittenPropNames(L);
+    if (written.has("*") || written.has(p.name)) return false;
+    // THE DEFERRED-CALLBACK SLOT, and the one place a checked-dynamic field
+    // may join this set. The exclusion above it is right about the
+    // population it was written for — in an implicit-`any` field
+    // (`this._connectionCallback = callback`) `undefined` is a dyn KIND
+    // that an explicit `obj.connect(undefined)` writes just as the
+    // initializer does, and nothing distinguishes them. A field whose whole
+    // inference is a FUNCTION TYPE is not that field: every value the
+    // checker admits in the slot is callable, so a dyn `undefined` there
+    // cannot be a value the source stored — and the name scan above still
+    // takes the name away the moment any assignment in the program proves
+    // otherwise. Measured both ways: the never-written slot stops printing
+    // (Node omits the key), and a program that really does write
+    // `a.cb = undefined` keeps printing it.
+    if (armed.kind === "dyn") {
+      return isDeferredCallbackField(L, site, L.checker.getTypeOfSymbol(p));
+    }
     if (armed.kind !== "union") return false;
     if (L.armTag(armed.unionId, UNDEFINED_T) < 0) return false;
     const pre = L.mapTypeOf(L.checker.getTypeOfSymbol(p));
     if (pre === null || pre.kind === "dyn" || pre.kind === "void") return false;
-    const written = undefWrittenPropNames(L);
-    return !written.has("*") && !written.has(p.name);
+    return true;
   }
 
 /** Every property NAME the program can assign an undefined value to, over
@@ -1126,8 +1246,18 @@ export interface GenericClassInfo {
     if (hit) return hit;
     const names = new Set<string>();
     const rhsMayBeUndefined = (rhs: ts.Expression): boolean => {
-      const mapped = L.mapTypeOf(L.checker.getBaseTypeOfLiteralType(L.checker.getTypeAtLocation(rhs)));
-      if (mapped === null) return true;
+      const rhsT = L.checker.getBaseTypeOfLiteralType(L.checker.getTypeAtLocation(rhs));
+      const mapped = L.mapTypeOf(rhsT);
+      // An unmapped right-hand side is unknown to this scan and counts as
+      // possibly-undefined — with ONE exception, and it is not a relaxation
+      // of the over-approximation but a correction to it: a FUNCTION VALUE
+      // is never `undefined`, whatever its signature does. Without this the
+      // assignment that DECLARES a callback field disqualified its own
+      // name (an implicit-any signature does not map), so no
+      // deferred-callback slot could ever be absence-tracked and inspect
+      // kept printing a key Node omits. Only the pure single-signature
+      // shape counts; every other unmapped RHS still disqualifies.
+      if (mapped === null) return dynFallbackType(L, rhs, rhsT)?.kind !== "func";
       if (mapped.kind === "dyn" || mapped.kind === "undefinedT" || mapped.kind === "void") return true;
       return mapped.kind === "union" && L.armTag(mapped.unionId, UNDEFINED_T) >= 0;
     };
@@ -3103,12 +3233,12 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
           // TypeScript classes keep the loud fence too: an annotated
           // program can spell `T | undefined` itself.
           if (isJsSourceFile(decl.getSourceFile())) {
-            const armed = undefArmedFieldType(L, p);
+            const armed = undefArmedFieldType(L, p, site);
             if (armed !== null) {
               fields.set(p.name, armed);
               fieldOrder.push({ name: p.name, type: armed, initializer: undefined });
               collectedFields.add(p.name);
-              if (undefArmIsAbsenceOnly(L, p, armed)) absentTrackedFields.add(p.name);
+              if (undefArmIsAbsenceOnly(L, p, armed, site)) absentTrackedFields.add(p.name);
               continue;
             }
           }
@@ -3125,6 +3255,28 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
               "SC1090",
               site,
               `fields holding a '${L.checker.typeToString(propT)}' the inference cannot compile (moving the assignment to the constructor's top level does NOT help — that slot would be checked-dynamic, which carries no method table for this builtin; annotate the element/key types with a JSDoc '@type' on the declaring assignment so the container itself compiles)`,
+            );
+          }
+          // THE REMEDY HAS TO BE ONE THAT WORKS, and which one works
+          // depends on WHERE the write is. Both arms below were compiled
+          // and run against node v25.9.0 before being written here.
+          //
+          // Inside a CALLBACK there is no move to make: the value is the
+          // callback's own parameter. The deferred-callback rule above now
+          // COMPILES that shape outright; what still lands here is the
+          // same position with an inference that rule declines — a rest
+          // parameter, a signature carrying properties, a field the source
+          // assigns two unrelated shapes. For those a JSDoc '@type' on a
+          // top-level pre-initialisation is what reaches a binary
+          // (measured: with it both shapes match node byte for byte;
+          // without it the reader moves the line, lands in a
+          // checked-dynamic slot, and meets a second fence about the CALL
+          // instead — which is the afternoon this diagnostic used to cost).
+          if (assignedInsideCallback(site)) {
+            L.unsupported(
+              "SC1090",
+              site,
+              `fields assigned inside a callback rather than at the constructor's top level ('this.${p.name}' is undefined until the callback runs, and when its value comes from the callback's own parameters the assignment cannot be moved out at all — give the field a static type instead: a JSDoc '@type' on a 'this.${p.name} = undefined' at the top of the constructor)`,
             );
           }
           L.unsupported(

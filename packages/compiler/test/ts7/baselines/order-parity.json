@@ -9801,6 +9801,30 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/7315-promise-executor-settler-fields.js": {
+   "order": [
+    "<repo>/tests/corpus/7315-promise-executor-settler-fields.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/7316-settler-field-read-before-write.js": {
+   "order": [
+    "<repo>/tests/corpus/7316-settler-field-read-before-write.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/7317-settler-field-identity-and-subclass.js": {
+   "order": [
+    "<repo>/tests/corpus/7317-settler-field-identity-and-subclass.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/7318-settler-field-absence-in-inspect.js": {
+   "order": [
+    "<repo>/tests/corpus/7318-settler-field-absence-in-inspect.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/750-cycle-closure-box.ts": {
    "order": [
     "<repo>/tests/corpus/750-cycle-closure-box.ts"
