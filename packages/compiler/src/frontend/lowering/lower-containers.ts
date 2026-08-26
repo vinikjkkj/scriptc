@@ -3499,8 +3499,29 @@ function lowerOptionalDefaultArg(
     if (L.chainBlocked(access, call)) return null;
     const name = access.name.text;
     if (!MAP_METHODS.has(name) && !MAP_ITER_METHODS.has(name)) return null;
-    const receiverIr = L.mapTypeOf(L.typeOf(access.expression));
-    if (receiverIr?.kind !== "map") return null;
+    let receiverIr = L.mapTypeOf(L.typeOf(access.expression));
+    // JavaScript has no type-argument syntax, so `const m = new Map()`
+    // types `Map<any, any>` — unmappable — however the program goes on to
+    // use it. The VALUE may still have lowered as a real Map: the
+    // new-Map probe reads the key and value types off the binding's own
+    // uses (inferContainerTypeFromUses), and `const` adopts its
+    // initializer's type. The lowered receiver's type is then the honest
+    // dispatch key, exactly as it already is for the identity-Set idiom
+    // in lowerSetMethodCall below.
+    //
+    // `inferred` records that the CHECKER could not name this container.
+    // Every read below whose result type the checker supplies has to
+    // derive it from the receiver instead: `m.get(k)` types `any` here,
+    // and `any` is not the `V | undefined` the lowering needs.
+    let inferred = false;
+    if (receiverIr === null && isJsSourceFile(access.getSourceFile())) {
+      const probed = probeLower(L, access.expression);
+      if (probed?.type.kind === "map") { receiverIr = probed.type; inferred = true; }
+    }
+    if (receiverIr?.kind !== "map") {
+      if (receiverIr === null) untypedContainerUseFence(L, access, "map");
+      return null;
+    }
     if (!L.isStdlibMember(access)) return null;
     const loc = locOf(call);
     const receiver = L.lowerExpr(access.expression);
@@ -3543,7 +3564,17 @@ function lowerOptionalDefaultArg(
       // The dyn result needs no union: `undefined` is a VALUE of the
       // checked-dynamic tree (the interned immortal singleton), so a miss
       // answers it directly and the arm/tag machinery has nothing to do.
-      const type = L.irTypeOf(call);
+      // An INFERRED container has no checker type to read the result off
+      // — `m.get(k)` types `any` on a `Map<any, any>` receiver, and `any`
+      // is neither the union nor the dyn the two clauses below admit. The
+      // value type the inference proved is the honest source: Node's miss
+      // answers `undefined`, so the result is `V | undefined`, the same
+      // shape the checker hands an annotated map.
+      const type = inferred
+        ? (receiverIr.value.kind === "dyn"
+            ? receiverIr.value
+            : L.withUndefinedArmOf(receiverIr.value) ?? L.irTypeOf(call))
+        : L.irTypeOf(call);
       if (type.kind !== "union" && !(type.kind === "dyn" && receiverIr.value.kind === "dyn")) {
         L.badType(call, L.typeOf(call));
       }
@@ -3915,6 +3946,83 @@ const MAP_ITER_METHODS = new Set(["keys", "values", "entries"]);
     };
   }
 
+/** The stdlib containers whose WHOLE VALUE is a method table the
+   * checked-dynamic tree does not carry, keyed by the display word for a
+   * diagnostic. A dyn box holds JSON-shaped data plus functions, promises
+   * and handles; it has no `set`, no `add`, no `size`. */
+  const UNTYPED_CONTAINER_NAMES: ReadonlyMap<string, "map" | "set"> = new Map<string, "map" | "set">([
+    ["Map", "map"], ["WeakMap", "map"], ["Set", "set"], ["WeakSet", "set"],
+  ]);
+
+/** The RECEIVER's checker type names a standard-library Map/Set that this
+   * build could not give a static container to — `Map<any, any>`, the type
+   * every JavaScript `new Map()` has, because JS carries no type-argument
+   * syntax and the element types never resolved past `any`.
+   *
+   * Without this the call falls out of the container lowering, the dyn
+   * member walk takes over, and the box — a plain SCR_DYN_OBJ with no
+   * entry for `set` — answers V8's own `m.set is not a function`: the
+   * mis-answer for a method Node HAS, which is the one trade this project
+   * never makes. `scr_dyn_bytes_proto_name` exists to prevent exactly this
+   * one kind over, and the SCR_DYN_MAP read arm names it "the OBJINST
+   * arm's silent wrong answer".
+   *
+   * A NAMED refusal instead, and the remedy is one this block RAN before
+   * shipping it: a JSDoc `@type` on the declaring assignment compiles the
+   * container for real (corpus j01/j02). The refusal is reached only where
+   * the program actually OPERATES on the value — a map that is constructed
+   * and never touched never gets here, which is the whole point of the
+   * escape hatch this sits in front of and why it stays a MATCH.
+   *
+   * `noLowering`, not a hard error: in the default lane an unlowerable
+   * statement becomes a runtime throw, so an unreached branch costs
+   * nothing and a reached one says exactly what it hit. */
+  function untypedContainerUseFence(
+    L: Lowerer, access: ts.PropertyAccessExpression, family: "map" | "set",
+  ): void {
+    if (!isJsSourceFile(access.getSourceFile())) return;
+    if (!L.isStdlibMember(access)) return;
+    const recvT = L.typeOf(access.expression);
+    const arms: readonly ts.Type[] = recvT.isUnionType() ? recvT.getTypes() : [recvT];
+    let word: string | null = null;
+    for (const a of arms) {
+      const sym = a.getSymbol();
+      if (sym === undefined) continue;
+      // The receiver must be a container of THIS call path's family.
+      // `has` is spelled by both surfaces, so the Map path sees Set
+      // receivers too — refusing there would refuse a call the Set path
+      // goes on to lower, which is how this fence's first draft turned a
+      // correctly annotated `/** @type {Set<string>} */` into a runtime
+      // throw (corpus j02, caught by compiling it).
+      if (UNTYPED_CONTAINER_NAMES.get(sym.name) !== family) continue;
+      // Only the standard library's own declaration of the name counts —
+      // a user's `class Map` is not this, exactly as the container
+      // diagnostics decide it elsewhere.
+      const stdlib = L.checker
+        .declarationsOf(sym)
+        .some((d) =>
+          (ts.isInterfaceDeclaration(d) || ts.isClassDeclaration(d)) &&
+          L.isStdlibFile(d.getSourceFile()),
+        );
+      if (stdlib) { word = sym.name; break; }
+    }
+    if (word === null) return;
+    L.noLowering(
+      `'${L.checker.typeToString(recvT)}.${access.name.text}'`,
+      access,
+      `JavaScript has no type-argument syntax, so this ${word}'s element types never ` +
+        `resolved past 'any' and it has no static container — the value carries no method table, ` +
+        `and answering '${access.name.text}' off it would be a wrong answer for a method Node has. ` +
+        `Annotate the declaration with a JSDoc '@type' (/** @type {${
+          family === "map" ? "Map<string, number>" : "Set<string>"
+        }} */ on the line above), which gives the container a real static representation. ` +
+        `Without an annotation the element types are read from the binding's own ${
+          family === "map" ? "set()" : "add()"
+        } calls, and that only reaches a binding every one of whose uses is a direct member ` +
+        `operation on it`,
+    );
+  }
+
 /** Ambient Set method calls — Map's lowering with the value slot gone.
    * `add`/`has`/`delete`/`clear` lower to setIntrinsic; `forEach` desugars
    * like Map's over the shared iteration primitives. Null when this isn't
@@ -3933,7 +4041,10 @@ const MAP_ITER_METHODS = new Set(["keys", "values", "entries"]);
       const probed = probeLower(L, access.expression);
       if (probed?.type.kind === "set") receiverIr = probed.type;
     }
-    if (receiverIr?.kind !== "set") return null;
+    if (receiverIr?.kind !== "set") {
+      if (receiverIr === null) untypedContainerUseFence(L, access, "set");
+      return null;
+    }
     if (!L.isStdlibMember(access)) return null;
     const loc = locOf(call);
     const receiver = L.lowerExpr(access.expression);
