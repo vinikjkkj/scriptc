@@ -1,0 +1,182 @@
+{
+ "entry": "G:\\blocks\\wamvoip\\lab\\app\\pkgs\\wam\\index.ts",
+ "ms": 1077600,
+ "provenance": [
+  "zapo-js@1.6.2 <- 250f9af5229a",
+  "argo-codec@0.2.1: no provenance attestation published; island path used",
+  "@vinikjkkj/wa-wam@2.3000.1041713829-1ec0d3b: no source mapping for '@vinikjkkj/wa-wam' (published target: index.js); island path used"
+ ],
+ "preflightFailed": false,
+ "stats": {
+  "statements": 46013,
+  "failed": 14,
+  "island": 0
+ },
+ "npmStatic": null,
+ "sites": [
+  {
+   "code": "SC2013",
+   "file": "G:/blocks/wamvoip/lab/app/pkgs/wam/registry.ts",
+   "line": null,
+   "col": null,
+   "message": "importing '@vinikjkkj/wa-wam' requires the embedded dynamic engine, which this build does not include — the package's implementation runs there",
+   "hint": "build with --dynamic to run npm package code in the embedded engine (adds ~620KB to the binary); static builds never include it"
+  },
+  {
+   "code": "SC2013",
+   "file": "G:/blocks/wamvoip/lab/app/pkgs/wam/globals.ts",
+   "line": null,
+   "col": null,
+   "message": "importing '@vinikjkkj/wa-wam' requires the embedded dynamic engine, which this build does not include — the package's implementation runs there",
+   "hint": "build with --dynamic to run npm package code in the embedded engine (adds ~620KB to the binary); static builds never include it"
+  },
+  {
+   "code": "SC2013",
+   "file": "G:/blocks/wamvoip/lab/app/pkgs/wam/wire/encoder.ts",
+   "line": null,
+   "col": null,
+   "message": "importing '@vinikjkkj/wa-wam' requires the embedded dynamic engine, which this build does not include — the package's implementation runs there",
+   "hint": "build with --dynamic to run npm package code in the embedded engine (adds ~620KB to the binary); static builds never include it"
+  },
+  {
+   "code": "SC2013",
+   "file": "G:/blocks/wamvoip/lab/app/pkgs/wam/wire/WamBatch.ts",
+   "line": null,
+   "col": null,
+   "message": "importing '@vinikjkkj/wa-wam' requires the embedded dynamic engine, which this build does not include — the package's implementation runs there",
+   "hint": "build with --dynamic to run npm package code in the embedded engine (adds ~620KB to the binary); static builds never include it"
+  },
+  {
+   "code": "SC2013",
+   "file": "G:/blocks/wamvoip/lab/app/pkgs/wam/WaWamCoordinator.ts",
+   "line": null,
+   "col": null,
+   "message": "importing '@vinikjkkj/wa-wam' requires the embedded dynamic engine, which this build does not include — the package's implementation runs there",
+   "hint": "build with --dynamic to run npm package code in the embedded engine (adds ~620KB to the binary); static builds never include it"
+  },
+  {
+   "code": "SC2020",
+   "file": "G:/blocks/wamvoip/prov/250f9af5229a545eec28ddbd3e8774a397cdb0bb/src/client/WaClient.ts",
+   "line": null,
+   "col": null,
+   "message": "'emit('debug_transport_node_in') with 1 arguments where the event's tuple has 0' is part of the standard library types but has no scriptc lowering yet",
+   "hint": "every emit site of one event name must supply the same argument tuple (listeners may declare a prefix)"
+  },
+  {
+   "code": "SC2020",
+   "file": "G:/blocks/wamvoip/prov/250f9af5229a545eec28ddbd3e8774a397cdb0bb/src/client/WaClient.ts",
+   "line": null,
+   "col": null,
+   "message": "'emit('debug_transport_node_out') with 1 arguments where the event's tuple has 0' is part of the standard library types but has no scriptc lowering yet",
+   "hint": "every emit site of one event name must supply the same argument tuple (listeners may declare a prefix)"
+  },
+  {
+   "code": "SC2013",
+   "file": "G:/blocks/wamvoip/lab/app/pkgs/wam/registry.ts",
+   "line": null,
+   "col": null,
+   "message": "values from the '@vinikjkkj/wa-wam' package run in the embedded dynamic engine, which this build does not include",
+   "hint": "build with --dynamic to run npm package code in the embedded engine (adds ~620KB to the binary); static builds never include it"
+  },
+  {
+   "code": "SC2013",
+   "file": "G:/blocks/wamvoip/lab/app/pkgs/wam/registry.ts",
+   "line": null,
+   "col": null,
+   "message": "values from the '@vinikjkkj/wa-wam' package run in the embedded dynamic engine, which this build does not include",
+   "hint": "build with --dynamic to run npm package code in the embedded engine (adds ~620KB to the binary); static builds never include it"
+  },
+  {
+   "code": "SC2020",
+   "file": "G:/blocks/wamvoip/lab/app/pkgs/wam/registry.ts",
+   "line": null,
+   "col": null,
+   "message": "'Number of unknown values' is part of the standard library types but has no scriptc lowering yet",
+   "hint": "the type checker sees the full standard library, but only the supported surface compiles (https://scriptc.dev/limitations)"
+  },
+  {
+   "code": "SC2013",
+   "file": "G:/blocks/wamvoip/lab/app/pkgs/wam/globals.ts",
+   "line": null,
+   "col": null,
+   "message": "values from the '@vinikjkkj/wa-wam' package run in the embedded dynamic engine, which this build does not include",
+   "hint": "build with --dynamic to run npm package code in the embedded engine (adds ~620KB to the binary); static builds never include it"
+  },
+  {
+   "code": "SC2012",
+   "file": "G:/blocks/wamvoip/lab/app/pkgs/wam/WaWamUploader.ts",
+   "line": null,
+   "col": null,
+   "message": "'Number.parseInt' runs in the embedded dynamic engine, which this build does not include",
+   "hint": "build with --dynamic to run this call in the embedded engine (adds ~620KB to the binary); static builds never include it"
+  },
+  {
+   "code": "SC2013",
+   "file": "G:/blocks/wamvoip/lab/app/pkgs/wam/wire/WamBatch.ts",
+   "line": null,
+   "col": null,
+   "message": "values from the '@vinikjkkj/wa-wam' package run in the embedded dynamic engine, which this build does not include",
+   "hint": "build with --dynamic to run npm package code in the embedded engine (adds ~620KB to the binary); static builds never include it"
+  },
+  {
+   "code": "SC2013",
+   "file": "G:/blocks/wamvoip/lab/app/pkgs/wam/wire/WamBatch.ts",
+   "line": null,
+   "col": null,
+   "message": "values from the '@vinikjkkj/wa-wam' package run in the embedded dynamic engine, which this build does not include",
+   "hint": "build with --dynamic to run npm package code in the embedded engine (adds ~620KB to the binary); static builds never include it"
+  },
+  {
+   "code": "SC2020",
+   "file": "G:/blocks/wamvoip/lab/app/pkgs/wam/synthetic/random.ts",
+   "line": null,
+   "col": null,
+   "message": "'Uint8Array.from' is part of the standard library types but has no scriptc lowering yet",
+   "hint": "the type checker sees the full standard library, but only the supported surface compiles (https://scriptc.dev/limitations)"
+  },
+  {
+   "code": "SC2013",
+   "file": "G:/blocks/wamvoip/lab/app/pkgs/wam/wire/encoder.ts",
+   "line": null,
+   "col": null,
+   "message": "values from the '@vinikjkkj/wa-wam' package run in the embedded dynamic engine, which this build does not include",
+   "hint": "build with --dynamic to run npm package code in the embedded engine (adds ~620KB to the binary); static builds never include it"
+  },
+  {
+   "code": "SC2013",
+   "file": "G:/blocks/wamvoip/lab/app/pkgs/wam/wire/encoder.ts",
+   "line": null,
+   "col": null,
+   "message": "values from the '@vinikjkkj/wa-wam' package run in the embedded dynamic engine, which this build does not include",
+   "hint": "build with --dynamic to run npm package code in the embedded engine (adds ~620KB to the binary); static builds never include it"
+  },
+  {
+   "code": "SC2013",
+   "file": "G:/blocks/wamvoip/lab/app/pkgs/wam/WaWamCoordinator.ts",
+   "line": null,
+   "col": null,
+   "message": "values from the '@vinikjkkj/wa-wam' package run in the embedded dynamic engine, which this build does not include (instantiating 'commit' with <string>)",
+   "hint": "build with --dynamic to run npm package code in the embedded engine (adds ~620KB to the binary); static builds never include it"
+  }
+ ],
+ "runtimeFences": [
+  {
+   "code": "SC2020",
+   "file": "G:/blocks/wamvoip/prov/250f9af5229a545eec28ddbd3e8774a397cdb0bb/spec/proto/index.js",
+   "line": null,
+   "col": null,
+   "message": "'require() with a run-time specifier' is part of the standard library types but has no scriptc lowering yet",
+   "hint": "the compiled module graph is fixed at build time: a specifier nothing installed resolves compiles to Node's MODULE_NOT_FOUND, and every other one needs the module's exports as a value"
+  },
+  {
+   "code": "SC1090",
+   "file": "G:/blocks/wamvoip/prov/250f9af5229a545eec28ddbd3e8774a397cdb0bb/spec/proto/index.js",
+   "line": null,
+   "col": null,
+   "message": "constructing values other than classes declared in the program is not supported yet",
+   "hint": null
+  }
+ ],
+ "ice": [],
+ "unreachedFailed": 31
+}

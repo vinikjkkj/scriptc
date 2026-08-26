@@ -1,0 +1,31 @@
+{
+ "entry": "G:\\blocks\\wamvoip\\lab\\app\\drivers\\wawam-probe.ts",
+ "ms": 9995,
+ "provenance": [],
+ "preflightFailed": true,
+ "stats": {
+  "statements": 0,
+  "failed": 0,
+  "island": 0
+ },
+ "npmStatic": [
+  {
+   "package": "@vinikjkkj/wa-wam",
+   "status": "fallback",
+   "detail": "the program does not typecheck against its inferred surface (type-only declarations and .d.ts type guards have no JS value inference can chase) — the package serves from the island instead"
+  }
+ ],
+ "sites": [
+  {
+   "code": "SC0001",
+   "file": "G:/blocks/wamvoip/lab/app/drivers/wawam-probe.ts",
+   "start": 93,
+   "end": 104,
+   "message": "Property 'headerMagic' does not exist on type 'WaWamWireFormat'.",
+   "hint": null
+  }
+ ],
+ "runtimeFences": [],
+ "ice": [],
+ "unreachedFailed": null
+}

@@ -1,0 +1,47 @@
+START 12:59:16 drivers/wam-entry-2.ts -> wam-entry-2
+FLAGS --best-effort --provenance-sources
+provenance: zapo-js@1.6.2 ← https://github.com/vinikjkkj/zapo@refs/tags/v1.6.2 @ 250f9af5229a (source compiles statically)
+provenance: argo-codec@0.2.1: no provenance attestation published; island path used
+provenance: @vinikjkkj/wa-wam@2.3000.1041713829-1ec0d3b: no source mapping for '@vinikjkkj/wa-wam' (published target: index.js); island path used
+G:/blocks/wamvoip/lab/app/pkgs/wam/globals.ts:1:1 - error SC2013: importing '@vinikjkkj/wa-wam' requires the embedded dynamic engine, which this build does not include — the package's implementation runs there
+
+  1 | import { WA_WAM_GLOBALS, type WaWamChannel, type WaWamGlobalName } from '@vinikjkkj/wa-wam'
+    | ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  2 | import { WA_VERSION } from 'zapo-js'
+
+  hint: build with --dynamic to run npm package code in the embedded engine (adds ~620KB to the binary); static builds never include it
+
+G:/blocks/wamvoip/lab/app/pkgs/wam/registry.ts:1:1 - error SC2013: importing '@vinikjkkj/wa-wam' requires the embedded dynamic engine, which this build does not include — the package's implementation runs there
+
+  1 | import {
+    | ^~~~~~~~
+  2 |     WA_WAM_ENUMS,
+
+  hint: build with --dynamic to run npm package code in the embedded engine (adds ~620KB to the binary); static builds never include it
+
+G:/blocks/wamvoip/lab/app/pkgs/wam/WaWamCoordinator.ts:1:1 - error SC2013: importing '@vinikjkkj/wa-wam' requires the embedded dynamic engine, which this build does not include — the package's implementation runs there
+
+  1 | import {
+    | ^~~~~~~~
+  2 |     WA_WAM_BUFFER_CONSTANTS,
+
+  hint: build with --dynamic to run npm package code in the embedded engine (adds ~620KB to the binary); static builds never include it
+
+G:/blocks/wamvoip/lab/app/pkgs/wam/wire/encoder.ts:1:1 - error SC2013: importing '@vinikjkkj/wa-wam' requires the embedded dynamic engine, which this build does not include — the package's implementation runs there
+
+  1 | import { WA_WAM_WIRE_FORMAT } from '@vinikjkkj/wa-wam'
+    | ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  2 | import { TEXT_ENCODER } from 'zapo-js/util'
+
+  hint: build with --dynamic to run npm package code in the embedded engine (adds ~620KB to the binary); static builds never include it
+
+G:/blocks/wamvoip/lab/app/pkgs/wam/wire/WamBatch.ts:1:1 - error SC2013: importing '@vinikjkkj/wa-wam' requires the embedded dynamic engine, which this build does not include — the package's implementation runs there
+
+  1 | import {
+    | ^~~~~~~~
+  2 |     WA_WAM_CHANNEL_WIRE_CODES,
+
+  hint: build with --dynamic to run npm package code in the embedded engine (adds ~620KB to the binary); static builds never include it
+
+5 errors.
+BUILD_EXIT=1 13:16:23

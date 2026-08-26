@@ -1,0 +1,777 @@
+{
+ "entry": "G:\\blocks\\wamvoip\\lab\\app\\pkgs\\wam\\index.ts",
+ "ms": 27592,
+ "provenance": [],
+ "preflightFailed": false,
+ "stats": {
+  "statements": 130,
+  "failed": 73,
+  "island": 0
+ },
+ "npmStatic": null,
+ "sites": [
+  {
+   "code": "SC2013",
+   "file": "G:/blocks/wamvoip/lab/app/pkgs/wam/registry.ts",
+   "line": null,
+   "col": null,
+   "message": "importing '@vinikjkkj/wa-wam' requires the embedded dynamic engine, which this build does not include — the package's implementation runs there",
+   "hint": "build with --dynamic to run npm package code in the embedded engine (adds ~620KB to the binary); static builds never include it"
+  },
+  {
+   "code": "SC2013",
+   "file": "G:/blocks/wamvoip/lab/app/pkgs/wam/registry.ts",
+   "line": null,
+   "col": null,
+   "message": "importing 'zapo-js' requires the embedded dynamic engine, which this build does not include — the package's implementation runs there",
+   "hint": "build with --dynamic to run npm package code in the embedded engine (adds ~620KB to the binary); static builds never include it"
+  },
+  {
+   "code": "SC2013",
+   "file": "G:/blocks/wamvoip/lab/app/pkgs/wam/globals.ts",
+   "line": null,
+   "col": null,
+   "message": "importing '@vinikjkkj/wa-wam' requires the embedded dynamic engine, which this build does not include — the package's implementation runs there",
+   "hint": "build with --dynamic to run npm package code in the embedded engine (adds ~620KB to the binary); static builds never include it"
+  },
+  {
+   "code": "SC2013",
+   "file": "G:/blocks/wamvoip/lab/app/pkgs/wam/globals.ts",
+   "line": null,
+   "col": null,
+   "message": "importing 'zapo-js' requires the embedded dynamic engine, which this build does not include — the package's implementation runs there",
+   "hint": "build with --dynamic to run npm package code in the embedded engine (adds ~620KB to the binary); static builds never include it"
+  },
+  {
+   "code": "SC2013",
+   "file": "G:/blocks/wamvoip/lab/app/pkgs/wam/globals.ts",
+   "line": null,
+   "col": null,
+   "message": "importing 'zapo-js' requires the embedded dynamic engine, which this build does not include — the package's implementation runs there",
+   "hint": "build with --dynamic to run npm package code in the embedded engine (adds ~620KB to the binary); static builds never include it"
+  },
+  {
+   "code": "SC2013",
+   "file": "G:/blocks/wamvoip/lab/app/pkgs/wam/send-parse.ts",
+   "line": null,
+   "col": null,
+   "message": "importing 'zapo-js' requires the embedded dynamic engine, which this build does not include — the package's implementation runs there",
+   "hint": "build with --dynamic to run npm package code in the embedded engine (adds ~620KB to the binary); static builds never include it"
+  },
+  {
+   "code": "SC2013",
+   "file": "G:/blocks/wamvoip/lab/app/pkgs/wam/send-parse.ts",
+   "line": null,
+   "col": null,
+   "message": "importing 'zapo-js' requires the embedded dynamic engine, which this build does not include — the package's implementation runs there",
+   "hint": "build with --dynamic to run npm package code in the embedded engine (adds ~620KB to the binary); static builds never include it"
+  },
+  {
+   "code": "SC2013",
+   "file": "G:/blocks/wamvoip/lab/app/pkgs/wam/synthetic/random.ts",
+   "line": null,
+   "col": null,
+   "message": "importing 'zapo-js' requires the embedded dynamic engine, which this build does not include — the package's implementation runs there",
+   "hint": "build with --dynamic to run npm package code in the embedded engine (adds ~620KB to the binary); static builds never include it"
+  },
+  {
+   "code": "SC2013",
+   "file": "G:/blocks/wamvoip/lab/app/pkgs/wam/synthetic/WaWamSyntheticUi.ts",
+   "line": null,
+   "col": null,
+   "message": "importing 'zapo-js' requires the embedded dynamic engine, which this build does not include — the package's implementation runs there",
+   "hint": "build with --dynamic to run npm package code in the embedded engine (adds ~620KB to the binary); static builds never include it"
+  },
+  {
+   "code": "SC2013",
+   "file": "G:/blocks/wamvoip/lab/app/pkgs/wam/WaWamAutoEmitter.ts",
+   "line": null,
+   "col": null,
+   "message": "importing 'zapo-js' requires the embedded dynamic engine, which this build does not include — the package's implementation runs there",
+   "hint": "build with --dynamic to run npm package code in the embedded engine (adds ~620KB to the binary); static builds never include it"
+  },
+  {
+   "code": "SC2013",
+   "file": "G:/blocks/wamvoip/lab/app/pkgs/wam/WaWamAutoEmitter.ts",
+   "line": null,
+   "col": null,
+   "message": "importing 'zapo-js' requires the embedded dynamic engine, which this build does not include — the package's implementation runs there",
+   "hint": "build with --dynamic to run npm package code in the embedded engine (adds ~620KB to the binary); static builds never include it"
+  },
+  {
+   "code": "SC2013",
+   "file": "G:/blocks/wamvoip/lab/app/pkgs/wam/WaWamAutoEmitter.ts",
+   "line": null,
+   "col": null,
+   "message": "importing 'zapo-js' requires the embedded dynamic engine, which this build does not include — the package's implementation runs there",
+   "hint": "build with --dynamic to run npm package code in the embedded engine (adds ~620KB to the binary); static builds never include it"
+  },
+  {
+   "code": "SC2013",
+   "file": "G:/blocks/wamvoip/lab/app/pkgs/wam/WaWamUploader.ts",
+   "line": null,
+   "col": null,
+   "message": "importing 'zapo-js' requires the embedded dynamic engine, which this build does not include — the package's implementation runs there",
+   "hint": "build with --dynamic to run npm package code in the embedded engine (adds ~620KB to the binary); static builds never include it"
+  },
+  {
+   "code": "SC2013",
+   "file": "G:/blocks/wamvoip/lab/app/pkgs/wam/WaWamUploader.ts",
+   "line": null,
+   "col": null,
+   "message": "importing 'zapo-js' requires the embedded dynamic engine, which this build does not include — the package's implementation runs there",
+   "hint": "build with --dynamic to run npm package code in the embedded engine (adds ~620KB to the binary); static builds never include it"
+  },
+  {
+   "code": "SC2013",
+   "file": "G:/blocks/wamvoip/lab/app/pkgs/wam/wire/binary-writer.ts",
+   "line": null,
+   "col": null,
+   "message": "importing 'zapo-js' requires the embedded dynamic engine, which this build does not include — the package's implementation runs there",
+   "hint": "build with --dynamic to run npm package code in the embedded engine (adds ~620KB to the binary); static builds never include it"
+  },
+  {
+   "code": "SC2013",
+   "file": "G:/blocks/wamvoip/lab/app/pkgs/wam/wire/encoder.ts",
+   "line": null,
+   "col": null,
+   "message": "importing '@vinikjkkj/wa-wam' requires the embedded dynamic engine, which this build does not include — the package's implementation runs there",
+   "hint": "build with --dynamic to run npm package code in the embedded engine (adds ~620KB to the binary); static builds never include it"
+  },
+  {
+   "code": "SC2013",
+   "file": "G:/blocks/wamvoip/lab/app/pkgs/wam/wire/encoder.ts",
+   "line": null,
+   "col": null,
+   "message": "importing 'zapo-js' requires the embedded dynamic engine, which this build does not include — the package's implementation runs there",
+   "hint": "build with --dynamic to run npm package code in the embedded engine (adds ~620KB to the binary); static builds never include it"
+  },
+  {
+   "code": "SC2013",
+   "file": "G:/blocks/wamvoip/lab/app/pkgs/wam/wire/WamBatch.ts",
+   "line": null,
+   "col": null,
+   "message": "importing '@vinikjkkj/wa-wam' requires the embedded dynamic engine, which this build does not include — the package's implementation runs there",
+   "hint": "build with --dynamic to run npm package code in the embedded engine (adds ~620KB to the binary); static builds never include it"
+  },
+  {
+   "code": "SC2013",
+   "file": "G:/blocks/wamvoip/lab/app/pkgs/wam/WaWamCoordinator.ts",
+   "line": null,
+   "col": null,
+   "message": "importing '@vinikjkkj/wa-wam' requires the embedded dynamic engine, which this build does not include — the package's implementation runs there",
+   "hint": "build with --dynamic to run npm package code in the embedded engine (adds ~620KB to the binary); static builds never include it"
+  },
+  {
+   "code": "SC2013",
+   "file": "G:/blocks/wamvoip/lab/app/pkgs/wam/WaWamCoordinator.ts",
+   "line": null,
+   "col": null,
+   "message": "importing 'zapo-js' requires the embedded dynamic engine, which this build does not include — the package's implementation runs there",
+   "hint": "build with --dynamic to run npm package code in the embedded engine (adds ~620KB to the binary); static builds never include it"
+  },
+  {
+   "code": "SC2013",
+   "file": "G:/blocks/wamvoip/lab/app/pkgs/wam/plugin.ts",
+   "line": null,
+   "col": null,
+   "message": "importing 'zapo-js' requires the embedded dynamic engine, which this build does not include — the package's implementation runs there",
+   "hint": "build with --dynamic to run npm package code in the embedded engine (adds ~620KB to the binary); static builds never include it"
+  },
+  {
+   "code": "SC2020",
+   "file": "G:/blocks/wamvoip/lab/app/pkgs/wam/synthetic/random.ts",
+   "line": null,
+   "col": null,
+   "message": "'Uint8Array.from' is part of the standard library types but has no scriptc lowering yet",
+   "hint": "the type checker sees the full standard library, but only the supported surface compiles (https://scriptc.dev/limitations)"
+  },
+  {
+   "code": "SC2013",
+   "file": "G:/blocks/wamvoip/lab/app/pkgs/wam/synthetic/random.ts",
+   "line": null,
+   "col": null,
+   "message": "values from the 'zapo-js' package run in the embedded dynamic engine, which this build does not include",
+   "hint": "build with --dynamic to run npm package code in the embedded engine (adds ~620KB to the binary); static builds never include it"
+  },
+  {
+   "code": "SC2013",
+   "file": "G:/blocks/wamvoip/lab/app/pkgs/wam/WaWamCoordinator.ts",
+   "line": null,
+   "col": null,
+   "message": "values from the 'zapo-js' package run in the embedded dynamic engine, which this build does not include",
+   "hint": "build with --dynamic to run npm package code in the embedded engine (adds ~620KB to the binary); static builds never include it"
+  },
+  {
+   "code": "SC1090",
+   "file": "G:/blocks/wamvoip/lab/app/pkgs/wam/synthetic/fabrications.ts",
+   "line": null,
+   "col": null,
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "hint": null
+  },
+  {
+   "code": "SC1090",
+   "file": "G:/blocks/wamvoip/lab/app/pkgs/wam/synthetic/fabrications.ts",
+   "line": null,
+   "col": null,
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "hint": null
+  },
+  {
+   "code": "SC1090",
+   "file": "G:/blocks/wamvoip/lab/app/pkgs/wam/synthetic/fabrications.ts",
+   "line": null,
+   "col": null,
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "hint": null
+  },
+  {
+   "code": "SC1090",
+   "file": "G:/blocks/wamvoip/lab/app/pkgs/wam/synthetic/fabrications.ts",
+   "line": null,
+   "col": null,
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "hint": null
+  },
+  {
+   "code": "SC1090",
+   "file": "G:/blocks/wamvoip/lab/app/pkgs/wam/synthetic/fabrications.ts",
+   "line": null,
+   "col": null,
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "hint": null
+  },
+  {
+   "code": "SC1090",
+   "file": "G:/blocks/wamvoip/lab/app/pkgs/wam/synthetic/fabrications.ts",
+   "line": null,
+   "col": null,
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "hint": null
+  },
+  {
+   "code": "SC1090",
+   "file": "G:/blocks/wamvoip/lab/app/pkgs/wam/synthetic/fabrications.ts",
+   "line": null,
+   "col": null,
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "hint": null
+  },
+  {
+   "code": "SC1090",
+   "file": "G:/blocks/wamvoip/lab/app/pkgs/wam/synthetic/fabrications.ts",
+   "line": null,
+   "col": null,
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "hint": null
+  },
+  {
+   "code": "SC1090",
+   "file": "G:/blocks/wamvoip/lab/app/pkgs/wam/synthetic/fabrications.ts",
+   "line": null,
+   "col": null,
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "hint": null
+  },
+  {
+   "code": "SC1090",
+   "file": "G:/blocks/wamvoip/lab/app/pkgs/wam/synthetic/fabrications.ts",
+   "line": null,
+   "col": null,
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "hint": null
+  },
+  {
+   "code": "SC1090",
+   "file": "G:/blocks/wamvoip/lab/app/pkgs/wam/synthetic/fabrications.ts",
+   "line": null,
+   "col": null,
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "hint": null
+  },
+  {
+   "code": "SC1090",
+   "file": "G:/blocks/wamvoip/lab/app/pkgs/wam/synthetic/fabrications.ts",
+   "line": null,
+   "col": null,
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "hint": null
+  },
+  {
+   "code": "SC1090",
+   "file": "G:/blocks/wamvoip/lab/app/pkgs/wam/synthetic/fabrications.ts",
+   "line": null,
+   "col": null,
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "hint": null
+  },
+  {
+   "code": "SC1090",
+   "file": "G:/blocks/wamvoip/lab/app/pkgs/wam/synthetic/fabrications.ts",
+   "line": null,
+   "col": null,
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "hint": null
+  },
+  {
+   "code": "SC1090",
+   "file": "G:/blocks/wamvoip/lab/app/pkgs/wam/synthetic/fabrications.ts",
+   "line": null,
+   "col": null,
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "hint": null
+  },
+  {
+   "code": "SC1090",
+   "file": "G:/blocks/wamvoip/lab/app/pkgs/wam/synthetic/fabrications.ts",
+   "line": null,
+   "col": null,
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "hint": null
+  },
+  {
+   "code": "SC1090",
+   "file": "G:/blocks/wamvoip/lab/app/pkgs/wam/synthetic/fabrications.ts",
+   "line": null,
+   "col": null,
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "hint": null
+  },
+  {
+   "code": "SC1090",
+   "file": "G:/blocks/wamvoip/lab/app/pkgs/wam/synthetic/fabrications.ts",
+   "line": null,
+   "col": null,
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "hint": null
+  },
+  {
+   "code": "SC1090",
+   "file": "G:/blocks/wamvoip/lab/app/pkgs/wam/synthetic/fabrications.ts",
+   "line": null,
+   "col": null,
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "hint": null
+  },
+  {
+   "code": "SC1090",
+   "file": "G:/blocks/wamvoip/lab/app/pkgs/wam/synthetic/fabrications.ts",
+   "line": null,
+   "col": null,
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "hint": null
+  },
+  {
+   "code": "SC1090",
+   "file": "G:/blocks/wamvoip/lab/app/pkgs/wam/synthetic/fabrications.ts",
+   "line": null,
+   "col": null,
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "hint": null
+  },
+  {
+   "code": "SC1090",
+   "file": "G:/blocks/wamvoip/lab/app/pkgs/wam/synthetic/fabrications.ts",
+   "line": null,
+   "col": null,
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "hint": null
+  },
+  {
+   "code": "SC1090",
+   "file": "G:/blocks/wamvoip/lab/app/pkgs/wam/synthetic/fabrications.ts",
+   "line": null,
+   "col": null,
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "hint": null
+  },
+  {
+   "code": "SC1090",
+   "file": "G:/blocks/wamvoip/lab/app/pkgs/wam/synthetic/fabrications.ts",
+   "line": null,
+   "col": null,
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "hint": null
+  },
+  {
+   "code": "SC1090",
+   "file": "G:/blocks/wamvoip/lab/app/pkgs/wam/synthetic/fabrications.ts",
+   "line": null,
+   "col": null,
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "hint": null
+  },
+  {
+   "code": "SC1090",
+   "file": "G:/blocks/wamvoip/lab/app/pkgs/wam/synthetic/fabrications.ts",
+   "line": null,
+   "col": null,
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "hint": null
+  },
+  {
+   "code": "SC1090",
+   "file": "G:/blocks/wamvoip/lab/app/pkgs/wam/synthetic/fabrications.ts",
+   "line": null,
+   "col": null,
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "hint": null
+  },
+  {
+   "code": "SC1090",
+   "file": "G:/blocks/wamvoip/lab/app/pkgs/wam/synthetic/fabrications.ts",
+   "line": null,
+   "col": null,
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "hint": null
+  },
+  {
+   "code": "SC1090",
+   "file": "G:/blocks/wamvoip/lab/app/pkgs/wam/synthetic/fabrications.ts",
+   "line": null,
+   "col": null,
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "hint": null
+  },
+  {
+   "code": "SC1090",
+   "file": "G:/blocks/wamvoip/lab/app/pkgs/wam/synthetic/fabrications.ts",
+   "line": null,
+   "col": null,
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "hint": null
+  },
+  {
+   "code": "SC1090",
+   "file": "G:/blocks/wamvoip/lab/app/pkgs/wam/synthetic/fabrications.ts",
+   "line": null,
+   "col": null,
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "hint": null
+  },
+  {
+   "code": "SC1090",
+   "file": "G:/blocks/wamvoip/lab/app/pkgs/wam/synthetic/fabrications.ts",
+   "line": null,
+   "col": null,
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "hint": null
+  },
+  {
+   "code": "SC1090",
+   "file": "G:/blocks/wamvoip/lab/app/pkgs/wam/synthetic/fabrications.ts",
+   "line": null,
+   "col": null,
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "hint": null
+  },
+  {
+   "code": "SC1090",
+   "file": "G:/blocks/wamvoip/lab/app/pkgs/wam/synthetic/fabrications.ts",
+   "line": null,
+   "col": null,
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "hint": null
+  },
+  {
+   "code": "SC1090",
+   "file": "G:/blocks/wamvoip/lab/app/pkgs/wam/synthetic/fabrications.ts",
+   "line": null,
+   "col": null,
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "hint": null
+  },
+  {
+   "code": "SC1090",
+   "file": "G:/blocks/wamvoip/lab/app/pkgs/wam/synthetic/fabrications.ts",
+   "line": null,
+   "col": null,
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "hint": null
+  },
+  {
+   "code": "SC1090",
+   "file": "G:/blocks/wamvoip/lab/app/pkgs/wam/synthetic/fabrications.ts",
+   "line": null,
+   "col": null,
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "hint": null
+  },
+  {
+   "code": "SC1090",
+   "file": "G:/blocks/wamvoip/lab/app/pkgs/wam/synthetic/fabrications.ts",
+   "line": null,
+   "col": null,
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "hint": null
+  },
+  {
+   "code": "SC1090",
+   "file": "G:/blocks/wamvoip/lab/app/pkgs/wam/synthetic/fabrications.ts",
+   "line": null,
+   "col": null,
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "hint": null
+  },
+  {
+   "code": "SC1090",
+   "file": "G:/blocks/wamvoip/lab/app/pkgs/wam/synthetic/fabrications.ts",
+   "line": null,
+   "col": null,
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "hint": null
+  },
+  {
+   "code": "SC1090",
+   "file": "G:/blocks/wamvoip/lab/app/pkgs/wam/synthetic/fabrications.ts",
+   "line": null,
+   "col": null,
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "hint": null
+  },
+  {
+   "code": "SC1090",
+   "file": "G:/blocks/wamvoip/lab/app/pkgs/wam/synthetic/fabrications.ts",
+   "line": null,
+   "col": null,
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "hint": null
+  },
+  {
+   "code": "SC1090",
+   "file": "G:/blocks/wamvoip/lab/app/pkgs/wam/synthetic/fabrications.ts",
+   "line": null,
+   "col": null,
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "hint": null
+  },
+  {
+   "code": "SC1090",
+   "file": "G:/blocks/wamvoip/lab/app/pkgs/wam/synthetic/fabrications.ts",
+   "line": null,
+   "col": null,
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "hint": null
+  },
+  {
+   "code": "SC1090",
+   "file": "G:/blocks/wamvoip/lab/app/pkgs/wam/synthetic/fabrications.ts",
+   "line": null,
+   "col": null,
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "hint": null
+  },
+  {
+   "code": "SC1090",
+   "file": "G:/blocks/wamvoip/lab/app/pkgs/wam/synthetic/fabrications.ts",
+   "line": null,
+   "col": null,
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "hint": null
+  },
+  {
+   "code": "SC1090",
+   "file": "G:/blocks/wamvoip/lab/app/pkgs/wam/synthetic/fabrications.ts",
+   "line": null,
+   "col": null,
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "hint": null
+  },
+  {
+   "code": "SC1090",
+   "file": "G:/blocks/wamvoip/lab/app/pkgs/wam/synthetic/fabrications.ts",
+   "line": null,
+   "col": null,
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "hint": null
+  },
+  {
+   "code": "SC1090",
+   "file": "G:/blocks/wamvoip/lab/app/pkgs/wam/synthetic/fabrications.ts",
+   "line": null,
+   "col": null,
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "hint": null
+  },
+  {
+   "code": "SC1090",
+   "file": "G:/blocks/wamvoip/lab/app/pkgs/wam/synthetic/fabrications.ts",
+   "line": null,
+   "col": null,
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "hint": null
+  },
+  {
+   "code": "SC1090",
+   "file": "G:/blocks/wamvoip/lab/app/pkgs/wam/synthetic/fabrications.ts",
+   "line": null,
+   "col": null,
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "hint": null
+  },
+  {
+   "code": "SC1090",
+   "file": "G:/blocks/wamvoip/lab/app/pkgs/wam/synthetic/fabrications.ts",
+   "line": null,
+   "col": null,
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "hint": null
+  },
+  {
+   "code": "SC1090",
+   "file": "G:/blocks/wamvoip/lab/app/pkgs/wam/synthetic/fabrications.ts",
+   "line": null,
+   "col": null,
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "hint": null
+  },
+  {
+   "code": "SC1090",
+   "file": "G:/blocks/wamvoip/lab/app/pkgs/wam/synthetic/fabrications.ts",
+   "line": null,
+   "col": null,
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "hint": null
+  },
+  {
+   "code": "SC1090",
+   "file": "G:/blocks/wamvoip/lab/app/pkgs/wam/synthetic/fabrications.ts",
+   "line": null,
+   "col": null,
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "hint": null
+  },
+  {
+   "code": "SC1090",
+   "file": "G:/blocks/wamvoip/lab/app/pkgs/wam/synthetic/fabrications.ts",
+   "line": null,
+   "col": null,
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "hint": null
+  },
+  {
+   "code": "SC1090",
+   "file": "G:/blocks/wamvoip/lab/app/pkgs/wam/synthetic/fabrications.ts",
+   "line": null,
+   "col": null,
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "hint": null
+  },
+  {
+   "code": "SC1090",
+   "file": "G:/blocks/wamvoip/lab/app/pkgs/wam/synthetic/fabrications.ts",
+   "line": null,
+   "col": null,
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "hint": null
+  },
+  {
+   "code": "SC1090",
+   "file": "G:/blocks/wamvoip/lab/app/pkgs/wam/synthetic/fabrications.ts",
+   "line": null,
+   "col": null,
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "hint": null
+  },
+  {
+   "code": "SC1090",
+   "file": "G:/blocks/wamvoip/lab/app/pkgs/wam/synthetic/fabrications.ts",
+   "line": null,
+   "col": null,
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "hint": null
+  },
+  {
+   "code": "SC1090",
+   "file": "G:/blocks/wamvoip/lab/app/pkgs/wam/synthetic/fabrications.ts",
+   "line": null,
+   "col": null,
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "hint": null
+  },
+  {
+   "code": "SC1090",
+   "file": "G:/blocks/wamvoip/lab/app/pkgs/wam/synthetic/fabrications.ts",
+   "line": null,
+   "col": null,
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "hint": null
+  },
+  {
+   "code": "SC1090",
+   "file": "G:/blocks/wamvoip/lab/app/pkgs/wam/synthetic/fabrications.ts",
+   "line": null,
+   "col": null,
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "hint": null
+  },
+  {
+   "code": "SC1090",
+   "file": "G:/blocks/wamvoip/lab/app/pkgs/wam/synthetic/fabrications.ts",
+   "line": null,
+   "col": null,
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "hint": null
+  },
+  {
+   "code": "SC1090",
+   "file": "G:/blocks/wamvoip/lab/app/pkgs/wam/synthetic/fabrications.ts",
+   "line": null,
+   "col": null,
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "hint": null
+  },
+  {
+   "code": "SC1090",
+   "file": "G:/blocks/wamvoip/lab/app/pkgs/wam/synthetic/fabrications.ts",
+   "line": null,
+   "col": null,
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "hint": null
+  },
+  {
+   "code": "SC1090",
+   "file": "G:/blocks/wamvoip/lab/app/pkgs/wam/synthetic/fabrications.ts",
+   "line": null,
+   "col": null,
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "hint": null
+  },
+  {
+   "code": "SC1090",
+   "file": "G:/blocks/wamvoip/lab/app/pkgs/wam/synthetic/fabrications.ts",
+   "line": null,
+   "col": null,
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "hint": null
+  },
+  {
+   "code": "SC1090",
+   "file": "G:/blocks/wamvoip/lab/app/pkgs/wam/synthetic/fabrications.ts",
+   "line": null,
+   "col": null,
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "hint": null
+  },
+  {
+   "code": "SC2013",
+   "file": "G:/blocks/wamvoip/lab/app/pkgs/wam/wire/encoder.ts",
+   "line": null,
+   "col": null,
+   "message": "values from the '@vinikjkkj/wa-wam' package run in the embedded dynamic engine, which this build does not include",
+   "hint": "build with --dynamic to run npm package code in the embedded engine (adds ~620KB to the binary); static builds never include it"
+  },
+  {
+   "code": "SC2013",
+   "file": "G:/blocks/wamvoip/lab/app/pkgs/wam/wire/encoder.ts",
+   "line": null,
+   "col": null,
+   "message": "values from the '@vinikjkkj/wa-wam' package run in the embedded dynamic engine, which this build does not include",
+   "hint": "build with --dynamic to run npm package code in the embedded engine (adds ~620KB to the binary); static builds never include it"
+  }
+ ],
+ "runtimeFences": [],
+ "ice": [],
+ "unreachedFailed": 30
+}

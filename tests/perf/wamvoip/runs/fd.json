@@ -1,0 +1,25 @@
+{
+ "entry": "G:\\blocks\\wamvoip\\tmp\\fdrepro\\main.ts",
+ "ms": 809,
+ "provenance": [],
+ "preflightFailed": true,
+ "stats": {
+  "statements": 0,
+  "failed": 0,
+  "island": 0
+ },
+ "npmStatic": null,
+ "sites": [
+  {
+   "code": "SC0001",
+   "file": "G:/blocks/wamvoip/tmp/fdrepro/main.ts",
+   "start": 13059,
+   "end": 13152,
+   "message": "Conversion of type '{ method: string; headers: { 'x-custom': string; }; dispatcher: Dispatcher; }' to type 'RequestInit' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.\n  Types of property 'dispatcher' are incompatible.\n    Type 'Dispatcher' is missing the following properties from type 'import(\"G:/blocks/wamvoip/node_modules/.pnpm/undici-types@7.18.2/node_modules/undici-types/dispatcher\").default': connect, compose, request, pipeline, and 19 more.",
+   "hint": null
+  }
+ ],
+ "runtimeFences": [],
+ "ice": [],
+ "unreachedFailed": null
+}

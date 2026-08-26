@@ -1,0 +1,143 @@
+{
+ "entry": "G:\\blocks\\wamvoip\\lab\\app\\pkgs\\voip\\index.ts",
+ "ms": 901111,
+ "provenance": [
+  "zapo-js@1.6.2 <- 250f9af5229a",
+  "argo-codec@0.2.1: no provenance attestation published; island path used",
+  "libmlow-wasm@0.1.1: no provenance attestation published; island path used",
+  "@roamhq/wrtc@0.10.0: no provenance attestation published; island path used"
+ ],
+ "preflightFailed": false,
+ "stats": {
+  "statements": 45632,
+  "failed": 8,
+  "island": 0
+ },
+ "npmStatic": null,
+ "sites": [
+  {
+   "code": "SC2009",
+   "file": "G:/blocks/wamvoip/lab/app/pkgs/voip/media/mlow-codec.ts",
+   "line": null,
+   "col": null,
+   "message": "values of type 'Promise<MlowModule> | null' cannot be compiled: the union shape is supported, but its arm 'Promise<MlowModule>' does not compile",
+   "hint": "the outer shape is supported — the named component is the blocker; restate it inside the compilable set (number, string, boolean, arrays, Maps, Sets, RegExp, functions, classes, records, unions of those, and 'unknown')"
+  },
+  {
+   "code": "SC2013",
+   "file": "G:/blocks/wamvoip/lab/app/pkgs/voip/relay/WaSctpRelay.ts",
+   "line": null,
+   "col": null,
+   "message": "importing '@roamhq/wrtc' requires the embedded dynamic engine, which this build does not include — the package's implementation runs there",
+   "hint": "build with --dynamic to run npm package code in the embedded engine (adds ~620KB to the binary); static builds never include it"
+  },
+  {
+   "code": "SC2011",
+   "file": "G:/blocks/wamvoip/prov/250f9af5229a545eec28ddbd3e8774a397cdb0bb/src/transport/wa-version-fetcher.ts",
+   "line": null,
+   "col": null,
+   "message": "values of type 'WaFetchLatestMobileVersionOptions' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "hint": "build with --dynamic to run these values in the embedded engine (adds ~620KB to the binary), or restate the type inside the static surface (https://scriptc.dev/limitations describes the boundary)"
+  },
+  {
+   "code": "SC2004",
+   "file": "G:/blocks/wamvoip/prov/250f9af5229a545eec28ddbd3e8774a397cdb0bb/src/client/WaClient.ts",
+   "line": null,
+   "col": null,
+   "message": "uses of 'fetchLatestWaMobileVersion' inherit the blocker on its declaration",
+   "hint": "the declaration of 'fetchLatestWaMobileVersion' did not compile — fix the diagnostic reported there and these sites clear with it"
+  },
+  {
+   "code": "SC2020",
+   "file": "G:/blocks/wamvoip/prov/250f9af5229a545eec28ddbd3e8774a397cdb0bb/src/client/WaClient.ts",
+   "line": null,
+   "col": null,
+   "message": "'emit('debug_transport_frame_in') with 1 arguments where the event's tuple has 0' is part of the standard library types but has no scriptc lowering yet",
+   "hint": "every emit site of one event name must supply the same argument tuple (listeners may declare a prefix)"
+  },
+  {
+   "code": "SC2020",
+   "file": "G:/blocks/wamvoip/prov/250f9af5229a545eec28ddbd3e8774a397cdb0bb/src/client/WaClient.ts",
+   "line": null,
+   "col": null,
+   "message": "'emit('debug_transport_frame_out') with 1 arguments where the event's tuple has 0' is part of the standard library types but has no scriptc lowering yet",
+   "hint": "every emit site of one event name must supply the same argument tuple (listeners may declare a prefix)"
+  },
+  {
+   "code": "SC2020",
+   "file": "G:/blocks/wamvoip/prov/250f9af5229a545eec28ddbd3e8774a397cdb0bb/src/client/WaClient.ts",
+   "line": null,
+   "col": null,
+   "message": "'emit('debug_transport_node_in') with 1 arguments where the event's tuple has 0' is part of the standard library types but has no scriptc lowering yet",
+   "hint": "every emit site of one event name must supply the same argument tuple (listeners may declare a prefix)"
+  },
+  {
+   "code": "SC2020",
+   "file": "G:/blocks/wamvoip/prov/250f9af5229a545eec28ddbd3e8774a397cdb0bb/src/client/WaClient.ts",
+   "line": null,
+   "col": null,
+   "message": "'emit('debug_transport_node_out') with 1 arguments where the event's tuple has 0' is part of the standard library types but has no scriptc lowering yet",
+   "hint": "every emit site of one event name must supply the same argument tuple (listeners may declare a prefix)"
+  },
+  {
+   "code": "SC2020",
+   "file": "G:/blocks/wamvoip/prov/250f9af5229a545eec28ddbd3e8774a397cdb0bb/src/client/WaClient.ts",
+   "line": null,
+   "col": null,
+   "message": "'emit('debug_transport_decode_error') with 1 arguments where the event's tuple has 0' is part of the standard library types but has no scriptc lowering yet",
+   "hint": "every emit site of one event name must supply the same argument tuple (listeners may declare a prefix)"
+  },
+  {
+   "code": "SC2020",
+   "file": "G:/blocks/wamvoip/lab/app/pkgs/voip/media/WaAudioEngine.ts",
+   "line": null,
+   "col": null,
+   "message": "'Int16Array<ArrayBufferLike>' is part of the standard library types but has no scriptc lowering yet",
+   "hint": "the type checker sees the full standard library, but only the supported surface compiles (https://scriptc.dev/limitations)"
+  },
+  {
+   "code": "SC2009",
+   "file": "G:/blocks/wamvoip/lab/app/pkgs/voip/relay/WaSctpRelay.ts",
+   "line": null,
+   "col": null,
+   "message": "values of type 'Map<string, Connection>' cannot be compiled: the Map shape is supported, but its value type 'Connection' does not compile",
+   "hint": "the outer shape is supported — the named component is the blocker; restate it inside the compilable set (number, string, boolean, arrays, Maps, Sets, RegExp, functions, classes, records, unions of those, and 'unknown')"
+  },
+  {
+   "code": "SC2009",
+   "file": "G:/blocks/wamvoip/lab/app/pkgs/voip/call/call-state.ts",
+   "line": null,
+   "col": null,
+   "message": "values of type 'CallStateData' cannot be compiled: the record shape is supported, but its member 'connectedAt' has type 'Date | undefined', which does not compile",
+   "hint": "the outer shape is supported — the named component is the blocker; restate it inside the compilable set (number, string, boolean, arrays, Maps, Sets, RegExp, functions, classes, records, unions of those, and 'unknown')"
+  },
+  {
+   "code": "SC2009",
+   "file": "G:/blocks/wamvoip/lab/app/pkgs/voip/media/mlow-codec.ts",
+   "line": null,
+   "col": null,
+   "message": "values of type 'MlowEncoder | null' cannot be compiled: the union shape is supported, but its arm 'MlowEncoder' does not compile",
+   "hint": "the outer shape is supported — the named component is the blocker; restate it inside the compilable set (number, string, boolean, arrays, Maps, Sets, RegExp, functions, classes, records, unions of those, and 'unknown')"
+  }
+ ],
+ "runtimeFences": [
+  {
+   "code": "SC2020",
+   "file": "G:/blocks/wamvoip/prov/250f9af5229a545eec28ddbd3e8774a397cdb0bb/spec/proto/index.js",
+   "line": null,
+   "col": null,
+   "message": "'require() with a run-time specifier' is part of the standard library types but has no scriptc lowering yet",
+   "hint": "the compiled module graph is fixed at build time: a specifier nothing installed resolves compiles to Node's MODULE_NOT_FOUND, and every other one needs the module's exports as a value"
+  },
+  {
+   "code": "SC1090",
+   "file": "G:/blocks/wamvoip/prov/250f9af5229a545eec28ddbd3e8774a397cdb0bb/spec/proto/index.js",
+   "line": null,
+   "col": null,
+   "message": "constructing values other than classes declared in the program is not supported yet",
+   "hint": null
+  }
+ ],
+ "ice": [],
+ "unreachedFailed": 157
+}
