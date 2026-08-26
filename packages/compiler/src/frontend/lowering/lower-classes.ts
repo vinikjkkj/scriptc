@@ -2343,6 +2343,26 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
             if (fields.has(mName)) {
               L.unsupported("SC1090", member.name, "methods shadowing inherited fields");
             }
+            if (findGenericMethodOn(L, base, mName)) {
+            // A generic method owns no vtable slot, so every call resolves
+            // on the receiver's STATIC class and `genericOverrideBelow` is
+            // the only thing that catches a call which could land on this
+            // override. That query reads `subclasses`, which is complete
+            // only for classes collected in collectProgram's declaration
+            // window -- a class EXPRESSION, or a class declared inside a
+            // function body, registers when its containing statement
+            // lowers, and a call compiled before that point already chose
+            // the base's body. Refuse rather than answer, by name: the
+            // alternative is a program that prints the base's answer where
+            // Node prints the override's, at exit 0.
+            if (!L.collectingClassDecls) {
+              L.unsupported(
+                "SC1090",
+                member.name,
+                `overriding the inherited generic method '${mName}' from a class expression or a class declared inside a function (generic methods dispatch statically, and this class is collected too late for calls already compiled to see it -- declare the class at module top level)`,
+              );
+            }
+            }
             if (L.findMethodOn(base, mName)) {
               L.unsupported(
                 "SC1090",
@@ -2397,6 +2417,26 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
             !L.findMethodOn(base, member.name.text)
           ) {
             const implicit = implicitAnyParamSymbolsOf(L, member);
+            if (implicit && findGenericMethodOn(L, base, member.name.text)) {
+            // A generic method owns no vtable slot, so every call resolves
+            // on the receiver's STATIC class and `genericOverrideBelow` is
+            // the only thing that catches a call which could land on this
+            // override. That query reads `subclasses`, which is complete
+            // only for classes collected in collectProgram's declaration
+            // window -- a class EXPRESSION, or a class declared inside a
+            // function body, registers when its containing statement
+            // lowers, and a call compiled before that point already chose
+            // the base's body. Refuse rather than answer, by name: the
+            // alternative is a program that prints the base's answer where
+            // Node prints the override's, at exit 0.
+            if (!L.collectingClassDecls) {
+              L.unsupported(
+                "SC1090",
+                member.name,
+                `overriding the inherited generic method '${member.name.text}' from a class expression or a class declared inside a function (generic methods dispatch statically, and this class is collected too late for calls already compiled to see it -- declare the class at module top level)`,
+              );
+            }
+            }
             if (implicit) {
               genericMethods.set(member.name.text, {
                 decl: member,
