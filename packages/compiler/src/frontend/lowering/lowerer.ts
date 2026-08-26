@@ -11310,7 +11310,20 @@ export class Lowerer {
       // KIND of function the frame is, not whether it happens to close over
       // something. Checked before any capture state is mutated, like the
       // test above it.
-      if (!ctx.isArrow) return true;
+      //
+      // `=== false`, not `!ctx.isArrow`, and the difference is 23 refusals
+      // in zapo. Only lowerLambdaInner sets the flag, and it sets it for a
+      // frame that came from a SOURCE function; the other 27 newFnCtx call
+      // sites build SYNTHETIC frames -- promise combinator bodies, stream
+      // shims, emitter dispatchers, island thunks -- and leave it
+      // undefined. A synthetic frame is not a JS function and rebinds
+      // nothing, so it has to stay transparent. Treating undefined as
+      // "not an arrow" fenced `this` inside a user arrow nested in another
+      // user arrow (`void x().catch((e) => { this.logger.warn(...) })`,
+      // zapo's WaComms.ts:387 and 22 more) with SC1080 'this' outside a
+      // class method -- 23 refusals of correct code, measured on a paired
+      // zapo build and caught by nothing else.
+      if (ctx.isArrow === false) return true;
     }
     return false;
   }
