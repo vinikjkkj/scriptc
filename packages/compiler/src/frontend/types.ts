@@ -3984,9 +3984,29 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
       // Belt and braces for non-strict type worlds: an optional param's
       // ABI slot is always the undefined-armed union (strictNullChecks
       // already spells it that way; arm it here if the world didn't).
-      if (optional && pt && pt.kind !== "void" && pt.kind !== "jsval") {
+      //
+      // A `dyn` slot is ALREADY that union and cannot be widened into one:
+      // `undefined` is an inhabitant of the dynamic tier, and withUnitArm
+      // refuses a dyn precisely because a union may not carry a dyn ARM.
+      // Arming it therefore turned a representable optional parameter into
+      // a mapping failure — and that failure was not academic: it is what
+      // made `run(sql: string, params?: readonly unknown[])` unmappable in
+      // zapo's `WaSqliteConnection` (`readonly unknown[] | undefined` maps
+      // to dyn), which took the whole record type down with it, while the
+      // SAME parameter spelled `params: readonly unknown[] | undefined`
+      // mapped. Two spellings of one type must map alike. The value side
+      // already agreed: requireExactArityValue exempts an omittable
+      // dyn/jsval slot on the stated ground that "their ABI slot IS the
+      // declared param type (no synthesized union)".
+      if (optional && pt && pt.kind !== "void" && pt.kind !== "jsval" && pt.kind !== "dyn") {
         const armed = withUndefinedArm(pt, ctx.unions);
-        if (!armed) return null;
+        if (!armed) {
+          mapTrace(
+            `FNPARAMARM ${checker.typeToString(type).slice(0, 46)} . ${p.name} : ` +
+              `optional slot of kind '${pt.kind}' admits no undefined arm`,
+          );
+          return null;
+        }
         pt = armed;
       }
       if (!pt) {

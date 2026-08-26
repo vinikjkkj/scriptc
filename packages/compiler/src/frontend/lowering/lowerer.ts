@@ -10525,8 +10525,9 @@ export class Lowerer {
   requireExactArityValue(blame: ts.Node,
     contextual: ts.Expression | null,
     shapes: readonly ParamShape[],
-    funcType: IrType,): void {
-    return requireExactArityValue(this, blame, contextual, shapes, funcType);
+    funcType: IrType,
+    resolvedTarget?: ts.Type | null,): void {
+    return requireExactArityValue(this, blame, contextual, shapes, funcType, resolvedTarget);
   }
 
   bodyReturnType(isAsync: boolean, declared: IrType): IrType {
