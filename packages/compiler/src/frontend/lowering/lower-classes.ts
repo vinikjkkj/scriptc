@@ -3112,6 +3112,21 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
               continue;
             }
           }
+          // The remedy this fence names — "assign it unconditionally at the
+          // top of the constructor" — has to be a remedy that WORKS. For a
+          // Map/Set/Date/RegExp field it is not one: the top-level scan
+          // refuses the same inference there (dynBoxLosesMethodTable), so
+          // the reader would move the line and meet a second refusal about
+          // something else. Name the real blocker instead, and the
+          // annotation that answers it.
+          const propT = L.checker.getTypeOfSymbol(p);
+          if (dynBoxLosesMethodTable(L, propT)) {
+            L.unsupported(
+              "SC1090",
+              site,
+              `fields holding a '${L.checker.typeToString(propT)}' the inference cannot compile (moving the assignment to the constructor's top level does NOT help — that slot would be checked-dynamic, which carries no method table for this builtin; annotate the element/key types with a JSDoc '@type' on the declaring assignment so the container itself compiles)`,
+            );
+          }
           L.unsupported(
             "SC1090",
             site,
