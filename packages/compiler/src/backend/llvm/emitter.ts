@@ -7627,16 +7627,27 @@ class LlEmitter {
       case "dynArrLit": {
         // A dyn array built element-by-element: ownership of each dyn
         // element MOVES into the array (scr_dyn_arr_push's contract).
+        // A SPREAD element flattens instead (push_spread RETAINS what it
+        // copies in) and can throw V8's spread TypeError, so the pending
+        // check runs after each one — JS's ArgumentListEvaluation order.
         this.declare(`declare ptr @scr_dyn_new_arr()`);
         this.declare(`declare void @scr_dyn_arr_push(ptr, ptr)`);
+        const spreadAt = new Map((e.spreads ?? []).map((s) => [s.at, s.what]));
+        if (spreadAt.size > 0) this.declare(`declare void @scr_dyn_arr_push_spread(ptr, ptr, ptr)`);
         const arr = B.tmp();
         B.line(`${arr} = call ptr @scr_dyn_new_arr()`);
         const out = this.own({ name: arr, type: e.type });
-        for (const el of e.elems) {
+        e.elems.forEach((el, i) => {
           const v = this.emitExpr(el);
+          const what = spreadAt.get(i);
+          if (what !== undefined) {
+            B.line(`call void @scr_dyn_arr_push_spread(ptr ${arr}, ptr ${v.name}, ptr ${this.cstr(what)})`);
+            this.emitPendingCheck();
+            return;
+          }
           this.moveTemp(v);
           B.line(`call void @scr_dyn_arr_push(ptr ${arr}, ptr ${v.name})`);
-        }
+        });
         return out;
       }
       case "dynArrNew": {

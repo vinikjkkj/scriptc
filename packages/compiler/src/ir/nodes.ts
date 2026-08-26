@@ -6492,8 +6492,20 @@ export type IrExpr =
   | { kind: "dynInvoke"; recv: IrExpr; method: string; methodKey?: IrExpr; calleeName: string; args: IrExpr[]; type: IrType; loc: SrcLoc }
   /** A dyn ARRAY built element-by-element (JS mixed-element literals —
    * `['pwd', []]` — and evolving `[]` declarations): each element is
-   * already a dyn value; the result owns them. Never throws. */
-  | { kind: "dynArrLit"; elems: IrExpr[]; type: IrType; loc: SrcLoc }
+   * already a dyn value; the result owns them.
+   *
+   * An element listed in `spreads` FLATTENS instead of being pushed: its
+   * dyn value is walked by JS's spread rule (arrays element-by-element,
+   * strings by code point, bytes by byte, engine values through their own
+   * iterator protocol) and every element lands in this array. `what` is
+   * the source's spelling, which rides along for V8's spread-call
+   * TypeError text ("v is not iterable (cannot read property
+   * undefined)"); a non-iterable dyn kind throws it, so a spread element
+   * — and ONLY a spread element — can throw. This is the runtime-arity
+   * form of a DYN rest pack: `f(...params)` where the callee's rest slot
+   * is one checked-dynamic array, so the array's length is the call's
+   * arity and no fixed ABI slot has to be decided at compile time. */
+  | { kind: "dynArrLit"; elems: IrExpr[]; spreads?: { at: number; what: string }[]; type: IrType; loc: SrcLoc }
   /** The `Array` CONSTRUCTOR over a runtime-arity length — the dyn twin of
    * arrayNewLen, for `new Array(n)` where the element type has no static
    * home (`any[]` in a JavaScript source, an `unknown[]` slot). `arg` is

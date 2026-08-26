@@ -2334,12 +2334,23 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
       case "dynArrLit": {
         // A dyn array built element-by-element: ownership of each dyn
         // element MOVES into the array (scr_dyn_arr_push's contract).
+        // A SPREAD element flattens instead (push_spread RETAINS what it
+        // copies in, so its temp keeps its own reference and releases with
+        // the frame) and can throw V8's spread TypeError, so the pending
+        // check runs after each one — JS's ArgumentListEvaluation order.
+        const spreadAt = new Map((e.spreads ?? []).map((s) => [s.at, s.what]));
         const arr = E.newTemp(e.type, "scr_dyn_new_arr()");
-        for (const el of e.elems) {
+        e.elems.forEach((el, i) => {
           const v = E.emitExpr(el);
+          const what = spreadAt.get(i);
+          if (what !== undefined) {
+            E.line(`scr_dyn_arr_push_spread(${arr.name}, ${v.name}, ${cStringLiteral(Buffer.from(what, "utf8"))});`);
+            E.emitPendingCheck();
+            return;
+          }
           E.moveTemp(v);
           E.line(`scr_dyn_arr_push(${arr.name}, ${v.name});`);
-        }
+        });
         return arr;
       }
       case "dynArrNew": {
