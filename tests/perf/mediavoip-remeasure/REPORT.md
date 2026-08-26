@@ -505,14 +505,18 @@ Everything under `G:\blocks\remeasure\`, nothing at `G:\` top level.
 | --- | --- |
 | `wt` | worktree, branch `block/remeasure` — **keep until merged** |
 | `lab` | lab app, node_modules, both sweeps, binaries — **disposable** |
-| `cache` | `SCRIPTC_CACHE_DIR` — **disposable** |
+| `cache` | `SCRIPTC_CACHE_DIR` — **already deleted whole** |
 | `prov` | `SCRIPTC_PROVENANCE_CACHE`, a 12 MB copy of the read-only checkout — **disposable** |
-| `zig` | `ZIG_GLOBAL_CACHE_DIR` and `ZIG_LOCAL_CACHE_DIR` — **disposable, delete whole** |
+| `zig` | `ZIG_GLOBAL_CACHE_DIR` and `ZIG_LOCAL_CACHE_DIR` — **already deleted whole, never half-pruned** |
 | `tmp` | emptied — **disposable** |
 
 No `base` worktree was created: this was a re-run of one compiler, not an A/B.
 `G:\zapo-work` was read only, apart from this report. `G:\scriptc` was not
 written to.
+
+Footprint now: **2.7 GB**, of which 2.6 GB is `wt/node_modules` plus
+`packages/*/dist`, kept so a re-gate needs no reinstall. `cache`, `zig` and
+`tmp` are emptied. `lab` holds the six binaries and both sweeps and can go.
 
 Everything a re-run needs is committed under `tests/perf/mediavoip-remeasure/`:
 the harness, both lanes' recorded sweeps, every driver, the probe copies, and
