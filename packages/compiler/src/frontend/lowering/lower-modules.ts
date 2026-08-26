@@ -932,10 +932,23 @@ function isBindingWriteTarget(n: ts.Identifier): boolean {
  * write that can run later — the function may be called from anywhere — and
  * refuses, as does any write after the export. That is the write analysis
  * the `const` keyword stands in for, decided instead of assumed. */
-function wholeExportRootRebindable(L: Lowerer, root: ts.Identifier, exportExpr: ts.BinaryExpression): boolean {
+export function wholeExportRootRebindable(
+  L: Lowerer,
+  root: ts.Identifier,
+  exportExpr: ts.BinaryExpression,
+  /** The VALUE symbol to track, when `root` is not itself spelled as one.
+   * A shorthand property name (`module.exports = { user }`) binds to the
+   * PROPERTY symbol under getSymbolAtLocation, so tracking that symbol
+   * finds no writes at all and every rebindable binding would come back
+   * clean -- a silent wrong answer where the fence belongs. Callers in
+   * that position resolve the value symbol themselves and pass it. */
+  valueSym?: ts.Symbol,
+): boolean {
   const sf = root.getSourceFile();
-  const sym = L.checker.getSymbolAtLocation(root);
+  const sym = valueSym ?? L.checker.getSymbolAtLocation(root);
   if (!sym) return true;
+  const symOf = (n: ts.Identifier): ts.Symbol | undefined =>
+    valueSym === undefined ? L.checker.getSymbolAtLocation(n) : (L.resolveValueSymbol(n) ?? undefined);
   const exportPos = exportExpr.getStart(sf);
   const runsBeforeTheExport = (n: ts.Node): boolean => {
     for (let p: ts.Node | undefined = n.parent; p !== undefined; p = p.parent) {
@@ -956,7 +969,7 @@ function wholeExportRootRebindable(L: Lowerer, root: ts.Identifier, exportExpr: 
     if (rebindable) return;
     if (
       ts.isIdentifier(n) && n !== root && n.text === root.text &&
-      isBindingWriteTarget(n) && L.checker.getSymbolAtLocation(n) === sym &&
+      isBindingWriteTarget(n) && symOf(n) === sym &&
       !runsBeforeTheExport(n)
     ) {
       rebindable = true;
