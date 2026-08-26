@@ -16733,7 +16733,16 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
     key: string,
     loc: SrcLoc,
   ): IrExpr | null {
-    const fieldT = L.classes.get(className)?.fields.get(key);
+    const info = L.classes.get(className);
+    // ONLY a COLLECTED field. A field the class body declares exists on the
+    // instance from construction even with nothing assigned to it (class
+    // fields define, they do not merely reserve), so Node answers `true`
+    // for `optional?: string` and for a `!`-asserted declaration before any
+    // write -- tests/corpus/4272. Keying this on "the slot has an undefined
+    // arm" instead answered `false` for both, which is how a MATCH became a
+    // WRONG on the branch's own differential run.
+    if (info?.collectedFields?.has(key) !== true) return null;
+    const fieldT = info.fields.get(key);
     if (fieldT === undefined) return null;
     const read = (): IrExpr => ({ kind: "fieldGet", obj: recv, className, field: key, type: fieldT, loc });
     if (fieldT.kind === "dyn") {
