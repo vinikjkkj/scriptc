@@ -53,7 +53,7 @@ import type {
   IrUnionDef,
   SrcLoc,
 } from "../../ir/nodes.js";
-import { armDiscrimLits, arrayOf, BOOL, internalSlotFields, canAdaptDynFuncTo, canDynCheckTo, discrimSeparates, dynCheckArmOrder, funcOf, shapeHasAccessorSlots, canConvertToDyn, canCrossIslandBoundary, canExitIslandToType, canMarshalTypedFuncIntoIsland, DYN, F64, httpReqIsReadableIn, isJsonSafeType, isUndefinedArmedUnion, isUnitType, JSVAL, READABLE_T, RUNTIME_ERROR_CLASSES, streamDuplexWidensToWritable, STRING, typeEquals, UNDEFINED_T, VOID } from "../../ir/nodes.js";
+import { strandTrap, armDiscrimLits, arrayOf, BOOL, internalSlotFields, canAdaptDynFuncTo, canDynCheckTo, discrimSeparates, dynCheckArmOrder, funcOf, shapeHasAccessorSlots, canConvertToDyn, canCrossIslandBoundary, canExitIslandToType, canMarshalTypedFuncIntoIsland, DYN, F64, httpReqIsReadableIn, isJsonSafeType, isUndefinedArmedUnion, isUnitType, JSVAL, READABLE_T, RUNTIME_ERROR_CLASSES, streamDuplexWidensToWritable, STRING, typeEquals, UNDEFINED_T, VOID } from "../../ir/nodes.js";
 import { type DynamicImportResolution, type NpmBuiltinUse, type NpmLazyTrap } from "../npm.js";
 import { provenanceActive } from "../provenance-registry.js";
 import {
@@ -7022,17 +7022,10 @@ export class Lowerer {
             loc,
           },
           then: [
-            {
-              kind: "throw",
-              value: {
-                kind: "libCall",
-                fn: "error.new",
-                args: [{ kind: "strLit", value: `expected ${this.fmt(toT)} (a non-empty ${this.fmt(fromT)} has no elements the target can hold)`, type: STRING, loc }],
-                type: { kind: "object", className: "%TypeError" },
-                loc,
-              },
+            strandTrap(
+              `expected ${this.fmt(toT)} (a non-empty ${this.fmt(fromT)} has no elements the target can hold)`,
               loc,
-            },
+            ),
           ],
           else_: [],
           loc,
@@ -8423,17 +8416,7 @@ export class Lowerer {
     this.retagHelpers.set(key, name);
     const impl = `${name}.impl`;
     const params: IrParam[] = toT.params.map((t, i) => ({ localId: `a.${i}`, name: `a${i}`, type: t }));
-    const strandThrow = (why: string): IrStmt => ({
-      kind: "throw",
-      value: {
-        kind: "libCall",
-        fn: "error.new",
-        args: [{ kind: "strLit", value: why, type: STRING, loc }],
-        type: { kind: "object", className: "%TypeError" },
-        loc,
-      },
-      loc,
-    });
+    const strandThrow = (why: string): IrStmt => strandTrap(why, loc);
     let body: IrStmt[];
     if (strandParams) {
       body = [
@@ -8801,24 +8784,10 @@ export class Lowerer {
         returnType: expected,
         locals: [],
         body: [
-          {
-            kind: "throw",
-            value: {
-              kind: "libCall",
-              fn: "error.new",
-              args: [
-                {
-                  kind: "strLit",
-                  value: `${what} is not representable in a '${this.fmt(expected)}' slot (a value narrowed or asserted past the type still held it)`,
-                  type: STRING,
-                  loc,
-                },
-              ],
-              type: { kind: "object", className: "%TypeError" },
-              loc,
-            },
+          strandTrap(
+            `${what} is not representable in a '${this.fmt(expected)}' slot (a value narrowed or asserted past the type still held it)`,
             loc,
-          },
+          ),
         ],
         loc,
       });
@@ -9053,24 +9022,10 @@ export class Lowerer {
         returnType: toT,
         locals: takesOperand ? [{ id: "v.0", name: "v", type: src, mutable: false }] : [],
         body: [
-          {
-            kind: "throw",
-            value: {
-              kind: "libCall",
-              fn: "error.new",
-              args: [
-                {
-                  kind: "strLit",
-                  value: `${what} is not representable in the target union (a value narrowed or asserted past it still held it)`,
-                  type: STRING,
-                  loc,
-                },
-              ],
-              type: { kind: "object", className: "%TypeError" },
-              loc,
-            },
+          strandTrap(
+            `${what} is not representable in the target union (a value narrowed or asserted past it still held it)`,
             loc,
-          },
+          ),
         ],
         loc,
       });
@@ -9129,24 +9084,10 @@ export class Lowerer {
           ? (arm.kind === "undefinedT" ? "undefined" : "null")
           : `a '${this.fmt(arm)}' value`;
         then = [
-          {
-            kind: "throw",
-            value: {
-              kind: "libCall",
-              fn: "error.new",
-              args: [
-                {
-                  kind: "strLit",
-                  value: `${what} is not representable in the target union (a value narrowed or asserted past it still held it)`,
-                  type: STRING,
-                  loc,
-                },
-              ],
-              type: { kind: "object", className: "%TypeError" },
-              loc,
-            },
+          strandTrap(
+            `${what} is not representable in the target union (a value narrowed or asserted past it still held it)`,
             loc,
-          },
+          ),
         ];
       } else {
         const value: IrExpr = isUnitType(arm)
@@ -9222,24 +9163,10 @@ export class Lowerer {
         kind: "if",
         cond: { kind: "unionIsTag", unionId: fromId, tag: i, negated: false, value: u, type: BOOL, loc },
         then: [
-          {
-            kind: "throw",
-            value: {
-              kind: "libCall",
-              fn: "error.new",
-              args: [
-                {
-                  kind: "strLit",
-                  value: `${what} is not representable in the target union (a value narrowed or asserted past it still held it)`,
-                  type: STRING,
-                  loc,
-                },
-              ],
-              type: { kind: "object", className: "%TypeError" },
-              loc,
-            },
+          strandTrap(
+            `${what} is not representable in the target union (a value narrowed or asserted past it still held it)`,
             loc,
-          },
+          ),
         ],
         else_: null,
         loc,
@@ -9322,24 +9249,10 @@ export class Lowerer {
           kind: "if",
           cond: { kind: "unary", op: "!", operand: anyTag, type: BOOL, loc },
           then: [
-            {
-              kind: "throw",
-              value: {
-                kind: "libCall",
-                fn: "error.new",
-                args: [
-                  {
-                    kind: "strLit",
-                    value: `a '${this.fmt(from)}' value is not representable as '${this.fmt(want)}' (${note})`,
-                    type: STRING,
-                    loc,
-                  },
-                ],
-                type: { kind: "object", className: "%TypeError" },
-                loc,
-              },
+            strandTrap(
+              `a '${this.fmt(from)}' value is not representable as '${this.fmt(want)}' (${note})`,
               loc,
-            },
+            ),
           ],
           else_: null,
           loc,
@@ -9407,26 +9320,11 @@ export class Lowerer {
         else_: null,
         loc,
       },
-      {
-        kind: "throw",
-        value: {
-          kind: "libCall",
-          fn: "error.new",
-          args: [
-            {
-              kind: "strLit",
-              value:
-                `a '${classDisplayName(fromClass)}' value is not a '${classDisplayName(toClass)}' ` +
-                `(a value narrowed or asserted past it still held another class)`,
-              type: STRING,
-              loc,
-            },
-          ],
-          type: { kind: "object", className: "%TypeError" },
-          loc,
-        },
+      strandTrap(
+        `a '${classDisplayName(fromClass)}' value is not a '${classDisplayName(toClass)}' ` +
+          `(a value narrowed or asserted past it still held another class)`,
         loc,
-      },
+      ),
     ];
     this.liftedFns.push({
       name,
