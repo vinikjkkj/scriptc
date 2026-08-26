@@ -301,6 +301,67 @@ import { PoisonError, dynUndefinedExpr, newFnCtx, own } from "./lowerer.js";
     // no dyn crossing ride as trap functions that throw when USED — the
     // namespace still builds, exactly the island path's stance.
     if (!L.dynamic && spec !== null && call.arguments.length === 1) {
+      /* STATIC tier, better-sqlite3: the ONE npm package the static lane
+       * serves ITSELF, over the vendored SQLite amalgamation
+       * (lower-sqlite.ts). A static `import` of it binds a compiler-known
+       * surface and the island owns nothing (lower-modules' twin arm);
+       * `import()` names the SAME package, so it answers the SAME
+       * namespace, through an already-resolved promise. Every use of the
+       * namespace is decided by TYPE, not by the value: `new
+       * ns.default(path)` is claimed by its RESULT type (lowerSqliteNew
+       * never lowers the callee), and `ns.default` as a VALUE is refused
+       * by name — the same SC2020 a static `import * as` namespace gives
+       * for the same spelling. What the value still has to get right is
+       * everything a program can ask of the namespace OBJECT without
+       * reading a member, which is the note on the literal below.
+       *
+       * The guard is the CHECKER's type, not our fold: only
+       * `import("better-sqlite3")` — a STRING LITERAL — types as the
+       * module namespace. `import(CONST)`, the named-constant idiom
+       * dynamicImportSpecOf accepts, does NOT: TypeScript leaves the
+       * awaited value `any`, and under `any` none of the type-directed
+       * machinery fires — the `new` site would not be claimed, the
+       * `.default` refusal would not fire, and the program would read
+       * `undefined` out of a namespace-shaped object. That is the silent
+       * wrong answer this compiler exists to refuse, so the constant form
+       * keeps the loud failure below, with a message that names the
+       * spelling that works. */
+      if (spec === "better-sqlite3" && arg !== undefined && ts.isStringLiteralLike(arg)) {
+        // The namespace OBJECT, key for key. Node builds this one by
+        // running cjs-module-lexer over the package's entry, so it is
+        // three keys in this order — better-sqlite3's detected named
+        // export, the default, and the `module.exports` alias the lexer
+        // adds for a whole-export replacement. The VALUES are absent
+        // (`undefined`), which is not a shortcut: every read of a member
+        // as a VALUE is refused by name at its type, so nothing here can
+        // escape into a program. What the values must not break is what a
+        // program CAN legally ask of the namespace itself, and an
+        // undefined-valued own property answers all of it the way Node
+        // does — `Object.keys` lists it, `in` finds it, and
+        // JSON.stringify skips it exactly as it skips Node's
+        // function-valued ones. An EMPTY object was the first cut and it
+        // is a silent wrong answer twice over: `Object.keys(ns)` came back
+        // `[]` where Node says three, and `"default" in ns` came back
+        // false. The fixture pins all four cells against the real
+        // package.
+        const nsKey = (name: string): { key: IrExpr; value: IrExpr } => ({
+          key: { kind: "strLit", value: name, type: STRING, loc },
+          value: dynUndefinedExpr(loc),
+        });
+        const ns: IrExpr = {
+          kind: "dynObjLit",
+          fields: [nsKey("SqliteError"), nsKey("default"), nsKey("module.exports")],
+          type: DYN,
+          loc,
+        };
+        return {
+          kind: "intrinsic",
+          name: "promise.resolve",
+          args: [ns],
+          type: { kind: "promise", inner: DYN },
+          loc,
+        };
+      }
       const dep = npmStaticDepSf7(L.program, call.getSourceFile(), spec);
       const builder = dep !== null ? staticDynNsBuilderOf(L, dep, loc) : null;
       if (process.env["SCRIPTC_DYNNS_TRACE"]) {
@@ -338,9 +399,21 @@ import { PoisonError, dynUndefinedExpr, newFnCtx, own } from "./lowerer.js";
         canonicalBuiltinModule(spec) === null
       ) {
         const msg =
-          `Cannot load module '${spec}': dynamic import() of npm packages runs in the ` +
-          `embedded dynamic engine, which this build does not include ` +
-          `(compile it statically with --npm-static ${spec}, or build with --dynamic)`;
+          spec === "better-sqlite3"
+            ? // The static lane DOES serve this package (the arm at the top of
+              // this function). What it cannot serve is this SPELLING: only a
+              // string literal makes TypeScript type the namespace, and every
+              // use of a better-sqlite3 namespace is type-directed, so a
+              // constant-folded specifier has nothing to bind against. Naming
+              // the spelling beats naming the package.
+              `Cannot load module 'better-sqlite3': the static lane serves this ` +
+              `package itself, but only through a STRING LITERAL specifier — ` +
+              `import(<const>) leaves the namespace untyped, and every use of it ` +
+              `(new ns.default(path)) is decided by type (write ` +
+              `import("better-sqlite3") at the site, or build with --dynamic)`
+            : `Cannot load module '${spec}': dynamic import() of npm packages runs in the ` +
+              `embedded dynamic engine, which this build does not include ` +
+              `(compile it statically with --npm-static ${spec}, or build with --dynamic)`;
         const err: IrExpr = {
           kind: "libCall",
           fn: "error.new",

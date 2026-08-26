@@ -1,0 +1,24 @@
+ns.typeof object
+ns.keys SqliteError,default,module.exports
+ns.json {}
+ns.hasDefault true
+ns.hasInherited false
+open true
+readonly false
+memory false
+run.changes 1
+run.rowid 1
+get.k a
+get.i 42
+get.r 1.5
+get.types integer/real/blob/null
+blob.len 3
+blob.isBuffer true
+blob.bytes 0,254,255
+all.len 2
+all.keys a,b
+get.missing undefined
+err.unique SqliteError/SQLITE_CONSTRAINT_PRIMARYKEY/UNIQUE constraint failed: t.k
+pragma.journal wal
+closed false
+END done
