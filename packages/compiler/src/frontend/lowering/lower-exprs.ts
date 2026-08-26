@@ -16717,6 +16717,34 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
     return names;
   }
 
+/** `key in recv` where the class slot named by `key` is UNDEFINED-ARMED:
+   * the presence answer is the slot's own arm test, not the layout. Null
+   * when the slot is not armed (an ordinary field, a method, an accessor,
+   * an Object.prototype name) and the caller's constant `true` stands.
+   *
+   * Both representations an armed slot can take are answered: the
+   * undefined-armed UNION (undefArmedFieldType's ordinary result) and the
+   * checked-dynamic box (its result for an implicit-`any` field, where
+   * `undefined` is a dyn KIND rather than a union arm). */
+  function undefinedArmedInAnswer(
+    L: Lowerer,
+    recv: IrExpr,
+    className: string,
+    key: string,
+    loc: SrcLoc,
+  ): IrExpr | null {
+    const fieldT = L.classes.get(className)?.fields.get(key);
+    if (fieldT === undefined) return null;
+    const read = (): IrExpr => ({ kind: "fieldGet", obj: recv, className, field: key, type: fieldT, loc });
+    if (fieldT.kind === "dyn") {
+      return { kind: "dynTest", test: "undefined", negated: true, value: read(), type: BOOL, loc };
+    }
+    if (fieldT.kind !== "union") return null;
+    const tag = L.armTag(fieldT.unionId, UNDEFINED_T);
+    if (tag < 0) return null;
+    return { kind: "unionIsTag", unionId: fieldT.unionId, tag, negated: true, value: read(), type: BOOL, loc };
+  }
+
 /** The interned per-class key-presence helper the RUNTIME-key `in` calls:
    * `%cls.haskey.<n>(k)` — a string-equality chain over the closed member
    * set. The answer depends on the KEY alone (unlike a record's, no
@@ -16961,7 +16989,28 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
             // …)` can have put `plug` there, and a constant-folded
             // `false` would be exactly the silent wrong answer the
             // closed-member-set comment warns about.
-            if (members.has(key)) return { kind: "boolLit", value: true, type: BOOL, loc };
+            if (members.has(key)) {
+              // ...unless the slot is UNDEFINED-ARMED. A field first
+              // assigned in a method or in a conditional constructor
+              // position collects into an undefined-armed slot precisely
+              // because it does not exist until the write runs, and Node
+              // answers `false` for it until then. Folding to the constant
+              // `true` because the LAYOUT has a slot answered a question
+              // about the static shape, not about the object:
+              //
+              //   class C { constructor(f){ if (f) { this.b = 1 } this.a = 0 } }
+              //   'b' in new C(false)      // Node false, this compiler true
+              //
+              // The answer is the one the RECORD path already gives an
+              // optional slot -- the undefined arm reads absent (stance 55)
+              // -- so a class field and a record field now say the same
+              // thing about the same value. It diverges from Node only
+              // where a field is EXPLICITLY assigned `undefined`, which is
+              // stance 55's own recorded divergence and not a new one.
+              const armed = undefinedArmedInAnswer(L, recv, recv.type.className, key, loc);
+              if (armed) return armed;
+              return { kind: "boolLit", value: true, type: BOOL, loc };
+            }
             const cinfo = L.classes.get(recv.type.className);
             if (cinfo?.hasPropsTable !== true) return { kind: "boolLit", value: false, type: BOOL, loc };
             return {
