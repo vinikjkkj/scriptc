@@ -16750,19 +16750,28 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
    * set. The answer depends on the KEY alone (unlike a record's, no
    * optional slot decides per value), so the receiver is not a parameter;
    * the call site still evaluates it, because JS does. */
-  export function classHasKeyHelper(L: Lowerer, className: string, members: ReadonlySet<string>, loc: SrcLoc): string {
+  export function classHasKeyHelper(L: Lowerer, className: string, members: ReadonlySet<string>, recvT: IrType, loc: SrcLoc): string {
     const hkey = `clshaskey:${className}`;
     const existing = L.widthHelpers.get(hkey);
     if (existing) return existing;
     const helper = `%cls.haskey.${L.widthHelpers.size}`;
     L.widthHelpers.set(hkey, helper);
     const k: IrExpr = { kind: "varRef", localId: "k.0", type: STRING, loc };
+    // The receiver IS a parameter now. It was not, and could not be, while
+    // every declared name answered `true`: the answer depended on the key
+    // alone. An UNDEFINED-ARMED slot breaks that -- the field does not
+    // exist until its first write, so the answer for that one name depends
+    // on the value. The literal-key fold learned this first; a runtime key
+    // reaching the same class had to keep answering `true` until the
+    // helper could see the object.
+    const o: IrExpr = { kind: "varRef", localId: "o.0", type: recvT, loc };
     const body: IrStmt[] = [];
     for (const name of members) {
+      const armed = undefinedArmedInAnswer(L, o, className, name, loc);
       body.push({
         kind: "if",
         cond: { kind: "strEq", negated: false, left: k, right: { kind: "strLit", value: name, type: STRING, loc }, type: BOOL, loc },
-        then: [{ kind: "return", value: { kind: "boolLit", value: true, type: BOOL, loc }, loc }],
+        then: [{ kind: "return", value: armed ?? { kind: "boolLit", value: true, type: BOOL, loc }, loc }],
         else_: null,
         loc,
       });
@@ -16770,9 +16779,15 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
     body.push({ kind: "return", value: { kind: "boolLit", value: false, type: BOOL, loc }, loc });
     L.liftedFns.push({
       name: helper,
-      params: [{ localId: "k.0", name: "k", type: STRING }],
+      params: [
+        { localId: "k.0", name: "k", type: STRING },
+        { localId: "o.0", name: "o", type: recvT },
+      ],
       returnType: BOOL,
-      locals: [{ id: "k.0", name: "k", type: STRING, mutable: true }],
+      locals: [
+        { id: "k.0", name: "k", type: STRING, mutable: true },
+        { id: "o.0", name: "o", type: recvT, mutable: false },
+      ],
       body,
       loc,
     });
@@ -16850,7 +16865,7 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
         if (probed?.type.kind === "object" && L.mapTypeOf(L.typeOf(expr.left))?.kind === "string") {
           const members = classInMemberNames(L, probed.type.className);
           if (members) {
-            const helper = classHasKeyHelper(L, probed.type.className, members, loc);
+            const helper = classHasKeyHelper(L, probed.type.className, members, probed.type, loc);
             // JS evaluates the key, then the receiver — and the receiver
             // is evaluated even though the answer does not read it.
             const keyIr = L.lowerExprExpecting(expr.left, STRING);
@@ -16858,7 +16873,8 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
             const recvIr = L.lowerExpr(expr.right);
             const rTmp = L.declareHiddenLocal("%inRecv", recvIr.type);
             const kRef = (): IrExpr => ({ kind: "varRef", localId: kTmp.id, type: STRING, loc });
-            const declared: IrExpr = { kind: "call", callee: helper, args: [kRef()], type: BOOL, loc };
+            const rRef = (): IrExpr => ({ kind: "varRef", localId: rTmp.id, type: recvIr.type, loc });
+            const declared: IrExpr = { kind: "call", callee: helper, args: [kRef(), rRef()], type: BOOL, loc };
             // …OR the instance's RUN-TIME property table, when the class
             // has one. The closed-member-set argument above rests on
             // "every construct which could ADD a member to an instance
