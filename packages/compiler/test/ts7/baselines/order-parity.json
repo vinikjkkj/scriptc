@@ -9585,6 +9585,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/7164-hasownproperty-hoisted-alias.js": {
+   "order": [
+    "<repo>/tests/corpus/7164-hasownproperty-hoisted-alias.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/720-accessors-basics.ts": {
    "order": [
     "<repo>/tests/corpus/720-accessors-basics.ts"

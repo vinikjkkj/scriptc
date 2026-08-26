@@ -18,7 +18,7 @@ import { isProvenanceSourceFile } from "../provenance-registry.js";
 import { ambientUndefVarRootOf, lowerImportEquals, nsUndefRead, nsWritableTarget, trapDeclRootOf } from "./lower-namespaces.js";
 import { expandoWritableTarget, lowerExpandoAssignStmt } from "./lower-expando.js";
 import { ForOfIterProjection, lowerForOfArrayIter, lowerForOfMap, lowerForOfSearchParams, lowerForOfSet, objectIterOverIndexShape, strCharsCall } from "./lower-containers.js";
-import { bindingContextualGenericFnNodeOf, bindingGenericFnAliasInfoOf, bindingGenericFnInfoOf, bindingGenericFnNodeOf, deadUnmappableBinding, implicitLocalFnInfoOf, implicitLocalFnNodeOf, islandRestFunctionLiteral, nullishExprUnitOf, nullishGenericBindingUnitOf, recordKeysArrayCall } from "./lower-calls.js";
+import { bindingContextualGenericFnNodeOf, bindingGenericFnAliasInfoOf, bindingGenericFnInfoOf, bindingGenericFnNodeOf, deadUnmappableBinding, implicitLocalFnInfoOf, implicitLocalFnNodeOf, islandRestFunctionLiteral, nullishExprUnitOf, nullishGenericBindingUnitOf, recordKeysArrayCall, hasOwnPropertyAliasDecl } from "./lower-calls.js";
 import { isMixinFnBinding, mixinResultBindingClassOf } from "./lower-mixins.js";
 import type { ClassInfo, ClassIteratorInfo } from "./lower-classes.js";
 import { bindingHoldsItsInitializer, genericIfaceBindingKeepsClass, isProvenPrefixTruncation } from "./lower-classes.js";
@@ -4447,6 +4447,14 @@ export function lowerVarDecl(L: Lowerer, decl: ts.VariableDeclaration, isLet: bo
     // `const process = globalThis.process` — a stdlib-global snapshot:
     // alias plumbing (see stdlibGlobalAliasDecl), no storage, no code.
     if (!isLet && stdlibGlobalAliasDecl(L, decl.name, decl.initializer)) return null;
+
+    // `var hasOwnProperty = Object.prototype.hasOwnProperty` — compile-time
+    // plumbing: the `.call(o, k)` uses lower to the own-key probe through
+    // the binding exactly as they do through the member access, and the
+    // READ of Object.prototype (which has no lowering) never happens. The
+    // `var` spelling is admitted here because the binding is checked
+    // never-reassigned, not because the declaration keyword says so.
+    if (hasOwnPropertyAliasDecl(L, decl.name, decl.initializer)) return null;
 
     // `const f = <T>(x: T) => x` — a generic function value binding: the
     // initializer monomorphizes per call-site-resolved signature exactly
