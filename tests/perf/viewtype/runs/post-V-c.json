@@ -1,0 +1,459 @@
+{
+ "tally": {
+  "MATCH": 28,
+  "WRONG": 0,
+  "TRAP": 36,
+  "DID-NOT-RUN": 0,
+  "NO-ORACLE": 0
+ },
+ "rows": [
+  {
+   "id": "V:u8:Uint8Array",
+   "verdict": "MATCH",
+   "node": "true",
+   "got": "true",
+   "reason": null
+  },
+  {
+   "id": "V:u8:Int8Array",
+   "verdict": "MATCH",
+   "node": "false",
+   "got": "false",
+   "reason": null
+  },
+  {
+   "id": "V:u8:Uint8ClampedArray",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC1090: 'instanceof' right-hand sides other than classes declared in the program is not supported yet"
+  },
+  {
+   "id": "V:u8:Int16Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC1090: 'instanceof' right-hand sides other than classes declared in the program is not supported yet"
+  },
+  {
+   "id": "V:u8:Uint16Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC1090: 'instanceof' right-hand sides other than classes declared in the program is not supported yet"
+  },
+  {
+   "id": "V:u8:Int32Array",
+   "verdict": "MATCH",
+   "node": "false",
+   "got": "false",
+   "reason": null
+  },
+  {
+   "id": "V:u8:Uint32Array",
+   "verdict": "MATCH",
+   "node": "false",
+   "got": "false",
+   "reason": null
+  },
+  {
+   "id": "V:u8:Float32Array",
+   "verdict": "MATCH",
+   "node": "false",
+   "got": "false",
+   "reason": null
+  },
+  {
+   "id": "V:u8:Float64Array",
+   "verdict": "MATCH",
+   "node": "false",
+   "got": "false",
+   "reason": null
+  },
+  {
+   "id": "V:u8:BigInt64Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC1090: 'instanceof' right-hand sides other than classes declared in the program is not supported yet"
+  },
+  {
+   "id": "V:u8:BigUint64Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC1090: 'instanceof' right-hand sides other than classes declared in the program is not supported yet"
+  },
+  {
+   "id": "V:u8:DataView",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC1090: 'instanceof' right-hand sides other than classes declared in the program is not supported yet"
+  },
+  {
+   "id": "V:u8:ArrayBuffer",
+   "verdict": "MATCH",
+   "node": "false",
+   "got": "false",
+   "reason": null
+  },
+  {
+   "id": "V:u8:SharedArrayBuffer",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC1090: 'instanceof' right-hand sides other than classes declared in the program is not supported yet"
+  },
+  {
+   "id": "V:u8:Buffer",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC0001: The right-hand side of an 'instanceof' expression must be either of type 'any', a class, function, or other type assignable to the 'Function' interface type, or an object type with a 'Symbol.hasInstance' method."
+  },
+  {
+   "id": "V:u8:Object",
+   "verdict": "TRAP",
+   "node": "true",
+   "got": null,
+   "reason": "SC1090: 'instanceof' right-hand sides other than classes declared in the program is not supported yet"
+  },
+  {
+   "id": "V:dv:Uint8Array",
+   "verdict": "MATCH",
+   "node": "false",
+   "got": "false",
+   "reason": null
+  },
+  {
+   "id": "V:dv:Int8Array",
+   "verdict": "MATCH",
+   "node": "false",
+   "got": "false",
+   "reason": null
+  },
+  {
+   "id": "V:dv:Uint8ClampedArray",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC1090: 'instanceof' right-hand sides other than classes declared in the program is not supported yet"
+  },
+  {
+   "id": "V:dv:Int16Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC1090: 'instanceof' right-hand sides other than classes declared in the program is not supported yet"
+  },
+  {
+   "id": "V:dv:Uint16Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC1090: 'instanceof' right-hand sides other than classes declared in the program is not supported yet"
+  },
+  {
+   "id": "V:dv:Int32Array",
+   "verdict": "MATCH",
+   "node": "false",
+   "got": "false",
+   "reason": null
+  },
+  {
+   "id": "V:dv:Uint32Array",
+   "verdict": "MATCH",
+   "node": "false",
+   "got": "false",
+   "reason": null
+  },
+  {
+   "id": "V:dv:Float32Array",
+   "verdict": "MATCH",
+   "node": "false",
+   "got": "false",
+   "reason": null
+  },
+  {
+   "id": "V:dv:Float64Array",
+   "verdict": "MATCH",
+   "node": "false",
+   "got": "false",
+   "reason": null
+  },
+  {
+   "id": "V:dv:BigInt64Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC1090: 'instanceof' right-hand sides other than classes declared in the program is not supported yet"
+  },
+  {
+   "id": "V:dv:BigUint64Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC1090: 'instanceof' right-hand sides other than classes declared in the program is not supported yet"
+  },
+  {
+   "id": "V:dv:DataView",
+   "verdict": "TRAP",
+   "node": "true",
+   "got": null,
+   "reason": "SC1090: 'instanceof' right-hand sides other than classes declared in the program is not supported yet"
+  },
+  {
+   "id": "V:dv:ArrayBuffer",
+   "verdict": "MATCH",
+   "node": "false",
+   "got": "false",
+   "reason": null
+  },
+  {
+   "id": "V:dv:SharedArrayBuffer",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC1090: 'instanceof' right-hand sides other than classes declared in the program is not supported yet"
+  },
+  {
+   "id": "V:dv:Buffer",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC0001: The right-hand side of an 'instanceof' expression must be either of type 'any', a class, function, or other type assignable to the 'Function' interface type, or an object type with a 'Symbol.hasInstance' method."
+  },
+  {
+   "id": "V:dv:Object",
+   "verdict": "TRAP",
+   "node": "true",
+   "got": null,
+   "reason": "SC1090: 'instanceof' right-hand sides other than classes declared in the program is not supported yet"
+  },
+  {
+   "id": "V:buf:Uint8Array",
+   "verdict": "MATCH",
+   "node": "true",
+   "got": "true",
+   "reason": null
+  },
+  {
+   "id": "V:buf:Int8Array",
+   "verdict": "MATCH",
+   "node": "false",
+   "got": "false",
+   "reason": null
+  },
+  {
+   "id": "V:buf:Uint8ClampedArray",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC1090: 'instanceof' right-hand sides other than classes declared in the program is not supported yet"
+  },
+  {
+   "id": "V:buf:Int16Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC1090: 'instanceof' right-hand sides other than classes declared in the program is not supported yet"
+  },
+  {
+   "id": "V:buf:Uint16Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC1090: 'instanceof' right-hand sides other than classes declared in the program is not supported yet"
+  },
+  {
+   "id": "V:buf:Int32Array",
+   "verdict": "MATCH",
+   "node": "false",
+   "got": "false",
+   "reason": null
+  },
+  {
+   "id": "V:buf:Uint32Array",
+   "verdict": "MATCH",
+   "node": "false",
+   "got": "false",
+   "reason": null
+  },
+  {
+   "id": "V:buf:Float32Array",
+   "verdict": "MATCH",
+   "node": "false",
+   "got": "false",
+   "reason": null
+  },
+  {
+   "id": "V:buf:Float64Array",
+   "verdict": "MATCH",
+   "node": "false",
+   "got": "false",
+   "reason": null
+  },
+  {
+   "id": "V:buf:BigInt64Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC1090: 'instanceof' right-hand sides other than classes declared in the program is not supported yet"
+  },
+  {
+   "id": "V:buf:BigUint64Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC1090: 'instanceof' right-hand sides other than classes declared in the program is not supported yet"
+  },
+  {
+   "id": "V:buf:DataView",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC1090: 'instanceof' right-hand sides other than classes declared in the program is not supported yet"
+  },
+  {
+   "id": "V:buf:ArrayBuffer",
+   "verdict": "MATCH",
+   "node": "false",
+   "got": "false",
+   "reason": null
+  },
+  {
+   "id": "V:buf:SharedArrayBuffer",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC1090: 'instanceof' right-hand sides other than classes declared in the program is not supported yet"
+  },
+  {
+   "id": "V:buf:Buffer",
+   "verdict": "TRAP",
+   "node": "true",
+   "got": null,
+   "reason": "SC0001: The right-hand side of an 'instanceof' expression must be either of type 'any', a class, function, or other type assignable to the 'Function' interface type, or an object type with a 'Symbol.hasInstance' method."
+  },
+  {
+   "id": "V:buf:Object",
+   "verdict": "TRAP",
+   "node": "true",
+   "got": null,
+   "reason": "SC1090: 'instanceof' right-hand sides other than classes declared in the program is not supported yet"
+  },
+  {
+   "id": "V:sub:Uint8Array",
+   "verdict": "MATCH",
+   "node": "true",
+   "got": "true",
+   "reason": null
+  },
+  {
+   "id": "V:sub:Int8Array",
+   "verdict": "MATCH",
+   "node": "false",
+   "got": "false",
+   "reason": null
+  },
+  {
+   "id": "V:sub:Uint8ClampedArray",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC1090: 'instanceof' right-hand sides other than classes declared in the program is not supported yet"
+  },
+  {
+   "id": "V:sub:Int16Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC1090: 'instanceof' right-hand sides other than classes declared in the program is not supported yet"
+  },
+  {
+   "id": "V:sub:Uint16Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC1090: 'instanceof' right-hand sides other than classes declared in the program is not supported yet"
+  },
+  {
+   "id": "V:sub:Int32Array",
+   "verdict": "MATCH",
+   "node": "false",
+   "got": "false",
+   "reason": null
+  },
+  {
+   "id": "V:sub:Uint32Array",
+   "verdict": "MATCH",
+   "node": "false",
+   "got": "false",
+   "reason": null
+  },
+  {
+   "id": "V:sub:Float32Array",
+   "verdict": "MATCH",
+   "node": "false",
+   "got": "false",
+   "reason": null
+  },
+  {
+   "id": "V:sub:Float64Array",
+   "verdict": "MATCH",
+   "node": "false",
+   "got": "false",
+   "reason": null
+  },
+  {
+   "id": "V:sub:BigInt64Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC1090: 'instanceof' right-hand sides other than classes declared in the program is not supported yet"
+  },
+  {
+   "id": "V:sub:BigUint64Array",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC1090: 'instanceof' right-hand sides other than classes declared in the program is not supported yet"
+  },
+  {
+   "id": "V:sub:DataView",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC1090: 'instanceof' right-hand sides other than classes declared in the program is not supported yet"
+  },
+  {
+   "id": "V:sub:ArrayBuffer",
+   "verdict": "MATCH",
+   "node": "false",
+   "got": "false",
+   "reason": null
+  },
+  {
+   "id": "V:sub:SharedArrayBuffer",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC1090: 'instanceof' right-hand sides other than classes declared in the program is not supported yet"
+  },
+  {
+   "id": "V:sub:Buffer",
+   "verdict": "TRAP",
+   "node": "false",
+   "got": null,
+   "reason": "SC0001: The right-hand side of an 'instanceof' expression must be either of type 'any', a class, function, or other type assignable to the 'Function' interface type, or an object type with a 'Symbol.hasInstance' method."
+  },
+  {
+   "id": "V:sub:Object",
+   "verdict": "TRAP",
+   "node": "true",
+   "got": null,
+   "reason": "SC1090: 'instanceof' right-hand sides other than classes declared in the program is not supported yet"
+  }
+ ]
+}

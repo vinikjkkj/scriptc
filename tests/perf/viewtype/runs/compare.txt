@@ -1,0 +1,23 @@
+# before -> after, every cell that moved
+cells compared: 1160
+   189  MATCH -> MATCH
+     1  TRAP -> MATCH
+   956  TRAP -> TRAP
+     7  WRONG -> MATCH
+     7  WRONG -> WRONG
+--- every changed cell ---
+  WRONG -> MATCH  D:dv:Uint8Array  before(got=true) after(got=false) node=false
+  WRONG -> MATCH  U:dv:Uint8Array  before(got=true) after(got=false) node=false
+  WRONG -> MATCH  K:dv:Uint8Array  before(got=true) after(got=false) node=false
+  WRONG -> MATCH  V:dv:Uint8Array  before(got=true) after(got=false) node=false
+  WRONG -> MATCH  W:dv:Uint8Array  before(got=true) after(got=false) node=false
+  WRONG -> MATCH  P:dv:isBuffer  before(got=THROW) after(got=false) node=false
+  WRONG -> MATCH  P:dv:ctorIsU8  before(got=THROW) after(got=false) node=false
+  TRAP -> MATCH  P:dv:clonedIsU8  before(got=null) after(got=false) node=false
+
+# the two backends against each other, after
+cells compared: 1160
+   197  MATCH -> MATCH
+   956  TRAP -> TRAP
+     7  WRONG -> WRONG
+--- every changed cell ---
