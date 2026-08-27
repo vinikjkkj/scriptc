@@ -1,0 +1,16 @@
+{
+  "compilerOptions": {
+    "baseUrl": "..",
+    "paths": {
+      "@core": [
+        "src/core/index.ts"
+      ],
+      "@core/*": [
+        "src/core/*"
+      ],
+      "aliaspkg2": [
+        "packages/aliaspkg2-decoy/src/index.ts"
+      ]
+    }
+  }
+}
