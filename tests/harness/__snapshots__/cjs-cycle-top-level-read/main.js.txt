@@ -1,0 +1,7 @@
+cjs-cycle-top-level-read/a.js:1:1 - error SC1016: circular imports (cjs-cycle-top-level-read/a.js → cjs-cycle-top-level-read/b.js → cjs-cycle-top-level-read/a.js; the cycle-crossing binding 'a' is read at cjs-cycle-top-level-read/b.js:6, outside any function body — the exporter has not attached that member yet, so Node answers 'undefined' there and this lowering would answer the final value) are not supported yet
+
+  1 | 'use strict';
+    | ^
+  2 | console.log('a start');
+
+  hint: ES-module cycles with declaration-only top levels compile as-is, and so do CommonJS cycles whose cycle-crossing require bindings are read only inside function bodies; the fix depends on which the message names — move the named read or call into a function body, attach members to 'exports' instead of replacing 'module.exports', or break the named edge
