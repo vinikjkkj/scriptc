@@ -29,7 +29,7 @@
  * this); unlisted packages still take the live pipeline. */
 
 import { execFile } from "node:child_process";
-import { readFileSync, statSync } from "node:fs";
+import { readdirSync, readFileSync, statSync } from "node:fs";
 import { cp, mkdir, mkdtemp, rename, rm, writeFile } from "node:fs/promises";
 import { builtinModules } from "node:module";
 import { homedir, tmpdir } from "node:os";
@@ -325,12 +325,34 @@ async function fetchSourceTree(repo: string, commit: string): Promise<string> {
     // flag only rides on the platform whose tar needs it.
     const win = process.platform === "win32";
     const tarPath = (p: string): string => (win ? p.replaceAll("\\", "/") : p);
-    await execFileAsync("tar", [
-      ...(win ? ["--force-local"] : []),
-      "-xzf", tarPath(tarball),
-      "-C", tarPath(extractDir),
-      "--strip-components=1",
-    ]);
+    try {
+      await execFileAsync("tar", [
+        ...(win ? ["--force-local"] : []),
+        "-xzf", tarPath(tarball),
+        "-C", tarPath(extractDir),
+        "--strip-components=1",
+      ]);
+    } catch (e) {
+      // GNU tar on Windows cannot create a symlink without the developer
+      // privilege, and a repo that ships one exits 2 having extracted
+      // every OTHER member. mysql2 is one (`.cursorrules`,
+      // `.windsurfrules` and `AGENTS.md` all link to `CLAUDE.md`), and
+      // failing the fetch there islands the package for a reason that has
+      // nothing to do with provenance: the tree is complete apart from
+      // links, and no link is a compilable source file.
+      //
+      // Accept the tree exactly when EVERY reported failure is a symlink
+      // creation and something was extracted; any other tar error — a
+      // truncated archive, a disk-full, a bad path — still throws, so the
+      // package still falls back to the island with its real reason.
+      const stderr = String((e as { stderr?: unknown }).stderr ?? "");
+      const reported = stderr
+        .split(/\r?\n/)
+        .map((l) => l.trim())
+        .filter((l) => l.startsWith("tar: ") && !l.startsWith("tar: Exiting with failure status"));
+      const onlyLinks = reported.length > 0 && reported.every((l) => l.includes("Cannot create symlink to"));
+      if (!onlyLinks || readdirSync(extractDir).length === 0) throw e;
+    }
     try {
       await rename(extractDir, dest);
     } catch {
