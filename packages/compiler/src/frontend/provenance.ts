@@ -491,6 +491,17 @@ function sourceAliasesOf(pkgDir: string): Record<string, string[]> | undefined {
   const seen = new Set<string>();
   let baseUrl: string | undefined;
   let paths: Record<string, unknown> | undefined;
+  // WHERE each field was DECLARED. tsc resolves a relative "baseUrl"
+  // against the directory of the config file that spells it, not against
+  // the project being built — and an inherited config commonly sits a
+  // level up and spells ".." to mean the repo root. Resolving it against
+  // the package directory instead moves every target by the depth of the
+  // package: `packages/fake-server` + ".." is `packages`, so
+  // `packages/src/...` — a directory that does not exist, in a table that
+  // still looks plausible. (TS >= 4.1: with no baseUrl anywhere, targets
+  // are relative to the config that declares "paths".)
+  let baseUrlDir: string | undefined;
+  let pathsDir: string | undefined;
   const load = (file: string): void => {
     const abs = resolve(file);
     if (seen.has(abs) || !isFile(abs)) return;
@@ -502,9 +513,13 @@ function sourceAliasesOf(pkgDir: string): Record<string, string[]> | undefined {
       const o = opts as Record<string, unknown>;
       // The NEAREST config in the chain wins for each field (a child's
       // value overrides what it extends), so only fill what is unset.
-      if (baseUrl === undefined && typeof o["baseUrl"] === "string") baseUrl = o["baseUrl"];
+      if (baseUrl === undefined && typeof o["baseUrl"] === "string") {
+        baseUrl = o["baseUrl"];
+        baseUrlDir = dirname(abs);
+      }
       if (paths === undefined && o["paths"] !== null && typeof o["paths"] === "object") {
         paths = o["paths"] as Record<string, unknown>;
+        pathsDir = dirname(abs);
       }
     }
     const ext = json["extends"];
@@ -521,7 +536,8 @@ function sourceAliasesOf(pkgDir: string): Record<string, string[]> | undefined {
     if (paths !== undefined) break;
   }
   if (paths === undefined) return undefined;
-  const base = join(pkgDir, baseUrl ?? ".");
+  const base =
+    baseUrl !== undefined ? join(baseUrlDir ?? pkgDir, baseUrl) : (pathsDir ?? pkgDir);
   const out: Record<string, string[]> = {};
   for (const [key, raw] of Object.entries(paths)) {
     if (!Array.isArray(raw)) continue;
@@ -800,5 +816,58 @@ export async function resolveProvenanceSources(entryPath: string): Promise<Prove
       ...(Object.keys(tree.external).length > 0 ? { external: tree.external } : {}),
     });
   }
+  /* An alias key that TWO mapped packages spell differently has exactly one
+   * answer, because tsconfig "paths" is one flat table per program and
+   * cannot be scoped to the package that declared it. The registry resolves
+   * such a key to the FIRST package mapped -- the one the driver's own
+   * imports reached -- and every later package spelling it borrows that
+   * answer.
+   *
+   * The borrow is not a refusal. Two checkouts of one monorepo export the
+   * same names with the same signatures, so the program typechecks,
+   * compiles, runs and prints the other commit's values. It cannot be made
+   * per-file here, so it is at least made LOUD -- once, naming the shape,
+   * rather than once per key.
+   *
+   * Keys that are also a package ENTRY are excluded: `provenancePaths()`
+   * writes the entry table after the alias table and `resolveSpecifier`
+   * consults entries first, so for those the alias never decides anything
+   * and a note would be a false alarm. On zapo's bench that is the
+   * difference between 41 notes and one. */
+  const entrySpecifiers = new Set<string>();
+  for (const pkg of packages) for (const spec of Object.keys(pkg.entries)) entrySpecifiers.add(spec);
+  const firstTarget = new Map<string, { pkg: string; target: string }>();
+  const collided = new Set<string>();
+  const borrowers = new Set<string>();
+  const winners = new Set<string>();
+  for (const pkg of packages) {
+    for (const [key, targets] of Object.entries(pkg.aliases ?? {})) {
+      const target = targets[0];
+      if (target === undefined || entrySpecifiers.has(key)) continue;
+      const seen = firstTarget.get(key);
+      if (seen === undefined) {
+        firstTarget.set(key, { pkg: pkg.name, target });
+        continue;
+      }
+      if (seen.target === target) continue;
+      collided.add(key);
+      borrowers.add(pkg.name);
+      winners.add(seen.pkg);
+    }
+  }
+  if (collided.size > 0) {
+    const examples = [...collided].slice(0, 5).map((k) => `'${k}'`).join(", ");
+    // The winner is per KEY, so it is only named when there is one of them.
+    // Naming the first key's winner for a set with several would be the same
+    // class of quiet inaccuracy this note exists to end.
+    const who = winners.size === 1 ? `${[...winners][0]}'s` : "the first-mapped package's";
+    notes.push(
+      `${collided.size} alias key(s) are spelled by more than one mapped package with different ` +
+        `targets (${examples}${collided.size > 5 ? ", …" : ""}); tsconfig "paths" is one table per ` +
+        `program, so ${who} answer is used for all of them and ${[...borrowers].join(", ")} ` +
+        `compile against ${who} checkout for those specifiers`,
+    );
+  }
+
   return { packages, notes };
 }
