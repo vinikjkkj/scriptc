@@ -1,0 +1,113 @@
+{
+ "entry": "G:/blocks/pkgstatus-lab/app/pkgs/store-mysql/appstate.store.ts",
+ "flags": [
+  "--provenance-sources"
+ ],
+ "elapsedMs": 441618,
+ "crashed": null,
+ "preflightFailed": false,
+ "stats": {
+  "statementsTotal": 30734,
+  "statementsFailed": 1,
+  "statementsIsland": 0,
+  "functionsSkipped": 0
+ },
+ "unreachedStats": {
+  "statementsTotal": 1781,
+  "statementsFailed": 1,
+  "statementsIsland": 0,
+  "functionsSkipped": 8
+ },
+ "npmStatic": null,
+ "provenanceNotes": [
+  "zapo-js@1.6.2 <- 250f9af5229a",
+  "note: argo-codec@0.2.1: no provenance attestation published; island path used",
+  "note: mysql2@3.24.2: Command failed: tar --force-local -xzf G:/blocks/pkgstatus-tmp/scriptc-provenance-i3sfFb/src.tgz -C G:/blocks/pkgstatus-tmp/scriptc-provenance-i3sfFb/tree --strip-components=1\ntar: .cursorrules: Cannot create symlink to 'CLAUDE.md': No such file or directory\ntar: .windsurfrules: Cannot create symlink to 'CLAUDE.md': No such file or directory\ntar: AGENTS.md: Cannot create symlink to 'CLAUDE.md': No such file or directory\ntar: Exiting with failure status due to previous errors\n; island path used"
+ ],
+ "sites": [
+  {
+   "section": "blocker",
+   "code": "SC2013",
+   "message": "values from the 'mysql2' package run in the embedded dynamic engine, which this build does not include",
+   "file": "G:/blocks/pkgstatus-lab/app/pkgs/store-mysql/BaseMysqlStore.ts",
+   "line": 13
+  },
+  {
+   "section": "blocker",
+   "code": "SC2013",
+   "message": "importing 'mysql2' requires the embedded dynamic engine, which this build does not include — the package's implementation runs there",
+   "file": "G:/blocks/pkgstatus-lab/app/pkgs/store-mysql/connection.ts",
+   "line": 1
+  },
+  {
+   "section": "runtimeFence",
+   "code": "SC2020",
+   "message": "'require() with a run-time specifier' is part of the standard library types but has no scriptc lowering yet",
+   "file": "G:/blocks/pkgstatus-lab/prov/250f9af5229a545eec28ddbd3e8774a397cdb0bb/spec/proto/index.js",
+   "line": 1
+  },
+  {
+   "section": "runtimeFence",
+   "code": "SC1090",
+   "message": "constructing values other than classes declared in the program is not supported yet",
+   "file": "G:/blocks/pkgstatus-lab/prov/250f9af5229a545eec28ddbd3e8774a397cdb0bb/spec/proto/index.js",
+   "line": 1
+  },
+  {
+   "section": "unreached",
+   "code": "SC2020",
+   "message": "'globalThis' is part of the standard library types but has no scriptc lowering yet",
+   "file": "G:/blocks/pkgstatus-lab/prov/250f9af5229a545eec28ddbd3e8774a397cdb0bb/src/util/runtime.ts",
+   "line": 20
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "extending classes not declared in the program ('BaseMysqlStore') is not supported yet",
+   "file": "G:/blocks/pkgstatus-lab/app/pkgs/store-mysql/appstate.store.ts",
+   "line": 35
+  },
+  {
+   "section": "unreached",
+   "code": "SC2001",
+   "message": "values of type 'WaMediaTransferClient' cannot be compiled yet (supported: number, string, boolean, arrays, Maps, Sets, RegExp, functions, classes, records, unions of those, and 'unknown')",
+   "file": "G:/blocks/pkgstatus-lab/prov/250f9af5229a545eec28ddbd3e8774a397cdb0bb/src/appstate/utils.ts",
+   "line": 65
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'QueryOutput' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "G:/blocks/pkgstatus-lab/app/pkgs/store-mysql/helpers.ts",
+   "line": 13
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'QueryOutput' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "G:/blocks/pkgstatus-lab/app/pkgs/store-mysql/helpers.ts",
+   "line": 17
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'QueryOutput' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "G:/blocks/pkgstatus-lab/app/pkgs/store-mysql/helpers.ts",
+   "line": 21
+  },
+  {
+   "section": "unreached",
+   "code": "SC2013",
+   "message": "values from the 'mysql2' package run in the embedded dynamic engine, which this build does not include",
+   "file": "G:/blocks/pkgstatus-lab/app/pkgs/store-mysql/connection.ts",
+   "line": 368
+  },
+  {
+   "section": "unreached",
+   "code": "SC2013",
+   "message": "values from the 'mysql2' package run in the embedded dynamic engine, which this build does not include",
+   "file": "G:/blocks/pkgstatus-lab/app/pkgs/store-mysql/connection.ts",
+   "line": 392
+  }
+ ]
+}

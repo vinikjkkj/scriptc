@@ -1,0 +1,39 @@
+{
+ "entry": "G:/blocks/pkgstatus-lab/app/pkgs/voip/index.ts",
+ "flags": [
+  "--provenance-sources"
+ ],
+ "elapsedMs": 35477,
+ "crashed": null,
+ "preflightFailed": true,
+ "stats": {
+  "statementsTotal": 0,
+  "statementsFailed": 0,
+  "statementsIsland": 0,
+  "functionsSkipped": 0
+ },
+ "unreachedStats": null,
+ "npmStatic": null,
+ "provenanceNotes": [
+  "zapo-js@1.6.2 <- 250f9af5229a",
+  "note: argo-codec@0.2.1: no provenance attestation published; island path used",
+  "note: libmlow-wasm@0.1.1: no provenance attestation published; island path used",
+  "note: @roamhq/wrtc@0.10.0: no provenance attestation published; island path used"
+ ],
+ "sites": [
+  {
+   "section": "blocker",
+   "code": "SC0001",
+   "message": "Cannot find name 'RTCPeerConnection'.",
+   "file": "G:/blocks/pkgstatus-lab/app/pkgs/voip/relay/WaSctpRelay.ts",
+   "line": 30
+  },
+  {
+   "section": "blocker",
+   "code": "SC0001",
+   "message": "Cannot find name 'RTCDataChannel'.",
+   "file": "G:/blocks/pkgstatus-lab/app/pkgs/voip/relay/WaSctpRelay.ts",
+   "line": 31
+  }
+ ]
+}

@@ -1,0 +1,400 @@
+{
+ "entry": "G:/blocks/pkgstatus-lab/app/pkgs/wam/index.ts",
+ "flags": [
+  "--provenance-sources"
+ ],
+ "elapsedMs": 759267,
+ "crashed": null,
+ "preflightFailed": false,
+ "stats": {
+  "statementsTotal": 46013,
+  "statementsFailed": 14,
+  "statementsIsland": 0,
+  "functionsSkipped": 0
+ },
+ "unreachedStats": {
+  "statementsTotal": 2795,
+  "statementsFailed": 31,
+  "statementsIsland": 0,
+  "functionsSkipped": 1
+ },
+ "npmStatic": null,
+ "provenanceNotes": [
+  "zapo-js@1.6.2 <- 250f9af5229a",
+  "note: argo-codec@0.2.1: no provenance attestation published; island path used",
+  "note: @vinikjkkj/wa-wam@2.3000.1041713829-1ec0d3b: no source mapping for '@vinikjkkj/wa-wam' (published target: index.js); island path used"
+ ],
+ "sites": [
+  {
+   "section": "blocker",
+   "code": "SC2013",
+   "message": "importing '@vinikjkkj/wa-wam' requires the embedded dynamic engine, which this build does not include — the package's implementation runs there",
+   "file": "G:/blocks/pkgstatus-lab/app/pkgs/wam/registry.ts",
+   "line": 1
+  },
+  {
+   "section": "blocker",
+   "code": "SC2013",
+   "message": "importing '@vinikjkkj/wa-wam' requires the embedded dynamic engine, which this build does not include — the package's implementation runs there",
+   "file": "G:/blocks/pkgstatus-lab/app/pkgs/wam/globals.ts",
+   "line": 1
+  },
+  {
+   "section": "blocker",
+   "code": "SC2013",
+   "message": "importing '@vinikjkkj/wa-wam' requires the embedded dynamic engine, which this build does not include — the package's implementation runs there",
+   "file": "G:/blocks/pkgstatus-lab/app/pkgs/wam/wire/encoder.ts",
+   "line": 1
+  },
+  {
+   "section": "blocker",
+   "code": "SC2013",
+   "message": "importing '@vinikjkkj/wa-wam' requires the embedded dynamic engine, which this build does not include — the package's implementation runs there",
+   "file": "G:/blocks/pkgstatus-lab/app/pkgs/wam/wire/WamBatch.ts",
+   "line": 1
+  },
+  {
+   "section": "blocker",
+   "code": "SC2013",
+   "message": "importing '@vinikjkkj/wa-wam' requires the embedded dynamic engine, which this build does not include — the package's implementation runs there",
+   "file": "G:/blocks/pkgstatus-lab/app/pkgs/wam/WaWamCoordinator.ts",
+   "line": 1
+  },
+  {
+   "section": "blocker",
+   "code": "SC2020",
+   "message": "'emit('debug_transport_node_in') with 1 arguments where the event's tuple has 0' is part of the standard library types but has no scriptc lowering yet",
+   "file": "G:/blocks/pkgstatus-lab/prov/250f9af5229a545eec28ddbd3e8774a397cdb0bb/src/client/WaClient.ts",
+   "line": 261
+  },
+  {
+   "section": "blocker",
+   "code": "SC2020",
+   "message": "'emit('debug_transport_node_out') with 1 arguments where the event's tuple has 0' is part of the standard library types but has no scriptc lowering yet",
+   "file": "G:/blocks/pkgstatus-lab/prov/250f9af5229a545eec28ddbd3e8774a397cdb0bb/src/client/WaClient.ts",
+   "line": 264
+  },
+  {
+   "section": "blocker",
+   "code": "SC2013",
+   "message": "values from the '@vinikjkkj/wa-wam' package run in the embedded dynamic engine, which this build does not include",
+   "file": "G:/blocks/pkgstatus-lab/app/pkgs/wam/registry.ts",
+   "line": 42
+  },
+  {
+   "section": "blocker",
+   "code": "SC2013",
+   "message": "values from the '@vinikjkkj/wa-wam' package run in the embedded dynamic engine, which this build does not include",
+   "file": "G:/blocks/pkgstatus-lab/app/pkgs/wam/registry.ts",
+   "line": 56
+  },
+  {
+   "section": "blocker",
+   "code": "SC2020",
+   "message": "'Number of unknown values' is part of the standard library types but has no scriptc lowering yet",
+   "file": "G:/blocks/pkgstatus-lab/app/pkgs/wam/registry.ts",
+   "line": 77
+  },
+  {
+   "section": "blocker",
+   "code": "SC2013",
+   "message": "values from the '@vinikjkkj/wa-wam' package run in the embedded dynamic engine, which this build does not include",
+   "file": "G:/blocks/pkgstatus-lab/app/pkgs/wam/globals.ts",
+   "line": 67
+  },
+  {
+   "section": "blocker",
+   "code": "SC2012",
+   "message": "'Number.parseInt' runs in the embedded dynamic engine, which this build does not include",
+   "file": "G:/blocks/pkgstatus-lab/app/pkgs/wam/WaWamUploader.ts",
+   "line": 88
+  },
+  {
+   "section": "blocker",
+   "code": "SC2013",
+   "message": "values from the '@vinikjkkj/wa-wam' package run in the embedded dynamic engine, which this build does not include",
+   "file": "G:/blocks/pkgstatus-lab/app/pkgs/wam/wire/WamBatch.ts",
+   "line": 39
+  },
+  {
+   "section": "blocker",
+   "code": "SC2013",
+   "message": "values from the '@vinikjkkj/wa-wam' package run in the embedded dynamic engine, which this build does not include",
+   "file": "G:/blocks/pkgstatus-lab/app/pkgs/wam/wire/WamBatch.ts",
+   "line": 42
+  },
+  {
+   "section": "blocker",
+   "code": "SC2020",
+   "message": "'Uint8Array.from' is part of the standard library types but has no scriptc lowering yet",
+   "file": "G:/blocks/pkgstatus-lab/app/pkgs/wam/synthetic/random.ts",
+   "line": 20
+  },
+  {
+   "section": "blocker",
+   "code": "SC2013",
+   "message": "values from the '@vinikjkkj/wa-wam' package run in the embedded dynamic engine, which this build does not include",
+   "file": "G:/blocks/pkgstatus-lab/app/pkgs/wam/wire/encoder.ts",
+   "line": 9
+  },
+  {
+   "section": "blocker",
+   "code": "SC2013",
+   "message": "values from the '@vinikjkkj/wa-wam' package run in the embedded dynamic engine, which this build does not include",
+   "file": "G:/blocks/pkgstatus-lab/app/pkgs/wam/wire/encoder.ts",
+   "line": 10
+  },
+  {
+   "section": "blocker",
+   "code": "SC2013",
+   "message": "values from the '@vinikjkkj/wa-wam' package run in the embedded dynamic engine, which this build does not include (instantiating 'commit' with <string>)",
+   "file": "G:/blocks/pkgstatus-lab/app/pkgs/wam/WaWamCoordinator.ts",
+   "line": 110
+  },
+  {
+   "section": "runtimeFence",
+   "code": "SC2020",
+   "message": "'require() with a run-time specifier' is part of the standard library types but has no scriptc lowering yet",
+   "file": "G:/blocks/pkgstatus-lab/prov/250f9af5229a545eec28ddbd3e8774a397cdb0bb/spec/proto/index.js",
+   "line": 1
+  },
+  {
+   "section": "runtimeFence",
+   "code": "SC1090",
+   "message": "constructing values other than classes declared in the program is not supported yet",
+   "file": "G:/blocks/pkgstatus-lab/prov/250f9af5229a545eec28ddbd3e8774a397cdb0bb/spec/proto/index.js",
+   "line": 1
+  },
+  {
+   "section": "advisory",
+   "code": "SC6003",
+   "message": "this projection of '%m101.WaMobileTcpSocket' COPIES the field 'readyState', and a method of '%m101.WaMobileTcpSocket' writes it",
+   "file": "G:/blocks/pkgstatus-lab/prov/250f9af5229a545eec28ddbd3e8774a397cdb0bb/src/auth/credentials-flow.ts",
+   "line": 204
+  },
+  {
+   "section": "unreached",
+   "code": "SC2020",
+   "message": "'globalThis' is part of the standard library types but has no scriptc lowering yet",
+   "file": "G:/blocks/pkgstatus-lab/prov/250f9af5229a545eec28ddbd3e8774a397cdb0bb/src/util/runtime.ts",
+   "line": 20
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "'Promise<{ fileEncSha256: Uint8Array; fileSha256: Uint8Array; firstFrameSidecar: Uint8Array | undefined; plaintextLength: number; streamingSidecar: Uint8Array | undefined }>' values where 'Promise<{ fileEncSha256: Uint8Array; fileSha256: Uint8Array; plaintextLength: number }>' is expected is not supported yet",
+   "file": "G:/blocks/pkgstatus-lab/prov/250f9af5229a545eec28ddbd3e8774a397cdb0bb/src/media/transfer/WaMediaTransferClient.ts",
+   "line": 438
+  },
+  {
+   "section": "unreached",
+   "code": "SC2020",
+   "message": "'the promisified deflate with this argument shape' is part of the standard library types but has no scriptc lowering yet",
+   "file": "G:/blocks/pkgstatus-lab/prov/250f9af5229a545eec28ddbd3e8774a397cdb0bb/src/client/messaging/companion-host.ts",
+   "line": 33
+  },
+  {
+   "section": "unreached",
+   "code": "SC2020",
+   "message": "'clearTimeout of 'number | undefined' handles' is part of the standard library types but has no scriptc lowering yet",
+   "file": "G:/blocks/pkgstatus-lab/prov/250f9af5229a545eec28ddbd3e8774a397cdb0bb/src/client/coordinators/WaMobileCoordinator.ts",
+   "line": 217
+  },
+  {
+   "section": "unreached",
+   "code": "SC2020",
+   "message": "'new Set(values)' is part of the standard library types but has no scriptc lowering yet",
+   "file": "G:/blocks/pkgstatus-lab/prov/250f9af5229a545eec28ddbd3e8774a397cdb0bb/src/client/coordinators/WaMobileCoordinator.ts",
+   "line": 712
+  },
+  {
+   "section": "unreached",
+   "code": "SC2020",
+   "message": "'Math.max' is part of the standard library types but has no scriptc lowering yet",
+   "file": "G:/blocks/pkgstatus-lab/prov/250f9af5229a545eec28ddbd3e8774a397cdb0bb/src/client/coordinators/WaMobileCoordinator.ts",
+   "line": 738
+  },
+  {
+   "section": "unreached",
+   "code": "SC1063",
+   "message": "this use of a catch binding is not supported yet",
+   "file": "G:/blocks/pkgstatus-lab/prov/250f9af5229a545eec28ddbd3e8774a397cdb0bb/src/client/persistence/companion-host.ts",
+   "line": 64
+  },
+  {
+   "section": "unreached",
+   "code": "SC2020",
+   "message": "'writeFile with 3 arguments' is part of the standard library types but has no scriptc lowering yet",
+   "file": "G:/blocks/pkgstatus-lab/prov/250f9af5229a545eec28ddbd3e8774a397cdb0bb/src/client/persistence/companion-host.ts",
+   "line": 94
+  },
+  {
+   "section": "unreached",
+   "code": "SC2020",
+   "message": "'fs/promises.rename' is typed by @types/node but has no scriptc lowering yet",
+   "file": "G:/blocks/pkgstatus-lab/prov/250f9af5229a545eec28ddbd3e8774a397cdb0bb/src/client/persistence/companion-host.ts",
+   "line": 95
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "dynamic keyed reads of '{ child: ({ [key: string]: unknown }) => ... | undefined; debug: (unknown) => void; error: (unknown) => void; info: (unknown) => void; level: string; trace: (unknown) => void; warn: (unknown) => void }' (the declared fields have no one common type) is not supported yet",
+   "file": "G:/blocks/pkgstatus-lab/prov/250f9af5229a545eec28ddbd3e8774a397cdb0bb/src/infra/log/PinoLogger.ts",
+   "line": 137
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "Function.prototype.call on a compiled function value (compiled calls are direct — no runtime 'this' or arguments object exists to re-route; spell the call directly: 'Object.prototype.hasOwnProperty(...)') is not supported yet",
+   "file": "G:/blocks/pkgstatus-lab/prov/250f9af5229a545eec28ddbd3e8774a397cdb0bb/src/infra/log/PinoLogger.ts",
+   "line": 141
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "dynamic keyed reads of '{ child: ({ [key: string]: unknown }) => ... | undefined; debug: (unknown) => void; error: (unknown) => void; info: (unknown) => void; level: string; trace: (unknown) => void; warn: (unknown) => void }' (the declared fields have no one common type) is not supported yet",
+   "file": "G:/blocks/pkgstatus-lab/prov/250f9af5229a545eec28ddbd3e8774a397cdb0bb/src/infra/log/PinoLogger.ts",
+   "line": 146
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "calls of the generic method 'on' with no defining object literal (the declaration is signature-only — only methods declared with a body in an object literal monomorphize) is not supported yet",
+   "file": "G:/blocks/pkgstatus-lab/app/pkgs/wam/synthetic/WaWamSyntheticUi.ts",
+   "line": 179
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "calls of the generic method 'on' with no defining object literal (the declaration is signature-only — only methods declared with a body in an object literal monomorphize) is not supported yet",
+   "file": "G:/blocks/pkgstatus-lab/app/pkgs/wam/synthetic/WaWamSyntheticUi.ts",
+   "line": 180
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "calls of the generic method 'off' with no defining object literal (the declaration is signature-only — only methods declared with a body in an object literal monomorphize) is not supported yet",
+   "file": "G:/blocks/pkgstatus-lab/app/pkgs/wam/synthetic/WaWamSyntheticUi.ts",
+   "line": 182
+  },
+  {
+   "section": "unreached",
+   "code": "SC2020",
+   "message": "'Date.getHours' is part of the standard library types but has no scriptc lowering yet",
+   "file": "G:/blocks/pkgstatus-lab/app/pkgs/wam/synthetic/WaWamSyntheticUi.ts",
+   "line": 738
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "calls of the generic method 'on' with no defining object literal (the declaration is signature-only — only methods declared with a body in an object literal monomorphize) is not supported yet",
+   "file": "G:/blocks/pkgstatus-lab/app/pkgs/wam/WaWamAutoEmitter.ts",
+   "line": 147
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "calls of the generic method 'on' with no defining object literal (the declaration is signature-only — only methods declared with a body in an object literal monomorphize) is not supported yet",
+   "file": "G:/blocks/pkgstatus-lab/app/pkgs/wam/WaWamAutoEmitter.ts",
+   "line": 148
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "calls of the generic method 'on' with no defining object literal (the declaration is signature-only — only methods declared with a body in an object literal monomorphize) is not supported yet",
+   "file": "G:/blocks/pkgstatus-lab/app/pkgs/wam/WaWamAutoEmitter.ts",
+   "line": 149
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "calls of the generic method 'on' with no defining object literal (the declaration is signature-only — only methods declared with a body in an object literal monomorphize) is not supported yet",
+   "file": "G:/blocks/pkgstatus-lab/app/pkgs/wam/WaWamAutoEmitter.ts",
+   "line": 150
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "calls of the generic method 'on' with no defining object literal (the declaration is signature-only — only methods declared with a body in an object literal monomorphize) is not supported yet",
+   "file": "G:/blocks/pkgstatus-lab/app/pkgs/wam/WaWamAutoEmitter.ts",
+   "line": 151
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "calls of the generic method 'on' with no defining object literal (the declaration is signature-only — only methods declared with a body in an object literal monomorphize) is not supported yet",
+   "file": "G:/blocks/pkgstatus-lab/app/pkgs/wam/WaWamAutoEmitter.ts",
+   "line": 152
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "calls of the generic method 'on' with no defining object literal (the declaration is signature-only — only methods declared with a body in an object literal monomorphize) is not supported yet",
+   "file": "G:/blocks/pkgstatus-lab/app/pkgs/wam/WaWamAutoEmitter.ts",
+   "line": 153
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "calls of the generic method 'on' with no defining object literal (the declaration is signature-only — only methods declared with a body in an object literal monomorphize) is not supported yet",
+   "file": "G:/blocks/pkgstatus-lab/app/pkgs/wam/WaWamAutoEmitter.ts",
+   "line": 154
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "calls of the generic method 'on' with no defining object literal (the declaration is signature-only — only methods declared with a body in an object literal monomorphize) is not supported yet",
+   "file": "G:/blocks/pkgstatus-lab/app/pkgs/wam/WaWamAutoEmitter.ts",
+   "line": 155
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "calls of the generic method 'on' with no defining object literal (the declaration is signature-only — only methods declared with a body in an object literal monomorphize) is not supported yet",
+   "file": "G:/blocks/pkgstatus-lab/app/pkgs/wam/WaWamAutoEmitter.ts",
+   "line": 156
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "calls of the generic method 'off' with no defining object literal (the declaration is signature-only — only methods declared with a body in an object literal monomorphize) is not supported yet",
+   "file": "G:/blocks/pkgstatus-lab/app/pkgs/wam/WaWamAutoEmitter.ts",
+   "line": 158
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "comparisons of union-typed values (narrow first: check a discriminant field, or compare with '!== undefined'/'!== null' for unit arms) are not supported yet",
+   "file": "G:/blocks/pkgstatus-lab/app/pkgs/wam/wire/WamBatch.ts",
+   "line": 51
+  },
+  {
+   "section": "unreached",
+   "code": "SC2013",
+   "message": "values from the '@vinikjkkj/wa-wam' package run in the embedded dynamic engine, which this build does not include",
+   "file": "G:/blocks/pkgstatus-lab/app/pkgs/wam/WaWamCoordinator.ts",
+   "line": 75
+  },
+  {
+   "section": "unreached",
+   "code": "SC2013",
+   "message": "values from the '@vinikjkkj/wa-wam' package run in the embedded dynamic engine, which this build does not include",
+   "file": "G:/blocks/pkgstatus-lab/app/pkgs/wam/WaWamCoordinator.ts",
+   "line": 77
+  },
+  {
+   "section": "unreached",
+   "code": "SC2013",
+   "message": "values from the '@vinikjkkj/wa-wam' package run in the embedded dynamic engine, which this build does not include (instantiating 'commit' with <string>)",
+   "file": "G:/blocks/pkgstatus-lab/app/pkgs/wam/WaWamCoordinator.ts",
+   "line": 110
+  },
+  {
+   "section": "unreached",
+   "code": "SC2008",
+   "message": "values of type 'WaClientPluginDefinition & { readonly exposeAs: \"wam\"; readonly setup: (ctx: WaClientPluginContext) => WaWamCoordinator; readonly __pluginEvents?: {} | undefined; }' cannot be compiled: this intersection resolves to no runtime shape",
+   "file": "G:/blocks/pkgstatus-lab/app/pkgs/wam/plugin.ts",
+   "line": 27
+  }
+ ]
+}

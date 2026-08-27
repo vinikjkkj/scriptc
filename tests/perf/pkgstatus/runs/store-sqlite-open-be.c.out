@@ -1,0 +1,1 @@
+Unhandled promise rejection: Error: 'globalThis' is part of the standard library types but has no scriptc lowering yet [SC2020 at G:/blocks/pkgstatus-lab/prov/250f9af5229a545eec28ddbd3e8774a397cdb0bb/src/util/runtime.ts:20]

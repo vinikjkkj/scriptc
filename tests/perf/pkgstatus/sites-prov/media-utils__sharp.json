@@ -1,0 +1,63 @@
+{
+ "entry": "G:/blocks/pkgstatus-lab/app/pkgs/media-utils/sharp.ts",
+ "flags": [
+  "--provenance-sources"
+ ],
+ "elapsedMs": 18405,
+ "crashed": null,
+ "preflightFailed": false,
+ "stats": {
+  "statementsTotal": 1,
+  "statementsFailed": 0,
+  "statementsIsland": 0,
+  "functionsSkipped": 0
+ },
+ "unreachedStats": {
+  "statementsTotal": 4,
+  "statementsFailed": 4,
+  "statementsIsland": 0,
+  "functionsSkipped": 1
+ },
+ "npmStatic": null,
+ "provenanceNotes": [
+  "zapo-js@1.6.2 <- 250f9af5229a",
+  "note: sharp@0.33.5: no provenance attestation published; island path used"
+ ],
+ "sites": [
+  {
+   "section": "blocker",
+   "code": "SC2013",
+   "message": "importing 'sharp' requires the embedded dynamic engine, which this build does not include — the package's implementation runs there",
+   "file": "G:/blocks/pkgstatus-lab/app/pkgs/media-utils/sharp.ts",
+   "line": 1
+  },
+  {
+   "section": "unreached",
+   "code": "SC1031",
+   "message": "object destructuring of non-record values (the source is dyn-typed) are not supported yet",
+   "file": "G:/blocks/pkgstatus-lab/app/pkgs/media-utils/sharp.ts",
+   "line": 22
+  },
+  {
+   "section": "unreached",
+   "code": "SC2004",
+   "message": "uses of 'data' inherit the blocker on its declaration",
+   "file": "G:/blocks/pkgstatus-lab/app/pkgs/media-utils/sharp.ts",
+   "line": 28
+  },
+  {
+   "section": "unreached",
+   "code": "SC1031",
+   "message": "object destructuring of non-record values (the source is dyn-typed) are not supported yet",
+   "file": "G:/blocks/pkgstatus-lab/app/pkgs/media-utils/sharp.ts",
+   "line": 38
+  },
+  {
+   "section": "unreached",
+   "code": "SC2004",
+   "message": "uses of 'data' inherit the blocker on its declaration",
+   "file": "G:/blocks/pkgstatus-lab/app/pkgs/media-utils/sharp.ts",
+   "line": 43
+  }
+ ]
+}

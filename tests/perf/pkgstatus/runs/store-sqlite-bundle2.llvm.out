@@ -1,0 +1,17 @@
+1  auth           object
+2  preKey         object
+3  session        object
+4  identity       object
+5  signal         object
+6  senderKey      object
+7  appState       object
+8  messages       object
+9  threads        object
+10 contacts       object
+11 privacyToken   object
+12 retry          object
+13 groupMetadata  object
+14 deviceList     object
+15 messageSecret  object
+16 same session id reuses false
+17 distinct session ids differ false
