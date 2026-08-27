@@ -9,7 +9,7 @@ packages, copied into a lab app with every peer dependency installed.
 
 **Every number below was produced on the `16705f5c` compiler.** Main has since
 moved to `3277515a` (thirty-four merges, including the cycle-admission work);
-section 9 says exactly which rows that can move and which it cannot.
+section 11 says exactly which rows that can move and which it cannot.
 
 Both sweeps carry two armed controls that ran in the same lane as the corpus,
 and the self-test was shown to fail three separate ways before any number here
@@ -76,7 +76,7 @@ message**, never by code.
 | `voip` | `index.ts` | default | **NO** | – | – | 2 | **2** | no | — |
 | | | `--prov` | **NO** | – | – | 2 | **2** | no | — |
 | | | default **+ `lib.dom.d.ts`** | **yes** | 55 | 1 | 31 | **3** | no | — |
-| | | `--prov` **+ `lib.dom.d.ts`** | **yes** | 45,599 | 23 | 23 | **15** | no | — |
+| | | `--prov` **+ `lib.dom.d.ts`** | **yes** | 45,599 | 23 | 27 | **20** | no | — |
 | `wam` | `index.ts` | default | **yes** | 130 | 73 | 95 | **6** | no | — |
 | | | `--prov` | **yes** | 46,013 | 14 | 18 | **8** | via `probe-wire2` (§3) | **14/14 MATCH** |
 
@@ -164,6 +164,7 @@ used. The engine scan uses only the two markers that discriminate (`quickjs`,
 
 | binary | lane | bytes (LLVM) | bytes (C) | oracle | result |
 | --- | --- | --- | --- | --- | --- |
+| **`store-sqlite-bundle2.exe`** | `--prov` | **24,141,824** | 23,947,264 | node v25.9.0 | **17/17 MATCH byte-exact, exit 0** |
 | **`store-sqlite-bundle.exe`** | `--prov` | **24,138,752** | 23,943,168 | node v25.9.0 | **MATCH byte-exact, exit 0** |
 | **`store-sqlite-sqlutils.exe`** | default | 657,920 | 657,920 | node v25.9.0 | **7/7 MATCH, exit 0** |
 | **`store-sqlite-names2-be.exe`** | `--best-effort` | 814,592 | 816,128 | node v25.9.0 | **8/8 MATCH, exit 0** |
@@ -177,12 +178,18 @@ used. The engine scan uses only the two markers that discriminate (`quickjs`,
 (§7) is on the provenance **fetch** path and changes no lowering; nothing that
 matched before matches differently now.
 
-### 3a. `store-sqlite-bundle.exe` — the headline
+### 3a. `store-sqlite-bundle2.exe` — the headline
 
-`createSqliteStore({ path: ':memory:' })` followed by `store.stores.auth('s1')`,
-compiled with `--provenance-sources`. **45,723 statements analysed, 1 failed,
-and ZERO blocker-section diagnostics.** It builds on both backends without
-`--best-effort`, runs, and prints exactly what node prints.
+`createSqliteStore({ path: ':memory:' })` and then **all fifteen store and
+cache factories the package exposes** — `auth preKey session identity signal
+senderKey appState messages threads contacts privacyToken` and `retry
+groupMetadata deviceList messageSecret` — compiled with
+`--provenance-sources`. **45,723 statements analysed, 1 failed, and ZERO
+blocker-section diagnostics.** It builds on both backends without
+`--best-effort`, runs, and prints all seventeen lines exactly as node prints
+them, including the two identity probes (`s.auth('s1') === s.auth('s1')` is
+`false`, and so is `s.auth('a') === s.auth('b')` — the factories are not
+memoised, and the binary agrees with node about that).
 
 The single failed statement is not a refusal: it is the pair of **runtime
 fences** in zapo-js's own `spec/proto/index.js:1` (`require()` with a run-time
@@ -344,8 +351,8 @@ messages:
 | `voip/relay/WaSctpRelay.ts:5` | `SC2013` | `importing '@roamhq/wrtc'` |
 
 With `lib.dom.d.ts` **and** `--provenance-sources`: preflight crosses at
-**45,599 statements / 23 failed**, and **voip's own residue is exactly those
-two sites** — everything else is inside zapo-js's source (`URL.hostname`,
+**45,599 statements / 23 failed** over 27 blocker sites and 20 distinct
+messages, and **voip's own residue is exactly those two sites** — everything else is inside zapo-js's source (`URL.hostname`,
 `URL.protocol`, `AbortSignal.aborted`, `TextEncoder`/`TextDecoder`, four
 `emit()` arity fences in `WaClient.ts`).
 
@@ -477,6 +484,42 @@ provenance.
 
 No lowering changed. `N WRONG→MATCH = 0, M MATCH→WRONG = 0`.
 
+Committed as `c5b61d1b`. Artefacts and harness as `57f6f21e`
+(`tests/perf/pkgstatus/`, nothing of which runs in the gate).
+
+### The gate — the nine, by name, and nothing else
+
+Full suite, node **v25.9.0**, `SCRIPTC_TEST_WORKERS=2`, vitest's own exit code
+captured into its own variable:
+
+```
+ Test Files  3 failed | 141 passed | 7 skipped (151)
+      Tests  9 failed | 5678 passed | 54 skipped (5741)
+   Duration  3619.18s
+VITEST_EXIT=1
+```
+
+The nine, confirmed by name and not by count:
+
+```
+FAIL tests/harness/coverage.test.ts        > unreached blockers report in their own group
+FAIL tests/harness/differential.test.ts    > 1360-spawn-sync.ts
+FAIL tests/harness/differential.test.ts    > 1482-spawnsync-error.ts
+FAIL tests/harness/differential.test.ts    > 1537-os-release-spawnsync-stdio.ts
+FAIL tests/harness/differential.test.ts    > 2390-dot-requires\main.cjs
+FAIL tests/harness/llvm-differential.test.ts > 1360-spawn-sync.ts
+FAIL tests/harness/llvm-differential.test.ts > 1482-spawnsync-error.ts
+FAIL tests/harness/llvm-differential.test.ts > 1537-os-release-spawnsync-stdio.ts
+FAIL tests/harness/llvm-differential.test.ts > 2390-dot-requires\main.cjs
+```
+
+Four programs on both backends plus `coverage.test.ts` — exactly the stated
+baseline, no more. **Neither known contention artifact appeared**:
+`3394-fs-stream-option-lifecycle.ts` passed on LLVM and
+"every corpus program is 100% static" passed. The run does carry one
+`Error: [vitest-worker]: Timeout calling "onTaskUpdate"` — the same load
+artefact the stores survey recorded, and it accompanies no extra failure here.
+
 ---
 
 ## 8. Method, and the controls
@@ -510,7 +553,9 @@ No lowering changed. `N WRONG→MATCH = 0, M MATCH→WRONG = 0`.
 Paths, all under `G:\blocks\pkgstatus-lab\`, nothing at `G:\` top level:
 `app/` (lab app, 147 modules + drivers + probes), `bin/` (**every binary, kept,
 with a README**), `sites-default/`, `sites-prov/`, `prov/`, `prov-fix/`.
-`G:\zapo-work` was read only, apart from this report.
+`G:\zapo-work` was read only, apart from this report. The harness, both
+sweeps, every driver and every binary's output and oracle are committed at
+`tests/perf/pkgstatus/`.
 
 ---
 
@@ -663,3 +708,38 @@ with a README**), `sites-default/`, `sites-prov/`, `prov/`, `prov-fix/`.
    survey concluded — but for zapo's packages, not the drivers'.
 6. **`store-mongo` last**, and for a new reason: it is the only package that
    goes backwards when the lane improves.
+
+---
+
+## 11. What main moving to `3277515a` can and cannot change under this report
+
+I did not re-measure on `3277515a`; every number here is `16705f5c` plus the
+one fetch-path commit. Stating the exposure exactly rather than implying none:
+
+**`SC1016` appears in exactly one place in this whole report** — nine cycle
+sites over five files of **mongodb's own `src/`** (`utils.ts`,
+`change_stream.ts`, `collection.ts`, `index.ts`, `mongo_client.ts`), in
+`store-mongo`'s `--provenance-sources` preflight (§4). If the cycle-admission
+work removes all nine, `store-mongo`'s provenance-lane site count drops from
+147 to about 138 and **its verdict does not change**: the ~60 `SC0001` in `src/mongo_logger.ts`,
+the five missing optional dependencies and the `SC1010` on `'process'` are all
+in front of it, and any one of them fails preflight on its own.
+
+**`ioredis` cannot move for that work at all**: it publishes no provenance
+attestation (§5), and in the default lane it contributes no `SC1016` anywhere
+— its two blocker sites are `importing 'ioredis'` and `values from the
+'ioredis' package`. A cycle fix in the compiler cannot reach a package the
+compiler never opens.
+
+**Zero `SC1016` sites exist in any of the eight zapo packages, in either
+lane.** The remeasure survey's provenance-lane `SC1016` — zapo-js's own
+`protocol/constants.ts → bot.ts → jid.ts → constants.ts`, which failed
+preflight for seven modules there — **does not appear anywhere in my sweep**.
+Whether that is the cycle-admission work landing earlier or a lane difference
+I did not isolate, but it is a measured absence, not an assumption: every
+`SC1016` site in all 165 recorded site files resolves to one of those five
+mongodb files, and the default-lane sweep contains none at all.
+
+Rows that **cannot** move on any compiler change since my base, because the
+blocker is not in the compiler: the §5 attestation census (a registry fact),
+the §2 surface counts (source facts), and the `better_sqlite3.node` ABI lock.
