@@ -1,0 +1,34 @@
+{
+ "entry": "G:/blocks/pkgstatus-lab/app/pkgs/store-mysql/cleanup.ts",
+ "flags": [
+  "--provenance-sources"
+ ],
+ "elapsedMs": 27408,
+ "crashed": null,
+ "preflightFailed": false,
+ "stats": {
+  "statementsTotal": 1,
+  "statementsFailed": 0,
+  "statementsIsland": 0,
+  "functionsSkipped": 0
+ },
+ "unreachedStats": {
+  "statementsTotal": 48,
+  "statementsFailed": 1,
+  "statementsIsland": 0,
+  "functionsSkipped": 0
+ },
+ "npmStatic": null,
+ "provenanceNotes": [
+  "zapo-js@1.6.2 <- 250f9af5229a"
+ ],
+ "sites": [
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "'in' on 'number' receivers (only process.env, Error instances, record-typed values, and unions of fixed record shapes answer; narrow first: check a discriminant field, or compare with '!== undefined'/'!== null' for unit arms) are not supported yet",
+   "file": "G:/blocks/pkgstatus-lab/app/pkgs/store-mysql/cleanup.ts",
+   "line": 59
+  }
+ ]
+}

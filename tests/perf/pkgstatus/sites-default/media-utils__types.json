@@ -1,0 +1,22 @@
+{
+ "entry": "G:/blocks/pkgstatus-lab/app/pkgs/media-utils/types.ts",
+ "flags": [],
+ "elapsedMs": 238,
+ "crashed": null,
+ "preflightFailed": false,
+ "stats": {
+  "statementsTotal": 0,
+  "statementsFailed": 0,
+  "statementsIsland": 0,
+  "functionsSkipped": 0
+ },
+ "unreachedStats": {
+  "statementsTotal": 0,
+  "statementsFailed": 0,
+  "statementsIsland": 0,
+  "functionsSkipped": 0
+ },
+ "npmStatic": null,
+ "provenanceNotes": null,
+ "sites": []
+}

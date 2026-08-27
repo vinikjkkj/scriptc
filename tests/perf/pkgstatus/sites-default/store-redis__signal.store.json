@@ -1,0 +1,65 @@
+{
+ "entry": "G:/blocks/pkgstatus-lab/app/pkgs/store-redis/signal.store.ts",
+ "flags": [],
+ "elapsedMs": 638,
+ "crashed": null,
+ "preflightFailed": false,
+ "stats": {
+  "statementsTotal": 2,
+  "statementsFailed": 0,
+  "statementsIsland": 0,
+  "functionsSkipped": 0
+ },
+ "unreachedStats": {
+  "statementsTotal": 18,
+  "statementsFailed": 1,
+  "statementsIsland": 0,
+  "functionsSkipped": 4
+ },
+ "npmStatic": null,
+ "provenanceNotes": null,
+ "sites": [
+  {
+   "section": "blocker",
+   "code": "SC2013",
+   "message": "values from the 'ioredis' package run in the embedded dynamic engine, which this build does not include",
+   "file": "G:/blocks/pkgstatus-lab/app/pkgs/store-redis/BaseRedisStore.ts",
+   "line": 8
+  },
+  {
+   "section": "blocker",
+   "code": "SC2013",
+   "message": "importing 'zapo-js' requires the embedded dynamic engine, which this build does not include — the package's implementation runs there",
+   "file": "G:/blocks/pkgstatus-lab/app/pkgs/store-redis/helpers.ts",
+   "line": 2
+  },
+  {
+   "section": "unreached",
+   "code": "SC2013",
+   "message": "values from the 'zapo-js' package run in the embedded dynamic engine, which this build does not include",
+   "file": "G:/blocks/pkgstatus-lab/app/pkgs/store-redis/helpers.ts",
+   "line": 14
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "extending classes not declared in the program ('BaseRedisStore') is not supported yet",
+   "file": "G:/blocks/pkgstatus-lab/app/pkgs/store-redis/signal.store.ts",
+   "line": 8
+  },
+  {
+   "section": "unreached",
+   "code": "SC2013",
+   "message": "values from the 'ioredis' package run in the embedded dynamic engine, which this build does not include",
+   "file": "G:/blocks/pkgstatus-lab/app/pkgs/store-redis/helpers.ts",
+   "line": 37
+  },
+  {
+   "section": "unreached",
+   "code": "SC2013",
+   "message": "values from the 'ioredis' package run in the embedded dynamic engine, which this build does not include",
+   "file": "G:/blocks/pkgstatus-lab/app/pkgs/store-redis/helpers.ts",
+   "line": 51
+  }
+ ]
+}

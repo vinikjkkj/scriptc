@@ -1,0 +1,21 @@
+4865:⎯⎯⎯⎯⎯⎯⎯ Failed Tests 9 ⎯⎯⎯⎯⎯⎯⎯
+5130: Test Files  3 failed | 141 passed | 7 skipped (151)
+5136:VITEST_EXIT=1
+ FAIL  tests/harness/coverage.test.ts > unreached blockers report in their own group
+ FAIL  tests/harness/differential.test.ts > differential corpus (1700 programs) > 1360-spawn-sync.ts
+ FAIL  tests/harness/differential.test.ts > differential corpus (1700 programs) > 1482-spawnsync-error.ts
+ FAIL  tests/harness/differential.test.ts > differential corpus (1700 programs) > 1537-os-release-spawnsync-stdio.ts
+ FAIL  tests/harness/differential.test.ts > differential corpus (1700 programs) > 2390-dot-requires\main.cjs
+ FAIL  tests/harness/llvm-differential.test.ts > llvm differential corpus (1700 programs) > 1360-spawn-sync.ts
+ FAIL  tests/harness/llvm-differential.test.ts > llvm differential corpus (1700 programs) > 1482-spawnsync-error.ts
+ FAIL  tests/harness/llvm-differential.test.ts > llvm differential corpus (1700 programs) > 1537-os-release-spawnsync-stdio.ts
+ FAIL  tests/harness/llvm-differential.test.ts > llvm differential corpus (1700 programs) > 2390-dot-requires\main.cjs
+
+  Snapshots  1 failed
+ Test Files  3 failed | 141 passed | 7 skipped (151)
+      Tests  9 failed | 5678 passed | 54 skipped (5741)
+     Errors  1 error
+   Start at  23:51:37
+   Duration  3619.18s (transform 7.29s, setup 0ms, collect 131.31s, tests 7045.79s, environment 36ms, prepare 24.71s)
+
+VITEST_EXIT=1

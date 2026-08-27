@@ -1,0 +1,22 @@
+{
+ "entry": "G:/blocks/pkgstatus-lab/app/pkgs/store-sqlite/sql-utils.ts",
+ "flags": [],
+ "elapsedMs": 252,
+ "crashed": null,
+ "preflightFailed": false,
+ "stats": {
+  "statementsTotal": 0,
+  "statementsFailed": 0,
+  "statementsIsland": 0,
+  "functionsSkipped": 0
+ },
+ "unreachedStats": {
+  "statementsTotal": 6,
+  "statementsFailed": 0,
+  "statementsIsland": 0,
+  "functionsSkipped": 0
+ },
+ "npmStatic": null,
+ "provenanceNotes": null,
+ "sites": []
+}

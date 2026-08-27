@@ -1,0 +1,1067 @@
+{
+ "entry": "G:/blocks/pkgstatus-lab/app/pkgs/store-mongo/thread.store.ts",
+ "flags": [
+  "--provenance-sources"
+ ],
+ "elapsedMs": 37159,
+ "crashed": null,
+ "preflightFailed": true,
+ "stats": {
+  "statementsTotal": 0,
+  "statementsFailed": 0,
+  "statementsIsland": 0,
+  "functionsSkipped": 0
+ },
+ "unreachedStats": null,
+ "npmStatic": null,
+ "provenanceNotes": [
+  "mongodb@6.21.0 <- 387b6dd29e0a",
+  "bson@6.10.4 <- 302f96e9591c",
+  "mongodb-connection-string-url@3.0.2 <- 26e2c12671f3",
+  "zapo-js@1.6.2 <- 250f9af5229a",
+  "note: .: not installed under the entry's node_modules; island path used",
+  "note: mongodb-client-encryption: not installed under the entry's node_modules; island path used",
+  "note: ..@1.0.0: no provenance attestation published; island path used",
+  "note: kerberos: not installed under the entry's node_modules; island path used",
+  "note: @mongodb-js/zstd: not installed under the entry's node_modules; island path used",
+  "note: @aws-sdk/credential-providers: not installed under the entry's node_modules; island path used",
+  "note: gcp-metadata: not installed under the entry's node_modules; island path used",
+  "note: snappy: not installed under the entry's node_modules; island path used",
+  "note: socks: not installed under the entry's node_modules; island path used",
+  "note: aws4: not installed under the entry's node_modules; island path used",
+  "note: whatwg-url@14.2.0: no provenance attestation published; island path used",
+  "note: @mongodb-js/saslprep@1.5.0: no provenance attestation published; island path used",
+  "note: argo-codec: skipped — provenance package limit (16) reached; island path used"
+ ],
+ "sites": [
+  {
+   "section": "blocker",
+   "code": "SC0001",
+   "message": "Argument of type 'ArrayBufferLike' is not assignable to parameter of type 'ArrayBuffer'.\n  Type 'SharedArrayBuffer' is missing the following properties from type 'ArrayBuffer': resizable, resize, detached, transfer, transferToFixedLength",
+   "file": "G:/blocks/pkgstatus-lab/prov/302f96e9591c6d4571480d69bb319266c281f67c/src/utils/node_byte_utils.ts",
+   "line": 70
+  },
+  {
+   "section": "blocker",
+   "code": "SC0001",
+   "message": "Argument of type '{}' is not assignable to parameter of type 'WriteConcernError | { message: string; code: number; writeErrors?: WriteError[] | undefined; } | AnyError'.",
+   "file": "G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/bulk/common.ts",
+   "line": 582
+  },
+  {
+   "section": "blocker",
+   "code": "SC0001",
+   "message": "Argument of type 'null | undefined' is not assignable to parameter of type 'AnyError | undefined'.\n  Type 'null' is not assignable to type 'AnyError | undefined'.",
+   "file": "G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/bulk/common.ts",
+   "line": 588
+  },
+  {
+   "section": "blocker",
+   "code": "SC0001",
+   "message": "Argument of type 'unknown' is not assignable to parameter of type 'AnyError'.",
+   "file": "G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/change_stream.ts",
+   "line": 744
+  },
+  {
+   "section": "blocker",
+   "code": "SC0001",
+   "message": "Argument of type 'unknown' is not assignable to parameter of type 'AnyError'.",
+   "file": "G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/change_stream.ts",
+   "line": 779
+  },
+  {
+   "section": "blocker",
+   "code": "SC0001",
+   "message": "Argument of type 'unknown' is not assignable to parameter of type 'AnyError'.",
+   "file": "G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/change_stream.ts",
+   "line": 819
+  },
+  {
+   "section": "blocker",
+   "code": "SC0001",
+   "message": "Argument of type 'unknown' is not assignable to parameter of type 'Error'.",
+   "file": "G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/change_stream.ts",
+   "line": 985
+  },
+  {
+   "section": "blocker",
+   "code": "SC0001",
+   "message": "Cannot find module 'mongodb-client-encryption' or its corresponding type declarations.",
+   "file": "G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/client-side-encryption/auto_encrypter.ts",
+   "line": 5
+  },
+  {
+   "section": "blocker",
+   "code": "SC0001",
+   "message": "Type 'unknown' is not assignable to type 'Error | undefined'.",
+   "file": "G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/client-side-encryption/auto_encrypter.ts",
+   "line": 378
+  },
+  {
+   "section": "blocker",
+   "code": "SC0001",
+   "message": "Cannot find module 'mongodb-client-encryption' or its corresponding type declarations.",
+   "file": "G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/client-side-encryption/client_encryption.ts",
+   "line": 6
+  },
+  {
+   "section": "blocker",
+   "code": "SC0001",
+   "message": "Type 'unknown' is not assignable to type 'Error'.",
+   "file": "G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/client-side-encryption/client_encryption.ts",
+   "line": 627
+  },
+  {
+   "section": "blocker",
+   "code": "SC0001",
+   "message": "Type 'unknown' is not assignable to type 'number | Error'.",
+   "file": "G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/client-side-encryption/crypto_callbacks.ts",
+   "line": 21
+  },
+  {
+   "section": "blocker",
+   "code": "SC0001",
+   "message": "Type 'unknown' is not assignable to type 'number | Error'.",
+   "file": "G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/client-side-encryption/crypto_callbacks.ts",
+   "line": 33
+  },
+  {
+   "section": "blocker",
+   "code": "SC0001",
+   "message": "Type 'unknown' is not assignable to type 'number | Error'.",
+   "file": "G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/client-side-encryption/crypto_callbacks.ts",
+   "line": 43
+  },
+  {
+   "section": "blocker",
+   "code": "SC0001",
+   "message": "Type 'unknown' is not assignable to type 'number | Error'.",
+   "file": "G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/client-side-encryption/crypto_callbacks.ts",
+   "line": 57
+  },
+  {
+   "section": "blocker",
+   "code": "SC0001",
+   "message": "Type 'unknown' is not assignable to type 'number | Error'.",
+   "file": "G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/client-side-encryption/crypto_callbacks.ts",
+   "line": 75
+  },
+  {
+   "section": "blocker",
+   "code": "SC0001",
+   "message": "Cannot find module 'mongodb-client-encryption' or its corresponding type declarations.",
+   "file": "G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/client-side-encryption/state_machine.ts",
+   "line": 2
+  },
+  {
+   "section": "blocker",
+   "code": "SC0001",
+   "message": "Invalid module name in augmentation, module 'mongodb-client-encryption' cannot be found.",
+   "file": "G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/client-side-encryption/state_machine.ts",
+   "line": 85
+  },
+  {
+   "section": "blocker",
+   "code": "SC0001",
+   "message": "Argument of type 'unknown' is not assignable to parameter of type 'Error'.",
+   "file": "G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/client-side-encryption/state_machine.ts",
+   "line": 384
+  },
+  {
+   "section": "blocker",
+   "code": "SC0001",
+   "message": "Argument of type 'unknown' is not assignable to parameter of type 'Error'.",
+   "file": "G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/client-side-encryption/state_machine.ts",
+   "line": 434
+  },
+  {
+   "section": "blocker",
+   "code": "SC0001",
+   "message": "'error' is of type 'unknown'.",
+   "file": "G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/cmap/auth/aws_temporary_credentials.ts",
+   "line": 143
+  },
+  {
+   "section": "blocker",
+   "code": "SC0001",
+   "message": "Type 'unknown' is not assignable to type 'Error | undefined'.",
+   "file": "G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/cmap/auth/aws_temporary_credentials.ts",
+   "line": 143
+  },
+  {
+   "section": "blocker",
+   "code": "SC0001",
+   "message": "Type 'unknown' is not assignable to type 'Error | undefined'.",
+   "file": "G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/cmap/connect.ts",
+   "line": 493
+  },
+  {
+   "section": "blocker",
+   "code": "SC0001",
+   "message": "Argument of type 'unknown' is not assignable to parameter of type 'Document | Error'.",
+   "file": "G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/cmap/connection.ts",
+   "line": 599
+  },
+  {
+   "section": "blocker",
+   "code": "SC0001",
+   "message": "Argument of type 'unknown' is not assignable to parameter of type 'Error'.",
+   "file": "G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/cmap/connection.ts",
+   "line": 733
+  },
+  {
+   "section": "blocker",
+   "code": "SC0001",
+   "message": "Argument of type 'unknown' is not assignable to parameter of type 'Error'.",
+   "file": "G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/cmap/connection.ts",
+   "line": 776
+  },
+  {
+   "section": "blocker",
+   "code": "SC0001",
+   "message": "'cause' is of type 'unknown'.",
+   "file": "G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/cmap/wire_protocol/responses.ts",
+   "line": 95
+  },
+  {
+   "section": "blocker",
+   "code": "SC0001",
+   "message": "Type 'unknown' is not assignable to type 'Error | undefined'.",
+   "file": "G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/cmap/wire_protocol/responses.ts",
+   "line": 95
+  },
+  {
+   "section": "blocker",
+   "code": "SC0001",
+   "message": "'cause' is of type 'unknown'.",
+   "file": "G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/cmap/wire_protocol/responses.ts",
+   "line": 253
+  },
+  {
+   "section": "blocker",
+   "code": "SC0001",
+   "message": "Type 'unknown' is not assignable to type 'Error | undefined'.",
+   "file": "G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/cmap/wire_protocol/responses.ts",
+   "line": 253
+  },
+  {
+   "section": "blocker",
+   "code": "SC0001",
+   "message": "Property 'message' does not exist on type '{}'.",
+   "file": "G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/collection.ts",
+   "line": 334
+  },
+  {
+   "section": "blocker",
+   "code": "SC0001",
+   "message": "'firstDNSError' is of type 'unknown'.",
+   "file": "G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/connection_string.ts",
+   "line": 57
+  },
+  {
+   "section": "blocker",
+   "code": "SC0001",
+   "message": "'error' is of type 'unknown'.",
+   "file": "G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/connection_string.ts",
+   "line": 109
+  },
+  {
+   "section": "blocker",
+   "code": "SC0001",
+   "message": "'error' is of type 'unknown'.",
+   "file": "G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/connection_string.ts",
+   "line": 109
+  },
+  {
+   "section": "blocker",
+   "code": "SC0001",
+   "message": "Argument of type 'unknown' is not assignable to parameter of type 'Error | null | undefined'.",
+   "file": "G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/cursor/abstract_cursor.ts",
+   "line": 550
+  },
+  {
+   "section": "blocker",
+   "code": "SC0001",
+   "message": "Argument of type 'unknown' is not assignable to parameter of type 'Error | undefined'.",
+   "file": "G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/cursor/abstract_cursor.ts",
+   "line": 964
+  },
+  {
+   "section": "blocker",
+   "code": "SC0001",
+   "message": "Argument of type 'unknown' is not assignable to parameter of type 'Error | undefined'.",
+   "file": "G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/cursor/abstract_cursor.ts",
+   "line": 1005
+  },
+  {
+   "section": "blocker",
+   "code": "SC0001",
+   "message": "Cannot find module 'kerberos' or its corresponding type declarations.",
+   "file": "G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/deps.ts",
+   "line": 20
+  },
+  {
+   "section": "blocker",
+   "code": "SC0001",
+   "message": "Type 'unknown' is not assignable to type 'Error'.",
+   "file": "G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/deps.ts",
+   "line": 32
+  },
+  {
+   "section": "blocker",
+   "code": "SC0001",
+   "message": "Type 'unknown' is not assignable to type 'Error'.",
+   "file": "G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/deps.ts",
+   "line": 72
+  },
+  {
+   "section": "blocker",
+   "code": "SC0001",
+   "message": "Type 'unknown' is not assignable to type 'Error'.",
+   "file": "G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/deps.ts",
+   "line": 113
+  },
+  {
+   "section": "blocker",
+   "code": "SC0001",
+   "message": "Cannot find module 'gcp-metadata' or its corresponding type declarations.",
+   "file": "G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/deps.ts",
+   "line": 121
+  },
+  {
+   "section": "blocker",
+   "code": "SC0001",
+   "message": "Type 'unknown' is not assignable to type 'Error'.",
+   "file": "G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/deps.ts",
+   "line": 135
+  },
+  {
+   "section": "blocker",
+   "code": "SC0001",
+   "message": "Type 'unknown' is not assignable to type 'Error'.",
+   "file": "G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/deps.ts",
+   "line": 165
+  },
+  {
+   "section": "blocker",
+   "code": "SC0001",
+   "message": "Type 'unknown' is not assignable to type 'Error'.",
+   "file": "G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/deps.ts",
+   "line": 200
+  },
+  {
+   "section": "blocker",
+   "code": "SC0001",
+   "message": "Type 'unknown' is not assignable to type 'Error'.",
+   "file": "G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/deps.ts",
+   "line": 258
+  },
+  {
+   "section": "blocker",
+   "code": "SC0001",
+   "message": "Cannot find module 'mongodb-client-encryption' or its corresponding type declarations.",
+   "file": "G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/deps.ts",
+   "line": 268
+  },
+  {
+   "section": "blocker",
+   "code": "SC0001",
+   "message": "Type 'unknown' is not assignable to type 'Error'.",
+   "file": "G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/deps.ts",
+   "line": 281
+  },
+  {
+   "section": "blocker",
+   "code": "SC0001",
+   "message": "Argument of type 'unknown' is not assignable to parameter of type 'Error | undefined'.",
+   "file": "G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/gridfs/download.ts",
+   "line": 353
+  },
+  {
+   "section": "blocker",
+   "code": "SC0001",
+   "message": "Argument of type 'unknown' is not assignable to parameter of type 'Error | undefined'.",
+   "file": "G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/gridfs/download.ts",
+   "line": 374
+  },
+  {
+   "section": "blocker",
+   "code": "SC0001",
+   "message": "Argument of type 'unknown' is not assignable to parameter of type 'Error | undefined'.",
+   "file": "G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/gridfs/download.ts",
+   "line": 394
+  },
+  {
+   "section": "blocker",
+   "code": "SC0001",
+   "message": "Argument of type 'unknown' is not assignable to parameter of type 'Error | undefined'.",
+   "file": "G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/gridfs/download.ts",
+   "line": 407
+  },
+  {
+   "section": "blocker",
+   "code": "SC0001",
+   "message": "Argument of type '(error?: Error | undefined) => void' is not assignable to parameter of type '(err?: Error | null | undefined) => void'.\n  Types of parameters 'error' and 'err' are incompatible.\n    Type 'Error | null | undefined' is not assignable to type 'Error | undefined'.\n      Type 'null' is not assignable to type 'Error | undefined'.",
+   "file": "G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/mongo_logger.ts",
+   "line": 245
+  },
+  {
+   "section": "blocker",
+   "code": "SC0001",
+   "message": "'e' is of type 'unknown'.",
+   "file": "G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/mongo_logger.ts",
+   "line": 578
+  },
+  {
+   "section": "blocker",
+   "code": "SC0001",
+   "message": "Argument of type 'Record<string, any> | LoggableEvent' is not assignable to parameter of type 'ServerSelectionEvent'.\n  Type 'CommandStartedEvent' is missing the following properties from type 'ServerSelectionEvent': selector, operation, topologyDescription, message",
+   "file": "G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/mongo_logger.ts",
+   "line": 680
+  },
+  {
+   "section": "blocker",
+   "code": "SC0001",
+   "message": "Argument of type 'Record<string, any> | LoggableEvent' is not assignable to parameter of type 'ServerSelectionEvent'.\n  Type 'CommandStartedEvent' is missing the following properties from type 'ServerSelectionEvent': selector, operation, topologyDescription, message",
+   "file": "G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/mongo_logger.ts",
+   "line": 683
+  },
+  {
+   "section": "blocker",
+   "code": "SC0001",
+   "message": "Property 'failure' does not exist on type 'Record<string, any> | LoggableEvent'.\n  Property 'failure' does not exist on type 'CommandStartedEvent'.",
+   "file": "G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/mongo_logger.ts",
+   "line": 684
+  },
+  {
+   "section": "blocker",
+   "code": "SC0001",
+   "message": "Argument of type 'Record<string, any> | LoggableEvent' is not assignable to parameter of type 'ServerSelectionEvent'.\n  Type 'CommandStartedEvent' is missing the following properties from type 'ServerSelectionEvent': selector, operation, topologyDescription, message",
+   "file": "G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/mongo_logger.ts",
+   "line": 687
+  },
+  {
+   "section": "blocker",
+   "code": "SC0001",
+   "message": "Property 'serverHost' does not exist on type 'Record<string, any> | LoggableEvent'.\n  Property 'serverHost' does not exist on type 'CommandStartedEvent'.",
+   "file": "G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/mongo_logger.ts",
+   "line": 688
+  },
+  {
+   "section": "blocker",
+   "code": "SC0001",
+   "message": "Property 'serverPort' does not exist on type 'Record<string, any> | LoggableEvent'.\n  Property 'serverPort' does not exist on type 'CommandStartedEvent'.",
+   "file": "G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/mongo_logger.ts",
+   "line": 689
+  },
+  {
+   "section": "blocker",
+   "code": "SC0001",
+   "message": "Argument of type 'Record<string, any> | LoggableEvent' is not assignable to parameter of type 'ServerSelectionEvent'.\n  Type 'CommandStartedEvent' is missing the following properties from type 'ServerSelectionEvent': selector, operation, topologyDescription, message",
+   "file": "G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/mongo_logger.ts",
+   "line": 692
+  },
+  {
+   "section": "blocker",
+   "code": "SC0001",
+   "message": "Property 'remainingTimeMS' does not exist on type 'Record<string, any> | LoggableEvent'.\n  Property 'remainingTimeMS' does not exist on type 'CommandStartedEvent'.",
+   "file": "G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/mongo_logger.ts",
+   "line": 693
+  },
+  {
+   "section": "blocker",
+   "code": "SC0001",
+   "message": "Argument of type 'Record<string, any> | LoggableEvent' is not assignable to parameter of type 'CommandStartedEvent | LoggableCommandFailedEvent | LoggableCommandSucceededEvent'.\n  Type 'ConnectionCheckOutFailedEvent' is not assignable to type 'CommandStartedEvent | LoggableCommandFailedEvent | LoggableCommandSucceededEvent'.\n    Type 'ConnectionCheckOutFailedEvent' is missing the following properties from type 'LoggableCommandSucceededEvent': requestId, duration, commandName, reply, and 2 more.",
+   "file": "G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/mongo_logger.ts",
+   "line": 696
+  },
+  {
+   "section": "blocker",
+   "code": "SC0001",
+   "message": "Property 'command' does not exist on type 'Record<string, any> | LoggableEvent'.\n  Property 'command' does not exist on type 'ConnectionCheckOutFailedEvent'.",
+   "file": "G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/mongo_logger.ts",
+   "line": 698
+  },
+  {
+   "section": "blocker",
+   "code": "SC0001",
+   "message": "Property 'databaseName' does not exist on type 'Record<string, any> | LoggableEvent'.\n  Property 'databaseName' does not exist on type 'ConnectionCheckOutFailedEvent'.",
+   "file": "G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/mongo_logger.ts",
+   "line": 699
+  },
+  {
+   "section": "blocker",
+   "code": "SC0001",
+   "message": "Argument of type 'Record<string, any> | LoggableEvent' is not assignable to parameter of type 'CommandStartedEvent | LoggableCommandFailedEvent | LoggableCommandSucceededEvent'.\n  Type 'ConnectionCheckOutFailedEvent' is not assignable to type 'CommandStartedEvent | LoggableCommandFailedEvent | LoggableCommandSucceededEvent'.\n    Type 'ConnectionCheckOutFailedEvent' is missing the following properties from type 'LoggableCommandSucceededEvent': requestId, duration, commandName, reply, and 2 more.",
+   "file": "G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/mongo_logger.ts",
+   "line": 702
+  },
+  {
+   "section": "blocker",
+   "code": "SC0001",
+   "message": "Property 'duration' does not exist on type 'Record<string, any> | LoggableEvent'.\n  Property 'duration' does not exist on type 'CommandStartedEvent'.",
+   "file": "G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/mongo_logger.ts",
+   "line": 704
+  },
+  {
+   "section": "blocker",
+   "code": "SC0001",
+   "message": "Property 'reply' does not exist on type 'Record<string, any> | LoggableEvent'.\n  Property 'reply' does not exist on type 'CommandStartedEvent'.",
+   "file": "G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/mongo_logger.ts",
+   "line": 705
+  },
+  {
+   "section": "blocker",
+   "code": "SC0001",
+   "message": "Argument of type 'Record<string, any> | LoggableEvent' is not assignable to parameter of type 'CommandStartedEvent | LoggableCommandFailedEvent | LoggableCommandSucceededEvent'.\n  Type 'ConnectionCheckOutFailedEvent' is not assignable to type 'CommandStartedEvent | LoggableCommandFailedEvent | LoggableCommandSucceededEvent'.\n    Type 'ConnectionCheckOutFailedEvent' is missing the following properties from type 'LoggableCommandSucceededEvent': requestId, duration, commandName, reply, and 2 more.",
+   "file": "G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/mongo_logger.ts",
+   "line": 708
+  },
+  {
+   "section": "blocker",
+   "code": "SC0001",
+   "message": "Property 'duration' does not exist on type 'Record<string, any> | LoggableEvent'.\n  Property 'duration' does not exist on type 'CommandStartedEvent'.",
+   "file": "G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/mongo_logger.ts",
+   "line": 710
+  },
+  {
+   "section": "blocker",
+   "code": "SC0001",
+   "message": "Property 'failure' does not exist on type 'Record<string, any> | LoggableEvent'.\n  Property 'failure' does not exist on type 'CommandStartedEvent'.",
+   "file": "G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/mongo_logger.ts",
+   "line": 711
+  },
+  {
+   "section": "blocker",
+   "code": "SC0001",
+   "message": "Property 'options' does not exist on type 'Record<string, any> | LoggableEvent'.\n  Property 'options' does not exist on type 'CommandStartedEvent'.",
+   "file": "G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/mongo_logger.ts",
+   "line": 716
+  },
+  {
+   "section": "blocker",
+   "code": "SC0001",
+   "message": "Property 'options' does not exist on type 'Record<string, any> | LoggableEvent'.\n  Property 'options' does not exist on type 'CommandStartedEvent'.",
+   "file": "G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/mongo_logger.ts",
+   "line": 718
+  },
+  {
+   "section": "blocker",
+   "code": "SC0001",
+   "message": "Property 'serviceId' does not exist on type 'Record<string, any> | LoggableEvent'.\n  Property 'serviceId' does not exist on type 'ConnectionCheckOutFailedEvent'.",
+   "file": "G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/mongo_logger.ts",
+   "line": 736
+  },
+  {
+   "section": "blocker",
+   "code": "SC0001",
+   "message": "Property 'serviceId' does not exist on type 'Record<string, any> | LoggableEvent'.\n  Property 'serviceId' does not exist on type 'ConnectionCheckOutFailedEvent'.",
+   "file": "G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/mongo_logger.ts",
+   "line": 737
+  },
+  {
+   "section": "blocker",
+   "code": "SC0001",
+   "message": "Property 'connectionId' does not exist on type 'Record<string, any> | LoggableEvent'.\n  Property 'connectionId' does not exist on type 'ConnectionCheckOutFailedEvent'.",
+   "file": "G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/mongo_logger.ts",
+   "line": 747
+  },
+  {
+   "section": "blocker",
+   "code": "SC0001",
+   "message": "Property 'connectionId' does not exist on type 'Record<string, any> | LoggableEvent'.\n  Property 'connectionId' does not exist on type 'ConnectionCheckOutFailedEvent'.",
+   "file": "G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/mongo_logger.ts",
+   "line": 752
+  },
+  {
+   "section": "blocker",
+   "code": "SC0001",
+   "message": "Property 'durationMS' does not exist on type 'Record<string, any> | LoggableEvent'.\n  Property 'durationMS' does not exist on type 'CommandStartedEvent'.",
+   "file": "G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/mongo_logger.ts",
+   "line": 753
+  },
+  {
+   "section": "blocker",
+   "code": "SC0001",
+   "message": "Property 'connectionId' does not exist on type 'Record<string, any> | LoggableEvent'.\n  Property 'connectionId' does not exist on type 'ConnectionCheckOutFailedEvent'.",
+   "file": "G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/mongo_logger.ts",
+   "line": 758
+  },
+  {
+   "section": "blocker",
+   "code": "SC0001",
+   "message": "Property 'reason' does not exist on type 'Record<string, any> | LoggableEvent'.\n  Property 'reason' does not exist on type 'CommandStartedEvent'.",
+   "file": "G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/mongo_logger.ts",
+   "line": 759
+  },
+  {
+   "section": "blocker",
+   "code": "SC0001",
+   "message": "Property 'error' does not exist on type 'Record<string, any> | LoggableEvent'.\n  Property 'error' does not exist on type 'CommandStartedEvent'.",
+   "file": "G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/mongo_logger.ts",
+   "line": 769
+  },
+  {
+   "section": "blocker",
+   "code": "SC0001",
+   "message": "Property 'error' does not exist on type 'Record<string, any> | LoggableEvent'.\n  Property 'error' does not exist on type 'CommandStartedEvent'.",
+   "file": "G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/mongo_logger.ts",
+   "line": 770
+  },
+  {
+   "section": "blocker",
+   "code": "SC0001",
+   "message": "Property 'reason' does not exist on type 'Record<string, any> | LoggableEvent'.\n  Property 'reason' does not exist on type 'CommandStartedEvent'.",
+   "file": "G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/mongo_logger.ts",
+   "line": 777
+  },
+  {
+   "section": "blocker",
+   "code": "SC0001",
+   "message": "Property 'reason' does not exist on type 'Record<string, any> | LoggableEvent'.\n  Property 'reason' does not exist on type 'CommandStartedEvent'.",
+   "file": "G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/mongo_logger.ts",
+   "line": 787
+  },
+  {
+   "section": "blocker",
+   "code": "SC0001",
+   "message": "Property 'error' does not exist on type 'Record<string, any> | LoggableEvent'.\n  Property 'error' does not exist on type 'CommandStartedEvent'.",
+   "file": "G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/mongo_logger.ts",
+   "line": 796
+  },
+  {
+   "section": "blocker",
+   "code": "SC0001",
+   "message": "Property 'error' does not exist on type 'Record<string, any> | LoggableEvent'.\n  Property 'error' does not exist on type 'CommandStartedEvent'.",
+   "file": "G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/mongo_logger.ts",
+   "line": 797
+  },
+  {
+   "section": "blocker",
+   "code": "SC0001",
+   "message": "Property 'reason' does not exist on type 'Record<string, any> | LoggableEvent'.\n  Property 'reason' does not exist on type 'CommandStartedEvent'.",
+   "file": "G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/mongo_logger.ts",
+   "line": 801
+  },
+  {
+   "section": "blocker",
+   "code": "SC0001",
+   "message": "Property 'durationMS' does not exist on type 'Record<string, any> | LoggableEvent'.\n  Property 'durationMS' does not exist on type 'CommandStartedEvent'.",
+   "file": "G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/mongo_logger.ts",
+   "line": 803
+  },
+  {
+   "section": "blocker",
+   "code": "SC0001",
+   "message": "Property 'connectionId' does not exist on type 'Record<string, any> | LoggableEvent'.\n  Property 'connectionId' does not exist on type 'ConnectionCheckOutFailedEvent'.",
+   "file": "G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/mongo_logger.ts",
+   "line": 808
+  },
+  {
+   "section": "blocker",
+   "code": "SC0001",
+   "message": "Property 'durationMS' does not exist on type 'Record<string, any> | LoggableEvent'.\n  Property 'durationMS' does not exist on type 'CommandStartedEvent'.",
+   "file": "G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/mongo_logger.ts",
+   "line": 809
+  },
+  {
+   "section": "blocker",
+   "code": "SC0001",
+   "message": "Property 'connectionId' does not exist on type 'Record<string, any> | LoggableEvent'.\n  Property 'connectionId' does not exist on type 'ConnectionCheckOutFailedEvent'.",
+   "file": "G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/mongo_logger.ts",
+   "line": 814
+  },
+  {
+   "section": "blocker",
+   "code": "SC0001",
+   "message": "Argument of type 'Record<string, any> | LoggableEvent' is not assignable to parameter of type 'SDAMLoggableEvent'.\n  Type 'CommandStartedEvent' is not assignable to type 'SDAMLoggableEvent'.\n    Type 'CommandStartedEvent' is missing the following properties from type 'LoggableServerHeartbeatSucceededEvent': topologyId, awaited, reply, duration",
+   "file": "G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/mongo_logger.ts",
+   "line": 817
+  },
+  {
+   "section": "blocker",
+   "code": "SC0001",
+   "message": "Argument of type 'Record<string, any> | LoggableEvent' is not assignable to parameter of type 'SDAMLoggableEvent'.\n  Type 'CommandStartedEvent' is not assignable to type 'SDAMLoggableEvent'.\n    Type 'CommandStartedEvent' is missing the following properties from type 'LoggableServerHeartbeatSucceededEvent': topologyId, awaited, reply, duration",
+   "file": "G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/mongo_logger.ts",
+   "line": 822
+  },
+  {
+   "section": "blocker",
+   "code": "SC0001",
+   "message": "Argument of type 'Record<string, any> | LoggableEvent' is not assignable to parameter of type 'SDAMLoggableEvent'.\n  Type 'CommandStartedEvent' is not assignable to type 'SDAMLoggableEvent'.\n    Type 'CommandStartedEvent' is missing the following properties from type 'LoggableServerHeartbeatSucceededEvent': topologyId, awaited, reply, duration",
+   "file": "G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/mongo_logger.ts",
+   "line": 827
+  },
+  {
+   "section": "blocker",
+   "code": "SC0001",
+   "message": "Argument of type 'Record<string, any> | LoggableEvent' is not assignable to parameter of type 'LoggableServerHeartbeatFailedEvent | LoggableServerHeartbeatStartedEvent | LoggableServerHeartbeatSucceededEvent'.\n  Type 'CommandStartedEvent' is not assignable to type 'LoggableServerHeartbeatFailedEvent | LoggableServerHeartbeatStartedEvent | LoggableServerHeartbeatSucceededEvent'.\n    Type 'CommandStartedEvent' is missing the following properties from type 'LoggableServerHeartbeatSucceededEvent': topologyId, awaited, reply, duration",
+   "file": "G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/mongo_logger.ts",
+   "line": 828
+  },
+  {
+   "section": "blocker",
+   "code": "SC0001",
+   "message": "Argument of type 'Record<string, any> | LoggableEvent' is not assignable to parameter of type 'SDAMLoggableEvent'.\n  Type 'CommandStartedEvent' is not assignable to type 'SDAMLoggableEvent'.\n    Type 'CommandStartedEvent' is missing the following properties from type 'LoggableServerHeartbeatSucceededEvent': topologyId, awaited, reply, duration",
+   "file": "G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/mongo_logger.ts",
+   "line": 832
+  },
+  {
+   "section": "blocker",
+   "code": "SC0001",
+   "message": "Argument of type 'Record<string, any> | LoggableEvent' is not assignable to parameter of type 'LoggableServerHeartbeatFailedEvent | LoggableServerHeartbeatStartedEvent | LoggableServerHeartbeatSucceededEvent'.\n  Type 'CommandStartedEvent' is not assignable to type 'LoggableServerHeartbeatFailedEvent | LoggableServerHeartbeatStartedEvent | LoggableServerHeartbeatSucceededEvent'.\n    Type 'CommandStartedEvent' is missing the following properties from type 'LoggableServerHeartbeatSucceededEvent': topologyId, awaited, reply, duration",
+   "file": "G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/mongo_logger.ts",
+   "line": 833
+  },
+  {
+   "section": "blocker",
+   "code": "SC0001",
+   "message": "Property 'duration' does not exist on type 'Record<string, any> | LoggableEvent'.\n  Property 'duration' does not exist on type 'CommandStartedEvent'.",
+   "file": "G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/mongo_logger.ts",
+   "line": 835
+  },
+  {
+   "section": "blocker",
+   "code": "SC0001",
+   "message": "Property 'serverConnectionId' does not exist on type 'Record<string, any> | LoggableEvent'.\n  Property 'serverConnectionId' does not exist on type 'ConnectionCheckOutFailedEvent'.",
+   "file": "G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/mongo_logger.ts",
+   "line": 836
+  },
+  {
+   "section": "blocker",
+   "code": "SC0001",
+   "message": "Property 'reply' does not exist on type 'Record<string, any> | LoggableEvent'.\n  Property 'reply' does not exist on type 'CommandStartedEvent'.",
+   "file": "G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/mongo_logger.ts",
+   "line": 837
+  },
+  {
+   "section": "blocker",
+   "code": "SC0001",
+   "message": "Argument of type 'Record<string, any> | LoggableEvent' is not assignable to parameter of type 'SDAMLoggableEvent'.\n  Type 'CommandStartedEvent' is not assignable to type 'SDAMLoggableEvent'.\n    Type 'CommandStartedEvent' is missing the following properties from type 'LoggableServerHeartbeatSucceededEvent': topologyId, awaited, reply, duration",
+   "file": "G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/mongo_logger.ts",
+   "line": 840
+  },
+  {
+   "section": "blocker",
+   "code": "SC0001",
+   "message": "Argument of type 'Record<string, any> | LoggableEvent' is not assignable to parameter of type 'LoggableServerHeartbeatFailedEvent | LoggableServerHeartbeatStartedEvent | LoggableServerHeartbeatSucceededEvent'.\n  Type 'CommandStartedEvent' is not assignable to type 'LoggableServerHeartbeatFailedEvent | LoggableServerHeartbeatStartedEvent | LoggableServerHeartbeatSucceededEvent'.\n    Type 'CommandStartedEvent' is missing the following properties from type 'LoggableServerHeartbeatSucceededEvent': topologyId, awaited, reply, duration",
+   "file": "G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/mongo_logger.ts",
+   "line": 841
+  },
+  {
+   "section": "blocker",
+   "code": "SC0001",
+   "message": "Property 'duration' does not exist on type 'Record<string, any> | LoggableEvent'.\n  Property 'duration' does not exist on type 'CommandStartedEvent'.",
+   "file": "G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/mongo_logger.ts",
+   "line": 843
+  },
+  {
+   "section": "blocker",
+   "code": "SC0001",
+   "message": "Property 'failure' does not exist on type 'Record<string, any> | LoggableEvent'.\n  Property 'failure' does not exist on type 'CommandStartedEvent'.",
+   "file": "G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/mongo_logger.ts",
+   "line": 844
+  },
+  {
+   "section": "blocker",
+   "code": "SC0001",
+   "message": "Argument of type 'Record<string, any> | LoggableEvent' is not assignable to parameter of type 'SDAMLoggableEvent'.\n  Type 'CommandStartedEvent' is not assignable to type 'SDAMLoggableEvent'.\n    Type 'CommandStartedEvent' is missing the following properties from type 'LoggableServerHeartbeatSucceededEvent': topologyId, awaited, reply, duration",
+   "file": "G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/mongo_logger.ts",
+   "line": 847
+  },
+  {
+   "section": "blocker",
+   "code": "SC0001",
+   "message": "Argument of type 'Record<string, any> | LoggableEvent' is not assignable to parameter of type 'SDAMLoggableEvent'.\n  Type 'CommandStartedEvent' is not assignable to type 'SDAMLoggableEvent'.\n    Type 'CommandStartedEvent' is missing the following properties from type 'LoggableServerHeartbeatSucceededEvent': topologyId, awaited, reply, duration",
+   "file": "G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/mongo_logger.ts",
+   "line": 851
+  },
+  {
+   "section": "blocker",
+   "code": "SC0001",
+   "message": "Argument of type 'Record<string, any> | LoggableEvent' is not assignable to parameter of type 'SDAMLoggableEvent'.\n  Type 'CommandStartedEvent' is not assignable to type 'SDAMLoggableEvent'.\n    Type 'CommandStartedEvent' is missing the following properties from type 'LoggableServerHeartbeatSucceededEvent': topologyId, awaited, reply, duration",
+   "file": "G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/mongo_logger.ts",
+   "line": 855
+  },
+  {
+   "section": "blocker",
+   "code": "SC0001",
+   "message": "Property 'previousDescription' does not exist on type 'Record<string, any> | LoggableEvent'.\n  Property 'previousDescription' does not exist on type 'CommandStartedEvent'.",
+   "file": "G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/mongo_logger.ts",
+   "line": 858
+  },
+  {
+   "section": "blocker",
+   "code": "SC0001",
+   "message": "Property 'newDescription' does not exist on type 'Record<string, any> | LoggableEvent'.\n  Property 'newDescription' does not exist on type 'CommandStartedEvent'.",
+   "file": "G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/mongo_logger.ts",
+   "line": 862
+  },
+  {
+   "section": "blocker",
+   "code": "SC0001",
+   "message": "Argument of type 'unknown' is not assignable to parameter of type 'Error'.",
+   "file": "G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/mongo_logger.ts",
+   "line": 1004
+  },
+  {
+   "section": "blocker",
+   "code": "SC0001",
+   "message": "Type 'unknown' is not assignable to type 'Error | undefined'.",
+   "file": "G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/operations/client_bulk_write/command_builder.ts",
+   "line": 136
+  },
+  {
+   "section": "blocker",
+   "code": "SC0001",
+   "message": "Type 'unknown' is not assignable to type 'Error | undefined'.",
+   "file": "G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/operations/client_bulk_write/command_builder.ts",
+   "line": 174
+  },
+  {
+   "section": "blocker",
+   "code": "SC0001",
+   "message": "Argument of type 'unknown' is not assignable to parameter of type 'MongoError'.",
+   "file": "G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/operations/execute_operation.ts",
+   "line": 292
+  },
+  {
+   "section": "blocker",
+   "code": "SC0001",
+   "message": "Argument of type 'unknown' is not assignable to parameter of type 'AnyError'.",
+   "file": "G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/sdam/server.ts",
+   "line": 298
+  },
+  {
+   "section": "blocker",
+   "code": "SC0001",
+   "message": "Argument of type 'unknown' is not assignable to parameter of type 'Error'.",
+   "file": "G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/sdam/topology.ts",
+   "line": 989
+  },
+  {
+   "section": "blocker",
+   "code": "SC0001",
+   "message": "Argument of type 'unknown' is not assignable to parameter of type 'MongoError'.",
+   "file": "G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/sdam/topology.ts",
+   "line": 994
+  },
+  {
+   "section": "blocker",
+   "code": "SC0001",
+   "message": "'error' is of type 'unknown'.",
+   "file": "G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/sessions.ts",
+   "line": 273
+  },
+  {
+   "section": "blocker",
+   "code": "SC0001",
+   "message": "Argument of type 'unknown' is not assignable to parameter of type 'MongoError'.",
+   "file": "G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/sessions.ts",
+   "line": 535
+  },
+  {
+   "section": "blocker",
+   "code": "SC0001",
+   "message": "'retryCommitError' is of type 'unknown'.",
+   "file": "G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/sessions.ts",
+   "line": 536
+  },
+  {
+   "section": "blocker",
+   "code": "SC0001",
+   "message": "Argument of type 'unknown' is not assignable to parameter of type 'Error'.",
+   "file": "G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/sessions.ts",
+   "line": 539
+  },
+  {
+   "section": "blocker",
+   "code": "SC0001",
+   "message": "Type 'unknown' is not assignable to type 'AnyError | undefined'.",
+   "file": "G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/sessions.ts",
+   "line": 540
+  },
+  {
+   "section": "blocker",
+   "code": "SC0001",
+   "message": "Argument of type 'unknown' is not assignable to parameter of type 'MongoError'.",
+   "file": "G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/sessions.ts",
+   "line": 547
+  },
+  {
+   "section": "blocker",
+   "code": "SC0001",
+   "message": "'firstCommitError' is of type 'unknown'.",
+   "file": "G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/sessions.ts",
+   "line": 548
+  },
+  {
+   "section": "blocker",
+   "code": "SC0001",
+   "message": "Argument of type 'unknown' is not assignable to parameter of type 'Error'.",
+   "file": "G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/sessions.ts",
+   "line": 551
+  },
+  {
+   "section": "blocker",
+   "code": "SC0001",
+   "message": "Type 'unknown' is not assignable to type 'AnyError | undefined'.",
+   "file": "G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/sessions.ts",
+   "line": 552
+  },
+  {
+   "section": "blocker",
+   "code": "SC0001",
+   "message": "'firstAbortError' is of type 'unknown'.",
+   "file": "G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/sessions.ts",
+   "line": 639
+  },
+  {
+   "section": "blocker",
+   "code": "SC0001",
+   "message": "'firstAbortError' is of type 'unknown'.",
+   "file": "G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/sessions.ts",
+   "line": 640
+  },
+  {
+   "section": "blocker",
+   "code": "SC0001",
+   "message": "'secondAbortError' is of type 'unknown'.",
+   "file": "G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/sessions.ts",
+   "line": 649
+  },
+  {
+   "section": "blocker",
+   "code": "SC0001",
+   "message": "'secondAbortError' is of type 'unknown'.",
+   "file": "G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/sessions.ts",
+   "line": 650
+  },
+  {
+   "section": "blocker",
+   "code": "SC0001",
+   "message": "Argument of type 'unknown' is not assignable to parameter of type 'MongoError'.",
+   "file": "G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/sessions.ts",
+   "line": 801
+  },
+  {
+   "section": "blocker",
+   "code": "SC0001",
+   "message": "'commitError' is of type 'unknown'.",
+   "file": "G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/sessions.ts",
+   "line": 802
+  },
+  {
+   "section": "blocker",
+   "code": "SC0001",
+   "message": "'commitError' is of type 'unknown'.",
+   "file": "G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/sessions.ts",
+   "line": 809
+  },
+  {
+   "section": "blocker",
+   "code": "SC0001",
+   "message": "Type 'unknown' is not assignable to type 'Error | undefined'.",
+   "file": "G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/utils.ts",
+   "line": 915
+  },
+  {
+   "section": "blocker",
+   "code": "SC1010",
+   "message": "the 'process' module is not supported yet",
+   "file": "G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/cmap/handshake/client_metadata.ts",
+   "line": 2
+  },
+  {
+   "section": "blocker",
+   "code": "SC1016",
+   "message": "circular imports (G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/utils.ts → G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/write_concern.ts → G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/cmap/wire_protocol/responses.ts → G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/utils.ts; top-level code at G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/cmap/wire_protocol/responses.ts:112 can run user code during the cycle's init window — only declaration-only module bodies are admitted) are not supported yet",
+   "file": "G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/utils.ts",
+   "line": 1
+  },
+  {
+   "section": "blocker",
+   "code": "SC1016",
+   "message": "circular imports (G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/change_stream.ts → G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/collection.ts → G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/change_stream.ts; top-level code at G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/connection_string.ts:66 can run user code during the cycle's init window — only declaration-only module bodies are admitted) are not supported yet",
+   "file": "G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/change_stream.ts",
+   "line": 1
+  },
+  {
+   "section": "blocker",
+   "code": "SC1016",
+   "message": "circular imports (G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/collection.ts → G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/operations/rename.ts → G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/collection.ts; top-level code at G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/connection_string.ts:66 can run user code during the cycle's init window — only declaration-only module bodies are admitted) are not supported yet",
+   "file": "G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/collection.ts",
+   "line": 1
+  },
+  {
+   "section": "blocker",
+   "code": "SC1016",
+   "message": "circular imports (G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/change_stream.ts → G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/cursor/change_stream_cursor.ts → G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/change_stream.ts; top-level code at G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/connection_string.ts:66 can run user code during the cycle's init window — only declaration-only module bodies are admitted) are not supported yet",
+   "file": "G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/change_stream.ts",
+   "line": 1
+  },
+  {
+   "section": "blocker",
+   "code": "SC1016",
+   "message": "circular imports (G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/change_stream.ts → G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/db.ts → G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/change_stream.ts; top-level code at G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/connection_string.ts:66 can run user code during the cycle's init window — only declaration-only module bodies are admitted) are not supported yet",
+   "file": "G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/change_stream.ts",
+   "line": 1
+  },
+  {
+   "section": "blocker",
+   "code": "SC1016",
+   "message": "circular imports (G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/index.ts → G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/change_stream.ts → G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/db.ts → G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/operations/drop.ts → G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/index.ts; top-level code at G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/connection_string.ts:66 can run user code during the cycle's init window — only declaration-only module bodies are admitted) are not supported yet",
+   "file": "G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/index.ts",
+   "line": 1
+  },
+  {
+   "section": "blocker",
+   "code": "SC1016",
+   "message": "circular imports (G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/change_stream.ts → G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/mongo_client.ts → G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/change_stream.ts; top-level code at G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/connection_string.ts:66 can run user code during the cycle's init window — only declaration-only module bodies are admitted) are not supported yet",
+   "file": "G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/change_stream.ts",
+   "line": 1
+  },
+  {
+   "section": "blocker",
+   "code": "SC1016",
+   "message": "circular imports (G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/mongo_client.ts → G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/connection_string.ts → G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/encrypter.ts → G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/client-side-encryption/auto_encrypter.ts → G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/mongo_client.ts; top-level code at G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/connection_string.ts:66 can run user code during the cycle's init window — only declaration-only module bodies are admitted) are not supported yet",
+   "file": "G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/mongo_client.ts",
+   "line": 1
+  },
+  {
+   "section": "blocker",
+   "code": "SC1016",
+   "message": "circular imports (G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/mongo_client.ts → G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/connection_string.ts → G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/encrypter.ts → G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/mongo_client.ts; top-level code at G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/connection_string.ts:66 can run user code during the cycle's init window — only declaration-only module bodies are admitted) are not supported yet",
+   "file": "G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/mongo_client.ts",
+   "line": 1
+  },
+  {
+   "section": "blocker",
+   "code": "SC1016",
+   "message": "circular imports (G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/mongo_client.ts → G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/connection_string.ts → G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/mongo_client.ts; top-level code at G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/connection_string.ts:66 can run user code during the cycle's init window — only declaration-only module bodies are admitted) are not supported yet",
+   "file": "G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/mongo_client.ts",
+   "line": 1
+  },
+  {
+   "section": "blocker",
+   "code": "SC1016",
+   "message": "circular imports (G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/index.ts → G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/change_stream.ts → G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/mongo_client.ts → G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/operations/client_bulk_write/executor.ts → G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/operations/client_bulk_write/results_merger.ts → G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/index.ts; top-level code at G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/connection_string.ts:66 can run user code during the cycle's init window — only declaration-only module bodies are admitted) are not supported yet",
+   "file": "G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/index.ts",
+   "line": 1
+  },
+  {
+   "section": "blocker",
+   "code": "SC1010",
+   "message": "the 'whatwg-url' package (its runtime resolution fails: Cannot find package 'whatwg-url' imported from G:\\blocks\\pkgstatus-lab\\prov\\26e2c12671f39743abc8a6ba884b8d89b41ca0c5\\src\\index.ts) is not supported yet",
+   "file": "G:/blocks/pkgstatus-lab/prov/26e2c12671f39743abc8a6ba884b8d89b41ca0c5/src/index.ts",
+   "line": 1
+  },
+  {
+   "section": "blocker",
+   "code": "SC1010",
+   "message": "the '@mongodb-js/saslprep' package (its runtime resolution fails: Cannot find package '@mongodb-js/saslprep' imported from G:\\blocks\\pkgstatus-lab\\prov\\387b6dd29e0aef37fb36607c4a0c652ef0878029\\src\\cmap\\auth\\scram.ts) is not supported yet",
+   "file": "G:/blocks/pkgstatus-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/cmap/auth/scram.ts",
+   "line": 1
+  }
+ ]
+}

@@ -1,0 +1,28 @@
+{
+ "entry": "G:/blocks/pkgstatus-lab/app/pkgs/store-mysql/types.ts",
+ "flags": [
+  "--provenance-sources"
+ ],
+ "elapsedMs": 14294,
+ "crashed": null,
+ "preflightFailed": false,
+ "stats": {
+  "statementsTotal": 0,
+  "statementsFailed": 0,
+  "statementsIsland": 0,
+  "functionsSkipped": 0
+ },
+ "unreachedStats": {
+  "statementsTotal": 0,
+  "statementsFailed": 0,
+  "statementsIsland": 0,
+  "functionsSkipped": 0
+ },
+ "npmStatic": null,
+ "provenanceNotes": [
+  "zapo-js@1.6.2 <- 250f9af5229a",
+  "note: mysql2@3.24.2: Command failed: tar --force-local -xzf G:/blocks/pkgstatus-tmp/scriptc-provenance-JETHKv/src.tgz -C G:/blocks/pkgstatus-tmp/scriptc-provenance-JETHKv/tree --strip-components=1\ntar: .cursorrules: Cannot create symlink to 'CLAUDE.md': No such file or directory\ntar: .windsurfrules: Cannot create symlink to 'CLAUDE.md': No such file or directory\ntar: AGENTS.md: Cannot create symlink to 'CLAUDE.md': No such file or directory\ntar: Exiting with failure status due to previous errors\n; island path used",
+  "note: argo-codec@0.2.1: no provenance attestation published; island path used"
+ ],
+ "sites": []
+}

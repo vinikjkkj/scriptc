@@ -1,0 +1,78 @@
+{
+ "entry": "G:/blocks/pkgstatus-lab/app/pkgs/wam/synthetic/index.ts",
+ "flags": [
+  "--provenance-sources"
+ ],
+ "elapsedMs": 428949,
+ "crashed": null,
+ "preflightFailed": false,
+ "stats": {
+  "statementsTotal": 30486,
+  "statementsFailed": 3,
+  "statementsIsland": 0,
+  "functionsSkipped": 0
+ },
+ "unreachedStats": {
+  "statementsTotal": 460,
+  "statementsFailed": 1,
+  "statementsIsland": 0,
+  "functionsSkipped": 1
+ },
+ "npmStatic": null,
+ "provenanceNotes": [
+  "zapo-js@1.6.2 <- 250f9af5229a",
+  "note: argo-codec@0.2.1: no provenance attestation published; island path used",
+  "note: @vinikjkkj/wa-wam@2.3000.1041713829-1ec0d3b: no source mapping for '@vinikjkkj/wa-wam' (published target: index.js); island path used"
+ ],
+ "sites": [
+  {
+   "section": "blocker",
+   "code": "SC2009",
+   "message": "values of type 'AmbientFab[]' cannot be compiled: the array shape is supported, but its element type 'AmbientFab' does not compile",
+   "file": "G:/blocks/pkgstatus-lab/app/pkgs/wam/synthetic/fabrications.ts",
+   "line": 26
+  },
+  {
+   "section": "blocker",
+   "code": "SC2020",
+   "message": "'Uint8Array.from' is part of the standard library types but has no scriptc lowering yet",
+   "file": "G:/blocks/pkgstatus-lab/app/pkgs/wam/synthetic/random.ts",
+   "line": 20
+  },
+  {
+   "section": "blocker",
+   "code": "SC2009",
+   "message": "values of type 'AmbientFab[]' cannot be compiled: the array shape is supported, but its element type 'AmbientFab' does not compile",
+   "file": "G:/blocks/pkgstatus-lab/app/pkgs/wam/synthetic/fabrications.ts",
+   "line": 26
+  },
+  {
+   "section": "runtimeFence",
+   "code": "SC2020",
+   "message": "'require() with a run-time specifier' is part of the standard library types but has no scriptc lowering yet",
+   "file": "G:/blocks/pkgstatus-lab/prov/250f9af5229a545eec28ddbd3e8774a397cdb0bb/spec/proto/index.js",
+   "line": 1
+  },
+  {
+   "section": "runtimeFence",
+   "code": "SC1090",
+   "message": "constructing values other than classes declared in the program is not supported yet",
+   "file": "G:/blocks/pkgstatus-lab/prov/250f9af5229a545eec28ddbd3e8774a397cdb0bb/spec/proto/index.js",
+   "line": 1
+  },
+  {
+   "section": "unreached",
+   "code": "SC2020",
+   "message": "'globalThis' is part of the standard library types but has no scriptc lowering yet",
+   "file": "G:/blocks/pkgstatus-lab/prov/250f9af5229a545eec28ddbd3e8774a397cdb0bb/src/util/runtime.ts",
+   "line": 20
+  },
+  {
+   "section": "unreached",
+   "code": "SC2009",
+   "message": "values of type 'WaWamCoordinator' cannot be compiled: the record shape is supported, but its member 'uploader' has type 'WaWamUploader', which does not compile",
+   "file": "G:/blocks/pkgstatus-lab/app/pkgs/wam/synthetic/WaWamSyntheticUi.ts",
+   "line": 147
+  }
+ ]
+}

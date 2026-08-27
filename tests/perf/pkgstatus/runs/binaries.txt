@@ -1,0 +1,80 @@
+G:/blocks/pkgstatus-lab/queue1.log:### wam-wire-probe2  (drivers/wam-wire-probe2.ts)  flags: --provenance-sources
+G:/blocks/pkgstatus-lab/queue1.log:build llvm rc=1  c rc=1
+G:/blocks/pkgstatus-lab/queue1.log:node v25 exit=0
+G:/blocks/pkgstatus-lab/queue1.log:### voip-stun  (drivers/voip-stun.ts)  flags: --provenance-sources
+G:/blocks/pkgstatus-lab/queue1.log:build llvm rc=0  c rc=0
+G:/blocks/pkgstatus-lab/queue1.log:bytes llvm: 812032
+G:/blocks/pkgstatus-lab/queue1.log:run llvm exit=0
+G:/blocks/pkgstatus-lab/queue1.log:bytes c:    812544
+G:/blocks/pkgstatus-lab/queue1.log:run c    exit=0
+G:/blocks/pkgstatus-lab/queue1.log:node v25 exit=0
+G:/blocks/pkgstatus-lab/queue1.log:ORACLE llvm: MATCH (byte-exact)
+G:/blocks/pkgstatus-lab/queue1.log:ORACLE c: MATCH (byte-exact)
+G:/blocks/pkgstatus-lab/queue1.log:engine scan voip-stun.exe: quickjs=0 ScrDyn=0 JS_NewRuntime=0
+G:/blocks/pkgstatus-lab/queue1.log:engine scan voip-stun.c.exe: quickjs=0 ScrDyn=0 JS_NewRuntime=0
+G:/blocks/pkgstatus-lab/queue1.log:### voip-ssrc  (drivers/voip-ssrc.ts)  flags: --provenance-sources
+G:/blocks/pkgstatus-lab/queue1.log:build llvm rc=0  c rc=0
+G:/blocks/pkgstatus-lab/queue1.log:bytes llvm: 926720
+G:/blocks/pkgstatus-lab/queue1.log:run llvm exit=0
+G:/blocks/pkgstatus-lab/queue1.log:bytes c:    928768
+G:/blocks/pkgstatus-lab/queue1.log:run c    exit=0
+G:/blocks/pkgstatus-lab/queue1.log:node v25 exit=0
+G:/blocks/pkgstatus-lab/queue1.log:ORACLE llvm: MATCH (byte-exact)
+G:/blocks/pkgstatus-lab/queue1.log:ORACLE c: MATCH (byte-exact)
+G:/blocks/pkgstatus-lab/queue1.log:engine scan voip-ssrc.exe: quickjs=0 ScrDyn=0 JS_NewRuntime=0
+G:/blocks/pkgstatus-lab/queue1.log:engine scan voip-ssrc.c.exe: quickjs=0 ScrDyn=0 JS_NewRuntime=0
+G:/blocks/pkgstatus-lab/queue3.log:### store-sqlite-names2-be  (drivers/store-sqlite-names2.ts)  flags: --best-effort
+G:/blocks/pkgstatus-lab/queue3.log:build llvm rc=0  c rc=0
+G:/blocks/pkgstatus-lab/queue3.log:bytes llvm: 814592
+G:/blocks/pkgstatus-lab/queue3.log:run llvm exit=0
+G:/blocks/pkgstatus-lab/queue3.log:bytes c:    816128
+G:/blocks/pkgstatus-lab/queue3.log:run c    exit=0
+G:/blocks/pkgstatus-lab/queue3.log:node v25 exit=0
+G:/blocks/pkgstatus-lab/queue3.log:ORACLE llvm: MATCH (byte-exact)
+G:/blocks/pkgstatus-lab/queue3.log:ORACLE c: MATCH (byte-exact)
+G:/blocks/pkgstatus-lab/queue3.log:engine scan store-sqlite-names2-be.exe: quickjs=0 ScrDyn=0 JS_NewRuntime=0
+G:/blocks/pkgstatus-lab/queue3.log:engine scan store-sqlite-names2-be.c.exe: quickjs=0 ScrDyn=0 JS_NewRuntime=0
+G:/blocks/pkgstatus-lab/queue3.log:### store-sqlite-names-be  (drivers/store-sqlite-names.ts)  flags: --best-effort
+G:/blocks/pkgstatus-lab/queue3.log:build llvm rc=0  c rc=0
+G:/blocks/pkgstatus-lab/queue3.log:bytes llvm: 818688
+G:/blocks/pkgstatus-lab/queue3.log:run llvm exit=1
+G:/blocks/pkgstatus-lab/queue3.log:bytes c:    819712
+G:/blocks/pkgstatus-lab/queue3.log:run c    exit=1
+G:/blocks/pkgstatus-lab/queue3.log:node v25 exit=0
+G:/blocks/pkgstatus-lab/queue3.log:ORACLE llvm: WRONG
+G:/blocks/pkgstatus-lab/queue3.log:ORACLE c: WRONG
+G:/blocks/pkgstatus-lab/queue3.log:engine scan store-sqlite-names-be.exe: quickjs=0 ScrDyn=0 JS_NewRuntime=0
+G:/blocks/pkgstatus-lab/queue3.log:engine scan store-sqlite-names-be.c.exe: quickjs=0 ScrDyn=0 JS_NewRuntime=0
+G:/blocks/pkgstatus-lab/queue4.log:### store-sqlite-bundle  (drivers/drv-sqlite.ts)  flags: --provenance-sources
+G:/blocks/pkgstatus-lab/queue4.log:build llvm rc=0  c rc=0
+G:/blocks/pkgstatus-lab/queue4.log:bytes llvm: 24138752
+G:/blocks/pkgstatus-lab/queue4.log:run llvm exit=0
+G:/blocks/pkgstatus-lab/queue4.log:bytes c:    23943168
+G:/blocks/pkgstatus-lab/queue4.log:run c    exit=0
+G:/blocks/pkgstatus-lab/queue4.log:node v25 exit=0
+G:/blocks/pkgstatus-lab/queue4.log:ORACLE llvm: MATCH (byte-exact)
+G:/blocks/pkgstatus-lab/queue4.log:ORACLE c: MATCH (byte-exact)
+G:/blocks/pkgstatus-lab/queue4.log:engine scan store-sqlite-bundle.exe: quickjs=0 ScrDyn=0 JS_NewRuntime=0
+G:/blocks/pkgstatus-lab/queue4.log:engine scan store-sqlite-bundle.c.exe: quickjs=0 ScrDyn=0 JS_NewRuntime=0
+G:/blocks/pkgstatus-lab/queue4.log:### store-sqlite-open-be  (drivers/store-sqlite-open.ts)  flags: --provenance-sources --best-effort
+G:/blocks/pkgstatus-lab/queue4.log:build llvm rc=0  c rc=0
+G:/blocks/pkgstatus-lab/queue4.log:bytes llvm: 922112
+G:/blocks/pkgstatus-lab/queue4.log:run llvm exit=1
+G:/blocks/pkgstatus-lab/queue4.log:bytes c:    926720
+G:/blocks/pkgstatus-lab/queue4.log:run c    exit=1
+G:/blocks/pkgstatus-lab/queue4.log:node v25 exit=1
+G:/blocks/pkgstatus-lab/queue4.log:ORACLE llvm: WRONG
+G:/blocks/pkgstatus-lab/queue4.log:ORACLE c: WRONG
+G:/blocks/pkgstatus-lab/queue4.log:engine scan store-sqlite-open-be.exe: quickjs=0 ScrDyn=0 JS_NewRuntime=0
+G:/blocks/pkgstatus-lab/queue4.log:engine scan store-sqlite-open-be.c.exe: quickjs=0 ScrDyn=0 JS_NewRuntime=0
+G:/blocks/pkgstatus-lab/queue5.log:### store-sqlite-bundle2  (drivers/drv-sqlite2.ts)  flags: --provenance-sources
+G:/blocks/pkgstatus-lab/queue5.log:build llvm rc=0  c rc=0
+G:/blocks/pkgstatus-lab/queue5.log:bytes llvm: 24141824
+G:/blocks/pkgstatus-lab/queue5.log:run llvm exit=0
+G:/blocks/pkgstatus-lab/queue5.log:bytes c:    23947264
+G:/blocks/pkgstatus-lab/queue5.log:run c    exit=0
+G:/blocks/pkgstatus-lab/queue5.log:node v25 exit=0
+G:/blocks/pkgstatus-lab/queue5.log:ORACLE llvm: MATCH (byte-exact)
+G:/blocks/pkgstatus-lab/queue5.log:ORACLE c: MATCH (byte-exact)
+G:/blocks/pkgstatus-lab/queue5.log:engine scan store-sqlite-bundle2.exe: quickjs=0 ScrDyn=0 JS_NewRuntime=0
+G:/blocks/pkgstatus-lab/queue5.log:engine scan store-sqlite-bundle2.c.exe: quickjs=0 ScrDyn=0 JS_NewRuntime=0
