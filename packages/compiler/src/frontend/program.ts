@@ -52,7 +52,7 @@ import {
 import { provenanceDeclSiblings } from "./provenance-registry.js";
 import { isNodeModulesPath, nearestPkgJsonPath, projectDtsRuntimeSibling, resolveBareModule, resolveProjectImport, resolveRelativeModule, resolveTypeDirective, setProjectRealm } from "./resolve.js";
 import { probeNodeImportRefusal, probeNodeRequireRefusal } from "./npm.js";
-import { isNpmStaticPackage, npmStaticActive, npmStaticFsShadow, npmStaticPackageOfPath, npmStaticPackages, reportNpmStaticOffender, setNpmStaticPackages } from "./npm-static.js";
+import { isNpmStaticPackage, npmStaticActive, npmStaticFsShadow, npmStaticPackageOfPath, npmStaticPackages, npmStaticRewroteExports, reportNpmStaticOffender, setNpmStaticPackages } from "./npm-static.js";
 import { isProvenanceSpecifier, provenancePaths } from "./provenance-registry.js";
 import { cjsLexerVisibleNames } from "./cjs-lexer.js";
 import {
@@ -897,12 +897,15 @@ function nsBindingUsesAreBareStatements7(
  * outcomes are unreachable. */
 
 /** A module edge, carrying what cycle admission needs when it turns out
- * to close one. `stmt` is the importing/re-exporting statement; absent
- * for require() edges, which are never admitted (their CJS home fails the
- * cluster check anyway). */
+ * to close one. `stmt` is the importing/re-exporting statement, present
+ * for ES-module edges only; `req` carries the CommonJS `require()` form
+ * instead — the declaration that binds it (null for a bare side-effect
+ * require, which binds nothing readable) and the call site to name in a
+ * diagnostic. Exactly one of the two is set. */
 export interface CycleEdge {
   dep: ts.SourceFile;
   stmt?: ts.ImportDeclaration | ts.ExportDeclaration;
+  req?: { decl: ts.VariableDeclaration | null; node: ts.Node };
 }
 
 /** True when the reference at `node` can only evaluate AFTER the module
@@ -1308,6 +1311,104 @@ function backEdgeUseOffence7(
   return null;
 }
 
+/** The first `module.exports = <expr>` anywhere in a CommonJS file, or
+ * null. Node REPLACES the export object there: a module that required
+ * this one before the assignment keeps a reference to the OLD object and
+ * never sees a single member of the new one. */
+function cjsWholeExportReplacement7(sf: ts.SourceFile): ts.Node | null {
+  // Under --npm-static the export rewrite APPENDS a canonical
+  // `module.exports = {...}` table to files that expressed their surface
+  // some other way (a getter table, __toCommonJS, per-member
+  // defineProperty). That table is the compiler's own spelling, not a
+  // replacement the package performs, and reading it as one refused every
+  // rewritten package's cycles — mongodb's whole lib/ among them. A file
+  // with a REAL module.exports assignment is never rewritten, so nothing
+  // is lost by skipping the rewritten ones wholesale.
+  if (npmStaticRewroteExports(sf.fileName)) return null;
+  const hits: ts.Node[] = [];
+  ts.walkPreorder(sf, (n) => {
+    if (ts.isBinaryExpression(n) && isCjsWholeExportAssign(n)) hits.push(n);
+  });
+  return hits[0] ?? null;
+}
+
+/** The first reference to `sym` in `sf` that is neither a type position
+ * nor a DEFERRED one (function body, parameter default, instance-field
+ * initializer) — the read that would execute during the cycle's init
+ * window. The declaration's own binding occurrence is not a read. */
+function firstNonDeferredRef7(
+  checker: ts.TypeChecker,
+  sf: ts.SourceFile,
+  name: string,
+  sym: ts.Symbol,
+): ts.Node | null {
+  const hits: ts.Node[] = [];
+  ts.walkPreorder(sf, (n) => {
+    if (hits.length > 0) return;
+    if (!ts.isIdentifier(n) || n.text !== name) return;
+    if (n.parent !== undefined && ts.isVariableDeclaration(n.parent) && n.parent.name === n) return;
+    if (inTypePosition7(n) || inDeferredPosition7(n)) return;
+    if (checker.getSymbolAtLocation(n) !== sym) return;
+    hits.push(n);
+  });
+  return hits[0] ?? null;
+}
+
+/** A CommonJS back edge — `importer` requires `e.dep` while `e.dep` is
+ * still mid-initialization: the reason it keeps the SC1016 fence, or null
+ * to ADMIT.
+ *
+ * Node answers the require with `e.dep`'s PARTIAL `module.exports`
+ * object. There is no temporal dead zone, so a member read during the
+ * window is a plain `undefined` and the program runs on; the alias
+ * lowering would answer the module's FINAL value at that same point. The
+ * bar is therefore that every read of this edge's binding sits in a
+ * DEFERRED position — a function body, a parameter default, an instance
+ * field initializer — all of which run after the whole graph initialized,
+ * where the alias and Node's object hold the same members.
+ *
+ * Only the BACK edge needs asking. A forward edge's require returns only
+ * once the target's body ran to completion, so its binding names a
+ * finished module and a top-level read of it is as safe as any other —
+ * which is what admits the barrel line every real package has
+ * (`exports.Sentinel = Sentinel_1.default` in ioredis's
+ * `connectors/index.js`), and, for the same reason, every read in the
+ * module the walk ENTERED the cluster through: being first, none of its
+ * own edges into the cluster is a back edge. */
+function cjsBackEdgeUseOffence7(
+  program: ts.Program,
+  importer: ts.SourceFile,
+  e: CycleEdge,
+  lineOf: (node: ts.Node) => string,
+): string | null {
+  const req = e.req;
+  if (req === undefined || req.decl === null) return null; // binds nothing readable
+  // `e.dep` REPLACES its export object after handing this edge the old
+  // one. Node's binding here keeps the pre-replacement object for the
+  // rest of the program and never sees a member of the new one — not
+  // from a function body either, so no position rule rescues it, and the
+  // alias lowering (which names the declaration) always answers the
+  // replacement. Only the edge's OWN target matters: a forward edge's
+  // require returns after the body ran, so it already holds the final
+  // object.
+  const replaced = cjsWholeExportReplacement7(e.dep);
+  if (replaced !== null) {
+    return `${lineOf(replaced)} replaces the module's export object after this edge read it — the binding keeps the OLD object for the rest of the program (Node), which a require binding with no storage of its own cannot represent`;
+  }
+  const decl = req.decl;
+  if (!ts.isIdentifier(decl.name)) {
+    return `the cycle-crossing require at ${lineOf(req.node)} destructures its binding, which reads the partially-initialized module at the require itself`;
+  }
+  const checker = program.getTypeChecker();
+  const sym = checker.getSymbolAtLocation(decl.name);
+  if (sym === undefined) return null;
+  const off = firstNonDeferredRef7(checker, importer, decl.name.text, sym);
+  if (off !== null) {
+    return `the cycle-crossing binding '${decl.name.text}' is read at ${lineOf(off)}, outside any function body — the exporter has not attached that member yet, so Node answers 'undefined' there and this lowering would answer the final value`;
+  }
+  return null;
+}
+
 /** The benign-cycle admission engine over one import graph, shared by
  * preflight's static-module walk and the --dynamic subgraph walk
  * (appendDynamicImportModules). Given a BACK edge (importer → e.dep with
@@ -1320,7 +1421,11 @@ function backEdgeUseOffence7(
  *    is a bare expression statement — no read crosses the edge at all;
  *  - the DECLARATION-ONLY INIT WINDOW rule (the admission block above):
  *    every cluster member is an ES module with an inert top level, and
- *    the closing edge's bindings are used only in deferred positions.
+ *    the closing edge's bindings are used only in deferred positions;
+ *  - for a cluster of CommonJS modules only, the CJS PARTIAL-EXPORTS rule
+ *    (cjsBackEdgeUseOffence7), which is per-EDGE rather than per-cluster:
+ *    the required module does not replace its export object, and this
+ *    edge's require binding is read only in deferred positions.
  * Tarjan SCCs (lazy, rooted at each queried importer) and cluster
  * verdicts are memoized across calls, so `edgesOf` must answer the same
  * edges for the same file every time.
@@ -1403,9 +1508,10 @@ export function makeCycleAdmission(
     stack: readonly ts.SourceFile[],
     evaluated: (f: ts.SourceFile) => boolean,
   ): string | null => {
-    if (e.stmt === undefined) return "the cycle closes through a require() edge";
-    // Cheap per-edge admission: nothing readable binds through the edge.
-    if (ts.isImportDeclaration(e.stmt)) {
+    // Cheap per-edge admission (ES-module edges): nothing readable binds
+    // through the edge. A require() edge has no import clause to inspect;
+    // the whole-CommonJS cluster rule below judges its bindings instead.
+    if (e.stmt !== undefined && ts.isImportDeclaration(e.stmt)) {
       const clause = e.stmt.importClause;
       if (
         clause === undefined ||
@@ -1431,22 +1537,42 @@ export function makeCycleAdmission(
       // the exemption is stable across the memoized verdict.
       const entered = stack.find((m) => comp.includes(m)) ?? null;
       let reason: string | null = null;
-      for (const m of comp) {
-        if (isCjsJsFile7(m)) {
-          reason = `${m.fileName} is a CommonJS module — admission covers ES-module cycles only`;
-          break;
-        }
-        if (m === entered) continue;
-        const off = nonInertTopLevel7(program, m, evaluated);
-        if (off !== null) {
-          reason = `top-level code at ${lineOf(off)} can run user code during the cycle's init window — only declaration-only module bodies are admitted`;
-          break;
+      // A cluster of CommonJS modules only decides NOTHING here: Node's
+      // semantics on a require() back edge are the partial EXPORT OBJECT
+      // rather than a TDZ slot, and what can observe the difference is
+      // per-EDGE (cjsBackEdgeUseOffence7, below). A MIXED cluster takes
+      // the loop and keeps the fence on its first CommonJS member — the
+      // two module systems' init windows interleave in ways neither
+      // analysis models.
+      if (!comp.every((m) => isCjsJsFile7(m))) {
+        for (const m of comp) {
+          if (isCjsJsFile7(m)) {
+            reason = `${m.fileName} is a CommonJS module — admission covers ES-module cycles only`;
+            break;
+          }
+          if (m === entered) continue;
+          const off = nonInertTopLevel7(program, m, evaluated);
+          if (off !== null) {
+            reason = `top-level code at ${lineOf(off)} can run user code during the cycle's init window — only declaration-only module bodies are admitted`;
+            break;
+          }
         }
       }
       sccVerdict.set(comp, reason);
     }
     const clusterReason = sccVerdict.get(comp)!;
     if (clusterReason !== null) return clusterReason;
+    // A require() edge closing a whole-CommonJS cluster: its own binding
+    // is the only one that can observe e.dep partially initialized. The
+    // all-CommonJS test is repeated rather than assumed — a require()
+    // edge reaching an ES-module cluster has no honest reading here (and
+    // preflight refuses require() in an ES module long before this), so
+    // it keeps the fence.
+    if (e.stmt === undefined) {
+      return comp.every((m) => isCjsJsFile7(m))
+        ? cjsBackEdgeUseOffence7(program, importer, e, lineOf)
+        : "the cycle closes through a require() edge into a module cluster that is not all CommonJS";
+    }
     const use = backEdgeUseOffence7(program, importer, e.stmt, evaluated);
     if (use !== null) {
       return `the cycle-crossing binding '${use.name}' is read at ${lineOf(use.node)}, outside any function body — a read during the init window observes the partially-initialized module (Node's TDZ ReferenceError / stale var), which is not modeled`;
@@ -2341,7 +2467,7 @@ function preflight7(load: LoadResult): {
             );
             continue;
           }
-          if (dep) deps.push({ dep });
+          if (dep) deps.push({ dep, req: { decl: req.decl, node: req.node } });
         }
       }
       if (!ts.isExternalModule(sf)) {

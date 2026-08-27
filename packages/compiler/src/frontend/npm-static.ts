@@ -70,10 +70,31 @@ const offenders = new Map<string, string>();
  * the host probes the same file many times, and the rewrite parses. */
 const rewriteCache = new Map<string, string | null>();
 
+/** Files the rewrite actually replaced, by normalized path — the question
+ * cycle admission asks (npmStaticRewroteExports). */
+const rewrittenPaths = new Set<string>();
+
+const rewriteKeyOf = (path: string): string =>
+  path.split(String.fromCharCode(92)).join("/").toLowerCase();
+
+/** True when the bundler-CJS export rewrite replaced this file's export
+ * plumbing with the canonical `module.exports = {...}` table
+ * (npm-static-rewrite.ts). That table is the COMPILER's spelling of a
+ * surface the package expressed some other way — a getter table, a
+ * `__toCommonJS` call, per-member `defineProperty` — and never a
+ * source-level replacement of the export object. Cycle admission must not
+ * read it as one. A file carrying a REAL `module.exports = <expr>` is
+ * never rewritten (rewriteBundlerCjsExports bails on exactly that), so
+ * its assignment still stands in the AST for the analysis to find. */
+export function npmStaticRewroteExports(fileName: string): boolean {
+  return rewrittenPaths.has(rewriteKeyOf(fileName));
+}
+
 export function setNpmStaticPackages(packages: Iterable<string>): void {
   activePackages = new Set(packages);
   offenders.clear();
   rewriteCache.clear();
+  rewrittenPaths.clear();
   untypedPkgCache.clear();
   realpathProbed.clear();
 }
@@ -383,6 +404,7 @@ export function npmStaticFsShadow(): NpmStaticFsShadow | null {
           rewritten = null; // unreadable/unparseable: fall through untouched
         }
         rewriteCache.set(path, rewritten);
+        if (rewritten !== null) rewrittenPaths.add(rewriteKeyOf(path));
         return rewritten ?? undefined;
       }
       return undefined;

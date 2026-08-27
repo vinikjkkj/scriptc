@@ -9825,6 +9825,38 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/7320-cjs-cycle-binds-nothing/main.js": {
+   "order": [
+    "<repo>/tests/corpus/7320-cjs-cycle-binds-nothing/b.js",
+    "<repo>/tests/corpus/7320-cjs-cycle-binds-nothing/a.js",
+    "<repo>/tests/corpus/7320-cjs-cycle-binds-nothing/main.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/7321-cjs-cycle-deferred-reads/main.js": {
+   "order": [
+    "<repo>/tests/corpus/7321-cjs-cycle-deferred-reads/b.js",
+    "<repo>/tests/corpus/7321-cjs-cycle-deferred-reads/a.js",
+    "<repo>/tests/corpus/7321-cjs-cycle-deferred-reads/main.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/7322-cjs-cycle-entered-module-top-level-read/main.js": {
+   "order": [
+    "<repo>/tests/corpus/7322-cjs-cycle-entered-module-top-level-read/b.js",
+    "<repo>/tests/corpus/7322-cjs-cycle-entered-module-top-level-read/a.js",
+    "<repo>/tests/corpus/7322-cjs-cycle-entered-module-top-level-read/main.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/7323-cjs-cycle-class-default-export/main.js": {
+   "order": [
+    "<repo>/tests/corpus/7323-cjs-cycle-class-default-export/b.js",
+    "<repo>/tests/corpus/7323-cjs-cycle-class-default-export/a.js",
+    "<repo>/tests/corpus/7323-cjs-cycle-class-default-export/main.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/750-cycle-closure-box.ts": {
    "order": [
     "<repo>/tests/corpus/750-cycle-closure-box.ts"
@@ -10428,6 +10460,46 @@
    ],
    "diags": []
   },
+  "<repo>/tests/diagnostics/cjs-cycle-export-replacement/main.js": {
+   "order": [
+    "<repo>/tests/diagnostics/cjs-cycle-export-replacement/b.js",
+    "<repo>/tests/diagnostics/cjs-cycle-export-replacement/a.js",
+    "<repo>/tests/diagnostics/cjs-cycle-export-replacement/main.js"
+   ],
+   "diags": [
+    {
+     "code": "SC1016",
+     "message": "circular imports (<repo>/tests/diagnostics/cjs-cycle-export-replacement/a.js → <repo>/tests/diagnostics/cjs-cycle-export-replacement/b.js → <repo>/tests/diagnostics/cjs-cycle-export-replacement/a.js; <repo>/tests/diagnostics/cjs-cycle-export-replacement/a.js:4 replaces the module's export object after this edge read it — the binding keeps the OLD object for the rest of the program (Node), which a require binding with no storage of its own cannot represent) are not supported yet",
+     "loc": {
+      "file": "<repo>/tests/diagnostics/cjs-cycle-export-replacement/a.js",
+      "start": 0,
+      "end": 0
+     },
+     "milestone": "later",
+     "hint": "ES-module cycles with declaration-only top levels compile as-is, and so do CommonJS cycles whose cycle-crossing require bindings are read only inside function bodies; the fix depends on which the message names — move the named read or call into a function body, attach members to 'exports' instead of replacing 'module.exports', or break the named edge"
+    }
+   ]
+  },
+  "<repo>/tests/diagnostics/cjs-cycle-top-level-read/main.js": {
+   "order": [
+    "<repo>/tests/diagnostics/cjs-cycle-top-level-read/b.js",
+    "<repo>/tests/diagnostics/cjs-cycle-top-level-read/a.js",
+    "<repo>/tests/diagnostics/cjs-cycle-top-level-read/main.js"
+   ],
+   "diags": [
+    {
+     "code": "SC1016",
+     "message": "circular imports (<repo>/tests/diagnostics/cjs-cycle-top-level-read/a.js → <repo>/tests/diagnostics/cjs-cycle-top-level-read/b.js → <repo>/tests/diagnostics/cjs-cycle-top-level-read/a.js; the cycle-crossing binding 'a' is read at <repo>/tests/diagnostics/cjs-cycle-top-level-read/b.js:6, outside any function body — the exporter has not attached that member yet, so Node answers 'undefined' there and this lowering would answer the final value) are not supported yet",
+     "loc": {
+      "file": "<repo>/tests/diagnostics/cjs-cycle-top-level-read/a.js",
+      "start": 0,
+      "end": 0
+     },
+     "milestone": "later",
+     "hint": "ES-module cycles with declaration-only top levels compile as-is, and so do CommonJS cycles whose cycle-crossing require bindings are read only inside function bodies; the fix depends on which the message names — move the named read or call into a function body, attach members to 'exports' instead of replacing 'module.exports', or break the named edge"
+    }
+   ]
+  },
   "<repo>/tests/diagnostics/cjs-esm-lexer-require-reached/main.js": {
    "order": [
     "<repo>/tests/diagnostics/cjs-esm-lexer-require-reached/table.cjs",
@@ -10444,26 +10516,6 @@
       "end": 10
      },
      "milestone": "later"
-    }
-   ]
-  },
-  "<repo>/tests/diagnostics/cjs-require-cycle/main.js": {
-   "order": [
-    "<repo>/tests/diagnostics/cjs-require-cycle/b.js",
-    "<repo>/tests/diagnostics/cjs-require-cycle/a.js",
-    "<repo>/tests/diagnostics/cjs-require-cycle/main.js"
-   ],
-   "diags": [
-    {
-     "code": "SC1016",
-     "message": "circular imports (<repo>/tests/diagnostics/cjs-require-cycle/a.js → <repo>/tests/diagnostics/cjs-require-cycle/b.js → <repo>/tests/diagnostics/cjs-require-cycle/a.js; the cycle closes through a require() edge) are not supported yet",
-     "loc": {
-      "file": "<repo>/tests/diagnostics/cjs-require-cycle/a.js",
-      "start": 0,
-      "end": 0
-     },
-     "milestone": "later",
-     "hint": "cycles of ES modules with declaration-only top levels whose cycle-crossing bindings are only used inside function bodies compile as-is; move the named top-level read or call into a function body (or break the named edge) so nothing runs during the cycle's init window"
     }
    ]
   },
@@ -10538,7 +10590,7 @@
       "end": 0
      },
      "milestone": "later",
-     "hint": "cycles of ES modules with declaration-only top levels whose cycle-crossing bindings are only used inside function bodies compile as-is; move the named top-level read or call into a function body (or break the named edge) so nothing runs during the cycle's init window"
+     "hint": "ES-module cycles with declaration-only top levels compile as-is, and so do CommonJS cycles whose cycle-crossing require bindings are read only inside function bodies; the fix depends on which the message names — move the named read or call into a function body, attach members to 'exports' instead of replacing 'module.exports', or break the named edge"
     }
    ]
   },
@@ -10558,7 +10610,7 @@
       "end": 0
      },
      "milestone": "later",
-     "hint": "cycles of ES modules with declaration-only top levels whose cycle-crossing bindings are only used inside function bodies compile as-is; move the named top-level read or call into a function body (or break the named edge) so nothing runs during the cycle's init window"
+     "hint": "ES-module cycles with declaration-only top levels compile as-is, and so do CommonJS cycles whose cycle-crossing require bindings are read only inside function bodies; the fix depends on which the message names — move the named read or call into a function body, attach members to 'exports' instead of replacing 'module.exports', or break the named edge"
     }
    ]
   },
@@ -10578,7 +10630,7 @@
       "end": 0
      },
      "milestone": "later",
-     "hint": "cycles of ES modules with declaration-only top levels whose cycle-crossing bindings are only used inside function bodies compile as-is; move the named top-level read or call into a function body (or break the named edge) so nothing runs during the cycle's init window"
+     "hint": "ES-module cycles with declaration-only top levels compile as-is, and so do CommonJS cycles whose cycle-crossing require bindings are read only inside function bodies; the fix depends on which the message names — move the named read or call into a function body, attach members to 'exports' instead of replacing 'module.exports', or break the named edge"
     }
    ]
   },
