@@ -1,0 +1,14 @@
+{
+  "packages": {
+    "aliaspkg": {
+      "dir": "./attested-src/aliasmono/packages/aliaspkg",
+      "commit": "5555555555555555555555555555555555555555",
+      "repo": "https://github.com/example/aliasmono"
+    },
+    "aliaspkg2": {
+      "dir": "./attested-src/aliasmono2/packages/aliaspkg2",
+      "commit": "6666666666666666666666666666666666666666",
+      "repo": "https://github.com/example/aliasmono2"
+    }
+  }
+}

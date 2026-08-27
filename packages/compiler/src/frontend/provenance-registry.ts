@@ -127,7 +127,24 @@ export function setProvenanceSources(sources: ProvenanceSources | null): void {
           ? { prefix: key, suffix: null, targets }
           : { prefix: key.slice(0, star), suffix: key.slice(star + 1), targets },
       );
-      aliasPaths[key] = targets;
+      // ACCUMULATE, never replace. Two mapped packages routinely spell the
+      // same alias key — a monorepo's `@protocol/*` is in the shared config
+      // that every package in it extends — and they are checkouts of
+      // DIFFERENT commits. Assigning here let the last package mapped
+      // silently rewrite every earlier package's table, so a file in
+      // zapo-js@1.6.2 (commit 250f9af5) resolved `@protocol/constants`
+      // into @zapo-js/store-sqlite's commit ff43c244 and dragged that
+      // other checkout's whole client tree into the program: 862 refusal
+      // sites, none of them naming an alias.
+      //
+      // tsgo tries a key's targets in order, and `aliases` above is
+      // consulted first-match-wins over a stable sort, so appending makes
+      // the two resolvers agree: the package mapped FIRST — the one the
+      // driver's own imports reached — answers, and the others become
+      // fallbacks instead of overrides. What this does NOT do is scope an
+      // alias to the package that declared it; tsconfig "paths" is one
+      // flat table per program and cannot express that.
+      aliasPaths[key] = [...(aliasPaths[key] ?? []), ...targets];
     }
   }
   // tsc's rule: among matching patterns the longest literal prefix wins.
