@@ -1,0 +1,5 @@
+{
+  "extends": "../tsconfig.paths.json",
+  "compilerOptions": { "types": ["node"], "noEmit": true },
+  "include": ["src"]
+}

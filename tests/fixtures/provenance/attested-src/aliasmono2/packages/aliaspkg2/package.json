@@ -1,0 +1,12 @@
+{
+  "name": "aliaspkg2",
+  "version": "3.4.0",
+  "type": "commonjs",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "require": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
+  }
+}
