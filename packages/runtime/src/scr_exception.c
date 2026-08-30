@@ -282,6 +282,67 @@ void scr_throw_str(ScrStr *v) {
 
 void scr_throw_ref(void *v, void *(*retain)(void *), void (*release)(void *),
                     ScrTraceFn trace) {
+  /* THROWING A DYN THAT IS A RUNTIME ERROR: unwrap to the ScrError it
+   * boxes, and store the OBJ arm.
+   *
+   * A caught error that crosses into `unknown` and is thrown again — the
+   * everyday `function rethrow(e: unknown): never { throw e }` helper,
+   * and the shape a non-inline `.catch(h)` handler takes — used to land
+   * here as a REF carrying a dyn. Every question the next catch body
+   * asked then answered from the erased arm: `e instanceof Error` was
+   * FALSE and `String(e)` was "[object Object]", where Node answers true
+   * and "Error: x". Silent, and reachable on any revision — writing the
+   * rethrow inline (`.catch((e) => rethrow(e))`) emits the same bytes.
+   *
+   * Unwrapping HERE rather than at the catch-side questions is what makes
+   * it safe: the narrowed EXTRACTION reads `payload` as an ScrError, so a
+   * cell that answers `instanceof Error` while carrying a dyn is a type
+   * confusion (measured: a segfault, not a wrong answer). One arm decides
+   * for all of them. Identity survives: reading the OBJ arm back as a dyn
+   * goes through scr_dyn_from_error, whose cache returns the SAME node
+   * this dyn is.
+   *
+   * The reverse lookup only hits for the runtime's own error encoding —
+   * a user object built over Error.prototype has no ScrError behind it
+   * and keeps the REF arm exactly as before. */
+  if (v != NULL && retain == scr_dyn_retain_v) {
+    ScrError *behind = scr_errdyn_err_of((const ScrDyn *)v); /* +1 or NULL */
+    if (behind != NULL) {
+      release(v); /* the dyn reference this call took ownership of */
+      scr_exc_reset();
+      scr_exc_kind = SCR_EXC_OBJ;
+      scr_exc_payload = behind; /* the +1 from the lookup moves in */
+      scr_exc_retain_fn = scr_error_retain_v;
+      scr_exc_release_fn = scr_error_release_v;
+      scr_exc_trace_fn = NULL;
+      return;
+    }
+    /* The SCALAR arms of the same round trip. The caught→dyn adapter maps
+     * SCR_EXC_{F64,BOOL,STR} into the matching dyn kinds; this maps them
+     * back, so the cell holds the same arm it started in. Without it
+     * `throw e` over a rethrown STRING landed in the REF arm and
+     * `String(e)` answered "[object Object]" where Node answers the
+     * string — the error case's twin, one kind down. */
+    const ScrDyn *d = (const ScrDyn *)v;
+    if (d->kind == SCR_DYN_STR) {
+      ScrStr *s = scr_str_retain(d->v.str);
+      release(v);
+      scr_throw_str(s); /* the retained +1 moves in */
+      return;
+    }
+    if (d->kind == SCR_DYN_NUM) {
+      const double n = d->v.num;
+      release(v);
+      scr_throw_f64(n);
+      return;
+    }
+    if (d->kind == SCR_DYN_BOOL) {
+      const bool b = d->v.b;
+      release(v);
+      scr_throw_bool(b);
+      return;
+    }
+  }
   scr_exc_reset();
   scr_exc_kind = SCR_EXC_REF;
   scr_exc_payload = v; /* ownership moves in */
