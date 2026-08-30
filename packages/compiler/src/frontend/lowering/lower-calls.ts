@@ -8299,12 +8299,16 @@ const inliningPredicates = new Set<ts.Symbol>();
    * dyn-inner `.catch` above already uses, and the same shape writing
    * `.catch((e) => h(e))` by hand produces.
    *
-   * Answers null (the caller keeps the fence) when the handler cannot be
-   * boxed — a non-callable or union-typed argument, where JS's own
-   * substitution rules differ — or when the COMBINED result is neither
-   * void nor the checked-dynamic value: reading a static T back out of the
-   * handler's dyn return would be an unchecked narrow, and a wrong answer
-   * there is worse than the refusal. */
+   * Answers null (the caller keeps the fence) in two cases. The handler
+   * cannot be boxed — a non-callable or union-typed argument, where JS's
+   * own substitution rules differ, or a METHOD reference, whose `this` JS
+   * unbinds and this lowering would not. Or the COMBINED result cannot
+   * take what the handler returns: the result IS the checked-dynamic value
+   * (fine, the dyn return reaches it unchanged), or the handler returns
+   * nothing and the result is void or a union with an undefined arm (fine,
+   * that undefined is what the handler contributes) — and otherwise
+   * reading a static T back out of a dyn return would be an unchecked
+   * narrow, where a wrong answer is worse than the refusal. */
   function lowerCatchHandlerValue(L: Lowerer, call: ts.CallExpression, receiver: IrExpr,
     promT: IrType & { kind: "promise" }, inner: IrType, callTs: ts.Type, loc: SrcLoc,): IrExpr | null {
     const argNode = call.arguments[0]!;
