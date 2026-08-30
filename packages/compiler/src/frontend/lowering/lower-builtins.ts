@@ -7853,6 +7853,22 @@ let digestInputValueDispatches = 0;
     // is a backpressure signal; this synchronous write is constantly true.
     // @types/node's wider forms (Buffer data, encoding, callback) typecheck
     // and fence here.
+    // process.memoryUsage.rss(): Node's own single-value spelling of the
+    // one field of the memoryUsage() record this runtime can answer
+    // honestly. Its own arm, ahead of the `process.<member>` switch,
+    // because the RECEIVER here is `process.memoryUsage` — the record
+    // form's function object — and stdlibGlobalMember only recognises a
+    // direct member of `process`.
+    if (
+      access.name.text === "rss" &&
+      ts.isPropertyAccessExpression(access.expression) &&
+      L.stdlibGlobalMember(access.expression, "process") === "memoryUsage"
+    ) {
+      if (call.arguments.length !== 0) {
+        L.noLowering(`process.memoryUsage.rss with ${call.arguments.length} arguments`, call);
+      }
+      return { kind: "libCall", fn: "process.rss", args: [], type: F64, loc: locOf(call) };
+    }
     // process.stdin.destroy(): a deliberate no-op — no stream machinery
     // exists to tear down, and no other stdin surface observes the
     // destroyed state (SEMANTICS.md documents it).
@@ -8085,6 +8101,46 @@ let digestInputValueDispatches = 0;
           loc,
         };
       }
+      // 'uncaughtException' (and its monitor twin) is a BEHAVIOUR, not a
+      // value, and this runtime cannot honour the behaviour — so it is
+      // refused by name, with the reason, instead of being registered as a
+      // listener that could never fire. A handler the program believes is
+      // installed and that never runs is worse than a refusal: the bench
+      // this fence was written against registers one precisely so an
+      // escaped throw still stops the profiler.
+      //
+      // What the runtime actually does, measured on both backends: an
+      // uncaught throw — synchronous, or from inside a loop turn — prints
+      // "Uncaught <error>" to stderr and exits 1 AT THE THROW; no further
+      // turn runs (a second setTimeout armed before it never fires).
+      // Node's contract is the opposite: the listener is called and the
+      // loop CONTINUES. The two are one line apart —
+      //
+      //   process.on('uncaughtException', e => console.log('caught', e.message))
+      //   setTimeout(() => { throw new Error('x') }, 0)
+      //   setTimeout(() => console.log('still alive'), 20)
+      //
+      // Node prints both lines and exits 0. A "call the listener, then
+      // exit" half-implementation prints the first and stops, so it would
+      // be a measurable wrong answer, not an approximation.
+      //
+      // The hint's advice is compiled and run (tests/fixtures/node-types
+      // probes u4/u5): 'exit' listeners DO fire on the uncaught path, with
+      // code 1, byte-exact with Node.
+      if (
+        (event === "uncaughtException" || event === "uncaughtExceptionMonitor") &&
+        (member === "on" || member === "once" || isOff)
+      ) {
+        L.noLowering(
+          `process.${member}("${event}", ...)`,
+          call.arguments[0]!,
+          "there is no dispatch point for it in a compiled binary: an escaped throw prints \"Uncaught <error>\" and exits 1 at the throw, so the listener could never run and the loop never resumes (Node calls the listener and keeps going, which is the difference). What DOES run on that path is 'exit' — process.on('exit', code) fires with code 1 — and 'unhandledRejection' covers an escaped promise; take the rest with try/catch and a .catch on the top-level promise",
+          // The provenance, so the report reads honestly: `process.on` is
+          // @types/node's declaration in a project that has it, and the
+          // fallback's own in a project that does not.
+          L.checker.getSymbolAtLocation(access.name),
+        );
+      }
       if (signo === undefined && event !== "exit") {
         L.noLowering(
           `process.${member}(${event === null ? "non-literal event" : `"${event}"`}, ...)`,
@@ -8210,6 +8266,34 @@ let digestInputValueDispatches = 0;
       }
       const cb = timerStyleCallback(L, call.arguments, "process.nextTick", loc);
       return { kind: "libCall", fn: "process.nextTick", args: [cb], type: VOID, loc };
+    }
+    // process.memoryUsage() — the RECORD form. REFUSED, by name, with the
+    // fields named: of Node's five, exactly one is a fact about the
+    // operating-system process and four are V8 heap statistics.
+    //
+    //   rss           an OS fact — the resident set. This binary has it,
+    //                 and process.memoryUsage.rss() below answers it from
+    //                 the same place libuv reads Node's.
+    //   heapTotal     V8's heap, reserved
+    //   heapUsed      V8's heap, live
+    //   external      V8's off-heap accounting
+    //   arrayBuffers  the ArrayBuffer share of `external`
+    //
+    // There is no V8 heap in a compiled binary and no refcounted analogue
+    // that means the same thing, so the four have nothing behind them.
+    // Answering 0 for them is not the conservative choice it looks like:
+    // `process.memoryUsage().heapUsed > 0` is true under Node on every
+    // host and would come back FALSE here, and a bench differencing
+    // heapUsed across a scenario would report a real-looking zero delta.
+    // One measurable wrong answer is worse than the refusal, so the record
+    // is refused and the honest field is offered by its own Node spelling.
+    if (member === "memoryUsage") {
+      L.noLowering(
+        "process.memoryUsage()",
+        call,
+        "four of its five fields are V8 heap statistics (heapTotal, heapUsed, external, arrayBuffers) and there is no V8 heap in a compiled binary — reporting 0 for them would read as a measurement rather than an absence. The fifth is an operating-system fact this process does have: process.memoryUsage.rss() lowers and answers the resident set in bytes, from the same place Node reads it. For peak instead of current, process.resourceUsage().maxRSS lowers too (kilobytes, Node's units)",
+        L.checker.getSymbolAtLocation(access.name),
+      );
     }
     // The process introspection statics — plain reads of the process's
     // own clocks and counters, Node's shapes exactly.

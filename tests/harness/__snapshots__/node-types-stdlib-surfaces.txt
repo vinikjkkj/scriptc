@@ -1,0 +1,62 @@
+stdlib-surfaces-fenced.ts:10:13 - error SC2020: 'process.memoryUsage()' is typed by @types/node but has no scriptc lowering yet
+
+   9 |  * and there is no V8 heap here. 0 would read as a measurement. */
+  10 | console.log(process.memoryUsage());
+     |             ^~~~~~~~~~~~~~~~~~~~~
+  11 | 
+
+  hint: four of its five fields are V8 heap statistics (heapTotal, heapUsed, external, arrayBuffers) and there is no V8 heap in a compiled binary — reporting 0 for them would read as a measurement rather than an absence. The fifth is an operating-system fact this process does have: process.memoryUsage.rss() lowers and answers the resident set in bytes, from the same place Node reads it. For peak instead of current, process.resourceUsage().maxRSS lowers too (kilobytes, Node's units)
+
+stdlib-surfaces-fenced.ts:16:12 - error SC2020: 'process.on("uncaughtException", ...)' is typed by @types/node but has no scriptc lowering yet
+
+  15 |  * never called is worse than the refusal. */
+  16 | process.on("uncaughtException", (err) => {
+     |            ^~~~~~~~~~~~~~~~~~~
+  17 |   console.error(err);
+
+  hint: there is no dispatch point for it in a compiled binary: an escaped throw prints "Uncaught <error>" and exits 1 at the throw, so the listener could never run and the loop never resumes (Node calls the listener and keeps going, which is the difference). What DOES run on that path is 'exit' — process.on('exit', code) fires with code 1 — and 'unhandledRejection' covers an escaped promise; take the rest with try/catch and a .catch on the top-level promise
+
+stdlib-surfaces-fenced.ts:19:14 - error SC2020: 'process.once("uncaughtExceptionMonitor", ...)' is typed by @types/node but has no scriptc lowering yet
+
+  18 | });
+  19 | process.once("uncaughtExceptionMonitor", (err) => {
+     |              ^~~~~~~~~~~~~~~~~~~~~~~~~~
+  20 |   console.error(err);
+
+  hint: there is no dispatch point for it in a compiled binary: an escaped throw prints "Uncaught <error>" and exits 1 at the throw, so the listener could never run and the loop never resumes (Node calls the listener and keeps going, which is the difference). What DOES run on that path is 'exit' — process.on('exit', code) fires with code 1 — and 'unhandledRejection' covers an escaped promise; take the rest with try/catch and a .catch on the top-level promise
+
+stdlib-surfaces-fenced.ts:26:12 - error SC2020: 'globalThis' is part of the standard library types but has no scriptc lowering yet
+
+  25 |  * still sees @types/node's non-optional `var crypto`. */
+  26 | const c = (globalThis as { crypto?: { randomUUID(): string } }).crypto;
+     |            ^~~~~~~~~~
+  27 | console.log(c === undefined);
+
+  hint: the type checker sees the full standard library, but only the supported surface compiles (https://scriptc.dev/limitations)
+
+stdlib-surfaces-fenced.ts:32:14 - error SC2020: 'globalThis.gc' is part of the standard library types but has no scriptc lowering yet
+
+  31 |  * rather than a lie. */
+  32 | const hard = (globalThis as { gc: () => void }).gc;
+     |              ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  33 | console.log(typeof hard);
+
+  hint: 'gc' is declared non-optional at this site, so the read must produce a value and there is none. The RECEIVER is not the blocker — this compiler has globalThis; the member is what has no value here. Reading a global this host does not have folds to `undefined` (Node's own answer for an absent property of the global object) exactly when the declaration admits it: spell the member optional — `(globalThis as { gc?: T }).gc` — and the read compiles
+
+stdlib-surfaces-fenced.ts:41:12 - error SC2020: 'globalThis' is part of the standard library types but has no scriptc lowering yet
+
+  40 | }
+  41 | const w = (globalThis as unknown as { WebSocket?: Weird }).WebSocket;
+     |            ^~~~~~~~~~
+  42 | console.log(w === undefined);
+
+  hint: the type checker sees the full standard library, but only the supported surface compiles (https://scriptc.dev/limitations)
+
+stdlib-surfaces-fenced.ts:49:16 - error SC2020: 'globalThis' is part of the standard library types but has no scriptc lowering yet
+
+  48 |  * evidence has to be a declaration that says so, and there is none here. */
+  49 | const sniff = (globalThis as { window?: { name: string } }).window;
+     |                ^~~~~~~~~~
+  50 | console.log(sniff === undefined);
+
+  hint: the type checker sees the full standard library, but only the supported surface compiles (https://scriptc.dev/limitations)
