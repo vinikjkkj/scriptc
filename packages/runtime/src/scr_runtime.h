@@ -2418,6 +2418,22 @@ void scr_throw_str(ScrStr *v); /* takes ownership */
 /* Takes ownership of v; retain/release must be non-NULL (the compiler
  * passes the payload type's `_v` adapters, like scr_union_new_ref); trace
  * is non-NULL iff the payload type carries a cycle header. */
+/* THE DYN-THROW HOOK.
+ *
+ * scr_exception.c is linked into every program and into every runtime
+ * unit test; the dyn tree (scr_json.c) is linked into neither of the
+ * latter.  Unwrapping a thrown dyn needs the dyn LAYOUT and the error
+ * identity cache, both of which live in the optional unit, so the
+ * mandatory unit cannot name them: doing so broke the link of four
+ * runtime unit tests.  It holds this pointer instead; the dyn unit
+ * fills it the first time it allocates a dyn value, and a link with no
+ * dyn tree leaves it NULL and keeps the historical REF arm -- correct by
+ * construction, since with no dyn tree no dyn can be thrown.
+ *
+ * Answers true when it CONSUMED v and set the exception cell. */
+typedef bool (*ScrThrowDynHook)(void *v, void *(*retain)(void *),
+                                void (*release)(void *));
+extern ScrThrowDynHook scr_throw_dyn_hook;
 void scr_throw_ref(void *v, void *(*retain)(void *), void (*release)(void *),
                     ScrTraceFn trace);
 /* Same ownership contract as scr_throw_ref; the payload must be a
