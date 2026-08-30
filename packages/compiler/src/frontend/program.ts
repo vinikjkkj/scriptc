@@ -2216,7 +2216,24 @@ function preflight7(load: LoadResult): {
       if (isBare && npmStaticDep === null) {
         const resolved = resolveProjectImport(sf.fileName, spec);
         projDep = resolved !== null ? (program.getSourceFile(resolved) ?? null) : null;
-        if (projDep !== null && projDep.isDeclarationFile) {
+        /* "Only type declarations" has to mean the IMPLEMENTATION IS ABSENT,
+         * not merely that the resolution landed on a `.d.ts`. A declaration
+         * with its `.js` twin in the program is a module with both halves:
+         * declTwinOf puts the twin into module order ahead of its
+         * declaration, and lowering reads the values out of it — the shape
+         * zapo-js's own `spec/proto/index.js` has always taken.
+         *
+         * The distinction only became reachable when mapEntryToSource began
+         * mapping an authored-JavaScript package to the `.d.ts` beside the
+         * file it publishes: every value @vinikjkkj/wa-wam exports refused
+         * here with "there is no runtime implementation to compile" while
+         * its 28,725-line implementation sat in the program as a root.
+         *
+         * The twin is looked up in the PROGRAM, not on disk, so this relaxes
+         * nothing on its own: a `.d.ts` whose sibling was never loaded still
+         * has no compiled implementation and still refuses, with the same
+         * message. */
+        if (projDep !== null && projDep.isDeclarationFile && declTwinOf(program, projDep) === undefined) {
           diags.push(
             unsupportedDiag(
               "SC1010",
