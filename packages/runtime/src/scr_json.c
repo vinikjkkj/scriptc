@@ -525,47 +525,42 @@ static void scr_dyn_gcfree(void *o);
  * Only the runtime's own encodings unwrap.  A user object built over
  * Error.prototype has no ScrError behind it, and a composite dyn has no
  * scalar arm, so both keep the REF arm exactly as before. */
-static bool scr_throw_dyn_unwrap(void *v, void *(*retain)(void *),
-                                  void (*release)(void *)) {
-  if (retain != scr_dyn_retain_v) return false;
-  ScrError *behind = scr_errdyn_err_of((const ScrDyn *)v); /* +1 or NULL */
+void scr_throw_dyn(ScrDyn *v) {
+  ScrError *behind = scr_errdyn_err_of(v); /* +1 or NULL */
   if (behind != NULL) {
-    release(v); /* the dyn reference the throw took ownership of */
+    scr_dyn_release(v); /* the reference this call took ownership of */
     /* scr_throw_obj takes the +1 the lookup returned. */
     scr_throw_obj(behind, scr_error_retain_v, scr_error_release_v, NULL);
-    return true;
+    return;
   }
   /* The SCALAR arms of the same round trip: the caught->dyn adapter maps
    * SCR_EXC_{F64,BOOL,STR} into the matching dyn kinds, and this maps them
    * back, so the cell holds the arm it started in.  Without it a rethrown
    * STRING stringified as "[object Object]". */
-  const ScrDyn *d = (const ScrDyn *)v;
+  const ScrDyn *d = v;
   if (d->kind == SCR_DYN_STR) {
     ScrStr *s = scr_str_retain(d->v.str);
-    release(v);
+    scr_dyn_release(v);
     scr_throw_str(s); /* the retained +1 moves in */
-    return true;
+    return;
   }
   if (d->kind == SCR_DYN_NUM) {
     const double n = d->v.num;
-    release(v);
+    scr_dyn_release(v);
     scr_throw_f64(n);
-    return true;
+    return;
   }
   if (d->kind == SCR_DYN_BOOL) {
     const bool b = d->v.b;
-    release(v);
+    scr_dyn_release(v);
     scr_throw_bool(b);
-    return true;
+    return;
   }
-  return false;
+  /* Every other dyn kind keeps the historical REF arm, byte for byte. */
+  scr_throw_ref(v, scr_dyn_retain_v, scr_dyn_release_v, scr_dyn_trace_v);
 }
 
 static ScrDyn *scr_dyn_alloc(ScrDynKind kind) {
-  /* Registering HERE is what makes the hook safe without a constructor:
-   * these PE binaries run no .CRT initialisers, and every dyn value that
-   * could ever be thrown passes through this one chokepoint first. */
-  scr_throw_dyn_hook = scr_throw_dyn_unwrap;
 #ifndef SCR_RC_AUDIT
   ScrDyn **list = kind == SCR_DYN_ARR   ? &scr_dyn_free_arr
                   : kind == SCR_DYN_OBJ ? &scr_dyn_free_obj
