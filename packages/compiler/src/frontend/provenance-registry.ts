@@ -198,6 +198,26 @@ export function provenanceDeclSiblings(): string[] {
     }
   };
   for (const d of state.packageDirs) walk(join(d, "spec"), 0);
+  /* The AUTHORED-JavaScript entries. mapEntryToSource (provenance.ts) maps a
+   * package with no build step to the `.d.ts` beside the file it publishes,
+   * and only accepts that mapping when the implementation twin exists — so
+   * every `.d.ts` entry here has one, and it is the body of the package's own
+   * entry point rather than of some file three directories down. The walk
+   * above cannot reach these: it descends `spec/`, and these sit at the
+   * package root. */
+  for (const entry of state.bySpecifier.values()) {
+    if (!entry.endsWith(".d.ts")) continue;
+    const stem = entry.slice(0, -".d.ts".length);
+    for (const ext of [".js", ".mjs", ".cjs"]) {
+      const impl = `${stem}${ext}`;
+      try {
+        if (statSync(impl).isFile()) {
+          if (!out.includes(impl)) out.push(impl);
+          break;
+        }
+      } catch { /* none */ }
+    }
+  }
   return out;
 }
 

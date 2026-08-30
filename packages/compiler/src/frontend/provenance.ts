@@ -473,22 +473,65 @@ function mapEntryToSource(pkgDir: string, target: string, subpath: string): stri
     stems.add(tail);
   }
   const candidates: string[] = [];
+  /* The AUTHORED-JAVASCRIPT candidates, probed only after every TypeScript
+   * candidate above has missed — see authoredJsEntry. Kept in a second list
+   * rather than interleaved so a package with a build step maps to exactly
+   * the file it maps to today, whatever else sits beside it. */
+  const authored: string[] = [];
   for (const stem of stems) {
     const base = stem.replace(/\.d\.(ts|mts|cts)$/, ".$1").replace(/\.(js|mjs|cjs)$/, "");
     if (/\.(ts|tsx|mts|cts)$/.test(base)) candidates.push(base);
     else {
       candidates.push(`${base}.ts`, `${base}.mts`, `${base}.cts`, `${base}.tsx`);
       candidates.push(join(base, "index.ts"));
+      authored.push(`${base}.d.ts`, `${base}.d.mts`, `${base}.d.cts`, join(base, "index.d.ts"));
     }
   }
   if (subpath === ".") {
     candidates.push("src/index.ts", "src/index.mts", "index.ts", "src/index.tsx");
+    authored.push("index.d.ts", "src/index.d.ts");
   }
   for (const c of candidates) {
     const abs = join(pkgDir, c);
     if (isFile(abs)) return abs;
   }
+  for (const c of authored) {
+    const abs = join(pkgDir, c);
+    if (authoredJsEntry(abs)) return abs;
+  }
   return null;
+}
+
+/** True when `dts` is the declaration half of an AUTHORED-JavaScript entry:
+ * the `.d.ts` exists AND an implementation file sits beside it under the same
+ * stem.
+ *
+ * Why the twin is REQUIRED, and why this is not simply "accept the .js".
+ * A package with no build step publishes the file it authored — mysql2's
+ * `promise.js`, @vinikjkkj/wa-wam's `index.js` — so the published target IS
+ * the attested source and there is no `.ts` twin for the walk above to find.
+ * Every such entry missed, and the whole package fell to the island with a
+ * `no source mapping` note, however faithfully its source had been fetched.
+ *
+ * Mapping to the `.js` directly would work for the values and LOSE the types:
+ * the hand-written `.d.ts` beside it stops being consulted, and a consumer
+ * importing one type token off the package sends the whole tree back to the
+ * island (measured on @vinikjkkj/wa-wam under --npm-static, whose
+ * `type WaWamChannel` did exactly that). Mapping to the `.d.ts` and letting
+ * the EXISTING declaration-twin machinery supply the body is the shape that
+ * hands the compiler both halves: provenanceDeclSiblings puts the `.js` into
+ * the program and declTwinOf (program.ts) puts it into module order ahead of
+ * its declaration — the same path zapo-js's own `spec/proto/index.js` already
+ * takes.
+ *
+ * A `.d.ts` with no twin is deliberately NOT accepted. It would map the
+ * package to a body-less surface on which every exported VALUE refuses, which
+ * is a worse answer than the island it replaced, not a better one. Such a
+ * package keeps its named `no source mapping` note. */
+function authoredJsEntry(dts: string): boolean {
+  if (!isFile(dts)) return false;
+  const stem = dts.replace(/\.d\.(ts|mts|cts)$/, "");
+  return isFile(`${stem}.js`) || isFile(`${stem}.mjs`) || isFile(`${stem}.cjs`);
 }
 
 /** The tsconfig files a source tree's alias table may live in, in the
