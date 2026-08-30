@@ -1,0 +1,1269 @@
+{
+ "entry": "G:/blocks/voipfix-lab/app/pkgs/voip/index.ts",
+ "flags": [
+  "--provenance-sources"
+ ],
+ "elapsedMs": 1271371,
+ "crashed": null,
+ "preflightFailed": false,
+ "stats": {
+  "statementsTotal": 45632,
+  "statementsFailed": 8,
+  "statementsIsland": 0,
+  "functionsSkipped": 0
+ },
+ "unreachedStats": {
+  "statementsTotal": 3604,
+  "statementsFailed": 157,
+  "statementsIsland": 0,
+  "functionsSkipped": 9
+ },
+ "npmStatic": null,
+ "provenanceNotes": [
+  "zapo-js@1.6.2 <- 250f9af5229a",
+  "note: argo-codec@0.2.1: no provenance attestation published; island path used",
+  "note: libmlow-wasm@0.1.1: no provenance attestation published; island path used",
+  "note: @roamhq/wrtc@0.10.0: no provenance attestation published; island path used"
+ ],
+ "sites": [
+  {
+   "section": "blocker",
+   "code": "SC2009",
+   "message": "values of type 'Promise<MlowModule> | null' cannot be compiled: the union shape is supported, but its arm 'Promise<MlowModule>' does not compile",
+   "file": "G:/blocks/voipfix-lab/app/pkgs/voip/media/mlow-codec.ts",
+   "line": 26
+  },
+  {
+   "section": "blocker",
+   "code": "SC2013",
+   "message": "importing '@roamhq/wrtc' requires the embedded dynamic engine, which this build does not include — the package's implementation runs there",
+   "file": "G:/blocks/voipfix-lab/app/pkgs/voip/relay/WaSctpRelay.ts",
+   "line": 5
+  },
+  {
+   "section": "blocker",
+   "code": "SC2011",
+   "message": "values of type 'WaFetchLatestMobileVersionOptions' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "G:/blocks/pkgstatus-lab/prov/250f9af5229a545eec28ddbd3e8774a397cdb0bb/src/transport/wa-version-fetcher.ts",
+   "line": 211
+  },
+  {
+   "section": "blocker",
+   "code": "SC2004",
+   "message": "uses of 'fetchLatestWaMobileVersion' inherit the blocker on its declaration",
+   "file": "G:/blocks/pkgstatus-lab/prov/250f9af5229a545eec28ddbd3e8774a397cdb0bb/src/client/WaClient.ts",
+   "line": 177
+  },
+  {
+   "section": "blocker",
+   "code": "SC2020",
+   "message": "'emit('debug_transport_frame_in') with 1 arguments where the event's tuple has 0' is part of the standard library types but has no scriptc lowering yet",
+   "file": "G:/blocks/pkgstatus-lab/prov/250f9af5229a545eec28ddbd3e8774a397cdb0bb/src/client/WaClient.ts",
+   "line": 255
+  },
+  {
+   "section": "blocker",
+   "code": "SC2020",
+   "message": "'emit('debug_transport_frame_out') with 1 arguments where the event's tuple has 0' is part of the standard library types but has no scriptc lowering yet",
+   "file": "G:/blocks/pkgstatus-lab/prov/250f9af5229a545eec28ddbd3e8774a397cdb0bb/src/client/WaClient.ts",
+   "line": 258
+  },
+  {
+   "section": "blocker",
+   "code": "SC2020",
+   "message": "'emit('debug_transport_node_in') with 1 arguments where the event's tuple has 0' is part of the standard library types but has no scriptc lowering yet",
+   "file": "G:/blocks/pkgstatus-lab/prov/250f9af5229a545eec28ddbd3e8774a397cdb0bb/src/client/WaClient.ts",
+   "line": 261
+  },
+  {
+   "section": "blocker",
+   "code": "SC2020",
+   "message": "'emit('debug_transport_node_out') with 1 arguments where the event's tuple has 0' is part of the standard library types but has no scriptc lowering yet",
+   "file": "G:/blocks/pkgstatus-lab/prov/250f9af5229a545eec28ddbd3e8774a397cdb0bb/src/client/WaClient.ts",
+   "line": 264
+  },
+  {
+   "section": "blocker",
+   "code": "SC2020",
+   "message": "'emit('debug_transport_decode_error') with 1 arguments where the event's tuple has 0' is part of the standard library types but has no scriptc lowering yet",
+   "file": "G:/blocks/pkgstatus-lab/prov/250f9af5229a545eec28ddbd3e8774a397cdb0bb/src/client/WaClient.ts",
+   "line": 267
+  },
+  {
+   "section": "blocker",
+   "code": "SC2020",
+   "message": "'Int16Array<ArrayBufferLike>' is part of the standard library types but has no scriptc lowering yet",
+   "file": "G:/blocks/voipfix-lab/app/pkgs/voip/media/WaAudioEngine.ts",
+   "line": 218
+  },
+  {
+   "section": "blocker",
+   "code": "SC2009",
+   "message": "values of type 'Map<string, Connection>' cannot be compiled: the Map shape is supported, but its value type 'Connection' does not compile",
+   "file": "G:/blocks/voipfix-lab/app/pkgs/voip/relay/WaSctpRelay.ts",
+   "line": 94
+  },
+  {
+   "section": "blocker",
+   "code": "SC2009",
+   "message": "values of type 'CallStateData' cannot be compiled: the record shape is supported, but its member 'connectedAt' has type 'Date | undefined', which does not compile",
+   "file": "G:/blocks/voipfix-lab/app/pkgs/voip/call/call-state.ts",
+   "line": 30
+  },
+  {
+   "section": "blocker",
+   "code": "SC2009",
+   "message": "values of type 'MlowEncoder | null' cannot be compiled: the union shape is supported, but its arm 'MlowEncoder' does not compile",
+   "file": "G:/blocks/voipfix-lab/app/pkgs/voip/media/mlow-codec.ts",
+   "line": 51
+  },
+  {
+   "section": "runtimeFence",
+   "code": "SC2020",
+   "message": "'require() with a run-time specifier' is part of the standard library types but has no scriptc lowering yet",
+   "file": "G:/blocks/pkgstatus-lab/prov/250f9af5229a545eec28ddbd3e8774a397cdb0bb/spec/proto/index.js",
+   "line": 1
+  },
+  {
+   "section": "runtimeFence",
+   "code": "SC1090",
+   "message": "constructing values other than classes declared in the program is not supported yet",
+   "file": "G:/blocks/pkgstatus-lab/prov/250f9af5229a545eec28ddbd3e8774a397cdb0bb/spec/proto/index.js",
+   "line": 1
+  },
+  {
+   "section": "advisory",
+   "code": "SC6003",
+   "message": "this projection of '%m101.WaMobileTcpSocket' COPIES the field 'readyState', and a method of '%m101.WaMobileTcpSocket' writes it",
+   "file": "G:/blocks/pkgstatus-lab/prov/250f9af5229a545eec28ddbd3e8774a397cdb0bb/src/auth/credentials-flow.ts",
+   "line": 204
+  },
+  {
+   "section": "unreached",
+   "code": "SC2020",
+   "message": "'globalThis' is part of the standard library types but has no scriptc lowering yet",
+   "file": "G:/blocks/pkgstatus-lab/prov/250f9af5229a545eec28ddbd3e8774a397cdb0bb/src/util/runtime.ts",
+   "line": 20
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "'Promise<{ fileEncSha256: Uint8Array; fileSha256: Uint8Array; firstFrameSidecar: Uint8Array | undefined; plaintextLength: number; streamingSidecar: Uint8Array | undefined }>' values where 'Promise<{ fileEncSha256: Uint8Array; fileSha256: Uint8Array; plaintextLength: number }>' is expected is not supported yet",
+   "file": "G:/blocks/pkgstatus-lab/prov/250f9af5229a545eec28ddbd3e8774a397cdb0bb/src/media/transfer/WaMediaTransferClient.ts",
+   "line": 438
+  },
+  {
+   "section": "unreached",
+   "code": "SC2020",
+   "message": "'the promisified deflate with this argument shape' is part of the standard library types but has no scriptc lowering yet",
+   "file": "G:/blocks/pkgstatus-lab/prov/250f9af5229a545eec28ddbd3e8774a397cdb0bb/src/client/messaging/companion-host.ts",
+   "line": 33
+  },
+  {
+   "section": "unreached",
+   "code": "SC2020",
+   "message": "'clearTimeout of 'number | undefined' handles' is part of the standard library types but has no scriptc lowering yet",
+   "file": "G:/blocks/pkgstatus-lab/prov/250f9af5229a545eec28ddbd3e8774a397cdb0bb/src/client/coordinators/WaMobileCoordinator.ts",
+   "line": 217
+  },
+  {
+   "section": "unreached",
+   "code": "SC2020",
+   "message": "'new Set(values)' is part of the standard library types but has no scriptc lowering yet",
+   "file": "G:/blocks/pkgstatus-lab/prov/250f9af5229a545eec28ddbd3e8774a397cdb0bb/src/client/coordinators/WaMobileCoordinator.ts",
+   "line": 712
+  },
+  {
+   "section": "unreached",
+   "code": "SC2020",
+   "message": "'Math.max' is part of the standard library types but has no scriptc lowering yet",
+   "file": "G:/blocks/pkgstatus-lab/prov/250f9af5229a545eec28ddbd3e8774a397cdb0bb/src/client/coordinators/WaMobileCoordinator.ts",
+   "line": 738
+  },
+  {
+   "section": "unreached",
+   "code": "SC1063",
+   "message": "this use of a catch binding is not supported yet",
+   "file": "G:/blocks/pkgstatus-lab/prov/250f9af5229a545eec28ddbd3e8774a397cdb0bb/src/client/persistence/companion-host.ts",
+   "line": 64
+  },
+  {
+   "section": "unreached",
+   "code": "SC2020",
+   "message": "'writeFile with 3 arguments' is part of the standard library types but has no scriptc lowering yet",
+   "file": "G:/blocks/pkgstatus-lab/prov/250f9af5229a545eec28ddbd3e8774a397cdb0bb/src/client/persistence/companion-host.ts",
+   "line": 94
+  },
+  {
+   "section": "unreached",
+   "code": "SC2020",
+   "message": "'fs/promises.rename' is typed by @types/node but has no scriptc lowering yet",
+   "file": "G:/blocks/pkgstatus-lab/prov/250f9af5229a545eec28ddbd3e8774a397cdb0bb/src/client/persistence/companion-host.ts",
+   "line": 95
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "dynamic keyed reads of '{ child: ({ [key: string]: unknown }) => ... | undefined; debug: (unknown) => void; error: (unknown) => void; info: (unknown) => void; level: string; trace: (unknown) => void; warn: (unknown) => void }' (the declared fields have no one common type) is not supported yet",
+   "file": "G:/blocks/pkgstatus-lab/prov/250f9af5229a545eec28ddbd3e8774a397cdb0bb/src/infra/log/PinoLogger.ts",
+   "line": 137
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "Function.prototype.call on a compiled function value (compiled calls are direct — no runtime 'this' or arguments object exists to re-route; spell the call directly: 'Object.prototype.hasOwnProperty(...)') is not supported yet",
+   "file": "G:/blocks/pkgstatus-lab/prov/250f9af5229a545eec28ddbd3e8774a397cdb0bb/src/infra/log/PinoLogger.ts",
+   "line": 141
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "dynamic keyed reads of '{ child: ({ [key: string]: unknown }) => ... | undefined; debug: (unknown) => void; error: (unknown) => void; info: (unknown) => void; level: string; trace: (unknown) => void; warn: (unknown) => void }' (the declared fields have no one common type) is not supported yet",
+   "file": "G:/blocks/pkgstatus-lab/prov/250f9af5229a545eec28ddbd3e8774a397cdb0bb/src/infra/log/PinoLogger.ts",
+   "line": 146
+  },
+  {
+   "section": "unreached",
+   "code": "SC2020",
+   "message": "'ArrayBufferLike.byteLength' is part of the standard library types but has no scriptc lowering yet",
+   "file": "G:/blocks/voipfix-lab/app/pkgs/voip/bytes.ts",
+   "line": 94
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "'.buffer' outside new DataView(x.buffer, ...) / Buffer.from(x.buffer, ...) (no free-standing ArrayBuffer value exists; subarray() answers an aliasing view directly) is not supported yet",
+   "file": "G:/blocks/voipfix-lab/app/pkgs/voip/bytes.ts",
+   "line": 99
+  },
+  {
+   "section": "unreached",
+   "code": "SC2020",
+   "message": "'createCipheriv with this algorithm' is part of the standard library types but has no scriptc lowering yet",
+   "file": "G:/blocks/voipfix-lab/app/pkgs/voip/crypto/primitives.ts",
+   "line": 27
+  },
+  {
+   "section": "unreached",
+   "code": "SC2020",
+   "message": "'child_process.execFile' is typed by @types/node but has no scriptc lowering yet",
+   "file": "G:/blocks/voipfix-lab/app/pkgs/voip/media/WaAudioEngine.ts",
+   "line": 22
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'any' run in the embedded dynamic engine, which this build does not include",
+   "file": "G:/blocks/voipfix-lab/app/pkgs/voip/relay/relay-ack.ts",
+   "line": 36
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "string conversions of unions with object arms (narrow first: check a discriminant field, or compare with '!== undefined'/'!== null' for unit arms) are not supported yet",
+   "file": "G:/blocks/voipfix-lab/app/pkgs/voip/relay/relay-ack.ts",
+   "line": 106
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "string conversions of unions with object arms (narrow first: check a discriminant field, or compare with '!== undefined'/'!== null' for unit arms) are not supported yet",
+   "file": "G:/blocks/voipfix-lab/app/pkgs/voip/relay/relay-ack.ts",
+   "line": 118
+  },
+  {
+   "section": "unreached",
+   "code": "SC2001",
+   "message": "values of type 'bigint' cannot be compiled yet (supported: number, string, boolean, arrays, Maps, Sets, RegExp, functions, classes, records, unions of those, and 'unknown')",
+   "file": "G:/blocks/voipfix-lab/app/pkgs/voip/crypto/srtp.ts",
+   "line": 83
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "compound array-element assignment through this target (supported: a numeric array or typed array, a bare identifier receiver, and an index that can be evaluated twice — a literal, an identifier, or arithmetic over those) is not supported yet",
+   "file": "G:/blocks/voipfix-lab/app/pkgs/voip/crypto/srtp.ts",
+   "line": 175
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "compound array-element assignment through this target (supported: a numeric array or typed array, a bare identifier receiver, and an index that can be evaluated twice — a literal, an identifier, or arithmetic over those) is not supported yet",
+   "file": "G:/blocks/voipfix-lab/app/pkgs/voip/crypto/srtp.ts",
+   "line": 180
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "constructing through a class value whose class has no lowering (the class declaration itself was rejected — see its own diagnostic) is not supported yet",
+   "file": "G:/blocks/voipfix-lab/app/pkgs/voip/call/WaCallMediaSession.ts",
+   "line": 113
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "constructing through a class value whose class has no lowering (the class declaration itself was rejected — see its own diagnostic) is not supported yet",
+   "file": "G:/blocks/voipfix-lab/app/pkgs/voip/call/WaCallMediaSession.ts",
+   "line": 117
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "method calls like 'this.audioEngine.setAudioSender' is not supported yet",
+   "file": "G:/blocks/voipfix-lab/app/pkgs/voip/call/WaCallMediaSession.ts",
+   "line": 120
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "method calls like 'this.audioEngine.setOnAudioFinished' is not supported yet",
+   "file": "G:/blocks/voipfix-lab/app/pkgs/voip/call/WaCallMediaSession.ts",
+   "line": 121
+  },
+  {
+   "section": "unreached",
+   "code": "SC2020",
+   "message": "'WaSctpRelay.on' is typed by @types/node but has no scriptc lowering yet",
+   "file": "G:/blocks/voipfix-lab/app/pkgs/voip/call/WaCallMediaSession.ts",
+   "line": 125
+  },
+  {
+   "section": "unreached",
+   "code": "SC2020",
+   "message": "'WaSctpRelay.on' is typed by @types/node but has no scriptc lowering yet",
+   "file": "G:/blocks/voipfix-lab/app/pkgs/voip/call/WaCallMediaSession.ts",
+   "line": 128
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "reading 'callId' from a value of type 'CallInfo' is not supported yet",
+   "file": "G:/blocks/voipfix-lab/app/pkgs/voip/call/WaCallMediaSession.ts",
+   "line": 137
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "reading 'callId' from a value of type 'CallInfo' is not supported yet",
+   "file": "G:/blocks/voipfix-lab/app/pkgs/voip/call/WaCallMediaSession.ts",
+   "line": 141
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "reading 'callId' from a value of type 'CallInfo' is not supported yet",
+   "file": "G:/blocks/voipfix-lab/app/pkgs/voip/call/WaCallMediaSession.ts",
+   "line": 145
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "reading 'callId' from a value of type 'CallInfo' is not supported yet",
+   "file": "G:/blocks/voipfix-lab/app/pkgs/voip/call/WaCallMediaSession.ts",
+   "line": 149
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "method calls like 'MLowCodec.create' is not supported yet",
+   "file": "G:/blocks/voipfix-lab/app/pkgs/voip/call/WaCallMediaSession.ts",
+   "line": 154
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "reading 'canAccept' from a value of type 'CallInfo' is not supported yet",
+   "file": "G:/blocks/voipfix-lab/app/pkgs/voip/call/WaCallMediaSession.ts",
+   "line": 163
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "method calls like 'this.info.applyTransition' is not supported yet",
+   "file": "G:/blocks/voipfix-lab/app/pkgs/voip/call/WaCallMediaSession.ts",
+   "line": 169
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "reading 'callId' from a value of type 'CallInfo' is not supported yet",
+   "file": "G:/blocks/voipfix-lab/app/pkgs/voip/call/WaCallMediaSession.ts",
+   "line": 173
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "reading 'callCreator' from a value of type 'CallInfo' is not supported yet",
+   "file": "G:/blocks/voipfix-lab/app/pkgs/voip/call/WaCallMediaSession.ts",
+   "line": 174
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "reading 'peerJid' from a value of type 'CallInfo' is not supported yet",
+   "file": "G:/blocks/voipfix-lab/app/pkgs/voip/call/WaCallMediaSession.ts",
+   "line": 175
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "reading 'mediaType' from a value of type 'CallInfo' is not supported yet",
+   "file": "G:/blocks/voipfix-lab/app/pkgs/voip/call/WaCallMediaSession.ts",
+   "line": 176
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "reading 'encryptionKey' from a value of type 'CallInfo' is not supported yet",
+   "file": "G:/blocks/voipfix-lab/app/pkgs/voip/call/WaCallMediaSession.ts",
+   "line": 199
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "reading 'relayData' from a value of type 'CallInfo' is not supported yet",
+   "file": "G:/blocks/voipfix-lab/app/pkgs/voip/call/WaCallMediaSession.ts",
+   "line": 218
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "method calls like 'this.info.applyTransition' is not supported yet",
+   "file": "G:/blocks/voipfix-lab/app/pkgs/voip/call/WaCallMediaSession.ts",
+   "line": 226
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "reading 'peerJid' from a value of type 'CallInfo' is not supported yet",
+   "file": "G:/blocks/voipfix-lab/app/pkgs/voip/call/WaCallMediaSession.ts",
+   "line": 229
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "reading 'isEnded' from a value of type 'CallInfo' is not supported yet",
+   "file": "G:/blocks/voipfix-lab/app/pkgs/voip/call/WaCallMediaSession.ts",
+   "line": 239
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "reading 'stateData' from a value of type 'CallInfo' is not supported yet",
+   "file": "G:/blocks/voipfix-lab/app/pkgs/voip/call/WaCallMediaSession.ts",
+   "line": 241
+  },
+  {
+   "section": "unreached",
+   "code": "SC2004",
+   "message": "uses of 'connectedAt' inherit the blocker on its declaration",
+   "file": "G:/blocks/voipfix-lab/app/pkgs/voip/call/WaCallMediaSession.ts",
+   "line": 242
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "method calls like 'this.info.applyTransition' is not supported yet",
+   "file": "G:/blocks/voipfix-lab/app/pkgs/voip/call/WaCallMediaSession.ts",
+   "line": 244
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "reading 'peerJid' from a value of type 'CallInfo' is not supported yet",
+   "file": "G:/blocks/voipfix-lab/app/pkgs/voip/call/WaCallMediaSession.ts",
+   "line": 246
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "reading 'callId' from a value of type 'CallInfo' is not supported yet",
+   "file": "G:/blocks/voipfix-lab/app/pkgs/voip/call/WaCallMediaSession.ts",
+   "line": 249
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "reading 'isActive' from a value of type 'CallInfo' is not supported yet",
+   "file": "G:/blocks/voipfix-lab/app/pkgs/voip/call/WaCallMediaSession.ts",
+   "line": 264
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "method calls like 'this.info.applyTransition' is not supported yet",
+   "file": "G:/blocks/voipfix-lab/app/pkgs/voip/call/WaCallMediaSession.ts",
+   "line": 266
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "method calls like 'this.audioEngine.stopCapture' is not supported yet",
+   "file": "G:/blocks/voipfix-lab/app/pkgs/voip/call/WaCallMediaSession.ts",
+   "line": 270
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "method calls like 'this.audioEngine.startCapture' is not supported yet",
+   "file": "G:/blocks/voipfix-lab/app/pkgs/voip/call/WaCallMediaSession.ts",
+   "line": 272
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "method calls like 'this.audioEngine.loadAudioFile' is not supported yet",
+   "file": "G:/blocks/voipfix-lab/app/pkgs/voip/call/WaCallMediaSession.ts",
+   "line": 277
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "reading 'callId' from a value of type 'CallInfo' is not supported yet",
+   "file": "G:/blocks/voipfix-lab/app/pkgs/voip/call/WaCallMediaSession.ts",
+   "line": 279
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "method calls like 'this.audioEngine.setExternalMode' is not supported yet",
+   "file": "G:/blocks/voipfix-lab/app/pkgs/voip/call/WaCallMediaSession.ts",
+   "line": 283
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "reading 'callId' from a value of type 'CallInfo' is not supported yet",
+   "file": "G:/blocks/voipfix-lab/app/pkgs/voip/call/WaCallMediaSession.ts",
+   "line": 286
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "method calls like 'this.audioEngine.feedExternalAudio' is not supported yet",
+   "file": "G:/blocks/voipfix-lab/app/pkgs/voip/call/WaCallMediaSession.ts",
+   "line": 291
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "method calls like 'this.audioEngine.getLiveBufferMs' is not supported yet",
+   "file": "G:/blocks/voipfix-lab/app/pkgs/voip/call/WaCallMediaSession.ts",
+   "line": 295
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "reading 'callId' from a value of type 'CallInfo' is not supported yet",
+   "file": "G:/blocks/voipfix-lab/app/pkgs/voip/call/WaCallMediaSession.ts",
+   "line": 302
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "reading 'relayData' from a value of type 'CallInfo' is not supported yet",
+   "file": "G:/blocks/voipfix-lab/app/pkgs/voip/call/WaCallMediaSession.ts",
+   "line": 314
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "reading 'callId' from a value of type 'CallInfo' is not supported yet",
+   "file": "G:/blocks/voipfix-lab/app/pkgs/voip/call/WaCallMediaSession.ts",
+   "line": 317
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "reading 'callCreator' from a value of type 'CallInfo' is not supported yet",
+   "file": "G:/blocks/voipfix-lab/app/pkgs/voip/call/WaCallMediaSession.ts",
+   "line": 318
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "reading 'relayData' from a value of type 'CallInfo' is not supported yet",
+   "file": "G:/blocks/voipfix-lab/app/pkgs/voip/call/WaCallMediaSession.ts",
+   "line": 319
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "reading 'relayData' from a value of type 'CallInfo' is not supported yet",
+   "file": "G:/blocks/voipfix-lab/app/pkgs/voip/call/WaCallMediaSession.ts",
+   "line": 322
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "reading 'encryptionKey' from a value of type 'CallInfo' is not supported yet",
+   "file": "G:/blocks/voipfix-lab/app/pkgs/voip/call/WaCallMediaSession.ts",
+   "line": 368
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "reading 'relayData' from a value of type 'CallInfo' is not supported yet",
+   "file": "G:/blocks/voipfix-lab/app/pkgs/voip/call/WaCallMediaSession.ts",
+   "line": 377
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "reading 'callId' from a value of type 'CallInfo' is not supported yet",
+   "file": "G:/blocks/voipfix-lab/app/pkgs/voip/call/WaCallMediaSession.ts",
+   "line": 402
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "method calls like 'this.info.applyTransition' is not supported yet",
+   "file": "G:/blocks/voipfix-lab/app/pkgs/voip/call/WaCallMediaSession.ts",
+   "line": 420
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "reading 'callId' from a value of type 'CallInfo' is not supported yet",
+   "file": "G:/blocks/voipfix-lab/app/pkgs/voip/call/WaCallMediaSession.ts",
+   "line": 430
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "reading 'callCreator' from a value of type 'CallInfo' is not supported yet",
+   "file": "G:/blocks/voipfix-lab/app/pkgs/voip/call/WaCallMediaSession.ts",
+   "line": 431
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "method calls like 'this.sctpRelay.setSubscriptionSsrc' is not supported yet",
+   "file": "G:/blocks/voipfix-lab/app/pkgs/voip/call/WaCallMediaSession.ts",
+   "line": 453
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "method calls like 'this.sctpRelay.resendSubscriptions' is not supported yet",
+   "file": "G:/blocks/voipfix-lab/app/pkgs/voip/call/WaCallMediaSession.ts",
+   "line": 454
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "reading 'relayData' from a value of type 'CallInfo' is not supported yet",
+   "file": "G:/blocks/voipfix-lab/app/pkgs/voip/call/WaCallMediaSession.ts",
+   "line": 460
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "method calls like 'this.sctpRelay.hasConnection' is not supported yet",
+   "file": "G:/blocks/voipfix-lab/app/pkgs/voip/call/WaCallMediaSession.ts",
+   "line": 530
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "reading 'direction' from a value of type 'CallInfo' is not supported yet",
+   "file": "G:/blocks/voipfix-lab/app/pkgs/voip/call/WaCallMediaSession.ts",
+   "line": 547
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "method calls like 'this.sctpRelay.hasConnection' is not supported yet",
+   "file": "G:/blocks/voipfix-lab/app/pkgs/voip/call/WaCallMediaSession.ts",
+   "line": 610
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "reading 'callId' from a value of type 'CallInfo' is not supported yet",
+   "file": "G:/blocks/voipfix-lab/app/pkgs/voip/call/WaCallMediaSession.ts",
+   "line": 625
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "assignment to non-variables are not supported yet",
+   "file": "G:/blocks/voipfix-lab/app/pkgs/voip/call/WaCallMediaSession.ts",
+   "line": 632
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "reading 'callId' from a value of type 'CallInfo' is not supported yet",
+   "file": "G:/blocks/voipfix-lab/app/pkgs/voip/call/WaCallMediaSession.ts",
+   "line": 642
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "reading 'encryptionKey' from a value of type 'CallInfo' is not supported yet",
+   "file": "G:/blocks/voipfix-lab/app/pkgs/voip/call/WaCallMediaSession.ts",
+   "line": 647
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "reading 'callId' from a value of type 'CallInfo' is not supported yet",
+   "file": "G:/blocks/voipfix-lab/app/pkgs/voip/call/WaCallMediaSession.ts",
+   "line": 667
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "reading 'callId' from a value of type 'CallInfo' is not supported yet",
+   "file": "G:/blocks/voipfix-lab/app/pkgs/voip/call/WaCallMediaSession.ts",
+   "line": 674
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "reading 'callId' from a value of type 'CallInfo' is not supported yet",
+   "file": "G:/blocks/voipfix-lab/app/pkgs/voip/call/WaCallMediaSession.ts",
+   "line": 682
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "reading 'isInitiator' from a value of type 'CallInfo' is not supported yet",
+   "file": "G:/blocks/voipfix-lab/app/pkgs/voip/call/WaCallMediaSession.ts",
+   "line": 687
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "method calls like 'this.sctpRelay.hasConnection' is not supported yet",
+   "file": "G:/blocks/voipfix-lab/app/pkgs/voip/call/WaCallMediaSession.ts",
+   "line": 709
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "reading 'callId' from a value of type 'CallInfo' is not supported yet",
+   "file": "G:/blocks/voipfix-lab/app/pkgs/voip/call/WaCallMediaSession.ts",
+   "line": 721
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "reading 'callCreator' from a value of type 'CallInfo' is not supported yet",
+   "file": "G:/blocks/voipfix-lab/app/pkgs/voip/call/WaCallMediaSession.ts",
+   "line": 722
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "reading 'relayData' from a value of type 'CallInfo' is not supported yet",
+   "file": "G:/blocks/voipfix-lab/app/pkgs/voip/call/WaCallMediaSession.ts",
+   "line": 728
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "assignment to non-variables are not supported yet",
+   "file": "G:/blocks/voipfix-lab/app/pkgs/voip/call/WaCallMediaSession.ts",
+   "line": 766
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "reading 'callId' from a value of type 'CallInfo' is not supported yet",
+   "file": "G:/blocks/voipfix-lab/app/pkgs/voip/call/WaCallMediaSession.ts",
+   "line": 768
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "reading 'callId' from a value of type 'CallInfo' is not supported yet",
+   "file": "G:/blocks/voipfix-lab/app/pkgs/voip/call/WaCallMediaSession.ts",
+   "line": 779
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "reading 'callCreator' from a value of type 'CallInfo' is not supported yet",
+   "file": "G:/blocks/voipfix-lab/app/pkgs/voip/call/WaCallMediaSession.ts",
+   "line": 780
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "method calls like 'this.info.applyTransition' is not supported yet",
+   "file": "G:/blocks/voipfix-lab/app/pkgs/voip/call/WaCallMediaSession.ts",
+   "line": 794
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "method calls like 'this.sctpRelay.hasConnection' is not supported yet",
+   "file": "G:/blocks/voipfix-lab/app/pkgs/voip/call/WaCallMediaSession.ts",
+   "line": 808
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "reading 'callId' from a value of type 'CallInfo' is not supported yet",
+   "file": "G:/blocks/voipfix-lab/app/pkgs/voip/call/WaCallMediaSession.ts",
+   "line": 821
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "method calls like 'this.opusCodec.encode' is not supported yet",
+   "file": "G:/blocks/voipfix-lab/app/pkgs/voip/call/WaCallMediaSession.ts",
+   "line": 860
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "reading 'callId' from a value of type 'CallInfo' is not supported yet",
+   "file": "G:/blocks/voipfix-lab/app/pkgs/voip/call/WaCallMediaSession.ts",
+   "line": 865
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "method calls like 'this.opusCodec?.getStats' is not supported yet",
+   "file": "G:/blocks/voipfix-lab/app/pkgs/voip/call/WaCallMediaSession.ts",
+   "line": 873
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "reading 'callId' from a value of type 'CallInfo' is not supported yet",
+   "file": "G:/blocks/voipfix-lab/app/pkgs/voip/call/WaCallMediaSession.ts",
+   "line": 875
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "method calls like 'this.audioEngine.setOnAudioFinished' is not supported yet",
+   "file": "G:/blocks/voipfix-lab/app/pkgs/voip/call/WaCallMediaSession.ts",
+   "line": 885
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "method calls like 'this.audioEngine.stop' is not supported yet",
+   "file": "G:/blocks/voipfix-lab/app/pkgs/voip/call/WaCallMediaSession.ts",
+   "line": 886
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "method calls like 'this.sctpRelay.cleanup' is not supported yet",
+   "file": "G:/blocks/voipfix-lab/app/pkgs/voip/call/WaCallMediaSession.ts",
+   "line": 887
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "method calls like 'this.opusCodec.destroy' is not supported yet",
+   "file": "G:/blocks/voipfix-lab/app/pkgs/voip/call/WaCallMediaSession.ts",
+   "line": 890
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "method calls like 'this.opusCodec?.getFrameSize' is not supported yet",
+   "file": "G:/blocks/voipfix-lab/app/pkgs/voip/call/WaCallMediaSession.ts",
+   "line": 920
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "method calls like 'this.sctpRelay.broadcast' is not supported yet",
+   "file": "G:/blocks/voipfix-lab/app/pkgs/voip/call/WaCallMediaSession.ts",
+   "line": 956
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "reading 'callId' from a value of type 'CallInfo' is not supported yet",
+   "file": "G:/blocks/voipfix-lab/app/pkgs/voip/call/WaCallMediaSession.ts",
+   "line": 961
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "reading 'callId' from a value of type 'CallInfo' is not supported yet",
+   "file": "G:/blocks/voipfix-lab/app/pkgs/voip/call/WaCallMediaSession.ts",
+   "line": 970
+  },
+  {
+   "section": "unreached",
+   "code": "SC2012",
+   "message": "'.replace()' on strings runs in the embedded dynamic engine, which this build does not include",
+   "file": "G:/blocks/voipfix-lab/app/pkgs/voip/call/WaCallMediaSession.ts",
+   "line": 978
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "reading 'encryptionKey' from a value of type 'CallInfo' is not supported yet",
+   "file": "G:/blocks/voipfix-lab/app/pkgs/voip/call/WaCallMediaSession.ts",
+   "line": 982
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "reading 'callId' from a value of type 'CallInfo' is not supported yet",
+   "file": "G:/blocks/voipfix-lab/app/pkgs/voip/call/WaCallMediaSession.ts",
+   "line": 984
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "reading 'relayData' from a value of type 'CallInfo' is not supported yet",
+   "file": "G:/blocks/voipfix-lab/app/pkgs/voip/call/WaCallMediaSession.ts",
+   "line": 992
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "reading 'peerJid' from a value of type 'CallInfo' is not supported yet",
+   "file": "G:/blocks/voipfix-lab/app/pkgs/voip/call/WaCallMediaSession.ts",
+   "line": 1001
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "reading 'callId' from a value of type 'CallInfo' is not supported yet",
+   "file": "G:/blocks/voipfix-lab/app/pkgs/voip/call/WaCallMediaSession.ts",
+   "line": 1022
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "reading 'callId' from a value of type 'CallInfo' is not supported yet",
+   "file": "G:/blocks/voipfix-lab/app/pkgs/voip/call/WaCallMediaSession.ts",
+   "line": 1028
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "reading 'stateData' from a value of type 'CallInfo' is not supported yet",
+   "file": "G:/blocks/voipfix-lab/app/pkgs/voip/call/WaCallMediaSession.ts",
+   "line": 1041
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "method calls like 'this.sctpRelay.setSubscriptionSsrc' is not supported yet",
+   "file": "G:/blocks/voipfix-lab/app/pkgs/voip/call/WaCallMediaSession.ts",
+   "line": 1080
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "method calls like 'this.sctpRelay.resendSubscriptions' is not supported yet",
+   "file": "G:/blocks/voipfix-lab/app/pkgs/voip/call/WaCallMediaSession.ts",
+   "line": 1081
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "method calls like 'this.opusCodec.decode' is not supported yet",
+   "file": "G:/blocks/voipfix-lab/app/pkgs/voip/call/WaCallMediaSession.ts",
+   "line": 1108
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "method calls like 'this.audioEngine.onPlaybackData' is not supported yet",
+   "file": "G:/blocks/voipfix-lab/app/pkgs/voip/call/WaCallMediaSession.ts",
+   "line": 1116
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "method calls like 'this.opusCodec.getStats' is not supported yet",
+   "file": "G:/blocks/voipfix-lab/app/pkgs/voip/call/WaCallMediaSession.ts",
+   "line": 1120
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "reading 'callId' from a value of type 'CallInfo' is not supported yet",
+   "file": "G:/blocks/voipfix-lab/app/pkgs/voip/call/WaCallMediaSession.ts",
+   "line": 1122
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "reading 'callId' from a value of type 'CallInfo' is not supported yet",
+   "file": "G:/blocks/voipfix-lab/app/pkgs/voip/call/WaCallMediaSession.ts",
+   "line": 1135
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "reading 'callId' from a value of type 'CallInfo' is not supported yet",
+   "file": "G:/blocks/voipfix-lab/app/pkgs/voip/call/WaCallMediaSession.ts",
+   "line": 1146
+  },
+  {
+   "section": "unreached",
+   "code": "SC2001",
+   "message": "values of type '(ep: RelayEndpoint) => \"\" | Uint8Array<ArrayBufferLike> | undefined' cannot be compiled yet (supported: number, string, boolean, arrays, Maps, Sets, RegExp, functions, classes, records, unions of those, and 'unknown')",
+   "file": "G:/blocks/voipfix-lab/app/pkgs/voip/call/WaCallMediaSession.ts",
+   "line": 1163
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "reading 'callId' from a value of type 'CallInfo' is not supported yet",
+   "file": "G:/blocks/voipfix-lab/app/pkgs/voip/call/WaCallMediaSession.ts",
+   "line": 1179
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "method calls like 'this.sctpRelay.setSsrc' is not supported yet",
+   "file": "G:/blocks/voipfix-lab/app/pkgs/voip/call/WaCallMediaSession.ts",
+   "line": 1183
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "method calls like 'this.sctpRelay.setSubscriptionSsrc' is not supported yet",
+   "file": "G:/blocks/voipfix-lab/app/pkgs/voip/call/WaCallMediaSession.ts",
+   "line": 1184
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "method calls like 'this.sctpRelay.configureRelays' is not supported yet",
+   "file": "G:/blocks/voipfix-lab/app/pkgs/voip/call/WaCallMediaSession.ts",
+   "line": 1187
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "reading 'callId' from a value of type 'CallInfo' is not supported yet",
+   "file": "G:/blocks/voipfix-lab/app/pkgs/voip/call/WaCallMediaSession.ts",
+   "line": 1189
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "reading 'callId' from a value of type 'CallInfo' is not supported yet",
+   "file": "G:/blocks/voipfix-lab/app/pkgs/voip/call/WaCallMediaSession.ts",
+   "line": 1194
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "method calls like 'this.audioEngine.startPlayback' is not supported yet",
+   "file": "G:/blocks/voipfix-lab/app/pkgs/voip/call/WaCallMediaSession.ts",
+   "line": 1202
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "method calls like 'this.audioEngine.startCapture' is not supported yet",
+   "file": "G:/blocks/voipfix-lab/app/pkgs/voip/call/WaCallMediaSession.ts",
+   "line": 1203
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "method calls like 'CallInfo.newOutgoing' is not supported yet",
+   "file": "G:/blocks/voipfix-lab/app/pkgs/voip/call/WaCallManager.ts",
+   "line": 70
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "assignment to non-variables are not supported yet",
+   "file": "G:/blocks/voipfix-lab/app/pkgs/voip/call/WaCallManager.ts",
+   "line": 72
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "method calls like 'info.applyTransition' is not supported yet",
+   "file": "G:/blocks/voipfix-lab/app/pkgs/voip/call/WaCallManager.ts",
+   "line": 99
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "reading 'canAccept' from a value of type 'CallInfo' is not supported yet",
+   "file": "G:/blocks/voipfix-lab/app/pkgs/voip/call/WaCallManager.ts",
+   "line": 109
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "reading 'isEnded' from a value of type 'CallInfo' is not supported yet",
+   "file": "G:/blocks/voipfix-lab/app/pkgs/voip/call/WaCallManager.ts",
+   "line": 129
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "method calls like 'WaAudioEngine.feedWatermarksMs' is not supported yet",
+   "file": "G:/blocks/voipfix-lab/app/pkgs/voip/call/WaCallManager.ts",
+   "line": 162
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "reading 'isEnded' from a value of type 'CallInfo' is not supported yet",
+   "file": "G:/blocks/voipfix-lab/app/pkgs/voip/call/WaCallManager.ts",
+   "line": 184
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "method calls like 'CallInfo.newIncoming' is not supported yet",
+   "file": "G:/blocks/voipfix-lab/app/pkgs/voip/call/WaCallManager.ts",
+   "line": 207
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "assignment to non-variables are not supported yet",
+   "file": "G:/blocks/voipfix-lab/app/pkgs/voip/call/WaCallManager.ts",
+   "line": 210
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "assignment to non-variables are not supported yet",
+   "file": "G:/blocks/voipfix-lab/app/pkgs/voip/call/WaCallManager.ts",
+   "line": 214
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "method calls like 'info.applyTransition' is not supported yet",
+   "file": "G:/blocks/voipfix-lab/app/pkgs/voip/call/WaCallManager.ts",
+   "line": 240
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "reading 'isEnded' from a value of type 'CallInfo' is not supported yet",
+   "file": "G:/blocks/voipfix-lab/app/pkgs/voip/call/WaCallManager.ts",
+   "line": 335
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "reading 'callId' from a value of type 'CallInfo' is not supported yet",
+   "file": "G:/blocks/voipfix-lab/app/pkgs/voip/call/WaCallManager.ts",
+   "line": 344
+  },
+  {
+   "section": "unreached",
+   "code": "SC2004",
+   "message": "uses of 'prior' inherit the blocker on its declaration",
+   "file": "G:/blocks/voipfix-lab/app/pkgs/voip/call/WaCallManager.ts",
+   "line": 346
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "reading 'callId' from a value of type 'CallInfo' is not supported yet",
+   "file": "G:/blocks/voipfix-lab/app/pkgs/voip/call/WaCallManager.ts",
+   "line": 350
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "assignment to non-variables are not supported yet",
+   "file": "G:/blocks/voipfix-lab/app/pkgs/voip/call/WaCallManager.ts",
+   "line": 359
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "reading 'callId' from a value of type 'CallInfo' is not supported yet",
+   "file": "G:/blocks/voipfix-lab/app/pkgs/voip/call/WaCallManager.ts",
+   "line": 362
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "reading 'callId' from a value of type 'CallInfo' is not supported yet",
+   "file": "G:/blocks/voipfix-lab/app/pkgs/voip/call/WaCallManager.ts",
+   "line": 376
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "reading 'isInitiator' from a value of type 'CallInfo' is not supported yet",
+   "file": "G:/blocks/voipfix-lab/app/pkgs/voip/call/WaCallManager.ts",
+   "line": 413
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "reading 'direction' from a value of type 'CallInfo' is not supported yet",
+   "file": "G:/blocks/voipfix-lab/app/pkgs/voip/call/WaCallManager.ts",
+   "line": 451
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "assignment to non-variables are not supported yet",
+   "file": "G:/blocks/voipfix-lab/app/pkgs/voip/call/WaCallManager.ts",
+   "line": 461
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "reading 'peerJid' from a value of type 'CallInfo' is not supported yet",
+   "file": "G:/blocks/voipfix-lab/app/pkgs/voip/call/WaCallManager.ts",
+   "line": 466
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "reading 'peerJid' from a value of type 'CallInfo' is not supported yet",
+   "file": "G:/blocks/voipfix-lab/app/pkgs/voip/call/WaCallManager.ts",
+   "line": 467
+  },
+  {
+   "section": "unreached",
+   "code": "SC2020",
+   "message": "''on' of 'call_inbound_audio' with a checked-dynamic listener' is part of the standard library types but has no scriptc lowering yet",
+   "file": "G:/blocks/voipfix-lab/app/pkgs/voip/WaVoipCoordinator.ts",
+   "line": 224
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'WaFetchVersionOptions' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "G:/blocks/pkgstatus-lab/prov/250f9af5229a545eec28ddbd3e8774a397cdb0bb/src/transport/wa-version-fetcher.ts",
+   "line": 93
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'WaFetchVersionOptions' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "G:/blocks/pkgstatus-lab/prov/250f9af5229a545eec28ddbd3e8774a397cdb0bb/src/transport/wa-version-fetcher.ts",
+   "line": 171
+  },
+  {
+   "section": "unreached",
+   "code": "SC2009",
+   "message": "values of type 'Promise<MlowModule>' cannot be compiled: the Promise shape is supported, but its value type 'MlowModule' does not compile",
+   "file": "G:/blocks/voipfix-lab/app/pkgs/voip/media/mlow-codec.ts",
+   "line": 28
+  },
+  {
+   "section": "unreached",
+   "code": "SC2008",
+   "message": "values of type 'WaClientPluginDefinition & { readonly exposeAs: \"voip\"; readonly setup: (ctx: WaClientPluginContext) => WaVoipCoordinator; readonly __pluginEvents?: VoipEvents | undefined; }' cannot be compiled: this intersection resolves to no runtime shape",
+   "file": "G:/blocks/voipfix-lab/app/pkgs/voip/plugin.ts",
+   "line": 27
+  }
+ ]
+}
