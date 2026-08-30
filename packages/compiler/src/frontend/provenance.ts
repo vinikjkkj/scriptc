@@ -529,6 +529,35 @@ function mapEntryToSource(pkgDir: string, target: string, subpath: string): stri
  * is a worse answer than the island it replaced, not a better one. Such a
  * package keeps its named `no source mapping` note. */
 function authoredJsEntry(dts: string): boolean {
+  /* OFF BY DEFAULT, and the reason is a measured wrong answer, not caution.
+   *
+   * The mapping itself works: @vinikjkkj/wa-wam maps, its 28,725-line twin
+   * lowers, and every one of the 13 SC2013 refusals at @zapo-js/wam's entry
+   * disappears (18 blocker sites over 7 messages -> 5 over 5). But the
+   * binary that comes out is WRONG, not merely incomplete. The smallest
+   * program that reads three constants off the mapped package prints
+   *
+   *     protocol=0        (node prints protocol=5)
+   *
+   * and then dies 0xC0000005 dereferencing a table that was never built.
+   *
+   * The cause is downstream of this file and is localized: the twin's
+   * module-init function is EMITTED and never CALLED. `main` calls the
+   * entry's init, the entry's import header names the DECLARATION (whose
+   * init is empty), and the twin's init -- which holds every assignment --
+   * is orphaned, leaving its globals at their zero value. lower-modules.ts
+   * already carries the redirect for exactly this (the header names the
+   * twin's init when `importBindsStaticTwinGlobal`), and its own
+   * SCRIPTC_TWININIT_WHY probe prints NOTHING on this build: the
+   * `dep.isDeclarationFile && declTwinSourceOf(dep) !== null` edge is never
+   * taken, so the redirect never gets the chance to fire.
+   *
+   * Until that edge is fixed, mapping an authored-JavaScript package turns a
+   * refusal into a silent wrong answer, which is the one trade this compiler
+   * does not make. The island's `no source mapping` note is the correct
+   * answer today. Opt in with SCRIPTC_PROVENANCE_AUTHORED_JS=1 to reproduce
+   * the whole thing in one command. */
+  if (process.env["SCRIPTC_PROVENANCE_AUTHORED_JS"] === undefined) return false;
   if (!isFile(dts)) return false;
   const stem = dts.replace(/\.d\.(ts|mts|cts)$/, "");
   return isFile(`${stem}.js`) || isFile(`${stem}.mjs`) || isFile(`${stem}.cjs`);
