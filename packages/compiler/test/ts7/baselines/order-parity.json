@@ -10419,6 +10419,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/diagnostics/a-spread-at-each-of-the-three-argument-positions.ts": {
+   "order": [
+    "<repo>/tests/diagnostics/a-spread-at-each-of-the-three-argument-positions.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/diagnostics/accessors.ts": {
    "order": [
     "<repo>/tests/diagnostics/accessors.ts"
