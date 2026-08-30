@@ -68,3 +68,39 @@ The lab app must hold voip's `src/` flattened into `pkgs/voip/` with
 dependency installed. The provenance lane is not slow-looking, it is slow:
 the entry's analysis is 1,271 s and each backend's build of it is longer.
 Slow is not hung.
+
+## Why honouring `lib` costs nothing where the `/// <reference>` workaround cost 15 refusals
+
+`estado-pkgstatus.md` reached voip's entry by referencing TypeScript's shipped
+`lib.dom.d.ts` into the program with a `/// <reference path="…" />`, and
+measured **23 failed over 27 blocker sites** under `--provenance-sources`,
+with `URL.hostname`, `URL.protocol`, `AbortSignal.aborted` and
+`TextEncoder`/`TextDecoder` appearing as NEW blockers inside zapo-js. That
+cost is the whole reason an earlier block refused to ship a `lib` change.
+
+Honouring the project's own `lib` instead measures **8 failed over 13 blocker
+sites**, and those names appear **nowhere in all 177 sites, in any section**
+(`runs/dom-voip-prov.json`).
+
+The difference is not luck; it is structural, and it is one line of the
+compiler. `lowerer.ts`'s `isStdlibFile` reads
+
+    this.program.isSourceFileDefaultLibrary(sf)
+
+and `frontend/types.ts` gates the stdlib mappings on it — `URL` maps to
+`{ kind: "url" }` only when its declaration sits in a stdlib file
+(`types.ts:2892`, "Provenance, not the name"), and `URLSearchParams`,
+`TextEncoder` and the rest are gated the same way.
+
+A file pulled in by `/// <reference path>` is an ordinary declaration file:
+`isSourceFileDefaultLibrary` is **false** for it. So DOM's `declare var URL`
+won the name while failing the provenance check that lets `URL` lower at all,
+and every use of it fenced. A file named in `lib` **is** a default library, so
+the provenance checks still pass and nothing moves.
+
+Which also means the mechanism is a prerequisite for the native `@roamhq/wrtc`
+replacement, not merely a way past preflight: a future `scr_wrtc.c` needs
+`RTCPeerConnection` to map to a lowered type the way `URL` does, and that
+mapping is gated on the DOM declaration being a stdlib file. `WaSctpRelay.ts:94`
+(`Map<string, Connection>`) does not clear until it is — a wrtc runtime that
+merely satisfies the DOM interface leaves that site refusing.
