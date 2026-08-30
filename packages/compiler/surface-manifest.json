@@ -1511,6 +1511,13 @@
       "note": "the signal-name and signal-number forms are one surface"
     },
     {
+      "id": "node-builtin.process.memoryUsage.rss",
+      "kind": "node-builtin",
+      "name": "process.memoryUsage.rss",
+      "status": "static",
+      "note": "the single-value form only — the memoryUsage() RECORD is refused by name (four of its five fields are V8 heap statistics)"
+    },
+    {
       "id": "node-builtin.process.pid",
       "kind": "node-builtin",
       "name": "process.pid",

@@ -28,7 +28,10 @@ const results = await Promise.all(jobs); // number[] — compiles
 
 **Standard library**
 
-- The type checker sees the full standard library; only the supported surface compiles. Reaching declared-but-unlowered surface is SC2020 with the supported alternatives in the hint — e.g. parts of the regex API (`re.exec`), `Symbol`, `globalThis`, array/Map/Set methods beyond the lowered sets.
+- The type checker sees the full standard library; only the supported surface compiles. Reaching declared-but-unlowered surface is SC2020 with the supported alternatives in the hint — e.g. parts of the regex API (`re.exec`), `Symbol`, array/Map/Set methods beyond the lowered sets, and `globalThis` members beyond the globals this runtime provides.
+- Reading a property of `globalThis` that this host does not have answers `undefined`, like every JavaScript host — `(globalThis as { gc?: () => void }).gc` is `undefined` here exactly as it is under Node without `--expose-gc`. The fold needs a DECLARATION that admits the absence (`declare var gc: ... | undefined`) AND a site with somewhere to put it, so a member declared non-optional keeps its fence and names the one-character fix. A name nothing declares does not qualify: the declarations say what scriptc supports, not what the host has.
+- `process.memoryUsage()` is refused: four of its five fields (`heapTotal`, `heapUsed`, `external`, `arrayBuffers`) are V8 heap statistics and a compiled binary has no V8 heap, so `0` would read as a measurement. `process.memoryUsage.rss()` lowers — Node's own single-value spelling of the one field that is an operating-system fact.
+- `process.on("uncaughtException", ...)` is refused: an escaped throw prints `Uncaught <error>` and exits 1 at the throw, so a listener could never run and the loop never resumes, where Node calls the listener and continues. `process.on("exit", ...)` DOES fire on that path with code 1, and `"unhandledRejection"` covers an escaped promise.
 - Map keys and Set elements are strings and numbers; other key types are fenced.
 
 **The `any`/`unknown` boundary**

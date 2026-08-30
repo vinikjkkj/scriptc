@@ -6101,6 +6101,8 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             return finish(`scr_process_uptime()`);
           case "perf.now":
             return finish(`scr_perf_now()`);
+          case "process.rss":
+            return finish(`scr_process_rss()`);
           case "process.availableMemory":
             return finish(`scr_available_memory()`);
           case "process.constrainedMemory":
