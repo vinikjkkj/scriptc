@@ -925,6 +925,15 @@ export function nodeRequireResolvableRoots(
 
 const resolvableRootsMemo = new Map<string, Set<string> | null>();
 
+/** Drops the resolvable-roots memo. Its entries are derived from
+ * package.json contents on disk, so they are one COMPILE's view of the
+ * filesystem, not a fact about a path -- exactly the reasoning
+ * clearResolveCaches states for resolve.ts's two maps. loadProgram calls
+ * both; nothing else should need to. */
+export function clearNpmResolutionCaches(): void {
+  resolvableRootsMemo.clear();
+}
+
 function computeResolvableRoots(fromFile: string, host: Host): Set<string> | null {
   const out = new Set<string>();
   for (const b of NODE_BUILTIN_ROOTS) out.add(b);

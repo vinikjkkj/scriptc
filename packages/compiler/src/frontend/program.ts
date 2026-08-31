@@ -50,8 +50,8 @@ import {
   unsupportedDiag,
 } from "../diagnostics/diagnostic.js";
 import { provenanceDeclSiblings } from "./provenance-registry.js";
-import { isNodeModulesPath, nearestPkgJsonPath, projectDtsRuntimeSibling, resolveBareModule, resolveProjectImport, resolveRelativeModule, resolveTypeDirective, setProjectRealm } from "./resolve.js";
-import { probeNodeImportRefusal, probeNodeRequireRefusal } from "./npm.js";
+import { clearResolveCaches, isNodeModulesPath, nearestPkgJsonPath, projectDtsRuntimeSibling, resolveBareModule, resolveProjectImport, resolveRelativeModule, resolveTypeDirective, setProjectRealm } from "./resolve.js";
+import { clearNpmResolutionCaches, probeNodeImportRefusal, probeNodeRequireRefusal } from "./npm.js";
 import { isNpmStaticPackage, npmStaticActive, npmStaticFsShadow, npmStaticPackageOfPath, npmStaticPackages, npmStaticRewroteExports, reportNpmStaticOffender, setNpmStaticPackages } from "./npm-static.js";
 import { isProvenanceSpecifier, provenancePaths } from "./provenance-registry.js";
 import { cjsLexerVisibleNames } from "./cjs-lexer.js";
@@ -329,6 +329,20 @@ export function loadProgram(
   // Absolute from the start: tsgo's world is absolute-path-keyed (the CLI
   // resolves before calling; this covers direct API callers too).
   entryPath = resolve(entryPath);
+  // The filesystem-derived resolution memos are ONE COMPILE'S VIEW, not
+  // facts about a path: package.json contents decide every one of them, and
+  // between two compiles in the same process the file can say something
+  // else. clearResolveCaches said so in its own comment and was called from
+  // two unit tests and nowhere else, so a second in-process compile answered
+  // out of the first one's realm -- and the failure does not look like a
+  // resolution failure. Measured: rewrite a package.json's "imports" map
+  // between two compiles of the same entry and the second refuses with
+  //   SC1090 the reference to 'v' (a binding form with no lowering)
+  // while a fresh process compiles it and runs. Only programmatic, watch
+  // and harness callers reach it; the CLI is one compile per process.
+  // Upstream #206 (27729aa2).
+  clearResolveCaches();
+  clearNpmResolutionCaches();
   setNpmStaticPackages(opts?.npmStatic ?? []);
   // Workspace-package registrations reset per load (same discipline as the
   // npm-static set), then the opted-in names are probed UP FRONT: a
