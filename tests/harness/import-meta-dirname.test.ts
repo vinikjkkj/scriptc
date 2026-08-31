@@ -24,7 +24,7 @@
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { copyFileSync, mkdirSync, writeFileSync } from "node:fs";
-import { dirname, join, sep } from "node:path";
+import { basename, dirname, join, sep } from "node:path";
 import { describe, expect, test } from "vitest";
 import { compile } from "@scriptc/compiler";
 import { exeName } from "./exe.js";
@@ -107,5 +107,39 @@ describe("import.meta.dirname / __dirname are the BUILD-TIME source directory", 
         ).not.toBe(elsewhere);
       });
     }
+  }
+});
+
+/* `process.execPath` is the same question one step over: not "where is my
+ * module" but "what executable am I". Node answers the path of the `node`
+ * that started the process. A compiled binary has no node in the picture,
+ * so it answers ITSELF — which is literally correct (that IS the executable
+ * that started this process) and is a trap with teeth, because the
+ * idiomatic use of execPath is "get node so I can spawn another node". In a
+ * compiled binary that silently becomes "spawn myself": a probe written
+ * that way forked ~3300 copies of itself on this host before it was killed.
+ *
+ * It is pinned here rather than in the corpus because the corpus compares
+ * against Node on the same host and this cell differs BY DESIGN — a corpus
+ * program could only pin it by being permanently red.
+ */
+describe("process.execPath in a compiled binary is the binary, not node", () => {
+  for (const backend of BACKENDS) {
+    test(`${backend}: execPath names this binary, and spawning it is not spawning node`, async () => {
+      const c = {
+        name: "execpath",
+        ext: "mts",
+        body: 'import { basename } from "node:path";\nconsole.log(basename(process.execPath));\n',
+      } as const;
+      const { binaryPath } = await buildOne(c, backend);
+      const printed = runLines(binaryPath)[0];
+
+      expect(printed, "execPath must name the compiled binary").toBe(basename(binaryPath));
+      expect(
+        printed.toLowerCase().startsWith("node"),
+        "if this ever names node, spawning process.execPath changed meaning — every program " +
+          "that uses it to launch a Node child is affected, in both directions",
+      ).toBe(false);
+    });
   }
 });
