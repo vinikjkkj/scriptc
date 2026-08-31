@@ -6254,7 +6254,7 @@ const DYN_STRING_ONLY_METHODS = new Set([
       // static tag answer and keep the narrow-first fence.
       const def = L.unions.get(arg.type.unionId);
       const opaque = !def || def.arms.some((a) => a.kind === "dyn" || a.kind === "caught" || a.kind === "jsval");
-      const arrayTags = def ? def.arms.flatMap((a, i) => (a.kind === "array" ? [i] : [])) : [];
+      const arrayTags = def ? def.arms.flatMap((a, i) => (L.isJsArrayType(a) ? [i] : [])) : [];
       const freeRead = arg.kind === "varRef" || arg.kind === "recordGet" || arg.kind === "fieldGet";
       if (!opaque && arrayTags.length === 1) {
         return { kind: "unionIsTag", unionId: arg.type.unionId, tag: arrayTags[0]!, negated: false, value: arg, type: BOOL, loc };
@@ -6275,7 +6275,7 @@ const DYN_STRING_ONLY_METHODS = new Set([
     }
     if (arg.type.kind === "jsval" || arg.type.kind === "caught") return null;
     if (arg.kind === "varRef" || arg.kind === "recordGet" || arg.kind === "fieldGet") {
-      return { kind: "boolLit", value: arg.type.kind === "array", type: BOOL, loc };
+      return { kind: "boolLit", value: L.isJsArrayType(arg.type), type: BOOL, loc };
     }
     L.unsupported(
       "SC1090",

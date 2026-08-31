@@ -9972,6 +9972,18 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/7350-array-isarray-over-fixed-tuples.ts": {
+   "order": [
+    "<repo>/tests/corpus/7350-array-isarray-over-fixed-tuples.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/7351-request-inherits-a-body-into-get.ts": {
+   "order": [
+    "<repo>/tests/corpus/7351-request-inherits-a-body-into-get.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/750-cycle-closure-box.ts": {
    "order": [
     "<repo>/tests/corpus/750-cycle-closure-box.ts"
@@ -10542,6 +10554,12 @@
   "<repo>/tests/diagnostics/any.ts": {
    "order": [
     "<repo>/tests/diagnostics/any.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/array-from-mapper-result-with-no-array-element.ts": {
+   "order": [
+    "<repo>/tests/diagnostics/array-from-mapper-result-with-no-array-element.ts"
    ],
    "diags": []
   },
