@@ -69,6 +69,23 @@ const FN_OWN_SKIPPED_KEYS = new Set([
 /** True when a member name routes to a function value's own-property
  * table. `name` and `length` READ from the box (its static name and
  * declared arity) but never route a WRITE — see fnOwnPropBox's callers. */
+/**
+ * The module-location constants (__dirname/__filename and the
+ * import.meta twins) are baked from the CHECKER's file name, which is
+ * always forward-slashed. Node hands back a NATIVE path, so on a
+ * Windows target every one of them has to be re-separated or the
+ * program gets a value Node never produces: `__dirname.includes('\\')` was
+ * false where Node says true, and `path.join(__dirname, base) ===
+ * __filename` was false where Node says true — at exit 0, with no
+ * diagnostic. (Measured on v25.9.0: Node prints G:\blocks\... here.) The
+ * existing corpus missed it because every entry that touches these
+ * values is separator-agnostic by accident: path.dirname and fs accept
+ * both separators on win32. Corpus 7334 is separator-SENSITIVE.
+ */
+function nativeModulePath(L: Lowerer, fileName: string): string {
+  return L.targetPlatform === "win32" ? fileName.split("/").join("\\") : fileName;
+}
+
 export function fnOwnRoutableKey(key: string): boolean {
   return !FN_OWN_SKIPPED_KEYS.has(key);
 }
@@ -1255,7 +1272,7 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
             `'${expr.text}' in an ES module (Node defines the CJS module globals only in CommonJS modules)`,
           );
         }
-        const value = expr.text === "__dirname" ? dirname(sf.fileName) : sf.fileName;
+        const value = nativeModulePath(L, expr.text === "__dirname" ? dirname(sf.fileName) : sf.fileName);
         return { kind: "strLit", value, type: STRING, loc };
       }
       const sig = L.fnSigOf(expr);
@@ -1979,6 +1996,69 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
     if (ts.isConditionalExpression(expr)) return lowerTernary(L, expr);
 
     if (ts.isPropertyAccessExpression(expr)) {
+      // `import.meta.dirname` / `.filename` / `.url` — the ESM spelling of
+      // "where is this module". They lower to COMPILE-TIME constants of the
+      // source file's own location, which is exactly the choice already
+      // shipped for the CommonJS twins (`__dirname` / `__filename`, one
+      // screen down): Node's values when the same tree runs in place.
+      //
+      // THE DIVERGENCE, stated rather than left to be found: Node derives
+      // these from the module's location AT RUN TIME, and a compiled binary
+      // has no module file to derive them from. What is baked is the
+      // BUILD-TIME source directory, so a binary that is moved, copied to
+      // another machine, or whose source tree is deleted keeps answering the
+      // path the build saw. tests/harness/import-meta-dirname.test.ts moves a
+      // binary and pins that it does. Programs that read data files or fork
+      // siblings out of their own source tree — which is what this surface
+      // is for — get the answer they want; programs asking "where am I
+      // installed" must not use it.
+      //
+      // Answering the BINARY's own directory instead was considered and
+      // rejected: it is a different question, it would silently break the
+      // fork-a-sibling use, and a plausible-looking wrong answer is the one
+      // failure mode this compiler most consistently refuses.
+      //
+      // `createRequire(import.meta.url)` is unaffected: that arm matches the
+      // whole CALL syntactically (createRequireBaseCallOf) and never lowers
+      // its argument.
+      if (
+        ts.isMetaProperty(expr.expression) &&
+        expr.expression.keywordToken === ts.SyntaxKind.ImportKeyword &&
+        expr.expression.name.text === "meta" &&
+        (expr.name.text === "dirname" || expr.name.text === "filename" || expr.name.text === "url")
+      ) {
+        const sf = expr.getSourceFile();
+        if (!isNodeEsmFile(sf)) {
+          // Node defines no import.meta in CommonJS — it is a SyntaxError
+          // there, so there is no value to invent.
+          L.unsupported(
+            "SC1090",
+            expr,
+            `'import.meta.${expr.name.text}' in a CommonJS module (Node parses import.meta ` +
+              `only in an ES module)`,
+          );
+        }
+        if (expr.name.text === "url") {
+          // Deliberately NOT lowered. The path twins are plain strings; a
+          // file: URL is a percent-ENCODED serialization whose exact rules
+          // (which characters escape, the //-prefix, the drive-letter form)
+          // decide byte-equality, and a near-miss here would be a silent
+          // wrong answer in string comparisons and in anything that parses
+          // it back. The path spellings answer the question this surface is
+          // actually used for.
+          L.unsupported(
+            "SC1090",
+            expr,
+            "'import.meta.url' (a file: URL is a percent-encoded serialization, " +
+              "and an approximate one would compare unequal to Node's)",
+            `'import.meta.dirname' and 'import.meta.filename' DO lower, to the ` +
+              `source file's build-time directory and path — use those directly ` +
+              `instead of fileURLToPath(import.meta.url)`,
+          );
+        }
+        const value = nativeModulePath(L, expr.name.text === "dirname" ? dirname(sf.fileName) : sf.fileName);
+        return { kind: "strLit", value, type: STRING, loc: locOf(expr) };
+      }
       // `super.x`: the base chain's GETTER, called directly (super
       // dispatch is static in JS — never through the dynamic class).
       // super.method() calls are routed at the call site; a bare super
@@ -2002,7 +2082,10 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
       // checker types the chain `string | undefined`, but the value is a
       // compile-time string.
       if (isRequireMainFilename(L, expr)) {
-        return { kind: "strLit", value: L.entry.fileName, type: STRING, loc };
+        // Native separators, the same as __filename: these two are compared
+        // to each other (corpus 1629 M1, 4771), and a mixed pair answers false
+        // where Node answers true.
+        return { kind: "strLit", value: nativeModulePath(L, L.entry.fileName), type: STRING, loc };
       }
       // The four properties Node defines on the CommonJS `require`
       // function, taken as VALUES: require.main, require.cache,

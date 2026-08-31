@@ -9930,6 +9930,18 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/7333-import-meta-paths/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/7333-import-meta-paths/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/7334-module-path-separators/main.cjs": {
+   "order": [
+    "<repo>/tests/corpus/7334-module-path-separators/main.cjs"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/7345-create-require-nested-esm.js": {
    "order": [
     "<repo>/tests/corpus/7345-create-require-nested-esm.js"
@@ -11102,6 +11114,12 @@
      "hint": "export declarations directly: export function f() {}"
     }
    ]
+  },
+  "<repo>/tests/diagnostics/import-meta-refusals.ts": {
+   "order": [
+    "<repo>/tests/diagnostics/import-meta-refusals.ts"
+   ],
+   "diags": []
   },
   "<repo>/tests/diagnostics/imports.ts": {
    "order": [
