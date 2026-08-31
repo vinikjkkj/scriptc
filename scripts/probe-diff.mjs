@@ -4,6 +4,8 @@
  * Usage: node scripts/probe-diff.mjs <file.ts> [more.ts ...]
  * Scores MATCH / WRONG / TRAP / DID-NOT-RUN per backend.
  * DID-NOT-RUN = the compile refused (diagnostics), so nothing executed.
+ * `// @dynamic` in the first two lines builds with the island engine, as
+ * differential.test.ts does.
  */
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -43,19 +45,21 @@ for (const rel of process.argv.slice(2)) {
   const file = resolve(rel);
   console.log("=".repeat(72));
   console.log("PROGRAM:", file);
+  const head = readFileSync(file, "utf8").split("\n", 2);
+  const dynamic = head.some((l) => /^\/\/ @dynamic\s*$/.test(l.replace(/\r$/, "")));
   const node = await run(process.execPath, ["--import", comptimeShim, "--import", islandShim, file]);
-  console.log("-- node oracle -- exit", node.exitCode);
+  console.log("-- node oracle -- exit", node.exitCode, dynamic ? "(dynamic)" : "");
   console.log("stdout:\n" + show(node.stdout));
   if (node.stderr.length) console.log("stderr:\n" + show(node.stderr));
 
   for (const backend of ["c", "llvm"]) {
     const key = createHash("sha256").update(file).update(readFileSync(file)).update(backend)
-      .update(String(Date.now())).digest("hex").slice(0, 16);
+      .update(dynamic ? "dyn" : "").update(String(Date.now())).digest("hex").slice(0, 16);
     const outDir = join(cacheDir, key);
     mkdirSync(outDir, { recursive: true });
     let res;
     try {
-      res = await compile(file, { outPath: join(outDir, `p-${backend}${EXE}`), outDir, backend });
+      res = await compile(file, { outPath: join(outDir, `p-${backend}${EXE}`), outDir, backend, dynamic });
     } catch (e) {
       console.log(`-- ${backend} -- COMPILE THREW: ${e && e.stack ? e.stack.split("\n").slice(0, 6).join("\n") : e}`);
       console.log(`SCORE[${backend}]: DID-NOT-RUN (ICE)`);
