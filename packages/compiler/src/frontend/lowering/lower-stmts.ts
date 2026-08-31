@@ -8,6 +8,7 @@ import { lowerForAwaitAsyncGenerator, lowerForOfGenerator, lowerYieldStarStateme
 import { BIGINT, type IrLibFn, BOOL, isRefCounted, BYTES_U8, CAUGHT, DYN, F64, IrExpr, IrGlobal, IrJsOp, IrLocal, type IrRecordShape, IrStmt, IrType, JSVAL, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, isUnitType, shapeHasAccessorSlots, typeEquals } from "../../ir/nodes.js";
 import { PoisonError, boundIdentifiersOf, dynFallbackType, dynUndefinedExpr, importCallHandleType, neverTaintedJsType, nodeThrowExpr, stmtUsesIsland, uncheckedOverloadHandleCall } from "./lowerer.js";
 import { wholeExportRootRebindable } from "./lower-modules.js";
+import { dynImportBindingDeclOf, dynImportBindingStmts } from "./lower-island.js";
 import { enforceLibBoundary } from "./lib-boundary.js";
 import { recordKeyReadRow } from "./keyread-census.js";
 import { cjsExportAssignmentOf, cjsExportDiscardReason, cjsExportTargetLiteral, commaWholeExportRecordOf, isCjsJsFile, isCjsWholeExportAssign, isJsSourceFile, locOf, requireSpecOf, topLevelJsStatementOf } from "../program.js";
@@ -1511,6 +1512,33 @@ export function lowerStmt(L: Lowerer, stmt: ts.Statement): IrStmt | IrStmt[] | n
           decl,
           "require() with bindings outside the module's top level (move it to the top of the file)",
         );
+      }
+      // STATIC tier: `const ns = await import("./m.ts")` / `const { a } =
+      // await import("./m.ts")` over one of the program's OWN modules.
+      // The declaration is ALIAS PLUMBING with no storage — the bindings
+      // name the exporter's own symbols (dynNsBindings /
+      // dynNsModuleBindings, read back through resolveValueSymbol and
+      // moduleNsSourceFileOf), so a class comes out a CLASS and a
+      // namespace member read is the same read a static `import * as ns`
+      // compiles. What remains at the statement is the module's
+      // EVALUATION, and its TIMING is the whole point of the two
+      // statements below: Node evaluates a dynamically-imported module
+      // after the importer's synchronous code, never at the site, so the
+      // fiber parks on a resolved promise FIRST and the guarded %init
+      // runs on the continuation. (Divergence: Node's own resolution
+      // takes several more microtask turns — five to the evaluation and
+      // eleven to the await's resume, measured on v25.9.0, and eight when
+      // the module is already cached — so a microtask chain racing the
+      // import interleaves differently. The chain is not a contract:
+      // those counts move with the loader. What IS observable and
+      // matched is that the module body runs after the importer's
+      // synchronous code and before the await resumes.)
+      {
+        const dyn = dynImportBindingDeclOf(L, decl);
+        if (dyn !== null) {
+          const stmts = dynImportBindingStmts(L, decl, dyn.dep, dyn.call);
+          if (stmts !== null) return stmts;
+        }
       }
       // `const { NGHTTP2_CANCEL } = http2.constants` — a destructure over
       // the baked constants table: alias plumbing, no storage (uses read

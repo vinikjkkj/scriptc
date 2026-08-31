@@ -18,6 +18,7 @@ import { builtinMemberRequireDecl, builtinNamespaceDestructureModuleOf, createRe
 import { bindingContextualGenericFnNodeOf, bindingGenericFnAliasInfoOf, bindingGenericFnInfoOf, bindingGenericFnNodeOf, deadUnmappableBinding, implicitLocalFnInfoOf, implicitLocalFnNodeOf, islandRestSlotType, nullishGenericBindingUnitOf, hasOwnPropertyAliasDecl } from "./lower-calls.js";
 import { dynAliasBindingIsDyn, isVarDeclared, jsEvolvingObjectLiteralInit, keyedReadGlobalArmedType, keyedReadGlobalIsDyn, numericIteratorSourceOf, provenanceElidedConstDecl } from "./lower-stmts.js";
 import { streamClassAliasDecl } from "./lower-stream.js";
+import { dynImportBindingDeclOf } from "./lower-island.js";
 import { diffieHellmanFnValueDeclType, objectStaticFnValueDeclType, stdlibGlobalAliasDecl } from "./surfaces.js";
 import { builtinFnValueDeclType } from "./lower-fnvalue.js";
 import { collectNamespaceStmt, nsPathPrefix, trapDeclRootOf } from "./lower-namespaces.js";
@@ -86,9 +87,39 @@ export interface FileParts {
     return dep;
   }
 
+/** The ONE dynamic-import spelling the STATIC tier serves: `const ns =
+   * await import("./m.ts")` and `const { a, b } = await import("./m.ts")`
+   * over a program module (lower-island's dynImportBindingDeclOf lowers
+   * exactly this set). Purely syntactic, so the module-ORDER walk and the
+   * per-site lowering cannot disagree about which modules join the graph
+   * — a dep the order never appended would fence at its site as "not
+   * part of the compiled module graph", which is how a disagreement here
+   * would show up. */
+  export function staticDynImportBindingShape(call: ts.CallExpression): boolean {
+    const awaited = call.parent;
+    if (awaited === undefined || !ts.isAwaitExpression(awaited) || awaited.expression !== call) return false;
+    const decl = awaited.parent;
+    if (decl === undefined || !ts.isVariableDeclaration(decl) || decl.initializer !== awaited) return false;
+    const list = decl.parent;
+    if (!ts.isVariableDeclarationList(list) || (list.flags & ts.NodeFlags.Const) === 0) return false;
+    if (ts.isIdentifier(decl.name)) return true;
+    if (!ts.isObjectBindingPattern(decl.name)) return false;
+    return decl.name.elements.every(
+      (el) =>
+        !el.dotDotDotToken &&
+        el.initializer === undefined &&
+        el.name !== undefined &&
+        ts.isIdentifier(el.name) &&
+        (el.propertyName === undefined || ts.isIdentifier(el.propertyName)),
+    );
+  }
+
 /** Every distinct program module a file's `import("literal")` sites name
-   * (source order, deduped). */
-  function dynamicProgramImportsOf(program: ts.Program, sf: ts.SourceFile): ts.SourceFile[] {
+   * (source order, deduped). In a STATIC build only the sites the tier
+   * actually SERVES count: appending a module for a site that will fence
+   * anyway would compile a whole subgraph the program cannot reach, and
+   * every refusal inside it would be new. */
+  function dynamicProgramImportsOf(program: ts.Program, sf: ts.SourceFile, dynamic: boolean): ts.SourceFile[] {
     const out: ts.SourceFile[] = [];
     const seen = new Set<ts.SourceFile>();
     // The fold must agree with collection/lowering (dynamicImportSpecOf):
@@ -102,7 +133,8 @@ export interface FileParts {
         node.arguments[0] !== undefined
       ) {
         const spec = dynamicImportSpecOf(checker, node.arguments[0]);
-        const dep = spec !== null ? dynamicImportProgramTargetOf(program, sf, spec) : null;
+        const served = dynamic || staticDynImportBindingShape(node);
+        const dep = spec !== null && served ? dynamicImportProgramTargetOf(program, sf, spec) : null;
         if (dep && !seen.has(dep)) {
           seen.add(dep);
           out.push(dep);
@@ -112,8 +144,8 @@ export interface FileParts {
     return out;
   }
 
-/** --dynamic builds: program modules reachable ONLY through dynamic
-   * `import()` join the compiled module graph — appended to `order` (before
+/** Program modules reachable ONLY through dynamic `import()` join the
+   * compiled module graph — appended to `order` (before
    * the entry, which stays last) in depth-first postorder over their own
    * static import edges, exactly like preflight ordered the static graph.
    * NOTHING calls their %init at startup (%main runs only the entry's init,
@@ -127,11 +159,19 @@ export interface FileParts {
    * run-once init guards reproduce, and inadmissible ones get preflight's
    * SC1016 with the same narrowed reason via `onCycle`. Idempotent —
    * re-running on an already-extended order adds nothing (both lowering
-   * passes share one array). */
+   * passes share one array).
+   *
+   * A STATIC build appends only the modules named by a SERVED site
+   * (staticDynImportBindingShape). The engine-free tier has no namespace
+   * object for the other positions, so their sites fence either way —
+   * and compiling a subgraph nothing can reach would turn every refusal
+   * inside it into a new diagnostic for a program that got no new
+   * behaviour. */
   export function appendDynamicImportModules(
     program: ts.Program,
     order: ts.SourceFile[],
     onCycle: (cycle: string, reason: string) => void,
+    dynamic: boolean,
   ): void {
     if (order.length === 0) return; // no preflight order — sites keep their fences
     const state = new Map<ts.SourceFile, "visiting" | "done">();
@@ -179,7 +219,7 @@ export interface FileParts {
       if (scan.length === 0) break;
       for (const sf of scan) {
         scanned.add(sf);
-        for (const dep of dynamicProgramImportsOf(program, sf)) visit(dep);
+        for (const dep of dynamicProgramImportsOf(program, sf, dynamic)) visit(dep);
       }
     }
     if (added.length > 0) order.splice(order.length - 1, 0, ...added);
@@ -1584,6 +1624,11 @@ export function collectGlobals(L: Lowerer, sf: ts.SourceFile, topStmts: ts.State
         // global storage (the statement lowering skips it by the same
         // test).
         if (L.builtinConstantsDestructureDecl(decl.name, decl.initializer)) continue;
+        // A served STATIC-tier `const ... = await import("./m.ts")` at
+        // file scope: alias plumbing too — the bindings name the
+        // exporter's own symbols, so no global storage (the statement
+        // lowering skips it by the same test, dynImportBindingDeclOf).
+        if (isConst && dynImportBindingDeclOf(L, decl) !== null) continue;
         // `const Writable = stream.Writable` at file scope: a stream
         // class through the namespace binding — alias plumbing, no
         // global storage (the statement lowering skips it by the same

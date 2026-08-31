@@ -9912,6 +9912,18 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/7330-dynamic-import-static-namespace/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/7330-dynamic-import-static-namespace/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/7331-dynamic-import-static-ordering/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/7331-dynamic-import-static-ordering/main.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/750-cycle-closure-box.ts": {
    "order": [
     "<repo>/tests/corpus/750-cycle-closure-box.ts"
@@ -10775,6 +10787,12 @@
   "<repo>/tests/diagnostics/dyn-rest-spread-sources.ts": {
    "order": [
     "<repo>/tests/diagnostics/dyn-rest-spread-sources.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/dynamic-import-static-positions/main.ts": {
+   "order": [
+    "<repo>/tests/diagnostics/dynamic-import-static-positions/main.ts"
    ],
    "diags": []
   },
