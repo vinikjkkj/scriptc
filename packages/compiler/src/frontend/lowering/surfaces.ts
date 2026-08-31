@@ -1454,8 +1454,16 @@ export const BUILTIN_MODULE_FENCE_HINTS: Record<string, Record<string, string | 
       "other halves (ChildProcess.send, on(\"message\"), removeListener, disconnect), " +
       "because they are one subsystem: a channel that could send but not receive would " +
       "deadlock rather than fail. The lowered process surface is spawn, spawnSync, " +
-      "execSync/execFileSync and promisify(execFile) — a child that talks over its " +
-      "STDIO, or over a socket the parent also opens, compiles today",
+      "execSync/execFileSync and promisify(execFile). For a child the parent must " +
+      "also TALK to, note that piped stdin is fenced as well, so stdio carries the " +
+      "child's output only (stdio: [\"ignore\", \"pipe\", \"pipe\"]) — a request/response " +
+      "channel needs a SOCKET the parent listens on and the child connects back to, " +
+      "which the net/TLS surface does compile. Note also WHICH node a fork would " +
+      "start: fork() spawns process.execPath, and in a compiled binary that is the " +
+      "BINARY ITSELF, not node — so a mechanical fork() would re-launch this " +
+      "program (measured: it forks a bomb), and 'which node' has no answer on a box " +
+      "that need not have one. A child that must run Node has to name its " +
+      "interpreter explicitly",
     execFile:
       "the callback form has no lowering — promisify it: " +
       "const execFileAsync = promisify(execFile) (from node:util), or use execFileSync",
