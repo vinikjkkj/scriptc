@@ -1,0 +1,14 @@
+protocol = https:
+hostname = example.co.uk
+host     = example.co.uk:8443
+pathname = /a/b
+search   = ?q=1&r=2
+href     = https://user:pw@example.co.uk:8443/a/b?q=1&r=2#frag
+toString = https://user:pw@example.co.uk:8443/a/b?q=1&r=2#frag
+sp.get(a) = 1
+sp string = a=1&b=two&a=3
+utf8 hex = 68c3a96c6c6f20e282ac
+utf8 len = 10
+decoded  = héllo €
+aborted before = false
+aborted after  = true

@@ -38,3 +38,4 @@ tmp-*/
 # per-block zig cache (see the fleet brief: ZIG_*_CACHE_DIR must be in-tree
 # or zig writes to %LOCALAPPDATA% on C:)
 .zig/
+.cache/
