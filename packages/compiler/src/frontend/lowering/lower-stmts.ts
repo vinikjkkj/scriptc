@@ -4900,7 +4900,13 @@ export function lowerVarDecl(L: Lowerer, decl: ts.VariableDeclaration, isLet: bo
     if (
       type === null && !isLet &&
       ((L.typeOf(decl.name).flags & ts.TypeFlags.Any) !== 0 ||
-        (L.checkerAnyArray(decl.name) && init.type.kind === "array") ||
+        // ... and a TUPLE initializer takes it too: `const t = value`
+        // inside an Array.isArray guard over a readonly tuple arm, where
+        // the checker's type is the `& any[]` residue that maps to
+        // nothing while the initializer lowered to the proven tuple arm
+        // (maybeNarrow's isArray bridge). isJsArrayType covers the array
+        // spelling above it as well as the positional record shape.
+        (L.checkerAnyArray(decl.name) && L.isJsArrayType(init.type)) ||
         // JS declarations carry no annotations: an unmappable inferred
         // type (a union with a fence-folded arm — the typeof-'bigint'
         // dual-mode ternary) adopts the initializer's static type, the
