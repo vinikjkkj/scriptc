@@ -1,0 +1,26 @@
+{
+ "entry": "G:/blocks/wamfix-lab/app/pkgs/voip/index.ts",
+ "packages": [
+  {
+   "name": "zapo-js",
+   "version": "1.6.2",
+   "sourceVersion": null,
+   "commit": "250f9af5229a545eec28ddbd3e8774a397cdb0bb",
+   "dir": "G:/blocks/wamfix-lab/prov/250f9af5229a545eec28ddbd3e8774a397cdb0bb",
+   "entries": {
+    "zapo-js": "G:/blocks/wamfix-lab/prov/250f9af5229a545eec28ddbd3e8774a397cdb0bb/src/index.ts",
+    "zapo-js/crypto": "G:/blocks/wamfix-lab/prov/250f9af5229a545eec28ddbd3e8774a397cdb0bb/src/crypto/index.ts",
+    "zapo-js/proto": "G:/blocks/wamfix-lab/prov/250f9af5229a545eec28ddbd3e8774a397cdb0bb/src/proto.ts",
+    "zapo-js/protocol": "G:/blocks/wamfix-lab/prov/250f9af5229a545eec28ddbd3e8774a397cdb0bb/src/protocol/index.ts",
+    "zapo-js/transport": "G:/blocks/wamfix-lab/prov/250f9af5229a545eec28ddbd3e8774a397cdb0bb/src/transport/index.ts",
+    "zapo-js/util": "G:/blocks/wamfix-lab/prov/250f9af5229a545eec28ddbd3e8774a397cdb0bb/src/util/index.ts"
+   },
+   "entryCount": 6
+  }
+ ],
+ "notes": [
+  "argo-codec@0.2.1: no provenance attestation published; island path used",
+  "libmlow-wasm@0.1.1: no provenance attestation published; island path used",
+  "@roamhq/wrtc@0.10.0: no provenance attestation published; island path used"
+ ]
+}

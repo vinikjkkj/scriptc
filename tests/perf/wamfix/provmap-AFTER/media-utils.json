@@ -1,0 +1,23 @@
+{
+ "entry": "G:/blocks/wamfix-lab/app/pkgs/media-utils/index.ts",
+ "packages": [
+  {
+   "name": "zapo-js",
+   "version": "1.6.2",
+   "sourceVersion": null,
+   "commit": "250f9af5229a545eec28ddbd3e8774a397cdb0bb",
+   "dir": "G:/blocks/wamfix-lab/prov/250f9af5229a545eec28ddbd3e8774a397cdb0bb",
+   "entries": {
+    "zapo-js": "G:/blocks/wamfix-lab/prov/250f9af5229a545eec28ddbd3e8774a397cdb0bb/src/index.ts",
+    "zapo-js/media": "G:/blocks/wamfix-lab/prov/250f9af5229a545eec28ddbd3e8774a397cdb0bb/src/media/index.ts",
+    "zapo-js/util": "G:/blocks/wamfix-lab/prov/250f9af5229a545eec28ddbd3e8774a397cdb0bb/src/util/index.ts"
+   },
+   "entryCount": 3
+  }
+ ],
+ "notes": [
+  "argo-codec@0.2.1: no provenance attestation published; island path used",
+  "file-type@19.6.0: no provenance attestation published; island path used",
+  "sharp@0.33.5: no provenance attestation published; island path used"
+ ]
+}

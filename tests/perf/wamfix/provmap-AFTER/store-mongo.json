@@ -1,0 +1,72 @@
+{
+ "entry": "G:/blocks/wamfix-lab/app/pkgs/store-mongo/index.ts",
+ "packages": [
+  {
+   "name": "zapo-js",
+   "version": "1.6.2",
+   "sourceVersion": null,
+   "commit": "250f9af5229a545eec28ddbd3e8774a397cdb0bb",
+   "dir": "G:/blocks/wamfix-lab/prov/250f9af5229a545eec28ddbd3e8774a397cdb0bb",
+   "entries": {
+    "zapo-js": "G:/blocks/wamfix-lab/prov/250f9af5229a545eec28ddbd3e8774a397cdb0bb/src/index.ts",
+    "zapo-js/appstate": "G:/blocks/wamfix-lab/prov/250f9af5229a545eec28ddbd3e8774a397cdb0bb/src/appstate/index.ts",
+    "zapo-js/auth": "G:/blocks/wamfix-lab/prov/250f9af5229a545eec28ddbd3e8774a397cdb0bb/src/auth/index.ts",
+    "zapo-js/proto": "G:/blocks/wamfix-lab/prov/250f9af5229a545eec28ddbd3e8774a397cdb0bb/src/proto.ts",
+    "zapo-js/protocol": "G:/blocks/wamfix-lab/prov/250f9af5229a545eec28ddbd3e8774a397cdb0bb/src/protocol/index.ts",
+    "zapo-js/retry": "G:/blocks/wamfix-lab/prov/250f9af5229a545eec28ddbd3e8774a397cdb0bb/src/retry/index.ts",
+    "zapo-js/signal": "G:/blocks/wamfix-lab/prov/250f9af5229a545eec28ddbd3e8774a397cdb0bb/src/signal/index.ts",
+    "zapo-js/store": "G:/blocks/wamfix-lab/prov/250f9af5229a545eec28ddbd3e8774a397cdb0bb/src/store/index.ts",
+    "zapo-js/util": "G:/blocks/wamfix-lab/prov/250f9af5229a545eec28ddbd3e8774a397cdb0bb/src/util/index.ts"
+   },
+   "entryCount": 9
+  },
+  {
+   "name": "mongodb",
+   "version": "6.21.0",
+   "sourceVersion": null,
+   "commit": "387b6dd29e0aef37fb36607c4a0c652ef0878029",
+   "dir": "G:/blocks/wamfix-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029",
+   "entries": {
+    "mongodb": "G:/blocks/wamfix-lab/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/index.ts"
+   },
+   "entryCount": 1
+  },
+  {
+   "name": "bson",
+   "version": "6.10.4",
+   "sourceVersion": null,
+   "commit": "302f96e9591c6d4571480d69bb319266c281f67c",
+   "dir": "G:/blocks/wamfix-lab/prov/302f96e9591c6d4571480d69bb319266c281f67c",
+   "entries": {
+    "bson": "G:/blocks/wamfix-lab/prov/302f96e9591c6d4571480d69bb319266c281f67c/src/index.ts"
+   },
+   "entryCount": 1
+  },
+  {
+   "name": "mongodb-connection-string-url",
+   "version": "3.0.2",
+   "sourceVersion": null,
+   "commit": "26e2c12671f39743abc8a6ba884b8d89b41ca0c5",
+   "dir": "G:/blocks/wamfix-lab/prov/26e2c12671f39743abc8a6ba884b8d89b41ca0c5",
+   "entries": {
+    "mongodb-connection-string-url": "G:/blocks/wamfix-lab/prov/26e2c12671f39743abc8a6ba884b8d89b41ca0c5/src/index.ts"
+   },
+   "entryCount": 1
+  }
+ ],
+ "notes": [
+  "argo-codec@0.2.1: no provenance attestation published; island path used",
+  ".: not installed under the entry's node_modules; island path used",
+  "mongodb-client-encryption: not installed under the entry's node_modules; island path used",
+  "..@1.0.0: no provenance attestation published; island path used",
+  "kerberos: not installed under the entry's node_modules; island path used",
+  "@mongodb-js/zstd: not installed under the entry's node_modules; island path used",
+  "@aws-sdk/credential-providers: not installed under the entry's node_modules; island path used",
+  "gcp-metadata: not installed under the entry's node_modules; island path used",
+  "snappy: not installed under the entry's node_modules; island path used",
+  "socks: not installed under the entry's node_modules; island path used",
+  "aws4: not installed under the entry's node_modules; island path used",
+  "whatwg-url@14.2.0: no provenance attestation published; island path used",
+  "@mongodb-js/saslprep: skipped — provenance package limit (16) reached; island path used"
+ ]
+}
