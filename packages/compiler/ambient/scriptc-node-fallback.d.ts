@@ -295,6 +295,23 @@ declare var __filename: string;
  * `global.process` read the same object as the bare name. */
 declare var global: typeof globalThis;
 
+/* `gc` — the --expose-gc probe, and the ONE global whose declared type has
+ * to admit its own absence. Node puts the NAME in the global scope either
+ * way and gives it a value only under --expose-gc, so `globalThis.gc` is
+ * `undefined` in an ordinary `node script.js`; @types/node says exactly
+ * this (`declare var gc: NodeJS.GCFunction | undefined`) and the fallback
+ * has to say it too, or the two worlds disagree about a global's presence.
+ *
+ * The type is load-bearing, not documentation: `| undefined` is the
+ * evidence the absent-global fold requires before it will answer
+ * `undefined` for a read through a cast (surfaces.ts's
+ * absentGlobalMemberValue). Without a declaration that admits absence
+ * there is no evidence, and a missing declaration is not evidence — this
+ * file declares what scriptc SUPPORTS, so silence here means "unsupported",
+ * never "the host does not have it". A compiled binary has no gc to
+ * expose, so the value is always the undefined arm. */
+declare var gc: (() => void) | undefined;
+
 /* The `require` VALUE's non-call surface. require() CALLS are module
  * edges (the checker models them as imports); the object's own members
  * are declared here so harness idioms typecheck. `require.main` lowers

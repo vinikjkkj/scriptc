@@ -4452,6 +4452,13 @@ export type IrLibFn =
   | "process.uptime"
   /** perf_hooks performance.now(): fractional ms since process start. */
   | "perf.now"
+  /** process.memoryUsage.rss(): the resident set in bytes, from the
+   * same place uv_resident_set_memory reads it (WorkingSetSize /
+   * /proc/self/statm / task_info). The RECORD form memoryUsage()
+   * carries no spelling and is refused at the frontend: four of its
+   * five fields are V8 heap statistics with nothing behind them here,
+   * and 0 would read as a measurement. */
+  | "process.rss"
   | "process.availableMemory"
   | "process.constrainedMemory"
   | "process.cpuUser"
@@ -10566,10 +10573,14 @@ export const LIB_NONDETERMINISTIC_PREFIXES: readonly [string, string][] = [
   ["process.uptime", "the live clock (process.uptime)"],
   ["process.availableMemory", "machine memory state"],
   ["process.constrainedMemory", "machine memory state"],
-  // process.memoryUsage carries NO row: nothing lowers it — no IrLibFn
-  // spelling exists for it, so a prefix here would be dead. If a lowering
-  // ever lands, its spellings must join this table AND the manifest's
-  // ambient projection (the parity test fails until both agree).
+  // process.memoryUsage() — the RECORD form — still carries no row:
+  // nothing lowers it, and nothing should (four of its five fields are
+  // V8 heap statistics a binary with no JavaScript heap cannot supply;
+  // lower-builtins.ts refuses it by name and says which four). The
+  // SINGLE-VALUE form process.memoryUsage.rss() does lower, and its
+  // spelling is here: the resident set is live machine state, sampled
+  // fresh on every call, exactly like the maxRSS row above.
+  ["process.rss", "machine memory state (process.memoryUsage.rss)"],
   ["process.rusage", "machine resource usage (process.resourceUsage)"],
   ["process.cpu", "the process CPU clock (process.cpuUsage)"],
   ["process.threadCpu", "the thread CPU clock (process.threadCpuUsage)"],

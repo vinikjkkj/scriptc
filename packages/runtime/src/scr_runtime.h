@@ -2612,6 +2612,11 @@ double scr_thread_cpu_user_diff(double prev);
 double scr_thread_cpu_system_diff(double prev);
 void scr_cpu_prev_validate(double user, double system);
 double scr_process_rusage(double idx);
+/* process.memoryUsage.rss(): the resident set in bytes, from the same
+   place uv_resident_set_memory reads it. The RECORD form of
+   memoryUsage() is refused at the frontend — the four V8 heap fields
+   have nothing behind them in a binary with no JavaScript heap. */
+double scr_process_rss(void);
 double scr_available_memory(void);
 double scr_constrained_memory(void);
 ScrArr *scr_active_resources(void);

@@ -229,3 +229,45 @@ test("dot-parent: bare '.' and '..' imports build and run (the TS project dialec
   const { stdout } = await execFileAsync(result.binaryPath);
   expect(stdout).toBe("parent-banner:lib-index!\n");
 });
+
+test("node-types: the three bench stdlib surfaces — what lowers, and what it answers", async () => {
+  /* zapo's messaging bench reaches three standard-library surfaces at run
+   * time that @types/node types and scriptc has to have an answer for:
+   * `globalThis.<absent>`, `process.memoryUsage`, and
+   * `process.on("uncaughtException")`. This pins the SUPPORTED side; the
+   * refusals are pinned by the snapshot test below.
+   *
+   * The typeof print is the load-bearing one. A test that printed only
+   * `gc === undefined` could not tell the right answer from a JS identity
+   * token, because a token compares unequal to undefined too — it has to
+   * distinguish "undefined" from "string" and "function". */
+  const outDir = outDirFor("node-stdlib-surfaces");
+  const result = await compile(join(nodeTypesDir, "stdlib-surfaces.ts"), {
+    outPath: join(outDir, exeName("stdlib-surfaces")),
+    outDir,
+    sanitize,
+  });
+  expect(result.ok, !result.ok ? JSON.stringify(result.diagnostics, null, 2) : "").toBe(true);
+  if (!result.ok) return;
+  const { stdout } = await execFileAsync(result.binaryPath);
+  /* rss and maxRSS are live machine state, so the program prints the
+   * DERIVED facts Node also answers on any host: a number, positive, and
+   * (for rss) a whole count of bytes. */
+  expect(stdout).toBe(
+    "undefined\ntrue\nno gc\nnumber true true\nnumber true\n[exit] 0\n",
+  );
+});
+
+test("node-types: the refused bench surfaces fence by name, and the globalThis fold claims no more than it proved", async () => {
+  const outDir = outDirFor("node-stdlib-surfaces-fenced");
+  const result = await compile(join(nodeTypesDir, "stdlib-surfaces-fenced.ts"), {
+    outPath: join(outDir, exeName("stdlib-surfaces-fenced")),
+    outDir,
+    sanitize,
+  });
+  expect(result.ok).toBe(false);
+  if (result.ok) return;
+  const rendered = renderAll(result.diagnostics, result.sourceTexts, { color: false })
+    .replaceAll(nodeTypesDir + "/", "");
+  await expect(rendered).toMatchFileSnapshot("__snapshots__/node-types-stdlib-surfaces.txt");
+});
