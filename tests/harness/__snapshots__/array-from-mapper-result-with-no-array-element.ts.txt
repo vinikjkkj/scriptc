@@ -1,0 +1,13 @@
+array-from-mapper-result-with-no-array-element.ts:23:17 - error SC1090: 'Array.from' with a mapper returning 'unknown'-typed values (the result array has no static element type — a DECLARED 'unknown[]' IS the checked-dynamic array, so build one directly: 'const xs: unknown[] = []' then push, or an array literal) are not supported yet
+
+  22 | // spellings it names match node v25.9.0 on both backends.
+  23 | const counted = Array.from({ length: 2 }, (_v, i) => JSON.parse(`{"n":${i}}`) as unknown);
+     |                 ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  24 | console.log(counted.length);
+
+array-from-mapper-result-with-no-array-element.ts:26:16 - error SC1090: 'Array.from' with a mapper returning 'unknown'-typed values (the result array has no static element type — a DECLARED 'unknown[]' IS the checked-dynamic array, so build one directly: 'const xs: unknown[] = []' then push, or an array literal) are not supported yet
+
+  25 | 
+  26 | const mapped = Array.from([1, 2], (n) => JSON.parse(`{"n":${n}}`) as unknown);
+     |                ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  27 | console.log(mapped.length);

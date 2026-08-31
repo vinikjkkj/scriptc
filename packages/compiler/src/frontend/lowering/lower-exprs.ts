@@ -4129,7 +4129,14 @@ function instanceofGuardArm(L: Lowerer, rhs: ts.Expression, unionId: string): Ir
           isArrayGuardProven(L, node));
       if (anyElem) {
         const def = L.unions.get(expr.type.unionId);
-        const arrayTags = def ? def.arms.flatMap((a, i) => (a.kind === "array" ? [i] : [])) : [];
+        // A TUPLE arm is an array arm here. `readonly [A, B]` is exactly
+        // the constituent tsc cannot assign to `any[]`, so it is the one
+        // that reaches this bridge as the `& any[]` residue -- and it
+        // lowers to a positional record shape, not to `kind: "array"`.
+        // Reading only the array kind left the proven tuple arm invisible
+        // and the read fenced SC1090 on a value the tag test had just
+        // proved (upstream #154, 1e4f71dd, from their side).
+        const arrayTags = def ? def.arms.flatMap((a, i) => (L.isJsArrayType(a) ? [i] : [])) : [];
         if (arrayTags.length === 1) {
           const arm = def!.arms[arrayTags[0]!]!;
           return checkedArmBridge(L, expr, arm, expr.loc);
@@ -6644,9 +6651,20 @@ export function lowerOptionalChain(L: Lowerer, expr: ts.CallExpression | ts.Prop
     // whose VALUE lowers to a real static array (maybeNarrow's isArray
     // bridge): `.length` and friends ride the array path on the lowered
     // value (re-lowering is pure IR construction).
+    // The same bridge over a proven TUPLE arm: `readonly [A, B]` is the
+    // constituent that produces the `& any[]` residue in the first place,
+    // and it lowers to a positional record shape rather than to an array.
+    // `.length` is the one member both spellings answer, and over a tuple
+    // it is the arity CONSTANT -- the fold below, whose instantiation gate
+    // this flag opens for the isArray seat.
+    let anyArrayTuple = false;
     if (kind === undefined && L.checkerAnyArray(expr.expression)) {
       const probe = L.lowerExpr(expr.expression);
       if (probe.type.kind === "array") kind = "array";
+      else if (L.isJsArrayType(probe.type)) {
+        kind = "array";
+        anyArrayTuple = true;
+      }
     }
     // `m.size` on a JS `const m = new Map()`. JavaScript has no
     // type-argument syntax, so the checker says `Map<any, any>` — which
@@ -6679,7 +6697,7 @@ export function lowerOptionalChain(L: Lowerer, expr: ts.CallExpression | ts.Prop
     // an ordinary array `.length` never pays the probe.
     if (
       kind === "array" && expr.name.text === "length" &&
-      L.typeParamBindings !== null && L.typeParamBindings.size > 0
+      (anyArrayTuple || (L.typeParamBindings !== null && L.typeParamBindings.size > 0))
     ) {
       const probe = L.lowerExpr(expr.expression);
       const shape = probe.type.kind === "record" ? L.shapes.get(probe.type.shapeId) : undefined;
@@ -11939,6 +11957,35 @@ function rejectThisInObjectMethodIn(L: Lowerer, node: ts.Node, mayStop: boolean)
     ts.forEachChild(node, (child) => rejectThisInObjectAccessor(L, child));
   }
 
+/** The positional read of a TUPLE receiver: `t[0]` is a record-shape field
+   * read at the literal index, narrowing like any field read. Factored out
+   * of lowerElementAccess because the receiver reaches it two ways -- from
+   * the CHECKER type (the ordinary annotated tuple) and, when the checker
+   * gave up, from the LOWERED VALUE (a tuple arm maybeNarrow's isArray
+   * bridge proved). Both must read it the same way or the two spellings of
+   * the same program answer differently. */
+  function tupleElementRead(L: Lowerer, expr: ts.ElementAccessExpression, obj: IrExpr, shapeId: string, shape: IrRecordShape): IrExpr {
+    const idx = tupleLiteralIndex(expr.argumentExpression);
+    if (idx === null) {
+      L.unsupported(
+        "SC1090",
+        expr.argumentExpression,
+        "tuple indexing with a non-literal index (tuples are fixed-shape — use t[0], t[1], ...)",
+      );
+    }
+    const fieldType = shape.fields.find((f) => f.name === String(idx))?.type;
+    if (fieldType === undefined) L.badType(expr, L.typeOf(expr)); // OOB smuggled past tsc
+    const get: IrExpr = {
+      kind: "recordGet",
+      obj,
+      shapeId,
+      field: String(idx),
+      type: fieldType,
+      loc: locOf(expr),
+    };
+    return L.maybeNarrow(get, expr);
+  }
+
 /** `a[i]` reads. Only f64 indices into array receivers are modeled; JS
    * string-key element access (`a["length"]`) and string indexing (`s[0]`
    * typechecks against the lib's index signature; use .charAt) stay out. */
@@ -12099,25 +12146,7 @@ function rejectThisInObjectMethodIn(L: Lowerer, node: ts.Node, mayStop: boolean)
             );
           }
         }
-        const idx = tupleLiteralIndex(expr.argumentExpression);
-        if (idx === null) {
-          L.unsupported(
-            "SC1090",
-            expr.argumentExpression,
-            "tuple indexing with a non-literal index (tuples are fixed-shape — use t[0], t[1], ...)",
-          );
-        }
-        const fieldType = shape.fields.find((f) => f.name === String(idx))?.type;
-        if (fieldType === undefined) L.badType(expr, L.typeOf(expr)); // OOB smuggled past tsc
-        const get: IrExpr = {
-          kind: "recordGet",
-          obj,
-          shapeId: receiverIr.shapeId,
-          field: String(idx),
-          type: fieldType,
-          loc: locOf(expr),
-        };
-        return L.maybeNarrow(get, expr);
+        return tupleElementRead(L, expr, obj, receiverIr.shapeId, shape);
       }
       if (shape && !shape.tuple) {
         // A record-typed .d.ts surface whose VALUE is an island handle
@@ -12142,6 +12171,20 @@ function rejectThisInObjectMethodIn(L: Lowerer, node: ts.Node, mayStop: boolean)
     // the fences below (re-lowering is pure IR construction).
     if (receiverIr?.kind === "dyn" || receiverIr === null) {
       const obj = L.lowerExpr(expr.expression);
+      // The checker gave up on the receiver but the VALUE is a proven
+      // TUPLE. `Array.isArray` is declared `arg is any[]`, and a `readonly
+      // [A, B]` constituent is not assignable to that, so tsc's true
+      // branch is the union of per-arm `& any[]` intersections -- which
+      // maps to nothing, while maybeNarrow's isArray bridge has already
+      // extracted the one array-kind arm out of the LOWERED union the tag
+      // test proved. Reading positionally here is what the mapped tuple
+      // receiver above does; dispatching off the value is the rule that
+      // path already follows for its jsval and static-array cases.
+      // Upstream #154 (1e4f71dd) is the same gap from their side.
+      if (obj.type.kind === "record") {
+        const bridged = L.shapes.get(obj.type.shapeId);
+        if (bridged?.tuple) return tupleElementRead(L, expr, obj, obj.type.shapeId, bridged);
+      }
       if (obj.type.kind === "dyn") {
         const rawKey = L.lowerExpr(expr.argumentExpression);
         // Number, bool, and DYN keys stringify (ToPropertyKey) — the

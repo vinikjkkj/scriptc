@@ -4,7 +4,7 @@
  * method surfaces. */
 import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
-import { BOOL, BYTES_ELEM_SIZE, BYTES_U8, CAUGHT, DV_BIG_SET_METHODS, DYN, F64, IrBytesElem, IrBytesIntrinsicMethod, IrExpr, IrFunction, IrLocal, IrMapIntrinsicMethod, IrParam, IrRecordShape, IrSetIntrinsicMethod, IrStmt, IrType, JSVAL, REF_TRUTHY_KINDS, REGEX, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, bytesOf, canDynCheckTo, funcOf, isRefCounted, isSupportedIndexValue, isUnitType, typeEquals } from "../../ir/nodes.js";
+import { BOOL, BYTES_ELEM_SIZE, BYTES_U8, CAUGHT, DV_BIG_SET_METHODS, DYN, F64, IrBytesElem, IrBytesIntrinsicMethod, IrExpr, IrFunction, IrLocal, IrMapIntrinsicMethod, IrParam, IrRecordShape, IrSetIntrinsicMethod, IrStmt, IrType, JSVAL, REF_TRUTHY_KINDS, REGEX, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, bytesOf, canBeArrayElem, canDynCheckTo, funcOf, isRefCounted, isSupportedIndexValue, isUnitType, typeEquals } from "../../ir/nodes.js";
 import { ARRAY_METHODS, MAP_METHODS, SET_COMBINE_METHODS, SET_METHODS, STR_METHODS } from "./surfaces.js";
 import { captureParticipationOfPattern, checkedJsNumber, droppableStatic, entryFoldStringChain, isRequireMainFilename, lowerDynObjectLiteral, probeLower, pureReemittable, staticRegexTextOf } from "./lower-exprs.js";
 import { forOfVarTarget, lowerDestructuringAssign } from "./lower-stmts.js";
@@ -1233,41 +1233,37 @@ function lowerOptionalDefaultArg(
       // story yet).
       L.badType(call, L.typeOf(call));
     }
-    if (
-      method === "map" &&
-      // map/set are NOT here: ScrArr stores them by reference like any
-      // other refcounted element (the nested-container storage a Map
-      // VALUE and an index-signature overflow already use), and an array
-      // of them builds fine through push. The exclusion outlived that.
-      (fnRet.kind === "url" ||
-        fnRet.kind === "searchParams" || fnRet.kind === "generator" || fnRet.kind === "caught" ||
-        fnRet.kind === "stats" || fnRet.kind === "spawnRes" || fnRet.kind === "netSocket" ||
-        fnRet.kind === "fileHandle" ||
-        fnRet.kind === "dgramSocket" || fnRet.kind === "testCtx" || fnRet.kind === "httpReq" ||
-        fnRet.kind === "httpRes" || fnRet.kind === "httpClientReq" || fnRet.kind === "secureCtx" ||
-        fnRet.kind === "fsWatcher" || fnRet.kind === "childStream" || fnRet.kind === "procStream" ||
-        isUnitType(fnRet))
-    ) {
-      // The result would be an array of an element kind ScrArr has no
-      // home for (mapTypeOf's own array exclusions) — the callback return
-      // type bypasses that gate, so it is enforced here: a named fence,
-      // never a mistyped array into the backends.
-      L.unsupported(
-        "SC1090",
-        call,
-        `'.map()' with a callback returning '${L.fmt(fnRet)}' values (arrays of this element kind have no representation — store the values individually)`,
-      );
-    }
     if (method === "map" && fnRet.kind === "dyn") {
       // A checked-dynamic callback return would make the result a
       // dyn-element STATIC array, which has no backend representation
       // (dynFallbackType's rule: an unmappable element makes the WHOLE
       // value dyn — but map's fresh array is built here, not by a
-      // declaration, so the honest answer is the fence).
+      // declaration, so the honest answer is the fence). FIRST, so this
+      // kind keeps its own advice rather than the generic one below.
       L.unsupported(
         "SC1090",
         call,
         "'.map()' with a callback returning 'unknown'-typed values (the result array has no static element type — annotate the callback's return)",
+      );
+    }
+    if (method === "map" && !canBeArrayElem(fnRet)) {
+      // The result would be an array of an element kind ScrArr has no
+      // home for (mapTypeOf's own array exclusions) — the callback return
+      // type bypasses that gate, so it is enforced here: a named fence,
+      // never a mistyped array into the backends.
+      //
+      // This was a hand-written list of nineteen kinds, and it had drifted
+      // from the emitter's: sqliteDb, sqliteStmt and asyncGenerator were
+      // missing, so `stmts.map(s => db.prepare(s))` reached elemKindC's
+      // `emitter bug: no array element representation` instead of a
+      // diagnostic. canBeArrayElem IS that list, transcribed once. (map
+      // and set were correctly absent from the old copy and stay absent
+      // here: ScrArr stores them by reference like any other refcounted
+      // element, and an array of them builds fine through push.)
+      L.unsupported(
+        "SC1090",
+        call,
+        `'.map()' with a callback returning '${L.fmt(fnRet)}' values (arrays of this element kind have no representation — store the values individually)`,
       );
     }
     if (method === "filter" && fnRet.kind !== "bool") L.badType(argNode, L.typeOf(argNode));
@@ -1311,11 +1307,19 @@ function lowerOptionalDefaultArg(
     if (name !== "slice" && name !== "map") return null;
     if (!L.isStdlibMember(access)) return null;
     const receiverIr = L.mapTypeOf(L.typeOf(access.expression));
-    if (receiverIr?.kind !== "record") return null;
-    const shape = L.shapes.get(receiverIr.shapeId);
-    if (!shape?.tuple) return null;
+    // The `& any[]` residue an Array.isArray guard leaves on a READONLY
+    // tuple constituent maps to nothing, while maybeNarrow's isArray
+    // bridge has already extracted the proven tuple arm from the lowered
+    // union. Take the shape off the VALUE there -- the same stance the
+    // element read and the `.length` fold take one file over, and the
+    // reason this function re-checks the lowered receiver at all.
+    const bridged = receiverIr === null && L.checkerAnyArray(access.expression);
+    if (!bridged && receiverIr?.kind !== "record") return null;
     const receiver = L.lowerExpr(access.expression);
     if (receiver.type.kind !== "record") return null;
+    const shapeId = bridged ? receiver.type.shapeId : (receiverIr as IrType & { kind: "record" }).shapeId;
+    const shape = L.shapes.get(shapeId);
+    if (!shape?.tuple) return null;
     if (!pureReemittable(receiver)) {
       L.noLowering(
         `${L.checker.typeToString(L.typeOf(access.expression))}.${name}`,
@@ -1342,7 +1346,7 @@ function lowerOptionalDefaultArg(
         const read: IrExpr = {
           kind: "recordGet",
           obj: receiver,
-          shapeId: receiverIr.shapeId,
+          shapeId,
           field: f.name,
           type: f.type,
           loc,
@@ -3288,9 +3292,7 @@ function lowerOptionalDefaultArg(
         const elem = base.type.elem;
         const { fnArg, arity } = hofCallbackArg(L, args[1]!, [elem], base.type);
         const fnRet = fnArg.type.ret;
-        if (fnRet.kind === "void" || fnRet.kind === "func" || fnRet.kind === "dyn" || isUnitType(fnRet)) {
-          L.badType(call, L.typeOf(call));
-        }
+        fenceArrayFromResult(L, call, fnRet);
         const helper = arrayHofHelper(L, "map", elem, fnRet, arity, loc);
         return { kind: "call", callee: helper, args: [base, fnArg], type: arrayOf(fnRet), loc };
       }
@@ -3328,7 +3330,7 @@ function lowerOptionalDefaultArg(
     }
     const fnT = fnArg.type as IrType & { kind: "func" };
     const fnRet = fnT.ret;
-    if (fnRet.kind === "void" || fnRet.kind === "func") L.badType(call, L.typeOf(call));
+    fenceArrayFromResult(L, call, fnRet);
     const arity = fnT.params.length;
     const key = `fromLen:${typeKey(fnRet)}:${arity}`;
     let helper = L.arrHofHelpers.get(key);
@@ -3338,6 +3340,43 @@ function lowerOptionalDefaultArg(
       L.liftedFns.push(buildArrayFromLenFn(helper, fnRet, arity, loc));
     }
     return { kind: "call", callee: helper, args: [n, fnArg], type: arrayOf(fnRet), loc };
+  }
+
+/** The mapper's RESULT becomes the array's element, and no checker type is
+   * consulted for it: `arrayOf(fnRet)` is synthesized straight from the
+   * signature, so mapType's array rule -- which leaves every
+   * unrepresentable element unmapped -- never sees it. Both Array.from
+   * forms go through here.
+   *
+   * `Array.from({ length: 2 }, () => JSON.parse(s) as unknown)` built
+   * `arrayOf(dyn)` and the C backend died with `emitter bug: no array
+   * element representation for dyn` on a program tsc accepts. Measured on
+   * all three lanes: --backend c threw, --backend llvm refused SC3001
+   * (arrayElem:dyn), and the RELEASE DEFAULT threw too. Upstream #183
+   * (58c214a4).
+   *
+   * The dyn case gets its own message because the generic one's advice is
+   * WRONG for it: SC2009's hint names 'unknown' as part of the compilable
+   * set, and here 'unknown' IS the blocker. A DECLARED `unknown[]` really
+   * is compilable -- mapType maps a dyn element to the whole-array dyn --
+   * which is exactly why the advice below is to declare one. Both
+   * spellings it names were compiled and run against node v25.9.0 on both
+   * backends before this message shipped. */
+  function fenceArrayFromResult(L: Lowerer, call: ts.CallExpression, fnRet: IrType): void {
+    if (fnRet.kind === "dyn") {
+      L.unsupported(
+        "SC1090",
+        call,
+        "'Array.from' with a mapper returning 'unknown'-typed values (the result array has no " +
+          "static element type \u2014 a DECLARED 'unknown[]' IS the checked-dynamic array, so build " +
+          "one directly: 'const xs: unknown[] = []' then push, or an array literal)",
+      );
+    }
+    // `func` is listed apart from canBeArrayElem because closures ARE a
+    // representable array element (SCR_ELEM_REF); this fence is the
+    // Array.from surface's own, not the array's, and widening it is not
+    // this change's business.
+    if (fnRet.kind === "func" || !canBeArrayElem(fnRet)) L.badType(call, L.typeOf(call));
   }
 
 /** `Array.from(s)` / `[...s]` on a STRING: the code-point split into a

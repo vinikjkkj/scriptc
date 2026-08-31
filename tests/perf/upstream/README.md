@@ -20,7 +20,8 @@ Node is the oracle for all of them, exactly as in the corpus: no golden files.
 ## What each one is, and the exact diagnostic it produces
 
 Measured 2026-08-31 on node v25.9.0, `SCRIPTC_CC=zigcc`,
-`SCRIPTC_TARGET=x86_64-windows-gnu`, C backend.
+`SCRIPTC_TARGET=x86_64-windows-gnu`, C backend. The two `request-*` and
+`array-isarray-*` entries were re-measured 2026-08-31 on BOTH backends.
 
 ### `top-level-await-implicit-module.ts`, `top-level-for-await-implicit-module.ts`, `top-level-await-ambiguous/`, `top-level-await-module-scope/`
 
@@ -65,23 +66,51 @@ its predicate's result; the predicate need not return `boolean`.
 A **refusal**, not a wrong answer — which makes it the lowest-value item of the
 three. It is here because it is cheap evidence, not because it is urgent.
 
-### `array-isarray-tuples.ts`
+### `array-isarray-tuples.ts` — **PROMOTED**, and its framing here was wrong
 
-Upstream **#154** (`1e4f71dd`). A fixed tuple lowers to a positional
-record-shaped IR representation, but it is still a JavaScript array.
+Upstream **#154** (`1e4f71dd`). Now
+`tests/corpus/7350-array-isarray-over-fixed-tuples.ts`.
 
-    SC1090: element access on non-array values are not supported yet
-    SC2004: uses of 'tuple' inherit the blocker on its declaration
-    SC2009: values of type 'ReadonlyTupleResult & any[]' cannot be compiled:
-            the union shape is supported, but its arm 'TupleModel & any[]'
-            does not compile
+This entry used to say the shape was "a **refusal for us**, not a silent
+wrong answer", and that upstream fixed a wrong answer in *their* tree while
+we merely refused. **That was an artefact of scoring the whole probe
+program.** Its `SC1090` came from ONE function; splitting the file put two
+silent wrong answers underneath, on both backends, exit 0, no diagnostic:
 
-Note this is a **refusal for us**, not a silent wrong answer. Upstream's own
-commit fixed a wrong answer in *their* tree (`Array.isArray` folding to
-constant `false`); we refuse the program instead, so the value of taking #154
-is lifting a capability limit. It was split out of
-`tests/corpus/1549-array-isarray-unions.ts` so that a previously green corpus
-entry did not start reading as a regression.
+    const t: readonly [M, C] = [...]; Array.isArray(t)   false — node: true
+    function f(v: [M, C]) { return Array.isArray(v); }   false — node: true
+
+and a third that was a wrong answer with a trap: over `M | [M, C]` the fold
+sent every call down the non-array branch, and the tuple arm then failed the
+union coercion — `a '[M, C]' value is not representable in the target union`,
+wrong stdout and exit 1. (The recorded diagnostic list was also short by one:
+the program emitted `SC2020` as well.)
+
+The lesson is the survey's own, one level down: **a program that refuses does
+not tell you that the shapes inside it refuse.** An aggregate probe scores
+the LOUDEST answer, and here the loud one hid the silent ones. Split before
+scoring.
+
+### `request-source-disturbed.ts`
+
+No upstream PR — found while closing `7de8be18` (the inherited-body
+TypeError, now `tests/corpus/7351-request-inherits-a-body-into-get.ts`), and
+it is the SECOND rule that same construction carries.
+
+Node DISTURBS a source request's body when a Request is built from a Request
+that has one: the construction succeeds, and every LATER use of the source
+throws `TypeError: Request body is unusable`. The island shares the bytes
+(`this._body = input._body; // shared bytes; fetch copies` in `scr_web.c`)
+and never marks the source used, so a second construction succeeds:
+
+    node:   …|keepPOST=POST|retarget=threw:TypeError|cloneAll=threw:TypeError|…
+    island: …|keepPOST=POST|retarget=PUT|cloneAll=POST/https://example.…|…
+
+Not a diagnostic — a **silent wrong answer**, on both backends. It was left
+out of the inherited-body fix on purpose: marking a source disturbed is a
+real state change on a value the island's fetch glue re-reads (`if (r._body
+instanceof Uint8Array) body = r._body`), so it wants its own measurement and
+its own controls, not a rider on a five-line constructor fix.
 
 ## Programs deliberately NOT taken, and why
 
