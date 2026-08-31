@@ -737,6 +737,15 @@ export function emitStmt(E: CEmitter, s: IrStmt): void {
           // uncaught printer's "name: message" for Error instances).
           const rc = vAdapters(t);
           E.line(`scr_throw_obj(${v.name}, &${rc.retain}, &${rc.release}, ${E.traceArgC(t)});${E.srcComment(s.loc)}`);
+        } else if (t.kind === "dyn") {
+          // A thrown DYN goes through the dyn unit, which unwraps it to the
+          // arm it came from -- `throw e` over a caught error that crossed
+          // into `unknown` must still answer `instanceof Error` and
+          // `String(e)` the way Node does. The unwrap cannot live in
+          // scr_exception.c: that unit is linked into every runtime unit
+          // test and the dyn unit is not, and naming its symbols from there
+          // broke four of those links.
+          E.line(`scr_throw_dyn(${v.name});${E.srcComment(s.loc)}`);
         } else {
           const rc = vAdapters(t);
           E.line(`scr_throw_ref(${v.name}, &${rc.retain}, &${rc.release}, ${E.traceArgC(t)});${E.srcComment(s.loc)}`);

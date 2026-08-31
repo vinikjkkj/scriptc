@@ -10950,8 +10950,22 @@ export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   "dyn.toStringRange",
   // util.format's %s runs an object's OWN toString (Node's
   // hasBuiltInToString test) — user code, so its throw is the
-  // program's. The REST-ARG twin insp.dynS inspects and never does.
+  // program's.
   "insp.fmtS",
+  // The REST-ARG twins inspect rather than convert, and inspecting
+  // THROWS: scr_insp_dyn fences loudly on four dyn kinds it cannot
+  // render — MAP, SET (one arm), OBJINST and HANDLE — each raising
+  // "util.inspect of a dynamic <cls> is not supported yet" and
+  // answering the empty string so the pending throw wins. Without the
+  // seed nothing checks, so that DELIBERATELY LOUD fence became a
+  // silent one: `const u: unknown = new Map([["k",1]]); console.log(u)`
+  // printed an empty field where Node prints `Map(1) { 'k' => 1 }`, and
+  // the exception stayed in the cell until the next unrelated pending
+  // check returned out of the enclosing function — the rest of the
+  // program simply did not run, at exit 0. Measured on both backends.
+  "insp.dyn",
+  "insp.dynS",
+  "insp.dynSpread",
   "dyn.defineProps",
   "dyn.defineProp",
   "cls.propsDefine",

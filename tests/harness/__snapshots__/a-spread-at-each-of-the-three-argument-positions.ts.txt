@@ -1,0 +1,6 @@
+a-spread-at-each-of-the-three-argument-positions.ts:52:19 - error SC1090: spread arguments into fixed parameter positions (a spread can only fill a rest parameter) are not supported yet
+
+  51 | // rather than stated as the rule it is.
+  52 | console.log(fixed(...(two as [number, number])));
+     |                   ^~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  53 | 

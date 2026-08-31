@@ -503,6 +503,63 @@ static void scr_dyn_gcfree(void *o);
 #include "scr_dyn_census_walk.h"
 #endif
 
+/* The dyn half of the throw unwrap (scr_runtime.h's ScrThrowDynHook).
+ *
+ * A caught error that crosses into `unknown` and is thrown again -- the
+ * everyday `function rethrow(e: unknown): never { throw e }`, and the shape
+ * a non-inline `.catch(h)` handler takes -- used to land in the exception
+ * cell's REF arm carrying a dyn.  Every question the next catch body asked
+ * then answered from the erased arm: `e instanceof Error` was FALSE and
+ * `String(e)` was "[object Object]", where Node answers true and "Error: x".
+ * Silent, and reachable on any revision: writing the rethrow inline as
+ * `.catch((e) => rethrow(e))` emits the identical bytes.
+ *
+ * Unwrapping at the THROW rather than at the catch-side questions is what
+ * makes it safe.  The narrowed EXTRACTION reads `payload` as an ScrError, so
+ * a cell that answers `instanceof Error` while still carrying a dyn is a
+ * type confusion -- measured, a segfault, not a wrong answer.  One arm
+ * decides for every question.  Identity survives: reading the OBJ arm back
+ * as a dyn goes through scr_dyn_from_error, whose cache returns the SAME
+ * node this dyn is.
+ *
+ * Only the runtime's own encodings unwrap.  A user object built over
+ * Error.prototype has no ScrError behind it, and a composite dyn has no
+ * scalar arm, so both keep the REF arm exactly as before. */
+void scr_throw_dyn(ScrDyn *v) {
+  ScrError *behind = scr_errdyn_err_of(v); /* +1 or NULL */
+  if (behind != NULL) {
+    scr_dyn_release(v); /* the reference this call took ownership of */
+    /* scr_throw_obj takes the +1 the lookup returned. */
+    scr_throw_obj(behind, scr_error_retain_v, scr_error_release_v, NULL);
+    return;
+  }
+  /* The SCALAR arms of the same round trip: the caught->dyn adapter maps
+   * SCR_EXC_{F64,BOOL,STR} into the matching dyn kinds, and this maps them
+   * back, so the cell holds the arm it started in.  Without it a rethrown
+   * STRING stringified as "[object Object]". */
+  const ScrDyn *d = v;
+  if (d->kind == SCR_DYN_STR) {
+    ScrStr *s = scr_str_retain(d->v.str);
+    scr_dyn_release(v);
+    scr_throw_str(s); /* the retained +1 moves in */
+    return;
+  }
+  if (d->kind == SCR_DYN_NUM) {
+    const double n = d->v.num;
+    scr_dyn_release(v);
+    scr_throw_f64(n);
+    return;
+  }
+  if (d->kind == SCR_DYN_BOOL) {
+    const bool b = d->v.b;
+    scr_dyn_release(v);
+    scr_throw_bool(b);
+    return;
+  }
+  /* Every other dyn kind keeps the historical REF arm, byte for byte. */
+  scr_throw_ref(v, scr_dyn_retain_v, scr_dyn_release_v, scr_dyn_trace_v);
+}
+
 static ScrDyn *scr_dyn_alloc(ScrDynKind kind) {
 #ifndef SCR_RC_AUDIT
   ScrDyn **list = kind == SCR_DYN_ARR   ? &scr_dyn_free_arr

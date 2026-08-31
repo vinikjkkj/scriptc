@@ -3915,6 +3915,32 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
           };
         }
       }
+      // FIXED arguments followed by a spread — `console.warn('[lib warn]',
+      // ...args)`, the logger-forwarding idiom with a tag (zapo's
+      // benchLogger). Node's formatter is total over the WHOLE argument
+      // list: every argument joins with one space and renders at the
+      // rest-args depth, so the fixed ones are not a separate case — they
+      // are simply the first entries of a list whose LENGTH is a runtime
+      // fact. The list therefore becomes one checked-dynamic array (the
+      // dyn rest pack — the one slot whose arity may be a runtime fact,
+      // spreads flattening into it at run time) and the runtime joins it,
+      // which is exactly what the sole-spread form above does with its one
+      // source.
+      //
+      // Building the ONE list is what makes an empty tail right: rendering
+      // the fixed arguments here and appending a joined tail as a further
+      // console argument would print `[lib warn] ` — a trailing space Node
+      // does not print — whenever `args` is empty.
+      if (expr.arguments.some((a) => ts.isSpreadElement(a))) {
+        const packed = dynRestPack(L, [...expr.arguments], expr, loc);
+        return {
+          kind: "intrinsic",
+          name: stdoutMember ? "console.log" : "console.error",
+          args: [{ kind: "libCall", fn: "insp.dynSpread", args: [packed], type: STRING, loc }],
+          type: VOID,
+          loc,
+        };
+      }
       const args = expr.arguments.map((a) => {
         // `console.log(attrs.id)`, and the same read one binding later.
         // The console formatter is TOTAL over dyn kinds and renders each
@@ -8261,6 +8287,148 @@ const inliningPredicates = new Set<ts.Symbol>();
     }
   }
 
+/** `.catch(h)` where `h` is a handler VALUE rather than an inline function
+   * literal — a named function, an imported one, or a binding like the
+   * `reject` of an enclosing Promise executor.
+   *
+   * The inline form exists because the handler's PARAMETER becomes the
+   * typed-catch binding directly. A value has no parameter to bind, so it
+   * takes the caught value as an ordinary ARGUMENT: a lifted async helper
+   * awaits the receiver, and on rejection calls the BOXED handler with
+   * caughtToDyn's identity-preserving snapshot — the same shape the
+   * dyn-inner `.catch` above already uses, and the same shape writing
+   * `.catch((e) => h(e))` by hand produces.
+   *
+   * Answers null (the caller keeps the fence) in two cases. The handler
+   * cannot be boxed — a non-callable or union-typed argument, where JS's
+   * own substitution rules differ, or a METHOD reference, whose `this` JS
+   * unbinds and this lowering would not. Or the COMBINED result cannot
+   * take what the handler returns: the result IS the checked-dynamic value
+   * (fine, the dyn return reaches it unchanged), or the handler returns
+   * nothing and the result is void or a union with an undefined arm (fine,
+   * that undefined is what the handler contributes) — and otherwise
+   * reading a static T back out of a dyn return would be an unchecked
+   * narrow, where a wrong answer is worse than the refusal. */
+  function lowerCatchHandlerValue(L: Lowerer, call: ts.CallExpression, receiver: IrExpr,
+    promT: IrType & { kind: "promise" }, inner: IrType, callTs: ts.Type, loc: SrcLoc,): IrExpr | null {
+    const argNode = call.arguments[0]!;
+    let cb = probeLower(L, argNode);
+    if (cb === null) return null;
+    if (
+      cb.type.kind === "func" &&
+      canBoxFuncIntoDyn(cb.type, (id) => L.shapes.get(id), (id) => L.unions.get(id))
+    ) {
+      cb = { kind: "dynFrom", value: cb, type: DYN, loc };
+    }
+    if (cb.type.kind !== "dyn") return null;
+    const resultT = L.mapTypeOf(callTs);
+    if (resultT?.kind !== "promise") return null;
+    const R = resultT.inner;
+    // Does the handler RETURN anything? The checker answers from its one
+    // call signature: `void`/`undefined` (and the always-throwing `never`,
+    // which returns by not returning) means the rejection arm of the
+    // combined result is exactly `undefined`, so the handler's dyn result
+    // may be discarded. Anything else has to reach the result promise, and
+    // reading a static T back out of a dyn would be an unchecked narrow —
+    // decline, and let the fence stand.
+    const sigs = L.checker.getCallSignatures(L.typeOf(argNode));
+    if (sigs.length !== 1) return null;
+    const retTs = L.checker.getReturnTypeOfSignature(sigs[0]!);
+    const returnsNothing =
+      (retTs.flags & (ts.TypeFlags.Void | ts.TypeFlags.Undefined | ts.TypeFlags.Never)) !== 0;
+    // The UNDEFINED arm of a union result (`Promise<void[] | void>` —
+    // `Promise.all(chains).catch(reject)`, where the fulfilled arm is the
+    // receiver's array and the rejected arm is the handler's undefined).
+    const undefTag =
+      R.kind === "union"
+        ? (L.unions.get(R.unionId)?.arms ?? []).findIndex((a) => a.kind === "undefinedT")
+        : -1;
+    if (R.kind === "dyn") {
+      // The result IS the checked-dynamic value: the handler's return
+      // reaches it unchanged, whatever it is.
+    } else if (returnsNothing && (R.kind === "void" || undefTag >= 0)) {
+      // The handler contributes undefined, which the result's own shape
+      // already spells.
+    } else {
+      return null;
+    }
+    const fnName = `%fn${L.lambdaCounter++}_catchval`;
+    const funcType: IrType & { kind: "func" } = { kind: "func", params: [promT, DYN], ret: resultT };
+    const fnCtx = newFnCtx(true, null, funcType, R);
+    fnCtx.isAsync = true;
+    L.fnStack.push(fnCtx);
+    try {
+      const pLocal = L.declareHiddenLocal("p", promT);
+      const cbLocal = L.declareHiddenLocal("cb", DYN);
+      const eLocal = L.declareHiddenLocal("e", CAUGHT);
+      const awaitE: IrExpr = {
+        kind: "awaitExpr",
+        value: { kind: "varRef", localId: pLocal.id, type: promT, loc },
+        type: inner,
+        loc,
+      };
+      // The FULFILLED path passes the receiver's value straight through,
+      // exactly as the inline form's try body does.
+      const tryBody: IrStmt[] =
+        R.kind === "void"
+          ? [{ kind: "exprStmt", expr: awaitE, loc }, { kind: "return", value: null, loc }]
+          : [{ kind: "return", value: L.coerceInto(call, awaitE, R), loc }];
+      const handlerCall: IrExpr = {
+        kind: "dynCall",
+        callee: { kind: "varRef", localId: cbLocal.id, type: DYN, loc },
+        calleeName: jsFuncNameOf(argNode) ?? "onRejected",
+        args: [
+          {
+            kind: "caughtToDyn",
+            value: { kind: "varRef", localId: eLocal.id, type: CAUGHT, loc },
+            type: DYN,
+            loc,
+          },
+        ],
+        type: DYN,
+        loc,
+      };
+      const catchBody: IrStmt[] =
+        R.kind === "dyn"
+          ? [{ kind: "return", value: handlerCall, loc }]
+          : R.kind === "void"
+            ? [{ kind: "exprStmt", expr: handlerCall, loc }, { kind: "return", value: null, loc }]
+            : [
+                { kind: "exprStmt", expr: handlerCall, loc },
+                {
+                  kind: "return",
+                  value: {
+                    kind: "unionWrap",
+                    unionId: (R as IrType & { kind: "union" }).unionId,
+                    tag: undefTag,
+                    value: { kind: "unitLit", unit: "undefined", type: UNDEFINED_T, loc },
+                    type: R,
+                    loc,
+                  },
+                  loc,
+                },
+              ];
+      const ctx = L.ctx;
+      L.liftedFns.push({
+        name: fnName,
+        params: [
+          { localId: pLocal.id, name: pLocal.name, type: promT },
+          { localId: cbLocal.id, name: cbLocal.name, type: DYN },
+        ],
+        returnType: R,
+        locals: ctx.locals,
+        captures: ctx.captures!,
+        body: [{ kind: "tryCatch", tryBody, catchBody, catchLocalId: eLocal.id, finallyBody: null, loc }],
+        loc,
+        async: true,
+      });
+      const closure: IrExpr = { kind: "closure", fnName, captures: ctx.captureSources, type: funcType, loc };
+      return { kind: "callValue", callee: closure, args: [receiver, cb], type: resultT, loc };
+    } finally {
+      L.fnStack.pop();
+    }
+  }
+
 export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
     access: ts.PropertyAccessExpression,): IrExpr | null {
     // chainBlocked, not a raw token test. A raw test declines the
@@ -8776,6 +8944,23 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
     let handlerNode: ts.Expression = call.arguments[0]!;
     while (ts.isParenthesizedExpression(handlerNode)) handlerNode = handlerNode.expression;
     if (!ts.isArrowFunction(handlerNode) && !ts.isFunctionExpression(handlerNode)) {
+      // A handler VALUE — a named function, an imported one, or a binding
+      // like the `reject` of an enclosing Promise executor (zapo's
+      // `Promise.all(peerSendChains).catch(reject)`). The inline form's
+      // PARAMETER becomes the typed-catch binding, which only a literal
+      // can receive; a value takes the caught value as an ordinary
+      // ARGUMENT instead, so the lifted helper carries the handler as a
+      // second parameter and CALLS it with the boxed binding. That is the
+      // dyn-inner `.catch` twin above, one tier down, and it is also
+      // exactly the desugaring the old fence's own advice named: writing
+      // `.catch((e) => h(e))` by hand produces this shape.
+      //
+      // Evaluation order is JS's: the handler expression is lowered ONCE,
+      // at the `.catch(...)` site, and rides in as an argument — a
+      // rejection that never happens still evaluated it, and one that
+      // happens twice still evaluates it once.
+      const built = lowerCatchHandlerValue(L, call, receiver, promT, inner, callTs, loc);
+      if (built) return built;
       L.unsupported(
         "SC1090",
         call.arguments[0]!,
