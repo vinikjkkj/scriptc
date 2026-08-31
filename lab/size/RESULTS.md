@@ -67,3 +67,31 @@ costs 512 bytes turns both floors red**, and the failure will name that
 change while seven eighths of the number belongs to everyone before it.
 Recalibrating is a deliberate decision, so this block has not touched
 `STATIC_CLASS_RECORDED` or `REGEX_CLASS_RECORDED`.
+
+## The coverage timeout is contention, and one sample nearly said otherwise
+
+`every corpus program is 100% static` timed out at 603,381 ms inside the
+full sweep, as it did before the rebase (602,305 ms). Run alone it passes.
+Four uncontended samples, same host, same 600,000 ms limit:
+
+| compiler | corpus | ms |
+| --- | --- | --- |
+| base `e361d31d` | base | 275,798 |
+| branch | base (my 3 held out) | 269,539 |
+| branch | branch | **335,656** |
+| branch | branch (second sample) | **269,288** |
+
+The 335,656 was a single noisy sample and it is the only reason this
+section exists: taken alone it reads as a 21.7% regression from three
+added programs, which would have been a false finding reported with a
+number attached. Re-running the same configuration gives 269,288 — inside
+the 6,259 ms spread the two base-corpus rows already showed. Measured
+individually through the CLI, the three new programs cost 990/1,016/941 ms
+against 1,022 ms for `1400-typedarray-basics` and 1,020 ms for
+`2625-bytes-views`: entirely ordinary, and nowhere near the 20 s each the
+outlier implied.
+
+So: the branch does not move this test, and the timeout is what the fleet
+brief already calls it — a contended long pole, ~269 s alone against a
+600 s limit, which exceeds the limit when it runs beside both differential
+suites.
