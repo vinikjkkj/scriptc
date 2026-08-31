@@ -1432,6 +1432,30 @@ export const BUILTIN_MODULE_FENCE_HINTS: Record<string, Record<string, string | 
       "nothing a compiled surface can mutate makes the call observable; remove it",
   },
   child_process: {
+    // fork() is not a missing FUNCTION, it is the entry point to an IPC
+    // CHANNEL, and naming it that way is the point: `send`,
+    // `on("message")`, `removeListener` and `disconnect` are the same
+    // subsystem, and a build that lowered `send` without a working
+    // `on("message")` would deadlock every request/response program that
+    // uses it — strictly worse than refusing the pair.
+    //
+    // What the channel needs, so the size is on the record rather than
+    // rediscovered: a libuv-compatible IPC pipe handed to a REAL Node
+    // child (a named pipe plus the NODE_CHANNEL_FD handshake on Windows,
+    // an inherited fd on POSIX — the child speaks the protocol only if
+    // the channel is created exactly the way libuv creates it); the wire
+    // framing for BOTH serialization modes, where 'advanced' is V8's
+    // versioned ValueSerializer format and not JSON; an emitter-shaped
+    // 'message' event wired into the event loop; and send() backpressure.
+    // Each of those is a place where a near-miss is a silent wrong answer
+    // rather than a failure.
+    fork:
+      "fork() opens a Node IPC channel, which has no lowering — and neither do its " +
+      "other halves (ChildProcess.send, on(\"message\"), removeListener, disconnect), " +
+      "because they are one subsystem: a channel that could send but not receive would " +
+      "deadlock rather than fail. The lowered process surface is spawn, spawnSync, " +
+      "execSync/execFileSync and promisify(execFile) — a child that talks over its " +
+      "STDIO, or over a socket the parent also opens, compiles today",
     execFile:
       "the callback form has no lowering — promisify it: " +
       "const execFileAsync = promisify(execFile) (from node:util), or use execFileSync",
