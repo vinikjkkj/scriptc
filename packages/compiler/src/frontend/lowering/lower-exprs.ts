@@ -16,7 +16,7 @@ import { requireFnValueOf, requireMemberFence } from "./lower-builtins.js";
 import { funcObjectPropOf } from "./lower-fnprops.js";
 import { recordKeyReadRow, recordNarrowBridgeRow } from "./keyread-census.js";
 import { cjsClassExprWholeExportOf, cjsExportAssignmentOf, cjsExportDiscardReason, isCjsExportTableLiteral, isCjsJsFile, isJsSourceFile, isModuleExportsAccess, isNodeEsmFile, locOf } from "../program.js";
-import { ARRAY_METHODS, builtinConstLit, builtinFenceHintOf, objectStaticFnValueOf, stdlibExistenceTestOf, stringMethodFnValueOf, builtinModuleConstOf, builtinModulesArrayLit, builtinModuleFnOf, COMPOUND_ASSIGN_OPS, CompoundOp, ISLAND_SURFACE, isChildSurfaceMember, MAP_METHODS, NARROW_FIRST, SET_METHODS, STR_METHODS, UNSUPPORTED_EXPR, sideEffectFreeOptionValue, stdlibGlobalNameOf } from "./surfaces.js";
+import { absentGlobalMemberValue, ARRAY_METHODS, builtinConstLit, builtinFenceHintOf, objectStaticFnValueOf, stdlibExistenceTestOf, stringMethodFnValueOf, builtinModuleConstOf, builtinModulesArrayLit, builtinModuleFnOf, COMPOUND_ASSIGN_OPS, CompoundOp, ISLAND_SURFACE, isChildSurfaceMember, MAP_METHODS, NARROW_FIRST, SET_METHODS, STR_METHODS, UNSUPPORTED_EXPR, sideEffectFreeOptionValue, stdlibGlobalNameOf } from "./surfaces.js";
 import { UNSUPPORTED, assertionDropsMembersDiag, assertionOverflowsMembersDiag, blockedBindingUseDiag, recordShapeMismatchDiag, requiresDynamicPackageDiag, unsupportedDiag } from "../../diagnostics/diagnostic.js";
 import { PoisonError, dynUndefinedExpr, jsFuncValueNameOf, jsFuncValueSourceOf, neverTaintedJsType, nodeThrowExpr, own } from "./lowerer.js";
 import { arrayAtOf, BYTES_CTORS, condPresenceSlot, IndexMergeContributor, lowerIndexMergeHelper, lowerNpmStaticSafeIndexRead, strCharsCall } from "./lower-containers.js";
@@ -2350,6 +2350,13 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
         // (there is no lib.dom to anchor on). Ahead of lowerFieldRead
         // because the receiver is a cast of globalThis, not a record.
         lowerWebSocketGlobal(L, expr) ??
+        // `(globalThis as { gc?: () => void }).gc` — a global THIS HOST
+        // DOES NOT HAVE, read at a site that already admits `undefined`.
+        // Below the WebSocket row (which owns its own name) and above the
+        // record paths, which would lower the globalThis receiver and
+        // fence on it — blaming `globalThis`, a global that is fine, for
+        // a member that is not.
+        absentGlobalMemberValue(L, expr) ??
         L.lowerUnionProperty(expr) ??
         L.lowerFieldRead(expr);
       // A union-typed field read narrows like an identifier when the

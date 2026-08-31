@@ -1496,6 +1496,53 @@ double scr_process_rusage(double idx) {
 #endif
 }
 
+/* process.memoryUsage.rss() — the RESIDENT SET, in bytes, from the same
+ * place libuv's uv_resident_set_memory reads it on each platform, which
+ * is where Node's own number comes from:
+ *
+ *   Windows  GetProcessMemoryInfo -> WorkingSetSize
+ *   Linux    /proc/self/statm field 2 (resident pages) x page size
+ *   macOS    task_info(MACH_TASK_BASIC_INFO).resident_size
+ *
+ * This is the ONE field of Node's memoryUsage() record a binary with no
+ * JavaScript heap can answer honestly, which is why the single-value form
+ * lowers and the record form is refused by name (lower-builtins.ts): rss
+ * is an operating-system fact about a process, and heapTotal/heapUsed/
+ * external/arrayBuffers are V8 heap statistics with nothing behind them
+ * here. Naming them 0 would read as "this program allocates nothing"
+ * rather than "there is no V8 heap to report", and `heapUsed > 0` — true
+ * under Node on any host — would come back false.
+ *
+ * Unmeasurable rather than zero is not an option the API has, so a
+ * platform that cannot answer returns 0, the same stance the maxRSS row
+ * of scr_process_rusage takes. */
+double scr_process_rss(void) {
+#ifdef _WIN32
+  ScrWinProcMem m;
+  if (!scr_win_proc_mem(&m)) return 0;
+  return (double)(unsigned long long)m.WorkingSetSize;
+#elif defined(__linux__)
+  FILE *f = fopen("/proc/self/statm", "r");
+  if (f == NULL) return 0;
+  unsigned long long total = 0, resident = 0;
+  int got = fscanf(f, "%llu %llu", &total, &resident);
+  fclose(f);
+  if (got != 2) return 0;
+  long page = sysconf(_SC_PAGESIZE);
+  if (page <= 0) return 0;
+  return (double)resident * (double)page;
+#elif defined(__APPLE__)
+  mach_task_basic_info_data_t info;
+  mach_msg_type_number_t count = MACH_TASK_BASIC_INFO_COUNT;
+  if (task_info(mach_task_self(), MACH_TASK_BASIC_INFO, (task_info_t)&info, &count) != KERN_SUCCESS) {
+    return 0;
+  }
+  return (double)info.resident_size;
+#else
+  return 0;
+#endif
+}
+
 /* process.availableMemory()/constrainedMemory() — libuv's numbers: the
  * constrained form answers the cgroup cap where one exists (Linux) and 0
  * everywhere else; available is the free-ish byte count. */

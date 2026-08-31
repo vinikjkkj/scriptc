@@ -9882,6 +9882,18 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/7324-globalthis-absent-member.ts": {
+   "order": [
+    "<repo>/tests/corpus/7324-globalthis-absent-member.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/7325-globalthis-absent-member.js": {
+   "order": [
+    "<repo>/tests/corpus/7325-globalthis-absent-member.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/750-cycle-closure-box.ts": {
    "order": [
     "<repo>/tests/corpus/750-cycle-closure-box.ts"
@@ -12200,6 +12212,18 @@
   "<repo>/tests/fixtures/node-types/server-address-states.ts": {
    "order": [
     "<repo>/tests/fixtures/node-types/server-address-states.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/fixtures/node-types/stdlib-surfaces-fenced.ts": {
+   "order": [
+    "<repo>/tests/fixtures/node-types/stdlib-surfaces-fenced.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/fixtures/node-types/stdlib-surfaces.ts": {
+   "order": [
+    "<repo>/tests/fixtures/node-types/stdlib-surfaces.ts"
    ],
    "diags": []
   },

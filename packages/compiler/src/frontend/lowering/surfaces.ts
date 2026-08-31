@@ -7,7 +7,7 @@
 import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
 import { UNSUPPORTED } from "../../diagnostics/diagnostic.js";
-import { BOOL, BYTES_U8, CHILD_T, DYN, F64, FILEHANDLE_T, IrExpr, IrLibFn, IrParam, IrStmt, IrStrIntrinsicMethod, IrType, KEYOBJ, SPAWNRES_T, STATS_T, STRING, SrcLoc, URL_T, VOID, arrayOf, funcOf, typeEquals, } from "../../ir/nodes.js";
+import { BOOL, BYTES_U8, CHILD_T, DYN, F64, FILEHANDLE_T, IrExpr, IrLibFn, IrParam, IrStmt, IrStrIntrinsicMethod, IrType, KEYOBJ, SPAWNRES_T, STATS_T, STRING, SrcLoc, URL_T, VOID, arrayOf, funcOf, typeEquals, UNDEFINED_T, } from "../../ir/nodes.js";
 import { STR_INTRINSIC_SIGS } from "../../ir/validate.js";
 import { definePropTableDecline } from "./lower-classes.js";
 import { isJsSourceFile, isNodeTypesPath, locOf, requireSpecOf } from "../program.js";
@@ -1140,6 +1140,13 @@ export const AMBIENT_SURFACE_FNS: readonly AmbientSurfaceRow[] = [
   { id: "node-builtin.process.execPath", kind: "node-builtin", name: "process.execPath", fns: ["process.execPath"] },
   { id: "node-builtin.process.uptime", kind: "node-builtin", name: "process.uptime", fns: ["process.uptime"] },
   {
+    id: "node-builtin.process.memoryUsage.rss",
+    kind: "node-builtin",
+    name: "process.memoryUsage.rss",
+    fns: ["process.rss"],
+    note: "the single-value form only — the memoryUsage() RECORD is refused by name (four of its five fields are V8 heap statistics)",
+  },
+  {
     id: "node-builtin.process.availableMemory",
     kind: "node-builtin",
     name: "process.availableMemory",
@@ -2219,6 +2226,168 @@ export const BUILTIN_MODULE_FENCE_HINTS: Record<string, Record<string, string | 
       console.error(`[existtest] ${loc.file}:${loc.start} ${globalName}.${access.name.text} -> ${!refused}`);
     }
     return { kind: "boolLit", value: !refused, type: BOOL, loc: locOf(access) };
+  }
+
+/** A property read on `globalThis` naming a global THIS HOST DOES NOT
+   * HAVE, at a site whose declared type already admits `undefined`.
+   *
+   * `(globalThis as { gc?: () => void }).gc` is the canonical spelling —
+   * the `--expose-gc` probe every benchmark carries, and the first thing
+   * zapo's messaging bench asks its host. In JavaScript, reading an ABSENT
+   * property of the global object is not an error and not a special case:
+   * it answers `undefined`, in every host, and Node started WITHOUT
+   * `--expose-gc` answers exactly that. So does a compiled binary, which
+   * has no gc to expose. The fold is therefore the general rule, not a
+   * bench-shaped exception — what needs care is PROVING the global is
+   * absent, because answering `undefined` for one this compiler does
+   * provide would be a silent wrong answer standing where a fence used
+   * to be.
+   *
+   * Two facts must both hold, and NEITHER is the program's cast:
+   *
+   *  1. The ambient global object DECLARES the name and admits `undefined`
+   *     in its type. The receiver's real type is read off the PEELED
+   *     identifier, never off the `as` (a cast changes only the static
+   *     view; the object is still the one global). A name nothing declares
+   *     does NOT qualify — see the counterexample block in the body. In the
+   *     pinned real-types world (tests/fixtures/node-types: @types/node
+   *     24.13.3 + undici-types 7.18.2) exactly ONE global is declared this
+   *     way, and the command that says so is
+   *
+   *       rg -n '^declare var .*\| *undefined' node_modules/@types/node
+   *       globals.d.ts:74:declare var gc: NodeJS.GCFunction | undefined;
+   *
+   *     and the fallback declares its twin, deliberately and for this
+   *     reason. A cast cannot manufacture either fact: `(globalThis as
+   *     { crypto?: Crypto }).crypto` still sees `var crypto` on the
+   *     receiver, non-optional, and keeps its fence — right, because this
+   *     compiler HAS crypto.
+   *  2. The site can represent the answer: the read's mapped type carries
+   *     an `undefined` arm. A program that declared the member
+   *     non-optional asked for a value and gets its fence, not a lie.
+   *
+   * WEBSOCKET IS EXCLUDED BY NAME, belt and braces. It is the one global
+   * with a structural lowering above this one (lowerWebSocketGlobal) that
+   * can DECLINE — on a construct signature it cannot build — and a decline
+   * there means "fence", never "undefined". Guard 1 already refuses it
+   * (undici declares it non-optional, and the fallback does not declare it
+   * at all), so the name check is redundant today; it is kept because the
+   * cost of it becoming load-bearing again is a silent wrong answer. The
+   * chain position is the guard for every other provided global: each is
+   * claimed above, so a declared-optional global with a lowering never
+   * reaches here.
+   *
+   * This is exactly the residue stdlibExistenceTestOf declines. That rule
+   * answers the EXISTENCE question (`Object.freeze ? ... : ...`) for
+   * NON-optional stdlib methods and returns null on Optional; this one
+   * answers the VALUE question for the optional half. */
+  export function absentGlobalMemberValue(L: Lowerer, access: ts.PropertyAccessExpression): IrExpr | null {
+    if (access.questionDotToken) return null;
+    if (L.chainBlocked(access)) return null;
+    const name = access.name.text;
+    if (name === "WebSocket") return null;
+    let recv: ts.Expression = access.expression;
+    for (;;) {
+      if (ts.isParenthesizedExpression(recv)) { recv = recv.expression; continue; }
+      if (ts.isAsExpression(recv) || ts.isSatisfiesExpression(recv)) { recv = recv.expression; continue; }
+      if (ts.isNonNullExpression(recv)) { recv = recv.expression; continue; }
+      break;
+    }
+    if (stdlibGlobalNameOf(L, recv) !== "globalThis") return null;
+    const why = (step: string): null => {
+      if (process.env["SCRIPTC_ABSENTGLOBAL_WHY"] !== undefined) {
+        const l = locOf(access);
+        console.error(`[absentglobal] decline=${step} globalThis.${name} at ${l.file}:${l.start}`);
+      }
+      return null;
+    };
+    const gp = L.checker.getPropertyOfType(L.typeOf(recv), name);
+    // NO DECLARATION IS NOT EVIDENCE OF ABSENCE, and this arm was written
+    // the other way round first. It folded any undeclared name, on the
+    // reasoning that a name nothing declares is a name Node does not have.
+    // That reasoning fails in BOTH worlds. The shipped fallback's whole job
+    // is to declare what scriptc SUPPORTS, so silence there means
+    // "unsupported"; and the pinned @types/node 24.13.3 does not declare
+    // URLPattern, navigator, Navigator, Float16Array, DisposableStack,
+    // Storage or localStorage, every one of which is a real global in the
+    // v25.9.0 oracle — a declaration set always lags the runtime it
+    // models. Compiled in a fallback-world project, that version answered
+    // `undefined` for twenty-four globals Node really has —
+    //
+    //   navigator Navigator URLPattern Blob File FormData BroadcastChannel
+    //   TransformStream ReadableStream WritableStream CompressionStream
+    //   DecompressionStream DisposableStack AsyncDisposableStack
+    //   SuppressedError WebAssembly Storage Performance PerformanceObserver
+    //   CloseEvent ErrorEvent Request Response Headers
+    //
+    // — on both backends, clean, at exit 0, where Node prints "function"
+    // or "object" (lab probe gprobe3.ts). So the evidence has to be a
+    // DECLARATION THAT SAYS SO: the ambient global object must declare the
+    // name AND admit `undefined` in its type. Both worlds carry exactly one
+    // such global and it is the same one — @types/node's `declare var gc:
+    // NodeJS.GCFunction | undefined` and the fallback's twin of it.
+    if (gp === undefined) return why("undeclared");
+    const decls = L.checker.declarationsOf(gp);
+    if (decls.length === 0 || !decls.every((d) => L.isStdlibFile(d.getSourceFile()))) return why("provenance");
+    const gt = L.checker.getTypeOfSymbol(gp);
+    const admitsUndefined = (t: ts.Type): boolean =>
+      (t.flags & ts.TypeFlags.Undefined) !== 0 ||
+      (t.isUnionType() && t.getTypes().some((a) => (a.flags & ts.TypeFlags.Undefined) !== 0));
+    if (!admitsUndefined(gt)) return why("declared-present");
+    const t = L.mapTypeOf(L.typeOf(access));
+    const loc = locOf(access);
+    const undef: IrExpr = { kind: "unitLit", unit: "undefined", type: UNDEFINED_T, loc };
+    if (process.env["SCRIPTC_ABSENTGLOBAL_WHY"] !== undefined) {
+      console.error(`[absentglobal] globalThis.${name} site=${t?.kind ?? "unmapped"} at ${loc.file}:${loc.start}`);
+    }
+    if (t?.kind === "undefinedT") return undef;
+    // A JavaScript source has no static slot to satisfy: values there ride
+    // the checked-dynamic tree, so the answer is the value itself. This arm
+    // is not a convenience — it is a WRONG ANSWER closed. `globalThis.gc`
+    // in a .js file reached the identity-token rule below (a stdlib global
+    // taken as a value becomes the interned string "[builtin gc]") and
+    // printed `string` / `false` where Node prints `undefined` / `true`,
+    // at exit 0. The token means "the one global object named X"; for a
+    // global this host does not have there is no object to name.
+    if (isJsSourceFile(access.getSourceFile())) return undef;
+    // Guard 1 passed — the ambient global object says this name may be
+    // absent — but the SITE cannot hold the answer. The read is a probe
+    // for a global this host does not have, written with the member
+    // declared non-optional, so `undefined` has nowhere to go.
+    //
+    // That fence is raised HERE rather than left to the chain, because
+    // the chain's next step lowers the RECEIVER and fences on it: it
+    // reported "'globalThis' ... has no scriptc lowering yet", blaming a
+    // global that is perfectly fine for a member that is not, and its
+    // hint was the generic limitations URL. The advice below is the
+    // difference between .probe/g3.ts (this fence) and .probe/g1.ts
+    // (which compiles and prints Node's answer) — one character.
+    //
+    // TypeScript sources only: a JavaScript source took the value arm
+    // above, and the identity-token rule below this chain is still the
+    // right owner of everything else there.
+    const memberFence = (detail: string): never =>
+      L.noLowering(
+        `globalThis.${name}`,
+        access,
+        `${detail}. The RECEIVER is not the blocker — this compiler has globalThis; the member is what has no value here. Reading a global this host does not have folds to \`undefined\` (Node's own answer for an absent property of the global object) exactly when the declaration admits it: spell the member optional — \`(globalThis as { ${name}?: T }).${name}\` — and the read compiles`,
+        L.checker.getSymbolAtLocation(access.name),
+      );
+    if (t?.kind !== "union") {
+      if (t !== null) {
+        memberFence(
+          `'${name}' is declared non-optional at this site, so the read must produce a value and there is none`,
+        );
+      }
+      return why("site-kind");
+    }
+    const tag = L.armTag(t.unionId, UNDEFINED_T);
+    if (tag < 0) {
+      memberFence(
+        `'${name}' is declared here as a union with no \`undefined\` arm, so the read must produce a value and there is none`,
+      );
+    }
+    return { kind: "unionWrap", unionId: t.unionId, tag, value: undef, type: t, loc };
   }
 
 /** `Object.getOwnPropertyNames` over a CHECKED-DYNAMIC receiver, as a
