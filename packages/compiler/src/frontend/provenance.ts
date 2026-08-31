@@ -473,22 +473,94 @@ function mapEntryToSource(pkgDir: string, target: string, subpath: string): stri
     stems.add(tail);
   }
   const candidates: string[] = [];
+  /* The AUTHORED-JAVASCRIPT candidates, probed only after every TypeScript
+   * candidate above has missed — see authoredJsEntry. Kept in a second list
+   * rather than interleaved so a package with a build step maps to exactly
+   * the file it maps to today, whatever else sits beside it. */
+  const authored: string[] = [];
   for (const stem of stems) {
     const base = stem.replace(/\.d\.(ts|mts|cts)$/, ".$1").replace(/\.(js|mjs|cjs)$/, "");
     if (/\.(ts|tsx|mts|cts)$/.test(base)) candidates.push(base);
     else {
       candidates.push(`${base}.ts`, `${base}.mts`, `${base}.cts`, `${base}.tsx`);
       candidates.push(join(base, "index.ts"));
+      authored.push(`${base}.d.ts`, `${base}.d.mts`, `${base}.d.cts`, join(base, "index.d.ts"));
     }
   }
   if (subpath === ".") {
     candidates.push("src/index.ts", "src/index.mts", "index.ts", "src/index.tsx");
+    authored.push("index.d.ts", "src/index.d.ts");
   }
   for (const c of candidates) {
     const abs = join(pkgDir, c);
     if (isFile(abs)) return abs;
   }
+  for (const c of authored) {
+    const abs = join(pkgDir, c);
+    if (authoredJsEntry(abs)) return abs;
+  }
   return null;
+}
+
+/** True when `dts` is the declaration half of an AUTHORED-JavaScript entry:
+ * the `.d.ts` exists AND an implementation file sits beside it under the same
+ * stem.
+ *
+ * Why the twin is REQUIRED, and why this is not simply "accept the .js".
+ * A package with no build step publishes the file it authored — mysql2's
+ * `promise.js`, @vinikjkkj/wa-wam's `index.js` — so the published target IS
+ * the attested source and there is no `.ts` twin for the walk above to find.
+ * Every such entry missed, and the whole package fell to the island with a
+ * `no source mapping` note, however faithfully its source had been fetched.
+ *
+ * Mapping to the `.js` directly would work for the values and LOSE the types:
+ * the hand-written `.d.ts` beside it stops being consulted, and a consumer
+ * importing one type token off the package sends the whole tree back to the
+ * island (measured on @vinikjkkj/wa-wam under --npm-static, whose
+ * `type WaWamChannel` did exactly that). Mapping to the `.d.ts` and letting
+ * the EXISTING declaration-twin machinery supply the body is the shape that
+ * hands the compiler both halves: provenanceDeclSiblings puts the `.js` into
+ * the program and declTwinOf (program.ts) puts it into module order ahead of
+ * its declaration — the same path zapo-js's own `spec/proto/index.js` already
+ * takes.
+ *
+ * A `.d.ts` with no twin is deliberately NOT accepted. It would map the
+ * package to a body-less surface on which every exported VALUE refuses, which
+ * is a worse answer than the island it replaced, not a better one. Such a
+ * package keeps its named `no source mapping` note. */
+function authoredJsEntry(dts: string): boolean {
+  /* OFF BY DEFAULT, and the reason is a measured wrong answer, not caution.
+   *
+   * The mapping itself works: @vinikjkkj/wa-wam maps, its 28,725-line twin
+   * lowers, and every one of the 13 SC2013 refusals at @zapo-js/wam's entry
+   * disappears (18 blocker sites over 7 messages -> 5 over 5). But the
+   * binary that comes out is WRONG, not merely incomplete. The smallest
+   * program that reads three constants off the mapped package prints
+   *
+   *     protocol=0        (node prints protocol=5)
+   *
+   * and then dies 0xC0000005 dereferencing a table that was never built.
+   *
+   * The cause is downstream of this file and is localized: the twin's
+   * module-init function is EMITTED and never CALLED. `main` calls the
+   * entry's init, the entry's import header names the DECLARATION (whose
+   * init is empty), and the twin's init -- which holds every assignment --
+   * is orphaned, leaving its globals at their zero value. lower-modules.ts
+   * already carries the redirect for exactly this (the header names the
+   * twin's init when `importBindsStaticTwinGlobal`), and its own
+   * SCRIPTC_TWININIT_WHY probe prints NOTHING on this build: the
+   * `dep.isDeclarationFile && declTwinSourceOf(dep) !== null` edge is never
+   * taken, so the redirect never gets the chance to fire.
+   *
+   * Until that edge is fixed, mapping an authored-JavaScript package turns a
+   * refusal into a silent wrong answer, which is the one trade this compiler
+   * does not make. The island's `no source mapping` note is the correct
+   * answer today. Opt in with SCRIPTC_PROVENANCE_AUTHORED_JS=1 to reproduce
+   * the whole thing in one command. */
+  if (process.env["SCRIPTC_PROVENANCE_AUTHORED_JS"] === undefined) return false;
+  if (!isFile(dts)) return false;
+  const stem = dts.replace(/\.d\.(ts|mts|cts)$/, "");
+  return isFile(`${stem}.js`) || isFile(`${stem}.mjs`) || isFile(`${stem}.cjs`);
 }
 
 /** The tsconfig files a source tree's alias table may live in, in the
