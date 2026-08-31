@@ -2977,6 +2977,37 @@ export function declTwinGlobalOf(L: Lowerer, sym: ts.Symbol): IrLocal | undefine
   return undefined;
 }
 
+/** The compiled twin behind a declaration-file binding that owns NO twin
+ * storage — or null.
+ *
+ * `declTwinGlobalOf` bridges a declaration's binding to the twin's GLOBAL,
+ * and a global is what a `const`/`let` export compiles to. A twin that
+ * exports a FUNCTION (`function f() {…}; module.exports = { f }`) holds it
+ * as a lowered function, not as storage, so the bridge finds nothing and
+ * the read fell through to the generic "a binding form with no lowering" —
+ * a message that names neither the module nor the reason, on a build where
+ * the implementation is demonstrably present and compiled.
+ *
+ * Distinguishing the two is the whole point: `declModuleWithoutTwin` means
+ * the code was never compiled, this means it WAS and only value bindings
+ * cross the boundary. Same code, different sentence, and the reader can
+ * tell which situation they are in. */
+export function declTwinBindingWithoutStorage(L: Lowerer, sym: ts.Symbol): ts.SourceFile | null {
+  const decls = L.checker.declarationsOf(sym);
+  if (decls.length === 0) return null;
+  let twin: ts.SourceFile | null = null;
+  for (const d of decls) {
+    const sf = d.getSourceFile();
+    if (!sf.isDeclarationFile) return null;
+    if (L.isStdlibFile(sf)) return null;
+    if (!ts.isExternalModule(sf)) return null;
+    const t = L.declTwinSourceOf(sf);
+    if (t === null) return null;
+    twin = t;
+  }
+  return twin;
+}
+
 /** The declaration MODULE behind a binding whose implementation twin this
  * build did not compile — or null.
  *

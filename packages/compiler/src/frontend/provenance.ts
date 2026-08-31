@@ -529,34 +529,34 @@ function mapEntryToSource(pkgDir: string, target: string, subpath: string): stri
  * is a worse answer than the island it replaced, not a better one. Such a
  * package keeps its named `no source mapping` note. */
 function authoredJsEntry(dts: string): boolean {
-  /* OFF BY DEFAULT, and the reason is a measured wrong answer, not caution.
+  /* OFF BY DEFAULT. The wrong answer it was gated on is FIXED; the gate
+   * stays until the lane is adopted deliberately rather than as a side
+   * effect of this file.
    *
-   * The mapping itself works: @vinikjkkj/wa-wam maps, its 28,725-line twin
-   * lowers, and every one of the 13 SC2013 refusals at @zapo-js/wam's entry
-   * disappears (18 blocker sites over 7 messages -> 5 over 5). But the
-   * binary that comes out is WRONG, not merely incomplete. The smallest
-   * program that reads three constants off the mapped package prints
+   * What it was gated on. Mapping @vinikjkkj/wa-wam made the 28,725-line
+   * twin lower and removed every one of the 13 wa-wam refusals at
+   * @zapo-js/wam's entry (18 blocker sites over 7 messages -> 5 over 5) --
+   * and produced a binary that printed
    *
    *     protocol=0        (node prints protocol=5)
    *
-   * and then dies 0xC0000005 dereferencing a table that was never built.
+   * then died 0xC0000005 dereferencing a table that was never built. The
+   * twin's module-init function was emitted and never called.
    *
-   * The cause is downstream of this file and is localized: the twin's
-   * module-init function is EMITTED and never CALLED. `main` calls the
-   * entry's init, the entry's import header names the DECLARATION (whose
-   * init is empty), and the twin's init -- which holds every assignment --
-   * is orphaned, leaving its globals at their zero value. lower-modules.ts
-   * already carries the redirect for exactly this (the header names the
-   * twin's init when `importBindsStaticTwinGlobal`), and its own
-   * SCRIPTC_TWININIT_WHY probe prints NOTHING on this build: the
-   * `dep.isDeclarationFile && declTwinSourceOf(dep) !== null` edge is never
-   * taken, so the redirect never gets the chance to fire.
+   * Where it actually was. NOT in the redirect that lower-modules.ts
+   * carries for exactly this case, and not in the
+   * `dep.isDeclarationFile && declTwinSourceOf(dep) !== null` guard that
+   * fronts it. The edge never reached either: orderedImportsOf resolved the
+   * bare specifier through resolveProjectImportSf7, which answered null for
+   * ANY declaration-file resolution, so the header saw dep=null and emitted
+   * no init call at all. SCRIPTC_TWININIT_WHY printing nothing was the
+   * ABSENCE of an edge, not a redirect declining one -- the two look
+   * identical from a probe that only fires once the edge exists.
    *
-   * Until that edge is fixed, mapping an authored-JavaScript package turns a
-   * refusal into a silent wrong answer, which is the one trade this compiler
-   * does not make. The island's `no source mapping` note is the correct
-   * answer today. Opt in with SCRIPTC_PROVENANCE_AUTHORED_JS=1 to reproduce
-   * the whole thing in one command. */
+   * Both halves are fixed (program.ts resolveProjectImportSf7; the
+   * three-valued binding kind in lower-modules.ts), and the minimal probe
+   * now prints protocol=5 and exits 0, byte-exact against node v25.9.0 on
+   * both backends. Opt in with SCRIPTC_PROVENANCE_AUTHORED_JS=1. */
   if (process.env["SCRIPTC_PROVENANCE_AUTHORED_JS"] === undefined) return false;
   if (!isFile(dts)) return false;
   const stem = dts.replace(/\.d\.(ts|mts|cts)$/, "");
