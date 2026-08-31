@@ -40,7 +40,7 @@ import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
 import { boundIdentifiersOf } from "./lowerer.js";
 import type { FileParts } from "./lower-modules.js";
-import { locOf, resolveImport } from "../program.js";
+import { isCjsJsFile, locOf, resolveImport } from "../program.js";
 import { F64, IrExpr, IrStmt, IrType, STRING } from "../../ir/nodes.js";
 
 /** True when this module declaration produces NO runtime construct at all:
@@ -1189,9 +1189,65 @@ export function lowerNsIdentifierValue(L: Lowerer, ident: ts.Identifier): IrExpr
       `the KEY SET is exact and compiles today — what has no compiled representation is the OBJECT: Node's namespace is exotic (a null prototype, the "Module" tag, one instance per module, and a [[Set]] that always fails), and a checked-dynamic object is none of those`,
     );
   }
+  // A DEFAULT import of a CommonJS module, which esModuleInterop types as
+  // the module namespace: `import d from 'pkg'` then `d.A`. Node binds
+  // `module.exports` and answers 11; this refuses. The refusal is real --
+  // the namespace object is not materialized -- but the generic advice
+  // below is FALSE here, and demonstrably so: `d.A` IS a direct member
+  // access, so a reader who follows "access 'd' members directly" writes
+  // the program they already wrote. (Its sibling, the namespace IMPORT of
+  // a CommonJS module, is caught earlier now and says so in program.ts.)
+  //
+  // What is followable, compiled and run before it was written here: the
+  // NAMED spelling `import { A } from 'pkg'` compiles and matches node,
+  // because the named binding resolves to the twin's own storage and never
+  // asks for a namespace object at all.
+  if (defaultImportOfCjs(L, ident)) {
+    L.unsupported(
+      "SC1013",
+      ident,
+      `the default import of a CommonJS module as a value (esModuleInterop types '${ident.text}' as the module namespace, ` +
+        `and Node binds module.exports there \u2014 use the named spelling instead: import { <member> } from '...')`,
+    );
+  }
   L.unsupported(
     "SC1090",
     ident,
     `namespace objects as first-class values (access '${ident.text}' members directly: ${ident.text}.<member>)`,
   );
+}
+
+/** `ident` is the DEFAULT-import binding of a module whose runtime half is
+ * CommonJS -- the shape esModuleInterop types as a module namespace, so it
+ * lands on the namespace-as-value fence with advice that cannot apply.
+ *
+ * A declaration file answers for its compiled twin, the same question
+ * program.ts asks of a namespace import: what the module DOES is the
+ * twin's business, never the .d.ts's. */
+function defaultImportOfCjs(L: Lowerer, ident: ts.Identifier): boolean {
+  // Ask the MODULE, not the binding. The binding spelling that got here is
+  // whatever esModuleInterop typed as a namespace (a default import, or a
+  // namespace import that program.ts did not catch); what decides whether
+  // the advice below can be followed is the module's runtime FORMAT, and a
+  // declaration file answers for its compiled twin.
+  const seen = new Set<string>();
+  for (const start of [L.checker.getSymbolAtLocation(ident), L.resolveValueSymbol(ident)]) {
+    if (!start) continue;
+    for (const d of L.checker.declarationsOf(start)) {
+      let sf: ts.SourceFile | null = null;
+      if (ts.isSourceFile(d)) {
+        sf = d;
+      } else if (ts.isImportClause(d) || ts.isNamespaceImport(d)) {
+        const decl = ts.isImportClause(d) ? d.parent : d.parent.parent;
+        if (ts.isImportDeclaration(decl) && ts.isStringLiteral(decl.moduleSpecifier)) {
+          sf = resolveImport(L.program, decl.getSourceFile(), decl.moduleSpecifier.text);
+        }
+      }
+      if (sf === null || seen.has(sf.fileName)) continue;
+      seen.add(sf.fileName);
+      const rt = sf.isDeclarationFile ? (L.declTwinSourceOf(sf) ?? sf) : sf;
+      if (isCjsJsFile(rt)) return true;
+    }
+  }
+  return false;
 }

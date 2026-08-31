@@ -2369,7 +2369,7 @@ function preflight7(load: LoadResult): {
           // before (their namespace members are the declared surface).
           if (isJson) {
             diags.push(unsupportedDiag("SC1013", locOf7(clause.namedBindings), "namespace imports of JSON modules"));
-          } else if (dep !== null && isCjsJsFile7(dep)) {
+          } else if (dep !== null && isCjsJsFile7(cjsRuntimeOf7(program, dep))) {
             // A CJS namespace binding whose every use is a bare expression
             // statement (`cjs;` — the corpus's "the import linked"
             // assertion) carries no surface question: the statement lowers
@@ -2718,6 +2718,30 @@ interface BadCjsImport {
  * require() of an ES module from CommonJS) instantiate mid-evaluation in
  * Node, where the SyntaxError interleaves with output already produced —
  * not modeled: those get a pointed fence instead. */
+/** The file whose MODULE FORMAT a namespace import has to answer to: a
+ * declaration file answers for its compiled twin, everything else for
+ * itself.
+ *
+ * `import * as ns from 'pkg'` on a CommonJS module is refused, because Node
+ * builds that namespace from its lexer's static analysis and the surface is
+ * a different one. The test asked `isCjsJsFile` of the RESOLUTION, and a
+ * provenance-mapped package resolves to `index.d.ts` -- an ES-module
+ * declaration surface -- while the `index.js` beside it, the file Node
+ * actually evaluates, is `module.exports = {...}`. So the CJS namespace
+ * import walked past its own fence and was refused much later, by the
+ * generic namespace-as-value fence in lower-namespaces.ts, whose advice is
+ * "access 'ns' members directly: ns.<member>" -- which is what the program
+ * was already doing. A fence whose advice restates what the source does
+ * cannot be followed.
+ *
+ * Same shape as the types-only fence one screen up, and for the same
+ * reason: a declaration file is a claim about a module, and every question
+ * about what the module DOES has to be asked of the twin. */
+function cjsRuntimeOf7(program: ts.Program, dep: ts.SourceFile): ts.SourceFile {
+  if (!dep.isDeclarationFile) return dep;
+  return declTwinOf(program, dep) ?? dep;
+}
+
 function cjsNamedImportLinkCheck(
   program: ts.Program,
   entry: ts.SourceFile,
