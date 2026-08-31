@@ -3983,7 +3983,26 @@ function instanceofGuardArm(L: Lowerer, rhs: ts.Expression, unionId: string): Ir
         // emits both sides; SCRIPTC_IDXNARROW_WHY names every read it
         // declines, so "the rule fires nowhere" and "the rule fires and
         // changes nothing" are different observations in the same run.
-        if (expr.kind === "dynKeyGet" && process.env["SCRIPTC_IDXNARROW_OFF"] !== "1" && keyedAccessOverIndexSignature(L, node as ts.Expression)) {
+        // ...and only at the DECLARATION destination, which is the one that
+        // measurably needed it. The bridge is what lets a keyed read be
+        // OPERATED on -- `d[k] + 1`, `d[k] < n` -- and declining it there
+        // turns a working program into `operators on 'unknown' values are
+        // not supported yet`. The gate said so in 29 cells across both
+        // lanes, and they were right: a read consumed by an operator has no
+        // guard to protect and nothing to gain from staying dyn.
+        //
+        // A read that INITIALISES A BINDING is the opposite case, and the
+        // only one this rule is for: the binding is what a later
+        // `typeof value === 'number'` guard interrogates, and bridging the
+        // initializer threw before that guard could run. The slot rung in
+        // lower-stmts.ts (keyedDynReadLocalAtDynWidth) is the same rule's
+        // other half -- it takes the binding to dyn width -- and it can only
+        // fire if the initializer is still a dynKeyGet when it looks, which
+        // is what this decline preserves.
+        //
+        // Per-DESTINATION, evidence-backed, and narrow: the same discipline
+        // the keyed-read ladder in lower-stmts.ts is already written to.
+        if (expr.kind === "dynKeyGet" && process.env["SCRIPTC_IDXNARROW_OFF"] !== "1" && keyedReadInitialisesABinding(node) && keyedAccessOverIndexSignature(L, node as ts.Expression)) {
           if (process.env["SCRIPTC_IDXNARROW_WHY"] !== undefined) {
             const sf = node.getSourceFile();
             const lc = sf.getLineAndCharacterOfPosition(node.getStart());
@@ -4184,6 +4203,34 @@ function instanceofGuardArm(L: Lowerer, rhs: ts.Expression, unionId: string): Ir
  * false. It is never an under-approximation, which is the direction that
  * would matter. */
 const WIDENED_KEYED_SYMS = new WeakMap<object, boolean>();
+
+/** The read's syntactic consumer is a VARIABLE DECLARATION -- the one
+ * destination where keeping an index-signature keyed read at dyn width
+ * buys anything, because the binding is what a later guard interrogates.
+ *
+ * Parens and casts are skipped so the consumer is the real one: the shape
+ * that started this is `const value = (t.values as Record<string, number>)[k]`,
+ * where the access sits inside no wrapper but the declaration is two nodes
+ * up in the general case. */
+function keyedReadInitialisesABinding(n: ts.Node): boolean {
+  let child: ts.Node = n;
+  let parent = child.parent as ts.Node | undefined;
+  while (
+    parent !== undefined &&
+    (ts.isParenthesizedExpression(parent) ||
+      ts.isAsExpression(parent) ||
+      ts.isNonNullExpression(parent) ||
+      ts.isSatisfiesExpression(parent))
+  ) {
+    child = parent;
+    parent = child.parent as ts.Node | undefined;
+  }
+  return (
+    parent !== undefined &&
+    ts.isVariableDeclaration(parent) &&
+    (parent.initializer as ts.Node | undefined) === child
+  );
+}
 
 export function keyedAccessOverIndexSignature(L: Lowerer, e: ts.Expression): boolean {
   if (!ts.isPropertyAccessExpression(e) && !ts.isElementAccessExpression(e)) return false;
