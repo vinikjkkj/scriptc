@@ -2534,62 +2534,67 @@ function activationsOf(L: Lowerer, sf: ts.SourceFile): Map<ts.Node, number> {
    * inline in the body. JSON-import bindings (pure data) load next; then
    * the body. Top-level var statements assign the pre-registered globals
    * instead of declaring locals. */
-  /** What a module-edge STATEMENT's own bindings say about whether the
-   * `.d.ts` dependency's runtime twin must be initialized here.
+  /** What a module-edge STATEMENT says about whether the `.d.ts`
+   * dependency's runtime twin must be initialized here.
    *
-   * - `"static"` — it binds at least one value resolving to a static
-   *   (non-island) global: a spec table read at init. The twin's init runs.
-   * - `"island"` — it binds values and every one of them is a jsval handle.
-   *   That is the uncompilable island twin (the minified proto), whose init
-   *   is TRAP-ONLY: naming it here would fire the first trap at module load,
-   *   so it deliberately stays orphaned and its methods trap on use instead.
-   * - `"none"` — the statement binds no resolvable value at all, so its
-   *   bindings cannot answer the question either way. The caller asks the
-   *   TWIN instead (moduleGlobalKind). Four spellings land here and
-   *   Node evaluates the module for every one of them:
-   *     import 'pkg'            (side-effect import, no clause)
-   *     import * as ns / d      (namespace and default bindings)
+   * - `"static"` — a binding resolves to a static (non-island) global: a
+   *   spec table read at init. The twin's init runs.
+   * - `"clause"` — the statement HAS a binding clause and nothing in it
+   *   resolved to a static global. Two different modules land here and both
+   *   want the same answer, which is why they share a value:
+   *     * the uncompilable island twin (the minified proto): every binding
+   *       is a jsval handle and its init is TRAP-ONLY, so naming it here
+   *       would fire the first trap at module load;
+   *     * a binding TypeScript ELIDES. `import { E } from 'pkg'` whose E is
+   *       never read is dropped by the transpiler, so Node never loads the
+   *       module -- and it resolves to no global here for the same reason it
+   *       is dropped there. Calling the twin's init would print output Node
+   *       does not print. (Verified against a control with no twin at all:
+   *       an unused named import of an ordinary relative module diverges the
+   *       same way, so the elision rule is not a twin question.)
+   *   Either way the declaration file's own init stands.
+   * - `"noClause"` — the statement carries NO binding clause, so there is
+   *   nothing for TypeScript to elide and nothing to resolve. Node evaluates
+   *   the module for every spelling that lands here:
+   *     import 'pkg'            (side-effect import)
    *     export * from 'pkg'     (a star re-export names nothing)
-   *     import { } from 'pkg'
-   *   Reading only the bindings left `export * from` and the side-effect
-   *   import orphaned: the re-exported reader got the twin's GLOBAL through
-   *   globalOf's twin bridge while the header called the declaration's empty
-   *   init, so it read the C zero value — `A=0` where Node prints `A=11`,
-   *   exit 0, no trap and no diagnostic. The side-effect import lost the
-   *   module's output entirely.
+   *   The caller asks the TWIN instead (moduleGlobalKind). Reading only the
+   *   bindings left both orphaned: the star re-export's reader got the
+   *   twin's GLOBAL through globalOf's twin bridge while the header called
+   *   the declaration's empty init, so it read the C zero value — `A=0`
+   *   where Node prints `A=11`, exit 0, no trap and no diagnostic. The
+   *   side-effect import lost the module's output entirely.
    *
    * A RE-EXPORT with a clause (`export { WA_VERSION } from '../spec/version'`)
    * binds the same value through the same twin storage as the import
    * spelling: the name resolves past the alias to the declaration file, and
    * globalOf's twin bridge hands back the `.js` twin's global. */
-  type TwinBindingKind = "static" | "island" | "none";
+  type TwinBindingKind = "static" | "clause" | "noClause";
 
   function twinBindingKindOf(L: Lowerer, stmt: ts.Statement): TwinBindingKind {
     let elements: readonly (ts.ImportSpecifier | ts.ExportSpecifier)[];
     if (ts.isImportDeclaration(stmt)) {
-      if (stmt.importClause === undefined) return "none";
+      if (stmt.importClause === undefined) return "noClause";
       const nb = stmt.importClause.namedBindings;
-      if (nb === undefined || !ts.isNamedImports(nb)) return "none";
+      if (nb === undefined || !ts.isNamedImports(nb)) return "clause";
       elements = nb.elements;
     } else if (ts.isExportDeclaration(stmt)) {
-      if (stmt.isTypeOnly || stmt.exportClause === undefined) return "none";
-      if (!ts.isNamedExports(stmt.exportClause)) return "none";
+      if (stmt.isTypeOnly) return "clause";
+      if (stmt.exportClause === undefined) return "noClause";
+      if (!ts.isNamedExports(stmt.exportClause)) return "clause";
       elements = stmt.exportClause.elements;
     } else {
-      return "none";
+      return "clause";
     }
-    let boundAValue = false;
     for (const el of elements) {
       if (el.isTypeOnly) continue;
       // A string export name (`export { x as "a-b" }`) is not a resolvable
       // reference — nothing to ask globalOf about.
       if (!ts.isIdentifier(el.name)) continue;
       const g = L.globalOf(el.name);
-      if (g === undefined || g === null) continue;
-      if (g.type.kind !== "jsval") return "static";
-      boundAValue = true;
+      if (g && g.type.kind !== "jsval") return "static";
     }
-    return boundAValue ? "island" : "none";
+    return "clause";
   }
 
   export function lowerFileInit(L: Lowerer, sf: ts.SourceFile, stmts: ts.Statement[], name: string): IrFunction {
@@ -2646,10 +2651,10 @@ function activationsOf(L: Lowerer, sf: ts.SourceFile): Map<ts.Node, number> {
           // resolvable value the TWIN answers, because Node evaluates the
           // module for every one of those spellings and only a trap-only
           // island twin is worth leaving orphaned.
-          const twinKind = depTwin === null ? "island" : twinBindingKindOf(L, stmt);
+          const twinKind = depTwin === null ? "clause" : twinBindingKindOf(L, stmt);
           const twinStorage = depTwin === null ? "island" : L.moduleGlobalKind(depTwin);
           const depRt =
-            depTwin !== null && (twinKind === "static" || (twinKind === "none" && twinStorage !== "island"))
+            depTwin !== null && (twinKind === "static" || (twinKind === "noClause" && twinStorage !== "island"))
               ? depTwin
               : dep;
           // SCRIPTC_TWININIT_WHY probe: every declaration-file edge, the
