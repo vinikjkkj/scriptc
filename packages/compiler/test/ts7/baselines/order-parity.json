@@ -9930,6 +9930,36 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/7345-create-require-nested-esm.js": {
+   "order": [
+    "<repo>/tests/corpus/7345-create-require-nested-esm.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/7346-filter-no-predicate-dyn.cjs": {
+   "order": [
+    "<repo>/tests/corpus/7346-filter-no-predicate-dyn.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/7347-inline-record-assert-index.ts": {
+   "order": [
+    "<repo>/tests/corpus/7347-inline-record-assert-index.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/7348-record-clone-overrides.ts": {
+   "order": [
+    "<repo>/tests/corpus/7348-record-clone-overrides.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/7349-string-accumulation.ts": {
+   "order": [
+    "<repo>/tests/corpus/7349-string-accumulation.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/750-cycle-closure-box.ts": {
    "order": [
     "<repo>/tests/corpus/750-cycle-closure-box.ts"
