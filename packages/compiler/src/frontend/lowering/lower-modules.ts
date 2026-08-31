@@ -10,6 +10,7 @@ import { NpmGraphBuilder, packageNameOfPath, probeNodeImportRefusal, probeNodeRe
 import { isNpmStaticPackage } from "../npm-static.js";
 import { isJsSourceFileName, isRelativeSpecifier } from "../shared.js";
 import { canonicalBuiltinModule, cjsExportAssignmentOf, cjsExportDiscardReason, commaWholeExportRecordOf, dynamicImportSpecOf, isCjsJsFile, isJsSourceFile, isModuleExportsAccess, isRequireStatement, locOf, makeCycleAdmission, orderedImportsOf, resolveImport, resolveNpmImport } from "../program.js";
+import { npmStaticDepSf7, resolveProjectImportSf7 } from "../program.js";
 import type { CycleEdge } from "../program.js";
 import { invalidJsonModuleDiag, npmEmbedFailedDiag, requiresDynamicImportDiag } from "../../diagnostics/diagnostic.js";
 import { BOOL, DYN, IrClassDef, IrExpr, IrFunction, IrGlobal, IrLocal, IrRecordShape, IrStmt, IrType, IrUnionDef, JSVAL, RUNTIME_ERROR_CLASSES, STRING, SrcLoc, VOID, arrayOf, canConvertToDyn, isUnitType } from "../../ir/nodes.js";
@@ -87,6 +88,39 @@ export interface FileParts {
     return dep;
   }
 
+/** The program module a dynamic `import()` specifier names, by the SAME
+   * admission rule a STATIC import of the same specifier uses.
+   *
+   * Relative and rooted specifiers go through dynamicImportProgramTargetOf,
+   * untouched. A BARE specifier resolves the way orderedImportsOf resolves
+   * one for a static import declaration — an opted-in --npm-static package,
+   * or a project/self-name/#alias edge, which is what a
+   * --provenance-sources package's sources are. That pair is deliberately
+   * NOT folded into dynamicImportProgramTargetOf: that helper is shared
+   * with the --dynamic collection pass and with the npm arm's ownModule
+   * test, and widening it there would change which specifiers those arms
+   * claim. Here it changes exactly one thing — that `const { x } = await
+   * import("@scope/pkg")` reaches the same compiled module `import { x }
+   * from "@scope/pkg"` would.
+   *
+   * The .json / .cts / CommonJS-.js exclusions apply to both arms: those
+   * have no ESM namespace to build. */
+  export function dynamicImportModuleTargetOf(
+    program: ts.Program,
+    sf: ts.SourceFile,
+    spec: string,
+  ): ts.SourceFile | null {
+    if (isRelativeSpecifier(spec) || spec.startsWith("/")) {
+      return dynamicImportProgramTargetOf(program, sf, spec);
+    }
+    if (spec.startsWith("node:")) return null;
+    const dep = npmStaticDepSf7(program, sf, spec) ?? resolveProjectImportSf7(program, sf, spec);
+    if (dep === null || dep.isDeclarationFile) return null;
+    if (dep.fileName.endsWith(".json") || dep.fileName.endsWith(".cts")) return null;
+    if (isCjsJsFile(dep)) return null;
+    return dep;
+  }
+
 /** The ONE dynamic-import spelling the STATIC tier serves: `const ns =
    * await import("./m.ts")` and `const { a, b } = await import("./m.ts")`
    * over a program module (lower-island's dynImportBindingDeclOf lowers
@@ -134,7 +168,7 @@ export interface FileParts {
       ) {
         const spec = dynamicImportSpecOf(checker, node.arguments[0]);
         const served = dynamic || staticDynImportBindingShape(node);
-        const dep = spec !== null && served ? dynamicImportProgramTargetOf(program, sf, spec) : null;
+        const dep = spec !== null && served ? dynamicImportModuleTargetOf(program, sf, spec) : null;
         if (process.env["SCRIPTC_DYNORDER_TRACE"]) {
           console.error(`[dynorder] sf=${sf.fileName} spec=${spec} served=${served} dep=${dep?.fileName ?? "null"}`);
         }

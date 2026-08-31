@@ -9,7 +9,7 @@ import { ISLAND_SURFACE, IslandFnEntry, STATIC_MATH_CONSTS, STATIC_MATH_FNS, bou
 import { requiresDynamicApiDiag, requiresDynamicPackageDiag } from "../../diagnostics/diagnostic.js";
 import { canonicalBuiltinModule, dynamicImportSpecOf, isCjsJsFile, isJsSourceFile, locOf, npmPackageNameOf, npmStaticDepSf7 } from "../program.js";
 import { isRelativeSpecifier } from "../shared.js";
-import { dynamicImportProgramTargetOf, staticDynImportBindingShape } from "./lower-modules.js";
+import { dynamicImportModuleTargetOf, dynamicImportProgramTargetOf, staticDynImportBindingShape } from "./lower-modules.js";
 import { pureReemittable } from "./lower-exprs.js";
 import { moduleNsStarExports } from "./lower-namespaces.js";
 import { PoisonError, dynUndefinedExpr, newFnCtx, own } from "./lowerer.js";
@@ -372,7 +372,7 @@ import { PoisonError, dynUndefinedExpr, newFnCtx, own } from "./lowerer.js";
     // uses: a dep the order did not append has no %init, and serving a
     // declaration whose module never evaluates would be worse than
     // refusing it.
-    const dep = dynamicImportProgramTargetOf(L.program, call.getSourceFile(), spec);
+    const dep = dynamicImportModuleTargetOf(L.program, call.getSourceFile(), spec);
     if (dep === null || dep === L.entry) return null;
     return { dep, call };
   }
