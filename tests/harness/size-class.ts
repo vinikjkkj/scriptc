@@ -23,6 +23,53 @@
  *           of the container format, not runtime growth, and it cannot
  *           hide an engine-sized jump any more than the other two can.
  *
+ * WHICH WIN32 BUILD THE RECORDED PAIR BELONGS TO, measured 2026-08-31.
+ * The prose above names `zig cc -target x86_64-windows-gnu`, but the
+ * RECORDED figures track the HOST-NATIVE zigcc build (SCRIPTC_TARGET
+ * unset), and the two are not the same binary. One tree, one install, one
+ * zig cache, the flag as the only variable, both columns run twice and
+ * byte-stable:
+ *
+ *                     SCRIPTC_TARGET=x86_64-windows-gnu   unset (native)
+ *   static hello-world              637,440                   650,752
+ *   regex                           778,240                   793,088
+ *   vs RECORDED                  -15,872 / -17,408        -2,560 / -2,560
+ *
+ * So the pair is GREEN natively and RED under the cross target, by about
+ * four drift pages on each program. The equal -2,560 offset on two
+ * unrelated programs is what identifies the configuration the anchors were
+ * last recorded in; the unequal offsets in the other column are the
+ * giveaway that it is not that one.
+ *
+ * THIS IS NOT A REGRESSION AND NOT A NUMBER TO NUDGE. `zig cc` with no
+ * -target builds for the native CPU model and its own archive cache
+ * flavor; the explicit triple builds baseline and a separate flavor (the
+ * per-target flavor note on ensureEngineArchive). Both are correct
+ * binaries. Neither anchor is moved here, because moving one would just
+ * break the other configuration.
+ *
+ * WHAT EACH HALF WAS WITNESSED BY, since they differ. The REGEX floor was
+ * run as this suite's own test with the flag unset and PASSED, so that
+ * half is end-to-end. The static figure is a direct compile() measurement,
+ * because island.test.ts additionally builds a --dynamic binary and the
+ * NATIVE engine archive goes through the historical CMake recipe rather
+ * than the cross recipe's four-TU `zig ar` pack -- on this box that recipe
+ * produces no libqjs.a (`ENOENT ... copyfile ...libqjs.a`) and the test
+ * dies after the static build it was going to weigh. The vendor cache here
+ * holds only `-x86_64-windows-gnu` and `-aarch64-linux-gnu...` flavors and
+ * no bare host one, which is the same fact from the other side. That is a
+ * second reason a win32 brief pins SCRIPTC_TARGET, and it is why the two
+ * floors cannot both be witnessed by the suite in one configuration on
+ * this host.
+ *
+ * It matters because a brief that mandates SCRIPTC_TARGET -- several do,
+ * because the differential lanes want a pinned triple -- makes BOTH floors
+ * fire, and the complaint says "SHRANK by 15,872", which reads exactly like
+ * a 16 KB regression somebody just introduced. It cost one block a full
+ * base-vs-branch A/B to establish that its own diff moved neither floor by
+ * a single byte. Before believing either floor, check whether
+ * SCRIPTC_TARGET is set in the environment that produced the number.
+ *
  * RECALIBRATED 2026-08-08, same toolchain, after SCR_DYN_OBJINST (the
  * class-instance dyn kind) landed in the always-linked dyn core: 632,320
  * static. Measured A/B on the same tree, the kind itself is +2,048 — one
