@@ -6224,19 +6224,6 @@ const DYN_STRING_ONLY_METHODS = new Set([
   "search",
 ]);
 
-/** Is this STATIC type a JavaScript array? `T[]` obviously is; a FIXED
- * TUPLE also is, and that is the one that gets missed. A tuple lowers to
- * a positional record shape (IrRecordShape.tuple) so each slot can keep
- * its own type, but `[a, b]` is an ordinary JS array at runtime and
- * `Array.isArray` answers true for it in Node. Reading only `kind ===
- * "array"` folded every tuple to a silent `false` — upstream #154
- * (1e4f71dd) is the same defect from their side. `readonly [A, B]` maps
- * to the same tuple shape and rides the same answer. */
-function isJsArrayType(L: Lowerer, t: IrType): boolean {
-  if (t.kind === "array") return true;
-  return t.kind === "record" && L.shapes.get(t.shapeId)?.tuple === true;
-}
-
 /** `Array.isArray(v)` — a real runtime test on `unknown` values (the checked-dynamic tree's
  * array kind: dyn arrays answer true, bytes/objects/scalars false — exactly
  * JS, Uint8Array included), a compile-time constant on statically-typed
@@ -6267,7 +6254,7 @@ function isJsArrayType(L: Lowerer, t: IrType): boolean {
       // static tag answer and keep the narrow-first fence.
       const def = L.unions.get(arg.type.unionId);
       const opaque = !def || def.arms.some((a) => a.kind === "dyn" || a.kind === "caught" || a.kind === "jsval");
-      const arrayTags = def ? def.arms.flatMap((a, i) => (isJsArrayType(L, a) ? [i] : [])) : [];
+      const arrayTags = def ? def.arms.flatMap((a, i) => (L.isJsArrayType(a) ? [i] : [])) : [];
       const freeRead = arg.kind === "varRef" || arg.kind === "recordGet" || arg.kind === "fieldGet";
       if (!opaque && arrayTags.length === 1) {
         return { kind: "unionIsTag", unionId: arg.type.unionId, tag: arrayTags[0]!, negated: false, value: arg, type: BOOL, loc };
@@ -6288,7 +6275,7 @@ function isJsArrayType(L: Lowerer, t: IrType): boolean {
     }
     if (arg.type.kind === "jsval" || arg.type.kind === "caught") return null;
     if (arg.kind === "varRef" || arg.kind === "recordGet" || arg.kind === "fieldGet") {
-      return { kind: "boolLit", value: isJsArrayType(L, arg.type), type: BOOL, loc };
+      return { kind: "boolLit", value: L.isJsArrayType(arg.type), type: BOOL, loc };
     }
     L.unsupported(
       "SC1090",
