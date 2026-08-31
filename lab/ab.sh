@@ -14,7 +14,7 @@ if [ "$side" = base ]; then
 fi
 (cd packages/compiler && node node_modules/typescript5/bin/tsc -p tsconfig.json) >/dev/null 2>&1
 (cd packages/cli && node ../../node_modules/typescript/bin/tsc -p tsconfig.json) >/dev/null 2>&1
-OUT=/g/blocks/twobyte-lab/runs/progs-$side bash lab/run.sh lab/progs/*.ts tests/corpus/7324-*.ts tests/corpus/7325-*.ts tests/corpus/7326-*.ts \
+OUT=/g/blocks/twobyte-lab/runs/progs-$side bash lab/run.sh lab/progs/*.ts tests/corpus/7327-*.ts tests/corpus/7328-*.ts tests/corpus/7329-*.ts \
   > /g/blocks/twobyte-lab/runs/ab-$side.txt 2>&1
 if [ "$side" = base ]; then
   git checkout HEAD -- packages/compiler/src packages/runtime/src || echo "RESTORE FAILED -- fix by hand"

@@ -1,9 +1,9 @@
-7324-int16array-elements c                TRAP         -> MATCH
-7324-int16array-elements llvm             TRAP         -> MATCH
-7325-int16array-views-and-methods c       TRAP         -> MATCH
-7325-int16array-views-and-methods llvm    TRAP         -> MATCH
-7326-typed-array-element-size c           TRAP         -> MATCH
-7326-typed-array-element-size llvm        TRAP         -> MATCH
+7327-int16array-elements c                TRAP         -> MATCH
+7327-int16array-elements llvm             TRAP         -> MATCH
+7328-int16array-views-and-methods c       TRAP         -> MATCH
+7328-int16array-views-and-methods llvm    TRAP         -> MATCH
+7329-typed-array-element-size c           TRAP         -> MATCH
+7329-typed-array-element-size llvm        TRAP         -> MATCH
 t01-i16-basics c                          TRAP         -> MATCH
 t01-i16-basics llvm                       TRAP         -> MATCH
 t02-u16-basics c                          TRAP         -> MATCH

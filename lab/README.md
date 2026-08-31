@@ -16,7 +16,7 @@ in the gate.
 | `run.sh` | one program, three lanes: node v25.9.0 oracle, `--backend c`, `--backend llvm`. Prints `MATCH` / `WRONG` / `TRAP` / `DID-NOT-RUN` per backend. Never gates on exit status — a run that prints an uncaught error can still exit 0. |
 | `fences.sh` | fence PARITY: every surface that refuses for a 32-bit typed array must refuse identically for the 16-bit one. Ten probes × two signednesses. |
 | `gate.sh` | the full vitest suite under node v25.9.0, PATH pinned inside the launcher, `node --version` as the log's first line. Never uses `pnpm exec`: v25's pnpm purges v22's `node_modules` and it reads as a red gate. |
-| `progs/` | the 21 differential programs (`t01`–`t21`; `t15` was folded into `fences.sh`). The three worth pinning permanently were promoted into `tests/corpus/7324`–`7326`. |
+| `progs/` | the 21 differential programs (`t01`–`t21`; `t15` was folded into `fences.sh`). The three worth pinning permanently were promoted into `tests/corpus/7327`–`7329`. |
 | `ab.sh` | base-vs-branch over that whole set in one lane: checks `packages/{compiler,runtime}/src` out at the base revision, rebuilds `dist`, scores, restores, rebuilds. |
 | `ab-table.txt` | the 46-cell result. |
 | `bin/` | every compiled probe, both backends, kept on purpose (git-ignored, not deleted). Run one directly; its Node oracle output is beside it in `G:/blocks/twobyte-lab/runs/progs/<name>.node.txt`. |
