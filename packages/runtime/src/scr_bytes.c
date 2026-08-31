@@ -23,9 +23,18 @@ static void scr_bytes_oom(void) {
 }
 
 size_t scr_bytes_elem_size(ScrBytesElem elem) {
-  if (elem == SCR_BYTES_U8 || elem == SCR_BYTES_I8 || elem == SCR_BYTES_BUF) return 1;
-  if (elem == SCR_BYTES_I16 || elem == SCR_BYTES_U16) return 2;
-  return elem == SCR_BYTES_F64 ? 8 : 4;
+  /* A TABLE, not a comparison chain, and the reason is size: this TU is in
+   * RUNTIME_SOURCES and the win32 link line carries no -ffunction-sections
+   * and no --gc-sections (cc.ts:423), so every branch here is paid by a
+   * hello-world that never constructs a typed array. Indexed in enum
+   * order: U8 U32 F32 I32 F64 I8 BUF I16 U16, then padding so the mask
+   * below can never index out of bounds -- a garbage element size is a
+   * garbage ALLOCATION size, which is worse than the 4 the comparison
+   * chain used to fall through to. The mask is one instruction and the
+   * padding is seven bytes of .rodata. */
+  static const unsigned char sizes[16] = { 1, 4, 4, 4, 8, 1, 1, 2, 2,
+                                           1, 1, 1, 1, 1, 1, 1 };
+  return sizes[(unsigned)elem & 15u];
 }
 
 /* ── lifecycle ─────────────────────────────────────────────────────────── */
@@ -230,15 +239,14 @@ double scr_bytes_get(const ScrBytes *b, double i) {
     }
     case SCR_BYTES_I8:
       return (double)(int8_t)b->data[idx];
-    case SCR_BYTES_I16: {
-      int16_t v;
-      memcpy(&v, b->data + idx * 2, 2);
-      return (double)v;
-    }
+    case SCR_BYTES_I16:
     case SCR_BYTES_U16: {
+      /* ONE load; only the reinterpretation differs, which is the same
+       * shape the store one function down already has. Two arms with two
+       * memcpys cost every binary in the tree (see elem_size above). */
       uint16_t v;
       memcpy(&v, b->data + idx * 2, 2);
-      return (double)v;
+      return b->elem == SCR_BYTES_I16 ? (double)(int16_t)v : (double)v;
     }
     case SCR_BYTES_BUF:
       /* An ArrayBuffer has no index signature, so no CORRECT program
