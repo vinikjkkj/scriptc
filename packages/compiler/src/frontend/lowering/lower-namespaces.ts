@@ -231,6 +231,14 @@ export function moduleNsSourceFileOf(L: Lowerer, e: ts.Expression): ts.SourceFil
     sym = L.checker.getSymbolAtLocation(e.name);
   }
   if (!sym) return null;
+  // The STATIC tier's `const ns = await import("./m.ts")` binding names
+  // the module the same way a namespace-import binding does (no storage,
+  // no runtime object) — so `ns.<member>`, Object.keys(ns) and the
+  // first-class-value refusal are one set of paths for both spellings.
+  {
+    const dyn = L.dynNsModuleBindings.get(sym);
+    if (dyn !== undefined) return dyn;
+  }
   if (sym.flags & ts.SymbolFlags.Alias) sym = L.checker.getAliasedSymbol(sym);
   for (const d of L.checker.declarationsOf(sym)) {
     if (
@@ -1139,6 +1147,22 @@ export function lowerImportEquals(L: Lowerer, stmt: ts.ImportEqualsDeclaration):
  * exists at runtime). Returns null when `ident` is not a namespace
  * reference at all. */
 export function lowerNsIdentifierValue(L: Lowerer, ident: ts.Identifier): IrExpr | null {
+  // The STATIC tier's `const ns = await import("./m.ts")` binding is a
+  // module namespace with no runtime object, exactly like a
+  // namespace-import binding — so it takes the SAME refusal here, with
+  // the same advice, instead of the generic no-lowering fence a plain
+  // variable with no storage would draw.
+  {
+    const bare = L.checker.getSymbolAtLocation(ident);
+    if (bare !== undefined && L.dynNsModuleBindings.has(bare)) {
+      L.unsupported(
+        "SC1013",
+        ident,
+        `module namespace objects as first-class values (access '${ident.text}' members directly: ${ident.text}.<member>, or enumerate it: Object.keys(${ident.text}) folds to the export names)`,
+        `the KEY SET is exact and compiles today — what has no compiled representation is the OBJECT: Node's namespace is exotic (a null prototype, the "Module" tag, one instance per module, and a [[Set]] that always fails), and a checked-dynamic object is none of those. A destructure at the import serves every other use: \`const { a, b } = await import("./m.ts")\``,
+      );
+    }
+  }
   const sym = L.resolveValueSymbol(ident);
   if (!sym || !(sym.flags & (ts.SymbolFlags.ValueModule | ts.SymbolFlags.NamespaceModule))) {
     return null;

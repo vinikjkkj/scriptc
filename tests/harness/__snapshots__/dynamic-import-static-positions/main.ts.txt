@@ -1,0 +1,71 @@
+dynamic-import-static-positions/main.ts:9:13 - error SC2012: 'import()' of './mod.ts' in this position runs in the embedded dynamic engine, which this build does not include
+
+   8 |   // materializes no namespace object for it to settle to.
+   9 |   const p = import("./mod.ts");
+     |             ^~~~~~~~~~~~~~~~~~
+  10 |   console.log((await p).VAL);
+
+  hint: the static tier serves this import at a CONST binding, where the names resolve to the module's own declarations (a class stays a class): `const ns = await import("./mod.ts")` for member reads and Object.keys, or `const { a, b } = await import("./mod.ts")` for named exports. A namespace stored, passed on, or awaited anywhere else has no static value to be — Node's namespace object is exotic and this build materializes no stand-in for it
+
+dynamic-import-static-positions/main.ts:14:18 - error SC2012: 'import()' of './mod.ts' in this position runs in the embedded dynamic engine, which this build does not include
+
+  13 |   // `let`: the binding is storage, and this plumbing has none.
+  14 |   let ns = await import("./mod.ts");
+     |                  ^~~~~~~~~~~~~~~~~~
+  15 |   console.log(ns.VAL);
+
+  hint: the static tier serves this import at a CONST binding, where the names resolve to the module's own declarations (a class stays a class): `const ns = await import("./mod.ts")` for member reads and Object.keys, or `const { a, b } = await import("./mod.ts")` for named exports. A namespace stored, passed on, or awaited anywhere else has no static value to be — Node's namespace object is exotic and this build materializes no stand-in for it
+
+dynamic-import-static-positions/main.ts:21:26 - error SC1013: module namespace objects as first-class values (access 'ns' members directly: ns.<member>, or enumerate it: Object.keys(ns) folds to the export names) are not supported yet
+
+  20 |   const ns = await import("./mod.ts");
+  21 |   const alias: unknown = ns;
+     |                          ^~
+  22 |   console.log(typeof alias);
+
+  hint: the KEY SET is exact and compiles today — what has no compiled representation is the OBJECT: Node's namespace is exotic (a null prototype, the "Module" tag, one instance per module, and a [[Set]] that always fails), and a checked-dynamic object is none of those. A destructure at the import serves every other use: `const { a, b } = await import("./m.ts")`
+
+dynamic-import-static-positions/main.ts:33:15 - error SC1013: module namespace objects as first-class values (access 'a' members directly: a.<member>, or enumerate it: Object.keys(a) folds to the export names) are not supported yet
+
+  32 |   const b = await import("./mod.ts");
+  33 |   console.log(a === b);
+     |               ^
+  34 | }
+
+  hint: the KEY SET is exact and compiles today — what has no compiled representation is the OBJECT: Node's namespace is exotic (a null prototype, the "Module" tag, one instance per module, and a [[Set]] that always fails), and a checked-dynamic object is none of those. A destructure at the import serves every other use: `const { a, b } = await import("./m.ts")`
+
+dynamic-import-static-positions/main.ts:37:23 - error SC2012: 'import()' of './tla.ts', whose module graph uses TOP-LEVEL AWAIT runs in the embedded dynamic engine, which this build does not include
+
+  36 |   // The module's own evaluation is a promise.
+  37 |   const { T } = await import("./tla.ts");
+     |                       ^~~~~~~~~~~~~~~~~~
+  38 |   console.log(T);
+
+  hint: its evaluation is a promise, and rooting that promise the way a cycle needs has no static form yet — import it statically, or move the top-level await into an exported async function
+
+dynamic-import-static-positions/main.ts:38:15 - error SC2004: uses of 'T' inherit the blocker on its declaration
+
+  37 |   const { T } = await import("./tla.ts");
+  38 |   console.log(T);
+     |               ^
+  39 | }
+
+  hint: the declaration of 'T' did not compile — fix the diagnostic reported there and these sites clear with it
+
+dynamic-import-static-positions/main.ts:42:26 - error SC2012: 'import()' of the ENTRY module importing itself runs in the embedded dynamic engine, which this build does not include
+
+  41 |   // The entry importing itself: nothing left to evaluate.
+  42 |   const { SELF } = await import("./main.ts");
+     |                          ^~~~~~~~~~~~~~~~~~~
+  43 |   console.log(SELF);
+
+  hint: the entry's own body is already running or has run, so there is no evaluation left to order — read the exports directly instead of importing the file that declares them
+
+dynamic-import-static-positions/main.ts:43:15 - error SC2004: uses of 'SELF' inherit the blocker on its declaration
+
+  42 |   const { SELF } = await import("./main.ts");
+  43 |   console.log(SELF);
+     |               ^~~~
+  44 | }
+
+  hint: the declaration of 'SELF' did not compile — fix the diagnostic reported there and these sites clear with it
