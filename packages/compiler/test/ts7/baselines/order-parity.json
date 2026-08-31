@@ -9924,6 +9924,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/7332-dynamic-import-static-top-level/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/7332-dynamic-import-static-top-level/main.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/750-cycle-closure-box.ts": {
    "order": [
     "<repo>/tests/corpus/750-cycle-closure-box.ts"

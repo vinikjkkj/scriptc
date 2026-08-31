@@ -42,6 +42,15 @@ async function self(): Promise<void> {
   const { SELF } = await import("./main.ts");
   console.log(SELF);
 }
+// A binding of a SERVED file-scope import read from a hoisted `function`
+// declaration. The plumbing has no storage, and a `function` body lowers on
+// its own, so the name has nothing to resolve to -- above the import or
+// below it alike (both spellings were compiled; moving the function down
+// does not help). Straight-line reads after the import and lambdas created
+// after it DO resolve, and corpus 7332 runs both.
+function tooEarly(): number { return LATE; }
+const { VAL: LATE } = await import("./mod.ts");
+console.log(tooEarly(), LATE);
 export const SELF = 1;
 void unbound(); void mutable(); void firstClass(); void identity();
 void topLevelAwait(); void self();

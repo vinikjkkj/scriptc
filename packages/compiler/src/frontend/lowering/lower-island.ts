@@ -335,7 +335,7 @@ import { PoisonError, dynUndefinedExpr, newFnCtx, own } from "./lowerer.js";
    * Null for every other shape (a bare `import()` expression, `.then()`,
    * `let`, a default/rest/renamed-to-pattern binding element) — the
    * caller keeps the fence. */
-  export function dynImportBindingDeclOf(
+  export function dynImportBindingDepOf(
     L: Lowerer,
     decl: ts.VariableDeclaration,
   ): { dep: ts.SourceFile; call: ts.CallExpression } | null {
@@ -346,6 +346,12 @@ import { PoisonError, dynUndefinedExpr, newFnCtx, own } from "./lowerer.js";
     if (!ts.isCallExpression(call)) return null;
     const list = decl.parent;
     if (!ts.isVariableDeclarationList(list) || (list.flags & ts.NodeFlags.Const) === 0) return null;
+    if (call.expression.kind !== ts.SyntaxKind.ImportKeyword) return null;
+    if (call.arguments.length !== 1) return null;
+    const arg = call.arguments[0];
+    if (arg === undefined) return null;
+    const spec = dynamicImportSpecOf(L.checker, arg);
+    if (spec === null) return null;
     if (ts.isIdentifier(decl.name)) {
       // A plain binding is the `import * as ns` equivalence.
     } else if (ts.isObjectBindingPattern(decl.name)) {
@@ -361,20 +367,42 @@ import { PoisonError, dynUndefinedExpr, newFnCtx, own } from "./lowerer.js";
     } else {
       return null;
     }
-    const dep = dynImportOwnModuleOf(L, call);
-    if (dep === null) return null;
-    // Three modules the tier cannot serve even in this shape, each with
-    // its own message at the import expression (lowerDynamicImportCall):
-    // the ENTRY importing itself, a module whose init is ASYNC (top-level
-    // await), and one that never joined the compiled graph. Answering
-    // null here keeps the declaration on the ordinary variable path,
-    // where its initializer draws exactly that message — and keeps
-    // collectGlobals and the statement lowering agreeing about which
-    // declarations own storage.
-    if (dep === L.entry) return null;
-    if (L.asyncInitFiles.has(dep)) return null;
-    if (L.initNameOf.get(dep) === undefined) return null;
+    // The SERVING resolver is the module-ORDER walk's own
+    // (dynamicImportProgramTargetOf), never the wider one the message tree
+    // uses: a dep the order did not append has no %init, and serving a
+    // declaration whose module never evaluates would be worse than
+    // refusing it.
+    const dep = dynamicImportProgramTargetOf(L.program, call.getSourceFile(), spec);
+    if (dep === null || dep === L.entry) return null;
     return { dep, call };
+  }
+
+/** The same predicate one phase later, when the module tables exist.
+   *
+   * The split is not cosmetic: collectProgram (and so collectGlobals) runs
+   * BEFORE prepareModuleInits, so initNameOf and asyncInitFiles are EMPTY
+   * while file-scope globals are being collected. Consulting them there
+   * answered "cannot serve" for every top-level declaration, which gave
+   * the binding storage, which then made the statement lowering refuse
+   * because storage existed — a served shape that worked inside a
+   * function and silently did not at file scope. collectGlobals asks the
+   * question it can answer at its phase (shape, and the order walk's own
+   * resolver, so the two agree by construction); the statement lowering
+   * adds the two facts that only exist later. */
+  export function dynImportBindingDeclOf(
+    L: Lowerer,
+    decl: ts.VariableDeclaration,
+  ): { dep: ts.SourceFile; call: ts.CallExpression } | null {
+    const found = dynImportBindingDepOf(L, decl);
+    if (found === null) return null;
+    // A module whose init is ASYNC (top-level await in the dep: its
+    // evaluation is a promise, and rooting that promise the way a cycle
+    // needs has no static twin yet), and one that never joined the
+    // compiled graph. Each keeps its own message at the import
+    // expression (lowerDynamicImportCall).
+    if (L.asyncInitFiles.has(found.dep)) return null;
+    if (L.initNameOf.get(found.dep) === undefined) return null;
+    return found;
   }
 
 /** The statements a served STATIC-tier `const ... = await import("./m")`

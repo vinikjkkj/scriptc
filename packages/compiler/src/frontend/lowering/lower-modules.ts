@@ -18,7 +18,7 @@ import { builtinMemberRequireDecl, builtinNamespaceDestructureModuleOf, createRe
 import { bindingContextualGenericFnNodeOf, bindingGenericFnAliasInfoOf, bindingGenericFnInfoOf, bindingGenericFnNodeOf, deadUnmappableBinding, implicitLocalFnInfoOf, implicitLocalFnNodeOf, islandRestSlotType, nullishGenericBindingUnitOf, hasOwnPropertyAliasDecl } from "./lower-calls.js";
 import { dynAliasBindingIsDyn, isVarDeclared, jsEvolvingObjectLiteralInit, keyedReadGlobalArmedType, keyedReadGlobalIsDyn, numericIteratorSourceOf, provenanceElidedConstDecl } from "./lower-stmts.js";
 import { streamClassAliasDecl } from "./lower-stream.js";
-import { dynImportBindingDeclOf } from "./lower-island.js";
+import { dynImportBindingDepOf } from "./lower-island.js";
 import { diffieHellmanFnValueDeclType, objectStaticFnValueDeclType, stdlibGlobalAliasDecl } from "./surfaces.js";
 import { builtinFnValueDeclType } from "./lower-fnvalue.js";
 import { collectNamespaceStmt, nsPathPrefix, trapDeclRootOf } from "./lower-namespaces.js";
@@ -135,6 +135,9 @@ export interface FileParts {
         const spec = dynamicImportSpecOf(checker, node.arguments[0]);
         const served = dynamic || staticDynImportBindingShape(node);
         const dep = spec !== null && served ? dynamicImportProgramTargetOf(program, sf, spec) : null;
+        if (process.env["SCRIPTC_DYNORDER_TRACE"]) {
+          console.error(`[dynorder] sf=${sf.fileName} spec=${spec} served=${served} dep=${dep?.fileName ?? "null"}`);
+        }
         if (dep && !seen.has(dep)) {
           seen.add(dep);
           out.push(dep);
@@ -173,6 +176,9 @@ export interface FileParts {
     onCycle: (cycle: string, reason: string) => void,
     dynamic: boolean,
   ): void {
+    if (process.env["SCRIPTC_DYNORDER_TRACE"]) {
+      console.error(`[dynorder] order.length=${order.length} dynamic=${dynamic} order=${order.map((f) => f.fileName).join(",")}`);
+    }
     if (order.length === 0) return; // no preflight order — sites keep their fences
     const state = new Map<ts.SourceFile, "visiting" | "done">();
     for (const sf of order) state.set(sf, "done");
@@ -1628,7 +1634,7 @@ export function collectGlobals(L: Lowerer, sf: ts.SourceFile, topStmts: ts.State
         // file scope: alias plumbing too — the bindings name the
         // exporter's own symbols, so no global storage (the statement
         // lowering skips it by the same test, dynImportBindingDeclOf).
-        if (isConst && dynImportBindingDeclOf(L, decl) !== null) continue;
+        if (isConst && dynImportBindingDepOf(L, decl) !== null) continue;
         // `const Writable = stream.Writable` at file scope: a stream
         // class through the namespace binding — alias plumbing, no
         // global storage (the statement lowering skips it by the same
