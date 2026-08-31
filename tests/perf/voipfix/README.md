@@ -128,8 +128,11 @@ at base. `program.ts` here is byte-identical to `70e1fe48`.
 | the six files | **6 passed**, 86/87 tests | **6 failed**, 51 failed / 16 passed |
 
 `coverage.test.ts > every corpus program is 100% static` fails in **both** —
-it is a 600 s timeout under load, the known contention artifact, not the
-mechanism. Six files, not seven.
+it is a 600 s timeout under load, not the mechanism. Six files, not seven.
+
+The margin there is thinner than the old "267 s" figure suggests: a sibling
+measured that test at **578 s uncontended against the 600 s limit**, so it is
+now one slow neighbour from red for everyone, independently of anything here.
 
 ### Why my control did not catch it
 
@@ -173,14 +176,29 @@ instinct was right, and scoping which programs opt in does not answer it.
 
 ### The mechanism that would work, and why it is different
 
-Every name in the failure population is one **node also declares**. The names
-voip needs are not: **neither `@types/node` nor scriptc's own ambient
-declarations mention `RTCPeerConnection` anywhere** (verified). The
-collision surface for a WebRTC slice is zero.
+Every name in the failure population is one **node also declares**. The two
+names voip refuses on are not: **neither `@types/node` nor scriptc's own
+ambient declarations mention `RTCPeerConnection` or `RTCDataChannel`
+anywhere** (verified). Those two names are collision-free.
 
 So the route is the `scriptc-sqlite.d.ts` precedent, not a `lib` knob: ship a
 curated WebRTC declaration file, admit it as a stdlib root the way
 `sqliteDtsPath()` is admitted, and let it stand down when real types are
-present. What is unmeasured, and is the next block's first question: how much
-of `lib.dom.d.ts` the RTC slice transitively needs, and whether that closure
-stays clear of `Event`/`MessageEvent`, which DO collide.
+present. It is a different mechanism with a different risk profile: an
+additive file whose names nothing else declares, rather than a lib that
+displaces declarations a program already had.
+
+### The next block's FIRST question, and it is UNMEASURED
+
+**How much of `lib.dom.d.ts` does the RTC slice transitively need, and does
+that closure stay clear of `Event` and `MessageEvent`?** Those two DO collide
+with the node declarations -- `MessageEvent` is in the failure population
+above ("All declarations of 'MessageEvent' must have identical type
+parameters"). `RTCPeerConnection`'s event handlers are typed against them, so
+the closure plausibly reaches them, and if it does, the slice inherits
+exactly the collision problem the `lib` knob died of.
+
+**I did not measure this.** What I measured is only the starting condition:
+the two names voip refuses on are collision-free. That is a necessary
+condition, not a sufficient one, and it says nothing about their closure.
+**Measure the closure before writing the file.**
