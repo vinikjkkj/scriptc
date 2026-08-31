@@ -6550,9 +6550,20 @@ export function lowerOptionalChain(L: Lowerer, expr: ts.CallExpression | ts.Prop
     // whose VALUE lowers to a real static array (maybeNarrow's isArray
     // bridge): `.length` and friends ride the array path on the lowered
     // value (re-lowering is pure IR construction).
+    // The same bridge over a proven TUPLE arm: `readonly [A, B]` is the
+    // constituent that produces the `& any[]` residue in the first place,
+    // and it lowers to a positional record shape rather than to an array.
+    // `.length` is the one member both spellings answer, and over a tuple
+    // it is the arity CONSTANT -- the fold below, whose instantiation gate
+    // this flag opens for the isArray seat.
+    let anyArrayTuple = false;
     if (kind === undefined && L.checkerAnyArray(expr.expression)) {
       const probe = L.lowerExpr(expr.expression);
       if (probe.type.kind === "array") kind = "array";
+      else if (L.isJsArrayType(probe.type)) {
+        kind = "array";
+        anyArrayTuple = true;
+      }
     }
     // `m.size` on a JS `const m = new Map()`. JavaScript has no
     // type-argument syntax, so the checker says `Map<any, any>` — which
@@ -6585,7 +6596,7 @@ export function lowerOptionalChain(L: Lowerer, expr: ts.CallExpression | ts.Prop
     // an ordinary array `.length` never pays the probe.
     if (
       kind === "array" && expr.name.text === "length" &&
-      L.typeParamBindings !== null && L.typeParamBindings.size > 0
+      (anyArrayTuple || (L.typeParamBindings !== null && L.typeParamBindings.size > 0))
     ) {
       const probe = L.lowerExpr(expr.expression);
       const shape = probe.type.kind === "record" ? L.shapes.get(probe.type.shapeId) : undefined;

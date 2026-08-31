@@ -1311,11 +1311,19 @@ function lowerOptionalDefaultArg(
     if (name !== "slice" && name !== "map") return null;
     if (!L.isStdlibMember(access)) return null;
     const receiverIr = L.mapTypeOf(L.typeOf(access.expression));
-    if (receiverIr?.kind !== "record") return null;
-    const shape = L.shapes.get(receiverIr.shapeId);
-    if (!shape?.tuple) return null;
+    // The `& any[]` residue an Array.isArray guard leaves on a READONLY
+    // tuple constituent maps to nothing, while maybeNarrow's isArray
+    // bridge has already extracted the proven tuple arm from the lowered
+    // union. Take the shape off the VALUE there -- the same stance the
+    // element read and the `.length` fold take one file over, and the
+    // reason this function re-checks the lowered receiver at all.
+    const bridged = receiverIr === null && L.checkerAnyArray(access.expression);
+    if (!bridged && receiverIr?.kind !== "record") return null;
     const receiver = L.lowerExpr(access.expression);
     if (receiver.type.kind !== "record") return null;
+    const shapeId = bridged ? receiver.type.shapeId : (receiverIr as IrType & { kind: "record" }).shapeId;
+    const shape = L.shapes.get(shapeId);
+    if (!shape?.tuple) return null;
     if (!pureReemittable(receiver)) {
       L.noLowering(
         `${L.checker.typeToString(L.typeOf(access.expression))}.${name}`,
@@ -1342,7 +1350,7 @@ function lowerOptionalDefaultArg(
         const read: IrExpr = {
           kind: "recordGet",
           obj: receiver,
-          shapeId: receiverIr.shapeId,
+          shapeId,
           field: f.name,
           type: f.type,
           loc,
