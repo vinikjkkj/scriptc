@@ -11607,6 +11607,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/diagnostics/promise-never-executor.ts": {
+   "order": [
+    "<repo>/tests/diagnostics/promise-never-executor.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/diagnostics/readable-from-async-generator.ts": {
    "order": [
     "<repo>/tests/diagnostics/readable-from-async-generator.ts"
