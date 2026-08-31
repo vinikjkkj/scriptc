@@ -23,7 +23,7 @@ import { PoisonError, dynUndefinedExpr, jsFuncValueNameOf, jsFuncValueSourceOf, 
 import { arrayAtOf, BYTES_CTORS, condPresenceSlot, IndexMergeContributor, lowerIndexMergeHelper, lowerNpmStaticSafeIndexRead, strCharsCall } from "./lower-containers.js";
 import { npmStaticPackageOfPath } from "../npm-static.js";
 import { unsupportedModuleFeatureOf } from "../shared.js";
-import { declModuleWithoutTwin, declTwinGlobalOf } from "./lower-modules.js";
+import { declModuleWithoutTwin, declTwinBindingWithoutStorage, declTwinGlobalOf } from "./lower-modules.js";
 import { fenceEnumObjectValue, lowerEnumAccess } from "./lower-enums.js";
 import { ambientErasedIdent, ambientNsRootOf, ambientUndefReadType, ambientUndefVarRootOf, ambientUndefinedClassSymbolOf, ambientUndefinedFnSymbolOf, contextualUndefReadType, fenceEarlyAliasUse, fenceEarlyNsMemberRef, lowerNsIdentifierValue, nsMemberIdentOf, nsUndefRead, nsWritableTarget } from "./lower-namespaces.js";
 import { expandoMemberRead, expandoWritableTarget } from "./lower-expando.js";
@@ -1684,6 +1684,24 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
             expr,
             `the reference to '${expr.text}' (it has no compiled implementation — its module ` +
               `'${where.startsWith(".") ? where : `./${where}`}' ships only a declaration file)`,
+          );
+        }
+        // ...and the OPPOSITE situation, which reached the generic message
+        // below and so read as the same one: the twin WAS compiled, and it
+        // holds this name as a function rather than as storage. Only value
+        // bindings cross the declaration/twin boundary today, and a reader
+        // told 'a binding form with no lowering' has no way to learn that
+        // from the text.
+        const twinHome = twinSym ? declTwinBindingWithoutStorage(L, twinSym) : null;
+        if (twinHome !== null) {
+          const twinWhere = relative(dirname(expr.getSourceFile().fileName), twinHome.fileName)
+            .replaceAll("\\", "/");
+          L.unsupported(
+            "SC1090",
+            expr,
+            `the reference to '${expr.text}' (its declaration's compiled twin ` +
+              `'${twinWhere.startsWith(".") ? twinWhere : `./${twinWhere}`}' defines it as a function, ` +
+              `and only value bindings — const/let exports — cross the declaration/twin boundary today)`,
           );
         }
       }
