@@ -13,10 +13,10 @@ import { mkdirSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
-import { compile } from "../packages/compiler/dist/index.js";
+import { compile } from "../../packages/compiler/dist/index.js";
 
 const execFileAsync = promisify(execFile);
-const repoRoot = resolve(import.meta.dirname, "..");
+const repoRoot = resolve(import.meta.dirname, "../..");
 const cacheDir = join(repoRoot, "node_modules/.cache/scriptc-probe");
 const EXE = process.platform === "win32" ? ".exe" : "";
 const comptimeShim = pathToFileURL(join(repoRoot, "tests/harness/comptime-shim.mjs")).href;
