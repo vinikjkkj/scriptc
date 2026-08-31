@@ -39,3 +39,10 @@ tmp-*/
 # or zig writes to %LOCALAPPDATA% on C:)
 .zig/
 .cache/
+
+# per-block scriptc artifact cache (SCRIPTC_CACHE_DIR)
+# (unanchored: each block worktree root has its own)
+
+# block lab: compiled probes and their captured output
+lab/bin/
+lab/runs/

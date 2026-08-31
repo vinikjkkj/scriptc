@@ -34,7 +34,7 @@ export interface SrcLoc {
  * Uint8Array` discriminate an `ArrayBuffer | Uint8Array` union arm. It has
  * no elements: element size is 1 byte and indexing is refused (TS gives
  * ArrayBuffer no index signature, so the checker refuses it first). */
-export type IrBytesElem = "u8" | "u32" | "i32" | "f32" | "f64" | "i8" | "buf";
+export type IrBytesElem = "u8" | "u32" | "i32" | "f32" | "f64" | "i8" | "i16" | "u16" | "buf";
 
 export type IrType =
   | { kind: "f64" }
@@ -599,11 +599,37 @@ export function bytesOf(elem: IrBytesElem): IrType {
 export const BYTES_ELEM_NAMES: Readonly<Record<IrBytesElem, string>> = {
   u8: "Uint8Array",
   i8: "Int8Array",
+  i16: "Int16Array",
+  u16: "Uint16Array",
   u32: "Uint32Array",
   i32: "Int32Array",
   f32: "Float32Array",
   f64: "Float64Array",
   buf: "ArrayBuffer",
+};
+
+/** BYTES_PER_ELEMENT, per element kind — the ONE table, because the
+ * arithmetic that reads it is the arithmetic a missing kind gets wrong.
+ * `buf` is 1: an ArrayBuffer's `len` counts BYTES (scr_runtime.h), so the
+ * same `len * size` that gives a view's byteLength gives a buffer's.
+ *
+ * This replaced an inline `elem === "u8" ? 1 : 4` at the `new T(new
+ * ArrayBuffer(n))` lowering, which was wrong for BOTH kinds outside the
+ * 4-byte middle: `new Float64Array(new ArrayBuffer(8))` compiled to a
+ * TWO-element array (Node: one, byteLength 8 not 16) and `new
+ * Int8Array(new ArrayBuffer(3))` was refused as "not divisible by 4"
+ * with advice — use 4 — that changes the program. Both predate the
+ * 16-bit work and are fixed by reading this table instead. */
+export const BYTES_ELEM_SIZE: Readonly<Record<IrBytesElem, number>> = {
+  u8: 1,
+  i8: 1,
+  i16: 2,
+  u16: 2,
+  u32: 4,
+  i32: 4,
+  f32: 4,
+  f64: 8,
+  buf: 1,
 };
 
 export function mapOf(key: IrType, value: IrType): IrType {

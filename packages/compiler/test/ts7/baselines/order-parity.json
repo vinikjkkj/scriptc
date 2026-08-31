@@ -9894,6 +9894,24 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/7327-int16array-elements.ts": {
+   "order": [
+    "<repo>/tests/corpus/7327-int16array-elements.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/7328-int16array-views-and-methods.ts": {
+   "order": [
+    "<repo>/tests/corpus/7328-int16array-views-and-methods.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/7329-typed-array-element-size.ts": {
+   "order": [
+    "<repo>/tests/corpus/7329-typed-array-element-size.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/750-cycle-closure-box.ts": {
    "order": [
     "<repo>/tests/corpus/750-cycle-closure-box.ts"
