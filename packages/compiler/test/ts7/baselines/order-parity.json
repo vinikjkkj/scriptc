@@ -6199,6 +6199,31 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/2801-console-fixed-args-then-a-spread.ts": {
+   "order": [
+    "<repo>/tests/corpus/2801-console-fixed-args-then-a-spread.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2802-promise-all-over-checked-dynamic-payloads.ts": {
+   "order": [
+    "<repo>/tests/corpus/2802-promise-all-over-checked-dynamic-payloads.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2803-catch-handler-values/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/2803-catch-handler-values/handlers.ts",
+    "<repo>/tests/corpus/2803-catch-handler-values/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2804-rethrowing-a-caught-error-through-unknown.ts": {
+   "order": [
+    "<repo>/tests/corpus/2804-rethrowing-a-caught-error-through-unknown.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2811-incdec-of-fields-in-value-position.js": {
    "order": [
     "<repo>/tests/corpus/2811-incdec-of-fields-in-value-position.js"
@@ -10391,6 +10416,12 @@
   "<repo>/tests/diagnostics/a-record-enumerated-in-an-order-or-a-key-set-it-is-not-built-with.ts": {
    "order": [
     "<repo>/tests/diagnostics/a-record-enumerated-in-an-order-or-a-key-set-it-is-not-built-with.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/a-spread-at-each-of-the-three-argument-positions.ts": {
+   "order": [
+    "<repo>/tests/diagnostics/a-spread-at-each-of-the-three-argument-positions.ts"
    ],
    "diags": []
   },

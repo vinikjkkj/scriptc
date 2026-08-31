@@ -3322,6 +3322,11 @@ class LlEmitter {
       const rc = vAdapters(this, t);
       this.declare(`declare void @scr_throw_obj(ptr, ptr, ptr, ptr)`);
       B.line(`call void @scr_throw_obj(ptr ${v.name}, ptr ${rc.retain}, ptr ${rc.release}, ptr ${traceArg(this, t)})`);
+    } else if (t.kind === "dyn") {
+      // The dyn arm's twin of the C lane: the dyn unit owns the unwrap, so
+      // the two backends cannot disagree about what a rethrown error is.
+      this.declare(`declare void @scr_throw_dyn(ptr)`);
+      B.line(`call void @scr_throw_dyn(ptr ${v.name})`);
     } else {
       const rc = vAdapters(this, t);
       this.declare(`declare void @scr_throw_ref(ptr, ptr, ptr, ptr)`);

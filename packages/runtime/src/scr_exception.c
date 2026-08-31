@@ -262,6 +262,10 @@ void scr_library_check_exc(void) {
 }
 #endif /* SCR_LIB */
 
+/* Filled in by the dyn unit (scr_dyn_alloc); NULL wherever that unit is
+ * not linked, where no dyn can be thrown in the first place. */
+ScrThrowDynHook scr_throw_dyn_hook = NULL;
+
 void scr_throw_f64(double v) {
   scr_exc_reset();
   scr_exc_kind = SCR_EXC_F64;
@@ -282,6 +286,22 @@ void scr_throw_str(ScrStr *v) {
 
 void scr_throw_ref(void *v, void *(*retain)(void *), void (*release)(void *),
                     ScrTraceFn trace) {
+  /* A THROWN DYN is unwrapped to the arm it came from -- but by the DYN
+   * unit, through the hook below, never from here.
+   *
+   * This unit is linked into every program AND into every runtime unit
+   * test; the dyn tree (scr_json.c) is linked into neither of the latter.
+   * Reaching for scr_errdyn_err_of and scr_dyn_retain_v directly made the
+   * mandatory unit depend on the optional one, and four runtime unit
+   * tests stopped LINKING: "undefined symbol: scr_errdyn_err_of". So the
+   * mandatory unit holds a pointer, the optional unit fills it the first
+   * time it allocates a dyn, and a link with no dyn tree keeps a NULL
+   * hook and the exact historical behaviour -- which is correct by
+   * construction, because with no dyn tree no dyn can be thrown. */
+  if (v != NULL && scr_throw_dyn_hook != NULL &&
+      scr_throw_dyn_hook(v, retain, release)) {
+    return;
+  }
   scr_exc_reset();
   scr_exc_kind = SCR_EXC_REF;
   scr_exc_payload = v; /* ownership moves in */

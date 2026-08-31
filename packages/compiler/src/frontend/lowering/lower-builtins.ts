@@ -9729,6 +9729,21 @@ const NUMBER_CONSTANTS: Record<string, number | undefined> = {
     }
   }
 
+/** Whether a `Promise.all(...)` call's combined result is DISCARDED —
+   * the call is its own expression statement, or it is awaited and that
+   * await is. Stricter than voidAllResultIsAValue, deliberately: that
+   * predicate answers "not a value" for `const r = await Promise.all(ps)`
+   * too (the call's parent is the await either way), which is fine where
+   * both readings fulfil with a representable value and is NOT fine where
+   * the collapse is the only lowering — a bound name would silently
+   * receive void instead of the array. */
+  function allResultIsDiscarded(call: ts.CallExpression): boolean {
+    const p = call.parent as ts.Node | undefined;
+    if (p === undefined) return false;
+    if (ts.isExpressionStatement(p)) return true;
+    return ts.isAwaitExpression(p) && ts.isExpressionStatement(p.parent);
+  }
+
   export function lowerPromiseStaticCall(L: Lowerer, call: ts.CallExpression,
     access: ts.PropertyAccessExpression,): IrExpr | null {
     if (L.chainBlocked(call)) return null;
@@ -9954,6 +9969,24 @@ const NUMBER_CONSTANTS: Record<string, number | undefined> = {
         const built = voidAllOverArray(L, call, entries, entries.type, loc);
         if (built) return built;
       }
+      // `await Promise.all(ps)` as a STATEMENT, over entries whose payload
+      // is the checked-dynamic value (`Promise<unknown>[]` — zapo's
+      // messaging send fan-out): the payload array has no static
+      // representation (see the fence below), but nothing reads it. The
+      // void-collapsing form is then exact and not an approximation: the
+      // combinator still subscribes to every entry, still settles when the
+      // last one does, and the FIRST rejection still wins — it just passes
+      // no values array, exactly as an all-void `Promise.all` already does
+      // in this same position.
+      if (inner.kind === "dyn" && allResultIsDiscarded(call)) {
+        return {
+          kind: "intrinsic",
+          name: "promise.all",
+          args: [entries],
+          type: { kind: "promise", inner: VOID },
+          loc,
+        };
+      }
       const resultT: IrType | null =
         inner.kind === "void"
           ? { kind: "promise", inner: VOID }
@@ -9963,6 +9996,24 @@ const NUMBER_CONSTANTS: Record<string, number | undefined> = {
         (inner.kind !== "void" &&
           (resultT.inner.kind !== "array" || !typeEquals(resultT.inner.elem, inner)))
       ) {
+        // A CHECKED-DYNAMIC entry payload (`Promise<unknown>[]`,
+        // `Promise<object>[]`) reaches here for a reason that has nothing
+        // to do with tuples: the combined result is `unknown[]`, and an
+        // array whose element is dyn IS the dyn (types.ts' collapse —
+        // ScrArr has no dyn element kind), so `resultT.inner` is `dyn`
+        // and there is no values array for the countdown combinator to
+        // pre-size. Saying "annotate the array so the result is
+        // Promise<T[]>" there is advice the source has ALREADY taken.
+        if (inner.kind === "dyn") {
+          L.noLowering(
+            "Promise.all whose combined result is a checked-dynamic array",
+            call,
+            "the entries' payload is 'unknown'/'object', so the result array is the checked-dynamic value " +
+              "and the combinator has no static array to fill — give the entries a concrete payload " +
+              "(Promise<T>[] for some representable T), or discard the result (`await Promise.all(ps)` as a " +
+              "statement) when it is awaited only for its settling",
+          );
+        }
         L.noLowering(
           "Promise.all with this combined result type",
           call,
