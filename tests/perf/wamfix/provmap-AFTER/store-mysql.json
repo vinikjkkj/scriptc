@@ -1,0 +1,38 @@
+{
+ "entry": "G:/blocks/wamfix-lab/app/pkgs/store-mysql/index.ts",
+ "packages": [
+  {
+   "name": "mysql2",
+   "version": "3.24.2",
+   "sourceVersion": null,
+   "commit": "649e129d833dd1209ac18cae3be3426f4c86c69b",
+   "dir": "G:/blocks/wamfix-lab/prov/649e129d833dd1209ac18cae3be3426f4c86c69b",
+   "entries": {
+    "mysql2/promise": "G:/blocks/wamfix-lab/prov/649e129d833dd1209ac18cae3be3426f4c86c69b/promise.d.ts"
+   },
+   "entryCount": 1
+  },
+  {
+   "name": "zapo-js",
+   "version": "1.6.2",
+   "sourceVersion": null,
+   "commit": "250f9af5229a545eec28ddbd3e8774a397cdb0bb",
+   "dir": "G:/blocks/wamfix-lab/prov/250f9af5229a545eec28ddbd3e8774a397cdb0bb",
+   "entries": {
+    "zapo-js": "G:/blocks/wamfix-lab/prov/250f9af5229a545eec28ddbd3e8774a397cdb0bb/src/index.ts",
+    "zapo-js/appstate": "G:/blocks/wamfix-lab/prov/250f9af5229a545eec28ddbd3e8774a397cdb0bb/src/appstate/index.ts",
+    "zapo-js/auth": "G:/blocks/wamfix-lab/prov/250f9af5229a545eec28ddbd3e8774a397cdb0bb/src/auth/index.ts",
+    "zapo-js/proto": "G:/blocks/wamfix-lab/prov/250f9af5229a545eec28ddbd3e8774a397cdb0bb/src/proto.ts",
+    "zapo-js/protocol": "G:/blocks/wamfix-lab/prov/250f9af5229a545eec28ddbd3e8774a397cdb0bb/src/protocol/index.ts",
+    "zapo-js/retry": "G:/blocks/wamfix-lab/prov/250f9af5229a545eec28ddbd3e8774a397cdb0bb/src/retry/index.ts",
+    "zapo-js/signal": "G:/blocks/wamfix-lab/prov/250f9af5229a545eec28ddbd3e8774a397cdb0bb/src/signal/index.ts",
+    "zapo-js/store": "G:/blocks/wamfix-lab/prov/250f9af5229a545eec28ddbd3e8774a397cdb0bb/src/store/index.ts",
+    "zapo-js/util": "G:/blocks/wamfix-lab/prov/250f9af5229a545eec28ddbd3e8774a397cdb0bb/src/util/index.ts"
+   },
+   "entryCount": 9
+  }
+ ],
+ "notes": [
+  "argo-codec@0.2.1: no provenance attestation published; island path used"
+ ]
+}
