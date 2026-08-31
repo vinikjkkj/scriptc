@@ -1,0 +1,12 @@
+// DataView over an Int16Array's buffer: getInt16 defaults to BIG-endian.
+const a = new Int16Array([258])
+const dv = new DataView(a.buffer)
+console.log(dv.byteLength)
+console.log('be', dv.getInt16(0))
+console.log('le', dv.getInt16(0, true))
+console.log('ube', dv.getUint16(0))
+console.log('ule', dv.getUint16(0, true))
+dv.setInt16(0, -2)
+console.log('after be set', a[0])
+dv.setInt16(0, -2, true)
+console.log('after le set', a[0])

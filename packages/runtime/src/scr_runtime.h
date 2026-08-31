@@ -7274,6 +7274,14 @@ typedef enum ScrBytesElem {
    * has no index signature, so nothing reads through it. It exists as a
    * separate tag so `instanceof Uint8Array` can tell the two apart. */
   SCR_BYTES_BUF,
+  /* The 16-bit pair, APPENDED after BUF on purpose: the emitter's
+   * BYTES_ELEM_NUM table spells these tags as ordinals in the LLVM lane,
+   * so inserting them beside their 8- and 32-bit neighbours would
+   * renumber SCR_BYTES_BUF and every already-emitted `i32 6`. Reads
+   * sign-extend (i16) or zero-extend (u16); writes take ToUint32's 2^32
+   * residue narrowed to 16 bits, which is ToInt16/ToUint16 exactly. */
+  SCR_BYTES_I16, /* Int16Array (PCM audio's element) */
+  SCR_BYTES_U16, /* Uint16Array */
 } ScrBytesElem;
 
 /* Buffer-ness, carried by the VALUE.
@@ -7325,7 +7333,7 @@ typedef struct ScrBytes {
   struct ScrBytes *backing;
 } ScrBytes;
 
-size_t scr_bytes_elem_size(ScrBytesElem elem); /* 1, 4, 4, 4, 8 */
+size_t scr_bytes_elem_size(ScrBytesElem elem); /* 1, 2, 4, 8 */
 
 /* Stamp a FRESHLY constructed value (+1, unaliased) with its Node flavor
  * and answer it unchanged — no copy, no refcount step. Marking an aliased
