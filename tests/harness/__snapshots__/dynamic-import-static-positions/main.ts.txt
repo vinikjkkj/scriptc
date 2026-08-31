@@ -69,3 +69,12 @@ dynamic-import-static-positions/main.ts:43:15 - error SC2004: uses of 'SELF' inh
   44 | }
 
   hint: the declaration of 'SELF' did not compile — fix the diagnostic reported there and these sites clear with it
+
+dynamic-import-static-positions/main.ts:51:38 - error SC1090: 'LATE', bound by `await import()`, read from a hoisted function declaration is not supported yet
+
+  50 | // after it DO resolve, and corpus 7332 runs both.
+  51 | function tooEarly(): number { return LATE; }
+     |                                      ^~~~
+  52 | const { VAL: LATE } = await import("./mod.ts");
+
+  hint: the binding is alias plumbing with no storage: it names the module's own declaration only from the import statement onwards, and a `function` body lowers on its own — moving it below the import does NOT help. Read the name in straight-line code after the import, or from a lambda created after it (`const readIt = () => VAL`); or import the module statically, which makes the name visible to the whole file
