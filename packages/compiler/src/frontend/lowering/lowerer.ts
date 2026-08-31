@@ -11908,16 +11908,30 @@ export class Lowerer {
    * table (WA_APPSTATE_SCHEMAS lives in a static record global) from an
    * uncompilable island twin (the minified proto, whose init is trap-only
    * and whose exports are jsval), so the twin-init redirect skips the
-   * latter — forcing its init would fire the first trap. */
-  moduleHasStaticGlobal(sf: ts.SourceFile): boolean {
+   * latter — forcing its init would fire the first trap.
+   *
+   * THREE answers, not two. "no static global" conflated two modules that
+   * need opposite treatment: the trap-only island above, and a perfectly
+   * compilable module that simply exports nothing (`module.exports = {}`)
+   * while its body still prints, opens a file or registers a handler. Node
+   * evaluates the second one, so the redirect must call its init; the
+   * two-way predicate skipped it and the whole body vanished from the
+   * program's output with no diagnostic. "empty" is therefore NOT "island". */
+  moduleGlobalKind(sf: ts.SourceFile): "static" | "island" | "empty" {
     const tagged = this.fileTag.get(sf);
-    if (tagged === undefined) return false;
+    if (tagged === undefined) return "empty";
     const prefix = `%g.${tagged.replace(/^%/, "").replace(/\.$/, "")}`;
+    let sawJsval = false;
     for (const g of this.globalsList) {
-      if (g.name === "%loaded" || g.type.kind === "jsval") continue;
-      if (g.id.startsWith(prefix) || g.id.startsWith(tagged)) return true;
+      if (g.name === "%loaded") continue;
+      if (!g.id.startsWith(prefix) && !g.id.startsWith(tagged)) continue;
+      if (g.type.kind === "jsval") {
+        sawJsval = true;
+        continue;
+      }
+      return "static";
     }
-    return false;
+    return sawJsval ? "island" : "empty";
   }
 
   /** The DECLARATION file a compiled runtime file is the twin of -- the
