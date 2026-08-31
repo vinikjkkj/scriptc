@@ -3037,7 +3037,7 @@ export function dynamicImportSpecOf(checker: ts.TypeChecker, arg: ts.Expression)
  * A `.d.ts` with NO twin still answers null exactly as before — there is no
  * implementation to evaluate, and preflight has already refused the import
  * with SC1010. The twin is looked up in the PROGRAM, not on disk. */
-function resolveProjectImportSf7(
+export function resolveProjectImportSf7(
   program: ts.Program,
   sf: ts.SourceFile,
   spec: string,
