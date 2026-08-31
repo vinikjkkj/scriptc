@@ -3951,6 +3951,49 @@ function instanceofGuardArm(L: Lowerer, rhs: ts.Expression, unionId: string): Ir
             valueKind: expr.kind,
           });
         }
+        // ...but an INDEX-SIGNATURE keyed read is not a narrowing at all.
+        // The premise above is that tsc narrowed this dyn read to a scalar
+        // because a typeof test PROVED the kind. For `r[k]` on a receiver
+        // carrying a string index signature, tsc's `number` is not a proof:
+        // without noUncheckedIndexedAccess it is the signature's promise
+        // about the keys that are PRESENT, and it says nothing at all about
+        // a key that is absent. Bridging it to a bare scalar checks the
+        // value back to a width that cannot say undefined, so a miss throws
+        // `expected number at $, got undefined` -- BEFORE the
+        // `typeof value === 'number'` guard the source is required to write
+        // can see it. Node prints null; this printed a throw.
+        //
+        // Two spellings of one expression disagreed, which is how it was
+        // found. Binding the cast to a local first
+        // (`const t = x as Record<string, number>; t[k]`) takes the record
+        // path and answers correctly; indexing the cast in place
+        // (`(x as Record<string, number>)[k]`) takes the dyn path and threw.
+        // Same program, same key, two answers -- and the destination could
+        // not rescue it: an explicit `const value: number | undefined = ...`
+        // threw too, because this bridge reads the checker's type at the
+        // READ and never the width the value is going into.
+        //
+        // Left at dyn width the read is exactly what the record path already
+        // produces, and the program's own guard does the narrowing it was
+        // written to do. A value that really does flow into a scalar slot
+        // still meets a dynCheck at that slot -- the throw moves to where the
+        // width is actually claimed, which is where it belongs.
+        //
+        // SCRIPTC_IDXNARROW_OFF=1 ablates this carve-out alone, so one binary
+        // emits both sides; SCRIPTC_IDXNARROW_WHY names every read it
+        // declines, so "the rule fires nowhere" and "the rule fires and
+        // changes nothing" are different observations in the same run.
+        if (expr.kind === "dynKeyGet" && process.env["SCRIPTC_IDXNARROW_OFF"] !== "1" && keyedAccessOverIndexSignature(L, node as ts.Expression)) {
+          if (process.env["SCRIPTC_IDXNARROW_WHY"] !== undefined) {
+            const sf = node.getSourceFile();
+            const lc = sf.getLineAndCharacterOfPosition(node.getStart());
+            process.stderr.write(
+              `IDXNARROW ${sf.fileName}:${lc.line + 1}:${lc.character + 1} kept-dyn want=${narrowed.kind}` +
+                ` :: ${node.getText().slice(0, 60).replace(/\s+/g, " ")}\n`,
+            );
+          }
+          return expr;
+        }
         return { kind: "dynCheck", value: expr, type: narrowed, narrowBridge: true, loc: expr.loc };
       }
       // An `instanceof Uint8Array` narrow: the checked-dynamic tree's bytes kind, extracted
@@ -4142,7 +4185,7 @@ function instanceofGuardArm(L: Lowerer, rhs: ts.Expression, unionId: string): Ir
  * would matter. */
 const WIDENED_KEYED_SYMS = new WeakMap<object, boolean>();
 
-function keyedAccessOverIndexSignature(L: Lowerer, e: ts.Expression): boolean {
+export function keyedAccessOverIndexSignature(L: Lowerer, e: ts.Expression): boolean {
   if (!ts.isPropertyAccessExpression(e) && !ts.isElementAccessExpression(e)) return false;
   if (e.questionDotToken !== undefined) return false;
   try {
