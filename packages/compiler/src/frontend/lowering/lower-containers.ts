@@ -4,7 +4,7 @@
  * method surfaces. */
 import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
-import { BOOL, BYTES_ELEM_SIZE, BYTES_U8, CAUGHT, DV_BIG_SET_METHODS, DYN, F64, IrBytesElem, IrBytesIntrinsicMethod, IrExpr, IrFunction, IrLocal, IrMapIntrinsicMethod, IrParam, IrRecordShape, IrSetIntrinsicMethod, IrStmt, IrType, JSVAL, REF_TRUTHY_KINDS, REGEX, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, bytesOf, canDynCheckTo, funcOf, isRefCounted, isSupportedIndexValue, isUnitType, typeEquals } from "../../ir/nodes.js";
+import { BOOL, BYTES_ELEM_SIZE, BYTES_U8, CAUGHT, DV_BIG_SET_METHODS, DYN, F64, IrBytesElem, IrBytesIntrinsicMethod, IrExpr, IrFunction, IrLocal, IrMapIntrinsicMethod, IrParam, IrRecordShape, IrSetIntrinsicMethod, IrStmt, IrType, JSVAL, REF_TRUTHY_KINDS, REGEX, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, bytesOf, canBeArrayElem, canDynCheckTo, funcOf, isRefCounted, isSupportedIndexValue, isUnitType, typeEquals } from "../../ir/nodes.js";
 import { ARRAY_METHODS, MAP_METHODS, SET_COMBINE_METHODS, SET_METHODS, STR_METHODS } from "./surfaces.js";
 import { captureParticipationOfPattern, checkedJsNumber, droppableStatic, entryFoldStringChain, isRequireMainFilename, lowerDynObjectLiteral, probeLower, pureReemittable, staticRegexTextOf } from "./lower-exprs.js";
 import { forOfVarTarget, lowerDestructuringAssign } from "./lower-stmts.js";
@@ -3296,7 +3296,15 @@ function lowerOptionalDefaultArg(
         const elem = base.type.elem;
         const { fnArg, arity } = hofCallbackArg(L, args[1]!, [elem], base.type);
         const fnRet = fnArg.type.ret;
-        if (fnRet.kind === "void" || fnRet.kind === "func" || fnRet.kind === "dyn" || isUnitType(fnRet)) {
+        // The mapper's RESULT becomes the array's element, and no checker
+        // type is consulted for it -- `arrayOf(fnRet)` below is synthesized
+        // straight from the signature. canBeArrayElem is the emitter's own
+        // no-representation list, so an element it cannot store is refused
+        // here by name instead of crashing emit-types.ts. It subsumes the
+        // void/dyn/unit spellings this line used to carry; `func` is listed
+        // separately because closures ARE a representable element and this
+        // fence is the Array.from surface's own, not the array's.
+        if (fnRet.kind === "func" || !canBeArrayElem(fnRet)) {
           L.badType(call, L.typeOf(call));
         }
         const helper = arrayHofHelper(L, "map", elem, fnRet, arity, loc);
@@ -3336,7 +3344,15 @@ function lowerOptionalDefaultArg(
     }
     const fnT = fnArg.type as IrType & { kind: "func" };
     const fnRet = fnT.ret;
-    if (fnRet.kind === "void" || fnRet.kind === "func") L.badType(call, L.typeOf(call));
+    // The counted form's twin of the map form's gate, and the seat that was
+    // missing it. `Array.from({ length: 2 }, () => JSON.parse(s) as unknown)`
+    // synthesized `arrayOf(dyn)` off the mapper's signature -- no declared
+    // array type is ever consulted, so mapType's array rule never sees it --
+    // and the C backend died with `emitter bug: no array element
+    // representation for dyn` on a program tsc accepts. The LLVM lane
+    // refused it as SC3001 arrayElem:dyn, and the release default falls back
+    // to C, so the ICE was the shipping answer. Upstream #183 (58c214a4).
+    if (fnRet.kind === "func" || !canBeArrayElem(fnRet)) L.badType(call, L.typeOf(call));
     const arity = fnT.params.length;
     const key = `fromLen:${typeKey(fnRet)}:${arity}`;
     let helper = L.arrHofHelpers.get(key);

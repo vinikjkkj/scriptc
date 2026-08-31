@@ -588,6 +588,35 @@ export function arrayOf(elem: IrType): IrType {
   return { kind: "array", elem };
 }
 
+/** The element kinds a ScrArr has NO representation for -- the exact set
+ * emit-types.ts's elemKindC throws `emitter bug: no array element
+ * representation for <kind>` on, transcribed here so the FRONTEND can
+ * refuse instead of the backend crashing.
+ *
+ * It is deliberately a DENY list, not an allow list. The array element
+ * surface here is wide and still growing -- func (closures), map, set,
+ * regex, promise, bigint, the crypto handles, the h2 pair, the abort pair,
+ * response/headers/request/requestInit all have representations -- so an
+ * allow list copied from anywhere else would start refusing arrays this
+ * tree compiles today. Anything not named below is representable, and the
+ * ONE authority for the names is elemKindC's own throw list. */
+const NO_ARRAY_ELEM_KINDS: ReadonlySet<IrType["kind"]> = new Set([
+  "void", "dyn", "caught", "generator", "asyncGenerator", "undefinedT", "nullT",
+  "url", "searchParams", "stats", "fileHandle", "spawnRes", "netSocket",
+  "dgramSocket", "testCtx", "httpReq", "httpRes", "httpClientReq", "secureCtx",
+  "fsWatcher", "sqliteDb", "sqliteStmt", "childStream", "procStream",
+]);
+
+/** Can an array HOLD this element? mapType's array rule already leaves
+ * every unrepresentable element unmapped, so a program that SPELLS such an
+ * array is refused at its type. This predicate is for the places the
+ * frontend SYNTHESIZES an array type out of a signature instead --
+ * `arrayOf(fnRet)` -- where no checker type was ever consulted and the
+ * unrepresentable kind reaches the emitter as an internal error. */
+export function canBeArrayElem(elem: IrType): boolean {
+  return !NO_ARRAY_ELEM_KINDS.has(elem.kind);
+}
+
 export function bytesOf(elem: IrBytesElem): IrType {
   return { kind: "bytes", elem };
 }
