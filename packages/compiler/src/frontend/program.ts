@@ -2977,6 +2977,13 @@ export function orderedImportsOf(
       ? resolveImport7(program, sf, spec)
       : (npmStaticDepSf7(program, sf, spec) ?? resolveProjectImportSf7(program, sf, spec));
     const isJson = dep !== null && dep.fileName.endsWith(".json");
+    if (process.env["SCRIPTC_TWININIT_WHY"] !== undefined) {
+      const raw = isRelative ? null : resolveProjectImport(sf.fileName, spec);
+      process.stderr.write(
+        `TWININIT-EDGE from=${sf.fileName} spec=${spec} relative=${isRelative} ` +
+          `dep=${dep === null ? "null" : dep.fileName} proj=${raw ?? "null"}\n`,
+      );
+    }
     out.push({ stmt, dep: isJson ? null : dep });
   }
   return out;
@@ -3012,8 +3019,24 @@ export function dynamicImportSpecOf(checker: ts.TypeChecker, arg: ts.Expression)
 
 /** resolveProjectImport lifted to SourceFile answers: the program's file
  * for a `#alias`/self-name resolution, or null (unresolved, or resolved
- * outside the program — declaration files included; callers that admit
- * d.ts answers probe resolveProjectImport directly). */
+ * outside the program).
+ *
+ * A DECLARATION-FILE answer counts as a module-order edge when its
+ * implementation twin is in the program — the same question preflight asks
+ * of the same resolution (`declTwinOf(program, projDep) === undefined` is
+ * what it refuses on), so the two agree about which edges exist. Answering
+ * null for a `.d.ts` WITH a twin dropped the edge out of the %init header
+ * entirely: the twin was lowered, its init emitted and assigning every
+ * global, and nothing ever called it. That is not a redirect choosing
+ * wrongly — the redirect below (lower-modules `importBindsStaticTwinGlobal`)
+ * never saw an edge to redirect. The globals then kept their C zero value,
+ * so a read printed 0 where Node prints the assigned value and the first
+ * record dereference was an access violation: a silent wrong answer, then a
+ * crash.
+ *
+ * A `.d.ts` with NO twin still answers null exactly as before — there is no
+ * implementation to evaluate, and preflight has already refused the import
+ * with SC1010. The twin is looked up in the PROGRAM, not on disk. */
 function resolveProjectImportSf7(
   program: ts.Program,
   sf: ts.SourceFile,
@@ -3023,7 +3046,9 @@ function resolveProjectImportSf7(
   const p = resolveProjectImport(sf.fileName, spec);
   if (p === null) return null;
   const dep = program.getSourceFile(p) ?? null;
-  return dep !== null && !dep.isDeclarationFile ? dep : null;
+  if (dep === null) return null;
+  if (!dep.isDeclarationFile) return dep;
+  return declTwinOf(program, dep) !== undefined ? dep : null;
 }
 
 /** True when `expr` is the `module.exports` property access. */
