@@ -24,6 +24,7 @@ static void scr_bytes_oom(void) {
 
 size_t scr_bytes_elem_size(ScrBytesElem elem) {
   if (elem == SCR_BYTES_U8 || elem == SCR_BYTES_I8 || elem == SCR_BYTES_BUF) return 1;
+  if (elem == SCR_BYTES_I16 || elem == SCR_BYTES_U16) return 2;
   return elem == SCR_BYTES_F64 ? 8 : 4;
 }
 
@@ -229,6 +230,16 @@ double scr_bytes_get(const ScrBytes *b, double i) {
     }
     case SCR_BYTES_I8:
       return (double)(int8_t)b->data[idx];
+    case SCR_BYTES_I16: {
+      int16_t v;
+      memcpy(&v, b->data + idx * 2, 2);
+      return (double)v;
+    }
+    case SCR_BYTES_U16: {
+      uint16_t v;
+      memcpy(&v, b->data + idx * 2, 2);
+      return (double)v;
+    }
     case SCR_BYTES_BUF:
       /* An ArrayBuffer has no index signature, so no CORRECT program
        * reaches this arm and the type world never emits an element read
@@ -283,6 +294,17 @@ void scr_bytes_set(ScrBytes *b, double i, double v) {
       /* ToInt8 is ToUint32's residue narrowed to 8 bits, reinterpreted. */
       b->data[idx] = (uint8_t)scr_bytes_to_u32(v);
       break;
+    case SCR_BYTES_I16:
+    case SCR_BYTES_U16: {
+      /* ToInt16 and ToUint16 are the SAME 16 bits -- ToUint32's 2^32
+       * residue truncated -- and differ only in how the READ above
+       * reinterprets them. One arm, exactly as I8 shares its store with
+       * a hypothetical U8: `new Int16Array([70000])[0]` is 4464 and
+       * `new Uint16Array([-1])[0]` is 65535 out of this same line. */
+      uint16_t u = (uint16_t)scr_bytes_to_u32(v);
+      memcpy(b->data + idx * 2, &u, 2);
+      break;
+    }
     case SCR_BYTES_I32: {
       /* ToInt32 is ToUint32 reinterpreted signed (same 2^32 residue). */
       uint32_t u = scr_bytes_to_u32(v);
@@ -1119,6 +1141,12 @@ ScrBytes *scr_bytes_from_arr(ScrBytesElem elem, const ScrArr *arr) {
       case SCR_BYTES_I8:
         b->data[i] = (uint8_t)scr_bytes_to_u32(v);
         break;
+      case SCR_BYTES_I16:
+      case SCR_BYTES_U16: {
+        uint16_t u = (uint16_t)scr_bytes_to_u32(v); /* same residue reinterpreted */
+        memcpy(b->data + i * 2, &u, 2);
+        break;
+      }
       case SCR_BYTES_I32: {
         uint32_t u = scr_bytes_to_u32(v);
         memcpy(b->data + i * 4, &u, 4); /* same residue reinterpreted */

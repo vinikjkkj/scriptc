@@ -4,7 +4,7 @@
  * method surfaces. */
 import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
-import { BOOL, BYTES_U8, CAUGHT, DV_BIG_SET_METHODS, DYN, F64, IrBytesElem, IrBytesIntrinsicMethod, IrExpr, IrFunction, IrLocal, IrMapIntrinsicMethod, IrParam, IrRecordShape, IrSetIntrinsicMethod, IrStmt, IrType, JSVAL, REF_TRUTHY_KINDS, REGEX, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, bytesOf, canDynCheckTo, funcOf, isRefCounted, isSupportedIndexValue, isUnitType, typeEquals } from "../../ir/nodes.js";
+import { BOOL, BYTES_ELEM_SIZE, BYTES_U8, CAUGHT, DV_BIG_SET_METHODS, DYN, F64, IrBytesElem, IrBytesIntrinsicMethod, IrExpr, IrFunction, IrLocal, IrMapIntrinsicMethod, IrParam, IrRecordShape, IrSetIntrinsicMethod, IrStmt, IrType, JSVAL, REF_TRUTHY_KINDS, REGEX, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, bytesOf, canDynCheckTo, funcOf, isRefCounted, isSupportedIndexValue, isUnitType, typeEquals } from "../../ir/nodes.js";
 import { ARRAY_METHODS, MAP_METHODS, SET_COMBINE_METHODS, SET_METHODS, STR_METHODS } from "./surfaces.js";
 import { captureParticipationOfPattern, checkedJsNumber, droppableStatic, entryFoldStringChain, isRequireMainFilename, lowerDynObjectLiteral, probeLower, pureReemittable, staticRegexTextOf } from "./lower-exprs.js";
 import { forOfVarTarget, lowerDestructuringAssign } from "./lower-stmts.js";
@@ -6782,6 +6782,8 @@ export const BYTES_CTORS: Record<string, IrBytesElem | undefined> = {
   Float32Array: "f32",
   Float64Array: "f64",
   Int8Array: "i8",
+  Int16Array: "i16",
+  Uint16Array: "u16",
 };
 
 /** `new Uint8Array(...)` / `new Uint32Array(...)` / `new Float32Array(...)`
@@ -6932,7 +6934,7 @@ export const BYTES_CTORS: Record<string, IrBytesElem | undefined> = {
               "erases into the view): drop the options bag",
           );
         }
-        const elemSize = elem === "u8" ? 1 : 4;
+        const elemSize = BYTES_ELEM_SIZE[elem];
         const lenArg = argNode.arguments?.length === 1 ? argNode.arguments[0] : undefined;
         const lenT = lenArg ? L.typeOf(lenArg) : null;
         const byteLen = lenT?.isNumberLiteralType() ? lenT.value : null;

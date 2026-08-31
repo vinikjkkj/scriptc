@@ -1,0 +1,5 @@
+const a = new Uint16Array([1, 2, 65535])
+console.log(a.length, a.byteLength)
+console.log(a[0], a[1], a[2])
+const z = new Uint16Array(3)
+console.log(z.length, z.byteLength, z[0])

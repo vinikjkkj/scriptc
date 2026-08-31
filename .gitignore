@@ -38,3 +38,10 @@ tmp-*/
 # per-block zig cache (see the fleet brief: ZIG_*_CACHE_DIR must be in-tree
 # or zig writes to %LOCALAPPDATA% on C:)
 .zig/
+
+# per-block scriptc artifact cache (SCRIPTC_CACHE_DIR)
+/.cache/
+
+# block lab: compiled probes and their captured output
+lab/bin/
+lab/runs/

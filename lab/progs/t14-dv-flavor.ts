@@ -1,0 +1,16 @@
+// The ScrBytes.flavor work a sibling landed: a DataView is not a
+// Uint8Array, and adding a 16-bit element must not disturb it.
+const a = new Int16Array([1, 2])
+const dv = new DataView(a.buffer)
+console.log('dv', dv.byteLength)
+const b = Buffer.from([1, 2, 3, 4])
+console.log('buf', b instanceof Uint8Array, Buffer.isBuffer(b))
+const u = new Uint8Array([1, 2, 3, 4])
+console.log('u8', u instanceof Uint8Array, Buffer.isBuffer(u))
+const dv2 = new DataView(u.buffer)
+console.log('dv2', dv2.getInt16(0), dv2.getInt16(0, true), dv2.getUint16(2), dv2.getUint16(2, true))
+dv2.setUint16(0, 65535)
+console.log('after', u[0], u[1])
+const i = new Int16Array([-1])
+const dv3 = new DataView(i.buffer)
+console.log('dv3', dv3.byteLength, dv3.getUint16(0), dv3.getInt16(0))

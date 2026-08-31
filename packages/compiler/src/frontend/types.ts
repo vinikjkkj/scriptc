@@ -2850,6 +2850,14 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
   if (isStdlibInterface("Float64Array")) return bytesOf("f64");
   // Int8Array: the signed 8-bit kind — reads sign-extend, writes ToInt8-wrap.
   if (isStdlibInterface("Int8Array")) return bytesOf("i8");
+  // The 16-bit pair. Int16Array is PCM audio's element — zapo's own audio
+  // path (voip/media) is typed in it — and Uint16Array is its unsigned
+  // twin. Reads sign- or zero-extend; the WRITE is one store for both
+  // (ToInt16 and ToUint16 are the same 16 bits of ToUint32's residue),
+  // so `new Int16Array([70000])[0]` is 4464 and `new Uint16Array([-1])[0]`
+  // is 65535 without a second coercion path.
+  if (isStdlibInterface("Int16Array")) return bytesOf("i16");
+  if (isStdlibInterface("Uint16Array")) return bytesOf("u16");
   // ArrayBufferView: the ABSTRACT byte-view base ({ buffer, byteLength,
   // byteOffset } — no index signature). Every typed array and DataView
   // satisfies it, and it appears only as an opaque "some byte view" handle
