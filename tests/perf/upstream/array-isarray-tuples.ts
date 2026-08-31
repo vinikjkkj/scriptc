@@ -1,6 +1,7 @@
-// Upstream vercel-labs/scriptc #154 (1e4f71dd), kept as its own entry so it
-// does not redden 1549. We REFUSE this today (SC1090 / SC2004 / SC2009);
-// upstream compiles it and answers correctly. Node is the oracle.
+// Upstream vercel-labs/scriptc #154 (1e4f71dd). NOT corpus coverage: we
+// REFUSE this today (SC1090 / SC2004 / SC2009) and upstream compiles it and
+// answers correctly, so it is evidence for the take-list, not a gate entry.
+// See the README beside this file. Node is the oracle when it is promoted.
 
 
 // Fixed tuples use a positional record-shaped IR representation so each
