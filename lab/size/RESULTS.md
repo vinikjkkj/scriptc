@@ -95,3 +95,41 @@ So: the branch does not move this test, and the timeout is what the fleet
 brief already calls it — a contended long pole, ~269 s alone against a
 600 s limit, which exceeds the limit when it runs beside both differential
 suites.
+
+## Re-measured on `003a7177`, and the two classes parted
+
+Main moved again (three stdlib surfaces). Re-weighed, two samples of base
+and three of the branch, all reproducible to the byte:
+
+| program | recorded | base `003a7177` | branch | delta |
+| --- | --- | --- | --- | --- |
+| static hello-world | 653,312 | 656,896 | **656,896** | **0** |
+| regex program | 795,648 | 798,208 | **798,720** | **+512** |
+
+The static class is still byte-identical. The regex class is **+512**, and
+this is exactly the parting size-class.ts warns about — "the two classes
+have parted by 512 bytes before, so deriving either from the other would
+have been 1,024 bytes wrong". Both floors are GREEN: the regex figure is
+3,072 over its recorded anchor against a 4,096-byte tolerance, so 1,024 of
+headroom remains.
+
+### It is not code growth. Section-level, on the two regex binaries:
+
+| section | base | branch | delta |
+| --- | --- | --- | --- |
+| `.text` | 606,598 | 606,598 | **0** |
+| `.rdata` | 161,792 | 161,840 | **+48** |
+| everything else | — | — | 0 (`.buildid` +2, the hash) |
+
+`scr_bytes.o`'s own `.text` is 24,953 -> 24,969, **+16 bytes** for two new
+element kinds — the table paid for essentially the whole comparison chain
+it replaced. The linked `.text` does not move at all.
+
+The `.rdata` +48 is the unavoidable part: two new `case` labels in each of
+three switches add jump-table entries (24 bytes), plus the 16-byte size
+table, plus alignment. **The +512 is those 48 bytes crossing a 512-byte
+file-alignment boundary in the regex binary and not in the static one** —
+which is why the same source change measures 0 in one class and 512 in the
+other. Chasing it would mean shaving the 7 bytes of table padding that
+keeps the index in bounds, and an element size is an allocation size; the
+padding stays.
