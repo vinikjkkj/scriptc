@@ -9,6 +9,7 @@ import { dirname, relative } from "node:path";
 import type { Lowerer, WidthLift } from "./lowerer.js";
 import { strandTrap, BIGINT, BOOL, CAUGHT, DYN, type IrBytesElem, type IrLibFn, type IrNumBinOp, DYN_HANDLE_KINDS, F64, IrExpr, IrFunction, IrJsOp, IrLocal, IrRecordShape, IrStmt, IrType, JSVAL, KEYOBJ, NULL_T, REF_TRUTHY_KINDS, REGEX, RUNTIME_ERROR_CLASSES, SEARCH_PARAMS_T, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, canAdaptDynFuncTo, canBoxFuncIntoDyn, canDynCheckTo, funcOf, isDynBytes, isJsonSafeType, isRefCounted, isUnitType, jsOpResultKind, httpReqIsReadableIn, shapeHasAccessorSlots, streamDuplexWidensToWritable, typeEquals, typeKey, unionFuncSetArmsOk } from "../../ir/nodes.js";
 import { lowerAbortProperty } from "./lower-abort.js";
+import { dynImportBindingDeclOf } from "./lower-island.js";
 import { lowerFetchProperty, lowerRequestInitLiteral } from "./lower-fetch.js";
 import { lowerSqliteProperty } from "./lower-sqlite.js";
 import { builtinFnValueOf, builtinMemberFnValueOf } from "./lower-fnvalue.js";
@@ -1683,6 +1684,43 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
             expr,
             `the reference to '${expr.text}' (it has no compiled implementation — its module ` +
               `'${where.startsWith(".") ? where : `./${where}`}' ships only a declaration file)`,
+          );
+        }
+      }
+      // A binding of a served STATIC-tier `const ... = await
+      // import("./m.ts")` read from a HOISTED FUNCTION DECLARATION. The
+      // plumbing has no storage: the name resolves to the exporter's own
+      // symbol, and that registration happens when the declaration
+      // STATEMENT lowers — while a `function` body lowers on its own,
+      // independently of where it sits in the file, so it has nothing to
+      // resolve to whether it is written above the import or below it.
+      // (Both spellings were compiled and run; moving the function down
+      // does NOT fix it, and an earlier draft of this hint said it did.)
+      // Straight-line code after the import and lambdas created after it
+      // do resolve, and a static import is visible to the whole file.
+      {
+        const sym = L.checker.getSymbolAtLocation(expr);
+        const d = sym ? L.checker.declarationsOf(sym)[0] : undefined;
+        const varDecl =
+          d !== undefined && ts.isBindingElement(d) && ts.isObjectBindingPattern(d.parent)
+            ? d.parent.parent
+            : undefined;
+        if (
+          varDecl !== undefined &&
+          ts.isVariableDeclaration(varDecl) &&
+          dynImportBindingDeclOf(L, varDecl) !== null
+        ) {
+          L.unsupported(
+            "SC1090",
+            expr,
+            `'${expr.text}', bound by \`await import()\`, read from a hoisted function ` +
+              `declaration`,
+            `the binding is alias plumbing with no storage: it names the module's own ` +
+              `declaration only from the import statement onwards, and a \`function\` body ` +
+              `lowers on its own — moving it below the import does NOT help. Read the ` +
+              `name in straight-line code after the import, or from a lambda created ` +
+              `after it (\`const readIt = () => VAL\`); or import the module statically, ` +
+              `which makes the name visible to the whole file`,
           );
         }
       }
