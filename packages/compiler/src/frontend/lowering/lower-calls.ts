@@ -4418,8 +4418,52 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
       // not disappear, it moves to the values that really need a
       // prototype. TS `any` keeps today's refusal: the island retry owns
       // that tier, the JS-file stance is the binary operators'.
-      if (arg.type.kind === "dyn" && isJsSourceFile(expr.getSourceFile())) {
+      //
+      // ...and TS `unknown` joins the JS stance rather than `any`'s,
+      // because the two tiers are drawn around the ISLAND and `unknown`
+      // has no business there. `any` defers to the island retry, which can
+      // run the real ToNumber with a real prototype chain. `unknown` has no
+      // such tier: TypeScript will not let a program do anything with it
+      // until it is narrowed, and `Number(x)` is the documented way to
+      // convert one. In a STATIC build the refusal was the only outcome for
+      // a conversion Node defines exactly and this runtime already
+      // implements — @zapo-js/wam's registry.ts:77 reads a payload value out
+      // of a `Readonly<Record<string, unknown>>` and converts it, and that
+      // one site was a hard stop.
+      //
+      // Nothing is loosened about what CAN be converted: this is the same
+      // scr_dyn_to_number the JS lane takes, so the primitives follow
+      // ECMA-262 7.1.4 exactly (string -> StringToNumber, bool -> 1/0,
+      // null -> +0, undefined -> NaN) and every reference kind still throws
+      // the loud dynCheck that names the site. Measured against node
+      // v25.9.0 over all six: '42'->42, true->1, 7->7, 'x'->NaN, null->0,
+      // and an absent key->NaN.
+      //
+      // anyOrigin is the discriminator rather than a syntactic test for the
+      // `unknown` keyword, because it is the same question the any-tier
+      // fence (anyOpFence) already asks, so the two cannot drift apart.
+      if (
+        arg.type.kind === "dyn" &&
+        (isJsSourceFile(expr.getSourceFile()) || !L.anyOrigin(argNode))
+      ) {
         return { kind: "libCall", fn: "dyn.toNumber", args: [arg], type: F64, loc };
+      }
+      // The `any` tier's own words. `Number of unknown values` was the text
+      // for BOTH tiers, and it is now false for one of them: an `unknown`
+      // converts here. A reader with an `any` was told the conversion has no
+      // lowering while the same call on the same runtime value one line
+      // away compiled. Name the tier, and give advice that was compiled and
+      // run before it was written down: `Number(x as unknown)` takes the
+      // ToNumber path, because the cast makes the argument's checker type
+      // `unknown` and anyOrigin answers false for it.
+      if (arg.type.kind === "dyn") {
+        L.noLowering(
+          "Number of an 'any'-typed value",
+          argNode,
+          "an 'unknown' converts here (ECMA-262 ToNumber, the same one the arithmetic operators run) — " +
+            "cast it first: Number(x as unknown). 'any' defers to the embedded dynamic engine, " +
+            "which a static build does not include",
+        );
       }
       L.noLowering(
         `Number of ${L.fmt(arg.type)} values`,
