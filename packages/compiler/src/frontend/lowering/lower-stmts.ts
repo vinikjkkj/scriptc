@@ -29,7 +29,7 @@ import { namespaceConditionalOf } from "./lower-nsvalue.js";
 import { builtinMemberRequireDecl, builtinNamespaceDestructureModuleOf, createRequireBindingDecl, createRequireCalleeFileOf, createRequireNamespaceDecl, nodeRequireArgumentError, requireFnValueDeclType } from "./lower-builtins.js";
 import { lowerEnumDeclaration } from "./lower-enums.js";
 import { ctorObjectGlobalValue, dynAssertionReceiver, isDynSafeReadWidth, isImmutablePrimitiveWidth } from "./lower-exprs.js";
-import { localTakesWidenedKeyedRead, narrowBridgeUnion, unitArmsOf } from "./lower-exprs.js";
+import { keyedAccessOverIndexSignature, localTakesWidenedKeyedRead, narrowBridgeUnion, unitArmsOf } from "./lower-exprs.js";
 import { abstractPropertyDeclOf, aliasTypeofNarrows, checkedJsNumber, compoundCombine, fnOwnCounters, fnOwnPropBox, fnOwnRoutableKey, fnOwnWhy, isMatchSliceType, lowerGroupsProjection, matchResultNamedGroupsOf, probeLower, pureReemittable, symbolFieldInfo, tonumWhy } from "./lower-exprs.js";
 import { UNSUPPORTED, checkerPanicDiag, isCheckerPanic, requiresDynamicDiag } from "../../diagnostics/diagnostic.js";
 import { isUnitOnlyTsType, unitOnlyUnion } from "../types.js";
@@ -3791,6 +3791,77 @@ function keyedReadLocalAtDynWidth(L: Lowerer, init: IrExpr, slot: IrType): IrExp
   return L.recordKeyReadAtSlotWidth(init, DYN);
 }
 
+/** THE SAME BINDING WHEN THE READ CAME OUT OF THE DYN TREE instead of a
+ * record -- the second seat of the index-signature rule whose first seat is
+ * in `maybeNarrow` (lower-exprs.ts).
+ *
+ * `(x as Record<string, number>)[k]` and
+ * `const t = x as Record<string, number>; t[k]` are the same expression
+ * written two ways, and they took two different paths: bound, the widening
+ * to the index signature is materialised and the read is a `recordKeyGet`
+ * that the whole ladder above serves; indexed in place, the widening is
+ * dropped, the receiver boxes to dyn, and the read is a `dynKeyGet` that
+ * every rung above declines because each one tests for `recordKeyGet`.
+ *
+ * `maybeNarrow` now keeps such a read at dyn width, which is what the
+ * record path produces too. But the SLOT is still the checker's `number`,
+ * because tsc infers the binding from the index signature -- so the
+ * initializer met a coercion to a width that cannot say undefined and the
+ * miss threw `expected number at $, got undefined` one line before the
+ * author's own `typeof value === 'number'` guard. The throw did not move
+ * because the bridge was the only seat; it moved because there are two.
+ *
+ * Same discipline as the rung above, for the same reasons:
+ *   - only a `dynKeyGet` that is ALREADY dyn, so nothing is converted and
+ *     the deep-copy/aliasing argument that restricts the record rung to
+ *     immutable primitives has nothing to bite on here;
+ *   - only the scalar widths `maybeNarrow` bridges, which is exactly the
+ *     population that was throwing;
+ *   - the slot must be the READ's own width or that width plus an
+ *     undefined arm (`keyedReadBindingSameWidth`, shared with the rungs
+ *     above so the lines cannot drift). A DIFFERENT declared type is a
+ *     conversion the author asked for and keeps its own coercion;
+ *   - the receiver must really carry an index signature
+ *     (`keyedAccessOverIndexSignature`), which is what makes tsc's type a
+ *     promise about present keys rather than a proof.
+ *
+ * Ablated by `SCRIPTC_IDXNARROW_OFF=1` together with its first seat: they
+ * are one rule, and ablating half of it would measure neither. */
+function keyedDynReadLocalAtDynWidth(
+  L: Lowerer,
+  decl: ts.VariableDeclaration,
+  init: IrExpr,
+  slot: IrType,
+): IrExpr | null {
+  if (process.env["SCRIPTC_IDXNARROW_OFF"] === "1") return null;
+  if (init.kind !== "dynKeyGet" || init.type.kind !== "dyn") return null;
+  if (slot.kind === "dyn") return null;
+  if (decl.initializer === undefined) return null;
+  let e: ts.Expression = decl.initializer;
+  while (ts.isParenthesizedExpression(e)) e = e.expression;
+  if (!keyedAccessOverIndexSignature(L, e)) return null;
+  const readT = L.mapTypeOf(L.typeOf(e));
+  if (readT === null) return null;
+  if (
+    readT.kind !== "string" &&
+    readT.kind !== "f64" &&
+    readT.kind !== "bool" &&
+    readT.kind !== "bigint"
+  ) {
+    return null;
+  }
+  if (!keyedReadBindingSameWidth(L, slot, readT)) return null;
+  if (process.env["SCRIPTC_IDXNARROW_WHY"] !== undefined) {
+    const sf = decl.getSourceFile();
+    const lc = sf.getLineAndCharacterOfPosition(decl.getStart());
+    process.stderr.write(
+      `IDXNARROW ${sf.fileName}:${lc.line + 1}:${lc.character + 1} slot-dyn was=${slot.kind}` +
+        ` :: ${decl.getText().slice(0, 60).replace(/\s+/g, " ")}\n`,
+    );
+  }
+  return init;
+}
+
 /** THE SAME BINDING AT THE ONE WIDTH THE DYN RULE CANNOT TAKE -- a
  * COMPOSITE, held in an undefined-ARMED union instead of a dyn.
  *
@@ -5023,6 +5094,7 @@ export function lowerVarDecl(L: Lowerer, decl: ts.VariableDeclaration, isLet: bo
     {
       const atWidth =
         keyedReadLocalAtDynWidth(L, init, type) ??
+        keyedDynReadLocalAtDynWidth(L, decl, init, type) ??
         keyedReadLocalShortCircuitAtDynWidth(L, init, type) ??
         keyedReadLocalShortCircuitAlreadyWidened(L, init, type);
       if (atWidth) { init = atWidth; type = DYN; }
