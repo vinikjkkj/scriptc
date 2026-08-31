@@ -1233,15 +1233,21 @@ static bool scr_net_sock_deliver(ScrNetSocket *s, const char *buf, size_t n) {
   return true;
 }
 
-/* One readable wake: read until EAGAIN/EOF, one 'data' emit per read(2)
- * chunk (Node's chunking is arrival-driven too — only the reassembled
- * bytes are contractual, the stdin stance). Peeked/unshifted bytes in
- * the receive buffer deliver first — they precede the kernel's in the
- * stream. A TLS socket drains those through the engine's bio instead. */
+/* One readable wake: read until EAGAIN/EOF OR a bounded batch, one 'data'
+ * emit per read(2) chunk (Node's chunking is arrival-driven too — only the
+ * reassembled bytes are contractual, the stdin stance). The batch bound is
+ * the loop's fairness fence: a continuously writing peer can otherwise keep
+ * every nonblocking read successful forever and strand timers plus every
+ * other fd inside this function. All poller arms are level-triggered, so
+ * unread kernel bytes make the socket ready again on the next loop turn.
+ * Peeked/unshifted bytes in the receive buffer deliver first — they precede
+ * the kernel's in the stream. A TLS socket drains those through the engine's
+ * bio instead. */
 static void scr_net_sock_append_rbuf(ScrNetSocket *s, const char *data, size_t len);
 static void scr_net_sock_transport_pump(ScrNetSocket *s);
 
 static void scr_net_sock_read(ScrNetSocket *s) {
+  size_t reads_left = 32; /* at most 2 MiB with the 64 KiB read buffer */
   if (s->tops && !s->t_est) return; /* readiness feeds the handshake pump instead */
   for (;;) {
     if (s->fd < 0 || s->user_paused) return;
@@ -1346,6 +1352,7 @@ static void scr_net_sock_read(ScrNetSocket *s) {
       }
     }
     scr_net_sock_update_read(s); /* a once-listener may have been the last consumer */
+    if (--reads_left == 0) return;
   }
 }
 
