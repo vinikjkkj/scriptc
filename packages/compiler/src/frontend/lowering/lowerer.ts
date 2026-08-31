@@ -4133,6 +4133,20 @@ export class Lowerer {
     return isIslandExpr(this, node);
   }
 
+  /** Is this LOWERED type a JavaScript array? `T[]` obviously is; a FIXED
+   * TUPLE also is, and that is the one that gets missed. A tuple lowers to
+   * a positional record shape (IrRecordShape.tuple) so each slot can keep
+   * its own type, but `[a, b]` is an ordinary JS array at runtime: Node's
+   * `Array.isArray` answers true for it, and tsc's `arg is any[]`
+   * predicate narrows to it. `readonly [A, B]` maps to the same shape and
+   * rides the same answer. Reading only `kind === "array"` is what made
+   * `Array.isArray` on a tuple fold to a silent `false` and what stopped
+   * maybeNarrow's isArray bridge from finding a proven tuple arm. */
+  isJsArrayType(t: IrType): boolean {
+    if (t.kind === "array") return true;
+    return t.kind === "record" && this.shapes.get(t.shapeId)?.tuple === true;
+  }
+
   /** True when this node's CHECKER type is `any[]`/`unknown[]` — the type
    * tsc's Array.isArray predicate narrows readonly arrays to (its `arg is
    * any[]` quirk), and what a union collapses to when such an arm absorbs
