@@ -1,0 +1,8 @@
+import-meta-refusals.ts:13:13 - error SC1090: 'import.meta.url' (a file: URL is a percent-encoded serialization, and an approximate one would compare unequal to Node's) is not supported yet
+
+  12 | export {}
+  13 | console.log(import.meta.url);
+     |             ^~~~~~~~~~~~~~~
+  14 | 
+
+  hint: 'import.meta.dirname' and 'import.meta.filename' DO lower, to the source file's build-time directory and path — use those directly instead of fileURLToPath(import.meta.url)
