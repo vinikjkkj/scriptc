@@ -69,6 +69,23 @@ const FN_OWN_SKIPPED_KEYS = new Set([
 /** True when a member name routes to a function value's own-property
  * table. `name` and `length` READ from the box (its static name and
  * declared arity) but never route a WRITE — see fnOwnPropBox's callers. */
+/**
+ * The module-location constants (__dirname/__filename and the
+ * import.meta twins) are baked from the CHECKER's file name, which is
+ * always forward-slashed. Node hands back a NATIVE path, so on a
+ * Windows target every one of them has to be re-separated or the
+ * program gets a value Node never produces: `__dirname.includes('\\')` was
+ * false where Node says true, and `path.join(__dirname, base) ===
+ * __filename` was false where Node says true — at exit 0, with no
+ * diagnostic. (Measured on v25.9.0: Node prints G:\blocks\... here.) The
+ * existing corpus missed it because every entry that touches these
+ * values is separator-agnostic by accident: path.dirname and fs accept
+ * both separators on win32. Corpus 7334 is separator-SENSITIVE.
+ */
+function nativeModulePath(L: Lowerer, fileName: string): string {
+  return L.targetPlatform === "win32" ? fileName.split("/").join("\\") : fileName;
+}
+
 export function fnOwnRoutableKey(key: string): boolean {
   return !FN_OWN_SKIPPED_KEYS.has(key);
 }
@@ -1255,7 +1272,7 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
             `'${expr.text}' in an ES module (Node defines the CJS module globals only in CommonJS modules)`,
           );
         }
-        const value = expr.text === "__dirname" ? dirname(sf.fileName) : sf.fileName;
+        const value = nativeModulePath(L, expr.text === "__dirname" ? dirname(sf.fileName) : sf.fileName);
         return { kind: "strLit", value, type: STRING, loc };
       }
       const sig = L.fnSigOf(expr);
@@ -2039,7 +2056,7 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
               `instead of fileURLToPath(import.meta.url)`,
           );
         }
-        const value = expr.name.text === "dirname" ? dirname(sf.fileName) : sf.fileName;
+        const value = nativeModulePath(L, expr.name.text === "dirname" ? dirname(sf.fileName) : sf.fileName);
         return { kind: "strLit", value, type: STRING, loc: locOf(expr) };
       }
       // `super.x`: the base chain's GETTER, called directly (super
