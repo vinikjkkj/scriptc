@@ -69,7 +69,15 @@ dependency installed. The provenance lane is not slow-looking, it is slow:
 the entry's analysis is 1,271 s and each backend's build of it is longer.
 Slow is not hung.
 
-## Why honouring `lib` costs nothing where the `/// <reference>` workaround cost 15 refusals
+## Honouring `lib` costs nothing INSIDE voip -- and that is not the same as costing nothing
+
+**Read the section below together with the one after it, which refutes its
+framing.** Everything measured here is real: inside voip's own program the
+`/// <reference>` workaround costs 15 refusals that honouring `lib` does not.
+What it does NOT establish -- and what I wrongly generalised from it -- is
+that honouring `lib` is free for OTHER programs. It is not: six test files
+that write a DOM lib at run time go red. The measurement stands; the title
+it originally carried ("costs nothing") did not.
 
 `estado-pkgstatus.md` reached voip's entry by referencing TypeScript's shipped
 `lib.dom.d.ts` into the program with a `/// <reference path="…" />`, and
@@ -104,3 +112,75 @@ replacement, not merely a way past preflight: a future `scr_wrtc.c` needs
 mapping is gated on the DOM declaration being a stdlib file. `WaSctpRelay.ts:94`
 (`Map<string, Connection>`) does not clear until it is — a wrtc runtime that
 merely satisfies the DOM interface leaves that site refusing.
+
+## The `lib`-as-floor mechanism was measured, and REVERTED. Here is what it would take.
+
+Commit `24e21a10` made `lib` a floor rather than a ceiling: es2025 always
+stands, `lib.es*` requests dropped, everything else appended, opt-in per
+program by the entry's own tsconfig. It reached voip's entry — preflight-fail
+7 → 0 — and it is **reverted**, because it reddened six test files that pass
+at base. `program.ts` here is byte-identical to `70e1fe48`.
+
+### The attribution, measured both ways uncontended
+
+| | base `70e1fe48` | with `lib`-as-floor |
+| --- | --- | --- |
+| the six files | **6 passed**, 86/87 tests | **6 failed**, 51 failed / 16 passed |
+
+`coverage.test.ts > every corpus program is 100% static` fails in **both** —
+it is a 600 s timeout under load, the known contention artifact, not the
+mechanism. Six files, not seven.
+
+### Why my control did not catch it
+
+I proved DOM-on and DOM-off produce byte-identical machine code — on probe
+sources that never name `fetch`, `RequestInit` or `Function.prototype.bind`.
+Those are the names that move. **A control drawn from sources that cannot
+contain the counterexample is not a control.**
+
+The census was wrong the same way. I enumerated committed `tsconfig*.json`
+files and concluded no corpus program requests DOM. But **six test files
+WRITE `lib: ["es2023", "dom"]` at run time** — `builtin-fn-value`,
+`fetch-dispatcher`, `fetch-static`, `fn-identity`, `module-ns-keys`,
+`request-init` — and they are exactly the six that failed, 1:1.
+`fetch-static.test.ts` states the contract in a comment: *"no node types, so
+it type-checks against the same lib set in both lanes"*. **They declare DOM
+and depend on scriptc ignoring it.** The population that matters is configs
+actually parsed, not files on disk.
+
+### Can the surface be narrowed? Not this way — and the reason is not scope
+
+Two distinct failure modes, separated by measurement:
+
+1. **`.d.ts` collision noise — 46 of the 51.** `lib.dom.d.ts` and the node
+   declarations contradict each other on `console`, `MessageEvent`,
+   `AbortController`, `DOMException`, `crypto`, `Response`/`Body` and six
+   `URL` members. Forcing `skipLibCheck` whenever an addition is taken clears
+   all of them (probed: 6 files → 2, 51 tests → 5).
+2. **A real capability regression — the remaining 5, and skipLibCheck does
+   not touch them.** DOM's `fetch` declares **two** call signatures where
+   node's declares one, so `fetch` as a value becomes
+   `SC2007 … the type declares multiple call signatures (overloads), and a
+   compiled function value is always one concrete signature`. It refuses
+   loudly rather than answering wrongly — but it compiled before and does
+   not now.
+
+Mode 2 is why narrowing the SCOPE cannot help: the damage is **inside** the
+opting program, and TypeScript offers no per-file `lib` and no per-name
+precedence between two default-library declarations. Once DOM is a default
+library, its `fetch` is authoritative for that program. The earlier block's
+instinct was right, and scoping which programs opt in does not answer it.
+
+### The mechanism that would work, and why it is different
+
+Every name in the failure population is one **node also declares**. The names
+voip needs are not: **neither `@types/node` nor scriptc's own ambient
+declarations mention `RTCPeerConnection` anywhere** (verified). The
+collision surface for a WebRTC slice is zero.
+
+So the route is the `scriptc-sqlite.d.ts` precedent, not a `lib` knob: ship a
+curated WebRTC declaration file, admit it as a stdlib root the way
+`sqliteDtsPath()` is admitted, and let it stand down when real types are
+present. What is unmeasured, and is the next block's first question: how much
+of `lib.dom.d.ts` the RTC slice transitively needs, and whether that closure
+stays clear of `Event`/`MessageEvent`, which DO collide.

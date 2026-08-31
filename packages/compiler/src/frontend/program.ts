@@ -115,68 +115,6 @@ const FORCED_OPTIONS: ts.Ts7CompilerOptions = {
   noEmit: true,
 };
 
-/** The lib floor scriptc's lowering is written against. FORCED_OPTIONS.lib
- * is exactly this, and `libWithProjectAdditions` may only ever append to
- * it. Spelled once so the two cannot drift. */
-const LIB_FLOOR = "lib.es2025.d.ts";
-
-/** `lib` is FORCED and stays forced — but as a FLOOR, not as a ceiling.
- *
- * The problem it answers: a package can declare a global type surface its
- * sources genuinely need and scriptc would refuse to see it. zapo's
- * `@zapo-js/voip` asks for `"lib": ["ES2020", "DOM"]` and every module
- * reachable from its entry passes through `relay/WaSctpRelay.ts:30-31`,
- * two type ALIASES of `RTCPeerConnection`/`RTCDataChannel`. With `lib`
- * forced to es2025 alone those are `SC0001 Cannot find name`, preflight
- * fails, and nothing in the package is analysable from its entry — a
- * package refused for naming a type, not for doing anything.
- *
- * Why the whole option cannot simply be ADOPTED: `lib` in a tsconfig is a
- * REPLACEMENT list, and adopting it verbatim would let a project NARROW
- * the global surface below what the lowering is written against. zapo's
- * own `tsconfig.packages.json` says `"lib": ["ES2020"]`; adopting that
- * would delete five years of ES declarations out from under every
- * lowering that assumes them. Narrowing is the dangerous direction and
- * nothing in this codebase wants it.
- *
- * So the rule is WIDEN-ONLY, and the split is mechanical rather than a
- * curated list: the ES progression (`lib.es*.d.ts`, which is what a
- * `target`-shaped request spells) is the floor's own business and is
- * DROPPED — es2025 already stands there. Everything else a project names
- * is a surface the ES progression does not contain at all
- * (`lib.dom.d.ts`, `lib.dom.iterable.d.ts`, `lib.webworker.d.ts`,
- * `lib.scripthost.d.ts`, `lib.decorators*.d.ts`) and is APPENDED. tsgo
- * has already normalised the names to `lib.*.d.ts` and rejected any that
- * name no shipped file, so this never invents a lib.
- *
- * Scope, exactly: this is per-PROGRAM and opt-in by the entry project's
- * own tsconfig. A program whose config names no `lib`, or names only
- * `es*` entries, gets `[LIB_FLOOR]` — byte-identical to the value before
- * this function existed. Nothing global moves; what moves is the surface
- * of the one program whose author wrote the request down.
- *
- * What it does NOT do, and this is the point: a visible type is not an
- * implemented capability. `lib.dom.d.ts` makes `RTCPeerConnection` NAME
- * something; nothing here makes one exist. The values behind those names
- * meet the same per-site fences every other unlowered global meets, and
- * `voip`'s peer connection still comes from `@roamhq/wrtc`, still fenced
- * by name at `WaSctpRelay.ts:5`. The refusal moves from "cannot find a
- * name" to "cannot build this capability", which is the true one. */
-function libWithProjectAdditions(parsedLib: unknown): string[] {
-  if (!Array.isArray(parsedLib)) return [LIB_FLOOR];
-  const out = [LIB_FLOOR];
-  for (const entry of parsedLib) {
-    if (typeof entry !== "string") continue;
-    const name = entry.toLowerCase();
-    // The ES progression is the floor's own; es2025 already covers it,
-    // and a lower one must never displace it.
-    if (name.startsWith("lib.es")) continue;
-    if (name === LIB_FLOOR || out.includes(name)) continue;
-    out.push(name);
-  }
-  return out;
-}
-
 /** JSONC syntax validation for a tsconfig text: tsgo's parseConfigFile
  * RECOVERS silently over syntax errors (probed: a hard-broken file answers
  * empty options, no diagnostic), where 5.9.3's readConfigFile reported the
@@ -248,16 +186,7 @@ function adoptProjectConfig7(
     diags.push(strictNullChecksFloorDiag(configFile));
     adopted["strictNullChecks"] = true;
   }
-  return {
-    configFile,
-    options: {
-      ...BASE_OPTIONS,
-      ...adopted,
-      ...FORCED_OPTIONS,
-      lib: libWithProjectAdditions(parsed.options["lib"]),
-    },
-    diags,
-  };
+  return { configFile, options: { ...BASE_OPTIONS, ...adopted, ...FORCED_OPTIONS }, diags };
 }
 
 /** The target project's @types/node, resolved with the OWN resolver's
