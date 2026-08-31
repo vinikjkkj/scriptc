@@ -23,3 +23,10 @@ console.log('A6', path.normalize(__filename) === __filename);
 // The separator this platform does NOT use must be absent.
 console.log('A7', __dirname.includes(SEP === '/' ? '\\' : '/'));
 console.log('A8', path.isAbsolute(__dirname), path.isAbsolute(__filename));
+
+// Every OTHER site that bakes a path must agree with these, or the program
+// sees two spellings of one file. require.main.filename is baked by its own
+// lowering: converting __filename alone made this false where Node says
+// true, and corpus 1629/4771 caught it.
+console.log('A9', require.main.filename === __filename);
+console.log('A10', path.dirname(require.main.filename) === __dirname);

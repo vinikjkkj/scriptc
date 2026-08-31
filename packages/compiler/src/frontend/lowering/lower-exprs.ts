@@ -2082,7 +2082,10 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
       // checker types the chain `string | undefined`, but the value is a
       // compile-time string.
       if (isRequireMainFilename(L, expr)) {
-        return { kind: "strLit", value: L.entry.fileName, type: STRING, loc };
+        // Native separators, the same as __filename: these two are compared
+        // to each other (corpus 1629 M1, 4771), and a mixed pair answers false
+        // where Node answers true.
+        return { kind: "strLit", value: nativeModulePath(L, L.entry.fileName), type: STRING, loc };
       }
       // The four properties Node defines on the CommonJS `require`
       // function, taken as VALUES: require.main, require.cache,
