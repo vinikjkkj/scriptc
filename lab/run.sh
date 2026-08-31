@@ -14,12 +14,19 @@ for f in "$@"; do
     node "$WT/packages/cli/dist/main.js" run "$f" --backend "$be" \
       -o "$OUT/$n.$be.exe" > "$OUT/$n.$be.txt" 2> "$OUT/$n.$be.err"
     rc=$?
-    if [ ! -s "$OUT/$n.$be.txt" ] && [ $rc -ne 0 ]; then
+    # A binary that FAULTS prints nothing and can still look like a
+    # non-build. Only a run with NO executable and a named refusal is a
+    # TRAP; empty stdout from a binary that exists is a WRONG answer.
+    if [ ! -s "$OUT/$n.$be.txt" ] && [ ! -f "$OUT/$n.$be.exe" ] && [ $rc -ne 0 ]; then
       if rg -q "error SC[0-9]+" "$OUT/$n.$be.err" "$OUT/$n.$be.txt" 2>/dev/null; then
         echo "$n $be TRAP $(rg -o 'error SC[0-9]+[^\n]{0,90}' "$OUT/$n.$be.err" "$OUT/$n.$be.txt" 2>/dev/null | head -1)"
       else
         echo "$n $be DID-NOT-RUN rc=$rc $(head -c 160 "$OUT/$n.$be.err" | tr '\n' ' ')"
       fi
+      continue
+    fi
+    if [ -s "$OUT/$n.node.txt" ] && [ ! -s "$OUT/$n.$be.txt" ]; then
+      echo "$n $be WRONG (empty stdout, exe exists, rc=$rc -- a fault, not a non-build)"
       continue
     fi
     if diff -q "$OUT/$n.node.txt" "$OUT/$n.$be.txt" >/dev/null 2>&1; then
