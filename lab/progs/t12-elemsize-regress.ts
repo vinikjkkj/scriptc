@@ -1,0 +1,11 @@
+// BYTES_ELEM_SIZE: the sizes the old inline `u8 ? 1 : 4` got wrong.
+const f = new Float64Array(new ArrayBuffer(8))
+console.log('f64', f.length, f.byteLength)
+const i = new Int8Array(new ArrayBuffer(3))
+console.log('i8', i.length, i.byteLength)
+const u = new Uint8Array(new ArrayBuffer(3))
+console.log('u8', u.length, u.byteLength)
+const w = new Int16Array(new ArrayBuffer(6))
+console.log('i16', w.length, w.byteLength)
+const q = new Uint32Array(new ArrayBuffer(8))
+console.log('u32', q.length, q.byteLength)
