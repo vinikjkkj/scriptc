@@ -515,21 +515,27 @@ export function lowerToIr(
   const targetPlatform = options.targetPlatform ?? process.platform;
   const bestEffort = options.bestEffort ?? false;
   const startupCrash = options.startupCrash ?? null;
-  // --dynamic: modules reachable only through dynamic import() of the
-  // program's own files join the compiled graph here, ONCE, before any
-  // pass constructs (nothing calls their %init at startup — the import()
-  // site's namespace builder does, on the engine microtask, Node's
-  // evaluation point for them). Inadmissible static cycles inside the
+  // Modules reachable only through dynamic import() of the program's own
+  // files join the compiled graph here, ONCE, before any pass constructs
+  // (nothing calls their %init at startup — the import() site does, one
+  // microtask in, which is Node's evaluation point for them). A STATIC
+  // build appends only the modules a SERVED site names; the other
+  // positions fence there either way. Inadmissible static cycles inside the
   // added subgraph are minted here and handed to the EMIT pass: the
   // discovery pass's diagnostics are discarded by design, and after this
   // extension of the shared array no later pass re-walks the subgraph.
   const dynamicCycleDiags: ScrDiagnostic[] = [];
-  if (dynamic) {
-    appendDynamicImportModules(program, moduleOrder, (cycle, reason) => {
-      dynamicCycleDiags.push(
-        unsupportedDiag("SC1016", { file: entry.fileName, start: 0, end: 0 }, `circular imports (${cycle}; ${reason})`),
-      );
-    });
+  {
+    appendDynamicImportModules(
+      program,
+      moduleOrder,
+      (cycle, reason) => {
+        dynamicCycleDiags.push(
+          unsupportedDiag("SC1016", { file: entry.fileName, start: 0, end: 0 }, `circular imports (${cycle}; ${reason})`),
+        );
+      },
+      dynamic,
+    );
   }
   const ffiImports = options.ffiImports ?? [];
   const validation = new Lowerer(program, entry, moduleOrder, dynamic, {
@@ -1453,6 +1459,28 @@ export class Lowerer {
    * (lowerOwnModuleImport): every `import()` of the same program module
    * shares one builder. */
   readonly dynNsBuilders = new Map<ts.SourceFile, string>();
+  /** STATIC-tier dynamic-import ALIAS PLUMBING (lower-island's
+   * dynImportBindingDeclOf): a binding introduced by `const { a } =
+   * await import("./m.ts")` maps to the exporter's own export symbol,
+   * so every read of it resolves exactly where a static `import { a }`
+   * would. The declaration itself allocates no storage.
+   *
+   * The lowering order that makes this safe is the same one the CJS
+   * require plumbing relies on: the declaration is lowered before any
+   * statement that can read the binding, in the discovery pass and the
+   * emit pass alike, so the entry is present at every use site. A read
+   * that somehow arrives first finds no entry and takes the ordinary
+   * unresolved-binding fence — a refusal, never a wrong value. */
+  readonly dynNsBindings = new Map<ts.Symbol, ts.Symbol>();
+  /** Module → the name of its synthesized once-only EVALUATION function
+   * for served static `import()` sites (dynEvalOnceOf). */
+  readonly dynEvalOnce = new Map<ts.SourceFile, string>();
+  /** The same plumbing's whole-namespace spelling (`const ns = await
+   * import("./m.ts")`): the binding symbol names the module, so
+   * moduleNsSourceFileOf answers for it and `ns.<member>` lowers
+   * through the very paths a static `import * as ns` uses — including
+   * the SC1013 refusal when `ns` is used as a first-class value. */
+  readonly dynNsModuleBindings = new Map<ts.Symbol, ts.SourceFile>();
   /** Parameters forced to the island-handle type (jsval) regardless of
    * their checker type: then-handler params whose settled value is an
    * engine handle (a dynamic import's namespace object) — paramShape's
@@ -1868,6 +1896,16 @@ export class Lowerer {
       }
     }
     if (!symbol) return null;
+    // STATIC-tier dynamic-import alias plumbing: a binding introduced
+    // by `const { a } = await import("./m.ts")` has no storage of its
+    // own — it names the exporter's export, exactly like the alias a
+    // static `import { a }` binds. Resolving here (before the alias
+    // walk) puts it on the same footing: a re-exported name still
+    // chases through, and a class still lands on its declaration.
+    {
+      const aliased = this.dynNsBindings.get(symbol);
+      if (aliased !== undefined) symbol = aliased;
+    }
     // Bare references across MERGED-namespace blocks fence here (Node's
     // transform throws ReferenceError where tsc's emit would qualify —
     // lower-namespaces.ts); a no-op for programs without namespaces.

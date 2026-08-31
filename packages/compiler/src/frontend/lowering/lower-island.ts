@@ -4,12 +4,12 @@
  * package boundary fences for node_modules-declared symbols. */
 import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
-import { DYN, F64, IrExpr, IrStmt, IrType, JSVAL, MAX_ISLAND_CALLBACK_ARITY, STRING, VOID, canBoxFuncIntoDyn, canMarshalTypedFuncIntoIsland, funcOf, islandPromisePayloadTag, isUnitType, typeEquals } from "../../ir/nodes.js";
+import { BOOL, DYN, F64, IrExpr, IrStmt, IrType, JSVAL, MAX_ISLAND_CALLBACK_ARITY, STRING, VOID, canBoxFuncIntoDyn, canMarshalTypedFuncIntoIsland, funcOf, islandPromisePayloadTag, isUnitType, typeEquals } from "../../ir/nodes.js";
 import { ISLAND_SURFACE, IslandFnEntry, STATIC_MATH_CONSTS, STATIC_MATH_FNS, boundaryIntoIslandMsg } from "./surfaces.js";
 import { requiresDynamicApiDiag, requiresDynamicPackageDiag } from "../../diagnostics/diagnostic.js";
 import { canonicalBuiltinModule, dynamicImportSpecOf, isCjsJsFile, isJsSourceFile, locOf, npmPackageNameOf, npmStaticDepSf7 } from "../program.js";
 import { isRelativeSpecifier } from "../shared.js";
-import { dynamicImportProgramTargetOf } from "./lower-modules.js";
+import { dynamicImportProgramTargetOf, staticDynImportBindingShape } from "./lower-modules.js";
 import { pureReemittable } from "./lower-exprs.js";
 import { moduleNsStarExports } from "./lower-namespaces.js";
 import { PoisonError, dynUndefinedExpr, newFnCtx, own } from "./lowerer.js";
@@ -270,6 +270,305 @@ import { PoisonError, dynUndefinedExpr, newFnCtx, own } from "./lowerer.js";
     return { kind: "jsBridgePromise", value: raw, type: { kind: "promise", inner: JSVAL }, loc };
   }
 
+/** The program's OWN module a STATIC-tier dynamic `import()` names, or
+   * null. Relative specifiers, '#' project aliases and self-names all
+   * route through the same two resolvers the collection pass uses (the
+   * checker's module symbol for a literal; the program resolver for a
+   * folded constant), so this answers exactly the set the fall-through
+   * arm below would otherwise hand to requireDynamicApi. Builtins and
+   * declaration files answer null — their own arms own them.
+   *
+   * A BARE specifier can land here too, and deliberately: a
+   * --provenance-sources package resolves to a real program source file
+   * through the checker's module symbol, so `import("@zapo-js/store-sqlite")`
+   * names a program module the same way `import("./m.ts")` does. It is
+   * NOT served today, because the module-order walk reaches its deps
+   * through dynamicImportProgramTargetOf, which takes relative
+   * specifiers only — so the dep has no %init and
+   * dynImportBindingDeclOf answers null for it. What the site gets from
+   * the message tree below is the accurate reason ("not part of the
+   * compiled module graph") and advice that works (import it
+   * statically), rather than the blanket engine refusal. Teaching the
+   * order walk this same resolver would serve those sites too; that is
+   * a separate change, with a separate subgraph to compile. */
+  export function dynImportOwnModuleOf(L: Lowerer, call: ts.CallExpression): ts.SourceFile | null {
+    if (call.expression.kind !== ts.SyntaxKind.ImportKeyword) return null;
+    if (call.arguments.length !== 1) return null;
+    const arg = call.arguments[0];
+    if (arg === undefined) return null;
+    const spec = dynamicImportSpecOf(L.checker, arg);
+    if (spec === null) return null;
+    if (ts.isStringLiteralLike(arg)) {
+      const modSym = L.checker.getSymbolAtLocation(arg);
+      for (const d of modSym ? L.checker.declarationsOf(modSym) : []) {
+        if (ts.isSourceFile(d) && !d.isDeclarationFile) return d;
+      }
+    }
+    return dynamicImportProgramTargetOf(L.program, call.getSourceFile(), spec);
+  }
+
+/** `const ns = await import("./m.ts")` / `const { a, b } = await
+   * import("./m.ts")` over one of the program's OWN modules, in a STATIC
+   * build: the two spellings the static tier serves, and the ONLY two.
+   *
+   * The declaration is ALIAS PLUMBING with no storage — exactly the
+   * shape a top-level `const { x } = require("./m")` already takes
+   * (lowerOneVarDecl's require arm): the bindings resolve through
+   * resolveValueSymbol to the exporter's own symbols, so a class comes
+   * out a CLASS and `new ServerRpc()` is the same construction a static
+   * `import { ServerRpc }` compiles, and `ns.<member>` is the same
+   * member read a static `import * as ns` compiles. What the statement
+   * leaves behind is the module's EVALUATION: one microtask park (Node
+   * evaluates a dynamically-imported module after the importer's
+   * synchronous code, never at the site) and then the dep's guarded
+   * %init.
+   *
+   * What this deliberately does NOT do is materialize a namespace
+   * OBJECT. Node's is exotic — null prototype, "Module" toStringTag,
+   * one instance per module, a [[Set]] that always fails — and the
+   * static tier has no such value; the identifier paths already refuse a
+   * static `import * as ns` used as a first-class value (SC1013) and
+   * this binding inherits that refusal by construction, which is why
+   * `typeof ns` and passing `ns` along stay refused instead of
+   * answering something Node does not.
+   *
+   * Null for every other shape (a bare `import()` expression, `.then()`,
+   * `let`, a default/rest/renamed-to-pattern binding element) — the
+   * caller keeps the fence. */
+  export function dynImportBindingDepOf(
+    L: Lowerer,
+    decl: ts.VariableDeclaration,
+  ): { dep: ts.SourceFile; call: ts.CallExpression } | null {
+    if (L.dynamic) return null; // --dynamic keeps the engine's namespace object
+    const init = decl.initializer;
+    if (init === undefined || !ts.isAwaitExpression(init)) return null;
+    const call = init.expression;
+    if (!ts.isCallExpression(call)) return null;
+    const list = decl.parent;
+    if (!ts.isVariableDeclarationList(list) || (list.flags & ts.NodeFlags.Const) === 0) return null;
+    if (call.expression.kind !== ts.SyntaxKind.ImportKeyword) return null;
+    if (call.arguments.length !== 1) return null;
+    const arg = call.arguments[0];
+    if (arg === undefined) return null;
+    const spec = dynamicImportSpecOf(L.checker, arg);
+    if (spec === null) return null;
+    if (ts.isIdentifier(decl.name)) {
+      // A plain binding is the `import * as ns` equivalence.
+    } else if (ts.isObjectBindingPattern(decl.name)) {
+      const ok = decl.name.elements.every(
+        (el) =>
+          !el.dotDotDotToken &&
+          el.initializer === undefined &&
+          el.name !== undefined &&
+          ts.isIdentifier(el.name) &&
+          (el.propertyName === undefined || ts.isIdentifier(el.propertyName)),
+      );
+      if (!ok) return null;
+    } else {
+      return null;
+    }
+    // The SERVING resolver is the module-ORDER walk's own
+    // (dynamicImportProgramTargetOf), never the wider one the message tree
+    // uses: a dep the order did not append has no %init, and serving a
+    // declaration whose module never evaluates would be worse than
+    // refusing it.
+    const dep = dynamicImportProgramTargetOf(L.program, call.getSourceFile(), spec);
+    if (dep === null || dep === L.entry) return null;
+    return { dep, call };
+  }
+
+/** The same predicate one phase later, when the module tables exist.
+   *
+   * The split is not cosmetic: collectProgram (and so collectGlobals) runs
+   * BEFORE prepareModuleInits, so initNameOf and asyncInitFiles are EMPTY
+   * while file-scope globals are being collected. Consulting them there
+   * answered "cannot serve" for every top-level declaration, which gave
+   * the binding storage, which then made the statement lowering refuse
+   * because storage existed — a served shape that worked inside a
+   * function and silently did not at file scope. collectGlobals asks the
+   * question it can answer at its phase (shape, and the order walk's own
+   * resolver, so the two agree by construction); the statement lowering
+   * adds the two facts that only exist later. */
+  export function dynImportBindingDeclOf(
+    L: Lowerer,
+    decl: ts.VariableDeclaration,
+  ): { dep: ts.SourceFile; call: ts.CallExpression } | null {
+    const found = dynImportBindingDepOf(L, decl);
+    if (found === null) return null;
+    // A module whose init is ASYNC (top-level await in the dep: its
+    // evaluation is a promise, and rooting that promise the way a cycle
+    // needs has no static twin yet), and one that never joined the
+    // compiled graph. Each keeps its own message at the import
+    // expression (lowerDynamicImportCall).
+    if (L.asyncInitFiles.has(found.dep)) return null;
+    if (L.initNameOf.get(found.dep) === undefined) return null;
+    return found;
+  }
+
+/** The statements a served STATIC-tier `const ... = await import("./m")`
+   * declaration leaves behind, and the binding registrations that make
+   * its names resolve — or null when this particular declaration cannot
+   * be served after all, in which case the caller falls through to the
+   * ordinary variable path and the import expression keeps its fence.
+   *
+   * (dynImportBindingDeclOf already ruled out the modules the tier
+   * cannot serve at all; what can still answer null here is a binding
+   * NAME that does not resolve to an export of the dep, or one that
+   * already owns storage. Either way nothing is emitted: a declaration
+   * that evaluated the module and then fenced at its reads would give
+   * two answers for one statement.) */
+  export function dynImportBindingStmts(
+    L: Lowerer,
+    decl: ts.VariableDeclaration,
+    dep: ts.SourceFile,
+    call: ts.CallExpression,
+  ): IrStmt[] | null {
+    const initName = L.initNameOf.get(dep);
+    if (initName === undefined) return null; // dynImportBindingDeclOf already checked
+    const loc = locOf(call);
+
+    // The names first: a declaration whose every binding cannot be
+    // routed must leave NOTHING behind, or the module would evaluate and
+    // the reads would then fence — two answers for one statement.
+    const pending: [ts.Symbol, ts.Symbol][] = [];
+    if (ts.isObjectBindingPattern(decl.name)) {
+      const modSym = L.checker.getSymbolAtLocation(dep);
+      const table = new Map<string, ts.Symbol>();
+      modSym?.getExports().forEach((sym: ts.Symbol, key: ts.__String) => {
+        const n = String(key);
+        if (!n.startsWith("__") && n !== "export=") table.set(n, sym);
+      });
+      // `export *` re-exports are not in the own table; the namespace
+      // sees them and so must a destructure off it.
+      const star = moduleNsStarExports(L, dep);
+      if (star.unresolved !== null) return null;
+      for (const [n, sym] of star.entries) if (!table.has(n)) table.set(n, sym);
+      for (const el of decl.name.elements) {
+        if (el.name === undefined) return null;
+        const exportName = (el.propertyName ?? el.name) as ts.Identifier;
+        const local = L.checker.getSymbolAtLocation(el.name);
+        const exported = table.get(exportName.text);
+        if (local === undefined || exported === undefined) return null;
+        pending.push([local, exported]);
+      }
+    }
+
+    const nameSym = ts.isIdentifier(decl.name) ? L.checker.getSymbolAtLocation(decl.name) : undefined;
+    if (ts.isIdentifier(decl.name) && nameSym === undefined) return null;
+    // A binding that ALREADY owns storage (a module-level global the
+    // collect pass registered before this arm existed for it) would have
+    // two homes; refuse rather than leave one of them unwritten.
+    if (nameSym !== undefined && L.globalsBySymbol.has(nameSym)) return null;
+    for (const [local] of pending) if (L.globalsBySymbol.has(local)) return null;
+
+    if (nameSym !== undefined) L.dynNsModuleBindings.set(nameSym, dep);
+    for (const [local, exported] of pending) L.dynNsBindings.set(local, exported);
+
+    const evalFn = dynEvalOnceOf(L, dep, initName, loc);
+    // `await Promise.resolve()`: one microtask park, so the module body
+    // runs on the continuation of the importer's synchronous code —
+    // Node's evaluation point — and not inline at the site.
+    const park: IrStmt = {
+      kind: "exprStmt",
+      expr: {
+        kind: "awaitExpr",
+        value: { kind: "intrinsic", name: "promise.resolve", args: [], type: { kind: "promise", inner: VOID }, loc },
+        type: VOID,
+        loc,
+      },
+      loc,
+    };
+    const init: IrStmt = {
+      kind: "exprStmt",
+      expr: { kind: "call", callee: evalFn, args: [], type: VOID, loc },
+      loc,
+    };
+    return [park, init];
+  }
+
+/** The once-only EVALUATION of a module reached through a served static
+   * `import()`, as a synthesized function shared by every site
+   * (`%dyneval.<tag>`).
+   *
+   * It exists for one cell the guarded %init alone gets WRONG, and gets
+   * wrong in the shipping --dynamic lane too (measured on v25.9.0 against
+   * a module whose body throws): Node remembers a module that threw while
+   * evaluating and rejects EVERY later import() of it with the same
+   * error, while %loaded only records "ran" — so the second import
+   * returned a half-initialized namespace, at exit 0, with the program's
+   * own catch never firing. A latch set BEFORE the init call and cleared
+   * after needs no stored error to see that: a set latch on entry means
+   * the previous evaluation left through the exception edge.
+   *
+   * The refusal it raises is a DIVERGENCE, not a fix — Node's answer
+   * is the original error and this build does not carry it. What it buys
+   * is that the wrong value never reaches the program.
+   *
+   * A re-entrant call (a dynamic import cycle) reads the same latch and
+   * takes the same refusal: Node answers a partially-initialized
+   * namespace there, which this tier equally cannot build. */
+/** A module's file name without its directory — the refusal above names
+   * the module, and an absolute path would make the program's own output
+   * depend on where the build ran. */
+  function baseNameOf(fileName: string): string {
+    const cut = Math.max(fileName.lastIndexOf("/"), fileName.lastIndexOf("\\"));
+    return cut < 0 ? fileName : fileName.slice(cut + 1);
+  }
+
+  function dynEvalOnceOf(L: Lowerer, dep: ts.SourceFile, initName: string, loc: IrExpr["loc"]): string {
+    const cached = L.dynEvalOnce.get(dep);
+    if (cached !== undefined) return cached;
+    const rawTag = L.fileTag.get(dep) ?? "";
+    const tag = rawTag === "" ? "e." : rawTag.replace(/^%/, "");
+    const name = `%dyneval.${tag}`;
+    L.dynEvalOnce.set(dep, name);
+    const flagId = `%g.${tag}%dynentered`;
+    L.globalsList.push({ id: flagId, name: "%dynentered", type: BOOL, mutable: true });
+    L.noteEdge(initName);
+    const flag: IrExpr = { kind: "varRef", localId: flagId, type: BOOL, loc };
+    const boolLit = (v: boolean): IrExpr => ({ kind: "boolLit", value: v, type: BOOL, loc });
+    L.liftedFns.push({
+      name,
+      params: [],
+      returnType: VOID,
+      locals: [],
+      // No `captures` key at all: this function is CALLED BY NAME, and a
+      // captures array (even an empty one) marks a function as a lifted
+      // CLOSURE, which both backends refuse to call directly.
+      body: [
+        {
+          kind: "if",
+          cond: flag,
+          then: [
+            {
+              // CENSUS: a runtime fence with no `[SCxxxx at file:line]` of
+              // its own — attributed by host name (`%dyneval.<tag>`).
+              kind: "runtimeFence",
+              code: "SC1090",
+              message:
+                `re-importing '${baseNameOf(dep.fileName)}' after an evaluation of it did not ` +
+                `COMPLETE: Node remembers a module whose body threw and rejects every later ` +
+                `import() of it with that same error (and answers a partially-initialized ` +
+                `namespace for a re-entrant one). This build carries neither, and the ` +
+                `namespace it could build here is the half-initialized one — so it refuses ` +
+                `instead of answering that at exit 0. Move the work that can throw out of the ` +
+                `module body into an exported function and call it: the failure then belongs ` +
+                `to the call, the module evaluates once, and re-importing it is ordinary`,
+              loc,
+            },
+          ],
+          else_: null,
+          loc,
+        },
+        { kind: "assign", localId: flagId, value: boolLit(true), loc },
+        { kind: "exprStmt", expr: { kind: "call", callee: initName, args: [], type: VOID, loc }, loc },
+        { kind: "assign", localId: flagId, value: boolLit(false), loc },
+      ],
+      loc,
+    });
+    return name;
+  }
+
 /** Dynamic `import(spec)` — the island's module system at a USER site.
    * Under --dynamic the call lowers to island.importDyn(key): the engine
    * loads the module (embedded npm graph, a shipped local .js/.mjs the
@@ -476,6 +775,61 @@ import { PoisonError, dynUndefinedExpr, newFnCtx, own } from "./lowerer.js";
           loc,
         };
         return { kind: "intrinsic", name: "promise.reject", args: [err], type: { kind: "promise", inner: DYN }, loc };
+      }
+    }
+    // A STATIC build reaching an own-module import() here means the site
+    // is not one of the two spellings the tier serves (or the module
+    // itself cannot be served). The generic SC2012 named none of that,
+    // and the advice a reader needs is different in each case — so it
+    // is spelled per case, and every spelling below is one that compiles
+    // and runs today.
+    if (!L.dynamic) {
+      const own = dynImportOwnModuleOf(L, call);
+      if (own !== null) {
+        const named = spec === null ? "the program's own module" : `'${spec}'`;
+        const shown = spec === null ? '"./m.ts"' : `"${spec}"`;
+        const positionServed = staticDynImportBindingShape(call);
+        const why =
+          !positionServed
+            ? {
+                what: `${named} in this position`,
+                how:
+                  `the static tier serves this import at a CONST binding, where the names ` +
+                  `resolve to the module's own declarations (a class stays a class): ` +
+                  `\`const ns = await import(${shown})\` for member reads and ` +
+                  `Object.keys, or \`const { a, b } = await import(${shown})\` for named ` +
+                  `exports. A namespace stored, passed on, or awaited anywhere else has no ` +
+                  `static value to be — Node's namespace object is exotic and this build ` +
+                  `materializes no stand-in for it`,
+              }
+            : own === L.entry
+            ? {
+                what: `the ENTRY module importing itself`,
+                how:
+                  `the entry's own body is already running or has run, so there is no evaluation ` +
+                  `left to order — read the exports directly instead of importing the file that ` +
+                  `declares them`,
+              }
+            : L.asyncInitFiles.has(own)
+              ? {
+                  what: `${named}, whose module graph uses TOP-LEVEL AWAIT`,
+                  how:
+                    `its evaluation is a promise, and rooting that promise the way a cycle needs ` +
+                    `has no static form yet — import it statically, or move the top-level await ` +
+                    `into an exported async function`,
+                }
+              : {
+                  what: `${named}, which is not part of the compiled module graph`,
+                  how: `import it statically so the build compiles it`,
+                };
+        L.pushDiag({
+          code: "SC2012",
+          message: `'import()' of ${why.what} runs in the embedded dynamic engine, which this build does not include`,
+          loc,
+          milestone: "M4",
+          hint: why.how,
+        });
+        throw new PoisonError();
       }
     }
     L.requireDynamicApi("'import()'", call);
