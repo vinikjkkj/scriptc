@@ -211,3 +211,48 @@ pool that is not sized for this workload.
 
 This lane ranks **churn**. Residency is a different list and needs the
 `-DSCR_PROF_LIVE` add-on, which charges a free back to the allocating site.
+
+### CPU per function (compiled lane, shipping-shaped binary)
+
+`tests/perf/sampler` profiles by suspend-and-sample, so it needs none of the
+link-time walls that close `-finstrument-functions` for a program this size.
+Four things it had to learn, each found by measurement:
+
+1. **Idle threads outvote the work.** A first cut put 99% of hits in ntdll's
+   wait stubs. Sampling is gated on each thread's own cycle delta.
+2. **A thread in a syscall parks its user RIP on an ntdll stub**, so the
+   sampler walks to the first frame inside the program image.
+3. **The "program image" test must be the executable sections, not the
+   module.** A module-wide test accepted an address in `.rdata` as a frame
+   and reported a confident **97%** for a symbol that cannot execute.
+   Restricting to `IMAGE_SCN_MEM_EXECUTE` sections dissolved it entirely.
+4. **The PE carries no debug directory and no DWARF** (`rva=0 size=0`, and
+   `nm` reports no symbols), so DbgHelp can never symbolise the live process
+   however the search path is set. The `.pdb` beside the binary is a valid
+   MSF 7.00 file, so symbolisation is done offline: load the **`.pdb`
+   itself** as the module image at a synthetic base and resolve each sample
+   by RVA.
+
+`send_1to1`, 400 contacts x 2 devices, 1200 messages, program-code samples
+with `+0x...` variants merged into their base function:
+
+| self%  | function                   |
+| ------ | -------------------------- |
+| 21.05% | `crypto_x25519_dirty_fast` |
+| 14.74% | `ge_scalarmult_base`       |
+| 7.37%  | `crypto_eddsa_key_pair`    |
+| 5.26%  | `g_rounds`                 |
+| 3.16%  | `scr_clear_immediate`      |
+| 3.16%  | `scr_str_cp_at`            |
+
+**51.6% of program-code samples are crypto**, which agrees with node's
+control for the same phase (`createPrivateKey` 59.73%, `feMul` 25.41%). The
+two lanes are doing the same work in the same proportions -- and the
+compiled lane does it in **half** node's user time. Nothing in the user-mode
+profile explains the gap, which is the same conclusion the fault counters
+reached from the other direction.
+
+Caveat worth keeping: only ~95 of ~1,355 samples land in program code,
+because the busiest-thread heuristic still frequently picks a thread parked
+in a syscall. The ranking is stable across runs and the dropped samples are
+uniformly non-program, but the absolute percentages are thin.
