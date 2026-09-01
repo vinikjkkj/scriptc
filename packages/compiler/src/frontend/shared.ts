@@ -82,6 +82,17 @@ export function fallbackDtsPath(): string {
  * that package and this ambient module would be dead weight at best and a
  * merge conflict at worst). The lowering recognizes EITHER declaration
  * source by provenance. */
+/** Path of the shipped WebRTC data-channel declarations — the global
+ * `RTCPeerConnection`/`RTCDataChannel` surface `lib.dom.d.ts` would
+ * otherwise supply. Unlike the sqlite and node fallbacks this one has no
+ * stand-down condition: scriptc forces `lib: ["lib.es2025.d.ts"]`, so
+ * there is no configuration in which these globals arrive from anywhere
+ * else, and `@roamhq/wrtc`'s own .d.ts re-exports the globals rather than
+ * declaring them (it cannot stand in). See ambient/scriptc-wrtc.d.ts. */
+export function wrtcDtsPath(): string {
+  return tsgoPath(require.resolve("@scriptc/compiler/scriptc-wrtc.d.ts"));
+}
+
 export function sqliteDtsPath(): string {
   return tsgoPath(require.resolve("@scriptc/compiler/scriptc-sqlite.d.ts"));
 }

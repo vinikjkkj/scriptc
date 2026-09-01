@@ -64,6 +64,7 @@ import {
   cjsExportDiscardReason,
   fallbackDtsPath,
   sqliteDtsPath,
+  wrtcDtsPath,
   isCjsExportTableLiteral,
   isJsSourceFile,
   isNodeEsmFile,
@@ -1606,6 +1607,7 @@ export class Lowerer {
    * is a program root only for a project with no better-sqlite3 types of
    * its own, so this path may name no source file at all. */
   readonly sqliteAmbient = sqliteDtsPath();
+  readonly wrtcAmbient = wrtcDtsPath();
   /** The one mapType context: registries + hooks, assembled in the
    * constructor (typeParamResolver reads the CURRENT instantiation bindings
    * through `this`, so the same ctx serves generic bodies too). */
@@ -12109,6 +12111,12 @@ export class Lowerer {
     // declaration file and every use of it meets the SC2013 fence the
     // whole unit exists to answer.
     sf.fileName === this.sqliteAmbient ||
+    // The shipped WebRTC data-channel declarations, and for the same
+    // reason as the row above: they resolve through @scriptc/compiler,
+    // so without this row they classify as an npm declaration file and
+    // the stdlib type mappings in types.ts -- every one of which is
+    // gated on isStdlibFile -- decline to see them.
+    sf.fileName === this.wrtcAmbient ||
     this.program.isSourceFileDefaultLibrary(sf) ||
     (sf.isDeclarationFile && isNodeTypesPath(sf.fileName));
 
