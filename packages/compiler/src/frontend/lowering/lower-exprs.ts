@@ -1760,6 +1760,33 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
           );
         }
       }
+      // A bare name NOTHING in the program declares. ECMA-262 6.2.5.5:
+      // GetValue over an unresolvable Reference throws ReferenceError
+      // "<name> is not defined", and that is what Node does -- measured
+      // against v25.9.0, where `NoSuchGlobalXyz`, `NoSuchGlobalXyz.k` and
+      // `new NoSuchGlobalXyz()` all throw exactly it. This site used to
+      // answer the generic "a binding form with no lowering" fence, which
+      // is the SAME THROW carrying a compiler-internals message where the
+      // language has a specified one -- a refusal standing in for an
+      // answer the runtime already implements (global.undefRead, the
+      // `declare const __VERSION__` stance).
+      //
+      // JAVASCRIPT sources only, and that is the whole reach: an
+      // unresolved name in a TypeScript source is tsc's TS2304, which
+      // preflight passes through as SC0001, and the build fails before
+      // lowering ever runs. Program .js is checked the same way -- what
+      // survives to here is the JS whose checker errors preflight
+      // suppresses ON PURPOSE (nodeModulesJsSuppressed /
+      // npmStaticFileSuppressed): node_modules JS, --npm-static packages
+      // and workspace-linked shipped JS. That third-party-bundle world is
+      // exactly where a name this host does not carry gets probed.
+      //
+      // The direction is safe by construction: every name that reaches
+      // this line REFUSED a moment ago, so the only thing that changes is
+      // WHICH error the site throws. A fence is never turned into a value.
+      if (isJsSourceFile(expr.getSourceFile()) && L.resolveValueSymbol(expr) === null) {
+        return nsUndefRead(L, expr.text, expr, ambientUndefReadType(L, expr) ?? DYN);
+      }
       L.rejectUnresolved(expr, `the reference to '${expr.text}' (a binding form with no lowering)`);
     }
     if (ts.isArrowFunction(expr) || ts.isFunctionExpression(expr)) {
