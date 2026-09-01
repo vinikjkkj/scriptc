@@ -287,3 +287,77 @@ but its selection is not biased toward frequently-waking threads -- and the
 agreement between its crypto share (51.6%) and node's control (59.73% +
 25.41%) is the reason to trust it. The sampler is also process-wide, not
 phase-scoped; it does not read the phase markers `cpuphase` uses.
+
+## Every number above was taken on `send_1to1` only
+
+Stated plainly because it was not before: the memory table is `send_1to1` at
+**200 contacts x 2 devices, 600 messages**, and the first CPU table is
+`send_1to1` at **400 x 2, 1200 messages** -- both *reduced* against the
+bench's full **1000 x 2, 1000 messages, 4 groups x 500 members**. Allocation
+counts scale and rankings hold, but the user's 20 MB target is against the
+full workload, so a reduced number must never be compared to a full-workload
+one from another file. The sampler was also **process-wide**, so those
+percentages were the whole run's and not the phase's.
+
+Both are now fixed: the sampler reads the same `[phase-begin]`/`[phase-end]`
+markers `cpuphase` emits, and weights each sample by its thread's cycle
+delta instead of picking one busiest thread.
+
+### Three compute phases, full workload, shipping binary
+
+`send_1to1`, `send_group` and `recv_group`, 1000 x 2, 1000 messages,
+4 groups x 500 members. **The three are not the same profile, which is
+exactly why one table could not stand for all three:**
+
+| phase        | dominant self-time                                            |
+| ------------ | ------------------------------------------------------------- |
+| `send_1to1`  | `ge_scalarmult_base` 17.6%, `crypto_x25519_dirty_fast` 16.0%, `g_rounds` 12.4%, `crypto_eddsa_key_pair` 5.9% -- ~52% crypto |
+| `send_group` | `scr_arr_slice` **21.0%**, `scr_arr_join` 7.3%, `add_and_denorm128` 7.0%, `feMul` 5.8% -- array work, *not* crypto |
+| `recv_group` | `scr_win_run_sync` 66.9%, then `scr_jb_put_json_str` 8.9%, `scr_string_to_number` 6.9% -- JSON and string->number |
+
+`send_1to1`'s ~52% crypto reproduces the 51.6% measured independently on the
+instrumented binary, which is the cross-check that the phase-scoped numbers
+are sound. **`send_group` and `recv_group` had never been attributed at all**
+and neither is crypto-bound.
+
+`scr_win_run_sync` at 66.9% in `recv_group` is the same child-supervision
+pump refuted above, and it is **not** claimed as a cost here: it survived
+cycle-weighting, which the earlier artifact did not, but it has not been
+independently confirmed and the earlier refutation stands until it is.
+
+### Residency: peak versus steady state (the `live` lane)
+
+`-DSCR_PROF_LIVE`, all three phases, **full workload**:
+
+    allocations 15,091,036   bytes 1.65 GiB   freed 94.5%
+    live heap PEAK  77.11 MiB      live heap AT EXIT  38.63 MiB
+    peak RSS 224.40 MiB (includes the profiler's own 53 MiB table)
+    ptrLost 0   freeUnknown 0
+
+**The residency ranking is the reverse of the churn ranking**, as the lane's
+own header predicted:
+
+| peak bytes | exit bytes | site                                  |
+| ---------- | ---------- | ------------------------------------- |
+| 34,832,200 | 16,799,672 | `scr_string.c:128` string allocation  |
+| 23,777,200 | 20,781,408 | `scr_cycle.c:150` cycle-collected obj |
+| 8,720,992  | 0          | `scr_array.c:172` array data          |
+| 2,499,560  | 8,204      | `scr_bytes.c:52` bytes payload        |
+| 1,567,520  | 0          | `scr_async.c:1331` **the fiber**      |
+
+**This reorders the work.** The fiber is **#1 by churn** (164,711 allocs,
+26.35 MiB ever allocated) and **holds 1.57 MiB at peak and zero at exit** --
+so removing it cuts allocations and page faults but takes almost nothing off
+peak RSS. Peak is set by **strings (34.8 MiB) and cycle-collected objects
+(23.8 MiB), together 76% of the live peak**; retention at exit is those same
+two at 97%. Runtime sites hold **99.3%** of the peak.
+
+Two smaller retainers never shrink: `scr_cycle.c:330` (roots buffer) and
+`scr_cycle.c:414` (white list) both `realloc` by doubling and hold 0.5 MiB
+and 1.0 MiB at exit having never been given back.
+
+**And the gap the arena is aimed at is now a number.** Live heap peaks at
+77.11 MiB while peak RSS is 224.40 MiB; subtracting the profiler's own
+53 MiB table leaves roughly 171 MiB of RSS behind 77 MiB of live heap. The
+remainder is image, stacks, and allocator slack that the churn re-commits --
+which is the same 28.7x page-in ratio seen from the other side.
