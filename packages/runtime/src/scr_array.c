@@ -618,6 +618,12 @@ ScrArr *scr_arr_slice(ScrArr *a, double start, double end) {
   size_t from = s0 <= 0 ? 0 : s0 >= len ? a->len : (size_t)s0;
   size_t to = e0 <= 0 ? 0 : e0 >= len ? a->len : (size_t)e0;
   size_t n = to > from ? to - from : 0;
+#ifdef SCR_ARRCEN_ON
+  /* tests/perf/arrcensus/scr_arr_census.h. Inert -- the switch is undefined --
+   * unless that header is -include'd, which is the only way to tell a
+   * quadratic here from a million small copies. */
+  scr_arrcen_note_slice((long long)a->len, (long long)n, (int)a->elem);
+#endif
   ScrArr *out =
       a->elem == SCR_ELEM_REF
           ? scr_arr_new_ref(a->elem_retain, a->elem_release, a->elem_trace, n ? n : 1)
@@ -661,6 +667,10 @@ ScrStr *scr_arr_join(ScrArr *a, ScrStr *sep) {
         scr_trap("scriptc: internal error: join on a ref-element array\n");
     }
   }
+#ifdef SCR_ARRCEN_ON
+  scr_arrcen_note(SCR_ARRCEN_JOIN_SRC, (long long)a->len);
+  scr_arrcen_note(SCR_ARRCEN_JOIN_OUT, (long long)len);
+#endif
   ScrStr *out = scr_str_new(buf, len);
   free(buf);
   return out;
