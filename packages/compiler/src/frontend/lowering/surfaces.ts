@@ -2327,6 +2327,21 @@ export const BUILTIN_MODULE_FENCE_HINTS: Record<string, Record<string, string | 
     "WorkerGlobalScope",
     "importScripts",
     "XMLHttpRequest",
+    // The two runtime-identity probes, admitted on the same evidence and
+    // read the same way (`hasOwnProperty.call(globalThis, n)` and `typeof`,
+    // main thread AND a `node:worker_threads` Worker, node v25.9.0):
+    //
+    //   Bun    own=false typeof "undefined"  |  Deno   own=false typeof "undefined"
+    //
+    // in both thread kinds -- against `fetch`, `navigator`, `Blob` and
+    // `process` read own=true in the same run, which is the control that
+    // says the probe can tell present from absent. A scriptc binary is
+    // neither Bun nor Deno, so the compiled answer and the oracle's agree.
+    // `isBunRuntime()` in zapo-js `src/util/runtime.ts:20` is the measured
+    // consumer: it is called at module scope by store-sqlite/connection.ts,
+    // so it stands in front of every driver that opens a connection.
+    "Bun",
+    "Deno",
   ]);
 
   export function absentGlobalMemberValue(L: Lowerer, access: ts.PropertyAccessExpression): IrExpr | null {
@@ -2411,8 +2426,75 @@ export const BUILTIN_MODULE_FENCE_HINTS: Record<string, Record<string, string | 
     // `!!globalThis.window` and `!!globalThis.WorkerGlobalScope` are the
     // first two statements of Emscripten's module glue, and they REFUSED
     // where Node answers `undefined`.
-    if (gp === undefined && NODE_ABSENT_GLOBALS.has(name) && isJsSourceFile(access.getSourceFile())) {
-      return { kind: "unitLit", unit: "undefined", type: UNDEFINED_T, loc: locOf(access) };
+    if (gp === undefined && NODE_ABSENT_GLOBALS.has(name)) {
+      if (isJsSourceFile(access.getSourceFile())) {
+        return { kind: "unitLit", unit: "undefined", type: UNDEFINED_T, loc: locOf(access) };
+      }
+      // A TYPESCRIPT source cannot reach this line without an assertion on
+      // the receiver: `globalThis.Bun` alone is a TYPE ERROR ("Property
+      // 'Bun' does not exist on type 'typeof globalThis'"), reported as
+      // SC0001 long before lowering. So the only shape that arrives here is
+      // the one the member fence below TELLS the programmer to write:
+      //
+      //   (globalThis as { readonly Bun?: unknown }).Bun
+      //
+      // and it declined at "undeclared", because the loop above unwraps the
+      // `as` to prove the receiver is globalThis and then looks the property
+      // up on the UNWRAPPED type -- discarding the very assertion that
+      // declares the member optional. The advice and the implementation
+      // disagreed, and the chain then fenced on the receiver and blamed
+      // `globalThis`, which is the mis-blame the memberFence below exists to
+      // prevent.
+      //
+      // WHY THE ASSERTION IS NOT THE EVIDENCE. An assertion is a claim, and
+      // a claim is exactly what this file already refuses to fold on --
+      // `(globalThis as { fetch?: T }).fetch` must NOT read `undefined`,
+      // because node v25.9.0 HAS fetch (own=true in the run above). So the
+      // assertion is only the SITE condition: it says the program admits an
+      // absence and gives `undefined` somewhere to go. The EVIDENCE stays
+      // the measured table, identical to the JavaScript arm. Both must hold.
+      const assertedOptional = ((): boolean => {
+        let node: ts.Expression = access.expression;
+        let sawAssertion = false;
+        for (;;) {
+          if (ts.isParenthesizedExpression(node)) { node = node.expression; continue; }
+          if (ts.isAsExpression(node) || ts.isSatisfiesExpression(node)) { sawAssertion = true; node = node.expression; continue; }
+          if (ts.isNonNullExpression(node)) { node = node.expression; continue; }
+          break;
+        }
+        if (!sawAssertion) return false;
+        const ap = L.checker.getPropertyOfType(L.typeOf(access.expression), name);
+        if (ap === undefined) return false;
+        if ((ap.flags & ts.SymbolFlags.Optional) !== 0) return true;
+        const at = L.checker.getTypeOfSymbol(ap);
+        return (at.flags & ts.TypeFlags.Undefined) !== 0 ||
+          (at.isUnionType() && at.getTypes().some((a) => (a.flags & ts.TypeFlags.Undefined) !== 0));
+      })();
+      if (assertedOptional) {
+        const st = L.mapTypeOf(L.typeOf(access));
+        const sloc = locOf(access);
+        if (process.env["SCRIPTC_ABSENTGLOBAL_WHY"] !== undefined) {
+          console.error(`[absentglobal] measured-absent globalThis.${name} site=${st?.kind ?? "unmapped"} at ${sloc.file}:${sloc.start}`);
+        }
+        const su: IrExpr = { kind: "unitLit", unit: "undefined", type: UNDEFINED_T, loc: sloc };
+        // `unknown` and `any` map to nothing static, and that is the
+        // ordinary spelling of this probe (`{ Bun?: unknown }`): there is no
+        // slot for `undefined` to fail to fit, exactly as in a JS source.
+        // A `dyn` site takes the same answer for the same reason the
+        // JavaScript arm above does not consult the site at all: values on
+        // the checked-dynamic tree have no static slot for `undefined` to
+        // fail to fit. `{ Bun?: unknown }` is the ordinary spelling of this
+        // probe and `unknown` maps to `dyn`, so this is the arm the
+        // measured consumer actually takes.
+        if (st === null || st.kind === "undefinedT" || st.kind === "dyn") return su;
+        if (st.kind === "union") {
+          const stag = L.armTag(st.unionId, UNDEFINED_T);
+          if (stag >= 0) return { kind: "unionWrap", unionId: st.unionId, tag: stag, value: su, type: st, loc: sloc };
+        }
+        // Any other site kind keeps the fence: the assertion admits the
+        // absence but the site cannot hold it, and a wrong value is worse
+        // than a refusal that names the line.
+      }
     }
     if (gp === undefined) return why("undeclared");
     const decls = L.checker.declarationsOf(gp);
