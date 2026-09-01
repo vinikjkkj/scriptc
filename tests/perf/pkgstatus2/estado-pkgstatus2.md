@@ -976,3 +976,188 @@ the package and the diagnostic (§8, §9). Neither was forced.
 
 The orchestrator has a gate in flight on `610073a4`. **This block did not start
 one and is not starting one.**
+
+---
+
+## 19. Design — per-`(specifier, name)` admission of a type-only export. NOT implemented.
+
+Written while the box was held for a sibling's gate. Nothing in this section
+was built; §19c is a measurement that **changes the recommendation** from the
+one this block gave in §15, and it was found by running the direction the
+orchestrator asked for.
+
+### 19a. The argument, stated plainly
+
+`npm-static.ts:6-18`: *"a declaration is a CLAIM about the body, and the
+compiled artifact must be built from what the body provably is, not from what
+the declaration says it should be."* protobuf earned that rule — `encode`
+declared with 2 parameters against an actual 3, **0 of 642 agreeing**.
+
+A type-only export is different in kind, and for one reason only:
+
+> **It emits no code and there is no body for it to contradict.**
+
+`export interface RedisOptions` produces no runtime value; `ioredis`'s JS module
+genuinely does not export that name, which is exactly why inference reports
+`Module '"ioredis"' has no exported member 'RedisOptions'`. A claim with nothing
+to contradict cannot mis-describe a body — the protobuf failure needs two
+accounts of one thing, and here there is one account of nothing.
+
+That argument is sound and it is **not sufficient**, which is what §19c shows.
+
+### 19b. The two directions of disagreement, both measured
+
+Harness: `claimlab/*.js` (a compiled JS body) + a hand-written interface over
+it, built on both backends and run against node v25.9.0.
+
+| direction | shape | binary | node | verdict |
+| --- | --- | --- | --- | --- |
+| **arity under-claim** (the protobuf shape) | body takes 3, claim takes 2 | `1:2:MISSING` | `1:2:MISSING` | **MATCH byte-exact**, 660,992 bytes — JS's own rule for a missing argument is `undefined`, and the compiler models it |
+| **over-claim** | claim declares `version` and `decode()`; the body has neither | `Uncaught TypeError: expected function at $.decode, got undefined` | prints 3 lines, catches its own TypeError | **TRAP** — refuses at the boundary and names the member |
+| **data under-claim** | claim says `count: string`; the body's is `number` | `Uncaught TypeError: expected string at $.count, got number` | prints the value | **TRAP** — names the member and both types |
+| **method-return under-claim** | claim says `find(k): string`; the body returns `string \| null` | **prints `2 miss, typeof: string`** | prints `object` | **WRONG**, then a failure |
+
+### 19c. The direction nobody had measured is the one that breaks the exception
+
+`drivers/underclaim-probe3.ts` — **no `as` cast anywhere**, just an annotation,
+over a body whose export infers as `any` (`JSON.parse(...) && { … }`, the
+ordinary shape of bundler-emitted JS):
+
+```ts
+const c: Underclaimed = makeCodec()      // interface says find(k): string
+console.log('2 miss, typeof:', typeof c.find('miss'))
+```
+
+```
+binary   2 miss, typeof: string          <- WRONG, printed, before anything fails
+node     2 miss, typeof: object
+binary   Uncaught TypeError: expected string at $, got null   <- only afterwards
+```
+
+and in the sibling probe where the consumer then reads `.length` off it
+(`underclaim-probe2.ts`), the binary **segfaults**, exit 139, on both backends.
+
+Three things follow, and they are the design:
+
+1. **A materialising boundary check can validate DATA and cannot validate a
+   future RETURN VALUE.** Every safe row in §19b is a property the check could
+   inspect at the boundary. The unsafe row is a method: nothing at the boundary
+   can know what `find` will return later.
+2. **The assignability check that would otherwise catch it does not fire when
+   the body's inferred type is `any`** — and `any` is precisely what inference
+   yields for the bundler-emitted JS this lane exists to compile. The check that
+   makes the exception safe is absent exactly where the exception is needed.
+3. So the admissible rule is **not** "the name is type-only". It is:
+
+   > Admit a type-only export at `(specifier, name)` only if **no member of the
+   > admitted declaration is a callable whose result the program consumes**, or
+   > the call's return is checked at the call. Data shapes are admissible;
+   > method-bearing interfaces returned BY the package are not, on the same
+   > evidence that made protobuf's `.d.ts` inadmissible.
+
+### 19d. Re-classified against that rule — and no package is fully closed
+
+| name | sites | kind | admissible under §19c? |
+| --- | --- | --- | --- |
+| `FieldPacket` (mysql2) | 1 | pure data | **yes** |
+| `ResultSetHeader` (mysql2) | 1 | pure data | **yes** |
+| `QueryResult` (pg) | 2 | pure data | **yes** |
+| `PoolOptions` (mysql2) | 3 | data bag, consumer-supplied callbacks only | **yes** — the callbacks travel INTO the package; the compiler compiles the consumer's own body for them |
+| `PoolConfig` (pg) | 3 | same | **yes** |
+| `RedisOptions` (ioredis) | 2 | same (`retryStrategy`, `reconnectOnError`) | **yes** |
+| `ChainableCommander` (ioredis) | 1 | method-bearing, **returned by** the package | **no** |
+| `Pool` (mysql2/promise) | 4 | method-bearing, returned by the package | **no** |
+| `PoolClient` (pg) | 9 | method-bearing, returned by the package | **no** |
+| `Pool` (pg) | 4 | **a VALUE**, not type-only at all | **no** — §19e |
+
+Member kinds were read out of each package's own declarations, so the column is
+checkable: `@types/pg/index.d.ts:104` (`QueryResult`: `rows`, `rowCount`, `oid`,
+`fields`, `command` — data), `:49` (`PoolConfig`: `log`, `Client`, `onConnect`,
+`verify`, all supplied BY the consumer), `:320`
+(`PoolClient extends Client { release(...) }`, and `Client` carries `query()`
+returning a result — returned BY the package);
+`ioredis/built/redis/RedisOptions.d.ts` (`Connector`, `retryStrategy`,
+consumer-supplied) against `built/utils/RedisCommander.d.ts`
+(`ChainableCommander extends RedisCommander<…>` — every Redis command, reached
+as `pipeline: ChainableCommander`); mysql2's
+`ResultSetHeader.d.ts` and `FieldPacket.d.ts` (both pure data) and
+`typings/mysql/lib/Pool.d.ts:12` (`PoolOptions`, data; the callables at `:54-68`
+are members of the `Pool` CLASS at `:49`, not of the options bag).
+
+**This retracts §15c.** The earlier conclusion — "closes `ioredis` 3/3 and
+`mysql2` 9/9 completely" — was reached before the method-return direction was
+measured, and it does not survive it:
+
+| package | sites | admissible | residue |
+| --- | --- | --- | --- |
+| `ioredis` | 3 | 2 (`RedisOptions`) | **1** — `ChainableCommander` |
+| `mysql2` | 9 | 5 (`PoolOptions`, `FieldPacket`, `ResultSetHeader`) | **4** — `Pool` |
+| `pg` | 18 | 5 (`PoolConfig`, `QueryResult`) | **13** — `PoolClient` ×9, `Pool` ×4 |
+
+The fallback loop is **all-or-nothing per package**, so a residue of one is a
+residue: on this rule alone, **no store becomes static**. `ioredis` is one
+interface away rather than three, which is a real improvement in the size of the
+question, and it is not the same claim as before.
+
+### 19e. `pg`'s remaining four need a different answer, and its missing `.d.ts` makes the declaration route worse, not better
+
+`pg`'s `Pool` is not a type-only export in any sense. `@types/pg/index.d.ts:184`
+declares `export class Pool extends events.EventEmitter` — a value — and pg's
+runtime really has one: `pg/lib/index.js` ends with
+`module.exports = new PG(clientConstructor)`, and `PG`'s constructor does
+`this.Pool = poolFactory(this.Client)` (`:25`). Inference cannot follow a
+property assigned onto an instance inside a constructor, so the name is
+**a value inference cannot reach**, which the doctrine says must come from the
+body.
+
+Three routes, and only one of them respects the doctrine:
+
+1. **Teach inference to reach it** — follow `module.exports = new C(...)` to
+   `C`'s constructor assignments. This is a JS-inference change, not a
+   declaration change, and it is the doctrine-respecting one: the answer still
+   comes from the body. **And the body is already there** — `pg-pool` is one of
+   the 13 packages that compiled statically in §7, so the class `Pool` really is
+   is a compiled program module; only pg's export surface hides it.
+2. **Refuse** — leave `pg` on the island and say so. Honest, and it is where pg
+   is today.
+3. **Admit `@types/pg`'s `class Pool`** — forbidden. It is a claim about a body
+   that exists and is compiled, which is the protobuf case exactly.
+
+**Shipping no declarations of its own makes pg's case worse.** For `ioredis` and
+`mysql2`, an admitted claim is at least the package author's own account of
+their own JS, versioned with it. `@types/pg` is a **third-party model**,
+versioned separately (`@types/pg@8.23.1` against `pg@8.23.0`), of a body the
+compiler can already read. Under a doctrine whose whole point is that the body
+outranks the claim, the weakest possible source of a claim is a stranger's model
+of it. So pg should not be the package the exception is designed around, and
+route 1 is what pg actually needs.
+
+### 19f. What an implementer would have to build, and the order
+
+1. **A classifier, per `(specifier, name)`** — not per package. `Pool` is
+   `export interface` at `mysql2/promise` (`promise.d.ts:92`) and
+   `declare class` at the `mysql2` root (`typings/mysql/lib/Pool.d.ts:49`, with
+   `exports.Pool = Pool` in `index.js:26`). It must load the package's shipped
+   declarations in a **side** program (they are hidden from the main one by the
+   virtual-FS hooks) and ask, for the module the program actually imported,
+   whether the symbol has `SymbolFlags.Value`. A name with a value meaning is
+   never admissible.
+2. **A member test on each admitted declaration** — §19c's rule. Every member
+   that is a callable whose result the program consumes disqualifies the name.
+   This is the step that keeps the exception out of the protobuf case, and it is
+   the step §15 did not have.
+3. **A synthesised, filtered declaration** exposed as the package's types while
+   the JS keeps supplying every value — the mechanism question, and the one
+   with real design risk: TypeScript will not merge an ambient module
+   declaration with an inferred module surface cleanly, so this probably means
+   emitting a `.d.ts` that re-exports the inferred value surface and adds the
+   admitted type-only names.
+4. **The census as the acceptance test.** `SCRIPTC_NPMSTATIC_WHY` (shipped in
+   `14c78654`) already names every breaking site; the acceptance criterion is
+   that the admissible names disappear from that list and the inadmissible ones
+   remain, with the fallback note naming them.
+
+**Do 2 before 3.** A rule that admits `ChainableCommander` or `PoolClient`
+produces the §19c wrong answer, and this block measured that it is a printed
+wrong line followed by either a checked TypeError or a segfault — never a clean
+refusal.
