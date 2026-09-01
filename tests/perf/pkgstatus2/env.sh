@@ -1,0 +1,16 @@
+export ZIG_GLOBAL_CACHE_DIR='G:\blocks\pkgstatus2\.zig'
+export ZIG_LOCAL_CACHE_DIR='G:\blocks\pkgstatus2\.zig'
+export SCRIPTC_CACHE_DIR='G:\blocks\pkgstatus2\.cache'
+export SCRIPTC_PROVENANCE_CACHE='G:\blocks\wamfix-lab\prov'
+export TMP='G:\blocks\pkgstatus2-tmp'
+export TEMP='G:\blocks\pkgstatus2-tmp'
+export TMPDIR='G:\blocks\pkgstatus2-tmp'
+export SCRIPTC_CC=zigcc
+export SCRIPTC_TEST_CC='zig cc'
+export SCRIPTC_TARGET=x86_64-windows-gnu
+export SCRIPTC_TEST_WORKERS=2
+export SCRIPTC_GENERIC_SLOT=1
+export WT='G:/blocks/pkgstatus2'
+export LAB='G:/blocks/pkgstatus2-lab'
+export PATH="/c/Users/vinicius/AppData/Local/nvm/v25.9.0:/g/zapo-work/tools/zig:$PATH"
+export NODE25='/c/Users/vinicius/AppData/Local/nvm/v25.9.0'

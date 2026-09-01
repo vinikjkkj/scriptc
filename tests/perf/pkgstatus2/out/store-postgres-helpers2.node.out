@@ -1,0 +1,16 @@
+6 toBytes uint8: 00017f80ff
+7 toBytes view: 090807
+8 toBytes rejects a number: expected binary data
+9 toBytesOrNull null: null
+10 toBytesOrNull undefined: null
+11 toBytesOrNull bytes: 00017f80ff
+12 prefix ok: ok
+13 prefix bad: tablePrefix must contain only letters, numbers, and underscores
+14 prefix empty: ok
+15 equal: true
+16 not equal: false
+17 timing equal: true
+18 timing length mismatch: false
+19 limit: 10
+20 limit default: 50
+21 limit 0 throws: invalid query limit: 0
