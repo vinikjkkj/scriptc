@@ -858,3 +858,49 @@ and STAGE 4 claim that it was came from measuring through wasm3, whose memory
 implementation commits eagerly. Corrected here, and the correction is the
 whole difference between "voip cannot be done under the target" and "voip
 costs about a megabyte of RSS and a megabyte of code".
+
+## STAGE 9 — the next rung, evidenced but NOT applied (the gate was running)
+
+The glue dies on its FIRST statement: `globalThis.window`. `surfaces.ts`'s
+`absentGlobalMemberValue` declines it at guard 1 —
+
+    if (gp === undefined) return why("undeclared");
+
+— and the comment above that line explains why, and is right: "NO DECLARATION
+IS NOT EVIDENCE OF ABSENCE", listing globals node really has that
+@types/node 24.13.3 does not declare. Answering `undefined` for those was
+measured WRONG.
+
+But the complement is measurable. Read off **node v25.9.0** directly:
+
+    window              own=false  typeof=undefined
+    WorkerGlobalScope   own=false  typeof=undefined
+    document            own=false  typeof=undefined
+    self                own=false  typeof=undefined
+    importScripts       own=false  typeof=undefined
+    XMLHttpRequest      own=false  typeof=undefined
+    postMessage         own=false  typeof=undefined
+    ---
+    navigator  own=true object     Blob       own=true function
+    File       own=true function   FormData   own=true function
+    URLPattern own=true function   WebAssembly own=true object
+    localStorage own=true object   Storage    own=true function
+    Performance own=true function  performance own=true object
+
+The lower block is exactly the set `surfaces.ts` warns about, and it confirms
+the warning. The upper block is different: those names are absent from node,
+measured, not inferred from a declaration set.
+
+**Proposed rung:** in a JavaScript source only, `globalThis.<name>` where the
+name is in a table MEASURED absent from node's globalThis answers `undefined`
+— the same answer the arm twenty lines below already gives for a declared
+optional global in a JS source. Table kept to names that are unambiguous in
+Node and that bundles actually feature-test: `window`, `document`,
+`WorkerGlobalScope`, `importScripts`, `XMLHttpRequest`. **`self` and
+`postMessage` are deliberately EXCLUDED** — node defines both inside
+`worker_threads`, so "absent" is true of the main thread only.
+
+That clears the glue's first two fences and lets the module get past its
+environment detection. **Not applied in this block: the gate was already
+running, and vitest runs the compiler SOURCE, not dist — editing
+`surfaces.ts` mid-gate would have corrupted the run.**
