@@ -80,8 +80,38 @@ const dec = [];
   ts.forEachChild(n, w);
 })(sf);
 
+// The namespace root is whatever identifier the nested Msg.decode chains hang
+// off (`j` in `j.waproto.X.decode`). Detected, not hardcoded.
+const NS_ROOT = (() => {
+  const tally = new Map();
+  (function w(n) {
+    if (ts.isCallExpression(n) && ts.isPropertyAccessExpression(n.expression) &&
+        n.expression.name.getText() === "decode" && n.getStart() >= bnd) {
+      let e = n.expression.expression;
+      while (ts.isPropertyAccessExpression(e)) e = e.expression;
+      if (ts.isIdentifier(e)) tally.set(e.text, (tally.get(e.text) ?? 0) + 1);
+    }
+    ts.forEachChild(n, w);
+  })(sf);
+  const top = [...tally.entries()].sort((a, b) => b[1] - a[1])[0];
+  return top ? top[0] : null;
+})();
 const c = { readerCall: 0, readerGet: 0, msgGet: 0, msgSet: 0, otherGet: 0, nestedDecode: 0,
-  setTypedRhs: 0, setDynRhs: 0 };
+  setTypedRhs: 0, setDynRhs: 0, nsWalk: 0, chainMsg: 0, chainOther: 0 };
+// Reads whose RECEIVER is itself an expression (j.waproto.Message, a.$unknowns
+// .length). An earlier version of this file counted only identifier-rooted reads
+// and therefore UNDERCOUNTED the seed total; these are seeds too.
+const rootOf = (n) => {
+  let e = n;
+  for (;;) {
+    if (ts.isPropertyAccessExpression(e) || ts.isCallExpression(e) ||
+        ts.isElementAccessExpression(e) || ts.isNonNullExpression(e)) { e = e.expression; continue; }
+    if (ts.isParenthesizedExpression(e)) { e = e.expression; continue; }
+    if (ts.isBinaryExpression(e)) { e = e.left; continue; }
+    break;
+  }
+  return ts.isIdentifier(e) ? e.text : null;
+};
 // A store into a typed slot only loses its guard if the VALUE is already typed.
 // If the RHS is still dyn, lowering inserts a dynCheck at the boundary and THAT
 // is guarded (may-throw.ts case "dynCheck"), so the guard RELOCATES rather than
@@ -110,7 +140,16 @@ for (const f of dec) {
         if (isWrite) { c.msgSet++; if (rhsIsTyped(n.parent.right)) c.setTypedRhs++; else c.setDynRhs++; }
         else if (!isCallee) c.msgGet++;
       }
-      else if (!isCallee) c.otherGet++;
+      else if (!isCallee) { if (recv === NS_ROOT) c.nsWalk++; else c.otherGet++; }
+    }
+    if (ts.isPropertyAccessExpression(n) && !ts.isIdentifier(n.expression)) {
+      const isCallee2 = n.parent && ts.isCallExpression(n.parent) && n.parent.expression === n;
+      if (!isCallee2) {
+        const r = rootOf(n.expression);
+        if (r === msg) c.chainMsg++;
+        else if (r !== null && r !== rdr) c.nsWalk++;
+        else c.chainOther++;
+      }
     }
     if (ts.isCallExpression(n) && ts.isPropertyAccessExpression(n.expression) &&
         n.expression.name.getText() === "decode" && !ts.isIdentifier(n.expression.expression))
@@ -118,14 +157,15 @@ for (const f of dec) {
     ts.forEachChild(n, w);
   })(f);
 }
-const total = c.readerCall + c.readerGet + c.msgGet + c.msgSet + c.otherGet + c.nestedDecode;
+const total = c.readerCall + c.readerGet + c.msgGet + c.msgSet + c.otherGet +
+  c.nestedDecode + c.nsWalk + c.chainMsg + c.chainOther;
 // MESSAGE shape alone: reads become recordGet (unguarded), but only the stores
 // whose RHS is ALREADY typed lose their guard; the rest swap dyn.keySet for dynCheck.
-const msgWin = c.msgGet + c.setTypedRhs;
-const rdrWin = c.readerCall + c.readerGet;
+const msgWin = c.msgGet + c.chainMsg + c.setTypedRhs;
+const rdrWin = c.readerCall + c.readerGet + c.otherGet;
 // BOTH is strictly MORE than the sum: the dyn-RHS stores pay only when the reader
 // shape has made their values typed, so they belong to neither arm alone.
-const bothWin = c.msgGet + c.msgSet + c.readerCall + c.readerGet;
+const bothWin = c.msgGet + c.chainMsg + c.msgSet + c.readerCall + c.readerGet + c.otherGet;
 const pct = (x) => ((x / total) * 100).toFixed(1) + "%";
 console.log("decode bodies: " + dec.length + "\n");
 console.log("throw seeds present today, by future IR node:");
@@ -133,11 +173,14 @@ console.log("  dynInvoke  reader method calls        " + String(c.readerCall).pa
 console.log("  dynInvoke  nested Msg.decode calls    " + String(c.nestedDecode).padStart(6));
 console.log("  dynKeyGet  reads on the reader        " + String(c.readerGet).padStart(6));
 console.log("  dynKeyGet  reads on the message       " + String(c.msgGet).padStart(6));
-console.log("  dynKeyGet  reads on other receivers   " + String(c.otherGet).padStart(6));
+console.log("  dynKeyGet  reads on the reader CLASS  " + String(c.otherGet).padStart(6));
 console.log("  dynKeySet  writes to the message      " + String(c.msgSet).padStart(6));
 console.log("     of which RHS already typed        " + String(c.setTypedRhs).padStart(6));
 console.log("     of which RHS still dyn            " + String(c.setDynRhs).padStart(6) +
   "   <- keeps a guard, relocated to a dynCheck");
+console.log("  dynKeyGet  namespace walk j.waproto.X  " + String(c.nsWalk).padStart(6));
+console.log("  dynKeyGet  chained reads on the message" + String(c.chainMsg).padStart(6));
+console.log("  dynKeyGet  chained, other roots        " + String(c.chainOther).padStart(6));
 console.log("  " + "TOTAL".padEnd(36) + String(total).padStart(6));
 console.log("\nwhat each shape buys, in seeds removed:");
 console.log("  MESSAGE shape only   removes " + String(msgWin).padStart(6) + " (" + pct(msgWin) +
@@ -150,12 +193,23 @@ console.log("     note BOTH (" + bothWin + ") EXCEEDS the sum of the arms (" +
   (msgWin + rdrWin) + ") by " + (bothWin - msgWin - rdrWin) + " -- the dyn-RHS");
 console.log("     stores, which belong to neither shape alone. That is what");
 console.log("     multiplicative means here, stated in seeds.");
-console.log("\n  of that residue, " + c.nestedDecode + " are nested Msg.decode calls, which stop");
-console.log("  seeding ON THEIR OWN once every decode is clean -- computeMayThrow is a");
-console.log("  FIXPOINT over the call graph, so a call to a non-throwing function is not a");
-console.log("  seed. That leaves " + c.otherGet + " module-local reads (M.recursionLimit,");
-console.log("  j.waproto.X, chained receivers) as the last thing standing between a decode");
-console.log("  body and losing its epilogue entirely.");
+console.log("");
+console.log("  the residue after BOTH is " + (total - bothWin) + ", and it is NOT a wall:");
+console.log("    " + String(c.nsWalk).padStart(6) + "  the j.waproto.X namespace walk");
+console.log("    " + String(c.nestedDecode).padStart(6) + "  nested Msg.decode calls, which stop seeding on");
+console.log("            their own once every decode is clean -- computeMayThrow is a");
+console.log("            FIXPOINT, so a call to a non-throwing function is not a seed");
+console.log("    " + String(c.chainOther).padStart(6) + "  everything else");
+console.log("");
+console.log("  THREE shapes, not two, and the third is ONE object:");
+console.log("    READER    " + String(c.readerCall + c.readerGet + c.otherGet).padStart(6) +
+  "   reader calls, reader reads, and P.recursionLimit");
+console.log("    MESSAGE   " + String(c.msgGet + c.msgSet + c.chainMsg).padStart(6) +
+  "   641 shapes, one per message type");
+console.log("    NAMESPACE " + String(c.nsWalk).padStart(6) +
+  "   j.waproto: ONE record with 641 fields");
+console.log("    residual  " + String(c.nestedDecode + c.chainOther).padStart(6) +
+  "   nested decode calls, which dissolve by fixpoint");
 console.log("");
 console.log("  and the asymmetry that decides the ORDER: a message shape cannot cash in");
 console.log("  its " + c.setDynRhs + " dyn-valued stores on its own -- each merely trades a");
