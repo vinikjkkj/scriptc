@@ -568,6 +568,8 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "dgram.connectCb": { argTypes: [DGRAMSOCK_T, F64, STRING, { kind: "func", params: [], ret: VOID }], result: VOID },
   "dgram.sendStr": { argTypes: [DGRAMSOCK_T, STRING, F64, STRING], result: VOID },
   "dgram.sendBytes": { argTypes: [DGRAMSOCK_T, BYTES_U8, F64, STRING], result: VOID },
+  "dgram.sendConnStr": { argTypes: [DGRAMSOCK_T, STRING], result: VOID },
+  "dgram.sendConnBytes": { argTypes: [DGRAMSOCK_T, BYTES_U8], result: VOID },
   "dgram.sendChk": { argTypes: [DGRAMSOCK_T, DYN, DYN, DYN, DYN, DYN, STRING], result: VOID },
   "dgram.address": { argTypes: [DGRAMSOCK_T], result: VOID },
   "dgram.close": { argTypes: [DGRAMSOCK_T], result: VOID },
