@@ -819,3 +819,42 @@ instantiate, and unknown-but-bounded-by-24.13 MiB under load.
 The one thing the interpreter buys that AOT does not is a module that is NOT a
 compile-time constant — `WebAssembly.instantiate(bytesFromNetwork)`. No zapo
 code does that: both modules in the tree are string literals in their bundles.
+
+## STAGE 8 — the 24.13 MiB is DECLARED, not USED. Measured.
+
+`cap5.mjs`: instrument `WebAssembly.instantiate`, keep the module's memory, and
+count non-zero 64 KiB pages at three points while running the real codec —
+`loadLibopus()`, then `createEncoder`/`createDecoder` at 16 kHz mono, then
+**500 encode+decode round trips** (242,148 bytes of packets produced).
+
+    after loadLibopus    : 386 pages total | non-zero  2 = 0.13 MiB | highest touched 0.13 MiB
+    after enc+dec create : 386 pages total | non-zero  8 = 0.50 MiB | highest touched 8.50 MiB
+    after 500 enc+dec    : 386 pages total | non-zero  8 = 0.50 MiB | highest touched 8.50 MiB
+    node rss=81.90 MiB  external=26.98 MiB
+
+**libopus touches 8 of 386 pages — half a megabyte — and 500 round trips add
+nothing to it.** The 24.13 MiB is the module's declared minimum, which
+Emscripten sizes for the worst case; node commits all of it (`external`
++24.66 MiB), and the workload uses 2%.
+
+(Caveat, stated rather than glossed: "non-zero" undercounts a page written and
+then zeroed, and Windows commits inside a reserved range at 4 KiB granularity,
+so this is a strong indication of the working set rather than an exact RSS.
+The exact figure would come from a real encode driven through the AOT build,
+which needs the minified export names wired into C and is not done.)
+
+### So the RSS answer, end to end
+
+| | measured |
+| --- | --- |
+| module's declared memory | 24.13 MiB |
+| node's resident cost for it | +24.66 MiB (commits all of it) |
+| pages the codec actually touches, 500 round trips | **8 of 386 = 0.50 MiB** |
+| AOT host, peak WS after instantiate + ctors | **4.39 MiB** |
+| wasm3 host, peak WS after instantiate | 31.27 MiB (commits all of it) |
+
+An AOT build is **not** in conflict with a ~20 MB peak-RSS target. My STAGE 2
+and STAGE 4 claim that it was came from measuring through wasm3, whose memory
+implementation commits eagerly. Corrected here, and the correction is the
+whole difference between "voip cannot be done under the target" and "voip
+costs about a megabyte of RSS and a megabyte of code".
