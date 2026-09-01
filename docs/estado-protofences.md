@@ -1029,3 +1029,60 @@ carry those eight. The three load-sensitive tests the brief warns about all
 
 Corpus size 1728 programs (1731 llvm tests including the file's own extras) —
 **no corpus program was added**, so no baseline needed recording.
+
+---
+# RUNG 2 — `globalThis.window` and friends, LANDED
+
+Commit `f4f26cce`. `surfaces.ts`, `absentGlobalMemberValue`: a name MEASURED
+absent from node v25.9.0's `globalThis` reads as `undefined` in a JavaScript
+source. Table: `window`, `document`, `WorkerGlobalScope`, `importScripts`,
+`XMLHttpRequest`.
+
+`git diff --numstat`: **56 added, 0 removed**; `surfaces.ts` is pure CRLF and
+its LF-only count is **0 before and 0 after**.
+
+## A claim I wrote and then measured false
+
+The first draft of the comment said `self` and `postMessage` were excluded
+"because Node defines both inside worker_threads". Running it says otherwise:
+in a `node:worker_threads` Worker under v25.9.0, `self` and `postMessage` are
+**own=false / typeof undefined**, exactly as in the main thread. The
+justification was wrong, so it was replaced rather than shipped — they stay
+out because nothing measured needs them, which is a reason that survives
+contact with the runtime. All five table entries were re-checked in BOTH
+thread kinds before the patch was applied.
+
+## Measured
+
+`aprobe` (`--best-effort --npm-static aprobe`), both backends, node v25.9.0:
+
+    globalThis.window            = undefined
+    !!globalThis.window          = false
+    globalThis.document          = undefined
+    globalThis.WorkerGlobalScope = undefined
+    !!globalThis.WorkerGlobalScope = false
+    globalThis.importScripts     = undefined
+    globalThis.XMLHttpRequest    = undefined
+    typeof globalThis.window     = undefined
+    typeof globalThis.Blob       = function      <- CONTROL
+    typeof globalThis.navigator  = object        <- CONTROL
+    typeof globalThis.FormData   = function      <- CONTROL
+    typeof globalThis.URLPattern = function      <- CONTROL
+
+**ORACLE C: MATCH (byte-exact). ORACLE LLVM: MATCH (byte-exact).**
+Fences in the probe's C: **0**. `quickjs=0 ScrDyn=0 JS_NewRuntime=0`.
+
+The four controls are the point: they are names @types/node does not declare
+and Node does have, and they must NOT become `undefined`. They didn't.
+
+## On the real subject
+
+libmlow-wasm's 642,918-byte Emscripten glue, compiled as an `--npm-static`
+package:
+
+    deferred fences  38 -> 36
+    first failure    'window' from typeof globalThis   ->   'type' from Process
+
+The module now runs past its environment detection. The next wall is
+`globalThis.process?.type != "renderer"` — the Electron probe — which is the
+same shape one level in: a member Node's `Process` measurably does not have.
