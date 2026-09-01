@@ -319,3 +319,147 @@ There is no call site anywhere in the bundle, `rg -a -l inquire` over zapo's
 own source (bundle excluded) matches only `package-lock.json`, and loading the
 bundle under node v25.9.0 issues **zero** `require()` calls. So the fence is
 compiled-in dead code today: it cannot fire in any zapo program that exists.
+
+## PHASE 7 — the first target: wam's package entry, on this branch
+
+`drivers/wam-entry2.ts --backend c --provenance-sources --best-effort`,
+`SCRIPTC_PROVENANCE_AUTHORED_JS=1`, compiler at `d646cfa2`. Provenance
+resolved on every package (no `fetch failed` anywhere in the full log):
+
+    provenance: @vinikjkkj/wa-wam@2.3000.1041713829-1ec0d3b <- ... (source compiles statically)
+    provenance: zapo-js@1.6.2 <- ... (source compiles statically)
+    provenance: argo-codec@0.2.1: no provenance attestation published; island path used
+
+Emitted C: `bin/wam-entry2.c`, **141,042,754 bytes**. Fence census over the C
+(`rg -a -o '\[SC[0-9]{4} at [^]]*\]'` — the `.ll` interns identical string
+constants and under-reports):
+
+    1  [SC2020 at .../prov/250f9af5.../spec/proto/index.js:1]
+
+**One fence. Total.**
+
+    6  at base main (wamfences' record: 1 SC1090, 1 SC2012, 4 SC2020)
+    2  after wamfences merged      (the two proto fences)
+    1  here                        (SC1090 gone)
+
+---
+# NEW SCOPE — implement WebAssembly
+
+## STAGE 1 — the artifact check on `libmlow-wasm`. It IS WebAssembly, and only that.
+
+Installed copy: `G:\blocks\twininit-lab\app\node_modules\libmlow-wasm@0.1.1`
+(it is NOT in `G:\zapo-work\app\node_modules` nor in the provenance checkout —
+my earlier "not installed" note was true of those two trees and wrong about
+the corpus app, which is the one that matters).
+
+    dist/index.js                     28,846 B   the public API
+    dist/generated/libmlow.generated.mjs  642,918 B   Emscripten glue  <- the ONLY one index.js imports
+    dist/generated/libopus.generated.mjs  559,526 B   Emscripten glue  (dead: nothing imports it)
+    dist/discordjs.js                  3,299 B
+
+**No `.wasm` file. No `.node` native addon. No download, no `locateFile`.**
+The module is embedded in the glue as a JS string literal and decoded by the
+package's own two-line `binaryDecode` (`o[i] = ~c>>8 & c`).
+
+Verified by RUNNING it, not reading it: `WebAssembly.instantiate` was
+instrumented and the package's own code path exercised end to end under node
+v25.9.0 —
+
+    package exports: Application, Bandwidth, Bitrate, DecoderCtl, EncoderCtl,
+      OpusError, OpusErrorCode, Signal, createDecoder, createEncoder,
+      getMlowPacketInfo, getPacketInfo, isOpusError, loadLibopus,
+      opusGlobalCreate, opusGlobalFree
+    loadLibopus() -> {"version":"libopus 1.0.1"}
+    encode(960 Int16 samples)  -> 586-byte packet, first bytes 187,131,252,11,...
+    decodeFloat(packet)        -> 960 Float32 samples, [100] = 0.002840107074007392
+
+**Exactly ONE module is instantiated**, 544,879 bytes. So a WebAssembly engine
+is exactly the right thing; there is no native fallback to prefer.
+
+## STAGE 2 — the module's inventory (`cap-0.wasm`, 544,879 bytes, version 1)
+
+Full parse, 214,692 opcodes decoded across 339 function bodies, **zero
+unknown**, 148 distinct opcodes.
+
+| section | bytes |
+| --- | --- |
+| type | 605 (65 types) |
+| import | 37 (6 functions) |
+| function | 341 (339 funcs) |
+| table | 5 (funcref, min=max=11) |
+| memory | 7 |
+| global | 9 (1 global) |
+| export | 188 (38 exports) |
+| element | 26 (1 segment) |
+| datacount | 1 (119) |
+| **code** | **421,219** |
+| **data** | **122,404** (119 segments) |
+
+### The number that decides the whole project
+
+    memory: min=386 pages = 24,704 KiB, max=32768 pages (2 GiB), not shared
+
+Measured at run time, not read: the instantiated module's exported memory is
+**25,296,896 bytes = 24.13 MiB**, and node's `process.memoryUsage().external`
+rises from 2.33 MiB to 26.99 MiB across `loadLibopus()` — +24.66 MiB.
+
+**The user's target is ~20 MB peak RSS. This module's linear memory ALONE is
+24.13 MiB**, before any interpreter, before scriptc's own runtime, before the
+544,879 bytes of module that has to be held to run it. Running libopus and
+holding a 20 MB RSS ceiling are arithmetically incompatible. That has to be
+settled before any engine work, because no engine choice changes it.
+
+### Feature set beyond the MVP — small, and fully enumerated
+
+    bulk-memory (memory.copy / memory.fill / memory.init / data.drop)  408 occurrences
+    sign-extension-ops (i32/i64.extend8_s/16_s/32_s)                   313 occurrences
+    nontrapping-float-to-int (i32/i64.trunc_sat_f32/f64_s/u)           182 occurrences
+
+    SIMD:                    0 occurrences   (no 0xfd prefix anywhere)
+    threads/atomics:         0 occurrences   (no 0xfe prefix anywhere)
+    reference-types beyond the MVP funcref table: 0
+    multi-value, tail-call, GC, exception-handling: 0
+
+So the requirement is **WebAssembly 1.0 + three finished proposals**, all three
+of which are shallow: sign-extension is five opcodes, non-trapping float→int is
+eight, bulk-memory's four memory ops are the only ones used (`table.*` bulk ops
+do not appear).
+
+Arithmetic is overwhelmingly **i32 and f32**; i64 appears (i64.store 701,
+i64.const 508) but is not the hot path. Top opcodes: local.get 57,773 ·
+i32.const 30,880 · i32.add 14,559 · local.tee 13,413 · local.set 11,264 ·
+i32.load 5,378 · i32.shl 5,173 · br_if 4,834 · f32.load 3,994 · f32.mul 3,507.
+664 `unreachable`.
+
+### The JS boundary is REAL — six imports, all Emscripten runtime, captured live
+
+    a.a  _emscripten_set_timeout(which, ms)   -> setTimeout, and the callback
+                                                RE-ENTERS wasm (__emscripten_timeout)
+    a.b  emscripten_resize_heap(size)         -> memory.grow driven from JS
+    a.c  proc_exit(code)                      -> throws ExitStatus
+    a.d  _emscripten_runtime_keepalive_clear
+    a.e  fd_write(fd, iov, iovcnt, pnum)      -> walks HEAPU32/HEAPU8 and prints
+    a.f  abort("")
+
+No imported memory and no imported table — both are module-declared and
+exported. But `fd_write` and `resize_heap` read and write the linear memory
+through JS typed-array views, and `set_timeout` schedules a host callback that
+calls back into the instance. Any engine has to serve all three faithfully.
+
+## STAGE 3 — the half that is not WebAssembly at all
+
+`mlow-codec.ts:30` is `import('libmlow-wasm')` — a DYNAMIC IMPORT OF A PACKAGE
+whose entry is a 28,846-byte ESM module that itself statically imports a
+642,918-byte Emscripten glue file. Before any wasm opcode runs, a compiled
+binary has to:
+
+  * resolve and load a bare-specifier dynamic import (`import('pkg')`);
+  * compile the glue, which is minified ESM using `globalThis.window`,
+    `globalThis.WorkerGlobalScope`, `process.versions.node`,
+    `await import("node:module")` + `createRequire(import.meta.url)`,
+    `setTimeout`, `TextDecoder`, and eight typed-array heap views;
+  * carry `Promise<MlowModule> | null` — which is the **SC2009 recorded for
+    weeks as "voip's other independent stop"** (`mlow-codec.ts:26`).
+
+A perfect engine behind an unresolvable import is worth nothing. This half is
+sized separately and reported before any engine is written.
