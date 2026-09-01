@@ -2327,22 +2327,38 @@ export const BUILTIN_MODULE_FENCE_HINTS: Record<string, Record<string, string | 
     "WorkerGlobalScope",
     "importScripts",
     "XMLHttpRequest",
-    // The two runtime-identity probes, admitted on the same evidence and
-    // read the same way (`hasOwnProperty.call(globalThis, n)` and `typeof`,
-    // main thread AND a `node:worker_threads` Worker, node v25.9.0):
-    //
-    //   Bun    own=false typeof "undefined"  |  Deno   own=false typeof "undefined"
-    //
-    // in both thread kinds -- against `fetch`, `navigator`, `Blob` and
-    // `process` read own=true in the same run, which is the control that
-    // says the probe can tell present from absent. A scriptc binary is
-    // neither Bun nor Deno, so the compiled answer and the oracle's agree.
-    // `isBunRuntime()` in zapo-js `src/util/runtime.ts:20` is the measured
-    // consumer: it is called at module scope by store-sqlite/connection.ts,
-    // so it stands in front of every driver that opens a connection.
-    "Bun",
-    "Deno",
   ]);
+
+  /** RUNTIME-IDENTITY probes, and a table of their own on purpose.
+   *
+   * NODE_ABSENT_GLOBALS above is consulted for JavaScript sources only, and
+   * `tests/fixtures/node-types/stdlib-surfaces-fenced.ts` ratifies the other
+   * half deliberately: `(globalThis as { window?: { name: string } }).window`
+   * in a TYPESCRIPT source keeps its refusal, because an assertion the
+   * program wrote is not evidence about the host. That control is right and
+   * this table does not touch it.
+   *
+   * These two are a different QUESTION, which is why they get a different
+   * table rather than a widened one. `window`, `document`, `XMLHttpRequest`,
+   * `crypto` and `gc` are CAPABILITY probes -- "does this host give me X?" --
+   * and a compiler must not answer "no" for a capability just because nothing
+   * declared it; that is the reasoning the fenced fixture protects, and
+   * folding on silence once answered `undefined` for two dozen globals Node
+   * really has. `Bun` and `Deno` ask "WHICH RUNTIME AM I?", and that answer
+   * does not come from an inventory of what the host provides: a scriptc
+   * binary is not Bun and is not Deno, whatever any declaration set says.
+   * The oracle agrees for the same structural reason, and it was read rather
+   * than assumed -- `hasOwnProperty.call(globalThis, n)` false and `typeof`
+   * "undefined" for both, in the main thread AND a `node:worker_threads`
+   * Worker on v25.9.0, with `fetch`, `navigator`, `Blob` and `process`
+   * own=true in the same run as the control that the probe can tell present
+   * from absent.
+   *
+   * Measured consumer: `isBunRuntime()` at zapo-js `src/util/runtime.ts:20`,
+   * called at module scope by store-sqlite/connection.ts, so it stands in
+   * front of every driver that opens a connection. No corpus program names
+   * either identifier. */
+  const RUNTIME_IDENTITY_ABSENT: ReadonlySet<string> = new Set(["Bun", "Deno"]);
 
   export function absentGlobalMemberValue(L: Lowerer, access: ts.PropertyAccessExpression): IrExpr | null {
     if (access.questionDotToken) return null;
@@ -2426,8 +2442,8 @@ export const BUILTIN_MODULE_FENCE_HINTS: Record<string, Record<string, string | 
     // `!!globalThis.window` and `!!globalThis.WorkerGlobalScope` are the
     // first two statements of Emscripten's module glue, and they REFUSED
     // where Node answers `undefined`.
-    if (gp === undefined && NODE_ABSENT_GLOBALS.has(name)) {
-      if (isJsSourceFile(access.getSourceFile())) {
+    if (gp === undefined && (NODE_ABSENT_GLOBALS.has(name) || RUNTIME_IDENTITY_ABSENT.has(name))) {
+      if (NODE_ABSENT_GLOBALS.has(name) && isJsSourceFile(access.getSourceFile())) {
         return { kind: "unitLit", unit: "undefined", type: UNDEFINED_T, loc: locOf(access) };
       }
       // A TYPESCRIPT source cannot reach this line without an assertion on
@@ -2470,7 +2486,7 @@ export const BUILTIN_MODULE_FENCE_HINTS: Record<string, Record<string, string | 
         return (at.flags & ts.TypeFlags.Undefined) !== 0 ||
           (at.isUnionType() && at.getTypes().some((a) => (a.flags & ts.TypeFlags.Undefined) !== 0));
       })();
-      if (assertedOptional) {
+      if (assertedOptional && RUNTIME_IDENTITY_ABSENT.has(name)) {
         const st = L.mapTypeOf(L.typeOf(access));
         const sloc = locOf(access);
         if (process.env["SCRIPTC_ABSENTGLOBAL_WHY"] !== undefined) {
