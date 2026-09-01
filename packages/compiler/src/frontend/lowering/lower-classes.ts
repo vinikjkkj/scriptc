@@ -16,6 +16,7 @@ import { fnOwnCounters, fnOwnPropBox, fnOwnWhy, probeLower, pureReemittable } fr
 import { lowerSearchParamsNew } from "./lower-builtins.js";
 import { requiresDynamicPackageDiag, unsupportedDiag } from "../../diagnostics/diagnostic.js";
 import { lowerSqliteNew } from "./lower-sqlite.js";
+import { lowerWrtcNew } from "./lower-wrtc.js";
 import { STREAM_API_MEMBERS, STREAM_PROP_MEMBERS, UNDERSCORE_METHODS, lowerStreamNew, lowerStreamSuperCall, streamCtorShape } from "./lower-stream.js";
 import { erasableSuperDelegation } from "./lower-emitter.js";
 import { emitOverrideShapeReason, emitSpecSuperForward, emitterRooted, lowerEmitterSuperCall, type EmitOverrideRec } from "./lower-emitter.js";
@@ -6550,6 +6551,12 @@ export function lowerNew(L: Lowerer, expr: ts.NewExpression): IrExpr {
      * @types/better-sqlite3 installed the callee IS a package-declared
      * value, and the generic requires-dynamic diagnostic would win. */
     if (!L.dynamic) {
+      // `new wrtc.RTCPeerConnection(...)`, claimed by its RESULT TYPE
+      // exactly as the sqlite row below is, so it runs before the
+      // "constructing values other than classes declared in the
+      // program" refusal at the end of this function.
+      const rtc = lowerWrtcNew(L, expr);
+      if (rtc !== null) return rtc;
       const sqlite = lowerSqliteNew(L, expr);
       if (sqlite !== null) return sqlite;
     }

@@ -11,6 +11,7 @@ import { strandTrap, BIGINT, BOOL, CAUGHT, DYN, type IrBytesElem, type IrLibFn, 
 import { lowerAbortProperty } from "./lower-abort.js";
 import { dynImportBindingDeclOf } from "./lower-island.js";
 import { lowerFetchProperty, lowerRequestInitLiteral } from "./lower-fetch.js";
+import { lowerWrtcProperty } from "./lower-wrtc.js";
 import { lowerSqliteProperty } from "./lower-sqlite.js";
 import { builtinFnValueOf, builtinMemberFnValueOf } from "./lower-fnvalue.js";
 import { requireFnValueOf, requireMemberFence } from "./lower-builtins.js";
@@ -2466,6 +2467,8 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
         // Its own entry for the same reason the abort row above is: a
         // handle receiver never reaches lowerIntrinsicProperty's switch.
         lowerFetchProperty(L, expr) ??
+        // Peer-connection and data-channel property reads.
+        lowerWrtcProperty(L, expr) ??
         // db.name/.open/.inTransaction/.readonly/.memory and the
         // statement's reader/readonly/busy/source. Its own entry for the
         // reason the two rows above have one: a handle receiver never

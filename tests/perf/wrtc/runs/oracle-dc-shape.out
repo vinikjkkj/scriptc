@@ -1,0 +1,15 @@
+pc.signalingState=stable
+pc.iceConnectionState=new
+pc.iceGatheringState=new
+pc.connectionState=new
+ch.label=wa-web-call
+ch.ordered=false
+ch.readyState=connecting
+ch.binaryType=arraybuffer
+ch.id=1.678169130046e-312
+ch.protocol=""
+ch.bufferedAmount=0
+after set, ch.binaryType=arraybuffer
+after close, ch.readyState=closing
+after pc.close, pc.signalingState=closed
+done

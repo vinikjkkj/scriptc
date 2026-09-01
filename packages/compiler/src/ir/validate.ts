@@ -18,7 +18,7 @@ import type {
   IrUnionDef,
   SrcLoc,
 } from "./nodes.js";
-import { settleOrValuePromiseTag, arrayOf, BOOL, BYTES_U8, bytesOf, canAdaptDynFuncTo, canDynCheckTo, canConvertToDyn, canExitIslandToType, canMarshalIntoIsland, canMarshalTypedFuncIntoIsland, CHILD_T, CHILDSTREAM_T, DGRAMSOCK_T, DV_BIG_SET_METHODS, DYN, DYN_HANDLE_KINDS, F64, ABORTCONTROLLER_T, ABORTSIGNAL_T, FILEHANDLE_T, FSWATCHER_T, HTTP2SESSION_T, HTTP2STREAM_T, HTTPCLIENTREQ_T, HTTPREQ_T, HTTPRES_T, HEADERS_T, REQUESTINIT_T, RESPONSE_T, islandPromisePayloadTag, isJsonSafeType, isRefCounted, isSupportedIndexValue, isSupportedMapKey, isSupportedMapValue, isSupportedSetElem, isUnitType, jsOpResultKind, JSVAL, NETSERVER_T, NETSOCKET_T, PROCSTREAM_T, REF_TRUTHY_KINDS, REGEX, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, SEARCH_PARAMS_T, SECURECTX_T, SPAWNRES_T, SQLITEDB_T, SQLITESTMT_T, STATS_T, streamDuplexWidensToWritable, STRING, SYMBOL_T, TESTCTX_T, typeEquals, typeKey, unionFuncSetArmsOk, URL_T, VOID, wsGlobalPlan } from "./nodes.js";
+import { settleOrValuePromiseTag, arrayOf, BOOL, BYTES_U8, bytesOf, canAdaptDynFuncTo, canDynCheckTo, canConvertToDyn, canExitIslandToType, canMarshalIntoIsland, canMarshalTypedFuncIntoIsland, CHILD_T, CHILDSTREAM_T, DGRAMSOCK_T, DV_BIG_SET_METHODS, DYN, DYN_HANDLE_KINDS, F64, ABORTCONTROLLER_T, ABORTSIGNAL_T, FILEHANDLE_T, FSWATCHER_T, HTTP2SESSION_T, HTTP2STREAM_T, HTTPCLIENTREQ_T, HTTPREQ_T, HTTPRES_T, HEADERS_T, REQUESTINIT_T, RESPONSE_T, islandPromisePayloadTag, isJsonSafeType, isRefCounted, isSupportedIndexValue, isSupportedMapKey, isSupportedMapValue, isSupportedSetElem, isUnitType, jsOpResultKind, JSVAL, NETSERVER_T, NETSOCKET_T, PROCSTREAM_T, REF_TRUTHY_KINDS, REGEX, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, SEARCH_PARAMS_T, SECURECTX_T, SPAWNRES_T, RTCPEERCONNECTION_T, RTCDATACHANNEL_T, SQLITEDB_T, SQLITESTMT_T, STATS_T, streamDuplexWidensToWritable, STRING, SYMBOL_T, TESTCTX_T, typeEquals, typeKey, unionFuncSetArmsOk, URL_T, VOID, wsGlobalPlan } from "./nodes.js";
 
 /** Per-method signature for strIntrinsic: `argTypes` lists every argument
  * position (optional ones included); `minArgs` is how many may be omitted
@@ -570,6 +570,21 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "dgram.sendBytes": { argTypes: [DGRAMSOCK_T, BYTES_U8, F64, STRING], result: VOID },
   "dgram.sendConnStr": { argTypes: [DGRAMSOCK_T, STRING], result: VOID },
   "dgram.sendConnBytes": { argTypes: [DGRAMSOCK_T, BYTES_U8], result: VOID },
+  "wrtc.newPeer": { argTypes: [], result: RTCPEERCONNECTION_T },
+  "wrtc.pcSignalingState": { argTypes: [RTCPEERCONNECTION_T], result: STRING },
+  "wrtc.pcIceConnectionState": { argTypes: [RTCPEERCONNECTION_T], result: STRING },
+  "wrtc.pcIceGatheringState": { argTypes: [RTCPEERCONNECTION_T], result: STRING },
+  "wrtc.pcConnectionState": { argTypes: [RTCPEERCONNECTION_T], result: STRING },
+  "wrtc.pcClose": { argTypes: [RTCPEERCONNECTION_T], result: VOID },
+  "wrtc.pcCreateDataChannel": { argTypes: [RTCPEERCONNECTION_T, STRING, BOOL], result: RTCDATACHANNEL_T },
+  "wrtc.dcLabel": { argTypes: [RTCDATACHANNEL_T], result: STRING },
+  "wrtc.dcProtocol": { argTypes: [RTCDATACHANNEL_T], result: STRING },
+  "wrtc.dcOrdered": { argTypes: [RTCDATACHANNEL_T], result: BOOL },
+  "wrtc.dcReadyState": { argTypes: [RTCDATACHANNEL_T], result: STRING },
+  "wrtc.dcBinaryType": { argTypes: [RTCDATACHANNEL_T], result: STRING },
+  "wrtc.dcBufferedAmount": { argTypes: [RTCDATACHANNEL_T], result: F64 },
+  "wrtc.dcSetBinaryType": { argTypes: [RTCDATACHANNEL_T, STRING], result: VOID },
+  "wrtc.dcClose": { argTypes: [RTCDATACHANNEL_T], result: VOID },
   "dgram.sendChk": { argTypes: [DGRAMSOCK_T, DYN, DYN, DYN, DYN, DYN, STRING], result: VOID },
   "dgram.address": { argTypes: [DGRAMSOCK_T], result: VOID },
   "dgram.close": { argTypes: [DGRAMSOCK_T], result: VOID },

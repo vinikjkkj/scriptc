@@ -15,6 +15,7 @@ import { cjsExportAssignmentOf, cjsExportDiscardReason, cjsExportTargetLiteral, 
 import { COMPOUND_ASSIGN_OPS, CompoundOp, STR_METHODS, UNSUPPORTED_STMT, isStdlibMember, sideEffectFreeOptionValue, stdlibGlobalAliasDecl, stdlibGlobalNameOf } from "./surfaces.js";
 import { builtinFnValueDeclType } from "./lower-fnvalue.js";
 import { requestInitWriteFence } from "./lower-fetch.js";
+import { lowerWrtcWrite } from "./lower-wrtc.js";
 import { isProvenanceSourceFile } from "../provenance-registry.js";
 import { ambientUndefVarRootOf, lowerImportEquals, nsUndefRead, nsWritableTarget, trapDeclRootOf } from "./lower-namespaces.js";
 import { expandoWritableTarget, lowerExpandoAssignStmt } from "./lower-expando.js";
@@ -6636,6 +6637,14 @@ function isEsModuleStamp(expr: ts.Expression): boolean {
           // STATEMENT now instead of only throwing.
           {
             const st = requestInitWriteFence(L, expr, expr.left);
+            if (st !== null) return st;
+          }
+          {
+            // `channel.binaryType = 'arraybuffer'` -- zapo writes exactly
+            // this. Claimed here for the reason the row above is: without
+            // it the write falls to "assignment to non-variables", which
+            // names neither the value nor the reason.
+            const st = lowerWrtcWrite(L, expr, expr.left);
             if (st !== null) return st;
           }
           {

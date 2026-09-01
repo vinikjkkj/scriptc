@@ -3488,6 +3488,27 @@ export type IrLibFn =
    * else. May-throw. */
   | "dgram.sendConnStr"
   | "dgram.sendConnBytes"
+  /** The WebRTC peer-connection and data-channel surface. The
+   * SYNCHRONOUS half only: construction, the state properties, the
+   * channel properties and close. Nothing here touches the network,
+   * so the transport states answer "new" honestly and every value is
+   * the one node v25.9.0 running @roamhq/wrtc answers. May-throw is
+   * NOT claimed: none of these can fail. */
+  | "wrtc.newPeer"
+  | "wrtc.pcSignalingState"
+  | "wrtc.pcIceConnectionState"
+  | "wrtc.pcIceGatheringState"
+  | "wrtc.pcConnectionState"
+  | "wrtc.pcClose"
+  | "wrtc.pcCreateDataChannel"
+  | "wrtc.dcLabel"
+  | "wrtc.dcProtocol"
+  | "wrtc.dcOrdered"
+  | "wrtc.dcReadyState"
+  | "wrtc.dcBinaryType"
+  | "wrtc.dcBufferedAmount"
+  | "wrtc.dcSetBinaryType"
+  | "wrtc.dcClose"
   /** The send argument-validation ladder over dyn arguments (Node's
    * signature shuffle: slice bounds, list/type contracts, port/address
    * validation, connected-state errors) — a fully-validated unconnected
