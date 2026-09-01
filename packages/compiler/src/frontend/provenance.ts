@@ -707,6 +707,14 @@ export async function resolveProvenanceSources(entryPath: string): Promise<Prove
   const entry = resolve(entryPath);
   const manifest = readManifest();
   const notes: string[] = [];
+  /** Packages whose provenance could not be DETERMINED on this run because
+   * something threw on the way to it -- a failed attestation fetch, a failed
+   * source fetch, an unreadable manifest dir. Distinct from a package that
+   * was resolved and deliberately not mapped (no attestation published, no
+   * source mapping): those are answers, this is the absence of one. The
+   * island diagnostics read it so they can stop advising --dynamic for what
+   * is really a network failure. */
+  const unfetched = new Set<string>();
   /** package name → located tree (or null after a noted failure). */
   const processed = new Map<string, MappedTree | null>();
   /** Names in the order their tree mapped its first entry. */
@@ -837,6 +845,7 @@ export async function resolveProvenanceSources(entryPath: string): Promise<Prove
         dir = located;
       }
     } catch (e) {
+      unfetched.add(name);
       notes.push(`${name}@${installed.version}: ${e instanceof Error ? e.message : String(e)}; island path used`);
       return;
     }
@@ -963,5 +972,5 @@ export async function resolveProvenanceSources(entryPath: string): Promise<Prove
     );
   }
 
-  return { packages, notes };
+  return { packages, notes, unfetched: [...unfetched] };
 }

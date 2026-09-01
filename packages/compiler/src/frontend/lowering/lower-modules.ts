@@ -2656,7 +2656,7 @@ function activationsOf(L: Lowerer, sf: ts.SourceFile): Map<ts.Node, number> {
    * globalOf's twin bridge hands back the `.js` twin's global. */
   type TwinBindingKind = "static" | "clause" | "noClause";
 
-  function twinBindingKindOf(L: Lowerer, stmt: ts.Statement): TwinBindingKind {
+  function twinBindingKindOf(L: Lowerer, stmt: ts.Statement, twin: ts.SourceFile): TwinBindingKind {
     let elements: readonly (ts.ImportSpecifier | ts.ExportSpecifier)[];
     if (ts.isImportDeclaration(stmt)) {
       if (stmt.importClause === undefined) return "noClause";
@@ -2678,8 +2678,52 @@ function activationsOf(L: Lowerer, sf: ts.SourceFile): Map<ts.Node, number> {
       if (!ts.isIdentifier(el.name)) continue;
       const g = L.globalOf(el.name);
       if (g && g.type.kind !== "jsval") return "static";
+      // ...or a binding that resolves INTO THE TWIN without owning storage
+      // there -- a function export. Node evaluates a module for a function
+      // import exactly as it does for a const one, and reading only globals
+      // left the twin orphaned: `f()` answered the right 9 while the twin's
+      // own console.log never ran.
+      //
+      // The question is deliberately "do this binding's declarations live in
+      // the twin", not "would the function bridge fire". Asked the second
+      // way it answers null, because by this point resolveValueSymbol has
+      // ALREADY re-pointed the symbol into the twin and the bridge declines
+      // anything that is not a declaration file. That is why the previous
+      // attempt fired nowhere.
+      if (referencedInFile(L, stmt.getSourceFile(), el.name)) {
+        const sym = L.resolveValueSymbol(el.name);
+        const decls = sym === null ? [] : L.checker.declarationsOf(sym);
+        if (decls.length > 0 && decls.every((d) => d.getSourceFile() === twin)) return "static";
+      }
     }
     return "clause";
+  }
+
+  /** The imported name is READ somewhere in the importing file.
+   *
+   * The elision rule, asked of the AST because that is where TypeScript asks
+   * it: an import clause whose bindings are never read is dropped by the
+   * transpiler, so Node never loads the module, and initialising it here
+   * would print output node does not. The CONST case gets this for free --
+   * an unread const owns no global, so the check above already declines --
+   * but a function is found whether it is used or not, so for that arm the
+   * question has to be asked out loud. `c22-fn-unused` is the control. */
+  function referencedInFile(L: Lowerer, sf: ts.SourceFile, name: ts.Identifier): boolean {
+    const want = L.checker.getSymbolAtLocation(name);
+    let found = false;
+    const walk = (n: ts.Node): void => {
+      if (found) return;
+      if (ts.isIdentifier(n) && n !== name && n.text === name.text) {
+        const p: ts.Node | undefined = n.parent;
+        if (p === undefined || (!ts.isImportSpecifier(p) && !ts.isImportClause(p))) {
+          const s2 = L.checker.getSymbolAtLocation(n);
+          if (want === undefined || s2 === undefined || s2 === want) { found = true; return; }
+        }
+      }
+      ts.forEachChild(n, walk);
+    };
+    ts.forEachChild(sf, walk);
+    return found;
   }
 
   export function lowerFileInit(L: Lowerer, sf: ts.SourceFile, stmts: ts.Statement[], name: string): IrFunction {
@@ -2736,7 +2780,7 @@ function activationsOf(L: Lowerer, sf: ts.SourceFile): Map<ts.Node, number> {
           // resolvable value the TWIN answers, because Node evaluates the
           // module for every one of those spellings and only a trap-only
           // island twin is worth leaving orphaned.
-          const twinKind = depTwin === null ? "clause" : twinBindingKindOf(L, stmt);
+          const twinKind = depTwin === null ? "clause" : twinBindingKindOf(L, stmt, depTwin);
           const twinStorage = depTwin === null ? "island" : L.moduleGlobalKind(depTwin);
           const depRt =
             depTwin !== null && (twinKind === "static" || (twinKind === "noClause" && twinStorage !== "island"))

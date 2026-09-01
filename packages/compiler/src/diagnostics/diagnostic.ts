@@ -935,6 +935,48 @@ export function requiresDynamicApiDiag(feature: string, loc: SrcLoc): ScrDiagnos
   };
 }
 
+/** Packages whose provenance SOURCE COULD NOT BE FETCHED on this run --
+ * a transport failure, not a decision. Pushed in by the provenance
+ * registry rather than imported from it, so diagnostics keep depending on
+ * nothing.
+ *
+ * Why the island diagnostics need to know. `--provenance-sources` degrades
+ * to the island when a fetch throws, and the build then fails with errors
+ * that name the USER'S OWN source and advise `--dynamic` -- while the real
+ * cause is a `note:` line at the top saying `fetch failed`. Measured: the
+ * same driver, same flags, same source, built green on one run and red with
+ * 7 errors on another, and the only difference was whether the network
+ * answered. A reader of those 7 errors has no way to know the provenance
+ * lane never ran. */
+let provenanceUnfetched: ReadonlySet<string> = new Set<string>();
+
+export function setProvenanceUnfetched(names: Iterable<string>): void {
+  provenanceUnfetched = new Set(names);
+}
+
+/** The package name a specifier belongs to (`zapo-js/util` -> `zapo-js`,
+ * `@scope/p/sub` -> `@scope/p`). */
+function packageNameOfSpecifier(spec: string): string {
+  const parts = spec.split("/");
+  return spec.startsWith("@") ? parts.slice(0, 2).join("/") : (parts[0] ?? spec);
+}
+
+/** The hint for an island diagnostic: normally "build with --dynamic", but
+ * when this package's provenance source could not be fetched, the honest
+ * one -- because `--dynamic` is not the fix for a network failure, and
+ * re-running is. */
+function islandHint(pkg: string): string {
+  if (provenanceUnfetched.has(packageNameOfSpecifier(pkg))) {
+    return (
+      `this build did NOT use the provenance lane for '${packageNameOfSpecifier(pkg)}': resolving its attested ` +
+      "source threw on this run (the provenance note for it, above, says what), so the package fell back to the " +
+      "island and these sites are the FALLBACK's refusals, not the lane's answer -- re-run before changing any " +
+      "source; --dynamic would embed the engine rather than fix the resolution"
+    );
+  }
+  return "build with --dynamic to run npm package code in the embedded engine (adds ~620KB to the binary); static builds never include it";
+}
+
 /** An npm package import in a static build. The package's shipped JS has
  * exactly one execution home — the embedded engine — so the import itself
  * "requires" (SC2010's voice); its own code so the coverage report can
@@ -945,7 +987,7 @@ export function requiresDynamicImportDiag(pkg: string, loc: SrcLoc): ScrDiagnost
     message: `importing '${pkg}' requires the embedded dynamic engine, which this build does not include — the package's implementation runs there`,
     loc,
     milestone: "M4",
-    hint: "build with --dynamic to run npm package code in the embedded engine (adds ~620KB to the binary); static builds never include it",
+    hint: islandHint(pkg),
   };
 }
 
@@ -958,7 +1000,7 @@ export function requiresDynamicPackageDiag(pkg: string, loc: SrcLoc): ScrDiagnos
     message: `values from the '${pkg}' package run in the embedded dynamic engine, which this build does not include`,
     loc,
     milestone: "M4",
-    hint: "build with --dynamic to run npm package code in the embedded engine (adds ~620KB to the binary); static builds never include it",
+    hint: islandHint(pkg),
   };
 }
 
