@@ -92,6 +92,12 @@ export function cType(t: IrType): string {
       // Declared so the union arm has a C type. Nothing constructs one —
       // see the IrType comment; the pointer is always NULL in practice.
       return "ScrRequest *";
+    case "rtcPeerConnection":
+      // Declared so the record field and the union arm have a C type.
+      // Nothing constructs one yet -- see the IrType comment.
+      return "ScrRtcPeerConnection *";
+    case "rtcDataChannel":
+      return "ScrRtcDataChannel *";
     case "abortController":
       return "ScrAbortController *";
     case "fsWatcher":
@@ -226,6 +232,10 @@ export function retainCallC(type: IrType, expr: string): string {
       return `scr_fetch_init_retain(${expr})`;
     case "request":
       return `scr_request_retain(${expr})`;
+    case "rtcPeerConnection":
+      return `scr_rtc_peer_connection_retain(${expr})`;
+    case "rtcDataChannel":
+      return `scr_rtc_data_channel_retain(${expr})`;
     case "abortController":
       return `scr_abort_controller_retain(${expr})`;
     case "fsWatcher":
@@ -335,6 +345,10 @@ export function releaseCallC(type: IrType, expr: string): string {
       return `scr_fetch_init_release(${expr})`;
     case "request":
       return `scr_request_release(${expr})`;
+    case "rtcPeerConnection":
+      return `scr_rtc_peer_connection_release(${expr})`;
+    case "rtcDataChannel":
+      return `scr_rtc_data_channel_release(${expr})`;
     case "abortController":
       return `scr_abort_controller_release(${expr})`;
     case "fsWatcher":
@@ -427,6 +441,8 @@ export function boxKindC(t: IrType): string {
     case "headers":
     case "requestInit":
     case "request":
+    case "rtcPeerConnection":
+    case "rtcDataChannel":
     case "bytes":
       throw new Error(`emitter bug: ${t.kind} boxes go through boxNewC, not boxKindC`);
     case "procStream":
@@ -565,6 +581,10 @@ export function rcAdapters(t: IrType): RcAdapters | null {
       return rt("scr_fetch_init_retain_v", "scr_fetch_init_release_v");
     case "request":
       return rt("scr_request_retain_v", "scr_request_release_v");
+    case "rtcPeerConnection":
+      return rt("scr_rtc_peer_connection_retain_v", "scr_rtc_peer_connection_release_v");
+    case "rtcDataChannel":
+      return rt("scr_rtc_data_channel_retain_v", "scr_rtc_data_channel_release_v");
     case "abortController":
       return rt("scr_abort_controller_retain_v", "scr_abort_controller_release_v");
     case "fsWatcher":
@@ -748,6 +768,11 @@ export function elemKindC(elem: IrType): string {
     // CLASS is SCR_ELEM_REF for both.
     case "requestInit":
     case "request":
+    // Connection.incomingChannels in zapo is RTCDataChannel[]; the peer
+    // connection is included for symmetry. Neither holds an edge, so
+    // elemTraceC answers null and the element CLASS is plain REF.
+    case "rtcPeerConnection":
+    case "rtcDataChannel":
       return "SCR_ELEM_REF";
     case "url":
     case "searchParams":
