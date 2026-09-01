@@ -1,0 +1,53 @@
+G:/blocks/wrtc-lab/probe/rtc-shape.ts:26:7 - error SC2009: values of type 'Map<string, Connection>' cannot be compiled: the Map shape is supported, but its value type 'Connection' does not compile
+
+  25 | 
+  26 | const connections = new Map<string, Connection>()
+     |       ^~~~~~~~~~~
+  27 | 
+
+  hint: the outer shape is supported — the named component is the blocker; restate it inside the compilable set (number, string, boolean, arrays, Maps, Sets, RegExp, functions, classes, records, unions of those, and 'unknown')
+
+G:/blocks/wrtc-lab/probe/rtc-shape.ts:26:21 - error SC1090: Map values of type 'Connection' (Map values must be number, string, boolean, records, class instances, arrays, promises, or unions of those — not functions, Maps, 'unknown', or 'any') is not supported yet
+
+  25 | 
+  26 | const connections = new Map<string, Connection>()
+     |                     ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  27 | 
+
+G:/blocks/wrtc-lab/probe/rtc-shape.ts:28:17 - error SC2009: values of type 'Connection' cannot be compiled: the record shape is supported, but its member 'peerConnection' has type 'RTCPeerConnection | null', which does not compile
+
+  27 | 
+  28 | export function make(id: string): Connection {
+     |                 ^~~~
+  29 |     const conn: Connection = {
+
+  hint: the outer shape is supported — the named component is the blocker; restate it inside the compilable set (number, string, boolean, arrays, Maps, Sets, RegExp, functions, classes, records, unions of those, and 'unknown')
+
+G:/blocks/wrtc-lab/probe/rtc-shape.ts:45:32 - error SC2020: 'Map<string, Connection>.size' is part of the standard library types but has no scriptc lowering yet
+
+  44 | 
+  45 | console.log('sites: ' + String(connections.size))
+     |                                ^~~~~~~~~~~~~~~~
+  46 | make('a')
+
+  hint: the type checker sees the full standard library, but only the supported surface compiles (https://scriptc.dev/limitations)
+
+G:/blocks/wrtc-lab/probe/rtc-shape.ts:46:1 - error SC2004: uses of 'make' inherit the blocker on its declaration
+
+  45 | console.log('sites: ' + String(connections.size))
+  46 | make('a')
+     | ^~~~
+  47 | console.log('sites: ' + String(connections.size))
+
+  hint: the declaration of 'make' did not compile — fix the diagnostic reported there and these sites clear with it
+
+G:/blocks/wrtc-lab/probe/rtc-shape.ts:47:32 - error SC2020: 'Map<string, Connection>.size' is part of the standard library types but has no scriptc lowering yet
+
+  46 | make('a')
+  47 | console.log('sites: ' + String(connections.size))
+     |                                ^~~~~~~~~~~~~~~~
+  48 | 
+
+  hint: the type checker sees the full standard library, but only the supported surface compiles (https://scriptc.dev/limitations)
+
+6 errors.

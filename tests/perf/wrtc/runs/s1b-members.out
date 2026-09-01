@@ -1,0 +1,64 @@
+G:/blocks/wrtc-lab/probe/rtc-members.ts:23:5 - error SC1090: assignment to non-variables are not supported yet
+
+  22 |     console.log(pc.iceGatheringState)
+  23 |     pc.onconnectionstatechange = () => {}
+     |     ^~~~~~~~~~~~~~~~~~~~~~~~~~
+  24 |     pc.oniceconnectionstatechange = () => {}
+
+G:/blocks/wrtc-lab/probe/rtc-members.ts:24:5 - error SC1090: assignment to non-variables are not supported yet
+
+  23 |     pc.onconnectionstatechange = () => {}
+  24 |     pc.oniceconnectionstatechange = () => {}
+     |     ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  25 |     pc.onicegatheringstatechange = () => {}
+
+G:/blocks/wrtc-lab/probe/rtc-members.ts:25:5 - error SC1090: assignment to non-variables are not supported yet
+
+  24 |     pc.oniceconnectionstatechange = () => {}
+  25 |     pc.onicegatheringstatechange = () => {}
+     |     ^~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  26 |     pc.onsignalingstatechange = () => {}
+
+G:/blocks/wrtc-lab/probe/rtc-members.ts:26:5 - error SC1090: assignment to non-variables are not supported yet
+
+  25 |     pc.onicegatheringstatechange = () => {}
+  26 |     pc.onsignalingstatechange = () => {}
+     |     ^~~~~~~~~~~~~~~~~~~~~~~~~
+  27 |     pc.close()
+
+G:/blocks/wrtc-lab/probe/rtc-members.ts:33:5 - error SC1090: assignment to non-variables are not supported yet
+
+  32 |     ch.send(buf)
+  33 |     ch.binaryType = 'arraybuffer'
+     |     ^~~~~~~~~~~~~
+  34 |     console.log(ch.readyState)
+
+G:/blocks/wrtc-lab/probe/rtc-members.ts:35:5 - error SC1090: assignment to non-variables are not supported yet
+
+  34 |     console.log(ch.readyState)
+  35 |     ch.onopen = () => {}
+     |     ^~~~~~~~~
+  36 |     ch.onclose = () => {}
+
+G:/blocks/wrtc-lab/probe/rtc-members.ts:36:5 - error SC1090: assignment to non-variables are not supported yet
+
+  35 |     ch.onopen = () => {}
+  36 |     ch.onclose = () => {}
+     |     ^~~~~~~~~~
+  37 |     ch.onerror = () => {}
+
+G:/blocks/wrtc-lab/probe/rtc-members.ts:37:5 - error SC1090: assignment to non-variables are not supported yet
+
+  36 |     ch.onclose = () => {}
+  37 |     ch.onerror = () => {}
+     |     ^~~~~~~~~~
+  38 |     ch.onmessage = (ev: MessageEvent) => {
+
+G:/blocks/wrtc-lab/probe/rtc-members.ts:38:5 - error SC1090: assignment to non-variables are not supported yet
+
+  37 |     ch.onerror = () => {}
+  38 |     ch.onmessage = (ev: MessageEvent) => {
+     |     ^~~~~~~~~~~~
+  39 |         void ev
+
+9 errors.

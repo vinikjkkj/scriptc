@@ -1,0 +1,15 @@
+G:/blocks/wrtc-lab/probe/rtc-shape.ts:8:28 - error SC0001: Cannot find name 'RTCPeerConnection'.
+
+  7 | 
+  8 | type PeerConnectionClass = RTCPeerConnection
+    |                            ^~~~~~~~~~~~~~~~~
+  9 | type DataChannelClass = RTCDataChannel
+
+G:/blocks/wrtc-lab/probe/rtc-shape.ts:9:25 - error SC0001: Cannot find name 'RTCDataChannel'.
+
+   8 | type PeerConnectionClass = RTCPeerConnection
+   9 | type DataChannelClass = RTCDataChannel
+     |                         ^~~~~~~~~~~~~~
+  10 | 
+
+2 errors.

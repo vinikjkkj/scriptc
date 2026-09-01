@@ -1,0 +1,53 @@
+G:/blocks/wrtc-lab/probe/rtc-live.ts:14:12 - error SC1090: constructing values other than classes declared in the program is not supported yet
+
+  13 | console.log('before')
+  14 | const pc = new wrtc.RTCPeerConnection({ iceServers: [] })
+     |            ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  15 | console.log('constructed')
+
+G:/blocks/wrtc-lab/probe/rtc-live.ts:16:12 - error SC2020: 'RTCPeerConnection.createDataChannel' is part of the standard library types but has no scriptc lowering yet
+
+  15 | console.log('constructed')
+  16 | const ch = pc.createDataChannel('wa-web-call', { ordered: false })
+     |            ^~~~~~~~~~~~~~~~~~~~
+  17 | console.log('channel')
+
+  hint: the type checker sees the full standard library, but only the supported surface compiles (https://scriptc.dev/limitations)
+
+G:/blocks/wrtc-lab/probe/rtc-live.ts:18:33 - error SC2020: 'RTCPeerConnection.signalingState' is part of the standard library types but has no scriptc lowering yet
+
+  17 | console.log('channel')
+  18 | console.log('signalingState=' + pc.signalingState)
+     |                                 ^~~~~~~~~~~~~~~~~
+  19 | console.log('readyState=' + ch.readyState)
+
+  hint: the type checker sees the full standard library, but only the supported surface compiles (https://scriptc.dev/limitations)
+
+G:/blocks/wrtc-lab/probe/rtc-live.ts:19:29 - error SC2020: 'RTCDataChannel.readyState' is part of the standard library types but has no scriptc lowering yet
+
+  18 | console.log('signalingState=' + pc.signalingState)
+  19 | console.log('readyState=' + ch.readyState)
+     |                             ^~~~~~~~~~~~~
+  20 | ch.close()
+
+  hint: the type checker sees the full standard library, but only the supported surface compiles (https://scriptc.dev/limitations)
+
+G:/blocks/wrtc-lab/probe/rtc-live.ts:20:1 - error SC2020: 'RTCDataChannel.close' is part of the standard library types but has no scriptc lowering yet
+
+  19 | console.log('readyState=' + ch.readyState)
+  20 | ch.close()
+     | ^~~~~~~~
+  21 | pc.close()
+
+  hint: the type checker sees the full standard library, but only the supported surface compiles (https://scriptc.dev/limitations)
+
+G:/blocks/wrtc-lab/probe/rtc-live.ts:21:1 - error SC2020: 'RTCPeerConnection.close' is part of the standard library types but has no scriptc lowering yet
+
+  20 | ch.close()
+  21 | pc.close()
+     | ^~~~~~~~
+  22 | console.log('after')
+
+  hint: the type checker sees the full standard library, but only the supported surface compiles (https://scriptc.dev/limitations)
+
+6 errors.
