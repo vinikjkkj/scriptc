@@ -1,3 +1,9 @@
+ch.onopen default=undefined
+ch.onmessage default=undefined
+pc.onsignalingstatechange default=null
+typeof ch.onopen=function
+typeof ch.onmessage=function
+typeof pc.oniceconnectionstatechange=function
 send on connecting throws name=InvalidStateError
 send on connecting throws message=RTCDataChannel.readyState is not 'open'
 after ch.close, readyState=closing

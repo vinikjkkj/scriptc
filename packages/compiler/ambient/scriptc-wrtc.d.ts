@@ -172,7 +172,24 @@ interface RTCDataChannel {
   onopen: (() => void) | null;
   onclose: (() => void) | null;
   onerror: (() => void) | null;
-  onmessage: ((event: MessageEvent) => void) | null;
+  /* TWO ARMS, and the split is the honest one.
+   *
+   * zapo writes `channel.onmessage = (event: MessageEvent) => { ... }` and
+   * reads `event.data`. In zapo's own tree `MessageEvent` resolves through
+   * @types/node to undici's `MessageEvent<T = any>`, so `data` is `any` --
+   * a DOM event object with a dynamic payload, and scriptc has no static
+   * representation for either half of that. A handler taking one therefore
+   * refuses BY NAME at the assignment ("the DOM MessageEvent object has no
+   * representation"), which is a diagnostic naming the real obstacle.
+   *
+   * The second arm is what scriptc DOES serve: the payload itself, as the
+   * Uint8Array the SCTP association delivers. It is declared here rather
+   * than left undeclared so a program can spell it and get a lowering
+   * instead of a type error. */
+  onmessage:
+    | ((event: MessageEvent) => void)
+    | ((payload: Uint8Array) => void)
+    | null;
   onbufferedamountlow: (() => void) | null;
 }
 

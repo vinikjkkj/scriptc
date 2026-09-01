@@ -9075,6 +9075,35 @@ ScrStr *scr_rtc_dc_ready_state(ScrRtcDataChannel *c);
 ScrStr *scr_rtc_dc_binary_type(ScrRtcDataChannel *c);
 void scr_rtc_dc_set_binary_type(ScrRtcDataChannel *c, ScrStr *v /*borrowed*/);
 void scr_rtc_dc_close(ScrRtcDataChannel *c);
+
+/* The joined half: the offer/answer exchange, the event handlers and
+ * send. scr_wrtc_conn.c is the transport underneath. */
+ScrStr *scr_rtc_peer_create_offer(ScrRtcPeerConnection *p);
+/* Both answer an ALREADY-SETTLED promise, the fs/promises stance: a
+ * validation failure throws and scr_promise_settled_void moves that
+ * exception in as the REJECTION, which is what node does here -- these
+ * two reject, they do not throw synchronously. */
+ScrPromise *scr_rtc_peer_set_local_description(ScrRtcPeerConnection *p, ScrStr *type /*borrowed*/);
+ScrPromise *scr_rtc_peer_set_remote_description(ScrRtcPeerConnection *p, ScrStr *type /*borrowed*/,
+                                                ScrStr *sdp /*borrowed*/);
+void scr_rtc_peer_on_ice_connection_state_change(ScrRtcPeerConnection *p, ScrClosure *cb /*+1*/);
+void scr_rtc_peer_on_ice_gathering_state_change(ScrRtcPeerConnection *p, ScrClosure *cb /*+1*/);
+void scr_rtc_peer_on_signaling_state_change(ScrRtcPeerConnection *p, ScrClosure *cb /*+1*/);
+void scr_rtc_peer_on_connection_state_change(ScrRtcPeerConnection *p, ScrClosure *cb /*+1*/);
+void scr_rtc_dc_on_open(ScrRtcDataChannel *c, ScrClosure *cb /*+1*/);
+void scr_rtc_dc_on_close(ScrRtcDataChannel *c, ScrClosure *cb /*+1*/);
+void scr_rtc_dc_on_error(ScrRtcDataChannel *c, ScrClosure *cb /*+1*/);
+/* The message adapter, the scr_net_data_thunk_* shape: the pointer says
+ * whether the listener WANTS the payload. A zero-parameter listener gets
+ * the ignoring thunk rather than a NULL check at every delivery. */
+typedef void (*ScrRtcMsgFn)(ScrClosure *cb, ScrBytes *payload /*borrowed*/);
+void scr_rtc_dc_on_message(ScrRtcDataChannel *c, ScrClosure *cb /*+1*/, ScrRtcMsgFn fn);
+void scr_rtc_msg_thunk0(ScrClosure *cb, ScrBytes *payload);
+void scr_rtc_msg_thunk_bytes(ScrClosure *cb, ScrBytes *payload);
+/* Both THROW InvalidStateError when the channel is not open -- the
+ * oracle's message, captured: "RTCDataChannel.readyState is not 'open'". */
+void scr_rtc_dc_send_str(ScrRtcDataChannel *c, ScrStr *data /*borrowed*/);
+void scr_rtc_dc_send_bytes(ScrRtcDataChannel *c, ScrBytes *data /*borrowed*/);
 ScrRtcPeerConnection *scr_rtc_peer_connection_retain(ScrRtcPeerConnection *p);
 void scr_rtc_peer_connection_release(ScrRtcPeerConnection *p);
 void *scr_rtc_peer_connection_retain_v(void *p);
@@ -9213,6 +9242,11 @@ long scr_dgram_live_count(void);
 /* The loop-side registration (scr_async.c, always linked) — the net
  * hook's exact shape, one more nullable slot set. */
 void scr_loop_set_dgram(bool (*pending)(void), void (*dispatch)(void), int (*pollfd)(void));
+/* scr_wrtc.c's loop hook. No pollfd: the WebRTC transport owns its own
+ * UDP socket and reads it inside the pump, so there is no readiness fd
+ * for the loop to wait on. */
+void scr_loop_set_wrtc(bool (*pending)(void), void (*dispatch)(void));
+void scr_wrtc_install(void);
 
 /* ── better-sqlite3 (scr_sqlite.c — compiled only when the program uses
  * it, ALONGSIDE the vendored SQLite amalgamation; design note atop the

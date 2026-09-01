@@ -1872,7 +1872,12 @@ export async function compileC(opts: CcOptions): Promise<void> {
     }
   }
   const engineArchive = dynamic ? await ensureEngineArchive(opts.sanitize ?? false, driver) : null;
-  const tlsArchive = tls ? await ensureTlsArchive(opts.sanitize ?? false, driver) : null;
+  /* The WebRTC path needs the SAME vendored mbedTLS archive (DTLS 1.2,
+   * ECDSA P-256, SHA-256) but NOT scr_tls.c, which is the TLS-over-TCP
+   * client. Gating the archive on `tls || wrtc` and scr_tls.c on `tls`
+   * alone keeps every existing TLS program's link line byte-identical --
+   * for them `tls` is true and both arms fire exactly as before. */
+  const tlsArchive = tls || wrtc ? await ensureTlsArchive(opts.sanitize ?? false, driver) : null;
   // --dynamic + regex shares the archive's libregexp (its host hooks and
   // ours would collide; see scr_regex.c) — the standalone objects are for
   // static builds only.
@@ -2013,7 +2018,22 @@ export async function compileC(opts: CcOptions): Promise<void> {
     // The WebRTC data-channel handles. Ownership pairs only for now; the
     // handles are never constructed, but a program that declares the
     // shapes still emits their release calls.
-    ...(wrtc ? [rt(join(rtDir, "scr_wrtc.c"))] : []),
+    // The WebRTC data channel, joined: the JS-visible handles
+    // (scr_wrtc.c), the transport that backs them (scr_wrtc_conn.c), the
+    // DTLS identity and RFC 8122 fingerprint check, and the SCTP wire
+    // format plus association. One gate, because they are one feature:
+    // a peer connection with no association behind it is the thing this
+    // clause set out to stop shipping.
+    ...(wrtc
+      ? [
+          rt(join(rtDir, "scr_wrtc.c")),
+          rt(join(rtDir, "scr_wrtc_conn.c")),
+          rt(join(rtDir, "scr_wrtc_cert.c")),
+          rt(join(rtDir, "scr_wrtc_fp.c")),
+          rt(join(rtDir, "scr_sctp.c")),
+          rt(join(rtDir, "scr_sctp_assoc.c")),
+        ]
+      : []),
     // The readiness-poller backends (scr_platform.h): kqueue on macOS/BSD,
     // epoll on Linux, WSAPoll on Windows — each TU is empty off its
     // platform, so all three link whenever a poller-using unit does and
@@ -2063,7 +2083,7 @@ export async function compileC(opts: CcOptions): Promise<void> {
     ...(tlsArchive
       ? [
           "-I", join(vendorTlsDir(), "include"),
-          rt(join(rtDir, "scr_tls.c")),
+          ...(tls ? [rt(join(rtDir, "scr_tls.c"))] : []),
           tlsArchive,
           // mbedTLS's win32 entropy poll is BCryptGenRandom (bcrypt.h) —
           // an import the unconditional win32 libs above don't carry.
