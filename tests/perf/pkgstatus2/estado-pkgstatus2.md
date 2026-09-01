@@ -468,3 +468,230 @@ declarations has an npm type in its signature**. `cleanup.ts` qualifies because
 its four `import type` names come from `zapo-js/store`, which
 `--provenance-sources` compiles; `helpers.ts` qualifies only for the seven of
 its ten exports that never name a driver type.
+
+---
+
+## 11. The status table, stated as the objective asks it to be stated
+
+Four outcomes, and **`ISLANDED`/`UNMEASURED` is a fifth state, never a zero.**
+
+| package | state | reaches a binary? | oracle, both backends | flagless errors | `--best-effort` | fences in emitted C |
+| --- | --- | --- | --- | --- | --- | --- |
+| **`store-mysql`** | ANALYSABLE (52 stmts, 90% static) | **YES**, TWO — `store-mysql-cleanup2.exe`, `store-mysql-helpers2.exe` | **9/9 and 16/16 MATCH byte-exact** | 16 (entry driver) / **0** (both module drivers) | not needed | **0** |
+| **`store-postgres`** | ANALYSABLE (38 stmts, 92% static) | **YES**, TWO — `store-postgres-cleanup2.exe`, `store-postgres-helpers2.exe` | **9/9 and 16/16 MATCH byte-exact** | 15 / **0** | not needed | **0** |
+| **`store-redis`** | ANALYSABLE (94 stmts, 96% static) | **YES** — `store-redis-helpers.exe`, `--provenance-sources` | **21/21 MATCH byte-exact** | 13 / **0** | not needed | **0** |
+| **`store-mongo`** | ANALYSABLE (56 stmts, 92% static) | **no** | — | 15 | 12, still fails | **absent** (no C emitted) |
+| **`media-utils`** | ANALYSABLE (60 stmts, 86% static) | **no** | — | 11 | — | **absent** |
+| `store-sqlite` (`names`) | ANALYSABLE | yes, `--best-effort` | **TRAP** at `table-names.ts:116` | 4 | 4 fences | **4** |
+| `store-sqlite` (`open`) | ANALYSABLE | yes, `--prov --best-effort` | **DID-NOT-RUN** — no oracle under v25 | — | — | — |
+
+**Not one package in this corpus is islanded, and not one fails preflight.**
+Every state above is `ANALYSABLE`: each entry crosses preflight with real
+statements to look at (38 to 94 in the default lane), so every count is a
+measurement of code the compiler read. The number that would have exposed an
+island is the `statements analyzed` column of `scriptc coverage`, run for every
+one of the five, and it is non-zero everywhere.
+
+Where a number would have been a lie, this report writes **absent**: a build
+that stops emits no C translation unit, so `store-mongo` and `media-utils` have
+**no fence population at all** — not a fence count of zero.
+
+**Score: `N …→MATCH = 10`** — five new binaries, each on both backends —
+**`M MATCH→WRONG = 0`.** No binary in this block was built with `--dynamic`;
+`quickjs`, `ScrDyn` and `JS_NewRuntime` all read **0** in every one.
+
+### What each of the five needs next, in the order the measurements justify
+
+1. **The `--npm-static` inferred-surface rule** (`index.ts:464`) —
+   `ioredis` is **3** import sites from static, `mysql2` **9**, `pg` **18**, and
+   all three packages' entire dependency trees already compile. One mechanism,
+   three packages, and it is the difference between a helper-module binary and
+   a real `createRedisStore(...)` binary. The names it cannot reach are
+   type-only exports; every one of the three packages ships a `.d.ts` that
+   declares them.
+2. **The `@types/pg` misattribution** — it is not cosmetic. `--npm-static auto`
+   acts on the wrong package name and reports `no runtime JS entry resolves`
+   for a types-only package, so the automatic route is closed for
+   `store-postgres` specifically.
+3. **`'in' on 'number' receivers`** (`SC1090`) — the single refusal in
+   `store-mysql/cleanup.ts` and `store-postgres/cleanup.ts`, at
+   `'unref' in this.timer`. It is the whole difference between a cleanup binary
+   that can `start()` and one that cannot.
+4. **`globalThis` with an `as`-cast receiver** (§12) — a defect, not a missing
+   feature, and it stands in front of every `store-sqlite` driver that opens a
+   connection.
+5. **`SC1013` (require below its binding) and `SC1012` (require of JSON)** —
+   these two account for `semver` (⇒ `sharp` ⇒ `media-utils`), `whatwg-url` and
+   `tr46` (⇒ `mongodb` ⇒ `store-mongo`). Two constructs, two packages that
+   currently have no route at all.
+6. `store-mongo`'s `new Binary(...)` need and `sharp.node` are the two places
+   where a static lane needs a real runtime, not a compiler change.
+
+---
+
+## 12. The one compiler defect this block isolated, with a minimal reproduction
+
+`packages/compiler/src/frontend/lowering/surfaces.ts`,
+`absentGlobalMemberValue`. Its own fence text tells the programmer:
+
+> spell the member optional — `(globalThis as { X?: T }).X` — and the read
+> compiles
+
+zapo-js's `src/util/runtime.ts:20` is written **exactly** that way:
+
+```ts
+export function isBunRuntime(): boolean {
+    return typeof (globalThis as { readonly Bun?: unknown }).Bun !== 'undefined'
+}
+```
+
+and it does not compile:
+
+```
+$ scriptc coverage drivers/globalthis-probe.ts
+  blockers:  ×1  'globalThis' is part of the standard library types but has no
+                 scriptc lowering yet  SC2020
+$ SCRIPTC_ABSENTGLOBAL_WHY=1 scriptc coverage drivers/globalthis-probe.ts
+  [absentglobal] decline=undeclared globalThis.Bun
+```
+
+**Why**, read off the source: the function unwraps parentheses, `as`,
+`satisfies` and `!` from the receiver to prove it is `globalThis`
+(`surfaces.ts:2336-2344`) and then looks the property up on the **unwrapped**
+receiver's type — `L.checker.getPropertyOfType(L.typeOf(recv), name)`. The
+`as` cast that declares the member optional is discarded before the lookup that
+needs it, so `gp === undefined` and the function declines at `"undeclared"`.
+The chain then fences on the receiver and blames `globalThis`, which is
+precisely the mis-blame the comment at `surfaces.ts:2448` says it raised the
+member fence to avoid.
+
+**Positive control that the surrounding machinery works**: the same read
+against a receiver whose declared type carries the optional member compiles at
+100% —
+
+```ts
+declare const gt: { readonly Bun?: unknown }
+console.log('bun:', typeof gt.Bun)     // statements analyzed 2, compile statically 2 (100%)
+```
+
+so what fails is specifically "the cast on the `globalThis` receiver is not
+honoured by the lookup", not the optional-member fold.
+
+**This block did not take the fix.** It is a lowering change, it needs the full
+gate, and two other blocks are live with a gate in flight. What it does is name
+the defect, the file, the function, the decline step, the minimal reproduction,
+the positive control, and the consumer that pays for it: `isBunRuntime()` is
+called at module scope by `store-sqlite/connection.ts`, so it is the **first**
+of the six constructs between `store-sqlite` and a flagless connection binary,
+and it is the one that makes `store-sqlite-open-be.exe` throw at run time.
+
+A fix must not simply honour any user cast: `(globalThis as { fetch?: T }).fetch`
+must **not** fold to `undefined`, because node v25.9.0 has `fetch`. The safe
+shape is the one the file already argues for — a name **measured** absent from
+node's own `globalThis` (the `NODE_ABSENT_GLOBALS` table, which today is
+consulted only for JavaScript sources). `Bun` and `Deno` belong in that table
+on the same evidence the five names already there were admitted on.
+
+---
+
+## 13. The other two binaries, and every binary's numbers in one place
+
+Trimming `queryRows` / `queryFirst` / `affectedRows` out of the driver — the
+three declarations whose signatures name a driver type (§10) — leaves them
+unreached, and the remaining seven exports of each `helpers.ts` build flagless:
+
+| binary | package | module | flags | bytes LLVM / C | lines | oracle |
+| --- | --- | --- | --- | --- | --- | --- |
+| `store-mysql-cleanup2.exe` | `store-mysql` | `cleanup.ts` | `--provenance-sources` | 670,208 / 672,256 | 9 | **9/9 MATCH** |
+| `store-postgres-cleanup2.exe` | `store-postgres` | `cleanup.ts` | `--provenance-sources` | 670,208 / 672,256 | 9 | **9/9 MATCH** |
+| `store-redis-helpers.exe` | `store-redis` | `helpers.ts` | `--provenance-sources` | 813,568 / 815,104 | 21 | **21/21 MATCH** |
+| `store-mysql-helpers2.exe` | `store-mysql` | `helpers.ts` | `--provenance-sources` | 810,496 / 811,520 | 16 | **16/16 MATCH** |
+| `store-postgres-helpers2.exe` | `store-postgres` | `helpers.ts` | `--provenance-sources` | 810,496 / 811,520 | 16 | **16/16 MATCH** |
+
+Every row: **both backends**, byte-exact against node v25.9.0, exit 0,
+`quickjs=0 ScrDyn=0 JS_NewRuntime=0`, **0 fences** in the emitted C, and
+**no `--best-effort`**.
+
+`store-mysql-helpers2` and `store-postgres-helpers2` are the same 16 lines
+because the two `helpers.ts` files differ only in the driver type they name and
+in one error string (`tablePrefix must contain only letters, numbers, and
+underscores` is identical in both); the two binaries are byte-identical in size
+and were built from separately generated drivers.
+
+### These binaries cross the attested/published boundary, which makes the MATCH stronger
+
+The brief warns about a binary that passes because the attested tree and the
+published artifact agree by construction. Here the two are **not** the same
+file and the driver exercises the difference: the binary compiles zapo-js's
+attested TypeScript (`src/util/collections.ts`, `src/util/bytes.ts` at
+`250f9af5229a`) while node runs the published
+`node_modules/zapo-js/dist/util/collections.js`. `bytesToHex`, `hexToBytes`,
+`normalizeQueryLimit` (including its throwing arm), `uint8Equal`,
+`uint8TimingSafeEqual` and `toBytesView` are executed on both sides and agree
+byte-for-byte — so the MATCH is evidence that source and dist agree on those
+six functions, not an artefact of reading the same bytes twice.
+
+**Identifiers these drivers stay clear of**: no `@vinikjkkj/wa-wam` name
+appears anywhere on any of these five build paths (`store-mysql`,
+`store-postgres` and `store-redis` do not depend on it), so the additive-lines
+hazard the brief describes cannot apply. Nothing in any driver reads a key of
+an attested data table; every printed line is computed by zapo's or the store
+package's own code.
+
+---
+
+## 14. Method, controls, and what this block did not do
+
+**What was run**, in order: the positive control (`hello.ts`, MATCH, 0 fences);
+`scriptc coverage` on all five package drivers to establish ANALYSABLE and rule
+out an island; flagless `scriptc build` on all five; `--best-effort`
+`scriptc build` on the four stores; `--npm-static` single-package and
+transitive-closure `coverage` runs for `pg`, `mysql2`, `ioredis`, `mongodb` and
+`sharp`; `--provenance-sources` builds on **both backends** for seven drivers;
+`store-sqlite-names` rebuilt `--best-effort`; the `store-sqlite-open` oracle
+re-run under v25.9.0; and two `globalThis` probes with `SCRIPTC_ABSENTGLOBAL_WHY`.
+
+**Controls.**
+- *Positive*: `hello.ts` — the harness reports a clean program as MATCH with
+  **0** fences, so the zeros in §13 are findings and not the harness's default.
+- *Negative, unplanned but real*: three drivers of mine failed and the harness
+  said so precisely — `safeLimit` arity (`SC0001`), an uncaught throw scoring
+  DIFF on exactly the line that threw, and `.buffer` outside `Buffer.from`
+  (`SC1090`). A harness that cannot fail cannot be trusted when it passes.
+- *Provenance-fetch audit*: every `--provenance-sources` build log was scanned
+  for `fetch failed` / `ECONN` / `ENOTFOUND` at the **top** of the full log, not
+  a tail. **Zero hits.** All five builds carry
+  `provenance: zapo-js@1.6.2 ← …@250f9af5229a (source compiles statically)`;
+  the only island notes are the two expected ones (`mysql2`: no source mapping
+  for `mysql2/promise`; `ioredis`/`pg`: no attestation published). The scan
+  proved it can detect something by finding those notes.
+- *Engine scan*: `quickjs` / `ScrDyn` / `JS_NewRuntime` counted with `strings`
+  on every binary produced, both backends. All zero. `--dynamic` was never
+  passed to any command in this block.
+
+**What this block did NOT do, stated so nobody assumes it.**
+- **No compiler source was changed and no gate was run.** Two other blocks are
+  live and one has a gate in flight; the brief asks to be told first. Every
+  result above is from `scriptc` as built from `7417b09f`, and the worktree's
+  only changes are under `tests/perf/pkgstatus2/`, which nothing in the gate
+  runs.
+- **`store-sqlite`'s six-construct list was not shortened.** `RegExp.toString`,
+  `Object.freeze` of a possibly-aliased value and the `SC1120` function
+  replacement are still what stands between `table-names.ts` and a flagless
+  binary, and `globalThis` is still what stands in front of `connection.ts`.
+- **`--npm-static` was measured, not fixed.** The three inferred-surface
+  numbers (3 / 9 / 18) are a diagnosis; the fix is a frontend change with a
+  wide blast radius and belongs to whoever owns `npm.ts`.
+- **The `better-sqlite3` install was not rebuilt.** A `npm rebuild` under
+  v25.9.0 would need a Windows toolchain this host does not have, and swapping
+  the lab's binding would change what the previous survey measured. The verdict
+  stands as **DID-NOT-RUN (oracle unavailable on this install)**, with the ABI
+  numbers quoted so the next person can decide.
+
+**Paths**, all under `G:\blocks\pkgstatus2-lab\` and `G:\blocks\pkgstatus2\`,
+nothing at `G:\` top level: `app/` (a copy of the previous block's lab app —
+`G:\blocks\pkgstatus-lab` was neither modified nor deleted), `bin/` (every
+binary, its stdout, its oracle's stdout, both build logs and the emitted C TU),
+`diag/` (every diagnostic log), `estado-pkgstatus2.md` (this file).
+Everything is mirrored into the worktree at `tests/perf/pkgstatus2/` and
+committed.
