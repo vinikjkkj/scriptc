@@ -131,8 +131,12 @@ A and P are `.text`-identical to the byte at both sizes.
                         dynInvoke and seeds anyway, and a function keeps its
                         epilogue while any seed remains. On zapo's 641 decode
                         bodies, of 20,542 seeds: message shape alone removes
-                        42.0%, reader shape alone 43.6%, BOTH 85.5%. The two are
-                        multiplicative, not additive.
+                        27.7%, reader shape alone 43.6%, BOTH 85.5% -- which
+                        EXCEEDS the sum of the arms by exactly the 2,923 stores
+                        whose value is still dyn. Those relocate their guard to a
+                        dynCheck under a message shape alone and only pay once the
+                        reader shape has typed the value, so they belong to
+                        neither arm on its own. Reader first.
 
     tucount.mjs         one streaming pass over a 130 MB emitted TU: the
                         retain/release/dyn-op shapes, with the interned-
