@@ -209,8 +209,16 @@ async function main(): Promise<number> {
   // ride the content-addressed cache / the offline manifest), the registry
   // installs, and every fallback prints as a note — never a failure.
   const provenance = values["provenance-sources"] ? await resolveProvenanceSources(input) : null;
+  // ALWAYS, including with null. The registry's own state starts null so a
+  // fresh process cannot tell the difference, but the setter also hands the
+  // diagnostics layer this run's fetch failures -- and leaving that unset
+  // means a build in a process where an EARLIER build used provenance
+  // inherits the earlier run's failures and prints hints about a package
+  // this build never resolved. One build per process in the CLI; the test
+  // harness runs many in one worker, which is where an order-dependent
+  // diagnostic would surface as a flake rather than as a bug.
+  setProvenanceSources(provenance);
   if (provenance !== null) {
-    setProvenanceSources(provenance);
     for (const pkg of provenance.packages) {
       process.stderr.write(
         `provenance: ${pkg.name}@${pkg.version} ← ${pkg.repo.replace(/^git\+/, "")} @ ${pkg.commit.slice(0, 12)} (source compiles statically)\n`,

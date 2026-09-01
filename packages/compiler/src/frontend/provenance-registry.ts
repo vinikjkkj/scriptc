@@ -18,6 +18,7 @@
  *
  * Empty registry (the default — the flag off) = every chokepoint answers
  * exactly as before; nothing in the production npm/island path changes. */
+import { setProvenanceUnfetched } from "../diagnostics/diagnostic.js";
 import { readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { tsgoPath } from "./shared.js";
@@ -71,6 +72,9 @@ export interface ProvenanceSources {
    * Fallbacks are never build failures — the coverage report carries
    * these so the build output stays honest. */
   notes: string[];
+  /** Packages whose attested source could not be FETCHED on this run. A
+   * transport failure, not a decision -- see setProvenanceUnfetched. */
+  unfetched?: string[];
 }
 
 /** One tsconfig path-alias pattern, pre-split around its single '*'
@@ -98,6 +102,11 @@ let state: RegistryState | null = null;
 /** Installs the resolved provenance sources for the current compile.
  * Passing null (or an empty set) clears the registry. */
 export function setProvenanceSources(sources: ProvenanceSources | null): void {
+  // Hand the fetch failures to the diagnostics layer before anything else:
+  // the island refusals they change are emitted during lowering, long after
+  // this, and a package that never fetched must not be told to try
+  // --dynamic.
+  setProvenanceUnfetched(sources?.unfetched ?? []);
   if (sources === null || sources.packages.length === 0) {
     state =
       sources === null
