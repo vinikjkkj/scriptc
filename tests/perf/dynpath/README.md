@@ -56,6 +56,17 @@ A and P are `.text`-identical to the byte at both sizes.
                         are generated message code (the .d.ts describes all
                         of it), plus the declared-surface and body-member
                         counts that have to agree.
+                        They DO agree, and that is the trap: agreeing counts
+                        say the declaration NAMES these procedures, not that
+                        it DESCRIBES them. So it also parses both files and
+                        prints the agreement that decides whether the .d.ts
+                        could ever type the bodies -- per-procedure ARITY,
+                        per-member reader/writer use, and how concrete the
+                        declared field types are. On zapo's bundle: arity
+                        agrees on 0 of 1,284, the declared PbReader is missing
+                        tag/raw/discardUnknown and the real skipType arity
+                        (28.7% of sites), and 188 of 7,493 declared fields
+                        (2.51%) are concrete rather than optional or a union.
     tucount.mjs         one streaming pass over a 130 MB emitted TU: the
                         retain/release/dyn-op shapes, with the interned-
                         literal share of scr_str_retain.
