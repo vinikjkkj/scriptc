@@ -49,6 +49,8 @@ header for the bootstrap and what it costs to reproduce.
 | `region.mjs` | is a module a contiguous region of the emitted C, and what are the bounds |
 | `probe.mjs` | what ONE emitted exception-unwind release costs in `.text`, by building a family of programs and reading the slope |
 | `flagsweep.mjs` | price build-line flags on one small program, byte-exact, with the PDB cost stated |
+| `epimerge.mjs` | how much of the emitted C's unwind epilogue is REDUNDANT — three models (as emitted / one pad per distinct body / a `goto` chain) |
+| `guardsrc.mjs` | WHICH CALL each `if (scr_exc_pending())` guards, ranked by the epilogue bytes it carries |
 
 ## The caveat that cost the most time
 
@@ -89,3 +91,42 @@ protobufjs, compiled through the dynamic (`ScrDyn`) path.
 The scripts in this directory reproduce every number above; each carries its
 own usage line, and each resolves paths from its own location so it runs from
 any checkout.
+
+## What the epilogue instruments found (2026-09-01, block/sizespeed)
+
+`estado-imagesize.md` section 8 named "tail-merge the unwind epilogues in the
+emitter" as a lever and declined to guess its ceiling. `epimerge.mjs` measures
+that ceiling in the emitted C, and it is small. On a 130,379,169-byte
+`messaging.bench.c`:
+
+    pending-check sites   107,177
+    epilogue body         43,732,766 bytes  (33.5% of the file)
+
+    model     epilogue bytes   saved vs now   % of whole file
+    now           43,732,766              0            0.00
+    dedup         43,395,121        337,645            0.26
+    chain         38,214,342      5,518,424            4.23
+
+`dedup` shares one landing pad per DISTINCT body; it is worth 0.26% because
+the bodies are almost all distinct (1,191 distinct across 1,193 sites in the
+worst function). `chain` is the `goto sc_unwind_k;` shape section 8 names;
+its ceiling is 4.23% of the emitted C, and only 15.93% of consecutive
+release lists in a function actually nest, so even that is optimistic. Read
+with section 11.3's finding that clang tail-merges the machine code anyway,
+the `.text` value of this lever is near zero. **Do not spend a session on
+it.**
+
+`guardsrc.mjs` says where the epilogue comes from instead, and the answer is
+three dyn primitives:
+
+         guards      epi bytes    %epi   avg  callee
+         33,061     12,289,187   28.07   372  sc_dyn_key_get
+         19,420     10,182,602   23.26   524  scr_dyn_invoke
+         16,679      6,451,666   14.73   387  scr_dyn_key_set
+
+69,160 of 107,473 guards (64.3%) and 66.06% of all epilogue bytes. A dyn
+property read, call or write is a fallible runtime call, so each one costs a
+pending check plus the whole live set's release list; the same source typed
+emits a struct load and nothing else. That is what the 8.4x expansion IS,
+and it is why the lever is the frontend's typing of the bundle rather than
+anything the emitter can fold.
