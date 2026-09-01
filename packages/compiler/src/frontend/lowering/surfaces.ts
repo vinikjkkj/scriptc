@@ -2313,6 +2313,22 @@ export const BUILTIN_MODULE_FENCE_HINTS: Record<string, Record<string, string | 
    * answers the EXISTENCE question (`Object.freeze ? ... : ...`) for
    * NON-optional stdlib methods and returns null on Optional; this one
    * answers the VALUE question for the optional half. */
+  /** Names read off node v25.9.0's `globalThis` as ABSENT -- own property
+   * false, `typeof` "undefined" -- in the main thread AND inside a
+   * `node:worker_threads` Worker. A reading, not a declaration set: the
+   * whole point of the block inside absentGlobalMemberValue is that
+   * declarations lag the runtime, so the evidence for absence has to come
+   * from the runtime too. Kept to browser/worker names that third-party
+   * bundles feature-test and that measured code actually probes -- a table
+   * carrying only what is required is the smaller wrong-answer surface. */
+  const NODE_ABSENT_GLOBALS: ReadonlySet<string> = new Set([
+    "window",
+    "document",
+    "WorkerGlobalScope",
+    "importScripts",
+    "XMLHttpRequest",
+  ]);
+
   export function absentGlobalMemberValue(L: Lowerer, access: ts.PropertyAccessExpression): IrExpr | null {
     if (access.questionDotToken) return null;
     if (L.chainBlocked(access)) return null;
@@ -2358,6 +2374,46 @@ export const BUILTIN_MODULE_FENCE_HINTS: Record<string, Record<string, string | 
     // name AND admit `undefined` in its type. Both worlds carry exactly one
     // such global and it is the same one — @types/node's `declare var gc:
     // NodeJS.GCFunction | undefined` and the fallback's twin of it.
+    // ...EXCEPT for a name MEASURED absent from Node's own globalThis.
+    // The block above is right that a missing DECLARATION proves nothing
+    // -- every name it lists is one Node really has, and answering
+    // `undefined` for those was measured WRONG. But the COMPLEMENT is not
+    // an inference from a declaration set, it is a reading of the
+    // runtime. Taken off node v25.9.0 directly, with
+    // `Object.prototype.hasOwnProperty.call(globalThis, n)`:
+    //
+    //   window false | document false | WorkerGlobalScope false
+    //   importScripts false | XMLHttpRequest false
+    //
+    // and, CONFIRMING the block above rather than contradicting it:
+    //
+    //   navigator true | Blob true | File true | FormData true
+    //   URLPattern true | WebAssembly true | localStorage true
+    //   Storage true | Performance true | performance true
+    //
+    // -- which is exactly why none of those is in the table.
+    //
+    // Read in BOTH thread kinds, main and a `node:worker_threads` Worker,
+    // because "absent" has to hold wherever the module runs: all five are
+    // own=false / typeof "undefined" in both. (`self` and `postMessage`
+    // measure absent in both as well -- an earlier draft of this comment
+    // claimed Node defines them in a Worker, and running it said
+    // otherwise. They stay OUT anyway: nothing measured needs them, and a
+    // table carrying only what is required is the smaller wrong-answer
+    // surface.)
+    //
+    // JavaScript sources only, and the answer is the VALUE -- the same
+    // one the JS arm below already gives for a declared-optional global,
+    // for the same stated reason: values there ride the checked-dynamic
+    // tree, so there is no static slot for `undefined` to fail to fit.
+    //
+    // This is the environment probe every bundler emits.
+    // `!!globalThis.window` and `!!globalThis.WorkerGlobalScope` are the
+    // first two statements of Emscripten's module glue, and they REFUSED
+    // where Node answers `undefined`.
+    if (gp === undefined && NODE_ABSENT_GLOBALS.has(name) && isJsSourceFile(access.getSourceFile())) {
+      return { kind: "unitLit", unit: "undefined", type: UNDEFINED_T, loc: locOf(access) };
+    }
     if (gp === undefined) return why("undeclared");
     const decls = L.checker.declarationsOf(gp);
     if (decls.length === 0 || !decls.every((d) => L.isStdlibFile(d.getSourceFile()))) return why("provenance");
