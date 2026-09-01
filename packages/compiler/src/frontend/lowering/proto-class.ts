@@ -74,7 +74,7 @@
  * can be trusted — see npm-static.ts's standing doctrine and the measurement in
  * tests/perf/dynpath/waproto-split.mjs.
  */
-import ts from "typescript";
+import ts from "typescript5";
 
 /** A member the constructor assigns to `this` in its own body. */
 export interface ProtoField {
