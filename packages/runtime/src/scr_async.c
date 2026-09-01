@@ -1894,6 +1894,79 @@ static void scr_resume_fiber(ScrFiber *f) {
  * the wake pipe and fd 0 directly. */
 #define SCR_SIGNAL_POLL_MS 50.0
 
+/* The loop's idle sleep.
+ *
+ * On win32 this is NOT nanosleep, and the reason is measured. mingw-w64's
+ * nanosleep cannot express a sub-tick wait: a 1 ms request costs a full
+ * 15.6 ms scheduler tick, and it is the one primitive of the four below
+ * that does not respond to timeBeginPeriod, so raising the timer
+ * resolution system-wide does nothing for it. On x86_64-windows-gnu
+ * (tests/perf/looplatency/sleep-primitives.c):
+ *
+ *     primitive                                default   timeBeginPeriod(1)
+ *     nanosleep(1ms)                           15.611 ms      15.584 ms
+ *     Sleep(1)                                 15.531 ms       1.186 ms
+ *     WaitForSingleObject(ev, 1)               15.480 ms       1.126 ms
+ *     CreateWaitableTimerExW HIGH_RESOLUTION    1.124 ms       1.207 ms
+ *
+ * The high-resolution waitable timer is the only one that gets there with
+ * no process-wide side effect (timeBeginPeriod raises the global tick rate
+ * and its power cost for every process on the box).
+ *
+ * Why it matters: the socket arm caps this sleep at SCR_CHILD_POLL_MS = 1
+ * ms and readiness is only noticed at the next turn's zero-timeout
+ * WSAPoll, so a reply arriving mid-sleep waited half a tick. Measured on a
+ * loopback echo, 2000 sequential round trips: 8.26-10.58 ms per round trip
+ * against node's 0.106-0.129 ms, and on the real zapo messaging bench it
+ * was worth 11.5x on the worst phase and 4.4x on the next
+ * (tests/perf/looplatency/README.md).
+ *
+ * This is NOT the missing-wake-fd upgrade scr_loop_wsapoll.c's header
+ * predicts (WSAEventSelect/IOCP). That would be better still — zero
+ * latency instead of 1 ms — but it is a loop-side redesign, and the
+ * granularity of the sleep is what stood between this workload and node.
+ *
+ * Falls back to nanosleep if the timer cannot be created (pre-1803
+ * Windows), so behavior degrades to exactly what it was. */
+#ifdef _WIN32
+static HANDLE scr_idle_timer = NULL;
+static int scr_idle_timer_tried = 0;
+#endif
+
+static void scr_sleep_ms(double ms) {
+  if (ms <= 0.0) return;
+#ifdef _WIN32
+  if (!scr_idle_timer_tried) {
+    scr_idle_timer_tried = 1;
+    scr_idle_timer = CreateWaitableTimerExW(NULL, NULL,
+                                            CREATE_WAITABLE_TIMER_HIGH_RESOLUTION,
+                                            TIMER_ALL_ACCESS);
+  }
+  if (scr_idle_timer != NULL) {
+    /* Negative == relative, in 100 ns units. */
+    double units = ms * 10000.0;
+    LARGE_INTEGER due;
+    if (units > 9.0e18) units = 9.0e18;
+    due.QuadPart = -(LONGLONG)units;
+    if (due.QuadPart == 0) due.QuadPart = -1;
+    if (SetWaitableTimer(scr_idle_timer, &due, 0, NULL, NULL, FALSE)) {
+      /* Bounded rather than INFINITE: the timer always signals, so the
+       * cap only ever fires if something is wrong, and it cannot hang
+       * the loop. It does not coarsen the normal path — the wait
+       * returns when the timer signals, not when the cap expires. */
+      DWORD cap = (DWORD)(ms + 100.0);
+      WaitForSingleObject(scr_idle_timer, cap);
+      return;
+    }
+  }
+#endif
+  {
+    time_t secs = (time_t)(ms / 1000.0);
+    struct timespec ts = {secs, (long)((ms - (double)secs * 1000.0) * 1e6)};
+    nanosleep(&ts, NULL);
+  }
+}
+
 /* The external io hook (scr_runtime.h): the dynamic island registers
  * engine-job draining + fetch transfer polling here. Static builds never
  * set it — both slots stay NULL and the loop is byte-identical in
@@ -2226,9 +2299,7 @@ bool scr_loop_run(ScrPromise *top_level) {
       if ((net || dgram || watch) && due > now + SCR_CHILD_POLL_MS) due = now + SCR_CHILD_POLL_MS;
       if (kids && due > now + SCR_CHILD_POLL_MS) due = now + SCR_CHILD_POLL_MS;
       if (due > now) {
-        double wait = due - now;
-        struct timespec ts = {(time_t)(wait / 1000.0), (long)((wait - (double)((time_t)(wait / 1000.0)) * 1000.0) * 1e6)};
-        nanosleep(&ts, NULL);
+        scr_sleep_ms(due - now);
       }
       now = scr_now_ms();
 #else
@@ -2310,9 +2381,7 @@ bool scr_loop_run(ScrPromise *top_level) {
     } else {
       if (kids && due > now + SCR_CHILD_POLL_MS) due = now + SCR_CHILD_POLL_MS;
       if (due > now) {
-        double wait = due - now;
-        struct timespec ts = {(time_t)(wait / 1000.0), (long)((wait - (double)((time_t)(wait / 1000.0)) * 1000.0) * 1e6)};
-        nanosleep(&ts, NULL);
+        scr_sleep_ms(due - now);
         now = due;
       }
     }
