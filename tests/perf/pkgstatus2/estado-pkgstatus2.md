@@ -701,3 +701,509 @@ binary, its stdout, its oracle's stdout, both build logs and the emitted C TU),
 `diag/` (every diagnostic log), `estado-pkgstatus2.md` (this file).
 Everything is mirrored into the worktree at `tests/perf/pkgstatus2/` and
 committed.
+
+---
+
+# Second round — on main `acdd8b96`, rebased and re-measured
+
+The block was rebased onto `acdd8b96`; the compiler was rebuilt; `surfaces.ts`
+had moved under this block (`310da1ea`, the `process.type` rung inside
+`610073a4`). **The defect re-reproduces unchanged on the new base** — same
+decline step, same mis-blame — so nothing below rests on the old build.
+
+---
+
+## 15. Item 1 — the type-only export exception: WHICH names, and why it is not the protobuf case
+
+The orchestrator's constraint is the right one to answer first:
+`npm-static.ts:6-18` says *"a declaration is a CLAIM about the body, and the
+compiled artifact must be built from what the body provably is, not from what
+the declaration says it should be"*, and a sibling proved it — protobuf's
+`.d.ts` declares `encode` with 2 parameters against an actual 3, **0 of 642
+agreeing**. So the exception has to be argued, not assumed.
+
+### 15a. First, the names — because "3, 9 and 18 sites" never said WHICH
+
+The note counts sites and never named them, and the names are what decides
+whether a package is one declaration away or a rewrite away. This block added
+`SCRIPTC_NPMSTATIC_WHY` (off by default, stderr, same shape as
+`SCRIPTC_ABSENTGLOBAL_WHY`) to `index.ts`'s consumer-anchored attribution loop,
+and every breaking site in the corpus is now named:
+
+| package | sites | distinct names | how the package's OWN declarations spell each |
+| --- | --- | --- | --- |
+| `ioredis` | **3** | `RedisOptions` ×2, `ChainableCommander` | `built/index.d.ts:34` re-exports `RedisOptions` from `./redis/RedisOptions`, where it is an **`interface`** (the JS module exports `DEFAULT_REDIS_OPTIONS`, a value, and no `RedisOptions`); `:38` is an explicit **`export type {`** for `ChainableCommander`. **Both type-only.** |
+| `mysql2` | **9** | `Pool` ×4, `PoolOptions` ×3, `FieldPacket`, `ResultSetHeader` | at the specifier the program imports, `mysql2/promise`, `promise.d.ts:92` is **`export interface Pool extends Connection`**; `PoolOptions` is an `interface`; `FieldPacket` and `ResultSetHeader` likewise. **All four type-only — at that specifier.** |
+| `pg` | **18** | `PoolClient` ×9, `Pool` ×4, `PoolConfig` ×3, `QueryResult` ×2 | `@types/pg/index.d.ts`: `PoolConfig:49` **`interface`**, `QueryResult:104` **`interface`**, `PoolClient:320` **`interface`** — but `Pool:184` is **`export class Pool extends events.EventEmitter`**, a **VALUE**. |
+
+Two facts fall out that no per-package rule would survive:
+
+- **The classification is per (specifier, name), never per package.**
+  `Pool` is an `interface` at `mysql2/promise` and a `declare class` at
+  `mysql2` (`typings/mysql/lib/Pool.d.ts:49`), whose JS really does
+  `exports.Pool = Pool` (`index.js:26`). The same name is type-only through one
+  door and a value through the other.
+- **`pg` is not the same case at all.** `pg` ships **no declarations of its
+  own** (`package.json` has no `types`/`typings`; `main: ./lib`) — the
+  declarations are a DefinitelyTyped twin, which is a weaker source of truth
+  than a package's own `.d.ts` to begin with. And its `Pool` *is* a runtime
+  value: `pg/lib/index.js` does `module.exports = new PG(clientConstructor)`
+  and the constructor assigns `this.Pool = poolFactory(this.Client)`
+  (`:25`). Inference cannot reach a property assigned onto an instance, so
+  `Pool` breaks not because it is type-only but because it is **a value
+  inference cannot see** — which is exactly the case the doctrine says must be
+  built from the body.
+
+### 15b. Why the exception is safe where the protobuf case was not
+
+Four points, and the third is measured rather than argued.
+
+1. **A type-only export contributes no code to the artifact.** An `interface`
+   or a `type` alias emits nothing. The doctrine's clause is that the compiled
+   artifact must be built from the body; a type-only name builds no part of it.
+2. **There is no body for it to contradict.** protobuf's `encode` is a function
+   the compiler *can* compile, so the declaration and the body are two accounts
+   of one thing and they disagreed 642 times. `RedisOptions` at `ioredis` and
+   `Pool` at `mysql2/promise` have **no runtime value at that specifier at
+   all** — the JS module genuinely does not export them, which is precisely why
+   inference reports "has no exported member". A claim with nothing to
+   contradict cannot mis-describe a body.
+3. **An over-claiming declaration produces a checked TypeError, not a wrong
+   answer — measured, both backends.** `drivers/claim-probe3.ts`: a compiled
+   JS body (`claimlab/body.js`) whose object has neither `version` nor
+   `decode`, typed by an interface that claims both.
+
+   ```
+   binary  Uncaught TypeError: expected function at $.decode, got undefined
+   node    1 tag: body
+           2 version the body does not have: undefined
+           3 decode the body does not have: threw: c.decode is not a function
+   ```
+
+   The binary **refuses at the boundary and names the member**. Scored DIFF, and
+   the direction matters: it is a TRAP, not a WRONG. And the *under*-claiming
+   shape — the protobuf arity shape, a body of three parameters called through a
+   claim of two (`drivers/claim-probe2.ts`) — builds and **MATCHes node
+   byte-exactly on both backends** (`1:2:MISSING`, 660,992 bytes, `quickjs=0
+   ScrDyn=0`, 0 fences), because JavaScript's own rule for a missing argument is
+   `undefined` and the compiler models it.
+
+   **This does NOT retract the doctrine.** The protobuf failure was not that the
+   compiler crashed on a bad declaration; it was that trusting declarations
+   would have mis-typed 91% of a bundle whose bodies were right there to be
+   read. Point 3 only establishes the weaker thing the exception needs: the
+   failure mode of an admitted type-only claim is refusal-shaped.
+4. **Nothing in the exception un-hides a body.** The rule admits a name that
+   the shipped JS does not export; every name the JS *does* export keeps
+   coming from the body, and every statement the lowering cannot honour keeps
+   its runtime fence. Trust-but-verify is untouched.
+
+### 15c. What the exception would and would not buy, per package
+
+| package | sites | the exception covers | residue |
+| --- | --- | --- | --- |
+| `ioredis` | 3 | **3 of 3** | **none** — `store-redis` becomes static |
+| `mysql2` | 9 | **9 of 9** | **none** — `store-mysql` becomes static |
+| `pg` | 18 | 14 (`PoolClient`, `PoolConfig`, `QueryResult`) | **4** — `Pool`, a value inference cannot reach through `module.exports = new PG(...)` |
+
+So it is **not** "one mechanism, three packages". It is one mechanism, **two**
+packages completely, and a third that needs a different fix (reaching an export
+assigned onto an instance, or refusing) and stays on the island without it.
+Both `ioredis` and `mysql2` ship their own declarations; `pg` does not, which is
+the same split.
+
+**This block did not implement it.** The change is in resolution — the `.d.ts`
+is hidden by virtual-FS hooks, and admitting *part* of one means synthesising a
+filtered declaration set and merging it with an inferred surface. That is a
+design, not a round, and it needs the gate. What is delivered is the decided
+question: the names, their spelling in each package's own declarations, the
+per-specifier rule, the measured failure mode, and the two packages it closes.
+
+---
+
+## 16. Item 2 — the `globalThis` defect, fixed, with the controls and the one it nearly broke
+
+### 16a. It re-reproduces on `acdd8b96`
+
+`surfaces.ts` moved under this block (`310da1ea`, the `process.type` rung inside
+`610073a4`). Rebased, rebuilt, re-probed: identical decline
+(`decline=undeclared globalThis.Bun`), identical mis-blame
+(`SC2020 'globalThis' … has no scriptc lowering yet`), 1 of 2 statements static.
+Nothing below rests on the old base.
+
+### 16b. The change
+
+`absentGlobalMemberValue` unwraps parentheses, `as`, `satisfies` and `!` from
+the receiver to prove it is `globalThis`, then looks the property up on the
+**unwrapped** receiver's type — discarding the assertion that declares the
+member optional. Two parts:
+
+1. **A new table, `RUNTIME_IDENTITY_ABSENT = { Bun, Deno }`**, on a reading of
+   node v25.9.0 rather than a declaration set: `hasOwnProperty.call(globalThis,
+   n)` false and `typeof` `"undefined"` for both, **in the main thread AND
+   inside a `node:worker_threads` Worker**, with `fetch`, `navigator`, `Blob`
+   and `process` reading `own=true` in the same run as the control that the
+   probe can tell present from absent.
+2. **A TypeScript arm** that folds `(globalThis as { X?: T }).X` to `undefined`
+   when — and only when — `X` is in that table **and** the assertion declares
+   the member optional. The assertion is the SITE condition, never the
+   evidence; the evidence stays the measurement, exactly as in the JavaScript
+   arm.
+
+`unknown` maps to `dyn`, which is the ordinary spelling of this probe
+(`{ Bun?: unknown }`), so the `dyn` site takes the same answer for the same
+reason the JavaScript arm does not consult the site at all.
+
+### 16c. Why a SECOND table and not a wider one — the control this nearly overwrote
+
+The first version widened `NODE_ABSENT_GLOBALS` itself, which would have made
+`(globalThis as { window?: { name: string } }).window` fold in a TypeScript
+source. That is a **ratified negative control**:
+`tests/fixtures/node-types/stdlib-surfaces-fenced.ts:49` expects it to keep its
+refusal, with the reasoning written beside it — an assertion the program wrote
+is not evidence about the host, and folding on silence once answered
+`undefined` for two dozen globals node really has.
+
+The two tables answer different questions, and that is the line:
+
+| | question | why a refusal is right / wrong |
+| --- | --- | --- |
+| `window` `document` `XMLHttpRequest` `crypto` `gc` | **capability**: "does this host give me X?" | a compiler must not answer "no" for a capability merely because nothing declared it — the fixture's rule, and it stands |
+| `Bun` `Deno` | **runtime identity**: "which runtime am I?" | not an inventory question. A scriptc binary is not Bun and is not Deno whatever any declaration set says, and node v25.9.0 is neither either — so both sides of the oracle agree structurally |
+
+No corpus program names `Bun` or `Deno` (`rg` over `tests/`), so the table
+addition cannot change any gate program's answer.
+
+### 16d. Controls, all run
+
+| control | expectation | result |
+| --- | --- | --- |
+| **positive** `globalthis-bun.ts` — the zapo shape plus `Deno` | compiles and matches | **3/3 MATCH byte-exact**, both backends, 657,920 / 657,408 bytes, `quickjs=0 ScrDyn=0`, **0 fences** — the `dyn`-site arm puts no dyn machinery in the binary |
+| **negative** `(globalThis as { fetch?: unknown }).fetch`, same for `navigator` | must NOT fold — node has both | `decline=declared-present`, still fenced. Node prints `function`/`object`; the compiler refuses rather than answering `undefined` |
+| **negative** `(globalThis as { Zorb?: unknown }).Zorb` | the assertion alone must buy nothing | `decline=undeclared`, still fenced |
+| **negative** `(globalThis as { Bun: unknown }).Bun` (non-optional) | must not fold | **TypeScript itself refuses the conversion** — the shape cannot reach lowering |
+| **ratified** `stdlib-surfaces-fenced.ts` | unchanged | 11 statements, **4 static (36%)**, ×3 `globalThis`, ×1 `globalThis.gc` — **identical to `acdd8b96`** |
+| **ratified** `corpus/7324-globalthis-absent-member.ts` | unchanged | **12/12, 100%, fully static** on both |
+| **negative** `globalthis-neg4.ts` — `window` behind a cast in a TS source | must keep its refusal | fenced, 0% — and the first draft of the positive-control driver carried this line, so the compiler CAUGHT the over-wide rule in my own lab before the fixture did |
+| **regression** the five existing binaries + `hello` | no MATCH may become WRONG | all rebuilt on the patched compiler: **MATCH byte-exact on both backends**, same byte sizes; `store-sqlite-names-be` is still the same TRAP at `table-names.ts:116` |
+
+`N …→MATCH = 12` (the five stores plus `globalthis-bun`, each on two backends),
+**`M MATCH→WRONG = 0`.** The five store binaries were scored on the wide build;
+the final build folds strictly less, and `store-redis-helpers` — the largest of
+the five — was rebuilt on it and still MATCHes byte-exactly on both backends at
+the same 813,568 / 815,104 bytes.
+
+### 16e. A stale incremental build nearly made me report a regression that does not exist
+
+The first before/after ran `git stash push` on `surfaces.ts` and then
+`pnpm build`. **`pnpm build` did not recompile** — the tsc incremental cache
+served the previous dist — and the "baseline" it produced read 5/11 (45%) with
+×2 `globalThis` against the patched 4/11 (36%) with ×3. That looked exactly like
+a regression I had caused.
+
+With `node_modules/.cache/scriptc-tsc` and both `dist/` trees removed, the true
+`acdd8b96` baseline reads **4/11 (36%), ×3 `globalThis`** — identical to the
+patched build. There was never a regression; there was a stale artifact.
+Every comparison in this section was re-run from a cleaned build afterwards.
+`package.json` has `build:fresh` for exactly this, and a comparison that does not
+use it is not a comparison.
+
+---
+
+## 17. What the `globalThis` fix is actually worth on `store-sqlite` — measured both sides, and a claim of mine that was wrong
+
+The previous survey ranked `globalThis` as **blocker #1 of six** on
+`openSqliteConnection` and said `isBunRuntime()` is "called at module scope by
+`store-sqlite/connection.ts`". My first commit message repeated that. **Both
+halves are wrong on `acdd8b96`, and reading the file plus running the baseline
+is what says so.**
+
+**The call site.** `store-sqlite/connection.ts:2` imports `isBunRuntime` and
+line **359** calls it — `return isBunRuntime() ? 'bun' : 'better-sqlite3'` —
+**inside a function**, not at module scope.
+
+**Before and after, same driver, same lane, both from CLEANED builds:**
+
+| | `acdd8b96` | with the fix |
+| --- | --- | --- |
+| statements analyzed | 48,921 | 48,921 |
+| compile statically | **48,815** (99%) | **48,816** (99%) |
+| blockers | **1** — `SC1090` the EventEmitter member `emit` as a VALUE, in zapo-js's `WaClient.ts` | **1** — the same one |
+| deferred to runtime | 1 — `require()` with a run-time specifier | the same |
+| `globalThis` anywhere | **absent** | absent |
+
+So on the current compiler the fold is worth **exactly one statement** on this
+driver and **removes no blocker**: the six-construct list is stale, the compiler
+moved past five of them, and `isBunRuntime` sits in the unreached group here.
+
+What the fix does remove is the refusal **on the construct**, and that is
+measured on its own: the probe goes from 1 of 2 statements static with an
+`SC2020` to **2 of 2**, and builds a binary that matches node byte-exactly on
+both backends. The next program that writes the shape the fence recommends gets
+an answer instead of a mis-blamed receiver. That is the honest size of it.
+
+`store-sqlite`'s one remaining blocker on this path is now **`emit` as a value
+inside zapo-js**, not anything in `store-sqlite`.
+
+---
+
+## 18. Status after round two, and what needs the gate
+
+**Binaries: six**, all `quickjs=0 ScrDyn=0 JS_NewRuntime=0`, **0 fences** in the
+emitted C, none built with `--best-effort`:
+
+| binary | package | flags | bytes LLVM / C | oracle |
+| --- | --- | --- | --- | --- |
+| `store-mysql-cleanup2.exe` | `store-mysql` | `--provenance-sources` | 670,208 / 672,256 | 9/9 MATCH |
+| `store-mysql-helpers2.exe` | `store-mysql` | `--provenance-sources` | 810,496 / 811,520 | 16/16 MATCH |
+| `store-postgres-cleanup2.exe` | `store-postgres` | `--provenance-sources` | 670,208 / 672,256 | 9/9 MATCH |
+| `store-postgres-helpers2.exe` | `store-postgres` | `--provenance-sources` | 810,496 / 811,520 | 16/16 MATCH |
+| `store-redis-helpers.exe` | `store-redis` | `--provenance-sources` | 813,568 / 815,104 | 21/21 MATCH |
+| `globalthis-bun.exe` | (the fix's control) | none | 657,920 / 657,408 | 3/3 MATCH |
+
+**`N …→MATCH = 12`, `M MATCH→WRONG = 0`.**
+
+`store-mongo` and `media-utils` still reach no binary, with the reasons named to
+the package and the diagnostic (§8, §9). Neither was forced.
+
+### Needs the gate — three commits, none started by this block
+
+| commit | what it touches | exposure |
+| --- | --- | --- |
+| `b474eb54` + `bab37ee3` | `surfaces.ts`, `absentGlobalMemberValue` | a lowering. Two ratified expectations re-measured identical from cleaned builds; no corpus program names `Bun` or `Deno`; six binaries rebuilt and still MATCH |
+| `14c78654` | `index.ts`, `SCRIPTC_NPMSTATIC_WHY` | a `console.error` behind an env var that is unset in the gate; no behaviour change |
+| `8f0c763d` | `tests/perf/pkgstatus2/bo.sh` | lab harness only, nothing the gate runs |
+
+The orchestrator has a gate in flight on `610073a4`. **This block did not start
+one and is not starting one.**
+
+---
+
+## 19. Design — per-`(specifier, name)` admission of a type-only export. NOT implemented.
+
+Written while the box was held for a sibling's gate. Nothing in this section
+was built; §19c is a measurement that **changes the recommendation** from the
+one this block gave in §15, and it was found by running the direction the
+orchestrator asked for.
+
+### 19a. The argument, stated plainly
+
+`npm-static.ts:6-18`: *"a declaration is a CLAIM about the body, and the
+compiled artifact must be built from what the body provably is, not from what
+the declaration says it should be."* protobuf earned that rule — `encode`
+declared with 2 parameters against an actual 3, **0 of 642 agreeing**.
+
+A type-only export is different in kind, and for one reason only:
+
+> **It emits no code and there is no body for it to contradict.**
+
+`export interface RedisOptions` produces no runtime value; `ioredis`'s JS module
+genuinely does not export that name, which is exactly why inference reports
+`Module '"ioredis"' has no exported member 'RedisOptions'`. A claim with nothing
+to contradict cannot mis-describe a body — the protobuf failure needs two
+accounts of one thing, and here there is one account of nothing.
+
+That argument is sound and it is **not sufficient**, which is what §19c shows.
+
+### 19b. The two directions of disagreement, both measured
+
+Harness: `claimlab/*.js` (a compiled JS body) + a hand-written interface over
+it, built on both backends and run against node v25.9.0.
+
+| direction | shape | binary | node | verdict |
+| --- | --- | --- | --- | --- |
+| **arity under-claim** (the protobuf shape) | body takes 3, claim takes 2 | `1:2:MISSING` | `1:2:MISSING` | **MATCH byte-exact**, 660,992 bytes — JS's own rule for a missing argument is `undefined`, and the compiler models it |
+| **over-claim** | claim declares `version` and `decode()`; the body has neither | `Uncaught TypeError: expected function at $.decode, got undefined` | prints 3 lines, catches its own TypeError | **TRAP** — refuses at the boundary and names the member |
+| **data under-claim** | claim says `count: string`; the body's is `number` | `Uncaught TypeError: expected string at $.count, got number` | prints the value | **TRAP** — names the member and both types |
+| **method-return under-claim** | claim says `find(k): string`; the body returns `string \| null` | **prints `2 miss, typeof: string`** | prints `object` | **WRONG**, then a failure |
+
+### 19c. The direction nobody had measured is the one that breaks the exception
+
+`drivers/underclaim-probe3.ts` — **no `as` cast anywhere**, just an annotation,
+over a body whose export infers as `any` (`JSON.parse(...) && { … }`, the
+ordinary shape of bundler-emitted JS):
+
+```ts
+const c: Underclaimed = makeCodec()      // interface says find(k): string
+console.log('2 miss, typeof:', typeof c.find('miss'))
+```
+
+```
+binary   2 miss, typeof: string          <- WRONG, printed, before anything fails
+node     2 miss, typeof: object
+binary   Uncaught TypeError: expected string at $, got null   <- only afterwards
+```
+
+and in the sibling probe where the consumer then reads `.length` off it
+(`underclaim-probe2.ts`), the binary **segfaults**, exit 139, on both backends.
+
+Three things follow, and they are the design:
+
+1. **A materialising boundary check can validate DATA and cannot validate a
+   future RETURN VALUE.** Every safe row in §19b is a property the check could
+   inspect at the boundary. The unsafe row is a method: nothing at the boundary
+   can know what `find` will return later.
+2. **The assignability check that would otherwise catch it does not fire when
+   the body's inferred type is `any`** — and `any` is precisely what inference
+   yields for the bundler-emitted JS this lane exists to compile. The check that
+   makes the exception safe is absent exactly where the exception is needed.
+3. So the admissible rule is **not** "the name is type-only". It is:
+
+   > Admit a type-only export at `(specifier, name)` only if **no member of the
+   > admitted declaration is a callable whose result the program consumes**, or
+   > the call's return is checked at the call. Data shapes are admissible;
+   > method-bearing interfaces returned BY the package are not, on the same
+   > evidence that made protobuf's `.d.ts` inadmissible.
+
+### 19d. Re-classified against that rule — and no package is fully closed
+
+| name | sites | kind | admissible under §19c? |
+| --- | --- | --- | --- |
+| `FieldPacket` (mysql2) | 1 | pure data | **yes** |
+| `ResultSetHeader` (mysql2) | 1 | pure data | **yes** |
+| `QueryResult` (pg) | 2 | pure data | **yes** |
+| `PoolOptions` (mysql2) | 3 | data bag, consumer-supplied callbacks only | **yes** — the callbacks travel INTO the package; the compiler compiles the consumer's own body for them |
+| `PoolConfig` (pg) | 3 | same | **yes** |
+| `RedisOptions` (ioredis) | 2 | same (`retryStrategy`, `reconnectOnError`) | **yes** |
+| `ChainableCommander` (ioredis) | 1 | method-bearing, **returned by** the package | **no** |
+| `Pool` (mysql2/promise) | 4 | method-bearing, returned by the package | **no** |
+| `PoolClient` (pg) | 9 | method-bearing, returned by the package | **no** |
+| `Pool` (pg) | 4 | **a VALUE**, not type-only at all | **no** — §19e |
+
+Member kinds were read out of each package's own declarations, so the column is
+checkable: `@types/pg/index.d.ts:104` (`QueryResult`: `rows`, `rowCount`, `oid`,
+`fields`, `command` — data), `:49` (`PoolConfig`: `log`, `Client`, `onConnect`,
+`verify`, all supplied BY the consumer), `:320`
+(`PoolClient extends Client { release(...) }`, and `Client` carries `query()`
+returning a result — returned BY the package);
+`ioredis/built/redis/RedisOptions.d.ts` (`Connector`, `retryStrategy`,
+consumer-supplied) against `built/utils/RedisCommander.d.ts`
+(`ChainableCommander extends RedisCommander<…>` — every Redis command, reached
+as `pipeline: ChainableCommander`); mysql2's
+`ResultSetHeader.d.ts` and `FieldPacket.d.ts` (both pure data) and
+`typings/mysql/lib/Pool.d.ts:12` (`PoolOptions`, data; the callables at `:54-68`
+are members of the `Pool` CLASS at `:49`, not of the options bag).
+
+**This retracts §15c.** The earlier conclusion — "closes `ioredis` 3/3 and
+`mysql2` 9/9 completely" — was reached before the method-return direction was
+measured, and it does not survive it:
+
+| package | sites | admissible | residue |
+| --- | --- | --- | --- |
+| `ioredis` | 3 | 2 (`RedisOptions`) | **1** — `ChainableCommander` |
+| `mysql2` | 9 | 5 (`PoolOptions`, `FieldPacket`, `ResultSetHeader`) | **4** — `Pool` |
+| `pg` | 18 | 5 (`PoolConfig`, `QueryResult`) | **13** — `PoolClient` ×9, `Pool` ×4 |
+
+The fallback loop is **all-or-nothing per package**, so a residue of one is a
+residue: on this rule alone, **no store becomes static**. `ioredis` is one
+interface away rather than three, which is a real improvement in the size of the
+question, and it is not the same claim as before.
+
+### 19e. `pg`'s remaining four need a different answer, and its missing `.d.ts` makes the declaration route worse, not better
+
+`pg`'s `Pool` is not a type-only export in any sense. `@types/pg/index.d.ts:184`
+declares `export class Pool extends events.EventEmitter` — a value — and pg's
+runtime really has one: `pg/lib/index.js` ends with
+`module.exports = new PG(clientConstructor)`, and `PG`'s constructor does
+`this.Pool = poolFactory(this.Client)` (`:25`). Inference cannot follow a
+property assigned onto an instance inside a constructor, so the name is
+**a value inference cannot reach**, which the doctrine says must come from the
+body.
+
+Three routes, and only one of them respects the doctrine:
+
+1. **Teach inference to reach it** — follow `module.exports = new C(...)` to
+   `C`'s constructor assignments. This is a JS-inference change, not a
+   declaration change, and it is the doctrine-respecting one: the answer still
+   comes from the body. **And the body is already there** — `pg-pool` is one of
+   the 13 packages that compiled statically in §7, so the class `Pool` really is
+   is a compiled program module; only pg's export surface hides it.
+2. **Refuse** — leave `pg` on the island and say so. Honest, and it is where pg
+   is today.
+3. **Admit `@types/pg`'s `class Pool`** — forbidden. It is a claim about a body
+   that exists and is compiled, which is the protobuf case exactly.
+
+**Shipping no declarations of its own makes pg's case worse.** For `ioredis` and
+`mysql2`, an admitted claim is at least the package author's own account of
+their own JS, versioned with it. `@types/pg` is a **third-party model**,
+versioned separately (`@types/pg@8.23.1` against `pg@8.23.0`), of a body the
+compiler can already read. Under a doctrine whose whole point is that the body
+outranks the claim, the weakest possible source of a claim is a stranger's model
+of it. So pg should not be the package the exception is designed around, and
+route 1 is what pg actually needs.
+
+### 19f. What an implementer would have to build, and the order
+
+1. **A classifier, per `(specifier, name)`** — not per package. `Pool` is
+   `export interface` at `mysql2/promise` (`promise.d.ts:92`) and
+   `declare class` at the `mysql2` root (`typings/mysql/lib/Pool.d.ts:49`, with
+   `exports.Pool = Pool` in `index.js:26`). It must load the package's shipped
+   declarations in a **side** program (they are hidden from the main one by the
+   virtual-FS hooks) and ask, for the module the program actually imported,
+   whether the symbol has `SymbolFlags.Value`. A name with a value meaning is
+   never admissible.
+2. **A member test on each admitted declaration** — §19c's rule. Every member
+   that is a callable whose result the program consumes disqualifies the name.
+   This is the step that keeps the exception out of the protobuf case, and it is
+   the step §15 did not have.
+3. **A synthesised, filtered declaration** exposed as the package's types while
+   the JS keeps supplying every value — the mechanism question, and the one
+   with real design risk: TypeScript will not merge an ambient module
+   declaration with an inferred module surface cleanly, so this probably means
+   emitting a `.d.ts` that re-exports the inferred value surface and adds the
+   admitted type-only names.
+4. **The census as the acceptance test.** `SCRIPTC_NPMSTATIC_WHY` (shipped in
+   `14c78654`) already names every breaking site; the acceptance criterion is
+   that the admissible names disappear from that list and the inadmissible ones
+   remain, with the fallback note naming them.
+
+**Do 2 before 3.** A rule that admits `ChainableCommander` or `PoolClient`
+produces the §19c wrong answer, and this block measured that it is a printed
+wrong line followed by either a checked TypeError or a segfault — never a clean
+refusal.
+
+---
+
+## 20. A live silent wrong answer in the shipping compiler, found by §19 and NOT caused by this block
+
+The under-claim experiment was aimed at a hypothetical admission rule. It also
+lands on the compiler as it ships, with no `--npm-static` anywhere:
+
+```ts
+// claimlab/anybody.js  — a body whose export the checker infers as `any`
+function makeCodec() { return JSON.parse('{"count":7}') && { find(k) { return k === 'hit' ? 'FOUND' : null }, count: 7 } }
+
+// drivers/underclaim-probe3.ts — an ANNOTATION, no `as` cast on the value
+interface Underclaimed { find(k: string): string; readonly count: number }
+const c: Underclaimed = makeCodec()
+console.log('2 miss, typeof:', typeof c.find('miss'))
+```
+
+```
+binary   2 miss, typeof: string     <- WRONG
+node     2 miss, typeof: object
+```
+
+**Reproduced on a cleaned build of pristine `acdd8b96`**, both backends,
+byte-identical output to the patched build — so it is not this block's change.
+`quickjs=0 ScrDyn=0`, 0 fences, exit non-zero only *after* the wrong line.
+
+### What guards exist, and where the gap is
+
+| the value that disagrees | guard | outcome |
+| --- | --- | --- |
+| a **property** (`{ name: string }` annotating a JSON `null`) | a materialising check at the boundary | `Uncaught TypeError: expected string at $.name, got null` — **TRAP**, safe (`drivers/liveclaim.ts`) |
+| a **member the body lacks** | the same check | `expected function at $.decode, got undefined` — **TRAP**, safe |
+| a **method's RETURN value** | **none** — a boundary check runs when the object materialises, and nothing there can know what a method will return later | **WRONG**, then a checked TypeError or a **segfault** (exit 139) depending on what the consumer does next |
+
+The guard is real and it is good; it simply cannot cover a future return value.
+Two mitigations exist in principle — check the return at the call site where the
+static type came from an unchecked `any`, or refuse the annotation — and this
+block did not take either: it is a lowering decision with a corpus-wide blast
+radius, the box is held for a sibling's gate, and the honest deliverable is the
+repro plus the fact that it predates every change here.
+
+**Where it bites in practice**: any program that annotates a value obtained from
+`any`-typed JavaScript with an interface carrying a method. That is the shape
+`--npm-static` would create wholesale if a type-only export were admitted
+without §19c's member test — which is why the test is in the design.

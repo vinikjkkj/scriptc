@@ -456,6 +456,14 @@ function runFrontend(entryPath: string, npmStatic?: readonly string[] | "auto" |
         if (d.code !== "SC0001") continue;
         for (const pkg of packagesNamedByDiag(d.message, effective)) {
           named.set(pkg, (named.get(pkg) ?? 0) + 1);
+          // The count in the note says HOW MANY sites the inferred surface
+          // could not type; it never said WHICH names, and the names are
+          // what decides whether a package is one declaration away or a
+          // rewrite away. Off by default, printed to stderr, same shape as
+          // SCRIPTC_ABSENTGLOBAL_WHY.
+          if (process.env["SCRIPTC_NPMSTATIC_WHY"] !== undefined) {
+            console.error(`[npmstatic] ${pkg} breaks ${d.loc.file}:${d.loc.start} ${d.message}`);
+          }
         }
       }
       for (const [pkg, count] of named) {
