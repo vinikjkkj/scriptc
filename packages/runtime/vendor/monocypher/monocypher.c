@@ -925,6 +925,26 @@ void crypto_argon2(u8 *hash, u32 hash_size, void *work_area,
 //  Originally taken from SUPERCOP's ref10 implementation.
 //  A bit bigger than TweetNaCl, over 4 times faster.
 
+// scriptc: SELECT THE FIELD BACKEND.
+//
+// monocypher-fe64.h replaces the ten-limb signed ref10 field below with five
+// unsigned 51-bit limbs accumulated in `unsigned __int128`. That is faster
+// wherever the target HAS a 128-bit integer AND a 64-bit word to hold the
+// halves -- on a 32-bit word the compiler synthesises every 64x64->128
+// product out of four 32-bit multiplies and the ten-limb form wins instead.
+// So the switch is on both facts, not on the triple, and it is automatic:
+// there is no build flag to forget on a new target.
+//
+// Force it either way with -DSCR_MONOCYPHER_FE64 or -DSCR_MONOCYPHER_NO_FE64.
+#if !defined(SCR_MONOCYPHER_FE64) && !defined(SCR_MONOCYPHER_NO_FE64)
+#  if defined(__SIZEOF_INT128__) && defined(__SIZEOF_POINTER__) && __SIZEOF_POINTER__ == 8
+#    define SCR_MONOCYPHER_FE64 1
+#  endif
+#endif
+#if defined(SCR_MONOCYPHER_FE64) && !defined(__SIZEOF_INT128__)
+#  error "SCR_MONOCYPHER_FE64 needs unsigned __int128; build without it."
+#endif
+
 #if defined(SCR_MONOCYPHER_FE64)
 // scriptc: a 64-bit field backend replaces the ref10 ten-limb block below.
 // Nothing outside this block indexes an `fe`, so the swap is contained here
