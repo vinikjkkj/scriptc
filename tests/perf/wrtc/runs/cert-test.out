@@ -1,0 +1,18 @@
+ephemeral self-signed DTLS certificate (ECDSA P-256)
+  ok   generates                                            
+  ok   has DER bytes                                        279 bytes
+  ok   DER begins with a SEQUENCE tag                       
+  ok   parses back through mbedtls x509                     rc=0
+  ok   key is ECDSA/ECKEY                                   
+  ok   curve is P-256 (secp256r1)                           
+  ok   issuer equals subject (self-signed)                  
+  ok   self-signature verifies (only NOT_TRUSTED tolerated) rc=0 flags=0x00000000
+  ok   computes its fingerprint                             
+  ok   fingerprint is SHA-256 of the DER we would send      
+       advertised: a=fingerprint:sha-256 39:FA:AA:6E:2F:A2:80:8C...
+  ok   round-trips through the SDP spelling                 
+  ok   generates a second                                   
+  ok   two certificates have DIFFERENT fingerprints         ephemeral, not a fixed key
+
+13 checks, 0 failures
+RESULT: PASS
