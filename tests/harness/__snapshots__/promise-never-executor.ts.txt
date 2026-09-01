@@ -1,0 +1,6 @@
+promise-never-executor.ts:20:16 - error SC9001: internal compiler error: in main: newPromise<void> resolve takes no argument — please report this
+
+  19 | async function main(): Promise<void> {
+  20 |   const boom = new Promise<never>((_resolve, reject) => {
+     |                ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  21 |     setTimeout(() => { reject(new Error('boom')) }, 1);
