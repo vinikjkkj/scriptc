@@ -1161,3 +1161,49 @@ route 1 is what pg actually needs.
 produces the §19c wrong answer, and this block measured that it is a printed
 wrong line followed by either a checked TypeError or a segfault — never a clean
 refusal.
+
+---
+
+## 20. A live silent wrong answer in the shipping compiler, found by §19 and NOT caused by this block
+
+The under-claim experiment was aimed at a hypothetical admission rule. It also
+lands on the compiler as it ships, with no `--npm-static` anywhere:
+
+```ts
+// claimlab/anybody.js  — a body whose export the checker infers as `any`
+function makeCodec() { return JSON.parse('{"count":7}') && { find(k) { return k === 'hit' ? 'FOUND' : null }, count: 7 } }
+
+// drivers/underclaim-probe3.ts — an ANNOTATION, no `as` cast on the value
+interface Underclaimed { find(k: string): string; readonly count: number }
+const c: Underclaimed = makeCodec()
+console.log('2 miss, typeof:', typeof c.find('miss'))
+```
+
+```
+binary   2 miss, typeof: string     <- WRONG
+node     2 miss, typeof: object
+```
+
+**Reproduced on a cleaned build of pristine `acdd8b96`**, both backends,
+byte-identical output to the patched build — so it is not this block's change.
+`quickjs=0 ScrDyn=0`, 0 fences, exit non-zero only *after* the wrong line.
+
+### What guards exist, and where the gap is
+
+| the value that disagrees | guard | outcome |
+| --- | --- | --- |
+| a **property** (`{ name: string }` annotating a JSON `null`) | a materialising check at the boundary | `Uncaught TypeError: expected string at $.name, got null` — **TRAP**, safe (`drivers/liveclaim.ts`) |
+| a **member the body lacks** | the same check | `expected function at $.decode, got undefined` — **TRAP**, safe |
+| a **method's RETURN value** | **none** — a boundary check runs when the object materialises, and nothing there can know what a method will return later | **WRONG**, then a checked TypeError or a **segfault** (exit 139) depending on what the consumer does next |
+
+The guard is real and it is good; it simply cannot cover a future return value.
+Two mitigations exist in principle — check the return at the call site where the
+static type came from an unchecked `any`, or refuse the annotation — and this
+block did not take either: it is a lowering decision with a corpus-wide blast
+radius, the box is held for a sibling's gate, and the honest deliverable is the
+repro plus the fact that it predates every change here.
+
+**Where it bites in practice**: any program that annotates a value obtained from
+`any`-typed JavaScript with an interface carrying a method. That is the shape
+`--npm-static` would create wholesale if a type-only export were admitted
+without §19c's member test — which is why the test is in the design.
