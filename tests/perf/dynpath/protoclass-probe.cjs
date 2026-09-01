@@ -67,7 +67,7 @@ const out = ts.transpileModule(fs.readFileSync(SRC, "utf8"), {
 }).outputText;
 const mod = new Module("proto-class", null);
 mod.filename = SRC;
-mod.require = (id) => (id === "typescript" ? ts : require(id));
+mod.require = (id) => (id === "typescript" || id === "typescript5" ? ts : require(id));
 mod._compile(out, SRC);
 const { findProtoClasses, usableProtoClasses } = mod.exports;
 
