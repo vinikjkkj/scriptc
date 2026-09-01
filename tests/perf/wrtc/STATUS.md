@@ -9,7 +9,7 @@ Base main `9c3534a9`. 11 commits on `block/wrtc`.
 | 0 — verify the brief | **done**, three corrections, all confirmed by the orchestrator |
 | 0b — DTLS foundation | **done**, PASS by running (mbedtls 3.6.7, DTLS 1.2 client, 6 checks) |
 | 1 — types exist, shapes compile, members refuse by name | **done**, both backends MATCH byte-exact vs node v25.9.0, engine scan 0/0/0 |
-| 2 — connected-mode `node:dgram` | **measured**: plumbing works and MATCHes; exactly two blockers named |
+| 2 — connected-mode `node:dgram` | **DONE**: the one real blocker is fixed and MATCHes; C-only |
 | 3 — DTLS handshake over the socket | **not started** |
 | 4 — SCTP | packet layer **done and tested** (51 checks); association/timers/bonding **not started** |
 
@@ -75,3 +75,71 @@ dgram program is on the LLVM tier today. Pre-existing, not this clause's.
   never-called functions compiled rc=0 with zero diagnostics.
 - **`CcCompileError` with no `error:` line is contention**, and that tell
   held for 2004.
+
+
+---
+
+# Stage 2 — closed
+
+## The twelve gate failures, by name
+
+Eight inherited (four programs on two backends) and four contention, each of
+the four verified passing alone. My earlier phrasing "all twelve resolve to the
+four inherited" was wrong; the split is 8 + 4.
+
+    1  every corpus program is 100% static (corpus and coverage agree)   contention
+    2  differential corpus > 1360-spawn-sync.ts                          INHERITED
+    3  differential corpus > 1482-spawnsync-error.ts                     INHERITED
+    4  differential corpus > 1537-os-release-spawnsync-stdio.ts          INHERITED
+    5  differential corpus > 2390-dot-requires\main.cjs                  INHERITED
+    6  server differential > upgrade-read-fairness                       contention
+    7  llvm differential corpus > 1360-spawn-sync.ts                     INHERITED
+    8  llvm differential corpus > 1482-spawnsync-error.ts                INHERITED
+    9  llvm differential corpus > 1537-os-release-spawnsync-stdio.ts     INHERITED
+    10 llvm differential corpus > 2390-dot-requires\main.cjs             INHERITED
+    11 llvm differential corpus > 2004-generic-methods-statics.ts        contention
+    12 llvm differential corpus > tier accounting                        downstream of 11
+
+## Blocker #1 was mine, and I retracted it
+
+`import dgram from 'node:dgram'` is NOT a blocker. `program.ts:2345` already
+admits a default import of any supported builtin under `esModuleInterop` or
+`allowSyntheticDefaultImports`, and zapo's `packages/voip/tsconfig.json`
+extends `tsconfig.packages.json`, which sets `esModuleInterop: true`. My probe's
+tsconfig did not. **Second time in this clause that measuring outside the
+shipping configuration produced a confident wrong answer** — the first was
+measuring the fallback declarations for want of any tsconfig at all.
+`probes/zapo-tsconfig.json` is now the one to copy.
+
+## Blocker #2 is fixed
+
+`socket.send(msg)` connected-mode now lowers: `scr_dgram_send_conn_str/bytes`,
+two `IrLibFn` entries with validate signatures, may-throw rows and C emission,
+and a static one-arg arm in `lower-dgram.ts`. sendto with a NULL address, which
+also rides the existing win32 shim.
+
+**The ordering bug it almost shipped with.** Every other entry point in
+`scr_dgram.c` checks `closing` first and my first version did too. Node does
+not: it validates the absent port argument before connection or running state,
+so a merely CLOSED socket answers `ERR_SOCKET_BAD_PORT`, not "Not running".
+That version passed the happy path and was wrong on the closed case — a refusal
+turned into a quiet wrong answer. The differential probe caught it.
+
+Byte-identical to node v25.9.0 on all three probes: zapo's exact spelling, both
+error states, and the string arm. **1 TRAP→MATCH, 0 MATCH→WRONG.**
+
+Targeted verification: `dgram.test.ts` 9/9, and `surface-manifest` +
+`llvm-runtime-abi` + `ir` 44/44.
+
+## Still C-only — flagging as its own item
+
+The build reports `backend c (llvm refused: libCall:dgram.onMessage)`.
+`dgram.sendStr`/`sendBytes` are absent from the LLVM emitter's map too, so the
+two new entries join them rather than making it worse. **No dgram program is on
+the LLVM tier today.** If the WebRTC path is dgram-based end to end, this whole
+clause lands C-only until someone takes that.
+
+## Stages 3 and 4
+
+Not started. The SCTP packet layer's 51 green checks are a wire format proved
+against published vectors — **not an association that works with any peer.**
