@@ -628,12 +628,62 @@ ScrArr *scr_arr_slice(ScrArr *a, double start, double end) {
       a->elem == SCR_ELEM_REF
           ? scr_arr_new_ref(a->elem_retain, a->elem_release, a->elem_trace, n ? n : 1)
           : scr_arr_new(a->elem, n ? n : 1);
-  for (size_t i = 0; i < n; i++) {
-    uint64_t slot = a->data[from + i];
-    if (scr_elem_is_ref(a->elem)) {
-      slot = scr_slot_from_ptr(scr_elem_retain_p(a, scr_slot_to_ptr(slot)));
+  if (n != 0) {
+    /* The slots move in one memcpy, and the retain decision is made ONCE.
+     *
+     * The element-at-a-time loop this replaces read `a->elem` and ran
+     * scr_elem_retain_p's four-way kind test on EVERY element, and it could
+     * not be hoisted by the compiler: the runtime is built
+     * -fno-strict-aliasing (the emitted object model type-puns), so a store
+     * into `out->data` may alias `a->elem` for all clang can prove, and the
+     * kind is reloaded and re-branched per element. On the f64 and bool
+     * arms that made a pure memcpy into a branchy per-slot copy for no
+     * work at all.
+     *
+     * Semantics are unchanged, element for element:
+     *   - an ABSENT slot is a NULL pointer and is copied through as absent,
+     *     retaining nothing, exactly as scr_elem_retain_p's NULL arm does;
+     *   - scr_str_retain / scr_arr_retain / scr_bytes_retain all RETURN
+     *     their argument, so the memcpy has already written the right slot
+     *     and only the count needs bumping. scr_arr_retain's
+     *     scr_cyc_mark_live arm rides along inside it;
+     *   - SCR_ELEM_REF goes through the array's own retain function
+     *     pointer, whose return value is NOT ours to assume, so that arm
+     *     stores it back. */
+    uint64_t *dst = out->data;
+    memcpy(dst, a->data + from, n * sizeof *dst);
+    out->len = n;
+    switch (a->elem) {
+      case SCR_ELEM_STR:
+        for (size_t i = 0; i < n; i++) {
+          ScrStr *p = (ScrStr *)scr_slot_to_ptr(dst[i]);
+          if (p != NULL) (void)scr_str_retain(p);
+        }
+        break;
+      case SCR_ELEM_ARR:
+        for (size_t i = 0; i < n; i++) {
+          ScrArr *p = (ScrArr *)scr_slot_to_ptr(dst[i]);
+          if (p != NULL) (void)scr_arr_retain(p);
+        }
+        break;
+      case SCR_ELEM_BYTES:
+        for (size_t i = 0; i < n; i++) {
+          ScrBytes *p = (ScrBytes *)scr_slot_to_ptr(dst[i]);
+          if (p != NULL) (void)scr_bytes_retain(p);
+        }
+        break;
+      case SCR_ELEM_REF: {
+        void *(*retain)(void *) = a->elem_retain;
+        for (size_t i = 0; i < n; i++) {
+          void *p = scr_slot_to_ptr(dst[i]);
+          if (p != NULL) dst[i] = scr_slot_from_ptr(retain(p));
+        }
+        break;
+      }
+      case SCR_ELEM_F64:
+      case SCR_ELEM_BOOL:
+        break; /* the memcpy IS the copy */
     }
-    out->data[out->len++] = slot;
   }
   return out;
 }
