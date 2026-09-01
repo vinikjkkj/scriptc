@@ -241,3 +241,197 @@ source supplies **types only** here (`WaRetryStore` and its three siblings are
 `import type`). The nine printed lines are all produced by
 `cleanup.ts`'s own code: an aggregate of zero tasks, four constructor
 validation messages, one `typeof`, and a stop-before-start no-op.
+
+## 5. `store-postgres` reaches a binary too, and by the same route
+
+`store-postgres/cleanup.ts` is `store-mysql/cleanup.ts` with `Mysql` renamed to
+`Pg` (`diff` is four lines, all identifiers). The twin driver
+`drivers/drv-pg-cleanup2.ts` was produced by exactly that substitution and
+built the same way:
+
+| | |
+| --- | --- |
+| binary | `store-postgres-cleanup2.exe` |
+| flags | `--provenance-sources` only, **no `--best-effort`** |
+| bytes | **670,208** (LLVM) / **672,256** (C) |
+| engine scan | `quickjs=0 ScrDyn=0 JS_NewRuntime=0` |
+| fences in emitted C | **0** |
+| oracle | node v25.9.0 — **9/9 MATCH byte-exact, exit 0, both backends** |
+
+---
+
+## 6. `store-redis` reaches a binary — a third one, on a different module
+
+`store-redis/helpers.ts` is the mirror image of `cleanup.ts`: its `ioredis`
+import is `import type Redis from 'ioredis'` (erased), and its `zapo-js/util`
+import is a **value** import, so it needs `--provenance-sources` and nothing
+else. `scanKeys` and `deleteKeysChunked` take a live `Redis` and are
+deliberately not driven; everything else in the module is.
+
+| | |
+| --- | --- |
+| binary | `store-redis-helpers.exe` |
+| driver | `drivers/drv-redis-helpers.ts` → `pkgs/store-redis/helpers.ts` |
+| flags | `--provenance-sources` only, **no `--best-effort`** |
+| bytes | **813,568** (LLVM) / **815,104** (C) |
+| engine scan | `quickjs=0 ScrDyn=0 JS_NewRuntime=0` |
+| fences in emitted C | **0** |
+| oracle | node v25.9.0 — **21/21 MATCH byte-exact, exit 0, both backends** |
+
+It drives `bytesToHex` / `hexToBytes` round-tripping, `toBytesOrNull` over
+null / undefined / empty-string / `Uint8Array`, `toStringOrNull`,
+`assertSafeKeyPrefix` (accept, reject, empty), `uint8Equal` and
+`uint8TimingSafeEqual` (equal, unequal, length-mismatch), `toRedisBuffer`
+(`Buffer.from` over a `Uint8Array`'s backing store, then `.toString('hex')`),
+and `safeLimit` including the throwing arm.
+
+**Running total: `N …→MATCH = 6`** (three binaries × two backends),
+**`M MATCH→WRONG = 0`**.
+
+**One method note, paid for by a first attempt.** The first `store-redis-helpers`
+build ran 20 of 21 lines identically and scored DIFF on line 21, because the
+driver let `safeLimit(0, 50)` throw: node prints a source-quoted stack trace,
+the binary prints one `Uncaught Error: invalid query limit: 0` line. That is an
+uncaught-exception **format** difference, not a wrong answer — but a driver that
+ends in an uncaught throw can never score MATCH. Every throwing arm in these
+drivers is caught and its `.message` printed.
+
+---
+
+## 7. The npm drivers: `--npm-static` peels the whole dependency tree, and all three SQL/KV drivers stop at ONE mechanism
+
+None of this was measured before. The previous survey measured
+`--provenance-sources` for the stores and recorded `--npm-static` only for
+`sharp`.
+
+`--npm-static <pkg>` compiles only the packages **named**, and refuses at the
+first dependency that is not named — which is why a single-package opt-in reads
+like a hard refusal:
+
+| package, named alone | island fallback reason |
+| --- | --- |
+| `pg` | `SC1010: the 'pg-types' module is not supported yet` |
+| `mysql2` | `SC1010: the 'lru.min' module is not supported yet` |
+| `ioredis` | `SC1010: the 'debug' module is not supported yet` |
+| `mongodb` | `SC1010: the 'bson' module is not supported yet` |
+| `sharp` | `SC1010: the 'semver/functions/coerce' module is not supported yet` |
+
+**Name the transitive closure and the trees compile.** One `--npm-static` list
+per driver, measured:
+
+| driver package | packages named | **compiled statically** | still island |
+| --- | --- | --- | --- |
+| `pg` | 14 | **13** — `pg-types pg-protocol pg-pool pg-connection-string pgpass pg-int8 pg-cloudflare postgres-array postgres-bytea postgres-date postgres-interval xtend split2` | `pg` itself |
+| `mysql2` | 13 | **12** — `lru.min denque generate-function iconv-lite long named-placeholders seq-queue sqlstring aws-ssl-profiles safer-buffer sql-escaper is-property` | `mysql2` itself |
+| `ioredis` | 12 | **11** — `debug denque cluster-key-slot redis-errors redis-parser standard-as-callback lodash.defaults lodash.isarguments ms supports-color @ioredis/commands` | `ioredis` itself |
+
+**All three then stop at the same wall, and it is a compiler mechanism, not a
+package fact:**
+
+```
+pg       island fallback (its inferred export surface breaks 18 import sites in program files …)
+mysql2   island fallback (its inferred export surface breaks  9 import sites in program files …)
+ioredis  island fallback (its inferred export surface breaks  3 import sites in program files …)
+```
+
+`packages/compiler/src/index.ts:464` is the consumer-anchored attribution:
+`--npm-static` types the program against a surface **inferred from the
+package's JS**, and the names these three stores import are exactly the ones
+inference cannot reach — `Pool`, `PoolClient`, `PoolConfig`, `QueryResult`;
+`Pool`, `PoolConnection`, `PoolOptions`, `FieldPacket`, `ResultSetHeader`;
+`RedisOptions`, `ChainableCommander` — **type-only exports, which have no JS
+value to chase** (the compiler's own comment at `index.ts:417` says exactly
+this). Each of the three packages ships a `.d.ts` that declares every one of
+those names; the static lane does not read it.
+
+**`ioredis` is 3 import sites from a static `store-redis`**, `mysql2` is 9 and
+`pg` is 18. That is the smallest gap in this corpus and it is one mechanism
+shared by three packages — worth more than any per-package work below it.
+
+### 7a. The `@types/pg` misattribution is not cosmetic — it closes the `auto` route
+
+With `--npm-static auto` the compiler does not try `pg` at all. It tries the
+package the misattribution names:
+
+```
+@types/pg  island fallback (auto: no runtime JS entry resolves)
+zapo-js    island fallback (its inferred export surface breaks 49 import sites …)
+```
+
+`@types/pg` is a types-only package, so of course no runtime JS entry resolves.
+The program imports `pg`, which has a good JS entry and which **does** compile
+when named explicitly. The wrong package name in the diagnostic is the same
+wrong name the opt-in machinery acts on.
+
+---
+
+## 8. `media-utils` — CANNOT reach a binary, and the chain is three packages deep
+
+1. Every module of `media-utils` except `types.ts` statically imports
+   `./sharp`, which is `import sharp from 'sharp'` at `sharp.ts:1`
+   (`index.ts` for the two thumbnail methods, `ffmpeg.ts:17` for the video
+   path). There is no driver that reaches a runtime surface of this package
+   while avoiding it, and an **import** fence is not deferrable by
+   `--best-effort`.
+2. `sharp` publishes **no provenance attestation**, so `--provenance-sources`
+   can never reach it — a registry fact from the previous survey that cannot
+   have moved.
+3. `--npm-static sharp` declines with
+   `SC1010: the 'semver/functions/coerce' module is not supported yet`. Naming
+   sharp's closure compiles `color color-convert color-string color-name
+   simple-swizzle is-arrayish detect-libc` — **7 of 9 static** — and the wall
+   becomes `semver` itself:
+
+   ```
+   semver  island fallback (SC1013: require() below code that can reach its
+           binding 'parseOptions' — Node initializes the binding AT the require
+           and throws ReferenceError on any earlier access, which is not
+           modeled — move the require above the code that can run first)
+   ```
+
+4. **Behind `semver` there is a native addon.** `node_modules/@img/sharp-win32-x64`
+   is installed and `sharp`'s runtime loads `sharp.node` from it. No static lane
+   compiles that, so even with SC1013 fixed the image path would need an FFI
+   binding or a substitute module — which would no longer be "media-utils
+   compiled", and this report does not claim it as one.
+
+**Verdict: `media-utils` is ANALYSABLE (60 statements, 52 static, 86%) and
+reaches no binary.** Its first measured wall is `SC1013` inside `semver`; its
+last is libvips through `sharp.node`.
+
+---
+
+## 9. `store-mongo` — CANNOT reach a binary either, and a different blocker at every layer
+
+1. `store-mongo` is the only store with **no** module that avoids its npm
+   driver at run time. All fifteen store classes extend `BaseMongoStore`, which
+   imports `assertSafeCollectionPrefix` from `./helpers`, and `helpers.ts:1` is
+   `import { Binary } from 'mongodb'` — a **value** import used as a value:
+   `new Binary(bytes)` (`helpers.ts:11`) and `value instanceof Binary` (`:15`).
+   Only two of `store-mongo`'s twenty modules value-import `mongodb`
+   (`helpers.ts`, `createMongoStore.ts`); every other one is `import type`. But
+   those two sit under everything.
+2. The `--npm-static` closure for `mongodb` gets four layers in and names a
+   different blocker at each:
+
+   ```
+   mongodb                        SC1010: the 'mongodb-connection-string-url' module …
+   mongodb-connection-string-url  SC1010: the 'whatwg-url' module …
+   whatwg-url                     SC1013: require() below code that can reach its binding 'Impl'
+   tr46                           SC1012: require() of JSON modules are not supported yet
+   bson                           the program does not typecheck against its inferred surface
+                                  (type-only declarations and .d.ts type guards have no JS value
+                                  inference can chase)
+   ```
+
+   `webidl-conversions punycode @mongodb-js/saslprep sparse-bitfield
+   memory-pager` all compile statically.
+3. `--provenance-sources` makes `store-mongo` **worse** — the only package in
+   the corpus that regresses when the lane improves — and the previous survey's
+   reason (mongodb's own tsconfig, `useUnknownInCatchVariables` adopted but its
+   `lib` list FORCED) is a structural fact this block did not need to
+   re-measure.
+
+**Verdict: `store-mongo` is ANALYSABLE (56 statements, 52 static, 92%) and
+reaches no binary.** Its blockers are `SC1013`, `SC1012` and an inferred-surface
+failure, in three third-party packages, none of them zapo's code.
