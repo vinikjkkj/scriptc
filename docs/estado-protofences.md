@@ -1122,3 +1122,23 @@ corpora failed:
 `No space left` anywhere in the log.
 
 **Both rungs are gated. 0 MATCH→WRONG on either gate.**
+
+## Does rung 2 touch the two zapo targets? Checked, and NO.
+
+The wam entry and the messaging bench binaries were built on the rung-1
+compiler. Rung 2 only changes `globalThis.<name>` reads for five names, so the
+question is whether either target reads any of them. Over both provenance
+trees actually compiled into those binaries:
+
+    zapo-js@1.6.2 (250f9af5...)   window 0 · document 0 · WorkerGlobalScope 0
+                                  importScripts 0 · XMLHttpRequest 0
+      every globalThis read there: globalThis.fetch x8, globalThis.__evalStash x1
+    @vinikjkkj/wa-wam (1ec0d3b...) 68 files, `globalThis` appears once
+
+Positive controls run on both searches (`globalThis.` matches 11 in the zapo
+tree, `function` matches 591 in the wa-wam tree), because an empty result from
+a blind instrument looks exactly like a true negative.
+
+So rung 2 cannot move either target's output, and the byte-exact MATCH
+recorded in PHASE 9/10 stands for the branch as a whole. The rung-2 gate
+(`gate2.log`) re-ran all 1,728 corpus programs on both backends anyway.
