@@ -74,6 +74,16 @@ async function main(): Promise<void> {
   } catch (e) {
     console.log("6:", e instanceof Error ? e.message : "non-error");
   }
+  // The `order` line at the end used to RACE: `slow` is a 10 ms timer armed
+  // here, while step 7's chain below is nominally ~6 ms, so whether `slow`
+  // lands before the print depended on how late the runtime's timers were.
+  // It was not stable even in node -- ten runs of this shape on one host
+  // gave `fast>slow>g>h` five times, `fast>g>h` (slow MISSING) four times
+  // and `fast>g>slow>h` once. Awaiting it here makes the ordering CAUSAL
+  // instead of temporal, so the expected output is the same string on any
+  // timer granularity. Step 6's own assertion is untouched: the catch above
+  // has already run, and this only settles when `slow` finally pushes.
+  await risky[0]!.catch(() => {});
 
   // (7) The held value passed to a helper at its own type, and indexed
   // there.
