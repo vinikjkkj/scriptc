@@ -819,8 +819,35 @@ export const SIZE_DRIFT_PAGE = 4_096;
  * THE MAX CEILINGS MOVE with them, by the same rule:
  *
  *     661,504 = 653,312 + 8,192      803,840 = 795,648 + 8,192
+ *
+ * 2026-09-01, static 653,312 -> 657,408 (+4,096 crossed; +512 of file).
+ * WHAT THE BYTES BOUGHT: the win32 loop idle sleep stopped being
+ * nanosleep. mingw-w64's nanosleep cannot express a sub-tick wait -- a
+ * 1 ms request costs a full 15.6 ms scheduler tick, and it is the one
+ * primitive of four measured that ignores timeBeginPeriod (nanosleep
+ * 15.611/15.584 ms default/boosted; Sleep(1) 15.531/1.186;
+ * WaitForSingleObject 15.480/1.126; a HIGH_RESOLUTION waitable timer
+ * 1.124/1.207). scr_async.c now uses the waitable timer, which is the
+ * only one that reaches 1 ms with no process-wide side effect. Worth
+ * 11.760 -> 1.296 ms per SEQUENTIAL socket round trip, ~9x, and 11.5x on
+ * the worst phase of the zapo messaging bench (tests/perf/looplatency).
+ *
+ * ATTRIBUTED BY SECTION rather than believed, because 4,096 is one page
+ * and the raw growth is nowhere near it:
+ *     .text  +128   .rdata +120   .pdata +12   .reloc +12   .buildid -1
+ *     RAW    +271 bytes, rounded to +512 by file alignment
+ * The base already weighed 656,896 against the 653,312 recorded, i.e.
+ * 3,584 of the 4,096 tolerance was consumed BEFORE this change existed.
+ * 3,584 + 512 = 4,096 exactly, and since the file-alignment quantum IS
+ * 512, any runtime growth at all crossed it. The change did not create
+ * that condition; it is the first one to meet it.
+ *
+ * THE REGEX FIGURE DID NOT MOVE, and that is the entry above's point
+ * made again: the same 271 bytes fit inside the regex program's existing
+ * alignment padding without crossing a 512-byte boundary. Deriving one
+ * class from the other would have been 512 bytes wrong here too.
  */
-export const STATIC_CLASS_RECORDED = platform === "win32" ? 653_312 : null;
+export const STATIC_CLASS_RECORDED = platform === "win32" ? 657_408 : null;
 
 /** The regex program, same run, same tree. Deliberately NOT derived from
  * the static delta - and the 2026-08-24 entry is why: that change moved the
