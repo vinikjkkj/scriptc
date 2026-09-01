@@ -1,0 +1,10 @@
+G:/blocks/wrtc-lab/withtypes/typecheck-probe.ts:6:1 - error SC2020: 'dgram.Socket.setBroadcast' is typed by @types/node but has no scriptc lowering yet
+
+  5 | const s = createSocket('udp4')
+  6 | s.setBroadcast(true)
+    | ^~~~~~~~~~~~~~~~~~~~
+  7 | console.log('ok')
+
+  hint: multicast/TTL options have no lowering (bind, connect, send, address, close, unref/ref, and on/once of message/listening/close/connect/error are the supported dgram.Socket members)
+
+1 error.
