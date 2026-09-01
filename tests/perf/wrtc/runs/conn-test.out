@@ -1,0 +1,61 @@
+scr_wrtc_conn.c — the runtime transport, driven one pump call per turn
+
+clean (drop=0%)
+  ok   transport constructs (socket bound, identity generated) 
+  ok   server side configured                             
+  ok   offer is generated                                 
+  ok   offer carries our host candidate                   
+  ok   answer carries setup:passive                       
+  ok   answer has no a=ice-options line                   
+  ok   remote answer applied (fingerprint + candidate parsed) 
+  ok   fingerprint verified against the answer            
+  ok   transport reaches CONNECTED                        
+  ok   DCEP channel is open                               
+  ok   a message left through DTLS+SCTP                   
+  ok   a message arrived back and popped                  
+       udp sent=9 recv=9 | sctp rtx=0 | msgs out=1 in=1 | srv dropped 0/9
+
+10% loss (drop=10%)
+  ok   transport constructs (socket bound, identity generated) 
+  ok   server side configured                             
+  ok   offer is generated                                 
+  ok   offer carries our host candidate                   
+  ok   answer carries setup:passive                       
+  ok   answer has no a=ice-options line                   
+  ok   remote answer applied (fingerprint + candidate parsed) 
+  ok   fingerprint verified against the answer            
+  ok   transport reaches CONNECTED                        
+  ok   DCEP channel is open                               
+  ok   a message left through DTLS+SCTP                   
+  ok   a message arrived back and popped                  
+       udp sent=9 recv=8 | sctp rtx=0 | msgs out=1 in=1 | srv dropped 1/9
+
+30% loss (drop=30%)
+  ok   transport constructs (socket bound, identity generated) 
+  ok   server side configured                             
+  ok   offer is generated                                 
+  ok   offer carries our host candidate                   
+  ok   answer carries setup:passive                       
+  ok   answer has no a=ice-options line                   
+  ok   remote answer applied (fingerprint + candidate parsed) 
+  ok   fingerprint verified against the answer            
+  ok   transport reaches CONNECTED                        
+  ok   DCEP channel is open                               
+  ok   a message left through DTLS+SCTP                   
+  ok   a message arrived back and popped                  
+       udp sent=12 recv=7 | sctp rtx=3 | msgs out=1 in=1 | srv dropped 7/14
+
+wrong fingerprint (drop=0%, WRONG fingerprint)
+  ok   transport constructs (socket bound, identity generated) 
+  ok   server side configured                             
+  ok   offer is generated                                 
+  ok   offer carries our host candidate                   
+  ok   answer carries setup:passive                       
+  ok   answer has no a=ice-options line                   
+  ok   remote answer applied (fingerprint + candidate parsed) 
+  ok   a certificate the answer did not name is REFUSED   
+  ok   and the channel never opened                       
+  ok   and no message was delivered                       
+
+46 checks, 0 failures
+RESULT: PASS
