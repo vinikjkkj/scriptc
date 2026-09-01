@@ -847,6 +847,75 @@ export const SIZE_DRIFT_PAGE = 4_096;
  * alignment padding without crossing a 512-byte boundary. Deriving one
  * class from the other would have been 512 bytes wrong here too.
  */
+/* MEASURED 2026-09-01, block/wrtcjoin, after the WebRTC data-channel stack
+ * was joined to the event loop (scr_wrtc_conn.c + a scr_loop_set_wrtc hook
+ * in the ALWAYS-LINKED scr_async.c). NOTHING MOVES, and the reason is
+ * worth more than the zero.
+ *
+ * The always-linked TU really did grow: scr_async.c's object went 202,837
+ * -> 203,722 (+885, +0.44%, -O2, same flags, the TU at c16b2b2d against
+ * the TU at HEAD). The LINKED classes did not move by one byte, in either
+ * win32 configuration, because 885 bytes fit inside the existing
+ * file-alignment padding of both programs:
+ *
+ *                     SCRIPTC_TARGET=x86_64-windows-gnu   unset (native)
+ *   static base       657,408                             664,576
+ *   static HEAD       657,408                             664,576
+ *   regex  base       799,232                             806,912
+ *   regex  HEAD       799,232                             806,912
+ *
+ * A/B on ONE tree, one install, one zig cache, with scr_async.c and
+ * scr_runtime.h swapped to their base versions as the only variable, and
+ * the cross column re-run for byte-stability.
+ *
+ * POSITIVE CONTROL, because a zero delta is exactly what a stale object
+ * cache also looks like: planting a referenced `volatile unsigned char
+ * [8192]` in scr_async.c moved the pair to 666,112 and 807,424 (+8,704 and
+ * +8,192). The pipeline recompiles and the scale responds, so the zero
+ * above is a measurement rather than a cache.
+ *
+ * THE TWO CONFIGURATIONS HAVE SWAPPED SINCE THE 2026-08-31 ENTRY ABOVE,
+ * and the next reader needs this more than the zero. That entry says the
+ * recorded pair tracks the NATIVE build and reads 15,872/17,408 low under
+ * the cross target. Today it is the other way round:
+ *
+ *   cross   657,408 (EXACT) and 799,232 (+3,584, 0.88 of a page) -> green
+ *   native  664,576 (+7,168) and 806,912 (+11,264)               -> RED
+ *
+ * Both columns are identical at base and at HEAD, so that is drift from
+ * intervening merges and belongs to nobody here. NO ANCHOR IS MOVED:
+ * moving one would just break the other configuration, which is the same
+ * conclusion the 2026-08-31 entry reached from the opposite side. What
+ * changed is WHICH column is green, and a brief that pins SCRIPTC_TARGET
+ * -- most win32 briefs do -- now gets the GREEN one. Check which column
+ * produced a number before believing either floor; last time that
+ * ambiguity cost a block a full base-vs-branch A/B.
+ *
+ * THE REGEX CLASS HAS 512 BYTES OF HEADROOM under the cross target
+ * (+3,584 against a 4,096 tolerance) and the file-alignment quantum IS
+ * 512. The next always-linked byte tips it. Nothing here spent that
+ * headroom, but nothing here leaves any either.
+ *
+ * WHAT THE WEBRTC STACK COSTS WHERE IT ACTUALLY LANDS. It is gated in
+ * cc.ts at the LINK LINE (`...(wrtc ? [scr_wrtc.c, scr_wrtc_conn.c,
+ * scr_wrtc_cert.c, scr_wrtc_fp.c, scr_sctp.c, scr_sctp_assoc.c] : [])`
+ * plus the mbedTLS archive), so a program with no peer connection never
+ * compiles those TUs at all -- a stronger gate than dead-strip, and one
+ * --gc-sections never enters into. Measured both ways: the hello-world is
+ * byte-identical to base and contains ZERO occurrences of `mbedtls`,
+ * `RTCDataChannel` or `ice-ufrag`, while the WebRTC program contains
+ * 9, 1 and 3. A program that DOES open a peer connection pays
+ * 657,408 -> 1,490,944, attributed by section:
+ *
+ *     .text +572,416   .rdata +231,936   .pdata +23,040
+ *     .reloc  +3,072   .data     +3,072
+ *     TOTAL raw +833,536
+ *
+ * which is mbedTLS's ECDSA P-256 / AES-GCM / SHA-2 / X.509 / DTLS state
+ * machine and its constant tables. Peak working set on the full live path
+ * (handshake, association, channel open, send, receive) is 6.63 MB over
+ * 3,387 samples; the same binary with no peer answering peaks at 5.80 MB,
+ * so the established session itself is ~0.83 MB resident. */
 export const STATIC_CLASS_RECORDED = platform === "win32" ? 657_408 : null;
 
 /** The regex program, same run, same tree. Deliberately NOT derived from

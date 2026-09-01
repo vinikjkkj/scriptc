@@ -276,3 +276,46 @@ in a turn that already performs five.
     rtc-dc.ts       13 lines  MATCH byte-identical vs node v25.9.0
     rtc-signal.ts   25 lines  MATCH byte-identical vs node v25.9.0
     rtc-events.ts    9 lines  MATCH byte-identical vs node v25.9.0
+
+---
+
+## The linked size, measured where it lands (not derived)
+
+Full record: `tests/perf/wrtc/size/SIZE-RESULTS.md`.
+
+**Neither recorded class moves, in either win32 configuration.** A/B on one
+tree with `scr_async.c` + `scr_runtime.h` swapped to `c16b2b2d` as the only
+variable, each class measured separately, cross column re-run for stability:
+
+|             | SCRIPTC_TARGET=x86_64-windows-gnu | unset (native) |
+| ---         | ---                               | ---            |
+| static base/HEAD | 657,408 / **657,408**        | 664,576 / **664,576** |
+| regex  base/HEAD | 799,232 / **799,232**        | 806,912 / **806,912** |
+
+The 885-byte object growth in the always-linked TU fits inside both programs'
+existing file-alignment padding. **No anchor re-recorded, because none moved.**
+Positive control: a referenced 8 KB array planted in `scr_async.c` moves the
+pair +8,704 / +8,192, so the zero is a measurement and not a stale cache.
+
+**`scr_wrtc_conn.c` does NOT land in every binary.** The gate is at the link
+line in `cc.ts`, not at dead-strip, so a program with no peer connection never
+compiles those TUs — `--gc-sections` never enters into it. The hello-world
+contains zero `mbedtls` / `RTCDataChannel` / `ice-ufrag` bytes; the WebRTC
+program contains 9 / 1 / 3.
+
+A program that DOES open a peer connection pays **657,408 -> 1,490,944**:
+`.text +572,416`, `.rdata +231,936`, `.pdata +23,040`, `.reloc +3,072`,
+`.data +3,072`, total raw **+833,536** — mbedTLS.
+
+**Peak RSS on the full live path: 6.63 MB** over 3,387 samples (handshake,
+association, channel open, send, receive). Same binary with no peer answering:
+5.80 MB over 3,246 samples, so the established session is ~0.83 MB resident.
+The hello-world's peak RSS is **unmeasured**, not zero — it exits faster than
+the poller samples.
+
+**The two win32 configurations have swapped since size-class.ts's 2026-08-31
+entry.** The anchors now track the CROSS build (static exact, regex +3,584 =
+0.88 page, green) and the NATIVE build is the red one (+7,168 / +11,264).
+Identical at base and HEAD, so it is drift and belongs to nobody here. The
+regex class has **512 bytes of headroom** under the cross target and the
+file-alignment quantum is 512: the next always-linked byte tips it.
