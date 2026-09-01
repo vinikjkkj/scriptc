@@ -33,7 +33,7 @@ build log as `- error SC\d{4}:` sites; **fences** are counted from the emitted
 
 | driver | package | state | flagless errors | `--best-effort` errors | binary? | LLVM / C bytes | fences in C | oracle |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `drivers/drv-media.ts` | `media-utils` | **ANALYSABLE** (60 stmts, 52 static, 86%) | **11** sites / 10 distinct | — | **no** | — | absent (no C emitted) | — |
+| `drivers/drv-media.ts` | `media-utils` | **ANALYSABLE** (60 stmts, 52 static, 86%) | **11** sites / 10 distinct | **4** | **no** | — | absent (no C emitted) | — |
 | `drivers/drv-mongo.ts` | `store-mongo` | **ANALYSABLE** (56 stmts, 52 static, 92%) | **15** | **12** | **no** | — | absent | — |
 | `drivers/drv-mysql.ts` | `store-mysql` | **ANALYSABLE** (52 stmts, 47 static, 90%) | **16** | **13** | **no** | — | absent | — |
 | `drivers/drv-postgres.ts` | `store-postgres` | **ANALYSABLE** (38 stmts, 35 static, 92%) | **15** | **12** | **no** | — | absent | — |
@@ -60,6 +60,12 @@ throws — **and the build still fails**, because what is left is `SC2013`
 | mysql | 16 | 13 | same shape | 10 × `zapo-js`, 1 + 1 × `mysql2`, 1 × `SC2011` |
 | postgres | 15 | 12 | same shape | 9 × `zapo-js`, 1 + 1 × **`@types/pg`**, 1 × `SC2011` |
 | redis | 13 | 10 | same shape | 7 × `zapo-js`, 1 + 1 × `ioredis`, 1 × `SC2011` |
+
+`media-utils` behaves the same way: **11 flagless, 4 under `--best-effort`**,
+and the four that remain are `importing 'sharp'`, `importing 'zapo-js'`,
+`values from 'zapo-js'` and one `SC2020 WeakMap<Logger, Set<string>>` — three
+import/type fences and one statement fence the flag could not reach because the
+build stops before it.
 
 So for these four packages the flagless number is **larger** than the flagged
 one, the opposite direction from the bundle the brief cites (3 flagless vs 38
@@ -481,7 +487,7 @@ Four outcomes, and **`ISLANDED`/`UNMEASURED` is a fifth state, never a zero.**
 | **`store-postgres`** | ANALYSABLE (38 stmts, 92% static) | **YES**, TWO — `store-postgres-cleanup2.exe`, `store-postgres-helpers2.exe` | **9/9 and 16/16 MATCH byte-exact** | 15 / **0** | not needed | **0** |
 | **`store-redis`** | ANALYSABLE (94 stmts, 96% static) | **YES** — `store-redis-helpers.exe`, `--provenance-sources` | **21/21 MATCH byte-exact** | 13 / **0** | not needed | **0** |
 | **`store-mongo`** | ANALYSABLE (56 stmts, 92% static) | **no** | — | 15 | 12, still fails | **absent** (no C emitted) |
-| **`media-utils`** | ANALYSABLE (60 stmts, 86% static) | **no** | — | 11 | — | **absent** |
+| **`media-utils`** | ANALYSABLE (60 stmts, 86% static) | **no** | — | 11 | 4, still fails | **absent** |
 | `store-sqlite` (`names`) | ANALYSABLE | yes, `--best-effort` | **TRAP** at `table-names.ts:116` | 4 | 4 fences | **4** |
 | `store-sqlite` (`open`) | ANALYSABLE | yes, `--prov --best-effort` | **DID-NOT-RUN** — no oracle under v25 | — | — | — |
 
