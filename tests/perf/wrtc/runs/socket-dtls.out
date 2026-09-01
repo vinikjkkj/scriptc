@@ -1,0 +1,54 @@
+DTLS 1.2 over REAL loopback UDP, with deliberate impairment
+
+clean (drop=0% reorder=0% seed=1)
+  ok   two real UDP sockets bound on loopback             
+  ok   handshake completes over a real socket             client=0 server=0 in 15ms
+       4 sent, 0 dropped, 0 reordered
+  ok   peer fingerprint authenticates                     
+  ok   and does not match the wrong certificate           
+  ok   application data arrives intact                    
+
+20% loss (drop=20% reorder=0% seed=12345)
+  ok   two real UDP sockets bound on loopback             
+  ok   handshake completes over a real socket             client=0 server=0 in 35ms
+  ok   datagrams were actually dropped                    6 sent, 2 dropped, 0 reordered
+  ok   peer fingerprint authenticates                     
+  ok   and does not match the wrong certificate           
+  ok   application data arrives intact                    
+
+40% loss, 4000ms ceiling (drop=40% reorder=0% seed=999)
+  ok   two real UDP sockets bound on loopback             
+  ok   handshake completes over a real socket             client=0 server=0 in 140ms
+  ok   datagrams were actually dropped                    15 sent, 6 dropped, 0 reordered
+  ok   peer fingerprint authenticates                     
+  ok   and does not match the wrong certificate           
+  ok   application data arrives intact                    
+
+40% loss, 400ms ceiling (drop=40% reorder=0% seed=999)
+  ok   two real UDP sockets bound on loopback             
+  ok   handshake completes over a real socket             client=0 server=0 in 140ms
+  ok   datagrams were actually dropped                    15 sent, 6 dropped, 0 reordered
+  ok   peer fingerprint authenticates                     
+  ok   and does not match the wrong certificate           
+  ok   application data arrives intact                    
+
+reordering (drop=0% reorder=100% seed=4242)
+  ok   two real UDP sockets bound on loopback             
+  ok   handshake completes over a real socket             client=0 server=0 in 35ms
+       8 sent, 0 dropped, 4 reordered
+  ok   datagrams were actually reordered                  8 sent, 0 dropped, 4 reordered
+  ok   peer fingerprint authenticates                     
+  ok   and does not match the wrong certificate           
+  ok   application data arrives intact                    
+
+30% loss + reordering (drop=30% reorder=100% seed=777)
+  ok   two real UDP sockets bound on loopback             
+  ok   handshake completes over a real socket             client=0 server=0 in 90ms
+  ok   datagrams were actually dropped                    13 sent, 2 dropped, 6 reordered
+  ok   datagrams were actually reordered                  13 sent, 2 dropped, 6 reordered
+  ok   peer fingerprint authenticates                     
+  ok   and does not match the wrong certificate           
+  ok   application data arrives intact                    
+
+36 checks, 0 failures
+RESULT: PASS
