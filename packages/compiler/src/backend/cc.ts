@@ -456,6 +456,13 @@ export interface CcOptions {
    * one it produced before this option existed, which is proved by md5
    * against a build of the same entry at the previous revision. */
   sqlite?: boolean;
+  /** The program holds an RTCPeerConnection or an RTCDataChannel
+   * (moduleUsesWrtc on the IR): compiles scr_wrtc.c. Six functions over
+   * two refcount words today, but gated all the same -- the units that
+   * will hang off it (ICE, DTLS, SCTP) are not small, and a
+   * WebRTC-free program must keep its exact link line and its exact
+   * bytes. */
+  wrtc?: boolean;
 }
 
 /** Structured compiler-driver failure. Most callers still let this surface
@@ -1800,6 +1807,7 @@ export async function compileC(opts: CcOptions): Promise<void> {
    * two implementations of one specifier in one binary would be a
    * question with no right answer. */
   const sqlite = (opts.sqlite ?? false) && !dynamic;
+  const wrtc = opts.wrtc ?? false;
   const fetchAbort = fetchStatic && (opts.abortSignal ?? false);
   const fetchDispatch = (opts.fetchDispatch ?? false) && fetchStatic;
   const abortHttp = (opts.abortHttp ?? false) || fetchAbort;
@@ -2002,6 +2010,10 @@ export async function compileC(opts: CcOptions): Promise<void> {
     ...(fetchAbort ? [rt(join(rtDir, "scr_fetch_abort.c"))] : []),
     ...(fetchDispatch ? [rt(join(rtDir, "scr_fetch_dispatch.c"))] : []),
     ...(stream ? [rt(join(rtDir, "scr_stream.c"))] : []),
+    // The WebRTC data-channel handles. Ownership pairs only for now; the
+    // handles are never constructed, but a program that declares the
+    // shapes still emits their release calls.
+    ...(wrtc ? [rt(join(rtDir, "scr_wrtc.c"))] : []),
     // The readiness-poller backends (scr_platform.h): kqueue on macOS/BSD,
     // epoll on Linux, WSAPoll on Windows — each TU is empty off its
     // platform, so all three link whenever a poller-using unit does and

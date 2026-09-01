@@ -67,6 +67,7 @@ import {
   isRelativeSpecifier,
   isSqliteTypesPath,
   sqliteDtsPath,
+  wrtcDtsPath,
   isWorkspacePackageName,
   JS_ANY_OPERATOR_CODES,
   JS_RELAXED_TSC_CODES,
@@ -272,6 +273,12 @@ function loadProgram7(host: ts.Ts7Host, entryPath: string): LoadResult & { dispo
     // ride as an extra root so an import of it typechecks with nothing
     // installed; with the real types present they stand down.
     ...(projectHasSqliteTypes(entryPath) ? [] : [sqliteDtsPath()]),
+    // The WebRTC data-channel globals lib.dom.d.ts would otherwise
+    // supply. No stand-down condition: with lib forced to es2025 there
+    // is no configuration in which these names arrive from anywhere
+    // else (scriptc-wrtc.d.ts's header says why the package's own
+    // declarations cannot stand in).
+    wrtcDtsPath(),
   ];
   // --npm-static: an explicitly-named package joins the program even when
   // no static import statement names it — the optional-dependency shape
@@ -2926,6 +2933,7 @@ export {
   npmPackageNameOf,
   overridesDtsPath,
   sqliteDtsPath,
+  wrtcDtsPath,
   SUPPORTED_BUILTIN_MODULES,
   workspacePackageOfPath,
 } from "./shared.js";

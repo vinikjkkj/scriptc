@@ -861,6 +861,10 @@ function formatIrTypeInner(t: IrType, shapes: ShapeRegistry, unions: UnionRegist
       return "RequestInit";
     case "request":
       return "Request";
+    case "rtcPeerConnection":
+      return "RTCPeerConnection";
+    case "rtcDataChannel":
+      return "RTCDataChannel";
     case "promise":
       return `Promise<${formatIrType(t.inner, shapes, unions, seen)}>`;
     case "generator":
@@ -3180,6 +3184,31 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
     )
   ) {
     return psym.name === "Database" ? { kind: "sqliteDb" } : { kind: "sqliteStmt" };
+  }
+  // The WebRTC data-channel pair. Unlike Database/Statement above these
+  // are GLOBAL interfaces, not module-scoped ones: a DOM program gets
+  // them from lib.dom.d.ts, and @roamhq/wrtc's own .d.ts re-exports the
+  // globals rather than declaring them. So the provenance check is the
+  // plain isStdlibFile one URL uses, with no enclosing-module half --
+  // and it is the whole check: a user's own RTCPeerConnection maps as a
+  // record or class like any other.
+  //
+  // Mapping them is what gives a record FIELD typed
+  // `RTCPeerConnection | null` a representation. Every member still
+  // refuses by name through stdlibMemberFence -- nothing constructs
+  // either handle yet (packages/runtime/src/scr_wrtc.c) -- so this arm
+  // buys the SHAPES, not the behaviour.
+  if (
+    (psym?.name === "RTCPeerConnection" || psym?.name === "RTCDataChannel") &&
+    checker.declarationsOf(psym).some(
+      (d) =>
+        (ts.isInterfaceDeclaration(d) || ts.isClassDeclaration(d)) &&
+        ctx.isStdlibFile(d.getSourceFile()),
+    )
+  ) {
+    return psym.name === "RTCPeerConnection"
+      ? { kind: "rtcPeerConnection" }
+      : { kind: "rtcDataChannel" };
   }
   // fs/promises FileHandle: the handle fsPromises.open() resolves to.
   // Module-checked like FSWatcher — @types/node declares
