@@ -143,3 +143,65 @@ clause lands C-only until someone takes that.
 
 Not started. The SCTP packet layer's 51 green checks are a wire format proved
 against published vectors — **not an association that works with any peer.**
+
+---
+
+# After the merge (main 31950bba): DTLS on a real socket, and the SCTP association
+
+## Stage 3 finished: DTLS over real, lossy UDP
+
+`probes/socket_test.c` — real loopback sockets, real mbedtls timers over a
+real clock, deliberate drop and reorder. **36 checks, 0 failures; 60
+consecutive runs green = 360 scenario executions, 0 handshake failures.**
+
+The retransmission timer was indeed the first thing to break, and **two of my
+three explanations for it were wrong**:
+
+1. "40% loss fails" — true but useless: `-26880` is `WANT_READ`, not fatal.
+   It had exhausted *my budget*, not the protocol.
+2. "the 4 s retransmission ceiling starves it" — 1 failure/20 at 4000ms vs
+   0/20 at 400ms looked decisive. **Sixty runs put it at 3/60 versus 3/60,
+   identical**, refuting it. A 20-run sample produced a confident wrong
+   answer.
+3. The real cause: every failure showed `server=0` with the client stuck.
+   The server had *finished*, and my loop stopped calling it, so a lost
+   final flight was never resent. **A harness bug, not DTLS.** Draining the
+   finished peer took 6 failures/360 to 0/360.
+
+**The seed does not reproduce a run**, and the file now says so: the PRNG is
+drawn per send, and real timers make the send sequence vary. Measured, not
+assumed — same seed and binary, 30 s budget exhausted on one run, 145 ms on
+the next.
+
+## Stage 4: the association
+
+`scr_sctp_assoc.c`, sans-io. **30 checks, 0 failures, byte-identical across
+10 runs** — the virtual clock makes this one genuinely deterministic.
+
+| loss | delivered | retransmits | wire |
+| --- | --- | --- | --- |
+| clean | 5/5 | 0 | 20 sent, 0 dropped |
+| 10% | 5/5 | 2 | 22 sent, 4 dropped |
+| 30% | 5/5 | 5 | 24 sent, 9 dropped |
+| **50%** | **5/5** | 20 | 53 sent, 22 dropped, 1 duplicate |
+
+**All three failures I hit were in the test peer, and each looked like a
+client bug**: acking the highest TSN seen instead of the highest contiguous
+one; never retransmitting its own DATA (so a dropped DCEP ACK killed the
+channel); and a heartbeat check racing the exit condition, which failed at
+30% and passed at 50% — a loss-*dependent* failure that was purely the test
+leaving early.
+
+## Still true, and worth repeating
+
+- **The two halves are not joined.** DTLS works over sockets; the
+  association works over a virtual wire. Neither is wired to `scr_dgram.c`,
+  and neither has met a real WebRTC peer.
+- **The SCTP unit's wire-format checks are published vectors, not an
+  association with any peer** — the association above is likewise measured
+  against a peer I wrote.
+- **C backend only.** 16 of 20 `dgram.*` lib functions absent from the LLVM
+  emitter; every dgram program demotes.
+- **`mlow-codec.ts:26` is voip's other independent stop** (`SC2009` on
+  `Promise<MlowModule> | null`), untouched and nothing to do with WebRTC.
+  voip is not finished when this clause lands.
