@@ -2478,6 +2478,80 @@ export const BUILTIN_MODULE_FENCE_HINTS: Record<string, Record<string, string | 
     return { kind: "unionWrap", unionId: t.unionId, tag, value: undef, type: t, loc };
   }
 
+  /** Members read off node v25.9.0's `process` as ABSENT -- own property
+   * false AND `in` false -- so a read of one answers `undefined`, which is
+   * what Node's ordinary property lookup does for a name an object does not
+   * carry.
+   *
+   * Same evidence standard as NODE_ABSENT_GLOBALS above, and the same reason
+   * for it: a name @types/node does not DECLARE proves nothing (that
+   * declaration set lags the runtime, and the comment on the globals table
+   * lists twenty-four names where believing it was measured WRONG). The
+   * evidence has to be a reading of the runtime, so it is one:
+   *
+   *   Object.prototype.hasOwnProperty.call(process, "type") -> false
+   *   "type" in process                                     -> false
+   *   typeof process.type                                   -> "undefined"
+   *   globalThis.process?.type                              -> undefined
+   *
+   * and, confirming that the table is the gate rather than a blanket rule,
+   * every member Node DOES carry keeps its own answer: `platform`, `arch`,
+   * `versions`, `argv` and `exitCode` are all own=true on the same read.
+   *
+   * ONE NAME, deliberately. `process.type` is Electron's renderer probe and
+   * it is the FIRST executable statement of Emscripten's module glue --
+   * `globalThis.process?.versions?.node && globalThis.process?.type !=
+   * "renderer"` -- so it is the wall every Emscripten bundle hits before it
+   * has done anything. `browser`, `pkg`, `__nexe`, `electron`,
+   * `resourcesPath` and `defaultApp` measure absent in exactly the same way
+   * and stay OUT: nothing measured needs them, and a table carrying only
+   * what is required is the smaller wrong-answer surface. That is the rule
+   * the globals table settled on after `self` and `postMessage`.
+   *
+   * NOT `exitCode`. It is own=true on node -- a real, writable property
+   * whose value happens to start `undefined` -- so folding a READ of it to
+   * `undefined` would be a wrong answer the moment a program assigns it.
+   * It keeps its own fence, which names it. */
+  const NODE_ABSENT_PROCESS_MEMBERS: ReadonlySet<string> = new Set(["type"]);
+
+  /** `process.type` / `globalThis.process?.type` -- a member of Node's
+   * `process` this host MEASURABLY does not have, read in a JavaScript
+   * source, where Node answers `undefined`.
+   *
+   * Called from ONE place: immediately before the "reading 'X' from a value
+   * of type 'Y'" fence in lowerPropertyAccess. That position is the
+   * direction argument -- every site that reaches it was about to REFUSE, so
+   * the only thing this can change is which answer a refusing site gives,
+   * and it can never turn a read that lowers today into something else.
+   *
+   * Four guards, each closing a way to be wrong:
+   *  1. the receiver is the ONE `process` global (stdlibGlobalNameOf, which
+   *     peels parens/casts/`!` and accepts both the bare `process` spelling
+   *     and `globalThis.process`) -- not a user object that happens to have
+   *     a `.type`;
+   *  2. the name is in the MEASURED table above;
+   *  3. the checker finds NO property of that name on the receiver's type --
+   *     so if @types/node ever grows a `process.type`, the declaration wins
+   *     and this stands down without an edit;
+   *  4. a JavaScript source only. A TypeScript program that wrote
+   *     `process.type` asked tsc for it and got TS2339 at preflight; what
+   *     reaches here is the third-party-bundle world preflight suppresses on
+   *     purpose, which is where every Emscripten glue lives. The answer is
+   *     the bare value for the reason the globals rule gives one: values in
+   *     a JS source ride the checked-dynamic tree, so there is no static
+   *     slot for `undefined` to fail to fit. */
+  export function absentProcessMemberValue(
+    L: Lowerer,
+    access: ts.PropertyAccessExpression,
+  ): IrExpr | null {
+    const name = access.name.text;
+    if (!NODE_ABSENT_PROCESS_MEMBERS.has(name)) return null;
+    if (!isJsSourceFile(access.getSourceFile())) return null;
+    if (stdlibGlobalNameOf(L, access.expression) !== "process") return null;
+    if (L.checker.getPropertyOfType(L.typeOf(access.expression), name) !== undefined) return null;
+    return { kind: "unitLit", unit: "undefined", type: UNDEFINED_T, loc: locOf(access) };
+  }
+
 /** `Object.getOwnPropertyNames` over a CHECKED-DYNAMIC receiver, as a
    * memoized lifted function — the honest twin of `dyn.objKeys`.
    *
