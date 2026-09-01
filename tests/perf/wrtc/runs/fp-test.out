@@ -1,0 +1,29 @@
+SDP fingerprint parsing (RFC 8122)
+  ok   parses zapo's pinned fingerprint                         true
+  ok   first and last bytes                                     F9 CA .. A0 68
+  ok   formats back to the same text                           
+  ok   accepts lowercase hex                                    true
+  ok   lowercase parses to the same bytes                       true
+
+rejections — each of these must NOT parse
+  ok   sha-1 is refused                                         false
+  ok   sha-512 is refused (unserved, not assumed)               false
+  ok   31 pairs is refused                                      false
+  ok   33 pairs is refused                                      false
+  ok   non-hex is refused                                       false
+  ok   missing colons is refused                                false
+  ok   empty is refused                                         false
+
+finding the line in a whole SDP
+  ok   extracts the fingerprint from a real SDP                 true
+  ok   and it equals the pinned value                           true
+  ok   an SDP with no fingerprint fails                         false
+
+certificate hashing and comparison
+  ok   hashes a byte string                                     true
+  ok   SHA-256("abc") is the FIPS 180-4 answer                  true
+  ok   a one-bit difference in the LAST byte is caught          false
+  ok   a one-bit difference in the FIRST byte is caught         false
+
+19 checks, 0 failures
+RESULT: PASS
