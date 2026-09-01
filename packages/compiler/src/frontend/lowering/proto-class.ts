@@ -30,6 +30,20 @@
  * keyed by their DECLARATION NODE, and a `S.prototype.m = ...` binds to the
  * innermost enclosing scope that declares `S`, which is what JS itself does.
  *
+ * FOR THE CONSUMER, and this is the part that will bite. When a recognized
+ * class's value flows into a typed slot — a field store, a call argument, a
+ * seeded container — lower it with `lowerExprExpecting(node, slot)` and NOT
+ * `lowerExpr(node)`. 668af820 is the standing example: `new Set(Object.values(Ctl))`
+ * refused while every static fact agreed, because the lowered VALUE arrived
+ * checked-dynamic and the `typeEquals` guard failed "over a difference that is
+ * not real". A declared binding lowers its initializer EXPECTING its own type;
+ * a raw `lowerExpr` at a use site does not. The same shape is waiting here:
+ * measured on zapo's bundle, 2,923 of the 6,679 message-field stores in the
+ * decode bodies hold a value that is dyn TODAY, and every one of them is a
+ * reader-method result that this recognizer is meant to make typed. Lowering
+ * those with `lowerExpr` would leave them dyn, hit a dynCheck at the boundary,
+ * and relocate the guard instead of removing it — which is the whole win.
+ *
  * Nothing here reads a `.d.ts`. The declaration beside this bundle omits four
  * of the members its own implementation uses (`tag`, `raw`, `discardUnknown`,
  * and `skipType`'s real arity), which is why the body is the only source that
@@ -377,7 +391,52 @@ export function findProtoClasses(sf: ts.SourceFile): ProtoClass[] {
   return cands;
 }
 
+/* Diagnostic, matching the SCRIPTC_*_WHY convention (SCRIPTC_SETNEW_WHY and
+ * friends): it reads the AST and prints, and it never lowers anything, so
+ * setting it cannot change what the compiler builds. Character offsets rather
+ * than lines because the inputs this matters for are minified to one line. */
+function whyPrint(sf: ts.SourceFile, classes: readonly ProtoClass[]): void {
+  const file = sf.fileName;
+  for (const c of classes) {
+    // A candidate whose ONLY objection is that it has no prototype methods is a
+    // record factory, not a class anyone was hoping to lower. There are 130 of
+    // those in zapo's bundle against 10 that carry a real verdict, and printing
+    // them buries the answer.
+    if (c.bailouts.length === 1 && c.bailouts[0] === "no prototype methods") continue;
+    const verdict = c.bailouts.length === 0 ? "USABLE" : "refused";
+    console.error(
+      `[protoclass] ${verdict} '${c.name}' at ${file}:${c.ctor.getStart()}` +
+        ` fields=${c.fields.length} methods=${c.methods.length}` +
+        ` merged=${c.mergedMethods.length} protoConsts=${c.protoConsts.length}` +
+        ` statics=${c.statics.length}` +
+        ` shape={${c.fields.map((f) => f.name + (f.conditional ? "?" : "") +
+          (f.reassignedInMethod ? "*" : "")).join(",")}}`,
+    );
+    // Collapse by REASON: a refusal repeated at 7 offsets is one fact, and
+    // the raw list ran to 1,612 lines on zapo's bundle, which is not a
+    // diagnostic anyone reads. First offset is kept, since one example is
+    // what you actually go and look at.
+    const byReason = new Map<string, { n: number; first: string }>();
+    for (const b of c.bailouts) {
+      const at = b.lastIndexOf(" @");
+      const reason = at >= 0 ? b.slice(0, at) : b;
+      const where = at >= 0 ? b.slice(at + 2) : "";
+      const e = byReason.get(reason);
+      if (e) e.n++;
+      else byReason.set(reason, { n: 1, first: where });
+    }
+    for (const [reason, e] of byReason) {
+      console.error(
+        `[protoclass]   bailout: ${reason}` +
+          (e.first !== "" ? ` (${e.n}x, first @${e.first})` : ""),
+      );
+    }
+  }
+}
+
 /** Only the classes safe to lower. Kept separate so callers cannot forget the check. */
 export function usableProtoClasses(sf: ts.SourceFile): ProtoClass[] {
-  return findProtoClasses(sf).filter((c) => c.bailouts.length === 0);
+  const all = findProtoClasses(sf);
+  if (process.env["SCRIPTC_PROTOCLASS_WHY"] !== undefined) whyPrint(sf, all);
+  return all.filter((c) => c.bailouts.length === 0);
 }
