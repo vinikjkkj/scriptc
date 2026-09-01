@@ -249,3 +249,30 @@ cause. **Deferred, deliberately, and named as an outstanding item.**
 - No STUN connectivity check; `ondatachannel` refuses because the association
   is offerer-only.
 - `mlow-codec.ts:26` remains voip's other independent stop.
+
+---
+
+## The price of the loop hook, measured
+
+`scr_async.c` is linked into EVERY binary, so the new `scr_loop_set_wrtc` slots
+and the dispatch station cost something to programs that will never hold a peer
+connection. Measured directly, same flags (`-O2 -target x86_64-windows-gnu`),
+the TU compiled at `c16b2b2d` against the TU at HEAD:
+
+    base.o  202,837 bytes
+    head.o  203,722 bytes
+    delta       885 bytes  (+0.44%)
+
+That is an OBJECT-size delta of the always-linked translation unit, not a
+linked-binary delta — the linker's dead-strip has not run on it. It is the same
+kind of cost the dgram and watch hooks already impose, and it is the honest
+number to compare a future fourth hook against.
+
+Runtime cost per loop turn: two more NULL pointer tests (`pending`, `dispatch`)
+in a turn that already performs five.
+
+## Final re-verification, from the shipped build
+
+    rtc-dc.ts       13 lines  MATCH byte-identical vs node v25.9.0
+    rtc-signal.ts   25 lines  MATCH byte-identical vs node v25.9.0
+    rtc-events.ts    9 lines  MATCH byte-identical vs node v25.9.0
