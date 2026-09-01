@@ -67,6 +67,55 @@ void __sanitizer_finish_switch_fiber(void *fake_stack_save, const void **bottom_
 #define SCR_FIBER_STACK (256 * 1024)
 #endif
 
+/* The INITIAL COMMITTED size of a win32 fiber stack, which is a different
+ * thing from the reserve above and was the whole of this runtime's page-
+ * fault bill. CreateFiber's dwStackSize parameter is the COMMIT, not a
+ * reserve and not lazy: every async call committed 256 KiB of fresh
+ * demand-zero stack and DeleteFiber handed it straight back.
+ *
+ * Measured standalone on this toolchain (dynimp-lab/arena/fiberfault.c),
+ * 164,711 create/switch/delete cycles touching two stack pages each --
+ * which is the fiber count of ONE phase of the zapo messaging bench:
+ *
+ *   commit    reserve            kernel   elapsed    faults
+ *   262144    16 MiB (default)   2,594     2.733 s   329,445  <- was
+ *    16384    16 MiB (default)   2,406     2.632 s   329,445  <- is
+ *   262144     1 MiB             1,312     1.545 s   329,445
+ *    16384     1 MiB             1,234     1.425 s   329,445
+ *   262144    16 MiB (control)   2,484     2.694 s   329,445
+ *
+ * 329,445 against the 329,111 the bench itself measures for that phase,
+ * so the fiber is the whole of that bill and not a piece of it.
+ *
+ * BUT THE RESERVE IS THE COST, NOT THE COMMIT, and the first version of
+ * this note said the opposite. The reserve here is the executable's
+ * 16 MiB SizeOfStackReserve, and reserving and releasing 16 MiB of
+ * address space 164,711 times is what the kernel time is. Dropping the
+ * commit at the same reserve is 7%, and shipping exactly that measured
+ * NOTHING on the real bench (5 plain / 4 post reps, kernel medians 3,969
+ * vs 3,992 ms, ranges fully overlapping) -- which is what 7% looks like.
+ *
+ * SO WHY KEEP IT: COMMIT CHARGE. 16 KiB instead of 256 KiB per LIVE
+ * fiber is 16x less pagefile commit on a phase that keeps hundreds in
+ * flight. That is unmeasured -- cpuphase reports working set, not
+ * PagefileUsage -- and it is the honest reason this line reads as it
+ * does. The reserve is left at the executable default exactly as
+ * CreateFiber left it, because lowering it caps how deep an async body
+ * may recurse and that is a semantic change, not a tuning one.
+ *
+ * THE FAULTS DO NOT MOVE IN ANY ARM ABOVE -- 329,445 in all six -- and
+ * that is expected: they are the demand-zero first touches of a FRESH
+ * stack, so only reusing stacks removes them. A
+ * pool of 8 reusable fibers measures 34 faults and 0.025 s for the same
+ * 164,711 switches (dynimp-lab/arena/fiberpool.c). That is the next
+ * change and it is not this one.
+ *
+ * Left alone under SCR_ASAN_FIBERS: that arm wants 8 MiB actually
+ * committed so ASan can poison the whole stack. */
+#ifndef SCR_FIBER_COMMIT
+#define SCR_FIBER_COMMIT (16 * 1024)
+#endif
+
 /* ── promises ─────────────────────────────────────────────────────────── */
 
 enum { SCR_PROM_PENDING = 0, SCR_PROM_FULFILLED = 1, SCR_PROM_REJECTED = 2 };
@@ -1339,10 +1388,18 @@ ScrPromise *scr_async_spawn(void (*entry)(ScrFiber *, void *), void *argpack) {
   scr_fibers_live++;
 
 #ifdef _WIN32
-  /* The commit size is the ucontext stack's size; the reserve stays the
-   * default 1MB. Committed lazily by the OS, like the malloc'd stacks. */
+  /* NOT lazy, and that mistake cost this runtime its whole page-fault
+   * bill: dwStackSize is the initial COMMITTED size, so the old
+   * CreateFiber(SCR_FIBER_STACK) committed 256 KiB of demand-zero stack
+   * per async CALL. The reserve is unchanged -- 0 means the executable
+   * default, which is what CreateFiber used. See SCR_FIBER_COMMIT. */
   ScrCtx here = scr_win_self();
-  f->ctx = CreateFiber(SCR_FIBER_STACK, scr_trampoline, NULL);
+  f->ctx =
+#ifdef SCR_ASAN_FIBERS
+      CreateFiber(SCR_FIBER_STACK, scr_trampoline, NULL);
+#else
+      CreateFiberEx(SCR_FIBER_COMMIT, 0, 0, scr_trampoline, NULL);
+#endif
   if (f->ctx == NULL) scr_oom();
 #else
   f->stack = malloc(SCR_FIBER_STACK);
@@ -2825,7 +2882,12 @@ ScrGen *scr_gen_new(void (*entry)(ScrFiber *, void *), void *argpack,
   f->als = scr_als_ctx_retain(*scr_als_active);
   scr_fibers_live++;
 #ifdef _WIN32
-  f->ctx = CreateFiber(SCR_FIBER_STACK, scr_trampoline, NULL);
+  f->ctx =
+#ifdef SCR_ASAN_FIBERS
+      CreateFiber(SCR_FIBER_STACK, scr_trampoline, NULL);
+#else
+      CreateFiberEx(SCR_FIBER_COMMIT, 0, 0, scr_trampoline, NULL);
+#endif
   if (f->ctx == NULL) scr_oom();
 #else
   f->stack = malloc(SCR_FIBER_STACK);
