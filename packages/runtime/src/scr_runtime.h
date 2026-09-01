@@ -4061,6 +4061,17 @@ struct ScrDyn {
    * caller still holds, where Node writes that object itself. A silently
    * dropped write is the one answer worse than a refusal. */
   bool static_copy;
+  /* SCR_DYN_OBJ flavor: this object is a compiled module's NAMESPACE
+   * snapshot (scr_dyn_mark_module_ns, set alongside static_copy). Node's
+   * module namespace is [[Set]]-proof and [[Delete]]-proof — measured on
+   * v25.9.0, `ns.k = 1` throws "Cannot assign to read only property 'k'
+   * of object '[object Module]'" and `delete ns.k` throws "Cannot delete
+   * property 'k' of [object Module]". static_copy alone already refuses
+   * both, so this flag changes no CONTROL FLOW; it only replaces a
+   * refusal text about array/record boundary copies — which advises
+   * "giving the parameter a static type", advice that cannot be followed
+   * for a namespace — with one that names what Node does here. */
+  bool module_ns;
   union {
     bool b;
     double num;
@@ -4965,10 +4976,19 @@ ScrDyn *scr_dyn_new_bytes_ref(ScrBytes *b);
  * the converter's own freshly built, acyclic output (cycle-capable shapes
  * trap before reaching here), so the walk terminates. */
 ScrDyn *scr_dyn_mark_static_copy(ScrDyn *d);
+/* Marks a module NAMESPACE snapshot: scr_dyn_mark_static_copy's whole
+ * effect, plus the `module_ns` flag on the top object so the mutation
+ * refusals name the namespace instead of the boundary copy. Answers d
+ * unchanged (+0). */
+ScrDyn *scr_dyn_mark_module_ns(ScrDyn *d);
 /* Throws the shared refusal for a mutation attempted through a marked
  * boundary copy. `what` names the operation ("assigning a property",
  * "deleting a property", "'push'") and leads the message. */
 void scr_dyn_static_copy_refuse(const char *what);
+/* The namespace-flavored twin, thrown ahead of it for a `module_ns`
+ * receiver: the boundary-copy text advises a fix ("give the parameter a
+ * static type") that a namespace has no spelling for. */
+void scr_dyn_module_ns_refuse(const char *what);
 /* The Buffer-flavored twin: FORCES the flag on rather than reading the
  * payload's flavor, for producers whose ScrBytes is stamped UNKNOWN but
  * whose Node value is a Buffer regardless (stream 'data' chunks). The two
