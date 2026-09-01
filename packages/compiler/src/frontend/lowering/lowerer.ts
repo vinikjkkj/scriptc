@@ -1941,6 +1941,19 @@ export class Lowerer {
     // registry (globals, fn signatures, classes) applies unchanged.
     const cjsValue = this.cjsExportValueSymbol(symbol);
     if (cjsValue) symbol = cjsValue;
+    // A binding whose alias chain landed in a `.d.ts` whose compiled twin
+    // defines the name as a FUNCTION -- the half of a module's exports the
+    // storage bridge (declTwinGlobalOf) cannot carry.
+    //
+    // HERE, after the alias walk, and that is not a style choice: asked any
+    // earlier the symbol is still the import specifier in the IMPORTING
+    // file, whose source file is not a declaration file, so the bridge
+    // answers null for every binding and changes nothing -- which is
+    // indistinguishable from a rule that is working.
+    {
+      const repointed = this.declTwinFunctionSymbol(symbol);
+      if (repointed !== null) symbol = repointed;
+    }
     this.flushDeferred(symbol);
     return symbol;
   }
@@ -11984,6 +11997,51 @@ export class Lowerer {
       return "static";
     }
     return sawJsval ? "island" : "empty";
+  }
+
+  /** The compiled twin's FUNCTION symbol behind a declaration-file binding
+   * that owns no twin storage, or null. The other half of what a module
+   * exports; declTwinGlobalOf owns the storage half.
+   *
+   * The twin's export TABLE is tried first and normally answers nothing: a
+   * CommonJS twin shadowed by its `.d.ts` presents the checker no export
+   * table at all, so a lookup by name misses every export it really has.
+   * The structural scan of the twin's own statements is the fallback
+   * declTwinGlobalOf already needs for consts, for the same reason.
+   *
+   * Declines when the declaration owns a twin global (that is the storage
+   * bridge's case) and when the twin's export is not a function with a
+   * body, so it is strictly last-resort. */
+  declTwinFunctionSymbol(sym: ts.Symbol | undefined): ts.Symbol | null {
+    if (sym === undefined) return null;
+    const decls = this.checker.declarationsOf(sym);
+    if (decls.length === 0) return null;
+    let twin: ts.SourceFile | null = null;
+    for (const d of decls) {
+      const sf = d.getSourceFile();
+      if (!sf.isDeclarationFile || this.isStdlibFile(sf)) return null;
+      const t = this.declTwinSourceOf(sf);
+      if (t === null) return null;
+      twin = t;
+    }
+    if (twin === null) return null;
+    let exported = this.cjsModuleExportSymbol(twin, sym.name);
+    if (exported === undefined) {
+      for (const stmt of twin.statements) {
+        if (!ts.isFunctionDeclaration(stmt) || stmt.body === undefined) continue;
+        if (stmt.name === undefined || stmt.name.text !== sym.name) continue;
+        const local = this.checker.getSymbolAtLocation(stmt.name);
+        if (local) { exported = local; break; }
+      }
+    }
+    if (exported === undefined || exported === sym) return null;
+    if (this.globalsBySymbol.has(exported)) return null;
+    const target = this.cjsExportValueSymbol(exported) ?? exported;
+    if (this.globalsBySymbol.has(target)) return null;
+    const hasFn = this.checker
+      .declarationsOf(target)
+      .some((d) => ts.isFunctionDeclaration(d) && d.body !== undefined);
+    return hasFn ? target : null;
   }
 
   /** The DECLARATION file a compiled runtime file is the twin of -- the
