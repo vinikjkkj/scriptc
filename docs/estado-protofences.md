@@ -1086,3 +1086,18 @@ package:
 The module now runs past its environment detection. The next wall is
 `globalThis.process?.type != "renderer"` — the Electron probe — which is the
 same shape one level in: a member Node's `Process` measurably does not have.
+
+## Host note — disk
+
+`G:` reached **16 GB free (99% used)** while gate 2 was running, with four
+blocks live. I freed 525 MB of my own redundant artifacts mid-run
+(`bin/wam-entry2.ll` 197 MB, every `.pdb`, the wasm3 source tree, the
+`benchapp` copy, the regenerable `libopus_aot.c`) — lab went 825 MB -> 299 MB
+— and the free figure did not move, so the pressure is not mine. My worktree
+is 21 GB, almost all of it `.zig` and `.cache` from two full gates, and it
+CANNOT be pruned while a gate is running (a half-pruned zig cache looks
+exactly like a compiler regression).
+
+Recorded because a gate that dies on ENOSPC reads as a code regression.
+`gate2.log` was checked for `No space left` / `ENOSPC`: **0 matches** at the
+time of writing.
