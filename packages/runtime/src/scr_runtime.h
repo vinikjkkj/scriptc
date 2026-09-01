@@ -8924,6 +8924,12 @@ typedef struct ScrResponse ScrResponse;
  * ownership machinery stays uniform, never allocated. */
 typedef struct ScrFetchInit ScrFetchInit;
 typedef struct ScrRequest ScrRequest;
+/* The WebRTC data-channel handles. Types with no values today: mapped so
+ * that a record with an `RTCPeerConnection | null` field, and the Map
+ * holding that record, have a representation at all. Every member still
+ * refuses by name. See scr_wrtc.c. */
+typedef struct ScrRtcPeerConnection ScrRtcPeerConnection;
+typedef struct ScrRtcDataChannel ScrRtcDataChannel;
 
 /* Starts one transfer and answers the fetch() promise (+1), which
  * fulfills with an ScrResponse when the HEAD arrives — not when the body
@@ -9043,6 +9049,17 @@ ScrRequest *scr_request_retain(ScrRequest *r);
 void scr_request_release(ScrRequest *r);
 void *scr_request_retain_v(void *p);
 void scr_request_release_v(void *p);
+
+/* The WebRTC ownership pairs. Dead code in every program: nothing
+ * constructs either handle yet. */
+ScrRtcPeerConnection *scr_rtc_peer_connection_retain(ScrRtcPeerConnection *p);
+void scr_rtc_peer_connection_release(ScrRtcPeerConnection *p);
+void *scr_rtc_peer_connection_retain_v(void *p);
+void scr_rtc_peer_connection_release_v(void *p);
+ScrRtcDataChannel *scr_rtc_data_channel_retain(ScrRtcDataChannel *c);
+void scr_rtc_data_channel_release(ScrRtcDataChannel *c);
+void *scr_rtc_data_channel_retain_v(void *p);
+void scr_rtc_data_channel_release_v(void *p);
 
 ScrResponse *scr_response_retain(ScrResponse *r);
 void scr_response_release(ScrResponse *r);

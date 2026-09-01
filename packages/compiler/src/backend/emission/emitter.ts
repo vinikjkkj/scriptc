@@ -2317,6 +2317,9 @@ export class CEmitter {
       case "headers":
       case "requestInit":
       case "request":
+      // A peer connection and a data channel are objects too.
+      case "rtcPeerConnection":
+      case "rtcDataChannel":
         return `${t.name} != NULL`;
       case "void":
         throw new Error("emitter bug: truthiness of void");
