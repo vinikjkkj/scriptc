@@ -595,6 +595,7 @@ static ScrDyn *scr_dyn_alloc(ScrDynKind kind) {
     /* A recycled node must not inherit the previous life's boundary mark,
      * or an unrelated fresh value would refuse its own writes. */
     d->static_copy = false;
+    d->module_ns = false;
     if (kind == SCR_DYN_ARR) {
       d->v.arr.len = 0; /* cap/items preserved from the node's last life */
     } else if (kind == SCR_DYN_OBJ) {
@@ -5221,7 +5222,14 @@ bool scr_dyn_key_delete(ScrDyn *recv, ScrStr *key) {
     return false;
   }
   if (recv->static_copy) {
-    if (recv->module_ns) scr_dyn_module_ns_refuse("deleting a property");
+    if (recv->module_ns) {
+      /* scr_throw_error RECORDS a pending error and returns, so this must
+       * not fall through: the second refusal would overwrite the
+       * namespace text with the boundary-copy one (measured — the test
+       * below read the wrong message before this return existed). */
+      scr_dyn_module_ns_refuse("deleting a property");
+      return false;
+    }
     scr_dyn_static_copy_refuse("deleting a property");
     return false;
   }
@@ -5419,7 +5427,10 @@ void scr_dyn_key_set(ScrDyn *recv, ScrStr *key, ScrDyn *value) {
   scr_dyncen_note_korigin(SCR_DYNCEN_KO_KEYSET);
 #endif
   if (recv->static_copy) {
-    if (recv->module_ns) scr_dyn_module_ns_refuse("assigning a property");
+    if (recv->module_ns) {
+      scr_dyn_module_ns_refuse("assigning a property");
+      return;
+    }
     scr_dyn_static_copy_refuse("assigning a property");
     return;
   }
