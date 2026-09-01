@@ -904,3 +904,20 @@ That clears the glue's first two fences and lets the module get past its
 environment detection. **Not applied in this block: the gate was already
 running, and vitest runs the compiler SOURCE, not dist — editing
 `surfaces.ts` mid-gate would have corrupted the run.**
+
+## PHASE 10 — BOTH BACKENDS, wam's package entry
+
+| backend | binary | bytes | exit | oracle (node v25.9.0) |
+| --- | --- | --- | --- | --- |
+| C | `bin/wam-head.c.exe` | 28,280,320 | 0 | **MATCH, byte-exact** |
+| LLVM | `bin/wam-head.exe` | 28,285,440 | 0 | **MATCH, byte-exact** |
+
+17 lines each, 15/15 `eq()` assertions, `WAM-ENTRY2: ALL PASS`.
+Engine scan on both: `quickjs=0 ScrDyn=0 JS_NewRuntime=0`.
+
+Fences: **1** in `bin/wam-entry2.c` (141,042,754 bytes) — the SC2020 at
+`spec/proto/index.js:1`. Counted over the **C**; the `.ll` interns identical
+string constants and under-reports, which is why the C is the instrument.
+
+The messaging bench binary (`bench/bench-head.c.exe`, 25,598,464 bytes) runs
+and prints its header and scenario table at exit 0.
