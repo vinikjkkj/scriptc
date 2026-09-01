@@ -67,6 +67,21 @@ A and P are `.text`-identical to the byte at both sizes.
                         tag/raw/discardUnknown and the real skipType arity
                         (28.7% of sites), and 188 of 7,493 declared fields
                         (2.51%) are concrete rather than optional or a union.
+    decode-shape.mjs    the follow-on to waproto-split: the .d.ts does not
+                        describe these bodies, so can the shapes be recovered
+                        from the BODIES, which is the only source npm-static's
+                        doctrine permits? Prints how many message field sets are
+                        statically enumerable from the generated template, and
+                        the three things a static shape would have to preserve
+                        to stay byte-exact. On zapo's bundle: decode is ONE
+                        template for 641 of 641 and 635 field sets (99.1%) are
+                        enumerable -- but encode reads a CALLER-SUPPLIED plain
+                        object and uses hasOwnProperty as the presence test that
+                        decides the wire bytes, so a static struct would emit
+                        fields the caller never set. Read the SAFETY block before
+                        costing any of this; the decode half is tractable and the
+                        encode half is gated on modelling presence.
+
     tucount.mjs         one streaming pass over a 130 MB emitted TU: the
                         retain/release/dyn-op shapes, with the interned-
                         literal share of scr_str_retain.
