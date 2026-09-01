@@ -925,8 +925,16 @@ void crypto_argon2(u8 *hash, u32 hash_size, void *work_area,
 //  Originally taken from SUPERCOP's ref10 implementation.
 //  A bit bigger than TweetNaCl, over 4 times faster.
 
+#if defined(SCR_MONOCYPHER_FE64)
+// scriptc: a 64-bit field backend replaces the ref10 ten-limb block below.
+// Nothing outside this block indexes an `fe`, so the swap is contained here
+// and every routine above and below is used verbatim. See monocypher-fe64.h
+// for the representation, the limb invariant, and the measurements.
+#include "monocypher-fe64.h"
+#else
 // field element
-typedef i32 fe[10];
+typedef i32 fe_limb;
+typedef fe_limb fe[10];
 
 // field constants
 //
@@ -1323,6 +1331,7 @@ static void fe_sq(fe h, const fe f)
 
 	FE_CARRY;
 }
+#endif // SCR_MONOCYPHER_FE64
 
 //  Parity check.  Returns 0 if even, 1 if odd
 static int fe_isodd(const fe f)
@@ -1425,11 +1434,11 @@ static int invsqrt(fe isr, const fe x)
 	fe_sq(t0, t0);  FOR (i, 1,   2) { fe_sq(t0, t0); }  fe_mul(t0, t0, x);
 
 	// quartic = x^((p-1)/4)
-	i32 *quartic = t1;
+	fe_limb *quartic = t1;
 	fe_sq (quartic, t0);
 	fe_mul(quartic, quartic, x);
 
-	i32 *check = t2;
+	fe_limb *check = t2;
 	fe_0  (check);          int z0 = fe_isequal(x      , check);
 	fe_1  (check);          int p1 = fe_isequal(quartic, check);
 	fe_neg(check, check );  int m1 = fe_isequal(quartic, check);
@@ -1855,6 +1864,11 @@ static void ge_double(ge *s, const ge *p, ge *q)
 }
 
 // 5-bit signed window in cached format (Niels coordinates, Z=1)
+#if defined(SCR_MONOCYPHER_FE64)
+// scriptc: the ref10 encodings of these tables and of A live below, behind
+// the #else; the 51-bit encodings of all four come from this header.
+#include "monocypher-fe64-tables.h"
+#else
 static const ge_precomp b_window[8] = {
 	{{25967493,-14356035,29566456,3660896,-12694345,
 	  4014787,27544626,-11754271,-6079156,2047605,},
@@ -1905,6 +1919,7 @@ static const ge_precomp b_window[8] = {
 	 {-3099351,10324967,-2241613,7453183,-5446979,
 	  -2735503,-13812022,-16236442,-32461234,-12290683,},},
 };
+#endif // SCR_MONOCYPHER_FE64
 
 // Incremental sliding windows (left to right)
 // Based on Roberto Maria Avanzi[2005]
@@ -2033,6 +2048,7 @@ int crypto_eddsa_check_equation(const u8 signature[64], const u8 public_key[32],
 }
 
 // 5-bit signed comb in cached format (Niels coordinates, Z=1)
+#if !defined(SCR_MONOCYPHER_FE64)
 static const ge_precomp b_comb_low[8] = {
 	{{-6816601,-2324159,-22559413,124364,18015490,
 	  8373481,19993724,1979872,-18549925,9085059,},
@@ -2083,7 +2099,9 @@ static const ge_precomp b_comb_low[8] = {
 	 {-14134701,-4174411,10246585,-14677495,33553567,
 	  -14012935,23366126,15080531,-7969992,7663473,},},
 };
+#endif
 
+#if !defined(SCR_MONOCYPHER_FE64)
 static const ge_precomp b_comb_high[8] = {
 	{{33055887,-4431773,-521787,6654165,951411,
 	  -6266464,-5158124,6995613,-5397442,-6985227,},
@@ -2134,6 +2152,7 @@ static const ge_precomp b_comb_high[8] = {
 	 {-3201977,14413268,-12058324,-16417589,-9035655,
 	  -7224648,9258160,1399236,30397584,-5684634,},},
 };
+#endif
 
 static void lookup_add(ge *p, ge_precomp *tmp_c, fe tmp_a, fe tmp_b,
                        const ge_precomp comb[8], const u8 scalar[32], int i)
@@ -2560,7 +2579,9 @@ void crypto_x25519_dirty_fast(u8 public_key[32], const u8 secret_key[32])
 ///////////////////
 /// Elligator 2 ///
 ///////////////////
+#if !defined(SCR_MONOCYPHER_FE64)
 static const fe A = {486662};
+#endif
 
 // Elligator direct map
 //
