@@ -131,3 +131,83 @@ remaining route, and it is declined twice over — WSL Arch has no linux
 node, so the fake server is unreachable from inside it, and valgrind
 answers CPUID SHA=0, taking the scalar fallback for exactly the crypto
 these two phases are made of.
+
+## Memory, page faults, and where the bytes come from
+
+`cpuphase` polls the child every 2 ms for working set, peak working set and
+page faults, and reports `GetProcessIoCounters` alongside the CPU columns.
+Polling rather than sampling at the phase markers, because both halves of
+the memory story are invisible to markers: the floor happens before the
+first marker exists, and the compiled lane spikes and *releases* inside a
+phase where node's only ever climbs.
+
+`send_1to1`, 200 contacts x 2 devices, 600 messages, same workload both
+lanes:
+
+|                | node       | compiled   | ratio |
+| -------------- | ---------- | ---------- | ----- |
+| page faults    | 16,134     | 328,885    | 20.4x |
+| kernel ms      | 578        | 2,734      | 4.7x  |
+| user ms        | 4,141      | 2,063      | 0.50x |
+| ioOther        | 2          | 4          |       |
+| peak RSS       | 171.56 MiB | 76.91 MiB  | 0.45x |
+| startup RSS    | 26.20 MiB  | 17.58 MiB  | 0.67x |
+
+**The kernel time is page faults.** `ioOther` of 4 rules out I/O and ioctls,
+and the compiled lane's *user* time is half node's in the same phase. The
+memory growth and the kernel time are one cause, not two.
+
+Two hypotheses died here, both by measurement:
+
+- **Entropy.** On win32 `arc4random_buf` passes every call straight to
+  `SystemFunction036` (`RtlGenRandom`) with no pool -- exactly the shape
+  that would explain syscall time. It costs 0.053 us for an 8-byte draw and
+  0.058 for 32 bytes: a user-mode fast path. Nine seconds would need ~155
+  million calls.
+- **Module init.** The idea was that per-module initialisers scattered
+  through 22.3 MB of `.text` fault in the image before `main`. RSS reaches
+  17.58 MiB and sits **flat for ~550 ms with no further faults** before any
+  work, against a ~25.8 MB image, and startup takes 4,042 faults against
+  `send_1to1`'s 328,885. The faults are in the workload, not startup.
+
+### Allocation sites
+
+`-DSCR_PROF_ALLOC` (see `tests/perf/prof/scr_prof.h`) needs none of the link
+walls that close `-finstrument-functions`, because it interposes the
+allocator through the preprocessor and keys on a compile-time `file:line`.
+Same workload:
+
+    allocations  1,671,020    frees  1,427,468 (85.4%)
+    bytes           110.27 MiB   sites  1,447   lost 0
+
+~2,785 allocations per message, 85% freed again inside the run. The runtime
+allocates through the mingw CRT `malloc` -- no `VirtualAlloc`, `HeapCreate`
+or private pool anywhere in `packages/runtime/src` -- and the Windows heap
+decommits freed blocks, so churn re-commits the same pages and pays a fault
+each time. That is the 20.4x fault gap.
+
+95% of the bytes are the runtime's own sites, not the emitted program (203
+runtime sites, 105.26 MiB; 1,244 program sites, 5.01 MiB):
+
+| bytes      | allocs  | avg   | site                                       |
+| ---------- | ------- | ----- | ------------------------------------------ |
+| 26,353,760 | 164,711 | 160   | `scr_async.c:1331` fiber, one per async call |
+| 12,668,568 | 166,276 | 76    | `scr_cycle.c:150` cycle-collector pool MISS  |
+| 9,037,888  | 141,217 | 64    | `scr_array.c:179` array header               |
+| 8,883,078  | 92,691  | 95    | `scr_bytes.c:52` bytes payload               |
+| 7,149,056  | 55,852  | 128   | `scr_map.c:249` map object                   |
+| 6,828,544  | 50,272  | 135   | `scr_map.c:164` map storage                  |
+| 6,429,120  | 5,430   | 1,184 | `scr_cipher_value.c:90` ScrCipher            |
+| 4,802,752  | 139,328 | 34    | `scr_array.c:172` array data                 |
+| 3,707,640  | 92,691  | 40    | `scr_bytes.c:43` bytes header                |
+| 3,328,960  | 103,528 | 32    | `scr_async.c:1388` promise waiters realloc   |
+
+Two sites are half the problem and both are structural. `scr_async_spawn`
+callocs a fiber per async **call** -- and it eagerly runs the body to its
+first suspension, so a body that never suspends still allocated a fiber to
+run in. And `scr_cyc_alloc_miss` is by its own name the path taken when the
+collector's pool has nothing to hand back; 166,276 misses in one phase is a
+pool that is not sized for this workload.
+
+This lane ranks **churn**. Residency is a different list and needs the
+`-DSCR_PROF_LIVE` add-on, which charges a free back to the allocating site.
