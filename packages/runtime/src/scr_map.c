@@ -656,6 +656,9 @@ static bool scr_map_key_array_index(const ScrStr *k, uint32_t *out) {
  * over the integer-like subset — overflow maps are small, and ties are
  * impossible (keys are unique). */
 ScrArr *scr_map_keys_js_order(const ScrMap *m) {
+#ifdef SCR_ARRCEN_ON
+  scr_arrcen_note(SCR_ARRCEN_MAPKEYS, (long long)m->nlive);
+#endif
   size_t n = m->nentries;
   ScrArr *out = scr_arr_new(SCR_ELEM_STR, m->nlive);
   size_t nidx = 0;
