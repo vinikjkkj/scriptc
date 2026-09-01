@@ -43,11 +43,19 @@ done
 
 # fences in the emitted C TU
 SBASE=$(basename "$SRC"); SBASE="${SBASE%.*}"
-CFILE=$(ls -1 "$LAB/bin/$SBASE.c" "$LAB/bin/$NAME.c" 2>/dev/null | head -1)
+# `ls -1 missing existing` ECHOES THE MISSING NAME on this host, so the old
+# glob picked a file that does not exist and reported total=0 -- a false
+# zero. Test for existence explicitly.
+CFILE=""
+for c in "$LAB/bin/$SBASE.c" "$LAB/bin/$NAME.c" "$LAB/bin/$NAME.c.c"; do
+  [ -f "$c" ] && { CFILE="$c"; break; }
+done
 if [ -n "$CFILE" ]; then
   tot=$(rg -a -o '\[SC[0-9]{4} at [^]]*\]' "$CFILE" | wc -l)
   uniq=$(rg -a -o '\[SC[0-9]{4} at [^]]*\]' "$CFILE" | sort -u | wc -l)
-  echo "FENCES in $(basename "$CFILE"): total=$tot distinct=$uniq"
+  # positive control on the counter itself: a TU with no SC-tagged lines and
+  # a TU that was never written both read 0, so print the size too.
+  echo "FENCES in $(basename "$CFILE") ($(stat -c%s "$CFILE") bytes): total=$tot distinct=$uniq"
   rg -a -o '\[SC[0-9]{4} at [^]]*\]' "$CFILE" | sort | uniq -c | sort -rn | head -25
 else
   echo "FENCES: no .c TU kept (ls $LAB/bin/$NAME*)"

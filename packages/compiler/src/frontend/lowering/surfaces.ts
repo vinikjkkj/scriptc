@@ -2329,6 +2329,45 @@ export const BUILTIN_MODULE_FENCE_HINTS: Record<string, Record<string, string | 
     "XMLHttpRequest",
   ]);
 
+  /** RUNTIME-IDENTITY probes, and a table of their own on purpose.
+   *
+   * NODE_ABSENT_GLOBALS above is consulted for JavaScript sources only, and
+   * `tests/fixtures/node-types/stdlib-surfaces-fenced.ts` ratifies the other
+   * half deliberately: `(globalThis as { window?: { name: string } }).window`
+   * in a TYPESCRIPT source keeps its refusal, because an assertion the
+   * program wrote is not evidence about the host. That control is right and
+   * this table does not touch it.
+   *
+   * These two are a different QUESTION, which is why they get a different
+   * table rather than a widened one. `window`, `document`, `XMLHttpRequest`,
+   * `crypto` and `gc` are CAPABILITY probes -- "does this host give me X?" --
+   * and a compiler must not answer "no" for a capability just because nothing
+   * declared it; that is the reasoning the fenced fixture protects, and
+   * folding on silence once answered `undefined` for two dozen globals Node
+   * really has. `Bun` and `Deno` ask "WHICH RUNTIME AM I?", and that answer
+   * does not come from an inventory of what the host provides: a scriptc
+   * binary is not Bun and is not Deno, whatever any declaration set says.
+   * The oracle agrees for the same structural reason, and it was read rather
+   * than assumed -- `hasOwnProperty.call(globalThis, n)` false and `typeof`
+   * "undefined" for both, in the main thread AND a `node:worker_threads`
+   * Worker on v25.9.0, with `fetch`, `navigator`, `Blob` and `process`
+   * own=true in the same run as the control that the probe can tell present
+   * from absent.
+   *
+   * Measured consumer: `isBunRuntime()` at zapo-js `src/util/runtime.ts:20`,
+   * imported by store-sqlite/connection.ts and called at `:359`
+   * (`return isBunRuntime() ? 'bun' : 'better-sqlite3'`) -- INSIDE a
+   * function, not at module scope. An earlier survey recorded it as a
+   * module-scope call and this comment repeated that; reading the file
+   * says otherwise, and the measurement agrees: on acdd8b96 the statement
+   * sits in the unreached group of a driver that opens a connection, so
+   * the fold is worth exactly +1 static statement there (48,815 ->
+   * 48,816 of 48,921) and removes no blocker. What it does remove is the
+   * refusal on the CONSTRUCT: the probe goes from 1 of 2 statements static
+   * with an SC2020 to 2 of 2, and builds a binary that matches node
+   * byte-exactly. No corpus program names either identifier. */
+  const RUNTIME_IDENTITY_ABSENT: ReadonlySet<string> = new Set(["Bun", "Deno"]);
+
   export function absentGlobalMemberValue(L: Lowerer, access: ts.PropertyAccessExpression): IrExpr | null {
     if (access.questionDotToken) return null;
     if (L.chainBlocked(access)) return null;
@@ -2411,8 +2450,75 @@ export const BUILTIN_MODULE_FENCE_HINTS: Record<string, Record<string, string | 
     // `!!globalThis.window` and `!!globalThis.WorkerGlobalScope` are the
     // first two statements of Emscripten's module glue, and they REFUSED
     // where Node answers `undefined`.
-    if (gp === undefined && NODE_ABSENT_GLOBALS.has(name) && isJsSourceFile(access.getSourceFile())) {
-      return { kind: "unitLit", unit: "undefined", type: UNDEFINED_T, loc: locOf(access) };
+    if (gp === undefined && (NODE_ABSENT_GLOBALS.has(name) || RUNTIME_IDENTITY_ABSENT.has(name))) {
+      if (NODE_ABSENT_GLOBALS.has(name) && isJsSourceFile(access.getSourceFile())) {
+        return { kind: "unitLit", unit: "undefined", type: UNDEFINED_T, loc: locOf(access) };
+      }
+      // A TYPESCRIPT source cannot reach this line without an assertion on
+      // the receiver: `globalThis.Bun` alone is a TYPE ERROR ("Property
+      // 'Bun' does not exist on type 'typeof globalThis'"), reported as
+      // SC0001 long before lowering. So the only shape that arrives here is
+      // the one the member fence below TELLS the programmer to write:
+      //
+      //   (globalThis as { readonly Bun?: unknown }).Bun
+      //
+      // and it declined at "undeclared", because the loop above unwraps the
+      // `as` to prove the receiver is globalThis and then looks the property
+      // up on the UNWRAPPED type -- discarding the very assertion that
+      // declares the member optional. The advice and the implementation
+      // disagreed, and the chain then fenced on the receiver and blamed
+      // `globalThis`, which is the mis-blame the memberFence below exists to
+      // prevent.
+      //
+      // WHY THE ASSERTION IS NOT THE EVIDENCE. An assertion is a claim, and
+      // a claim is exactly what this file already refuses to fold on --
+      // `(globalThis as { fetch?: T }).fetch` must NOT read `undefined`,
+      // because node v25.9.0 HAS fetch (own=true in the run above). So the
+      // assertion is only the SITE condition: it says the program admits an
+      // absence and gives `undefined` somewhere to go. The EVIDENCE stays
+      // the measured table, identical to the JavaScript arm. Both must hold.
+      const assertedOptional = ((): boolean => {
+        let node: ts.Expression = access.expression;
+        let sawAssertion = false;
+        for (;;) {
+          if (ts.isParenthesizedExpression(node)) { node = node.expression; continue; }
+          if (ts.isAsExpression(node) || ts.isSatisfiesExpression(node)) { sawAssertion = true; node = node.expression; continue; }
+          if (ts.isNonNullExpression(node)) { node = node.expression; continue; }
+          break;
+        }
+        if (!sawAssertion) return false;
+        const ap = L.checker.getPropertyOfType(L.typeOf(access.expression), name);
+        if (ap === undefined) return false;
+        if ((ap.flags & ts.SymbolFlags.Optional) !== 0) return true;
+        const at = L.checker.getTypeOfSymbol(ap);
+        return (at.flags & ts.TypeFlags.Undefined) !== 0 ||
+          (at.isUnionType() && at.getTypes().some((a) => (a.flags & ts.TypeFlags.Undefined) !== 0));
+      })();
+      if (assertedOptional && RUNTIME_IDENTITY_ABSENT.has(name)) {
+        const st = L.mapTypeOf(L.typeOf(access));
+        const sloc = locOf(access);
+        if (process.env["SCRIPTC_ABSENTGLOBAL_WHY"] !== undefined) {
+          console.error(`[absentglobal] measured-absent globalThis.${name} site=${st?.kind ?? "unmapped"} at ${sloc.file}:${sloc.start}`);
+        }
+        const su: IrExpr = { kind: "unitLit", unit: "undefined", type: UNDEFINED_T, loc: sloc };
+        // `unknown` and `any` map to nothing static, and that is the
+        // ordinary spelling of this probe (`{ Bun?: unknown }`): there is no
+        // slot for `undefined` to fail to fit, exactly as in a JS source.
+        // A `dyn` site takes the same answer for the same reason the
+        // JavaScript arm above does not consult the site at all: values on
+        // the checked-dynamic tree have no static slot for `undefined` to
+        // fail to fit. `{ Bun?: unknown }` is the ordinary spelling of this
+        // probe and `unknown` maps to `dyn`, so this is the arm the
+        // measured consumer actually takes.
+        if (st === null || st.kind === "undefinedT" || st.kind === "dyn") return su;
+        if (st.kind === "union") {
+          const stag = L.armTag(st.unionId, UNDEFINED_T);
+          if (stag >= 0) return { kind: "unionWrap", unionId: st.unionId, tag: stag, value: su, type: st, loc: sloc };
+        }
+        // Any other site kind keeps the fence: the assertion admits the
+        // absence but the site cannot hold it, and a wrong value is worse
+        // than a refusal that names the line.
+      }
     }
     if (gp === undefined) return why("undeclared");
     const decls = L.checker.declarationsOf(gp);
