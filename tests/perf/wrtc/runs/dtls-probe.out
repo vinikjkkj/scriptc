@@ -1,0 +1,14 @@
+mbedtls: Mbed TLS 3.6.7
+MBEDTLS_SSL_PROTO_TLS1_2                       yes
+MBEDTLS_SSL_PROTO_DTLS                         yes
+MBEDTLS_SSL_DTLS_SRTP                          no  (not needed: data channel only)
+ctr_drbg seeded                                yes
+ssl_config_defaults(CLIENT, DATAGRAM)          yes
+ssl_setup with a DATAGRAM config               yes
+ssl_set_timer_cb linked                        yes
+suite TLS-ECDHE-ECDSA-WITH-AES-128-GCM-SHA256  yes
+suite TLS-ECDHE-RSA-WITH-AES-128-GCM-SHA256    yes
+suite TLS-ECDHE-ECDSA-WITH-AES-256-GCM-SHA384  yes
+SHA-256 md_info available                      yes
+SHA-256("abc") matches the known answer        yes
+RESULT: PASS
