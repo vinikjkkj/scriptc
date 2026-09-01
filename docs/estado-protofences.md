@@ -1101,3 +1101,24 @@ exactly like a compiler regression).
 Recorded because a gate that dies on ENOSPC reads as a code regression.
 `gate2.log` was checked for `No space left` / `ENOSPC`: **0 matches** at the
 time of writing.
+
+## THE GATE, RUN 2 — CLEAN (rung 1 + rung 2)
+
+`gate2.log`, node **v25.9.0** (first line), `SCRIPTC_TEST_WORKERS=2`.
+
+    === gate start 17:29:34 ===
+    Test Files  2 failed | 146 passed | 7 skipped (155)
+    Duration    1989.63s
+    === gate end 18:02:44 rc=1 ===
+
+The same eight, by NAME, on both backends, and only the two differential
+corpora failed:
+
+    1360-spawn-sync.ts · 1482-spawnsync-error.ts
+    1537-os-release-spawnsync-stdio.ts · 2390-dot-requires\main.cjs
+
+`server.test.ts > upgrade-read-fairness`, `coverage > every corpus program is
+100% static` and `tier accounting` all passed in the run. No `ENOSPC` /
+`No space left` anywhere in the log.
+
+**Both rungs are gated. 0 MATCH→WRONG on either gate.**
