@@ -204,3 +204,99 @@ merely noisy, they are attributable to the wrong cause — a reader seeing
 fourteen `require`-suite failures would go looking at module resolution.
 The positive control itself was worth running; running it concurrently was
 not. Gate re-run clean afterwards.
+
+---
+
+## Stage 4 groundwork — the SCTP packet layer (written, RUN, not yet committed)
+
+Held out of the worktree until the gate finishes; I invalidated one gate
+already by editing the tree mid-run and will not do it twice.
+
+`G:\blocks\wrtc-lab\sctp\` — `scr_sctp.c`, `scr_sctp.h`, `sctp_test.c`.
+Wire format only: build and parse, **no association state machine, no
+timers, no socket**. That split is deliberate — the packet layer is the
+part provable offline against published answers, and a retransmission
+timer over a wrong CRC is not worth writing.
+
+`zig cc -target x86_64-windows-gnu -std=c11 -O1 -Wall -Wextra`:
+**0 errors, 0 warnings**. `sctp_test.exe`: **51 checks, 0 failures, PASS, rc=0**.
+
+What is covered:
+
+- **CRC32c (RFC 3309)** against all four RFC 3720 B.4 iSCSI vectors plus the
+  universal `crc32c("123456789") = 0xE3069283` and the empty-input case.
+  Six published answers, none of them derived from running this code.
+- **The little-endian checksum field.** RFC 3309's one exception to SCTP's
+  big-endian wire format. Checked *explicitly against the byte order on the
+  wire*, not just round-tripped — a big-endian store would round-trip
+  through our own reader and pass every other test in the file.
+- **DATA chunk byte layout**, RFC 4960 §3.3.1, byte-exact including the
+  length field excluding padding (19 declared, 20 returned) and the padding
+  being **zeroed** rather than left as whatever the buffer held.
+- **DCEP DATA_CHANNEL_OPEN**, RFC 8832 §5.1, byte-exact for zapo's actual
+  channel: `0x80 RELIABLE_UNORDERED`, reliability 0, label `wa-web-call`.
+  Deliberately **unpadded** — the enclosing DATA chunk pads, and padding
+  here would be read by the peer as protocol-string bytes.
+- **Hostile input.** A chunk declaring length 0 ends the walk instead of
+  looping forever; a chunk declaring a length past the end ends the walk
+  instead of reading out of bounds; truncated datagrams are refused.
+- **INIT ACK State Cookie extraction**, and cookie-absent reported as NULL
+  rather than garbage.
+- **Undersized buffers** return 0 from every builder rather than overrunning.
+
+What zapo's measured usage lets this layer NOT implement, and why each is
+sound rather than a shortcut:
+
+| omitted | because |
+| --- | --- |
+| RFC 3758 FORWARD-TSN / PR-SCTP | `{ ordered: false }` with **no** `maxRetransmits` and **no** `maxPacketLifeTime` is unordered **reliable** |
+| stream sequence numbers | the U bit is always set, and unordered DATA ignores SSN on receive (RFC 4960 §6.6) |
+| State Cookie generation | zapo is offerer-only: this side sends INIT and COOKIE-ECHO, never validates a cookie of its own |
+| gap-ack blocks | the cumulative ack alone, sufficient while the receive path acknowledges the contiguous prefix; the obvious next growth |
+
+**Still unwritten for stage 4:** the association state machine, retransmission
+and RTO timers, the congestion/receive windows, and the bonding of all of it
+to DTLS over `scr_dgram.c`. The packet layer is the foundation, not the
+feature — no association has been established with any peer, and I claim none.
+
+---
+
+## Gate, second (clean) run — under concurrent load
+
+Started 21:36 under node v25.9.0, full env. It survived the session kill and
+kept running; its three workers were burning CPU throughout, which is how I
+confirmed it was alive rather than hung (the PARENT sits near-idle by design,
+so parent CPU is not the liveness signal — worker CPU is).
+
+**Another block's gate ran concurrently** from 21:46 (pid 12840, its own
+workers). Six vitest workers on six physical cores. The suite lock did not
+serialise them because it is keyed on `tmpdir()`, and each block has its own
+`TMP` — so the lock is per-block here, not per-host.
+
+**One failure:**
+
+    × every corpus program is 100% static (corpus and coverage agree)  601867ms
+      -> Test timed out in 600000ms
+
+`coverage.test.ts:245`, hardcoded `600_000`. It calls `analyze()` once per
+corpus file over 600-plus files. voipfix recorded this same test at
+**578 s uncontended against the 600 s limit** and wrote that it is "one slow
+neighbour from red for everyone, independently of anything here". It ran here
+against a concurrent full gate.
+
+**I am not calling that inherited without measuring it**, because there is a
+mechanism by which it could be mine: this block adds a ~230-line ambient
+declaration file to the roots of EVERY program, and that cost is paid once per
+`analyze()` — 600-plus times inside this one test. Against a 22 s margin that
+is exactly the right shape to matter.
+
+`ambient-cost.mjs` is written for that: it runs the test's own `analyze()`
+loop over a fixed, sorted sample with one untimed warm-up, and reports
+mean/median per program. Run it with the ambient root present and again with
+it removed, back to back on the same host, and the per-program delta times
+600 is the answer. Comparing my wall time to voipfix's 578 s from another
+revision on another day would not be a control.
+
+**Not yet run.** `server.test.ts` had not reported when I last checked and its
+`upgrade-read-fairness` is load-sensitive *by construction*, so I have stayed
+off the CPU rather than contaminate it the way I contaminated the first run.

@@ -1,0 +1,67 @@
+CRC32c known answers (RFC 3720 B.4 + the CRC-32C check value)
+  ok   crc32c("123456789")                                  0xE3069283
+  ok   crc32c(empty)                                        0x00000000
+  ok   crc32c(32 x 0x00)                                    0x8A9136AA
+  ok   crc32c(32 x 0xFF)                                    0x62A8AB43
+  ok   crc32c(0x00..0x1F ascending)                         0x46DD794E
+  ok   crc32c(0x1F..0x00 descending)                        0x113FDB5C
+
+header, checksum install and verify
+  ok   header length                                        12
+  ok   header + INIT length                                 32
+  ok   verify accepts the finalised datagram                true
+  ok   read_header succeeds                                 true
+  ok   vtag survives the round trip                         0xDEADBEEF
+  ok   checksum stored little-endian on the wire            4 bytes
+  ok   verify rejects a flipped payload bit                 false
+  ok   verify rejects a flipped header bit                  false
+  ok   verify does not mutate the packet                    true
+
+DATA chunk layout and padding
+  ok   returned length is PADDED                            20
+  ok   DATA bytes match the RFC layout                      20 bytes
+  ok   read_data succeeds                                   true
+  ok   tsn                                                  0x00000001
+  ok   ppid                                                 0x00000035
+  ok   payload_len                                          3
+  ok   payload                                              3 bytes
+
+DCEP DATA_CHANNEL_OPEN for createDataChannel('wa-web-call', { ordered: false })
+  ok   DCEP open bytes                                      23 bytes
+  ok   DCEP open is unpadded                                23
+  ok   is_dcep_ack recognises DATA_CHANNEL_ACK              true
+  ok   is_dcep_ack rejects an OPEN                          false
+  ok   is_dcep_ack rejects empty                            false
+
+chunk iteration
+  ok   three chunks walked                                  3
+  ok   chunk 0 is SACK                                      0x00000003
+  ok   chunk 1 is DATA                                      0x00000000
+  ok   chunk 2 is COOKIE ACK                                0x0000000B
+  ok   a zero-length chunk ends the walk                    false
+  ok   an over-long chunk ends the walk                     false
+  ok   a truncated datagram has no chunks                   false
+  ok   read_header refuses a truncated datagram             false
+
+INIT ACK parsing and State Cookie extraction
+  ok   read_init_ack succeeds                               true
+  ok   init tag                                             0xAABBCCDD
+  ok   initial TSN                                          0x10203040
+  ok   cookie length                                        8
+  ok   cookie bytes                                         8 bytes
+  ok   read_init_ack succeeds with no parameters            true
+  ok   cookie absent is reported as NULL                    true
+  ok   read_init_ack refuses a short value                  false
+  ok   COOKIE ECHO length                                   12
+  ok   COOKIE ECHO bytes                                    12 bytes
+
+undersized buffers return 0 rather than overrunning
+  ok   write_header into 4 bytes                            0
+  ok   write_init into 4 bytes                              0
+  ok   write_sack into 4 bytes                              0
+  ok   write_data into 4 bytes                              0
+  ok   dcep_open into 4 bytes                               0
+  ok   cookie_ack into exactly 4 bytes                      4
+
+51 checks, 0 failures
+RESULT: PASS
