@@ -602,3 +602,108 @@ and nothing else.
 
 A perfect engine behind an unresolvable `import('libmlow-wasm')` is worth
 nothing, so this half is sized and reported BEFORE any engine is written.
+
+## STAGE 6 — MEASURED: the engine is the EASY half. The glue is the wall.
+
+Three compiles, all `--backend c`, node v25.9.0 as oracle, compiler at `d646cfa2`.
+
+### (a) `mlow-codec.ts`'s exact shape — `.then()` on `import('libmlow-wasm')`
+
+`app/mlow/drv.ts`, the shape copied from `packages/voip/src/media/mlow-codec.ts:26-41`.
+Builds `rc=0`; runs; prints
+
+    FAILED 'Promise<typeof import(".../libmlow-wasm/dist/index")>.then' is part of
+    the standard library types but has no scriptc lowering yet [SC2020 at drv.ts:9]
+
+Emitted C: **10,561 bytes**. The package never entered the program. Node prints
+`version libopus 1.0.1`.
+
+### (b) the `await import()` spelling
+
+`app/mlow/drv2.ts`. Builds `rc=0` with **zero fences**, and at run time says:
+
+    FAILED Cannot load module 'libmlow-wasm': dynamic import() of npm packages runs
+    in the embedded dynamic engine, which this build does not include (compile it
+    statically with --npm-static libmlow-wasm, or build with --dynamic)
+
+So the honest route is `--npm-static libmlow-wasm`. `--dynamic` is disqualifying.
+
+### (c) `--npm-static libmlow-wasm`
+
+Builds `rc=0`, C is **30,514 bytes**, and it runs to:
+
+    FAILED 'new Set(values)' ... [SC2020 at libmlow-wasm/dist/index.js:62]
+
+`dist/index.js` (28,846 B) IS compiled — fences at index.js:62, :63, :92. But the
+**642,918-byte generated glue is not in the program**: `ENVIRONMENT_IS_WEB`,
+`HEAPU32`, `binaryDecode`, `wasmImports` all occur **0** times in the C.
+
+Flagless (no `--best-effort`), the build stops at the first wall with 3 errors, and
+the third names the cause:
+
+    index.js:92:23 - error SC2011: values of type '() => Promise<{ version: any; }>'
+    have no static representation ...
+
+`version` is `any` because it comes from `module.UTF8ToString(module._oc_get_version_string())`,
+and `module` is the Emscripten module object — assembled at run time out of
+`WebAssembly.Instance.exports`. **No static analysis types that object**; its
+members exist only once a module is instantiated.
+
+### (d) the glue ALONE, as its own `--npm-static` package
+
+`app/glueroot/node_modules/glueprobe/glue.mjs` — a byte copy of
+`libmlow.generated.mjs` with a two-line `.d.ts`. Builds `rc=0`, and this time
+the glue really is in the program:
+
+    C emitted: 2,210,665 bytes
+    ENVIRONMENT_IS_WEB 2 · HEAPU32 44 · binaryDecode 43 · wasmImports 40
+    deferred runtime fences: 38 sites, 23 distinct messages
+
+It runs, and dies on its **first statement**:
+
+    FAILED reading 'window' from a value of type 'typeof globalThis' is not
+    supported yet [SC1090 at glue.mjs:1]
+
+### The 38, enumerated (this is the actual work item)
+
+     8  converting typed values to 'unknown'                              SC1101
+     5  optional chaining on 'unknown' values                             SC1100
+     3  class declarations inside functions                               SC1090
+     2  functions with optional/defaulted parameters as values            SC1090
+     2  assignment to non-variables                                       SC1090
+     1  reading 'window' from 'typeof globalThis'                         SC1090
+     1  reading 'WorkerGlobalScope' from 'typeof globalThis'              SC1090
+     1  reading 'type' from a value of type 'Process'                     SC1090
+     1  'import()' runs in the embedded dynamic engine                    SC2012
+     1  uses of 'createRequire' inherit the blocker on its declaration    SC2004
+     1  'import.meta.url'                                                 SC1090
+     1  'console.log' typed by @types/node, no lowering                   SC2020
+     1  'console.error' typed by @types/node, no lowering                 SC2020
+     1  values of type 'any'                                              SC2011
+     1  'Uint8Array' where 'ArrayBuffer' is expected                      SC1090
+     1  'new BigInt64Array'                                               SC2020
+     1  'new BigUint64Array'                                              SC2020
+     1  'instanceof' against a class value whose class has no lowering    SC1090
+     1  constructing through a class value whose class has no lowering    SC1090
+     1  'clearTimeout of unknown handles'                                 SC2020
+     1  element access on non-array values                                SC1090
+     1  calls omitting a non-optional parameter                           SC1090
+     1  'never[] | null.push'                                             SC2020
+
+**`WebAssembly.instantiate` is NOT in that list.** After `d646cfa2` the glue's
+`WebAssembly` reference lowers to `global.undefRead` — an untagged, catchable
+ReferenceError — so the engine call site is not a refusal any more. It is
+simply never reached, because the module dies 43 statements earlier on
+`globalThis.window`.
+
+## THE ORDERING, and it is the reverse of the assumption
+
+| half | state |
+| --- | --- |
+| **the WebAssembly engine** | wasm3 v0.5.0, stock, already parses + links + compiles all 339 bodies of the real libopus module. +115,200 image bytes. **Done, as an off-the-shelf part.** |
+| **the JavaScript around it** | 38 fences in the glue, 3 more in `index.js`, a module object that is inherently `any`, and a first statement (`globalThis.window`) that refuses. |
+
+Writing a WebAssembly engine first buys **nothing measurable**: no zapo program
+can reach `WebAssembly.instantiate`. The bottleneck is ordinary JavaScript
+lowering in a minified Emscripten bundle, and it is 23 distinct problems, most
+of them small and none of them WebAssembly.
