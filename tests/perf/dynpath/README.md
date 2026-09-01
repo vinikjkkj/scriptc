@@ -145,6 +145,20 @@ A and P are `.text`-identical to the byte at both sizes.
                         those dissolve through the may-throw fixpoint once the
                         decodes are clean. A decode body can reach ZERO seeds.
 
+    protoclass-probe.cjs
+                        runs frontend/lowering/proto-class.ts against a real
+                        bundle WITHOUT building the compiler: it transpiles that
+                        one module in memory and hands it a typescript. CJS for
+                        exactly that reason. Prints which JS pre-class
+                        constructors have a fixed instance shape and a fixed
+                        method table, and the reason for every refusal, with a
+                        character offset since a minified bundle has no lines.
+                        On zapo's bundle: 140 candidates, 4 usable, including
+                        Reader {buf,pos,len,discardUnknown} with 14 prototype
+                        methods plus the 5 that merge(proto,{...}) installs at
+                        _configure time, and Writer {len,head,tail,states} with
+                        19. Those two are the 9,594-seed reader arm.
+
     tucount.mjs         one streaming pass over a 130 MB emitted TU: the
                         retain/release/dyn-op shapes, with the interned-
                         literal share of scr_str_retain.
