@@ -435,3 +435,36 @@ last is libvips through `sharp.node`.
 **Verdict: `store-mongo` is ANALYSABLE (56 statements, 52 static, 92%) and
 reaches no binary.** Its blockers are `SC1013`, `SC1012` and an inferred-surface
 failure, in three third-party packages, none of them zapo's code.
+
+---
+
+## 10. `import type` erases the import fence but NOT the type
+
+This is the rule that decides which module of each store is reachable, and it
+cost two builds to learn precisely.
+
+`store-mysql/helpers.ts` and `store-postgres/helpers.ts` have exactly the shape
+that made `cleanup.ts` work: every npm import is `import type`
+(`FieldPacket`, `ResultSetHeader` from `mysql2/promise`; `QueryResult` from
+`pg`), and the only value import is `zapo-js/util`. Both drivers over their
+full export list **fail to build under `--provenance-sources`**, 9 errors each:
+
+| | `store-mysql/helpers.ts` | `store-postgres/helpers.ts` |
+| --- | --- | --- |
+| errors | **9** | **9** |
+| the root | 3 × `SC2011 values of type 'QueryOutput'` at `helpers.ts:13,17,21` | 3 × `SC2013 values from the '@types/pg' package` at `helpers.ts:12,16,20` |
+| cascade | 5 × `SC2004` on `queryRows` / `queryFirst` / `affectedRows` | the same 5 |
+| driver's own | 1 × `SC1090` `.buffer` outside `new DataView(x.buffer, …)` / `Buffer.from(x.buffer, …)` | the same |
+
+`QueryOutput` is `[unknown, FieldPacket[]]` — a **local** type alias whose
+element type comes from `mysql2`. The import was erased; the type was not, and
+a value at that type fences exactly as if the package had been imported for its
+values. The same fence appears on the `pg` side wearing the `@types/pg` name
+again.
+
+So the reachable surface of `store-mysql` and `store-postgres` is not "modules
+whose npm imports are `import type`" — it is **modules none of whose reached
+declarations has an npm type in its signature**. `cleanup.ts` qualifies because
+its four `import type` names come from `zapo-js/store`, which
+`--provenance-sources` compiles; `helpers.ts` qualifies only for the seven of
+its ten exports that never name a driver type.
