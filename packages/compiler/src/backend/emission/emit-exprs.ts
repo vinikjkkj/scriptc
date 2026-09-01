@@ -4414,6 +4414,36 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
           case "dgram.sendConnBytes":
             E.usesTimers = true;
             return finish(`scr_dgram_send_conn_bytes(${arg(0)}, ${arg(1)})`);
+          case "wrtc.newPeer":
+            return finish(`scr_rtc_peer_new()`);
+          case "wrtc.pcSignalingState":
+            return finish(`scr_rtc_peer_signaling_state(${arg(0)})`);
+          case "wrtc.pcIceConnectionState":
+            return finish(`scr_rtc_peer_ice_connection_state(${arg(0)})`);
+          case "wrtc.pcIceGatheringState":
+            return finish(`scr_rtc_peer_ice_gathering_state(${arg(0)})`);
+          case "wrtc.pcConnectionState":
+            return finish(`scr_rtc_peer_connection_state(${arg(0)})`);
+          case "wrtc.pcClose":
+            return finish(`scr_rtc_peer_close(${arg(0)})`);
+          case "wrtc.pcCreateDataChannel":
+            return finish(`scr_rtc_peer_create_data_channel(${arg(0)}, ${arg(1)}, ${arg(2)})`);
+          case "wrtc.dcLabel":
+            return finish(`scr_rtc_dc_label(${arg(0)})`);
+          case "wrtc.dcProtocol":
+            return finish(`scr_rtc_dc_protocol(${arg(0)})`);
+          case "wrtc.dcOrdered":
+            return finish(`scr_rtc_dc_ordered(${arg(0)})`);
+          case "wrtc.dcReadyState":
+            return finish(`scr_rtc_dc_ready_state(${arg(0)})`);
+          case "wrtc.dcBinaryType":
+            return finish(`scr_rtc_dc_binary_type(${arg(0)})`);
+          case "wrtc.dcBufferedAmount":
+            return finish(`scr_rtc_dc_buffered_amount(${arg(0)})`);
+          case "wrtc.dcSetBinaryType":
+            return finish(`scr_rtc_dc_set_binary_type(${arg(0)}, ${arg(1)})`);
+          case "wrtc.dcClose":
+            return finish(`scr_rtc_dc_close(${arg(0)})`);
           case "dgram.sendChk":
             E.usesTimers = true; // a validated send implicit-binds
             return finish(

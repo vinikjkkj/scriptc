@@ -1,0 +1,50 @@
+SCTP association over a lossy transport (virtual clock)
+
+clean (drop=0%, seed=11)
+  ok   association reaches ESTABLISHED                    
+  ok   peer saw COOKIE ECHO                               
+  ok   DCEP open reached the peer                         
+  ok   channel is open (DCEP ACK processed)               
+  ok   every user message reached the peer                5 of 5 delivered
+       sent=6 rtx=0 sacks=6 dup=0 hb=1 | wire 20 sent 0 dropped
+  ok   heartbeat was answered                             
+       peer saw 0 duplicate(s), none counted as new
+
+10% loss (drop=10%, seed=22)
+  ok   association reaches ESTABLISHED                    
+  ok   peer saw COOKIE ECHO                               
+  ok   DCEP open reached the peer                         
+  ok   channel is open (DCEP ACK processed)               
+  ok   every user message reached the peer                5 of 5 delivered
+       sent=7 rtx=2 sacks=5 dup=0 hb=3 | wire 26 sent 5 dropped
+  ok   heartbeat was answered                             
+       peer saw 0 duplicate(s), none counted as new
+  ok   the wire actually dropped datagrams                
+  ok   retransmission actually happened                   
+
+30% loss (drop=30%, seed=33)
+  ok   association reaches ESTABLISHED                    
+  ok   peer saw COOKIE ECHO                               
+  ok   DCEP open reached the peer                         
+  ok   channel is open (DCEP ACK processed)               
+  ok   every user message reached the peer                5 of 5 delivered
+       sent=11 rtx=5 sacks=3 dup=0 hb=1 | wire 26 sent 9 dropped
+  ok   heartbeat was answered                             
+       peer saw 0 duplicate(s), none counted as new
+  ok   the wire actually dropped datagrams                
+  ok   retransmission actually happened                   
+
+50% loss (drop=50%, seed=44)
+  ok   association reaches ESTABLISHED                    
+  ok   peer saw COOKIE ECHO                               
+  ok   DCEP open reached the peer                         
+  ok   channel is open (DCEP ACK processed)               
+  ok   every user message reached the peer                5 of 5 delivered
+       sent=24 rtx=20 sacks=7 dup=1 hb=1 | wire 53 sent 22 dropped
+  ok   heartbeat was answered                             
+       peer saw 0 duplicate(s), none counted as new
+  ok   the wire actually dropped datagrams                
+  ok   retransmission actually happened                   
+
+30 checks, 0 failures
+RESULT: PASS

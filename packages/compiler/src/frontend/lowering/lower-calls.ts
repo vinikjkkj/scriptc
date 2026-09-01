@@ -20,6 +20,7 @@ import { mixinFnShapeOf } from "./lower-mixins.js";
 import { bufEncoding, dynStringReceiver, lowerArrayFromCall, lowerBytesStaticFromCall, lowerDynArrayFilterCall, lowerDynArrayFlatMapCall, lowerGroupByStaticCall, lowerIteratorHelperCall, lowerObjectAssignIndexShape, lowerObjectFromEntriesCall, lowerObjectIterOverIndexShape, lowerRegexMethodCall, lowerStringMethodCall, lowerTupleReadMethodCall } from "./lower-containers.js";
 import { lowerBareRequireCall, lowerChildStreamMethodCall, lowerCreateRequireCall, lowerDiffieHellmanCallbackCall, lowerDirentMethodCall, lowerPerfHooksCall, lowerProcStreamMethodCall, lowerReflectApplyCall, lowerStringFromCharCodeApply, lowerWatcherMethodCall } from "./lower-builtins.js";
 import { lowerSqliteMethodCall, lowerSqliteNew } from "./lower-sqlite.js";
+import { lowerWrtcMethodCall } from "./lower-wrtc.js";
 import { classHasKeyHelper, classInMemberNames, droppableStatic, dynAssertionReceiver, fnOwnCounters, keyedCalleeAtUndefinedArm, unionArmBridge, fnOwnPropBox, fnOwnRoutableKey, fnOwnWhy, lowerPromiseAllTupleCall, lowerPromiseRejectCall, narrowBridgeDyn, probeLower, recordArmStringable, templateRawTextOf } from "./lower-exprs.js";
 import { httpClientFnBindingOf, isStreamUndefCallExpr, lowerHttpClientFnCall } from "./lower-server.js";
 import { CLASS_PROPS_FIELD, EMITTER_API_MEMBERS, definePropSlotSiteOf, definePropTableSiteOf, exactInstanceClassOf, findGenericMethodOn, lowerClassGenericMethodCall, lowerStaticMethodCall, type ClassInfo } from "./lower-classes.js";
@@ -5210,6 +5211,8 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
         L.lowerDcTracingChannelMethodCall(expr, expr.expression) ??
         L.lowerServerMethodCall(expr, expr.expression) ??
         L.lowerDgramMethodCall(expr, expr.expression) ??
+        // RTCPeerConnection / RTCDataChannel receivers.
+        lowerWrtcMethodCall(L, expr, expr.expression) ??
         // node:test — skip/todo/only twins on named import bindings, the
         // TestContext surface (t.test/t.skip/t.diagnostic), t.assert.*.
         L.lowerTestMethodCall(expr, expr.expression) ??

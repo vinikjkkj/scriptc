@@ -9052,6 +9052,29 @@ void scr_request_release_v(void *p);
 
 /* The WebRTC ownership pairs. Dead code in every program: nothing
  * constructs either handle yet. */
+/* Construction and the synchronous state surface. Nothing here touches
+ * the network: the transport states answer "new" honestly because ICE,
+ * DTLS and SCTP are not wired in yet. Every string is CAPTURED from node
+ * v25.9.0 running @roamhq/wrtc, not taken from the spec -- binaryType
+ * defaults to "arraybuffer" and readyState after close() is "closing",
+ * both of which contradict the specification. */
+ScrRtcPeerConnection *scr_rtc_peer_new(void);
+ScrStr *scr_rtc_peer_signaling_state(ScrRtcPeerConnection *p);
+ScrStr *scr_rtc_peer_ice_connection_state(ScrRtcPeerConnection *p);
+ScrStr *scr_rtc_peer_ice_gathering_state(ScrRtcPeerConnection *p);
+ScrStr *scr_rtc_peer_connection_state(ScrRtcPeerConnection *p);
+void scr_rtc_peer_close(ScrRtcPeerConnection *p);
+ScrRtcDataChannel *scr_rtc_peer_create_data_channel(ScrRtcPeerConnection *p,
+                                                    ScrStr *label /*borrowed*/,
+                                                    bool ordered);
+ScrStr *scr_rtc_dc_label(ScrRtcDataChannel *c);
+ScrStr *scr_rtc_dc_protocol(ScrRtcDataChannel *c);
+bool scr_rtc_dc_ordered(ScrRtcDataChannel *c);
+double scr_rtc_dc_buffered_amount(ScrRtcDataChannel *c);
+ScrStr *scr_rtc_dc_ready_state(ScrRtcDataChannel *c);
+ScrStr *scr_rtc_dc_binary_type(ScrRtcDataChannel *c);
+void scr_rtc_dc_set_binary_type(ScrRtcDataChannel *c, ScrStr *v /*borrowed*/);
+void scr_rtc_dc_close(ScrRtcDataChannel *c);
 ScrRtcPeerConnection *scr_rtc_peer_connection_retain(ScrRtcPeerConnection *p);
 void scr_rtc_peer_connection_release(ScrRtcPeerConnection *p);
 void *scr_rtc_peer_connection_retain_v(void *p);
