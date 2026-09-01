@@ -205,3 +205,63 @@ leaving early.
 - **`mlow-codec.ts:26` is voip's other independent stop** (`SC2009` on
   `Promise<MlowModule> | null`), untouched and nothing to do with WebRTC.
   voip is not finished when this clause lands.
+
+---
+
+# The halves are joined
+
+`probes/joined_test.c` — real loopback UDP, DTLS 1.2, SCTP association on top.
+**36 checks, 0 failures; 25 consecutive runs = 100 joined scenario
+executions, 0 failures.**
+
+| loss | delivered | sctp rtx | udp dropped (handshake / data) |
+| --- | --- | --- | --- |
+| clean | 5/5 | 0 | 0/26 |
+| 10% | 5/5 | 3 | 4/30 (0/4, 4/26) |
+| 20% | 5/5 | 0 | 8/36 (5/14, 3/22) |
+| 30% | 5/5 | 14 | 21/55 (5/12, 16/43) |
+
+## Two interactions neither half could have shown
+
+Both first appeared as a red from an assertion I had written too strongly.
+
+1. **DTLS shields SCTP during the handshake.** At 20% loss, `rtx=0` despite 8
+   drops. Splitting the counters by phase showed 5 of 8 landed in the
+   handshake, which DTLS recovers itself — it retransmits its own flights and
+   never retransmits application data. SCTP correctly did nothing.
+2. **Cumulative SACK loss is self-healing.** Even after the phase split the
+   case stayed red: 3 of 22 *data-phase* drops, `rtx` still 0, all five
+   messages delivered. The drops were SACKs, and a lost SACK costs nothing
+   when a later one carries a higher cumulative TSN. **A data-phase drop does
+   not imply a retransmission** — the assertion was wrong twice over.
+
+Retransmission is now reported per case and asserted once for the suite: 17
+across the four cases.
+
+## Reproducing
+
+    . G:/blocks/wrtc-lab/env.sh
+    V=packages/runtime/vendor/mbedtls
+    # mbedtls archive (once): compile vendor/mbedtls/library/*.c, zig ar rcs
+    zig cc -target x86_64-windows-gnu -std=c11 -O1 -Wall -Wextra \
+      -I probes -I "$V/include" \
+      packages/runtime/src/scr_wrtc_fp.c packages/runtime/src/scr_wrtc_cert.c \
+      packages/runtime/src/scr_sctp.c packages/runtime/src/scr_sctp_assoc.c \
+      probes/joined_test.c libmbedtls.a \
+      -lbcrypt -lcrypt32 -lws2_32 -ladvapi32 -o joined_test.exe
+
+`probes/sctp_peer.inc` is included by **both** `assoc_test.c` and
+`joined_test.c`, so the hand-written peer has one source. The extraction was
+verified byte-identical against `assoc_test`'s pre-refactor output.
+
+## Still true
+
+- **Not a real peer.** Both sides are code in this repository and the SCTP
+  peer is one I wrote. Joining the halves did not change that.
+- The SCTP wire-format unit's checks are **published vectors, not an
+  association with any peer**.
+- **C backend only** — 16 of 20 `dgram.*` absent from the LLVM emitter.
+- `mlow-codec.ts:26` remains voip's other independent stop.
+- None of this is wired into `scr_dgram.c` *inside a compiled scriptc
+  binary* yet: the pump loop exists here as a test harness, not as runtime
+  code the compiler emits.
