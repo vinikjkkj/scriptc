@@ -9984,6 +9984,24 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/7352-typed-array-from-counted.ts": {
+   "order": [
+    "<repo>/tests/corpus/7352-typed-array-from-counted.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/7353-optional-chain-any-result.ts": {
+   "order": [
+    "<repo>/tests/corpus/7353-optional-chain-any-result.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/7354-emit-untyped-payload.ts": {
+   "order": [
+    "<repo>/tests/corpus/7354-emit-untyped-payload.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/750-cycle-closure-box.ts": {
    "order": [
     "<repo>/tests/corpus/750-cycle-closure-box.ts"
