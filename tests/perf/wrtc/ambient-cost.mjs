@@ -27,7 +27,11 @@ const label = process.argv[2] ?? "unlabelled";
 const count = Number(process.argv[3] ?? "60");
 
 const repoRoot = "G:/blocks/wrtc";
-const { analyze } = await import("@scriptc/compiler");
+/* Import the built compiler by PATH: this script lives outside the
+ * worktree, so a bare specifier resolves against the lab directory and
+ * finds nothing. dist/index.js's own imports still resolve from inside
+ * the worktree, which is what we want. */
+const { analyze } = await import("file:///G:/blocks/wrtc/packages/compiler/dist/index.js");
 
 /* The same selection rule the test uses -- sorted, so the sample is the
  * same set of files in the same order on both sides of the comparison. */

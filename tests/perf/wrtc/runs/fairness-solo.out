@@ -1,0 +1,11 @@
+
+ RUN  v3.2.7 G:/blocks/wrtc
+
+ ✓ tests/harness/server.test.ts (78 tests | 77 skipped) 4770ms
+   ✓ server differential (78 programs) > upgrade-read-fairness  4768ms
+
+ Test Files  1 passed (1)
+      Tests  1 passed | 77 skipped (78)
+   Start at  22:36:30
+   Duration  9.74s (transform 3.29s, setup 0ms, collect 4.59s, tests 4.77s, environment 0ms, prepare 136ms)
+

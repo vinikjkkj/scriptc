@@ -1,0 +1,153 @@
+{
+ "label": "A1-with",
+ "files": 60,
+ "totalMs": 12091,
+ "meanMs": 201.51,
+ "medianMs": 196.79,
+ "minMs": 149.07,
+ "maxMs": 328.91
+}
+{
+ "label": "A2-with",
+ "files": 60,
+ "totalMs": 9542,
+ "meanMs": 159.04,
+ "medianMs": 154.03,
+ "minMs": 125.92,
+ "maxMs": 244.42
+}
+{
+ "label": "A3-with",
+ "files": 60,
+ "totalMs": 10245,
+ "meanMs": 170.75,
+ "medianMs": 165.46,
+ "minMs": 126.25,
+ "maxMs": 281.56
+}
+{
+ "label": "A4-with",
+ "files": 60,
+ "totalMs": 10461,
+ "meanMs": 174.35,
+ "medianMs": 167.95,
+ "minMs": 130.82,
+ "maxMs": 266.22
+}
+{
+ "label": "A5-with",
+ "files": 60,
+ "totalMs": 10084,
+ "meanMs": 168.07,
+ "medianMs": 162.72,
+ "minMs": 132.76,
+ "maxMs": 258.28
+}
+{
+ "label": "A6-with",
+ "files": 60,
+ "totalMs": 9618,
+ "meanMs": 160.31,
+ "medianMs": 151.24,
+ "minMs": 123.03,
+ "maxMs": 243.54
+}
+{
+ "label": "A7-with",
+ "files": 60,
+ "totalMs": 9621,
+ "meanMs": 160.35,
+ "medianMs": 155.07,
+ "minMs": 129.34,
+ "maxMs": 256.03
+}
+{
+ "label": "A8-with",
+ "files": 60,
+ "totalMs": 9618,
+ "meanMs": 160.3,
+ "medianMs": 154.13,
+ "minMs": 130.56,
+ "maxMs": 239.65
+}
+{
+ "label": "B-without",
+ "files": 60,
+ "totalMs": 9757,
+ "meanMs": 162.61,
+ "medianMs": 157.92,
+ "minMs": 122.86,
+ "maxMs": 245.89
+}
+{
+ "label": "B2-without",
+ "files": 60,
+ "totalMs": 9378,
+ "meanMs": 156.29,
+ "medianMs": 149.63,
+ "minMs": 123.97,
+ "maxMs": 249.54
+}
+{
+ "label": "B3-without",
+ "files": 60,
+ "totalMs": 9019,
+ "meanMs": 150.31,
+ "medianMs": 144.72,
+ "minMs": 119.79,
+ "maxMs": 233.87
+}
+{
+ "label": "B4-without",
+ "files": 60,
+ "totalMs": 9032,
+ "meanMs": 150.54,
+ "medianMs": 145.02,
+ "minMs": 120.83,
+ "maxMs": 233.47
+}
+{
+ "label": "B5-without",
+ "files": 60,
+ "totalMs": 9571,
+ "meanMs": 159.52,
+ "medianMs": 154.34,
+ "minMs": 129.32,
+ "maxMs": 238.66
+}
+{
+ "label": "B6-without",
+ "files": 60,
+ "totalMs": 9477,
+ "meanMs": 157.95,
+ "medianMs": 150.7,
+ "minMs": 119.58,
+ "maxMs": 241.46
+}
+{
+ "label": "B7-without",
+ "files": 60,
+ "totalMs": 9218,
+ "meanMs": 153.63,
+ "medianMs": 144.19,
+ "minMs": 123.08,
+ "maxMs": 240.29
+}
+{
+ "label": "B8-without",
+ "files": 60,
+ "totalMs": 8735,
+ "meanMs": 145.59,
+ "medianMs": 140.62,
+ "minMs": 115.46,
+ "maxMs": 236.81
+}
+{
+ "label": "smoke",
+ "files": 5,
+ "totalMs": 881,
+ "meanMs": 176.16,
+ "medianMs": 152.22,
+ "minMs": 147.59,
+ "maxMs": 258.91
+}
