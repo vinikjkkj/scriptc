@@ -1989,6 +1989,30 @@ function preflight7(load: LoadResult): {
   if (resolveNpmImport7(entry.fileName, "better-sqlite3") === null) {
     ambientModules.add("better-sqlite3");
   }
+  /* @roamhq/wrtc, for the same reason and on the same condition.
+   *
+   * The package is a native addon: 0.10 ships a .node binary that a
+   * compiled scriptc binary has no loader for, and the whole point of
+   * this clause is that the WebRTC data channel is served in C
+   * instead (scr_wrtc.c). So a binary that talks to a data channel
+   * needs NOTHING installed, and reproducing Node's "Cannot find
+   * package" startup crash for a specifier the binary never resolves
+   * is the theatre the row above describes.
+   *
+   * Measured before adding this: the compiled probe threw
+   * "Cannot find package '@roamhq/wrtc'" at startup while the oracle
+   * ran fine, which is the compiler faithfully emulating Node in a
+   * project where Node would also fail -- correct, and not the
+   * comparison the differential needs.
+   *
+   * Conditional on non-resolution, exactly like sqlite: with the
+   * package installed, resolution answers it and nothing here
+   * changes. Note its .d.ts only RE-EXPORTS the global RTC types
+   * rather than declaring them, so the shipped ambient globals are
+   * the type surface either way. */
+  if (resolveNpmImport7(entry.fileName, "@roamhq/wrtc") === null) {
+    ambientModules.add("@roamhq/wrtc");
+  }
 
   // Ambient `declare module "name"` declarations anywhere in the program —
   // exact names and `*` patterns — so the import fence can say "type
@@ -2350,7 +2374,14 @@ function preflight7(load: LoadResult): {
           // the package documents, and the shipped declarations export
           // exactly that. The callable-module-object row above under a
           // different name.
-          spec === "better-sqlite3";
+          spec === "better-sqlite3" ||
+          /* @roamhq/wrtc, the callable-module-object row again. Its
+           * default export IS the module object carrying the
+           * constructors, `new wrtc.RTCPeerConnection(...)` is the only
+           * spelling the package documents, and it is what zapo writes
+           * at WaSctpRelay.ts:5. The shipped ambient module declares
+           * exactly that default. */
+          spec === "@roamhq/wrtc";
         if (clause.name && !isJson && dep === null && !defaultOk) {
           diags.push(unsupportedDiag("SC1012", locOf7(clause.name)));
         }
