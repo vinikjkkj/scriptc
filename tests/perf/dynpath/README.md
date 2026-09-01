@@ -98,6 +98,27 @@ A and P are `.text`-identical to the byte at both sizes.
                         presence needs nullable slots, not a side bitset. Slots
                         defaulting to 0/false/"" diverge on 278 types.
 
+    enum-observability.mjs
+                        presence-coupling proves a null-defaulted shape is
+                        byte-exact on the WIRE and says nothing about the object
+                        surface. This is the object surface. 13 of 20 common
+                        expressions distinguish an absent field from a
+                        null-valued own slot -- but `x === null || x ===
+                        undefined` and `x !== null && x !== undefined` are each
+                        just `x == null`, so it classifies those as safe rather
+                        than counting them. Scope-aware: a same-named variable in
+                        another function is not the decoded one. Over-approximates
+                        the tracked set on purpose (any `.decode(`, TextDecoder
+                        included), because tracking too much can only invent
+                        findings, never hide one. Carries a SELF-TEST that fires
+                        every detector on a fixture and exits non-zero if any of
+                        them is dead -- "0 findings" from a broken scan looks
+                        exactly like good news, and this project has already been
+                        fooled once by a harness that confirmed its own
+                        hypothesis. On zapo's checkout plus the drivers, 1,152
+                        files: 81 decode-bound locals, 72 of them protobuf, 22
+                        safe pairs, and ZERO observations.
+
     tucount.mjs         one streaming pass over a 130 MB emitted TU: the
                         retain/release/dyn-op shapes, with the interned-
                         literal share of scr_str_retain.
