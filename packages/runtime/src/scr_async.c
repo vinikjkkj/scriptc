@@ -2073,6 +2073,24 @@ void scr_loop_set_dgram(bool (*pending)(void), void (*dispatch)(void), int (*pol
   scr_dgram_pollfd_fn = pollfd;
 }
 
+/* The WebRTC hook (scr_wrtc.c, when linked) - the dgram hook's exact
+ * shape. The transport under it (scr_wrtc_conn.c) is SANS-IO by
+ * construction, so what this station does per turn is hand it the loop's
+ * clock and drain whatever came back: `dispatch` is a pump, not a driver.
+ * Byte-identical loop behavior when unset, which is every program that
+ * holds no peer connection. */
+static bool (*scr_wrtc_pending_fn)(void) = NULL;
+static void (*scr_wrtc_dispatch_fn)(void) = NULL;
+
+/* No pollfd slot, and that is a decision rather than an omission: the
+ * transport owns its own UDP socket and reads it INSIDE the pump, so
+ * there is no readiness fd for the loop to wait on. It therefore takes
+ * the same coarse cap an fd-less dgram unit takes below. */
+void scr_loop_set_wrtc(bool (*pending)(void), void (*dispatch)(void)) {
+  scr_wrtc_pending_fn = pending;
+  scr_wrtc_dispatch_fn = dispatch;
+}
+
 /* The fs.watch hook (scr_watch.c, when linked) — the net hook's exact
  * shape: one more set of nullable slots, byte-identical loop behavior
  * when unset. */
@@ -2242,6 +2260,15 @@ bool scr_loop_run(ScrPromise *top_level) {
       if (scr_exc_pending()) return false; /* uncaught throw in a listener */
       if (scr_ready_len > 0) continue;
     }
+    /* WebRTC dispatch (scr_wrtc.c, when linked): one pump of the
+     * ICE/DTLS/SCTP transport with the loop's clock, then the events that
+     * pump produced - open, message, close, and the four on*statechange
+     * handlers - fire now, the dgram hook's exact station. */
+    if (scr_wrtc_dispatch_fn != NULL) {
+      scr_wrtc_dispatch_fn();
+      if (scr_exc_pending()) return false; /* uncaught throw in a listener */
+      if (scr_ready_len > 0) continue;
+    }
     /* Watch dispatch (scr_watch.c, when linked): file events queued on
      * the unit's event backend fire their FSWatcher listeners now — the
      * net hook's exact station. */
@@ -2271,6 +2298,7 @@ bool scr_loop_run(ScrPromise *top_level) {
           (scr_events_pending_fn != NULL && scr_events_pending_fn()) ||
           (scr_net_pending_fn != NULL && scr_net_pending_fn()) ||
           (scr_dgram_pending_fn != NULL && scr_dgram_pending_fn()) ||
+          (scr_wrtc_pending_fn != NULL && scr_wrtc_pending_fn()) ||
           (scr_watch_pending_fn != NULL && scr_watch_pending_fn());
       if (held) {
         scr_children_poll();
@@ -2290,6 +2318,14 @@ bool scr_loop_run(ScrPromise *top_level) {
     bool net = scr_net_pending_fn != NULL && scr_net_pending_fn();
     bool dgram = scr_dgram_pending_fn != NULL && scr_dgram_pending_fn();
     bool watch = scr_watch_pending_fn != NULL && scr_watch_pending_fn();
+    /* A peer connection with an answer applied is UNSETTLED work: the DTLS
+     * handshake is in flight, or the channel is open and a message may
+     * arrive, and either way the program is not finished. Folded into
+     * `dgram` for the sleep caps below rather than given a fourth slot,
+     * because the cap it wants is the same one - socket readiness at reap
+     * granularity, since scr_wrtc_pollfd answers -1 (the transport polls
+     * its own socket inside the pump). */
+    if (scr_wrtc_pending_fn != NULL && scr_wrtc_pending_fn()) dgram = true;
     /* Timer liveness counts only REF'd timers: an unref'd timer stays in
      * the heap (and fires if the loop runs on for other reasons) but does
      * not by itself keep the process alive — Node's unref semantics.

@@ -4444,6 +4444,102 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             return finish(`scr_rtc_dc_set_binary_type(${arg(0)}, ${arg(1)})`);
           case "wrtc.dcClose":
             return finish(`scr_rtc_dc_close(${arg(0)})`);
+          case "wrtc.pcCreateOffer":
+            return finish(`scr_rtc_peer_create_offer(${arg(0)})`);
+          case "wrtc.pcSetLocalDesc":
+            E.usesTimers = true; // an offered connection holds the loop
+            return finish(`scr_rtc_peer_set_local_description(${arg(0)}, ${arg(1)})`);
+          case "wrtc.pcSetRemoteDesc":
+            E.usesTimers = true; // the handshake is unsettled work
+            return finish(`scr_rtc_peer_set_remote_description(${arg(0)}, ${arg(1)}, ${arg(2)})`);
+          case "wrtc.pcOnIceConnectionStateChange": {
+            // Registering a handler is what makes this program LOOP-USING:
+            // the transitions that fire it are produced by the loop station,
+            // and pc.close() alone queues three of them.
+            E.usesTimers = true;
+            const cb = args[1]!;
+            E.moveTemp(cb);
+            E.line(`scr_rtc_peer_on_ice_connection_state_change(${arg(0)}, ${cb.name});${E.srcComment(e.loc)}`);
+            return { name: "", type: e.type };
+          }
+          case "wrtc.pcOnIceGatheringStateChange": {
+            // Registering a handler is what makes this program LOOP-USING:
+            // the transitions that fire it are produced by the loop station,
+            // and pc.close() alone queues three of them.
+            E.usesTimers = true;
+            const cb = args[1]!;
+            E.moveTemp(cb);
+            E.line(`scr_rtc_peer_on_ice_gathering_state_change(${arg(0)}, ${cb.name});${E.srcComment(e.loc)}`);
+            return { name: "", type: e.type };
+          }
+          case "wrtc.pcOnSignalingStateChange": {
+            // Registering a handler is what makes this program LOOP-USING:
+            // the transitions that fire it are produced by the loop station,
+            // and pc.close() alone queues three of them.
+            E.usesTimers = true;
+            const cb = args[1]!;
+            E.moveTemp(cb);
+            E.line(`scr_rtc_peer_on_signaling_state_change(${arg(0)}, ${cb.name});${E.srcComment(e.loc)}`);
+            return { name: "", type: e.type };
+          }
+          case "wrtc.pcOnConnectionStateChange": {
+            // Registering a handler is what makes this program LOOP-USING:
+            // the transitions that fire it are produced by the loop station,
+            // and pc.close() alone queues three of them.
+            E.usesTimers = true;
+            const cb = args[1]!;
+            E.moveTemp(cb);
+            E.line(`scr_rtc_peer_on_connection_state_change(${arg(0)}, ${cb.name});${E.srcComment(e.loc)}`);
+            return { name: "", type: e.type };
+          }
+          case "wrtc.dcOnOpen": {
+            // Registering a handler is what makes this program LOOP-USING:
+            // the transitions that fire it are produced by the loop station,
+            // and pc.close() alone queues three of them.
+            E.usesTimers = true;
+            const cb = args[1]!;
+            E.moveTemp(cb);
+            E.line(`scr_rtc_dc_on_open(${arg(0)}, ${cb.name});${E.srcComment(e.loc)}`);
+            return { name: "", type: e.type };
+          }
+          case "wrtc.dcOnClose": {
+            // Registering a handler is what makes this program LOOP-USING:
+            // the transitions that fire it are produced by the loop station,
+            // and pc.close() alone queues three of them.
+            E.usesTimers = true;
+            const cb = args[1]!;
+            E.moveTemp(cb);
+            E.line(`scr_rtc_dc_on_close(${arg(0)}, ${cb.name});${E.srcComment(e.loc)}`);
+            return { name: "", type: e.type };
+          }
+          case "wrtc.dcOnError": {
+            // Registering a handler is what makes this program LOOP-USING:
+            // the transitions that fire it are produced by the loop station,
+            // and pc.close() alone queues three of them.
+            E.usesTimers = true;
+            const cb = args[1]!;
+            E.moveTemp(cb);
+            E.line(`scr_rtc_dc_on_error(${arg(0)}, ${cb.name});${E.srcComment(e.loc)}`);
+            return { name: "", type: e.type };
+          }
+          case "wrtc.dcOnMessage": {
+            // The adapter pointer says whether this listener WANTS the
+            // payload — the scr_net_data_thunk_* shape. A zero-parameter
+            // handler gets the ignoring thunk rather than a NULL test at
+            // every delivery.
+            const cbT = e.args[1]!.type;
+            if (cbT.kind !== "func") throw new Error("emitter bug: wrtc.dcOnMessage callback not a func");
+            E.usesTimers = true;
+            const cb = args[1]!;
+            E.moveTemp(cb);
+            const adapter = cbT.params.length === 0 ? "scr_rtc_msg_thunk0" : "scr_rtc_msg_thunk_bytes";
+            E.line(`scr_rtc_dc_on_message(${arg(0)}, ${cb.name}, &${adapter});${E.srcComment(e.loc)}`);
+            return { name: "", type: e.type };
+          }
+          case "wrtc.dcSendStr":
+            return finish(`scr_rtc_dc_send_str(${arg(0)}, ${arg(1)})`);
+          case "wrtc.dcSendBytes":
+            return finish(`scr_rtc_dc_send_bytes(${arg(0)}, ${arg(1)})`);
           case "dgram.sendChk":
             E.usesTimers = true; // a validated send implicit-binds
             return finish(

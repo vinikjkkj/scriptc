@@ -1,0 +1,9 @@
+send on connecting throws name=InvalidStateError
+send on connecting throws message=RTCDataChannel.readyState is not 'open'
+after ch.close, readyState=closing
+send after close throws name=InvalidStateError
+send after close throws message=RTCDataChannel.readyState is not 'open'
+done
+ice fired
+connection fired
+signaling fired

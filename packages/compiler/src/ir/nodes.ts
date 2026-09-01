@@ -3509,6 +3509,19 @@ export type IrLibFn =
   | "wrtc.dcBufferedAmount"
   | "wrtc.dcSetBinaryType"
   | "wrtc.dcClose"
+  | "wrtc.pcCreateOffer"
+  | "wrtc.pcSetLocalDesc"
+  | "wrtc.pcSetRemoteDesc"
+  | "wrtc.pcOnIceConnectionStateChange"
+  | "wrtc.pcOnIceGatheringStateChange"
+  | "wrtc.pcOnSignalingStateChange"
+  | "wrtc.pcOnConnectionStateChange"
+  | "wrtc.dcOnOpen"
+  | "wrtc.dcOnClose"
+  | "wrtc.dcOnError"
+  | "wrtc.dcOnMessage"
+  | "wrtc.dcSendStr"
+  | "wrtc.dcSendBytes"
   /** The send argument-validation ladder over dyn arguments (Node's
    * signature shuffle: slice bounds, list/type contracts, port/address
    * validation, connected-state errors) — a fully-validated unconnected
@@ -10801,6 +10814,15 @@ export function moduleLibNondeterministicSurface(mod: IrModule): string | null {
  * seed on `dynCheck` and `awaitExpr` nodes, which throw on validation
  * failure / promise rejection). */
 export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
+  // RTCDataChannel.send on a channel that is not open. Node's
+  // @roamhq/wrtc throws InvalidStateError SYNCHRONOUSLY (message
+  // "RTCDataChannel.readyState is not 'open'" -- captured from the
+  // oracle, not guessed), so the send is a may-throw. Its promise-shaped
+  // neighbours setLocalDescription/setRemoteDescription are NOT here:
+  // they REJECT, which the runtime does by minting an already-settled
+  // promise from the pending throw.
+  "wrtc.dcSendStr",
+  "wrtc.dcSendBytes",
   // The fs stream OPTIONS forms only: Node validates start/end/
   // highWaterMark/mode in the constructor and throws there (measured —
   // `{ start: -1 }` is a synchronous ERR_OUT_OF_RANGE). The path-only

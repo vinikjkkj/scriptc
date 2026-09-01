@@ -1,0 +1,25 @@
+before offer, signalingState=stable
+offer.type=offer
+offer.sdp is string=true
+offer.sdp ends CRLF=true
+offer has v=0 first=true
+ufrag matched=true
+ufrag len=4
+ufrag charset ok=true
+pwd len=24
+fingerprint sha-256 pairs=32
+has setup:actpass=true
+has webrtc-datachannel m-line=true
+has sctp-port:5000=true
+has max-message-size=true
+has a=mid=true
+has ice-options=true
+after setLocal, signalingState=have-local-offer
+answer has setup:passive=true
+answer has relay candidate=true
+answer has end-of-candidates=true
+answer has fixed fingerprint=true
+after setRemote, signalingState=stable
+after setRemote, ch.readyState=connecting
+after close, signalingState=closed
+done
