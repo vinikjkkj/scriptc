@@ -973,3 +973,27 @@ must fence, not miscompile. The inventory tool that decides it already runs.
   are ordinary JavaScript lowering;
 * a module that is NOT a compile-time constant — no zapo code does this, and
   the honest answer for it is a fence, not an interpreter.
+
+## Which flag produced which number — stated, because the two disagree
+
+**Every fence count in this document was produced with `--best-effort`**, over
+the emitted **C**, with `rg -a -o '\[SC[0-9]{4} at [^]]*\]'`.
+
+The flagless census is NOT a superset and is not quoted as one. Two reasons,
+both seen here:
+
+* without `--best-effort` the build stops at the FIRST wall and never lowers
+  far enough to see later refusals — measured directly in STAGE 6, where the
+  flagless build of `drv2.ts --npm-static libmlow-wasm` reported **3 errors**
+  while the `--best-effort` build of the same entry carries **38 deferred
+  fences** in the glue alone;
+* wamfences recorded the same shape at base: `cov.runtimeFences` without the
+  flag saw **2 of the 6** fences the `--best-effort` C carried.
+
+I did **not** re-run a flagless census of the wam entry on this branch — that
+is another ~900 s of `analyze()` per lane and it would not change the answer
+about the two proto fences, which are only visible with the flag at all.
+
+**Unmeasured, and named as such:** the flagless site count on this branch; the
+resident set of a real libopus encode driven through an AOT build; the
+attribution of the wam entry's +121,856 bytes against the recorded floor.
