@@ -6484,6 +6484,31 @@ export function lowerOptionalChain(L: Lowerer, expr: ts.CallExpression | ts.Prop
       return { kind: "optChain", id, receiver, body, type: DYN, loc };
     }
     const declared = L.irTypeOf(expr);
+    // A chain the checker types `any`/`unknown` while the BODY lowered to a
+    // static type. Same rule as the dyn body one branch up -- `unknown |
+    // undefined` IS unknown, and dyn represents undefined directly -- read
+    // from the other end: the DECLARED type is the dyn, so the body boxes
+    // into it and the short-circuit produces the undefined dyn exactly as
+    // it does for a body that was dyn already.
+    //
+    // This is `Array.isArray(node.content)`: tsc narrows a `readonly T[]`
+    // arm to `any[]`, so `content.find(...)` answers `any` and every `?.`
+    // off it is checker-typed `any` -- while the compiler's own types still
+    // carry the real element (the emitted C binds the find's result as the
+    // `T | undefined` union it is). Without this rung the chain refused and
+    // every consumer downstream of it refused with a diagnostic naming
+    // ITSELF: zapo's `Number.parseInt(error?.attrs.code ?? '', 10)` reported
+    // SC2012 on parseInt, which lowers that argument perfectly well.
+    //
+    // Nothing that lowers today changes: `declared` is dyn only where the
+    // fence below was the outcome (dyn is not a union, so it has no
+    // undefined arm to find).
+    if (declared.kind === "dyn") {
+      const boxed = L.coerceToExpected(body, DYN);
+      if (boxed.type.kind === "dyn") {
+        return { kind: "optChain", id, receiver, body: boxed, type: DYN, loc };
+      }
+    }
     const noArm = declared.kind !== "union" || L.armTag(declared.unionId, UNDEFINED_T) < 0;
     const type =
       noArm && slotWidenedRecv && typeEquals(declared, body.type) && armCarryableChainWidth(body.type)
