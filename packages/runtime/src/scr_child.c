@@ -715,6 +715,19 @@ static void scr_win_run_sync(ScrStr *cmd, ScrArr *args, const ScrStr *input,
    * the process handle so an exit ends the sleep immediately; pipes keep
    * draining after exit until every writer's copy closes (a grandchild
    * may hold one — the POSIX arm's discipline). */
+#ifdef SCR_ARRCEN_ON
+  /* tests/perf/arrcensus/scr_arr_census.h. The suspend-and-sample profiler
+   * reports this function at 66.9% of the bench's RECV group phase, and an
+   * earlier 93.81% reading of it was refuted as a thread-selection artifact.
+   * Counting the pump's own iterations and reading this thread's own cycle
+   * counter across the whole blocking call answers the same question with
+   * none of the sampler's assumptions. Inert unless that header is
+   * -include'd. */
+  long long scr_arrcen_iters = 0;
+  ULONG64 scr_arrcen_c0 = 0, scr_arrcen_c1 = 0;
+  DWORD scr_arrcen_t0 = GetTickCount();
+  (void)QueryThreadCycleTime(GetCurrentThread(), &scr_arrcen_c0);
+#endif
   bool out_open = out_parent != NULL, err_open = err_parent != NULL;
   bool in_open = in_parent != NULL;
   size_t in_at = 0;
@@ -751,6 +764,9 @@ static void scr_win_run_sync(ScrStr *cmd, ScrArr *args, const ScrStr *input,
       res->timed_out = true;
       (void)TerminateProcess(sp.proc, 1); /* killed children exit 1 (uv) */
     }
+#ifdef SCR_ARRCEN_ON
+    scr_arrcen_iters++;
+#endif
     if (!exited) {
       exited = WaitForSingleObject(sp.proc, progress ? 0 : 1) == WAIT_OBJECT_0;
     } else if (!progress) {
@@ -758,6 +774,12 @@ static void scr_win_run_sync(ScrStr *cmd, ScrArr *args, const ScrStr *input,
     }
     if (exited && !out_open && !err_open) break;
   }
+#ifdef SCR_ARRCEN_ON
+  (void)QueryThreadCycleTime(GetCurrentThread(), &scr_arrcen_c1);
+  scr_arrcen_note_pump(scr_arrcen_iters,
+                       (unsigned long long)(scr_arrcen_c1 - scr_arrcen_c0),
+                       (long long)(GetTickCount() - scr_arrcen_t0));
+#endif
   if (in_open) CloseHandle(in_parent);
   (void)GetExitCodeProcess(sp.proc, &res->exit_code);
   CloseHandle(sp.proc);
