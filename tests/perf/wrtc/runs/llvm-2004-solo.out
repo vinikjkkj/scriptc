@@ -1,0 +1,12 @@
+
+stdout | tests/harness/llvm-differential.test.ts > llvm differential corpus (1725 programs)
+llvm tier: 1/1725 corpus programs claimed, 0 REFUSED (skipped, NOT passed); top refusals: 
+
+ ✓ tests/harness/llvm-differential.test.ts (1728 tests | 1727 skipped) 1698ms
+   ✓ llvm differential corpus (1725 programs) > 2004-generic-methods-statics.ts  1692ms
+
+ Test Files  1 passed (1)
+      Tests  1 passed | 1727 skipped (1728)
+   Start at  22:19:34
+   Duration  5.49s (transform 2.36s, setup 0ms, collect 3.46s, tests 1.70s, environment 0ms, prepare 98ms)
+

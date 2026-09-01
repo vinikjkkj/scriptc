@@ -304,6 +304,27 @@ export type IrType =
    * union arm has a C type and the ownership machinery stays uniform; it
    * is never allocated. */
   | { kind: "request" }
+  /** An `RTCPeerConnection`. Like `request` above it is a TYPE FIRST:
+   * mapping it is what lets zapo's `Connection` record -- whose
+   * `peerConnection` field is typed `RTCPeerConnection | null` -- compile
+   * at all, and what lets the `Map<string, Connection>` holding those
+   * records compile with it. Every MEMBER still refuses through the
+   * standard-library fence (surfaces.ts's stdlibMemberFence), so the
+   * handle is representable and inert: nothing in this compiler
+   * constructs one yet.
+   *
+   * Refcounted rather than scalar so the ownership machinery stays
+   * uniform with every other handle, and NOT cycle-capable: the struct
+   * holds a refcount and nothing else, so traceAdapterC answers null and
+   * no container ever traces one. */
+  | { kind: "rtcPeerConnection" }
+  /** An `RTCDataChannel`. The peer connection's companion, and the same
+   * type-first stance -- but note it is genuinely held in an ARRAY:
+   * zapo's `Connection.incomingChannels` is `RTCDataChannel[]`. That is
+   * why this kind stays OUT of NO_ARRAY_ELEM_KINDS and answers
+   * SCR_ELEM_REF from elemKindC, following `request` rather than the
+   * sqlite handles. */
+  | { kind: "rtcDataChannel" }
   /** Heap, refcounted closure. `rest` marks a VARIADIC JS function (a
    * `...args` rest parameter, or a zero-param function body reading
    * `arguments` — test/common's mustCall wrapper): the lifted function
@@ -488,6 +509,8 @@ export const REF_TRUTHY_KINDS: ReadonlySet<string> = new Set([
   "response", "headers",
   // A RequestInit is a JS object, and a Request would be one.
   "requestInit", "request",
+  // A peer connection and a data channel are JS objects: always truthy.
+  "rtcPeerConnection", "rtcDataChannel",
   // A generator object is a JS object: always truthy.
   "generator",
   "asyncGenerator",
@@ -531,6 +554,8 @@ export const RESPONSE_T: IrType = { kind: "response" };
 export const HEADERS_T: IrType = { kind: "headers" };
 export const REQUESTINIT_T: IrType = { kind: "requestInit" };
 export const REQUEST_T: IrType = { kind: "request" };
+export const RTCPEERCONNECTION_T: IrType = { kind: "rtcPeerConnection" };
+export const RTCDATACHANNEL_T: IrType = { kind: "rtcDataChannel" };
 export const FSWATCHER_T: IrType = { kind: "fsWatcher" };
 export const SQLITEDB_T: IrType = { kind: "sqliteDb" };
 export const SQLITESTMT_T: IrType = { kind: "sqliteStmt" };
@@ -930,6 +955,10 @@ export function typeKey(t: IrType): string {
       return "requestInit";
     case "request":
       return "request";
+    case "rtcPeerConnection":
+      return "rtcPeerConnection";
+    case "rtcDataChannel":
+      return "rtcDataChannel";
     default: {
       const _exhaustive: never = t;
       void _exhaustive;
@@ -1082,6 +1111,11 @@ export function isRefCounted(t: IrType): boolean {
     // (never constructed, owned uniformly wherever it is typed).
     t.kind === "requestInit" ||
     t.kind === "request" ||
+    // The two WebRTC handles. Refcount-only structs with no outward
+    // edge, so like bigint and the crypto handles below this is pure
+    // balance and never a cycle question.
+    t.kind === "rtcPeerConnection" ||
+    t.kind === "rtcDataChannel" ||
     // bigint and the four crypto handles. Ordinary refcounted heap values
     // with NULL-tolerant, immortal-tolerant releases and — decisively —
     // NO collector header and no edge that could point back at anything
@@ -3446,6 +3480,14 @@ export type IrLibFn =
   | "dgram.connectCb"
   | "dgram.sendStr"
   | "dgram.sendBytes"
+  /** send(msg) on a CONNECTED socket -- the destination is the one
+   * connect(2) installed, so there is no port/address argument. zapo's
+   * WaSctpRelay.ts:663 spelling, and the only send its FNA relay path
+   * uses. On an UNCONNECTED socket these throw ERR_SOCKET_BAD_PORT,
+   * matching Node, which validates the absent port before anything
+   * else. May-throw. */
+  | "dgram.sendConnStr"
+  | "dgram.sendConnBytes"
   /** The send argument-validation ladder over dyn arguments (Node's
    * signature shuffle: slice bounds, list/type contracts, port/address
    * validation, connected-state errors) — a fully-validated unconnected
@@ -7345,6 +7387,10 @@ function isJsonSafeAt(
     // honest JSON surface.
     case "requestInit":
     case "request":
+    // Neither WebRTC handle has an honest JSON surface: nothing
+    // constructs one, and its members do not lower.
+    case "rtcPeerConnection":
+    case "rtcDataChannel":
       return false;
     default: {
       const _exhaustive: never = t;
@@ -9402,6 +9448,37 @@ export function moduleUsesFsWatch(mod: IrModule): boolean {
   return found;
 }
 
+/** The program holds an RTCPeerConnection or an RTCDataChannel: compiles
+ * scr_wrtc.c in. A LINK GATE, not a fence -- a wrong `false` is a loud
+ * unresolved-symbol link error, never a wrong answer.
+ *
+ * The HANDLE TYPE alone is enough, and today it is the ONLY trigger:
+ * nothing constructs either handle, so there are no `rtc.*` libCalls to
+ * look for. A record field typed `RTCPeerConnection | null` still emits
+ * scr_rtc_peer_connection_release, and an RTCDataChannel[] still emits the
+ * element adapters, so the unit must link for a program that merely
+ * DECLARES the shapes and refuses every member -- which is exactly the
+ * state zapo's WaSctpRelay.ts is in. Same generic-walk shape as
+ * moduleUsesFsWatch above. */
+export function moduleUsesWrtc(mod: IrModule): boolean {
+  let found = false;
+  const visit = (v: unknown): void => {
+    if (found || v === null || typeof v !== "object") return;
+    if (Array.isArray(v)) {
+      for (const item of v) visit(item);
+      return;
+    }
+    const node = v as { kind?: unknown };
+    if (node.kind === "rtcPeerConnection" || node.kind === "rtcDataChannel") {
+      found = true;
+      return;
+    }
+    for (const key of Object.keys(v)) visit((v as Record<string, unknown>)[key]);
+  };
+  visit(mod);
+  return found;
+}
+
 /** The program touches fs/promises.open (moduleUsesFileHandle on the IR):
  * compiles scr_filehandle.c in. It is a LINK GATE, not a fence — a wrong
  * `false` is a loud unresolved-symbol link error, never a wrong answer.
@@ -10519,6 +10596,8 @@ const LIB_MODE_REFUSED_KINDS: ReadonlyMap<string, string> = new Map([
   ["headers", "the fetch surface"],
   ["requestInit", "the fetch surface"],
   ["request", "the fetch surface"],
+  ["rtcPeerConnection", "the WebRTC data-channel surface"],
+  ["rtcDataChannel", "the WebRTC data-channel surface"],
   ["dynInvoke", "checked-dynamic prototype dispatch"],
 ]);
 
@@ -11166,6 +11245,8 @@ export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   "dgram.connectCb",
   "dgram.sendStr",
   "dgram.sendBytes",
+  "dgram.sendConnStr",
+  "dgram.sendConnBytes",
   "dgram.sendChk",
   "dgram.address",
   "dgram.close",

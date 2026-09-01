@@ -1,0 +1,17 @@
+G:/blocks/wrtc-lab/probe/dgram-connected.ts:22:8 - error SC1012: default exports/imports are not supported yet
+
+  21 | 
+  22 | import dgram from 'node:dgram'
+     |        ^~~~~
+  23 | 
+
+  hint: use named exports: export function f() {} / import { f } from "./m"
+
+G:/blocks/wrtc-lab/probe/dgram-connected.ts:50:16 - error SC0001: Expected 3 arguments, but got 1.
+
+  49 |         // The single-argument send, connected mode -- zapo's exact form.
+  50 |         client.send(new Uint8Array([0x00, 0x01, 0x02, 0xfe, 0xff]))
+     |                ^~~~
+  51 |         console.log('client sent')
+
+2 errors.

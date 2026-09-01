@@ -1,0 +1,32 @@
+G:\blocks\wrtc\packages\compiler\src\backend\cc.ts:2139
+      throw new CcCompileError(
+            ^
+
+
+CcCompileError: zig cc failed compiling G:\blocks\wrtc-tmp\rtc-shape.ll.
+This is a scriptc bug (generated C should always compile) unless zig cc itself is missing/broken.
+
+zig: warning: argument unused during compilation: '-I G:\blocks\wrtc\packages\runtime\src' [-Wunused-command-line-argument]
+lld-link: error: undefined symbol: scr_rtc_data_channel_retain_v
+>>> referenced by .zig\o\86eeb8feefe249b8479738492346f3d7\rtc-shape.obj:(main)
+
+lld-link: error: undefined symbol: scr_rtc_data_channel_release_v
+>>> referenced by .zig\o\86eeb8feefe249b8479738492346f3d7\rtc-shape.obj:(main)
+
+    at runClang (G:\blocks\wrtc\packages\compiler\src\backend\cc.ts:2139:13)
+    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+    at async compileC (G:\blocks\wrtc\packages\compiler\src\backend\cc.ts:2250:3)
+    at async compile (G:\blocks\wrtc\packages\compiler\src\index.ts:793:5)
+    at async build (G:\blocks\wrtc\packages\cli\src\main.ts:268:20)
+    at async main (G:\blocks\wrtc\packages\cli\src\main.ts:310:18)
+    at async <anonymous> (G:\blocks\wrtc\packages\cli\src\main.ts:330:22) {
+  driver: 'zig cc',
+  stderr: "zig: warning: argument unused during compilation: '-I G:\\blocks\\wrtc\\packages\\runtime\\src' [-Wunused-command-line-argument]\r\n" +
+    'lld-link: error: undefined symbol: scr_rtc_data_channel_retain_v\r\n' +
+    '>>> referenced by .zig\\o\\86eeb8feefe249b8479738492346f3d7\\rtc-shape.obj:(main)\r\n' +
+    '\r\n' +
+    'lld-link: error: undefined symbol: scr_rtc_data_channel_release_v\r\n' +
+    '>>> referenced by .zig\\o\\86eeb8feefe249b8479738492346f3d7\\rtc-shape.obj:(main)\r\n'
+}
+
+Node.js v22.18.0

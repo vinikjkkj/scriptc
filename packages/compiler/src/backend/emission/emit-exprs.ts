@@ -4408,6 +4408,12 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
           case "dgram.sendBytes":
             E.usesTimers = true;
             return finish(`scr_dgram_send_bytes(${arg(0)}, ${arg(1)}, ${arg(2)}, ${arg(3)})`);
+          case "dgram.sendConnStr":
+            E.usesTimers = true; // a connected socket holds the loop
+            return finish(`scr_dgram_send_conn_str(${arg(0)}, ${arg(1)})`);
+          case "dgram.sendConnBytes":
+            E.usesTimers = true;
+            return finish(`scr_dgram_send_conn_bytes(${arg(0)}, ${arg(1)})`);
           case "dgram.sendChk":
             E.usesTimers = true; // a validated send implicit-binds
             return finish(

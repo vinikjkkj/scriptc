@@ -1,0 +1,12 @@
+ Test Files  3 failed | 144 passed | 7 skipped (154)
+      Tests  9 failed | 5754 passed | 54 skipped (5817)
+   Duration  1807.85s (transform 4.12s, setup 0ms, collect 113.34s, tests 5190.67s, environment 32ms, prepare 20.96s)
+× differential corpus (1725 programs) > 1360-spawn-sync.ts
+× differential corpus (1725 programs) > 1482-spawnsync-error.ts
+× differential corpus (1725 programs) > 1537-os-release-spawnsync-stdio.ts
+× differential corpus (1725 programs) > 2390-dot-requires\main.cjs
+× inheritance codegen > standalone classes emit no vtable machinery
+× llvm differential corpus (1725 programs) > 1360-spawn-sync.ts
+× llvm differential corpus (1725 programs) > 1482-spawnsync-error.ts
+× llvm differential corpus (1725 programs) > 1537-os-release-spawnsync-stdio.ts
+× llvm differential corpus (1725 programs) > 2390-dot-requires\main.cjs

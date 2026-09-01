@@ -8924,6 +8924,12 @@ typedef struct ScrResponse ScrResponse;
  * ownership machinery stays uniform, never allocated. */
 typedef struct ScrFetchInit ScrFetchInit;
 typedef struct ScrRequest ScrRequest;
+/* The WebRTC data-channel handles. Types with no values today: mapped so
+ * that a record with an `RTCPeerConnection | null` field, and the Map
+ * holding that record, have a representation at all. Every member still
+ * refuses by name. See scr_wrtc.c. */
+typedef struct ScrRtcPeerConnection ScrRtcPeerConnection;
+typedef struct ScrRtcDataChannel ScrRtcDataChannel;
 
 /* Starts one transfer and answers the fetch() promise (+1), which
  * fulfills with an ScrResponse when the HEAD arrives — not when the body
@@ -9044,6 +9050,17 @@ void scr_request_release(ScrRequest *r);
 void *scr_request_retain_v(void *p);
 void scr_request_release_v(void *p);
 
+/* The WebRTC ownership pairs. Dead code in every program: nothing
+ * constructs either handle yet. */
+ScrRtcPeerConnection *scr_rtc_peer_connection_retain(ScrRtcPeerConnection *p);
+void scr_rtc_peer_connection_release(ScrRtcPeerConnection *p);
+void *scr_rtc_peer_connection_retain_v(void *p);
+void scr_rtc_peer_connection_release_v(void *p);
+ScrRtcDataChannel *scr_rtc_data_channel_retain(ScrRtcDataChannel *c);
+void scr_rtc_data_channel_release(ScrRtcDataChannel *c);
+void *scr_rtc_data_channel_retain_v(void *p);
+void scr_rtc_data_channel_release_v(void *p);
+
 ScrResponse *scr_response_retain(ScrResponse *r);
 void scr_response_release(ScrResponse *r);
 void *scr_response_retain_v(void *p);
@@ -9132,6 +9149,11 @@ void scr_dgram_bind(ScrDgramSocket *s, double port, ScrStr *host /*borrowed*/, S
 void scr_dgram_connect(ScrDgramSocket *s, double port, ScrStr *host /*borrowed*/, ScrClosure *cb /*moves, nullable*/);
 void scr_dgram_send_str(ScrDgramSocket *s, ScrStr *data /*borrowed*/, double port, ScrStr *host /*borrowed*/);
 void scr_dgram_send_bytes(ScrDgramSocket *s, ScrBytes *data /*borrowed*/, double port, ScrStr *host /*borrowed*/);
+/* send(msg) on a CONNECTED socket: the destination is the one connect(2)
+ * installed. On an unconnected socket these throw ERR_SOCKET_BAD_PORT,
+ * which is what Node does -- it validates the absent port first. */
+void scr_dgram_send_conn_str(ScrDgramSocket *s, ScrStr *data /*borrowed*/);
+void scr_dgram_send_conn_bytes(ScrDgramSocket *s, ScrBytes *data /*borrowed*/);
 /* The send argument-validation ladder over dyn arguments (Node's
  * signature shuffle, slice bounds, list/type contracts, port/address
  * validation, and the connected-state errors); a fully-validated

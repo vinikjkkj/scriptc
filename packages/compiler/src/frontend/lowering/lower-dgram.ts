@@ -384,6 +384,30 @@ export function lowerDgramMethodCall(L: Lowerer, call: ts.CallExpression,
       const fn: IrLibFn = data.type.kind === "string" ? "dgram.sendStr" : "dgram.sendBytes";
       return { kind: "libCall", fn, args: [receiver, data, port, host], type: VOID, loc };
     }
+    // send(msg) — the CONNECTED form. zapo's WaSctpRelay.ts:663 writes
+    // `conn.udpSocket.send(new Uint8Array(data))` and that single call is
+    // the whole send path of its FNA relay, which never constructs a peer
+    // connection at all.
+    //
+    // The compiler cannot know whether the socket is connected — that is a
+    // RUNTIME property — so this lowers unconditionally and the runtime
+    // decides: connected sends to the installed peer, unconnected throws
+    // ERR_SOCKET_BAD_PORT, which is what Node does (it validates the
+    // absent port argument before it ever looks at connection state,
+    // verified against node v25.9.0).
+    const connShape =
+      args.length === 1 && !args.some(ts.isSpreadElement) &&
+      (() => {
+        const dataT = L.mapTypeOf(L.typeOf(args[0]!));
+        return dataT?.kind === "string" || (dataT?.kind === "bytes" && dataT.elem === "u8");
+      })();
+    if (connShape) {
+      const receiver = L.lowerExpr(access.expression);
+      const data = L.lowerExpr(args[0]!);
+      const fn: IrLibFn =
+        data.type.kind === "string" ? "dgram.sendConnStr" : "dgram.sendConnBytes";
+      return { kind: "libCall", fn, args: [receiver, data], type: VOID, loc };
+    }
     if (isJsSourceFile(call.getSourceFile()) && args.length <= 5 && !args.some(ts.isSpreadElement)) {
       const receiver = L.lowerExpr(access.expression);
       const slots: IrExpr[] = [];

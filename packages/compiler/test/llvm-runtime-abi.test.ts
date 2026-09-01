@@ -569,6 +569,8 @@ describe("LLVM backend declares match scr_runtime.h prototypes", () => {
     // LOOKED at on both backends, and "nothing makes one" is a claim that
     // should be written down where the adapters are checked, not assumed.
     request: { kind: "request" },
+    rtcPeerConnection: { kind: "rtcPeerConnection" },
+    rtcDataChannel: { kind: "rtcDataChannel" },
     fsWatcher: { kind: "fsWatcher" },
     sqliteDb: { kind: "sqliteDb" },
     sqliteStmt: { kind: "sqliteStmt" },

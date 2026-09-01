@@ -3387,6 +3387,8 @@ class LlEmitter {
       case "asyncGenerator":
       case "sqliteDb":
       case "sqliteStmt":
+      case "rtcPeerConnection":
+      case "rtcDataChannel":
       case "fsWatcher": {
         // JS objects are ALWAYS truthy; the honest constant reads as a
         // pointer test, exactly the C emitter's `!= NULL`.
@@ -3492,6 +3494,8 @@ class LlEmitter {
             case "headers":
             case "requestInit":
             case "request":
+            case "rtcPeerConnection":
+            case "rtcDataChannel":
               B.line(`store i1 true, ptr ${slot} ; ${arm.kind}: objects are truthy`);
               break;
             default:

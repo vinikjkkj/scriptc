@@ -1,0 +1,8 @@
+ ✓ tests/harness/inheritance.test.ts (7 tests | 6 skipped) 2930ms
+   ✓ inheritance codegen > standalone classes emit no vtable machinery  2928ms
+
+ Test Files  1 passed (1)
+      Tests  1 passed | 6 skipped (7)
+   Start at  23:45:24
+   Duration  12.80s (transform 4.88s, setup 0ms, collect 9.57s, tests 2.93s, environment 0ms, prepare 104ms)
+

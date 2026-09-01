@@ -640,6 +640,61 @@ static void scr_dgram_send_raw(ScrDgramSocket *s, const char *data, size_t len, 
   scr_dgram_update_read(s);
 }
 
+/* send(msg) on a CONNECTED socket -- zapo's WaSctpRelay.ts:663 spelling,
+ * `conn.udpSocket.send(new Uint8Array(data))`, and the only form the FNA
+ * relay path uses.
+ *
+ * The destination is the one connect(2) already installed, so this is
+ * sendto with a NULL address rather than a second address resolution.
+ * NULL/0 is the portable spelling of "use the connected peer" and rides
+ * the existing win32 sendto shim, so no new shim is needed.
+ *
+ * On an UNCONNECTED socket Node does NOT report a connection error: it
+ * validates the absent port argument first and throws
+ * ERR_SOCKET_BAD_PORT "Port should be > 0 and < 65536. Received
+ * undefined." (verified against node v25.9.0). Matching that exactly is
+ * why this branch renders a port error rather than the "Not connected"
+ * one a reader would expect. A connected socket is always bound and
+ * always has an fd -- scr_dgram_connect implicit-binds -- so there is no
+ * ensure_fd/bind bookkeeping here. */
+static void scr_dgram_send_conn_raw(ScrDgramSocket *s, const char *data, size_t len) {
+  /* ORDER MATTERS, and it is not the intuitive one. Node validates the
+   * ABSENT port argument before it looks at connection or running state,
+   * so a socket that is merely closed answers ERR_SOCKET_BAD_PORT rather
+   * than "Not running" -- verified against node v25.9.0, where BOTH an
+   * unconnected and a closed socket report
+   *   RangeError [ERR_SOCKET_BAD_PORT]: Port should be > 0 and < 65536.
+   *   Received undefined.
+   * Checking `closing` first, which is what every other entry point in
+   * this file does, would have produced a wrong answer for the closed
+   * case while passing the happy path. */
+  if (!s->connected) {
+    static const char msg[] = "Port should be > 0 and < 65536. Received undefined.";
+    scr_throw_error_msg_code(SCR_ERR_RANGE, msg, sizeof msg - 1, "ERR_SOCKET_BAD_PORT");
+    return;
+  }
+  if (s->closing || s->close_emitted) {
+    scr_dgram_throw("Not running");
+    return;
+  }
+  scr_dgram_register(s); /* an open sender holds the loop, like Node */
+  if (sendto(s->fd, data, len, 0, NULL, 0) < 0 &&
+      errno != EAGAIN && errno != EWOULDBLOCK && errno != EINTR) {
+    char msg[128];
+    snprintf(msg, sizeof msg, "send %s", scr_dgram_errname(errno));
+    scr_dgram_defer_err(s, msg);
+  }
+  scr_dgram_update_read(s);
+}
+
+void scr_dgram_send_conn_str(ScrDgramSocket *s, ScrStr *data) {
+  scr_dgram_send_conn_raw(s, data->data, data->len);
+}
+
+void scr_dgram_send_conn_bytes(ScrDgramSocket *s, ScrBytes *data) {
+  scr_dgram_send_conn_raw(s, (const char *)data->data, data->len);
+}
+
 void scr_dgram_send_str(ScrDgramSocket *s, ScrStr *data, double port, ScrStr *host) {
   scr_dgram_send_raw(s, data->data, data->len, port, host);
 }

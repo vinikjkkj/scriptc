@@ -1,0 +1,10 @@
+G:/blocks/wrtc-lab/withtypes/dgram-default.ts:50:9 - error SC2020: 'send with 1 arguments' is part of the standard library types but has no scriptc lowering yet
+
+  49 |         // The single-argument send, connected mode -- zapo's exact form.
+  50 |         client.send(new Uint8Array([0x00, 0x01, 0x02, 0xfe, 0xff]))
+     |         ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  51 |         console.log('client sent')
+
+  hint: the supported form is send(msg, port, address) — one string or Buffer datagram
+
+1 error.
