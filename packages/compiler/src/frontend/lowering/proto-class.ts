@@ -49,6 +49,11 @@ export interface ProtoField {
    * zero default diverges on 278 of 641 protobuf message types and a null
    * default on none. */
   conditional: boolean;
+  /** A prototype method also writes this field. The slot's type has to admit
+   * every one of those writes, not just the constructor's initializer — e.g.
+   * Reader.pos is seeded to 0 and then rewritten by every accessor. Recorded
+   * rather than refused: reassignment is normal, it only widens the slot. */
+  reassignedInMethod: boolean;
 }
 
 export interface ProtoMethod {
@@ -190,7 +195,8 @@ export function findProtoClasses(sf: ts.SourceFile): ProtoClass[] {
         const name = n.left.name.getText();
         if (!seen.has(name)) {
           seen.add(name);
-          out.push({ name, init: n.right, conditional: isConditional(n, fn) });
+          out.push({ name, init: n.right, conditional: isConditional(n, fn),
+            reassignedInMethod: false });
         }
       }
       ts.forEachChild(n, walk);
@@ -319,7 +325,43 @@ export function findProtoClasses(sf: ts.SourceFile): ProtoClass[] {
     ts.forEachChild(n, walk);
   })(sf);
 
-  /* Pass 3: per-scope shadowing, and candidates that buy nothing. */
+  /* Pass 3: what the METHODS do to `this`.
+   *
+   * The constructor is only the instance shape if nothing else adds to it. A
+   * prototype method that assigns a field the constructor never sets means
+   * instances gain a slot later, and a struct laid out from the constructor
+   * alone would have nowhere to put it — a silently wrong shape rather than a
+   * failed build, which is the shape of bug this whole module exists to avoid.
+   * Verified against zapo's bundle: zero such fields across all four usable
+   * classes, so this refuses nothing there and guards every other input. */
+  for (const c of cands) {
+    const ctorFields = new Set(c.fields.map((f) => f.name));
+    for (const m of [...c.methods, ...c.mergedMethods]) {
+      (function walk(n: ts.Node) {
+        // A nested function has its own `this`; do not credit it to ours.
+        if (n !== m.fn && (ts.isFunctionDeclaration(n) || ts.isFunctionExpression(n))) return;
+        if (
+          ts.isBinaryExpression(n) &&
+          n.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
+          ts.isPropertyAccessExpression(n.left) &&
+          n.left.expression.kind === ts.SyntaxKind.ThisKeyword
+        ) {
+          const name = n.left.name.getText();
+          const own = c.fields.find((f) => f.name === name);
+          if (own) own.reassignedInMethod = true;
+          else if (ctorFields.has(name)) { /* unreachable, kept for clarity */ }
+          else {
+            c.bailouts.push(
+              `method '${m.name}' assigns '${name}', which the constructor never sets @` +
+              n.getStart());
+          }
+        }
+        ts.forEachChild(n, walk);
+      })(m.fn);
+    }
+  }
+
+  /* Pass 4: per-scope shadowing, and candidates that buy nothing. */
   for (const c of cands) {
     if ((declsIn.get(c.scope)?.get(c.name) ?? 0) > 1) {
       c.bailouts.push("the name is declared more than once in its own scope");
