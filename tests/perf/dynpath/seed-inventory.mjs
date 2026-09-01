@@ -11,11 +11,15 @@
 //   recordSet   is NOT IN THE SWITCH AT ALL -- a static-field store on a known
 //               shape is not a throw seed, so it carries no guard
 //
-// So a known slot really does remove the store's guard. The question this
-// answers is whether that is enough on its own. It is not: the same statement's
-// `e.uint32()` is a dynInvoke and seeds anyway, and a function keeps its
-// epilogue while ANY seed remains in it. Message shape and Reader shape are
-// multiplicative, not additive.
+// So a known slot really does remove the store's guard -- BUT ONLY IF THE VALUE
+// BEING STORED IS ALREADY TYPED. A still-dyn value crossing into a typed slot
+// gets a dynCheck at the boundary, and dynCheck seeds f.throws too, so the guard
+// relocates instead of vanishing.
+//
+// And a function keeps its epilogue while ANY seed remains in it, so partial
+// conversion buys nothing structural. Message shape and Reader shape are
+// multiplicative, not additive, and the instrument now shows that literally:
+// BOTH removes more seeds than the two arms summed.
 //
 // Usage: node seed-inventory.mjs <bundle.js>
 import { createRequire } from "node:module";
@@ -76,7 +80,16 @@ const dec = [];
   ts.forEachChild(n, w);
 })(sf);
 
-const c = { readerCall: 0, readerGet: 0, msgGet: 0, msgSet: 0, otherGet: 0, nestedDecode: 0 };
+const c = { readerCall: 0, readerGet: 0, msgGet: 0, msgSet: 0, otherGet: 0, nestedDecode: 0,
+  setTypedRhs: 0, setDynRhs: 0 };
+// A store into a typed slot only loses its guard if the VALUE is already typed.
+// If the RHS is still dyn, lowering inserts a dynCheck at the boundary and THAT
+// is guarded (may-throw.ts case "dynCheck"), so the guard RELOCATES rather than
+// vanishing. Literals are already typed; a reader call or a nested decode is not,
+// until those are shaped too.
+const rhsIsTyped = (r) =>
+  ts.isStringLiteral(r) || ts.isNumericLiteral(r) || ts.isArrayLiteralExpression(r) ||
+  r.kind === ts.SyntaxKind.TrueKeyword || r.kind === ts.SyntaxKind.FalseKeyword;
 for (const f of dec) {
   const rdr = f.parameters[0]?.name.getText();
   let msg = null;
@@ -93,7 +106,10 @@ for (const f of dec) {
       const isWrite = n.parent && ts.isBinaryExpression(n.parent) && n.parent.left === n &&
         n.parent.operatorToken.kind === ts.SyntaxKind.EqualsToken;
       if (recv === rdr) { if (isCallee) c.readerCall++; else c.readerGet++; }
-      else if (recv === msg) { if (isWrite) c.msgSet++; else if (!isCallee) c.msgGet++; }
+      else if (recv === msg) {
+        if (isWrite) { c.msgSet++; if (rhsIsTyped(n.parent.right)) c.setTypedRhs++; else c.setDynRhs++; }
+        else if (!isCallee) c.msgGet++;
+      }
       else if (!isCallee) c.otherGet++;
     }
     if (ts.isCallExpression(n) && ts.isPropertyAccessExpression(n.expression) &&
@@ -103,8 +119,13 @@ for (const f of dec) {
   })(f);
 }
 const total = c.readerCall + c.readerGet + c.msgGet + c.msgSet + c.otherGet + c.nestedDecode;
-const msgWin = c.msgGet + c.msgSet;
+// MESSAGE shape alone: reads become recordGet (unguarded), but only the stores
+// whose RHS is ALREADY typed lose their guard; the rest swap dyn.keySet for dynCheck.
+const msgWin = c.msgGet + c.setTypedRhs;
 const rdrWin = c.readerCall + c.readerGet;
+// BOTH is strictly MORE than the sum: the dyn-RHS stores pay only when the reader
+// shape has made their values typed, so they belong to neither arm alone.
+const bothWin = c.msgGet + c.msgSet + c.readerCall + c.readerGet;
 const pct = (x) => ((x / total) * 100).toFixed(1) + "%";
 console.log("decode bodies: " + dec.length + "\n");
 console.log("throw seeds present today, by future IR node:");
@@ -114,19 +135,31 @@ console.log("  dynKeyGet  reads on the reader        " + String(c.readerGet).pad
 console.log("  dynKeyGet  reads on the message       " + String(c.msgGet).padStart(6));
 console.log("  dynKeyGet  reads on other receivers   " + String(c.otherGet).padStart(6));
 console.log("  dynKeySet  writes to the message      " + String(c.msgSet).padStart(6));
+console.log("     of which RHS already typed        " + String(c.setTypedRhs).padStart(6));
+console.log("     of which RHS still dyn            " + String(c.setDynRhs).padStart(6) +
+  "   <- keeps a guard, relocated to a dynCheck");
 console.log("  " + "TOTAL".padEnd(36) + String(total).padStart(6));
 console.log("\nwhat each shape buys, in seeds removed:");
 console.log("  MESSAGE shape only   removes " + String(msgWin).padStart(6) + " (" + pct(msgWin) +
   ")   leaves " + (total - msgWin) + "  -> function STILL THROWS");
 console.log("  READER  shape only   removes " + String(rdrWin).padStart(6) + " (" + pct(rdrWin) +
   ")   leaves " + (total - rdrWin) + "  -> function STILL THROWS");
-console.log("  BOTH                 removes " + String(msgWin + rdrWin).padStart(6) + " (" +
-  pct(msgWin + rdrWin) + ")   leaves " + (total - msgWin - rdrWin));
+console.log("  BOTH                 removes " + String(bothWin).padStart(6) + " (" +
+  pct(bothWin) + ")   leaves " + (total - bothWin));
+console.log("     note BOTH (" + bothWin + ") EXCEEDS the sum of the arms (" +
+  (msgWin + rdrWin) + ") by " + (bothWin - msgWin - rdrWin) + " -- the dyn-RHS");
+console.log("     stores, which belong to neither shape alone. That is what");
+console.log("     multiplicative means here, stated in seeds.");
 console.log("\n  of that residue, " + c.nestedDecode + " are nested Msg.decode calls, which stop");
 console.log("  seeding ON THEIR OWN once every decode is clean -- computeMayThrow is a");
 console.log("  FIXPOINT over the call graph, so a call to a non-throwing function is not a");
 console.log("  seed. That leaves " + c.otherGet + " module-local reads (M.recursionLimit,");
 console.log("  j.waproto.X, chained receivers) as the last thing standing between a decode");
 console.log("  body and losing its epilogue entirely.");
+console.log("");
+console.log("  and the asymmetry that decides the ORDER: a message shape cannot cash in");
+console.log("  its " + c.setDynRhs + " dyn-valued stores on its own -- each merely trades a");
+console.log("  dyn.keySet guard for a dynCheck guard at the boundary. A READER shape makes");
+console.log("  those values typed, which is what lets the message shape pay. Reader first.");
 console.log("\nCONCLUSION: build toward GUARD REMOVAL, and that needs BOTH shapes. Either one");
 console.log("alone leaves the function throwing, which keeps the epilogue that IS the size.");
