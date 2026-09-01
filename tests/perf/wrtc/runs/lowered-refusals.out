@@ -1,0 +1,9 @@
+error SC2020: 'RTCDataChannel.id' is part of the standard library types but has no scriptc lowering yet
+error SC2020: 'RTCDataChannel.send' is part of the standard library types but has no scriptc lowering yet
+error SC2020: 'RTCPeerConnection.createOffer' is part of the standard library types but has no scriptc lowering yet
+error SC2020: 'RTCPeerConnection.setLocalDescription' is part of the standard library types but has no scriptc lowering yet
+error SC2020: 'RTCPeerConnection.setRemoteDescription' is part of the standard library types but has no scriptc lowering yet
+error SC2020: 'assignment to RTCDataChannel.onmessage' is part of the standard library types but has no scriptc lowering yet
+error SC2020: 'assignment to RTCDataChannel.onopen' is part of the standard library types but has no scriptc lowering yet
+error SC2020: 'assignment to RTCPeerConnection.onconnectionstatechange' is part of the standard library types but has no scriptc lowering yet
+error SC2020: 'assignment to RTCPeerConnection.oniceconnectionstatechange' is part of the standard library types but has no scriptc lowering yet
