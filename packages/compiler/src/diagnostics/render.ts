@@ -20,6 +20,39 @@ const DIM = "\x1b[2m";
 const BOLD = "\x1b[1m";
 const RESET = "\x1b[0m";
 
+/* The line-start index of one source, built ONCE per lookup object.
+ *
+ * It used to be rebuilt PER DIAGNOSTIC: a `source.text[i] === "\n"` loop
+ * over the whole file, then `source.text.split("\n")`, then a LINEAR scan
+ * for the line — three passes over the entire source for every diagnostic
+ * rendered against it. On an ordinary file that is invisible. On the input
+ * this compiler is actually asked to swallow it is not: zapo's
+ * `spec/proto/index.js` is 1,867,556 bytes of minified JavaScript on ONE
+ * line, and a build that refuses N statements inside it walked O(N x 1.87 MB)
+ * three times over before printing anything.
+ *
+ * Keyed on the SourceLookup OBJECT rather than on the text, so the cache can
+ * never pin a megabyte of source alive by itself; renderAll hands every
+ * diagnostic of a file the same lookup object, which is what makes the memo
+ * bite. The emitter's own srcSite() has had this shape — cached index plus
+ * binary search — since it was written; this is the diagnostics side
+ * catching up.
+ *
+ * Output is byte-identical: `lineStarts.length` equals
+ * `text.split("\n").length` for every string, and lineAt() below reproduces
+ * that array's elements exactly. */
+const lineIndexCache = new WeakMap<SourceLookup, number[]>();
+
+function lineStartsOf(source: SourceLookup): number[] {
+  const hit = lineIndexCache.get(source);
+  if (hit !== undefined) return hit;
+  const starts = [0];
+  const text = source.text;
+  for (let i = text.indexOf("\n"); i >= 0; i = text.indexOf("\n", i + 1)) starts.push(i + 1);
+  lineIndexCache.set(source, starts);
+  return starts;
+}
+
 export function renderDiagnostic(
   diag: ScrDiagnostic,
   source: SourceLookup | undefined,
@@ -40,25 +73,36 @@ export function renderDiagnostic(
   const frame: string[] = [];
 
   if (source) {
-    const lineStarts = [0];
-    for (let i = 0; i < source.text.length; i++) {
-      if (source.text[i] === "\n") lineStarts.push(i + 1);
+    const text = source.text;
+    const lineStarts = lineStartsOf(source);
+    let lo = 0, hi = lineStarts.length - 1;
+    while (lo < hi) {
+      const mid = (lo + hi + 1) >> 1;
+      if (lineStarts[mid]! <= diag.loc.start) lo = mid;
+      else hi = mid - 1;
     }
-    let lo = 0;
-    while (lo + 1 < lineStarts.length && lineStarts[lo + 1]! <= diag.loc.start) lo++;
     lineNum = lo + 1;
     colNum = diag.loc.start - lineStarts[lo]! + 1;
 
-    const lines = source.text.split("\n");
-    const gutterWidth = String(Math.min(lineNum + 1, lines.length)).length;
+    /* The nth line's text, WITHOUT materialising the other n-1. Identical
+     * to `text.split("\n")[n - 1]`: the slice stops one character before
+     * the next line's start, which drops that "\n" and keeps any "\r"
+     * in front of it; the last line runs to the end of the file. */
+    const lineAt = (n: number): string | undefined => {
+      if (n < 1 || n > lineStarts.length) return undefined;
+      const from = lineStarts[n - 1]!;
+      const next = lineStarts[n];
+      return next === undefined ? text.slice(from) : text.slice(from, next - 1);
+    };
+    const gutterWidth = String(Math.min(lineNum + 1, lineStarts.length)).length;
     const emitLine = (n: number) => {
-      const text = lines[n - 1];
-      if (text === undefined) return;
-      frame.push(c(DIM, `  ${String(n).padStart(gutterWidth)} | `) + text);
+      const t = lineAt(n);
+      if (t === undefined) return;
+      frame.push(c(DIM, `  ${String(n).padStart(gutterWidth)} | `) + t);
     };
     emitLine(lineNum - 1);
     emitLine(lineNum);
-    const lineText = lines[lineNum - 1] ?? "";
+    const lineText = lineAt(lineNum) ?? "";
     const spanOnLine = Math.max(
       1,
       Math.min(diag.loc.end - diag.loc.start, lineText.length - (colNum - 1)),
@@ -98,10 +142,20 @@ export function renderAll(
   const sorted = [...diags].sort(
     (a, b) => a.loc.file.localeCompare(b.loc.file) || a.loc.start - b.loc.start,
   );
+  // One lookup object per FILE, not per diagnostic: the line index above is
+  // memoized on that object, so N diagnostics in one file build the index
+  // once between them instead of N times.
+  const lookups = new Map<string, SourceLookup>();
+  const lookupFor = (file: string): SourceLookup | undefined => {
+    const hit = lookups.get(file);
+    if (hit !== undefined) return hit;
+    const text = sourceTextByFile.get(file);
+    if (text === undefined) return undefined;
+    const made: SourceLookup = { text };
+    lookups.set(file, made);
+    return made;
+  };
   return sorted
-    .map((d) => {
-      const text = sourceTextByFile.get(d.loc.file);
-      return renderDiagnostic(d, text === undefined ? undefined : { text }, opts);
-    })
+    .map((d) => renderDiagnostic(d, lookupFor(d.loc.file), opts))
     .join("\n\n");
 }
