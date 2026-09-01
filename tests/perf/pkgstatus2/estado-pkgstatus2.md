@@ -112,3 +112,132 @@ outcome.
 `sharp`** (`index.ts` → `./sharp`, and `ffmpeg.ts:17` → `./sharp` for the
 video-thumbnail path), so there is no submodule driver that reaches a binary
 while avoiding it.
+
+---
+
+## 3. Phase 1 — the two open `store-sqlite` binaries, both re-run on `7417b09f`
+
+### 3a. `store-sqlite-names-be.exe` — still a TRAP, reproduced exactly
+
+Built `--best-effort`, both backends, **819,712** (LLVM) / **820,736** (C)
+bytes — a few hundred bytes larger than the previous survey's 818,688 /
+819,712, so this is a fresh build on the current compiler, not a cached one.
+`quickjs=0 ScrDyn=0 JS_NewRuntime=0`. It runs, prints its first two lines
+byte-exactly, and then stops with
+
+```
+Uncaught Error: 'Object.freeze of a possibly-aliased value' is part of the
+standard library types but has no scriptc lowering yet
+[SC2020 at .../store-sqlite/table-names.ts:116]
+```
+
+Scored **TRAP**, on both backends: a refusal that names its own construct and
+line, not a wrong answer. Node prints 12 lines; the binary prints 2 and refuses.
+
+**Two fence numbers, each with its flag.** Flagless: **4** build errors
+(`SC2020 RegExp.toString` at `table-names.ts:68`, `SC2020 Object.freeze` at
+`:116`, `SC1120` function-replacement-over-a-runtime-regex at `:142`, and
+`SC2001 'never'` at the driver's own line 33). `--best-effort`: **4** fences in
+the emitted C, the same four `(code, file, line)` — this program's walls are
+all statement-level, so the flag defers every one of them and the two counts
+agree. That is the opposite of the bundle the brief cites and the same rule
+(§1a).
+
+### 3b. `store-sqlite-open` — the oracle half is now exact, and it is an install artefact
+
+The previous survey scored this **DID-NOT-RUN on both sides**. Re-run under
+node v25.9.0, the oracle side fails with a number, not a guess:
+
+```
+Error: The module '…\node_modules\better-sqlite3\build\Release\better_sqlite3.node'
+was compiled against a different Node.js version using
+NODE_MODULE_VERSION 127. This version of Node.js requires NODE_MODULE_VERSION 141.
+  at openBetterSqlite (…/store-sqlite/connection.ts:311:16)
+```
+
+`build/Release/` is a **locally built** V8-ABI binding, ABI 127 = node v22 —
+the lab's own install, not a Node-API prebuild. So the oracle cannot run this
+driver under v25.9.0 **on this lab install**; the verdict is
+**DID-NOT-RUN (oracle unavailable)**, and it is a property of the lab's
+`node_modules`, not of `better-sqlite3` (which does publish prebuilds) and not
+of the compiler.
+
+The static side's cause is separately reconfirmed, with a four-line probe
+rather than a whole build: **`globalThis` still has no lowering** on
+`7417b09f`.
+
+```
+$ scriptc coverage drivers/globalthis-probe.ts        # the exact zapo-js shape
+  blockers:  ×1  'globalThis' is part of the standard library types but has
+                 no scriptc lowering yet  SC2020
+```
+
+and with `SCRIPTC_ABSENTGLOBAL_WHY=1` the compiler names its own decline step:
+`decline=undeclared globalThis.Bun`. §5 says exactly why that is a defect and
+not a missing feature.
+
+---
+
+## 4. Phase 2, first result — **`store-mysql` reaches a binary**
+
+`store-mysql-cleanup2.exe`, `--provenance-sources`, **no `--best-effort`**,
+both backends:
+
+| | |
+| --- | --- |
+| driver | `drivers/drv-mysql-cleanup2.ts` → `pkgs/store-mysql/cleanup.ts` |
+| flags | `--provenance-sources` only |
+| bytes | **670,208** (LLVM) / **672,256** (C) |
+| engine scan | `quickjs=0 ScrDyn=0 JS_NewRuntime=0`, both binaries |
+| fences in emitted C | **0** |
+| oracle | node v25.9.0 — **9/9 MATCH byte-exact, exit 0, both backends** |
+
+This is the **first native binary of `store-mysql`**. `N …→MATCH = 2` (LLVM and
+C), `M MATCH→WRONG = 0`.
+
+### How it was found, and it is a two-step measurement, not a guess
+
+1. **`cleanup.ts` is the only module of `store-mysql` whose every import is
+   `import type`** — `WaDeviceListStore`, `WaGroupMetadataStore`,
+   `WaMessageSecretStore`, `WaRetryStore` from `zapo-js/store`, all erased. It
+   touches `mysql2` nowhere. `store-postgres/cleanup.ts` is the same file with
+   `Mysql`→`Pg` renamed (diff: 4 lines).
+2. **In the default lane it still does not build**, and the shape is the
+   cascade the previous survey described for `BaseSqliteStore`: **10 errors,
+   9 of them `SC1090` in the driver** (`new MysqlCleanupPoller` ×3,
+   `p.cleanup`, `q.start` ×2, `q.stop` ×2, `q.cleanup`) — all downstream of
+   **one** line:
+
+   ```
+   pkgs/store-mysql/cleanup.ts:21:22 - error SC2013: values from the 'zapo-js'
+   package run in the embedded dynamic engine
+     21 |     private readonly retry: WaRetryStore | undefined
+   ```
+
+   The class declaration is rejected because one field's type is a value from
+   the island, and every use of the class inherits it. Under
+   `--provenance-sources`, where `WaRetryStore` is compiled, **all ten go**.
+3. What was left after that was **exactly one** refusal, and it is worth
+   naming because it is small and general:
+
+   ```
+   pkgs/store-mysql/cleanup.ts:59:47 - error SC1090: 'in' on 'number' receivers
+     59 |  if (typeof this.timer === 'object' && 'unref' in this.timer) {
+   ```
+
+   `ReturnType<typeof setInterval>` includes `number`, and `'unref' in x`
+   over a `number` arm has no lowering. That statement lives in `start()`.
+   **The driver that calls `start()` fails to build; the driver that does not
+   call it builds flagless** — `start()` is then unreached, and unreached
+   statements cannot fail a build. Both drivers are kept
+   (`drv-mysql-cleanup.ts`, `drv-mysql-cleanup2.ts`) so the difference is one
+   file apart, and the second one is the binary above.
+
+**What the driver stays clear of** (the brief's provenance warning): it names
+`MysqlCleanupPoller` and nothing else. It reads no key of any attested data
+table, and `store-mysql` has no `@vinikjkkj/wa-wam` on its path at all — the
+only attested package on this build's path is `zapo-js@1.6.2`, whose compiled
+source supplies **types only** here (`WaRetryStore` and its three siblings are
+`import type`). The nine printed lines are all produced by
+`cleanup.ts`'s own code: an aggregate of zero tasks, four constructor
+validation messages, one `typeof`, and a stop-before-start no-op.
