@@ -734,3 +734,88 @@ fixes, and every fence that becomes a real lowering ADDS code. My own rung
 should push the other way — it replaces a long fence message string with a
 short name string. A paired base build at `2b05d613` is what would settle it,
 and the sibling block that owns binary size has the section attribution.
+
+## STAGE 7 — AOT vs interpreter, measured. AND A CORRECTION.
+
+`wasm2c` (wabt 1.0.36, prebuilt Windows binary; its `wasm2c.exe` needs
+OpenSSL 1.1's `libcrypto-1_1-x64.dll`, which the release does not ship —
+fetched separately) translates a module to C. That is what this compiler
+already does with everything else, and the module here is a **compile-time
+constant**: a string literal inside the glue.
+
+### long.js's 286-byte module
+
+`wasm2c wasm-long.wasm` -> `long_aot.c` 31,606 B + `long_aot.h` 1,338 B, whose
+whole interface is **six ordinary typed C functions**:
+
+    u32 w2c_wasm0x2Dlong_mul   (inst, u32, u32, u32, u32);
+    u32 w2c_wasm0x2Dlong_div_s (inst, u32, u32, u32, u32);
+    u32 w2c_wasm0x2Dlong_div_u (inst, u32, u32, u32, u32);
+    u32 w2c_wasm0x2Dlong_rem_s (inst, u32, u32, u32, u32);
+    u32 w2c_wasm0x2Dlong_rem_u (inst, u32, u32, u32, u32);
+    u32 w2c_wasm0x2Dlong_get_high(inst);
+
+| | image | mul | div_s |
+| --- | --- | --- | --- |
+| bare C hello-world | 188,416 B | — | — |
+| + wasm3 interpreter | 301,056 B (**+112,640**) | 27.5–28.7 ns | 28.0–28.3 ns |
+| + **wasm2c AOT** | 193,024 B (**+4,608**) | **1.94–2.72 ns** | **2.96–4.99 ns** |
+
+`mul(7,0,6,0)` answers 42 both ways. AOT is **+4,608 bytes and ~10x faster
+than the interpreter**, and it takes NODE'S OWN PATH — so `Long#modulo(0)`
+throws the wasm trap node throws, and the one divergence PHASE 1 measured
+disappears instead of being argued about.
+
+### libopus's 544,879-byte module
+
+`wasm2c cap-0.wasm` -> **7,083,687 bytes of C**, which compiles and runs:
+
+| | image | peak WS after instantiate + ctors |
+| --- | --- | --- |
+| bare C hello-world | 188,416 B | 3.74 MiB |
+| + wasm3 interpreter | 303,616 B (+115,200) | **31.27 MiB** |
+| + **wasm2c AOT** | 1,138,176 B (+949,760) | **4.39 MiB** |
+
+### CORRECTION to STAGE 2 and STAGE 4
+
+**I reported that the 24.13 MiB linear memory makes a ~20 MB RSS target
+arithmetically impossible. That was measured through wasm3, and wasm3 is the
+reason for the number, not the module.**
+
+The AOT build reports `memory bytes = 25296896` — the same 24.13 MiB — and its
+peak working set after instantiate and ctors is **4.39 MiB**. wasm2c's memory
+implementation RESERVES the address space and commits pages on demand; wasm3
+allocates and commits the whole thing up front. So the 24.13 MiB is VIRTUAL,
+and the resident cost is whatever libopus actually touches.
+
+What remains true: node itself commits it (`external` +24.66 MiB across
+`loadLibopus()`), so an AOT scriptc build would be *lighter here than node*.
+What is still **unmeasured** is the resident set of a real encode/decode
+workload through the AOT build — driving the Emscripten ABI from C needs the
+minified export names wired up, and I have not done it. I am not going to
+report a number I did not measure: the honest statement is 4.39 MiB after
+instantiate, and unknown-but-bounded-by-24.13 MiB under load.
+
+### The engine recommendation
+
+**AOT-compile the module to C. Do not vendor an interpreter.**
+
+1. It is what scriptc already is. The module is a build-time constant, and the
+   compiler's whole job is turning build-time-constant programs into C.
+2. **The cost is per-module, not per-binary.** wasm3 is 115 KB in *every*
+   binary (the link line has no `--gc-sections`), gateable only by a
+   `RuntimeUnits` flag. Generated C for a module a program does not have is
+   simply never generated — no gate needed.
+3. It is ~10x faster, and for long.js it costs **4,608 bytes** against the
+   interpreter's 112,640.
+4. It gives the exports **static types**: `w2c_..._mul(inst, u32,u32,u32,u32)`
+   is a typed C call, not an `any`. That is the same fact that could type
+   `WebAssembly.Instance.exports` in the front end and dissolve the SC2011
+   that stops `index.js` today — the export section names and signatures are
+   readable at compile time (this lab reads them in 60 lines of JS).
+5. It takes node's own path for long.js, so the fallback-equivalence argument
+   stops being needed at all.
+
+The one thing the interpreter buys that AOT does not is a module that is NOT a
+compile-time constant — `WebAssembly.instantiate(bytesFromNetwork)`. No zapo
+code does that: both modules in the tree are string literals in their bundles.
