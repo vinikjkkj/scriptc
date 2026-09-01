@@ -463,3 +463,81 @@ binary has to:
 
 A perfect engine behind an unresolvable import is worth nothing. This half is
 sized separately and reported before any engine is written.
+
+## STAGE 4 — the engine choice, measured against the REAL module
+
+### wasm3 v0.5.0 runs libopus. Not "should" — it does.
+
+`w3opus.c`: a bare C host that reads `cap-0.wasm` (the 544,879-byte module
+captured out of the running package), links the six imports with their real
+signatures — `a.a (i32,f64)->i32`, `a.b (i32)->i32`, `a.c (i32)->void`,
+`a.d ()->void`, `a.e (i32,i32,i32,i32)->i32`, `a.f ()->void`, decoded from the
+type section rather than guessed — and then compiles the WHOLE module rather
+than the lazily-reached subset.
+
+    module 544879 bytes
+    before env                   peakWS= 4.21 MiB
+    parse ok
+    after parse                  peakWS= 4.45 MiB
+    load ok
+    link ok
+    after link                   peakWS=28.59 MiB     <- the 24.13 MiB linear memory lands here
+    found export h
+    call h ok
+    after call                   peakWS=28.59 MiB
+    compile whole module: ok                            <- every one of 339 bodies
+    after compiling exports      peakWS=31.27 MiB
+
+`m3_CompileModule` returning `ok` over all 339 bodies is the proof that wasm3
+accepts every opcode in the inventory: all 408 bulk-memory, 313
+sign-extension and 182 non-trapping-float-to-int occurrences included. No
+build flags were needed — stock v0.5.0, `zig cc -target x86_64-windows-gnu
+-O2 -DNDEBUG`, 12 core TUs.
+
+It also runs the long.js accelerator correctly: `mul(7,0,6,0)` answers 42.
+
+### Cost, measured on this host
+
+| | bare C hello-world | + wasm3 (long.js, 286 B) | + wasm3 (libopus, 544 KB) |
+| --- | --- | --- | --- |
+| image | 188,416 B | 301,056 B (+112,640) | 303,616 B (+115,200) |
+| peak WS | 3.74 MiB | 3.87 MiB | **31.27 MiB** |
+
+Interpreter speed, 2,000,000 calls, two agreeing runs:
+
+    wasm3 mul    27.5 - 28.7 ns/call
+    wasm3 div_s  28.0 - 28.3 ns/call
+    native int64  0.25 ns/op
+
+### What that means for each of the two consumers — opposite answers
+
+**long.js: do NOT route it through an engine.** Its fallback is compiled to
+native C by scriptc, and it is value-identical to the WASM path over 208,804
+measured comparisons (PHASE 1). Sending it through wasm3 makes it ~110x
+slower and recovers exactly two observable things: `typeof WebAssembly ===
+"object"`, and the error class thrown by `Long#modulo(0)`. (Note: once a
+WebAssembly global exists at all, long.js takes the engine path automatically
+whether or not that is wanted — the library's own `if (t)` decides. Any
+implementation therefore has to accept the 110x on long, or the global has to
+stay absent. That is a real design constraint, not a footnote.)
+
+**libopus: an engine is the ONLY answer.** No pure-JS path exists, the
+`.catch` re-throws, and the consumer awaits it with no fallback.
+
+### The size constraint, stated honestly
+
+The link line has no `-ffunction-sections` and no `--gc-sections`, so an
+unconditional unit lands in every binary — but `cc.ts` already has the gating
+mechanism for exactly this (`abortSignal`, `fetchStatic`, `wsGlobal`,
+`tlsCa` … each compiles its runtime unit only when the IR says the program
+uses it). So the +115 KiB of engine is affordable and gateable.
+
+**The 24.13 MiB of linear memory is not.** It is the module's own declared
+minimum, it is allocated at instantiate, and no engine choice changes it.
+Against a ~20 MB peak-RSS target and a bench binary already at 25.7 MB image
+with 87% `.text`, a binary that instantiates libopus measures **31.27 MiB peak
+working set in a BARE C host** — before any of scriptc's runtime. This needs
+a decision from the user before engine work continues: the target and this
+codec cannot both hold, and the honest options are (a) the ~20 MB target
+applies to binaries that do not instantiate libopus, (b) the target moves for
+voip, or (c) voip's codec stays refused.
