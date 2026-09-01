@@ -86,7 +86,11 @@ for (const c of all) {
   // of one-field factories is noise.
   if (c.bailouts.length > 0 && c.methods.length === 0 && c.mergedMethods.length === 0) continue;
   console.log(head);
-  console.log("    fields : " + c.fields.map((f) => f.name + (f.conditional ? "?" : "")).join(", "));
+  // `?` = assigned in a branch, so the slot must be nullable rather than
+  // zero-defaulted. `*` = a prototype method also writes it, so the slot type
+  // must admit those writes too.
+  console.log("    fields : " + c.fields.map((f) =>
+    f.name + (f.conditional ? "?" : "") + (f.reassignedInMethod ? "*" : "")).join(", "));
   if (c.methods.length) console.log("    methods: " + c.methods.map((m) => m.name).join(", "));
   if (c.mergedMethods.length)
     console.log("    merged : " + c.mergedMethods.map((m) => m.name).join(", ") +
