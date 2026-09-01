@@ -1,0 +1,132 @@
+// seed-inventory.mjs — what a shaped `decode` would actually cost, counted in
+// MAY-THROW SEEDS rather than in bytes or sites.
+//
+// The size is the guards, not the object layout. backend/emission/may-throw.ts
+// computes may-throw per function by fixpoint and the emitter places unwind
+// checks from it, so what matters is which IR nodes SEED `f.throws`:
+//
+//   dynInvoke   seeds unconditionally   (may-throw.ts, case "dynInvoke")
+//   dynKeyGet   seeds unconditionally   (may-throw.ts, case "dynKeyGet")
+//   recordKeySet seeds only for a dynamic key colliding with a declared field
+//   recordSet   is NOT IN THE SWITCH AT ALL -- a static-field store on a known
+//               shape is not a throw seed, so it carries no guard
+//
+// So a known slot really does remove the store's guard. The question this
+// answers is whether that is enough on its own. It is not: the same statement's
+// `e.uint32()` is a dynInvoke and seeds anyway, and a function keeps its
+// epilogue while ANY seed remains in it. Message shape and Reader shape are
+// multiplicative, not additive.
+//
+// Usage: node seed-inventory.mjs <bundle.js>
+import { createRequire } from "node:module";
+import { fileURLToPath } from "node:url";
+import { existsSync, statSync, readFileSync } from "node:fs";
+import path from "node:path";
+
+const BUNDLE = process.argv[2] ?? process.env["WAPROTO_JS"] ?? null;
+if (BUNDLE === null) { console.error("usage: node seed-inventory.mjs <bundle.js>"); process.exit(2); }
+const ts = (() => {
+  const upward = (from) => {
+    let dir = from;
+    for (;;) {
+      const cand = path.join(dir, "node_modules", "typescript", "package.json");
+      if (existsSync(cand)) return createRequire(cand)("typescript");
+      const up = path.dirname(dir);
+      if (up === dir) return null;
+      dir = up;
+    }
+  };
+  const here = path.dirname(fileURLToPath(import.meta.url));
+  let got = upward(here) ?? upward(process.cwd());
+  if (got !== null) return got;
+  let dir = here;
+  for (;;) {
+    const dot = path.join(dir, ".git");
+    if (existsSync(dot) && statSync(dot).isFile()) {
+      const m = /gitdir:\s*(.+)/.exec(readFileSync(dot, "utf8"));
+      if (m !== null) {
+        const gd = m[1].trim();
+        const i = gd.lastIndexOf(path.sep + ".git" + path.sep);
+        const main = i >= 0 ? gd.slice(0, i) : path.dirname(path.dirname(gd));
+        got = upward(main);
+        if (got !== null) return got;
+      }
+      break;
+    }
+    const up = path.dirname(dir);
+    if (up === dir) break;
+    dir = up;
+  }
+  return null;
+})();
+if (ts === null) { console.error("no typescript resolvable"); process.exit(2); }
+
+const src = readFileSync(BUNDLE, "utf8");
+const sf = ts.createSourceFile("i.js", src, ts.ScriptTarget.ESNext, true, ts.ScriptKind.JS);
+const bnd = src.indexOf("j.waproto=");
+if (bnd < 0) { console.error("no `j.waproto=` boundary"); process.exit(2); }
+const isFn = (n) => ts.isFunctionExpression(n) || ts.isFunctionDeclaration(n);
+const dec = [];
+(function w(n) {
+  if (isFn(n) && n.getStart() >= bnd) {
+    const p = n.parent;
+    if (p && ts.isBinaryExpression(p) && ts.isPropertyAccessExpression(p.left) &&
+        p.left.name.getText() === "decode") dec.push(n);
+  }
+  ts.forEachChild(n, w);
+})(sf);
+
+const c = { readerCall: 0, readerGet: 0, msgGet: 0, msgSet: 0, otherGet: 0, nestedDecode: 0 };
+for (const f of dec) {
+  const rdr = f.parameters[0]?.name.getText();
+  let msg = null;
+  (function w(n) {
+    if (ts.isVariableDeclaration(n) && n.initializer && ts.isBinaryExpression(n.initializer) &&
+        n.initializer.operatorToken.kind === ts.SyntaxKind.BarBarToken &&
+        ts.isNewExpression(n.initializer.right)) msg = n.name.getText();
+    ts.forEachChild(n, w);
+  })(f);
+  (function w(n) {
+    if (ts.isPropertyAccessExpression(n) && ts.isIdentifier(n.expression)) {
+      const recv = n.expression.text;
+      const isCallee = n.parent && ts.isCallExpression(n.parent) && n.parent.expression === n;
+      const isWrite = n.parent && ts.isBinaryExpression(n.parent) && n.parent.left === n &&
+        n.parent.operatorToken.kind === ts.SyntaxKind.EqualsToken;
+      if (recv === rdr) { if (isCallee) c.readerCall++; else c.readerGet++; }
+      else if (recv === msg) { if (isWrite) c.msgSet++; else if (!isCallee) c.msgGet++; }
+      else if (!isCallee) c.otherGet++;
+    }
+    if (ts.isCallExpression(n) && ts.isPropertyAccessExpression(n.expression) &&
+        n.expression.name.getText() === "decode" && !ts.isIdentifier(n.expression.expression))
+      c.nestedDecode++;
+    ts.forEachChild(n, w);
+  })(f);
+}
+const total = c.readerCall + c.readerGet + c.msgGet + c.msgSet + c.otherGet + c.nestedDecode;
+const msgWin = c.msgGet + c.msgSet;
+const rdrWin = c.readerCall + c.readerGet;
+const pct = (x) => ((x / total) * 100).toFixed(1) + "%";
+console.log("decode bodies: " + dec.length + "\n");
+console.log("throw seeds present today, by future IR node:");
+console.log("  dynInvoke  reader method calls        " + String(c.readerCall).padStart(6));
+console.log("  dynInvoke  nested Msg.decode calls    " + String(c.nestedDecode).padStart(6));
+console.log("  dynKeyGet  reads on the reader        " + String(c.readerGet).padStart(6));
+console.log("  dynKeyGet  reads on the message       " + String(c.msgGet).padStart(6));
+console.log("  dynKeyGet  reads on other receivers   " + String(c.otherGet).padStart(6));
+console.log("  dynKeySet  writes to the message      " + String(c.msgSet).padStart(6));
+console.log("  " + "TOTAL".padEnd(36) + String(total).padStart(6));
+console.log("\nwhat each shape buys, in seeds removed:");
+console.log("  MESSAGE shape only   removes " + String(msgWin).padStart(6) + " (" + pct(msgWin) +
+  ")   leaves " + (total - msgWin) + "  -> function STILL THROWS");
+console.log("  READER  shape only   removes " + String(rdrWin).padStart(6) + " (" + pct(rdrWin) +
+  ")   leaves " + (total - rdrWin) + "  -> function STILL THROWS");
+console.log("  BOTH                 removes " + String(msgWin + rdrWin).padStart(6) + " (" +
+  pct(msgWin + rdrWin) + ")   leaves " + (total - msgWin - rdrWin));
+console.log("\n  of that residue, " + c.nestedDecode + " are nested Msg.decode calls, which stop");
+console.log("  seeding ON THEIR OWN once every decode is clean -- computeMayThrow is a");
+console.log("  FIXPOINT over the call graph, so a call to a non-throwing function is not a");
+console.log("  seed. That leaves " + c.otherGet + " module-local reads (M.recursionLimit,");
+console.log("  j.waproto.X, chained receivers) as the last thing standing between a decode");
+console.log("  body and losing its epilogue entirely.");
+console.log("\nCONCLUSION: build toward GUARD REMOVAL, and that needs BOTH shapes. Either one");
+console.log("alone leaves the function throwing, which keeps the epilogue that IS the size.");

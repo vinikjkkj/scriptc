@@ -119,6 +119,21 @@ A and P are `.text`-identical to the byte at both sizes.
                         files: 81 decode-bound locals, 72 of them protobuf, 22
                         safe pairs, and ZERO observations.
 
+    seed-inventory.mjs  what a shaped decode would cost, counted in MAY-THROW
+                        SEEDS rather than sites, because the size is the guards
+                        and not the object layout. may-throw.ts seeds f.throws
+                        unconditionally on dynInvoke and dynKeyGet; recordKeySet
+                        seeds only for a dynamic key hitting a declared field;
+                        and recordSet -- a static-field store on a known shape --
+                        is not in that switch at all, so it carries no guard. A
+                        known slot therefore does remove the store's guard. It is
+                        not enough alone: the same statement's e.uint32() is a
+                        dynInvoke and seeds anyway, and a function keeps its
+                        epilogue while any seed remains. On zapo's 641 decode
+                        bodies, of 20,542 seeds: message shape alone removes
+                        42.0%, reader shape alone 43.6%, BOTH 85.5%. The two are
+                        multiplicative, not additive.
+
     tucount.mjs         one streaming pass over a 130 MB emitted TU: the
                         retain/release/dyn-op shapes, with the interned-
                         literal share of scr_str_retain.
