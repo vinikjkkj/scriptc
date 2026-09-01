@@ -8148,7 +8148,7 @@ export function canDynCheckTo(
   // `seen` guards the walk: a self-referential shape would recurse
   // forever. A shape already on the stack answers TRUE, since the check
   // being built for it is the one that will validate it.
-  const nestedOk = (x: IrType, stack: ReadonlySet<IrType>): boolean => {
+  const nestedOk = (x: IrType, stack: Set<IrType>): boolean => {
     if (isJsonSafeType(x, getRecord, getUnion)) return true;
     if (isDynBytes(x)) return true;
     // A dyn ('unknown') LEAF: the target itself says "anything fits here",
@@ -8214,7 +8214,22 @@ export function canDynCheckTo(
     // strand it — the method-bundle lesson, one container down.
     if (x.kind === "map" || x.kind === "set") return true;
     if (stack.has(x)) return true;
-    const deeper = new Set(stack).add(x);
+    /* PUSH/POP, not COPY. This was `const deeper = new Set(stack).add(x)`,
+     * which allocated and filled a fresh Set at EVERY node of the walk — so
+     * a walk of N nodes at depth d cost O(N*d) set inserts before it looked
+     * at a single field. The contents handed to each recursive call are
+     * identical either way (the ancestors on the current path, plus x), so
+     * this is the same predicate; it just stops rebuilding the path at every
+     * step. Measured on zapo's protobuf shapes, this arrow was the single
+     * largest self-time frame in the whole frontend. */
+    stack.add(x);
+    const ok = nestedBody(x, stack);
+    stack.delete(x);
+    return ok;
+  };
+  /* The kind dispatch of nestedOk, split out so the push above has exactly
+   * one matching pop no matter which arm answers. */
+  const nestedBody = (x: IrType, stack: Set<IrType>): boolean => {
     // A FUNCTION leaf — a callable record field, which is how every
     // protobuf message type reaches here (the Long's `toNumber`). The
     // checked-dynamic tree's function box carries the interned typeKey it
@@ -8224,7 +8239,7 @@ export function canDynCheckTo(
     // they can still exact-unwrap, and the matcher is the exact-unwrap
     // test either way.
     if (x.kind === "func") return true;
-    if (x.kind === "array") return nestedOk(x.elem, deeper);
+    if (x.kind === "array") return nestedOk(x.elem, stack);
     if (x.kind === "record") {
       const shape = getRecord(x.shapeId);
       if (!shape || shape.tuple) return false;
@@ -8243,8 +8258,8 @@ export function canDynCheckTo(
       // RESERVED internal marker into a user's TypeError path.
       if (shapeHasAccessorSlots(shape)) return false;
       return (
-        shape.fields.every((f) => nestedOk(f.type, deeper)) &&
-        (shape.indexValue === undefined || nestedOk(shape.indexValue, deeper))
+        shape.fields.every((f) => nestedOk(f.type, stack)) &&
+        (shape.indexValue === undefined || nestedOk(shape.indexValue, stack))
       );
     }
     if (x.kind === "union") {
@@ -8255,11 +8270,11 @@ export function canDynCheckTo(
       // the func matcher compares the boxed signature: two arms that
       // matched the same function value would have to have the same
       // typeKey, and a union cannot hold the same type twice.
-      return !!def && def.arms.every((a) => a.kind === "undefinedT" || nestedOk(a, deeper));
+      return !!def && def.arms.every((a) => a.kind === "undefinedT" || nestedOk(a, stack));
     }
     return false;
   };
-  if ((t.kind === "array" || t.kind === "record" || t.kind === "union") && nestedOk(t, seen)) {
+  if ((t.kind === "array" || t.kind === "record" || t.kind === "union") && nestedOk(t, new Set(seen))) {
     return true;
   }
   return false;
