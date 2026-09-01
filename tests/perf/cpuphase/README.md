@@ -180,11 +180,13 @@ Same workload:
     allocations  1,671,020    frees  1,427,468 (85.4%)
     bytes           110.27 MiB   sites  1,447   lost 0
 
-~2,785 allocations per message, 85% freed again inside the run. The runtime
-allocates through the mingw CRT `malloc` -- no `VirtualAlloc`, `HeapCreate`
-or private pool anywhere in `packages/runtime/src` -- and the Windows heap
-decommits freed blocks, so churn re-commits the same pages and pays a fault
-each time. That is the 20.4x fault gap.
+~2,785 allocations per message, 85% freed again inside the run.
+
+> **This paragraph used to end "and the Windows heap decommits freed blocks,
+> so churn re-commits the same pages and pays a fault each time. That is the
+> 20.4x fault gap." That explanation is wrong and was refuted twice over --
+> see "The arena, built and measured" and "It is `CreateFiber`" below. The
+> faults are not the heap at all.**
 
 95% of the bytes are the runtime's own sites, not the emitted program (203
 runtime sites, 105.26 MiB; 1,244 program sites, 5.01 MiB):
@@ -361,3 +363,201 @@ and 1.0 MiB at exit having never been given back.
 53 MiB table leaves roughly 171 MiB of RSS behind 77 MiB of live heap. The
 remainder is image, stacks, and allocator slack that the churn re-commits --
 which is the same 28.7x page-in ratio seen from the other side.
+
+## The arena, built and measured: it does almost nothing
+
+The standing explanation for the compiled lane's 328,885 page faults was
+churn against a heap that decommits. A private, non-decommitting allocator
+was built to test it -- `tests/perf/prof/scr_arena.h`, size-class slabs over
+one `VirtualAlloc` reservation, injected through `SCRIPTC_PROF_CFLAGS` the
+same way `scr_prof.h` is, so nothing in `packages/` changes.
+
+Interleaved in one session, plain and arena alternating, plain re-run last
+as the drift control. `send_1to1`, **200 contacts x 2 devices, 600 messages**,
+`ZAPO_BENCH_SCENARIOS=send_1to1`; both binaries built from the same tree by
+the same script, differing only in the `-include`.
+
+| arm | `send_1to1` faults | peak RSS | rssEnd | kernel ms |
+| --- | --- | --- | --- | --- |
+| plain r1 | 329,111 | 76.48 MiB | 58.33 | 4,828 |
+| arena r1 | 327,076 | 75.44 MiB | 60.61 | 4,844 |
+| plain r2 | 328,918 | 76.13 MiB | 59.88 | 5,016 |
+| arena r2 | 327,209 | 75.46 MiB | 60.22 | 5,094 |
+| plain r9 (last) | 328,896 | 75.80 MiB | 59.96 | 4,547 |
+
+Faults **-0.6%**. Peak RSS -1.2%. Kernel time unchanged.
+
+**It is not a plumbing failure.** The arena's own exit counters:
+
+    chunks=364  committedBytes=23,855,104  small=1,666,962  large=149
+    freed=1,452,023  foreign=165  livePeakBytes=20,577,200
+
+1,666,962 allocations captured, against the 1,671,020 the `-DSCR_PROF_ALLOC`
+census counted for this same workload. Only 149 exceeded 4096 bytes; only
+165 frees were foreign pointers. It caught everything -- and **the whole
+heap's live peak in this phase is 19.62 MiB**, which cannot be what 329,111
+faults are about.
+
+Two observations finish the heap explanation off:
+
+1. **RSS still falls inside the phase with the arena in**, 75.44 to 60.61
+   MiB. The arena never returns a page, and only 149 allocations went to the
+   CRT, so what is being released is neither.
+2. **The faults arrive with a flat working set.** `cpuphase` now takes
+   `SCR_CPUPHASE_TRACE=<ms>` and dumps the whole run instead of the first
+   1.5 s. Through the middle of `send_1to1`:
+
+   ```
+   ms     rssMiB  faultsTot  faultsInStep  rssDeltaKiB
+   6095    65.70    174,928     13,783          -80
+   6500    66.28    188,585     13,657           36
+   6907    66.59    202,223     13,638          108
+   7313    67.31    215,553     13,330          232
+   7725    67.80    228,413     12,860           80
+   ```
+
+   ~13,500 faults every 400 ms -- 34,000 a second, 132 MiB/s of page-ins --
+   while the working set moves by tens of kilobytes. Pages the process
+   already had are being faulted in again. No allocator does that.
+
+A microbenchmark had reproduced the fault count beforehand
+(`dynimp-lab/arena/churn.c`, the measured size distribution replayed against
+both allocators) and it reproduced it *for the wrong reason*: steady churn
+through the CRT costs 26,887 faults for 1.65 GiB, one per resident page,
+while releasing in bulk costs 482,807. That is a true property of the CRT
+heap and it is not this program's problem. **Matching a number is not
+identifying a cause** -- the second time in this file a model has matched a
+number and been wrong, after the 15.625 ms tick.
+
+## It is `CreateFiber`. One per async call. Matched to 0.1%
+
+`scr_async.c`, `scr_async_spawn`, the win32 arm: `CreateFiber(SCR_FIBER_STACK
+= 262144, ...)` once per async **call**, `DeleteFiber` on completion --
+164,711 pairs in this phase. **`CreateFiber`'s first parameter is the initial
+*committed* stack size**, not a reserve and not lazy. The comment three lines
+above it said the opposite ("the reserve stays the default 1MB. Committed
+lazily by the OS"), which is why the site was read as a 160-byte `calloc`.
+
+Standalone, no zapo, no sockets, no crypto, no allocation
+(`dynimp-lab/arena/fiberfault.c`, `fiberpool.c`), 164,711 iterations each
+touching two stack pages the way a real async frame would:
+
+| arm | faults | kernel ms | elapsed |
+| --- | --- | --- | --- |
+| `CreateFiber(262144)` + `DeleteFiber`, per call | 329,445 | 3,766 | 4.00 s |
+| `CreateFiberEx(4096 commit, 1 MiB reserve)` | 329,445 | 1,812 | 2.09 s |
+| pooled, 8 reusable fibers | **34** | 16 | **0.025 s** |
+| pooled, 64 | 174 | 0 | 0.026 s |
+| pooled, 256 | 628 | 0 | 0.034 s |
+| `CreateFiber` arm re-run **last** (control) | 329,445 | 3,766 | 4.12 s |
+
+**329,445 against the bench's 329,111.** The compiled lane's entire
+page-fault bill, reproduced from the fiber count alone.
+
+- The **faults** are the two demand-zero pages each fresh stack touches.
+  Shrinking the commit does not remove them; only reusing stacks does.
+- The **commit size is half the kernel time**: 256 KiB to 4 KiB takes 3,766
+  ms to 1,812 ms for the same faults, with no semantic change.
+- **Reusing the stack removes both**: 34 faults and 0.025 s for the same
+  164,711 switches. A pool of 8 suffices. The pool's cost is *commit* --
+  256 KiB per fiber, so 256 fibers charge 68.97 MiB -- so it must be bounded
+  or the commit shrunk, and the two fixes compose.
+
+**This does not move peak RSS.** The residency table already had the fiber at
+1.57 MiB at peak and zero at exit. It is a page-fault and kernel-time fix and
+is reported as one.
+
+## Is ~20 MB peak RSS reachable for this workload? No, and here is the floor
+
+Stated plainly because the target deserves a number rather than an attempt.
+Every figure below is the **compiled** lane on the real zapo bench.
+
+| term | measured | where |
+| --- | --- | --- |
+| startup RSS floor, before any work | **17.56 MiB** | flat for >1.4 s, 3,864 faults, against a ~25.8 MB image |
+| live heap peak, `send_1to1` 200x2/600 | 19.62 MiB | the arena's own counter |
+| live heap peak, full workload, all phases | **77.11 MiB** | `-DSCR_PROF_LIVE` |
+| peak RSS, `send_1to1` 200x2/600 | 75.8-76.5 MiB | this file, five runs |
+| peak RSS, full workload | 121.88 MiB | earlier run, same instrument |
+
+The floor alone is **17.56 MiB, 88% of a 20 MB budget, before the program
+does anything**, and the full workload's live heap adds 77.11 MiB on top of
+it. An allocator cannot close that: the arena moved peak RSS by 1.2%, and it
+is a *better* allocator than the CRT on this shape (12.2% slack against the
+CRT's larger figure), so allocator slack is not where the bytes are.
+
+Reaching 20 MB would need **both** halves attacked at the source:
+
+- **the image floor**, 17.56 MiB resident of a ~25.8 MB binary. That is a
+  binary-size question, not a memory-management one.
+- **the live set**, of which strings (34.83 MiB at peak) and
+  cycle-collected objects (23.77 MiB) are 76%. Both are *payload*, not
+  representation: `ScrStr` is a 12-byte header plus a NUL over UTF-8, which
+  is 1.2% on the 1102-byte mean this workload allocates. Whether the
+  workload needs those bytes is a question about content, and the census
+  that would answer it (`SCR_STRCEN_ON` -> `scr_str_census_walk.h`) is
+  referenced by `scr_string.c` and **does not exist in this tree**.
+
+A realistic ceiling for allocator and fiber work alone is peak RSS roughly
+where it already is, with the *kernel time* cut by most of the fiber's
+3.8 s. The 20 MB number is not reachable without shrinking the image or the
+live set, and nothing measured here shrinks either.
+
+### Why the two biggest residency sites are both pool misses
+
+`SCR_POOL_MAX` is **256 bytes** (`scr_runtime.h`). `scr_pool_take` returns
+NULL above it, so every string and every cycle-collected object over 256
+bytes physical misses the pool **by construction, on every call**. That is
+exactly what `scr_string.c:128` and `scr_cycle.c:150` are -- the miss arms --
+and the mean allocation at `scr_string.c:128` is 1102 bytes, four times the
+ceiling. It is not a pool sizing problem for those; the pool cannot serve
+them at all.
+
+### The churn ranking over the full workload, which no earlier table showed
+
+Earlier allocation tables were `send_1to1` at 200x2/600. Over the **full**
+workload and all three phases the ranking by count is led by a site absent
+from them:
+
+| allocs | bytes | avg | site |
+| --- | --- | --- | --- |
+| 5,365,508 | 277,694,836 | 52 | `scr_bigint.c:39` |
+| 722,747 | 28,909,880 | 40 | `scr_bytes.c:384` |
+| 643,787 | 103,005,920 | 160 | `scr_async.c:1331` the fiber |
+| 622,021 x3 | 13,522,400 x3 | 22 | `scr_bigint.c:528/529/530` |
+| 587,423 | 647,291,520 | 1102 | `scr_string.c:128` |
+
+`scr_bigint.c:39` alone is **35.6% of all 15,091,036 allocations**; with
+`:528/:529/:530` the bigint file is **47.9%** of every allocation the
+workload makes. Those three lines are `scr_big_bitop`'s three temporary limb
+arrays, all dead before it returns, at a mean of 22 bytes -- a 16-limb stack
+array covers them. And `scr_string.c:128` is 36.6% of all bytes ever
+allocated as well as being #1 by residency; it leads both lists, which no
+earlier table could show because churn and residency were measured on
+different workloads.
+
+`scr_bigint.c`'s own header says "bigint here serves key material and modular
+reduction -- hundreds of ops per handshake, not a hot loop". It is 5.4 million
+calls here. That premise should be re-checked before "binary long division,
+not Knuth D" is accepted on the same authority.
+
+### Sizing the monocypher lead
+
+Measured on the shipping toolchain against the vendored monocypher, 2000 ops
+each, **on a host running 16 concurrent compiler processes** -- upper bounds,
+to be re-taken quiet:
+
+    crypto_x25519             95.2 us/op        crypto_eddsa_key_pair  42.4 us/op
+    crypto_x25519_public_key  94.6 us/op        crypto_eddsa_sign      47.3 us/op
+    crypto_blake2b (64 B)      0.163 us/op
+
+What fraction of `send_1to1` is *field multiplication* cannot be read
+directly: `fe_mul` has 86 call sites in `monocypher.c` and is inlined at all
+of them, which the sampler confirms from the other side -- its table has
+`ge_scalarmult_base` and `crypto_x25519_dirty_fast` with `+0x...` offsets and
+no `fe_mul` symbol at all. **Derived**, and labelled as derived: the two
+scalar-multiplication symbols are 33.6% of `send_1to1`'s program-code
+self-time, and Curve25519 scalar multiplication is ~85-90% `fe_mul`/`fe_sq`,
+so field arithmetic is on the order of **29% of `send_1to1`** -- one phase of
+six. `g_rounds` (12.4%) is Blake2b and is *not* field arithmetic, so the 52%
+"crypto" rollup must not be read as 52% field work.

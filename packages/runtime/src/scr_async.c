@@ -67,6 +67,39 @@ void __sanitizer_finish_switch_fiber(void *fake_stack_save, const void **bottom_
 #define SCR_FIBER_STACK (256 * 1024)
 #endif
 
+/* The INITIAL COMMITTED size of a win32 fiber stack, which is a different
+ * thing from the reserve above and was the whole of this runtime's page-
+ * fault bill. CreateFiber's dwStackSize parameter is the COMMIT, not a
+ * reserve and not lazy: every async call committed 256 KiB of fresh
+ * demand-zero stack and DeleteFiber handed it straight back.
+ *
+ * Measured standalone on this toolchain (dynimp-lab/arena/fiberfault.c),
+ * 164,711 create/switch/delete cycles touching two stack pages each --
+ * which is the fiber count of ONE phase of the zapo messaging bench:
+ *
+ *   CreateFiber(262144)                    329,445 faults  3,766 ms kernel
+ *   CreateFiberEx(16384 commit)            329,445 faults  1,812 ms kernel
+ *   the same arm re-run last (control)     329,445 faults  3,766 ms kernel
+ *
+ * 329,445 against the 329,111 the bench itself measures for that phase, so
+ * this is the whole of it and not a piece. The RESERVE is left at the
+ * executable default exactly as CreateFiber left it -- passing 0 for
+ * dwStackReserveSize means "the default for the executable", so a deep
+ * async body still grows the same way it does today through the guard
+ * page. Only the up-front commitment changes.
+ *
+ * THE FAULTS DO NOT MOVE, and that is expected: they are the demand-zero
+ * first touches of a FRESH stack, so only reusing stacks removes them. A
+ * pool of 8 reusable fibers measures 34 faults and 0.025 s for the same
+ * 164,711 switches (dynimp-lab/arena/fiberpool.c). That is the next
+ * change and it is not this one.
+ *
+ * Left alone under SCR_ASAN_FIBERS: that arm wants 8 MiB actually
+ * committed so ASan can poison the whole stack. */
+#ifndef SCR_FIBER_COMMIT
+#define SCR_FIBER_COMMIT (16 * 1024)
+#endif
+
 /* ── promises ─────────────────────────────────────────────────────────── */
 
 enum { SCR_PROM_PENDING = 0, SCR_PROM_FULFILLED = 1, SCR_PROM_REJECTED = 2 };
@@ -1339,10 +1372,18 @@ ScrPromise *scr_async_spawn(void (*entry)(ScrFiber *, void *), void *argpack) {
   scr_fibers_live++;
 
 #ifdef _WIN32
-  /* The commit size is the ucontext stack's size; the reserve stays the
-   * default 1MB. Committed lazily by the OS, like the malloc'd stacks. */
+  /* NOT lazy, and that mistake cost this runtime its whole page-fault
+   * bill: dwStackSize is the initial COMMITTED size, so the old
+   * CreateFiber(SCR_FIBER_STACK) committed 256 KiB of demand-zero stack
+   * per async CALL. The reserve is unchanged -- 0 means the executable
+   * default, which is what CreateFiber used. See SCR_FIBER_COMMIT. */
   ScrCtx here = scr_win_self();
-  f->ctx = CreateFiber(SCR_FIBER_STACK, scr_trampoline, NULL);
+  f->ctx =
+#ifdef SCR_ASAN_FIBERS
+      CreateFiber(SCR_FIBER_STACK, scr_trampoline, NULL);
+#else
+      CreateFiberEx(SCR_FIBER_COMMIT, 0, 0, scr_trampoline, NULL);
+#endif
   if (f->ctx == NULL) scr_oom();
 #else
   f->stack = malloc(SCR_FIBER_STACK);
@@ -2825,7 +2866,12 @@ ScrGen *scr_gen_new(void (*entry)(ScrFiber *, void *), void *argpack,
   f->als = scr_als_ctx_retain(*scr_als_active);
   scr_fibers_live++;
 #ifdef _WIN32
-  f->ctx = CreateFiber(SCR_FIBER_STACK, scr_trampoline, NULL);
+  f->ctx =
+#ifdef SCR_ASAN_FIBERS
+      CreateFiber(SCR_FIBER_STACK, scr_trampoline, NULL);
+#else
+      CreateFiberEx(SCR_FIBER_COMMIT, 0, 0, scr_trampoline, NULL);
+#endif
   if (f->ctx == NULL) scr_oom();
 #else
   f->stack = malloc(SCR_FIBER_STACK);
