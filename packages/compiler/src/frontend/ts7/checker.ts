@@ -92,6 +92,84 @@ function chunked<T, R>(items: readonly T[], fetch: (chunk: readonly T[]) => read
  * memoized per-node call. */
 const PREFETCH_MAX_DEPTH = 512;
 
+/** The prefetch sweep's SIZE floor, and the second thing that stopped it
+ * paying.
+ *
+ * The sweep exists because a per-node round trip costs 0.1-0.3 ms and a
+ * file's lowering asks about most of its nodes, so ONE batch beats
+ * thousands of calls. That trade is a bet on the hit rate, and it is a
+ * losing bet exactly where the file is enormous and the answers are
+ * worthless: zapo's `spec/proto/index.js` is 1,867,556 bytes of minified
+ * JavaScript with ZERO newlines and 623,938 AST nodes at a maximum
+ * depth of 431 — under PREFETCH_MAX_DEPTH, so nothing above stopped it —
+ * and it reaches the lowering through the declaration-twin rule, where a
+ * minified `.js` body has no types and every value in it ends up `ScrDyn`.
+ * The sweep issued getTypeAtLocation and getSymbolAtLocation over all
+ * 623,938 nodes, in 305 chunks of 2,048, twice.
+ *
+ * Measured with `node --cpu-prof` over the frontend-only lane
+ * (SCRIPTC_KEYREAD_CENSUS_ONLY=1) of zapo's fake-server messaging bench:
+ * prefetchTypes was 127,733 ms and prefetchSymbols 27,096 ms of 507,470 ms
+ * sampled — 30.5% of the whole frontend, nearly all of it blocked
+ * reading the tsgo channel.
+ *
+ * Above this many nodes the file keeps the per-node path, which is not a
+ * fallback bolted on for this: getTypeAtLocation/getSymbolAtLocation
+ * already answer a memo miss with a direct memoized call, and have since
+ * the facade was written. Answers are IDENTICAL either way; only the
+ * number of round trips changes. Skipped files stay marked prefetched, so
+ * the decision is made once per file, not once per query.
+ *
+ * THE CONSTANT IS NOT ON A CLIFF. Every source of that program over 150 KB
+ * was counted, plus the three largest @types/node declaration files:
+ *
+ *     1,867,556 bytes   623,938 nodes   OVER   spec/proto/index.js
+ *       757,506         133,498         OVER   spec/proto/index.d.ts
+ *       179,914          17,877                spec/mex/index.d.ts
+ *       215,106          15,200                @types/node/inspector.generated.d.ts
+ *       225,899          10,507                @types/node/crypto.d.ts
+ *
+ * Only the generated protobuf pair crosses; the next largest file in the
+ * whole program is 5.6x under. Nothing an ordinary project writes comes
+ * near it, and packages/compiler/test/ts7/facade.test.ts — whose fixtures
+ * are small — keeps taking the batch path and keeps asserting that N nodes
+ * cost O(1) raw requests.
+ *
+ * WHAT IT IS WORTH, A/B, on the frontend-only lane of zapo's fake-server
+ * messaging bench. NO profiler (its overhead lands on the node side, which
+ * is the side that changes), arms back to back by a chained script, and the
+ * cap arm run BOTH first and last because a one-sample timing on a shared
+ * box is not a measurement. The tsgo checker is a separate process, so its
+ * CPU is sampled by pid and reported apart:
+ *
+ *     arm  variant   wall s   node CPU s   tsgo CPU s   TOTAL CPU s
+ *     c1   cap ON     604.0        428.6        186.5         615.0
+ *     c2   cap OFF    676.7        370.2        322.3         692.4
+ *     c3   cap ON     539.1        394.8        161.9         556.7
+ *
+ * READ THE A/A CONTROL FIRST: c1 and c3 are the SAME compiler and differ by
+ * 9.5% of total CPU. That is the run-to-run noise with three sibling blocks
+ * building, and it is large enough that the c1-vs-c2 pair alone would not
+ * have carried this. What does carry it is that BOTH cap arms sit below the
+ * base arm while the base arm ran BETWEEN them — drift cannot produce that
+ * ordering — and that the mechanism column is far outside the noise: tsgo
+ * CPU -42.1% and -49.8% against an A/A spread of 13.2%.
+ *
+ * The trade is legible in the two CPU columns and it is the trade this
+ * constant is making: the SERVER does about half as much work, because the
+ * sweep is not asking it about 623,938 nodes the lowering never queries;
+ * node does more, because the queries that remain each pay their own round
+ * trip instead of riding a batch of 2,048. On this input the server saves
+ * more than the client spends. Mean of the two cap arms against the base:
+ * total CPU 585.9 vs 692.4 (-15.4%), wall 571.6 s vs 676.7 s (-15.5%).
+ *
+ * The frontend is 45.8% of an 877 s end-to-end build of that program, so
+ * this is worth roughly 7% of a whole build — real, free, and NOT the big
+ * lever. The big one is to keep the batching and SCOPE it to the subtree
+ * the lowering is about to walk, so nodes nobody asks about are never
+ * queried at all, in a batch or otherwise. */
+const PREFETCH_MAX_NODES = 100_000;
+
 /** Preorder sweep of the whole file, ITERATIVE (walkPreorder): the obvious
  * recursive forEachChild walk overflowed the stack HERE, in the prefetch
  * sweep, on the binderBinaryExpressionStress chains — before lowering could
@@ -259,7 +337,9 @@ export class CheckerFacade {
   private prefetchTypes(sf: SourceFile): void {
     if (this.prefetchedTypes.has(sf)) return;
     this.prefetchedTypes.add(sf);
-    const nodes = collectNodes(sf).filter((n) => !this.typeAtLocation.has(n));
+    const all = collectNodes(sf);
+    if (all.length > PREFETCH_MAX_NODES) return;
+    const nodes = all.filter((n) => !this.typeAtLocation.has(n));
     const types = chunked(nodes, (chunk) => this.typesWithPanicFence(chunk));
     nodes.forEach((n, i) => this.typeAtLocation.set(n, types[i]));
   }
@@ -273,7 +353,9 @@ export class CheckerFacade {
   private prefetchSymbols(sf: SourceFile): void {
     if (this.prefetchedSymbols.has(sf)) return;
     this.prefetchedSymbols.add(sf);
-    const nodes = collectNodes(sf).filter((n) => !this.symbolAtLocation.has(n));
+    const all = collectNodes(sf);
+    if (all.length > PREFETCH_MAX_NODES) return;
+    const nodes = all.filter((n) => !this.symbolAtLocation.has(n));
     // The same bisecting panic fence as the type sweep: tsgo panics on
     // SYMBOL queries too (observed: GetSymbolAtLocation over an
     // `import.defer(...)` callee — the sweep's batch must not turn one
@@ -303,7 +385,14 @@ export class CheckerFacade {
     if (this.typeAtLocation.has(node)) return this.typeAtLocation.get(node) ?? this.anyType();
     this.autoPrefetch(node, "types");
     if (this.typeAtLocation.has(node)) return this.typeAtLocation.get(node) ?? this.anyType();
-    const type = this.raw.getTypeAtLocation(node);
+    // The direct (memo-miss) path wears the SAME panic fence as the sweep,
+    // for the reason getTypeOfSymbol's already did: a tsgo panic is a
+    // thrown Error on the sync channel, and the sweep answers one with
+    // `undefined` (presented as `any`) rather than a crashed build. While
+    // every file was swept, the sweep reached the poisonous node first and
+    // this path never saw one; a file the sweep SKIPS has no such
+    // protection, so the two paths have to agree about what a panic means.
+    const [type] = withPanicFence([node], (c) => this.raw.getTypeAtLocation(c) as (Type | undefined)[]);
     this.typeAtLocation.set(node, type);
     return type ?? this.anyType();
   }
@@ -312,7 +401,10 @@ export class CheckerFacade {
     if (this.symbolAtLocation.has(node)) return this.symbolAtLocation.get(node);
     this.autoPrefetch(node, "symbols");
     if (this.symbolAtLocation.has(node)) return this.symbolAtLocation.get(node);
-    const symbol = this.raw.getSymbolAtLocation(node);
+    // Fenced for the reason above: the symbol sweep panics too (the
+    // `import.defer(...)` callee it already names), and a skipped file's
+    // queries all come down this path.
+    const [symbol] = withPanicFence([node], (c) => this.raw.getSymbolAtLocation(c));
     this.symbolAtLocation.set(node, symbol);
     return symbol;
   }
