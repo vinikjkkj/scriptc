@@ -445,7 +445,6 @@ touching two stack pages the way a real async frame would:
 | arm | faults | kernel ms | elapsed |
 | --- | --- | --- | --- |
 | `CreateFiber(262144)` + `DeleteFiber`, per call | 329,445 | 3,766 | 4.00 s |
-| `CreateFiberEx(4096 commit, 1 MiB reserve)` | 329,445 | 1,812 | 2.09 s |
 | pooled, 8 reusable fibers | **34** | 16 | **0.025 s** |
 | pooled, 64 | 174 | 0 | 0.026 s |
 | pooled, 256 | 628 | 0 | 0.034 s |
@@ -454,14 +453,55 @@ touching two stack pages the way a real async frame would:
 **329,445 against the bench's 329,111.** The compiled lane's entire
 page-fault bill, reproduced from the fiber count alone.
 
-- The **faults** are the two demand-zero pages each fresh stack touches.
-  Shrinking the commit does not remove them; only reusing stacks does.
-- The **commit size is half the kernel time**: 256 KiB to 4 KiB takes 3,766
-  ms to 1,812 ms for the same faults, with no semantic change.
-- **Reusing the stack removes both**: 34 faults and 0.025 s for the same
-  164,711 switches. A pool of 8 suffices. The pool's cost is *commit* --
-  256 KiB per fiber, so 256 fibers charge 68.97 MiB -- so it must be bounded
-  or the commit shrunk, and the two fixes compose.
+**The faults are the two demand-zero pages each *fresh* stack touches, and
+nothing but reusing stacks removes them.** A pool of 8 reusable fibers costs
+34 faults and 0.025 s for the same 164,711 switches -- four orders of
+magnitude. The pool's own cost is *commit*, 256 KiB per fiber, so 256 fibers
+charge 68.97 MiB: it must be bounded, or the commit shrunk, or both.
+
+### Commit or reserve: a confound in the first table, caught by the bench
+
+The first version of this table had a `CreateFiberEx(4096 commit, 1 MiB
+reserve)` row at 1,812 ms and credited the **commit size** with halving the
+kernel time. That arm moved two variables at once: the baseline
+`CreateFiber` takes its reserve from the executable, and **the scriptc
+binaries carry a 16 MiB `SizeOfStackReserve`** (read from the PE optional
+header of `bench.exe` and of the microbenchmark itself).
+
+The commit-only change was shipped and measured on the real bench -- plain
+vs fibfix interleaved, plain re-run last, 5 plain / 4 fibfix reps on a quiet
+host, `send_1to1` 200x2/600 -- and moved **nothing**:
+
+    kern_ms  plain  3969 4016 4422 3641 3625   median 3969
+             fibfix 4375 4094 3750 3891        median 3992
+    faults   both ~329,000 (unchanged, as predicted)
+
+The 2x2 that should have been run first (`dynimp-lab/arena/fiber2x2.c`),
+same 164,711 cycles, `reserve 0` = the 16 MiB executable default:
+
+| commit | reserve | kernel ms | elapsed | faults |
+| --- | --- | --- | --- | --- |
+| 262144 | 16 MiB (default) | 2,594 | 2.733 s | 329,445 |
+| 16384 | 16 MiB (default) | 2,406 | 2.632 s | 329,445 |
+| 262144 | 1 MiB | 1,312 | 1.545 s | 329,445 |
+| 16384 | 1 MiB | 1,234 | 1.425 s | 329,445 |
+| 16384 | 256 KiB | 1,000 | 1.165 s | 329,445 |
+| 262144 | 16 MiB (control, **last**) | 2,484 | 2.694 s | 329,445 |
+
+**The reserve is the cost, not the commit.** 16 MiB to 1 MiB halves the
+kernel time; 256 KiB to 16 KiB of commit at the same reserve is 7% -- which
+is exactly the "indistinguishable from noise" the real bench reported for
+that change. The two instruments agree once the confound is removed, and
+that agreement is the reason to believe the 2x2.
+
+So the shipped commit-size change is worth **~7% of the fiber's kernel time,
+unmeasurable on the bench**, zero bytes of binary, and one corrected comment.
+Its real value is **commit charge** -- 16 KiB instead of 256 KiB per *live*
+fiber, 16x less on a phase that keeps hundreds in flight -- and that is
+**unmeasured**, because `cpuphase` reports working set and not
+`PagefileUsage`. Lowering the *reserve* is the larger lever and is a
+semantic change (it caps how deep an async body may recurse), so it is not
+taken here.
 
 **This does not move peak RSS.** The residency table already had the fiber at
 1.57 MiB at peak and zero at exit. It is a page-fault and kernel-time fix and
