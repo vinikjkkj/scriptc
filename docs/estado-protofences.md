@@ -541,3 +541,64 @@ a decision from the user before engine work continues: the target and this
 codec cannot both hold, and the honest options are (a) the ~20 MB target
 applies to binaries that do not instantiate libopus, (b) the target moves for
 voip, or (c) voip's codec stays refused.
+
+## PHASE 8 — the SECOND target: the messaging bench, same construct, different TU
+
+`benchapp/tree/packages/fake-server/bench-client5/messaging.bench.ts
+--backend c --best-effort --provenance-sources`, compiler at `d646cfa2`.
+Emitted C: `bench/messaging.bench.c`, **130,898,721 bytes**.
+
+| | base (sizespeed's `builds/base/messaging.bench.c`, main `2b05d613`, same day) | here |
+| --- | --- | --- |
+| `[SC1090 at .../spec/proto/index.js:1]` | **1** | **0** |
+| `[SC2020 at .../spec/proto/index.js:1]` | 1 | 1 |
+| SC1090 in the bench's own TS (`messaging.bench.ts` x18, `_store-factory.ts:91`) | 19 | 19 |
+| SC2002 / SC2004 / SC2011 in the bench's own TS | 3 | 3 |
+| **total** | **24** | **23** |
+
+Exactly one fence moved, and it is the proto SC1090. A different entry, a
+different translation unit, a different lab, measured independently at base by
+another block — which is the check that the CONSTRUCT was fixed rather than
+one site.
+
+## Score so far
+
+**wam's package entry:  1 TRAP-fence removed, 0 MATCH→WRONG.**  6 → 2 → **1**.
+**the messaging bench:   1 TRAP-fence removed, 0 MATCH→WRONG.**  24 → **23**.
+**probes:                3 TRAP→MATCH** (`NoSuchGlobalXyz` as a value, as a
+member receiver, and under `new`), byte-exact against node v25.9.0 on both
+backends, `quickjs=0 ScrDyn=0 JS_NewRuntime=0`.
+
+## STAGE 5 — the OTHER half: what has to compile before any opcode runs
+
+Static inventory of `libmlow-wasm/dist/generated/libmlow.generated.mjs`
+(642,918 bytes, 2 newlines — minified ESM) and `dist/index.js` (28,846 B):
+
+| surface | count | note |
+| --- | --- | --- |
+| `WebAssembly.instantiate` | 1 | the only compile/instantiate entry point used |
+| `WebAssembly.RuntimeError` | 1 | trap classification |
+| typed-array heap views | 10 distinct | Int8/Uint8/Int16/Uint16/Int32/Uint32/Float32/Float64/**BigInt64**/**BigUint64** |
+| `TextDecoder` | 2 | plus `globalThis.TextDecoder` feature-test |
+| `setTimeout` / `clearTimeout` | 3 / 1 | the `a.a` import; its callback RE-ENTERS wasm |
+| `await import("node:module")` | 1 | then `createRequire(import.meta.url)` |
+| `import.meta.url` | 2 | |
+| `require("node:fs")` / `("node:path")` / `("node:url")` | 3 | through that createRequire |
+| `globalThis.window` / `.WorkerGlobalScope` / `.process` | 4 | environment feature-tests |
+| `process.argv` / `.argv.slice` / `.exitCode` | 4 | |
+| `performance.now` | 1 | |
+| `Symbol.dispose` (index.js) | 2 | explicit resource management |
+| `Atomics` / `SharedArrayBuffer` / `Worker` / `crypto` | **0** | no threads, no worker pool |
+
+So the non-WebAssembly half needs: a **dynamic import of a bare package
+specifier**, `import.meta.url`, `createRequire` off it, ten typed-array views
+over a `WebAssembly.Memory` buffer (BigInt64 included), `TextDecoder`,
+`setTimeout` with a callback that re-enters the instance, `performance.now`,
+`process.argv`/`exitCode`, and `Symbol.dispose`.
+
+And `mlow-codec.ts:26`'s `Promise<MlowModule> | null` is the **SC2009 that has
+been on the books for weeks as "voip's other independent stop"**. It is this,
+and nothing else.
+
+A perfect engine behind an unresolvable `import('libmlow-wasm')` is worth
+nothing, so this half is sized and reported BEFORE any engine is written.
