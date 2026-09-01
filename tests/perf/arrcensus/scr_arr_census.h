@@ -104,6 +104,18 @@ SCR_ARRCEN_SHARED long long scr_arrcen_kind_elems[SCR_ARRCEN_KINDS];
  * wearing a slice's name, and it is the shape a reference would replace. */
 SCR_ARRCEN_SHARED long long scr_arrcen_slice_whole = 0;
 SCR_ARRCEN_SHARED long long scr_arrcen_slice_empty = 0;
+/* THE CHILD-SUPERVISION PUMP. scr_win_run_sync is reported at 66.9% of the
+ * RECV group phase by the suspend-and-sample profiler, and an earlier 93.81%
+ * reading of the SAME function was refuted as a thread-selection artifact.
+ * The 66.9% survived cycle-weighting but has never been confirmed by an
+ * instrument that does not share the sampler's thread-selection assumption.
+ * This is that instrument, and it shares nothing with it: an exact iteration
+ * count and the pump thread's OWN QueryThreadCycleTime delta across the whole
+ * blocking call. If the claim is real those cycles are most of the run. */
+SCR_ARRCEN_SHARED long long scr_arrcen_pump_calls = 0;
+SCR_ARRCEN_SHARED long long scr_arrcen_pump_iters = 0;
+SCR_ARRCEN_SHARED unsigned long long scr_arrcen_pump_cycles = 0;
+SCR_ARRCEN_SHARED long long scr_arrcen_pump_ms = 0;
 SCR_ARRCEN_SHARED long long scr_arrcen_planted = 0;
 SCR_ARRCEN_SHARED int scr_arrcen_reported = 0;
 
@@ -124,6 +136,14 @@ SCR_ARRCEN_FN void scr_arrcen_note_slice(long long srclen, long long n, int kind
   }
   if (n == 0) scr_arrcen_slice_empty++;
   else if (n == srclen) scr_arrcen_slice_whole++;
+}
+
+SCR_ARRCEN_FN void scr_arrcen_note_pump(long long iters, unsigned long long cycles,
+                                       long long ms) {
+  scr_arrcen_pump_calls++;
+  scr_arrcen_pump_iters += iters;
+  scr_arrcen_pump_cycles += cycles;
+  scr_arrcen_pump_ms += ms;
 }
 
 SCR_ARRCEN_FN const char *scr_arrcen_name(int s) {
@@ -151,6 +171,9 @@ SCR_ARRCEN_FN void scr_arrcen_report(void) {
           (int)SCR_ARRCEN_EXACT);
   fprintf(f, "ARRCEN-SLICE whole=%lld empty=%lld\n", scr_arrcen_slice_whole,
           scr_arrcen_slice_empty);
+  fprintf(f, "ARRCEN-PUMP calls=%lld iters=%lld cycles=%llu wallms=%lld\n",
+          scr_arrcen_pump_calls, scr_arrcen_pump_iters, scr_arrcen_pump_cycles,
+          scr_arrcen_pump_ms);
   for (s = 0; s < SCR_ARRCEN_SLOTS; s++) {
     fprintf(f, "ARRCEN-SLOT %s calls=%lld total=%lld max=%lld\n",
             scr_arrcen_name(s), scr_arrcen_calls[s], scr_arrcen_total[s],
