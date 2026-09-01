@@ -1,0 +1,24 @@
+DTLS 1.2 handshake with our own certificate
+  ok   both endpoints have certificates                     
+  ok   client cert parses for presentation                  
+  ok   server cert parses for presentation                  
+  ok   drbg seeds                                           
+  ok   both configs default to DTLS                         
+  ok   client key and cert installed                        
+  ok   server key and cert installed                        
+  ok   client setup                                         
+  ok   server setup                                         
+  ok   HANDSHAKE COMPLETES                                  client=0 server=0 spins=3
+       DTLSv1.2 / TLS-ECDHE-ECDSA-WITH-CHACHA20-POLY1305-SHA256
+  ok   client received a peer certificate                   
+  ok   it hashes to the SERVER's advertised fingerprint     
+  ok   and NOT to the client's own certificate              
+  ok   server received a peer certificate                   
+  ok   it hashes to the CLIENT's advertised fingerprint     
+  ok   client writes application data                       
+  ok   server reads exactly those bytes                     
+  ok   server writes back                                   
+  ok   client reads it                                      
+
+19 checks, 0 failures
+RESULT: PASS
