@@ -701,3 +701,120 @@ binary, its stdout, its oracle's stdout, both build logs and the emitted C TU),
 `diag/` (every diagnostic log), `estado-pkgstatus2.md` (this file).
 Everything is mirrored into the worktree at `tests/perf/pkgstatus2/` and
 committed.
+
+---
+
+# Second round — on main `acdd8b96`, rebased and re-measured
+
+The block was rebased onto `acdd8b96`; the compiler was rebuilt; `surfaces.ts`
+had moved under this block (`310da1ea`, the `process.type` rung inside
+`610073a4`). **The defect re-reproduces unchanged on the new base** — same
+decline step, same mis-blame — so nothing below rests on the old build.
+
+---
+
+## 15. Item 1 — the type-only export exception: WHICH names, and why it is not the protobuf case
+
+The orchestrator's constraint is the right one to answer first:
+`npm-static.ts:6-18` says *"a declaration is a CLAIM about the body, and the
+compiled artifact must be built from what the body provably is, not from what
+the declaration says it should be"*, and a sibling proved it — protobuf's
+`.d.ts` declares `encode` with 2 parameters against an actual 3, **0 of 642
+agreeing**. So the exception has to be argued, not assumed.
+
+### 15a. First, the names — because "3, 9 and 18 sites" never said WHICH
+
+The note counts sites and never named them, and the names are what decides
+whether a package is one declaration away or a rewrite away. This block added
+`SCRIPTC_NPMSTATIC_WHY` (off by default, stderr, same shape as
+`SCRIPTC_ABSENTGLOBAL_WHY`) to `index.ts`'s consumer-anchored attribution loop,
+and every breaking site in the corpus is now named:
+
+| package | sites | distinct names | how the package's OWN declarations spell each |
+| --- | --- | --- | --- |
+| `ioredis` | **3** | `RedisOptions` ×2, `ChainableCommander` | `built/index.d.ts:34` re-exports `RedisOptions` from `./redis/RedisOptions`, where it is an **`interface`** (the JS module exports `DEFAULT_REDIS_OPTIONS`, a value, and no `RedisOptions`); `:38` is an explicit **`export type {`** for `ChainableCommander`. **Both type-only.** |
+| `mysql2` | **9** | `Pool` ×4, `PoolOptions` ×3, `FieldPacket`, `ResultSetHeader` | at the specifier the program imports, `mysql2/promise`, `promise.d.ts:92` is **`export interface Pool extends Connection`**; `PoolOptions` is an `interface`; `FieldPacket` and `ResultSetHeader` likewise. **All four type-only — at that specifier.** |
+| `pg` | **18** | `PoolClient` ×9, `Pool` ×4, `PoolConfig` ×3, `QueryResult` ×2 | `@types/pg/index.d.ts`: `PoolConfig:49` **`interface`**, `QueryResult:104` **`interface`**, `PoolClient:320` **`interface`** — but `Pool:184` is **`export class Pool extends events.EventEmitter`**, a **VALUE**. |
+
+Two facts fall out that no per-package rule would survive:
+
+- **The classification is per (specifier, name), never per package.**
+  `Pool` is an `interface` at `mysql2/promise` and a `declare class` at
+  `mysql2` (`typings/mysql/lib/Pool.d.ts:49`), whose JS really does
+  `exports.Pool = Pool` (`index.js:26`). The same name is type-only through one
+  door and a value through the other.
+- **`pg` is not the same case at all.** `pg` ships **no declarations of its
+  own** (`package.json` has no `types`/`typings`; `main: ./lib`) — the
+  declarations are a DefinitelyTyped twin, which is a weaker source of truth
+  than a package's own `.d.ts` to begin with. And its `Pool` *is* a runtime
+  value: `pg/lib/index.js` does `module.exports = new PG(clientConstructor)`
+  and the constructor assigns `this.Pool = poolFactory(this.Client)`
+  (`:25`). Inference cannot reach a property assigned onto an instance, so
+  `Pool` breaks not because it is type-only but because it is **a value
+  inference cannot see** — which is exactly the case the doctrine says must be
+  built from the body.
+
+### 15b. Why the exception is safe where the protobuf case was not
+
+Four points, and the third is measured rather than argued.
+
+1. **A type-only export contributes no code to the artifact.** An `interface`
+   or a `type` alias emits nothing. The doctrine's clause is that the compiled
+   artifact must be built from the body; a type-only name builds no part of it.
+2. **There is no body for it to contradict.** protobuf's `encode` is a function
+   the compiler *can* compile, so the declaration and the body are two accounts
+   of one thing and they disagreed 642 times. `RedisOptions` at `ioredis` and
+   `Pool` at `mysql2/promise` have **no runtime value at that specifier at
+   all** — the JS module genuinely does not export them, which is precisely why
+   inference reports "has no exported member". A claim with nothing to
+   contradict cannot mis-describe a body.
+3. **An over-claiming declaration produces a checked TypeError, not a wrong
+   answer — measured, both backends.** `drivers/claim-probe3.ts`: a compiled
+   JS body (`claimlab/body.js`) whose object has neither `version` nor
+   `decode`, typed by an interface that claims both.
+
+   ```
+   binary  Uncaught TypeError: expected function at $.decode, got undefined
+   node    1 tag: body
+           2 version the body does not have: undefined
+           3 decode the body does not have: threw: c.decode is not a function
+   ```
+
+   The binary **refuses at the boundary and names the member**. Scored DIFF, and
+   the direction matters: it is a TRAP, not a WRONG. And the *under*-claiming
+   shape — the protobuf arity shape, a body of three parameters called through a
+   claim of two (`drivers/claim-probe2.ts`) — builds and **MATCHes node
+   byte-exactly on both backends** (`1:2:MISSING`, 660,992 bytes, `quickjs=0
+   ScrDyn=0`, 0 fences), because JavaScript's own rule for a missing argument is
+   `undefined` and the compiler models it.
+
+   **This does NOT retract the doctrine.** The protobuf failure was not that the
+   compiler crashed on a bad declaration; it was that trusting declarations
+   would have mis-typed 91% of a bundle whose bodies were right there to be
+   read. Point 3 only establishes the weaker thing the exception needs: the
+   failure mode of an admitted type-only claim is refusal-shaped.
+4. **Nothing in the exception un-hides a body.** The rule admits a name that
+   the shipped JS does not export; every name the JS *does* export keeps
+   coming from the body, and every statement the lowering cannot honour keeps
+   its runtime fence. Trust-but-verify is untouched.
+
+### 15c. What the exception would and would not buy, per package
+
+| package | sites | the exception covers | residue |
+| --- | --- | --- | --- |
+| `ioredis` | 3 | **3 of 3** | **none** — `store-redis` becomes static |
+| `mysql2` | 9 | **9 of 9** | **none** — `store-mysql` becomes static |
+| `pg` | 18 | 14 (`PoolClient`, `PoolConfig`, `QueryResult`) | **4** — `Pool`, a value inference cannot reach through `module.exports = new PG(...)` |
+
+So it is **not** "one mechanism, three packages". It is one mechanism, **two**
+packages completely, and a third that needs a different fix (reaching an export
+assigned onto an instance, or refusing) and stays on the island without it.
+Both `ioredis` and `mysql2` ship their own declarations; `pg` does not, which is
+the same split.
+
+**This block did not implement it.** The change is in resolution — the `.d.ts`
+is hidden by virtual-FS hooks, and admitting *part* of one means synthesising a
+filtered declaration set and merging it with an inferred surface. That is a
+design, not a round, and it needs the gate. What is delivered is the decided
+question: the names, their spelling in each package's own declarations, the
+per-specifier rule, the measured failure mode, and the two packages it closes.
