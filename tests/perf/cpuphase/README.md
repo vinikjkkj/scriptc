@@ -53,32 +53,59 @@ and samples the child's kernel counters on the `[phase-begin]` /
 the user/kernel split the cycle counter cannot give; its 15.625 ms quantum
 is 0.03–0.4% over phases of seconds, unusable per call but reportable here.
 
-Interleaved, 3 reps, medians, full-size bench:
+Interleaved, 3 reps, medians, full-size bench. **Re-measured 2026-09-01
+with the `scr_async.c` idle-sleep fix in**, as three arms in ONE session —
+node, the PRE-fix binary and the POST-fix binary — because comparing a
+fresh run against a table measured on a different machine state is not a
+comparison. Both binaries content-verified: PRE has no
+`CreateWaitableTimerExW` import, POST has it.
+
+Ratios are **paired within each rep** (the three arms run back to back), so
+session drift cancels — the control measured that drift at 1.10-1.51x, and
+POST runs last in every rep, so residual bias is *against* POST.
 
 ```
-phase          lane      wall_s  Mcycles  user_s  kern_s  cpu_s   cpu%
-buildContacts  node        7.42     4226    0.77    0.34   1.05  19.4%
-               compiled   22.64     7383    1.39    0.67   2.03   9.1%
-buildGroups    node        7.10     4912    0.62    0.42   1.11  15.6%
-               compiled   60.64     7626    0.94    1.17   2.08   3.4%
-send_1to1      node       14.88    54930   14.58    0.98  15.62 104.2%
-               compiled   18.64    61144    6.19   10.86  17.08  91.6%
-recv_1to1      node       12.38    27334    7.27    0.38   7.67  62.2%
-               compiled   11.13    26263    2.69    4.31   7.33  65.8%
-send_group     node       17.44    63068   16.28    0.98  17.27 100.1%
-               compiled   28.77    94364   18.16    7.61  26.23  91.2%
-recv_group     node        2.42     5357    1.09    0.36   1.45  62.8%
-               compiled    9.99    33003    6.83    2.41   9.23  92.4%
+phase           pre/node              post/node             post/pre (the fix)
+buildContacts   4.35x [3.62-5.78]     1.65x [1.29-1.83]     0.36x [0.32-0.38]
+buildGroups    12.06x [10.95-16.06]   1.97x [1.64-2.48]     0.15x [0.15-0.16]
+send_1to1       1.35x [1.26-1.38]     1.34x [1.19-1.79]     0.99x [0.95-1.30]
+recv_1to1       0.90x [0.85-0.93]     0.83x [0.83-1.39]     0.93x [0.89-1.62]
+send_group      1.60x [1.53-1.64]     1.46x [1.40-1.83]     0.95x [0.85-1.14]
+recv_group      4.05x [3.57-4.17]     3.90x [3.47-5.25]     0.97x [0.96-1.26]
 ```
 
-Contention control — the node arm re-run **last**: buildGroups 5.44→5.99 s,
-send_group 15.85→15.30 s. Within ~10%.
+**The fix does what the micro-benchmark said and nothing more.** The two
+sequential-RPC phases collapse — buildGroups 61.8 s to 9.6 s, buildContacts
+21.3 s to 7.5 s — and every other row is unchanged inside its spread.
 
-**The split is the finding.** `buildGroups` compiled is 3.4% CPU over 60.6 s
-— blocked, not computing (see `tests/perf/looplatency` for the cause). And
-in `send_1to1` the compiled lane uses **2.4× less user time than node** and
-still loses, because it pays **11× more kernel time**: 10.86 s against
-0.98. The extra cost is syscalls, not compute.
+**Two things that were predicted and did not happen, which matter more than
+the wins:**
+
+1. **`recv_group` did not collapse** (4.05x -> 3.90x) even though it has
+   ~251 sequential round trips. It was never wait-dominated: its CPU is
+   **97.3%**, against buildGroups' 3.2%. Ordering the rows by RPC sequential
+   depth predicted this one wrong — depth only matters when the phase is
+   actually blocked, and this one is compute-bound.
+2. **`send_1to1`'s kernel time did not fall.** Per rep, seconds:
+
+   ```
+           node    pre    post
+   rep1    0.83    8.58   8.66
+   rep2    1.47    9.22  10.44
+   rep3    0.61    9.36   9.06
+   ```
+
+   Still ~10x node's. **The syscall cost is NOT the loop-turn sleep** — it
+   survives the fix untouched, and it is the largest remaining compiled-lane
+   cost in a compute-bound phase. That is the next thing to attribute.
+
+What the fix *did* move, on the other column asked for: **`buildGroups` CPU
+climbed off 3.2% to 13.7-18.8%** while its CPU time stayed at ~1.3-1.9 s and
+its wall fell 6.5x. It is no longer blocked; it now spends its ~1.6 s of work
+in 9.6 s instead of 61.8 s.
+
+The pre-fix absolute table (measured 2026-08-31, before the fix) is kept in
+`dynimp-lab/FINDINGS.txt` section 11.
 
 `heap delta` is genuinely unobtainable — there is no V8 heap in a compiled
 binary. Both benches now print `n/a` with the reason rather than `0.00`.
