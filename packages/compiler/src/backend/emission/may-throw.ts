@@ -1,7 +1,74 @@
 /* Cheap whole-module may-throw analysis (see computeMayThrow). Pure function
  * of the IR module; the emitter consults the result to place unwind checks. */
-import type { IrArrIntrinsicMethod, IrBytesIntrinsicMethod, IrLibFn, IrModule } from "../../ir/nodes.js";
+import type { IrArrIntrinsicMethod, IrBytesIntrinsicMethod, IrLibFn, IrModule, IrType } from "../../ir/nodes.js";
 import { MAY_THROW_ARR_METHODS, MAY_THROW_BYTES_METHODS, MAY_THROW_LIB_FNS } from "../../ir/nodes.js";
+
+/** Does a dynCheck against `t` mint a function ADAPTER anywhere inside it?
+ *
+ * A dyn→static check descends the target type: a record check validates each
+ * declared field, a union check each arm, an array check its elements. Wherever
+ * that descent reaches a `func`, the walker compares the source closure's
+ * signature against the declared one and, when they differ, synthesizes an
+ * adapter closure that re-validates arguments on the way in and THE RESULT on
+ * the way out. Those adapters throw, and they are emitter-synthesized — no
+ * `closure` node names them, so `closureTargets` cannot see them and only this
+ * predicate can force `indirect`.
+ *
+ * A TOP-LEVEL-ONLY test is not enough, and the gap is not academic: annotating
+ * an `any` value with an interface that has a method
+ * (`interface U { find(k: string): string }`) produces a check whose own kind is
+ * `record`, with the func one level down. Before this walked, the adapter's
+ * result check fired, set the pending exception, and the caller — told the call
+ * could not throw — carried on with a NULL result for the rest of the function.
+ * That printed values Node never prints (a `typeof` folded from the declared
+ * type read `string` over a `null`) and surfaced the throw at exit instead of at
+ * the call: a silent wrong answer where a trap belonged.
+ *
+ * Deliberately conservative in the other direction: a `func` under a promise or
+ * a generator slot counts even where today's walker may not reach it. The only
+ * cost of a false yes is pending-exception checks in a module that already
+ * contains a dyn-check — a flag read — and the cost of a false no is this bug.
+ * Records and unions are id-indirected and may be recursive, so the seen set is
+ * load-bearing, not hygiene. */
+function typeMintsFnAdapter(t: IrType | undefined, mod: IrModule, seen: Set<string>): boolean {
+  if (t === undefined) return false;
+  switch (t.kind) {
+    case "func":
+      return true;
+    case "array":
+    case "set":
+      return typeMintsFnAdapter(t.elem, mod, seen);
+    case "map":
+      return typeMintsFnAdapter(t.key, mod, seen) || typeMintsFnAdapter(t.value, mod, seen);
+    case "promise":
+      return typeMintsFnAdapter(t.inner, mod, seen);
+    case "generator":
+      return (
+        typeMintsFnAdapter(t.yieldT, mod, seen) ||
+        typeMintsFnAdapter(t.retT, mod, seen) ||
+        typeMintsFnAdapter(t.nextT, mod, seen)
+      );
+    case "record": {
+      if (seen.has(`r:${t.shapeId}`)) return false;
+      seen.add(`r:${t.shapeId}`);
+      const shape = (mod.records ?? []).find((r) => r.id === t.shapeId);
+      if (!shape) return false;
+      return (
+        shape.fields.some((f) => typeMintsFnAdapter(f.type, mod, seen)) ||
+        typeMintsFnAdapter(shape.indexValue, mod, seen)
+      );
+    }
+    case "union": {
+      if (seen.has(`u:${t.unionId}`)) return false;
+      seen.add(`u:${t.unionId}`);
+      const def = (mod.unions ?? []).find((u) => u.id === t.unionId);
+      if (!def) return false;
+      return def.arms.some((a) => typeMintsFnAdapter(a, mod, seen));
+    }
+    default:
+      return false;
+  }
+}
 
 /** Cheap may-throw analysis (cost discipline: functions that transitively
  * CANNOT throw pay for no pending-exception checks). A function may throw
@@ -84,7 +151,11 @@ export function computeMayThrow(mod: IrModule): { fns: Set<string>; indirect: bo
           // callValue) — those adapters are emitter-synthesized, invisible
           // to closureTargets, so they force the indirect answer below.
           f.throws = true;
-          if ((rec["type"] as { kind?: string } | undefined)?.kind === "func") {
+          // NOT a top-level kind test: the adapter is minted wherever the
+          // descent reaches a func, which for the ordinary spelling — an
+          // interface with a method, annotated onto an `any` value — is one
+          // level down inside a record. See typeMintsFnAdapter.
+          if (!sawDynFuncAdapter && typeMintsFnAdapter(rec["type"] as IrType | undefined, mod, new Set())) {
             sawDynFuncAdapter = true;
           }
           break;
