@@ -8050,10 +8050,58 @@ const DV_SETTERS: Record<string, { method: IrBytesIntrinsicMethod; le: boolean }
     const elem = own(BYTES_CTORS, name);
     if (!elem || !L.isStdlibGlobal(access.expression, name)) return null;
     const args = call.arguments;
-    if (args.length !== 1 || ts.isSpreadElement(args[0]!)) return null; // mapFn / spread → the fence
-    const argNode = args[0]!;
     const type = bytesOf(elem);
     const loc = locOf(call);
+    // `Uint8Array.from({ length: n }, mapfn)` — the COUNTED-GENERATION
+    // idiom, the one mapped form with an answer that is already built.
+    // ES2024 23.2.2.1 step 6: the source has no index properties, so
+    // every `kValue` is undefined and the mapper is called with
+    // (undefined, k) for k in 0..len-1, in order; each result is stored
+    // through the constructor's own element conversion. That is exactly
+    // `new Uint8Array(<the number[] Array.from builds>)` — the same
+    // ToUint8/ToInt16/... rule `bytesNew` already applies to a number[]
+    // source — so this routes to the counted-generation helper
+    // `lowerArrayFromCall` interns and hands the result to bytesNew. The
+    // intermediate array is not observable: the mapper runs in the same
+    // order, the same number of times, and an f64 result needs no
+    // ToNumber (which is the only coercion that could run user code).
+    //
+    // Held to a mapper whose RESULT is f64: a `string`/`dyn`/union result
+    // would need ToNumber at the store, which can run a user valueOf, and
+    // the intermediate array would then run it at a different point than
+    // Node does. Those keep the SC2020 member fence.
+    if (
+      args.length === 2 &&
+      !ts.isSpreadElement(args[0]!) &&
+      !ts.isSpreadElement(args[1]!) &&
+      ts.isObjectLiteralExpression(args[0]!) &&
+      args[0]!.properties.length === 1
+    ) {
+      const n = lowerLengthProp(L, args[0]!.properties[0]!);
+      if (n !== null && n.type.kind === "f64") {
+        const fnArg = probeLower(L, args[1]!);
+        const fnT = fnArg?.type.kind === "func" ? fnArg.type : null;
+        if (
+          fnArg !== null && fnT !== null && fnT.ret.kind === "f64" &&
+          fnT.params.length <= 2 &&
+          (fnT.params.length < 1 || fnT.params[0]!.kind === "dyn") &&
+          (fnT.params.length < 2 || fnT.params[1]!.kind === "f64")
+        ) {
+          const arity = fnT.params.length;
+          const key = `fromLen:${typeKey(F64)}:${arity}`;
+          let helper = L.arrHofHelpers.get(key);
+          if (helper === undefined) {
+            helper = `%arr.fromLen.${L.arrHofHelpers.size}`;
+            L.arrHofHelpers.set(key, helper);
+            L.liftedFns.push(buildArrayFromLenFn(helper, F64, arity, loc));
+          }
+          const built: IrExpr = { kind: "call", callee: helper, args: [n, fnArg], type: arrayOf(F64), loc };
+          return markFlavor({ kind: "bytesNew", source: built, type, loc }, "plain", loc);
+        }
+      }
+    }
+    if (args.length !== 1 || ts.isSpreadElement(args[0]!)) return null; // mapFn / spread → the fence
+    const argNode = args[0]!;
     const src = L.lowerExpr(argNode);
     if (typeEquals(src.type, type) || (src.type.kind === "array" && src.type.elem.kind === "f64")) {
       return markFlavor({ kind: "bytesNew", source: src, type, loc }, "plain", loc);

@@ -8804,6 +8804,30 @@ const NUMBER_CONSTANTS: Record<string, number | undefined> = {
             return { kind: "libCall", fn: "num.parseInt", args: [sProbe, radix], type: F64, loc };
           }
         }
+        // A CHECKED-DYNAMIC argument. ECMA 19.2.5 step 1 and 19.2.4 step 1
+        // are both `inputString = ToString(string)`, and dyn.toStringCoerce
+        // IS that ToString over a dyn value -- the string hint, the user
+        // toString/valueOf protocol, "Cannot convert object to primitive
+        // value" where the protocol is exhausted, units rendering
+        // "null"/"undefined". So the parse composes exactly: coerce, then
+        // run the same scr_string.c parser the string arm runs. Nothing is
+        // assumed about the dyn's kind, which is why this is an ANSWER and
+        // not a guess -- a number, an array, an object with a toString all
+        // reach the parser through the conversion JS specifies for them.
+        //
+        // The reachable shape is a chain the checker types `any`:
+        // `Number.parseInt(error?.attrs.code ?? '', 10)` (zapo's
+        // WaWamUploader) is a string at run time and reported SC2012.
+        if (sProbe?.type.kind === "dyn") {
+          const s: IrExpr = { kind: "libCall", fn: "dyn.toStringCoerce", args: [sProbe], type: STRING, loc };
+          if (member === "parseFloat") {
+            return { kind: "libCall", fn: "num.parseFloat", args: [s], type: F64, loc };
+          }
+          const radixDyn = probeLower(L, call.arguments[1]!);
+          if (radixDyn?.type.kind === "f64") {
+            return { kind: "libCall", fn: "num.parseInt", args: [s, radixDyn], type: F64, loc };
+          }
+        }
       }
       L.requireDynamicApi(`'Number.${member}'`, call);
       const callee: IrExpr = { kind: "jsOp", op: "globalGet", name: member, args: [], type: JSVAL, loc };

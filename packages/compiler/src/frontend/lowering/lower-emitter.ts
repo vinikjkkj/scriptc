@@ -41,6 +41,7 @@ import type { Lowerer } from "./lowerer.js";
 import { dynFallbackType, newFnCtx } from "./lowerer.js";
 import type { ClassInfo } from "./lower-classes.js";
 import { isJsSourceFile, locOf } from "../program.js";
+import { lowerDynObjectLiteral } from "./lower-exprs.js";
 import { strandTrap, arrayOf, BOOL, canBoxFuncIntoDyn, canConvertToDyn, canDynCheckTo, DYN, F64, IrExpr, IrFunction, IrLocal, IrParam, IrStmt, IrType, isUnitType, STRING, SrcLoc, typeEquals, typeKey, VOID } from "../../ir/nodes.js";
 import { streamForcedTuple, streamSidesOf } from "./lower-stream.js";
 import { handlerFnTypeNodeOf } from "../types.js";
@@ -180,8 +181,32 @@ function emitterEvents(L: Lowerer): Map<string, EventSig> {
     // is answered by the emit-payload shape instead.
     return null;
   };
-  const mergeEmit = (name: string, args: (IrType | null)[]): void => {
-    if (args.some((a) => a === null)) return; // its own site will diagnose
+  const mergeEmit = (name: string, rawArgs: (IrType | null)[]): void => {
+    let args = rawArgs;
+    if (args.some((a) => a === null)) {
+      // An UNMAPPED argument. `this.emit('x', { node, frame })` re-emitting
+      // an UNTYPED emitter's callback parameters is a record whose FIELDS
+      // are `any`, and `any` maps nowhere without --dynamic, so the emit
+      // contributed nothing and the event's tuple stayed EMPTY -- which is
+      // then the arity fence, on an event whose only listeners are exactly
+      // the ones that would have read a dyn.
+      //
+      // Record DYN for those positions instead, but ONLY for an event
+      // NOTHING has recorded a tuple for. A position a listener (or an
+      // earlier emit) pinned keeps the skip: widening it to dyn conflicts
+      // the event, and a conflict fences EVERY site that touches it where
+      // today only this one does. So the rule can add a tuple where there
+      // was none and can never rewrite one that exists.
+      //
+      // The dispatch that results is the one a checked-dynamic listener
+      // already takes, and a checked-dynamic listener is what an event in
+      // this state has: an unannotated `on('x', (event) => ...)` sets
+      // dynListener and constrains nothing, which is how the tuple came to
+      // be empty while the bucket is full.
+      const recorded = table.get(name);
+      if (recorded !== undefined && (recorded.tuple.length > 0 || recorded.fromEmit)) return;
+      args = args.map((a) => a ?? DYN);
+    }
     const tuple = [...(args as IrType[])];
     const sig = sigOf(name);
     if (sig.conflict) return;
@@ -1121,7 +1146,25 @@ export function lowerEmitterMethodCall(L: Lowerer, call: ts.CallExpression,
       });
       console.error(`[emit] ${loc.file}@${loc.start} '${name}' tuple=${tuple.length}[${tuple.map((t) => L.fmt(t)).join(", ")}] ${parts.join(" | ")}`);
     }
-    const payload = args.slice(1, 1 + tuple.length).map((a, i) => L.lowerExprExpecting(a, tuple[i]));
+    const payload = args.slice(1, 1 + tuple.length).map((a, i) => {
+      // A DYN tuple position with an OBJECT LITERAL payload takes the dyn
+      // literal builder directly. The position is dyn because nothing in
+      // the program typed the event (the mergeEmit fallback above), and the
+      // literal's own checker type is the reason: `{ node, frame }` out of
+      // an untyped emitter's callback is `{ node: any; frame: any }`, which
+      // has a DYNAMIC representation and no static one. Reading each field
+      // as a dyn is exactly what the members already are, so the object the
+      // listener receives carries the same values Node's does. This is the
+      // rule the dyn-argument path in lower-containers already applies at
+      // its own boundary; without it the payload met the record fence one
+      // step later and the site kept a refusal, just under a different code.
+      let v: ts.Expression = a;
+      while (ts.isParenthesizedExpression(v)) v = v.expression;
+      if (tuple[i]?.kind === "dyn" && ts.isObjectLiteralExpression(v)) {
+        return lowerDynObjectLiteral(L, v);
+      }
+      return L.lowerExprExpecting(a, tuple[i]);
+    });
     return emitDispatchExpr(L, info, name, tuple, receiver, payload, superRecv?.cls, loc);
   }
 
