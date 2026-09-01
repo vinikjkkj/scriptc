@@ -300,3 +300,30 @@ revision on another day would not be a control.
 **Not yet run.** `server.test.ts` had not reported when I last checked and its
 `upgrade-read-fairness` is load-sensitive *by construction*, so I have stayed
 off the CPU rather than contaminate it the way I contaminated the first run.
+
+### The six failures, attributed
+
+    × differential corpus (1725 programs) > 1360-spawn-sync.ts                 INHERITED
+    × differential corpus (1725 programs) > 1482-spawnsync-error.ts            INHERITED
+    × differential corpus (1725 programs) > 1537-os-release-spawnsync-stdio.ts INHERITED
+    × differential corpus (1725 programs) > 2390-dot-requires\main.cjs         INHERITED
+    × every corpus program is 100% static (corpus and coverage agree)          601867ms, LOAD?
+    × server differential (78 programs) > upgrade-read-fairness                LOAD?
+
+The first four are the inherited failure set **by name**, exactly the four the
+block brief lists — not four by count.
+
+The last two are the two the brief and the prior art independently predict
+will flake under load, and this run had a second full gate on the same six
+cores from 21:46:
+
+- `upgrade-read-fairness` is described in the brief as load-sensitive **by
+  construction**: it measures whether a writing peer can starve others, so
+  under contention the host itself is that peer.
+- `every corpus program is 100% static` was recorded by voipfix at **578 s
+  uncontended against a hardcoded 600 s limit**; it came in at 601867 ms.
+
+**Neither is called inherited yet.** Both need a solo re-run, and the static
+one additionally needs the ambient-cost A/B, because this block adds a
+~230-line ambient file to every program's roots and that test pays it 600-plus
+times against a 22 s margin. `post-gate.sh` runs all three measurements.
