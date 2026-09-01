@@ -7403,7 +7403,35 @@ export function lowerNew(L: Lowerer, expr: ts.NewExpression): IrExpr {
           if (!ts.isSpreadElement(argNode)) {
             const argIr = L.mapTypeOf(L.typeOf(argNode));
             if (argIr?.kind === "array" && typeEquals(argIr.elem, mapped.elem)) {
-              let seed = L.lowerExpr(argNode);
+              // EXPECTING the array, not just lowering: the checker already
+              // said this argument is a `T[]` whose element matches the
+              // Set's, but the VALUE can still arrive checked-dynamic and
+              // then fail the equality below over a difference that is not
+              // real.
+              //
+              // `new Set(Object.values(Ctl))` is the shape that showed it --
+              // libmlow-wasm's dist/index.js:62-63 builds both of its opus
+              // control-request tables that way, and so does every enum-ish
+              // table in every bundle. Instrumented (SCRIPTC_SETNEW_WHY) it
+              // reads:
+              //
+              //   mapped=set<f64> argChecker=number[] argIr=array<f64>
+              //   lowered=dyn
+              //
+              // -- every static fact agrees and the lowered VALUE is a dyn,
+              // so `typeEquals(dyn, f64[])` failed and a Set the compiler
+              // has every part of refused. Hoisting the identical call into
+              // a `const number[]` and seeding from the variable compiled
+              // and answered 3, because a declared binding lowers its
+              // initializer EXPECTING its own type and this site did not.
+              //
+              // The array-literal arm two blocks up already lowers this way
+              // for the same reason. The `typeEquals` guard below is
+              // unchanged and still the gate, so an argument that cannot
+              // meet the expectation keeps its fence -- this can only turn
+              // a refusal into the Set the surrounding code already proved
+              // legal.
+              let seed = L.lowerExprExpecting(argNode, arrayOf(mapped.elem));
               // A T[]-DECLARED seed whose value is an island handle (a
               // package's exported array — the binding never held a
               // static array): the VALIDATED exit copies the engine
@@ -7446,6 +7474,17 @@ export function lowerNew(L: Lowerer, expr: ts.NewExpression): IrExpr {
             const seed: IrExpr = { kind: "arrayLit", elems, type: arrayOf(first.type), loc };
             return { kind: "setNew", seed, type: setT, loc };
           }
+        }
+        if (process.env["SCRIPTC_SETNEW_WHY"] !== undefined && (expr.arguments?.length ?? 0) > 0) {
+          const a0 = expr.arguments![0]!;
+          const ai = L.mapTypeOf(L.typeOf(a0));
+          const l = locOf(expr);
+          console.error(
+            `[setnew] mapped=${mapped ? typeKey(mapped) : "null"}` +
+              ` argChecker=${L.checker.typeToString(L.typeOf(a0)).slice(0, 60)}` +
+              ` argIr=${ai ? typeKey(ai) : "null"}` +
+              ` js=${isJsSourceFile(expr.getSourceFile())} at ${l.file}:${l.start}`,
+          );
         }
         if ((expr.arguments?.length ?? 0) > 0) {
           L.noLowering(

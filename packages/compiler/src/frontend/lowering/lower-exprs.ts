@@ -18,7 +18,7 @@ import { requireFnValueOf, requireMemberFence } from "./lower-builtins.js";
 import { funcObjectPropOf } from "./lower-fnprops.js";
 import { recordKeyReadRow, recordNarrowBridgeRow } from "./keyread-census.js";
 import { cjsClassExprWholeExportOf, cjsExportAssignmentOf, cjsExportDiscardReason, isCjsExportTableLiteral, isCjsJsFile, isJsSourceFile, isModuleExportsAccess, isNodeEsmFile, locOf } from "../program.js";
-import { absentGlobalMemberValue, ARRAY_METHODS, builtinConstLit, builtinFenceHintOf, objectStaticFnValueOf, stdlibExistenceTestOf, stringMethodFnValueOf, builtinModuleConstOf, builtinModulesArrayLit, builtinModuleFnOf, COMPOUND_ASSIGN_OPS, CompoundOp, ISLAND_SURFACE, isChildSurfaceMember, MAP_METHODS, NARROW_FIRST, SET_METHODS, STR_METHODS, UNSUPPORTED_EXPR, sideEffectFreeOptionValue, stdlibGlobalNameOf } from "./surfaces.js";
+import { absentGlobalMemberValue, absentProcessMemberValue, ARRAY_METHODS, builtinConstLit, builtinFenceHintOf, objectStaticFnValueOf, stdlibExistenceTestOf, stringMethodFnValueOf, builtinModuleConstOf, builtinModulesArrayLit, builtinModuleFnOf, COMPOUND_ASSIGN_OPS, CompoundOp, ISLAND_SURFACE, isChildSurfaceMember, MAP_METHODS, NARROW_FIRST, SET_METHODS, STR_METHODS, UNSUPPORTED_EXPR, sideEffectFreeOptionValue, stdlibGlobalNameOf } from "./surfaces.js";
 import { UNSUPPORTED, assertionDropsMembersDiag, assertionOverflowsMembersDiag, blockedBindingUseDiag, recordShapeMismatchDiag, requiresDynamicPackageDiag, unsupportedDiag } from "../../diagnostics/diagnostic.js";
 import { PoisonError, dynUndefinedExpr, jsFuncValueNameOf, jsFuncValueSourceOf, neverTaintedJsType, nodeThrowExpr, own } from "./lowerer.js";
 import { arrayAtOf, BYTES_CTORS, condPresenceSlot, IndexMergeContributor, lowerIndexMergeHelper, lowerNpmStaticSafeIndexRead, strCharsCall } from "./lower-containers.js";
@@ -2924,6 +2924,16 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
       if (recvLowered.type.kind === "union") {
         const served = lowerUnionFieldRead(L, expr, recvLowered, expr.name.text);
         if (served) return L.maybeNarrow(served, expr);
+      }
+      // `process.type` in a JavaScript source -- a member of Node's
+      // `process` MEASURED absent from the runtime, read where Node answers
+      // `undefined`. Here, one line above the fence, so that only a site
+      // that was about to refuse can change: the read is the Electron probe
+      // in the first executable statement of every Emscripten module glue,
+      // and it refused where Node answers.
+      {
+        const absentProcess = absentProcessMemberValue(L, expr);
+        if (absentProcess !== null) return L.maybeNarrow(absentProcess, expr);
       }
       L.unsupported(
         "SC1090",
@@ -15154,6 +15164,62 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
               loc,
             };
             return negated ? { kind: "unary", op: "!", operand: eq, type: BOOL, loc } : eq;
+          }
+        }
+        // A UNIT operand against a NON-NULLISH primitive. The spec answers
+        // this pair WITHOUT ever coercing: IsLooselyEqual (7.2.14) sends
+        // same-Type pairs to IsStrictlyEqual (step 1), then handles the
+        // null/undefined pair by itself (steps 2-3), and every remaining
+        // step guards on the OTHER operand being Number, String, Boolean,
+        // BigInt, Symbol or Object -- Undefined and Null match none of
+        // them, so control reaches the final `return false`. Read off node
+        // v25.9.0 rather than off the spec alone:
+        //
+        //   undefined == "renderer" false | undefined == 0     false
+        //   undefined == ""         false | undefined == false false
+        //   undefined == undefined  true  | undefined == null  true
+        //
+        // The first of those is the one that matters: `globalThis.process
+        // ?.type != "renderer"` is Electron's renderer probe, and with the
+        // process member folding to `undefined` one rule over, this
+        // comparison became the wall in its place. Emscripten's module glue
+        // puts it in its FIRST executable statement.
+        //
+        // `x == null` never reaches here -- lowerLooseNullCompare claims
+        // the null-KEYWORD spelling above, including its dyn and union
+        // arms, and it is the owner of that question. What is left for this
+        // rule is a unit-typed VALUE, which is what an absent global or an
+        // absent `process` member now lowers to.
+        //
+        // BOTH operands must be a literal or a plain re-emittable read.
+        // Folding to a constant DISCARDS the operands, so anything whose
+        // evaluation is observable keeps the fence -- this can only ever
+        // refuse where it is unsure.
+        {
+          const unitLeft = isUnitType(left.type);
+          const unitRight = isUnitType(right.type);
+          const pureOperand = (e: IrExpr): boolean =>
+            e.kind === "unitLit" ||
+            e.kind === "strLit" ||
+            e.kind === "numLit" ||
+            e.kind === "boolLit" ||
+            pureReemittable(e);
+          if ((unitLeft || unitRight) && pureOperand(left) && pureOperand(right)) {
+            // `undefined == null`, `null == null`, `undefined == undefined`
+            // -- units are mutually loose-equal, the same answer
+            // lowerLooseNullCompare gives its own unit arm.
+            if (unitLeft && unitRight) {
+              return { kind: "boolLit", value: !negated, type: BOOL, loc };
+            }
+            const otherKind = (unitLeft ? right : left).type.kind;
+            // Only the three primitive kinds whose values can never BE
+            // null-ish. Not `dyn`, not `union`, not `jsval` -- each of
+            // those can carry a unit at run time, and answering `false`
+            // for one would be the wrong answer this rule exists to
+            // avoid. They keep the fence.
+            if (otherKind === "string" || otherKind === "f64" || otherKind === "bool") {
+              return { kind: "boolLit", value: negated, type: BOOL, loc };
+            }
           }
         }
       }
