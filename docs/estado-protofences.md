@@ -997,3 +997,35 @@ about the two proto fences, which are only visible with the flag at all.
 **Unmeasured, and named as such:** the flagless site count on this branch; the
 resident set of a real libopus encode driven through an AOT build; the
 attribution of the wam entry's +121,856 bytes against the recorded floor.
+
+## THE GATE — CLEAN
+
+`node node_modules/vitest/vitest.mjs run` under **node v25.9.0** (first line of
+`gate1.log` is `v25.9.0`), full env, `SCRIPTC_TEST_WORKERS=2` (lowered from 3
+because four blocks were live on six physical cores).
+
+    === gate start 16:35:22 ===
+    Test Files  2 failed | 146 passed | 7 skipped (155)
+    Tests       8 failed | 5764 passed | 54 skipped (5826)
+    Duration    2909.84s
+    === gate end 17:23:53 rc=1 ===
+
+The eight, by NAME — the inherited set exactly, on both backends, and nothing
+else:
+
+    FAIL differential.test.ts      > 1360-spawn-sync.ts
+    FAIL differential.test.ts      > 1482-spawnsync-error.ts
+    FAIL differential.test.ts      > 1537-os-release-spawnsync-stdio.ts
+    FAIL differential.test.ts      > 2390-dot-requires\main.cjs
+    FAIL llvm-differential.test.ts > 1360-spawn-sync.ts
+    FAIL llvm-differential.test.ts > 1482-spawnsync-error.ts
+    FAIL llvm-differential.test.ts > 1537-os-release-spawnsync-stdio.ts
+    FAIL llvm-differential.test.ts > 2390-dot-requires\main.cjs
+
+Only **two** test files failed, and both are the differential corpora that
+carry those eight. The three load-sensitive tests the brief warns about all
+**passed in the run**: `server.test.ts > upgrade-read-fairness`,
+`coverage > every corpus program is 100% static`, and `tier accounting`.
+
+Corpus size 1728 programs (1731 llvm tests including the file's own extras) —
+**no corpus program was added**, so no baseline needed recording.
