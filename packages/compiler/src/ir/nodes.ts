@@ -3480,6 +3480,14 @@ export type IrLibFn =
   | "dgram.connectCb"
   | "dgram.sendStr"
   | "dgram.sendBytes"
+  /** send(msg) on a CONNECTED socket -- the destination is the one
+   * connect(2) installed, so there is no port/address argument. zapo's
+   * WaSctpRelay.ts:663 spelling, and the only send its FNA relay path
+   * uses. On an UNCONNECTED socket these throw ERR_SOCKET_BAD_PORT,
+   * matching Node, which validates the absent port before anything
+   * else. May-throw. */
+  | "dgram.sendConnStr"
+  | "dgram.sendConnBytes"
   /** The send argument-validation ladder over dyn arguments (Node's
    * signature shuffle: slice bounds, list/type contracts, port/address
    * validation, connected-state errors) — a fully-validated unconnected
@@ -11237,6 +11245,8 @@ export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   "dgram.connectCb",
   "dgram.sendStr",
   "dgram.sendBytes",
+  "dgram.sendConnStr",
+  "dgram.sendConnBytes",
   "dgram.sendChk",
   "dgram.address",
   "dgram.close",

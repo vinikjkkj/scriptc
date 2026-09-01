@@ -9149,6 +9149,11 @@ void scr_dgram_bind(ScrDgramSocket *s, double port, ScrStr *host /*borrowed*/, S
 void scr_dgram_connect(ScrDgramSocket *s, double port, ScrStr *host /*borrowed*/, ScrClosure *cb /*moves, nullable*/);
 void scr_dgram_send_str(ScrDgramSocket *s, ScrStr *data /*borrowed*/, double port, ScrStr *host /*borrowed*/);
 void scr_dgram_send_bytes(ScrDgramSocket *s, ScrBytes *data /*borrowed*/, double port, ScrStr *host /*borrowed*/);
+/* send(msg) on a CONNECTED socket: the destination is the one connect(2)
+ * installed. On an unconnected socket these throw ERR_SOCKET_BAD_PORT,
+ * which is what Node does -- it validates the absent port first. */
+void scr_dgram_send_conn_str(ScrDgramSocket *s, ScrStr *data /*borrowed*/);
+void scr_dgram_send_conn_bytes(ScrDgramSocket *s, ScrBytes *data /*borrowed*/);
 /* The send argument-validation ladder over dyn arguments (Node's
  * signature shuffle, slice bounds, list/type contracts, port/address
  * validation, and the connected-state errors); a fully-validated
