@@ -1187,6 +1187,9 @@ double scr_parse_float(ScrStr *s) {
  * Node-exact for giant hex, Infinity overflow included: power-of-two
  * radixes take the exact path, never V8's approximate chunk loop). */
 double scr_string_to_number(ScrStr *s) {
+#ifdef SCR_ARRCEN_ON
+  scr_arrcen_note(SCR_ARRCEN_STR2NUM, (long long)s->len);
+#endif
   const char *p = s->data;
   size_t b = 0, e = s->len;
   while (b < e) {
