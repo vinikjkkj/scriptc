@@ -818,3 +818,161 @@ filtered declaration set and merging it with an inferred surface. That is a
 design, not a round, and it needs the gate. What is delivered is the decided
 question: the names, their spelling in each package's own declarations, the
 per-specifier rule, the measured failure mode, and the two packages it closes.
+
+---
+
+## 16. Item 2 — the `globalThis` defect, fixed, with the controls and the one it nearly broke
+
+### 16a. It re-reproduces on `acdd8b96`
+
+`surfaces.ts` moved under this block (`310da1ea`, the `process.type` rung inside
+`610073a4`). Rebased, rebuilt, re-probed: identical decline
+(`decline=undeclared globalThis.Bun`), identical mis-blame
+(`SC2020 'globalThis' … has no scriptc lowering yet`), 1 of 2 statements static.
+Nothing below rests on the old base.
+
+### 16b. The change
+
+`absentGlobalMemberValue` unwraps parentheses, `as`, `satisfies` and `!` from
+the receiver to prove it is `globalThis`, then looks the property up on the
+**unwrapped** receiver's type — discarding the assertion that declares the
+member optional. Two parts:
+
+1. **A new table, `RUNTIME_IDENTITY_ABSENT = { Bun, Deno }`**, on a reading of
+   node v25.9.0 rather than a declaration set: `hasOwnProperty.call(globalThis,
+   n)` false and `typeof` `"undefined"` for both, **in the main thread AND
+   inside a `node:worker_threads` Worker**, with `fetch`, `navigator`, `Blob`
+   and `process` reading `own=true` in the same run as the control that the
+   probe can tell present from absent.
+2. **A TypeScript arm** that folds `(globalThis as { X?: T }).X` to `undefined`
+   when — and only when — `X` is in that table **and** the assertion declares
+   the member optional. The assertion is the SITE condition, never the
+   evidence; the evidence stays the measurement, exactly as in the JavaScript
+   arm.
+
+`unknown` maps to `dyn`, which is the ordinary spelling of this probe
+(`{ Bun?: unknown }`), so the `dyn` site takes the same answer for the same
+reason the JavaScript arm does not consult the site at all.
+
+### 16c. Why a SECOND table and not a wider one — the control this nearly overwrote
+
+The first version widened `NODE_ABSENT_GLOBALS` itself, which would have made
+`(globalThis as { window?: { name: string } }).window` fold in a TypeScript
+source. That is a **ratified negative control**:
+`tests/fixtures/node-types/stdlib-surfaces-fenced.ts:49` expects it to keep its
+refusal, with the reasoning written beside it — an assertion the program wrote
+is not evidence about the host, and folding on silence once answered
+`undefined` for two dozen globals node really has.
+
+The two tables answer different questions, and that is the line:
+
+| | question | why a refusal is right / wrong |
+| --- | --- | --- |
+| `window` `document` `XMLHttpRequest` `crypto` `gc` | **capability**: "does this host give me X?" | a compiler must not answer "no" for a capability merely because nothing declared it — the fixture's rule, and it stands |
+| `Bun` `Deno` | **runtime identity**: "which runtime am I?" | not an inventory question. A scriptc binary is not Bun and is not Deno whatever any declaration set says, and node v25.9.0 is neither either — so both sides of the oracle agree structurally |
+
+No corpus program names `Bun` or `Deno` (`rg` over `tests/`), so the table
+addition cannot change any gate program's answer.
+
+### 16d. Controls, all run
+
+| control | expectation | result |
+| --- | --- | --- |
+| **positive** `globalthis-bun.ts` — the zapo shape plus `Deno` | compiles and matches | **3/3 MATCH byte-exact**, both backends, 657,920 / 657,408 bytes, `quickjs=0 ScrDyn=0`, **0 fences** — the `dyn`-site arm puts no dyn machinery in the binary |
+| **negative** `(globalThis as { fetch?: unknown }).fetch`, same for `navigator` | must NOT fold — node has both | `decline=declared-present`, still fenced. Node prints `function`/`object`; the compiler refuses rather than answering `undefined` |
+| **negative** `(globalThis as { Zorb?: unknown }).Zorb` | the assertion alone must buy nothing | `decline=undeclared`, still fenced |
+| **negative** `(globalThis as { Bun: unknown }).Bun` (non-optional) | must not fold | **TypeScript itself refuses the conversion** — the shape cannot reach lowering |
+| **ratified** `stdlib-surfaces-fenced.ts` | unchanged | 11 statements, **4 static (36%)**, ×3 `globalThis`, ×1 `globalThis.gc` — **identical to `acdd8b96`** |
+| **ratified** `corpus/7324-globalthis-absent-member.ts` | unchanged | **12/12, 100%, fully static** on both |
+| **negative** `globalthis-neg4.ts` — `window` behind a cast in a TS source | must keep its refusal | fenced, 0% — and the first draft of the positive-control driver carried this line, so the compiler CAUGHT the over-wide rule in my own lab before the fixture did |
+| **regression** the five existing binaries + `hello` | no MATCH may become WRONG | all rebuilt on the patched compiler: **MATCH byte-exact on both backends**, same byte sizes; `store-sqlite-names-be` is still the same TRAP at `table-names.ts:116` |
+
+`N …→MATCH = 12` (the five stores plus `globalthis-bun`, each on two backends),
+**`M MATCH→WRONG = 0`.** The five store binaries were scored on the wide build;
+the final build folds strictly less, and `store-redis-helpers` — the largest of
+the five — was rebuilt on it and still MATCHes byte-exactly on both backends at
+the same 813,568 / 815,104 bytes.
+
+### 16e. A stale incremental build nearly made me report a regression that does not exist
+
+The first before/after ran `git stash push` on `surfaces.ts` and then
+`pnpm build`. **`pnpm build` did not recompile** — the tsc incremental cache
+served the previous dist — and the "baseline" it produced read 5/11 (45%) with
+×2 `globalThis` against the patched 4/11 (36%) with ×3. That looked exactly like
+a regression I had caused.
+
+With `node_modules/.cache/scriptc-tsc` and both `dist/` trees removed, the true
+`acdd8b96` baseline reads **4/11 (36%), ×3 `globalThis`** — identical to the
+patched build. There was never a regression; there was a stale artifact.
+Every comparison in this section was re-run from a cleaned build afterwards.
+`package.json` has `build:fresh` for exactly this, and a comparison that does not
+use it is not a comparison.
+
+---
+
+## 17. What the `globalThis` fix is actually worth on `store-sqlite` — measured both sides, and a claim of mine that was wrong
+
+The previous survey ranked `globalThis` as **blocker #1 of six** on
+`openSqliteConnection` and said `isBunRuntime()` is "called at module scope by
+`store-sqlite/connection.ts`". My first commit message repeated that. **Both
+halves are wrong on `acdd8b96`, and reading the file plus running the baseline
+is what says so.**
+
+**The call site.** `store-sqlite/connection.ts:2` imports `isBunRuntime` and
+line **359** calls it — `return isBunRuntime() ? 'bun' : 'better-sqlite3'` —
+**inside a function**, not at module scope.
+
+**Before and after, same driver, same lane, both from CLEANED builds:**
+
+| | `acdd8b96` | with the fix |
+| --- | --- | --- |
+| statements analyzed | 48,921 | 48,921 |
+| compile statically | **48,815** (99%) | **48,816** (99%) |
+| blockers | **1** — `SC1090` the EventEmitter member `emit` as a VALUE, in zapo-js's `WaClient.ts` | **1** — the same one |
+| deferred to runtime | 1 — `require()` with a run-time specifier | the same |
+| `globalThis` anywhere | **absent** | absent |
+
+So on the current compiler the fold is worth **exactly one statement** on this
+driver and **removes no blocker**: the six-construct list is stale, the compiler
+moved past five of them, and `isBunRuntime` sits in the unreached group here.
+
+What the fix does remove is the refusal **on the construct**, and that is
+measured on its own: the probe goes from 1 of 2 statements static with an
+`SC2020` to **2 of 2**, and builds a binary that matches node byte-exactly on
+both backends. The next program that writes the shape the fence recommends gets
+an answer instead of a mis-blamed receiver. That is the honest size of it.
+
+`store-sqlite`'s one remaining blocker on this path is now **`emit` as a value
+inside zapo-js**, not anything in `store-sqlite`.
+
+---
+
+## 18. Status after round two, and what needs the gate
+
+**Binaries: six**, all `quickjs=0 ScrDyn=0 JS_NewRuntime=0`, **0 fences** in the
+emitted C, none built with `--best-effort`:
+
+| binary | package | flags | bytes LLVM / C | oracle |
+| --- | --- | --- | --- | --- |
+| `store-mysql-cleanup2.exe` | `store-mysql` | `--provenance-sources` | 670,208 / 672,256 | 9/9 MATCH |
+| `store-mysql-helpers2.exe` | `store-mysql` | `--provenance-sources` | 810,496 / 811,520 | 16/16 MATCH |
+| `store-postgres-cleanup2.exe` | `store-postgres` | `--provenance-sources` | 670,208 / 672,256 | 9/9 MATCH |
+| `store-postgres-helpers2.exe` | `store-postgres` | `--provenance-sources` | 810,496 / 811,520 | 16/16 MATCH |
+| `store-redis-helpers.exe` | `store-redis` | `--provenance-sources` | 813,568 / 815,104 | 21/21 MATCH |
+| `globalthis-bun.exe` | (the fix's control) | none | 657,920 / 657,408 | 3/3 MATCH |
+
+**`N …→MATCH = 12`, `M MATCH→WRONG = 0`.**
+
+`store-mongo` and `media-utils` still reach no binary, with the reasons named to
+the package and the diagnostic (§8, §9). Neither was forced.
+
+### Needs the gate — three commits, none started by this block
+
+| commit | what it touches | exposure |
+| --- | --- | --- |
+| `b474eb54` + `bab37ee3` | `surfaces.ts`, `absentGlobalMemberValue` | a lowering. Two ratified expectations re-measured identical from cleaned builds; no corpus program names `Bun` or `Deno`; six binaries rebuilt and still MATCH |
+| `14c78654` | `index.ts`, `SCRIPTC_NPMSTATIC_WHY` | a `console.error` behind an env var that is unset in the gate; no behaviour change |
+| `8f0c763d` | `tests/perf/pkgstatus2/bo.sh` | lab harness only, nothing the gate runs |
+
+The orchestrator has a gate in flight on `610073a4`. **This block did not start
+one and is not starting one.**

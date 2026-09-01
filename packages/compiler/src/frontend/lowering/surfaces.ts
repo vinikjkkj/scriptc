@@ -2355,9 +2355,17 @@ export const BUILTIN_MODULE_FENCE_HINTS: Record<string, Record<string, string | 
    * from absent.
    *
    * Measured consumer: `isBunRuntime()` at zapo-js `src/util/runtime.ts:20`,
-   * called at module scope by store-sqlite/connection.ts, so it stands in
-   * front of every driver that opens a connection. No corpus program names
-   * either identifier. */
+   * imported by store-sqlite/connection.ts and called at `:359`
+   * (`return isBunRuntime() ? 'bun' : 'better-sqlite3'`) -- INSIDE a
+   * function, not at module scope. An earlier survey recorded it as a
+   * module-scope call and this comment repeated that; reading the file
+   * says otherwise, and the measurement agrees: on acdd8b96 the statement
+   * sits in the unreached group of a driver that opens a connection, so
+   * the fold is worth exactly +1 static statement there (48,815 ->
+   * 48,816 of 48,921) and removes no blocker. What it does remove is the
+   * refusal on the CONSTRUCT: the probe goes from 1 of 2 statements static
+   * with an SC2020 to 2 of 2, and builds a binary that matches node
+   * byte-exactly. No corpus program names either identifier. */
   const RUNTIME_IDENTITY_ABSENT: ReadonlySet<string> = new Set(["Bun", "Deno"]);
 
   export function absentGlobalMemberValue(L: Lowerer, access: ts.PropertyAccessExpression): IrExpr | null {
