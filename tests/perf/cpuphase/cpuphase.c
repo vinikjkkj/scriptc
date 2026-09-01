@@ -249,6 +249,30 @@ int main(int argc, char **argv) {
               "finalRSS=%.2f MiB  peakWS(os)=%.2f MiB  totalFaults=%llu\n",
               (long)n, first / MB, peak / MB, last / MB,
               samp[n - 1].peak / MB, (unsigned long long)(samp[n - 1].pf - samp[0].pf));
+      /* SCR_CPUPHASE_TRACE=<ms>: the WHOLE run at that resolution, not just
+       * the first 1.5 s. The startup window below was enough while the
+       * question was the floor; it is not enough for "where are the faults
+       * taken", which needs to see whether RSS oscillates (trim and refault)
+       * or grows once and drops once. */
+      {
+        const char *tr = getenv("SCR_CPUPHASE_TRACE");
+        if (tr != NULL && *tr != 0) {
+          double step = atof(tr); double at = 0; double b0 = samp[0].t;
+          ULONG64 pf0 = samp[0].pf, prevpf = samp[0].pf;
+          if (step <= 0) step = 100;
+          fprintf(stderr, "[cputrace] %8s %9s %12s %13s %14s\n",
+                  "ms", "rssMiB", "faultsTot", "faultsStep", "rssDeltaKiB");
+          for (LONG i = 0; i < n; i++) {
+            double dt = samp[i].t - b0;
+            if (dt < at && i != n - 1) continue;
+            fprintf(stderr, "[cputrace] %8.0f %9.2f %12llu %13lld %14.0f\n", dt,
+                    samp[i].ws / MB, (unsigned long long)(samp[i].pf - pf0),
+                    (long long)(samp[i].pf - prevpf),
+                    ((double)samp[i].ws - (double)(i ? samp[i - 1].ws : samp[i].ws)) / 1024.0);
+            prevpf = samp[i].pf; at = dt + step;
+          }
+        }
+      }
       fprintf(stderr, "[cpumem] startup trajectory (ms -> RSS MiB, faults):\n");
       double t0 = samp[0].t;
       double nextAt = 0;
