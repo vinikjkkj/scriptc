@@ -82,6 +82,22 @@ A and P are `.text`-identical to the byte at both sizes.
                         costing any of this; the decode half is tractable and the
                         encode half is gated on modelling presence.
 
+    presence-coupling.mjs
+                        the assumption a decode-only static shape rests on,
+                        EXECUTED against the real bundle rather than argued
+                        about. A decode-produced message is an encode input, and
+                        encode decides the wire with a null check AND a
+                        hasOwnProperty check. Runs both, plus $unknowns
+                        enumerability, the caller-supplied target, and the
+                        null-slot vs zero-slot question over every message type.
+                        Exits non-zero on any failure and carries three controls,
+                        one of which asserts the harness can detect a difference
+                        at all. Headline: the NULL CHECK COMES FIRST, so a shape
+                        that makes every field an own property is harmless for
+                        the wire provided an absent slot reads as null --
+                        presence needs nullable slots, not a side bitset. Slots
+                        defaulting to 0/false/"" diverge on 278 types.
+
     tucount.mjs         one streaming pass over a 130 MB emitted TU: the
                         retain/release/dyn-op shapes, with the interned-
                         literal share of scr_str_retain.
