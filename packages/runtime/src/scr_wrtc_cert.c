@@ -101,6 +101,13 @@ const uint8_t *scr_wrtc_cert_der(const ScrWrtcCert *c, size_t *len) {
   return c->der;
 }
 
+void *scr_wrtc_cert_pk(const ScrWrtcCert *c) {
+  if (c == NULL) return NULL;
+  /* Cast away const: mbedtls's signing path needs a mutable context, and
+   * the cert owns this key for its whole lifetime. */
+  return (void *)&((ScrWrtcCert *)c)->key;
+}
+
 bool scr_wrtc_cert_fingerprint(const ScrWrtcCert *c, uint8_t out[32]) {
   if (c == NULL || c->der == NULL) return false;
   return scr_wrtc_fp_of_cert(c->der, c->der_len, out);

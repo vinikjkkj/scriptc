@@ -35,4 +35,10 @@ const uint8_t *scr_wrtc_cert_der(const ScrWrtcCert *c, size_t *len);
  * own a=fingerprint line. */
 bool scr_wrtc_cert_fingerprint(const ScrWrtcCert *c, uint8_t out[32]);
 
+/* The private key, borrowed. mbedtls_ssl_conf_own_cert needs it to sign
+ * the handshake, and it lives as long as the cert does. Typed void* so
+ * this header does not drag mbedtls/pk.h into every includer; the only
+ * caller casts it straight back to mbedtls_pk_context*. */
+void *scr_wrtc_cert_pk(const ScrWrtcCert *c);
+
 #endif /* SCR_WRTC_CERT_H */
