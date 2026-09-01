@@ -1,0 +1,14 @@
+local ufrag len=4
+answer applied, gathering=complete
+ice=checking
+conn=connecting
+signaling=stable
+ice=connected
+conn=connected
+channel open, readyState=open
+sent
+message len=10 body=relay-pong
+closed, ice=closed signaling=closed
+ice=closed
+conn=closed
+signaling=closed

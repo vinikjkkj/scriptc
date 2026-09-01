@@ -1,0 +1,68 @@
+
+run 1, port 34842
+  ok   offer carries a 4-character ice-ufrag
+  ok   gathering is complete once the local description is set
+  ok   iceConnectionState reaches connected
+  ok   connectionState reaches connected
+  ok   the data channel reaches readyState=open
+  ok   send() actually sent
+  ok   onmessage fired from the loop with the relay's reply
+  ok   the close cascade ran
+  ok   a wrong fingerprint NEVER opens the channel
+  ok   a wrong fingerprint delivers no message
+  ok   and it is reported as a failure, not left hanging
+
+run 2, port 34844
+  ok   offer carries a 4-character ice-ufrag
+  ok   gathering is complete once the local description is set
+  ok   iceConnectionState reaches connected
+  ok   connectionState reaches connected
+  ok   the data channel reaches readyState=open
+  ok   send() actually sent
+  ok   onmessage fired from the loop with the relay's reply
+  ok   the close cascade ran
+  ok   a wrong fingerprint NEVER opens the channel
+  ok   a wrong fingerprint delivers no message
+  ok   and it is reported as a failure, not left hanging
+
+run 3, port 34846
+  ok   offer carries a 4-character ice-ufrag
+  ok   gathering is complete once the local description is set
+  ok   iceConnectionState reaches connected
+  ok   connectionState reaches connected
+  ok   the data channel reaches readyState=open
+  ok   send() actually sent
+  ok   onmessage fired from the loop with the relay's reply
+  ok   the close cascade ran
+  ok   a wrong fingerprint NEVER opens the channel
+  ok   a wrong fingerprint delivers no message
+  ok   and it is reported as a failure, not left hanging
+
+run 4, port 34848
+  ok   offer carries a 4-character ice-ufrag
+  ok   gathering is complete once the local description is set
+  ok   iceConnectionState reaches connected
+  ok   connectionState reaches connected
+  ok   the data channel reaches readyState=open
+  ok   send() actually sent
+  ok   onmessage fired from the loop with the relay's reply
+  ok   the close cascade ran
+  ok   a wrong fingerprint NEVER opens the channel
+  ok   a wrong fingerprint delivers no message
+  ok   and it is reported as a failure, not left hanging
+
+run 5, port 34850
+  ok   offer carries a 4-character ice-ufrag
+  ok   gathering is complete once the local description is set
+  ok   iceConnectionState reaches connected
+  ok   connectionState reaches connected
+  ok   the data channel reaches readyState=open
+  ok   send() actually sent
+  ok   onmessage fired from the loop with the relay's reply
+  ok   the close cascade ran
+  ok   a wrong fingerprint NEVER opens the channel
+  ok   a wrong fingerprint delivers no message
+  ok   and it is reported as a failure, not left hanging
+
+55 checks, 0 failures
+RESULT: PASS

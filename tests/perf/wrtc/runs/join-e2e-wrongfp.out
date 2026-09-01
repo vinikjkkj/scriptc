@@ -1,0 +1,11 @@
+local ufrag len=4
+answer applied, gathering=complete
+ice=checking
+conn=connecting
+signaling=stable
+ice=failed
+conn=failed
+TIMEOUT opened=false got=0
+ice=closed
+conn=closed
+signaling=closed
