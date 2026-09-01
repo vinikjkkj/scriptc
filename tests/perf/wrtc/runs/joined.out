@@ -1,0 +1,52 @@
+JOINED: real UDP socket -> DTLS 1.2 -> SCTP association
+
+clean (drop=0%, seed=101)
+  ok   both DTLS sides configured                       
+  ok   DTLS handshake completes over the lossy socket   client=0 server=0 in 47ms
+  ok   peer fingerprint authenticates                   
+  ok   and does not match the wrong certificate         
+  ok   SCTP association reaches ESTABLISHED inside DTLS 
+  ok   DCEP channel opens inside DTLS                   
+  ok   every user message arrives                       5 of 5
+  ok   heartbeat answered through DTLS                  
+       sctp sent=6 rtx=0 sacks=6 dup=1 | udp 0/26 dropped (handshake 0/4, data 0/22)
+
+10% loss (drop=10%, seed=202)
+  ok   both DTLS sides configured                       
+  ok   DTLS handshake completes over the lossy socket   client=0 server=0 in 31ms
+  ok   peer fingerprint authenticates                   
+  ok   and does not match the wrong certificate         
+  ok   SCTP association reaches ESTABLISHED inside DTLS 
+  ok   DCEP channel opens inside DTLS                   
+  ok   every user message arrives                       5 of 5
+  ok   heartbeat answered through DTLS                  
+       sctp sent=8 rtx=3 sacks=6 dup=0 | udp 4/30 dropped (handshake 0/4, data 4/26)
+  ok   the wire actually dropped datagrams              
+
+20% loss (drop=20%, seed=303)
+  ok   both DTLS sides configured                       
+  ok   DTLS handshake completes over the lossy socket   client=0 server=0 in 484ms
+  ok   peer fingerprint authenticates                   
+  ok   and does not match the wrong certificate         
+  ok   SCTP association reaches ESTABLISHED inside DTLS 
+  ok   DCEP channel opens inside DTLS                   
+  ok   every user message arrives                       5 of 5
+  ok   heartbeat answered through DTLS                  
+       sctp sent=6 rtx=0 sacks=4 dup=1 | udp 8/36 dropped (handshake 5/14, data 3/22)
+  ok   the wire actually dropped datagrams              
+
+30% loss (drop=30%, seed=404)
+  ok   both DTLS sides configured                       
+  ok   DTLS handshake completes over the lossy socket   client=0 server=0 in 281ms
+  ok   peer fingerprint authenticates                   
+  ok   and does not match the wrong certificate         
+  ok   SCTP association reaches ESTABLISHED inside DTLS 
+  ok   DCEP channel opens inside DTLS                   
+  ok   every user message arrives                       5 of 5
+  ok   heartbeat answered through DTLS                  
+       sctp sent=19 rtx=14 sacks=7 dup=1 | udp 21/55 dropped (handshake 5/12, data 16/43)
+  ok   the wire actually dropped datagrams              
+
+  ok   SCTP retransmission was exercised somewhere      17 across all cases
+36 checks, 0 failures
+RESULT: PASS
