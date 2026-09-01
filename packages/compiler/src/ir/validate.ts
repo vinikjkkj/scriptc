@@ -585,6 +585,29 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "wrtc.dcBufferedAmount": { argTypes: [RTCDATACHANNEL_T], result: F64 },
   "wrtc.dcSetBinaryType": { argTypes: [RTCDATACHANNEL_T, STRING], result: VOID },
   "wrtc.dcClose": { argTypes: [RTCDATACHANNEL_T], result: VOID },
+  "wrtc.pcCreateOffer": { argTypes: [RTCPEERCONNECTION_T], result: STRING },
+  /* Both answer an ALREADY-SETTLED promise rather than throwing: node's
+   * setLocalDescription/setRemoteDescription REJECT on a bad description,
+   * and scr_promise_settled_void moves a pending throw in as the
+   * rejection. So neither is in MAY_THROW_LIB_FNS. */
+  "wrtc.pcSetLocalDesc": { argTypes: [RTCPEERCONNECTION_T, STRING], result: { kind: "promise", inner: VOID } },
+  "wrtc.pcSetRemoteDesc": { argTypes: [RTCPEERCONNECTION_T, STRING, STRING], result: { kind: "promise", inner: VOID } },
+  /* The four on*statechange handlers take no arguments (the DOM event
+   * object is never read by zapo and has no representation), so their
+   * shape is pinned right here rather than in the program-dependent
+   * block below. */
+  "wrtc.pcOnIceConnectionStateChange": { argTypes: [RTCPEERCONNECTION_T, { kind: "func", params: [], ret: VOID }], result: VOID },
+  "wrtc.pcOnIceGatheringStateChange": { argTypes: [RTCPEERCONNECTION_T, { kind: "func", params: [], ret: VOID }], result: VOID },
+  "wrtc.pcOnSignalingStateChange": { argTypes: [RTCPEERCONNECTION_T, { kind: "func", params: [], ret: VOID }], result: VOID },
+  "wrtc.pcOnConnectionStateChange": { argTypes: [RTCPEERCONNECTION_T, { kind: "func", params: [], ret: VOID }], result: VOID },
+  "wrtc.dcOnOpen": { argTypes: [RTCDATACHANNEL_T, { kind: "func", params: [], ret: VOID }], result: VOID },
+  "wrtc.dcOnClose": { argTypes: [RTCDATACHANNEL_T, { kind: "func", params: [], ret: VOID }], result: VOID },
+  "wrtc.dcOnError": { argTypes: [RTCDATACHANNEL_T, { kind: "func", params: [], ret: VOID }], result: VOID },
+  /* Program-dependent, the dgram.onMessage shape: null here and the
+   * callback's own shape checked in the listener block below. */
+  "wrtc.dcOnMessage": { argTypes: [RTCDATACHANNEL_T, null], result: VOID },
+  "wrtc.dcSendStr": { argTypes: [RTCDATACHANNEL_T, STRING], result: VOID },
+  "wrtc.dcSendBytes": { argTypes: [RTCDATACHANNEL_T, BYTES_U8], result: VOID },
   "dgram.sendChk": { argTypes: [DGRAMSOCK_T, DYN, DYN, DYN, DYN, DYN, STRING], result: VOID },
   "dgram.address": { argTypes: [DGRAMSOCK_T], result: VOID },
   "dgram.close": { argTypes: [DGRAMSOCK_T], result: VOID },
@@ -4435,6 +4458,23 @@ function validateFunction(
           }
           if (!ok) {
             err(`libCall ${e.fn} SNI callback shape (frontend must fence)`, e.loc);
+          }
+          break;
+        }
+        if (e.fn === "wrtc.dcOnMessage") {
+          // The data-channel message listener: a void closure with no
+          // params, or exactly one bytes<u8> payload. The DOM MessageEvent
+          // object has no representation (its `data` is `any` in zapo's
+          // real @types/node), so the payload form is what is served and
+          // the frontend refuses the event form BY NAME.
+          const cbT = e.args[1]?.type;
+          let ok = cbT?.kind === "func" && cbT.ret.kind === "void" && cbT.params.length <= 1;
+          if (ok && cbT?.kind === "func" && cbT.params.length === 1) {
+            const p = cbT.params[0]!;
+            ok = p.kind === "bytes" && p.elem === "u8";
+          }
+          if (!ok) {
+            err(`libCall ${e.fn} callback shape (frontend must fence)`, e.loc);
           }
           break;
         }

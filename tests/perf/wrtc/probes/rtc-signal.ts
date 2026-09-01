@@ -4,6 +4,12 @@
  * would score randomness. What zapo consumes is the a=ice-ufrag regex, the
  * a=setup rewrite, the fingerprint line and the sctp-port -- so those are
  * what this prints, canonicalised.
+ *
+ * pc.localDescription and pc.remoteDescription are NOT read here: neither
+ * is on zapo's 21-member surface, both are refused by name under scriptc,
+ * and rtc-refusals.ts is where a refusal belongs. Their two lines were in
+ * the first oracle capture and were removed rather than left to score as
+ * DID-NOT-RUN.
  */
 import wrtc from '@roamhq/wrtc'
 
@@ -63,7 +69,6 @@ async function main(): Promise<void> {
 
   await pc.setLocalDescription(offer)
   console.log('after setLocal, signalingState=' + pc.signalingState)
-  console.log('after setLocal, localDescription.type=' + String(pc.localDescription?.type))
 
   const answer = modifySdpForRelay(sdp, '127.0.0.1', 3480)
   console.log('answer has setup:passive=' + String(/a=setup:passive/.test(answer)))
@@ -73,7 +78,6 @@ async function main(): Promise<void> {
 
   await pc.setRemoteDescription({ type: 'answer', sdp: answer })
   console.log('after setRemote, signalingState=' + pc.signalingState)
-  console.log('after setRemote, remoteDescription.type=' + String(pc.remoteDescription?.type))
   console.log('after setRemote, ch.readyState=' + ch.readyState)
   pc.close()
   console.log('after close, signalingState=' + pc.signalingState)
