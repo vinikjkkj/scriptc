@@ -44,6 +44,30 @@
  * those with `lowerExpr` would leave them dyn, hit a dynCheck at the boundary,
  * and relocate the guard instead of removing it — which is the whole win.
  *
+ * WHAT THE CONSUMER HAS TO BUILD, in the order the IR forces:
+ *
+ *   1. An `IrClassDef` (ir/nodes.ts:1341) per usable class: `fields` in layout
+ *      order with an `IrType` each, and `methods` as declared names. A slot's
+ *      type must admit the constructor initializer AND every write flagged
+ *      `reassignedInMethod` — Reader seeds `pos` to 0 and every accessor
+ *      rewrites it, so inferring from the initializer alone gets a type the
+ *      first method write violates. A `conditional` field must be NULLABLE, not
+ *      zero-defaulted (presence-coupling.mjs: 278 of 641 protobuf types diverge
+ *      on a zero default, none on null).
+ *   2. A module function `%<class>.<method>` per entry in `methods`, lowered
+ *      with `this` bound to the instance type. This is the bulk of the work and
+ *      the reason this is a feature rather than a patch.
+ *   3. `new S(a)` becomes `{ kind: "new", className, args, type, loc }`
+ *      (ir/nodes.ts:6375) instead of falling to the dyn box arm in
+ *      lower-classes.ts. Place the new arm BEFORE that one and after every
+ *      typed arm, so it can only turn a box into a class — never change a
+ *      program that compiles today.
+ *   4. `mergedMethods` is a SEPARATE decision. Binding them statically is only
+ *      sound if the merge provably ran before any use; protobufjs calls
+ *      `_configure()` at module init, but that is a runtime fact. Refusing them
+ *      keeps 215 of 5,068 reader calls (4.2%) on the dyn path, which is correct
+ *      and cheap. Do that first and revisit only with a reason.
+ *
  * Nothing here reads a `.d.ts`. The declaration beside this bundle omits four
  * of the members its own implementation uses (`tag`, `raw`, `discardUnknown`,
  * and `skipType`'s real arity), which is why the body is the only source that
