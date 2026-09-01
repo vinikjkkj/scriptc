@@ -707,3 +707,30 @@ Writing a WebAssembly engine first buys **nothing measurable**: no zapo program
 can reach `WebAssembly.instantiate`. The bottleneck is ordinary JavaScript
 lowering in a minified Emscripten bundle, and it is 23 distinct problems, most
 of them small and none of them WebAssembly.
+
+## PHASE 9 — the floor, re-measured on THIS branch (not the recorded one)
+
+`bin/wam-head.c.exe`, built from `drivers/wam-entry2.ts --backend c
+--provenance-sources --best-effort`, `SCRIPTC_PROVENANCE_AUTHORED_JS=1`,
+compiler at `d646cfa2`; oracle regenerated from MY tree under node v25.9.0
+via tsx (not the recorded `.node.out`).
+
+    exit 0
+    ORACLE C: MATCH (byte-exact)
+    17 lines, 15 `ok` assertion lines, last line `WAM-ENTRY2: ALL PASS`
+    engine scan: quickjs=0 ScrDyn=0 JS_NewRuntime=0
+    fences in the emitted C: 1   (was 2)
+
+**1 TRAP-fence removed, 0 MATCH→WRONG.**
+
+### One number I will NOT claim as mine
+
+    this branch   28,280,320 bytes
+    the recorded floor (twininit-lab, base main at the time)  28,158,464 bytes
+
++121,856. **Not attributable to this block without a paired base build**: the
+recorded floor predates main `2b05d613`, which merged wamfences' four fence
+fixes, and every fence that becomes a real lowering ADDS code. My own rung
+should push the other way — it replaces a long fence message string with a
+short name string. A paired base build at `2b05d613` is what would settle it,
+and the sibling block that owns binary size has the section attribution.
