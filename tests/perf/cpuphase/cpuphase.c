@@ -54,6 +54,12 @@ typedef struct {
   ULONG64 cyc0, cyc1;
   double usr0, usr1, ker0, ker1;
   double wall0, wall1;
+  /* What crosses into the kernel, counted rather than theorised about.
+   * A compute-bound phase spending seconds in kernel mode is doing
+   * SOMETHING hundreds of thousands of times; these three counters say
+   * which class it is before anyone argues about why. */
+  ULONG64 rd0, rd1, wr0, wr1, ot0, ot1;   /* GetProcessIoCounters */
+  ULONG64 pf0, pf1;                        /* page faults */
   int open, done;
 } Phase;
 static Phase ph[MAXPH];
@@ -68,19 +74,45 @@ static double ft_ms(FILETIME ft) {
   ULARGE_INTEGER u; u.LowPart = ft.dwLowDateTime; u.HighPart = ft.dwHighDateTime;
   return (double)u.QuadPart / 10000.0; /* 100ns -> ms */
 }
-static void sample(HANDLE h, ULONG64 *cyc, double *usr, double *ker) {
+typedef BOOL(WINAPI *GPMI)(HANDLE, void *, DWORD);
+static GPMI pGPMI;
+/* PROCESS_MEMORY_COUNTERS' first two fields; declared locally so this TU
+ * needs no psapi header or import library. */
+typedef struct {
+  DWORD cb;
+  DWORD PageFaultCount;
+  SIZE_T PeakWorkingSetSize;
+  SIZE_T WorkingSetSize;
+  SIZE_T rest[6];
+} PMC_FULL;
+
+static void sample(HANDLE h, ULONG64 *cyc, double *usr, double *ker,
+                   ULONG64 *rd, ULONG64 *wr, ULONG64 *ot, ULONG64 *pf) {
   ULONG64 c = 0;
   if (pQPCT != NULL) pQPCT(h, &c);
   *cyc = c;
   FILETIME cr, ex, kf, uf;
   if (GetProcessTimes(h, &cr, &ex, &kf, &uf)) { *ker = ft_ms(kf); *usr = ft_ms(uf); }
   else { *ker = 0; *usr = 0; }
+  IO_COUNTERS io;
+  if (GetProcessIoCounters(h, &io)) {
+    *rd = io.ReadOperationCount; *wr = io.WriteOperationCount; *ot = io.OtherOperationCount;
+  } else { *rd = 0; *wr = 0; *ot = 0; }
+  *pf = 0;
+  if (pGPMI != NULL) {
+    unsigned char blob[128];
+    PMC_FULL *m = (PMC_FULL *)blob;
+    memset(blob, 0, sizeof blob);
+    m->cb = (DWORD)sizeof blob;
+    if (pGPMI(h, blob, (DWORD)sizeof blob)) *pf = m->PageFaultCount;
+  }
 }
 
 static void mark(HANDLE h, const char *name, int begin) {
   for (int i = 0; i < nph; i++) {
     if (strcmp(ph[i].name, name) == 0 && ph[i].open && !begin) {
-      sample(h, &ph[i].cyc1, &ph[i].usr1, &ph[i].ker1);
+      sample(h, &ph[i].cyc1, &ph[i].usr1, &ph[i].ker1,
+             &ph[i].rd1, &ph[i].wr1, &ph[i].ot1, &ph[i].pf1);
       ph[i].wall1 = now_ms(); ph[i].open = 0; ph[i].done = 1; return;
     }
   }
@@ -88,13 +120,47 @@ static void mark(HANDLE h, const char *name, int begin) {
   Phase *p = &ph[nph++];
   memset(p, 0, sizeof *p);
   strncpy(p->name, name, sizeof p->name - 1);
-  sample(h, &p->cyc0, &p->usr0, &p->ker0);
+  sample(h, &p->cyc0, &p->usr0, &p->ker0, &p->rd0, &p->wr0, &p->ot0, &p->pf0);
   p->wall0 = now_ms(); p->open = 1;
+}
+
+#define MAXSAMP 400000
+typedef struct { double t; ULONG64 ws, peak, pf; } Samp;
+static Samp samp[MAXSAMP];
+static volatile LONG nsamp;
+static volatile LONG pollStop;
+static HANDLE pollTarget;
+
+static DWORD WINAPI poller(LPVOID unused) {
+  (void)unused;
+  while (!pollStop) {
+    unsigned char blob[128];
+    PMC_FULL *m = (PMC_FULL *)blob;
+    memset(blob, 0, sizeof blob);
+    m->cb = (DWORD)sizeof blob;
+    if (pGPMI != NULL && pGPMI(pollTarget, blob, (DWORD)sizeof blob)) {
+      LONG i = nsamp;
+      if (i < MAXSAMP) {
+        samp[i].t = now_ms();
+        samp[i].ws = (ULONG64)m->WorkingSetSize;
+        samp[i].peak = (ULONG64)m->PeakWorkingSetSize;
+        samp[i].pf = m->PageFaultCount;
+        nsamp = i + 1;
+      }
+    }
+    Sleep(2);
+  }
+  return 0;
 }
 
 int main(int argc, char **argv) {
   HMODULE k = GetModuleHandleW(L"kernel32.dll");
   pQPCT = (QPCT)(void *)GetProcAddress(k, "QueryProcessCycleTime");
+  {
+    HMODULE ps = LoadLibraryW(L"psapi.dll");
+    if (ps != NULL) pGPMI = (GPMI)(void *)GetProcAddress(ps, "GetProcessMemoryInfo");
+    if (pGPMI == NULL) pGPMI = (GPMI)(void *)GetProcAddress(k, "K32GetProcessMemoryInfo");
+  }
   if (pQPCT == NULL) { fprintf(stderr, "cpuphase: no QueryProcessCycleTime\n"); return 2; }
 
   int i = 1;
@@ -128,6 +194,8 @@ int main(int argc, char **argv) {
     return 2;
   }
   CloseHandle(wr);
+  pollTarget = pi.hProcess;
+  HANDLE pollThread = CreateThread(NULL, 0, poller, NULL, 0, NULL);
 
   char buf[8192], line[4096];
   size_t ll = 0;
@@ -147,18 +215,67 @@ int main(int argc, char **argv) {
     fflush(stdout);
   }
   WaitForSingleObject(pi.hProcess, INFINITE);
+  pollStop = 1;
+  if (pollThread != NULL) { WaitForSingleObject(pollThread, 2000); CloseHandle(pollThread); }
   DWORD code = 0; GetExitCodeProcess(pi.hProcess, &code);
 
-  fprintf(stderr, "\n[cpuphase] %-14s %10s %10s %9s %9s %9s %7s\n",
-          "phase", "wall_ms", "Mcycles", "user_ms", "kern_ms", "cpu_ms", "cpu%");
+  fprintf(stderr, "\n[cpuphase] %-14s %10s %10s %9s %9s %9s %7s %9s %9s %10s %11s\n",
+          "phase", "wall_ms", "Mcycles", "user_ms", "kern_ms", "cpu_ms", "cpu%", "ioRead", "ioWrite", "ioOther", "pageFaults");
   for (int j = 0; j < nph; j++) {
     if (!ph[j].done) continue;
     double wall = ph[j].wall1 - ph[j].wall0;
     double usr = ph[j].usr1 - ph[j].usr0, ker = ph[j].ker1 - ph[j].ker0;
     double cpu = usr + ker;
     double mc = (double)(ph[j].cyc1 - ph[j].cyc0) / 1e6;
-    fprintf(stderr, "[cpuphase] %-14s %10.0f %10.1f %9.1f %9.1f %9.1f %6.1f%%\n",
-            ph[j].name, wall, mc, usr, ker, cpu, wall > 0 ? cpu / wall * 100.0 : 0.0);
+    fprintf(stderr,
+            "[cpuphase] %-14s %10.0f %10.1f %9.1f %9.1f %9.1f %6.1f%% %9llu %9llu %10llu %11llu\n",
+            ph[j].name, wall, mc, usr, ker, cpu, wall > 0 ? cpu / wall * 100.0 : 0.0,
+            (unsigned long long)(ph[j].rd1 - ph[j].rd0),
+            (unsigned long long)(ph[j].wr1 - ph[j].wr0),
+            (unsigned long long)(ph[j].ot1 - ph[j].ot0),
+            (unsigned long long)(ph[j].pf1 - ph[j].pf0));
+  }
+  /* ---- memory, from the polled samples ------------------------------
+   * Sampling at the phase markers alone would miss both halves of the
+   * story: what is resident BEFORE the first marker (the floor), and the
+   * spike-and-release inside a phase. */
+  {
+    LONG n = nsamp;
+    if (n > 0) {
+      ULONG64 peak = 0, first = samp[0].ws, last = samp[n - 1].ws;
+      for (LONG i = 0; i < n; i++) if (samp[i].ws > peak) peak = samp[i].ws;
+      double MB = 1048576.0;
+      fprintf(stderr, "\n[cpumem] samples=%ld  firstRSS=%.2f MiB  peakRSS=%.2f MiB  "
+              "finalRSS=%.2f MiB  peakWS(os)=%.2f MiB  totalFaults=%llu\n",
+              (long)n, first / MB, peak / MB, last / MB,
+              samp[n - 1].peak / MB, (unsigned long long)(samp[n - 1].pf - samp[0].pf));
+      fprintf(stderr, "[cpumem] startup trajectory (ms -> RSS MiB, faults):\n");
+      double t0 = samp[0].t;
+      double nextAt = 0;
+      for (LONG i = 0; i < n; i++) {
+        double dt = samp[i].t - t0;
+        if (dt < nextAt) continue;
+        if (dt > 1500) break;
+        fprintf(stderr, "[cpumem]   %6.0f  %8.2f  %10llu\n", dt, samp[i].ws / MB,
+                (unsigned long long)(samp[i].pf - samp[0].pf));
+        nextAt = dt + 50;
+      }
+      fprintf(stderr, "[cpumem] %-14s %10s %10s %10s %12s\n",
+              "phase", "rssBegin", "rssMax", "rssEnd", "faults");
+      for (int j = 0; j < nph; j++) {
+        if (!ph[j].done) continue;
+        ULONG64 mx = 0, b = 0, e = 0; int seen = 0;
+        for (LONG i = 0; i < n; i++) {
+          if (samp[i].t < ph[j].wall0 || samp[i].t > ph[j].wall1) continue;
+          if (!seen) { b = samp[i].ws; seen = 1; }
+          if (samp[i].ws > mx) mx = samp[i].ws;
+          e = samp[i].ws;
+        }
+        fprintf(stderr, "[cpumem] %-14s %10.2f %10.2f %10.2f %12llu\n",
+                ph[j].name, b / MB, mx / MB, e / MB,
+                (unsigned long long)(ph[j].pf1 - ph[j].pf0));
+      }
+    }
   }
   CloseHandle(pi.hProcess); CloseHandle(pi.hThread);
   return (int)code;
