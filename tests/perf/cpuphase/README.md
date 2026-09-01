@@ -256,3 +256,34 @@ Caveat worth keeping: only ~95 of ~1,355 samples land in program code,
 because the busiest-thread heuristic still frequently picks a thread parked
 in a syscall. The ranking is stable across runs and the dropped samples are
 uniformly non-program, but the absolute percentages are thin.
+
+#### A fifth way the sampler lies, caught by cross-checking
+
+Run against the **uninstrumented** binary the yield is far better (1,583 of
+1,895 samples reach program code, against 95 of 1,355 for the instrumented
+one) -- and the table is then dominated by a single name:
+
+    93.81%  scr_win_run_sync
+     1.58%  crypto_x25519_dirty_fast
+     1.45%  ge_scalarmult_base
+
+`scr_win_run_sync` is `scr_child.c`'s synchronous child-process core. The
+bench supervises the fake server through it for the whole run, and its pump
+polls at about 1 kHz (`WaitForSingleObject(proc, progress ? 0 : 1)` then
+`Sleep(1)`). A 94% headline for a polling loop is exactly the shape of a
+real finding, and it is not one.
+
+**It is refuted by a number already in this file.** If that pump were
+burning a core, `buildContacts` -- which is 97% RPC wait -- could not
+measure **20.5% CPU**. It does. So the pump is cheap, and the 93.81% is a
+**thread-selection artifact**: the busiest-thread heuristic picks the thread
+with the largest cycle delta each round, and a thread that wakes 1,000 times
+a second is selected far more often than the one thread actually computing.
+
+The heuristic needs replacing with cycle-delta *weighting* rather than
+argmax before these absolute percentages mean anything. Until then the
+instrumented-binary table above is the better ranking -- its yield is worse
+but its selection is not biased toward frequently-waking threads -- and the
+agreement between its crypto share (51.6%) and node's control (59.73% +
+25.41%) is the reason to trust it. The sampler is also process-wide, not
+phase-scoped; it does not read the phase markers `cpuphase` uses.
