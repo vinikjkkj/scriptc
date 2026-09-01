@@ -921,3 +921,55 @@ string constants and under-reports, which is why the C is the instrument.
 
 The messaging bench binary (`bench/bench-head.c.exe`, 25,598,464 bytes) runs
 and prints its header and scenario table at exit 0.
+
+## STAGE 10 — the AOT design, and the machinery that already exists for it
+
+The one thing an AOT wasm lowering needs that is not obvious: **the module
+bytes at compile time.** In both real cases the bytes are a pure function of a
+string literal —
+
+    long.js   new Uint8Array([0,97,115,109,1,0,0,0, ...])      a literal array
+    libopus   binaryDecode('\0asm\x01\0\0\0...')               a 2-line pure
+                                                               decoder over a
+                                                               string literal
+
+`lower-comptime.ts` already does exactly this kind of evaluation: it extracts a
+callback SOURCE-TEXTUALLY, runs it under `node:vm` inside the compiler with a
+2,000 ms budget (`COMPTIME_TIMEOUT_MS`), and bakes the returned value into the
+IR as literals, with a value check against the declared type and SC1110 for a
+throw or a timeout. It is opt-in today (`comptime(() => ...)`), but the
+machinery — vm evaluation at build time, value validation, literal baking — is
+built and gated and has a diagnostic story.
+
+So the shape of the lowering is:
+
+1. recognise `new WebAssembly.Module(E)` / `WebAssembly.instantiate(E, imports)`
+   where `E` is comptime-evaluable;
+2. evaluate `E` in the existing vm sandbox -> the module bytes;
+3. validate the module (a real parse — the inventory in STAGE 2 is 200 lines of
+   JS and already written in this lab) and **refuse loudly** on any feature
+   outside the supported set, so an unsupported module is a fence and never a
+   wrong answer;
+4. translate the module to C (wasm2c's output shape is demonstrated here:
+   `w2c_<mod>_<export>(inst, ...)`, one typed C function per export);
+5. **type the exports from the export section**, so `instance.exports.h(...)`
+   is a typed static call rather than an `any` — which is the same fact that
+   dissolves the SC2011 stopping `index.js` today;
+6. imports become C function pointers into the compiled JS side, and the six
+   Emscripten shims (`set_timeout`, `resize_heap`, `proc_exit`,
+   `keepalive_clear`, `fd_write`, `abort`) are ordinary compiled JS closures.
+
+Nothing in that list is an interpreter, and step 3 is the safety property this
+fleet cares about: a module using a feature the translator does not implement
+must fence, not miscompile. The inventory tool that decides it already runs.
+
+### What is still genuinely open
+
+* the **trap semantics and JS<->wasm conversion rules** — where byte-exactness
+  against node is won or lost, and untouched here;
+* `WebAssembly.Memory` growth through `memory.grow`/`emscripten_resize_heap`,
+  and the ten typed-array views the glue rebuilds over the buffer after a grow;
+* the **38 glue fences + 3 index.js fences**, which are the actual blocker and
+  are ordinary JavaScript lowering;
+* a module that is NOT a compile-time constant — no zapo code does this, and
+  the honest answer for it is a fence, not an interpreter.
