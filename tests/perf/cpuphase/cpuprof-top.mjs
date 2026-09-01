@@ -80,7 +80,8 @@ for (const [k, h] of busy.slice(0, topN)) {
 const SUBS = [
   ['curve25519 / field arith', /math\/(fe|edwards|montgomery)|core\/xeddsa|curve/i],
   ['protobuf                ', /proto\/|protobuf|waproto/i],
-  ['node crypto (hash/hkdf/cipher/random)', /crypto\/(hkdf|hash|cipher|random|sig)/i],
+  ['node:crypto KeyObject / DH  ', /crypto\/(keys|diffiehellman|keygen)|KeyObject/i],
+  ['node:crypto hash/hkdf/cipher', /crypto\/(hkdf|hash|cipher|random|sig)/i],
   ['zapo messaging/coordinators', /coordinators\/|messaging\/|signal\/|session/i],
   ['module loading / tsx    ', /cjs\/loader|esm\/hooks|wrapSafe|PackageJSON|tsx/i],
 ]
