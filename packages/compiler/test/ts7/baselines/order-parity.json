@@ -10002,6 +10002,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/7355-annotated-any-method-return-underclaim.ts": {
+   "order": [
+    "<repo>/tests/corpus/7355-annotated-any-method-return-underclaim.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/750-cycle-closure-box.ts": {
    "order": [
     "<repo>/tests/corpus/750-cycle-closure-box.ts"
