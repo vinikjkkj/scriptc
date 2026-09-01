@@ -130,13 +130,20 @@ A and P are `.text`-identical to the byte at both sizes.
                         not enough alone: the same statement's e.uint32() is a
                         dynInvoke and seeds anyway, and a function keeps its
                         epilogue while any seed remains. On zapo's 641 decode
-                        bodies, of 20,542 seeds: message shape alone removes
-                        27.7%, reader shape alone 43.6%, BOTH 85.5% -- which
+                        bodies, of 23,359 seeds: message shape alone removes
+                        25.2%, reader shape alone 41.1%, BOTH 78.8% -- which
                         EXCEEDS the sum of the arms by exactly the 2,923 stores
                         whose value is still dyn. Those relocate their guard to a
                         dynCheck under a message shape alone and only pay once the
                         reader shape has typed the value, so they belong to
                         neither arm on its own. Reader first.
+                        The residue after both is NOT a wall: 4,108 of it is the
+                        j.waproto.X namespace walk, and that is ONE record with
+                        641 fields rather than a per-message problem. THREE shapes
+                        -- reader 9,594, message 8,814, namespace 4,108 -- account
+                        for every seed except the 843 nested decode calls, and
+                        those dissolve through the may-throw fixpoint once the
+                        decodes are clean. A decode body can reach ZERO seeds.
 
     tucount.mjs         one streaming pass over a 130 MB emitted TU: the
                         retain/release/dyn-op shapes, with the interned-
