@@ -2709,6 +2709,9 @@ export class CEmitter {
       case "headers":
       case "requestInit":
       case "request":
+      // A Date is an object too -- and this case is what keeps
+      // `if (new Date(0))` true rather than false.
+      case "date":
       // A peer connection and a data channel are objects too.
       case "rtcPeerConnection":
       case "rtcDataChannel":

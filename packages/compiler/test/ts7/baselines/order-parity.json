@@ -10026,6 +10026,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/7383-a-date-typed-record-member-is-a-shape-with-no-values.ts": {
+   "order": [
+    "<repo>/tests/corpus/7383-a-date-typed-record-member-is-a-shape-with-no-values.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/750-cycle-closure-box.ts": {
    "order": [
     "<repo>/tests/corpus/750-cycle-closure-box.ts"

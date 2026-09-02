@@ -8950,6 +8950,11 @@ typedef struct ScrResponse ScrResponse;
  * ownership machinery stays uniform, never allocated. */
 typedef struct ScrFetchInit ScrFetchInit;
 typedef struct ScrRequest ScrRequest;
+/* A Date. A type with no values: mapped so that a record carrying a
+ * `Date | undefined` member -- zapo voip's CallStateData is the measured
+ * case -- has a representation at all. Every member still refuses by
+ * name, and `new Date(...)` as a VALUE still refuses. See scr_date.c. */
+typedef struct ScrDate ScrDate;
 /* The WebRTC data-channel handles. Types with no values today: mapped so
  * that a record with an `RTCPeerConnection | null` field, and the Map
  * holding that record, have a representation at all. Every member still
@@ -9075,6 +9080,13 @@ ScrRequest *scr_request_retain(ScrRequest *r);
 void scr_request_release(ScrRequest *r);
 void *scr_request_retain_v(void *p);
 void scr_request_release_v(void *p);
+
+/* The Date ownership pair. Dead code in every program: nothing
+ * constructs a ScrDate. */
+ScrDate *scr_date_retain(ScrDate *d);
+void scr_date_release(ScrDate *d);
+void *scr_date_retain_v(void *p);
+void scr_date_release_v(void *p);
 
 /* The WebRTC ownership pairs. Dead code in every program: nothing
  * constructs either handle yet. */
