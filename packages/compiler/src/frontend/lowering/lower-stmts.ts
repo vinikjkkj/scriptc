@@ -4884,6 +4884,34 @@ export function lowerVarDecl(L: Lowerer, decl: ts.VariableDeclaration, isLet: bo
       (!isLet && init.type.kind === "func"
         ? builtinFnValueDeclType(L, decl) ?? requireFnValueDeclType(L, decl)
         : null);
+    // `const _exhaustive: never = backend` — the EXHAUSTIVENESS IDIOM, and
+    // the one construction site the never mapping's own comment says
+    // cannot exist (types.ts: "construction sites cannot exist (nothing
+    // has type never to feed them)"). It exists in every strict-TS switch:
+    // tsc narrows the discriminant to never in the default arm, and the
+    // declaration is how a program asserts the arms are complete.
+    //
+    // The value is NOT unobservable, which is the part that makes this a
+    // correctness fix rather than a convenience. The default arm RUNS
+    // whenever an unsound cast escapes the switch — `describe('bogus' as
+    // Backend)` is the shape, and every `never` assertion admits it —
+    // and Node then interpolates the REAL value into the message the
+    // idiom's next line builds. So the binding takes the INITIALIZER's
+    // type, and `${_exhaustive as string}` prints "bogus" exactly as Node
+    // does. Held in the f64 slot the never mapping hands out, a string
+    // initializer fenced SC1090 ('string' values where 'number' is
+    // expected) and every use of the binding inherited SC2004 — which is
+    // what the messaging bench's `_store-factory.ts:91,92` are.
+    //
+    // Numeric discriminants already worked by accident (the f64 slot
+    // holds the number), so this arm only ever WIDENS what compiles.
+    if (
+      type !== null &&
+      (L.typeOf(decl.name).flags & ts.TypeFlags.Never) !== 0 &&
+      init.type.kind !== "void"
+    ) {
+      type = init.type;
+    }
     // A JS `let x = {}`: TS's empty-object-literal type admits ANY later
     // non-nullish assignment (`envs = {}`, later `envs =
     // Object.fromEntries(...)` — tsc accepts every such write, since
