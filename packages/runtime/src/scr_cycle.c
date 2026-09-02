@@ -303,12 +303,70 @@ static size_t scr_cyc_threshold(void) {
  * an absolute constant, so it self-scales in both directions: a small
  * program keeps the historic 256 exactly.
  *
- * What this deliberately does NOT touch: the other collection points.
- * Exit, event-loop quiescence and an explicit scr_collect_cycles() all run
- * a full pass regardless of the budget, so WHAT a program has freed by the
- * time it exits is unchanged — only how often it pays for a pass mid-run.
+ * What this deliberately does NOT touch: exit and an explicit
+ * scr_collect_cycles() run a full pass regardless of the budget, so WHAT a
+ * program has freed by the time it exits is unchanged — only how often it
+ * pays for a pass mid-run. Event-loop quiescence used to be on that list
+ * too; scr_collect_cycles_idle below is why it no longer is.
  */
 #define SCR_CYC_PACE 8
+
+/* ── the event loop's between-turns pass ──────────────────────
+ * The loop calls this every time the ready queue drains (scr_loop_run's
+ * quiescence point), and it used to be an UNCONDITIONAL full pass. On an
+ * RPC-shaped program that is the collector's whole bill: the loop goes
+ * quiescent once per round trip, so a thousand awaits buy a thousand
+ * O(live) passes to reclaim whatever handful of candidates each turn
+ * happened to buffer. The pacing above never saw any of it, because this
+ * site bypassed the threshold entirely.
+ *
+ * MEASURED, and this is why the fix is here and not in the threshold: on
+ * the real zapo messaging bench (the preserved pre-regression binary, full
+ * default workload) SCR_CYCLE_THRESHOLD 256 -> 4096 -> 65536 moves
+ * recv_group's cycles by nothing at all — 33.0 / 31.7 / 33.5 Gcycles
+ * against a measured 1.2% A/A floor on that phase. The threshold-triggered
+ * passes were never the cost.
+ *
+ * So this point is paced too, with a quantum 8x SMALLER than the release
+ * path's (a turn boundary is the cheapest moment to collect, so it stays
+ * the eager one) and, crucially, a floor of ONE: while the live cycle-node
+ * population is under SCR_CYC_IDLE_PACE this is exactly the unconditional
+ * pass it always was — which is every program small enough for the pacing
+ * question not to arise. Only a large live set, where a pass is expensive
+ * and reclaiming three promises is not worth paying for it, starts skipping
+ * turns; and the release path's own budget still bounds how long a
+ * candidate can wait, so nothing is held indefinitely.
+ *
+ * SCR_CYCLE_IDLE_PACE=0 restores the unconditional pass. That is the A/B
+ * control arm, and it is an env knob rather than a build flag on purpose:
+ * both arms are then the SAME BINARY, so the measurement carries no code
+ * layout confound. */
+#ifndef SCR_CYC_IDLE_PACE
+#define SCR_CYC_IDLE_PACE 64
+#endif
+
+static size_t scr_cyc_idle_pace(void) {
+  static bool once = false;
+  static size_t cached = SCR_CYC_IDLE_PACE;
+  if (!once) {
+    const char *env = getenv("SCR_CYCLE_IDLE_PACE");
+    if (env != NULL) {
+      long v = strtol(env, NULL, 10);
+      if (v >= 0) cached = (size_t)v;
+    }
+    once = true;
+  }
+  return cached;
+}
+
+void scr_collect_cycles_idle(void) {
+  size_t pace = scr_cyc_idle_pace();
+  if (pace != 0) {
+    size_t want = scr_cyc_live / pace;
+    if (scr_nroots < (want > 1 ? want : 1)) return;
+  }
+  scr_collect_cycles();
+}
 
 void scr_cyc_on_dead(void *obj) {
   ScrCycHdr *h = scr_cyc_hdr(obj);
