@@ -404,6 +404,27 @@ export function findProtoClasses(sf: ts.SourceFile): ProtoClass[] {
    * failed build, which is the shape of bug this whole module exists to avoid.
    * Verified against zapo's bundle: zero such fields across all four usable
    * classes, so this refuses nothing there and guards every other input. */
+  /* A field the constructor assigns only under a BRANCH. The slot exists on
+   * every instance, but on the path that skips the assignment nothing writes it
+   * -- Node reads undefined there, and a fixed layout would read whatever the
+   * allocation left behind. Typing the slot to admit undefined (which
+   * protoSlotTypes does) is necessary and NOT sufficient: something still has to
+   * write the undefined, and the constructor demonstrably does not.
+   *
+   * Emitting a pre-initializer would fix it properly and needs a synthesized
+   * `undefined` expression node, which is not available here. So it refuses, and
+   * a caller that later gains that node can lift this. Zero such fields across
+   * zapo's four usable classes -- it refuses nothing there. */
+  for (const c of cands) {
+    for (const f of c.fields) {
+      if (f.conditional) {
+        c.bailouts.push(
+          `field '${f.name}' is assigned only under a branch, so instances that ` +
+          "skip it have no value written to the slot");
+      }
+    }
+  }
+
   for (const c of cands) {
     const ctorFields = new Set(c.fields.map((f) => f.name));
     for (const m of [...c.methods, ...c.mergedMethods]) {
