@@ -84,33 +84,138 @@ async function compileBoth(): Promise<{ c: string; ll: string }> {
  * pair is the same pair. What the comparison is for is the case where one
  * lane reaches a DIFFERENT class's helpers, which survives the strip. */
 const rcBase = (sym: string): string => sym.replace(/_v$/, "");
-function cDescriptors(c: string): Map<string, string> {
+/** A parser that reads ZERO is the failure mode this file has already had,
+ * and it is worse than having no test at all.
+ *
+ * When the instance MEMBER TABLE landed it widened ScrDynClass from six
+ * fields to nine. Both regexes below stopped matching, both maps came back
+ * empty, and the two parity tests failed as
+ *
+ *   expected [] to deeply equal [ 'Base', 'Derived', 'Lone', 'Readable' ]
+ *
+ * which READS as "the lanes disagree" but MEANT "nothing was checked" --
+ * on precisely the change that needed checking, because the LLVM lane
+ * spells %ScrDynClass as a literal struct and a C-side field added without
+ * widening it hands the dyn core a short descriptor (measured once as
+ * 0xC0000005).
+ *
+ * So every parser here refuses to come back empty when its anchor text is
+ * in the unit. The next widening fails LOUDLY, as a parse error naming the
+ * line it could not read, instead of quietly asserting nothing. */
+function mustNotReadZero(kind: string, text: string, anchor: RegExp, size: number): void {
+  if (size > 0) return;
+  const hit = text.split("\n").find((l) => anchor.test(l));
+  if (hit === undefined) return; // genuinely no descriptors in this unit
+  throw new Error(
+    `${kind}: this unit HAS descriptors but the parser matched none — the emitted ` +
+      `shape changed and this test just went blind. Fix the regex to the shape ` +
+      `actually emitted. First line it could not read:\n  ${hit.trim()}`,
+  );
+}
+
+/** name:accessor:enumerable for each row, in EMITTED ORDER — order is a
+ * parity fact too, since it is the order Object.keys answers in. */
+function memberSummary(rows: readonly { name: string; get: boolean; enumerable: boolean }[]): string {
+  return `[${rows.map((r) => `${r.name}:${r.get ? "get" : "call"}:${r.enumerable ? 1 : 0}`).join(",")}]`;
+}
+
+/** C member tables, keyed by their `sc_dclt_<n>` symbol.
+ * `static const ScrDynClassMember sc_dclt_0[] = { /* members of Lone *\/`
+ * then one `{ "v", 1, NULL, &sc_x, false },` per row. */
+function cMemberTables(c: string): Map<string, string> {
   const out = new Map<string, string>();
-  // static const ScrDynClass sc_dcl_0 = { "Lone", 5, 5, false, &r, &rl }; /* dyn box: class Lone */
-  const re = /static const ScrDynClass sc_dcl_\d+ = \{ "([^"]*)", (\d+), (\d+), (true|false), &(\w+), &(\w+) \};/g;
+  const re =
+    /(?:static )?const ScrDynClassMember (sc_dclt_\d+)\[\] = \{ \/\* members of [^*]*\*\/\n([\s\S]*?)\n\};/g;
   for (const m of c.matchAll(re)) {
-    out.set(m[1]!, `pre=${m[2]} post=${m[3]} vt=${m[4]} rc=${rcBase(m[5]!)}/${rcBase(m[6]!)}`);
+    const rows: { name: string; get: boolean; enumerable: boolean }[] = [];
+    const ent = /\{ "([^"]*)", \d+, (NULL|&\w+), (NULL|&\w+), (true|false) \}/g;
+    for (const e of m[2]!.matchAll(ent)) {
+      rows.push({ name: e[1]!, get: e[2] !== "NULL", enumerable: e[4] === "true" });
+    }
+    out.set(m[1]!, memberSummary(rows));
   }
   return out;
 }
 
-function llDescriptors(ll: string): Map<string, string> {
-  // @sc_dcl_0 = internal constant %ScrDynClass { ptr @sc_cs_3, i64 5, i64 5, i8 0, ptr @r, ptr @rl } ; dyn box: class Lone
+/** LLVM member tables, same key. Names are cstr references, resolved
+ * through the same pool the descriptor's display name comes from. */
+function llMemberTables(ll: string, cstrs: Map<string, string>): Map<string, string> {
+  const out = new Map<string, string>();
+  const re = /@(sc_dclt_\d+) = internal constant \[\d+ x %ScrDynClassMember\] \[([\s\S]*?)\n\]/g;
+  for (const m of ll.matchAll(re)) {
+    const rows: { name: string; get: boolean; enumerable: boolean }[] = [];
+    const ent =
+      /%ScrDynClassMember \{ ptr @(sc_cs_\d+), i64 \d+, ptr (null|@[\w.]+), ptr (null|@[\w.]+), i8 ([01]) \}/g;
+    for (const e of m[2]!.matchAll(ent)) {
+      const nm = cstrs.get(e[1]!);
+      if (nm === undefined) throw new Error(`llvm member row names an undefined cstr ${e[1]}`);
+      rows.push({ name: nm, get: e[2] !== "null", enumerable: e[4] === "1" });
+    }
+    out.set(m[1]!, memberSummary(rows));
+  }
+  return out;
+}
+
+/** The cstr pool, shared by descriptor display names and member names. */
+function llCstrs(ll: string): Map<string, string> {
   const cstrs = new Map<string, string>();
   for (const m of ll.matchAll(/^@(sc_cs_\d+) = internal constant \[\d+ x i8\] c"([^"]*)\\00"/gm)) {
     cstrs.set(m[1]!, m[2]!);
   }
+  return cstrs;
+}
+
+const C_DESC_ANCHOR = /const ScrDynClass sc_dcl_\d+ = \{/;
+const LL_DESC_ANCHOR = /^@sc_dcl_\d+ = internal constant %ScrDynClass \{/;
+
+function cDescriptors(c: string): Map<string, string> {
   const out = new Map<string, string>();
+  const tbls = cMemberTables(c);
+  // The unit is emitted with `static ` linkage normally and bare when the
+  // emitter is building a single merged TU (CEmitter.link), so the storage
+  // class is optional here rather than assumed.
+  // const ScrDynClass sc_dcl_0 = { "Lone", 5, 5, false, &r, &rl, sc_dclt_0, 1, false }; /* dyn box: class Lone */
   const re =
-    /^@sc_dcl_\d+ = internal constant %ScrDynClass \{ ptr @(sc_cs_\d+), i64 (\d+), i64 (\d+), i8 ([01]), ptr @(\w+), ptr @(\w+) \}/gm;
+    /(?:static )?const ScrDynClass sc_dcl_\d+ = \{ "([^"]*)", (\d+), (\d+), (true|false), &(\w+), &(\w+), (NULL|\w+), (\d+), (true|false) \};/g;
+  for (const m of c.matchAll(re)) {
+    const mem = m[7] === "NULL" ? "[]" : (tbls.get(m[7]!) ?? `<missing table ${m[7]}>`);
+    const declared = Number(m[8]);
+    const actual = m[7] === "NULL" ? 0 : (mem.match(/:/g)?.length ?? 0) / 2;
+    if (declared !== actual) {
+      throw new Error(`c descriptor for ${m[1]} says nmembers=${declared} but its table holds ${actual}`);
+    }
+    out.set(
+      m[1]!,
+      `pre=${m[2]} post=${m[3]} vt=${m[4]} rc=${rcBase(m[5]!)}/${rcBase(m[6]!)} props=${m[9]} mem=${mem}`,
+    );
+  }
+  mustNotReadZero("cDescriptors", c, C_DESC_ANCHOR, out.size);
+  return out;
+}
+
+function llDescriptors(ll: string): Map<string, string> {
+  const cstrs = llCstrs(ll);
+  const tbls = llMemberTables(ll, cstrs);
+  const out = new Map<string, string>();
+  // @sc_dcl_0 = internal constant %ScrDynClass { ptr @sc_cs_3, i64 5, i64 5, i8 0, ptr @r, ptr @rl, ptr @sc_dclt_0, i64 1, i8 0 }
+  const re =
+    /^@sc_dcl_\d+ = internal constant %ScrDynClass \{ ptr @(sc_cs_\d+), i64 (\d+), i64 (\d+), i8 ([01]), ptr @(\w+), ptr @(\w+), ptr (null|@sc_dclt_\d+), i64 (\d+), i8 ([01]) \}/gm;
   for (const m of ll.matchAll(re)) {
     const name = cstrs.get(m[1]!);
     if (name === undefined) throw new Error(`llvm descriptor names an undefined cstr ${m[1]}`);
+    const mem = m[7] === "null" ? "[]" : (tbls.get(m[7]!.slice(1)) ?? `<missing table ${m[7]}>`);
+    const declared = Number(m[8]);
+    const actual = m[7] === "null" ? 0 : (mem.match(/:/g)?.length ?? 0) / 2;
+    if (declared !== actual) {
+      throw new Error(`llvm descriptor for ${name} says nmembers=${declared} but its table holds ${actual}`);
+    }
     out.set(
       name,
-      `pre=${m[2]} post=${m[3]} vt=${m[4] === "1" ? "true" : "false"} rc=${rcBase(m[5]!)}/${rcBase(m[6]!)}`,
+      `pre=${m[2]} post=${m[3]} vt=${m[4] === "1" ? "true" : "false"} ` +
+        `rc=${rcBase(m[5]!)}/${rcBase(m[6]!)} props=${m[9] === "1" ? "true" : "false"} mem=${mem}`,
     );
   }
+  mustNotReadZero("llDescriptors", ll, LL_DESC_ANCHOR, out.size);
   return out;
 }
 
