@@ -481,10 +481,41 @@ const LIB_FN_SYMS: Record<string, string> = {
   "tls.createServerDyn": "scr_tls_create_server_dyn",
   "tls.createSecureContextDyn": "scr_tls_create_secure_context_dyn",
   "tls.connect": "scr_tls_connect_dyn",
+  // ── node:dgram, THE WHOLE SURFACE. Four of the twenty declared
+  // `dgram.*` lib functions used to be here, so every program that binds
+  // a socket or registers a message listener raised
+  // LlvmUnsupportedError and the default backend demoted to C — silently,
+  // because a demotion prints one line and still produces a binary. The
+  // absent sixteen were not a tail: they were both `bind` forms, plain
+  // `connect`, every event registration, `address`, ref/unref and every
+  // static send, i.e. a socket that could not bind, could not listen and
+  // could not say its own port.
+  //
+  // Thirteen of the sixteen ride the GENERIC path unchanged: the C tier
+  // spells each as ONE runtime call whose arguments are 1:1 with the
+  // IR's, plus (for bind/connect) the trailing NULL callback that is
+  // LIB_FN_TAIL's seat and (for the five registrations) a callback that
+  // MOVES, which is LIB_FN_MOVE_ARGS'. The three that do NOT are
+  // `onMessage`, `onError` and `address`, special-cased in emitLibCall
+  // with their reasons: two need an ADAPTER symbol the runtime invokes,
+  // and the third builds a record out of three runtime calls.
   "dgram.createSocket": "scr_dgram_create",
+  "dgram.bind": "scr_dgram_bind",
+  "dgram.bindCb": "scr_dgram_bind",
+  "dgram.connect": "scr_dgram_connect",
   "dgram.connectCb": "scr_dgram_connect",
+  "dgram.sendStr": "scr_dgram_send_str",
+  "dgram.sendBytes": "scr_dgram_send_bytes",
+  "dgram.sendConnStr": "scr_dgram_send_conn_str",
+  "dgram.sendConnBytes": "scr_dgram_send_conn_bytes",
   "dgram.sendChk": "scr_dgram_send_chk",
   "dgram.close": "scr_dgram_close",
+  "dgram.closeCb": "scr_dgram_close",
+  "dgram.unref": "scr_dgram_unref",
+  "dgram.ref": "scr_dgram_ref",
+  "dgram.onListening": "scr_dgram_on_listening",
+  "dgram.onClose": "scr_dgram_on_close",
+  "dgram.onConnect": "scr_dgram_on_connect",
   "crypto.randomBytes": "scr_crypto_random_bytes",
   "crypto.randomInt": "scr_crypto_random_int",
   "crypto.randomIntAsync": "scr_crypto_random_int_async",
@@ -1089,6 +1120,11 @@ const LIB_FN_TAIL: Record<string, readonly { readonly decl: string; readonly arg
   "tls.createServerDyn": [{ decl: "ptr", arg: "ptr null" }, { decl: "ptr", arg: "ptr null" }],
   "tls.connect": [{ decl: "ptr", arg: "ptr null" }],
   "dgram.close": [{ decl: "ptr", arg: "ptr null" }],
+  // The no-callback bind/connect: the C tier spells the same trailing
+  // NULL inline (`scr_dgram_bind(s, port, host, NULL)`), and the Cb
+  // siblings pass the real closure as their own fourth argument.
+  "dgram.bind": [{ decl: "ptr", arg: "ptr null" }],
+  "dgram.connect": [{ decl: "ptr", arg: "ptr null" }],
 };
 
 /** The rows whose runtime entry TAKES OWNERSHIP of an argument — the
@@ -1102,6 +1138,15 @@ const LIB_FN_TAIL: Record<string, readonly { readonly decl: string; readonly arg
 const LIB_FN_MOVE_ARGS: Record<string, readonly number[]> = {
   // scr_dgram_connect's `ScrClosure *cb /*moves, nullable*/`.
   "dgram.connectCb": [3],
+  // The same seat on the rest of the dgram surface: `scr_dgram_bind`'s
+  // fourth argument, `scr_dgram_close`'s second, and the closure every
+  // event registration hands to the socket's listener registry. The C
+  // tier calls E.moveTemp on exactly these.
+  "dgram.bindCb": [3],
+  "dgram.closeCb": [1],
+  "dgram.onListening": [1],
+  "dgram.onClose": [1],
+  "dgram.onConnect": [1],
 };
 
 /** The rows where a STRING argument is handed to the runtime as its raw
@@ -1158,7 +1203,9 @@ const USES_TIMERS_LIB_FNS = new Set<string>([
   // exactly these, and a server whose loop never runs accepts nothing.
   "tls.createServer", "tls.createServerCb", "tls.createServerDyn", "tls.connect",
   "https.createServer",
-  "dgram.connectCb", "dgram.sendChk",
+  "dgram.bind", "dgram.bindCb", "dgram.connect", "dgram.connectCb",
+  "dgram.sendStr", "dgram.sendBytes", "dgram.sendConnStr", "dgram.sendConnBytes",
+  "dgram.sendChk",
   "fs.existsChk",
   "http.createServer", "http.createServerEmpty",
   "http.request", "http.requestCb", "http.requestUrl", "http.requestUrlCb",
@@ -8703,6 +8750,84 @@ class LlEmitter {
     }
   }
 
+  /** The per-shape `dgram` message adapter for the TWO-parameter
+   * `(msg, rinfo)` listener — emit-async.ts's dgramMsgThunkFor, in IR.
+   *
+   * The runtime hands the listener's parts FLAT (`msg, addr, family,
+   * port, size`) because it cannot know the program's rinfo record; the
+   * record is program data, so building it is the emitter's job and the
+   * adapter is interned per shape. Everything the runtime passes is
+   * BORROWED and the closure ABI CONSUMES its arguments, which is why the
+   * two strings and the bytes are retained in — the C twin's
+   * `scr_str_retain` / `scr_bytes_retain` calls, one for one.
+   *
+   * Zero- and one-parameter listeners never reach here: the runtime ships
+   * scr_dgram_msg_thunk0/1 for those, and the record has no reader. */
+  private dgramMsgThunkFor(cbT: IrType & { kind: "func" }): string {
+    const param = cbT.params[1]!;
+    const msgT = cbT.params[0]!;
+    if (param.kind !== "record") throw new Error("llvm emitter bug: message listener rinfo not a record");
+    const key = `dgmt:${param.shapeId}:${typeKey(msgT)}`;
+    const seen = this.resolveThunks.get(key);
+    if (seen) return seen;
+    const sym = `sc_dgmt_${this.resolveThunks.size}`;
+    this.resolveThunks.set(key, sym);
+    const struct = mangleRecordStruct(param.shapeId);
+    const shape = this.recordShape(param.shapeId);
+    // The four members the frontend pinned, resolved through the shape so
+    // a field-order change cannot silently write the wrong slot.
+    const slot = (name: string): { idx: number; type: IrType } => {
+      const idx = shape.fields.findIndex((f) => f.name === name);
+      if (idx < 0) throw new Error(`llvm emitter bug: dgram rinfo shape ${param.shapeId} has no ${name}`);
+      return { idx, type: shape.fields[idx]!.type };
+    };
+    const addr = slot("address");
+    const family = slot("family");
+    const port = slot("port");
+    const size = slot("size");
+    if (llFieldType(addr.type) !== "ptr" || llFieldType(family.type) !== "ptr") {
+      throw new Error("llvm emitter bug: dgram rinfo address/family are not reference members");
+    }
+    if (llFieldType(port.type) !== "double" || llFieldType(size.type) !== "double") {
+      throw new Error("llvm emitter bug: dgram rinfo port/size are not f64 members");
+    }
+    const gep = (reg: string, idx: number): string =>
+      `${reg} = getelementptr inbounds %${struct}, ptr %ri, i64 0, i32 ${idx + 1}`;
+    // retainSym emits the runtime `declare` itself (vAdapters does it for
+    // every non-emitted pair), so these need no hand-written prototype —
+    // and must NOT have one: `scr_bytes_retain` is a `static inline` in
+    // scr_runtime.h with no external symbol at all, so a `declare` under
+    // that name links against nothing (`lld-link: undefined symbol`, the
+    // first thing this thunk did). The `_v` entry point rcAdapters names
+    // is the one that exists.
+    const retAddr = retainSym(this, addr.type);
+    const retFamily = retainSym(this, family.type);
+    const retMsg = retainSym(this, msgT);
+    this.resolveThunkDefs.push(
+      `define internal void @${sym}(ptr %cb, ptr %msg, ptr %addr, ptr %family, double %port, double %size) ${FN_ATTRS} { ; dgram message adapter for ${param.shapeId}`,
+      `entry:`,
+      `  %ri = call ptr @${mangleRecordNew(param.shapeId)}()`,
+      `  %a = call ptr ${retAddr}(ptr %addr)`,
+      `  ${gep("%pa", addr.idx)}`,
+      `  store ptr %a, ptr %pa`,
+      `  %f = call ptr ${retFamily}(ptr %family)`,
+      `  ${gep("%pf", family.idx)}`,
+      `  store ptr %f, ptr %pf`,
+      `  ${gep("%pp", port.idx)}`,
+      `  store double %port, ptr %pp`,
+      `  ${gep("%ps", size.idx)}`,
+      `  store double %size, ptr %ps`,
+      `  %m = call ptr ${retMsg}(ptr %msg)`,
+      `  %fnp = getelementptr inbounds %ScrClosure, ptr %cb, i64 0, i32 1`,
+      `  %fn = load ptr, ptr %fnp`,
+      `  call void %fn(ptr %cb, ptr %m, ptr %ri)`,
+      `  ret void`,
+      `}`,
+      ``,
+    );
+    return sym;
+  }
+
   /** The host-call adapter for closures of a given (arity, return kind) —
    * emit-island.ts's islandAdapter: argv cells are BORROWED by the
    * wrapper; the closure ABI consumes (+1) each param, so the adapter
@@ -14110,6 +14235,84 @@ class LlEmitter {
         : this.own({ name: ty === "double" ? f64Lit(0) : ty === "i1" ? "false" : "null", type: e.type });
       this.emitPendingCheck();
       return out;
+    }
+    if (e.fn === "dgram.address") {
+      // The AddressInfo record, built here from three runtime parts —
+      // emit-exprs.ts's twin. Not the generic path's shape: one IR call
+      // becomes three C calls and a record, and only the FIRST of the
+      // three throws (Node's "Not running" for a socket that never
+      // bound), so the pending check goes after `addr_ip` and not after
+      // the other two. The frontend pinned the {address, family, port}
+      // shape, so the field lookups cannot miss.
+      const sock = this.emitExpr(e.args[0]!);
+      if (e.type.kind !== "record") throw new Error("llvm emitter bug: dgram.address result is not a record");
+      this.declare(`declare ptr @scr_dgram_addr_ip(ptr)`);
+      this.declare(`declare ptr @scr_dgram_addr_family(ptr)`);
+      this.declare(`declare double @scr_dgram_addr_port(ptr)`);
+      const ip = B.tmp();
+      B.line(`${ip} = call ptr @scr_dgram_addr_ip(ptr ${sock.name}) ; +1, may throw`);
+      const ipv = this.own({ name: ip, type: STRING });
+      this.emitPendingCheck();
+      const rec = B.tmp();
+      B.line(`${rec} = call ptr @${mangleRecordNew(e.type.shapeId)}()`);
+      const recv = this.own({ name: rec, type: e.type });
+      // The +1 string moves INTO the field, exactly as the C tier's
+      // moveTemp does — the record owns it from here.
+      this.moveTemp(ipv);
+      B.line(`store ptr ${ip}, ptr ${this.recordFieldPtr(rec, e.type.shapeId, "address").ptr}`);
+      const fam = B.tmp();
+      B.line(`${fam} = call ptr @scr_dgram_addr_family(ptr ${sock.name}) ; +1, straight into the field`);
+      B.line(`store ptr ${fam}, ptr ${this.recordFieldPtr(rec, e.type.shapeId, "family").ptr}`);
+      const port = B.tmp();
+      B.line(`${port} = call double @scr_dgram_addr_port(ptr ${sock.name})`);
+      this.storeField(this.recordFieldPtr(rec, e.type.shapeId, "port").ptr, F64, port);
+      return recv;
+    }
+    if (e.fn === "dgram.onMessage") {
+      // The registration the whole tier used to fall over on. The runtime
+      // stores (closure, ADAPTER, once) and calls adapter(cb, msg, addr,
+      // family, port, size) on every datagram; the adapter is what turns
+      // the runtime's flat parts into the listener's declared arguments.
+      // Zero- and one-parameter listeners take the runtime's own
+      // scr_dgram_msg_thunk0/1; a two-parameter one needs the rinfo
+      // RECORD, which is program data, so its adapter is emitted per
+      // shape (dgramMsgThunkFor's twin).
+      const cbT = e.args[1]!.type;
+      if (cbT.kind !== "func") throw new Error("llvm emitter bug: dgram.onMessage callback not a func");
+      const sock = this.emitExpr(e.args[0]!);
+      const cb = this.emitExpr(e.args[1]!);
+      const once = this.emitExpr(e.args[2]!);
+      this.moveTemp(cb);
+      const adapter =
+        cbT.params.length === 0 ? "scr_dgram_msg_thunk0"
+        : cbT.params.length === 1 ? "scr_dgram_msg_thunk1"
+        : this.dgramMsgThunkFor(cbT);
+      this.declare(`declare void @scr_dgram_on_message(ptr, ptr, ptr, i1 zeroext)`);
+      if (cbT.params.length < 2) this.declare(`declare void @${adapter}(ptr, ptr, ptr, ptr, double, double)`);
+      B.line(
+        `call void @scr_dgram_on_message(ptr ${sock.name}, ptr ${cb.name}, ptr @${adapter}, i1 ${once.name})`,
+      );
+      return { name: "", type: e.type };
+    }
+    if (e.fn === "dgram.onError") {
+      // Same shape as onMessage, and the adapter is one of the runtime's
+      // two child-error thunks (the %Error the child surface already
+      // builds fits this listener exactly), so nothing is emitted per
+      // program — but the symbol still sits in the MIDDLE of the argument
+      // list, which is the one thing LIB_FN_TAIL cannot express.
+      const cbT = e.args[1]!.type;
+      if (cbT.kind !== "func") throw new Error("llvm emitter bug: dgram.onError callback not a func");
+      const sock = this.emitExpr(e.args[0]!);
+      const cb = this.emitExpr(e.args[1]!);
+      const once = this.emitExpr(e.args[2]!);
+      this.moveTemp(cb);
+      const adapter = cbT.params.length === 0 ? "scr_child_err_thunk0" : "scr_child_err_thunk_error";
+      this.declare(`declare void @scr_dgram_on_error(ptr, ptr, ptr, i1 zeroext)`);
+      this.declare(`declare void @${adapter}(ptr, ptr)`);
+      B.line(
+        `call void @scr_dgram_on_error(ptr ${sock.name}, ptr ${cb.name}, ptr @${adapter}, i1 ${once.name})`,
+      );
+      return { name: "", type: e.type };
     }
     if (MAY_THROW_LIB_FNS.has(e.fn) && LIB_FN_SYMS[e.fn] === undefined) {
       throw new LlvmUnsupportedError(`libCall:${e.fn}`, e.loc);

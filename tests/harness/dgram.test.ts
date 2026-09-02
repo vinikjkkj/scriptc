@@ -79,28 +79,64 @@ function runLane(cmd: string, args: string[], driver: string | null): Promise<Pr
   });
 }
 
-async function build(entry: string): Promise<string> {
+/** The LLVM lane's REFUSALS, pinned by case name and by the construct the
+ * backend names. Every other case must build on BOTH backends and answer
+ * Node byte for byte on both.
+ *
+ * This list is the tier boundary, written down. It was ALL NINE cases
+ * until node:dgram's sixteen missing lib functions were emitted, at which
+ * point every `libCall:dgram.*` refusal disappeared and only node:dns's
+ * one function was left — so a case leaving this list is progress and a
+ * case JOINING it is a regression, and the assertions below are written
+ * to fail in both directions rather than to skip quietly. */
+const LLVM_REFUSALS: Record<string, string> = {
+  "dns-lookup": "libCall:dns.lookup",
+  "udp-state-errors": "libCall:dns.lookup",
+};
+
+interface Built {
+  /** The C binary: the reference lane, always present. */
+  c: string;
+  /** The LLVM binary, or null when the tier refuses this case. */
+  llvm: string | null;
+  /** The construct the LLVM backend named, when it refused. */
+  llvmRefusal: string | null;
+}
+
+async function buildOn(entry: string, backend: "c" | "llvm"): Promise<
+  { ok: true; binary: string } | { ok: false; diags: string }
+> {
   const hash = createHash("sha256");
   hash.update(entry).update(readFileSync(entry));
-  const key = hash.update(sanitize ? "san" : "plain").digest("hex").slice(0, 16);
+  const key = hash.update(sanitize ? "san" : "plain").update(backend).digest("hex").slice(0, 16);
   const outDir = join(cacheDir, `dgram-${key}`);
   mkdirSync(outDir, { recursive: true });
   const result = await compile(entry, {
     outPath: join(outDir, exeName("program")),
     outDir,
     sanitize,
-    // Pinned: a networking suite whose flake surface is already the
-    // sockets — the compiled lane stays the C reference so any diff is
-    // network behavior, never a backend-lane change.
-    backend: "c",
+    backend,
   });
   if (!result.ok) {
-    throw new Error(
-      "dgram fixture failed to compile:\n" +
-        result.diagnostics.map((d) => `${d.code}: ${d.message}`).join("\n"),
-    );
+    return { ok: false, diags: result.diagnostics.map((d) => `${d.code}: ${d.message}`).join("\n") };
   }
-  return result.binaryPath;
+  return { ok: true, binary: result.binaryPath };
+}
+
+/* The C lane stays the REFERENCE — a diff between it and Node is network
+ * behavior, which is what the original pin was protecting. The LLVM lane
+ * is an ADDITIONAL comparison against the same Node output, not a
+ * replacement for it, so a backend-lane bug and a socket bug stay
+ * distinguishable: a C-vs-Node diff is the first, C==Node!=LLVM is the
+ * second. Without this lane the sixteen dgram rows the LLVM emitter now
+ * carries had no test at all — every fixture here silently demoted. */
+async function build(entry: string): Promise<Built> {
+  const c = await buildOn(entry, "c");
+  if (!c.ok) throw new Error("dgram fixture failed to compile (C):\n" + c.diags);
+  const llvm = await buildOn(entry, "llvm");
+  if (llvm.ok) return { c: c.binary, llvm: llvm.binary, llvmRefusal: null };
+  const m = /\(([^)]*)\)/.exec(llvm.diags);
+  return { c: c.binary, llvm: null, llvmRefusal: m ? m[1]! : llvm.diags };
 }
 
 /* POSIX spelling first: globSync answers backslashes on win32, where
@@ -117,16 +153,28 @@ const cases = globSync(join(fixturesRoot, "cases/*/main.ts"))
 
 describe(`dgram differential (${cases.length} programs${sanitize ? ", sanitized" : ""})`, () => {
   test.for(cases.map((c) => [c.name, c] as const))("%s", async ([, c]) => {
-    const binary = await build(c.entry);
+    const built = await build(c.entry);
+    // The tier boundary is asserted in BOTH directions: a case that used
+    // to refuse and now compiles must be taken off LLVM_REFUSALS, and a
+    // case that compiled and now refuses fails here rather than skipping.
+    expect(built.llvmRefusal).toBe(LLVM_REFUSALS[c.name] ?? null);
     // Sequential, not parallel: both lanes bind ephemeral ports and drive
     // real sockets — parallelism buys little and interleaves kernel state.
     const nodeRes = await runLane("node", [c.entry], c.driver);
-    const nativeRes = await runLane(binary, [], c.driver);
+    const nativeRes = await runLane(built.c, [], c.driver);
     expect(nativeRes.stdout.toString("utf8")).toBe(nodeRes.stdout.toString("utf8"));
     if (!nodeRes.stdout.equals(nativeRes.stdout)) {
       expect.unreachable("stdout differed at byte level but not after utf8 decode");
     }
     expect(nativeRes.exitCode).toBe(nodeRes.exitCode);
     expect(nativeRes.driverStdout).toBe(nodeRes.driverStdout);
-  }, 120_000);
+    if (built.llvm === null) return;
+    const llvmRes = await runLane(built.llvm, [], c.driver);
+    expect(llvmRes.stdout.toString("utf8")).toBe(nodeRes.stdout.toString("utf8"));
+    if (!nodeRes.stdout.equals(llvmRes.stdout)) {
+      expect.unreachable("LLVM stdout differed at byte level but not after utf8 decode");
+    }
+    expect(llvmRes.exitCode).toBe(nodeRes.exitCode);
+    expect(llvmRes.driverStdout).toBe(nodeRes.driverStdout);
+  }, 240_000);
 });
