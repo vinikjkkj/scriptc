@@ -355,6 +355,14 @@ void scr_fence_fatal(const char *message, size_t len, const char *code) {
   scr_trap_trace_note(message, len, code);
 #endif
   (void)code; /* already inside `message`, as "[SCxxxx at file:line]" */
+#ifdef SCR_LIB
+  /* LIBRARY MODE has a host, and _Exit would take the host down with it.
+   * The library contract already has one channel for a failure the program
+   * cannot recover from -- the trap funnel -- and scr_trap_len is _Noreturn
+   * and NOT catchable, which is the property this fence needs. Same message,
+   * same tagged site, delivered where a library's caller reads failures. */
+  scr_trap_len(message, len);
+#else
   scr_exit_code_note(1);
   fflush(stdout); /* the program's own output settles before the refusal */
   fputs("Uncaught Error: ", stderr);
@@ -362,6 +370,7 @@ void scr_fence_fatal(const char *message, size_t len, const char *code) {
   fputc('\n', stderr);
   fflush(stderr);
   _Exit(1); /* no unwind, no catch, no atexit -- the refusal is terminal */
+#endif
 }
 
 /* A compiler-resolved Node-parity throw (the always-throwing lowered
