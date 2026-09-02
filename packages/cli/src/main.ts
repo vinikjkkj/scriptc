@@ -311,7 +311,14 @@ async function main(): Promise<number> {
       const n = result.advisories.length;
       process.stderr.write(`\n${n} advisor${n === 1 ? "y" : "ies"} (the build succeeded).\n`);
     }
-    if (!values["keep-c"]) rmSync(result.cPath, { force: true });
+    if (!values["keep-c"]) {
+      rmSync(result.cPath, { force: true });
+      // A split program's other units and their shared header go with it:
+      // "delete the generated program TU" means the whole emission, not
+      // the first file of it.
+      for (const p of result.cPathParts ?? []) rmSync(p, { force: true });
+      if (result.cPathHeader !== undefined) rmSync(result.cPathHeader, { force: true });
+    }
     return result.binaryPath;
   };
 

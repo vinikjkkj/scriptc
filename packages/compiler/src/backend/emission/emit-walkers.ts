@@ -85,8 +85,9 @@ function typeMayHoldFunc(E: CEmitter, t: IrType): boolean {
     // A static const with internal linkage, beside the walker prototypes:
     // emitStructDefs has already declared the `_v` thunks by then, and the
     // converters that take its address are emitted after.
-    E.walkerProtos.push(
-      `static const ScrDynClass ${name} = { ${cStringLiteral(Buffer.from(display, "utf8"))}, ` +
+    E.walkerData(
+      `extern const ScrDynClass ${name};`,
+      `${E.link}const ScrDynClass ${name} = { ${cStringLiteral(Buffer.from(display, "utf8"))}, ` +
         `${meta.pre}, ${meta.post}, ${meta.hierarchy ? "true" : "false"}, ` +
         `&${rc.retain}, &${rc.release} }; /* dyn box: class ${className} */`,
     );
@@ -176,7 +177,7 @@ function typeMayHoldFunc(E: CEmitter, t: IrType): boolean {
     if (!def) throw new Error(`emitter bug: truthiness of unknown union ${unionId}`);
     const name = `sc_ut_${E.unionTruthyFns.size}`;
     E.unionTruthyFns.set(unionId, name);
-    const sig = `static bool ${name}(ScrUnion *v)`;
+    const sig = `${E.link}bool ${name}(ScrUnion *v)`;
     E.walkerProtos.push(`${sig}; /* ToBoolean ${unionId} */`);
     const d: string[] = [`${sig} { /* ToBoolean ${unionId} */`, `  switch (v->tag) {`];
     def.arms.forEach((arm, i) => {
@@ -229,7 +230,7 @@ function typeMayHoldFunc(E: CEmitter, t: IrType): boolean {
     const name = `sc_ue_${E.unionEqFns.size}`;
     E.unionEqFns.set(key, name);
     const what = sameValue ? "SameValue" : "strict equality";
-    const sig = `static bool ${name}(ScrUnion *a, ScrUnion *b)`;
+    const sig = `${E.link}bool ${name}(ScrUnion *a, ScrUnion *b)`;
     E.walkerProtos.push(`${sig}; /* ${what} ${unionId} */`);
     const d: string[] = [
       `${sig} { /* ${what} ${unionId} */`,
@@ -285,7 +286,7 @@ function typeMayHoldFunc(E: CEmitter, t: IrType): boolean {
     if (!def) throw new Error(`emitter bug: ToString of unknown union ${unionId}`);
     const name = `sc_us_${E.unionToStrFns.size}`;
     E.unionToStrFns.set(unionId, name);
-    const sig = `static ScrStr *${name}(ScrUnion *v)`;
+    const sig = `${E.link}ScrStr *${name}(ScrUnion *v)`;
     E.walkerProtos.push(`${sig}; /* ToString ${unionId} */`);
     const d: string[] = [`${sig} { /* ToString ${unionId} */`, `  switch (v->tag) {`];
     def.arms.forEach((arm, i) => {
@@ -367,7 +368,7 @@ function typeMayHoldFunc(E: CEmitter, t: IrType): boolean {
     const unitTags = def.arms.flatMap((a, i) =>
       a.kind === "undefinedT" || a.kind === "nullT" ? [i] : [],
     );
-    const sig = `static ScrStr *${name}(ScrArr *a, ScrStr *sep)`;
+    const sig = `${E.link}ScrStr *${name}(ScrArr *a, ScrStr *sep)`;
     E.walkerProtos.push(`${sig}; /* join ${unionId} */`);
     E.walkerDefs.push(
       `${sig} { /* Array#join over ${unionId}: nullish arms print empty */`,
@@ -404,11 +405,11 @@ function typeMayHoldFunc(E: CEmitter, t: IrType): boolean {
     const name = "sc_ds";
     E.dynToStrFn = name;
     E.walkerProtos.push(
-      `static void ${name}_buf(ScrJsonBuf *b, const ScrDyn *d); /* String(unknown) walker */`,
-      `static ScrStr *${name}(const ScrDyn *d); /* String(unknown) */`,
+      `${E.link}void ${name}_buf(ScrJsonBuf *b, const ScrDyn *d); /* String(unknown) walker */`,
+      `${E.link}ScrStr *${name}(const ScrDyn *d); /* String(unknown) */`,
     );
     E.walkerDefs.push(
-      `static void ${name}_buf(ScrJsonBuf *b, const ScrDyn *d) { /* String(unknown), recursive */`,
+      `${E.link}void ${name}_buf(ScrJsonBuf *b, const ScrDyn *d) { /* String(unknown), recursive */`,
       `  switch (d->kind) {`,
       `  case SCR_DYN_UNDEF: scr_jb_puts(b, "undefined"); break;`,
       `  case SCR_DYN_NULL: scr_jb_puts(b, "null"); break;`,
@@ -554,7 +555,7 @@ function typeMayHoldFunc(E: CEmitter, t: IrType): boolean {
       `    break;`,
       `  }`,
       `}`,
-      `static ScrStr *${name}(const ScrDyn *d) { /* String(unknown) -> owned (+1) */`,
+      `${E.link}ScrStr *${name}(const ScrDyn *d) { /* String(unknown) -> owned (+1) */`,
       `  if (d->kind == SCR_DYN_STR) return scr_str_retain(d->v.str);`,
       `  ScrJsonBuf b;`,
       `  scr_jb_init(&b);`,
@@ -582,7 +583,7 @@ function typeMayHoldFunc(E: CEmitter, t: IrType): boolean {
     if (E.caughtToDynFn) return E.caughtToDynFn;
     const name = "sc_cd";
     E.caughtToDynFn = name;
-    const sig = `static ScrDyn *${name}(const ScrCaught *c)`;
+    const sig = `${E.link}ScrDyn *${name}(const ScrCaught *c)`;
     E.walkerProtos.push(`${sig}; /* caught -> unknown */`);
     E.walkerDefs.push(
       `${sig} { /* caught -> unknown (+1, fresh tree) */`,
@@ -629,7 +630,7 @@ function typeMayHoldFunc(E: CEmitter, t: IrType): boolean {
     if (E.jsonIndentFn) return E.jsonIndentFn;
     const name = "sc_ji";
     E.jsonIndentFn = name;
-    const sig = `static ScrStr *${name}(ScrStr *compact, const char *indent, size_t ilen)`;
+    const sig = `${E.link}ScrStr *${name}(ScrStr *compact, const char *indent, size_t ilen)`;
     E.walkerProtos.push(`${sig}; /* stringify space re-indent */`);
     E.walkerDefs.push(
       `${sig} { /* stringify space re-indent (Node's gap algorithm) */`,
@@ -694,7 +695,7 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
     if (existing) return existing;
     const name = `sc_jw_${E.jsonWriters.size}`;
     E.jsonWriters.set(key, name);
-    const sig = `static void ${name}(ScrJsonBuf *b, ${cDecl(t, "v")})`;
+    const sig = `${E.link}void ${name}(ScrJsonBuf *b, ${cDecl(t, "v")})`;
     E.walkerProtos.push(`${sig}; /* stringify ${key} */`);
     const d: string[] = [`${sig} { /* stringify ${key} */`];
     switch (t.kind) {
@@ -930,7 +931,7 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
     if (existing) return existing;
     const name = `sc_dm_${E.dynMatchers.size}`;
     E.dynMatchers.set(key, name);
-    const sig = `static bool ${name}(const ScrDyn *d)`;
+    const sig = `${E.link}bool ${name}(const ScrDyn *d)`;
     E.walkerProtos.push(`${sig}; /* matches ${key} */`);
     const d: string[] = [`${sig} { /* matches ${key} */`];
     switch (t.kind) {
@@ -1204,7 +1205,7 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
     if (existing) return existing;
     const name = `sc_dlit_${E.dynBuilders.size}`;
     E.dynBuilders.set(memoKey, name);
-    const sig = `static bool ${name}(const ScrDyn *d)`;
+    const sig = `${E.link}bool ${name}(const ScrDyn *d)`;
     // The pairs ride into a C BLOCK comment, so a literal spelling `*/`
     // would end it early and the rest of the predicate would be code no
     // one wrote. Neutralised here rather than trusted not to happen.
@@ -1247,7 +1248,7 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
     if (existing) return existing;
     const name = "sc_dyn_destr_check";
     E.dynBuilders.set(memoKey, name);
-    const sig = `static void ${name}(const ScrDyn *d, const char *spell, const char *firstProp)`;
+    const sig = `${E.link}void ${name}(const ScrDyn *d, const char *spell, const char *firstProp)`;
     E.walkerProtos.push(`${sig}; /* destructuring RequireObjectCoercible */`);
     E.walkerDefs.push(
       `${sig} { /* destructuring RequireObjectCoercible */`,
@@ -1288,7 +1289,7 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
     if (existing) return existing;
     const name = "sc_dyn_iter_n";
     E.dynBuilders.set(memoKey, name);
-    const sig = `static ScrDyn *${name}(const ScrDyn *d, size_t n)`;
+    const sig = `${E.link}ScrDyn *${name}(const ScrDyn *d, size_t n)`;
     E.walkerProtos.push(`${sig}; /* destructuring GetIterator + N steps */`);
     E.walkerDefs.push(
       `${sig} { /* destructuring GetIterator + N steps */`,
@@ -1359,7 +1360,7 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
     if (existing) return existing;
     const name = "sc_dyn_key_get";
     E.dynBuilders.set(memoKey, name);
-    const sig = `static ScrDyn *${name}(ScrDyn *d, ScrStr *k, bool opt)`;
+    const sig = `${E.link}ScrDyn *${name}(ScrDyn *d, ScrStr *k, bool opt)`;
     E.walkerProtos.push(`${sig}; /* d[k] on dyn */`);
     const d: string[] = [`${sig} { /* d[k] on dyn */`];
     d.push(`  if (d->kind == SCR_DYN_UNDEF || d->kind == SCR_DYN_NULL) {`);
@@ -1629,8 +1630,8 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
     const name = "sc_dyn_rec_wide";
     E.dynBuilders.set(memoKey, name);
     const kg = dynKeyGetHelper(E);
-    const okSig = `static bool sc_dyn_rec_wideable(const ScrDyn *d)`;
-    const sig = `static ScrDyn *${name}(const ScrDyn *d, const char *const *keys, const unsigned *lens, size_t n)`;
+    const okSig = `${E.link}bool sc_dyn_rec_wideable(const ScrDyn *d)`;
+    const sig = `${E.link}ScrDyn *${name}(const ScrDyn *d, const char *const *keys, const unsigned *lens, size_t n)`;
     E.walkerProtos.push(`${okSig}; /* record builder: a receiver whose members can be read */`);
     E.walkerProtos.push(`${sig}; /* record builder: the non-OBJ receiver's declared members */`);
     // The admitted kinds come from backend/kindgate.ts, spelled here as
@@ -1694,7 +1695,7 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
     if (existing) return existing;
     const name = `sc_dc_${E.dynBuilders.size}`;
     E.dynBuilders.set(key, name);
-    const sig = `static ${cType(t)}${cType(t).endsWith("*") ? "" : " "}${name}(const ScrDyn *d, const ScrDynPath *path)`;
+    const sig = `${E.link}${cType(t)}${cType(t).endsWith("*") ? "" : " "}${name}(const ScrDyn *d, const ScrDynPath *path)`;
     E.walkerProtos.push(`${sig}; /* check ${key} */`);
     const d: string[] = [`${sig} { /* check ${key} */`];
     dynWalkerBody(E, t, name, d, false);
@@ -1759,7 +1760,7 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
     if (existing) return existing;
     const name = `sc_da_${E.dynArmBuilders.size}`;
     E.dynArmBuilders.set(key, name);
-    const sig = `static ${cType(t)}${cType(t).endsWith("*") ? "" : " "}${name}(const ScrDyn *d, const ScrDynPath *path, bool *ok)`;
+    const sig = `${E.link}${cType(t)}${cType(t).endsWith("*") ? "" : " "}${name}(const ScrDyn *d, const ScrDynPath *path, bool *ok)`;
     E.walkerProtos.push(`${sig}; /* arm ${key} */`);
     const d: string[] = [`${sig} { /* arm ${key} */`];
     dynWalkerBody(E, t, name, d, true);
@@ -2026,13 +2027,15 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
           const lensName = `sc_kgl_${t.shapeId}`;
           if (!E.recWideTables.has(t.shapeId)) {
             E.recWideTables.add(t.shapeId);
-            E.walkerProtos.push(
-              `static const char *const ${keysName}[] = { ${shape.fields
+            E.walkerData(
+              `extern const char *const ${keysName}[];`,
+              `${E.link}const char *const ${keysName}[] = { ${shape.fields
                 .map((f) => cStringLiteral(Buffer.from(f.name, "utf8")))
                 .join(", ")} };`,
             );
-            E.walkerProtos.push(
-              `static const unsigned ${lensName}[] = { ${shape.fields
+            E.walkerData(
+              `extern const unsigned ${lensName}[];`,
+              `${E.link}const unsigned ${lensName}[] = { ${shape.fields
                 .map((f) => String(Buffer.byteLength(f.name, "utf8")))
                 .join(", ")} };`,
             );
@@ -2559,7 +2562,7 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
     if (existing) return existing;
     const name = `sc_td_${E.toDynFns.size}`;
     E.toDynFns.set(key, name);
-    const sig = `static ScrDyn *${name}(${cDecl(t, "v")})`;
+    const sig = `${E.link}ScrDyn *${name}(${cDecl(t, "v")})`;
     E.walkerProtos.push(`${sig}; /* to-dyn ${key} */`);
     const d: string[] = [`${sig} { /* to-dyn ${key} */`];
     switch (t.kind) {
@@ -2999,7 +3002,7 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
     if (existing) return existing;
     const name = `sc_pda_${E.promiseDynAdapters.size}`;
     E.promiseDynAdapters.set(key, name);
-    const sig = `static void ${name}(ScrPromise *dst, ScrPromise *src)`;
+    const sig = `${E.link}void ${name}(ScrPromise *dst, ScrPromise *src)`;
     E.walkerProtos.push(`${sig}; /* dyn-box settle adapter for promise<${key}> */`);
     const d: string[] = [`${sig} { /* dyn-box settle adapter for promise<${key}> */`];
     const fulfill = (expr: string) =>
@@ -3084,7 +3087,7 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
     if (existing) return existing;
     const name = `sc_dfk_${E.dynFuncThunks.size}`;
     E.dynFuncThunks.set(key, name);
-    const sig = `static ScrDyn *${name}(ScrClosure *c, ScrDyn *const *args, size_t argc)`;
+    const sig = `${E.link}ScrDyn *${name}(ScrClosure *c, ScrDyn *const *args, size_t argc)`;
     E.walkerProtos.push(`${sig}; /* dyn call thunk for ${key} */`);
     const d: string[] = [`${sig} { /* dyn call thunk for ${key} */`];
     if (t.params.length === 0) d.push(`  (void)args;`);
@@ -3183,7 +3186,7 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
     const name = `sc_dfs_${E.strandedDynFuncBoxes.size}`;
     E.strandedDynFuncBoxes.set(ikey, name);
     const thunkName = `${name}_thunk`;
-    const thunkSig = `static ScrDyn *${thunkName}(ScrClosure *c, ScrDyn *const *args, size_t argc)`;
+    const thunkSig = `${E.link}ScrDyn *${thunkName}(ScrClosure *c, ScrDyn *const *args, size_t argc)`;
     // CENSUS: this used to be an UNCODED refusal - scr_throw_error_msg carries
     // no SC code at all, so it was invisible to the bracket census, to the
     // scr_trap census, AND to SCRIPTC_TRAP_TRACE, whose hook
@@ -3215,7 +3218,7 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
       `}`,
       ``,
     );
-    const sig = `static ScrDyn *${name}(ScrClosure *v, const char *fname, const char *fsrc)`;
+    const sig = `${E.link}ScrDyn *${name}(ScrClosure *v, const char *fname, const char *fsrc)`;
     E.walkerProtos.push(`${sig}; /* box ${key} into dyn (uncallable) */`);
     const sigLit = cStringLiteral(Buffer.from(key, "utf8"));
     E.walkerDefs.push(
@@ -3301,7 +3304,7 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
     if (existing) return existing;
     const name = `sc_dfb_${E.dynFuncBoxes.size}`;
     E.dynFuncBoxes.set(key, name);
-    const sig = `static ScrDyn *${name}(ScrClosure *v, const char *fname, const char *fsrc)`;
+    const sig = `${E.link}ScrDyn *${name}(ScrClosure *v, const char *fname, const char *fsrc)`;
     E.walkerProtos.push(`${sig}; /* box ${key} into dyn */`);
     const thunk = dynFuncThunkHelper(E, t);
     const sigLit = cStringLiteral(Buffer.from(key, "utf8"));
@@ -3328,7 +3331,7 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
     // its own -- its identity is the target signature it adapts to.
     if (rcSitesRequested()) E.closureSites.set(name, `<dyn fn adapter to ${key}>`);
     const params = ["ScrClosure *sc_env", ...t.params.map((p, i) => cDecl(p, `a${i}`))].join(", ");
-    const sig = `static ${cType(t.ret)}${cType(t.ret).endsWith("*") ? "" : " "}${name}(${params})`;
+    const sig = `${E.link}${cType(t.ret)}${cType(t.ret).endsWith("*") ? "" : " "}${name}(${params})`;
     E.walkerProtos.push(`${sig}; /* dyn fn adapter to ${key} */`);
     const dummy =
       t.ret.kind === "void" ? "" : t.ret.kind === "f64" ? "0" : t.ret.kind === "bool" ? "false" : "NULL";
@@ -3399,7 +3402,7 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
     // at the end of this function, in the same order.
     const aborts = t.kind !== "dyn" && !(t.kind === "union" && E.undefinedArmTag(t) >= 0);
     if (aborts) E.recordKeyGetAborts.add(name);
-    const sig = `static ${cType(t)}${cType(t).endsWith("*") ? "" : " "}${name}(${struct} *r, ScrStr *k${aborts ? ", const char *sc_site" : ""})`;
+    const sig = `${E.link}${cType(t)}${cType(t).endsWith("*") ? "" : " "}${name}(${struct} *r, ScrStr *k${aborts ? ", const char *sc_site" : ""})`;
     E.walkerProtos.push(`${sig}; /* r[k] on ${shapeId} as ${typeKey(t)} */`);
     const d: string[] = [`${sig} { /* r[k] on ${shapeId} as ${typeKey(t)} */`];
     // How a value of type `vt` (a field, or the overflow hit) surfaces as T.
@@ -3555,7 +3558,7 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
     const name = `sc_rks_${E.recordKeySetFns.size}`;
     E.recordKeySetFns.set(shapeId, name);
     const struct = mangleRecordStruct(shapeId);
-    const sig = `static void ${name}(${struct} *r, ScrStr *k, ${cDecl(iv, "v")})`;
+    const sig = `${E.link}void ${name}(${struct} *r, ScrStr *k, ${cDecl(iv, "v")})`;
     E.walkerProtos.push(`${sig}; /* r[k] = v on ${shapeId} */`);
     const d: string[] = [`${sig} { /* r[k] = v on ${shapeId} */`];
     for (const f of shape.fields) {

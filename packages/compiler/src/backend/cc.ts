@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { createRequire } from "node:module";
-import { chmod, copyFile, mkdir, mkdtemp, readdir, readFile, rename, rm, rmdir, stat, unlink, utimes, writeFile } from "node:fs/promises";
+import { appendFile, chmod, copyFile, mkdir, mkdtemp, readdir, readFile, rename, rm, rmdir, stat, unlink, utimes, writeFile } from "node:fs/promises";
 import { availableParallelism, tmpdir } from "node:os";
 import { basename, dirname, join, sep } from "node:path";
 import { promisify } from "node:util";
@@ -178,6 +178,21 @@ export interface CcOptions {
    * LLVM backend's .ll — clang compiles IR text natively on the same
    * command line, so both ride this one seat. */
   cPath: string;
+  /** The program's REMAINING translation units, when the emitter split it.
+   * Empty (the default) for every program under the split threshold, which
+   * keeps their command line byte-identical.
+   *
+   * They ride the same `zig cc` invocation as `cPath` rather than separate
+   * `-c` calls on purpose: zig's driver already schedules one cc1 job per C
+   * input across its thread pool, measured at 6x the work for 1.42x the
+   * wall on six cores. Handing it N inputs is exactly as parallel as N
+   * processes and does not need a scheduler here. */
+  programUnits?: readonly string[];
+  /** The shared header a split program's units include. Never an input on
+   * the command line — the `#include` reaches it — but its bytes join the
+   * build-cache key, because a declaration can move without any unit's
+   * bytes moving. */
+  programHeader?: string;
   /** Path of the native executable to produce. */
   outPath: string;
   /** Build with ASan + the runtime RC audit (test/debug lane). */
@@ -2147,6 +2162,10 @@ export async function compileC(opts: CcOptions): Promise<void> {
     // command line cannot change by a byte.
     ...(opts.cPath.endsWith(".ll") ? ["-Wno-override-module"] : []),
     opts.cPath,
+    // The rest of a SPLIT program. Empty for every program under the
+    // emitter's threshold, so their command line is unchanged element for
+    // element.
+    ...(opts.programUnits ?? []),
     ...(opts.linkInputs ?? []),
     ...(opts.systemLibraries ?? []).map((name) => `-l${name}`),
     // glibc keeps libm separate from libc. This must trail the generated
@@ -2156,9 +2175,22 @@ export async function compileC(opts: CcOptions): Promise<void> {
     "-o", opts.outPath,
   ];
   const ccName = driver.argv.join(" ");
+  /* SCRIPTC_CC_ARGV=<path>: append the EXACT argv of every cc invocation
+   * this build makes, with its wall time. A build-time measurement that
+   * reads the conditionals above instead of the command line they produce
+   * is measuring a second copy of the logic; this is the command line.
+   * Unset (the default) costs one env read per build. */
+  const argvTrace = process.env["SCRIPTC_CC_ARGV"];
   const runClang = async (args: string[]): Promise<void> => {
+    const started = Date.now();
     try {
       await execFileAsync(driver.argv[0] ?? "clang", [...driver.argv.slice(1), ...args]);
+      if (argvTrace !== undefined && argvTrace !== "") {
+        await appendFile(
+          argvTrace,
+          `${JSON.stringify({ ms: Date.now() - started, argv: [...driver.argv, ...args] })}\n`,
+        ).catch(() => undefined);
+      }
     } catch (err) {
       const stderr = (err as { stderr?: string }).stderr ?? String(err);
       const guidance =
@@ -2190,18 +2222,26 @@ export async function compileC(opts: CcOptions): Promise<void> {
     return;
   }
 
-  const [cv, fingerprint, cBytes, linkBytes] = await Promise.all([
+  const [cv, fingerprint, cBytes, unitBytes, linkBytes] = await Promise.all([
     ccVersionOnce(driver.argv),
     runtimeFingerprint(rtDir),
     readFile(opts.cPath),
+    Promise.all(
+      [...(opts.programHeader !== undefined ? [opts.programHeader] : []), ...(opts.programUnits ?? [])]
+        .map((path) => readFile(path)),
+    ),
     Promise.all((opts.linkInputs ?? []).map((path) => readFile(path))),
   ]);
   // The key sees the full command line with the two program-specific paths
   // normalized out (their CONTENT is what matters: the C bytes are hashed,
   // the out path is where the result lands). Runtime and vendor paths stay
   // verbatim — their contents are covered by the fingerprint and the pin.
+  const unitSet = new Set(opts.programUnits ?? []);
   const identityArgs = buildArgs((p) => p).map((a) =>
-    a === opts.cPath ? "<program.c>" : a === opts.outPath ? "<out>" : a,
+    a === opts.cPath ? "<program.c>"
+    : a === opts.outPath ? "<out>"
+    : unitSet.has(a) ? "<program.part.c>"
+    : a,
   );
   const key = createHash("sha256")
     .update("bin-v1\0")
@@ -2213,6 +2253,10 @@ export async function compileC(opts: CcOptions): Promise<void> {
     .update(fingerprint).update("\0")
     .update(identityArgs.join("\x1f")).update("\0")
     .update(cBytes);
+  // The shared header and the other units of a split program. Every byte
+  // the compiler will read has to be in the key, or an edit that lands in
+  // one part alone is served the previous binary out of the cache.
+  for (const bytes of unitBytes) key.update("\0program-unit\0").update(bytes);
   for (const bytes of linkBytes) key.update("\0ffi-link\0").update(bytes);
   const keyHex = key
     .digest("hex");
@@ -2237,6 +2281,32 @@ export async function compileC(opts: CcOptions): Promise<void> {
   // Miss: link the program's own TU against cached per-flavor runtime
   // objects. cflags reproduces exactly the option set every TU sees in the
   // single invocation (the clang driver applies all options to all inputs).
+  //
+  // The header search path is READ OFF THE REAL COMMAND LINE, not restated
+  // here. A restated copy drifts, and the drift is invisible: it was missing
+  // the monocypher `-I` that buildArgs spells beside scr_asym.c, so on every
+  // asym-using program `zig cc -c scr_asym.c` died with
+  // `fatal error: 'monocypher.h' file not found`, ensureRuntimeObjects threw,
+  // the catch below turned that into `objects = null`, and the build fell
+  // back to compiling ALL ~59 runtime sources from source. Forever, on every
+  // build, reported by nothing — the fallback IS the historical command
+  // line, so the binary is correct and only the clock is wrong.
+  // One pass over the real command line serves both readers: the header
+  // search path above and the runtime sources this build actually compiles.
+  const rtInputs: string[] = [];
+  const cmdLine = buildArgs((p) => {
+    rtInputs.push(p);
+    return p;
+  });
+  const includeArgs: string[] = [];
+  const seenInclude = new Set<string>();
+  for (let i = 0; i < cmdLine.length; i++) {
+    if (cmdLine[i] !== "-I") continue;
+    const dir = cmdLine[++i];
+    if (dir === undefined || seenInclude.has(dir)) continue;
+    seenInclude.add(dir);
+    includeArgs.push("-I", dir);
+  }
   const cflags = [
     "-std=c11",
     ...driver.targetArgs,
@@ -2244,21 +2314,10 @@ export async function compileC(opts: CcOptions): Promise<void> {
     "-fno-math-errno",
     "-fno-strict-aliasing", // the emitted object model type-puns — see buildArgs
     "-Wno-deprecated-declarations",
-    "-I", rtDir,
-    ...(regex || dynamic ? ["-I", vendorEngineDir()] : []),
-    ...(zlibObjects.length > 0 ? ["-I", vendorZlibDir()] : []),
-    ...(sqliteObjects.length > 0 ? ["-I", vendorSqliteDir()] : []),
-    ...(curlStubDir !== null ? ["-I", join(vendorCurlDir(), "include")] : []),
-    ...(tlsArchive !== null ? ["-I", join(vendorTlsDir(), "include")] : []),
+    ...includeArgs,
     ...(dynamic ? ["-DSCR_DYNAMIC"] : []),
   ];
-  // Collect the runtime sources this build actually compiles (the same
-  // conditionals as the command line, by construction).
-  const rtInputs: string[] = [];
-  buildArgs((p) => {
-    rtInputs.push(p);
-    return p;
-  });
+
   let objects: Map<string, string> | null = null;
   const objKeyPrefix = `obj-v2\0${ccName}\0${cv}\0${fingerprint}\0`;
   try {

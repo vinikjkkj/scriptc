@@ -150,6 +150,10 @@ export interface ClassMeta {
    * contract in scr_runtime.h) — and their retain/release feed the
    * candidate-root buffer. Acyclic shapes keep the lean 1-word header. */
   export function emitStructDefs(E: CEmitter, out: string[]): void {
+    // Where the DECLARATION half goes: the shared header when the program
+    // is emitted as several TUs, and `out` itself otherwise -- so a
+    // single-TU file keeps the historical line order byte for byte.
+    const decl = E.protoOut(out);
     interface StructShape {
       struct: string;
       newFn: string;
@@ -265,21 +269,21 @@ export interface ClassMeta {
     };
 
     for (const s of shapes) {
-      out.push(`typedef struct ${s.struct} ${s.struct}; /* ${s.comment} */`);
+      decl.push(`typedef struct ${s.struct} ${s.struct}; /* ${s.comment} */`);
     }
-    out.push("");
+    decl.push("");
     for (const s of shapes) {
-      out.push(`struct ${s.struct} { /* ${s.comment} */`, `  size_t rc;`);
+      decl.push(`struct ${s.struct} { /* ${s.comment} */`, `  size_t rc;`);
       if (inHierarchy(s)) {
         // The hierarchy prefix: base fields follow at identical offsets in
         // every subclass, so vt must sit between rc and the field list.
-        out.push(`  const ScrVt *vt;`);
+        decl.push(`  const ScrVt *vt;`);
         if (s.meta!.root.def.name === RUNTIME_EMITTER_CLASS) {
           // Emitter subclasses embed ScrEmitter's remaining prefix (the
           // registry and display-name slots) so an upcast to ScrEmitter*
           // is the usual pointer reinterpret. Carried by the BACKEND —
           // the IR field lists stay empty for it.
-          out.push(
+          decl.push(
             `  ScrEeReg *sc_eereg; /* EventEmitter registry (ScrEmitter prefix) */`,
             `  const char *sc_eecls; /* EventEmitter display name (ScrEmitter prefix) */`,
           );
@@ -288,56 +292,65 @@ export interface ClassMeta {
             // state pointer, NULL until the constructor's super(options)
             // reaches scr_stream_init_* — so an upcast to ScrStream* (and
             // on through ScrEmitter*) is the usual pointer reinterpret.
-            out.push(`  ScrStreamState *sc_st; /* stream state (ScrStream prefix) */`);
+            decl.push(`  ScrStreamState *sc_st; /* stream state (ScrStream prefix) */`);
           }
         }
       }
       for (const f of s.fields) {
-        out.push(`  ${cDecl(f.type, mangleField(f.name))}; /* ${f.name} */`);
+        decl.push(`  ${cDecl(f.type, mangleField(f.name))}; /* ${f.name} */`);
       }
       if (s.indexValue) {
-        out.push(`  ScrMap *${OVERFLOW_MEMBER}; /* [key: string] overflow (string-keyed) */`);
+        decl.push(`  ScrMap *${OVERFLOW_MEMBER}; /* [key: string] overflow (string-keyed) */`);
       }
       if (s.tostr) {
-        out.push(`  ScrClosure *${TOSTR_MEMBER}; /* hidden per-instance toString slot (NULL = the constant) */`);
+        decl.push(`  ScrClosure *${TOSTR_MEMBER}; /* hidden per-instance toString slot (NULL = the constant) */`);
       }
       if (s.ownmask) {
-        out.push(
+        decl.push(
           `  uint8_t ${OWNMASK_MEMBER}[${ownMaskBytes(s)}]; /* hidden per-instance own-key mask ([0] = valid) */`,
         );
       }
       if (s.srcproto) {
-        out.push(
+        decl.push(
           `  ScrDyn *${SRCPROTO_MEMBER}; /* hidden per-instance source [[Prototype]] (NULL = no crossing / no chain) */`,
         );
       }
-      out.push(`};`);
+      decl.push(`};`);
     }
-    out.push("");
+    decl.push("");
     // Vtable struct typedefs are named after hierarchy ROOTS, which may be
     // a runtime error class (a user `extends Error` subclass's vtable
     // instance is typed by the %Error root's struct) — so typedefs come
     // from the EMITTED hierarchy classes' roots, while adapter prototypes,
     // instances, and helpers stay shapes-only (the runtime owns the
     // builtin classes; a subclass-free Error tree emits nothing at all).
-    E.emitVtableDecls(out, shapes.filter(inHierarchy).map((s) => s.meta!));
+    E.emitVtableDecls(decl, shapes.filter(inHierarchy).map((s) => s.meta!));
     for (const s of shapes) {
-      out.push(
-        `static ${s.struct} *${s.retain}(${s.struct} *o);`,
-        `static void ${s.release}(${s.struct} *o);`,
-        `static ${s.struct} *${s.newFn}(void);`,
+      decl.push(
+        `${E.link}${s.struct} *${s.retain}(${s.struct} *o);`,
+        `${E.link}void ${s.release}(${s.struct} *o);`,
+        `${E.link}${s.struct} *${s.newFn}(void);`,
       );
       if (inHierarchy(s)) {
-        out.push(`static void ${mangleClassReleaseDirect(s.meta!.def.name)}(void *o0);`);
+        decl.push(`${E.link}void ${mangleClassReleaseDirect(s.meta!.def.name)}(void *o0);`);
       }
       if (s.traced) {
-        out.push(
-          `static void ${s.trace}(void *o, ScrTraceVisit visit, void *ctx);`,
-          `static void ${s.gcFree}(void *o);`,
+        decl.push(
+          `${E.link}void ${s.trace}(void *o, ScrTraceVisit visit, void *ctx);`,
+          `${E.link}void ${s.gcFree}(void *o);`,
         );
       }
+      // The void RC adapters have never been prototyped: in one file the
+      // definition sits a few hundred lines above the container
+      // construction that takes its address. Split, that address is in
+      // another TU. E.decl is a no-op for a single TU, so the historical
+      // file does not gain a line.
+      E.decl(
+        `void *${s.retain}_v(void *o);`,
+        `void ${s.release}_v(void *o);`,
+      );
     }
-    out.push("");
+    decl.push("");
     E.emitVtableInstances(out, shapes.filter(inHierarchy).map((s) => s.meta!));
     for (const s of shapes) {
       if (inHierarchy(s)) {
@@ -348,11 +361,11 @@ export interface ClassMeta {
       // casts can put NULL where an object is expected.
       if (!s.traced) {
         out.push(
-          `static ${s.struct} *${s.retain}(${s.struct} *o) {`,
+          `${E.link}${s.struct} *${s.retain}(${s.struct} *o) {`,
           `  if (o && o->rc != SIZE_MAX) o->rc++;`,
           `  return o;`,
           `}`,
-          `static void ${s.release}(${s.struct} *o) {`,
+          `${E.link}void ${s.release}(${s.struct} *o) {`,
           `  if (!o || o->rc == SIZE_MAX) return;`,
           `  if (--o->rc == 0) {`,
         );
@@ -366,7 +379,7 @@ export interface ClassMeta {
           `    free(o);`,
           `  }`,
           `}`,
-          `static ${s.struct} *${s.newFn}(void) {`,
+          `${E.link}${s.struct} *${s.newFn}(void) {`,
           `  ${s.struct} *o = calloc(1, sizeof *o);`,
           `  if (!o) { ${E.oomAbortC()}; }`,
           `  o->rc = 1;`,
@@ -375,8 +388,8 @@ export interface ClassMeta {
           `  scr_obj_alloc_note();`,
           `  return o;`,
           `}`,
-          `static void *${s.retain}_v(void *o) { return ${s.retain}((${s.struct} *)o); }`,
-          `static void ${s.release}_v(void *o) { ${s.release}((${s.struct} *)o); }`,
+          `${E.link}void *${s.retain}_v(void *o) { return ${s.retain}((${s.struct} *)o); }`,
+          `${E.link}void ${s.release}_v(void *o) { ${s.release}((${s.struct} *)o); }`,
           ``,
         );
         continue;
@@ -388,14 +401,14 @@ export interface ClassMeta {
         (m) => isRefCounted(m.type) && E.traceAdapterC(m.type) === null,
       );
       out.push(
-        `static ${s.struct} *${s.retain}(${s.struct} *o) {`,
+        `${E.link}${s.struct} *${s.retain}(${s.struct} *o) {`,
         `  if (o && o->rc != SIZE_MAX) {`,
         `    o->rc++;`,
         `    scr_cyc_mark_live(o);`,
         `  }`,
         `  return o;`,
         `}`,
-        `static void ${s.release}(${s.struct} *o) {`,
+        `${E.link}void ${s.release}(${s.struct} *o) {`,
         `  if (!o || o->rc == SIZE_MAX) return;`,
         `  if (--o->rc == 0) {`,
         `    scr_cyc_on_dead(o);`,
@@ -412,7 +425,7 @@ export interface ClassMeta {
         `    scr_cyc_on_release(o); /* possible cycle root; may collect */`,
         `  }`,
         `}`,
-        `static ${s.struct} *${s.newFn}(void) {`,
+        `${E.link}${s.struct} *${s.newFn}(void) {`,
         `  ${s.struct} *o = scr_cyc_alloc(sizeof *o, &${s.trace}, &${s.gcFree});`,
         `  o->rc = 1;`,
         ...undefFieldInitC(s),
@@ -420,13 +433,13 @@ export interface ClassMeta {
         `  scr_obj_alloc_note();`,
         `  return o;`,
         `}`,
-        `static void ${s.trace}(void *o0, ScrTraceVisit visit, void *ctx) {`,
+        `${E.link}void ${s.trace}(void *o0, ScrTraceVisit visit, void *ctx) {`,
         `  ${s.struct} *o = (${s.struct} *)o0;`,
         ...tracedFields.map(
           (m) => `  visit(o->${m.member}, ctx); /* ${m.name} */`,
         ),
         `}`,
-        `static void ${s.gcFree}(void *o0) {`,
+        `${E.link}void ${s.gcFree}(void *o0) {`,
         ...(untracedRefFields.length > 0
           ? [
               `  ${s.struct} *o = (${s.struct} *)o0;`,
@@ -439,8 +452,8 @@ export interface ClassMeta {
         `  scr_obj_free_note();`,
         `  scr_cyc_free(o0);`,
         `}`,
-        `static void *${s.retain}_v(void *o) { return ${s.retain}((${s.struct} *)o); }`,
-        `static void ${s.release}_v(void *o) { ${s.release}((${s.struct} *)o); }`,
+        `${E.link}void *${s.retain}_v(void *o) { return ${s.retain}((${s.struct} *)o); }`,
+        `${E.link}void ${s.release}_v(void *o) { ${s.release}((${s.struct} *)o); }`,
         ``,
       );
     }
@@ -505,7 +518,7 @@ export interface ClassMeta {
         E.vtAdapters.set(key, { impl, slot });
         const ret = cType(slot.fn.returnType).trim();
         out.push(
-          `static ${ret} ${mangleVtAdapter(impl.def.name, slot.method)}(${E.vtSlotParams(slot, false).join(", ")});`,
+          `${E.link}${ret} ${mangleVtAdapter(impl.def.name, slot.method)}(${E.vtSlotParams(slot, false).join(", ")});`,
         );
       }
     }
@@ -523,8 +536,10 @@ export interface ClassMeta {
           ? `0 /* ${slot.method}: outside the declaring subtree */`
           : `&${mangleVtAdapter(impl.def.name, slot.method)} /* ${slot.method} */`,
       );
+      // A constructor body in another part stamps `o->vt = &sc_vt_X.head`.
+      E.declData(`extern const ${vtt} ${mangleVtInstance(meta.def.name)};`);
       out.push(
-        `static const ${vtt} ${mangleVtInstance(meta.def.name)} = { /* class ${meta.def.name} */`,
+        `${E.link}const ${vtt} ${mangleVtInstance(meta.def.name)} = { /* class ${meta.def.name} */`,
         `  ${[head, ...entries].join(",\n  ")}`,
         `};`,
       );
@@ -543,7 +558,7 @@ export interface ClassMeta {
       const call = `${mangleFunction(`%${impl.def.name}.${slot.method}`)}(${args})`;
       out.push(
         ``,
-        `static ${ret} ${mangleVtAdapter(impl.def.name, slot.method)}(${E.vtSlotParams(slot, true).join(", ")}) {`,
+        `${E.link}${ret} ${mangleVtAdapter(impl.def.name, slot.method)}(${E.vtSlotParams(slot, true).join(", ")}) {`,
         slot.fn.returnType.kind === "void" ? `  ${call};` : `  return ${call};`,
         `}`,
       );
@@ -578,17 +593,17 @@ export interface ClassMeta {
       ? meta.def.name.slice(meta.def.name.lastIndexOf(".") + 1)
       : meta.def.name;
     out.push(
-      `static ${s.struct} *${s.retain}(${s.struct} *o) {`,
+      `${E.link}${s.struct} *${s.retain}(${s.struct} *o) {`,
       ...(s.traced
         ? [`  if (o && o->rc != SIZE_MAX) {`, `    o->rc++;`, `    scr_cyc_mark_live(o);`, `  }`]
         : [`  if (o && o->rc != SIZE_MAX) o->rc++;`]),
       `  return o;`,
       `}`,
-      `static void ${s.release}(${s.struct} *o) {`,
+      `${E.link}void ${s.release}(${s.struct} *o) {`,
       `  if (!o || o->rc == SIZE_MAX) return;`,
       `  o->vt->release(o); /* the DYNAMIC class's teardown */`,
       `}`,
-      `static void ${reld}(void *o0) {`,
+      `${E.link}void ${reld}(void *o0) {`,
       `  ${s.struct} *o = (${s.struct} *)o0;`,
       `  if (--o->rc == 0) {`,
       ...(s.traced ? [`    scr_cyc_on_dead(o);`] : []),
@@ -611,7 +626,7 @@ export interface ClassMeta {
         ? [`  } else {`, `    scr_cyc_on_release(o); /* possible cycle root; may collect */`, `  }`]
         : [`  }`]),
       `}`,
-      `static ${s.struct} *${s.newFn}(void) {`,
+      `${E.link}${s.struct} *${s.newFn}(void) {`,
       ...(s.traced
         ? [`  ${s.struct} *o = scr_cyc_alloc(sizeof *o, &${s.trace}, &${s.gcFree});`]
         : [
@@ -637,7 +652,7 @@ export interface ClassMeta {
         (f) => isRefCounted(f.type) && E.traceAdapterC(f.type) === null,
       );
       out.push(
-        `static void ${s.trace}(void *o0, ScrTraceVisit visit, void *ctx) {`,
+        `${E.link}void ${s.trace}(void *o0, ScrTraceVisit visit, void *ctx) {`,
         `  ${s.struct} *o = (${s.struct} *)o0;`,
         ...(emitterRooted
           ? [`  scr_emitter_reg_trace(o->sc_eereg, visit, ctx); /* listener closures */`]
@@ -647,7 +662,7 @@ export interface ClassMeta {
           : []),
         ...tracedFields.map((f) => `  visit(o->${mangleField(f.name)}, ctx); /* ${f.name} */`),
         `}`,
-        `static void ${s.gcFree}(void *o0) {`,
+        `${E.link}void ${s.gcFree}(void *o0) {`,
         ...(untracedRefFields.length > 0 || emitterRooted
           ? [`  ${s.struct} *o = (${s.struct} *)o0;`]
           : []),
@@ -667,8 +682,8 @@ export interface ClassMeta {
       );
     }
     out.push(
-      `static void *${s.retain}_v(void *o) { return ${s.retain}((${s.struct} *)o); }`,
-      `static void ${s.release}_v(void *o) { ${s.release}((${s.struct} *)o); }`,
+      `${E.link}void *${s.retain}_v(void *o) { return ${s.retain}((${s.struct} *)o); }`,
+      `${E.link}void ${s.release}_v(void *o) { ${s.release}((${s.struct} *)o); }`,
       ``,
     );
   }
@@ -695,9 +710,12 @@ export interface ClassMeta {
         : meta;
       if (!intervalMeta) throw new Error(`emitter bug: class object for ${className} names unknown family ${meta.def.genericOf ?? ""}`);
       const nameSym = E.internLiteral(meta.def.jsName ?? "");
+      // Both halves are named from bodies: the class object by every
+      // classRef that takes its address, the thunk by newValue's dispatch.
+      E.declData(`extern ScrClassObj ${sym};`);
       out.push(
-        `static void *${mangleCtorThunk(className)}(${ctorThunkParams(E, className).decls || "void"});`,
-        `static ScrClassObj ${sym} = { SIZE_MAX, ${intervalMeta.pre}, ${intervalMeta.post}, ` +
+        `${E.link}void *${mangleCtorThunk(className)}(${ctorThunkParams(E, className).decls || "void"});`,
+        `${E.link}ScrClassObj ${sym} = { SIZE_MAX, ${intervalMeta.pre}, ${intervalMeta.post}, ` +
           `(void *)&${mangleCtorThunk(className)}, (const ScrStr *)&${nameSym} }; /* class ${className} */`,
       );
     }
@@ -729,7 +747,7 @@ export interface ClassMeta {
       const struct = mangleClassStruct(className);
       const lines = [
         ``,
-        `static void *${mangleCtorThunk(className)}(${decls || "void"}) {`,
+        `${E.link}void *${mangleCtorThunk(className)}(${decls || "void"}) {`,
         `  ${struct} *o = ${mangleClassNew(className)}();`,
         `  ${mangleFunction(`%${className}.constructor`)}(${[`${mangleClassRetain(className)}(o)`, ...names].join(", ")});`,
       ];
