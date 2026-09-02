@@ -915,14 +915,62 @@ export const SIZE_DRIFT_PAGE = 4_096;
  * machine and its constant tables. Peak working set on the full live path
  * (handshake, association, channel open, send, receive) is 6.63 MB over
  * 3,387 samples; the same binary with no peer answering peaks at 5.80 MB,
- * so the established session itself is ~0.83 MB resident. */
-export const STATIC_CLASS_RECORDED = platform === "win32" ? 657_408 : null;
+ * so the established session itself is ~0.83 MB resident. *
+ * TIPPED 2026-09-01, by the module-namespace mutation refusal
+ * (scr_dyn_mark_module_ns / scr_dyn_module_ns_refuse in scr_json.c, an
+ * ALWAYS-LINKED TU). This is the entry the paragraph above predicted:
+ * "the next always-linked byte tips it."
+ *
+ * A/B on one host, one tree, one zig cache, SCRIPTC_TARGET=x86_64-windows-gnu,
+ * backend c, sanitize off, the whole branch diff as the only variable:
+ *
+ *                    size-plain            size-regex
+ *   BASE b5df95f1    657,408  (delta +0)   799,232  (delta +3,584)
+ *   HEAD b6b44b1a    658,432  (+1,024)     800,256  (+4,608)
+ *   this branch      +1,024                +1,024
+ *
+ * TWO NUMBERS, NOT ONE, and the split is the point. Only 1,024 of the
+ * 4,608 belongs to this branch; the other 3,584 was already there at BASE
+ * and is the drift the paragraph above recorded without spending. The
+ * floor fired because 3,584 + 1,024 crosses 4,096, not because a kilobyte
+ * of refusal text is expensive. A block that reads only the complaint
+ * ("GREW by 4608") and re-records will attribute four times its own cost
+ * to itself; the base column is what prevents that, and it costs one
+ * revert-and-rebuild to get.
+ *
+ * WHAT THE BYTES BOUGHT. Two functions and one message in scr_json.c.
+ * Node's module namespace is [[Set]]-proof and [[Delete]]-proof; the
+ * static lane hands over a checked-dynamic SNAPSHOT of a module's exports,
+ * and before this the two mutation guards accepted the write, left it on
+ * the snapshot where nothing can observe it, and read 99 back where node
+ * reads 1. The guards now refuse, with text that names the namespace
+ * instead of the array/record boundary copy — whose advice ("give the
+ * parameter a static type") a namespace has no spelling for.
+ *
+ * MEASURED, so the next reader does not have to guess whether the string
+ * or the code is the cost: trimming the message from 1,018 source bytes to
+ * 239 buys back exactly 512 on BOTH programs (+1,024 -> +512). It was NOT
+ * taken. 512 does not clear a floor that is 3,584 in on its own, the
+ * tolerance test is `Math.abs(delta) < page` so the trimmed +4,096 fails
+ * too, and trading a refusal's only explanation for half a page is the
+ * nudge the complaint text forbids.
+ *
+ * The uniform +1,024 on two unrelated programs is also the evidence that
+ * `bool module_ns` did NOT grow ScrDyn: a struct-size change moves two
+ * programs by different amounts, and these moved by the same.
+ *
+ * The static anchor is moved by the same +1,024 for the same reason.
+ * BASE measured 657,408 against a recorded 657,408 — dead on, zero drift —
+ * so the whole of its move is this branch's and none of it is inherited.
+ * That also settles a stale note above: the recorded pair tracks the
+ * CROSS-TARGET build on this host, not the host-native one. */
+export const STATIC_CLASS_RECORDED = platform === "win32" ? 658_432 : null;
 
 /** The regex program, same run, same tree. Deliberately NOT derived from
  * the static delta - and the 2026-08-24 entry is why: that change moved the
  * two classes by -7,680 and -6,656, so deriving either from the other would
  * have been 1,024 bytes wrong. */
-export const REGEX_CLASS_RECORDED = platform === "win32" ? 795_648 : null;
+export const REGEX_CLASS_RECORDED = platform === "win32" ? 800_256 : null;
 
 /** The complaint a recorded-figure check makes, or null when the size is
  * within one page of what was recorded. A string rather than a thrown
