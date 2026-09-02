@@ -324,6 +324,55 @@ void scr_throw_error_msg_code(int kind, const char *message, size_t len,
                  scr_error_traced ? &scr_error_trace : NULL);
 }
 
+/* THE REFUSAL THAT REACHES THE USER. Same message, same bytes, same code as
+ * scr_throw_error_msg_code -- and no exception cell, so nothing in the
+ * program can catch it.
+ *
+ * Why one fence needs this. A deferred fence is a THROW, and a throw is
+ * catchable; that is exactly what makes --best-effort worth having for a
+ * path a program never takes. But protobufjs's inquire() is
+ *
+ *     function (m) { try { ... return require(m) ... } catch (e) {} return null }
+ *
+ * so the refusal for `require(<run-time specifier>)` is EATEN: measured on
+ * both backends, `require("buffer")`, `require("node:path")` and
+ * `require("typescript")` each answered NULL where node answers a module, at
+ * exit 0, with no diagnostic anywhere. A catchable refusal for a construct
+ * whose only compiled answer is "no answer" is not a safeguard; it is a
+ * silent wrong answer with a fence's name on it.
+ *
+ * The first line is byte-identical to what scr_exc_print_uncaught would have
+ * printed had nothing caught it -- "Uncaught Error: <message>" -- because the
+ * point is that the user sees the refusal, not that they can tell which road
+ * it took. The exit code is 1, node's for an uncaught error.
+ *
+ * Deliberately NOT global: see the emitter's `fatal` flag. Making every
+ * deferred fence non-catchable would turn every fence zapo's own code
+ * currently catches into a hard crash, and working --best-effort builds into
+ * failures. */
+void scr_fence_fatal(const char *message, size_t len, const char *code) {
+#ifdef SCR_TRAP_TRACE
+  scr_trap_trace_note(message, len, code);
+#endif
+  (void)code; /* already inside `message`, as "[SCxxxx at file:line]" */
+#ifdef SCR_LIB
+  /* LIBRARY MODE has a host, and _Exit would take the host down with it.
+   * The library contract already has one channel for a failure the program
+   * cannot recover from -- the trap funnel -- and scr_trap_len is _Noreturn
+   * and NOT catchable, which is the property this fence needs. Same message,
+   * same tagged site, delivered where a library's caller reads failures. */
+  scr_trap_len(message, len);
+#else
+  scr_exit_code_note(1);
+  fflush(stdout); /* the program's own output settles before the refusal */
+  fputs("Uncaught Error: ", stderr);
+  fwrite(message, 1, len, stderr);
+  fputc('\n', stderr);
+  fflush(stderr);
+  _Exit(1); /* no unwind, no catch, no atexit -- the refusal is terminal */
+#endif
+}
+
 /* A compiler-resolved Node-parity throw (the always-throwing lowered
  * arms: ERR_INVALID_THIS receivers, ERR_MISSING_ARGS ladders, the
  * symbol-to-string TypeError): builds the builtin error of `kind` with

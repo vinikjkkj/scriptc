@@ -7029,7 +7029,24 @@ export type IrExpr =
    * closing invariant ("bracket occurrences == tagged coded throws") would
    * fail — measured, not predicted. Carried here, the text reaches the
    * emitters and nothing else. */
-  | { kind: "libCall"; fn: IrLibFn; args: IrExpr[]; fence?: { message: string; code: string }; type: IrType; loc: SrcLoc }
+  /** `fatal` opts ONE construct out of catchability. A fence is a throw, and
+   * a throw is catchable -- which is the whole value of --best-effort for a
+   * path a program never takes, and a hazard for a path it takes inside a
+   * `try`. protobufjs's inquire() wraps its require in try/catch and returns
+   * null, so the refusal for `require(<run-time specifier>)` is EATEN and the
+   * call answers null where node answers a module, at exit 0 with no
+   * diagnostic (measured on both backends, flagless as well as
+   * --best-effort). With `fatal` the backends emit scr_fence_fatal instead of
+   * scr_throw_error_msg_code: identical message, identical code, but printed
+   * and _Exit(1) rather than thrown, so no catch in the program can turn the
+   * refusal into an answer.
+   *
+   * It is PER CONSTRUCT and must stay that way. A global non-catchable stop
+   * would convert every deferred fence zapo's own code currently catches into
+   * a hard runtime crash, turning working --best-effort builds into failures;
+   * a second construct has to argue for itself, with the measurement of what
+   * would newly crash. */
+  | { kind: "libCall"; fn: IrLibFn; args: IrExpr[]; fence?: { message: string; code: string; fatal?: boolean }; type: IrType; loc: SrcLoc }
   /** `JSON.stringify(v)` — type-DIRECTED serialization: `value`'s static IR
    * type must be JSON-safe (f64/string/bool/record/array/union of those,
    * recursively — validated), and backends emit one serializer per type used

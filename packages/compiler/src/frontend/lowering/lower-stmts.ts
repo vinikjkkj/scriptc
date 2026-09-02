@@ -9,6 +9,7 @@ import { BIGINT, type IrLibFn, BOOL, isRefCounted, BYTES_U8, CAUGHT, DYN, F64, I
 import { PoisonError, boundIdentifiersOf, dynFallbackType, dynUndefinedExpr, importCallHandleType, neverTaintedJsType, nodeThrowExpr, stmtUsesIsland, uncheckedOverloadHandleCall } from "./lowerer.js";
 import { wholeExportRootRebindable } from "./lower-modules.js";
 import { dynImportBindingDeclOf, dynImportBindingStmts } from "./lower-island.js";
+import { fenceCatchProbe } from "./fence-catch.js";
 import { enforceLibBoundary } from "./lib-boundary.js";
 import { recordKeyReadRow } from "./keyread-census.js";
 import { cjsExportAssignmentOf, cjsExportDiscardReason, cjsExportTargetLiteral, commaWholeExportRecordOf, isCjsJsFile, isCjsWholeExportAssign, isJsSourceFile, locOf, requireSpecOf, topLevelJsStatementOf } from "../program.js";
@@ -130,6 +131,7 @@ export function provenanceElidedConstDecl(L: Lowerer, decl: ts.VariableDeclarati
     }
     const first = captured[0];
     L.runtimeFences.push(...captured);
+    fenceCatchProbe("deferred-stmt", node, sf.fileName, ts.getLineAndCharacterOfPosition(sf, node.getStart(sf)).line + 1);
     const at = (d?: { loc: { file: string; start: number } }): string => {
       const loc = d?.loc ?? { file: sf.fileName, start: node.getStart(sf) };
       const pos = ts.getLineAndCharacterOfPosition(
