@@ -42,6 +42,13 @@ tmp-*/
 
 # per-block scriptc artifact cache (SCRIPTC_CACHE_DIR)
 # (unanchored: each block worktree root has its own)
+#
+# The SUFFIXED forms too. An A/B needs one cache root per arm, so a block
+# spells .cache3 / .cache5 beside .cache; those matched nothing here, and a
+# git add -A in the middle of an A/B put 59 object files into a commit that
+# was supposed to carry documentation. The rule that covers one arm has to
+# cover them all.
+.cache[0-9]*/
 
 # block lab: compiled probes and their captured output
 lab/bin/
