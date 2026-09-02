@@ -81,6 +81,7 @@ import { settleOrValueArms,
   containsRecord,
   containsUnion,
   describeComponentBlocker,
+  esOwnKeyOrder,
   describeRecordMemberBlocker,
   formatIrType,
   ISLAND_AMBIENT_TYPES,
@@ -3286,6 +3287,101 @@ export class Lowerer {
     return `f${id}:${localId}`;
   }
 
+  /** THE ORDER A RECORD'S KEYS BECAME PRESENT, per binding, for the
+   * construction no literal can describe: `const r: R = {}` followed by
+   * `r.b = 1; r.a = 2`. Node answers `b,a`; the struct answers its shape's
+   * `a,b`, and until this commit it did so with no diagnostic of any kind
+   * (tests/perf/keyorder/boundary/p/p20). There is no literal to test here
+   * - the order is made by the WRITES.
+   *
+   * `names` is first-appearance order: the initializing literal's own
+   * spelling, then each field write that makes a not-yet-present key
+   * present. A re-write of a key already listed does not move it, which is
+   * JS's rule. `writeLocs` keeps each write's position so the decision at a
+   * surface can count only the writes that happen BEFORE it - without that,
+   * `r.b = 1; keys(r); r.a = 2` would be refused for an order its
+   * enumeration never sees, which is a correct program made red.
+   *
+   * ONE FILE, ONE STRAIGHT LINE. Positions compare only within a file, and
+   * a write reached through an alias or from another frame is not seen at
+   * all. Both directions are UNDER-reporting, which is this walk's safe
+   * direction: it can miss a wrong order, and it cannot invent one. Writes
+   * in DIFFERENT BRANCHES are the known gap - `c ? (r.a, r.b) : (r.b, r.a)`
+   * reads as one sequence here and is two at run time. */
+  readonly keyPresenceOrder = new Map<
+    string,
+    { shapeId: string; names: string[]; writeLocs: Map<string, SrcLoc> }
+  >();
+
+  /** The SPELLED key order of a record literal, by location - the literal
+   * half of keyPresenceOrder's `names`, recorded where the spelling is
+   * still in hand (the same walk that decides the literal's own order
+   * risk). */
+  readonly literalSpellings = new Map<string, string[]>();
+
+  /** Record one literal's spelled key order (see literalSpellings). */
+  noteLiteralSpelling(loc: SrcLoc, names: string[]): void {
+    const k = this.keyRiskLocKey(loc);
+    if (!this.literalSpellings.has(k)) this.literalSpellings.set(k, names);
+  }
+
+  /** A SOURCE-LEVEL field write `r.f = v` / `r["f"] = v`. Only a write onto
+   * a TRACKED local counts: everything else has no construction the walk
+   * can point at, and "name the site or say nothing" is the rule. */
+  noteKeyPresenceWrite(obj: IrExpr, field: string, loc: SrcLoc): void {
+    if (obj.kind !== "varRef") return;
+    const e = this.keyPresenceOrder.get(this.keyRiskKey(obj.localId));
+    if (!e) return;
+    if (!e.names.includes(field)) {
+      e.names.push(field);
+      e.writeLocs.set(field, loc);
+    }
+  }
+
+  /** Start tracking a record binding whose initializer is a literal this
+   * walk could spell. A literal that already names EVERY field is not
+   * tracked: its order is fixed at construction and the literal half
+   * already decided it. */
+  noteKeyPresenceInit(localId: string, init: IrExpr | null): void {
+    if (!init || init.kind !== "recordLit" || init.type.kind !== "record") return;
+    const shape = this.shapes.get(init.type.shapeId);
+    if (!shape || shape.tuple || shape.indexValue || !shape.declaredOrder) return;
+    const spelled = this.literalSpellings.get(this.keyRiskLocKey(init.loc));
+    if (spelled === undefined) return;
+    if (spelled.length >= shape.declaredOrder.length) return;
+    const k = this.keyRiskKey(localId);
+    if (this.keyPresenceOrder.has(k)) return;
+    this.keyPresenceOrder.set(k, { shapeId: init.type.shapeId, names: [...spelled], writeLocs: new Map() });
+  }
+
+  /** The order risk of a TRACKED binding as of one surface: the keys it
+   * holds at that point, in the order the program gave them, against the
+   * order the shape enumerates. Null when they agree, when fewer than two
+   * keys are in hand (one key has one order), or when the binding is not
+   * tracked. */
+  presenceOrderRisk(ref: string, at: SrcLoc): { why: "set" | "order" | "dyn"; detail: string } | null {
+    const e = this.keyPresenceOrder.get(ref);
+    if (!e) return null;
+    const shape = this.shapes.get(e.shapeId);
+    if (!shape?.declaredOrder) return null;
+    // Only what is present BEFORE this surface, and only within one file.
+    const present = e.names.filter((n) => {
+      const w = e.writeLocs.get(n);
+      if (!w) return true; // spelled in the literal, present from the start
+      return w.file === at.file && w.start < at.start;
+    });
+    if (present.length < 2) return null;
+    const got = esOwnKeyOrder(present);
+    const want = shape.declaredOrder.filter((n) => got.includes(n));
+    if (want.length !== got.length || !want.some((n, i) => n !== got[i])) return null;
+    return {
+      why: "order",
+      detail:
+        `this value's keys become present in the order ${JSON.stringify(got.join(","))} ` +
+        `where its shape ${JSON.stringify(e.shapeId)} enumerates ${JSON.stringify(want.join(","))}`,
+    };
+  }
+
   /** A record LITERAL the walk proved cannot enumerate Node-exactly. */
   noteKeyRiskLiteral(loc: SrcLoc, why: "set" | "order" | "dyn", detail: string): void {
     const k = this.keyRiskLocKey(loc);
@@ -3472,6 +3568,9 @@ export class Lowerer {
     // NO RISK *YET*. The initializer may be a call to a function this walk
     // has not reached, so the question is kept rather than answered.
     if (!this.keyRiskPending.has(k)) this.keyRiskPending.set(k, { init, frame: this.keyRiskCurrentFrame() });
+    // ...and a PARTIAL literal starts the write-order tracking, because the
+    // keys it does not spell get their order from the writes that follow.
+    this.noteKeyPresenceInit(localId, init);
   }
 
   /** Note that this expression's own keys are enumerated. */
@@ -3560,7 +3659,11 @@ export class Lowerer {
   reportKeyEnumerationRisks(): void {
     const why = process.env["SCRIPTC_KEYRISK_WHY"] !== undefined;
     for (const u of this.keyEnumUses) {
-      const risk = u.risk ?? (u.ref !== null ? this.keyRiskValues.get(u.ref) ?? this.resolvePendingRisk(u.ref) : this.deferredUseRisk(u));
+      const risk =
+        u.risk ??
+        (u.ref !== null
+          ? this.keyRiskValues.get(u.ref) ?? this.resolvePendingRisk(u.ref) ?? this.presenceOrderRisk(u.ref, u.loc)
+          : this.deferredUseRisk(u));
       if (why) {
         console.error(
           `[keyrisk] ${u.loc.file}@${u.loc.start} ${u.crossing ? "CROSSING" : u.surface} ${u.ref ?? "-"} ` +

@@ -1,0 +1,26 @@
+key-order-through-a-spread-a-return-and-a-filled-record.ts:13:13 - error SC1090: Object.keys over a record this program does not build the way its shape enumerates (a record enumerates in its shape declared order, not per-object insertion order) are not supported yet
+
+  12 | const head = { c: 3, ...base };
+  13 | console.log(Object.keys(head).join(","));
+     |             ^~~~~~~~~~~~~~~~~
+  14 | 
+
+  hint: this literal spells "c,b,a" where its shape enumerates "a,b,c" - read the fields you need instead of enumerating, or build the value the way the shape enumerates it
+
+key-order-through-a-spread-a-return-and-a-filled-record.ts:26:13 - error SC1090: JSON.stringify over a record this program does not build the way its shape enumerates (a record enumerates in its shape declared order, not per-object insertion order) are not supported yet
+
+  25 | }
+  26 | console.log(JSON.stringify(mk()));
+     |             ^~~~~~~~~~~~~~~~~~~~
+  27 | 
+
+  hint: this literal spells "c,a,b" where its shape enumerates "a,b,c" - read the fields you need instead of enumerating, or build the value the way the shape enumerates it
+
+key-order-through-a-spread-a-return-and-a-filled-record.ts:38:13 - error SC1090: Object.entries over a record this program does not build the way its shape enumerates (a record enumerates in its shape declared order, not per-object insertion order) are not supported yet
+
+  37 | filled.a = 2;
+  38 | console.log(Object.entries(filled).map((e) => e[0]).join(";"));
+     |             ^~~~~~~~~~~~~~~~~~~~~~
+  39 | 
+
+  hint: this value's keys become present in the order "b,a" where its shape "r2" enumerates "a,b" - read the fields you need instead of enumerating, or build the value the way the shape enumerates it

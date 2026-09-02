@@ -7,7 +7,7 @@
 import * as ts from "../ts7/adapter.js";
 import { dirname, relative } from "node:path";
 import type { Lowerer, WidthLift } from "./lowerer.js";
-import { strandTrap, BIGINT, BOOL, CAUGHT, DYN, type IrBytesElem, type IrLibFn, type IrNumBinOp, DYN_HANDLE_KINDS, F64, IrExpr, IrFunction, IrJsOp, IrLocal, IrRecordShape, IrStmt, IrType, JSVAL, KEYOBJ, NULL_T, REF_TRUTHY_KINDS, REGEX, RUNTIME_ERROR_CLASSES, SEARCH_PARAMS_T, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, canAdaptDynFuncTo, canBoxFuncIntoDyn, canDynCheckTo, funcOf, isDynBytes, isJsonSafeType, isRefCounted, isUnitType, jsOpResultKind, httpReqIsReadableIn, shapeHasAccessorSlots, streamDuplexWidensToWritable, typeEquals, typeKey, unionFuncSetArmsOk } from "../../ir/nodes.js";
+import { strandTrap, BIGINT, BOOL, CAUGHT, DYN, isUndefinedArmedUnion, type IrBytesElem, type IrLibFn, type IrNumBinOp, DYN_HANDLE_KINDS, F64, IrExpr, IrFunction, IrJsOp, IrLocal, IrRecordShape, IrStmt, IrType, JSVAL, KEYOBJ, NULL_T, REF_TRUTHY_KINDS, REGEX, RUNTIME_ERROR_CLASSES, SEARCH_PARAMS_T, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, canAdaptDynFuncTo, canBoxFuncIntoDyn, canDynCheckTo, funcOf, isDynBytes, isJsonSafeType, isRefCounted, isUnitType, jsOpResultKind, httpReqIsReadableIn, shapeHasAccessorSlots, streamDuplexWidensToWritable, typeEquals, typeKey, unionFuncSetArmsOk } from "../../ir/nodes.js";
 import { lowerAbortProperty } from "./lower-abort.js";
 import { dynImportBindingDeclOf } from "./lower-island.js";
 import { lowerFetchProperty, lowerRequestInitLiteral } from "./lower-fetch.js";
@@ -10163,13 +10163,31 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
           if (st?.kind !== "record") { simpleSpelling = false; break; }
           const ss = L.shapes.get(st.shapeId);
           if (!ss || ss.tuple || ss.indexValue || !ss.declaredOrder) { simpleSpelling = false; break; }
-          for (const n of ss.declaredOrder) contribute(n);
+          // AN OPTIONAL SOURCE MEMBER HAS NO STATIC POSITION. Spread copies
+          // the source's OWN keys, and an absent optional contributes
+          // nothing at all - so the sequence this loop builds is an upper
+          // bound, not the order. Dropping an element can turn a
+          // disagreeing sequence into an agreeing one (`{ ...v, a: t }`
+          // over `{a?: number; b?: number}` reads "a,b" here and is "b,a"
+          // at run time when `a` is absent, which is corpus 3501 exactly),
+          // and a later explicit write of the same name moves it. Both
+          // would make a refusal an invention, so an optional contributor
+          // gives up.
+          const order = ss.declaredOrder;
+          if (ss.fields.some((f) => order.includes(f.name) && isUndefinedArmedUnion(f.type, (u) => L.unions.get(u)))) {
+            simpleSpelling = false;
+            break;
+          }
+          for (const n of order) contribute(n);
           continue;
         }
         if (!ts.isPropertyAssignment(p) && !ts.isShorthandPropertyAssignment(p)) { simpleSpelling = false; break; }
         if (!p.name || ts.isComputedPropertyName(p.name) || ts.isPrivateIdentifier(p.name)) { simpleSpelling = false; break; }
         contribute(propNameText(L, p.name));
       }
+      // The spelling is also what starts the WRITE-ORDER tracking for a
+      // literal that does not name every field (noteKeyPresenceInit).
+      if (simpleSpelling) L.noteLiteralSpelling(locOf(expr), spelledNames);
       if (simpleSpelling && spelledNames.length >= 2) {
         const spelled = esOwnKeyOrder(spelledNames);
         const want = shape.declaredOrder.filter((n) => spelled.includes(n));
@@ -13406,6 +13424,7 @@ export function staticAssertionOperand(L: Lowerer, node: ts.Expression, field: s
             const obj = L.lowerExpr(opNode ?? target.expression);
             const shapeId = opNode !== null && obj.type.kind === "record" ? obj.type.shapeId : receiverIr.shapeId;
             const value = L.lowerExprExpecting(expr.right, field.type);
+            L.noteKeyPresenceWrite(obj, litKey, locOf(expr));
             return { kind: "recordSet", obj, shapeId, field: litKey, value, loc: locOf(expr) };
           }
         }
@@ -20128,6 +20147,7 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
         loc,
       };
     }
+    if (target.container !== "class") L.noteKeyPresenceWrite(target.obj, target.field, loc);
     return target.container === "class"
       ? { kind: "fieldSet", obj: target.obj, className: target.className, field: target.field, value, loc }
       : { kind: "recordSet", obj: target.obj, shapeId: target.shapeId, field: target.field, value, loc };
