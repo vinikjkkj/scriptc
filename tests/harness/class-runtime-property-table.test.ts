@@ -210,16 +210,6 @@ const READ_REFUSALS: readonly { name: string; src: string }[] = [
       "console.log('READ ' + String(r['nope']))\n",
   },
   {
-    name: "a DECLARED member read through the box",
-    src:
-      "class C { a: number\n  constructor() { this.a = 1 } }\n" +
-      "const c = new C()\n" +
-      RTKEY +
-      "Object.defineProperty(c, k, { value: 5, enumerable: true, writable: true, configurable: true })\n" +
-      "const r = c as unknown as Record<string, unknown>\n" +
-      "console.log('READ ' + String(r['a']))\n",
-  },
-  {
     // A hierarchy instance's table MISS. The old row here pinned "a class
     // WITH A BASE fences" as a NAMED GAP; the gap is closed and the two
     // answering rows are in RUNS. What has to stay pinned is the sharper
@@ -237,21 +227,6 @@ const READ_REFUSALS: readonly { name: string; src: string }[] = [
       "console.log('READ ' + String(r['nope']))\n",
   },
   {
-    // A DECLARED member of the BASE, read through the derived instance's
-    // box. The table is D's and the member is B's struct cell, so this is
-    // the shape that would go silently wrong the day the arm answered its
-    // own misses -- and it is reachable only now that D has an arm at all.
-    name: "a base's DECLARED member read through a derived instance's box",
-    src:
-      "class B { a: number\n  constructor() { this.a = 1 } }\n" +
-      "class D extends B { b: number\n  constructor() { super(); this.b = 2 } }\n" +
-      "const d = new D()\n" +
-      RTKEY +
-      "Object.defineProperty(d, k, { value: 5, enumerable: true, writable: true, configurable: true })\n" +
-      "const r = d as unknown as Record<string, unknown>\n" +
-      "console.log('READ ' + String(r['a']))\n",
-  },
-  {
     name: "any read on an instance of a class NO define names",
     src:
       "class C { a: number\n  constructor() { this.a = 1 } }\n" +
@@ -265,6 +240,53 @@ const READ_REFUSALS: readonly { name: string; src: string }[] = [
 /** Programs that must refuse AT RUN TIME, loudly and catchably. Node
  * answers for both: the divergence is deliberate and is exactly what a
  * differential cannot assert. */
+/* THE TWO ROWS THAT MOVED, and why the move is not a weakening.
+ *
+ * Both were READ_REFUSALS: a DECLARED member read through the box, and a
+ * BASE's declared member read through a DERIVED instance's box. The
+ * comment there called the second one "the shape that would go silently
+ * wrong the day the arm answered its own misses", and that reading was
+ * right about the hazard and wrong about the answer -- because Node reads
+ * both fine. `(c as unknown as Record<string, unknown>)['a']` is 1 in
+ * Node v25.9.0, so the fence was a divergence of its own: a named,
+ * deliberate one, which is why it was pinned, and it is closed now that
+ * the box carries the class's member table.
+ *
+ * What is NOT closed, and stays pinned above: a MISS. A key no define put
+ * in the table and no member declares still fences, on a standalone class
+ * and through a hierarchy interval alike. That is the row that would go
+ * silently wrong if the member lookup ever started answering `undefined`
+ * for its own misses, and it is the one worth guarding.
+ *
+ * The derived row also pins the REGISTRY: D's table is flattened over B,
+ * and the box carries D's descriptor only because the run-time preorder
+ * position resolves it. Answering 1 here is that resolution working. */
+const READ_ANSWERS: readonly { name: string; src: string; out: string }[] = [
+  {
+    name: "a DECLARED member read through the box",
+    src:
+      "class C { a: number\n  constructor() { this.a = 1 } }\n" +
+      "const c = new C()\n" +
+      RTKEY +
+      "Object.defineProperty(c, k, { value: 5, enumerable: true, writable: true, configurable: true })\n" +
+      "const r = c as unknown as Record<string, unknown>\n" +
+      "console.log('READ ' + String(r['a']))\n",
+    out: "READ 1\n",
+  },
+  {
+    name: "a base's DECLARED member read through a derived instance's box",
+    src:
+      "class B { a: number\n  constructor() { this.a = 1 } }\n" +
+      "class D extends B { b: number\n  constructor() { super(); this.b = 2 } }\n" +
+      "const d = new D()\n" +
+      RTKEY +
+      "Object.defineProperty(d, k, { value: 5, enumerable: true, writable: true, configurable: true })\n" +
+      "const r = d as unknown as Record<string, unknown>\n" +
+      "console.log('READ ' + String(r['a']))\n",
+    out: "READ 1\n",
+  },
+];
+
 const RUNTIME_REFUSALS: readonly { name: string; src: string; fragment: string }[] = [
   {
     name: "a run-time key that names a DECLARED FIELD",
@@ -439,6 +461,7 @@ beforeAll(async () => {
   for (const backend of LANES) {
     for (const p of RUNS) BUILT.set(`R:${p.name}:${backend}`, await build(p.name, p.src, backend));
     for (const p of RUNTIME_REFUSALS) BUILT.set(`T:${p.name}:${backend}`, await build(p.name, p.src, backend));
+    for (const p of READ_ANSWERS) BUILT.set(`A:${p.name}:${backend}`, await build(p.name, p.src, backend));
     for (const p of READ_REFUSALS) BUILT.set(`G:${p.name}:${backend}`, await build(p.name, p.src, backend));
     for (const p of COMPILE_REFUSALS) BUILT.set(`C:${p.name}:${backend}`, await build(p.name, p.src, backend));
     BUILT.set(`N:no-table:${backend}`, await build("no-table", NO_TABLE_SRC, backend));
@@ -482,6 +505,20 @@ describe("a compiled class instance's run-time property table", () => {
       expect(r.stdout, `${p.name} (${backend}) must throw a catchable error naming the collision`).toContain(
         p.fragment,
       );
+    }
+  });
+
+  test.for(READ_ANSWERS.map((p) => [p.name, p] as const))("a boxed read ANSWERS: %s", ([, p]) => {
+    for (const backend of LANES) {
+      const b = BUILT.get(`A:${p.name}:${backend}`)!;
+      expect(
+        b.ok,
+        `${p.name} (${backend}) did not compile: ` +
+          b.diags.map((d) => `${d.code} ${d.message.slice(0, 160)}`).join(" | "),
+      ).toBe(true);
+      const r = run(b.binaryPath!);
+      expect(r.status, `${p.name} (${backend}) exit code`).toBe(0);
+      expect(r.stdout, `${p.name} (${backend}) stdout must equal Node v25.9.0's`).toBe(p.out);
     }
   });
 
