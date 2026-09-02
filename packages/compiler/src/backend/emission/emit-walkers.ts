@@ -8,7 +8,7 @@
 import type { CEmitter } from "./emitter.js";
 import { rcSitesRequested } from "./emitter.js";
 import { bytesAliasOnExtract } from "../../ir/nodes.js";
-import { CLASS_PROPS_FIELD, armDiscrimLits, canAdaptDynFuncTo, canBoxClassIntoDyn, canBoxFuncIntoDyn, canConvertToDyn, canDynCheckTo, dynCheckArmOrder, internalSlotFields, isUndefinedArmedUnion, nullProtoRule, OWNMASK_SRC_NULL_PROTO, OWNMASK_VALID, ownMaskKeyBit, slotStorageKey, unionHasDiscrim, DYN_BYTES_KINDS, DYN_HANDLE_KINDS, IrFunction, IrRecordShape, IrType, IrUnionDef, isRefCounted, strandedFuncReason, typeEquals, typeKey } from "../../ir/nodes.js";
+import { CLASS_PROPS_FIELD, armDiscrimLits, canAdaptDynFuncTo, canBoxClassIntoDyn, canBoxFuncIntoDyn, dynCheckArmOrder, internalSlotFields, isUndefinedArmedUnion, nullProtoRule, OWNMASK_SRC_NULL_PROTO, OWNMASK_VALID, ownMaskKeyBit, slotStorageKey, unionHasDiscrim, DYN_BYTES_KINDS, DYN_HANDLE_KINDS, IrType, isRefCounted, strandedFuncReason, typeEquals, typeKey } from "../../ir/nodes.js";
 import { cDecl, cStringLiteral, cType, elemAccess, releaseCallC, retainCallC, vAdapters } from "./emit-types.js";
 import { mangleClassStruct, mangleField, mangleFunction, mangleRecordNew, mangleRecordStruct } from "../mangle.js";
 import type { ClassMeta } from "./emit-shapes.js";
@@ -98,7 +98,8 @@ function typeMayHoldFunc(E: CEmitter, t: IrType): boolean {
       `${E.link}const ScrDynClass ${name} = { ${cStringLiteral(Buffer.from(display, "utf8"))}, ` +
         `${meta.pre}, ${meta.post}, ${meta.hierarchy ? "true" : "false"}, ` +
         `&${rc.retain}, &${rc.release}, ` +
-        `${members === null ? "NULL, 0" : `${members.sym}, ${members.count}`} }; ` +
+        `${members === null ? "NULL, 0" : `${members.sym}, ${members.count}`}, ` +
+        `${meta.def.fields.some((f) => f.name === CLASS_PROPS_FIELD) ? "true" : "false"} }; ` +
         `/* dyn box: class ${className} */`,
     );
     return name;

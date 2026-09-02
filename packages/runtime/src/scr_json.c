@@ -2486,6 +2486,21 @@ bool scr_dyn_objinst_has_members(const ScrDyn *d) {
   return scr_dyn_objinst_class_of(d)->nmembers > 0;
 }
 
+bool scr_dyn_objinst_has_props(const ScrDyn *d) {
+  if (d == NULL || d->kind != SCR_DYN_OBJINST) return false;
+  return scr_dyn_objinst_class_of(d)->props;
+}
+
+/* The gate every ENUMERATING surface opens with: a class answers its own
+ * key set only when it HAS a member table and carries no run-time
+ * property table beside it. Written once, read by Object.keys, both JSON
+ * writers, util.inspect and Object.assign, so the five cannot come to
+ * disagree about which instances they can enumerate -- which is the very
+ * failure the gate exists to prevent, one level up. */
+bool scr_dyn_objinst_enumerable(const ScrDyn *d) {
+  return scr_dyn_objinst_has_members(d) && !scr_dyn_objinst_has_props(d);
+}
+
 bool scr_dyn_objinst_fence(const ScrDyn *d, const char *what) {
   ScrJsonBuf b;
   scr_jb_init(&b);
@@ -3324,9 +3339,30 @@ size_t *scr_dyn_obj_key_order(const ScrDyn *v) {
  * toJSON closed over an ancestor. Declared, not silent. MEMORY safety is
  * claimed in both. */
 static ScrDyn *scr_dyn_json_tojson(const ScrDyn *d, const char *key, size_t key_len) {
-  if (d->kind != SCR_DYN_OBJ) return NULL;
   static const char name[] = "toJSON";
   const size_t name_len = sizeof name - 1;
+  /* A boxed class INSTANCE declaring toJSON: the hook is the whole reason
+   * a class writes one, and skipping it here would serialize the FIELDS
+   * of a class whose author said in so many words what its JSON is --
+   * confidently, and at exit 0. The table's `call` is a plain function
+   * pointer, so answering it here costs this always-linked unit no edge
+   * to scr_dyn_invoke.c, which is the constraint the OBJ walk below is
+   * open-coded to respect.
+   *
+   * A DATA member named toJSON is not a hook, exactly as below: the row
+   * carries `get` and not `call`, and an object with a numeric toJSON
+   * serializes it as an ordinary member. */
+  if (d->kind == SCR_DYN_OBJINST) {
+    const ScrDynClassMember *cm = scr_dyn_objinst_member(d, name, name_len);
+    if (cm == NULL || cm->call == NULL) return NULL;
+    ScrStr *iks = scr_str_new(key, key_len); /* +1 */
+    ScrDyn *ikarg = scr_dyn_new_str(iks);    /* +1; RETAINS iks */
+    scr_str_release(iks);
+    ScrDyn *ir = cm->call(d->v.inst.o, &ikarg, 1, "toJSON");
+    scr_dyn_release(ikarg);
+    return ir;
+  }
+  if (d->kind != SCR_DYN_OBJ) return NULL;
   /* BORROWED both — own member first, then the prototype chain: JS's
    * [[Get]], and scr_dyn_invoke's OBJ dispatch order. Open-coded rather
    * than delegated to scr_dyn_invoke so that (a) a missing or
@@ -3546,7 +3582,7 @@ static bool scr_dyn_json_write_raw(ScrJsonBuf *b, const ScrDyn *d) {
      * cycle down an unguarded writer is an infinite recursion -- which is
      * worse than the fence this replaces, not better. Guarded, a cycle is
      * V8's own "Converting circular structure to JSON". */
-    if (!scr_dyn_objinst_has_members(d)) {
+    if (!scr_dyn_objinst_enumerable(d)) {
       scr_dyn_objinst_fence(d, "JSON.stringify");
       return true; /* pending exception; caller checks */
     }
@@ -5983,7 +6019,7 @@ static void scr_jb_put_dyn_raw(ScrJsonBuf *b, const ScrDyn *d) {
      * here exactly as it does for a plain object's member. A class with
      * NO table keeps the fence, and a cycle through a field is V8's
      * circular TypeError rather than an infinite recursion. */
-    if (!scr_dyn_objinst_has_members(d)) {
+    if (!scr_dyn_objinst_enumerable(d)) {
       scr_dyn_objinst_fence(d, "JSON.stringify");
       scr_jb_puts(b, "null"); /* the buffer never surfaces: the throw wins */
       return;
@@ -8660,7 +8696,7 @@ static ScrDyn *scr_dyn_objwalk(const ScrDyn *v, ScrObjWalk mode) {
     free(ord);
     return out;
   }
-  if (v->kind == SCR_DYN_OBJINST) {
+  if (v->kind == SCR_DYN_OBJINST && scr_dyn_objinst_enumerable(v)) {
     /* An instance's OWN ENUMERABLE properties are its declared FIELDS, in
      * declaration order. Methods are excluded and that is not an omission:
      * a class method is non-enumerable in JS, which is exactly why
@@ -8837,8 +8873,20 @@ static void scr_dyn_assign_from(ScrDyn *target, const ScrDyn *src) {
    * source copies nothing" stops being Node's answer. The walk lists
    * exactly the enumerable set (built-ins skipped), so this arm and
    * Object.keys can never disagree. */
+  /* A boxed class INSTANCE joins the entries walk, and joins it HERE
+   * rather than as an arm of its own: the walk is scr_dyn_obj_entries,
+   * i.e. the same own-key projection Object.keys reads, so assign and
+   * Object.keys cannot come to disagree about which properties an
+   * instance has -- including about the run-time-property-table gate,
+   * which they now share by construction rather than by two spellings.
+   *
+   * Before the member table the projection answered nothing for an
+   * OBJINST, so this kind was correctly excluded -- and correctly wrong,
+   * silently: Object.assign({}, x) copied no fields where Node copies
+   * them all. The exclusion is what has to go now, not the walk. */
   if (src->kind != SCR_DYN_ARR && src->kind != SCR_DYN_STR &&
-      src->kind != SCR_DYN_BYTES && src->kind != SCR_DYN_FUNC) {
+      src->kind != SCR_DYN_BYTES && src->kind != SCR_DYN_FUNC &&
+      src->kind != SCR_DYN_OBJINST) {
     return;
   }
   ScrDyn *pairs = scr_dyn_obj_entries(src); /* +1; never throws here */
@@ -9021,7 +9069,23 @@ bool scr_dyn_has_own(const ScrDyn *v, const ScrStr *key) {
    * false here would be the one that did not: an instance field IS own in
    * Node, so false is a wrong ANSWER where the neighbours refuse. The
    * method spelling `inst.hasOwnProperty(k)` lands here too. */
-  if (v->kind == SCR_DYN_OBJINST) return scr_dyn_objinst_fence(v, "Object.hasOwn");
+  if (v->kind == SCR_DYN_OBJINST) {
+    /* An instance's OWN properties are its declared FIELDS. A method and
+     * an accessor live on the PROTOTYPE, so Object.hasOwn(new Box(7),
+     * "get") is FALSE in Node while `"get" in x` is true -- the two
+     * questions differ exactly here, and `enumerable` is already the
+     * distinction the table records (it is set for data rows only). One
+     * flag, both answers, no second rule to drift.
+     *
+     * A MISS keeps the fence unless the class is enumerable-complete: on
+     * a class carrying the run-time property table the missing name may
+     * be a key that table holds, and "false" would be a confident wrong
+     * answer where the fence is an honest one. */
+    const ScrDynClassMember *cm = scr_dyn_objinst_member(v, key->data, key->len);
+    if (cm != NULL) return cm->enumerable;
+    if (scr_dyn_objinst_enumerable(v)) return false;
+    return scr_dyn_objinst_fence(v, "Object.hasOwn");
+  }
   /* A MAP box is exact in the OTHER direction and it is worth saying why
    * it does NOT join the OBJINST arm: a Map's entries are internal slots,
    * not own properties, so `Object.hasOwn(new Map([["a",1]]), "a")` is
