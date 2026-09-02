@@ -191,3 +191,69 @@ PBox.prototype.toString = function () {
   return "Box(" + String(this.v) + ")";
 };
 console.log(surface(new PBox(10)));
+
+// The ENUMERATING surfaces over a boxed instance. Each one used to answer
+// from before the member table existed, and two of them answered at exit 0
+// with no diagnostic: `in` said false and Object.keys said nothing.
+class Pair {
+  constructor(a, b) {
+    this.a = a;
+    this.b = b;
+  }
+  sum() {
+    return this.a + this.b;
+  }
+}
+function enumerate(x) {
+  return [
+    Object.keys(x).join("|"),
+    Object.values(x).join("|"),
+    Object.entries(x).map((e) => e[0] + "=" + String(e[1])).join("|"),
+    JSON.stringify(x),
+    JSON.stringify(Object.assign({}, x)),
+    String(Object.hasOwn(x, "a")),
+    String(Object.hasOwn(x, "sum")),
+    String(x.hasOwnProperty("a")),
+  ].join(",");
+}
+console.log(enumerate(new Pair(1, 2)));
+
+// util.inspect through console.log: Node prints `Pair { a: 1, b: 2 }`, and
+// a class METHOD does not appear because it is non-enumerable in JS.
+function show(x) {
+  console.log(x);
+}
+show(new Pair(1, 2));
+
+// A #PRIVATE field is not an own property: Object.keys is ["v"], not
+// ["v","#h"], and the method that reads it still runs.
+class Hidden {
+  #h = 9;
+  constructor(v) {
+    this.v = v;
+  }
+  peek() {
+    return this.#h;
+  }
+}
+function hidden(x) {
+  return Object.keys(x).join("|") + "|" + JSON.stringify(x) + "|" + String(x.peek());
+}
+console.log(hidden(new Hidden(1)));
+
+// A NESTED instance: the field's own table answers, one level down.
+class Inner {
+  constructor(v) {
+    this.v = v;
+  }
+}
+class Outer {
+  constructor(i) {
+    this.i = i;
+    this.n = 2;
+  }
+}
+function nested(x) {
+  return JSON.stringify(x);
+}
+console.log(nested(new Outer(new Inner(1))));
