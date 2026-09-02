@@ -1,19 +1,30 @@
-/* THE OBJECT SURFACE OF A CLASS INSTANCE SITTING IN A DYN SLOT.
+/* THE OBJECT SURFACE OF A CLASS INSTANCE SITTING IN A DYN SLOT, AS ONE
+ * LEDGER.
  *
  * A class instance boxes into the checked-dynamic tree by reference and
  * carries a compiler-emitted MEMBER TABLE (backend/dyn-members.ts). The
- * table landed the READ surface — `x.get()` and `x.v` through an untyped
- * JavaScript parameter — and left its neighbours answering from before
- * the table existed. Two of them answered WRONGLY AND SILENTLY, which is
- * the shape this tier refuses everywhere else:
+ * surfaces that read that table arrived one at a time — the member read
+ * and the method call, then Object.keys and the JSON writers, then the
+ * copy family and util.inspect behind the enumerable gate — and each
+ * arrived with its own coverage. This file is the ledger over ALL of
+ * them at once, arranged so a regression NAMES THE SURFACE rather than
+ * only saying something broke, and so the two surfaces that still cannot
+ * answer are pinned beside the ten that can instead of living in a
+ * comment.
  *
- *     { ...inst }                 {}          exit 0   (Node: {"v":7,"w":8})
- *     delete inst.v; keys(inst)   ["v","w"]   exit 0   (Node: ["w"])
+ * What it adds that the per-surface files did not have:
  *
- * and two more threw where Node prints or answers a boolean
- * (`util.inspect`, `Object.hasOwn`). This file is the guard for all of
- * it, and it is arranged so that a REGRESSION NAMES THE SURFACE rather
- * than only saying something broke.
+ *   - `delete inst.v`, which answered the PRE-DELETE key list at exit 0.
+ *     A wrong array with no diagnostic, and the array came from the very
+ *     table this file scores every other row against.
+ *   - the CLASS NAME in util.inspect's output. Node prints `Box { v: 7 }`;
+ *     the descriptor carried the IR name, so a class EXPRESSION printed
+ *     `cx44. { v: 7 }` — the compiler's own internal name, on stdout, at
+ *     exit 0. The pre-class-constructor spelling below is the same fact
+ *     with a `%pc<offset>.` prefix, which is why both spellings are here.
+ *   - `Object.hasOwn` and `in` scored in ONE row, because the whole point
+ *     of the `enumerable` flag is that the two answers differ exactly
+ *     where JS says they do and nowhere else.
  *
  * SCORED AGAINST A LIVE NODE. Every program is plain JavaScript that Node
  * runs unchanged, so the oracle is `process.execPath` executing the very
@@ -55,6 +66,14 @@ type Lane = (typeof LANES)[number];
 const DECL =
   "class Box { constructor(v) { this.v = v; this.w = v + 1 } get() { return this.v } }\n";
 
+/** The CLASS-EXPRESSION spelling, and it is here for one row: its IR name is
+ * `%cx<character offset>.<binding name>`, so the descriptor's display name
+ * printed `cx44. { v: 7 }` where node prints `Box { v: 7 }` -- a compiler
+ * name on stdout at exit 0, with NO arm involved. NamedEvaluation gives the
+ * class the binding's name, which is what the descriptor now carries. */
+const CEXPR =
+  "const Box = class { constructor(v) { this.v = v; this.w = v + 1 } get() { return this.v } }\n";
+
 /** The PRE-CLASS-CONSTRUCTOR spelling. Under SCRIPTC_PROTOCLASS=1 the
  * frontend synthesizes a class from it; with the arm off it lowers to a
  * plain dyn object and never reaches the box at all, which is why the arm
@@ -70,8 +89,8 @@ const SURFACES: readonly { name: string; body: string; gap: string | null }[] = 
   { name: "Object.values", body: "return JSON.stringify(Object.values(x))", gap: null },
   { name: "Object.entries", body: "return JSON.stringify(Object.entries(x))", gap: null },
   { name: "JSON.stringify", body: "return JSON.stringify(x)", gap: null },
-  // THE SILENT ONE. Object spread is CopyDataProperties, the same walk
-  // Object.keys runs; the box copied nothing and answered a fabricated {}.
+  // Object spread is CopyDataProperties, the same walk Object.keys runs, so
+  // these two rows and the three above cannot be allowed to drift apart.
   { name: "object spread", body: "return JSON.stringify({ ...x })", gap: null },
   { name: "Object.assign onto a fresh object", body: "return JSON.stringify(Object.assign({}, x))", gap: null },
   // A method is NON-enumerable in JS, so it is absent from keys/spread and
@@ -141,6 +160,7 @@ function run(bin: string): { stdout: string; status: number | null } {
 /** The two class spellings, and the arm state each needs. */
 const SPELLINGS = [
   { tag: "declared class", head: DECL, arm: false },
+  { tag: "class expression", head: CEXPR, arm: false },
   { tag: "pre-class constructor, SCRIPTC_PROTOCLASS=1", head: PROTO, arm: true },
 ] as const;
 
@@ -218,8 +238,9 @@ describe("a class instance in a dyn slot", () => {
         ).toBe(false);
         // …and it must refuse LOUDLY. A fabricated shape at exit 0 is the
         // failure mode this whole file exists to keep closed: the delete row
-        // used to answer the pre-delete key list, and the spread row a bare
-        // `{}`, both with no diagnostic.
+        // answered the pre-delete key list with no diagnostic at all, which
+        // is a worse outcome than either the throw it has now or the right
+        // answer it does not have.
         expect(
           !b.ok || r.status !== 0,
           `${sp.tag} / ${s.name} (${lane}) exited 0 with a WRONG answer instead of refusing: ` +
