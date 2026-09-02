@@ -10008,6 +10008,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/7380-the-key-orders-the-record-model-gets-right.ts": {
+   "order": [
+    "<repo>/tests/corpus/7380-the-key-orders-the-record-model-gets-right.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/750-cycle-closure-box.ts": {
    "order": [
     "<repo>/tests/corpus/750-cycle-closure-box.ts"
@@ -11302,6 +11308,12 @@
   "<repo>/tests/diagnostics/key-order-across-the-widening-boundary.ts": {
    "order": [
     "<repo>/tests/diagnostics/key-order-across-the-widening-boundary.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/key-order-through-a-spread-a-return-and-a-filled-record.ts": {
+   "order": [
+    "<repo>/tests/diagnostics/key-order-through-a-spread-a-return-and-a-filled-record.ts"
    ],
    "diags": []
   },
