@@ -1151,7 +1151,7 @@ export interface TypeMapperCtx {
    * non-variables" (measured) and every `inst.m()` stays a dynInvoke.
    * Null for a function that is not one, or one the consumer refused.
    * Absent in checkers with no lowering attached. */
-  protoClassInstance?: (decl: ts.Node) => IrType | null;
+  protoClassInstance?: ((decl: ts.Node) => IrType | null) | undefined;
   /** MIXIN instance INTERSECTIONS (`Tagged.C & Derived` — values built
    * through a mixin result): resolved by chain structure to the unique
    * pinned instantiation they describe; null when ambiguous or when no
@@ -2286,7 +2286,10 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
   // FunctionDeclaration/FunctionExpression, which that arm does not admit --
   // the instance type would otherwise fall through to the structural mapping
   // and the synthesized class would type nothing.
-  {
+  // The property test comes FIRST so this costs one comparison, not two
+  // signature queries per object type, whenever the arm is off (the Lowerer
+  // installs the hook only when it is on).
+  if (ctx.protoClassInstance !== undefined) {
     const protoDecl = widenedSym ? checker.valueDeclarationOf(widenedSym) : undefined;
     if (
       protoDecl &&
