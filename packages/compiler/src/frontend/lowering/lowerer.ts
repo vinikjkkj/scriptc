@@ -2508,6 +2508,9 @@ export class Lowerer {
 
     // The deferred key-enumeration decision - after the whole walk, so a
     // construction anywhere in the program can reach a surface anywhere.
+    // What each function RETURNS is part of "the whole walk": a callee can
+    // be lowered after its caller, so the return risks are armed first.
+    this.armKeyRiskFnReturns(functions);
     this.reportKeyEnumerationRisks();
 
     if (this.remainder) {
@@ -3208,12 +3211,42 @@ export class Lowerer {
   readonly keyRiskHelpers = new Map<string, { why: "set" | "order" | "dyn"; detail: string }>();
   readonly keyRiskValues = new Map<string, { why: "set" | "order" | "dyn"; detail: string }>();
 
+  /** THE RISK OF WHAT A FUNCTION RETURNS, keyed by IrFunction.name — which
+   * is exactly the name an IrCall's `callee` carries.
+   *
+   * Until this commit the walk stopped at a function boundary: exprKeyRisk's
+   * `call` arm consulted keyRiskHelpers, which holds only the compiler's OWN
+   * generated width/capture helpers, so a user function returning a literal
+   * spelled out of order was invisible. Measured
+   * (tests/perf/keyorder/boundary/p/p19): the same literal refuses with
+   * SC1090 at the top level and answers `a,b,c` for Node's `c,a,b` in
+   * silence one stack frame away — the defect and its refusal separated by
+   * nothing but a `function` keyword.
+   *
+   * Filled by armKeyRiskFnReturns AFTER the whole walk, for armOwnMasks's
+   * reasons: a function can be lowered after its own caller, and the answer
+   * must not depend on which. */
+  readonly keyRiskFnReturns = new Map<string, { why: "set" | "order" | "dyn"; detail: string }>();
+
+  /** Bindings whose initializer carried NO risk when it was noted, kept
+   * with the frame their local ids belong to so the question can be asked
+   * again once the deferred facts (a callee's return risk) exist. Resolved
+   * lazily, memoized on success, cycle-guarded by keyRiskResolving — a
+   * mutually recursive pair otherwise walks forever. */
+  readonly keyRiskPending = new Map<string, { init: IrExpr; frame: object | null }>();
+  private readonly keyRiskResolving = new Set<string>();
+  /** The frame keyRiskKey scopes local ids to while a DEFERRED resolution
+   * runs: `this.ctx` is the frame being lowered, and by report time that is
+   * whatever the walk finished on rather than the frame the pending
+   * expression's varRefs came from. */
+  private keyRiskFrameOverride: object | null = null;
+
   /** Every place the program enumerates a record, decided in run().
    * Deferred because a surface can be lowered before the construction that
    * puts its value at risk (a literal inside a function declared further
    * down, a width copy in a later module) - an eager test would miss
    * exactly the programs that make the answer wrong. */
-  readonly keyEnumUses: { ref: string | null; risk: { why: "set" | "order" | "dyn"; detail: string } | null; loc: SrcLoc; surface: string; crossing?: boolean }[] = [];
+  readonly keyEnumUses: { ref: string | null; risk: { why: "set" | "order" | "dyn"; detail: string } | null; expr?: IrExpr; frame?: object | null; loc: SrcLoc; surface: string; crossing?: boolean }[] = [];
 
   keyRiskLocKey(loc: SrcLoc): string {
     return `${loc.file}@${loc.start}`;
@@ -3227,9 +3260,24 @@ export class Lowerer {
   private readonly keyRiskFrameIds = new WeakMap<object, number>();
   private keyRiskFrameNext = 0;
 
+  /** The frame a risk note taken RIGHT NOW belongs to, or null. Null is a
+   * real state: collectGlobals lowers a module's top-level slots with the
+   * function stack empty, and `this.ctx` throws there. */
+  keyRiskCurrentFrame(): object | null {
+    return this.fnStack.length > 0 ? (this.ctx as unknown as object) : null;
+  }
+
   keyRiskKey(localId: string): string {
     if (localId.startsWith("%g.")) return localId;
-    const frame = this.ctx as unknown as object;
+    // NO FRAME AT ALL is a real state: armKeyRiskFnReturns and the report's
+    // deferred resolution both run after the walk, with the function stack
+    // empty, and `this.ctx` THROWS there rather than answering. A local read
+    // with no frame to scope it to cannot be resolved, so it gets a key
+    // nothing was ever registered under instead of crashing the compile —
+    // "say nothing" is this walk's rule for a value it cannot point at.
+    const active = this.fnStack.length > 0 ? (this.ctx as unknown as object) : null;
+    const frame = this.keyRiskFrameOverride ?? active;
+    if (frame === null) return `f?:${localId}`;
     let id = this.keyRiskFrameIds.get(frame);
     if (id === undefined) {
       id = this.keyRiskFrameNext++;
@@ -3299,7 +3347,9 @@ export class Lowerer {
       }
       return null;
     }
-    if (e.kind === "call") return this.keyRiskHelpers.get(e.callee) ?? null;
+    // A compiler-generated helper first (it is the more specific fact),
+    // then the USER function's own return risk.
+    if (e.kind === "call") return this.keyRiskHelpers.get(e.callee) ?? this.keyRiskFnReturns.get(e.callee) ?? null;
     if (e.kind === "recordLit") {
       const own = this.keyRiskLiterals.get(this.keyRiskLocKey(e.loc));
       if (own) return own;
@@ -3325,8 +3375,88 @@ export class Lowerer {
     // field stays null - that is the "name the site or say nothing" rule,
     // and it is why the widened half was silent to begin with.
     if (e.kind === "arrayGet") return this.exprKeyRisk(e.arr);
-    if (e.kind === "varRef") return this.keyRiskValues.get(this.keyRiskKey(e.localId)) ?? null;
+    if (e.kind === "varRef") {
+      const k = this.keyRiskKey(e.localId);
+      return this.keyRiskValues.get(k) ?? this.resolvePendingRisk(k);
+    }
     return null;
+  }
+
+  /** Ask a binding's initializer again, in ITS frame, now that the deferred
+   * facts exist. Null is not memoized (the fact may still be on its way);
+   * a hit is, so a value read a hundred times costs one walk. */
+  resolvePendingRisk(k: string): { why: "set" | "order" | "dyn"; detail: string } | null {
+    const p = this.keyRiskPending.get(k);
+    if (!p || this.keyRiskResolving.has(k)) return null;
+    this.keyRiskResolving.add(k);
+    const saved = this.keyRiskFrameOverride;
+    this.keyRiskFrameOverride = p.frame;
+    try {
+      const r = this.exprKeyRisk(p.init);
+      if (r) this.keyRiskValues.set(k, r);
+      return r;
+    } finally {
+      this.keyRiskFrameOverride = saved;
+      this.keyRiskResolving.delete(k);
+    }
+  }
+
+  /** The risk of what each function RETURNS (keyRiskFnReturns), over the
+   * finished function list — armOwnMasks's timing, for armOwnMasks's
+   * reasons. Iterated to a FIXPOINT so a chain of returns (`f` returns
+   * `g()` returns the literal) settles whichever order the two were
+   * lowered in; the loop is monotone (entries are only added) and bounded
+   * by the function count, so a mutually recursive pair terminates with
+   * whatever was proved rather than spinning.
+   *
+   * A returned VARREF is read through the pending-binding resolver in the
+   * returning function's own frame, which is why the frame rides on the
+   * pending entry rather than being read off `this.ctx`. */
+  armKeyRiskFnReturns(functions: IrFunction[]): void {
+    const returnsOf = (fn: IrFunction): IrExpr[] => {
+      const out: IrExpr[] = [];
+      const seen = new Set<object>();
+      const walk = (n: unknown): void => {
+        if (n === null || typeof n !== "object") return;
+        if (seen.has(n)) return;
+        seen.add(n);
+        if (Array.isArray(n)) {
+          for (const x of n) walk(x);
+          return;
+        }
+        const o = n as Record<string, unknown>;
+        if (o["kind"] === "return" && o["value"] !== null && typeof o["value"] === "object") {
+          out.push(o["value"] as IrExpr);
+        }
+        for (const v of Object.values(o)) walk(v);
+      };
+      walk(fn.body);
+      return out;
+    };
+    const rets = new Map<string, IrExpr[]>();
+    for (const fn of functions) {
+      if (rets.has(fn.name)) continue;
+      rets.set(fn.name, returnsOf(fn));
+    }
+    for (let pass = 0; pass < functions.length + 1; pass++) {
+      let grew = false;
+      for (const [name, exprs] of rets) {
+        if (this.keyRiskFnReturns.has(name)) continue;
+        for (const e of exprs) {
+          const r = this.exprKeyRisk(e);
+          if (!r) continue;
+          this.keyRiskFnReturns.set(name, r);
+          grew = true;
+          break;
+        }
+      }
+      if (!grew) break;
+    }
+    if (process.env["SCRIPTC_KEYRISK_WHY"] !== undefined) {
+      for (const [name, r] of this.keyRiskFnReturns) {
+        console.error(`[keyrisk] return-of ${name} RISK-${r.why} ${r.detail}`);
+      }
+    }
   }
 
   /** A binding takes its initializer's risk: `const n: Narrow = wide` is
@@ -3335,7 +3465,13 @@ export class Lowerer {
     if (!init) return;
     const r = this.exprKeyRisk(init);
     const k = this.keyRiskKey(localId);
-    if (r && !this.keyRiskValues.has(k)) this.keyRiskValues.set(k, r);
+    if (r) {
+      if (!this.keyRiskValues.has(k)) this.keyRiskValues.set(k, r);
+      return;
+    }
+    // NO RISK *YET*. The initializer may be a call to a function this walk
+    // has not reached, so the question is kept rather than answered.
+    if (!this.keyRiskPending.has(k)) this.keyRiskPending.set(k, { init, frame: this.keyRiskCurrentFrame() });
   }
 
   /** Note that this expression's own keys are enumerated. */
@@ -3346,7 +3482,14 @@ export class Lowerer {
       return;
     }
     const r = this.exprKeyRisk(value);
-    if (r) this.keyEnumUses.push({ ref: null, risk: r, loc, surface });
+    if (r) {
+      this.keyEnumUses.push({ ref: null, risk: r, loc, surface });
+      return;
+    }
+    // `Object.keys(mk())` — the value is not a local, so there is no ref to
+    // resolve later, and the risk of a call is not known until every
+    // function has been lowered. Keep the expression and its frame.
+    this.keyEnumUses.push({ ref: null, risk: null, expr: value, frame: this.keyRiskCurrentFrame(), loc, surface });
   }
 
   /** THE CROSSING IS AN ENUMERATION. A record widening into an
@@ -3389,17 +3532,35 @@ export class Lowerer {
       return;
     }
     const r = this.exprKeyRisk(value);
-    if (r) this.keyEnumUses.push({ ref: null, risk: r, loc: value.loc, surface: "", crossing: true });
+    if (r) {
+      this.keyEnumUses.push({ ref: null, risk: r, loc: value.loc, surface: "", crossing: true });
+      return;
+    }
+    this.keyEnumUses.push({ ref: null, risk: null, expr: value, frame: this.keyRiskCurrentFrame(), loc: value.loc, surface: "", crossing: true });
   }
 
   /** run()'s deferred decision: enumerating a value the walk proved wrong
    * is REFUSED rather than answered wrongly. SCRIPTC_KEYRISK_WHY prints the
    * whole join instead of only the matches, so a program that is CLEAR can
    * be seen to be. */
+  /** The risk of a use whose value was not a local: asked again here, in
+   * the frame it was lowered in, now that every function's return risk is
+   * known. */
+  private deferredUseRisk(u: { expr?: IrExpr; frame?: object | null }): { why: "set" | "order" | "dyn"; detail: string } | null {
+    if (!u.expr) return null;
+    const saved = this.keyRiskFrameOverride;
+    this.keyRiskFrameOverride = u.frame ?? null;
+    try {
+      return this.exprKeyRisk(u.expr);
+    } finally {
+      this.keyRiskFrameOverride = saved;
+    }
+  }
+
   reportKeyEnumerationRisks(): void {
     const why = process.env["SCRIPTC_KEYRISK_WHY"] !== undefined;
     for (const u of this.keyEnumUses) {
-      const risk = u.risk ?? (u.ref === null ? null : this.keyRiskValues.get(u.ref) ?? null);
+      const risk = u.risk ?? (u.ref !== null ? this.keyRiskValues.get(u.ref) ?? this.resolvePendingRisk(u.ref) : this.deferredUseRisk(u));
       if (why) {
         console.error(
           `[keyrisk] ${u.loc.file}@${u.loc.start} ${u.crossing ? "CROSSING" : u.surface} ${u.ref ?? "-"} ` +

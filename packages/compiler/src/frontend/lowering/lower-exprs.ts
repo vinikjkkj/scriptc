@@ -10127,13 +10127,48 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
     // at the ENUMERATION: a literal nobody enumerates is wrong about nothing.
     // Integer-like names go through esOwnKeyOrder because JS moves them to
     // the front however they are spelled, and declaredOrder already ran it.
-    if (!shape.tuple && shape.declaredOrder) {
+    //
+    // A SPREAD CONTRIBUTES KEYS, and until this commit any literal holding
+    // one escaped the test entirely - the loop below used to give up at the
+    // first property that was not a plain assignment, so `{ c: 3, ...base }`
+    // answered its target shape's order in silence, with no diagnostic of
+    // any kind (tests/perf/keyorder/boundary/p/p06). `{ ...base }` alone was
+    // caught only because the spread INHERITS its source's risk further
+    // down, which says nothing when the source is itself in order.
+    //
+    // The spelled order of a literal with spreads is JS's FIRST-APPEARANCE
+    // order: a property fixes its position where it is first defined, and a
+    // later contributor writing the same key overwrites the value and
+    // leaves the position alone. A spread of a known record contributes its
+    // source shape's own enumeration order, which is the order the
+    // field-by-field desugar below copies in.
+    //
+    // Everything whose contribution is not a statically known name list
+    // still gives up: a computed or private name, an accessor, a
+    // CONDITIONAL spread (`...(c ? {k: v} : {})` contributes its key only
+    // sometimes, so there is no one order to compare), and a spread whose
+    // source is not a plain record shape. An INDEX-SIGNATURE target is
+    // skipped as well - it lowers through the merge helper, whose overflow
+    // map keeps the real runtime insertion order and is already Node-exact.
+    if (!shape.tuple && shape.declaredOrder && !shape.indexValue) {
       const spelledNames: string[] = [];
       let simpleSpelling = true;
+      const contribute = (n: string): void => {
+        if (!spelledNames.includes(n)) spelledNames.push(n);
+      };
       for (const p of expr.properties) {
+        if (ts.isSpreadAssignment(p)) {
+          if (conditionalSpreadOf(p.expression) !== null) { simpleSpelling = false; break; }
+          const st = L.mapTypeOf(L.typeOf(p.expression));
+          if (st?.kind !== "record") { simpleSpelling = false; break; }
+          const ss = L.shapes.get(st.shapeId);
+          if (!ss || ss.tuple || ss.indexValue || !ss.declaredOrder) { simpleSpelling = false; break; }
+          for (const n of ss.declaredOrder) contribute(n);
+          continue;
+        }
         if (!ts.isPropertyAssignment(p) && !ts.isShorthandPropertyAssignment(p)) { simpleSpelling = false; break; }
         if (!p.name || ts.isComputedPropertyName(p.name) || ts.isPrivateIdentifier(p.name)) { simpleSpelling = false; break; }
-        spelledNames.push(propNameText(L, p.name));
+        contribute(propNameText(L, p.name));
       }
       if (simpleSpelling && spelledNames.length >= 2) {
         const spelled = esOwnKeyOrder(spelledNames);
