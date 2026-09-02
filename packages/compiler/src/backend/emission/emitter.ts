@@ -321,7 +321,11 @@ export class CEmitter {
   walkerData(declLine: string, ...defLines: string[]): void {
     if (this.link === "") {
       this.hdrData.push(declLine);
-      for (const l of defLines) this.walkerDefs.push(l);
+      // NOT walkerDefs: this data sits in the PROTOTYPE block because the
+      // converters that take its address are defined below it, and
+      // `walkerDefs` is below them. Moved there it became `use of
+      // undeclared identifier 'sc_dcl_0'` in the very unit that defines it.
+      for (const l of defLines) this.promotedData.push(l);
       return;
     }
     // Interned while the BODIES were being emitted, which is before the
@@ -335,6 +339,11 @@ export class CEmitter {
    * decided: `{ at, count }` into `walkerProtos`, plus its declaration. */
   private readonly pendingWalkerData: { at: number; count: number; decl: string }[] = [];
 
+  /** The walker DATA definitions, once they are external: emitted in unit 0
+   * at the exact position the prototype block used to hold them, which is
+   * above every converter that takes their address. */
+  private readonly promotedData: string[] = [];
+
   /** Turn the thunks and walkers interned DURING body emission external.
    *
    * They are interned lazily, from the body that first needs one, so they
@@ -347,11 +356,16 @@ export class CEmitter {
    * units include. */
   private promoteInternedToExternal(): void {
     // Reverse order so an earlier splice cannot move a later index.
+    // Reverse order so an earlier splice cannot move a later index; the
+    // definitions are then put back in their original relative order.
+    const moved: string[][] = [];
     for (let i = this.pendingWalkerData.length - 1; i >= 0; i--) {
       const p = this.pendingWalkerData[i]!;
-      const defLines = this.walkerProtos.splice(p.at, p.count);
+      moved.push(this.walkerProtos.splice(p.at, p.count));
       this.hdrData.push(p.decl);
-      for (const l of defLines) this.walkerDefs.push(stripStatic(l));
+    }
+    for (let i = moved.length - 1; i >= 0; i--) {
+      for (const l of moved[i]!) this.promotedData.push(stripStatic(l));
     }
     this.pendingWalkerData.length = 0;
     for (let i = 0; i < this.walkerProtos.length; i++) {
@@ -1410,11 +1424,15 @@ export class CEmitter {
     // that for a single TU. Split, walkerData moves DATA definitions out of
     // the proto block and into walkerDefs, so a program whose only walker
     // entry was such a definition would otherwise lose it.
-    if (this.link === "" ? this.walkerProtos.length > 0 || this.walkerDefs.length > 0 : this.walkerProtos.length > 0) {
+    if (this.link === ""
+      ? this.walkerProtos.length > 0 || this.walkerDefs.length > 0 || this.promotedData.length > 0
+      : this.walkerProtos.length > 0) {
       const proto = this.protoOut(out);
       out.push("");
       for (const line of this.walkerProtos) proto.push(line);
       out.push("");
+      // The data the prototype block used to carry, in its old position.
+      for (const line of this.promotedData) out.push(line);
       for (const line of this.walkerDefs) out.push(line);
     }
     // Loop-appended, never spread: `body` scales with the PROGRAM (a large
