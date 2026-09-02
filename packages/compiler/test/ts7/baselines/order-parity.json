@@ -10014,6 +10014,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/7381-taking-the-key-order-hint-produces-a-matching-program.ts": {
+   "order": [
+    "<repo>/tests/corpus/7381-taking-the-key-order-hint-produces-a-matching-program.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/750-cycle-closure-box.ts": {
    "order": [
     "<repo>/tests/corpus/750-cycle-closure-box.ts"
