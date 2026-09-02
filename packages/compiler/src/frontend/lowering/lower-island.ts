@@ -689,6 +689,9 @@ import { PoisonError, dynUndefinedExpr, newFnCtx, own } from "./lowerer.js";
         });
         const ns: IrExpr = {
           kind: "dynObjLit",
+          // Node's namespace is [[Set]]-proof and [[Delete]]-proof; this
+          // object is a snapshot, so a write to it would land nowhere.
+          staticCopy: true,
           fields: [
             nsKey("SqliteError", "the error class"),
             nsKey("default", "the Database constructor"),
@@ -1163,12 +1166,68 @@ import { PoisonError, dynUndefinedExpr, newFnCtx, own } from "./lowerer.js";
    * a build is one tier). Null when the module never joined the compiled
    * graph, or when its init is async (top-level await in a package — the
    * island path's business). */
+/** A MUTABLE export has no snapshot, so the namespace VALUE refuses.
+   *
+   * Node's namespace property is a LIVE view of the exporter's binding —
+   * measured on v25.9.0 against a package with `export let counter` and an
+   * exported `bump()`: after `ns.bump()`, Node reads `ns.counter === 1`
+   * and the snapshot this builder makes read 0, silently, at exit 0.
+   *
+   * The KEY SET is untouched: what refuses is the OBJECT, not the
+   * enumeration, so `Object.keys(ns)` through a namespace BINDING keeps
+   * its fold and every member read through a binding keeps resolving to
+   * the exporter's own storage (which IS live).
+   *
+   * `let`/`var` is the test rather than "reassigned somewhere", because
+   * the write can live in any module the graph reaches and a missed one
+   * is the silent wrong answer this refusal exists to prevent. A `let`
+   * nobody reassigns is refused too — a refusal where a value was
+   * possible, never a value where a refusal was owed. */
+  function refuseNsSnapshotIfLive(L: Lowerer, dep: ts.SourceFile): void {
+    const modSym = L.checker.getSymbolAtLocation(dep);
+    const seen: [string, ts.Symbol][] = [];
+    modSym?.getExports().forEach((sym: ts.Symbol, key: ts.__String) => {
+      const n = String(key);
+      if (!n.startsWith("__") && n !== "export=") seen.push([n, sym]);
+    });
+    const star = moduleNsStarExports(L, dep);
+    if (star.unresolved === null) for (const pair of star.entries) seen.push(pair);
+    for (const [exportName, sym] of seen) {
+      let live = sym;
+      if (live.flags & ts.SymbolFlags.Alias) live = L.checker.getAliasedSymbol(live);
+      const mutable = L.checker.declarationsOf(live).some(
+        (d) =>
+          ts.isVariableDeclaration(d) &&
+          ts.isVariableDeclarationList(d.parent) &&
+          (d.parent.flags & ts.NodeFlags.Const) === 0,
+      );
+      if (mutable) {
+        L.unsupported(
+          "SC1013",
+          dep,
+          `a namespace VALUE of '${baseNameOf(dep.fileName)}', whose '${exportName}' export is a ` +
+            `mutable binding (let/var)`,
+          `a namespace property is a LIVE view of the exporter's binding in Node — a reassignment ` +
+            `after the import is visible through the namespace, and this object is a snapshot taken ` +
+            `once. Read the member through the import BINDING instead (\`const ns = await ` +
+            `import("..."); ns.${exportName}\`), where the name resolves to the exporter's own ` +
+            `storage and stays live`,
+        );
+      }
+    }
+  }
+
   function staticDynNsBuilderOf(L: Lowerer, dep: ts.SourceFile, loc: IrExpr["loc"]): string | null {
     const cached = L.dynNsBuilders.get(dep);
     if (cached !== undefined) return cached;
     const initName = L.initNameOf.get(dep);
     if (initName === undefined) return null;
     if (L.asyncInitFiles.has(dep)) return null;
+    // BEFORE the name is registered: a refusal raised after
+    // `dynNsBuilders.set` leaves the call site naming a function that the
+    // aborted body never pushed — measured, SC9001 "call to undeclared
+    // function '%dynnsd.<tag>'", an ICE where a diagnostic belonged.
+    refuseNsSnapshotIfLive(L, dep);
     const rawTag = L.fileTag.get(dep) ?? "";
     const name = `%dynnsd.${rawTag === "" ? "e." : rawTag.replace(/^%/, "")}`;
     L.dynNsBuilders.set(dep, name);
@@ -1220,14 +1279,61 @@ import { PoisonError, dynUndefinedExpr, newFnCtx, own } from "./lowerer.js";
           value,
         });
       }
-      body.push({ kind: "return", value: { kind: "dynObjLit", fields, type: DYN, loc }, loc });
+      // INTERNED, because Node answers the SAME namespace object for
+      // every import of one module: measured on v25.9.0, two `import()`
+      // sites of one package compare `===` true, and two fresh literals
+      // compared false. The object is built on first call into a module
+      // global and every later call returns that one.
+      const nsGid = `%g.${rawTag === "" ? "e." : rawTag.replace(/^%/, "")}%dynnsobj`;
+      const builtGid = `%g.${rawTag === "" ? "e." : rawTag.replace(/^%/, "")}%dynnsbuilt`;
+      L.globalsList.push({ id: nsGid, name: "%dynnsobj", type: DYN, mutable: true });
+      L.globalsList.push({ id: builtGid, name: "%dynnsbuilt", type: BOOL, mutable: true });
+      body.push({
+        kind: "if",
+        cond: { kind: "varRef", localId: builtGid, type: BOOL, loc },
+        then: [],
+        else_: [
+          {
+            kind: "assign",
+            localId: nsGid,
+            value: { kind: "dynObjLit", fields, staticCopy: true, type: DYN, loc },
+            loc,
+          },
+          { kind: "assign", localId: builtGid, value: { kind: "boolLit", value: true, type: BOOL, loc }, loc },
+        ],
+        loc,
+      });
+      body.push({ kind: "return", value: { kind: "varRef", localId: nsGid, type: DYN, loc }, loc });
       const ctx = L.ctx;
+      // No `captures` key, for the reason dynEvalOnceOf states above and
+      // for the same call shape: this builder is CALLED BY NAME
+      // (`{ kind: "call", callee: name }` at the import site), and a
+      // captures array — even an EMPTY one — marks a function as a lifted
+      // CLOSURE, so both backends give it the `sc_env` parameter a direct
+      // call does not pass. Measured on the C backend before this line
+      // changed: `main.c:368: error: too few arguments to function call,
+      // single argument 'sc_env' was not specified`, i.e. the ONE path
+      // that materializes a first-class namespace value in the static
+      // lane did not compile at all.
+      //
+      // The body genuinely captures nothing — it calls the module's
+      // %init and reads module GLOBALS — so an entry in `ctx.captures`
+      // means some export path started closing over a local, and the
+      // silent answer would be a namespace field reading whatever
+      // `sc_env` happened to be. Refuse instead.
+      if ((ctx.captures ?? []).length !== 0) {
+        L.unsupported(
+          "SC1090",
+          dep,
+          `a namespace of '${baseNameOf(dep.fileName)}' whose exports close over local storage ` +
+            `(the builder is called by name and has no environment to close over)`,
+        );
+      }
       L.liftedFns.push({
         name,
         params: [],
         returnType: DYN,
         locals: ctx.locals,
-        captures: ctx.captures ?? [],
         body,
         loc,
       });

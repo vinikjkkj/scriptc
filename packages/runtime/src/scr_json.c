@@ -595,6 +595,7 @@ static ScrDyn *scr_dyn_alloc(ScrDynKind kind) {
     /* A recycled node must not inherit the previous life's boundary mark,
      * or an unrelated fresh value would refuse its own writes. */
     d->static_copy = false;
+    d->module_ns = false;
     if (kind == SCR_DYN_ARR) {
       d->v.arr.len = 0; /* cap/items preserved from the node's last life */
     } else if (kind == SCR_DYN_OBJ) {
@@ -1855,6 +1856,12 @@ ScrDyn *scr_dyn_mark_static_copy(ScrDyn *d) {
     d->static_copy = true;
     for (size_t i = 0; i < d->v.obj.len; i++) scr_dyn_mark_static_copy(d->v.obj.entries[i].value);
   }
+  return d;
+}
+
+ScrDyn *scr_dyn_mark_module_ns(ScrDyn *d) {
+  scr_dyn_mark_static_copy(d);
+  if (d != NULL && d->kind == SCR_DYN_OBJ) d->module_ns = true;
   return d;
 }
 
@@ -5215,6 +5222,14 @@ bool scr_dyn_key_delete(ScrDyn *recv, ScrStr *key) {
     return false;
   }
   if (recv->static_copy) {
+    if (recv->module_ns) {
+      /* scr_throw_error RECORDS a pending error and returns, so this must
+       * not fall through: the second refusal would overwrite the
+       * namespace text with the boundary-copy one (measured — the test
+       * below read the wrong message before this return existed). */
+      scr_dyn_module_ns_refuse("deleting a property");
+      return false;
+    }
     scr_dyn_static_copy_refuse("deleting a property");
     return false;
   }
@@ -5376,6 +5391,23 @@ bool scr_dyn_has_key(const ScrDyn *v, const ScrStr *key) {
 /* The one refusal every mutating dyn entry point shares: this receiver is
  * a copy the static→dyn boundary made of a value the caller still names,
  * so the write cannot reach what Node would write. Loud beats lost. */
+void scr_dyn_module_ns_refuse(const char *what) {
+  ScrJsonBuf b;
+  scr_jb_init(&b);
+  scr_jb_puts(&b, what);
+  scr_jb_puts(&b, " on a module namespace object is not supported yet: Node throws a"
+                  " TypeError there (a namespace's properties are non-writable and"
+                  " non-configurable, and the object is non-extensible), and this build"
+                  " has no exotic namespace to throw that TypeError from — the value it"
+                  " hands over is a checked-dynamic SNAPSHOT of the module's exports."
+                  " Accepting the write would leave it on the snapshot, where nothing"
+                  " can observe it, which is the one answer this refusal ranks below"
+                  " itself. A module's exports are not writable in Node either, so"
+                  " there is no spelling of this write that works: read the member"
+                  " instead, or export a setter function from the module");
+  scr_throw_error(SCR_ERR_ERROR, scr_jb_finish(&b));
+}
+
 void scr_dyn_static_copy_refuse(const char *what) {
   ScrJsonBuf b;
   scr_jb_init(&b);
@@ -5395,6 +5427,10 @@ void scr_dyn_key_set(ScrDyn *recv, ScrStr *key, ScrDyn *value) {
   scr_dyncen_note_korigin(SCR_DYNCEN_KO_KEYSET);
 #endif
   if (recv->static_copy) {
+    if (recv->module_ns) {
+      scr_dyn_module_ns_refuse("assigning a property");
+      return;
+    }
     scr_dyn_static_copy_refuse("assigning a property");
     return;
   }
