@@ -200,26 +200,50 @@ export interface ScopeEntry extends Temp {
  * translation units so `zig cc` can compile them at once instead of leaving
  * five of six cores idle.
  *
- * Measured on the zapobench app (a 129,831,315-byte TU, 2.998 M lines) on a
- * six-core box: one `zig cc -c` of the whole thing runs at 0.982 cores for
- * 364 s; the same code cut six ways and handed to one `zig cc` finishes in
- * 132 s. The link is not the other half of the story — lld-link on the
- * resulting 25.7 MB PE is 573 ms.
+ * Measured on the zapobench app, A/B/A/B on one host state, the part count
+ * as the only variable: one unit builds in 689 s / 651 s with 312 s / 312 s
+ * of that in cc; the split builds in 438 s / 412 s with 91 s / 66 s of cc.
+ * **cc 3.96x, the whole build -36.6%.** The single cc1 it replaces was
+ * sampled every five seconds for its whole life at a mean of 0.982 cores
+ * and a 7.7 GB peak; seven at once peak at 6.7 GB, so this is cheaper in
+ * memory too. And the link is not the other half of the story: lld-link on
+ * the resulting 25.7 MB PE is 573 ms.
  *
  * The threshold is not a tuning knob, it is a CONTRACT: under it the emitter
  * produces the same bytes it always has, `compileC` builds the same command
  * line, and the binary is identical. Every corpus program is three orders of
- * magnitude under it, so the size classes those programs anchor cannot move.
- * It is deliberately far above anything a human writes by hand: only a
- * program that has swallowed an npm graph gets here. */
+ * magnitude under it, so the size classes those programs anchor cannot move
+ * (hello-world measured at 657,408 on both sides of this change, which is
+ * STATIC_CLASS_RECORDED to the byte). It is deliberately far above anything
+ * a human writes by hand: only a program that has swallowed an npm graph
+ * gets here. */
 const SPLIT_MIN_BYTES = 24 * 1024 * 1024;
 /** Target bytes per part once splitting starts, and the ceiling on parts.
  * Both are functions of the PROGRAM, never of the host: two machines with
  * different core counts must emit the same C or the build cache, the
  * provenance manifest and every byte-comparison in the fleet stop working.
- * 16 MB puts the zapobench TU at the ceiling of 8. */
-const SPLIT_PART_BYTES = 16 * 1024 * 1024;
-const SPLIT_MAX_PARTS = 8;
+ *
+ * MEASURED, not chosen. The zapobench emission was redistributed across
+ * unit counts and each set compiled and linked (same C every time, only the
+ * distribution moving), on six physical cores:
+ *
+ *   units    1      2      3      4      7     13     25     49
+ *   cc (s) 311.8  220.1  119.8   88.4   91.1   79.5   82.4   92.2
+ *   exe    27.115 26.274 26.286 26.288 26.297 26.310 26.371 26.421  (MB)
+ *
+ * Two things fall out. The binary is essentially FLAT in the part count —
+ * 2 units to 13 moves it 35 KB — so the count is a free variable for size
+ * and should be chosen purely for speed. And the curve is flat from 13 to
+ * 25 and worse at 49, so a 16 MB target (which put this program at the old
+ * ceiling of 8, and cost 91 s against 80) was leaving time on the table.
+ *
+ * The threshold stays at 24 MB; what changes is that 24 MB now yields
+ * THREE units rather than two. Two units was the worst bargain on the
+ * board: 96% of the size cost for 36% of the available speed, because unit
+ * 0 carries the prelude, the walkers, the tables and main on top of its
+ * body share and one sibling cannot balance it. */
+const SPLIT_PART_BYTES = 8 * 1024 * 1024;
+const SPLIT_MAX_PARTS = 16;
 /** Defined by unit 0 before it includes the shared header: it DEFINES the
  * program's objects, so it must not also declare them. See `declData`. */
 const UNIT0_GUARD = "SCR_PROGRAM_UNIT0";
