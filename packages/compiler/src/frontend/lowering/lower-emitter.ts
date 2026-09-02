@@ -2427,6 +2427,36 @@ export function boundEmitDispatcher(
         if (helper !== null) return { kind: "call", callee: helper, args: [read], type: want, loc };
       }
     }
+    // A DYN tuple position, and dyn is not a MISSING arm of the payload
+    // union -- it is the ABSENCE of a static arm, so armTag can only ever
+    // miss it and every branch above declines. The arm loop turns that
+    // decline into `return why(...)`, which abandons the WHOLE dispatcher,
+    // so ONE untyped event took `WaClient`'s `this.emit.bind(this)` down
+    // with it and the constructor fell back to the emit-as-a-value fence.
+    // That is the same all-or-nothing coupling the arity comment below
+    // already unpicked once, reached from a different premise: mergeEmit
+    // records dyn for an event NOTHING in the program typed, which is a
+    // tuple where there used to be no table entry at all.
+    //
+    // What the arm owes such an event is a BOXED payload, and that is not
+    // a concession: the tuple is dyn precisely because the bucket holds dyn
+    // adapters -- an unannotated listener -- and a dyn adapter reads a dyn.
+    // The slot's array element has a static type, so `dynFrom` (the node
+    // this file's own checked-dynamic listener path uses at its boundary)
+    // is the conversion. It cannot silently widen a TYPED event: mergeEmit
+    // never rewrites a tuple that already exists, so a dyn position here
+    // was never pinned by a listener or by another emit.
+    //
+    // And it STRICTLY IMPROVES on the shape it replaces. Before the dyn
+    // tuple existed such an event had no table entry at all, the arm loop
+    // skipped the key outright, and an emit of that name THROUGH the bound
+    // value was a silent NO-OP. The arm now runs.
+    if (
+      want.kind === "dyn" &&
+      (isUnitType(elem) || canConvertToDyn(elem, (id) => L.shapes.get(id), (id) => L.unions.get(id)))
+    ) {
+      return { kind: "dynFrom", value: read, type: DYN, loc };
+    }
     return null;
   };
 
