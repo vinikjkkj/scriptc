@@ -109,7 +109,15 @@ export interface ProtoField {
 
 export interface ProtoMethod {
   name: string;
-  fn: ts.FunctionExpression | ts.ArrowFunction;
+  /** Never an ArrowFunction. An arrow captures `this` LEXICALLY, so
+   * `C.prototype.m = () => { this.x = 1 }` does not touch the instance at all --
+   * calling `inst.m()` writes the enclosing scope's `this`, and in a CJS module
+   * that is module.exports, not `inst`. Lowering one as a method would bind
+   * `this` to the receiver and silently do something Node never does, and the
+   * field walk would credit its writes to the instance shape. Both sites that
+   * collect methods refuse an arrow outright; the type keeps a future consumer
+   * from having to know that. */
+  fn: ts.FunctionExpression;
 }
 
 /** A non-function value parked on the prototype (`C.prototype._slice = ...`):
@@ -305,7 +313,12 @@ export function findProtoClasses(sf: ts.SourceFile): ProtoClass[] {
             // a value we cannot see through. Never a class.
             c.bailouts.push("prototype is assigned wholesale @" + n.getStart());
           } else if (isFnLike(n.right)) {
-            if (c.methods.some((m) => m.name === t.member)) {
+            if (ts.isArrowFunction(n.right)) {
+              // Lexical `this`: not a method, and not something to guess about.
+              c.bailouts.push(
+                `prototype method '${t.member}' is an arrow function (its 'this' is ` +
+                "lexical, so it never touches the instance) @" + n.getStart());
+            } else if (c.methods.some((m) => m.name === t.member)) {
               c.bailouts.push(`prototype method '${t.member}' assigned more than once`);
             } else {
               c.methods.push({ name: t.member, fn: n.right });
@@ -337,8 +350,14 @@ export function findProtoClasses(sf: ts.SourceFile): ProtoClass[] {
         if (c) {
           let readAll = true;
           for (const prop of a1.properties) {
-            if (ts.isPropertyAssignment(prop) && isFnLike(prop.initializer)) {
+            if (ts.isPropertyAssignment(prop) && isFnLike(prop.initializer) &&
+                !ts.isArrowFunction(prop.initializer)) {
               c.mergedMethods.push({ name: prop.name.getText(), fn: prop.initializer });
+            } else if (ts.isPropertyAssignment(prop) && isFnLike(prop.initializer)) {
+              readAll = false;
+              c.bailouts.push(
+                `prototype merge member '${prop.name.getText()}' is an arrow function ` +
+                "(its 'this' is lexical, so it never touches the instance) @" + prop.getStart());
             } else {
               readAll = false;
               c.bailouts.push("prototype merge has a member we cannot read @" + prop.getStart());
