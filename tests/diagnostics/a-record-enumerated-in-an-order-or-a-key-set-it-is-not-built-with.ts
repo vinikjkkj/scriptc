@@ -9,16 +9,20 @@
 // compiles (tests/corpus/4970 is the control). What is refused is
 // ENUMERATING one, which is the only place the divergence becomes an answer.
 
-// ---- 1. The ORDER half: a literal spelled in an order the shape does not
-// carry. `declaredOrder` is the first-interned type's member order, so this
-// object enumerates b,a,c where Node enumerates c,b,a.
+// ---- 1. The ORDER half: TWO literals spelling one shape differently, so
+// no order can be the shape's and the enumeration has no right answer to
+// give. ONE out-of-order literal is NOT this: a shape's enumeration order is
+// a choice, and where the program proves one, reconcileKeyOrders re-picks
+// declaredOrder to it and every surface reads Node's own answer. What is
+// refused here is an order that is not KNOWABLE.
 interface T {
     readonly b: number;
     readonly a: number;
     readonly c: number;
 }
 const t: T = { c: 3, b: 1, a: 2 };
-console.log(JSON.stringify(t));
+const t2: T = { b: 4, a: 5, c: 6 };
+console.log(JSON.stringify(t), String(t2.a));
 
 // ---- 2. The same half through Object.keys, on a shape two structurally
 // equal literals spell differently: one shape, two orders, and the second

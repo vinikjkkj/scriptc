@@ -1,44 +1,44 @@
-a-record-enumerated-in-an-order-or-a-key-set-it-is-not-built-with.ts:21:13 - error SC1090: JSON.stringify over a record this program does not build the way its shape enumerates (a record enumerates in its shape declared order, not per-object insertion order) are not supported yet
+a-record-enumerated-in-an-order-or-a-key-set-it-is-not-built-with.ts:25:13 - error SC1090: JSON.stringify over a record this program does not build the way its shape enumerates (a record enumerates in its shape declared order, not per-object insertion order) are not supported yet
 
-  20 | const t: T = { c: 3, b: 1, a: 2 };
-  21 | console.log(JSON.stringify(t));
+  24 | const t2: T = { b: 4, a: 5, c: 6 };
+  25 | console.log(JSON.stringify(t), String(t2.a));
      |             ^~~~~~~~~~~~~~~~~
-  22 | 
+  26 | 
 
   hint: this literal spells "c,b,a" where its shape enumerates "b,a,c" - read the fields you need instead of enumerating, or build the value the way the shape enumerates it
 
-a-record-enumerated-in-an-order-or-a-key-set-it-is-not-built-with.ts:28:42 - error SC1090: Object.keys over a record this program does not build the way its shape enumerates (a record enumerates in its shape declared order, not per-object insertion order) are not supported yet
+a-record-enumerated-in-an-order-or-a-key-set-it-is-not-built-with.ts:32:42 - error SC1090: Object.keys over a record this program does not build the way its shape enumerates (a record enumerates in its shape declared order, not per-object insertion order) are not supported yet
 
-  27 | const three = { y: 2, z: 1 };
-  28 | console.log(Object.keys(two).join(",") + Object.keys(three).join(","));
+  31 | const three = { y: 2, z: 1 };
+  32 | console.log(Object.keys(two).join(",") + Object.keys(three).join(","));
      |                                          ^~~~~~~~~~~~~~~~~~
-  29 | 
+  33 | 
 
   hint: this literal spells "y,z" where its shape enumerates "z,y" - read the fields you need instead of enumerating, or build the value the way the shape enumerates it
 
-a-record-enumerated-in-an-order-or-a-key-set-it-is-not-built-with.ts:43:13 - error SC1090: Object.keys over a record this program does not build the way its shape enumerates (a width copy into the narrower shape ends the keys that shape does not name, and JS would keep them) are not supported yet
+a-record-enumerated-in-an-order-or-a-key-set-it-is-not-built-with.ts:47:13 - error SC1090: Object.keys over a record this program does not build the way its shape enumerates (a width copy into the narrower shape ends the keys that shape does not name, and JS would keep them) are not supported yet
 
-  42 | const narrow: Narrow = wide;
-  43 | console.log(Object.keys(narrow).join("|"));
+  46 | const narrow: Narrow = wide;
+  47 | console.log(Object.keys(narrow).join("|"));
      |             ^~~~~~~~~~~~~~~~~~~
-  44 | 
+  48 | 
 
   hint: a width copy from r2 into r3 ends "extra" - read the fields you need instead of enumerating, or build the value the way the shape enumerates it
 
-a-record-enumerated-in-an-order-or-a-key-set-it-is-not-built-with.ts:51:1 - error SC1090: for-in over a record this program does not build the way its shape enumerates (a width copy into the narrower shape ends the keys that shape does not name, and JS would keep them) are not supported yet
+a-record-enumerated-in-an-order-or-a-key-set-it-is-not-built-with.ts:55:1 - error SC1090: for-in over a record this program does not build the way its shape enumerates (a width copy into the narrower shape ends the keys that shape does not name, and JS would keep them) are not supported yet
 
-  50 | let seen = "";
-  51 | for (const k in small) {
+  54 | let seen = "";
+  55 | for (const k in small) {
      | ^~~~~~~~~~~~~~~~~~~~~~~~
-  52 |     seen = seen + k + ";";
+  56 |     seen = seen + k + ";";
 
   hint: a spread of "r2" into this literal ends "b" - read the fields you need instead of enumerating, or build the value the way the shape enumerates it
 
-a-record-enumerated-in-an-order-or-a-key-set-it-is-not-built-with.ts:51:1 - error SC1090: Object.keys over a record this program does not build the way its shape enumerates (a width copy into the narrower shape ends the keys that shape does not name, and JS would keep them) are not supported yet
+a-record-enumerated-in-an-order-or-a-key-set-it-is-not-built-with.ts:55:1 - error SC1090: Object.keys over a record this program does not build the way its shape enumerates (a width copy into the narrower shape ends the keys that shape does not name, and JS would keep them) are not supported yet
 
-  50 | let seen = "";
-  51 | for (const k in small) {
+  54 | let seen = "";
+  55 | for (const k in small) {
      | ^~~~~~~~~~~~~~~~~~~~~~~~
-  52 |     seen = seen + k + ";";
+  56 |     seen = seen + k + ";";
 
   hint: a spread of "r2" into this literal ends "b" - read the fields you need instead of enumerating, or build the value the way the shape enumerates it
