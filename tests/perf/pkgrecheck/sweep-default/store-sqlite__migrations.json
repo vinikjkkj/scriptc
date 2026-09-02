@@ -1,0 +1,44 @@
+{
+ "entry": "G:/blocks/pkgrecheck-lab/app/pkgs/store-sqlite/migrations.ts",
+ "flags": [],
+ "elapsedMs": 2595,
+ "crashed": null,
+ "preflightFailed": false,
+ "stats": {
+  "statementsTotal": 19,
+  "statementsFailed": 0,
+  "statementsIsland": 0,
+  "functionsSkipped": 0
+ },
+ "unreachedStats": {
+  "statementsTotal": 7,
+  "statementsFailed": 2,
+  "statementsIsland": 0,
+  "functionsSkipped": 1
+ },
+ "npmStatic": null,
+ "provenanceNotes": null,
+ "sites": [
+  {
+   "section": "unreached",
+   "code": "SC2003",
+   "message": "union types must match exactly: expected 'null | { id: unknown; [key: string]: unknown }', got 'null | { [key: string]: unknown }' (a union re-tags into another union only when every arm of the source has an identical arm in the destination, or is a record/array that width-coerces into exactly one destination arm)",
+   "file": "G:/blocks/pkgrecheck-lab/app/pkgs/store-sqlite/migrations.ts",
+   "line": 451
+  },
+  {
+   "section": "unreached",
+   "code": "SC2004",
+   "message": "uses of 'row' inherit the blocker on its declaration",
+   "file": "G:/blocks/pkgrecheck-lab/app/pkgs/store-sqlite/migrations.ts",
+   "line": 457
+  },
+  {
+   "section": "unreached",
+   "code": "SC2013",
+   "message": "values from the 'zapo-js' package run in the embedded dynamic engine, which this build does not include",
+   "file": "G:/blocks/pkgrecheck-lab/app/pkgs/store-sqlite/migrations.ts",
+   "line": 470
+  }
+ ]
+}

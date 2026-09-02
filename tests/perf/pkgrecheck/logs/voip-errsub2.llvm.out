@@ -1,0 +1,19 @@
+1 name = InvalidTransition
+2 message = invalid transition 'accept' in state 'ringing'
+3 currentState = ringing
+4 attempted = accept
+5 String(e) = InvalidTransition: invalid transition 'accept' in state 'ringing'
+6 template = InvalidTransition: invalid transition 'accept' in state 'ringing'
+7 instanceof Error = true
+8 instanceof InvalidTransition = true
+9 typeof = object
+10 message length = 46
+11 message slice = invalid transition
+12 second message = invalid transition 'offer_sent' in state 'connecting'
+13 second currentState = connecting
+14 distinct instances = different
+15 caught message = invalid transition 'end' in state 'idle'
+16 caught name = InvalidTransition
+17 caught currentState = idle
+18 caught instanceof = true
+VOIP-ERRSUB2: END

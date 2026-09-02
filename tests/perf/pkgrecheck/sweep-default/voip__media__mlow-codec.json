@@ -1,0 +1,30 @@
+{
+ "entry": "G:/blocks/pkgrecheck-lab/app/pkgs/voip/media/mlow-codec.ts",
+ "flags": [],
+ "elapsedMs": 669,
+ "crashed": null,
+ "preflightFailed": false,
+ "stats": {
+  "statementsTotal": 7,
+  "statementsFailed": 0,
+  "statementsIsland": 0,
+  "functionsSkipped": 0
+ },
+ "unreachedStats": {
+  "statementsTotal": 53,
+  "statementsFailed": 1,
+  "statementsIsland": 0,
+  "functionsSkipped": 0
+ },
+ "npmStatic": null,
+ "provenanceNotes": null,
+ "sites": [
+  {
+   "section": "unreached",
+   "code": "SC2020",
+   "message": "'Promise<typeof import(\"G:/blocks/pkgrecheck-lab/app/node_modules/libmlow-wasm/dist/index\")>.then' is part of the standard library types but has no scriptc lowering yet",
+   "file": "G:/blocks/pkgrecheck-lab/app/pkgs/voip/media/mlow-codec.ts",
+   "line": 30
+  }
+ ]
+}

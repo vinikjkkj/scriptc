@@ -1,0 +1,12 @@
+1 default auth_credentials: auth_credentials
+2 default serialized head: wa_migrations=wa_migrations;auth_credentials=auth_credential
+3 override mailbox_messages: zz_msgs
+4 override signal_session: zz_sess
+5 override untouched auth: auth_credentials
+6 identity resolver: SELECT * FROM mailbox_messages WHERE id = ?
+7 rewrite: SELECT * FROM zz_msgs JOIN zz_sess ON 1
+8 no-match: SELECT * FROM other_table
+9 repeat: ?, ?, ?, ?
+10 repeat 1: ?
+11 repeat 0: "?"
+12 bad key throws: unsupported sqlite tableNames key "not_a

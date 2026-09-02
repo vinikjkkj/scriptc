@@ -1,0 +1,30 @@
+{
+ "entry": "G:/blocks/pkgrecheck-lab/app/typesprobe.ts",
+ "flags": [],
+ "elapsedMs": 343,
+ "crashed": null,
+ "preflightFailed": false,
+ "stats": {
+  "statementsTotal": 0,
+  "statementsFailed": 0,
+  "statementsIsland": 0,
+  "functionsSkipped": 0
+ },
+ "unreachedStats": {
+  "statementsTotal": 1,
+  "statementsFailed": 1,
+  "statementsIsland": 0,
+  "functionsSkipped": 0
+ },
+ "npmStatic": null,
+ "provenanceNotes": null,
+ "sites": [
+  {
+   "section": "unreached",
+   "code": "SC2020",
+   "message": "'child_process.execFile' is typed by @types/node but has no scriptc lowering yet",
+   "file": "G:/blocks/pkgrecheck-lab/app/typesprobe.ts",
+   "line": 15
+  }
+ ]
+}

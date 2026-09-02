@@ -1,0 +1,22 @@
+{
+ "entry": "G:/blocks/pkgrecheck-lab/app/pkgs/store-mysql/types.ts",
+ "flags": [],
+ "elapsedMs": 825,
+ "crashed": null,
+ "preflightFailed": false,
+ "stats": {
+  "statementsTotal": 0,
+  "statementsFailed": 0,
+  "statementsIsland": 0,
+  "functionsSkipped": 0
+ },
+ "unreachedStats": {
+  "statementsTotal": 0,
+  "statementsFailed": 0,
+  "statementsIsland": 0,
+  "functionsSkipped": 0
+ },
+ "npmStatic": null,
+ "provenanceNotes": null,
+ "sites": []
+}
