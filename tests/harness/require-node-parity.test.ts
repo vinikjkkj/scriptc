@@ -10,6 +10,17 @@
  * swallowed a COMPILER REFUSAL and carried on with `null`, at exit 0, with
  * no diagnostic. Node's answer there is a module, or a throw. Never null.
  *
+ * THAT SWALLOW IS CLOSED, for this one construct. `require(<run-time
+ * specifier>)` opts into `fence.fatal` (ir/nodes.ts): the refusal is printed
+ * as the "Uncaught Error: ..." line an uncaught throw would have printed and
+ * the process leaves non-zero, so no `catch` in the program can turn it into
+ * an answer. It is still not Node's answer — but a named refusal instead of
+ * a silent wrong one, which is what a construct with no lowering can honestly
+ * give. Every FENCED entry below whose code is SC2020 is that construct and
+ * carries `fatal: true`; the SC1090/SC1100/SC2013 entries are OTHER fences
+ * and are still catchable, deliberately — a global non-catchable stop would
+ * turn every fence zapo's own code catches into a hard crash.
+ *
  * A 30-program matrix against Node v25.9.0 found ELEVEN cells answering
  * WRONG at exit 0 on both backends. This file pins the ones that close and
  * — just as important — the ones that do NOT, because the population that
@@ -528,10 +539,11 @@ const RUNS: readonly Program[] = [
  *
  * They are checked by RUNNING the built program (a JS file's fence is
  * deferred into the translation unit, so the build succeeds) and reading
- * the SC code back off the thrown error. `caught` says whether the
- * program's own catch swallows the fence: under the deferred-fence stance
- * a refusal inside a `try` IS catchable, and that is the lane zapo builds
- * in — recorded, not hidden. */
+ * the SC code back off the failure. Which channel it arrives on is the
+ * `fatal` field: a catchable fence lands wherever the program's own catch
+ * prints it, and a `fatal` one lands on stderr with a non-zero exit and an
+ * empty stdout, because the program never resumed. Both are recorded, not
+ * hidden. */
 const FENCED: readonly {
   readonly name: string;
   readonly src: string;
@@ -541,6 +553,14 @@ const FENCED: readonly {
   /** What Node v25.9.0 answers — the distance still to go, written down. */
   readonly nodeSays: string;
   readonly stdout: string;
+  /** The refusal is NOT catchable: `require(<run-time specifier>)` opts in
+   * (ir/nodes.ts's `fence.fatal`). The refusal is printed as the "Uncaught
+   * Error: ..." line an uncaught throw would have printed and the process
+   * leaves with a non-zero exit, so the program's own `catch` never runs and
+   * `stdout` is whatever it had already flushed — usually nothing. Every
+   * entry below whose code is SC2020 is that construct; the SC1090/SC1100/
+   * SC2013 entries are other fences and stay catchable. */
+  readonly fatal?: true;
 }[] = [
   {
     // The other half of the 'node:' class, and the reason the name table
@@ -552,7 +572,11 @@ const FENCED: readonly {
       "console.log(g('node:fs'), g('node:fs/promises'));\n",
     code: "SC2020",
     nodeSays: "GOT object GOT object",
-    stdout: "threw SC2020 threw SC2020\n",
+    // NON-CATCHABLE since the run-time-specifier require opted in: the
+    // refusal reaches the user instead of the program's own catch, so
+    // nothing is printed at all. It used to print "threw SC2020 threw SC2020\n"
+    stdout: "",
+    fatal: true,
   },
   {
     // A '#' key that MATCHES. The imports map is read at build time and
@@ -565,7 +589,11 @@ const FENCED: readonly {
       "console.log(g('#ok'), g('#pat/m'));\n",
     code: "SC2020",
     nodeSays: "GOT 42 GOT 42",
-    stdout: "threw SC2020 threw SC2020\n",
+    // NON-CATCHABLE since the run-time-specifier require opted in: the
+    // refusal reaches the user instead of the program's own catch, so
+    // nothing is printed at all. It used to print "threw SC2020 threw SC2020\n"
+    stdout: "",
+    fatal: true,
   },
   {
     // The boundary of the filesystem arm, from the other side: the path
@@ -580,7 +608,11 @@ const FENCED: readonly {
       "console.log(g(path.resolve(__dirname, 'm.cjs')));\n",
     code: "SC2020",
     nodeSays: "GOT 42",
-    stdout: "threw SC2020\n",
+    // NON-CATCHABLE since the run-time-specifier require opted in: the
+    // refusal reaches the user instead of the program's own catch, so
+    // nothing is printed at all. It used to print "threw SC2020\n"
+    stdout: "",
+    fatal: true,
   },
   {
     name: "a run-time specifier naming an INSTALLED package",
@@ -589,7 +621,11 @@ const FENCED: readonly {
       "console.log(g('mylib'));\n",
     code: "SC2020",
     nodeSays: "GOT 42",
-    stdout: "threw SC2020\n",
+    // NON-CATCHABLE since the run-time-specifier require opted in: the
+    // refusal reaches the user instead of the program's own catch, so
+    // nothing is printed at all. It used to print "threw SC2020\n"
+    stdout: "",
+    fatal: true,
   },
   {
     name: "a run-time specifier naming a builtin",
@@ -598,7 +634,11 @@ const FENCED: readonly {
       "console.log(g('node:path'), g('vm'));\n",
     code: "SC2020",
     nodeSays: "GOT object GOT object",
-    stdout: "threw SC2020 threw SC2020\n",
+    // NON-CATCHABLE since the run-time-specifier require opted in: the
+    // refusal reaches the user instead of the program's own catch, so
+    // nothing is printed at all. It used to print "threw SC2020 threw SC2020\n"
+    stdout: "",
+    fatal: true,
   },
   {
     name: "a run-time RELATIVE specifier naming a program module",
@@ -607,7 +647,11 @@ const FENCED: readonly {
       "console.log(g('./m.cjs'));\n",
     code: "SC2020",
     nodeSays: "GOT 42",
-    stdout: "threw SC2020\n",
+    // NON-CATCHABLE since the run-time-specifier require opted in: the
+    // refusal reaches the user instead of the program's own catch, so
+    // nothing is printed at all. It used to print "threw SC2020\n"
+    stdout: "",
+    fatal: true,
   },
   {
     // The BOUNDARY this branch created, recorded rather than hidden. The
@@ -633,7 +677,11 @@ const FENCED: readonly {
       "try { console.log('GOT', r('./m.cjs').v) } catch (e) { console.log('threw', e.code) }\n",
     code: "SC2020",
     nodeSays: "GOT 42",
-    stdout: "threw SC2020\n",
+    // NON-CATCHABLE since the run-time-specifier require opted in: the
+    // refusal reaches the user instead of the program's own catch, so
+    // nothing is printed at all. It used to print "threw SC2020\n"
+    stdout: "",
+    fatal: true,
   },
   {
     name: "a call through the alias naming an INSTALLED package",
@@ -642,7 +690,11 @@ const FENCED: readonly {
       "try { console.log('GOT', r('mylib').v) } catch (e) { console.log('threw', e.code) }\n",
     code: "SC2020",
     nodeSays: "GOT 42",
-    stdout: "threw SC2020\n",
+    // NON-CATCHABLE since the run-time-specifier require opted in: the
+    // refusal reaches the user instead of the program's own catch, so
+    // nothing is printed at all. It used to print "threw SC2020\n"
+    stdout: "",
+    fatal: true,
   },
   {
     // A package ROOT need not be a DIRECTORY. Node tries LOAD_AS_FILE on
@@ -669,7 +721,11 @@ const FENCED: readonly {
       "console.log(g('filepkg'), g('jsonpkg'), g('@s/sfile'));\n",
     code: "SC2020",
     nodeSays: "GOT 42 GOT 7 GOT 9",
-    stdout: "threw SC2020 threw SC2020 threw SC2020\n",
+    // NON-CATCHABLE since the run-time-specifier require opted in: the
+    // refusal reaches the user instead of the program's own catch, so
+    // nothing is printed at all. It used to print "threw SC2020 threw SC2020 threw SC2020\n"
+    stdout: "",
+    fatal: true,
   },
   {
     // The wall, named: a required module used AS A VALUE. Everything in
@@ -732,7 +788,11 @@ const FENCED: readonly {
       "console.log(g('./m.cjs') + ' identity=' + same);\n",
     code: "SC2020",
     nodeSays: "GOT 42 identity=true",
-    stdout: "threw SC2020 identity=threw SC1090\n",
+    // NON-CATCHABLE since the run-time-specifier require opted in: the
+    // refusal reaches the user instead of the program's own catch, so
+    // nothing is printed at all. It used to print "threw SC2020 identity=threw SC1090\n"
+    stdout: "",
+    fatal: true,
   },
   {
     // The CONSERVATIVE half of the package-root predicate, pinned from
@@ -750,31 +810,37 @@ const FENCED: readonly {
       "console.log(g('expmissing'), g('badjson'));\n",
     code: "SC2020",
     nodeSays: "MODULE_NOT_FOUND ERR_INVALID_PACKAGE_CONFIG",
-    stdout: "SC2020 SC2020\n",
+    // NON-CATCHABLE since the run-time-specifier require opted in: the
+    // refusal reaches the user instead of the program's own catch, so
+    // nothing is printed at all. It used to print "SC2020 SC2020\n"
+    stdout: "",
+    fatal: true,
   },
   {
     // THE FENCE IS ALREADY NOT LOUD HERE, and this row exists to keep that
     // written down, because it is the cell that decides whether SC2020 may
     // be replaced by a run-time MODULE_NOT_FOUND.
     //
-    // The argument for replacing it goes: a miss should throw Node's own
-    // MODULE_NOT_FOUND, and protobufjs's inquire() catches, so the program
-    // sees exactly what it sees on a host where the module is absent. That
-    // is true for a specifier NOTHING resolves — 'long' — and the row above
-    // and corpus 5970 both prove it, byte for byte.
+    // THE CELL THIS ROW WAS ABOUT, and the one that changed.
     //
-    // It is false for a specifier Node DOES serve, and 'buffer' is one of
-    // the two protobufjs itself inquires for. Measured on both lanes: Node
-    // answers the module, the compiled program answers null, at exit 0,
-    // with nothing printed — because the SC2020 is thrown INTO the
-    // program's own catch and swallowed there. So the refusal is already
-    // silent at exactly the population a MODULE_NOT_FOUND would be silent
-    // at, and replacing it would not trade a loud answer for a quiet one:
-    // it would trade an attributable wrong answer for one that reads
-    // exactly like Node's, for a builtin that is never actually absent.
+    // For a specifier NOTHING resolves — 'long' — the compiled program and
+    // Node agree byte for byte: Node's own MODULE_NOT_FOUND is thrown at the
+    // require site, inquire catches it, both answer null. The row above and
+    // corpus 5970 prove that, and it is untouched.
     //
-    // The uncaught spelling is the control: there the code is still visible,
-    // and that visibility is the only thing the tag is still buying.
+    // For a specifier Node DOES serve it was false, and 'buffer' is one of
+    // the two protobufjs itself inquires for. Measured on both lanes at main
+    // acba2b2d: Node answered the module, the compiled program answered
+    // null, at exit 0, with nothing printed — because the SC2020 was thrown
+    // INTO the program's own catch and swallowed there. The fence was not
+    // the safeguard; the deadness of that call in that one bundle was, and
+    // any other consumer of the construct got null and never knew.
+    //
+    // So the fence stopped being catchable. Both spellings now end the same
+    // way — the caught one because there is nothing to catch, the uncaught
+    // one because it never had a catch — and the code is visible in both,
+    // on stderr, at a non-zero exit. `stdout` is empty for that reason: the
+    // first console.log never completes.
     name: "the refusal is SWALLOWED whole by the idiom, for a specifier Node DOES serve",
     src:
       "function inquire(moduleName) {\n" +
@@ -790,7 +856,11 @@ const FENCED: readonly {
       "console.log('uncaught', raw('buffer'))\n",
     code: "SC2020",
     nodeSays: "caught MODULE / uncaught GOT",
-    stdout: "caught null\nuncaught SC2020\n",
+    // NON-CATCHABLE since the run-time-specifier require opted in: the
+    // refusal reaches the user instead of the program's own catch, so
+    // nothing is printed at all. It used to print "caught null\nuncaught SC2020\n"
+    stdout: "",
+    fatal: true,
   },
 ];
 
@@ -921,6 +991,15 @@ describe("the ambient CommonJS require, against Node v25.9.0", () => {
           `that is a silent wrong answer where an installed module exists. Saw: ${all.slice(0, 400)}`,
       ).toBe(true);
       expect(r.stdout, `${p.name} (${backend}) stdout`).toBe(p.stdout);
+      if (p.fatal === true) {
+        // The refusal must REACH THE USER: a non-zero exit, the code on
+        // stderr, and the uncaught-error shape. Asserted separately from
+        // `all.includes(p.code)` above, which a catchable throw the program
+        // printed itself would also satisfy.
+        expect(r.status, `${p.name} (${backend}) must not exit 0`).not.toBe(0);
+        expect(r.stderr, `${p.name} (${backend}) stderr shape`).toContain("Uncaught Error: ");
+        expect(r.stderr, `${p.name} (${backend}) stderr code`).toContain(p.code);
+      }
     }
   });
 
