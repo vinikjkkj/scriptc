@@ -340,8 +340,46 @@ if ((raw.match(/^(?:declare|define) /gm) ?? []).length > 0 && (raw.match(/^#incl
 }
 
 const a = analyse(raw);
+
+/* MUST-NOT-READ-ZERO. "The scan found none" and "there are none" must not be
+ * able to print the same thing, and until 2026-09-02 they did: on a split TU
+ * this pass answered `keyed-read helpers 0 ... ABORTABLE CALL SITES 0` over a
+ * 139 MB program with 33 helpers and 9 abort call sites, exited 0, and read as
+ * the best possible news. The input itself says whether the population is
+ * there: `sc_rkg_` is the token this whole pass is about, and the trap
+ * template is the exact text an aborting miss path carries. If either is in
+ * the bytes and the parse recovered nothing, the READER is broken, not the
+ * program, and that is a different message and a different exit code. */
+const mustNotReadZero = (why, present, found) => {
+  if (!present || found > 0) return;
+  console.error(`real-aborts: *** THE READER FOUND NOTHING AND THE INPUT SAYS OTHERWISE ***`);
+  console.error(`  ${why}`);
+  console.error(`  ${file}  ${raw.length} bytes`);
+  console.error("  This is an instrument failure, NOT a program with no aborts. Do not report a zero.");
+  process.exit(5);
+};
+mustNotReadZero(
+  "the input mentions sc_rkg_ (the keyed-read helper family) and no helper header parsed",
+  raw.includes("sc_rkg_"),
+  a.helpers.length,
+);
+mustNotReadZero(
+  "the input carries the `record has no key` trap template and no ABORTING helper parsed",
+  TRAP.test(raw),
+  a.helpers.filter((h) => h.traps).length,
+);
+
 const abort = a.helpers.filter((h) => h.traps);
 const safe = a.helpers.filter((h) => !h.traps);
+/* The same rule one level down: aborting helpers exist and NOT ONE of them
+ * could be attributed a call site. One unused helper is possible; all of them
+ * unused is the split-TU signature (bodies in `<tu>.c`, calls in the parts)
+ * seen from the other side. */
+mustNotReadZero(
+  `${abort.length} aborting helper(s) parsed and not one call site was attributed to any of them`,
+  abort.length > 0,
+  abort.reduce((s, h) => s + h.ways, 0),
+);
 const out = [];
 out.push(`FILE ${file}  ${raw.length} bytes`);
 out.push("");

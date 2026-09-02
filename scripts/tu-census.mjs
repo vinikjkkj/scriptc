@@ -729,6 +729,17 @@ const statements = rows.length;
  * left to count — and every other problem on this list is the instrument
  * saying it does not trust its own reading. */
 if (statements === 0) fail("ZERO-POPULATION: zero failure statements in the whole TU — an empty or wrong input file reads exactly like a perfect one");
+/* MUST-NOT-READ-ZERO, one level down. The `ways` column of ABORT.real is a
+ * CALL-SITE count, and an aborting keyed-read helper the program never calls
+ * is not something the emitter produces — so "7 statements / 0 call sites" is
+ * the reader saying it cannot see the calls, which is exactly what censusing
+ * ONE FILE of a split TU produces (measured 2026-09-02: 7 / 0 per-file where
+ * the whole program has 7 / 9). Zero there must not be able to print like a
+ * real answer. The guard needs the whole family silent, not one helper: an
+ * individual unused row is arguable, all of them is the split. */
+if ((byCat.get("ABORT.real") ?? 0) > 0 && (waysByCat.get("ABORT.real") ?? 0) === 0) {
+  fail("ZERO-CALL-SITES: ABORT.real has statements and not one call site — the reader cannot see the calls (pass EVERY emitted file, not just <tu>.c)");
+}
 if (nCodedCalls + nUncodedCalls + nTrapCalls !== statements) {
   fail(`family totals ${nCodedCalls}+${nUncodedCalls}+${nTrapCalls} != ${statements} rows`);
 }
