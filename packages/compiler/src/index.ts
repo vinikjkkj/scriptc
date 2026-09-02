@@ -1,7 +1,7 @@
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
 import { CcCompileError, compileC, compileLibArchive, resolveCc, targetPlatform } from "./backend/cc.js";
-import { emitModule } from "./backend/emission/emitter.js";
+import { emitModule, emitModuleProgram } from "./backend/emission/emitter.js";
 import { emitFinalKeyReadWidths, emitFinalNarrowBridges, flushKeyReadCensus, flushNarrowBridgeCensus, keyReadCensusOnly } from "./frontend/lowering/keyread-census.js";
 import { emitLlvmModule, LlvmUnsupportedError } from "./backend/llvm/emitter.js";
 import { checkerPanicDiag, ffiNativeBuildDiag, libAsyncExportDiag, libAsyncSurfaceDiag, libExportUnresolvedDiag, libGenericExportDiag, libIntBoundaryDiag, libNpmIneligibleDiag, libSidecarDiag, libUnmappableSignatureDiag, iceDiag, isCheckerPanic, LIB_INBOUND_BYTES_TRAP_CODE, LIB_RUNTIME_TRAP_CODES, type ScrDiagnostic } from "./diagnostics/diagnostic.js";
@@ -162,6 +162,11 @@ export type CompileResult =
       ok: true;
       binaryPath: string;
       cPath: string;
+      /** The program's REMAINING translation units, when the emitter split
+       * it, and the header they share. Absent for every program under the
+       * split threshold. `--no-keep-c` deletes these with `cPath`. */
+      cPathParts?: string[];
+      cPathHeader?: string;
       irPath?: string;
       backend: "c" | "llvm";
       llvmRefusal?: string;
@@ -781,9 +786,31 @@ export async function compile(entryPath: string, opts: CompileOptions): Promise<
       llvmRefusal = err.kind;
     }
   }
+  // The rest of a SPLIT program, and the header its units share. Empty for
+  // every program the emitter answers one unit for, which is everything
+  // under its size threshold — the .c beside the binary is then the same
+  // file it has always been.
+  let programUnits: string[] = [];
+  let programHeader: string | undefined;
+  const headerName = `${stem}.scrh`;
   if (backend === "c") {
-    await writeFile(cPath, emitModule(lowered.module!, entryText));
+    const program = emitModuleProgram(lowered.module!, entryText, headerName);
+    await writeFile(cPath, program.units[0]!);
+    if (program.header !== null) {
+      programHeader = join(opts.outDir, headerName);
+      await writeFile(programHeader, program.header);
+      programUnits = program.units.slice(1).map((_, i) => join(opts.outDir, `${stem}.part${i + 1}.c`));
+      await Promise.all(programUnits.map((p, i) => writeFile(p, program.units[i + 1]!)));
+    }
   }
+  // A previous build of the same program may have been split when this one
+  // is not (an edit that shrank it, or a threshold change). Its parts would
+  // survive in outDir and, worse, still be compiled if anything globbed
+  // them. Sweep any part beyond the ones just written.
+  for (let i = programUnits.length + 1; i <= 32; i++) {
+    await rm(join(opts.outDir, `${stem}.part${i}.c`), { force: true });
+  }
+  if (programHeader === undefined) await rm(join(opts.outDir, headerName), { force: true });
   // Kept-TU honesty: outDir persists across builds (the CLI's .scriptc/),
   // so a lane change would leave the PREVIOUS lane's TU beside the fresh
   // one — remove the loser so the surviving TU is always the one the
@@ -800,6 +827,8 @@ export async function compile(entryPath: string, opts: CompileOptions): Promise<
   try {
     await compileC({
       cPath,
+      ...(programUnits.length > 0 ? { programUnits } : {}),
+      ...(programHeader !== undefined ? { programHeader } : {}),
       outPath: opts.outPath,
       sanitize: opts.sanitize ?? false,
       dynamic: opts.dynamic ?? false,
@@ -958,6 +987,7 @@ export async function compile(entryPath: string, opts: CompileOptions): Promise<
     ok: true,
     binaryPath: opts.outPath,
     cPath,
+    ...(programUnits.length > 0 ? { cPathParts: programUnits, cPathHeader: programHeader! } : {}),
     backend,
     ...(irPath !== undefined ? { irPath } : {}),
     ...(llvmRefusal !== undefined ? { llvmRefusal } : {}),

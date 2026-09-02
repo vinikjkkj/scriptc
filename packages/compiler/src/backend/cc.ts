@@ -178,6 +178,21 @@ export interface CcOptions {
    * LLVM backend's .ll — clang compiles IR text natively on the same
    * command line, so both ride this one seat. */
   cPath: string;
+  /** The program's REMAINING translation units, when the emitter split it.
+   * Empty (the default) for every program under the split threshold, which
+   * keeps their command line byte-identical.
+   *
+   * They ride the same `zig cc` invocation as `cPath` rather than separate
+   * `-c` calls on purpose: zig's driver already schedules one cc1 job per C
+   * input across its thread pool, measured at 6x the work for 1.42x the
+   * wall on six cores. Handing it N inputs is exactly as parallel as N
+   * processes and does not need a scheduler here. */
+  programUnits?: readonly string[];
+  /** The shared header a split program's units include. Never an input on
+   * the command line — the `#include` reaches it — but its bytes join the
+   * build-cache key, because a declaration can move without any unit's
+   * bytes moving. */
+  programHeader?: string;
   /** Path of the native executable to produce. */
   outPath: string;
   /** Build with ASan + the runtime RC audit (test/debug lane). */
@@ -2147,6 +2162,10 @@ export async function compileC(opts: CcOptions): Promise<void> {
     // command line cannot change by a byte.
     ...(opts.cPath.endsWith(".ll") ? ["-Wno-override-module"] : []),
     opts.cPath,
+    // The rest of a SPLIT program. Empty for every program under the
+    // emitter's threshold, so their command line is unchanged element for
+    // element.
+    ...(opts.programUnits ?? []),
     ...(opts.linkInputs ?? []),
     ...(opts.systemLibraries ?? []).map((name) => `-l${name}`),
     // glibc keeps libm separate from libc. This must trail the generated
@@ -2203,18 +2222,26 @@ export async function compileC(opts: CcOptions): Promise<void> {
     return;
   }
 
-  const [cv, fingerprint, cBytes, linkBytes] = await Promise.all([
+  const [cv, fingerprint, cBytes, unitBytes, linkBytes] = await Promise.all([
     ccVersionOnce(driver.argv),
     runtimeFingerprint(rtDir),
     readFile(opts.cPath),
+    Promise.all(
+      [...(opts.programHeader !== undefined ? [opts.programHeader] : []), ...(opts.programUnits ?? [])]
+        .map((path) => readFile(path)),
+    ),
     Promise.all((opts.linkInputs ?? []).map((path) => readFile(path))),
   ]);
   // The key sees the full command line with the two program-specific paths
   // normalized out (their CONTENT is what matters: the C bytes are hashed,
   // the out path is where the result lands). Runtime and vendor paths stay
   // verbatim — their contents are covered by the fingerprint and the pin.
+  const unitSet = new Set(opts.programUnits ?? []);
   const identityArgs = buildArgs((p) => p).map((a) =>
-    a === opts.cPath ? "<program.c>" : a === opts.outPath ? "<out>" : a,
+    a === opts.cPath ? "<program.c>"
+    : a === opts.outPath ? "<out>"
+    : unitSet.has(a) ? "<program.part.c>"
+    : a,
   );
   const key = createHash("sha256")
     .update("bin-v1\0")
@@ -2226,6 +2253,10 @@ export async function compileC(opts: CcOptions): Promise<void> {
     .update(fingerprint).update("\0")
     .update(identityArgs.join("\x1f")).update("\0")
     .update(cBytes);
+  // The shared header and the other units of a split program. Every byte
+  // the compiler will read has to be in the key, or an edit that lands in
+  // one part alone is served the previous binary out of the cache.
+  for (const bytes of unitBytes) key.update("\0program-unit\0").update(bytes);
   for (const bytes of linkBytes) key.update("\0ffi-link\0").update(bytes);
   const keyHex = key
     .digest("hex");
