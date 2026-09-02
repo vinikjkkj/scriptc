@@ -591,6 +591,9 @@ static inline void scr_cyc_mark_live(void *obj) {
 
 /* Run one full trial-deletion pass over the buffered candidates now. */
 void scr_collect_cycles(void);
+/* The event loop's between-turns collection point: a PACED pass (see
+ * scr_cycle.c) rather than the unconditional one scr_collect_cycles is. */
+void scr_collect_cycles_idle(void);
 
 /* ── class hierarchies (single inheritance) ───────────────────────────
  * Classes in an `extends` hierarchy share a two-word object prefix: the

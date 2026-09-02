@@ -2357,8 +2357,9 @@ bool scr_loop_run(ScrPromise *top_level) {
     }
     if (scr_ready_len > 0 || scr_nt_head != NULL || scr_nunhandled > 0) continue;
     /* Quiescent between turns (microtasks drained, nothing running):
-     * collect any cycles the turn left behind. No-op on an empty buffer. */
-    scr_collect_cycles();
+     * collect any cycles the turn left behind. No-op on an empty buffer,
+     * and PACED above a large live set — see scr_collect_cycles_idle. */
+    scr_collect_cycles_idle();
     /* Stream tick dispatch (scr_stream.c, when linked): the deferred
      * next-tick emissions ('data' flow kicks, 'readable'/'end'/'finish'/
      * 'drain'/'error'/'close') fire now, FIRST — the nextTick station.
