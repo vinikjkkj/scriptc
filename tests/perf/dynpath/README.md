@@ -176,6 +176,28 @@ A and P are `.text`-identical to the byte at both sizes.
                         was confirmed to be exactly what was intended and
                         nothing else.
 
+    bucket-origin.mjs   WHERE each seed bucket's RECEIVER comes from, which is
+                        what decides whether a lowering arm can reach it at all.
+                        seed-inventory.mjs counts the seeds; this one counts the
+                        spellings that produce the values they are read off. On
+                        zapo's bundle: 641 of 641 decode bodies take the READER
+                        as an untyped FUNCTION PARAMETER, and 641 of 641 MESSAGE
+                        bindings are `var a = <param> || new j.waproto.X` -- a
+                        var slot whose construction names a NAMESPACE MEMBER.
+                        Neither is a `new K(...)` an identifier resolves to, so
+                        the prototype-class arm cannot type either.
+    arm-reach.mts       the same question asked of the COMPILER instead of the
+                        source: four programs, each compiled with the arm off and
+                        the arm ON, with the emitted C's seed CALL SITES counted
+                        both times. The param shape and the namespace-new shape
+                        move by ZERO and each gains ~7.2 KB of emitted C; a
+                        `const` binding of the same construction drops its four
+                        dynInvoke sites to zero. That last row is the POSITIVE
+                        CONTROL and it is why the zeros above are readable: a
+                        `var` spelling of the identical body also moves by zero,
+                        because a var slot is typed at HOIST. Needs tsx (it
+                        imports the compiler): see the usage line in the header.
+
 `litrel.mjs` counts SOURCE LINES. `estado-imagesize.md` §11.3 is the
 standing warning that source lines do not transfer to `.text` — clang
 tail-merges the epilogues. The `.text` ceiling is that count times the

@@ -302,9 +302,9 @@ describe("a JavaScript pre-class constructor's prototype methods", () => {
  * are NAMED GAPS, pinned so the day one is fixed this file says so out loud
  * instead of quietly agreeing.
  *
- * The gap is one mechanism, not several: A CLASS INSTANCE COERCED INTO A DYN
- * SLOT KEEPS ITS FIELDS AND LOSES ITS METHODS. It is not caused by this arm —
- * main has it today for a DECLARED `class` in a .js file:
+ * THE GAP THIS FILE ORIGINALLY PINNED IS CLOSED, and the closing is what
+ * moved four rows. It was: A CLASS INSTANCE COERCED INTO A DYN SLOT KEEPS ITS
+ * FIELDS AND LOSES ITS METHODS —
  *
  *     class Box { constructor(v) { this.v = v } get() { return this.v } }
  *     function use(x) { return x.get() }
@@ -313,16 +313,27 @@ describe("a JavaScript pre-class constructor's prototype methods", () => {
  *     node    -> 7
  *     scriptc -> Uncaught TypeError: x.get is not a function
  *
- * The per-use dyn box the arm replaces dispatches that call correctly, so a
- * default-on arm would take such a program from MATCH to WRONG. That is the
- * whole reason for the flag, and it is why the OFF rows above are the ones
- * that must stay green.
+ * — and the boxing descriptor's member table answers it now, so both slots
+ * that reach a dyn-typed destination in a JavaScript file (an untyped
+ * PARAMETER, and a `var` binding whose slot is decided when the declaration
+ * HOISTS, before any initializer has lowered) DISPATCH. Those two rows moved
+ * up into the answering set, by measurement, when this file went red saying
+ * so.
  *
- * Two slots reach a dyn-typed destination in a JavaScript file:
- *   - an untyped PARAMETER (`function use(x)`), and
- *   - a `var` binding, whose slot is decided when the declaration HOISTS,
- *     before any initializer has lowered. `const`/`let` take their type from
- *     the lowered initializer and work.
+ * WHAT STILL STOPS THE ARM DEFAULTING ON is a different mechanism, and the
+ * rows below name it: A CLASS INSTANCE HAS A FIXED LAYOUT, AND A JAVASCRIPT
+ * OBJECT DOES NOT. The per-use dyn box the arm replaces is a real dyn object,
+ * so a program may add an own property to it and delete one; a class instance
+ * has struct slots and no representation for either. Both refuse LOUDLY (a
+ * throw at the site, not a fabricated shape), and both are MATCH → WRONG for
+ * a program that does it — which is why the flag stays.
+ *
+ * The rest of the object surface is NOT in that list any more and is not
+ * pinned here for that reason: `{...inst}`, `Object.assign`, `Object.keys`,
+ * `Object.values`, `Object.entries`, `JSON.stringify`, `Object.hasOwn`,
+ * `'k' in inst`, `util.inspect` and `console.log` all answer Node-exactly off
+ * the same member table (tests/harness/dyn-class-object-surface.test.ts is
+ * their guard, both arm states, both lanes).
  */
 const ARM = "SCRIPTC_PROTOCLASS";
 const PROTO = "function Box(v) { this.v = v }\nBox.prototype.get = function () { return this.v }\n";
@@ -339,19 +350,42 @@ const ARMED: readonly { name: string; src: string; gap: string | null }[] = [
     gap: null,
   },
   {
-    // NAMED GAP. A `var` slot is typed when the declaration HOISTS — before
-    // the initializer lowers — so the class instance boxes into a dyn slot
-    // and loses its methods. Minified bundles spell `var`, so this is the
-    // shape that matters most and the one that does not work.
+    // WAS a named gap: a `var` slot is typed when the declaration HOISTS,
+    // before the initializer lowers, so the instance boxes into a dyn slot.
+    // It still does — and the box now DISPATCHES, off the member table. This
+    // is the shape that matters most, because minified bundles spell `var`.
     name: "a var binding holding the instance",
     src: PROTO + "function run() { var b = new Box(7); return b.get() }\nconsole.log(String(run()))\n",
-    gap: "a var slot is typed at HOIST, before the initializer lowers",
+    gap: null,
   },
   {
-    // NAMED GAP, and NOT this arm's doing: identical for a declared `class`.
+    // WAS a named gap, and was never this arm's doing: identical for a
+    // declared `class`. The member table answers it for both spellings.
     name: "the instance through an untyped parameter",
     src: PROTO + "function use(x) { return x.get() }\nconsole.log(String(use(new Box(4))))\n",
-    gap: "an untyped JS parameter is a dyn slot; main loses a DECLARED class's methods here too",
+    gap: null,
+  },
+  {
+    // NAMED GAP. `delete inst.v` removes an own property in JS; a class
+    // instance's fields are struct slots and there is no representation for a
+    // removed one. Refused loudly (it used to answer the pre-delete key list
+    // at exit 0 — a silent wrong array).
+    name: "a field deleted off the instance",
+    src:
+      PROTO +
+      "function run() { var b = new Box(7); delete b.v; return JSON.stringify(Object.keys(b)) }\n" +
+      "console.log(run())\n",
+    gap: "a class instance has a fixed layout and no representation for a removed field",
+  },
+  {
+    // NAMED GAP, the same fact from the other side: JS lets a program ADD an
+    // own property to any object, and a struct has no slot to add.
+    name: "an expando written onto the instance",
+    src:
+      PROTO +
+      "function run() { var b = new Box(7); b.z = 3; return JSON.stringify(Object.keys(b)) }\n" +
+      "console.log(run())\n",
+    gap: "a class instance has a fixed layout and no slot for a property the class does not declare",
   },
 ];
 
