@@ -37,7 +37,7 @@ would read as "clean" without that column.
 | `harness/bo.sh` | build on **both** backends, run both, run the same source under node v25.9.0, diff, and scan for the engine |
 | `harness/gate.sh` | the full suite under node v25.9.0 with `VITEST_EXIT` captured into its own variable |
 | `harness/tsconfig.lab.json` | the lab app's tsconfig |
-| `harness/domprobe-*` | `voip`'s entry with TypeScript's own `lib.dom.d.ts` referenced into the program |
+| `harness/domprobe-*` | `voip`'s entry with the DOM lib supplied by the tsconfig's `"lib"` array. **Never by a copied `dom-lib.d.ts` referenced by path** — `isStdlibFile` is a path identity, so a byte-identical copy is not a stdlib file and every DOM type mapping declines: that one line was 16 of this entry's 19 flagless errors. |
 | `harness/cfgprobe-mongo-tsconfig.json` | `store-mongo` under mongodb's own compiler options |
 | `sites-default/` | the **complete** default lane: 147 modules + 2 controls |
 | `sites-prov/` | the `--provenance-sources` lane: **all 9 entries** + 7 further modules. Partial by design — `store-postgres/index.ts` alone takes 951 s. |

@@ -42,9 +42,19 @@ node G:/blocks/twobyte-lab/sites.mjs \
      G:/blocks/twobyte-lab/app/domprobe/voip-entry.ts out.json --provenance-sources
 ```
 
-`voip` needs `lib.dom.d.ts` referenced into the program or preflight fails
-on `RTCPeerConnection` before any lowering runs — `domprobe/voip-entry.ts`
-is that reference. The provenance lane over that entry takes about an hour.
+`voip` needs the DOM lib in the program or preflight fails on
+`RTCPeerConnection` before any lowering runs. Supply it through the
+tsconfig's `"lib": ["ES2020", "DOM"]` and **not** by referencing a copied
+`dom-lib.d.ts`: `Lowerer.isStdlibFile` is a PATH identity
+(`program.isSourceFileDefaultLibrary`), so a byte-identical copy of
+typescript's own lib is not a stdlib file, and every stdlib type mapping in
+`types.ts` — all of them are gated on that predicate — declines to see what it
+declares. Measured on this entry, same app and same tsconfig, one line the
+only variable: **19 flagless errors -> 3**, and **4 -> 2** under
+`--best-effort`. The sixteen were `TextEncoder`/`TextDecoder` (SC2020),
+`URL.protocol`, `URL.hostname`, `AbortSignal.aborted` and
+`AbortController.signal` (SC1090) — the instrument's, not zapo's.
+The provenance lane over that entry takes about an hour.
 
 ## The armed control
 
