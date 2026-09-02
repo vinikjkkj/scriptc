@@ -5462,6 +5462,51 @@ bool scr_dyn_key_delete(ScrDyn *recv, ScrStr *key) {
     }
     return true;
   }
+  if (recv->kind == SCR_DYN_OBJINST) {
+    /* A CLASS INSTANCE has a FIXED LAYOUT: its declared fields are struct
+     * slots, and there is no representation for "this instance no longer
+     * has `v`". Every kind above answers `true` because it has no own
+     * property of that name to remove; an instance DOES, so the same
+     * `true` was a claim it had removed one. Measured against node
+     * v25.9.0, both lanes:
+     *
+     *     delete b.v; Object.keys(b)   ->  ["v","w"]   exit 0
+     *     node                         ->  ["w"]
+     *
+     * A wrong array at exit 0 with no diagnostic -- and the surface that
+     * reads it is the member table, the same table this arm consults, so
+     * the two now agree about which names an instance has. It is the ARR
+     * arm's situation one kind over: refused loudly rather than answered
+     * wrongly.
+     *
+     * As NARROW as the fact behind it. Only an OWN key is refused:
+     * `delete inst.get` names a method, which lives on the PROTOTYPE, and
+     * `delete inst.nosuch` names nothing -- Node removes nothing for
+     * either and answers true, so both keep JS's true. `enumerable` is
+     * the same flag Object.hasOwn reads one function over, which is what
+     * keeps "which names are own" one rule and not two.
+     *
+     * A MISS keeps the fence unless the class is enumerable-complete --
+     * the hasOwn arm's condition, for its reason: on a class carrying the
+     * run-time property table the missing name may be a key that table
+     * holds, and `true` would be a claim that nothing was there. */
+    const ScrDynClassMember *dm = scr_dyn_objinst_member(recv, key->data, key->len);
+    if (dm != NULL && !dm->enumerable) return true; /* a method or an accessor: nothing own */
+    if (dm == NULL) {
+      if (scr_dyn_objinst_enumerable(recv)) return true;
+      return scr_dyn_objinst_fence(recv, "'delete'");
+    }
+    ScrJsonBuf sb;
+    scr_jb_init(&sb);
+    scr_jb_puts(&sb, "'delete' of the field '");
+    scr_jb_write(&sb, key->data, key->len);
+    scr_jb_puts(&sb, "' on a dynamic ");
+    scr_jb_puts(&sb, scr_dyn_objinst_cls(recv));
+    scr_jb_puts(&sb, " is not supported yet: a class instance has a fixed layout and no"
+                     " representation for a removed field");
+    scr_throw_error(SCR_ERR_ERROR, scr_jb_finish(&sb));
+    return false;
+  }
   return true;
 }
 
