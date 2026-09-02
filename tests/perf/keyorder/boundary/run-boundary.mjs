@@ -13,10 +13,16 @@
  *
  * Requires a BUILT tree (packages/cli/dist) and node v25.9.0 first on PATH:
  * the oracle is spawned as process.execPath, so a v22 shell silently
- * compares against the wrong runtime. Recorded on 2026-09-01 at main
- * b5df95f1 as llvm/c both {"TRAP":10,"WRONG":5,"MATCH":5}; the five WRONG
- * are p02/p16 (the dyn cast, SC6002-advised) and p06/p19/p20, which carry
- * no diagnostic at all. */
+ * compares against the wrong runtime.
+ *
+ * RECORDED, llvm and c identical on both lines:
+ *   main b5df95f1     {"TRAP":10,"WRONG":5,"MATCH":5}
+ *   block/keyorder    {"TRAP":13,"WRONG":2,"MATCH":5}
+ * At base the five WRONG were p02/p16 (one dyn cast seen through Object.keys
+ * and through JSON.stringify/for-in, SC6002-advised) and p06/p19/p20, which
+ * carried no diagnostic at all. p06/p19/p20 are now refusals; p02/p16 still
+ * answer the shape's order and still only advise, which is the defect a
+ * per-instance key order has to close. */
 import { execFileSync } from "node:child_process";
 import { readdirSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
