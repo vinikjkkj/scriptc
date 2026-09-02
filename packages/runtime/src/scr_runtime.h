@@ -3839,6 +3839,20 @@ typedef struct ScrDynClass {
   bool vt;
   void *(*retain)(void *);
   void (*release)(void *);
+  /* The instance MEMBER TABLE (ScrDynClassMember, below), `nmembers`
+   * long, or NULL for a class the emitter built none for.
+   *
+   * APPENDED, and deliberately: every initializer of this struct is
+   * emitted, both lanes spell it positionally, and a field added at the
+   * end is the one change that cannot silently reorder an existing one.
+   * A class with no table keeps every behaviour it had.
+   *
+   * FLATTENED over the base chain with overrides winning, so a lookup is
+   * one linear scan and never a walk -- and so the answer depends on the
+   * class the INSTANCE is, which is what `scr_dyn_objinst_class_of`
+   * resolves before reading this. */
+  const struct ScrDynClassMember *members;
+  size_t nmembers;
 } ScrDynClass;
 
 /* The handle-type tags the checked-dynamic tree can carry. The set is deliberately the
@@ -3860,6 +3874,44 @@ typedef enum {
 } ScrDynHandleTag;
 
 typedef struct ScrDyn ScrDyn;
+
+/* ── the member surface of a boxed class instance ──────────────────────
+ *
+ * A class instance boxes into the checked-dynamic tree BY REFERENCE, and
+ * until this table the box carried no way to reach a member at all.
+ * `x.get()` through an untyped parameter answered Node's "x.get is not a
+ * function" for a method the object plainly has, and `x.v` answered the
+ * loud fence. The methods were never DROPPED anywhere: a class's methods
+ * are static functions in the emitted TU, and nothing the box carried
+ * could name one. The prototype-constructor spelling of the same
+ * JavaScript answered all of it, because that one lowers to a plain dyn
+ * object whose members are real FUNC boxes.
+ *
+ * One entry per member the instance's own class exposes. A DATA member
+ * reads the instance's struct slot through `get`; a METHOD runs through
+ * `call` with the instance as the receiver. EXACTLY ONE of the two is
+ * non-NULL, and the readers assert on it rather than guessing.
+ *
+ * Emitted per class by BOTH backends off the same IR class def, so the
+ * two lanes cannot answer `x.get` differently -- the ScrDynClass
+ * descriptor's own rule. */
+typedef struct ScrDynClassMember {
+  const char *name;
+  size_t len;
+  /* A DATA member (a declared field): the boxed value, +1. The instance
+   * stays borrowed. NULL for a method. */
+  ScrDyn *(*get)(void *obj);
+  /* A METHOD, run with `obj` as the receiver: +1, or NULL with the
+   * exception pending. `what` is the call's SPELLING ("x.get"), for the
+   * messages the per-argument checks raise. NULL for a data member. */
+  ScrDyn *(*call)(void *obj, ScrDyn *const *args, size_t argc, const char *what);
+  /* An OWN ENUMERABLE data key -- what Object.keys, JSON.stringify and a
+   * for-in walk report, in declaration order. False for methods: a class
+   * method is non-enumerable in JS, which is why `Object.keys(new Box(7))`
+   * is ["v"] and not ["v","get"]. */
+  bool enumerable;
+} ScrDynClassMember;
+
 typedef struct ScrBytes ScrBytes; /* full definition below (C11 repeat) */
 typedef struct ScrClosure ScrClosure; /* full definition below (C11 repeat) */
 typedef struct ScrJsval ScrJsval; /* opaque island cell (C11 repeat; the
@@ -5581,6 +5633,47 @@ void *scr_dyn_objinst_ptr_of(const ScrDyn *d, const ScrDynClass *cls);
  * throws catchably; returns false so callers can `return
  * scr_dyn_objinst_fence(...)` from a bool tail. */
 bool scr_dyn_objinst_fence(const ScrDyn *d, const char *what);
+/* The program's boxable class descriptors, installed by emitted main()
+ * exactly like the handle ops -- the always-linked dyn core cannot name
+ * an emitted symbol, so the emitted TU hands it the table.
+ *
+ * It exists for ONE question the box cannot answer alone: a Derived
+ * instance in a Base-typed slot boxes with the BASE's descriptor, so
+ * `d->v.inst.cls->members` is the base's table and the derived class's
+ * methods are missing from it. The registry resolves the instance's OWN
+ * class from its run-time preorder position -- the same fact
+ * `instanceof` reads -- and the table hung off THAT is the right one.
+ * Borrowed: the array and its descriptors are emitted statics. */
+void scr_dyn_objinst_registry(const ScrDynClass *const *descs, size_t n);
+/* The descriptor of the class the instance ACTUALLY is: the registered
+ * descriptor with the tightest interval containing the box's run-time
+ * preorder position, or the box's own descriptor when the registry holds
+ * nothing narrower (an unregistered class, or no registry at all -- the
+ * pre-table behaviour, unchanged). Never NULL for an OBJINST box. */
+const ScrDynClass *scr_dyn_objinst_class_of(const ScrDyn *d);
+/* The instance's member `k`, or NULL when its class has no table or the
+ * table has no such name. Never throws -- a miss is a fact, and what the
+ * caller does with it (Object.prototype, the fence, Node's
+ * is-not-a-function) differs per caller. */
+const ScrDynClassMember *scr_dyn_objinst_member(const ScrDyn *d, const char *k, size_t klen);
+/* Does the instance's class carry a member table at all? The gate every
+ * new arm is behind: with no table nothing changes, so the whole feature
+ * is additive by construction. */
+bool scr_dyn_objinst_has_members(const ScrDyn *d);
+/* The member table BY INDEX -- the one projection Object.keys,
+ * JSON.stringify and String() all enumerate through, so the three cannot
+ * disagree about which properties a boxed instance has. `member_at`
+ * answers NULL past the end. */
+size_t scr_dyn_objinst_member_count(const ScrDyn *d);
+const ScrDynClassMember *scr_dyn_objinst_member_at(const ScrDyn *d, size_t i);
+/* The keyed READ of an instance member (the emitted sc_dyn_key_get's
+ * OBJINST arm): a data member's value, or a METHOD as a BOUND function
+ * box minted over the very dispatch a CALL takes. +1, or NULL with
+ * nothing pending when the class has no table or the table has no such
+ * name -- the caller then keeps the fence it had. Lives in the gated
+ * invoke unit beside scr_dyn_intrinsic_method_get, which the emitted
+ * read already calls. */
+ScrDyn *scr_dyn_objinst_member_get(ScrDyn *d, const ScrStr *key);
 
 /* ── maps and sets in the checked-dynamic tree (SCR_DYN_MAP) ──────────
  * The static→dyn BOUNDARY constructor: wraps the SAME ScrMap, retained

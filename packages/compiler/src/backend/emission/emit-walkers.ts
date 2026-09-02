@@ -8,9 +8,11 @@
 import type { CEmitter } from "./emitter.js";
 import { rcSitesRequested } from "./emitter.js";
 import { bytesAliasOnExtract } from "../../ir/nodes.js";
-import { CLASS_PROPS_FIELD, armDiscrimLits, canAdaptDynFuncTo, canBoxClassIntoDyn, canBoxFuncIntoDyn, dynCheckArmOrder, internalSlotFields, isUndefinedArmedUnion, nullProtoRule, OWNMASK_SRC_NULL_PROTO, OWNMASK_VALID, ownMaskKeyBit, slotStorageKey, unionHasDiscrim, DYN_BYTES_KINDS, DYN_HANDLE_KINDS, IrType, isRefCounted, strandedFuncReason, typeEquals, typeKey } from "../../ir/nodes.js";
+import { CLASS_PROPS_FIELD, armDiscrimLits, canAdaptDynFuncTo, canBoxClassIntoDyn, canBoxFuncIntoDyn, canConvertToDyn, canDynCheckTo, dynCheckArmOrder, internalSlotFields, isUndefinedArmedUnion, nullProtoRule, OWNMASK_SRC_NULL_PROTO, OWNMASK_VALID, ownMaskKeyBit, slotStorageKey, unionHasDiscrim, DYN_BYTES_KINDS, DYN_HANDLE_KINDS, IrFunction, IrRecordShape, IrType, IrUnionDef, isRefCounted, strandedFuncReason, typeEquals, typeKey } from "../../ir/nodes.js";
 import { cDecl, cStringLiteral, cType, elemAccess, releaseCallC, retainCallC, vAdapters } from "./emit-types.js";
-import { mangleClassStruct, mangleField, mangleRecordNew, mangleRecordStruct } from "../mangle.js";
+import { mangleClassStruct, mangleField, mangleFunction, mangleRecordNew, mangleRecordStruct } from "../mangle.js";
+import type { ClassMeta } from "./emit-shapes.js";
+import { dynMemberRows } from "../dyn-members.js";
 import { KINDGATE_WIDE_KINDS, kindgateWideLane } from "../kindgate.js";
 import { OVERFLOW_MEMBER, OWNMASK_MEMBER, SRCPROTO_MEMBER, TOSTR_MEMBER, nullProtoCondC, ownPresentCondC } from "./emit-shapes.js";
 
@@ -82,6 +84,12 @@ function typeMayHoldFunc(E: CEmitter, t: IrType): boolean {
     E.dynClassDescs.set(className, name);
     const rc = vAdapters({ kind: "object", className });
     const display = className.startsWith("%") ? className.slice(1) : className;
+    // The instance MEMBER TABLE, built before the descriptor that points
+    // at it so its own helpers and data are already registered — the
+    // dynClassDesc rule one level down. A class the filters empty out
+    // carries `NULL, 0` and behaves exactly as it did before the table
+    // existed.
+    const members = dynClassMembers(E, className, meta);
     // A static const with internal linkage, beside the walker prototypes:
     // emitStructDefs has already declared the `_v` thunks by then, and the
     // converters that take its address are emitted after.
@@ -89,11 +97,149 @@ function typeMayHoldFunc(E: CEmitter, t: IrType): boolean {
       `extern const ScrDynClass ${name};`,
       `${E.link}const ScrDynClass ${name} = { ${cStringLiteral(Buffer.from(display, "utf8"))}, ` +
         `${meta.pre}, ${meta.post}, ${meta.hierarchy ? "true" : "false"}, ` +
-        `&${rc.retain}, &${rc.release} }; /* dyn box: class ${className} */`,
+        `&${rc.retain}, &${rc.release}, ` +
+        `${members === null ? "NULL, 0" : `${members.sym}, ${members.count}`} }; ` +
+        `/* dyn box: class ${className} */`,
     );
     return name;
   }
 
+
+/** The MEMBER TABLE of one boxable class, as emitted C — what `x.get()`
+ * and `x.v` read through once the instance is in a dyn slot.
+ *
+ * WHICH rows exist is not decided here: `dynMemberRows` (backend/
+ * dyn-members.ts) decides it once for both lanes, because a name one lane
+ * answers and the other refuses is exactly the two-lanes-one-question
+ * defect this layer is arranged to avoid. This function renders those
+ * rows: one wrapper per row, plus the static array the descriptor points
+ * at.
+ *
+ * A FIELD reads its struct slot through the toDyn walker its type already
+ * has. A GETTER runs. A METHOD checks the dyn arguments into its declared
+ * parameter types — the dyn call thunk's body exactly — and calls the
+ * static function with the instance as the receiver, which is what `this`
+ * is on the static side.
+ *
+ * Answers null when the class has no rows: an empty C array is not a C
+ * array, and the descriptor then carries `NULL, 0` and behaves exactly as
+ * it did before member tables existed. */
+  function dynClassMembers(E: CEmitter, className: string, meta: ClassMeta): { sym: string; count: number } | null {
+    const rows = dynMemberRows(
+      meta,
+      E.fnByName,
+      (id: string) => E.recordsById.get(id),
+      (id: string) => E.unionsById.get(id),
+    );
+    if (rows.length === 0) return null;
+    const struct = mangleClassStruct(className);
+    const defs: string[] = [];
+    const entries: string[] = [];
+
+    for (const row of rows) {
+      const sym = `sc_dclm_${E.dynClassMemberFns++}`;
+      if (row.kind === "field") {
+        E.walkerProtos.push(`${E.link}ScrDyn *${sym}(void *o); /* member get ${className}.${row.name} */`);
+        defs.push(
+          `${E.link}ScrDyn *${sym}(void *o) { /* member get ${className}.${row.name} */`,
+          // BORROWED: every toDyn walker retains or copies, and the
+          // instance stays owned by the box the caller is holding.
+          `  return ${toDynExprC(E, row.type, `((${struct} *)o)->${mangleField(row.name)}`)};`,
+          `}`,
+          ``,
+        );
+        entries.push(
+          `  { ${cStringLiteral(Buffer.from(row.name, "utf8"))}, ${Buffer.byteLength(row.name, "utf8")}, ` +
+            `&${sym}, NULL, true },`,
+        );
+        continue;
+      }
+      const fn = row.fn;
+      const recvT = fn.params[0]!.type as IrType & { kind: "object" };
+      // The receiver is RETAINED into the call: a compiled method consumes
+      // its `this` parameter exactly as a constructor does, and the box
+      // still holds its own reference afterwards.
+      const recv = retainCallC(recvT, `((${mangleClassStruct(recvT.className)} *)o)`);
+      const callee = mangleFunction(fn.name);
+      const ret = fn.returnType;
+      const d: string[] = [];
+      if (row.kind === "accessor") {
+        E.walkerProtos.push(`${E.link}ScrDyn *${sym}(void *o); /* member get ${className}.${row.name} (accessor) */`);
+        d.push(`${E.link}ScrDyn *${sym}(void *o) { /* member get ${className}.${row.name} (accessor) */`);
+        d.push(`  ${cDecl(ret, "r")} = ${callee}(${recv});`);
+        d.push(`  if (scr_exc_pending()) return NULL;`);
+        d.push(`  ScrDyn *out = ${toDynExprC(E, ret, "r")};`);
+        if (isRefCounted(ret)) d.push(`  ${releaseCallC(ret, "r")};`);
+        d.push(`  return out;`);
+        d.push(`}`, ``);
+        defs.push(...d);
+        entries.push(
+          `  { ${cStringLiteral(Buffer.from(row.name, "utf8"))}, ${Buffer.byteLength(row.name, "utf8")}, ` +
+            `&${sym}, NULL, false },`,
+        );
+        continue;
+      }
+      const rest = fn.params.slice(1);
+      E.walkerProtos.push(
+        `${E.link}ScrDyn *${sym}(void *o, ScrDyn *const *args, size_t argc, const char *what); /* member call ${className}.${row.name} */`,
+      );
+      d.push(
+        `${E.link}ScrDyn *${sym}(void *o, ScrDyn *const *args, size_t argc, const char *what) { /* member call ${className}.${row.name} */`,
+      );
+      d.push(`  (void)args; (void)argc; (void)what;`);
+      // Per-argument conversion, the dyn call thunk's body exactly: a
+      // MISSING argument IS the undefined dyn value (JS arity), and the
+      // parameter's own check decides whether that flies.
+      rest.forEach((p, i) => {
+        d.push(`  ${cDecl(p.type, `a${i}`)};`);
+        d.push(`  {`);
+        d.push(`    const ScrDyn *ad = ${i} < argc ? args[${i}] : scr_dyn_undefined();`);
+        if (p.type.kind === "dyn") {
+          d.push(`    a${i} = scr_dyn_retain((ScrDyn *)ad);`);
+        } else {
+          d.push(`    ScrDynPath pp = { NULL, NULL, ${i} };`);
+          d.push(`    a${i} = ${E.dynCheckHelper(p.type)}(ad, &pp);`);
+          const undo = rest
+            .slice(0, i)
+            .flatMap((q, j) => (isRefCounted(q.type) ? [`${releaseCallC(q.type, `a${j}`)};`] : []));
+          d.push(`    if (scr_exc_pending()) { ${undo.join(" ")}${undo.length > 0 ? " " : ""}return NULL; }`);
+        }
+        d.push(`  }`);
+      });
+      const argList = [recv, ...rest.map((_, i) => `a${i}`)].join(", ");
+      if (ret.kind === "void") {
+        d.push(`  ${callee}(${argList});`);
+        d.push(`  if (scr_exc_pending()) return NULL;`);
+        d.push(`  return scr_dyn_retain(scr_dyn_undefined());`);
+      } else if (ret.kind === "dyn") {
+        d.push(`  ScrDyn *r = ${callee}(${argList});`);
+        d.push(`  if (scr_exc_pending()) return NULL;`);
+        d.push(`  return r;`);
+      } else {
+        d.push(`  ${cDecl(ret, "r")} = ${callee}(${argList});`);
+        d.push(`  if (scr_exc_pending()) return NULL;`);
+        d.push(`  ScrDyn *out = ${toDynExprC(E, ret, "r")};`);
+        if (isRefCounted(ret)) d.push(`  ${releaseCallC(ret, "r")};`);
+        d.push(`  return out;`);
+      }
+      d.push(`}`, ``);
+      defs.push(...d);
+      entries.push(
+        `  { ${cStringLiteral(Buffer.from(row.name, "utf8"))}, ${Buffer.byteLength(row.name, "utf8")}, ` +
+          `NULL, &${sym}, false },`,
+      );
+    }
+
+    E.walkerDefs.push(...defs);
+    const sym = `sc_dclt_${E.dynClassMemberTbls++}`;
+    E.walkerData(
+      `extern const ScrDynClassMember ${sym}[];`,
+      `${E.link}const ScrDynClassMember ${sym}[] = { /* members of ${className} */`,
+      ...entries,
+      `};`,
+    );
+    return { sym, count: rows.length };
+  }
 /** Short human description of a dynCheck target for error messages
    * ("expected number | string at $.items[2]"). Records read as "object" —
    * the path already says where; the full shape would bloat messages. */
@@ -1522,6 +1668,21 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
       d.push(`      if (pv != NULL || scr_exc_pending()) return pv;`);
       d.push(`    } }`);
     }
+    // The class's own MEMBER TABLE, ahead of the fence: a declared field
+    // reads its slot and a METHOD reads as a bound function box, minted
+    // over the very dispatch `x.get()` takes. The two spellings are one
+    // answer from one body -- the rule the intrinsic-method read below
+    // keeps for the modeled prototypes.
+    //
+    // AFTER %props and BEFORE the fence. %props first because a run-time
+    // defineProperty write is an OWN property and shadows nothing the
+    // table can hold (cls.propsDefine refuses a collision with a declared
+    // member, so the two key sets are disjoint and the order is a
+    // statement of intent rather than a tie-break). The fence last
+    // because it is now the answer for a class with NO table only -- the
+    // shape that behaves exactly as it did.
+    d.push(`    { ScrDyn *cm = scr_dyn_objinst_member_get(d, k);`);
+    d.push(`      if (cm != NULL || scr_exc_pending()) return cm; }`);
     d.push(`    scr_dyn_objinst_fence(d, "a property read");`);
     d.push(`    return NULL;`);
     d.push(`  }`);

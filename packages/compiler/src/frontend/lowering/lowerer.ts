@@ -3150,7 +3150,7 @@ export class Lowerer {
     };
 
     parts.forEach((fp) => {
-      this.lowerFileInit(fp.sf, fp.topStmts, this.initNameOf.get(fp.sf)!);
+      this.noteDynBoxEdges(this.lowerFileInit(fp.sf, fp.topStmts, this.initNameOf.get(fp.sf)!));
       drainInstances();
     });
     // LIBRARY mode's extra reachability roots (LowerOptions.libRoots): the
@@ -3164,13 +3164,125 @@ export class Lowerer {
       // discovery only needs the edges the body fired before poisoning —
       // the emit pass re-records the diagnostic and skips the member.
       try {
-        units.get(queue.shift()!)!();
+        this.noteDynBoxEdges(units.get(queue.shift()!)!());
       } catch (e) {
         if (!(e instanceof PoisonError)) throw e;
       }
       drainInstances();
     }
     return reachable;
+  }
+
+
+  /** Every class name a value of type `t` would carry into a dyn box —
+   * the type itself when it is a class, plus the classes nested in a
+   * record field, an array element or a union arm, because the to-dyn
+   * walker boxes those leaves exactly as it boxes the bare type.
+   *
+   * Mirrors `canConvertToDyn`'s recursion rather than restating a domain:
+   * a leaf this misses is a method the emitted table cannot carry, and a
+   * leaf it invents is only a body that stays alive. */
+  private classesCrossingIntoDyn(t: IrType, out: Set<string>, seen: Set<string>): void {
+    switch (t.kind) {
+      case "object":
+        out.add(t.className);
+        return;
+      case "array":
+        this.classesCrossingIntoDyn(t.elem, out, seen);
+        return;
+      case "record": {
+        if (seen.has(`r:${t.shapeId}`)) return;
+        seen.add(`r:${t.shapeId}`);
+        for (const f of this.shapes.get(t.shapeId)?.fields ?? []) {
+          this.classesCrossingIntoDyn(f.type, out, seen);
+        }
+        return;
+      }
+      case "union": {
+        if (seen.has(`u:${t.unionId}`)) return;
+        seen.add(`u:${t.unionId}`);
+        for (const arm of this.unions.get(t.unionId)?.arms ?? []) {
+          this.classesCrossingIntoDyn(arm, out, seen);
+        }
+        return;
+      }
+      default:
+        return;
+    }
+  }
+
+  /** A class whose instances the program boxes into a dyn slot: every
+   * method it exposes becomes callable BY NAME through the box, so every
+   * one of them is a reachability root.
+   *
+   * Without this the fix for the crossing is half a fix. `x.get()` on an
+   * untyped parameter is not a call site the discovery pass can see — it
+   * resolves at run time, through the emitted member table — so `%Box.get`
+   * had no edge, was pruned, and the table the emitter built for Box
+   * carried the fields and none of the methods. The measured symptom is
+   * exactly the defect it is meant to remove: `x.v` answers 7 and
+   * `x.get()` still says "is not a function".
+   *
+   * The BASE CHAIN because the table is flattened (an inherited method's
+   * implementation is the base's function), and the SUBCLASSES because a
+   * base-typed box can be holding a derived instance — the registry
+   * resolves the instance's own class and reads ITS table, which is the
+   * same reason noteVirtualEdge marks both directions. */
+  noteDynBoxedClass(className: string): void {
+    if (!this.onEdge) return;
+    const info = this.classes.get(className);
+    if (!info) return;
+    const mark = (c: ClassInfo): void => {
+      // The unit names, taken from the SAME two sources discover()
+      // registers units from — a third spelling of "the class's methods"
+      // is how the two drift.
+      for (const { mName } of this.classMethodMembers(c)) this.noteEdge(`%${c.def.name}.${mName}`);
+      for (const [mName] of this.protoClassBodies.get(c.def.name) ?? []) {
+        this.noteEdge(`%${c.def.name}.${mName}`);
+      }
+    };
+    for (let a: ClassInfo | null | undefined = info; a; a = a.base) mark(a);
+    const below = (c: ClassInfo): void => {
+      for (const s of c.subclasses) {
+        mark(s);
+        below(s);
+      }
+    };
+    below(info);
+  }
+
+  /** The dyn-box edges one lowered body carries, fired off the produced
+   * IR rather than at a resolution site.
+   *
+   * Deliberate, and the exception to this pass's own rule. `dynFrom` is
+   * constructed at some ninety places across the lowering — the argument
+   * paths, the container stores, every builtin boundary — and not one of
+   * them is "the crossing": there is no single resolution site to hook.
+   * The body is the one place they all arrive.
+   *
+   * The walk is over PLAIN DATA and not a hand-written IR visitor, which
+   * is the whole safety argument: an IrExpr variant cannot hide from
+   * Object.values, whereas a visitor that forgets one silently drops the
+   * edge — and a dropped edge here is a method pruned out of a table that
+   * still has to answer for it. Costs one traversal per discovered body. */
+  noteDynBoxEdges(fn: IrFunction | null | undefined): void {
+    if (!this.onEdge || !fn) return;
+    const found = new Set<string>();
+    const seen = new Set<string>();
+    const walk = (n: unknown): void => {
+      if (n === null || typeof n !== "object") return;
+      if (Array.isArray(n)) {
+        for (const x of n) walk(x);
+        return;
+      }
+      const o = n as { kind?: unknown; value?: { type?: IrType } };
+      if (o.kind === "dynFrom" && o.value?.type !== undefined) {
+        this.classesCrossingIntoDyn(o.value.type, found, seen);
+      }
+      for (const v of Object.values(n as Record<string, unknown>)) walk(v);
+    };
+    walk(fn);
+    for (const c of found) this.noteDynBoxedClass(c);
   }
 
   /** Discovery hook (see discover): fires when lowering resolves a
