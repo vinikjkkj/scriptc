@@ -5660,6 +5660,12 @@ const ScrDynClassMember *scr_dyn_objinst_member(const ScrDyn *d, const char *k, 
  * new arm is behind: with no table nothing changes, so the whole feature
  * is additive by construction. */
 bool scr_dyn_objinst_has_members(const ScrDyn *d);
+/* The member table BY INDEX -- the one projection Object.keys,
+ * JSON.stringify and String() all enumerate through, so the three cannot
+ * disagree about which properties a boxed instance has. `member_at`
+ * answers NULL past the end. */
+size_t scr_dyn_objinst_member_count(const ScrDyn *d);
+const ScrDynClassMember *scr_dyn_objinst_member_at(const ScrDyn *d, size_t i);
 /* The keyed READ of an instance member (the emitted sc_dyn_key_get's
  * OBJINST arm): a data member's value, or a METHOD as a BOUND function
  * box minted over the very dispatch a CALL takes. +1, or NULL with

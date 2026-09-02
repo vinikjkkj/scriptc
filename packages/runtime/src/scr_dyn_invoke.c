@@ -892,8 +892,23 @@ static ScrDyn *dyn_bound_intrinsic_thunk(ScrClosure *clo, ScrDyn *const *args, s
  * said false would be a fresh disagreement in place of the one being
  * closed. One table, three callers (read, `in`, call), no drift. */
 bool scr_dyn_has_intrinsic_method(const ScrDyn *recv, const char *key, size_t key_len) {
-  (void)key_len; /* the tests are on the NUL-terminated spelling */
   if (recv->kind == SCR_DYN_OBJ && recv->null_proto) return false;
+  /* A boxed class INSTANCE's members are the emitted table's, and the
+   * stored walk cannot see them for exactly the reason a primitive's
+   * prototype methods are invisible to it: they are not stored ON the
+   * value. That is this function's whole contract -- the READ answers a
+   * name, so `in` must report it -- so the table belongs here rather
+   * than as a fourth arm in each emitter's ladder, where the two lanes
+   * would have to spell it twice.
+   *
+   * BOTH kinds of row: `in` walks the prototype chain and counts
+   * non-enumerable properties, so `'get' in new Box(7)` is true in Node
+   * even though Object.keys reports only ['v']. Before this it answered
+   * FALSE, at exit 0, with no diagnostic. */
+  if (recv->kind == SCR_DYN_OBJINST) {
+    return scr_dyn_objinst_member(recv, key, key_len) != NULL;
+  }
+  (void)key_len; /* the remaining tests are on the NUL-terminated spelling */
   return dyn_kind_knows(recv, key);
 }
 
