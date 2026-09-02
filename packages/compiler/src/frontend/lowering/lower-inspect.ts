@@ -604,6 +604,9 @@ function inspectHelper(L: Lowerer, t: IrType, loc: SrcLoc): string {
         break;
       }
       // Object.keys' declared order (SEMANTICS.md 36's stance).
+      // Baked into this inspect helper's body, and the body is built once —
+      // so the shape's order is fixed here (Lowerer.noteEnumOrderBake).
+      L.noteEnumOrderBake(t.shapeId, null);
       const order = shape.declaredOrder ?? shape.fields.map((f) => f.name);
       const byName = new Map(shape.fields.map((f) => [f.name, f.type] as const));
       const depthLit = strNode(bdepth, loc);
