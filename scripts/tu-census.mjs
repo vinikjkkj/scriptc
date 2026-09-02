@@ -302,7 +302,14 @@ const UNCODED_PARITY = [
 ];
 
 // ------------------------------------------------------------- 3. the scan
-const CODED = /scr_throw_error_msg_code\(\s*([A-Z_]+)\s*,\s*"((?:[^"\\]|\\.)*)"\s*,\s*(\d+)\s*,\s*"([^"]*)"\s*\)/g;
+// Two callees spell a tagged coded throw, not one. scr_fence_fatal is the
+// NON-CATCHABLE fence (ir/nodes.ts's `fatal`): same message, same code, no
+// exception cell, and no SCR_ERR_* kind argument -- it always renders an
+// Error. It has to be counted here, or the closing invariant ("bracket
+// occurrences == tagged coded throws") fails the moment any construct opts
+// in, and the census reports a bracket with no throw behind it.
+const CODED = /scr_(?:throw_error_msg_code\(\s*([A-Z_]+)\s*,|fence_fatal\()\s*"((?:[^"\\]|\\.)*)"\s*,\s*(\d+)\s*,\s*"([^"]*)"\s*\)/g;
+const CODED_MARKERS = ["scr_throw_error_msg_code(", "scr_fence_fatal("];
 const UNCODED = /scr_throw_error_msg\(\s*([A-Z_]+)\s*,\s*(?:"((?:[^"\\]|\\.)*)"|([A-Za-z_][A-Za-z0-9_]*))\s*,/g;
 const TRAP = /\bscr_trap(_fmt)?\s*\(\s*"((?:[^"\\]|\\.)*)"/g;
 const TAGRE = /\[SC(\d{4}) at ([^\]]+)\]/g;
@@ -358,7 +365,7 @@ let nCodedCalls = 0, nUncodedCalls = 0, nTrapCalls = 0;
 for (let i = 0; !isLl && i < lines.length; i++) {
   const l = lines[i];
 
-  if (l.includes("scr_throw_error_msg_code(")) {
+  if (CODED_MARKERS.some((mk) => l.includes(mk))) {
     let m, seen = 0;
     CODED.lastIndex = 0;
     while ((m = CODED.exec(l)) !== null) {
@@ -425,7 +432,8 @@ for (let i = 0; !isLl && i < lines.length; i++) {
 // An operand this reader cannot resolve to a table entry becomes UNKNOWN and
 // the process exits 3 -- an unreadable message must never read as zero.
 if (isLl) {
-  const CODED_LL = /call void @scr_throw_error_msg_code\(i32 -?\d+, ptr ([^,)]+), i64 (\d+), ptr ([^,)]+)\)/g;
+  const CODED_LL = /call void @scr_(?:throw_error_msg_code\(i32 -?\d+, |fence_fatal\()ptr ([^,)]+), i64 (\d+), ptr ([^,)]+)\)/g;
+  const CODED_LL_MARKERS = ["@scr_throw_error_msg_code(", "@scr_fence_fatal("];
   const UNCODED_LL = /call void @scr_throw_error_msg\(i32 -?\d+, ptr ([^,)]+), i64 (\d+)\)/g;
   const TRAP_LL = /call void @scr_trap\(ptr ([^,)]+)\)/g;
   // The FORMATTED trap.  The LLVM lane grew one when the keyed-read abort
@@ -445,7 +453,7 @@ if (isLl) {
     const l = lines[i];
     if (l.length === 0 || l.startsWith("declare ") || l.startsWith("define ")) continue;
 
-    if (l.includes("@scr_throw_error_msg_code(")) {
+    if (CODED_LL_MARKERS.some((mk) => l.includes(mk))) {
       let m, seen = 0;
       CODED_LL.lastIndex = 0;
       while ((m = CODED_LL.exec(l)) !== null) {

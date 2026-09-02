@@ -928,6 +928,12 @@ void scr_undef_global_read(ScrStr *name);
 void scr_error_set_code(ScrError *e, const char *code);
 ScrStr *scr_error_code(ScrError *e);
 void scr_throw_error_msg_code(int kind, const char *message, size_t len, const char *code);
+/* The same refusal, NOT catchable: prints the identical "Uncaught Error:
+ * <message>" first line scr_exc_print_uncaught would have printed and
+ * _Exit(1)s without touching the exception cell. One construct opts in --
+ * `require(<run-time specifier>)`, whose refusal protobufjs's inquire()
+ * swallows into a null where node hands back a module. See scr_error.c. */
+void scr_fence_fatal(const char *message, size_t len, const char *code);
 /* The compiler-resolved Node-parity throw (error.nodeThrow): builtin
  * error of `kind`, `code` stamped when non-empty. Borrows both. */
 void scr_throw_node_coded(double kind, const ScrStr *code, const ScrStr *msg);
