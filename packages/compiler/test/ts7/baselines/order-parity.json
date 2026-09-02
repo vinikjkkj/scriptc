@@ -10032,6 +10032,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/7384-a-dyn-tuple-position-in-a-bound-emit-dispatcher.ts": {
+   "order": [
+    "<repo>/tests/corpus/7384-a-dyn-tuple-position-in-a-bound-emit-dispatcher.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/7390-a-class-instance-in-a-dyn-slot-keeps-its-members.js": {
    "order": [
     "<repo>/tests/corpus/7390-a-class-instance-in-a-dyn-slot-keeps-its-members.js"
