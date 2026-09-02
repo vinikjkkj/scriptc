@@ -366,6 +366,35 @@ export interface FileParts {
          * Without this arm the import line itself reports SC2013 and the
          * program never reaches the lowering that would serve it. */
         if (!L.dynamic && spec === "better-sqlite3") continue;
+        /* @roamhq/wrtc in a STATIC build: the same row, for the same
+         * reason. The compiler serves the data-channel surface itself
+         * (lower-wrtc.ts, scr_wrtc.c / scr_wrtc_conn.c) and the package
+         * is a native addon a compiled binary has no loader for, so the
+         * island owns nothing here either.
+         *
+         * This arm is what makes the served surface independent of
+         * whether the package happens to be INSTALLED. Without it the
+         * behaviour split on a fact about node_modules: with nothing
+         * installed, program.ts's `ambientModules.add("@roamhq/wrtc")`
+         * fires, `resolveNpmImport` answers null and the import falls
+         * through the `!npm && !relIsJs` skip below; with the package
+         * present — which is how zapo installs it, and how any project
+         * that also runs under node installs it — resolution answers,
+         * the skip does not fire, and the import line reports SC2013
+         * before the program reaches the lowering that would serve it.
+         * Measured on one variable (moving `node_modules/@roamhq`
+         * aside): rc=1 with one SC2013, vs rc=0 and a binary whose
+         * output is byte-identical to node running the real addon.
+         *
+         * The TYPE surface does not move: `wrtcDtsPath()` is an
+         * unconditional program root (program.ts) and the package's own
+         * `types/index.d.ts` re-exports the GLOBAL RTC names rather than
+         * declaring them, so types.ts's rtcPeerConnection/rtcDataChannel
+         * mapping claims the same declarations either way.
+         *
+         * Under --dynamic the package's own code is what an import
+         * reaches, so this steps aside exactly as the sqlite row does. */
+        if (!L.dynamic && spec === "@roamhq/wrtc") continue;
         const npm = resolveNpmImport(fp.sf.fileName, spec);
         // --npm-static: an opted-in package that made it through preflight
         // is a PROGRAM-MODULE dependency — its entry sits in the module
