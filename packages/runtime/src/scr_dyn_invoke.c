@@ -892,8 +892,23 @@ static ScrDyn *dyn_bound_intrinsic_thunk(ScrClosure *clo, ScrDyn *const *args, s
  * said false would be a fresh disagreement in place of the one being
  * closed. One table, three callers (read, `in`, call), no drift. */
 bool scr_dyn_has_intrinsic_method(const ScrDyn *recv, const char *key, size_t key_len) {
-  (void)key_len; /* the tests are on the NUL-terminated spelling */
   if (recv->kind == SCR_DYN_OBJ && recv->null_proto) return false;
+  /* A boxed class INSTANCE's members are the emitted table's, and the
+   * stored walk cannot see them for exactly the reason a primitive's
+   * prototype methods are invisible to it: they are not stored ON the
+   * value. That is this function's whole contract -- the READ answers a
+   * name, so `in` must report it -- so the table belongs here rather
+   * than as a fourth arm in each emitter's ladder, where the two lanes
+   * would have to spell it twice.
+   *
+   * BOTH kinds of row: `in` walks the prototype chain and counts
+   * non-enumerable properties, so `'get' in new Box(7)` is true in Node
+   * even though Object.keys reports only ['v']. Before this it answered
+   * FALSE, at exit 0, with no diagnostic. */
+  if (recv->kind == SCR_DYN_OBJINST) {
+    return scr_dyn_objinst_member(recv, key, key_len) != NULL;
+  }
+  (void)key_len; /* the remaining tests are on the NUL-terminated spelling */
   return dyn_kind_knows(recv, key);
 }
 
@@ -924,6 +939,35 @@ ScrDyn *scr_dyn_intrinsic_method_get(ScrDyn *recv, const ScrStr *key) {
   clo->caps[1] = scr_box_new_obj(scr_dyn_retain_v, scr_dyn_release_v, NULL);
   ScrDyn *nameBox = scr_dyn_new_str((ScrStr *)key); /* retains key */
   scr_box_set_ref(clo->caps[1], nameBox);           /* takes the +1 */
+  return scr_dyn_new_func(clo, dyn_bound_intrinsic_thunk, 0, "()", "bound");
+}
+
+/* The keyed READ of a boxed class instance's member -- the emitted
+ * sc_dyn_key_get's OBJINST arm, which before this answered the loud
+ * property-read fence for a field the instance is holding.
+ *
+ * A DATA member reads its slot. A METHOD reads as a BOUND function box
+ * minted over dyn_bound_intrinsic_thunk, i.e. over `scr_dyn_invoke`
+ * itself -- so `typeof x.get`, `const m = x.get; m.call(x)` and
+ * `x.get()` are ONE answer computed by ONE body and cannot drift into
+ * two behaviours. That is the rule scr_dyn_intrinsic_method_get above
+ * was written to keep, reused rather than restated.
+ *
+ * NULL with nothing pending = this class has no table, or the table has
+ * no such name; the caller keeps whatever it did before. */
+ScrDyn *scr_dyn_objinst_member_get(ScrDyn *d, const ScrStr *key) {
+  const ScrDynClassMember *cm = scr_dyn_objinst_member(d, key->data, key->len);
+  if (cm == NULL) return NULL;
+  if (cm->get != NULL) return cm->get(d->v.inst.o);
+  ScrClosure *clo = scr_closure_new((void *)dyn_bound_intrinsic_thunk, 2);
+  clo->caps[0] = scr_box_new_obj(scr_dyn_retain_v, scr_dyn_release_v, NULL);
+  scr_box_set_ref(clo->caps[0], scr_dyn_retain(d));
+  clo->caps[1] = scr_box_new_obj(scr_dyn_retain_v, scr_dyn_release_v, NULL);
+  ScrDyn *nameBox = scr_dyn_new_str((ScrStr *)key); /* retains key */
+  scr_box_set_ref(clo->caps[1], nameBox);           /* takes the +1 */
+  /* "bound" and not the method's own name for scr_dyn_intrinsic_method_get's
+   * reason: `name` is stored, not copied, and the key's bytes belong to a
+   * string this box does not own. A stated divergence, not an oversight. */
   return scr_dyn_new_func(clo, dyn_bound_intrinsic_thunk, 0, "()", "bound");
 }
 
@@ -973,6 +1017,57 @@ ScrDyn *scr_dyn_invoke(ScrDyn *recv, const char *method, ScrDyn *const *args, si
    * binds the INSTANCE as the receiver, not the prototype object that
    * stores the function. Anything non-callable is Node's
    * is-not-a-function. */
+  /* OBJINST: a class instance's members are the emitted table's, and the
+   * LOOKUP is the whole [[Get]] -- the OBJ arm's rule below, one kind
+   * over, and for the same reason: `x.get` and `x.get()` must not be able
+   * to disagree about where a method lives.
+   *
+   * Until this arm the ladder had NONE for OBJINST at all. A class
+   * instance in a dyn slot fell past every arm to the tail and answered
+   * Node's "x.get is not a function" for a method the object plainly has
+   * -- a lie, and a MATCH->WRONG for ordinary JavaScript that node runs.
+   * The methods were never dropped: a class's methods are static
+   * functions in the emitted TU, and the box carried no way to name one.
+   * The prototype-constructor spelling of the same program answered it
+   * correctly the whole time, because that one lowers to a plain dyn
+   * object whose members are real FUNC boxes.
+   *
+   * A class with NO table falls through exactly as before, so a program
+   * whose classes carry none cannot tell this arm was added. */
+  if (recv->kind == SCR_DYN_OBJINST && scr_dyn_objinst_has_members(recv)) {
+    const ScrDynClassMember *cm = scr_dyn_objinst_member(recv, method, strlen(method));
+    if (cm != NULL && cm->call != NULL) {
+      /* The receiver binds by CONSTRUCTION here -- the emitted wrapper
+       * passes the instance as the method's own first parameter, which
+       * is what `this` is on the static side. No ambient window is
+       * pushed, because none is read. */
+      return cm->call(recv->v.inst.o, args, argc, what);
+    }
+    if (cm != NULL) {
+      /* A DATA member holding a function value: `o.m()` is Get then Call,
+       * and the call binds the instance (the OBJ arm's ambient-receiver
+       * window, same reason). */
+      ScrDyn *fv = cm->get(recv->v.inst.o);
+      if (fv == NULL) return NULL; /* the read threw */
+      if (fv->kind == SCR_DYN_FUNC ||
+          (fv->kind == SCR_DYN_JSVAL && scr_dyn_isl_typeof_is(fv, "function"))) {
+        scr_dyn_this_push_dyn(recv);
+        ScrDyn *r = scr_dyn_call(fv, args, argc, what);
+        scr_dyn_this_pop();
+        scr_dyn_release(fv);
+        return r;
+      }
+      scr_dyn_release(fv);
+      dyn_throw_not_fn(what);
+      return NULL;
+    }
+    /* A miss on a class WITH a table: the table is the class's whole
+     * member set, so is-not-a-function is now a TRUE statement -- but
+     * Object.prototype's own set is inherited by every instance and has
+     * to be walked before a miss can be called one. */
+    return dyn_object_proto_method(recv, method, args, argc, what);
+  }
+
   if (recv->kind == SCR_DYN_OBJ) {
     ScrDyn *m = scr_dyn_obj_key_get(recv, method, strlen(method)); /* +1, or NULL */
     if (m == NULL) return NULL; /* a getter threw, or the `constructor` fence */
