@@ -1298,7 +1298,7 @@ class LlEmitter {
   private needsBadKey = false;
   private needsRetainBox = false;
 
-  private readonly fnByName = new Map<string, IrFunction>();
+  readonly fnByName = new Map<string, IrFunction>();
   /** Manifest-bound native imports, used by ffiCall emission. */
   private readonly ffiByName = new Map<string, IrFfiImport>();
   private readonly globalTypes = new Map<string, IrType>();
@@ -1866,7 +1866,19 @@ class LlEmitter {
       // (dynClassDesc), handed to scr_dyn_new_objinst by address. The C
       // struct's `bool vt` occupies an i8 with 7 bytes of tail padding
       // before the two function pointers, which is what this mirrors.
-      `%ScrDynClass = type { ptr, i64, i64, i8, ptr, ptr }`,
+      // The C struct, field for field (scr_runtime.h). The two trailing
+      // fields are the instance MEMBER TABLE and its length; a lane that
+      // spells this type SHORT does not fail to build, it hands the
+      // always-linked dyn core a descriptor whose `members` read runs off
+      // the end of the object — measured, as an access violation on the
+      // first boxed method call.
+      `%ScrDynClass = type { ptr, i64, i64, i8, ptr, ptr, ptr, i64 }`,
+      // One row of a class's instance MEMBER TABLE
+      // { name, len, get, call, enumerable } (ScrDynClassMember in
+      // scr_runtime.h) — what `x.get()` and `x.v` read through once the
+      // instance is in a dyn slot. The trailing `bool` is an i8 with 7
+      // bytes of tail padding, the descriptor above's own rule.
+      `%ScrDynClassMember = type { ptr, i64, ptr, ptr, i8 }`,
       // One row of the function-name table { fn, name } — the closure
       // entry point and the JS name of the value it backs (ScrFnName in
       // scr_runtime.h). main() installs the array; walker-built boxes
@@ -1979,6 +1991,24 @@ class LlEmitter {
         ``,
       );
     }
+    // The BOXABLE CLASS REGISTRY (scr_dyn_objinst_registry): every class
+    // descriptor this program emitted, so the dyn core can resolve a boxed
+    // instance's OWN class from its run-time preorder position. It exists
+    // for one question the box cannot answer alone: a Derived instance in a
+    // Base-typed slot boxes with the BASE's descriptor, so reading
+    // `members` off the box's own descriptor would miss every derived
+    // method. Sorted by symbol so the .ll is a function of the program and
+    // not of interning order — the fn-name table's rule, same reason.
+    const dynClassDescSyms = [...this.dynClassDescSyms.values()].map((d) => d.sym).sort();
+    if (dynClassDescSyms.length > 0) {
+      out.push(
+        `declare void @scr_dyn_objinst_registry(ptr, i64)`,
+        `@sc_dcl_tbl = internal constant [${dynClassDescSyms.length} x ptr] [` +
+          dynClassDescSyms.map((s) => `ptr @${s}`).join(", ") +
+          `]`,
+        ``,
+      );
+    }
     for (const g of globals) {
       const ty = this.llType(g.type);
       const zero = ty === "double" ? f64Lit(0) : ty === "ptr" ? "null" : "false";
@@ -2057,6 +2087,11 @@ class LlEmitter {
       `define i32 @main(i32 %argc, ptr %argv) ${FN_ATTRS} {`,
       `entry:`,
       `  call void @scr_init()`,
+      // Before anything can box: the registry is read by every keyed
+      // access and every method call on a boxed class instance.
+      ...(dynClassDescSyms.length > 0
+        ? [`  call void @scr_dyn_objinst_registry(ptr @sc_dcl_tbl, i64 ${dynClassDescSyms.length})`]
+        : []),
       ...(fnNameRows.length > 0
         ? [`  call void @scr_fn_names_install(ptr @sc_fn_name_tbl, i64 ${fnNameRows.length})`]
         : []),
@@ -2975,6 +3010,13 @@ class LlEmitter {
     }
     const meta = this.classMetaOf(className);
     const sym = `sc_dcl_${this.dynClassDescSyms.size}`;
+    // Interned BEFORE the member table is built, and that ordering is
+    // load-bearing: a member wrapper boxes its field and return types,
+    // and a class-typed one asks for a descriptor — including, for a
+    // self-referential class, this one. The placeholder body is replaced
+    // below; nothing reads a body before emission.
+    this.dynClassDescSyms.set(className, { sym, body: "" });
+    const members = this.dyn.classMemberTable(className);
     // The whole initialiser is built HERE, at the call site's interning
     // moment, not at emission time: the display-name cstr and the RC
     // declares it depends on must be registered while those pools are
@@ -2984,7 +3026,8 @@ class LlEmitter {
     const display = className.startsWith("%") ? className.slice(1) : className;
     const body =
       `%ScrDynClass { ptr ${this.cstr(display)}, i64 ${meta.pre}, i64 ${meta.post}, ` +
-      `i8 ${meta.hierarchy ? 1 : 0}, ptr ${rc.retain}, ptr ${rc.release} }`;
+      `i8 ${meta.hierarchy ? 1 : 0}, ptr ${rc.retain}, ptr ${rc.release}, ` +
+      `ptr ${members === null ? "null" : `@${members.sym}`}, i64 ${members === null ? 0 : members.count} }`;
     this.dynClassDescSyms.set(className, { sym, body });
     return `@${sym}`;
   }
@@ -3010,6 +3053,22 @@ class LlEmitter {
       `]`;
     this.recWideTables.set(shapeId, { keys, lens, keyBody, lenBody });
     return { keys: `@${keys}`, lens: `@${lens}` };
+  }
+
+  /** The class graph node one class name resolves to — what the shared
+   * member-row decision (backend/dyn-members.ts) walks for the base
+   * chain. LlClassMeta already IS that shape structurally, which is what
+   * lets one module answer the WHICH-members question for both lanes.
+   *
+   * DynHost. */
+  classMetaFor(className: string): LlClassMeta {
+    return this.classMetaOf(className);
+  }
+
+  /** The GEP index of a declared field inside a class struct —
+   * classFieldIndex, with the hierarchy rc+vt prefix already counted. */
+  classFieldGep(className: string, field: string): number {
+    return classFieldIndex(this.classMetaOf(className), field).index;
   }
 
   classInterval(className: string): { pre: number; post: number } {
