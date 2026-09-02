@@ -569,6 +569,11 @@ describe("LLVM backend declares match scr_runtime.h prototypes", () => {
     // LOOKED at on both backends, and "nothing makes one" is a claim that
     // should be written down where the adapters are checked, not assumed.
     request: { kind: "request" },
+    // A Date is the same shape of claim: nothing constructs a ScrDate,
+    // the RC pair exists so record fields, union arms and Date[]
+    // elements stay uniform, and the row is what forces the next
+    // person to look at both backends before that changes.
+    date: { kind: "date" },
     rtcPeerConnection: { kind: "rtcPeerConnection" },
     rtcDataChannel: { kind: "rtcDataChannel" },
     fsWatcher: { kind: "fsWatcher" },

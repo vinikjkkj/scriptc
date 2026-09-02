@@ -304,6 +304,30 @@ export type IrType =
    * union arm has a C type and the ownership machinery stays uniform; it
    * is never allocated. */
   | { kind: "request" }
+  /** A `Date`. TYPE FIRST, exactly as `request` and `rtcPeerConnection`
+   * are: mapping it is what lets a record carrying a `Date` member
+   * compile at all. zapo's `CallStateData` (voip's `call/call-state.ts`)
+   * is the measured case — `connectedAt?: Date`, `acceptedAt?: Date`,
+   * `endedAt?: Date` — and before this kind existed the record type
+   * itself reported SC2009, a TYPE-level stop that `--best-effort`
+   * cannot defer, which was the single remaining error between voip's
+   * package entry and a binary.
+   *
+   * NOTHING in this compiler constructs one. `new Date(...)` as a VALUE
+   * stays fenced (lower-builtins.ts's Date slice: only `Date.now()`,
+   * `Date.UTC()` and the COMPOSED `new Date(ms?).getTime()` /
+   * `.toISOString()` lower), and every MEMBER refuses through
+   * surfaces.ts's stdlibMemberFence. So the handle is representable and
+   * inert, and the pointer is always NULL in practice.
+   *
+   * Deliberately a refcounted HANDLE and not the f64 epoch it would fit
+   * in. A scalar would answer `true` for `d1 === d2` on two distinct
+   * Dates with the same milliseconds, where node answers `false`, and it
+   * would make `if (new Date(0))` false where node makes it true —
+   * silent wrong answers in a surface whose whole value here is that it
+   * cannot produce one. Not cycle-capable: the struct holds a refcount
+   * and nothing else, so traceAdapterC answers null. */
+  | { kind: "date" }
   /** An `RTCPeerConnection`. Like `request` above it is a TYPE FIRST:
    * mapping it is what lets zapo's `Connection` record -- whose
    * `peerConnection` field is typed `RTCPeerConnection | null` -- compile
@@ -509,6 +533,9 @@ export const REF_TRUTHY_KINDS: ReadonlySet<string> = new Set([
   "response", "headers",
   // A RequestInit is a JS object, and a Request would be one.
   "requestInit", "request",
+  // A Date is a JS object: always truthy, INCLUDING new Date(0). That is
+  // exactly why this kind is a handle and not the f64 epoch it would fit in.
+  "date",
   // A peer connection and a data channel are JS objects: always truthy.
   "rtcPeerConnection", "rtcDataChannel",
   // A generator object is a JS object: always truthy.
@@ -554,6 +581,7 @@ export const RESPONSE_T: IrType = { kind: "response" };
 export const HEADERS_T: IrType = { kind: "headers" };
 export const REQUESTINIT_T: IrType = { kind: "requestInit" };
 export const REQUEST_T: IrType = { kind: "request" };
+export const DATE_T: IrType = { kind: "date" };
 export const RTCPEERCONNECTION_T: IrType = { kind: "rtcPeerConnection" };
 export const RTCDATACHANNEL_T: IrType = { kind: "rtcDataChannel" };
 export const FSWATCHER_T: IrType = { kind: "fsWatcher" };
@@ -955,6 +983,8 @@ export function typeKey(t: IrType): string {
       return "requestInit";
     case "request":
       return "request";
+    case "date":
+      return "date";
     case "rtcPeerConnection":
       return "rtcPeerConnection";
     case "rtcDataChannel":
@@ -1111,6 +1141,9 @@ export function isRefCounted(t: IrType): boolean {
     // (never constructed, owned uniformly wherever it is typed).
     t.kind === "requestInit" ||
     t.kind === "request" ||
+    // A Date. Refcount-only struct with no outward edge, and never
+    // constructed -- the same pure-balance case as the two below.
+    t.kind === "date" ||
     // The two WebRTC handles. Refcount-only structs with no outward
     // edge, so like bigint and the crypto handles below this is pure
     // balance and never a cycle question.
@@ -7454,6 +7487,11 @@ function isJsonSafeAt(
     // honest JSON surface.
     case "requestInit":
     case "request":
+    // A Date is never constructed and toISOString does not lower off a
+    // value, so it has no honest JSON surface either. Node serialises a
+    // Date as its ISO string; answering anything else would be silently
+    // wrong, and a refusal is what says so.
+    case "date":
     // Neither WebRTC handle has an honest JSON surface: nothing
     // constructs one, and its members do not lower.
     case "rtcPeerConnection":
@@ -9530,6 +9568,37 @@ export function moduleUsesFsWatch(mod: IrModule): boolean {
   return found;
 }
 
+/** The program holds a Date VALUE: compiles scr_date.c in. A LINK GATE,
+ * not a fence -- a wrong `false` is a loud unresolved-symbol link error,
+ * never a wrong answer.
+ *
+ * The HANDLE TYPE alone is the trigger, and today it is the only one:
+ * nothing constructs a Date, so there are no `date.*` libCalls to look
+ * for. A record field typed `Date | undefined` still emits
+ * scr_date_release, and a Date[] still emits the element adapters, so the
+ * unit must link for a program that merely DECLARES the shape and refuses
+ * every member -- which is exactly the state zapo's
+ * voip/call/call-state.ts is in. Same generic-walk shape as
+ * moduleUsesWrtc below. */
+export function moduleUsesDate(mod: IrModule): boolean {
+  let found = false;
+  const visit = (v: unknown): void => {
+    if (found || v === null || typeof v !== "object") return;
+    if (Array.isArray(v)) {
+      for (const item of v) visit(item);
+      return;
+    }
+    const node = v as { kind?: unknown };
+    if (node.kind === "date") {
+      found = true;
+      return;
+    }
+    for (const key of Object.keys(v)) visit((v as Record<string, unknown>)[key]);
+  };
+  visit(mod);
+  return found;
+}
+
 /** The program holds an RTCPeerConnection or an RTCDataChannel: compiles
  * scr_wrtc.c in. A LINK GATE, not a fence -- a wrong `false` is a loud
  * unresolved-symbol link error, never a wrong answer.
@@ -10678,6 +10747,7 @@ const LIB_MODE_REFUSED_KINDS: ReadonlyMap<string, string> = new Map([
   ["headers", "the fetch surface"],
   ["requestInit", "the fetch surface"],
   ["request", "the fetch surface"],
+  ["date", "Date values"],
   ["rtcPeerConnection", "the WebRTC data-channel surface"],
   ["rtcDataChannel", "the WebRTC data-channel surface"],
   ["dynInvoke", "checked-dynamic prototype dispatch"],
