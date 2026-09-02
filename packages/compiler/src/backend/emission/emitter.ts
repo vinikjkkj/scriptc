@@ -133,6 +133,20 @@ export function emitModule(mod: IrModule, sourceText?: string): string {
   return new CEmitter(mod, sourceText).emit();
 }
 
+/** The emission the CLI drives: one translation unit for everything a person
+ * writes, several for a program that has swallowed an npm graph, decided by
+ * emitted size alone. `headerName` is the basename the units include. */
+export function emitModuleProgram(
+  mod: IrModule,
+  sourceText: string | undefined,
+  headerName: string,
+): EmittedProgram {
+  resetSrcSiteCache();
+  const E = new CEmitter(mod, sourceText);
+  E.headerName = headerName;
+  return E.emitProgram();
+}
+
 /** `dst.push(...src)` for a WHOLE FUNCTION BODY, which is unbounded.
  *
  * A spread call passes one argument per element, and an engine's argument
@@ -182,10 +196,192 @@ export interface ScopeEntry extends Temp {
   boxed?: boolean;
 }
 
+/** Above this many bytes of emitted C, the program is split into several
+ * translation units so `zig cc` can compile them at once instead of leaving
+ * five of six cores idle.
+ *
+ * Measured on the zapobench app (a 129,831,315-byte TU, 2.998 M lines) on a
+ * six-core box: one `zig cc -c` of the whole thing runs at 0.982 cores for
+ * 364 s; the same code cut six ways and handed to one `zig cc` finishes in
+ * 132 s. The link is not the other half of the story — lld-link on the
+ * resulting 25.7 MB PE is 573 ms.
+ *
+ * The threshold is not a tuning knob, it is a CONTRACT: under it the emitter
+ * produces the same bytes it always has, `compileC` builds the same command
+ * line, and the binary is identical. Every corpus program is three orders of
+ * magnitude under it, so the size classes those programs anchor cannot move.
+ * It is deliberately far above anything a human writes by hand: only a
+ * program that has swallowed an npm graph gets here. */
+const SPLIT_MIN_BYTES = 24 * 1024 * 1024;
+/** Target bytes per part once splitting starts, and the ceiling on parts.
+ * Both are functions of the PROGRAM, never of the host: two machines with
+ * different core counts must emit the same C or the build cache, the
+ * provenance manifest and every byte-comparison in the fleet stop working.
+ * 16 MB puts the zapobench TU at the ceiling of 8. */
+const SPLIT_PART_BYTES = 16 * 1024 * 1024;
+const SPLIT_MAX_PARTS = 8;
+/** Defined by unit 0 before it includes the shared header: it DEFINES the
+ * program's objects, so it must not also declare them. See `declData`. */
+const UNIT0_GUARD = "SCR_PROGRAM_UNIT0";
+
+/** Drop a file-scope `static ` from one emitted line.
+ *
+ * Only ever applied to lines the emitter itself wrote at column 0, and the
+ * emitted object model puts nothing else there: measured on the zapobench
+ * TU, all 67,181 `static` tokens are at the start of a line, none indented.
+ * A function-local static would be indented and is therefore never touched. */
+function stripStatic(line: string): string {
+  return line.startsWith("static ") ? line.slice(7) : line;
+}
+
+/** One emitted program: the shared header (null when there is a single TU)
+ * and the translation units, `units[0]` first. */
+export interface EmittedProgram {
+  header: string | null;
+  units: string[];
+}
+
+/** How many translation units a program of this body size is emitted as.
+ * A pure function of the byte count, so the emitted C is a function of the
+ * PROGRAM and of nothing about the machine that compiled it.
+ *
+ * SCRIPTC_SPLIT_PARTS forces the count. It is a TEST seam, not a way to
+ * get the speed-up: the speed-up is on by default above the threshold and
+ * there is no flag to ask for it. What the seam buys is a corpus program
+ * small enough to gate quickly that still exercises the split path, which
+ * the size gate would otherwise leave untested on every program. */
+export function splitPartCount(bodyBytes: number): number {
+  const forced = process.env["SCRIPTC_SPLIT_PARTS"];
+  if (forced !== undefined && forced !== "") {
+    const n = Number(forced);
+    if (Number.isInteger(n) && n >= 1) return n;
+  }
+  if (bodyBytes < SPLIT_MIN_BYTES) return 1;
+  return Math.max(2, Math.min(SPLIT_MAX_PARTS, Math.ceil(bodyBytes / SPLIT_PART_BYTES)));
+}
+
 export class CEmitter {
   readonly lines: string[] = [];
   indent = 0;
   tempCounter = 0;
+  /** The linkage token every FILE-SCOPE definition carries. `"static "` for
+   * the historical single TU; `""` once the program is split, because a
+   * symbol a sibling TU calls cannot have internal linkage.
+   *
+   * Chosen AFTER the function bodies are emitted (they are what the size
+   * gate weighs), so the bodies' own `static ` headers are rewritten in
+   * place rather than the whole program being emitted twice. Everything
+   * else in the file is assembled after the decision and reads this. */
+  link = "static ";
+  /** The shared header, when splitting: a declaration for everything the
+   * parts define, so any part may name any of it. Empty for a single TU.
+   *
+   * A declaration this misses is an `implicit declaration` or `undeclared
+   * identifier` at compile time, naming the symbol. That is the reason the
+   * header is built by the emitter rather than derived textually from the
+   * assembled file: the failure mode is loud. */
+  readonly hdr: string[] = [];
+  /** The basename every unit `#include`s when the program is split. */
+  headerName = "scr_program.h";
+
+  /** The header's DATA externs, which unit 0 skips. See `declData`. */
+  readonly hdrData: string[] = [];
+
+  /** Declare something in the shared header. A NO-OP for a single TU: there
+   * the definition and the declaration are the same line in the same file,
+   * and an extra declaration would change bytes that must not change. */
+  decl(...lines: string[]): void {
+    if (this.link === "") for (const l of lines) this.hdr.push(l);
+  }
+
+  /** Declare a file-scope OBJECT in the shared header — and hide that
+   * declaration from unit 0, the unit that defines it.
+   *
+   * `SCR_STR_LIT(n)` expands to an ANONYMOUS struct, and two anonymous
+   * structs are distinct types within one translation unit even when they
+   * are spelled identically. So `extern SCR_STR_LIT(2) sc_lit_3;` followed
+   * by `SCR_STR_LIT(2) sc_lit_3 = {...}` in the same file is
+   * "redefinition with a different type" — 12,097 times over on a program
+   * like zapo's. Across units the two ARE compatible (C11 6.2.7), which is
+   * exactly the case that matters. The interned closures have the same
+   * shape and the same problem.
+   *
+   * Rather than special-case the anonymous ones, every object extern goes
+   * behind the same guard: unit 0 defines the data and needs no
+   * declaration of it, and the ordering inside unit 0 is then byte-for-byte
+   * the ordering the single-TU file has always had. */
+  declData(...lines: string[]): void {
+    if (this.link === "") for (const l of lines) this.hdrData.push(l);
+  }
+
+  /** A file-scope DATA definition that historically sits in the walker
+   * PROTOTYPE block. In one TU it stays exactly there. Split, a definition
+   * cannot be in a header eight TUs include — it moves to the definitions
+   * unit and the header takes an `extern` for it instead. */
+  walkerData(declLine: string, ...defLines: string[]): void {
+    if (this.link === "") {
+      this.hdrData.push(declLine);
+      // NOT walkerDefs: this data sits in the PROTOTYPE block because the
+      // converters that take its address are defined below it, and
+      // `walkerDefs` is below them. Moved there it became `use of
+      // undeclared identifier 'sc_dcl_0'` in the very unit that defines it.
+      for (const l of defLines) this.promotedData.push(l);
+      return;
+    }
+    // Interned while the BODIES were being emitted, which is before the
+    // split is decided. Remember where it landed so the decision can move
+    // it; see `promoteInternedToExternal`.
+    this.pendingWalkerData.push({ at: this.walkerProtos.length, count: defLines.length, decl: declLine });
+    for (const l of defLines) this.walkerProtos.push(l);
+  }
+
+  /** Walker DATA written into the prototype block before the split was
+   * decided: `{ at, count }` into `walkerProtos`, plus its declaration. */
+  private readonly pendingWalkerData: { at: number; count: number; decl: string }[] = [];
+
+  /** The walker DATA definitions, once they are external: emitted in unit 0
+   * at the exact position the prototype block used to hold them, which is
+   * above every converter that takes their address. */
+  private readonly promotedData: string[] = [];
+
+  /** Turn the thunks and walkers interned DURING body emission external.
+   *
+   * They are interned lazily, from the body that first needs one, so they
+   * are written before the size gate has weighed the bodies and they carry
+   * `static `. Left that way, a part that calls one gets the prototype out
+   * of the shared header and the linker gets `undefined symbol: sc_jw_0` —
+   * loud, and 34 of the corpus's programs hit it the first time this ran.
+   *
+   * Their DATA entries move too: a definition cannot live in a header eight
+   * units include. */
+  private promoteInternedToExternal(): void {
+    // Reverse order so an earlier splice cannot move a later index.
+    // Reverse order so an earlier splice cannot move a later index; the
+    // definitions are then put back in their original relative order.
+    const moved: string[][] = [];
+    for (let i = this.pendingWalkerData.length - 1; i >= 0; i--) {
+      const p = this.pendingWalkerData[i]!;
+      moved.push(this.walkerProtos.splice(p.at, p.count));
+      this.hdrData.push(p.decl);
+    }
+    for (let i = moved.length - 1; i >= 0; i--) {
+      for (const l of moved[i]!) this.promotedData.push(stripStatic(l));
+    }
+    this.pendingWalkerData.length = 0;
+    for (let i = 0; i < this.walkerProtos.length; i++) {
+      this.walkerProtos[i] = stripStatic(this.walkerProtos[i]!);
+    }
+    for (let i = 0; i < this.walkerDefs.length; i++) {
+      this.walkerDefs[i] = stripStatic(this.walkerDefs[i]!);
+    }
+  }
+
+  /** Where a PROTOTYPE goes. Splitting moves the whole declaration surface
+   * into the shared header; a single TU keeps every prototype exactly where
+   * it has always been, so the file is byte-for-byte the historical one. */
+  protoOut(out: string[]): string[] {
+    return this.link === "" ? this.hdr : out;
+  }
   /** Interned string literals: UTF-8 text → static symbol name. */
   readonly literals = new Map<string, string>();
   /** Interned unit-armed union instances: "unionId:tag" → static symbol.
@@ -458,11 +654,11 @@ export class CEmitter {
     const n = this.dcSites;
     return [
       `/* SCRIPTC_DC_COUNT=1: ${n} emitted dyn-check statements, one ordinal each. */`,
-      `static unsigned long sc_dc_hits[${n}];`,
-      `static unsigned long sc_dc_fails[${n}];`,
+      `${this.link}unsigned long sc_dc_hits[${n}];`,
+      `${this.link}unsigned long sc_dc_fails[${n}];`,
       `#define SC_DC_HIT(k) (sc_dc_hits[k]++)`,
       `#define SC_DC_FAIL(k) (sc_dc_fails[k]++)`,
-      `__attribute__((destructor)) static void sc_dc_count_dump(void) {`,
+      `__attribute__((destructor)) ${this.link}void sc_dc_count_dump(void) {`,
       `  unsigned long th = 0, tf = 0;`,
       `  size_t ran = 0, failed = 0;`,
       `  for (size_t i = 0; i < ${n}; i++) {`,
@@ -549,7 +745,7 @@ export class CEmitter {
     const n = this.rkSites;
     return [
       `/* SCRIPTC_RKG_COUNT=1: ${n} emitted ABORTABLE keyed-read call sites, one ordinal each. */`,
-      `static unsigned long sc_rk_hits[${n}];`,
+      `${this.link}unsigned long sc_rk_hits[${n}];`,
       // FIRST-HIT PRINT, and the reason it is not only a table.
       // `process.exit()` takes `_Exit`, which skips atexit AND the
       // destructor below - zapo's own entry ends in `process.exit(0)`, so
@@ -558,7 +754,7 @@ export class CEmitter {
       // time it executes is immune to that: it is already on stderr when
       // the process dies, however it dies.
       `#define SC_RK_HIT(k) ((sc_rk_hits[k]++ == 0) ? (void)fprintf(stderr, "RKFIRST %zu\\n", (size_t)(k)) : (void)0)`,
-      `__attribute__((destructor)) static void sc_rk_count_dump(void) {`,
+      `__attribute__((destructor)) ${this.link}void sc_rk_count_dump(void) {`,
       `  unsigned long th = 0;`,
       `  size_t ran = 0;`,
       `  for (size_t i = 0; i < ${n}; i++) {`,
@@ -958,7 +1154,8 @@ export class CEmitter {
     // closes with `}` at column 0" as given, and a one-liner would hide the
     // helper's body from every one of them.
     const def = (name: string, msg: string): void => {
-      defs.push(`static _Noreturn void ${name}(void) {`, `  scr_trap(${msg});`, `}`);
+      this.decl(`_Noreturn void ${name}(void);`);
+      defs.push(`${this.link}_Noreturn void ${name}(void) {`, `  scr_trap(${msg});`, `}`);
     };
     if (this.usesOomHelper) def("sc_oom", '"scriptc: out of memory\\n"');
     if (this.usesBadTagHelper) {
@@ -971,7 +1168,18 @@ export class CEmitter {
     return defs;
   }
 
+  /** The historical single-string emission. Identical to `emitProgram()`
+   * whenever that answers one unit, which is every program under the split
+   * threshold — i.e. all of them but the npm-graph-sized ones. */
   emit(): string {
+    const p = this.emitProgram();
+    if (p.header !== null || p.units.length !== 1) {
+      throw new Error("emit(): this program is emitted as several TUs — use emitProgram()");
+    }
+    return p.units[0]!;
+  }
+
+  emitProgram(): EmittedProgram {
     const body: string[] = [];
     // Function bodies are emitted first (into this.lines) so the literal
     // table is complete; the file is then assembled around them.
@@ -981,8 +1189,42 @@ export class CEmitter {
       this.lines.length = 0;
     }
 
+    // THE SPLIT DECISION, taken here and nowhere else.
+    //
+    // The bodies are ~94% of the emitted file, so their byte count is the
+    // size gate's input; taking the decision now (rather than before
+    // emission, off some IR proxy) means the gate weighs the real thing and
+    // the program is still only emitted once. The bodies already carry
+    // `static ` on every definition header, so the split rewrites those
+    // lines in place — a second emission pass would cost as much as the
+    // parallelism buys.
+    //
+    // The whole file is a little larger than the bodies; the prelude
+    // measured 7.1% of the zapobench TU. The gate weighs the bodies alone
+    // and is generous enough that the difference cannot matter.
+    let bodyBytes = 0;
+    for (const line of body) bodyBytes += line.length + 1;
+    // LIBRARY mode never splits: its artifact is an archive with a declared
+    // external surface, the profile pins the emission, and no library is
+    // anywhere near the threshold. One less shape to reason about.
+    const nParts = this.mod.lib !== undefined ? 1 : splitPartCount(bodyBytes);
+    if (nParts > 1) {
+      this.link = "";
+      // Every `static ` in the body region is a file-scope definition
+      // header at column 0: the emitted object model puts nothing else
+      // there (measured on the zapobench TU — 67,181 `static` tokens, not
+      // one of them indented). A sibling part calls these, so they lose
+      // internal linkage; their declarations are the prototype block the
+      // header already carries.
+      for (let i = 0; i < body.length; i++) body[i] = stripStatic(body[i]!);
+      // The thunks and walkers those bodies interned along the way were
+      // written before this decision and carry `static ` too.
+      this.promoteInternedToExternal();
+    }
+
+    const banner = `/* Generated by scriptc from ${this.mod.sourceFile}. Do not edit. */`;
     const out: string[] = [
-      `/* Generated by scriptc from ${this.mod.sourceFile}. Do not edit. */`,
+      banner,
       `#include "scr_runtime.h"`,
       // The WebSocket global's API-object glue: its own header, because
       // the synthesized ctor/dispatch thunks name ScrWsGlobal and the
@@ -1035,8 +1277,9 @@ export class CEmitter {
       // layout single-sourced and scr_runtime.h static-asserts it against the
       // real type.
       const bytes = Buffer.from(text, "utf8");
+      this.declData(`extern SCR_STR_LIT(${bytes.length + 1}) ${sym};`);
       out.push(
-        `static SCR_STR_LIT(${bytes.length + 1}) ${sym} =`,
+        `${this.link}SCR_STR_LIT(${bytes.length + 1}) ${sym} =`,
         `    { SCR_STR_IMMORTAL, ${bytes.length}, ${bytes.length}, ${cStringLiteral(bytes)} };`,
       );
     }
@@ -1046,8 +1289,9 @@ export class CEmitter {
       // slot and RC entry points zero — retain/release/collector all skip
       // rc == SIZE_MAX, so these never join the RC audit or a trace walk.
       const [unionId, tag] = key.split(":");
+      this.declData(`extern ScrUnion ${sym};`);
       out.push(
-        `static ScrUnion ${sym} = { .rc = SIZE_MAX, .tag = ${tag} }; /* ${unionId} unit arm */`,
+        `${this.link}ScrUnion ${sym} = { .rc = SIZE_MAX, .tag = ${tag} }; /* ${unionId} unit arm */`,
       );
     }
     if (this.unitInstances.size > 0) out.push("");
@@ -1065,8 +1309,9 @@ export class CEmitter {
       const fl = this.internLiteral(flags);
       // "*/" inside the pattern would close the trailing comment.
       const safe = `/${pattern}/${flags}`.split("*/").join("* /");
+      this.declData(`extern ScrRegex ${sym};`);
       out.push(
-        `static ScrRegex ${sym} = { .rc = SIZE_MAX, .source = (ScrStr *)&${src}, ` +
+        `${this.link}ScrRegex ${sym} = { .rc = SIZE_MAX, .source = (ScrStr *)&${src}, ` +
           `.flags = (ScrStr *)&${fl}, .bc = NULL }; /* ${safe} */`,
       );
     }
@@ -1078,9 +1323,10 @@ export class CEmitter {
       // len == cap and nothing ever mutates it (TemplateStringsArray is
       // ReadonlyArray, tsc rejects the mutating spellings).
       const slots = cooked.map((s) => `(void *)&${this.internLiteral(s)}`).join(", ");
+      this.declData(`extern void *${sym}_data[${cooked.length}];`, `extern ScrArr ${sym};`);
       out.push(
-        `static void *${sym}_data[${cooked.length}] = { ${slots} };`,
-        `static ScrArr ${sym} = { .rc = SIZE_MAX, .len = ${cooked.length}, .cap = ${cooked.length}, ` +
+        `${this.link}void *${sym}_data[${cooked.length}] = { ${slots} };`,
+        `${this.link}ScrArr ${sym} = { .rc = SIZE_MAX, .len = ${cooked.length}, .cap = ${cooked.length}, ` +
           `.elem = SCR_ELEM_STR, .elem_retain = NULL, .elem_release = NULL, .elem_trace = NULL, ` +
           `.data = (uint64_t *)${sym}_data };`,
       );
@@ -1092,7 +1338,8 @@ export class CEmitter {
     for (const g of globals) {
       // File-scope statics: zero/NULL-initialized, assigned by %init
       // functions, released (refcounted ones) before the RC audit runs.
-      out.push(`static ${cDecl(g.type, mangleGlobal(g.id))}; /* ${g.name} */`);
+      this.declData(`extern ${cDecl(g.type, mangleGlobal(g.id))};`);
+      out.push(`${this.link}${cDecl(g.type, mangleGlobal(g.id))}; /* ${g.name} */`);
     }
     if (globals.length > 0) out.push("");
     // Outbound native FFI declarations. string/bytes each expand from one
@@ -1120,10 +1367,16 @@ export class CEmitter {
         : entry.returns === "u32" ? "uint32_t"
         : entry.returns === "i32" ? "int32_t"
         : "void";
-      out.push(`extern ${ret} ${entry.symbol}(${params.length > 0 ? params.join(", ") : "void"});`);
+      this.protoOut(out).push(`extern ${ret} ${entry.symbol}(${params.length > 0 ? params.join(", ") : "void"});`);
     }
     if ((this.mod.ffiImports?.length ?? 0) > 0) out.push("");
-    for (const fn of this.mod.functions) out.push(this.signature(fn) + ";");
+    // The forward declarations for every program function. This block IS
+    // the shared header's spine once the program is split: it is what lets
+    // any part call anything, and it already existed.
+    {
+      const proto = this.protoOut(out);
+      for (const fn of this.mod.functions) proto.push(this.signature(fn) + ";");
+    }
     // Class objects (classes as values): construct-thunk prototypes plus
     // the immortal statics that take their addresses — after the function
     // signatures (the thunks call sc_new_*/the constructors), before
@@ -1141,9 +1394,15 @@ export class CEmitter {
       const params = ["ScrClosure *sc_env", ...fn.params.map((p) => cDecl(p.type, mangleLocal(p.localId)))];
       const call = `${this.callTargetC(name)}(${fn.params.map((p) => mangleLocal(p.localId)).join(", ")})`;
       const retType = fn.async ? "ScrPromise *" : fn.generator ? "ScrGen *" : cType(fn.returnType);
+      // The interned closure is named by every body that uses the function
+      // as a value; the wrapper is named by the closure's initialiser.
+      this.decl(`${retType}${retType.endsWith("*") ? "" : " "}${mangleWrapper(name)}(${params.join(", ")});`);
+      this.declData(
+        `extern struct { size_t rc; void *fn; size_t ncaps; ScrBox *props; void *implicit_proto; } ${mangleFnClosure(name)};`,
+      );
       out.push(
         ``,
-        `static ${retType}${retType.endsWith("*") ? "" : " "}${mangleWrapper(name)}(${params.join(", ")}) {`,
+        `${this.link}${retType}${retType.endsWith("*") ? "" : " "}${mangleWrapper(name)}(${params.join(", ")}) {`,
         `  (void)sc_env;`,
         fn.returnType.kind === "void" && !fn.async && !fn.generator ? `  ${call};` : `  return ${call};`,
         `}`,
@@ -1152,7 +1411,7 @@ export class CEmitter {
         // it, so a field the literal omits is a write past the object.
         // `implicit_proto` is the prototype object scr_dyn_fn_prototype
         // mints on first demand.
-        `static struct { size_t rc; void *fn; size_t ncaps; ScrBox *props; void *implicit_proto; } ${mangleFnClosure(name)} =`,
+        `${this.link}struct { size_t rc; void *fn; size_t ncaps; ScrBox *props; void *implicit_proto; } ${mangleFnClosure(name)} =`,
         `    { SIZE_MAX, (void *)&${mangleWrapper(name)}, 0, NULL, NULL };`,
       );
     }
@@ -1161,10 +1420,19 @@ export class CEmitter {
     emitCtorThunkDefs(this, out);
     // Type-directed JSON walkers (jsonStringify serializers, dynCheck
     // matchers/builders), interned per type during body emission above.
-    if (this.walkerProtos.length > 0) {
+    // The historical gate is `walkerProtos.length > 0` and it stays exactly
+    // that for a single TU. Split, walkerData moves DATA definitions out of
+    // the proto block and into walkerDefs, so a program whose only walker
+    // entry was such a definition would otherwise lose it.
+    if (this.link === ""
+      ? this.walkerProtos.length > 0 || this.walkerDefs.length > 0 || this.promotedData.length > 0
+      : this.walkerProtos.length > 0) {
+      const proto = this.protoOut(out);
       out.push("");
-      for (const line of this.walkerProtos) out.push(line);
+      for (const line of this.walkerProtos) proto.push(line);
       out.push("");
+      // The data the prototype block used to carry, in its old position.
+      for (const line of this.promotedData) out.push(line);
       for (const line of this.walkerDefs) out.push(line);
     }
     // Loop-appended, never spread: `body` scales with the PROGRAM (a large
@@ -1172,14 +1440,16 @@ export class CEmitter {
     // push passes every line as a call argument — the engine's stack
     // overflows long before memory matters.
     out.push("");
+    const bodyStart = out.length;
     for (const line of body) out.push(line);
+    const bodyEnd = out.length;
     if (this.mod.lib !== undefined) {
       // LIBRARY mode: no main(), no scr_init/scr_lib_init, no event
       // loop — the profile-declared external symbols instead. Everything
       // above is unchanged (still all internal linkage).
       this.emitLibEntries(out, globals);
       out.splice(trapHelperSlot, 0, ...this.dcCountDefs(), ...this.rkCountDefs(), ...this.sharedTrapDefs());
-      return out.join("\n");
+      return { header: null, units: [out.join("\n")] };
     }
     const refGlobals = globals.filter((g) => isRefCounted(g.type));
     // Interned function-value closures are IMMORTAL (rc == SIZE_MAX), so
@@ -1194,7 +1464,8 @@ export class CEmitter {
     // prototype object lives in that table. See the LLVM emitter's note.
     const fnValueProps = [...this.fnValues];
     if (refGlobals.length > 0 || fnValueProps.length > 0) {
-      out.push(`static void sc_release_globals(void) {`);
+      this.decl(`void sc_release_globals(void);`);
+      out.push(`${this.link}void sc_release_globals(void) {`);
       for (const g of refGlobals) {
         out.push(`  ${releaseCallC(g.type, mangleGlobal(g.id))};`);
       }
@@ -1258,7 +1529,7 @@ export class CEmitter {
     if (rcSiteRows.length > 0) {
       out.push(
         `#ifdef SCR_RC_AUDIT`,
-        `static const ScrClosureSite sc_clo_site_tbl[] = {`,
+        `${this.link}const ScrClosureSite sc_clo_site_tbl[] = {`,
         ...rcSiteRows.map(([sym, site]) =>
           `  { (const void *)&${sym}, ${cStringLiteral(Buffer.from(site, "utf8"))} },`),
         `};`,
@@ -1276,7 +1547,7 @@ export class CEmitter {
     const fnNameRows = [...this.fnNames].filter(([sym]) => sym.length > 0).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
     if (fnNameRows.length > 0) {
       out.push(
-        `static const ScrFnName sc_fn_name_tbl[] = {`,
+        `${this.link}const ScrFnName sc_fn_name_tbl[] = {`,
         ...fnNameRows.map(([sym, name]) =>
           `  { (const void *)&${sym}, ${cStringLiteral(Buffer.from(name, "utf8"))} },`),
         `};`,
@@ -1488,8 +1759,104 @@ export class CEmitter {
       `}`,
       ``,
     );
-    out.splice(trapHelperSlot, 0, ...this.dcCountDefs(), ...this.rkCountDefs(), ...this.sharedTrapDefs());
-    return out.join("\n");
+    const trapLines = [...this.dcCountDefs(), ...this.rkCountDefs(), ...this.sharedTrapDefs()];
+    out.splice(trapHelperSlot, 0, ...trapLines);
+    if (nParts <= 1) return { header: null, units: [out.join("\n")] };
+    return this.assembleParts(out, banner, out.slice(0, trapHelperSlot),
+      bodyStart + trapLines.length, bodyEnd + trapLines.length, nParts);
+  }
+
+  /** Cut the assembled file into a shared header and `nParts` translation
+   * units.
+   *
+   * The header is `hdr`: a declaration for everything, built at the
+   * emission sites rather than derived from the text here, so a symbol this
+   * misses is a compile error naming it and not a silently wrong program.
+   *
+   * Unit 0 keeps EVERY definition that is not a function body — the literal
+   * table, the shapes' RC helpers, the walkers, the thunks, the tables and
+   * main — plus a share of the bodies sized so that its extra weight does
+   * not make it the long pole. Units 1..n-1 are body slices and nothing
+   * else. Cuts land on a top-level `}` so a function is never divided. */
+  private assembleParts(
+    out: string[],
+    banner: string,
+    prologue: string[],
+    bodyStart: number,
+    bodyEnd: number,
+    nParts: number,
+  ): EmittedProgram {
+    const headerName = this.headerName;
+    const header = [
+      banner,
+      `/* The shared declarations of a program emitted as ${nParts} translation`,
+      `   units. Every unit includes this and nothing else of the program. */`,
+      `#ifndef SCR_PROGRAM_DECLS_H`,
+      `#define SCR_PROGRAM_DECLS_H`,
+      ...prologue.slice(1), // the includes, without a second banner
+      ...this.hdr,
+      ``,
+      `/* The program's file-scope OBJECTS. Unit 0 defines them and skips`,
+      `   these: an anonymous-struct type (SCR_STR_LIT, the interned`,
+      `   closures) is a DIFFERENT type from a second anonymous struct in`,
+      `   the same unit, so the declaration and the definition would not`,
+      `   agree. Across units they are compatible, which is the case that`,
+      `   matters. */`,
+      `#ifndef ${UNIT0_GUARD}`,
+      ...this.hdrData,
+      `#endif`,
+      ``,
+      `#endif`,
+      ``,
+    ].join("\n");
+
+    let bodyBytes = 0;
+    for (let i = bodyStart; i < bodyEnd; i++) bodyBytes += out[i]!.length + 1;
+    let restBytes = 0;
+    for (let i = 0; i < out.length; i++) if (i < bodyStart || i >= bodyEnd) restBytes += out[i]!.length + 1;
+    // Unit 0 already carries `restBytes` of definitions, so it takes that
+    // much less body. A negative share means the definitions alone outweigh
+    // an even split; then unit 0 takes no body at all.
+    const even = (bodyBytes + restBytes) / nParts;
+    const firstShare = Math.max(0, even - restBytes);
+
+    // Cut points: top-level `}` lines, at or after each running target.
+    const cuts: number[] = [];
+    let acc = 0;
+    let target = firstShare;
+    for (let i = bodyStart; i < bodyEnd && cuts.length < nParts - 1; i++) {
+      acc += out[i]!.length + 1;
+      if (out[i] === "}" && acc >= target) {
+        cuts.push(i + 1);
+        acc = 0;
+        target = even;
+      }
+    }
+    cuts.push(bodyEnd);
+
+    const include = `#include "${headerName}"`;
+    const unit0: string[] = [];
+    for (let i = 0; i < bodyStart; i++) unit0.push(out[i]!);
+    for (let i = bodyStart; i < cuts[0]!; i++) unit0.push(out[i]!);
+    for (let i = bodyEnd; i < out.length; i++) unit0.push(out[i]!);
+    // The include goes after the banner and before anything else: unit 0's
+    // own definitions are then checked against the declarations every other
+    // unit compiled against, which is the cheapest possible guard against
+    // the two drifting.
+    unit0.splice(1, 0, `#define ${UNIT0_GUARD} 1`, include);
+    const units = [unit0.join("\n")];
+    for (let k = 0; k < cuts.length - 1; k++) {
+      const part: string[] = [
+        banner,
+        include,
+        `/* Translation unit ${k + 2} of ${nParts}: function bodies only. */`,
+        ``,
+      ];
+      for (let i = cuts[k]!; i < cuts[k + 1]!; i++) part.push(out[i]!);
+      part.push("");
+      units.push(part.join("\n"));
+    }
+    return { header, units };
   }
 
   /* ── library mode ─────────────────────────────────────────────────────
@@ -1508,7 +1875,8 @@ export class CEmitter {
     // Session reset of PROGRAM state: release every refcounted global and
     // zero everything (the run-once module guards included), putting the
     // program back at the not-yet-evaluated state.
-    out.push(`static void sc_lib_release_globals(void) {`);
+    this.decl(`void sc_lib_release_globals(void);`);
+    out.push(`${this.link}void sc_lib_release_globals(void) {`);
     for (const g of globals) {
       const name = mangleGlobal(g.id);
       if (isRefCounted(g.type)) {
@@ -2170,7 +2538,7 @@ export class CEmitter {
     // Lifted functions receive their closure first.
     if (fn.captures !== undefined) parts.unshift("ScrClosure *sc_env");
     const params = parts.length ? parts.join(", ") : "void";
-    return `static ${cType(fn.returnType)} ${mangleFunction(fn.name)}(${params})`;
+    return `${this.link}${cType(fn.returnType)} ${mangleFunction(fn.name)}(${params})`;
   }
 
   emitFunction(fn: IrFunction): void {

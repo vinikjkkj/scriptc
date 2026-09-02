@@ -122,7 +122,7 @@ export function emitNpmEmbedding(E: CEmitter, out: string[]): void {
                   `  scr_str_release(s);`,
                   `  return r;`,
                 ];
-    const sig = `static ScrJsval *${name}(ScrClosure *c, ScrJsval **argv)`;
+    const sig = `${E.link}ScrJsval *${name}(ScrClosure *c, ScrJsval **argv)`;
     E.walkerProtos.push(
       `${sig}; /* island host-call adapter (${arity} arg${arity === 1 ? "" : "s"}, ${retKind}) */`,
     );
@@ -309,7 +309,7 @@ export function emitNpmEmbedding(E: CEmitter, out: string[]): void {
           `  return NULL;`,
         ]
       : [];
-    const sig = `static ScrJsval *${name}(ScrClosure *c, ScrJsval **argv)`;
+    const sig = `${E.link}ScrJsval *${name}(ScrClosure *c, ScrJsval **argv)`;
     E.walkerProtos.push(`${sig}; /* typed island host-call adapter: ${key} */`);
     E.walkerDefs.push(
       `${sig} { /* ${key} */`,

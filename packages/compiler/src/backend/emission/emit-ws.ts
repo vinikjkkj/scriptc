@@ -86,17 +86,21 @@ export function wsGlobalCtorFor(E: CEmitter, t: IrType, site?: string): string {
     `bool sc_is_text, int sc_code, const char *sc_text, size_t sc_tlen, bool sc_clean`;
 
   E.walkerProtos.push(
-    `static ${names.ev} *${names.event}(${evParams});`,
-    `static void ${names.dispatch}(${dispatchParams});`,
-    `static void ${names.send}(${sendParams});`,
-    `static void ${names.close}(${closeParams});`,
-    `static ${cType(t.ret)}${names.wrap}(${ctorParams});`,
-    // The interned immortal closure: the VALUE of globalThis.WebSocket,
-    // one per program so `globalThis.WebSocket === globalThis.WebSocket`
-    // is true the way it is in every runtime that has one.
-    // Field list MIRRORS ScrClosure's — the runtime casts this to
-    // ScrClosure * and writes through it (emitter.ts's note).
-    `static struct { size_t rc; void *fn; size_t ncaps; ScrBox *props; void *implicit_proto; } ${sym} =`,
+    `${E.link}${names.ev} *${names.event}(${evParams});`,
+    `${E.link}void ${names.dispatch}(${dispatchParams});`,
+    `${E.link}void ${names.send}(${sendParams});`,
+    `${E.link}void ${names.close}(${closeParams});`,
+    `${E.link}${cType(t.ret)}${names.wrap}(${ctorParams});`,
+  );
+
+  // The interned immortal closure: the VALUE of globalThis.WebSocket,
+  // one per program so `globalThis.WebSocket === globalThis.WebSocket`
+  // is true the way it is in every runtime that has one.
+  // Field list MIRRORS ScrClosure's — the runtime casts this to
+  // ScrClosure * and writes through it (emitter.ts's note).
+  E.walkerData(
+    `extern struct { size_t rc; void *fn; size_t ncaps; ScrBox *props; void *implicit_proto; } ${sym};`,
+    `${E.link}struct { size_t rc; void *fn; size_t ncaps; ScrBox *props; void *implicit_proto; } ${sym} =`,
     `    { SIZE_MAX, (void *)&${names.wrap}, 0, NULL, NULL }; /* globalThis.WebSocket */`,
   );
 
@@ -106,9 +110,9 @@ export function wsGlobalCtorFor(E: CEmitter, t: IrType, site?: string): string {
     ``,
     ...dispatcher(E, plan, names, dispatchParams),
     ``,
-    ...sendMethod(plan, names.send, sendParams),
+    ...sendMethod(E, plan, names.send, sendParams),
     ``,
-    ...closeMethod(plan, names.close, closeParams),
+    ...closeMethod(E, plan, names.close, closeParams),
     ``,
     ...ctorWrapper(E, plan, t, names, ctorParams, site),
     ``,
@@ -136,7 +140,7 @@ function eventBuilder(
   ev: string,
   params: string,
 ): string[] {
-  const lines = [`static ${ev} *${sym}(${params}) {`];
+  const lines = [`${E.link}${ev} *${sym}(${params}) {`];
   const used = new Set(plan.event.fields.map((f) => f.name));
   if (!used.has("data")) lines.push(`  (void)sc_self; (void)sc_data; (void)sc_len; (void)sc_is_text;`);
   if (!used.has("code")) lines.push(`  (void)sc_code;`);
@@ -195,7 +199,7 @@ function dispatcher(
   params: string,
 ): string[] {
   const lines = [
-    `static void ${names.dispatch}(${params}) {`,
+    `${E.link}void ${names.dispatch}(${params}) {`,
     `  ${names.rec} *sc_self = (${names.rec} *)sc_u;`,
     `  sc_self->${mangleField("readyState")} = (double)sc_state;`,
     `  switch (sc_which) {`,
@@ -241,9 +245,9 @@ function dispatcher(
 }
 
 /** `socket.send(data)`. The handle rides the shared box in caps[0]. */
-function sendMethod(plan: WsGlobalPlan, sym: string, params: string): string[] {
+function sendMethod(E: CEmitter, plan: WsGlobalPlan, sym: string, params: string): string[] {
   const lines = [
-    `static void ${sym}(${params}) {`,
+    `${E.link}void ${sym}(${params}) {`,
     `  ScrWsGlobal *sc_g = (ScrWsGlobal *)scr_box_get_ref(sc_env->caps[0]);`,
   ];
   const call = (t: IrType, expr: string): string =>
@@ -272,9 +276,9 @@ function sendMethod(plan: WsGlobalPlan, sym: string, params: string): string[] {
 
 /** `socket.close(code?, reason?)`. Argument validation lives in the
  * runtime unit, where the WHATWG rules are written down once. */
-function closeMethod(plan: WsGlobalPlan, sym: string, params: string): string[] {
+function closeMethod(E: CEmitter, plan: WsGlobalPlan, sym: string, params: string): string[] {
   const lines = [
-    `static void ${sym}(${params}) {`,
+    `${E.link}void ${sym}(${params}) {`,
     `  ScrWsGlobal *sc_g = (ScrWsGlobal *)scr_box_get_ref(sc_env->caps[0]);`,
     `  bool sc_has = false;`,
     `  double sc_code = 0;`,
@@ -334,7 +338,7 @@ function ctorWrapper(
   params: string,
   site: string | undefined,
 ): string[] {
-  const lines = [`static ${cType(t.ret)}${names.wrap}(${params}) {`, `  (void)sc_env;`];
+  const lines = [`${E.link}${cType(t.ret)}${names.wrap}(${params}) {`, `  (void)sc_env;`];
   for (let n = 2; n < t.params.length; n++) {
     lines.push(
       `  /* the options bag: a browser WebSocket has no third parameter */`,
