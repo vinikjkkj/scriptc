@@ -74,7 +74,7 @@
  * can be trusted — see npm-static.ts's standing doctrine and the measurement in
  * tests/perf/dynpath/waproto-split.mjs.
  */
-import ts from "typescript5";
+import * as ts from "../ts7/adapter.js";
 
 /** A member the constructor assigns to `this` in its own body. */
 export interface ProtoField {
@@ -92,11 +92,32 @@ export interface ProtoField {
    * Reader.pos is seeded to 0 and then rewritten by every accessor. Recorded
    * rather than refused: reassignment is normal, it only widens the slot. */
   reassignedInMethod: boolean;
+  /** The RHS of every `this.<name> = ...` a prototype method performs, in walk
+   * order. The BOOLEAN above says a write exists; these say WHAT is written,
+   * and the consumer needs the latter to pick a slot type.
+   *
+   * Measured, not assumed: the TypeScript checker will NOT supply this. For
+   * `function S(){this.pos=0}` plus `S.prototype.clear=function(){this.pos=null}`
+   * the checker answers `pos: number` (the constructor's initializer alone)
+   * under allowJs, under checkJs, and under checkJs+strict alike. A slot typed
+   * from the checker is therefore a slot the first method write violates, which
+   * is exactly what the constraint above warns about; the validator's fieldSet
+   * `expectType` would reject it at build time. So the write expressions have to
+   * come from here or from nowhere. */
+  methodWrites: ts.Expression[];
 }
 
 export interface ProtoMethod {
   name: string;
-  fn: ts.FunctionExpression | ts.ArrowFunction;
+  /** Never an ArrowFunction. An arrow captures `this` LEXICALLY, so
+   * `C.prototype.m = () => { this.x = 1 }` does not touch the instance at all --
+   * calling `inst.m()` writes the enclosing scope's `this`, and in a CJS module
+   * that is module.exports, not `inst`. Lowering one as a method would bind
+   * `this` to the receiver and silently do something Node never does, and the
+   * field walk would credit its writes to the instance shape. Both sites that
+   * collect methods refuse an arrow outright; the type keeps a future consumer
+   * from having to know that. */
+  fn: ts.FunctionExpression;
 }
 
 /** A non-function value parked on the prototype (`C.prototype._slice = ...`):
@@ -234,7 +255,7 @@ export function findProtoClasses(sf: ts.SourceFile): ProtoClass[] {
         if (!seen.has(name)) {
           seen.add(name);
           out.push({ name, init: n.right, conditional: isConditional(n, fn),
-            reassignedInMethod: false });
+            reassignedInMethod: false, methodWrites: [] });
         }
       }
       ts.forEachChild(n, walk);
@@ -292,7 +313,12 @@ export function findProtoClasses(sf: ts.SourceFile): ProtoClass[] {
             // a value we cannot see through. Never a class.
             c.bailouts.push("prototype is assigned wholesale @" + n.getStart());
           } else if (isFnLike(n.right)) {
-            if (c.methods.some((m) => m.name === t.member)) {
+            if (ts.isArrowFunction(n.right)) {
+              // Lexical `this`: not a method, and not something to guess about.
+              c.bailouts.push(
+                `prototype method '${t.member}' is an arrow function (its 'this' is ` +
+                "lexical, so it never touches the instance) @" + n.getStart());
+            } else if (c.methods.some((m) => m.name === t.member)) {
               c.bailouts.push(`prototype method '${t.member}' assigned more than once`);
             } else {
               c.methods.push({ name: t.member, fn: n.right });
@@ -324,8 +350,14 @@ export function findProtoClasses(sf: ts.SourceFile): ProtoClass[] {
         if (c) {
           let readAll = true;
           for (const prop of a1.properties) {
-            if (ts.isPropertyAssignment(prop) && isFnLike(prop.initializer)) {
+            if (ts.isPropertyAssignment(prop) && isFnLike(prop.initializer) &&
+                !ts.isArrowFunction(prop.initializer)) {
               c.mergedMethods.push({ name: prop.name.getText(), fn: prop.initializer });
+            } else if (ts.isPropertyAssignment(prop) && isFnLike(prop.initializer)) {
+              readAll = false;
+              c.bailouts.push(
+                `prototype merge member '${prop.name.getText()}' is an arrow function ` +
+                "(its 'this' is lexical, so it never touches the instance) @" + prop.getStart());
             } else {
               readAll = false;
               c.bailouts.push("prototype merge has a member we cannot read @" + prop.getStart());
@@ -372,6 +404,27 @@ export function findProtoClasses(sf: ts.SourceFile): ProtoClass[] {
    * failed build, which is the shape of bug this whole module exists to avoid.
    * Verified against zapo's bundle: zero such fields across all four usable
    * classes, so this refuses nothing there and guards every other input. */
+  /* A field the constructor assigns only under a BRANCH. The slot exists on
+   * every instance, but on the path that skips the assignment nothing writes it
+   * -- Node reads undefined there, and a fixed layout would read whatever the
+   * allocation left behind. Typing the slot to admit undefined (which
+   * protoSlotTypes does) is necessary and NOT sufficient: something still has to
+   * write the undefined, and the constructor demonstrably does not.
+   *
+   * Emitting a pre-initializer would fix it properly and needs a synthesized
+   * `undefined` expression node, which is not available here. So it refuses, and
+   * a caller that later gains that node can lift this. Zero such fields across
+   * zapo's four usable classes -- it refuses nothing there. */
+  for (const c of cands) {
+    for (const f of c.fields) {
+      if (f.conditional) {
+        c.bailouts.push(
+          `field '${f.name}' is assigned only under a branch, so instances that ` +
+          "skip it have no value written to the slot");
+      }
+    }
+  }
+
   for (const c of cands) {
     const ctorFields = new Set(c.fields.map((f) => f.name));
     for (const m of [...c.methods, ...c.mergedMethods]) {
@@ -386,7 +439,7 @@ export function findProtoClasses(sf: ts.SourceFile): ProtoClass[] {
         ) {
           const name = n.left.name.getText();
           const own = c.fields.find((f) => f.name === name);
-          if (own) own.reassignedInMethod = true;
+          if (own) { own.reassignedInMethod = true; own.methodWrites.push(n.right); }
           else if (ctorFields.has(name)) { /* unreachable, kept for clarity */ }
           else {
             c.bailouts.push(
@@ -434,7 +487,7 @@ function whyPrint(sf: ts.SourceFile, classes: readonly ProtoClass[]): void {
         ` merged=${c.mergedMethods.length} protoConsts=${c.protoConsts.length}` +
         ` statics=${c.statics.length}` +
         ` shape={${c.fields.map((f) => f.name + (f.conditional ? "?" : "") +
-          (f.reassignedInMethod ? "*" : "")).join(",")}}`,
+          (f.reassignedInMethod ? "*" + String(f.methodWrites.length) : "")).join(",")}}`,
     );
     // Collapse by REASON: a refusal repeated at 7 offsets is one fact, and
     // the raw list ran to 1,612 lines on zapo's bundle, which is not a
