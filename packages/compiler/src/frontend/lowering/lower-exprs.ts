@@ -21,6 +21,7 @@ import { cjsClassExprWholeExportOf, cjsExportAssignmentOf, cjsExportDiscardReaso
 import { absentGlobalMemberValue, absentProcessMemberValue, ARRAY_METHODS, builtinConstLit, builtinFenceHintOf, objectStaticFnValueOf, stdlibExistenceTestOf, stringMethodFnValueOf, builtinModuleConstOf, builtinModulesArrayLit, builtinModuleFnOf, COMPOUND_ASSIGN_OPS, CompoundOp, ISLAND_SURFACE, isChildSurfaceMember, MAP_METHODS, NARROW_FIRST, SET_METHODS, STR_METHODS, UNSUPPORTED_EXPR, sideEffectFreeOptionValue, stdlibGlobalNameOf } from "./surfaces.js";
 import { UNSUPPORTED, assertionDropsMembersDiag, assertionOverflowsMembersDiag, blockedBindingUseDiag, recordShapeMismatchDiag, requiresDynamicPackageDiag, unsupportedDiag } from "../../diagnostics/diagnostic.js";
 import { PoisonError, dynUndefinedExpr, jsFuncValueNameOf, jsFuncValueSourceOf, neverTaintedJsType, nodeThrowExpr, own } from "./lowerer.js";
+import { protoThisType } from "./proto-class-consume.js";
 import { arrayAtOf, BYTES_CTORS, condPresenceSlot, IndexMergeContributor, lowerIndexMergeHelper, lowerNpmStaticSafeIndexRead, strCharsCall } from "./lower-containers.js";
 import { npmStaticPackageOfPath } from "../npm-static.js";
 import { unsupportedModuleFeatureOf } from "../shared.js";
@@ -19603,7 +19604,12 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
    * fieldSet/recordSet/accessor-call (minus value/kind) or null. */
   export function fieldTarget(L: Lowerer, access: ts.PropertyAccessExpression, forWrite = false): FieldTarget | null {
     if (L.chainBlocked(access)) return null;
-    const receiverIr = L.mapTypeOf(L.typeOf(access.expression));
+    let receiverIr = L.mapTypeOf(L.typeOf(access.expression));
+    // `this.f` inside a SYNTHESIZED prototype-class: the checker answers
+    // `any` for `this` in a JavaScript pre-class constructor, so the type has
+    // to come from the body's own declared `this` local. Only ever fires when
+    // the checker said nothing at all.
+    if (receiverIr === null) receiverIr = protoThisType(L, access.expression);
     if (receiverIr?.kind === "object") {
       const info = L.classes.get(receiverIr.className);
       if (!info) {
