@@ -2462,6 +2462,16 @@ const ScrDynClassMember *scr_dyn_objinst_member(const ScrDyn *d, const char *k, 
   return NULL;
 }
 
+size_t scr_dyn_objinst_member_count(const ScrDyn *d) {
+  if (d == NULL || d->kind != SCR_DYN_OBJINST) return 0;
+  return scr_dyn_objinst_class_of(d)->nmembers;
+}
+
+const ScrDynClassMember *scr_dyn_objinst_member_at(const ScrDyn *d, size_t i) {
+  const ScrDynClass *c = scr_dyn_objinst_class_of(d);
+  return i < c->nmembers ? &c->members[i] : NULL;
+}
+
 bool scr_dyn_objinst_has_members(const ScrDyn *d) {
   if (d == NULL || d->kind != SCR_DYN_OBJINST) return false;
   return scr_dyn_objinst_class_of(d)->nmembers > 0;
@@ -3516,10 +3526,49 @@ static bool scr_dyn_json_write_raw(ScrJsonBuf *b, const ScrDyn *d) {
      * isJsonSafeType and must stay absent. */
     scr_dyn_big_json_throw();
     return true; /* pending exception; caller checks */
-  case SCR_DYN_OBJINST:
-    /* Named by its class, like every other OBJINST refusal. */
-    scr_dyn_objinst_fence(d, "JSON.stringify");
-    return true; /* pending exception; caller checks */
+  case SCR_DYN_OBJINST: {
+    /* Node serializes an instance's OWN ENUMERABLE properties, which the
+     * member table now names -- so this answers where it used to fence.
+     * A class with NO table keeps the fence: a fabricated {} there would
+     * be the silent wrong shape the fence exists to refuse.
+     *
+     * The enter/leave bracket is not decoration. A class field may hold
+     * another instance, including this one (`this.self = this`), and a
+     * cycle down an unguarded writer is an infinite recursion -- which is
+     * worse than the fence this replaces, not better. Guarded, a cycle is
+     * V8's own "Converting circular structure to JSON". */
+    if (!scr_dyn_objinst_has_members(d)) {
+      scr_dyn_objinst_fence(d, "JSON.stringify");
+      return true; /* pending exception; caller checks */
+    }
+    if (!scr_jb_enter(b, d->v.inst.o, false)) return true; /* cyclic; pending */
+    scr_jb_putc(b, '{');
+    bool ifirst = true;
+    const size_t inm = scr_dyn_objinst_member_count(d);
+    for (size_t i = 0; i < inm; i++) {
+      const ScrDynClassMember *m = scr_dyn_objinst_member_at(d, i);
+      if (!m->enumerable || m->get == NULL) continue;
+      ScrDyn *mv = m->get(d->v.inst.o); /* +1 */
+      if (mv == NULL) { scr_jb_leave(b); return true; } /* threw; pending */
+      if (scr_dyn_json_absent(mv)) { /* undefined/function members drop, like Node */
+        scr_dyn_release(mv);
+        continue;
+      }
+      ScrStr *mk = scr_str_new(m->name, m->len); /* +1, alive across the nested write */
+      if (!ifirst) scr_jb_putc(b, ',');
+      ifirst = false;
+      scr_jb_put_json_str(b, mk);
+      scr_jb_putc(b, ':');
+      scr_jb_edge_key(b, mk);
+      scr_dyn_json_write_raw(b, mv);
+      scr_str_release(mk);
+      scr_dyn_release(mv);
+      if (scr_exc_pending()) { scr_jb_leave(b); return true; }
+    }
+    scr_jb_putc(b, '}');
+    scr_jb_leave(b);
+    return true;
+  }
   case SCR_DYN_HANDLE:
   default: {
     const char *msg = "JSON.stringify of a runtime handle is not supported yet";
@@ -4161,15 +4210,32 @@ ScrStr *scr_dyn_to_string(const ScrDyn *d, const ScrStr *enc) {
       return s;
     }
     return scr_str_new("[object Object]", 15);
-  case SCR_DYN_OBJINST:
-    /* NOT "[object Object]". A class instance may override toString, and
-     * its static twin calls the override — answering the default here
-     * would make one value render two ways depending on whether it
-     * crossed the boundary, which is the wrong-answer shape this tree
-     * refuses. The box carries no member table to dispatch the override
-     * through, so the honest answer is the loud ladder. */
+  case SCR_DYN_OBJINST: {
+    /* A class instance may override toString, and its static twin calls
+     * the override -- answering "[object Object]" blindly would make one
+     * value render two ways depending on whether it crossed the boundary,
+     * which is the wrong-answer shape this tree refuses. That is why this
+     * WAS a fence: the box had no member table to dispatch through.
+     *
+     * It has one now, so this answers. An override runs; a class that
+     * declares none inherits Object.prototype.toString, whose answer is
+     * "[object Object]" -- and here that is a MEASURED constant rather
+     * than a guess, because the table is the class's whole member set and
+     * its absence from the table is the absence of the method. Only a
+     * class with NO table keeps the fence: there the box still cannot
+     * tell an override from an absence. */
+    const ScrDynClassMember *ts = scr_dyn_objinst_member(d, "toString", 8);
+    if (ts != NULL && ts->call != NULL) {
+      ScrDyn *r = ts->call(d->v.inst.o, NULL, 0, "toString");
+      if (r == NULL) return scr_str_new("", 0); /* threw -- pending */
+      ScrStr *s = scr_dyn_to_string(r, NULL);
+      scr_dyn_release(r);
+      return s;
+    }
+    if (scr_dyn_objinst_has_members(d)) return scr_str_new("[object Object]", 15);
     scr_dyn_objinst_fence(d, "String()");
     return scr_str_new("", 0); /* the pending throw wins */
+  }
   case SCR_DYN_BIG:
     /* The DIGITS, with no suffix: String(5n) is "5" and only
      * util.inspect prints 5n. A bigint has a real BigInt.prototype
@@ -5446,6 +5512,16 @@ bool scr_dyn_has_key(const ScrDyn *v, const ScrStr *key) {
    * defineProperties both land in one table), so `k in f` answers from
    * the same place the read does. */
   if (v->kind == SCR_DYN_FUNC) return scr_dyn_fn_has(v, key->data, key->len);
+  /* A boxed class INSTANCE answers from its member table, and `in` walks
+   * the prototype chain, so a METHOD is a member here as well as a field
+   * -- Node says true to both. Before the table this fell to the `false`
+   * tail: `'get' in x` answered false for a method the object has, at
+   * exit 0, with no diagnostic. A wrong boolean is the worst shape a
+   * wrong answer takes, and it is the shape this closes. A class with no
+   * table still answers false, exactly as it did. */
+  if (v->kind == SCR_DYN_OBJINST) {
+    return scr_dyn_objinst_member(v, key->data, key->len) != NULL;
+  }
   return false;
 }
 
@@ -5892,11 +5968,43 @@ static void scr_jb_put_dyn_raw(ScrJsonBuf *b, const ScrDyn *d) {
     scr_jb_puts(b, "null"); /* the buffer never surfaces: the throw wins */
     return;
   case SCR_DYN_OBJINST: {
-    /* Node serializes an instance's own enumerable properties; the box
-     * has no member table to enumerate, so a fabricated {} would be a
-     * silent wrong shape. Loud fence, like the handle arm above. */
-    scr_dyn_objinst_fence(d, "JSON.stringify");
-    scr_jb_puts(b, "null"); /* the buffer never surfaces: the throw wins */
+    /* The sibling writer's arm, and the two must stay one answer: an
+     * instance's own ENUMERABLE properties, the member table's rows.
+     * Members ride scr_jb_put_dyn_keyed so a field's own toJSON hook runs
+     * here exactly as it does for a plain object's member. A class with
+     * NO table keeps the fence, and a cycle through a field is V8's
+     * circular TypeError rather than an infinite recursion. */
+    if (!scr_dyn_objinst_has_members(d)) {
+      scr_dyn_objinst_fence(d, "JSON.stringify");
+      scr_jb_puts(b, "null"); /* the buffer never surfaces: the throw wins */
+      return;
+    }
+    if (!scr_jb_enter(b, d->v.inst.o, false)) { scr_jb_puts(b, "null"); return; }
+    scr_jb_putc(b, '{');
+    bool ifirst = true;
+    const size_t inm = scr_dyn_objinst_member_count(d);
+    for (size_t i = 0; i < inm; i++) {
+      const ScrDynClassMember *m = scr_dyn_objinst_member_at(d, i);
+      if (!m->enumerable || m->get == NULL) continue;
+      ScrDyn *mv = m->get(d->v.inst.o); /* +1 */
+      if (mv == NULL) { scr_jb_leave(b); return; } /* threw; pending */
+      if (scr_dyn_json_absent(mv)) {
+        scr_dyn_release(mv);
+        continue;
+      }
+      ScrStr *mk = scr_str_new(m->name, m->len); /* +1, alive across the nested write */
+      if (!ifirst) scr_jb_putc(b, ',');
+      ifirst = false;
+      scr_jb_put_json_str(b, mk);
+      scr_jb_putc(b, ':');
+      scr_jb_edge_key(b, mk);
+      scr_jb_put_dyn_keyed(b, mv, mk->data, mk->len);
+      scr_str_release(mk);
+      scr_dyn_release(mv);
+      if (scr_exc_pending()) { scr_jb_leave(b); return; }
+    }
+    scr_jb_putc(b, '}');
+    scr_jb_leave(b);
     return;
   }
   case SCR_DYN_JSVAL: {
@@ -8541,6 +8649,39 @@ static ScrDyn *scr_dyn_objwalk(const ScrDyn *v, ScrObjWalk mode) {
       scr_str_release(k);
     }
     free(ord);
+    return out;
+  }
+  if (v->kind == SCR_DYN_OBJINST) {
+    /* An instance's OWN ENUMERABLE properties are its declared FIELDS, in
+     * declaration order. Methods are excluded and that is not an omission:
+     * a class method is non-enumerable in JS, which is exactly why
+     * Object.keys(new Box(7)) is ["v"] and not ["v","get"] -- measured
+     * against v25.9.0, and the member table records the distinction per
+     * row rather than re-deriving it here.
+     *
+     * Before the table this fell through to the empty-array tail, so
+     * Object.keys answered [] for an object with fields: a wrong array at
+     * exit 0, the `in` arm's silence one surface over. A class with no
+     * table still answers [], exactly as it did. */
+    const size_t nm = scr_dyn_objinst_member_count(v);
+    for (size_t i = 0; i < nm; i++) {
+      const ScrDynClassMember *m = scr_dyn_objinst_member_at(v, i);
+      if (!m->enumerable || m->get == NULL) continue;
+      if (mode == SCR_OBJWALK_KEYS) {
+        /* KEYS runs nothing -- the OBJ arm's rule: listing a name is not
+         * a [[Get]], and reading the field here would be a side effect JS
+         * does not have. */
+        scr_dyn_arr_push(out, scr_dyn_objwalk_key(m->name, m->len));
+        continue;
+      }
+      ScrDyn *val = m->get(v->v.inst.o); /* +1 */
+      if (val == NULL) { /* the read threw */
+        scr_dyn_release(out);
+        return NULL;
+      }
+      scr_dyn_objwalk_push(out, mode, m->name, m->len, val);
+      scr_dyn_release(val);
+    }
     return out;
   }
   if (v->kind == SCR_DYN_ARR || v->kind == SCR_DYN_BYTES) {
