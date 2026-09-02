@@ -3110,6 +3110,7 @@ export function lowerStmt(L: Lowerer, stmt: ts.Statement): IrStmt | IrStmt[] | n
         );
       }
     }
+    L.noteEnumOrderBake(restT.shapeId, null);
     const emitOrder = restShape.declaredOrder ?? restShape.fields.map((f) => f.name);
     if (emitOrder.length !== remaining.length || emitOrder.some((n, i) => n !== remaining[i]!.name)) {
       L.unsupported(
@@ -7937,6 +7938,9 @@ function isEsModuleStamp(expr: ts.Expression): boolean {
           }
         }
         const remaining = shape.fields.filter((f) => !consumed.has(f.name));
+        // The rest shape's order is DERIVED from the source's, right here.
+        // Re-picking the source afterwards would leave the two disagreeing.
+        L.noteEnumOrderBake(srcType.shapeId, null);
         const restShapeId = L.shapes.intern(
           remaining.map((f) => ({ name: f.name, type: f.type })),
           false,

@@ -87,15 +87,36 @@ console.log(JSON.stringify(narrow));
 /* ── the ORDER half: one shape, several literal orders ────────────────── */
 
 test("enumerating a literal spelled in an order its shape does not carry is refused", () => {
+  // TWO literals, spelled differently. ONE alone is not a divergence any
+  // more -- reconcileKeyOrders re-picks the shape's order to the one order
+  // the program proves -- so the refusal's remaining domain is an order that
+  // is not knowable, and this is it: neither spelling can be the shape's.
   const r = lower(`
 interface T { readonly b: number; readonly a: number; readonly c: number }
 const t: T = { c: 3, b: 1, a: 2 };
-console.log(JSON.stringify(t));
+const u: T = { b: 4, a: 5, c: 6 };
+console.log(JSON.stringify(t), String(u.a));
 `);
   const rows = keyRisk(r);
   expect(rows.length).toBeGreaterThan(0);
   expect(rows[0]!.message).toContain("declared order");
   expect(rows[0]!.hint ?? "").toContain("c,b,a");
+});
+
+test("ONE out-of-order literal is not a divergence: the shape takes the program's order", () => {
+  // wam's package entry, in miniature. The type here is a plain interface;
+  // in wam it is `Partial<Record<K, V>>`, a MAPPED type whose member order
+  // is the key union's and which no literal anywhere was spelled from.
+  // Either way the order the program BUILDS is the only evidence there is,
+  // so it becomes the shape's and every enumeration surface reads it.
+  const r = lower(`
+interface T { readonly b: number; readonly a: number; readonly c: number }
+const t: T = { c: 3, b: 1, a: 2 };
+console.log(JSON.stringify(t));
+console.log(Object.keys(t).join(","));
+`);
+  expect(keyRisk(r)).toEqual([]);
+  expect(r.compiled).toBe(true);
 });
 
 test("the INTERNING half: a literal in order for its own spelling that lands on another type's shape", () => {

@@ -8204,6 +8204,11 @@ const DV_SETTERS: Record<string, { method: IrBytesIntrinsicMethod; le: boolean }
       // Declared fields, in declaration order. Undefined-valued fields
       // skip at runtime (the unset-optional convention); values surface
       // into the element type or the site fences with the field named.
+      // BAKED, NOT REBUILDABLE: this expansion is spliced into the caller's
+      // statements rather than an interned helper, so the shape's order is
+      // fixed here. Blocking it keeps every consumer of that order in step
+      // (Lowerer.noteEnumOrderBake).
+      L.noteEnumOrderBake(argIr.shapeId, null);
       const order = shape.declaredOrder ?? shape.fields.map((f) => f.name);
       for (const name of order) {
         const f = shape.fields.find((x) => x.name === name)!;
@@ -8879,6 +8884,7 @@ const DV_SETTERS: Record<string, { method: IrBytesIntrinsicMethod; le: boolean }
     // Every source declared field must flow into the keyed-write slot —
     // in DECLARATION order (insertion order below; declaredOrder omits
     // internal '%'-fields, which never enter the copy).
+    L.noteEnumOrderBake(fromId, null);
     const orderedFields = from.declaredOrder
       ? from.declaredOrder.flatMap((n) => {
           const f = from.fields.find((x) => x.name === n);
@@ -9102,6 +9108,7 @@ const DV_SETTERS: Record<string, { method: IrBytesIntrinsicMethod; le: boolean }
       const from = L.shapes.get(srcIr.shapeId);
       if (!from || from.tuple) return null;
       if (from.fields.some((f) => f.name.startsWith("%"))) return null;
+      L.noteEnumOrderBake(srcIr.shapeId, null);
       const orderedFields = from.declaredOrder
         ? from.declaredOrder.flatMap((n) => {
             const f = from.fields.find((x) => x.name === n);

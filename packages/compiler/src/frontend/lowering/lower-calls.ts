@@ -9530,9 +9530,16 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
       helper = `%obj.keys.${L.arrHofHelpers.size}`;
       const ref: IrExpr = { kind: "varRef", localId: "r.0", type: argIr, loc };
       const outRef: IrExpr = { kind: "varRef", localId: "out.0", type: resultT, loc };
-      const body: IrStmt[] = [
-        { kind: "varDecl", localId: "out.0", init: { kind: "arrayLit", elems: [], type: resultT, loc }, loc },
-      ];
+      const body: IrStmt[] = [];
+      // THE BODY IS FILLED THROUGH A THUNK so reconcileKeyOrders can fill
+      // it AGAIN over a re-picked declaredOrder. It runs once here (nothing
+      // downstream may see an empty helper) and at most once more, before
+      // moduleArtifacts and armOwnMasks — the guards this registers are
+      // dropped by owner first, because a refill moves every statement.
+      const fill = (): void => {
+      L.dropOwnKeyGuards(helper!);
+      body.length = 0;
+      body.push({ kind: "varDecl", localId: "out.0", init: { kind: "arrayLit", elems: [], type: resultT, loc }, loc });
       const order = shape.declaredOrder ?? shape.fields.map((f) => f.name);
       for (const name of order) {
         const f = shape.fields.find((x) => x.name === name)!;
@@ -9576,9 +9583,12 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
         // walk, so an unarmed shape keeps the tag test above verbatim.
         L.noteOwnKeyGuard(argIr.shapeId, f.name, ref, loc, (present) => {
           body[at] = { kind: "if", cond: present, then: [pushStmt], else_: null, loc };
-        });
+        }, helper!);
       }
       body.push({ kind: "return", value: outRef, loc });
+      };
+      fill();
+      L.noteEnumOrderBake(argIr.shapeId, fill);
       L.arrHofHelpers.set(key, helper);
       L.liftedFns.push({
         name: helper,
@@ -11109,17 +11119,21 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
     }
 
     L.noteKeyEnumeration(receiver, loc, `Object.${member}`);
-    const order = shape.declaredOrder ?? shape.fields.map((f) => f.name);
     const key = `obj.${member}:${argIr.shapeId}:${typeKey(resultT)}`;
     let helper = L.arrHofHelpers.get(key);
     if (!helper) {
       helper = `%obj.${member}.${L.arrHofHelpers.size}`;
       const recT = argIr;
       const ref: IrExpr = { kind: "varRef", localId: "r.0", type: recT, loc };
-      const body: IrStmt[] = [
-        { kind: "varDecl", localId: "out.0", init: { kind: "arrayLit", elems: [], type: resultT, loc }, loc },
-      ];
+      const body: IrStmt[] = [];
       const outRef: IrExpr = { kind: "varRef", localId: "out.0", type: resultT, loc };
+      // Refillable over a re-picked order — Object.keys's thunk, verbatim
+      // (values and entries must not drift from the key list).
+      const fill = (): void => {
+      L.dropOwnKeyGuards(helper!);
+      body.length = 0;
+      body.push({ kind: "varDecl", localId: "out.0", init: { kind: "arrayLit", elems: [], type: resultT, loc }, loc });
+      const order = shape.declaredOrder ?? shape.fields.map((f) => f.name);
       for (const name of order) {
         const f = shape.fields.find((x) => x.name === name)!;
         const raw: IrExpr = { kind: "recordGet", obj: ref, shapeId: argIr.shapeId, field: f.name, type: f.type, loc };
@@ -11245,9 +11259,12 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
                   loc,
                 }
               : inner;
-        });
+        }, helper!);
       }
       body.push({ kind: "return", value: outRef, loc });
+      };
+      fill();
+      L.noteEnumOrderBake(argIr.shapeId, fill);
       L.arrHofHelpers.set(key, helper);
       L.liftedFns.push({
         name: helper,
