@@ -187,3 +187,38 @@ export function dynMemberRows(
 
   return rows;
 }
+
+/** The DISPLAY NAME a `ScrDynClass` descriptor carries: the string every
+ * "on a dynamic X" fence prints and, since util.inspect joined the member
+ * table, the one that goes before the brace (`Box { v: 7 }`).
+ *
+ * `def.name` is the IR name, and an IR name is a COMPILER name. It is
+ * program-qualified, and for a class EXPRESSION it is `%cx<character
+ * offset>.<binding name>` — so
+ *
+ *     const Box = class { constructor(v) { this.v = v } get() {...} }
+ *     function see(x) { return require("node:util").inspect(x) }
+ *     console.log(see(new Box(7)))
+ *
+ * printed `cx44. { v: 7 }` at EXIT 0 where node v25.9.0 prints
+ * `Box { v: 7 }` — the compiler's own internal name, on stdout, in the
+ * most ordinary thing a program does with a value. A class the frontend
+ * synthesizes from a JavaScript pre-class constructor is the same fact
+ * with a different prefix (`%pc<offset>.<name>`), and there the string
+ * was a function of where in the file the constructor happened to sit.
+ *
+ * `def.jsName` is the JS-VISIBLE name — `C.name`, the value the `.name`
+ * property lowering already folds to, following NamedEvaluation — which
+ * is what Node prints and what an error text about a program's own value
+ * should say. Empty for a truly anonymous class expression and absent on
+ * the runtime-provided defs, which is why this falls back rather than
+ * trusting it: there the IR name is the only name there is.
+ *
+ * Here, and not in either emitter, for the reason the member rows are
+ * here: a name one lane prints and the other spells differently is the
+ * two-lanes-one-question defect, and both emitters call this. */
+export function dynClassDisplayName(def: IrClassDef): string {
+  const js = def.jsName ?? "";
+  if (js !== "") return js;
+  return def.name.startsWith("%") ? def.name.slice(1) : def.name;
+}
