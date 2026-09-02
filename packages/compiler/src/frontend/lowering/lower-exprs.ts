@@ -10173,6 +10173,10 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
           // and a later explicit write of the same name moves it. Both
           // would make a refusal an invention, so an optional contributor
           // gives up.
+          // The spelling this literal reports is the spread SOURCE's order
+          // read here, so re-picking that source later would make the
+          // evidence stale.
+          L.noteEnumOrderBake(st.shapeId, null);
           const order = ss.declaredOrder;
           if (ss.fields.some((f) => order.includes(f.name) && isUndefinedArmedUnion(f.type, (u) => L.unions.get(u)))) {
             simpleSpelling = false;
@@ -10188,6 +10192,14 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
       // The spelling is also what starts the WRITE-ORDER tracking for a
       // literal that does not name every field (noteKeyPresenceInit).
       if (simpleSpelling) L.noteLiteralSpelling(locOf(expr), spelledNames);
+      // EVERY literal into an order-carrying shape is evidence about that
+      // SHAPE's order, whether or not it disagrees — an agreeing literal is
+      // what stops the reconciliation below from re-picking the order out
+      // from under it. A literal the loop could not spell (a computed name,
+      // a conditional spread) is evidence of the opposite kind: it says the
+      // program builds this shape in an order nobody can name, and it
+      // BLOCKS the shape (null spelling).
+      L.noteLiteralOrderEvidence(type.shapeId, locOf(expr), simpleSpelling ? esOwnKeyOrder(spelledNames) : null);
       if (simpleSpelling && spelledNames.length >= 2) {
         const spelled = esOwnKeyOrder(spelledNames);
         const want = shape.declaredOrder.filter((n) => spelled.includes(n));

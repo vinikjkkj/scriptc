@@ -2511,6 +2511,10 @@ export class Lowerer {
     // construction anywhere in the program can reach a surface anywhere.
     // What each function RETURNS is part of "the whole walk": a callee can
     // be lowered after its caller, so the return risks are armed first.
+    // ...and the order the shapes ENUMERATE in is re-picked first, where
+    // the program's own constructions prove one: a refusal is the answer
+    // only for a disagreement that survives that.
+    this.reconcileKeyOrders(functions);
     this.armKeyRiskFnReturns(functions);
     this.reportKeyEnumerationRisks();
 
@@ -2677,6 +2681,12 @@ export class Lowerer {
     obj: IrExpr;
     loc: SrcLoc;
     install: (present: IrExpr) => void;
+    /** The interned helper whose body this guard writes into, when it has
+     * one. reconcileKeyOrders REBUILDS such a body, which moves every
+     * statement in it — the guards a rebuild replaces are dropped by owner
+     * first, so no install closure survives pointing at a slot that has
+     * moved. */
+    owner?: string;
   }[] = [];
 
   /** Inspect helpers that baked an `[Object: null prototype]` prefix from
@@ -2721,8 +2731,43 @@ export class Lowerer {
     obj: IrExpr,
     loc: SrcLoc,
     install: (present: IrExpr) => void,
+    owner?: string,
   ): void {
-    this.ownKeyGuards.push({ shapeId, field, obj, loc, install });
+    this.ownKeyGuards.push({ shapeId, field, obj, loc, install, ...(owner ? { owner } : {}) });
+  }
+
+  /** Forget the guards one interned helper registered, before it registers
+   * them again over a rebuilt body. */
+  dropOwnKeyGuards(owner: string): void {
+    for (let i = this.ownKeyGuards.length - 1; i >= 0; i--) {
+      if (this.ownKeyGuards[i]!.owner === owner) this.ownKeyGuards.splice(i, 1);
+    }
+  }
+
+  /** A LOWERING-TIME CONSUMER of a shape's enumeration order.
+   *
+   * Four of the six enumeration surfaces read `declaredOrder` at EMISSION
+   * time (JSON.stringify's walker, the record->dyn crossing's, and both
+   * backends' inspect walkers), so they follow a re-picked order for free.
+   * The rest BAKE it: Object.keys/values/entries and for...in expand into
+   * an interned helper whose body is one guarded push per field, the
+   * width-copy spread emits its writes in the source shape's order, and a
+   * rest binding packs a shape derived from it. Those are already IR by
+   * the time reconcileKeyOrders runs.
+   *
+   * So each such site says so here. A site that can REBUILD its body
+   * passes a thunk; one that cannot passes null, and a null BLOCKS the
+   * shape from ever being re-picked. That is what keeps the enumeration
+   * work's own constraint — an order read by four surfaces of six makes
+   * Object.keys and JSON.stringify disagree, which is a new defect, not a
+   * partial fix. Either every consumer of a shape's order moves with it or
+   * the shape does not move. */
+  readonly enumOrderBakes = new Map<string, { rebuilds: (() => void)[]; blocked: boolean }>();
+  noteEnumOrderBake(shapeId: string, rebuild: (() => void) | null): void {
+    let e = this.enumOrderBakes.get(shapeId);
+    if (!e) this.enumOrderBakes.set(shapeId, (e = { rebuilds: [], blocked: false }));
+    if (rebuild === null) e.blocked = true;
+    else e.rebuilds.push(rebuild);
   }
 
   /** Arm the hidden OWN-KEY MASK (IrRecordShape.ownmask) on every record
@@ -3325,6 +3370,47 @@ export class Lowerer {
     if (!this.literalSpellings.has(k)) this.literalSpellings.set(k, names);
   }
 
+  /** ORDER EVIDENCE, per SHAPE — what reconcileKeyOrders decides on.
+   *
+   * `declaredOrder` is the FIRST INTERNED TYPE's member order, and for a
+   * MAPPED type (`Partial<Record<K, V>>`, `{[P in K]: T}`) that is the key
+   * union's order, which no object literal anywhere was ever spelled from.
+   * wam's `pkgs/wam/globals.ts` is exactly that: the shape enumerates the
+   * alphabetical order of an AUTO-GENERATED table's members and the one
+   * literal that builds it is spelled `platform, webcWebPlatform,
+   * appVersion, ...`. Refusing the enumeration is right about the
+   * disagreement and wrong about who is wrong — the shape's order is the
+   * fiction, and the literal is the fact.
+   *
+   * So every literal into an order-carrying shape reports here: its
+   * esOwnKeyOrder'd spelling, or NULL when the walk could not spell it at
+   * all. `locs` keeps the sites so the loc-keyed literal risks can be
+   * recomputed after a rewrite. */
+  readonly shapeOrderEvidence = new Map<
+    string,
+    { spellings: Set<string>; blocked: boolean; locs: Map<string, string[]> }
+  >();
+  noteLiteralOrderEvidence(shapeId: string, loc: SrcLoc, spelled: string[] | null): void {
+    let e = this.shapeOrderEvidence.get(shapeId);
+    if (!e) {
+      e = { spellings: new Set(), blocked: false, locs: new Map() };
+      this.shapeOrderEvidence.set(shapeId, e);
+    }
+    if (spelled === null) {
+      e.blocked = true;
+      return;
+    }
+    e.spellings.add(spelled.join(","));
+    e.locs.set(this.keyRiskLocKey(loc), spelled);
+  }
+
+  /** True once reconcileKeyOrders rewrote at least one shape's
+   * declaredOrder. Every key-risk answer cached during the walk was
+   * computed against the OLD order, so the report recomputes from scratch
+   * when this is set — and behaves byte-identically to before when it is
+   * not, which is what keeps a program no rewrite touched unchanged. */
+  private keyOrderReconciled = false;
+
   /** A SOURCE-LEVEL field write `r.f = v` / `r["f"] = v`. Only a write onto
    * a TRACKED local counts: everything else has no construction the walk
    * can point at, and "name the site or say nothing" is the rule. */
@@ -3561,13 +3647,18 @@ export class Lowerer {
     if (!init) return;
     const r = this.exprKeyRisk(init);
     const k = this.keyRiskKey(localId);
+    // The initializer is kept whatever the answer is. A risk answered NOW
+    // was answered against the order the shapes carried at the time, and
+    // reconcileKeyOrders can re-pick one — the kept expression is what lets
+    // the report ask again rather than trust a stale cache. Answering
+    // eagerly as well keeps the no-rewrite path exactly as it was.
+    if (!this.keyRiskPending.has(k)) this.keyRiskPending.set(k, { init, frame: this.keyRiskCurrentFrame() });
     if (r) {
       if (!this.keyRiskValues.has(k)) this.keyRiskValues.set(k, r);
       return;
     }
     // NO RISK *YET*. The initializer may be a call to a function this walk
-    // has not reached, so the question is kept rather than answered.
-    if (!this.keyRiskPending.has(k)) this.keyRiskPending.set(k, { init, frame: this.keyRiskCurrentFrame() });
+    // has not reached, so the question is kept (above) rather than answered.
     // ...and a PARTIAL literal starts the write-order tracking, because the
     // keys it does not spell get their order from the writes that follow.
     this.noteKeyPresenceInit(localId, init);
@@ -3582,7 +3673,10 @@ export class Lowerer {
     }
     const r = this.exprKeyRisk(value);
     if (r) {
-      this.keyEnumUses.push({ ref: null, risk: r, loc, surface });
+      // The EXPRESSION rides along with the answer. reconcileKeyOrders can
+      // re-pick the order this answer was computed against, and the report
+      // then asks again from the expression instead of trusting it.
+      this.keyEnumUses.push({ ref: null, risk: r, expr: value, frame: this.keyRiskCurrentFrame(), loc, surface });
       return;
     }
     // `Object.keys(mk())` — the value is not a local, so there is no ref to
@@ -3632,10 +3726,179 @@ export class Lowerer {
     }
     const r = this.exprKeyRisk(value);
     if (r) {
-      this.keyEnumUses.push({ ref: null, risk: r, loc: value.loc, surface: "", crossing: true });
+      this.keyEnumUses.push({ ref: null, risk: r, expr: value, frame: this.keyRiskCurrentFrame(), loc: value.loc, surface: "", crossing: true });
       return;
     }
     this.keyEnumUses.push({ ref: null, risk: null, expr: value, frame: this.keyRiskCurrentFrame(), loc: value.loc, surface: "", crossing: true });
+  }
+
+  /** ORDER RECONCILIATION — the half of the enumeration decision that fixes
+   * the program instead of refusing it.
+   *
+   * A record has no per-instance key list, so ONE order per shape is all
+   * the model can carry. Which one is a CHOICE, and until now it was made
+   * by whichever type interned the shape first. That choice is evidence-
+   * free: for a mapped type there is no member list in the source at all,
+   * and the order it hands out is the key union's. Where the program builds
+   * every value of a shape ONE way, the program's own way is the evidence,
+   * and adopting it makes all six enumeration surfaces answer Node —
+   * Object.keys/values/entries, for...in, JSON.stringify, object spread,
+   * util.inspect and the record->dyn crossing all read declaredOrder, so
+   * they move together or not at all.
+   *
+   * It re-picks a shape's order ONLY on proof, and every clause below is a
+   * way the proof can fail:
+   *
+   *   - the shape must carry a declaredOrder, and must not be a tuple, an
+   *     index-signature shape, or a builtin rendering (Dirent and friends
+   *     are constructed by the RUNTIME, and no literal speaks for them);
+   *   - it must have internal '%'-fields nowhere in play: the rewrite is a
+   *     PERMUTATION of declaredOrder, so the omitted set — which IS part of
+   *     the shape's interning identity (keyOf) — cannot move;
+   *   - every literal of the shape must have been spellable, and all of
+   *     them must spell the SAME order. Two literals that disagree have no
+   *     one right answer and keep refusing;
+   *   - every recordLit of the shape ANYWHERE in the emitted IR must be one
+   *     the evidence saw. A literal built by a path that does not report
+   *     (the merge helper, a synthesized shape) blocks the shape rather
+   *     than being assumed to agree;
+   *   - no dynCheck may materialise the shape. A cast's order is a run-time
+   *     fact; re-picking under it could turn a checked cast that happened to
+   *     match into one that does not, and that would be a MATCH -> WRONG;
+   *   - no write-order-tracked binding may name the shape. Those orders are
+   *     made by writes the walk reads as one straight line, which is
+   *     deliberately under-reported, and under-reported evidence may not
+   *     DECIDE anything — only refuse.
+   *
+   * The IR walk is the completeness check: it is what turns "the literals I
+   * happened to see agree" into "these are the only constructions there
+   * are". */
+  reconcileKeyOrders(functions: IrFunction[]): void {
+    const why = process.env["SCRIPTC_KEYORDER_WHY"] !== undefined;
+    if (this.shapeOrderEvidence.size === 0) return;
+    // ONE walk over everything the program can emit: every recordLit's
+    // shape and loc (completeness) and every dynCheck's target shapes
+    // (the run-time-order veto).
+    const litSites = new Map<string, Set<string>>();
+    const castShapes = new Set<string>();
+    const seen = new Set<object>();
+    const walk = (n: unknown): void => {
+      if (n === null || typeof n !== "object") return;
+      if (seen.has(n)) return;
+      seen.add(n);
+      if (Array.isArray(n)) {
+        for (const x of n) walk(x);
+        return;
+      }
+      const o = n as Record<string, unknown>;
+      const kind = o["kind"];
+      if (kind === "recordLit") {
+        const t = o["type"] as { kind?: string; shapeId?: string } | undefined;
+        const loc = o["loc"] as SrcLoc | undefined;
+        if (t?.kind === "record" && typeof t.shapeId === "string" && loc) {
+          let s = litSites.get(t.shapeId);
+          if (!s) litSites.set(t.shapeId, (s = new Set()));
+          s.add(this.keyRiskLocKey(loc));
+        }
+      } else if (kind === "dynCheck") {
+        const t = o["type"] as { kind?: string; shapeId?: string; unionId?: string } | undefined;
+        if (t?.kind === "record" && typeof t.shapeId === "string") castShapes.add(t.shapeId);
+        else if (t?.kind === "union" && typeof t.unionId === "string") {
+          for (const a of this.unions.get(t.unionId)?.arms ?? []) {
+            if (a.kind === "record") castShapes.add(a.shapeId);
+          }
+        }
+      }
+      for (const v of Object.values(o)) walk(v);
+    };
+    walk(functions);
+    walk(this.globalsList);
+
+    const presenceShapes = new Set<string>();
+    for (const e of this.keyPresenceOrder.values()) presenceShapes.add(e.shapeId);
+
+    const rewritten: string[] = [];
+    for (const [shapeId, ev] of this.shapeOrderEvidence) {
+      const reject = (reason: string): void => {
+        if (why) console.error(`[keyorder] ${shapeId} NO-REWRITE ${reason}`);
+      };
+      if (ev.blocked) { reject("a literal of this shape could not be spelled"); continue; }
+      if (ev.spellings.size !== 1) { reject(`${ev.spellings.size} distinct literal spellings`); continue; }
+      const shape = this.shapes.get(shapeId);
+      if (!shape?.declaredOrder || shape.tuple || shape.indexValue || shape.builtin) {
+        reject("shape carries no re-pickable order");
+        continue;
+      }
+      if (shape.fields.some((f) => f.name.startsWith("%"))) { reject("shape has internal slots"); continue; }
+      if (castShapes.has(shapeId)) { reject("a checked cast materialises this shape"); continue; }
+      if (this.enumOrderBakes.get(shapeId)?.blocked) { reject("an order consumer baked this shape and cannot be rebuilt"); continue; }
+      if (presenceShapes.has(shapeId)) { reject("a write-order-tracked binding names this shape"); continue; }
+      const known = ev.locs;
+      const all = litSites.get(shapeId) ?? new Set<string>();
+      // NO LITERAL IN THE EMITTED IR is not evidence, whatever the walk
+      // recorded. A speculative lowering that was rolled back still reports
+      // its spelling here, and a shape whose only values come from somewhere
+      // this walk cannot point at has no construction to take an order from.
+      if (all.size === 0) { reject("no recordLit of this shape reached the IR"); continue; }
+      let complete = true;
+      for (const site of all) if (!known.has(site)) { complete = false; break; }
+      if (!complete) { reject("a recordLit of this shape reported no spelling"); continue; }
+      const spelled = [...known.values()][0]!;
+      if (spelled.length < 2) { reject("one key has one order"); continue; }
+      const declared = shape.declaredOrder;
+      if (!spelled.every((n) => declared.includes(n))) { reject("the spelling names a field the order does not"); continue; }
+      // A PERMUTATION, never a new set: the spelled names take the front in
+      // the order the program writes them, the rest keep theirs, and
+      // esOwnKeyOrder re-applies JS's integer-key rule over the join so a
+      // numeric name the spelling does not carry cannot be pushed behind a
+      // string one.
+      const next = esOwnKeyOrder([...spelled, ...declared.filter((n) => !spelled.includes(n))]);
+      if (next.length !== declared.length) { reject("compiler bug: rewrite is not a permutation"); continue; }
+      if (next.every((n, i) => n === declared[i])) { reject("already in this order"); continue; }
+      shape.declaredOrder = next;
+      rewritten.push(shapeId);
+      if (why) {
+        console.error(
+          `[keyorder] ${shapeId} REWRITE ${JSON.stringify(declared.join(","))} -> ${JSON.stringify(next.join(","))}`,
+        );
+      }
+    }
+    if (rewritten.length === 0) return;
+    // The baked consumers rebuild NOW — before moduleArtifacts collects the
+    // shapes a body names and before armOwnMasks installs into it.
+    for (const shapeId of rewritten) {
+      for (const rebuild of this.enumOrderBakes.get(shapeId)?.rebuilds ?? []) rebuild();
+    }
+    this.keyOrderReconciled = true;
+    // Every cached answer was computed against the OLD order. The loc-keyed
+    // literal risks are recomputed here from the recorded spellings (the
+    // same formula the literal half uses); everything derived from them —
+    // binding risks, function-return risks, and the eagerly-captured risk on
+    // an enumeration use — is dropped and re-derived by the report.
+    for (const [shapeId, ev] of this.shapeOrderEvidence) {
+      const shape = this.shapes.get(shapeId);
+      if (!shape?.declaredOrder) continue;
+      for (const [locKey, spelled] of ev.locs) {
+        // ONLY the ORDER verdict is recomputed. A literal can carry a "set"
+        // risk at the same location — a spread that ends keys the narrower
+        // shape does not name — and that has nothing to do with the order
+        // this pass re-picked. Deleting it here took four SC1090s off the
+        // width-copy half of the diagnostics corpus before the snapshot
+        // caught it.
+        const prev = this.keyRiskLiterals.get(locKey);
+        if (prev && prev.why !== "order") continue;
+        this.keyRiskLiterals.delete(locKey);
+        if (spelled.length < 2) continue;
+        const want = shape.declaredOrder.filter((n) => spelled.includes(n));
+        if (want.length !== spelled.length || !want.some((n, i) => n !== spelled[i])) continue;
+        this.keyRiskLiterals.set(locKey, {
+          why: "order",
+          detail: `this literal spells ${JSON.stringify(spelled.join(","))} where its shape enumerates ${JSON.stringify(want.join(","))}`,
+        });
+      }
+    }
+    this.keyRiskValues.clear();
+    this.keyRiskFnReturns.clear();
   }
 
   /** run()'s deferred decision: enumerating a value the walk proved wrong
@@ -3660,7 +3923,7 @@ export class Lowerer {
     const why = process.env["SCRIPTC_KEYRISK_WHY"] !== undefined;
     for (const u of this.keyEnumUses) {
       const risk =
-        u.risk ??
+        (this.keyOrderReconciled ? null : u.risk) ??
         (u.ref !== null
           ? this.keyRiskValues.get(u.ref) ?? this.resolvePendingRisk(u.ref) ?? this.presenceOrderRisk(u.ref, u.loc)
           : this.deferredUseRisk(u));
