@@ -9,7 +9,7 @@
  * --allow-multiple-definition; and selectany applies only to data.
  *
  * Sampling needs none of it. But a naive sampler is confidently WRONG here
- * in five ways, each found by measurement, each producing a clean table:
+ * in six ways, each found by measurement, each producing a clean table:
  *
  *  1. Idle threads outvote the work: a first cut put 99% of hits in ntdll
  *     wait stubs. Samples are gated on each thread's own cycle delta.
@@ -27,6 +27,19 @@
  *     took 93.81% that way, refuted because buildContacts measures 20.5%
  *     CPU while being 97% RPC wait. So every thread that burned cycles is
  *     sampled, and each sample is WEIGHTED by that thread's cycle delta.
+ *
+ *  6. The RVA is taken from the MODULE base, not from .text. Narrowing
+ *     imgLo to the first executable section (lie 3) and then reusing it as
+ *     the base for `symBase + (q - imgLo)` resolved every sample 0x1000
+ *     bytes early, because .text sits at RVA 0x1000 on
+ *     x86_64-windows-gnu. The tell was that three reported names --
+ *     crypto_x25519_dirty_fast, g_rounds and scr_win_run_sync -- are
+ *     UNREACHABLE in the program profiled, while fe_mul and fe_sq, which
+ *     cannot fail to dominate an X25519 workload, were absent. Found by
+ *     block/computecpu (e6cab267) with a 40-function control where exactly
+ *     one function runs: the skewed build reported hot_15 73.18% and
+ *     hot_14 26.82%, neither ever called; corrected, hot_20 100.00%.
+ *     modBase is kept for this and imgLo stays narrowed for lie 3.
  *
  * Phase scoping closes the last gap: percentages are otherwise the whole
  * run's, not the phase's, and the run is dominated by one phase. cpuphase
@@ -47,7 +60,7 @@
 typedef struct { DWORD64 pc; ULONG64 w; int ph; } Hit;
 static Hit *hits;
 static volatile LONG nhits;
-static DWORD64 imgLo, imgHi;
+static DWORD64 imgLo, imgHi, modBase;
 static HANDLE gProc;
 static DWORD gPid;
 static volatile LONG nWait;
@@ -222,6 +235,10 @@ int main(int argc, char **argv) {
         if (GetModuleInformation(pi.hProcess, mods[0], &mi, sizeof mi)) {
           imgLo = (DWORD64)(ULONG_PTR)mi.lpBaseOfDll;
           imgHi = imgLo + mi.SizeOfImage;
+          /* Keep the MODULE base. imgLo is narrowed to the first executable
+           * section below, and a PDB indexes by RVA from the module base --
+           * see lie 6. */
+          modBase = imgLo;
         }
       }
       if (imgHi == 0) Sleep(2);
@@ -315,7 +332,7 @@ int main(int argc, char **argv) {
       sym->SizeOfStruct = sizeof(SYMBOL_INFO);
       sym->MaxNameLen = 500;
       DWORD64 disp = 0, q = hits[k].pc;
-      if (symBase != 0 && q >= imgLo && q < imgHi) q = symBase + (q - imgLo);
+      if (symBase != 0 && q >= imgLo && q < imgHi) q = symBase + (q - modBase);
       char name[240];
       if (SymFromAddr(symProc, q, &disp, sym)) snprintf(name, sizeof name, "%s", sym->Name);
       else snprintf(name, sizeof name, "<0x%llx>", (unsigned long long)hits[k].pc);
