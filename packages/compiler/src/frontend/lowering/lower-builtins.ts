@@ -35,6 +35,7 @@ import {
   fenceOrDropOptionKey,
   isChildSurfaceMember,
 } from "./surfaces.js";
+import { fenceCatchProbe } from "./fence-catch.js";
 import { conditionalSpreadOf, lowerDynObjectLiteral, narrowBridgeDyn, probeLower, voidAllResultIsAValue } from "./lower-exprs.js";
 import { bufEncoding } from "./lower-containers.js";
 import { HTTP2_CONSTANTS } from "./http2-constants.js";
@@ -613,7 +614,33 @@ import { KEYOBJ, HASH_T, HMAC_T, CIPHER_T, DECIPHER_T, BOOL, BYTES_U8, CAUGHT, C
         kind: "libCall",
         fn: "error.fenceThrow",
         args: [],
-        fence: { message: fence.text, code: fence.code },
+        // NON-CATCHABLE, and this is the one construct that opts in.
+        //
+        // Under --best-effort -- and, for THIS construct, flagless too, since
+        // the arm above emits the fence unconditionally -- the refusal was a
+        // catchable throw, and protobufjs's inquire() is
+        //   function (m) { try { ... return require(m) ... } catch (e) {} return null }
+        // so it was EATEN. Measured on both backends at main acba2b2d, exit 0,
+        // no diagnostic: require("buffer"), require("node:path") and
+        // require("typescript") each answered NULL where node hands back a
+        // module. The fence was not the safeguard; the deadness of that call
+        // in the one bundle that ships it was. Any other consumer of the same
+        // construct got null and never knew.
+        //
+        // There is nothing to lower here instead: the value would have to be a
+        // module namespace object AND the graph would have to be dynamic, and
+        // the compiler names the graph as fixed at build time. So the job is to
+        // make the refusal REACH THE USER, which is what fatal does.
+        //
+        // Scoped to this construct on purpose. A global non-catchable stop
+        // would convert every deferred fence zapo's own code currently catches
+        // into a hard crash. What newly stops here is exactly: a program that
+        // reaches a run-time-specifier require whose specifier the BUILD could
+        // not rule out -- the verdict's own "throw Node's MODULE_NOT_FOUND"
+        // arm is untouched, so every specifier nothing resolves keeps its
+        // catchable Node error and every optional-dependency idiom keeps
+        // working.
+        fence: { message: fence.text, code: fence.code, fatal: true },
         type: DYN,
         loc,
       },
@@ -774,6 +801,7 @@ import { KEYOBJ, HASH_T, HMAC_T, CIPHER_T, DECIPHER_T, BOOL, BYTES_U8, CAUGHT, C
     L.runtimeFences.push(d);
     const sf = call.getSourceFile();
     const pos = ts.getLineAndCharacterOfPosition(sf, loc.start);
+    fenceCatchProbe("require-runtime-specifier", call, loc.file, pos.line + 1);
     return { text: `${d.message} [${d.code} at ${loc.file}:${pos.line + 1}]`, code: d.code };
   }
 

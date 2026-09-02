@@ -11991,10 +11991,21 @@ class LlEmitter {
       // the pending check's unwind.
       if (e.fence === undefined) throw new Error("emitter bug: error.fenceThrow carries no fence");
       const fenceBytes = Buffer.byteLength(e.fence.message, "utf8");
-      this.declare(`declare void @scr_throw_error_msg_code(i32, ptr, i64, ptr)`);
-      B.line(
-        `call void @scr_throw_error_msg_code(i32 0, ptr ${this.cstr(e.fence.message)}, i64 ${fenceBytes}, ptr ${this.cstr(e.fence.code)})`,
-      );
+      // The NON-CATCHABLE arm (fence.fatal) - same message, same code, no
+      // exception cell: scr_fence_fatal prints the "Uncaught Error: ..." line
+      // and _Exit(1)s. Kept in the same literal-argument shape so the LLVM
+      // half of scripts/tu-census.mjs reads it as the tagged refusal it is.
+      if (e.fence.fatal) {
+        this.declare(`declare void @scr_fence_fatal(ptr, i64, ptr)`);
+        B.line(
+          `call void @scr_fence_fatal(ptr ${this.cstr(e.fence.message)}, i64 ${fenceBytes}, ptr ${this.cstr(e.fence.code)})`,
+        );
+      } else {
+        this.declare(`declare void @scr_throw_error_msg_code(i32, ptr, i64, ptr)`);
+        B.line(
+          `call void @scr_throw_error_msg_code(i32 0, ptr ${this.cstr(e.fence.message)}, i64 ${fenceBytes}, ptr ${this.cstr(e.fence.code)})`,
+        );
+      }
       const fty = this.llType(e.type);
       if (fty === "void") {
         this.emitPendingCheck();

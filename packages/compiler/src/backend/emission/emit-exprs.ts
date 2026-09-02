@@ -5671,8 +5671,16 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             // unwind, the error.nodeThrow pattern.)
             if (e.fence === undefined) throw new Error("emitter bug: error.fenceThrow carries no fence");
             const fenceBytes = Buffer.from(e.fence.message, "utf8");
+            // The NON-CATCHABLE arm (fence.fatal): the identical message and
+            // code, printed as the "Uncaught Error: ..." line an uncaught
+            // throw would have printed, then _Exit(1). Same literal-argument
+            // shape, so scripts/tu-census.mjs reads it as the tagged refusal
+            // it is (its CODED pattern accepts either callee).
+            const fenceCall = e.fence.fatal
+              ? `scr_fence_fatal(${cStringLiteral(fenceBytes)}, ${fenceBytes.length}, "${e.fence.code}")`
+              : `scr_throw_error_msg_code(SCR_ERR_ERROR, ${cStringLiteral(fenceBytes)}, ${fenceBytes.length}, "${e.fence.code}")`;
             return finish(
-              `(scr_throw_error_msg_code(SCR_ERR_ERROR, ${cStringLiteral(fenceBytes)}, ${fenceBytes.length}, "${e.fence.code}"), ${isRefCounted(e.type) ? `(${cType(e.type).trim()})NULL` : "0"})`,
+              `(${fenceCall}, ${isRefCounted(e.type) ? `(${cType(e.type).trim()})NULL` : "0"})`,
             );
           }
           case "error.nodeThrow":
