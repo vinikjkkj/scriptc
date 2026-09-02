@@ -12,6 +12,7 @@ import type { IrFfiImport } from "../../ir/nodes.js";
 import { isCjsJsFile, isJsSourceFile, locOf } from "../program.js";
 import { genResultRecord, isGenericCallableMemberType, isSymbolicCandidateType, typeKey} from "../types.js";
 import { PoisonError, dynFallbackType, dynUndefinedExpr, importCallHandleType, jsFuncNameOf, jsFuncValueNameOf, jsFuncValueSourceOf, newFnCtx, nodeThrowExpr } from "./lowerer.js";
+import { protoThisType } from "./proto-class-consume.js";
 import { enforceLibBoundary } from "./lib-boundary.js";
 import { NARROW_FIRST, builtinFenceHintOf, builtinModuleFnOf, dynOwnNamesHelper } from "./surfaces.js";
 import { ffiBindingDiag, ffiSignatureDiag, requiresDynamicDiag } from "../../diagnostics/diagnostic.js";
@@ -12794,6 +12795,11 @@ export function lowerFunction(L: Lowerer, decl: ts.FunctionDeclaration): IrFunct
     access: ts.PropertyAccessExpression, adoptedClass?: string,): IrExpr | null {
     if (L.chainBlocked(access, call)) return null;
     let receiverIr = L.mapTypeOf(L.typeOf(access.expression));
+    // `this.m()` inside a SYNTHESIZED prototype-class -- the same
+    // checker-answers-`any` story as fieldTarget's. A method reached ONLY this
+    // way (one prototype method calling another) is named by no user
+    // statement, so without this it is never even a call, let alone an edge.
+    if (receiverIr === null) receiverIr = protoThisType(L, access.expression);
     // The receiver's LOWERED value is a class instance (adoptedClass —
     // see the adopted-instance rescue at the method fence). Only that
     // call site passes it, and it passes the type it just lowered.

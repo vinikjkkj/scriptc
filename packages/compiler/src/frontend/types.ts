@@ -1139,6 +1139,19 @@ export interface TypeMapperCtx {
    * inside members, self-referential member types), null outside any
    * mixin context (the type alone cannot name a call site). */
   mixinClassInstance?: (decl: ts.ClassLikeDeclaration) => IrType | null;
+  /** RECOGNIZED PROTOTYPE-CLASSES: a JavaScript pre-class constructor
+   * (`function S(b) { this.buf = b }` plus `S.prototype.m = function...`)
+   * whose instances the frontend synthesizes a class for. The checker
+   * already types such a function's instances nominally -- `this` inside the
+   * constructor, the result of `new S(b)`, a parameter the flow narrows --
+   * and every one of those types resolves to the FUNCTION's declaration, so
+   * this is the single place that turns them into the synthesized class's
+   * object type. Without it the class exists and nothing is typed at it:
+   * `this.buf = b` inside the constructor falls to "assignment to
+   * non-variables" (measured) and every `inst.m()` stays a dynInvoke.
+   * Null for a function that is not one, or one the consumer refused.
+   * Absent in checkers with no lowering attached. */
+  protoClassInstance?: ((decl: ts.Node) => IrType | null) | undefined;
   /** MIXIN instance INTERSECTIONS (`Tagged.C & Derived` — values built
    * through a mixin result): resolved by chain structure to the unique
    * pinned instantiation they describe; null when ambiguous or when no
@@ -2267,6 +2280,36 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
   {
     const viaRetyping = interfaceRetypingClassInstance(checker, widened, widenedSym, ctx);
     if (viaRetyping) return mapType(viaRetyping, ctx);
+  }
+  // A JavaScript PRE-CLASS CONSTRUCTOR the frontend recognized as a class.
+  // Checked before the ClassDeclaration arm because the declaration here is a
+  // FunctionDeclaration/FunctionExpression, which that arm does not admit --
+  // the instance type would otherwise fall through to the structural mapping
+  // and the synthesized class would type nothing.
+  // The property test comes FIRST so this costs one comparison, not two
+  // signature queries per object type, whenever the arm is off (the Lowerer
+  // installs the hook only when it is on).
+  if (ctx.protoClassInstance !== undefined) {
+    const protoDecl = widenedSym ? checker.valueDeclarationOf(widenedSym) : undefined;
+    if (
+      protoDecl &&
+      (ts.isFunctionDeclaration(protoDecl) || ts.isFunctionExpression(protoDecl) ||
+        ts.isVariableDeclaration(protoDecl)) &&
+      !protoDecl.getSourceFile().isDeclarationFile &&
+      // The INSTANCE type, never the constructor function's own type: a call
+      // signature here means `typeof Box` (or `Box.prototype`, which the
+      // checker answers as the function type -- measured), and mapping that
+      // to the instance would type a function value as an object.
+      checker.getConstructSignatures(widened).length === 0 &&
+      checker.getCallSignatures(widened).length === 0 &&
+      ctx.isProgramFile(protoDecl.getSourceFile())
+    ) {
+      const viaProto = ctx.protoClassInstance?.(protoDecl);
+      if (viaProto) {
+        contextResolutions++;
+        return viaProto;
+      }
+    }
   }
   const classDecl = widenedSym ? checker.valueDeclarationOf(widenedSym) : undefined;
   if (

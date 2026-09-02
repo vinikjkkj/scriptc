@@ -101,7 +101,8 @@ import { CompoundOp, IslandFnEntry, boundaryIntoIslandMsg, boundaryOutOfIslandMs
 import { FileParts, splitFiles, collectProgram, collectNpmImports, collectJsonImports,
   collectJsonRequires, collectDeclTwinExportBridges, moduleArtifacts, collectGlobals, declSymbolOf, defaultExportSymbolOf, lowerFileInit, lowerDefaultExport, buildMain, appendDynamicImportModules } from "./lower-modules.js";
 import { scanDefinePropStringTables, scanDefinePropSymbolSlots } from "./lower-classes.js";
-import { ClassInfo, ClassIteratorInfo, GenericClassInfo, registerBuiltinErrorClasses, registerBuiltinEmitterClass, registerBuiltinStreamClasses, builtinErrorInfoOf, builtinEmitterInfoOf, builtinStreamInfoOf, analyzeClassDecoration, classIteratorDrainCall, classIteratorNextCall, classIteratorOf, classIteratorOpenCall, classIteratorRestDrainCall, classMemberNameOf, classValueRef, collectClassShape, exactClassOfReceiver, collectClassShapeInner, ctorAbiEquals, findMethodOn, findStaticOn, findGenericMethodOn, findGenericStaticOn, genericClassInstanceType, isSubclassOf, inHierarchy, overrideBelow, staticShadowBelow, upcastTo, lowerClassMembers, lowerClassCtor, lowerClassExpression, lowerClassExpressionInfo, lowerClassMethodMember, lowerClassValueProperty, lowerStaticMethod, throwingSetterFn, fieldInitStmts, lowerStaticFieldInits, lowerStaticFieldRead, lowerDerivedCtorBody, superCallStmt, lowerSuperMethodCall, superThisRef, lowerSuperAccessorRead, lowerSuperAccessorWrite, inheritsBuiltinErrorCtor, inheritsBuiltinEmitterCtor, errorMessageArg, lowerNew, accessorCall } from "./lower-classes.js";
+import { protoClassArmOn, protoClassInstanceType } from "./proto-class-consume.js";
+import { ClassInfo, ClassIteratorInfo, GenericClassInfo, registerBuiltinErrorClasses, registerBuiltinEmitterClass, registerBuiltinStreamClasses, builtinErrorInfoOf, builtinEmitterInfoOf, builtinStreamInfoOf, analyzeClassDecoration, classIteratorDrainCall, classIteratorNextCall, classIteratorOf, classIteratorOpenCall, classIteratorRestDrainCall, classMemberNameOf, classValueRef, collectClassShape, exactClassOfReceiver, collectClassShapeInner, ctorAbiEquals, findMethodOn, findStaticOn, findGenericMethodOn, findGenericStaticOn, genericClassInstanceType, isSubclassOf, inHierarchy, overrideBelow, staticShadowBelow, upcastTo, lowerClassMembers, lowerClassCtor, lowerClassExpression, lowerClassExpressionInfo, lowerClassMethodMember, lowerProtoMethodMember, lowerClassValueProperty, lowerStaticMethod, throwingSetterFn, fieldInitStmts, lowerStaticFieldInits, lowerStaticFieldRead, lowerDerivedCtorBody, superCallStmt, lowerSuperMethodCall, superThisRef, lowerSuperAccessorRead, lowerSuperAccessorWrite, inheritsBuiltinErrorCtor, inheritsBuiltinEmitterCtor, errorMessageArg, lowerNew, accessorCall } from "./lower-classes.js";
 import { MixinFnShape, mixinCallClassInfoOf, mixinIntersectionInstanceType } from "./lower-mixins.js";
 import { ParamShape, FnSig, GenericFnInfo, GenericInstance, bindingNeverReassigned, bodyReadsArguments, isThisParameter, paramShape, paramShapes, checkDefaultParamBodyType, completeArgs, wrappedUndefined, undefinedArgFor, requireExactArityValue, bodyReturnType, declaredReturnType, collectSignature, collectSignatureInner, collectGenericSignature, genericFnOf, lowerGenericCall, lowerGenericFnValue, inferTypeParamBindings, lowerGenericInstance, lowerCall, lowerFfiCall, lowerTimersMemberCall, lowerPromiseMethodCall, lowerFilterNarrowCall, isTopLevelFnSymbol, lowerNestedFunctionDecl, lambdaSignature, lowerLambda, lowerFunction, validateFfiImports } from "./lower-calls.js";
 import { lowerArrayMethodCall, lowerBufferStaticCall, lowerBytesMethodCall, lowerBytesNew, lowerMapMethodCall, lowerMapForEachCall, buildMapForEachFn, lowerRecordOvfCaptureHelper, ovfCapturePlannable, dynSlotCheckOk, lowerEnvToPairsHelper, lowerSetMethodCall, lowerSetForEachCall, buildSetForEachFn, lowerRegexMethodCall, lowerStringMethodCall } from "./lower-containers.js";
@@ -1794,6 +1795,14 @@ export class Lowerer {
       resolveTypeParamTs: this.typeParamTsResolver,
       resolveSymbolic: this.symbolicTsResolver,
       genericClassInstance: (decl, ref) => this.genericClassInstanceType(decl, ref),
+      // A JavaScript PRE-CLASS CONSTRUCTOR the frontend recognized as a
+      // class: `this` inside its body, the result of `new S(b)`, and every
+      // binding the checker narrows to it all resolve to the FUNCTION's
+      // declaration, and this is the one place that turns them into the
+      // synthesized class's object type.
+      protoClassInstance: protoClassArmOn()
+        ? (decl) => protoClassInstanceType(this, decl)
+        : undefined,
       mixinClassInstance: (decl) =>
         this.mixinTypeContext && this.mixinTypeContext.classNode === decl
           ? { kind: "object", className: this.mixinTypeContext.className }
@@ -3051,6 +3060,14 @@ export class Lowerer {
         for (const { mName, member } of this.classMethodMembers(info)) {
           units.set(`%${cName}.${mName}`, () => this.lowerClassMethodMember(info, member));
         }
+        // A prototype-class recognized during COLLECTION is already here
+        // when the units map is built, so it never passes through
+        // onExprClassCollected; one recognized later does and never appears
+        // in this loop. Both registrations are additive and idempotent, and
+        // NEITHER ALONE COVERS BOTH TIMINGS.
+        for (const [mName, fn] of this.protoClassBodies.get(cName) ?? []) {
+          units.set(`%${cName}.${mName}`, () => this.lowerProtoMethodMember(info, mName, fn));
+        }
         for (const prop of info.throwingSetters) {
           units.set(`%${cName}.set:${prop}`, () => this.throwingSetterFn(info, prop));
         }
@@ -3075,6 +3092,15 @@ export class Lowerer {
       units.set(`%${cName}.constructor`, () => this.lowerClassCtor(info));
       for (const { mName, member } of this.classMethodMembers(info)) {
         units.set(`%${cName}.${mName}`, () => this.lowerClassMethodMember(info, member));
+      }
+      // ADDITIVE, and the only route a SYNTHESIZED class's methods have:
+      // classMethodMembers yields nothing for a null decl. A method whose
+      // call site never fires noteEdge is pruned by module assembly and then
+      // fails validation at the call as a phantom undeclared function --
+      // tests/harness/proto-class-methods.test.ts is the guard, one row per
+      // reach shape.
+      for (const [mName, fn] of this.protoClassBodies.get(cName) ?? []) {
+        units.set(`%${cName}.${mName}`, () => this.lowerProtoMethodMember(info, mName, fn));
       }
       for (const name of info.staticMethods?.keys() ?? []) {
         units.set(`%${cName}.static:${name}`, () => lowerStaticMethod(this, info, name));
@@ -11336,6 +11362,21 @@ export class Lowerer {
    * containing statement lowers). */
   readonly exprClasses: ClassInfo[] = [];
   readonly exprClassInfoByNode = new Map<ts.ClassExpression, ClassInfo>();
+  /** Recognized PROTOTYPE-CLASSES, memoized by the constructor declaration
+   * node. A null entry is a refusal already decided and not worth deciding
+   * again; the `new` site falls through to the per-use dyn box, which is
+   * still a correct lowering, so a refusal costs size and never an answer.
+   * Per Lowerer because discovery and emit are separate instances -- the IR
+   * name is minted from the constructor's character offset, so both agree. */
+  readonly protoClassByCtor = new Map<ts.Node, ClassInfo | null>();
+  /** `%pc<offset>.K` -> method name -> the FunctionExpression to lower as
+   * `%pc<offset>.K.<name>`. A synthesized class has no ts.ClassLikeDeclaration,
+   * so classMethodMembers cannot yield its members (its early return on a null
+   * decl is correct: there are no decl.members to walk). This carries them
+   * instead, and TWO NAMES MAY SHARE ONE FunctionExpression -- a sibling alias
+   * (`p.prototype.int64 = p.prototype.uint64`) is two module functions over
+   * one source body. */
+  readonly protoClassBodies = new Map<string, Map<string, ts.FunctionExpression>>();
   /** Class expressions whose collection is IN FLIGHT — the reentrancy
    * guard for heritage-demanded collection (lowerClassExpressionInfo). */
   readonly collectingExprClasses = new Set<ts.ClassExpression>();
@@ -11462,6 +11503,15 @@ export class Lowerer {
   lowerClassMethodMember(info: ClassInfo,
     fnLike: ts.MethodDeclaration | ts.AccessorDeclaration,): IrFunction | null {
     return lowerClassMethodMember(this, info, fnLike);
+  }
+
+  /** A recognized prototype-class's method as `%C.<name>` -- the same module
+   * function a declared method produces, entered by NAME because a
+   * FunctionExpression on the right of `C.prototype.m = ...` has no name node
+   * to derive one from (and when minified, no name at all). */
+  lowerProtoMethodMember(info: ClassInfo, mName: string,
+    fn: ts.FunctionExpression,): IrFunction | null {
+    return lowerProtoMethodMember(this, info, mName, fn);
   }
 
   throwingSetterFn(info: ClassInfo, prop: string): IrFunction {

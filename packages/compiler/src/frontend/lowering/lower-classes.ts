@@ -10,6 +10,7 @@ import { lowerAbortControllerNew } from "./lower-abort.js";
 import { MAX_GENERIC_INSTANCES, bindingNeverReassigned, genericCallInstance, implicitAnyParamSymbolsOf, implicitCallInstance, implicitMonoFile, omittedArgFor, type GenericFnInfo, type ParamShape } from "./lower-calls.js";
 import { isGenericCallableMemberType, runtimeStreamClassOf, typeKey } from "../types.js";
 import { cjsClassExprWholeExportOf, isCjsJsFile, isJsSourceFile, isModuleExportsAccess, locOf } from "../program.js";
+import { protoClassArmOn, protoClassInfoFor } from "./proto-class-consume.js";
 import { PoisonError, dynFallbackType, dynUndefinedExpr, newFnCtx, own } from "./lowerer.js";
 import { bufEncoding, lowerMapCloneNew, lowerMapSeedArrayNew } from "./lower-containers.js";
 import { fnOwnCounters, fnOwnPropBox, fnOwnWhy, probeLower, pureReemittable } from "./lower-exprs.js";
@@ -128,6 +129,11 @@ export interface ClassInfo {
    * Class EXPRESSIONS carry their ts.ClassExpression here — members,
    * accessors, and locs read identically off either form. */
   decl: ts.ClassLikeDeclaration | null;
+  /** SYNTHESIZED from a JavaScript pre-class constructor (proto-class.ts).
+   * `decl` is null here as it is for the builtin error classes, and the two
+   * have to be told apart: a prototype-class has bodies to lower and fields
+   * to write, a builtin error has neither. */
+  protoClass?: true;
   /** Runtime-provided builtin (the Error hierarchy): no bodies lower, `new`
    * and super() calls become error.* libCalls, toString is the runtime's. */
   builtinError?: true;
@@ -5325,6 +5331,21 @@ export function lowerClassMembers(L: Lowerer, info: ClassInfo): IrFunction[] {
         if (!(e instanceof PoisonError)) throw e;
       }
     }
+    // A RECOGNIZED PROTOTYPE-CLASS's methods, which classMethodMembers
+    // cannot yield (no decl.members to walk). Additive and wantBody-gated
+    // exactly like the declared loop above, so the dead-stripper still
+    // decides what is emitted — bypassing it would emit unreached bodies,
+    // a size cost in a size change, and deadstrip.test.ts pins that
+    // contract.
+    for (const [mName, fnExpr] of L.protoClassBodies.get(className) ?? []) {
+      if (!always && !L.wantBody(`%${className}.${mName}`)) continue;
+      try {
+        const fn = L.lowerProtoMethodMember(info, mName, fnExpr);
+        if (fn) out.push(fn);
+      } catch (e) {
+        if (!(e instanceof PoisonError)) throw e;
+      }
+    }
     for (const name of info.staticMethods?.keys() ?? []) {
       if (!L.wantBody(`%${className}.static:${name}`)) continue;
       const fn = lowerStaticMethod(L, info, name);
@@ -7871,6 +7892,55 @@ export function lowerNew(L: Lowerer, expr: ts.NewExpression): IrExpr {
             return { kind: "callValue", callee, args, type: callee.type.ret, loc };
           }
         }
+      }
+    }
+    // `new K(a)` where `K` is a RECOGNIZED PROTOTYPE-CLASS: a plain
+    // JavaScript function whose body gives its instances a fixed shape
+    // (`this.buf = b; this.pos = 0`) and whose methods hang off
+    // `K.prototype.m = function () {...}` — what a minifier leaves of a
+    // `class`, and what protobufjs is written in. proto-class.ts decides
+    // whether the shape is fixed, proto-class-synth.ts types the slots
+    // (from the constructor's initializer UNIONED with every method write,
+    // because the checker types a this-property from the initializer alone
+    // and a slot typed that way is one the first method write violates),
+    // and proto-class-consume.ts builds and registers the ClassInfo.
+    //
+    // Placed HERE, immediately before the per-use dyn box below and after
+    // every typed arm above, so it can only turn a REFUSAL OR A DYN BOX
+    // INTO A CLASS — it can never change a program that compiles today.
+    // Same JavaScript-only and no-spread guard as the box it precedes.
+    //
+    // WHY IT IS WORTH AN ARM: the box makes every later `inst.m()` a
+    // dynInvoke and every `inst.f` a dynKeyGet, both unconditional
+    // may-throw seeds. The arguments go through completeArgs, which lowers
+    // each one EXPECTING its parameter's type — a raw lowerExpr at a use
+    // site does not, and a still-dyn value crossing into a typed slot only
+    // relocates its guard to a dynCheck at the boundary instead of removing
+    // it.
+    if (
+      isJsSourceFile(expr.getSourceFile()) &&
+      !(expr.arguments ?? []).some((a) => ts.isSpreadElement(a))
+    ) {
+      const proto = protoClassArmOn() ? protoClassInfoFor(L, expr.expression) : null;
+      // OFF BY DEFAULT, and the reason is measured rather than cautious: a
+      // class instance crossing into a DYN slot keeps its fields and loses
+      // its methods, so `function use(x) { return x.get() }` called with an
+      // instance throws `x.get is not a function` where Node answers. That
+      // is main's behaviour for a DECLARED `class` in a .js file today --
+      // this arm does not cause it -- but the per-use dyn box it replaces
+      // DOES dispatch correctly, so switching it on by default would move an
+      // existing defect onto programs that answer correctly now.
+      // tests/harness/proto-class-methods.test.ts scores both states.
+      if (proto) {
+        L.noteEdge(`%${proto.def.name}.constructor`);
+        const args = L.completeArgs(expr.arguments ?? [], proto.ctorParams, loc, expr);
+        return {
+          kind: "new",
+          className: proto.def.name,
+          args,
+          type: { kind: "object", className: proto.def.name },
+          loc,
+        };
       }
     }
     // `new Klass(a)` where `Klass` is a plain FUNCTION value in a

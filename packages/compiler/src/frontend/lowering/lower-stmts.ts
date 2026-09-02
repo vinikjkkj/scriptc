@@ -4771,6 +4771,21 @@ export function lowerVarDecl(L: Lowerer, decl: ts.VariableDeclaration, isLet: bo
       console.error(`[adoptwhy${isLet ? "-let" : ""}] ${l.file}:${l.start} ${d.name.getText()}: record -> ${t.kind === "object" ? `object:${t.className}` : t.kind}`);
     };
     let type =
+      // A binding holding a freshly constructed SYNTHESIZED PROTOTYPE-CLASS
+      // instance whose checker type maps to NOTHING. The `any` is not
+      // information: this world's checker performs no JS constructor-function
+      // inference (MEASURED -- TypeScript 5.9.3 answers `Box` for
+      // `var b = new Box(7)` under this compiler's own options, and this world
+      // answers `any`), so a dyn slot here would box the instance and lose its
+      // methods at the first `b.get()`. The initializer's LOWERED type is the
+      // proof this scope has, exactly as the record-adopt arm below argues,
+      // and the `let` half rests on the same bindingHoldsItsInitializer proof.
+      ((!isLet || bindingHoldsItsInitializer(L, decl)) &&
+      init.type.kind === "object" && !bindingTainted &&
+      L.classes.get(init.type.className)?.protoClass === true &&
+      L.mapTypeOf(L.typeOf(decl.name)) === null
+        ? init.type
+        : null) ??
       (L.dynamic &&
       (init.type.kind === "jsval" ||
         (init.type.kind === "promise" && init.type.inner.kind === "jsval"))
