@@ -57,15 +57,6 @@ stdlib-fence.ts:20:13 - error SC1090: constructing values other than classes dec
      |             ^~~~~~~~~~~~~~~~~~~~~~~
   21 | 
 
-stdlib-fence.ts:23:7 - error SC2020: 'Date' is part of the standard library types but has no scriptc lowering yet
-
-  22 | // Constructors.
-  23 | const d = new Date();
-     |       ^
-  24 | const wm = new WeakMap();
-
-  hint: the type checker sees the full standard library, but only the supported surface compiles (https://scriptc.dev/limitations)
-
 stdlib-fence.ts:23:11 - error SC2020: 'new Date' is part of the standard library types but has no scriptc lowering yet
 
   22 | // Constructors.
