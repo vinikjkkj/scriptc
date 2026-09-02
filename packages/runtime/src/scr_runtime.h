@@ -3853,6 +3853,22 @@ typedef struct ScrDynClass {
    * resolves before reading this. */
   const struct ScrDynClassMember *members;
   size_t nmembers;
+  /* This class's instances carry the RUN-TIME property table
+   * (Object.defineProperty's receiver row -- CLASS_PROPS_FIELD).
+   *
+   * It gates the ENUMERATING surfaces, and it has to. The member table
+   * names the DECLARED members; the run-time table holds keys no
+   * declaration mentions, and the box cannot reach it (its cell is a
+   * struct field only the emitted [[Get]] can GEP to). So for such a
+   * class Object.keys, JSON.stringify, util.inspect and Object.assign
+   * would each answer a set that is real but INCOMPLETE -- and the same
+   * value printed through its static type shows the missing keys. One
+   * value, two renderings, the shape this tree refuses.
+   *
+   * A READ is unaffected and needs no gate: [[Get]] consults the
+   * run-time table first, then the member table, then fences, so it is
+   * complete for every key. Only enumeration is not. */
+  bool props;
 } ScrDynClass;
 
 /* The handle-type tags the checked-dynamic tree can carry. The set is deliberately the
@@ -5660,6 +5676,17 @@ const ScrDynClassMember *scr_dyn_objinst_member(const ScrDyn *d, const char *k, 
  * new arm is behind: with no table nothing changes, so the whole feature
  * is additive by construction. */
 bool scr_dyn_objinst_has_members(const ScrDyn *d);
+/* Does the instance carry the run-time property table? True means the
+ * member table is a real but INCOMPLETE key set, so the enumerating
+ * surfaces keep their fence rather than answer a partial object. */
+bool scr_dyn_objinst_has_props(const ScrDyn *d);
+/* The gate every ENUMERATING surface opens with: this instance answers
+ * its own key set only when it HAS a member table and carries no
+ * run-time property table beside it. One predicate, five readers
+ * (Object.keys, both JSON writers, util.inspect, Object.assign), so the
+ * five cannot come to disagree about which instances they can
+ * enumerate -- which is the failure the gate exists to prevent. */
+bool scr_dyn_objinst_enumerable(const ScrDyn *d);
 /* The member table BY INDEX -- the one projection Object.keys,
  * JSON.stringify and String() all enumerate through, so the three cannot
  * disagree about which properties a boxed instance has. `member_at`

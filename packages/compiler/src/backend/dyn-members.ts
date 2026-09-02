@@ -25,6 +25,9 @@
 import {
   canConvertToDyn,
   canDynCheckTo,
+  RUNTIME_EMITTER_CLASS,
+  RUNTIME_ERROR_CLASSES,
+  RUNTIME_STREAM_CLASSES,
   type IrClassDef,
   type IrFunction,
   type IrRecordShape,
@@ -77,6 +80,36 @@ export function dynMemberRows(
   getRecord: (id: string) => IrRecordShape | undefined,
   getUnion: (id: string) => IrUnionDef | undefined,
 ): DynMemberRow[] {
+  // A class whose chain reaches a RUNTIME-PROVIDED base gets no table at
+  // all, and this one is not a scruple -- it is a regression caught by a
+  // probe, written down.
+  //
+  // A user Error subclass's layout PREFIX is ScrError's own cells, so
+  // `def.fields` lists name/message/code beside the user's own fields and
+  // nothing here can tell them apart. Node makes `name` and `message`
+  // own NON-ENUMERABLE properties, so Object.keys(new MyErr()) is
+  // ["code"] and JSON.stringify is {"code":"X"} -- measured on v25.9.0.
+  // With a table the boxed instance answered
+  // `name,message,code | {"name":"Error","message":"boom","code":"X"}`,
+  // at exit 0. That took JSON.stringify from a LOUD fence to a SILENTLY
+  // WRONG object, which is a regression in kind and the one direction
+  // this feature is not allowed to move.
+  //
+  // The same reasoning covers the emitter and stream hierarchies, whose
+  // prefixes are internal cells (_events, _eventsCount, _maxListeners)
+  // that Node does list -- but with values this representation does not
+  // hold, which is the same wrong answer with the sign flipped.
+  //
+  // The cost is stated rather than hidden: a method on an Error or
+  // EventEmitter subclass is still lost across the crossing. That is the
+  // PRE-EXISTING behaviour, unchanged, and a narrower gap than the one
+  // this whole change closes.
+  for (let c: DynMemberClass | null = cls; c !== null; c = c.base) {
+    if (c.def.runtime === true) return [];
+    if (RUNTIME_ERROR_CLASSES.has(c.def.name)) return [];
+    if (RUNTIME_STREAM_CLASSES.has(c.def.name)) return [];
+    if (c.def.name === RUNTIME_EMITTER_CLASS) return [];
+  }
   const rows: DynMemberRow[] = [];
   const seen = new Set<string>();
 
@@ -89,6 +122,11 @@ export function dynMemberRows(
     // can spell one, so answering for it would invent a key Node does not
     // have.
     if (f.name.startsWith("%")) continue;
+    // A #PRIVATE field is not an own property in JS: Object.keys(new C(1))
+    // is ["v"], not ["v","#h"] -- measured on v25.9.0. The frontend keys
+    // privates by their spelled name, which no public identifier can
+    // collide with, so the test is on the sigil exactly as the '%' one is.
+    if (f.name.startsWith("#")) continue;
     if (seen.has(f.name)) continue;
     // A field whose type has no dyn representation at all keeps the
     // fence. Fabricating `undefined` for it would be the silent wrong

@@ -1872,7 +1872,7 @@ class LlEmitter {
       // always-linked dyn core a descriptor whose `members` read runs off
       // the end of the object — measured, as an access violation on the
       // first boxed method call.
-      `%ScrDynClass = type { ptr, i64, i64, i8, ptr, ptr, ptr, i64 }`,
+      `%ScrDynClass = type { ptr, i64, i64, i8, ptr, ptr, ptr, i64, i8 }`,
       // One row of a class's instance MEMBER TABLE
       // { name, len, get, call, enumerable } (ScrDynClassMember in
       // scr_runtime.h) — what `x.get()` and `x.v` read through once the
@@ -3027,7 +3027,8 @@ class LlEmitter {
     const body =
       `%ScrDynClass { ptr ${this.cstr(display)}, i64 ${meta.pre}, i64 ${meta.post}, ` +
       `i8 ${meta.hierarchy ? 1 : 0}, ptr ${rc.retain}, ptr ${rc.release}, ` +
-      `ptr ${members === null ? "null" : `@${members.sym}`}, i64 ${members === null ? 0 : members.count} }`;
+      `ptr ${members === null ? "null" : `@${members.sym}`}, i64 ${members === null ? 0 : members.count}, ` +
+      `i8 ${meta.def.fields.some((f) => f.name === CLASS_PROPS_FIELD) ? 1 : 0} }`;
     this.dynClassDescSyms.set(className, { sym, body });
     return `@${sym}`;
   }

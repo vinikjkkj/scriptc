@@ -1022,15 +1022,87 @@ ScrStr *scr_insp_dyn(ScrDyn *d, double recurse, double depth) {
       return ib_take(&out);
     }
     case SCR_DYN_OBJINST: {
-      /* Node prints `Thing { a: 1 }` — the instance's own properties,
-       * which the box has no member table to enumerate. Same fence, same
-       * reason as the handle arm below. */
-      InspBuf out = {0};
-      ib_cstr(&out, "util.inspect of a dynamic ");
-      ib_cstr(&out, scr_dyn_objinst_cls(d));
-      ib_cstr(&out, " is not supported yet");
-      scr_throw_error(SCR_ERR_ERROR, ib_take(&out));
-      return scr_str_new("", 0); /* the pending throw wins */
+      /* Node prints `Thing { a: 1 }` -- the instance's own ENUMERABLE
+       * properties, which the member table now enumerates. It used to
+       * fence here for the honest reason that a box with no table cannot
+       * tell an empty object from one it cannot read; a class without a
+       * complete key set still cannot, and still fences.
+       *
+       * Enumerable rows only, so this lists exactly what Object.keys
+       * lists -- the OBJ arm's rule above, and the reason a class method
+       * does not appear: it is non-enumerable in JS, and `console.log(new
+       * Box(7))` is `Box { v: 7 }` on v25.9.0, not `Box { v: 7, get:
+       * [Function] }`.
+       *
+       * A GETTER row shows nothing rather than `[Getter]`: a class
+       * accessor lives on the PROTOTYPE, where Node does not look for own
+       * properties -- and running one at a print would be a side effect
+       * the program did not ask for, which is the OBJ arm's stance too. */
+      const char *icn = scr_dyn_objinst_cls(d);
+      if (!scr_dyn_objinst_enumerable(d)) {
+        InspBuf out = {0};
+        ib_cstr(&out, "util.inspect of a dynamic ");
+        ib_cstr(&out, icn);
+        ib_cstr(&out, " is not supported yet");
+        scr_throw_error(SCR_ERR_ERROR, ib_take(&out));
+        return scr_str_new("", 0); /* the pending throw wins */
+      }
+      const size_t inm = scr_dyn_objinst_member_count(d);
+      size_t ishown = 0;
+      for (size_t i = 0; i < inm; i++) {
+        const ScrDynClassMember *m = scr_dyn_objinst_member_at(d, i);
+        if (m->enumerable && m->get != NULL) ishown++;
+      }
+      if (ishown == 0) {
+        InspBuf nb = {0};
+        ib_cstr(&nb, icn);
+        ib_cstr(&nb, " {}");
+        return ib_take(&nb);
+      }
+      if (recurse > depth) {
+        InspBuf nb = {0};
+        ib_char(&nb, '[');
+        ib_cstr(&nb, icn);
+        ib_char(&nb, ']');
+        return ib_take(&nb);
+      }
+      scr_insp_begin(recurse + 1);
+      bool ithrew = false;
+      for (size_t i = 0; i < inm && !ithrew; i++) {
+        const ScrDynClassMember *m = scr_dyn_objinst_member_at(d, i);
+        if (!m->enumerable || m->get == NULL) continue;
+        ScrDyn *mv = m->get(d->v.inst.o); /* +1 */
+        if (mv == NULL) { /* the read threw */
+          ithrew = true;
+          break;
+        }
+        ScrStr *val = scr_insp_dyn(mv, recurse + 1, depth);
+        scr_dyn_release(mv);
+        InspBuf eb = {0};
+        insp_key_into(&eb, m->name, m->len);
+        ib_cstr(&eb, ": ");
+        ib_bytes(&eb, val->data, val->len);
+        scr_str_release(val);
+        ScrStr *entry = ib_take(&eb);
+        scr_insp_entry(entry, false);
+        scr_str_release(entry);
+      }
+      ScrStr *ibase = scr_str_new(icn, strlen(icn));
+      ScrStr *ib0 = scr_str_new("{", 1);
+      ScrStr *ib1 = scr_str_new("}", 1);
+      /* scr_insp_end runs even on the throw path: the frame was pushed by
+       * scr_insp_begin and leaving it on the stack would corrupt every
+       * later print in the process, which is a worse failure than the one
+       * being reported. */
+      ScrStr *iout = scr_insp_end(ibase, ib0, ib1, recurse + 1, false, false);
+      scr_str_release(ibase);
+      scr_str_release(ib0);
+      scr_str_release(ib1);
+      if (ithrew) {
+        scr_str_release(iout);
+        return scr_str_new("", 0); /* the pending throw wins */
+      }
+      return iout;
     }
     case SCR_DYN_MAP: {
       /* Node prints `Map(1) { 'a' => 1 }` / `Set(1) { 'a' }` — the
