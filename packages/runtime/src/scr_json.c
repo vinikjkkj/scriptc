@@ -2406,6 +2406,67 @@ void *scr_dyn_objinst_ptr_of(const ScrDyn *d, const ScrDynClass *cls) {
   return scr_dyn_objinst_is(d, cls->pre, cls->post) ? d->v.inst.o : NULL;
 }
 
+/* ── the class MEMBER REGISTRY ─────────────────────────────────────
+ *
+ * The emitted table of every boxable class descriptor in the program,
+ * installed by main() exactly like the handle ops: this unit is always
+ * linked and cannot name an emitted symbol, so the emitted TU hands it
+ * the array. Borrowed statics -- nothing here owns or frees them.
+ *
+ * A program that installs nothing keeps every pre-table behaviour, and
+ * that is the whole safety argument for the feature: every reader below
+ * falls back to the box's own descriptor, whose `members` is then NULL. */
+static const ScrDynClass *const *scr_cls_reg = NULL;
+static size_t scr_cls_reg_n = 0;
+
+void scr_dyn_objinst_registry(const ScrDynClass *const *descs, size_t n) {
+  scr_cls_reg = descs;
+  scr_cls_reg_n = n;
+}
+
+const ScrDynClass *scr_dyn_objinst_class_of(const ScrDyn *d) {
+  const ScrDynClass *own = d->v.inst.cls;
+  if (scr_cls_reg == NULL) return own;
+  /* The instance's OWN position, read out of its vtable for a hierarchy
+   * class -- the fact `instanceof` reads, and the reason this cannot be
+   * answered from `own` alone: a Derived instance in a Base-typed slot
+   * boxes with the BASE's descriptor, so `own->members` would be the
+   * base's table and every derived method would read as absent. */
+  const size_t p = scr_dyn_objinst_pre(d);
+  /* A preorder numbering NESTS, so every ancestor's interval contains the
+   * instance's position and the TIGHTEST containing one is the instance's
+   * own class. Linear over the program's boxable classes, which is
+   * nothing beside the call this is about to dispatch. */
+  const ScrDynClass *best = NULL;
+  for (size_t i = 0; i < scr_cls_reg_n; i++) {
+    const ScrDynClass *c = scr_cls_reg[i];
+    if (c->pre <= p && p <= c->post &&
+        (best == NULL || (c->post - c->pre) < (best->post - best->pre))) {
+      best = c;
+    }
+  }
+  return best != NULL ? best : own;
+}
+
+const ScrDynClassMember *scr_dyn_objinst_member(const ScrDyn *d, const char *k, size_t klen) {
+  if (d == NULL || d->kind != SCR_DYN_OBJINST) return NULL;
+  const ScrDynClass *c = scr_dyn_objinst_class_of(d);
+  /* nmembers and not a NULL `members`: a class with an empty table is a
+   * class with no members, and reading through a NULL pointer to prove
+   * it would be the same bug the SCR_DYN_KIND_COUNT note above records. */
+  for (size_t i = 0; i < c->nmembers; i++) {
+    if (c->members[i].len == klen && memcmp(c->members[i].name, k, klen) == 0) {
+      return &c->members[i];
+    }
+  }
+  return NULL;
+}
+
+bool scr_dyn_objinst_has_members(const ScrDyn *d) {
+  if (d == NULL || d->kind != SCR_DYN_OBJINST) return false;
+  return scr_dyn_objinst_class_of(d)->nmembers > 0;
+}
+
 bool scr_dyn_objinst_fence(const ScrDyn *d, const char *what) {
   ScrJsonBuf b;
   scr_jb_init(&b);

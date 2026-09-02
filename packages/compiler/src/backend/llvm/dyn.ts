@@ -30,12 +30,13 @@
  *               FUNC=8 HANDLE=9.
  *   ScrBytes { rc +0; len +8; elem +16; data +24 }.
  *   ScrDynPath { parent, key, index } — the %ScrDynPath type. */
-import type { IrRecordShape, IrType } from "../../ir/nodes.js";
+import type { IrClassDef, IrFunction, IrRecordShape, IrType } from "../../ir/nodes.js";
 import { bytesAliasOnExtract } from "../../ir/nodes.js";
 import { armDiscrimLits, canAdaptDynFuncTo, canBoxFuncIntoDyn, dynCheckArmOrder, internalSlotFields, isUndefinedArmedUnion, slotStorageKey, unionHasDiscrim, DYN_BYTES_KINDS, DYN_HANDLE_KINDS, isRefCounted, strandedFuncReason, typeKey } from "../../ir/nodes.js";
 import { nullProtoRule, OWNMASK_SRC_NULL_PROTO, OWNMASK_VALID, ownMaskKeyBit as maskKeyBit } from "../../ir/nodes.js";
 import { INTERNAL_SLOT_WANT_TEXT } from "../emission/emit-walkers.js";
-import { mangleRecordNew, mangleRecordStruct } from "../mangle.js";
+import { mangleClassRelease, mangleClassRetain, mangleClassStruct, mangleFunction, mangleRecordNew, mangleRecordStruct } from "../mangle.js";
+import { dynMemberRows, type DynMemberClass } from "../dyn-members.js";
 import { KINDGATE_WIDE_KINDS, kindgateWideLane, readKindgateDials } from "../kindgate.js";
 import { BlockBuilder } from "./blocks.js";
 import { arrNewCall, elemAccess, llFieldType, ownMaskSlotIndex, releaseSym, srcProtoSlotIndex, toStrSlotIndex, traceAdapter, traceArg, vAdapters } from "./shapes.js";
@@ -125,6 +126,17 @@ export interface DynHost extends WalkerHost {
    * table-carrying class is therefore a leaf. emit-walkers.ts's arm
    * carries the full reasoning and both lanes spell the gates once each. */
   classPropsTables(): { desc: string; struct: string; index: number }[];
+  /** The class graph node one class name resolves to — what the shared
+   * member-row decision (backend/dyn-members.ts) walks for the base
+   * chain. */
+  classMetaFor(className: string): DynMemberClass;
+  /** The module's functions by IR name — the member rows name the
+   * implementation each class actually has, and a dead-stripped body is
+   * a row that is not there. */
+  readonly fnByName: ReadonlyMap<string, IrFunction>;
+  /** The GEP index of a declared field inside the class's own struct
+   * (the hierarchy prefix already counted). */
+  classFieldGep(className: string, field: string): number;
 }
 
 /** Exact double literal (the emitter's f64Lit — the walkers' copy). */
@@ -141,6 +153,13 @@ const FN_ATTRS = "#0";
 const IDX_MAX_DIV10 = "1844674407370955160";
 
 export class LlDyn {
+  /** Counters for the per-class instance MEMBER TABLES: the wrappers
+   * `sc_dclm_*` and the tables `sc_dclt_*` they fill. Plain counters and
+   * not maps for the C twin's reason: a wrapper belongs to exactly one
+   * (class, member) pair, so there is nothing to intern.
+   * The names match the C lane's so a diff of the two TUs reads. */
+  private classMemberFns = 0;
+  private classMemberTbls = 0;
   private readonly dynMatchers = new Map<string, string>();
   private readonly dynBuilders = new Map<string, string>();
   /** The MERGED walkers (sc_da_), interned in their own map: a soft body
@@ -3522,6 +3541,38 @@ export class LlDyn {
         B.terminate(`ret ptr null`);
         B.startBlock(lSkip);
       }
+      // The class's own MEMBER TABLE, ahead of the fence: a declared field
+      // reads its slot and a METHOD reads as a bound function box, minted
+      // over the very dispatch `x.get()` takes. The C lane's arm, and the
+      // same position in the ladder -- after %props (a run-time
+      // defineProperty write is an OWN property, and cls.propsDefine
+      // refuses a collision with a declared member, so the two key sets are
+      // disjoint), before the fence (which is now the answer for a class
+      // with NO table only -- the shape that behaves exactly as it did).
+      {
+        host.declare(`declare ptr @scr_dyn_objinst_member_get(ptr, ptr)`);
+        host.declare(`declare zeroext i1 @scr_exc_pending()`);
+        const cm = B.tmp();
+        B.line(`${cm} = call ptr @scr_dyn_objinst_member_get(ptr %d, ptr %k)`);
+        const hit = B.tmp();
+        B.line(`${hit} = icmp ne ptr ${cm}, null`);
+        const lHit = B.newLabel("kg.mh");
+        const lMiss = B.newLabel("kg.mm");
+        B.condBr(hit, lHit, lMiss);
+        B.startBlock(lHit);
+        B.terminate(`ret ptr ${cm}`);
+        B.startBlock(lMiss);
+        // NULL is a miss AND a throw, and only the pending exception tells
+        // them apart -- the %props arm's rule above, for its reason.
+        const pe = B.tmp();
+        B.line(`${pe} = call zeroext i1 @scr_exc_pending()`);
+        const lThrew = B.newLabel("kg.me");
+        const lGo = B.newLabel("kg.mg");
+        B.condBr(pe, lThrew, lGo);
+        B.startBlock(lThrew);
+        B.terminate(`ret ptr null`);
+        B.startBlock(lGo);
+      }
       host.declare(`declare zeroext i1 @scr_dyn_objinst_fence(ptr, ptr)`);
       B.line(`call zeroext i1 @scr_dyn_objinst_fence(ptr %d, ptr ${host.cstr("a property read")})`);
       B.terminate(`ret ptr null`);
@@ -4345,6 +4396,214 @@ export class LlDyn {
       ``,
     );
     return name;
+  }
+
+
+  /** The MEMBER TABLE of one boxable class, as .ll — the C lane's
+   * dynClassMembers, rendered here.
+   *
+   * WHICH rows exist is not decided in either backend: `dynMemberRows`
+   * (backend/dyn-members.ts) decides it once, because a name one lane
+   * answers and the other refuses is exactly the two-lanes-one-question
+   * defect this layer is arranged to avoid. This renders those rows —
+   * one internal wrapper per row, plus the constant array the descriptor
+   * points at.
+   *
+   * Answers null for a class with no rows: the descriptor then carries
+   * `ptr null, i64 0` and behaves exactly as it did before member tables
+   * existed. */
+  classMemberTable(className: string): { sym: string; count: number } | null {
+    const host = this.host;
+    const meta = host.classMetaFor(className);
+    const rows = dynMemberRows(
+      meta,
+      host.fnByName,
+      (id: string) => host.recordsById.get(id),
+      (id: string) => host.unionsById.get(id),
+    );
+    if (rows.length === 0) return null;
+    const struct = mangleClassStruct(className);
+    const entries: string[] = [];
+
+    for (const row of rows) {
+      const sym = `sc_dclm_${this.classMemberFns++}`;
+      const nameLit = host.cstr(row.name);
+      const nameLen = Buffer.byteLength(row.name, "utf8");
+      if (row.kind === "field") {
+        const B = new BlockBuilder();
+        const idx = host.classFieldGep(className, row.name);
+        const p = B.tmp();
+        B.line(`${p} = getelementptr inbounds %${struct}, ptr %o, i64 0, i32 ${idx} ; .${row.name}`);
+        const raw = B.tmp();
+        B.line(`${raw} = load ${llFieldType(row.type)}, ptr ${p}`);
+        let v = raw;
+        // A `bool` field is STORED as i8 and passed as i1 — the record
+        // walker's own trunc, for the same reason.
+        if (llFieldType(row.type) === "i8") {
+          const b = B.tmp();
+          B.line(`${b} = trunc i8 ${raw} to i1`);
+          v = b;
+        }
+        // BORROWED: every toDyn walker retains or copies, and the instance
+        // stays owned by the box the caller is holding.
+        const out = row.type.kind === "func"
+          ? (() => {
+              const box = canBoxFuncIntoDyn(row.type, (id: string) => host.recordsById.get(id), (id: string) => host.unionsById.get(id))
+                ? this.dynFuncBoxHelper(row.type)
+                : this.strandedDynFuncBoxHelper(row.type, row.name);
+              const r = B.tmp();
+              B.line(`${r} = call ptr @${box}(ptr ${v}, ptr null, ptr null)`);
+              return r;
+            })()
+          : (() => {
+              const r = B.tmp();
+              B.line(`${r} = call ptr @${this.toDynHelper(row.type)}(${this.valTy(row.type)} ${v})`);
+              return r;
+            })();
+        B.terminate(`ret ptr ${out}`);
+        this.defs.push(
+          `define internal ptr @${sym}(ptr %o) ${FN_ATTRS} { ; member get ${className}.${row.name}`,
+          B.render(),
+          `}`,
+          ``,
+        );
+        entries.push(`  { ptr ${nameLit}, i64 ${nameLen}, ptr @${sym}, ptr null, i8 1 }`);
+        continue;
+      }
+
+      const fn = row.fn;
+      const recvT = fn.params[0]!.type as IrType & { kind: "object" };
+      const callee = `@${mangleFunction(fn.name)}`;
+      const ret = fn.returnType;
+      const retTy = ret.kind === "void" ? "void" : this.valTy(ret);
+      const B = new BlockBuilder();
+      // The receiver is RETAINED into the call: a compiled method consumes
+      // its `this` parameter exactly as a constructor does, and the box
+      // still holds its own reference afterwards.
+      // No `declare` for the RC pair: they are DEFINED in this same
+      // module (emitClassShapes), and a declare beside a define is
+      // "invalid redefinition" from llc rather than a link-time nicety.
+      const recv = B.tmp();
+      B.line(`${recv} = call ptr @${mangleClassRetain(recvT.className)}(ptr %o)`);
+
+      if (row.kind === "accessor") {
+        const callArgs = `ptr ${recv}`;
+        if (ret.kind === "void") {
+          // A getter with no value is not a getter; dynMemberRows keeps
+          // the shape reachable only through a declared accessor, so this
+          // is a compiler bug rather than a program's.
+          throw new Error(`llvm emitter bug: void accessor ${className}.${row.name}`);
+        }
+        const r = B.tmp();
+        B.line(`${r} = call ${retTy} ${callee}(${callArgs})`);
+        this.pendingBail(B, "dclm", () => {}, "ptr null");
+        const out = ret.kind === "dyn" ? r : this.toDynExpr(B, ret, r);
+        if (ret.kind !== "dyn" && isRefCounted(ret)) {
+          B.line(`call void ${releaseSym(host, ret)}(ptr ${r})`);
+        }
+        B.terminate(`ret ptr ${out}`);
+        this.defs.push(
+          `define internal ptr @${sym}(ptr %o) ${FN_ATTRS} { ; member get ${className}.${row.name} (accessor)`,
+          B.render(),
+          `}`,
+          ``,
+        );
+        entries.push(`  { ptr ${nameLit}, i64 ${nameLen}, ptr @${sym}, ptr null, i8 0 }`);
+        continue;
+      }
+
+      // Per-argument conversion, the dyn call thunk's body exactly: a
+      // MISSING argument IS the undefined dyn value (JS arity), and the
+      // parameter's own check decides whether that flies.
+      const rest = fn.params.slice(1);
+      const argNames: string[] = [];
+      const undoAll = (upto: number): void => {
+        B.line(`call void @${mangleClassRelease(recvT.className)}(ptr ${recv})`);
+        rest.slice(0, upto).forEach((q, j) => {
+          if (isRefCounted(q.type)) B.line(`call void ${releaseSym(host, q.type)}(ptr ${argNames[j]})`);
+        });
+      };
+      rest.forEach((p, i) => {
+        const adSlot = B.slot();
+        B.entryAllocas.push(`${adSlot} = alloca ptr`);
+        const has = B.tmp();
+        B.line(`${has} = icmp ult i64 ${i}, %argc`);
+        const lHas = B.newLabel("dclm.h");
+        const lMiss = B.newLabel("dclm.m");
+        const lj = B.newLabel("dclm.j");
+        B.condBr(has, lHas, lMiss);
+        B.startBlock(lHas);
+        const ap = B.tmp();
+        const av = B.tmp();
+        B.line(`${ap} = getelementptr inbounds ptr, ptr %args, i64 ${i}`);
+        B.line(`${av} = load ptr, ptr ${ap}`);
+        B.line(`store ptr ${av}, ptr ${adSlot}`);
+        B.br(lj);
+        B.startBlock(lMiss);
+        const u = this.undef(B);
+        B.line(`store ptr ${u}, ptr ${adSlot}`);
+        B.br(lj);
+        B.startBlock(lj);
+        const ad = B.tmp();
+        B.line(`${ad} = load ptr, ptr ${adSlot}`);
+        if (p.type.kind === "dyn") {
+          argNames.push(this.retainDyn(B, ad));
+          return;
+        }
+        const pathSlot = B.slot();
+        B.entryAllocas.push(`${pathSlot} = alloca %ScrDynPath`);
+        const pp = B.tmp();
+        const kp = B.tmp();
+        const ip = B.tmp();
+        B.line(`${pp} = getelementptr inbounds %ScrDynPath, ptr ${pathSlot}, i64 0, i32 0`);
+        B.line(`store ptr null, ptr ${pp}`);
+        B.line(`${kp} = getelementptr inbounds %ScrDynPath, ptr ${pathSlot}, i64 0, i32 1`);
+        B.line(`store ptr null, ptr ${kp}`);
+        B.line(`${ip} = getelementptr inbounds %ScrDynPath, ptr ${pathSlot}, i64 0, i32 2`);
+        B.line(`store i64 ${i}, ptr ${ip}`);
+        const a = B.tmp();
+        B.line(`${a} = call ${this.valTy(p.type)} @${this.dynCheckHelper(p.type)}(ptr ${ad}, ptr ${pathSlot})`);
+        this.pendingBail(B, "dclm", () => undoAll(i), "ptr null");
+        argNames.push(a);
+      });
+
+      const callArgs = [`ptr ${recv}`, ...rest.map((p, i) => `${this.valTy(p.type)} ${argNames[i]}`)].join(", ");
+      if (ret.kind === "void") {
+        B.line(`call void ${callee}(${callArgs})`);
+        this.pendingBail(B, "dclmr", () => {}, "ptr null");
+        const u = this.undef(B);
+        const r = this.retainDyn(B, u);
+        B.terminate(`ret ptr ${r}`);
+      } else if (ret.kind === "dyn") {
+        const r = B.tmp();
+        B.line(`${r} = call ptr ${callee}(${callArgs})`);
+        this.pendingBail(B, "dclmr", () => {}, "ptr null");
+        B.terminate(`ret ptr ${r}`);
+      } else {
+        const r = B.tmp();
+        B.line(`${r} = call ${retTy} ${callee}(${callArgs})`);
+        this.pendingBail(B, "dclmr", () => {}, "ptr null");
+        const out = this.toDynExpr(B, ret, r);
+        if (isRefCounted(ret)) B.line(`call void ${releaseSym(host, ret)}(ptr ${r})`);
+        B.terminate(`ret ptr ${out}`);
+      }
+      this.defs.push(
+        `define internal ptr @${sym}(ptr %o, ptr %args, i64 %argc, ptr %what) ${FN_ATTRS} { ; member call ${className}.${row.name}`,
+        B.render(),
+        `}`,
+        ``,
+      );
+      entries.push(`  { ptr ${nameLit}, i64 ${nameLen}, ptr null, ptr @${sym}, i8 0 }`);
+    }
+
+    const sym = `sc_dclt_${this.classMemberTbls++}`;
+    this.defs.push(
+      `@${sym} = internal constant [${entries.length} x %ScrDynClassMember] [`,
+      entries.map((e) => `  %ScrDynClassMember ${e.trim()}`).join(",\n"),
+      `] ; members of ${className}`,
+      ``,
+    );
+    return { sym, count: entries.length };
   }
 
   /** The box builder dynFrom emits for one closure signature. */

@@ -595,6 +595,13 @@ export class CEmitter {
    * emitStructDefs, so the `_v` RC thunks the descriptor points at are
    * already declared. See dynClassDesc (emit-walkers.ts). */
   readonly dynClassDescs = new Map<string, string>();
+  /** Counters for the per-class instance MEMBER TABLES (dynClassMembers,
+   * emit-walkers.ts): the accessor/method wrappers `sc_dclm_*` and the
+   * tables `sc_dclt_*` they fill. Plain counters and not maps, because a
+   * wrapper belongs to exactly one (class, member) pair — there is
+   * nothing to intern, and the emission order IS the numbering. */
+  dynClassMemberFns = 0;
+  dynClassMemberTbls = 0;
   readonly recordKeyGetFns = new Map<string, string>();
   readonly recordKeySetFns = new Map<string, string>();
   /** The shared abort helpers, mirroring the LLVM emitter's helperDefs
@@ -1578,11 +1585,39 @@ export class CEmitter {
         ``,
       );
     }
+    // The BOXABLE CLASS REGISTRY (scr_dyn_objinst_registry): every class
+    // descriptor this program emitted, so the dyn core can resolve a
+    // boxed instance's OWN class from its run-time preorder position.
+    //
+    // It exists for one question the box cannot answer alone: a Derived
+    // instance in a Base-typed slot boxes with the BASE's descriptor, so
+    // reading `members` off the box's own descriptor would miss every
+    // derived method. Sorted by symbol so the TU is a function of the
+    // program and not of interning order — the fn-name table's rule, for
+    // the same reason.
+    //
+    // Emitted HERE, after the walker block, because that is where the
+    // last descriptor can still be interned: a body emitted earlier is
+    // what asks for one.
+    const dynClassDescSyms = [...this.dynClassDescs.values()].sort();
+    if (dynClassDescSyms.length > 0) {
+      out.push(
+        `${this.link}const ScrDynClass *const sc_dcl_tbl[] = {`,
+        ...dynClassDescSyms.map((s) => `  &${s},`),
+        `};`,
+        ``,
+      );
+    }
     out.push(
       // Real argc/argv feed the library's interned process.argv (see
       // scr_lib_init — lazy, so argv-free programs allocate nothing).
       `int main(int argc, char **argv) {`,
       `  scr_init();`,
+      // Before anything can box: the registry is read by every keyed
+      // access and every method call on a boxed instance.
+      ...(dynClassDescSyms.length > 0
+        ? [`  scr_dyn_objinst_registry(sc_dcl_tbl, sizeof sc_dcl_tbl / sizeof sc_dcl_tbl[0]);`]
+        : []),
       ...(fnNameRows.length > 0
         ? [`  scr_fn_names_install(sc_fn_name_tbl, sizeof sc_fn_name_tbl / sizeof sc_fn_name_tbl[0]);`]
         : []),
