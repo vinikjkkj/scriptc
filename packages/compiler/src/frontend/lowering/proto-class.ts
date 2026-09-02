@@ -92,6 +92,19 @@ export interface ProtoField {
    * Reader.pos is seeded to 0 and then rewritten by every accessor. Recorded
    * rather than refused: reassignment is normal, it only widens the slot. */
   reassignedInMethod: boolean;
+  /** The RHS of every `this.<name> = ...` a prototype method performs, in walk
+   * order. The BOOLEAN above says a write exists; these say WHAT is written,
+   * and the consumer needs the latter to pick a slot type.
+   *
+   * Measured, not assumed: the TypeScript checker will NOT supply this. For
+   * `function S(){this.pos=0}` plus `S.prototype.clear=function(){this.pos=null}`
+   * the checker answers `pos: number` (the constructor's initializer alone)
+   * under allowJs, under checkJs, and under checkJs+strict alike. A slot typed
+   * from the checker is therefore a slot the first method write violates, which
+   * is exactly what the constraint above warns about; the validator's fieldSet
+   * `expectType` would reject it at build time. So the write expressions have to
+   * come from here or from nowhere. */
+  methodWrites: ts.Expression[];
 }
 
 export interface ProtoMethod {
@@ -234,7 +247,7 @@ export function findProtoClasses(sf: ts.SourceFile): ProtoClass[] {
         if (!seen.has(name)) {
           seen.add(name);
           out.push({ name, init: n.right, conditional: isConditional(n, fn),
-            reassignedInMethod: false });
+            reassignedInMethod: false, methodWrites: [] });
         }
       }
       ts.forEachChild(n, walk);
@@ -386,7 +399,7 @@ export function findProtoClasses(sf: ts.SourceFile): ProtoClass[] {
         ) {
           const name = n.left.name.getText();
           const own = c.fields.find((f) => f.name === name);
-          if (own) own.reassignedInMethod = true;
+          if (own) { own.reassignedInMethod = true; own.methodWrites.push(n.right); }
           else if (ctorFields.has(name)) { /* unreachable, kept for clarity */ }
           else {
             c.bailouts.push(
@@ -434,7 +447,7 @@ function whyPrint(sf: ts.SourceFile, classes: readonly ProtoClass[]): void {
         ` merged=${c.mergedMethods.length} protoConsts=${c.protoConsts.length}` +
         ` statics=${c.statics.length}` +
         ` shape={${c.fields.map((f) => f.name + (f.conditional ? "?" : "") +
-          (f.reassignedInMethod ? "*" : "")).join(",")}}`,
+          (f.reassignedInMethod ? "*" + String(f.methodWrites.length) : "")).join(",")}}`,
     );
     // Collapse by REASON: a refusal repeated at 7 offsets is one fact, and
     // the raw list ran to 1,612 lines on zapo's bundle, which is not a
