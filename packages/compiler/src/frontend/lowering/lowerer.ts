@@ -3835,6 +3835,11 @@ export class Lowerer {
       if (presenceShapes.has(shapeId)) { reject("a write-order-tracked binding names this shape"); continue; }
       const known = ev.locs;
       const all = litSites.get(shapeId) ?? new Set<string>();
+      // NO LITERAL IN THE EMITTED IR is not evidence, whatever the walk
+      // recorded. A speculative lowering that was rolled back still reports
+      // its spelling here, and a shape whose only values come from somewhere
+      // this walk cannot point at has no construction to take an order from.
+      if (all.size === 0) { reject("no recordLit of this shape reached the IR"); continue; }
       let complete = true;
       for (const site of all) if (!known.has(site)) { complete = false; break; }
       if (!complete) { reject("a recordLit of this shape reported no spelling"); continue; }
