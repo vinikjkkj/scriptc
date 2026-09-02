@@ -79,7 +79,15 @@ export function lastStringArg(line, open) {
   if (last === null || last.length < 2 || last[0] !== '"' || last[last.length - 1] !== '"') return null;
   return last.slice(1, -1);
 }
-const HDR = /^static\s+(.+?)\s*\*?\s*(sc_rkg_\d+)\(([^)]*)\)\s*\{\s*\/\* r\[k\] on (\S+) as (.+?) \*\//;
+/* `static` is OPTIONAL, and that word cost this instrument a whole TU.
+ * Since the translation-unit split, the emitted program is `<tu>.c` +
+ * `<tu>.partN.c` + `<tu>.scrh`, and a helper called from another part
+ * cannot be `static` — so on every split TU this header matched NOTHING
+ * and the report read `keyed-read helpers 0 ... ABORTABLE CALL SITES 0`.
+ * Zero here is the most flattering number this tool can print and it was
+ * mechanical: measured 2026-09-02 on a 139 MB zapo TU whose census says
+ * 7 aborting helpers over 9 call sites. */
+const HDR = /^(?:static\s+)?(.+?)\s*\*?\s*(sc_rkg_\d+)\(([^)]*)\)\s*\{\s*\/\* r\[k\] on (\S+) as (.+?) \*\//;
 
 export function analyse(raw) {
   const lines = raw.split("\n");
@@ -232,6 +240,21 @@ const FIXTURE = [
   "static void sc_f_ptruser(void) {",
   "  f = &sc_rkg_0;",
   "}",
+  // The SPLIT-TU spelling: a helper reachable from another part cannot be
+  // `static`, and this instrument's header regex used to require the word.
+  // Planted here so "helpers 0 on a split TU" cannot come back silently --
+  // it is the exact shape that made the tool read zero on a real 139 MB
+  // program, and only a fixture without `static` can catch it.
+  "double sc_rkg_4(sc_rs_r5 *r, ScrStr *k, const char *sc_site); /* r[k] on r5 as f64 */",
+  "double sc_rkg_4(sc_rs_r5 *r, ScrStr *k, const char *sc_site) { /* r[k] on r5 as f64 */",
+  "  if (scr_str_eq(k, (ScrStr *)&sc_s_4)) { /* going */",
+  "    return r->sc_m_going;",
+  "  }",
+  '  scr_trap_fmt("scriptc: TypeError: record has no key \'%.*s\' (typed \'number\' - no undefined is representable) (SC9003 at %s)\\n", (int)k->len, k->data, sc_site);',
+  "}",
+  "void sc_f_split(void) {",
+  '  double q = sc_rkg_4(tbl2, k5, "G:/x/messages.ts:344:19");',
+  "}",
   "",
 ].join("\n");
 
@@ -240,8 +263,14 @@ if (process.argv.includes("--selftest")) {
   const h0 = a.helpers.find((h) => h.name === "sc_rkg_0");
   const h1 = a.helpers.find((h) => h.name === "sc_rkg_1");
   const h3 = a.helpers.find((h) => h.name === "sc_rkg_3");
+  const h4 = a.helpers.find((h) => h.name === "sc_rkg_4");
   const need = [
-    ["four helpers found", a.helpers.length === 4],
+    ["five helpers found", a.helpers.length === 5],
+    // The split-TU spelling, asserted three ways: the helper exists at
+    // all, its call site is counted, and its prototype is not.
+    ["a NON-static helper is found (the split-TU spelling)", h4 !== undefined && h4.traps === true],
+    ["the non-static helper's call site is counted, prototype excluded", h4?.ways === 1 && h4.callers.get("sc_f_split") === 1],
+    ["the non-static helper's site argument is recovered", h4?.sites[0]?.site === "G:/x/messages.ts:344:19"],
     // The SITE, and the two ways a reader could get it wrong: taking the
     // first string on the line, or losing the argument behind a cast.
     ["the site argument is recovered", h0?.sites.map((s) => s.site).join("|") === "G:/x/xml.ts:41:19|G:/x/xml.ts:42:19"],
@@ -277,12 +306,25 @@ if (process.argv.includes("--selftest")) {
   process.exit(bad === 0 ? 0 : 4);
 }
 
-const file = process.argv[2];
-if (!file) {
-  console.error("usage: node scripts/real-aborts.mjs <tu.c> [--json out] [--quiet]");
+/* EVERY file of the program, not the base one. A split TU is `<tu>.c` +
+ * `<tu>.partN.c` + `<tu>.scrh`: the helper BODIES sit in one file and
+ * most of their CALL SITES in others, so a reader given one path answers
+ * about a tenth of the program and cannot say so. Passing all of them
+ * concatenates in argument order — the call-site unit is per line, so
+ * concatenation changes no count. */
+const inputs = [];
+for (let i = 2; i < process.argv.length; i++) {
+  const a = process.argv[i];
+  if (a === "--json") { i++; continue; }   // its VALUE is an output path, never an input
+  if (a.startsWith("--")) continue;
+  inputs.push(a);
+}
+if (inputs.length === 0) {
+  console.error("usage: node scripts/real-aborts.mjs <tu.c> [<tu.partN.c> ... <tu.scrh>] [--json out] [--quiet]");
   process.exit(2);
 }
-const raw = readFileSync(file, "latin1");
+const file = inputs.length === 1 ? inputs[0] : `${inputs[0]} +${inputs.length - 1} more`;
+const raw = inputs.map((f) => readFileSync(f, "latin1")).join("\n");
 // ------------------------------------------------------------ 0. the lane
 // The release default is the LLVM lane (index.ts emits the .ll first and
 // falls back to C only on an LlvmUnsupportedError tier refusal), so a C-only

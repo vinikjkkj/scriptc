@@ -71,15 +71,37 @@
 // really a wrong-lane instrument.  The lane is decided by CONTENT and checked
 // against the extension.
 //
-// usage: node scripts/tu-census.mjs <tu.c|tu.ll> [--sites <out>] [--json <out>] [--quiet]
+// THE SPLIT TU IS SEVERAL FILES AND ALL OF THEM ARE THE PROGRAM. Since the
+// translation-unit split, one build emits `<tu>.c` + `<tu>.partN.c` +
+// `<tu>.scrh` -- 16 files and 139 MB for a zapo client entry -- and the
+// halves are not interchangeable: the keyed-read HELPERS sit in `<tu>.c`,
+// their PROTOTYPES in `<tu>.scrh`, and most of their CALL SITES in the
+// parts. Censusing one file at a time and adding the numbers up is not the
+// same census: the "ways to die" column counts call sites in the file it is
+// reading, so a helper whose callers live in another part scores ZERO ways,
+// and every part that happens to contain no failure statement trips the
+// zero-population guard on its own. Measured 2026-09-02: per-file summing
+// answered ABORT.real 7 statements / 0 ways where the whole program has 9
+// call sites. So pass EVERY emitted file; they are concatenated in argument
+// order and censused once. The unit is the line, so concatenation changes no
+// count -- it only lets the reader see the calls.
+//
+// usage: node scripts/tu-census.mjs <tu.c|tu.ll> [<tu.partN.c> ... <tu.scrh>] [--sites <out>] [--json <out>] [--quiet]
 import { readFileSync, writeFileSync } from "node:fs";
 
 const args = process.argv.slice(2);
-const file = args[0];
-if (!file || file.startsWith("-")) {
-  console.error("usage: node scripts/tu-census.mjs <tu.c|tu.ll> [--sites <out>] [--json <out>] [--quiet]");
+const inputs = [];
+for (let i = 0; i < args.length; i++) {
+  const a = args[i];
+  if (a === "--sites" || a === "--json") { i++; continue; }  // the VALUE is an output path
+  if (a.startsWith("-")) continue;
+  inputs.push(a);
+}
+if (inputs.length === 0) {
+  console.error("usage: node scripts/tu-census.mjs <tu.c|tu.ll> [<tu.partN.c> ... <tu.scrh>] [--sites <out>] [--json <out>] [--quiet]");
   process.exit(2);
 }
+const file = inputs.length === 1 ? inputs[0] : `${inputs[0]} +${inputs.length - 1} more`;
 const optOf = (flag) => {
   const i = args.indexOf(flag);
   return i >= 0 ? args[i + 1] : null;
@@ -92,7 +114,7 @@ const quiet = args.includes("--quiet");
 // spellings of the SAME em dash: cStringLiteral() octal-escapes non-ASCII
 // (\342\200\224) while the scr_trap templates carry raw UTF-8 bytes.  Matching
 // on the character would silently miss one of the two families.
-const raw = readFileSync(file, "latin1");
+const raw = inputs.map((f) => readFileSync(f, "latin1")).join("\n");
 const lines = raw.split("\n");
 
 // ---------------------------------------------------------------- 0. lane
@@ -103,7 +125,11 @@ const lines = raw.split("\n");
 // to make impossible.
 const N_LL = (raw.match(/^(?:declare|define) /gm) ?? []).length;
 const N_C = (raw.match(/^#include /gm) ?? []).length;
-const extLl = /\.ll$/i.test(file);
+/* The extension guard reads the FIRST input, not the composite label: with
+ * several files `file` is "x.c +15 more", which ends in neither `.c` nor
+ * `.ll`, and testing that string would skip the guard entirely — the one
+ * check that exists to stop IR being read by the C tables. */
+const extLl = /\.ll$/i.test(inputs[0]);
 let lane;
 if (N_LL > 0 && N_C === 0) lane = "llvm";
 else if (N_C > 0 && N_LL === 0) lane = "c";
@@ -112,7 +138,7 @@ else {
   console.error(`tu-census: cannot tell the lane of ${file} (${N_LL} llvm markers, ${N_C} C markers)`);
   process.exit(4);
 }
-if (raw.length > 0 && (extLl || /\.c$/i.test(file)) && lane !== (extLl ? "llvm" : "c")) {
+if (raw.length > 0 && (extLl || /\.c$/i.test(inputs[0])) && lane !== (extLl ? "llvm" : "c")) {
   console.error(`tu-census: ${file} is named .${extLl ? "ll" : "c"} but its CONTENT is the ${lane} lane`);
   process.exit(4);
 }
