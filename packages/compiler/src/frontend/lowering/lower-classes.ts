@@ -149,7 +149,7 @@ export interface ClassInfo {
    * body once per event name as the specialization method `emit:<event>`
    * (lower-emitter.ts's emit-overrides block has the whole story). */
   emitOverride?: EmitOverrideRec;
-  ctor: ts.ConstructorDeclaration | null;
+  ctor: ts.ConstructorDeclaration | ts.FunctionDeclaration | ts.FunctionExpression | null;
   /** PARAMETER PROPERTIES (`constructor(public x: number)`), in parameter
    * order: each declares a field (placed BEFORE the class's declared
    * fields in the layout — Node's transform hoists the definitions to the
