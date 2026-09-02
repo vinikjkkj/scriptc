@@ -67,7 +67,20 @@ const out = ts.transpileModule(fs.readFileSync(SRC, "utf8"), {
 }).outputText;
 const mod = new Module("proto-class", null);
 mod.filename = SRC;
-mod.require = (id) => (id === "typescript" || id === "typescript5" ? ts : require(id));
+/* proto-class.ts lives in the TS7 world (frontend/ts7/adapter.js) like the rest
+ * of lowering, because the consumer in lower-classes.ts must hand its nodes to
+ * L.irTypeOf and the two worlds are nominally incompatible by design. This probe
+ * cannot resolve that adapter -- it deliberately runs with no build -- so it
+ * aliases the specifier to its own 5.9.3.
+ *
+ * Sound for THIS module and not in general: the recognizer touches only
+ * same-name guards, SyntaxKind, forEachChild, getText and getStart, all of which
+ * 5.9.3 spells identically. It never takes a checker, a Type or a Symbol, where
+ * the two worlds actually diverge. A future edit that reaches for one of those
+ * breaks here first, which is the right place to find out. */
+const ADAPTER = /ts7\/adapter\.js$/; // the import specifier, always forward-slashed
+mod.require = (id) =>
+  id === "typescript" || id === "typescript5" || ADAPTER.test(id) ? ts : require(id);
 mod._compile(out, SRC);
 const { findProtoClasses, usableProtoClasses } = mod.exports;
 

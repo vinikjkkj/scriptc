@@ -149,7 +149,7 @@ export interface ClassInfo {
    * body once per event name as the specialization method `emit:<event>`
    * (lower-emitter.ts's emit-overrides block has the whole story). */
   emitOverride?: EmitOverrideRec;
-  ctor: ts.ConstructorDeclaration | null;
+  ctor: ts.ConstructorDeclaration | ts.FunctionDeclaration | ts.FunctionExpression | null;
   /** PARAMETER PROPERTIES (`constructor(public x: number)`), in parameter
    * order: each declares a field (placed BEFORE the class's declared
    * fields in the layout — Node's transform hoists the definitions to the
@@ -5689,13 +5689,41 @@ export function lowerClassMembers(L: Lowerer, info: ClassInfo): IrFunction[] {
 
   function lowerClassMethodMemberInner(L: Lowerer, info: ClassInfo,
     fnLike: ts.MethodDeclaration | ts.AccessorDeclaration,): IrFunction | null {
-    const className = info.def.name;
-    const thisType: IrType = { kind: "object", className };
     const memberName = ts.isMethodDeclaration(fnLike) ? classMemberNameOf(L, fnLike.name) : ts.isIdentifier(fnLike.name) || ts.isPrivateIdentifier(fnLike.name) ? fnLike.name.text : null;
     if (memberName === null) return null;
     const mName = ts.isMethodDeclaration(fnLike)
       ? memberName
       : `${ts.isGetAccessor(fnLike) ? "get" : "set"}:${memberName}`;
+    return lowerMethodBodyInner(L, info, mName, fnLike);
+  }
+
+  /** A RECOGNIZED PROTOTYPE-CLASS method: `C.prototype.m = function () {...}`
+   * lowered as `%C.m`, the same module function a declared method produces.
+   *
+   * It cannot go through lowerClassMethodMember, which derives the name from a
+   * ts.MethodDeclaration's `name` node -- a FunctionExpression on the right of an
+   * assignment has no such name (and when minified, no name at all). The caller
+   * already knows the method name from the property it was assigned to, so it
+   * passes it in and shares everything below.
+   *
+   * The fn is a FunctionExpression and never an ArrowFunction: an arrow's `this`
+   * is lexical, so it is not a method at all, and the recognizer refuses one.
+   *
+   * The CALLER must note the edge for `%C.m`. Module assembly prunes any method
+   * no call site reached, and the function disappears with it. */
+  export function lowerProtoMethodMember(L: Lowerer, info: ClassInfo, mName: string,
+    fn: ts.FunctionExpression,): IrFunction | null {
+    return withInstanceBindings(L, info, () => lowerMethodBodyInner(L, info, mName, fn));
+  }
+
+  /** One instance method body as its module function, shared by the declared
+   * path and the synthesized one. Everything here reads only `parameters`,
+   * `body` and the position -- which a FunctionExpression carries exactly as a
+   * MethodDeclaration does. */
+  function lowerMethodBodyInner(L: Lowerer, info: ClassInfo, mName: string,
+    fnLike: ts.MethodDeclaration | ts.AccessorDeclaration | ts.FunctionExpression,): IrFunction | null {
+    const className = info.def.name;
+    const thisType: IrType = { kind: "object", className };
     const sig = info.methods.get(mName);
     if (!sig || !fnLike.body) return null;
     const prevClass = L.currentClass;
