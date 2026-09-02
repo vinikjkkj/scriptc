@@ -1,0 +1,9 @@
+1 empty cleanup: 0
+2 zero: cleanup intervalMs must be a positive finite number
+3 negative: cleanup intervalMs must be a positive finite number
+4 nan: cleanup intervalMs must be a positive finite number
+5 infinite: cleanup intervalMs must be a positive finite number
+6 ok: no throw (object)
+7 stop before start is a no-op: ok
+8 cleanup again: 0
+9 cleanup is idempotent: 0
