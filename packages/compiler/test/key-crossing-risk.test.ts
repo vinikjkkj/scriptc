@@ -52,7 +52,22 @@ const crossing = (r: Lowered): ScrDiagnostic[] =>
   r.diags.filter((d) => d.message.includes("widening a record into an 'unknown'/'object' slot"));
 
 const ROW = `interface Row { inner: number; middle: string; tag: boolean }`;
-const OUT_OF_ORDER = `${ROW}\nconst w: Row = { tag: true, inner: 1, middle: "m" };`;
+/* OUT OF ORDER *AND* AMBIGUOUS, and the second half is load-bearing.
+ *
+ * A shape's enumeration order is a CHOICE, and reconcileKeyOrders re-picks
+ * it where the program proves one. So a Row built by ONE out-of-order
+ * literal is not a divergence any more: it is a shape that enumerates
+ * `tag,inner,middle` and answers Node exactly (measured -- that program,
+ * crossed into an `object` slot and read through Object.keys,
+ * JSON.stringify and console.log, is MATCH byte-exact on both backends
+ * against node v25.9.0). What the crossing fence still refuses is an order
+ * that is not KNOWABLE, and two literals spelling one shape differently is
+ * exactly that: neither order can be the shape's, so the crossing
+ * materialises a key list that is wrong for at least one of them. `w2` is
+ * READ so its construction is lowered. */
+const OUT_OF_ORDER =
+  `${ROW}\nconst w: Row = { tag: true, inner: 1, middle: "m" };\n` +
+  `const w2: Row = { inner: 9, middle: "z", tag: false };\nconsole.log(String(w2.inner));`;
 const IN_ORDER = `${ROW}\nconst w: Row = { inner: 1, middle: "m", tag: true };`;
 
 /* -- the ARMED half: what must keep compiling ------------------------- */
@@ -98,6 +113,19 @@ test("integer-like keys are hoisted by the SHAPE, so their declaration slots are
   // below is therefore in enumeration order and carries no risk at all.
   const r = lower(`interface M { "2": string; alpha: number; "10": string; beta: number }
 const w: M = { "2": "two", alpha: 3, "10": "ten", beta: 4 };
+const o: object = w;
+console.log(Object.keys(o).join(","));`);
+  expect(crossing(r)).toEqual([]);
+  expect(r.compiled).toBe(true);
+});
+
+test("an UNAMBIGUOUS out-of-order record crosses, because the SHAPE takes its order", () => {
+  // The one construction the program makes IS the evidence, and there is
+  // nothing of this shape to contradict it -- so declaredOrder is re-picked
+  // to `tag,inner,middle` and the crossing materialises Node's own key list.
+  // Nothing is excused here: the answer is given.
+  const r = lower(`${ROW}
+const w: Row = { tag: true, inner: 1, middle: "m" };
 const o: object = w;
 console.log(Object.keys(o).join(","));`);
   expect(crossing(r)).toEqual([]);

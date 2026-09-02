@@ -3874,6 +3874,14 @@ export class Lowerer {
       const shape = this.shapes.get(shapeId);
       if (!shape?.declaredOrder) continue;
       for (const [locKey, spelled] of ev.locs) {
+        // ONLY the ORDER verdict is recomputed. A literal can carry a "set"
+        // risk at the same location — a spread that ends keys the narrower
+        // shape does not name — and that has nothing to do with the order
+        // this pass re-picked. Deleting it here took four SC1090s off the
+        // width-copy half of the diagnostics corpus before the snapshot
+        // caught it.
+        const prev = this.keyRiskLiterals.get(locKey);
+        if (prev && prev.why !== "order") continue;
         this.keyRiskLiterals.delete(locKey);
         if (spelled.length < 2) continue;
         const want = shape.declaredOrder.filter((n) => spelled.includes(n));

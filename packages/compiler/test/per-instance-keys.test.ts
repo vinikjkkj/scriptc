@@ -105,14 +105,19 @@ test("a record literal keeps its SOURCE order in the IR", () => {
   // The order debt is not a lost fact, it is an unread one: the crossing
   // walks the shape's declaredOrder while the literal that built the value
   // is right here, in the order the program spelled it.
+  // TWO literals, spelled differently, because the divergence this test is
+  // about needs a shape that cannot take either one's order. With ONE
+  // literal reconcileKeyOrders re-picks declaredOrder to it and there is no
+  // divergence left to show.
   const r = lower(`
 interface W { inner: number; middle: string; tag: boolean }
 const w: W = { tag: true, inner: 1, middle: "m" };
-console.log(w.inner);
+const v: W = { inner: 9, middle: "z", tag: false };
+console.log(w.inner, v.inner);
 `);
   expect(r.module).not.toBeNull();
   const lits = recordLits(r.module!);
-  expect(lits.length).toBe(1);
+  expect(lits.length).toBe(2);
   expect(lits[0]!.fields).toEqual(["tag", "inner", "middle"]);
   // ... while the SHAPE says something else, and that is the divergence.
   const rec = (r.module!.records ?? [])[0]!;
@@ -159,15 +164,24 @@ console.log(p.a, q.a);
 
 /* -- and the fences that stand where the debt is not payable ---------- */
 
-test("a record built out of its shape's order still refuses to cross", () => {
-  // The order half is LOUD today (SC1090 at the crossing). Nothing here may
-  // quietly stop refusing: a per-instance representation that landed halfway
-  // would take this refusal away before it could answer in its place.
+test("a record whose order is NOT KNOWABLE still refuses to cross", () => {
+  // The order half is LOUD where no answer is available (SC1090 at the
+  // crossing). Nothing here may quietly stop refusing: a per-instance
+  // representation that landed halfway would take this refusal away before
+  // it could answer in its place.
+  //
+  // Two literals spelling one shape differently IS "no answer available".
+  // The one-literal case does not refuse any more and does not have to:
+  // reconcileKeyOrders gives the shape the program's own order and the
+  // crossing materialises Node's key list -- measured MATCH byte-exact on
+  // both backends through Object.keys, JSON.stringify and console.log,
+  // which is answering in its place rather than landing halfway.
   const r = lower(`
 interface W { inner: number; middle: string; tag: boolean }
 const w: W = { tag: true, inner: 1, middle: "m" };
+const v: W = { inner: 9, middle: "z", tag: false };
 const o: object = w;
-console.log(Object.keys(o).join(","));
+console.log(Object.keys(o).join(","), v.inner);
 `);
   expect(r.codes).toContain("SC1090");
 });
