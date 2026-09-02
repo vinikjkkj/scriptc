@@ -1,0 +1,8 @@
+ok   derivePerJidSrtpKey masterKey = 98910a45765c741d6d0105bbafd8d24c
+ok   derivePerJidSrtpKey masterSalt = 0ceca9ba0c214ecfe106f90f3716
+ok   SrtpSession.protect bytes = 807800070000078011223344519081bf09c22f7890
+ok   SrtpSession.unprotect payload = f8fffeabcd
+ok   unprotect sequenceNumber = 7
+ok   unprotect ssrc = 287454020
+ok   unprotect rejects a tampered packet = rejected
+VOIP-SRTP: ALL PASS
