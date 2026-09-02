@@ -33,7 +33,7 @@ import { IrFunction, IrType, isRefCounted, isUnitType, typeEquals, typeKey } fro
       const ret = fn.returnType;
       const bodyCall = `${mangleFunction(fn.name)}(${callArgs})`;
       const lines: string[] = [
-        `static void ${mangleTrampoline(fn.name)}(ScrFiber *sc_self, void *sc_ap0) {`,
+        `${E.link}void ${mangleTrampoline(fn.name)}(ScrFiber *sc_self, void *sc_ap0) {`,
         `  ${pack} sc_a = *(${pack} *)sc_ap0;`,
         `  free(sc_ap0);`,
       ];
@@ -80,8 +80,10 @@ import { IrFunction, IrType, isRefCounted, isUnitType, typeEquals, typeKey } fro
       const cache = fn.asyncCacheGlobal !== undefined ? mangleGlobal(fn.asyncCacheGlobal) : null;
       const cycleCache =
         fn.asyncCycleCacheGlobal !== undefined ? mangleGlobal(fn.asyncCycleCacheGlobal) : null;
+      // Every `await f()` in any part calls the spawn wrapper.
+      E.decl(`ScrPromise *${mangleAsyncSpawn(fn.name)}(${spawnParams.join(", ") || "void"});`);
       out.push(
-        `static ScrPromise *${mangleAsyncSpawn(fn.name)}(${spawnParams.join(", ") || "void"}) {`,
+        `${E.link}ScrPromise *${mangleAsyncSpawn(fn.name)}(${spawnParams.join(", ") || "void"}) {`,
         ...(cache !== null
           ? [`  if (${cache}) return scr_promise_retain(${cache});`]
           : []),
@@ -183,7 +185,7 @@ function agenResultTypeOf(fn: IrFunction): IrType & { kind: "record" } {
       const ret = fn.returnType;
       const bodyCall = `${mangleFunction(fn.name)}(${callArgs})`;
       const lines: string[] = [
-        `static void ${mangleTrampoline(fn.name)}(ScrFiber *sc_self, void *sc_ap0) {`,
+        `${E.link}void ${mangleTrampoline(fn.name)}(ScrFiber *sc_self, void *sc_ap0) {`,
         `  ${pack} sc_a = *(${pack} *)sc_ap0;`,
         `  free(sc_ap0);`,
       ];
@@ -230,13 +232,15 @@ function agenResultTypeOf(fn: IrFunction): IrType & { kind: "record" } {
         ...(lifted ? ["ScrClosure *sc_env"] : []),
         ...fn.params.map((p) => cDecl(p.type, pname(p))),
       ];
+      // Every call of a generator function, from any part, goes here.
+      E.decl(`ScrGen *${mangleGenSpawn(fn.name)}(${spawnParams.join(", ") || "void"});`);
       out.push(
         // The settle thunk is DEFINED with the interned walkers, far below
         // this spawn wrapper, so its prototype has to be repeated here.
         ...(isAsyncGen
-          ? [`static void ${agenSettleThunkFor(E, agenTypeOf(fn), agenResultTypeOf(fn))}(ScrGen *sc_g, ScrPromise *sc_p);`]
+          ? [`${E.link}void ${agenSettleThunkFor(E, agenTypeOf(fn), agenResultTypeOf(fn))}(ScrGen *sc_g, ScrPromise *sc_p);`]
           : []),
-        `static void ${mangleGenDrop(fn.name)}(void *sc_ap0) {`,
+        `${E.link}void ${mangleGenDrop(fn.name)}(void *sc_ap0) {`,
         `  ${pack} sc_a = *(${pack} *)sc_ap0;`,
         `  free(sc_ap0);`,
         ...(lifted ? [`  scr_closure_release(sc_a.sc_env);`] : []),
@@ -245,7 +249,7 @@ function agenResultTypeOf(fn: IrFunction): IrType & { kind: "record" } {
           .map((p) => `  ${releaseCallC(p.type, `sc_a.${pname(p)}`)};`),
         ...(!lifted && !fn.params.some((p) => isRefCounted(p.type)) ? [`  (void)sc_a;`] : []),
         `}`,
-        `static ScrGen *${mangleGenSpawn(fn.name)}(${spawnParams.join(", ") || "void"}) {`,
+        `${E.link}ScrGen *${mangleGenSpawn(fn.name)}(${spawnParams.join(", ") || "void"}) {`,
         `  ${pack} *sc_ap = malloc(sizeof *sc_ap);`,
         `  if (!sc_ap) { ${E.oomAbortC()}; }`,
         ...(lifted ? [`  sc_ap->sc_env = scr_closure_retain(sc_env);`] : []),
@@ -283,10 +287,10 @@ function agenResultTypeOf(fn: IrFunction): IrType & { kind: "record" } {
         throw new Error("emitter bug: exit listener union lacks its arms");
       }
       E.walkerProtos.push(
-        `static void ${sym}(ScrClosure *sc_cb, bool sc_has, double sc_code, const char *sc_sig);`,
+        `${E.link}void ${sym}(ScrClosure *sc_cb, bool sc_has, double sc_code, const char *sc_sig);`,
       );
       E.walkerDefs.push(
-        `static void ${sym}(ScrClosure *sc_cb, bool sc_has, double sc_code, const char *sc_sig) {`,
+        `${E.link}void ${sym}(ScrClosure *sc_cb, bool sc_has, double sc_code, const char *sc_sig) {`,
         `  (void)sc_sig;`,
         `  ScrUnion *sc_u = sc_has ? scr_union_new_f64(${f64Tag}, sc_code)`,
         `                           : ${E.unitInstanceRef(param.unionId, nullTag)};`,
@@ -320,10 +324,10 @@ function agenResultTypeOf(fn: IrFunction): IrType & { kind: "record" } {
         throw new Error("emitter bug: exit listener unions lack their arms");
       }
       E.walkerProtos.push(
-        `static void ${sym}(ScrClosure *sc_cb, bool sc_has, double sc_code, const char *sc_sig);`,
+        `${E.link}void ${sym}(ScrClosure *sc_cb, bool sc_has, double sc_code, const char *sc_sig);`,
       );
       E.walkerDefs.push(
-        `static void ${sym}(ScrClosure *sc_cb, bool sc_has, double sc_code, const char *sc_sig) {`,
+        `${E.link}void ${sym}(ScrClosure *sc_cb, bool sc_has, double sc_code, const char *sc_sig) {`,
         `  ScrUnion *sc_u = sc_has ? scr_union_new_f64(${f64Tag}, sc_code)`,
         `                           : ${E.unitInstanceRef(codeParam.unionId, codeNullTag)};`,
         `  ScrUnion *sc_s = sc_sig`,
@@ -355,10 +359,10 @@ function agenResultTypeOf(fn: IrFunction): IrType & { kind: "record" } {
         throw new Error("emitter bug: stream data listener union lacks its Buffer arm");
       }
       E.walkerProtos.push(
-        `static void ${sym}(ScrClosure *sc_cb, ScrBytes *sc_chunk);`,
+        `${E.link}void ${sym}(ScrClosure *sc_cb, ScrBytes *sc_chunk);`,
       );
       E.walkerDefs.push(
-        `static void ${sym}(ScrClosure *sc_cb, ScrBytes *sc_chunk) {`,
+        `${E.link}void ${sym}(ScrClosure *sc_cb, ScrBytes *sc_chunk) {`,
         `  ScrUnion *sc_u = scr_union_new_ref(${bytesTag}, scr_bytes_retain(sc_chunk), &scr_bytes_retain_v, &scr_bytes_release_v, NULL);`,
         `  ((void (*)(ScrClosure *, ScrUnion *))sc_cb->fn)(sc_cb, sc_u);`,
         `}`,
@@ -397,9 +401,9 @@ function agenResultTypeOf(fn: IrFunction): IrType & { kind: "record" } {
       const undefTag = errDef ? errDef.arms.findIndex((a) => a.kind === "undefinedT") : -1;
       if (undefTag < 0) throw new Error("emitter bug: bound-close err union lacks its undefined arm");
       trampoline = `${sym}_cb`;
-      E.walkerProtos.push(`static void ${trampoline}(ScrClosure *sc_self);`);
+      E.walkerProtos.push(`${E.link}void ${trampoline}(ScrClosure *sc_self);`);
       E.walkerDefs.push(
-        `static void ${trampoline}(ScrClosure *sc_self) { /* close cb: fire with no error */`,
+        `${E.link}void ${trampoline}(ScrClosure *sc_self) { /* close cb: fire with no error */`,
         `  ScrClosure *sc_inner = (ScrClosure *)scr_box_get_ref(sc_self->caps[0]); /* +1 */`,
         `  ((void (*)(ScrClosure *, ScrUnion *))sc_inner->fn)(sc_inner, ${E.unitInstanceRef(errParam.unionId, undefTag)});`,
         `  scr_closure_release(sc_inner);`,
@@ -407,9 +411,9 @@ function agenResultTypeOf(fn: IrFunction): IrType & { kind: "record" } {
       );
     }
     const retC = retServer ? "ScrNetServer *" : "void";
-    E.walkerProtos.push(`static ${retC}${retServer ? "" : " "}${sym}(ScrClosure *sc_self, ScrUnion *sc_cb);`);
+    E.walkerProtos.push(`${E.link}${retC}${retServer ? "" : " "}${sym}(ScrClosure *sc_self, ScrUnion *sc_cb);`);
     E.walkerDefs.push(
-      `static ${retC}${retServer ? "" : " "}${sym}(ScrClosure *sc_self, ScrUnion *sc_cb) { /* bound server.close */`,
+      `${E.link}${retC}${retServer ? "" : " "}${sym}(ScrClosure *sc_self, ScrUnion *sc_cb) { /* bound server.close */`,
       `  ScrNetServer *sc_srv = (ScrNetServer *)scr_box_get_ref(sc_self->caps[0]); /* +1 */`,
       `  ScrClosure *sc_reg = NULL;`,
       `  if (sc_cb->tag == ${funcTag}) {`,
@@ -446,9 +450,9 @@ function agenResultTypeOf(fn: IrFunction): IrType & { kind: "record" } {
     const def = E.unionsById.get(cbUnion.unionId);
     const undefTag = def ? def.arms.findIndex((a) => a.kind === "undefinedT") : -1;
     if (undefTag < 0) throw new Error("emitter bug: close-override callback union lacks its undefined arm");
-    E.walkerProtos.push(`static void ${sym}(ScrClosure *sc_self);`);
+    E.walkerProtos.push(`${E.link}void ${sym}(ScrClosure *sc_self);`);
     E.walkerDefs.push(
-      `static void ${sym}(ScrClosure *sc_self) { /* close override wrapper */`,
+      `${E.link}void ${sym}(ScrClosure *sc_self) { /* close override wrapper */`,
       `  ScrClosure *sc_inner = (ScrClosure *)scr_box_get_ref(sc_self->caps[0]); /* +1 */`,
       ...(retServer
         ? [
@@ -480,10 +484,10 @@ function agenResultTypeOf(fn: IrFunction): IrType & { kind: "record" } {
       E.dgramMsgThunks.set(key, sym);
       const struct = mangleRecordStruct(param.shapeId);
       E.walkerProtos.push(
-        `static void ${sym}(ScrClosure *sc_cb, ScrBytes *sc_msg, ScrStr *sc_addr, ScrStr *sc_family, double sc_port, double sc_size);`,
+        `${E.link}void ${sym}(ScrClosure *sc_cb, ScrBytes *sc_msg, ScrStr *sc_addr, ScrStr *sc_family, double sc_port, double sc_size);`,
       );
       E.walkerDefs.push(
-        `static void ${sym}(ScrClosure *sc_cb, ScrBytes *sc_msg, ScrStr *sc_addr, ScrStr *sc_family, double sc_port, double sc_size) {`,
+        `${E.link}void ${sym}(ScrClosure *sc_cb, ScrBytes *sc_msg, ScrStr *sc_addr, ScrStr *sc_family, double sc_port, double sc_size) {`,
         `  ${struct} *sc_ri = ${mangleRecordNew(param.shapeId)}();`,
         `  sc_ri->${mangleField("address")} = scr_str_retain(sc_addr);`,
         `  sc_ri->${mangleField("family")} = scr_str_retain(sc_family);`,
@@ -522,10 +526,10 @@ function agenResultTypeOf(fn: IrFunction): IrType & { kind: "record" } {
       const callSig = ["ScrClosure *", "ScrUnion *", ...(nparams >= 2 ? ["ScrStr *"] : []), ...(nparams >= 3 ? ["double"] : [])].join(", ");
       const callArgs = ["sc_cb", "sc_u", ...(nparams >= 2 ? ["scr_str_retain(sc_addr)"] : []), ...(nparams >= 3 ? ["sc_family"] : [])].join(", ");
       E.walkerProtos.push(
-        `static void ${sym}(ScrClosure *sc_cb, ScrStr *sc_err, ScrStr *sc_addr, double sc_family);`,
+        `${E.link}void ${sym}(ScrClosure *sc_cb, ScrStr *sc_err, ScrStr *sc_addr, double sc_family);`,
       );
       E.walkerDefs.push(
-        `static void ${sym}(ScrClosure *sc_cb, ScrStr *sc_err, ScrStr *sc_addr, double sc_family) {`,
+        `${E.link}void ${sym}(ScrClosure *sc_cb, ScrStr *sc_err, ScrStr *sc_addr, double sc_family) {`,
         `  (void)sc_addr; (void)sc_family;`,
         `  ScrUnion *sc_u = sc_err`,
         `      ? scr_union_new_ref(${errTag}, scr_error_new(0, sc_err), &scr_error_retain_v, &scr_error_release_v, NULL)`,
@@ -558,10 +562,10 @@ function agenResultTypeOf(fn: IrFunction): IrType & { kind: "record" } {
     if (tag < 0) throw new Error("emitter bug: connect listener union lacks its socket arm");
     const three = cbT.params.length === 3;
     E.walkerProtos.push(
-      `static void ${sym}(ScrClosure *sc_cb, ScrHttpReq *sc_req, ScrNetSocket *sc_sock, ScrBytes *sc_head);`,
+      `${E.link}void ${sym}(ScrClosure *sc_cb, ScrHttpReq *sc_req, ScrNetSocket *sc_sock, ScrBytes *sc_head);`,
     );
     E.walkerDefs.push(
-      `static void ${sym}(ScrClosure *sc_cb, ScrHttpReq *sc_req, ScrNetSocket *sc_sock, ScrBytes *sc_head) {`,
+      `${E.link}void ${sym}(ScrClosure *sc_cb, ScrHttpReq *sc_req, ScrNetSocket *sc_sock, ScrBytes *sc_head) {`,
       ...(three ? [] : [`  scr_bytes_release(sc_head);`]),
       `  ScrUnion *sc_u = scr_union_new_ref(${tag}, sc_sock, &scr_net_sock_retain_v, &scr_net_sock_release_v, NULL);`,
       three
@@ -601,9 +605,9 @@ function agenResultTypeOf(fn: IrFunction): IrType & { kind: "record" } {
     const recStruct = mangleRecordStruct(addrsT.elem.shapeId);
     const recRelease = mangleRecordRelease(addrsT.elem.shapeId);
     const addrField = mangleField("address");
-    E.walkerProtos.push(`static void ${sym}(ScrClosure *sc_self, ScrUnion *sc_err, ScrArr *sc_addrs);`);
+    E.walkerProtos.push(`${E.link}void ${sym}(ScrClosure *sc_self, ScrUnion *sc_err, ScrArr *sc_addrs);`);
     E.walkerDefs.push(
-      `static void ${sym}(ScrClosure *sc_self, ScrUnion *sc_err, ScrArr *sc_addrs) {`,
+      `${E.link}void ${sym}(ScrClosure *sc_self, ScrUnion *sc_err, ScrArr *sc_addrs) {`,
       `  bool sc_has_err = sc_err->tag != ${nullTag};`,
       `  ScrStr *sc_msg = NULL;`,
       `  if (sc_has_err) sc_msg = scr_str_retain(((ScrError *)scr_union_peek(sc_err))->message);`,
@@ -672,8 +676,8 @@ function agenResultTypeOf(fn: IrFunction): IrType & { kind: "record" } {
     body.push(`  bool sc_has_err = ${hasErr};`);
     if (nparams >= 1) body.push(`  scr_union_release(sc_err);`);
     body.push(`  scr_tls_sni_answer(sc_self, sc_has_err, ${ctx});`);
-    E.walkerProtos.push(`static void ${sym}(${params.join(", ")});`);
-    E.walkerDefs.push(`static void ${sym}(${params.join(", ")}) {`, ...body, `}`);
+    E.walkerProtos.push(`${E.link}void ${sym}(${params.join(", ")});`);
+    E.walkerDefs.push(`${E.link}void ${sym}(${params.join(", ")}) {`, ...body, `}`);
     return sym;
   }
 
@@ -703,7 +707,7 @@ function agenResultTypeOf(fn: IrFunction): IrType & { kind: "record" } {
     const rv = vAdapters(to);
     const fulfill = (value: string): string =>
       `scr_promise_fulfill_ref(sc_dst, ${value}, ${rv.retain}, ${rv.release}, ${E.traceArgC(to)});`;
-    E.walkerProtos.push(`static void ${sym}(ScrPromise *sc_dst, ScrPromise *sc_src);`);
+    E.walkerProtos.push(`${E.link}void ${sym}(ScrPromise *sc_dst, ScrPromise *sc_src);`);
     if (from.kind !== "union") {
       // One arm wrap, straight off the payload accessors.
       const tag = tagOf(from);
@@ -724,7 +728,7 @@ function agenResultTypeOf(fn: IrFunction): IrType & { kind: "record" } {
         }
       }
       E.walkerDefs.push(
-        `static void ${sym}(ScrPromise *sc_dst, ScrPromise *sc_src) {`,
+        `${E.link}void ${sym}(ScrPromise *sc_dst, ScrPromise *sc_src) {`,
         `  ${fulfill(value)}`,
         `}`,
       );
@@ -750,7 +754,7 @@ function agenResultTypeOf(fn: IrFunction): IrType & { kind: "record" } {
       return `  case ${i}: sc_v = ${build}; break;`;
     });
     E.walkerDefs.push(
-      `static void ${sym}(ScrPromise *sc_dst, ScrPromise *sc_src) {`,
+      `${E.link}void ${sym}(ScrPromise *sc_dst, ScrPromise *sc_src) {`,
       `  ScrUnion *sc_u = (ScrUnion *)scr_promise_payload_ref(sc_src);`,
       `  ScrUnion *sc_v = NULL;`,
       `  switch (sc_u->tag) {`,
@@ -788,7 +792,7 @@ function agenResultTypeOf(fn: IrFunction): IrType & { kind: "record" } {
     const valueT = shape?.fields.find((f) => f.name === "value")?.type;
     if (!valueT) throw new Error("emitter bug: genResume record lacks its value field");
     const lines: string[] = [
-      `static ${struct} *${sym}(ScrGen *sc_g) {`,
+      `${E.link}${struct} *${sym}(ScrGen *sc_g) {`,
       `  ${struct} *sc_r = ${mangleRecordNew(recT.shapeId)}();`,
       `  bool sc_d = scr_gen_done(sc_g);`,
       `  sc_r->${mangleField("done")} = sc_d;`,
@@ -872,7 +876,7 @@ function agenResultTypeOf(fn: IrFunction): IrType & { kind: "record" } {
       lines.push(`  sc_r->${mangleField("value")} = sc_v;`);
     }
     lines.push(`  return sc_r;`, `}`);
-    E.walkerProtos.push(`static ${struct} *${sym}(ScrGen *sc_g);`);
+    E.walkerProtos.push(`${E.link}${struct} *${sym}(ScrGen *sc_g);`);
     E.walkerDefs.push(...lines, ``);
     return sym;
   }
@@ -900,9 +904,9 @@ function agenResultTypeOf(fn: IrFunction): IrType & { kind: "record" } {
     E.genResThunks.set(key, sym);
     const struct = mangleRecordStruct(recT.shapeId);
     const v = vAdapters(recT);
-    E.walkerProtos.push(`static void ${sym}(ScrGen *sc_g, ScrPromise *sc_p);`);
+    E.walkerProtos.push(`${E.link}void ${sym}(ScrGen *sc_g, ScrPromise *sc_p);`);
     E.walkerDefs.push(
-      `static void ${sym}(ScrGen *sc_g, ScrPromise *sc_p) {`,
+      `${E.link}void ${sym}(ScrGen *sc_g, ScrPromise *sc_p) {`,
       `  ${struct} *sc_r = ${inner}(sc_g);`,
       `  scr_promise_fulfill_ref(sc_p, sc_r, ${v.retain}, ${v.release}, ${E.traceArgC(recT)});`,
       `}`,
@@ -975,7 +979,7 @@ export function promiseAdoptAdapterFor(E: CEmitter, sov: IrType, inner: IrType):
     }
   };
   const lines: string[] = [
-    `static void ${sym}(ScrPromise *sc_dst, ScrPromise *sc_src) {`,
+    `${E.link}void ${sym}(ScrPromise *sc_dst, ScrPromise *sc_src) {`,
     `  ScrUnion *sc_u = (ScrUnion *)scr_promise_payload_ref(sc_src);`,
     `  switch (sc_u->tag) {`,
     `  case ${promiseTag}:`,
@@ -992,7 +996,7 @@ export function promiseAdoptAdapterFor(E: CEmitter, sov: IrType, inner: IrType):
     `  scr_union_release(sc_u);`,
     `}`,
   );
-  E.walkerProtos.push(`static void ${sym}(ScrPromise *sc_dst, ScrPromise *sc_src);`);
+  E.walkerProtos.push(`${E.link}void ${sym}(ScrPromise *sc_dst, ScrPromise *sc_src);`);
   E.walkerDefs.push(...lines, ``);
   return sym;
 }
@@ -1006,10 +1010,10 @@ export function promiseAdoptAdapterFor(E: CEmitter, sov: IrType, inner: IrType):
       E.resolveThunks.set(key, sym);
       const v = vAdapters(inner);
       E.walkerProtos.push(
-        `static void ${sym}(ScrClosure *sc_self, ${cDecl(inner, "sc_v")});`,
+        `${E.link}void ${sym}(ScrClosure *sc_self, ${cDecl(inner, "sc_v")});`,
       );
       E.walkerDefs.push(
-        `static void ${sym}(ScrClosure *sc_self, ${cDecl(inner, "sc_v")}) {`,
+        `${E.link}void ${sym}(ScrClosure *sc_self, ${cDecl(inner, "sc_v")}) {`,
         `  scr_resolve_ref_impl(sc_self, sc_v, ${v.retain}, ${v.release}, ${E.traceArgC(inner)});`,
         `}`,
       );
@@ -1054,9 +1058,9 @@ export function emitterInvokeThunkFor(E: CEmitter, cbT: IrType): string {
   // listener return values.
   const retC = cbT.ret.kind === "void" ? "void" : cType(cbT.ret).trim();
   const invoke = `((${retC} (*)(${sigParams}))sc_cb->fn)(${["sc_cb", ...passed].join(", ")})`;
-  E.walkerProtos.push(`static void ${sym}(ScrClosure *sc_cb, va_list sc_ap);`);
+  E.walkerProtos.push(`${E.link}void ${sym}(ScrClosure *sc_cb, va_list sc_ap);`);
   E.walkerDefs.push(
-    `static void ${sym}(ScrClosure *sc_cb, va_list sc_ap) {`,
+    `${E.link}void ${sym}(ScrClosure *sc_cb, va_list sc_ap) {`,
     ...(cbT.params.length === 0 ? [`  (void)sc_ap;`] : reads),
     ...(cbT.ret.kind === "void"
       ? [`  ${invoke};`]
@@ -1131,9 +1135,9 @@ export function streamDoneFnFor(E: CEmitter, kind: "w" | "f" | "d" | "t" | "l", 
     kind === "t" || kind === "l"
       ? `${entry}(sc_s, sc_err, sc_data, sc_dataStr);`
       : `${entry}(sc_s, sc_err);`;
-  E.walkerProtos.push(`static void ${sym}(${params.join(", ")});`);
+  E.walkerProtos.push(`${E.link}void ${sym}(${params.join(", ")});`);
   E.walkerDefs.push(
-    `static void ${sym}(${params.join(", ")}) {`,
+    `${E.link}void ${sym}(${params.join(", ")}) {`,
     ...body,
     `  ${tail} /* moves sc_err/sc_data; borrows sc_s */`,
     `  scr_stream_release(sc_s);`,
@@ -1200,9 +1204,9 @@ export function streamDataThunkFor(E: CEmitter, cbT: IrType): string {
   const sigParams = ["ScrClosure *", ...cbT.params.map((q) => cType(q).trim())].join(", ");
   const retC = cbT.ret.kind === "void" ? "void" : cType(cbT.ret).trim();
   const invoke = `((${retC} (*)(${sigParams}))sc_cb->fn)(${passed.join(", ")})`;
-  E.walkerProtos.push(`static void ${sym}(ScrClosure *sc_cb, va_list sc_ap);`);
+  E.walkerProtos.push(`${E.link}void ${sym}(ScrClosure *sc_cb, va_list sc_ap);`);
   E.walkerDefs.push(
-    `static void ${sym}(ScrClosure *sc_cb, va_list sc_ap) {`,
+    `${E.link}void ${sym}(ScrClosure *sc_cb, va_list sc_ap) {`,
     ...body,
     ...(cbT.ret.kind === "void"
       ? [`  ${invoke};`]
@@ -1360,9 +1364,9 @@ export function streamCbThunkFor(E: CEmitter, kind: "r" | "w" | "f" | "d" | "t" 
   // callback results (`read: () => this.push(null)`).
   const retC = cbT.ret.kind === "void" ? "void" : cType(cbT.ret).trim();
   const invoke = `((${retC} (*)(${sigParams}))sc_cb->fn)(${passed.join(", ")})`;
-  E.walkerProtos.push(`static void ${sym}(ScrClosure *sc_cb, ${runtimeParams.join(", ")});`);
+  E.walkerProtos.push(`${E.link}void ${sym}(ScrClosure *sc_cb, ${runtimeParams.join(", ")});`);
   E.walkerDefs.push(
-    `static void ${sym}(ScrClosure *sc_cb, ${runtimeParams.join(", ")}) {`,
+    `${E.link}void ${sym}(ScrClosure *sc_cb, ${runtimeParams.join(", ")}) {`,
     ...unused,
     ...body,
     ...(cbT.ret.kind === "void"
