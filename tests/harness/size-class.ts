@@ -248,11 +248,11 @@ const platform = process.platform;
 
 /** A default-built hello-world: no regex, no engine. */
 export const STATIC_CLASS_MAX =
-  platform === "linux" ? 397_632 : platform === "win32" ? 661_504 : 366_632;
+  platform === "linux" ? 397_632 : platform === "win32" ? 666_112 : 366_632;
 
 /** A program that uses regex: libregexp + libunicode, never the engine. */
 export const REGEX_CLASS_MAX =
-  platform === "linux" ? 552_680 : platform === "win32" ? 803_840 : 519_680;
+  platform === "linux" ? 552_680 : platform === "win32" ? 808_448 : 519_680;
 
 /* ── the ARMED half of the guard ───────────────────────────────────────
  *
@@ -964,13 +964,64 @@ export const SIZE_DRIFT_PAGE = 4_096;
  * so the whole of its move is this branch's and none of it is inherited.
  * That also settles a stale note above: the recorded pair tracks the
  * CROSS-TARGET build on this host, not the host-native one. */
-export const STATIC_CLASS_RECORDED = platform === "win32" ? 658_432 : null;
+/* ── 2026-09-02: +4,608 on BOTH classes, the boxed member table ───────
+ *
+ * WHAT THE BYTES BOUGHT. The read paths for a class instance's MEMBER
+ * TABLE once it is in a dyn slot — the walk that lets Object.keys,
+ * util.inspect and both JSON writers answer for a boxed instance instead
+ * of fencing. It lives in two ALWAYS-LINKED TUs.
+ *
+ * MEASURED, not reasoned: all 82 runtime TUs compiled at BOTH revisions
+ * (cffe8dd8 and the merge that followed) under one identical flag set,
+ * `zig cc -target x86_64-windows-gnu -Os -std=c11 -DNDEBUG -c`. Exactly
+ * TWO moved, and every other TU was byte-identical:
+ *
+ *   scr_inspect.o  .text   14,201 -> 14,965   +764
+ *   scr_json.o     .text   68,683 -> 68,995   +312
+ *                  .pdata   4,056 ->  4,080    +24
+ *                  .xdata   4,908 ->  4,932    +24
+ *                                            ------
+ *                                            +1,124
+ *
+ * Nine TUs do not compile standalone without vendor headers this
+ * measurement did not stage (scr_asym, scr_fetch_static,
+ * scr_inspect_island, scr_sqlite, scr_tls, scr_wrtc_cert, scr_wrtc_fp,
+ * scr_wrtc_conn, scr_zlib). They failed IDENTICALLY on both revisions —
+ * symmetric failure, so no delta hides in them — and not one is in a
+ * static hello-world's link.
+ *
+ * It is the ALWAYS-LINKED-TU-GREW branch of the complaint above, not the
+ * other one: the change adds no .c file at all (three files touched, all
+ * modified, none added), so no program links a unit it did not link
+ * before.
+ *
+ * THE 4x IS PE ALIGNMENT, NOT CODE. 1,124 bytes of object growth became
+ * 4,608 bytes on disk, which is exactly 9 times the 512-byte file
+ * alignment. That factor is obtained by DIFFERENCE (binary minus objects)
+ * and is deliberately not decomposed further here. The two classes moved
+ * by exactly the same 4,608, which is the signature of a shared
+ * always-linked cost rather than a per-program one — the same reasoning
+ * the 2026-08 entry above uses to rule out a struct-size change.
+ *
+ * THE COST, SAID PLAINLY, because it cuts against a standing objective
+ * (binary size, and the ~20 MB RSS target): a hello-world that can never
+ * box a class instance pays every one of these bytes. scr_inspect.c and
+ * scr_json.c are always linked, and the member-table walk sits inside
+ * them behind a RUN-TIME kind check rather than behind a link gate. If
+ * the size budget outweighs the surface, the honest fix is a
+ * reachable-only TU on the scr_inspect_island pattern — a smaller ceiling
+ * would only hide it.
+ *
+ * Both ceilings tipped too and are raised by the same amount, keeping the
+ * headroom each already had (3,072 static, 3,584 regex) and keeping the
+ * class DISTANCE at 141,824 bytes on both sides, byte for byte. */
+export const STATIC_CLASS_RECORDED = platform === "win32" ? 663_040 : null;
 
 /** The regex program, same run, same tree. Deliberately NOT derived from
  * the static delta - and the 2026-08-24 entry is why: that change moved the
  * two classes by -7,680 and -6,656, so deriving either from the other would
  * have been 1,024 bytes wrong. */
-export const REGEX_CLASS_RECORDED = platform === "win32" ? 800_256 : null;
+export const REGEX_CLASS_RECORDED = platform === "win32" ? 804_864 : null;
 
 /** The complaint a recorded-figure check makes, or null when the size is
  * within one page of what was recorded. A string rather than a thrown
