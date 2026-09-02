@@ -7708,6 +7708,10 @@ class LlEmitter {
           const v = this.emitExpr(f.value);
           B.line(`call void @scr_dyn_key_set(ptr ${obj}, ptr ${k.name}, ptr ${v.name})`);
         }
+        if (e.staticCopy) {
+          this.declare(`declare ptr @scr_dyn_mark_module_ns(ptr)`);
+          B.line(`call ptr @scr_dyn_mark_module_ns(ptr ${obj})`);
+        }
         return out;
       }
       case "dynKeyGet": {
