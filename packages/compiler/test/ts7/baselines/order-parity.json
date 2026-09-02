@@ -10032,6 +10032,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/7384-a-dyn-tuple-position-in-a-bound-emit-dispatcher.ts": {
+   "order": [
+    "<repo>/tests/corpus/7384-a-dyn-tuple-position-in-a-bound-emit-dispatcher.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/750-cycle-closure-box.ts": {
    "order": [
     "<repo>/tests/corpus/750-cycle-closure-box.ts"
