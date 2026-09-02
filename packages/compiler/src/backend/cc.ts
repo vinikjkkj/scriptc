@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { createRequire } from "node:module";
-import { chmod, copyFile, mkdir, mkdtemp, readdir, readFile, rename, rm, rmdir, stat, unlink, utimes, writeFile } from "node:fs/promises";
+import { appendFile, chmod, copyFile, mkdir, mkdtemp, readdir, readFile, rename, rm, rmdir, stat, unlink, utimes, writeFile } from "node:fs/promises";
 import { availableParallelism, tmpdir } from "node:os";
 import { basename, dirname, join, sep } from "node:path";
 import { promisify } from "node:util";
@@ -2156,9 +2156,22 @@ export async function compileC(opts: CcOptions): Promise<void> {
     "-o", opts.outPath,
   ];
   const ccName = driver.argv.join(" ");
+  /* SCRIPTC_CC_ARGV=<path>: append the EXACT argv of every cc invocation
+   * this build makes, with its wall time. A build-time measurement that
+   * reads the conditionals above instead of the command line they produce
+   * is measuring a second copy of the logic; this is the command line.
+   * Unset (the default) costs one env read per build. */
+  const argvTrace = process.env["SCRIPTC_CC_ARGV"];
   const runClang = async (args: string[]): Promise<void> => {
+    const started = Date.now();
     try {
       await execFileAsync(driver.argv[0] ?? "clang", [...driver.argv.slice(1), ...args]);
+      if (argvTrace !== undefined && argvTrace !== "") {
+        await appendFile(
+          argvTrace,
+          `${JSON.stringify({ ms: Date.now() - started, argv: [...driver.argv, ...args] })}\n`,
+        ).catch(() => undefined);
+      }
     } catch (err) {
       const stderr = (err as { stderr?: string }).stderr ?? String(err);
       const guidance =
@@ -2237,6 +2250,32 @@ export async function compileC(opts: CcOptions): Promise<void> {
   // Miss: link the program's own TU against cached per-flavor runtime
   // objects. cflags reproduces exactly the option set every TU sees in the
   // single invocation (the clang driver applies all options to all inputs).
+  //
+  // The header search path is READ OFF THE REAL COMMAND LINE, not restated
+  // here. A restated copy drifts, and the drift is invisible: it was missing
+  // the monocypher `-I` that buildArgs spells beside scr_asym.c, so on every
+  // asym-using program `zig cc -c scr_asym.c` died with
+  // `fatal error: 'monocypher.h' file not found`, ensureRuntimeObjects threw,
+  // the catch below turned that into `objects = null`, and the build fell
+  // back to compiling ALL ~59 runtime sources from source. Forever, on every
+  // build, reported by nothing — the fallback IS the historical command
+  // line, so the binary is correct and only the clock is wrong.
+  // One pass over the real command line serves both readers: the header
+  // search path above and the runtime sources this build actually compiles.
+  const rtInputs: string[] = [];
+  const cmdLine = buildArgs((p) => {
+    rtInputs.push(p);
+    return p;
+  });
+  const includeArgs: string[] = [];
+  const seenInclude = new Set<string>();
+  for (let i = 0; i < cmdLine.length; i++) {
+    if (cmdLine[i] !== "-I") continue;
+    const dir = cmdLine[++i];
+    if (dir === undefined || seenInclude.has(dir)) continue;
+    seenInclude.add(dir);
+    includeArgs.push("-I", dir);
+  }
   const cflags = [
     "-std=c11",
     ...driver.targetArgs,
@@ -2244,21 +2283,10 @@ export async function compileC(opts: CcOptions): Promise<void> {
     "-fno-math-errno",
     "-fno-strict-aliasing", // the emitted object model type-puns — see buildArgs
     "-Wno-deprecated-declarations",
-    "-I", rtDir,
-    ...(regex || dynamic ? ["-I", vendorEngineDir()] : []),
-    ...(zlibObjects.length > 0 ? ["-I", vendorZlibDir()] : []),
-    ...(sqliteObjects.length > 0 ? ["-I", vendorSqliteDir()] : []),
-    ...(curlStubDir !== null ? ["-I", join(vendorCurlDir(), "include")] : []),
-    ...(tlsArchive !== null ? ["-I", join(vendorTlsDir(), "include")] : []),
+    ...includeArgs,
     ...(dynamic ? ["-DSCR_DYNAMIC"] : []),
   ];
-  // Collect the runtime sources this build actually compiles (the same
-  // conditionals as the command line, by construction).
-  const rtInputs: string[] = [];
-  buildArgs((p) => {
-    rtInputs.push(p);
-    return p;
-  });
+
   let objects: Map<string, string> | null = null;
   const objKeyPrefix = `obj-v2\0${ccName}\0${cv}\0${fingerprint}\0`;
   try {
