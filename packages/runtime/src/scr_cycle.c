@@ -26,9 +26,18 @@
  *   count was already given up (which would over-decrement and free live
  *   data).
  *
- * Recursion depth equals the traced structure's depth — same property as
- * the existing recursive releases (deep lists recurse deeply; acceptable
- * for now, revisit with an explicit stack if it ever traps).
+ * TRAVERSAL DEPTH. All four phases walk an EXPLICIT WORKLIST; the note
+ * that used to sit here said the recursion depth equalled the traced
+ * structure's depth and was "acceptable for now, revisit with an explicit
+ * stack if it ever traps". This is that revisit. The depth is heap now,
+ * which matters more here than the arithmetic suggests: a collection can
+ * run on a FIBER stack, which is fixed-size and much smaller than the main
+ * thread's.
+ *
+ * IT DID NOT BUY CPU, and the number is in the block above the phases.
+ * Measured on the real zapo messaging bench with both forms in ONE binary
+ * and an env knob choosing between them, every phase moved less than the
+ * A/A floor. The depth is the reason it is here.
  */
 #include "scr_runtime.h"
 
@@ -99,6 +108,20 @@ __attribute__((constructor)) static void scr_poolstat_reg_cycle(void) {
 #define SCR_CYC_ZERO_WHOLE 0
 #endif
 
+/* The collector's own cost, in cycles, when tests/perf/cycstat's header is
+ * force-included with -DSCR_CYCSTAT_ON. Absent that, every hook below is
+ * nothing at all and an ordinary build carries no trace of it -- the same
+ * arrangement the census above uses, and for the same reason: the frequency
+ * knobs answer "does this pay" differentially, and a differential inside the
+ * A/A floor cannot tell a small cost from no cost. */
+#ifndef SCR_CS_PASS_BEGIN
+#define SCR_CS_PASS_BEGIN() ((void)0)
+#define SCR_CS_PASS_END() ((void)0)
+#define SCR_CS_PHASE_BEGIN() ((void)0)
+#define SCR_CS_PHASE_END(which) ((void)0)
+#define SCR_CS_ADD(which, n) ((void)0)
+#endif
+
 /* The census hook, as one macro rather than an #ifdef inside each arm of
  * the allocator below. With tests/perf/cycensus/scr_cyc_census.h absent
  * this expands to nothing, which is what makes an ordinary build carry no
@@ -130,6 +153,97 @@ static inline void scr_cyc_stamp(ScrCycHdr *h, ScrTraceFn trace,
   h->blk = blk;
 }
 
+/* ── the block arena ──────────────────────────────────────────────────
+ * The pool above recycles blocks; it does not change where a block COMES
+ * FROM, and on this workload that is where the bytes are. Residency-
+ * profiled on the real messaging bench, scr_cyc_alloc_miss's calloc is the
+ * #2 live-heap site — 25.25 MiB, 31.31% of the live heap at its
+ * high-water — and ScrCycHdr is already hand-minimized to exactly 16
+ * bytes, so the header is not what is left. THE COUNT OF CRT BLOCKS IS.
+ * Every calloc'd block carries the allocator's own per-block overhead
+ * (~24 B measured across the process: ~26.6 MiB over ~1.16M live blocks),
+ * and that term is not in any header this file controls.
+ *
+ * So the miss carves out of 64 KiB chunks instead. Three properties make
+ * it cheap to state and safe to free:
+ *
+ *   NO ARENA HEADER, because ScrCycHdr::blk already carries the block's
+ *   physical size class and scr_cyc_free already reads it. The free list
+ *   is indexed by that same field, so a block NEVER MIGRATES between
+ *   classes — the same invariant the pool relies on, for the same reason.
+ *
+ *   PROVENANCE IS A HEADER BIT, not a range check. ScrCycHdr::pad was a
+ *   spare byte; it is 1 for a carved block. A range check would need one
+ *   contiguous reservation, and that means VirtualAlloc, and this runtime
+ *   cross-compiles to ELF targets that have no such call (cc-driver's five
+ *   ELF cells are what rules it out). A bit in a header we own needs no
+ *   platform symbol and is exact.
+ *
+ *   BLOCKS ARE 16-BYTE ALIGNED: the chunk comes from malloc (16-aligned on
+ *   every target here) and the carve stride is `phys` rounded up to 16, so
+ *   the OBJECT pointer keeps the alignment the 16-byte header was shaped
+ *   to give it.
+ *
+ * A carved block must never reach free(), so scr_cyc_free has an overflow
+ * list for the case where the pool's byte budget rejects the give. The
+ * arena does not return chunks; the ~256 B tail of a chunk that cannot fit
+ * the next stride is abandoned. Off under SCR_RC_AUDIT for exactly the
+ * reason the pool is: that lane exists to prove every logical free is a
+ * real free.
+ *
+ * SCR_CYCLE_ARENA=0 restores the calloc. It is an env knob, not a build
+ * flag, so both arms are the same binary. */
+#ifndef SCR_CYC_ARENA
+#define SCR_CYC_ARENA 1
+#endif
+#ifndef SCR_CYC_ARENA_CHUNK
+#define SCR_CYC_ARENA_CHUNK ((size_t)64 << 10)
+#endif
+
+/* One list per SCR_POOL_GRAIN class, indexed by ScrCycHdr::blk (1..32). */
+static void *scr_cyc_ar_free[SCR_POOL_MAX / SCR_POOL_GRAIN + 1u];
+static unsigned char *scr_cyc_ar_cur = NULL;
+static unsigned char *scr_cyc_ar_lim = NULL;
+
+static int scr_cyc_arena_on(void) {
+#ifdef SCR_RC_AUDIT
+  return 0;
+#else
+  static int cached = -1;
+  if (cached < 0) {
+    const char *env = getenv("SCR_CYCLE_ARENA");
+    cached = env != NULL ? (strtol(env, NULL, 10) != 0) : (SCR_CYC_ARENA != 0);
+  }
+  return cached;
+#endif
+}
+
+/* NULL when the chunk could not be had; every caller falls back to calloc,
+ * so a failure here is a slower program and not a broken one. */
+static void *scr_cyc_ar_take(size_t phys, uint8_t blk) {
+  void *b = scr_cyc_ar_free[blk];
+  size_t stride;
+  if (b != NULL) {
+    __builtin_memcpy(&scr_cyc_ar_free[blk], b, sizeof(void *));
+    return b;
+  }
+  stride = (phys + 15u) & ~(size_t)15u;
+  if ((size_t)(scr_cyc_ar_lim - scr_cyc_ar_cur) < stride) {
+    unsigned char *c = (unsigned char *)malloc(SCR_CYC_ARENA_CHUNK);
+    if (c == NULL) return NULL;
+    scr_cyc_ar_cur = c;
+    scr_cyc_ar_lim = c + SCR_CYC_ARENA_CHUNK;
+  }
+  b = scr_cyc_ar_cur;
+  scr_cyc_ar_cur += stride;
+  return b;
+}
+
+static void scr_cyc_ar_give(ScrCycHdr *h) {
+  __builtin_memcpy(h, &scr_cyc_ar_free[h->blk], sizeof(void *));
+  scr_cyc_ar_free[h->blk] = h;
+}
+
 /* The pool miss, and DELIBERATELY the whole of it: the calloc, the stamp,
  * the counter and the return. On closure-churn this runs 5 times in
  * 800,031.
@@ -147,11 +261,23 @@ static __attribute__((noinline)) void *scr_cyc_alloc_miss(size_t size,
                                                           ScrTraceFn trace,
                                                           ScrCycFreeFn free_fn) {
   size_t phys = scr_pool_bytes(sizeof(ScrCycHdr) + size);
-  ScrCycHdr *h = calloc(1, phys);
-  if (h == NULL) scr_cyc_oom();
-  /* calloc zeroed the whole block, `buffered` and `buf_index` included. */
-  scr_cyc_stamp(h, trace, free_fn,
-                phys <= SCR_POOL_MAX ? (uint8_t)(phys / SCR_POOL_GRAIN) : 0u);
+  uint8_t blk = phys <= SCR_POOL_MAX ? (uint8_t)(phys / SCR_POOL_GRAIN) : 0u;
+  ScrCycHdr *h = NULL;
+  uint8_t arena = 0;
+  if (blk != 0 && scr_cyc_arena_on()) {
+    h = (ScrCycHdr *)scr_cyc_ar_take(phys, blk);
+    if (h != NULL) {
+      arena = 1;
+      memset(h, 0, phys); /* the carve is not zeroed; calloc's contract, kept */
+    }
+  }
+  if (h == NULL) {
+    h = calloc(1, phys);
+    if (h == NULL) scr_cyc_oom();
+    /* calloc zeroed the whole block, `buffered` and `buf_index` included. */
+  }
+  scr_cyc_stamp(h, trace, free_fn, blk);
+  h->pad = arena; /* provenance: 1 = carved, must never reach free() */
   scr_cyc_live++; /* the pacing denominator; see below */
   SCR_CYCEN_NOTE_ALLOC(h, phys, size, free_fn, 0);
   return h + 1;
@@ -218,7 +344,14 @@ void *scr_cyc_alloc(size_t size, ScrTraceFn trace, ScrCycFreeFn free_fn) {
    * is in range, so `blk` needs no test, and `phys / SCR_POOL_GRAIN` is the
    * class index it just computed. */
 #if SCR_CYC_ZERO_WHOLE
-  memset(h, 0, phys);
+  {
+    /* `pad` is the block's PROVENANCE and outlives one use of the block:
+     * wiping it would send a carved block to free(). The default arm never
+     * touches it, so it only has to be saved here. */
+    uint8_t prov = h->pad;
+    memset(h, 0, phys);
+    h->pad = prov;
+  }
 #endif
   scr_cyc_stamp(h, trace, free_fn, (uint8_t)(phys / SCR_POOL_GRAIN));
 #if !SCR_CYC_ZERO_WHOLE
@@ -258,6 +391,12 @@ void scr_cyc_free(void *obj) {
 #ifdef SCR_CYCEN_ON
   scr_cycen_note_free(h, 0, scr_cyc_live);
 #endif
+  /* A carved block is not a CRT block. The pool's byte budget can reject a
+   * give, so this is where the rejected ones go — never free(). */
+  if (h->pad) {
+    scr_cyc_ar_give(h);
+    return;
+  }
   free(h);
 }
 
@@ -408,80 +547,183 @@ void scr_cyc_on_release(void *obj) {
  * slots) or immortal (interned statics have no header at all). */
 #define SCR_CYC_SKIP(child) ((child) == NULL || SCR_RC(child) == SIZE_MAX)
 
-static void scr_mark_gray(void *obj);
-static void scr_mg_visit(void *child, void *ctx) {
-  (void)ctx;
-  if (SCR_CYC_SKIP(child)) return;
-  SCR_RC(child) -= 1; /* trial-delete this internal edge */
-  scr_mark_gray(child);
-}
-static void scr_mark_gray(void *obj) {
-  ScrCycHdr *h = scr_cyc_hdr(obj);
-  if (h->color == SCR_CYC_GRAY) return;
-  h->color = SCR_CYC_GRAY;
-  scr_cyc_trace_of(h)(obj, scr_mg_visit, NULL);
-}
-
-static void scr_scan_black(void *obj);
-static void scr_sb_visit(void *child, void *ctx) {
-  (void)ctx;
-  if (SCR_CYC_SKIP(child)) return;
-  SCR_RC(child) += 1; /* restore the trial decrement */
-  if (scr_cyc_hdr(child)->color != SCR_CYC_BLACK) scr_scan_black(child);
-}
-static void scr_scan_black(void *obj) {
-  scr_cyc_hdr(obj)->color = SCR_CYC_BLACK;
-  scr_cyc_trace_of(scr_cyc_hdr(obj))(obj, scr_sb_visit, NULL);
-}
-
-static void scr_scan(void *obj);
-static void scr_scan_visit(void *child, void *ctx) {
-  (void)ctx;
-  if (SCR_CYC_SKIP(child)) return;
-  scr_scan(child);
-}
-static void scr_scan(void *obj) {
-  ScrCycHdr *h = scr_cyc_hdr(obj);
-  if (h->color != SCR_CYC_GRAY) return;
-  if (SCR_RC(obj) > 0) {
-    /* Externally referenced: this whole subgraph stays. */
-    scr_scan_black(obj);
-    return;
-  }
-  h->color = SCR_CYC_WHITE;
-  scr_cyc_trace_of(h)(obj, scr_scan_visit, NULL);
-}
-
 /* The gathered white set (freed after the walk completes). */
 static void **scr_white = NULL;
 static size_t scr_nwhite = 0, scr_white_cap = 0;
 
-static void scr_collect_white(void *obj);
+/* ── the four phases, over an explicit worklist ─────────────────────
+ * Same algorithm, same visit-order guarantees, no C stack.
+ *
+ *   DEPTH — the reason this is here. The recursive form's depth was the
+ *   traced structure's depth, so a long list or a deep promise chain was a
+ *   deep C stack, and in this runtime the stack a collection runs on may be
+ *   a FIBER stack: fixed-size and much smaller than the main thread's. The
+ *   worklist's depth is heap.
+ *
+ *   THE ALREADY-VISITED EDGE was the reason it was expected to be FASTER,
+ *   and it is not. On a dense live graph most edges point at a node the
+ *   phase has already been to; recursively that costs a call, a header
+ *   load, a compare and a return, and on the worklist the visitor does the
+ *   compare itself and the call never happens. MEASURED ON THE REAL BENCH
+ *   AND IT IS A NULL: the preserved messaging TU relinked against this
+ *   runtime, full default workload, both forms in ONE binary with a
+ *   temporary env knob as the arm (removed after the measurement: two
+ *   traversals of one graph cost 1,024 bytes of always-linked runtime, and
+ *   the static hello-world's size class has no room for a form that pays
+ *   nothing), 2 interleaved reps — send_1to1 -0.77%,
+ *   recv_1to1 -4.43%, send_group -0.28%, recv_group -1.01% against an A/A
+ *   floor of +4.89% / -4.01% / +1.04% / -1.81% on the same four phases.
+ *   Every one of them is inside the floor.
+ *
+ *   THE REASON IT IS A NULL is one measurement up: on this bench the
+ *   collector is not on the critical path at all any more. With the pass
+ *   frequency turned all the way down (SCR_CYCLE_IDLE_PACE=1 and
+ *   SCR_CYCLE_THRESHOLD=1e9, so no pass runs during the measured phases at
+ *   all) the four phases move by +3.3% / -2.6% / +0.1% / 0.0% — nothing,
+ *   against arms that provably differ, because the same switch costs
+ *   +9.3 MiB of peak RSS in retained garbage. There is no collector CPU
+ *   left on this workload for a faster traversal to win.
+ *
+ * WHERE THIS DIFFERS FROM THE RECURSION IT REPLACED:
+ *
+ *   The node is COLOURED WHEN IT IS PUSHED, not when it is popped, in all
+ *   four phases. That is what bounds the stack by the node count instead
+ *   of the edge count — a node can be pushed at most once, because the
+ *   colour that admits it is gone by the time a second parent looks. The
+ *   recursion coloured at the same moment for the same reason (it coloured
+ *   before it traced).
+ *
+ *   collectWhite's gather is PRE-order here and was post-order. The order
+ *   of the white set does not reach the program: a member's teardown
+ *   releases exactly the children its trace does NOT visit (the partition
+ *   is the contract in scr_runtime.h and scr_box_gcfree is the worked
+ *   example), so no white object's teardown can touch another white
+ *   object. Both forms free the same set.
+ *
+ *   scanBlack nests INSIDE scan on the same stack, bounded by the mark it
+ *   took on entry. It cannot escape below that mark, so the outer phase's
+ *   pending nodes are untouched. */
+static void **scr_wl = NULL;
+static size_t scr_wl_n = 0, scr_wl_cap = 0;
+
+static void scr_wl_push(void *obj) {
+  if (scr_wl_n == scr_wl_cap) {
+    scr_wl_cap = scr_wl_cap ? scr_wl_cap * 2 : 256;
+    scr_wl = realloc(scr_wl, scr_wl_cap * sizeof *scr_wl);
+    if (!scr_wl) scr_cyc_oom();
+  }
+  scr_wl[scr_wl_n++] = obj;
+}
+
+static void scr_mg_visit(void *child, void *ctx) {
+  (void)ctx;
+  if (SCR_CYC_SKIP(child)) return;
+  SCR_RC(child) -= 1; /* trial-delete this internal edge */
+  ScrCycHdr *h = scr_cyc_hdr(child);
+  if (h->color == SCR_CYC_GRAY) return;
+  h->color = SCR_CYC_GRAY;
+  scr_wl_push(child);
+}
+static void scr_mark_gray(void *obj) {
+  ScrCycHdr *h = scr_cyc_hdr(obj);
+  size_t floor = scr_wl_n;
+  if (h->color == SCR_CYC_GRAY) return;
+  h->color = SCR_CYC_GRAY;
+  scr_wl_push(obj);
+  while (scr_wl_n > floor) {
+    void *o = scr_wl[--scr_wl_n];
+    scr_cyc_trace_of(scr_cyc_hdr(o))(o, scr_mg_visit, NULL);
+  }
+}
+
+static void scr_sb_visit(void *child, void *ctx) {
+  (void)ctx;
+  if (SCR_CYC_SKIP(child)) return;
+  SCR_RC(child) += 1; /* restore the trial decrement */
+  ScrCycHdr *h = scr_cyc_hdr(child);
+  if (h->color == SCR_CYC_BLACK) return;
+  h->color = SCR_CYC_BLACK;
+  scr_wl_push(child);
+}
+static void scr_scan_black(void *obj) {
+  size_t floor = scr_wl_n;
+  scr_cyc_hdr(obj)->color = SCR_CYC_BLACK;
+  scr_wl_push(obj);
+  while (scr_wl_n > floor) {
+    void *o = scr_wl[--scr_wl_n];
+    scr_cyc_trace_of(scr_cyc_hdr(o))(o, scr_sb_visit, NULL);
+  }
+}
+
+static void scr_scan_visit(void *child, void *ctx) {
+  (void)ctx;
+  if (SCR_CYC_SKIP(child)) return;
+  ScrCycHdr *h = scr_cyc_hdr(child);
+  if (h->color != SCR_CYC_GRAY) return;
+  if (SCR_RC(child) > 0) {
+    /* Externally referenced: this whole subgraph stays. Nested on the same
+     * stack, bounded by the mark scr_scan_black takes on entry. */
+    scr_scan_black(child);
+    return;
+  }
+  h->color = SCR_CYC_WHITE;
+  scr_wl_push(child);
+}
+static void scr_scan(void *obj) {
+  ScrCycHdr *h = scr_cyc_hdr(obj);
+  size_t floor = scr_wl_n;
+  if (h->color != SCR_CYC_GRAY) return;
+  if (SCR_RC(obj) > 0) {
+    scr_scan_black(obj);
+    return;
+  }
+  h->color = SCR_CYC_WHITE;
+  scr_wl_push(obj);
+  while (scr_wl_n > floor) {
+    void *o = scr_wl[--scr_wl_n];
+    /* A node whitened before a later scanBlack reached it is black now,
+     * and that scanBlack blackened all of its children, so there is
+     * nothing here for this phase to do. */
+    if (scr_cyc_hdr(o)->color != SCR_CYC_WHITE) continue;
+    scr_cyc_trace_of(scr_cyc_hdr(o))(o, scr_scan_visit, NULL);
+  }
+}
+
 static void scr_cw_visit(void *child, void *ctx) {
   (void)ctx;
   if (SCR_CYC_SKIP(child)) return;
-  scr_collect_white(child);
+  ScrCycHdr *h = scr_cyc_hdr(child);
+  if (h->color != SCR_CYC_WHITE || h->buffered) return;
+  h->color = SCR_CYC_BLACK; /* visited marker — prevents re-gathering */
+  scr_wl_push(child);
 }
 static void scr_collect_white(void *obj) {
   ScrCycHdr *h = scr_cyc_hdr(obj);
+  size_t floor = scr_wl_n;
   if (h->color != SCR_CYC_WHITE || h->buffered) return;
-  h->color = SCR_CYC_BLACK; /* visited marker — prevents re-gathering */
-  scr_cyc_trace_of(h)(obj, scr_cw_visit, NULL);
-  if (scr_nwhite == scr_white_cap) {
-    scr_white_cap = scr_white_cap ? scr_white_cap * 2 : 64;
-    scr_white = realloc(scr_white, scr_white_cap * sizeof *scr_white);
-    if (!scr_white) scr_cyc_oom();
+  h->color = SCR_CYC_BLACK;
+  scr_wl_push(obj);
+  while (scr_wl_n > floor) {
+    void *o = scr_wl[--scr_wl_n];
+    scr_cyc_trace_of(scr_cyc_hdr(o))(o, scr_cw_visit, NULL);
+    if (scr_nwhite == scr_white_cap) {
+      scr_white_cap = scr_white_cap ? scr_white_cap * 2 : 64;
+      scr_white = realloc(scr_white, scr_white_cap * sizeof *scr_white);
+      if (!scr_white) scr_cyc_oom();
+    }
+    scr_white[scr_nwhite++] = o;
   }
-  scr_white[scr_nwhite++] = obj;
 }
 
 void scr_collect_cycles(void) {
   if (scr_collecting || scr_nroots == 0) return;
   scr_collecting = true;
+  SCR_CS_PASS_BEGIN();
 
   /* markRoots: keep live candidates (still purple), drop the rest — an
    * object re-retained since buffering is black; one grayed by an earlier
    * candidate's walk is already covered by that candidate's subgraph. */
+  SCR_CS_PHASE_BEGIN();
   size_t out = 0;
   for (size_t i = 0; i < scr_nroots; i++) {
     void *obj = scr_roots[i];
@@ -495,8 +737,12 @@ void scr_collect_cycles(void) {
     }
   }
   scr_nroots = out;
+  SCR_CS_PHASE_END(mark);
+  SCR_CS_ADD(roots, scr_nroots);
 
+  SCR_CS_PHASE_BEGIN();
   for (size_t i = 0; i < scr_nroots; i++) scr_scan(scr_roots[i]);
+  SCR_CS_PHASE_END(scan);
 
   /* collectWhite over a drained buffer: clear every buffered flag first so
    * the recursion can gather buffered members of an earlier root's cycle. */
@@ -504,15 +750,21 @@ void scr_collect_cycles(void) {
   scr_nroots = 0;
   for (size_t i = 0; i < n; i++) scr_cyc_hdr(scr_roots[i])->buffered = 0;
   scr_nwhite = 0;
+  SCR_CS_PHASE_BEGIN();
   for (size_t i = 0; i < n; i++) scr_collect_white(scr_roots[i]);
+  SCR_CS_PHASE_END(white);
+  SCR_CS_ADD(freed, scr_nwhite);
   /* Teardowns run after the full walk. They may release untraced children
    * (plain RC) — which can re-buffer survivors for the NEXT pass — but
    * never touch traced (white, already-accounted) edges. */
+  SCR_CS_PHASE_BEGIN();
   for (size_t i = 0; i < scr_nwhite; i++) {
     void *obj = scr_white[i];
     scr_cyc_free_of(scr_cyc_hdr(obj))(obj);
   }
+  SCR_CS_PHASE_END(free);
   scr_nwhite = 0;
 
+  SCR_CS_PASS_END();
   scr_collecting = false;
 }
