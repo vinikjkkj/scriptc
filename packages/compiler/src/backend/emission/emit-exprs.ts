@@ -2384,6 +2384,10 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
           const v = E.emitExpr(f.value);
           E.line(`scr_dyn_key_set(${obj.name}, ${k.name}, ${v.name});`);
         }
+        // The namespace builders' snapshot: mutating it would write where
+        // nothing can observe the write, which is the one answer the
+        // static_copy stance ranks below a refusal.
+        if (e.staticCopy) E.line(`scr_dyn_mark_module_ns(${obj.name});`);
         return obj;
       }
       case "unionWrap": {

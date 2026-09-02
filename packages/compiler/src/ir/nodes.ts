@@ -6691,7 +6691,23 @@ export type IrExpr =
    * evaluation order; later duplicate keys win, insertion order preserved —
    * the checked-dynamic tree's own set semantics). Keys and values are borrowed (the member
    * retains the value in). Never throws itself. */
-  | { kind: "dynObjLit"; fields?: { key: IrExpr; value: IrExpr }[]; type: IrType; loc: SrcLoc }
+  | {
+      kind: "dynObjLit";
+      fields?: { key: IrExpr; value: IrExpr }[];
+      /** Mark the finished object a STATIC COPY (scr_dyn_mark_static_copy),
+       * so every mutating entry point refuses loudly on it instead of
+       * writing where the write cannot be observed. Set by the module
+       * NAMESPACE builders: the object is a snapshot of a module's export
+       * storage, and Node's namespace is [[Set]]-proof and
+       * [[Delete]]-proof — measured on v25.9.0, `ns.konst = 99` and
+       * `delete ns.konst` both throw TypeError there, while an unmarked
+       * literal silently accepted both and then read back 99. The refusal
+       * is a DIVERGENCE from Node's TypeError, not a match; what it buys
+       * is that the wrong value never reaches the program. */
+      staticCopy?: boolean;
+      type: IrType;
+      loc: SrcLoc;
+    }
   /** Runtime kind test on a dyn value — the narrowing tests tsc's
    * control flow understands on `unknown`: `typeof v === "string" |
    * "number" | "boolean" | "undefined"` and the unit comparisons `v ===
