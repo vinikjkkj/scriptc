@@ -2426,6 +2426,15 @@ void scr_dyn_objinst_registry(const ScrDynClass *const *descs, size_t n) {
 
 const ScrDynClass *scr_dyn_objinst_class_of(const ScrDyn *d) {
   const ScrDynClass *own = d->v.inst.cls;
+  /* A STANDALONE class needs no scan, and this is not an optimization
+   * bolted on afterwards -- it is the same fact scr_dyn_objinst_pre reads
+   * two functions up. `vt` false means no base and no subclass, so the
+   * descriptor's interval is a single point and the box's own descriptor
+   * IS the instance's class. Every member lookup on every boxed instance
+   * runs through here, so the scan has to be the exception rather than
+   * the rule; on a program whose classes are all standalone (which is
+   * most of them) the registry is never walked at all. */
+  if (!own->vt) return own;
   if (scr_cls_reg == NULL) return own;
   /* The instance's OWN position, read out of its vtable for a hierarchy
    * class -- the fact `instanceof` reads, and the reason this cannot be
