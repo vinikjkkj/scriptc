@@ -2837,13 +2837,23 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
       // there is no single function to take the address of, and the generic
       // property-read recitation names neither that fact nor a way round
       // it. A direct call is the working spelling.
+      //
+      // The arrow escape is narrower than it reads, and the hint says so
+      // because it was MEASURED: an arrow works only when it names ONE
+      // event literally. zapo's destination (WaClientFactory.ts:159) is
+      // <K extends keyof WaClientEventMap>(event: K, ...args:
+      // Parameters<WaClientEventMap[K]>) => void, and a generic wrapper
+      // into that field refuses again inside the body with 'emit with a
+      // non-literal event name' -- the type parameter is not a literal.
+      // The field itself is not the obstacle: the same generic variadic
+      // field holding a USER function compiles.
       if (recvLowered.type.kind === "object" && EMITTER_API_MEMBERS.has(expr.name.text)) {
         const emitterInfo = L.classes.get(recvLowered.type.className);
         if (emitterRooted(L, emitterInfo)) {
           L.unsupported(
             "SC1090",
             expr,
-            `the EventEmitter member '${expr.name.text}' as a VALUE (it is the runtime's, and every call compiles against a statically known event name — each event has its own payload tuple, so no single function value exists to bind or pass; call '${expr.name.text}' directly, or wrap it in an arrow that names the event)`,
+            `the EventEmitter member '${expr.name.text}' as a VALUE (it is the runtime's, and every call compiles against a statically known event name — each event has its own payload tuple, so no single function value exists to bind or pass; call '${expr.name.text}' directly, or wrap it in an arrow that names ONE event LITERALLY — a generic wrapper taking the name as a type parameter does NOT qualify: the erased name is not a literal and the body refuses again with 'emit with a non-literal event name')`,
           );
         }
       }

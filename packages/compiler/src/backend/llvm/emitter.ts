@@ -3387,6 +3387,9 @@ class LlEmitter {
       case "asyncGenerator":
       case "sqliteDb":
       case "sqliteStmt":
+      // A Date is a JS object too, and this is what keeps
+      // `if (new Date(0))` true rather than false.
+      case "date":
       case "rtcPeerConnection":
       case "rtcDataChannel":
       case "fsWatcher": {
@@ -3494,6 +3497,7 @@ class LlEmitter {
             case "headers":
             case "requestInit":
             case "request":
+            case "date":
             case "rtcPeerConnection":
             case "rtcDataChannel":
               B.line(`store i1 true, ptr ${slot} ; ${arm.kind}: objects are truthy`);

@@ -327,3 +327,38 @@ cores from 21:46:
 one additionally needs the ambient-cost A/B, because this block adds a
 ~230-line ambient file to every program's roots and that test pays it 600-plus
 times against a 22 s margin. `post-gate.sh` runs all three measurements.
+
+---
+
+## `probes/rtc-installed.ts` — the resolution differential (block `voipthree`)
+
+Every probe above was built in a project where **`@roamhq/wrtc` is not
+installed**, so the shipped ambient declarations apply and
+`resolveNpmImport` answers null. That instrument hid a split in the
+product: the ambient-module row in `frontend/program.ts` is conditional on
+the package NOT resolving, and `frontend/lowering/lower-modules.ts` had the
+matching island-skip row for `better-sqlite3` and **none for
+`@roamhq/wrtc`**. So with the package present — how zapo installs it, and
+how any project that also runs under node installs it — the import line
+reported `SC2013` before the program reached `lower-wrtc` at all.
+
+Measured on that one variable, moving `node_modules/@roamhq` aside in the
+pkgstatus lab app and back, same source, same tsconfig, `--backend c`:
+
+| `node_modules/@roamhq` | build |
+| --- | --- |
+| present | **rc=1**, one `SC2013` at the import line |
+| absent | **rc=0**, binary, **MATCH byte-exact** vs node v25.9.0 + the real addon |
+
+`rtc-installed.ts` is that probe, kept so the arm cannot silently regress:
+build it in a project that HAS the package. With the island row added
+(`if (!L.dynamic && spec === "@roamhq/wrtc") continue;`), it and
+`rtc-dc.ts`, `rtc-signal.ts`, `rtc-events.ts` all build and all MATCH
+byte-exact in a project where the package is installed — **8 DID-NOT-RUN →
+MATCH across the two build lanes, 0 MATCH → WRONG**, engine scan
+`quickjs=0 ScrDyn=0 JS_NewRuntime=0` with `RTCDataChannel` = 2 as the
+positive control.
+
+Still **C backend only**: the default lane prints
+`scriptc: backend c (llvm refused: libCall:wrtc.newPeer)` and demotes, and
+the two binaries are byte-for-byte identical. A demotion is not a backend.

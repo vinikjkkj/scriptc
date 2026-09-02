@@ -861,6 +861,8 @@ function formatIrTypeInner(t: IrType, shapes: ShapeRegistry, unions: UnionRegist
       return "RequestInit";
     case "request":
       return "Request";
+    case "date":
+      return "Date";
     case "rtcPeerConnection":
       return "RTCPeerConnection";
     case "rtcDataChannel":
@@ -3198,6 +3200,33 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
   // refuses by name through stdlibMemberFence -- nothing constructs
   // either handle yet (packages/runtime/src/scr_wrtc.c) -- so this arm
   // buys the SHAPES, not the behaviour.
+  // Date. The same stance and the same provenance check: a GLOBAL
+  // interface, so the plain isStdlibFile test is the whole check and a
+  // user's own `Date` maps as a record or class like any other.
+  //
+  // Mapping it is what gives a record MEMBER typed `Date | undefined` a
+  // representation. Before this arm existed, zapo voip's `CallStateData`
+  // (`connectedAt?: Date`) reported SC2009 on the RECORD TYPE -- a
+  // type-level stop that --best-effort cannot defer, and the last error
+  // between voip's package entry and a binary.
+  //
+  // Every member still refuses by name through stdlibMemberFence, and
+  // `new Date(...)` as a VALUE still refuses (lower-builtins.ts's Date
+  // slice serves only Date.now(), Date.UTC() and the COMPOSED
+  // `new Date(ms?).getTime()` / `.toISOString()`). Nothing constructs one
+  // -- packages/runtime/src/scr_date.c is four ownership functions over a
+  // struct that is never allocated -- so this arm buys the SHAPE, not the
+  // behaviour, exactly as the WebRTC pair below did.
+  if (
+    psym?.name === "Date" &&
+    checker.declarationsOf(psym).some(
+      (d) =>
+        (ts.isInterfaceDeclaration(d) || ts.isClassDeclaration(d)) &&
+        ctx.isStdlibFile(d.getSourceFile()),
+    )
+  ) {
+    return { kind: "date" };
+  }
   if (
     (psym?.name === "RTCPeerConnection" || psym?.name === "RTCDataChannel") &&
     checker.declarationsOf(psym).some(
