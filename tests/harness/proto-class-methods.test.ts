@@ -293,3 +293,110 @@ describe("a JavaScript pre-class constructor's prototype methods", () => {
     },
   );
 });
+
+/* ── SCRIPTC_PROTOCLASS=1: the arm's OTHER state ─────────────────────────
+ *
+ * The arm is OFF by default and everything above scores the default. This
+ * block scores the arm ON, and it is deliberately a MIXED ledger: some shapes
+ * answer Node-exactly through the synthesized class, and some do not — those
+ * are NAMED GAPS, pinned so the day one is fixed this file says so out loud
+ * instead of quietly agreeing.
+ *
+ * The gap is one mechanism, not several: A CLASS INSTANCE COERCED INTO A DYN
+ * SLOT KEEPS ITS FIELDS AND LOSES ITS METHODS. It is not caused by this arm —
+ * main has it today for a DECLARED `class` in a .js file:
+ *
+ *     class Box { constructor(v) { this.v = v } get() { return this.v } }
+ *     function use(x) { return x.get() }
+ *     console.log(String(use(new Box(7))))
+ *
+ *     node    -> 7
+ *     scriptc -> Uncaught TypeError: x.get is not a function
+ *
+ * The per-use dyn box the arm replaces dispatches that call correctly, so a
+ * default-on arm would take such a program from MATCH to WRONG. That is the
+ * whole reason for the flag, and it is why the OFF rows above are the ones
+ * that must stay green.
+ *
+ * Two slots reach a dyn-typed destination in a JavaScript file:
+ *   - an untyped PARAMETER (`function use(x)`), and
+ *   - a `var` binding, whose slot is decided when the declaration HOISTS,
+ *     before any initializer has lowered. `const`/`let` take their type from
+ *     the lowered initializer and work.
+ */
+const ARM = "SCRIPTC_PROTOCLASS";
+const PROTO = "function Box(v) { this.v = v }\nBox.prototype.get = function () { return this.v }\n";
+
+const ARMED: readonly { name: string; src: string; gap: string | null }[] = [
+  {
+    name: "a const binding holding the instance",
+    src: PROTO + "function run() { const b = new Box(7); return b.get() }\nconsole.log(String(run()))\n",
+    gap: null,
+  },
+  {
+    name: "a let binding the file never reassigns",
+    src: PROTO + "function run() { let b = new Box(7); return b.get() }\nconsole.log(String(run()))\n",
+    gap: null,
+  },
+  {
+    // NAMED GAP. A `var` slot is typed when the declaration HOISTS — before
+    // the initializer lowers — so the class instance boxes into a dyn slot
+    // and loses its methods. Minified bundles spell `var`, so this is the
+    // shape that matters most and the one that does not work.
+    name: "a var binding holding the instance",
+    src: PROTO + "function run() { var b = new Box(7); return b.get() }\nconsole.log(String(run()))\n",
+    gap: "a var slot is typed at HOIST, before the initializer lowers",
+  },
+  {
+    // NAMED GAP, and NOT this arm's doing: identical for a declared `class`.
+    name: "the instance through an untyped parameter",
+    src: PROTO + "function use(x) { return x.get() }\nconsole.log(String(use(new Box(4))))\n",
+    gap: "an untyped JS parameter is a dyn slot; main loses a DECLARED class's methods here too",
+  },
+];
+
+describe("SCRIPTC_PROTOCLASS=1 — the arm ON", () => {
+  const RESULT = new Map<string, { ok: boolean; matched: boolean; detail: string }>();
+  beforeAll(async () => {
+    const prev = process.env[ARM];
+    process.env[ARM] = "1";
+    try {
+      for (const p of ARMED) {
+        const b = await build("armed-" + p.name, p.src, "c");
+        const r = b.ok ? run(b.binaryPath!) : { stdout: "", status: null };
+        RESULT.set(p.name, {
+          ok: b.ok,
+          matched: b.ok && r.status === 0 && r.stdout === b.oracle,
+          detail: b.ok
+            ? `exit ${String(r.status)} stdout ${JSON.stringify(r.stdout)} oracle ${JSON.stringify(b.oracle)}`
+            : b.diags.map((d) => `${d.code} ${d.message.slice(0, 160)}`).join(" | "),
+        });
+      }
+    } finally {
+      if (prev === undefined) delete process.env[ARM];
+      else process.env[ARM] = prev;
+    }
+  }, 1_800_000);
+
+  test.for(ARMED.filter((p) => p.gap === null).map((p) => [p.name, p] as const))(
+    "answers Node-exactly with the arm ON: %s",
+    ([, p]) => {
+      const r = RESULT.get(p.name)!;
+      expect(r.matched, `${p.name}: ${r.detail}`).toBe(true);
+    },
+  );
+
+  test.for(ARMED.filter((p) => p.gap !== null).map((p) => [p.name, p] as const))(
+    "NAMED GAP, still open: %s",
+    ([, p]) => {
+      const r = RESULT.get(p.name)!;
+      // Pinned as a divergence ON PURPOSE. If this goes green the gap closed —
+      // move the row up, and reconsider whether the arm can default ON.
+      expect(
+        r.matched,
+        `${p.name} now MATCHES with the arm on — the gap (${p.gap!}) is CLOSED. ` +
+          `Move this row into the answering set and re-examine the default. ${r.detail}`,
+      ).toBe(false);
+    },
+  );
+});
