@@ -482,10 +482,20 @@ typedef void *ScrCtx;
 typedef ucontext_t ScrCtx;
 #endif
 
-struct ScrFiber {
+/* One EXECUTION CONTEXT: a stack, plus the saved state naming where on it
+ * to resume. Deliberately NOT part of ScrFiber, which is per-TASK: a
+ * finished fiber's stack is empty but perfectly good, and the trampoline
+ * loops so one stack serves task after task. See scr_stack_acquire. */
+typedef struct ScrStack {
   ScrCtx ctx;
+  char *mem;             /* POSIX only; Windows fibers own their stack */
+  struct ScrStack *next; /* free-list link; meaningful only while pooled */
+} ScrStack;
+
+struct ScrFiber {
+  ScrStack *st;      /* the context we run on; NULL on the stackless
+                      * microtask envelopes at the bottom of this struct */
   ScrCtx *return_to; /* whoever resumed us last (spawner or the loop) */
-  char *stack;       /* POSIX only; Windows fibers own their stack (NULL) */
   ScrPromise *promise; /* the promise this fiber settles (owned +1); NULL
                         * for generator fibers (gen non-NULL instead) */
   ScrGen *gen;         /* the generator this fiber runs (borrowed — the
@@ -1067,7 +1077,7 @@ static void scr_switch(ScrCtx *from, ScrCtx *to, ScrFiber *to_fiber) {
   SwitchToFiber(*to);
 #elif defined(SCR_ASAN_FIBERS)
   void **save = from_fiber ? &from_fiber->fake_stack : &scr_main_fake_stack;
-  const void *bottom = to_fiber ? to_fiber->stack : NULL;
+  const void *bottom = to_fiber ? to_fiber->st->mem : NULL;
   size_t size = to_fiber ? SCR_FIBER_STACK : 0;
   __sanitizer_start_switch_fiber(save, bottom, size);
   swapcontext(from, to);
@@ -1353,24 +1363,170 @@ static void scr_trampoline(void) {
   size_t os;
   __sanitizer_finish_switch_fiber(scr_current->fake_stack, &ob, &os);
 #endif
-  ScrFiber *self = scr_current;
-  self->entry(self, self->argpack);
-  scr_fiber_finish(self);
-  /* Dead fiber: hop back to whoever resumed us. The loop frees us. */
-  scr_switch(&self->ctx, self->return_to, NULL);
+  /* THE TASK LOOP. A fiber whose body RETURNS is finished and can never
+   * be re-entered, which is why this used to be straight-line code and
+   * why every async call used to cost a CreateFiber/DeleteFiber pair. A
+   * fiber whose body YIELDS instead can be handed a new task forever, so
+   * the stack outlives the task that ran on it and goes back in the pool.
+   *
+   * `self` is dangling the instant control leaves the switch below — the
+   * call site frees the ScrFiber and returns the ScrStack to the pool —
+   * so every iteration re-reads scr_current and nothing here touches a
+   * value carried across the switch. The one thing that does survive is
+   * `st`, which is the pooled object itself. */
+  ScrStack *st = scr_current->st;
+  for (;;) {
+    ScrFiber *self = scr_current;
+    self->entry(self, self->argpack);
+    scr_fiber_finish(self);
+    /* Dead TASK, live STACK: hop back to whoever resumed us. The call
+     * site frees the fiber and decides whether this stack is pooled. */
+    scr_switch(&st->ctx, self->return_to, NULL);
+  }
   /* unreachable */
 }
 
-/* Frees a finished fiber's execution resources (the promise release and
- * bookkeeping stay at the call sites). Windows: DeleteFiber tears down the
- * fiber object and its stack — legal here because a finished fiber has
- * switched away and can never be current again. */
-static void scr_fiber_destroy(ScrFiber *f) {
-#ifdef _WIN32
-  DeleteFiber(f->ctx);
+/* ── the stack pool ───────────────────────────────────────────────────
+ * A free list of idle execution contexts. Every entry is in one of two
+ * states and BOTH resume correctly into the task loop: PRISTINE (created
+ * and never entered — resuming enters scr_trampoline at the top) or
+ * PARKED (its last task finished and the loop yielded — resuming returns
+ * from that scr_switch and falls round to the next iteration). Nothing
+ * else can reach the pool: a SUSPENDED fiber is never destroyed (loop
+ * exhaustion abandons it deliberately), and the stackless microtask
+ * envelopes never own a stack at all.
+ *
+ * The stack is empty in both states, so there is nothing to unwind. The
+ * runtime propagates a throw through an exception CELL and an early
+ * return, never setjmp/longjmp (scr_runtime.h's `catch` note), so the
+ * body's entry call returns normally however it ended and scr_fiber_finish
+ * has already moved the payload into the promise.
+ *
+ * Why a cap: an idle entry keeps its TOUCHED pages resident, which is
+ * exactly what removes the faults and exactly what costs RSS. The cap
+ * bounds the IDLE set only — a burst that wants more contexts than the cap
+ * still gets them, they are just not all kept afterwards.
+ *
+ * WHERE 64 COMES FROM. Measured on the real zapo messaging bench (the
+ * preserved pre-regression TU relinked against this runtime, full default
+ * workload, same binary in every arm — only this env knob changes), 2 reps,
+ * medians; the A/A floor on that lane is 7.7% on cycles:
+ *
+ *   cap    send_1to1 Mcyc   recv_group Mcyc   faults      peak RSS
+ *     0        63,320           13,597       1,585,510    176.1 MiB
+ *     4        37,026            7,896         773,378    178.1 MiB
+ *     8        30,505            6,690         617,279    180.0 MiB
+ *    16        25,755            5,413         508,602    180.1 MiB
+ *    64        21,821            4,178         403,628    182.9 MiB
+ *   256        21,239            4,200         374,219    183.4 MiB
+ *
+ * 64 is the knee: quadrupling it again buys 2.7% more on send_1to1 and
+ * nothing at all on recv_group, while every step up costs resident stack.
+ * The +6.8 MiB from 0 to 64 is the honest price of the CPU column and it
+ * is inside the bench lane's 6.76% RSS noise floor, so it is reported from
+ * the monotone trend across six caps rather than from any one pair.
+ * SCR_FIBER_POOL=0 turns the pool off entirely (the pre-change runtime,
+ * and the A/B control arm). */
+#ifndef SCR_FIBER_POOL
+#define SCR_FIBER_POOL 64
 #endif
+
+static ScrStack *scr_stack_pool = NULL;
+static size_t scr_stack_pool_n = 0;
+
+static size_t scr_stack_pool_max(void) {
+  static bool once = false;
+  static size_t cached = SCR_FIBER_POOL;
+  if (!once) {
+    const char *env = getenv("SCR_FIBER_POOL");
+    if (env != NULL) {
+      long v = strtol(env, NULL, 10);
+      if (v >= 0) cached = (size_t)v;
+    }
+    once = true;
+  }
+  return cached;
+}
+
+static void scr_stack_free(ScrStack *s) {
+#ifdef _WIN32
+  DeleteFiber(s->ctx);
+#else
+  free(s->mem);
+#endif
+  free(s);
+}
+
+/* A context to run a task on: a pooled one if there is one, otherwise a
+ * fresh one. The fresh arm is the code that used to sit inline in
+ * scr_async_spawn and scr_gen_new, unchanged. */
+static ScrStack *scr_stack_acquire(void) {
+  ScrStack *s = scr_stack_pool;
+  if (s != NULL) {
+    scr_stack_pool = s->next;
+    scr_stack_pool_n--;
+    s->next = NULL;
+    return s;
+  }
+  s = calloc(1, sizeof *s);
+  if (!s) scr_oom();
+#ifdef _WIN32
+  /* NOT lazy, and that mistake cost this runtime its whole page-fault
+   * bill: dwStackSize is the initial COMMITTED size, so the old
+   * CreateFiber(SCR_FIBER_STACK) committed 256 KiB of demand-zero stack
+   * per async CALL. The reserve is unchanged -- 0 means the executable
+   * default, which is what CreateFiber used. See SCR_FIBER_COMMIT. */
+  s->ctx =
+#ifdef SCR_ASAN_FIBERS
+      CreateFiber(SCR_FIBER_STACK, scr_trampoline, NULL);
+#else
+      CreateFiberEx(SCR_FIBER_COMMIT, 0, 0, scr_trampoline, NULL);
+#endif
+  if (s->ctx == NULL) scr_oom();
+#else
+  s->mem = malloc(SCR_FIBER_STACK);
+  if (!s->mem) scr_oom();
+  getcontext(&s->ctx);
+  s->ctx.uc_stack.ss_sp = s->mem;
+  s->ctx.uc_stack.ss_size = SCR_FIBER_STACK;
+  s->ctx.uc_link = NULL;
+  makecontext(&s->ctx, scr_trampoline, 0);
+#endif
+  return s;
+}
+
+static void scr_stack_release(ScrStack *s) {
+  if (s == NULL) return;
+  if (scr_stack_pool_n < scr_stack_pool_max()) {
+    s->next = scr_stack_pool;
+    scr_stack_pool = s;
+    scr_stack_pool_n++;
+    return;
+  }
+  scr_stack_free(s);
+}
+
+/* Drops every idle context. Called from the loop's teardown so a run that
+ * ends with a warm pool does not read as a leak to the sanitized lane;
+ * fibers still in flight are untouched (they are abandoned by design). */
+static void scr_fiber_pool_teardown(void) {
+  while (scr_stack_pool != NULL) {
+    ScrStack *s = scr_stack_pool;
+    scr_stack_pool = s->next;
+    scr_stack_free(s);
+  }
+  scr_stack_pool_n = 0;
+}
+
+/* Frees a finished fiber's execution resources (the promise release and
+ * bookkeeping stay at the call sites). The STACK does not die with the
+ * task — it goes back to the pool, which is the whole point; only the
+ * overflow past the cap is actually torn down. Releasing a stack whose
+ * trampoline is parked is exactly as legal as the DeleteFiber this used to
+ * do: a finished fiber has switched away and can never be current. */
+static void scr_fiber_destroy(ScrFiber *f) {
+  scr_stack_release(f->st);
   scr_als_ctx_release(f->als);
-  free(f->stack);
   free(f);
 }
 
@@ -1387,34 +1543,15 @@ ScrPromise *scr_async_spawn(void (*entry)(ScrFiber *, void *), void *argpack) {
   f->als = scr_als_ctx_retain(*scr_als_active);
   scr_fibers_live++;
 
+  f->st = scr_stack_acquire();
 #ifdef _WIN32
-  /* NOT lazy, and that mistake cost this runtime its whole page-fault
-   * bill: dwStackSize is the initial COMMITTED size, so the old
-   * CreateFiber(SCR_FIBER_STACK) committed 256 KiB of demand-zero stack
-   * per async CALL. The reserve is unchanged -- 0 means the executable
-   * default, which is what CreateFiber used. See SCR_FIBER_COMMIT. */
   ScrCtx here = scr_win_self();
-  f->ctx =
-#ifdef SCR_ASAN_FIBERS
-      CreateFiber(SCR_FIBER_STACK, scr_trampoline, NULL);
 #else
-      CreateFiberEx(SCR_FIBER_COMMIT, 0, 0, scr_trampoline, NULL);
-#endif
-  if (f->ctx == NULL) scr_oom();
-#else
-  f->stack = malloc(SCR_FIBER_STACK);
-  if (!f->stack) scr_oom();
-  getcontext(&f->ctx);
-  f->ctx.uc_stack.ss_sp = f->stack;
-  f->ctx.uc_stack.ss_size = SCR_FIBER_STACK;
-  f->ctx.uc_link = NULL;
-  makecontext(&f->ctx, scr_trampoline, 0);
-
   ucontext_t here;
 #endif
   f->return_to = &here;
   ScrFiber *spawner = scr_current;
-  scr_switch(&here, &f->ctx, f);
+  scr_switch(&here, &f->st->ctx, f);
   /* back: the fiber suspended or finished. The switch back targeted NULL
    * (the child doesn't know who spawned it), which pointed both the current
    * fiber AND the exception machinery at main — restore the spawner's cell
@@ -1446,7 +1583,7 @@ static void scr_await_park(ScrPromise *p) {
     if (!p->waiters) scr_oom();
   }
   p->waiters[p->nwaiters++] = self;
-  scr_switch(&self->ctx, self->return_to, NULL);
+  scr_switch(&self->st->ctx, self->return_to, NULL);
   /* Resumed by the loop: return_to must now point at the loop's context. */
 }
 
@@ -1462,7 +1599,7 @@ static void scr_await_yield(void) {
     abort();
   }
   scr_ready_push(self);
-  scr_switch(&self->ctx, self->return_to, NULL);
+  scr_switch(&self->st->ctx, self->return_to, NULL);
 }
 
 /* The emitted promise-or-absent await's unit arm (`await u` where u holds
@@ -1910,7 +2047,7 @@ static void scr_resume_fiber(ScrFiber *f) {
 #endif
   f->return_to = &scr_loop_ctx;
   ScrGen *g = f->gen; /* read BEFORE the switch: the finish path clears it */
-  scr_switch(&scr_loop_ctx, &f->ctx, f);
+  scr_switch(&scr_loop_ctx, &f->st->ctx, f);
   if (f->done) {
     if (g != NULL) {
       /* An ASYNC generator body that ran to completion on a LOOP resume
@@ -2561,6 +2698,7 @@ bool scr_loop_run(ScrPromise *top_level) {
   scr_children_teardown();
   scr_fibers_abandoned = scr_fibers_live;
   scr_note_abandoned_fibers(scr_fibers_abandoned);
+  scr_fiber_pool_teardown();
   return rejection_failed;
 }
 
@@ -2917,23 +3055,7 @@ ScrGen *scr_gen_new(void (*entry)(ScrFiber *, void *), void *argpack,
    * fiber switch). */
   f->als = scr_als_ctx_retain(*scr_als_active);
   scr_fibers_live++;
-#ifdef _WIN32
-  f->ctx =
-#ifdef SCR_ASAN_FIBERS
-      CreateFiber(SCR_FIBER_STACK, scr_trampoline, NULL);
-#else
-      CreateFiberEx(SCR_FIBER_COMMIT, 0, 0, scr_trampoline, NULL);
-#endif
-  if (f->ctx == NULL) scr_oom();
-#else
-  f->stack = malloc(SCR_FIBER_STACK);
-  if (!f->stack) scr_oom();
-  getcontext(&f->ctx);
-  f->ctx.uc_stack.ss_sp = f->stack;
-  f->ctx.uc_stack.ss_size = SCR_FIBER_STACK;
-  f->ctx.uc_link = NULL;
-  makecontext(&f->ctx, scr_trampoline, 0);
-#endif
+  f->st = scr_stack_acquire();
   g->fiber = f;
   return g;
 }
@@ -3068,7 +3190,7 @@ void *scr_gen_take_in_ref(void) { return scr_gen_slot_take_ref(&scr_gen_self()->
  * payload or the GENRET sentinel pending (the emitted check handles it). */
 static void scr_gen_yield_switch(void) {
   ScrFiber *self = scr_current;
-  scr_switch(&self->ctx, self->return_to, NULL);
+  scr_switch(&self->st->ctx, self->return_to, NULL);
 }
 void scr_gen_yield_f64(double v) {
   scr_gen_slot_f64(&scr_gen_self()->out, v);
@@ -3213,7 +3335,7 @@ static void scr_agen_switch_in(ScrGen *g) {
 #endif
   f->return_to = &here;
   ScrFiber *me = scr_current;
-  scr_switch(&here, &f->ctx, f);
+  scr_switch(&here, &f->st->ctx, f);
   scr_current = me;
   scr_exc_swap_cell(me != NULL ? &me->exc : NULL);
   if (f->done) {
@@ -3504,7 +3626,7 @@ static void scr_gen_switch_in(ScrGen *g) {
 #endif
   f->return_to = &here;
   ScrFiber *me = scr_current;
-  scr_switch(&here, &f->ctx, f);
+  scr_switch(&here, &f->st->ctx, f);
   /* Back on the consumer: restore identity + the consumer's cell (the
    * yield/finish switch targeted NULL — main's cell). */
   scr_current = me;
