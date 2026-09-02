@@ -12,7 +12,7 @@ import { CLASS_PROPS_FIELD, armDiscrimLits, canAdaptDynFuncTo, canBoxClassIntoDy
 import { cDecl, cStringLiteral, cType, elemAccess, releaseCallC, retainCallC, vAdapters } from "./emit-types.js";
 import { mangleClassStruct, mangleField, mangleFunction, mangleRecordNew, mangleRecordStruct } from "../mangle.js";
 import type { ClassMeta } from "./emit-shapes.js";
-import { dynMemberRows } from "../dyn-members.js";
+import { dynClassDisplayName, dynMemberRows } from "../dyn-members.js";
 import { KINDGATE_WIDE_KINDS, kindgateWideLane } from "../kindgate.js";
 import { OVERFLOW_MEMBER, OWNMASK_MEMBER, SRCPROTO_MEMBER, TOSTR_MEMBER, nullProtoCondC, ownPresentCondC } from "./emit-shapes.js";
 
@@ -83,7 +83,7 @@ function typeMayHoldFunc(E: CEmitter, t: IrType): boolean {
     const name = `sc_dcl_${E.dynClassDescs.size}`;
     E.dynClassDescs.set(className, name);
     const rc = vAdapters({ kind: "object", className });
-    const display = className.startsWith("%") ? className.slice(1) : className;
+    const display = dynClassDisplayName(meta.def);
     // The instance MEMBER TABLE, built before the descriptor that points
     // at it so its own helpers and data are already registered — the
     // dynClassDesc rule one level down. A class the filters empty out
