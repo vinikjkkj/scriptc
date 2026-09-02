@@ -35,6 +35,7 @@ import {
   fenceOrDropOptionKey,
   isChildSurfaceMember,
 } from "./surfaces.js";
+import { fenceCatchProbe } from "./fence-catch.js";
 import { conditionalSpreadOf, lowerDynObjectLiteral, narrowBridgeDyn, probeLower, voidAllResultIsAValue } from "./lower-exprs.js";
 import { bufEncoding } from "./lower-containers.js";
 import { HTTP2_CONSTANTS } from "./http2-constants.js";
@@ -774,6 +775,7 @@ import { KEYOBJ, HASH_T, HMAC_T, CIPHER_T, DECIPHER_T, BOOL, BYTES_U8, CAUGHT, C
     L.runtimeFences.push(d);
     const sf = call.getSourceFile();
     const pos = ts.getLineAndCharacterOfPosition(sf, loc.start);
+    fenceCatchProbe("require-runtime-specifier", call, loc.file, pos.line + 1);
     return { text: `${d.message} [${d.code} at ${loc.file}:${pos.line + 1}]`, code: d.code };
   }
 
