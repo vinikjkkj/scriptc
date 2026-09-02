@@ -1918,6 +1918,32 @@ export function validateModule(mod: IrModule): IrValidationError[] {
   return errors;
 }
 
+/** Names the CAUSE behind the worst-shaped failure this validator can report.
+ *
+ * A class method is emitted as the module function `%C.m`, and module assembly
+ * PRUNES both the function and the def's method entry unless the lowering of a
+ * call site noted an edge for it (L.noteEdge). Miss that call and nothing
+ * complains where the mistake is: the method vanishes quietly and the build dies
+ * here instead, at a call to a name that looks like it should obviously exist,
+ * with no clue that reachability removed it.
+ *
+ * So when the callee spells `%C.m` for a class the module DOES carry, say that.
+ * lastIndexOf is deliberate: namespaced classes hoist under dotted names, so
+ * `%ns.C.m` has to split into `ns.C` and `m`. */
+function prunedMethodHint(callee: string, classes: Map<string, IrClassDef>): string {
+  if (!callee.startsWith("%")) return "";
+  const dot = callee.lastIndexOf(".");
+  if (dot < 2) return "";
+  const cls = callee.slice(1, dot);
+  const method = callee.slice(dot + 1);
+  const def = classes.get(cls);
+  if (def === undefined || (def.methods ?? []).includes(method)) return "";
+  return (
+    ` (class "${cls}" is emitted but carries no method "${method}":` +
+    " reachability pruned it because no call site noted an edge for it)"
+  );
+}
+
 function validateFunction(
   fn: IrFunction,
   functions: Map<string, IrFunction>,
@@ -3021,7 +3047,7 @@ function validateFunction(
         for (const a of e.args) checkExpr(a);
         const callee = functions.get(e.callee);
         if (!callee) {
-          err(`call to undeclared function "${e.callee}"`, e.loc);
+          err(`call to undeclared function "${e.callee}"${prunedMethodHint(e.callee, classes)}`, e.loc);
           break;
         }
         if (callee.params.length !== e.args.length) {
