@@ -1,0 +1,100 @@
+{
+ "entry": "G:/blocks/pkgrecheck-lab/app/pkgs/store-postgres/signal.store.ts",
+ "flags": [],
+ "elapsedMs": 1015,
+ "crashed": null,
+ "preflightFailed": false,
+ "stats": {
+  "statementsTotal": 4,
+  "statementsFailed": 0,
+  "statementsIsland": 0,
+  "functionsSkipped": 0
+ },
+ "unreachedStats": {
+  "statementsTotal": 12,
+  "statementsFailed": 1,
+  "statementsIsland": 0,
+  "functionsSkipped": 7
+ },
+ "npmStatic": null,
+ "provenanceNotes": null,
+ "sites": [
+  {
+   "section": "blocker",
+   "code": "SC2013",
+   "message": "values from the '@types/pg' package run in the embedded dynamic engine, which this build does not include",
+   "file": "G:/blocks/pkgrecheck-lab/app/pkgs/store-postgres/BasePgStore.ts",
+   "line": 13
+  },
+  {
+   "section": "blocker",
+   "code": "SC2013",
+   "message": "importing 'zapo-js' requires the embedded dynamic engine, which this build does not include — the package's implementation runs there",
+   "file": "G:/blocks/pkgrecheck-lab/app/pkgs/store-postgres/helpers.ts",
+   "line": 2
+  },
+  {
+   "section": "blocker",
+   "code": "SC2013",
+   "message": "importing '@types/pg' requires the embedded dynamic engine, which this build does not include — the package's implementation runs there",
+   "file": "G:/blocks/pkgrecheck-lab/app/pkgs/store-postgres/connection.ts",
+   "line": 1
+  },
+  {
+   "section": "blocker",
+   "code": "SC2013",
+   "message": "importing 'zapo-js' requires the embedded dynamic engine, which this build does not include — the package's implementation runs there",
+   "file": "G:/blocks/pkgrecheck-lab/app/pkgs/store-postgres/BasePgStore.ts",
+   "line": 3
+  },
+  {
+   "section": "unreached",
+   "code": "SC2013",
+   "message": "values from the 'zapo-js' package run in the embedded dynamic engine, which this build does not include",
+   "file": "G:/blocks/pkgrecheck-lab/app/pkgs/store-postgres/helpers.ts",
+   "line": 27
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "extending classes not declared in the program ('BasePgStore') is not supported yet",
+   "file": "G:/blocks/pkgrecheck-lab/app/pkgs/store-postgres/signal.store.ts",
+   "line": 9
+  },
+  {
+   "section": "unreached",
+   "code": "SC2013",
+   "message": "values from the '@types/pg' package run in the embedded dynamic engine, which this build does not include",
+   "file": "G:/blocks/pkgrecheck-lab/app/pkgs/store-postgres/helpers.ts",
+   "line": 12
+  },
+  {
+   "section": "unreached",
+   "code": "SC2013",
+   "message": "values from the '@types/pg' package run in the embedded dynamic engine, which this build does not include",
+   "file": "G:/blocks/pkgrecheck-lab/app/pkgs/store-postgres/helpers.ts",
+   "line": 16
+  },
+  {
+   "section": "unreached",
+   "code": "SC2013",
+   "message": "values from the '@types/pg' package run in the embedded dynamic engine, which this build does not include",
+   "file": "G:/blocks/pkgrecheck-lab/app/pkgs/store-postgres/helpers.ts",
+   "line": 20
+  },
+  {
+   "section": "unreached",
+   "code": "SC2013",
+   "message": "values from the '@types/pg' package run in the embedded dynamic engine, which this build does not include",
+   "file": "G:/blocks/pkgrecheck-lab/app/pkgs/store-postgres/connection.ts",
+   "line": 375
+  },
+  {
+   "section": "unreached",
+   "code": "SC2013",
+   "message": "values from the '@types/pg' package run in the embedded dynamic engine, which this build does not include",
+   "file": "G:/blocks/pkgrecheck-lab/app/pkgs/store-postgres/connection.ts",
+   "line": 380
+  }
+ ]
+}

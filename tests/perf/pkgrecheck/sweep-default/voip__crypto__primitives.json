@@ -1,0 +1,58 @@
+{
+ "entry": "G:/blocks/pkgrecheck-lab/app/pkgs/voip/crypto/primitives.ts",
+ "flags": [],
+ "elapsedMs": 504,
+ "crashed": null,
+ "preflightFailed": false,
+ "stats": {
+  "statementsTotal": 0,
+  "statementsFailed": 0,
+  "statementsIsland": 0,
+  "functionsSkipped": 0
+ },
+ "unreachedStats": {
+  "statementsTotal": 10,
+  "statementsFailed": 4,
+  "statementsIsland": 0,
+  "functionsSkipped": 0
+ },
+ "npmStatic": null,
+ "provenanceNotes": null,
+ "sites": [
+  {
+   "section": "blocker",
+   "code": "SC2013",
+   "message": "importing 'zapo-js' requires the embedded dynamic engine, which this build does not include — the package's implementation runs there",
+   "file": "G:/blocks/pkgrecheck-lab/app/pkgs/voip/crypto/primitives.ts",
+   "line": 8
+  },
+  {
+   "section": "unreached",
+   "code": "SC2013",
+   "message": "values from the 'zapo-js' package run in the embedded dynamic engine, which this build does not include",
+   "file": "G:/blocks/pkgrecheck-lab/app/pkgs/voip/crypto/primitives.ts",
+   "line": 11
+  },
+  {
+   "section": "unreached",
+   "code": "SC2013",
+   "message": "values from the 'zapo-js' package run in the embedded dynamic engine, which this build does not include",
+   "file": "G:/blocks/pkgrecheck-lab/app/pkgs/voip/crypto/primitives.ts",
+   "line": 23
+  },
+  {
+   "section": "unreached",
+   "code": "SC2020",
+   "message": "'createCipheriv with this algorithm' is part of the standard library types but has no scriptc lowering yet",
+   "file": "G:/blocks/pkgrecheck-lab/app/pkgs/voip/crypto/primitives.ts",
+   "line": 27
+  },
+  {
+   "section": "unreached",
+   "code": "SC2013",
+   "message": "values from the 'zapo-js' package run in the embedded dynamic engine, which this build does not include",
+   "file": "G:/blocks/pkgrecheck-lab/app/pkgs/voip/crypto/primitives.ts",
+   "line": 28
+  }
+ ]
+}

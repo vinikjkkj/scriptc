@@ -1,0 +1,107 @@
+{
+ "entry": "G:/blocks/pkgrecheck-lab/app/pkgs/store-mysql/appstate.store.ts",
+ "flags": [],
+ "elapsedMs": 1282,
+ "crashed": null,
+ "preflightFailed": false,
+ "stats": {
+  "statementsTotal": 9,
+  "statementsFailed": 0,
+  "statementsIsland": 0,
+  "functionsSkipped": 0
+ },
+ "unreachedStats": {
+  "statementsTotal": 12,
+  "statementsFailed": 1,
+  "statementsIsland": 0,
+  "functionsSkipped": 7
+ },
+ "npmStatic": null,
+ "provenanceNotes": null,
+ "sites": [
+  {
+   "section": "blocker",
+   "code": "SC2013",
+   "message": "values from the 'mysql2' package run in the embedded dynamic engine, which this build does not include",
+   "file": "G:/blocks/pkgrecheck-lab/app/pkgs/store-mysql/BaseMysqlStore.ts",
+   "line": 13
+  },
+  {
+   "section": "blocker",
+   "code": "SC2013",
+   "message": "importing 'zapo-js' requires the embedded dynamic engine, which this build does not include — the package's implementation runs there",
+   "file": "G:/blocks/pkgrecheck-lab/app/pkgs/store-mysql/helpers.ts",
+   "line": 2
+  },
+  {
+   "section": "blocker",
+   "code": "SC2013",
+   "message": "importing 'mysql2' requires the embedded dynamic engine, which this build does not include — the package's implementation runs there",
+   "file": "G:/blocks/pkgrecheck-lab/app/pkgs/store-mysql/connection.ts",
+   "line": 1
+  },
+  {
+   "section": "blocker",
+   "code": "SC2013",
+   "message": "importing 'zapo-js' requires the embedded dynamic engine, which this build does not include — the package's implementation runs there",
+   "file": "G:/blocks/pkgrecheck-lab/app/pkgs/store-mysql/BaseMysqlStore.ts",
+   "line": 3
+  },
+  {
+   "section": "blocker",
+   "code": "SC2013",
+   "message": "importing 'zapo-js' requires the embedded dynamic engine, which this build does not include — the package's implementation runs there",
+   "file": "G:/blocks/pkgrecheck-lab/app/pkgs/store-mysql/appstate.store.ts",
+   "line": 2
+  },
+  {
+   "section": "unreached",
+   "code": "SC2013",
+   "message": "values from the 'zapo-js' package run in the embedded dynamic engine, which this build does not include",
+   "file": "G:/blocks/pkgrecheck-lab/app/pkgs/store-mysql/helpers.ts",
+   "line": 28
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "extending classes not declared in the program ('BaseMysqlStore') is not supported yet",
+   "file": "G:/blocks/pkgrecheck-lab/app/pkgs/store-mysql/appstate.store.ts",
+   "line": 35
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'QueryOutput' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "G:/blocks/pkgrecheck-lab/app/pkgs/store-mysql/helpers.ts",
+   "line": 13
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'QueryOutput' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "G:/blocks/pkgrecheck-lab/app/pkgs/store-mysql/helpers.ts",
+   "line": 17
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'QueryOutput' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "G:/blocks/pkgrecheck-lab/app/pkgs/store-mysql/helpers.ts",
+   "line": 21
+  },
+  {
+   "section": "unreached",
+   "code": "SC2013",
+   "message": "values from the 'mysql2' package run in the embedded dynamic engine, which this build does not include",
+   "file": "G:/blocks/pkgrecheck-lab/app/pkgs/store-mysql/connection.ts",
+   "line": 368
+  },
+  {
+   "section": "unreached",
+   "code": "SC2013",
+   "message": "values from the 'mysql2' package run in the embedded dynamic engine, which this build does not include",
+   "file": "G:/blocks/pkgrecheck-lab/app/pkgs/store-mysql/connection.ts",
+   "line": 392
+  }
+ ]
+}

@@ -1,0 +1,16 @@
+export ZIG_GLOBAL_CACHE_DIR='G:\blocks\pkgrecheck\.zig'
+export ZIG_LOCAL_CACHE_DIR='G:\blocks\pkgrecheck\.zig'
+export SCRIPTC_CACHE_DIR='G:\blocks\pkgrecheck\.cache'
+export SCRIPTC_PROVENANCE_CACHE='G:\blocks\pkgrecheck-lab\prov'
+export TMP='G:\blocks\pkgrecheck-tmp'
+export TEMP='G:\blocks\pkgrecheck-tmp'
+export TMPDIR='G:\blocks\pkgrecheck-tmp'
+export SCRIPTC_CC=zigcc
+export SCRIPTC_TEST_CC='zig cc'
+export SCRIPTC_TARGET=x86_64-windows-gnu
+export SCRIPTC_TEST_WORKERS=3
+export SCRIPTC_GENERIC_SLOT=1
+export WT='G:/blocks/pkgrecheck'
+export LAB='G:/blocks/pkgrecheck-lab'
+export NODE25='/c/Users/vinicius/AppData/Local/nvm/v25.9.0'
+export PATH="/c/Users/vinicius/AppData/Local/nvm/v25.9.0:/g/zapo-work/tools/zig:/c/msys64/ucrt64/bin:/c/Program Files/Git/bin:$PATH"

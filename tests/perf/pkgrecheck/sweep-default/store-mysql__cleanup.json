@@ -1,0 +1,30 @@
+{
+ "entry": "G:/blocks/pkgrecheck-lab/app/pkgs/store-mysql/cleanup.ts",
+ "flags": [],
+ "elapsedMs": 622,
+ "crashed": null,
+ "preflightFailed": false,
+ "stats": {
+  "statementsTotal": 1,
+  "statementsFailed": 0,
+  "statementsIsland": 0,
+  "functionsSkipped": 0
+ },
+ "unreachedStats": {
+  "statementsTotal": 0,
+  "statementsFailed": 0,
+  "statementsIsland": 0,
+  "functionsSkipped": 1
+ },
+ "npmStatic": null,
+ "provenanceNotes": null,
+ "sites": [
+  {
+   "section": "unreached",
+   "code": "SC2013",
+   "message": "values from the 'zapo-js' package run in the embedded dynamic engine, which this build does not include",
+   "file": "G:/blocks/pkgrecheck-lab/app/pkgs/store-mysql/cleanup.ts",
+   "line": 21
+  }
+ ]
+}

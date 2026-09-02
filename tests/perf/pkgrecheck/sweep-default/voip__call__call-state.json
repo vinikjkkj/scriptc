@@ -1,0 +1,86 @@
+{
+ "entry": "G:/blocks/pkgrecheck-lab/app/pkgs/voip/call/call-state.ts",
+ "flags": [],
+ "elapsedMs": 1033,
+ "crashed": null,
+ "preflightFailed": false,
+ "stats": {
+  "statementsTotal": 12,
+  "statementsFailed": 0,
+  "statementsIsland": 0,
+  "functionsSkipped": 0
+ },
+ "unreachedStats": {
+  "statementsTotal": 92,
+  "statementsFailed": 9,
+  "statementsIsland": 0,
+  "functionsSkipped": 0
+ },
+ "npmStatic": null,
+ "provenanceNotes": null,
+ "sites": [
+  {
+   "section": "unreached",
+   "code": "SC2020",
+   "message": "'new Date' is part of the standard library types but has no scriptc lowering yet",
+   "file": "G:/blocks/pkgrecheck-lab/app/pkgs/voip/call/call-state.ts",
+   "line": 55
+  },
+  {
+   "section": "unreached",
+   "code": "SC2020",
+   "message": "'new Date' is part of the standard library types but has no scriptc lowering yet",
+   "file": "G:/blocks/pkgrecheck-lab/app/pkgs/voip/call/call-state.ts",
+   "line": 167
+  },
+  {
+   "section": "unreached",
+   "code": "SC2020",
+   "message": "'new Date' is part of the standard library types but has no scriptc lowering yet",
+   "file": "G:/blocks/pkgrecheck-lab/app/pkgs/voip/call/call-state.ts",
+   "line": 176
+  },
+  {
+   "section": "unreached",
+   "code": "SC2020",
+   "message": "'new Date' is part of the standard library types but has no scriptc lowering yet",
+   "file": "G:/blocks/pkgrecheck-lab/app/pkgs/voip/call/call-state.ts",
+   "line": 185
+  },
+  {
+   "section": "unreached",
+   "code": "SC2020",
+   "message": "'new Date' is part of the standard library types but has no scriptc lowering yet",
+   "file": "G:/blocks/pkgrecheck-lab/app/pkgs/voip/call/call-state.ts",
+   "line": 195
+  },
+  {
+   "section": "unreached",
+   "code": "SC2020",
+   "message": "'new Date' is part of the standard library types but has no scriptc lowering yet",
+   "file": "G:/blocks/pkgrecheck-lab/app/pkgs/voip/call/call-state.ts",
+   "line": 205
+  },
+  {
+   "section": "unreached",
+   "code": "SC2020",
+   "message": "'Date.getTime' is part of the standard library types but has no scriptc lowering yet",
+   "file": "G:/blocks/pkgrecheck-lab/app/pkgs/voip/call/call-state.ts",
+   "line": 215
+  },
+  {
+   "section": "unreached",
+   "code": "SC2020",
+   "message": "'Date.getTime' is part of the standard library types but has no scriptc lowering yet",
+   "file": "G:/blocks/pkgrecheck-lab/app/pkgs/voip/call/call-state.ts",
+   "line": 217
+  },
+  {
+   "section": "unreached",
+   "code": "SC2020",
+   "message": "'new Date' is part of the standard library types but has no scriptc lowering yet",
+   "file": "G:/blocks/pkgrecheck-lab/app/pkgs/voip/call/call-state.ts",
+   "line": 221
+  }
+ ]
+}

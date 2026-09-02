@@ -1,0 +1,22 @@
+{
+ "entry": "G:/blocks/pkgrecheck-lab/app/pkgs/voip/types.ts",
+ "flags": [],
+ "elapsedMs": 713,
+ "crashed": null,
+ "preflightFailed": false,
+ "stats": {
+  "statementsTotal": 12,
+  "statementsFailed": 0,
+  "statementsIsland": 0,
+  "functionsSkipped": 0
+ },
+ "unreachedStats": {
+  "statementsTotal": 0,
+  "statementsFailed": 0,
+  "statementsIsland": 0,
+  "functionsSkipped": 0
+ },
+ "npmStatic": null,
+ "provenanceNotes": null,
+ "sites": []
+}

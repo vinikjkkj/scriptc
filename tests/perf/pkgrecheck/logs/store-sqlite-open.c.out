@@ -1,0 +1,1 @@
+Unhandled promise rejection: Error: optional dependency "better-sqlite3" is not installed. Install with: npm i better-sqlite3

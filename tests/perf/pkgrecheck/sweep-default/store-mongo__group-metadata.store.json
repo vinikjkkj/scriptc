@@ -1,0 +1,72 @@
+{
+ "entry": "G:/blocks/pkgrecheck-lab/app/pkgs/store-mongo/group-metadata.store.ts",
+ "flags": [],
+ "elapsedMs": 739,
+ "crashed": null,
+ "preflightFailed": false,
+ "stats": {
+  "statementsTotal": 3,
+  "statementsFailed": 0,
+  "statementsIsland": 0,
+  "functionsSkipped": 0
+ },
+ "unreachedStats": {
+  "statementsTotal": 13,
+  "statementsFailed": 2,
+  "statementsIsland": 0,
+  "functionsSkipped": 3
+ },
+ "npmStatic": null,
+ "provenanceNotes": null,
+ "sites": [
+  {
+   "section": "blocker",
+   "code": "SC2013",
+   "message": "values from the 'mongodb' package run in the embedded dynamic engine, which this build does not include",
+   "file": "G:/blocks/pkgrecheck-lab/app/pkgs/store-mongo/BaseMongoStore.ts",
+   "line": 10
+  },
+  {
+   "section": "blocker",
+   "code": "SC2013",
+   "message": "importing 'mongodb' requires the embedded dynamic engine, which this build does not include — the package's implementation runs there",
+   "file": "G:/blocks/pkgrecheck-lab/app/pkgs/store-mongo/helpers.ts",
+   "line": 1
+  },
+  {
+   "section": "blocker",
+   "code": "SC2013",
+   "message": "importing 'zapo-js' requires the embedded dynamic engine, which this build does not include — the package's implementation runs there",
+   "file": "G:/blocks/pkgrecheck-lab/app/pkgs/store-mongo/helpers.ts",
+   "line": 2
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "'instanceof' right-hand sides other than classes declared in the program is not supported yet",
+   "file": "G:/blocks/pkgrecheck-lab/app/pkgs/store-mongo/helpers.ts",
+   "line": 15
+  },
+  {
+   "section": "unreached",
+   "code": "SC2013",
+   "message": "values from the 'zapo-js' package run in the embedded dynamic engine, which this build does not include",
+   "file": "G:/blocks/pkgrecheck-lab/app/pkgs/store-mongo/helpers.ts",
+   "line": 21
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "extending classes not declared in the program ('BaseMongoStore') is not supported yet",
+   "file": "G:/blocks/pkgrecheck-lab/app/pkgs/store-mongo/group-metadata.store.ts",
+   "line": 16
+  },
+  {
+   "section": "unreached",
+   "code": "SC2013",
+   "message": "values from the 'bson' package run in the embedded dynamic engine, which this build does not include",
+   "file": "G:/blocks/pkgrecheck-lab/app/pkgs/store-mongo/helpers.ts",
+   "line": 10
+  }
+ ]
+}
