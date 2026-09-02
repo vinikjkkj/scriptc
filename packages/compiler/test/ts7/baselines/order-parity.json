@@ -10020,6 +10020,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/7382-a-never-assertion-still-carries-its-value.ts": {
+   "order": [
+    "<repo>/tests/corpus/7382-a-never-assertion-still-carries-its-value.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/750-cycle-closure-box.ts": {
    "order": [
     "<repo>/tests/corpus/750-cycle-closure-box.ts"
