@@ -278,4 +278,9 @@ test(`every corpus program is 100% static (corpus and coverage agree${shardSuffi
     expect.soft(coverage.stats.statementsFailed, file).toBe(deferred ? Number(deferred[1]) : 0);
     if (++n % 10 === 0) await new Promise((r) => setImmediate(r));
   }
-}, 600_000);
+  // 1617 corpus files at ~370 ms each. The old 600 s budget was not a
+  // correctness bound and it stopped being a time bound too: this test
+  // timed out at 600,461 ms with ZERO failing assertions, so the gate
+  // reported red for a sweep that had passed every check it ran. Sized
+  // to the work rather than to how long it used to take.
+}, 2_400_000);
