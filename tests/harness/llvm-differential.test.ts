@@ -80,6 +80,13 @@ const TIER_FLOOR = [
 /** Fixed backend gaps whose corpus programs must remain in the LLVM tier. */
 const TIER_REGRESSIONS = [
   "2672-http-request-response-callback.ts",
+  // Bigint arms in a union, tested rather than only stored. This one is
+  // pinned for the SKIP trap and not only for the tier: before the fix the
+  // LLVM lane REFUSED `truthy:union:bigint`, so a reverted fix does not
+  // fail the program here -- it drops it into the refused column and this
+  // suite goes green on the regression. The C lane fails loudly either
+  // way; only this pin makes the LLVM lane say so too.
+  "7392-bigint-union-truthy-eq.ts",
 ];
 
 interface RunResult {
