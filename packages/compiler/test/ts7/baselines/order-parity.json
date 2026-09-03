@@ -10050,6 +10050,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/7393-math-rounding-and-typed-array-element-edges.ts": {
+   "order": [
+    "<repo>/tests/corpus/7393-math-rounding-and-typed-array-element-edges.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/750-cycle-closure-box.ts": {
    "order": [
     "<repo>/tests/corpus/750-cycle-closure-box.ts"
