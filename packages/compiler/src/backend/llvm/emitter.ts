@@ -74,7 +74,7 @@ import type {
   IrUnionDef,
   SrcLoc,
 } from "../../ir/nodes.js";
-import { UNION_ARM_JS_OBJECT_KINDS, irFunctionJsName, settleOrValuePromiseTag, canBoxClassIntoDyn, CLASS_PROPS_FIELD, canMarshalFuncIntoIsland, CAUGHT, DYN, dynCopyIsObservable, F64, islandCallbackRet, islandPromisePayloadTag, isRefCounted, nullProtoRule, OWNMASK_SRC_NULL_PROTO, ownMaskKeyBit, isUnitType, MAY_THROW_LIB_FNS, moduleEmbedsBuiltin, moduleEmbedsNetIsland, moduleUsesAbortSignal, moduleUsesChildStream, moduleUsesDgram, moduleUsesFetch, moduleUsesFetchStatic, moduleUsesFetchDispatch, moduleUsesFsWatch, moduleUsesHttp2, moduleUsesHttpServer, moduleUsesNet, moduleUsesProcessEvents, moduleUsesRegex, moduleUsesStream, moduleUsesWsGlobal, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, STRING, typeEquals, typeKey, VOID } from "../../ir/nodes.js";
+import { UNION_ARM_JS_OBJECT_KINDS, irFunctionJsName, settleOrValuePromiseTag, canBoxClassIntoDyn, CLASS_PROPS_FIELD, canMarshalFuncIntoIsland, CAUGHT, DYN, dynCopyIsObservable, F64, islandCallbackRet, islandPromisePayloadTag, isRefCounted, nullProtoRule, OWNMASK_SRC_NULL_PROTO, ownMaskKeyBit, isUnitType, REF_TRUTHY_KINDS, MAY_THROW_LIB_FNS, moduleEmbedsBuiltin, moduleEmbedsNetIsland, moduleUsesAbortSignal, moduleUsesChildStream, moduleUsesDgram, moduleUsesFetch, moduleUsesFetchStatic, moduleUsesFetchDispatch, moduleUsesFsWatch, moduleUsesHttp2, moduleUsesHttpServer, moduleUsesNet, moduleUsesProcessEvents, moduleUsesRegex, moduleUsesStream, moduleUsesWsGlobal, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, STRING, typeEquals, typeKey, VOID } from "../../ir/nodes.js";
 import { dynClassDisplayName } from "../dyn-members.js";
 import { computeMayThrow } from "../emission/may-throw.js";
 import { seqScopedLocals } from "../emission/emit-stmts.js";
@@ -3577,47 +3577,15 @@ class LlEmitter {
               B.line(`store i1 ${t}, ptr ${slot}`);
               break;
             }
-            case "array":
-            case "record":
-            case "object":
-            case "classval":
-            case "func":
-            case "map":
-            case "set":
-            case "symbol":
-            case "regex":
-            case "promise":
-            case "bytes":
-            case "url":
-            case "searchParams":
-            case "stats":
-            case "spawnRes":
-            case "fileHandle":
-            case "child":
-            case "childStream":
-            case "generator":
-            case "fsWatcher":
-            case "sqliteDb":
-            case "sqliteStmt":
-            case "abortSignal":
-            case "abortController":
-            case "response":
-            case "headers":
-            case "requestInit":
-            case "request":
-            case "date":
-            case "rtcPeerConnection":
-            case "rtcDataChannel":
-              B.line(`store i1 true, ptr ${slot} ; ${arm.kind}: objects are truthy`);
-              break;
             case "bigint": {
-              // A bigint is a PRIMITIVE — `0n` is falsy — so this arm is
-              // ANSWERED here rather than refused: the value is readable,
-              // and the C lane reads it. The refusal it replaces was the
-              // honest half of the original defect (the C lane's open
-              // default guessed `true` where this one declined), and a
-              // refusal on one lane is what kept the corpus from covering
-              // the shape at all.
+              // A bigint is a PRIMITIVE -- `0n` is falsy -- so this arm is
+              // ANSWERED here rather than refused. It was listed just below as
+              // "deliberately still refused", and that judgement was right
+              // about the DANGER and wrong about the remedy: the value is
+              // readable, so refusing it left the C lane as the only lane the
+              // corpus could score against node, and the C lane's own open
+              // default was meanwhile answering `0n` TRUTHY. A refusal on one
+              // lane hid a wrong answer on the other.
               const p = this.unionPeek(v.name);
               const t = B.tmp();
               this.declare(`declare zeroext i1 @scr_big_truthy(ptr)`);
@@ -3625,8 +3593,29 @@ class LlEmitter {
               B.line(`store i1 ${t}, ptr ${slot}`);
               break;
             }
-            default:
+            default: {
+              // Every arm kind whose truthiness is the CONSTANT true — JS
+              // objects ([] and {} included), plus symbol. REF_TRUTHY_KINDS is
+              // the shared authority: the frontend folds `if (x)` on those
+              // kinds with it, and the C lane's per-union helper answers them
+              // `true` from its own CLOSED enumeration (UNION_ARM_JS_OBJECT_KINDS,
+              // this set plus the five crypto handles). Reading a set here
+              // instead of
+              // carrying a second hand-maintained list is what stops the two
+              // lanes drifting as handle kinds are added — this list had
+              // silently lost the whole net/http/h2/dgram/tls family, so a
+              // truthiness test on a `Socket | undefined` refused on LLVM
+              // while C answered it.
+              if (REF_TRUTHY_KINDS.has(arm.kind)) {
+                B.line(`store i1 true, ptr ${slot} ; ${arm.kind}: objects are truthy`);
+                break;
+              }
+              // Deliberately still refused: jsval (only the engine can
+              // answer) and dyn. Value-dependent, so a constant would be a
+              // silent wrong answer rather than a missing feature. bigint is
+              // NOT in this list any more -- it is answered above.
               throw new LlvmUnsupportedError(`truthy:union:${arm.kind}`);
+            }
           }
           B.br(join);
         });
