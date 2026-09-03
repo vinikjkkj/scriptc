@@ -26,6 +26,12 @@
  *   --crash-get-ulp      1 + 1ulp               → the smallest non-integer
  *   --crash-set-neg      write at -1            → the write arm
  *
+ * and the same set again through the INLINE accessors the emitter actually
+ * lowers `bytes[i]` to (--crash-inl-*), which must abort with byte-identical
+ * text because the inline arm declines and hands over rather than trapping
+ * on its own. -DSCR_NO_FASTARM compiles the inline arm out, and
+ * bytes.test.ts builds this file both ways and runs every mode on each.
+ *
  * SCR_FASTIDX=0 forces every access down the slow arm. bytes.test.ts runs
  * the whole file under both settings and requires identical output, which
  * is the differential the two arms have to survive.
@@ -161,6 +167,86 @@ static void test_index_window(void) {
   scr_bytes_release(w);
 
   scr_bytes_release(b);
+}
+
+/* scr_bytes_get_inl / scr_bytes_set_inl (scr_runtime.h) against the
+ * out-of-line functions they front. `bytes[i]` lowers to the inline pair at
+ * exactly one emitter site per operation, so if these two disagree with the
+ * functions on ANY input the compiled program is wrong and nothing else in
+ * this file would notice: every other case here calls the functions.
+ *
+ * The inline arm accepts a strict SUBSET -- u8 only, whole index, in bounds,
+ * value inside the int64 window -- and hands everything else to the call, so
+ * the differential has to cover both sides of every one of those edges. It
+ * compares BITS on the read side, because a u8 read can only answer a small
+ * integer but the harness must not be the reason a -0 or a NaN slips
+ * through, and it compares the STORED BYTE on the write side, because that
+ * is the only observable a store has.
+ *
+ * -DSCR_NO_FASTARM compiles the inline arm out, which makes this a tautology
+ * on that arm -- and that is the arm that proves the switch reaches both
+ * accessors and that the case count does not change with it. */
+static void check_bits(double got, double want, const char *what) {
+  uint64_t a, b;
+  memcpy(&a, &got, 8);
+  memcpy(&b, &want, 8);
+  check(a == b || (got != got && want != want), what);
+}
+
+static void test_inline_accessors(void) {
+  static const ScrBytesElem KINDS[] = {SCR_BYTES_U8,  SCR_BYTES_I8,  SCR_BYTES_U16,
+                                       SCR_BYTES_I16, SCR_BYTES_U32, SCR_BYTES_I32,
+                                       SCR_BYTES_F32, SCR_BYTES_F64};
+  /* Values that cross every edge of the store window and of ToUint32. */
+  static const double VALUES[] = {
+      0.0, -0.0, 1.0, -1.0, 127.0, 128.0, 255.0, 256.0, 255.7, -1.5, -255.0,
+      65535.0, 65536.0, 70000.0, 4294967295.0, 4294967296.0, 4294967297.0,
+      9007199254740993.0, -9007199254740993.0, 1e18, -1e18, 1e300, -1e300,
+      0.0 / 0.0, 1.0 / 0.0, -1.0 / 0.0, 0.5, -0.5, 1.0 / 3.0};
+  const unsigned nk = (unsigned)(sizeof KINDS / sizeof KINDS[0]);
+  const unsigned nv = (unsigned)(sizeof VALUES / sizeof VALUES[0]);
+
+  for (unsigned k = 0; k < nk; k++) {
+    /* Sixteen elements: the AES block state send_group actually walks. */
+    ScrBytes *a = scr_bytes_new(KINDS[k], 16);
+    ScrBytes *c = scr_bytes_new(KINDS[k], 16);
+    for (unsigned v = 0; v < nv; v++) {
+      for (double i = 0; i < 16; i++) {
+        double idx = i == 0 ? -0.0 : i; /* -0 is index 0 on both arms */
+        scr_bytes_set(a, idx, VALUES[v]);
+        scr_bytes_set_inl(c, idx, VALUES[v]);
+        check_bits(scr_bytes_get_inl(c, idx), scr_bytes_get(a, idx),
+                   "inline accessor agrees with the call");
+        check_bits(scr_bytes_get_inl(c, idx), scr_bytes_get(c, idx),
+                   "inline read agrees with the call on the inline's own store");
+      }
+    }
+    scr_bytes_release(a);
+    scr_bytes_release(c);
+  }
+
+  /* Indices that are integral but not int-shaped, and the far end of a
+   * buffer large enough that the 16-byte case is not the only one covered. */
+  ScrBytes *big = scr_bytes_new(SCR_BYTES_U8, 1048576);
+  for (unsigned q = 0; q < 1048576u; q += 65537u) scr_bytes_set_inl(big, (double)q, (double)(q & 255u));
+  for (unsigned q = 0; q < 1048576u; q += 65537u)
+    check_bits(scr_bytes_get_inl(big, (double)q), scr_bytes_get(big, (double)q),
+               "inline read agrees on a 2^20 buffer");
+  scr_bytes_set_inl(big, 1048575.0, 200);
+  check_f64(scr_bytes_get_inl(big, 1048575.0), 200, "inline write reaches index 2^20-1");
+  check_f64(scr_bytes_get_inl(big, 6.0 / 2.0), scr_bytes_get(big, 3.0),
+            "an index computed by division reads the same element");
+  check_f64(scr_bytes_get_inl(big, floor(4.9)), scr_bytes_get(big, 4.0),
+            "so does one that came out of floor()");
+  scr_bytes_release(big);
+
+  /* An ArrayBuffer payload must NOT take the inline arm -- its elem is not
+   * u8 -- so the fence in scr_bytes_get still owns that mistake. Nothing to
+   * call here without aborting; the kind loop above already proves every
+   * non-u8 kind falls through to the function. */
+  ScrBytes *empty = scr_bytes_new(SCR_BYTES_U8, 0);
+  check(scr_bytes_len(empty) == 0, "a zero-length buffer still has length 0");
+  scr_bytes_release(empty);
 }
 
 static void test_construction(void) {
@@ -509,6 +595,30 @@ int main(int argc, char **argv) {
       scr_bytes_get(b, nextafter(1.0, 2.0)); /* the smallest non-integer > 1 */
     } else if (strcmp(argv[1], "--crash-set-neg") == 0) {
       scr_bytes_set(b, -1, 9);
+    /* The same refusals reached through the INLINE accessors, which is how
+     * the compiled program reaches them: `bytes[i]` lowers to
+     * scr_bytes_get_inl / scr_bytes_set_inl. The inline arm declines and
+     * hands over, so the message must be byte-identical to the direct
+     * modes above -- a fast arm that trapped on its own would be a second
+     * copy of the text to keep in step. */
+    } else if (strcmp(argv[1], "--crash-inl-get-oob") == 0) {
+      scr_bytes_get_inl(b, 1);
+    } else if (strcmp(argv[1], "--crash-inl-get-frac") == 0) {
+      scr_bytes_get_inl(b, 0.5);
+    } else if (strcmp(argv[1], "--crash-inl-get-nan") == 0) {
+      scr_bytes_get_inl(b, 0.0 / 0.0);
+    } else if (strcmp(argv[1], "--crash-inl-get-neg") == 0) {
+      scr_bytes_get_inl(b, -1);
+    } else if (strcmp(argv[1], "--crash-inl-get-inf") == 0) {
+      scr_bytes_get_inl(b, 1.0 / 0.0);
+    } else if (strcmp(argv[1], "--crash-inl-get-2p53") == 0) {
+      scr_bytes_get_inl(b, 9007199254740992.0);
+    } else if (strcmp(argv[1], "--crash-inl-set-oob") == 0) {
+      scr_bytes_set_inl(b, 1, 7);
+    } else if (strcmp(argv[1], "--crash-inl-set-neg") == 0) {
+      scr_bytes_set_inl(b, -1, 9);
+    } else if (strcmp(argv[1], "--crash-inl-set-nan-idx") == 0) {
+      scr_bytes_set_inl(b, 0.0 / 0.0, 9);
     } else {
       fprintf(stderr, "unknown mode %s\n", argv[1]);
       return 2;
@@ -523,6 +633,7 @@ int main(int argc, char **argv) {
 
   test_construction();
   test_index_window();
+  test_inline_accessors();
   test_coercion_matrix();
   test_slice_set_copy();
   test_encodings();

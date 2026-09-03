@@ -2877,6 +2877,17 @@ double scr_math_max(double a, double b) {
   return a > b ? a : b;
 }
 
+/* Math.floor / Math.trunc / Math.ceil under the LIBCALL convention, for the
+ * LLVM lane, which cannot inline a diamond at an expression site. The C lane
+ * calls neither of these -- it emits scr_floor/scr_trunc/scr_ceil straight
+ * into the program TU, which is the whole point. The knob reader those three
+ * consult is header-local (scr_runtime.h), deliberately: an extern reader
+ * here would put a link edge onto this unit from scr_bytes.c and from every
+ * test binary that uses the inline element accessors. */
+double scr_math_floor(double x) { return scr_floor(x); }
+double scr_math_trunc(double x) { return scr_trunc(x); }
+double scr_math_ceil(double x) { return scr_ceil(x); }
+
 /* Math.round: ECMA half-toward-+Infinity. NOT C round() (half away from
  * zero: round(-1.5) is -2 where JS answers -1) and NOT floor(x + 0.5)
  * (the float ADD drifts at the epsilon boundary: 0.49999999999999994 +

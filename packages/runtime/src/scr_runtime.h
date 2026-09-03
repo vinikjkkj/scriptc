@@ -8,6 +8,7 @@
 #ifndef SCR_RUNTIME_H
 #define SCR_RUNTIME_H
 
+#include <math.h>    /* floor/trunc/ceil/copysign in the inline fast arms */
 #include <stdarg.h>  /* va_list in the emitter listener adapters */
 #include <stdbool.h>
 #include <stddef.h>
@@ -1277,6 +1278,122 @@ double scr_math_random(void);
 double scr_math_pow(double x, double y);
 /* Math.clz32 — leading zeros of ToUint32(x); 32 for zero. */
 double scr_math_clz32(double x);
+
+/* ── the integer-domain fast arms ───────────────────────────────────────
+ *
+ * Third and fourth instances of one idea: where a double is known to sit in
+ * a range an integer type covers exactly, the integer domain answers the
+ * same question without a library call. scr_array.c did it for an array
+ * index in 39b8bcd9 and scr_bytes.c for a typed-array index in 92a76290;
+ * below are Math.floor/trunc/ceil and the typed-array element accessors.
+ *
+ * WHAT IS SHARED IS THE WINDOW, NOT A KNOB, and that is a measurement and
+ * not a preference. The two landed arms sit inside out-of-line functions,
+ * where an env-var check is a byte load amortised over a whole call; these
+ * two are INLINED AT THE CALL SITE, where the same check is paid per
+ * operation and cannot be hoisted (the flag is a global, and the fall-back
+ * arm is a call that could in principle write it). Measured with an exact
+ * executed-instruction counter on the shipping toolchain, a runtime knob
+ * costs 4.6 of the 12.4 instructions a rounding call saves -- 37% of the
+ * change -- and 4.1 of the 20.1 an element read saves.
+ *
+ * Both arms are also EMITTER changes: the emitted C says scr_floor(x) where
+ * it used to say floor(x), and scr_bytes_get_inl where it said
+ * scr_bytes_get. So the two arms of an A/B were never going to be one
+ * binary whatever the runtime did, and the evidence for both is the
+ * instruction delta, measured, with an A/A control of exactly zero.
+ *
+ * -DSCR_NO_FASTARM restores the previous code for every arm below, and it
+ * is a better A/B than branch-against-main because the emitted program text
+ * is then IDENTICAL between the two builds: only this header differs.
+ * SCRIPTC_PROF_CFLAGS carries it, and it lands in the build-cache key like
+ * any other flag, so the two never share an entry.
+ *
+ * The int64 window. (int64_t)x is UNDEFINED outside it, which is the only
+ * reason these bounds are checked at all -- NaN and both infinities fail
+ * both comparisons and fall to the library call, which is what they need
+ * anyway. 2^63 is exactly representable, and -2^63 IS a valid int64.
+ * SCR_FAST_INT_MAX is the other window, 2^53, above which no double has a
+ * fractional part for an index check to reject. */
+#define SCR_FAST_I64_LO (-9223372036854775808.0)
+#define SCR_FAST_I64_HI (9223372036854775808.0)
+#define SCR_FAST_INT_MAX (9007199254740992.0)
+
+/* Math.floor / Math.trunc / Math.ceil.
+ *
+ * WHY THESE ARE NOT FREE TODAY. The shipping target is baseline x86-64 with
+ * no SSE4.1, so clang cannot lower any of the three to one `roundsd` and
+ * emits a call. On x86_64-windows-gnu that call does NOT reach ucrtbase's
+ * one-instruction implementation -- the binary's only math import is
+ * __setusermatherr, everything else is mingw-w64's own statically linked
+ * software routine. Measured on the shipping toolchain with an exact
+ * executed-instruction counter, on a faithful model of zapo's feMul carry
+ * chain (sixteen Math.floor(t/65536) in one straight line over sixteen live
+ * doubles -- src/crypto/math/fe.ts, the shape that puts `floor` at 4.3-5.7%
+ * of the send_group phase):
+ *
+ *   feMul carry chain   681 -> 483 executed instructions   -29.07%
+ *   feCarry loop        724 -> 528                         -27.07%
+ *
+ * That is 12.4 instructions per call, A/A control exactly 0.
+ *
+ * WHY THEY ARE ALL THREE DIFFERENT FUNCTIONS. floor, trunc and ceil differ
+ * on negatives and a fast path that is wrong on -0.5 is strictly worse than
+ * the call it replaces. For 0 < |x| < 2^63 the int64 cast truncates toward
+ * zero exactly, so trunc IS the cast, floor is the cast minus one when the
+ * cast overshot, and ceil is the cast plus one when it undershot.
+ *
+ * The -0 rule is the whole reason copysign is here. JS answers -0 for
+ * Math.trunc(-0.5), Math.ceil(-0.5), and all three of Math.floor(-0),
+ * Math.trunc(-0), Math.ceil(-0); the int64 cast answers +0 for every one of
+ * them. copysign(r, x) fixes exactly that and is a no-op everywhere else,
+ * because for all three operations a nonzero result always carries x's own
+ * sign -- floor(x) <= x < 0 and ceil(x) >= x > 0. It compiles to andpd/
+ * andpd/orpd, no call.
+ *
+ * Checked against the library functions on 44,100,904 doubles -- every
+ * named edge, 64 nextafter steps either side of each, a dense fractional
+ * sweep, and 20M random bit patterns -- comparing BITS, so a +0 answered
+ * where -0 was due is a failure. Zero mismatches, with a positive control
+ * proving the comparator sees a -0 error when one is there. */
+#ifdef SCR_NO_FASTARM
+static inline double scr_trunc(double x) { return trunc(x); }
+static inline double scr_floor(double x) { return floor(x); }
+static inline double scr_ceil(double x) { return ceil(x); }
+#else
+static inline double scr_trunc(double x) {
+  if (x >= SCR_FAST_I64_LO && x < SCR_FAST_I64_HI)
+    return copysign((double)(int64_t)x, x);
+  return trunc(x);
+}
+
+static inline double scr_floor(double x) {
+  if (x >= SCR_FAST_I64_LO && x < SCR_FAST_I64_HI) {
+    double r = (double)(int64_t)x;
+    if (r > x) r -= 1.0; /* the cast rounded toward zero, i.e. up, so back off */
+    return copysign(r, x);
+  }
+  return floor(x);
+}
+
+static inline double scr_ceil(double x) {
+  if (x >= SCR_FAST_I64_LO && x < SCR_FAST_I64_HI) {
+    double r = (double)(int64_t)x;
+    if (r < x) r += 1.0;
+    return copysign(r, x);
+  }
+  return ceil(x);
+}
+#endif
+
+/* The same three under the LIBCALL convention, for the LLVM lane, which
+ * cannot inline a diamond at an expression site and can only call. That is
+ * NOT a consolation prize: measured on the same chain, a call to a leaf
+ * holding the fast arm is 681 -> 536, -21.29%, because mingw's floor is a
+ * software routine and this one is not. */
+double scr_math_floor(double x);
+double scr_math_trunc(double x);
+double scr_math_ceil(double x);
 
 double scr_arr_get_f64(ScrArr *a, double i); /* trap OOB */
 bool scr_arr_get_bool(ScrArr *a, double i);  /* trap OOB */
@@ -7632,6 +7749,100 @@ void scr_dataview_set_big(ScrBytes *b, double byte_off, const ScrBigInt *value, 
  * toward zero, wrap mod 2^8/2^32), f32 by double→float rounding. */
 double scr_bytes_get(const ScrBytes *b, double i);
 void scr_bytes_set(ScrBytes *b, double i, double v);
+
+/* ── the inlinable element accessors ───────────────────────────────────
+ * `bytes[i]` lowers at exactly one emitter site per lane, and after
+ * 92a76290 took libm out of the index check the two out-of-line bodies are
+ * still 44 and 54 instructions where V8 inlines to a handful. On the real
+ * zapo messaging bench send_group performs 515,725,184 typed-array element
+ * accesses -- 97.5% of every one in the run -- and 93.8% of the reads are
+ * on a SIXTEEN-byte buffer: AES block state, walked a byte at a time from
+ * TypeScript. Every one of those is elem == SCR_BYTES_U8.
+ *
+ * Measured against the SHIPPING scr_bytes.c, compiled unmodified from this
+ * tree and linked into an exact executed-instruction counter, on a 16-byte
+ * u8 buffer walked a byte at a time with the indices read out of MEMORY so
+ * the compiler cannot fold the window check away -- which it does when the
+ * index is visibly a loop counter, and which the emitted program cannot
+ * count on:
+ *
+ *   read  16 elements   750 -> 428 executed instructions   -42.93%
+ *   write 16 elements   941 -> 513                         -45.48%
+ *
+ * That is 20.1 instructions off a read and 26.8 off a write, A/A control
+ * exactly 0, and -DSCR_NO_FASTARM reproduces 750 and 941 to the
+ * instruction.
+ *
+ * So the inline arm serves exactly that case and nothing else. It is a
+ * strict SUBSET of what the out-of-line function accepts: only U8, only a
+ * whole index inside the int-cast window, only in bounds -- and on that
+ * subset scr_bytes_get's own answer is `(double)b->data[idx]`, the same
+ * expression, and scr_bytes_set's is
+ * `b->data[idx] = (uint8_t)scr_bytes_to_u32(v)`, whose fast arm is already
+ * `(uint32_t)(int64_t)v` for any v an int64 holds, and the low byte of
+ * that IS (uint8_t)(int64_t)v for negatives too (-1 -> 255). Every other
+ * element kind, every bad index, NaN, both infinities and every value
+ * outside the int64 window fall through to the call, unchanged -- so no
+ * trap moves, no message changes, and the declining arm has done nothing
+ * observable by the time it hands over.
+ *
+ * Under SCR_ARRCEN_ON (tests/perf/arrcensus) -- and under SCR_NO_FASTARM,
+ * which is the A/B switch -- the inline arm is compiled OUT. The census
+ * counts CALLS, and an instrument that stopped seeing 97.5% of the
+ * accesses it exists to count would report a collapse and be believed. */
+#if defined(SCR_ARRCEN_ON) || defined(SCR_NO_FASTARM)
+static inline double scr_bytes_get_inl(const ScrBytes *b, double i) {
+  return scr_bytes_get(b, i);
+}
+static inline void scr_bytes_set_inl(ScrBytes *b, double i, double v) {
+  scr_bytes_set(b, i, v);
+}
+#else
+static inline double scr_bytes_get_inl(const ScrBytes *b, double i) {
+  if (b->elem == SCR_BYTES_U8 && i >= 0.0 && i < SCR_FAST_INT_MAX) {
+    int64_t n = (int64_t)i;
+    if ((double)n == i && (uint64_t)n < (uint64_t)b->len) return (double)b->data[n];
+  }
+  return scr_bytes_get(b, i);
+}
+
+static inline void scr_bytes_set_inl(ScrBytes *b, double i, double v) {
+  if (b->elem == SCR_BYTES_U8 && i >= 0.0 && i < SCR_FAST_INT_MAX &&
+      v >= SCR_FAST_I64_LO && v < SCR_FAST_I64_HI) {
+    int64_t n = (int64_t)i;
+    if ((double)n == i && (uint64_t)n < (uint64_t)b->len) {
+      b->data[n] = (uint8_t)(int64_t)v;
+      return;
+    }
+  }
+  scr_bytes_set(b, i, v);
+}
+#endif
+
+/* The same two arms under the LIBCALL convention, for the LLVM lane, which
+ * cannot inline a diamond at an expression site AND has no knowledge of
+ * this struct's field offsets -- putting them in the IR emitter would be a
+ * second, unchecked copy of the layout.
+ *
+ * A call is NOT much worse than the inline here, because most of what
+ * scr_bytes_get costs is the element switch and the double-domain bound
+ * rather than the call itself. Measured against the shipping function on
+ * the same sixteen-element u8 walk:
+ *
+ *                        inlined (C lane)   called (LLVM lane)
+ *   read  16 elements     750 -> 428         750 -> 459
+ *   write 16 elements     941 -> 513         941 -> 538
+ *
+ * -20.1 versus -18.2 instructions per read and -26.8 versus -25.2 per
+ * write. Both are one implementation: these two forward to the inlines
+ * above, exactly as scr_math_floor forwards to scr_floor.
+ *
+ * That the LLVM lane needs this at all is not a detail -- the real zapo
+ * messaging bench compiles on it. It emits messaging.bench.ll and no .c,
+ * so a C-lane-only element accessor would have reached none of the
+ * 515,725,184 accesses the change exists for. */
+double scr_bytes_get_fast(const ScrBytes *b, double i);
+void scr_bytes_set_fast(ScrBytes *b, double i, double v);
 
 /* TypedArray.prototype.slice(start, end): relative indices clamp like
  * string/array slice (ToIntegerOrInfinity, negatives from the end); the
