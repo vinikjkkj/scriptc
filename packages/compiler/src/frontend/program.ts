@@ -1643,8 +1643,17 @@ function resolveNpmImport7(
     if (resolved.workspaceDir === undefined) return null;
     registerWorkspacePackage(resolved.packageName, resolved.workspaceDir);
   }
+  // The package this IMPORT names, not the package the DECLARATIONS came
+  // from. They differ for exactly one shape -- a runtime package whose
+  // types live in the mangled @types twin (`pg` + `@types/pg`) -- and
+  // every consumer here (the island SC2013 attribution, the --npm-static
+  // opt-in and its `auto` detection, path-keyed package attribution) is
+  // asking about the thing Node LOADS. resolve.ts keeps packageName on
+  // packageId parity with 5.9.3 and reports the specifier's package
+  // separately; see BareResolution.importedPackageName for what naming
+  // the wrong one cost.
   return {
-    packageName: resolved.packageName,
+    packageName: resolved.importedPackageName ?? resolved.packageName,
     ...(resolved.version !== undefined ? { version: resolved.version } : {}),
     typesFile: resolved.typesFile,
   };

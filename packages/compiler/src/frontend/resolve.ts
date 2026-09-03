@@ -690,8 +690,32 @@ export interface BareResolution {
   typesFile: string;
   /** package.json "name" when present (5.9.3's packageId.name), else the
    * specifier's package prefix. For @types answers this is the @types
-   * package's own name ("@types/foo"). */
+   * package's own name ("@types/foo") -- packageId PARITY with 5.9.3 is
+   * what this field is for (packages/compiler/test/ts7/resolver-parity
+   * asserts it against ts5's own answer on every fixture), so it must NOT
+   * be corrected to the specifier's package. A consumer asking "which
+   * package does this IMPORT name?" wants importedPackageName below. */
   packageName: string;
+  /** The package the SPECIFIER names, set only when the answer came from
+   * the mangled @types twin and therefore disagrees with packageName.
+   *
+   * WHY IT EXISTS. `import pg from 'pg'` resolves its declarations out of
+   * `@types/pg`, so packageName is "@types/pg" -- and every consumer that
+   * asked "which package is this import?" was told about a package the
+   * program never mentions. Two measured consequences on zapo's
+   * store-postgres:
+   *   - `store-postgres/connection.ts:1` and `BasePgStore.ts:13` reported
+   *     `SC2013 importing '@types/pg'` and `values from the '@types/pg'
+   *     package` -- naming a TYPES-ONLY package as the thing that needs
+   *     the embedded engine, which it cannot be: it ships no code to run;
+   *   - `--npm-static auto` acted on the same wrong name and answered
+   *     `@types/pg island fallback (auto: no runtime JS entry resolves)`.
+   *     That is true of every types-only package, and it closed the route:
+   *     `pg` -- which does have a JS entry, and which compiles when named
+   *     explicitly -- was never tried.
+   * Node loads `pg`; `@types/pg` is where the declarations were found.
+   * Two facts, two fields. */
+  importedPackageName?: string;
   /** package.json "version" (packageId is only formed when it exists). */
   version?: string;
   /** Set when the node_modules package directory is a SYMLINK whose real
@@ -827,7 +851,11 @@ export function resolveBareModule(
         if (pass === "types" && !npmStatic) {
           const typesPkgName = `@types/${mangleScopedName(pkgName)}`;
           const viaTypes = inPackage(join(nm, typesPkgName), typesPkgName, pass);
-          if (viaTypes) return viaTypes;
+          // The FILE is the @types twin's and packageName stays its name
+          // (packageId parity); the IMPORT still names the runtime package,
+          // which is what the island attribution and the --npm-static
+          // opt-in act on. See importedPackageName.
+          if (viaTypes) return { ...viaTypes, importedPackageName: pkgName };
         }
       }
       const parent = dirname(dir);

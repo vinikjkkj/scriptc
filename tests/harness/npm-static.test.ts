@@ -300,6 +300,43 @@ describe(`npm-static pilots${sanitize ? " (sanitized)" : ""}`, () => {
   // Auto refuses ms: it ships no own .d.ts (the declared-claim criterion),
   // so the import keeps today's story — and the explicit opt-in below is
   // the user's override.
+  // WHICH PACKAGE DOES A DIAGNOSTIC NAME when the declarations come from a
+  // DefinitelyTyped twin. `dtwin` ships the JS and no .d.ts; `@types/dtwin`
+  // ships the declarations and no code at all.
+  //
+  // Every answer here used to be "@types/dtwin" -- the package the SYMBOL
+  // was declared in -- which is wrong three ways: the program never imports
+  // it, it ships nothing that could run in the embedded engine, and `auto`
+  // acted on that name and reported "no runtime JS entry resolves", which is
+  // true of every declarations-only package and closed the only route that
+  // could have worked (`dtwin` itself was never tried). Measured on zapo
+  // store-postgres: `import pg from 'pg'` with @types/pg installed reported
+  // `SC2013 importing '@types/pg'` at connection.ts:1 and `values from the
+  // '@types/pg' package` at BasePgStore.ts:13.
+  //
+  // Both halves are asserted, and the negative half by SUBSTRING over every
+  // message rather than by a count -- a rule that only checks for "dtwin"
+  // still passes on "@types/dtwin".
+  test("a package typed by its @types twin is named by its OWN name, not the twin's", () => {
+    const entry = join(pilotRoot, "dtwin-attribution.ts");
+    const { coverage } = analyze(entry);
+    expect(coverage.preflightFailed).toBe(false);
+    const messages = coverage.diagnostics.map((d) => d.message);
+    expect(messages.length).toBeGreaterThan(0); // a zero here would pass vacuously
+    expect(messages.some((m) => /importing 'dtwin' requires the embedded dynamic engine/.test(m))).toBe(true);
+    expect(messages.some((m) => /values from the 'dtwin' package/.test(m))).toBe(true);
+    for (const m of messages) expect(m).not.toContain("@types/");
+    // ...and `auto` acts on the same name, so its verdict is about the
+    // package that actually ships code.
+    const auto = analyze(entry, { npmStatic: "auto" });
+    expect(auto.coverage.npmStatic).toEqual([
+      {
+        package: "dtwin",
+        status: "fallback",
+        detail: "auto: its declared types come from a third-party @types package, not the package itself",
+      },
+    ]);
+  }, 120_000);
   test("--npm-static=auto refuses a package with no own .d.ts", () => {
     const { coverage } = analyze(join(pilotRoot, "ms-cli.ts"), { npmStatic: "auto" });
     expect(coverage.npmStatic).toEqual([

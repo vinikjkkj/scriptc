@@ -10062,6 +10062,18 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/7394-typeof-a-timer-handle-is-an-object.ts": {
+   "order": [
+    "<repo>/tests/corpus/7394-typeof-a-timer-handle-is-an-object.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/7395-a-base-signature-intersected-with-a-narrower-one.ts": {
+   "order": [
+    "<repo>/tests/corpus/7395-a-base-signature-intersected-with-a-narrower-one.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/750-cycle-closure-box.ts": {
    "order": [
     "<repo>/tests/corpus/750-cycle-closure-box.ts"
@@ -11019,6 +11031,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/diagnostics/function-intersection-unrelated-returns.ts": {
+   "order": [
+    "<repo>/tests/diagnostics/function-intersection-unrelated-returns.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/diagnostics/function-limits.ts": {
    "order": [
     "<repo>/tests/diagnostics/function-limits.ts"
@@ -11766,6 +11784,12 @@
   "<repo>/tests/diagnostics/stdlib.ts": {
    "order": [
     "<repo>/tests/diagnostics/stdlib.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/timer-handle-unmodelled-key.ts": {
+   "order": [
+    "<repo>/tests/diagnostics/timer-handle-unmodelled-key.ts"
    ],
    "diags": []
   },
