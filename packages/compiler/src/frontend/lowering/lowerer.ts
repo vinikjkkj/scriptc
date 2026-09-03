@@ -7415,11 +7415,22 @@ export class Lowerer {
             // boundary where the validated extraction is already the
             // conversion this compiler uses (`as T` on a dyn, dynCheck in
             // coerceToExpected, coercibleValue's dyn answer). A
-            // `Record<string, string>` source still declines: its read
-            // type is `string | undefined`, which dynOutPlan refuses.
+            // `Record<string, string>` source is the SAME position one
+            // type-world over: its read type is `string | undefined`, a
+            // UNION whose checked extraction is `narrow` — narrowedArmHelper,
+            // exactly `x!` — so narrowOutPlan offers it here on dynOutPlan's
+            // own terms. Both are checked, both throw only where the key is
+            // genuinely absent, and both beat strandedCoercionTrap's
+            // unconditional throw at the same flow. Nothing ELSE widthLiftPlan
+            // would answer is offered to a required field: narrowOutPlan
+            // returns null for every lift but `narrow`, so an unchecked copy
+            // can never reach a slot that has no undefined arm to hold a key
+            // the map does not have. (zapo's bench store factory is the site —
+            // `const out: Record<string, B> = {}` filled by loop and returned
+            // `as` an eleven-field REQUIRED providers record.)
             const lift = optionalFlavored
               ? (this.widthLiftPlan(readT, tf.type) ?? this.dynOutPlan(readT, tf.type))
-              : this.dynOutPlan(readT, tf.type);
+              : (this.dynOutPlan(readT, tf.type) ?? this.narrowOutPlan(readT, tf.type));
             if (process.env.SCRIPTC_KEYREAD_WHY) {
               console.error(
                 `KEYREAD plan ${fromId}->${toId} field=${tf.name} read=${this.fmt(readT)} want=${this.fmt(tf.type)} opt=${optionalFlavored} lift=${lift?.how ?? "NONE"}`,
@@ -7476,6 +7487,22 @@ export class Lowerer {
   dynOutPlan(src: IrType, dst: IrType): WidthLift | null {
     if (src.kind !== "dyn" || dst.kind === "dyn") return null;
     return canDynCheckTo(dst, (id) => this.shapes.get(id), (id) => this.unions.get(id)) ? { how: "dynOut" } : null;
+  }
+
+  /** The CHECKED ARM extraction as a width-plan step, dynOutPlan's twin one
+   * type-world over: a UNION source into a slot that is one of its arms.
+   * Same machinery as `x!` (narrowedArmHelper), same stance — the proven
+   * arm's payload comes out and any other arm throws the catchable
+   * TypeError. widthLiftPlan already answers this pair for every OTHER
+   * position; this wrapper exists so the keyed-read arm can offer it to a
+   * REQUIRED target field WITHOUT offering the rest of widthLiftPlan there
+   * — a required field takes a checked extraction and nothing else, and
+   * `V | undefined` (the keyed read's own type, exactly what indexReadType
+   * builds) into `V` is that extraction spelled for a union instead of a
+   * dyn. Null for anything widthLiftPlan answers some other way. */
+  narrowOutPlan(src: IrType, dst: IrType): WidthLift | null {
+    const lift = this.widthLiftPlan(src, dst);
+    return lift !== null && lift.how === "narrow" ? lift : null;
   }
 
   /** The type a KEYED read of an index-signature shape has, for a key that
@@ -7572,6 +7599,12 @@ export class Lowerer {
           const optionalFlavored =
             tf.type.kind === "dyn" ||
             (tf.type.kind === "union" && this.armTag(tf.type.unionId, UNDEFINED_T) >= 0);
+          if (
+            !optionalFlavored &&
+            (this.dynOutPlan(readT, tf.type) !== null || this.narrowOutPlan(readT, tf.type) !== null)
+          ) {
+            continue;
+          }
           return optionalFlavored
             ? `the expected field '${tf.name}' is not a declared field of the source, and a keyed read of its '[key: string]: ${this.fmt(from.indexValue)}' signature ('${this.fmt(readT)}' — the key may be absent) does not lift into '${this.fmt(tf.type)}'`
             : `the expected field '${tf.name}' ('${this.fmt(tf.type)}') is required, and a keyed read of the source's '[key: string]: ${this.fmt(from.indexValue)}' signature ('${this.fmt(readT)}') is not a value the checked extraction can turn into it`;
