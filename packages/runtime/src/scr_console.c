@@ -166,6 +166,17 @@ static void scr_console_write(FILE *out, size_t n, const ScrLogArg *args) {
 }
 
 void scr_console_log(size_t n, const ScrLogArg *args) {
+#ifdef SCR_ARRCEN_ON
+  /* tests/perf/arrcensus/scr_arr_census.h. Inert -- the switch is
+   * undefined -- unless that header is -include'd. The bench prints
+   * `[phase-begin] <label>` / `[phase-end] <label>` here, and
+   * cpuphase.exe and tests/perf/sampler bracket the phase on those
+   * same two lines from outside the process; reading them here scopes
+   * the census to the identical interval by construction rather than
+   * by agreement. */
+  if (n > 0 && args[0].tag == SCR_ARG_STR)
+    scr_arrcen_phase_line(args[0].v.s->data, (unsigned long long)args[0].v.s->len);
+#endif
   scr_console_write(stdout, n, args);
 }
 
