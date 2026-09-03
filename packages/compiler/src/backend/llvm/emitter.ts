@@ -74,7 +74,7 @@ import type {
   IrUnionDef,
   SrcLoc,
 } from "../../ir/nodes.js";
-import { irFunctionJsName, settleOrValuePromiseTag, canBoxClassIntoDyn, CLASS_PROPS_FIELD, canMarshalFuncIntoIsland, CAUGHT, DYN, dynCopyIsObservable, F64, islandCallbackRet, islandPromisePayloadTag, isRefCounted, nullProtoRule, OWNMASK_SRC_NULL_PROTO, ownMaskKeyBit, isUnitType, MAY_THROW_LIB_FNS, moduleEmbedsBuiltin, moduleEmbedsNetIsland, moduleUsesAbortSignal, moduleUsesChildStream, moduleUsesDgram, moduleUsesFetch, moduleUsesFetchStatic, moduleUsesFetchDispatch, moduleUsesFsWatch, moduleUsesHttp2, moduleUsesHttpServer, moduleUsesNet, moduleUsesProcessEvents, moduleUsesRegex, moduleUsesStream, moduleUsesWsGlobal, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, STRING, typeEquals, typeKey, VOID } from "../../ir/nodes.js";
+import { UNION_ARM_JS_OBJECT_KINDS, irFunctionJsName, settleOrValuePromiseTag, canBoxClassIntoDyn, CLASS_PROPS_FIELD, canMarshalFuncIntoIsland, CAUGHT, DYN, dynCopyIsObservable, F64, islandCallbackRet, islandPromisePayloadTag, isRefCounted, nullProtoRule, OWNMASK_SRC_NULL_PROTO, ownMaskKeyBit, isUnitType, MAY_THROW_LIB_FNS, moduleEmbedsBuiltin, moduleEmbedsNetIsland, moduleUsesAbortSignal, moduleUsesChildStream, moduleUsesDgram, moduleUsesFetch, moduleUsesFetchStatic, moduleUsesFetchDispatch, moduleUsesFsWatch, moduleUsesHttp2, moduleUsesHttpServer, moduleUsesNet, moduleUsesProcessEvents, moduleUsesRegex, moduleUsesStream, moduleUsesWsGlobal, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, STRING, typeEquals, typeKey, VOID } from "../../ir/nodes.js";
 import { dynClassDisplayName } from "../dyn-members.js";
 import { computeMayThrow } from "../emission/may-throw.js";
 import { seqScopedLocals } from "../emission/emit-stmts.js";
@@ -3610,6 +3610,21 @@ class LlEmitter {
             case "rtcDataChannel":
               B.line(`store i1 true, ptr ${slot} ; ${arm.kind}: objects are truthy`);
               break;
+            case "bigint": {
+              // A bigint is a PRIMITIVE — `0n` is falsy — so this arm is
+              // ANSWERED here rather than refused: the value is readable,
+              // and the C lane reads it. The refusal it replaces was the
+              // honest half of the original defect (the C lane's open
+              // default guessed `true` where this one declined), and a
+              // refusal on one lane is what kept the corpus from covering
+              // the shape at all.
+              const p = this.unionPeek(v.name);
+              const t = B.tmp();
+              this.declare(`declare zeroext i1 @scr_big_truthy(ptr)`);
+              B.line(`${t} = call zeroext i1 @scr_big_truthy(ptr ${p})`);
+              B.line(`store i1 ${t}, ptr ${slot}`);
+              break;
+            }
             default:
               throw new LlvmUnsupportedError(`truthy:union:${arm.kind}`);
           }
@@ -5941,8 +5956,32 @@ class LlEmitter {
               B.line(`store i1 ${t}, ptr ${slot}`);
               break;
             }
+            case "bigint": {
+              // A bigint is a PRIMITIVE: compare the VALUE. The object
+              // default below compared two heap ScrBigInts by address and
+              // answered `5n === 5n` false — the same silent wrong answer
+              // the C lane carried, and the one defect of this pair that
+              // was live on BOTH backends. SameValue needs no separate
+              // arm: a bigint has no NaN and no signed zero.
+              const a = this.unionPeek(l.name);
+              const b = this.unionPeek(r.name);
+              const t = B.tmp();
+              this.declare(`declare zeroext i1 @scr_big_eq(ptr, ptr)`);
+              B.line(`${t} = call zeroext i1 @scr_big_eq(ptr ${a}, ptr ${b})`);
+              B.line(`store i1 ${t}, ptr ${slot}`);
+              break;
+            }
             default: {
               // Ref arms: pointer identity, exactly JS object equality.
+              // CLOSED: identity is right only for values that ARE JS
+              // objects. A primitive arm compared by address is a wrong
+              // answer, so anything outside the shared object set refuses
+              // here instead of inheriting the compare. The frontend's
+              // eqComparableUnion already fences dyn, caught and jsval, so
+              // bigint above was the only arm this default ever got wrong.
+              if (!UNION_ARM_JS_OBJECT_KINDS.has(arm.kind)) {
+                throw new LlvmUnsupportedError(`unionEq:${arm.kind}`);
+              }
               const a = this.unionPeek(l.name);
               const b = this.unionPeek(r.name);
               const t = B.tmp();

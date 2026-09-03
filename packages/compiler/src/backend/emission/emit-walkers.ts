@@ -8,7 +8,7 @@
 import type { CEmitter } from "./emitter.js";
 import { rcSitesRequested } from "./emitter.js";
 import { bytesAliasOnExtract } from "../../ir/nodes.js";
-import { CLASS_PROPS_FIELD, armDiscrimLits, canAdaptDynFuncTo, canBoxClassIntoDyn, canBoxFuncIntoDyn, dynCheckArmOrder, internalSlotFields, isUndefinedArmedUnion, nullProtoRule, OWNMASK_SRC_NULL_PROTO, OWNMASK_VALID, ownMaskKeyBit, slotStorageKey, unionHasDiscrim, DYN_BYTES_KINDS, DYN_HANDLE_KINDS, IrType, isRefCounted, strandedFuncReason, typeEquals, typeKey } from "../../ir/nodes.js";
+import { CLASS_PROPS_FIELD, armDiscrimLits, canAdaptDynFuncTo, canBoxClassIntoDyn, canBoxFuncIntoDyn, dynCheckArmOrder, internalSlotFields, isUndefinedArmedUnion, nullProtoRule, OWNMASK_SRC_NULL_PROTO, OWNMASK_VALID, ownMaskKeyBit, slotStorageKey, unionHasDiscrim, DYN_BYTES_KINDS, DYN_HANDLE_KINDS, IrType, UNION_ARM_JS_OBJECT_KINDS, isRefCounted, strandedFuncReason, typeEquals, typeKey } from "../../ir/nodes.js";
 import { cDecl, cStringLiteral, cType, elemAccess, releaseCallC, retainCallC, vAdapters } from "./emit-types.js";
 import { mangleClassStruct, mangleField, mangleFunction, mangleRecordNew, mangleRecordStruct } from "../mangle.js";
 import type { ClassMeta } from "./emit-shapes.js";
@@ -315,8 +315,16 @@ function typeMayHoldFunc(E: CEmitter, t: IrType): boolean {
 
 /** The per-union ToBoolean helper (interned per unionId): switch on the
    * runtime tag — unit arms false, f64 arms 0/NaN-falsy, string arms
-   * empty-falsy, bool arms by payload, ref arms always true (JS objects),
-   * jsval arms answered by the engine. Borrows the operand. */
+   * empty-falsy, bool arms by payload, BIGINT arms 0n-falsy, ref arms always
+   * true (JS objects), jsval arms answered by the engine. Borrows the
+   * operand.
+   *
+   * The ref answer is a CLOSED enumeration (UNION_ARM_JS_OBJECT_KINDS), not
+   * an open default. It used to be `default: return true`, and that is what
+   * made `0n` in a `bigint | undefined` union report TRUTHY on the C lane
+   * while the LLVM lane refused the same shape. Constant-true is Node's
+   * answer for a value that IS a JS object, and for nothing else — a
+   * primitive arm has to be read. */
   export function unionTruthyHelper(E: CEmitter, unionId: string): string {
     const existing = E.unionTruthyFns.get(unionId);
     if (existing) return existing;
@@ -345,10 +353,38 @@ function typeMayHoldFunc(E: CEmitter, t: IrType): boolean {
         case "jsval":
           d.push(`  case ${i}: return scr_jsval_truthy((ScrJsval *)scr_union_peek(v)) != 0;`);
           break;
+        case "bigint":
+          // A bigint is a PRIMITIVE, not an object: `0n` is FALSY and every
+          // other value truthy, exactly as the scalar path answers it
+          // (emitter.ts's truthyC). This arm used to fall into the object
+          // default below and report `0n` truthy — a silent wrong answer on
+          // the shipping lane, and the reason that default is now closed.
+          d.push(`  case ${i}: return scr_big_truthy((ScrBigInt *)scr_union_peek(v));`);
+          break;
         default:
           // Arrays, maps, sets, records, objects, functions, promises,
           // regexes, ...: JS objects are always truthy — [] and {} included.
-          d.push(`  case ${i}: return true; /* ${arm.kind} */`);
+          // CLOSED: an arm kind with no JS-object guarantee has to be
+          // answered above, because a constant here is a wrong answer and
+          // not a missing feature. The frontend's checkTruthyUnion fences
+          // the kinds that reach a program (dyn/caught/void); this is the
+          // backstop that keeps a NEW arm kind from inheriting `true`.
+          //
+          // The audit that closed it: of the 59 IrType kinds, 4 are not arm
+          // kinds at all (void, union, dyn, caught — the last two fenced by
+          // checkTruthyUnion), 7 are answered above, and the remaining 48
+          // are JS objects (or symbol), for which constant-true IS Node's
+          // answer — `[]`, `{}`, `new Date(0)` and a zero-length Buffer all
+          // included. bigint was the ONE kind in neither column, and it sat
+          // in this default reporting `0n` truthy.
+          if (!UNION_ARM_JS_OBJECT_KINDS.has(arm.kind)) {
+            throw new Error(
+              `emitter bug: ToBoolean of union with a ${arm.kind} arm — ` +
+                `not a JS object, so constant-true would be a wrong answer; ` +
+                `give the kind its own case or fence it in the frontend`,
+            );
+          }
+          d.push(`  case ${i}: return true; /* ${arm.kind}: a JS object is always truthy */`);
       }
     });
     d.push(
@@ -366,8 +402,15 @@ function typeMayHoldFunc(E: CEmitter, t: IrType): boolean {
    * different tags are never equal; equal tags compare the arm values —
    * unit arms equal, f64 with C == (NaN !== NaN, +0 === -0) or SameValue
    * (NaN equals NaN, +0 differs from -0) under the sameValue flag,
-   * strings by bytes, bools by value, ref arms by POINTER identity (JS
-   * object equality). Borrows both operands. */
+   * strings by bytes, bools by value, BIGINT arms by magnitude and sign, ref
+   * arms by POINTER identity (JS object equality). Borrows both operands.
+   *
+   * The ref answer is a CLOSED enumeration (UNION_ARM_JS_OBJECT_KINDS) for
+   * the reason unionTruthyHelper's is: identity is Node's `===` only for
+   * values that ARE objects. As an open default it swallowed the bigint arm
+   * and answered `5n === 5n` FALSE — two heap ScrBigInts at two addresses.
+   * That one was live on BOTH backends; the LLVM lane carries the same
+   * fix. */
   export function unionEqHelper(E: CEmitter, unionId: string, sameValue: boolean): string {
     const key = sameValue ? `sv:${unionId}` : unionId;
     const existing = E.unionEqFns.get(key);
@@ -405,8 +448,39 @@ function typeMayHoldFunc(E: CEmitter, t: IrType): boolean {
             `  case ${i}: return scr_str_eq((ScrStr *)scr_union_peek(a), (ScrStr *)scr_union_peek(b));`,
           );
           break;
+        case "bigint":
+          // A bigint is a PRIMITIVE: `5n === 5n` is true however the two
+          // values were built, and SameValue agrees with strict equality
+          // here (a bigint has no NaN and no signed zero). Pointer identity
+          // — what the object default below answers — compared two distinct
+          // heap ScrBigInts by ADDRESS and said false. Silent wrong answer,
+          // on BOTH backends; the LLVM lane carries the same fix.
+          d.push(
+            `  case ${i}: return scr_big_eq((ScrBigInt *)scr_union_peek(a), (ScrBigInt *)scr_union_peek(b));`,
+          );
+          break;
         default:
           // Ref arms: pointer identity, exactly JS object equality.
+          // CLOSED, for the reason unionTruthyHelper's default is: identity
+          // is the right answer only for values that ARE JS objects. A
+          // primitive arm compared by address is a wrong answer, so a kind
+          // outside the object set must be answered above or refused here.
+          //
+          // The audit that closed this default: the frontend's
+          // `eqComparableUnion` already refuses dyn, caught and jsval arms,
+          // and `void`/`union` are not arm kinds — so the ONLY thing that
+          // ever reached the ref default besides a real JS object was
+          // bigint, which is why the fix above is one case and not a
+          // family. jsval in particular stays a frontend refusal rather
+          // than gaining an arm here: the engine's strict equality is a
+          // FALLIBLE call (scr_jsval_cmp) and this helper is a leaf bool.
+          if (!UNION_ARM_JS_OBJECT_KINDS.has(arm.kind)) {
+            throw new Error(
+              `emitter bug: ${what} of union with a ${arm.kind} arm — ` +
+                `not a JS object, so pointer identity would be a wrong answer; ` +
+                `give the kind its own case or fence it in the frontend`,
+            );
+          }
           d.push(`  case ${i}: return scr_union_peek(a) == scr_union_peek(b); /* ${arm.kind} */`);
       }
     });
