@@ -10086,6 +10086,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/7400-a-keyed-accumulator-reshapes-into-required-fields.ts": {
+   "order": [
+    "<repo>/tests/corpus/7400-a-keyed-accumulator-reshapes-into-required-fields.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/750-cycle-closure-box.ts": {
    "order": [
     "<repo>/tests/corpus/750-cycle-closure-box.ts"
