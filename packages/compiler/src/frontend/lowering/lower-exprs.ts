@@ -18,7 +18,7 @@ import { requireFnValueOf, requireMemberFence } from "./lower-builtins.js";
 import { funcObjectPropOf } from "./lower-fnprops.js";
 import { recordKeyReadRow, recordNarrowBridgeRow } from "./keyread-census.js";
 import { cjsClassExprWholeExportOf, cjsExportAssignmentOf, cjsExportDiscardReason, isCjsExportTableLiteral, isCjsJsFile, isJsSourceFile, isModuleExportsAccess, isNodeEsmFile, locOf } from "../program.js";
-import { absentGlobalMemberValue, absentProcessMemberValue, ARRAY_METHODS, builtinConstLit, builtinFenceHintOf, objectStaticFnValueOf, stdlibExistenceTestOf, stringMethodFnValueOf, builtinModuleConstOf, builtinModulesArrayLit, builtinModuleFnOf, COMPOUND_ASSIGN_OPS, CompoundOp, ISLAND_SURFACE, isChildSurfaceMember, MAP_METHODS, NARROW_FIRST, SET_METHODS, STR_METHODS, UNSUPPORTED_EXPR, sideEffectFreeOptionValue, stdlibGlobalNameOf } from "./surfaces.js";
+import { absentGlobalMemberValue, absentProcessMemberValue, ARRAY_METHODS, builtinConstLit, builtinFenceHintOf, objectStaticFnValueOf, stdlibExistenceTestOf, stringMethodFnValueOf, builtinModuleConstOf, builtinModulesArrayLit, builtinModuleFnOf, COMPOUND_ASSIGN_OPS, CompoundOp, ISLAND_SURFACE, isChildSurfaceMember, MAP_METHODS, NARROW_FIRST, SET_METHODS, STR_METHODS, UNSUPPORTED_EXPR, sideEffectFreeOptionValue, stdlibGlobalNameOf, stdlibHandleObjectTypeOf, stdlibHandleTypeOfAnswersObject, stdlibHandleDeclaresMember } from "./surfaces.js";
 import { UNSUPPORTED, assertionDropsMembersDiag, assertionOverflowsMembersDiag, blockedBindingUseDiag, recordShapeMismatchDiag, requiresDynamicPackageDiag, unsupportedDiag } from "../../diagnostics/diagnostic.js";
 import { PoisonError, dynUndefinedExpr, jsFuncValueNameOf, jsFuncValueSourceOf, neverTaintedJsType, nodeThrowExpr, own } from "./lowerer.js";
 import { protoThisType } from "./proto-class-consume.js";
@@ -1097,6 +1097,30 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
         const armedT = L.withUndefinedArmOf(operand.type);
         const armed = armedT ? L.recordKeyReadAtUndefinedArm(operand, armedT) : null;
         if (armed) operand = armed;
+      }
+      // A stdlib OPAQUE HANDLE (`NodeJS.Timeout`, `NodeJS.Immediate`) is a
+      // NUMBER here and an OBJECT in Node, so the FOLD table below — which
+      // keys on the IR type — answered "number". That was a silent wrong
+      // answer at exit 0 on both backends with zero diagnostics; see
+      // stdlibHandleObjectTypeOf for the measurement and the two zapo sites
+      // that ride on it. The declared type is the fact `typeof` needs.
+      // Both IR shapes reach here: the bare handle (f64) and the
+      // `Timeout | null` slot a `let` keeps (a union of f64 and null),
+      // whose per-arm chain further down would otherwise answer "number"
+      // for the handle arm. The predicate has already proved EVERY checker
+      // arm answers "object", so the answer is one constant either way.
+      if ((operand.type.kind === "f64" || operand.type.kind === "union") && stdlibHandleTypeOfAnswersObject(L, expr.expression)) {
+        const answer: IrExpr = { kind: "strLit", value: "object", type: STRING, loc };
+        if (droppableStatic(operand)) return answer;
+        // Not droppable: keep the evaluation, exactly as the effectful FOLD
+        // arm below does (JS evaluates a typeof operand like any other).
+        return {
+          kind: "seqExpr",
+          stmts: [{ kind: "exprStmt", expr: operand, loc }],
+          result: answer,
+          type: STRING,
+          loc,
+        };
       }
       const FOLD: Partial<Record<string, string>> = {
         f64: "number", string: "string", bool: "boolean", func: "function",
@@ -18282,6 +18306,28 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
           return out;
         }
       }
+    }
+    // `'unref' in t` on a stdlib OPAQUE HANDLE (`NodeJS.Timeout`,
+    // `NodeJS.Immediate`): the representation is a number, so the record
+    // path below has nothing to walk and the fence read "'in' on 'number'
+    // receivers" -- on the standard way of asking whether a timer is
+    // Node's or a browser's. Node's value is an object carrying the
+    // interface's members, so the members it DECLARES answer true and every
+    // other key keeps the fence (stdlibHandleDeclaresMember says why).
+    // Same purity discipline as the declared-field fold further down: the
+    // answer is constant, so only a receiver read with nothing to preserve
+    // may drop the evaluation.
+    if (recv.type.kind === "f64" && stdlibHandleDeclaresMember(key) && stdlibHandleObjectTypeOf(L, expr.right) !== null) {
+      if (recv.kind === "varRef" || recv.kind === "recordGet" || recv.kind === "fieldGet" || pureRecvNode) {
+        return { kind: "boolLit", value: true, type: BOOL, loc };
+      }
+      return {
+        kind: "seqExpr",
+        stmts: [{ kind: "exprStmt", expr: recv, loc }],
+        result: { kind: "boolLit", value: true, type: BOOL, loc },
+        type: BOOL,
+        loc,
+      };
     }
     if (recv.type.kind !== "record") {
       L.unsupported(

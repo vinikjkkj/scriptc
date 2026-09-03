@@ -10062,6 +10062,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/7394-typeof-a-timer-handle-is-an-object.ts": {
+   "order": [
+    "<repo>/tests/corpus/7394-typeof-a-timer-handle-is-an-object.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/750-cycle-closure-box.ts": {
    "order": [
     "<repo>/tests/corpus/750-cycle-closure-box.ts"
@@ -11766,6 +11772,12 @@
   "<repo>/tests/diagnostics/stdlib.ts": {
    "order": [
     "<repo>/tests/diagnostics/stdlib.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/timer-handle-unmodelled-key.ts": {
+   "order": [
+    "<repo>/tests/diagnostics/timer-handle-unmodelled-key.ts"
    ],
    "diags": []
   },
