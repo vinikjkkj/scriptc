@@ -10092,6 +10092,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/7420-promise-resolve-null-placeholder-field.ts": {
+   "order": [
+    "<repo>/tests/corpus/7420-promise-resolve-null-placeholder-field.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/750-cycle-closure-box.ts": {
    "order": [
     "<repo>/tests/corpus/750-cycle-closure-box.ts"
@@ -11730,6 +11736,12 @@
   "<repo>/tests/diagnostics/promise-never-executor.ts": {
    "order": [
     "<repo>/tests/diagnostics/promise-never-executor.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/promise-resolve-null-placeholder-fences.ts": {
+   "order": [
+    "<repo>/tests/diagnostics/promise-resolve-null-placeholder-fences.ts"
    ],
    "diags": []
   },
