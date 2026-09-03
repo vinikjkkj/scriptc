@@ -80,6 +80,12 @@ const TIER_FLOOR = [
 /** Fixed backend gaps whose corpus programs must remain in the LLVM tier. */
 const TIER_REGRESSIONS = [
   "2672-http-request-response-callback.ts",
+  // The union-truthiness handle arms (truthy:union:netSocket and its
+  // net/http/h2/dgram siblings). PINNED because a refusal is scored as a
+  // SKIP here: without this line a revert of the emitter fix would make
+  // 7391 quietly stop running instead of failing, and the lane would go
+  // green on the regression it exists to catch.
+  "7391-truthy-union-handle-arms.ts",
 ];
 
 interface RunResult {
