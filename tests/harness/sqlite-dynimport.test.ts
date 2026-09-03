@@ -46,20 +46,23 @@
  *
  * ── and the boundary that must survive ────────────────────────────────
  *
- * A dynamic import whose specifier is not a string literal must still
- * refuse, loudly and by name. Two shapes, two different refusals, both
- * asserted below: a genuinely computed specifier is a BUILD error
- * (SC2012), and the named-constant idiom — which the compiler's own
- * dynamicImportSpecOf folds but TypeScript does NOT type — compiles to a
- * rejected promise whose message names the spelling that works. The
- * second is the subtle one: under a folded constant the awaited value is
- * `any`, so none of the type-directed machinery above fires and the
- * construction the message names is never claimed. Measured on BOTH
- * checkers (typescript 5.9.3 and the 7.0.2 this build uses): a `const M =
- * "better-sqlite3"` and even a `declare const M: "better-sqlite3"` type
- * `import(M)` as `any`. The compiler's own dynamicImportSpecOf folds the
- * specifier fine — the fold is not the constraint, and that is why it is
- * not the guard either.
+ * A dynamic import whose specifier does not FOLD must still refuse,
+ * loudly and by name: a genuinely computed specifier is a BUILD error
+ * (SC2012), asserted below.
+ *
+ * The named-constant idiom is no longer one of those. It used to be: the
+ * fold worked but the CHECKER left the awaited value `any`, and under
+ * `any` none of the type-directed machinery fired, so a folded constant
+ * would have reached a namespace whose members had no value behind them.
+ * There is no type-directed machinery left to miss — the exports are real
+ * values (tests/fixtures/sqlite-value measures the whole widened path
+ * cell for cell) and `any` and `unknown` reach the same object — so the
+ * FOLD is the guard now and the constant form opens a database. Which is
+ * what zapo's store-sqlite writes: `const BETTER_SQLITE3_MODULE =
+ * 'better-sqlite3'` at connection.ts:45, imported at :300, whose
+ * rejection its own catch arm reported as `optional dependency
+ * "better-sqlite3" is not installed` — a package-manager instruction for
+ * a package the binary already contained.
  *
  * The oracle is RECORDED, for sqlite.test.ts's reason (the gate needs no
  * native dependency installed in this repo) and re-checked against a live
@@ -156,8 +159,7 @@ let valueLive: string | null = null;
 beforeAll(async () => {
   workDir = mkdtempSync(join(tmpdir(), "scriptc-sqlite-dyn-"));
   writeFileSync(join(workDir, "tsconfig.json"), TSCONFIG);
-  valueGolden = readFileSync(join(valueFixtureDir, "node-answers.txt"), "utf8").split("
-");
+  valueGolden = readFileSync(join(valueFixtureDir, "node-answers.txt"), "utf8").split("\n");
   golden = readFileSync(join(fixtureDir, "node-answers.txt"), "utf8").split("\n");
   try {
     const { createRequire } = await import("node:module");
@@ -339,8 +341,7 @@ describe("better-sqlite3 as VALUES: the widened namespace", () => {
       expect(liveWhy).not.toBe("");
       return;
     }
-    expect(valueLive.split("
-")).toEqual(valueGolden);
+    expect(valueLive.split("\n")).toEqual(valueGolden);
   });
 
   for (const backend of ["c", "llvm"] as const) {
@@ -357,10 +358,8 @@ describe("better-sqlite3 as VALUES: the widened namespace", () => {
         });
         expect(
           built.ok,
-          `the value fixture must COMPILE on ${backend}:
-` +
-            (built.diagnostics ?? []).map((d) => `${d.code}: ${d.message}`).join("
-"),
+          `the value fixture must COMPILE on ${backend}:\n` +
+            (built.diagnostics ?? []).map((d) => `${d.code}: ${d.message}`).join("\n"),
         ).toBe(true);
 
         plantDecoy(outDir);
@@ -379,8 +378,7 @@ describe("better-sqlite3 as VALUES: the widened namespace", () => {
         ).toBe("THREW DECOY WAS LOADED");
 
         const native = await run(built.binaryPath!, [], outDir);
-        const lines = native.stdout.split("
-");
+        const lines = native.stdout.split("\n");
         const keyOf = (l: string): string => l.split(" ")[0] ?? "";
         for (const line of valueGolden) {
           const key = keyOf(line);
@@ -389,8 +387,7 @@ describe("better-sqlite3 as VALUES: the widened namespace", () => {
           expect(mine, `${backend}: '${key}' never ran (better-sqlite3 answered: ${line})`).toBeDefined();
           expect(mine, `${backend}: '${key}' differs from better-sqlite3`).toBe(line);
         }
-        expect(native.stdout.split("
-")).toEqual(valueGolden);
+        expect(native.stdout.split("\n")).toEqual(valueGolden);
         expect(native.exitCode).toBe(0);
       },
       900_000,
@@ -400,7 +397,7 @@ describe("better-sqlite3 as VALUES: the widened namespace", () => {
 
 describe("the link gate, through import()", () => {
   test(
-    "an unconstructed namespace costs a resolved promise and nothing more",
+    "the import costs the engine, and the construction costs a call site",
     async () => {
       const cases = {
         // The control is not "no import" — an `await` of anything costs
@@ -506,29 +503,60 @@ describe("the boundary: a specifier that should not route must refuse by name", 
   );
 
   test(
-    "the named-constant idiom refuses at the await, naming the spelling that works",
+    "the named-constant idiom ROUTES, and opens a database",
     async () => {
+      // The idiom this used to refuse, in the optional-dependency
+      // try/import shape it always appears in. What it asserted was
+      // `REFUSED: ... STRING LITERAL`; what it asserts now is a row out
+      // of a real database, because the reason for the refusal (a
+      // namespace whose members had no value behind them under `any`)
+      // does not exist any more.
       const r = await build(
         "const-spec",
         "const M = 'better-sqlite3';\n" +
           "async function main(): Promise<void> {\n" +
+          "  let loaded: unknown;\n" +
           "  try {\n" +
-          "    const ns = await import(M);\n" +
-          "    console.log('LOADED', typeof ns);\n" +
+          "    loaded = await import(M);\n" +
           "  } catch (e) {\n" +
           "    const x = e as NodeJS.ErrnoException;\n" +
           "    console.log('REFUSED:', x.message);\n" +
-          "  }\n}\nvoid main();\n",
+          "    return;\n" +
+          "  }\n" +
+          "  const bag = loaded as Record<string, unknown>;\n" +
+          "  console.log('LOADED', typeof bag['default']);\n" +
+          "  const D = bag['default'] as new (p: string) => { exec: (s: string) => unknown; prepare: (s: string) => { get: (...a: unknown[]) => unknown } };\n" +
+          "  const db = new D(':memory:');\n" +
+          "  db.exec('create table t(a)');\n" +
+          "  db.exec('insert into t values(7)');\n" +
+          "  const row = db.prepare('select a from t').get() as Record<string, unknown>;\n" +
+          "  console.log('ROW', String(row['a']));\n" +
+          "}\nvoid main();\n",
       );
-      // It COMPILES — import()'s failure channel is in-band, which is
-      // where Node puts a load failure and where the optional-dependency
-      // try/import pattern catches it.
-      expect(r.ok, `the constant form must still compile:\n${r.diags}`).toBe(true);
-      const out = await run(r.binaryPath!, [], join(workDir, "neg-const-spec"));
-      expect(out.stdout).toContain("REFUSED:");
-      expect(out.stdout).toContain("better-sqlite3");
-      expect(out.stdout).toContain("STRING LITERAL");
-      expect(out.stdout).not.toContain("LOADED");
+      expect(r.ok, `the constant form must compile:\n${r.diags}`).toBe(true);
+      const dir = join(workDir, "neg-const-spec");
+      // Armed the same way the fixture runs are: a REAL better-sqlite3 is
+      // planted in the run directory whose only export throws, and it is
+      // proved loadable, so "the binary did not load it" is evidence.
+      plantDecoy(dir);
+      const decoyProbe = await run(
+        process.execPath,
+        [
+          "-e",
+          "try { new (require('better-sqlite3'))(':memory:'); console.log('NO THROW'); }" +
+            " catch (e) { console.log('THREW ' + e.message); }",
+        ],
+        dir,
+      );
+      expect(
+        decoyProbe.stdout.trim(),
+        "the decoy control is INERT — Node did not load the planted package",
+      ).toBe("THREW DECOY WAS LOADED");
+      const out = await run(r.binaryPath!, [], dir);
+      expect(out.stdout).not.toContain("REFUSED:");
+      expect(out.stdout).toContain("LOADED function");
+      expect(out.stdout).toContain("ROW 7");
+      expect(out.exitCode).toBe(0);
     },
     900_000,
   );

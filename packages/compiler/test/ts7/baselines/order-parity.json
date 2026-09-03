@@ -10104,6 +10104,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/7412-two-function-arms-and-each-value-takes-its-own.ts": {
+   "order": [
+    "<repo>/tests/corpus/7412-two-function-arms-and-each-value-takes-its-own.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/750-cycle-closure-box.ts": {
    "order": [
     "<repo>/tests/corpus/750-cycle-closure-box.ts"

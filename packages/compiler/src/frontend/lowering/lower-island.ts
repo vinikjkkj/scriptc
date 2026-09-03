@@ -615,24 +615,35 @@ import { PoisonError, dynUndefinedExpr, newFnCtx, own } from "./lowerer.js";
        * everything a program can ask of the namespace OBJECT without
        * reading a member, which is the note on the literal below.
        *
-       * The guard is the CHECKER's type, not our fold: only
+       * The guard used to be the CHECKER's type and not our fold: only
        * `import("better-sqlite3")` — a STRING LITERAL — types as the
-       * module namespace. `import(CONST)`, the named-constant idiom
-       * dynamicImportSpecOf accepts, does NOT: TypeScript leaves the
-       * awaited value `any`, and under `any` none of the type-directed
-       * machinery fires — the `new` site would not be claimed and the
-       * `.default` refusal would not fire, so the program would reach the
-       * namespace VALUE for a construction the compiler never compiled.
-       * (Measured, on typescript 5.9.3 AND on the 7.0.2 checker this
-       * build uses: `import(SPEC)` types as `any` for a `const SPEC =
-       * "better-sqlite3"`, and so does `import(SPEC_LIT)` for a
-       * `declare const SPEC_LIT: "better-sqlite3"`. The fold is not the
-       * constraint; the CHECKER is.) The values below make that reach a
-       * named refusal rather than a wrong answer, but a refusal at the
-       * construction is still worse than a build that works, so the
-       * constant form keeps the loud failure below, with a message that
-       * names the spelling that works. */
-      if (spec === "better-sqlite3" && arg !== undefined && ts.isStringLiteralLike(arg)) {
+       * module namespace, and `import(CONST)`, the named-constant idiom
+       * dynamicImportSpecOf accepts, does NOT (measured on typescript
+       * 5.9.3 AND on the 7.0.2 checker this build uses: `import(SPEC)`
+       * types as `any` for a `const SPEC = "better-sqlite3"`, and so does
+       * `import(SPEC_LIT)` for a `declare const SPEC_LIT:
+       * "better-sqlite3"`). The reason that mattered was that under `any`
+       * none of the TYPE-DIRECTED machinery fires — the `new` site would
+       * not be claimed and the namespace's members had no value behind
+       * them — so a folded constant would have reached the namespace
+       * VALUE for a construction the compiler never compiled.
+       *
+       * There is no type-directed machinery left to miss. The namespace's
+       * exports are REAL VALUES now, `new ns.default(path)` on one of
+       * them is an ordinary dyn construction, and the whole widened path
+       * is measured cell for cell against a live better-sqlite3
+       * (tests/fixtures/sqlite-value) — which is the path a folded
+       * constant takes anyway, because `any` and `unknown` reach the same
+       * dyn object. So the FOLD is the guard now, and the named-constant
+       * idiom opens a database instead of rejecting with advice.
+       *
+       * zapo's store-sqlite is that idiom: `const BETTER_SQLITE3_MODULE =
+       * 'better-sqlite3'` at connection.ts:45, imported at :300. The
+       * rejection it used to get was swallowed by its own catch arm and
+       * reported as `optional dependency "better-sqlite3" is not
+       * installed`, which is a package-manager instruction for a package
+       * the binary already contains. */
+      if (spec === "better-sqlite3" && arg !== undefined) {
         // The namespace OBJECT, key for key. Node builds this one by
         // running cjs-module-lexer over the package's entry, so it is
         // three keys in this order — better-sqlite3's detected named
@@ -747,32 +758,18 @@ import { PoisonError, dynUndefinedExpr, newFnCtx, own } from "./lowerer.js";
         !spec.startsWith("/") &&
         canonicalBuiltinModule(spec) === null
       ) {
+        // better-sqlite3 no longer reaches here at all: the arm at the
+        // top of this function takes every spelling whose specifier
+        // FOLDS, literal or named constant, and a specifier that does not
+        // fold has `spec === null` and never gets this far. The
+        // spelling-specific advice this used to carry ("only through a
+        // STRING LITERAL specifier") described a constraint that is gone,
+        // and advice that names a rule the compiler no longer has is
+        // worse than no advice.
         const msg =
-          spec === "better-sqlite3"
-            ? // The static lane DOES serve this package (the arm at the top of
-              // this function). What it cannot serve is this SPELLING: only a
-              // string literal makes TypeScript type the namespace, and every
-              // use of a better-sqlite3 namespace is type-directed, so a
-              // constant-folded specifier has nothing to bind against. Naming
-              // the spelling beats naming the package.
-              //
-              // The advice used to end "or build with --dynamic". It was
-              // RUN, and it is a dead end: under --dynamic the engine loads
-              // the real package, but the very use this message names —
-              // `new ns.default(path)` — is SC1090 ("constructing values
-              // other than classes declared in the program"), so the reader
-              // trades a rejected promise for a build error one line later.
-              // Only the literal spelling actually gets a database open.
-              `Cannot load module 'better-sqlite3': the static lane serves this ` +
-              `package itself, but only through a STRING LITERAL specifier — ` +
-              `import(<const>) leaves the namespace untyped, and every use of it ` +
-              `(new ns.default(path)) is decided by type. Write ` +
-              `import("better-sqlite3") at the site and keep the namespace's ` +
-              `type: \`const ns = await import("better-sqlite3"); const db = ` +
-              `new ns.default(path);\``
-            : `Cannot load module '${spec}': dynamic import() of npm packages runs in the ` +
-              `embedded dynamic engine, which this build does not include ` +
-              `(compile it statically with --npm-static ${spec}, or build with --dynamic)`;
+          `Cannot load module '${spec}': dynamic import() of npm packages runs in the ` +
+          `embedded dynamic engine, which this build does not include ` +
+          `(compile it statically with --npm-static ${spec}, or build with --dynamic)`;
         const err: IrExpr = {
           kind: "libCall",
           fn: "error.new",

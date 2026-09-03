@@ -211,14 +211,20 @@ static ScrDyn *sv_stmt_columns(ScrClosure *clo, ScrDyn *const *args, size_t argc
 ScrDyn *scr_sqlite_value_db(ScrSqliteDb *db);
 static ScrDyn *sv_stmt_value(ScrSqliteStmt *st, ScrDyn *dbObj);
 
-/* One installed member: a FUNC box over `thunk`, holding the handle and
- * (for the `return this` methods) the object itself. The signature
- * string is "%better-sqlite3" for every one of them, deliberately: a
- * dynCheck's exact-signature unwrap hands the raw closure to a STATIC
- * call site, and these closures are dyn thunks with the dyn ABI — a
- * name no emitted typeKey can equal keeps every crossing on the ADAPTER
- * path, which converts. */
-static const char SV_SIG[] = "%better-sqlite3";
+/* THE SIGNATURE STRING, and why it is spelled at every call site rather
+ * than named once. Every FUNC box this unit mints carries
+ * "%better-sqlite3", deliberately: a dynCheck's exact-signature unwrap
+ * hands the RAW CLOSURE to a static call site, and these closures are dyn
+ * thunks with the dyn ABI, so a name no emitted typeKey can equal is what
+ * keeps every crossing on the ADAPTER path — which converts. The literal
+ * is repeated because the contract scan over this argument
+ * (tests/harness/dyn-fn-sig-contract.test.ts) reads the CALL SITE and
+ * accepts a string literal or a forwarded `sig`; a named constant is
+ * invisible to it, and a scan that cannot see this argument is the one
+ * that lets a NULL through, which the emitted strcmp dereferences.
+ *
+ * One installed member: a FUNC box over `thunk`, holding the handle and
+ * (for the `return this` methods) the object itself. */
 
 static void sv_install(ScrDyn *obj, const char *name, void *thunk, ScrBox *handle,
                        bool wants_self, uint32_t arity) {
@@ -228,7 +234,7 @@ static void sv_install(ScrDyn *obj, const char *name, void *thunk, ScrBox *handl
     clo->caps[1] = sv_self_cap();
     scr_box_set_ref(clo->caps[1], scr_dyn_retain(obj));
   }
-  ScrDyn *fn = scr_dyn_new_func(clo, (ScrDynThunk)thunk, arity, SV_SIG, name);
+  ScrDyn *fn = scr_dyn_new_func(clo, (ScrDynThunk)thunk, arity, "%better-sqlite3", name);
   scr_dyn_obj_define_hidden_data(obj, name, strlen(name), fn, true, true);
   scr_dyn_release(fn);
 }
@@ -240,7 +246,7 @@ static void sv_install_refusals(ScrDyn *obj, size_t first, size_t count) {
     ScrClosure *clo = scr_closure_new((void *)&sv_refuse_thunk, 1);
     clo->caps[0] = scr_box_new(SCR_BOX_F64);
     scr_box_set_f64(clo->caps[0], (double)i);
-    ScrDyn *fn = scr_dyn_new_func(clo, &sv_refuse_thunk, 0, SV_SIG, tab[i].name);
+    ScrDyn *fn = scr_dyn_new_func(clo, &sv_refuse_thunk, 0, "%better-sqlite3", tab[i].name);
     scr_dyn_obj_define_hidden_data(obj, tab[i].name, strlen(tab[i].name), fn, true, true);
     scr_dyn_release(fn);
   }
@@ -313,7 +319,7 @@ static ScrDyn *sv_stmt_get_source(ScrClosure *clo, ScrDyn *const *args, size_t a
 static void sv_install_getter(ScrDyn *obj, const char *name, void *thunk, ScrBox *handle) {
   ScrClosure *clo = scr_closure_new(thunk, 1);
   clo->caps[0] = handle;
-  ScrDyn *fn = scr_dyn_new_func(clo, (ScrDynThunk)thunk, 0, SV_SIG, name);
+  ScrDyn *fn = scr_dyn_new_func(clo, (ScrDynThunk)thunk, 0, "%better-sqlite3", name);
   scr_dyn_obj_define_accessor(obj, name, strlen(name), fn, scr_dyn_undefined(), true, true);
   scr_dyn_release(fn);
 }
@@ -330,7 +336,7 @@ static void sv_install_db_getter(ScrDyn *obj, ScrDyn *dbObj) {
   ScrClosure *clo = scr_closure_new((void *)&sv_stmt_get_database, 1);
   clo->caps[0] = sv_self_cap();
   scr_box_set_ref(clo->caps[0], scr_dyn_retain(dbObj));
-  ScrDyn *fn = scr_dyn_new_func(clo, &sv_stmt_get_database, 0, SV_SIG, "database");
+  ScrDyn *fn = scr_dyn_new_func(clo, &sv_stmt_get_database, 0, "%better-sqlite3", "database");
   scr_dyn_obj_define_accessor(obj, "database", 8, fn, scr_dyn_undefined(), true, true);
   scr_dyn_release(fn);
 }
@@ -641,7 +647,7 @@ static ScrDyn *sv_ctor_singleton;
 ScrDyn *scr_sqlite_value_ctor(void) {
   if (sv_ctor_singleton == NULL) {
     ScrClosure *clo = scr_closure_new((void *)&sv_database_ctor, 0);
-    sv_ctor_singleton = scr_dyn_new_func(clo, &sv_database_ctor, 1, SV_SIG, "Database");
+    sv_ctor_singleton = scr_dyn_new_func(clo, &sv_database_ctor, 1, "%better-sqlite3", "Database");
   }
   return scr_dyn_retain(sv_ctor_singleton);
 }
@@ -668,7 +674,7 @@ static ScrDyn *sv_error_singleton;
 ScrDyn *scr_sqlite_value_error_class(void) {
   if (sv_error_singleton == NULL) {
     ScrClosure *clo = scr_closure_new((void *)&sv_sqlite_error_ctor, 0);
-    sv_error_singleton = scr_dyn_new_func(clo, &sv_sqlite_error_ctor, 1, SV_SIG, "SqliteError");
+    sv_error_singleton = scr_dyn_new_func(clo, &sv_sqlite_error_ctor, 1, "%better-sqlite3", "SqliteError");
   }
   return scr_dyn_retain(sv_error_singleton);
 }
