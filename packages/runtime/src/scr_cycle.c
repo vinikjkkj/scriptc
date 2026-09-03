@@ -120,6 +120,7 @@ __attribute__((constructor)) static void scr_poolstat_reg_cycle(void) {
 #define SCR_CS_PHASE_BEGIN() ((void)0)
 #define SCR_CS_PHASE_END(which) ((void)0)
 #define SCR_CS_ADD(which, n) ((void)0)
+#define SCR_CS_BUMP(which) ((void)0)
 #endif
 
 /* The census hook, as one macro rather than an #ifdef inside each arm of
@@ -225,6 +226,7 @@ static void *scr_cyc_ar_take(size_t phys, uint8_t blk) {
   size_t stride;
   if (b != NULL) {
     __builtin_memcpy(&scr_cyc_ar_free[blk], b, sizeof(void *));
+    SCR_CS_BUMP(arhit);
     return b;
   }
   stride = (phys + 15u) & ~(size_t)15u;
@@ -233,13 +235,16 @@ static void *scr_cyc_ar_take(size_t phys, uint8_t blk) {
     if (c == NULL) return NULL;
     scr_cyc_ar_cur = c;
     scr_cyc_ar_lim = c + SCR_CYC_ARENA_CHUNK;
+    SCR_CS_BUMP(archunk);
   }
+  SCR_CS_BUMP(arcarve);
   b = scr_cyc_ar_cur;
   scr_cyc_ar_cur += stride;
   return b;
 }
 
 static void scr_cyc_ar_give(ScrCycHdr *h) {
+  SCR_CS_BUMP(argive);
   __builtin_memcpy(h, &scr_cyc_ar_free[h->blk], sizeof(void *));
   scr_cyc_ar_free[h->blk] = h;
 }
@@ -272,6 +277,7 @@ static __attribute__((noinline)) void *scr_cyc_alloc_miss(size_t size,
     }
   }
   if (h == NULL) {
+    SCR_CS_BUMP(arcalloc);
     h = calloc(1, phys);
     if (h == NULL) scr_cyc_oom();
     /* calloc zeroed the whole block, `buffered` and `buf_index` included. */
