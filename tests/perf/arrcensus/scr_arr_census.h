@@ -57,6 +57,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 /* The switch the hook lines test. */
 #define SCR_ARRCEN_ON 1
@@ -76,7 +77,18 @@
 #define SCR_ARRCEN_STR2NUM 4    /* scr_string_to_number, input bytes         */
 #define SCR_ARRCEN_JSONSTR 5    /* scr_jb_put_json_str, input bytes          */
 #define SCR_ARRCEN_MAPKEYS 6    /* scr_map_keys_js_order, entries            */
-#define SCR_ARRCEN_SLOTS 7
+/* THE TYPED-ARRAY ELEMENT PATH. scr_bytes_get and scr_bytes_set are
+ * 13.8-16.8% and 4.0-9.5% of the messaging bench's SEND group phase by
+ * suspend-and-sample, and `trunc` appears at 5.4-6.1% as its OWN symbol
+ * because scr_bytes_check_index makes it a real libm call. A share is not
+ * a count, and a per-call fix has to be priced by the CALL COUNT times the
+ * per-call instruction delta -- which is the only currency that survives a
+ * busy host, where the same binary's cycles for this phase moved 52% in one
+ * session. The length recorded is the BUFFER's, so a million reads of a
+ * 32-byte key is distinguishable from a thousand walks of a megabyte. */
+#define SCR_ARRCEN_BYTESGET 7   /* scr_bytes_get, buffer length              */
+#define SCR_ARRCEN_BYTESSET 8   /* scr_bytes_set, buffer length              */
+#define SCR_ARRCEN_SLOTS 9
 
 /* scr_arr_slice by element kind — the ref arm retains per element through a
  * function pointer, the scalar arms could be one memcpy, and which of the two
@@ -154,7 +166,160 @@ SCR_ARRCEN_FN const char *scr_arrcen_name(int s) {
     case SCR_ARRCEN_JOIN_OUT: return "join-outbytes";
     case SCR_ARRCEN_STR2NUM: return "str2num-bytes";
     case SCR_ARRCEN_JSONSTR: return "jsonstr-bytes";
-    default: return "mapkeys-entries";
+    case SCR_ARRCEN_MAPKEYS: return "mapkeys-entries";
+    case SCR_ARRCEN_BYTESGET: return "bytesget-len";
+    default: return "bytesset-len";
+  }
+}
+
+/* ── PHASE SCOPING ────────────────────────────────────────────────────────
+ * The counters above are PROCESS-WIDE, and this bench's run is dominated by
+ * one phase out of six. A process-wide count cannot say whether a million
+ * slices happened in `send_group` or in the setup that precedes it, and the
+ * question being asked is specifically about `send_group`.
+ *
+ * The bench already prints `[phase-begin] <label>` / `[phase-end] <label>`
+ * on stdout, and cpuphase.exe and tests/perf/sampler both bracket the phase
+ * on exactly those two lines. This reads the SAME markers from inside the
+ * process, through the one choke point every console.log passes
+ * (scr_console_log -> scr_arrcen_phase_line), so the census, the cycle
+ * counter and the sampler are all scoped to the same interval by
+ * construction rather than by agreement.
+ *
+ * Cost on the counting path is ZERO: nothing in scr_arrcen_note changes.
+ * A phase boundary memcpys the whole counter block once, and the per-phase
+ * figure is the difference. Six phases, twice per run.
+ *
+ * A phase whose name never appears is reported as absent rather than as
+ * zero -- SCR_ARRCEN_ARM plants into the process-wide totals, and if the
+ * marker hook never compiled in, `phases=0` says so instead of every
+ * per-phase row silently reading zero.
+ */
+#define SCR_ARRCEN_MAXPH 16
+#define SCR_ARRCEN_NAMELEN 56
+
+typedef struct {
+  long long rows[SCR_ARRCEN_SLOTS][SCR_ARRCEN_ROWS];
+  long long calls[SCR_ARRCEN_SLOTS];
+  long long total[SCR_ARRCEN_SLOTS];
+  long long kind_calls[SCR_ARRCEN_KINDS];
+  long long kind_elems[SCR_ARRCEN_KINDS];
+  long long whole;
+  long long empty;
+  long long pump_calls;
+  long long pump_iters;
+  unsigned long long pump_cycles;
+} ScrArrcenSnap;
+
+SCR_ARRCEN_SHARED ScrArrcenSnap scr_arrcen_at_begin;
+SCR_ARRCEN_SHARED ScrArrcenSnap scr_arrcen_ph[SCR_ARRCEN_MAXPH];
+SCR_ARRCEN_SHARED char scr_arrcen_phname[SCR_ARRCEN_MAXPH][SCR_ARRCEN_NAMELEN];
+SCR_ARRCEN_SHARED int scr_arrcen_nph = 0;
+SCR_ARRCEN_SHARED int scr_arrcen_curph = -1;
+SCR_ARRCEN_SHARED long long scr_arrcen_marks = 0;
+
+SCR_ARRCEN_FN void scr_arrcen_capture(ScrArrcenSnap *d) {
+  int s, i;
+  for (s = 0; s < SCR_ARRCEN_SLOTS; s++) {
+    d->calls[s] = scr_arrcen_calls[s];
+    d->total[s] = scr_arrcen_total[s];
+    for (i = 0; i < SCR_ARRCEN_ROWS; i++) d->rows[s][i] = scr_arrcen_rows[s][i];
+  }
+  for (i = 0; i < SCR_ARRCEN_KINDS; i++) {
+    d->kind_calls[i] = scr_arrcen_kind_calls[i];
+    d->kind_elems[i] = scr_arrcen_kind_elems[i];
+  }
+  d->whole = scr_arrcen_slice_whole;
+  d->empty = scr_arrcen_slice_empty;
+  d->pump_calls = scr_arrcen_pump_calls;
+  d->pump_iters = scr_arrcen_pump_iters;
+  d->pump_cycles = scr_arrcen_pump_cycles;
+}
+
+/* dst += (now - at_begin), field by field. */
+SCR_ARRCEN_FN void scr_arrcen_accum(ScrArrcenSnap *dst) {
+  ScrArrcenSnap now;
+  int s, i;
+  scr_arrcen_capture(&now);
+  for (s = 0; s < SCR_ARRCEN_SLOTS; s++) {
+    dst->calls[s] += now.calls[s] - scr_arrcen_at_begin.calls[s];
+    dst->total[s] += now.total[s] - scr_arrcen_at_begin.total[s];
+    for (i = 0; i < SCR_ARRCEN_ROWS; i++)
+      dst->rows[s][i] += now.rows[s][i] - scr_arrcen_at_begin.rows[s][i];
+  }
+  for (i = 0; i < SCR_ARRCEN_KINDS; i++) {
+    dst->kind_calls[i] += now.kind_calls[i] - scr_arrcen_at_begin.kind_calls[i];
+    dst->kind_elems[i] += now.kind_elems[i] - scr_arrcen_at_begin.kind_elems[i];
+  }
+  dst->whole += now.whole - scr_arrcen_at_begin.whole;
+  dst->empty += now.empty - scr_arrcen_at_begin.empty;
+  dst->pump_calls += now.pump_calls - scr_arrcen_at_begin.pump_calls;
+  dst->pump_iters += now.pump_iters - scr_arrcen_at_begin.pump_iters;
+  dst->pump_cycles += now.pump_cycles - scr_arrcen_at_begin.pump_cycles;
+}
+
+SCR_ARRCEN_FN int scr_arrcen_phslot(const char *name) {
+  int i, k;
+  for (i = 0; i < scr_arrcen_nph; i++)
+    if (strcmp(scr_arrcen_phname[i], name) == 0) return i;
+  if (scr_arrcen_nph >= SCR_ARRCEN_MAXPH) return -1;
+  i = scr_arrcen_nph++;
+  for (k = 0; k + 1 < SCR_ARRCEN_NAMELEN && name[k] != 0; k++)
+    scr_arrcen_phname[i][k] = name[k];
+  scr_arrcen_phname[i][k] = 0;
+  return i;
+}
+
+/* Called from scr_console.c for EVERY console.log line. The two markers are
+ * six lines in a run of tens of thousands, so the strncmp is the whole cost.
+ * `line` is not NUL-terminated by the caller -- length is explicit. */
+SCR_ARRCEN_FN void scr_arrcen_phase_line(const char *line, unsigned long long len) {
+  char name[SCR_ARRCEN_NAMELEN];
+  unsigned long long i, o;
+  int begin;
+  if (len < 14) return;
+  if (line[0] != '[') return;
+  if (strncmp(line, "[phase-begin] ", 14) == 0) begin = 1;
+  else if (len >= 12 && strncmp(line, "[phase-end] ", 12) == 0) begin = 0;
+  else return;
+  i = begin ? 14 : 12;
+  for (o = 0; i < len && o + 1 < SCR_ARRCEN_NAMELEN; i++) {
+    if (line[i] == '\n' || line[i] == '\r') break;
+    name[o++] = line[i];
+  }
+  name[o] = 0;
+  scr_arrcen_marks++;
+  if (begin) {
+    scr_arrcen_curph = scr_arrcen_phslot(name);
+    scr_arrcen_capture(&scr_arrcen_at_begin);
+  } else if (scr_arrcen_curph >= 0) {
+    scr_arrcen_accum(&scr_arrcen_ph[scr_arrcen_curph]);
+    scr_arrcen_curph = -1;
+  }
+}
+
+SCR_ARRCEN_FN void scr_arrcen_report_phases(FILE *f) {
+  int p, s, i;
+  fprintf(f, "ARRCEN-PHASES n=%d marks=%lld\n", scr_arrcen_nph, scr_arrcen_marks);
+  for (p = 0; p < scr_arrcen_nph; p++) {
+    const ScrArrcenSnap *d = &scr_arrcen_ph[p];
+    fprintf(f, "ARRCEN-PH %s slice.whole=%lld slice.empty=%lld pump.calls=%lld pump.iters=%lld pump.cycles=%llu\n",
+            scr_arrcen_phname[p], d->whole, d->empty, d->pump_calls, d->pump_iters,
+            d->pump_cycles);
+    for (s = 0; s < SCR_ARRCEN_SLOTS; s++)
+      fprintf(f, "ARRCEN-PHSLOT %s %s calls=%lld total=%lld\n", scr_arrcen_phname[p],
+              scr_arrcen_name(s), d->calls[s], d->total[s]);
+    for (i = 0; i < SCR_ARRCEN_KINDS; i++) {
+      if (d->kind_calls[i] == 0) continue;
+      fprintf(f, "ARRCEN-PHKIND %s %d calls=%lld elems=%lld\n", scr_arrcen_phname[p], i,
+              d->kind_calls[i], d->kind_elems[i]);
+    }
+    for (s = 0; s < SCR_ARRCEN_SLOTS; s++)
+      for (i = 0; i < SCR_ARRCEN_ROWS; i++) {
+        if (d->rows[s][i] == 0) continue;
+        fprintf(f, "ARRCEN-PHROW %s %s %d %lld\n", scr_arrcen_phname[p],
+                scr_arrcen_name(s), i, d->rows[s][i]);
+      }
   }
 }
 
@@ -191,6 +356,7 @@ SCR_ARRCEN_FN void scr_arrcen_report(void) {
               scr_arrcen_rows[s][i]);
     }
   }
+  scr_arrcen_report_phases(f);
   fclose(f);
 }
 
