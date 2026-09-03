@@ -10452,10 +10452,28 @@ const NUMBER_CONSTANTS: Record<string, number | undefined> = {
         return { kind: "intrinsic", name: "promise.resolve", args: [], type: { kind: "promise", inner: VOID }, loc };
       }
       if (resultT.inner.kind === "void") {
-        // Promise.resolve(expr) at a void-promise type: the argument's
-        // effects must still run — no statement slot exists here for
-        // them, so only effect-free spellings could drop it honestly;
-        // fence rather than model that corner.
+        // ONE effect-free spelling now has a destination that can hold what
+        // it produces: `Promise.resolve(null as never)` initializing a
+        // record field. The checker types the call `Promise<never>`, which
+        // maps to promise<void> on the ground that a throw-only promise
+        // never fulfils — but this one FULFILS, with `null`, into a slot
+        // spelled `Promise<S>`. No record slot holds a null, so the FIELD's
+        // payload is void (mapType's nullPayloadPromiseProp) and the
+        // placeholder is the already-settled payload-less promise: it
+        // settles when node's settles, a rejection still propagates, and
+        // every attempt to READ the fulfillment value refuses at compile
+        // time rather than answering something node did not say. The type
+        // is read back off the interned shape, so producer and slot cannot
+        // drift. The argument is a bare `null` (nullPromisePlaceholderArg),
+        // which has no effects to drop.
+        const slot = L.nullPlaceholderFieldType(call);
+        if (slot !== null) {
+          return { kind: "intrinsic", name: "promise.resolve", args: [], type: slot, loc };
+        }
+        // Every other spelling keeps the fence: the argument's effects must
+        // still run — no statement slot exists here for them, so only
+        // effect-free spellings could drop it honestly; fence rather than
+        // model that corner.
         L.noLowering("Promise.resolve with an argument at a void-promise type", call);
       }
       if (isUnitType(resultT.inner)) {
