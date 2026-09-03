@@ -13,6 +13,9 @@ const bin = join(testDir, "build", "test_bytes" + exeSuffix);
 // inline-versus-call differential in test_inline_accessors runs on both
 // arms of the A/B switch and the trap modes abort identically either way.
 const binNoFast = join(testDir, "build", "test_bytes_nofast" + exeSuffix);
+// And with the f64 arm alone compiled out (the u8 arm stays), which is the
+// narrower switch the f64 element arm is measured against.
+const binNoF64 = join(testDir, "build", "test_bytes_nof64" + exeSuffix);
 let scratch: string;
 
 // Compiled once with ASan + the RC audit: the assertions in test_bytes.c
@@ -23,7 +26,11 @@ let scratch: string;
 // — the sanitized run proves no leak/double-free across all of them.
 beforeAll(async () => {
   await mkdir(join(testDir, "build"), { recursive: true });
-  for (const [out, extra] of [[bin, []], [binNoFast, ["-DSCR_NO_FASTARM"]]] as const)
+  for (const [out, extra] of [
+    [bin, []],
+    [binNoFast, ["-DSCR_NO_FASTARM"]],
+    [binNoF64, ["-DSCR_NO_F64ARM"]],
+  ] as const)
   await ccCompile([
     "-std=c11", "-O1", "-Wall", "-Wextra",
     "-fsanitize=address", "-DSCR_RC_AUDIT",
@@ -92,6 +99,19 @@ test.each([
   expectCasesPassed(stderr);
 });
 
+// The f64 arm's own switch. With it off, test_inline_accessors walks the
+// SAME kind x value x index differential with f64 going through the call --
+// so a divergence introduced by the arm shows up as a case-count difference
+// between this binary and the default one rather than as silence.
+test.each([
+  ["fast (default)", undefined],
+  ["libm (SCR_FASTIDX=0)", "0"],
+])("bytes runtime with -DSCR_NO_F64ARM -- %s", async (_name, fastidx) => {
+  const env = { ...process.env, ...(fastidx === undefined ? {} : { SCR_FASTIDX: fastidx }) };
+  const { stderr } = await execFileAsync(binNoF64, [scratch], { env });
+  expectCasesPassed(stderr);
+});
+
 // JS reads undefined / ignores writes out of bounds on typed arrays; both
 // are unrepresentable, so the runtime traps (documented divergence, the
 // array runtime's exact discipline).
@@ -126,17 +146,29 @@ const CRASH_MODES: readonly (readonly [string, string])[] = [
   ["--crash-inl-set-oob", "typed array index 1 out of bounds (length 1)"],
   ["--crash-inl-set-neg", "typed array index -1 out of bounds (length 1)"],
   ["--crash-inl-set-nan-idx", "typed array index NaN out of bounds (length 1)"],
+  // Through an F64 buffer's inline accessor. The u8 modes above never enter
+  // the f64 branch, so these are the only cases that prove IT hands over --
+  // and the expected text is identical, which is the point.
+  ["--crash-inl-f64-get-oob", "typed array index 1 out of bounds (length 1)"],
+  ["--crash-inl-f64-get-frac", "typed array index 0.5 out of bounds (length 1)"],
+  ["--crash-inl-f64-get-nan", "typed array index NaN out of bounds (length 1)"],
+  ["--crash-inl-f64-get-neg", "typed array index -1 out of bounds (length 1)"],
+  ["--crash-inl-f64-get-2p53", "typed array index 9007199254740992 out of bounds (length 1)"],
+  ["--crash-inl-f64-set-oob", "typed array index 1 out of bounds (length 1)"],
+  ["--crash-inl-f64-set-neg", "typed array index -1 out of bounds (length 1)"],
+  ["--crash-inl-f64-set-nan-idx", "typed array index NaN out of bounds (length 1)"],
 ];
 
 test.each(
   CRASH_MODES.flatMap(([mode, message]) =>
     [undefined, "0"].flatMap((fastidx) =>
-      ([false, true] as const).map((nofast) => [mode, message, fastidx, nofast] as const),
+      (["on", "nofast", "nof64"] as const).map((arm) => [mode, message, fastidx, arm] as const),
     ),
   ),
-)("trap aborts (%s, SCR_FASTIDX=%s, SCR_NO_FASTARM=%s)", async (mode, message, fastidx, nofast) => {
+)("trap aborts (%s, SCR_FASTIDX=%s, arm=%s)", async (mode, message, fastidx, arm) => {
   const env = { ...process.env, ...(fastidx === undefined ? {} : { SCR_FASTIDX: fastidx }) };
-  const err = await execFileAsync(nofast ? binNoFast : bin, [mode], { env }).then(
+  const exe = arm === "nofast" ? binNoFast : arm === "nof64" ? binNoF64 : bin;
+  const err = await execFileAsync(exe, [mode], { env }).then(
     () => {
       throw new Error(`expected ${mode} to abort`);
     },

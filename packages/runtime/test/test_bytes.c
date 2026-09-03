@@ -207,7 +207,9 @@ static void test_inline_accessors(void) {
   const unsigned nv = (unsigned)(sizeof VALUES / sizeof VALUES[0]);
 
   for (unsigned k = 0; k < nk; k++) {
-    /* Sixteen elements: the AES block state send_group actually walks. */
+    /* Sixteen elements: the GF(2^255-19) field element send_group actually
+     * walks -- a Float64Array, per the element-kind census, not the u8 block
+     * an earlier comment here guessed at. */
     ScrBytes *a = scr_bytes_new(KINDS[k], 16);
     ScrBytes *c = scr_bytes_new(KINDS[k], 16);
     for (unsigned v = 0; v < nv; v++) {
@@ -240,13 +242,64 @@ static void test_inline_accessors(void) {
             "so does one that came out of floor()");
   scr_bytes_release(big);
 
-  /* An ArrayBuffer payload must NOT take the inline arm -- its elem is not
-   * u8 -- so the fence in scr_bytes_get still owns that mistake. Nothing to
-   * call here without aborting; the kind loop above already proves every
-   * non-u8 kind falls through to the function. */
+  /* An ArrayBuffer payload must NOT take either inline arm -- its elem is
+   * neither u8 nor f64 -- so the fence in scr_bytes_get still owns that
+   * mistake. Nothing to call here without aborting; the kind loop above
+   * proves every kind the arms decline falls through to the function. */
   ScrBytes *empty = scr_bytes_new(SCR_BYTES_U8, 0);
   check(scr_bytes_len(empty) == 0, "a zero-length buffer still has length 0");
   scr_bytes_release(empty);
+
+  /* ── the f64 arm's two own hazards ──────────────────
+   * An UNALIGNED f64 element address. Built by taking a real subarray view
+   * -- so the refcount discipline and the RC audit stay exactly balanced --
+   * one byte into a u8 owner, then wearing the f64 kind over those bytes:
+   * seven elements starting at an address that is not 8-aligned. The JS
+   * surface cannot construct this (a Float64Array's byteOffset must be a
+   * multiple of 8), and that is precisely why it is pinned here: the arm
+   * memcpys, and a later "obvious" rewrite to a `double *` load would be
+   * undefined behaviour on this address and would fault on a target that
+   * enforces alignment. scr_bytes_get memcpys for the same reason. */
+  {
+    ScrBytes *owner = scr_bytes_new(SCR_BYTES_U8, 64);
+    ScrBytes *v = scr_bytes_subarray(owner, 1, 57);
+    check(v->data == owner->data + 1, "the view starts one byte in");
+    v->elem = SCR_BYTES_F64;
+    v->len = 7;
+    for (double i = 0; i < 7; i++) {
+      scr_bytes_set_inl(v, i, (double)i + 0.25);
+      check_bits(scr_bytes_get_inl(v, i), scr_bytes_get(v, i),
+                 "unaligned f64 view: inline read agrees with the call");
+      check_bits(scr_bytes_get_inl(v, i), (double)i + 0.25,
+                 "unaligned f64 view: the value survives the round trip");
+    }
+    scr_bytes_release(v);
+    scr_bytes_release(owner);
+  }
+
+  /* A NaN with a NON-CANONICAL payload. A Float64Array store is the raw
+   * double, so both arms must move all 64 bits; a round trip through int64
+   * -- which is what the u8 arm's value window implies and what a careless
+   * f64 arm would copy -- turns this into 0 or into a canonical NaN. */
+  {
+    ScrBytes *f = scr_bytes_new(SCR_BYTES_F64, 4);
+    const uint64_t bits[] = {0x7FF8000ABCDEF123ull,  /* quiet NaN, payload   */
+                             0xFFF0000000000001ull,  /* signalling NaN       */
+                             0x8000000000000000ull,  /* -0.0                 */
+                             0x7FF0000000000000ull}; /* +Infinity            */
+    for (unsigned q = 0; q < 4; q++) {
+      double v;
+      uint64_t back;
+      memcpy(&v, &bits[q], 8);
+      scr_bytes_set_inl(f, (double)q, v);
+      check_bits(scr_bytes_get_inl(f, (double)q), v, "f64 store keeps every bit");
+      check_bits(scr_bytes_get_inl(f, (double)q), scr_bytes_get(f, (double)q),
+                 "f64 inline read agrees with the call on that bit pattern");
+      memcpy(&back, f->data + q * 8, 8);
+      check(back == bits[q], "the stored bytes are the bytes handed in");
+    }
+    scr_bytes_release(f);
+  }
 }
 
 static void test_construction(void) {
@@ -618,6 +671,44 @@ int main(int argc, char **argv) {
     } else if (strcmp(argv[1], "--crash-inl-set-neg") == 0) {
       scr_bytes_set_inl(b, -1, 9);
     } else if (strcmp(argv[1], "--crash-inl-set-nan-idx") == 0) {
+      scr_bytes_set_inl(b, 0.0 / 0.0, 9);
+    /* The same refusals on an F64 buffer. The u8 modes above cannot reach
+     * the f64 arm at all -- they fail its kind test before its index test --
+     * so without these the arm's DECLINING path is untested and a bad bound
+     * there would return a stale element instead of trapping. Length 1 and
+     * the same indices, so the expected text is character for character the
+     * text the u8 modes pin. */
+    } else if (strcmp(argv[1], "--crash-inl-f64-get-oob") == 0) {
+      scr_bytes_release(b);
+      b = scr_bytes_new(SCR_BYTES_F64, 1);
+      scr_bytes_get_inl(b, 1);
+    } else if (strcmp(argv[1], "--crash-inl-f64-get-frac") == 0) {
+      scr_bytes_release(b);
+      b = scr_bytes_new(SCR_BYTES_F64, 1);
+      scr_bytes_get_inl(b, 0.5);
+    } else if (strcmp(argv[1], "--crash-inl-f64-get-nan") == 0) {
+      scr_bytes_release(b);
+      b = scr_bytes_new(SCR_BYTES_F64, 1);
+      scr_bytes_get_inl(b, 0.0 / 0.0);
+    } else if (strcmp(argv[1], "--crash-inl-f64-get-neg") == 0) {
+      scr_bytes_release(b);
+      b = scr_bytes_new(SCR_BYTES_F64, 1);
+      scr_bytes_get_inl(b, -1);
+    } else if (strcmp(argv[1], "--crash-inl-f64-get-2p53") == 0) {
+      scr_bytes_release(b);
+      b = scr_bytes_new(SCR_BYTES_F64, 1);
+      scr_bytes_get_inl(b, 9007199254740992.0);
+    } else if (strcmp(argv[1], "--crash-inl-f64-set-oob") == 0) {
+      scr_bytes_release(b);
+      b = scr_bytes_new(SCR_BYTES_F64, 1);
+      scr_bytes_set_inl(b, 1, 7);
+    } else if (strcmp(argv[1], "--crash-inl-f64-set-neg") == 0) {
+      scr_bytes_release(b);
+      b = scr_bytes_new(SCR_BYTES_F64, 1);
+      scr_bytes_set_inl(b, -1, 9);
+    } else if (strcmp(argv[1], "--crash-inl-f64-set-nan-idx") == 0) {
+      scr_bytes_release(b);
+      b = scr_bytes_new(SCR_BYTES_F64, 1);
       scr_bytes_set_inl(b, 0.0 / 0.0, 9);
     } else {
       fprintf(stderr, "unknown mode %s\n", argv[1]);
