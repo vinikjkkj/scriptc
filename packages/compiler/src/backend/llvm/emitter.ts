@@ -731,6 +731,8 @@ const LIB_FN_SYMS: Record<string, string> = {
   "sqlite.stmtReader": "scr_sqlite_stmt_reader",
   "sqlite.stmtReadonly": "scr_sqlite_stmt_readonly",
   "sqlite.stmtBusy": "scr_sqlite_stmt_busy",
+  "sqlite.ctorValue": "scr_sqlite_value_ctor",
+  "sqlite.errorClassValue": "scr_sqlite_value_error_class",
   "dyn.keySet": "scr_dyn_key_set",
   "dyn.expandoBind": "scr_dyn_expando_bind",
   "dyn.keyDelete": "scr_dyn_key_delete",

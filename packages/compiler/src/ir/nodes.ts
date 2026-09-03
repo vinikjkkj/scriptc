@@ -2802,6 +2802,15 @@ export type IrLibFn =
   | "sqlite.stmtReader"
   | "sqlite.stmtReadonly"
   | "sqlite.stmtBusy"
+  /* better-sqlite3 as VALUES (scr_sqlite_value.c). The namespace's three
+   * exports, as real callables rather than the trap functions they were:
+   * `default` and `module.exports` are the constructor
+   * (sqlite.ctorValue), `SqliteError` is the error class
+   * (sqlite.errorClassValue). Neither CALL is made here — these produce
+   * the VALUE — so neither is in the may-throw seed set; the throw a
+   * construction can raise rides `dyn.construct`, which already is. */
+  | "sqlite.ctorValue"
+  | "sqlite.errorClassValue"
   /** Keyed WRITE on a dyn value — `h.onDone = cb` / `h["k"] = v` on a
    * checked-dynamic object (args: receiver, key string, value — all
    * borrowed; the runtime copies the key and retains the value in). An
@@ -8681,6 +8690,33 @@ export function moduleUsesSqlite(mod: IrModule): boolean {
       return;
     }
     if (rec.kind === "libCall" && typeof rec.fn === "string" && rec.fn.startsWith("sqlite.")) {
+      found = true;
+      return;
+    }
+    for (const x of Object.values(v as Record<string, unknown>)) visit(x);
+  };
+  visit(mod);
+  return found;
+}
+
+/** True when the module mints better-sqlite3's VALUE surface — the link
+ * switch for scr_sqlite_value.c.
+ *
+ * Narrower than moduleUsesSqlite on purpose: a program that keeps the
+ * namespace's TYPE from the import to the construction never reaches a
+ * checked-dynamic Database at all, and must keep its exact bytes. The two
+ * libCalls below are the only producers of one, so asking for them is
+ * asking exactly the right question. */
+export function moduleUsesSqliteValue(mod: IrModule): boolean {
+  let found = false;
+  const visit = (v: unknown): void => {
+    if (found || v === null || typeof v !== "object") return;
+    if (Array.isArray(v)) {
+      for (const item of v) visit(item);
+      return;
+    }
+    const rec = v as { kind?: unknown; fn?: unknown };
+    if (rec.kind === "libCall" && (rec.fn === "sqlite.ctorValue" || rec.fn === "sqlite.errorClassValue")) {
       found = true;
       return;
     }
