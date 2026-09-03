@@ -8739,6 +8739,33 @@ export class Lowerer {
     }
     if (dst.ret.kind === "void") return src.ret.kind !== "jsval";
     if (this.coercibleValue(src.ret, dst.ret)) return true;
+    // The CLASS-INSTANCE RETURN, which funcCoerceAdapter already bridges
+    // (its `classRetProj`) and this probe did not: a factory
+    // `(sessionId) => new WaAuthSqliteStore(...)` flowing into a slot that
+    // spells the same members as a record — the store-BACKEND shape, where
+    // every one of the fifteen domain factories has exactly that pair of
+    // types. The adapter's own comment states the rung ("a factory
+    // returning a CLASS INSTANCE into a slot that spells the instance's
+    // shape as a record"), so the BUILD side of a funcAdapt lift over this
+    // pair has always existed; only the PLAN side declined, and the two
+    // disagreeing is what made `createStore({ backends: { sqlite: b } })`
+    // refuse while `f(b.stores.auth)` one nesting level out lowered.
+    //
+    // Probed here, not in coercibleValue, for that predicate's stated
+    // reason: "a class is NOT a record anywhere else". This is the one
+    // position where it is, and it is the position funcCoerceAdapter
+    // already took.
+    //
+    // CLEAN in the gate's sense: ctorWitnessProjection either plans every
+    // requested field or answers null, so an adapter it approves cannot
+    // strand a call. Interning on the plan path mirrors widthLiftPlan's
+    // own object→record rung, which calls this same helper with this same
+    // synthetic loc and for the same reason (interned per class+shape, so
+    // the build reuses the helper rather than making a second).
+    if (dst.ret.kind === "record" && src.ret.kind === "object") {
+      const synthLoc: SrcLoc = { file: "<width>", start: 0, end: 0 };
+      if (this.ctorWitnessProjection(src.ret.className, dst.ret, synthLoc) !== null) return true;
+    }
     return src.ret.kind === "void" && (dst.ret.kind === "dyn" || dst.ret.kind === "jsval");
   }
 
