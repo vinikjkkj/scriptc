@@ -87,6 +87,12 @@ const TIER_REGRESSIONS = [
   // suite goes green on the regression. The C lane fails loudly either
   // way; only this pin makes the LLVM lane say so too.
   "7392-bigint-union-truthy-eq.ts",
+  // The union-truthiness handle arms (truthy:union:netSocket and its
+  // net/http/h2/dgram siblings). PINNED because a refusal is scored as a
+  // SKIP here: without this line a revert of the emitter fix would make
+  // 7391 quietly stop running instead of failing, and the lane would go
+  // green on the regression it exists to catch.
+  "7391-truthy-union-handle-arms.ts",
 ];
 
 interface RunResult {
