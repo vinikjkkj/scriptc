@@ -8812,6 +8812,7 @@ const DV_SETTERS: Record<string, { method: IrBytesIntrinsicMethod; le: boolean }
         consumed.add(tf.name);
         continue;
       }
+      if (isDynSlot(tf.type, tIv)) continue;
       if (tf.type.kind !== "union") return false;
       if (L.armTag(tf.type.unionId, UNDEFINED_T) < 0) return false;
       if (tIv.kind === "dyn" ? !L.dynConvertible(tf.type) : !typeEquals(tf.type, tIv)) return false;
@@ -8824,11 +8825,44 @@ const DV_SETTERS: Record<string, { method: IrBytesIntrinsicMethod; le: boolean }
       fIv !== null ||
       from.fields.some((ff) => !consumed.has(ff.name) && to.fields.some((f) => f.name === ff.name));
     if (dispatchWrites) {
-      if (tIv.kind === "dyn" ? !to.fields.every((f) => L.dynConvertible(f.type)) : !to.fields.every((f) => typeEquals(f.type, tIv))) {
+      if (!to.fields.every((f) => (tIv.kind === "dyn" ? isDynSlot(f.type, tIv) || L.dynConvertible(f.type) : typeEquals(f.type, tIv)))) {
         return false;
       }
     }
     return true;
+  }
+
+  /** An 'unknown' DECLARED field of an 'unknown'-signature target: the
+   * pair recordWidthPlan already answers with its `absentDyn` arm and the
+   * overflow capture did not, which is the whole of the row-shape wall.
+   *
+   *   const row = db.get<ContactRow>(sql, args)
+   *
+   * `get<T extends Record<string, unknown>>(): T | null` is lowered at its
+   * CONSTRAINT, so the value is `{ [key: string]: unknown }` and the call
+   * site's type is `ContactRow` = `{ jid: unknown; …; [key: string]:
+   * unknown }` — declared names beside the same signature. The target has
+   * an index signature, so the pair routes to the CAPTURE planner rather
+   * than to recordWidthPlan, and the capture planner had exactly one way
+   * to initialize a target field the source does not declare: its
+   * undefined ARM. An 'unknown' field has no arm to find — it holds JS's
+   * undefined directly (dynUndefinedExpr, and `indexReadType`'s "a dyn
+   * signature already carries its own undefined singleton") — so a shape
+   * whose every declared field is `unknown` declined the whole pair.
+   *
+   * Nothing is dropped by initializing them undefined: the source's
+   * overflow walk below writes every runtime key through recordKeySet,
+   * which DISPATCHES a key naming a declared field into that field. A row
+   * that HAS `jid` fills the declared slot; a row that does not leaves the
+   * undefined an absent property read would have answered anyway. That is
+   * the same answer recordWidthPlan's keyRead arm produces one planner
+   * over, which is the agreement this restores.
+   *
+   * Bounded to a dyn signature on purpose: with a TYPED signature the
+   * dispatch write must store through at the slot's type, and an
+   * 'unknown' declared field is not that type. */
+  function isDynSlot(fieldT: IrType, tIv: IrType): boolean {
+    return fieldT.kind === "dyn" && tIv.kind === "dyn";
   }
 
   export function lowerRecordOvfCaptureHelper(L: Lowerer, fromId: string, toId: string, loc: SrcLoc,): string | null {
@@ -8864,6 +8898,7 @@ const DV_SETTERS: Record<string, { method: IrBytesIntrinsicMethod; le: boolean }
     // directly).
     type FieldInit =
       | { name: string; kind: "undef"; unionId: string; utag: number }
+      | { name: string; kind: "undefDyn" }
       | { name: string; kind: "direct"; src: IrType; lift: WidthLift };
     const inits: FieldInit[] = [];
     const consumed = new Set<string>();
@@ -8873,6 +8908,14 @@ const DV_SETTERS: Record<string, { method: IrBytesIntrinsicMethod; le: boolean }
       if (sf && directLift) {
         inits.push({ name: tf.name, kind: "direct", src: sf.type, lift: directLift });
         consumed.add(tf.name);
+        continue;
+      }
+      // The 'unknown' declared field beside an 'unknown' signature —
+      // recordWidthPlan's `absentDyn` arm, which this planner lacked. See
+      // isDynSlot above for what it is for and why the overflow walk below
+      // is what actually fills it.
+      if (isDynSlot(tf.type, tIv)) {
+        inits.push({ name: tf.name, kind: "undefDyn" });
         continue;
       }
       if (tf.type.kind !== "union") return null;
@@ -8912,7 +8955,7 @@ const DV_SETTERS: Record<string, { method: IrBytesIntrinsicMethod; le: boolean }
       fIv !== undefined ||
       orderedFields.some((ff) => !consumed.has(ff.name) && to.fields.some((f) => f.name === ff.name));
     if (dispatchWrites) {
-      if (tIv.kind === "dyn" ? !to.fields.every((f) => L.dynConvertible(f.type)) : !to.fields.every((f) => typeEquals(f.type, tIv))) {
+      if (!to.fields.every((f) => (tIv.kind === "dyn" ? isDynSlot(f.type, tIv) || L.dynConvertible(f.type) : typeEquals(f.type, tIv)))) {
         return null;
       }
     }
@@ -8949,6 +8992,8 @@ const DV_SETTERS: Record<string, { method: IrBytesIntrinsicMethod; le: boolean }
                     to.fields.find((f) => f.name === d.name)!.type,
                     loc,
                   )
+                : d.kind === "undefDyn"
+                ? dynUndefinedExpr(loc)
                 : ({
                     kind: "unionWrap",
                     unionId: d.unionId,
