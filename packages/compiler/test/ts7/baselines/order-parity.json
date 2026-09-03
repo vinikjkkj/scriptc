@@ -10044,6 +10044,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/7391-truthy-union-handle-arms.ts": {
+   "order": [
+    "<repo>/tests/corpus/7391-truthy-union-handle-arms.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/750-cycle-closure-box.ts": {
    "order": [
     "<repo>/tests/corpus/750-cycle-closure-box.ts"
