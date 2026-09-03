@@ -112,6 +112,17 @@ SCR_ARRCEN_SHARED long long scr_arrcen_total[SCR_ARRCEN_SLOTS];
 SCR_ARRCEN_SHARED long long scr_arrcen_max[SCR_ARRCEN_SLOTS];
 SCR_ARRCEN_SHARED long long scr_arrcen_kind_calls[SCR_ARRCEN_KINDS];
 SCR_ARRCEN_SHARED long long scr_arrcen_kind_elems[SCR_ARRCEN_KINDS];
+/* THE ELEMENT KIND OF EVERY TYPED-ARRAY ACCESS. The length histogram above
+ * says a 16-element buffer carries 93.8% of the reads; it does NOT say what
+ * KIND of buffer, and the two accessors' fast arm serves `SCR_BYTES_U8` and
+ * nothing else. An access on any other kind fails that arm's FIRST branch
+ * and tail-calls the full function, so an instruction saving priced as
+ * `accesses x per-access delta` is a saving on the accesses that ENTER the
+ * arm -- which the length row cannot tell apart from the ones that do not.
+ * Indexed by ScrBytesElem in scr_runtime.h's own order. */
+#define SCR_ARRCEN_ELEMS 9
+SCR_ARRCEN_SHARED long long scr_arrcen_bget_elem[SCR_ARRCEN_ELEMS];
+SCR_ARRCEN_SHARED long long scr_arrcen_bset_elem[SCR_ARRCEN_ELEMS];
 /* a slice whose copied length EQUALS the source length is a whole-array copy
  * wearing a slice's name, and it is the shape a reference would replace. */
 SCR_ARRCEN_SHARED long long scr_arrcen_slice_whole = 0;
@@ -137,6 +148,31 @@ SCR_ARRCEN_FN void scr_arrcen_note(int slot, long long n) {
   scr_arrcen_calls[slot]++;
   scr_arrcen_total[slot] += n;
   if (n > scr_arrcen_max[slot]) scr_arrcen_max[slot] = n;
+}
+
+/* The typed-array hooks' entry: the buffer length as before, plus the
+ * element kind the length row cannot carry. An out-of-range kind lands in
+ * the last slot rather than being dropped, so a new ScrBytesElem appears as
+ * a nonzero row instead of as silence. */
+SCR_ARRCEN_FN void scr_arrcen_note_bytes(int slot, long long len, int elem) {
+  scr_arrcen_note(slot, len);
+  if (elem < 0 || elem >= SCR_ARRCEN_ELEMS) elem = SCR_ARRCEN_ELEMS - 1;
+  if (slot == SCR_ARRCEN_BYTESGET) scr_arrcen_bget_elem[elem]++;
+  else if (slot == SCR_ARRCEN_BYTESSET) scr_arrcen_bset_elem[elem]++;
+}
+
+SCR_ARRCEN_FN const char *scr_arrcen_elem_name(int e) {
+  switch (e) {
+    case 0: return "u8";
+    case 1: return "u32";
+    case 2: return "f32";
+    case 3: return "i32";
+    case 4: return "f64";
+    case 5: return "i8";
+    case 6: return "buf";
+    case 7: return "i16";
+    default: return "u16-or-other";
+  }
 }
 
 SCR_ARRCEN_FN void scr_arrcen_note_slice(long long srclen, long long n, int kind) {
@@ -204,6 +240,8 @@ typedef struct {
   long long total[SCR_ARRCEN_SLOTS];
   long long kind_calls[SCR_ARRCEN_KINDS];
   long long kind_elems[SCR_ARRCEN_KINDS];
+  long long bget_elem[SCR_ARRCEN_ELEMS];
+  long long bset_elem[SCR_ARRCEN_ELEMS];
   long long whole;
   long long empty;
   long long pump_calls;
@@ -229,6 +267,10 @@ SCR_ARRCEN_FN void scr_arrcen_capture(ScrArrcenSnap *d) {
     d->kind_calls[i] = scr_arrcen_kind_calls[i];
     d->kind_elems[i] = scr_arrcen_kind_elems[i];
   }
+  for (i = 0; i < SCR_ARRCEN_ELEMS; i++) {
+    d->bget_elem[i] = scr_arrcen_bget_elem[i];
+    d->bset_elem[i] = scr_arrcen_bset_elem[i];
+  }
   d->whole = scr_arrcen_slice_whole;
   d->empty = scr_arrcen_slice_empty;
   d->pump_calls = scr_arrcen_pump_calls;
@@ -250,6 +292,10 @@ SCR_ARRCEN_FN void scr_arrcen_accum(ScrArrcenSnap *dst) {
   for (i = 0; i < SCR_ARRCEN_KINDS; i++) {
     dst->kind_calls[i] += now.kind_calls[i] - scr_arrcen_at_begin.kind_calls[i];
     dst->kind_elems[i] += now.kind_elems[i] - scr_arrcen_at_begin.kind_elems[i];
+  }
+  for (i = 0; i < SCR_ARRCEN_ELEMS; i++) {
+    dst->bget_elem[i] += now.bget_elem[i] - scr_arrcen_at_begin.bget_elem[i];
+    dst->bset_elem[i] += now.bset_elem[i] - scr_arrcen_at_begin.bset_elem[i];
   }
   dst->whole += now.whole - scr_arrcen_at_begin.whole;
   dst->empty += now.empty - scr_arrcen_at_begin.empty;
@@ -314,6 +360,11 @@ SCR_ARRCEN_FN void scr_arrcen_report_phases(FILE *f) {
       fprintf(f, "ARRCEN-PHKIND %s %d calls=%lld elems=%lld\n", scr_arrcen_phname[p], i,
               d->kind_calls[i], d->kind_elems[i]);
     }
+    for (i = 0; i < SCR_ARRCEN_ELEMS; i++) {
+      if (d->bget_elem[i] == 0 && d->bset_elem[i] == 0) continue;
+      fprintf(f, "ARRCEN-PHELEM %s %s get=%lld set=%lld\n", scr_arrcen_phname[p],
+              scr_arrcen_elem_name(i), d->bget_elem[i], d->bset_elem[i]);
+    }
     for (s = 0; s < SCR_ARRCEN_SLOTS; s++)
       for (i = 0; i < SCR_ARRCEN_ROWS; i++) {
         if (d->rows[s][i] == 0) continue;
@@ -349,6 +400,11 @@ SCR_ARRCEN_FN void scr_arrcen_report(void) {
     fprintf(f, "ARRCEN-KIND %d calls=%lld elems=%lld\n", i,
             scr_arrcen_kind_calls[i], scr_arrcen_kind_elems[i]);
   }
+  for (i = 0; i < SCR_ARRCEN_ELEMS; i++) {
+    if (scr_arrcen_bget_elem[i] == 0 && scr_arrcen_bset_elem[i] == 0) continue;
+    fprintf(f, "ARRCEN-ELEM %s get=%lld set=%lld\n", scr_arrcen_elem_name(i),
+            scr_arrcen_bget_elem[i], scr_arrcen_bset_elem[i]);
+  }
   for (s = 0; s < SCR_ARRCEN_SLOTS; s++) {
     for (i = 0; i < SCR_ARRCEN_ROWS; i++) {
       if (scr_arrcen_rows[s][i] == 0) continue;
@@ -382,6 +438,10 @@ __attribute__((constructor)) SCR_ARRCEN_FN void scr_arrcen_install(void) {
   if (arm && *arm) {
     long long n = atoll(arm), i;
     for (i = 0; i < n; i++) scr_arrcen_note_slice(41, 7, 0);
+    /* The element split gets its OWN plant, in a kind this workload cannot
+     * produce (SCR_BYTES_BUF has no index signature), so "the split never
+     * compiled in" and "this program reads no f64" stay distinguishable. */
+    for (i = 0; i < n; i++) scr_arrcen_note_bytes(SCR_ARRCEN_BYTESGET, 41, 6);
     scr_arrcen_planted = n;
   }
   atexit(scr_arrcen_report);

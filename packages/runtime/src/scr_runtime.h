@@ -7754,10 +7754,35 @@ void scr_bytes_set(ScrBytes *b, double i, double v);
  * `bytes[i]` lowers at exactly one emitter site per lane, and after
  * 92a76290 took libm out of the index check the two out-of-line bodies are
  * still 44 and 54 instructions where V8 inlines to a handful. On the real
- * zapo messaging bench send_group performs 515,725,184 typed-array element
- * accesses -- 97.5% of every one in the run -- and 93.8% of the reads are
- * on a SIXTEEN-byte buffer: AES block state, walked a byte at a time from
- * TypeScript. Every one of those is elem == SCR_BYTES_U8.
+ * zapo messaging bench send_group performs 516,760,658 typed-array element
+ * accesses -- 97.4% of every one in the run -- and 92.1% of them are on a
+ * SIXTEEN-ELEMENT buffer.
+ *
+ * That buffer is a Float64Array, NOT a Uint8Array. It is the GF(2^255-19)
+ * field element of zapo's TypeScript X25519 -- `export type Fe =
+ * Float64Array`, sixteen 16-bit limbs, tweetnacl style, in
+ * src/crypto/math/fe.ts -- and feMul and feSqr alone carry 48 and 32
+ * element-access sites, more than any other function in the program.
+ *
+ * This comment used to say "AES block state ... every one of those is
+ * elem == SCR_BYTES_U8". That was an inference from the LENGTH histogram:
+ * the census recorded `b->len` and nothing else, so a 16-ELEMENT row could
+ * not be told from a 16-BYTE one. It is now measured. An element-kind split
+ * in tests/perf/arrcensus (ARRCEN-PHELEM) reads, for send_group:
+ *
+ *     f64  311,527,696 get + 164,678,288 set   92.15%
+ *     u8    14,883,540 get +  17,530,221 set    6.27%
+ *     u32    5,024,016 get +   2,012,016 set    1.36%
+ *     i8       505,046 get +     599,835 set    0.21%
+ *
+ * and the f64 counts equal the length-16 rows to the access.
+ *
+ * The cost of believing the u8 claim was a block's work. A u8-only fast arm
+ * was priced at 20.1 instructions x 513M accesses = 10.63 G instructions
+ * removed from send_group; the A/B measured 1.000x cycles, and that null was
+ * read as evidence that the phase is stalled rather than instruction-bound.
+ * It is neither. 6.27% of the accesses entered the arm, so about 0.67 G
+ * instructions came out, and nothing moved because nothing was removed.
  *
  * Measured against the SHIPPING scr_bytes.c, compiled unmodified from this
  * tree and linked into an exact executed-instruction counter, on a 16-byte
@@ -7786,10 +7811,14 @@ void scr_bytes_set(ScrBytes *b, double i, double v);
  * trap moves, no message changes, and the declining arm has done nothing
  * observable by the time it hands over.
  *
- * Under SCR_ARRCEN_ON (tests/perf/arrcensus) -- and under SCR_NO_FASTARM,
- * which is the A/B switch -- the inline arm is compiled OUT. The census
- * counts CALLS, and an instrument that stopped seeing 97.5% of the
- * accesses it exists to count would report a collapse and be believed. */
+ * Under SCR_ARRCEN_ON (tests/perf/arrcensus) -- and under SCR_NO_FASTARM --
+ * EVERY arm is compiled out and both accessors are a plain forward. The
+ * census counts CALLS, and an instrument that stopped seeing 97.4% of the
+ * accesses it exists to count would report a collapse and be believed.
+ * SCR_NO_F64ARM is the narrower switch: it restores the u8-only shape and
+ * leaves everything else, so an A/B of the f64 arm alone runs two binaries
+ * whose emitted program text is identical and whose only difference is the
+ * body of these two functions. */
 #if defined(SCR_ARRCEN_ON) || defined(SCR_NO_FASTARM)
 static inline double scr_bytes_get_inl(const ScrBytes *b, double i) {
   return scr_bytes_get(b, i);
@@ -7798,6 +7827,10 @@ static inline void scr_bytes_set_inl(ScrBytes *b, double i, double v) {
   scr_bytes_set(b, i, v);
 }
 #else
+#ifdef SCR_NO_F64ARM
+/* THE A/B CONTROL: the u8-only shape, character for character as it stood
+ * before the f64 arm. Nothing else in the program changes between the two
+ * builds, so the emitted .ll hashes equal and only these bodies differ. */
 static inline double scr_bytes_get_inl(const ScrBytes *b, double i) {
   if (b->elem == SCR_BYTES_U8 && i >= 0.0 && i < SCR_FAST_INT_MAX) {
     int64_t n = (int64_t)i;
@@ -7817,6 +7850,70 @@ static inline void scr_bytes_set_inl(ScrBytes *b, double i, double v) {
   }
   scr_bytes_set(b, i, v);
 }
+#else
+/* The index check is ONE test for both kinds and it comes FIRST, because
+ * every arm needs the same answer from it and only then differs in how it
+ * reads the element. Written as two separate diamonds instead -- a u8 one
+ * followed by an f64 one -- the compiler does not share it: measured on the
+ * shipping toolchain the f64 path then re-ran the 2^53 bound, the sign
+ * test, the truncate-and-compare and the length bound, 14 instructions, to
+ * reach the same n it had already computed.
+ *
+ * Both arms accept a STRICT SUBSET of what the out-of-line functions accept
+ * and answer what those functions answer on it:
+ *
+ *   f64 read   scr_bytes_get's own F64 case IS this memcpy.
+ *   f64 write  scr_bytes_set's F64 case is this memcpy and no coercion --
+ *              a Float64Array element is the double. So there is no value
+ *              window on the write arm, and that is not an oversight: NaN
+ *              (payload preserved, which a round trip through int64 would
+ *              destroy), both infinities, -0.0 and every magnitude store
+ *              the same eight bytes here as they do there. The u8 arm needs
+ *              its window only because ToUint32 is not truncation outside
+ *              it.
+ *   u8         unchanged from the shape above.
+ *
+ * Every index either arm declines -- NaN, negative, fractional, both
+ * infinities, |i| >= 2^53, and every out-of-range value -- falls through to
+ * the full function and traps there with the same message and the same
+ * text. No trap moves. -0.0 still reads element 0 (-0.0 >= 0.0 is true and
+ * (double)(int64_t)-0.0 == -0.0 is true).
+ *
+ * memcpy and not a `double *` load because a subarray VIEW's data can start
+ * at any byte offset of its owner, so the address need not be 8-aligned;
+ * this is the same reason scr_bytes_get itself memcpys. */
+static inline double scr_bytes_get_inl(const ScrBytes *b, double i) {
+  if (i >= 0.0 && i < SCR_FAST_INT_MAX) {
+    int64_t n = (int64_t)i;
+    if ((double)n == i && (uint64_t)n < (uint64_t)b->len) {
+      if (b->elem == SCR_BYTES_F64) {
+        double v;
+        memcpy(&v, b->data + n * 8, 8);
+        return v;
+      }
+      if (b->elem == SCR_BYTES_U8) return (double)b->data[n];
+    }
+  }
+  return scr_bytes_get(b, i);
+}
+
+static inline void scr_bytes_set_inl(ScrBytes *b, double i, double v) {
+  if (i >= 0.0 && i < SCR_FAST_INT_MAX) {
+    int64_t n = (int64_t)i;
+    if ((double)n == i && (uint64_t)n < (uint64_t)b->len) {
+      if (b->elem == SCR_BYTES_F64) {
+        memcpy(b->data + n * 8, &v, 8);
+        return;
+      }
+      if (b->elem == SCR_BYTES_U8 && v >= SCR_FAST_I64_LO && v < SCR_FAST_I64_HI) {
+        b->data[n] = (uint8_t)(int64_t)v;
+        return;
+      }
+    }
+  }
+  scr_bytes_set(b, i, v);
+}
+#endif
 #endif
 
 /* The same two arms under the LIBCALL convention, for the LLVM lane, which
