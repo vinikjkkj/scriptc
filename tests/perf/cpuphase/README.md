@@ -601,3 +601,136 @@ self-time, and Curve25519 scalar multiplication is ~85-90% `fe_mul`/`fe_sq`,
 so field arithmetic is on the order of **29% of `send_1to1`** -- one phase of
 six. `g_rounds` (12.4%) is Blake2b and is *not* field arithmetic, so the 52%
 "crypto" rollup must not be read as 52% field work.
+
+## The wait was never the sleep's granularity. It was the sleep.
+
+Measured 2026-09-02, **the real zapo bench at its full default workload**
+(1000 contacts x2 devices, 4 groups x500 members, 1000 msgs/scenario, store
+`memory`), four reps, arms interleaved inside every rep, node v25.9.0 run
+FIRST in each rep so session drift works against the compiled arms.
+
+Both compiled arms are **the same binary**, separated only by
+`SCRIPTC_NET_WAIT` — a runtime knob, because the Windows cycle lane cannot
+adjudicate a code-layout change. `off` is what main does today (the
+high-resolution capped sleep); `on` waits on the sockets as well
+(`scrp_wait_win32`, `tests/perf/looplatency/README.md` for the primitive
+measurements behind it).
+
+### The phase that answered it was already in the bench
+
+`bench-prof`'s own `[phase]` line splits each phase into "waiting on the
+control channel" and everything else, and the two build phases are pure
+sequential RPC. **The call counts are identical between the lanes**, so the
+whole question is what one call costs:
+
+| phase | calls | node ms/call | off ms/call | on ms/call |
+| --- | --- | --- | --- | --- |
+| `buildContacts` | 2,000 | 1.805 | **3.173** | 1.868 |
+| `buildGroups` | 4,004 | 0.978 | **2.285** | 0.974 |
+
+`off` is **+1.368 ms** and **+1.307 ms** per round trip against node. The
+flat cost of one capped idle sleep, measured standalone on a loopback pair,
+is **1.5164 ms**. Multiply back out: 1.368 x 2000 = 2.74 s and 1.307 x 4004
+= 5.23 s, against measured wall gaps of 2.74 s and 5.24 s. **The per-call
+delta accounts for 99.6% and 99.7% of those two phases' entire gap.** `on`
+lands at +0.063 ms and -0.004 ms — at node, and at node for the right
+reason.
+
+### Per phase, medians of ratios formed INSIDE each rep
+
+```
+phase          on/off (the change)   off/node (main)   on/node
+buildContacts  0.59x [0.58-0.60]     1.76x [1.71-1.79]  1.04x [1.02-1.05]
+buildGroups    0.42x [0.41-0.45]     2.36x [2.20-2.47]  1.00x [0.99-1.00]
+send_1to1      0.89x [0.77-1.00]     1.45x [1.28-1.66]  1.28x [1.24-1.30]
+recv_1to1      0.92x [0.85-1.01]     1.13x [0.99-1.22]  1.03x [1.00-1.04]
+send_group     1.00x [0.94-1.04]     3.41x [3.25-3.50]  3.34x [3.28-3.51]
+recv_group     1.08x [1.02-1.21]     0.98x [0.83-1.06]  1.05x [1.01-1.09]
+
+A/A floor, same env same binary, wall:
+buildContacts 1.00 [1.00-1.00]   buildGroups 1.00 [0.99-1.01]
+send_1to1     1.00 [0.99-1.02]   recv_1to1   0.99 [0.98-1.04]
+send_group    0.98 [0.93-1.04]   recv_group  1.02 [0.98-1.22]
+```
+
+**Cycles did not pay for it.** Summed over the five phases that are not
+`send_group`, `on/off` cycles are 0.99 / 1.02 / 0.88 / 0.89 across the four
+reps — down, never up. Fewer turns is less work, not more.
+
+The five phases together, wall ms, paired per rep:
+
+```
+rep   node    off      on     on-off   on/off   A/A floor  off/node  on/node
+ 1   14802   24061   15898    -8163    0.661      0.994      1.63x    1.07x
+ 2   14914   23823   15924    -7899    0.668      1.001      1.60x    1.07x
+ 3   16061   25941   17061    -8880    0.658      1.018      1.62x    1.06x
+ 4   16194   26197   17074    -9123    0.652      1.008      1.62x    1.05x
+```
+
+**1.62x node to 1.06x node, a median 8.5 s off the run**, against an A/A
+floor of +-1.8% on the same sum. Including `send_group` (which is another
+lane's compute problem and does not move: 1.00x [0.94-1.04]) the whole
+six-phase sum goes 2.00x -> 1.55x node, a median 8.4 s.
+
+### Two rows that did NOT do what the mechanism predicts
+
+Both are recorded because a mechanism that explains everything explains
+nothing.
+
+- **`send_1to1` issues ZERO control-channel RPC calls** and is still 1.28x
+  node's wall at **0.84x** node's cycles. It is waiting on something, and
+  it is not this. The change moves it 0.89x [0.77-1.00] — and the raw reps
+  say why that median is misleading: reps 1-2 are 3197 -> 3183 and 3253 ->
+  3243, i.e. *unchanged*, while reps 3-4 have the `off` arm degrade to
+  ~4200 ms (and its cycles rise from 11.5 Gc to 15.0 Gc) where `on` stays
+  flat at ~3280. So the honest reading is **no effect on `send_1to1`'s
+  steady state**, plus the removal of a late-session degradation that has
+  not been characterised. Its remaining ~740 ms of wall over node, at lower
+  cycles, is unattributed.
+- **`recv_group` looked slower in the first session and is not.** It read
+  1.08x [1.02-1.21] there, against the loosest A/A floor of the six (1.02
+  [0.98-1.22]) and an absolute spread inside a single arm of 1532-1958 ms.
+  A second session on the same change re-measured it at **1.00x
+  [0.99-1.18]** against an A/A floor of 1.07x. It is floor, not signal, and
+  it is written down here because the first session's number was on its way
+  into a finding as a real trade-off before the confirmation run existed.
+  A mechanism was even available for it -- a readiness-driven wait stops
+  batching arrivals into one 1.5 ms window, and this phase is 97.3% CPU
+  with its 1,004 calls overlapping at 392% of wall -- which is exactly why
+  it needed a second measurement rather than an explanation.
+
+### What this does not touch
+
+`send_group` is compute, not waiting: 2.54x node's cycles, unmoved at 1.00x
+[0.94-1.04] by a change that is entirely about the idle wait. It is scored
+here only to show the instrument can report "nothing changed".
+
+### Confirmed in a second session, on a busier host
+
+Everything above is one session. A second, three reps, same script, run
+against the binary rebuilt from the committed tree (20 bytes different from
+the measured one: the PE TimeDateStamp at 0x80 and the debug directory's
+PDB GUID and age -- link nondeterminism, no code). The host was
+substantially busier: node's own five-phase sum went 14.8-16.2 s to
+20.2-23.8 s and the A/A floor loosened from +-1.8% to 0.941-1.090.
+
+```
+per-RPC-call channel wait, ms      session 1              session 2
+                             node   off    on       node   off    on
+buildContacts                1.805  3.173  1.868    2.655  3.792  2.773
+buildGroups                  0.978  2.285  0.974    1.400  2.564  1.381
+```
+
+`off` is **+1.14 to +1.37 ms** per call over node in both sessions; `on` is
+**+0.06 to +0.12** on `buildContacts` and **zero to -0.02** on
+`buildGroups`. The five-phase sums, paired per rep:
+
+```
+session 2   node    off      on     on-off   on/off   A/A floor  on/node
+  rep1     23754   33051   23908    -9143    0.723      0.941     1.01x
+  rep2     21754   29141   23113    -6028    0.793      1.061     1.06x
+  rep3     20153   31500   25476    -6024    0.809      1.090     1.26x
+```
+
+Across both sessions, seven reps, the median saving on the five phases is
+**8.2 s** and `on/off` never once reads above 0.81.
