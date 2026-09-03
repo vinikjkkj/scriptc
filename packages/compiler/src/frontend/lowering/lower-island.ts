@@ -656,37 +656,39 @@ import { PoisonError, dynUndefinedExpr, newFnCtx, own } from "./lowerer.js";
         // entry is a whole-export replacement (`module.exports =
         // Database`), so the lexer's named export, the interop `default`,
         // and the `module.exports` alias are all the constructor or the
-        // error class. They ride here as TRAP functions (dynTrapFnValue,
-        // the --npm-static namespace's own stance one arm below): `typeof`
-        // answers "function" the way Node does, `Object.keys` lists them,
-        // `in` finds them, and JSON.stringify skips them — and only
-        // INVOKING one throws, with the spelling that works named in the
-        // message.
+        // error class. They are REAL CALLABLES here (scr_sqlite_value.c,
+        // through the two libCalls below), over the same entry points the
+        // typed lowering calls, so the two lanes cannot answer
+        // differently about the same database: `new ns.default(path)`
+        // opens one, `db.prepare(sql)` prepares against it, and
+        // `db.exec(a) === db` is true because exec answers the object it
+        // was installed on. `default` and `module.exports` are ONE value
+        // (the runtime's process singleton), which is what makes
+        // `ns.default === ns["module.exports"]` true the way Node's
+        // whole-export replacement makes it true.
         //
-        // Two earlier cuts, both silent wrong answers. An EMPTY object
-        // failed twice over: `Object.keys(ns)` came back `[]` where Node
-        // says three, and `"default" in ns` came back false.
-        // UNDEFINED-valued own properties fixed those four cells and left
-        // a fifth broken — `typeof ns.default` read "undefined" where
-        // Node reads "function", so the standard optional-driver probe
-        // (`typeof candidate === 'function'`) took the wrong arm and the
-        // program reported "invalid sqlite driver export" at exit 0. A
-        // trap function answers that cell correctly and turns the use
-        // into a named refusal.
-        const nsKey = (name: string, what: string): { key: IrExpr; value: IrExpr } => ({
+        // Three earlier cuts, and the first two were silent wrong
+        // answers. An EMPTY object failed twice over: `Object.keys(ns)`
+        // came back `[]` where Node says three, and `"default" in ns`
+        // came back false. UNDEFINED-valued own properties fixed those
+        // four cells and left a fifth broken — `typeof ns.default` read
+        // "undefined" where Node reads "function", so the standard
+        // optional-driver probe (`typeof candidate === 'function'`) took
+        // the wrong arm and the program reported "invalid sqlite driver
+        // export" at exit 0. TRAP functions (dynTrapFnValue, the
+        // --npm-static namespace's stance one arm below) answered that
+        // cell correctly and turned the USE into a named refusal — which
+        // is honest, and still not a database. This arm is the database.
+        const nsFn = (fn: "sqlite.ctorValue" | "sqlite.errorClassValue"): IrExpr => ({
+          kind: "libCall",
+          fn,
+          args: [],
+          type: DYN,
+          loc,
+        });
+        const nsKey = (name: string, fn: "sqlite.ctorValue" | "sqlite.errorClassValue"): { key: IrExpr; value: IrExpr } => ({
           key: { kind: "strLit", value: name, type: STRING, loc },
-          value: dynTrapFnValue(
-            L,
-            `the better-sqlite3 namespace's '${name}' export is ${what}, which the ` +
-              `static lane serves by TYPE and not as a value — the namespace reached ` +
-              `this call through a widening (unknown/any), and nothing left in it ` +
-              `names the compiler-served surface. Keep the namespace's type and ` +
-              `construct AT the site: \`const ns = await import("better-sqlite3"); ` +
-              `const db = new ns.default(path);\` — with no \`: unknown\` (or other ` +
-              `annotation) on the binding in between, and no annotation on what ` +
-              `\`db.prepare()\` returns`,
-            loc,
-          ),
+          value: nsFn(fn),
         });
         const ns: IrExpr = {
           kind: "dynObjLit",
@@ -694,9 +696,9 @@ import { PoisonError, dynUndefinedExpr, newFnCtx, own } from "./lowerer.js";
           // object is a snapshot, so a write to it would land nowhere.
           staticCopy: true,
           fields: [
-            nsKey("SqliteError", "the error class"),
-            nsKey("default", "the Database constructor"),
-            nsKey("module.exports", "the Database constructor (the lexer's whole-export alias)"),
+            nsKey("SqliteError", "sqlite.errorClassValue"),
+            nsKey("default", "sqlite.ctorValue"),
+            nsKey("module.exports", "sqlite.ctorValue"),
           ],
           type: DYN,
           loc,

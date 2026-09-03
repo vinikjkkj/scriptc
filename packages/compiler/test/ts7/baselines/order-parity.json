@@ -10092,6 +10092,18 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/7410-an-optional-function-member-arrives-from-unknown.ts": {
+   "order": [
+    "<repo>/tests/corpus/7410-an-optional-function-member-arrives-from-unknown.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/7411-a-served-package-value-fills-a-driver-shaped-record.ts": {
+   "order": [
+    "<repo>/tests/corpus/7411-a-served-package-value-fills-a-driver-shaped-record.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/750-cycle-closure-box.ts": {
    "order": [
     "<repo>/tests/corpus/750-cycle-closure-box.ts"

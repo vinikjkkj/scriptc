@@ -22,7 +22,7 @@ import {
 import { validateSidecar } from "./library/sidecar-validate.js";
 import { entryFunctionExports, type EntryExportInfo } from "./frontend/lib-exports.js";
 import { entryContractFacts, type ContractFacts } from "./frontend/lib-contract.js";
-import { moduleLibAsyncSurface, moduleLibNondeterministicSurface, moduleEmbedsBuiltin, moduleEmbedsNetIsland, moduleEmbedsCompressedNpm, moduleUsesAbortSignal, moduleUsesAssert, moduleUsesChildStream, moduleUsesCopying, moduleUsesDc, moduleUsesDgram, moduleUsesDynAsync, moduleUsesDynInvoke, moduleUsesEmitter, moduleUsesFetch, moduleUsesFetchStatic, moduleUsesFetchDispatch, moduleUsesFileHandle, moduleUsesFsWatch, moduleUsesAbortHttp, moduleUsesHttpBody, moduleUsesHttpPipe, moduleUsesHttp2, moduleUsesHttpServer, moduleUsesInspect, moduleUsesNet, moduleUsesNodeTest, moduleUsesProcessEvents, moduleUsesQs, moduleUsesRegex, moduleUsesRequireVerdict, moduleUsesSearchParams, moduleUsesSqlite, moduleUsesStream, moduleUsesUrl, moduleUsesSymbol, moduleUsesTls, moduleUsesTlsCa, moduleUsesWsGlobal, moduleUsesWsDispatch, moduleUsesWrtc, moduleUsesDate, moduleUsesBigInt,
+import { moduleLibAsyncSurface, moduleLibNondeterministicSurface, moduleEmbedsBuiltin, moduleEmbedsNetIsland, moduleEmbedsCompressedNpm, moduleUsesAbortSignal, moduleUsesAssert, moduleUsesChildStream, moduleUsesCopying, moduleUsesDc, moduleUsesDgram, moduleUsesDynAsync, moduleUsesDynInvoke, moduleUsesEmitter, moduleUsesFetch, moduleUsesFetchStatic, moduleUsesFetchDispatch, moduleUsesFileHandle, moduleUsesFsWatch, moduleUsesAbortHttp, moduleUsesHttpBody, moduleUsesHttpPipe, moduleUsesHttp2, moduleUsesHttpServer, moduleUsesInspect, moduleUsesNet, moduleUsesNodeTest, moduleUsesProcessEvents, moduleUsesQs, moduleUsesRegex, moduleUsesRequireVerdict, moduleUsesSearchParams, moduleUsesSqlite, moduleUsesSqliteValue, moduleUsesStream, moduleUsesUrl, moduleUsesSymbol, moduleUsesTls, moduleUsesTlsCa, moduleUsesWsGlobal, moduleUsesWsDispatch, moduleUsesWrtc, moduleUsesDate, moduleUsesBigInt,
   moduleUsesAsym, moduleUsesCipher, moduleUsesZlib, type IrLibSection, type IrModule, type IrRecordShape, type IrType, type SrcLoc } from "./ir/nodes.js";
 import { serializeModule } from "./ir/serialize.js";
 import { validateModule } from "./ir/validate.js";
@@ -958,6 +958,9 @@ export async function compile(entryPath: string, opts: CompileOptions): Promise<
       // The gate that keeps 269,649 lines of vendored SQLite out of every
       // binary that does not use it (see CcOptions.sqlite).
       sqlite: moduleUsesSqlite(lowered.module),
+      // ...and the narrower gate for the package's VALUE surface, which
+      // only a program reaching it through an untyped namespace mints.
+      sqliteValue: moduleUsesSqliteValue(lowered.module),
       // The link gate for the WebRTC handles: a declared shape emits
       // release calls even though nothing constructs one.
       wrtc: moduleUsesWrtc(lowered.module),
