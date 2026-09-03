@@ -48,6 +48,19 @@ SCR_CS_SHARED unsigned long long scr_cs_mark = 0;    /* ... in markRoots/markGra
 SCR_CS_SHARED unsigned long long scr_cs_scan = 0;    /* ... in scan/scanBlack */
 SCR_CS_SHARED unsigned long long scr_cs_white = 0;   /* ... in collectWhite */
 SCR_CS_SHARED unsigned long long scr_cs_free = 0;    /* ... in the teardowns */
+/* The arena, counted where the residency profiler cannot see it. A carve is
+ * invisible to any malloc interposer (no malloc happens), and the OVERFLOW
+ * path -- a block the pool's byte budget refused, which must go on the
+ * arena's own list and never to free() -- is not reached on zapo at all,
+ * because that budget is never reached. Rebuild with
+ * -DSCR_POOL_DEPTH=1 -DSCR_POOL_BUDGET=0 to force it and read `argive` here:
+ * a zero there under a starved pool means the branch did not run, which is
+ * the one thing a passing test cannot tell you. */
+SCR_CS_SHARED unsigned long long scr_cs_archunk = 0; /* 64 KiB chunks taken */
+SCR_CS_SHARED unsigned long long scr_cs_arcarve = 0; /* blocks bump-carved */
+SCR_CS_SHARED unsigned long long scr_cs_arhit = 0;   /* popped off an arena list */
+SCR_CS_SHARED unsigned long long scr_cs_argive = 0;  /* pushed onto one */
+SCR_CS_SHARED unsigned long long scr_cs_arcalloc = 0; /* fell back to calloc */
 SCR_CS_SHARED unsigned long long scr_cs_t0 = 0;
 SCR_CS_SHARED unsigned long long scr_cs_p0 = 0;
 SCR_CS_SHARED int scr_cs_registered = 0;
@@ -76,6 +89,14 @@ SCR_CS_FN void scr_cs_report(void) {
           (double)scr_cs_tot / 1e6, (double)scr_cs_mark / 1e6,
           (double)scr_cs_scan / 1e6, (double)scr_cs_white / 1e6,
           (double)scr_cs_free / 1e6);
+  fprintf(f, "[cycstat] arena chunks=%llu carved=%llu listhit=%llu"
+             " listgive=%llu callocfallback=%llu\n",
+          scr_cs_archunk, scr_cs_arcarve, scr_cs_arhit, scr_cs_argive,
+          scr_cs_arcalloc);
+  if (scr_cs_arcarve == 0) {
+    fprintf(f, "[cycstat] ARENA NEVER CARVED - either SCR_CYCLE_ARENA=0 or the"
+               " arena is not reached. Not a measurement of the arena.\n");
+  }
   if (f != stderr) fclose(f);
 }
 
@@ -98,6 +119,7 @@ SCR_CS_FN void scr_cs_phase_end(unsigned long long *acc) {
 #define SCR_CS_PHASE_BEGIN() scr_cs_phase_begin()
 #define SCR_CS_PHASE_END(which) scr_cs_phase_end(&scr_cs_##which)
 #define SCR_CS_ADD(which, n) (scr_cs_##which += (unsigned long long)(n))
+#define SCR_CS_BUMP(which) (scr_cs_##which += 1u)
 
 #else /* not armed: every hook is nothing at all */
 
@@ -106,6 +128,7 @@ SCR_CS_FN void scr_cs_phase_end(unsigned long long *acc) {
 #define SCR_CS_PHASE_BEGIN() ((void)0)
 #define SCR_CS_PHASE_END(which) ((void)0)
 #define SCR_CS_ADD(which, n) ((void)0)
+#define SCR_CS_BUMP(which) ((void)0)
 
 #endif /* SCR_CYCSTAT_ON */
 #endif /* SCR_CYC_STAT_H */
