@@ -1,0 +1,6 @@
+timer-handle-unmodelled-key.ts:20:32 - error SC1090: 'in' on 'number' receivers (only process.env, Error instances, record-typed values, and unions of fixed record shapes answer; narrow first: check a discriminant field, or compare with '!== undefined'/'!== null' for unit arms) are not supported yet
+
+  19 | 
+  20 | console.log("internal field:", "_idleTimeout" in t);
+     |                                ^~~~~~~~~~~~~~~~~~~
+  21 | clearInterval(t);

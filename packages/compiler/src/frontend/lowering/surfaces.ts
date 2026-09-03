@@ -2043,6 +2043,108 @@ export const BUILTIN_MODULE_FENCE_HINTS: Record<string, Record<string, string | 
     return viaNode;
   }
 
+/* ── stdlib OPAQUE HANDLES: a number here, an object in Node ─────────────
+ *
+ * `NodeJS.Timeout` (setTimeout/setInterval's return) and `NodeJS.Immediate`
+ * (setImmediate's) map to F64 — the numeric timer id — because that is what
+ * the runtime's timer registry keys on, and `.ref()`/`.unref()`/`.hasRef()`
+ * lower over that handle (frontend/types.ts's Timeout arm says so).
+ *
+ * The representation is not the problem; answering QUESTIONS ABOUT it from
+ * the representation is. Node's value is an OBJECT, so `typeof t` is
+ * "object" and `'unref' in t` is `true` — and both of those were being
+ * answered off the IR type instead of the declared one:
+ *
+ *     const t = setInterval(f, 1e5)
+ *     typeof t              // Node "object";  this compiler said "number"
+ *     typeof t === 'object' // Node true;      this compiler said false
+ *     'unref' in t          // Node true;      this compiler REFUSED
+ *                           //   ("'in' on 'number' receivers")
+ *
+ * Measured on both backends at exit 0 with ZERO diagnostics — a silent
+ * wrong answer, in exactly the shape a library uses to tell a Node timer
+ * from a browser one:
+ *
+ *     if (typeof this.timer === 'object' && 'unref' in this.timer) {
+ *         this.timer.unref()
+ *     }
+ *
+ * (zapo `store-mysql/cleanup.ts:59` and `store-postgres/cleanup.ts`, both
+ * verbatim.) There the divergence is not cosmetic: the guard is how the
+ * poller releases the event loop, so a compiled store never unref'd its
+ * timer and kept the loop alive.
+ *
+ * `typeof` is the one consumer that never needs the value, and `in` over a
+ * declared member set is the same kind of question, so both read the
+ * DECLARED type — the same discipline stdlibGlobalTypeOfAnswer already
+ * uses for `typeof process` / `typeof Math`. */
+  const HANDLE_OBJECT_INTERFACES = new Set(["Timeout", "Immediate"]);
+
+/** The members `NodeJS.Timeout`/`NodeJS.Immediate` DECLARE. `in` answers
+   * `true` for exactly these and keeps its fence for every other key:
+   * Node's real Timeout also carries internal fields (`_idleTimeout`,
+   * `_idlePrev`, …) that nothing here models, and answering `false` for one
+   * of those would be the same class of silent wrong answer this table
+   * exists to remove. */
+  const HANDLE_OBJECT_MEMBERS = new Set(["ref", "unref", "hasRef", "refresh"]);
+
+/** The stdlib opaque-handle interface `node`'s DECLARED type is, or null.
+   *
+   * Deliberately narrow. Provenance-checked (an interface of the same name
+   * declared by the program maps as a record and never reaches here), and
+   * SINGLE-constituent only: a union is left alone because `Timeout | null`
+   * answers "object" for BOTH arms in Node while `Timeout | undefined`
+   * does not, and the arm chain above this is the machinery that already
+   * gets per-arm answers right. Every use site here has been narrowed to
+   * the handle by the time its IR type is f64. */
+  function handleInterfaceOf(L: Lowerer, t: ts.Type): string | null {
+    const sym = t.getSymbol();
+    if (!sym || !HANDLE_OBJECT_INTERFACES.has(sym.name)) return null;
+    const decls = L.checker.declarationsOf(sym);
+    if (decls.length === 0) return null;
+    let viaLib = false;
+    for (const d of decls) {
+      if (!ts.isInterfaceDeclaration(d)) return null;
+      if (L.isStdlibFile(d.getSourceFile())) viaLib = true;
+    }
+    return viaLib ? sym.name : null;
+  }
+
+  export function stdlibHandleObjectTypeOf(L: Lowerer, node: ts.Expression): string | null {
+    const t = L.typeOf(node);
+    if (t.isUnionType()) return null;
+    const found = handleInterfaceOf(L, t);
+    if (found === null && process.env["SCRIPTC_HANDLE_WHY"] !== undefined) {
+      console.error(`[handle] declined ${node.getText().slice(0, 40)} :: ${L.checker.typeToString(t)} union=${t.isUnionType()} sym=${t.getSymbol()?.name ?? "-"}`);
+    }
+    return found;
+  }
+
+/** `typeof` alone: the NULL arm may ride along, because Node answers
+   * "object" for `null` too — so `Timeout | null` has ONE answer and the
+   * fold is exact. `undefined` may not (Node answers "undefined"), and any
+   * other arm may not either, so both decline and keep the arm chain above.
+   * `in` deliberately does NOT use this: `'unref' in null` throws. */
+  export function stdlibHandleTypeOfAnswersObject(L: Lowerer, node: ts.Expression): boolean {
+    const t = L.typeOf(node);
+    const arms: readonly ts.Type[] = t.isUnionType() ? t.getTypes() : [t];
+    let sawHandle = false;
+    for (const a of arms) {
+      if (handleInterfaceOf(L, a) !== null) { sawHandle = true; continue; }
+      if ((a.flags & ts.TypeFlags.Null) !== 0) continue;
+      if (process.env["SCRIPTC_HANDLE_WHY"] !== undefined) {
+        console.error(`[handle] typeof declined ${node.getText().slice(0, 40)} :: arm ${L.checker.typeToString(a)} flags=${a.flags} sym=${a.getSymbol()?.name ?? "-"}`);
+      }
+      return false;
+    }
+    return sawHandle;
+  }
+
+/** True when the opaque-handle interfaces declare `key` as a member. */
+  export function stdlibHandleDeclaresMember(key: string): boolean {
+    return HANDLE_OBJECT_MEMBERS.has(key);
+  }
+
 /** `Object.getOwnPropertyNames` — and its twin `Object.keys` — taken as a
    * VALUE rather than called. The diffieHellman lift, one surface over.
    *
