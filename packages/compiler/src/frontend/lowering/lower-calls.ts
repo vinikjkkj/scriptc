@@ -22,7 +22,7 @@ import { bufEncoding, dynStringReceiver, lowerArrayFromCall, lowerBytesStaticFro
 import { lowerBareRequireCall, lowerChildStreamMethodCall, lowerCreateRequireCall, lowerDiffieHellmanCallbackCall, lowerDirentMethodCall, lowerPerfHooksCall, lowerProcStreamMethodCall, lowerReflectApplyCall, lowerStringFromCharCodeApply, lowerWatcherMethodCall } from "./lower-builtins.js";
 import { lowerSqliteMethodCall, lowerSqliteNew } from "./lower-sqlite.js";
 import { lowerWrtcMethodCall } from "./lower-wrtc.js";
-import { classHasKeyHelper, classInMemberNames, droppableStatic, dynAssertionReceiver, fnOwnCounters, keyedCalleeAtUndefinedArm, unionArmBridge, fnOwnPropBox, fnOwnRoutableKey, fnOwnWhy, lowerPromiseAllTupleCall, lowerPromiseRejectCall, narrowBridgeDyn, probeLower, recordArmStringable, templateRawTextOf } from "./lower-exprs.js";
+import { classHasKeyHelper, classInMemberNames, droppableStatic, dynAssertionReceiver, fnOwnCounters, keyedCalleeAtUndefinedArm, spawnResStreamArg, jsonStringifySpawnStreamArg, unionArmBridge, fnOwnPropBox, fnOwnRoutableKey, fnOwnWhy, lowerPromiseAllTupleCall, lowerPromiseRejectCall, narrowBridgeDyn, probeLower, recordArmStringable, templateRawTextOf } from "./lower-exprs.js";
 import { httpClientFnBindingOf, isStreamUndefCallExpr, lowerHttpClientFnCall } from "./lower-server.js";
 import { CLASS_PROPS_FIELD, EMITTER_API_MEMBERS, definePropSlotSiteOf, definePropTableSiteOf, exactInstanceClassOf, findGenericMethodOn, lowerClassGenericMethodCall, lowerStaticMethodCall, type ClassInfo } from "./lower-classes.js";
 import { boundEmitDispatcher, emitterRooted, lowerEmitterMethodCall } from "./lower-emitter.js";
@@ -3953,7 +3953,12 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
         // holds one (narrowBridgeDyn), whose validation this consumer does
         // not need. On a hit, and on a soundly narrowed dyn, the two
         // renderings are the same bytes.
-        const raw = L.lowerExpr(a);
+        // `console.log(r.stdout)` on a spawnSync result: taken at the
+        // UNDEFINED-ARMED width, because a spawn that never started reads
+        // `undefined` there and the formatter below renders that arm as
+        // the word Node prints (spawnResStreamArg). Null everywhere else,
+        // and the property access answers at its own width.
+        const raw = spawnResStreamArg(L, a) ?? jsonStringifySpawnStreamArg(L, a) ?? L.lowerExpr(a);
         const lowered = L.recordKeyReadAtSlotWidth(raw, DYN) ?? narrowBridgeDyn(raw) ?? raw;
         if (lowered.type.kind === "jsval") {
           // Node prints objects with util.inspect formatting, which

@@ -662,6 +662,7 @@ const LIB_FN_SYMS: Record<string, string> = {
   "cp.execCapture": "scr_exec_capture",
   "spawnRes.stdout": "scr_spawn_res_stdout",
   "spawnRes.stderr": "scr_spawn_res_stderr",
+  "spawnRes.hasOutput": "scr_spawn_res_has_output",
   "child.killed": "scr_child_killed",
   "child.kill": "scr_child_kill",
   "child.killNum": "scr_child_kill_num",
