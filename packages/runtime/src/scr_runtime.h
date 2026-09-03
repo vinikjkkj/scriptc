@@ -3043,6 +3043,12 @@ bool scr_spawn_res_has_status(ScrSpawnRes *r);
 double scr_spawn_res_status(ScrSpawnRes *r);
 ScrStr *scr_spawn_res_stdout(ScrSpawnRes *r); /* +1 */
 ScrStr *scr_spawn_res_stderr(ScrSpawnRes *r); /* +1 */
+/* Node's `result.output !== null` — false exactly when the spawn itself
+ * failed, where v25 derives the streams as `output?.[1]` / `?.[2]` and
+ * both therefore read UNDEFINED. The two getters above still hand back
+ * "" in that state (every existing reader keeps a valid string); this is
+ * the predicate the undefined-armed read consults. */
+bool scr_spawn_res_has_output(ScrSpawnRes *r);
 /* result.signal — the termination signal's name when a signal killed the
  * child (a timeout's killSignal included), the null arm otherwise; the
  * emitter wraps type-directedly over the has/get pair like status. */

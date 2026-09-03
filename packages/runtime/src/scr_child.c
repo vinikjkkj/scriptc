@@ -793,6 +793,13 @@ struct ScrSpawnRes {
   double status;
   ScrStr *out;
   ScrStr *err;
+  /* Node's `output` array exists only when the child was really started:
+   * on a SPAWN FAILURE v25 leaves it null and derives the streams with
+   * `result.output?.[1]`, so `stdout` and `stderr` are UNDEFINED there —
+   * not "" and not the empty capture. The strings below stay "" so every
+   * existing reader keeps a valid ScrStr; this flag is what the
+   * undefined-armed read consults. */
+  bool has_out;
   const char *spawn_errname;
   ScrStr *cmd;
   const char *signal_name;
@@ -820,6 +827,9 @@ bool scr_spawn_res_has_status(ScrSpawnRes *r) { return r->has_status; }
 double scr_spawn_res_status(ScrSpawnRes *r) { return r->status; }
 ScrStr *scr_spawn_res_stdout(ScrSpawnRes *r) { return scr_str_retain(r->out); }
 ScrStr *scr_spawn_res_stderr(ScrSpawnRes *r) { return scr_str_retain(r->err); }
+/* Node's `output !== null`: false ONLY when the spawn itself failed, and
+ * then `result.stdout` / `result.stderr` are undefined. */
+bool scr_spawn_res_has_output(ScrSpawnRes *r) { return r->has_out; }
 bool scr_spawn_res_has_signal(ScrSpawnRes *r) { return r->signal_name != NULL; }
 ScrStr *scr_spawn_res_signal(ScrSpawnRes *r) {
   return scr_str_new(r->signal_name, strlen(r->signal_name));
@@ -848,6 +858,7 @@ static ScrSpawnRes *scr_spawn_res_new(bool has_status, double status,
   r->status = status;
   r->out = out;
   r->err = err;
+  r->has_out = true;
   r->spawn_errname = NULL;
   r->cmd = NULL;
   r->signal_name = NULL;
@@ -882,6 +893,7 @@ static ScrSpawnRes *scr_spawn_sync_core(ScrStr *cmd, ScrArr *args, double timeou
     free(w.out.data);
     free(w.err.data);
     ScrSpawnRes *r = scr_spawn_res_new(false, 0, scr_str_new("", 0), scr_str_new("", 0));
+    r->has_out = false; /* Node: no `output` array at all — the streams read undefined */
     r->spawn_errname = w.spawn_errname;
     r->cmd = scr_str_retain(cmd);
     return r;
@@ -1952,6 +1964,13 @@ struct ScrSpawnRes {
   double status;
   ScrStr *out; /* captured stdout, utf8 */
   ScrStr *err; /* captured stderr, utf8 */
+  /* Node's `output` array exists only when the child was really started:
+   * on a SPAWN FAILURE v25 leaves it null and derives the streams with
+   * `result.output?.[1]`, so `stdout` and `stderr` are UNDEFINED there —
+   * not "" and not the empty capture. The strings above stay "" so every
+   * existing reader keeps a valid ScrStr; this flag is what the
+   * undefined-armed read consults. */
+  bool has_out;
   /* Spawn failure (Node's `error` property): the errno name for the
    * message ("spawnSync <file> ENOENT") and `code` stamp — a timeout kill
    * rides the same slot as ETIMEDOUT. NULL = no error — the property
@@ -1986,6 +2005,9 @@ bool scr_spawn_res_has_status(ScrSpawnRes *r) { return r->has_status; }
 double scr_spawn_res_status(ScrSpawnRes *r) { return r->status; }
 ScrStr *scr_spawn_res_stdout(ScrSpawnRes *r) { return scr_str_retain(r->out); }
 ScrStr *scr_spawn_res_stderr(ScrSpawnRes *r) { return scr_str_retain(r->err); }
+/* Node's `output !== null`: false ONLY when the spawn itself failed, and
+ * then `result.stdout` / `result.stderr` are undefined. */
+bool scr_spawn_res_has_output(ScrSpawnRes *r) { return r->has_out; }
 bool scr_spawn_res_has_signal(ScrSpawnRes *r) { return r->signal_name != NULL; }
 ScrStr *scr_spawn_res_signal(ScrSpawnRes *r) {
   return scr_str_new(r->signal_name, strlen(r->signal_name));
@@ -2070,6 +2092,7 @@ static ScrSpawnRes *scr_spawn_res_new(bool has_status, double status,
   r->status = status;
   r->out = out;
   r->err = err;
+  r->has_out = true;
   r->spawn_errname = NULL;
   r->cmd = NULL;
   r->signal_name = NULL;
@@ -2134,6 +2157,7 @@ static ScrSpawnRes *scr_spawn_sync_core(ScrStr *cmd, ScrArr *args, double timeou
     if (cap_out) close(outfd[0]);
     if (cap_err) close(errfd[0]);
     ScrSpawnRes *r = scr_spawn_res_new(false, 0, scr_str_new("", 0), scr_str_new("", 0));
+    r->has_out = false; /* Node: no `output` array at all — the streams read undefined */
     r->spawn_errname = scr_errname(spawn_err);
     r->cmd = scr_str_retain(cmd);
     return r;

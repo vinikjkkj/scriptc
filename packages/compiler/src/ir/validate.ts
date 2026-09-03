@@ -956,6 +956,7 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "child.unref": { argTypes: [CHILD_T], result: VOID },
   "spawnRes.stdout": { argTypes: [SPAWNRES_T], result: STRING },
   "spawnRes.stderr": { argTypes: [SPAWNRES_T], result: STRING },
+  "spawnRes.hasOutput": { argTypes: [SPAWNRES_T], result: BOOL },
   "crypto.randomUUID": { argTypes: [], result: STRING },
   // Any two bytes values (the widths fold at runtime); byte-length
   // mismatch throws rather than answering.

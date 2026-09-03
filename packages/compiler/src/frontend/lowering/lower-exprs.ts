@@ -4835,6 +4835,219 @@ export function keyedReadAtMemberReceiver(L: Lowerer, node: ts.Expression, read:
   };
 }
 
+/** THE UNDEFINED-ARMED spawnSync STREAM READ: `result.stdout` and
+ * `result.stderr` where the SPAWN ITSELF may have failed.
+ *
+ * Node v25 derives both from the result's `output` array with optional
+ * chaining — `result.stdout = result.output?.[1]` — and on a spawn
+ * failure there IS no output array, so both read `undefined`. Measured
+ * against v25.9.0, not argued: `spawnSync("/definitely/not/a/binary")`
+ * answers `{ status: null, output: null, stdout: undefined, stderr:
+ * undefined, error: Error }`. The runtime has always answered "" there,
+ * and that was filed as a documented divergence — which it is, but a
+ * SILENT one: `console.log(r.stdout)` printed a blank line where Node
+ * prints `undefined`, and `r.stdout.length` answered 0 where Node
+ * throws. On Windows, where `/bin/sh` cannot be spawned at all, it is
+ * the ONLY thing 1360-spawn-sync, 1482-spawnsync-error and
+ * 1537-os-release-spawnsync-stdio diverge on.
+ *
+ * The DECLARED type stays `string`: @types/node types these `string` for
+ * the `{ encoding }` overloads and Node's own runtime contradicts its own
+ * types there, so narrowing is not available to the program and must not
+ * be demanded of it. The read is armed to `string | undefined` only where
+ * a DESTINATION can take that width, exactly as
+ * `recordKeyReadAtUndefinedArm` is for a keyed read — and for the same
+ * reason, that a value wider than the checker's is only safe where
+ * something is waiting for it. There are three rungs: this one,
+ * `spawnResStreamArg`, and `jsonStringifySpawnStreamArg`.
+ *
+ * THIS RUNG IS THE MEMBER RECEIVER: `killed.stdout.length`,
+ * `ok.stdout.trim()`. The absent arm throws Node's own catchable
+ * `TypeError: Cannot read properties of undefined (reading '<prop>')` at
+ * that exact point in control flow; the present arm is the plain string
+ * read, so nothing downstream ever sees a wider value and the string
+ * method dispatchers keep choosing their path from a STRING receiver.
+ * The receiver must lower to a `varRef` — the ternary reads it twice
+ * (the tag test and the value), and a hidden local would hand those
+ * dispatchers a `seqExpr`, which they do not recognise as a shape.
+ *
+ * A WRITE TARGET keeps today's lowering: Node's message there is the SET
+ * one, and a read message on a write is a wrong answer standing where a
+ * loud abort used to be — the precise trade the `recordKeyRead` family
+ * exists to refuse.
+ *
+ * EVERY OTHER DESTINATION KEEPS TODAY'S "": a store into a `string`
+ * binding, a template hole, a comparison, a call argument. Those are
+ * still the old divergence and this rung does not pretend otherwise;
+ * each needs to answer for itself before it can carry the arm.
+ *
+ * What does NOT change is the successful spawn: `has_output` is true for
+ * every child that really started — one killed by a signal and one whose
+ * stdio was `inherit` included — so the present arm is the same string
+ * read the plain lowering emits.
+ *
+ * `SCRIPTC_SPAWNOUT_OFF=1` ablates all three rungs, so one binary emits
+ * both sides. */
+export function spawnResStreamRead(
+  L: Lowerer,
+  expr: ts.PropertyAccessExpression,
+  receiver: IrExpr,
+  fn: "spawnRes.stdout" | "spawnRes.stderr",
+  loc: SrcLoc,
+): IrExpr {
+  const plain: IrExpr = { kind: "libCall", fn, args: [receiver], type: STRING, loc };
+  if (SPAWNOUT_OFF || receiver.kind !== "varRef") return plain;
+  const p = expr.parent;
+  if (p === undefined) return plain;
+  let prop: string | null = null;
+  if (ts.isPropertyAccessExpression(p) && p.expression === expr && p.questionDotToken === undefined) {
+    prop = p.name.text;
+  } else if (ts.isElementAccessExpression(p) && p.expression === expr && p.questionDotToken === undefined) {
+    const a = p.argumentExpression;
+    if (ts.isStringLiteralLike(a)) prop = a.text;
+    else if (ts.isNumericLiteral(a)) prop = String(Number(a.text));
+  }
+  if (prop === null || memberMessageIsNotRead(p)) return plain;
+  return {
+    kind: "ternary",
+    cond: { kind: "libCall", fn: "spawnRes.hasOutput", args: [receiver], type: BOOL, loc },
+    then: plain,
+    else_: nodeThrowExpr(1, "", `Cannot read properties of undefined (reading '${prop}')`, STRING, loc),
+    type: STRING,
+    loc,
+  };
+}
+
+/** The shared body of the two ARGUMENT rungs: the spawnSync stream read
+ * as a `string | undefined`, with `present` applied to the string arm
+ * (identity for the console rung, the serializer for the JSON one).
+ * Null for anything that is not a spawnSync stream read the utf8 overload
+ * typed `string` — a Buffer capture keeps its own fence at the property
+ * access, and every other expression lowers exactly as before.
+ *
+ * The receiver is bound to a hidden local rather than re-emitted: it can
+ * be the spawnSync CALL itself (`spawnSync(...).stdout`), and the tag
+ * test and the value read would then run the child twice. */
+function spawnResStreamArmed(
+  L: Lowerer,
+  node: ts.Expression,
+  present: (s: IrExpr) => IrExpr,
+): IrExpr | null {
+  if (SPAWNOUT_OFF) return null;
+  if (!ts.isPropertyAccessExpression(node) || node.questionDotToken !== undefined) return null;
+  const name = node.name.text;
+  if (name !== "stdout" && name !== "stderr") return null;
+  if (L.chainBlocked(node)) return null;
+  if (L.mapTypeOf(L.typeOf(node.expression))?.kind !== "spawnRes") return null;
+  if (L.mapTypeOf(L.typeOf(node))?.kind !== "string") return null;
+  const armedT = L.withUndefinedArm(STRING);
+  if (armedT === null || armedT.kind !== "union") return null;
+  const strTag = L.armTag(armedT.unionId, STRING);
+  const undefTag = L.armTag(armedT.unionId, UNDEFINED_T);
+  if (strTag < 0 || undefTag < 0) return null;
+  const loc = locOf(node);
+  const fn = name === "stdout" ? ("spawnRes.stdout" as const) : ("spawnRes.stderr" as const);
+  const receiver = L.lowerExpr(node.expression);
+  const tmp = L.declareHiddenLocal("%spawnOut", receiver.type);
+  const ref: IrExpr = { kind: "varRef", localId: tmp.id, type: receiver.type, loc };
+  return {
+    kind: "seqExpr",
+    stmts: [{ kind: "varDecl", localId: tmp.id, init: receiver, loc }],
+    result: {
+      kind: "ternary",
+      cond: { kind: "libCall", fn: "spawnRes.hasOutput", args: [ref], type: BOOL, loc },
+      then: {
+        kind: "unionWrap",
+        unionId: armedT.unionId,
+        tag: strTag,
+        value: present({ kind: "libCall", fn, args: [ref], type: STRING, loc }),
+        type: armedT,
+        loc,
+      },
+      else_: {
+        kind: "unionWrap",
+        unionId: armedT.unionId,
+        tag: undefTag,
+        value: { kind: "unitLit", unit: "undefined", type: UNDEFINED_T, loc },
+        type: armedT,
+        loc,
+      },
+      type: armedT,
+      loc,
+    },
+    type: armedT,
+    loc,
+  };
+}
+
+/** THE CONSOLE-ARGUMENT DESTINATION for the stream read
+ * (spawnResStreamRead documents the divergence and the stance).
+ *
+ * `console.log(r.stdout)` must print `undefined` for a spawn that never
+ * started, and the console formatter is TOTAL over `string | undefined` —
+ * it renders a string arm verbatim and the undefined arm as `undefined`,
+ * which is exactly Node's bytes. So the argument is taken at ARMED width,
+ * the way the same map already takes a keyed read at dyn width
+ * (recordKeyReadAtSlotWidth).
+ *
+ * It has to be asked HERE rather than at the property access, because the
+ * property-access dispatch ends in `maybeNarrow`: the checker types the
+ * site `string`, so an armed read handed back from there is immediately
+ * bridged BACK to the string arm by narrowedArmHelper, and the absent arm
+ * becomes a throw rather than a printed `undefined`. Only the consumer
+ * knows it wants the wider value.
+ *
+ * Only the plain fixed-arity console path consults this. The other two
+ * pack their arguments before rendering (a literal `%s` format string
+ * routes through util.format; any spread packs a checked-dynamic rest
+ * array) and return earlier, so they keep today's "". */
+export function spawnResStreamArg(L: Lowerer, node: ts.Expression): IrExpr | null {
+  return spawnResStreamArmed(L, node, (s) => s);
+}
+
+/** THE JSON.stringify-ARGUMENT DESTINATION, one console argument out:
+ * `console.log(r.status ?? -1, JSON.stringify(r.stdout))`, which is how
+ * 1537-os-release-spawnsync-stdio reads its captures.
+ *
+ * `JSON.stringify(undefined)` is not a string at all — it IS undefined —
+ * and that is precisely why the type-directed serializer REFUSES a bare
+ * undefined-armed union (SC1090, lower-builtins). The refusal stands:
+ * this rung does not lift it. What it does is answer the same question
+ * one destination further out, where the answer has somewhere to go — the
+ * console formatter, which renders `undefined` as the word. The result
+ * is a `string | undefined` built by TAG, not by serializing a union:
+ * the present arm is the ordinary `jsonStringify` of the captured string
+ * (the very node the serializer emits for a `string`), and the absent arm
+ * is the undefined the serializer could not have produced.
+ *
+ * A `JSON.stringify` anywhere else — stored, concatenated, returned —
+ * keeps the existing refusal, because nothing there can take an
+ * `undefined`. `noteKeyEnumeration` is not called: the value serialized
+ * here is a string, which enumerates no keys.
+ *
+ * The replacer/space arguments are not accepted: only the one-argument
+ * spelling, so `stringifySpaceIndent`'s compile-time gap algorithm never
+ * has to be reproduced here. Anything else falls through to the ordinary
+ * lowering and its fence. */
+export function jsonStringifySpawnStreamArg(L: Lowerer, node: ts.Expression): IrExpr | null {
+  if (SPAWNOUT_OFF) return null;
+  if (!ts.isCallExpression(node) || node.arguments.length !== 1) return null;
+  const callee = node.expression;
+  if (!ts.isPropertyAccessExpression(callee)) return null;
+  if (L.stdlibGlobalMember(callee, "JSON") !== "stringify") return null;
+  if (L.chainBlocked(node)) return null;
+  const arg = node.arguments[0]!;
+  if (ts.isSpreadElement(arg)) return null;
+  const loc = locOf(node);
+  return spawnResStreamArmed(L, arg, (s) => ({ kind: "jsonStringify", value: s, type: STRING, loc }));
+}
+
+/** `SCRIPTC_SPAWNOUT_OFF=1` — the ablation for the spawnSync stream rungs
+ * above, hoisted like LOWER_FP_ON so an ordinary build pays one
+ * already-predicted boolean test. Same unset/empty/"0" contract as
+ * SCRIPTC_RC_AUDIT. */
+const SPAWNOUT_OFF = process.env["SCRIPTC_SPAWNOUT_OFF"] === "1";
+
 /** V8's OWN SPELLING of a callee expression, or null where scriptc cannot
  * reproduce it — the text that rides Node's "<callee> is not a function".
  *
@@ -7012,8 +7225,12 @@ export function lowerOptionalChain(L: Lowerer, expr: ts.CallExpression | ts.Prop
           );
         }
         const receiver = L.lowerExpr(expr.expression);
-        const fn = name === "stdout" ? "spawnRes.stdout" : "spawnRes.stderr";
-        return { kind: "libCall", fn, args: [receiver], type: STRING, loc };
+        const fn = name === "stdout" ? ("spawnRes.stdout" as const) : ("spawnRes.stderr" as const);
+        // A SPAWN FAILURE leaves Node's `output` array null and both
+        // streams `undefined`; the member-receiver rung throws Node's own
+        // TypeError there instead of reading "" (spawnResStreamRead), and
+        // is the plain string read everywhere else.
+        return spawnResStreamRead(L, expr, receiver, fn, loc);
       }
       if (name === "error") {
         // Node's spawn-failure carrier: `Error | undefined` — a fresh

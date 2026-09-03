@@ -81,11 +81,16 @@ const WINDOWS_SKIPS: Record<string, string> = {
   // on Windows NODE too, so both sides fail the same way but render
   // differently — Node prints a stack for uncaught/unhandled errors
   // where the runtime prints one line, and @exit can't say "0 on posix,
-  // 1 on win32". A second recurring class: a FAILED spawn's captured
-  // stdout/stderr read "" here where Node types them null (the
-  // documented spawnSync stance) — invisible on POSIX lanes where these
-  // spawns succeed, exposed here where every one fails.
-  "1360-spawn-sync.ts": "posix-shaped: every spawn is ENOENT on Windows Node too, exposing the documented spawn-failure \"\"-vs-null stdout stance (1644 covers spawnSync here)",
+  // 1 on win32". The second recurring class is CLOSED: a FAILED
+  // spawn's captured stdout/stderr used to read "" here where Node
+  // reads undefined (v25 derives them as `output?.[1]`, and a failed
+  // spawn has no output array). The runtime carries that arm now at
+  // the destinations that can take it — a console argument and a
+  // member receiver — so a program whose ONLY divergence was that
+  // class comes off this list. The entries below that still cite it
+  // read it somewhere else (a store, a template hole), where the ""
+  // stands; each needs its own destination before it can move.
+  "1360-spawn-sync.ts": "posix-shaped: every spawn is ENOENT on Windows Node too, so the `.length` on an undefined capture crashes BOTH sides — rendered differently (this lane compares the raw report; 1644 covers spawnSync here)",
   "1361-spawn-events.ts": "posix-shaped: the unlistened /bin/sh spawn failure crashes both sides, rendered differently (1646 covers spawn events here)",
   "1362-spawn-timers.ts": "posix-shaped: the unlistened /bin/sh spawn failure crashes both sides, rendered differently",
   "1462-exec-sync.ts": "posix-shaped: the uncaught printf ENOENT throw crashes both sides, rendered differently (1645 covers exec here)",
@@ -93,12 +98,11 @@ const WINDOWS_SKIPS: Record<string, string> = {
   "1470-child-lifecycle.ts": "posix-shaped: kill() on the spawn-failed child crashes Windows Node (unhandled 'error'); the runtime answers false",
   "1471-child-unref.ts": "posix-shaped: the unlistened sh spawn failure crashes both sides, rendered differently",
   "1473-promisify-execfile.ts": "posix-shaped: the unhandled spawn-ENOENT rejection crashes both sides, rendered differently",
-  "1482-spawnsync-error.ts": "posix-shaped: /bin/sh fails ENOENT on Windows Node too — its null stdout .trim() crashes the oracle where the documented \"\" stance carries on",
+  "1482-spawnsync-error.ts": "posix-shaped: /bin/sh fails ENOENT on Windows Node too, so the undefined capture's .trim() crashes BOTH sides — rendered differently (this lane compares the raw report)",
   "1522-spawnsync-options.ts": "posix-shaped: the sh capture case exposes the documented spawn-failure \"\"-vs-null stance (every other line agrees; 1644 covers the options here)",
   "1523-spawn-options.ts": "posix-shaped: the unlistened sh spawn failure crashes both sides, rendered differently",
   "1525-child-exit-signal.ts": "posix-shaped: the unlistened sh spawn failure crashes both sides, rendered differently (1646 covers kill/exit signals here)",
   "1535-spawn-fd-stdio.ts": "posix-shaped: the unlistened sh spawn failure crashes both sides, rendered differently",
-  "1537-os-release-spawnsync-stdio.ts": "posix-shaped: the failed spawns expose the documented spawn-failure \"\"-vs-null stance",
   "1552-exec-options-record.ts": "posix-shaped: the uncaught /bin/echo ENOENT throw crashes both sides, rendered differently",
   "1562-spawn-conditional-spread.ts": "posix-shaped: the unlistened sh spawn failure crashes both sides, rendered differently",
   "1565-spawn-pipe-streams.ts": "posix-shaped: the unlistened /bin/sh spawn failure crashes both sides, rendered differently (1646 covers pipe streams here)",
