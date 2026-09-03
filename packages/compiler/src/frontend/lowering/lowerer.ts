@@ -1143,6 +1143,31 @@ function functionNodeSource(n: ts.Node): { text: string } | null {
   return text.length > 0 ? { text } : null;
 }
 
+/** The argument of a `Promise.resolve(...)` the null-payload placeholder
+ * rule accepts: a bare `null`, however it is dressed (parens, `as`,
+ * `satisfies`, `!`). A null literal HAS NO EFFECTS, which is the whole of
+ * what the SC2020 fence at the Promise.resolve site said it could not
+ * honour -- so this predicate is also the boundary of what the fence still
+ * covers. Exported so the scan that marks the field and the lowering that
+ * builds the value read the SAME rule. */
+export function nullPromisePlaceholderArg(call: ts.CallExpression): boolean {
+  if (call.arguments.length !== 1) return false;
+  let a: ts.Expression | undefined = call.arguments[0];
+  for (;;) {
+    if (a === undefined) return false;
+    if (
+      ts.isParenthesizedExpression(a) ||
+      ts.isAsExpression(a) ||
+      ts.isSatisfiesExpression(a) ||
+      ts.isNonNullExpression(a)
+    ) {
+      a = a.expression;
+      continue;
+    }
+    return a.kind === ts.SyntaxKind.NullKeyword;
+  }
+}
+
 export class Lowerer {
   readonly checker: ts.TypeChecker;
   readonly diags: ScrDiagnostic[] = [];
@@ -1816,6 +1841,7 @@ export class Lowerer {
       isProgramFile: (sf) => this.fileTag.has(sf),
       declFileHasCompiledImpl: (sf) => this.declTwinCompiled(sf),
       accessorProducerProp: (sym) => this.accessorProducerProp(sym),
+      nullPayloadPromiseProp: (sym) => this.nullPayloadPromiseProp(sym),
     };
     // --dynamic: modules reachable only through dynamic import() joined
     // moduleOrder BEFORE any pass constructed — lowerToIr runs
@@ -12856,6 +12882,137 @@ export class Lowerer {
   definePropStringTable(decl: ts.ClassLikeDeclaration): boolean {
     this.definePropTableCache ??= scanDefinePropStringTables(this);
     return this.definePropTableCache.has(decl);
+  }
+
+  /** PROMISE-typed data properties some object literal in this program
+   * initializes with a `Promise.resolve(<null>)` the checker types
+   * `Promise<never>` -- zapo's sqlite connection-cache placeholder,
+   * `connectionPromise: Promise.resolve(null as never)`.
+   *
+   * `Promise<never>` maps to `promise<void>` on the stated ground that a
+   * throw-only promise never fulfils, so no await can observe a value.
+   * THIS one fulfils, with `null`, and the slot it lands in is
+   * `Promise<WaSqliteConnection>` -- so the value node produces is not
+   * representable at the slot's payload type and the site fenced (SC2020).
+   * Marking the property makes the FIELD's payload void: the promise stays
+   * a promise (it settles; a rejection still propagates and is still
+   * catchable), a real `Promise<S>` assigned over the placeholder converts
+   * through the ordinary payload adapter, and `await field` in statement
+   * position -- the only thing zapo does with it -- runs unchanged. Reading
+   * the fulfillment value refuses at compile time, which is the one answer
+   * that is never wrong: node's is `null`, and no record slot holds one.
+   *
+   * A null ARM was tried first and rejected. It makes the await's value a
+   * `S | null` union while the checker still calls it `S`, so the
+   * checker-trusted extraction into the declared slot THROWS where node
+   * answers `null` -- a wrong answer, not a refusal.
+   *
+   * Deliberately narrow. The argument must be a syntactic `null` (through
+   * parens/`as`/`satisfies`/`!`): a null literal has no effects, which is
+   * the whole of what the SC2020 fence at the Promise.resolve site said it
+   * could not honour ("the argument's effects must still run -- no
+   * statement slot exists here for them"). Any other argument spelling,
+   * and any destination that is not a record field, keeps the fence.
+   *
+   * Computed on first ask, for accessorProducerCache's reason and with its
+   * timing rule: after fileTag is populated, before shape interning. */
+  private nullPayloadPromiseCache: Set<ts.Symbol> | null = null;
+
+  nullPayloadPromiseProp(sym: ts.Symbol): boolean {
+    this.nullPayloadPromiseCache ??= this.scanNullPayloadPromiseProps();
+    return this.nullPayloadPromiseCache.has(sym);
+  }
+
+  /** The property symbol a `Promise.resolve(null)` placeholder initializes,
+   * or null: the call must BE an object-literal property's initializer, the
+   * literal must have a contextual type, and that type must declare the
+   * property. Shared by the scan and the lowering so the two can never
+   * disagree about which sites the set covers. */
+  nullPromisePlaceholderTarget(call: ts.CallExpression): ts.Symbol | null {
+    if (!nullPromisePlaceholderArg(call)) return null;
+    const prop = call.parent;
+    if (prop === undefined || !ts.isPropertyAssignment(prop) || prop.initializer !== call) return null;
+    const lit = prop.parent;
+    if (lit === undefined || !ts.isObjectLiteralExpression(lit)) return null;
+    const nm = prop.name;
+    if (!ts.isIdentifier(nm) && !ts.isStringLiteral(nm)) return null;
+    const ct = this.checker.getContextualType(lit);
+    if (ct === undefined) return null;
+    return this.checker.getPropertyOfType(ct, nm.text) ?? null;
+  }
+
+  /** The interned FIELD type a null-payload placeholder must be built at:
+   * the object literal's contextual record, that property's slot, read
+   * back off the interned shape rather than re-derived -- so the value the
+   * producer builds and the slot it lands in can never drift. Null unless
+   * the property is marked AND the slot really is the payload-less promise
+   * the mark puts there. */
+  nullPlaceholderFieldType(call: ts.CallExpression): (IrType & { kind: "promise" }) | null {
+    const target = this.nullPromisePlaceholderTarget(call);
+    if (target === null || !this.nullPayloadPromiseProp(target)) return null;
+    const prop = call.parent;
+    if (!ts.isPropertyAssignment(prop)) return null;
+    const lit = prop.parent;
+    if (!ts.isObjectLiteralExpression(lit)) return null;
+    const ct = this.checker.getContextualType(lit);
+    if (ct === undefined) return null;
+    const mapped = this.mapTypeOf(ct);
+    if (mapped?.kind !== "record") return null;
+    const shape = this.shapes.get(mapped.shapeId);
+    const nm = prop.name;
+    if (!ts.isIdentifier(nm) && !ts.isStringLiteral(nm)) return null;
+    const f = shape?.fields.find((x) => x.name === nm.text);
+    if (!f || f.type.kind !== "promise") return null;
+    if (f.type.inner.kind !== "void") return null;
+    return f.type;
+  }
+
+  private scanNullPayloadPromiseProps(): Set<ts.Symbol> {
+    const out = new Set<ts.Symbol>();
+    const visit = (n: ts.Node): void => {
+      if (ts.isCallExpression(n) && nullPromisePlaceholderArg(n)) {
+        const callee = n.expression;
+        if (
+          ts.isPropertyAccessExpression(callee) &&
+          callee.name.text === "resolve" &&
+          ts.isIdentifier(callee.expression) &&
+          callee.expression.text === "Promise"
+        ) {
+          // The checker's answer for the CALL decides, not the spelling:
+          // only a `Promise<never>` is the shape whose payload has no
+          // representation. `Promise.resolve(null)` without the assertion
+          // is `Promise<null>`, which keeps its own (unit-payload) fence.
+          const t = this.checker.getTypeAtLocation(n);
+          const args = this.checker.getTypeArguments(t as ts.TypeReference);
+          if (args.length === 1 && ((args[0]?.flags ?? 0) & ts.TypeFlags.Never) !== 0) {
+            const target = this.nullPromisePlaceholderTarget(n);
+            if (target !== null) out.add(target);
+          }
+        }
+      }
+      ts.forEachChild(n, visit);
+    };
+    for (const sf of this.fileTag.keys()) {
+      if (sf.isDeclarationFile) continue;
+      // A cheap textual prefilter: the walk is over every node of every
+      // program file, and the shape it looks for cannot occur in a file
+      // that never spells the call.
+      if (!sf.text.includes("Promise.resolve")) continue;
+      ts.forEachChild(sf, visit);
+    }
+    // SCRIPTC_NULLPAYLOAD_WHY: name every property this scan marks. The
+    // blast radius of the rule is exactly this set -- no other program's
+    // shapes change -- so a sweep with the variable set is the measurement,
+    // and an empty line for a program is the negative control.
+    if (process.env["SCRIPTC_NULLPAYLOAD_WHY"] !== undefined) {
+      for (const s of out) {
+        const d = this.checker.declarationsOf(s)[0];
+        const at = d === undefined ? "?" : `${d.getSourceFile().fileName}:${d.getStart()}`;
+        process.stderr.write(`[nullpayload] ${s.name} @ ${at}\n`);
+      }
+      process.stderr.write(`[nullpayload] marked=${String(out.size)}\n`);
+    }
+    return out;
   }
 
   private scanAccessorProducers(): Set<ts.Symbol> {

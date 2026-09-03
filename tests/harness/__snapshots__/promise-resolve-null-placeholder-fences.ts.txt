@@ -1,0 +1,51 @@
+promise-resolve-null-placeholder-fences.ts:47:34 - error SC2020: 'Promise.resolve with an argument at a void-promise type' is part of the standard library types but has no scriptc lowering yet
+
+  46 |     // 1 — a variable destination.
+  47 |     const loose: Promise<Conn> = Promise.resolve(null as never)
+     |                                  ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  48 |     await loose
+
+  hint: the type checker sees the full standard library, but only the supported surface compiles (https://scriptc.dev/limitations)
+
+promise-resolve-null-placeholder-fences.ts:51:51 - error SC2020: 'Promise.resolve with an argument at a void-promise type' is part of the standard library types but has no scriptc lowering yet
+
+  50 |     // 2 — an argument with effects.
+  51 |     const effectful: Entry = { connectionPromise: Promise.resolve(bump()), refs: 0 }
+     |                                                   ^~~~~~~~~~~~~~~~~~~~~~~
+  52 |     await effectful.connectionPromise
+
+  hint: the type checker sees the full standard library, but only the supported surface compiles (https://scriptc.dev/limitations)
+
+promise-resolve-null-placeholder-fences.ts:55:47 - error SC2020: 'Promise.resolve with an argument at a void-promise type' is part of the standard library types but has no scriptc lowering yet
+
+  54 |     // 3 — `undefined as never`, which fulfils with a different value.
+  55 |     const undef: Entry = { connectionPromise: Promise.resolve(undefined as never), refs: 0 }
+     |                                               ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  56 |     await undef.connectionPromise
+
+  hint: the type checker sees the full standard library, but only the supported surface compiles (https://scriptc.dev/limitations)
+
+promise-resolve-null-placeholder-fences.ts:60:18 - error SC2002: record shapes must match exactly or width-coerce: expected '{ driver: string }', got 'void'
+
+  59 |     const marked: Entry = { connectionPromise: Promise.resolve(null as never), refs: 0 }
+  60 |     const conn = await marked.connectionPromise
+     |                  ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  61 |     console.log(conn.driver)
+
+  hint: width subtyping compiles as a copy (each expected field copied off the source; extra fields drop) — this pair is outside the copy's rules; build a literal with exactly the expected fields instead
+
+promise-resolve-null-placeholder-fences.ts:61:17 - error SC2004: uses of 'conn' inherit the blocker on its declaration
+
+  60 |     const conn = await marked.connectionPromise
+  61 |     console.log(conn.driver)
+     |                 ^~~~
+  62 |     take(marked.connectionPromise)
+
+  hint: the declaration of 'conn' did not compile — fix the diagnostic reported there and these sites clear with it
+
+promise-resolve-null-placeholder-fences.ts:62:10 - error SC1090: 'Promise<void>' values where 'Promise<{ driver: string }>' is expected is not supported yet
+
+  61 |     console.log(conn.driver)
+  62 |     take(marked.connectionPromise)
+     |          ^~~~~~~~~~~~~~~~~~~~~~~~
+  63 |     console.log(effects)
