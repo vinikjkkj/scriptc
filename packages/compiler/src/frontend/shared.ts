@@ -286,6 +286,30 @@ export function npmPackageNameOf(file: string): string | null {
   return first;
 }
 
+/** The RUNTIME package a DefinitelyTyped declarations package types, or
+ * null when `name` is not one. `@types/pg` -> `pg`, `@types/better-sqlite3`
+ * -> `better-sqlite3`, `@types/foo__bar` -> `@foo/bar` (the inverse of the
+ * scope mangling resolve.ts applies on the way in).
+ *
+ * WHY A DIAGNOSTIC NEEDS THIS. A `@types/x` package ships declarations and
+ * nothing else -- no code, no values, nothing that could run anywhere. So
+ * "values from the '@types/pg' package run in the embedded dynamic engine"
+ * is wrong twice over, and it names a package the program never imported:
+ * the value is `pg`'s, and `pg` is what the author would have to act on.
+ * The path the SYMBOL is declared in is the @types twin because that is
+ * where the declaration lives; the package the VALUE belongs to is this.
+ *
+ * `@types/node` is excluded: it types the Node builtins, not a package,
+ * and "node" would name nothing installable. Symbols it declares have
+ * their own surface (nodeTypesOnlySymbol) and never want this. */
+export function runtimePackageOfTypesPackage(name: string): string | null {
+  if (!name.startsWith("@types/")) return null;
+  const rest = name.slice("@types/".length);
+  if (rest === "" || rest === "node") return null;
+  const at = rest.indexOf("__");
+  return at < 0 ? rest : `@${rest.slice(0, at)}/${rest.slice(at + 2)}`;
+}
+
 /* The compiler-options split (documented in SEMANTICS.md; the enum-valued
  * FORCED knobs are spelled per world — each lane owns its enum objects):
  * ADOPTED knobs change which programs typecheck; FORCED knobs change
