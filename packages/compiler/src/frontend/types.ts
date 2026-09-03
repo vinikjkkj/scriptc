@@ -2214,6 +2214,69 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
         return wsParts[0]!;
       }
     }
+    // A BASE's loosest signature intersected with a NARROWER re-declaration
+    // of the same member: `(ctx: Ctx) => unknown` -- all a base interface can
+    // promise before it knows the type -- intersected with `(ctx: Ctx) => T`
+    // from a generic helper's return type. That is the shape every
+    // `defineX<K, T>()` helper produces, and zapo's `defineWaClientPlugin`
+    // is one:
+    //
+    //   function define<K extends string, T, E = {}>(...): Definition & {
+    //     readonly exposeAs: K
+    //     readonly setup: (ctx: Ctx) => T      // Definition.setup is
+    //     readonly __pluginEvents?: E          //   (ctx: Ctx) => unknown
+    //   }
+    //
+    // The OUTER intersection is an ordinary record merge and resolves fine.
+    // It failed only because it could not intern the `setup` FIELD, whose
+    // type is this nested function intersection -- so the whole plugin value
+    // reported SC2008 "this intersection resolves to no runtime shape", and
+    // that one construct was the entire remaining distance between
+    // @zapo-js/wam and a build (measured: 2 blockers left at its entry, this
+    // and its SC2004 cascade, over 46,036 statements).
+    //
+    // `unknown` constrains nothing, so `(P) => unknown` is the TOP function
+    // type over its parameter list: every value of the intersection is a
+    // function of the OTHER signature, and keeping that one discards no
+    // information about the value. Node stores one closure; this names it.
+    //
+    // Deliberately narrow, because the general rule needs an assignability
+    // query this facade does not carry:
+    //   - every constituent is a PLAIN function type (one call signature, no
+    //     properties, no construct signature), so the chalk
+    //     function-with-properties shape and every branded intersection are
+    //     untouched;
+    //   - exactly ONE constituent returns something other than `unknown`;
+    //   - the parameter lists are IDENTICAL as mapped IR, so nothing is
+    //     silently widened or narrowed on the way in.
+    // `any` is deliberately NOT admitted: it is a different question (an
+    // unchecked hole, not a top type) and the dyn rules own it.
+    {
+      const parts = widened.getTypes();
+      const plainFn = (t: ts.Type): boolean =>
+        checker.getCallSignatures(t).length === 1 &&
+        checker.getConstructSignatures(t).length === 0 &&
+        checker.getPropertiesOfType(t).length === 0;
+      if (parts.length >= 2 && parts.every(plainFn)) {
+        const rets = parts.map((t) => checker.getReturnTypeOfSignature(checker.getCallSignatures(t)[0]!));
+        const keepIdx = rets.findIndex((r) => (r.flags & ts.TypeFlags.Unknown) === 0);
+        const onlyOne = rets.filter((r) => (r.flags & ts.TypeFlags.Unknown) === 0).length === 1;
+        if (keepIdx >= 0 && onlyOne) {
+          const mappedFns = parts.map((t) => mapType(t, ctx));
+          const keep = mappedFns[keepIdx];
+          if (
+            keep !== null && keep !== undefined && keep.kind === "func" &&
+            mappedFns.every(
+              (m) =>
+                m !== null && m.kind === "func" && m.params.length === keep.params.length &&
+                m.params.every((q, i) => typeEquals(q, keep.params[i]!)),
+            )
+          ) {
+            return keep;
+          }
+        }
+      }
+    }
     // MIXIN instance intersections (`Tagged.C & Derived` — values built
     // through a mixin result): the chain structure names the unique
     // pinned instantiation; ambiguity stays unmapped (the hook's rules).

@@ -1,0 +1,35 @@
+function-intersection-unrelated-returns.ts:46:17 - error SC2008: values of type 'StringBase & { readonly setup: (ctx: Ctx) => Coord; }' cannot be compiled: this intersection resolves to no runtime shape
+
+  45 | 
+  46 | export function unrelatedReturns() {
+     |                 ^~~~~~~~~~~~~~~~
+  47 |     return defineOverString<Coord>({
+
+  hint: restate the intersection as a single interface or type literal with the combined members; mixin-produced intersections compile where the mixin chain pins one instantiation
+
+function-intersection-unrelated-returns.ts:65:17 - error SC2008: values of type 'UnknownBase & { readonly setup: (o: Other) => Coord; }' cannot be compiled: this intersection resolves to no runtime shape
+
+  64 | 
+  65 | export function differentParams() {
+     |                 ^~~~~~~~~~~~~~~
+  66 |     return defineOverOther<Coord>({
+
+  hint: restate the intersection as a single interface or type literal with the combined members; mixin-produced intersections compile where the mixin chain pins one instantiation
+
+function-intersection-unrelated-returns.ts:74:34 - error SC2004: uses of 'unrelatedReturns' inherit the blocker on its declaration
+
+  73 | 
+  74 | console.log("unrelated:", typeof unrelatedReturns());
+     |                                  ^~~~~~~~~~~~~~~~
+  75 | console.log("params:", typeof differentParams());
+
+  hint: the declaration of 'unrelatedReturns' did not compile — fix the diagnostic reported there and these sites clear with it
+
+function-intersection-unrelated-returns.ts:75:31 - error SC2004: uses of 'differentParams' inherit the blocker on its declaration
+
+  74 | console.log("unrelated:", typeof unrelatedReturns());
+  75 | console.log("params:", typeof differentParams());
+     |                               ^~~~~~~~~~~~~~~
+  76 | 
+
+  hint: the declaration of 'differentParams' did not compile — fix the diagnostic reported there and these sites clear with it
