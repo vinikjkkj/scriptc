@@ -56,20 +56,50 @@ afterAll(async () => {
   if (scratch) await rm(scratch, { recursive: true, force: true });
 });
 
-test("bytes runtime: coercions, encodings, zlib, fs, RC", async () => {
-  const { stderr } = await execFileAsync(bin, [scratch]);
+// Both arms of scr_bytes_check_index / scr_bytes_to_u32. The fast arm tests
+// the bound and integrality in the integer domain; SCR_FASTIDX=0 keeps the
+// original double expression with its libm trunc/fmod. They are only allowed
+// to differ in speed, so the SAME binary must print the SAME count both ways.
+test.each([
+  ["fast (default)", undefined],
+  ["libm (SCR_FASTIDX=0)", "0"],
+])("bytes runtime: coercions, encodings, zlib, fs, RC -- %s", async (_name, fastidx) => {
+  const env = { ...process.env, ...(fastidx === undefined ? {} : { SCR_FASTIDX: fastidx }) };
+  const { stderr } = await execFileAsync(bin, [scratch], { env });
   expectCasesPassed(stderr);
 });
 
 // JS reads undefined / ignores writes out of bounds on typed arrays; both
 // are unrepresentable, so the runtime traps (documented divergence, the
 // array runtime's exact discipline).
-test.each([
+// One mode per ARM of scr_bytes_check_index, and each one is run under BOTH
+// settings of SCR_FASTIDX: a value the fast window rejects must reach the
+// same trap with byte-identical text as the original expression, because the
+// index reaches the message as a formatted double and a validator change can
+// rename it silently.
+const CRASH_MODES: readonly (readonly [string, string])[] = [
   ["--crash-get-oob", "typed array index 1 out of bounds (length 1)"],
   ["--crash-get-frac", "typed array index 0.5 out of bounds (length 1)"],
   ["--crash-set-oob", "typed array index 1 out of bounds (length 1)"],
-])("trap aborts (%s)", async (mode, message) => {
-  const err = await execFileAsync(bin, [mode]).then(
+  ["--crash-get-nan", "typed array index NaN out of bounds (length 1)"],
+  ["--crash-get-neg", "typed array index -1 out of bounds (length 1)"],
+  ["--crash-get-inf", "typed array index Infinity out of bounds (length 1)"],
+  ["--crash-get-neginf", "typed array index -Infinity out of bounds (length 1)"],
+  ["--crash-get-2p53", "typed array index 9007199254740992 out of bounds (length 1)"],
+  ["--crash-get-2p32", "typed array index 4294967296 out of bounds (length 1)"],
+  ["--crash-get-at-len", "typed array index 1 out of bounds (length 1)"],
+  ["--crash-get-empty", "typed array index 0 out of bounds (length 0)"],
+  ["--crash-get-ulp", "typed array index 1.0000000000000002 out of bounds (length 1)"],
+  ["--crash-set-neg", "typed array index -1 out of bounds (length 1)"],
+];
+
+test.each(
+  CRASH_MODES.flatMap(([mode, message]) =>
+    [undefined, "0"].map((fastidx) => [mode, message, fastidx] as const),
+  ),
+)("trap aborts (%s, SCR_FASTIDX=%s)", async (mode, message, fastidx) => {
+  const env = { ...process.env, ...(fastidx === undefined ? {} : { SCR_FASTIDX: fastidx }) };
+  const err = await execFileAsync(bin, [mode], { env }).then(
     () => {
       throw new Error(`expected ${mode} to abort`);
     },
