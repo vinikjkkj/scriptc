@@ -1407,28 +1407,57 @@ static void scr_trampoline(void) {
  * bounds the IDLE set only — a burst that wants more contexts than the cap
  * still gets them, they are just not all kept afterwards.
  *
- * WHERE 64 COMES FROM. Measured on the real zapo messaging bench (the
- * preserved pre-regression TU relinked against this runtime, full default
- * workload, same binary in every arm — only this env knob changes), 2 reps,
- * medians; the A/A floor on that lane is 7.7% on cycles:
+ * WHERE THE CAP COMES FROM, and why it used to be 64. The first sweep
+ * stopped at 256, called 64 the knee, and read the flattening between 64
+ * and 256 as the curve running out. It was not: the sweep ended one
+ * octave below the interesting region, and it scored only send_1to1 and
+ * recv_group. send_group is the phase that pins the cap and it was not in
+ * that table.
  *
- *   cap    send_1to1 Mcyc   recv_group Mcyc   faults      peak RSS
- *     0        63,320           13,597       1,585,510    176.1 MiB
- *     4        37,026            7,896         773,378    178.1 MiB
- *     8        30,505            6,690         617,279    180.0 MiB
- *    16        25,755            5,413         508,602    180.1 MiB
- *    64        21,821            4,178         403,628    182.9 MiB
- *   256        21,239            4,200         374,219    183.4 MiB
+ * send_group builds an array of 1000 promises and Promise.all's it (the
+ * bench's scenarioSendGroup), so a thousand message sends are in flight at
+ * once, each a nested chain of async calls. The number of stacks LIVE at
+ * the peak is therefore between 4,096 and 16,384 — measured, from where
+ * this table stops moving — and a 64-entry idle list against that is
+ * ~136,000 fresh CreateFiberEx/DeleteFiber pairs in one phase. Each fresh
+ * stack costs exactly two demand-zero faults (see SCR_FIBER_COMMIT above),
+ * which is that phase's whole 272,738-fault bill.
  *
- * 64 is the knee: quadrupling it again buys 2.7% more on send_1to1 and
- * nothing at all on recv_group, while every step up costs resident stack.
- * The +6.8 MiB from 0 to 64 is the honest price of the CPU column and it
- * is inside the bench lane's 6.76% RSS noise floor, so it is reported from
- * the monotone trend across six caps rather than from any one pair.
- * SCR_FIBER_POOL=0 turns the pool off entirely (the pre-change runtime,
- * and the A/B control arm). */
+ * Re-measured on the real zapo messaging bench, full default workload, all
+ * four scenarios, ONE session with the arms interleaved and every ratio
+ * formed inside a rep, the SAME binary in every arm — only this env knob
+ * changes. 3 reps, medians. The A/A floor on this lane (the same cap run
+ * twice in each rep) is 1.3% on send_group wall, 1.2% on its cycles, 0.3%
+ * on its faults and 0.1% on peak RSS:
+ *
+ *   cap    send_group    send_group   send_group   6-phase    peak
+ *            faults        Mcyc         kern ms      Mcyc      RSS
+ *      0     461,782      47,691        3,766      107,864   175.4 MiB
+ *     64     272,738      41,174        2,063       64,225   186.6 MiB
+ *   4096      83,449      35,583          750       56,235   189.8 MiB
+ *  16384      17,830      33,322           47       52,838   250.9 MiB
+ *  65536      17,984      33,032          125       53,132   254.0 MiB
+ *
+ * 4096 is the knee OF THE TRADE, not of the CPU column. The CPU column
+ * keeps improving to 16,384 and then stops dead — 65,536 buys nothing over
+ * 16,384, which is what "the peak live set is below 16,384" looks like —
+ * but the RSS column turns over first. 64 -> 4096 is -13.6% on send_group
+ * cycles, -69.4% on its faults and -12.4% on the six-phase sum for
+ * +1.7% peak RSS, which is inside this lane's 6.76% RSS noise floor.
+ * 4096 -> 16384 buys a further -6.4% of cycles and costs +32.2% peak RSS,
+ * far outside it. An idle pooled stack keeps its touched pages resident
+ * and the pool holds them ACROSS phases, so the retained set lands on top
+ * of the next phase's live set rather than under it — which is why this
+ * cost is real and not, as first reasoned, free because the pages were
+ * resident at the peak anyway.
+ *
+ * So the cap that would minimise CPU alone is 16,384 and it is not taken.
+ * Anyone optimising only for cycles should set SCR_FIBER_POOL=16384 and
+ * pay the 61 MiB. SCR_FIBER_POOL=0 turns the pool off entirely (the
+ * pre-pool runtime, and the positive control that proves an arm of this
+ * experiment can move the number at all). */
 #ifndef SCR_FIBER_POOL
-#define SCR_FIBER_POOL 64
+#define SCR_FIBER_POOL 4096
 #endif
 
 static ScrStack *scr_stack_pool = NULL;
