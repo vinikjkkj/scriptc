@@ -104,6 +104,35 @@ void scrp_timer_cancel(ScrPoller *p, void *key);
  * Returns the count; EINTR reads as 0 (a spurious pass, as today). */
 int scrp_drain(ScrPoller *p, ScrPollerEvent *out, int max);
 
+/* win32 only: the loop's idle wait, made readiness-driven.
+ *
+ * scrp_poller_fd answers -1 here -- WSAPoll has no waitable handle -- so
+ * the loop's win32 arm used to sleep a flat capped interval and notice
+ * readiness only at the NEXT turn's zero-timeout drain. Measured, that
+ * costs a full 1.5164 ms per turn whatever the reply's real arrival time
+ * (tests/perf/looplatency/waitarm.c), and a sequential request/response
+ * workload pays it once per round trip.
+ *
+ * This waits on WSAEventSelect events over every socket any LIVE poller
+ * watches, plus a high-resolution waitable timer for the deadline, so a
+ * reply ends the wait when it lands and the deadline is still exact:
+ * 0.0645/0.2165/0.5202/0.9213 ms measured for replies at 50/200/500/900
+ * us against the flat 1.5164 ms. A plain blocking WSAPoll cannot do this
+ * -- its TIMEOUT rounds up to a 15.4 ms scheduler tick, also measured.
+ *
+ * Returns true if it did the waiting; false if it declined (no watched
+ * sockets, event creation failed, or the knob is off), in which case the
+ * caller must take its own sleep. The loop registers it through
+ * scr_loop_set_netwait from scrp_poller_new, so a program that links no
+ * poller-using unit never sees it.
+ *
+ * SCRIPTC_NET_WAIT=0 restores the plain capped sleep. Same binary, both
+ * arms -- a runtime knob, not a compile-time one, because the Windows
+ * cycle lane cannot adjudicate a code-layout change. */
+#ifdef _WIN32
+bool scrp_wait_win32(double ms);
+#endif
+
 /* ── child-exit wakeups: NOT here, deliberately ───────────────────────
  * scr_child.c keeps its narrow seam INLINE (scr_child_watch /
  * scr_children_wait / scr_children_wake_fd, plus the stream read-fd
