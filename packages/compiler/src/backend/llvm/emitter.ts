@@ -74,7 +74,7 @@ import type {
   IrUnionDef,
   SrcLoc,
 } from "../../ir/nodes.js";
-import { irFunctionJsName, settleOrValuePromiseTag, canBoxClassIntoDyn, CLASS_PROPS_FIELD, canMarshalFuncIntoIsland, CAUGHT, DYN, dynCopyIsObservable, F64, islandCallbackRet, islandPromisePayloadTag, isRefCounted, nullProtoRule, OWNMASK_SRC_NULL_PROTO, ownMaskKeyBit, isUnitType, REF_TRUTHY_KINDS, MAY_THROW_LIB_FNS, moduleEmbedsBuiltin, moduleEmbedsNetIsland, moduleUsesAbortSignal, moduleUsesChildStream, moduleUsesDgram, moduleUsesFetch, moduleUsesFetchStatic, moduleUsesFetchDispatch, moduleUsesFsWatch, moduleUsesHttp2, moduleUsesHttpServer, moduleUsesNet, moduleUsesProcessEvents, moduleUsesRegex, moduleUsesStream, moduleUsesWsGlobal, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, STRING, typeEquals, typeKey, VOID } from "../../ir/nodes.js";
+import { UNION_ARM_JS_OBJECT_KINDS, irFunctionJsName, settleOrValuePromiseTag, canBoxClassIntoDyn, CLASS_PROPS_FIELD, canMarshalFuncIntoIsland, CAUGHT, DYN, dynCopyIsObservable, F64, islandCallbackRet, islandPromisePayloadTag, isRefCounted, nullProtoRule, OWNMASK_SRC_NULL_PROTO, ownMaskKeyBit, isUnitType, REF_TRUTHY_KINDS, MAY_THROW_LIB_FNS, moduleEmbedsBuiltin, moduleEmbedsNetIsland, moduleUsesAbortSignal, moduleUsesChildStream, moduleUsesDgram, moduleUsesFetch, moduleUsesFetchStatic, moduleUsesFetchDispatch, moduleUsesFsWatch, moduleUsesHttp2, moduleUsesHttpServer, moduleUsesNet, moduleUsesProcessEvents, moduleUsesRegex, moduleUsesStream, moduleUsesWsGlobal, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, STRING, typeEquals, typeKey, VOID } from "../../ir/nodes.js";
 import { dynClassDisplayName } from "../dyn-members.js";
 import { computeMayThrow } from "../emission/may-throw.js";
 import { seqScopedLocals } from "../emission/emit-stmts.js";
@@ -3577,12 +3577,30 @@ class LlEmitter {
               B.line(`store i1 ${t}, ptr ${slot}`);
               break;
             }
+            case "bigint": {
+              // A bigint is a PRIMITIVE -- `0n` is falsy -- so this arm is
+              // ANSWERED here rather than refused. It was listed just below as
+              // "deliberately still refused", and that judgement was right
+              // about the DANGER and wrong about the remedy: the value is
+              // readable, so refusing it left the C lane as the only lane the
+              // corpus could score against node, and the C lane's own open
+              // default was meanwhile answering `0n` TRUTHY. A refusal on one
+              // lane hid a wrong answer on the other.
+              const p = this.unionPeek(v.name);
+              const t = B.tmp();
+              this.declare(`declare zeroext i1 @scr_big_truthy(ptr)`);
+              B.line(`${t} = call zeroext i1 @scr_big_truthy(ptr ${p})`);
+              B.line(`store i1 ${t}, ptr ${slot}`);
+              break;
+            }
             default: {
               // Every arm kind whose truthiness is the CONSTANT true — JS
               // objects ([] and {} included), plus symbol. REF_TRUTHY_KINDS is
               // the shared authority: the frontend folds `if (x)` on those
               // kinds with it, and the C lane's per-union helper answers them
-              // `true` from its own default. Reading the set here instead of
+              // `true` from its own CLOSED enumeration (UNION_ARM_JS_OBJECT_KINDS,
+              // this set plus the five crypto handles). Reading a set here
+              // instead of
               // carrying a second hand-maintained list is what stops the two
               // lanes drifting as handle kinds are added — this list had
               // silently lost the whole net/http/h2/dgram/tls family, so a
@@ -3592,9 +3610,10 @@ class LlEmitter {
                 B.line(`store i1 true, ptr ${slot} ; ${arm.kind}: objects are truthy`);
                 break;
               }
-              // Deliberately still refused: bigint (0n is falsy), jsval (only
-              // the engine can answer), dyn. Value-dependent, so a constant
-              // would be a silent wrong answer rather than a missing feature.
+              // Deliberately still refused: jsval (only the engine can
+              // answer) and dyn. Value-dependent, so a constant would be a
+              // silent wrong answer rather than a missing feature. bigint is
+              // NOT in this list any more -- it is answered above.
               throw new LlvmUnsupportedError(`truthy:union:${arm.kind}`);
             }
           }
@@ -5926,8 +5945,32 @@ class LlEmitter {
               B.line(`store i1 ${t}, ptr ${slot}`);
               break;
             }
+            case "bigint": {
+              // A bigint is a PRIMITIVE: compare the VALUE. The object
+              // default below compared two heap ScrBigInts by address and
+              // answered `5n === 5n` false — the same silent wrong answer
+              // the C lane carried, and the one defect of this pair that
+              // was live on BOTH backends. SameValue needs no separate
+              // arm: a bigint has no NaN and no signed zero.
+              const a = this.unionPeek(l.name);
+              const b = this.unionPeek(r.name);
+              const t = B.tmp();
+              this.declare(`declare zeroext i1 @scr_big_eq(ptr, ptr)`);
+              B.line(`${t} = call zeroext i1 @scr_big_eq(ptr ${a}, ptr ${b})`);
+              B.line(`store i1 ${t}, ptr ${slot}`);
+              break;
+            }
             default: {
               // Ref arms: pointer identity, exactly JS object equality.
+              // CLOSED: identity is right only for values that ARE JS
+              // objects. A primitive arm compared by address is a wrong
+              // answer, so anything outside the shared object set refuses
+              // here instead of inheriting the compare. The frontend's
+              // eqComparableUnion already fences dyn, caught and jsval, so
+              // bigint above was the only arm this default ever got wrong.
+              if (!UNION_ARM_JS_OBJECT_KINDS.has(arm.kind)) {
+                throw new LlvmUnsupportedError(`unionEq:${arm.kind}`);
+              }
               const a = this.unionPeek(l.name);
               const b = this.unionPeek(r.name);
               const t = B.tmp();
