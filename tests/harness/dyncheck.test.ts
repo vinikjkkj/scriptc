@@ -1690,20 +1690,35 @@ console.log("unreachable", s === null ? "n" : "y");
     expect(r.stderr).toContain("Uncaught TypeError: expected number | null | object at $, got object");
   });
 
-  test("a WRONG-SIGNATURE function is refused by a function arm, not adapted into it", async () => {
-    // The union arm walker decides while it builds, and for a FUNCTION arm
-    // the rule it applies has to be the match predicate's exact-signature
-    // strcmp and NOT the checked builder's exact-or-adapt. The builder's
-    // permissive half is right where it stands -- `u as Fn` is a cast, and
-    // adapting is what makes a foreign signature usable -- but as an ARM
-    // SELECTOR it would put every callable on the first function arm and
-    // hand the union the wrong tag, with the adapter quietly converting a
-    // return type nobody asked to convert.
+  test("a WRONG-SIGNATURE function fills a function ARM through the adapter, and the refusal moves to the call", async () => {
+    // WHAT THIS TEST USED TO SAY, and why it changed. The union arm
+    // walker stopped at the match predicate's exact-signature strcmp for
+    // a FUNCTION arm, so `wrong as Fn | null` refused at the CAST while
+    // `wrong as Fn` -- the identical cast, one spelling over -- went on
+    // to wrap the foreign signature in the per-target adapter and threw
+    // at the CALL. Two spellings of one cast, two behaviours, and the
+    // refusing one is the spelling an OPTIONAL member takes, because
+    // `f?: T` IS `T | undefined`. That is what made `{ f: (s) => Row }`
+    // fillable out of `unknown` and `{ f?: (s) => Row }` not, with a
+    // message -- `expected function | undefined at $.f, got function` --
+    // that named neither signature and was not even true of a member
+    // that was present and callable.
     //
-    // This cannot be a differential corpus program: Node has no arms and
-    // answers 4 for the call below, so all three behaviours (Node's
-    // answer, the refusal, and the adaptation) differ from each other.
-    // The refusal is the honest one and this pins it.
+    // The arm adapts now. Nothing about the refusal disappeared: the
+    // adapter validates the RESULT per call, so this program still exits
+    // 1 with a TypeError, and the message now names the type that
+    // actually disagreed (`expected string`, `got number`) instead of
+    // the arm set. Measured on both spellings: probes p24, and the two
+    // lines below are the same message.
+    //
+    // The ARM-SELECTOR hazard the old rule guarded is guarded a
+    // different way: the adapt pass runs LAST, after every exact pass,
+    // so a value that IS one of the arms still takes its own arm.
+    // Corpus 7412 is that control, differentially -- it is the one half
+    // of this behaviour Node agrees with.
+    //
+    // This half cannot be a differential corpus program: Node has no
+    // arms and answers 4 for the call below.
     const r = await compileAndRun(
       "func-arm-signature-decides",
       `type Fn = (x: number) => string;
@@ -1714,8 +1729,27 @@ console.log("took", w === null ? "null" : w(2));
     );
     expect(r.exitCode).toBe(1);
     expect(r.stdout).toBe("");
-    expect(r.stderr).toContain("Uncaught TypeError: expected");
-    expect(r.stderr).toContain("at $, got function");
+    expect(r.stderr).toContain("Uncaught TypeError: expected string at $, got number");
+  });
+
+  test("...and the BARE cast of the same type answers identically, which is the point", async () => {
+    // The asymmetry this pair exists to keep closed. Before the arm
+    // adapted, these two programs differed: the bare cast threw at the
+    // call with `expected string at $, got number` and the union threw at
+    // the cast with `expected function | null at $, got function`. A
+    // future change that re-narrows either one will make them differ
+    // again, and this is the test that says so.
+    const r = await compileAndRun(
+      "func-bare-cast-same",
+      `type Fn = (x: number) => string;
+const wrong: unknown = (x: number) => x * 2;
+const w = wrong as Fn;
+console.log("took", w(2));
+`,
+    );
+    expect(r.exitCode).toBe(1);
+    expect(r.stdout).toBe("");
+    expect(r.stderr).toContain("Uncaught TypeError: expected string at $, got number");
   });
 
   test("a '.filter' whose INFERRED predicate delegates to a lying guard throws instead of re-tagging", async () => {

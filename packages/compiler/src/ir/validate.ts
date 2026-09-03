@@ -142,6 +142,8 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "sqlite.stmtReader": { argTypes: [SQLITESTMT_T], result: BOOL },
   "sqlite.stmtReadonly": { argTypes: [SQLITESTMT_T], result: BOOL },
   "sqlite.stmtBusy": { argTypes: [SQLITESTMT_T], result: BOOL },
+  "sqlite.ctorValue": { argTypes: [], result: DYN },
+  "sqlite.errorClassValue": { argTypes: [], result: DYN },
   "dyn.keySet": { argTypes: [DYN, STRING, DYN], result: VOID },
   "dyn.expandoBind": { argTypes: [DYN, STRING, DYN, DYN], result: VOID },
   "dyn.keyDelete": { argTypes: [DYN, STRING], result: BOOL },

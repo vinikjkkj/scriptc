@@ -259,7 +259,7 @@ export class LlDyn {
    * malloc'd copy. The struct is still 24 bytes and `key` and `value` are
    * still at +0 and +16, which is why the flag went where it did. This is
    * the ONLY place in this backend that reads the entry layout. */
-  private entryAt(B: BlockBuilder, entries: string, i: string): { key: string; keyLen: string; value: string } {
+  private entryAt(B: BlockBuilder, entries: string, i: string): { key: string; keyLen: string; value: string; base: string } {
     const off = B.tmp();
     const base = B.tmp();
     B.line(`${off} = mul i64 ${i}, 24 ; sizeof(ScrDynEntry)`);
@@ -276,7 +276,7 @@ export class LlDyn {
     const value = B.tmp();
     B.line(`${vp} = getelementptr inbounds i8, ptr ${base}, i64 16`);
     B.line(`${value} = load ptr, ptr ${vp}`);
-    return { key, keyLen, value };
+    return { key, keyLen, value, base };
   }
 
   /** An ScrStr's (len, data) pair — len via the %ScrStr header (a u32,
@@ -1706,13 +1706,44 @@ export class LlDyn {
               B.br(lNo);
               B.startBlock(lNo);
             }
+            // `entries` is not a table of values: an own ENUMERABLE
+            // ACCESSOR lives there as a position SLOT whose descriptor is
+            // in `hidden`. The C lane's rule, over the same runtime entry
+            // point — it RUNS the getter, reports a tombstone as a skip,
+            // and reports a throwing getter as NULL with the exception
+            // pending.
+            host.declare(`declare ptr @scr_dyn_obj_entry_read(ptr, ptr, ptr)`);
+            const skSlot = B.slot();
+            B.entryAllocas.push(`${skSlot} = alloca i1`);
+            B.line(`store i1 false, ptr ${skSlot}`);
+            const rv = B.tmp();
+            B.line(`${rv} = call ptr @scr_dyn_obj_entry_read(ptr ${dRef}, ptr ${ent.base}, ptr ${skSlot}) ; +1, runs a getter`);
+            const sk = B.tmp();
+            B.line(`${sk} = load i1, ptr ${skSlot}`);
+            const lTomb = B.newLabel("dcv.tomb");
+            const lLive = B.newLabel("dcv.live");
+            B.condBr(sk, lTomb, lLive);
+            B.startBlock(lTomb);
+            brNext();
+            B.startBlock(lLive);
+            const isNull = B.tmp();
+            B.line(`${isNull} = icmp eq ptr ${rv}, null`);
+            const lThrew = B.newLabel("dcv.thr");
+            const lOk = B.newLabel("dcv.ok");
+            B.condBr(isNull, lThrew, lOk);
+            B.startBlock(lThrew);
+            releaseR();
+            if (soft) notOk();
+            B.terminate(`ret ptr null`);
+            B.startBlock(lOk);
             let ev: string;
             if (iv.kind === "dyn") {
-              ev = this.retainDyn(B, ent.value);
+              ev = rv; /* the read already owns +1 */
             } else {
               setPathKeyPtr(ent.key);
               ev = B.tmp();
-              B.line(`${ev} = call ${this.valTy(iv)} @${childC(iv)}(ptr ${ent.value}, ptr ${pathSlot}${childArg})`);
+              B.line(`${ev} = call ${this.valTy(iv)} @${childC(iv)}(ptr ${rv}, ptr ${pathSlot}${childArg})`);
+              B.line(`call void @scr_dyn_release(ptr ${rv})`);
               afterChild("dcv", releaseR, "ptr null");
             }
             const ek = B.tmp();
@@ -1927,6 +1958,65 @@ export class LlDyn {
             B.terminate(`ret ptr null`);
             B.startBlock(lGo);
           });
+        }
+        // ── the FUNCTION-ADAPT pass ───────────────────────────────────
+        // The C lane's last pass, ported line for line (emit-walkers.ts
+        // carries the soundness argument): after every exact pass, a
+        // callable takes the first ADAPTABLE func arm in canonical order
+        // and rides its adapter. A value that ever WAS one of the arms has
+        // already taken that arm by signature above, so the two lanes
+        // still tell `(() => number) | (() => string)` apart for every
+        // value either of them was boxed from.
+        for (const i of order.filter((j) => {
+          const arm = def.arms[j]!;
+          return (
+            arm.kind === "func" &&
+            canAdaptDynFuncTo(arm, (id: string) => host.recordsById.get(id), (id: string) => host.unionsById.get(id))
+          );
+        })) {
+          const arm = def.arms[i]! as IrType & { kind: "func" };
+          const lTry = B.newLabel("dau.fa");
+          const lSkip = B.newLabel("dau.fn");
+          B.condBr(kindEq(DK.FUNC), lTry, lSkip);
+          B.startBlock(lTry);
+          const adapter = this.dynFuncAdapterHelper(arm);
+          host.declare(`declare ptr @scr_closure_new(ptr, i64)`);
+          host.declare(`declare ptr @scr_box_new(i32)`);
+          host.declare(`declare void @scr_box_set_ref(ptr, ptr)`);
+          host.declare(`declare void @scr_box_set_thunk_fn(ptr, ptr)`);
+          host.declare(`declare ptr @scr_closure_retain_v(ptr)`);
+          host.declare(`declare ptr @scr_union_new_ref(i32, ptr, ptr, ptr, ptr)`);
+          const ad = B.tmp();
+          B.line(`${ad} = call ptr @scr_closure_new(ptr @${adapter}, i64 2)`);
+          const cap0 = B.tmp();
+          B.line(`${cap0} = getelementptr inbounds %ScrClosure, ptr ${ad}, i64 1 ; caps[0]`);
+          const fbox = B.tmp();
+          B.line(`${fbox} = call ptr @scr_box_new(i32 4) ; SCR_BOX_FUNC — traced`);
+          B.line(`store ptr ${fbox}, ptr ${cap0}`);
+          const clop = B.tmp();
+          const clo = B.tmp();
+          const rclo = B.tmp();
+          B.line(`${clop} = getelementptr inbounds i8, ptr %d, i64 16 ; ->v.fn.clo`);
+          B.line(`${clo} = load ptr, ptr ${clop}`);
+          B.line(`${rclo} = call ptr @scr_closure_retain_v(ptr ${clo})`);
+          B.line(`call void @scr_box_set_ref(ptr ${fbox}, ptr ${rclo})`);
+          const cap1 = B.tmp();
+          B.line(`${cap1} = getelementptr inbounds ptr, ptr ${cap0}, i64 1 ; caps[1]`);
+          const tbox = B.tmp();
+          B.line(`${tbox} = call ptr @scr_box_new(i32 0) ; SCR_BOX_F64 — the call descriptor`);
+          B.line(`store ptr ${tbox}, ptr ${cap1}`);
+          const thp = B.tmp();
+          const th = B.tmp();
+          B.line(`${thp} = getelementptr inbounds i8, ptr %d, i64 24 ; ->v.fn.thunk`);
+          B.line(`${th} = load ptr, ptr ${thp}`);
+          B.line(`call void @scr_box_set_thunk_fn(ptr ${tbox}, ptr ${th})`);
+          const rc = vAdapters(host, arm);
+          const u = B.tmp();
+          B.line(
+            `${u} = call ptr @scr_union_new_ref(i32 ${i}, ptr ${ad}, ptr ${rc.retain}, ptr ${rc.release}, ptr ${traceArg(host, arm)})`,
+          );
+          B.terminate(`ret ptr ${u}`);
+          B.startBlock(lSkip);
         }
         // No arm survived. The refusal belongs to the CHECKED form above,
         // which is the only caller that has a message to write; here the

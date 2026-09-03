@@ -3093,6 +3093,13 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             return finish(`scr_sqlite_stmt_readonly(${arg(0)})`);
           case "sqlite.stmtBusy":
             return finish(`scr_sqlite_stmt_busy(${arg(0)})`);
+          /* better-sqlite3 as VALUES (scr_sqlite_value.c). Both mint a
+           * callable dyn (+1) and neither can throw: what throws is the
+           * CALL, inside the minted thunk. */
+          case "sqlite.ctorValue":
+            return finish(`scr_sqlite_value_ctor()`);
+          case "sqlite.errorClassValue":
+            return finish(`scr_sqlite_value_error_class()`);
           case "dyn.defineProps":
             // Object.defineProperties over dyn values: both borrowed,
             // result the target (+1); throws catchably (may-throw seed).
