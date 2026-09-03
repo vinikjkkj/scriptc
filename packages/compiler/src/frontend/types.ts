@@ -1171,6 +1171,19 @@ export interface TypeMapperCtx {
   /** True for a DATA property some literal satisfies with a getter: the
    * field carries an accessor slot so both producers share one layout. */
   accessorProducerProp?: (sym: ts.Symbol) => boolean;
+  /** True for a PROMISE-typed data property some object literal in this
+   * program initializes with `Promise.resolve(null as never)` -- a promise
+   * the checker types `Promise<never>` and that nevertheless FULFILS, with
+   * `null`, at a slot whose declared payload cannot hold one. The field's
+   * payload becomes VOID: node's value there is unrepresentable at the
+   * declared type, so the honest slot is one that carries NO payload and
+   * refuses every attempt to read one, rather than one that carries a
+   * plausible stand-in. Decided over the whole program
+   * (Lowerer.nullPayloadPromiseProp) for the same reason
+   * accessorProducerProp is -- a shape is interned from the TYPE, long
+   * before any producer is seen, and two values of one interface must
+   * share a layout. */
+  nullPayloadPromiseProp?: (sym: ts.Symbol) => boolean;
   /** --dynamic: `any` maps to the island handle type (jsval). Off, `any`
    * stays unmapped and the requires-dynamic diagnostic fires per site. */
   dynamic: boolean;
@@ -6826,6 +6839,19 @@ function mapRecordTypeInner(widened: ts.Type, ctx: TypeMapperCtx): IrType | Reco
       // BEARING composite fields (`content: any[]`) keep their static
       // shape — the lift covers them.
       if (pt.kind === "jsval") return JSVAL;
+      // A promise field some literal fills with `Promise.resolve(null as
+      // never)`: node's promise FULFILS with `null` there, at a slot whose
+      // declared payload is a record. No representation holds that, so the
+      // field's payload becomes VOID -- the promise stays a promise (it
+      // settles, and a rejection still propagates), and every attempt to
+      // READ the fulfillment value refuses at compile time instead of
+      // answering. A null ARM was tried first and rejected: it makes the
+      // await's value a union that the checker still calls the record, so
+      // the checker-trusted extraction throws where node answers `null`.
+      // Refusing is the only answer that is never wrong.
+      if (pt.kind === "promise" && ctx.nullPayloadPromiseProp?.(p) === true) {
+        pt = { kind: "promise", inner: VOID };
+      }
       fields.push({ name: p.name, type: pt });
     }
     // getPropertiesOfType yields DECLARATION order (interface/alias/literal
