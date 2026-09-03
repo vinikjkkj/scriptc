@@ -4225,8 +4225,10 @@ class LlEmitter {
         const arr = this.emitExpr(s.arr);
         const idx = this.emitExpr(s.index);
         const v = this.emitExpr(s.value);
-        this.declare(`declare void @scr_bytes_set(ptr, double, double)`);
-        B.line(`call void @scr_bytes_set(ptr ${arr.name}, double ${idx.name}, double ${v.name})`);
+        // The write twin of the read site above -- same fast arm, same
+        // answer, the full function for everything it declines.
+        this.declare(`declare void @scr_bytes_set_fast(ptr, double, double)`);
+        B.line(`call void @scr_bytes_set_fast(ptr ${arr.name}, double ${idx.name}, double ${v.name})`);
         break;
       }
       case "fieldSet":
@@ -11377,7 +11379,16 @@ class LlEmitter {
         return call("scr_bytes_byte_len", "double (ptr)", `ptr ${r.name}`, false, false);
       case "get":
         // Any invalid index traps (the array runtime's discipline).
-        return call("scr_bytes_get", "double (ptr, double)", `ptr ${r.name}, double ${args[0]!.name}`, false, false);
+        // scr_bytes_get_FAST, not scr_bytes_get: the u8-in-bounds arm
+        // without the element switch or the double-domain bound, which is
+        // 18.2 executed instructions per read cheaper and answers the same
+        // double for every input (scr_runtime.h). This lane calls where
+        // the C lane inlines, because it has no knowledge of ScrBytes's
+        // field offsets and putting them here would be a second,
+        // unchecked copy of the layout -- and the call is only 1.9
+        // instructions worse than the inline. This is one of exactly two
+        // sites that lower `bytes[i]` on this lane.
+        return call("scr_bytes_get_fast", "double (ptr, double)", `ptr ${r.name}, double ${args[0]!.name}`, false, false);
       case "slice":
         return call(
           "scr_bytes_slice",
@@ -14304,11 +14315,19 @@ class LlEmitter {
       throw new LlvmUnsupportedError(`libCall:${e.fn}`, e.loc);
     }
     if (e.fn === "math.floor" || e.fn === "math.trunc" || e.fn === "math.ceil") {
-      const intr = e.fn === "math.floor" ? "floor" : e.fn === "math.trunc" ? "trunc" : "ceil";
+      // scr_math_floor/trunc/ceil, NOT llvm.floor.f64 and friends. The
+      // intrinsic lowers to a call into mingw's statically linked software
+      // rounding on the baseline target (no SSE4.1, so no roundsd), and the
+      // runtime function is an int64-domain leaf that answers the same
+      // double for every input. This lane cannot inline a diamond at an
+      // expression site the way the C lane does, but the call still pays:
+      // measured on zapo's feMul carry chain, 681 -> 536 executed
+      // instructions, -21.29%, against -29.07% for the inlined C arm.
+      const fn = e.fn === "math.floor" ? "scr_math_floor" : e.fn === "math.trunc" ? "scr_math_trunc" : "scr_math_ceil";
       const v = this.emitExpr(e.args[0]!);
-      this.declare(`declare double @llvm.${intr}.f64(double)`);
+      this.declare(`declare double @${fn}(double)`);
       const t = B.tmp();
-      B.line(`${t} = call double @llvm.${intr}.f64(double ${v.name})`);
+      B.line(`${t} = call double @${fn}(double ${v.name})`);
       return { name: t, type: e.type };
     }
     if (e.fn === "math.log") {
