@@ -362,6 +362,13 @@ double scr_bytes_get(const ScrBytes *b, double i) {
   return 0; /* unreachable */
 }
 
+/* The LIBCALL face of scr_runtime.h's inline element accessors, for the
+ * LLVM lane. One implementation, two faces: everything these can answer,
+ * the inline above answers with the same expression, and everything else
+ * falls through to the function below in both. */
+double scr_bytes_get_fast(const ScrBytes *b, double i) { return scr_bytes_get_inl(b, i); }
+void scr_bytes_set_fast(ScrBytes *b, double i, double v) { scr_bytes_set_inl(b, i, v); }
+
 void scr_bytes_set(ScrBytes *b, double i, double v) {
 #ifdef SCR_ARRCEN_ON
   scr_arrcen_note(SCR_ARRCEN_BYTESSET, (long long)b->len);

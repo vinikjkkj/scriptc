@@ -248,11 +248,11 @@ const platform = process.platform;
 
 /** A default-built hello-world: no regex, no engine. */
 export const STATIC_CLASS_MAX =
-  platform === "linux" ? 397_632 : platform === "win32" ? 666_112 : 366_632;
+  platform === "linux" ? 398_656 : platform === "win32" ? 674_816 : 367_656;
 
 /** A program that uses regex: libregexp + libunicode, never the engine. */
 export const REGEX_CLASS_MAX =
-  platform === "linux" ? 552_680 : platform === "win32" ? 808_448 : 519_680;
+  platform === "linux" ? 553_704 : platform === "win32" ? 816_640 : 520_704;
 
 /* ── the ARMED half of the guard ───────────────────────────────────────
  *
@@ -1015,13 +1015,112 @@ export const SIZE_DRIFT_PAGE = 4_096;
  * Both ceilings tipped too and are raised by the same amount, keeping the
  * headroom each already had (3,072 static, 3,584 regex) and keeping the
  * class DISTANCE at 141,824 bytes on both sides, byte for byte. */
-export const STATIC_CLASS_RECORDED = platform === "win32" ? 663_040 : null;
+/* 2026-09-03 - THE INTEGER-DOMAIN FAST ARMS (Math.floor/trunc/ceil and the
+ * typed-array element accessors) TIPPED BOTH CEILINGS, and the RECORDED
+ * pair stayed silent while they did. Measured A/B on two worktrees, same
+ * toolchain (x86_64-windows-gnu, zig cc 0.16.0, -O2), the two class
+ * programs built with default options:
+ *
+ *   base 8a904d8d   665,600 static   807,424 regex
+ *   this change     666,624 static   808,448 regex
+ *                   +1,024           +1,024
+ *
+ * WHAT THE PAGE BOUGHT. scr_runtime.h gained inline arms that answer
+ * Math.floor/trunc/ceil and `bytes[i]` in the integer domain instead of
+ * calling mingw's statically linked software rounding or walking
+ * scr_bytes_get's element switch. Those are header inlines and cost a
+ * program nothing unless it uses the construct -- but each has a LIBCALL
+ * FACE for the LLVM lane, which cannot inline a diamond at an expression
+ * site, and those five functions live in ALWAYS-LINKED TUs:
+ *
+ *   scr_lib.c     scr_math_floor / scr_math_trunc / scr_math_ceil
+ *   scr_bytes.c   scr_bytes_get_fast / scr_bytes_set_fast
+ *
+ * Every runtime TU compiled at both revisions under one identical flag set
+ * (-std=c11 -O2 -fno-math-errno -fno-strict-aliasing -DSCR_LIB), 73 of
+ * them, names exactly two movers and they are those two:
+ *
+ *   scr_bytes.o   134,121 -> 135,807   +1,686
+ *   scr_lib.o     315,893 -> 318,173   +2,280
+ *
+ * with every other always-linked TU moving -8 to -28 bytes of debug and
+ * string tables (-276 across the other seventeen), for +3,690 of object
+ * landing as +1,024 in the binary after dead-strip and section alignment.
+ * That last factor is obtained by DIFFERENCE, the way the 2026-08-31 entry
+ * above obtains it, and is deliberately not decomposed further.
+ *
+ * The page is the BODIES and not the symbols, which is measurable rather
+ * than argued: the same tree built with -DSCR_NO_FASTARM -- which keeps all
+ * five functions and compiles only their fast arms out -- weighs 665,600
+ * and 807,424, byte for byte the base revision.
+ *
+ * THE COST, SAID PLAINLY, because it cuts against a standing objective
+ * (binary size, and the ~20 MB RSS target): a hello-world pays all 1,024
+ * bytes and cannot reach one of them. Its own emitted TU contains ZERO
+ * occurrences of scr_floor(, scr_trunc(, scr_ceil(, scr_bytes_get_inl( or
+ * scr_bytes_set_inl( -- it uses neither construct -- so the bytes are
+ * entirely always-linked runtime. The trade is deliberate, and it is a
+ * trade rather than a footnote: 1 KB on every binary the project builds,
+ * against roughly 10.7 G executed instructions off the zapo messaging
+ * bench's send_group phase, where the element accessors alone answer
+ * 515,725,184 accesses. If the size budget ever outweighs that, the honest
+ * fix is the reachable-only-TU pattern the 2026-08-31 entry names, not a
+ * looser ceiling.
+ *
+ * Both classes moved by exactly the same +1,024, which is the signature of
+ * a shared always-linked cost rather than a per-program one, and the class
+ * DISTANCE this pair exists to protect is 141,824 bytes on BOTH sides,
+ * byte for byte.
+ *
+ * The figures recorded below are the change's BRANCH measured alone (on
+ * c1a2f83c) and the same change MERGED into 8a904d8d, and the two are
+ * byte-identical at 666,624 / 808,448 -- so the merge it arrived through
+ * contributed nothing to either class and the recorded pair is right from
+ * whichever side the gate runs.
+ *
+ * HOW MUCH OF IT WAS DRIFT, since this file keeps finding that it is most
+ * of it: the recorded pair was 663,040 / 804,864 and the BASE revision
+ * already weighed 665,600 / 807,424. So +2,560 on each was gone before
+ * this change compiled a line, silently, because 2,560 is under one
+ * SIZE_DRIFT_PAGE. Adding 1,024 takes the total to +3,584 -- STILL under a
+ * page, so the loud RECORDED pair did not fire here either. What fired was
+ * the coarse ceiling: 666,624 against 666,112, and 808,448 against a
+ * REGEX_CLASS_MAX of exactly 808,448 (toBeLessThan fails on equal). That
+ * is precisely the inversion this file has now diagnosed three times --
+ * the ceiling speaking first, with the message the loud pair was added to
+ * replace.
+ *
+ * THE MAX CEILINGS MOVE by the rule adopted 2026-08-20 and now failed to
+ * apply for the THIRD time: on win32, CLASS_MAX = CLASS_RECORDED + 2 x
+ * SIZE_DRIFT_PAGE. The ceilings this change inherited were RECORDED +
+ * 3,072 and RECORDED + 3,584, both under one drift page, which is exactly
+ * what let them fire first. Applied here rather than restated:
+ *
+ *     674,816 = 666,624 + 8,192      816,640 = 808,448 + 8,192
+ *
+ * linux and darwin cannot be weighed from this box, so their ceilings move
+ * by exactly what the change costs here, +1,024 each, which preserves
+ * whatever headroom each had rather than inventing new headroom for a
+ * platform nobody measured.
+ *
+ * ONE MEASUREMENT TRAP, written down because it cost this block a wrong
+ * conclusion in a report before it cost anyone a gate: chocolatey's `zig`
+ * on this box is 0.15.2 and every calibration in this file is 0.16.0, the
+ * one under G:/zapo-work/tools/zig. They are not the same compiler --
+ * 0.15.2 builds the static class at 645,632 where 0.16.0 builds it at
+ * 665,600, a ~20 KB gap. Measured with the wrong one, a ceiling that has
+ * genuinely tipped reads as a 17 KB SHRINK against the recorded figure,
+ * and an A/B meant to settle it compares two builds that are BOTH ~17 KB
+ * under the anchor, which looks like agreement and is not. Before
+ * believing any figure in this file, check `zig version` as well as
+ * SCRIPTC_TARGET. */
+export const STATIC_CLASS_RECORDED = platform === "win32" ? 666_624 : null;
 
 /** The regex program, same run, same tree. Deliberately NOT derived from
  * the static delta - and the 2026-08-24 entry is why: that change moved the
  * two classes by -7,680 and -6,656, so deriving either from the other would
  * have been 1,024 bytes wrong. */
-export const REGEX_CLASS_RECORDED = platform === "win32" ? 804_864 : null;
+export const REGEX_CLASS_RECORDED = platform === "win32" ? 808_448 : null;
 
 /** The complaint a recorded-figure check makes, or null when the size is
  * within one page of what was recorded. A string rather than a thrown

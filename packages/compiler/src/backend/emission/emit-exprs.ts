@@ -1353,7 +1353,12 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             return E.newTemp(e.type, `scr_bytes_byte_len(${r.name})`);
           case "get":
             // Any invalid index traps (the array runtime's discipline).
-            return E.newTemp(e.type, `scr_bytes_get(${r.name}, ${args[0]!.name})`);
+            // scr_bytes_get_inl, not scr_bytes_get: the inline arm answers
+            // the u8-in-bounds case here and calls the function for
+            // everything else, which is the same answer either way (see
+            // scr_runtime.h). This is one of exactly two sites that lower
+            // `bytes[i]` on this lane.
+            return E.newTemp(e.type, `scr_bytes_get_inl(${r.name}, ${args[0]!.name})`);
           case "slice":
             // Omitted relative indices default like string slice: start 0,
             // end +Infinity (math.h is always included). Fresh copy, +1.
@@ -3420,14 +3425,21 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             return finish(`scr_math_max_arr(${arg(0)})`);
           case "math.minArr":
             return finish(`scr_math_min_arr(${arg(0)})`);
-          // Math.floor/trunc/ceil — the C functions ARE the JS operations
-          // (math.h is always included). Borrow nothing; no throw.
+          // Math.floor/trunc/ceil — scr_floor/scr_trunc/scr_ceil, which
+          // ARE the C functions outside the int64 window and an inline
+          // integer-domain rounding inside it (scr_runtime.h). NOT bare
+          // floor()/trunc()/ceil(): the shipping target is baseline x86-64
+          // with no SSE4.1, so clang cannot lower any of the three to one
+          // roundsd and emits a call into mingw's STATICALLY LINKED
+          // software routine — 12.4 executed instructions per call more
+          // than the inline arm, measured on zapo's feMul carry chain.
+          // Borrow nothing; no throw.
           case "math.floor":
-            return finish(`floor(${arg(0)})`);
+            return finish(`scr_floor(${arg(0)})`);
           case "math.trunc":
-            return finish(`trunc(${arg(0)})`);
+            return finish(`scr_trunc(${arg(0)})`);
           case "math.ceil":
-            return finish(`ceil(${arg(0)})`);
+            return finish(`scr_ceil(${arg(0)})`);
           // Math.pow — scr_math_pow, NOT C pow(): the spec's NaN-exponent
           // and |base|==1-with-infinite-exponent rules are exactly where
           // C disagrees. Math.log — C log() IS the JS operation at every
