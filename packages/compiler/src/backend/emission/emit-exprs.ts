@@ -3981,6 +3981,8 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             return finish(`scr_spawn_res_stdout(${arg(0)})`);
           case "spawnRes.stderr":
             return finish(`scr_spawn_res_stderr(${arg(0)})`);
+          case "spawnRes.hasOutput":
+            return finish(`scr_spawn_res_has_output(${arg(0)})`);
           case "spawnRes.signal": {
             // The `string | null` union (the termination signal's name,
             // null for a normal exit or spawn failure) — the has/get pair
