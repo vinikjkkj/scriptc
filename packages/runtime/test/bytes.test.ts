@@ -9,6 +9,10 @@ import { afterAll, beforeAll, expect, test } from "vitest";
 const execFileAsync = promisify(execFile);
 const testDir = import.meta.dirname;
 const bin = join(testDir, "build", "test_bytes" + exeSuffix);
+// The same file with the inline element accessors compiled out, so the
+// inline-versus-call differential in test_inline_accessors runs on both
+// arms of the A/B switch and the trap modes abort identically either way.
+const binNoFast = join(testDir, "build", "test_bytes_nofast" + exeSuffix);
 let scratch: string;
 
 // Compiled once with ASan + the RC audit: the assertions in test_bytes.c
@@ -19,11 +23,13 @@ let scratch: string;
 // — the sanitized run proves no leak/double-free across all of them.
 beforeAll(async () => {
   await mkdir(join(testDir, "build"), { recursive: true });
+  for (const [out, extra] of [[bin, []], [binNoFast, ["-DSCR_NO_FASTARM"]]] as const)
   await ccCompile([
     "-std=c11", "-O1", "-Wall", "-Wextra",
     "-fsanitize=address", "-DSCR_RC_AUDIT",
+    ...extra,
     "-I", join(testDir, "../src"),
-    "-o", bin,
+    "-o", out,
     join(testDir, "test_bytes.c"),
     join(testDir, "../src/scr_bytes.c"),
     join(testDir, "../src/scr_bytes_io.c"),
@@ -50,7 +56,7 @@ beforeAll(async () => {
     ...(process.platform === "linux" ? ["-D_GNU_SOURCE", "-lm"] : []),
   ]);
   scratch = await mkdtemp(join(tmpdir(), "scriptc-bytes-"));
-});
+}, 300_000);
 
 afterAll(async () => {
   if (scratch) await rm(scratch, { recursive: true, force: true });
@@ -66,6 +72,23 @@ test.each([
 ])("bytes runtime: coercions, encodings, zlib, fs, RC -- %s", async (_name, fastidx) => {
   const env = { ...process.env, ...(fastidx === undefined ? {} : { SCR_FASTIDX: fastidx }) };
   const { stderr } = await execFileAsync(bin, [scratch], { env });
+  expectCasesPassed(stderr);
+});
+
+// The inline element accessors (scr_bytes_get_inl / scr_bytes_set_inl in
+// scr_runtime.h, which is what the emitter lowers `bytes[i]` to) are a
+// COMPILE-TIME arm, not an env one: inlined at the call site, an env check
+// costs a fifth of what the arm saves, so -DSCR_NO_FASTARM is the switch.
+// The second binary compiles the same test file with the arm off, and its
+// count must match the first exactly -- test_inline_accessors walks the
+// inline-versus-call differential either way, and with the arm off it walks
+// the function against itself.
+test.each([
+  ["fast (default)", undefined],
+  ["libm (SCR_FASTIDX=0)", "0"],
+])("bytes runtime with -DSCR_NO_FASTARM -- %s", async (_name, fastidx) => {
+  const env = { ...process.env, ...(fastidx === undefined ? {} : { SCR_FASTIDX: fastidx }) };
+  const { stderr } = await execFileAsync(binNoFast, [scratch], { env });
   expectCasesPassed(stderr);
 });
 
@@ -91,15 +114,29 @@ const CRASH_MODES: readonly (readonly [string, string])[] = [
   ["--crash-get-empty", "typed array index 0 out of bounds (length 0)"],
   ["--crash-get-ulp", "typed array index 1.0000000000000002 out of bounds (length 1)"],
   ["--crash-set-neg", "typed array index -1 out of bounds (length 1)"],
+  // The same refusals through the inline accessors the emitter lowers
+  // `bytes[i]` to. Identical text is the requirement: the inline arm
+  // declines and hands over, it never formats a message of its own.
+  ["--crash-inl-get-oob", "typed array index 1 out of bounds (length 1)"],
+  ["--crash-inl-get-frac", "typed array index 0.5 out of bounds (length 1)"],
+  ["--crash-inl-get-nan", "typed array index NaN out of bounds (length 1)"],
+  ["--crash-inl-get-neg", "typed array index -1 out of bounds (length 1)"],
+  ["--crash-inl-get-inf", "typed array index Infinity out of bounds (length 1)"],
+  ["--crash-inl-get-2p53", "typed array index 9007199254740992 out of bounds (length 1)"],
+  ["--crash-inl-set-oob", "typed array index 1 out of bounds (length 1)"],
+  ["--crash-inl-set-neg", "typed array index -1 out of bounds (length 1)"],
+  ["--crash-inl-set-nan-idx", "typed array index NaN out of bounds (length 1)"],
 ];
 
 test.each(
   CRASH_MODES.flatMap(([mode, message]) =>
-    [undefined, "0"].map((fastidx) => [mode, message, fastidx] as const),
+    [undefined, "0"].flatMap((fastidx) =>
+      ([false, true] as const).map((nofast) => [mode, message, fastidx, nofast] as const),
+    ),
   ),
-)("trap aborts (%s, SCR_FASTIDX=%s)", async (mode, message, fastidx) => {
+)("trap aborts (%s, SCR_FASTIDX=%s, SCR_NO_FASTARM=%s)", async (mode, message, fastidx, nofast) => {
   const env = { ...process.env, ...(fastidx === undefined ? {} : { SCR_FASTIDX: fastidx }) };
-  const err = await execFileAsync(bin, [mode], { env }).then(
+  const err = await execFileAsync(nofast ? binNoFast : bin, [mode], { env }).then(
     () => {
       throw new Error(`expected ${mode} to abort`);
     },

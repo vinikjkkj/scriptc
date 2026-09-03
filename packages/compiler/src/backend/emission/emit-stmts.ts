@@ -468,7 +468,9 @@ export function emitStmt(E: CEmitter, s: IrStmt): void {
         const arr = E.emitExpr(s.arr);
         const idx = E.emitExpr(s.index);
         const v = E.emitExpr(s.value);
-        E.line(`scr_bytes_set(${arr.name}, ${idx.name}, ${v.name});${E.srcComment(s.loc)}`);
+        // The inline arm's twin of the read site in emit-exprs — same
+        // subset, same answer, the call for everything it declines.
+        E.line(`scr_bytes_set_inl(${arr.name}, ${idx.name}, ${v.name});${E.srcComment(s.loc)}`);
         break;
       }
       case "fieldSet":
