@@ -2191,6 +2191,16 @@ static bool (*scr_net_pending_fn)(void) = NULL;
 static void (*scr_net_dispatch_fn)(void) = NULL;
 static int (*scr_net_pollfd_fn)(void) = NULL;
 
+/* The win32 readiness-driven idle wait (scr_loop_wsapoll.c's
+ * scrp_wait_win32; see scr_platform.h for the contract and the numbers).
+ * The poller backend registers itself the first time any unit creates a
+ * poller, so this stays NULL in a program that links none and the loop's
+ * behaviour is byte-identical to what it was. Off-win32 nothing ever
+ * registers it. */
+static bool (*scr_netwait_fn)(double) = NULL;
+
+void scr_loop_set_netwait(bool (*fn)(double)) { scr_netwait_fn = fn; }
+
 void scr_loop_set_net(bool (*pending)(void), void (*dispatch)(void), int (*pollfd)(void)) {
   scr_net_pending_fn = pending;
   scr_net_dispatch_fn = dispatch;
@@ -2530,7 +2540,16 @@ bool scr_loop_run(ScrPromise *top_level) {
       if ((net || dgram || watch) && due > now + SCR_CHILD_POLL_MS) due = now + SCR_CHILD_POLL_MS;
       if (kids && due > now + SCR_CHILD_POLL_MS) due = now + SCR_CHILD_POLL_MS;
       if (due > now) {
-        scr_sleep_ms(due - now);
+        /* Readiness-driven when the poller backend can be: the wait ends
+         * when a socket becomes ready instead of at the cap, so a
+         * sequential request/response round trip stops paying a full
+         * turn for every reply. The caps above are UNCHANGED — they
+         * still bound the wait, they just stop being the only thing that
+         * ends it. Declines (no watched sockets, no high-resolution
+         * timer, SCRIPTC_NET_WAIT=0) fall through to the plain sleep. */
+        if (scr_netwait_fn == NULL || !scr_netwait_fn(due - now)) {
+          scr_sleep_ms(due - now);
+        }
       }
       now = scr_now_ms();
 #else
