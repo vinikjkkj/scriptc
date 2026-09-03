@@ -2557,14 +2557,33 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
               return `(e->key_len == ${keyLen} && memcmp(e->key, ${keyLit}, ${keyLen}) == 0)`;
             })
             .join(" || ");
+          // `entries` is not a table of values: an own ENUMERABLE
+          // ACCESSOR lives there as a position SLOT whose descriptor is in
+          // `hidden` (scr_runtime.h's note). Reading `e->value` off one
+          // answers the immortal slot node — the "key silently missing
+          // from a JSON document" the header names — so the capture asks
+          // scr_dyn_obj_entry_read, which RUNS the getter with `this`
+          // bound to the receiver, reports a tombstone as a skip, and
+          // reports a throwing getter as NULL with the exception pending.
+          //
+          // Reachable since better-sqlite3's Database and Statement began
+          // arriving as VALUES: their five and five getters are own
+          // enumerable accessors because Node's are, and before this
+          // `(db as Record<string, unknown>)["open"]` read `undefined`
+          // where Node reads `true`.
           d.push(`  for (size_t i = 0; i < d->v.obj.len; i++) {`);
           d.push(`    const ScrDynEntry *e = &d->v.obj.entries[i];`);
           if (shape.fields.length > 0) d.push(`    if (${skip}) continue;`);
+          d.push(`    bool sc_esk = false;`);
+          d.push(`    ScrDyn *sc_ev = scr_dyn_obj_entry_read((ScrDyn *)d, e, &sc_esk); /* +1, runs a getter */`);
+          d.push(`    if (sc_esk) continue; /* a tombstone: not an own enumerable key */`);
+          d.push(`    if (sc_ev == NULL) { ${rel("r")}; ${soft ? "*ok = false; " : ""}return NULL; } /* the getter threw */`);
           if (iv.kind === "dyn") {
-            d.push(`    ${cDecl(iv, "ev")} = scr_dyn_retain(e->value);`);
+            d.push(`    ${cDecl(iv, "ev")} = sc_ev; /* the read already owns +1 */`);
           } else {
             d.push(`    ScrDynPath p = { path, e->key, 0 };`);
-            d.push(`    ${cDecl(iv, "ev")} = ${childC(iv)}(e->value, &p${childArg});`);
+            d.push(`    ${cDecl(iv, "ev")} = ${childC(iv)}(sc_ev, &p${childArg});`);
+            d.push(`    scr_dyn_release(sc_ev);`);
             d.push(afterChild(`    `, `${rel("r")}; `, `NULL`));
           }
           d.push(`    ScrStr *ek = scr_str_new(e->key, e->key_len);`);
@@ -2697,6 +2716,58 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
             d.push(`    if (scr_exc_pending()) { *ok = false; return NULL; }`);
             d.push(`  }`);
           });
+        }
+        // ── the FUNCTION-ADAPT pass ───────────────────────────────────
+        //
+        // A LAST pass, over the func arms only, matching a callable by
+        // KIND and wrapping it in the arm's adapter. It runs after every
+        // exact pass above, and that ORDER is the whole soundness
+        // argument: a value boxed from an arm's own type has already
+        // taken that arm by signature, so `{a: () => number} | {a: () =>
+        // string}` still tells its two arms apart for every value that
+        // was ever one of them. What reaches here is a function whose
+        // signature is NONE of the arms', which the chain used to end on
+        // with `expected function | undefined at $.x, got function` — a
+        // refusal that named neither signature and was, for an
+        // undefined-armed OPTIONAL member, simply wrong: `f ?? g` on a
+        // present function is not a missing member.
+        //
+        // The widening this adds is exactly the one dynCheckHelper's own
+        // func case already makes for a DIRECTLY targeted func slot (its
+        // "anything else wraps in the per-target adapter"), which is why
+        // an optional `(sql: string) => Row` field could be filled from
+        // `unknown` and a required one could not. The adapter validates
+        // per call — a callee that answers the wrong shape throws the
+        // path-annotated TypeError at the CALL, never a wrong value.
+        //
+        // Ambiguity is resolved by canonical arm order and is reachable
+        // only for a union with TWO adaptable func arms and a value that
+        // is neither: the first arm wins and its adapter throws at the
+        // call if the callee disagrees. A refusal moved, not a wrong
+        // answer introduced.
+        {
+          const adaptArms = order.filter((i) => {
+            const arm = def.arms[i]!;
+            return (
+              arm.kind === "func" &&
+              canAdaptDynFuncTo(arm, (id) => E.recordsById.get(id), (id) => E.unionsById.get(id))
+            );
+          });
+          for (const i of adaptArms) {
+            const arm = def.arms[i]! as IrType & { kind: "func" };
+            const adapter = dynFuncAdapterHelper(E, arm);
+            const rc = vAdapters(arm);
+            d.push(`  if (d->kind == SCR_DYN_FUNC) { /* adapt to arm ${i}: ${typeKey(arm)} */`);
+            d.push(`    ScrClosure *ad = scr_closure_new((void *)&${adapter}, 2);`);
+            d.push(`    ad->caps[0] = scr_box_new(SCR_BOX_FUNC); /* TRACED — the ring closes here */`);
+            d.push(`    scr_box_set_ref(ad->caps[0], scr_closure_retain(d->v.fn.clo));`);
+            d.push(`    ad->caps[1] = scr_box_new(SCR_BOX_F64); /* the call descriptor: owns nothing */`);
+            d.push(`    scr_box_set_thunk(ad->caps[1], d->v.fn.thunk);`);
+            d.push(
+              `    return scr_union_new_ref(${i}, ad, &${rc.retain}, &${rc.release}, ${E.traceArgC(arm)});`,
+            );
+            d.push(`  }`);
+          }
         }
         // No arm survived. The refusal belongs to the CHECKED form above,
         // which is the only caller that has a message to write; here the

@@ -471,6 +471,14 @@ export interface CcOptions {
    * one it produced before this option existed, which is proved by md5
    * against a build of the same entry at the previous revision. */
   sqlite?: boolean;
+  /** The program mints better-sqlite3's checked-dynamic VALUE surface
+   * (moduleUsesSqliteValue on the IR): compiles scr_sqlite_value.c.
+   *
+   * Separate from `sqlite` above, and narrower: the typed lane needs none
+   * of it, so a program that keeps the namespace's type from the import
+   * to the construction keeps its exact bytes. Implies `sqlite` — the
+   * value surface calls the same entry points — but never the reverse. */
+  sqliteValue?: boolean;
   /** The program holds an RTCPeerConnection or an RTCDataChannel
    * (moduleUsesWrtc on the IR): compiles scr_wrtc.c. Six functions over
    * two refcount words today, but gated all the same -- the units that
@@ -1961,6 +1969,7 @@ export async function compileC(opts: CcOptions): Promise<void> {
       ? [
           "-I", vendorSqliteDir(),
           rt(join(rtDir, "scr_sqlite.c")),
+          ...(opts.sqliteValue ? [rt(join(rtDir, "scr_sqlite_value.c"))] : []),
           ...sqliteObjects,
         ]
       : []),

@@ -28,12 +28,18 @@
  *                  cell. The control is ARMED — the decoy is proved
  *                  loadable in the same test — so "the decoy did not
  *                  load" cannot be an inert instrument.
- *   the link gate  an `await import("better-sqlite3")` whose namespace is
- *                  never constructed costs what `await
- *                  Promise.resolve(Object.create(null))` costs plus the
- *                  three export TRAPS (2,048 bytes, measured) and not one
- *                  byte of the engine or the amalgamation; adding `new
- *                  ns.default(":memory:")` costs the amalgamation.
+ *   the link gate  a program that never names better-sqlite3 pays
+ *                  nothing, and `await import("better-sqlite3")` pays the
+ *                  ENGINE whether or not the namespace is constructed
+ *                  from. That second half is new, and it is the price of
+ *                  the namespace's exports being real callables rather
+ *                  than trap functions: the value a widened namespace
+ *                  hands out opens databases, so the amalgamation is
+ *                  part of what the import costs — which is also what
+ *                  the import costs under Node, where it loads the addon.
+ *                  The gate now bounds the CONSTRUCTION's own cost
+ *                  instead, which is a call site and not a database
+ *                  engine.
  *   the cells      every line matches better-sqlite3 13.0.3, on BOTH
  *                  backends. A driver that half-answered would diverge
  *                  here long before it diverged anywhere a user looks.
@@ -81,6 +87,7 @@ import { exeName } from "./exe.js";
 
 const repoRoot = join(import.meta.dirname, "../..");
 const fixtureDir = join(repoRoot, "tests/fixtures/sqlite-dynimport");
+const valueFixtureDir = join(repoRoot, "tests/fixtures/sqlite-value");
 const sanitize = process.env["SCRIPTC_SAN"] === "1";
 
 interface Run {
@@ -143,10 +150,14 @@ let workDir = "";
 let golden: string[] = [];
 let live: string | null = null;
 let liveWhy = "";
+let valueGolden: string[] = [];
+let valueLive: string | null = null;
 
 beforeAll(async () => {
   workDir = mkdtempSync(join(tmpdir(), "scriptc-sqlite-dyn-"));
   writeFileSync(join(workDir, "tsconfig.json"), TSCONFIG);
+  valueGolden = readFileSync(join(valueFixtureDir, "node-answers.txt"), "utf8").split("
+");
   golden = readFileSync(join(fixtureDir, "node-answers.txt"), "utf8").split("\n");
   try {
     const { createRequire } = await import("node:module");
@@ -162,6 +173,12 @@ beforeAll(async () => {
     );
     if (r.exitCode === 0) live = r.stdout;
     else liveWhy = `the addon is installed but the fixture exited ${r.exitCode}: ${r.stderr.slice(0, 400)}`;
+    const rv = await run(
+      process.execPath,
+      ["--experimental-strip-types", "--no-warnings", join(valueFixtureDir, "main.ts")],
+      liveDir,
+    );
+    if (rv.exitCode === 0) valueLive = rv.stdout;
   } catch (e) {
     liveWhy = `better-sqlite3 is not loadable here (${(e as Error).message.split("\n")[0]})`;
   }
@@ -267,6 +284,120 @@ describe("better-sqlite3 through a dynamic import", () => {
   }
 });
 
+
+describe("better-sqlite3 as VALUES: the widened namespace", () => {
+  // The other fixture keeps the namespace's TYPE from the import to the
+  // construction, which is the half the type-directed lowering serves.
+  // This one widens it FIRST — the shape every optional-driver loader is
+  // written in — so every answer below comes from the served value
+  // surface, and a member that reads `undefined` where Node reads
+  // `function` is exactly the silent wrong answer this fixture exists to
+  // catch.
+  test("the instrument can say 'no difference' AND can fail", () => {
+    const nonEmpty = valueGolden.filter((l) => l !== "");
+    expect(nonEmpty.length).toBeGreaterThanOrEqual(60);
+    expect(nonEmpty.at(-1)).toBe("END done");
+    // The cells that decide whether this is a value surface at all: Node
+    // puts the five Database getters on the INSTANCE, so an
+    // implementation that hid them behind the prototype (or made them
+    // non-enumerable) answers `[]` and `{}` to these two.
+    expect(nonEmpty).toContain("db.keys name,open,inTransaction,readonly,memory");
+    expect(nonEmpty).toContain(
+      'db.json {"name":":memory:","open":true,"inTransaction":false,"readonly":false,"memory":true}',
+    );
+    expect(nonEmpty).toContain("stmt.keys reader,readonly,source,database,busy");
+    // ...the members with NO lowering, which must still be present, or
+    // the standard `typeof candidate === 'function'` probe takes the
+    // wrong arm at exit 0.
+    expect(nonEmpty).toContain("db.typeof.transaction function");
+    expect(nonEmpty).toContain("db.typeof.backup function");
+    expect(nonEmpty).toContain("stmt.typeof.iterate function");
+    // ...their negative controls: a name neither surface has must still
+    // read undefined, or the surface is answering "function" to
+    // everything and proves nothing.
+    expect(nonEmpty).toContain("db.typeof.absent undefined");
+    expect(nonEmpty).toContain("stmt.typeof.absent undefined");
+    expect(nonEmpty).toContain("db.has.absent false");
+    // ...and IDENTITY, which is where a value surface that rebuilt its
+    // objects per call would diverge silently.
+    expect(nonEmpty).toContain("db.exec.returnsThis true");
+    expect(nonEmpty).toContain("stmt.pluck.returnsThis true");
+    expect(nonEmpty).toContain("db.close.returnsThis true");
+    expect(nonEmpty).toContain("ns.default.is.moduleExports true");
+    // ...and the getters that CHANGE, which a data snapshot would miss.
+    expect(nonEmpty).toContain("db.open true");
+    expect(nonEmpty).toContain("db.open.afterClose false");
+    // Armed: the same comparison, against one mutated cell.
+    const mutated = [...valueGolden];
+    mutated[0] = "ns.typeof function";
+    expect(mutated).not.toEqual(valueGolden);
+  });
+
+  test("the recording still matches a live better-sqlite3, where one can load", () => {
+    if (valueLive === null) {
+      console.warn(`[sqlite-value] the live-oracle self-check did NOT run — ${liveWhy}`);
+      expect(liveWhy).not.toBe("");
+      return;
+    }
+    expect(valueLive.split("
+")).toEqual(valueGolden);
+  });
+
+  for (const backend of ["c", "llvm"] as const) {
+    test(
+      `${backend}: every value-surface cell matches better-sqlite3, and the decoy is never loaded`,
+      async () => {
+        const outDir = join(workDir, `value-${backend}`);
+        mkdirSync(outDir, { recursive: true });
+        const built = await compile(join(valueFixtureDir, "main.ts"), {
+          outPath: join(outDir, exeName("program")),
+          outDir,
+          backend,
+          sanitize,
+        });
+        expect(
+          built.ok,
+          `the value fixture must COMPILE on ${backend}:
+` +
+            (built.diagnostics ?? []).map((d) => `${d.code}: ${d.message}`).join("
+"),
+        ).toBe(true);
+
+        plantDecoy(outDir);
+        const decoyProbe = await run(
+          process.execPath,
+          [
+            "-e",
+            "try { new (require('better-sqlite3'))(':memory:'); console.log('NO THROW'); }" +
+              " catch (e) { console.log('THREW ' + e.message); }",
+          ],
+          outDir,
+        );
+        expect(
+          decoyProbe.stdout.trim(),
+          "the decoy control is INERT — Node did not load the planted package, so 'the binary did not load it' proves nothing",
+        ).toBe("THREW DECOY WAS LOADED");
+
+        const native = await run(built.binaryPath!, [], outDir);
+        const lines = native.stdout.split("
+");
+        const keyOf = (l: string): string => l.split(" ")[0] ?? "";
+        for (const line of valueGolden) {
+          const key = keyOf(line);
+          if (key === "") continue;
+          const mine = lines.find((l) => keyOf(l) === key);
+          expect(mine, `${backend}: '${key}' never ran (better-sqlite3 answered: ${line})`).toBeDefined();
+          expect(mine, `${backend}: '${key}' differs from better-sqlite3`).toBe(line);
+        }
+        expect(native.stdout.split("
+")).toEqual(valueGolden);
+        expect(native.exitCode).toBe(0);
+      },
+      900_000,
+    );
+  }
+});
+
 describe("the link gate, through import()", () => {
   test(
     "an unconstructed namespace costs a resolved promise and nothing more",
@@ -304,25 +435,33 @@ describe("the link gate, through import()", () => {
         expect(built.ok, `the ${name} gate program must compile`).toBe(true);
         sizes[name] = readFileSync(built.binaryPath!).length;
       }
-      // The namespace's three exports are TRAP functions, so that
-      // `typeof ns.default` answers "function" the way Node does even
-      // after the namespace is widened past its type. Three lifted
-      // zero-parameter fences and their messages are what the
-      // unconstructed namespace costs over the control: MEASURED at 2,048
-      // bytes on the C backend, bounded generously here because the
-      // number this gate exists to exclude is six hundred THOUSAND. The
-      // strong form ("to the byte") held only while the exports were
-      // undefined-valued, which is the silent wrong answer this fixture
-      // now pins the other way.
+      // WHAT MOVED, and why the old bound is gone. The namespace's three
+      // exports were TRAP functions — three lifted zero-parameter fences,
+      // 2,048 bytes, and not one byte of the engine, so an unconstructed
+      // namespace was nearly free. They are REAL CALLABLES now
+      // (scr_sqlite_value.c), and the value a widened namespace hands out
+      // opens databases: the amalgamation is part of what
+      // `import("better-sqlite3")` costs, whether or not this program's
+      // text goes on to construct one. Node pays the same price at the
+      // same place — the import loads the addon there too — and nothing
+      // in the compiler can know that a namespace it has just handed out
+      // will go unused.
       const nsCost = sizes["unused"]! - sizes["control"]!;
-      expect(nsCost, "the unconstructed namespace must cost the trap closures and nothing else").toBeLessThanOrEqual(
-        16_384,
+      expect(
+        nsCost,
+        "the namespace carries a working constructor, so the import costs the engine",
+      ).toBeGreaterThan(600_000);
+      // And the CONSTRUCTION is a call site, not a second engine: what
+      // `new ns.default(":memory:")` adds over the bare import is the
+      // site's own code. This is the half of the old gate that still
+      // discriminates — a build that linked the amalgamation twice, or
+      // that dragged the dynamic engine in behind the constructor, would
+      // blow through it.
+      const ctorCost = sizes["used"]! - sizes["unused"]!;
+      expect(ctorCost, "constructing from the namespace must cost a call site, not an engine").toBeLessThan(
+        65_536,
       );
-      expect(nsCost, "the trap closures are not free — a zero here means they stopped being emitted").toBeGreaterThan(0);
-      // Neither the amalgamation nor the engine is linked until the
-      // namespace is CONSTRUCTED from.
       expect(sizes["used"]! - sizes["control"]!).toBeGreaterThan(600_000);
-      expect(sizes["used"]! - sizes["unused"]!).toBeGreaterThan(600_000);
     },
     900_000,
   );

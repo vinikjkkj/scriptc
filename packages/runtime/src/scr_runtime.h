@@ -9785,6 +9785,22 @@ bool scr_sqlite_stmt_reader(const ScrSqliteStmt *st);
 bool scr_sqlite_stmt_readonly(const ScrSqliteStmt *st);
 bool scr_sqlite_stmt_busy(const ScrSqliteStmt *st);
 
+/* ── better-sqlite3 as VALUES (scr_sqlite_value.c — compiled only when a
+ * program reaches the package through an UNTYPED namespace; the typed
+ * lane above needs none of it).
+ *
+ * `scr_sqlite_value_ctor` is the namespace's `default` / `module.exports`
+ * export: a callable whose `new` (and whose bare call — the package's own
+ * constructor re-enters itself when new.target is null) opens a database
+ * and answers the object below. `scr_sqlite_value_error_class` is the
+ * `SqliteError` export, present so `typeof` reads "function" like Node's.
+ * `scr_sqlite_value_db` is the Database object itself, exported so the
+ * typed lane can hand the same value out if a boxing site ever needs it.
+ * All three answer +1. */
+ScrDyn *scr_sqlite_value_ctor(void);
+ScrDyn *scr_sqlite_value_error_class(void);
+ScrDyn *scr_sqlite_value_db(ScrSqliteDb *db);
+
 /* ── fs.watch (scr_watch.c — compiled only when the program uses it;
  * design note atop the file). FSWatcher handles over the unit's own
  * event backend (kqueue EVFILT_VNODE on macOS/BSD, inotify on Linux):
