@@ -10062,6 +10062,18 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/7394-a-record-of-class-returning-factories-into-a-structural-slot.ts": {
+   "order": [
+    "<repo>/tests/corpus/7394-a-record-of-class-returning-factories-into-a-structural-slot.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/7395-an-unknown-map-reshapes-into-a-row-with-declared-unknown-fields.ts": {
+   "order": [
+    "<repo>/tests/corpus/7395-an-unknown-map-reshapes-into-a-row-with-declared-unknown-fields.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/750-cycle-closure-box.ts": {
    "order": [
     "<repo>/tests/corpus/750-cycle-closure-box.ts"
