@@ -1179,6 +1179,48 @@ console.log("recovered");
     expect(r.stdout).toBe("TypeError true\narray: TypeError\nfunc: TypeError\nrecovered\n");
   });
 
+  test("a keyed read into a REQUIRED field throws catchably when the map does not hold the key", async () => {
+    // recordWidthPlan's keyed-read arm at a REQUIRED target field. The
+    // extraction is CHECKED (narrowOutPlan -> narrowedArmHelper, exactly
+    // `x!`), so a key the map HOLDS comes out and a key it does not throws
+    // the catchable TypeError. Node reads `undefined` off the same object
+    // -- divergence 38's stance, the same answer the dynOut arm one
+    // type-world over already gives, and strictly better than what this
+    // pair used to do at the same flow (refuse the build, or throw
+    // unconditionally under --best-effort).
+    //
+    // NEGATIVE CONTROL: this program does not COMPILE without the arm
+    // (SC2002 -- "the expected field 'auth' is required, and a keyed read
+    // of the source's '[key: string]: string' signature ('string |
+    // undefined') is not a value the checked extraction can turn into
+    // it"), so a revert fails this test with a build error rather than
+    // quietly skipping it.
+    const r = await compileAndRun(
+      "keyread-required-narrow",
+      `type P = { auth: string; signal: string };
+function asP(m: Record<string, string>): P {
+  return m as P;
+}
+const full: Record<string, string> = {};
+full["auth"] = "a";
+full["signal"] = "s";
+const f = asP(full);
+console.log("full:", f.auth, f.signal);
+const partial: Record<string, string> = {};
+partial["auth"] = "here";
+try {
+  const p = asP(partial);
+  console.log("unreachable", p.auth, p.signal);
+} catch (e) {
+  console.log((e as Error).name, (e as Error).message.includes("not representable"));
+}
+console.log("recovered");
+`,
+    );
+    expect(r.exitCode).toBe(0);
+    expect(r.stdout).toBe("full: a s\nTypeError true\nrecovered\n");
+  });
+
   test("a checker-approved function mismatch strands per piece: mismatched params compile at the flow, void results trap after the call", async () => {
     // funcCoerceAdapter's stranded dispositions. Param strand: an array
     // literal of arrows collapses to one element signature — the
