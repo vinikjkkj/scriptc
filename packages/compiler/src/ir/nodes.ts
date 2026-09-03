@@ -544,6 +544,32 @@ export const REF_TRUTHY_KINDS: ReadonlySet<string> = new Set([
   // A class object is a JS object (constructors are functions): always truthy.
   "classval",
 ]);
+/** The union ARM kinds whose runtime payload is a JS OBJECT: `ToBoolean` is
+ * constantly true, and `===` on them is POINTER identity. This is
+ * REF_TRUTHY_KINDS plus the five crypto/key handles — those are JS objects
+ * too, but they are deliberately absent from REF_TRUTHY_KINDS, which
+ * additionally governs whether a BARE value of the kind may be lowered at
+ * `toBool` (a separate policy: no program has asked to write `if (hash)`).
+ * `symbol` rides along in both sets for the same reason it does there — not
+ * an object, but every symbol is truthy AND unique, so both the constant
+ * and the identity compare are right.
+ *
+ * This set is CLOSED on purpose, and the per-union truthiness and equality
+ * helpers refuse rather than guess for anything outside it. They used to
+ * answer every unenumerated arm kind with a constant, and that open default
+ * is exactly how two silent wrong answers reached the shipping lane: `0n` in
+ * a `bigint | undefined` union reported TRUTHY on the C lane, and `5n === 5n`
+ * reported FALSE on BOTH lanes (two distinct heap ScrBigInts compared by
+ * address). A bigint is a PRIMITIVE — its truthiness and its equality are
+ * both value-dependent — so it never belonged in the object default. An arm
+ * kind that is neither answered explicitly nor listed here is an emitter
+ * refusal; a wrong answer is never the safe fallback. */
+export const UNION_ARM_JS_OBJECT_KINDS: ReadonlySet<string> = new Set([
+  ...REF_TRUTHY_KINDS,
+  // A KeyObject, Hash, Hmac, Cipher and Decipher are all JS objects.
+  "keyobj", "hash", "hmac", "cipher", "decipher",
+]);
+
 
 export const F64: IrType = { kind: "f64" };
 export const BYTES_U8: IrType = { kind: "bytes", elem: "u8" };

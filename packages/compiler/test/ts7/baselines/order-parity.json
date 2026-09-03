@@ -10050,6 +10050,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/7392-bigint-union-truthy-eq.ts": {
+   "order": [
+    "<repo>/tests/corpus/7392-bigint-union-truthy-eq.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/750-cycle-closure-box.ts": {
    "order": [
     "<repo>/tests/corpus/750-cycle-closure-box.ts"
