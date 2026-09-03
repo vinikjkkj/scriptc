@@ -7,6 +7,29 @@
  *   --crash-get-frac    fractional element index    → RangeError + abort()
  *   --crash-set-oob     element write past the end  → RangeError + abort()
  *
+ * and the index minefield, one mode per ARM of scr_bytes_check_index. The
+ * fast arm tests the bound and integrality in the INTEGER domain and the
+ * slow arm keeps the original double expression; they accept the same set
+ * only if every edge of the window between them is walked, and
+ * test_index_window below walks the accepting side. The array runtime has
+ * carried this minefield since 39b8bcd9; the typed-array path had the same
+ * expression and none of the tests.
+ *
+ *   --crash-get-nan      NaN                    → fails `i >= 0`
+ *   --crash-get-neg      -1                     → fails `i >= 0`
+ *   --crash-get-inf      +Infinity              → above the window
+ *   --crash-get-neginf   -Infinity              → fails `i >= 0`
+ *   --crash-get-2p53     2^53 exactly           → the window's own edge
+ *   --crash-get-2p32     2^32                   → in the window, past len
+ *   --crash-get-at-len   i == len exactly       → typed arrays never append
+ *   --crash-get-empty    any read of a 0-length → limit 0 accepts nothing
+ *   --crash-get-ulp      1 + 1ulp               → the smallest non-integer
+ *   --crash-set-neg      write at -1            → the write arm
+ *
+ * SCR_FASTIDX=0 forces every access down the slow arm. bytes.test.ts runs
+ * the whole file under both settings and requires identical output, which
+ * is the differential the two arms have to survive.
+ *
  * The coercion matrix mirrors Node exactly (verified by hand and by the
  * differential corpus): ToUint8/ToUint32 modular truncation on writes,
  * double→float rounding for f32, ToIndex construction lengths, WHATWG
@@ -52,6 +75,92 @@ static ScrStr *S(const char *text) { return scr_str_new(text, strlen(text)); }
 static void expect_pending(const char *name) {
   check(scr_exc_pending(), name);
   if (scr_exc_pending()) scr_exc_print_uncaught();
+}
+
+/* THE INDEX WINDOW. scr_bytes_check_index has two arms: a fast one that
+ * tests the bound and integrality with an int64 round trip, and the
+ * original double expression for everything else. They agree only if both
+ * accept exactly the same doubles, and the interesting ones are all at an
+ * edge. The refusing side is one --crash-* mode per arm (see the header);
+ * this is every value that must still be READ or WRITTEN, including the one
+ * that looks like a refusal and is not: -0.0 is index 0 (JS: `a[-0]` is
+ * `a[0]`). An index that arrived from arithmetic is integral even though it
+ * is not an int. */
+static void test_index_window(void) {
+  ScrBytes *b = scr_bytes_new(SCR_BYTES_U8, 8);
+  for (double i = 0; i < 8; i++) scr_bytes_set(b, i, i * 10);
+
+  check_f64(scr_bytes_get(b, -0.0), 0, "index -0 reads element 0");
+  check(signbit(-0.0), "the -0 literal really is negative zero");
+  check_f64(scr_bytes_get(b, 0.0), 0, "index +0 reads element 0");
+  check_f64(scr_bytes_get(b, 7), 70, "index len-1 reads the last element");
+  check_f64(scr_bytes_get(b, 3.0), 30, "an integral double is an index");
+  check_f64(scr_bytes_get(b, 6.0 / 2.0), 30, "so is one computed by division");
+  check_f64(scr_bytes_get(b, 2.0 + 2.0), 40, "so is one computed by addition");
+  check_f64(scr_bytes_get(b, floor(4.9)), 40, "so is floor()'s answer");
+  scr_bytes_set(b, -0.0, 99);
+  check_f64(scr_bytes_get(b, 0), 99, "index -0 WRITES element 0 too");
+  scr_bytes_set(b, 7.0, 88);
+  check_f64(scr_bytes_get(b, 7), 88, "the last element writes back");
+
+  /* Every element kind takes the same index path with a different accessor,
+   * and the switch below the check is per-kind. */
+  ScrBytes *u32 = scr_bytes_new(SCR_BYTES_U32, 2);
+  scr_bytes_set(u32, -0.0, 4294967295.0);
+  check_f64(scr_bytes_get(u32, 0), 4294967295.0, "u32 at index -0");
+  scr_bytes_release(u32);
+  ScrBytes *i16 = scr_bytes_new(SCR_BYTES_I16, 2);
+  scr_bytes_set(i16, 1.0, 70000);
+  check_f64(scr_bytes_get(i16, 1), 4464, "i16 store wraps to 16 bits");
+  scr_bytes_release(i16);
+  ScrBytes *f64 = scr_bytes_new(SCR_BYTES_F64, 2);
+  scr_bytes_set(f64, 0.0, 1.5);
+  check_f64(scr_bytes_get(f64, -0.0), 1.5, "f64 at index -0");
+  scr_bytes_release(f64);
+
+  /* An index at the far end of a buffer big enough to have one: 2^20 bytes
+   * is a long way past 2^32's worth of mantissa games. */
+  ScrBytes *big = scr_bytes_new(SCR_BYTES_U8, 1048576);
+  scr_bytes_set(big, 1048575, 200);
+  check_f64(scr_bytes_get(big, 1048575), 200, "index 2^20-1 reads back");
+  check_f64(scr_bytes_get(big, 1048575.0), 200, "and as a double literal");
+  scr_bytes_release(big);
+
+  /* THE STORE COERCION, which shares the fast/slow split with the index.
+   * ToUint8 is ToUint32's low byte, so every one of these is fixed by
+   * ECMA-262 and must read the same on both arms. */
+  check_f64(scr_bytes_get(b, (scr_bytes_set(b, 0, -1), 0.0)), 255, "store -1 wraps to 255");
+  scr_bytes_set(b, 0, 256);
+  check_f64(scr_bytes_get(b, 0), 0, "store 256 wraps to 0");
+  scr_bytes_set(b, 0, 4294967296.0);
+  check_f64(scr_bytes_get(b, 0), 0, "store 2^32 wraps to 0");
+  scr_bytes_set(b, 0, 4294967295.0);
+  check_f64(scr_bytes_get(b, 0), 255, "store 2^32-1 keeps the low byte");
+  scr_bytes_set(b, 0, 255.7);
+  check_f64(scr_bytes_get(b, 0), 255, "store truncates toward zero");
+  scr_bytes_set(b, 0, -1.5);
+  check_f64(scr_bytes_get(b, 0), 255, "store truncates toward zero, then wraps");
+  scr_bytes_set(b, 0, 0.0 / 0.0);
+  check_f64(scr_bytes_get(b, 0), 0, "store NaN is 0");
+  scr_bytes_set(b, 0, 1.0 / 0.0);
+  check_f64(scr_bytes_get(b, 0), 0, "store +Infinity is 0");
+  scr_bytes_set(b, 0, -1.0 / 0.0);
+  check_f64(scr_bytes_get(b, 0), 0, "store -Infinity is 0");
+  scr_bytes_set(b, 0, -0.0);
+  check_f64(scr_bytes_get(b, 0), 0, "store -0 is 0");
+  /* Past the int64 window, where the fast arm hands over to fmod. */
+  scr_bytes_set(b, 0, 1e300);
+  check_f64(scr_bytes_get(b, 0), 0, "store 1e300 takes the libm arm");
+  ScrBytes *w = scr_bytes_new(SCR_BYTES_U32, 1);
+  scr_bytes_set(w, 0, 1e18);
+  check_f64(scr_bytes_get(w, 0), (double)(uint32_t)(int64_t)1000000000000000000LL,
+            "store 1e18 keeps the low 32 bits");
+  scr_bytes_set(w, 0, -9007199254740993.0);
+  check_f64(scr_bytes_get(w, 0), (double)(uint32_t)(int64_t)-9007199254740992LL,
+            "a large negative wraps the same on both arms");
+  scr_bytes_release(w);
+
+  scr_bytes_release(b);
 }
 
 static void test_construction(void) {
@@ -378,6 +487,28 @@ int main(int argc, char **argv) {
       scr_bytes_get(b, 0.5);
     } else if (strcmp(argv[1], "--crash-set-oob") == 0) {
       scr_bytes_set(b, 1, 7); /* JS ignores; we trap (no appends either) */
+    } else if (strcmp(argv[1], "--crash-get-nan") == 0) {
+      scr_bytes_get(b, 0.0 / 0.0);
+    } else if (strcmp(argv[1], "--crash-get-neg") == 0) {
+      scr_bytes_get(b, -1);
+    } else if (strcmp(argv[1], "--crash-get-inf") == 0) {
+      scr_bytes_get(b, 1.0 / 0.0);
+    } else if (strcmp(argv[1], "--crash-get-neginf") == 0) {
+      scr_bytes_get(b, -1.0 / 0.0);
+    } else if (strcmp(argv[1], "--crash-get-2p53") == 0) {
+      scr_bytes_get(b, 9007199254740992.0); /* the fast window's own edge */
+    } else if (strcmp(argv[1], "--crash-get-2p32") == 0) {
+      scr_bytes_get(b, 4294967296.0); /* inside the window, past len */
+    } else if (strcmp(argv[1], "--crash-get-at-len") == 0) {
+      scr_bytes_get(b, 1); /* len is 1; a typed array never appends */
+    } else if (strcmp(argv[1], "--crash-get-empty") == 0) {
+      scr_bytes_release(b);
+      b = scr_bytes_new(SCR_BYTES_U8, 0);
+      scr_bytes_get(b, 0); /* limit 0 accepts nothing, not even 0 */
+    } else if (strcmp(argv[1], "--crash-get-ulp") == 0) {
+      scr_bytes_get(b, nextafter(1.0, 2.0)); /* the smallest non-integer > 1 */
+    } else if (strcmp(argv[1], "--crash-set-neg") == 0) {
+      scr_bytes_set(b, -1, 9);
     } else {
       fprintf(stderr, "unknown mode %s\n", argv[1]);
       return 2;
@@ -391,6 +522,7 @@ int main(int argc, char **argv) {
   }
 
   test_construction();
+  test_index_window();
   test_coercion_matrix();
   test_slice_set_copy();
   test_encodings();

@@ -57,7 +57,7 @@
 #define MAXPH 32
 #define MAXTH 512
 
-typedef struct { DWORD64 pc; ULONG64 w; int ph; } Hit;
+typedef struct { DWORD64 pc; ULONG64 w; int ph; int walked; } Hit;
 static Hit *hits;
 static volatile LONG nhits;
 static DWORD64 imgLo, imgHi, modBase;
@@ -110,7 +110,9 @@ static void sample_once(void) {
         ctx.ContextFlags = CONTEXT_FULL;
         if (GetThreadContext(th, &ctx) && nhits < MAXHITS) {
           DWORD64 pick = ctx.Rip;
+          int walked = 0;
           if (!(pick >= imgLo && pick < imgHi)) {
+            walked = 1;
             STACKFRAME64 fr;
             memset(&fr, 0, sizeof fr);
             fr.AddrPC.Offset = ctx.Rip;    fr.AddrPC.Mode = AddrModeFlat;
@@ -128,6 +130,7 @@ static void sample_once(void) {
           if (inProg || !progOnly) {
             LONG k = nhits;
             hits[k].pc = pick; hits[k].w = delta; hits[k].ph = ph;
+            hits[k].walked = walked && (pick != ctx.Rip);
             nhits = k + 1;
           }
         }
@@ -244,6 +247,21 @@ int main(int argc, char **argv) {
       if (imgHi == 0) Sleep(2);
     }
   }
+  /* LIE 7. SymInitialize(pi.hProcess, symPath, TRUE) above runs BEFORE the
+   * child has mapped anything -- the EnumProcessModules wait loop is after
+   * it -- so DbgHelp invades an empty module list and
+   * SymFunctionTableAccess64 answers NULL for every address. StackWalk64 on
+   * x86-64 with no RUNTIME_FUNCTION falls back to a frame-POINTER walk, and
+   * clang -O2 keeps no frame pointer, so every "frame" it produced was a
+   * stale stack word that happened to point into .text. These binaries DO
+   * carry a debug directory and .pdata (objdump -p, Entry 6 CodeView), so
+   * loading the module now that it exists makes the walk real. Found by
+   * block/computecpu; carried here from instr/sampler_fixed.c. */
+  SymRefreshModuleList(pi.hProcess);
+  if (imgHi != 0)
+    SymLoadModuleEx(pi.hProcess, NULL, argv[i], NULL, imgLo,
+                    (DWORD)(imgHi - imgLo), NULL, 0);
+
   /* Narrow to executable sections: see lie 3 above. */
   {
     FILE *pe = fopen(argv[i], "rb");
@@ -316,8 +334,26 @@ int main(int argc, char **argv) {
 
   long cap = 20000;
   Row *rows = (Row *)calloc((size_t)cap, sizeof(Row));
-  fprintf(stderr, "\n[sampler] %ld samples, %ld with no program frame%s\n",
-          (long)nhits, (long)nWait, progOnly ? " (excluded)" : "");
+  {
+    long nw = 0;
+    for (long k = 0; k < nhits; k++) if (hits[k].walked) nw++;
+    fprintf(stderr, "\n[sampler] %ld samples, %ld with no program frame%s\n",
+            (long)nhits, (long)nWait, progOnly ? " (excluded)" : "");
+    fprintf(stderr, "[sampler] %ld of %ld samples (%.1f%%) are STACK-WALKED: the\n"
+                    "[sampler] unwinder chose the frame, not the thread PC. The\n"
+                    "[sampler] DIRECT tables below do not depend on the unwinder.\n",
+            nw, (long)nhits, nhits ? (double)nw * 100.0 / (double)nhits : 0.0);
+  }
+  /* Two passes. A stack-walked sample is only as good as the unwinder, and
+   * the unwinder on this target was wrong for every table taken before the
+   * fix above -- it had no .pdata and fell back to a frame-pointer walk that
+   * clang -O2 does not support. The DIRECT pass uses nothing but the
+   * thread PC, so a name that leads BOTH passes is not an artifact of
+   * the unwinder, and one that leads only the first is suspect. */
+  for (int pass = 0; pass < 2; pass++) {
+  fprintf(stderr, "\n[sampler] ############ %s ############\n",
+          pass == 0 ? "ALL SAMPLES (RIP + stack-walked)"
+                    : "DIRECT RIP ONLY (no unwinder involved)");
   /* -1 is "outside any phase" and is reported as its own bucket rather than
    * folded into a phase it did not happen in. */
   for (int ph = -1; ph < nph; ph++) {
@@ -326,6 +362,7 @@ int main(int argc, char **argv) {
     memset(rows, 0, sizeof(Row) * (size_t)cap);
     for (long k = 0; k < nhits; k++) {
       if (hits[k].ph != ph) continue;
+      if (pass == 1 && hits[k].walked) continue;
       char nbuf[sizeof(SYMBOL_INFO) + 512];
       SYMBOL_INFO *sym = (SYMBOL_INFO *)nbuf;
       memset(nbuf, 0, sizeof nbuf);
@@ -351,6 +388,7 @@ int main(int argc, char **argv) {
       fprintf(stderr, "[sampler] %7.2f%% %9ld  %s\n",
               tot ? (double)rows[r].w * 100.0 / (double)tot : 0.0, rows[r].n, rows[r].name);
     }
+  }
   }
   DWORD code = 0; GetExitCodeProcess(pi.hProcess, &code);
   return (int)code;

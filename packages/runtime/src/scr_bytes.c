@@ -192,7 +192,64 @@ double scr_bytes_byte_len(const ScrBytes *b) {
  * both are unrepresentable here, so any invalid index traps — the array
  * runtime's exact discipline (SEMANTICS.md). */
 
-static size_t scr_bytes_check_index(const ScrBytes *b, double i) {
+/* Every typed-array element read and write lands here, so what this costs
+ * is multiplied by the message rate: on the real zapo messaging bench the
+ * suspend-and-sample profiler puts scr_bytes_get at 13.8-16.8% of the SEND
+ * group phase, scr_bytes_set at 4.0-9.5%, and `trunc` at 5.4-6.1% as its
+ * OWN symbol -- which only happens because it is a real call.
+ *
+ * This is the SAME defect scr_array.c fixed in 39b8bcd9 and it was never
+ * carried across to the typed-array path, which is the one a protocol
+ * client actually uses: every protobuf field, every AES block and every
+ * HMAC byte is a Uint8Array element access.
+ *
+ * `i != trunc(i)` is the integrality test, and on a baseline x86-64 target
+ * with no SSE4.1 clang cannot lower trunc to one `roundsd`, so it emits
+ * `callq trunc` into libm. Measured on the shipping toolchain: the libm
+ * shape is 36 instructions with a call, an xmm6 spill and a 56-byte frame;
+ * the integer-domain shape is a leaf with no call, no spill and no frame.
+ * The bound also converted b->len to a DOUBLE on every access; comparing
+ * as integers drops that too.
+ *
+ * For 0 <= i < 2^53 none of it is needed: (int64_t)i truncates exactly and
+ * is defined, one cvtsi2sd comes back, equality with i IS integrality.
+ * Everything the fast window does not accept -- NaN, negatives, fractions,
+ * both infinities, |i| >= 2^53 and every out-of-range index -- falls into
+ * scr_bytes_check_index_slow, whose test is the original expression
+ * character for character. The fast arm accepts a strict SUBSET of what
+ * that expression accepts and returns the same (size_t)i, so the answer is
+ * unchanged for every double. -0.0 still reads element 0: -0.0 >= 0 is
+ * true and (double)0 == -0.0 is true.
+ *
+ * The slow arm is cold and noinline for the reason scr_array.c records:
+ * inline, its char buf[32] and its two calls put a frame and callee-saved
+ * pushes on the HOT path, and out of line the fast arm calls nothing.
+ *
+ * SCR_FASTIDX=0 sends every access down the slow arm -- the original
+ * expression -- so an A/B runs the SAME binary and no code moves between
+ * the arms. */
+#if defined(__GNUC__) || defined(__clang__)
+#define SCR_BYTES_COLD __attribute__((noinline, cold))
+#else
+#define SCR_BYTES_COLD
+#endif
+
+#define SCR_BYTES_FAST_MAX 9007199254740992.0 /* 2^53 */
+
+static signed char scr_bytes_fastidx_cache = -1;
+
+SCR_BYTES_COLD static int scr_bytes_fastidx_init(void) {
+  const char *e = getenv("SCR_FASTIDX");
+  scr_bytes_fastidx_cache = (e != NULL && e[0] == '0' && e[1] == 0) ? 0 : 1;
+  return scr_bytes_fastidx_cache;
+}
+
+static int scr_bytes_fastidx(void) {
+  int c = scr_bytes_fastidx_cache;
+  return c >= 0 ? c : scr_bytes_fastidx_init();
+}
+
+SCR_BYTES_COLD static size_t scr_bytes_check_index_slow(const ScrBytes *b, double i) {
   if (!(i >= 0) || i != trunc(i) || i >= (double)b->len) {
     char buf[32];
     scr_f64_to_str(i, buf);
@@ -202,17 +259,45 @@ static size_t scr_bytes_check_index(const ScrBytes *b, double i) {
   return (size_t)i;
 }
 
+static size_t scr_bytes_check_index(const ScrBytes *b, double i) {
+  if (scr_bytes_fastidx() && i >= 0.0 && i < SCR_BYTES_FAST_MAX) {
+    int64_t n = (int64_t)i;
+    if ((double)n == i && (uint64_t)n < (uint64_t)b->len) return (size_t)n;
+  }
+  return scr_bytes_check_index_slow(b, i);
+}
+
 /* ToUint32: NaN/±Infinity → 0, truncate toward zero, wrap mod 2^32.
  * ToUint8 is its low byte (2^8 divides 2^32, so the residues agree). */
-static uint32_t scr_bytes_to_u32(double v) {
+SCR_BYTES_COLD static uint32_t scr_bytes_to_u32_slow(double v) {
+  double t;
   if (v != v || isinf(v)) return 0;
-  double t = trunc(v);
+  t = trunc(v);
   t = fmod(t, 4294967296.0);
   if (t < 0) t += 4294967296.0;
   return (uint32_t)t;
 }
 
+/* The store arm's own pair of libm calls, and one of them is `fmod`. For
+ * any v an int64 can hold, truncation toward zero followed by the 2^32
+ * residue IS the low 32 bits of that int64 in two's complement -- which is
+ * exactly what the wrap-to-unsigned conversion computes, for negatives as
+ * well (-1 -> 4294967295 on both arms). NaN and both infinities fail the
+ * window and reach the slow arm, which answers 0 as before. */
+static uint32_t scr_bytes_to_u32(double v) {
+  if (scr_bytes_fastidx() && v >= -9223372036854775808.0 &&
+      v < 9223372036854775808.0)
+    return (uint32_t)(int64_t)v;
+  return scr_bytes_to_u32_slow(v);
+}
+
 double scr_bytes_get(const ScrBytes *b, double i) {
+#ifdef SCR_ARRCEN_ON
+  /* tests/perf/arrcensus/scr_arr_census.h. Inert -- the switch is
+   * undefined -- unless that header is -include'd. The profile gives this
+   * function a SHARE; only a count prices a per-call change. */
+  scr_arrcen_note(SCR_ARRCEN_BYTESGET, (long long)b->len);
+#endif
   size_t idx = scr_bytes_check_index(b, i);
   switch (b->elem) {
     case SCR_BYTES_U8:
@@ -278,6 +363,9 @@ double scr_bytes_get(const ScrBytes *b, double i) {
 }
 
 void scr_bytes_set(ScrBytes *b, double i, double v) {
+#ifdef SCR_ARRCEN_ON
+  scr_arrcen_note(SCR_ARRCEN_BYTESSET, (long long)b->len);
+#endif
   size_t idx = scr_bytes_check_index(b, i);
   switch (b->elem) {
     case SCR_BYTES_U8:
