@@ -91,7 +91,7 @@ import { basename, dirname, extname, join, resolve } from "node:path";
 import ts from "typescript5";
 import { cjsLexedExportsOf } from "./cjs-lexer.js";
 import { provenanceInstalledCounterpart } from "./provenance-registry.js";
-import { nativePath, pathFileUrl, tsgoPath } from "./shared.js";
+import { isRelativeSpecifier, nativePath, pathFileUrl, tsgoPath } from "./shared.js";
 
 export type EmbeddedFormat = "esm" | "cjs" | "json";
 
@@ -708,8 +708,19 @@ export function probeNodeRequireRefusal(
   specifier: string,
   host: Host = realHost,
 ): { message: string } | null {
+  // The relative family is `isRelativeSpecifier`'s, not a hand-rolled
+  // prefix test: Node's CJS `_resolveLookupPaths` calls a request
+  // relative when it starts with '.' and is either exactly "." / ".." or
+  // continues with '.' or a separator, so the BARE DOT FORMS are
+  // relative to require (they are NOT to ESM `import()`, whose two sites
+  // below keep their own prefix tests). Spelled as prefixes only, `.`
+  // and `..` fell through to the bare-specifier walk and this function
+  // "proved" MODULE_NOT_FOUND for a directory require Node hands over —
+  // `require("..")` survived it only by accident, because the walk's
+  // first probe is `<dir>/node_modules/..`, which collapses back to
+  // `<dir>` and exists.
   if (
-    specifier.startsWith("./") || specifier.startsWith("../") ||
+    isRelativeSpecifier(specifier) ||
     specifier.startsWith("/") || specifier.startsWith("#") ||
     specifier.startsWith("node:")
   ) {
