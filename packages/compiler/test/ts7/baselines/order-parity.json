@@ -10068,6 +10068,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/7395-a-base-signature-intersected-with-a-narrower-one.ts": {
+   "order": [
+    "<repo>/tests/corpus/7395-a-base-signature-intersected-with-a-narrower-one.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/750-cycle-closure-box.ts": {
    "order": [
     "<repo>/tests/corpus/750-cycle-closure-box.ts"
@@ -11022,6 +11028,12 @@
   "<repo>/tests/diagnostics/function-forms.ts": {
    "order": [
     "<repo>/tests/diagnostics/function-forms.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/function-intersection-unrelated-returns.ts": {
+   "order": [
+    "<repo>/tests/diagnostics/function-intersection-unrelated-returns.ts"
    ],
    "diags": []
   },
