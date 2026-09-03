@@ -8,6 +8,7 @@ import { BOOL, DYN, F64, IrExpr, IrStmt, IrType, JSVAL, MAX_ISLAND_CALLBACK_ARIT
 import { ISLAND_SURFACE, IslandFnEntry, STATIC_MATH_CONSTS, STATIC_MATH_FNS, boundaryIntoIslandMsg } from "./surfaces.js";
 import { requiresDynamicApiDiag, requiresDynamicPackageDiag } from "../../diagnostics/diagnostic.js";
 import { canonicalBuiltinModule, dynamicImportSpecOf, isCjsJsFile, isJsSourceFile, locOf, npmPackageNameOf, npmStaticDepSf7 } from "../program.js";
+import { runtimePackageOfTypesPackage } from "../shared.js";
 import { isRelativeSpecifier } from "../shared.js";
 import { dynamicImportModuleTargetOf, dynamicImportProgramTargetOf, staticDynImportBindingShape } from "./lower-modules.js";
 import { pureReemittable } from "./lower-exprs.js";
@@ -1775,5 +1776,12 @@ import { PoisonError, dynUndefinedExpr, newFnCtx, own } from "./lowerer.js";
     const decls = sym ? L.checker.declarationsOf(sym) : undefined;
     if (!decls || decls.length === 0) return null;
     if (!decls.every((d) => L.isNpmFile(d.getSourceFile()))) return null;
-    return npmPackageNameOf(decls[0]!.getSourceFile().fileName);
+    const declaredBy = npmPackageNameOf(decls[0]!.getSourceFile().fileName);
+    if (declaredBy === null) return null;
+    // The DECLARATION lives in the @types twin; the VALUE belongs to the
+    // package that twin types, and that is what this diagnostic must name.
+    // See runtimePackageOfTypesPackage: a declarations-only package ships
+    // nothing that could "run in the embedded dynamic engine", and naming
+    // it points the author at a package the program never imported.
+    return runtimePackageOfTypesPackage(declaredBy) ?? declaredBy;
   }
