@@ -3327,6 +3327,13 @@ export type IrLibFn =
   | "spawnRes.status"
   | "spawnRes.stdout"
   | "spawnRes.stderr"
+  /** Node's `result.output !== null` — false EXACTLY when the spawn
+   * itself failed. v25 derives the streams as `result.output?.[1]` /
+   * `?.[2]`, so both read `undefined` in that state rather than "" (the
+   * two getters above still answer "" there, which is what every reader
+   * that has not asked this predicate keeps seeing). The undefined-armed
+   * `.stdout` / `.stderr` read builds its union over this. */
+  | "spawnRes.hasOutput"
   /** Node's spawn-failure carrier `error?: Error`: a fresh +1 %Error
    * ("spawnSync <file> ENOENT", `code` stamped) when the spawn itself
    * failed, the interned undefined arm otherwise — the result type is the
