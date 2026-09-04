@@ -1243,6 +1243,12 @@ export class Lowerer {
    * only while that instance's body lowers (lowerGenericInstance). Null
    * everywhere else, which makes symbolicTsResolver inert. */
   symbolicResolved: Map<ts.Type, ts.Type> | null = null;
+  /** The instantiation-chain depth of the generic instance whose body is
+   * lowering right now; 0 outside every instance body, which is where a
+   * call site the PROGRAM spells lives. internGenericInstance reads it to
+   * stamp the instance it mints with depth+1, and that number — not the
+   * instance population — is what MAX_GENERIC_INSTANCE_DEPTH bounds. */
+  genericInstanceDepth = 0;
   /** Non-null while an IMPLICIT-ANY instance body lowers (npm-static JS —
    * lower-calls' implicit-monomorphization section): bound param symbol →
    * the call site's checker type, consulted by typeOf for identifier

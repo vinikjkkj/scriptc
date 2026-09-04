@@ -131,11 +131,39 @@ export interface FnSig {
   generator?: { yieldT: IrType; nextT: IrType };
 }
 
-/** Instantiation cap per generic function: same-key recursion (`len<T>`
- * calling itself) converges, but POLYMORPHIC recursion (`f<T>` calling
- * `f<T[]>`) would request new instances forever — the cap turns that into a
- * diagnostic instead of a hang. */
-export const MAX_GENERIC_INSTANCES = 100;
+/** The DIVERGENCE cap for monomorphizing instantiation, on the axis that
+ * actually diverges: the DEPTH of the instantiation chain.
+ *
+ * Same-key recursion (`len<T>` calling itself) converges — the key interns
+ * and no new instance is minted. POLYMORPHIC recursion (`f<T>` calling
+ * `f<T[]>`) mints a strictly larger key from INSIDE the body of the
+ * instance that asked for it, forever, and each of those is one link in a
+ * chain: the instance at depth n requests the one at depth n+1. Chain depth
+ * is unbounded exactly when instantiation fails to terminate, and is
+ * bounded by the generic call graph's acyclic depth when it terminates.
+ *
+ * This was a POPULATION cap of 100 instances per function, which is a proxy
+ * for the same property and cannot tell the two cases apart. A program that
+ * spells 134 distinct event names and calls one
+ * `commit<K extends WaWamEventName>` at each of them asks for 134
+ * instances, every one of them at chain depth 1 — terminating, finite, and
+ * refused. @zapo-js/wam is that program: its 142 commit call sites are
+ * BREADTH, and breadth is what a monomorphizing compiler is for.
+ *
+ * The depth number is deliberately SMALLER than the population cap it
+ * replaces: polymorphic recursion is now named after 64 nested requests
+ * instead of 100, so the pathological case is diagnosed sooner, not later. */
+export const MAX_GENERIC_INSTANCE_DEPTH = 64;
+
+/** The RESOURCE backstop for monomorphizing instantiation, which is NOT a
+ * divergence test: a chain shallow enough to pass MAX_GENERIC_INSTANCE_DEPTH
+ * can still branch, and every instance costs a lowered body and an emitted
+ * function. It carries its own wording so a reader can tell which limit
+ * fired — "this build cannot monomorphize further" is a budget, and
+ * "polymorphic recursion?" is a defect. Nothing in the corpus and nothing
+ * in the zapo packages reaches it (@zapo-js/wam's largest generic is
+ * `commit`, at 134 instances). */
+export const MAX_GENERIC_INSTANCES = 4096;
 
 /** A generic function-like declaration, collected instead of an FnSig —
  * top-level generic function declarations, class GENERIC METHODS (own type
@@ -217,6 +245,13 @@ export interface GenericInstance {
   symResolved?: Map<ts.Type, ts.Type>;
   /** Rendered type arguments ("<number, string>") for diagnostics. */
   typeArgsText: string;
+  /** This instance's link number in the instantiation CHAIN: 0 when the
+   * request came from a call site the program spells, n+1 when it came from
+   * inside the body of an instance at depth n. The divergence test
+   * (MAX_GENERIC_INSTANCE_DEPTH) is a bound on this, and it travels WITH the
+   * instance because the body that mints the next link lowers later, off the
+   * worklist, outside the frame that built this one. */
+  depth: number;
   /** Implicit instances only: param symbol → the call site's (widened)
    * checker type, consulted by the Lowerer's typeOf while this instance's
    * body lowers (the implicit twin of `bindings`). */
@@ -1872,12 +1907,28 @@ const SYMBOLIC_PAIR_BUDGET = 256;
     const key = `${params.map((s) => typeKey(s.type)).join(",")}=>${typeKey(returnType)}${opts?.extraKey ?? ""}`;
     let inst = info.instances.get(key);
     if (!inst) {
+      // The DIVERGENCE test. This request's link number in the chain:
+      // depth 0 is a call site the program spells, depth n+1 is a request
+      // made while the body of an instance at depth n was lowering. Only a
+      // cycle that mints a NEW key each time round it can raise this
+      // without bound — breadth cannot, however wide.
+      const depth = L.genericInstanceDepth + 1;
+      if (depth > MAX_GENERIC_INSTANCE_DEPTH) {
+        L.unsupported(
+          "SC1090",
+          blame,
+          `unbounded generic instantiation ('${info.baseName}' nested ` +
+            `${MAX_GENERIC_INSTANCE_DEPTH} instantiations deep — polymorphic recursion?)`,
+        );
+      }
+      // The RESOURCE backstop, which is a budget and says so.
       if (info.instances.size >= MAX_GENERIC_INSTANCES) {
         L.unsupported(
           "SC1090",
           blame,
-          `unbounded generic instantiation ('${info.baseName}' exceeded ` +
-            `${MAX_GENERIC_INSTANCES} instances — polymorphic recursion?)`,
+          `generic instantiation budget ('${info.baseName}' reached ` +
+            `${MAX_GENERIC_INSTANCES} distinct instances — this build cannot ` +
+            `monomorphize further)`,
         );
       }
       const tsBindings = opts?.tsBindings ?? new Map<ts.Symbol, ts.Type>();
@@ -1899,6 +1950,7 @@ const SYMBOLIC_PAIR_BUDGET = 256;
       inst = {
         name: `${info.qualifiedName}%${info.instances.size}`,
         ordinal: info.instances.size,
+        depth,
         params,
         returnType,
         bindings,
@@ -2159,6 +2211,13 @@ const SYMBOLIC_PAIR_BUDGET = 256;
     // guarantees no two differing resolutions share this frame.
     const prevSymResolved = L.symbolicResolved;
     L.symbolicResolved = inst.symResolved ?? null;
+    // The instantiation CHAIN. Every instance this body asks for is one
+    // link further out than this one, and that is the number the divergence
+    // test bounds. It is scoped exactly like the binding maps above: the
+    // body lowers off a worklist, so "the request came from inside an
+    // instance body" is only true while this frame is installed.
+    const prevInstDepth = L.genericInstanceDepth;
+    L.genericInstanceDepth = inst.depth;
     // The rest-tuple rule is scoped to THIS body (see erasedRest).
     const prevRestErasure = L.typeCtx.restTupleFromErasure;
     L.typeCtx.restTupleFromErasure = inst.erasedRest === true ? true : undefined;
@@ -2302,6 +2361,7 @@ const SYMBOLIC_PAIR_BUDGET = 256;
       // behaviour that changed 30 corpus programs.
       L.typeCtx.restTupleFromErasure = prevRestErasure;
       L.implicitParamTypes = prevImplicit;
+      L.genericInstanceDepth = prevInstDepth;
       L.instantiationContext = prevContext;
       L.suppressStats = prevSuppress;
     }
@@ -2823,12 +2883,28 @@ const SYMBOLIC_PAIR_BUDGET = 256;
     const key = shapes.map((s) => typeKey(s.type)).join(",");
     let inst = info.instances.get(key);
     if (inst) return inst;
+    // The same two limits the call-keyed route applies, for the same
+    // reasons — and they matter MORE here, because this route lowers its
+    // instance eagerly and NESTED, so a diverging chain is a growing
+    // JavaScript stack rather than a growing worklist. Breadth on this
+    // route is one instance per distinct argument SHAPE of an untyped
+    // JavaScript function, which a wide npm package reaches honestly.
+    const depth = L.genericInstanceDepth + 1;
+    if (depth > MAX_GENERIC_INSTANCE_DEPTH) {
+      L.unsupported(
+        "SC1090",
+        blame,
+        `unbounded implicit-any instantiation ('${info.baseName}' nested ` +
+          `${MAX_GENERIC_INSTANCE_DEPTH} instantiations deep — polymorphic recursion?)`,
+      );
+    }
     if (info.instances.size >= MAX_GENERIC_INSTANCES) {
       L.unsupported(
         "SC1090",
         blame,
-        `unbounded implicit-any instantiation ('${info.baseName}' exceeded ` +
-          `${MAX_GENERIC_INSTANCES} instances — polymorphic recursion?)`,
+        `implicit-any instantiation budget ('${info.baseName}' reached ` +
+          `${MAX_GENERIC_INSTANCES} distinct instances — this build cannot ` +
+          `monomorphize further)`,
       );
     }
     const rendered = shapes.map((s) => L.fmt(s.type)).join(", ");
@@ -2836,6 +2912,7 @@ const SYMBOLIC_PAIR_BUDGET = 256;
     inst = {
       name: `${info.qualifiedName}%${info.instances.size}`,
       ordinal: info.instances.size,
+      depth,
       params: shapes,
       // The promise callers rely on before the body settles it: the
       // declared truth when it maps, else DYN (the recursion pin — and
