@@ -10184,6 +10184,18 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/7500-a-rest-parameter-filling-a-fixed-arity-slot.ts": {
+   "order": [
+    "<repo>/tests/corpus/7500-a-rest-parameter-filling-a-fixed-arity-slot.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/7501-a-fixed-arity-function-filling-a-rest-parameter-slot.ts": {
+   "order": [
+    "<repo>/tests/corpus/7501-a-fixed-arity-function-filling-a-rest-parameter-slot.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/751-cycle-records-mutual.ts": {
    "order": [
     "<repo>/tests/corpus/751-cycle-records-mutual.ts"
@@ -10712,6 +10724,12 @@
   "<repo>/tests/diagnostics/a-cast-that-spells-a-record-over-a-value-that-is-not-one.ts": {
    "order": [
     "<repo>/tests/diagnostics/a-cast-that-spells-a-record-over-a-value-that-is-not-one.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/a-fixed-arity-function-filling-a-rest-parameter-slot.ts": {
+   "order": [
+    "<repo>/tests/diagnostics/a-fixed-arity-function-filling-a-rest-parameter-slot.ts"
    ],
    "diags": []
   },

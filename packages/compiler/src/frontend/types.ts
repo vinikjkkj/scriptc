@@ -739,7 +739,18 @@ function formatIrTypeInner(t: IrType, shapes: ShapeRegistry, unions: UnionRegist
     case "set":
       return `Set<${formatIrType(t.elem, shapes, unions, seen)}>`;
     case "func":
-      return `(${t.params.map((p) => formatIrType(p, shapes, unions, seen)).join(", ")}) => ${formatIrType(t.ret, shapes, unions, seen)}`;
+      // The SPELLED rest slot prints as one (`(...unknown) => void`). It is
+      // a different calling convention from a fixed parameter of the same
+      // type — the packed array is one argument, not a positional list — so
+      // a refusal between the two printed both sides identically and named
+      // nothing the reader could act on.
+      return `(${t.params
+        .map((p, i) =>
+          t.restIn === true && i === t.params.length - 1
+            ? `...${formatIrType(p, shapes, unions, seen)}`
+            : formatIrType(p, shapes, unions, seen),
+        )
+        .join(", ")}) => ${formatIrType(t.ret, shapes, unions, seen)}`;
     case "object":
       // Runtime-provided error classes carry '%'-prefixed IR names
       // ("%Error") so user classes can never collide; diagnostics show the

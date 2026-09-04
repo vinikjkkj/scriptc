@@ -7626,6 +7626,24 @@ const inliningPredicates = new Set<ts.Symbol>();
       shapes.length = 0;
       argumentsBound = true;
     }
+    // A SPELLED rest slot (`...xs: T[]`, `...args: unknown[]`) — paramShape's
+    // "rest" mode. The ABI slot and a FIXED parameter of the same type are
+    // the same C parameter, so the func type used to spell
+    // `(...args: unknown[]) => void` and `(x: unknown) => void` identically;
+    // mapType has marked the difference since IrType.restIn shipped, but
+    // this side — the DECLARATION's own signature — never did, and the two
+    // spellings of one function drifted apart. Everything that has to
+    // reconcile a lowered function value with a slot's mapped signature
+    // reads only the type, so the drift was invisible until something
+    // BUILT a call from the slot's side: funcCoerceAdapter handed the
+    // callee's packed-array slot the call's FIRST argument, and a
+    // `warn(msg, ctx)` through a `(...args: unknown[])` literal bound the
+    // message string where the array belonged — `args.length` then read
+    // the string's length and `for..of` walked its characters. Marking it
+    // here makes the declaration and the signature agree, which is also
+    // what makes a rest function value flowing into a rest-typed slot
+    // EXACT (typeEquals) instead of adapter-wrapped.
+    const hasRestIn = shapes.some((s) => s.mode === "rest");
     return {
       shapes,
       ...(argumentsBound ? { argumentsBound: true as const } : {}),
@@ -7639,6 +7657,7 @@ const inliningPredicates = new Set<ts.Symbol>();
         ret,
         ...(hasDynRest || usesArguments || hasIslandRest ? { rest: true as const } : {}),
         ...(hasIslandRest ? { restAbi: "jsval" as const } : {}),
+        ...(hasRestIn ? { restIn: true as const } : {}),
       },
     };
   }
