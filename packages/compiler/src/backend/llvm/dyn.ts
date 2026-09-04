@@ -1024,12 +1024,30 @@ export class LlDyn {
     const originRecover = (hint: string): void => {
       const { retain } = vAdapters(host, t);
       host.declare(`declare ptr @scr_dyn_origin_take(ptr, ptr)`);
+      // The `static_copy` byte, INLINE, with the call behind it — the C
+      // twin's shape, and see its comment for the measurement: inlining the
+      // test is strictly less work but is NOT what makes the miss path
+      // cheap (the call and this form measure the same).
+      //
+      // Offset 14 is the third of ScrDyn's four flag bools, which sit in
+      // the padding between `kind` (+8) and the payload union (+16);
+      // `buffer` at +12 is already read exactly this way further down this
+      // file, and `->v.arr.len` at +16 pins the union's start.
+      const fp = B.tmp();
+      const fb = B.tmp();
+      const isc = B.tmp();
+      B.line(`${fp} = getelementptr inbounds i8, ptr %d, i64 14 ; ->static_copy`);
+      B.line(`${fb} = load i8, ptr ${fp}`);
+      B.line(`${isc} = icmp ne i8 ${fb}, 0`);
+      const lAsk = B.newLabel(`${hint}.mayorig`);
+      const lMiss = B.newLabel(`${hint}.noorig`);
+      B.condBr(isc, lAsk, lMiss);
+      B.startBlock(lAsk);
       const o = B.tmp();
       B.line(`${o} = call ptr @scr_dyn_origin_take(ptr %d, ptr ${host.cstr(typeKey(t))})`);
       const hit = B.tmp();
       B.line(`${hit} = icmp ne ptr ${o}, null`);
       const lHit = B.newLabel(`${hint}.orig`);
-      const lMiss = B.newLabel(`${hint}.noorig`);
       B.condBr(hit, lHit, lMiss);
       B.startBlock(lHit);
       const r = B.tmp();
