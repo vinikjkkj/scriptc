@@ -671,6 +671,19 @@ static void scr_dyn_gcfree(void *o) {
   scr_dyncen_note_dead(d); /* the collector's exit from the live set; the
                             * fields are still intact at this point */
 #endif
+  /* A boundary copy the COLLECTOR reclaimed drops its origin HERE, because
+   * this is a second teardown reaching the same two kinds by a different
+   * road: scr_dyn_release's switch never runs for a node trial deletion
+   * takes. Without this the origin's reference is leaked outright (the RC
+   * audit reports it) and the table keeps an entry keyed on an address the
+   * allocator is about to hand out again. Releasing a refcounted object
+   * from inside gcfree is what the OBJINST arm below already does.
+   *
+   * The ARR arm is spelled in the condition rather than as a `case`: the
+   * switch has none, because an array's items are TRACED and there is
+   * otherwise nothing for it to do. */
+  if (d->static_copy && (d->kind == SCR_DYN_ARR || d->kind == SCR_DYN_OBJ))
+    scr_dyn_origin_forget(d);
   switch (d->kind) {
   case SCR_DYN_STR:
     scr_str_release(d->v.str);
