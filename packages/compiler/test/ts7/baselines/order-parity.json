@@ -10158,6 +10158,14 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/7492-a-symbolic-alias-imported-from-another-module-still-resolves/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/7492-a-symbolic-alias-imported-from-another-module-still-resolves/connection.ts",
+    "<repo>/tests/corpus/7492-a-symbolic-alias-imported-from-another-module-still-resolves/store.ts",
+    "<repo>/tests/corpus/7492-a-symbolic-alias-imported-from-another-module-still-resolves/main.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/750-cycle-closure-box.ts": {
    "order": [
     "<repo>/tests/corpus/750-cycle-closure-box.ts"
