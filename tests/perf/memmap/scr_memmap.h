@@ -63,12 +63,27 @@
  * the same time.
  *
  * TRIGGERING ON THE PEAK. A sampler thread polls GetProcessMemoryInfo every
- * SCR_MEMMAP_MS milliseconds (default 4) and takes a full snapshot only when
- * the working set beats the best snapshot by SCR_MEMMAP_DELTA bytes (default
- * 4 MiB). Each snapshot OVERWRITES SCR_MEMMAP_OUT, so the file left behind
- * is the highest one seen. The kernel's own PeakWorkingSetSize is printed
- * beside the snapshot total in every report: if the snapshot is far under
- * the kernel's peak, the sampler missed the peak and the report says so
+ * SCR_MEMMAP_MS milliseconds (default 4). A snapshot is attempted when BOTH
+ * hold:
+ *   (a) the kernel's PeakWorkingSetSize is more than SCR_MEMMAP_DELTA above
+ *       the resident total any previous walk actually RESOLVED, and
+ *   (b) the working set is within SCR_MEMMAP_DELTA of that peak right now.
+ *
+ * Both halves were learned the hard way. The first version advanced its
+ * high-water mark to the working set it read BEFORE walking; a walk costs
+ * ~250ms and the workload moves through it, so the file regularly held a
+ * trough - mm-b-r1 wrote 145 MiB against a kernel peak of 205 MiB (71%) - and
+ * because the mark had already advanced, the trigger never re-armed to try
+ * again. Condition (a) now closes only against what a walk PROVED, so a
+ * missed peak re-arms itself. Condition (b) refuses to spend a quarter of a
+ * second walking while the process sits in a trough, where the walk cannot
+ * describe the peak by construction. SCR_MEMMAP_MAXTRIES (default 12) bounds
+ * the chase so a peak that was truly transient cannot become a walk storm.
+ *
+ * Snapshots OVERWRITE SCR_MEMMAP_OUT, so the file keeps the walk with the
+ * HIGHEST resolved resident, not the most recent one. Every report carries a
+ * COVERAGE line - resolved bytes against the kernel's own peak, as a
+ * percentage - so a snapshot that still missed says so in its own output
  * rather than presenting a floor as an answer.
  *
  * WHAT IT COSTS THE MEASUREMENT. The polling thread does one syscall per
@@ -123,6 +138,13 @@
  * against a subject that peaks near 190 MiB. Overflow is fatal, never a
  * truncation - see scr_mm_bucket. */
 #define SCR_MM_MAXPAGES 262144u /* 1 GiB of resident pages, 2 MiB of buffer */
+/* Report buffer. Only the bytes actually written are ever touched, so this is
+ * demand-zero address space and not resident cost - unlike the page-list
+ * buffer above, which QueryWorkingSet touches in full. 8 MiB so an itemised
+ * region dump (SCR_MEMMAP_REGMIN_RES=1) of ~15,000 fiber stacks fits; the
+ * overflow is FLAGGED, never silent, because a report that stops mid-line is
+ * indistinguishable from a small one. */
+#define SCR_MM_OUTBUF (8u * 1024u * 1024u)
 
 /* ---- classes. Disjoint and exhaustive over committed regions. ---- */
 enum {
@@ -176,6 +198,7 @@ SCR_MM_SHARED ScrMmRange *scr_mm_hr = 0;
 SCR_MM_SHARED ScrMmHeap *scr_mm_heaps = 0;
 SCR_MM_SHARED ULONG_PTR *scr_mm_pages = 0;
 SCR_MM_SHARED char *scr_mm_outbuf = 0;
+SCR_MM_SHARED int scr_mm_trunc = 0;
 SCR_MM_SHARED ScrMmRange scr_mm_own[8] = {{0, 0}};
 SCR_MM_SHARED unsigned scr_mm_nown = 0;
 SCR_MM_SHARED unsigned scr_mm_nheap = 0;
@@ -188,6 +211,24 @@ SCR_MM_SHARED int scr_mm_snapshots = 0;
 SCR_MM_SHARED ULONG_PTR scr_mm_best = 0;
 SCR_MM_SHARED ULONG_PTR scr_mm_delta = 4u * 1024u * 1024u;
 SCR_MM_SHARED DWORD scr_mm_ms = 4;
+/* Peak-chasing state. `covered` is the resident total a walk ACTUALLY
+ * achieved, never the working set read before it - a walk that lands off the
+ * peak must leave the trigger armed, which is the whole bug fix. `bestRes`
+ * keeps the best snapshot on disk instead of the last one, and `tries` bounds
+ * the chase so a transient peak cannot turn the sampler into a walk storm. */
+SCR_MM_SHARED ULONG_PTR scr_mm_covered = 0;
+SCR_MM_SHARED ULONG_PTR scr_mm_bestRes = 0;
+SCR_MM_SHARED ULONG_PTR scr_mm_lastPeak = 0;
+SCR_MM_SHARED ULONG_PTR scr_mm_peakAtWalk = 0;
+SCR_MM_SHARED unsigned scr_mm_tries = 0;
+SCR_MM_SHARED unsigned scr_mm_maxtries = 12;
+SCR_MM_SHARED unsigned scr_mm_attempts = 0;
+SCR_MM_SHARED int scr_mm_onlybest = 0;
+/* Region-dump floor. A stack/private region is itemised when it clears
+ * EITHER bound; both are env-tunable so a fiber census can ask for all of
+ * them without recompiling. */
+SCR_MM_SHARED ULONG_PTR scr_mm_regMinRes = 65536u;
+SCR_MM_SHARED ULONG_PTR scr_mm_regMinSize = 262144u;
 SCR_MM_SHARED char scr_mm_out[512] = {0};
 SCR_MM_SHARED char scr_mm_tag[64] = {0};
 SCR_MM_SHARED unsigned scr_mm_outlen = 0;
@@ -237,7 +278,8 @@ typedef struct {
 
 /* ---------------------------------------------------------------- output */
 SCR_MM_FN void scr_mm_ch(char c) {
-  if (scr_mm_outlen < 1024u * 1024u - 2u) scr_mm_outbuf[scr_mm_outlen++] = c;
+  if (scr_mm_outlen < SCR_MM_OUTBUF - 2u) scr_mm_outbuf[scr_mm_outlen++] = c;
+  else scr_mm_trunc = 1;
 }
 SCR_MM_FN void scr_mm_s(const char *s) {
   while (s && *s) scr_mm_ch(*s++);
@@ -271,9 +313,17 @@ SCR_MM_FN void scr_mm_flush_to(const char *path) {
   if (f != INVALID_HANDLE_VALUE) {
     DWORD wrote = 0;
     WriteFile(f, scr_mm_outbuf, (DWORD)scr_mm_outlen, &wrote, 0);
+    /* Written past the buffer, never into it, so the notice cannot itself be
+     * the thing that got truncated. A report that stops mid-line otherwise
+     * reads exactly like a short one. */
+    if (scr_mm_trunc) {
+      static const char *tm = "\nTRUNCATED report exceeded SCR_MM_OUTBUF - raise it; the lines above are complete but the tail is missing\n";
+      WriteFile(f, tm, (DWORD)lstrlenA(tm), &wrote, 0);
+    }
     CloseHandle(f);
   }
   scr_mm_outlen = 0;
+  scr_mm_trunc = 0;
 }
 SCR_MM_FN void scr_mm_flush(void) { scr_mm_flush_to(scr_mm_out); }
 /* A failing self-test must never destroy the snapshot that shows WHY it
@@ -566,6 +616,7 @@ SCR_MM_FN void scr_mm_snapshot(const char *why) {
   if (scr_mm_gpmi) scr_mm_gpmi(GetCurrentProcess(), &pmc, (DWORD)sizeof pmc);
 
   scr_mm_outlen = 0;
+  scr_mm_trunc = 0;
   scr_mm_s("MEMMAP v1 tag=");
   scr_mm_s(scr_mm_tag[0] ? scr_mm_tag : "-");
   scr_mm_s(" why=");
@@ -612,6 +663,87 @@ SCR_MM_FN void scr_mm_snapshot(const char *why) {
       scr_mm_mib(scr_mm_clsRes[i]);
       scr_mm_ch('\n');
     }
+  }
+
+  /* COVERAGE is how the trigger is held to account: what this walk resolved
+   * against the kernel's own all-time high. pct near 100 means the snapshot
+   * describes the peak; the old trigger produced 71 here and said nothing. */
+  scr_mm_s("COVERAGE walkResident=");
+  scr_mm_u((unsigned long long)resident);
+  scr_mm_s(" wsPeak=");
+  scr_mm_u((unsigned long long)pmc.PeakWorkingSetSize);
+  scr_mm_s(" pct=");
+  scr_mm_u(pmc.PeakWorkingSetSize ? (unsigned long long)((resident * 100ull) / (ULONG_PTR)pmc.PeakWorkingSetSize) : 0ull);
+  scr_mm_s(" attempts=");
+  scr_mm_u(scr_mm_attempts);
+  scr_mm_s(" triesThisPeak=");
+  scr_mm_u(scr_mm_tries);
+  scr_mm_ch('\n');
+
+  /* The orphan split, so "8 MB the walk could not attribute" is answerable
+   * rather than a residual. These pages faulted in BETWEEN the VM walk and
+   * QueryWorkingSet; each was re-queried individually and the class below is
+   * VirtualQuery's own later answer. Only `unresolved` truly resisted. */
+  {
+    static const char *onames[SCR_MM_C_N] = {"INSTRUMENT", "IMAGE", "MAPPED", "STACK", "HEAP", "PRIVATE"};
+    scr_mm_s("ORPHANCLS total=");
+    scr_mm_u((unsigned long long)orphan);
+    for (i = 0; i < SCR_MM_C_N; i++) {
+      scr_mm_ch(' ');
+      scr_mm_s(onames[i]);
+      scr_mm_ch('=');
+      scr_mm_u((unsigned long long)scr_mm_orphanCls[i]);
+    }
+    scr_mm_s(" unresolved=");
+    scr_mm_u((unsigned long long)scr_mm_orphanUnresolved);
+    scr_mm_ch('\n');
+  }
+
+  /* STACK census. Regions arrive in ascending address order and an allocation
+   * base is contiguous, so counting allocBase transitions counts STACKS -
+   * thread stacks and CreateFiberEx fiber stacks alike. `bases` is therefore
+   * the concurrent fiber count (minus the handful of real threads), and
+   * resident/bases is what a fiber actually costs in pages. */
+  {
+    ULONG_PTR prevBase = 0;
+    ULONG_PTR bases = 0, sres = 0, scom = 0, curRes = 0, maxRes = 0, minRes = 0;
+    int seen = 0;
+    for (i = 0; i < scr_mm_nreg; i++) {
+      ScrMmReg *R = &scr_mm_reg[i];
+      if (R->cls != SCR_MM_C_STACK) continue;
+      if (!seen || R->allocBase != prevBase) {
+        if (seen) {
+          if (curRes > maxRes) maxRes = curRes;
+          if (!minRes || curRes < minRes) minRes = curRes;
+        }
+        bases++;
+        prevBase = R->allocBase;
+        curRes = 0;
+        seen = 1;
+      }
+      curRes += R->resident;
+      sres += R->resident;
+      scom += R->size;
+    }
+    if (seen) {
+      if (curRes > maxRes) maxRes = curRes;
+      if (!minRes || curRes < minRes) minRes = curRes;
+    }
+    scr_mm_s("STACKSUM bases=");
+    scr_mm_u((unsigned long long)bases);
+    scr_mm_s(" resident=");
+    scr_mm_u((unsigned long long)sres);
+    scr_mm_s(" committed=");
+    scr_mm_u((unsigned long long)scom);
+    scr_mm_s(" residentPerBase=");
+    scr_mm_u(bases ? (unsigned long long)(sres / bases) : 0ull);
+    scr_mm_s(" committedPerBase=");
+    scr_mm_u(bases ? (unsigned long long)(scom / bases) : 0ull);
+    scr_mm_s(" maxRes=");
+    scr_mm_u((unsigned long long)maxRes);
+    scr_mm_s(" minRes=");
+    scr_mm_u((unsigned long long)minRes);
+    scr_mm_ch('\n');
   }
 
   /* HeapWalk holds HeapLock, so every millisecond here is a millisecond the
@@ -685,7 +817,7 @@ SCR_MM_FN void scr_mm_snapshot(const char *why) {
   for (i = 0; i < scr_mm_nreg; i++) {
     ScrMmReg *R = &scr_mm_reg[i];
     if (R->cls != SCR_MM_C_PRIVATE && R->cls != SCR_MM_C_STACK) continue;
-    if (R->resident < 65536 && R->size < 262144) continue;
+    if (R->resident < scr_mm_regMinRes && R->size < scr_mm_regMinSize) continue;
     scr_mm_s("REGION cls=");
     scr_mm_u(R->cls);
     scr_mm_s(" base=");
@@ -701,6 +833,17 @@ SCR_MM_FN void scr_mm_snapshot(const char *why) {
     scr_mm_ch('\n');
   }
   scr_mm_s("END\n");
+  /* What this walk actually resolved is what the trigger may treat as
+   * explained - never the working set it read on the way in. A walk that
+   * landed in a trough leaves `covered` low, so the sampler re-arms and tries
+   * again at the next moment the process is genuinely at its high-water. */
+  if (resident > scr_mm_covered) scr_mm_covered = resident;
+  /* Keep the BEST snapshot, not the last. CREATE_ALWAYS means a later, worse
+   * walk would otherwise overwrite the one that caught the peak. */
+  if (scr_mm_onlybest) {
+    if (resident <= scr_mm_bestRes) return;
+    scr_mm_bestRes = resident;
+  }
   scr_mm_flush();
 }
 
@@ -712,9 +855,33 @@ SCR_MM_FN DWORD WINAPI scr_mm_thread(LPVOID p) {
     pmc.cb = (DWORD)sizeof pmc;
     pmc.WorkingSetSize = 0;
     if (scr_mm_gpmi && scr_mm_gpmi(GetCurrentProcess(), &pmc, (DWORD)sizeof pmc)) {
-      if ((ULONG_PTR)pmc.WorkingSetSize > scr_mm_best + scr_mm_delta) {
-        scr_mm_best = (ULONG_PTR)pmc.WorkingSetSize;
+      ULONG_PTR wsNow = (ULONG_PTR)pmc.WorkingSetSize;
+      ULONG_PTR wsPeak = (ULONG_PTR)pmc.PeakWorkingSetSize;
+      /* A fresh all-time high re-arms the chase. */
+      if (wsPeak > scr_mm_lastPeak) {
+        scr_mm_lastPeak = wsPeak;
+        scr_mm_tries = 0;
+      }
+      /* THE FIX. The old trigger fired on the way up and recorded the working
+       * set read BEFORE the walk. A walk costs ~250ms (vmWalk dominates), and
+       * the workload keeps moving through it, so the file routinely captured a
+       * trough: mm-b-r1 wrote 145 MiB while the kernel peak was 205 MiB, and
+       * because `best` had already been advanced to the pre-walk reading, the
+       * trigger never re-armed to try again.
+       *
+       * Two conditions now, and both matter. The first says the peak is not
+       * yet explained: no walk has landed within delta of it. The second says
+       * NOW is worth spending 250ms on - the process is currently sitting at
+       * its all-time high, so a walk started here describes the peak rather
+       * than whatever the workload happened to fall back to. Walking while
+       * wsNow is far below wsPeak cannot produce a peak attribution and is
+       * exactly the wasted quarter-second the old trigger kept spending. */
+      if (wsPeak > scr_mm_covered + scr_mm_delta && wsNow + scr_mm_delta >= wsPeak && scr_mm_tries < scr_mm_maxtries) {
+        scr_mm_tries++;
+        scr_mm_attempts++;
         scr_mm_snapshots++;
+        scr_mm_peakAtWalk = wsPeak;
+        scr_mm_best = wsNow;
         scr_mm_snapshot("highwater");
       }
     }
@@ -761,6 +928,9 @@ __attribute__((constructor)) SCR_MM_FN void scr_mm_arm(void) {
   scr_mm_ms = (DWORD)scr_mm_envnum("SCR_MEMMAP_MS", 4);
   scr_mm_delta = (ULONG_PTR)scr_mm_envnum("SCR_MEMMAP_DELTA", 4ull * 1024ull * 1024ull);
   scr_mm_walkheap = (int)scr_mm_envnum("SCR_MEMMAP_HEAP", 1);
+  scr_mm_maxtries = (unsigned)scr_mm_envnum("SCR_MEMMAP_MAXTRIES", 12);
+  scr_mm_regMinRes = (ULONG_PTR)scr_mm_envnum("SCR_MEMMAP_REGMIN_RES", 65536ull);
+  scr_mm_regMinSize = (ULONG_PTR)scr_mm_envnum("SCR_MEMMAP_REGMIN_SIZE", 262144ull);
 
   k32 = GetModuleHandleA("kernel32.dll");
   scr_mm_qws = (ScrMmQWS)(void *)GetProcAddress(k32, "K32QueryWorkingSet");
@@ -769,7 +939,7 @@ __attribute__((constructor)) SCR_MM_FN void scr_mm_arm(void) {
   scr_mm_gmi = (ScrMmGMI)(void *)GetProcAddress(k32, "K32GetModuleInformation");
   scr_mm_gpmi = (ScrMmGPMI)(void *)GetProcAddress(k32, "K32GetProcessMemoryInfo");
 
-  scr_mm_outbuf = (char *)scr_mm_valloc(1024u * 1024u);
+  scr_mm_outbuf = (char *)scr_mm_valloc(SCR_MM_OUTBUF);
   scr_mm_reg = (ScrMmReg *)scr_mm_valloc((SIZE_T)SCR_MM_MAXREG * sizeof(ScrMmReg));
   scr_mm_mod = (ScrMmMod *)scr_mm_valloc((SIZE_T)SCR_MM_MAXMOD * sizeof(ScrMmMod));
   scr_mm_hr = (ScrMmRange *)scr_mm_valloc((SIZE_T)SCR_MM_MAXHR * sizeof(ScrMmRange));
@@ -869,6 +1039,10 @@ __attribute__((constructor)) SCR_MM_FN void scr_mm_arm(void) {
     }
   }
 
+  /* From here on only the sampler takes snapshots, and it keeps the best one
+   * rather than the last. The self-test snapshots above ran with this off, so
+   * their files are written unconditionally as before. */
+  scr_mm_onlybest = 1;
   CreateThread(0, 65536, scr_mm_thread, 0, 0, 0);
 }
 
