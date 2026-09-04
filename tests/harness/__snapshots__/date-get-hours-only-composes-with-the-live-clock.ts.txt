@@ -1,0 +1,26 @@
+date-get-hours-only-composes-with-the-live-clock.ts:25:13 - error SC2020: 'new Date(...) with an argument composed with .getHours()' is part of the standard library types but has no scriptc lowering yet
+
+  24 | /* 1. an explicit millisecond value */
+  25 | console.log(new Date(1700000000000).getHours())
+     |             ^~~~~~~~~~~~~~~~~~~~~~~
+  26 | 
+
+  hint: only the live-clock form lowers — new Date().getHours(); the local offset for an arbitrary instant is the RUN host's zone history, which this compiler cannot see (Windows applies the current rule to every instant and disagrees with Node across past DST periods). Read the UTC field instead: new Date(ms).toISOString()
+
+date-get-hours-only-composes-with-the-live-clock.ts:30:13 - error SC2020: 'new Date(...) with an argument composed with .getHours()' is part of the standard library types but has no scriptc lowering yet
+
+  29 | const ms = Date.now() - 86400000
+  30 | console.log(new Date(ms).getHours())
+     |             ^~~~~~~~~~~~
+  31 | 
+
+  hint: only the live-clock form lowers — new Date().getHours(); the local offset for an arbitrary instant is the RUN host's zone history, which this compiler cannot see (Windows applies the current rule to every instant and disagrees with Node across past DST periods). Read the UTC field instead: new Date(ms).toISOString()
+
+date-get-hours-only-composes-with-the-live-clock.ts:33:13 - error SC2020: 'new Date(...) with an argument composed with .getHours()' is part of the standard library types but has no scriptc lowering yet
+
+  32 | /* 3. the date-string form: the parse is bounded AND the zone is unknown */
+  33 | console.log(new Date('2024-01-15T00:00:00Z').getHours())
+     |             ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  34 | 
+
+  hint: only the live-clock form lowers — new Date().getHours(); the local offset for an arbitrary instant is the RUN host's zone history, which this compiler cannot see (Windows applies the current rule to every instant and disagrees with Node across past DST periods). Read the UTC field instead: new Date(ms).toISOString()
