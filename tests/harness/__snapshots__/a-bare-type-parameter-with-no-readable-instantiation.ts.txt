@@ -1,0 +1,27 @@
+a-bare-type-parameter-with-no-readable-instantiation.ts:47:5 - error SC1090: calls of the generic method 'send' through this receiver (its type parameter 'T' carries no constraint, so the member has no single closure slot to hold — a CONSTRAINED type parameter maps at its constraint and any producer fills the slot; without one the only home is static monomorphization, which needs the receiver's own declaration: a const bound to the defining object literal, or to a 'new' expression) is not supported yet
+
+  46 | function useSinkOnly(s: SinkOnly): void {
+  47 |     s.send(1)
+     |     ^~~~~~~~~
+  48 |     s.send('two')
+
+a-bare-type-parameter-with-no-readable-instantiation.ts:48:5 - error SC1090: calls of the generic method 'send' through this receiver (its type parameter 'T' carries no constraint, so the member has no single closure slot to hold — a CONSTRAINED type parameter maps at its constraint and any producer fills the slot; without one the only home is static monomorphization, which needs the receiver's own declaration: a const bound to the defining object literal, or to a 'new' expression) is not supported yet
+
+  47 |     s.send(1)
+  48 |     s.send('two')
+     |     ^~~~~~~~~~~~~
+  49 | }
+
+a-bare-type-parameter-with-no-readable-instantiation.ts:61:17 - error SC1090: calls of the generic method 'keep' through this receiver (its type parameter 'T' carries no constraint, so the member has no single closure slot to hold — a CONSTRAINED type parameter maps at its constraint and any producer fills the slot; without one the only home is static monomorphization, which needs the receiver's own declaration: a const bound to the defining object literal, or to a 'new' expression) is not supported yet
+
+  60 | function useDropping(d: Dropping): void {
+  61 |     console.log(d.keep<number>(() => 1))
+     |                 ^~~~~~~~~~~~~~~~~~~~~~~
+  62 |     console.log(d.keep<string>(() => 'x' as never))
+
+a-bare-type-parameter-with-no-readable-instantiation.ts:62:17 - error SC1090: calls of the generic method 'keep' through this receiver (its type parameter 'T' carries no constraint, so the member has no single closure slot to hold — a CONSTRAINED type parameter maps at its constraint and any producer fills the slot; without one the only home is static monomorphization, which needs the receiver's own declaration: a const bound to the defining object literal, or to a 'new' expression) is not supported yet
+
+  61 |     console.log(d.keep<number>(() => 1))
+  62 |     console.log(d.keep<string>(() => 'x' as never))
+     |                 ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  63 | }
