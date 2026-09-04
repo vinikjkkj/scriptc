@@ -1,0 +1,40 @@
+promiselike-hand-rolled-thenable.ts:16:32 - error SC1090: object literals where 'Promise<number>' is expected (a hand-rolled thenable) is not supported yet
+
+  15 | // has no lowering for a bare thenable and says so.
+  16 | const a: PromiseLike<number> = {
+     |                                ^
+  17 |   then<TResult1 = number, TResult2 = never>(
+
+  hint: a bare thenable — an object with a then method — has no lowering: wrap it, e.g. Promise.resolve().then(() => thenable); a PromiseLike<T> slot holds a real promise here
+
+promiselike-hand-rolled-thenable.ts:35:32 - error SC1090: 'Thenable' values where 'Promise<number>' is expected is not supported yet
+
+  34 | }
+  35 | const b: PromiseLike<number> = new Thenable();
+     |                                ^~~~~~~~~~~~~~
+  36 | 
+
+promiselike-hand-rolled-thenable.ts:40:32 - error SC2002: record shapes must match exactly or width-coerce: expected 'Promise<number>', got '{ then: ((number) => void) => void }'
+
+  39 | // hand rather than a PromiseLike-shaped one.
+  40 | const c: PromiseLike<number> = {
+     |                                ^
+  41 |   then(cb: (v: number) => void): void {
+
+  hint: width subtyping compiles as a copy (each expected field copied off the source; extra fields drop) — this pair is outside the copy's rules; build a literal with exactly the expected fields instead
+
+promiselike-hand-rolled-thenable.ts:51:3 - error SC1090: generic methods are not supported yet
+
+  50 | const d = {
+  51 |   then<TResult1 = number, TResult2 = never>(
+     |   ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  52 |     onfulfilled?: ((value: number) => TResult1 | PromiseLike<TResult1>) | null,
+
+promiselike-hand-rolled-thenable.ts:60:53 - error SC2002: record shapes must match exactly or width-coerce: expected 'Promise<number>', got '{ then: ((number) => number | Promise<number> | null | undefined, (unknown) => number | Promise<number> | null | undefined) => Promise<number> }'
+
+  59 | async function main(): Promise<void> {
+  60 |   console.log(await a, await b, await c, await take(d));
+     |                                                     ^
+  61 | }
+
+  hint: width subtyping compiles as a copy (each expected field copied off the source; extra fields drop) — this pair is outside the copy's rules; build a literal with exactly the expected fields instead

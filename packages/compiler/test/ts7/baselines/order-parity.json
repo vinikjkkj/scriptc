@@ -10128,6 +10128,24 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/7460-by-reference-kinds-survive-the-unknown-round-trip.ts": {
+   "order": [
+    "<repo>/tests/corpus/7460-by-reference-kinds-survive-the-unknown-round-trip.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/7470-promiselike-is-a-promise-slot.ts": {
+   "order": [
+    "<repo>/tests/corpus/7470-promiselike-is-a-promise-slot.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/7471-promise-then-through-unknown.ts": {
+   "order": [
+    "<repo>/tests/corpus/7471-promise-then-through-unknown.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/750-cycle-closure-box.ts": {
    "order": [
     "<repo>/tests/corpus/750-cycle-closure-box.ts"
@@ -11784,6 +11802,12 @@
   "<repo>/tests/diagnostics/promise-resolve-null-placeholder-fences.ts": {
    "order": [
     "<repo>/tests/diagnostics/promise-resolve-null-placeholder-fences.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/promiselike-hand-rolled-thenable.ts": {
+   "order": [
+    "<repo>/tests/diagnostics/promiselike-hand-rolled-thenable.ts"
    ],
    "diags": []
   },
