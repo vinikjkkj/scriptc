@@ -1566,17 +1566,53 @@ export function makeCycleAdmission(
       // two module systems' init windows interleave in ways neither
       // analysis models.
       if (!comp.every((m) => isCjsJsFile7(m))) {
+        // The whole cluster is surveyed, not just up to the first
+        // offender, and the count rides the message.
+        //
+        // A cluster is admitted only when EVERY member's top level is
+        // inert, so naming one offending line and stopping told the
+        // reader to go fix a line that is one of N — they fix it, rebuild,
+        // and get the identical refusal at a different line, N-1 times.
+        // The count is the only part of this that says how big the job
+        // is, and it is what turns "mongodb's src has a cycle problem"
+        // into a number. Paid once per cluster (the verdict memo), and
+        // only for clusters that are already failing.
+        let offenders = 0;
+        let firstOff: ts.Node | null = null;
+        /** A CommonJS member ends the survey. Which reason WINS is
+         * unchanged from before the survey existed — whichever of the two
+         * comes first in cluster order — so a mixed cluster still reports
+         * the CommonJS line; the count then covers only the prefix walked
+         * and says so. */
+        let partial = false;
         for (const m of comp) {
           if (isCjsJsFile7(m)) {
-            reason = `${m.fileName} is a CommonJS module — admission covers ES-module cycles only`;
+            if (offenders === 0) {
+              reason = `${m.fileName} is a CommonJS module — admission covers ES-module cycles only`;
+            } else {
+              partial = true;
+            }
             break;
           }
           if (m === entered) continue;
           const off = nonInertTopLevel7(program, m, evaluated);
           if (off !== null) {
-            reason = `top-level code at ${lineOf(off)} can run user code during the cycle's init window — only declaration-only module bodies are admitted`;
-            break;
+            offenders++;
+            firstOff ??= off;
+            // The count says how big the job is; this says WHERE. Off by
+            // default, printed to stderr, same shape as
+            // SCRIPTC_NPMSTATIC_WHY and SCRIPTC_ABSENTGLOBAL_WHY.
+            if (process.env["SCRIPTC_CYCLE_WHY"] !== undefined) {
+              console.error(`[cycle] non-inert top level ${lineOf(off)} (cluster of ${comp.length})`);
+            }
           }
+        }
+        if (reason === null && firstOff !== null) {
+          const rest =
+            offenders === 1 && !partial
+              ? ""
+              : ` (and ${partial ? "at least " : ""}${offenders - 1} more of the ${comp.length} modules in this cluster)`;
+          reason = `top-level code at ${lineOf(firstOff)} can run user code during the cycle's init window — only declaration-only module bodies are admitted${rest}`;
         }
       }
       sccVerdict.set(comp, reason);
