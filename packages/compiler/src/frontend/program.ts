@@ -1010,6 +1010,11 @@ function nonInertTopLevel7(
   const checker = program.getTypeChecker();
   /** Set while surveying a CALLEE BODY: see dtsRooted and bodyInert. */
   let strictRoots = false;
+  /** The OUTERMOST surveyed body, when one is being surveyed. A binding
+   * declared inside it is the callee's own local, initialized by the
+   * body's own execution; a binding declared outside could be a cluster
+   * partner's slot. */
+  let surveyedBody: ts.Node | null = null;
   const bodyInFlight = new Set<ts.FunctionDeclaration>();
   const PRIM =
     ts.TypeFlags.StringLike |
@@ -1066,6 +1071,23 @@ function nonInertTopLevel7(
         d.getSourceFile().isDeclarationFile ||
         (!strictRoots && (evaluated?.(d.getSourceFile()) ?? false)) ||
         (sameFileOk && d.getSourceFile() === sf && d.getStart() < useStart),
+    );
+  };
+  /** Every declaration of `id`'s symbol sits lexically inside the body
+   * currently being surveyed — a parameter, a local, a local function. */
+  const declaredWithinSurveyedBody = (id: ts.Identifier): boolean => {
+    const root = surveyedBody;
+    if (root === null) return false;
+    const rf = root.getSourceFile();
+    const lo = root.getStart(rf);
+    const hi = root.getEnd();
+    let sym = checker.getSymbolAtLocation(id);
+    if (sym === undefined) return false;
+    if (sym.flags & ts.SymbolFlags.Alias) return false; // an import is never a local
+    const decls = checker.declarationsOf(sym);
+    return (
+      decls.length > 0 &&
+      decls.every((d) => d.getSourceFile() === rf && d.getStart() >= lo && d.getEnd() <= hi)
     );
   };
   /** The lib containers whose iteration is runtime-implemented. */
@@ -1142,12 +1164,25 @@ function nonInertTopLevel7(
       e.kind === ts.SyntaxKind.TrueKeyword ||
       e.kind === ts.SyntaxKind.FalseKeyword ||
       e.kind === ts.SyntaxKind.NullKeyword ||
-      ts.isIdentifier(e) ||
       ts.isMetaProperty(e) ||
       ts.isArrowFunction(e) ||
       ts.isFunctionExpression(e)
     ) {
       return true;
+    }
+    if (ts.isIdentifier(e)) {
+      // At a MODULE TOP LEVEL a bare identifier read is free here because
+      // rule 2 stands behind it: backEdgeUseOffence7 refuses exactly the
+      // cycle-crossing binding read outside a deferred position.
+      if (!strictRoots) return true;
+      // Inside a surveyed CALLEE BODY there is no rule 2. The body runs at
+      // the CALL, in the middle of the init window, and a use written
+      // inside a function body satisfies rule 2's deferred-position test
+      // no matter when that function is actually invoked. So the read has
+      // to be answered here: a declaration-file global, or a binding the
+      // surveyed body declares itself. Anything else could be a partner's
+      // slot, and reading one is Node's ReferenceError.
+      return dtsRooted(e) || declaredWithinSurveyedBody(e);
     }
     if (ts.isClassExpression(e)) return inertClass(e) === null;
     if (ts.isParenthesizedExpression(e) || ts.isAsExpression(e) || ts.isSatisfiesExpression(e) || ts.isNonNullExpression(e)) {
@@ -1617,12 +1652,18 @@ function nonInertTopLevel7(
     if (bodyInFlight.size >= 8) return false; // depth cap: cost, not soundness
     bodyInFlight.add(fn);
     const prevStrict = strictRoots;
+    const prevBody = surveyedBody;
     strictRoots = true;
+    // The scope root is the body whose expressions are being walked right
+    // now, which through a nested survey is the CALLEE's, not the
+    // caller's — and it is restored on the way out.
+    surveyedBody = fn;
     let ok: boolean;
     try {
       ok = fn.body !== undefined && statementsInert(fn.body.statements);
     } finally {
       strictRoots = prevStrict;
+      surveyedBody = prevBody;
       bodyInFlight.delete(fn);
     }
     if (bodyInFlight.size === 0) memo.set(fn, ok);
