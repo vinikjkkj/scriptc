@@ -8,7 +8,7 @@
 import type { CEmitter } from "./emitter.js";
 import { rcSitesRequested } from "./emitter.js";
 import { bytesAliasOnExtract } from "../../ir/nodes.js";
-import { CLASS_PROPS_FIELD, armDiscrimLits, canAdaptDynFuncTo, canBoxClassIntoDyn, canBoxFuncIntoDyn, dynCheckArmOrder, internalSlotFields, isUndefinedArmedUnion, nullProtoRule, OWNMASK_SRC_NULL_PROTO, OWNMASK_VALID, ownMaskKeyBit, slotStorageKey, unionHasDiscrim, DYN_BYTES_KINDS, DYN_HANDLE_KINDS, IrType, UNION_ARM_JS_OBJECT_KINDS, isRefCounted, strandedFuncReason, typeEquals, typeKey } from "../../ir/nodes.js";
+import { CLASS_PROPS_FIELD, armDiscrimLits, canAdaptDynFuncTo, dynRestApplyable, canBoxClassIntoDyn, canBoxFuncIntoDyn, dynCheckArmOrder, internalSlotFields, isUndefinedArmedUnion, nullProtoRule, OWNMASK_SRC_NULL_PROTO, OWNMASK_VALID, ownMaskKeyBit, slotStorageKey, unionHasDiscrim, DYN_BYTES_KINDS, DYN_HANDLE_KINDS, IrType, UNION_ARM_JS_OBJECT_KINDS, isRefCounted, strandedFuncReason, typeEquals, typeKey } from "../../ir/nodes.js";
 import { cDecl, cStringLiteral, cType, elemAccess, releaseCallC, retainCallC, vAdapters } from "./emit-types.js";
 import { mangleClassStruct, mangleField, mangleFunction, mangleRecordNew, mangleRecordStruct } from "../mangle.js";
 import type { ClassMeta } from "./emit-shapes.js";
@@ -2876,7 +2876,27 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
         }
         d.push(fail(`  `, "func.kind", `d->kind != SCR_DYN_FUNC`, `NULL`));
         d.push(`  if (strcmp(scr_dyn_fn_sig(d), ${sigLit}) == 0) return scr_closure_retain(d->v.fn.clo);`);
-        if (canAdaptDynFuncTo(t, (id) => E.recordsById.get(id), (id) => E.unionsById.get(id))) {
+        // A TARGET with a SPELLED rest slot (`(...args: unknown[]) => R`)
+        // whose boxed signature is not the same one: the adapter's single
+        // parameter IS the packed array, and the thunk it forwards to
+        // wants POSITIONAL arguments — so the pack has to be SPREAD, with
+        // the array's runtime LENGTH deciding the argument count. The
+        // adapter's own argument vector is a fixed-size C array sized from
+        // the target's arity, so it cannot express that; the pack's items
+        // ARE a positional vector, though, so the spread costs one call
+        // (scr_dyn_thunk_apply) and no allocation. That works when the
+        // pack is the WHOLE argument list -- the `(...args: unknown[])`
+        // shape, which is every rest slot the checked-dynamic tier can
+        // spell. A rest behind FIXED parameters would have to prepend them
+        // into a fresh array, and a TYPED pack is not a dyn array at all;
+        // both refuse.
+        //
+        // It used to hand the whole pack over as argument ZERO: a boxed
+        // `(a, b) => …` reached through a `(...args: unknown[]) => void`
+        // cast bound `a` to the array's toString ("x,7") and `b` to
+        // undefined, at exit 0 with nothing said.
+        if ((t.restIn !== true || dynRestApplyable(t)) &&
+            canAdaptDynFuncTo(t, (id) => E.recordsById.get(id), (id) => E.unionsById.get(id))) {
           const adapter = dynFuncAdapterHelper(E, t);
           d.push(`  {`);
           d.push(`    ScrClosure *a = scr_closure_new((void *)&${adapter}, 2);`);
@@ -2887,8 +2907,14 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
           d.push(`    return a;`);
           d.push(`  }`);
         } else {
+          const w = t.restIn === true
+            ? cStringLiteral(Buffer.from(
+                `function with a rest parameter behind fixed ones (only a value boxed at the identical signature '${key}' can fill it — the pack would have to be prepended to the fixed arguments)`,
+                "utf8",
+              ))
+            : want;
           d.push(
-            `  ${E.dcHitC(name, "func.noadapt")}${E.dcFailC()}scr_dyn_check_fail(path, ${want}, d);`,
+            `  ${E.dcHitC(name, t.restIn === true ? "func.restpack" : "func.noadapt")}${E.dcFailC()}scr_dyn_check_fail(path, ${w}, d);`,
           );
           d.push(`  return NULL;`);
         }
@@ -3455,7 +3481,37 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
     const d: string[] = [`${sig} { /* dyn call thunk for ${key} */`];
     if (t.params.length === 0) d.push(`  (void)args;`);
     d.push(`  (void)argc;`);
+    // The LAST parameter of a restIn signature IS the pack (`...args:
+    // unknown[]`), not a positional: the call's arguments from that index
+    // on go INTO it. Taking `args[L]` alone bound the callee's `args` to
+    // the first argument, so `args.length` read the first argument's
+    // length — a string's characters for the logger shape. The pack is
+    // built as a dyn array (which the `dyn` slot IS) and validated into a
+    // typed slot through the array's own dynCheck, so a `...xs: string[]`
+    // rest reaching the boundary keeps its element check.
+    const restInAt = t.restIn === true ? t.params.length - 1 : -1;
     t.params.forEach((p, i) => {
+      if (i === restInAt) {
+        d.push(`  ${cDecl(p, `a${i}`)};`);
+        d.push(`  {`);
+        d.push(`    ScrDyn *rp = scr_dyn_new_arr();`);
+        d.push(`    for (size_t ri = ${i}; ri < argc; ri++) {`);
+        d.push(`      scr_dyn_arr_push(rp, scr_dyn_retain((ScrDyn *)args[ri]));`);
+        d.push(`    }`);
+        const undo = t.params
+          .slice(0, i)
+          .flatMap((q, j) => (isRefCounted(q) ? [`${releaseCallC(q, `a${j}`)};`] : []));
+        if (p.kind === "dyn") {
+          d.push(`    a${i} = rp;`);
+        } else {
+          d.push(`    ScrDynPath pp = { NULL, NULL, ${i} };`);
+          d.push(`    a${i} = ${E.dynCheckHelper(p)}(rp, &pp);`);
+          d.push(`    scr_dyn_release(rp);`);
+          d.push(`    if (scr_exc_pending()) { ${undo.join(" ")}${undo.length > 0 ? " " : ""}return NULL; }`);
+        }
+        d.push(`  }`);
+        return;
+      }
       // JS arity: a missing argument IS the undefined dyn value; the
       // param's own check decides whether that flies (dyn params take
       // anything; a number param throws the catchable TypeError).
@@ -3703,6 +3759,29 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
     // a ring through this adapter is collectable), caps[1] its thunk.
     d.push(`  ScrClosure *sc_fn = (ScrClosure *)scr_box_get_ref(sc_env->caps[0]); /* +1 */`);
     d.push(`  ScrDynThunk sc_th = scr_box_get_thunk(sc_env->caps[1]);`);
+    // A REST target: the single parameter IS the packed argument list, so
+    // the call is the SPREAD -- the pack's own items are the positional
+    // vector the thunk wants (scr_dyn_thunk_apply). Nothing is allocated
+    // and nothing is copied; the adapter still owns and releases the pack.
+    if (dynRestApplyable(t)) {
+      d.push(`  ScrDyn *sc_r = scr_dyn_thunk_apply(sc_fn, sc_th, a0);`);
+      d.push(`  scr_closure_release(sc_fn);`);
+      d.push(`  scr_dyn_release(a0);`);
+      d.push(`  if (scr_exc_pending()) return ${dummy};`.replace("return ;", "return;"));
+      if (t.ret.kind === "void") {
+        d.push(`  scr_dyn_release(sc_r);`);
+        d.push(`  return;`);
+      } else if (t.ret.kind === "dyn") {
+        d.push(`  return sc_r;`);
+      } else {
+        d.push(`  ${cDecl(t.ret, "out")} = ${E.dynCheckHelper(t.ret)}(sc_r, NULL);`);
+        d.push(`  scr_dyn_release(sc_r);`);
+        d.push(`  return out;`);
+      }
+      d.push(`}`, ``);
+      E.walkerDefs.push(...d);
+      return name;
+    }
     // The adapter OWNS its params (closure ABI); each converts to a dyn
     // argument (toDynExprC borrows) and releases.
     if (t.params.length > 0) {

@@ -1,0 +1,20 @@
+a-fixed-arity-function-filling-a-rest-parameter-slot.ts:36:17 - error SC1090: '(string) => void' values where '(...string[]) => void' is expected is not supported yet
+
+  35 | // A — the arrow.
+  36 | const a: Slot = (first: string): void => {
+     |                 ^~~~~~~~~~~~~~~~~~~~~~~~~~
+  37 |   console.log(first);
+
+a-fixed-arity-function-filling-a-rest-parameter-slot.ts:47:9 - error SC1090: '(string) => void' values where '(...string[]) => void' is expected is not supported yet
+
+  46 | const c: Sink = {
+  47 |   emit: (first: string): void => {
+     |         ^~~~~~~~~~~~~~~~~~~~~~~~~~
+  48 |     console.log(first);
+
+a-fixed-arity-function-filling-a-rest-parameter-slot.ts:57:9 - error SC1090: '(...string[]) => void' values where '(...unknown) => void' is expected is not supported yet
+
+  56 | const w: Wide = {
+  57 |   emit: (...args: string[]): void => {
+     |         ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  58 |     console.log(String(args.length));
