@@ -601,7 +601,21 @@ export function probeNodeImportRefusal(
   const parts = specifier.split("/");
   const subparts = specifier.startsWith("@") ? parts.slice(2) : parts.slice(1);
   const subpath = subparts.length > 0 ? `./${subparts.join("/")}` : ".";
-  const importer = resolve(fromFile);
+  /* requireResolutionBase, not `fromFile`, for the reason spelled out at
+   * its definition below: under --provenance-sources the importer is a
+   * file in a bare content-addressed checkout with no node_modules of its
+   * own, and the walk asked from THERE climbs out of the cache entirely.
+   * The CJS probe was taught this; the ESM one was not, and the two
+   * disagreed about the same edge.
+   *
+   * Both directions were wrong and the WRONG one is the loud one: for
+   * mongodb's `import('@mongodb-js/saslprep')` and
+   * mongodb-connection-string-url's `whatwg-url` — both installed, both
+   * resolvable, both edges Node hands over — this probe walked from the
+   * cache to the filesystem root, found nothing, and reported the ESM
+   * startup crash. That is an SC1010 refusal for a package that IS there:
+   * the build failed on a resolution that succeeds. */
+  const importer = requireResolutionBase(resolve(fromFile));
   const pkgJsonAt = (dir: string): PkgJson | null => {
     const text = host.readFile(join(dir, "package.json"));
     if (text === null) return null;

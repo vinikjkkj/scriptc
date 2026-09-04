@@ -53,7 +53,7 @@ import { provenanceDeclSiblings } from "./provenance-registry.js";
 import { clearResolveCaches, isNodeModulesPath, nearestPkgJsonPath, projectDtsRuntimeSibling, resolveBareModule, resolveProjectImport, resolveRelativeModule, resolveTypeDirective, setProjectRealm } from "./resolve.js";
 import { clearNpmResolutionCaches, probeNodeImportRefusal, probeNodeRequireRefusal } from "./npm.js";
 import { isNpmStaticPackage, npmStaticActive, npmStaticFsShadow, npmStaticPackageOfPath, npmStaticPackages, npmStaticRewroteExports, reportNpmStaticOffender, setNpmStaticPackages } from "./npm-static.js";
-import { isProvenanceSpecifier, provenancePaths } from "./provenance-registry.js";
+import { isProvenanceSourceFile, isProvenanceSpecifier, provenancePaths } from "./provenance-registry.js";
 import { cjsLexerVisibleNames } from "./cjs-lexer.js";
 import {
   ADOPTED_OPTIONS,
@@ -1849,6 +1849,37 @@ function preflight7(load: LoadResult): {
    * offender and it falls back to the island. */
   const npmStaticFileSuppressed = (d: ts.Diagnostic): boolean =>
     d.fileName !== undefined && npmStaticPackageOfPath(d.fileName) !== null;
+  /* --provenance-sources: the SAME doctrine at the same chokepoint, for
+   * the same reason, and the argument is stronger here than for
+   * --npm-static.
+   *
+   * These files are the package author's own TypeScript, fetched from the
+   * commit its published dist attests to. The author checked them under
+   * THEIR tsconfig — their target, their lib, their strictness, their
+   * TypeScript version — and shipped. The program's author cannot fix
+   * them: they are not in the tree, they are a content-addressed checkout
+   * the compiler chose to read. Yet the flag re-checks that whole source
+   * tree under scriptc's forced option set with tsgo, and any disagreement
+   * — a lib the author did not target, a strictness flag they did not set,
+   * a narrowing the checker version lost — became a preflight FAILURE for
+   * a program that compiles fine with the flag off.
+   *
+   * That asymmetry was ours, and it was invisible: with the flag off the
+   * same package is consumed through its shipped .d.ts under
+   * skipLibCheck, so scriptc never looked at those declarations at all.
+   * Turning on source mapping must not newly gate the build on a third
+   * party's own typecheck.
+   *
+   * The safety net is the one the --npm-static comment names, and it is
+   * the same net because it is the same lowering: a type the checker could
+   * not prove does not map, and a statement whose types do not map
+   * compiles to its honest per-site refusal, never to a silent guess. And
+   * scriptc's OWN codes are untouched — SC1010 (an unsupported builtin),
+   * SC1016 (a module-cycle shape), every SC1xxx preflight structure
+   * finding still gates from inside a provenance file exactly as before.
+   * Only the TypeScript passthrough (SC0001) stops speaking there. */
+  const provenanceFileSuppressed = (d: ts.Diagnostic): boolean =>
+    d.fileName !== undefined && isProvenanceSourceFile(d.fileName);
   /* The same doctrine for node_modules JS the opt-in never NAMED:
    * maxNodeModuleJsDepth (set only on --npm-static loads) admits ANY
    * node_modules JavaScript the checker's resolution touches — e.g. an
@@ -1933,6 +1964,7 @@ function preflight7(load: LoadResult): {
         d.category === ts.DiagnosticCategory.Error &&
         !suppressedJsStrictness7(d) &&
         !npmStaticFileSuppressed(d) &&
+        !provenanceFileSuppressed(d) &&
         !nodeModulesJsSuppressed(d) &&
         !namespaceCalleeSuppressed(p, d) &&
         !workspaceImplicitAnySuppressed(p, d) &&
