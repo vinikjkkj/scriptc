@@ -315,6 +315,43 @@ export class CheckerFacade {
     return this.raw.getPropertyOfType(type, name);
   }
 
+  /** 5.9.3's checker.getConstraintOfTypeParameter(tp): the constraint of a
+   * type parameter AS THE CHECKER HOLDS IT, or undefined when none was
+   * written.
+   *
+   * This is NOT the same question as reading `tpDecl.constraint` and
+   * resolving that type NODE, and the difference is the whole reason the
+   * method exists. A type node resolves in the scope it was WRITTEN in, so
+   * a member of a GENERIC type still reads that type's own parameters as
+   * abstract: `interface Client<TP = {}> { on<K extends keyof (Events &
+   * TP)>(...) }` accessed as `Client['on']` answers a SIGNATURE whose
+   * parameters are instantiated at `TP = {}`, while its type parameter's
+   * declaration node still says `keyof (Events & TP)` with `TP` open. The
+   * signature's own type parameter carries the INSTANTIATED constraint.
+   *
+   * It answers undefined for a parameter with no constraint (a bare `<T>`,
+   * or one carrying only a default), which is the property
+   * getBaseConstraintOfType does NOT have — that one widens a bare
+   * parameter to its apparent type instead of saying it has none. Callers
+   * that must distinguish "unconstrained" from "constrained" still read
+   * the declaration for THAT question and use this for the type. */
+  constraintOfTypeParameter(type: Type): Type | undefined {
+    if (this.constraintOfTp.has(type)) return this.constraintOfTp.get(type);
+    let constraint: Type | undefined;
+    try {
+      constraint = type.isTypeParameter() ? this.raw.getConstraintOfTypeParameter(type) : undefined;
+    } catch {
+      // tsgo can PANIC on a query (the sync channel surfaces it as a throw,
+      // server intact). "No answer" is the honest report; every caller here
+      // falls back to the declaration node it read before this method
+      // existed, so a panic costs the improvement and never the build.
+      constraint = undefined;
+    }
+    this.constraintOfTp.set(type, constraint);
+    return constraint;
+  }
+  private readonly constraintOfTp = new WeakMap<Type, Type | undefined>();
+
   /** The 5.9.3 checker never answered undefined from getTypeAtLocation-
    * family queries (errorType/anyType stood in); the 7 client loosens them
    * to `T | undefined`. The lowering is written against the 5.9.3 contract,

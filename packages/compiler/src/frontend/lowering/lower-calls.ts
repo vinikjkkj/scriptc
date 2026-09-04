@@ -10,7 +10,7 @@ import { lowerFetchMethodCall } from "./lower-fetch.js";
 import { BIGINT, BOOL, BYTES_U8, CAUGHT, DYN, F64, IrExpr, IrFunction, IrLocal, IrParam, IrStmt, IrType, JSVAL, STRING, SYMBOL_T, SrcLoc, UNDEFINED_T, VOID, arrayOf, canBoxFuncIntoDyn, canConvertToDyn, canDynCheckTo, canMarshalTypedFuncIntoIsland, funcOf, isUnitType, shapeHasAccessorSlots, typeEquals } from "../../ir/nodes.js";
 import type { IrFfiImport } from "../../ir/nodes.js";
 import { isCjsJsFile, isJsSourceFile, locOf } from "../program.js";
-import { erasedUnionOfArms, genResultRecord, isGenericCallableMemberType, isSymbolicCandidateType, typeKey} from "../types.js";
+import { erasedUnionOfArms, genResultRecord, instantiatedConstraint, isGenericCallableMemberType, isSymbolicCandidateType, typeKey} from "../types.js";
 import { PoisonError, dynFallbackType, dynUndefinedExpr, importCallHandleType, jsFuncNameOf, jsFuncValueNameOf, jsFuncValueSourceOf, newFnCtx, nodeThrowExpr } from "./lowerer.js";
 import { protoThisType } from "./proto-class-consume.js";
 import { enforceLibBoundary } from "./lib-boundary.js";
@@ -8036,7 +8036,12 @@ const inliningPredicates = new Set<ts.Symbol>();
         if (mapped === null) return why("a learned instantiation does not map");
       } else {
         try {
-          srcT = L.checker.getTypeFromTypeNode(src);
+          // The SAME recipe the slot side uses (constraintErasedCtx): the
+          // declaration says whether a constraint was written, the checker
+          // says what it is after the enclosing type's own parameters are
+          // substituted. The two must agree or the closure a producer
+          // builds does not fit the slot it fills.
+          srcT = instantiatedConstraint(L.checker, tp, tpDecls[i], src);
         } catch {
           return why("constraint type node threw");
         }
