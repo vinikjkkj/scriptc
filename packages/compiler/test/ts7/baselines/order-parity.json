@@ -10134,6 +10134,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/7480-a-boundary-copy-recovers-as-its-origin.ts": {
+   "order": [
+    "<repo>/tests/corpus/7480-a-boundary-copy-recovers-as-its-origin.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/750-cycle-closure-box.ts": {
    "order": [
     "<repo>/tests/corpus/750-cycle-closure-box.ts"
