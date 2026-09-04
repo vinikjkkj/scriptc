@@ -12963,8 +12963,75 @@ export class Lowerer {
   private tpArmsCache: Map<ts.TypeParameterDeclaration, readonly ts.Type[]> | null = null;
 
   unconstrainedTpArms(tpDecl: ts.TypeParameterDeclaration): readonly ts.Type[] | null {
+    if (this.classProvidesMember(tpDecl)) return null;
     this.tpArmsCache ??= this.scanUnconstrainedTpArms();
     return this.tpArmsCache.get(tpDecl) ?? null;
+  }
+
+  /** A member some CLASS in this program provides — and therefore a slot
+   * this must NOT create.
+   *
+   * Giving the interface a closure slot is only an improvement where the
+   * producers are values that can FILL one. A class instance cannot: a
+   * record carrying function fields is outside the width copy's rules, so a
+   * shape that GAINED the member stops accepting the very instances that
+   * used to flow into it. `tests/corpus/2552-generics-iface-methods.ts` is
+   * exactly that program, and its own comment names the property it relies
+   * on -- "the record shape maps empty -- generic members are excluded" --
+   * with `const all: Repo[] = [r, d]` a width copy off two class instances.
+   * Those receivers already monomorphize against the class's own bodies,
+   * which is the better answer, so the slot buys nothing there and costs
+   * the coercion.
+   *
+   * Two signals, either of which declines: a class that says `implements`
+   * the owning interface, and a class that declares a generic method of the
+   * same NAME (the structural implementer, which has no clause to read).
+   * Declining restores exactly the previous behaviour, so over-declining is
+   * safe where under-declining is not -- which is why the second, broader
+   * signal is there beside the precise one. */
+  private classProducerCache: { ifaces: Set<string>; methods: Set<string> } | null = null;
+
+  private classProvidesMember(tpDecl: ts.TypeParameterDeclaration): boolean {
+    const parent = tpDecl.parent;
+    if (parent === undefined || parent.kind !== ts.SyntaxKind.MethodSignature) return false;
+    const member = parent as ts.MethodSignature;
+    const owner = member.parent;
+    const ownerName = owner !== undefined && ts.isInterfaceDeclaration(owner) ? owner.name.text : null;
+    const memberName = ts.isIdentifier(member.name) ? member.name.text : null;
+    this.classProducerCache ??= this.scanClassProducers();
+    if (ownerName !== null && this.classProducerCache.ifaces.has(ownerName)) return true;
+    return memberName !== null && this.classProducerCache.methods.has(memberName);
+  }
+
+  private scanClassProducers(): { ifaces: Set<string>; methods: Set<string> } {
+    const ifaces = new Set<string>();
+    const methods = new Set<string>();
+    const visit = (n: ts.Node): void => {
+      if (ts.isClassDeclaration(n) || ts.isClassExpression(n)) {
+        for (const h of n.heritageClauses ?? []) {
+          if (h.token !== ts.SyntaxKind.ImplementsKeyword) continue;
+          for (const t of h.types) {
+            if (ts.isIdentifier(t.expression)) ifaces.add(t.expression.text);
+          }
+        }
+        for (const m of n.members) {
+          if (
+            ts.isMethodDeclaration(m) &&
+            m.typeParameters !== undefined &&
+            m.typeParameters.length > 0 &&
+            ts.isIdentifier(m.name)
+          ) {
+            methods.add(m.name.text);
+          }
+        }
+      }
+      ts.forEachChild(n, visit);
+    };
+    for (const sf of this.fileTag.keys()) {
+      if (sf.isDeclarationFile) continue;
+      ts.forEachChild(sf, visit);
+    }
+    return { ifaces, methods };
   }
 
   /** The declaration of the type parameter this type IS, or null. */
