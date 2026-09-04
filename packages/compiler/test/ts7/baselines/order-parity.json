@@ -10146,6 +10146,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/7490-a-symbolic-alias-under-a-promise-resolves-through-the-instantiation.ts": {
+   "order": [
+    "<repo>/tests/corpus/7490-a-symbolic-alias-under-a-promise-resolves-through-the-instantiation.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/750-cycle-closure-box.ts": {
    "order": [
     "<repo>/tests/corpus/750-cycle-closure-box.ts"

@@ -1673,7 +1673,10 @@ const SYMBOLIC_PAIR_BUDGET = 256;
  * it: the DECLARED parameter type comes off the declaration's own type node
  * (still written in the generic's type parameters), the RESOLVED one off
  * `rsig`'s parameter symbol (substituted at this call site). Walking the two
- * in parallel by property NAME pairs them structurally.
+ * in parallel pairs them structurally: by property NAME, by the type
+ * ARGUMENTS of a matching alias or reference, and through the single call
+ * signature of a function type — the same three moves
+ * unifySignatureBindings makes on the binding side.
  *
  *   buildSetMutationFromSchema<S>(input: {
  *     readonly schema: S
@@ -1723,6 +1726,74 @@ const SYMBOLIC_PAIR_BUDGET = 256;
           if (L.mapTypeOf(resolved) !== null) out.set(declared, resolved);
           return;
         }
+      }
+      // Type-ARGUMENT descent, for the SAME generic alias or the SAME
+      // generic target. A symbolic type WRAPPED in something that already
+      // has machinery is invisible to the property walk below: the walk
+      // reads `Promise<NonPromise<T>>`'s members (then/catch/finally), and
+      // none of them is `NonPromise<T>`. So the wrapped shape recorded
+      // nothing and the body's `NonPromise<T>` had no resolution to read —
+      // the same signature written WITHOUT the wrapper (`NonPromise<T>` as
+      // a bare return) recorded fine, which is the whole difference between
+      // a sync `withTransaction` and an async one.
+      //
+      // These are the moves unifySignatureBindings already makes on the
+      // binding side, for the same reason: instantiation preserves
+      // aliasSymbol/aliasTypeArguments and the reference target, so the two
+      // argument lists are parallel by construction. Nothing is guessed —
+      // a length mismatch or a differing target falls through.
+      const dAlias = declared.getAliasSymbol();
+      const dAliasArgs = declared.getAliasTypeArguments();
+      const rAliasArgs = resolved.getAliasTypeArguments();
+      if (
+        dAlias &&
+        dAlias === resolved.getAliasSymbol() &&
+        dAliasArgs.length > 0 &&
+        rAliasArgs.length === dAliasArgs.length
+      ) {
+        dAliasArgs.forEach((da, i) => {
+          const ra = rAliasArgs[i];
+          if (ra) pair(da, ra, depth + 1);
+        });
+        return;
+      }
+      const dRef = declared as ts.TypeReference;
+      const rRef = resolved as ts.TypeReference;
+      if (
+        declared.flags & ts.TypeFlags.Object &&
+        resolved.flags & ts.TypeFlags.Object &&
+        (declared as ts.ObjectType).objectFlags & ts.ObjectFlags.Reference &&
+        (resolved as ts.ObjectType).objectFlags & ts.ObjectFlags.Reference &&
+        dRef.getTarget() === rRef.getTarget()
+      ) {
+        const dArgs = L.checker.getTypeArguments(dRef);
+        const rArgs = L.checker.getTypeArguments(rRef);
+        dArgs.forEach((da, i) => {
+          const ra = rArgs[i];
+          if (ra) pair(da, ra, depth + 1);
+        });
+        return;
+      }
+      // CALL-SIGNATURE descent. A callback parameter (`run: () =>
+      // NonPromise<T>`) carries the symbolic type in its RETURN, and a
+      // function type has no properties for the walk below to follow.
+      // Single signature only: overloads have no positional correspondence.
+      // This one does NOT return: a callable object also has properties,
+      // and the walk below is what already visited them.
+      const dCallSigs = L.checker.getCallSignatures(declared);
+      const rCallSigs = L.checker.getCallSignatures(resolved);
+      if (dCallSigs.length === 1 && rCallSigs.length === 1) {
+        const ds = dCallSigs[0]!;
+        const rs = rCallSigs[0]!;
+        ds.getParameters().forEach((dp, i) => {
+          const rp = rs.getParameters()[i];
+          if (rp) pair(L.checker.getTypeOfSymbol(dp), L.checker.getTypeOfSymbol(rp), depth + 1);
+        });
+        pair(
+          L.checker.getReturnTypeOfSignature(ds),
+          L.checker.getReturnTypeOfSignature(rs),
+          depth + 1,
+        );
       }
       // Structural descent, by property NAME. A member the resolved side
       // does not carry is skipped rather than guessed at.
