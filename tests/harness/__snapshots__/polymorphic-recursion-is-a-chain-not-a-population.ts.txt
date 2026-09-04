@@ -1,0 +1,13 @@
+polymorphic-recursion-is-a-chain-not-a-population.ts:36:16 - error SC1090: unbounded generic instantiation ('deepen' nested 64 instantiations deep — polymorphic recursion?) is not supported yet (instantiating 'deepen' with <number[][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][...>)
+
+  35 |     const wrapped: T[] = [value]
+  36 |     return 1 + deepen(wrapped, rounds - 1)
+     |                ^~~~~~~~~~~~~~~~~~~~~~~~~~~
+  37 | }
+
+polymorphic-recursion-is-a-chain-not-a-population.ts:50:16 - error SC1090: unbounded generic instantiation ('ping' nested 64 instantiations deep — polymorphic recursion?) is not supported yet (instantiating 'pong' with <string[][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][][...>)
+
+  49 |     const wrapped: T[] = [value]
+  50 |     return 1 + ping(wrapped, rounds - 1)
+     |                ^~~~~~~~~~~~~~~~~~~~~~~~~
+  51 | }
