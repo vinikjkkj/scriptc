@@ -4937,7 +4937,42 @@ export class Lowerer {
    * resolution, everything else with null. Inert outside a call-keyed
    * generic instance body (symbolicResolved is null there). */
   readonly symbolicTsResolver = (t: ts.Type): ts.Type | null => {
-    return this.symbolicResolved?.get(t) ?? null;
+    const table = this.symbolicResolved;
+    if (!table) return null;
+    const hit = table.get(t);
+    if (hit !== undefined) return hit;
+    // IDENTITY is not enough once the alias crosses a MODULE. The table is
+    // keyed by the ts.Type the DECLARATION's own type node produced, and
+    // that was measured identical to what the body asks about — measured
+    // on a single file. zapo's store-sqlite spells `NonPromise<T>` in
+    // connection.ts and uses it in BaseSqliteStore.ts, and there the two
+    // are distinct ts.Type objects that print the same and mean the same:
+    // the table held `NonPromise<T> -> PreKeyRecord | null` and the lookup
+    // at BaseSqliteStore.ts:55 missed it, so `Promise<NonPromise<T>>` did
+    // not map and every rule that reads the site's type — the sub-union
+    // narrowing bridge among them — declined.
+    //
+    // The fallback keys on what the two actually share: the same ALIAS
+    // SYMBOL (one declaration, imported) applied to pairwise-IDENTICAL
+    // alias arguments. That is the same type expression written twice, so
+    // the recorded resolution is its resolution. Ambiguity declines: if two
+    // entries match with DIFFERENT resolutions there is no single answer,
+    // and answering either would be one instantiation speaking for
+    // another. The table is one instantiation's own and holds a handful of
+    // entries, so the scan runs only on a miss and only over those.
+    const alias = t.getAliasSymbol();
+    if (!alias) return null;
+    const args = t.getAliasTypeArguments() ?? [];
+    let found: ts.Type | null = null;
+    for (const [declared, resolved] of table) {
+      if (declared.getAliasSymbol() !== alias) continue;
+      const dargs = declared.getAliasTypeArguments() ?? [];
+      if (dargs.length !== args.length) continue;
+      if (!dargs.every((d, i) => d === args[i])) continue;
+      if (found !== null && found !== resolved) return null;
+      found = resolved;
+    }
+    return found;
   };
 
   irTypeOf(node: ts.Node): IrType {
@@ -9589,8 +9624,23 @@ export class Lowerer {
   narrowedRetagHelper(node: ts.Node, fromId: string, toId: string, loc: SrcLoc): string | null {
     const from = this.unions.get(fromId);
     if (!from || !this.unions.get(toId)) return null;
-    const siteT = this.mapTypeOf(this.typeOf(node));
+    let siteT = this.mapTypeOf(this.typeOf(node));
     if (!siteT) return null;
+    // The AWAITED PAYLOAD of a promise-typed site. An async `return
+    // <promise>` FLATTENS (asyncReturnFlatten): the value coerceInto hands
+    // this bridge is what came OUT of the promise, while the node it reads
+    // the checker's type off still spells the promise. Read literally, a
+    // promise is not an arm of a value union, so the bridge declined and
+    // the coercion fell through to SC2003 — which is where zapo's
+    // `withTransaction<PreKeyRecord | null>` met the whole
+    // learned-instantiation union of `runInTransaction<T>`
+    // (BaseSqliteStore.ts:55). The SYNC twin of the same program narrowed
+    // fine, because there the node's type IS the payload.
+    //
+    // Unwrapped only when the promise ITSELF is not an arm of the source
+    // union: where it is, the coercion really is promise-to-promise and
+    // the payload would be the wrong proof.
+    if (siteT.kind === "promise" && this.armTag(fromId, siteT) < 0) siteT = siteT.inner;
     const siteArms = siteT.kind === "union" ? this.unions.get(siteT.unionId)?.arms : [siteT];
     if (!siteArms || siteArms.length === 0) return null;
     const allowed = new Set<number>();

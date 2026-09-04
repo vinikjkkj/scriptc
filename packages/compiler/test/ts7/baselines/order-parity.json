@@ -10158,6 +10158,26 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/7490-a-symbolic-alias-under-a-promise-resolves-through-the-instantiation.ts": {
+   "order": [
+    "<repo>/tests/corpus/7490-a-symbolic-alias-under-a-promise-resolves-through-the-instantiation.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/7491-an-erased-union-narrows-back-into-the-instantiation-s-own-type.ts": {
+   "order": [
+    "<repo>/tests/corpus/7491-an-erased-union-narrows-back-into-the-instantiation-s-own-type.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/7492-a-symbolic-alias-imported-from-another-module-still-resolves/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/7492-a-symbolic-alias-imported-from-another-module-still-resolves/connection.ts",
+    "<repo>/tests/corpus/7492-a-symbolic-alias-imported-from-another-module-still-resolves/store.ts",
+    "<repo>/tests/corpus/7492-a-symbolic-alias-imported-from-another-module-still-resolves/main.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/750-cycle-closure-box.ts": {
    "order": [
     "<repo>/tests/corpus/750-cycle-closure-box.ts"
