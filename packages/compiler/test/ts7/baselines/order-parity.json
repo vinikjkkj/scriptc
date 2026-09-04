@@ -10275,6 +10275,18 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/7550-a-generic-member-of-a-generic-interface-keeps-its-closure-slot.ts": {
+   "order": [
+    "<repo>/tests/corpus/7550-a-generic-member-of-a-generic-interface-keeps-its-closure-slot.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/7551-the-local-hour-is-a-zone-read-not-a-clock-read.ts": {
+   "order": [
+    "<repo>/tests/corpus/7551-the-local-hour-is-a-zone-read-not-a-clock-read.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/756-cycle-inheritance.ts": {
    "order": [
     "<repo>/tests/corpus/756-cycle-inheritance.ts"
@@ -11063,6 +11075,12 @@
   "<repo>/tests/diagnostics/dataview.ts": {
    "order": [
     "<repo>/tests/diagnostics/dataview.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/date-get-hours-only-composes-with-the-live-clock.ts": {
+   "order": [
+    "<repo>/tests/diagnostics/date-get-hours-only-composes-with-the-live-clock.ts"
    ],
    "diags": []
   },
