@@ -1105,7 +1105,7 @@ export const AMBIENT_SURFACE_FNS: readonly AmbientSurfaceRow[] = [
     kind: "stdlib",
     name: "Date.prototype.getHours",
     fns: ["date.getHours"],
-    note: "the composed new Date(ms?).getHours() form; reads the HOST's local zone, unlike every other Date surface here",
+    note: "the composed new Date().getHours() form only — it reads the HOST's local zone, unlike every other Date surface here, and an arbitrary instant would depend on the run host's zone history",
   },
   // ── crypto.randomFill (lowerCryptoModuleCall's dedicated arm): the only
   // CSPRNG member with no lowering-table row, because the fill writes into
