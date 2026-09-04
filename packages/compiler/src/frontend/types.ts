@@ -1,6 +1,6 @@
 import * as ts from "./ts7/adapter.js";
 import type { IrBuiltinRendering, IrRecordShape, IrType, IrUnionDef } from "../ir/nodes.js";
-import { BYTES_ELEM_NAMES, ABORTCONTROLLER_T, ABORTSIGNAL_T, BIGINT, HEADERS_T, REQUEST_T, REQUESTINIT_T, RESPONSE_T, arrayOf, BOOL, bytesOf, canConvertToDyn, CHILD_T, DYN, F64, funcOf, isSupportedIndexValue, isSupportedMapKey, isSupportedMapValue, isSupportedSetElem, isUnitType, JSVAL, mapOf, NULL_T, PROCSTREAM_T, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, setOf, STRING, SYMBOL_T, typeEquals, typeKey, UNDEFINED_T, VOID } from "../ir/nodes.js";
+import { BYTES_ELEM_NAMES, ABORTCONTROLLER_T, ABORTSIGNAL_T, BIGINT, HEADERS_T, REQUEST_T, REQUESTINIT_T, RESPONSE_T, arrayOf, BOOL, bytesOf, canConvertToDyn, CHILD_T, DYN, F64, funcOf, isSupportedIndexValue, isSupportedMapKey, isSupportedMapValue, isSupportedSetElem, isUnitType, JSVAL, mapOf, NULL_T, PROCSTREAM_T, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, setOf, STRING, SYMBOL_T, typeEquals, typeKey, UNDEFINED_T, unionFuncSetArmsOk, VOID } from "../ir/nodes.js";
 
 import { isJsSourceFile } from "./program.js";
 import { isSqliteTypesPath } from "./shared.js";
@@ -1104,6 +1104,18 @@ export interface TypeMapperCtx {
    * only where literal identity matters — indexed accesses (`T[K]`) inside
    * generic bodies whose K is bound to a literal key. */
   resolveTypeParamTs?: TypeParamTsResolver;
+  /** The ARMS a constraint-erased parameter is bound to, when the binding
+   * came from the program's own instantiations rather than a written
+   * constraint. There is no single checker type to hand back — 7's checker
+   * has no union CONSTRUCTOR — so the arms travel as a list, and the only
+   * reader is the filtering-conditional resolver, which needs them one at a
+   * time for its assignability test anyway. */
+  resolveTypeParamTsArms?: ((t: ts.Type) => readonly ts.Type[] | null) | undefined;
+  /** The types this program instantiates an UNCONSTRAINED type parameter at
+   * (Lowerer.unconstrainedTpArms), or null when the set could not be closed.
+   * Consulted ONLY by constraintErasedCtx, and only for a parameter with
+   * neither constraint nor default: a written constraint always wins. */
+  unconstrainedTpArms?: ((tpDecl: ts.TypeParameterDeclaration) => readonly ts.Type[] | null) | undefined;
   /** The instantiation's symbolic→resolved side table (SymbolicResolver):
    * a type the checker keeps SYMBOLIC inside a generic body, answered with
    * the resolved type the CALL SITE already holds for it. Consulted only
@@ -1696,6 +1708,15 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
     if (viaIndexed !== null) {
       contextResolutions++;
       return viaIndexed;
+    }
+    // A FILTERING conditional over a bound parameter (`NonPromise<T>`) —
+    // the third form the checker keeps symbolic while T is open. Tried
+    // AFTER the two above and only ever ANSWERS where they returned null,
+    // so it can turn a refusal into a mapping and never change one.
+    const viaCond = mapBoundFilteringConditional(type, ctx);
+    if (viaCond !== null) {
+      contextResolutions++;
+      return viaCond;
     }
     // `Parameters<M[K]>` over a bound K — the emitter idiom's rest. Also a
     // form the checker keeps symbolic, and answered HERE rather than at
@@ -4896,6 +4917,70 @@ function mapNarrowedTypeParam(type: ts.Type, ctx: TypeMapperCtx): IrType | null 
   return { kind: "union", unionId: unions.intern(arms) };
 }
 
+/** A FILTERING conditional alias over a bound type parameter, resolved
+ * through the instantiation's BOUND checker type — zapo's
+ * `NonPromise<T> = T extends PromiseLike<unknown> ? never : T`.
+ *
+ * Like `Awaited<T>` and `T[K]`, the checker keeps a conditional symbolic
+ * while its check type is open, so nothing downstream maps it and the whole
+ * signature it sits in fails. That is a second, independent reason a generic
+ * member leaves a record shape: `runInTransaction<T>(run: () =>
+ * NonPromise<T>): Promise<NonPromise<T>>` has no closure slot even when T
+ * DOES carry a constraint, because the payload is a conditional.
+ *
+ * Deliberately narrow — the FILTER idiom only. Each branch must be either
+ * `never` (the arm is dropped) or the check parameter itself (the arm passes
+ * through unchanged), which is the whole of what a "reject these, keep the
+ * rest" alias spells. A branch that computes anything else has a result this
+ * cannot name, and answers null so the existing refusal stands.
+ *
+ * Distributes over the bound union arm by arm, which is what a conditional
+ * with a bare type-parameter check type does in the checker. */
+function mapBoundFilteringConditional(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
+  const { checker, resolveTypeParamTs } = ctx;
+  if (!type.isConditionalType()) return null;
+  const check = type.getCheckType();
+  if ((check.flags & ts.TypeFlags.TypeParameter) === 0) return null;
+  // The binding arrives either as ONE checker type (a written constraint)
+  // or as the ARM LIST of a learned instantiation union — 7 has no union
+  // constructor, so the second form cannot be collapsed into the first.
+  const bound = resolveTypeParamTs?.(check) ?? null;
+  const learned = bound === null ? ctx.resolveTypeParamTsArms?.(check) ?? null : null;
+  if (bound === null && learned === null) return null;
+  // The check parameter, recognised by SYMBOL as well as by identity: the
+  // client dedupes types by server handle, but a branch reached through a
+  // different alias expansion need not be the same object.
+  const isCheckParam = (b: ts.Type): boolean =>
+    b === check ||
+    ((b.flags & ts.TypeFlags.TypeParameter) !== 0 &&
+      b.getSymbol() !== undefined &&
+      b.getSymbol() === check.getSymbol());
+  const branchKind = (b: ts.Type): "drop" | "pass" | null =>
+    (b.flags & ts.TypeFlags.Never) !== 0 ? "drop" : isCheckParam(b) ? "pass" : null;
+  const onTrue = branchKind(type.getTrueType());
+  const onFalse = branchKind(type.getFalseType());
+  if (onTrue === null || onFalse === null) return null;
+  const extendsT = type.getExtendsType();
+  const arms = bound === null ? learned! : bound.isUnionType() ? bound.getTypes() : [bound];
+  // The filter must keep EVERY arm. A dropped arm would need this to
+  // rebuild the union arm by arm, and a per-arm rebuild does not reproduce
+  // the normalization mapType applies to a union as a whole (an
+  // `undefined` arm mapped alone is a unit, not a union member — it ICEd
+  // the validator with "arm is void"). A filter that actually rejects
+  // something answers null, and the existing refusal stands.
+  if (arms.some((arm) => (checker.isTypeAssignableTo(arm, extendsT) ? onTrue : onFalse) === "drop")) {
+    return null;
+  }
+  // Nothing filtered: the conditional IS its check type at this binding.
+  // For a written constraint that means mapping the BOUND type whole — the
+  // same request the declared-constraint path makes, so the two spellings
+  // cannot disagree. For a LEARNED binding the union was already interned
+  // by constraintErasedCtx, and asking resolveTypeParam for it reuses that
+  // one answer instead of re-deriving it arm by arm (which loses the
+  // normalization a whole-union mapping applies).
+  return bound === null ? ctx.resolveTypeParam?.(check) ?? null : mapType(bound, ctx);
+}
+
 /** `T[K]` inside a generic body, resolved through the instantiation's BOUND
  * checker types (the checker keeps indexed accesses over type parameters
  * symbolic). Object and index sides each resolve through resolveTypeParamTs
@@ -5750,6 +5835,59 @@ function tupleArityExpansion(restT: IrType, ctx: TypeMapperCtx): IrType[] | null
   return out;
 }
 
+/** The IR union a LEARNED instantiation set erases to. Shared by the SLOT
+ * (constraintErasedCtx) and the PRODUCER (contextualConstraintErasure in
+ * lower-calls), so the two cannot disagree about the slot's width — the
+ * same discipline the written-constraint path already keeps by reading one
+ * declaration from both sides. */
+export function erasedUnionOfArms(arms: readonly ts.Type[], ctx: TypeMapperCtx): IrType | null {
+  const mapped: IrType[] = [];
+  for (const arm of arms) {
+    const m = mapType(arm, ctx);
+    if (m === null) return null;
+    // `void` and `undefined` instantiations both reach the slot as the
+    // undefined VALUE — awaiting a void promise answers undefined in Node —
+    // and `void` is not a union arm any backend can represent.
+    mapped.push(m.kind === "void" ? UNDEFINED_T : m);
+  }
+  if (mapped.length === 0) return null;
+  // FLATTEN: an arm that is itself a union contributes its ARMS, not itself.
+  // A union holding a union is not a representation any backend has — the
+  // validator says so ("union uN: arm K is union"), and an instantiation at
+  // a union type (`T` bound to `Row | null` at one call site and to
+  // `number` at another) reaches here as exactly that. Same rule
+  // restTupleFromErasure already keeps one function up.
+  const byKey = new Map<string, IrType>();
+  for (const m of mapped) {
+    if (m.kind === "union") {
+      const inner = ctx.unions.get(m.unionId)?.arms ?? [];
+      // A union id with no arms is a placeholder nothing finalized; keeping
+      // a reference to one is the empty-union the validator rejects.
+      if (inner.length === 0) return null;
+      for (const a of inner) byKey.set(typeKey(a), a);
+    } else byKey.set(typeKey(m), m);
+  }
+  const distinct = [...byKey.entries()].sort(([x], [y]) => (x < y ? -1 : x > y ? 1 : 0)).map(([, t]) => t);
+  if (distinct.length === 1) return distinct[0]!;
+  // A union is not a bag of types: the validator's own membership rules
+  // decide what may sit beside what, and an instantiation set is free to
+  // contain things no union holds (zapo's stores return a Map from one
+  // transaction and an array from another — "map arm beside non-unit
+  // arms"). Checked HERE, against the same predicate the validator uses,
+  // so an illegal set is a REFUSAL at the erasure and never an ICE three
+  // passes later.
+  for (const arm of distinct) {
+    if (arm.kind === "void" || arm.kind === "union" || arm.kind === "dyn" || arm.kind === "jsval" ||
+        arm.kind === "generator" || arm.kind === "asyncGenerator") {
+      return null;
+    }
+    if ((arm.kind === "func" || arm.kind === "set" || arm.kind === "map") && !unionFuncSetArmsOk(distinct)) {
+      return null;
+    }
+  }
+  return { kind: "union", unionId: ctx.unions.intern(distinct) };
+}
+
 function constraintErasedCtx(sig: ts.Signature, ctx: TypeMapperCtx): TypeMapperCtx | null {
   const why = (r: string): null => {
     if (process.env["SCRIPTC_ERASE_WHY"] !== undefined) console.error(`[erasewhy] ${r}`);
@@ -5765,9 +5903,54 @@ function constraintErasedCtx(sig: ts.Signature, ctx: TypeMapperCtx): TypeMapperC
   if (tpDecls === undefined || tpDecls.length !== tps.length) return why("no tp declarations");
   const irByTp = new Map<ts.Type, IrType>();
   const tsByTp = new Map<ts.Type, ts.Type>();
+  const tsArmsByTp = new Map<ts.Type, readonly ts.Type[]>();
   for (const [i, tp] of tps.entries()) {
-    const src = tpDecls[i]?.constraint ?? tpDecls[i]?.defaultType;
-    if (!src) return why("type param without constraint or default");
+    const tpDecl = tpDecls[i];
+    const src = tpDecl?.constraint ?? tpDecl?.defaultType;
+    if (!src) {
+      // NO declared constraint and no default — but the program still
+      // instantiates the parameter somewhere, and the union of THOSE types
+      // is a widest binding just as honest as a written one: every value
+      // that reaches the slot is one of them by construction. The Lowerer
+      // computes the set once over the whole program (scanUnconstrainedTpArms)
+      // because a record shape interns from the TYPE, long before any call
+      // site is lowered.
+      //
+      // The alternative — erasing to `unknown` — is a WRONG ANSWER, not a
+      // wider one: an array or record crossing the dyn boundary COPIES
+      // (estado-aliasing §0.4), so `back === original` reads false where
+      // Node says true and a write through the original is never seen. A
+      // union arm keeps the value's own representation, so identity and
+      // mutation are the caller's.
+      //
+      // A set that is too NARROW cannot go wrong silently either: a call
+      // site whose type argument is not an arm fails to coerce into the
+      // slot, which is a refusal.
+      // ...but ONLY for a SIGNATURE-ONLY member. A declaration with a BODY
+      // — an object-literal method, a function, a class method — already
+      // monomorphizes per call site, which is strictly better than any
+      // slot: each instance is typed at its own argument, with no union to
+      // narrow back out of. Erasing those too took `const lit = { tx<T>(f:
+      // () => T): T { return f() } }` off the monomorphization path it was
+      // already on and onto a slot its producer could not fill (no
+      // contextual type exists for an inferred literal), turning a working
+      // program into a fence. A MethodSignature has no body, so
+      // monomorphization was never available for it and the slot is the
+      // only home there is.
+      if (sigDecl === undefined || sigDecl.kind !== ts.SyntaxKind.MethodSignature) {
+        return why("type param without constraint or default");
+      }
+      const arms = tpDecl === undefined ? null : ctx.unconstrainedTpArms?.(tpDecl) ?? null;
+      if (arms === null || arms.length === 0) return why("type param without constraint or default");
+      const union = erasedUnionOfArms(arms, ctx);
+      if (union === null) return why("an instantiation does not map");
+      if (process.env["SCRIPTC_ERASE_WHY"] !== undefined) {
+        console.error(`[erasewhy] learned ${ctx.checker.typeToString(tp)} := ${arms.map((a) => ctx.checker.typeToString(a)).join(" | ")}`);
+      }
+      irByTp.set(tp, union);
+      tsArmsByTp.set(tp, arms);
+      continue;
+    }
     const constraint = ctx.checker.getTypeFromTypeNode(src);
     const mapped = mapType(constraint, ctx);
     if (!mapped || mapped.kind === "void") return why(`constraint does not map: ${ctx.checker.typeToString(constraint).slice(0,60)}`);
@@ -5776,10 +5959,12 @@ function constraintErasedCtx(sig: ts.Signature, ctx: TypeMapperCtx): TypeMapperC
   }
   const outerIr = ctx.resolveTypeParam;
   const outerTs = ctx.resolveTypeParamTs;
+  const outerArms = ctx.resolveTypeParamTsArms;
   return {
     ...ctx,
     resolveTypeParam: (t) => irByTp.get(t) ?? outerIr?.(t) ?? null,
     resolveTypeParamTs: (t) => tsByTp.get(t) ?? outerTs?.(t) ?? null,
+    resolveTypeParamTsArms: (t) => tsArmsByTp.get(t) ?? outerArms?.(t) ?? null,
     indexUnionOk: true,
     restTupleFromErasure: true,
   };
