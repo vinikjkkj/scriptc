@@ -1315,6 +1315,11 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
           params: sig.params.filter((p) => p.mode !== "dynRest").map((p) => p.type),
           ret: sig.returnType,
           ...(sig.params.some((p) => p.mode === "dynRest") ? { rest: true as const } : {}),
+          // A SPELLED rest slot: the value's last parameter IS the pack, and
+          // the func type must say so or a fixed-arity slot binds the first
+          // argument where the array belongs (IrType.restIn; lambdaSignature
+          // marks the literal side of the same fact).
+          ...(sig.params.some((p) => p.mode === "rest") ? { restIn: true as const } : {}),
         };
         L.requireExactArityValue(expr, expr, sig.params, funcType);
         return { kind: "closure", fnName: sig.name, captures: [], type: funcType, loc };
@@ -12348,6 +12353,11 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
           params: sig.params.filter((p) => p.mode !== "dynRest").map((p) => p.type),
           ret: sig.returnType,
           ...(sig.params.some((p) => p.mode === "dynRest") ? { rest: true as const } : {}),
+          // A SPELLED rest slot: the value's last parameter IS the pack, and
+          // the func type must say so or a fixed-arity slot binds the first
+          // argument where the array belongs (IrType.restIn; lambdaSignature
+          // marks the literal side of the same fact).
+          ...(sig.params.some((p) => p.mode === "rest") ? { restIn: true as const } : {}),
         };
         L.requireExactArityValue(prop, propName, sig.params, funcType);
         return { kind: "closure", fnName: sig.name, captures: [], type: funcType, loc };

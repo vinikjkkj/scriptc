@@ -8843,6 +8843,16 @@ export class Lowerer {
    * bridges only signatures whose every call succeeds by construction. */
   cleanFuncAdaptable(src: IrType & { kind: "func" }, dst: IrType & { kind: "func" }): boolean {
     if (src.rest === true || dst.rest === true) return false;
+    // A SPELLED rest slot is a DIFFERENT calling convention — the packed
+    // array is one argument, not a positional list — so the positional
+    // walk below would otherwise compare a pack against a value. The two
+    // sides answer differently, and both answers are funcCoerceAdapter's:
+    // a SOURCE pack has to be BUILT, which the width family stays out of
+    // (declining leaves the exact-shape fence, the loud direction); a
+    // SLOT pack is DROPPED, which is sound exactly when the wrapped
+    // function declares nothing the pack would have to fill.
+    if (src.restIn === true) return false;
+    if (dst.restIn === true && src.params.length > dst.params.length - 1) return false;
     if (src.params.length > dst.params.length) return false;
     for (let i = 0; i < src.params.length; i++) {
       if (!this.coercibleValue(dst.params[i]!, src.params[i]!)) return false;
@@ -9223,15 +9233,92 @@ export class Lowerer {
 
   funcCoerceAdapter(fromT: IrType & { kind: "func" }, toT: IrType & { kind: "func" }, loc: SrcLoc): string | null {
     if (fromT.rest === true || toT.rest === true) return null;
+    // A SPELLED rest slot on the SLOT side (`(...args: T[]) => R` as the
+    // TARGET, filled by a function of some other arity). The slot's
+    // callers hand ONE packed array, so the wrapper's trailing parameter
+    // IS that pack — and what the wrapped function can be given depends
+    // entirely on whether it wants anything out of it:
+    //
+    //   - It needs NOTHING (`const d: D = { dispatch: () => true }` over
+    //     `dispatch(...args: readonly unknown[]): unknown` — undici's
+    //     dispatcher, zapo's own spelling): the pack is DROPPED and the
+    //     leading fixed parameters pass positionally. Exactly what Node
+    //     does with a callback that ignores its arguments, and the case
+    //     that already worked.
+    //   - It DECLARES parameters the pack would have to fill: the wrapper
+    //     would have to UNPACK — read element `i` at run time, with the
+    //     array's LENGTH deciding which parameters get values and which
+    //     take undefined. That is runtime arity, which the one-signature
+    //     contract has no node for, and handing the pack over as argument
+    //     ZERO (what this used to do, silently) bound `a` to the array's
+    //     toString: `f('alpha', 7)` gave `a = "alpha,7"`. Refuse; the
+    //     caller's exactness fence names the pair.
+    //
+    // Both packs at once (a rest source into a rest slot of a DIFFERENT
+    // signature) would have to unpack and repack, and refuses with them.
+    const toRestIn = toT.restIn === true;
+    const fixedTo = toRestIn ? toT.params.length - 1 : toT.params.length;
+    // The UNPACK, where it is exact. A CHECKED-DYNAMIC pack (`...args:
+    // unknown[]`, the only rest slot whose element type carries no
+    // promise) read through the keyed-dyn path answers the undefined dyn
+    // value for a missing index — which IS Node's answer for a parameter
+    // the call did not reach — so a source whose extra parameters are all
+    // `unknown` unpacks exactly, with no arity anywhere. A TYPED pack
+    // (`...xs: T[]`) does not: its out-of-range read traps where Node
+    // hands back undefined, and its elements would need a check the
+    // wrapper has no honest failure mode for. That pair refuses.
+    const toRestUnpack =
+      toRestIn &&
+      fromT.restIn !== true &&
+      fromT.params.length > fixedTo &&
+      toT.params[fixedTo]!.kind === "dyn" &&
+      fromT.params.slice(fixedTo).every((p) => p.kind === "dyn");
+    if (toRestIn && fromT.restIn === true) return null;
+    if (toRestIn && fromT.params.length > fixedTo && !toRestUnpack) return null;
+    // The SOURCE's spelled rest slot: its last parameter is the packed
+    // array, not a positional. `restPack` below builds the slot's
+    // arguments from position `fixedFrom` on, exactly the way completeArgs
+    // packs a direct call's surplus.
+    const fromRestIn = fromT.restIn === true;
+    const fixedFrom = fromRestIn ? fromT.params.length - 1 : fromT.params.length;
+    const restSlotT = fromRestIn ? fromT.params[fixedFrom]! : null;
+    // The element type the pack coerces each surplus slot argument into,
+    // and the pack's own node kind. A `...args: unknown[]` slot is the
+    // checked-dynamic array (dyn); a typed `...xs: T[]` is a real array; a
+    // TUPLE-typed rest pins the arity exactly. Anything else has no pack.
+    let restElem: IrType | null = null;
+    let restTupleFields: { name: string; type: IrType }[] | null = null;
+    if (restSlotT !== null) {
+      if (restSlotT.kind === "dyn") {
+        restElem = DYN;
+      } else if (restSlotT.kind === "array") {
+        restElem = restSlotT.elem;
+      } else if (restSlotT.kind === "record") {
+        const shape = this.shapes.get(restSlotT.shapeId);
+        if (!shape?.tuple) return null;
+        if (toT.params.length - fixedFrom !== shape.fields.length) return null;
+        restTupleFields = shape.fields.map((f) => ({ name: f.name, type: f.type }));
+      } else {
+        return null;
+      }
+      // Fewer slot parameters than the source's LEADING fixed ones: those
+      // have no argument to take and no undefined completion inside a
+      // pack. Refuse rather than guess.
+      if (toT.params.length < fixedFrom) return null;
+    }
     // The source may carry EXTRA trailing parameters the slot omits
     // (`(a, b, opts?) => R` assigned where `(a, b) => R` is wanted — the
     // checker admits it): sound only when each extra is OPTIONAL
     // (undefined-armed), and the adapter feeds them undefined, exactly what
     // an omitted optional argument takes.
-    const optionalIr = (p: IrType): boolean =>
-      p.kind === "union" && (this.unions.get(p.unionId)?.arms.some((a) => a.kind === "undefinedT") ?? false);
-    if (fromT.params.length > toT.params.length) {
-      for (let i = toT.params.length; i < fromT.params.length; i++) {
+    const undefArmTagOf = (p: IrType): { unionId: string; tag: number } | null => {
+      if (p.kind !== "union") return null;
+      const tag = this.unions.get(p.unionId)?.arms.findIndex((a) => a.kind === "undefinedT") ?? -1;
+      return tag >= 0 ? { unionId: p.unionId, tag } : null;
+    };
+    const optionalIr = (p: IrType): boolean => undefArmTagOf(p) !== null;
+    if (!fromRestIn && !toRestUnpack && fromT.params.length > fixedTo) {
+      for (let i = fixedTo; i < fromT.params.length; i++) {
         if (!optionalIr(fromT.params[i]!)) return null;
       }
     }
@@ -9253,8 +9340,20 @@ export class Lowerer {
     //   value — the call runs (a `never` thrower never comes back, so the
     //   trap is unreachable there), then the stranded TypeError.
     let strandParams = false;
-    for (let i = 0; i < Math.min(fromT.params.length, toT.params.length); i++) {
-      if (this.coercibleValue(toT.params[i]!, fromT.params[i]!)) continue;
+    // What the slot's parameter at position `i` must convert INTO: the
+    // wrapped function's own parameter there, or — past the source's
+    // fixed prefix when its last slot is a spelled rest — that pack's
+    // ELEMENT type. One rule, used by both the probe here and the build
+    // below, so the two cannot disagree about what the call looks like.
+    const wantAt = (i: number): IrType | null => {
+      if (!fromRestIn) return i < fromT.params.length ? fromT.params[i]! : null;
+      if (i < fixedFrom) return fromT.params[i]!;
+      return restTupleFields !== null ? restTupleFields[i - fixedFrom]!.type : restElem;
+    };
+    for (let i = 0; i < (fromRestIn ? fixedTo : Math.min(fromT.params.length, fixedTo)); i++) {
+      const want = wantAt(i);
+      if (want === null) continue;
+      if (this.coercibleValue(toT.params[i]!, want)) continue;
       // ...and the WIDTH family, which coerceToExpected applies to this very
       // pair one call frame down (the `converted` below is built by it) but
       // which coercibleValue never learned — it answers for arm wraps,
@@ -9265,7 +9364,7 @@ export class Lowerer {
       // width-liftable and no recursion is introduced. Strictly a bridge
       // where there was a strand: the adapter body below already builds the
       // conversion, and its `stopped coercing` assertion is the arming.
-      if (this.widthLiftPlan(toT.params[i]!, fromT.params[i]!) !== null) continue;
+      if (this.widthLiftPlan(toT.params[i]!, wantAt(i)!) !== null) continue;
       strandParams = true;
     }
     let voidRet: "jsval" | "strand" | null = null;
@@ -9311,18 +9410,99 @@ export class Lowerer {
         ),
       ];
     } else {
+      const slotArg = (i: number, pt: IrType): IrExpr => {
+        const aRef: IrExpr = { kind: "varRef", localId: `a.${i}`, type: toT.params[i]!, loc };
+        const converted = this.coerceToExpected(aRef, pt);
+        if (!typeEquals(converted.type, pt)) throw new Error("lowerer bug: probed fn-adapter param stopped coercing");
+        return converted;
+      };
       const args = fromT.params.map((pt, i): IrExpr => {
-        if (i >= toT.params.length) {
+        // The SOURCE's packed rest slot, built from every slot parameter
+        // from `fixedFrom` on — the same three packs completeArgs builds
+        // for a direct call (dynArrLit for a checked-dynamic
+        // `...args: unknown[]`, arrayLit for a typed `...xs: T[]`, a
+        // positional recordLit for a tuple-typed rest). This IS the
+        // fix: the slot used to be handed `a.0` alone, so the callee's
+        // `args` was the first argument rather than the list of them.
+        if (fromRestIn && i === fixedFrom) {
+          if (restTupleFields !== null) {
+            return {
+              kind: "recordLit",
+              fields: restTupleFields.map((f, k) => ({ name: f.name, value: slotArg(fixedFrom + k, f.type) })),
+              type: pt,
+              loc,
+            };
+          }
+          const packTo = (n: number): IrExpr => {
+            const elems = toT.params.slice(fixedFrom, n).map((_, k) => slotArg(fixedFrom + k, restElem!));
+            return pt.kind === "dyn"
+              ? { kind: "dynArrLit", elems, type: DYN, loc }
+              : { kind: "arrayLit", elems, type: pt, loc };
+          };
+          // THE PACK'S LENGTH. `args.length` is the only thing a rest
+          // parameter can see that a fixed one cannot, and the compiled
+          // slot ABI does not carry it: the one-signature contract fills
+          // every declared parameter at the call site, so an OMITTED
+          // trailing optional (`log.warn('no context')`) and an explicitly
+          // passed `undefined` arrive at this wrapper as the same
+          // undefined-armed value. Node tells them apart (1 vs 2).
+          //
+          // The trailing undefined-armed slot parameters are exactly the
+          // ones an omission can have completed, so the pack tests them at
+          // run time and stops at the last one that holds a value — which
+          // is Node's answer for the omission, the common case and the one
+          // the interface's `context?` spells. A caller that WRITES the
+          // trailing `undefined` gets the shorter pack; that divergence is
+          // the ABI's, not this adapter's, and closing it needs an arity
+          // word on every optional-param func type (IrType deliberately
+          // spells `b?: X` and `b: X | undefined` alike — types.ts, "two
+          // spellings of one type must map alike").
+          let trimFrom = toT.params.length;
+          while (trimFrom > fixedFrom && undefArmTagOf(toT.params[trimFrom - 1]!) !== null) trimFrom--;
+          let pack = packTo(trimFrom);
+          for (let j = trimFrom; j < toT.params.length; j++) {
+            const u = undefArmTagOf(toT.params[j]!)!;
+            pack = {
+              kind: "ternary",
+              cond: {
+                kind: "unionIsTag",
+                unionId: u.unionId,
+                tag: u.tag,
+                negated: false,
+                value: { kind: "varRef", localId: `a.${j}`, type: toT.params[j]!, loc },
+                type: BOOL,
+                loc,
+              },
+              then: pack,
+              else_: packTo(j + 1),
+              type: pt,
+              loc,
+            };
+          }
+          return pack;
+        }
+        if (toRestUnpack && i >= fixedTo) {
+          // Element `i - fixedTo` of the slot's own pack, read through the
+          // keyed-dyn path exactly as `args[k]` reads it inside a rest
+          // body: a present index answers its value, a missing one answers
+          // the undefined dyn value -- which is what Node binds to a
+          // parameter the call never reached.
+          return {
+            kind: "dynKeyGet",
+            key: { kind: "strLit", value: String(i - fixedTo), type: STRING, loc },
+            value: { kind: "varRef", localId: `a.${fixedTo}`, type: toT.params[fixedTo]!, loc },
+            type: DYN,
+            loc,
+          };
+        }
+        if (i >= fixedTo) {
           // An extra trailing optional param the slot omits: feed undefined,
           // wrapped into the param's own undefined-armed union.
           const u = pt as IrType & { kind: "union" };
           const tag = this.unions.get(u.unionId)!.arms.findIndex((a) => a.kind === "undefinedT");
           return { kind: "unionWrap", unionId: u.unionId, tag, value: { kind: "unitLit", unit: "undefined", type: UNDEFINED_T, loc }, type: pt, loc };
         }
-        const aRef: IrExpr = { kind: "varRef", localId: `a.${i}`, type: toT.params[i]!, loc };
-        const converted = this.coerceToExpected(aRef, pt);
-        if (!typeEquals(converted.type, pt)) throw new Error("lowerer bug: probed fn-adapter param stopped coercing");
-        return converted;
+        return slotArg(i, pt);
       });
       const call: IrExpr = {
         kind: "callValue",
