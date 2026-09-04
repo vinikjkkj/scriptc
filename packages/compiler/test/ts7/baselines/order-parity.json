@@ -10269,6 +10269,18 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/7540-an-error-subclass-whose-name-is-a-getter.ts": {
+   "order": [
+    "<repo>/tests/corpus/7540-an-error-subclass-whose-name-is-a-getter.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/7541-a-name-write-that-is-not-an-error.ts": {
+   "order": [
+    "<repo>/tests/corpus/7541-a-name-write-that-is-not-an-error.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/755-cycle-async-promise.ts": {
    "order": [
     "<repo>/tests/corpus/755-cycle-async-promise.ts"
@@ -11189,6 +11201,18 @@
   "<repo>/tests/diagnostics/enums.ts": {
    "order": [
     "<repo>/tests/diagnostics/enums.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/error-name-accessor-shapes.ts": {
+   "order": [
+    "<repo>/tests/diagnostics/error-name-accessor-shapes.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/error-name-accessor-write.ts": {
+   "order": [
+    "<repo>/tests/diagnostics/error-name-accessor-write.ts"
    ],
    "diags": []
   },

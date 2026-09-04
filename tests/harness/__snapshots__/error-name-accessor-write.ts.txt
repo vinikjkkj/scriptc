@@ -1,0 +1,31 @@
+error-name-accessor-write.ts:8:16 - error SC1090: accessors sharing a name with a field is not supported yet
+
+  7 | class Tagged extends Error {
+  8 |   override get name(): string {
+    |                ^~~~
+  9 |     return 'Tagged';
+
+error-name-accessor-write.ts:13:11 - error SC1090: constructing through a class value whose class has no lowering (the class declaration itself was rejected — see its own diagnostic) is not supported yet
+
+  12 | 
+  13 | const e = new Tagged('boom');
+     |           ^~~~~~~~~~~~~~~~~~
+  14 | const view: Error = e;
+
+error-name-accessor-write.ts:14:21 - error SC2004: uses of 'e' inherit the blocker on its declaration
+
+  13 | const e = new Tagged('boom');
+  14 | const view: Error = e;
+     |                     ^
+  15 | view.name = 'Renamed';
+
+  hint: the declaration of 'e' did not compile — fix the diagnostic reported there and these sites clear with it
+
+error-name-accessor-write.ts:16:13 - error SC2004: uses of 'e' inherit the blocker on its declaration
+
+  15 | view.name = 'Renamed';
+  16 | console.log(e.name);
+     |             ^~~~~~
+  17 | 
+
+  hint: the declaration of 'e' did not compile — fix the diagnostic reported there and these sites clear with it
