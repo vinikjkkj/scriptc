@@ -1,15 +1,17 @@
 // The static->dyn boundary COPIES arrays and records and SHARES everything
-// else. This program pins the SHARING half, and it exists because the
-// refusal that now guards the copying half must not touch it.
+// else. This program pins the SHARING half.
 //
-// Recovering an array or a record out of a value that crossed into an
-// `unknown` slot hands back a SECOND object where Node hands back the first
-// — `back === original` false, writes invisible in both directions, and a
-// write made through the original since the crossing missing from the copy.
-// All of it at exit 0 with no diagnostic, which is why it is now a loud
-// refusal (scr_dyn_static_copy_extract_refuse; the shapes that refuse are
-// pinned in tests/harness/dyn-boundary-copy-extract.test.ts, where a
-// refusing program can be compared against Node's real answer).
+// The copying half is a known open defect: recovering an array or a record
+// out of a value that crossed into an `unknown` slot hands back a SECOND
+// object where Node hands back the first — `back === original` false,
+// writes invisible in both directions, and a write made through the
+// original since the crossing missing from the copy, all of it at exit 0
+// with no diagnostic. A refusal on the recovery was tried and REVERTED: the
+// bit it can test (`static_copy`) is set on every array and record that
+// crosses, not only on the ones whose copy is ever observed, so it turned
+// 39 corpus programs that answer Node correctly today into hard errors.
+// Closing it for real needs the recovery to hand back the ORIGIN, which is
+// a representation change rather than a walker one.
 //
 // FOUR kinds cross by REFERENCE and recover as themselves, so identity and
 // mutation are already Node's for them: a class instance boxes a retained
@@ -20,10 +22,11 @@
 // does not name (`f({ a: 1 })`, which `dynCopyIsObservable` excludes on
 // purpose: nothing can observe that copy).
 //
-// Every line here answered correctly BEFORE the refusal existed. The point
-// is that they still do: a guard planted at the boundary is one wrong `&&`
-// away from refusing the four kinds that were never wrong, and that failure
-// mode is silent in the corpus unless something asserts against it.
+// Every line here answers correctly today, and the point is that whatever
+// eventually closes the copying half leaves them alone: a guard planted at
+// the boundary is one wrong `&&` away from refusing the six receivers that
+// were never wrong, and that failure mode is silent in the corpus unless
+// something asserts against it.
 
 class Box {
     public n = 1

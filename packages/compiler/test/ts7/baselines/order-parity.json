@@ -10122,12 +10122,6 @@
    ],
    "diags": []
   },
-  "<repo>/tests/corpus/7460-by-reference-kinds-survive-the-unknown-round-trip.ts": {
-   "order": [
-    "<repo>/tests/corpus/7460-by-reference-kinds-survive-the-unknown-round-trip.ts"
-   ],
-   "diags": []
-  },
   "<repo>/tests/corpus/750-cycle-closure-box.ts": {
    "order": [
     "<repo>/tests/corpus/750-cycle-closure-box.ts"
