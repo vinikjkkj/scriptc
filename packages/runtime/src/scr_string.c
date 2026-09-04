@@ -94,6 +94,20 @@ static ScrSidx *scr_sidx(const ScrStr *s) {
 #define SCR_STR_CHAIN_SLACK 8
 #endif
 
+/* The arena's counters, tests/perf/cycstat/scr_cyc_stat.h's, which already
+ * carries the cycle arena's five. With that header absent every hook below
+ * is nothing at all, so an uninstrumented build carries no instruction of
+ * it -- the same contract scr_cycle.c states for the same macros. They are
+ * the POSITIVE CONTROL for this arena: a carve is invisible to any malloc
+ * interposer, because no malloc happens, so "the residency profile moved"
+ * and "the arena ran" are two claims and only one of them has a counter. */
+#ifndef SCR_CS_BUMP
+#define SCR_CS_BUMP(which) ((void)0)
+#endif
+#ifndef SCR_CS_ARM
+#define SCR_CS_ARM() ((void)0)
+#endif
+
 /* ── allocation ─────────────────────────────────────────────────────── */
 
 /* Blocks freed by scr_str_release come back here instead of going to the
@@ -115,6 +129,187 @@ __attribute__((constructor)) static void scr_poolstat_reg_string(void) {
 }
 #endif
 
+/* 512, MEASURED, not chosen. On the real zapo messaging bench, memory store,
+ * six runs per arm pooled over both halves of a palindrome arm order (so the
+ * per-arm mean position, and with it the 11.1% cycle drift across a rep, is
+ * identical for every arm):
+ *
+ *     arena off, growth 0   191.93 MiB peak working set   (this is main)
+ *     arena on,  growth 0   183.21   -8.71
+ *     arena on,  growth 512 178.07  -13.85
+ *
+ * with an A/A floor of 0.43% on peak RSS taken from the SAME session, and
+ * six-phase cycles at 0.9478 against a cycle floor of 11.1% -- i.e. no cycle
+ * claim in either direction.
+ *
+ * WHY THE THRESHOLD IS SAFE, as a bound rather than as a benchmark. Above
+ * 512 bytes nothing changes at all: both geometric arms still apply, so an
+ * accumulator is amortized exactly as it is today. Below 512 a result falls
+ * to the SCR_STR_CHAIN_SLACK arm and grows by a constant instead, so a
+ * string built from empty pays at most 512/SCR_STR_CHAIN_SLACK = 64 extra
+ * reallocations and 512^2/(2*8) = 16 KiB of extra copying on its way to the
+ * threshold, once, and nothing after it. That is the whole worst case.
+ *
+ * WHAT IT BUYS, from the census rather than from the delta: 93.70% of the
+ * live heap strings at the bench's high-water mark carry capacity 50 for a
+ * payload of about 28 bytes, and every one of those 22 slack bytes comes
+ * from the `a->rc == 1` arm below firing on a 28-byte result. The arm was
+ * measured on CHURN and had never been priced against RETENTION. */
+#ifndef SCR_STR_GROWTH_MIN
+#define SCR_STR_GROWTH_MIN 512
+#endif
+
+/* The minimum RESULT LENGTH at which the geometric arms apply. 0 = always,
+ * which is the shipped behaviour. A threshold is the interesting shape and a
+ * boolean is not: the arms exist to amortize APPEND LOOPS, and an append
+ * loop is large by the time it matters, while the population this costs is
+ * 28 bytes long. Gating on length keeps the amortization where it pays and
+ * removes the slack where it is only retained.
+ *
+ * SCR_STRING_GROWTH=0 is kept as the spelling for "never", because the first
+ * measurement in this block used it and the two arms have to stay
+ * comparable. SCR_STRING_SLACK overrides SCR_STR_CHAIN_SLACK the same way,
+ * so ONE image can hold every point on the curve. */
+static size_t scr_str_growth_min(void) {
+  static int done = 0;
+  static size_t cached = 0;
+  if (!done) {
+    const char *env = getenv("SCR_STRING_GROWTH_MIN");
+    const char *off = getenv("SCR_STRING_GROWTH");
+    done = 1;
+    cached = (size_t)SCR_STR_GROWTH_MIN;
+    if (env != NULL) cached = (size_t)strtoull(env, NULL, 10);
+    else if (off != NULL && strtol(off, NULL, 10) == 0) cached = (size_t)-1;
+  }
+  return cached;
+}
+
+static size_t scr_str_slack(void) {
+  static int done = 0;
+  static size_t cached = 0;
+  if (!done) {
+    const char *env = getenv("SCR_STRING_SLACK");
+    done = 1;
+    cached = env != NULL ? (size_t)strtoull(env, NULL, 10)
+                         : (size_t)SCR_STR_CHAIN_SLACK;
+  }
+  return cached;
+}
+
+/* ── the string block arena ───────────────────────────────────────────
+ * The pool above recycles blocks; it does not change where a block COMES
+ * FROM, and on the real messaging bench that is where the bytes are.
+ * Residency-profiled there, this file's malloc is the #1 live-heap site,
+ * and ScrStr's header is already 12 bytes — the header is not what is
+ * left. THE COUNT OF CRT BLOCKS IS: every malloc'd block carries the
+ * allocator's own per-block cost, which on this target is an 8-byte header
+ * rounded to a 16-byte grain, i.e. 8 or 16 bytes on top of a request that
+ * is already a multiple of SCR_POOL_GRAIN. Twelve bytes on average, on a
+ * population whose mean physical block is under 60. That term is in no
+ * header this file controls.
+ *
+ * So the pool miss carves out of 64 KiB chunks instead. This is
+ * scr_cycle.c's arena, ported, and it can be simpler in exactly one way
+ * that matters:
+ *
+ *   PROVENANCE NEEDS NO BIT, because it is a FUNCTION OF `cap`. The arena
+ *   serves exactly the class range the pool serves — scr_pool_bytes(want)
+ *   in [SCR_POOL_GRAIN, SCR_POOL_MAX] — and every block in that range
+ *   comes from here. `cap` is the field the size was computed from at
+ *   birth and the field scr_str_release recomputes the class from at
+ *   death, so the two cannot disagree: the same predicate that decides
+ *   "the pool may hold this" decides "this must never reach free()".
+ *   scr_cycle.c had to spend ScrCycHdr::pad on the question because a
+ *   cycle block's size is not recoverable from any field the object
+ *   itself carries; a string's is.
+ *
+ *   The one place the invariant could be broken is scr_str_regrow, which
+ *   is a realloc. It is redirected to copy-and-give for a carved block —
+ *   see the comment there.
+ *
+ * NO ARENA HEADER, and BLOCKS NEVER MIGRATE between classes: the free list
+ * is indexed by the same class the pool's is, so a block handed back is
+ * handed out at exactly its own width. The carve stride is the physical
+ * size itself, already a multiple of SCR_POOL_GRAIN (8) — enough for the
+ * free-list link that lives in the block's first word and for ScrStr's own
+ * 4-byte fields. The arena does not return chunks; the < 256 B tail of a
+ * chunk that cannot fit the next stride is abandoned (0.4% at worst).
+ *
+ * OFF UNDER SCR_RC_AUDIT for exactly the reason the pool is: that lane
+ * exists to prove every logical free is a real free, and ASan can only see
+ * that if the free reaches the CRT.
+ *
+ * SCR_STRING_ARENA=0 restores the malloc. It is an env knob, not a build
+ * flag, so both arms are the same binary — and it is read once and cached,
+ * so it cannot change between a block's birth and its death. */
+#ifndef SCR_STR_ARENA
+#define SCR_STR_ARENA 1
+#endif
+#ifndef SCR_STR_ARENA_CHUNK
+#define SCR_STR_ARENA_CHUNK ((size_t)64 << 10)
+#endif
+
+/* Compiled out entirely in the audit lane, exactly like scr_str_spare below
+ * and for the same reason, so that lane carries no instruction of it. */
+#ifndef SCR_RC_AUDIT
+
+/* One list per SCR_POOL_GRAIN class. Index r / SCR_POOL_GRAIN, 1..CLASSES. */
+static void *scr_str_ar_free[SCR_POOL_CLASSES + 1];
+static unsigned char *scr_str_ar_cur;
+static unsigned char *scr_str_ar_lim;
+
+static int scr_str_arena_on(void) {
+  static int cached = -1;
+  /* Armed HERE and not at the carve: this is called on every pool miss in
+   * the class range whatever the knob answers, so an arm with the arena OFF
+   * still writes a report -- and that report says STRING ARENA NEVER CARVED
+   * rather than saying nothing at all. An instrument that is silent in the
+   * arm it is supposed to refute is not an instrument. */
+  SCR_CS_ARM();
+  if (cached < 0) {
+    const char *env = getenv("SCR_STRING_ARENA");
+    cached = env != NULL ? (strtol(env, NULL, 10) != 0) : (SCR_STR_ARENA != 0);
+  }
+  return cached;
+}
+
+/* NULL when the chunk could not be had; the caller falls back to malloc, so
+ * a failure here is a slower program and not a broken one. A block that
+ * came from that fallback still reaches scr_str_ar_give at death — it is
+ * never handed to free(), which is safe (it is reused from the free list
+ * forever) and is the only shape in which the cap predicate can be wrong
+ * about where a block came from. */
+static void *scr_str_ar_take(size_t r) {
+  size_t c = r / SCR_POOL_GRAIN;
+  void *b = scr_str_ar_free[c];
+  SCR_CS_ARM();
+  if (b != NULL) {
+    __builtin_memcpy(&scr_str_ar_free[c], b, sizeof(void *));
+    SCR_CS_BUMP(sarhit);
+    return b;
+  }
+  if ((size_t)(scr_str_ar_lim - scr_str_ar_cur) < r) {
+    unsigned char *k = (unsigned char *)malloc(SCR_STR_ARENA_CHUNK);
+    if (k == NULL) return NULL;
+    scr_str_ar_cur = k;
+    scr_str_ar_lim = k + SCR_STR_ARENA_CHUNK;
+    SCR_CS_BUMP(sarchunk);
+  }
+  b = scr_str_ar_cur;
+  scr_str_ar_cur += r;
+  SCR_CS_BUMP(sarcarve);
+  return b;
+}
+
+static void scr_str_ar_give(void *b, size_t r) {
+  size_t c = r / SCR_POOL_GRAIN;
+  __builtin_memcpy(b, &scr_str_ar_free[c], sizeof(void *));
+  scr_str_ar_free[c] = b;
+  SCR_CS_BUMP(sargive);
+}
+
+#endif /* !SCR_RC_AUDIT */
+
 static ScrStr *scr_str_alloc(size_t len, size_t cap) {
   /* The one fence every heap string passes through. len <= cap at every call
    * site, but checking both costs one predictable branch and makes the
@@ -125,7 +320,16 @@ static ScrStr *scr_str_alloc(size_t len, size_t cap) {
   ScrStr *s = scr_pool_take(&scr_str_blocks, want);
   /* scr_pool_bytes, not want: a recycled block is a whole class wide and
    * the class is what give() will put it back into. */
-  if (!s) s = malloc(scr_pool_bytes(want));
+  if (!s) {
+    size_t r = scr_pool_bytes(want);
+#ifndef SCR_RC_AUDIT
+    if (r <= SCR_POOL_MAX && r != 0 && scr_str_arena_on()) {
+      s = (ScrStr *)scr_str_ar_take(r);
+      if (!s) SCR_CS_BUMP(sarmalloc);
+    }
+#endif
+    if (!s) s = malloc(r);
+  }
   if (!s) scr_oom();
   s->rc = 1;
   s->len = (uint32_t)len;
@@ -192,11 +396,33 @@ ScrStr *scr_str_alloc_raw(size_t len, size_t cap) {
 }
 
 ScrStr *scr_str_regrow(ScrStr *s, size_t newcap) {
+  scr_str_size_check(newcap); /* realloc, not scr_str_alloc: its own fence */
+  /* A CARVED BLOCK CANNOT BE realloc'd — it did not come from the CRT. The
+   * test is the same predicate the allocation used, over the same field, so
+   * it cannot disagree with where the block came from. This is not a rare
+   * path: scr_jb_grow's first buffer is `scr_jb_hint` bytes, 64 at startup,
+   * which is squarely inside the arena's range, and it doubles from there.
+   *
+   * `s->cap + 1` bytes are copied, not `s->len`: the JSON builder holds its
+   * own length and leaves ScrStr::len at 0 for the whole build, so a copy
+   * sized from len would silently truncate every stringify. realloc copied
+   * the whole block; so does this. */
+#ifndef SCR_RC_AUDIT
+  if (scr_str_arena_on() &&
+      scr_pool_bytes(sizeof(ScrStr) + (size_t)s->cap + 1) <= SCR_POOL_MAX) {
+    ScrStr *g = scr_str_alloc(s->len, newcap);
+    size_t n = (size_t)s->cap < newcap ? (size_t)s->cap : newcap;
+    memcpy(g->data, s->data, n + 1);
+    /* Runs the sidx purge and both census hooks on its own; the contract is
+     * rc == 1, so this is the free the realloc would have done. */
+    scr_str_release(s);
+    return g;
+  }
+#endif
   scr_sidx_purge(s); /* realloc may move; the old address may be recycled */
 #ifdef SCR_STRCEN_ON
   scr_strcen_died(s, (long long)s->len, (long long)s->cap);
 #endif
-  scr_str_size_check(newcap); /* realloc, not scr_str_alloc: its own fence */
   ScrStr *r = realloc(s, scr_pool_bytes(sizeof(ScrStr) + newcap + 1));
   if (!r) scr_oom();
   r->cap = (uint32_t)newcap;
@@ -221,6 +447,17 @@ void scr_str_release(ScrStr *s) {
      * block below covers the large end (>= 512), and the two ranges do
      * not overlap, so neither can steal the other's blocks. */
     if (scr_pool_give(&scr_str_blocks, s, sizeof(ScrStr) + s->cap + 1)) return;
+    /* The pool refused: either the block is out of its class range, or its
+     * byte budget is full. In the SECOND case a carved block would reach
+     * free() — so the arena's own list catches it first. The predicate is
+     * `cap`, exactly as at birth. */
+    if (scr_str_arena_on()) {
+      size_t r = scr_pool_bytes(sizeof(ScrStr) + (size_t)s->cap + 1);
+      if (r != 0 && r <= SCR_POOL_MAX) {
+        scr_str_ar_give(s, r);
+        return;
+      }
+    }
     if (s->cap >= 512) {
       ScrStr *old = scr_str_spare;
       scr_str_spare = s;
@@ -263,10 +500,11 @@ ScrStr *scr_str_concat(ScrStr *a, ScrStr *b) {
    * the slack is what lets the free-block cache above satisfy the next
    * iteration's slightly-larger allocation). */
   size_t newcap = newlen;
-  if (a->rc == 1) {
+  size_t gmin = scr_str_growth_min();
+  if (a->rc == 1 && newlen >= gmin) {
     size_t grown = (size_t)a->cap + ((size_t)a->cap >> 1) + 16;
     if (grown > newcap) newcap = grown;
-  } else if (newlen >= 512 && newlen <= SCR_STR_MAX_LEN / 2) {
+  } else if (newlen >= 512 && newlen <= SCR_STR_MAX_LEN / 2 && newlen >= gmin) {
     newcap = newlen + (newlen >> 1);
   }
 #if SCR_STR_CHAIN_SLACK
@@ -277,7 +515,7 @@ ScrStr *scr_str_concat(ScrStr *a, ScrStr *b) {
      sole-reference temp. A small constant slack on short results is what
      lets it. The messaging profile's SEND group is exactly this shape
      (`members[m] + "|" + seq`). Measured, not assumed - see the ablation. */
-  else if (newlen < 512) newcap = newlen + SCR_STR_CHAIN_SLACK;
+  else if (newlen < 512) newcap = newlen + scr_str_slack();
 #endif
   /* Slack is an optimisation and is never worth a trap: a result that fits
    * but whose SLACK would not is allocated exact. */
