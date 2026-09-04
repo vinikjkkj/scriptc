@@ -5670,6 +5670,17 @@ ScrDyn *scr_dyn_call(const ScrDyn *d, ScrDyn *const *args, size_t argc, const ch
  * `f(...args)` after the emitted argument array is built): argv IS the
  * array's items. Borrows both; result owned (+1), or NULL pending. */
 ScrDyn *scr_dyn_apply(const ScrDyn *d, const ScrDyn *args, const char *what);
+/* scr_dyn_apply's shape for a caller that holds the CLOSURE and its thunk
+ * rather than the whole dyn value -- the checked-dynamic function
+ * adapter, whose captures are exactly those two (a traced FUNC box and
+ * the call descriptor, so a ring through the adapter stays collectable).
+ * It exists because an adapter whose TARGET spells a rest parameter
+ * receives the call's arguments already PACKED into one dyn array, and
+ * the thunk underneath wants them positionally: `argv` IS the array's
+ * items, so the spread costs nothing and needs no allocation. Entries are
+ * BORROWED; the result is owned (+1), or NULL with the exception pending.
+ */
+ScrDyn *scr_dyn_thunk_apply(ScrClosure *clo, ScrDynThunk thunk, const ScrDyn *args);
 
 /* Path spine for dynCheck error messages — a compile-time-shaped linked
  * list the emitted builders stack-allocate per recursion level: `key`

@@ -32,7 +32,7 @@
  *   ScrDynPath { parent, key, index } — the %ScrDynPath type. */
 import type { IrFunction, IrRecordShape, IrType } from "../../ir/nodes.js";
 import { bytesAliasOnExtract } from "../../ir/nodes.js";
-import { armDiscrimLits, canAdaptDynFuncTo, canBoxFuncIntoDyn, dynCheckArmOrder, internalSlotFields, isUndefinedArmedUnion, slotStorageKey, unionHasDiscrim, DYN_BYTES_KINDS, DYN_HANDLE_KINDS, isRefCounted, strandedFuncReason, typeKey } from "../../ir/nodes.js";
+import { armDiscrimLits, canAdaptDynFuncTo, dynRestApplyable, canBoxFuncIntoDyn, dynCheckArmOrder, internalSlotFields, isUndefinedArmedUnion, slotStorageKey, unionHasDiscrim, DYN_BYTES_KINDS, DYN_HANDLE_KINDS, isRefCounted, strandedFuncReason, typeKey } from "../../ir/nodes.js";
 import { nullProtoRule, OWNMASK_SRC_NULL_PROTO, OWNMASK_VALID, ownMaskKeyBit as maskKeyBit } from "../../ir/nodes.js";
 import { INTERNAL_SLOT_WANT_TEXT } from "../emission/emit-walkers.js";
 import { mangleClassRelease, mangleClassRetain, mangleClassStruct, mangleFunction, mangleRecordNew, mangleRecordStruct } from "../mangle.js";
@@ -2123,8 +2123,19 @@ export class LlDyn {
           B.terminate(`ret ptr null`);
           break;
         }
-        if (!canAdaptDynFuncTo(t, (id: string) => host.recordsById.get(id), (id: string) => host.unionsById.get(id))) {
-          B.line(`call void @scr_dyn_check_fail(ptr %path, ptr ${want}, ptr %d)`);
+        // A TARGET with a SPELLED rest slot whose boxed signature is not
+        // the same one: the adapter's single parameter IS the packed array
+        // and the thunk wants positional arguments, so the pack would have
+        // to be SPREAD at the adapter's own runtime arity — which its
+        // fixed-size argument vector cannot express. The C lane refuses
+        // here for the same reason and with the same wording; the
+        // exact-signature fast path above is untouched.
+        if ((t.restIn === true && !dynRestApplyable(t)) ||
+            !canAdaptDynFuncTo(t, (id: string) => host.recordsById.get(id), (id: string) => host.unionsById.get(id))) {
+          const w = t.restIn === true
+            ? host.cstr(`function with a rest parameter behind fixed ones (only a value boxed at the identical signature '${key}' can fill it — the pack would have to be prepended to the fixed arguments)`)
+            : want;
+          B.line(`call void @scr_dyn_check_fail(ptr %path, ptr ${w}, ptr %d)`);
           B.terminate(`ret ptr null`);
           break;
         }
@@ -4403,7 +4414,73 @@ export class LlDyn {
     const host = this.host;
     const B = new BlockBuilder();
     const argNames: string[] = [];
+    // The LAST parameter of a restIn signature IS the pack (`...args:
+    // unknown[]`), not a positional: the call's arguments from that index
+    // on go INTO it. Taking args[L] alone bound the callee's `args` to the
+    // first argument, so `args.length` read the first argument's length —
+    // the C lane's dynFuncThunkHelper carries the same rule and the same
+    // note.
+    const restInAt = t.restIn === true ? t.params.length - 1 : -1;
     t.params.forEach((p, i) => {
+      if (i === restInAt) {
+        host.declare(`declare ptr @scr_dyn_new_arr()`);
+        host.declare(`declare void @scr_dyn_arr_push(ptr, ptr)`);
+        const rp = B.tmp();
+        B.line(`${rp} = call ptr @scr_dyn_new_arr()`);
+        const riSlot = B.slot();
+        B.entryAllocas.push(`${riSlot} = alloca i64`);
+        B.line(`store i64 ${i}, ptr ${riSlot}`);
+        const lc = B.newLabel("dfk.pc");
+        const lb = B.newLabel("dfk.pb");
+        const le = B.newLabel("dfk.pe");
+        B.br(lc);
+        B.startBlock(lc);
+        const ri = B.tmp();
+        const cont = B.tmp();
+        B.line(`${ri} = load i64, ptr ${riSlot}`);
+        B.line(`${cont} = icmp ult i64 ${ri}, %argc`);
+        B.condBr(cont, lb, le);
+        B.startBlock(lb);
+        const pap = B.tmp();
+        const pav = B.tmp();
+        B.line(`${pap} = getelementptr inbounds ptr, ptr %args, i64 ${ri}`);
+        B.line(`${pav} = load ptr, ptr ${pap}`);
+        const prv = this.retainDyn(B, pav);
+        B.line(`call void @scr_dyn_arr_push(ptr ${rp}, ptr ${prv})`);
+        const ri2 = B.tmp();
+        B.line(`${ri2} = add i64 ${ri}, 1`);
+        B.line(`store i64 ${ri2}, ptr ${riSlot}`);
+        B.br(lc);
+        B.startBlock(le);
+        if (p.kind === "dyn") {
+          argNames.push(rp);
+        } else {
+          // A TYPED rest slot (`...xs: string[]`) keeps its element check:
+          // the pack is validated through the array's own dynCheck.
+          const pathSlot = B.slot();
+          B.entryAllocas.push(`${pathSlot} = alloca %ScrDynPath`);
+          const pp = B.tmp();
+          const kp2 = B.tmp();
+          const ip = B.tmp();
+          B.line(`${pp} = getelementptr inbounds %ScrDynPath, ptr ${pathSlot}, i64 0, i32 0`);
+          B.line(`store ptr null, ptr ${pp}`);
+          B.line(`${kp2} = getelementptr inbounds %ScrDynPath, ptr ${pathSlot}, i64 0, i32 1`);
+          B.line(`store ptr null, ptr ${kp2}`);
+          B.line(`${ip} = getelementptr inbounds %ScrDynPath, ptr ${pathSlot}, i64 0, i32 2`);
+          B.line(`store i64 ${i}, ptr ${ip}`);
+          const a = B.tmp();
+          B.line(`${a} = call ${this.valTy(p)} @${this.dynCheckHelper(p)}(ptr ${rp}, ptr ${pathSlot})`);
+          host.declare(`declare void @scr_dyn_release(ptr)`);
+          B.line(`call void @scr_dyn_release(ptr ${rp})`);
+          this.pendingBail(B, "dfk", () => {
+            t.params.slice(0, i).forEach((q, j) => {
+              if (isRefCounted(q)) B.line(`call void ${releaseSym(host, q)}(ptr ${argNames[j]})`);
+            });
+          }, "ptr null");
+          argNames.push(a);
+        }
+        return;
+      }
       // JS arity: a missing argument IS the undefined dyn value.
       const adSlot = B.slot();
       B.entryAllocas.push(`${adSlot} = alloca ptr`);
@@ -4855,6 +4932,37 @@ export class LlDyn {
     B.line(`${capp1} = getelementptr inbounds ptr, ptr ${capp}, i64 1 ; caps[1]`);
     B.line(`${tbox} = load ptr, ptr ${capp1}`);
     B.line(`${thunk} = call ptr @scr_box_get_thunk_fn(ptr ${tbox})`);
+    // A REST target whose pack IS the whole argument list: the pack's own
+    // items are the positional vector the boxed thunk wants, so the
+    // SPREAD is one call and no allocation (scr_dyn_thunk_apply, and the
+    // C lane's dynFuncAdapterHelper carries the same note). The adapter
+    // still owns and releases the pack.
+    if (dynRestApplyable(t)) {
+      host.declare(`declare ptr @scr_dyn_thunk_apply(ptr, ptr, ptr)`);
+      const ar = B.tmp();
+      B.line(`${ar} = call ptr @scr_dyn_thunk_apply(ptr ${fnv}, ptr ${thunk}, ptr %a0)`);
+      B.line(`call void @scr_closure_release(ptr ${fnv})`);
+      B.line(`call void @scr_dyn_release(ptr %a0)`);
+      this.pendingBail(B, "dfa", () => {}, dummy === "void" ? "void" : dummy);
+      if (t.ret.kind === "void") {
+        B.line(`call void @scr_dyn_release(ptr ${ar})`);
+        B.terminate(`ret void`);
+      } else if (t.ret.kind === "dyn") {
+        B.terminate(`ret ptr ${ar}`);
+      } else {
+        const aout = B.tmp();
+        B.line(`${aout} = call ${this.valTy(t.ret)} @${this.dynCheckHelper(t.ret)}(ptr ${ar}, ptr null)`);
+        B.line(`call void @scr_dyn_release(ptr ${ar})`);
+        B.terminate(`ret ${this.valTy(t.ret)} ${aout}`);
+      }
+      this.defs.push(
+        `define internal ${retTy === "i1" ? "zeroext i1" : retTy} @${name}(ptr %sc_env, ptr %a0) ${FN_ATTRS} { ; dyn fn adapter to ${key}`,
+        B.render(),
+        `}`,
+        ``,
+      );
+      return name;
+    }
     // The adapter OWNS its params (closure ABI); each converts to a dyn
     // argument (borrowed by the conversion) and releases.
     let argsPtr = "null";
