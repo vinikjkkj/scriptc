@@ -1,6 +1,6 @@
 import * as ts from "./ts7/adapter.js";
 import type { IrBuiltinRendering, IrRecordShape, IrType, IrUnionDef } from "../ir/nodes.js";
-import { BYTES_ELEM_NAMES, ABORTCONTROLLER_T, ABORTSIGNAL_T, BIGINT, HEADERS_T, REQUEST_T, REQUESTINIT_T, RESPONSE_T, arrayOf, BOOL, bytesOf, canConvertToDyn, CHILD_T, DYN, F64, funcOf, isSupportedIndexValue, isSupportedMapKey, isSupportedMapValue, isSupportedSetElem, isUnitType, JSVAL, mapOf, NULL_T, PROCSTREAM_T, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, setOf, STRING, SYMBOL_T, typeEquals, typeKey, UNDEFINED_T, VOID } from "../ir/nodes.js";
+import { BYTES_ELEM_NAMES, ABORTCONTROLLER_T, ABORTSIGNAL_T, BIGINT, HEADERS_T, REQUEST_T, REQUESTINIT_T, RESPONSE_T, arrayOf, BOOL, bytesOf, canConvertToDyn, CHILD_T, DYN, F64, funcOf, isSupportedIndexValue, isSupportedMapKey, isSupportedMapValue, isSupportedSetElem, isUnitType, JSVAL, mapOf, NULL_T, PROCSTREAM_T, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, setOf, STRING, SYMBOL_T, typeEquals, typeKey, UNDEFINED_T, unionFuncSetArmsOk, VOID } from "../ir/nodes.js";
 
 import { isJsSourceFile } from "./program.js";
 import { isSqliteTypesPath } from "./shared.js";
@@ -5868,7 +5868,24 @@ export function erasedUnionOfArms(arms: readonly ts.Type[], ctx: TypeMapperCtx):
     } else byKey.set(typeKey(m), m);
   }
   const distinct = [...byKey.entries()].sort(([x], [y]) => (x < y ? -1 : x > y ? 1 : 0)).map(([, t]) => t);
-  return distinct.length === 1 ? distinct[0]! : { kind: "union", unionId: ctx.unions.intern(distinct) };
+  if (distinct.length === 1) return distinct[0]!;
+  // A union is not a bag of types: the validator's own membership rules
+  // decide what may sit beside what, and an instantiation set is free to
+  // contain things no union holds (zapo's stores return a Map from one
+  // transaction and an array from another — "map arm beside non-unit
+  // arms"). Checked HERE, against the same predicate the validator uses,
+  // so an illegal set is a REFUSAL at the erasure and never an ICE three
+  // passes later.
+  for (const arm of distinct) {
+    if (arm.kind === "void" || arm.kind === "union" || arm.kind === "dyn" || arm.kind === "jsval" ||
+        arm.kind === "generator" || arm.kind === "asyncGenerator") {
+      return null;
+    }
+    if ((arm.kind === "func" || arm.kind === "set" || arm.kind === "map") && !unionFuncSetArmsOk(distinct)) {
+      return null;
+    }
+  }
+  return { kind: "union", unionId: ctx.unions.intern(distinct) };
 }
 
 function constraintErasedCtx(sig: ts.Signature, ctx: TypeMapperCtx): TypeMapperCtx | null {
