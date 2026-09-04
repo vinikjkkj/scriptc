@@ -5860,11 +5860,11 @@ export function erasedUnionOfArms(arms: readonly ts.Type[], ctx: TypeMapperCtx):
   const byKey = new Map<string, IrType>();
   for (const m of mapped) {
     if (m.kind === "union") {
-      const arms = ctx.unions.get(m.unionId)?.arms ?? [];
+      const inner = ctx.unions.get(m.unionId)?.arms ?? [];
       // A union id with no arms is a placeholder nothing finalized; keeping
       // a reference to one is the empty-union the validator rejects.
-      if (arms.length === 0) return null;
-      for (const a of arms) byKey.set(typeKey(a), a);
+      if (inner.length === 0) return null;
+      for (const a of inner) byKey.set(typeKey(a), a);
     } else byKey.set(typeKey(m), m);
   }
   const distinct = [...byKey.entries()].sort(([x], [y]) => (x < y ? -1 : x > y ? 1 : 0)).map(([, t]) => t);
