@@ -5662,6 +5662,16 @@ export type IrLibFn =
    * map to 1900+year, out-of-range months/dates roll over, non-finite
    * parts and out-of-range results answer NaN. Never throws. */
   | "date.utc"
+  /** The composed `new Date(ms?).getHours()` read — the first LOCAL-time
+   * field on this surface, and the reason it is separate from every UTC
+   * entry above: it is not a pure function of its milliseconds. The
+   * runtime asks the HOST's zone database for the offset AT THAT INSTANT
+   * (so DST and historical changes are the platform's answer, exactly as
+   * Node takes ICU's), then reads HourFromTime of the shifted value: an
+   * f64 in 0..23. NaN for NaN / out-of-range ms, and for an instant the
+   * platform's `localtime` cannot express (the declared divergence in
+   * scr_lib.c). Never throws. */
+  | "date.getHours"
   /** The fs option forms and friends (scr_lib.c), all throwing catchably
    * like the rest of sync fs. mkdirRecursiveSync is Node's recursive
    * algorithm (try mkdir, EEXIST-dir is fine, ENOENT creates the parent

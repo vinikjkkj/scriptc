@@ -7467,6 +7467,11 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             return finish(
               `scr_date_utc(${arg(0)}, ${arg(1)}, ${arg(2)}, ${arg(3)}, ${arg(4)}, ${arg(5)}, ${arg(6)})`,
             );
+          case "date.getHours":
+            // HourFromTime(LocalTime(t)) through the HOST's zone
+            // database; NaN outside Date's range or the platform's
+            // time_t. Never throws.
+            return finish(`scr_date_get_hours(${arg(0)})`);
           case "text.decode":
             // WHATWG utf-8 decode with the leading BOM stripped
             // (scr_bytes.c). Borrowed bytes; +1 string; never throws.
