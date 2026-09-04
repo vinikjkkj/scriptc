@@ -4175,6 +4175,11 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
       params: sig.params.filter((p) => p.mode !== "dynRest").map((p) => p.type),
       ret: sig.ret,
       ...(sig.params.some((p) => p.mode === "dynRest") ? { rest: true as const } : {}),
+      // A SPELLED rest slot: the value's last parameter IS the pack, and
+      // the func type must say so or a fixed-arity slot binds the first
+      // argument where the array belongs (IrType.restIn; lambdaSignature
+      // marks the literal side of the same fact).
+      ...(sig.params.some((p) => p.mode === "rest") ? { restIn: true as const } : {}),
     };
     L.requireExactArityValue(blame, blame, sig.params, funcType);
     return { kind: "closure", fnName, captures: [], type: funcType, loc };
