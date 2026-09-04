@@ -10263,6 +10263,18 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/7530-string-block-recycling-across-the-arena-boundary.ts": {
+   "order": [
+    "<repo>/tests/corpus/7530-string-block-recycling-across-the-arena-boundary.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/7531-string-append-accumulator-across-the-growth-threshold.ts": {
+   "order": [
+    "<repo>/tests/corpus/7531-string-append-accumulator-across-the-growth-threshold.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/754-cycle-external-ref.ts": {
    "order": [
     "<repo>/tests/corpus/754-cycle-external-ref.ts"
