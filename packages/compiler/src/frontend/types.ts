@@ -5935,6 +5935,43 @@ export function erasedUnionOfArms(arms: readonly ts.Type[], ctx: TypeMapperCtx):
   return { kind: "union", unionId: ctx.unions.intern(distinct) };
 }
 
+/** The constraint a type parameter carries AT THIS SIGNATURE, which is not
+ * always the type its declaration's `extends` clause spells.
+ *
+ * A member of a GENERIC type reached through an instantiation
+ * (`Client<TP = {}>['on']`) hands back an INSTANTIATED signature — its
+ * parameter and return types have `TP` substituted — while the type
+ * parameter's own declaration node is still the one written inside the
+ * generic declaration, where `TP` is abstract. Resolving that node answers
+ * `keyof Events | keyof TP`, an index type over an open parameter that no
+ * representation maps; the member then leaves every record shape it appears
+ * in, and every call of it through an interface-typed receiver refuses for
+ * a constraint the program never had. zapo-js's `WaClientPluginContext.on`
+ * (declared `readonly on: WaClient['on']`, where
+ * `WaClient<TPluginEvents = {}>` redeclares `on<K extends keyof
+ * (WaClientEventMap & TPluginEvents)>`) is exactly that shape, and it is
+ * why @zapo-js/wam's 14 `on`/`off` subscriptions did not compile.
+ *
+ * The declaration keeps the question it actually answers — was a constraint
+ * WRITTEN — because the checker query answers undefined both for "no
+ * constraint" and for a parameter that carries only a default, and those
+ * two must not collapse (the learned-arms path below depends on telling
+ * them apart). Only when a constraint was written is the checker's
+ * instantiated answer preferred, and a checker that declines (or panics)
+ * leaves the previous behaviour exactly in place. */
+export function instantiatedConstraint(
+  checker: ts.TypeChecker,
+  tp: ts.Type,
+  tpDecl: ts.TypeParameterDeclaration | undefined,
+  src: ts.TypeNode,
+): ts.Type {
+  if (tpDecl?.constraint !== undefined) {
+    const instantiated = checker.constraintOfTypeParameter(tp);
+    if (instantiated !== undefined) return instantiated;
+  }
+  return checker.getTypeFromTypeNode(src);
+}
+
 function constraintErasedCtx(sig: ts.Signature, ctx: TypeMapperCtx): TypeMapperCtx | null {
   const why = (r: string): null => {
     if (process.env["SCRIPTC_ERASE_WHY"] !== undefined) console.error(`[erasewhy] ${r}`);
@@ -5942,9 +5979,10 @@ function constraintErasedCtx(sig: ts.Signature, ctx: TypeMapperCtx): TypeMapperC
   };
   const tps = sig.getTypeParameters();
   if (!tps || tps.length === 0) return why("no type params");
-  // The constraint is read off the DECLARATION (the idiom
+  // WHETHER a constraint was written is read off the DECLARATION (the idiom
   // constraintTypeParamBindings uses): a base-constraint query widens a
-  // bare parameter instead of answering that it has none.
+  // bare parameter instead of answering that it has none. WHAT the
+  // constraint is comes from the checker — see instantiatedConstraint.
   const sigDecl = ctx.checker.signatureDeclaration(sig);
   const tpDecls = sigDecl !== undefined && ts.isFunctionLike(sigDecl) ? sigDecl.typeParameters : undefined;
   if (tpDecls === undefined || tpDecls.length !== tps.length) return why("no tp declarations");
@@ -5998,7 +6036,7 @@ function constraintErasedCtx(sig: ts.Signature, ctx: TypeMapperCtx): TypeMapperC
       tsArmsByTp.set(tp, arms);
       continue;
     }
-    const constraint = ctx.checker.getTypeFromTypeNode(src);
+    const constraint = instantiatedConstraint(ctx.checker, tp, tpDecl, src);
     const mapped = mapType(constraint, ctx);
     if (!mapped || mapped.kind === "void") return why(`constraint does not map: ${ctx.checker.typeToString(constraint).slice(0,60)}`);
     irByTp.set(tp, mapped);
