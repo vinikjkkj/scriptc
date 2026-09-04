@@ -10647,6 +10647,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/diagnostics/a-bare-type-parameter-with-no-readable-instantiation.ts": {
+   "order": [
+    "<repo>/tests/diagnostics/a-bare-type-parameter-with-no-readable-instantiation.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/diagnostics/a-cast-that-spells-a-record-over-a-value-that-is-not-one.ts": {
    "order": [
     "<repo>/tests/diagnostics/a-cast-that-spells-a-record-over-a-value-that-is-not-one.ts"
