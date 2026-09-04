@@ -5851,8 +5851,22 @@ export function erasedUnionOfArms(arms: readonly ts.Type[], ctx: TypeMapperCtx):
     mapped.push(m.kind === "void" ? UNDEFINED_T : m);
   }
   if (mapped.length === 0) return null;
+  // FLATTEN: an arm that is itself a union contributes its ARMS, not itself.
+  // A union holding a union is not a representation any backend has — the
+  // validator says so ("union uN: arm K is union"), and an instantiation at
+  // a union type (`T` bound to `Row | null` at one call site and to
+  // `number` at another) reaches here as exactly that. Same rule
+  // restTupleFromErasure already keeps one function up.
   const byKey = new Map<string, IrType>();
-  for (const m of mapped) byKey.set(typeKey(m), m);
+  for (const m of mapped) {
+    if (m.kind === "union") {
+      const arms = ctx.unions.get(m.unionId)?.arms ?? [];
+      // A union id with no arms is a placeholder nothing finalized; keeping
+      // a reference to one is the empty-union the validator rejects.
+      if (arms.length === 0) return null;
+      for (const a of arms) byKey.set(typeKey(a), a);
+    } else byKey.set(typeKey(m), m);
+  }
   const distinct = [...byKey.entries()].sort(([x], [y]) => (x < y ? -1 : x > y ? 1 : 0)).map(([, t]) => t);
   return distinct.length === 1 ? distinct[0]! : { kind: "union", unionId: ctx.unions.intern(distinct) };
 }
