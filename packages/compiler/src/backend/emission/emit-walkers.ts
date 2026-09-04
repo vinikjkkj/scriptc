@@ -2075,10 +2075,30 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
      * The retain is the same void*-thunk pair a container slot would use
      * for this type, so the recovered object arrives at +1 exactly like
      * the freshly built one and every caller's ownership is unchanged. */
+    // The `static_copy` test is INLINE with the call behind it: the common
+    // receiver is not a boundary copy at all (a parsed value, a decoded
+    // one, anything the program built itself), and the flag is false for
+    // every dyn such a program produces — the table is not even allocated
+    // then.
+    //
+    // IT IS NOT WHAT MAKES THE MISS PATH CHEAP, and the measurement says so.
+    // On a loop of 400,000 recoveries of JSON.parse output the
+    // unconditional call cost +5.48% against base and this inline form
+    // costs +5.38% — the same, inside a layout floor of about 2%. So the
+    // cost is not the call: it is that anything added to the preamble of
+    // `sc_dc_N` / `sc_da_N` perturbs how the C compiler treats these static
+    // functions. The teardown half of the change was measured apart and is
+    // free (-1.56%, i.e. nothing, on a loop that allocates and frees the
+    // same trees and recovers none of them).
+    //
+    // The trade is worth naming: on a program that DOES cross, the recovery
+    // stops building an object at all and the same harness measures -36.7%.
+    // The +5.4% is paid only by a program that recovers constantly and
+    // crosses nothing.
     const originRecover = (ind: string): string => {
       const { retain } = vAdapters(t);
       const tk = cStringLiteral(Buffer.from(key, "utf8"));
-      return `${ind}{ void *sc_o = scr_dyn_origin_take(d, ${tk}); if (sc_o != NULL) return (${cType(t).trim()})${retain}(sc_o); }`;
+      return `${ind}if (d->static_copy) { void *sc_o = scr_dyn_origin_take(d, ${tk}); if (sc_o != NULL) return (${cType(t).trim()})${retain}(sc_o); }`;
     };
     switch (t.kind) {
       case "f64":
