@@ -2267,6 +2267,33 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
           instances: new Map(),
         });
       };
+      // TWO members keyed by the SAME global registry symbol. tsc types the
+      // two consts as DISTINCT unique symbols and late-binds two members;
+      // Symbol.for hands both the one runtime symbol, so JS keeps only the
+      // last definition. ONE slot is the right model — that is why the slot
+      // is keyed by the registry string — but a class declaring the pair
+      // has no honest single answer here: the second collection would
+      // silently overwrite the first's signature and body. Named fence.
+      {
+        const registrySlots = new Set<string>();
+        for (const m of decl.members) {
+          const named =
+            ts.isMethodDeclaration(m) || ts.isGetAccessor(m) || ts.isSetAccessor(m) ||
+            ts.isPropertyDeclaration(m);
+          if (!named || !ts.isComputedPropertyName(m.name)) continue;
+          const slot = classMemberNameOf(L, m.name);
+          if (slot === null || !slot.startsWith("sym.for:")) continue;
+          const keyed = `${ts.isGetAccessor(m) ? "get:" : ts.isSetAccessor(m) ? "set:" : ""}${slot}`;
+          if (registrySlots.has(keyed)) {
+            L.unsupported(
+              "SC1090",
+              m,
+              "two members keyed by the same global-registry symbol (Symbol.for hands both consts the one runtime symbol, so JS keeps only the last definition)",
+            );
+          }
+          registrySlots.add(keyed);
+        }
+      }
       for (const member of decl.members) {
         if (ts.isClassStaticBlockDeclaration(member)) {
           // Statics live on the FAMILY (JS has one class, one static
@@ -3066,8 +3093,15 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
           // applies verbatim, with the get and set halves independent.
           const isGet = ts.isGetAccessor(member);
           // #private accessors collect as "get:#x"/"set:#x" — the same
-          // reserved spelling, one more unspellable segment.
-          if (!ts.isIdentifier(member.name) && !ts.isPrivateIdentifier(member.name)) {
+          // reserved spelling, one more unspellable segment. COMPUTED names
+          // resolve exactly as method names do (classMemberNameOf: a
+          // constant-folding string key, a well-known-Symbol slot, or a
+          // global-registry `sym.for:` slot) — this branch used to demand a
+          // bare identifier and refuse every computed accessor, where the
+          // method branch two hundred lines up had folded them since the
+          // object-literal key machinery landed.
+          const accessorProp = classMemberNameOf(L, member.name);
+          if (accessorProp === null) {
             L.unsupported("SC1090", member, "computed accessor names");
           }
           // ABSTRACT accessors are the abstract-method story with property
@@ -3077,7 +3111,7 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
           const abstractAccessor =
             ts.getModifiers(member)?.some((m) => m.kind === ts.SyntaxKind.AbstractKeyword) === true;
           if (!member.body && !abstractAccessor) L.unsupported("SC1090", member, "bodyless accessors");
-          const prop = member.name.text;
+          const prop = accessorProp;
           const mName = `${isGet ? "get" : "set"}:${prop}`;
           // `name` on an ERROR-ROOTED class is ScrError's FIRST slot, not a
           // field this accessor collides with. The collision is OURS: the
@@ -3114,9 +3148,7 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
             !abstractAccessor &&
             member.body !== undefined &&
             typeEquals(fields.get("name") ?? VOID, STRING) &&
-            !decl.members.some(
-              (m) => ts.isSetAccessor(m) && ts.isIdentifier(m.name) && m.name.text === "name",
-            ) &&
+            !decl.members.some((m) => ts.isSetAccessor(m) && classMemberNameOf(L, m.name) === "name") &&
             !programWritesErrorName(L)
           ) {
             const lit = constStringReturnOf(member.body);
@@ -5591,6 +5623,49 @@ export function lowerClassMembers(L: Lowerer, info: ClassInfo): IrFunction[] {
    * this the declaration alone refused the file. */
   const WELL_KNOWN_SYMBOL_SLOTS = new Set(["iterator", "dispose", "asyncDispose"]);
 
+/** The GLOBAL REGISTRY key behind a computed member name — `Symbol.for(k)`
+ * written inline, or an identifier resolving to a module-level `const S =
+ * Symbol.for(k)` with a literal k — or null.
+ *
+ * `Symbol.for` is exactly the symbol flavour uniqueSymbolKeyOf refuses, and
+ * for the right reason: two distinct consts can alias ONE runtime symbol
+ * through the registry, so a slot keyed by the CONST's identity would split
+ * what JS shares. Keying by the registry STRING inverts that argument — the
+ * key IS the identity, so both consts land on one slot, which is what JS
+ * does. A unique `Symbol('k')` gets uniqueSymbolKeyOf's "Symbol(k)" name and
+ * a plain string key gets its own text, so the three never collide.
+ *
+ * The slot is DECLARED ONLY, the WELL_KNOWN_SYMBOL_SLOTS story: `x[S]`
+ * element access keeps its symbol fence, so nothing dispatches here. What
+ * this buys is the DECLARATION — bson's BSONValue hangs a
+ * `get [BSON_VERSION_SYMBOL]()` and a
+ * `[Symbol.for('nodejs.util.inspect.custom')]()` on the abstract base of its
+ * whole value hierarchy, and the two names alone refused the base and every
+ * class under it. */
+  function symbolForRegistryKeyOf(L: Lowerer, expr: ts.Expression): string | null {
+    let e = expr;
+    while (ts.isParenthesizedExpression(e) || ts.isAsExpression(e) || ts.isTypeAssertion(e)) e = e.expression;
+    if (ts.isIdentifier(e)) {
+      const sym = L.resolveValueSymbol(e);
+      const decl = sym ? L.checker.valueDeclarationOf(sym) : undefined;
+      if (!sym || !decl || !ts.isVariableDeclaration(decl)) return null;
+      if (!(ts.getCombinedNodeFlags(decl) & ts.NodeFlags.Const)) return null;
+      // Module level only — a const inside a function is a fresh binding
+      // per call, and one static slot would conflate the calls (the
+      // uniqueSymbolKeyOf rule verbatim; the registry key happens to be
+      // stable, but the DECLARATION battery is what makes the fold sound).
+      if (!ts.isVariableStatement(decl.parent.parent) || !ts.isSourceFile(decl.parent.parent.parent)) return null;
+      return decl.initializer === undefined ? null : symbolForRegistryKeyOf(L, decl.initializer);
+    }
+    if (!ts.isCallExpression(e) || e.questionDotToken) return null;
+    if (!ts.isPropertyAccessExpression(e.expression)) return null;
+    if (L.stdlibGlobalMember(e.expression, "Symbol") !== "for") return null;
+    const arg = e.arguments.length === 1 ? e.arguments[0]! : undefined;
+    if (arg === undefined) return null;
+    if (!ts.isStringLiteral(arg) && !ts.isNoSubstitutionTemplateLiteral(arg)) return null;
+    return arg.text;
+  }
+
 /** The lowered method-map name of a class member: identifier text, a
    * COMPUTED name that folds to one compile-time string
    * (foldedStringKeyOf — the object-literal computed-key machinery
@@ -5612,6 +5687,8 @@ export function lowerClassMembers(L: Lowerer, info: ClassInfo): IrFunction[] {
       const wellKnown = L.stdlibGlobalMember(e, "Symbol");
       if (wellKnown !== null && WELL_KNOWN_SYMBOL_SLOTS.has(wellKnown)) return `sym:${wellKnown}`;
     }
+    const registryKey = symbolForRegistryKeyOf(L, e);
+    if (registryKey !== null) return `sym.for:${registryKey}`;
     return L.foldedStringKeyOf(name.expression);
   }
 

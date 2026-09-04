@@ -10281,6 +10281,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/7542-class-members-keyed-by-a-registry-symbol.ts": {
+   "order": [
+    "<repo>/tests/corpus/7542-class-members-keyed-by-a-registry-symbol.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/755-cycle-async-promise.ts": {
    "order": [
     "<repo>/tests/corpus/755-cycle-async-promise.ts"
@@ -12029,6 +12035,18 @@
   "<repo>/tests/diagnostics/stdlib.ts": {
    "order": [
     "<repo>/tests/diagnostics/stdlib.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/symbol-for-class-members.ts": {
+   "order": [
+    "<repo>/tests/diagnostics/symbol-for-class-members.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/symbol-for-duplicate-slot.ts": {
+   "order": [
+    "<repo>/tests/diagnostics/symbol-for-duplicate-slot.ts"
    ],
    "diags": []
   },
