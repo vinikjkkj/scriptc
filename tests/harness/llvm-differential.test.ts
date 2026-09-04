@@ -99,6 +99,12 @@ const TIER_REGRESSIONS = [
   // suite goes green on the regression. The pin is what makes the lane
   // say so.
   "7450-process-module-esm-import-forms.ts",
+  // `PromiseLike<T>` at the promise slot. Same SKIP trap, and the sharpest
+  // form of it: before the mapping a bare `PromiseLike<number>` was SC2020,
+  // so a revert does not fail this program — it stops compiling on either
+  // lane and lands in the refused column, and the suite goes green on the
+  // regression it exists to catch.
+  "7470-promiselike-is-a-promise-slot.ts",
 ];
 
 interface RunResult {
