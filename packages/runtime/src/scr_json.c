@@ -5649,15 +5649,7 @@ void scr_dyn_static_copy_refuse(const char *what) {
   scr_throw_error(SCR_ERR_ERROR, scr_jb_finish(&b));
 }
 
-/* The EXTRACTION twin of scr_dyn_static_copy_refuse: a checked cast that
- * would recover a static array or record OUT of a boundary copy. The
- * value it hands back is a SECOND object where Node hands back the first
- * one, so `back === original` reads false, a write through either is
- * invisible to the other, and a write made through the ORIGINAL between
- * the crossing and the cast is not in the copy at all. Every one of those
- * is a wrong answer with no diagnostic, which is what this replaces.
- * `what` names the recovered kind ("an array", "a record"). */
-/* "Is this value an array/record COPY the static—>dyn boundary made of a
+/* "Is this value an array/record COPY the static->dyn boundary made of a
  * source the program still names?" — the one definition of that question,
  * so the two backends cannot answer it differently. A module NAMESPACE
  * carries the same bit and is deliberately not one: it is frozen in Node,
@@ -5666,6 +5658,14 @@ bool scr_dyn_is_boundary_copy(const ScrDyn *d) {
   return d->static_copy && !d->module_ns;
 }
 
+/* The EXTRACTION twin of scr_dyn_static_copy_refuse: a checked cast that
+ * would recover a static array or record OUT of a boundary copy. The
+ * value it hands back is a SECOND object where Node hands back the first
+ * one, so `back === original` reads false, a write through either is
+ * invisible to the other, and a write made through the ORIGINAL between
+ * the crossing and the cast is not in the copy at all. Every one of those
+ * is a wrong answer with no diagnostic, which is what this replaces.
+ * `what` names the recovered kind ("an array", "a record"). */
 void scr_dyn_static_copy_extract_refuse(const char *what) {
   ScrJsonBuf b;
   scr_jb_init(&b);
