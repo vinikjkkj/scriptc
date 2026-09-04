@@ -10152,6 +10152,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/7491-an-erased-union-narrows-back-into-the-instantiation-s-own-type.ts": {
+   "order": [
+    "<repo>/tests/corpus/7491-an-erased-union-narrows-back-into-the-instantiation-s-own-type.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/750-cycle-closure-box.ts": {
    "order": [
     "<repo>/tests/corpus/750-cycle-closure-box.ts"

@@ -9589,8 +9589,23 @@ export class Lowerer {
   narrowedRetagHelper(node: ts.Node, fromId: string, toId: string, loc: SrcLoc): string | null {
     const from = this.unions.get(fromId);
     if (!from || !this.unions.get(toId)) return null;
-    const siteT = this.mapTypeOf(this.typeOf(node));
+    let siteT = this.mapTypeOf(this.typeOf(node));
     if (!siteT) return null;
+    // The AWAITED PAYLOAD of a promise-typed site. An async `return
+    // <promise>` FLATTENS (asyncReturnFlatten): the value coerceInto hands
+    // this bridge is what came OUT of the promise, while the node it reads
+    // the checker's type off still spells the promise. Read literally, a
+    // promise is not an arm of a value union, so the bridge declined and
+    // the coercion fell through to SC2003 — which is where zapo's
+    // `withTransaction<PreKeyRecord | null>` met the whole
+    // learned-instantiation union of `runInTransaction<T>`
+    // (BaseSqliteStore.ts:55). The SYNC twin of the same program narrowed
+    // fine, because there the node's type IS the payload.
+    //
+    // Unwrapped only when the promise ITSELF is not an arm of the source
+    // union: where it is, the coercion really is promise-to-promise and
+    // the payload would be the wrong proof.
+    if (siteT.kind === "promise" && this.armTag(fromId, siteT) < 0) siteT = siteT.inner;
     const siteArms = siteT.kind === "union" ? this.unions.get(siteT.unionId)?.arms : [siteT];
     if (!siteArms || siteArms.length === 0) return null;
     const allowed = new Set<number>();
