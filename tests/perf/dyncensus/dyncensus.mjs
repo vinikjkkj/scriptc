@@ -612,7 +612,7 @@ function selfTest() {
 const RC_LABELS = ["1", "2", "3", "4", "5-8", "9-16", "17+"];
 
 export function strParse(text) {
-  const r = { layout: null, rows: new Map(), walk: [], rc: [], total: null };
+  const r = { layout: null, rows: new Map(), walk: [], rc: [], top: [], total: null };
   for (const raw of text.split(/\r?\n/)) {
     const line = raw.trim();
     if (!line) continue;
@@ -621,6 +621,17 @@ export function strParse(text) {
     if (sp[0] === "STRCEN-ROW") { r.rows.set(+sp[1], { peak: +sp[2], exit: +sp[3] }); continue; }
     if (sp[0] === "STRCEN-RC") { r.rc[+sp[1]] = sp.slice(2).map(Number); continue; }
     if (sp[0] === "STRCEN-WALK") { r.walk[+sp[1]] = kv(sp.slice(2)); continue; }
+    if (sp[0] === "STRCEN-TOP") {
+      // The sample is delimited by | on both sides and is the LAST field,
+      // so it is taken off the raw line rather than the whitespace split:
+      // the escaping in the writer keeps spaces and | out of it, but a
+      // reader that trusted that and were wrong would silently drop bytes.
+      const m = /\|([^|]*)\|\s*$/.exec(line);
+      const row = kv(sp.slice(3).filter((s) => s.includes("=")));
+      row.sample = m ? m[1] : "";
+      (r.top[+sp[1]] ||= []).push(row);
+      continue;
+    }
     if (sp[0] === "STRCEN-TOTAL") { r.total = kv(sp.slice(1)); continue; }
   }
   return r;
@@ -728,6 +739,24 @@ export function strRender(r) {
     o.push(`   duplication  ${n(w0.distinct)} distinct of ${n(w0.n)} = ${pct(w0.n - w0.distinct, w0.n)} duplicated, holding ${n(w0.dupBytes)} B`);
     o.push(`                that is the CEILING on what interning could ever recover here`);
     o.push(`   encoding     ${n(w0.ascii)} of ${n(w0.n)} = ${pct(w0.ascii, w0.n)} pure ASCII`);
+    o.push("");
+  }
+
+  const top = r.top[0] || [];
+  if (top.length) {
+    // A ceiling with no content behind it cannot say WHERE to intern.
+    const shown = top.reduce((a, t) => a + t.bytes, 0);
+    o.push(`── THE MOST DUPLICATED LIVE CONTENTS (top ${top.length} by live multiplicity)`);
+    o.push(`   these ${top.length} contents alone hold ${n(shown)} B, ${pct(shown, T.peakPhys)} of the peak`);
+    o.push(`      live       B  len  cap  content (escaped, truncated)`);
+    for (const t of top) {
+      o.push(`${n(t.n).padStart(10)}${n(t.bytes).padStart(9)}${String(t.len).padStart(5)}${String(t.cap).padStart(5)}  ${t.sample}`);
+    }
+    o.push("");
+  } else if (w0.n) {
+    o.push(`── NO TOP-CONTENT ROWS: this report was written by a build without the`);
+    o.push(`   second walk pass. The duplication CEILING above still stands; what`);
+    o.push(`   the duplicates ARE is not in this file.`);
     o.push("");
   }
 
