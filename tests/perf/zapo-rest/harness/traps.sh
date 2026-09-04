@@ -7,7 +7,7 @@ set -u
 DIR=${1:-/g/blocks/restapi/out}
 
 echo "=== emitted translation units under $DIR ==="
-FILES=$(find "$DIR" -maxdepth 2 \( -name '*.c' -o -name '*.scrh' -o -name '*.h' \) 2>/dev/null | sort)
+FILES=$(find "$DIR" -maxdepth 2 \( -name '*.c' -o -name '*.ll' -o -name '*.scrh' -o -name '*.h' \) 2>/dev/null | sort)
 if [ -z "$FILES" ]; then
   echo "NO EMITTED C FOUND -> every count below is n/a (a build that produced no TU cannot be scanned)"
   exit 0
