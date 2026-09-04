@@ -10122,6 +10122,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/7450-process-module-esm-import-forms.ts": {
+   "order": [
+    "<repo>/tests/corpus/7450-process-module-esm-import-forms.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/750-cycle-closure-box.ts": {
    "order": [
     "<repo>/tests/corpus/750-cycle-closure-box.ts"
@@ -11760,6 +11766,12 @@
   "<repo>/tests/diagnostics/private-members.ts": {
    "order": [
     "<repo>/tests/diagnostics/private-members.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/process-module-import-fences.ts": {
+   "order": [
+    "<repo>/tests/diagnostics/process-module-import-fences.ts"
    ],
    "diags": []
   },

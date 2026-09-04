@@ -1,0 +1,9 @@
+{
+  "packages": {
+    "foreignts": {
+      "dir": "./attested-src/foreignts",
+      "commit": "0000000000000000000000000000000000000000",
+      "repo": "https://github.com/example/foreignts"
+    }
+  }
+}
