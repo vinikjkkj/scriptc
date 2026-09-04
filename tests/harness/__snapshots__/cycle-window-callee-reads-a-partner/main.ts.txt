@@ -1,0 +1,7 @@
+cycle-window-callee-reads-a-partner/a.ts:1:1 - error SC1016: circular imports (cycle-window-callee-reads-a-partner/a.ts → cycle-window-callee-reads-a-partner/b.ts → cycle-window-callee-reads-a-partner/a.ts; top-level code at cycle-window-callee-reads-a-partner/b.ts:15 can run user code during the cycle's init window — only declaration-only module bodies are admitted) are not supported yet
+
+  1 | import { bTag } from "./b.ts";
+    | ^
+  2 | 
+
+  hint: ES-module cycles with declaration-only top levels compile as-is, and so do CommonJS cycles whose cycle-crossing require bindings are read only inside function bodies; the fix depends on which the message names — move the named read or call into a function body, attach members to 'exports' instead of replacing 'module.exports', or break the named edge
