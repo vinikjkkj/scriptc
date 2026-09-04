@@ -984,6 +984,12 @@ function inTypePosition7(node: ts.Node): boolean {
  * conservative — anything that could CALL user code (directly, through a
  * callback-invoking builtin, a getter, an iterator, or an implicit
  * coercion of a user object) disqualifies the module's cycles. */
+/** Memoized callee-body verdicts (nonInertTopLevel7's `bodyInert`). Keyed
+ * per PROGRAM: the verdict is a pure function of the callee node given a
+ * checker, and a cluster's members call the same helpers over and over,
+ * but two programs can resolve the same file's identifiers differently. */
+const CALLEE_BODY_MEMO7 = new WeakMap<ts.Program, Map<ts.FunctionDeclaration, boolean>>();
+
 function nonInertTopLevel7(
   program: ts.Program,
   sf: ts.SourceFile,
@@ -995,8 +1001,21 @@ function nonInertTopLevel7(
    * Absent (the default) nothing is considered evaluated, so every caller
    * that does not track evaluation keeps the strict bar. */
   evaluated?: (f: ts.SourceFile) => boolean,
+  /** The cycle cluster `sf` belongs to (the strongly connected component).
+   * Present only on the cycle-admission path; absent, the construction
+   * survey below is unavailable and every `new` of a user class refuses,
+   * which is the behavior every other caller had. */
+  cluster?: readonly ts.SourceFile[],
 ): ts.Node | null {
   const checker = program.getTypeChecker();
+  /** Set while surveying a CALLEE BODY: see dtsRooted and bodyInert. */
+  let strictRoots = false;
+  /** The OUTERMOST surveyed body, when one is being surveyed. A binding
+   * declared inside it is the callee's own local, initialized by the
+   * body's own execution; a binding declared outside could be a cluster
+   * partner's slot. */
+  let surveyedBody: ts.Node | null = null;
+  const bodyInFlight = new Set<ts.FunctionDeclaration>();
   const PRIM =
     ts.TypeFlags.StringLike |
     ts.TypeFlags.NumberLike |
@@ -1027,6 +1046,13 @@ function nonInertTopLevel7(
      * runs user code, which could reach a partner mid-init. */
      sameFileOk = false,
   ): boolean => {
+    // Inside a surveyed CALLEE BODY the two relaxations below do not
+    // hold: `sf`/`useStart` name the CALLING module, not the callee's,
+    // and `evaluated` is a fact about the walk's position, not about the
+    // callee. Requiring a declaration-file root there keeps the body
+    // verdict a pure function of the callee — which is what makes the
+    // memo sound.
+    if (strictRoots) sameFileOk = false;
     let root: ts.Expression = e;
     while (ts.isPropertyAccessExpression(root) || ts.isElementAccessExpression(root)) root = root.expression;
     if (ts.isMetaProperty(root)) return true; // import.meta
@@ -1043,8 +1069,25 @@ function nonInertTopLevel7(
     return decls.every(
       (d) =>
         d.getSourceFile().isDeclarationFile ||
-        (evaluated?.(d.getSourceFile()) ?? false) ||
+        (!strictRoots && (evaluated?.(d.getSourceFile()) ?? false)) ||
         (sameFileOk && d.getSourceFile() === sf && d.getStart() < useStart),
+    );
+  };
+  /** Every declaration of `id`'s symbol sits lexically inside the body
+   * currently being surveyed — a parameter, a local, a local function. */
+  const declaredWithinSurveyedBody = (id: ts.Identifier): boolean => {
+    const root = surveyedBody;
+    if (root === null) return false;
+    const rf = root.getSourceFile();
+    const lo = root.getStart(rf);
+    const hi = root.getEnd();
+    let sym = checker.getSymbolAtLocation(id);
+    if (sym === undefined) return false;
+    if (sym.flags & ts.SymbolFlags.Alias) return false; // an import is never a local
+    const decls = checker.declarationsOf(sym);
+    return (
+      decls.length > 0 &&
+      decls.every((d) => d.getSourceFile() === rf && d.getStart() >= lo && d.getEnd() <= hi)
     );
   };
   /** The lib containers whose iteration is runtime-implemented. */
@@ -1053,8 +1096,7 @@ function nonInertTopLevel7(
    * strings) that iterator is runtime-provided, so no user code executes
    * and the spread is as inert as the operand; a user iterable's own
    * Symbol.iterator IS user code and keeps the refusal. */
-  const stdlibIterable = (e: ts.Expression): boolean => {
-    const t = checker.getTypeAtLocation(e);
+  const stdlibIterableType = (t: ts.Type): boolean => {
     const parts = t.isUnionType() ? t.getTypes() : [t];
     return parts.every((p) => {
       if ((p.flags & ts.TypeFlags.StringLike) !== 0) return true;
@@ -1063,6 +1105,7 @@ function nonInertTopLevel7(
       return checker.declarationsOf(s).some((d) => d.getSourceFile().isDeclarationFile);
     });
   };
+  const stdlibIterable = (e: ts.Expression): boolean => stdlibIterableType(checker.getTypeAtLocation(e));
   const hasDecorator = (n: ts.Node): boolean =>
     ((n as { modifiers?: readonly ts.Node[] }).modifiers ?? []).some((m) => m.kind === ts.SyntaxKind.Decorator);
   /** No function-like node anywhere in the subtree — arguments to builtin
@@ -1121,12 +1164,25 @@ function nonInertTopLevel7(
       e.kind === ts.SyntaxKind.TrueKeyword ||
       e.kind === ts.SyntaxKind.FalseKeyword ||
       e.kind === ts.SyntaxKind.NullKeyword ||
-      ts.isIdentifier(e) ||
       ts.isMetaProperty(e) ||
       ts.isArrowFunction(e) ||
       ts.isFunctionExpression(e)
     ) {
       return true;
+    }
+    if (ts.isIdentifier(e)) {
+      // At a MODULE TOP LEVEL a bare identifier read is free here because
+      // rule 2 stands behind it: backEdgeUseOffence7 refuses exactly the
+      // cycle-crossing binding read outside a deferred position.
+      if (!strictRoots) return true;
+      // Inside a surveyed CALLEE BODY there is no rule 2. The body runs at
+      // the CALL, in the middle of the init window, and a use written
+      // inside a function body satisfies rule 2's deferred-position test
+      // no matter when that function is actually invoked. So the read has
+      // to be answered here: a declaration-file global, or a binding the
+      // surveyed body declares itself. Anything else could be a partner's
+      // slot, and reading one is Node's ReferenceError.
+      return dtsRooted(e) || declaredWithinSurveyedBody(e);
     }
     if (ts.isClassExpression(e)) return inertClass(e) === null;
     if (ts.isParenthesizedExpression(e) || ts.isAsExpression(e) || ts.isSatisfiesExpression(e) || ts.isNonNullExpression(e)) {
@@ -1167,6 +1223,20 @@ function nonInertTopLevel7(
     if (ts.isObjectLiteralExpression(e)) {
       return e.properties.every((p) => {
         if (ts.isShorthandPropertyAssignment(p)) return true;
+        // METHOD SHORTHAND is a function DEFINITION, not a call: `{ f() {} }`
+        // creates exactly the closure `{ f: function () {} }` creates, and
+        // that spelling is admitted below as a PropertyAssignment whose
+        // initializer is a FunctionExpression. Only the two spellings
+        // differed, so refusing this one refused mongodb's whole OPTIONS
+        // table for containing no executable code at all. Accessors
+        // (`get x() {}`) are NOT admitted here: defining one is inert, but
+        // it plants user code behind a later property READ, which the
+        // property-access arm treats as free.
+        if (ts.isMethodDeclaration(p)) {
+          return p.name === undefined || !ts.isComputedPropertyName(p.name)
+            ? true
+            : inert(p.name.expression) && primitiveTyped(p.name.expression);
+        }
         if (!ts.isPropertyAssignment(p)) return false;
         // A COMPUTED key is a key expression plus a ToPropertyKey coercion,
         // both inert when the expression is — the bar inertClass already
@@ -1180,23 +1250,456 @@ function nonInertTopLevel7(
       });
     }
     if (ts.isCallExpression(e) || ts.isNewExpression(e)) {
-      if (!dtsRooted(e.expression) || !ts.isIdentifier(chainRoot7(e.expression))) return false;
       const args = e.arguments ?? [];
       // A CALLABLE argument is admissible when it is itself dts-rooted:
       // a builtin-owned function value (the `promisify(fs.readFile)`
       // at every cycle member's top level) is runtime-implemented — even
       // if the builtin callee invokes it, no user code runs and no
       // cluster binding is observable. Function literals and user
-      // callables keep the refusal.
-      return args.every(
-        (a) =>
-          inert(a) &&
-          !containsFunctionLike(a) &&
-          (checker.getCallSignatures(checker.getTypeAtLocation(a)).length === 0 || dtsRooted(a)),
-      );
+      // callables keep the refusal — EXCEPT where the callee provably
+      // does not invoke the argument (`storesItsArgument` below).
+      // A CALLBACK LITERAL the builtin invokes runs user code, but user
+      // code that provably names nothing in the cluster observes nothing.
+      // That is what lets `[...].filter(d => d.default != null)` stand at
+      // a cycle member's top level.
+      const safeCallback = (a: ts.Expression): boolean =>
+        (ts.isArrowFunction(a) || ts.isFunctionExpression(a)) &&
+        namesNothingInCluster7(a, new Set());
+      const argsInert = (fnAllowedAt: number): boolean =>
+        args.every(
+          (a, i) =>
+            inert(a) &&
+            (i === fnAllowedAt || !containsFunctionLike(a) || safeCallback(a)) &&
+            (checker.getCallSignatures(checker.getTypeAtLocation(a)).length === 0 ||
+              dtsRooted(a) ||
+              safeCallback(a)),
+        );
+      if (dtsRooted(e.expression) && ts.isIdentifier(chainRoot7(e.expression))) {
+        return argsInert(storesItsArgument(e) ? 2 : -1);
+      }
+      // A method on a LIB-TYPED RECEIVER is lib-implemented, whatever the
+      // receiver expression was. `dtsRooted` can only see through a chain
+      // of property accesses down to a named global, so it answered false
+      // for every `f(x).map(…)` — the head of the chain is a call, not an
+      // identifier. The receiver's TYPE says what the method is, and it
+      // is the same static-type trust `stdlibIterable` already takes to
+      // admit a spread.
+      if (
+        ts.isCallExpression(e) &&
+        ts.isPropertyAccessExpression(e.expression) &&
+        builtinTyped(e.expression.expression) &&
+        inert(e.expression.expression)
+      ) {
+        return argsInert(-1);
+      }
+      // Not a builtin: the callee is USER code, so the question is what
+      // that code does. A call whose callee body is itself inert runs
+      // exactly the builtins the whitelist already admits and nothing
+      // else — no cluster binding can be observed through it — so the
+      // call is as inert as the body. Recursive and memoized; `new` is
+      // excluded (a construction also runs field initializers and the
+      // whole superclass chain, which this does not survey).
+      if (ts.isCallExpression(e) && ts.isIdentifier(e.expression) && calleeInert(e.expression)) {
+        return argsInert(-1);
+      }
+      if (ts.isNewExpression(e) && constructionInert(e)) return true;
+      return false;
     }
     return false;
   };
+  /** `Object.defineProperty(o, k, {…})` — the ONE builtin on this
+   * whitelist that takes a function-valued argument and provably never
+   * invokes it. Its third argument is a property DESCRIPTOR: the
+   * abstract operation reads `value`/`get`/`set`/`writable`/`enumerable`/
+   * `configurable` off it and installs them; `value` is stored, and even
+   * `get`/`set` are installed as accessors rather than called. Restricted
+   * to a literal descriptor so that "reads its properties" is a read of
+   * data properties this analysis can see, not a Get() that could land on
+   * a user getter. */
+  const storesItsArgument = (e: ts.CallExpression | ts.NewExpression): boolean => {
+    if (!ts.isCallExpression(e)) return false;
+    const callee = e.expression;
+    if (!ts.isPropertyAccessExpression(callee)) return false;
+    if (callee.name.text !== "defineProperty") return false;
+    const root = callee.expression;
+    if (!ts.isIdentifier(root) || root.text !== "Object") return false;
+    return e.arguments.length === 3 && ts.isObjectLiteralExpression(e.arguments[2]!);
+  };
+  /** The type is a primitive or a type the LIB declares — a value that
+   * carries no user code into whatever it is handed to. */
+  const builtinTyped = (a: ts.Expression): boolean => {
+    const t = checker.getTypeAtLocation(a);
+    const parts = t.isUnionType() ? t.getTypes() : [t];
+    return parts.every((p) => {
+      if ((p.flags & PRIM) !== 0) return true;
+      const s = p.getSymbol();
+      if (s === undefined) return false;
+      const ds = checker.declarationsOf(s);
+      return ds.length > 0 && ds.every((d) => d.getSourceFile().isDeclarationFile);
+    });
+  };
+  /** The class chain a `new` runs, nearest first, or null when it does not
+   * resolve to declarations. The walk STOPS at the first base whose
+   * declarations are all in declaration files — a builtin base (Map,
+   * Error, …) whose construction is runtime-implemented. */
+  const classChain7 = (root: ts.Expression): ts.ClassDeclaration[] | null => {
+    const chain: ts.ClassDeclaration[] = [];
+    let cur: ts.Expression = root;
+    for (let depth = 0; depth < 16; depth++) {
+      if (!ts.isIdentifier(cur)) return null;
+      let sym = checker.getSymbolAtLocation(cur);
+      if (sym === undefined) return null;
+      if (sym.flags & ts.SymbolFlags.Alias) sym = checker.getAliasedSymbol(sym);
+      const decls = checker.declarationsOf(sym);
+      if (decls.length === 0) return null;
+      if (decls.every((d) => d.getSourceFile().isDeclarationFile)) return chain;
+      if (decls.length !== 1) return null;
+      const cls = decls[0]!;
+      if (!ts.isClassDeclaration(cls) || hasDecorator(cls)) return null;
+      chain.push(cls);
+      const ext = (cls.heritageClauses ?? []).find((h) => h.token === ts.SyntaxKind.ExtendsKeyword);
+      if (ext === undefined || ext.types.length === 0) return chain;
+      cur = ext.types[0]!.expression;
+    }
+    return null;
+  };
+  /** Every `this` in `n` is the receiver of a plain named property access
+   * whose name no cluster-side override can claim, and every `super` is a
+   * base-constructor call. This is what bounds the CLUSTER-DISJOINT
+   * ESCAPE below: a body outside the cluster cannot NAME a cluster
+   * binding, but it can still DISPATCH into one through the object being
+   * constructed, whose class is inside the cluster. */
+  const thisDisciplined7 = (n: ts.Node, dispatch: ReadonlySet<string>): boolean => {
+    let ok = true;
+    ts.walkPreorder(n, (c) => {
+      if (c.kind === ts.SyntaxKind.SuperKeyword) {
+        const p = c.parent;
+        if (p === undefined || !ts.isCallExpression(p) || p.expression !== c) ok = false;
+        return ok ? undefined : "stop";
+      }
+      if (c.kind === ts.SyntaxKind.ThisKeyword) {
+        const p = c.parent;
+        if (
+          p === undefined ||
+          !ts.isPropertyAccessExpression(p) ||
+          p.expression !== c ||
+          dispatch.has(p.name.text)
+        ) {
+          ok = false;
+          return "stop";
+        }
+      }
+      return undefined;
+    });
+    return ok;
+  };
+  /** Iterating this type runs a LIB iterator: an array, a tuple, or one of
+   * the named lib containers. Same static-type trust `stdlibIterable`
+   * already takes for a spread. */
+  const libIterable7 = (t: ts.Type): boolean =>
+    stdlibIterableType(t) || checker.isArrayType(t) || checker.isTupleType(t);
+  /** Callees that run code chosen at RUNTIME, so no static survey covers
+   * them however well-declared they are. */
+  const OPAQUE_CALLEES7 = new Set(["eval", "require", "Function", "queueMicrotask", "setTimeout", "setInterval", "setImmediate"]);
+  /** True when NOTHING the surveyed body `n` evaluates can NAME a
+   * module-scope binding of a cluster module, and nothing it calls can
+   * either.
+   *
+   * This is the survey tier of the same theorem the escape tier uses, run
+   * one level finer. The escape tier answers "this whole MODULE cannot
+   * reach the cluster"; here the body IS in a cluster module, so the
+   * question descends to what it lexically names. A body that names only
+   * its own locals, lib globals, and bindings of modules outside the
+   * cluster cannot read a cluster binding, so it cannot observe partial
+   * initialization — no matter what it does otherwise. Loops, throws and
+   * try/catch are therefore all fine here where the top-level whitelist
+   * refuses them: they change what the program COMPUTES, which is Node's
+   * business, not what it can OBSERVE, which is ours.
+   *
+   * What can still cross the line is a value: a call landing on user code
+   * chosen at runtime, a `this` dispatching into a cluster-side override,
+   * or an iterator. Each is bounded below. */
+  const namesNothingInCluster7 = (n: ts.Node, dispatch: ReadonlySet<string>): boolean => {
+    if (cluster === undefined) return false;
+    const cls = cluster;
+    /** The symbol has a MODULE-SCOPE value binding in a cluster module.
+     * Property signatures, methods and members are not bindings — reading
+     * one is a property read, which this analysis treats as free
+     * everywhere (as the top-level whitelist already does). */
+    const bindsInCluster = (id: ts.Identifier): boolean => {
+      let sym = checker.getSymbolAtLocation(id);
+      if (sym === undefined) return false;
+      if (sym.flags & ts.SymbolFlags.Alias) {
+        const a = checker.getAliasedSymbol(sym);
+        if (a !== undefined) sym = a;
+      }
+      return checker.declarationsOf(sym).some((d) => {
+        if (!cls.includes(d.getSourceFile())) return false;
+        if (
+          !ts.isVariableDeclaration(d) &&
+          !ts.isFunctionDeclaration(d) &&
+          !ts.isClassDeclaration(d) &&
+          !ts.isEnumDeclaration(d)
+        ) {
+          return false;
+        }
+        for (let p: ts.Node | undefined = d.parent; p !== undefined; p = p.parent) {
+          if (ts.isFunctionLike(p)) return false; // a local, not a module binding
+          if (ts.isSourceFile(p)) return true;
+        }
+        return false;
+      });
+    };
+    let ok = true;
+    const fail = (): "stop" => {
+      ok = false;
+      return "stop";
+    };
+    ts.walkPreorder(n, (c) => {
+      if (!ok) return "stop";
+      if (c.kind === ts.SyntaxKind.Decorator) return fail();
+      // A `new` inside a surveyed body is not surveyed: its own chain
+      // would need the whole construction question asked again, against a
+      // different set of arguments.
+      if (ts.isNewExpression(c)) return fail();
+      if (ts.isTaggedTemplateExpression(c)) return fail();
+      if (ts.isIdentifier(c)) {
+        if (inTypePosition7(c)) return "skip";
+        if (bindsInCluster(c)) return fail();
+        return undefined;
+      }
+      if (ts.isCallExpression(c)) {
+        const callee = c.expression;
+        if (callee.kind === ts.SyntaxKind.SuperKeyword) {
+          // `super(...)` runs the BASE constructor. Admitted only where
+          // the base is lib-declared, so that constructor is runtime code.
+          let k: ts.Node | undefined = c;
+          while (k !== undefined && !ts.isClassDeclaration(k) && !ts.isClassExpression(k)) k = k.parent;
+          if (k === undefined) return fail();
+          const ext = ((k as ts.ClassLikeDeclaration).heritageClauses ?? []).find(
+            (h) => h.token === ts.SyntaxKind.ExtendsKeyword,
+          );
+          const base = ext?.types[0]?.expression;
+          if (base === undefined || !ts.isIdentifier(base)) return fail();
+          let bs = checker.getSymbolAtLocation(base);
+          if (bs === undefined) return fail();
+          if (bs.flags & ts.SymbolFlags.Alias) bs = checker.getAliasedSymbol(bs);
+          const bd = checker.declarationsOf(bs);
+          if (bd.length === 0 || !bd.every((d) => d.getSourceFile().isDeclarationFile)) return fail();
+          return undefined;
+        }
+        if (ts.isIdentifier(callee)) {
+          if (OPAQUE_CALLEES7.has(callee.text)) return fail();
+          // bindsInCluster answers the identifier itself on the next
+          // visit; what it cannot answer is a callee whose VALUE arrived
+          // from outside — a parameter holding a function could hold any
+          // function at all.
+          let s = checker.getSymbolAtLocation(callee);
+          if (s === undefined) return fail();
+          if (s.flags & ts.SymbolFlags.Alias) s = checker.getAliasedSymbol(s);
+          const ds = checker.declarationsOf(s);
+          if (ds.length === 0) return fail();
+          if (ds.some((d) => ts.isParameter(d) || ts.isBindingElement(d))) return fail();
+          return undefined;
+        }
+        if (ts.isPropertyAccessExpression(callee)) {
+          // A method on a LIB-typed receiver is lib-implemented.
+          if (!builtinTyped(callee.expression)) return fail();
+          return undefined;
+        }
+        return fail();
+      }
+      if (c.kind === ts.SyntaxKind.ThisKeyword) {
+        const p = c.parent;
+        if (p === undefined || !ts.isPropertyAccessExpression(p) || p.expression !== c || dispatch.has(p.name.text)) {
+          return fail();
+        }
+        return undefined;
+      }
+      if (c.kind === ts.SyntaxKind.SuperKeyword) {
+        // Any `super` that is not the callee handled above (`super.m()`,
+        // `super.x`) reaches a member, and a member can be anywhere.
+        const p = c.parent;
+        if (p === undefined || !ts.isCallExpression(p) || p.expression !== c) return fail();
+        return undefined;
+      }
+      // ITERATION runs an iterator. Array-shaped ones are lib-implemented;
+      // anything else is user code chosen by the value.
+      if (ts.isArrayBindingPattern(c)) {
+        const host = c.parent;
+        if (host === undefined) return fail();
+        return libIterable7(checker.getTypeAtLocation(host)) ? undefined : fail();
+      }
+      if (ts.isForOfStatement(c)) {
+        return libIterable7(checker.getTypeAtLocation(c.expression)) ? undefined : fail();
+      }
+      if (ts.isSpreadElement(c)) {
+        return libIterable7(checker.getTypeAtLocation(c.expression)) ? undefined : fail();
+      }
+      return undefined;
+    });
+    return ok;
+  };
+  /** A `new C(...)` of a USER class, admitted when nothing it runs can
+   * observe a cluster binding.
+   *
+   * The lever is that the cluster is a STRONGLY CONNECTED COMPONENT. Any
+   * module this survey reaches is import-reachable from the cluster — we
+   * got to it by resolving a name a cluster module imports. If such a
+   * module could reach any cluster member, the two would be mutually
+   * reachable and it would BE a cluster member. So "declared outside the
+   * cluster" already proves "cannot name a cluster binding", with no
+   * import-closure walk and no descent into the body at all.
+   *
+   * Three things can still carry cluster code across that line, and each
+   * is closed here: an ARGUMENT holding a user object whose methods the
+   * constructor could call (builtinTyped), a DISPATCH through `this` into
+   * an override declared by a chain class that is inside the cluster
+   * (thisDisciplined7), and a chain class inside the cluster that
+   * contributes a body of its own — which refuses. A class contributing
+   * NO constructor and NO instance initializer runs nothing at all, so
+   * its own module never matters: that is exactly MongoDBResponse, whose
+   * `static empty = new MongoDBResponse(...)` reaches only the base
+   * constructor over in on_demand/document.ts. */
+  const constructionInert = (e: ts.NewExpression): boolean => {
+    if (cluster === undefined || !ts.isIdentifier(e.expression)) return false;
+    const chain = classChain7(e.expression);
+    if (chain === null || chain.length === 0) return false;
+    const dispatch = new Set<string>();
+    for (const k of chain) {
+      if (!cluster.includes(k.getSourceFile())) continue;
+      for (const m of k.members) {
+        if (!ts.isMethodDeclaration(m) && !ts.isGetAccessorDeclaration(m) && !ts.isSetAccessorDeclaration(m)) {
+          continue;
+        }
+        if ((ts.getCombinedModifierFlags(m) & ts.ModifierFlags.Static) !== 0) continue;
+        const nm = m.name;
+        // A computed member name cannot be compared against a `this.x`,
+        // so the class could be overriding anything.
+        if (nm === undefined || (!ts.isIdentifier(nm) && !ts.isStringLiteral(nm))) return false;
+        dispatch.add(nm.text);
+      }
+    }
+    // An ESCAPED body is never read, so what the arguments carry INTO it
+    // is unbounded — a user object handed to it brings its own methods,
+    // and those can be declared anywhere. A SURVEYED body is read, and
+    // its own call discipline already bounds what it can do with anything
+    // it is given, so its arguments need no separate bound.
+    let escaped = false;
+    const chainOk = chain.every((k) => {
+      const ctor = k.members.find(
+        (m) => ts.isConstructorDeclaration(m) && m.body !== undefined,
+      ) as ts.ConstructorDeclaration | undefined;
+      const inits = k.members.filter(
+        (m) =>
+          ts.isPropertyDeclaration(m) &&
+          (ts.getCombinedModifierFlags(m) & ts.ModifierFlags.Static) === 0 &&
+          m.initializer !== undefined,
+      ) as ts.PropertyDeclaration[];
+      if (ctor === undefined && inits.length === 0) return true; // runs nothing
+      const bodies: ts.Node[] = [...inits.map((p) => p.initializer!), ...(ctor === undefined ? [] : [ctor])];
+      if (!cluster.includes(k.getSourceFile())) {
+        escaped = true;
+        return bodies.every((b) => thisDisciplined7(b, dispatch));
+      }
+      return bodies.every((b) => namesNothingInCluster7(b, dispatch));
+    });
+    if (!chainOk) return false;
+    const args = e.arguments ?? [];
+    return args.every(
+      (a) => inert(a) && (!escaped || (!containsFunctionLike(a) && builtinTyped(a))),
+    );
+  };
+  /** True when calling the function `id` names provably executes nothing
+   * but runtime-implemented builtins — the same bar `inert` applies to a
+   * module's top level, applied to the callee's BODY.
+   *
+   * Roots are held to declaration files inside the body (`strictRoots`),
+   * because the callee's module may itself be mid-initialization: a
+   * same-file-earlier read is only safe where "same file" is the file
+   * whose evaluation we are reasoning about, and here it is not. That
+   * restriction is also what makes the verdict a pure function of the
+   * callee node, hence memoizable across every cluster member that calls
+   * it. */
+  const calleeInert = (id: ts.Identifier): boolean => {
+    let sym = checker.getSymbolAtLocation(id);
+    if (sym === undefined) return false;
+    if (sym.flags & ts.SymbolFlags.Alias) sym = checker.getAliasedSymbol(sym);
+    const decls = checker.declarationsOf(sym);
+    if (decls.length === 0) return false;
+    // Every declaration must be a plain function declaration: a `let`
+    // rebound to something else, a class, a method torn off an object —
+    // any of those and the callee is not statically known.
+    if (!decls.every((d) => ts.isFunctionDeclaration(d))) return false;
+    const bodied = decls.filter((d) => (d as ts.FunctionDeclaration).body !== undefined);
+    // Overload signatures carry no body; an AMBIENT declaration has none
+    // either, and its implementation is not in the program at all.
+    if (bodied.length === 0) return false;
+    return bodied.every((d) => bodyInert(d as ts.FunctionDeclaration));
+  };
+  const bodyInert = (fn: ts.FunctionDeclaration): boolean => {
+    let memo = CALLEE_BODY_MEMO7.get(program);
+    if (memo === undefined) {
+      memo = new Map();
+      CALLEE_BODY_MEMO7.set(program, memo);
+    }
+    const hit = memo.get(fn);
+    if (hit !== undefined) return hit;
+    // Recursion (direct or mutual) answers false rather than assuming its
+    // own conclusion, and is NOT memoized — the false is an artifact of
+    // where the walk entered, not a fact about the callee.
+    if (bodyInFlight.has(fn)) return false;
+    if (bodyInFlight.size >= 8) return false; // depth cap: cost, not soundness
+    bodyInFlight.add(fn);
+    const prevStrict = strictRoots;
+    const prevBody = surveyedBody;
+    strictRoots = true;
+    // The scope root is the body whose expressions are being walked right
+    // now, which through a nested survey is the CALLEE's, not the
+    // caller's — and it is restored on the way out.
+    surveyedBody = fn;
+    let ok: boolean;
+    try {
+      ok = fn.body !== undefined && statementsInert(fn.body.statements);
+    } finally {
+      strictRoots = prevStrict;
+      surveyedBody = prevBody;
+      bodyInFlight.delete(fn);
+    }
+    if (bodyInFlight.size === 0) memo.set(fn, ok);
+    return ok;
+  };
+  /** The statement forms admissible inside a surveyed body. Deliberately
+   * narrower than a module top level: no loops, no try, no destructuring —
+   * every form here either declares nothing that runs or hands its one
+   * expression to `inert`. Anything unlisted refuses. */
+  const statementsInert = (stmts: readonly ts.Statement[]): boolean =>
+    stmts.every((s) => {
+      if (
+        ts.isInterfaceDeclaration(s) ||
+        ts.isTypeAliasDeclaration(s) ||
+        ts.isFunctionDeclaration(s) ||
+        ts.isEmptyStatement(s)
+      ) {
+        return true;
+      }
+      if (ts.isBlock(s)) return statementsInert(s.statements);
+      if (ts.isReturnStatement(s)) return s.expression === undefined || inert(s.expression);
+      if (ts.isExpressionStatement(s)) return inert(s.expression);
+      if (ts.isVariableStatement(s)) {
+        return s.declarationList.declarations.every(
+          (d) => ts.isIdentifier(d.name) && (d.initializer === undefined || inert(d.initializer)),
+        );
+      }
+      if (ts.isIfStatement(s)) {
+        return (
+          inert(s.expression) &&
+          statementsInert([s.thenStatement]) &&
+          (s.elseStatement === undefined || statementsInert([s.elseStatement]))
+        );
+      }
+      return false;
+    });
   for (const stmt of sf.statements) {
     if (
       ts.isImportDeclaration(stmt) ||
@@ -1595,7 +2098,7 @@ export function makeCycleAdmission(
             break;
           }
           if (m === entered) continue;
-          const off = nonInertTopLevel7(program, m, evaluated);
+          const off = nonInertTopLevel7(program, m, evaluated, comp);
           if (off !== null) {
             offenders++;
             firstOff ??= off;

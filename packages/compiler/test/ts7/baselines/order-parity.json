@@ -10202,6 +10202,49 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/7510-cycle-top-level-call-with-an-inert-callee-body/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/7510-cycle-top-level-call-with-an-inert-callee-body/tag.ts",
+    "<repo>/tests/corpus/7510-cycle-top-level-call-with-an-inert-callee-body/b.ts",
+    "<repo>/tests/corpus/7510-cycle-top-level-call-with-an-inert-callee-body/a.ts",
+    "<repo>/tests/corpus/7510-cycle-top-level-call-with-an-inert-callee-body/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/7511-cycle-top-level-defineproperty-installs-a-method/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/7511-cycle-top-level-defineproperty-installs-a-method/attach.ts",
+    "<repo>/tests/corpus/7511-cycle-top-level-defineproperty-installs-a-method/b.ts",
+    "<repo>/tests/corpus/7511-cycle-top-level-defineproperty-installs-a-method/a.ts",
+    "<repo>/tests/corpus/7511-cycle-top-level-defineproperty-installs-a-method/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/7512-cycle-top-level-table-of-method-shorthands/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/7512-cycle-top-level-table-of-method-shorthands/b.ts",
+    "<repo>/tests/corpus/7512-cycle-top-level-table-of-method-shorthands/a.ts",
+    "<repo>/tests/corpus/7512-cycle-top-level-table-of-method-shorthands/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/7513-cycle-construction-whose-base-lives-outside-the-cluster/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/7513-cycle-construction-whose-base-lives-outside-the-cluster/b.ts",
+    "<repo>/tests/corpus/7513-cycle-construction-whose-base-lives-outside-the-cluster/doc.ts",
+    "<repo>/tests/corpus/7513-cycle-construction-whose-base-lives-outside-the-cluster/a.ts",
+    "<repo>/tests/corpus/7513-cycle-construction-whose-base-lives-outside-the-cluster/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/7514-cycle-construction-whose-body-names-nothing-in-the-cluster/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/7514-cycle-construction-whose-body-names-nothing-in-the-cluster/b.ts",
+    "<repo>/tests/corpus/7514-cycle-construction-whose-body-names-nothing-in-the-cluster/a.ts",
+    "<repo>/tests/corpus/7514-cycle-construction-whose-body-names-nothing-in-the-cluster/main.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/752-cycle-classes.ts": {
    "order": [
     "<repo>/tests/corpus/752-cycle-classes.ts"
