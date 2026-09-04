@@ -10,7 +10,7 @@ import { lowerFetchMethodCall } from "./lower-fetch.js";
 import { BIGINT, BOOL, BYTES_U8, CAUGHT, DYN, F64, IrExpr, IrFunction, IrLocal, IrParam, IrStmt, IrType, JSVAL, STRING, SYMBOL_T, SrcLoc, UNDEFINED_T, VOID, arrayOf, canBoxFuncIntoDyn, canConvertToDyn, canDynCheckTo, canMarshalTypedFuncIntoIsland, funcOf, isUnitType, shapeHasAccessorSlots, typeEquals } from "../../ir/nodes.js";
 import type { IrFfiImport } from "../../ir/nodes.js";
 import { isCjsJsFile, isJsSourceFile, locOf } from "../program.js";
-import { genResultRecord, isGenericCallableMemberType, isSymbolicCandidateType, typeKey} from "../types.js";
+import { erasedUnionOfArms, genResultRecord, isGenericCallableMemberType, isSymbolicCandidateType, typeKey} from "../types.js";
 import { PoisonError, dynFallbackType, dynUndefinedExpr, importCallHandleType, jsFuncNameOf, jsFuncValueNameOf, jsFuncValueSourceOf, newFnCtx, nodeThrowExpr } from "./lowerer.js";
 import { protoThisType } from "./proto-class-consume.js";
 import { enforceLibBoundary } from "./lib-boundary.js";
@@ -7786,7 +7786,7 @@ const inliningPredicates = new Set<ts.Symbol>();
  * query widens a bare parameter instead of admitting it has none), and an
  * UNCONSTRAINED parameter has no widest honest binding — those keep the fence.
  */
-  function contextualConstraintErasure(L: Lowerer, node: ts.Node,): { ir: Map<ts.Symbol, IrType>; ts: Map<ts.Symbol, ts.Type> } | null {
+  function contextualConstraintErasure(L: Lowerer, node: ts.Node,): { ir: Map<ts.Symbol, IrType>; ts: Map<ts.Symbol, ts.Type>; tsArms: Map<ts.Symbol, readonly ts.Type[]> } | null {
     const why = (r: string): null => {
       if (process.env["SCRIPTC_ERASELAMBDA_WHY"] !== undefined) {
         const sf = node.getSourceFile();
@@ -7840,22 +7840,47 @@ const inliningPredicates = new Set<ts.Symbol>();
     }
     const ir = new Map<ts.Symbol, IrType>();
     const tsMap = new Map<ts.Symbol, ts.Type>();
+    const tsArms = new Map<ts.Symbol, readonly ts.Type[]>();
     for (const [i, tp] of tps.entries()) {
       const src = tpDecls[i]?.constraint ?? tpDecls[i]?.defaultType;
       const sym = tp.getSymbol();
-      if (src === undefined || sym === undefined) return why("type parameter without constraint or default");
-      let srcT: ts.Type;
-      try {
-        srcT = L.checker.getTypeFromTypeNode(src);
-      } catch {
-        return why("constraint type node threw");
-      }
-      const mapped = L.mapTypeOf(srcT);
-      if (!mapped || mapped.kind === "void") {
-        return why(`constraint does not map: ${L.checker.typeToString(srcT).slice(0, 70)}`);
+      if (sym === undefined) return why("type parameter without constraint or default");
+      let mapped: IrType | null;
+      let srcT: ts.Type | null = null;
+      let arms: readonly ts.Type[] | null = null;
+      if (src === undefined) {
+        // The SLOT's own answer for a bare `<T>`: the union of the types
+        // the program instantiates it at (constraintErasedCtx). The
+        // producer must be erased by the SAME recipe or the closure it
+        // builds does not fit the slot it fills, so it reads the identical
+        // set off the identical declaration and interns the identical
+        // union.
+        // Gated exactly as the slot side is: only a SIGNATURE-ONLY member
+        // (a MethodSignature — no body, so nothing to monomorphize) takes
+        // the learned union. Everything with a body keeps the fence and
+        // its existing per-call-site instances.
+        if (sigDecl === undefined || sigDecl.kind !== ts.SyntaxKind.MethodSignature) {
+          return why("type parameter without constraint or default");
+        }
+        const tpDecl = tpDecls[i];
+        arms = tpDecl === undefined ? null : L.unconstrainedTpArms(tpDecl);
+        if (arms === null || arms.length === 0) return why("type parameter without constraint or default");
+        mapped = erasedUnionOfArms(arms, L.typeCtx);
+        if (mapped === null) return why("a learned instantiation does not map");
+      } else {
+        try {
+          srcT = L.checker.getTypeFromTypeNode(src);
+        } catch {
+          return why("constraint type node threw");
+        }
+        mapped = L.mapTypeOf(srcT);
+        if (!mapped || mapped.kind === "void") {
+          return why(`constraint does not map: ${L.checker.typeToString(srcT).slice(0, 70)}`);
+        }
       }
       ir.set(sym, mapped);
-      tsMap.set(sym, srcT);
+      if (srcT !== null) tsMap.set(sym, srcT);
+      if (arms !== null) tsArms.set(sym, arms);
       // The method's OWN parameter at this position, bound to the SAME
       // constraint — the body names that symbol, not the slot's.
       if (ownDecls !== undefined) {
@@ -7863,7 +7888,8 @@ const inliningPredicates = new Set<ts.Symbol>();
         const ownSym = ownName !== undefined ? L.checker.getSymbolAtLocation(ownName) : undefined;
         if (ownSym === undefined) return why("object-literal method's type parameter has no symbol");
         ir.set(ownSym, mapped);
-        tsMap.set(ownSym, srcT);
+        if (srcT !== null) tsMap.set(ownSym, srcT);
+        if (arms !== null) tsArms.set(ownSym, arms);
       }
     }
     if (process.env["SCRIPTC_ERASELAMBDA_WHY"] !== undefined) {
@@ -7873,7 +7899,7 @@ const inliningPredicates = new Set<ts.Symbol>();
       console.error(`ERASELAMBDA erase ${sf.fileName}:${p.line + 1} <${shown}> hits=${eraseLambdaHits + 1}`);
     }
     eraseLambdaHits++;
-    return { ir, ts: tsMap };
+    return { ir, ts: tsMap, tsArms };
   }
 
 /** Lifts an arrow function / function expression / nested declaration /
@@ -7889,12 +7915,14 @@ const inliningPredicates = new Set<ts.Symbol>();
     if (erasure === null) return lowerLambdaInner(L, node);
     const prevIr = L.typeParamBindings;
     const prevTs = L.typeParamTsBindings;
+    const prevArms = L.typeParamTsArmsBindings;
     const prevIndexUnion = L.typeCtx.indexUnionOk;
     const prevRestTuple = L.typeCtx.restTupleFromErasure;
     // Merged over any OUTER instantiation: an erased arrow can sit inside a
     // monomorphized generic body, whose bindings the inner walk still needs.
     L.typeParamBindings = new Map([...(prevIr ?? []), ...erasure.ir]);
     L.typeParamTsBindings = new Map([...(prevTs ?? []), ...erasure.ts]);
+    L.typeParamTsArmsBindings = new Map([...(prevArms ?? []), ...erasure.tsArms]);
     // The same two flags constraintErasedCtx sets for the slot's type: `M[K]`
     // under a key-union binding means the union of the named property types,
     // and a rest tuple comes from the erasure.
@@ -7911,6 +7939,7 @@ const inliningPredicates = new Set<ts.Symbol>();
     } finally {
       L.typeParamBindings = prevIr;
       L.typeParamTsBindings = prevTs;
+      L.typeParamTsArmsBindings = prevArms;
       L.typeCtx.indexUnionOk = prevIndexUnion;
       L.typeCtx.restTupleFromErasure = prevRestTuple;
       if (ownGeneric) L.erasedGenericMethods.delete(node);

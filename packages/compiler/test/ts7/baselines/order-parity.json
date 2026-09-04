@@ -10092,12 +10092,6 @@
    ],
    "diags": []
   },
-  "<repo>/tests/corpus/7420-promise-resolve-null-placeholder-field.ts": {
-   "order": [
-    "<repo>/tests/corpus/7420-promise-resolve-null-placeholder-field.ts"
-   ],
-   "diags": []
-  },
   "<repo>/tests/corpus/7410-an-optional-function-member-arrives-from-unknown.ts": {
    "order": [
     "<repo>/tests/corpus/7410-an-optional-function-member-arrives-from-unknown.ts"
@@ -10113,6 +10107,18 @@
   "<repo>/tests/corpus/7412-two-function-arms-and-each-value-takes-its-own.ts": {
    "order": [
     "<repo>/tests/corpus/7412-two-function-arms-and-each-value-takes-its-own.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/7420-promise-resolve-null-placeholder-field.ts": {
+   "order": [
+    "<repo>/tests/corpus/7420-promise-resolve-null-placeholder-field.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/7430-a-bare-type-parameter-erases-to-its-instantiations.ts": {
+   "order": [
+    "<repo>/tests/corpus/7430-a-bare-type-parameter-erases-to-its-instantiations.ts"
    ],
    "diags": []
   },
