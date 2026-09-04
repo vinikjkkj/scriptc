@@ -93,6 +93,12 @@ const TIER_REGRESSIONS = [
   // 7391 quietly stop running instead of failing, and the lane would go
   // green on the regression it exists to catch.
   "7391-truthy-union-handle-arms.ts",
+  // The ESM spellings of the `process` module. Same SKIP trap: before the
+  // preflight admission this program did not compile at all, so a revert
+  // does not fail it here — it drops it into the refused column and this
+  // suite goes green on the regression. The pin is what makes the lane
+  // say so.
+  "7450-process-module-esm-import-forms.ts",
 ];
 
 interface RunResult {
