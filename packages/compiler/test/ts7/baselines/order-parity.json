@@ -10134,9 +10134,6 @@
    ],
    "diags": []
   },
-   ],
-   "diags": []
-  },
   "<repo>/tests/corpus/7470-promiselike-is-a-promise-slot.ts": {
    "order": [
     "<repo>/tests/corpus/7470-promiselike-is-a-promise-slot.ts"
