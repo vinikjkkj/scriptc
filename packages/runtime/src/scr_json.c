@@ -5649,6 +5649,42 @@ void scr_dyn_static_copy_refuse(const char *what) {
   scr_throw_error(SCR_ERR_ERROR, scr_jb_finish(&b));
 }
 
+/* The EXTRACTION twin of scr_dyn_static_copy_refuse: a checked cast that
+ * would recover a static array or record OUT of a boundary copy. The
+ * value it hands back is a SECOND object where Node hands back the first
+ * one, so `back === original` reads false, a write through either is
+ * invisible to the other, and a write made through the ORIGINAL between
+ * the crossing and the cast is not in the copy at all. Every one of those
+ * is a wrong answer with no diagnostic, which is what this replaces.
+ * `what` names the recovered kind ("an array", "a record"). */
+/* "Is this value an array/record COPY the static—>dyn boundary made of a
+ * source the program still names?" — the one definition of that question,
+ * so the two backends cannot answer it differently. A module NAMESPACE
+ * carries the same bit and is deliberately not one: it is frozen in Node,
+ * so a copy of it can lose no write and go stale on nothing. */
+bool scr_dyn_is_boundary_copy(const ScrDyn *d) {
+  return d->static_copy && !d->module_ns;
+}
+
+void scr_dyn_static_copy_extract_refuse(const char *what) {
+  ScrJsonBuf b;
+  scr_jb_init(&b);
+  scr_jb_puts(&b, "recovering ");
+  scr_jb_puts(&b, what);
+  scr_jb_puts(&b, " out of a value that crossed into an 'unknown' (dynamic)"
+                  " slot is not supported yet: the crossing COPIED it (a static"
+                  " array is a packed ScrArr and a record is a C struct, and the"
+                  " dynamic tree can share neither), so this cast would hand back"
+                  " a SECOND object where Node hands back the first one —"
+                  " identity reads false, a write through either is invisible to"
+                  " the other, and a write made through the original since the"
+                  " crossing is not in this copy at all. A Uint8Array or Buffer, a"
+                  " class instance, a Map and a function all cross by REFERENCE and"
+                  " recover as themselves; giving the parameter a static type keeps"
+                  " the value static across the call");
+  scr_throw_error(SCR_ERR_ERROR, scr_jb_finish(&b));
+}
+
 void scr_dyn_key_set(ScrDyn *recv, ScrStr *key, ScrDyn *value) {
 #ifdef SCR_DYNCEN_ON
   scr_dyncen_note_korigin(SCR_DYNCEN_KO_KEYSET);
