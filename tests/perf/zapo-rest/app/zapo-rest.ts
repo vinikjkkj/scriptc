@@ -213,10 +213,24 @@ let lastConnectionEvent: unknown = null;
 let connectStarted = false;
 let sentCount = 0;
 let recvCount = 0;
+let storeReady = false;
+let storeError: string | null = null;
+let hasCredentials = false;
 
 /* ── the store and the client ──────────────────────────────────────────── */
 
-const backend = createSqliteStore({ path: DB_PATH, driver: "auto" });
+/* zapo's store-sqlite defaults are journal_mode=WAL, synchronous=normal and
+ * busy_timeout=5000 -- it does NOT default cache_size, so the database would
+ * run on SQLite's compiled-in 2 MiB page cache, which is small for a
+ * long-lived server with a real message archive. cache_size IS on
+ * store-sqlite's allowed-pragma list, so this is a supported knob and not a
+ * patch: a negative value is KiB. ZAPO_SQLITE_CACHE_KB=0 leaves zapo's
+ * behaviour exactly as shipped. */
+const CACHE_KB = envNum("ZAPO_SQLITE_CACHE_KB", 16000);
+const backend =
+  CACHE_KB > 0
+    ? createSqliteStore({ path: DB_PATH, driver: "auto", pragmas: { cache_size: -CACHE_KB } })
+    : createSqliteStore({ path: DB_PATH, driver: "auto" });
 const store = createStore({
   backends: { sqlite: backend },
   providers: {
@@ -303,6 +317,60 @@ client.on("newsletter", (e) => {
 client.on("stream_failure", (e) => {
   push("stream_failure", e);
 });
+client.on("stanza_error", (e) => {
+  push("stanza_error", e);
+});
+client.on("auth_passkey_required", (e) => {
+  push("auth_passkey_required", e);
+  console.log(`[auth] a passkey is required to link this device (signer configured: ${e.hasSigner ? "yes" : "no"})`);
+});
+client.on("message_addon", (e) => {
+  push("message_addon", e);
+});
+client.on("message_bot_chunk", (e) => {
+  push("message_bot_chunk", e);
+});
+client.on("message_protocol", (e) => {
+  push("message_protocol", e);
+});
+client.on("message_unavailable", (e) => {
+  push("message_unavailable", e);
+});
+client.on("newsletter_message_update", (e) => {
+  push("newsletter_message_update", e);
+});
+client.on("mex_notification", (e) => {
+  push("mex_notification", e);
+});
+client.on("business", (e) => {
+  push("business", e);
+});
+client.on("picture", (e) => {
+  push("picture", e);
+});
+client.on("history_sync_chunk", (e) => {
+  /* A history-sync chunk can be very large; record that it arrived and how
+   * big it was rather than parking the whole payload in the ring. */
+  push("history_sync_chunk", { received: true, progress: e.progress, syncType: e.syncType });
+});
+client.on("offline_resume", (e) => {
+  push("offline_resume", e);
+});
+client.on("mobile_registration_code", (e) => {
+  push("mobile_registration_code", e);
+});
+client.on("mobile_account_takeover_notice", (e) => {
+  push("mobile_account_takeover_notice", e);
+});
+client.on("companion_host_linked", (e) => {
+  push("companion_host_linked", e);
+});
+client.on("companion_host_revoked", (e) => {
+  push("companion_host_revoked", e);
+});
+client.on("companion_host_error", (e) => {
+  push("companion_host_error", e);
+});
 
 function startConnect(): void {
   if (connectStarted) return;
@@ -363,7 +431,15 @@ async function route(method: string, path: string, p: Bag): Promise<unknown> {
     return {
       ok: true,
       uptimeMs: Date.now() - STARTED_MS,
-      store: { driver: "sqlite", path: DB_PATH, sessionId: SESSION_ID },
+      store: {
+        driver: "sqlite",
+        path: DB_PATH,
+        sessionId: SESSION_ID,
+        cacheKiB: CACHE_KB > 0 ? CACHE_KB : "sqlite default",
+        ready: storeReady,
+        error: storeError,
+        paired: hasCredentials,
+      },
       connection: {
         connected: connected,
         hasQr: currentQr !== null,
@@ -1124,6 +1200,28 @@ const server = createServer((req: IncomingMessage, res: ServerResponse) => {
   });
 });
 
+/* The store is LAZY: createSqliteStore/createStore do not touch the file, and
+ * the schema is only created when a domain first reads. Force that here so a
+ * first run creates and MIGRATES the database up front rather than on the
+ * first request that happens to need it, and so /health can say whether the
+ * store is actually usable before any WhatsApp traffic exists. */
+function initStore(): void {
+  sessionStore.auth.load().then(
+    (creds) => {
+      storeReady = true;
+      hasCredentials = creds !== null;
+      console.log(
+        `  store    : ready, migrations applied; session is ${creds !== null ? "PAIRED (credentials found)" : "unpaired (scan the QR below)"}`,
+      );
+      if (AUTOCONNECT) startConnect();
+    },
+    (err: unknown) => {
+      storeError = String(err);
+      console.log(`  store    : FAILED to open: ${String(err)}`);
+    },
+  );
+}
+
 server.listen(PORT, HOST, () => {
   console.log(`zapo-rest listening on http://${HOST}:${PORT}`);
   console.log(`  store    : sqlite ${DB_PATH}`);
@@ -1131,8 +1229,8 @@ server.listen(PORT, HOST, () => {
   console.log(`  auth     : ${TOKEN === "" ? "OPEN (set ZAPO_REST_TOKEN to require x-api-key)" : "x-api-key required"}`);
   if (AUTOCONNECT) {
     console.log("  connecting to WhatsApp; the QR will print below when it arrives");
-    startConnect();
   } else {
     console.log("  ZAPO_AUTOCONNECT=0 — POST /connect to start");
   }
+  initStore();
 });
