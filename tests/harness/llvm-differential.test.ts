@@ -105,6 +105,12 @@ const TIER_REGRESSIONS = [
   // lane and lands in the refused column, and the suite goes green on the
   // regression it exists to catch.
   "7470-promiselike-is-a-promise-slot.ts",
+  // A generic called at 110 distinct keys. Same SKIP trap, and the reason
+  // it is here rather than only in the corpus: the old population cap
+  // REFUSED the program outright at its 101st instantiation, so a revert
+  // does not fail it -- it stops compiling on both lanes and lands in the
+  // refused column, and the suite goes green on the regression.
+  "7520-a-generic-called-at-more-distinct-keys-than-the-old-cap.ts",
 ];
 
 interface RunResult {
