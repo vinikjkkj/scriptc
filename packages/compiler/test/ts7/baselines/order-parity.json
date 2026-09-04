@@ -10251,6 +10251,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/7520-a-generic-called-at-more-distinct-keys-than-the-old-cap.ts": {
+   "order": [
+    "<repo>/tests/corpus/7520-a-generic-called-at-more-distinct-keys-than-the-old-cap.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/753-cycle-owned-arrays.ts": {
    "order": [
     "<repo>/tests/corpus/753-cycle-owned-arrays.ts"
@@ -11893,6 +11899,12 @@
      "hint": "relative imports (./file, ../dir/file), package.json-mediated project imports (#alias via the imports field, self-name references via exports), installed npm packages (their code runs under --dynamic), and the built-in fs, fs/promises, path, os, url, crypto, zlib, child_process, net, http, tls, https, http2, dgram, dns, util, util/types, string_decoder, querystring, readline, events, stream, stream/promises, stream/consumers, buffer, assert, assert/strict, worker_threads, cluster, tty, async_hooks, timers, timers/promises, diagnostics_channel, perf_hooks, and module modules (bare or node:-prefixed) and node:test (node:-prefixed only, like in Node) are supported"
     }
    ]
+  },
+  "<repo>/tests/diagnostics/polymorphic-recursion-is-a-chain-not-a-population.ts": {
+   "order": [
+    "<repo>/tests/diagnostics/polymorphic-recursion-is-a-chain-not-a-population.ts"
+   ],
+   "diags": []
   },
   "<repo>/tests/diagnostics/private-members.ts": {
    "order": [
