@@ -2252,10 +2252,26 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
         // (scr_dyn_key_set and the array mutators) then refuse LOUDLY,
         // naming the boundary, instead of accepting a write nobody will
         // ever read. Read-only uses are untouched.
-        return E.newTemp(
-          e.type,
-          dynCopyIsObservable(e.value) ? `scr_dyn_mark_static_copy(${conv})` : conv,
-        );
+        //
+        // ...and the copy REMEMBERS the object it was made from, so the
+        // recovery on the way back out (dynCheckHelper's array and record
+        // builders) can hand that object back instead of building a second
+        // one. That is what makes `back === original` true, a write in
+        // either direction visible to the other, and a write made through
+        // the original since the crossing present in the recovered value —
+        // the four answers a boxed class instance, a Uint8Array, a Map and
+        // a closure already give, because each of those recovers as the
+        // pointer it boxed. `v.name` is a plain C temp, so naming it twice
+        // re-evaluates nothing.
+        if (dynCopyIsObservable(e.value)) {
+          const { retain, release } = vAdapters(v.type);
+          const tk = cStringLiteral(Buffer.from(typeKey(v.type), "utf8"));
+          return E.newTemp(
+            e.type,
+            `scr_dyn_origin_mark(${conv}, (void *)${v.name}, ${tk}, ${retain}, ${release})`,
+          );
+        }
+        return E.newTemp(e.type, conv);
       }
       case "dynFromJsval": {
         // Island value → dyn: the by-reference wrap (scr_dyn_from_jsval
