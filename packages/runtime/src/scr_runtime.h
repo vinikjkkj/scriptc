@@ -5176,6 +5176,28 @@ ScrDyn *scr_dyn_new_bytes_ref(ScrBytes *b);
  * the converter's own freshly built, acyclic output (cycle-capable shapes
  * trap before reaching here), so the walk terminates. */
 ScrDyn *scr_dyn_mark_static_copy(ScrDyn *d);
+/* scr_dyn_mark_static_copy's whole effect, plus the ORIGIN: the static
+ * array or record this copy was made from, RETAINED for as long as the
+ * copy lives, under the compiler's interned typeKey of its static type.
+ * The recovery below hands that object back instead of building a second
+ * one, so identity, a write in either direction, and a write made
+ * through the original since the crossing all answer what Node answers.
+ * Answers d unchanged (+0); `obj` stays borrowed at the call site (the
+ * table takes its own reference through `retain`). See the long comment
+ * on the table in scr_json.c for why it is a side table and not a
+ * field. */
+ScrDyn *scr_dyn_origin_mark(ScrDyn *d, void *obj, const char *tkey,
+                            void *(*retain)(void *), void (*release)(void *));
+/* "Was this copy made from a live <tkey>?" — the origin BORROWED, or
+ * NULL, in which case the caller builds the fresh object it always
+ * built. NULL for everything that is not a marked ARR/OBJ copy, so the
+ * emitted recovery can ask unconditionally. A key MISMATCH answers NULL
+ * too: the same dyn value can be recovered at a different static type
+ * than it crossed at, and the origin is the wrong shape there. */
+void *scr_dyn_origin_take(const ScrDyn *d, const char *tkey);
+/* Drops a dying copy's origin. Called from the ARR/OBJ teardown behind
+ * `static_copy`; a node with no entry is a cheap miss. */
+void scr_dyn_origin_forget(ScrDyn *d);
 /* Marks a module NAMESPACE snapshot: scr_dyn_mark_static_copy's whole
  * effect, plus the `module_ns` flag on the top object so the mutation
  * refusals name the namespace instead of the boundary copy. Answers d

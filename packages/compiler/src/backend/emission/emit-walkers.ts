@@ -2052,6 +2052,54 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
      * carries it out so the caller needs one test, not two. */
     const afterHard = (ind: string, rel: string, dummy: string): string =>
       `${ind}if (scr_exc_pending()) { ${soft ? "*ok = false; " : ""}${rel}return ${dummy}; }`;
+    /* THE ORIGIN RECOVERY, emitted at the head of the array and record
+     * builders — the two whose crossing COPIES.
+     *
+     * When this dyn value is a boundary copy of a live static object of
+     * exactly this type, the object itself is the answer: `back ===
+     * original` is true, a write through either side is seen by the
+     * other, and a write made through the original since the crossing is
+     * already there. Building a second object instead is the silent
+     * wrong answer this replaces.
+     *
+     * It cannot over-refuse, because it refuses nothing: a miss — no
+     * origin, a different static type, a parsed value, a temporary whose
+     * source is gone — falls through to the fresh build that has always
+     * happened, byte for byte. That is the whole difference from the
+     * REFUSAL this defect's previous fix planted at these same two exits,
+     * which turned 39 corpus programs that answer Node correctly into
+     * hard errors: the receiver at a cast cannot tell a copy whose loss
+     * matters from one whose loss does not, so the only safe thing to do
+     * with the knowledge is to hand back a better VALUE, never to throw.
+     *
+     * The retain is the same void*-thunk pair a container slot would use
+     * for this type, so the recovered object arrives at +1 exactly like
+     * the freshly built one and every caller's ownership is unchanged. */
+    // The `static_copy` test is INLINE with the call behind it: the common
+    // receiver is not a boundary copy at all (a parsed value, a decoded
+    // one, anything the program built itself), and the flag is false for
+    // every dyn such a program produces — the table is not even allocated
+    // then.
+    //
+    // IT IS NOT WHAT MAKES THE MISS PATH CHEAP, and the measurement says so.
+    // On a loop of 400,000 recoveries of JSON.parse output the
+    // unconditional call cost +5.48% against base and this inline form
+    // costs +5.38% — the same, inside a layout floor of about 2%. So the
+    // cost is not the call: it is that anything added to the preamble of
+    // `sc_dc_N` / `sc_da_N` perturbs how the C compiler treats these static
+    // functions. The teardown half of the change was measured apart and is
+    // free (-1.56%, i.e. nothing, on a loop that allocates and frees the
+    // same trees and recovers none of them).
+    //
+    // The trade is worth naming: on a program that DOES cross, the recovery
+    // stops building an object at all and the same harness measures -36.7%.
+    // The +5.4% is paid only by a program that recovers constantly and
+    // crosses nothing.
+    const originRecover = (ind: string): string => {
+      const { retain } = vAdapters(t);
+      const tk = cStringLiteral(Buffer.from(key, "utf8"));
+      return `${ind}if (d->static_copy) { void *sc_o = scr_dyn_origin_take(d, ${tk}); if (sc_o != NULL) return (${cType(t).trim()})${retain}(sc_o); }`;
+    };
     switch (t.kind) {
       case "f64":
         if (soft) d.push(`  (void)path;`);
@@ -2205,6 +2253,7 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
           d.push(
             fail(`  `, "tuple.arity", `d->v.arr.len != ${byIndex.length}`, `NULL`, ``, arityWant),
           );
+          d.push(originRecover(`  `));
           d.push(`  ${cDecl(t, "r")} = ${mangleRecordNew(t.shapeId)}();`);
           byIndex.forEach((f, i) => {
             d.push(`  {`);
@@ -2258,6 +2307,12 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
         const wide = kindgateWideLane(E.kindgateDials, soft, shape)
           ? E.recordWideHelper()
           : null;
+        // Ahead of the kind gate and the wide lane both: an origin is by
+        // construction an OBJ copy of this exact shape, so neither has
+        // anything to decide about it, and taking it here means a
+        // recovered record never pays for a projection it would throw
+        // away.
+        d.push(originRecover(`  `));
         if (wide) {
           const keysName = `sc_kgk_${t.shapeId}`;
           const lensName = `sc_kgl_${t.shapeId}`;
@@ -2605,6 +2660,7 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
         const elem = t.elem;
         const c = childC(elem);
         d.push(fail(`  `, "array.kind", `d->kind != SCR_DYN_ARR`, `NULL`));
+        d.push(originRecover(`  `));
         d.push(`  ScrArr *a = ${E.arrNewC(elem, "d->v.arr.len")};`);
         d.push(`  for (size_t i = 0; i < d->v.arr.len; i++) {`);
         d.push(`    ScrDynPath p = { path, NULL, i };`);

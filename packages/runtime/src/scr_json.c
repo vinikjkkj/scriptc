@@ -671,6 +671,19 @@ static void scr_dyn_gcfree(void *o) {
   scr_dyncen_note_dead(d); /* the collector's exit from the live set; the
                             * fields are still intact at this point */
 #endif
+  /* A boundary copy the COLLECTOR reclaimed drops its origin HERE, because
+   * this is a second teardown reaching the same two kinds by a different
+   * road: scr_dyn_release's switch never runs for a node trial deletion
+   * takes. Without this the origin's reference is leaked outright (the RC
+   * audit reports it) and the table keeps an entry keyed on an address the
+   * allocator is about to hand out again. Releasing a refcounted object
+   * from inside gcfree is what the OBJINST arm below already does.
+   *
+   * The ARR arm is spelled in the condition rather than as a `case`: the
+   * switch has none, because an array's items are TRACED and there is
+   * otherwise nothing for it to do. */
+  if (d->static_copy && (d->kind == SCR_DYN_ARR || d->kind == SCR_DYN_OBJ))
+    scr_dyn_origin_forget(d);
   switch (d->kind) {
   case SCR_DYN_STR:
     scr_str_release(d->v.str);
@@ -760,9 +773,15 @@ void scr_dyn_release(ScrDyn *d) {
     scr_bytes_release(d->v.bytes);
     break;
   case SCR_DYN_ARR:
+    /* A boundary copy drops the object it was made from. Behind
+     * `static_copy` because that bit is already loaded here and is false
+     * for every dyn value a program that never crosses one produces —
+     * the table is not even allocated then. */
+    if (d->static_copy) scr_dyn_origin_forget(d);
     for (size_t i = 0; i < d->v.arr.len; i++) scr_dyn_release(d->v.arr.items[i]);
     break;
   case SCR_DYN_OBJ:
+    if (d->static_copy) scr_dyn_origin_forget(d);
     for (size_t i = 0; i < d->v.obj.len; i++) {
       if (!d->v.obj.entries[i].key_static)
         scr_json_key_free(d->v.obj.entries[i].key, d->v.obj.entries[i].key_len);
@@ -1842,6 +1861,210 @@ ScrDyn *scr_dyn_new_bytes_ref(ScrBytes *b) {
   d->v.bytes = scr_bytes_retain(b);
   d->buffer = dyn_bytes_is_buffer(b);
   return d;
+}
+
+/* ── the boundary copy's ORIGIN ────────────────────────────────────────
+ *
+ * A static array or record that crosses into an `unknown` slot is COPIED
+ * — different representations, which is exactly why bytes, maps,
+ * closures, handles and class instances can SHARE and these two cannot:
+ * a packed ScrArr of monomorphic slots and a C struct of mangled fields
+ * against a ScrDyn** vector and a ScrDynEntry table.
+ *
+ * Recovering one back out used to build a SECOND static object. So
+ * `back === original` read false, a write through either side was
+ * invisible to the other, and a write made through the original since
+ * the crossing was missing from the recovered value — every one of them
+ * at exit 0 with no diagnostic.
+ *
+ * The copy now REMEMBERS the object it was made from, and the recovery
+ * hands THAT object back instead of building a new one. It is the answer
+ * the by-reference kinds already give (a boxed class instance recovers
+ * as the same pointer — scr_dyn_objinst_ptr_of), reached without
+ * changing what an ARR or OBJ node physically IS: all 86 runtime
+ * functions that read `v.arr.*` or `v.obj.*` keep reading exactly what
+ * they read before, and neither backend's hardcoded payload offsets
+ * move.
+ *
+ * A SIDE TABLE rather than a field, because ScrDyn has no room for one:
+ * the payload union is 32 bytes wide (the FUNC arm), the ARR arm is 16
+ * and the OBJ arm 24, so an origin pointer plus its type key fits the
+ * first and overflows the second; and the four flag bools sit exactly in
+ * the padding between `kind` and the union, so a fifth would push the
+ * union out by 8 bytes on EVERY dyn value in the program.
+ *
+ * The table is written only at the crossing that already calls
+ * scr_dyn_mark_static_copy, and read only where `static_copy` is already
+ * true — a bit every one of these paths has loaded anyway. A program
+ * that never crosses an observable array or record never allocates it.
+ *
+ * The type key is the compiler's interned typeKey of the static type the
+ * origin WAS, and it is load-bearing rather than tidy: the same dyn value
+ * can be recovered at a DIFFERENT static type than it crossed at (a
+ * widening `{a, b}` recovered as `{a}`), and handing back the origin
+ * there would be a pointer of the wrong shape. A key mismatch falls
+ * through to the fresh build that has always happened. It is the FUNC
+ * box's `sig` and the MAP box's `tkey`, for the same job. */
+typedef struct {
+  ScrDyn *d;        /* the boundary copy — the key; NULL = empty slot */
+  void *obj;        /* the static origin, RETAINED for the copy's lifetime */
+  const char *tkey; /* compiler-emitted static literal; never owned */
+  void (*release)(void *);
+} ScrDynOriginEnt;
+
+static ScrDynOriginEnt *dyn_origin_tab = NULL;
+static size_t dyn_origin_cap = 0;  /* always a power of two, or 0 */
+static size_t dyn_origin_len = 0;
+
+static size_t dyn_origin_hash(const ScrDyn *d) {
+  /* Fibonacci scramble of the pointer: the low bits of a malloc'd
+   * ScrDyn are near-constant (the allocator hands out one size class
+   * here), so the raw pointer clusters catastrophically under a mask. */
+  uint64_t x = (uint64_t)(uintptr_t)d;
+  x *= 0x9E3779B97F4A7C15ull;
+  return (size_t)(x >> 32);
+}
+
+/* The slot `d` occupies, or the first empty one on its probe path.
+ * Linear probing with no tombstones: removal back-shifts (below), so a
+ * probe stops at the first empty slot and never walks past a hole. */
+static size_t dyn_origin_slot(const ScrDyn *d) {
+  size_t mask = dyn_origin_cap - 1;
+  size_t i = dyn_origin_hash(d) & mask;
+  while (dyn_origin_tab[i].d != NULL && dyn_origin_tab[i].d != d) i = (i + 1) & mask;
+  return i;
+}
+
+/* The table at exit. Unlike the constructor table above this one DOES
+ * hold counted references — the origin of every boundary copy still
+ * alive — so the release is not optional: without it the RC audit
+ * reports each pinned origin as a leak, and the library lane would start
+ * its next session holding objects from the previous one. */
+static void dyn_origin_teardown(void) {
+  /* Detach the table BEFORE releasing anything, for scr_dyn_origin_forget's
+   * reason: a release here can re-enter this file, and it must find an
+   * empty table rather than one being walked. Every entry is released from
+   * the detached copy, so a re-entrant forget is a no-op instead of a
+   * double free. */
+  ScrDynOriginEnt *tab = dyn_origin_tab;
+  size_t cap = dyn_origin_cap;
+  dyn_origin_tab = NULL;
+  dyn_origin_cap = 0;
+  dyn_origin_len = 0;
+  for (size_t i = 0; i < cap; i++) {
+    if (tab[i].d == NULL) continue;
+    if (tab[i].release) tab[i].release(tab[i].obj);
+  }
+  free(tab);
+}
+
+static void dyn_origin_grow(void) {
+  if (dyn_origin_cap == 0) scr_atexit(dyn_origin_teardown);
+  size_t ncap = dyn_origin_cap ? dyn_origin_cap * 2 : 16;
+  ScrDynOriginEnt *old = dyn_origin_tab;
+  size_t ocap = dyn_origin_cap;
+  ScrDynOriginEnt *nt = (ScrDynOriginEnt *)calloc(ncap, sizeof *nt);
+  if (nt == NULL) scr_json_oom();
+  dyn_origin_tab = nt;
+  dyn_origin_cap = ncap;
+  for (size_t i = 0; i < ocap; i++) {
+    if (old[i].d == NULL) continue;
+    dyn_origin_tab[dyn_origin_slot(old[i].d)] = old[i];
+  }
+  free(old);
+}
+
+ScrDyn *scr_dyn_origin_mark(ScrDyn *d, void *obj, const char *tkey,
+                            void *(*retain)(void *), void (*release)(void *)) {
+  /* The crossing's whole effect: the existing static-copy mark over the
+   * subtree, plus this node's origin. The mark comes FIRST because the
+   * table is only ever consulted behind `static_copy`. */
+  scr_dyn_mark_static_copy(d);
+  if (d == NULL || obj == NULL) return d;
+  if (d->kind != SCR_DYN_ARR && d->kind != SCR_DYN_OBJ) return d;
+  /* A module NAMESPACE snapshot carries `static_copy` too and is NOT a
+   * boundary copy of anything the program can name; it never reaches
+   * this constructor, and the kind gate above is not what keeps it out —
+   * scr_dyn_mark_module_ns is a different entry point. Stated because
+   * the two flags travel together everywhere else. */
+  if (dyn_origin_len * 10 >= dyn_origin_cap * 7) dyn_origin_grow();
+  /* The retain happens BEFORE the table is touched and the displaced
+   * entry's release AFTER it is whole again — the reentrancy discipline
+   * this whole table is written to, and the reason is in
+   * scr_dyn_origin_forget's comment: either call can re-enter here. */
+  void *taken = retain ? retain(obj) : obj;
+  size_t i = dyn_origin_slot(d);
+  ScrDynOriginEnt old = dyn_origin_tab[i];
+  if (old.d == NULL) dyn_origin_len++;
+  dyn_origin_tab[i].d = d;
+  dyn_origin_tab[i].obj = taken;
+  dyn_origin_tab[i].tkey = tkey;
+  dyn_origin_tab[i].release = release;
+  /* Re-marking a node that already carries an origin: the LAST crossing
+   * wins, which is the only one whose static value is still the one this
+   * copy was built from. Cannot happen from the emitted crossing (the
+   * converter hands back a fresh tree every time) and is handled rather
+   * than asserted because nothing here should depend on that staying
+   * true. */
+  if (old.d != NULL && old.release) old.release(old.obj);
+  return d;
+}
+
+void *scr_dyn_origin_take(const ScrDyn *d, const char *tkey) {
+  /* The recovery's question: "was this copy made from a live <tkey>?".
+   * Answers the origin at +1, or NULL — in which case the caller builds
+   * the fresh object it has always built. */
+  if (d == NULL || !d->static_copy || dyn_origin_cap == 0) return NULL;
+  if (d->kind != SCR_DYN_ARR && d->kind != SCR_DYN_OBJ) return NULL;
+  size_t i = dyn_origin_slot(d);
+  ScrDynOriginEnt *e = &dyn_origin_tab[i];
+  if (e->d == NULL) return NULL;
+  /* Pointer equality first: both sides are the compiler's ONE interned
+   * literal for a given typeKey within a TU, so the strcmp is the
+   * cross-TU fallback and not the common path. */
+  if (e->tkey != tkey && (e->tkey == NULL || tkey == NULL || strcmp(e->tkey, tkey) != 0)) return NULL;
+  return e->obj; /* borrowed here; the emitted recovery retains it */
+}
+
+void scr_dyn_origin_forget(ScrDyn *d) {
+  /* Called from BOTH teardowns (scr_dyn_release's switch and the
+   * collector's scr_dyn_gcfree), behind `static_copy`. Back-shift
+   * deletion, so the probe path stays hole-free and no tombstone kind is
+   * needed.
+   *
+   * THE RELEASE IS LAST, AND THAT ORDER IS LOAD-BEARING. Releasing the
+   * origin runs an arbitrary amount of teardown: a record's `dyn` field,
+   * or an array of dyn, can hold another boundary copy, whose own
+   * teardown re-enters this function. If that happened while the slot was
+   * still occupied, or mid-back-shift, the re-entrant call would walk a
+   * probe path with a hole in it — and a re-entrant scr_dyn_origin_mark
+   * could GROW the table and free the very array `dyn_origin_tab[i]` was
+   * about to be written through. Emptying the slot and finishing the
+   * shift first means the table is whole and consistent before any
+   * foreign code runs. */
+  if (dyn_origin_cap == 0) return;
+  size_t mask = dyn_origin_cap - 1;
+  size_t i = dyn_origin_slot(d);
+  if (dyn_origin_tab[i].d == NULL) return;
+  ScrDynOriginEnt gone = dyn_origin_tab[i];
+  dyn_origin_tab[i].d = NULL;
+  dyn_origin_len--;
+  size_t j = i;
+  for (;;) {
+    j = (j + 1) & mask;
+    ScrDyn *k = dyn_origin_tab[j].d;
+    if (k == NULL) break;
+    size_t want = dyn_origin_hash(k) & mask;
+    /* Does slot j's entry belong at or before i on its probe path? */
+    bool movable = (j > i) ? (want <= i || want > j) : (want <= i && want > j);
+    if (movable) {
+      dyn_origin_tab[i] = dyn_origin_tab[j];
+      dyn_origin_tab[j].d = NULL;
+      i = j;
+    }
+  }
+  /* The table is whole again; now the origin may go, re-entrantly or not. */
+  if (gone.release) gone.release(gone.obj);
 }
 
 ScrDyn *scr_dyn_mark_static_copy(ScrDyn *d) {

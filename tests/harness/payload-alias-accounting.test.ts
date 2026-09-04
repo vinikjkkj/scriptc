@@ -141,15 +141,30 @@ describe("the dyn->static recovery is a copy, and the store into it is lost", ()
   test("the source is really the zapo shape: a MARKED static copy feeds a keyed read", async () => {
     const c = await emitC();
     // The record is copied wholesale into a dyn, and the compiler already
-    // judges the copy observable — that is the `scr_dyn_mark_static_copy`.
-    expect(c).toMatch(/scr_dyn_mark_static_copy\(sc_td_\d+\(/);
+    // judges the copy observable. That mark is now spelled
+    // `scr_dyn_origin_mark`, which performs `scr_dyn_mark_static_copy`'s
+    // whole effect and additionally records the object the copy was made
+    // FROM — so the marking this row is about is unchanged, and only its
+    // call site's name moved.
+    expect(c).toMatch(/scr_dyn_origin_mark\(sc_td_\d+\(/);
     expect(c).toMatch(/sc_dyn_key_get\(/);
   });
 
-  test("the recovered carrier is a FRESH struct, not the original", async () => {
+  test("the recovered carrier is a FRESH struct here, because the SHAPE changes", async () => {
     const c = await emitC();
-    // Every record checker allocates. If one ever stops allocating and hands
-    // back a borrowed pointer instead, this is the line that notices.
+    // Every record checker still allocates, and on THIS program the
+    // allocation is still what runs.
+    //
+    // A checker now opens with an origin recovery: when the dyn is a
+    // boundary copy of a live static object OF THE SAME TYPE, it hands that
+    // object back and never reaches the allocation. That is what closes the
+    // round-trip half of this family — but not this program. The whole point
+    // of the zapo shape is that the recovery crosses A SHAPE CHANGE:
+    // `ContextInfoCarrier` is not `IExtendedTextMessage`, so the interned
+    // type key the copy carries is not the key this checker asks for, the
+    // origin lookup misses, and the fresh struct below is what the store
+    // lands on. The divergence this file pins is therefore intact, and the
+    // assertion is deliberately kept as "it allocates" rather than relaxed.
     const checkers = [...c.matchAll(/static sc_rs_r\d+ \*(sc_dc_\d+)\(const ScrDyn \*d[^)]*\) \{/g)];
     expect(checkers.length).toBeGreaterThan(0);
     for (const m of checkers) {
