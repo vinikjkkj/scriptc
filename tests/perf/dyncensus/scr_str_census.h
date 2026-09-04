@@ -131,6 +131,30 @@ SCR_STRCEN_FN int scr_strcen_row(long long cap) {
 #define SCR_STRCEN_HSLOTS (1u << 23)
 #endif
 
+/* ── WHAT the duplicates ARE ──────────────────────────────────────────
+ * "95% of the live strings are byte-equal to another live string" prices
+ * interning and names nothing. A ceiling with no content behind it cannot
+ * say WHERE to intern, and the difference between "one call site makes
+ * these" and "every site makes a few" is the difference between a local
+ * change and a new allocator.
+ *
+ * So the walk also carries the TOP contents by live multiplicity, with a
+ * sample of the bytes. Two passes over the same population: the first
+ * counts per content hash, the second copies a payload for the rows that
+ * made the top. Both are O(live) and allocate nothing — the count column
+ * rides the existing hash table and the samples are a fixed array.
+ *
+ * The sample is TRUNCATED to SCR_STRCEN_SAMPLE bytes and the true length is
+ * printed beside it, so a reader can never mistake the excerpt for the
+ * string. Non-printable bytes are escaped as '.', which is lossy on
+ * purpose: this is a locator, not a transcript. */
+#ifndef SCR_STRCEN_TOPN
+#define SCR_STRCEN_TOPN 24
+#endif
+#ifndef SCR_STRCEN_SAMPLE
+#define SCR_STRCEN_SAMPLE 72
+#endif
+
 /* rc rows: 1, 2, 3, 4, 5-8, 9-16, 17+. */
 #define SCR_STRCEN_RCROWS 7
 SCR_STRCEN_FN int scr_strcen_rcrow(unsigned long long rc) {
@@ -207,6 +231,20 @@ SCR_STRCEN_SHARED long long scr_strcen_walk_len_max[SCR_STRCEN_WALKSETS] = {0};
 SCR_STRCEN_SHARED long long scr_strcen_walk_at_n[SCR_STRCEN_WALKSETS] = {0};
 
 SCR_STRCEN_SHARED const void *scr_strcen_ptbl[SCR_STRCEN_PSLOTS] = {0};
+
+/* The top-multiplicity rows, filled by the walk's second pass. `n` is the
+ * number of LIVE strings with this content; `bytes` is what they cost
+ * together in allocator buckets. */
+typedef struct {
+  unsigned long long h;
+  long long n;
+  long long bytes;
+  long long len;
+  long long cap;
+  char sample[SCR_STRCEN_SAMPLE + 1];
+} ScrStrcenTop;
+SCR_STRCEN_SHARED ScrStrcenTop scr_strcen_top[SCR_STRCEN_WALKSETS][SCR_STRCEN_TOPN];
+SCR_STRCEN_SHARED long long scr_strcen_top_n[SCR_STRCEN_WALKSETS] = {0};
 
 /* Physical bytes an allocation request of n costs. */
 SCR_STRCEN_FN long long scr_strcen_phys_of_req(long long req) {
@@ -361,6 +399,17 @@ SCR_STRCEN_FN void scr_strcen_report(void) {
                 scr_strcen_walk_distinct[w], scr_strcen_walk_dup_bytes[w],
                 scr_strcen_walk_ascii[w], scr_strcen_walk_phys[w],
                 scr_strcen_walk_len_sum[w], scr_strcen_walk_len_max[w]);
+      }
+    }
+    {
+      int w, j;
+      for (w = 0; w < SCR_STRCEN_WALKSETS; w++) {
+        for (j = 0; j < (int)scr_strcen_top_n[w]; j++) {
+          fprintf(f, "STRCEN-TOP %d %d n=%lld bytes=%lld len=%lld cap=%lld |%s|\n",
+                  w, j, scr_strcen_top[w][j].n, scr_strcen_top[w][j].bytes,
+                  scr_strcen_top[w][j].len, scr_strcen_top[w][j].cap,
+                  scr_strcen_top[w][j].sample);
+        }
       }
     }
     fprintf(f,
