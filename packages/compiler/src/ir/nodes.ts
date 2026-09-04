@@ -8479,6 +8479,19 @@ export function strandedFuncReason(
  * param dyn or dyn-convertible (the adapter converts typed arguments into
  * dyn), return void, dyn, or dynCheckable (the adapter validates the dyn
  * result). */
+/** A REST-slot function TARGET whose pack IS the whole argument list, and
+ * whose pack is the checked-dynamic array: the one rest shape the
+ * dyn-function adapter can serve, because the array's items are already
+ * the positional vector the boxed thunk wants (scr_dyn_thunk_apply). A
+ * rest behind FIXED parameters would have to prepend them into a fresh
+ * array, and a typed `...xs: T[]` pack is not a dyn array at all; neither
+ * is one. Lives here, not in a backend, because both backends must answer
+ * it identically -- a shape one lane adapts and the other refuses is the
+ * two-lanes-one-question defect this layer exists to avoid. */
+export function dynRestApplyable(t: IrType & { kind: "func" }): boolean {
+  return t.restIn === true && t.params.length === 1 && t.params[0]!.kind === "dyn";
+}
+
 export function canAdaptDynFuncTo(
   t: IrType,
   getRecord: (shapeId: string) => IrRecordShape | undefined,

@@ -2330,6 +2330,10 @@ ScrDyn *scr_dyn_apply(const ScrDyn *d, const ScrDyn *args, const char *what) {
   return scr_dyn_call(d, args->v.arr.items, args->v.arr.len, what);
 }
 
+ScrDyn *scr_dyn_thunk_apply(ScrClosure *clo, ScrDynThunk thunk, const ScrDyn *args) {
+  return thunk(clo, args->v.arr.items, args->v.arr.len);
+}
+
 /* ── native handles in the checked-dynamic tree (SCR_DYN_HANDLE) ───────────────────────
  * Per-tag ops stamped by the owning units at main() (scr_http_dyn_install
  * / scr_net_dyn_install — the scr_net_install hook story), so this
