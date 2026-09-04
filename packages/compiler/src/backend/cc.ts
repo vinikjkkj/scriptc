@@ -2,6 +2,7 @@ import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { createRequire } from "node:module";
 import { appendFile, chmod, copyFile, mkdir, mkdtemp, readdir, readFile, rename, rm, rmdir, stat, unlink, utimes, writeFile } from "node:fs/promises";
+import { readFileSync } from "node:fs";
 import { availableParallelism, tmpdir } from "node:os";
 import { basename, dirname, join, sep } from "node:path";
 import { promisify } from "node:util";
@@ -749,17 +750,68 @@ function profCflags(): string[] {
  * the kind this tree has been bitten by six times, so the flag and the
  * discriminator are one change and must never be separated.
  *
+ * The key folds the CONTENTS of every file a -include names, and not just
+ * the flag string that names it. Hashing the string alone was this very
+ * defect one level up: an instrument lives in a HEADER, so editing the header
+ * leaves SCRIPTC_PROF_CFLAGS byte-identical, every one of the five caches
+ * hits, and the build hands back a binary carrying the PREVIOUS instrument.
+ * A memmap block lost a full build-and-measure cycle to exactly that and
+ * reported three runs as successful which had in fact measured the old
+ * header. The flag string cannot witness a header edit; only the bytes can.
+ *
  * Unset or empty returns "", which keeps every historical cache path byte
  * for byte -- an ordinary build shares its cache entries with every build
  * that came before this. FNV-1a rather than a crypto hash because this is a
  * cache key, not a signature, and it keeps the import list unchanged. */
+function profIncludeFiles(v: string): string[] {
+  // Both spellings the driver accepts: `-include foo.h` as two arguments and
+  // `-includefoo.h` joined. Anything else in the flag string is not a forced
+  // include, and the string fold already covers it.
+  const parts = v.split(/\s+/).filter((s) => s.length > 0);
+  const out: string[] = [];
+  for (let i = 0; i < parts.length; i++) {
+    const p = parts[i];
+    if (p === undefined) continue;
+    if (p === "-include") {
+      const next = parts[i + 1];
+      if (next !== undefined) {
+        out.push(next);
+        i++;
+      }
+    } else if (p.startsWith("-include")) {
+      out.push(p.slice("-include".length));
+    }
+  }
+  return out;
+}
+
 function profFlavor(): string {
   const v = process.env.SCRIPTC_PROF_CFLAGS;
   if (v === undefined || v === "") return "";
   let h = 0x811c9dc5;
-  for (let i = 0; i < v.length; i++) {
-    h ^= v.charCodeAt(i);
-    h = Math.imul(h, 0x01000193) >>> 0;
+  const fold = (s: string): void => {
+    for (let i = 0; i < s.length; i++) {
+      h ^= s.charCodeAt(i);
+      h = Math.imul(h, 0x01000193) >>> 0;
+    }
+  };
+  fold(v);
+  for (const f of profIncludeFiles(v)) {
+    // Path and contents both, separated by a byte that cannot occur in
+    // either, so two files cannot collide by concatenation. latin1 so the
+    // fold sees the file's BYTES rather than decoded code points.
+    fold("\u0000");
+    fold(f);
+    fold("\u0000");
+    let body: string;
+    try {
+      body = readFileSync(f, "latin1");
+    } catch {
+      // Unreadable is a distinct state from any content, and never a silent
+      // one: the compile that follows fails on the same missing file.
+      body = "\u0000unreadable";
+    }
+    fold(body);
   }
   return `-prof${h.toString(16).padStart(8, "0")}`;
 }
