@@ -1749,6 +1749,30 @@ function processModuleAliasRequire7(spec: string, decl: ts.VariableDeclaration |
   return decl === null || ts.isIdentifier(decl.name);
 }
 
+/** The ESM spelling of the same thing: `import * as process from 'process'`,
+ * `import process from 'process'`, and the bare side-effect import.
+ *
+ * @types/node declares the module as `export = process` over the GLOBAL
+ * `process` variable, so a namespace or default binding of it aliases to
+ * that one global symbol — which is exactly what stdlibGlobalNameOf
+ * already resolves (the "imported binding of a builtin module's
+ * re-exported global" arm it was given for `import { Buffer } from
+ * "node:buffer"`). The reads therefore lower through the process surface
+ * with no new machinery; only this gate stood in front of them, and it
+ * stood there because the require form was taught and the import form was
+ * not. mongodb's client_metadata.ts opens with the namespace spelling.
+ *
+ * NAMED bindings keep the fence, for the require form's reason: `import
+ * { env } from 'process'` binds a MEMBER, not the object, and a member
+ * binding has no receiver for the surface to lower through. */
+function processModuleAliasImport7(spec: string, clause: ts.ImportClause | undefined): boolean {
+  if (spec !== "process" && spec !== "node:process") return false;
+  if (clause === undefined) return true; // bare side-effect import
+  const bindings = clause.namedBindings;
+  if (bindings !== undefined && !ts.isNamespaceImport(bindings)) return false;
+  return true;
+}
+
 /** The whole TS7-lane lifecycle for one entry: spawn (or share) a tsgo
  * host, build the lowering-world program, run the ported preflight, and
  * dispose EVERYTHING before returning — the CLI process must exit promptly,
@@ -2297,6 +2321,7 @@ function preflight7(load: LoadResult): {
       // imports-field family, resolved below.
       const npm = isBare && !spec.startsWith("#") ? resolveNpmImport7(sf.fileName, spec) : null;
       if (npm && isNodeTypesPath(npm.typesFile)) {
+        if (processModuleAliasImport7(spec, stmt.importClause)) continue;
         diags.push(unsupportedDiag("SC1010", locOf7(stmt), unsupportedModuleFeatureOf(spec)));
         continue;
       }
@@ -2368,6 +2393,11 @@ function preflight7(load: LoadResult): {
         if (projDep === null) {
           const nodeBuiltin = spec.startsWith("node:") || nodeBuiltinNames.has(spec);
           if (nodeBuiltin) {
+            // The process-module alias reaches this arm, not the npm one
+            // above: nothing named "process" is INSTALLED, so the npm
+            // resolution answers nothing and the bare name is judged here
+            // against Node's builtin list. Same admission, both arms.
+            if (processModuleAliasImport7(spec, stmt.importClause)) continue;
             diags.push(unsupportedDiag("SC1010", locOf7(stmt), unsupportedModuleFeatureOf(spec)));
             continue;
           }

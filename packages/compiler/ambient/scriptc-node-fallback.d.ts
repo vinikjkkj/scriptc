@@ -295,6 +295,27 @@ declare var __filename: string;
  * `global.process` read the same object as the bare name. */
 declare var global: typeof globalThis;
 
+/* node:process — the MODULE spelling of the global above, and nothing
+ * else. Node's process module object IS globalThis.process
+ * (`module.exports = process`), which is what @types/node says too:
+ * `declare module "process" { export = process; }` over the same global
+ * variable. So a namespace or default binding of it names the one object
+ * declared above, and every member read lowers through the process
+ * surface with no separate module value anywhere.
+ *
+ * Declared here for the same reason the file's header gives for console's
+ * non-lowered members: without it `import * as process from 'process'`
+ * is a fallback-manufactured "Cannot find name 'process'" in a project
+ * that has no @types/node — an error the author cannot reproduce with
+ * their own tsc. With @types/node present this whole file stands down and
+ * its identical declarations win. */
+declare module "process" {
+  export = process;
+}
+declare module "node:process" {
+  export = process;
+}
+
 /* `gc` — the --expose-gc probe, and the ONE global whose declared type has
  * to admit its own absence. Node puts the NAME in the global scope either
  * way and gives it a value only under --expose-gc, so `globalThis.gc` is
