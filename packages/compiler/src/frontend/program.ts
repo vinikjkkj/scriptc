@@ -984,6 +984,12 @@ function inTypePosition7(node: ts.Node): boolean {
  * conservative — anything that could CALL user code (directly, through a
  * callback-invoking builtin, a getter, an iterator, or an implicit
  * coercion of a user object) disqualifies the module's cycles. */
+/** Memoized callee-body verdicts (nonInertTopLevel7's `bodyInert`). Keyed
+ * per PROGRAM: the verdict is a pure function of the callee node given a
+ * checker, and a cluster's members call the same helpers over and over,
+ * but two programs can resolve the same file's identifiers differently. */
+const CALLEE_BODY_MEMO7 = new WeakMap<ts.Program, Map<ts.FunctionDeclaration, boolean>>();
+
 function nonInertTopLevel7(
   program: ts.Program,
   sf: ts.SourceFile,
@@ -997,6 +1003,9 @@ function nonInertTopLevel7(
   evaluated?: (f: ts.SourceFile) => boolean,
 ): ts.Node | null {
   const checker = program.getTypeChecker();
+  /** Set while surveying a CALLEE BODY: see dtsRooted and bodyInert. */
+  let strictRoots = false;
+  const bodyInFlight = new Set<ts.FunctionDeclaration>();
   const PRIM =
     ts.TypeFlags.StringLike |
     ts.TypeFlags.NumberLike |
@@ -1027,6 +1036,13 @@ function nonInertTopLevel7(
      * runs user code, which could reach a partner mid-init. */
      sameFileOk = false,
   ): boolean => {
+    // Inside a surveyed CALLEE BODY the two relaxations below do not
+    // hold: `sf`/`useStart` name the CALLING module, not the callee's,
+    // and `evaluated` is a fact about the walk's position, not about the
+    // callee. Requiring a declaration-file root there keeps the body
+    // verdict a pure function of the callee — which is what makes the
+    // memo sound.
+    if (strictRoots) sameFileOk = false;
     let root: ts.Expression = e;
     while (ts.isPropertyAccessExpression(root) || ts.isElementAccessExpression(root)) root = root.expression;
     if (ts.isMetaProperty(root)) return true; // import.meta
@@ -1043,7 +1059,7 @@ function nonInertTopLevel7(
     return decls.every(
       (d) =>
         d.getSourceFile().isDeclarationFile ||
-        (evaluated?.(d.getSourceFile()) ?? false) ||
+        (!strictRoots && (evaluated?.(d.getSourceFile()) ?? false)) ||
         (sameFileOk && d.getSourceFile() === sf && d.getStart() < useStart),
     );
   };
@@ -1167,6 +1183,20 @@ function nonInertTopLevel7(
     if (ts.isObjectLiteralExpression(e)) {
       return e.properties.every((p) => {
         if (ts.isShorthandPropertyAssignment(p)) return true;
+        // METHOD SHORTHAND is a function DEFINITION, not a call: `{ f() {} }`
+        // creates exactly the closure `{ f: function () {} }` creates, and
+        // that spelling is admitted below as a PropertyAssignment whose
+        // initializer is a FunctionExpression. Only the two spellings
+        // differed, so refusing this one refused mongodb's whole OPTIONS
+        // table for containing no executable code at all. Accessors
+        // (`get x() {}`) are NOT admitted here: defining one is inert, but
+        // it plants user code behind a later property READ, which the
+        // property-access arm treats as free.
+        if (ts.isMethodDeclaration(p)) {
+          return p.name === undefined || !ts.isComputedPropertyName(p.name)
+            ? true
+            : inert(p.name.expression) && primitiveTyped(p.name.expression);
+        }
         if (!ts.isPropertyAssignment(p)) return false;
         // A COMPUTED key is a key expression plus a ToPropertyKey coercion,
         // both inert when the expression is — the bar inertClass already
@@ -1180,23 +1210,140 @@ function nonInertTopLevel7(
       });
     }
     if (ts.isCallExpression(e) || ts.isNewExpression(e)) {
-      if (!dtsRooted(e.expression) || !ts.isIdentifier(chainRoot7(e.expression))) return false;
       const args = e.arguments ?? [];
       // A CALLABLE argument is admissible when it is itself dts-rooted:
       // a builtin-owned function value (the `promisify(fs.readFile)`
       // at every cycle member's top level) is runtime-implemented — even
       // if the builtin callee invokes it, no user code runs and no
       // cluster binding is observable. Function literals and user
-      // callables keep the refusal.
-      return args.every(
-        (a) =>
-          inert(a) &&
-          !containsFunctionLike(a) &&
-          (checker.getCallSignatures(checker.getTypeAtLocation(a)).length === 0 || dtsRooted(a)),
-      );
+      // callables keep the refusal — EXCEPT where the callee provably
+      // does not invoke the argument (`storesItsArgument` below).
+      const argsInert = (fnAllowedAt: number): boolean =>
+        args.every(
+          (a, i) =>
+            inert(a) &&
+            (i === fnAllowedAt || !containsFunctionLike(a)) &&
+            (checker.getCallSignatures(checker.getTypeAtLocation(a)).length === 0 || dtsRooted(a)),
+        );
+      if (dtsRooted(e.expression) && ts.isIdentifier(chainRoot7(e.expression))) {
+        return argsInert(storesItsArgument(e) ? 2 : -1);
+      }
+      // Not a builtin: the callee is USER code, so the question is what
+      // that code does. A call whose callee body is itself inert runs
+      // exactly the builtins the whitelist already admits and nothing
+      // else — no cluster binding can be observed through it — so the
+      // call is as inert as the body. Recursive and memoized; `new` is
+      // excluded (a construction also runs field initializers and the
+      // whole superclass chain, which this does not survey).
+      if (ts.isCallExpression(e) && ts.isIdentifier(e.expression) && calleeInert(e.expression)) {
+        return argsInert(-1);
+      }
+      return false;
     }
     return false;
   };
+  /** `Object.defineProperty(o, k, {…})` — the ONE builtin on this
+   * whitelist that takes a function-valued argument and provably never
+   * invokes it. Its third argument is a property DESCRIPTOR: the
+   * abstract operation reads `value`/`get`/`set`/`writable`/`enumerable`/
+   * `configurable` off it and installs them; `value` is stored, and even
+   * `get`/`set` are installed as accessors rather than called. Restricted
+   * to a literal descriptor so that "reads its properties" is a read of
+   * data properties this analysis can see, not a Get() that could land on
+   * a user getter. */
+  const storesItsArgument = (e: ts.CallExpression | ts.NewExpression): boolean => {
+    if (!ts.isCallExpression(e)) return false;
+    const callee = e.expression;
+    if (!ts.isPropertyAccessExpression(callee)) return false;
+    if (callee.name.text !== "defineProperty") return false;
+    const root = callee.expression;
+    if (!ts.isIdentifier(root) || root.text !== "Object") return false;
+    return e.arguments.length === 3 && ts.isObjectLiteralExpression(e.arguments[2]!);
+  };
+  /** True when calling the function `id` names provably executes nothing
+   * but runtime-implemented builtins — the same bar `inert` applies to a
+   * module's top level, applied to the callee's BODY.
+   *
+   * Roots are held to declaration files inside the body (`strictRoots`),
+   * because the callee's module may itself be mid-initialization: a
+   * same-file-earlier read is only safe where "same file" is the file
+   * whose evaluation we are reasoning about, and here it is not. That
+   * restriction is also what makes the verdict a pure function of the
+   * callee node, hence memoizable across every cluster member that calls
+   * it. */
+  const calleeInert = (id: ts.Identifier): boolean => {
+    let sym = checker.getSymbolAtLocation(id);
+    if (sym === undefined) return false;
+    if (sym.flags & ts.SymbolFlags.Alias) sym = checker.getAliasedSymbol(sym);
+    const decls = checker.declarationsOf(sym);
+    if (decls.length === 0) return false;
+    // Every declaration must be a plain function declaration: a `let`
+    // rebound to something else, a class, a method torn off an object —
+    // any of those and the callee is not statically known.
+    if (!decls.every((d) => ts.isFunctionDeclaration(d))) return false;
+    const bodied = decls.filter((d) => (d as ts.FunctionDeclaration).body !== undefined);
+    // Overload signatures carry no body; an AMBIENT declaration has none
+    // either, and its implementation is not in the program at all.
+    if (bodied.length === 0) return false;
+    return bodied.every((d) => bodyInert(d as ts.FunctionDeclaration));
+  };
+  const bodyInert = (fn: ts.FunctionDeclaration): boolean => {
+    let memo = CALLEE_BODY_MEMO7.get(program);
+    if (memo === undefined) {
+      memo = new Map();
+      CALLEE_BODY_MEMO7.set(program, memo);
+    }
+    const hit = memo.get(fn);
+    if (hit !== undefined) return hit;
+    // Recursion (direct or mutual) answers false rather than assuming its
+    // own conclusion, and is NOT memoized — the false is an artifact of
+    // where the walk entered, not a fact about the callee.
+    if (bodyInFlight.has(fn)) return false;
+    if (bodyInFlight.size >= 8) return false; // depth cap: cost, not soundness
+    bodyInFlight.add(fn);
+    const prevStrict = strictRoots;
+    strictRoots = true;
+    let ok: boolean;
+    try {
+      ok = fn.body !== undefined && statementsInert(fn.body.statements);
+    } finally {
+      strictRoots = prevStrict;
+      bodyInFlight.delete(fn);
+    }
+    if (bodyInFlight.size === 0) memo.set(fn, ok);
+    return ok;
+  };
+  /** The statement forms admissible inside a surveyed body. Deliberately
+   * narrower than a module top level: no loops, no try, no destructuring —
+   * every form here either declares nothing that runs or hands its one
+   * expression to `inert`. Anything unlisted refuses. */
+  const statementsInert = (stmts: readonly ts.Statement[]): boolean =>
+    stmts.every((s) => {
+      if (
+        ts.isInterfaceDeclaration(s) ||
+        ts.isTypeAliasDeclaration(s) ||
+        ts.isFunctionDeclaration(s) ||
+        ts.isEmptyStatement(s)
+      ) {
+        return true;
+      }
+      if (ts.isBlock(s)) return statementsInert(s.statements);
+      if (ts.isReturnStatement(s)) return s.expression === undefined || inert(s.expression);
+      if (ts.isExpressionStatement(s)) return inert(s.expression);
+      if (ts.isVariableStatement(s)) {
+        return s.declarationList.declarations.every(
+          (d) => ts.isIdentifier(d.name) && (d.initializer === undefined || inert(d.initializer)),
+        );
+      }
+      if (ts.isIfStatement(s)) {
+        return (
+          inert(s.expression) &&
+          statementsInert([s.thenStatement]) &&
+          (s.elseStatement === undefined || statementsInert([s.elseStatement]))
+        );
+      }
+      return false;
+    });
   for (const stmt of sf.statements) {
     if (
       ts.isImportDeclaration(stmt) ||
