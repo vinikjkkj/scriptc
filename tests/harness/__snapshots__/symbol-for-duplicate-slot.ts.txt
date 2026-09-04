@@ -1,0 +1,20 @@
+symbol-for-duplicate-slot.ts:13:3 - error SC1090: two members keyed by the same global-registry symbol (Symbol.for hands both consts the one runtime symbol, so JS keeps only the last definition) is not supported yet
+
+  12 |   }
+  13 |   get [B](): number {
+     |   ^~~~~~~~~~~~~~~~~~~
+  14 |     return 2;
+
+symbol-for-duplicate-slot.ts:21:11 - error SC1090: constructing through a class value whose class has no lowering (the class declaration itself was rejected — see its own diagnostic) is not supported yet
+
+  20 | 
+  21 | const h = new Holder();
+     |           ^~~~~~~~~~~~
+  22 | console.log(h.plain());
+
+symbol-for-duplicate-slot.ts:22:13 - error SC1090: method calls like 'h.plain' is not supported yet
+
+  21 | const h = new Holder();
+  22 | console.log(h.plain());
+     |             ^~~~~~~~~
+  23 | 

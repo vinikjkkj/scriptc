@@ -1,0 +1,61 @@
+// Class members keyed by a GLOBAL REGISTRY symbol. bson hangs two of them
+// on the abstract base of its whole value hierarchy — a
+// `get [BSON_VERSION_SYMBOL]()` and a
+// `[Symbol.for('nodejs.util.inspect.custom')]()` — and the two names alone
+// used to refuse the base and every class under it.
+//
+// The slots are DECLARED ONLY: nothing dispatches to them (a `x[S]` access
+// keeps its symbol fence), so what this program checks is that declaring
+// them costs the class nothing.
+const VERSION_KEY = Symbol.for('@@corpus.version');
+// A SECOND const for the SAME registry key. Symbol.for hands both the one
+// runtime symbol, so both must name the one slot — which is why the slot
+// is keyed by the registry string and not by the const's identity.
+const ALSO_VERSION_KEY = Symbol.for('@@corpus.version');
+
+abstract class Value {
+  abstract get kind(): string;
+
+  get [VERSION_KEY](): number {
+    return 2;
+  }
+
+  [Symbol.for('nodejs.util.inspect.custom')](): string {
+    return '<' + this.kind + '>';
+  }
+
+  abstract render(): string;
+}
+
+class Num extends Value {
+  constructor(private readonly v: number) {
+    super();
+  }
+  override get kind(): string {
+    return 'num';
+  }
+  override render(): string {
+    return this.kind + '(' + this.v + ')';
+  }
+}
+
+class Text extends Value {
+  constructor(private readonly v: string) {
+    super();
+  }
+  override get kind(): string {
+    return 'text';
+  }
+  override render(): string {
+    return this.kind + '(' + this.v + ')';
+  }
+}
+
+const vs: Value[] = [new Num(7), new Text('hi')];
+for (const v of vs) console.log(v.kind, v.render());
+
+function show(v: Value): string {
+  return v.render().toUpperCase();
+}
+console.log(show(vs[0]!), show(vs[1]!));
+console.log(typeof VERSION_KEY, typeof ALSO_VERSION_KEY);
