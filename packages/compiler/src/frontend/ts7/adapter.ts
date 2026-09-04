@@ -62,6 +62,7 @@ export type { Ts7Program as Program } from "./program.js";
  * census does with it). */
 export type {
   CompilerOptions,
+  ConditionalType,
   Diagnostic,
   IndexInfo,
   InterfaceType,

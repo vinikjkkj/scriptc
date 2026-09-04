@@ -1226,6 +1226,12 @@ export class Lowerer {
    * the body needs — indexed accesses (`T[K]` needs K's literal key) and
    * keyed record reads (`o[k]` where k's type is a literal-bound K). */
   typeParamTsBindings: Map<ts.Symbol, ts.Type> | null = null;
+  /** The ARM-LIST twin of typeParamTsBindings, for a parameter whose
+   * binding was LEARNED from the program's instantiations rather than
+   * written: 7's checker has no union constructor, so the set cannot be
+   * collapsed into one checker type and travels as its arms. Read only by
+   * the filtering-conditional resolver, which needs them one at a time. */
+  typeParamTsArmsBindings: Map<ts.Symbol, readonly ts.Type[]> | null = null;
   /** Object-literal GENERIC METHODS currently lowering under the
    * contextual constraint erasure (lowerLambda). Their own type
    * parameters are bound in typeParamBindings for the extent of the
@@ -1818,6 +1824,7 @@ export class Lowerer {
       classNamer: this.classNamer,
       resolveTypeParam: this.typeParamResolver,
       resolveTypeParamTs: this.typeParamTsResolver,
+      resolveTypeParamTsArms: this.typeParamTsArmsResolver,
       resolveSymbolic: this.symbolicTsResolver,
       genericClassInstance: (decl, ref) => this.genericClassInstanceType(decl, ref),
       // A JavaScript PRE-CLASS CONSTRUCTOR the frontend recognized as a
@@ -1842,6 +1849,7 @@ export class Lowerer {
       declFileHasCompiledImpl: (sf) => this.declTwinCompiled(sf),
       accessorProducerProp: (sym) => this.accessorProducerProp(sym),
       nullPayloadPromiseProp: (sym) => this.nullPayloadPromiseProp(sym),
+      unconstrainedTpArms: (tpDecl) => this.unconstrainedTpArms(tpDecl),
     };
     // --dynamic: modules reachable only through dynamic import() joined
     // moduleOrder BEFORE any pass constructed — lowerToIr runs
@@ -4914,6 +4922,14 @@ export class Lowerer {
     if (!this.typeParamTsBindings || !(t.flags & ts.TypeFlags.TypeParameter)) return null;
     const sym: ts.Symbol | undefined = t.getSymbol();
     return (sym && this.typeParamTsBindings.get(sym)) ?? null;
+  };
+
+  /** The arm-list twin of typeParamTsResolver (typeParamTsArmsBindings).
+   * Inert unless a LEARNED instantiation union is live. */
+  readonly typeParamTsArmsResolver = (t: ts.Type): readonly ts.Type[] | null => {
+    if (!this.typeParamTsArmsBindings || !(t.flags & ts.TypeFlags.TypeParameter)) return null;
+    const sym: ts.Symbol | undefined = t.getSymbol();
+    return (sym && this.typeParamTsArmsBindings.get(sym)) ?? null;
   };
 
   /** The instantiation's symbolic→resolved side table, as mapType sees it:
@@ -12921,6 +12937,199 @@ export class Lowerer {
   nullPayloadPromiseProp(sym: ts.Symbol): boolean {
     this.nullPayloadPromiseCache ??= this.scanNullPayloadPromiseProps();
     return this.nullPayloadPromiseCache.has(sym);
+  }
+
+  /** The types this program instantiates an UNCONSTRAINED type parameter
+   * at — zapo's `WaSqliteConnection.runInTransaction<T>`.
+   *
+   * A generic member with a CONSTRAINED parameter maps to one closure slot
+   * at the constraint, and any producer fills it. A bare `<T>` has no
+   * written widest binding, so the member leaves the record shape entirely
+   * and every call through an interface-typed receiver refuses (SC1090,
+   * lower-calls.ts). But the parameter still has an ACTUAL widest binding:
+   * the union of the types the program instantiates it at. That union is a
+   * slot every value crosses in its OWN representation, so identity and
+   * mutation are the caller's — which erasing to `unknown` cannot say,
+   * because arrays and records COPY at the dyn boundary (estado-aliasing).
+   *
+   * Two ways this answers null, and both leave the refusal standing: a call
+   * site whose binding cannot be read, and a parameter no call site
+   * instantiates. A set that is too NARROW is not a third way to be wrong —
+   * the missing type simply fails to coerce into the slot, which is a
+   * refusal at the call site.
+   *
+   * Computed on first ask, for accessorProducerCache's reason and with its
+   * timing rule: after fileTag is populated, before shape interning. */
+  private tpArmsCache: Map<ts.TypeParameterDeclaration, readonly ts.Type[]> | null = null;
+
+  unconstrainedTpArms(tpDecl: ts.TypeParameterDeclaration): readonly ts.Type[] | null {
+    this.tpArmsCache ??= this.scanUnconstrainedTpArms();
+    return this.tpArmsCache.get(tpDecl) ?? null;
+  }
+
+  /** The declaration of the type parameter this type IS, or null. */
+  private tpDeclOf(t: ts.Type): ts.TypeParameterDeclaration | null {
+    if ((t.flags & ts.TypeFlags.TypeParameter) === 0) return null;
+    const sym = t.getSymbol();
+    if (sym === undefined) return null;
+    const d = this.checker.declarationsOf(sym)[0];
+    return d !== undefined && ts.isTypeParameterDeclaration(d) ? d : null;
+  }
+
+  /** The check type of a FILTERING conditional (`X extends E ? never : X` —
+   * every branch either drops the arm or passes it through), or null. The
+   * same idiom mapBoundFilteringConditional resolves, recognized here so a
+   * payload written `NonPromise<T>` unifies against a concrete one. */
+  private filterConditionalCheck(t: ts.Type): ts.Type | null {
+    if (!t.isConditionalType()) return null;
+    const check = t.getCheckType();
+    const isCheck = (b: ts.Type): boolean =>
+      b === check ||
+      ((b.flags & ts.TypeFlags.TypeParameter) !== 0 &&
+        b.getSymbol() !== undefined &&
+        b.getSymbol() === check.getSymbol());
+    const ok = (b: ts.Type): boolean => (b.flags & ts.TypeFlags.Never) !== 0 || isCheck(b);
+    return ok(t.getTrueType()) && ok(t.getFalseType()) ? check : null;
+  }
+
+  /** Does this type still MENTION a type parameter? A binding that does is
+   * not a concrete instantiation and must not enter the set. */
+  private mentionsTypeParam(t: ts.Type, depth = 0): boolean {
+    if (depth > 6) return true; // unreadable counts as open — the safe side
+    if ((t.flags & ts.TypeFlags.TypeParameter) !== 0) return true;
+    if (t.isConditionalType()) return true;
+    if (t.isUnionType()) return t.getTypes().some((a) => this.mentionsTypeParam(a, depth + 1));
+    let args: readonly ts.Type[] = [];
+    try {
+      args = this.checker.getTypeArguments(t as ts.TypeReference);
+    } catch {
+      return false;
+    }
+    return args.some((a) => this.mentionsTypeParam(a, depth + 1));
+  }
+
+  /** What `tpDecl` is bound to at a call site, read by matching the
+   * DECLARATION's return type against the RESOLVED one.
+   *
+   * 7's checker exposes no type-argument list for an INFERRED call and no
+   * way to apply a signature's mapper, so the binding is recovered
+   * structurally: walk the two return types together and answer the
+   * resolved side at the position where the declared side IS the parameter
+   * (directly, or under a filtering conditional, which is the identity on
+   * every arm it does not drop). Any other shape answers null, and null
+   * poisons the parameter — a guess here would silently narrow the slot. */
+  private tpBindingAt(declRet: ts.Type, resRet: ts.Type, tpDecl: ts.TypeParameterDeclaration, depth = 0): ts.Type | null {
+    if (depth > 6) return null;
+    if (this.tpDeclOf(declRet) === tpDecl) return resRet;
+    const inner = this.filterConditionalCheck(declRet);
+    if (inner !== null && this.tpDeclOf(inner) === tpDecl) return resRet;
+    const ds = declRet.getSymbol();
+    if (ds === undefined || ds !== resRet.getSymbol()) return null;
+    let da: readonly ts.Type[] = [];
+    let ra: readonly ts.Type[] = [];
+    try {
+      da = this.checker.getTypeArguments(declRet as ts.TypeReference);
+      ra = this.checker.getTypeArguments(resRet as ts.TypeReference);
+    } catch {
+      return null;
+    }
+    if (da.length === 0 || da.length !== ra.length) return null;
+    for (const [i, d] of da.entries()) {
+      const got = this.tpBindingAt(d, ra[i]!, tpDecl, depth + 1);
+      if (got !== null) return got;
+    }
+    return null;
+  }
+
+  private scanUnconstrainedTpArms(): Map<ts.TypeParameterDeclaration, readonly ts.Type[]> {
+    const concrete = new Map<ts.TypeParameterDeclaration, ts.Type[]>();
+    const edges = new Map<ts.TypeParameterDeclaration, Set<ts.TypeParameterDeclaration>>();
+    const poisoned = new Set<ts.TypeParameterDeclaration>();
+    const seen = new Set<ts.TypeParameterDeclaration>();
+
+    const visit = (n: ts.Node): void => {
+      if (ts.isCallExpression(n)) this.collectTpBindings(n, concrete, edges, poisoned, seen);
+      ts.forEachChild(n, visit);
+    };
+    for (const sf of this.fileTag.keys()) {
+      if (sf.isDeclarationFile) continue;
+      ts.forEachChild(sf, visit);
+    }
+
+    // The forwarding fixpoint: `withTransaction<T>` calling
+    // `db.runInTransaction(...)` binds the member's parameter to its OWN,
+    // so the member inherits withTransaction's instantiations. Monotone and
+    // finite — the graph is over the program's type-parameter declarations,
+    // and a cycle (a generic that forwards to itself, which zapo's pooled
+    // connection wrapper does) adds nothing on the turn that closes it.
+    const out = new Map<ts.TypeParameterDeclaration, readonly ts.Type[]>();
+    for (const tp of seen) {
+      const armsOut: ts.Type[] = [];
+      const walked = new Set<ts.TypeParameterDeclaration>();
+      const stack = [tp];
+      let ok = true;
+      while (stack.length > 0) {
+        const cur = stack.pop()!;
+        if (walked.has(cur)) continue;
+        walked.add(cur);
+        if (poisoned.has(cur)) { ok = false; break; }
+        for (const a of concrete.get(cur) ?? []) if (!armsOut.includes(a)) armsOut.push(a);
+        for (const next of edges.get(cur) ?? []) stack.push(next);
+      }
+      if (ok && armsOut.length > 0) out.set(tp, armsOut);
+    }
+    if (process.env["SCRIPTC_TPARMS_WHY"] !== undefined) {
+      for (const tp of seen) {
+        const arms = out.get(tp);
+        const at = `${tp.getSourceFile().fileName}:${tp.getStart()}`;
+        const why = arms === undefined ? (poisoned.has(tp) ? "POISONED" : "no instantiation") : arms.map((a) => this.checker.typeToString(a)).join(" | ");
+        process.stderr.write(`[tparms] ${tp.name.text} @ ${at} -> ${why}\n`);
+      }
+      process.stderr.write(`[tparms] seen=${String(seen.size)} answered=${String(out.size)}\n`);
+    }
+    return out;
+  }
+
+  private collectTpBindings(
+    call: ts.CallExpression,
+    concrete: Map<ts.TypeParameterDeclaration, ts.Type[]>,
+    edges: Map<ts.TypeParameterDeclaration, Set<ts.TypeParameterDeclaration>>,
+    poisoned: Set<ts.TypeParameterDeclaration>,
+    seen: Set<ts.TypeParameterDeclaration>,
+  ): void {
+    const sig = this.checker.getResolvedSignature(call);
+    if (sig === undefined) return;
+    const decl = this.checker.signatureDeclaration(sig);
+    if (decl === undefined || !ts.isFunctionLike(decl)) return;
+    const tpDecls = decl.typeParameters;
+    if (tpDecls === undefined || tpDecls.length === 0) return;
+    const bare = tpDecls.filter((tp) => tp.constraint === undefined && tp.defaultType === undefined);
+    if (bare.length === 0) return;
+    const declSig = this.checker.getSignatureFromDeclaration(decl);
+    if (declSig === undefined) { for (const tp of bare) { seen.add(tp); poisoned.add(tp); } return; }
+    const declRet = this.checker.getReturnTypeOfSignature(declSig);
+    const resRet = this.checker.getReturnTypeOfSignature(sig);
+    for (const tp of bare) {
+      seen.add(tp);
+      const bound = declRet === undefined || resRet === undefined ? null : this.tpBindingAt(declRet, resRet, tp);
+      if (bound === null) { poisoned.add(tp); continue; }
+      const via = this.tpDeclOf(bound) ?? (() => {
+        const inner = this.filterConditionalCheck(bound);
+        return inner === null ? null : this.tpDeclOf(inner);
+      })();
+      if (via !== null) {
+        if (via !== tp) {
+          let s = edges.get(tp);
+          if (s === undefined) { s = new Set(); edges.set(tp, s); }
+          s.add(via);
+        }
+        continue;
+      }
+      if (this.mentionsTypeParam(bound)) { poisoned.add(tp); continue; }
+      let arms = concrete.get(tp);
+      if (arms === undefined) { arms = []; concrete.set(tp, arms); }
+      if (!arms.includes(bound)) arms.push(bound);
+    }
   }
 
   /** The property symbol a `Promise.resolve(null)` placeholder initializes,

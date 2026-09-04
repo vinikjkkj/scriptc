@@ -461,6 +461,14 @@ export class CheckerFacade {
     return symbol;
   }
 
+  /** Assignability, straight through. Not memoized: the answer depends on a
+   * PAIR of types, and the only caller (the constraint-erased conditional
+   * in types.ts) asks it once per arm of one union, a handful of times per
+   * program. */
+  isTypeAssignableTo(source: Type, target: Type): boolean {
+    return this.raw.isTypeAssignableTo(source, target);
+  }
+
   getResolvedSignature(node: Node): Signature | undefined {
     if (this.resolvedSignature.has(node)) return this.resolvedSignature.get(node);
     const signature = this.raw.getResolvedSignature(node);
