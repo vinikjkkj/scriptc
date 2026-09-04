@@ -4,13 +4,14 @@
 // `[Symbol.for('nodejs.util.inspect.custom')]()` — and the two names alone
 // used to refuse the base and every class under it.
 //
-// The slots are DECLARED ONLY: nothing dispatches to them (a `x[S]` access
-// keeps its symbol fence), so what this program checks is that declaring
-// them costs the class nothing.
+// The slots are DECLARED ONLY: nothing dispatches to them (an `x[S]`
+// access keeps its symbol fence), so what this program checks is that
+// declaring them costs the class nothing.
 const VERSION_KEY = Symbol.for('@@corpus.version');
 // A SECOND const for the SAME registry key. Symbol.for hands both the one
 // runtime symbol, so both must name the one slot — which is why the slot
-// is keyed by the registry string and not by the const's identity.
+// is keyed by the registry string and not by the const's identity. (Two
+// members keyed this way in ONE class is the fence; two consts is not.)
 const ALSO_VERSION_KEY = Symbol.for('@@corpus.version');
 
 abstract class Value {
@@ -28,8 +29,10 @@ abstract class Value {
 }
 
 class Num extends Value {
-  constructor(private readonly v: number) {
+  v: number;
+  constructor(v: number) {
     super();
+    this.v = v;
   }
   override get kind(): string {
     return 'num';
@@ -40,11 +43,16 @@ class Num extends Value {
 }
 
 class Text extends Value {
-  constructor(private readonly v: string) {
+  v: string;
+  constructor(v: string) {
     super();
+    this.v = v;
   }
   override get kind(): string {
     return 'text';
+  }
+  get [ALSO_VERSION_KEY](): number {
+    return 3;
   }
   override render(): string {
     return this.kind + '(' + this.v + ')';
