@@ -2,6 +2,7 @@ import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { createRequire } from "node:module";
 import { appendFile, chmod, copyFile, mkdir, mkdtemp, readdir, readFile, rename, rm, rmdir, stat, unlink, utimes, writeFile } from "node:fs/promises";
+import { readFileSync } from "node:fs";
 import { availableParallelism, tmpdir } from "node:os";
 import { basename, dirname, join, sep } from "node:path";
 import { promisify } from "node:util";
@@ -736,6 +737,85 @@ function profCflags(): string[] {
   return v.split(/\s+/).filter((s) => s.length > 0);
 }
 
+/** The cache-flavor discriminator for SCRIPTC_PROF_CFLAGS, and the reason the
+ * vendored units could not be profiled before.
+ *
+ * The five cached vendored units (the engine archive, lre, zlib, SQLite,
+ * mbedTLS) each key their cache on `plain|asan` plus the driver and target,
+ * and NOTHING else. So the moment those units started honouring
+ * SCRIPTC_PROF_CFLAGS, an instrumented build would find the UNINSTRUMENTED
+ * object already sitting in vendor/.cache and link it -- and the profiler
+ * would report zero allocations from SQLite, correctly, for a build that
+ * never compiled SQLite with the profiler. That is a silent zero of exactly
+ * the kind this tree has been bitten by six times, so the flag and the
+ * discriminator are one change and must never be separated.
+ *
+ * The key folds the CONTENTS of every file a -include names, and not just
+ * the flag string that names it. Hashing the string alone was this very
+ * defect one level up: an instrument lives in a HEADER, so editing the header
+ * leaves SCRIPTC_PROF_CFLAGS byte-identical, every one of the five caches
+ * hits, and the build hands back a binary carrying the PREVIOUS instrument.
+ * A memmap block lost a full build-and-measure cycle to exactly that and
+ * reported three runs as successful which had in fact measured the old
+ * header. The flag string cannot witness a header edit; only the bytes can.
+ *
+ * Unset or empty returns "", which keeps every historical cache path byte
+ * for byte -- an ordinary build shares its cache entries with every build
+ * that came before this. FNV-1a rather than a crypto hash because this is a
+ * cache key, not a signature, and it keeps the import list unchanged. */
+function profIncludeFiles(v: string): string[] {
+  // Both spellings the driver accepts: `-include foo.h` as two arguments and
+  // `-includefoo.h` joined. Anything else in the flag string is not a forced
+  // include, and the string fold already covers it.
+  const parts = v.split(/\s+/).filter((s) => s.length > 0);
+  const out: string[] = [];
+  for (let i = 0; i < parts.length; i++) {
+    const p = parts[i];
+    if (p === undefined) continue;
+    if (p === "-include") {
+      const next = parts[i + 1];
+      if (next !== undefined) {
+        out.push(next);
+        i++;
+      }
+    } else if (p.startsWith("-include")) {
+      out.push(p.slice("-include".length));
+    }
+  }
+  return out;
+}
+
+function profFlavor(): string {
+  const v = process.env.SCRIPTC_PROF_CFLAGS;
+  if (v === undefined || v === "") return "";
+  let h = 0x811c9dc5;
+  const fold = (s: string): void => {
+    for (let i = 0; i < s.length; i++) {
+      h ^= s.charCodeAt(i);
+      h = Math.imul(h, 0x01000193) >>> 0;
+    }
+  };
+  fold(v);
+  for (const f of profIncludeFiles(v)) {
+    // Path and contents both, separated by a byte that cannot occur in
+    // either, so two files cannot collide by concatenation. latin1 so the
+    // fold sees the file's BYTES rather than decoded code points.
+    fold("\u0000");
+    fold(f);
+    fold("\u0000");
+    let body: string;
+    try {
+      body = readFileSync(f, "latin1");
+    } catch {
+      // Unreadable is a distinct state from any content, and never a silent
+      // one: the compile that follows fails on the same missing file.
+      body = "\u0000unreadable";
+    }
+    fold(body);
+  }
+  return `-prof${h.toString(16).padStart(8, "0")}`;
+}
+
 function optAuditArgs(sanitize: boolean): string[] {
   // Appended last and only when asked, so an untraced build's argv is
   // the historical one, element for element.
@@ -765,7 +845,7 @@ function optAuditArgs(sanitize: boolean): string[] {
  * same flags CMake's MinSizeRel/Debug+ASan configurations apply, packed
  * with `zig ar`. Host builds keep the exact historical CMake recipe. */
 async function ensureEngineArchive(sanitize: boolean, driver: CcDriver): Promise<string> {
-  const flavor = `${sanitize ? "asan" : "plain"}${driver.target !== null ? `-${driver.target}` : ""}`;
+  const flavor = `${sanitize ? "asan" : "plain"}${driver.target !== null ? `-${driver.target}` : ""}${profFlavor()}`;
   const vendor = vendorEngineDir();
   const cacheRoot = join(vendor, "..", ".cache");
   const cacheDir = join(cacheRoot, `${QJS_COMMIT.slice(0, 12)}-${flavor}`);
@@ -905,7 +985,8 @@ async function ensureLreObjects(sanitize: boolean, driver: CcDriver): Promise<st
   const flavor =
     (sanitize ? "asan" : "plain") +
     (driver.argv.length === 1 && driver.argv[0] === "clang" ? "" : "-zigcc") +
-    (driver.target !== null ? `-${driver.target}` : "");
+    (driver.target !== null ? `-${driver.target}` : "") +
+    profFlavor();
   const vendor = vendorEngineDir();
   const cacheRoot = join(vendor, "..", ".cache");
   const cacheDir = join(cacheRoot, `${QJS_COMMIT.slice(0, 12)}-lre-${flavor}`);
@@ -930,6 +1011,12 @@ async function ensureLreObjects(sanitize: boolean, driver: CcDriver): Promise<st
           "-I", vendor,
           "-c", join(vendor, f),
           "-o", join(buildDir, f.replace(/\.c$/, ".o")),
+          // Last in the argv, so SCRIPTC_PROF_CFLAGS can only ADD (same
+          // contract as optAuditArgs). Paired with profFlavor() in the cache
+          // key above: without that, an instrumented build would relink the
+          // clean cached object and the profiler would read a truthful zero
+          // for a unit it never instrumented.
+          ...profCflags(),
         ],
         { cwd: buildDir },
       );
@@ -966,7 +1053,8 @@ async function ensureZlibObjects(sanitize: boolean, driver: CcDriver): Promise<s
   const flavor =
     (sanitize ? "asan" : "plain") +
     (driver.argv.length === 1 && driver.argv[0] === "clang" ? "" : "-zigcc") +
-    (driver.target !== null ? `-${driver.target}` : "");
+    (driver.target !== null ? `-${driver.target}` : "") +
+    profFlavor();
   const vendor = vendorZlibDir();
   const cacheRoot = join(vendor, "..", ".cache");
   const cacheDir = join(cacheRoot, `zlib-${ZLIB_VERSION}-${flavor}`);
@@ -989,6 +1077,12 @@ async function ensureZlibObjects(sanitize: boolean, driver: CcDriver): Promise<s
           "-I", vendor,
           "-c", join(vendor, f),
           "-o", join(buildDir, f.replace(/\.c$/, ".o")),
+          // Last in the argv, so SCRIPTC_PROF_CFLAGS can only ADD (same
+          // contract as optAuditArgs). Paired with profFlavor() in the cache
+          // key above: without that, an instrumented build would relink the
+          // clean cached object and the profiler would read a truthful zero
+          // for a unit it never instrumented.
+          ...profCflags(),
         ],
         { cwd: buildDir },
       );
@@ -1081,7 +1175,8 @@ async function ensureSqliteObjects(sanitize: boolean, driver: CcDriver): Promise
   const flavor =
     (sanitize ? "asan" : "plain") +
     (driver.argv.length === 1 && driver.argv[0] === "clang" ? "" : "-zigcc") +
-    (driver.target !== null ? `-${driver.target}` : "");
+    (driver.target !== null ? `-${driver.target}` : "") +
+    profFlavor();
   const vendor = vendorSqliteDir();
   const cacheRoot = join(vendor, "..", ".cache");
   const cacheDir = join(cacheRoot, `sqlite-${SQLITE_VERSION}-${flavor}`);
@@ -1102,6 +1197,7 @@ async function ensureSqliteObjects(sanitize: boolean, driver: CcDriver): Promise
         "-I", vendor,
         "-c", join(vendor, "sqlite3.c"),
         "-o", join(buildDir, "sqlite3.o"),
+        ...profCflags(),
       ],
       { cwd: buildDir },
     );
@@ -1201,7 +1297,7 @@ function vendorTlsDir(): string {
  * with `zig ar` (llvm-ar — the host BSD ar has no business indexing ELF
  * objects). Host builds keep the exact historical clang + ar recipe. */
 async function ensureTlsArchive(sanitize: boolean, driver: CcDriver): Promise<string> {
-  const flavor = `${sanitize ? "asan" : "plain"}${driver.target !== null ? `-${driver.target}` : ""}`;
+  const flavor = `${sanitize ? "asan" : "plain"}${driver.target !== null ? `-${driver.target}` : ""}${profFlavor()}`;
   const compileArgv = driver.target !== null ? driver.argv : ["clang"];
   const arArgv = driver.target !== null ? [...driver.argv.slice(0, 1), "ar"] : ["ar"];
   const vendor = vendorTlsDir();
@@ -1220,6 +1316,7 @@ async function ensureTlsArchive(sanitize: boolean, driver: CcDriver): Promise<st
       ...(sanitize ? ["-O1", "-fsanitize=address"] : ["-Os"]),
       "-I", join(vendor, "include"),
       "-I", join(vendor, "library"),
+      ...profCflags(),
     ];
     const width = availableParallelism();
     for (let i = 0; i < sources.length; i += width) {
