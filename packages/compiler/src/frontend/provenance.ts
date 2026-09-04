@@ -38,7 +38,7 @@ import { promisify } from "node:util";
 import ts from "typescript5";
 import { resolveExports } from "./npm.js";
 import { resolveBareModule, resolveRelativeModule } from "./resolve.js";
-import { tsgoPath } from "./shared.js";
+import { isRelativeSpecifier, tsgoPath } from "./shared.js";
 import type { ProvenancePackageSource, ProvenanceSources } from "./provenance-registry.js";
 
 const execFileAsync = promisify(execFile);
@@ -205,7 +205,20 @@ function bareImportsWalk(
       continue;
     }
     for (const { spec, typeOnly } of moduleSpecifiersLite(text, file)) {
-      if (spec.startsWith("./") || spec.startsWith("../")) {
+      /* isRelativeSpecifier, not a hand-rolled prefix pair: the BARE DOT
+       * FORMS `.` and `..` are relative specifiers too (shared.ts has said
+       * so all along, and npm.ts's require probe carries the same scar),
+       * and spelled as prefixes only they fell through to the bare branch
+       * below and were enqueued as PACKAGE NAMES. They are not packages,
+       * nothing installs them, and each one still claimed one of the
+       * sixteen provenance slots on the way to failing:
+       *
+       *   note: .: not installed under the entry's node_modules
+       *   note: ..@1.0.0: no provenance attestation published
+       *
+       * — two slots of sixteen, on mongodb's own tree, spent on specifiers
+       * that name a directory. */
+      if (isRelativeSpecifier(spec)) {
         const dep = resolveRelativeModule(file, spec);
         if (dep !== null && !dep.endsWith(".json") && !dep.endsWith(".d.ts")) queue.push(dep);
         continue;
