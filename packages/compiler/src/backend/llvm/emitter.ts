@@ -7645,11 +7645,18 @@ class LlEmitter {
         B.line(`${t} = call ptr @${conv}(${valTy} ${v.name})`);
         // The C emitter's twin: mark a copy whose loss would be visible, so
         // the mutating dyn entry points refuse loudly instead of dropping
-        // the write.
+        // the write — and record the ORIGIN, so the recovery on the way
+        // back out hands the caller's own object back instead of a second
+        // one. See emit-exprs.ts's row for the whole argument.
         if (dynCopyIsObservable(e.value)) {
-          this.declare(`declare ptr @scr_dyn_mark_static_copy(ptr)`);
+          const { retain, release } = vAdapters(this, v.type);
+          this.declare(
+            `declare ptr @scr_dyn_origin_mark(ptr, ptr, ptr, ptr, ptr)`,
+          );
           const m = B.tmp();
-          B.line(`${m} = call ptr @scr_dyn_mark_static_copy(ptr ${t})`);
+          B.line(
+            `${m} = call ptr @scr_dyn_origin_mark(ptr ${t}, ptr ${v.name}, ptr ${this.cstr(typeKey(v.type))}, ptr ${retain}, ptr ${release})`,
+          );
           return this.own({ name: m, type: e.type });
         }
         return this.own({ name: t, type: e.type });

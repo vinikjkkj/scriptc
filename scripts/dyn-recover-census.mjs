@@ -164,7 +164,16 @@ function analyse(src, kinds, listLimit) {
     const marked = new Set();
     for (let pass = 0; pass < 4; pass++) {
       for (const line of fn.body) {
-        let m2 = /^\s*(?:const\s+)?ScrDyn\s*\*\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*scr_dyn_mark_static_copy\(/.exec(line);
+        // BOTH spellings of the mark. `scr_dyn_origin_mark` performs
+        // scr_dyn_mark_static_copy's whole effect and additionally records
+        // the object the copy was made from; it is what the emitter writes
+        // at an observable crossing now, and the bare form survives for any
+        // TU emitted before that. An instrument that knows only one of them
+        // reports ZERO marked copies on a current build and therefore zero
+        // silent lost writes -- a clean bill of health produced by not
+        // looking, which is the failure mode this file's self-test exists
+        // to prevent.
+        let m2 = /^\s*(?:const\s+)?ScrDyn\s*\*\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(?:scr_dyn_mark_static_copy|scr_dyn_origin_mark)\(/.exec(line);
         if (m2) { marked.add(m2[1]); continue; }
         m2 = /^\s*(?:(?:const\s+)?ScrDyn\s*\*\s*)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(?:sc_dyn_key_get|scr_dyn_retain|scr_dyn_obj_get|sc_dyn_idx_get)\(\s*([A-Za-z_][A-Za-z0-9_]*)/.exec(line);
         if (m2 && marked.has(m2[2])) { marked.add(m2[1]); continue; }
@@ -323,8 +332,16 @@ function selftest() {
     // original exists, so a caller writing through it loses nothing.
     // The OTHER spelling of the same escape: the checker hands back a bare
     // record and the emitter wraps it in a union before returning.
+    //
+    // ...and its MARK is written the way the emitter writes one today,
+    // `scr_dyn_origin_mark`, while sc_f_escapes above keeps the bare
+    // `scr_dyn_mark_static_copy`. Both fixtures are charged below, so the
+    // "fed by a MARKED static copy" count proves the instrument recognises
+    // BOTH spellings. With only the old one planted, a rename in the
+    // emitter would take this census silently to zero -- which is exactly
+    // what it did before this line was changed.
     'static ScrUnion * sc_f_escapes_wrapped(sc_rs_r4 *sc_l_message_0) { /* G:/x/a.ts:22 */',
-    '  ScrDyn *sc_t8 = scr_dyn_mark_static_copy(sc_td_4(sc_l_message_0));',
+    '  ScrDyn *sc_t8 = scr_dyn_origin_mark(sc_td_4(sc_l_message_0), (void *)sc_l_message_0, "record:r4", sc_rretain_r4_v, sc_rrelease_r4_v);',
     '  ScrDyn *sc_t9 = sc_dyn_key_get(sc_t8, sc_t7, false);',
     '  sc_rs_r1 *sc_t17 = sc_dc_0(sc_t9, NULL);',
     '  ScrUnion *sc_t18 = scr_union_new_ref(1, sc_t17, &sc_rretain_r1_v, &sc_rrelease_r1_v, NULL);',
@@ -444,7 +461,7 @@ const res = analyse(src, kinds, listLimit);
 report(file, kinds, res);
 // The static->dyn direction, for scale: how many conversions the compiler
 // already judged observable and marked.
-const marks = (src.match(/scr_dyn_mark_static_copy\(/g) || []).length;
-console.log("  for scale, the OTHER direction: " + marks + " scr_dyn_mark_static_copy() sites (already loud on write)");
+const marks = (src.match(/scr_dyn_mark_static_copy\(|scr_dyn_origin_mark\(/g) || []).length;
+console.log("  for scale, the OTHER direction: " + marks + " static-copy mark sites (already loud on write)");
 if (res.totals.recoveries === 0) { console.error("ZERO DENOMINATOR"); process.exit(2); }
 process.exit(0);

@@ -1007,6 +1007,54 @@ export class LlDyn {
       failRet();
       B.startBlock(lo);
     };
+    /** THE ORIGIN RECOVERY — emit-walkers.ts's `originRecover`, asked at
+     * the identical point of the array and record builders.
+     *
+     * When this dyn value is a boundary COPY of a live static object of
+     * exactly this type, the object itself is the answer, so identity, a
+     * write in either direction and a write made through the original
+     * since the crossing all agree with Node. A miss — no origin, a
+     * different static type, a parsed value — falls through to the fresh
+     * build that has always happened, so this refuses nothing and can
+     * redden nothing.
+     *
+     * Both lanes spell it because both lanes emit their own builders; the
+     * runtime call and the retain pair are the same in each, which is what
+     * keeps the two from answering the same cast differently. */
+    const originRecover = (hint: string): void => {
+      const { retain } = vAdapters(host, t);
+      host.declare(`declare ptr @scr_dyn_origin_take(ptr, ptr)`);
+      // The `static_copy` byte, INLINE, with the call behind it — the C
+      // twin's shape, and see its comment for the measurement: inlining the
+      // test is strictly less work but is NOT what makes the miss path
+      // cheap (the call and this form measure the same).
+      //
+      // Offset 14 is the third of ScrDyn's four flag bools, which sit in
+      // the padding between `kind` (+8) and the payload union (+16);
+      // `buffer` at +12 is already read exactly this way further down this
+      // file, and `->v.arr.len` at +16 pins the union's start.
+      const fp = B.tmp();
+      const fb = B.tmp();
+      const isc = B.tmp();
+      B.line(`${fp} = getelementptr inbounds i8, ptr %d, i64 14 ; ->static_copy`);
+      B.line(`${fb} = load i8, ptr ${fp}`);
+      B.line(`${isc} = icmp ne i8 ${fb}, 0`);
+      const lAsk = B.newLabel(`${hint}.mayorig`);
+      const lMiss = B.newLabel(`${hint}.noorig`);
+      B.condBr(isc, lAsk, lMiss);
+      B.startBlock(lAsk);
+      const o = B.tmp();
+      B.line(`${o} = call ptr @scr_dyn_origin_take(ptr %d, ptr ${host.cstr(typeKey(t))})`);
+      const hit = B.tmp();
+      B.line(`${hit} = icmp ne ptr ${o}, null`);
+      const lHit = B.newLabel(`${hint}.orig`);
+      B.condBr(hit, lHit, lMiss);
+      B.startBlock(lHit);
+      const r = B.tmp();
+      B.line(`${r} = call ptr ${retain}(ptr ${o})`);
+      B.terminate(`ret ptr ${r}`);
+      B.startBlock(lMiss);
+    };
     /** A recursive edge, in this body's own mode. */
     const childC = (ct: IrType): string => (soft ? this.dynArmHelper(ct) : this.dynCheckHelper(ct));
     const childArg = soft ? ", ptr %ok" : "";
@@ -1270,6 +1318,7 @@ export class LlDyn {
           B.startBlock(lAr);
           failRet(undefined, arityWant);
           B.startBlock(lGo);
+          originRecover("dct");
           B.line(`%r0 = call ptr @${mangleRecordNew(t.shapeId)}()`);
           const items = this.itemsOf(B, "%d");
           byIndex.forEach((f, i) => {
@@ -1302,6 +1351,12 @@ export class LlDyn {
         // still the same catchable path-annotated TypeError naming the
         // ORIGINAL receiver (the projection is not what failed), and a
         // shape that cannot take the lane meets the bare kind test.
+        // Ahead of the kind gate and the wide lane both — the C twin's
+        // placement, and for its reason: an origin is by construction an
+        // OBJ copy of this exact shape, so neither has anything to decide
+        // about it and a recovered record never pays for a projection it
+        // would throw away.
+        originRecover("dcr");
         let dRef = "%d";
         if (kindgateWideLane(this.kindgateDials, soft, shape)) {
           const proj = this.recordWideHelper();
@@ -1776,6 +1831,7 @@ export class LlDyn {
         const elem = t.elem;
         const c = childC(elem);
         requireKind(DK.ARR, "dca");
+        originRecover("dca");
         const n = this.lenOf(B, "%d");
         const a = B.tmp();
         B.line(`${a} = ${arrNewCall(host, elem, n)}`);

@@ -1258,8 +1258,17 @@ console.log("recovered");
     // Node prints "2 2" here. This used to answer "1 2", the silent
     // divergence; scr_dyn_static_copy_refuse replaced it with a loud one
     // ("loud beats lost") and every mutating dyn entry point shares it.
-    // Aliasing the original is the real fix and is not built yet; until
-    // it is, THIS is the behaviour, and nothing else pinned it.
+    //
+    // THE RECOVERY now hands back the origin (scr_dyn_origin_mark /
+    // scr_dyn_origin_take), so `base === (boxed as {a: number})` is true and
+    // a write through the RECOVERED value does reach `base`. This row is the
+    // other direction and is deliberately unchanged: `boxed.a = 2` never
+    // recovers anything — the receiver stays a ScrDyn and the store goes to
+    // scr_dyn_key_set, which would land on the copy's own entry table. That
+    // still refuses, because the origin remembers the object but the dyn
+    // node's storage is still its own. Making THAT land needs the two
+    // representations to share storage, which is the change the origin route
+    // exists to avoid.
     const r = await compileAndRun(
       "any-record-copy",
       `const base = { a: 1 };
