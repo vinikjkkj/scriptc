@@ -53,7 +53,7 @@ import { provenanceDeclSiblings } from "./provenance-registry.js";
 import { clearResolveCaches, isNodeModulesPath, nearestPkgJsonPath, projectDtsRuntimeSibling, resolveBareModule, resolveProjectImport, resolveRelativeModule, resolveTypeDirective, setProjectRealm } from "./resolve.js";
 import { clearNpmResolutionCaches, probeNodeImportRefusal, probeNodeRequireRefusal } from "./npm.js";
 import { isNpmStaticPackage, npmStaticActive, npmStaticFsShadow, npmStaticPackageOfPath, npmStaticPackages, npmStaticRewroteExports, reportNpmStaticOffender, setNpmStaticPackages } from "./npm-static.js";
-import { isProvenanceSpecifier, provenancePaths } from "./provenance-registry.js";
+import { isProvenanceSourceFile, isProvenanceSpecifier, provenancePaths } from "./provenance-registry.js";
 import { cjsLexerVisibleNames } from "./cjs-lexer.js";
 import {
   ADOPTED_OPTIONS,
@@ -1566,17 +1566,53 @@ export function makeCycleAdmission(
       // two module systems' init windows interleave in ways neither
       // analysis models.
       if (!comp.every((m) => isCjsJsFile7(m))) {
+        // The whole cluster is surveyed, not just up to the first
+        // offender, and the count rides the message.
+        //
+        // A cluster is admitted only when EVERY member's top level is
+        // inert, so naming one offending line and stopping told the
+        // reader to go fix a line that is one of N — they fix it, rebuild,
+        // and get the identical refusal at a different line, N-1 times.
+        // The count is the only part of this that says how big the job
+        // is, and it is what turns "mongodb's src has a cycle problem"
+        // into a number. Paid once per cluster (the verdict memo), and
+        // only for clusters that are already failing.
+        let offenders = 0;
+        let firstOff: ts.Node | null = null;
+        /** A CommonJS member ends the survey. Which reason WINS is
+         * unchanged from before the survey existed — whichever of the two
+         * comes first in cluster order — so a mixed cluster still reports
+         * the CommonJS line; the count then covers only the prefix walked
+         * and says so. */
+        let partial = false;
         for (const m of comp) {
           if (isCjsJsFile7(m)) {
-            reason = `${m.fileName} is a CommonJS module — admission covers ES-module cycles only`;
+            if (offenders === 0) {
+              reason = `${m.fileName} is a CommonJS module — admission covers ES-module cycles only`;
+            } else {
+              partial = true;
+            }
             break;
           }
           if (m === entered) continue;
           const off = nonInertTopLevel7(program, m, evaluated);
           if (off !== null) {
-            reason = `top-level code at ${lineOf(off)} can run user code during the cycle's init window — only declaration-only module bodies are admitted`;
-            break;
+            offenders++;
+            firstOff ??= off;
+            // The count says how big the job is; this says WHERE. Off by
+            // default, printed to stderr, same shape as
+            // SCRIPTC_NPMSTATIC_WHY and SCRIPTC_ABSENTGLOBAL_WHY.
+            if (process.env["SCRIPTC_CYCLE_WHY"] !== undefined) {
+              console.error(`[cycle] non-inert top level ${lineOf(off)} (cluster of ${comp.length})`);
+            }
           }
+        }
+        if (reason === null && firstOff !== null) {
+          const rest =
+            offenders === 1 && !partial
+              ? ""
+              : ` (and ${partial ? "at least " : ""}${offenders - 1} more of the ${comp.length} modules in this cluster)`;
+          reason = `top-level code at ${lineOf(firstOff)} can run user code during the cycle's init window — only declaration-only module bodies are admitted${rest}`;
         }
       }
       sccVerdict.set(comp, reason);
@@ -1711,6 +1747,30 @@ function npmStaticProgramDep(
 function processModuleAliasRequire7(spec: string, decl: ts.VariableDeclaration | null): boolean {
   if (spec !== "process" && spec !== "node:process") return false;
   return decl === null || ts.isIdentifier(decl.name);
+}
+
+/** The ESM spelling of the same thing: `import * as process from 'process'`,
+ * `import process from 'process'`, and the bare side-effect import.
+ *
+ * @types/node declares the module as `export = process` over the GLOBAL
+ * `process` variable, so a namespace or default binding of it aliases to
+ * that one global symbol — which is exactly what stdlibGlobalNameOf
+ * already resolves (the "imported binding of a builtin module's
+ * re-exported global" arm it was given for `import { Buffer } from
+ * "node:buffer"`). The reads therefore lower through the process surface
+ * with no new machinery; only this gate stood in front of them, and it
+ * stood there because the require form was taught and the import form was
+ * not. mongodb's client_metadata.ts opens with the namespace spelling.
+ *
+ * NAMED bindings keep the fence, for the require form's reason: `import
+ * { env } from 'process'` binds a MEMBER, not the object, and a member
+ * binding has no receiver for the surface to lower through. */
+function processModuleAliasImport7(spec: string, clause: ts.ImportClause | undefined): boolean {
+  if (spec !== "process" && spec !== "node:process") return false;
+  if (clause === undefined) return true; // bare side-effect import
+  const bindings = clause.namedBindings;
+  if (bindings !== undefined && !ts.isNamespaceImport(bindings)) return false;
+  return true;
 }
 
 /** The whole TS7-lane lifecycle for one entry: spawn (or share) a tsgo
@@ -1849,6 +1909,37 @@ function preflight7(load: LoadResult): {
    * offender and it falls back to the island. */
   const npmStaticFileSuppressed = (d: ts.Diagnostic): boolean =>
     d.fileName !== undefined && npmStaticPackageOfPath(d.fileName) !== null;
+  /* --provenance-sources: the SAME doctrine at the same chokepoint, for
+   * the same reason, and the argument is stronger here than for
+   * --npm-static.
+   *
+   * These files are the package author's own TypeScript, fetched from the
+   * commit its published dist attests to. The author checked them under
+   * THEIR tsconfig — their target, their lib, their strictness, their
+   * TypeScript version — and shipped. The program's author cannot fix
+   * them: they are not in the tree, they are a content-addressed checkout
+   * the compiler chose to read. Yet the flag re-checks that whole source
+   * tree under scriptc's forced option set with tsgo, and any disagreement
+   * — a lib the author did not target, a strictness flag they did not set,
+   * a narrowing the checker version lost — became a preflight FAILURE for
+   * a program that compiles fine with the flag off.
+   *
+   * That asymmetry was ours, and it was invisible: with the flag off the
+   * same package is consumed through its shipped .d.ts under
+   * skipLibCheck, so scriptc never looked at those declarations at all.
+   * Turning on source mapping must not newly gate the build on a third
+   * party's own typecheck.
+   *
+   * The safety net is the one the --npm-static comment names, and it is
+   * the same net because it is the same lowering: a type the checker could
+   * not prove does not map, and a statement whose types do not map
+   * compiles to its honest per-site refusal, never to a silent guess. And
+   * scriptc's OWN codes are untouched — SC1010 (an unsupported builtin),
+   * SC1016 (a module-cycle shape), every SC1xxx preflight structure
+   * finding still gates from inside a provenance file exactly as before.
+   * Only the TypeScript passthrough (SC0001) stops speaking there. */
+  const provenanceFileSuppressed = (d: ts.Diagnostic): boolean =>
+    d.fileName !== undefined && isProvenanceSourceFile(d.fileName);
   /* The same doctrine for node_modules JS the opt-in never NAMED:
    * maxNodeModuleJsDepth (set only on --npm-static loads) admits ANY
    * node_modules JavaScript the checker's resolution touches — e.g. an
@@ -1933,6 +2024,7 @@ function preflight7(load: LoadResult): {
         d.category === ts.DiagnosticCategory.Error &&
         !suppressedJsStrictness7(d) &&
         !npmStaticFileSuppressed(d) &&
+        !provenanceFileSuppressed(d) &&
         !nodeModulesJsSuppressed(d) &&
         !namespaceCalleeSuppressed(p, d) &&
         !workspaceImplicitAnySuppressed(p, d) &&
@@ -2229,6 +2321,7 @@ function preflight7(load: LoadResult): {
       // imports-field family, resolved below.
       const npm = isBare && !spec.startsWith("#") ? resolveNpmImport7(sf.fileName, spec) : null;
       if (npm && isNodeTypesPath(npm.typesFile)) {
+        if (processModuleAliasImport7(spec, stmt.importClause)) continue;
         diags.push(unsupportedDiag("SC1010", locOf7(stmt), unsupportedModuleFeatureOf(spec)));
         continue;
       }
@@ -2300,6 +2393,11 @@ function preflight7(load: LoadResult): {
         if (projDep === null) {
           const nodeBuiltin = spec.startsWith("node:") || nodeBuiltinNames.has(spec);
           if (nodeBuiltin) {
+            // The process-module alias reaches this arm, not the npm one
+            // above: nothing named "process" is INSTALLED, so the npm
+            // resolution answers nothing and the bare name is judged here
+            // against Node's builtin list. Same admission, both arms.
+            if (processModuleAliasImport7(spec, stmt.importClause)) continue;
             diags.push(unsupportedDiag("SC1010", locOf7(stmt), unsupportedModuleFeatureOf(spec)));
             continue;
           }

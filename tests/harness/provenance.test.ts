@@ -35,6 +35,9 @@ const outDir = join(repoRoot, "node_modules/.cache/scriptc-tests/provenance", fl
 
 const EXPECTED = "hello, world\nHELLO, COMPILER!\nhello, chain!\n";
 
+/* The foreign-tsconfig case (see the two tests at the end). */
+const FOREIGN_EXPECTED = "rule:1 strict:2\n42\n";
+
 /* The protobuf-intersection case (see the test below). */
 const pbEntry = join(fixtureDir, "cases/pb/main.ts");
 const PB_EXPECTED =
@@ -181,5 +184,55 @@ describe("provenance sources", () => {
     // The island path still works under the flag — the fallback contract.
     const island = await buildAndRun("greet-fallback", true);
     expect(island).toBe(EXPECTED);
+  });
+
+  test("a checker error in the ATTESTED SOURCE does not gate the build", async () => {
+    /* The foreign-tsconfig contract, which --npm-static already had and
+     * this flag did not.
+     *
+     * `foreignts`'s source names a DOM type. `lib` is FORCED to
+     * lib.es2025.d.ts for every program scriptc compiles, so re-checking
+     * those files reports "Cannot find name 'HTMLElement'" — an error the
+     * package's author never saw (their own lib listed `dom`), in files
+     * the consuming program's author cannot edit, over a name that is
+     * erased before anything runs.
+     *
+     * Before the suppression this was a preflight FAILURE: turning source
+     * mapping ON broke a program that compiles with it off, where the
+     * same package is consumed through its shipped .d.ts under
+     * skipLibCheck and scriptc never looks at those declarations.
+     *
+     * The differential is the thesis unchanged: source-static must
+     * byte-match the island running the published dist. */
+    const foreignEntry = join(fixtureDir, "cases/foreignts/main.ts");
+    const island = await buildAndRun("foreignts-island", true, foreignEntry);
+    expect(island).toBe(FOREIGN_EXPECTED);
+
+    process.env["SCRIPTC_PROVENANCE_MANIFEST"] = join(fixtureDir, "manifest-foreignts.json");
+    const sources = await resolveProvenanceSources(foreignEntry);
+    expect(sources.packages).toHaveLength(1);
+    expect(sources.packages[0]!.name).toBe("foreignts");
+    setProvenanceSources(sources);
+
+    const { coverage } = analyze(foreignEntry);
+    expect(coverage.preflightFailed).toBe(false);
+    expect(coverage.diagnostics).toHaveLength(0);
+    const fromSource = await buildAndRun("foreignts-static", false, foreignEntry);
+    expect(fromSource).toBe(island);
+  });
+
+  test("the suppression is scoped to provenance files: the DRIVER's own error still gates", async () => {
+    /* The negative control for the test above. The same mapped package,
+     * the same flag — but the type error is in the program's OWN file,
+     * which its author can fix, so it must still fail preflight. A
+     * suppression that reached user files would make this pass. */
+    const badEntry = join(fixtureDir, "cases/foreignts/bad.ts");
+    process.env["SCRIPTC_PROVENANCE_MANIFEST"] = join(fixtureDir, "manifest-foreignts.json");
+    setProvenanceSources(await resolveProvenanceSources(badEntry));
+    const { coverage } = analyze(badEntry);
+    expect(coverage.preflightFailed).toBe(true);
+    const tsc = coverage.diagnostics.filter((d) => d.code === "SC0001");
+    expect(tsc.length).toBeGreaterThan(0);
+    expect(tsc.some((d) => d.loc.file.split("\\").join("/").endsWith("cases/foreignts/bad.ts"))).toBe(true);
   });
 });
