@@ -746,6 +746,82 @@ export interface GenericClassInfo {
     return out;
   }
 
+/** Programs that ASSIGN to a `.name` on an %Error-rooted receiver, scanned
+ * once per Lowerer. It is the gate on the `get name()` routing in the
+ * member loop below, and it exists because that is the ONE place the two
+ * shapes disagree: Node answers a routed `name` through a PROTOTYPE
+ * ACCESSOR with no setter, so `(e as Error).name = x` throws TypeError,
+ * where the routed layout would quietly store the string. Reads agree (the
+ * slot holds the getter's constant, stamped ahead of every own field
+ * initializer, which is when Node's prototype getter becomes visible), and
+ * `Object.keys`/`JSON.stringify` cannot tell the two apart — an
+ * %Error-rooted class is denied a member table.
+ *
+ * A hit keeps TODAY'S fence for the whole program: a refusal, never a wrong
+ * answer. The scan is the emitter-registry pass's shape verbatim — one
+ * syntactic walk, mapTypeOf only at the handful of `.name =` sites, and
+ * anything that does not RESOLVE counts as a write. */
+const errorNameWriteScan = new WeakMap<Lowerer, boolean>();
+
+export function programWritesErrorName(L: Lowerer): boolean {
+  const memo = errorNameWriteScan.get(L);
+  if (memo !== undefined) return memo;
+  let found = false;
+  for (const sf of L.program.getSourceFiles()) {
+    if (found) break;
+    if (sf.isDeclarationFile) continue;
+    const walk = (node: ts.Node): void => {
+      if (found) return;
+      ts.forEachChild(node, walk);
+      if (found) return;
+      if (!ts.isBinaryExpression(node)) return;
+      const k = node.operatorToken.kind;
+      if (k < ts.SyntaxKind.FirstAssignment || k > ts.SyntaxKind.LastAssignment) return;
+      let lhs: ts.Expression = node.left;
+      while (ts.isParenthesizedExpression(lhs) || ts.isNonNullExpression(lhs)) lhs = lhs.expression;
+      if (!ts.isPropertyAccessExpression(lhs) || lhs.name.text !== "name") return;
+      let recv: ts.Expression = lhs.expression;
+      while (
+        ts.isParenthesizedExpression(recv) || ts.isNonNullExpression(recv) ||
+        ts.isAsExpression(recv) || ts.isTypeAssertion(recv)
+      ) recv = recv.expression;
+      let recvT: IrType | null = null;
+      try {
+        recvT = L.mapTypeOf(L.typeOf(recv));
+      } catch {
+        // Unresolved receivers count as a write, like the emitter scan's
+        // opaque registrations: the gate must never let a write through.
+        found = true;
+        return;
+      }
+      if (recvT === null) return;
+      for (let c: ClassInfo | null = recvT.kind === "object" ? L.classes.get(recvT.className) ?? null : null; c; c = c.base) {
+        if (c.def.name === "%Error") {
+          found = true;
+          return;
+        }
+      }
+    };
+    walk(sf);
+  }
+  errorNameWriteScan.set(L, found);
+  return found;
+}
+
+/** The string constant a getter body RETURNS and nothing else — `{ return
+ * 'BSONError'; }`, the whole shape the `name` routing accepts. A body with
+ * any other statement, or a computed return, keeps the fence: stamping a
+ * slot at construction is only Node's answer when the getter is a
+ * constant, and a lazily-evaluated one is not that. */
+function constStringReturnOf(body: ts.Block): ts.Expression | null {
+  if (body.statements.length !== 1) return null;
+  const s = body.statements[0]!;
+  if (!ts.isReturnStatement(s) || s.expression === undefined) return null;
+  let e: ts.Expression = s.expression;
+  while (ts.isParenthesizedExpression(e) || ts.isAsExpression(e) || ts.isTypeAssertion(e)) e = e.expression;
+  return ts.isStringLiteral(e) || ts.isNoSubstitutionTemplateLiteral(e) ? e : null;
+}
+
 /** The builtin Error hierarchy (Error + TypeError/RangeError/SyntaxError)
    * as eagerly-registered ClassInfos: mapType names them the moment a lib
    * Error type appears, so the infos must exist before any lowering. They
@@ -3003,6 +3079,52 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
           if (!member.body && !abstractAccessor) L.unsupported("SC1090", member, "bodyless accessors");
           const prop = member.name.text;
           const mName = `${isGet ? "get" : "set"}:${prop}`;
+          // `name` on an ERROR-ROOTED class is ScrError's FIRST slot, not a
+          // field this accessor collides with. The collision is OURS: the
+          // runtime lays Error out as [name, message, %code] and %Error's
+          // fields map carries `name`, so `fields` inherits it — where tsc
+          // sees no class field at all, because `Error.name` reaches
+          // TypeScript through `interface Error`. Every Error hierarchy in
+          // the wild spells its display name `override get name() { return
+          // 'X' }` (bson's four, mongodb's thirty), and the fence took the
+          // whole class, and with it every subclass.
+          //
+          // A CONSTANT getter and a stamped slot are the same observable
+          // object: `e.name` reads the constant through the subclass type
+          // AND through every `Error` view (one memory, the routesErrorCode
+          // precedent), `String(e)` reads it through the runtime's
+          // toString, and the enumerability difference — Node's accessor
+          // sits on the prototype, a slot does not — is invisible because
+          // an %Error-rooted class is denied a member table (Object.keys
+          // and JSON.stringify both fence). The stamp goes to the FRONT of
+          // fieldOrder: Node installs the getter on the prototype before
+          // any instance exists, so an own field initializer reading
+          // `this.name` must already see it.
+          //
+          // WRITES are the one divergence — Node throws TypeError at
+          // `(e as Error).name = x` (accessor, no setter) where the slot
+          // would store — so the routing is off for any program that
+          // contains such a write (programWritesErrorName). A getter with a
+          // sibling setter is a real accessor pair, not a constant, and
+          // keeps the fence too.
+          if (
+            isGet &&
+            prop === "name" &&
+            errorRootedBase &&
+            !abstractAccessor &&
+            member.body !== undefined &&
+            typeEquals(fields.get("name") ?? VOID, STRING) &&
+            !decl.members.some(
+              (m) => ts.isSetAccessor(m) && ts.isIdentifier(m.name) && m.name.text === "name",
+            ) &&
+            !programWritesErrorName(L)
+          ) {
+            const lit = constStringReturnOf(member.body);
+            if (lit !== null) {
+              fieldOrder.unshift({ name: "name", type: STRING, initializer: lit, redeclared: true });
+              continue;
+            }
+          }
           if (fields.has(prop)) {
             // tsc rejects field/accessor mixing (TS2610/2611); defensive.
             L.unsupported("SC1090", member.name, "accessors sharing a name with a field");
