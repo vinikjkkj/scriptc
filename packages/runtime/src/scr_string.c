@@ -129,6 +129,121 @@ __attribute__((constructor)) static void scr_poolstat_reg_string(void) {
 }
 #endif
 
+/* ── CONTENT INTERNING: EXPERIMENTAL, DEFAULT OFF ─────────────────────
+ * WHAT IT IS FOR. The census of the real messaging bench (SCR_STRCEN_ON,
+ * G:\blocks\stringmem\lab\strcen-memoff.txt) says the live heap-string
+ * population at its high-water mark is 541,092 strings holding 42,733,824
+ * physical bytes, that 93.70% of them carry capacity 50, and that only
+ * 20,322 of the 456,257 the walk read are DISTINCT -- 95.55% of the live
+ * population is byte-equal to another live string, holding 34,639,520 B.
+ * That is 41% of the whole live heap duplicated. No allocator change can
+ * touch it; only not making the copy can.
+ *
+ * WHY IT IS OFF, and what it would take to turn it on. Interning cannot
+ * change a JavaScript answer -- strings are primitives, so `===`, Map and
+ * Set keys and every dyn crossing compare VALUE, which corpus program 7530
+ * checks against the oracle. What it changes is the runtime's own
+ * ALLOCATION DISCIPLINE, and the runtime's C unit tests are written against
+ * that discipline by exact count: test_array.c alone asserts
+ * `scr_str_live_count() == strings0 + 4`, "aa and bb released, cc and dd
+ * shared", and a dozen more. Those are correct assertions about a
+ * non-interning allocator and every one of them would have to be re-stated.
+ * The audit lane is where they run, so interning is compiled out there --
+ * which means the RC audit does not cover this arm, and that is a hole this
+ * knob NAMES rather than hides.
+ *
+ * WHAT IS MEASURED HERE. SCR_STRING_INTERN=1 turns it on in the same image,
+ * so the ceiling above stops being arithmetic: it becomes a peak-RSS number
+ * and a cycle number on the real bench, which is what a decision needs.
+ *
+ * THE SHAPE. A fixed-size DIRECT-MAPPED cache of OWNING references, not a
+ * table with eviction sweeps. Owning is the load-bearing choice: an entry
+ * always has rc >= 1 from the table, so an interned string can never be
+ * seen with rc == 1 by scr_str_concat's in-place arm, and the one way
+ * interning could corrupt a value -- mutating a string the table still
+ * points at -- cannot arise. A collision EVICTS by releasing the resident
+ * entry, so nothing is immortal and the table's own footprint is bounded at
+ * SCR_STR_INTERN_SLOTS pointers plus whatever the live entries cost.
+ *
+ * Only scr_str_concat's copy path is hooked, because that is where the
+ * measured population is born (capacity 50 is the `a->rc == 1` growth arm's
+ * output for a 28-byte result), and because a narrow hook is a narrow blast
+ * radius. MINLEN keeps chain INTERMEDIATES out: `"5511" + digits` is 14
+ * bytes and is not a value anyone stores, and interning it would only cost
+ * the next link its in-place append. */
+#ifndef SCR_STR_INTERN
+#define SCR_STR_INTERN 0
+#endif
+#ifndef SCR_STR_INTERN_BITS
+#define SCR_STR_INTERN_BITS 16
+#endif
+#define SCR_STR_INTERN_SLOTS (1u << SCR_STR_INTERN_BITS)
+#ifndef SCR_STR_INTERN_MINLEN
+#define SCR_STR_INTERN_MINLEN 16
+#endif
+#ifndef SCR_STR_INTERN_MAXLEN
+#define SCR_STR_INTERN_MAXLEN 128
+#endif
+
+#ifndef SCR_RC_AUDIT
+static ScrStr *scr_str_itab[SCR_STR_INTERN_SLOTS];
+
+static int scr_str_intern_on(void) {
+  static int cached = -1;
+  SCR_CS_ARM();
+  if (cached < 0) {
+    const char *env = getenv("SCR_STRING_INTERN");
+    cached = env != NULL ? (strtol(env, NULL, 10) != 0) : (SCR_STR_INTERN != 0);
+  }
+  return cached;
+}
+
+/* FNV-1a over the CONCATENATION of two spans, without forming it. */
+static unsigned scr_str_ihash(const char *x, size_t nx, const char *y, size_t ny) {
+  unsigned long long h = 1469598103934665603ULL;
+  size_t i;
+  for (i = 0; i < nx; i++) { h ^= (unsigned char)x[i]; h *= 1099511628211ULL; }
+  for (i = 0; i < ny; i++) { h ^= (unsigned char)y[i]; h *= 1099511628211ULL; }
+  h ^= (unsigned long long)(nx + ny) * 2654435761ULL;
+  h ^= h >> 32;
+  return (unsigned)h & (SCR_STR_INTERN_SLOTS - 1u);
+}
+
+/* A RETAINED string with these bytes if the cache holds one, else NULL.
+ * *slot is always written: a miss still names where a put would go, so the
+ * caller hashes once. */
+static ScrStr *scr_str_intern_get(const char *x, size_t nx, const char *y,
+                                  size_t ny, unsigned *slot) {
+  ScrStr *e;
+  unsigned k = scr_str_ihash(x, nx, y, ny);
+  *slot = k;
+  e = scr_str_itab[k];
+  if (e == NULL) return NULL;
+  if ((size_t)e->len != nx + ny) return NULL;
+  /* rc is 32 bits and UINT32_MAX is the immortal marker. Half of it is more
+   * references than any real program holds (the bench's measured maximum is
+   * 1,001), and stopping there means the counter can never reach the marker
+   * by sharing. */
+  if (e->rc > (SCR_STR_IMMORTAL >> 1)) return NULL;
+  if (nx != 0 && memcmp(e->data, x, nx) != 0) return NULL;
+  if (ny != 0 && memcmp(e->data + nx, y, ny) != 0) return NULL;
+  e->rc++;
+  SCR_CS_BUMP(sihit);
+  return e;
+}
+
+static void scr_str_intern_put(unsigned k, ScrStr *s) {
+  ScrStr *e = scr_str_itab[k];
+  s->rc++; /* the table's OWN reference; see the note on rc >= 1 above */
+  scr_str_itab[k] = s;
+  SCR_CS_BUMP(siput);
+  if (e != NULL) {
+    SCR_CS_BUMP(sievict);
+    scr_str_release(e);
+  }
+}
+#endif /* !SCR_RC_AUDIT */
+
 /* 512, MEASURED, not chosen. On the real zapo messaging bench, memory store,
  * six runs per arm pooled over both halves of a palindrome arm order (so the
  * per-arm mean position, and with it the 11.1% cycle drift across a rep, is
@@ -499,6 +614,19 @@ ScrStr *scr_str_concat(ScrStr *a, ScrStr *b) {
    * with rc == 2 — the variable plus the emitted temp — every iteration;
    * the slack is what lets the free-block cache above satisfy the next
    * iteration's slightly-larger allocation). */
+#ifndef SCR_RC_AUDIT
+  /* The interning probe, BEFORE the allocation it would replace. A hit
+   * returns a string that already holds these bytes, so the memcpy, the
+   * block and the eventual free all do not happen. */
+  unsigned islot = 0;
+  int iwant = 0;
+  if (newlen >= SCR_STR_INTERN_MINLEN && newlen <= SCR_STR_INTERN_MAXLEN &&
+      scr_str_intern_on()) {
+    ScrStr *hit = scr_str_intern_get(a->data, a->len, b->data, b->len, &islot);
+    if (hit != NULL) return hit;
+    iwant = 1;
+  }
+#endif
   size_t newcap = newlen;
   size_t gmin = scr_str_growth_min();
   if (a->rc == 1 && newlen >= gmin) {
@@ -525,6 +653,9 @@ ScrStr *scr_str_concat(ScrStr *a, ScrStr *b) {
   memcpy(s->data, a->data, a->len);
   memcpy(s->data + a->len, b->data, b->len);
   s->data[newlen] = '\0';
+#ifndef SCR_RC_AUDIT
+  if (iwant) scr_str_intern_put(islot, s);
+#endif
   return s;
 }
 
