@@ -2052,38 +2052,6 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
      * carries it out so the caller needs one test, not two. */
     const afterHard = (ind: string, rel: string, dummy: string): string =>
       `${ind}if (scr_exc_pending()) { ${soft ? "*ok = false; " : ""}${rel}return ${dummy}; }`;
-    /* THE BOUNDARY-COPY EXTRACTION REFUSAL, and it is planted at the
-     * SUCCESSFUL EXIT of the array and record builders rather than at the
-     * kind gate.
-     *
-     * A static array or record that crossed into an `unknown` slot was
-     * COPIED (`scr_dyn_mark_static_copy` — the two representations are
-     * different memory). Recovering one back out builds a SECOND object
-     * where Node hands back the first: `back === original` reads false, a
-     * write through either is invisible to the other, and a write made
-     * through the original since the crossing is not in the copy at all.
-     * All of that answered at exit 0 with no diagnostic.
-     *
-     * At the EXIT, not the entry, for the soft discipline's sake: a union
-     * arm that does not match must still fall through to the next arm, and
-     * a gate at the top would refuse on a receiver this arm was never going
-     * to take. By the time control reaches the return the arm HAS matched,
-     * so the refusal fires exactly where a copy would have been handed
-     * back. The build work it discards is a copy nobody may keep.
-     *
-     * `module_ns` is excluded deliberately. A module namespace is frozen in
-     * Node ([[Set]]- and [[Delete]]-proof, measured on v25.9.0), so the
-     * only thing a copy of one can get wrong is identity — there is no
-     * write to lose and no staleness to read. Refusing there would trade a
-     * working shape for a narrower defect than the one this closes.
-     *
-     * `sc_bcopy` is read off the RECEIVER AS IT ARRIVED, before the record
-     * branch's wide lane can replace `d` with its own fresh projection —
-     * that projection carries no mark, and testing it would miss. */
-    const extractRefuse = (ind: string, what: string, rel: string, dummy: string): string =>
-      `${ind}if (sc_bcopy) { scr_dyn_static_copy_extract_refuse(${cStringLiteral(
-        Buffer.from(what, "utf8"),
-      )}); ${soft ? "*ok = false; " : ""}${rel}return ${dummy}; }`;
     switch (t.kind) {
       case "f64":
         if (soft) d.push(`  (void)path;`);
@@ -2226,9 +2194,6 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
         // lane is actually taken (a tuple shape returns above it).
         let projRel = "";
         const rel = (v: string) => `${releaseCallC(t, v)}${projRel}`;
-        // extractRefuse's own comment: read off the receiver AS IT ARRIVED,
-        // ahead of the wide lane's `d = sc_proj`.
-        d.push(`  const bool sc_bcopy = scr_dyn_is_boundary_copy(d);`);
         // Tuple targets: a JSON ARRAY of exactly the arity, validated and
         // extracted positionally with index paths ("$.pairs[3][1]").
         if (shape.tuple) {
@@ -2250,7 +2215,6 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
             d.push(afterChild(`    `, `${rel("r")}; `, `NULL`));
             d.push(`  }`);
           });
-          d.push(extractRefuse(`  `, "a tuple", `${rel("r")}; `, `NULL`));
           d.push(`  return r;`);
           break;
         }
@@ -2633,7 +2597,6 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
           d.push(`    scr_str_release(ek);`);
           d.push(`  }`);
         }
-        d.push(extractRefuse(`  `, "a record", `${rel("r")}; `, `NULL`));
         if (wide) d.push(`  if (sc_proj) scr_dyn_release(sc_proj);`);
         d.push(`  return r;`);
         break;
@@ -2641,7 +2604,6 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
       case "array": {
         const elem = t.elem;
         const c = childC(elem);
-        d.push(`  const bool sc_bcopy = scr_dyn_is_boundary_copy(d);`);
         d.push(fail(`  `, "array.kind", `d->kind != SCR_DYN_ARR`, `NULL`));
         d.push(`  ScrArr *a = ${E.arrNewC(elem, "d->v.arr.len")};`);
         d.push(`  for (size_t i = 0; i < d->v.arr.len; i++) {`);
@@ -2650,7 +2612,6 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
         d.push(afterChild(`    `, `scr_arr_release(a); `, `NULL`));
         d.push(`    scr_arr_push_${elemAccess(elem)}(a, e);`);
         d.push(`  }`);
-        d.push(extractRefuse(`  `, "an array", `scr_arr_release(a); `, `NULL`));
         d.push(`  return a;`);
         break;
       }
