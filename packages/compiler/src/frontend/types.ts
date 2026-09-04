@@ -3618,7 +3618,43 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
   }
   // Promise<T>: a reference to the lib Promise interface. The inner type
   // maps recursively; promise-of-unmappable stays unmappable.
-  if (isStdlibInterface("Promise")) {
+  //
+  // PromiseLike<T> maps to THE SAME promise slot, and the boundary that
+  // makes that honest is stated here because nothing downstream restates
+  // it. In TypeScript `PromiseLike<T>` is *any thenable* — `{ then(cb) {
+  // cb(1) } }` inhabits it and is not a promise — so answering "promise"
+  // for the type is only true if every VALUE that can reach such a slot in
+  // this program is a real promise. It is, and by construction rather than
+  // by hope:
+  //
+  //   - scriptc compiles a closed program. A `PromiseLike<T>`-typed slot is
+  //     filled by an expression this compiler lowered, and the only IR type
+  //     it hands out for a thing you can `.then`/`await` is `promise`.
+  //   - every OTHER inhabitant of PromiseLike<T> maps to something else —
+  //     an object literal with a `then` member is a `record`, a class with
+  //     one is a class instance, a function with one is a `func`. None of
+  //     those is type-equal to `promise<T>`, so the assignment, argument or
+  //     return that would put it here is refused where it is written, with
+  //     the site's own coercion diagnostic. Nothing silently becomes a
+  //     promise.
+  //   - the surface that could hand back a foreign thenable without the
+  //     compiler seeing its construction is package surface, and package
+  //     values are already fenced on their own terms (SC2013 / the island
+  //     boundary) before this mapping is consulted.
+  //
+  // So the admission is exactly "PromiseLike here means Promise", and the
+  // refusal outside it is the pre-existing structural one: a bare thenable
+  // has no lowering (lower-assert.ts, and `Promise.resolve(<thenable>)` in
+  // lower-builtins.ts, both already say so in those words). This mapping
+  // does not widen that stance — it lets the TYPE be spelled while every
+  // non-promise VALUE keeps the refusal it already had.
+  //
+  // What this deliberately does NOT do: narrow a `dyn`/`unknown` value to
+  // PromiseLike<T> through a user-written type predicate. `value is
+  // PromiseLike<T>` over an `unknown` parameter would claim a promise
+  // handle for an arbitrary object; that narrowing is refused separately
+  // (dynNarrowToPromiseRefused) rather than answered.
+  if (isStdlibInterface("Promise") || isStdlibInterface("PromiseLike")) {
     const arg = checker.getTypeArguments(widened as ts.TypeReference)[0];
     if (!arg) return null;
     // Promise<never> — a throw-only async function's inference. Like sync

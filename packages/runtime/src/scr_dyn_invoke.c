@@ -847,20 +847,36 @@ static bool dyn_kind_knows(const ScrDyn *recv, const char *m) {
        * missed by the time this is asked (the caller checks), so this is
        * only ever Object.prototype's set. */
       return !recv->null_proto && dyn_objproto_knows(m);
+    case SCR_DYN_PROMISE:
+      /* THE ARM 4242's comment said could not be exercised. It can now: a
+       * DOT read of `then` off an `unknown` (`typeof (v as { then?:
+       * unknown }).then === "function"` — the thenable feature-detect
+       * every library writes, and the one `PromiseLike` exists for) does
+       * reach this tail with a PROMISE receiver, and before this line it
+       * answered `undefined` while the call arm below ran `then` and the
+       * await machinery settled it. Measured, on this branch AND on
+       * 3830a113 with the `value is Promise<T>` spelling that needs no
+       * new type mapping at all: Node says `function`, the read said
+       * `undefined`, exit 0, no diagnostic — the exact read/call split
+       * the ARR and BYTES comments above exist to prevent, live.
+       *
+       * The names are the ones the call arm implements (scr_dyn_invoke's
+       * PROMISE branch: then/catch/finally ride scr_dyn_promise_then),
+       * plus Object.prototype's, which a promise inherits like any
+       * object. Nothing else: every other Promise.prototype name is
+       * `then`-adjacent sugar JS does not have either, so `undefined` IS
+       * the JS answer for those. */
+      {
+        static const char *const impl[] = { "then", "catch", "finally", NULL };
+        return dyn_name_in(m, impl) || dyn_objproto_knows(m);
+      }
     default:
-      /* BYTES, HANDLE, JSVAL, OBJINST, BIG, ARRBUF and PROMISE. Each has
-       * its own arm in the emitted read (a modeled-property table, the
-       * engine, or a loud fence) that answers before the tail this
-       * serves, and a PROMISE receiver's element access never reaches
-       * the dyn read at all: the frontend fences it (SC1090, "element
-       * access on non-array values") while the receiver is still typed.
-       * A `then` arm was written here and REMOVED for exactly that
-       * reason -- it could not be exercised by any program 4242 can
-       * spell, and an unexercised arm is how a control comes to pass
-       * because its guarded region never runs. Widening the read to
-       * those kinds is a separate question with its own evidence;
-       * answering it here from a table nobody measured is how the
-       * read/call split happened in the first place. */
+      /* BYTES, HANDLE, JSVAL, OBJINST, BIG and ARRBUF. Each has its own
+       * arm in the emitted read (a modeled-property table, the engine, or
+       * a loud fence) that answers before the tail this serves. Widening
+       * the read to those kinds is a separate question with its own
+       * evidence; answering it here from a table nobody measured is how
+       * the read/call split happened in the first place. */
       return false;
   }
 }
