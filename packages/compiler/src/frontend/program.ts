@@ -1001,6 +1001,11 @@ function nonInertTopLevel7(
    * Absent (the default) nothing is considered evaluated, so every caller
    * that does not track evaluation keeps the strict bar. */
   evaluated?: (f: ts.SourceFile) => boolean,
+  /** The cycle cluster `sf` belongs to (the strongly connected component).
+   * Present only on the cycle-admission path; absent, the construction
+   * survey below is unavailable and every `new` of a user class refuses,
+   * which is the behavior every other caller had. */
+  cluster?: readonly ts.SourceFile[],
 ): ts.Node | null {
   const checker = program.getTypeChecker();
   /** Set while surveying a CALLEE BODY: see dtsRooted and bodyInert. */
@@ -1238,6 +1243,7 @@ function nonInertTopLevel7(
       if (ts.isCallExpression(e) && ts.isIdentifier(e.expression) && calleeInert(e.expression)) {
         return argsInert(-1);
       }
+      if (ts.isNewExpression(e) && constructionInert(e)) return true;
       return false;
     }
     return false;
@@ -1259,6 +1265,132 @@ function nonInertTopLevel7(
     const root = callee.expression;
     if (!ts.isIdentifier(root) || root.text !== "Object") return false;
     return e.arguments.length === 3 && ts.isObjectLiteralExpression(e.arguments[2]!);
+  };
+  /** The type is a primitive or a type the LIB declares — a value that
+   * carries no user code into whatever it is handed to. */
+  const builtinTyped = (a: ts.Expression): boolean => {
+    const t = checker.getTypeAtLocation(a);
+    const parts = t.isUnionType() ? t.getTypes() : [t];
+    return parts.every((p) => {
+      if ((p.flags & PRIM) !== 0) return true;
+      const s = p.getSymbol();
+      if (s === undefined) return false;
+      const ds = checker.declarationsOf(s);
+      return ds.length > 0 && ds.every((d) => d.getSourceFile().isDeclarationFile);
+    });
+  };
+  /** The class chain a `new` runs, nearest first, or null when it does not
+   * resolve to declarations. The walk STOPS at the first base whose
+   * declarations are all in declaration files — a builtin base (Map,
+   * Error, …) whose construction is runtime-implemented. */
+  const classChain7 = (root: ts.Expression): ts.ClassDeclaration[] | null => {
+    const chain: ts.ClassDeclaration[] = [];
+    let cur: ts.Expression = root;
+    for (let depth = 0; depth < 16; depth++) {
+      if (!ts.isIdentifier(cur)) return null;
+      let sym = checker.getSymbolAtLocation(cur);
+      if (sym === undefined) return null;
+      if (sym.flags & ts.SymbolFlags.Alias) sym = checker.getAliasedSymbol(sym);
+      const decls = checker.declarationsOf(sym);
+      if (decls.length === 0) return null;
+      if (decls.every((d) => d.getSourceFile().isDeclarationFile)) return chain;
+      if (decls.length !== 1) return null;
+      const cls = decls[0]!;
+      if (!ts.isClassDeclaration(cls) || hasDecorator(cls)) return null;
+      chain.push(cls);
+      const ext = (cls.heritageClauses ?? []).find((h) => h.token === ts.SyntaxKind.ExtendsKeyword);
+      if (ext === undefined || ext.types.length === 0) return chain;
+      cur = ext.types[0]!.expression;
+    }
+    return null;
+  };
+  /** Every `this` in `n` is the receiver of a plain named property access
+   * whose name no cluster-side override can claim, and every `super` is a
+   * base-constructor call. This is what bounds the CLUSTER-DISJOINT
+   * ESCAPE below: a body outside the cluster cannot NAME a cluster
+   * binding, but it can still DISPATCH into one through the object being
+   * constructed, whose class is inside the cluster. */
+  const thisDisciplined7 = (n: ts.Node, dispatch: ReadonlySet<string>): boolean => {
+    let ok = true;
+    ts.walkPreorder(n, (c) => {
+      if (c.kind === ts.SyntaxKind.SuperKeyword) {
+        const p = c.parent;
+        if (p === undefined || !ts.isCallExpression(p) || p.expression !== c) ok = false;
+        return ok ? undefined : "stop";
+      }
+      if (c.kind === ts.SyntaxKind.ThisKeyword) {
+        const p = c.parent;
+        if (
+          p === undefined ||
+          !ts.isPropertyAccessExpression(p) ||
+          p.expression !== c ||
+          dispatch.has(p.name.text)
+        ) {
+          ok = false;
+          return "stop";
+        }
+      }
+      return undefined;
+    });
+    return ok;
+  };
+  /** A `new C(...)` of a USER class, admitted when nothing it runs can
+   * observe a cluster binding.
+   *
+   * The lever is that the cluster is a STRONGLY CONNECTED COMPONENT. Any
+   * module this survey reaches is import-reachable from the cluster — we
+   * got to it by resolving a name a cluster module imports. If such a
+   * module could reach any cluster member, the two would be mutually
+   * reachable and it would BE a cluster member. So "declared outside the
+   * cluster" already proves "cannot name a cluster binding", with no
+   * import-closure walk and no descent into the body at all.
+   *
+   * Three things can still carry cluster code across that line, and each
+   * is closed here: an ARGUMENT holding a user object whose methods the
+   * constructor could call (builtinTyped), a DISPATCH through `this` into
+   * an override declared by a chain class that is inside the cluster
+   * (thisDisciplined7), and a chain class inside the cluster that
+   * contributes a body of its own — which refuses. A class contributing
+   * NO constructor and NO instance initializer runs nothing at all, so
+   * its own module never matters: that is exactly MongoDBResponse, whose
+   * `static empty = new MongoDBResponse(...)` reaches only the base
+   * constructor over in on_demand/document.ts. */
+  const constructionInert = (e: ts.NewExpression): boolean => {
+    if (cluster === undefined || !ts.isIdentifier(e.expression)) return false;
+    const args = e.arguments ?? [];
+    if (!args.every((a) => inert(a) && !containsFunctionLike(a) && builtinTyped(a))) return false;
+    const chain = classChain7(e.expression);
+    if (chain === null || chain.length === 0) return false;
+    const dispatch = new Set<string>();
+    for (const k of chain) {
+      if (!cluster.includes(k.getSourceFile())) continue;
+      for (const m of k.members) {
+        if (!ts.isMethodDeclaration(m) && !ts.isGetAccessorDeclaration(m) && !ts.isSetAccessorDeclaration(m)) {
+          continue;
+        }
+        if ((ts.getCombinedModifierFlags(m) & ts.ModifierFlags.Static) !== 0) continue;
+        const nm = m.name;
+        // A computed member name cannot be compared against a `this.x`,
+        // so the class could be overriding anything.
+        if (nm === undefined || (!ts.isIdentifier(nm) && !ts.isStringLiteral(nm))) return false;
+        dispatch.add(nm.text);
+      }
+    }
+    return chain.every((k) => {
+      const ctor = k.members.find(
+        (m) => ts.isConstructorDeclaration(m) && m.body !== undefined,
+      ) as ts.ConstructorDeclaration | undefined;
+      const inits = k.members.filter(
+        (m) =>
+          ts.isPropertyDeclaration(m) &&
+          (ts.getCombinedModifierFlags(m) & ts.ModifierFlags.Static) === 0 &&
+          m.initializer !== undefined,
+      ) as ts.PropertyDeclaration[];
+      if (ctor === undefined && inits.length === 0) return true; // runs nothing
+      if (cluster.includes(k.getSourceFile())) return false;
+      const bodies: ts.Node[] = [...inits.map((p) => p.initializer!), ...(ctor === undefined ? [] : [ctor])];
+      return bodies.every((b) => thisDisciplined7(b, dispatch));
+    });
   };
   /** True when calling the function `id` names provably executes nothing
    * but runtime-implemented builtins — the same bar `inert` applies to a
@@ -1742,7 +1874,7 @@ export function makeCycleAdmission(
             break;
           }
           if (m === entered) continue;
-          const off = nonInertTopLevel7(program, m, evaluated);
+          const off = nonInertTopLevel7(program, m, evaluated, comp);
           if (off !== null) {
             offenders++;
             firstOff ??= off;
