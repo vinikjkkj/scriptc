@@ -10140,6 +10140,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/7481-nested-boundary-copies-tear-down-reentrantly.ts": {
+   "order": [
+    "<repo>/tests/corpus/7481-nested-boundary-copies-tear-down-reentrantly.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/750-cycle-closure-box.ts": {
    "order": [
     "<repo>/tests/corpus/750-cycle-closure-box.ts"

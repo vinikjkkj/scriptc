@@ -1941,14 +1941,21 @@ static size_t dyn_origin_slot(const ScrDyn *d) {
  * reports each pinned origin as a leak, and the library lane would start
  * its next session holding objects from the previous one. */
 static void dyn_origin_teardown(void) {
-  for (size_t i = 0; i < dyn_origin_cap; i++) {
-    if (dyn_origin_tab[i].d == NULL) continue;
-    if (dyn_origin_tab[i].release) dyn_origin_tab[i].release(dyn_origin_tab[i].obj);
-  }
-  free(dyn_origin_tab);
+  /* Detach the table BEFORE releasing anything, for scr_dyn_origin_forget's
+   * reason: a release here can re-enter this file, and it must find an
+   * empty table rather than one being walked. Every entry is released from
+   * the detached copy, so a re-entrant forget is a no-op instead of a
+   * double free. */
+  ScrDynOriginEnt *tab = dyn_origin_tab;
+  size_t cap = dyn_origin_cap;
   dyn_origin_tab = NULL;
   dyn_origin_cap = 0;
   dyn_origin_len = 0;
+  for (size_t i = 0; i < cap; i++) {
+    if (tab[i].d == NULL) continue;
+    if (tab[i].release) tab[i].release(tab[i].obj);
+  }
+  free(tab);
 }
 
 static void dyn_origin_grow(void) {
@@ -1981,22 +1988,25 @@ ScrDyn *scr_dyn_origin_mark(ScrDyn *d, void *obj, const char *tkey,
    * scr_dyn_mark_module_ns is a different entry point. Stated because
    * the two flags travel together everywhere else. */
   if (dyn_origin_len * 10 >= dyn_origin_cap * 7) dyn_origin_grow();
+  /* The retain happens BEFORE the table is touched and the displaced
+   * entry's release AFTER it is whole again — the reentrancy discipline
+   * this whole table is written to, and the reason is in
+   * scr_dyn_origin_forget's comment: either call can re-enter here. */
+  void *taken = retain ? retain(obj) : obj;
   size_t i = dyn_origin_slot(d);
-  if (dyn_origin_tab[i].d != NULL) {
-    /* Re-marking a node that already carries an origin: the LAST
-     * crossing wins, which is the only one whose static value is still
-     * the one this copy was built from. Cannot happen from the emitted
-     * crossing (the converter hands back a fresh tree every time) and is
-     * handled rather than asserted because nothing here should depend on
-     * that staying true. */
-    if (dyn_origin_tab[i].release) dyn_origin_tab[i].release(dyn_origin_tab[i].obj);
-  } else {
-    dyn_origin_len++;
-  }
+  ScrDynOriginEnt old = dyn_origin_tab[i];
+  if (old.d == NULL) dyn_origin_len++;
   dyn_origin_tab[i].d = d;
-  dyn_origin_tab[i].obj = retain ? retain(obj) : obj;
+  dyn_origin_tab[i].obj = taken;
   dyn_origin_tab[i].tkey = tkey;
   dyn_origin_tab[i].release = release;
+  /* Re-marking a node that already carries an origin: the LAST crossing
+   * wins, which is the only one whose static value is still the one this
+   * copy was built from. Cannot happen from the emitted crossing (the
+   * converter hands back a fresh tree every time) and is handled rather
+   * than asserted because nothing here should depend on that staying
+   * true. */
+  if (old.d != NULL && old.release) old.release(old.obj);
   return d;
 }
 
@@ -2017,14 +2027,26 @@ void *scr_dyn_origin_take(const ScrDyn *d, const char *tkey) {
 }
 
 void scr_dyn_origin_forget(ScrDyn *d) {
-  /* Called from the ARR/OBJ teardown, behind `static_copy`. Back-shift
+  /* Called from BOTH teardowns (scr_dyn_release's switch and the
+   * collector's scr_dyn_gcfree), behind `static_copy`. Back-shift
    * deletion, so the probe path stays hole-free and no tombstone kind is
-   * needed. */
+   * needed.
+   *
+   * THE RELEASE IS LAST, AND THAT ORDER IS LOAD-BEARING. Releasing the
+   * origin runs an arbitrary amount of teardown: a record's `dyn` field,
+   * or an array of dyn, can hold another boundary copy, whose own
+   * teardown re-enters this function. If that happened while the slot was
+   * still occupied, or mid-back-shift, the re-entrant call would walk a
+   * probe path with a hole in it — and a re-entrant scr_dyn_origin_mark
+   * could GROW the table and free the very array `dyn_origin_tab[i]` was
+   * about to be written through. Emptying the slot and finishing the
+   * shift first means the table is whole and consistent before any
+   * foreign code runs. */
   if (dyn_origin_cap == 0) return;
   size_t mask = dyn_origin_cap - 1;
   size_t i = dyn_origin_slot(d);
   if (dyn_origin_tab[i].d == NULL) return;
-  if (dyn_origin_tab[i].release) dyn_origin_tab[i].release(dyn_origin_tab[i].obj);
+  ScrDynOriginEnt gone = dyn_origin_tab[i];
   dyn_origin_tab[i].d = NULL;
   dyn_origin_len--;
   size_t j = i;
@@ -2041,6 +2063,8 @@ void scr_dyn_origin_forget(ScrDyn *d) {
       i = j;
     }
   }
+  /* The table is whole again; now the origin may go, re-entrantly or not. */
+  if (gone.release) gone.release(gone.obj);
 }
 
 ScrDyn *scr_dyn_mark_static_copy(ScrDyn *d) {
