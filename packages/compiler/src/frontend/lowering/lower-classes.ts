@@ -6492,10 +6492,14 @@ function boundFnOriginOf(
  * (paramIrOverrides) and answer that union, or null to leave the executor
  * exactly as it lowers today.
  *
- * WHY the parameter and not the argument. The lib's
- * `resolve: (value: T | PromiseLike<T>) => void` maps to `T` — the
- * PromiseLike arm has no home of its own, so the union collapses — and the
- * promise possibility is gone before the call is lowered. Nothing at the
+ * WHY the parameter and not the argument. The executor's resolve is typed
+ * `(value: T) => void` here, by the ambient override (scriptc-overrides
+ * .d.ts) that replaces the lib's `T | PromiseLike<T>` — so the promise
+ * possibility is gone before the call is lowered. (The lib spelling would
+ * now map: PromiseLike<T> is the promise slot, and the union is the very
+ * settle-or-value shape this function goes on to build. The override still
+ * stands: it makes the ORDINARY `resolve(plainValue)` a plain value rather
+ * than a union every promise construction pays for.) Nothing at the
  * call site can put it back: the resolve closure is the only thing that
  * holds the promise being settled, so adoption has to live in the closure's
  * own type. The settle-or-value union is the one shape a runtime tag can

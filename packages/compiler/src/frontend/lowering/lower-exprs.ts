@@ -9902,12 +9902,20 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
     }
     // An async function's return position types the literal
     // `T | PromiseLike<T>` (the lib's await-unwrapping contract). The
-    // PromiseLike arm never maps, and the record the return slot actually
-    // holds is exactly the checker's awaited type — strip to it BEFORE the
-    // own-type fallback below: the awaited contextual type carries the
-    // slot's field types (`lanIp: string | null`), which the literal's own
-    // type narrows away (a field written as `lanIp: null` types as bare
-    // `null`, which maps to nothing on its own).
+    // record the return slot actually holds is exactly the checker's
+    // awaited type — strip to it BEFORE the own-type fallback below: the
+    // awaited contextual type carries the slot's field types (`lanIp:
+    // string | null`), which the literal's own type narrows away (a field
+    // written as `lanIp: null` types as bare `null`, which maps to nothing
+    // on its own).
+    //
+    // The strip used to be load-bearing for a second reason that is no
+    // longer true: the PromiseLike arm had no mapping, so the union had
+    // none either. It maps now (types.ts), which makes this contextual
+    // type a settle-or-value union — and a literal must still be built at
+    // the RECORD the slot holds, not at a union whose promise arm no
+    // return of an object literal can inhabit. Same answer, and now it is
+    // this line rather than a missing mapping that gives it.
     if (tsType.isUnionType() && tsType.getTypes().some((t) => t.getSymbol()?.name === "PromiseLike")) {
       tsType = L.checker.getAwaitedType(tsType) ?? tsType;
     }
@@ -10342,6 +10350,22 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
         // not from anything inferred for this literal.
         shapeDeclared = true;
       }
+    }
+    // A HAND-ROLLED THENABLE. `PromiseLike<T>` maps to the promise slot
+    // (frontend/types.ts states the boundary), so an object literal whose
+    // declared slot is a promise is a `then`-carrying object being offered
+    // where a real promise belongs. The generic type fence below would
+    // blame 'PromiseLike<T>' for having no lowering, which is no longer
+    // true and sends the reader after the wrong thing; the thenable is
+    // what has none, in exactly the words lower-assert.ts uses for it.
+    if (mapped?.kind === "promise") {
+      L.unsupported(
+        "SC1090",
+        expr,
+        `object literals where '${L.fmt(mapped)}' is expected (a hand-rolled thenable)`,
+        "a bare thenable — an object with a then method — has no lowering: wrap it, e.g. " +
+          "Promise.resolve().then(() => thenable); a PromiseLike<T> slot holds a real promise here",
+      );
     }
     if (!mapped || mapped.kind !== "record") L.badType(expr, tsType);
     let type = mapped;
