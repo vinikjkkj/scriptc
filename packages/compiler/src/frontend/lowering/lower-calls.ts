@@ -12025,17 +12025,36 @@ export function lowerFunction(L: Lowerer, decl: ts.FunctionDeclaration): IrFunct
     if (unit === null) return null;
     const mapped = L.mapTypeOf(L.checker.getTypeOfSymbol(sym));
     if (mapped !== null) {
-      // Only the EMPTY interned shape qualifies among record mappings —
-      // the all-generic-signature interface (`I<A & B>`) whose struct has
-      // no slot at all. A record with DATA fields (`const value: { inner:
-      // number | string } = null as any`) keeps its real storage and
-      // every ordinary lowering: its reads flow through positions (comma
-      // chains, call arguments) the no-storage read paths never claim,
-      // so claiming the binding would fence working programs.
+      // Only a shape with no DATA slot qualifies among record mappings —
+      // the all-generic-signature interface (`I<A & B>`). A record with
+      // DATA fields (`const value: { inner: number | string } = null as
+      // any`) keeps its real storage and every ordinary lowering: its
+      // reads flow through positions (comma chains, call arguments) the
+      // no-storage read paths never claim, so claiming the binding would
+      // fence working programs.
+      //
+      // "No data slot" USED TO BE SPELLED "no fields at all", and those
+      // were the same sentence only while a generic member could never
+      // map: `I<A & B>` interned an EMPTY struct because every one of its
+      // members had left the shape. Now that a generic member's
+      // constraint is read at its INSTANTIATION, `I<{ x: number }>` keeps
+      // a real `fn` closure slot — and a slot is not a reason to store
+      // null, it is the same interface it always was. Reading the
+      // question off the DECLARED TYPE instead of the field count says so
+      // directly: every property is a generic callable member, so no
+      // property is data, so there is nothing for null to fail to be.
+      // (Without this, corpus 2594's `const i: I<{x:number}> = null as
+      // any` stored into the slot and threw the representation error
+      // where Node throws a catchable TypeError at the READ.)
       if (mapped.kind !== "record") return null;
       const shape = L.shapes.get(mapped.shapeId);
-      if (!shape || shape.fields.length > 0 || shape.tuple !== undefined || shape.indexValue !== undefined) {
-        return null;
+      if (!shape || shape.tuple !== undefined || shape.indexValue !== undefined) return null;
+      if (shape.fields.length > 0) {
+        const props = L.checker.getPropertiesOfType(L.checker.getTypeOfSymbol(sym));
+        if (props.length === 0) return null;
+        if (!props.every((p) => isGenericCallableMemberType(L.checker.getTypeOfSymbol(p), L.checker))) {
+          return null;
+        }
       }
     }
     return unit;

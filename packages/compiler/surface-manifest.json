@@ -2044,6 +2044,13 @@
       "note": "the lowered call form takes 1 to 7 number arguments"
     },
     {
+      "id": "stdlib.date.getHours",
+      "kind": "stdlib",
+      "name": "Date.prototype.getHours",
+      "status": "static",
+      "note": "the composed new Date().getHours() form only — it reads the HOST's local zone, unlike every other Date surface here, and an arbitrary instant would depend on the run host's zone history"
+    },
+    {
       "id": "stdlib.date.getTime",
       "kind": "stdlib",
       "name": "Date.prototype.getTime",

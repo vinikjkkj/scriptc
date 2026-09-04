@@ -1062,6 +1062,22 @@ export function lowerConsoleInspectArg(
   surface: string,
   loc: SrcLoc,
 ): IrExpr {
+  // AN ARGUMENT THAT HAS ALREADY UNWOUND. `global.undefRead` is the trap
+  // family's lowered shape: an ambient-undefined name, or a binding whose
+  // own initializer threw its ReferenceError. Module init dies at that
+  // declaration, so this argument is never evaluated and its rendering is
+  // never printed — planning an inspect for a type that no value will ever
+  // have turns a provably dead statement into a build failure, which is
+  // exactly the value-world lie the trap family exists to keep out. The
+  // read is "typed by the use site" by contract (nsUndefRead), and the use
+  // site here produces a string; the call throws before it returns, so the
+  // type is never observed and the emitter already casts it (NULL for a
+  // refcounted result). Corpus 2592's `console.log("never", dead)` is the
+  // case: dead code past an uncaught ambient-root trap, whose type became
+  // renderable-or-not only because a generic member kept its slot.
+  if (value.kind === "libCall" && value.fn === "global.undefRead") {
+    return { ...value, type: STRING };
+  }
   const t = value.type;
   if (t.kind === "undefinedT" || t.kind === "nullT") {
     // The baked text ("undefined"/"null"): the operand is a literal or a
