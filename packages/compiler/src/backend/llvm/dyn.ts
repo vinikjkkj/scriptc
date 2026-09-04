@@ -1043,6 +1043,37 @@ export class LlDyn {
       B.terminate(`ret ${dummyR}`);
       B.startBlock(lk);
     };
+    /** THE BOUNDARY-COPY EXTRACTION REFUSAL — emit-walkers.ts's
+     * `extractRefuse`, ported, and its comment carries the whole argument:
+     * a static array or record that crossed into an `unknown` slot was
+     * COPIED, so recovering one back out hands back a SECOND object where
+     * Node hands back the first. Planted at the SUCCESSFUL EXIT, never at
+     * the kind gate, so a union arm that does not match still falls
+     * through to the next one. `bcopy` is read off `%d` AS IT ARRIVED,
+     * which is also the only spelling available here: the record branch's
+     * wide lane keeps its projection in `dSlot` and never rebinds `%d`. */
+    const extractRefuse = (hint: string, what: string, bcopy: string, cleanup: () => void): void => {
+      host.declare(`declare void @scr_dyn_static_copy_extract_refuse(ptr)`);
+      const lu = B.newLabel(`${hint}.bc`);
+      const lk = B.newLabel(`${hint}.bk`);
+      B.condBr(bcopy, lu, lk);
+      B.startBlock(lu);
+      B.line(`call void @scr_dyn_static_copy_extract_refuse(ptr ${host.cstr(what)})`);
+      if (soft) notOk();
+      cleanup();
+      B.terminate(`ret ${dummy}`);
+      B.startBlock(lk);
+    };
+    /** `%d`'s boundary-copy verdict, read ONCE at the head of a body that
+     * needs it and reused at every exit. Hoisted here rather than taken at
+     * the exit because the record branch reaches its return through blocks
+     * that the wide lane may have rebuilt around a projection. */
+    const boundaryCopyOf = (): string => {
+      host.declare(`declare zeroext i1 @scr_dyn_is_boundary_copy(ptr)`);
+      const v = B.tmp();
+      B.line(`${v} = call zeroext i1 @scr_dyn_is_boundary_copy(ptr %d)`);
+      return v;
+    };
     /** The SOFT form's pre-test in front of a leaf whose refusal lives
      * inside a runtime unbox (bigint, ArrayBuffer, Map/Set, a class
      * interval): the match predicate's own test, verbatim, so the unbox
@@ -1200,6 +1231,7 @@ export class LlDyn {
       case "record": {
         const shape = host.recordsById.get(t.shapeId);
         if (!shape) throw new Error(`llvm emitter bug: dynCheck of unknown shape ${t.shapeId}`);
+        const bcopy = boundaryCopyOf();
         const struct = mangleRecordStruct(t.shapeId);
         const fieldIndex = new Map(shape.fields.map((f, i) => [f.name, i + 1]));
         // The wide lane owns a PROJECTION that every exit has to release.
@@ -1280,6 +1312,7 @@ export class LlDyn {
             storeInto(f.name, f.type, v);
             afterChild("dct", releaseR, "ptr null");
           });
+          extractRefuse("dct", "a tuple", bcopy, releaseR);
           B.terminate(`ret ptr %r0`);
           break;
         }
@@ -1761,6 +1794,7 @@ export class LlDyn {
             B.line(`call void @scr_str_release(ptr ${ek})`);
           });
         }
+        extractRefuse("dcr", "a record", bcopy, releaseR);
         if (projSlot !== null) {
           // The SUCCESS exit — the only one `releaseR` does not cover,
           // because it does not release `%r0`. The C twin's
@@ -1775,6 +1809,7 @@ export class LlDyn {
       case "array": {
         const elem = t.elem;
         const c = childC(elem);
+        const bcopy = boundaryCopyOf();
         requireKind(DK.ARR, "dca");
         const n = this.lenOf(B, "%d");
         const a = B.tmp();
@@ -1806,6 +1841,10 @@ export class LlDyn {
           }, "ptr null");
           const pushed = B.tmp();
           B.line(`${pushed} = call double @scr_arr_push_${acc}(ptr ${a}, ${accTy} ${v})`);
+        });
+        extractRefuse("dca", "an array", bcopy, () => {
+          host.declare(`declare void @scr_arr_release(ptr)`);
+          B.line(`call void @scr_arr_release(ptr ${a})`);
         });
         B.terminate(`ret ptr ${a}`);
         break;

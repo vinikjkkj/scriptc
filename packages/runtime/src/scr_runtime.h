@@ -5185,6 +5185,13 @@ ScrDyn *scr_dyn_mark_module_ns(ScrDyn *d);
  * boundary copy. `what` names the operation ("assigning a property",
  * "deleting a property", "'push'") and leads the message. */
 void scr_dyn_static_copy_refuse(const char *what);
+/* The EXTRACTION twin: a checked cast recovering a static array or record
+ * out of a boundary copy would hand back a SECOND object where Node hands
+ * back the first. `what` names the recovered kind ("an array", "a record"). */
+void scr_dyn_static_copy_extract_refuse(const char *what);
+/* The predicate both backends gate that refusal on: an array/record copy
+ * of a source the program still names. A module namespace is excluded. */
+bool scr_dyn_is_boundary_copy(const ScrDyn *d);
 /* The namespace-flavored twin, thrown ahead of it for a `module_ns`
  * receiver: the boundary-copy text advises a fix ("give the parameter a
  * static type") that a namespace has no spelling for. */
