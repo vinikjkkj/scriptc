@@ -10689,6 +10689,18 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/7720-a-set-arm-beside-data-siblings-in-one-union.ts": {
+   "order": [
+    "<repo>/tests/corpus/7720-a-set-arm-beside-data-siblings-in-one-union.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/7721-a-set-arm-beside-a-scalar-and-a-record.ts": {
+   "order": [
+    "<repo>/tests/corpus/7721-a-set-arm-beside-a-scalar-and-a-record.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/800-switch-basics.ts": {
    "order": [
     "<repo>/tests/corpus/800-switch-basics.ts"

@@ -17356,6 +17356,52 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
           return { kind: "boolLit", value: true, type: BOOL, loc };
         }
       }
+      // `x instanceof Set` over a union with a set arm — the RegExp rule
+      // one constructor over, and the test that gives a SET arm a union
+      // home at all (unionFuncSetArmsOk). `typeof` answers "object" for
+      // a set and for every object-flavored sibling alike, so this is the
+      // only thing that separates them; over a union it is the runtime
+      // TAG compare, which is exact against EVERY sibling kind, not just
+      // the ones typeof happens to split. mongodb's `defineAspects`
+      // (`symbol | symbol[] | Set<symbol>`, narrowed by `Array.isArray`
+      // and then by this) is the shape that asked.
+      //
+      // Reads in the true branch bridge through maybeNarrow's tag-CHECKED
+      // %union.narrow, so nothing here is a trusted reinterpret.
+      //
+      // TWO set arms are refused upstream (no test tells them apart), so
+      // the one-hit rule below is the only case that can arise from a
+      // compiled union; the guard stays anyway because a union built by
+      // some other route must never silently pick the first Set.
+      if (
+        ts.isIdentifier(expr.right) &&
+        L.isStdlibGlobal(expr.right, "Set") &&
+        !L.caughtLocalOf(expr.left)
+      ) {
+        const left = L.lowerExpr(expr.left);
+        if (left.type.kind === "union") {
+          const def = L.unions.get(left.type.unionId);
+          const tags = def ? def.arms.flatMap((a, i) => (a.kind === "set" ? [i] : [])) : [];
+          if (tags.length === 1) {
+            return { kind: "unionIsTag", unionId: left.type.unionId, tag: tags[0]!, negated: false, value: left, type: BOOL, loc };
+          }
+        }
+        // A plain set-typed operand folds true. The read may arrive as
+        // maybeNarrow's tag-checked bridge rather than a bare varRef (a
+        // `const held: T | Set<E> = live` that tsc already narrowed), and
+        // folding drops that bridge's tag CHECK along with the read —
+        // sound for the same reason the fold is: the bridge's arm is the
+        // one the constant answers for, so a value that would fail the
+        // check is a value whose enclosing narrowing already misread it.
+        // (The bytes-flavor fold below states the rule in full.)
+        const pureSetRead =
+          left.kind === "varRef" ||
+          (left.kind === "unionNarrow" && left.value.kind === "varRef") ||
+          narrowBridgeArm(left)?.kind === "varRef";
+        if (left.type.kind === "set" && pureSetRead) {
+          return { kind: "boolLit", value: true, type: BOOL, loc };
+        }
+      }
       // `x instanceof X` where X is a class VALUE (a classval-typed
       // binding): the target is DYNAMIC — a hierarchy target reads its
       // interval from the class object at runtime (instanceOfValue); a
