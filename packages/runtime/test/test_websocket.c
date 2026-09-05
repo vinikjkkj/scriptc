@@ -154,6 +154,29 @@ static void run_state_machine_tests(void) {
     scr_ws_conn_free(c);
   }
 
+  /* A server close WITH A REASON: the echo carries the code and NOTHING
+   * else. Node/undici answer close(1001, "going") with the bare status
+   * code; quoting the reason back is what this pins against. */
+  {
+    Cap cap; memset(&cap, 0, sizeof cap);
+    ScrWsConn *c = sm_mk(&cap, accept, seed);
+    scr_ws_conn_recv(c, (const uint8_t *)hs, strlen(hs));
+    cap.out_len = 0;
+    uint8_t body[7] = {0x03, 0xe9, 'g', 'o', 'i', 'n', 'g'}; /* 1001 "going" */
+    uint8_t cf[24]; size_t cn = sm_server_frame(cf, SCR_WS_OP_CLOSE, body, 7);
+    scr_ws_conn_recv(c, cf, cn);
+    ScrWsHeader h;
+    check(cap.closes == 1 && cap.close_code == 1001, "sm: on_close code 1001");
+    check(scr_ws_parse_header(cap.out, cap.out_len, &h) && h.opcode == SCR_WS_OP_CLOSE &&
+              h.payload_len == 2,
+          "sm: close echo is code-only");
+    uint8_t ebody[2];
+    memcpy(ebody, cap.out + h.payload_offset, 2);
+    scr_ws_mask(ebody, 2, h.mask_key);
+    check(ebody[0] == 0x03 && ebody[1] == 0xe9, "sm: close echo carries the peer's code");
+    scr_ws_conn_free(c);
+  }
+
   /* Bad Sec-WebSocket-Accept -> on_error, no open. */
   {
     Cap cap; memset(&cap, 0, sizeof cap);

@@ -15,6 +15,10 @@
  */
 import { createServer } from "node:http";
 import type { IncomingMessage, ServerResponse } from "node:http";
+import type { Socket } from "node:net";
+/* The WebSocket push endpoint's Sec-WebSocket-Accept (RFC 6455 §4.2.2).
+ * sha1 exists in the lowered digest set for exactly this. */
+import { createHash } from "node:crypto";
 /* zapo-js MUST be imported before @zapo-js/store-sqlite: the two provenance
  * checkouts collide on ~39 tsconfig "paths" alias keys, the paths table is one
  * per program, and the FIRST package seen wins. With store-sqlite first, zapo-js's
@@ -46,6 +50,31 @@ const DB_PATH = envStr("ZAPO_DB", "zapo-state.sqlite");
 const DEFAULT_SESSION = envStr("ZAPO_SESSION", "default");
 const EVENT_BUFFER = envNum("ZAPO_EVENT_BUFFER", 1000);
 const AUTOCONNECT = envStr("ZAPO_AUTOCONNECT", "1") !== "0";
+
+/* ── the WebSocket push endpoint's dials ───────────────────────────────── */
+
+/* How many events the server will send a subscriber ahead of its last
+ * acknowledgement. This is the WHOLE slow-consumer policy and it is
+ * deliberately a WINDOW rather than a queue: the service holds no
+ * per-subscriber buffer at all, so a consumer that stops reading cannot
+ * grow this process's memory. It only stops being sent to. What it missed
+ * stays where it already was -- in the per-session ring, which is bounded
+ * (EVENT_BUFFER entries) and which the polling /events route reads from
+ * too, so a subscriber and a poller cost the same memory.
+ *
+ * Node exposes socket.writableLength and a 'drain' event and this design
+ * would rather use them; the compiled surface has neither (net Socket
+ * lowers write/end/destroy/pipe/setTimeout/remoteAddress/read/unshift and
+ * data/end/close/error/connect/timeout/readable). An ack window needs
+ * only arithmetic, so it is what the compiled lane can actually enforce. */
+const WS_WINDOW = envNum("ZAPO_WS_WINDOW", 64);
+/* How long a subscriber may sit at the window before the server gives up on
+ * it and closes with 1013 (try again later). The consumer reconnects with
+ * ?since=<its last seq> and refills from the ring. */
+const WS_LAG_MS = envNum("ZAPO_WS_LAG_MS", 30000);
+/* The route suffix, under the same /s/<sessionId>/ addressing as every
+ * other route: /s/<id>/events/ws, or /events/ws for ZAPO_SESSION. */
+const WS_ROUTE = "/events/ws";
 
 const STARTED_MS = Date.now();
 
@@ -414,8 +443,12 @@ function findSession(id: string): Session | undefined {
 
 function push(sess: Session, type: string, data: unknown): void {
   sess.seq += 1;
-  sess.events.push({ seq: sess.seq, at: Date.now(), type: type, data: data });
+  const ev: Ev = { seq: sess.seq, at: Date.now(), type: type, data: data };
+  sess.events.push(ev);
   if (sess.events.length > EVENT_BUFFER) sess.events.shift();
+  /* The same event, pushed to whoever is listening on a socket instead of
+   * polling. The ring above is unchanged and is still the only buffer. */
+  wsFanout(sess.id, ev);
 }
 
 function rememberMessage(sess: Session, seq: number, ev: WaIncomingMessageEvent): void {
@@ -443,6 +476,371 @@ function since(sess: Session, kindPrefix: string, from: number, limit: number): 
     if (out.length >= limit) break;
   }
   return out;
+}
+
+/* ── the WebSocket push endpoint ───────────────────────────────────────── */
+
+/* GET /s/<sessionId>/events/ws  (and /events/ws for ZAPO_SESSION)
+ *
+ * The same events GET /events serves by polling, pushed as they happen.
+ * The runtime ships a WebSocket CLIENT and no server, so the server half is
+ * here in TypeScript: the 'upgrade' seam hands the socket over raw, and the
+ * RFC 6455 framing below is the whole of what is needed. Proven byte-exact
+ * against Node on both backends by tests/corpus/7760 and /7761, and against
+ * Node's OWN built-in WebSocket client by
+ * tests/fixtures/server/cases/ws-server.
+ *
+ * The wire: one JSON text frame per event, exactly the object /events
+ * returns ({seq, at, type, data}), plus service frames whose `type` starts
+ * with "$" so they can never collide with a zapo event name:
+ *   {"type":"$hello","sessionId":..,"seq":..,"window":..,"buffered":..}
+ *   {"type":"$gap","fromSeq":..,"toSeq":..}   events the ring dropped
+ *   {"type":"$lag","sinceSeq":..}             the window closed on you
+ * The client acknowledges with {"ack":<seq>} (a bare number is accepted
+ * too). Acking is not optional past WS_WINDOW events -- see the dial's
+ * note: the ack IS the backpressure signal, because the compiled socket
+ * surface has no 'drain'. */
+
+const WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
+
+interface WsSub {
+  readonly id: number;
+  readonly sessionId: string;
+  readonly sock: Socket;
+  readonly typeFilter: string;
+  /** The highest seq written to this socket. */
+  lastSentSeq: number;
+  /** The highest seq the client has acknowledged. */
+  ackedSeq: number;
+  /** At the window: nothing is being written, and the clock is running. */
+  lagging: boolean;
+  laggingSinceMs: number;
+  dead: boolean;
+}
+
+let wsSubs: WsSub[] = [];
+let wsNextId = 1;
+let wsSweeping = false;
+
+/** One frame, server side: FIN as asked, NEVER masked (RFC 6455 §5.1), and
+ * the shortest length form the payload allows (§5.2). */
+function wsFrame(opcode: number, payload: Buffer, fin: boolean): Buffer {
+  const len = payload.length;
+  let header: Buffer;
+  if (len < 126) {
+    header = Buffer.alloc(2);
+    header[1] = len;
+  } else if (len < 65536) {
+    header = Buffer.alloc(4);
+    header[1] = 126;
+    header.writeUInt16BE(len, 2);
+  } else {
+    header = Buffer.alloc(10);
+    header[1] = 127;
+    header.writeUInt32BE(0, 2);
+    header.writeUInt32BE(len, 6);
+  }
+  header[0] = (fin ? 0x80 : 0x00) | opcode;
+  return Buffer.concat([header, payload]);
+}
+
+function wsSendText(sub: WsSub, text: string): void {
+  if (sub.dead) return;
+  sub.sock.write(wsFrame(0x1, Buffer.from(text, "utf8"), true));
+}
+
+function wsClose(sub: WsSub, code: number, reason: string): void {
+  if (sub.dead) return;
+  const r = Buffer.from(reason, "utf8");
+  const p = Buffer.alloc(2 + r.length);
+  p.writeUInt16BE(code, 0);
+  r.copy(p, 2);
+  sub.sock.write(wsFrame(0x8, p, true));
+  wsDrop(sub);
+  sub.sock.end();
+}
+
+function wsDrop(sub: WsSub): void {
+  if (sub.dead) return;
+  sub.dead = true;
+  const keep: WsSub[] = [];
+  for (const x of wsSubs) {
+    if (x.id !== sub.id) keep.push(x);
+  }
+  wsSubs = keep;
+}
+
+function wsMatches(sub: WsSub, ev: Ev): boolean {
+  return sub.typeFilter === "" || ev.type === sub.typeFilter;
+}
+
+/** Write one event, or note that the window is shut. Returns false when the
+ * subscriber is at the window (nothing was written). */
+function wsOffer(sub: WsSub, ev: Ev): boolean {
+  if (sub.dead) return false;
+  if (sub.lastSentSeq - sub.ackedSeq >= WS_WINDOW) {
+    if (!sub.lagging) {
+      sub.lagging = true;
+      sub.laggingSinceMs = Date.now();
+      /* One notice, then silence: telling a stalled consumer it is stalled
+       * once is information, telling it every event is the same unbounded
+       * write this design exists to avoid. */
+      sub.sock.write(
+        wsFrame(0x1, Buffer.from(safeJson({ type: "$lag", sinceSeq: sub.lastSentSeq }), "utf8"), true),
+      );
+    }
+    return false;
+  }
+  sub.lagging = false;
+  sub.lastSentSeq = ev.seq;
+  if (wsMatches(sub, ev)) wsSendText(sub, safeJson(ev));
+  return true;
+}
+
+function wsFanout(sessionId: string, ev: Ev): void {
+  if (wsSubs.length === 0) return;
+  for (const sub of wsSubs) {
+    if (sub.sessionId !== sessionId) continue;
+    wsOffer(sub, ev);
+  }
+}
+
+/** After an ack: send what the ring still holds past lastSentSeq, up to the
+ * window. Events the ring has already evicted are reported as a gap rather
+ * than silently skipped -- a consumer that cannot tell it lost events is
+ * worse than one that reconnects. */
+function wsCatchUp(sub: WsSub): void {
+  const sess = findSession(sub.sessionId);
+  if (sess === undefined) return;
+  const ring = sess.events;
+  if (ring.length === 0) return;
+  const oldest = ring[0];
+  if (oldest !== undefined && oldest.seq > sub.lastSentSeq + 1 && sub.lastSentSeq > 0) {
+    wsSendText(sub, safeJson({ type: "$gap", fromSeq: sub.lastSentSeq + 1, toSeq: oldest.seq - 1 }));
+    sub.lastSentSeq = oldest.seq - 1;
+  }
+  for (const ev of ring) {
+    if (ev.seq <= sub.lastSentSeq) continue;
+    if (!wsOffer(sub, ev)) return;
+  }
+}
+
+/** The lag reaper. It runs only while somebody is subscribed -- a
+ * self-rescheduling timeout rather than a standing interval, so an idle
+ * service holds no timer it does not need. */
+function wsSweepLater(): void {
+  if (wsSweeping) return;
+  wsSweeping = true;
+  setTimeout(() => {
+    wsSweeping = false;
+    const now = Date.now();
+    const doomed: WsSub[] = [];
+    for (const sub of wsSubs) {
+      if (sub.lagging && now - sub.laggingSinceMs > WS_LAG_MS) doomed.push(sub);
+    }
+    for (const sub of doomed) {
+      console.log(`  ws       : closing subscriber ${sub.id} (${sub.sessionId}); no ack for ${WS_LAG_MS}ms past seq ${sub.ackedSeq}`);
+      wsClose(sub, 1013, "lagging");
+    }
+    if (wsSubs.length > 0) wsSweepLater();
+  }, 1000);
+}
+
+/** The ack a client sends back: {"ack":<seq>} or a bare number. */
+function wsReadAck(text: string): number {
+  const bare = Number(text);
+  if (bare === bare && text.trim() !== "") return bare;
+  try {
+    const parsed = JSON.parse(text) as unknown;
+    if (typeof parsed === "object" && parsed !== null) {
+      const bag = parsed as Bag;
+      const a = bag["ack"];
+      if (typeof a === "number") return a;
+    }
+  } catch (err: unknown) {
+    void err;
+  }
+  return -1;
+}
+
+function wsRefuse(sock: Socket, status: number, text: string): void {
+  const body = safeJson({ error: text });
+  sock.write(
+    `HTTP/1.1 ${status} ${status === 401 ? "Unauthorized" : status === 404 ? "Not Found" : "Bad Request"}\r\n` +
+      "content-type: application/json; charset=utf-8\r\n" +
+      `content-length: ${Buffer.byteLength(body, "utf8")}\r\n` +
+      "connection: close\r\n\r\n" +
+      body,
+  );
+  sock.end();
+}
+
+function wsAttach(req: IncomingMessage, sock: Socket, head: Buffer): void {
+  const raw = req.url !== undefined ? req.url : "/";
+  const qIdx = raw.indexOf("?");
+  const path = qIdx === -1 ? raw : raw.slice(0, qIdx);
+  const query = qIdx === -1 ? "" : raw.slice(qIdx + 1);
+  const p: Bag = {};
+  parseQuery(query, p);
+
+  /* The same key the HTTP routes want. A browser's WebSocket cannot set a
+   * header, so ?token= is accepted for it and for nothing else. */
+  if (TOKEN !== "") {
+    const given = req.headers["x-api-key"];
+    const q = p["token"];
+    if (given !== TOKEN && !(typeof q === "string" && q === TOKEN)) {
+      wsRefuse(sock, 401, "unauthorized: set the x-api-key header (or ?token=) to ZAPO_REST_TOKEN");
+      return;
+    }
+  }
+
+  let id = DEFAULT_SESSION;
+  let sub = path;
+  if (path.indexOf(SESSION_PREFIX) === 0) {
+    const rest = path.slice(SESSION_PREFIX.length);
+    const slash = rest.indexOf("/");
+    id = slash === -1 ? rest : rest.slice(0, slash);
+    sub = slash === -1 ? "/" : rest.slice(slash);
+  }
+  if (sub !== WS_ROUTE) {
+    wsRefuse(sock, 404, `no websocket route at '${path}'; the only one is /s/<sessionId>${WS_ROUTE}`);
+    return;
+  }
+  if (!idOk(id)) {
+    wsRefuse(sock, 400, `invalid session id '${id}'; expected ${ID_SPELLING}`);
+    return;
+  }
+  const sess = findSession(id);
+  if (sess === undefined) {
+    wsRefuse(sock, 404, `no such session '${id}'`);
+    return;
+  }
+
+  const key = req.headers["sec-websocket-key"];
+  if (typeof key !== "string" || key === "") {
+    wsRefuse(sock, 400, "missing Sec-WebSocket-Key");
+    return;
+  }
+  const accept = createHash("sha1").update(key + WS_GUID).digest("base64");
+  sock.write(
+    "HTTP/1.1 101 Switching Protocols\r\n" +
+      "Upgrade: websocket\r\n" +
+      "Connection: Upgrade\r\n" +
+      `Sec-WebSocket-Accept: ${accept}\r\n\r\n`,
+  );
+
+  const typeFilter = str(p, "type") !== undefined ? reqStr(p, "type") : "";
+  /* ?since=<seq> replays from the ring; absent means live-only, so a fresh
+   * consumer is not handed a thousand events it never asked for. */
+  const sinceSeq = num(p, "since") !== undefined ? reqNum(p, "since") : sess.seq;
+
+  const entry: WsSub = {
+    id: wsNextId,
+    sessionId: sess.id,
+    sock: sock,
+    typeFilter: typeFilter,
+    lastSentSeq: sinceSeq,
+    ackedSeq: sinceSeq,
+    lagging: false,
+    laggingSinceMs: 0,
+    dead: false,
+  };
+  wsNextId += 1;
+  wsSubs.push(entry);
+  console.log(`  ws       : subscriber ${entry.id} on ${sess.id} from seq ${sinceSeq}${typeFilter !== "" ? ` type=${typeFilter}` : ""}`);
+
+  wsSendText(
+    entry,
+    safeJson({
+      type: "$hello",
+      sessionId: sess.id,
+      seq: sess.seq,
+      since: sinceSeq,
+      window: WS_WINDOW,
+      lagCloseMs: WS_LAG_MS,
+      buffered: sess.events.length,
+      note: "acknowledge with {\"ack\":<seq>}; the server sends at most `window` events past your last ack",
+    }),
+  );
+  wsCatchUp(entry);
+  wsSweepLater();
+
+  /* The frame reader. `head` is whatever arrived past the request head --
+   * a pipelining client can put its first frame there. */
+  let buf: Buffer = head.length > 0 ? Buffer.from(head) : Buffer.alloc(0);
+  let fragOp = -1;
+  let frag: Buffer = Buffer.alloc(0);
+
+  const pump = (chunk: Buffer): void => {
+    buf = Buffer.concat([buf, chunk]);
+    for (;;) {
+      if (buf.length < 2) return;
+      const b0 = buf[0] ?? 0;
+      const b1 = buf[1] ?? 0;
+      const fin = (b0 & 0x80) !== 0;
+      const op = b0 & 0x0f;
+      const masked = (b1 & 0x80) !== 0;
+      let len = b1 & 0x7f;
+      let off = 2;
+      if (len === 126) {
+        if (buf.length < 4) return;
+        len = buf.readUInt16BE(2);
+        off = 4;
+      } else if (len === 127) {
+        if (buf.length < 10) return;
+        /* A frame this process could not hold anyway: refuse rather than
+         * truncate the length into 32 bits. */
+        if (buf.readUInt32BE(2) !== 0) { wsClose(entry, 1009, "frame too large"); return; }
+        len = buf.readUInt32BE(6);
+        off = 10;
+      }
+      let mask: Buffer = Buffer.alloc(4);
+      if (masked) {
+        if (buf.length < off + 4) return;
+        mask = Buffer.from(buf.subarray(off, off + 4));
+        off += 4;
+      }
+      if (buf.length < off + len) return;
+      const payload = Buffer.from(buf.subarray(off, off + len));
+      if (masked) {
+        for (let i = 0; i < len; i++) payload[i] = (payload[i] ?? 0) ^ (mask[i & 3] ?? 0);
+      }
+      buf = Buffer.from(buf.subarray(off + len));
+
+      /* RFC 6455 §5.1: a client frame MUST be masked. */
+      if (!masked) { wsClose(entry, 1002, "unmasked client frame"); return; }
+
+      if (op === 0x0 || op === 0x1 || op === 0x2) {
+        if (op !== 0x0) { fragOp = op; frag = Buffer.alloc(0); }
+        frag = Buffer.concat([frag, payload]);
+        if (!fin) continue;
+        const whole = frag;
+        frag = Buffer.alloc(0);
+        const wasOp = fragOp;
+        fragOp = -1;
+        if (wasOp !== 0x1) continue; /* binary from a consumer means nothing here */
+        const ack = wsReadAck(whole.toString("utf8"));
+        if (ack >= 0) {
+          if (ack > entry.ackedSeq) entry.ackedSeq = ack;
+          if (entry.lagging) { entry.lagging = false; wsCatchUp(entry); }
+        }
+      } else if (op === 0x9) {
+        sock.write(wsFrame(0xa, payload, true));
+      } else if (op === 0x8) {
+        /* Echo the CODE only -- the reason is the peer's, not ours. */
+        sock.write(wsFrame(0x8, Buffer.from(payload.subarray(0, len >= 2 ? 2 : 0)), true));
+        wsDrop(entry);
+        sock.end();
+        return;
+      }
+    }
+  };
+
+  sock.on("error", () => { wsDrop(entry); sock.destroy(); });
+  sock.on("close", () => { wsDrop(entry); });
+  sock.on("end", () => { wsDrop(entry); });
+  sock.on("data", (chunk: Buffer) => { pump(chunk); });
+  if (buf.length > 0) pump(Buffer.alloc(0));
 }
 
 function hexToBytes(hex: string): Uint8Array {
@@ -919,6 +1317,16 @@ async function registryRoute(method: string, path: string, p: Bag): Promise<unkn
       dbPath: DB_PATH,
       defaultSession: DEFAULT_SESSION,
       addressing: "/s/<sessionId>/<route>; an unprefixed /<route> is addressed to the default session",
+      push: {
+        route: `/s/<sessionId>${WS_ROUTE}`,
+        protocol: "websocket (RFC 6455); one JSON text frame per event, the same object GET /events returns",
+        params: "?since=<seq> replays from the ring (absent = live only), ?type=<name> filters, ?token= when ZAPO_REST_TOKEN is set",
+        ack: "{\"ack\":<seq>}",
+        window: WS_WINDOW,
+        lagCloseMs: WS_LAG_MS,
+        subscribers: wsSubs.length,
+        note: "the service keeps NO per-subscriber buffer; a consumer that stops acking stops being sent to and is closed with 1013, then reconnects with ?since=",
+      },
       idSpelling: ID_SPELLING,
       ready: storeReady,
       storeError: storeError,
@@ -1970,6 +2378,13 @@ const server = createServer((req: IncomingMessage, res: ServerResponse) => {
   });
 });
 
+/* The push endpoint. 'upgrade' fires INSTEAD of 'request' for a
+ * Connection: upgrade request and hands the socket over raw, which is the
+ * whole seam a WebSocket server needs -- see the endpoint's own note. */
+server.on("upgrade", (req: IncomingMessage, socket: Socket, head: Buffer) => {
+  wsAttach(req, socket, head);
+});
+
 /* The store is LAZY: createSqliteStore/createStore do not touch the file, and
  * the schema is only created when a domain first reads. Opening the shared
  * connection here forces that up front, so a first run creates and MIGRATES
@@ -2030,6 +2445,8 @@ server.listen(PORT, HOST, () => {
   console.log(`  store    : sqlite ${DB_PATH} (one file, one connection, N sessions)`);
   console.log(`  default  : ${DEFAULT_SESSION}   (an unprefixed /<route> is addressed to it)`);
   console.log(`  sessions : /s/<sessionId>/<route>; GET /sessions lists them`);
+  console.log(`  push     : ws://${HOST}:${PORT}/s/<sessionId>${WS_ROUTE} — the /events stream, pushed`);
+  console.log(`             window ${WS_WINDOW} unacked events, closed with 1013 after ${WS_LAG_MS}ms at the window`);
   console.log(`  auth     : ${TOKEN === "" ? "OPEN (set ZAPO_REST_TOKEN to require x-api-key)" : "x-api-key required"}`);
   if (AUTOCONNECT) {
     console.log("  connecting every session with autoconnect set; QRs will print below as they arrive");
