@@ -10311,6 +10311,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/7570-content-interning-across-the-identity-surfaces.ts": {
+   "order": [
+    "<repo>/tests/corpus/7570-content-interning-across-the-identity-surfaces.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/760-any-arithmetic.ts": {
    "order": [
     "<repo>/tests/corpus/760-any-arithmetic.ts"

@@ -79,6 +79,12 @@ static void test_same_value_zero(void) {
 }
 
 #ifdef SCR_RC_AUDIT
+/* The exact string counts here are counts of strings THE PROGRAM CAN REACH,
+ * not of live string objects: scr_string.c's content-intern table is a
+ * second owning reference and scr_str_live_count drains it before answering.
+ * See the longer note in test_array.c, and test_intern.c for the table's own
+ * discipline. Nothing on this path is interned in any case — the hook is
+ * scr_str_concat's copy path and every string below is a literal. */
 static void test_rc_accounting(void) {
   long strings0 = scr_str_live_count();
   long maps0 = scr_map_live_count();

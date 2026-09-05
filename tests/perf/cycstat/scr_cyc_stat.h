@@ -75,12 +75,29 @@ SCR_CS_SHARED unsigned long long scr_cs_sarhit = 0;    /* popped off a list */
 SCR_CS_SHARED unsigned long long scr_cs_sargive = 0;   /* pushed onto one */
 SCR_CS_SHARED unsigned long long scr_cs_sarmalloc = 0; /* fell back to malloc */
 /* The content-intern cache in scr_string.c. A HIT is an allocation that did
- * not happen; a PUT is one that did and was cached; an EVICT is a resident
- * entry the table let go of. hit/(hit+put) is the hit rate, and a run with
- * put > 0 and hit == 0 is a cache that is only ever paying. */
+ * not happen; a MISS is a probe that found nothing; a PUT is an allocation
+ * that happened and was cached; an EVICT is a resident entry the table let
+ * go of; a REFUSE is a miss the table declined to cache because every way of
+ * its set was still referenced by the program.
+ *
+ * EVICT AND REFUSE ARE THE INSTRUMENT, not decoration. The table is
+ * set-associative precisely because the direct-mapped one thrashed -- and
+ * "it no longer thrashes" is a claim a hit rate cannot make, because a hit
+ * rate stays high while two hot contents beat each other out of one slot as
+ * long as everything ELSE hits. evict/put is what moves: a well-behaved
+ * table evicts only dead weight (rc == 1 entries) and evicts rarely.
+ *
+ * THE POSITIVE CONTROL IS SCR_STRING_INTERN_WAYS=1, which is the
+ * direct-mapped table in the same image. On that arm evict/put MUST be
+ * large; on the default arm it must be small. A build where both read small
+ * has not measured a good cache -- it has failed to compile the hooks, or
+ * never reached the length band, and the report below says so by name
+ * rather than printing a zero that reads like a result. */
 SCR_CS_SHARED unsigned long long scr_cs_sihit = 0;
+SCR_CS_SHARED unsigned long long scr_cs_simiss = 0;
 SCR_CS_SHARED unsigned long long scr_cs_siput = 0;
 SCR_CS_SHARED unsigned long long scr_cs_sievict = 0;
+SCR_CS_SHARED unsigned long long scr_cs_sirefuse = 0;
 SCR_CS_SHARED unsigned long long scr_cs_t0 = 0;
 SCR_CS_SHARED unsigned long long scr_cs_p0 = 0;
 SCR_CS_SHARED int scr_cs_registered = 0;
@@ -121,11 +138,21 @@ SCR_CS_FN void scr_cs_report(void) {
              " listgive=%llu mallocfallback=%llu\n",
           scr_cs_sarchunk, scr_cs_sarcarve, scr_cs_sarhit, scr_cs_sargive,
           scr_cs_sarmalloc);
-  fprintf(f, "[cycstat] strintern hit=%llu put=%llu evict=%llu hitRate=%.4f\n",
-          scr_cs_sihit, scr_cs_siput, scr_cs_sievict,
-          (scr_cs_sihit + scr_cs_siput) > 0
-              ? (double)scr_cs_sihit / (double)(scr_cs_sihit + scr_cs_siput)
-              : 0.0);
+  fprintf(f, "[cycstat] strintern hit=%llu miss=%llu put=%llu evict=%llu"
+             " refuse=%llu hitRate=%.4f evictPerPut=%.4f\n",
+          scr_cs_sihit, scr_cs_simiss, scr_cs_siput, scr_cs_sievict,
+          scr_cs_sirefuse,
+          (scr_cs_sihit + scr_cs_simiss) > 0
+              ? (double)scr_cs_sihit / (double)(scr_cs_sihit + scr_cs_simiss)
+              : 0.0,
+          scr_cs_siput > 0 ? (double)scr_cs_sievict / (double)scr_cs_siput
+                           : 0.0);
+  if (scr_cs_sievict == 0 && scr_cs_siput > 0) {
+    fprintf(f, "[cycstat] STRING INTERN NEVER EVICTED - read this against the"
+               " SCR_STRING_INTERN_WAYS=1 control on the SAME binary, which"
+               " must evict heavily. A zero here with no such control is an"
+               " untested branch, not a collision-free table.\n");
+  }
   if (scr_cs_sihit == 0 && scr_cs_siput == 0) {
     fprintf(f, "[cycstat] STRING INTERN NEVER PROBED - either"
                " SCR_STRING_INTERN=0, or SCR_RC_AUDIT compiled it out, or no"
