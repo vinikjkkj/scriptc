@@ -25,7 +25,7 @@ import { lowerWrtcMethodCall } from "./lower-wrtc.js";
 import { classHasKeyHelper, classInMemberNames, droppableStatic, dynAssertionReceiver, fnOwnCounters, keyedCalleeAtUndefinedArm, spawnResStreamArg, jsonStringifySpawnStreamArg, unionArmBridge, fnOwnPropBox, fnOwnRoutableKey, fnOwnWhy, lowerPromiseAllTupleCall, lowerPromiseRejectCall, narrowBridgeDyn, probeLower, recordArmStringable, templateRawTextOf } from "./lower-exprs.js";
 import { httpClientFnBindingOf, isStreamUndefCallExpr, lowerHttpClientFnCall } from "./lower-server.js";
 import { CLASS_PROPS_FIELD, EMITTER_API_MEMBERS, definePropSlotSiteOf, definePropTableSiteOf, exactInstanceClassOf, findGenericMethodOn, lowerClassGenericMethodCall, lowerStaticMethodCall, requireVirtualSlotFit, virtualViewFitsSlot, type ClassInfo } from "./lower-classes.js";
-import { boundEmitDispatcher, emitterRooted, lowerEmitterMethodCall } from "./lower-emitter.js";
+import { boundEmitDispatcher, boundSubscribeDispatcher, emitterRooted, lowerEmitterMethodCall } from "./lower-emitter.js";
 import { lowerConsoleInspectArg, lowerFormatCall } from "./lower-inspect.js";
 import { STREAM_API_MEMBERS, lowerStreamMethodCall, lowerStreamModuleCall, lowerStreamStaticCall, streamSidesOf } from "./lower-stream.js";
 import { ambientNsRootOf, ambientUndefReadType, ambientUndefVarRootOf, ambientUndefinedFnSymbolOf, contextualUndefReadType, fenceEarlyAliasUse, fenceEarlyNsMemberRef, moduleNsOwnKeys, moduleNsSourceFileOf, nsMemberIdentOf, nsPathPrefix, nsUndefRead } from "./lower-namespaces.js";
@@ -12606,6 +12606,12 @@ export function lowerFunction(L: Lowerer, decl: ts.FunctionDeclaration): IrFunct
             // names (lower-emitter.ts).
             const dispatcher = boundEmitDispatcher(L, call, methodAccess);
             if (dispatcher) return dispatcher;
+            // `X.on.bind(X)` and its two siblings: the same idea over the
+            // SUBSCRIBE surface. Its slot hands the arm a listener out of an
+            // IR union rather than a syntax node, and hands the caller the
+            // receiver back, because Node's `on` is chainable.
+            const sub = boundSubscribeDispatcher(L, call, methodAccess);
+            if (sub) return sub;
           }
         }
         if (isJsSourceFile(call.getSourceFile())) {

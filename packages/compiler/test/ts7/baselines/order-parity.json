@@ -10329,39 +10329,39 @@
    ],
    "diags": []
   },
-  "<repo>/tests/corpus/7570-content-interning-across-the-identity-surfaces.ts": {
+  "<repo>/tests/corpus/7590-a-bound-subscribe-dispatcher-over-a-plugin-context.ts": {
    "order": [
-    "<repo>/tests/corpus/7570-content-interning-across-the-identity-surfaces.ts"
+    "<repo>/tests/corpus/7590-a-bound-subscribe-dispatcher-over-a-plugin-context.ts"
    ],
    "diags": []
   },
-  "<repo>/tests/corpus/7580-override-covariant-return-into-unknown.ts": {
+  "<repo>/tests/corpus/7591-an-untabled-event-is-armed-by-the-subscribe-dispatcher.ts": {
    "order": [
-    "<repo>/tests/corpus/7580-override-covariant-return-into-unknown.ts"
+    "<repo>/tests/corpus/7591-an-untabled-event-is-armed-by-the-subscribe-dispatcher.ts"
    ],
    "diags": []
   },
-  "<repo>/tests/corpus/7581-override-adds-a-trailing-optional-parameter.ts": {
+  "<repo>/tests/corpus/7592-a-subscribe-slot-over-a-run-time-chosen-receiver.ts": {
    "order": [
-    "<repo>/tests/corpus/7581-override-adds-a-trailing-optional-parameter.ts"
+    "<repo>/tests/corpus/7592-a-subscribe-slot-over-a-run-time-chosen-receiver.ts"
    ],
    "diags": []
   },
-  "<repo>/tests/corpus/7582-override-widening-in-the-middle-of-a-chain.ts": {
+  "<repo>/tests/corpus/7593-two-subscribe-slots-that-erase-alike-arm-different-events.ts": {
    "order": [
-    "<repo>/tests/corpus/7582-override-widening-in-the-middle-of-a-chain.ts"
+    "<repo>/tests/corpus/7593-two-subscribe-slots-that-erase-alike-arm-different-events.ts"
    ],
    "diags": []
   },
-  "<repo>/tests/corpus/7583-override-widens-parameters-and-return-together.ts": {
+  "<repo>/tests/corpus/7594-the-rest-of-the-subscribe-surface-through-bound-slots.ts": {
    "order": [
-    "<repo>/tests/corpus/7583-override-widens-parameters-and-return-together.ts"
+    "<repo>/tests/corpus/7594-the-rest-of-the-subscribe-surface-through-bound-slots.ts"
    ],
    "diags": []
   },
-  "<repo>/tests/corpus/7584-declare-fields-are-type-only.ts": {
+  "<repo>/tests/corpus/7595-a-dyn-tuple-arm-in-a-bound-subscribe-dispatcher.ts": {
    "order": [
-    "<repo>/tests/corpus/7584-declare-fields-are-type-only.ts"
+    "<repo>/tests/corpus/7595-a-dyn-tuple-arm-in-a-bound-subscribe-dispatcher.ts"
    ],
    "diags": []
   },
@@ -10875,6 +10875,12 @@
   "<repo>/tests/diagnostics/a-spread-at-each-of-the-three-argument-positions.ts": {
    "order": [
     "<repo>/tests/diagnostics/a-spread-at-each-of-the-three-argument-positions.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/a-subscribe-slot-whose-event-map-has-an-unspellable-handler.ts": {
+   "order": [
+    "<repo>/tests/diagnostics/a-subscribe-slot-whose-event-map-has-an-unspellable-handler.ts"
    ],
    "diags": []
   },
@@ -11959,12 +11965,6 @@
   "<repo>/tests/diagnostics/overloaded-function-values.ts": {
    "order": [
     "<repo>/tests/diagnostics/overloaded-function-values.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/diagnostics/override-widened-mid-chain-dispatch.ts": {
-   "order": [
-    "<repo>/tests/diagnostics/override-widened-mid-chain-dispatch.ts"
    ],
    "diags": []
   },
