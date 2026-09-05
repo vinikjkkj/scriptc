@@ -10359,6 +10359,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/7595-a-dyn-tuple-arm-in-a-bound-subscribe-dispatcher.ts": {
+   "order": [
+    "<repo>/tests/corpus/7595-a-dyn-tuple-arm-in-a-bound-subscribe-dispatcher.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/760-any-arithmetic.ts": {
    "order": [
     "<repo>/tests/corpus/760-any-arithmetic.ts"

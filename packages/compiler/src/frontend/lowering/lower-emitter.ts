@@ -681,6 +681,31 @@ function lowerDynListenerCall(
     }
     cbDyn = { kind: "dynFrom", value: cb, type: DYN, loc };
   }
+  return dynListenerRegistration(L, tuple, receiver, name, cbDyn, registering, once, prepend, streamData, loc);
+}
+
+/** The registration itself, once the listener is a DYN value: the interned
+ * `%emitter.onDyn.<n>` / `%emitter.offDyn.<n>` helper and the call to it.
+ *
+ * Split out of `lowerDynListenerCall` because the bound-SUBSCRIBE dispatcher
+ * needs exactly this and has no `ts.Expression` to hand it — its listener
+ * arrives as an IR value narrowed out of the slot's union. Everything the
+ * shape relies on is unchanged: cb evaluates ONCE and feeds both roles (the
+ * dynCheck adapter emit invokes, and the dyn box the registry keeps as the
+ * entry's IDENTITY, which is what off/removeListener and
+ * listenerCount(name, fn) match on). */
+function dynListenerRegistration(
+  L: Lowerer,
+  tuple: IrType[],
+  receiver: IrExpr,
+  name: string,
+  cbDyn: IrExpr,
+  registering: boolean,
+  once: boolean,
+  prepend: boolean,
+  streamData: boolean,
+  loc: SrcLoc,
+): IrExpr {
   const recvT = receiver.type;
   const adapterT: IrType = { kind: "func", params: tuple, ret: VOID };
   const onFn = streamData ? "emitter.onDataDyn" as const : "emitter.onDyn" as const;
@@ -2637,7 +2662,8 @@ export function boundEmitDispatcher(
  *     therefore be listened for and never fired, which is exactly what the
  *     registration does. */
 
-/** The subscribe surface, with the two flags each spelling carries. */
+/** The subscribe surface, with the (registering, once, prepend) triple each
+ * spelling carries. */
 const SUBSCRIBE_MEMBERS: ReadonlyMap<string, { registering: boolean; once: boolean; prepend: boolean }> = new Map([
   ["on", { registering: true, once: false, prepend: false }],
   ["addListener", { registering: true, once: false, prepend: false }],
@@ -2757,7 +2783,9 @@ export function boundSubscribeDispatcher(
   const table = emitterEvents(L);
   const loc = locOf(call);
 
-  const arms: { name: string; listener: (v: () => IrExpr) => IrExpr }[] = [];
+  const getRecord = (id: string) => L.shapes.get(id);
+  const getUnion = (id: string) => L.unions.get(id);
+  const arms: { name: string; tuple: IrType[]; boxed: boolean; listener: (v: () => IrExpr) => IrExpr }[] = [];
   for (const key of keySet.keys) {
     // The meta events hand their listener the affected event's NAME and, in
     // Node, the listener function itself — a second argument with no unified
@@ -2778,13 +2806,52 @@ export function boundSubscribeDispatcher(
     if (want.params.length > tuple.length) {
       return why(`the '${key}' handler declares ${want.params.length} parameters where the event's tuple has ${tuple.length}`);
     }
+    // WHICH REGISTRATION THIS ARM NEEDS.
+    //
+    // The runtime stores an invoke shim per entry, chosen by the LISTENER's
+    // own arity, and emit hands it the event's tuple through a va_list. So a
+    // listener whose declared parameter is not the tuple's own type would
+    // read the emitted slot AS something it is not — the one shape that must
+    // never be registered, because it is a wrong memory read rather than a
+    // diagnostic.
+    //
+    // Positions that agree register plainly. A position the table holds as
+    // DYN and the key map declares statically is the shape corpus 7384 named
+    // on the emit side: an event NOTHING in the program typed carries a dyn
+    // tuple, because its bucket holds dyn adapters and its emits box. The
+    // listener owed such an event is a BOXED one, so the arm registers
+    // through the same `emitter.onDyn` path a directly written
+    // checked-dynamic listener takes — the dyn box is the entry's IDENTITY
+    // (so `off` still matches) and the dynCheck adapter is what emit invokes,
+    // converting each boxed argument into the declared parameter at the call.
+    //
+    // Anything else fences the whole dispatcher, arm-by-arm gated rather than
+    // best-effort: an arm dropped quietly is a listener Node registered and
+    // this compiler did not.
+    let boxed = false;
     for (let i = 0; i < want.params.length; i++) {
-      if (!typeEquals(want.params[i]!, tuple[i]!)) {
+      if (typeEquals(want.params[i]!, tuple[i]!)) continue;
+      if (tuple[i]!.kind !== "dyn") {
         return why(`the '${key}' handler's parameter ${i} is '${L.fmt(want.params[i]!)}' where the event's tuple has '${L.fmt(tuple[i]!)}'`);
+      }
+      boxed = true;
+    }
+    if (boxed) {
+      // The same two gates `lowerDynListenerCall` applies to a directly
+      // written checked-dynamic listener: every tuple position must box, and
+      // the listener's own signature must cross the boundary.
+      for (let i = 0; i < tuple.length; i++) {
+        const t = tuple[i]!;
+        if (t.kind !== "dyn" && !canConvertToDyn(t, getRecord, getUnion)) {
+          return why(`'${key}' argument ${i} is '${L.fmt(t)}', which cannot box into a dynamic value`);
+        }
+      }
+      if (!canBoxFuncIntoDyn(want, getRecord, getUnion)) {
+        return why(`the '${key}' handler '${L.fmt(want)}' does not box across the dynamic boundary`);
       }
     }
     if (typeEquals(lisT, want)) {
-      arms.push({ name: key, listener: (v) => v() });
+      arms.push({ name: key, tuple, boxed, listener: (v) => v() });
       continue;
     }
     if (lisT.kind !== "union") return why(`the '${key}' handler is '${L.fmt(want)}' where the slot's listener parameter is '${L.fmt(lisT)}'`);
@@ -2792,6 +2859,8 @@ export function boundSubscribeDispatcher(
     if (helper !== null) {
       arms.push({
         name: key,
+        tuple,
+        boxed,
         listener: (v) => ({ kind: "call", callee: helper, args: [v()], type: want, narrowBridge: true, loc }),
       });
       continue;
@@ -2800,6 +2869,8 @@ export function boundSubscribeDispatcher(
     if (tag < 0) return why(`the '${key}' handler '${L.fmt(want)}' is not an arm of the slot's listener union`);
     arms.push({
       name: key,
+      tuple,
+      boxed,
       listener: (v) => ({ kind: "unionNarrow", unionId: lisT.unionId, tag, value: v(), type: want, loc }),
     });
   }
@@ -2816,7 +2887,7 @@ export function boundSubscribeDispatcher(
   // silently unregistered. That is a wrong VALUE with no diagnostic, which is
   // the one thing a dispatcher must never produce, so the armed set is part
   // of the identity rather than a consequence of it.
-  const ikey = `emitsub:${recvIr.className}:${member}:${typeKey(slot)}:${arms.map((a) => a.name).join(",")}`;
+  const ikey = `emitsub:${recvIr.className}:${member}:${typeKey(slot)}:${arms.map((a) => `${a.boxed ? "d" : ""}${a.name}`).join(",")}`;
   let fname = L.widthHelpers.get(ikey);
   if (fname === undefined) {
     fname = `%emit.sub.${L.widthHelpers.size}`;
@@ -2828,15 +2899,21 @@ export function boundSubscribeDispatcher(
     const body: IrStmt[] = [];
     for (const arm of arms) {
       const cb = arm.listener(lisRef);
-      const reg: IrExpr = {
-        kind: "libCall",
-        fn: mode.registering ? "emitter.on" : "emitter.off",
-        args: mode.registering
-          ? [self(), strLit(arm.name, loc), cb, boolLit(mode.once, loc), boolLit(mode.prepend, loc)]
-          : [self(), strLit(arm.name, loc), cb],
-        type: selfT,
-        loc,
-      };
+      const reg: IrExpr = arm.boxed
+        ? dynListenerRegistration(
+          L, arm.tuple, self(), arm.name,
+          { kind: "dynFrom", value: cb, type: DYN, loc },
+          mode.registering, mode.once, mode.prepend, false, loc,
+        )
+        : {
+          kind: "libCall",
+          fn: mode.registering ? "emitter.on" : "emitter.off",
+          args: mode.registering
+            ? [self(), strLit(arm.name, loc), cb, boolLit(mode.once, loc), boolLit(mode.prepend, loc)]
+            : [self(), strLit(arm.name, loc), cb],
+          type: selfT,
+          loc,
+        };
       body.push({
         kind: "if",
         cond: {
