@@ -193,7 +193,15 @@ build succeeded.
 | arm | was | is |
 |---|---|---|
 | strict, no `--best-effort` | 14 errors | **1** |
-| `--best-effort`, deferred sites in the emitted module | 15 | **4** |
+| `--best-effort`, deferred sites in the emitted module | 15 by the bracket scan | **4** sites (**1** bracket) |
+
+"was" is the shipped 29,085,696-byte binary, measured at `958b912f`; "is" is
+measured on the tree that carries this file. The two deferred numbers are not
+the same measurement: the old scan counted `[SCxxxx]` markers inside message
+text, and only some refusals spell one — the four sites below are three
+`SC1090` throws that carry the code as an argument plus one bracketed
+`SC2020` fence. The bracket count is printed beside the site count so the
+difference is visible rather than inferred.
 
 The one strict error, and three of the four deferred sites, are the same
 construct: **`client.on.bind(client)`** (and `.off`, `.once`) in zapo's own
