@@ -1,0 +1,27 @@
+error-name-accessor-shapes.ts:6:16 - error SC1090: accessors sharing a name with a field is not supported yet
+
+  5 | class Computed extends Error {
+  6 |   override get name(): string {
+    |                ^~~~
+  7 |     return 'E' + this.message;
+
+error-name-accessor-shapes.ts:10:13 - error SC1090: constructing through a class value whose class has no lowering (the class declaration itself was rejected — see its own diagnostic) is not supported yet
+
+   9 | }
+  10 | console.log(new Computed('x').name);
+     |             ^~~~~~~~~~~~~~~~~
+  11 | 
+
+error-name-accessor-shapes.ts:16:16 - error SC1090: accessors sharing a name with a field is not supported yet
+
+  15 |   private n = 'p';
+  16 |   override get name(): string {
+     |                ^~~~
+  17 |     return this.n;
+
+error-name-accessor-shapes.ts:23:13 - error SC1090: constructing through a class value whose class has no lowering (the class declaration itself was rejected — see its own diagnostic) is not supported yet
+
+  22 | }
+  23 | console.log(new Pair('y').name);
+     |             ^~~~~~~~~~~~~
+  24 | 
