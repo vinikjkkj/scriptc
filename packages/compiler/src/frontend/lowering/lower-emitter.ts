@@ -2203,6 +2203,7 @@ function looseEmitDispatcher(
   const keySet = emitterClassKeySet(L, methodAccess, info);
   if (keySet === null) return why("the receiver class declares no 'keyof' event map on its own emit");
   const table = emitterEvents(L);
+  const classMap = declaredEventMap(L, info);
 
   const arms: { name: string; tuple: IrType[] }[] = [];
   for (const key of keySet.keys) {
@@ -2217,15 +2218,21 @@ function looseEmitDispatcher(
     const arity = keyMapArity(L, keySet.map, key);
     if (arity === null) return why(`the key map does not spell '${key}' plainly`);
     if (arity > 1) return why(`'${key}' declares ${arity} payload arguments where the loose slot has one`);
-    if (sig.tuple.length > 1) return why(`'${key}' unifies to ${sig.tuple.length} arguments where the loose slot has one`);
-    const want = sig.tuple[0];
+    // `slotTuple`'s rule, for the same reason the key-map dispatcher takes
+    // it: the LOOSE slot is the third way an emit reaches an event without
+    // the syntactic scan seeing it, so if it kept truncating to the table's
+    // listener-derived prefix it would supply fewer arguments than the
+    // subscribe dispatcher registers a listener to read.
+    const tuple = slotTuple(L, sig, key, classMap) ?? sig.tuple;
+    if (tuple.length > 1) return why(`'${key}' unifies to ${tuple.length} arguments where the loose slot has one`);
+    const want = tuple[0];
     if (
       want !== undefined && want.kind !== "dyn" &&
       !canDynCheckTo(want, (id) => L.shapes.get(id), (id) => L.unions.get(id))
     ) {
       return why(`'${key}' carries '${L.fmt(want)}', which a dyn payload cannot be checked into`);
     }
-    arms.push({ name: key, tuple: sig.tuple });
+    arms.push({ name: key, tuple });
   }
   // ZERO arms is a legitimate dispatcher, unlike the key-map one: every name
   // then falls through to `false`, which is exactly what Node answers for an
@@ -2400,6 +2407,7 @@ export function boundEmitDispatcher(
   if (keySet === null) return why("the slot's type parameter has no enumerable keyof constraint");
   const elem = argsT.elem;
   const table = emitterEvents(L);
+  const classMap = declaredEventMap(L, info);
   const loc = locOf(call);
 
   /** One position's extraction from the payload array — TAG-CHECKED.
@@ -2520,22 +2528,26 @@ export function boundEmitDispatcher(
     // fence — a library constructor re-lowering because a consumer added a
     // listener, which is the exact coupling this file exists to avoid.
     //
-    // Dropping the trailing slots is what the emitter already promises
-    // everywhere else ("listeners may declare a prefix"): the arm builds the
-    // unified tuple, and NO listener of that event anywhere in the program
-    // declared a parameter past it — the table's tuple is the maximum over all
-    // of them. The values in the unread slots are the caller's to release, and
-    // the array owns them exactly as before.
-    if (sig.tuple.length > arity) {
-      return why(`'${key}' unifies to ${sig.tuple.length} arguments where the key map declares ${arity}`);
+    // Dropping the trailing slots WAS what this did, on the argument that the
+    // table's tuple is the maximum over every listener in the program. The
+    // subscribe dispatcher made that argument false — a listener registered
+    // THROUGH a slot is as invisible to the scan as an emit through one — so
+    // the length both sides speak now comes from `slotTuple`: the recorded
+    // tuple whenever a real emit pinned it, and otherwise the class's own
+    // declaration, extended past whatever prefix the direct listeners
+    // reached. The values in slots no listener reads are the caller's to
+    // release, and the array owns them exactly as before.
+    const emitTuple = slotTuple(L, sig, key, classMap) ?? sig.tuple;
+    if (emitTuple.length > arity) {
+      return why(`'${key}' unifies to ${emitTuple.length} arguments where the key map declares ${arity}`);
     }
     const payload: IrExpr[] = [];
-    for (let i = 0; i < sig.tuple.length; i++) {
-      const c = convert(sig.tuple[i]!, i);
-      if (c === null) return why(`'${key}' position ${i} is '${L.fmt(sig.tuple[i]!)}', not an arm of the slot's payload`);
+    for (let i = 0; i < emitTuple.length; i++) {
+      const c = convert(emitTuple[i]!, i);
+      if (c === null) return why(`'${key}' position ${i} is '${L.fmt(emitTuple[i]!)}', not an arm of the slot's payload`);
       payload.push(c);
     }
-    arms.push({ name: key, tuple: sig.tuple, payload });
+    arms.push({ name: key, tuple: emitTuple, payload });
   }
   if (arms.length === 0) return why("no reachable event has a listener");
 
@@ -2695,6 +2707,100 @@ function keyMapHandler(L: Lowerer, map: ts.Type, key: string): (IrType & { kind:
   }
 }
 
+/* ── THE SLOT TUPLE, AND WHY BOTH DISPATCHERS MUST COMPUTE IT THE SAME WAY ──
+ *
+ * An event's program-global tuple is unified from the `.emit(` and `.on(`
+ * sites the SYNTACTIC scan can see, and a call routed through a key-map slot
+ * is not one of them: `runtime.emitEvent('auth_paired', { credentials })` is
+ * a call on a function-typed FIELD, and `ctx.on('auth_paired', h)` is a call
+ * on a record. So for an event whose only traffic goes through slots, the
+ * table's tuple is a LOWER BOUND — the longest DIRECT listener — and not the
+ * truth.
+ *
+ * The emit dispatcher already met that: zapo's consumer writes
+ * `client.on('auth_paired', () => …)`, a listener that ignores its payload,
+ * and the event's tuple sat at ZERO while the key map declares one. It read
+ * the table as the truth and TRUNCATED — the arm emits zero arguments — and
+ * that was exact as long as the table really was the maximum over every
+ * listener.
+ *
+ * The subscribe dispatcher makes it false. Its arm registers the key map's
+ * DECLARED handler, which for `auth_paired` reads one parameter, and the
+ * runtime picks each entry's invoke shim by the listener's own arity and
+ * hands it the tuple through a `va_list`. A one-parameter shim over a
+ * zero-argument emit reads a slot nothing supplied: a wrong memory read with
+ * no diagnostic, which is why the arm loop REFUSED — and one refused key
+ * fences the whole dispatcher, so `installWaClientPlugins` stayed on the
+ * member-as-a-VALUE fence over an event no plugin even listens to.
+ *
+ * Neither half is wrong on its own; they disagree about what an emit
+ * supplies. The fix is to give them ONE answer: when no emit anywhere in the
+ * program pinned the arity, the event's tuple is the key map's own
+ * declaration, extended past whatever prefix the direct listeners reached.
+ * The emit dispatcher then supplies it and the subscribe dispatcher may
+ * register against it.
+ *
+ * TWO PROPERTIES MAKE THAT SAFE.
+ *
+ * (1) IT NEVER OVERRIDES AN OBSERVED EMIT. `fromEmit` means the scan saw a
+ *     real `.emit(` with a literal name, and that site's argument count is
+ *     the truth for it; the tuple stays exactly what unification produced,
+ *     and a key map declaring more than it still refuses.
+ *
+ * (2) BOTH SIDES READ THE SAME DECLARATION. The extension comes from the
+ *     RECEIVER CLASS's own event map — the one its typed `emit` overload
+ *     names — never from the slot's, so it is a function of (class, event)
+ *     alone. Two slots over one class, spelled over different key maps,
+ *     cannot end up disagreeing about how many arguments an emit supplies:
+ *     a slot whose own map declares FEWER than the extension reaches meets
+ *     the payload-array gate and refuses, which is a diagnostic rather than
+ *     a wrong read.
+ *
+ * A direct listener is unaffected: its shim is built from its OWN arity, and
+ * declaring a prefix of the tuple is what the emitter promises everywhere. */
+
+/** The event map the receiver CLASS declares on its own typed `emit`
+ * overload, walking the base chain — the single source both dispatchers
+ * extend a short tuple from. Null when the class declares no key map. */
+function declaredEventMap(L: Lowerer, info: ClassInfo): ts.Type | null {
+  for (let c: ClassInfo | null = info; c; c = c.base) {
+    for (const m of c.decl?.members ?? []) {
+      if (!ts.isMethodDeclaration(m)) continue;
+      if (m.name === undefined || !ts.isIdentifier(m.name) || m.name.text !== "emit") continue;
+      let sig: ts.Signature | undefined;
+      try {
+        sig = L.checker.getSignatureFromDeclaration(m);
+      } catch {
+        sig = undefined;
+      }
+      if (sig === undefined) continue;
+      const found = keySetOfSignature(L, sig);
+      if (found !== null) return found.map;
+    }
+  }
+  return null;
+}
+
+/** The tuple a key-map slot's arm speaks for `key`: the table's own when an
+ * emit pinned it, and otherwise the class's declared handler extended past
+ * the longest direct listener's prefix. `classMap` is `declaredEventMap`'s
+ * answer for the receiver class; a null map, a key the map does not spell
+ * plainly, and a declaration no longer than the recorded tuple all leave the
+ * tuple exactly as the table has it. */
+function slotTuple(L: Lowerer, sig: EventSig | undefined, key: string, classMap: ts.Type | null): IrType[] | null {
+  // No table entry is not this rule's business: nothing in the program emits
+  // or listens for the name, and each caller already has its own answer for
+  // that case (the emit dispatchers skip the key; the subscribe dispatcher
+  // arms it from the SLOT's map, which may spell a plugin event the class's
+  // own map does not).
+  if (sig === undefined) return null;
+  if (sig.fromEmit) return sig.tuple;
+  if (classMap === null) return sig.tuple;
+  const declared = keyMapHandler(L, classMap, key);
+  if (declared === null || declared.params.length <= sig.tuple.length) return sig.tuple;
+  return [...sig.tuple, ...declared.params.slice(sig.tuple.length)];
+}
+
 /** True when `cls` is `want` or descends from it. */
 function classReaches(L: Lowerer, cls: string, want: string): boolean {
   for (let c: ClassInfo | null = L.classes.get(cls) ?? null; c; c = c.base) {
@@ -2753,7 +2859,29 @@ export function boundSubscribeDispatcher(
       } catch { /* keep the contextual type */ }
     }
   }
-  if (ctxTs === undefined) return why("the bind site has no contextual type");
+  // NO CONTEXTUAL TYPE AT ALL — `const f = c.on.bind(c)`, and then `f` is
+  // called, or handed on. There is no destination naming the shape, so the
+  // dispatcher has to read it off the bind expression itself.
+  //
+  // That is not a weaker answer than a contextual type; on this shape it is
+  // the STRONGER one. `strict` implies `strictBindCallApply`, so `bind`
+  // resolves through `CallableFunction.bind` and the result carries the
+  // member's own signature with `this` fixed — the very declaration
+  // `emitterClassKeySet` reads the key set from. And it is the type the rest
+  // of the program computes for the binding, so the closure the dispatcher
+  // builds and every later use of it agree by construction, where a
+  // contextual type is only required to be a supertype of the value.
+  //
+  // A contextual type still WINS when there is one: `X.on.bind(X) as unknown
+  // as Slot` names a destination the program chose deliberately, and the
+  // assertion walk above exists to honour it.
+  if (ctxTs === undefined || L.mapTypeOf(ctxTs)?.kind !== "func") {
+    try {
+      const self = L.typeOf(call);
+      if (L.mapTypeOf(self)?.kind === "func") ctxTs = self;
+    } catch { /* keep whatever the contextual walk found */ }
+  }
+  if (ctxTs === undefined) return why("the bind site has no contextual type and its own type does not resolve");
   const slot = L.mapTypeOf(ctxTs);
   if (slot?.kind !== "func") return why(`the slot maps to '${slot ? L.fmt(slot) : "nothing"}'`);
   if (process.env["SCRIPTC_BSUB_WHY"] !== undefined) console.error(`[bsub] SLOTKEY ${typeKey(slot)}`);
@@ -2781,6 +2909,7 @@ export function boundSubscribeDispatcher(
   const keySet = boundEmitKeySet(L, ctxTs) ?? emitterClassKeySet(L, methodAccess, info, member);
   if (keySet === null) return why("neither the slot nor the receiver class names an enumerable keyof event map");
   const table = emitterEvents(L);
+  const classMap = declaredEventMap(L, info);
   const loc = locOf(call);
 
   const getRecord = (id: string) => L.shapes.get(id);
@@ -2799,10 +2928,10 @@ export function boundSubscribeDispatcher(
     if (sig?.dynListener) return why(`'${key}' has a dyn-flavored listener`);
     const want = keyMapHandler(L, keySet.map, key);
     if (want === null) return why(`the key map does not spell '${key}' plainly`);
-    // The tuple this event carries. With a table entry it is the program-wide
-    // unification; without one nothing anywhere can emit the name, and the
-    // key map's own handler is the only declaration there is.
-    const tuple = sig?.tuple ?? want.params;
+    // The tuple this event carries — `slotTuple`'s rule, the same one the
+    // emit dispatcher builds its payload from, so the arm registers a
+    // listener of exactly the arity an emit through a slot supplies.
+    const tuple = slotTuple(L, sig, key, classMap) ?? want.params;
     if (want.params.length > tuple.length) {
       return why(`the '${key}' handler declares ${want.params.length} parameters where the event's tuple has ${tuple.length}`);
     }
