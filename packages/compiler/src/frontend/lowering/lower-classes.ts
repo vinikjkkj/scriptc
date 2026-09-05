@@ -7657,6 +7657,30 @@ export function lowerNew(L: Lowerer, expr: ts.NewExpression): IrExpr {
               }
             }
           }
+          // A SET seed — `new Set(other)` / `new Set(readonlySet)`, the
+          // copy idiom. This is `new Set([...other])` with the array
+          // literal elided, and it lowers to exactly that: the receiver
+          // drains through the same `toArray` intrinsic a spread uses,
+          // and the drained array seeds the construction. Iteration order
+          // is the source's insertion order (what toArray answers) and the
+          // elements are already distinct, so the bulk add reproduces the
+          // source set — Node's semantics, with no aliasing: the seed is
+          // read once, at construction, into a fresh table.
+          const seedSetIr = ts.isSpreadElement(argNode) ? null : L.mapTypeOf(L.typeOf(argNode));
+          if (seedSetIr?.kind === "set" && typeEquals(seedSetIr.elem, mapped.elem)) {
+            const srcSet = L.lowerExpr(argNode);
+            if (srcSet.type.kind === "set" && typeEquals(srcSet.type.elem, mapped.elem)) {
+              const seed: IrExpr = {
+                kind: "setIntrinsic",
+                method: "toArray",
+                receiver: srcSet,
+                args: [],
+                type: arrayOf(mapped.elem),
+                loc,
+              };
+              return { kind: "setNew", seed, type: mapped, loc };
+            }
+          }
           if (!ts.isSpreadElement(argNode)) {
             const argIr = L.mapTypeOf(L.typeOf(argNode));
             if (argIr?.kind === "array" && typeEquals(argIr.elem, mapped.elem)) {

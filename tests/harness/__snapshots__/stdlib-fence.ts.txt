@@ -102,15 +102,6 @@ stdlib-fence.ts:26:13 - error SC2020: 'new ArrayBuffer' is part of the standard 
 
   hint: no free-standing ArrayBuffer value exists — typed arrays own their storage: allocate the view directly (new Uint8Array(n)), or erase a fresh buffer into one (new Uint8Array(new ArrayBuffer(n)), new DataView(new ArrayBuffer(n), ...))
 
-stdlib-fence.ts:27:12 - error SC2020: 'new Set(values)' is part of the standard library types but has no scriptc lowering yet
-
-  26 | const buf = new ArrayBuffer(8);
-  27 | const st = new Set(new Set([1, 2])); // array seeds lower; Set/iterable seeds stay fenced
-     |            ^~~~~~~~~~~~~~~~~~~~~~~~
-  28 | // (new Error / TypeError / RangeError / SyntaxError now LOWER — the error
-
-  hint: construct the Set empty and add() each value — only an array of already-legal elements (string or number) seeds a Set
-
 stdlib-fence.ts:31:7 - error SC2020: 'AggregateError' is part of the standard library types but has no scriptc lowering yet
 
   30 | // and the unlowered members of lowered error objects.)
@@ -138,18 +129,9 @@ stdlib-fence.ts:35:15 - error SC2020: 'Error.cause' is part of the standard libr
 
   hint: the type checker sees the full standard library, but only the supported surface compiles (https://scriptc.dev/limitations)
 
-stdlib-fence.ts:41:17 - error SC2020: 'Math.min' is part of the standard library types but has no scriptc lowering yet
-
-  40 | // corpus; the mixed spread/positional list is the form that stays fenced.)
-  41 | const clamped = Math.min(1, ...[2, 3]);
-     |                 ^~~~~~~~
-  42 | const entries = [1, 2].entries();
-
-  hint: Math.min lowers with any number of plain arguments or ONE number[] spread — mixed spread/positional lists don't: spread a single array (Math.min(...xs))
-
 stdlib-fence.ts:42:7 - error SC2020: 'ArrayIterator<[number, number]>' is part of the standard library types but has no scriptc lowering yet
 
-  41 | const clamped = Math.min(1, ...[2, 3]);
+  41 | // fences any more; `Math.SQRT2` above is the Math member that still does.)
   42 | const entries = [1, 2].entries();
      |       ^~~~~~~
   43 | const arrAt = [1, 2].at(0);
@@ -158,7 +140,7 @@ stdlib-fence.ts:42:7 - error SC2020: 'ArrayIterator<[number, number]>' is part o
 
 stdlib-fence.ts:42:17 - error SC2020: 'number[].entries' is part of the standard library types but has no scriptc lowering yet
 
-  41 | const clamped = Math.min(1, ...[2, 3]);
+  41 | // fences any more; `Math.SQRT2` above is the Math member that still does.)
   42 | const entries = [1, 2].entries();
      |                 ^~~~~~~~~~~~~~
   43 | const arrAt = [1, 2].at(0);

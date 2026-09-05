@@ -8361,6 +8361,9 @@ ScrBytes *scr_zlib_unzip(const ScrBytes *data);
 /* The promisified twins (util.promisify): the codec runs synchronously
  * and answers an already-settled promise (the fs/promises stance). */
 ScrPromise *scr_zlib_deflate_async(const ScrBytes *data);
+/* The same, with node:zlib's { level } option honored (the level changes
+ * the output bytes, so it is passed through rather than dropped). */
+ScrPromise *scr_zlib_deflate_async_level(const ScrBytes *data, double level);
 ScrPromise *scr_zlib_unzip_async(const ScrBytes *data);
 /* The RAW twins: headerless DEFLATE (mode 1). */
 ScrBytes *scr_zlib_deflate_raw(const ScrBytes *data);
