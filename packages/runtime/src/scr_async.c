@@ -1927,6 +1927,22 @@ static size_t scr_heap_commit_kib(void) {
 }
 #endif
 
+/* Prints `<label><decimal>` for each pair and a newline, to stderr.
+ * Table-driven because the alternative is twenty-two fputs call sites in
+ * an always-linked TU: the same two lines cost 3,584 bytes of static
+ * hello-world written out longhand and 2,560 written like this. Still no
+ * printf -- see the note at the window line for what one %zu cost. */
+static void scr_heap_trim_line(const char *const *labels, const size_t *vals,
+                               size_t n) {
+  char nb[24];
+  size_t i;
+  for (i = 0; i < n; i++) {
+    fputs(labels[i], stderr);
+    fputs(scr_utoa(vals[i], nb), stderr);
+  }
+  fputc('\n', stderr);
+}
+
 /* One trim window. Called from the sleep seam in scr_loop_run with the
  * loop's own scr_now_ms(), passed in rather than re-read so the window
  * boundary lines up with the turn the caller is timing. */
@@ -1991,20 +2007,17 @@ static void scr_heap_trim(double now) {
    * only printf in the always-linked runtime and this file has already
    * paid 33,280 bytes of static hello-world for that mistake once. */
   if (stat) {
-    char nb[24];
-    fputs("[heaptrim] window commitKiB=", stderr);
-    fputs(scr_utoa(before, nb), stderr);
-    fputs("->", stderr);
-    fputs(scr_utoa(after, nb), stderr);
-    fputs(" releasedKiB=", stderr);
-    fputs(scr_utoa(before > after ? before - after : 0, nb), stderr);
-    fputs(" largestFreeKiB=", stderr);
-    fputs(scr_utoa(largest / 1024u, nb), stderr);
-    fputs(" us=", stderr);
-    fputs(scr_utoa(us, nb), stderr);
-    fputs(" trims=", stderr);
-    fputs(scr_utoa((size_t)scr_heap_trims, nb), stderr);
-    fputc('\n', stderr);
+    static const char *const labels[6] = {
+        "[heaptrim] window commitKiB=", "->", " releasedKiB=",
+        " largestFreeKiB=", " us=", " trims="};
+    size_t vals[6];
+    vals[0] = before;
+    vals[1] = after;
+    vals[2] = before > after ? before - after : 0;
+    vals[3] = largest / 1024u;
+    vals[4] = us;
+    vals[5] = (size_t)scr_heap_trims;
+    scr_heap_trim_line(labels, vals, 6);
   }
 
 #ifdef _WIN32
@@ -2040,25 +2053,21 @@ static void scr_heap_trim(double now) {
     HeapUnlock(h);
     QueryPerformanceCounter(&c1);
     {
-      char nb[24];
-      size_t wus = cf.QuadPart > 0 ? (size_t)(((c1.QuadPart - c0.QuadPart) *
-                                               1000000LL) / cf.QuadPart)
-                                   : 0;
-      fputs("[heaptrim] census busyKiB=", stderr);
-      fputs(scr_utoa(busy / 1024u, nb), stderr);
-      fputs(" freeKiB=", stderr);
-      fputs(scr_utoa(freeb / 1024u, nb), stderr);
-      fputs(" uncommittedKiB=", stderr);
-      fputs(scr_utoa(uncommitted / 1024u, nb), stderr);
-      fputs(" busyBlocks=", stderr);
-      fputs(scr_utoa(nbusy, nb), stderr);
-      fputs(" freeBlocks=", stderr);
-      fputs(scr_utoa(nfree, nb), stderr);
-      fputs(" regions=", stderr);
-      fputs(scr_utoa(nregion, nb), stderr);
-      fputs(" walk_us=", stderr);
-      fputs(scr_utoa(wus, nb), stderr);
-      fputc('\n', stderr);
+      static const char *const labels[7] = {
+          "[heaptrim] census busyKiB=", " freeKiB=", " uncommittedKiB=",
+          " busyBlocks=", " freeBlocks=", " regions=", " walk_us="};
+      size_t vals[7];
+      vals[0] = busy / 1024u;
+      vals[1] = freeb / 1024u;
+      vals[2] = uncommitted / 1024u;
+      vals[3] = nbusy;
+      vals[4] = nfree;
+      vals[5] = nregion;
+      vals[6] = cf.QuadPart > 0
+                    ? (size_t)(((c1.QuadPart - c0.QuadPart) * 1000000LL) /
+                               cf.QuadPart)
+                    : 0;
+      scr_heap_trim_line(labels, vals, 7);
     }
   }
 #endif
