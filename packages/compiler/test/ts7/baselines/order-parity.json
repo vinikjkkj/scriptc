@@ -10713,15 +10713,15 @@
    ],
    "diags": []
   },
-  "<repo>/tests/corpus/7760-websocket-server-frames.ts": {
+  "<repo>/tests/corpus/7780-initializer-less-static-fields.ts": {
    "order": [
-    "<repo>/tests/corpus/7760-websocket-server-frames.ts"
+    "<repo>/tests/corpus/7780-initializer-less-static-fields.ts"
    ],
    "diags": []
   },
-  "<repo>/tests/corpus/7761-websocket-server-raw-client.ts": {
+  "<repo>/tests/corpus/7781-a-static-redeclared-down-a-chain.ts": {
    "order": [
-    "<repo>/tests/corpus/7761-websocket-server-raw-client.ts"
+    "<repo>/tests/corpus/7781-a-static-redeclared-down-a-chain.ts"
    ],
    "diags": []
   },
