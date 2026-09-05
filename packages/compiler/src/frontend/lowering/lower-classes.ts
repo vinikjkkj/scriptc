@@ -3263,19 +3263,33 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
             // tsc rejects optional/default/rest setter params (TS1051-53).
             sig = { params: L.paramShapes(member.parameters), ret: VOID };
           }
-          // One property, ONE type: tsc (5.1+) admits get/set pairs with
-          // unrelated annotated types; a property slot here has a single
-          // IR type, so the pair must agree exactly.
-          const twin = methods.get(`${isGet ? "set" : "get"}:${prop}`);
-          const twinType = twin ? (isGet ? twin.params[0]!.type : twin.ret) : null;
-          const ownType = isGet ? sig.ret : sig.params[0]!.type;
-          if (twinType && !typeEquals(twinType, ownType)) {
-            L.unsupported(
-              "SC1090",
-              member.name,
-              `getter/setter pairs with different types (the property '${prop}' must have one type)`,
-            );
-          }
+          // One property, TWO independent halves. tsc (5.1+) admits get/set
+          // pairs with unrelated annotated types -- `get session():
+          // ClientSession | undefined` beside `set session(s: ClientSession)`
+          // is the write-a-value / read-back-maybe idiom, and mongodb's
+          // AbstractOperation is built on it.
+          //
+          // There is NO shared slot to disagree about. An accessor collects
+          // as the two METHODS "get:p" and "set:p", each with its own
+          // signature and its own vtable entry, and the property's storage is
+          // whatever the accessor BODIES touch (`this._session` -- a declared
+          // field, with its own single type). A read is a call of the getter
+          // and yields the getter's return type; a write is a call of the
+          // setter and consumes the setter's parameter type. Neither half
+          // ever reads the other's type off the instance.
+          //
+          // What DID assume they agree is the FieldTarget the read and the
+          // write paths share: one `fieldType`, used both to type the read
+          // and to coerce the right-hand side of a write. Divergent halves
+          // there would hand a `T | undefined` (a TAGGED union value) to a
+          // setter whose parameter is a bare `T` -- the wrong-representation
+          // write this fence stood in front of. The target now carries the
+          // write type beside the read type (writeTypeOf), so each path
+          // consults its own half and the fence has nothing left to guard.
+          //
+          // Compound assignment is the one spelling that needs BOTH in one
+          // expression (read, combine, write); it keeps a fence of its own,
+          // named at the site.
           // Same exactness rule as methods — an accessor override keeps
           // the overridden accessor's type (getter return / setter param).
           const overridden = L.findMethodOn(base, mName);

@@ -10701,6 +10701,18 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/7740-a-getter-and-setter-pair-with-different-types.ts": {
+   "order": [
+    "<repo>/tests/corpus/7740-a-getter-and-setter-pair-with-different-types.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/7741-a-divergent-accessor-pair-on-a-generic-base.ts": {
+   "order": [
+    "<repo>/tests/corpus/7741-a-divergent-accessor-pair-on-a-generic-base.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/800-switch-basics.ts": {
    "order": [
     "<repo>/tests/corpus/800-switch-basics.ts"

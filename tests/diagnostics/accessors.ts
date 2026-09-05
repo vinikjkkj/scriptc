@@ -26,16 +26,25 @@ class Auto {
   accessor a: number = 1;
 }
 
-// a getter/setter pair must agree on ONE property type (tsc 5.1+ admits
-// unrelated annotated types; a property slot here has a single type)
+// a getter/setter pair may have DIFFERENT types on its two halves (tsc 5.1+
+// admits unrelated annotated ones) — there is no shared slot: reads call the
+// getter at its return type, writes call the setter at its parameter type.
+// The one spelling that needs both at once is compound assignment, and that
+// is where the remaining fence is.
 class Mixed {
+  private held = 0;
   get m(): number {
-    return 1;
+    return this.held;
   }
-  set m(v: string) {
-    console.log(v);
+  set m(v: number | string) {
+    this.held = typeof v === "string" ? v.length : v;
   }
 }
+const mixed = new Mixed();
+mixed.m = "abc";
+console.log(mixed.m);
+const mixed2 = new Mixed();
+mixed2.m += 1;
 
 // accessor overrides keep the exact type — property covariance through a
 // vtable slot would be unsound, same rule as methods
@@ -130,7 +139,6 @@ new S().probe();
 // them relevant; these references are what makes them count.
 new Config();
 new Auto();
-new Mixed();
 new DogKennel();
 new WriteOnlyCell();
 new Computed();
