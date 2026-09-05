@@ -10581,6 +10581,54 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/7660-a-bound-subscribe-value-with-no-contextual-type.ts": {
+   "order": [
+    "<repo>/tests/corpus/7660-a-bound-subscribe-value-with-no-contextual-type.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/7661-a-bound-subscribe-value-handed-to-another-function.ts": {
+   "order": [
+    "<repo>/tests/corpus/7661-a-bound-subscribe-value-handed-to-another-function.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/7662-on-off-and-once-through-three-bound-values.ts": {
+   "order": [
+    "<repo>/tests/corpus/7662-on-off-and-once-through-three-bound-values.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/7663-one-bound-subscribe-value-over-three-payload-arities.ts": {
+   "order": [
+    "<repo>/tests/corpus/7663-one-bound-subscribe-value-over-three-payload-arities.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/7664-a-dyn-tuple-arm-through-an-unannotated-bound-value.ts": {
+   "order": [
+    "<repo>/tests/corpus/7664-a-dyn-tuple-arm-through-an-unannotated-bound-value.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/7665-two-unannotated-bound-values-that-erase-alike.ts": {
+   "order": [
+    "<repo>/tests/corpus/7665-two-unannotated-bound-values-that-erase-alike.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/7666-a-slot-routed-emit-supplies-what-the-key-map-declares.ts": {
+   "order": [
+    "<repo>/tests/corpus/7666-a-slot-routed-emit-supplies-what-the-key-map-declares.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/7667-a-bound-subscribe-value-with-a-run-time-event-name.ts": {
+   "order": [
+    "<repo>/tests/corpus/7667-a-bound-subscribe-value-with-a-run-time-event-name.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/767-string-literal-keys.ts": {
    "order": [
     "<repo>/tests/corpus/767-string-literal-keys.ts"
