@@ -248,11 +248,11 @@ const platform = process.platform;
 
 /** A default-built hello-world: no regex, no engine. */
 export const STATIC_CLASS_MAX =
-  platform === "linux" ? 398_656 : platform === "win32" ? 674_816 : 367_656;
+  platform === "linux" ? 400_192 : platform === "win32" ? 679_424 : 369_192;
 
 /** A program that uses regex: libregexp + libunicode, never the engine. */
 export const REGEX_CLASS_MAX =
-  platform === "linux" ? 553_704 : platform === "win32" ? 816_640 : 520_704;
+  platform === "linux" ? 554_728 : platform === "win32" ? 821_248 : 521_728;
 
 /* ── the ARMED half of the guard ───────────────────────────────────────
  *
@@ -1114,13 +1114,57 @@ export const SIZE_DRIFT_PAGE = 4_096;
  * under the anchor, which looks like agreement and is not. Before
  * believing any figure in this file, check `zig version` as well as
  * SCRIPTC_TARGET. */
-export const STATIC_CLASS_RECORDED = platform === "win32" ? 666_624 : null;
+/* 2026-09-05, the fiber-stack pool's decay (scr_async.c). The pool kept a
+ * burst's worth of idle fiber stacks for the life of the process --
+ * scr_fiber_pool_teardown runs at process exit -- which is 22.4 MiB of
+ * working set and 133.6 MiB of commit charge held after any burst that
+ * touches the 4096-entry cap, measured and tabulated at the knob's own
+ * definition. The decay is a low-water-mark trim on the loop's sleep seam,
+ * plus a cap on that sleep while the pool still has entries to free.
+ *
+ * WHAT THE BYTES BOUGHT, and both halves are named because only their SUM
+ * tripped the guard:
+ *
+ *                       recorded   BASE 958b912f   with the decay
+ *     static class       666,624       669,696         671,232
+ *     regex class        808,448       812,032         813,056
+ *
+ * The BASE column is this change's own control: scr_async.c reverted to
+ * 958b912f in an otherwise identical tree, same box, same zig. So +3,072
+ * and +3,584 were already gone before this change compiled a line, silent
+ * because each is under one SIZE_DRIFT_PAGE, and the decay's OWN cost is
+ * +1,536 and +1,024. The two are not equal, which is section rounding, not
+ * two different costs -- the source is one always-linked TU.
+ *
+ * THE PRINTF THAT WASN'T WORTH 33,280 BYTES. The first version of the stat
+ * line used fprintf("%zu"). Every other diagnostic in scr_async.c is
+ * fputs/fwrite and the only other fprintf is behind SCR_LOOP_WHY, so that
+ * one conversion was the sole printf in the always-linked runtime: it grew
+ * the static class by 33,280 bytes -- EIGHT drift pages -- for a line no
+ * default build ever prints. It is a hand-rolled decimal now. Anyone adding
+ * a diagnostic to an always-linked TU should weigh a hello-world before and
+ * after; this one was caught by the guard rather than by the author.
+ *
+ * Ceilings move by the win32 rule (RECORDED + 2 x SIZE_DRIFT_PAGE):
+ *
+ *     679,424 = 671,232 + 8,192      821,248 = 813,056 + 8,192
+ *
+ * linux and darwin cannot be weighed from this box, so theirs move by
+ * exactly what the change costs here (+1,536 static, +1,024 regex), which
+ * preserves each platform's existing headroom rather than inventing new
+ * headroom for a platform nobody measured.
+ *
+ * Measured with zig 0.16.0 (G:/zapo-work/tools/zig) and
+ * SCRIPTC_TARGET=x86_64-windows-gnu, per the trap recorded above: 0.15.2
+ * builds this same base at 649,728, ~20 KB under, and reading either
+ * column with it would invert the sign of this entry. */
+export const STATIC_CLASS_RECORDED = platform === "win32" ? 671_232 : null;
 
 /** The regex program, same run, same tree. Deliberately NOT derived from
  * the static delta - and the 2026-08-24 entry is why: that change moved the
  * two classes by -7,680 and -6,656, so deriving either from the other would
  * have been 1,024 bytes wrong. */
-export const REGEX_CLASS_RECORDED = platform === "win32" ? 808_448 : null;
+export const REGEX_CLASS_RECORDED = platform === "win32" ? 813_056 : null;
 
 /** The complaint a recorded-figure check makes, or null when the size is
  * within one page of what was recorded. A string rather than a thrown

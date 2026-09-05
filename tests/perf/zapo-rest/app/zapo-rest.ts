@@ -296,6 +296,24 @@ const store = createStore({
   },
 });
 
+function hexToBytes(hex: string): Uint8Array {
+  const out = new Uint8Array(hex.length / 2);
+  for (let i = 0; i < out.length; i += 1) {
+    out[i] = Number.parseInt(hex.substring(i * 2, i * 2 + 2), 16);
+  }
+  return out;
+}
+
+/* ZAPO_WS_URL alone is NOT enough to reach a local fake server, and that gap
+ * cost a block a day. The fake server signs its static key with an ephemeral
+ * root CA, so a client pointed at it with the PRODUCTION root still refuses
+ * the handshake -- the url override lands, the certificate check rejects, and
+ * it reads as the fake server being broken. ZAPO_WS_CA_PUB (hex, 32 bytes)
+ * and ZAPO_WS_CA_SERIAL inject that root through zapo's own testHooks, which
+ * REPLACES the trusted root rather than skipping verification: the full
+ * certificate-chain path still runs. Unset -- the shipped default and every
+ * real-WhatsApp run -- leaves the production root in place. */
+const WS_CA_PUB = envStr("ZAPO_WS_CA_PUB", "");
 const client = new WaClient({
   store: store,
   sessionId: SESSION_ID,
@@ -306,6 +324,10 @@ const client = new WaClient({
    * binary against a local fake server for verification; leave unset for real
    * WhatsApp. */
   chatSocketUrls: envStr("ZAPO_WS_URL", "") !== "" ? [envStr("ZAPO_WS_URL", "")] : undefined,
+  testHooks:
+    WS_CA_PUB !== ""
+      ? { noiseRootCa: { publicKey: hexToBytes(WS_CA_PUB), serial: envNum("ZAPO_WS_CA_SERIAL", 0) } }
+      : undefined,
 });
 
 client.on("auth_qr", (e) => {
