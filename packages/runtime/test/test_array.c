@@ -552,7 +552,29 @@ static void test_in_place_mutators(void) {
 
   /* REFERENCE elements — where the counting lives. unshift_ref takes
    * ownership like push_ref; copyWithin retains the copied run and
-   * releases the overwritten one, with the runs overlapping BOTH ways. */
+   * releases the overwritten one, with the runs overlapping BOTH ways.
+   *
+   * WHAT THESE COUNTS MEAN UNDER CONTENT INTERNING (scr_string.c). The
+   * intern table is a second OWNING reference, so "live string objects" and
+   * "live strings the program can reach" stopped being the same number. The
+   * exact counts below are the SECOND, because scr_str_live_count drains the
+   * table before answering — so "aa and bb released, cc and dd shared" still
+   * says exactly what it said, and still fails if copyWithin drops or
+   * duplicates a reference.
+   *
+   * Two independent reasons it is still an EXACT count here rather than a
+   * bound, and both are worth writing down because a later edit could break
+   * either one:
+   *   1. Nothing on this path is interned at all. The table is hooked into
+   *      scr_str_concat's copy path only, and every string here comes from
+   *      scr_str_new. An element built with `+` instead of a literal would
+   *      still count the same, by (2), but it would be a different test.
+   *   2. Even if one were, the drain makes the count independent of what the
+   *      table happens to hold — which is the property the exactness needs,
+   *      since which entries survive is a function of a hash.
+   * packages/runtime/test/test_intern.c is where the table's OWN discipline
+   * is asserted, including the gap between the drained and undrained counts
+   * that this file is deliberately blind to. */
   ScrArr *s = scr_arr_new(SCR_ELEM_STR, 0);
   scr_arr_unshift_ref(s, scr_str_new("dd", 2));
   scr_arr_unshift_ref(s, scr_str_new("cc", 2));
