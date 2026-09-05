@@ -10701,6 +10701,18 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/7760-websocket-server-frames.ts": {
+   "order": [
+    "<repo>/tests/corpus/7760-websocket-server-frames.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/7761-websocket-server-raw-client.ts": {
+   "order": [
+    "<repo>/tests/corpus/7761-websocket-server-raw-client.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/800-switch-basics.ts": {
    "order": [
     "<repo>/tests/corpus/800-switch-basics.ts"
