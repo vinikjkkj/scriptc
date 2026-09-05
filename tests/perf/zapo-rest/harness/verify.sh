@@ -5,6 +5,13 @@
 #   3. kill it, restart it on the SAME file, and show the store came back
 set -u
 EXE=${EXE:?set EXE to the built zapo-rest binary}
+# The kill below is BY IMAGE NAME, because $! under Git Bash is the MSYS pid
+# and taskkill silently matches nothing on it. That makes the image name
+# load-bearing: hardcoding "zapo-rest.exe" meant a verification run would
+# also kill a zapo-rest.exe the USER was running from another directory.
+# It is taken from $EXE, so verifying a copy under a distinct name cannot
+# reach anyone else's process.
+IMG=$(basename "$EXE")
 RUN=${RUN:-$PWD/verify-run}
 PORT=${PORT:-18933}
 TOKEN=verify-secret
@@ -87,7 +94,7 @@ echo; echo "--- killing $PID1 and WAITING for it to actually die ---"
 # `taskkill /PID $!` silently matches nothing -- which is exactly how the
 # first run of this script produced a bogus "identical row counts" result.
 # Kill by IMAGE NAME, which is unambiguous here (one binary under test).
-taskkill //F //IM zapo-rest.exe > /dev/null 2>&1
+taskkill //F //IM "$IMG" > /dev/null 2>&1
 # The previous revision of this script trusted taskkill and started run 2
 # immediately. run 1 was still listening, run 2 died with EADDRINUSE, and the
 # "after restart" counts were served by the SAME process that produced the
@@ -99,12 +106,12 @@ while [ $i -lt 60 ]; do
   if ! curl -s -m 1 $H "$B/health" > /dev/null 2>&1; then dead=yes; break; fi
   i=$((i+1))
 done
-left=$(tasklist //FI "IMAGENAME eq zapo-rest.exe" //NH 2>/dev/null | grep -c zapo-rest)
-echo "port refuses connections: $dead   zapo-rest images still running: $left"
+left=$(tasklist //FI "IMAGENAME eq $IMG" //NH 2>/dev/null | grep -c -F "$IMG")
+echo "port refuses connections: $dead   $IMG images still running: $left"
 if [ "$dead" != yes ]; then echo "ABORT: run 1 is still serving; the restart test would be a lie"; exit 1; fi
 if [ "$left" != "0" ]; then
-  echo "a zapo-rest image is still up; killing by image name"
-  taskkill //F //IM zapo-rest.exe > /dev/null 2>&1
+  echo "a $IMG image is still up; killing by image name"
+  taskkill //F //IM "$IMG" > /dev/null 2>&1
 fi
 ls -la "$RUN"/verify.sqlite* 2>/dev/null
 
@@ -121,7 +128,7 @@ cat "$RUN/counts-after.json"
 echo; echo "### /health after restart"
 curl -s $H "$B/health"
 echo
-taskkill //F //IM zapo-rest.exe > /dev/null 2>&1
+taskkill //F //IM "$IMG" > /dev/null 2>&1
 
 echo; echo "=============== DIFF ==============="
 if diff "$RUN/counts-before.json" "$RUN/counts-after.json" > /dev/null; then
