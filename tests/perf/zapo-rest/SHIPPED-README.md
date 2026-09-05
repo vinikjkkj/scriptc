@@ -1,10 +1,12 @@
 # zapo-rest
 
-A **single compiled Windows executable** that runs a real WhatsApp client, keeps
-everything in a **SQLite file**, and exposes zapo's public API as a plain-JSON
-HTTP service you can drive from `curl` or any HTTP client.
+A **single compiled Windows executable** that runs **any number of real WhatsApp
+sessions at once**, keeps them all in **one SQLite file**, and exposes zapo's
+public API as a plain-JSON HTTP service you can drive from `curl` or any HTTP
+client.
 
-No Node. No `node_modules`. No repo checkout. One `.exe` and one `.sqlite` file.
+No Node. No `node_modules`. No repo checkout. One `.exe` and one `.sqlite` file —
+however many WhatsApp accounts you put in it.
 
 ---
 
@@ -18,7 +20,8 @@ That is the whole command. On first run it will:
 
 1. create (or open) `zapo-state.sqlite` in the current directory and run its migrations,
 2. start serving on `http://127.0.0.1:8787`,
-3. connect to WhatsApp and **print a QR code string to stdout**.
+3. bring up the **default session** (`ZAPO_SESSION`, default `default`), connect it
+   to WhatsApp and **print a QR code string to stdout**.
 
 **Scan that QR with your phone** (WhatsApp → Settings → Linked devices → Link a
 device). Once paired, the credentials are written to the SQLite file and every
@@ -36,6 +39,23 @@ and the service is live from the moment it starts:
 curl -s http://127.0.0.1:8787/health
 ```
 
+### More than one WhatsApp account
+
+Add sessions at run time. Each gets its own client, its own connection to
+WhatsApp and its own QR; all of them share the one SQLite file.
+
+```sh
+curl -s -X POST 'localhost:8787/sessions/create?id=work'
+curl -s -X POST 'localhost:8787/sessions/create?id=personal'
+
+curl -s localhost:8787/sessions          # list them all
+curl -s localhost:8787/s/work/qr         # the QR for 'work'
+curl -s localhost:8787/s/personal/qr     # a different QR, same process, same file
+```
+
+Sessions are remembered: restart the executable and every session comes back,
+still paired, still separate. See "Sessions" below.
+
 ---
 
 ## Configuration
@@ -48,8 +68,8 @@ Everything is an environment variable; all have working defaults.
 | `ZAPO_REST_PORT` | `8787` | port |
 | `ZAPO_REST_TOKEN` | *(empty)* | when set, every request must carry `x-api-key: <token>` or it gets 401 |
 | `ZAPO_DB` | `zapo-state.sqlite` | the SQLite file |
-| `ZAPO_SESSION` | `default` | session id; one database file can hold several sessions |
-| `ZAPO_AUTOCONNECT` | `1` | `0` to start serving without connecting (then `POST /connect`) |
+| `ZAPO_SESSION` | `default` | the **default** session — the one an unprefixed route such as `/health` is addressed to. Other sessions live beside it in the same file. |
+| `ZAPO_AUTOCONNECT` | `1` | `0` to start serving without connecting the sessions restored at boot (then `POST /s/<id>/connect`). It does **not** gate `POST /sessions/create`, which takes its own `autoconnect` parameter. |
 | `ZAPO_EVENT_BUFFER` | `1000` | how many events `/events` and `/messages` keep in memory |
 | `ZAPO_CONNECT_TIMEOUT_MS` | `30000` | socket connect timeout |
 | `ZAPO_DEVICE_BROWSER` | `Chrome` | the device name your phone will show |
@@ -72,6 +92,17 @@ Full reference with every route, its parameters and a `curl` example:
 
 The convention is that a zapo method `client.<group>.<method>(...)` is the route
 `/<group>/<method>`. If you know zapo, you can guess the route.
+
+**Every such route is addressed to one session**, and the session is named in the
+path:
+
+```
+  /s/<sessionId>/<route>      e.g.  GET /s/work/store/threads
+  /<route>                    the same route on ZAPO_SESSION
+```
+
+An unknown session id is a clean **404**; a malformed one is a **400**. Neither
+reaches a handler, so no zapo call ever runs without a session behind it.
 
 Every route accepts **both** a query string and a JSON body; they are merged into
 one parameter bag. So a read works as a plain `GET` with query parameters, and a
@@ -107,7 +138,15 @@ curl -s 'localhost:8787/messages?since=0&limit=20'
 # every event, not just messages
 curl -s 'localhost:8787/events?since=0'
 
-# what is in the store
+# the sessions, and the same routes addressed to one of them
+curl -s localhost:8787/sessions
+curl -s 'localhost:8787/sessions?rows=1'
+curl -s localhost:8787/s/work/health
+curl -s -X POST localhost:8787/s/work/message/sendText \
+     -H 'content-type: application/json' \
+     -d '{"to":"5511999999999","text":"from the work account"}'
+
+# what is in the store -- `total` is the whole file, `session` is this session's
 curl -s localhost:8787/store/counts
 curl -s 'localhost:8787/store/threads?limit=20'
 curl -s 'localhost:8787/store/messages?thread=5511999999999@s.whatsapp.net&limit=50'
@@ -128,9 +167,9 @@ with a status:
 
 | status | meaning |
 |---|---|
-| 400 | missing required parameter, or the body is not JSON |
+| 400 | missing required parameter, the body is not JSON, or the session id is malformed |
 | 401 | `ZAPO_REST_TOKEN` set and `x-api-key` missing or wrong |
-| 404 | no such route |
+| 404 | no such route, **or no such session** |
 | 500 | zapo threw — not connected, WhatsApp refused, etc. `detail` has the message |
 | **501** | **the compiler has no static lowering for this zapo method.** `diagnostic` carries the `[SCxxxx]` code. |
 
@@ -151,6 +190,88 @@ does the same across every event type (`connection`, `receipt`, `presence`,
 `chatstate`, `call`, `group`, `newsletter`, `auth_qr`, ...).
 
 There is no webhook and no SSE stream in this build — see "Not implemented".
+
+The event ring is **per session**: `/s/work/messages` and `/s/personal/messages`
+keep separate sequence numbers, and a `seq` from one is meaningless to the other.
+
+---
+
+## Sessions
+
+One process, N WhatsApp accounts, one SQLite file, **one SQLite connection**.
+
+### The identifier
+
+A session is named by an id of **1-64 characters from `A-Za-z0-9` and `. _ -`**.
+That id is the same string the store writes into the `session_id` column of all
+21 of its domain tables, so the name a caller uses and the name the rows carry
+are one value — there is no mapping table to drift, and a row's owner is legible
+from the database with a plain `SELECT`.
+
+### The routes
+
+| route | what it does |
+|---|---|
+| `GET /sessions` | list every session: id, live or not, paired, connected, whether a QR is waiting, counters. `?rows=1` adds per-session row counts read from the database. |
+| `POST /sessions/create?id=<id>` | build a session and (unless `autoconnect=0`) start connecting it, which is what produces its QR. Also takes `label`. |
+| `POST /sessions/remove?id=<id>` | **stop the client and forget it. Every data row is KEPT.** |
+| `POST /sessions/remove?id=<id>&purge=1` | the same, and then `DELETE` every row the session owns from all 21 tables. Irreversible; it un-pairs the account. |
+| `GET /sessions/rows?id=<id>` | per-table row counts for one session, from the database. |
+| `GET /sessions/connection` | proves the one-connection claim, with a negative control (see below). |
+
+**Removal never deletes by accident.** A plain `remove` stops the client, drops
+the service's registry row, and leaves every WhatsApp credential and message row
+in place — so `POST /sessions/create?id=<same id>` afterwards resumes the same
+paired account. Deleting the data needs the explicit `purge=1`, and the response
+reports the before/after row counts per table so you can see exactly what went.
+
+### They survive a restart
+
+The set of sessions is recovered from the file, not from memory or a config: the
+service's own `zapo_rest_sessions` table, plus **every distinct `session_id`
+present in any of the 21 domain tables**. So a session whose registry row was
+removed but whose rows remain comes back, and a session that a previous build
+wrote comes back too.
+
+### One connection, one file
+
+Every session's stores go through the *same* SQLite connection.
+`openSqliteConnection` keys its process-wide connection cache on
+`driver|path|pragmas|tableNames` — **the session id is not part of that key** —
+and `BaseSqliteStore.getConnection()` is the only route a domain store has to
+SQLite, so all 15 domains of all N sessions land on one `better-sqlite3`
+`Database`.
+
+`GET /sessions/connection` demonstrates it rather than asserting it. A SQLite
+`TEMP` table is private to one connection, so the route writes a token into one
+and then reads it back through (a) a handle opened with the stores' exact
+options, which must see it, and (b) a **negative control** opened on the same
+file with a different pragma set — a genuinely separate connection, which must
+*not*. A run where both see the token is reported as `INCONCLUSIVE`, not as a
+pass.
+
+Because there is one connection and `better-sqlite3` is synchronous, two
+sessions' statements cannot interleave at all; and `runInTransaction` serialises
+transactions on that connection through an explicit promise tail
+(`connection.ts`, `wrapConnection`). Concurrency between sessions is therefore
+not a race this service has to manage.
+
+### Cross-session isolation
+
+This is the hazard that outranks everything else here: two sessions in one file
+means a query missing its `session_id` returns plausible data belonging to
+someone else. It is checked, not assumed:
+
+* all **124** SQL statements in `@zapo-js/store-sqlite` that name a
+  session-scoped table are qualified by `session_id` (the two that build their
+  `WHERE` from a variable build it as `session_id = ? AND ...`), and
+  `session_id` is in the PRIMARY KEY of every one of the 21 tables;
+* `harness/isolation.mjs` plants deliberately asymmetric rows for three session
+  ids, then compares what each session's routes return against counts read
+  **directly from the file with its own connection** — never through the API
+  that would confirm its own bug;
+* `harness/verify.sh` runs that end to end, including a session removed while
+  another keeps serving, a restart, and unknown/empty/over-long identifiers.
 
 ---
 
@@ -315,7 +436,27 @@ Verified against this exact binary:
 * the API answers over a real socket to `curl` — routing, query parameters, JSON
   bodies, the `x-api-key` gate, 400/401/404, and the 501 classifier;
 * **persistence across a restart**: the process was killed and restarted on the
-  same file and the store came back with the same row counts;
+  same file and the store came back with the same row counts — measured twice,
+  through `/store/counts` and by reading the file directly;
+* **four sessions in one file**: `harness/verify.sh` makes 59 assertions, all
+  passing, over three named sessions plus the default. Each one's reads return
+  only its own rows; a session addressed while another is mid-call is
+  unaffected; one session is removed while another keeps serving; all of them
+  come back across a restart, still separate; unknown, empty, over-long and
+  space-bearing identifiers answer 404/400 rather than crashing; and the
+  per-session row counts are read straight from the database with a second
+  connection, not through the API under test;
+* **two live WhatsApp sessions at once**: this exact binary was started, two
+  sessions created, and **both connected to `wss://web.whatsapp.com/ws/chat`
+  and were issued their own distinct pairing QR simultaneously**, in one
+  process, over one SQLite file;
+* **one connection**: `GET /sessions/connection` reported
+  `storeOptionsHandle.seesTheTempRow=true` with the different-pragma negative
+  control at `false` — so the probe discriminates, and the answer is that every
+  session's stores share one `better-sqlite3` connection;
+* **`purge=1` deletes only its own session**: the throwaway session's five rows
+  went and every other session's counts were unchanged, before and after,
+  read from the file;
 * it opens a real WebSocket to `wss://web.whatsapp.com:5222/ws/chat`, completes
   the noise handshake and is issued a QR (`harness/verify.sh` prints the run
   log);
@@ -335,9 +476,16 @@ Verified against this exact binary:
 
 **Not verified: a live WhatsApp conversation.** Pairing requires scanning the QR
 with a real phone, which only you can do. So sending and receiving against the
-real WhatsApp service has **not** been exercised end to end for this binary. The
-underlying client and store paths are the ones prior work has run compiled, but
-this specific claim is untested here and is not being asserted.
+real WhatsApp service has **not** been exercised end to end for this binary —
+for one session or for several. What *is* verified is that two sessions reach
+WhatsApp and are each issued a QR at the same time; what happens after two
+phones scan two QRs in one process is untested and is not being asserted.
+
+**Also not verified: message traffic arriving on two paired sessions at once.**
+The isolation evidence above uses rows planted directly in the database and
+credentials created through zapo's own `auth.loadOrCreateCredentials`, which
+exercises the same session-qualified store paths that inbound traffic writes
+through — but it is planted data, not received data.
 
 No test credentials are bundled and no recorded session ships with this folder.
 Your first run is the scan.
