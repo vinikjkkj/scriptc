@@ -438,10 +438,18 @@ async function route(method: string, path: string, p: Bag): Promise<unknown> {
         cacheKiB: CACHE_KB > 0 ? CACHE_KB : "sqlite default",
         ready: storeReady,
         error: storeError,
-        paired: hasCredentials,
+        /* credentials ROW present in the store -- this is what proves the
+         * session survived a restart. It is NOT "linked to a phone": that is
+         * state.registered, which stays false until the QR is scanned. */
+        hasCredentials: hasCredentials,
       },
       connection: {
-        connected: connected,
+        /* client.getState() is authoritative; lastEventStatus is what the
+         * most recent `connection` event said. They can disagree briefly --
+         * the socket opens before the event is dispatched -- so both are
+         * reported rather than one being presented as the truth. */
+        connected: client.getState().connected,
+        lastEventSaidOpen: connected,
         hasQr: currentQr !== null,
         last: lastConnectionEvent,
       },
