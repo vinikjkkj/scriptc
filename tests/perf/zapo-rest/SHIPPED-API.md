@@ -5,16 +5,89 @@ Every route answers JSON. A success is `{"ok":true,"result":...}`; a failure is
 body are accepted on **every** route and merged into one parameter bag, so any route
 can be driven with `?name=value` alone.
 
+## Addressing a session
+
+The service runs **N WhatsApp sessions in one process over one SQLite file**.
+Every route below except the five under `/sessions` is addressed to exactly one
+session, and the session is named in the **path**:
+
+```
+  /s/<sessionId>/<route>        e.g.  GET /s/alice/store/threads
+  /<route>                      the same route on ZAPO_SESSION (default: "default")
+```
+
+A `<sessionId>` is 1-64 characters from `A-Za-z0-9` and `. _ -`. It is the SAME
+string the store writes into the `session_id` column of all 21 domain tables, so
+the identity a caller uses and the identity the rows carry are one value.
+
+The `/sessions` routes are service-level and are never prefixed. Routes under a
+session id are listed once below, without the prefix.
+
 | status | meaning |
 |---|---|
 | 200 | the call ran |
-| 400 | a required parameter is missing, or the body is not JSON |
+| 400 | a required parameter is missing, the body is not JSON, or the session id is malformed |
 | 401 | `ZAPO_REST_TOKEN` is set and the `x-api-key` header does not match |
-| 404 | no such route |
+| 404 | no such route, or no such session |
 | 500 | zapo threw (not connected, WhatsApp refused, …) — `detail` carries the message |
 | **501** | **the compiler has no static lowering for this zapo method.** `diagnostic` carries the `[SCxxxx]` code. See "Unimplemented" at the end. |
 
-Routes in this build: **189**, covering **170 of 210** public members of zapo's client surface.
+Routes in this build: **194** — 5 service-level (`/sessions...`) plus 189 addressed to a session, covering **170 of 210** public members of zapo's client surface.
+
+## sessions
+
+### `GET /sessions`
+
+| parameter | type | required |
+|---|---|---|
+| `rows` | boolean | no |
+
+```sh
+curl -s 'http://127.0.0.1:8787/sessions?rows=OPTIONAL' -H 'x-api-key: $ZAPO_REST_TOKEN'
+```
+
+### `GET /sessions/connection`
+
+No parameters.
+
+```sh
+curl -s 'http://127.0.0.1:8787/sessions/connection' -H 'x-api-key: $ZAPO_REST_TOKEN'
+```
+
+### `POST /sessions/create`
+
+| parameter | type | required |
+|---|---|---|
+| `id` | string | yes |
+| `autoconnect` | boolean | no |
+| `label` | string | no |
+
+```sh
+curl -s -X POST 'http://127.0.0.1:8787/sessions/create' -H 'x-api-key: $ZAPO_REST_TOKEN' \
+       -H 'content-type: application/json' -d '{"id": "VALUE", "autoconnect": true, "label": "VALUE"}'
+```
+
+### `POST /sessions/remove`
+
+| parameter | type | required |
+|---|---|---|
+| `id` | string | yes |
+| `purge` | boolean | no |
+
+```sh
+curl -s -X POST 'http://127.0.0.1:8787/sessions/remove' -H 'x-api-key: $ZAPO_REST_TOKEN' \
+       -H 'content-type: application/json' -d '{"id": "VALUE", "purge": true}'
+```
+
+### `GET /sessions/rows`
+
+| parameter | type | required |
+|---|---|---|
+| `id` | string | yes |
+
+```sh
+curl -s 'http://127.0.0.1:8787/sessions/rows?id=VALUE' -H 'x-api-key: $ZAPO_REST_TOKEN'
+```
 
 ## service
 

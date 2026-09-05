@@ -1,8 +1,14 @@
 # zapo-rest — a compiled WhatsApp REST service over the SQLite store
 
 `app/zapo-rest.ts` is one entry program that compiles to a single native
-executable which runs a real zapo WhatsApp client, persists to a SQLite file,
-and serves zapo's public API as plain JSON over HTTP.
+executable which runs **N real zapo WhatsApp clients at once**, persists them all
+to **one SQLite file over one SQLite connection**, and serves zapo's public API
+as plain JSON over HTTP.
+
+Every zapo route is addressed to a session as `/s/<sessionId>/<route>`; an
+unprefixed `/<route>` means `ZAPO_SESSION`. Five service-level routes under
+`/sessions` list, create and remove them. The session id is the same string the
+store puts in the `session_id` column of its 21 domain tables.
 
 It exists here so the artifact is reproducible: the shipped folder is just the
 built `.exe` plus generated docs.
@@ -64,7 +70,8 @@ provenance: 40 alias key(s) are spelled by more than one mapped package ...
 | `harness/surface.mjs` | enumerates zapo's public surface through the TypeScript checker (`WaClient` plus every coordinator it exposes) and writes `surface.txt` |
 | `harness/coverage.mjs` | cross-references that surface against the routes the entry actually serves; writes `coverage.json` and prints the implemented/unimplemented split |
 | `harness/gen-api-md.mjs` | generates `API.md`, taking each route's parameters from the handler body so the doc cannot drift from the code |
-| `harness/verify.sh` | starts the binary on a fresh store, exercises the API with `curl`, kills it, restarts on the same file and diffs the row counts |
+| `harness/verify.sh` | starts the binary on a fresh store, exercises the API with `curl`, drives the **multi-session isolation probe**, kills it, restarts on the same file and diffs the row counts — both through the API and straight from the database |
+| `harness/isolation.mjs` | the cross-session instrument: plants asymmetric rows for three session ids on **its own** connection and reports/asserts per-session, per-table counts read directly from the file. Aborts rather than print a reassuring table of zeroes. |
 | `harness/scan.sh` | the 100%-C proof, armed: engine markers beside a `--dynamic` control and beside positive controls that must be non-zero |
 | `harness/traps.sh` | counts `[SCxxxx]` deferred-refusal sites and trap sites across every emitted TU |
 
