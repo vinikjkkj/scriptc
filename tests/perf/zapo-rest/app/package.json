@@ -1,0 +1,17 @@
+{
+  "name": "zapo-rest-driver",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "zapo-js": "1.6.2",
+    "argo-codec": "^0.2.1",
+    "ws": "^8.18.0",
+    "better-sqlite3": "*",
+    "@zapo-js/store-sqlite": "1.0.2"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "@types/ws": "^8.18.1",
+    "typescript": "^5.9.0"
+  }
+}
