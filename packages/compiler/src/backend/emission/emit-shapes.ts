@@ -484,9 +484,12 @@ export interface ClassMeta {
    * synthesized thunk `%C.m%vt` when the frontend made one — the override
    * WIDENED (trailing optional parameters the slot does not carry, or a
    * return the slot's `unknown` boxes), so the implementation is callable
-   * at the slot but not spelled at it — and the implementation itself
-   * otherwise. Every candidate is spelled at the slot's signature by
-   * construction, so the slot's own C type may be read off either. */
+   * at the slot but not spelled at it, or the method is ASYNC (its `%C.m`
+   * is the fiber body: it returns the promise's INNER type and runs on the
+   * caller's stack, where the slot must hand back the promise the spawn
+   * wrapper answers) — and the implementation itself otherwise. Every
+   * candidate is spelled at the slot's signature by construction, so the
+   * slot's own C type may be read off either. */
   export function vtTargetIr(E: CEmitter, className: string, method: string): string {
     const thunk = `%${className}.${method}%vt`;
     return E.fnByName.has(thunk) ? thunk : `%${className}.${method}`;
