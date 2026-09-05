@@ -5,7 +5,7 @@
  * hierarchy registration. */
 import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
-import { BOOL, CLASS_PROPS_FIELD as IR_CLASS_PROPS_FIELD, DYN, F64, bytesOf, IrClassDef, IrExpr, IrFunction, IrLocal, IrParam, IrStmt, IrType, JSVAL, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, STRING, SrcLoc, UNDEFINED_T, URL_T, VOID, arrayOf, isRefCounted, isSupportedMapKey, isSupportedMapValue, isSupportedSetElem, isUnitType, mapOf, setOf, typeEquals } from "../../ir/nodes.js";
+import { BOOL, CLASS_PROPS_FIELD as IR_CLASS_PROPS_FIELD, DYN, F64, bytesOf, canConvertToDyn, IrClassDef, IrExpr, IrFunction, IrLocal, IrParam, IrStmt, IrType, JSVAL, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, STRING, SrcLoc, UNDEFINED_T, URL_T, VOID, arrayOf, isRefCounted, isSupportedMapKey, isSupportedMapValue, isSupportedSetElem, isUnitType, mapOf, setOf, typeEquals } from "../../ir/nodes.js";
 import { lowerAbortControllerNew } from "./lower-abort.js";
 import { MAX_GENERIC_INSTANCES, bindingNeverReassigned, genericCallInstance, implicitAnyParamSymbolsOf, implicitCallInstance, implicitMonoFile, omittedArgFor, type GenericFnInfo, type ParamShape } from "./lower-calls.js";
 import { isGenericCallableMemberType, runtimeStreamClassOf, typeKey } from "../types.js";
@@ -37,6 +37,17 @@ const WEAK_COLLECTION_HINTS = {
   WeakSet: "weak collections observe garbage collection, which reference counting never exposes — a strong Set behaves identically in-language: use Set",
 } as const;
 
+/** One entry of ClassInfo.methods — a method's ABI signature as the class
+ * declares it. Named because the vtable-slot rules compare two of them
+ * (the slot's and an override's) and needed a spelling to pass around. */
+export interface MethodSig {
+  params: ParamShape[];
+  ret: IrType;
+  abstract?: true;
+  async?: true;
+  gen?: { yieldT: IrType; nextT: IrType };
+}
+
 export interface ClassInfo {
   def: IrClassDef;
   /** ALL fields visible on instances — the inherited ones included — for
@@ -58,7 +69,7 @@ export interface ClassInfo {
    * no-dynamic-dispatch semantics by construction). A `gen` entry is a
    * #private GENERATOR method: the body is a generator IrFunction and
    * calls enter through its gen-spawn wrapper. */
-  methods: Map<string, { params: ParamShape[]; ret: IrType; abstract?: true; async?: true; gen?: { yieldT: IrType; nextT: IrType } }>;
+  methods: Map<string, MethodSig>;
   /** OWN GENERIC instance methods (own type parameters — `m<T>(x: T)`),
    * monomorphized per call site like top-level generic functions: instance
    * `n` is the module function `%C.m%n` taking `this` as param 0. They
@@ -2559,6 +2570,22 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
           // ABSTRACT-typed receivers have no slot to read and keep a
           // per-site fence.
           if (modifiers?.some((m) => m.kind === ts.SyntaxKind.AbstractKeyword)) continue;
+          // A `declare` property is TYPE-ONLY: TypeScript emits nothing
+          // for it — no [[Define]], no initializer, not even the
+          // `undefined` write a bare `x;` performs. It exists to re-state
+          // the type of a property some OTHER mechanism supplies (a base
+          // class's field, a constructor assignment, a mixin). So it
+          // contributes no slot, no layout position, and — the case that
+          // brought it here — no field RESET: `declare cause: Error` over
+          // an inherited slot leaves the inherited value exactly where it
+          // was, which is why the bare-redeclare fence below must not see
+          // it (verified against node: `class B extends A { declare x:
+          // number }` reads A's value, where `class B extends A { x:
+          // number }` reads undefined). When no inherited slot answers
+          // the name there is simply no property, and every read fences
+          // at its own site — the honest outcome, since Node would answer
+          // undefined at a type that cannot hold it.
+          if (modifiers?.some((m) => m.kind === ts.SyntaxKind.DeclareKeyword)) continue;
           if (modifiers?.some((m) => m.kind === ts.SyntaxKind.AccessorKeyword)) {
             // `accessor x = 1` desugars (in JS) to a private slot plus a
             // get/set pair — declare the field and accessors explicitly.
@@ -3044,16 +3071,19 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
               `overriding the builtin Error method '${mName}'`,
             );
           }
-          if (
-            overridden &&
-            (overridden.sig.params.length !== shapes.length ||
-              !overridden.sig.params.every((p, i) => typeEquals(p.type, shapes[i]!.type)) ||
-              !typeEquals(overridden.sig.ret, ft.ret))
-          ) {
+          // The signature the VTABLE SLOT is spelled at is the ROOT-most
+          // declaration's, not the nearest one's — under exactness they are
+          // the same class, and where a middle class widened they are not.
+          // Fitting the override to the slot is what makes a vtable entry
+          // possible; whether a call at some INTERMEDIATE static type can
+          // still dispatch is the call site's question (lowerObjectMethodCall
+          // fences a virtual call whose static view disagrees with the slot).
+          const slotSig = slotMethodOn(L, base, mName);
+          if (slotSig && overrideSlotFit(L, slotSig.sig, { params: shapes, ret: ft.ret }) === null) {
             L.unsupported(
               "SC1090",
               member.name,
-              "overriding a method with a different signature (parameter and return types must match the base declaration exactly)",
+              "overriding a method with a different signature (parameters must match the base declaration exactly, except for trailing optional ones the override adds; the return type must match, or be a value the base's 'unknown' can hold)",
             );
           }
           const asyncMember =
@@ -5246,6 +5276,185 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
     return null;
   }
 
+/** The ROOT-MOST declaration of `name` at/above `info` — the one that owns
+   * the VTABLE SLOT (the backend's collectSlots walks down and stops at the
+   * first class whose chain declares it), and therefore the one signature
+   * every vtable entry must be spelled at. Identical to findMethodOn under
+   * exactness; they diverge only where a middle class widens (an extra
+   * trailing optional parameter, a covariant return), which is exactly the
+   * case the virtual-call guard has to see. */
+  export function slotMethodOn(L: Lowerer, info: ClassInfo | null,
+    name: string,): { declarer: ClassInfo; sig: MethodSig } | null {
+    let found: { declarer: ClassInfo; sig: MethodSig } | null = null;
+    for (let c = info; c; c = c.base) {
+      const sig = c.methods.get(name);
+      if (sig) found = { declarer: c, sig };
+    }
+    return found;
+  }
+
+/** Two method signatures with the SAME ABI: parameter types positionally
+   * and the return type. Modes are deliberately excluded — call sites
+   * complete against the static receiver's shape, so `m(x?: number)` and
+   * `m(x: number | undefined)` interchange soundly. */
+  export function methodAbiEquals(a: MethodSig, b: MethodSig): boolean {
+    return a.params.length === b.params.length &&
+      a.params.every((p, i) => typeEquals(p.type, b.params[i]!.type)) &&
+      typeEquals(a.ret, b.ret);
+  }
+
+/** True when a VIRTUAL dispatch at static class `info` is spelled at the
+ * vtable slot's own signature — the precondition every virtualCall needs.
+ *
+ * A call completes against the NEAREST declaration at/above the receiver's
+ * static class, while the vtable slot is spelled at the ROOT-most one.
+ * Under override exactness those are the same signature and this is always
+ * true. It goes false exactly where a MIDDLE class widened (it appended a
+ * trailing optional parameter, or narrowed its return under the root's
+ * `unknown`) and something below it overrides again: the call site would
+ * push an argument the slot has no place for, or read a dyn as a record.
+ * Such a call fences — the same call spelled at the declaring class, or at
+ * the exact subclass (where it devirtualizes), compiles. */
+  export function virtualViewFitsSlot(L: Lowerer, info: ClassInfo, method: string): boolean {
+    const near = findMethodOn(L, info, method);
+    const slot = slotMethodOn(L, info, method);
+    if (!near || !slot) return true;
+    return near.declarer === slot.declarer || methodAbiEquals(near.sig, slot.sig);
+  }
+
+/** The virtual-dispatch guard as a FENCE: nothing when the static view
+ * agrees with the slot, an SC1090 at `blame` when it does not. */
+  export function requireVirtualSlotFit(L: Lowerer, info: ClassInfo, method: string,
+    blame: ts.Node,): void {
+    if (virtualViewFitsSlot(L, info, method)) return;
+    L.unsupported(
+      "SC1090",
+      blame,
+      `dispatching '${method}' through a receiver typed at '${info.def.name.replace(/^%/, "")}' (a class between it and the vtable slot widened the signature — call it at the class that declares the slot, or at a receiver whose exact subclass is known)`,
+    );
+  }
+
+/** How an override's own signature relates to the VTABLE SLOT's.
+ *
+ * "exact" — the historical rule: identical ABI, so the implementation IS
+ * the vtable entry and nothing is synthesized.
+ *
+ * "widened" — the implementation is still CALLABLE AT THE SLOT, but not
+ * spelled at it: it may append TRAILING OPTIONAL parameters the slot does
+ * not carry, and may return a value the slot's `unknown` boxes. Neither
+ * can be reinterpreted (a C call through the slot's function-pointer type
+ * would leave the extra parameter holding whatever the register happened
+ * to carry, and would read a record pointer as a dyn), so the vtable entry
+ * becomes a synthesized THUNK — `%C.m%vt`, spelled exactly at the slot,
+ * which fills the missing arguments with `undefined` (what Node hands an
+ * omitted optional) and dynFroms the result. Direct and `super` calls keep
+ * targeting `%C.m` at its own signature and are untouched.
+ *
+ * null — no honest vtable entry exists; the caller fences.
+ *
+ * Only the LEADING parameters are compared, and by ABI type only: call
+ * sites complete against the static receiver's shape, so `m(x?: number)`
+ * and `m(x: number | undefined)` interchange soundly. Parameter
+ * CONTRAVARIANCE is still refused outright — tsc's method bivariance would
+ * let a narrowed parameter through, and the override would then read a
+ * base instance's fields out of bounds. */
+  export function overrideSlotFit(L: Lowerer, slot: MethodSig,
+    own: { params: ParamShape[]; ret: IrType },): "exact" | "widened" | null {
+    // A REST parameter on either side puts the argument list itself in the
+    // body's hands (`arguments`, a packed array): dropping or inventing a
+    // trailing argument would then be observable, so those keep exactness.
+    const packed = (p: ParamShape): boolean =>
+      p.mode === "rest" || p.mode === "dynRest" || p.mode === "islandRest";
+    if (slot.params.some(packed) || own.params.some(packed)) {
+      return methodAbiEquals(slot, { params: own.params, ret: own.ret }) ? "exact" : null;
+    }
+    const shared = Math.min(slot.params.length, own.params.length);
+    for (let i = 0; i < shared; i++) {
+      if (!typeEquals(slot.params[i]!.type, own.params[i]!.type)) return null;
+    }
+    // Parameters the OVERRIDE adds must be OMITTABLE and must have an
+    // absent value the thunk can pass. A required extra parameter has no
+    // honest value at a slot-typed call, and a slot type with no undefined
+    // arm (omittedArgFor answers null) cannot represent "not supplied".
+    //
+    // Parameters the override DROPS need nothing: a JS function ignores
+    // arguments past its declared list, so the thunk simply does not
+    // forward them — which is how bson's `MinKey.inspect()` implements
+    // `abstract inspect(depth?, options?, inspect?)`.
+    for (const p of own.params.slice(shared)) {
+      if (p.mode !== "omittable") return null;
+      if (omittedArgFor(L, p.type, { file: "<synthetic>", start: 0, end: 0 }) === null) return null;
+    }
+    const arityExact = own.params.length === slot.params.length;
+    const retExact = typeEquals(slot.ret, own.ret);
+    // COVARIANT return, and only into the slot's `unknown`: the slot hands
+    // its callers a dyn, which is exactly what a base-typed reader of an
+    // `unknown`-returning method already gets in Node. A narrower slot
+    // return has no such widening (there is no representation both the
+    // slot's callers and the override's callers can read).
+    const retWidened = !retExact && slot.ret.kind === "dyn" && own.ret.kind !== "dyn" &&
+      own.ret.kind !== "void" &&
+      canConvertToDyn(own.ret, (id) => L.shapes.get(id), (id) => L.unions.get(id));
+    if (!retExact && !retWidened) return null;
+    return retExact && arityExact ? "exact" : "widened";
+  }
+
+/** The synthesized VTABLE THUNK of a widened override — `%C.m%vt`, spelled
+ * at the slot's signature. Body: one call of `%C.m` with the slot's own
+ * arguments plus an `undefined` for each parameter only the override
+ * declares, its result dynFrom'd when the slot returns `unknown`.
+ *
+ * The thunk is a UNIT registered beside the implementation and reached by
+ * the same edge (discover's `%vt` propagation), so it exists exactly when
+ * `%C.m` does — a vtable entry can never point at a pruned function. */
+  export function vtThunkFn(L: Lowerer, info: ClassInfo, mName: string): IrFunction | null {
+    const className = info.def.name;
+    const own = info.methods.get(mName);
+    const slot = slotMethodOn(L, info.base, mName);
+    if (!own || !slot) return null;
+    if (overrideSlotFit(L, slot.sig, own) !== "widened") return null;
+    const loc = info.decl ? locOf(info.decl) : { file: "<synthetic>", start: 0, end: 0 };
+    const thisType: IrType = { kind: "object", className };
+    const locals: IrLocal[] = [{ id: "this.0", name: "this", type: thisType, mutable: false }];
+    slot.sig.params.forEach((p, i) => {
+      locals.push({ id: `a${i}.0`, name: `a${i}`, type: p.type, mutable: false });
+    });
+    // `this`, then one argument per parameter the IMPLEMENTATION declares:
+    // the slot's own local where it has one, the absent-argument value
+    // where the override added a trailing optional. Slot parameters the
+    // override does not declare are simply not forwarded — JS ignores
+    // arguments past a function's list.
+    const args: IrExpr[] = [{ kind: "varRef", localId: locals[0]!.id, type: locals[0]!.type, loc }];
+    own.params.forEach((p, i) => {
+      const l = locals[i + 1];
+      args.push(l ? { kind: "varRef", localId: l.id, type: l.type, loc } : omittedArgFor(L, p.type, loc)!);
+    });
+    const call: IrExpr = {
+      kind: "call",
+      callee: `%${className}.${mName}`,
+      args,
+      type: own.ret,
+      loc,
+    };
+    const value: IrExpr = typeEquals(slot.sig.ret, own.ret)
+      ? call
+      : { kind: "dynFrom", value: call, type: DYN, loc };
+    return {
+      name: `%${className}.${mName}%vt`,
+      params: locals.map((l) => ({ localId: l.id, name: l.name, type: l.type })),
+      returnType: slot.sig.ret,
+      locals,
+      // A void slot (only the parameter list widened) has no value to
+      // hand back — the call IS the whole body.
+      body: [
+        slot.sig.ret.kind === "void"
+          ? { kind: "exprStmt", expr: value, loc }
+          : { kind: "return", value, loc },
+      ],
+      loc,
+    };
+  }
+
 /** True when `sub` is a STRICT descendant of `sup` in the class graph. */
   export function isSubclassOf(L: Lowerer, sub: string, sup: string): boolean {
     for (let c = L.classes.get(sub)?.base ?? null; c; c = c.base) {
@@ -5512,6 +5721,18 @@ export function lowerClassMembers(L: Lowerer, info: ClassInfo): IrFunction[] {
     }
     for (const prop of info.throwingSetters) {
       if (always || L.wantBody(`%${className}.set:${prop}`)) out.push(L.throwingSetterFn(info, prop));
+    }
+    // VTABLE THUNKS of this class's WIDENED overrides. One per method whose
+    // own signature is callable at the slot but not spelled at it; the
+    // synthesis is pure (it reads the collected signatures, never a body),
+    // so it runs off `info.methods` and covers declared and prototype-class
+    // methods alike. Gated on the implementation's own reachability — the
+    // thunk exists exactly when `%C.m` does, which is what keeps a vtable
+    // entry from pointing at a stripped function.
+    for (const mName of info.methods.keys()) {
+      if (!always && !L.wantBody(`%${className}.${mName}`)) continue;
+      const thunk = vtThunkFn(L, info, mName);
+      if (thunk) out.push(thunk);
     }
     return out;
   }
