@@ -1,0 +1,6 @@
+a-subscribe-slot-whose-event-map-has-an-unspellable-handler.ts:45:24 - error SC1090: the EventEmitter member 'on' as a VALUE (it is the runtime's, and every call compiles against a statically known event name — each event has its own payload tuple, so no single function value exists to bind or pass; call 'on' directly, or wrap it in an arrow that names ONE event LITERALLY — a generic wrapper taking the name as a type parameter does NOT qualify: the erased name is not a literal and the body refuses again with 'emit with a non-literal event name') is not supported yet
+
+  44 | const client: Client = new ClientImpl();
+  45 | const ctx: Ctx = { on: client.on.bind(client) };
+     |                        ^~~~~~~~~
+  46 | ctx.on("ok", (e: { readonly n: number }): void => {
