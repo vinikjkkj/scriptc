@@ -133,6 +133,9 @@ is enforceable.
 | `harness/isolation.mjs` | the cross-session instrument: plants asymmetric rows for three session ids on **its own** connection and reports/asserts per-session, per-table counts read directly from the file. Aborts rather than print a reassuring table of zeroes. |
 | `harness/scan.sh` | the 100%-C proof, armed: engine markers beside a `--dynamic` control and beside positive controls that must be non-zero |
 | `harness/traps.sh` | counts `[SCxxxx]` deferred-refusal sites and trap sites across every emitted TU |
+| `harness/memrig-report.mjs` | the memory time series of one memrig run: presync, peak, settled, +30 s, +60 s, in both working set and private commit |
+| `harness/memrig-rows.mjs` | row counts and history-sync integrity for a run's store — what a streaming or serialising change has to leave untouched |
+| `harness/memrig-throughput.mjs` | what a sync cost in wall time, and whether the `progress` a consumer sees was monotonic |
 
 Run `surface.mjs` and `coverage.mjs` from inside `app/` (they need its
 `node_modules` for `typescript` and the zapo types).
@@ -166,3 +169,148 @@ This is deliberately **not** a corpus program: it would go red. It is the
 evidence for the finding. The neighbouring stance — a twin-*less* `declare enum`
 throwing, matching Node — is already pinned by `tests/corpus/1832-enum-modules`.
 The twin-backed fold at `lower-enums.ts:138` has no test at all.
+
+## The peak of a history sync — measured, and where it comes from
+
+A WhatsApp history sync is the largest single thing this binary does to memory,
+and the peak is what sets everything after it: a separate measurement found the
+process settles at a fixed fraction of the transient climb no matter which knob
+you turn, so the climb is the only lever.
+
+Driven with **19,200 messages in 8 chunks** (`CHUNKS=8 CONVS=400 MSGS=6
+TEXTLEN=300`, about 6.0 MB of message text) from a 33 MiB presync baseline, the
+shipped binary reaches **211 MiB working set / 582 MiB private commit** and
+settles at 147 MiB. That is **30× the payload resident and 96× committed** —
+about 8.9 KiB of peak for every 320-byte message.
+
+### It is chunk concurrency, not chunk size
+
+`WaClientFactory` dispatches incoming stanzas fire-and-forget —
+
+```ts
+emitIncomingMessage: (event) => {
+    void runtime.handleIncomingMessageEvent(event).catch(...)
+}
+```
+
+— so nothing serialises `runHistorySyncNotification`. Every chunk WhatsApp
+pushes decodes and persists **at the same time**, and the peak is the whole
+sync rather than one chunk. Holding the total at 19,200 messages and varying
+only how it is chunked shows it directly:
+
+| chunking | peak WS | peak private |
+|---|---|---|
+| 1 chunk × 3200 conversations | 214 MiB | 282 MiB |
+| 8 chunks × 400 | 210 MiB | 582 MiB |
+| 32 chunks × 100 | 316 MiB | 1172 MiB |
+
+Resident bytes are flat from 1 to 8 chunks — eight chunks each holding an
+eighth of the sync cost the same as one chunk holding all of it, which is what
+"all of them are live at once" looks like. Commit, on the other hand, scales
+with the chunk **count**: each concurrent decode pays its own allocator
+reservation, roughly 30–40 MiB per chunk in flight. **Cutting a sync into more,
+smaller chunks makes this worse, not better.**
+
+### What the bytes are
+
+Holding the message count fixed and varying only the body length (`TEXTLEN`
+30 / 300 / 900, peak WS 201 / 210 / 282 MiB) gives 5.1 MiB of peak per MiB of
+message text and a **166 MiB intercept at zero text**. So of the ~178 MiB
+climb, roughly **84% is per-message structure and 16% is the message bodies**.
+The compressed blob and the inflated buffer together cannot account for more
+than ~10 MiB of it: dropping the text tenfold removed 4.9 MiB of payload and
+only 9.9 MiB of peak. Varying conversations against messages per conversation
+at a fixed message count (2400×1 → 201 MiB, 400×6 → 210 MiB, 100×24 → 255 MiB)
+says conversations are not the term either.
+
+The dominant term is the decoded protobuf graph plus the per-message re-encode
+`proto.Message.encode(webMsg.message).finish()` and the queued row it produces,
+multiplied by the number of chunks in flight.
+
+### Serialising the chunks — measured
+
+Gating `runHistorySyncNotification` on a one-chunk-at-a-time promise, measured
+on the same binary with the gate as an env knob so both arms are the same
+executable:
+
+| | peak WS | peak private | settled | +60 s | sync wall time |
+|---|---|---|---|---|---|
+| 19,200 msgs, as shipped | 211.05 / 210.91 MiB | 582.41 / 582.57 MiB | 146.87 / 146.02 | same | 11.87 / 10.02 s |
+| 19,200 msgs, serialised | **79.22 / 78.64 MiB** | **144.25 / 144.51 MiB** | 76.17 / 75.64 | same | **5.20 / 4.30 s** |
+| 38,400 msgs, as shipped | 265.80 / 265.62 MiB | 546.34 / 546.27 MiB | 175.30 / 175.99 | same | 19.15 / 23.48 s |
+| 38,400 msgs, serialised | **107.16 / 107.54 MiB** | **173.82 / 175.03 MiB** | 95.70 / 96.27 | same | **15.09 / 11.21 s** |
+
+Both numbers in each cell are the two halves of an A/A pair. **−62% peak
+working set, −75% peak commit at 19,200 messages; −60% and −68% at 38,400** —
+and the sync finishes *faster*, not slower, because eight concurrent decodes
+thrash where one does not.
+
+Releasing each conversation's decoded messages as they are written is a second,
+independent change; on its own it moves nothing (217 MiB, inside the spread of
+the unserialised arm) because the other seven chunks still hold their graphs.
+It only becomes visible once the chunks are serialised.
+
+Row counts are **identical**, not close, across every arm at both sizes:
+19,200 / 38,400 history messages, 3,200 / 6,400 threads, the same
+`SUM(length(message_bytes))` to the byte, no duplicate ids, no null bodies, no
+orphan rows, `PRAGMA integrity_check` ok.
+
+### The A/A floor, and a defect it exposed
+
+Four runs of the shipped binary at the same workload give peak working sets of
+210.82, 210.82, 211.44 and **247.16** MiB. The first three are a 0.29% spread;
+the fourth is a different mode of the same code, and it is the run in which the
+`history_sync_chunk` events arrived **out of order**:
+
+```
+progress [13,25,38,50,63,75,88,100]   monotonic     3 of 4 runs
+progress [13,38,50,63,75,88,100,25]   NOT monotonic 1 of 4 runs
+```
+
+A consumer polling `/events` in that run sees progress reach 100 and then fall
+back to 25, and 25 is the last value it ever sees. This is the concurrent path,
+not a rig artefact — chunk 2 simply finished after chunk 8. It happened in 2 of
+7 unserialised runs and in **0 of 4** serialised ones, where completion order is
+arrival order by construction. So quote a per-arm floor that includes both
+modes (17% on peak WS) unless the arm is serialised, in which case it is under
+1%.
+
+### A chunk that dies mid-write
+
+The receipt that tells the phone a chunk is done (`onProcessed`) is sent only
+after that chunk's writes are flushed, and every store write is
+`INSERT … ON CONFLICT(session_id, message_id) DO UPDATE SET …`. So an
+interrupted chunk is simply not acked and is resent, and re-applying it is a
+no-op for the rows that already landed. Measured by SIGKILLing the binary two
+seconds into a sync and re-running the same payload against the same file:
+
+| | rows after the kill | after the resync |
+|---|---|---|
+| serialised | 4,800 messages / 800 threads — exactly two whole chunks | 24,000 = 4,800 + 19,200 |
+| as shipped | 2,400 messages / 401 threads — partial across chunks | 21,600 = 2,400 + 19,200 |
+
+`integrity_check` ok, no duplicate ids and no null bodies in either partial
+store. The resync adds its full 19,200 (the rig mints fresh message ids each
+run, so the totals add) while threads coalesce to exactly 3,200 — the upsert
+merging as it should. Note that the store has **no chunk-level atomicity today
+and does not want any**: `upsertBatch` commits ≤250 rows per transaction on the
+write-behind queue's own schedule, which has never lined up with chunk
+boundaries. Serialising the chunks does not change that; it only makes the
+partial store land on a chunk boundary more often.
+
+### Running it
+
+The rig is `packages/fake-server/memrig.ts` in the zapo checkout: it drives this
+binary through pairing and the whole post-login sequence with no phone, and
+samples the child's `WorkingSet64`/`PrivateMemorySize64` kernel-side. The three
+scripts here read what it leaves behind, and every one of them takes the run
+directory as an argument and exits 2 when it cannot look — a hardcoded run root
+that has moved prints a clean table of zeroes and is believed.
+
+```sh
+CHUNKS=8 CONVS=400 MSGS=6 TEXTLEN=300 IDLE_S=60 \
+  node --import tsx memrig.ts <exe> <tag>
+node harness/memrig-report.mjs     <runRoot> <tag>     # presync/peak/settled/+30/+60
+node harness/memrig-rows.mjs       <runRoot> <tag>...  # row counts and integrity
+node harness/memrig-throughput.mjs <runRoot> <tag>...  # wall time and progress order
+```

@@ -1,0 +1,94 @@
+From: scriptc tests/perf/zapo-rest
+Subject: serialise history-sync chunk processing
+
+zapo-js v1.6.2, commit 250f9af5229a545eec28ddbd3e8774a397cdb0bb.
+
+Why, and what it is worth, is in tests/perf/zapo-rest/README.md under
+"The peak of a history sync". In one line: nothing serialises
+runHistorySyncNotification, so a sync's peak is the whole sync and not one
+chunk, and the fix is a five-line promise gate that costs no throughput.
+
+The one risk this carries: the hist_sync receipt for chunk N is now sent after
+chunks 1..N-1 have been written, so a phone whose resend timer is shorter than
+the serialised backlog would resend. Measured backlog for a 19,200-message sync
+is 4.6 s end to end.
+
+---
+--- a/src/client/WaClient.ts
++++ b/src/client/WaClient.ts
+@@ -70,12 +70,24 @@
+     private readonly mediaTransfer!: WaMediaTransferClient
+     private readonly writeBehind!: WriteBehindPersistence
+     private connectPromise: Promise<void> | null = null
+     private acceptingIncomingEvents = true
+     private activeIncomingHandlers = 0
+     private readonly incomingHandlersDrainedWaiters: Array<() => void> = []
++    /* One history-sync chunk at a time. The stanza pipeline dispatches incoming
++     * messages fire-and-forget (`void runtime.handleIncomingMessageEvent(event)`
++     * in WaClientFactory), so without this gate every chunk WhatsApp pushes
++     * decodes and persists concurrently and the process's peak is the whole
++     * sync rather than one chunk. Measured on the compiled REST service at
++     * 19,200 messages in 8 chunks: 211 -> 79 MiB peak working set, 582 -> 144
++     * MiB peak private commit, and the sync finishes in 4.6 s instead of 11.9 s
++     * because eight concurrent decodes thrash where one does not. It also makes
++     * the `history_sync_chunk` events arrive in chunk order, which the
++     * concurrent path does not: 2 of 7 unserialised runs ended with a final
++     * reported `progress` of 25 after having already reported 100. */
++    private historySyncChunkGate: Promise<void> = Promise.resolve()
+     private disposePlugins: (() => Promise<void>) | null = null
+     private readonly pluginInstallInput!: WaClientPluginInstallInput
+ 
+     /**
+      * @param options Client configuration (store, transport, addons, history...).
+      * @param logger  Optional structured logger. Defaults to a `ConsoleLogger('info')`.
+@@ -350,26 +362,36 @@
+                                   })
+                               }
+                           }
+                         : undefined
+ 
+                 if (this.options.history?.enabled !== false) {
+-                    await runHistorySyncNotification(
+-                        {
+-                            logger: this.logger,
+-                            mediaTransfer: this.mediaTransfer,
+-                            writeBehind: this.writeBehind,
+-                            emitEvent: this.emit.bind(this),
+-                            onPrivacyTokens: (conversations) =>
+-                                this.deps.trustedContactToken.hydrateFromHistorySync(conversations),
+-                            onNctSalt: (salt) =>
+-                                this.deps.trustedContactToken.hydrateNctSaltFromHistorySync(salt),
+-                            onProcessed: sendHistSyncReceipt
+-                        },
+-                        protocolMessage.historySyncNotification
+-                    )
++                    const previousChunk = this.historySyncChunkGate
++                    let releaseChunk: () => void = () => {}
++                    this.historySyncChunkGate = new Promise<void>((resolve) => {
++                        releaseChunk = resolve
++                    })
++                    await previousChunk
++                    try {
++                        await runHistorySyncNotification(
++                            {
++                                logger: this.logger,
++                                mediaTransfer: this.mediaTransfer,
++                                writeBehind: this.writeBehind,
++                                emitEvent: this.emit.bind(this),
++                                onPrivacyTokens: (conversations) =>
++                                    this.deps.trustedContactToken.hydrateFromHistorySync(conversations),
++                                onNctSalt: (salt) =>
++                                    this.deps.trustedContactToken.hydrateNctSaltFromHistorySync(salt),
++                                onProcessed: sendHistSyncReceipt
++                            },
++                            protocolMessage.historySyncNotification
++                        )
++                    } finally {
++                        releaseChunk()
++                    }
+                 } else if (sendHistSyncReceipt) {
+                     await sendHistSyncReceipt()
+                 }
+                 return
+             }
+ 
