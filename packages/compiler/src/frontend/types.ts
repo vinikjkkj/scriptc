@@ -6384,7 +6384,9 @@ function spreadErasedIndexValue(
       // dynamic one does. The source's own members are already merged
       // into `widened`'s properties, so they are checked below with the
       // literal's own.
-      const srcInfos = checker.getIndexInfosOfType(checker.getTypeAtLocation(prop.expression));
+      const srcT = checker.getTypeAtLocation(prop.expression);
+      const srcImplicit = implicitLiteralIndex(srcT, ctx);
+      const srcInfos = checker.getIndexInfosOfType(srcT);
       if (srcInfos.length === 0) {
         widenToDyn = true;
         continue;
@@ -6396,7 +6398,7 @@ function spreadErasedIndexValue(
         ) {
           return undefined;
         }
-        const iv = mapType(info.valueType, ctx);
+        const iv = srcImplicit ? mapType(info.valueType, ctx) : mapIndexSignatureValue(info.valueType, ctx);
         if (!iv || !isSupportedIndexValue(iv)) return undefined;
         sawIndexSource = true;
         // Two signatures that disagree have no common narrow slot; the
@@ -6554,7 +6556,7 @@ function mapSymbolicMappedAlias(
   if (!keyTs || (keyTs.flags & (ts.TypeFlags.String | ts.TypeFlags.Number)) === 0) return undefined;
   const keyIr = ctx.resolveTypeParam(keyT);
   if (!keyIr || (keyIr.kind !== "string" && keyIr.kind !== "f64")) return undefined;
-  const indexValue = mapType(valueT, ctx);
+  const indexValue = mapIndexSignatureValue(valueT, ctx);
   if (indexValue?.kind === "jsval") return JSVAL;
   if (!indexValue || !isSupportedIndexValue(indexValue)) {
     mapTrace(`INDEXVALUE ${checker.typeToString(valueT).slice(0, 60)}`);
@@ -6639,6 +6641,53 @@ function declTwinTupleAsArray(
   return answer;
 }
 
+/** The value type of an index SIGNATURE, mapped. Identical to mapType
+ * except for one type: a bare `any`.
+ *
+ * mapType answers `null` for `any` in a static build and JSVAL under
+ * --dynamic, because `any` in a VALUE slot is a type hole: nothing tells
+ * the compiler what representation to give the slot. An index signature's
+ * value is not that slot. It is the OVERFLOW STORE's value, and the
+ * overflow store already has exactly one representation for a value whose
+ * type is not known statically -- the checked-dynamic one, which is what
+ * `[k: string]: unknown` compiles to today. `any` and `unknown` describe
+ * the SAME runtime store (they intern to one shape); they differ only in
+ * what tsc lets a READ of it flow into without a cast, and that difference
+ * is settled at the read, not here.
+ *
+ * Settled at the read is the whole soundness argument. Mapping the store
+ * to dyn does not widen any use site: an `any`-typed read produces a dyn
+ * IR value and meets the ordinary dyn rules -- a checked conversion where
+ * the target is dyn-checkable, a fence where it is not. What tsc would
+ * have allowed silently (`const n: number = doc.x`) the lowering still
+ * has to answer for, and answers with a path-carrying TypeError. */
+function mapIndexSignatureValue(t: ts.Type, ctx: TypeMapperCtx): IrType | null {
+  if ((t.flags & ts.TypeFlags.Any) !== 0 && !ctx.dynamic) return DYN;
+  return mapType(t, ctx);
+}
+
+/** The ONE `any`-valued index info that must NOT become the store.
+ *
+ * tsgo hands the type it infers for an EMPTY OBJECT LITERAL an implicit
+ * `[x: string]: any` -- the assignability affordance that lets `{}` flow
+ * into a `Record<string, T>` slot. No program wrote it, and reading it as
+ * a signature turns every `const o = {}` into a PURE INDEX SHAPE: a
+ * different thing, with the delete/live-presence semantics that carries
+ * (THE OVERFLOW GRANT declines empty field lists for exactly this reason)
+ * and a named fence over it in the rest-binding lowering, which is how
+ * corpus 2081 caught it -- `const { ...empty } = {}` stopped compiling.
+ *
+ * Recognised the way `anonymousEmpty` below recognises the same type: NO
+ * symbol and NO declared properties. Every signature a program actually
+ * wrote has a symbol -- an interface, an anonymous type literal, and the
+ * `Record<string, any>` alias all carry one -- and a `{}` ANNOTATION (or
+ * `interface Empty {}`) publishes no index info at all, so neither the
+ * admitted shapes nor the empty-as-top-type rule move. Here the value
+ * takes mapType's answer, which for `any` is the pre-change null. */
+function implicitLiteralIndex(widened: ts.Type, ctx: TypeMapperCtx): boolean {
+  return widened.getSymbol() === undefined && ctx.checker.getPropertiesOfType(widened).length === 0;
+}
+
 function mapRecordTypeInner(widened: ts.Type, ctx: TypeMapperCtx): IrType | RecordShapeParts | null {
   const { checker, shapes } = ctx;
   if (checker.getConstructSignatures(widened).length > 0) return null;
@@ -6657,7 +6706,8 @@ function mapRecordTypeInner(widened: ts.Type, ctx: TypeMapperCtx): IrType | Reco
   }
   // An index signature maps to a hybrid shape: declared fields keep
   // struct slots, undeclared keys ride the shape's overflow map, valued
-  // uniformly by the signature's value type (`unknown` → dyn — a model-pricing table's
+  // uniformly by the signature's value type (`unknown` AND `any` — the dyn;
+  // mapIndexSignatureValue is where the two spellings meet — a model-pricing table's
   // ModelPricing; `Record<string, T>` resolves here too, declared-field-
   // free). STRING and NUMBER key domains both compile — JS object keys ARE
   // strings (`o[1]` reads `o["1"]`), so a number-keyed signature is the
@@ -6689,10 +6739,13 @@ function mapRecordTypeInner(widened: ts.Type, ctx: TypeMapperCtx): IrType | Reco
               checker.getIndexInfosOfType(p).length === 0),
         ));
     if (indexInfos.length > 2) return null;
+    // The implicit affordance on an inferred literal type takes mapType's
+    // answer for its value; a signature the program wrote takes the store's.
+    const implicit = implicitLiteralIndex(widened, ctx);
     let v: IrType | null = null;
     for (const info of indexInfos) {
       if (!stringKey(info.keyType) && !(info.keyType.flags & ts.TypeFlags.Number)) return null;
-      const iv = mapType(info.valueType, ctx);
+      const iv = implicit ? mapType(info.valueType, ctx) : mapIndexSignatureValue(info.valueType, ctx);
       // A jsval-valued signature absorbs the shape: `Record<string,
       // JSONValue>` (a package's own JSON alias) and `Record<string, any>`
       // are one island object — the overflow map has no handle slot, and
