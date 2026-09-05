@@ -480,6 +480,18 @@ export interface ClassMeta {
     });
   }
 
+/** The function a VTABLE ENTRY for (class, method) points at: the
+   * synthesized thunk `%C.m%vt` when the frontend made one — the override
+   * WIDENED (trailing optional parameters the slot does not carry, or a
+   * return the slot's `unknown` boxes), so the implementation is callable
+   * at the slot but not spelled at it — and the implementation itself
+   * otherwise. Every candidate is spelled at the slot's signature by
+   * construction, so the slot's own C type may be read off either. */
+  export function vtTargetIr(E: CEmitter, className: string, method: string): string {
+    const thunk = `%${className}.${method}%vt`;
+    return E.fnByName.has(thunk) ? thunk : `%${className}.${method}`;
+  }
+
 /** The C parameter list of a slot (declaring-class `this` first). */
   export function vtSlotParams(E: CEmitter, slot: VtSlot, named: boolean): string[] {
     const thisParam = named
@@ -555,7 +567,7 @@ export interface ClassMeta {
       const recv =
         impl === slot.declarer ? "o" : `(${mangleClassStruct(impl.def.name)} *)o`;
       const args = [recv, ...slot.fn.params.slice(1).map((_, i) => `sc_a${i}`)].join(", ");
-      const call = `${mangleFunction(`%${impl.def.name}.${slot.method}`)}(${args})`;
+      const call = `${mangleFunction(vtTargetIr(E, impl.def.name, slot.method))}(${args})`;
       out.push(
         ``,
         `${E.link}${ret} ${mangleVtAdapter(impl.def.name, slot.method)}(${E.vtSlotParams(slot, true).join(", ")}) {`,

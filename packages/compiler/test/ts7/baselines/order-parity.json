@@ -10305,18 +10305,6 @@
    ],
    "diags": []
   },
-  "<repo>/tests/corpus/7550-a-generic-member-of-a-generic-interface-keeps-its-closure-slot.ts": {
-   "order": [
-    "<repo>/tests/corpus/7550-a-generic-member-of-a-generic-interface-keeps-its-closure-slot.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/7551-the-local-hour-is-a-zone-read-not-a-clock-read.ts": {
-   "order": [
-    "<repo>/tests/corpus/7551-the-local-hour-is-a-zone-read-not-a-clock-read.ts"
-   ],
-   "diags": []
-  },
   "<repo>/tests/corpus/756-cycle-inheritance.ts": {
    "order": [
     "<repo>/tests/corpus/756-cycle-inheritance.ts"
@@ -10329,9 +10317,33 @@
    ],
    "diags": []
   },
-  "<repo>/tests/corpus/7570-content-interning-across-the-identity-surfaces.ts": {
+  "<repo>/tests/corpus/7580-override-covariant-return-into-unknown.ts": {
    "order": [
-    "<repo>/tests/corpus/7570-content-interning-across-the-identity-surfaces.ts"
+    "<repo>/tests/corpus/7580-override-covariant-return-into-unknown.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/7581-override-adds-a-trailing-optional-parameter.ts": {
+   "order": [
+    "<repo>/tests/corpus/7581-override-adds-a-trailing-optional-parameter.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/7582-override-widening-in-the-middle-of-a-chain.ts": {
+   "order": [
+    "<repo>/tests/corpus/7582-override-widening-in-the-middle-of-a-chain.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/7583-override-widens-parameters-and-return-together.ts": {
+   "order": [
+    "<repo>/tests/corpus/7583-override-widens-parameters-and-return-together.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/7584-declare-fields-are-type-only.ts": {
+   "order": [
+    "<repo>/tests/corpus/7584-declare-fields-are-type-only.ts"
    ],
    "diags": []
   },
@@ -11117,12 +11129,6 @@
   "<repo>/tests/diagnostics/dataview.ts": {
    "order": [
     "<repo>/tests/diagnostics/dataview.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/diagnostics/date-get-hours-only-composes-with-the-live-clock.ts": {
-   "order": [
-    "<repo>/tests/diagnostics/date-get-hours-only-composes-with-the-live-clock.ts"
    ],
    "diags": []
   },
@@ -11929,6 +11935,12 @@
   "<repo>/tests/diagnostics/overloaded-function-values.ts": {
    "order": [
     "<repo>/tests/diagnostics/overloaded-function-values.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/override-widened-mid-chain-dispatch.ts": {
+   "order": [
+    "<repo>/tests/diagnostics/override-widened-mid-chain-dispatch.ts"
    ],
    "diags": []
   },
