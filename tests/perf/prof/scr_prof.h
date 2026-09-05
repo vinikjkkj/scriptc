@@ -493,14 +493,14 @@ SCR_PROF_FN void scr_prof_live_del(const void *p) {
 
 SCR_PROF_SHARED int scr_prof_reported = 0;
 
-SCR_PROF_FN void scr_prof_report(void) {
-  /* Two producers now reach this (atexit and the _Exit interposer below),
-   * and a second report would truncate the first. */
-  if (scr_prof_reported) return;
-  scr_prof_reported = 1;
-  const char *path = getenv("SCR_PROF_OUT");
-  FILE *f = fopen(path && *path ? path : "scr-prof.txt", "w");
-  if (!f) return;
+/* The body, with the stream as a parameter. Split out from scr_prof_report
+ * so a PHASE EDGE can take a residency dump mid-run without latching the
+ * one-shot flag that protects the exit report. The exit report is still the
+ * only writer of SCR_PROF_OUT; a phase dump goes to its own path and to
+ * nothing else. Nothing about the TABLE is reset by a dump -- `snap` stays
+ * the process-wide high-water it always was, and `live` is read at the
+ * instant of the dump, which is the whole point of taking one at an edge. */
+SCR_PROF_FN void scr_prof_write(FILE *f) {
   size_t base = scr_prof_base();
 #ifdef SCR_PROF_ALLOC
   fprintf(f, "PROF-KIND alloc\n");
@@ -562,6 +562,31 @@ SCR_PROF_FN void scr_prof_report(void) {
             (long long)(sizeof scr_prof_tbl + sizeof scr_prof_ptbl));
   }
 #endif
+}
+
+SCR_PROF_FN void scr_prof_report(void) {
+  /* Two producers reach this (atexit and the _Exit interposer below), and a
+   * second report would truncate the first. */
+  const char *path;
+  FILE *f;
+  if (scr_prof_reported) return;
+  scr_prof_reported = 1;
+  path = getenv("SCR_PROF_OUT");
+  f = fopen(path && *path ? path : "scr-prof.txt", "w");
+  if (!f) return;
+  scr_prof_write(f);
+  fclose(f);
+}
+
+/* A mid-run dump to a named path. Does NOT latch scr_prof_reported: the exit
+ * report must still happen, and a run whose phase dumps silently replaced it
+ * would be a worse instrument than no phase dump at all. */
+SCR_PROF_FN void scr_prof_report_to(const char *path) {
+  FILE *f;
+  if (path == NULL || *path == 0) return;
+  f = fopen(path, "w");
+  if (f == NULL) return;
+  scr_prof_write(f);
   fclose(f);
 }
 
