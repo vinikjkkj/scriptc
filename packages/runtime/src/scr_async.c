@@ -1460,8 +1460,68 @@ static void scr_trampoline(void) {
 #define SCR_FIBER_POOL 4096
 #endif
 
+/* ── THE CAP BOUNDS THE IDLE SET; NOTHING BOUNDED HOW LONG IT IS HELD ──
+ *
+ * The table above measures the pool against a bench that stays busy, so
+ * every arm's retained set sits UNDER the next phase's live set and the
+ * only visible cost is +1.7% peak RSS. A long-lived server is the other
+ * shape: one burst, then hours of near-idle. The cap is a high-water
+ * mark there, and until this decay existed nothing ever lowered it —
+ * scr_fiber_pool_teardown runs at LOOP TEARDOWN, i.e. process exit.
+ *
+ * Measured, this file's probe (K concurrent chains, 8 async levels each,
+ * so ~9K live stacks at the peak; RSS sampled every 100 ms and read as
+ * the mean over a 5 s window well after the burst drained):
+ *
+ *   pool    idle before    burst peak    idle AFTER the burst
+ *      0        4.75          212.23           15.00 MiB
+ *     64        4.75          212.25           15.29
+ *    512        4.74          212.29           17.97
+ *   1024        4.75          212.31           20.85
+ *   4096        4.75          212.27           37.42
+ *  16384        4.75          212.23          104.11
+ *
+ * The PEAK column is flat across every arm — 212.23-212.31, a 0.04%
+ * spread — which is what makes this a controlled experiment: the knob
+ * moves only what is KEPT, never what is needed. The slope is 5.44 KiB
+ * of resident stack per pooled entry, linear across five octaves, so the
+ * shipped default retains 4096 x 5.44 KiB = 22.4 MiB after any burst
+ * that touches 4096 stacks, for the life of the process.
+ *
+ * THE POLICY IS A LOW-WATER MARK, not a timeout. scr_stack_pool_lo
+ * tracks the smallest the idle list got during the current window; an
+ * entry above that low mark was demonstrably not needed at ANY instant
+ * of the window, so it is not serving the burst locality the cap was
+ * bought for. Each window frees half of that provable excess. Halving
+ * rather than dropping all of it costs a few extra windows and buys the
+ * margin a workload with a period near the window would otherwise lose.
+ *
+ * What this deliberately does NOT do is time out idle entries. A server
+ * with steady concurrency holds pool_lo high and never trims, which is
+ * the case the cap exists for; a server whose concurrency COLLAPSED
+ * after a sync has pool_lo == pool_n and drains geometrically, ~12
+ * windows from a full 4096.
+ *
+ * SCR_FIBER_POOL_DECAY_MS=0 disables decay and restores the pre-decay
+ * runtime exactly — the negative control for every number above. */
+#ifndef SCR_FIBER_POOL_DECAY_MS
+#define SCR_FIBER_POOL_DECAY_MS 1000
+#endif
+
 static ScrStack *scr_stack_pool = NULL;
 static size_t scr_stack_pool_n = 0;
+/* Smallest scr_stack_pool_n seen since the last decay window closed.
+ * SIZE_MAX means "no acquire has narrowed it yet this window", which the
+ * tick reads as pool_n. */
+static size_t scr_stack_pool_lo = (size_t)-1;
+static double scr_stack_pool_next_ms = 0;
+/* Counts entries actually freed BY DECAY (never by the cap's overflow
+ * path), so the stat line below can tell "the trim found nothing to free"
+ * from "the trim never ran" — the two readings this tree keeps confusing.
+ * Deliberately NOT exported: an unused external symbol in the
+ * always-linked runtime cannot be dead-stripped, and this file is measured
+ * to the page by tests/harness/island.test.ts. */
+static unsigned long long scr_stack_pool_decayed = 0;
 
 static size_t scr_stack_pool_max(void) {
   static bool once = false;
@@ -1494,6 +1554,9 @@ static ScrStack *scr_stack_acquire(void) {
   if (s != NULL) {
     scr_stack_pool = s->next;
     scr_stack_pool_n--;
+    /* The low-water mark for this decay window. Only the take side can
+     * lower it, so this is the one place it is narrowed. */
+    if (scr_stack_pool_n < scr_stack_pool_lo) scr_stack_pool_lo = scr_stack_pool_n;
     s->next = NULL;
     return s;
   }
@@ -1535,6 +1598,117 @@ static void scr_stack_release(ScrStack *s) {
   scr_stack_free(s);
 }
 
+static bool scr_stack_pool_stat(void) {
+  static bool once = false;
+  static bool cached = false;
+  if (!once) { cached = getenv("SCR_FIBER_POOL_STAT") != NULL; once = true; }
+  return cached;
+}
+
+/* Unsigned to decimal into a caller buffer of at least 24 bytes. Exists so
+ * the stat line below needs no printf; see the note at its call site. */
+static const char *scr_utoa(size_t v, char *buf) {
+  char *p = buf + 23;
+  *p = ' ';
+  do { *--p = (char)('0' + (v % 10u)); v /= 10u; } while (v != 0);
+  return p;
+}
+
+static size_t scr_stack_pool_decay_ms(void) {
+  static bool once = false;
+  static size_t cached = SCR_FIBER_POOL_DECAY_MS;
+  if (!once) {
+    const char *env = getenv("SCR_FIBER_POOL_DECAY_MS");
+    if (env != NULL) {
+      long v = strtol(env, NULL, 10);
+      if (v >= 0) cached = (size_t)v;
+    }
+    once = true;
+  }
+  return cached;
+}
+
+/* One decay window. Called once per loop turn from the sleep seam in
+ * scr_loop_run — the point the loop has already decided it has no
+ * runnable work — so it costs one double compare on a path that is about
+ * to block anyway, and it cannot run while a fiber is mid-switch.
+ *
+ * `now` is the loop's own scr_now_ms(), passed in rather than re-read so
+ * the window boundary lines up with the turn the caller is timing. */
+/* How long the loop may sleep before the next decay window is due, or a
+ * negative number when there is nothing to decay and the sleep is free to
+ * run to its natural deadline.
+ *
+ * THIS SEAM IS LOAD-BEARING AND THE FIRST VERSION DID NOT HAVE IT. The
+ * decay ticks once per loop turn, and a process whose only pending work is
+ * one long timer takes the WHOLE timer in a single turn — the probe below
+ * sleeps 8 s after its burst, so the trim ran once, freed the half of a
+ * low-water mark that was still 0 from the burst, and the measurement came
+ * back 36.69 MiB against 37.93 for decay off. That reads exactly like a
+ * fix that does not work, and it was a fix that never RAN.
+ *
+ * So the sleep is capped to the window, but ONLY while there is something
+ * to free: an empty pool imposes no wakeups at all, and a full one costs
+ * one wakeup per second until it drains. */
+static double scr_stack_pool_decay_due(double now) {
+  if (scr_stack_pool_n == 0) return -1.0;
+  size_t win = scr_stack_pool_decay_ms();
+  if (win == 0) return -1.0;
+  if (scr_stack_pool_next_ms == 0) return now + (double)win;
+  return scr_stack_pool_next_ms;
+}
+
+static void scr_fiber_pool_decay(double now) {
+  size_t win = scr_stack_pool_decay_ms();
+  if (win == 0) return; /* decay off: the pre-decay runtime, exactly */
+  if (scr_stack_pool_next_ms == 0) {
+    scr_stack_pool_next_ms = now + (double)win;
+    return;
+  }
+  if (now < scr_stack_pool_next_ms) return;
+  scr_stack_pool_next_ms = now + (double)win;
+
+  /* Entries above the window's low-water mark were idle at every instant
+   * of the window. Free half of them, rounded up so a pool of 1 still
+   * makes progress. */
+  size_t lo = scr_stack_pool_lo == (size_t)-1 ? scr_stack_pool_n : scr_stack_pool_lo;
+  size_t drop = (lo + 1u) / 2u;
+  size_t freed = 0;
+  while (drop-- > 0 && scr_stack_pool != NULL) {
+    ScrStack *s = scr_stack_pool;
+    scr_stack_pool = s->next;
+    scr_stack_pool_n--;
+    scr_stack_free(s);
+    scr_stack_pool_decayed++;
+    freed++;
+  }
+  /* ARMING. A trim that silently finds nothing to free is indistinguishable
+   * from a trim that never ran, and this file has now made that exact
+   * mistake once (see scr_stack_pool_decay_due). SCR_FIBER_POOL_STAT=1
+   * prints EVERY window including the ones that free nothing, so the
+   * negative control — SCR_FIBER_POOL_DECAY_MS=0, which must print no
+   * lines at all — is distinguishable from a live decay that has already
+   * drained the pool, which prints `freed=0 idle=0`. */
+  if (scr_stack_pool_stat()) {
+    /* fputs and a hand-rolled decimal, NOT fprintf. This TU's diagnostics
+     * are all fputs/fwrite, so a single %zu here was the only printf in
+     * the always-linked runtime: it grew a static hello-world by 33,280
+     * bytes — eight times tests/harness/size-class.ts's one-page drift
+     * tolerance — for a line no default build ever prints. */
+    char nb[24];
+    fputs("[fiberpool] window freed=", stderr);
+    fputs(scr_utoa(freed, nb), stderr);
+    fputs(" idle=", stderr);
+    fputs(scr_utoa(scr_stack_pool_n, nb), stderr);
+    fputs(" lo=", stderr);
+    fputs(scr_utoa(lo, nb), stderr);
+    fputs(" decayedTotal=", stderr);
+    fputs(scr_utoa((size_t)scr_stack_pool_decayed, nb), stderr);
+    fputc('\n', stderr);
+  }
+  scr_stack_pool_lo = scr_stack_pool_n;
+}
+
 /* Drops every idle context. Called from the loop's teardown so a run that
  * ends with a warm pool does not read as a leak to the sanitized lane;
  * fibers still in flight are untouched (they are abandoned by design). */
@@ -1545,6 +1719,8 @@ static void scr_fiber_pool_teardown(void) {
     scr_stack_free(s);
   }
   scr_stack_pool_n = 0;
+  scr_stack_pool_lo = (size_t)-1;
+  scr_stack_pool_next_ms = 0;
 }
 
 /* Frees a finished fiber's execution resources (the promise release and
@@ -2532,7 +2708,16 @@ bool scr_loop_run(ScrPromise *top_level) {
      *   fallback.
      * - timers only: plain nanosleep to the deadline. */
     double now = scr_now_ms();
+    /* The loop has no runnable work at this point and is about to block:
+     * the one place a fiber-stack trim can never race a switch. */
+    scr_fiber_pool_decay(now);
     double due = scr_ntimers > 0 ? scr_timers[0].deadline_ms : now + SCR_IO_POLL_MS;
+    /* A pool with entries left to free caps the sleep at its next window;
+     * an empty one does not (see scr_stack_pool_decay_due). */
+    {
+      double pool_due = scr_stack_pool_decay_due(now);
+      if (pool_due >= 0 && pool_due < due) due = pool_due;
+    }
     /* An armed island timer (AbortSignal.timeout) caps the sleep: it must
      * fire on time even while the poller waits on socket readiness. */
     if (scr_island_deadline_fn != NULL) {
