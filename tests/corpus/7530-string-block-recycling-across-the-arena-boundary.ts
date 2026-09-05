@@ -99,40 +99,53 @@ for (const n of [1, 7, 31, 60, 61, 62, 63, 64, 65, 100, 180, 230, 240, 243, 244,
 // Strings are primitives, so `===` is a VALUE comparison and no allocator
 // can move it. The things that are NOT primitives are checked here against
 // the same expectation Node states.
-{
-  const a = ruler(243);
-  const b = ruler(243);
-  console.log("prim eq", a === b, a == b, Object.is(a, b), a < b, a.localeCompare(b));
+// It runs at SEVERAL lengths and not only at 243, because a second
+// allocator behaviour has since landed on this same population: concat
+// results in [16, 128] BYTES are content-interned, so two byte-equal strings
+// there are ONE heap block, and 243 is outside that band. A section named
+// "the surfaces where identity is observable" that only runs where nothing
+// is shared observes nothing. 15 is below the band, 16 and 128 are its
+// edges, 129 is above it, 243 is the arena's last carved capacity.
+//
+// Interning has its own file for the surfaces that are specific to it
+// (7570); what belongs HERE is that these answers do not depend on which
+// allocator behaviour a length happens to fall under.
+for (const n of [15, 16, 64, 128, 129, 243]) {
+  const a = ruler(n);
+  const b = ruler(n);
+  console.log("prim eq", n, a === b, a == b, Object.is(a, b), a < b, a.localeCompare(b));
 
   // `new String` has no scriptc lowering (SC2020) and cannot appear in a
   // corpus program at all; the wrapper surfaces that DO lower are here.
-  console.log("wrapper", String(a) === a, a.toString() === a, `${a}` === a, typeof a);
+  console.log("wrapper", n, String(a) === a, a.toString() === a, `${a}` === a, typeof a);
 
   const symA: symbol = Symbol(a);
   const symB: symbol = Symbol(a);
-  console.log("symbol", symA === symB, symA.description === a, symA.toString().length);
+  console.log("symbol", n, symA === symB, symA.description === a, symA.toString().length);
   const forA: symbol = Symbol.for(a);
   const forB: symbol = Symbol.for(b);
-  console.log("symbol for", forA === forB, Symbol.keyFor(forA) === a);
+  console.log("symbol for", n, forA === forB, Symbol.keyFor(forA) === a);
 
   // Map/Set key identity is value identity for primitives, on both sides.
   const m = new Map<string, number>();
   m.set(a, 1);
   m.set(b, 2);
-  console.log("map", m.size, m.get(a), m.get(ruler(243)));
-  const st = new Set<string>([a, b, ruler(243), ruler(244)]);
-  console.log("set", st.size);
+  console.log("map", n, m.size, m.get(a), m.get(ruler(n)));
+  const st = new Set<string>([a, b, ruler(n), ruler(n + 1)]);
+  console.log("set", n, st.size);
 
   // Buffer.toString and back: bytes out of a different allocator entirely.
   const buf = Buffer.from(a, "utf8");
-  console.log("buffer", buf.length, buf.toString("utf8") === a,
-              buf.toString("utf8", 0, 243).length, Buffer.from(buf).toString("utf8") === a);
+  console.log("buffer", n, buf.length, buf.toString("utf8") === a,
+              buf.toString("utf8", 0, n).length, Buffer.from(buf).toString("utf8") === a);
 }
 
 // ── 5. the same population through a dyn boundary ─────────────────────────
 {
   const rows: Record<string, string> = {};
-  for (const n of [63, 64, 242, 243, 244, 245]) rows["k" + n] = ruler(n);
+  // 15..129 straddle the content-intern band as well as the arena boundary,
+  // so a record crossing carries both populations.
+  for (const n of [15, 16, 17, 63, 64, 128, 129, 242, 243, 244, 245]) rows["k" + n] = ruler(n);
   const text = JSON.stringify(rows);
   const parsed = JSON.parse(text) as Record<string, string>;
   const keys = Object.keys(parsed).sort();
