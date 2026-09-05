@@ -10872,6 +10872,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/diagnostics/a-subscribe-slot-whose-event-map-has-an-unspellable-handler.ts": {
+   "order": [
+    "<repo>/tests/diagnostics/a-subscribe-slot-whose-event-map-has-an-unspellable-handler.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/diagnostics/accessors.ts": {
    "order": [
     "<repo>/tests/diagnostics/accessors.ts"
