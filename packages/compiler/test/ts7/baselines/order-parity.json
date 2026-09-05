@@ -10323,6 +10323,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/7560-http-rest-server-shapes.ts": {
+   "order": [
+    "<repo>/tests/corpus/7560-http-rest-server-shapes.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/7570-content-interning-across-the-identity-surfaces.ts": {
    "order": [
     "<repo>/tests/corpus/7570-content-interning-across-the-identity-surfaces.ts"
