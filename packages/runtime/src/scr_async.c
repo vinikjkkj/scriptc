@@ -1460,6 +1460,28 @@ static void scr_trampoline(void) {
 #define SCR_FIBER_POOL 4096
 #endif
 
+/* Gauges for tests/perf/fiberstat/scr_fiber_stat.h. With that header absent
+ * every one of these preprocesses to nothing at all, so an uninstrumented
+ * build carries no instruction of them -- the same contract scr_string.c
+ * states for SCR_CS_BUMP. They exist because the pool's two populations
+ * are indistinguishable from outside the process: a VirtualQuery walk sees
+ * N stack regions and cannot say which of them a task is sitting on. */
+#ifndef SCR_FST_ACQUIRE
+#define SCR_FST_ACQUIRE() ((void)0)
+#endif
+#ifndef SCR_FST_RELEASE
+#define SCR_FST_RELEASE() ((void)0)
+#endif
+#ifndef SCR_FST_POOLED
+#define SCR_FST_POOLED(n) ((void)0)
+#endif
+#ifndef SCR_FST_FRESH_ONE
+#define SCR_FST_FRESH_ONE() ((void)0)
+#endif
+#ifndef SCR_FST_FREED_ONE
+#define SCR_FST_FREED_ONE() ((void)0)
+#endif
+
 /* ── THE CAP BOUNDS THE IDLE SET; NOTHING BOUNDED HOW LONG IT IS HELD ──
  *
  * The table above measures the pool against a bench that stays busy, so
@@ -1549,6 +1571,7 @@ static size_t scr_stack_pool_max(void) {
 }
 
 static void scr_stack_free(ScrStack *s) {
+  SCR_FST_FREED_ONE();
 #ifdef _WIN32
   DeleteFiber(s->ctx);
 #else
@@ -1569,10 +1592,14 @@ static ScrStack *scr_stack_acquire(void) {
      * lower it, so this is the one place it is narrowed. */
     if (scr_stack_pool_n < scr_stack_pool_lo) scr_stack_pool_lo = scr_stack_pool_n;
     s->next = NULL;
+    SCR_FST_POOLED(scr_stack_pool_n);
+    SCR_FST_ACQUIRE();
     return s;
   }
   s = calloc(1, sizeof *s);
   if (!s) scr_oom();
+  SCR_FST_FRESH_ONE();
+  SCR_FST_ACQUIRE();
 #ifdef _WIN32
   /* NOT lazy, and that mistake cost this runtime its whole page-fault
    * bill: dwStackSize is the initial COMMITTED size, so the old
@@ -1600,10 +1627,12 @@ static ScrStack *scr_stack_acquire(void) {
 
 static void scr_stack_release(ScrStack *s) {
   if (s == NULL) return;
+  SCR_FST_RELEASE();
   if (scr_stack_pool_n < scr_stack_pool_max()) {
     s->next = scr_stack_pool;
     scr_stack_pool = s;
     scr_stack_pool_n++;
+    SCR_FST_POOLED(scr_stack_pool_n);
     return;
   }
   scr_stack_free(s);
@@ -1693,6 +1722,7 @@ static void scr_fiber_pool_decay(double now) {
     scr_stack_pool_decayed++;
     freed++;
   }
+  SCR_FST_POOLED(scr_stack_pool_n);
   /* ARMING. A trim that silently finds nothing to free is indistinguishable
    * from a trim that never ran, and this file has now made that exact
    * mistake once (see scr_stack_pool_decay_due). SCR_FIBER_POOL_STAT=1
@@ -1730,6 +1760,7 @@ static void scr_fiber_pool_teardown(void) {
     scr_stack_free(s);
   }
   scr_stack_pool_n = 0;
+  SCR_FST_POOLED(0);
   scr_stack_pool_lo = (size_t)-1;
   scr_stack_pool_next_ms = 0;
 }
