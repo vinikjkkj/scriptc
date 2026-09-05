@@ -16,20 +16,27 @@ cd <worktree>
 node packages/cli/dist/main.js build \
   tests/perf/zapo-rest/app/zapo-rest.ts \
   -o <out>/zapo-rest.exe \
-  --best-effort --provenance-sources
+  --provenance-sources
 ```
 
 `--provenance-sources` is required: `@zapo-js/store-sqlite` is only compilable
 from its attested source, and the vendored SQLite the compiler intercepts is
 what the binary links (no native addon ships).
 
-`--best-effort` is required today. A handful of zapo constructs have no static
-lowering; without it the build stops on the first. With it each becomes a
-per-statement runtime refusal, which `zapo-rest.ts` catches and reports as an
-HTTP 501 naming the `[SCxxxx]` code — so the surface documents its own gaps
-instead of hiding them. **A zero refusal-site count under `--best-effort` is
-not zero refusals**; `harness/traps.sh` counts the deferred sites in the
-emitted C.
+**`--best-effort` is no longer required.** It was, until `9fd92e4b`: a handful
+of zapo constructs had no static lowering and the strict build stopped on the
+first. The strict arm has been clean since, and it is the shipping arm — build
+without the flag, so a construct that stops lowering is an error you see at
+build time rather than a 501 the service reports to a caller later.
+
+`--best-effort` is still worth running as a cross-check, because the two arms
+answer different questions. Strict asks "did anything fail to lower"; best
+effort asks "how many sites would have been deferred" — and a construct can
+be deferred without being an error, which is why the one site left in this
+program (a `scr_fence_fatal`) survives a strict build. **A zero refusal-site
+count under `--best-effort` is not zero refusals**; `harness/traps.sh` counts
+the deferred sites in the emitted module, and it aborts rather than scan fewer
+translation units than the build produced.
 
 ### Import order is load-bearing
 
