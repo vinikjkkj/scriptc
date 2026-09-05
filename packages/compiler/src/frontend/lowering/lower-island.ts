@@ -4,7 +4,7 @@
  * package boundary fences for node_modules-declared symbols. */
 import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
-import { BOOL, DYN, F64, IrExpr, IrStmt, IrType, JSVAL, MAX_ISLAND_CALLBACK_ARITY, STRING, VOID, canBoxFuncIntoDyn, canMarshalTypedFuncIntoIsland, funcOf, islandPromisePayloadTag, isUnitType, typeEquals } from "../../ir/nodes.js";
+import { BOOL, DYN, F64, IrExpr, IrStmt, IrType, JSVAL, MAX_ISLAND_CALLBACK_ARITY, STRING, VOID, arrayOf, canBoxFuncIntoDyn, canMarshalTypedFuncIntoIsland, funcOf, islandPromisePayloadTag, isUnitType, typeEquals } from "../../ir/nodes.js";
 import { ISLAND_SURFACE, IslandFnEntry, STATIC_MATH_CONSTS, STATIC_MATH_FNS, boundaryIntoIslandMsg } from "./surfaces.js";
 import { requiresDynamicApiDiag, requiresDynamicPackageDiag } from "../../diagnostics/diagnostic.js";
 import { canonicalBuiltinModule, dynamicImportSpecOf, isCjsJsFile, isJsSourceFile, locOf, npmPackageNameOf, npmStaticDepSf7 } from "../program.js";
@@ -1571,31 +1571,57 @@ import { PoisonError, dynUndefinedExpr, newFnCtx, own } from "./lowerer.js";
     // `Math.max(...xs)` / `Math.min(...xs)` over a number[]: a STATIC
     // runtime fold (JS-exact: NaN poisons, ±0 order by the JS rules, the
     // empty array yields ∓Infinity like the zero-arg calls) — no island
-    // involved, so it works without --dynamic too. Only the exact
-    // one-spread form lowers; mixed spread/positional argument lists keep
-    // the nest-calls fence.
+    // involved, so it works without --dynamic too.
+    //
+    // MIXED lists (`Math.max(a, ...xs)`, `Math.max(...xs, b, ...ys)`) fold
+    // the same way, and the fold is exact rather than approximate: max and
+    // min are associative under the JS rules the two scalar lib calls
+    // already implement — NaN poisons through either operand, and the
+    // ±0 ordering (+0 above -0 for max, below for min) is a total order on
+    // the values that survives regrouping. An empty spread contributes the
+    // fold's identity (∓Infinity), which is what `math.maxArr`/`minArr`
+    // already answer for an empty array, so `Math.max(a, ...[])` is `a`
+    // exactly as Node has it. Operands lower in ARGUMENT ORDER and each
+    // nests one level deeper, so the left-to-right evaluation JS specifies
+    // is the order the emitted calls evaluate in.
     if (
       isMath &&
       (name === "max" || name === "min") &&
-      call.arguments.length === 1 &&
-      ts.isSpreadElement(call.arguments[0]!)
+      call.arguments.length > 0 &&
+      call.arguments.some((a) => ts.isSpreadElement(a))
     ) {
-      const spread = call.arguments[0]! as ts.SpreadElement;
-      const src = L.lowerExpr(spread.expression);
-      if (src.type.kind !== "array" || src.type.elem.kind !== "f64") {
-        L.unsupported(
-          "SC1090",
-          spread,
-          `spreading '${L.fmt(src.type)}' into Math.${name} (only a number[] spreads)`,
-        );
+      const arrFn = name === "max" ? "math.maxArr" : "math.minArr";
+      const scalarFn = name === "max" ? "math.max" : "math.min";
+      let acc: IrExpr | null = null;
+      for (const a of call.arguments) {
+        let operand: IrExpr;
+        if (ts.isSpreadElement(a)) {
+          // An inline `[1, 2]` in the spread has a TUPLE checker type (the
+          // rest parameter's contextual type pins the positions), and the
+          // fold wants the array it spells. Build it at number[] where the
+          // syntax allows; every other operand lowers as itself and meets
+          // the named fence below if it is not one.
+          let inner: ts.Expression = a.expression;
+          while (ts.isParenthesizedExpression(inner)) inner = inner.expression;
+          const src = ts.isArrayLiteralExpression(inner)
+            ? L.lowerExprExpecting(a.expression, arrayOf(F64))
+            : L.lowerExpr(a.expression);
+          if (src.type.kind !== "array" || src.type.elem.kind !== "f64") {
+            L.unsupported(
+              "SC1090",
+              a,
+              `spreading '${L.fmt(src.type)}' into Math.${name} (only a number[] spreads)`,
+            );
+          }
+          operand = { kind: "libCall", fn: arrFn, args: [src], type: F64, loc };
+        } else {
+          operand = L.lowerExprExpecting(a, F64);
+        }
+        acc = acc === null
+          ? operand
+          : { kind: "libCall", fn: scalarFn, args: [acc, operand], type: F64, loc };
       }
-      return {
-        kind: "libCall",
-        fn: name === "max" ? "math.maxArr" : "math.minArr",
-        args: [src],
-        type: F64,
-        loc,
-      };
+      return acc!;
     }
     const mathFn = isMath ? own(ISLAND_SURFACE.math.fns, name) : undefined;
     if (mathFn && call.arguments.length === mathFn.args.length) {

@@ -20,6 +20,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
  * per program, and the FIRST package seen wins. With store-sqlite first, zapo-js's
  * own @client/@store aliases are lost and its barrel fails to resolve. */
 import { WaClient, createStore } from "zapo-js";
+import type { WaIncomingMessageEvent } from "zapo-js";
 import { createSqliteStore, openSqliteConnection } from "@zapo-js/store-sqlite";
 
 /* ── configuration ─────────────────────────────────────────────────────── */
@@ -157,6 +158,23 @@ function obj(p: Bag, key: string): Bag | undefined {
   return undefined;
 }
 
+/** The message reference a reaction/revoke/pin content carries, read out of
+ * a nested `target` object. One declared shape, so the literal the routes
+ * hand zapo is the same one whether it came from query parameters or from a
+ * JSON `content` body. */
+function quoteRefOf(c: Bag): { remoteJid: string; id: string; fromMe: boolean; participant: string | undefined } {
+  const t = obj(c, "target");
+  if (t === undefined) {
+    throw new Error("missing required parameter 'target' (an object with 'remoteJid' and 'id')");
+  }
+  return {
+    remoteJid: reqStr(t, "remoteJid"),
+    id: reqStr(t, "id"),
+    fromMe: bool(t, "fromMe") === true,
+    participant: str(t, "participant"),
+  };
+}
+
 /** The record argument for a route whose zapo method takes one options/input
  * object: either an explicit "input" member, or the whole request bag. */
 function inputOf(p: Bag): Bag {
@@ -189,6 +207,36 @@ function push(type: string, data: unknown): void {
   seqCounter += 1;
   events.push({ seq: seqCounter, at: Date.now(), type: type, data: data });
   if (events.length > EVENT_BUFFER) events.shift();
+}
+
+/* The incoming messages, kept a SECOND time at their real type.
+ *
+ * The ring above stores every event's payload as `unknown`, which is right
+ * for /events and /messages (they serialize it) and useless for
+ * `message.download*`, whose parameter is
+ * `WaIncomingMessageEvent | Proto.IMessage` — a union, and an open JSON
+ * record has no re-tag into one. The media a download needs (mediaKey,
+ * directPath, fileEncSha256) only ever came from a real incoming event
+ * anyway, so the download routes take the event's `seq` and read it back
+ * here at the type zapo handed it over with. Two parallel arrays rather
+ * than a Map so the value type stays a plain array element. */
+const msgSeqs: number[] = [];
+const msgEvents: WaIncomingMessageEvent[] = [];
+
+function rememberMessage(seq: number, ev: WaIncomingMessageEvent): void {
+  msgSeqs.push(seq);
+  msgEvents.push(ev);
+  if (msgSeqs.length > EVENT_BUFFER) {
+    msgSeqs.shift();
+    msgEvents.shift();
+  }
+}
+
+function messageBySeq(seq: number): WaIncomingMessageEvent | undefined {
+  for (let i = 0; i < msgSeqs.length; i++) {
+    if (msgSeqs[i] === seq) return msgEvents[i];
+  }
+  return undefined;
 }
 
 function since(kindPrefix: string, from: number, limit: number): Ev[] {
@@ -291,6 +339,7 @@ client.on("connection", (e) => {
 client.on("message", (e) => {
   recvCount += 1;
   push("message", e);
+  rememberMessage(seqCounter, e);
 });
 client.on("message_send", (e) => {
   sentCount += 1;
@@ -598,8 +647,60 @@ async function route(method: string, path: string, p: Bag): Promise<unknown> {
       return await client.message.send(to, { type: "text", text: text });
     }
     if (content === undefined) throw new Error("missing required parameter 'text' or 'content'");
-    if (options !== undefined) return await client.message.send(to, content, options);
-    return await client.message.send(to, content);
+    /* zapo's content parameter is a DISCRIMINATED UNION and the request's
+     * `content` is an open JSON object. There is no re-tag from one to the
+     * other — the union's arms are distinct runtime shapes, and picking one
+     * means reading the discriminant and BUILDING that arm, which is what
+     * every dedicated route below does inline. So this route does it too,
+     * on `content.type`, instead of handing the open record over. */
+    const kind = str(content, "type");
+    if (kind === undefined) {
+      throw new Error("parameter 'content' needs a 'type' member (text|reaction|revoke|pin|unpin|poll|image|video|audio|document|sticker)");
+    }
+    /* One `send` per arm rather than one built value: the value would then
+     * be a UNION of the arms, and a union crossing into another union is
+     * the same re-tag this route exists to avoid. `{}` stands in for absent
+     * options, which is zapo's own default. */
+    const opts: Bag = options !== undefined ? options : {};
+    if (kind === "text") {
+      return await client.message.send(to, { type: "text", text: reqStr(content, "text") }, opts);
+    }
+    if (kind === "reaction") {
+      return await client.message.send(to, { type: "reaction", emoji: reqStr(content, "emoji"), target: quoteRefOf(content) }, opts);
+    }
+    if (kind === "revoke") {
+      return await client.message.send(to, { type: "revoke", target: quoteRefOf(content) }, opts);
+    }
+    if (kind === "pin" || kind === "unpin") {
+      return await client.message.send(
+        to,
+        { type: kind === "unpin" ? "unpin" : "pin", durationSecs: num(content, "durationSecs"), target: quoteRefOf(content) },
+        opts,
+      );
+    }
+    if (kind === "poll") {
+      return await client.message.send(
+        to,
+        { type: "poll", name: reqStr(content, "name"), options: reqList(content, "options"), selectableCount: num(content, "selectableCount") },
+        opts,
+      );
+    }
+    if (kind === "image") {
+      return await client.message.send(to, { type: "image", media: reqStr(content, "media"), mimetype: str(content, "mimetype"), caption: str(content, "caption") }, opts);
+    }
+    if (kind === "video") {
+      return await client.message.send(to, { type: "video", media: reqStr(content, "media"), mimetype: str(content, "mimetype"), caption: str(content, "caption") }, opts);
+    }
+    if (kind === "audio") {
+      return await client.message.send(to, { type: "audio", media: reqStr(content, "media"), mimetype: str(content, "mimetype"), ptt: bool(content, "ptt") }, opts);
+    }
+    if (kind === "document") {
+      return await client.message.send(to, { type: "document", media: reqStr(content, "media"), mimetype: str(content, "mimetype"), fileName: str(content, "fileName") }, opts);
+    }
+    if (kind === "sticker") {
+      return await client.message.send(to, { type: "sticker", media: reqStr(content, "media"), mimetype: str(content, "mimetype") }, opts);
+    }
+    throw new Error(`content type '${kind}' is not one of text|reaction|revoke|pin|unpin|poll|image|video|audio|document|sticker`);
   }
   if (path === "/message/sendText") {
     return await client.message.send(reqStr(p, "to"), { type: "text", text: reqStr(p, "text") });
@@ -688,17 +789,30 @@ async function route(method: string, path: string, p: Bag): Promise<unknown> {
     await client.message.sendReceipt(reqStr(p, "jid"), reqList(p, "ids"), { type: str(p, "type") as never });
     return { sent: true };
   }
+  /* The download routes take the `seq` of a buffered incoming message —
+   * the number /messages and /events report — not a hand-written JSON
+   * message. A media download needs the mediaKey, directPath and
+   * fileEncSha256 the server sent, so the only message that can be
+   * downloaded is one this process received; and zapo's parameter is a
+   * union that an open JSON record cannot become. */
   if (path === "/message/downloadBytes") {
-    const src = obj(p, "message");
-    if (src === undefined) throw new Error("missing required parameter 'message' (a JSON message object)");
+    const seq = reqNum(p, "seq");
+    const src = messageBySeq(seq);
+    if (src === undefined) {
+      throw new Error(`no buffered message with seq ${seq} (take 'seq' from GET /messages; the buffer holds the last ${EVENT_BUFFER} events)`);
+    }
     const bytes = await client.message.downloadBytes(src, { maxBytes: num(p, "maxBytes") });
-    return { length: bytes.length, base64: Buffer.from(bytes).toString("base64") };
+    return { seq: seq, length: bytes.length, base64: Buffer.from(bytes).toString("base64") };
   }
   if (path === "/message/downloadToFile") {
-    const src = obj(p, "message");
-    if (src === undefined) throw new Error("missing required parameter 'message'");
-    await client.message.downloadToFile(src, reqStr(p, "filePath"), { maxBytes: num(p, "maxBytes") });
-    return { written: reqStr(p, "filePath") };
+    const seq = reqNum(p, "seq");
+    const src = messageBySeq(seq);
+    if (src === undefined) {
+      throw new Error(`no buffered message with seq ${seq} (take 'seq' from GET /messages; the buffer holds the last ${EVENT_BUFFER} events)`);
+    }
+    const filePath = reqStr(p, "filePath");
+    await client.message.downloadToFile(src, filePath, { maxBytes: num(p, "maxBytes") });
+    return { seq: seq, written: filePath };
   }
   if (path === "/message/requestHistorySync") {
     const input = obj(p, "input");

@@ -6081,6 +6081,8 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             return finish(`scr_zlib_unzip(${arg(0)})`);
           case "zlib.deflateAsync":
             return finish(`scr_zlib_deflate_async(${arg(0)})`);
+          case "zlib.deflateAsyncLevel":
+            return finish(`scr_zlib_deflate_async_level(${arg(0)}, ${arg(1)})`);
           case "zlib.unzipAsync":
             return finish(`scr_zlib_unzip_async(${arg(0)})`);
           case "zlib.deflateRawSync":

@@ -22,7 +22,7 @@ import { absentGlobalMemberValue, absentProcessMemberValue, ARRAY_METHODS, built
 import { UNSUPPORTED, assertionDropsMembersDiag, assertionOverflowsMembersDiag, blockedBindingUseDiag, recordShapeMismatchDiag, requiresDynamicPackageDiag, unsupportedDiag } from "../../diagnostics/diagnostic.js";
 import { PoisonError, dynUndefinedExpr, jsFuncValueNameOf, jsFuncValueSourceOf, neverTaintedJsType, nodeThrowExpr, own } from "./lowerer.js";
 import { protoThisType } from "./proto-class-consume.js";
-import { arrayAtOf, BYTES_CTORS, condPresenceSlot, IndexMergeContributor, lowerIndexMergeHelper, lowerNpmStaticSafeIndexRead, strCharsCall } from "./lower-containers.js";
+import { arrayAtOf, BYTES_CTORS, condPresenceSlot, IndexMergeContributor, lowerIndexMergeHelper, lowerNpmStaticSafeIndexRead, regexToStringExpr, strCharsCall } from "./lower-containers.js";
 import { npmStaticPackageOfPath } from "../npm-static.js";
 import { unsupportedModuleFeatureOf } from "../shared.js";
 import { declModuleWithoutTwin, declTwinBindingWithoutStorage, declTwinGlobalOf } from "./lower-modules.js";
@@ -5989,8 +5989,34 @@ function nullishArmBridge(L: Lowerer, left: IrExpr): IrExpr | null {
     const def = L.unions.get(left.type.unionId);
     if (!def) L.badType(expr.left, L.typeOf(expr.left));
     if (!def.arms.some(isUnitType)) return left;
-    const type = L.irTypeOf(expr);
     const rest = def.arms.filter((a) => !isUnitType(a));
+    // The `??`'s own checker type, with two fallbacks for the case where
+    // it has NO representation but both operands do.
+    //
+    // `maps.get(k) ?? new Map()` is that case, and it is store-sqlite's
+    // app-state reader. A bare `new Map()` types `Map<any, any>` — the
+    // contextual type reaches a plain field initializer and pins the type
+    // arguments there, but it does not reach through `??` into the `new`'s
+    // inference — and the union `Map<string, Uint8Array> | Map<any, any>`
+    // reduces to the `any` one, whose key kind is not compilable. The
+    // program is not asking for an any-keyed Map; every value that can
+    // flow out of this expression is the LEFT arm's Map, which is exactly
+    // what the destination slot declares.
+    //
+    // So: prefer the DESTINATION's type when the expression's own has no
+    // representation (that is the slot the value flows into, and tsc
+    // already proved both operands fit it), and fall back to the left's
+    // single non-unit arm. The default is then lowered EXPECTING that type
+    // by the arm below, so a default that cannot be built at it reports
+    // there rather than silently becoming something else. When the
+    // expression's own type maps, nothing changes.
+    let type = L.mapTypeOf(L.typeOf(expr));
+    if (type === null) {
+      const ctx = L.checker.getContextualType(expr);
+      const ctxIr = ctx !== undefined ? L.mapTypeOf(ctx) : null;
+      type = ctxIr !== null ? ctxIr : rest.length === 1 ? rest[0]! : null;
+    }
+    if (type === null) type = L.irTypeOf(expr); // reports the original diagnostic
     if (typeEquals(type, left.type) || (rest.length === 1 && typeEquals(type, rest[0]!))) {
       // `event.key.participant ?? event.rawNode.attrs.participant ??
       // event.key.remoteJid` (zapo mailbox.ts:99). The MIDDLE operand is
@@ -14143,6 +14169,16 @@ export function ensureString(L: Lowerer, e: IrExpr, node: ts.Node): IrExpr {
       // String(v) in the engine — JS-exact (and Node-exact in templates).
       return { kind: "jsOp", op: "toStr", args: [e], type: STRING, loc: e.loc };
     }
+    if (e.type.kind === "regex") {
+      // `${re}` / String(re) / "" + re: RegExp.prototype.toString, the
+      // same lifted helper the explicit `re.toString()` call uses. A regex
+      // has no valueOf of its own, so the DEFAULT hint reaches toString
+      // too and both spellings answer identically — which is why this arm
+      // serves ensureStringForPlus as well. store-sqlite's pragma
+      // validator is the program: it interpolates the pattern into the
+      // error message it throws.
+      return regexToStringExpr(L, e, e.loc);
+    }
     if (e.type.kind === "object") {
       // String(err) / `${err}` over the Error hierarchy: Error.prototype
       // .toString — the ONE runtime implementation (overriding it is
@@ -19014,6 +19050,52 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
     if (ts.isIdentifier(expr)) {
       const init = constInitializerOf(L, expr);
       if (init !== null) return staticRegexTextOf(L, init);
+    }
+    return null;
+  }
+
+/** The statically-known regex FLAGS behind an expression, with NO claim
+   * about the pattern: a regex literal, a const bound to one, or
+   * `new RegExp(<anything>, "<literal flags>")` — the shape a table-driven
+   * pattern has, where the alternation is assembled at run time and the
+   * flags are written at the call. The omitted second argument is "".
+   *
+   * `staticRegexTextOf` answers both halves and is what a consumer needing
+   * the PATTERN must use; this is for the consumers whose only question is
+   * global-or-once and the flag alphabet. Null when even the flags are a
+   * run-time value. */
+  export function staticRegexFlagsOf(L: Lowerer, e: ts.Expression): string | null {
+    let expr = e;
+    for (;;) {
+      if (ts.isParenthesizedExpression(expr) || ts.isNonNullExpression(expr)) {
+        expr = expr.expression;
+        continue;
+      }
+      break;
+    }
+    if (ts.isRegularExpressionLiteral(expr)) {
+      const text = expr.text;
+      return text.slice(text.lastIndexOf("/") + 1);
+    }
+    if (
+      ts.isNewExpression(expr) &&
+      ts.isIdentifier(expr.expression) &&
+      expr.expression.text === "RegExp" &&
+      L.isStdlibGlobal(expr.expression, "RegExp") &&
+      expr.arguments !== undefined &&
+      expr.arguments.length >= 1 &&
+      expr.arguments.length <= 2
+    ) {
+      const fa = expr.arguments[1];
+      if (fa === undefined) return "";
+      if (ts.isStringLiteral(fa) || ts.isNoSubstitutionTemplateLiteral(fa)) {
+        return (fa as ts.StringLiteral | ts.NoSubstitutionTemplateLiteral).text;
+      }
+      return null;
+    }
+    if (ts.isIdentifier(expr)) {
+      const init = constInitializerOf(L, expr);
+      if (init !== null) return staticRegexFlagsOf(L, init);
     }
     return null;
   }
