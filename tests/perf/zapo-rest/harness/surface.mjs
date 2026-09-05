@@ -1,9 +1,19 @@
 // Enumerate zapo's PUBLIC surface as the type checker sees it: every member
 // of WaClient, and every member of each coordinator WaClient exposes.
 import ts from "typescript";
-import { writeFileSync } from "node:fs";
+import { writeFileSync, rmSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
-const APP = "G:/blocks/restapi/lab/app2";
+/* Paths are environment-driven so the harness runs from any checkout:
+ *   ZAPO_REST_APP  the app directory (default: ../app beside this file)
+ *   ZAPO_REST_LAB  where the generated files go (default: the cwd)
+ * They used to be absolute paths into one block's scratch directory,
+ * which is why nothing but that block could run them. */
+const HERE = dirname(fileURLToPath(import.meta.url));
+const LAB = process.env["ZAPO_REST_LAB"] ?? process.cwd();
+
+const APP = process.env["ZAPO_REST_APP"] ?? join(HERE, "..", "app");
 const entry = APP + "/__surface_probe.ts";
 writeFileSync(
   entry,
@@ -93,4 +103,5 @@ for (const g of groups) {
 lines.push(`\n=== TOTAL public members: ${total} across ${groups.length} groups ===`);
 const out = lines.join("\n");
 console.log(out);
-writeFileSync("G:/blocks/restapi/lab/surface.txt", out);
+writeFileSync(join(LAB, "surface.txt"), out);
+rmSync(entry, { force: true });

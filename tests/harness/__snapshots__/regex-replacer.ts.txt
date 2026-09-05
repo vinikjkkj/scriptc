@@ -79,7 +79,7 @@ regex-replacer.ts:31:32 - error SC1120: a function replacement value declaring 2
 
   hint: supported: literal regexes with the g/i/m/s/u/v/y flags — .test(), .exec()/.match()/.matchAll(), named capture groups (.groups, $<name> templates, \k<name>), .source/.flags, and string replace/replaceAll/split with string replacement templates or a string-returning replacer function over capture groups the pattern always fills
 
-regex-replacer.ts:35:29 - error SC1120: a function replacement value over a regex the compiler cannot read statically (the group-participation proof needs the pattern — write the literal at the call, or bind it to a const) is not supported yet
+regex-replacer.ts:35:29 - error SC1120: a function replacement value over a regex whose FLAGS the compiler cannot read statically (global-or-once is decided at compile time — write the flags argument as a literal, or bind the regex to a const) is not supported yet
 
   34 | let re = /(a)/g;
   35 | console.log("a".replace(re, (m: string, g: string) => g));
@@ -88,7 +88,7 @@ regex-replacer.ts:35:29 - error SC1120: a function replacement value over a rege
 
   hint: supported: literal regexes with the g/i/m/s/u/v/y flags — .test(), .exec()/.match()/.matchAll(), named capture groups (.groups, $<name> templates, \k<name>), .source/.flags, and string replace/replaceAll/split with string replacement templates or a string-returning replacer function over capture groups the pattern always fills
 
-regex-replacer.ts:37:51 - error SC1120: a function replacement value over a regex the compiler cannot read statically (the group-participation proof needs the pattern — write the literal at the call, or bind it to a const) is not supported yet
+regex-replacer.ts:37:51 - error SC1120: a function replacement value over a regex whose FLAGS the compiler cannot read statically (global-or-once is decided at compile time — write the flags argument as a literal, or bind the regex to a const) is not supported yet
 
   36 | const flags = "g";
   37 | console.log("a".replace(new RegExp("(a)", flags), (m: string, g: string) => g));

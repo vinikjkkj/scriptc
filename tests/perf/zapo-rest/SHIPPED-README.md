@@ -92,6 +92,15 @@ curl -s -X POST localhost:8787/message/sendText \
 # ... the same thing as a query string
 curl -s 'localhost:8787/message/sendText?to=5511999999999&text=hello'
 
+# the generic form: /message/send takes a typed content object, dispatched on
+# content.type (text|reaction|revoke|pin|unpin|poll|image|video|audio|
+# document|sticker), which is the same set the dedicated routes cover
+curl -s -X POST localhost:8787/message/send      -H 'content-type: application/json'      -d '{"to":"5511999999999","content":{"type":"text","text":"hi"}}'
+
+# download the media of a message this process received; seq is the number
+# /messages reports for it
+curl -s 'localhost:8787/message/downloadBytes?seq=12'
+
 # incoming messages since sequence 0
 curl -s 'localhost:8787/messages?since=0&limit=20'
 
@@ -125,12 +134,13 @@ with a status:
 | 500 | zapo threw — not connected, WhatsApp refused, etc. `detail` has the message |
 | **501** | **the compiler has no static lowering for this zapo method.** `diagnostic` carries the `[SCxxxx]` code. |
 
-The 501 case is worth understanding: this binary is compiled ahead of time, and a
-handful of zapo constructs have no static lowering yet. Rather than omit those
-routes, the build defers them to a runtime refusal, and the service turns that
-into a 501 that **names the compiler diagnostic**. So an unsupported method tells
-you exactly why it is unsupported instead of vanishing, and it cannot take the
-process down.
+The 501 case is worth understanding: this binary is compiled ahead of time, so a
+zapo construct with no static lowering becomes a per-statement runtime refusal
+rather than a missing route, and the service turns that into a 501 that **names
+the compiler diagnostic**. One such construct is left in this build, on the
+plugin-installation path no route reaches (see "What still refuses" below), so
+no route answers 501 today — the classifier stays because the alternative is a
+route that vanishes or a process that dies.
 
 ### Receiving messages
 
@@ -163,30 +173,58 @@ into a few groups:
   must own, `message.upload`, `profile.setProfilePicture`,
   `business.updateCoverPhoto`). Use `/message/downloadBytes`,
   `/message/downloadToFile` and `/message/sendMedia` (which takes a file path
-  the server process can read).
+  the server process can read). The two download routes take the **`seq`** of a
+  message this process received — the number `/messages` and `/events` report —
+  rather than a hand-written JSON message: the mediaKey, directPath and
+  fileEncSha256 a download needs only ever came from a real incoming event, and
+  zapo's parameter is a union an open JSON record cannot become.
 * **`chat.set` / `chat.remove`**: the argument is a 60-arm app-state schema
   union with no stable JSON spelling. The named per-collection routes
   (`/chat/setChatPin`, `/chat/setChatMute`, ...) cover the same ground.
 
-### Routes that answer 501 in this build
+### What still refuses, and what no longer does
 
-These are not guesses: the deferred refusals were counted in the emitted C of
-the shipped binary (15 sites across the 14 translation units the program is
-split into) and mapped back to their source. Everything else compiled
-statically.
+Two numbers, and they are not the same number. A **strict** build (no
+`--best-effort`) stops on a construct with no static lowering; `--best-effort`
+turns each one into a per-statement runtime throw instead, so the count to
+watch is the number of DEFERRED SITES in the emitted module, not whether the
+build succeeded.
 
-| route | code | why |
+| arm | was | is |
 |---|---|---|
-| `POST /message/send` **with a `content` object** | `SC2003` | an open `Record<string, unknown>` cannot be re-tagged into zapo's message-content union. **`text` works** — use `POST /message/sendText`, or `/message/send` with `text`, or `/message/reply`, `/message/react`, `/message/poll`, `/message/sendMedia`, all of which build a typed literal. |
-| `POST /message/downloadBytes` | `SC2003` | same: the `message` parameter is an open record going into a union |
-| `POST /message/downloadToFile` | `SC2003` | same |
-| `/mobile/*` companion routes | `SC2020` | three sites in zapo's own `WaMobileCoordinator` (`new Set(values)`, `Math.max`, a `handles` member) |
+| strict, no `--best-effort` | 14 errors | **1** |
+| `--best-effort`, deferred sites in the emitted module | 15 by the bracket scan | **4** sites (**1** bracket) |
 
-Four more `SC2020`/`SC2009`/`SC1120` sites sit inside `@zapo-js/store-sqlite`
-(`table-names.ts`, `connection.ts`, `appstate.store.ts`) and one in
-`spec/proto`. They are on paths the service does not drive during normal
-operation — the store opens, migrates, reads and writes — but if you reach one
-you get a 501 naming it rather than a crash.
+"was" is the shipped 29,085,696-byte binary, measured at `958b912f`; "is" is
+measured on the tree that carries this file. The two deferred numbers are not
+the same measurement: the old scan counted `[SCxxxx]` markers inside message
+text, and only some refusals spell one — the four sites below are three
+`SC1090` throws that carry the code as an argument plus one bracketed
+`SC2020` fence. The bracket count is printed beside the site count so the
+difference is visible rather than inferred.
+
+The one strict error, and three of the four deferred sites, are the same
+construct: **`client.on.bind(client)`** (and `.off`, `.once`) in zapo's own
+`src/client/plugins/install.ts:77`. The EventEmitter surface is the runtime's
+and is monomorphized per event — each event name carries its own payload
+tuple — so there is no single function value to bind or pass. It is reached
+only when a zapo client PLUGIN is installed, and this service installs none.
+
+The fourth deferred site is `require()` with a run-time specifier, one
+statement inside `spec/proto/index.js`, which predates all of this.
+
+Everything else the shipped binary used to defer now compiles: the
+`/message/send` content object, both download routes, and seven lowerings in
+zapo's and `@zapo-js/store-sqlite`'s own source (`RegExp` in a template,
+`RegExp.toString`, `Object.freeze` of a checked-then-published local, a
+function replacement over a runtime-built regex, `new Set(otherSet)`,
+`Math.max` with a mixed spread list, `clearTimeout` of an optional handle, a
+`?? new Map()` default, and `promisify(deflate)` with `{ level }`).
+
+`harness/traps.sh` is what counts these. Give it the directory the build
+emitted into and the number of translation units the build produced; it
+aborts rather than report a partial scan, and it prints both the SITE count
+and the (smaller, misleading) count of messages that spell `[SCxxxx]` inline.
 
 Also not present in this build:
 
@@ -229,9 +267,15 @@ Verified against this exact binary:
 
 * it builds, starts, creates and migrates the SQLite file, and serves the API;
 * the API answers over a real socket to `curl` — routing, query parameters, JSON
-  bodies, the `x-api-key` gate, 400/401/404, and the 501 refusal path;
+  bodies, the `x-api-key` gate, 400/401/404, and the 501 classifier;
 * **persistence across a restart**: the process was killed and restarted on the
   same file and the store came back with the same row counts;
+* it opens a real WebSocket to `wss://web.whatsapp.com/ws/chat` and completes
+  the noise handshake (`harness/verify.sh` prints the run log);
+* `POST /message/send` with a `content` OBJECT reaches zapo — it answers zapo's
+  own "sendMessage requires registered meJid" on an unpaired session, where it
+  used to answer 501 — and both download routes answer 400 for a missing `seq`
+  and a named 500 for a `seq` the buffer no longer holds;
 * the binary is 100% statically compiled — no embedded JavaScript engine.
 
 **Not verified: a live WhatsApp conversation.** Pairing requires scanning the QR

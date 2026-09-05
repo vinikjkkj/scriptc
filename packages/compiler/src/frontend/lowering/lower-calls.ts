@@ -7,7 +7,7 @@ import type { Lowerer } from "./lowerer.js";
 import { lowerGenMethodCall } from "./lower-generators.js";
 import { lowerAbortMethodCall } from "./lower-abort.js";
 import { lowerFetchMethodCall } from "./lower-fetch.js";
-import { BIGINT, BOOL, BYTES_U8, CAUGHT, DYN, F64, IrExpr, IrFunction, IrLocal, IrParam, IrStmt, IrType, JSVAL, STRING, SYMBOL_T, SrcLoc, UNDEFINED_T, VOID, arrayOf, canBoxFuncIntoDyn, canConvertToDyn, canDynCheckTo, canMarshalTypedFuncIntoIsland, funcOf, isUnitType, shapeHasAccessorSlots, typeEquals } from "../../ir/nodes.js";
+import { BIGINT, BOOL, BYTES_U8, CAUGHT, DYN, F64, IrExpr, IrFunction, IrLibFn, IrLocal, IrParam, IrStmt, IrType, JSVAL, STRING, SYMBOL_T, SrcLoc, UNDEFINED_T, VOID, arrayOf, canBoxFuncIntoDyn, canConvertToDyn, canDynCheckTo, canMarshalTypedFuncIntoIsland, funcOf, isUnitType, shapeHasAccessorSlots, typeEquals } from "../../ir/nodes.js";
 import type { IrFfiImport } from "../../ir/nodes.js";
 import { isCjsJsFile, isJsSourceFile, locOf } from "../program.js";
 import { erasedUnionOfArms, genResultRecord, instantiatedConstraint, isGenericCallableMemberType, isSymbolicCandidateType, typeKey} from "../types.js";
@@ -3472,6 +3472,78 @@ export function islandPrimitiveExit(L: Lowerer, call: ts.CallExpression, result:
     return null;
   }
 
+/** `clearTimeout(h)` where `h` is `Timeout | undefined` / `Timeout | null`
+   * — the shape a `let t: ReturnType<typeof setTimeout> | undefined` gives
+   * every cancel-in-a-finally idiom, and the one zapo's companion-host
+   * handshake has.
+   *
+   * Node's clear functions take anything and DO NOTHING when the argument
+   * is not a live handle, so the optional handle needs no narrowing to be
+   * meaningful: the value either carries the id, and clearing it is the
+   * f64 call this already lowers, or it does not, and the call is a no-op.
+   * `tolerantClearNoop` above already answers the statically-absent
+   * spellings (`clearTimeout(undefined)`, `clearTimeout(null)`) that way;
+   * this is the same rule where the arm is only known at run time.
+   *
+   * The test-and-call goes through an interned one-parameter helper so the
+   * argument evaluates exactly once (a call expression is not a statement
+   * position where the frontend could spill it to a temp). Null when the
+   * handle is not a union of exactly one f64 arm and unit arms — anything
+   * else keeps the fence it had. */
+  function optionalTimerHandleClear(L: Lowerer, handle: IrExpr, fn: IrLibFn, loc: SrcLoc): IrExpr | null {
+    if (handle.type.kind !== "union") return null;
+    const t = handle.type;
+    const def = L.unions.get(t.unionId);
+    if (def === undefined) return null;
+    let idTag = -1;
+    for (let i = 0; i < def.arms.length; i++) {
+      const arm = def.arms[i]!;
+      if (arm.kind === "f64") {
+        if (idTag !== -1) return null; // two numeric arms: no single handle
+        idTag = i;
+      } else if (!isUnitType(arm)) {
+        return null; // a ref arm is not an absent handle
+      }
+    }
+    if (idTag === -1) return null;
+    const key = `clearOpt:${fn}:${t.unionId}`;
+    let name = L.arrHofHelpers.get(key);
+    if (name === undefined) {
+      name = `%timers.clearOpt.${L.arrHofHelpers.size}`;
+      L.arrHofHelpers.set(key, name);
+      const v = (): IrExpr => ({ kind: "varRef", localId: "h.0", type: t, loc });
+      L.liftedFns.push({
+        name,
+        params: [{ localId: "h.0", name: "h", type: t }],
+        returnType: VOID,
+        locals: [{ id: "h.0", name: "h", type: t, mutable: false }],
+        body: [
+          {
+            kind: "if",
+            cond: { kind: "unionIsTag", unionId: t.unionId, tag: idTag, negated: false, value: v(), type: BOOL, loc },
+            then: [
+              {
+                kind: "exprStmt",
+                expr: {
+                  kind: "libCall",
+                  fn,
+                  args: [{ kind: "unionNarrow", unionId: t.unionId, tag: idTag, value: v(), type: F64, loc }],
+                  type: VOID,
+                  loc,
+                },
+                loc,
+              },
+            ],
+            else_: null,
+            loc,
+          },
+        ],
+        loc,
+      });
+    }
+    return { kind: "call", callee: name, args: [handle], type: VOID, loc };
+  }
+
 /** One timer call by MEMBER NAME — the shared lowering behind the ambient
    * globals, the node:timers named/destructured imports, and the namespace
    * form (`timers.setTimeout(...)`). Null when the member isn't a lowered
@@ -3512,6 +3584,10 @@ export function islandPrimitiveExit(L: Lowerer, call: ts.CallExpression, result:
         L.noLowering(`clearTimeout with ${expr.arguments.length} arguments`, expr);
       }
       const handle = L.lowerExpr(expr.arguments[0]!);
+      {
+        const opt = optionalTimerHandleClear(L, handle, "timers.clearTimeout", loc);
+        if (opt !== null) return opt;
+      }
       if (handle.type.kind !== "f64") {
         L.noLowering(
           `clearTimeout of '${L.fmt(handle.type)}' handles`,
@@ -3548,6 +3624,10 @@ export function islandPrimitiveExit(L: Lowerer, call: ts.CallExpression, result:
         L.noLowering(`clearInterval with ${expr.arguments.length} arguments`, expr);
       }
       const handle = L.lowerExpr(expr.arguments[0]!);
+      {
+        const opt = optionalTimerHandleClear(L, handle, "timers.clearInterval", loc);
+        if (opt !== null) return opt;
+      }
       if (handle.type.kind !== "f64") {
         L.noLowering(
           `clearInterval of '${L.fmt(handle.type)}' handles`,
@@ -3576,6 +3656,10 @@ export function islandPrimitiveExit(L: Lowerer, call: ts.CallExpression, result:
         L.noLowering(`clearImmediate with ${expr.arguments.length} arguments`, expr);
       }
       const handle = L.lowerExpr(expr.arguments[0]!);
+      {
+        const opt = optionalTimerHandleClear(L, handle, "timers.clearImmediate", loc);
+        if (opt !== null) return opt;
+      }
       if (handle.type.kind !== "f64") {
         L.noLowering(
           `clearImmediate of '${L.fmt(handle.type)}' handles`,
@@ -13358,7 +13442,15 @@ function freezeFreshLocal(L: Lowerer, ident: ts.Identifier, call: ts.CallExpress
           access.parent !== undefined &&
           ts.isCallExpression(access.parent) &&
           access.parent.expression === access;
-        if (!isWriteTarget && !isSafeCall) ok = false;
+        // (3c) an argument to a call whose PARAMETER only reads. The
+        // theorem the whole fence rests on is "nothing can write through
+        // this value after the freeze"; a callee that never writes through
+        // its parameter, and never hands it on, cannot. Reads are
+        // irrelevant at any time — a property read cannot observe the
+        // frozen bit — so the callee is free to keep reading, even from a
+        // closure that runs later.
+        const isReadOnlyArg = access === undefined && freezeReadOnlyCallArg(L, n);
+        if (!isWriteTarget && !isSafeCall && !isReadOnlyArg) ok = false;
         else if (fnOf(n) !== fn || n.getStart() >= freezeAt) ok = false;
       }
     }
@@ -13366,4 +13458,89 @@ function freezeFreshLocal(L: Lowerer, ident: ts.Identifier, call: ts.CallExpress
   };
   ts.forEachChild(fn, visit);
   return ok;
+}
+
+/** True when `arg` is an argument of a call to a function DECLARED in this
+ * program whose matching parameter is inspect-only: every reference to it
+ * is a property or element READ, and the parameter never appears as a whole
+ * value (no reassignment, no passing it on, no returning it, no spread).
+ *
+ * That is exactly what the freeze fence needs from a callee. The fence's
+ * question is never "who can see this value" but "who can WRITE through it
+ * after the freeze" — a reader cannot, whenever it reads, so a call that
+ * only reads is as harmless to the frozen bit as no call at all. What is
+ * rejected is everything that could retain or mutate: the parameter used
+ * bare (it could be stored), written through, or used as a call receiver
+ * (`p.push(x)` mutates an array).
+ *
+ * The callee must be an ordinary function declaration with a body in the
+ * program, resolved from a plain identifier — a call through a value, a
+ * method, or an overload set has no single body to prove anything about. */
+function freezeReadOnlyCallArg(L: Lowerer, arg: ts.Identifier): boolean {
+  const call = arg.parent;
+  if (call === undefined || !ts.isCallExpression(call)) return false;
+  if (!ts.isIdentifier(call.expression)) return false;
+  const idx = call.arguments.indexOf(arg);
+  if (idx < 0) return false;
+  if (call.arguments.some(ts.isSpreadElement)) return false;
+  const calleeSym = L.resolveValueSymbol(call.expression);
+  if (!calleeSym) return false;
+  const calleeDecl = L.checker.valueDeclarationOf(calleeSym);
+  if (!calleeDecl || !ts.isFunctionDeclaration(calleeDecl) || calleeDecl.body === undefined) return false;
+  const param = calleeDecl.parameters[idx];
+  // A rest parameter collects the value into an array the body holds — a
+  // whole-value use by construction.
+  if (!param || param.dotDotDotToken !== undefined || !ts.isIdentifier(param.name)) return false;
+  const paramSym = L.resolveValueSymbol(param.name);
+  if (!paramSym) return false;
+  // A record carrying ACCESSOR slots breaks the "a read cannot write"
+  // premise this rests on: a getter body can assign through `this`, and
+  // that write is exactly what the frozen bit would refuse. Every other
+  // record's read is a field load.
+  {
+    const pIr = L.mapTypeOf(L.typeOf(param.name));
+    const pShape = pIr?.kind === "record" ? L.shapes.get(pIr.shapeId) : undefined;
+    if (pShape !== undefined && shapeHasAccessorSlots(pShape)) return false;
+  }
+
+  let readsOnly = true;
+  const visit = (n: ts.Node): void => {
+    if (!readsOnly) return;
+    // `arguments` reaches the value without naming the parameter at all,
+    // so a body that mentions it defeats the reference walk below.
+    if (ts.isIdentifier(n) && n.text === "arguments") { readsOnly = false; return; }
+    if (ts.isIdentifier(n) && n !== param.name && n.text === param.name.getText()) {
+      if (L.resolveValueSymbol(n) === paramSym) {
+        const p = n.parent;
+        const access =
+          p !== undefined &&
+          (ts.isPropertyAccessExpression(p) || ts.isElementAccessExpression(p)) &&
+          p.expression === n
+            ? p
+            : undefined;
+        if (access === undefined) {
+          readsOnly = false; // the parameter used as a whole value
+        } else {
+          const ap = access.parent;
+          const isAssignTarget =
+            ap !== undefined && ts.isBinaryExpression(ap) && ap.left === access &&
+            ap.operatorToken.kind >= ts.SyntaxKind.FirstAssignment &&
+            ap.operatorToken.kind <= ts.SyntaxKind.LastAssignment;
+          const isUpdateTarget =
+            ap !== undefined && (ts.isPrefixUnaryExpression(ap) || ts.isPostfixUnaryExpression(ap)) &&
+            ap.operand === access;
+          const isDeleteTarget =
+            ap !== undefined && ts.isDeleteExpression(ap) && ap.expression === access;
+          // `p.m(...)` — a method call through the parameter can mutate it
+          // (`push`, `sort`, `set`, ...), so the read-only claim fails.
+          const isCallReceiver =
+            ap !== undefined && ts.isCallExpression(ap) && ap.expression === access;
+          if (isAssignTarget || isUpdateTarget || isDeleteTarget || isCallReceiver) readsOnly = false;
+        }
+      }
+    }
+    if (readsOnly) ts.forEachChild(n, visit);
+  };
+  ts.forEachChild(calleeDecl.body, visit);
+  return readsOnly;
 }

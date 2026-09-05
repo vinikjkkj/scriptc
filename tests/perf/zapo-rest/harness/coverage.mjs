@@ -1,10 +1,22 @@
 // Cross-reference zapo's public surface against the routes zapo-rest serves.
 import { readFileSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
-const surface = readFileSync("G:/blocks/restapi/lab/surface.txt", "utf8");
-const routes = new Set(
-  readFileSync("G:/blocks/restapi/lab/routes.txt", "utf8").split("\n").map((s) => s.trim()).filter(Boolean),
-);
+/* Paths are environment-driven so the harness runs from any checkout:
+ *   ZAPO_REST_APP  the app directory (default: ../app beside this file)
+ *   ZAPO_REST_LAB  where the generated files go (default: the cwd)
+ * They used to be absolute paths into one block's scratch directory,
+ * which is why nothing but that block could run them. */
+const HERE = dirname(fileURLToPath(import.meta.url));
+const APP = process.env["ZAPO_REST_APP"] ?? join(HERE, "..", "app");
+const LAB = process.env["ZAPO_REST_LAB"] ?? process.cwd();
+
+const surface = readFileSync(join(LAB, "surface.txt"), "utf8");
+/* The routes come from the ENTRY rather than from a hand-kept list: the
+ * whole point of this cross-reference is that it cannot drift. */
+const entrySrc = readFileSync(join(APP, "zapo-rest.ts"), "utf8");
+const routes = new Set([...entrySrc.matchAll(/if \(path === "([^"]+)"\)/g)].map((m) => m[1]));
 
 // group name -> route prefix
 const prefixOf = {
@@ -107,4 +119,4 @@ console.log(`  not routed:   ${unimpl}`);
 const noReason = unimplemented.filter((u) => u.reason === "NOT YET ROUTED");
 console.log(`  of which with NO stated reason: ${noReason.length}`);
 for (const u of noReason) console.log(`     ${u.key}`);
-writeFileSync("G:/blocks/restapi/lab/coverage.json", JSON.stringify({ impl, unimpl, rows, unimplemented }, null, 1));
+writeFileSync(join(LAB, "coverage.json"), JSON.stringify({ impl, unimpl, rows, unimplemented }, null, 1));

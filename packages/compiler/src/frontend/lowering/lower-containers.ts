@@ -6,7 +6,7 @@ import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
 import { BOOL, BYTES_ELEM_SIZE, BYTES_U8, CAUGHT, DV_BIG_SET_METHODS, DYN, F64, IrBytesElem, IrBytesIntrinsicMethod, IrExpr, IrFunction, IrLocal, IrMapIntrinsicMethod, IrParam, IrRecordShape, IrSetIntrinsicMethod, IrStmt, IrType, JSVAL, REF_TRUTHY_KINDS, REGEX, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, bytesOf, canBeArrayElem, canDynCheckTo, funcOf, isRefCounted, isSupportedIndexValue, isUnitType, typeEquals } from "../../ir/nodes.js";
 import { ARRAY_METHODS, MAP_METHODS, SET_COMBINE_METHODS, SET_METHODS, STR_METHODS } from "./surfaces.js";
-import { captureParticipationOfPattern, checkedJsNumber, droppableStatic, entryFoldStringChain, isRequireMainFilename, lowerDynObjectLiteral, probeLower, pureReemittable, staticRegexTextOf } from "./lower-exprs.js";
+import { captureParticipationOfPattern, checkedJsNumber, droppableStatic, entryFoldStringChain, isRequireMainFilename, lowerDynObjectLiteral, probeLower, pureReemittable, staticRegexFlagsOf, staticRegexTextOf } from "./lower-exprs.js";
 import { forOfVarTarget, lowerDestructuringAssign } from "./lower-stmts.js";
 import { isJsSourceFile, locOf } from "../program.js";
 import { DYN_DISPATCH_METHODS, islandPrimitiveExit } from "./lower-calls.js";
@@ -5986,6 +5986,41 @@ const ITER_TERMINALS = new Set(["toArray", "forEach", "reduce", "some", "every",
    *   } finally { s.iterExit(); }
    *   return out;
    */
+  /** A regex value's ToString, through the interned one-parameter helper.
+   * The explicit `re.toString()` call and the implicit conversions
+   * (`${re}`, `String(re)`, `"" + re`) are the same operation and share
+   * this one lowering. */
+  export function regexToStringExpr(L: Lowerer, receiver: IrExpr, loc: SrcLoc): IrExpr {
+    const key = "regexToString";
+    let helper = L.mapHofHelpers.get(key);
+    if (helper === undefined) {
+      helper = `%regex.toString.${L.mapHofHelpers.size}`;
+      L.mapHofHelpers.set(key, helper);
+      L.liftedFns.push(buildRegexToStringFn(helper, loc));
+    }
+    return { kind: "call", callee: helper, args: [receiver], type: STRING, loc };
+  }
+
+  /** `function (r) { return "/" + r.source + "/" + r.flags }` — the
+   * spec's RegExp.prototype.toString, over the intrinsics that answer
+   * those two halves. One parameter, so the receiver evaluates once. */
+  function buildRegexToStringFn(name: string, loc: SrcLoc): IrFunction {
+    const ref: IrExpr = { kind: "varRef", localId: "r.0", type: REGEX, loc };
+    const lit = (value: string): IrExpr => ({ kind: "strLit", value, type: STRING, loc });
+    const half = (method: "source" | "flags"): IrExpr =>
+      ({ kind: "regexIntrinsic", method, receiver: ref, args: [], type: STRING, loc });
+    const cat = (left: IrExpr, right: IrExpr): IrExpr =>
+      ({ kind: "strConcat", left, right, type: STRING, loc });
+    return {
+      name,
+      params: [{ localId: "r.0", name: "r", type: REGEX }],
+      returnType: STRING,
+      locals: [{ id: "r.0", name: "r", type: REGEX, mutable: true }],
+      body: [{ kind: "return", value: cat(cat(cat(lit("/"), half("source")), lit("/")), half("flags")), loc }],
+      loc,
+    };
+  }
+
   function buildMapCloneFn(mapT: IrType & { kind: "map" }, name: string, loc: SrcLoc): IrFunction {
     const ref = (localId: string, type: IrType): IrExpr => ({ kind: "varRef", localId, type, loc });
     const num = (value: number): IrExpr => ({ kind: "numLit", value, type: F64, loc });
@@ -6115,6 +6150,18 @@ const ITER_TERMINALS = new Set(["toArray", "forEach", "reduce", "some", "every",
       const subject = L.lowerExprExpecting(call.arguments[0]!, STRING);
       const resultT: IrType = { kind: "union", unionId: L.unions.intern([arrayOf(STRING), { kind: "nullT" }]) };
       return { kind: "regexIntrinsic", method: "match", receiver: subject, args: [re], type: resultT, loc };
+    }
+    // `re.toString()` — the spec's `"/" + source + "/" + flags`, built from
+    // the two intrinsics that already answer those halves. It goes through
+    // a LIFTED helper rather than concatenating in place because the
+    // receiver would otherwise be lowered twice (once per half) and so
+    // evaluated twice: as a helper parameter it evaluates exactly once,
+    // which is the tuple-seed helper's argument in Set construction. The
+    // regex's own state is not read, so no g/y fence applies — toString is
+    // pure over source and flags.
+    if (receiverKind === "regex" && name === "toString" && call.arguments.length === 0) {
+      const receiver = L.lowerExpr(access.expression);
+      if (receiver.type.kind === "regex") return regexToStringExpr(L, receiver, loc);
     }
     // `s.match(re)` for non-g/y regexes: Node's exec-shaped result reduced
     // to the honest slice — the `string[] | null` union holding
@@ -6305,9 +6352,19 @@ const ITER_TERMINALS = new Set(["toArray", "forEach", "reduce", "some", "every",
     const at = call.arguments[1] ?? call;
     const fence = (why: string): never => L.unsupported("SC1120", at, why);
     const lit = staticRegexTextOf(L, reNode);
-    if (lit === null) {
+    // The PATTERN is needed for exactly one proof — which capture groups
+    // always participate — and a replacer that declares only the whole
+    // match asks about no group at all. So a regex whose pattern is built
+    // at run time still lowers for that arity; what it cannot do without
+    // is the FLAGS, which decide global-vs-once and the alphabet.
+    // store-sqlite's table-name resolver is the program:
+    //
+    //   const pattern = new RegExp(`\\b(?:${names.join("|")})\\b`, "g")
+    //   return (sql) => sql.replace(pattern, (token) => map[token] ?? token)
+    const flags = lit !== null ? lit.flags : staticRegexFlagsOf(L, reNode);
+    if (flags === null) {
       fence(
-        "a function replacement value over a regex the compiler cannot read statically (the group-participation proof needs the pattern — write the literal at the call, or bind it to a const)",
+        "a function replacement value over a regex whose FLAGS the compiler cannot read statically (global-or-once is decided at compile time — write the flags argument as a literal, or bind the regex to a const)",
       );
     }
     // The flag ALPHABET, checked here and not only in lowerRegexLiteral.
@@ -6317,18 +6374,18 @@ const ITER_TERMINALS = new Set(["toArray", "forEach", "reduce", "some", "every",
     // them (the 'g' completion below), which turned an ordinary SC1120
     // into an SC9001 ICE ("regexLit flags \"dg\" outside the supported
     // alphabet"). Found by a deliberate flag sweep, not by a fixture.
-    if ([...lit!.flags].some((f) => !"gimsuvy".includes(f))) {
+    if ([...flags!].some((f) => !"gimsuvy".includes(f))) {
       fence(
-        `a function replacement value over a regex with the '${[...lit!.flags].filter((f) => !"gimsuvy".includes(f)).join("")}' flag (the lowered alphabet is g/i/m/s/u/v/y)`,
+        `a function replacement value over a regex with the '${[...flags!].filter((f) => !"gimsuvy".includes(f)).join("")}' flag (the lowered alphabet is g/i/m/s/u/v/y)`,
       );
     }
-    const part = captureParticipationOfPattern(lit!.pattern);
-    if (part === null) {
+    const part = lit !== null ? captureParticipationOfPattern(lit.pattern) : null;
+    if (lit !== null && part === null) {
       fence(
         "a function replacement value over a pattern this compiler cannot scan for capture-group participation (a '{n,m}' quantifier on a group, or an escaped group name)",
       );
     }
-    if (method === "replaceAll" && !lit!.flags.includes("g")) {
+    if (method === "replaceAll" && !flags!.includes("g")) {
       fence(
         "'.replaceAll()' with a function replacement value and a non-global regex (Node throws a TypeError here; add the 'g' flag)",
       );
@@ -6342,9 +6399,14 @@ const ITER_TERMINALS = new Set(["toArray", "forEach", "reduce", "some", "every",
       );
     }
     const arity = fnT.params.length;
-    if (arity > 1 + part!.captureCount) {
+    if (part === null && arity > 1) {
       fence(
-        `a function replacement value declaring ${arity} parameters over a pattern with ${part!.captureCount} capture group(s) (the trailing offset/subject/groups parameters have no lowering — declare only the match and its groups)`,
+        `a function replacement value declaring ${arity} parameters over a regex the compiler cannot read statically (a parameter past the first reads a capture group, and the participation proof needs the pattern — write the pattern as a literal, or declare only the match)`,
+      );
+    }
+    if (part !== null && arity > 1 + part.captureCount) {
+      fence(
+        `a function replacement value declaring ${arity} parameters over a pattern with ${part.captureCount} capture group(s) (the trailing offset/subject/groups parameters have no lowering — declare only the match and its groups)`,
       );
     }
     for (let i = 0; i < arity; i++) {
@@ -6362,10 +6424,26 @@ const ITER_TERMINALS = new Set(["toArray", "forEach", "reduce", "some", "every",
     // The internal regex is the source one with 'g' guaranteed. When the
     // author already wrote it, the ALREADY-LOWERED operand rides through
     // (a const binding stays evaluated, exactly as JS evaluates it).
-    const re: IrExpr = lit!.flags.includes("g")
+    // Without the pattern there is no literal to synthesize, so the
+    // completion happens at run time instead — over the source regex's own
+    // `source`, with the STATIC flags plus 'g' (this arm is the branch
+    // where 'g' is known absent, so the concatenation cannot duplicate it
+    // and cannot throw). The value is still built once, at the call.
+    const re: IrExpr = flags!.includes("g")
       ? reIr
-      : { kind: "regexLit", pattern: lit!.pattern, flags: lit!.flags + "g", type: REGEX, loc };
-    const once = !lit!.flags.includes("g");
+      : lit !== null
+        ? { kind: "regexLit", pattern: lit.pattern, flags: flags! + "g", type: REGEX, loc }
+        : {
+            kind: "libCall",
+            fn: "regex.new",
+            args: [
+              { kind: "regexIntrinsic", method: "source", receiver: reIr, args: [], type: STRING, loc },
+              { kind: "strLit", value: flags! + "g", type: STRING, loc },
+            ],
+            type: REGEX,
+            loc,
+          };
+    const once = !flags!.includes("g");
     const helper = strReplaceFnHelper(L, arity, once, loc);
     return { kind: "call", callee: helper, args: [receiver, re, fnIr], type: STRING, loc };
   }
