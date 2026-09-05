@@ -42,13 +42,20 @@ class Box<T> {
 }
 // The uninstantiated family as a value: no thunk, no single ctor ABI.
 const BoxAlias = Box;
-// A base that mentions the class's own type parameters would differ per
-// instantiation — no single family interval can cover them.
+// A base that mentions the class's own type parameters differs per
+// instantiation, so the family SPLITS: each instantiation extends the base
+// its own arguments named and the family is not their common ancestor. The
+// class itself compiles; what it gives up is the one thing that needed the
+// ancestor link — an `instanceof` interval covering the whole family.
 class Chained<T> extends Box<T> {
   constructor(v: T) {
     super(v);
   }
 }
+function chainedInstanceOf(v: Chained<number>): boolean {
+  return v instanceof Chained;
+}
+console.log(chainedInstanceOf(new Chained(1)));
 // Generic class expressions: each evaluation would mint a distinct FAMILY.
 const ExprFamily = class <T> {
   x: T | undefined;

@@ -17,32 +17,25 @@ generics.ts:44:18 - error SC1090: generic classes as values ('typeof Box' keeps 
   43 | // The uninstantiated family as a value: no thunk, no single ctor ABI.
   44 | const BoxAlias = Box;
      |                  ^~~
-  45 | // A base that mentions the class's own type parameters would differ per
+  45 | // A base that mentions the class's own type parameters differs per
 
-generics.ts:47:26 - error SC1090: generic classes whose 'extends' clause mentions their own type parameters (each instantiation would need a different base) are not supported yet
+generics.ts:56:10 - error SC1090: 'instanceof Chained' where the class's 'extends' clause mentions its own type parameters (each instantiation extends a different base, so no one interval covers the family the way JS's single runtime class does) are not supported yet
 
-  46 | // instantiation — no single family interval can cover them.
-  47 | class Chained<T> extends Box<T> {
-     |                          ^~~~~~
-  48 |   constructor(v: T) {
+  55 | function chainedInstanceOf(v: Chained<number>): boolean {
+  56 |   return v instanceof Chained;
+     |          ^~~~~~~~~~~~~~~~~~~~
+  57 | }
 
-generics.ts:53:20 - error SC1090: generic class expressions are not supported yet
+generics.ts:60:20 - error SC1090: generic class expressions are not supported yet
 
-  52 | // Generic class expressions: each evaluation would mint a distinct FAMILY.
-  53 | const ExprFamily = class <T> {
+  59 | // Generic class expressions: each evaluation would mint a distinct FAMILY.
+  60 | const ExprFamily = class <T> {
      |                    ^~~~~~~~~~~
-  54 |   x: T | undefined;
+  61 |   x: T | undefined;
 
-generics.ts:66:1 - error SC1090: constructing through a class value whose class has no lowering (the class declaration itself was rejected — see its own diagnostic) is not supported yet
+generics.ts:74:1 - error SC1090: constructing through a class value whose class has no lowering (the class declaration itself was rejected — see its own diagnostic) is not supported yet
 
-  65 | new Box(1);
-  66 | new Chained(2);
-     | ^~~~~~~~~~~~~~
-  67 | new ExprFamily<number>();
-
-generics.ts:67:1 - error SC1090: constructing through a class value whose class has no lowering (the class declaration itself was rejected — see its own diagnostic) is not supported yet
-
-  66 | new Chained(2);
-  67 | new ExprFamily<number>();
+  73 | new Chained(2);
+  74 | new ExprFamily<number>();
      | ^~~~~~~~~~~~~~~~~~~~~~~~
-  68 | 
+  75 | 
