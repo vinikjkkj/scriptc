@@ -24,7 +24,7 @@ import { lowerSqliteMethodCall, lowerSqliteNew } from "./lower-sqlite.js";
 import { lowerWrtcMethodCall } from "./lower-wrtc.js";
 import { classHasKeyHelper, classInMemberNames, droppableStatic, dynAssertionReceiver, fnOwnCounters, keyedCalleeAtUndefinedArm, spawnResStreamArg, jsonStringifySpawnStreamArg, unionArmBridge, fnOwnPropBox, fnOwnRoutableKey, fnOwnWhy, lowerPromiseAllTupleCall, lowerPromiseRejectCall, narrowBridgeDyn, probeLower, recordArmStringable, templateRawTextOf } from "./lower-exprs.js";
 import { httpClientFnBindingOf, isStreamUndefCallExpr, lowerHttpClientFnCall } from "./lower-server.js";
-import { CLASS_PROPS_FIELD, EMITTER_API_MEMBERS, definePropSlotSiteOf, definePropTableSiteOf, exactInstanceClassOf, findGenericMethodOn, lowerClassGenericMethodCall, lowerStaticMethodCall, type ClassInfo } from "./lower-classes.js";
+import { CLASS_PROPS_FIELD, EMITTER_API_MEMBERS, definePropSlotSiteOf, definePropTableSiteOf, exactInstanceClassOf, findGenericMethodOn, lowerClassGenericMethodCall, lowerStaticMethodCall, requireVirtualSlotFit, virtualViewFitsSlot, type ClassInfo } from "./lower-classes.js";
 import { boundEmitDispatcher, emitterRooted, lowerEmitterMethodCall } from "./lower-emitter.js";
 import { lowerConsoleInspectArg, lowerFormatCall } from "./lower-inspect.js";
 import { STREAM_API_MEMBERS, lowerStreamMethodCall, lowerStreamModuleCall, lowerStreamStaticCall, streamSidesOf } from "./lower-stream.js";
@@ -6893,6 +6893,10 @@ const inliningPredicates = new Set<ts.Symbol>();
     const virtual = L.overrideBelow(info, "toString");
     if (found.sig.abstract === true && !virtual) return null;
     if (found.sig.ret.kind !== "string") return null;
+    // A dispatch the vtable slot's signature cannot carry (a middle class
+    // widened) keeps the old answer — the fold declines rather than fences,
+    // exactly like the abstract and non-string cases above.
+    if (virtual && !virtualViewFitsSlot(L, info, "toString")) return null;
     // `toString(radix?: number)` DOES have a zero-argument entry point in
     // JS -- `String(x)` and `x.toString()` call it with no argument, and
     // the body's `radix ?? 0` is written for exactly that. The emitted C
@@ -13118,6 +13122,10 @@ export function lowerFunction(L: Lowerer, decl: ts.FunctionDeclaration): IrFunct
         `calls of the abstract method '${method}' with no concrete implementation below the receiver's static class`,
       );
     }
+    // The dispatch this call is about to compile must be spelled at the
+    // vtable slot's signature (a middle class that widened is the only way
+    // it is not — see requireVirtualSlotFit).
+    if (L.overrideBelow(info, method)) requireVirtualSlotFit(L, info, method, call);
     if (L.overrideBelow(info, method)) L.noteVirtualEdge(info, method);
     else L.noteEdge(`%${found.declarer.def.name}.${method}`);
     const receiver = L.lowerExpr(access.expression);

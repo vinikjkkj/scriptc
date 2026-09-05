@@ -111,10 +111,15 @@ export function buildClassGraph(mod: IrModule, fnByName: Map<string, IrFunction>
           // Abstract declarer: the slot ABI comes from any concrete
           // descendant implementation; none anywhere means the slot can
           // never dispatch (only abstract classes declare it) — skip.
+          // A WIDENED implementation is not spelled at the slot; its
+          // synthesized thunk `%C.m%vt` is, and so is every unwidened one,
+          // so preferring the thunk makes every candidate agree (the C
+          // emitter's collectSlots carries the same preference).
           const findImpl = (c: LlClassMeta): IrFunction | undefined => {
             for (const child of c.children) {
               const f = declares(child, method) && !child.def.abstractMethods?.includes(method)
-                ? fnByName.get(`%${child.def.name}.${method}`)
+                ? fnByName.get(`%${child.def.name}.${method}%vt`) ??
+                  fnByName.get(`%${child.def.name}.${method}`)
                 : undefined;
               const found = f ?? findImpl(child);
               if (found) return found;
@@ -262,6 +267,9 @@ export function emitClassShapes(
   const defs: string[] = [];
   const emitted = (mod.classes ?? []).filter((c) => !c.runtime);
   if (emitted.length === 0) return { typeDefs, defs };
+  // The module's function names, for spotting a widened override's
+  // synthesized vtable thunk (`%C.m%vt`) when the entries are filled.
+  const emittedFnNames = new Set((mod.functions ?? []).map((f) => f.name));
   host.declare(`declare void @scr_obj_alloc_note()`);
   host.declare(`declare void @scr_obj_free_note()`);
 
@@ -303,10 +311,19 @@ export function emitClassShapes(
   for (const cls of emitted) {
     const meta = metaMap.get(cls.name)!;
     if (!meta.hierarchy) continue;
+    // A WIDENED override is callable at the slot but not SPELLED at it, so
+    // its entry is the frontend's synthesized thunk `%C.m%vt` (which is).
+    // Everything else keeps the method function itself — the header's "no
+    // adapters" simplification, which override exactness still buys for
+    // every unwidened slot.
     const entries = vtEntriesFor(meta).map(({ slot, impl }) =>
       impl === null
         ? `ptr null` // outside the declaring subtree / fully-abstract chain
-        : `ptr @${mangleFunction(`%${impl.def.name}.${slot.method}`)}`,
+        : `ptr @${mangleFunction(
+            emittedFnNames.has(`%${impl.def.name}.${slot.method}%vt`)
+              ? `%${impl.def.name}.${slot.method}%vt`
+              : `%${impl.def.name}.${slot.method}`,
+          )}`,
     );
     const head = `%ScrVt { i64 ${meta.pre}, i64 ${meta.post}, ptr @${mangleClassReleaseDirect(cls.name)} }`;
     defs.push(

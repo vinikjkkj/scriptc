@@ -10311,6 +10311,42 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/7560-http-rest-server-shapes.ts": {
+   "order": [
+    "<repo>/tests/corpus/7560-http-rest-server-shapes.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/7580-override-covariant-return-into-unknown.ts": {
+   "order": [
+    "<repo>/tests/corpus/7580-override-covariant-return-into-unknown.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/7581-override-adds-a-trailing-optional-parameter.ts": {
+   "order": [
+    "<repo>/tests/corpus/7581-override-adds-a-trailing-optional-parameter.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/7582-override-widening-in-the-middle-of-a-chain.ts": {
+   "order": [
+    "<repo>/tests/corpus/7582-override-widening-in-the-middle-of-a-chain.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/7583-override-widens-parameters-and-return-together.ts": {
+   "order": [
+    "<repo>/tests/corpus/7583-override-widens-parameters-and-return-together.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/7584-declare-fields-are-type-only.ts": {
+   "order": [
+    "<repo>/tests/corpus/7584-declare-fields-are-type-only.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/760-any-arithmetic.ts": {
    "order": [
     "<repo>/tests/corpus/760-any-arithmetic.ts"
@@ -11899,6 +11935,12 @@
   "<repo>/tests/diagnostics/overloaded-function-values.ts": {
    "order": [
     "<repo>/tests/diagnostics/overloaded-function-values.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/override-widened-mid-chain-dispatch.ts": {
+   "order": [
+    "<repo>/tests/diagnostics/override-widened-mid-chain-dispatch.ts"
    ],
    "diags": []
   },
