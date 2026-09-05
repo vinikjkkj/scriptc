@@ -10323,6 +10323,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/7560-http-rest-server-shapes.ts": {
+   "order": [
+    "<repo>/tests/corpus/7560-http-rest-server-shapes.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/7570-content-interning-across-the-identity-surfaces.ts": {
    "order": [
     "<repo>/tests/corpus/7570-content-interning-across-the-identity-surfaces.ts"
@@ -10332,6 +10338,54 @@
   "<repo>/tests/corpus/760-any-arithmetic.ts": {
    "order": [
     "<repo>/tests/corpus/760-any-arithmetic.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/7600-math-minmax-mixed-spread-and-positional.ts": {
+   "order": [
+    "<repo>/tests/corpus/7600-math-minmax-mixed-spread-and-positional.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/7601-a-set-constructed-from-another-set.ts": {
+   "order": [
+    "<repo>/tests/corpus/7601-a-set-constructed-from-another-set.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/7602-a-regex-printed-by-tostring.ts": {
+   "order": [
+    "<repo>/tests/corpus/7602-a-regex-printed-by-tostring.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/7603-freeze-of-a-local-a-reading-callee-inspected.ts": {
+   "order": [
+    "<repo>/tests/corpus/7603-freeze-of-a-local-a-reading-callee-inspected.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/7604-clearing-an-optional-timer-handle.ts": {
+   "order": [
+    "<repo>/tests/corpus/7604-clearing-an-optional-timer-handle.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/7605-a-replacer-over-a-runtime-built-regex.ts": {
+   "order": [
+    "<repo>/tests/corpus/7605-a-replacer-over-a-runtime-built-regex.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/7606-a-nullish-default-whose-own-type-has-no-home.ts": {
+   "order": [
+    "<repo>/tests/corpus/7606-a-nullish-default-whose-own-type-has-no-home.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/7607-promisified-deflate-with-a-level-option.ts": {
+   "order": [
+    "<repo>/tests/corpus/7607-promisified-deflate-with-a-level-option.ts"
    ],
    "diags": []
   },
