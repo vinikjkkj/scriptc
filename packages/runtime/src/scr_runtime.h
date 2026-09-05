@@ -742,6 +742,15 @@ static inline ScrStr *scr_str_retain(ScrStr *s) {
 
 void scr_str_release(ScrStr *s); /* NULL-tolerant (uninitialized locals) */
 
+/* Drop every reference scr_string.c's content-intern table holds. The table
+ * is a CACHE: an entry is byte-equal to whatever the next miss would build,
+ * so draining it can change when a string is freed and can never change a
+ * value. Two callers, and both are about being able to SEE the table:
+ * scr_str_live_count (so the RC audit counts strings the program can reach,
+ * not strings the cache is holding) and packages/runtime/test/test_intern.c
+ * (which asserts the difference). */
+void scr_str_intern_drain(void);
+
 /* Borrow both args, return +1. */
 ScrStr *scr_str_concat(ScrStr *a, ScrStr *b);
 

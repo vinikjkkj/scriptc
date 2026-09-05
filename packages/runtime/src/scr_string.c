@@ -11,7 +11,33 @@
  * use-after-free on the rc field or a negative count here). */
 #ifdef SCR_RC_AUDIT
 static long scr_live_strings = 0;
-long scr_str_live_count(void) { return scr_live_strings; }
+/* THE OBSERVER DRAINS THE CONTENT-INTERN TABLE FIRST, and that is the whole
+ * re-statement of this counter's contract under interning.
+ *
+ * What it counted before interning: live heap-string OBJECTS, which was the
+ * same number as "strings the program can still reach", because the runtime
+ * held no string of its own. Interning breaks that equality in one
+ * direction only -- the table is an extra OWNING reference, so a string the
+ * program has finished with can still be an object. It is never the other
+ * way round: the table cannot make a reachable string unreachable.
+ *
+ * So the two numbers are "objects" and "objects the program can reach", and
+ * this function answers the SECOND, by dropping the table before it looks.
+ * That keeps every assertion written against it literally true -- `strings0
+ * + 4`, "aa and bb released, cc and dd shared", "no strings leaked", and
+ * scr_console.c's atexit audit -- and it keeps them MEANING what they said,
+ * which deleting them or slackening them to an inequality would not.
+ *
+ * The first number is not lost: scr_str_live_objects() below reports it
+ * undrained, and packages/runtime/test/test_intern.c asserts the gap between
+ * the two is exactly the table's holdings. A test that could not see the
+ * gap would be a test that cannot tell interning from its absence. */
+long scr_str_live_count(void) {
+  scr_str_intern_drain();
+  return scr_live_strings;
+}
+/* Undrained: live string OBJECTS, table holdings included. */
+long scr_str_live_objects(void) { return scr_live_strings; }
 #endif
 
 static void scr_oom(void) {
@@ -129,55 +155,135 @@ __attribute__((constructor)) static void scr_poolstat_reg_string(void) {
 }
 #endif
 
-/* ── CONTENT INTERNING: EXPERIMENTAL, DEFAULT OFF ─────────────────────
- * WHAT IT IS FOR. The census of the real messaging bench (SCR_STRCEN_ON,
- * G:\blocks\stringmem\lab\strcen-memoff.txt) says the live heap-string
- * population at its high-water mark is 541,092 strings holding 42,733,824
- * physical bytes, that 93.70% of them carry capacity 50, and that only
- * 20,322 of the 456,257 the walk read are DISTINCT -- 95.55% of the live
- * population is byte-equal to another live string, holding 34,639,520 B.
- * That is 41% of the whole live heap duplicated. No allocator change can
- * touch it; only not making the copy can.
+/* ── CONTENT INTERNING ────────────────────────────────────────────────
+ * WHAT IT IS FOR. The census of the real messaging bench (SCR_STRCEN_ON)
+ * says the live heap-string population at its high-water mark is 541,092
+ * strings, and that only 20,322 of the 456,257 the walk reads are
+ * DISTINCT -- 95.55% of the live population is byte-equal to another live
+ * string. That is 41% of the whole live heap duplicated. No allocator
+ * change can touch it; only not making the copy can. It is not a few hot
+ * strings either: the top 24 contents hold 1.72% of the peak, and the
+ * count scales as group_members x messages, one retained JID copy per
+ * (group message x recipient) out of send_group's fanout.
  *
- * WHY IT IS OFF, and what it would take to turn it on. Interning cannot
- * change a JavaScript answer -- strings are primitives, so `===`, Map and
- * Set keys and every dyn crossing compare VALUE, which corpus program 7530
- * checks against the oracle. What it changes is the runtime's own
- * ALLOCATION DISCIPLINE, and the runtime's C unit tests are written against
- * that discipline by exact count: test_array.c alone asserts
- * `scr_str_live_count() == strings0 + 4`, "aa and bb released, cc and dd
- * shared", and a dozen more. Those are correct assertions about a
- * non-interning allocator and every one of them would have to be re-stated.
- * The audit lane is where they run, so interning is compiled out there --
- * which means the RC audit does not cover this arm, and that is a hole this
- * knob NAMES rather than hides.
+ * THE SHAPE. A fixed-size SET-ASSOCIATIVE cache of OWNING references, not
+ * a table with eviction sweeps. Two properties carry it:
  *
- * WHAT IS MEASURED HERE. SCR_STRING_INTERN=1 turns it on in the same image,
- * so the ceiling above stops being arithmetic: it becomes a peak-RSS number
- * and a cycle number on the real bench, which is what a decision needs.
+ *   OWNING. An entry always has rc >= 1 from the table, so an interned
+ *   string can never be seen with rc == 1 by scr_str_concat's in-place
+ *   arm or by scr_str_regrow (whose contract is rc == 1 and whose only
+ *   caller is the JSON builder's own buffer, never a concat result). The
+ *   one way interning could corrupt a value -- mutating a string the
+ *   table still points at -- cannot arise. It is the whole safety
+ *   argument, and it is a property of the DATA, not of a review of the
+ *   call sites.
  *
- * THE SHAPE. A fixed-size DIRECT-MAPPED cache of OWNING references, not a
- * table with eviction sweeps. Owning is the load-bearing choice: an entry
- * always has rc >= 1 from the table, so an interned string can never be
- * seen with rc == 1 by scr_str_concat's in-place arm, and the one way
- * interning could corrupt a value -- mutating a string the table still
- * points at -- cannot arise. A collision EVICTS by releasing the resident
- * entry, so nothing is immortal and the table's own footprint is bounded at
- * SCR_STR_INTERN_SLOTS pointers plus whatever the live entries cost.
+ *   SET-ASSOCIATIVE, WITH ADMISSION BY rc. The victim is the
+ *   LEAST-REFERENCED way, and a set whose every way is still referenced by
+ *   the PROGRAM (rc > 1) refuses the newcomer entirely. rc == 1 means "the
+ *   table is the only thing holding this", i.e. dead weight, and dead
+ *   weight is all the table ever gives up, so a hot entry is never evicted
+ *   by a cold one.
+ *
+ *   WHAT THAT DID AND DID NOT BUY, because the reason it was built is not
+ *   the reason to keep it. It was built to remove a 15.6% run-to-run spread
+ *   in peak RSS (156.68-181.20 MiB across six runs of one arm) that had
+ *   been attributed to two hot contents colliding in a direct-mapped table.
+ *   IT DID NOT: 24 runs per arm on the real messaging bench, memory store,
+ *   palindrome order, against an A/A floor of 0.28% on peak RSS --
+ *
+ *     intern off                179.09 MiB median, 177.38-181.22,  2.1%
+ *     direct-mapped, evict all  168.48        -10.61, 155.51-182.46, 16.0%
+ *     4-way, admission by rc    166.78        -12.31, 152.70-178.03, 15.2%
+ *
+ *   -- so associativity moved the spread 16.0% -> 15.2% and the diagnosis
+ *   was wrong. THE TABLE IS NOT WHERE THE VARIANCE LIVES, and the counters
+ *   say so directly: across three instrumented runs the hit rate is
+ *   97.27/97.36/97.27%, evictions 78,428/73,454/76,502, the live string
+ *   high-water 4.290/4.218/4.280 MiB and the arena's committed chunks
+ *   57/57/58 -- every string-side quantity inside 2% -- while peak process
+ *   RSS on those same three runs was 337.54/336.21/358.98 MiB. Two runs
+ *   whose table behaviour is identical to four digits differ by 22.8 MiB.
+ *   Removing a large STABLE term from a max() exposes the noisy smaller
+ *   terms underneath; that is the whole effect, and no table can fix it.
+ *
+ *   What the change IS worth keeping for is the TAIL. The direct-mapped
+ *   arm's worst run (182.46) is worse than not interning at all (max
+ *   181.22); the admission-gated arm's worst (178.03) is not. Never worse
+ *   is a property; a smaller variance is not one this bought.
+ *
+ * WAYS IS A RUNTIME KNOB, and that is deliberate: SCR_STRING_INTERN_WAYS=1
+ * turns this back into exactly the direct-mapped table, in the SAME image
+ * with the same hash and the same array, so the spread claim above is an
+ * A/B and not a comparison across binaries. It is also the POSITIVE
+ * CONTROL for the counters -- see scr_cs_sievict / scr_cs_sirefuse in
+ * tests/perf/cycstat/scr_cyc_stat.h: on ways 1 the eviction counter must
+ * be enormous, and a build where it reads small on BOTH settings is a
+ * broken instrument, not a well-behaved cache.
  *
  * Only scr_str_concat's copy path is hooked, because that is where the
- * measured population is born (capacity 50 is the `a->rc == 1` growth arm's
- * output for a 28-byte result), and because a narrow hook is a narrow blast
- * radius. MINLEN keeps chain INTERMEDIATES out: `"5511" + digits` is 14
- * bytes and is not a value anyone stores, and interning it would only cost
- * the next link its in-place append. */
+ * measured population is born, and because a narrow hook is a narrow blast
+ * radius. Nothing that builds a string by any other route -- slice,
+ * Buffer.toString, the JSON builder, scr_str_alloc_raw's nine call sites --
+ * can reach the table at all. MINLEN keeps chain INTERMEDIATES out:
+ * `"5511" + digits` is 14 bytes and is not a value anyone stores, and
+ * interning it would only cost the next link its in-place append.
+ *
+ * WHAT IT IS WORTH, measured on the real zapo messaging bench with the fake
+ * server in a separate node process, on top of the arena and the growth
+ * threshold that are already in this file:
+ *
+ *   STRING BYTES, and this is the number that is DETERMINISTIC. The live
+ *   string high-water goes 34.51 MiB -> 4.29 MiB (-30.2 MiB, -87.6%) and
+ *   the live count 541,092 -> 64,312, both inside 2% across runs. The
+ *   string arena's committed chunks go 464 -> 57, i.e. 29.0 MiB -> 3.6 MiB
+ *   of address space it never gives back. Allocations go 11,775,088 ->
+ *   7,505,024: 4.27 million memcpy-plus-block that do not happen.
+ *
+ *   PEAK PROCESS RSS, and this is the number that is NOT. Median -12.31 MiB
+ *   (-6.9%) on the memory store over 24 runs, but spread over 152.70-178.03
+ *   where the un-interned arm holds 177.38-181.22. On the sqlite store the
+ *   median is +1.99 MiB, which is inside that lane's 4.4% A/A floor -- no
+ *   claim in either direction there, and the floor is the reason, not the
+ *   sign. Peak RSS is a max() over the whole run and the string high-water
+ *   stops being the term that wins it.
+ *
+ *   CPU: no claim. The six-phase cycle sum reads 1.05x against a position
+ *   floor of 11.1% on this host, and the fixed-work instruction count that
+ *   could settle it needs callgrind, which needs an ELF binary and a
+ *   valgrind this Windows host does not have.
+ *
+ * WHAT IT COSTS. 512 KiB of BSS for the pointers, faulted in lazily. Up to
+ * SCR_STR_INTERN_SLOTS strings the program has finished with, held until
+ * something displaces them: 65,536 * ~152 B = 9.5 MiB is the worst case at
+ * MAXLEN, and 3.5 MiB is what the bench actually holds at exit. It does not
+ * scale with the program -- the table is the bound. And an FNV pass over
+ * the result bytes on every concat in the band, hit or miss, which is what
+ * a workload with no duplication pays for nothing.
+ *
+ * IT IS COMPILED IN UNDER SCR_RC_AUDIT, unlike the pool, the spare block
+ * and the arena. Those three are compiled out because that lane exists to
+ * prove every logical free is a real free and ASan can only see that if
+ * the free reaches the CRT -- an argument about WHERE a block goes. A
+ * table that holds references across the whole run is a different thing:
+ * it is a LIFETIME shape, and a lifetime shape that the lifetime lane does
+ * not run is a lifetime shape nothing checks. So it runs there, and
+ * scr_str_live_count drains the table before answering -- see the note on
+ * that function. */
 #ifndef SCR_STR_INTERN
-#define SCR_STR_INTERN 0
+#define SCR_STR_INTERN 1
 #endif
 #ifndef SCR_STR_INTERN_BITS
 #define SCR_STR_INTERN_BITS 16
 #endif
 #define SCR_STR_INTERN_SLOTS (1u << SCR_STR_INTERN_BITS)
+/* 4, over 16,384 sets for the bench's 20,322 distinct live contents: mean
+ * occupancy 1.24 per set, so a Poisson tail puts ~1.2% of sets at four or
+ * more and the refusal counter can be read against that. 1 is the
+ * direct-mapped control. */
+#ifndef SCR_STR_INTERN_WAYS
+#define SCR_STR_INTERN_WAYS 4
+#endif
 #ifndef SCR_STR_INTERN_MINLEN
 #define SCR_STR_INTERN_MINLEN 16
 #endif
@@ -185,8 +291,11 @@ __attribute__((constructor)) static void scr_poolstat_reg_string(void) {
 #define SCR_STR_INTERN_MAXLEN 128
 #endif
 
-#ifndef SCR_RC_AUDIT
 static ScrStr *scr_str_itab[SCR_STR_INTERN_SLOTS];
+/* Non-NULL slots. Only so the drain below can be O(1) when nothing was ever
+ * interned: a table-wide scan would otherwise fault in all 512 KiB of BSS
+ * in a program that never made a single concat in the band. */
+static size_t scr_str_itab_used;
 
 static int scr_str_intern_on(void) {
   static int cached = -1;
@@ -194,6 +303,41 @@ static int scr_str_intern_on(void) {
   if (cached < 0) {
     const char *env = getenv("SCR_STRING_INTERN");
     cached = env != NULL ? (strtol(env, NULL, 10) != 0) : (SCR_STR_INTERN != 0);
+  }
+  return cached;
+}
+
+/* Ways, clamped to a power of two in [1, 64] that divides the table. An
+ * unparseable or out-of-range value falls back to the compiled default
+ * rather than to 1: a typo must not silently select the arm this cache
+ * exists to avoid. */
+static unsigned scr_str_intern_ways(void) {
+  static unsigned cached = 0;
+  if (cached == 0) {
+    unsigned w = (unsigned)SCR_STR_INTERN_WAYS;
+    const char *env = getenv("SCR_STRING_INTERN_WAYS");
+    if (env != NULL) {
+      long v = strtol(env, NULL, 10);
+      if (v >= 1 && v <= 64 && (v & (v - 1)) == 0) w = (unsigned)v;
+    }
+    if (w > SCR_STR_INTERN_SLOTS) w = SCR_STR_INTERN_SLOTS;
+    cached = w;
+  }
+  return cached;
+}
+
+/* Admission: 1 = a set gives up only a way the PROGRAM has finished with
+ * (rc == 1), 0 = a miss always evicts the least-referenced way. This is a
+ * SECOND knob and not folded into ways for one reason: the table that
+ * thrashed was direct-mapped AND unconditionally evicting, and those are two
+ * changes. With them separate, WAYS=1 ADMIT=0 reproduces that table exactly,
+ * in the same image, so the variance this cache was rebuilt to remove can be
+ * attributed to one of them rather than to "the rewrite". */
+static int scr_str_intern_admit(void) {
+  static int cached = -1;
+  if (cached < 0) {
+    const char *env = getenv("SCR_STRING_INTERN_ADMIT");
+    cached = env != NULL ? (strtol(env, NULL, 10) != 0) : 1;
   }
   return cached;
 }
@@ -210,39 +354,83 @@ static unsigned scr_str_ihash(const char *x, size_t nx, const char *y, size_t ny
 }
 
 /* A RETAINED string with these bytes if the cache holds one, else NULL.
- * *slot is always written: a miss still names where a put would go, so the
- * caller hashes once. */
+ * *slot is always written with the SET BASE: a miss still names where a put
+ * would look, so the caller hashes once. */
 static ScrStr *scr_str_intern_get(const char *x, size_t nx, const char *y,
                                   size_t ny, unsigned *slot) {
-  ScrStr *e;
-  unsigned k = scr_str_ihash(x, nx, y, ny);
-  *slot = k;
-  e = scr_str_itab[k];
-  if (e == NULL) return NULL;
-  if ((size_t)e->len != nx + ny) return NULL;
-  /* rc is 32 bits and UINT32_MAX is the immortal marker. Half of it is more
-   * references than any real program holds (the bench's measured maximum is
-   * 1,001), and stopping there means the counter can never reach the marker
-   * by sharing. */
-  if (e->rc > (SCR_STR_IMMORTAL >> 1)) return NULL;
-  if (nx != 0 && memcmp(e->data, x, nx) != 0) return NULL;
-  if (ny != 0 && memcmp(e->data + nx, y, ny) != 0) return NULL;
-  e->rc++;
-  SCR_CS_BUMP(sihit);
-  return e;
+  unsigned w = scr_str_intern_ways();
+  unsigned base = scr_str_ihash(x, nx, y, ny) & ~(w - 1u);
+  unsigned i;
+  *slot = base;
+  for (i = 0; i < w; i++) {
+    ScrStr *e = scr_str_itab[base + i];
+    if (e == NULL) continue;
+    if ((size_t)e->len != nx + ny) continue;
+    /* rc is 32 bits and UINT32_MAX is the immortal marker. Half of it is
+     * more references than any real program holds (the bench's measured
+     * maximum is 1,001), and stopping there means the counter can never
+     * reach the marker by sharing. */
+    if (e->rc > (SCR_STR_IMMORTAL >> 1)) continue;
+    if (nx != 0 && memcmp(e->data, x, nx) != 0) continue;
+    if (ny != 0 && memcmp(e->data + nx, y, ny) != 0) continue;
+    e->rc++;
+    SCR_CS_BUMP(sihit);
+    return e;
+  }
+  SCR_CS_BUMP(simiss);
+  return NULL;
 }
 
-static void scr_str_intern_put(unsigned k, ScrStr *s) {
-  ScrStr *e = scr_str_itab[k];
-  s->rc++; /* the table's OWN reference; see the note on rc >= 1 above */
-  scr_str_itab[k] = s;
-  SCR_CS_BUMP(siput);
-  if (e != NULL) {
+/* Offer s to the set at `base`. Takes an empty way; failing that, evicts the
+ * least-referenced way, but ONLY when that way is table-only (rc == 1). A
+ * set every one of whose ways the program still holds keeps them all and s
+ * is simply not cached -- see the admission note above. */
+static void scr_str_intern_put(unsigned base, ScrStr *s) {
+  unsigned w = scr_str_intern_ways();
+  unsigned i, victim = base;
+  uint32_t best = UINT32_MAX;
+  for (i = 0; i < w; i++) {
+    ScrStr *e = scr_str_itab[base + i];
+    if (e == NULL) {
+      s->rc++; /* the table's OWN reference; see the note on rc >= 1 above */
+      scr_str_itab[base + i] = s;
+      scr_str_itab_used++;
+      SCR_CS_BUMP(siput);
+      return;
+    }
+    if (e->rc < best) { best = e->rc; victim = base + i; }
+  }
+  if (best != 1 && scr_str_intern_admit()) {
+    /* every way is still referenced by the program */
+    SCR_CS_BUMP(sirefuse);
+    return;
+  }
+  {
+    ScrStr *e = scr_str_itab[victim];
+    s->rc++;
+    scr_str_itab[victim] = s;
+    SCR_CS_BUMP(siput);
     SCR_CS_BUMP(sievict);
     scr_str_release(e);
   }
 }
-#endif /* !SCR_RC_AUDIT */
+
+/* Drop every reference the table holds. A cache reference is not a program
+ * reference: dropping the whole table can change WHEN a string is freed and
+ * can never change any value, because an entry is byte-equal to whatever the
+ * next miss will build. This is what makes scr_str_live_count mean the same
+ * thing it meant before interning existed. */
+void scr_str_intern_drain(void) {
+  size_t i;
+  if (scr_str_itab_used == 0) return;
+  for (i = 0; i < SCR_STR_INTERN_SLOTS; i++) {
+    ScrStr *e = scr_str_itab[i];
+    if (e == NULL) continue;
+    scr_str_itab[i] = NULL;
+    scr_str_release(e);
+  }
+  scr_str_itab_used = 0;
+}
 
 /* 512, MEASURED, not chosen. On the real zapo messaging bench, memory store,
  * six runs per arm pooled over both halves of a palindrome arm order (so the
@@ -512,6 +700,25 @@ ScrStr *scr_str_alloc_raw(size_t len, size_t cap) {
 
 ScrStr *scr_str_regrow(ScrStr *s, size_t newcap) {
   scr_str_size_check(newcap); /* realloc, not scr_str_alloc: its own fence */
+  /* THE rc == 1 CONTRACT, MACHINE-CHECKED IN THE AUDIT LANE. This function
+   * is a realloc: it frees `s` and hands back a different address, so any
+   * second holder of `s` is left with a dangling pointer. Its only caller
+   * is scr_jb_grow over the JSON builder's own buffer, which comes from
+   * scr_str_alloc_raw and is never published -- but "only caller" is a fact
+   * about today's tree, and content interning makes the failure mode much
+   * worse: the intern table would be left pointing at freed memory, and the
+   * next hit on those bytes would hand a program a dangling string.
+   *
+   * An interned string always has rc >= 2 (the table's own reference plus
+   * the caller's), so this fence is exactly the statement "the table can
+   * never reach here", checked rather than reasoned. It is audit-lane only:
+   * the shipping lane keeps the historical instruction stream, and the
+   * lane that would catch a violation is the lane that runs under ASan. */
+#ifdef SCR_RC_AUDIT
+  if (s->rc != 1) {
+    scr_trap("scriptc: scr_str_regrow on a shared string\n");
+  }
+#endif
   /* A CARVED BLOCK CANNOT BE realloc'd — it did not come from the CRT. The
    * test is the same predicate the allocation used, over the same field, so
    * it cannot disagree with where the block came from. This is not a rare
@@ -614,10 +821,10 @@ ScrStr *scr_str_concat(ScrStr *a, ScrStr *b) {
    * with rc == 2 — the variable plus the emitted temp — every iteration;
    * the slack is what lets the free-block cache above satisfy the next
    * iteration's slightly-larger allocation). */
-#ifndef SCR_RC_AUDIT
   /* The interning probe, BEFORE the allocation it would replace. A hit
    * returns a string that already holds these bytes, so the memcpy, the
-   * block and the eventual free all do not happen. */
+   * block and the eventual free all do not happen. Compiled in under
+   * SCR_RC_AUDIT as well -- see the header comment on the table. */
   unsigned islot = 0;
   int iwant = 0;
   if (newlen >= SCR_STR_INTERN_MINLEN && newlen <= SCR_STR_INTERN_MAXLEN &&
@@ -626,7 +833,6 @@ ScrStr *scr_str_concat(ScrStr *a, ScrStr *b) {
     if (hit != NULL) return hit;
     iwant = 1;
   }
-#endif
   size_t newcap = newlen;
   size_t gmin = scr_str_growth_min();
   if (a->rc == 1 && newlen >= gmin) {
@@ -653,9 +859,7 @@ ScrStr *scr_str_concat(ScrStr *a, ScrStr *b) {
   memcpy(s->data, a->data, a->len);
   memcpy(s->data + a->len, b->data, b->len);
   s->data[newlen] = '\0';
-#ifndef SCR_RC_AUDIT
   if (iwant) scr_str_intern_put(islot, s);
-#endif
   return s;
 }
 
