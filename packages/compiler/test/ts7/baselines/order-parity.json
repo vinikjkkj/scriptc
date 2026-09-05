@@ -10323,6 +10323,30 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/7560-http-rest-server-shapes.ts": {
+   "order": [
+    "<repo>/tests/corpus/7560-http-rest-server-shapes.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/7590-a-bound-subscribe-dispatcher-over-a-plugin-context.ts": {
+   "order": [
+    "<repo>/tests/corpus/7590-a-bound-subscribe-dispatcher-over-a-plugin-context.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/7591-an-untabled-event-is-armed-by-the-subscribe-dispatcher.ts": {
+   "order": [
+    "<repo>/tests/corpus/7591-an-untabled-event-is-armed-by-the-subscribe-dispatcher.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/7592-a-subscribe-slot-over-a-run-time-chosen-receiver.ts": {
+   "order": [
+    "<repo>/tests/corpus/7592-a-subscribe-slot-over-a-run-time-chosen-receiver.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/760-any-arithmetic.ts": {
    "order": [
     "<repo>/tests/corpus/760-any-arithmetic.ts"

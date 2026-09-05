@@ -1876,7 +1876,8 @@ function boundEmitKeySet(L: Lowerer, ctxTs: ts.Type): { keys: string[]; map: ts.
   return keySetOfSignature(L, sigs[0]!);
 }
 
-/** The same read over an OVERLOADED member: the class's own `emit` declares
+/** The same read over an OVERLOADED member (`emit` by default; the subscribe
+ * dispatcher passes `on`/`off`/`once`): the class's own declaration carries
  * the typed arm and the forwarding arm side by side, and the typed arm is the
  * one carrying `<K extends keyof M>`. First arm that has it wins — a class
  * declares at most one event map, and the forwarding arm has no type
@@ -1885,6 +1886,7 @@ function emitterClassKeySet(
   L: Lowerer,
   member: ts.Expression,
   info: ClassInfo,
+  name = "emit",
 ): { keys: string[]; map: ts.Type } | null {
   const fromType = ((): { keys: string[]; map: ts.Type } | null => {
     let t: ts.Type;
@@ -1909,7 +1911,7 @@ function emitterClassKeySet(
   for (let c: ClassInfo | null = info; c; c = c.base) {
     for (const m of c.decl?.members ?? []) {
       if (!ts.isMethodDeclaration(m)) continue;
-      if (m.name === undefined || !ts.isIdentifier(m.name) || m.name.text !== "emit") continue;
+      if (m.name === undefined || !ts.isIdentifier(m.name) || m.name.text !== name) continue;
       let sig: ts.Signature | undefined;
       try {
         sig = L.checker.getSignatureFromDeclaration(m);
@@ -2567,6 +2569,310 @@ export function boundEmitDispatcher(
   ctx.locals.push({ id: recvId, name: "%bmrecv", type: recv.type, mutable: false, boxed: true });
   if (process.env["SCRIPTC_BEMIT_WHY"] !== undefined) {
     console.error(`[bemit] BUILT ${fname} for ${recvIr.className}: ${arms.map((a) => a.name).join(",")}`);
+  }
+  return {
+    kind: "seqExpr",
+    stmts: [{ kind: "varDecl", localId: recvId, init: recv, loc }],
+    result: { kind: "closure", fnName: fname, captures: [recvId], type: slot, loc },
+    type: slot,
+    loc,
+  };
+}
+
+
+/* ══ THE BOUND-SUBSCRIBE DISPATCHER ══════════════════════════════════════
+ *
+ * `on: client.on.bind(client)` inside a plugin-context literal — the other
+ * half of the coordinator idiom `boundEmitDispatcher` already answers, and
+ * the shape zapo's `installWaClientPlugins` writes three lines running
+ * (`on`, `off`, `once`) directly under the `emit` line that dispatcher
+ * built.
+ *
+ * The member read alone has no value for exactly the reason emit's does
+ * not: `on` monomorphizes per literal event name, so no single function
+ * exists to take the address of. What exists is a function that names the
+ * events itself — one `strEq` arm per event the SLOT's own constraint
+ * admits, each arm registering with a STATIC name so the event keeps its
+ * own tuple.
+ *
+ * WHAT IS DIFFERENT FROM EMIT, AND WHY EACH DIFFERENCE IS A HAZARD.
+ *
+ * (1) THE LISTENER COMES OUT OF AN IR UNION, not a `ts.Expression`. The
+ *     direct path types the callback from its syntax node
+ *     (`lowerListenerArg`); here the slot's second parameter is the erased
+ *     `EvMap[K]`, which maps to the UNION of every event's declared handler
+ *     type. The arm must extract its own handler out of that union, and the
+ *     extraction is CHECKED (`checkedArmHelper`, the same machinery the
+ *     emit dispatcher's payload extraction uses) — because the pair
+ *     (name, listener) is bound by tsc's generic instantiation and by
+ *     nothing the runtime performed. An `any`-typed forwarder that pairs
+ *     'alpha' with 'beta''s listener would otherwise call a closure through
+ *     the wrong signature with no diagnostic. A wrong pair now throws the
+ *     catchable TypeError.
+ *
+ * (2) THE SLOT RETURNS `this`. Node's `on` is chainable, and the erased
+ *     slot's return type is the receiver's class, not void. The arm hands
+ *     back the captured receiver (upcast when the slot names an ancestor);
+ *     a slot returning anything else declines.
+ *
+ * (3) `off` MUST FIND WHAT `on` REGISTERED. It does, and for a structural
+ *     reason rather than a lucky one: both arms narrow the SAME closure
+ *     value out of the union (a union payload is the closure pointer, not
+ *     a copy), and the runtime's off matches listeners by identity — the
+ *     same identity `emitter.off` and `listenerCount(name, fn)` already
+ *     use for a directly registered listener.
+ *
+ * (4) AN EVENT WITH NO TABLE ENTRY IS ARMED, NOT SKIPPED. The emit
+ *     dispatcher skips such a key because emitting a name nothing listens
+ *     to is a no-op. The mirror of that argument is NOT available here:
+ *     skipping would leave a listener unregistered, which `listenerCount`
+ *     and `rawListeners` can both see, and Node would have registered it.
+ *     So the arm is built from the key map's own declared handler, whose
+ *     parameter list IS the event's tuple when no other site named it.
+ *     That is sound because no emit can reach such a name: every emit's
+ *     event name must be a compile-time string literal (`eventNameOf`), a
+ *     literal-named emit on an emitter-rooted receiver always enters the
+ *     program-global table, and a slot-routed emit — bound or loose — arms
+ *     only names the table already holds. A name absent from the table can
+ *     therefore be listened for and never fired, which is exactly what the
+ *     registration does. */
+
+/** The subscribe surface, with the two flags each spelling carries. */
+const SUBSCRIBE_MEMBERS: ReadonlyMap<string, { registering: boolean; once: boolean; prepend: boolean }> = new Map([
+  ["on", { registering: true, once: false, prepend: false }],
+  ["addListener", { registering: true, once: false, prepend: false }],
+  ["once", { registering: true, once: true, prepend: false }],
+  ["prependListener", { registering: true, once: false, prepend: true }],
+  ["prependOnceListener", { registering: true, once: true, prepend: true }],
+  ["off", { registering: false, once: false, prepend: false }],
+  ["removeListener", { registering: false, once: false, prepend: false }],
+]);
+
+/** The key map's declared handler for one event, as an IR function type —
+ * read SYNTACTICALLY through the same alias walk `keyMapArity` uses, so a
+ * wide event map costs one `getTypeFromTypeNode` per key and never a
+ * signature query. Null for any spelling that is not a plain function type
+ * with fixed parameters. */
+function keyMapHandler(L: Lowerer, map: ts.Type, key: string): (IrType & { kind: "func" }) | null {
+  const prop = L.checker.getPropertyOfType(map, key);
+  if (prop === undefined) return null;
+  const decl = L.checker.valueDeclarationOf(prop);
+  if (decl === undefined || !ts.isPropertySignature(decl)) return null;
+  const fn = handlerFnTypeNodeOf(decl.type, L.checker);
+  if (fn === null || fn.parameters.some((p) => p.dotDotDotToken !== undefined)) return null;
+  try {
+    const mapped = L.mapTypeOf(L.checker.getTypeFromTypeNode(fn));
+    if (mapped?.kind !== "func" || mapped.rest === true) return null;
+    return mapped;
+  } catch {
+    return null;
+  }
+}
+
+/** True when `cls` is `want` or descends from it. */
+function classReaches(L: Lowerer, cls: string, want: string): boolean {
+  for (let c: ClassInfo | null = L.classes.get(cls) ?? null; c; c = c.base) {
+    if (c.def.name === want) return true;
+  }
+  return false;
+}
+
+/** The note a wrong (name, listener) pair carries. */
+const SUBSCRIBE_NOTE = "a listener was registered under an event whose declared handler it is not";
+
+/** `X.on.bind(X)` / `X.off.bind(X)` / `X.once.bind(X)` against a generic
+ * key-map slot: the dispatcher, or null when any part of the shape does not
+ * hold (the caller then keeps the member-as-a-value diagnostic). */
+export function boundSubscribeDispatcher(
+  L: Lowerer,
+  call: ts.CallExpression,
+  methodAccess: ts.PropertyAccessExpression,
+): IrExpr | null {
+  const why = (r: string): null => {
+    if (process.env["SCRIPTC_BSUB_WHY"] !== undefined) {
+      const l = locOf(call);
+      console.error(`[bsub] ${l.file}@${l.start} ${r}`);
+    }
+    return null;
+  };
+  const member = methodAccess.name.text;
+  const mode = SUBSCRIBE_MEMBERS.get(member);
+  if (mode === undefined) return null;
+  let recvIr: IrType | null;
+  try {
+    recvIr = L.mapTypeOf(L.typeOf(methodAccess.expression));
+  } catch {
+    return why("the receiver's type does not resolve");
+  }
+  if (recvIr?.kind !== "object") return why(`the receiver maps to '${recvIr ? L.fmt(recvIr) : "nothing"}'`);
+  const info = L.classes.get(recvIr.className);
+  if (!info || !emitterRooted(L, info)) return why("the receiver is not emitter-rooted");
+  // The same contextual-type walk the emit dispatcher performs, and for the
+  // same reason: `X.on.bind(X) as unknown as Slot` erases the destination
+  // the program actually named, so the OUTERMOST asserted type is taken.
+  let ctxTs = L.checker.getContextualType(call);
+  if (ctxTs === undefined || L.mapTypeOf(ctxTs)?.kind !== "func") {
+    let outer: ts.Node = call;
+    while (
+      ts.isParenthesizedExpression(outer.parent) ||
+      ts.isAsExpression(outer.parent) ||
+      ts.isTypeAssertion(outer.parent)
+    ) {
+      outer = outer.parent;
+    }
+    if (outer !== call && ts.isExpression(outer)) {
+      try {
+        const asserted = L.typeOf(outer);
+        if (L.mapTypeOf(asserted)?.kind === "func") ctxTs = asserted;
+      } catch { /* keep the contextual type */ }
+    }
+  }
+  if (ctxTs === undefined) return why("the bind site has no contextual type");
+  const slot = L.mapTypeOf(ctxTs);
+  if (slot?.kind !== "func") return why(`the slot maps to '${slot ? L.fmt(slot) : "nothing"}'`);
+  if (process.env["SCRIPTC_BSUB_WHY"] !== undefined) console.error(`[bsub] SLOTKEY ${typeKey(slot)}`);
+  if (slot.rest === true || slot.params.length !== 2) {
+    return why(`the slot takes ${slot.params.length} parameters (rest=${String(slot.rest === true)})`);
+  }
+  const nameT = slot.params[0]!;
+  if (nameT.kind !== "string") return why(`the slot's event parameter is '${L.fmt(nameT)}'`);
+  const lisT = slot.params[1]!;
+  if (lisT.kind !== "func" && lisT.kind !== "union") return why(`the slot's listener parameter is '${L.fmt(lisT)}'`);
+  // Chainable: the slot returns `this`, which erases to the receiver's own
+  // class or an ancestor of it. A void slot is the other honest spelling.
+  const retT = slot.ret;
+  if (retT.kind !== "void" && !(retT.kind === "object" && classReaches(L, recvIr.className, retT.className))) {
+    return why(`the slot returns '${L.fmt(retT)}'`);
+  }
+  // The slot's own constraint is the precise answer (the emit dispatcher's
+  // fact (1)), but the surface zapo publishes does not give it: `WaClient<T>`
+  // spells `<K extends keyof (WaClientEventMap & TPluginEvents)>`, and a type
+  // NODE resolves in the scope it was written in, so the constraint comes back
+  // with `TPluginEvents` still abstract and enumerates nothing. The receiver's
+  // own class declares the CLOSED map on its own `on`, which is the same
+  // second road `looseEmitDispatcher` already takes for `emit`. Arming a name
+  // the slot could not have passed is dead code, never a wrong dispatch.
+  const keySet = boundEmitKeySet(L, ctxTs) ?? emitterClassKeySet(L, methodAccess, info, member);
+  if (keySet === null) return why("neither the slot nor the receiver class names an enumerable keyof event map");
+  const table = emitterEvents(L);
+  const loc = locOf(call);
+
+  const arms: { name: string; listener: (v: () => IrExpr) => IrExpr }[] = [];
+  for (const key of keySet.keys) {
+    // The meta events hand their listener the affected event's NAME and, in
+    // Node, the listener function itself — a second argument with no unified
+    // static type. The direct path fences on it; so does this one.
+    if (META_EVENTS.has(key)) return why(`'${key}' is a meta event`);
+    if (streamForcedTuple(L, info, key) !== null) return why(`'${key}' is a stream event`);
+    const sig = table.get(key);
+    if (sig?.conflict) return why(`'${key}' has conflicting argument types`);
+    // A dyn-flavored listener elsewhere in the program means the bucket may
+    // hold originals of mixed signatures; the arm has no one static tuple.
+    if (sig?.dynListener) return why(`'${key}' has a dyn-flavored listener`);
+    const want = keyMapHandler(L, keySet.map, key);
+    if (want === null) return why(`the key map does not spell '${key}' plainly`);
+    // The tuple this event carries. With a table entry it is the program-wide
+    // unification; without one nothing anywhere can emit the name, and the
+    // key map's own handler is the only declaration there is.
+    const tuple = sig?.tuple ?? want.params;
+    if (want.params.length > tuple.length) {
+      return why(`the '${key}' handler declares ${want.params.length} parameters where the event's tuple has ${tuple.length}`);
+    }
+    for (let i = 0; i < want.params.length; i++) {
+      if (!typeEquals(want.params[i]!, tuple[i]!)) {
+        return why(`the '${key}' handler's parameter ${i} is '${L.fmt(want.params[i]!)}' where the event's tuple has '${L.fmt(tuple[i]!)}'`);
+      }
+    }
+    if (typeEquals(lisT, want)) {
+      arms.push({ name: key, listener: (v) => v() });
+      continue;
+    }
+    if (lisT.kind !== "union") return why(`the '${key}' handler is '${L.fmt(want)}' where the slot's listener parameter is '${L.fmt(lisT)}'`);
+    const helper = L.checkedArmHelper(lisT.unionId, want, loc, SUBSCRIBE_NOTE);
+    if (helper !== null) {
+      arms.push({
+        name: key,
+        listener: (v) => ({ kind: "call", callee: helper, args: [v()], type: want, narrowBridge: true, loc }),
+      });
+      continue;
+    }
+    const tag = L.armTag(lisT.unionId, want);
+    if (tag < 0) return why(`the '${key}' handler '${L.fmt(want)}' is not an arm of the slot's listener union`);
+    arms.push({
+      name: key,
+      listener: (v) => ({ kind: "unionNarrow", unionId: lisT.unionId, tag, value: v(), type: want, loc }),
+    });
+  }
+  if (arms.length === 0) return why("the slot's constraint names no event");
+
+  // INTERNED per (receiver class, member, slot signature): `on` and `once`
+  // wear the SAME slot type and must not share a body.
+  const ikey = `emitsub:${recvIr.className}:${member}:${typeKey(slot)}`;
+  let fname = L.widthHelpers.get(ikey);
+  if (fname === undefined) {
+    fname = `%emit.sub.${L.widthHelpers.size}`;
+    L.widthHelpers.set(ikey, fname);
+    const selfT: IrType = { kind: "object", className: recvIr.className };
+    const self = (): IrExpr => ({ kind: "varRef", localId: "self.0", type: selfT, loc });
+    const lisRef = (): IrExpr => ({ kind: "varRef", localId: "lis.0", type: lisT, loc });
+    const chained = (): IrExpr | null => (retT.kind === "void" ? null : L.upcastTo(self(), retT.className));
+    const body: IrStmt[] = [];
+    for (const arm of arms) {
+      const cb = arm.listener(lisRef);
+      const reg: IrExpr = {
+        kind: "libCall",
+        fn: mode.registering ? "emitter.on" : "emitter.off",
+        args: mode.registering
+          ? [self(), strLit(arm.name, loc), cb, boolLit(mode.once, loc), boolLit(mode.prepend, loc)]
+          : [self(), strLit(arm.name, loc), cb],
+        type: selfT,
+        loc,
+      };
+      body.push({
+        kind: "if",
+        cond: {
+          kind: "strEq",
+          negated: false,
+          left: { kind: "varRef", localId: "ev.0", type: STRING, loc },
+          right: strLit(arm.name, loc),
+          type: BOOL,
+          loc,
+        },
+        then: [{ kind: "exprStmt", expr: reg, loc }, { kind: "return", value: chained(), loc }],
+        else_: null,
+        loc,
+      });
+    }
+    // A name no arm claims: the constraint admits none, so nothing compiled
+    // can ever emit it and Node's own registration would never fire. The
+    // chain value is still what the caller gets back.
+    body.push({ kind: "return", value: chained(), loc });
+    L.liftedFns.push({
+      name: fname,
+      params: [
+        { localId: "ev.0", name: "ev", type: STRING },
+        { localId: "lis.0", name: "lis", type: lisT },
+      ],
+      returnType: retT,
+      captures: [{ localId: "self.0", name: "self", type: selfT }],
+      locals: [
+        { id: "self.0", name: "self", type: selfT, mutable: false, boxed: true },
+        { id: "ev.0", name: "ev", type: STRING, mutable: false },
+        { id: "lis.0", name: "lis", type: lisT, mutable: false },
+      ],
+      body,
+      loc,
+    });
+  }
+  const recv = L.lowerExpr(methodAccess.expression);
+  if (recv.type.kind !== "object") return why(`the lowered receiver is '${L.fmt(recv.type)}'`);
+  const ctx = L.ctx;
+  const count = ctx.localCounters.get("%bmrecv") ?? 0;
+  ctx.localCounters.set("%bmrecv", count + 1);
+  const recvId = `%bmrecv.${count}`;
+  ctx.locals.push({ id: recvId, name: "%bmrecv", type: recv.type, mutable: false, boxed: true });
+  if (process.env["SCRIPTC_BSUB_WHY"] !== undefined) {
+    console.error(`[bsub] BUILT ${fname} for ${recvIr.className}.${member}: ${arms.map((a) => a.name).join(",")}`);
   }
   return {
     kind: "seqExpr",
