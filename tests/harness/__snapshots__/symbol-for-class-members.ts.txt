@@ -1,0 +1,6 @@
+symbol-for-class-members.ts:21:13 - error SC1090: symbol-keyed property access outside class fields keyed by a module-level `const k = Symbol('desc')` (static shapes have no symbol-keyed storage) is not supported yet
+
+  20 | console.log(h.plain());
+  21 | console.log(h[KEY]);
+     |             ^~~~~~
+  22 | 
