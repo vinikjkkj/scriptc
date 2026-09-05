@@ -1,0 +1,62 @@
+any-outside-an-index-signature-still-has-no-representation.ts:17:7 - error SC2011: values of type 'any[]' have no static representation but run in the embedded dynamic engine, which this build does not include
+
+  16 | // an `any` ARRAY: the element slot is a named slot
+  17 | const arr: any[] = [1, "x"];
+     |       ^~~
+  18 | 
+
+  hint: build with --dynamic to run these values in the embedded engine (adds ~620KB to the binary), or restate the type inside the static surface (https://scriptc.dev/limitations describes the boundary)
+
+any-outside-an-index-signature-still-has-no-representation.ts:20:7 - error SC2011: values of type '{ item: any; width: string; }' have no static representation but run in the embedded dynamic engine, which this build does not include
+
+  19 | // an `any` MEMBER of a record: same
+  20 | const rec = { item: {} as any, width: "10px" };
+     |       ^~~
+  21 | 
+
+  hint: build with --dynamic to run these values in the embedded engine (adds ~620KB to the binary), or restate the type inside the static surface (https://scriptc.dev/limitations describes the boundary)
+
+any-outside-an-index-signature-still-has-no-representation.ts:20:13 - error SC2011: values of type '{ item: any; width: string; }' have no static representation but run in the embedded dynamic engine, which this build does not include
+
+  19 | // an `any` MEMBER of a record: same
+  20 | const rec = { item: {} as any, width: "10px" };
+     |             ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  21 | 
+
+  hint: build with --dynamic to run these values in the embedded engine (adds ~620KB to the binary), or restate the type inside the static surface (https://scriptc.dev/limitations describes the boundary)
+
+any-outside-an-index-signature-still-has-no-representation.ts:25:13 - error SC2011: the '+' operator on 'any'-typed values runs in the embedded dynamic engine, which this build does not include
+
+  24 | // operand types to pick an operation from
+  25 | console.log(admitted.a + 1);
+     |             ^~~~~~~~~~~~~~
+  26 | console.log(admitted.a * 2);
+
+  hint: build with --dynamic to run 'any'-typed code in the embedded engine (adds ~620KB to the binary), or stay static with 'unknown' and a checked cast ('x as T')
+
+any-outside-an-index-signature-still-has-no-representation.ts:26:13 - error SC2011: the '*' operator on 'any'-typed values runs in the embedded dynamic engine, which this build does not include
+
+  25 | console.log(admitted.a + 1);
+  26 | console.log(admitted.a * 2);
+     |             ^~~~~~~~~~~~~~
+  27 | 
+
+  hint: build with --dynamic to run 'any'-typed code in the embedded engine (adds ~620KB to the binary), or stay static with 'unknown' and a checked cast ('x as T')
+
+any-outside-an-index-signature-still-has-no-representation.ts:31:17 - error SC2011: values of type '[string, any][]' have no static representation but run in the embedded dynamic engine, which this build does not include
+
+  30 | // for...in, `in`, delete, spread and JSON.stringify all compile over it.
+  31 | for (const e of Object.entries(admitted)) console.log(e[0], String(e[1]));
+     |                 ^~~~~~~~~~~~~~~~~~~~~~~~
+  32 | 
+
+  hint: build with --dynamic to run these values in the embedded engine (adds ~620KB to the binary), or restate the type inside the static surface (https://scriptc.dev/limitations describes the boundary)
+
+any-outside-an-index-signature-still-has-no-representation.ts:33:25 - error SC2004: uses of 'rec' inherit the blocker on its declaration
+
+  32 | 
+  33 | console.log(arr.length, rec.width);
+     |                         ^~~~~~~~~
+  34 | export const marker: number = 1;
+
+  hint: the declaration of 'rec' did not compile — fix the diagnostic reported there and these sites clear with it
