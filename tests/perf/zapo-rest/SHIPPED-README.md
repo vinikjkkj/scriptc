@@ -137,10 +137,11 @@ with a status:
 The 501 case is worth understanding: this binary is compiled ahead of time, so a
 zapo construct with no static lowering becomes a per-statement runtime refusal
 rather than a missing route, and the service turns that into a 501 that **names
-the compiler diagnostic**. One such construct is left in this build, on the
-plugin-installation path no route reaches (see "What still refuses" below), so
-no route answers 501 today — the classifier stays because the alternative is a
-route that vanishes or a process that dies.
+the compiler diagnostic**. **This build is compiled strictly and no such
+construct is left on any routed path**, so no route answers 501 (see "What
+still refuses" below for the one deferred site that remains, which no route
+reaches). The classifier stays because the alternative is a route that vanishes
+or a process that dies.
 
 ### Receiving messages
 
@@ -190,28 +191,44 @@ turns each one into a per-statement runtime throw instead, so the count to
 watch is the number of DEFERRED SITES in the emitted module, not whether the
 build succeeded.
 
-| arm | was | is |
-|---|---|---|
-| strict, no `--best-effort` | 14 errors | **1** |
-| `--best-effort`, deferred sites in the emitted module | 15 by the bracket scan | **4** sites (**1** bracket) |
+| arm | `958b912f` | `b6aac7aa` | `c02b73ca` (this build) |
+|---|---|---|---|
+| strict, no `--best-effort` | 14 errors | 1 error | **0 errors, 1 advisory** |
+| `--best-effort`, deferred sites in the emitted module | 15 by the bracket scan | 4 sites (1 bracket) | **1 site (1 bracket)** |
 
-"was" is the shipped 29,085,696-byte binary, measured at `958b912f`; "is" is
-measured on the tree that carries this file. The two deferred numbers are not
-the same measurement: the old scan counted `[SCxxxx]` markers inside message
-text, and only some refusals spell one — the four sites below are three
-`SC1090` throws that carry the code as an argument plus one bracketed
-`SC2020` fence. The bracket count is printed beside the site count so the
-difference is visible rather than inferred.
+`958b912f` is the 29,085,696-byte binary shipped on 2026-09-04; `b6aac7aa` is
+the revision that first carried this file. **This binary is built strictly**
+— the `--best-effort` column is now a cross-check, not the shipping arm.
 
-The one strict error, and three of the four deferred sites, are the same
-construct: **`client.on.bind(client)`** (and `.off`, `.once`) in zapo's own
-`src/client/plugins/install.ts:77`. The EventEmitter surface is the runtime's
-and is monomorphized per event — each event name carries its own payload
-tuple — so there is no single function value to bind or pass. It is reached
-only when a zapo client PLUGIN is installed, and this service installs none.
+The deferred numbers across columns are not one measurement: the oldest scan
+counted `[SCxxxx]` markers inside message text, and only some refusals spell
+one. The bracket count is printed beside the site count so the difference is
+visible rather than inferred.
 
-The fourth deferred site is `require()` with a run-time specifier, one
-statement inside `spec/proto/index.js`, which predates all of this.
+What closed the strict arm was `9fd92e4b`, *a bound subscribe reads its slot
+off the bind's own type*. The one strict error and three of the four deferred
+sites were the same construct: **`client.on.bind(client)`** (and `.off`,
+`.once`) in zapo's own `src/client/plugins/install.ts:77`, an EventEmitter
+surface monomorphized per event. All four are gone.
+
+**One deferred site is left, and it is deliberate**: `require()` with a
+run-time specifier, one statement inside the vendored minified protobufjs at
+`spec/proto/index.js` (protobufjs's `inquire()`, a `require()` in a
+`try`/`catch`). It is emitted as `scr_fence_fatal`, the refusal that is *not*
+catchable, precisely so `inquire()` cannot swallow it into the `null` it
+would hand back on any other platform. `scr_runtime.h` documents the site as
+the one construct that opts into that treatment. It survives a strict build
+because a fence is not a compile error.
+
+The strict arm's one advisory is `SC6003` on
+`src/auth/credentials-flow.ts:204` in zapo's own source — a projection that
+copies `readyState` off a socket whose methods write it. Advice, not a
+refusal; the build succeeds and nothing is deferred.
+
+Both arms were built from the same tree into separate caches and agree: the
+executables are the same size to the byte, and the emitted modules differ in
+exactly two string literals, both of which embed the absolute path of the
+provenance checkout each arm used.
 
 Everything else the shipped binary used to defer now compiles: the
 `/message/send` content object, both download routes, and seven lowerings in
@@ -258,6 +275,35 @@ Also not present in this build:
   readers, but two servers on one file writing the same session will fight.
 * **Logout is one-way.** After `POST /logout` the client instance is spent;
   restart the process to pair again.
+* **Memory: the fiber-stack pool, and how to see it.** Every awaiting call in
+  this binary owns a real stack, and a finished one goes back to a pool
+  rather than being freed — that is what keeps a burst of concurrent work
+  from paying the page-fault bill twice. The pool is capped
+  (`SCR_FIBER_POOL`, default 4096) and, since this build, it also *decays*:
+  every `SCR_FIBER_POOL_DECAY_MS` (default 5000) it frees half of whatever
+  sat idle for the whole window, so a burst's high-water mark comes back
+  down instead of being held until the process exits.
+
+  **This is the first build that can be asked whether the pool is involved
+  in a given memory climb.** Set `SCR_FIBER_POOL_STAT=1` and the process
+  writes one line per window to **stderr**:
+
+  ```
+  [fiberpool] window freed=0 idle=12 lo=0 decayedTotal=0
+  [fiberpool] window freed=3 idle=9 lo=6 decayedTotal=3
+  [fiberpool] window freed=2 idle=7 lo=3 decayedTotal=5
+  ```
+
+  `idle` is how many stacks the pool is holding right now, `lo` the number
+  that were idle at every instant of the window (the provably surplus ones),
+  `freed` how many this window released. Read `idle` during and after a
+  history sync: if it climbs into the thousands the pool is holding the
+  memory, and if it stays in the tens it is not and the climb is elsewhere.
+  A window that frees nothing still prints, so "no lines at all" means the
+  decay is off (`SCR_FIBER_POOL_DECAY_MS=0`) rather than idle — the two are
+  distinguishable readings. Measured on the HTTP path the pool has not been
+  seen above 189 stacks against the 4096 cap, so **the decay is not known to
+  fix an idle-10-MB-to-70-MB climb**; the instrument is here to settle it.
 
 ---
 
@@ -270,13 +316,22 @@ Verified against this exact binary:
   bodies, the `x-api-key` gate, 400/401/404, and the 501 classifier;
 * **persistence across a restart**: the process was killed and restarted on the
   same file and the store came back with the same row counts;
-* it opens a real WebSocket to `wss://web.whatsapp.com/ws/chat` and completes
-  the noise handshake (`harness/verify.sh` prints the run log);
+* it opens a real WebSocket to `wss://web.whatsapp.com:5222/ws/chat`, completes
+  the noise handshake and is issued a QR (`harness/verify.sh` prints the run
+  log);
 * `POST /message/send` with a `content` OBJECT reaches zapo — it answers zapo's
   own "sendMessage requires registered meJid" on an unpaired session, where it
   used to answer 501 — and both download routes answer 400 for a missing `seq`
   and a named 500 for a `seq` the buffer no longer holds;
 * the binary is 100% statically compiled — no embedded JavaScript engine.
+  `harness/scan.sh` reads 0 for `quickjs` and `ScrDyn` against a known
+  `--dynamic` control that reads non-zero for both, with `mbedtls_`,
+  `deflate`, `inflate` and `sqlite3_` non-zero as positive controls so the
+  scan is visibly not blind, and no `libqjs.a` exists anywhere under the
+  build tree, so `ensureEngineArchive` never ran;
+* the `[fiberpool]` instrument is live: started with `SCR_FIBER_POOL_STAT=1`
+  the process printed one window line every 5 s and the pool visibly drained
+  (`idle` 12 to 6 over five windows).
 
 **Not verified: a live WhatsApp conversation.** Pairing requires scanning the QR
 with a real phone, which only you can do. So sending and receiving against the
