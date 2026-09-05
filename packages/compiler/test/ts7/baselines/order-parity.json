@@ -10353,6 +10353,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/7594-the-rest-of-the-subscribe-surface-through-bound-slots.ts": {
+   "order": [
+    "<repo>/tests/corpus/7594-the-rest-of-the-subscribe-surface-through-bound-slots.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/760-any-arithmetic.ts": {
    "order": [
     "<repo>/tests/corpus/760-any-arithmetic.ts"
