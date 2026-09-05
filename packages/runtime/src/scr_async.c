@@ -1516,13 +1516,12 @@ static size_t scr_stack_pool_n = 0;
 static size_t scr_stack_pool_lo = (size_t)-1;
 static double scr_stack_pool_next_ms = 0;
 /* Counts entries actually freed BY DECAY (never by the cap's overflow
- * path), so a test can tell "the trim found nothing to free" from "the
- * trim never ran" — the two readings this tree keeps confusing. */
+ * path), so the stat line below can tell "the trim found nothing to free"
+ * from "the trim never ran" — the two readings this tree keeps confusing.
+ * Deliberately NOT exported: an unused external symbol in the
+ * always-linked runtime cannot be dead-stripped, and this file is measured
+ * to the page by tests/harness/island.test.ts. */
 static unsigned long long scr_stack_pool_decayed = 0;
-unsigned long long scr_fiber_pool_decayed_count(void) {
-  return scr_stack_pool_decayed;
-}
-size_t scr_fiber_pool_idle_count(void) { return scr_stack_pool_n; }
 
 static size_t scr_stack_pool_max(void) {
   static bool once = false;
@@ -1597,6 +1596,22 @@ static void scr_stack_release(ScrStack *s) {
     return;
   }
   scr_stack_free(s);
+}
+
+static bool scr_stack_pool_stat(void) {
+  static bool once = false;
+  static bool cached = false;
+  if (!once) { cached = getenv("SCR_FIBER_POOL_STAT") != NULL; once = true; }
+  return cached;
+}
+
+/* Unsigned to decimal into a caller buffer of at least 24 bytes. Exists so
+ * the stat line below needs no printf; see the note at its call site. */
+static const char *scr_utoa(size_t v, char *buf) {
+  char *p = buf + 23;
+  *p = ' ';
+  do { *--p = (char)('0' + (v % 10u)); v /= 10u; } while (v != 0);
+  return p;
 }
 
 static size_t scr_stack_pool_decay_ms(void) {
@@ -1674,9 +1689,22 @@ static void scr_fiber_pool_decay(double now) {
    * negative control — SCR_FIBER_POOL_DECAY_MS=0, which must print no
    * lines at all — is distinguishable from a live decay that has already
    * drained the pool, which prints `freed=0 idle=0`. */
-  if (getenv("SCR_FIBER_POOL_STAT") != NULL) {
-    fprintf(stderr, "[fiberpool] window freed=%zu idle=%zu lo=%zu decayedTotal=%llu\n",
-            freed, scr_stack_pool_n, lo, (unsigned long long)scr_stack_pool_decayed);
+  if (scr_stack_pool_stat()) {
+    /* fputs and a hand-rolled decimal, NOT fprintf. This TU's diagnostics
+     * are all fputs/fwrite, so a single %zu here was the only printf in
+     * the always-linked runtime: it grew a static hello-world by 33,280
+     * bytes — eight times tests/harness/size-class.ts's one-page drift
+     * tolerance — for a line no default build ever prints. */
+    char nb[24];
+    fputs("[fiberpool] window freed=", stderr);
+    fputs(scr_utoa(freed, nb), stderr);
+    fputs(" idle=", stderr);
+    fputs(scr_utoa(scr_stack_pool_n, nb), stderr);
+    fputs(" lo=", stderr);
+    fputs(scr_utoa(lo, nb), stderr);
+    fputs(" decayedTotal=", stderr);
+    fputs(scr_utoa((size_t)scr_stack_pool_decayed, nb), stderr);
+    fputc('\n', stderr);
   }
   scr_stack_pool_lo = scr_stack_pool_n;
 }
