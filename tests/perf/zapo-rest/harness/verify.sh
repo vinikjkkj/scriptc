@@ -4,7 +4,7 @@
 #   2. prove it serves the API (health, routes, store reads, auth gate, 404)
 #   3. kill it, restart it on the SAME file, and show the store came back
 set -u
-EXE=/g/blocks/restapi/out/zapo-rest.exe
+EXE=${EXE:-/g/zapo-rest/zapo-rest.exe}
 RUN=/g/blocks/restapi/lab/run
 PORT=18899
 TOKEN=verify-secret
@@ -72,14 +72,38 @@ echo; echo "### row counts BEFORE restart"
 curl -s $H "$B/store/counts" > "$RUN/counts-before.json"
 cat "$RUN/counts-before.json"
 
-echo; echo "--- killing $PID1 ---"
-taskkill //F //T //PID $PID1 > /dev/null 2>&1
-sleep 2 2>/dev/null || true
+echo; echo "--- killing $PID1 and WAITING for it to actually die ---"
+# NOTE: $! under Git Bash is the MSYS pid, NOT the Windows pid, so
+# `taskkill /PID $!` silently matches nothing -- which is exactly how the
+# first run of this script produced a bogus "identical row counts" result.
+# Kill by IMAGE NAME, which is unambiguous here (one binary under test).
+taskkill //F //IM zapo-rest.exe > /dev/null 2>&1
+# The previous revision of this script trusted taskkill and started run 2
+# immediately. run 1 was still listening, run 2 died with EADDRINUSE, and the
+# "after restart" counts were served by the SAME process that produced the
+# "before" counts -- a persistence proof that proved nothing. So: poll until
+# the port is genuinely refused AND no zapo-rest image is left running.
+dead=no
+i=0
+while [ $i -lt 60 ]; do
+  if ! curl -s -m 1 $H "$B/health" > /dev/null 2>&1; then dead=yes; break; fi
+  i=$((i+1))
+done
+left=$(tasklist //FI "IMAGENAME eq zapo-rest.exe" //NH 2>/dev/null | grep -c zapo-rest)
+echo "port refuses connections: $dead   zapo-rest images still running: $left"
+if [ "$dead" != yes ]; then echo "ABORT: run 1 is still serving; the restart test would be a lie"; exit 1; fi
+if [ "$left" != "0" ]; then
+  echo "a zapo-rest image is still up; killing by image name"
+  taskkill //F //IM zapo-rest.exe > /dev/null 2>&1
+fi
 ls -la "$RUN"/verify.sqlite* 2>/dev/null
 
 echo; echo "=============== RUN 2 (same store file) ==============="
 PID2=$(boot run2)
 if ! waitup; then echo "SERVER DID NOT COME BACK"; cat "$RUN/run2.log"; kill $PID2 2>/dev/null; exit 1; fi
+if grep -q EADDRINUSE "$RUN/run2.log" 2>/dev/null; then
+  echo "ABORT: run 2 could not bind (EADDRINUSE) -- whatever answered is run 1"; cat "$RUN/run2.log"; exit 1
+fi
 echo "--- server is back up, pid $PID2 ---"
 echo "### row counts AFTER restart"
 curl -s $H "$B/store/counts" > "$RUN/counts-after.json"
@@ -87,7 +111,7 @@ cat "$RUN/counts-after.json"
 echo; echo "### /health after restart"
 curl -s $H "$B/health"
 echo
-taskkill //F //T //PID $PID2 > /dev/null 2>&1
+taskkill //F //IM zapo-rest.exe > /dev/null 2>&1
 
 echo; echo "=============== DIFF ==============="
 if diff "$RUN/counts-before.json" "$RUN/counts-after.json" > /dev/null; then
