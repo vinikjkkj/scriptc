@@ -428,7 +428,17 @@ describe("library profile fences", () => {
     expect(r.ok).toBe(true);
     if (!r.ok) return;
     const dateIds = r.profile.fences[0]!.surfaces.map((s) => s.id);
-    expect(dateIds).toEqual(["stdlib.date.UTC", "stdlib.date.getTime", "stdlib.date.now", "stdlib.date.toISOString"]);
+    // getHours joins the family and MUST: it is the one Date surface that
+    // reads the host's local ZONE as well as its clock, so a determinism
+    // fence that named the family without it would leave the most
+    // machine-dependent Date read on this compiler unfenced.
+    expect(dateIds).toEqual([
+      "stdlib.date.UTC",
+      "stdlib.date.getHours",
+      "stdlib.date.getTime",
+      "stdlib.date.now",
+      "stdlib.date.toISOString",
+    ]);
     expect(r.profile.fences[0]!.surfaces.every((s) => s.detector !== undefined)).toBe(true);
     const processIds = r.profile.fences[1]!.surfaces.map((s) => s.id);
     expect(processIds).toContain("node-builtin.process.env");
