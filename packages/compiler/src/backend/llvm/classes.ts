@@ -106,7 +106,12 @@ export function buildClassGraph(mod: IrModule, fnByName: Map<string, IrFunction>
       let inherited = false;
       for (let a = m.base; a; a = a.base) inherited ||= declares(a, method);
       if (!inherited && declaredBelow(m, method)) {
-        let fn = fnByName.get(`%${m.def.name}.${method}`);
+        // The declarer's own vtable ENTRY types the slot, and that is the
+        // synthesized thunk `%C.m%vt` wherever the frontend made one (a
+        // widened override, or an ASYNC method — whose `%C.m` is the fiber
+        // body). The C emitter's collectSlots carries the same preference.
+        let fn = fnByName.get(`%${m.def.name}.${method}%vt`) ??
+          fnByName.get(`%${m.def.name}.${method}`);
         if (!fn && m.def.abstractMethods?.includes(method)) {
           // Abstract declarer: the slot ABI comes from any concrete
           // descendant implementation; none anywhere means the slot can
