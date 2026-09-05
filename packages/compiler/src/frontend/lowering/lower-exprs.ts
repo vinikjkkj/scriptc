@@ -6010,13 +6010,18 @@ function nullishArmBridge(L: Lowerer, left: IrExpr): IrExpr | null {
     // by the arm below, so a default that cannot be built at it reports
     // there rather than silently becoming something else. When the
     // expression's own type maps, nothing changes.
-    let type = L.mapTypeOf(L.typeOf(expr));
-    if (type === null) {
+    //
+    // TypeScript sources only, and only where the expression's own type has
+    // NO mapping at all: a JavaScript source's unmappable type is the
+    // checked-dynamic fallback's business (irTypeOf owns that decision) and
+    // this rung must not take it away.
+    let type: IrType | null = null;
+    if (L.mapTypeOf(L.typeOf(expr)) === null && !isJsSourceFile(expr.getSourceFile())) {
       const ctx = L.checker.getContextualType(expr);
       const ctxIr = ctx !== undefined ? L.mapTypeOf(ctx) : null;
       type = ctxIr !== null ? ctxIr : rest.length === 1 ? rest[0]! : null;
     }
-    if (type === null) type = L.irTypeOf(expr); // reports the original diagnostic
+    if (type === null) type = L.irTypeOf(expr); // unchanged, diagnostic included
     if (typeEquals(type, left.type) || (rest.length === 1 && typeEquals(type, rest[0]!))) {
       // `event.key.participant ?? event.rawNode.attrs.participant ??
       // event.key.remoteJid` (zapo mailbox.ts:99). The MIDDLE operand is

@@ -13479,6 +13479,15 @@ function freezeReadOnlyCallArg(L: Lowerer, arg: ts.Identifier): boolean {
   if (!param || param.dotDotDotToken !== undefined || !ts.isIdentifier(param.name)) return false;
   const paramSym = L.resolveValueSymbol(param.name);
   if (!paramSym) return false;
+  // A record carrying ACCESSOR slots breaks the "a read cannot write"
+  // premise this rests on: a getter body can assign through `this`, and
+  // that write is exactly what the frozen bit would refuse. Every other
+  // record's read is a field load.
+  {
+    const pIr = L.mapTypeOf(L.typeOf(param.name));
+    const pShape = pIr?.kind === "record" ? L.shapes.get(pIr.shapeId) : undefined;
+    if (pShape !== undefined && shapeHasAccessorSlots(pShape)) return false;
+  }
 
   let readsOnly = true;
   const visit = (n: ts.Node): void => {

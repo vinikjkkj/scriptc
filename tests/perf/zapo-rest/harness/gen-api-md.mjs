@@ -2,9 +2,20 @@
 // from the reqStr/str/num/bool/list/obj calls inside each handler body, so
 // the doc cannot drift from the code.
 import { readFileSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
-const src = readFileSync("G:/blocks/restapi/lab/app2/zapo-rest.ts", "utf8");
-const cov = JSON.parse(readFileSync("G:/blocks/restapi/lab/coverage.json", "utf8"));
+/* Paths are environment-driven so the harness runs from any checkout:
+ *   ZAPO_REST_APP  the app directory (default: ../app beside this file)
+ *   ZAPO_REST_LAB  where the generated files go (default: the cwd)
+ * They used to be absolute paths into one block's scratch directory,
+ * which is why nothing but that block could run them. */
+const HERE = dirname(fileURLToPath(import.meta.url));
+const APP = process.env["ZAPO_REST_APP"] ?? join(HERE, "..", "app");
+const LAB = process.env["ZAPO_REST_LAB"] ?? process.cwd();
+
+const src = readFileSync(join(APP, "zapo-rest.ts"), "utf8");
+const cov = JSON.parse(readFileSync(join(LAB, "coverage.json"), "utf8"));
 
 const lines = src.split("\n");
 
@@ -145,5 +156,5 @@ for (const u of cov.unimplemented.sort((a, b) => a.key.localeCompare(b.key))) {
 }
 out.push("");
 
-writeFileSync("G:/blocks/restapi/lab/API.md", out.join("\n"));
+writeFileSync(join(LAB, "API.md"), out.join("\n"));
 console.log(`API.md written: ${n} routes documented, ${cov.unimpl} unimplemented listed`);
