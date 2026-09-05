@@ -37,9 +37,19 @@
  * served by a capped nanosleep — dispatch at the next turn's top, the
  * cap bounding signal/stdin latency instead of a pollable wake fd. */
 #include <windows.h>
+/* _get_heap_handle (the CRT heap the runtime's malloc actually reaches)
+ * and GetProcessMemoryInfo, both for the idle-seam heap trim below.
+ * GetProcessMemoryInfo resolves to K32GetProcessMemoryInfo in
+ * kernel32.dll under psapi.h's default PSAPI_VERSION 2, so this adds no
+ * library to the link line. */
+#include <malloc.h>
+#include <psapi.h>
 #else
 #include <poll.h>
 #include <signal.h>
+#ifdef __GLIBC__
+#include <malloc.h> /* malloc_trim, the posix arm of the idle-seam trim */
+#endif
 #include <ucontext.h>
 #include <unistd.h>
 #endif
@@ -1782,6 +1792,278 @@ static void scr_fiber_pool_teardown(void) {
   scr_stack_pool_next_ms = 0;
 }
 
+/* -- returning free heap pages to the OS at the idle seam -------------
+ *
+ * A compiled service that survives one history sync never gives the
+ * memory back: measured with packages/fake-server/memrig.ts driving the
+ * shipped zapo-rest binary, 8 chunks x 400 conversations, kernel-side
+ * WorkingSet64 sampled every 270 ms -- presync 32.25 MiB, peak 267.15,
+ * settled 133.54, and STILL 133.54 after sixty seconds of idle. Three
+ * identical rounds in one process add +78.11, +25.71, -1.69 MiB: three
+ * times the data, one time the retention, so nothing is leaking. The
+ * bytes are free and reused; they are simply resident.
+ *
+ * THIS SEAM, not a timer thread: scr_loop_run has already decided it has
+ * no runnable work and is about to block, which is the one point where a
+ * heap-wide walk cannot land between two allocations of the same turn.
+ * It is the seam scr_fiber_pool_decay uses, for the same reason.
+ *
+ * WHAT THE WIN32 HEAP ACTUALLY DOES, measured on this toolchain (zig
+ * 0.16.0, x86_64-windows-gnu, ucrtbase): malloc reaches the process heap
+ * -- _get_heap_handle() == GetProcessHeap() -- and that heap ALREADY
+ * DECOMMITS ON free(). 400,000 x 320 B taken to 136.43 MiB of private
+ * commit and then fully freed falls to 4.52 MiB with no trim call at all.
+ * The retention is therefore never "the runtime forgot to return it".
+ *
+ *   arm                          after free   +HeapCompact  +Optimize
+ *   320 B x400k, 1-in-20 live      136.44       136.44       134.55
+ *   320 B x400k, all freed           4.52         4.40         3.87
+ *   4 KiB x40k,  1-in-20 live      165.09       165.09       162.81
+ *
+ * So: HeapCompact -- which is exactly what _heapmin() calls -- releases
+ * 0.00 MiB on every fragmented arm. HeapSetInformation with
+ * HeapOptimizeResources releases 1.9-3.0 MiB of 136-165, i.e. ~1.5-1.8%,
+ * in 0.04-0.08 ms. What holds the other 98% is LIVE BLOCKS SCATTERED
+ * THROUGH THE SEGMENTS: one surviving allocation in twenty pins its whole
+ * LFH subsegment, and no trim on any OS can move a live block.
+ *
+ * Both calls are made, not just the one that pays. The point of a knob
+ * called "trim the heap" is that a null result is a statement about the
+ * platform rather than about which API its author guessed at, so it does
+ * everything Win32 offers: HeapCompact to coalesce, HeapOptimizeResources
+ * to decommit what coalescing exposed. Compact costs 0.25 ms at worst and
+ * only when there is genuinely free space to walk.
+ *
+ * DEFAULT OFF, and the reason is the size of the prize, not fear. A
+ * feature that returns 1.5% of the retained bytes does not earn a change
+ * in the default behaviour of every compiled binary -- least of all in
+ * this file, whose other idle-seam feature (SCR_FIBER_POOL_DECAY_MS)
+ * shipped on, was implicated in a service that could not pair, and is now
+ * off and unshipped. The knob stays available, armed, and measured.
+ *
+ * SCR_HEAP_TRIM_MS=0 is the negative control and the default: the seam
+ * costs one integer compare and the pre-trim runtime is restored exactly.
+ * SCR_HEAP_TRIM_STAT=1 prints one line per window INCLUDING the windows
+ * that release nothing, so "the trim found nothing" and "the trim never
+ * ran" are distinguishable readings -- the property that let the fiber
+ * pool's diagnostic be trusted. SCR_HEAP_TRIM_CENSUS=1 adds a HeapWalk
+ * per window: busy bytes are the floor no trim can go below, and free
+ * bytes are the most any trim could ever return. */
+#ifndef SCR_HEAP_TRIM_MS
+#define SCR_HEAP_TRIM_MS 0
+#endif
+
+static double scr_heap_trim_next_ms = 0;
+/* Windows this trim actually ran, so the stat line can say "ran and found
+ * nothing" rather than leaving the reader to guess. Static, deliberately:
+ * an exported symbol in the always-linked runtime cannot be dead-stripped
+ * and this file is measured to the page by tests/harness/island.test.ts. */
+static unsigned long long scr_heap_trims = 0;
+
+static size_t scr_heap_trim_ms(void) {
+  static bool once = false;
+  static size_t cached = SCR_HEAP_TRIM_MS;
+  if (!once) {
+    const char *env = getenv("SCR_HEAP_TRIM_MS");
+    if (env != NULL) {
+      long v = strtol(env, NULL, 10);
+      if (v >= 0) cached = (size_t)v;
+    }
+    once = true;
+  }
+  return cached;
+}
+
+static bool scr_heap_trim_stat(void) {
+  static bool once = false;
+  static bool cached = false;
+  if (!once) { cached = getenv("SCR_HEAP_TRIM_STAT") != NULL; once = true; }
+  return cached;
+}
+
+static bool scr_heap_trim_census_on(void) {
+  static bool once = false;
+  static bool cached = false;
+  if (!once) { cached = getenv("SCR_HEAP_TRIM_CENSUS") != NULL; once = true; }
+  return cached;
+}
+
+/* How long the loop may sleep before the next trim window is due, or a
+ * negative number when the knob is off and the sleep runs to its natural
+ * deadline.
+ *
+ * THE CAP IS LOAD-BEARING and scr_stack_pool_decay_due learned it the hard
+ * way: a process whose only pending work is one long timer takes the whole
+ * timer in a single turn, so a trim that ticks once per turn never runs,
+ * and the measurement comes back looking like a fix that does not work.
+ * Unlike the fiber pool's, this cap has no "nothing left to free" exit --
+ * the heap is always eligible -- so it costs exactly one wakeup per window
+ * for the life of the process. At the 5000 ms this is meant to be used
+ * with, that is one wakeup per five seconds against a trim measured at
+ * 0.04-0.25 ms. */
+static double scr_heap_trim_due(double now) {
+  size_t win = scr_heap_trim_ms();
+  if (win == 0) return -1.0;
+  if (scr_heap_trim_next_ms == 0) return now + (double)win;
+  return scr_heap_trim_next_ms;
+}
+
+#ifdef _WIN32
+/* HeapOptimizeResources is guarded on NTDDI_VERSION in mingw's winnt.h, so
+ * the two things it needs are declared here rather than left to whichever
+ * target macro the compiler driver picks. Windows 8.1+; older kernels fail
+ * the call and the trim degrades to HeapCompact alone. */
+typedef struct { DWORD Version; DWORD Flags; } ScrHeapOptimizeInfo;
+
+/* Private commit -- PagefileUsage, the number that actually falls when the
+ * heap decommits, as opposed to WorkingSetSize which also falls when the
+ * OS merely pages something out. Reported in KiB so scr_utoa can print it
+ * without a printf. */
+static size_t scr_heap_commit_kib(void) {
+  PROCESS_MEMORY_COUNTERS c;
+  c.cb = (DWORD)sizeof c;
+  if (!GetProcessMemoryInfo(GetCurrentProcess(), &c, (DWORD)sizeof c)) return 0;
+  return (size_t)(c.PagefileUsage / 1024u);
+}
+#endif
+
+/* One trim window. Called from the sleep seam in scr_loop_run with the
+ * loop's own scr_now_ms(), passed in rather than re-read so the window
+ * boundary lines up with the turn the caller is timing. */
+static void scr_heap_trim(double now) {
+  size_t win = scr_heap_trim_ms();
+  if (win == 0) return; /* trim off: the pre-trim runtime, exactly */
+  if (scr_heap_trim_next_ms == 0) {
+    scr_heap_trim_next_ms = now + (double)win;
+    return;
+  }
+  if (now < scr_heap_trim_next_ms) return;
+  scr_heap_trim_next_ms = now + (double)win;
+  scr_heap_trims++;
+
+  bool stat = scr_heap_trim_stat();
+  size_t before = 0, after = 0, largest = 0, us = 0;
+
+#ifdef _WIN32
+  LARGE_INTEGER qf, q0, q1;
+  HANDLE h = (HANDLE)(intptr_t)_get_heap_handle();
+  qf.QuadPart = 0;
+  q0.QuadPart = 0;
+  q1.QuadPart = 0;
+  if (stat) {
+    before = scr_heap_commit_kib();
+    QueryPerformanceFrequency(&qf);
+    QueryPerformanceCounter(&q0);
+  }
+  /* Coalesce, then decommit what coalescing exposed. The return value is
+   * the largest committed FREE block left, which is the ceiling on what a
+   * further trim could possibly hand back. */
+  largest = (size_t)HeapCompact(h, 0);
+  {
+    ScrHeapOptimizeInfo oi;
+    oi.Version = 1;
+    oi.Flags = 0;
+    HeapSetInformation(h, (HEAP_INFORMATION_CLASS)3, &oi, sizeof oi);
+  }
+  if (stat) {
+    QueryPerformanceCounter(&q1);
+    if (qf.QuadPart > 0)
+      us = (size_t)(((q1.QuadPart - q0.QuadPart) * 1000000LL) / qf.QuadPart);
+    after = scr_heap_commit_kib();
+  }
+#elif defined(__GLIBC__)
+  {
+    struct timespec t0, t1;
+    if (stat) clock_gettime(CLOCK_MONOTONIC, &t0);
+    malloc_trim(0);
+    if (stat) {
+      clock_gettime(CLOCK_MONOTONIC, &t1);
+      us = (size_t)((t1.tv_sec - t0.tv_sec) * 1000000L +
+                    (t1.tv_nsec - t0.tv_nsec) / 1000L);
+    }
+  }
+#endif
+
+  /* ARMING. Every window prints, including the ones that release nothing,
+   * so SCR_HEAP_TRIM_MS=0 (zero lines) is distinguishable from a live trim
+   * that has nothing left to give (a line reading releasedKiB=0). fputs
+   * and a hand-rolled decimal, NOT fprintf: a single %zu here would be the
+   * only printf in the always-linked runtime and this file has already
+   * paid 33,280 bytes of static hello-world for that mistake once. */
+  if (stat) {
+    char nb[24];
+    fputs("[heaptrim] window commitKiB=", stderr);
+    fputs(scr_utoa(before, nb), stderr);
+    fputs("->", stderr);
+    fputs(scr_utoa(after, nb), stderr);
+    fputs(" releasedKiB=", stderr);
+    fputs(scr_utoa(before > after ? before - after : 0, nb), stderr);
+    fputs(" largestFreeKiB=", stderr);
+    fputs(scr_utoa(largest / 1024u, nb), stderr);
+    fputs(" us=", stderr);
+    fputs(scr_utoa(us, nb), stderr);
+    fputs(" trims=", stderr);
+    fputs(scr_utoa((size_t)scr_heap_trims, nb), stderr);
+    fputc('\n', stderr);
+  }
+
+#ifdef _WIN32
+  /* THE FLOOR, not the delta. busy is what is genuinely allocated and
+   * therefore the number no trim can go below; free is the whole of what
+   * any trim could ever return. A retained working set that is nearly all
+   * busy is not a trim problem at all -- it is a peak problem. Off by
+   * default because HeapWalk is O(blocks) and a 100 MiB heap has upwards
+   * of a million of them. */
+  if (scr_heap_trim_census_on()) {
+    PROCESS_HEAP_ENTRY e;
+    size_t busy = 0, freeb = 0, nbusy = 0, nfree = 0, nregion = 0;
+    size_t uncommitted = 0;
+    LARGE_INTEGER cf, c0, c1;
+    cf.QuadPart = 0;
+    QueryPerformanceFrequency(&cf);
+    QueryPerformanceCounter(&c0);
+    memset(&e, 0, sizeof e);
+    HeapLock(h);
+    while (HeapWalk(h, &e)) {
+      if (e.wFlags & PROCESS_HEAP_ENTRY_BUSY) {
+        busy += (size_t)e.cbData + e.cbOverhead;
+        nbusy++;
+      } else if (e.wFlags & PROCESS_HEAP_UNCOMMITTED_RANGE) {
+        uncommitted += (size_t)e.cbData;
+      } else if (e.wFlags & PROCESS_HEAP_REGION) {
+        nregion++;
+      } else {
+        freeb += (size_t)e.cbData + e.cbOverhead;
+        nfree++;
+      }
+    }
+    HeapUnlock(h);
+    QueryPerformanceCounter(&c1);
+    {
+      char nb[24];
+      size_t wus = cf.QuadPart > 0 ? (size_t)(((c1.QuadPart - c0.QuadPart) *
+                                               1000000LL) / cf.QuadPart)
+                                   : 0;
+      fputs("[heaptrim] census busyKiB=", stderr);
+      fputs(scr_utoa(busy / 1024u, nb), stderr);
+      fputs(" freeKiB=", stderr);
+      fputs(scr_utoa(freeb / 1024u, nb), stderr);
+      fputs(" uncommittedKiB=", stderr);
+      fputs(scr_utoa(uncommitted / 1024u, nb), stderr);
+      fputs(" busyBlocks=", stderr);
+      fputs(scr_utoa(nbusy, nb), stderr);
+      fputs(" freeBlocks=", stderr);
+      fputs(scr_utoa(nfree, nb), stderr);
+      fputs(" regions=", stderr);
+      fputs(scr_utoa(nregion, nb), stderr);
+      fputs(" walk_us=", stderr);
+      fputs(scr_utoa(wus, nb), stderr);
+      fputc('\n', stderr);
+    }
+  }
+#endif
+}
+
 /* Frees a finished fiber's execution resources (the promise release and
  * bookkeeping stay at the call sites). The STACK does not die with the
  * task — it goes back to the pool, which is the whole point; only the
@@ -2770,12 +3052,22 @@ bool scr_loop_run(ScrPromise *top_level) {
     /* The loop has no runnable work at this point and is about to block:
      * the one place a fiber-stack trim can never race a switch. */
     scr_fiber_pool_decay(now);
+    /* And the same seam for the heap itself: the loop is about to
+     * block, so a heap-wide walk cannot land between two allocations
+     * of one turn. Off unless SCR_HEAP_TRIM_MS says otherwise. */
+    scr_heap_trim(now);
     double due = scr_ntimers > 0 ? scr_timers[0].deadline_ms : now + SCR_IO_POLL_MS;
     /* A pool with entries left to free caps the sleep at its next window;
      * an empty one does not (see scr_stack_pool_decay_due). */
     {
       double pool_due = scr_stack_pool_decay_due(now);
       if (pool_due >= 0 && pool_due < due) due = pool_due;
+    }
+    /* Likewise the heap trim: a turn that sleeps past its window is a
+     * window that never ran (see scr_heap_trim_due). */
+    {
+      double trim_due = scr_heap_trim_due(now);
+      if (trim_due >= 0 && trim_due < due) due = trim_due;
     }
     /* An armed island timer (AbortSignal.timeout) caps the sleep: it must
      * fire on time even while the poller waits on socket readiness. */
