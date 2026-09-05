@@ -4589,66 +4589,6 @@ double scr_date_utc(double y, double mo, double d,
   return t == 0 ? 0 : t; /* normalize -0 (TimeClip's +0) */
 }
 
-/* ── new Date(ms?).getHours(), the first LOCAL-time field read ──────────
- *
- * Every other Date entry point above is UTC and therefore a pure function
- * of its milliseconds. This one is not: HourFromTime(LocalTime(t)) needs
- * LocalTZA(t) — the offset the HOST's zone was at THAT INSTANT, which is
- * a table lookup, not arithmetic, because it moves with DST and with
- * historical zone changes.
- *
- * The offset is read the way that cannot disagree with the host: break
- * the SAME instant down twice, once local and once UTC, and subtract the
- * two civil times. mktime() is the usual spelling and it is the wrong one
- * — it re-derives an instant from wall-clock fields, and wall clocks are
- * AMBIGUOUS across a DST fall-back (one local hour names two instants)
- * and NONEXISTENT across a spring-forward. Subtracting two broken-down
- * views of one instant asks no ambiguous question.
- *
- * WHY ONLY THE LIVE CLOCK REACHES HERE. Node carries ICU's full zone
- * HISTORY; the platforms this links against do not agree that they
- * should. Windows' CRT applies the zone's CURRENT rule to every instant,
- * so a past DST period reads an hour off — measured, one instant every
- * ~9 days from 2000 to 2030 on a Windows host in America/Sao_Paulo, 260
- * of 1200 disagreed with Node. That is a divergence the COMPILER cannot
- * see, because the zone database belongs to the machine that runs the
- * binary. So the frontend composes only `new Date().getHours()`, whose
- * instant is the present — the one instant a zone database cannot be
- * wrong about — and fences every arbitrary-millisecond spelling.
- *
- * The guards below still answer NaN for anything outside Date's range or
- * outside the platform's `time_t` (Windows rejects negative values
- * outright). Nothing the frontend emits can reach them; they are here so
- * that a future caller cannot get a quietly wrong hour instead of a
- * loudly wrong one. */
-static double scr_date_tm_civil_ms(const struct tm *x) {
-  return scr_days_from_civil((long long)x->tm_year + 1900, x->tm_mon + 1, x->tm_mday) * 86400000.0 +
-         (double)x->tm_hour * 3600000.0 + (double)x->tm_min * 60000.0 + (double)x->tm_sec * 1000.0;
-}
-
-double scr_date_get_hours(double ms) {
-  if (!(fabs(ms) <= 8640000000000000.0)) return NAN; /* NaN and out of range */
-  double t = trunc(ms);
-  /* The second the instant falls in, floored — so a negative ms keeps a
-   * non-negative sub-second remainder and the hour never rounds up. */
-  double secsd = floor(t / 1000.0);
-  if (secsd < -9.2e18 || secsd > 9.2e18) return NAN; /* outside any time_t */
-  time_t secs = (time_t)secsd;
-  if ((double)secs != secsd) return NAN; /* narrower time_t than the instant */
-  struct tm local_tm, utc_tm;
-  const struct tm *lp = localtime(&secs);
-  if (lp == NULL) return NAN; /* the platform declines this instant */
-  local_tm = *lp;
-  const struct tm *gp = gmtime(&secs);
-  if (gp == NULL) return NAN;
-  utc_tm = *gp;
-  double tza = scr_date_tm_civil_ms(&local_tm) - scr_date_tm_civil_ms(&utc_tm);
-  double local = t + tza;
-  double dayd = floor(local / 86400000.0);
-  double msday = local - dayd * 86400000.0;
-  return floor(msday / 3600000.0);
-}
-
 /* ── Number statics ────────────────────────────────────────────────────
  * JS-exact: the ES2015 Number statics never coerce (unlike the global
  * isNaN/isFinite), and the compiler routes only number-typed arguments

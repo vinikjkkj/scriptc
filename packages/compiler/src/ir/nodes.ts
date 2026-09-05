@@ -9660,18 +9660,25 @@ export function moduleUsesFsWatch(mod: IrModule): boolean {
   return found;
 }
 
-/** The program holds a Date VALUE: compiles scr_date.c in. A LINK GATE,
- * not a fence -- a wrong `false` is a loud unresolved-symbol link error,
- * never a wrong answer.
+/** The program holds a Date VALUE, or reads a LOCAL-TIME field: compiles
+ * scr_date.c in. A LINK GATE, not a fence -- a wrong `false` is a loud
+ * unresolved-symbol link error, never a wrong answer.
  *
- * The HANDLE TYPE alone is the trigger, and today it is the only one:
- * nothing constructs a Date, so there are no `date.*` libCalls to look
- * for. A record field typed `Date | undefined` still emits
- * scr_date_release, and a Date[] still emits the element adapters, so the
- * unit must link for a program that merely DECLARES the shape and refuses
- * every member -- which is exactly the state zapo's
- * voip/call/call-state.ts is in. Same generic-walk shape as
- * moduleUsesWrtc below. */
+ * TWO triggers now. The HANDLE TYPE used to be the only one, and the
+ * reason given here was that "nothing constructs a Date, so there are no
+ * `date.*` libCalls to look for". There is one: `date.getHours` needs the
+ * host's zone table, and on win32 `localtime`/`gmtime` drag the CRT's
+ * timezone machinery in with them -- 1,536 bytes on both backends, in a
+ * hello-world that never mentions Date, if the function sits in the
+ * always-linked TU. It lives in scr_date.c instead, so this gate has to
+ * see the CALL and not only the type. (Every other Date entry point is
+ * pure arithmetic over its milliseconds and stays in scr_lib.c.)
+ *
+ * A record field typed `Date | undefined` still emits scr_date_release,
+ * and a Date[] still emits the element adapters, so the unit must link
+ * for a program that merely DECLARES the shape and refuses every member
+ * -- which is exactly the state zapo's voip/call/call-state.ts is in.
+ * Same generic-walk shape as moduleUsesWrtc below. */
 export function moduleUsesDate(mod: IrModule): boolean {
   let found = false;
   const visit = (v: unknown): void => {
@@ -9680,8 +9687,12 @@ export function moduleUsesDate(mod: IrModule): boolean {
       for (const item of v) visit(item);
       return;
     }
-    const node = v as { kind?: unknown };
+    const node = v as { kind?: unknown; fn?: unknown };
     if (node.kind === "date") {
+      found = true;
+      return;
+    }
+    if (node.kind === "libCall" && node.fn === "date.getHours") {
       found = true;
       return;
     }
