@@ -10701,15 +10701,15 @@
    ],
    "diags": []
   },
-  "<repo>/tests/corpus/7740-a-getter-and-setter-pair-with-different-types.ts": {
+  "<repo>/tests/corpus/7760-websocket-server-frames.ts": {
    "order": [
-    "<repo>/tests/corpus/7740-a-getter-and-setter-pair-with-different-types.ts"
+    "<repo>/tests/corpus/7760-websocket-server-frames.ts"
    ],
    "diags": []
   },
-  "<repo>/tests/corpus/7741-a-divergent-accessor-pair-on-a-generic-base.ts": {
+  "<repo>/tests/corpus/7761-websocket-server-raw-client.ts": {
    "order": [
-    "<repo>/tests/corpus/7741-a-divergent-accessor-pair-on-a-generic-base.ts"
+    "<repo>/tests/corpus/7761-websocket-server-raw-client.ts"
    ],
    "diags": []
   },
