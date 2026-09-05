@@ -10467,6 +10467,48 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/7620-a-generic-base-mentioned-in-its-own-extends-clause.ts": {
+   "order": [
+    "<repo>/tests/corpus/7620-a-generic-base-mentioned-in-its-own-extends-clause.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/7621-an-extends-clause-that-mentions-the-class-through-itself.ts": {
+   "order": [
+    "<repo>/tests/corpus/7621-an-extends-clause-that-mentions-the-class-through-itself.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/7622-async-and-widened-overrides-inside-a-split-generic-family.ts": {
+   "order": [
+    "<repo>/tests/corpus/7622-async-and-widened-overrides-inside-a-split-generic-family.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/7623-layout-and-statics-across-a-split-generic-boundary.ts": {
+   "order": [
+    "<repo>/tests/corpus/7623-layout-and-statics-across-a-split-generic-boundary.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/7624-a-three-level-split-generic-chain-with-an-abstract-middle.ts": {
+   "order": [
+    "<repo>/tests/corpus/7624-a-three-level-split-generic-chain-with-an-abstract-middle.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/7625-extending-a-class-published-behind-a-construct-signature-cast.ts": {
+   "order": [
+    "<repo>/tests/corpus/7625-extending-a-class-published-behind-a-construct-signature-cast.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/7626-refcounts-across-a-split-generic-boundary.ts": {
+   "order": [
+    "<repo>/tests/corpus/7626-refcounts-across-a-split-generic-boundary.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/763-any-flow.ts": {
    "order": [
     "<repo>/tests/corpus/763-any-flow.ts"

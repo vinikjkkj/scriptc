@@ -257,6 +257,21 @@ export interface ClassInfo {
    * and instance types resolve to instantiations instead (`generic`
    * carries the instance table). */
   generic?: GenericClassInfo;
+  /** GENERIC FAMILY whose `extends` clause mentions its OWN type parameters
+   * (`class Wrap<T> extends Box<T>`): the base is a DIFFERENT class per
+   * instantiation (`Box%0` for `Wrap<number>`, `Box%1` for `Wrap<string>`),
+   * so no single family node can sit above all of them and the family is
+   * NOT in its instantiations' base chain. It keeps what does not depend on
+   * the arguments — the statics, the symbol, the declaration — and gives up
+   * the two things that need the ancestor link: the `instanceof Wrap`
+   * interval (JS has one brand across a family; a split family would answer
+   * for one instantiation and lie about the rest, so `instanceof` against
+   * such a family FENCES) and the degenerate family object type
+   * (`genericClassInstanceType` answers null rather than a type nothing can
+   * upcast into). Every instantiation is an ordinary class sitting exactly
+   * where its own base puts it, so layout prefixes, vtable slots and
+   * dispatch are the honest ones. */
+  genericSplitBase?: true;
   /** GENERIC class INSTANTIATION (`Box%0` for `Box<number>`): the family,
    * the type-parameter bindings member lowering runs under (the
    * generic-fn typeParamResolver mechanism), the rendered type arguments
@@ -1784,6 +1799,41 @@ export function collectClassShape(L: Lowerer, decl: ts.ClassDeclaration): void {
     }
   }
 
+/** Does this GENERIC class declaration's `extends` clause mention one of
+   * its OWN type parameters (`class Wrap<T> extends Box<T>`, `class C<T>
+   * extends B<C<T>>`)? Such a family has no single base: `Wrap<number>`
+   * extends `Box%0` and `Wrap<string>` extends `Box%1`, two unrelated
+   * classes. The answer decides whether the family SPLITS — see
+   * ClassInfo.genericSplitBase. Type parameters are matched by SYMBOL, so
+   * an outer scope's `T` (a generic function's, an enclosing class's) does
+   * not count: only this declaration's own parameters make the base vary
+   * per instantiation of THIS family. */
+  function extendsMentionsOwnTypeParams(L: Lowerer, decl: ts.ClassLikeDeclaration): boolean {
+    if (decl.typeParameters === undefined || decl.heritageClauses === undefined) return false;
+    const tpSyms = new Set<ts.Symbol>();
+    for (const tp of decl.typeParameters) {
+      const s = L.checker.getSymbolAtLocation(tp.name);
+      if (s) tpSyms.add(s);
+    }
+    if (tpSyms.size === 0) return false;
+    for (const clause of decl.heritageClauses) {
+      if (clause.token !== ts.SyntaxKind.ExtendsKeyword) continue;
+      for (const t of clause.types) {
+        let mentions = false;
+        ts.walkPreorder(t, (n) => {
+          const s = ts.isIdentifier(n) ? L.checker.getSymbolAtLocation(n) : undefined;
+          if (s && tpSyms.has(s)) {
+            mentions = true;
+            return "stop";
+          }
+          return undefined;
+        });
+        if (mentions) return true;
+      }
+    }
+    return false;
+  }
+
 export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration, jsNameOverride?: string,
     inst?: { family: ClassInfo; name: string; bindings: Map<ts.Symbol, IrType>; typeArgsText: string; ordinal: number },
     /** MIXIN instantiation mode (lower-mixins.ts): the class inside a
@@ -1952,40 +2002,37 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
       // so the base's ClassInfo already exists here. An INSTANTIATION's
       // base is its family (whose base is the declared one) — the heritage
       // clause resolved when the family collected.
-      let base: ClassInfo | null = inst ? inst.family : mixin ? mixin.base : null;
       // A family whose `extends` clause mentions its OWN type parameters
-      // (`class D<T> extends Box<T>`) would need a different base per
-      // instantiation — no single family interval can sit above all of
-      // them. Named fence at the declaration.
-      if (familyMode && decl.heritageClauses !== undefined) {
-        const tpSyms = new Set<ts.Symbol>();
-        for (const tp of decl.typeParameters!) {
-          const s = L.checker.getSymbolAtLocation(tp.name);
-          if (s) tpSyms.add(s);
-        }
-        for (const clause of decl.heritageClauses) {
-          if (clause.token !== ts.SyntaxKind.ExtendsKeyword) continue;
-          for (const t of clause.types) {
-            let mentions = false;
-            ts.walkPreorder(t, (n) => {
-              const s = ts.isIdentifier(n) ? L.checker.getSymbolAtLocation(n) : undefined;
-              if (s && tpSyms.has(s)) {
-                mentions = true;
-                return "stop";
-              }
-              return undefined;
-            });
-            if (mentions) {
-              L.unsupported(
-                "SC1090",
-                t,
-                "generic classes whose 'extends' clause mentions their own type parameters (each instantiation would need a different base)",
-              );
-            }
-          }
-        }
+      // (`class Wrap<T> extends Box<T>`) resolves a DIFFERENT base per
+      // instantiation, so no single family node can sit above all of them.
+      // The family SPLITS: it collects with no base at all (statics only —
+      // it never had fields or instance methods), and each instantiation
+      // resolves the heritage clause itself, under its own bindings, and
+      // takes that concrete class as its base. Instantiations are then
+      // ordinary classes sitting exactly where their bases put them —
+      // layout prefix, vtable slots, dispatch and `instanceof Box` all come
+      // out of the honest tree — and the family keeps only what does not
+      // depend on the arguments. What it gives up is named at
+      // `genericSplitBase`.
+      // A MIXIN instantiation never resolves its heritage through the loop
+      // (the clause names the mixin's PARAMETER and `mixin.base` is the
+      // argument class), so there is nothing to split and the family-level
+      // refusal it used to take stays exactly where it was.
+      const splitsBase = familyMode && mixin === undefined && extendsMentionsOwnTypeParams(L, decl);
+      if (familyMode && mixin !== undefined && extendsMentionsOwnTypeParams(L, decl)) {
+        L.unsupported(
+          "SC1090",
+          decl,
+          "generic classes inside a mixin whose 'extends' clause mentions their own type parameters (each instantiation would need a different base)",
+        );
       }
-      for (const clause of inst || mixin ? [] : (decl.heritageClauses ?? [])) {
+      // An INSTANTIATION of a SPLIT family resolves its own heritage below;
+      // every other instantiation's base is its family (whose base is the
+      // declared one, resolved when the family collected).
+      const splitInst = inst !== undefined && inst.family.genericSplitBase === true;
+      let base: ClassInfo | null = inst ? (splitInst ? null : inst.family) : mixin ? mixin.base : null;
+      const resolvesHeritage = mixin !== undefined ? false : inst !== undefined ? splitInst : !splitsBase;
+      for (const clause of resolvesHeritage ? (decl.heritageClauses ?? []) : []) {
         // `implements` is pure type-world: tsc checked the conformance and
         // the clause erases — nothing about the runtime class changes.
         // (Assigning an instance INTO an interface-typed slot is a separate
@@ -2162,7 +2209,19 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
           // A const BINDING of a mixin call (`const Tagged = M(Base);
           // class D extends Tagged {}`): the binding pins that call's
           // instantiation — collected on demand (lower-mixins.ts).
-          mixinResultBindingClassOf(L, symbol) ?? null;
+          mixinResultBindingClassOf(L, symbol) ??
+          // `const B = Impl as unknown as BCtor; class D extends B {}` —
+          // the published-class-behind-a-construct-signature shape (bson's
+          // `LongWithoutOverridesClass`, the mixin-looking base that is
+          // really one class behind two casts). The casts are erasure: the
+          // VALUE is that class's static side, so `new B()` already
+          // resolves through castAliasedClassInfoOf and the extends clause
+          // has to name the same class or the two spellings of one thing
+          // disagree. The instance type the const's annotation publishes
+          // may be a MAPPED view of the class (Long minus the members
+          // Timestamp redeclares) — a type-world subset of the same
+          // layout, so the prefix an `extends` needs is unchanged.
+          castAliasedClassInfoOf(L, symbol) ?? null;
         // `extends Box<number>` — a GENERIC program class as the base: the
         // base is the concrete INSTANTIATION, resolved through the heritage
         // type (mapType registers/reuses `Box%0`).
@@ -3766,7 +3825,15 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
             const am = [...methods.entries()].filter(([, s]) => s.abstract === true).map(([n]) => n);
             return am.length > 0 ? { abstractMethods: am } : {};
           })(),
-          ...(inst ? { genericOf: inst.family.def.name } : {}),
+          // The FAMILY's preorder interval, carried by the instantiation's
+          // emitted class object so `instanceof Box` answers for the whole
+          // family exactly like JS's one runtime class. A SPLIT family is
+          // not an ancestor of this instantiation (its base is the one its
+          // own arguments named), so there is no such interval to borrow —
+          // the class object carries its own, and `instanceof` against the
+          // family fences at its site rather than reading an interval that
+          // covers the wrong set.
+          ...(inst && !splitInst ? { genericOf: inst.family.def.name } : {}),
           loc: locOf(decl),
         },
         fields,
@@ -3833,6 +3900,7 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
           family: info,
           instances: new Map(),
         };
+        if (splitsBase) info.genericSplitBase = true;
         L.genericClassByDecl.set(decl, info.generic);
       }
       if (base) base.subclasses.push(info);
@@ -3888,7 +3956,16 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
     // instanceof answers for the whole family, inherited concrete fields
     // read through the shared prefix, and every per-instantiation member
     // keeps a named per-site fence.
-    const familyT: IrType = { kind: "object", className: gci.family.def.name };
+    // A SPLIT family (its `extends` mentions its own type parameters) is
+    // NOT an ancestor of its instantiations, so the two properties this
+    // degradation rests on — the upcast and the interval — are both gone.
+    // Answering the family type there would hand back a class no
+    // instantiation can widen into (the validator's strict-descendant rule)
+    // and an interval covering nothing. Unmapped is the honest answer: the
+    // reference's own site fences and says why.
+    const familyT: IrType | null = gci.family.genericSplitBase === true
+      ? null
+      : { kind: "object", className: gci.family.def.name };
     // The checker appends `this` (and outer type parameters) to
     // getTypeArguments — only the declaration's own count participates.
     const args = L.checker.getTypeArguments(ref as ts.TypeReference).slice(0, gci.typeParams.length);
