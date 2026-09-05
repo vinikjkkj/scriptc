@@ -2962,10 +2962,10 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
           // surface is synchronous still compiles (commander: parse()
           // works, parseAsync() traps where called). TS async methods
           // collect below like any method: the body is an async
-          // IrFunction (fiber spawn wrapper, `this` as param 0), calls
-          // dispatch STATICALLY — override chains fence (the vtable slot
-          // machinery has no fiber-spawn story), so every call site is a
-          // direct call the emitter routes through the spawn wrapper.
+          // IrFunction (fiber spawn wrapper, `this` as param 0), a direct
+          // call the emitter routes through that wrapper, and a VIRTUAL
+          // call the same wrapper by way of the synthesized vtable entry
+          // `%C.m%vt` (vtThunkKind).
           if (
             member.modifiers?.some((m) => m.kind === ts.SyntaxKind.AsyncKeyword) &&
             isJsSourceFile(decl.getSourceFile())
@@ -3088,17 +3088,21 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
           }
           const asyncMember =
             member.modifiers?.some((m) => m.kind === ts.SyntaxKind.AsyncKeyword) === true;
-          // Async methods dispatch STATICALLY (the body enters through its
-          // fiber spawn wrapper; vtable slots hold raw implementations) —
-          // an override chain touching an async method on either end would
-          // put a spawn wrapper behind a virtual slot, so it fences.
-          if (overridden && (asyncMember || overridden.sig.async === true)) {
-            L.unsupported(
-              "SC1090",
-              member.name,
-              `overriding ${overridden.sig.async === true ? "the async method" : "a method with an async method"} '${mName}' (async methods dispatch statically — the vtable slot machinery has no fiber-spawn story)`,
-            );
-          }
+          // ASYNC METHODS DISPATCH VIRTUALLY. An async method's module
+          // function `%C.m` is the FIBER BODY: it returns the promise's
+          // INNER type and, called directly, would run on the caller's
+          // stack. So it is not what a vtable slot may hold — the slot's
+          // signature returns the PROMISE, and the thing spelled at it is
+          // the emitted spawn wrapper. vtThunkFn synthesizes `%C.m%vt` for
+          // exactly that: one call of `%C.m` (which callTargetC routes
+          // through `sc_as_%C.m`, spawning the fiber and answering the
+          // promise), typed at the slot. Direct and `super` calls keep
+          // targeting `%C.m` and are untouched.
+          //
+          // Nothing here has to agree about async-ness across the chain:
+          // an `async m(): Promise<T>` and a plain `m(): Promise<T>` have
+          // the SAME slot ABI, so either may override the other — only the
+          // async side needs the thunk, and the choice is per class.
           // A #private GENERATOR method carries its channels on the sig:
           // the body lowers as a generator IrFunction (`this` as param 0),
           // and every call — direct by construction — enters through the
@@ -5399,20 +5403,62 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
     return retExact && arityExact ? "exact" : "widened";
   }
 
-/** The synthesized VTABLE THUNK of a widened override — `%C.m%vt`, spelled
- * at the slot's signature. Body: one call of `%C.m` with the slot's own
- * arguments plus an `undefined` for each parameter only the override
- * declares, its result dynFrom'd when the slot returns `unknown`.
+/** True when the vtable entry for `info`'s own `mName` cannot be the method
+ * function itself, so `vtThunkFn` must synthesize `%C.m%vt`. Two reasons,
+ * and a class can have both at once:
+ *
+ * - WIDENED (overrideSlotFit): the implementation is callable at the slot
+ *   but not spelled at it — it declares trailing optional parameters the
+ *   slot does not carry, or returns a value the slot's `unknown` boxes.
+ *
+ * - ASYNC: an async method's module function IS THE FIBER BODY. It returns
+ *   the promise's INNER type and runs on whatever stack calls it, while the
+ *   slot's signature returns the PROMISE. What is spelled at the slot is
+ *   the emitted spawn wrapper `sc_as_%C.m` — which has no IR name a vtable
+ *   entry could carry, so the thunk (an ordinary, NON-async function whose
+ *   one statement is a call of `%C.m`, and callTargetC routes that call
+ *   through the spawn wrapper) is the entry instead. This applies to the
+ *   slot's own DECLARER as much as to an override: `class A { async m() }`
+ *   with any subclass overriding `m` needs A's entry to be A's thunk. */
+  function vtThunkKind(L: Lowerer, info: ClassInfo, mName: string,
+  ): { own: MethodSig; slot: { declarer: ClassInfo; sig: MethodSig } } | null {
+    const own = info.methods.get(mName);
+    if (!own || own.abstract === true) return null;
+    // The slot is the ROOT-MOST declaration at or above this class — `info`
+    // itself when nothing above declares the name, which is the case an
+    // async DECLARER needs (overrideSlotFit then answers "exact" and only
+    // the async reason remains).
+    const slot = slotMethodOn(L, info, mName);
+    if (!slot) return null;
+    const fit = overrideSlotFit(L, slot.sig, own);
+    if (fit === null) return null;
+    if (fit !== "exact") return { own, slot };
+    // Only the ASYNC reason is left, and it only bites where a VTABLE
+    // exists: a standalone class dispatches every call directly and would
+    // carry the thunk as dead weight in every program with an async
+    // method. inHierarchy answers with the whole class graph in hand at
+    // EMIT time (lowerClassMembers), which is where the emitted set is
+    // decided — discovery may see a smaller graph, and a thunk it misses
+    // is only missing from the reachable SET, never from the module.
+    if (own.async !== true || !inHierarchy(L, info)) return null;
+    return { own, slot };
+  }
+
+/** The synthesized VTABLE THUNK — `%C.m%vt`, spelled at the slot's
+ * signature. Body: one call of `%C.m` with the slot's own arguments plus an
+ * `undefined` for each parameter only the override declares, its result
+ * dynFrom'd when the slot returns `unknown`. For an ASYNC `%C.m` that one
+ * call is the SPAWN (callTargetC routes by fn.async), so the thunk hands
+ * back the promise the fiber settles — exactly what a direct call gets.
  *
  * The thunk is a UNIT registered beside the implementation and reached by
  * the same edge (discover's `%vt` propagation), so it exists exactly when
  * `%C.m` does — a vtable entry can never point at a pruned function. */
   export function vtThunkFn(L: Lowerer, info: ClassInfo, mName: string): IrFunction | null {
     const className = info.def.name;
-    const own = info.methods.get(mName);
-    const slot = slotMethodOn(L, info.base, mName);
-    if (!own || !slot) return null;
-    if (overrideSlotFit(L, slot.sig, own) !== "widened") return null;
+    const need = vtThunkKind(L, info, mName);
+    if (!need) return null;
+    const { own, slot } = need;
     const loc = info.decl ? locOf(info.decl) : { file: "<synthetic>", start: 0, end: 0 };
     const thisType: IrType = { kind: "object", className };
     const locals: IrLocal[] = [{ id: "this.0", name: "this", type: thisType, mutable: false }];
@@ -5690,6 +5736,10 @@ export function lowerClassMembers(L: Lowerer, info: ClassInfo): IrFunction[] {
         if (!(e instanceof PoisonError)) throw e;
       }
     }
+    // Members whose body POISONED: no `%C.m` reached `out`, so no vtable
+    // thunk of `%C.m` may either — it would call an undeclared function,
+    // the one shape --best-effort refuses to defer.
+    const poisoned = new Set<string>();
     for (const { mName, member } of L.classMethodMembers(info)) {
       if (!always && !L.wantBody(`%${className}.${mName}`)) continue;
       try {
@@ -5697,6 +5747,7 @@ export function lowerClassMembers(L: Lowerer, info: ClassInfo): IrFunction[] {
         if (fn) out.push(fn);
       } catch (e) {
         if (!(e instanceof PoisonError)) throw e;
+        poisoned.add(mName);
       }
     }
     // A RECOGNIZED PROTOTYPE-CLASS's methods, which classMethodMembers
@@ -5712,6 +5763,7 @@ export function lowerClassMembers(L: Lowerer, info: ClassInfo): IrFunction[] {
         if (fn) out.push(fn);
       } catch (e) {
         if (!(e instanceof PoisonError)) throw e;
+        poisoned.add(mName);
       }
     }
     for (const name of info.staticMethods?.keys() ?? []) {
@@ -5722,15 +5774,18 @@ export function lowerClassMembers(L: Lowerer, info: ClassInfo): IrFunction[] {
     for (const prop of info.throwingSetters) {
       if (always || L.wantBody(`%${className}.set:${prop}`)) out.push(L.throwingSetterFn(info, prop));
     }
-    // VTABLE THUNKS of this class's WIDENED overrides. One per method whose
-    // own signature is callable at the slot but not spelled at it; the
-    // synthesis is pure (it reads the collected signatures, never a body),
-    // so it runs off `info.methods` and covers declared and prototype-class
-    // methods alike. Gated on the implementation's own reachability — the
-    // thunk exists exactly when `%C.m` does, which is what keeps a vtable
-    // entry from pointing at a stripped function.
+    // VTABLE THUNKS of this class — one per method whose own function is
+    // not what the slot may hold: a WIDENED override (callable at the slot
+    // but not spelled at it) or an ASYNC method (whose function is the
+    // fiber body, not the spawn). The synthesis is pure (it reads the
+    // collected signatures, never a body), so it runs off `info.methods`
+    // and covers declared and prototype-class methods alike. Gated on the
+    // implementation's own reachability — the thunk exists exactly when
+    // `%C.m` does, which is what keeps a vtable entry from pointing at a
+    // stripped function — and on it having actually lowered.
     for (const mName of info.methods.keys()) {
       if (!always && !L.wantBody(`%${className}.${mName}`)) continue;
+      if (poisoned.has(mName)) continue;
       const thunk = vtThunkFn(L, info, mName);
       if (thunk) out.push(thunk);
     }
@@ -6178,8 +6233,10 @@ export function lowerClassMembers(L: Lowerer, info: ClassInfo): IrFunction[] {
     // body returns the promise's INNER type (a `return v` fulfills with
     // v) and every call enters through the emitted fiber spawn wrapper
     // (callTargetC routes by fn.async; `this` rides as param 0 in the
-    // spawn's argument pack). Dispatch is static by construction — the
-    // override fence at collection keeps async methods out of vtables.
+    // spawn's argument pack). A VIRTUAL call reaches the same wrapper: the
+    // vtable entry is the synthesized `%C.m%vt`, whose one statement is a
+    // call of this function and so routes through the wrapper too — this
+    // function is never the entry itself (vtThunkKind).
     const isAsync = sig.async === true && sig.ret.kind === "promise";
     // #PRIVATE GENERATOR methods: the module function is a generator
     // IrFunction — the body returns the TReturn channel, yields ride

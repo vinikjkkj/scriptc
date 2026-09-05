@@ -967,7 +967,15 @@ export class CEmitter {
         let inherited = false;
         for (let a = m.base; a; a = a.base) inherited ||= declares(a, method);
         if (!inherited && declaredBelow(m, method)) {
-          let fn = this.fnByName.get(`%${m.def.name}.${method}`);
+          // The SLOT's own signature is read off whatever the declarer's
+          // vtable ENTRY is, and that is the synthesized thunk `%C.m%vt`
+          // wherever the frontend made one (a widened override, or an ASYNC
+          // method — whose `%C.m` is the fiber body, returning the promise's
+          // inner type and running on the caller's stack, while the thunk
+          // is the spawn spelled at the slot). Reading the raw function here
+          // would type an async slot at the AWAITED value.
+          let fn = this.fnByName.get(`%${m.def.name}.${method}%vt`) ??
+            this.fnByName.get(`%${m.def.name}.${method}`);
           if (!fn && m.def.abstractMethods?.includes(method)) {
             // An ABSTRACT declarer has no function; the slot's ABI
             // signature comes from any concrete descendant implementation

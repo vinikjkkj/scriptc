@@ -10371,6 +10371,54 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/7600-async-methods-dispatch-through-the-vtable.ts": {
+   "order": [
+    "<repo>/tests/corpus/7600-async-methods-dispatch-through-the-vtable.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/7601-an-async-override-rejects-rather-than-throwing.ts": {
+   "order": [
+    "<repo>/tests/corpus/7601-an-async-override-rejects-rather-than-throwing.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/7602-async-virtual-calls-interleave-on-the-loop.ts": {
+   "order": [
+    "<repo>/tests/corpus/7602-async-virtual-calls-interleave-on-the-loop.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/7603-async-and-plain-overrides-share-one-slot.ts": {
+   "order": [
+    "<repo>/tests/corpus/7603-async-and-plain-overrides-share-one-slot.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/7604-super-into-an-async-base-from-an-async-override.ts": {
+   "order": [
+    "<repo>/tests/corpus/7604-super-into-an-async-base-from-an-async-override.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/7605-an-abstract-async-slot-types-off-its-implementations.ts": {
+   "order": [
+    "<repo>/tests/corpus/7605-an-abstract-async-slot-types-off-its-implementations.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/7606-a-cached-index-promise-behind-an-async-slot.ts": {
+   "order": [
+    "<repo>/tests/corpus/7606-a-cached-index-promise-behind-an-async-slot.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/7607-an-async-slot-returning-promise-void.ts": {
+   "order": [
+    "<repo>/tests/corpus/7607-an-async-slot-returning-promise-void.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/761-any-objects.ts": {
    "order": [
     "<repo>/tests/corpus/761-any-objects.ts"
