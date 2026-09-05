@@ -1,0 +1,13 @@
+override-widened-mid-chain-dispatch.ts:28:10 - error SC1090: dispatching 'pick' through a receiver typed at 'Mid' (a class between it and the vtable slot widened the signature — call it at the class that declares the slot, or at a receiver whose exact subclass is known) is not supported yet
+
+  27 | function throughMid(m: Mid): string {
+  28 |   return m.pick(5);
+     |          ^~~~~~~~~
+  29 | }
+
+override-widened-mid-chain-dispatch.ts:32:10 - error SC1090: dispatching 'pick' through a receiver typed at 'Mid' (a class between it and the vtable slot widened the signature — call it at the class that declares the slot, or at a receiver whose exact subclass is known) is not supported yet
+
+  31 | function alsoThroughMid(m: Mid): string {
+  32 |   return m.pick();
+     |          ^~~~~~~~
+  33 | }
