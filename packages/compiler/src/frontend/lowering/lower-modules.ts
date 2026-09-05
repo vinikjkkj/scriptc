@@ -914,9 +914,9 @@ export function collectJsonRequires(L: Lowerer, parts: FileParts[]): void {
     const reachable = L.reachable;
     return {
       classes: [...L.classes.values()]
-        .map((c) => c.def)
-        .filter((def) => classNames.has(def.name))
-        .map((def) => {
+        .filter((c) => classNames.has(c.def.name))
+        .map((c) => {
+          const def = c.def;
           // Generic-class instantiations bypass the reachability gate
           // (demand-driven — every member of a demanded instantiation
           // lowers; see lowerClassMembers), so their defs keep every
@@ -924,8 +924,13 @@ export function collectJsonRequires(L: Lowerer, parts: FileParts[]): void {
           // the same rule (noteVirtualEdge marks the abstract declarer, so
           // a dispatched slot keeps its declaration; an unreferenced one
           // drops and the root-most CONCRETE declaration owns the slot).
+          //
+          // The test is `genericInstance`, not `def.genericOf`: a SPLIT
+          // family's instantiation carries no genericOf (the family is not
+          // its ancestor, so there is no family interval to borrow) and is
+          // demand-driven exactly like every other instantiation.
           const methods =
-            reachable === null || def.genericOf !== undefined
+            reachable === null || c.genericInstance !== undefined
               ? (def.methods ?? [])
               : (def.methods?.filter((m) => reachable.has(`%${def.name}.${m}`)) ?? []);
           const abstractMethods = def.abstractMethods?.filter((m) => methods.includes(m)) ?? [];

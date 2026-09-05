@@ -17335,6 +17335,17 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
             "'instanceof' against a class value whose class has no lowering (the class declaration itself was rejected — see its own diagnostic)",
           );
         }
+        // The class-VALUE spelling of the split-family refusal below: the
+        // interval this would read off the class object covers one
+        // instantiation's subtree, never the family JS brands.
+        if (targetInfo.genericSplitBase === true) {
+          L.unsupported(
+            "SC1090",
+            expr,
+            `'instanceof' against a class value of '${targetInfo.def.jsName ?? targetInfo.def.name}', whose 'extends' clause mentions its own type parameters ` +
+              `(each instantiation extends a different base, so no one interval covers the family the way JS's single runtime class does)`,
+          );
+        }
         const left = L.lowerExpr(expr.left);
         if (left.type.kind !== "object") {
           L.unsupported(
@@ -17579,6 +17590,19 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
         "SC1090",
         expr.right,
         "'instanceof' right-hand sides other than classes declared in the program",
+      );
+    }
+    // A SPLIT generic family (`class Wrap<T> extends Box<T>` — one base per
+    // instantiation, so the family is not their common ancestor) has no
+    // interval that means "any Wrap". JS has ONE runtime `Wrap` and answers
+    // for every instantiation; the static graph here would answer for at
+    // most one of them and say false about the rest — silently. Refuse.
+    if (target.genericSplitBase === true) {
+      L.unsupported(
+        "SC1090",
+        expr,
+        `'instanceof ${target.def.jsName ?? target.def.name}' where the class's 'extends' clause mentions its own type parameters ` +
+          `(each instantiation extends a different base, so no one interval covers the family the way JS's single runtime class does)`,
       );
     }
     // A catch binding on the left: the runtime test against the class's
