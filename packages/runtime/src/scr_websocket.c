@@ -463,7 +463,19 @@ static bool scr_ws_drain_frames(ScrWsConn *c) {
         reason = pay + 2;
         rlen = plen - 2;
       }
-      if (c->state == SCR_WS_ST_OPEN) scr_ws_write_frame(c, SCR_WS_OP_CLOSE, pay, plen); /* echo */
+      if (c->state == SCR_WS_ST_OPEN) {
+        /* Echo the CODE, never the peer's reason. RFC 6455 §5.5.1 leaves
+         * the reply body open, and this used to send `pay`/`plen` back
+         * verbatim -- so a server that closed with a reason got its own
+         * reason quoted at it, where Node/undici answer with the bare
+         * two-byte status code. Measured against node v25.9.0: a server
+         * close(1001, "going") is answered with `88 02 03 e9`, not
+         * `88 07 03 e9 g o i n g`. A close with no body stays bodiless. */
+        uint8_t echo[2];
+        size_t elen = 0;
+        if (plen >= 2) { echo[0] = pay[0]; echo[1] = pay[1]; elen = 2; }
+        scr_ws_write_frame(c, SCR_WS_OP_CLOSE, echo, elen);
+      }
       int was = c->state;
       c->state = SCR_WS_ST_CLOSED;
       if (was != SCR_WS_ST_CLOSED && c->cb.on_close) c->cb.on_close(c->user, code, reason, rlen);

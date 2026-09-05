@@ -63,6 +63,65 @@ provenance: 40 alias key(s) are spelled by more than one mapped package ...
   so @zapo-js/store-sqlite's answer is used for all of them  <- barrel will fail
 ```
 
+## The push endpoint — `/s/<sessionId>/events/ws`
+
+`GET /events` serves the per-session event ring by polling. The same events are
+also **pushed** over a WebSocket at
+
+```
+ws://<host>:<port>/s/<sessionId>/events/ws      # /events/ws for ZAPO_SESSION
+    ?since=<seq>   replay from the ring (absent = live only)
+    &type=<name>   only that event type
+    &token=<t>     when ZAPO_REST_TOKEN is set and the client cannot send x-api-key
+```
+
+One JSON text frame per event — exactly the object `/events` returns. Service
+frames use a `$`-prefixed `type` so they can never collide with a zapo event
+name: `$hello` (on connect), `$gap` (events the ring dropped before you got
+them), `$lag` (the window closed on you).
+
+### The runtime had no WebSocket server
+
+`packages/runtime/src/scr_websocket.h` is the **client** codec — masking is a
+client obligation and `scr_ws_accept_key` exists only to *validate* a server's
+reply. There is no server-side frame builder and no accept path in C. What the
+runtime does have is the seam: `server.on("upgrade", (req, socket, head))`
+fires instead of `'request'` for a `Connection: upgrade` request and hands the
+socket over raw (`scr_http.c`'s upgrade arm), `createHash("sha1")…
+digest("base64")` lowers, and the Buffer surface covers the framing
+arithmetic. So the server half is **TypeScript in this file** and needs no
+runtime change at all.
+
+It is proven, not assumed:
+
+| evidence | what it pins |
+|---|---|
+| `tests/corpus/7760-websocket-server-frames.ts` | the framing matrix against the runtime's own native WebSocket client; every outbound header printed as hex, so the 7-bit / 16-bit / 64-bit length forms and the clear mask bit are pinned as bytes. Byte-exact vs node v25.9.0 on **both** backends |
+| `tests/corpus/7761-websocket-server-raw-client.ts` | fragmentation, an unmasked client frame refused with 1002, ping/pong, a client vanishing mid-frame. Byte-exact vs node on **both** backends |
+| `tests/fixtures/server/cases/ws-server` | the same server judged by **Node's own built-in `WebSocket`** from a separate process — a real client, not this code talking to itself |
+
+### Slow consumers
+
+The service keeps **no per-subscriber buffer**. A subscriber is a few numbers
+next to a socket; the only buffer in the system is the per-session ring the
+polling route already used, bounded at `ZAPO_EVENT_BUFFER` (1000) entries. A
+consumer that stops reading therefore cannot grow this process's memory.
+
+What it does instead is stop being written to. The server sends at most
+`ZAPO_WS_WINDOW` (64) events past the consumer's last `{"ack":<seq>}`; at the
+window it emits one `$lag` frame and goes quiet. If the consumer acks, the
+server catches it up from the ring — announcing a `$gap` for anything the ring
+evicted in the meantime, so a consumer can always tell it lost events. If it
+stays at the window for `ZAPO_WS_LAG_MS` (30 s) the server closes it with 1013
+and the consumer reconnects with `?since=<its last seq>`.
+
+An ack window rather than a byte budget because **the compiled socket surface
+has no `'drain'` event and no `writableLength`** (the lowered net Socket is
+write/end/destroy/pipe/setTimeout/remoteAddress/read/unshift plus
+data/end/close/error/connect/timeout/readable). Byte-level backpressure is not
+observable from TypeScript on this lane; an ack is arithmetic, and arithmetic
+is enforceable.
+
 ## Harness
 
 | script | what it does |
