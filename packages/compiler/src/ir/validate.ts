@@ -1056,6 +1056,7 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "zlib.gunzipSync": { argTypes: [BYTES_U8], result: BYTES_U8 },
   "zlib.unzipSync": { argTypes: [BYTES_U8], result: BYTES_U8 },
   "zlib.deflateAsync": { argTypes: [BYTES_U8], result: { kind: "promise", inner: BYTES_U8 } },
+  "zlib.deflateAsyncLevel": { argTypes: [BYTES_U8, F64], result: { kind: "promise", inner: BYTES_U8 } },
   "zlib.unzipAsync": { argTypes: [BYTES_U8], result: { kind: "promise", inner: BYTES_U8 } },
   "zlib.deflateRawSync": { argTypes: [BYTES_U8], result: BYTES_U8 },
   "zlib.inflateRawSync": { argTypes: [BYTES_U8], result: BYTES_U8 },

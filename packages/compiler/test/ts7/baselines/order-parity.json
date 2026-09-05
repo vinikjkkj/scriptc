@@ -10365,93 +10365,57 @@
    ],
    "diags": []
   },
-  "<repo>/tests/corpus/7590-a-bound-subscribe-dispatcher-over-a-plugin-context.ts": {
-   "order": [
-    "<repo>/tests/corpus/7590-a-bound-subscribe-dispatcher-over-a-plugin-context.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/7591-an-untabled-event-is-armed-by-the-subscribe-dispatcher.ts": {
-   "order": [
-    "<repo>/tests/corpus/7591-an-untabled-event-is-armed-by-the-subscribe-dispatcher.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/7592-a-subscribe-slot-over-a-run-time-chosen-receiver.ts": {
-   "order": [
-    "<repo>/tests/corpus/7592-a-subscribe-slot-over-a-run-time-chosen-receiver.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/7593-two-subscribe-slots-that-erase-alike-arm-different-events.ts": {
-   "order": [
-    "<repo>/tests/corpus/7593-two-subscribe-slots-that-erase-alike-arm-different-events.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/7594-the-rest-of-the-subscribe-surface-through-bound-slots.ts": {
-   "order": [
-    "<repo>/tests/corpus/7594-the-rest-of-the-subscribe-surface-through-bound-slots.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/7595-a-dyn-tuple-arm-in-a-bound-subscribe-dispatcher.ts": {
-   "order": [
-    "<repo>/tests/corpus/7595-a-dyn-tuple-arm-in-a-bound-subscribe-dispatcher.ts"
-   ],
-   "diags": []
-  },
   "<repo>/tests/corpus/760-any-arithmetic.ts": {
    "order": [
     "<repo>/tests/corpus/760-any-arithmetic.ts"
    ],
    "diags": []
   },
-  "<repo>/tests/corpus/7600-async-methods-dispatch-through-the-vtable.ts": {
+  "<repo>/tests/corpus/7600-math-minmax-mixed-spread-and-positional.ts": {
    "order": [
-    "<repo>/tests/corpus/7600-async-methods-dispatch-through-the-vtable.ts"
+    "<repo>/tests/corpus/7600-math-minmax-mixed-spread-and-positional.ts"
    ],
    "diags": []
   },
-  "<repo>/tests/corpus/7601-an-async-override-rejects-rather-than-throwing.ts": {
+  "<repo>/tests/corpus/7601-a-set-constructed-from-another-set.ts": {
    "order": [
-    "<repo>/tests/corpus/7601-an-async-override-rejects-rather-than-throwing.ts"
+    "<repo>/tests/corpus/7601-a-set-constructed-from-another-set.ts"
    ],
    "diags": []
   },
-  "<repo>/tests/corpus/7602-async-virtual-calls-interleave-on-the-loop.ts": {
+  "<repo>/tests/corpus/7602-a-regex-printed-by-tostring.ts": {
    "order": [
-    "<repo>/tests/corpus/7602-async-virtual-calls-interleave-on-the-loop.ts"
+    "<repo>/tests/corpus/7602-a-regex-printed-by-tostring.ts"
    ],
    "diags": []
   },
-  "<repo>/tests/corpus/7603-async-and-plain-overrides-share-one-slot.ts": {
+  "<repo>/tests/corpus/7603-freeze-of-a-local-a-reading-callee-inspected.ts": {
    "order": [
-    "<repo>/tests/corpus/7603-async-and-plain-overrides-share-one-slot.ts"
+    "<repo>/tests/corpus/7603-freeze-of-a-local-a-reading-callee-inspected.ts"
    ],
    "diags": []
   },
-  "<repo>/tests/corpus/7604-super-into-an-async-base-from-an-async-override.ts": {
+  "<repo>/tests/corpus/7604-clearing-an-optional-timer-handle.ts": {
    "order": [
-    "<repo>/tests/corpus/7604-super-into-an-async-base-from-an-async-override.ts"
+    "<repo>/tests/corpus/7604-clearing-an-optional-timer-handle.ts"
    ],
    "diags": []
   },
-  "<repo>/tests/corpus/7605-an-abstract-async-slot-types-off-its-implementations.ts": {
+  "<repo>/tests/corpus/7605-a-replacer-over-a-runtime-built-regex.ts": {
    "order": [
-    "<repo>/tests/corpus/7605-an-abstract-async-slot-types-off-its-implementations.ts"
+    "<repo>/tests/corpus/7605-a-replacer-over-a-runtime-built-regex.ts"
    ],
    "diags": []
   },
-  "<repo>/tests/corpus/7606-a-cached-index-promise-behind-an-async-slot.ts": {
+  "<repo>/tests/corpus/7606-a-nullish-default-whose-own-type-has-no-home.ts": {
    "order": [
-    "<repo>/tests/corpus/7606-a-cached-index-promise-behind-an-async-slot.ts"
+    "<repo>/tests/corpus/7606-a-nullish-default-whose-own-type-has-no-home.ts"
    ],
    "diags": []
   },
-  "<repo>/tests/corpus/7607-an-async-slot-returning-promise-void.ts": {
+  "<repo>/tests/corpus/7607-promisified-deflate-with-a-level-option.ts": {
    "order": [
-    "<repo>/tests/corpus/7607-an-async-slot-returning-promise-void.ts"
+    "<repo>/tests/corpus/7607-promisified-deflate-with-a-level-option.ts"
    ],
    "diags": []
   },
@@ -10959,12 +10923,6 @@
   "<repo>/tests/diagnostics/a-spread-at-each-of-the-three-argument-positions.ts": {
    "order": [
     "<repo>/tests/diagnostics/a-spread-at-each-of-the-three-argument-positions.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/diagnostics/a-subscribe-slot-whose-event-map-has-an-unspellable-handler.ts": {
-   "order": [
-    "<repo>/tests/diagnostics/a-subscribe-slot-whose-event-map-has-an-unspellable-handler.ts"
    ],
    "diags": []
   },

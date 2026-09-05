@@ -1776,6 +1776,18 @@ declare module "util" {
     privateKey: import("crypto").KeyObject;
     publicKey: import("crypto").KeyObject;
   }) => Promise<Buffer>;
+  /* The THIRD promisify target: node:zlib's callback deflate, which
+   * answers `(data, options?) => Promise<Buffer>`. Declared LAST so the
+   * two spellings above still resolve exactly where they did. zapo's
+   * companion-host history sync is the program:
+   * `deflateAsync(serialized, { level: 1 })`. */
+  export function promisify(
+    fn: (
+      data: string | Uint8Array,
+      options: import("zlib").ZlibOptions,
+      callback: (err: Error | null, result: Buffer) => void,
+    ) => void,
+  ): (data: string | Uint8Array, options?: import("zlib").ZlibOptions) => Promise<Buffer>;
   /* Declared surface without full lowering (the type-level tolerance
    * story: guarded/diagnostic-path code must TYPECHECK; a reached use
    * without a lowering fences at its site). inspect's options carry the
@@ -2071,6 +2083,18 @@ declare module "zlib" {
   export function inflateSync(data: Uint8Array): Buffer;
   export function gzipSync(data: string | Uint8Array): Buffer;
   export function gunzipSync(data: Uint8Array): Buffer;
+  /* The CALLBACK compressor, declared for the one thing it is used for
+   * here: `promisify(deflate)`. `level` is the only option with a lowering
+   * (it changes the output bytes, so it reaches the codec); an options
+   * object carrying anything else fences at the call. */
+  export interface ZlibOptions {
+    level?: number;
+  }
+  export function deflate(
+    data: string | Uint8Array,
+    options: ZlibOptions,
+    callback: (err: Error | null, result: Buffer) => void,
+  ): void;
 }
 declare module "node:zlib" {
   export * from "zlib";

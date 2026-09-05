@@ -274,25 +274,25 @@ curl -s -X POST 'http://127.0.0.1:8787/auth/setNextConnectVersion' -H 'x-api-key
 
 | parameter | type | required |
 |---|---|---|
-| `message` | object (JSON) | no |
+| `seq` | number | yes |
 | `maxBytes` | number | no |
 
 ```sh
 curl -s -X POST 'http://127.0.0.1:8787/message/downloadBytes' -H 'x-api-key: $ZAPO_REST_TOKEN' \
-       -H 'content-type: application/json' -d '{"message": {}, "maxBytes": 0}'
+       -H 'content-type: application/json' -d '{"seq": 0, "maxBytes": 0}'
 ```
 
 ### `POST /message/downloadToFile`
 
 | parameter | type | required |
 |---|---|---|
-| `message` | object (JSON) | no |
+| `seq` | number | yes |
 | `filePath` | string | yes |
 | `maxBytes` | number | no |
 
 ```sh
 curl -s -X POST 'http://127.0.0.1:8787/message/downloadToFile' -H 'x-api-key: $ZAPO_REST_TOKEN' \
-       -H 'content-type: application/json' -d '{"message": {}, "filePath": "VALUE", "maxBytes": 0}'
+       -H 'content-type: application/json' -d '{"seq": 0, "filePath": "VALUE", "maxBytes": 0}'
 ```
 
 ### `GET /message/getNewChatMessageCapping`

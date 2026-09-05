@@ -454,6 +454,7 @@ const LIB_FN_SYMS: Record<string, string> = {
   "zlib.gunzipSync": "scr_zlib_gunzip",
   "zlib.unzipSync": "scr_zlib_unzip",
   "zlib.deflateAsync": "scr_zlib_deflate_async",
+  "zlib.deflateAsyncLevel": "scr_zlib_deflate_async_level",
   "zlib.unzipAsync": "scr_zlib_unzip_async",
   "zlib.deflateRawSync": "scr_zlib_deflate_raw",
   "zlib.inflateRawSync": "scr_zlib_inflate_raw",

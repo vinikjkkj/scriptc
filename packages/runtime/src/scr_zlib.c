@@ -230,6 +230,16 @@ ScrPromise *scr_zlib_deflate_async(const ScrBytes *data) {
   return scr_promise_settled_ref(b, &scr_bytes_retain_v, &scr_bytes_release_v, NULL);
 }
 
+/* util.promisify(deflate) WITH an options object carrying a level. Node's
+ * callback deflate takes { level }, and the level changes the OUTPUT BYTES
+ * (it is a size/CPU tradeoff over a stream that inflates identically), so
+ * the level has to reach the codec rather than being dropped. Mode 0 is the
+ * zlib container, which is what the option-less form produces too. */
+ScrPromise *scr_zlib_deflate_async_level(const ScrBytes *data, double level) {
+  ScrBytes *b = scr_zlib_deflate_mode(data, 0, level);
+  return scr_promise_settled_ref(b, &scr_bytes_retain_v, &scr_bytes_release_v, NULL);
+}
+
 ScrPromise *scr_zlib_unzip_async(const ScrBytes *data) {
   ScrBytes *b = scr_zlib_unzip(data);
   return scr_promise_settled_ref(b, &scr_bytes_retain_v, &scr_bytes_release_v, NULL);

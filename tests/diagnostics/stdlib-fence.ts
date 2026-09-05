@@ -36,9 +36,9 @@ const cause = new Error("boom").cause;
 
 // Unlowered members on lowered containers.
 const sqrt2 = Math.SQRT2;
-// (n-ary Math.min/max LOWER now — the variadic battery lives in the
-// corpus; the mixed spread/positional list is the form that stays fenced.)
-const clamped = Math.min(1, ...[2, 3]);
+// (Math.min/max lower at any plain arity AND with number[] spreads mixed
+// into the list — corpus 7600 is that battery — so no call FORM of them
+// fences any more; `Math.SQRT2` above is the Math member that still does.)
 const entries = [1, 2].entries();
 const arrAt = [1, 2].at(0);
 const norm = "abc".normalize();

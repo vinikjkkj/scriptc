@@ -3023,6 +3023,22 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
     return true;
   }
 
+/** A zlib options object whose ONLY member is `level`, as the number the
+   * codec takes. Null for every other spelling — an empty object, one
+   * carrying a second setting, a non-number level, or a value that is not
+   * an object literal at all. Narrow on purpose: the claim being made is
+   * that the emitted call reproduces the bytes Node's own call produces,
+   * and that claim holds for exactly the settings the codec is handed. */
+  function soleLevelOption(L: Lowerer, optNode: ts.Expression): IrExpr | null {
+    let opt: ts.Expression = optNode;
+    while (ts.isParenthesizedExpression(opt)) opt = opt.expression;
+    if (!ts.isObjectLiteralExpression(opt) || opt.properties.length !== 1) return null;
+    const prop = opt.properties[0]!;
+    if (!ts.isPropertyAssignment(prop) || !ts.isIdentifier(prop.name) || prop.name.text !== "level") return null;
+    const value = L.lowerExpr(prop.initializer);
+    return value.type.kind === "f64" ? value : null;
+  }
+
 /** The `{ privateKey, publicKey }` options argument of a diffieHellman
    * call, as the two KEYOBJ reads the agreement takes -- the object-literal
    * spelling and the BOUND-record one, exactly the pair the synchronous
@@ -3444,6 +3460,28 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
    * than dropping settings that change the output. */
   export function lowerPromisifiedSettledCall(L: Lowerer, expr: ts.CallExpression, target: PromisifiedTarget, loc: SrcLoc): IrExpr {
     const name = target.fn.replace(/^[a-z]+\./, "").replace(/Async$/, "");
+    // `deflateAsync(bytes, { level })` — the ONE trailing option that has a
+    // lowering, because the codec already takes it (scr_zlib_deflate_mode's
+    // level parameter) and because DROPPING it would be a wrong answer
+    // rather than a missing feature: the level changes the compressed
+    // bytes. zapo's companion-host history sync is the program
+    // (`deflateAsync(serialized, { level: 1 })` — the level the phone
+    // uses). An options object carrying anything else keeps the fence
+    // below: those settings would change the output too, and none of them
+    // reach the codec yet.
+    if (target.fn === "zlib.deflateAsync" && expr.arguments.length === 2 && !expr.arguments.some(ts.isSpreadElement)) {
+      const level = soleLevelOption(L, expr.arguments[1]!);
+      if (level !== null) {
+        const data = L.lowerExprExpecting(expr.arguments[0]!, BYTES_U8);
+        return {
+          kind: "libCall",
+          fn: "zlib.deflateAsyncLevel",
+          args: [data, level],
+          type: { kind: "promise", inner: BYTES_U8 },
+          loc,
+        };
+      }
+    }
     if (expr.arguments.length !== target.params.length || expr.arguments.some(ts.isSpreadElement)) {
       L.noLowering(
         `the promisified ${name} with this argument shape`,

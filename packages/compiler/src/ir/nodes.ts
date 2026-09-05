@@ -4405,6 +4405,9 @@ export type IrLibFn =
    * runs synchronously and answers an ALREADY SETTLED promise — the
    * fs/promises stance (divergence 23). */
   | "zlib.deflateAsync"
+  /** util.promisify(deflate) called WITH `{ level }`: the level reaches the
+   * codec, because it changes the compressed bytes. */
+  | "zlib.deflateAsyncLevel"
   | "zlib.unzipAsync"
   /** The RAW twins: headerless DEFLATE, for framing layers that carry
    * their own length and checksum. */

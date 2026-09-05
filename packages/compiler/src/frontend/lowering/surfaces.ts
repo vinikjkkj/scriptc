@@ -1594,8 +1594,8 @@ export const BUILTIN_MODULE_FENCE_HINTS: Record<string, Record<string, string | 
       hint = "radix-free conversion is a template literal away: `${x}`; toString(radix) runs under --dynamic";
     } else if (container === "Math" && (member === "min" || member === "max")) {
       hint =
-        `Math.${member} lowers with any number of plain arguments or ONE number[] spread — ` +
-        `mixed spread/positional lists don't: spread a single array (Math.${member}(...xs))`;
+        `Math.${member} lowers with any number of plain arguments and any number of number[] ` +
+        `spreads, in any mix — a spread of something other than a number[] is what does not`;
     } else if (
       recvIr?.kind === "array" &&
       member === "index" &&
