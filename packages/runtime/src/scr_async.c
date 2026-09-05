@@ -1538,7 +1538,24 @@ static void scr_trampoline(void) {
  * 20s, still descending. Near-identical reclaim, no burst cost, so 5000
  * is the default: a one-second lull is not idleness for a server. */
 #ifndef SCR_FIBER_POOL_DECAY_MS
-#define SCR_FIBER_POOL_DECAY_MS 5000
+/* OFF by default until the pairing fault below is understood.
+ *
+ * A user's compiled WhatsApp service reached `[auth] paired` and was then
+ * dropped by the server with `stream:error device removed`, reproducibly,
+ * on every attempt. The same binary with SCR_FIBER_POOL_DECAY_MS=0 pairs
+ * every time. The control is exact: the decay prints one line per window,
+ * so a run with the knob off carries ZERO `[fiberpool]` lines, and the
+ * failing run carried nine -- three of them mid-handshake (freed=18
+ * between the QR and the pairing code, then 9, then 10 before
+ * pair-success). Same binary, same custom pairing code, same store.
+ *
+ * Until it is known WHY -- and in particular whether DeleteFiber on a
+ * pooled stack is sound when something still holds it -- the default is
+ * off. The feature is real and measured (30.8 -> 8.8 MiB idle RSS on a
+ * fan-out workload, page faults unchanged when the window exceeds the
+ * traffic's gaps) and stays available opt-in. It is not worth a service
+ * that cannot pair. */
+#define SCR_FIBER_POOL_DECAY_MS 0
 #endif
 
 static ScrStack *scr_stack_pool = NULL;
