@@ -725,17 +725,19 @@ export function genericSignatureTypeDiag(typeText: string, loc: SrcLoc): ScrDiag
  * undeclared keys, number keys canonicalized to their JS string spelling)
  * over the whole overflow-store value domain — data values, functions
  * (the command-registry pattern), Maps/Sets, nested index-signature
- * records, and 'unknown' — so reaching this means a symbol-keyed
- * signature, dual signatures with UNEQUAL value types, or a value type
+ * records, and the checked-dynamic value ('unknown' and 'any' — one
+ * store, differing only in what tsc lets a READ of it flow into) — so
+ * reaching this means a symbol-keyed signature, dual signatures with
+ * UNEQUAL value types, or a value type
  * with no representation at all (Dates, typed arrays beyond the domain,
  * lib API objects). The message points at the working alternatives. */
 export function indexSignatureTypeDiag(typeText: string, loc: SrcLoc): ScrDiagnostic {
   return {
     code: "SC2006",
-    message: `values of type '${typeText}' cannot be compiled: this index signature is outside the supported shape (string or number keys; values limited to numbers, strings, booleans, records, classes, arrays, unions, functions, Maps, Sets, RegExps, Promises, or 'unknown')`,
+    message: `values of type '${typeText}' cannot be compiled: this index signature is outside the supported shape (string or number keys; values limited to numbers, strings, booleans, records, classes, arrays, unions, functions, Maps, Sets, RegExps, Promises, 'unknown', or 'any')`,
     loc,
     milestone: "M2",
-    hint: "string- and number-keyed index signatures over the supported value types compile directly; symbol keys and dual signatures with unequal value types have no lowering",
+    hint: "string- and number-keyed index signatures over the supported value types compile directly (an 'any'- or 'unknown'-valued one rides the checked-dynamic store); symbol keys and dual signatures with unequal value types have no lowering",
   };
 }
 
