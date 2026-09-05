@@ -1503,9 +1503,20 @@ static void scr_trampoline(void) {
  * windows from a full 4096.
  *
  * SCR_FIBER_POOL_DECAY_MS=0 disables decay and restores the pre-decay
- * runtime exactly — the negative control for every number above. */
+ * runtime exactly — the negative control for every number above.
+ *
+ * The window must exceed the traffic's real gaps, or the decay trims
+ * between bursts and the next burst re-faults what it freed. Measured on
+ * a periodic-burst probe (1500 chains x 7 live stacks, saturating the
+ * 4096 cap), gaps of 2.5s: a 1000ms window costs +34% page faults
+ * (136,170 -> 182,452) and reclaims to 19.4 MiB; a 5000ms window costs
+ * nothing measurable and reclaims to 29.9 -> 29.9 (i.e. does not trim at
+ * all on that traffic). On the case the feature is for -- one burst then
+ * quiet -- 5000ms reaches 10.1 MiB against 1000ms's 8.8 MiB in the same
+ * 20s, still descending. Near-identical reclaim, no burst cost, so 5000
+ * is the default: a one-second lull is not idleness for a server. */
 #ifndef SCR_FIBER_POOL_DECAY_MS
-#define SCR_FIBER_POOL_DECAY_MS 1000
+#define SCR_FIBER_POOL_DECAY_MS 5000
 #endif
 
 static ScrStack *scr_stack_pool = NULL;
