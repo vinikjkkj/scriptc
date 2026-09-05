@@ -32,7 +32,7 @@ import { builtinMemberRequireDecl, builtinNamespaceDestructureModuleOf, createRe
 import { lowerEnumDeclaration } from "./lower-enums.js";
 import { ctorObjectGlobalValue, dynAssertionReceiver, isDynSafeReadWidth, isImmutablePrimitiveWidth } from "./lower-exprs.js";
 import { keyedAccessOverIndexSignature, localTakesWidenedKeyedRead, narrowBridgeUnion, unitArmsOf } from "./lower-exprs.js";
-import { abstractPropertyDeclOf, aliasTypeofNarrows, checkedJsNumber, compoundCombine, fnOwnCounters, fnOwnPropBox, fnOwnRoutableKey, fnOwnWhy, isMatchSliceType, lowerGroupsProjection, matchResultNamedGroupsOf, probeLower, pureReemittable, symbolFieldInfo, tonumWhy } from "./lower-exprs.js";
+import { abstractPropertyDeclOf, aliasTypeofNarrows, checkedJsNumber, compoundCombine, writeTypeOf, fnOwnCounters, fnOwnPropBox, fnOwnRoutableKey, fnOwnWhy, isMatchSliceType, lowerGroupsProjection, matchResultNamedGroupsOf, probeLower, pureReemittable, symbolFieldInfo, tonumWhy } from "./lower-exprs.js";
 import { UNSUPPORTED, checkerPanicDiag, isCheckerPanic, requiresDynamicDiag } from "../../diagnostics/diagnostic.js";
 import { isUnitOnlyTsType, unitOnlyUnion } from "../types.js";
 import { canonicalBuiltinModule, isRelativeSpecifier } from "../shared.js";
@@ -6981,7 +6981,13 @@ function isEsModuleStamp(expr: ts.Expression): boolean {
           }
           const target = L.fieldTarget(expr.left, true);
           if (target) {
-            const value = L.lowerExprExpecting(expr.right, target.fieldType);
+            // The right-hand side is built at the WRITE type, which is the
+            // setter's parameter for an accessor pair and the slot's one type
+            // for everything else. A divergent pair (`get p(): T | undefined`
+            // / `set p(v: T)`) takes the bare `T` here -- wrapping it into the
+            // getter's union would hand the setter a tagged value it never
+            // declared.
+            const value = L.lowerExprExpecting(expr.right, writeTypeOf(target));
             return L.fieldSetStmt(target, value, locOf(expr), expr.left);
           }
           // A write to an ABSTRACT property through an abstract-typed
@@ -8164,7 +8170,10 @@ function isEsModuleStamp(expr: ts.Expression): boolean {
         // defaulted value machinery may emit.
         const recv = L.declareHiddenLocal("%dtRecv", ft.obj.type);
         out.push({ kind: "varDecl", localId: recv.id, init: ft.obj, loc });
-        const value = L.coerceInto(blame, valueOf(ft.fieldType), ft.fieldType);
+        // At the WRITE type -- the setter's parameter through an accessor
+        // pair (see writeTypeOf), the slot's type everywhere else.
+        const dtWriteT = writeTypeOf(ft);
+        const value = L.coerceInto(blame, valueOf(dtWriteT), dtWriteT);
         out.push(L.fieldSetStmt({ ...ft, obj: { kind: "varRef", localId: recv.id, type: ft.obj.type, loc } }, value, loc, t));
         return;
       }
