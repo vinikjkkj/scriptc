@@ -9,7 +9,12 @@
 # The structural proof is separate and stronger: ensureEngineArchive runs only
 # under --dynamic and produces libqjs.a; we show none exists.
 set -u
-CTL=/g/blocks/_artifacts/spreadargs-lab/dyn-ctl.exe
+# SCAN_CTL   a KNOWN --dynamic binary, so you can see which markers discriminate
+# SCAN_ROOT  the block root to search for libqjs.a (the structural proof).
+#            It used to be one block's absolute path, which is why the
+#            structural half of this scan was only ever true for that block.
+CTL=${SCAN_CTL:-/g/blocks/_artifacts/spreadargs-lab/dyn-ctl.exe}
+ROOT=${SCAN_ROOT:-$PWD}
 BINS="$*"
 
 scan1 () { # file, needle
@@ -40,6 +45,6 @@ echo "  * a marker that is 0 in the CONTROL is NOT EVIDENCE -- it cannot discrim
 echo "  * the positive controls must be NON-ZERO in the shipped binary, or the scan is blind."
 echo
 echo "=== structural proof: ensureEngineArchive output ==="
-echo "libqjs.a anywhere under this block's caches and output:"
-find /g/blocks/restapi -name 'libqjs.a' 2>/dev/null | head -20
+echo "libqjs.a anywhere under this block's caches and output ($ROOT):"
+find "$ROOT" -name 'libqjs.a' 2>/dev/null | head -20
 echo "(no lines above = no engine archive was ever produced = no --dynamic build)"
