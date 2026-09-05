@@ -4,13 +4,13 @@
 #   2. prove it serves the API (health, routes, store reads, auth gate, 404)
 #   3. kill it, restart it on the SAME file, and show the store came back
 set -u
-EXE=${EXE:-/g/zapo-rest/zapo-rest.exe}
-RUN=/g/blocks/restapi/lab/run
-PORT=18899
+EXE=${EXE:?set EXE to the built zapo-rest binary}
+RUN=${RUN:-$PWD/verify-run}
+PORT=${PORT:-18933}
 TOKEN=verify-secret
 DB="$RUN/verify.sqlite"
 
-. /g/blocks/restapi/env.sh
+[ -n "${VERIFY_ENV:-}" ] && . "$VERIFY_ENV"
 export ZAPO_REST_PORT=$PORT
 export ZAPO_REST_TOKEN=$TOKEN
 export ZAPO_DB="$DB"
@@ -68,6 +68,16 @@ curl -s -o /dev/null -w 'status=%{http_code}\n' $H "$B/group/queryGroupMetadata"
 echo "### bad JSON body (expect 400)"
 curl -s -o /dev/null -w 'status=%{http_code}\n' -X POST $H -d 'not json' "$B/message/sendText"
 
+echo; echo "### POST /message/send with a content OBJECT (the SC2003 route: must NOT be 501)"
+curl -s -X POST $H -H content-type:application/json -d '{"to":"5511999999999","content":{"type":"text","text":"hello"}}' "$B/message/send" | head -c 300
+echo; echo "### the same with an unknown content type (expect 500 whose detail names the set -- the /message/sendMedia convention)"
+curl -s -o /dev/null -w 'status=%{http_code}\n' -X POST $H -H content-type:application/json -d '{"to":"x","content":{"type":"nope"}}' "$B/message/send"
+echo "### GET /message/downloadBytes without seq (expect 400)"
+curl -s -o /dev/null -w 'status=%{http_code}\n' $H "$B/message/downloadBytes"
+echo "### GET /message/downloadBytes with an unknown seq (expect 500 naming the buffer, never 501)"
+curl -s $H "$B/message/downloadBytes?seq=99999" | head -c 260
+echo; echo "### GET /messages?since=0"
+curl -s $H "$B/messages?since=0&limit=3" | head -c 200
 echo; echo "### row counts BEFORE restart"
 curl -s $H "$B/store/counts" > "$RUN/counts-before.json"
 cat "$RUN/counts-before.json"
