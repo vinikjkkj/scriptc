@@ -178,17 +178,39 @@ __attribute__((constructor)) static void scr_poolstat_reg_string(void) {
  *   argument, and it is a property of the DATA, not of a review of the
  *   call sites.
  *
- *   SET-ASSOCIATIVE, WITH ADMISSION BY rc. A direct-mapped table was
- *   MEASURED and rejected: 156.68-181.20 MiB across six runs of the same
- *   arm, a 15.6% spread where every other arm held inside 1.2%, because
- *   whichever two hot contents happened to collide decided the run. Ways
- *   alone do not fix that -- a cold stream still walks a full set. So the
- *   victim is the LEAST-REFERENCED way, and a set whose every way is
- *   still referenced by the PROGRAM (rc > 1) refuses the newcomer
- *   entirely. rc == 1 means "the table is the only thing holding this",
- *   i.e. dead weight, and dead weight is all the table ever gives up. A
- *   hot entry is therefore never evicted by a cold one, and which two
- *   contents collide stops deciding anything.
+ *   SET-ASSOCIATIVE, WITH ADMISSION BY rc. The victim is the
+ *   LEAST-REFERENCED way, and a set whose every way is still referenced by
+ *   the PROGRAM (rc > 1) refuses the newcomer entirely. rc == 1 means "the
+ *   table is the only thing holding this", i.e. dead weight, and dead
+ *   weight is all the table ever gives up, so a hot entry is never evicted
+ *   by a cold one.
+ *
+ *   WHAT THAT DID AND DID NOT BUY, because the reason it was built is not
+ *   the reason to keep it. It was built to remove a 15.6% run-to-run spread
+ *   in peak RSS (156.68-181.20 MiB across six runs of one arm) that had
+ *   been attributed to two hot contents colliding in a direct-mapped table.
+ *   IT DID NOT: 24 runs per arm on the real messaging bench, memory store,
+ *   palindrome order, against an A/A floor of 0.28% on peak RSS --
+ *
+ *     intern off                179.09 MiB median, 177.38-181.22,  2.1%
+ *     direct-mapped, evict all  168.48        -10.61, 155.51-182.46, 16.0%
+ *     4-way, admission by rc    166.78        -12.31, 152.70-178.03, 15.2%
+ *
+ *   -- so associativity moved the spread 16.0% -> 15.2% and the diagnosis
+ *   was wrong. THE TABLE IS NOT WHERE THE VARIANCE LIVES, and the counters
+ *   say so directly: across three instrumented runs the hit rate is
+ *   97.27/97.36/97.27%, evictions 78,428/73,454/76,502, the live string
+ *   high-water 4.290/4.218/4.280 MiB and the arena's committed chunks
+ *   57/57/58 -- every string-side quantity inside 2% -- while peak process
+ *   RSS on those same three runs was 337.54/336.21/358.98 MiB. Two runs
+ *   whose table behaviour is identical to four digits differ by 22.8 MiB.
+ *   Removing a large STABLE term from a max() exposes the noisy smaller
+ *   terms underneath; that is the whole effect, and no table can fix it.
+ *
+ *   What the change IS worth keeping for is the TAIL. The direct-mapped
+ *   arm's worst run (182.46) is worse than not interning at all (max
+ *   181.22); the admission-gated arm's worst (178.03) is not. Never worse
+ *   is a property; a smaller variance is not one this bought.
  *
  * WAYS IS A RUNTIME KNOB, and that is deliberate: SCR_STRING_INTERN_WAYS=1
  * turns this back into exactly the direct-mapped table, in the SAME image
@@ -206,6 +228,38 @@ __attribute__((constructor)) static void scr_poolstat_reg_string(void) {
  * can reach the table at all. MINLEN keeps chain INTERMEDIATES out:
  * `"5511" + digits` is 14 bytes and is not a value anyone stores, and
  * interning it would only cost the next link its in-place append.
+ *
+ * WHAT IT IS WORTH, measured on the real zapo messaging bench with the fake
+ * server in a separate node process, on top of the arena and the growth
+ * threshold that are already in this file:
+ *
+ *   STRING BYTES, and this is the number that is DETERMINISTIC. The live
+ *   string high-water goes 34.51 MiB -> 4.29 MiB (-30.2 MiB, -87.6%) and
+ *   the live count 541,092 -> 64,312, both inside 2% across runs. The
+ *   string arena's committed chunks go 464 -> 57, i.e. 29.0 MiB -> 3.6 MiB
+ *   of address space it never gives back. Allocations go 11,775,088 ->
+ *   7,505,024: 4.27 million memcpy-plus-block that do not happen.
+ *
+ *   PEAK PROCESS RSS, and this is the number that is NOT. Median -12.31 MiB
+ *   (-6.9%) on the memory store over 24 runs, but spread over 152.70-178.03
+ *   where the un-interned arm holds 177.38-181.22. On the sqlite store the
+ *   median is +1.99 MiB, which is inside that lane's 4.4% A/A floor -- no
+ *   claim in either direction there, and the floor is the reason, not the
+ *   sign. Peak RSS is a max() over the whole run and the string high-water
+ *   stops being the term that wins it.
+ *
+ *   CPU: no claim. The six-phase cycle sum reads 1.05x against a position
+ *   floor of 11.1% on this host, and the fixed-work instruction count that
+ *   could settle it needs callgrind, which needs an ELF binary and a
+ *   valgrind this Windows host does not have.
+ *
+ * WHAT IT COSTS. 512 KiB of BSS for the pointers, faulted in lazily. Up to
+ * SCR_STR_INTERN_SLOTS strings the program has finished with, held until
+ * something displaces them: 65,536 * ~152 B = 9.5 MiB is the worst case at
+ * MAXLEN, and 3.5 MiB is what the bench actually holds at exit. It does not
+ * scale with the program -- the table is the bound. And an FNV pass over
+ * the result bytes on every concat in the band, hit or miss, which is what
+ * a workload with no duplication pays for nothing.
  *
  * IT IS COMPILED IN UNDER SCR_RC_AUDIT, unlike the pool, the spare block
  * and the arena. Those three are compiled out because that lane exists to
