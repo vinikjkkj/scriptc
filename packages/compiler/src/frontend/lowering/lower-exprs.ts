@@ -146,8 +146,12 @@ export function fnOwnWhy(arm: string, node: ts.Node, key: string): void {
 }
 
 /** An assignable `obj.field` target — a class field, a record field, or a
- * class ACCESSOR property (reads become getter calls, writes setter calls;
- * fieldType is the property's one type). */
+ * class ACCESSOR property (reads become getter calls, writes setter calls).
+ *
+ * `fieldType` is the READ type. For a data slot the read and the write type
+ * are the same one type; for an accessor pair whose halves are annotated
+ * differently they are not, and `writeType` carries the setter's parameter.
+ * Every write site takes its coercion target from `writeTypeOf`. */
 export type FieldTarget =
   | { container: "class"; obj: IrExpr; className: string; field: string; fieldType: IrType }
   | { container: "record"; obj: IrExpr; shapeId: string; field: string; fieldType: IrType }
@@ -157,7 +161,10 @@ export type FieldTarget =
   // (the write-slot type; reads arm it with undefined under
   // noUncheckedIndexedAccess in fieldGetExpr).
   | { container: "recordOvf"; obj: IrExpr; shapeId: string; field: string; fieldType: IrType }
-  | { container: "accessor"; obj: IrExpr; className: string; field: string; fieldType: IrType }
+  // fieldType is the GETTER's return; writeType the SETTER's parameter,
+  // present whenever a setter half exists and different from fieldType
+  // exactly when the pair is annotated divergently.
+  | { container: "accessor"; obj: IrExpr; className: string; field: string; fieldType: IrType; writeType?: IrType }
   // A RECORD accessor property (an object-literal `get x()`/`set x(v)` —
   // the shape carries %get:/%set: closure slots): reads call the getter
   // closure, writes the setter; fieldType is the property's one value type
@@ -20102,6 +20109,7 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
           className: receiverIr.className,
           field: access.name.text,
           fieldType: getF ? getF.sig.ret : setF!.sig.params[0]!.type,
+          ...(setF ? { writeType: setF.sig.params[0]!.type } : {}),
         };
       }
       return null;
@@ -20823,6 +20831,21 @@ export interface CompoundCombine {
   numericRead?: { read: IrExpr; combine: (converted: IrExpr) => IrExpr };
 }
 
+/** The type a WRITE through this target must produce.
+ *
+ * For every data container that is `fieldType` -- one slot, one type. An
+ * ACCESSOR property has no slot: its write is a CALL of the setter, so the
+ * type is the setter's PARAMETER, which a divergently-annotated pair spells
+ * differently from the getter's return. Record accessors read theirs off the
+ * %set: closure slot for the same reason (their halves cannot diverge today
+ * -- the shape mapper declines such a member -- so the answer is the same one
+ * type there, and stays right if that ever changes). */
+export function writeTypeOf(target: FieldTarget): IrType {
+  if (target.container === "accessor") return target.writeType ?? target.fieldType;
+  if (target.container === "recordAccessor") return target.setType?.params[0] ?? target.fieldType;
+  return target.fieldType;
+}
+
 export function compoundCombine(
   L: Lowerer,
   op: CompoundOp,
@@ -20995,6 +21018,21 @@ export function compoundCombine(
     // binary operators did and the field path kept the older dynCheck, so
     // `this.pos += 4` over an untyped field threw where `pos += 4` over an
     // untyped local answered. One helper now settles both.
+    // `o.p op= e` is a read AND a write in one expression, so it is the one
+    // spelling that needs the two halves of a DIVERGENT accessor pair to be
+    // one type: the operator runs on what the getter returned and the result
+    // goes back through the setter. Coercing across the gap would either wrap
+    // (a bare `T` result into a `T | undefined` slot the setter does not
+    // take) or strip a tag off a value that carries one — both silent. Named
+    // fence; the two-statement spelling says which value goes where.
+    const compoundWriteT = writeTypeOf(target);
+    if (!typeEquals(compoundWriteT, target.fieldType)) {
+      L.unsupported(
+        "SC1090",
+        access,
+        `compound assignment through the getter/setter pair '${target.field}', whose halves have different types (it reads as '${L.fmt(target.fieldType)}' and writes as '${L.fmt(compoundWriteT)}' — read, combine and assign in separate statements)`,
+      );
+    }
     const combined = compoundCombine(L, op, read, rhs, target.fieldType, access, access, rhsNode ?? access, loc, rhsNode === null);
     if (!combined) L.unsupported("SC1043", access);
     // Second, independent evaluation of the (side-effect-free) receiver.
