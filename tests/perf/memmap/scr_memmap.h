@@ -117,6 +117,7 @@
 #endif
 #include <windows.h>
 #include <stddef.h>
+#include <stdio.h>
 #include <stdlib.h>
 
 /* Linkage follows the rule scr_prof.h established for x86_64-windows-gnu:
@@ -224,6 +225,29 @@ SCR_MM_SHARED unsigned scr_mm_tries = 0;
 SCR_MM_SHARED unsigned scr_mm_maxtries = 12;
 SCR_MM_SHARED unsigned scr_mm_attempts = 0;
 SCR_MM_SHARED int scr_mm_onlybest = 0;
+/* THE WALK IS NOT RE-ENTRANT: every buffer above is one shared instance, so
+ * two walks at once produce one corrupt report and no way to tell. Until the
+ * phase hook below existed there was only ever one walker (the sampler
+ * thread), so nothing needed saying. Now the PROGRAM's own thread can ask
+ * for a walk too, and the two must not interleave. A walk that loses the
+ * race is SKIPPED and COUNTED, never queued: a phase edge is an instant, and
+ * a walk taken 250 ms later would describe something else while carrying the
+ * edge's name. */
+SCR_MM_SHARED volatile LONG scr_mm_walking = 0;
+SCR_MM_SHARED unsigned long long scr_mm_skipped = 0;
+/* The phase hook's state, declared here rather than beside its code because
+ * scr_mm_snapshot -- which is defined well above that code -- prints
+ * PHASEHITS in every report. */
+SCR_MM_SHARED char scr_mm_phases[512] = {0};
+SCR_MM_SHARED unsigned long long scr_mm_phasehits = 0;
+SCR_MM_SHARED int scr_mm_phase_on = 0;
+/* The fiber gauges AS THEY WERE WHEN THE WALK STARTED. A snapshot takes
+ * ~250 ms and the workload runs through it, so reading the live gauges at
+ * REPORT time describes a different instant from the page list the report
+ * is about -- on the arming probe that gap was 1,107 stacks. Copied once at
+ * the top of scr_mm_snapshot instead, which is the same instant the VM walk
+ * begins. */
+SCR_MM_SHARED unsigned long long scr_mm_fibAt[8] = {0, 0, 0, 0, 0, 0, 0, 0};
 /* Region-dump floor. A stack/private region is itemised when it clears
  * EITHER bound; both are env-tunable so a fiber census can ask for all of
  * them without recompiling. */
@@ -585,6 +609,13 @@ SCR_MM_FN void scr_mm_snapshot(const char *why) {
   if (scr_mm_walkheap) scr_mm_walk_heaps();
   tHeap = GetTickCount64();
   scr_mm_modules();
+#ifdef SCR_FIBERSTAT_ON
+  /* Immediately before the VM walk, because the VM walk is what produces
+   * STACKSUM's `bases`: the two numbers are then the same instant to within
+   * the walk itself and can be checked against each other. Captured after
+   * the HEAP walk, which is the slow half. */
+  for (i = 0; i < (unsigned)SCR_FST_N; i++) scr_mm_fibAt[i] = scr_fst_c[i];
+#endif
   scr_mm_walk_vm();
   tVm = GetTickCount64();
   resident = scr_mm_bucket(&orphan, &sharedTotal);
@@ -832,6 +863,51 @@ SCR_MM_FN void scr_mm_snapshot(const char *why) {
     scr_mm_hex(R->protect);
     scr_mm_ch('\n');
   }
+  /* The fiber gauges, if tests/perf/fiberstat/scr_fiber_stat.h was
+   * -include'd BEFORE this header. They are the one thing a VirtualQuery
+   * walk structurally cannot answer: the STACK class counts regions and
+   * their resident pages, and a region looks identical whether a suspended
+   * task owns it or it is an idle entry on scr_async.c's pool free list.
+   * Both numbers are printed, never their sum, so a reader can check them
+   * against the STACK region count instead of trusting a join. */
+#ifdef SCR_FIBERSTAT_ON
+  scr_mm_s("FIBERS out=");
+  scr_mm_u(scr_mm_fibAt[SCR_FST_OUT]);
+  scr_mm_s(" outHi=");
+  scr_mm_u(scr_mm_fibAt[SCR_FST_OUT_HI]);
+  scr_mm_s(" pool=");
+  scr_mm_u(scr_mm_fibAt[SCR_FST_POOL]);
+  scr_mm_s(" poolHi=");
+  scr_mm_u(scr_mm_fibAt[SCR_FST_POOL_HI]);
+  scr_mm_s(" fresh=");
+  scr_mm_u(scr_mm_fibAt[SCR_FST_FRESH]);
+  scr_mm_s(" freed=");
+  scr_mm_u(scr_mm_fibAt[SCR_FST_FREED]);
+  scr_mm_ch('\n');
+  /* The SAME gauges read now, at report time, a whole walk later. The
+   * pair is the instrument's own drift: STACKSUM's `bases` was counted
+   * between these two readings, so a report where out+pool differs wildly
+   * across them is a report whose fiber column and page column describe
+   * different instants -- and it says so, instead of presenting one of
+   * them as the answer. */
+  scr_mm_s("FIBERSEND out=");
+  scr_mm_u(scr_fst_c[SCR_FST_OUT]);
+  scr_mm_s(" pool=");
+  scr_mm_u(scr_fst_c[SCR_FST_POOL]);
+  scr_mm_s(" fresh=");
+  scr_mm_u(scr_fst_c[SCR_FST_FRESH]);
+  scr_mm_s(" freed=");
+  scr_mm_u(scr_fst_c[SCR_FST_FREED]);
+  scr_mm_ch('\n');
+#else
+  scr_mm_s("FIBERS n/a - scr_fiber_stat.h was not -include'd. This is NOT a zero.\n");
+#endif
+  scr_mm_s("PHASEHITS ");
+  scr_mm_u(scr_mm_phasehits);
+  scr_mm_ch('\n');
+  scr_mm_s("SKIPPEDWALKS ");
+  scr_mm_u(scr_mm_skipped);
+  scr_mm_ch('\n');
   scr_mm_s("END\n");
   /* What this walk actually resolved is what the trigger may treat as
    * explained - never the working set it read on the way in. A walk that
@@ -882,12 +958,157 @@ SCR_MM_FN DWORD WINAPI scr_mm_thread(LPVOID p) {
         scr_mm_snapshots++;
         scr_mm_peakAtWalk = wsPeak;
         scr_mm_best = wsNow;
-        scr_mm_snapshot("highwater");
+        if (InterlockedCompareExchange(&scr_mm_walking, 1, 0) == 0) {
+          scr_mm_snapshot("highwater");
+          InterlockedExchange(&scr_mm_walking, 0);
+        } else {
+          scr_mm_skipped++;
+        }
       }
     }
     Sleep(scr_mm_ms);
   }
 }
+
+
+/* ------------------------------------------------------- the phase hook
+ * WHY. The sampler above triggers on RSS, so it answers "what is resident
+ * AT THE PEAK". It cannot answer "what did THIS PHASE add", because that
+ * needs a second walk at the phase's own edge and nothing about the RSS
+ * curve marks where an edge is. On the zapo messaging bench the peak is
+ * made inside send_group, which enters at roughly 100 MiB and climbs
+ * ~85 MiB inside itself; a class split of the PEAK describes the sum and
+ * says nothing about the climb. Two walks subtract.
+ *
+ * HOW THE EDGE IS FOUND, without the program cooperating. bench-prof's
+ * messaging.bench.ts already prints "[phase-begin] <name>" and
+ * "[phase-end] <name>" on stdout for tests/perf/cpuphase to bracket the
+ * phase from OUTSIDE the process. Those lines reach the CRT through
+ * scr_console.c's fwrite (a single string argument is one fwrite of the
+ * whole text) and fputs. Interposing those two catches the edge inside
+ * the process, on the program's own thread, at the instant it is printed
+ * -- with no change to the bench, which is read-only test input, and no
+ * new marker for anything to keep in sync.
+ *
+ * The interposer runs BEFORE the real write, so no CRT stream lock is
+ * held while the walk takes the heap locks. That ordering is the whole
+ * deadlock argument and it is why the hook does its work first and
+ * forwards second.
+ *
+ * WHICH EDGES. SCR_MEMMAP_PHASES is a comma-separated list of phase
+ * names; "*" takes every edge. Each snapshot is written to
+ * <SCR_MEMMAP_OUT>.<name>.begin / .end -- never to SCR_MEMMAP_OUT itself,
+ * which stays reserved for the sampler's best walk, and never through the
+ * only-best filter, because a phase-begin walk is LOWER than the peak by
+ * construction and would be discarded by it every time.
+ *
+ * ARMING, because a hook that never fires writes no file and an absent
+ * file reads exactly like a phase that cost nothing. PHASEHITS is printed
+ * in every report, including the sampler's, and read-memmap refuses a
+ * phase claim from a run whose PHASEHITS is 0. The positive control is
+ * cheap and exact: ask for a phase that certainly happens (buildContacts)
+ * alongside the one under study, and require both files to exist. */
+SCR_MM_FN int scr_mm_phase_wanted(const char *name, unsigned n) {
+  unsigned i = 0, j;
+  if (scr_mm_phases[0] == '*' && scr_mm_phases[1] == 0) return 1;
+  while (scr_mm_phases[i]) {
+    unsigned start = i;
+    while (scr_mm_phases[i] && scr_mm_phases[i] != ',') i++;
+    if (i - start == n) {
+      for (j = 0; j < n; j++)
+        if (scr_mm_phases[start + j] != name[j]) break;
+      if (j == n) return 1;
+    }
+    if (scr_mm_phases[i] == ',') i++;
+  }
+  return 0;
+}
+
+SCR_MM_FN void scr_mm_phase_walk(const char *name, unsigned n, int begin) {
+  char save[512];
+  char path[640];
+  unsigned i = 0, k = 0;
+  int ob;
+  if (!scr_mm_outbuf || scr_mm_out[0] == 0) return; /* not armed yet */
+  if (!scr_mm_phase_wanted(name, n)) return;
+  if (InterlockedCompareExchange(&scr_mm_walking, 1, 0) != 0) {
+    scr_mm_skipped++;
+    return;
+  }
+  while (scr_mm_out[i] && i < sizeof save - 1) { save[i] = scr_mm_out[i]; i++; }
+  save[i] = 0;
+  while (save[k] && k < 500) { path[k] = save[k]; k++; }
+  path[k++] = '.';
+  for (i = 0; i < n && k < 600; i++) path[k++] = name[i];
+  path[k++] = '.';
+  if (begin) { path[k++] = 'b'; path[k++] = 'e'; path[k++] = 'g'; path[k++] = 'i'; path[k++] = 'n'; }
+  else { path[k++] = 'e'; path[k++] = 'n'; path[k++] = 'd'; }
+  path[k] = 0;
+  for (i = 0; i <= k; i++) scr_mm_out[i] = path[i];
+  ob = scr_mm_onlybest;
+  scr_mm_onlybest = 0;
+  scr_mm_snapshots++;
+  scr_mm_phasehits++;
+  scr_mm_snapshot(begin ? "phase-begin" : "phase-end");
+  /* If tests/perf/prof/scr_prof.h's residency lane is also in this image
+   * -- it must be -include'd BEFORE this header -- take its per-site live
+   * table at the same instant. The two answer different halves of the same
+   * question and only agree if they are read at the same edge: the walk
+   * says how many resident bytes the HEAP class holds, and the residency
+   * table says which source lines are holding them. Sampled a second apart
+   * on this workload they describe different populations. */
+#ifdef SCR_PROF_LIVE
+  {
+    char pp[660];
+    unsigned q = 0;
+    while (path[q] && q < 650) { pp[q] = path[q]; q++; }
+    pp[q++] = '.'; pp[q++] = 'p'; pp[q++] = 'r'; pp[q++] = 'o'; pp[q++] = 'f';
+    pp[q] = 0;
+    scr_prof_report_to(pp);
+  }
+#endif
+  scr_mm_onlybest = ob;
+  for (i = 0; i <= (unsigned)lstrlenA(save); i++) scr_mm_out[i] = save[i];
+  InterlockedExchange(&scr_mm_walking, 0);
+}
+
+/* One console write. The marker is always the whole of the buffer (it is a
+ * single template-literal argument), so this only has to compare a prefix
+ * and never scan. */
+SCR_MM_FN void scr_mm_phase_scan(const char *b, size_t n) {
+  static const char *BEG = "[phase-begin] ";
+  static const char *END = "[phase-end] ";
+  size_t i, hl;
+  int begin;
+  if (!scr_mm_phase_on || b == 0) return;
+  if (n >= 14) {
+    for (i = 0; i < 14; i++) if (b[i] != BEG[i]) break;
+    if (i == 14) { begin = 1; hl = 14; goto found; }
+  }
+  if (n >= 12) {
+    for (i = 0; i < 12; i++) if (b[i] != END[i]) break;
+    if (i == 12) { begin = 0; hl = 12; goto found; }
+  }
+  return;
+found:
+  {
+    size_t e = hl;
+    while (e < n && b[e] != '\n' && b[e] != '\r' && b[e] != ' ') e++;
+    if (e > hl) scr_mm_phase_walk(b + hl, (unsigned)(e - hl), begin);
+  }
+}
+
+SCR_MM_FN size_t scr_mm_fwrite(const void *p, size_t sz, size_t ct, FILE *f) {
+  if (sz == 1) scr_mm_phase_scan((const char *)p, ct);
+  return fwrite(p, sz, ct, f);
+}
+SCR_MM_FN int scr_mm_fputs(const char *t, FILE *f) {
+  if (t) scr_mm_phase_scan(t, (size_t)lstrlenA(t));
+  return fputs(t, f);
+}
+/* Defined AFTER the two forwarders, so their own calls are the real ones. */
+#define fwrite(p, sz, ct, f) scr_mm_fwrite((p), (sz), (ct), (f))
+#define fputs(t, f) scr_mm_fputs((t), (f))
 
 /* --------------------------------------------------------------- arming */
 SCR_MM_FN void *scr_mm_valloc(SIZE_T n) {
@@ -931,6 +1152,7 @@ __attribute__((constructor)) SCR_MM_FN void scr_mm_arm(void) {
   scr_mm_maxtries = (unsigned)scr_mm_envnum("SCR_MEMMAP_MAXTRIES", 12);
   scr_mm_regMinRes = (ULONG_PTR)scr_mm_envnum("SCR_MEMMAP_REGMIN_RES", 65536ull);
   scr_mm_regMinSize = (ULONG_PTR)scr_mm_envnum("SCR_MEMMAP_REGMIN_SIZE", 262144ull);
+  GetEnvironmentVariableA("SCR_MEMMAP_PHASES", scr_mm_phases, (DWORD)sizeof scr_mm_phases);
 
   k32 = GetModuleHandleA("kernel32.dll");
   scr_mm_qws = (ScrMmQWS)(void *)GetProcAddress(k32, "K32QueryWorkingSet");
@@ -1043,6 +1265,8 @@ __attribute__((constructor)) SCR_MM_FN void scr_mm_arm(void) {
    * rather than the last. The self-test snapshots above ran with this off, so
    * their files are written unconditionally as before. */
   scr_mm_onlybest = 1;
+  /* Last, so no console write can reach a half-armed walker. */
+  scr_mm_phase_on = scr_mm_phases[0] != 0;
   CreateThread(0, 65536, scr_mm_thread, 0, 0, 0);
 }
 
