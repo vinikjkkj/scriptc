@@ -7429,6 +7429,13 @@ double scr_date_parse_get_time(ScrStr *s);
  * and years past V8's ±1e6 MakeDay bound. Never throws. */
 double scr_date_utc(double y, double mo, double d,
                     double h, double mi, double s, double ms);
+/* new Date(ms).getHours(): HourFromTime(LocalTime(t)) — the LOCAL-time
+ * hour 0..23, read through the HOST's own zone database (so DST and
+ * historical offsets are the platform's answer, exactly as Node takes
+ * ICU's). NaN for NaN / |ms| > 8.64e15, and for an instant the host's
+ * time_t cannot express (scr_lib.c names that divergence). Never
+ * throws. */
+double scr_date_get_hours(double ms);
 
 /* ── bitwise operators (scr_lib.c) ────────────────────────────────────
  * JS-exact ToInt32/ToUint32 semantics: NaN/±Infinity → 0, truncation

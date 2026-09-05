@@ -111,6 +111,16 @@ const TIER_REGRESSIONS = [
   // does not fail it -- it stops compiling on both lanes and lands in the
   // refused column, and the suite goes green on the regression.
   "7520-a-generic-called-at-more-distinct-keys-than-the-old-cap.ts",
+  // A generic member reached through an interface property typed by an
+  // indexed access into a GENERIC interface. Same SKIP trap: before the
+  // constraint was read at its instantiation the member left the record
+  // shape and every call refused, so a revert does not fail this program
+  // -- it stops compiling on both lanes and lands in the refused column.
+  "7550-a-generic-member-of-a-generic-interface-keeps-its-closure-slot.ts",
+  // The live-clock local hour. Same SKIP trap: `Date.getHours` was SC2020
+  // before this lowering existed, so a revert takes the program out of the
+  // running set rather than failing it.
+  "7551-the-local-hour-is-a-zone-read-not-a-clock-read.ts",
 ];
 
 interface RunResult {
