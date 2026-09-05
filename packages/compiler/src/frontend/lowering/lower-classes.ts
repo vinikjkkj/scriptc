@@ -188,18 +188,37 @@ export interface ClassInfo {
    * base-typed write reaches this class and throws TypeError (Node's
    * behavior, matched exactly — see collectClassShape). */
   throwingSetters: string[];
-  /** STATIC fields with initializers — the honest static subset: each is
-   * a module global (`%g.s.<C>.<name>`), assigned once in the declaring
-   * file's %init at the class statement's source position (exactly when
-   * JS evaluates static initializers, so an initializer reading earlier
-   * module bindings sees their values), and read as `C.name` anywhere
+  /** STATIC fields — the honest static subset: each is a module global
+   * (`%g.s.<C>.<name>`), assigned once in the declaring file's %init at
+   * the class statement's source position (exactly when JS evaluates
+   * static initializers, so an initializer reading earlier module
+   * bindings sees their values), and read as `C.name` anywhere
    * (lowerStaticFieldRead). Writable (non-readonly) fields are MUTABLE
    * globals; writes lower only through the DECLARING class's own name
    * (`D.x = v` where x is inherited creates an OWN property on D in JS —
    * different storage — and writes through class VALUES would need the
-   * same dynamic story: both are named fences). Accessors and
-   * initializer-less fields keep the fence. */
-  staticFields: { name: string; type: IrType; initializer: ts.Expression; globalId: string; readonly: boolean }[];
+   * same dynamic story: both are named fences). An INITIALIZER-LESS field
+   * (`static tag?: string`) has `initializer: undefined` and takes JS's
+   * undefined at the same position: Node [[Define]]s the property when the
+   * class statement evaluates, and a read before any write answers
+   * undefined — so the global's one write in %init is the undefined arm.
+   * Only a type that can HOLD undefined qualifies; the rest, and
+   * accessors, keep the fence. `decl` is the declaration itself — the
+   * source position and the blame node when there is no initializer to
+   * carry either. */
+  staticFields: { name: string; type: IrType; initializer: ts.Expression | undefined; decl: ts.PropertyDeclaration; globalId: string; readonly: boolean }[];
+  /** Static member names this class DECLARES and does NOT lower — static
+   * accessors, `static x?: T = e`, an initializer-less static whose type
+   * cannot hold undefined. They are not storage, but they ARE own
+   * properties on the class object at runtime, so a chain walk must stop
+   * at them: `Sub.tag` where Sub declares a static getter and Base a
+   * static field reads SUB's getter in JS, never Base's storage.
+   * findStaticOn and staticShadowBelow consult this, and the use site
+   * takes the ordinary unsupported-static fence instead of the base's
+   * answer. `declare static x: T` is NOT here: it is type-only, installs
+   * no own property, and the walk past it to the base is JS's own
+   * lookup. Absent when the class hides nothing. */
+  uncollectedStatics?: Set<string>;
   /** STATIC methods — ordinary module functions named `%C.static:m` (the
    * accessor-colon trick: no user identifier can spell it, and statics
    * never join vtables, so IrClassDef doesn't know them). `C.m(args)` is
@@ -2298,6 +2317,7 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
       // `member.cls` backlink fills after the ClassInfo assembles below.
       const genericMethods = new Map<string, GenericFnInfo>();
       const genericStatics = new Map<string, GenericFnInfo>();
+      const uncollectedStatics = new Set<string>();
       // Accepts generic METHODS and instance FIELDS initialized with a
       // generic arrow/function expression (`time = async <T>(...) => {...}`
       // — the field form of a generic method: no closure slot can hold a
@@ -2402,14 +2422,27 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
           // instantiation — JS's one class); instantiations skip them and
           // reach them through the base chain (findStaticOn).
           if (inst) continue;
-          // The honest static subset: a field WITH an initializer is a
-          // module global (mutable when not readonly) assigned once at
-          // the class statement's position in module init and read as
-          // `C.name` anywhere; a static METHOD is an ordinary module
-          // function `%C.static:m`. No per-class runtime property table
-          // exists, so the members that would need one — accessors, and
-          // initializer-less fields (undefined until someone assigns
-          // them) — keep the fence, each named at its use site.
+          // The honest static subset: a field is a module global (mutable
+          // when not readonly) assigned once at the class statement's
+          // position in module init and read as `C.name` anywhere; a
+          // static METHOD is an ordinary module function `%C.static:m`.
+          // No per-class runtime property table exists, so the members
+          // that would need one — accessors — keep the fence, each named
+          // at its use site.
+          //
+          // An INITIALIZER-LESS field is not a member that needs one. JS
+          // [[Define]]s `static tag;` to undefined when the class
+          // statement evaluates, at exactly the position a sibling
+          // initializer would run, and nothing writes it again unless the
+          // program does: one global, one `undefined` write, the same
+          // storage the initialized form already uses. What it needs is a
+          // type that can HOLD undefined. `static tag?: string` and
+          // `static tag: string | undefined` both map to a union carrying
+          // the undefined arm and take it; `static flag: boolean` cannot —
+          // tsc runs no definite-assignment check over statics, so that
+          // declaration is a type the storage never keeps, and a
+          // zero-initialized global would answer `false` where Node
+          // answers undefined. That one keeps its use-site fence.
           // #PRIVATE statics ride along under their spelled names
           // ('#count' → the module global %g.s.C.#count, '#make' → the
           // module function %C.static:#make): tsc confines every access
@@ -2422,8 +2455,20 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
           if (
             ts.isPropertyDeclaration(member) &&
             (ts.isIdentifier(member.name) || ts.isPrivateIdentifier(member.name)) &&
-            member.initializer &&
-            member.postfixToken?.kind !== ts.SyntaxKind.QuestionToken
+            (member.initializer
+              ? member.postfixToken?.kind !== ts.SyntaxKind.QuestionToken
+              : // No initializer. `declare static x: T` is TYPE-ONLY — it
+                // promises a property something else installed and emits
+                // nothing, the same carve-out the instance-field path
+                // makes — and `static x!: T` asserts the program assigns
+                // it, which for a static is precisely a claim about the
+                // window this representation cannot describe. Both stay
+                // out; staticTypeAdmitsUndefined decides the rest, and
+                // says no for every type with no lowering at all, so a
+                // refusal that exists today stays exactly where it is.
+                !modifiers.some((m) => m.kind === ts.SyntaxKind.DeclareKeyword) &&
+                member.postfixToken?.kind !== ts.SyntaxKind.ExclamationToken &&
+                staticTypeAdmitsUndefined(L, member))
           ) {
             const type = L.irTypeOf(member.name);
             if (type.kind === "void") L.badType(member.name, L.typeOf(member.name));
@@ -2434,6 +2479,7 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
               name: member.name.text,
               type,
               initializer: member.initializer,
+              decl: member,
               globalId: `%g.s.${L.classNamer(decl)}.${member.name.text}`,
               readonly: modifiers.some((m) => m.kind === ts.SyntaxKind.ReadonlyKeyword),
             });
@@ -2465,11 +2511,31 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
             collectGenericMember(member, true);
           }
           // Statics that don't qualify for the module-global/module-
-          // function treatment (accessors, initializer-less fields,
-          // async/generic methods) never live on instances, so they must
-          // not poison the class either — constructions and instance
-          // members stay compilable, and each USE of an unsupported
-          // static fences at its own site.
+          // function treatment (accessors, the optional-with-initializer
+          // field, an initializer-less field whose type cannot hold
+          // undefined) never live on instances, so they must not poison
+          // the class either — constructions and instance members stay
+          // compilable, and each USE of an unsupported static fences at
+          // its own site.
+          //
+          // They must still be VISIBLE to the chain walk. JS puts an own
+          // property on this class object for every one of them, so a
+          // `Sub.x` read stops here; resolving past it to a base that
+          // happens to have lowered storage under the same name answers
+          // the wrong value with no diagnostic. Record the name.
+          // `declare static x: T` is the exception and stays out: it
+          // installs nothing, so walking past it IS the JS lookup.
+          if (
+            (ts.isPropertyDeclaration(member) || ts.isMethodDeclaration(member) ||
+              ts.isGetAccessorDeclaration(member) || ts.isSetAccessorDeclaration(member)) &&
+            (ts.isIdentifier(member.name) || ts.isPrivateIdentifier(member.name)) &&
+            !modifiers.some((m) => m.kind === ts.SyntaxKind.DeclareKeyword) &&
+            !staticFields.some((f) => f.name === (member.name as ts.Identifier | ts.PrivateIdentifier).text) &&
+            !staticMethods.has((member.name as ts.Identifier | ts.PrivateIdentifier).text) &&
+            !genericStatics.has((member.name as ts.Identifier | ts.PrivateIdentifier).text)
+          ) {
+            uncollectedStatics.add((member.name as ts.Identifier | ts.PrivateIdentifier).text);
+          }
           continue;
         }
         // INSTANCE members of a generic class collect per instantiation
@@ -3862,6 +3928,7 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
         subclasses: [],
         throwingSetters,
         staticFields,
+        ...(uncollectedStatics.size > 0 ? { uncollectedStatics } : {}),
         ...(staticMethods.size > 0 ? { staticMethods } : {}),
         ...(staticBlocks.length > 0 ? { staticBlocks } : {}),
         ...(symbolFields.size > 0 ? { symbolFields } : {}),
@@ -4121,7 +4188,7 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
       | { pos: number; kind: "field"; f: ClassInfo["staticFields"][number] }
       | { pos: number; kind: "block"; b: ts.ClassStaticBlockDeclaration };
     const items: Item[] = [
-      ...info.staticFields.map((f): Item => ({ pos: f.initializer.getStart(), kind: "field", f })),
+      ...info.staticFields.map((f): Item => ({ pos: (f.initializer ?? f.decl).getStart(), kind: "field", f })),
       ...(info.staticBlocks ?? []).map((b): Item => ({ pos: b.getStart(), kind: "block", b })),
     ].sort((a, b) => a.pos - b.pos);
     for (const item of items) {
@@ -4132,9 +4199,33 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
         continue;
       }
       const f = item.f;
+      const blame: ts.Node = f.initializer ?? f.decl;
       L.stats.statementsTotal++;
-      L.bumpFileStat(locOf(f.initializer).file, "total");
+      L.bumpFileStat(locOf(blame).file, "total");
       try {
+        if (!f.initializer) {
+          // `static tag?: string` — JS's [[Define]] to undefined, at this
+          // member's own position among the initializers and blocks. The
+          // collection admitted the field only with an undefined arm in
+          // its mapped type, so the arm tag is there to be taken.
+          const loc = locOf(f.decl);
+          const undefTag = f.type.kind === "union" ? L.armTag(f.type.unionId, UNDEFINED_T) : -1;
+          if (f.type.kind !== "union" || undefTag < 0) throw new PoisonError();
+          out.push({
+            kind: "assign",
+            localId: f.globalId,
+            value: {
+              kind: "unionWrap",
+              unionId: f.type.unionId,
+              tag: undefTag,
+              value: { kind: "unitLit", unit: "undefined", type: UNDEFINED_T, loc },
+              type: f.type,
+              loc,
+            },
+            loc,
+          });
+          continue;
+        }
         // `this` in a static field initializer names the CLASS (like a
         // static block's), with arrows transparent and this-binding
         // function forms opaque — the static-block rule verbatim, named
@@ -4159,10 +4250,25 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
       } catch (e) {
         if (!(e instanceof PoisonError)) throw e;
         L.stats.statementsFailed++;
-        L.bumpFileStat(locOf(f.initializer).file, "failed");
+        L.bumpFileStat(locOf(blame).file, "failed");
       }
     }
     return out;
+  }
+
+/** Can an initializer-less STATIC field's declared type hold JS's
+   * undefined? `static tag?: string` and `static tag: string | undefined`
+   * can — both map to a union carrying the undefinedT arm, and that arm is
+   * the value Node reads there until something writes. `static flag:
+   * boolean` cannot: tsc asks statics for no definite assignment, so the
+   * declaration is a type the storage does not keep, and a
+   * zero-initialized global would answer `false` where Node answers
+   * undefined. Asked with mapTypeOf, which ANSWERS NULL instead of
+   * poisoning, so a static whose type has no lowering at all is not
+   * collected and keeps the use-site fence it has today. */
+  function staticTypeAdmitsUndefined(L: Lowerer, member: ts.PropertyDeclaration): boolean {
+    const mapped = L.mapTypeOf(L.typeOf(member.name));
+    return mapped?.kind === "union" && L.armTag(mapped.unionId, UNDEFINED_T) >= 0;
   }
 
 /** Post-collection analysis of a decorated class (all shapes registered —
@@ -4413,6 +4519,9 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
       if (field) return { declarer: c, field };
       const method = c.staticMethods?.get(name);
       if (method) return { declarer: c, method };
+      // An own property this class declares but does not lower ends the
+      // walk: JS would read IT, not the base's storage.
+      if (c.uncollectedStatics?.has(name) === true) return null;
     }
     return null;
   }
@@ -4427,6 +4536,10 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
         s.staticFields.some((f) => f.name === name) ||
         s.staticMethods?.has(name) === true ||
         s.genericStatics?.has(name) === true ||
+        // A shadow the collection declined to lower is still a shadow:
+        // the classval slot can hold that descendant, and the runtime
+        // class decides which own property answers.
+        s.uncollectedStatics?.has(name) === true ||
         staticShadowBelow(L, s, name),
     );
   }
