@@ -3369,15 +3369,20 @@ function validateFunction(
         }
         // The nearest declaration may be ABSTRACT (no function): the call
         // is then well-formed against any concrete override below — the
-        // frontend's override-exactness rule makes every implementation
-        // ABI-identical, so any one of them carries the slot's signature.
+        // frontend's override rule makes every VTABLE ENTRY ABI-identical,
+        // so any one of them carries the slot's signature. An entry is the
+        // method function itself, or — where the override WIDENED (trailing
+        // optional parameters, a return the slot's `unknown` boxes) — the
+        // synthesized thunk `%C.m%vt`, which is the one spelled at the slot.
+        const entryFn = (className: string): IrFunction | undefined =>
+          functions.get(`%${className}.${e.method}%vt`) ?? functions.get(`%${className}.${e.method}`);
         let declared = false;
         let impl: IrFunction | undefined;
         for (let c = classes.get(e.className); c; c = c.base !== undefined ? classes.get(c.base) : undefined) {
           if (c.methods?.includes(e.method)) {
             declared = true;
             if (!c.abstractMethods?.includes(e.method)) {
-              impl = functions.get(`%${c.name}.${e.method}`);
+              impl = entryFn(c.name);
               break;
             }
           }
@@ -3395,9 +3400,7 @@ function validateFunction(
         if (concreteBelow.length === 0) {
           err(`virtualCall ${e.className}.${e.method}: no concrete override below the static class`, e.loc);
         }
-        impl ??= concreteBelow
-          .map((c) => functions.get(`%${c.name}.${e.method}`))
-          .find((f) => f !== undefined);
+        impl ??= concreteBelow.map((c) => entryFn(c.name)).find((f) => f !== undefined);
         if (!impl) {
           err(`virtualCall ${e.className}.${e.method}: no implementation function exists`, e.loc);
           break;

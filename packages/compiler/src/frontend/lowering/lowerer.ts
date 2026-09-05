@@ -102,7 +102,7 @@ import { FileParts, splitFiles, collectProgram, collectNpmImports, collectJsonIm
   collectJsonRequires, collectDeclTwinExportBridges, moduleArtifacts, collectGlobals, declSymbolOf, defaultExportSymbolOf, lowerFileInit, lowerDefaultExport, buildMain, appendDynamicImportModules } from "./lower-modules.js";
 import { scanDefinePropStringTables, scanDefinePropSymbolSlots } from "./lower-classes.js";
 import { protoClassArmOn, protoClassInstanceType } from "./proto-class-consume.js";
-import { ClassInfo, ClassIteratorInfo, GenericClassInfo, registerBuiltinErrorClasses, registerBuiltinEmitterClass, registerBuiltinStreamClasses, builtinErrorInfoOf, builtinEmitterInfoOf, builtinStreamInfoOf, analyzeClassDecoration, classIteratorDrainCall, classIteratorNextCall, classIteratorOf, classIteratorOpenCall, classIteratorRestDrainCall, classMemberNameOf, classValueRef, collectClassShape, exactClassOfReceiver, collectClassShapeInner, ctorAbiEquals, findMethodOn, findStaticOn, findGenericMethodOn, findGenericStaticOn, genericClassInstanceType, isSubclassOf, inHierarchy, overrideBelow, staticShadowBelow, upcastTo, lowerClassMembers, lowerClassCtor, lowerClassExpression, lowerClassExpressionInfo, lowerClassMethodMember, lowerProtoMethodMember, lowerClassValueProperty, lowerStaticMethod, throwingSetterFn, fieldInitStmts, lowerStaticFieldInits, lowerStaticFieldRead, lowerDerivedCtorBody, superCallStmt, lowerSuperMethodCall, superThisRef, lowerSuperAccessorRead, lowerSuperAccessorWrite, inheritsBuiltinErrorCtor, inheritsBuiltinEmitterCtor, errorMessageArg, lowerNew, accessorCall } from "./lower-classes.js";
+import { ClassInfo, ClassIteratorInfo, GenericClassInfo, registerBuiltinErrorClasses, registerBuiltinEmitterClass, registerBuiltinStreamClasses, builtinErrorInfoOf, builtinEmitterInfoOf, builtinStreamInfoOf, analyzeClassDecoration, classIteratorDrainCall, classIteratorNextCall, classIteratorOf, classIteratorOpenCall, classIteratorRestDrainCall, classMemberNameOf, classValueRef, collectClassShape, exactClassOfReceiver, collectClassShapeInner, ctorAbiEquals, findMethodOn, findStaticOn, findGenericMethodOn, findGenericStaticOn, genericClassInstanceType, isSubclassOf, inHierarchy, overrideBelow, staticShadowBelow, upcastTo, lowerClassMembers, lowerClassCtor, lowerClassExpression, lowerClassExpressionInfo, lowerClassMethodMember, lowerProtoMethodMember, lowerClassValueProperty, lowerStaticMethod, throwingSetterFn, fieldInitStmts, lowerStaticFieldInits, lowerStaticFieldRead, lowerDerivedCtorBody, superCallStmt, lowerSuperMethodCall, superThisRef, lowerSuperAccessorRead, lowerSuperAccessorWrite, inheritsBuiltinErrorCtor, inheritsBuiltinEmitterCtor, errorMessageArg, lowerNew, accessorCall, virtualViewFitsSlot, vtThunkFn } from "./lower-classes.js";
 import { MixinFnShape, mixinCallClassInfoOf, mixinIntersectionInstanceType } from "./lower-mixins.js";
 import { ParamShape, FnSig, GenericFnInfo, GenericInstance, bindingNeverReassigned, bodyReadsArguments, isThisParameter, paramShape, paramShapes, checkDefaultParamBodyType, completeArgs, wrappedUndefined, undefinedArgFor, requireExactArityValue, bodyReturnType, declaredReturnType, collectSignature, collectSignatureInner, collectGenericSignature, genericFnOf, lowerGenericCall, lowerGenericFnValue, inferTypeParamBindings, lowerGenericInstance, lowerCall, lowerFfiCall, lowerTimersMemberCall, lowerPromiseMethodCall, lowerFilterNarrowCall, isTopLevelFnSymbol, lowerNestedFunctionDecl, lambdaSignature, lowerLambda, lowerFunction, validateFfiImports } from "./lower-calls.js";
 import { lowerArrayMethodCall, lowerBufferStaticCall, lowerBytesMethodCall, lowerBytesNew, lowerMapMethodCall, lowerMapForEachCall, buildMapForEachFn, lowerRecordOvfCaptureHelper, ovfCapturePlannable, dynSlotCheckOk, lowerEnvToPairsHelper, lowerSetMethodCall, lowerSetForEachCall, buildSetForEachFn, lowerRegexMethodCall, lowerStringMethodCall } from "./lower-containers.js";
@@ -3123,6 +3123,20 @@ export class Lowerer {
       if (reachable.has(name)) return;
       reachable.add(name);
       if (units.has(name)) queue.push(name);
+      // The VTABLE THUNK of a widened override rides its implementation's
+      // edge: `%C.m%vt` exists exactly when `%C.m` does, so a vtable entry
+      // can never point at a function module assembly pruned. Registering
+      // here (rather than in the units loop above) covers every route a
+      // method reaches the queue by — declared classes, class expressions,
+      // and the demand-driven generic/mixin instantiations, which are not
+      // units at all.
+      if (!name.endsWith("%vt")) {
+        const thunk = this.vtThunkUnit(name);
+        if (thunk) {
+          units.set(`${name}%vt`, thunk);
+          this.onEdge!(`${name}%vt`);
+        }
+      }
     };
     // Class EXPRESSIONS collect while init bodies lower (below): their
     // member units register the moment collection finishes — before any
@@ -6779,6 +6793,9 @@ export class Lowerer {
           }
           extraParams = methodParamTypes.slice(fnT.params.length);
         }
+        if (this.overrideBelow(info, f.name) && !virtualViewFitsSlot(this, info, f.name)) {
+          return why(`field '${f.name}': the receiver's view of the method is not the vtable slot's signature (a class between them widened it), so a virtual dispatch here has no spelling`);
+        }
         plan.push({
           how: "method",
           name: f.name,
@@ -8085,6 +8102,10 @@ export class Lowerer {
     // declaration with no override below has no body to bind — decline.
     const virtual = this.overrideBelow(info, name);
     if (sig.abstract === true && !virtual) return null;
+    // A dispatch the vtable slot cannot carry at this static view (a middle
+    // class widened the signature) has no bound-closure form — decline, the
+    // trampoline case this routine already declines for.
+    if (virtual && !virtualViewFitsSlot(this, info, name)) return null;
     return { method: { declarer, name, virtual, func: fieldType } };
   }
 
@@ -10996,6 +11017,7 @@ export class Lowerer {
       if (found.sig.params.some((p) => p.mode === "rest")) return null;
       const methodT = funcOf(found.sig.params.map((p) => p.type), found.sig.ret);
       if (!typeEquals(methodT, f.type)) return null;
+      if (this.overrideBelow(info, f.name) && !virtualViewFitsSlot(this, info, f.name)) return null;
       plan.push({
         name: f.name,
         fnT: f.type,
@@ -11966,6 +11988,22 @@ export class Lowerer {
 
   throwingSetterFn(info: ClassInfo, prop: string): IrFunction {
     return throwingSetterFn(this, info, prop);
+  }
+
+  /** The unit that builds `%C.m%vt` when `%C.m` is a WIDENED override —
+   * null for every other emitted-function name, which is nearly all of
+   * them. `%C.m` splits at the LAST dot: IR class names carry their module
+   * qualifier (`%m1.C`) and accessor members carry a colon (`get:x`), and
+   * neither can put a dot after the method name. */
+  vtThunkUnit(name: string): (() => IrFunction | null) | null {
+    const cut = name.lastIndexOf(".");
+    if (cut <= 0) return null;
+    const info = this.classes.get(name.slice(0, cut));
+    if (!info) return null;
+    const mName = name.slice(cut + 1);
+    if (!info.methods.has(mName)) return null;
+    if (vtThunkFn(this, info, mName) === null) return null;
+    return () => vtThunkFn(this, info, mName);
   }
 
   fieldInitStmts(info: ClassInfo, thisLocal: IrLocal): IrStmt[] {

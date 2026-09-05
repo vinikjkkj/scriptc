@@ -975,10 +975,17 @@ export class CEmitter {
             // No concrete implementation anywhere in the subtree means no
             // instance can dispatch the slot (only abstract classes
             // declare it, and abstract classes never instantiate) — skip.
+            // A WIDENED implementation is not spelled at the slot — its
+            // synthesized thunk `%C.m%vt` is, and so is every unwidened
+            // implementation, so whichever the walk reaches first types the
+            // slot identically. Preferring the thunk is what makes that
+            // true; reading the raw function here would type the slot at
+            // one subclass's extra optional parameter.
             const findImpl = (c: ClassMeta): IrFunction | undefined => {
               for (const child of c.children) {
                 const f = declares(child, method) && !child.def.abstractMethods?.includes(method)
-                  ? this.fnByName.get(`%${child.def.name}.${method}`)
+                  ? this.fnByName.get(`%${child.def.name}.${method}%vt`) ??
+                    this.fnByName.get(`%${child.def.name}.${method}`)
                   : undefined;
                 const found = f ?? findImpl(child);
                 if (found) return found;
