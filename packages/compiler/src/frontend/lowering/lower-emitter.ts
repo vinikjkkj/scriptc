@@ -2805,9 +2805,18 @@ export function boundSubscribeDispatcher(
   }
   if (arms.length === 0) return why("the slot's constraint names no event");
 
-  // INTERNED per (receiver class, member, slot signature): `on` and `once`
-  // wear the SAME slot type and must not share a body.
-  const ikey = `emitsub:${recvIr.className}:${member}:${typeKey(slot)}`;
+  // INTERNED per (receiver class, member, slot signature, ARMED NAMES).
+  //
+  // The first three are the obvious part: `on` and `once` wear the SAME slot
+  // type and must not share a body. The fourth is the one that matters. Two
+  // slots on one receiver can erase to the SAME IR function type and still
+  // admit different event names -- `<K extends 'a' | 'b'>` and
+  // `<K extends 'a' | 'b' | 'c'>` erase alike whenever the handlers coincide
+  // -- and reusing a body armed for the smaller set would leave a listener
+  // silently unregistered. That is a wrong VALUE with no diagnostic, which is
+  // the one thing a dispatcher must never produce, so the armed set is part
+  // of the identity rather than a consequence of it.
+  const ikey = `emitsub:${recvIr.className}:${member}:${typeKey(slot)}:${arms.map((a) => a.name).join(",")}`;
   let fname = L.widthHelpers.get(ikey);
   if (fname === undefined) {
     fname = `%emit.sub.${L.widthHelpers.size}`;

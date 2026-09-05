@@ -10347,6 +10347,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/7593-two-subscribe-slots-that-erase-alike-arm-different-events.ts": {
+   "order": [
+    "<repo>/tests/corpus/7593-two-subscribe-slots-that-erase-alike-arm-different-events.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/760-any-arithmetic.ts": {
    "order": [
     "<repo>/tests/corpus/760-any-arithmetic.ts"
