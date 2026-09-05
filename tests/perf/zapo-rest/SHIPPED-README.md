@@ -312,14 +312,28 @@ turns each one into a per-statement runtime throw instead, so the count to
 watch is the number of DEFERRED SITES in the emitted module, not whether the
 build succeeded.
 
-| arm | `958b912f` | `b6aac7aa` | `c02b73ca` (this build) |
-|---|---|---|---|
-| strict, no `--best-effort` | 14 errors | 1 error | **0 errors, 1 advisory** |
-| `--best-effort`, deferred sites in the emitted module | 15 by the bracket scan | 4 sites (1 bracket) | **1 site (1 bracket)** |
+| arm | `958b912f` | `b6aac7aa` | `c02b73ca` | `d97d74e3` (this build) |
+|---|---|---|---|---|
+| strict, no `--best-effort` | 14 errors | 1 error | 0 errors, 1 advisory | **0 errors, 1 advisory** |
+| `--best-effort`, deferred sites in the emitted module | 15 by the bracket scan | 4 sites (1 bracket) | 1 site (1 bracket) | **1 site (1 bracket)** |
+| `scr_trap` call sites | — | — | 3, all compiler helpers | **3, all compiler helpers** |
 
 `958b912f` is the 29,085,696-byte binary shipped on 2026-09-04; `b6aac7aa` is
-the revision that first carried this file. **This binary is built strictly**
-— the `--best-effort` column is now a cross-check, not the shipping arm.
+the revision that first carried this file; `c02b73ca` is the single-session
+build this one replaces. **This binary is built strictly** — the
+`--best-effort` column is now a cross-check, not the shipping arm.
+
+Adding N sessions moved none of these numbers. The one advisory is the same
+`SC6003` in zapo's own `credentials-flow.ts:204`, and the three `scr_trap`
+sites are the compiler's own `sc_oom`, `sc_bad_tag` and `sc_bad_key` helpers —
+none emitted into program code.
+
+Both arms were built from the same tree into separate caches. The executables
+are **27,940,864 bytes, the same to the byte**; their md5s differ only because
+each embeds the absolute path of the provenance checkout its own arm used
+(11 occurrences each, `.../prov/` versus `.../prov-be/`), which grows `.rdata`
+by 48 bytes and shifts every downstream RIP-relative displacement. Neither
+binary contains the other's path.
 
 The deferred numbers across columns are not one measurement: the oldest scan
 counted `[SCxxxx]` markers inside message text, and only some refusals spell
