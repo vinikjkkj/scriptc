@@ -10737,6 +10737,18 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/7782-map-function-values.ts": {
+   "order": [
+    "<repo>/tests/corpus/7782-map-function-values.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/7783-primitive-valueof-identity.ts": {
+   "order": [
+    "<repo>/tests/corpus/7783-primitive-valueof-identity.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/800-switch-basics.ts": {
    "order": [
     "<repo>/tests/corpus/800-switch-basics.ts"
