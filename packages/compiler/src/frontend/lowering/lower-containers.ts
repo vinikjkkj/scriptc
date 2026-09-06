@@ -7369,6 +7369,17 @@ export const BYTES_CTORS: Record<string, IrBytesElem | undefined> = {
       const idx = call.arguments.slice(1).map((a) => L.lowerExprExpecting(a, F64));
       return { kind: "bytesIntrinsic", method: "fillElem", receiver, args: [v, ...idx], type: receiverIr, loc };
     }
+    if (name === "copyWithin") {
+      // In-place overlapping move, slice-clamped relative indices, never
+      // throws, receiver back. target is required; start defaults to 0 and
+      // end to the length (INFINITY clamps to it).
+      if (nArgs < 1 || nArgs > 3) {
+        L.noLowering(`.copyWithin with ${nArgs} arguments on typed arrays`, call);
+      }
+      const receiver = L.lowerExpr(access.expression);
+      const idx = call.arguments.map((a) => L.lowerExprExpecting(a, F64));
+      return { kind: "bytesIntrinsic", method: "copyWithin", receiver, args: idx, type: receiverIr, loc };
+    }
     if (name === "set") {
       if (nArgs < 1 || nArgs > 2) {
         L.noLowering(`.set with ${nArgs} arguments on typed arrays`, call);

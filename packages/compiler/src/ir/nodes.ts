@@ -2587,6 +2587,10 @@ export type IrStrIntrinsicMethod =
  * (integer kinds by modular truncation, Float32 by double→float
  * rounding). No BIG setters exist — bigint arguments never lower. */
 export type IrBytesIntrinsicMethod =
+  /** copyWithin(target[, start[, end]]): an OVERLAPPING in-place move
+   * (memmove, not memcpy -- source and destination are one buffer),
+   * slice-clamped relative indices, never throws, receiver returned. */
+  | "copyWithin"
   | "length"
   | "byteLength"
   | "get"
@@ -2693,6 +2697,7 @@ export const DV_BIG_SET_METHODS: ReadonlySet<IrBytesIntrinsicMethod> = new Set([
  * everything the table-accounting suite concludes from it) trustworthy
  * rather than a second hand-maintained copy. */
 const BYTES_INTRINSIC_METHOD_SET: Record<IrBytesIntrinsicMethod, true> = {
+  copyWithin: true,
   length: true, byteLength: true, get: true, slice: true,
   subarray: true, toReversed: true, with: true, join: true,
   toArray: true, setFrom: true, toString: true, readNum: true,

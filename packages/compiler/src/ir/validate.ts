@@ -2740,6 +2740,8 @@ function validateFunction(
           fillNum: { argTypes: [F64, F64, F64], minArgs: 1, result: BYTES_U8 },
           // Per-element TypedArray fill (any elem — the non-u8 fill path).
           fillElem: { argTypes: [F64, F64, F64], minArgs: 1, result: bytesOf(recv.elem) },
+          // copyWithin(target[, start[, end]]) -> the receiver, same elem.
+          copyWithin: { argTypes: [F64, F64, F64], minArgs: 1, result: bytesOf(recv.elem) },
           fillStr: { argTypes: [STRING, STRING, F64, F64], minArgs: 2, result: BYTES_U8 },
           copy: { argTypes: [BYTES_U8, F64, F64, F64], minArgs: 1, result: F64 },
           swap16: { argTypes: [], minArgs: 0, result: BYTES_U8 },

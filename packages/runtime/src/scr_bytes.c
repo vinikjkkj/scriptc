@@ -484,6 +484,30 @@ ScrBytes *scr_bytes_fill_elem(ScrBytes *b, double v, double start, double end) {
   return scr_bytes_retain(b);
 }
 
+/* copyWithin(target, start, end): an in-place move with slice-style
+ * relative indices, never throws, receiver back at +1.
+ *
+ * memmove and NOT memcpy, and that is the entire point of the method: the
+ * source and destination ranges are the SAME buffer and are expected to
+ * overlap. zapo-js 1.8.2 uses it to slide a trailing HMAC window down over
+ * itself (media/crypto/WaMediaCrypto.ts:508), which is precisely the
+ * overlapping case memcpy leaves undefined.
+ *
+ * The count is clamped twice, per spec: by how much source there is
+ * (final - from) and by how much room remains at the destination
+ * (len - to). */
+ScrBytes *scr_bytes_copy_within(ScrBytes *b, double target, double start, double end) {
+  size_t esz = scr_bytes_elem_size(b->elem);
+  size_t to = scr_bytes_rel_index(target, b->len);
+  size_t from = scr_bytes_rel_index(start, b->len);
+  size_t fin = scr_bytes_rel_index(end, b->len);
+  size_t avail = fin > from ? fin - from : 0;
+  size_t room = b->len - to;
+  size_t count = avail < room ? avail : room;
+  if (count > 0) memmove(b->data + to * esz, b->data + from * esz, count * esz);
+  return scr_bytes_retain(b);
+}
+
 /* subarray(start, end): a same-elem VIEW over the receiver's storage —
  * TypedArray.prototype.subarray and Buffer's slice()/subarray() all alias
  * in JS (mutations are visible both ways; buffer-swap through a slice is

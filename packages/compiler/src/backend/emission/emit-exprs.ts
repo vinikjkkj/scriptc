@@ -1459,6 +1459,13 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             E.emitPendingCheck();
             return t;
           }
+          case "copyWithin":
+            // Overlapping in-place move; slice-style index defaults (end
+            // omitted is INFINITY, which clamps to the length); receiver +1.
+            return E.newTemp(
+              e.type,
+              `scr_bytes_copy_within(${r.name}, ${args[0]!.name}, ${args[1]?.name ?? "0"}, ${args[2]?.name ?? "INFINITY"})`,
+            );
           case "fillElem":
             // Per-element TypedArray fill (non-u8): slice-style index
             // defaults, never throws; the receiver comes back +1.

@@ -11597,6 +11597,16 @@ class LlEmitter {
         B.line(`${t} = fcmp one double ${idx.name}, ${f64Lit(-1)}`);
         return { name: t, type: e.type };
       }
+      case "copyWithin":
+        // Overlapping in-place move (memmove); slice-style index defaults,
+        // never throws; the receiver comes back +1.
+        return call(
+          "scr_bytes_copy_within",
+          "ptr (ptr, double, double, double)",
+          `ptr ${r.name}, double ${args[0]!.name}, double ${args[1]?.name ?? f64Lit(0)}, double ${args[2]?.name ?? F64_INF}`,
+          true,
+          false,
+        );
       case "fillElem":
         // Per-element TypedArray fill (non-u8): slice-style index
         // defaults, never throws; the receiver comes back +1.

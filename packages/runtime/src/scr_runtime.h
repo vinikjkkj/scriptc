@@ -8072,6 +8072,7 @@ ScrBytes *scr_bytes_fill_elem(ScrBytes *b, double v, double start, double end); 
  * (mutations visible both ways, JS-exactly). The view retains the OWNER
  * (chain depth exactly 1, the DataView rule) and its byteOffset composes.
  * Same index clamping as slice; never throws. */
+ScrBytes *scr_bytes_copy_within(ScrBytes *b, double target, double start, double end);
 ScrBytes *scr_bytes_subarray(ScrBytes *b, double start, double end); /* +1 */
 
 /* dst.set(src, offset): same-kind bulk copy (memmove — dst may be src).
