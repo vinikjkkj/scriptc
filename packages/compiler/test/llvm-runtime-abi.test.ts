@@ -531,6 +531,7 @@ describe("LLVM backend declares match scr_runtime.h prototypes", () => {
     string: STRING,
     array: { kind: "array", elem: STRING },
     map: { kind: "map", key: STRING, value: STRING },
+    weakmap: { kind: "weakmap", key: { kind: "bytes", elem: "u8" }, value: STRING },
     set: { kind: "set", elem: STRING },
     regex: { kind: "regex" },
     bigint: { kind: "bigint" },
