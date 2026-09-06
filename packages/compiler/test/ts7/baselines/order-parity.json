@@ -11993,6 +11993,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/diagnostics/instanceof-on-a-rejected-class.ts": {
+   "order": [
+    "<repo>/tests/diagnostics/instanceof-on-a-rejected-class.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/diagnostics/intl.ts": {
    "order": [
     "<repo>/tests/diagnostics/intl.ts"

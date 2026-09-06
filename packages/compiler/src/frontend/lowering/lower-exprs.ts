@@ -17204,6 +17204,33 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
     });
   }
 
+  /** The LHS twin of the RHS guard above: the OPERAND's static class was
+   * named by the type world but never registered, because its declaration
+   * was rejected (a computed field name; an `extends` clause whose generic
+   * base has no concrete instantiation -- mongodb's whole `operations/`
+   * tree). The RHS spelling has carried this guard since it was written;
+   * the LEFT side reached a bare `throw` instead, so one refused class plus
+   * a PARAMETER typed as it turned every diagnostic in the program into an
+   * ICE -- the analysis aborts and reports nothing at all, which is
+   * strictly worse than the fence it was standing in for.
+   *
+   * A parameter is what makes it reachable: `new Bad()` poisons at the
+   * construction, so a locally built value never arrives here, while
+   * `function f(x: Bad)` types the binding off the checker and arrives with
+   * a className `L.classes` has no row for. Flush the declaration's deferred
+   * diagnostics first -- the refusal that CAUSED this is the one worth
+   * reading -- then poison this site. */
+  function lhsClassInfoOrRefuse(L: Lowerer, expr: ts.BinaryExpression, className: string): ClassInfo {
+    const info = L.classes.get(className);
+    if (info) return info;
+    L.flushDeferredClass(className);
+    L.unsupported(
+      "SC1090",
+      expr,
+      "'instanceof' on a value whose class has no lowering (the class declaration itself was rejected — see its own diagnostic)",
+    );
+  }
+
   export function lowerInstanceOf(L: Lowerer, expr: ts.BinaryExpression, loc: SrcLoc): IrExpr {
     // `x instanceof net.Socket` over a union with a netSocket arm — the
     // h2 compat 'connect' narrowing (lower-server.ts): a union tag test.
@@ -17448,8 +17475,7 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
             "'instanceof' on values other than class instances (narrow union-typed values first)",
           );
         }
-        const lhsInfo = L.classes.get(left.type.className);
-        if (!lhsInfo) throw new Error(`lowerer bug: unknown class ${left.type.className}`);
+        const lhsInfo = lhsClassInfoOrRefuse(L, expr, left.type.className);
         if (L.inHierarchy(targetInfo) && L.inHierarchy(lhsInfo)) {
           const classValue = L.lowerExpr(expr.right);
           if (classValue.type.kind !== "classval") L.badType(expr.right, L.typeOf(expr.right));
@@ -17764,8 +17790,7 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
         "'instanceof' on values other than class instances (narrow union-typed values first)",
       );
     }
-    const lhsInfo = L.classes.get(left.type.className);
-    if (!lhsInfo) throw new Error(`lowerer bug: unknown class ${left.type.className}`);
+    const lhsInfo = lhsClassInfoOrRefuse(L, expr, left.type.className);
     if (L.inHierarchy(lhsInfo) && L.inHierarchy(target)) {
       // The plain interval test everywhere except `instanceof
       // Writable`, where Node's own Symbol.hasInstance also admits the

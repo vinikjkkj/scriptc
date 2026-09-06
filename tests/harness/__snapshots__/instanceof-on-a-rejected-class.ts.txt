@@ -1,0 +1,34 @@
+instanceof-on-a-rejected-class.ts:24:3 - error SC1090: computed field names are not supported yet
+
+  23 | class Bad extends Base {
+  24 |   [k]: number = 2;
+     |   ^~~~~~~~~~~~~~~~
+  25 | }
+
+instanceof-on-a-rejected-class.ts:29:10 - error SC1090: 'instanceof' on a value whose class has no lowering (the class declaration itself was rejected — see its own diagnostic) is not supported yet
+
+  28 | function isBase(x: Bad): boolean {
+  29 |   return x instanceof Base;
+     |          ^~~~~~~~~~~~~~~~~
+  30 | }
+
+instanceof-on-a-rejected-class.ts:36:10 - error SC1090: 'instanceof' on a value whose class has no lowering (the class declaration itself was rejected — see its own diagnostic) is not supported yet
+
+  35 | function isBaseValue(x: Bad): boolean {
+  36 |   return x instanceof C;
+     |          ^~~~~~~~~~~~~~
+  37 | }
+
+instanceof-on-a-rejected-class.ts:43:20 - error SC1090: constructing through a class value whose class has no lowering (the class declaration itself was rejected — see its own diagnostic) is not supported yet
+
+  42 | // site like this stays invisible until a real program reaches it.
+  43 | console.log(isBase(new Bad()));
+     |                    ^~~~~~~~~
+  44 | console.log(isBaseValue(new Bad()));
+
+instanceof-on-a-rejected-class.ts:44:25 - error SC1090: constructing through a class value whose class has no lowering (the class declaration itself was rejected — see its own diagnostic) is not supported yet
+
+  43 | console.log(isBase(new Bad()));
+  44 | console.log(isBaseValue(new Bad()));
+     |                         ^~~~~~~~~
+  45 | 
