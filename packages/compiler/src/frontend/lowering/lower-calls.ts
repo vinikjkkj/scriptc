@@ -7165,6 +7165,8 @@ const inliningPredicates = new Set<ts.Symbol>();
    *     runtime formatters (num.toExponential's shortest-mantissa form,
    *     num.toFixed0's ties-up integer fast path, and num.toFixed's exact
    *     binary-value rounding for an explicit fractionDigits).
+   *   - `x.valueOf()` on a number/string/boolean receiver, or on a union
+   *     of those — the identity read (see the arm's own comment).
    *   - `hasOwnProperty(lit)` on number/boolean receivers — the boxes own
    *     NOTHING, so any key answers false (a compile-time constant; the
    *     receiver must be effect-free since the constant elides it).
@@ -7179,9 +7181,27 @@ const inliningPredicates = new Set<ts.Symbol>();
     recv: ts.Expression, name: string, memberSym: ts.Symbol | undefined,): IrExpr | null {
     if (L.chainBlocked(call)) return null;
     if (!L.isStdlibSymbol(memberSym)) return null;
-    const recvKind = L.mapTypeOf(L.typeOf(recv))?.kind;
-    if (recvKind !== "f64" && recvKind !== "bool" && recvKind !== "string") return null;
+    const recvIr = L.mapTypeOf(L.typeOf(recv));
+    const recvKind = recvIr?.kind;
     const loc = locOf(call);
+    // `x.valueOf()` on a PRIMITIVE — the identity read, and the one member
+    // here whose receiver may also be a UNION of primitives (Node answers
+    // the receiver itself whichever arm it holds, so the arms need no
+    // common kind). The dyn path already dispatches this name at runtime
+    // (DYN_DISPATCH_METHODS' valueOf row, "one no receiver kind overrides
+    // observably"), so the static receiver was the one spelling that
+    // refused — a fence in front of a working implementation. Symbols get
+    // the same identity read in lowerSymbolMethodCall.
+    if (name === "valueOf" && call.arguments.length === 0 && recvIr) {
+      const arms = recvIr.kind === "union" ? (L.unions.get(recvIr.unionId)?.arms ?? []) : [recvIr];
+      const primitive = (t: IrType): boolean =>
+        t.kind === "f64" || t.kind === "bool" || t.kind === "string";
+      if (arms.length > 0 && arms.every(primitive)) {
+        const operand = L.lowerExpr(recv);
+        if (typeEquals(operand.type, recvIr)) return operand;
+      }
+    }
+    if (recvKind !== "f64" && recvKind !== "bool" && recvKind !== "string") return null;
     if (name === "toString" && call.arguments.length === 0) {
       const operand = L.lowerExpr(recv);
       if (operand.type.kind === "string") return operand; // identity

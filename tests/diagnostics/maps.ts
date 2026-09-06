@@ -7,11 +7,18 @@
 // exactly those) — the new-site diagnostic names the key type.
 const byFlag = new Map<boolean, string>();
 
-// Values exclude functions (no closure story in the uniform value slot yet).
+// Closure and nested-container VALUES compile — the index-signature
+// overflow store is a string-keyed ScrMap and has carried both for as long
+// as it existed, so these two lines are here as the boundary's inside edge
+// and report nothing.
 const handlers = new Map<string, () => void>();
-
-// ... and nested Maps (no maps of maps this round).
 const nested = new Map<string, Map<string, number>>();
+
+// A SYMBOL value has no Map slot: the value fence admits the refcounted
+// kinds the runtime has `_v` adapters and a trace answer for, and a symbol
+// is neither (it is a Set ELEMENT kind, keyed by identity, which is a
+// different slot).
+const tagged = new Map<string, symbol>();
 
 // Map-typed slots elsewhere report the ordinary unsupported-type diagnostic.
 function useBad(m: Map<boolean, number>): number {

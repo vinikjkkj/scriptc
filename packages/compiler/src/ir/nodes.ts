@@ -797,10 +797,10 @@ export function isSupportedSetElem(t: IrType): boolean {
 }
 
 /** The Map VALUE fence: scalars plus every refcounted kind EXCEPT
- * func/promise/dyn/jsval (and map itself — no maps of maps).
- * Record/object/union values can point back at the map holding them, which
- * is exactly why ref-valued maps are cycle-capable (see the backend's
- * cycle analysis and docs/memory.md). Shared frontend/validator. */
+ * jsval. Record/object/union values can point back at the map holding
+ * them, which is exactly why ref-valued maps are cycle-capable (see the
+ * backend's cycle analysis and docs/memory.md). Shared
+ * frontend/validator. */
 export function isSupportedMapValue(t: IrType): boolean {
   switch (t.kind) {
     case "f64":
@@ -860,6 +860,20 @@ export function isSupportedMapValue(t: IrType): boolean {
     case "map":
     case "set":
       return true;
+    // A CLOSURE (Map<string, () => void> — the command/handler registry,
+    // and mongodb's `Map<string, (props) => AuthProvider>` provider table).
+    // The index-signature overflow store has carried func values since it
+    // existed (isSupportedIndexValue below) and that store IS a
+    // string-keyed ScrMap built by the same scr_map_new call with the same
+    // `_v` adapters — scr_closure_retain_v/release_v — and the same
+    // trace argument, so a user Map holding one is the identical storage
+    // under a different spelling, exactly the argument the nested-container
+    // case makes. Closures are cycle-headered and traced
+    // (scr_closure_trace_v, unconditional in traceAdapterC), so a handler
+    // capturing the very registry that holds it collects; the map inherits
+    // the header through traceAdapterC's map rule.
+    case "func":
+      return true;
     // An `unknown` value (Map<string, unknown> — a per-key bag of
     // opaque payloads). The overflow store of an index-signature
     // record IS a string-keyed map and has carried dyn values since
@@ -879,14 +893,12 @@ export function isSupportedMapValue(t: IrType): boolean {
 /** The INDEX-SIGNATURE value fence (`{ [k: string]: V }` shapes): the map
  * VALUE kinds — the overflow portion IS a string-keyed map — plus dyn
  * (`unknown`, an unknown-valued pricing-table shape: overflow reads surface ordinary
- * dyn values validated by the usual checked casts) and three kinds the
- * overflow store carries that user Maps don't admit yet:
- *   func — `Record<string, () => void>`, the command-registry pattern
- *          (scr_closure adapters; closures are cycle-headered and traced,
- *          so a handler capturing its own registry collects)
- *   map/set — `Record<string, Map<K, V>>`/`Record<string, Set<T>>`
- *          nested-container tables (scr_map adapters; a map value's own
- *          cycle capability propagates through the trace fixpoint)
+ * dyn values validated by the usual checked casts). It is now the map
+ * value fence exactly — func, map and set used to be listed here as the
+ * kinds the overflow store carried and user Maps did not, and each has
+ * since joined isSupportedMapValue on the argument that the overflow store
+ * IS a string-keyed ScrMap. The rows stay spelled out because a future
+ * narrowing of the map fence must not silently narrow the overflow store.
  * Nested index-signature RECORDS ride the record kind like any other.
  * Shared frontend (mapType) / validator. */
 export function isSupportedIndexValue(t: IrType): boolean {

@@ -7388,7 +7388,7 @@ export function describeComponentBlocker(widened: ts.Type, ctx: TypeMapperCtx): 
         return `the ${container} shape is supported, but keys are limited to numbers and strings — '${text(arg)}' is outside that domain`;
       }
       if ((container === "Map" || container === "ReadonlyMap") && i === 1 && !isSupportedMapValue(mapped)) {
-        return `the ${container} shape is supported, but '${text(arg)}' values have no Map slot yet (functions, promises, and nested Maps stay out)`;
+        return `the ${container} shape is supported, but '${text(arg)}' values have no Map slot yet (symbols, bigints, generators and the runtime handle types stay out)`;
       }
       if ((container === "Set" || container === "ReadonlySet") && !isSupportedSetElem(mapped)) {
         return `the ${container} shape is supported, but elements are limited to numbers and strings — '${text(arg)}' is outside that domain`;
