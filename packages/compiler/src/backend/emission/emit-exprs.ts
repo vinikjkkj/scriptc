@@ -838,6 +838,12 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             }
             return E.newTemp(e.type, `scr_str_includes(${r.name}, ${args[0]!.name})`);
           case "startsWith":
+            if (args[1]) {
+              return E.newTemp(
+                e.type,
+                `scr_str_starts_with_at(${r.name}, ${args[0]!.name}, ${args[1].name})`,
+              );
+            }
             return E.newTemp(e.type, `scr_str_starts_with(${r.name}, ${args[0]!.name})`);
           case "endsWith":
             return E.newTemp(e.type, `scr_str_ends_with(${r.name}, ${args[0]!.name})`);

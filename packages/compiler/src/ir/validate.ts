@@ -34,7 +34,7 @@ export const STR_INTRINSIC_SIGS: Record<
   charAt: { argTypes: [F64], minArgs: 1, result: STRING },
   indexOf: { argTypes: [STRING, F64], minArgs: 1, result: F64 },
   includes: { argTypes: [STRING, F64], minArgs: 1, result: BOOL },
-  startsWith: { argTypes: [STRING], minArgs: 1, result: BOOL },
+  startsWith: { argTypes: [STRING, F64], minArgs: 1, result: BOOL },
   endsWith: { argTypes: [STRING], minArgs: 1, result: BOOL },
   slice: { argTypes: [F64, F64], minArgs: 0, result: STRING },
   substring: { argTypes: [F64, F64], minArgs: 1, result: STRING },

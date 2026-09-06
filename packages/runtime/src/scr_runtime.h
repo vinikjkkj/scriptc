@@ -1002,6 +1002,7 @@ bool scr_str_includes(ScrStr *s, ScrStr *needle);
 
 /* startsWith(needle) / endsWith(needle) — no position argument. */
 bool scr_str_starts_with(ScrStr *s, ScrStr *needle);
+bool scr_str_starts_with_at(ScrStr *s, ScrStr *needle, double position);
 bool scr_str_ends_with(ScrStr *s, ScrStr *needle);
 
 /* slice(start, end): UTF-16 indices, negatives count from length, clamped
