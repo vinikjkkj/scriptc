@@ -35,7 +35,7 @@ import { newFnCtx, own } from "./lowerer.js";
 import { appendImplicitUndefinedReturn } from "./lower-calls.js";
 import { bufEncoding, knownBufEncoding } from "./lower-containers.js";
 import { probeLower } from "./lower-exprs.js";
-import { BOOL, DYN, F64, IrExpr, IrFunction, IrLibFn, IrStmt, IrType, RUNTIME_STREAM_CLASSES, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, bytesOf, canBoxFuncIntoDyn, funcOf, typeEquals, typeKey } from "../../ir/nodes.js";
+import { BOOL, DYN, F64, IrExpr, IrFunction, IrLibFn, IrStmt, IrType, RUNTIME_STREAM_CLASSES, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, bytesOf, canBoxFuncIntoDyn, funcOf, isUnitType, typeEquals, typeKey } from "../../ir/nodes.js";
 
 const BYTES = bytesOf("u8");
 
@@ -237,7 +237,23 @@ function lowerStreamCallback(
   // because a body only ever CALLS it: the arguments coerce into the
   // forced parameter types and nothing reads its declared shape.
   const normParams = declaredType.params.map((p) => normalizeDoneType(L, p, which));
-  const funcType: IrType & { kind: "func" } = { ...declaredType, params: normParams };
+  // A concise-body arrow whose body IS a unit literal — `() => undefined`,
+  // the idiom for "I am deliberately ignoring this completion", and what
+  // zapo's history-sync inflater writes — infers a UNIT return type, not
+  // void: TypeScript takes the arrow's own inferred return, and the
+  // contextual `=> void` never overrides it. Unit types have no runtime
+  // value, so the bare-expression arm below would emit `return unitLit`
+  // and the IR validator would reject it as frontend breakage. It WAS
+  // frontend breakage: `pipeline(src, dst, () => undefined)` was an ICE
+  // (SC9001 "bare unitLit 'undefined' outside a unionWrap"), on a
+  // callback whose result Node discards outright.
+  //
+  // Normalizing to void here rather than special-casing the body arm
+  // keeps the lifted function's returnType, the closure's type and the
+  // emitted done-thunk reading ONE answer — the same reason the
+  // completion parameter is substituted through `funcType` above.
+  const normRet = isUnitType(declaredType.ret) ? VOID : declaredType.ret;
+  const funcType: IrType & { kind: "func" } = { ...declaredType, params: normParams, ret: normRet };
   const shapes = declaredShapes.map((s, i) =>
     normParams[i] !== undefined && normParams[i] !== declaredType.params[i]
       ? { ...s, type: normParams[i]! }
@@ -297,7 +313,14 @@ function lowerStreamCallback(
       // option-callback results either way.
       const bodyExpr = node.body as ts.Expression;
       if (funcType.ret.kind === "void") {
-        body = [{ kind: "exprStmt", expr: L.lowerExpr(bodyExpr), loc: locOf(node.body) }];
+        const discarded = L.lowerExpr(bodyExpr);
+        // The other half of the `() => undefined` story above: a unit
+        // literal has no runtime value AND no effect, so discarding one
+        // means emitting nothing. An exprStmt around it left a bare
+        // unitLit on the IR, which the validator rejects.
+        body = discarded.kind === "unitLit"
+          ? []
+          : [{ kind: "exprStmt", expr: discarded, loc: locOf(node.body) }];
       } else {
         const value = L.lowerExpr(bodyExpr);
         body = [{ kind: "return", value: L.coerceInto(bodyExpr, value, funcType.ret), loc: locOf(node.body) }];
