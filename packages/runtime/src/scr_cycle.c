@@ -121,6 +121,7 @@ __attribute__((constructor)) static void scr_poolstat_reg_cycle(void) {
 #define SCR_CS_PHASE_END(which) ((void)0)
 #define SCR_CS_ADD(which, n) ((void)0)
 #define SCR_CS_BUMP(which) ((void)0)
+#define SCR_CS_MAX(which, n) ((void)0)
 #endif
 
 /* The census hook, as one macro rather than an #ifdef inside each arm of
@@ -157,7 +158,7 @@ static inline void scr_cyc_stamp(ScrCycHdr *h, ScrTraceFn trace,
 /* ── the block arena ──────────────────────────────────────────────────
  * The pool above recycles blocks; it does not change where a block COMES
  * FROM, and on this workload that is where the bytes are. Residency-
- * profiled on the real messaging bench, scr_cyc_alloc_miss's calloc is the
+ * profiled on the real messaging bench, scr_cyc_alloc_miss's calloc was the
  * #2 live-heap site — 25.25 MiB, 31.31% of the live heap at its
  * high-water — and ScrCycHdr is already hand-minimized to exactly 16
  * bytes, so the header is not what is left. THE COUNT OF CRT BLOCKS IS.
@@ -165,35 +166,114 @@ static inline void scr_cyc_stamp(ScrCycHdr *h, ScrTraceFn trace,
  * (~24 B measured across the process: ~26.6 MiB over ~1.16M live blocks),
  * and that term is not in any header this file controls.
  *
- * So the miss carves out of 64 KiB chunks instead. Three properties make
- * it cheap to state and safe to free:
+ * So the miss carves out of 64 KiB chunks instead — and, since this
+ * revision, GIVES THE CHUNKS BACK. The shape is mimalloc's page (see
+ * "Mimalloc: Free List Sharding in Action", Leijen/Zorn/de Moura, MSR-TR-
+ * 2019-18) reduced to what one size-class family needs: a chunk is a page,
+ * it serves ONE size class, it owns its own free list, it counts the blocks
+ * it has handed out, and it is returned to the allocator the moment that
+ * count reaches zero. jemalloc's runs and tcmalloc's spans are the same
+ * idea with different names.
  *
- *   NO ARENA HEADER, because ScrCycHdr::blk already carries the block's
- *   physical size class and scr_cyc_free already reads it. The free list
- *   is indexed by that same field, so a block NEVER MIGRATES between
- *   classes — the same invariant the pool relies on, for the same reason.
+ * WHY IT COULD NOT DO THAT BEFORE, and what changed. The previous form had
+ * NO CHUNK HEADER on purpose, and the note here said so: given a block
+ * pointer the arena could not name the chunk it came from, so it could
+ * never learn that a chunk had emptied. Measured on tests/perf/zapo-rest
+ * driven through a full WhatsApp history sync, that cost 1,053 chunks
+ * allocated and zero freed — 65.81 MiB of a 96.40 MiB settled heap, 72% of
+ * it, at 4% occupancy, against a genuine working set of ~11 MiB.
  *
- *   PROVENANCE IS A HEADER BIT, not a range check. ScrCycHdr::pad was a
- *   spare byte; it is 1 for a carved block. A range check would need one
- *   contiguous reservation, and that means VirtualAlloc, and this runtime
- *   cross-compiles to ELF targets that have no such call (cc-driver's five
- *   ELF cells are what rules it out). A bit in a header we own needs no
- *   platform symbol and is exact.
+ * WHAT IT IS WORTH, on that same rig and the same workload (8 chunks x 400
+ * conversations x 6 messages x 300 B, settled = 45 s after the last chunk
+ * decoded, then 60 s idle, read through the /shutdown route). The peak is
+ * BIMODAL on this workload and knob-independent, so these are the HIGH-peak
+ * arms only — 4 base, 3 reclaiming, interleaved, one host:
  *
- *   BLOCKS ARE 16-BYTE ALIGNED: the chunk comes from malloc (16-aligned on
- *   every target here) and the carve stride is `phys` rounded up to 16, so
- *   the OBJECT pointer keeps the alignment the 16-byte header was shaped
- *   to give it.
+ *   settled working set     163.39 -> 104.50 MiB   -58.89  (-36.0%)
+ *   peak working set        248.34 -> 247.69       -0.65   (-0.3%)
+ *   CRT-heap BUSY at settled 96.42 ->  40.66 MiB   -55.76  (-57.8%)
+ *   heap uncommitted          8.55 ->  60.43 MiB   +51.88  (returned)
+ *   65,536-byte busy blocks   1,110 ->    218
+ *   arena chunks held at exit 1,053 ->    160      (peak 1,073, freed 1,236)
  *
- * A carved block must never reach free(), so scr_cyc_free has an overflow
- * list for the case where the pool's byte budget rejects the give. The
- * arena does not return chunks; the ~256 B tail of a chunk that cannot fit
- * the next stride is abandoned. Off under SCR_RC_AUDIT for exactly the
- * reason the pool is: that lane exists to prove every logical free is a
- * real free.
+ * THE PEAK DOES NOT MOVE and that is the honest half: the arena still takes
+ * 1,073 chunks at the high-water, because that is what the sync genuinely
+ * needs at once. What changes is that it gives 1,236 of the 1,397 it ever
+ * took back, and the ~160 left are one cached chunk per live size class
+ * plus the classes that really are still populated.
  *
- * SCR_CYCLE_ARENA=0 restores the calloc. It is an env knob, not a build
- * flag, so both arms are the same binary. */
+ * THE NUMBER THAT EXPLAINS ALL OF IT is cycstat's `listhit`: 0 before and
+ * 65,097,056 after. Routing carved blocks away from the size-class pool is
+ * what turned the arena's free lists from a write-only sink into the
+ * recycler, and a recycled block is a chunk that never had to be carved.
+ *
+ * THE MAP IS ScrCycHdr::pad, WITH NO EXTRA BYTE AND NO LOOKUP. The two
+ * candidates were a per-block back-pointer (8 bytes on a 16-byte header
+ * that has no room, so 16 after alignment — 20% on the 80-byte class that
+ * dominates this heap) and a side registry keyed on the block address (a
+ * hash probe on the free path, which is as hot as the allocate path). This
+ * is neither. `pad` is ONE byte and it holds the block's offset from its
+ * chunk in 256-byte granules; the chunk's own base is 256-ALIGNED, so
+ *
+ *     chunk = (block & ~255) - (pad << 8)
+ *
+ * is exact and is two instructions. Three things make it work and each is
+ * load-bearing:
+ *
+ *   THE CHUNK IS 256-ALIGNED. malloc gives 16, so the chunk carves its
+ *   base out of a 64 KiB malloc by rounding UP to 256 — at most 240 bytes
+ *   lost, and the CRT block stays exactly 65,536 bytes, which is what
+ *   tests/perf/heapcensus's histogram identifies an arena chunk by.
+ *
+ *   THE FIRST 256 BYTES ARE THE CHUNK HEADER. ScrCycChunk is 56 bytes; the
+ *   zone is 256 so that NO BLOCK EVER SITS AT AN OFFSET BELOW 256, which
+ *   is what keeps `pad != 0` the provenance test it already was. A calloc'd
+ *   block is stamped 0 and must never reach the arena; a carved block is
+ *   stamped 1..255 and must never reach free(). Both still read as one
+ *   test of one byte.
+ *
+ *   THE CHUNK IS AT MOST 64 KiB. 255 granules of 256 is 65,280, and the
+ *   last block of a 65,536-byte chunk starts below 65,536, so the offset
+ *   always fits. The _Static_assert below is the guard, because a -D that
+ *   raised the chunk size would otherwise alias two chunks silently.
+ *
+ * PROVENANCE IS STILL A HEADER FIELD, not a range check, and for the
+ * original reason: a range check would need one contiguous reservation,
+ * that means VirtualAlloc, and this runtime cross-compiles to ELF targets
+ * that have no such call (cc-driver's five ELF cells are what rules it
+ * out). A field in a header we own needs no platform symbol and is exact.
+ *
+ * BLOCKS ARE 16-BYTE ALIGNED: the chunk base is 256-aligned and the carve
+ * stride is `phys` rounded up to 16, so the OBJECT pointer keeps the
+ * alignment the 16-byte header was shaped to give it.
+ *
+ * THE SIZE-CLASS POOL IS EXCLUDED FROM CARVED BLOCKS, and that is the
+ * deliberate half of this design. A pooled block keeps its chunk pinned:
+ * scr_pool_give would park it for reuse, the chunk's count could not go to
+ * zero, and 16 MiB of pool spread thin over a thousand chunks would pin all
+ * of them — the exact failure this change exists to remove. Carrying chunk
+ * identity THROUGH the pool is possible and is not enough: `pad` already
+ * survives a pool round-trip (the pool writes only the block's first 8
+ * bytes, and `pad` is byte 10), so the identity was never the problem; the
+ * PINNING is. So scr_cyc_free routes on `pad` FIRST and a carved block goes
+ * to its own chunk's list, never to the pool. The pool is not redundant
+ * after that — it still recycles every block the arena does not own (the
+ * >SCR_POOL_MAX sizes, the calloc fallback, and the whole of SCR_RC_AUDIT
+ * and SCR_CYCLE_ARENA=0) — it simply no longer competes for the blocks the
+ * arena has to be able to account for.
+ *
+ * That competition was also the retention bug. On the measured sync
+ * cycstat reported listhit=0: not one of the ~45 MiB parked on the arena's
+ * old global free lists was ever handed back out, because scr_pool_take
+ * answered every reuse before a miss could reach the arena, and the pool's
+ * byte budget rejected the gives that would have refilled the classes the
+ * pool had starved. Blocks went one way. Routing on provenance closes that
+ * by construction.
+ *
+ * SCR_CYCLE_ARENA=0 restores the calloc-and-pool arm. It is an env knob,
+ * not a build flag, so both arms are the same binary. Off under
+ * SCR_RC_AUDIT for exactly the reason the pool is: that lane exists to
+ * prove every logical free is a real free. */
 #ifndef SCR_CYC_ARENA
 #define SCR_CYC_ARENA 1
 #endif
@@ -201,50 +281,113 @@ static inline void scr_cyc_stamp(ScrCycHdr *h, ScrTraceFn trace,
 #define SCR_CYC_ARENA_CHUNK ((size_t)64 << 10)
 #endif
 
-/* THE ARENA'S CEILING, and the measurement that says it needs one.
+/* The granule the block->chunk map is expressed in, and the size of the
+ * chunk's own header zone. Both are 256 for one reason: ScrCycHdr::pad is
+ * ONE BYTE, and the map has to fit in it with a value of 0 left over to
+ * mean "not from a chunk at all". */
+#define SCR_CYC_ARENA_GRAN ((size_t)256)
+
+_Static_assert(SCR_CYC_ARENA_CHUNK <= (SCR_CYC_ARENA_GRAN * 256),
+               "SCR_CYC_ARENA_CHUNK over 64 KiB: a block's offset no longer "
+               "fits in ScrCycHdr::pad and two chunks would alias");
+_Static_assert(SCR_CYC_ARENA_CHUNK >= SCR_CYC_ARENA_GRAN * 4,
+               "SCR_CYC_ARENA_CHUNK too small to hold a header zone and carve");
+
+/* THE ARENA'S CEILING, WHICH THE RECLAMATION ABOVE HAS MADE HARMFUL, and
+ * the measurement that says so. It predates this revision: past the budget
+ * a miss falls back to calloc, and a calloc'd block is stamped pad=0 so it
+ * reaches free() and the NT heap can decommit it. That was the only way an
+ * unreclaimable arena could give anything back.
  *
- * The arena does not return chunks - it cannot, because a chunk carries no
- * header and a block cannot be traced back to the chunk it came from. That
- * is fine for a program whose live small-object population is flat, and it
- * is the whole of the retention for one whose population SPIKES. Measured
- * on tests/perf/zapo-rest driven through a full WhatsApp history sync
- * (packages/fake-server, no phone), at settled - sixty seconds after the
- * last chunk decoded, with the process flat:
+ * On the same rig and workload as the block above, medians of matched
+ * peak-mode arms, settled working set:
  *
- *   the CRT heap holds 96.40 MiB BUSY across 175,232 blocks, and
- *   69.25 MiB of that - 72.49% - is 1,110 busy blocks of EXACTLY 65,536
- *   bytes, i.e. this malloc and scr_string.c's. tests/perf/prof's
- *   residency lane charges 65.81 MiB to THIS LINE alone, 75.07% of the
- *   whole live heap, and tests/perf/cycstat counts the 1,053 chunks that
- *   is. Three independent instruments, the same number.
+ *                        no budget    SCR_CYCLE_ARENA_BUDGET=16 MiB
+ *   the old arena         163.39 MiB          143.02 MiB
+ *   this arena            104.50              133.93
  *
- *   Inside those 65.81 MiB, tests/perf/cycensus finds 4.33 MiB of live
- *   cycle objects and 16.00 MiB parked on the size-class pool. The
- *   remaining ~45 MiB is on this arena's own per-class free lists, and
- *   `listhit=0` says not one block of it was ever handed back out: the
- *   pool answers every reuse first, so the overflow list only grows.
+ * The ceiling was worth -20 MiB when a chunk could never come back. It now
+ * COSTS +29 MiB, because everything past it is a calloc'd block carrying
+ * the allocator's own ~24 B of per-block overhead and fragmenting the heap
+ * the arena exists to keep dense — cycstat counts 616,314 such fallbacks on
+ * the budgeted arm against 41,628 on the unbudgeted one, and those 41,628
+ * are the >SCR_POOL_MAX sizes the arena never served anyway.
  *
- * A budget is the same instrument SCR_POOL_BUDGET already is, in the same
- * shape and for the same reason. Past it a miss falls back to calloc, and
- * a calloc'd block is stamped pad=0, so it reaches free() and the NT heap
- * can decommit it - which is exactly what the retention needs and what a
- * carved block can never do. The check is one comparison on the CHUNK
- * path, which runs once per 64 KiB (1,053 times in a run of 66 million
- * allocations); the hot path is untouched.
- *
- * 0 is unbounded and is the default, so the shipped arm is today's
- * behaviour. SCR_CYCLE_ARENA_BUDGET is an env knob, not a build flag, so
- * both arms are the same binary. */
+ * So the knob stays at 0, unbounded, which is what it already shipped as;
+ * it is kept only as the diagnostic arm the table above is read from. The
+ * check is one comparison on the CHUNK path, which runs once per 64 KiB;
+ * the hot path is untouched. Env knob, not a build flag, so both arms are
+ * the same binary. */
 #ifndef SCR_CYC_ARENA_BUDGET
 #define SCR_CYC_ARENA_BUDGET 0
 #endif
 
-/* One list per SCR_POOL_GRAIN class, indexed by ScrCycHdr::blk (1..32). */
-static void *scr_cyc_ar_free[SCR_POOL_MAX / SCR_POOL_GRAIN + 1u];
-static unsigned char *scr_cyc_ar_cur = NULL;
-static unsigned char *scr_cyc_ar_lim = NULL;
-/* Chunk bytes this arena has taken and will never give back. Only the
- * budget reads it, and only the chunk path writes it. */
+/* One chunk serves one size class. `used` is the whole of the reclamation
+ * contract: it counts blocks HANDED TO THE PROGRAM and not yet returned,
+ * so it is incremented at the two places a block leaves this chunk (the
+ * free-list pop and the bump carve) and decremented at the one place a
+ * block comes back (scr_cyc_ar_give). used == 0 therefore means no block of
+ * this chunk is in anyone's hands: every carved block is on `freelist`,
+ * which is chunk-local, and nothing outside points into the chunk. That is
+ * what makes free() on it sound. */
+typedef struct ScrCycChunk ScrCycChunk;
+struct ScrCycChunk {
+  ScrCycChunk *next;   /* next chunk of this class with capacity */
+  ScrCycChunk **prevp; /* the pointer that points HERE, for O(1) unlink */
+  void *raw;           /* what malloc returned; what free() must be given */
+  void *freelist;      /* this chunk's own free blocks, LIFO */
+  unsigned char *bump; /* first byte never yet carved */
+  unsigned char *lim;  /* one past the last usable byte */
+  uint32_t used;       /* blocks out; see above */
+  uint32_t stride;     /* this class's carve stride, bytes */
+  uint8_t blk;         /* the class, ScrCycHdr::blk */
+  /* 1 = scr_cyc_ar_refill can reach this chunk without searching, i.e. it
+   * is its class's current chunk OR it is on scr_cyc_ar_part[blk]. The two
+   * cases are conflated ON PURPOSE and it is worth four instructions per
+   * free: the return path has to ask "does this chunk need putting back
+   * where allocation will find it", and with a flag that meant only
+   * "listed" the answer for the CURRENT chunk — which is where most frees
+   * land — was no, but only after a second load of the class table to
+   * prove it. One byte answers it. */
+  uint8_t avail;
+};
+
+/* THE EMPTY CHUNK, and it is not a placeholder. Every class starts pointing
+ * at this one shared object whose free list is permanently NULL, so the hot
+ * path needs no "is there a chunk yet" test at all: the pop it already does
+ * fails on the free list and falls to the cold path, which is where a first
+ * chunk was going to come from anyway. mimalloc spends the same trick on
+ * the same problem (`_mi_page_empty`), for the same two instructions.
+ *
+ * `used` is 1 so that nothing can ever mistake it for a chunk that has
+ * emptied; nothing decrements it, because a block's chunk is computed from
+ * the block and no block lives here. */
+static ScrCycChunk scr_cyc_ar_empty = {NULL, NULL, NULL, NULL,
+                                       NULL, NULL, 1u,   0u,
+                                       0u,   0u};
+
+/* The class's CURRENT chunk — the one and only one the hot path looks at,
+ * the same shape as mimalloc's `pages_free_direct` slot. It is deliberately
+ * NEVER released while it is current: a class that empties completely keeps
+ * exactly one 64 KiB chunk as its cache, which is what stops an alternating
+ * one-block-live workload from malloc/free'ing a chunk per turn (mimalloc
+ * spends a retire counter on the same problem). The ceiling that buys is 32
+ * classes x 64 KiB = 2 MiB, and a real program has a handful of live
+ * classes, not 32. */
+#define SCR_CYC_AR_E4                                                     \
+  &scr_cyc_ar_empty, &scr_cyc_ar_empty, &scr_cyc_ar_empty, &scr_cyc_ar_empty
+static ScrCycChunk *scr_cyc_ar_cur[SCR_POOL_MAX / SCR_POOL_GRAIN + 1u] = {
+    SCR_CYC_AR_E4, SCR_CYC_AR_E4, SCR_CYC_AR_E4, SCR_CYC_AR_E4,
+    SCR_CYC_AR_E4, SCR_CYC_AR_E4, SCR_CYC_AR_E4, SCR_CYC_AR_E4,
+    &scr_cyc_ar_empty};
+_Static_assert(SCR_POOL_MAX / SCR_POOL_GRAIN + 1u == 33u,
+               "the empty-chunk initialiser above spells 33 slots by hand");
+/* The class's other chunks that still have capacity. A chunk that is
+ * neither current nor listed is FULL; the first free into it relinks it. */
+static ScrCycChunk *scr_cyc_ar_part[SCR_POOL_MAX / SCR_POOL_GRAIN + 1u];
+/* Chunk bytes this arena holds RIGHT NOW — the release path decrements it,
+ * so the budget below is a ceiling on residency and not on lifetime
+ * allocation. Only the budget reads it. */
 static size_t scr_cyc_ar_held = 0;
 
 static size_t scr_cyc_ar_budget(void) {
@@ -275,45 +418,203 @@ static int scr_cyc_arena_on(void) {
 #endif
 }
 
-/* NULL when the chunk could not be had; every caller falls back to calloc,
- * so a failure here is a slower program and not a broken one. */
-static void *scr_cyc_ar_take(size_t phys, uint8_t blk) {
-  void *b = scr_cyc_ar_free[blk];
-  size_t stride;
-  if (b != NULL) {
-    __builtin_memcpy(&scr_cyc_ar_free[blk], b, sizeof(void *));
-    SCR_CS_BUMP(arhit);
-    return b;
-  }
-  stride = (phys + 15u) & ~(size_t)15u;
-  if ((size_t)(scr_cyc_ar_lim - scr_cyc_ar_cur) < stride) {
-    unsigned char *c;
-    /* The ceiling. NULL here is not a failure: scr_cyc_alloc_miss falls
-     * back to calloc, and that block is stamped pad=0 and can be freed. */
-    size_t bud = scr_cyc_ar_budget();
-    if (bud != 0 && scr_cyc_ar_held + SCR_CYC_ARENA_CHUNK > bud) return NULL;
-    c = (unsigned char *)malloc(SCR_CYC_ARENA_CHUNK);
-    if (c == NULL) return NULL;
-    scr_cyc_ar_held += SCR_CYC_ARENA_CHUNK;
-    scr_cyc_ar_cur = c;
-    scr_cyc_ar_lim = c + SCR_CYC_ARENA_CHUNK;
-    SCR_CS_BUMP(archunk);
-  }
-  SCR_CS_BUMP(arcarve);
-  b = scr_cyc_ar_cur;
-  scr_cyc_ar_cur += stride;
-  return b;
+/* The map, and the only place it is spelled. Two instructions: mask the
+ * block down to its granule, subtract the granule count the header carries.
+ * Sound because the chunk base is 256-aligned, so the block's low 8 address
+ * bits ARE the low 8 bits of its offset from that base. */
+static inline ScrCycChunk *scr_cyc_ar_chunk(const ScrCycHdr *h) {
+  uintptr_t a = (uintptr_t)(const void *)h;
+  return (ScrCycChunk *)(void *)((a & ~(uintptr_t)(SCR_CYC_ARENA_GRAN - 1u)) -
+                                 (uintptr_t)h->pad * SCR_CYC_ARENA_GRAN);
 }
 
+/* THE MAP'S OWN TEST, and it is off in every shipping build. A chunk freed
+ * while a live block still points into it is a use-after-free that looks
+ * like random corruption a long way from here, so the one thing that must
+ * not be taken on trust is that `chunk = (block & ~255) - (pad << 8)` names
+ * the chunk the block was actually carved from. -DSCR_CYC_ARENA_VERIFY=1
+ * checks four things on EVERY free of a carved block:
+ *   the block lies inside the chunk's carve region;
+ *   it sits on the chunk's stride grid;
+ *   the chunk's class agrees with the block's own ScrCycHdr::blk;
+ *   the chunk still has a block out to account for (used != 0).
+ * Any of them failing is a trap with a name, not a corrupted heap two
+ * seconds later. Run the differential corpus with it on: it is the only
+ * lane that exercises the map over every allocation shape the compiler
+ * emits. */
+#ifndef SCR_CYC_ARENA_VERIFY
+#define SCR_CYC_ARENA_VERIFY 0
+#endif
+
+#if SCR_CYC_ARENA_VERIFY
+static void scr_cyc_ar_verify(const ScrCycChunk *c, const ScrCycHdr *h) {
+  const unsigned char *b = (const unsigned char *)(const void *)h;
+  const unsigned char *base = (const unsigned char *)(const void *)c;
+  size_t off;
+  if (b < base + SCR_CYC_ARENA_GRAN || b >= c->lim) {
+    scr_trap("scriptc: cycle arena verify: block outside its chunk\n");
+  }
+  off = (size_t)(b - (base + SCR_CYC_ARENA_GRAN));
+  if (c->stride == 0 || off % c->stride != 0) {
+    scr_trap("scriptc: cycle arena verify: block off the stride grid\n");
+  }
+  if (c->blk != h->blk) {
+    scr_trap("scriptc: cycle arena verify: chunk class does not match block\n");
+  }
+  if (c->used == 0) {
+    scr_trap("scriptc: cycle arena verify: free into a chunk with none out\n");
+  }
+}
+#else
+#define scr_cyc_ar_verify(c, h) ((void)0)
+#endif
+
+static void scr_cyc_ar_link(ScrCycChunk *c) {
+  ScrCycChunk **head = &scr_cyc_ar_part[c->blk];
+  c->next = *head;
+  c->prevp = head;
+  if (c->next != NULL) c->next->prevp = &c->next;
+  *head = c;
+  c->avail = 1;
+}
+
+/* Removes the chunk from its class's partial list. It does NOT touch
+ * `avail`, because the two callers mean opposite things by it: the refill
+ * unlinks a chunk in order to make it CURRENT, which is still available. */
+static void scr_cyc_ar_unlink(ScrCycChunk *c) {
+  *c->prevp = c->next;
+  if (c->next != NULL) c->next->prevp = c->prevp;
+  c->next = NULL;
+  c->prevp = NULL;
+}
+
+/* NULL when the chunk could not be had — a budget refusal or a real OOM.
+ * Every caller falls back to calloc, so a failure here is a slower program
+ * and not a broken one. */
+static ScrCycChunk *scr_cyc_ar_new(uint8_t blk, size_t stride) {
+  unsigned char *raw, *base;
+  ScrCycChunk *c;
+  size_t bud = scr_cyc_ar_budget();
+  if (bud != 0 && scr_cyc_ar_held + SCR_CYC_ARENA_CHUNK > bud) return NULL;
+  raw = (unsigned char *)malloc(SCR_CYC_ARENA_CHUNK);
+  if (raw == NULL) return NULL;
+  base = (unsigned char *)(void *)(((uintptr_t)(void *)raw +
+                                    (SCR_CYC_ARENA_GRAN - 1u)) &
+                                   ~(uintptr_t)(SCR_CYC_ARENA_GRAN - 1u));
+  c = (ScrCycChunk *)(void *)base;
+  c->next = NULL;
+  c->prevp = NULL;
+  c->raw = raw;
+  c->freelist = NULL;
+  c->bump = base + SCR_CYC_ARENA_GRAN;
+  c->lim = raw + SCR_CYC_ARENA_CHUNK;
+  c->used = 0;
+  c->stride = (uint32_t)stride;
+  c->blk = blk;
+  c->avail = 1; /* the caller makes it current the moment it returns */
+  scr_cyc_ar_held += SCR_CYC_ARENA_CHUNK;
+  SCR_CS_BUMP(archunk);
+  SCR_CS_MAX(arpeak, scr_cyc_ar_held / SCR_CYC_ARENA_CHUNK);
+  return c;
+}
+
+/* Only ever reached for a chunk that is NOT its class's current one, so
+ * `avail` here can only mean "on the partial list". */
+static void scr_cyc_ar_release(ScrCycChunk *c) {
+  if (c->avail) scr_cyc_ar_unlink(c);
+  scr_cyc_ar_held -= SCR_CYC_ARENA_CHUNK;
+  SCR_CS_BUMP(arfree);
+  free(c->raw);
+}
+
+/* THE HOT ARM, and the whole of it: the class's current chunk, one pop off
+ * its free list, one increment. Two dependent loads where the size-class
+ * pool had one (the chunk, then its list head) — mimalloc's fast path pays
+ * the same two for the same reason, and the cost is measured in the block
+ * above scr_cyc_alloc rather than asserted here. NULL means "the cold path
+ * has to do something", which is every case: no chunk, an empty list, or a
+ * size the arena does not serve. */
+static inline ScrCycHdr *scr_cyc_ar_pop(size_t phys) {
+  ScrCycChunk *c;
+  void *b;
+  if (phys > SCR_POOL_MAX) return NULL;
+  c = scr_cyc_ar_cur[phys / SCR_POOL_GRAIN]; /* never NULL; see the sentinel */
+  b = c->freelist;
+  if (b == NULL) return NULL;
+  __builtin_memcpy(&c->freelist, b, sizeof(void *));
+  c->used++;
+  SCR_CS_BUMP(arhit);
+  return (ScrCycHdr *)b;
+}
+
+/* The cold arm: the current chunk had nothing on its list, so carve, or
+ * promote a partial chunk, or take a new one. Returns a block whose `pad`
+ * is already correct — the carve stamps it, and a block off a free list
+ * never lost it. */
+static ScrCycHdr *scr_cyc_ar_refill(size_t phys, uint8_t blk) {
+  size_t stride = (phys + 15u) & ~(size_t)15u;
+  for (;;) {
+    ScrCycChunk *c = scr_cyc_ar_cur[blk];
+    void *b;
+    if (c == &scr_cyc_ar_empty) {
+      c = scr_cyc_ar_part[blk];
+      if (c != NULL) {
+        scr_cyc_ar_unlink(c); /* still available: it is about to be current */
+      } else {
+        c = scr_cyc_ar_new(blk, stride);
+        if (c == NULL) return NULL;
+      }
+      scr_cyc_ar_cur[blk] = c;
+    }
+    b = c->freelist;
+    if (b != NULL) {
+      __builtin_memcpy(&c->freelist, b, sizeof(void *));
+      c->used++;
+      SCR_CS_BUMP(arhit);
+      return (ScrCycHdr *)b;
+    }
+    if ((size_t)(c->lim - c->bump) >= (size_t)c->stride) {
+      ScrCycHdr *h = (ScrCycHdr *)(void *)c->bump;
+      c->bump += c->stride;
+      c->used++;
+      SCR_CS_BUMP(arcarve);
+      /* The map, stamped once per block for the life of the block: the
+       * offset from the chunk base in 256-byte granules, 1..255. */
+      h->pad = (uint8_t)(((uintptr_t)(void *)h - (uintptr_t)(void *)c) /
+                         SCR_CYC_ARENA_GRAN);
+      return h;
+    }
+    /* Exhausted: no free block and no room to carve another. It stops being
+     * the current chunk and goes on NO list — it is full, so there is
+     * nothing to allocate from it. The first free INTO it relinks it. */
+    c->avail = 0;
+    scr_cyc_ar_cur[blk] = &scr_cyc_ar_empty;
+  }
+}
+
+/* The return path. Push onto the chunk's own list, drop the count, and — if
+ * that emptied a chunk that is not its class's cache — hand the 64 KiB back
+ * to the allocator. */
 static void scr_cyc_ar_give(ScrCycHdr *h) {
+  ScrCycChunk *c = scr_cyc_ar_chunk(h);
   SCR_CS_BUMP(argive);
-  __builtin_memcpy(h, &scr_cyc_ar_free[h->blk], sizeof(void *));
-  scr_cyc_ar_free[h->blk] = h;
+  scr_cyc_ar_verify(c, h);
+  __builtin_memcpy(h, &c->freelist, sizeof(void *));
+  c->freelist = h;
+  if (--c->used == 0) {
+    if (scr_cyc_ar_cur[c->blk] != c) scr_cyc_ar_release(c);
+    return;
+  }
+  /* It was full — neither current nor listed — and now it has capacity
+   * again, so put it where scr_cyc_ar_refill will find it. `avail` is what
+   * makes this ONE byte-test on the path every free takes; see its
+   * declaration. */
+  if (!c->avail) scr_cyc_ar_link(c);
 }
 
-/* The pool miss, and DELIBERATELY the whole of it: the calloc, the stamp,
- * the counter and the return. On closure-churn this runs 5 times in
- * 800,031.
+/* The miss, and DELIBERATELY the whole of it: the refill, the pool, the
+ * calloc, the stamp, the counter and the return. On closure-churn the
+ * fast arm above answers 800,026 of 800,031 calls.
  *
  * Both halves of that are load-bearing and both were measured. `noinline`
  * alone is not enough - with only the calloc out of line, clang still
@@ -323,32 +624,48 @@ static void scr_cyc_ar_give(ScrCycHdr *h) {
  * Taking the SAME three arguments this function does makes the miss a
  * TAIL call, so the hot path holds nothing across anything and needs no
  * frame at all. `phys` is recomputed here rather than passed for the same
- * reason - a fourth argument would be a register shuffle in the caller. */
+ * reason - a fourth argument would be a register shuffle in the caller.
+ *
+ * THE THREE SOURCES ARE TRIED IN THE ORDER THAT OWNS THE BLOCK. The arena
+ * first, because a carved block is the only kind whose chunk can be given
+ * back. The size-class pool second: it is unreachable for a carved size
+ * while the arena is on (scr_cyc_free routes those away from it before it
+ * can ever be offered one), so on the shipping arm this is the recycler
+ * for the >SCR_POOL_MAX sizes only — but it is the WHOLE recycler under
+ * SCR_CYCLE_ARENA=0 and under SCR_RC_AUDIT, which is why it stays. calloc
+ * last.
+ *
+ * `pad` IS NOT WRITTEN HERE and that is the invariant, not an omission.
+ * A carved block already carries its chunk offset (scr_cyc_ar_refill
+ * stamped it, and neither the pool nor the arena's free list touches byte
+ * 10 of a block), a calloc'd block was zeroed by calloc, and a pooled
+ * block was calloc'd once and has been 0 ever since. Zeroing the payload
+ * rather than the whole block is what keeps that true — a memset over the
+ * header would send a carved block to free(). */
 static __attribute__((noinline)) void *scr_cyc_alloc_miss(size_t size,
                                                           ScrTraceFn trace,
                                                           ScrCycFreeFn free_fn) {
   size_t phys = scr_pool_bytes(sizeof(ScrCycHdr) + size);
   uint8_t blk = phys <= SCR_POOL_MAX ? (uint8_t)(phys / SCR_POOL_GRAIN) : 0u;
   ScrCycHdr *h = NULL;
-  uint8_t arena = 0;
-  if (blk != 0 && scr_cyc_arena_on()) {
-    h = (ScrCycHdr *)scr_cyc_ar_take(phys, blk);
-    if (h != NULL) {
-      arena = 1;
-      memset(h, 0, phys); /* the carve is not zeroed; calloc's contract, kept */
-    }
-  }
+  if (blk != 0 && scr_cyc_arena_on()) h = scr_cyc_ar_refill(phys, blk);
+  if (h == NULL) h = (ScrCycHdr *)scr_pool_take(&scr_cyc_blocks, phys);
   if (h == NULL) {
     SCR_CS_BUMP(arcalloc);
     h = calloc(1, phys);
     if (h == NULL) scr_cyc_oom();
-    /* calloc zeroed the whole block, `buffered` and `buf_index` included. */
+    /* calloc zeroed the whole block, `pad` included: provenance 0, which
+     * is what sends it to free() rather than to a chunk. */
   }
   scr_cyc_stamp(h, trace, free_fn, blk);
-  h->pad = arena; /* provenance: 1 = carved, must never reach free() */
+  h->buffered = 0;
+  h->buf_index = 0;
   scr_cyc_live++; /* the pacing denominator; see below */
   SCR_CYCEN_NOTE_ALLOC(h, phys, size, free_fn, 0);
-  return h + 1;
+  /* calloc's contract, kept, and only over the payload; see the note in
+   * scr_cyc_alloc for why the header is stamped rather than zeroed. */
+  return memset((unsigned char *)h + sizeof(ScrCycHdr), 0,
+                phys - sizeof(ScrCycHdr));
 }
 
 /* WHERE THE 60 INSTRUCTIONS WENT, and where the 33 go now. Read off the
@@ -402,20 +719,64 @@ static __attribute__((noinline)) void *scr_cyc_alloc_miss(size_t size,
  * arithmetic and stores on the object; there is no dispatch, no boxing and
  * no tagged round-trip in this function at all.
  *
+ * WHAT THE RECLAIMING ARENA COSTS THIS FUNCTION, counted the same way -
+ * `zig cc -target x86_64-linux-gnu -O2 -S`, the TAKEN path from the entry
+ * to the `jmp memset`, both trees compiled in the same session with the
+ * same toolchain:
+ *
+ *                                   pool arm  chunk arm
+ *   the range check                     3         2
+ *   the class lookup and the pop        7        10
+ *   everything else                    22        22
+ *   SELF, taken path                   32        34  <- before the sentinel
+ *                                      32        32  <- shipped
+ *
+ * TWO OF THE THREE EXTRA INSTRUCTIONS WERE THE "IS THERE A CHUNK YET"
+ * TEST, and the empty-chunk sentinel deletes both, which is exactly why
+ * mimalloc has one. The third is paid back by the range check: the pool
+ * needed `phys != 0 && phys <= MAX` (3), the chunk table needs only
+ * `phys <= MAX` (2), because sizeof(ScrCycHdr) already makes phys
+ * non-zero. So the SHIPPED count is 32 against 32 - identical.
+ *
+ * The instruction count is not the whole cost and this note will not
+ * pretend it is. THE REAL DIFFERENCE IS ONE MORE DEPENDENT LOAD: the pool
+ * chased `head[c]` then the block, the arena chases `cur[c]`, then the
+ * chunk's free-list head, then the block. The chunk header is one cache
+ * line per LIVE size class and a program has a handful of those, so it
+ * stays resident; mimalloc's fast path is this same three-load chain.
+ *
+ * scr_cyc_free is the other half and it came out AHEAD: 21 instructions
+ * on the taken path against the pool's 22, because the block->chunk map
+ * (mask, shift, subtract) plus `used--` is cheaper than the pool's range
+ * check plus its byte-budget comparison and store.
+ *
+ * WALL CLOCK, because instruction counts are not time. An allocation-heavy
+ * cycle-churn program (a 60k-node spike four times over, then 600k rounds
+ * of small-graph churn, ~8.5M cycle frees) built from both trees, 12
+ * interleaved reps, first 3 discarded, medians: +1.86%, against an A/A
+ * floor measured the same way on the same host of +2.61%. Inside the
+ * floor. This is a Windows host and the binaries differ in layout, which
+ * is the confound an A/A floor exists to bound - it does not license
+ * reading +1.86% as a real number, only as "not distinguishable here".
+ *
  * Zeroed allocation with a cycle header in front; returns the OBJECT
  * pointer (header at scr_cyc_hdr). Aborts on OOM. */
 void *scr_cyc_alloc(size_t size, ScrTraceFn trace, ScrCycFreeFn free_fn) {
   size_t phys = scr_pool_bytes(sizeof(ScrCycHdr) + size);
-  ScrCycHdr *h = scr_pool_take(&scr_cyc_blocks, phys);
+  ScrCycHdr *h = scr_cyc_ar_pop(phys);
   if (h == NULL) return scr_cyc_alloc_miss(size, trace, free_fn);
-  /* The pooled arm. scr_pool_take only returns a block whose physical size
+  /* The carved arm. scr_cyc_ar_pop only returns a block whose physical size
    * is in range, so `blk` needs no test, and `phys / SCR_POOL_GRAIN` is the
-   * class index it just computed. */
+   * class index it just computed. The block's `pad` — its offset from the
+   * chunk that owns it — was stamped at the carve and is NOT rewritten
+   * here: a block never migrates between chunks or classes, which is the
+   * same invariant the size-class pool relies on, for the same reason. */
 #if SCR_CYC_ZERO_WHOLE
   {
     /* `pad` is the block's PROVENANCE and outlives one use of the block:
-     * wiping it would send a carved block to free(). The default arm never
-     * touches it, so it only has to be saved here. */
+     * wiping it would send a carved block to free() and lose the chunk it
+     * has to be counted against. The default arm never touches it, so it
+     * only has to be saved here. */
     uint8_t prov = h->pad;
     memset(h, 0, phys);
     h->pad = prov;
@@ -446,9 +807,23 @@ void *scr_cyc_alloc(size_t size, ScrTraceFn trace, ScrCycFreeFn free_fn) {
 #endif
 }
 
+/* THE ROUTE IS DECIDED BY PROVENANCE, AND THAT ORDER IS THE DESIGN. A
+ * carved block goes to the chunk that owns it and nowhere else: not to
+ * free(), which would corrupt the chunk, and not to the size-class pool,
+ * which would park it where the chunk's live count could never fall to
+ * zero. Everything else — the >SCR_POOL_MAX sizes, the calloc fallback,
+ * and every block in an SCR_CYCLE_ARENA=0 or SCR_RC_AUDIT process — is
+ * offered to the pool and then to free(), exactly as before. */
 void scr_cyc_free(void *obj) {
   scr_cyc_live--;
   ScrCycHdr *h = scr_cyc_hdr(obj);
+  if (h->pad != 0) {
+#ifdef SCR_CYCEN_ON
+    scr_cycen_note_free(h, 1, scr_cyc_live);
+#endif
+    scr_cyc_ar_give(h);
+    return;
+  }
   if (h->blk != 0 &&
       scr_pool_give(&scr_cyc_blocks, h, (size_t)h->blk * SCR_POOL_GRAIN)) {
 #ifdef SCR_CYCEN_ON
@@ -459,12 +834,6 @@ void scr_cyc_free(void *obj) {
 #ifdef SCR_CYCEN_ON
   scr_cycen_note_free(h, 0, scr_cyc_live);
 #endif
-  /* A carved block is not a CRT block. The pool's byte budget can reject a
-   * give, so this is where the rejected ones go — never free(). */
-  if (h->pad) {
-    scr_cyc_ar_give(h);
-    return;
-  }
   free(h);
 }
 
