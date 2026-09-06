@@ -378,7 +378,11 @@ export const STR_METHODS: Record<
   // spec routes both through StringIndexOf) — the emitter composes
   // scr_str_index_of(...) != -1 for the two-argument form.
   includes: { method: "includes", result: BOOL, minArgs: 1, maxArgs: 2 },
-  startsWith: { method: "startsWith", result: BOOL, minArgs: 1, maxArgs: 1 },
+  // startsWith takes a POSITION, and it is a UTF-16 index rather than a
+  // byte offset -- scr_str_starts_with_at clamps and converts it exactly
+  // the way scr_str_index_of does, so `s.startsWith(n, p)` and
+  // `s.indexOf(n, p) === p` cannot disagree.
+  startsWith: { method: "startsWith", result: BOOL, minArgs: 1, maxArgs: 2 },
   endsWith: { method: "endsWith", result: BOOL, minArgs: 1, maxArgs: 1 },
   slice: { method: "slice", result: STRING, minArgs: 0, maxArgs: 2 },
   // substring: slice's clamp-and-swap sibling (negatives clamp to 0

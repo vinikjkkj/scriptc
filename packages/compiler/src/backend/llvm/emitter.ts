@@ -10678,6 +10678,15 @@ class LlEmitter {
         return call("scr_str_includes", "zeroext i1 (ptr, ptr)", `ptr ${r.name}, ptr ${args[0]!.name}`, "i1", false);
       }
       case "startsWith":
+        if (args[1]) {
+          return call(
+            "scr_str_starts_with_at",
+            "zeroext i1 (ptr, ptr, double)",
+            `ptr ${r.name}, ptr ${args[0]!.name}, double ${args[1].name}`,
+            "i1",
+            false,
+          );
+        }
         return call("scr_str_starts_with", "zeroext i1 (ptr, ptr)", `ptr ${r.name}, ptr ${args[0]!.name}`, "i1", false);
       case "endsWith":
         return call("scr_str_ends_with", "zeroext i1 (ptr, ptr)", `ptr ${r.name}, ptr ${args[0]!.name}`, "i1", false);
@@ -11047,6 +11056,12 @@ class LlEmitter {
     // Empty map: the runtime stores the value kind's RC entry points as
     // function pointers (scalar values pass nulls); the trace argument
     // doubles as the cycle-capability flag — exactly the C mapNew.
+    // WeakMap has no LLVM lowering yet: the C emitter grew it first (it is
+    // where scr_weak.c is wired), and a WeakMap program therefore takes the
+    // documented demotion to the C backend rather than a wrong answer. This
+    // is a REFUSAL, not a bug -- LlvmUnsupportedError is what selects the
+    // fallback and prints the one-line lane note.
+    if (e.type.kind === "weakmap") throw new LlvmUnsupportedError("weakmap:new");
     if (e.type.kind !== "map") throw new Error("llvm emitter bug: mapNew of non-map type");
     const B = this.B;
     const value = e.type.value;
@@ -11093,6 +11108,7 @@ class LlEmitter {
   private emitMapIntrinsic(e: IrExpr & { kind: "mapIntrinsic" }): LlValue {
     const B = this.B;
     const r = this.emitExpr(e.receiver);
+    if (e.receiver.type.kind === "weakmap") throw new LlvmUnsupportedError("weakmap:intrinsic");
     if (e.receiver.type.kind !== "map") throw new Error("llvm emitter bug: mapIntrinsic on non-map");
     const { key, value } = e.receiver.type;
     const kAcc = mapKeyAccess(key);
@@ -11581,6 +11597,16 @@ class LlEmitter {
         B.line(`${t} = fcmp one double ${idx.name}, ${f64Lit(-1)}`);
         return { name: t, type: e.type };
       }
+      case "copyWithin":
+        // Overlapping in-place move (memmove); slice-style index defaults,
+        // never throws; the receiver comes back +1.
+        return call(
+          "scr_bytes_copy_within",
+          "ptr (ptr, double, double, double)",
+          `ptr ${r.name}, double ${args[0]!.name}, double ${args[1]?.name ?? f64Lit(0)}, double ${args[2]?.name ?? F64_INF}`,
+          true,
+          false,
+        );
       case "fillElem":
         // Per-element TypedArray fill (non-u8): slice-style index
         // defaults, never throws; the receiver comes back +1.

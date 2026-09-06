@@ -29,6 +29,11 @@ export function cType(t: IrType): string {
       // Sets ARE the map runtime with the value slot unused (SCR_MAP_VAL_F64
       // storing a constant 0) — one struct, one RC family, one allocator.
       return "ScrMap *";
+    // A WeakMap is NOT the map runtime with a flag: it does not retain its
+    // keys and it is spliced by the key's own free path, so it is its own
+    // struct and its own RC family (scr_weak.c).
+    case "weakmap":
+      return "ScrWeakMap *";
     case "regex":
       return "ScrRegex *";
     case "bigint":
@@ -178,6 +183,8 @@ export function retainCallC(type: IrType, expr: string): string {
     case "map":
     case "set":
       return `scr_map_retain(${expr})`;
+    case "weakmap":
+      return `scr_weak_retain(${expr})`;
     case "regex":
       return `scr_regex_retain(${expr})`;
     case "bigint":
@@ -293,6 +300,8 @@ export function releaseCallC(type: IrType, expr: string): string {
     case "map":
     case "set":
       return `scr_map_release(${expr})`;
+    case "weakmap":
+      return `scr_weak_release(${expr})`;
     case "regex":
       return `scr_regex_release(${expr})`;
     case "bigint":
@@ -416,6 +425,10 @@ export function boxKindC(t: IrType): string {
     case "union":
     case "map":
     case "set":
+    // Boxable: the weak table is an ordinary refcounted pointer from the
+    // box's point of view (scr_weak_retain_v/release_v), and boxing does
+    // not change how its KEYS are held.
+    case "weakmap":
     case "regex":
     case "bigint":
     case "keyobj":
@@ -532,6 +545,13 @@ export function rcAdapters(t: IrType): RcAdapters | null {
     case "map":
     case "set":
       return rt("scr_map_retain_v", "scr_map_release_v");
+    // No trace, deliberately. A WeakMap holds its keys weakly (so the
+    // collector must not see them) and its values strongly but
+    // opaquely. Tracing the values would be the first half of
+    // ephemeron support and the wrong half on its own: it would keep a
+    // value alive past its key. See the head of scr_weak.c.
+    case "weakmap":
+      return rt("scr_weak_retain_v", "scr_weak_release_v");
     case "regex":
       return rt("scr_regex_retain_v", "scr_regex_release_v");
     case "bigint":
@@ -811,6 +831,10 @@ export function elemKindC(elem: IrType): string {
     case "caught":
     case "generator":
     case "asyncGenerator":
+    // WeakMap has no ScrArr element representation: mapTypeInner never
+    // produces one, so `WeakMap[]` is refused in the frontend and this
+    // arm is unreachable by construction, exactly like the others here.
+    case "weakmap":
     case "undefinedT":
     case "nullT":
       // (promise, http2Session, http2Stream and abortSignal were listed

@@ -838,6 +838,12 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             }
             return E.newTemp(e.type, `scr_str_includes(${r.name}, ${args[0]!.name})`);
           case "startsWith":
+            if (args[1]) {
+              return E.newTemp(
+                e.type,
+                `scr_str_starts_with_at(${r.name}, ${args[0]!.name}, ${args[1].name})`,
+              );
+            }
             return E.newTemp(e.type, `scr_str_starts_with(${r.name}, ${args[0]!.name})`);
           case "endsWith":
             return E.newTemp(e.type, `scr_str_ends_with(${r.name}, ${args[0]!.name})`);
@@ -1453,6 +1459,13 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             E.emitPendingCheck();
             return t;
           }
+          case "copyWithin":
+            // Overlapping in-place move; slice-style index defaults (end
+            // omitted is INFINITY, which clamps to the length); receiver +1.
+            return E.newTemp(
+              e.type,
+              `scr_bytes_copy_within(${r.name}, ${args[0]!.name}, ${args[1]?.name ?? "0"}, ${args[2]?.name ?? "INFINITY"})`,
+            );
           case "fillElem":
             // Per-element TypedArray fill (non-u8): slice-style index
             // defaults, never throws; the receiver comes back +1.
@@ -1579,6 +1592,46 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
         }
       }
       case "mapNew": {
+        // A WeakMap rides the same IR node (identical shape: a construction
+        // with a key/value type and no seed) but a DIFFERENT runtime. It is
+        // not scr_map with a flag -- it does not retain keys, and it is
+        // spliced by the key's own free path. Only the VALUE adapters cross
+        // over, because only values are held.
+        if (e.type.kind === "weakmap") {
+          if ((e.seed?.length ?? 0) !== 0) {
+            throw new Error("emitter bug: seeded WeakMap construction");
+          }
+          const wvNew = e.type.value;
+          const wrcNew = isRefCounted(wvNew) ? vAdapters(wvNew) : null;
+          // The key's own stamp. Per-kind because each writes a field only
+          // that type has; picking wrong is a stray store, not a bad answer.
+          const wkNew = e.type.key;
+          let wMark: string;
+          if (wkNew.kind === "bytes") {
+            wMark = "&scr_bytes_weak_mark";
+          } else if (wkNew.kind === "array") {
+            // THE BOUNDARY, re-checked against the REAL fixpoint. The
+            // frontend predicate under-approximates tracedness from the type
+            // alone (isNeverTracedElem); here the module-level answer is
+            // available, so the two are made to agree. A traced array reaching
+            // this point would be a weak key whose collector death nothing
+            // observes -- a wrong answer rather than a leak -- so it is an
+            // emitter bug and not a silent demotion.
+            if (E.traceAdapterC(wkNew.elem) !== null) {
+              throw new Error(
+                "emitter bug: WeakMap key is a TRACED array — its death can come " +
+                  "from the collector, which scr_arr_release never sees (phase 3)",
+              );
+            }
+            wMark = "&scr_arr_weak_mark";
+          } else {
+            throw new Error(`emitter bug: WeakMap key kind ${wkNew.kind} has no stamp`);
+          }
+          return E.newTemp(
+            e.type,
+            `scr_weak_new(${wrcNew ? `&${wrcNew.retain}` : "NULL"}, ${wrcNew ? `&${wrcNew.release}` : "NULL"}, ${wMark})`,
+          );
+        }
         // Empty map: the runtime stores the value kind's RC entry points as
         // function pointers (scalar values pass NULLs). The trace argument
         // doubles as the cycle-capability flag: non-NULL exactly when the
@@ -1615,6 +1668,66 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
       }
       case "mapIntrinsic": {
         const r = E.emitExpr(e.receiver);
+        if (e.receiver.type.kind === "weakmap") {
+          // get/set/has ONLY -- the surface zapo-js 1.8.2 uses, and the only
+          // surface a weak table can answer honestly. Deliberately no size,
+          // no clear and no iteration: entries vanish when their keys die,
+          // so a count or an enumeration would be a number the program
+          // cannot reason about. JS does not offer them either.
+          const wv = e.receiver.type.value;
+          if (elemAccess(wv) !== "ref") {
+            // Scalar-valued weak maps are frontend-refused: a scalar has no
+            // pointer for the table to hold.
+            throw new Error("emitter bug: scalar-valued WeakMap reached the emitter");
+          }
+          switch (e.method) {
+            case "get": {
+              const wk = E.emitExpr(e.args[0]!);
+              if (e.type.kind !== "union") {
+                throw new Error("emitter bug: WeakMap get result is not a union");
+              }
+              const wdef = E.unionsById.get(e.type.unionId);
+              const wUndefTag = E.undefinedArmTag(e.type);
+              if (!wdef || wUndefTag < 0) {
+                throw new Error("emitter bug: WeakMap get union lacks its undefined arm");
+              }
+              const wAbsent = E.unitInstanceRef(e.type.unionId, wUndefTag);
+              if (wv.kind === "union") {
+                const wt = E.newTemp(e.type, `(ScrUnion *)scr_weak_get_ref(${r.name}, ${wk.name})`);
+                E.line(`if (!${wt.name}) ${wt.name} = ${wAbsent};`);
+                return wt;
+              }
+              const wTag = wdef.arms.findIndex((a) => typeEquals(a, wv));
+              if (wTag < 0) throw new Error("emitter bug: WeakMap get union lacks its value arm");
+              const wrc = vAdapters(wv);
+              const wval = E.newTemp(wv, `(${cType(wv).trim()})scr_weak_get_ref(${r.name}, ${wk.name})`);
+              E.moveTemp(wval); // +1 on a hit, moves into the box; NULL on a miss
+              const wPresent =
+                `scr_union_new_ref(${wTag}, ${wval.name}, &${wrc.retain}, &${wrc.release}, ` +
+                `${E.traceArgC(wv)})`;
+              return E.newTemp(e.type, `${wval.name} ? ${wPresent} : ${wAbsent}`);
+            }
+            case "set": {
+              // Key BORROWED and never retained -- that is the whole point.
+              // The value moves in exactly as it does for a map.
+              const wk = E.emitExpr(e.args[0]!);
+              const wval = E.emitExpr(e.args[1]!);
+              // NO moveTemp, unlike scr_map_set_*_ref. scr_weak_set takes the
+              // value BORROWED and retains its own reference, so the caller's
+              // temp is released normally. Moving it in as well would double
+              // count -- the RC audit caught exactly that on corpus 7782 as
+              // 43 live objects at exit.
+              E.line(`scr_weak_set(${r.name}, ${wk.name}, ${wval.name});${E.srcComment(e.loc)}`);
+              return { name: "", type: e.type };
+            }
+            case "has": {
+              const wk = E.emitExpr(e.args[0]!);
+              return E.newTemp(e.type, `scr_weak_has(${r.name}, ${wk.name})`);
+            }
+            default:
+              throw new Error(`emitter bug: WeakMap.${e.method} reached the emitter`);
+          }
+        }
         if (e.receiver.type.kind !== "map") throw new Error("emitter bug: mapIntrinsic on non-map");
         const { key, value } = e.receiver.type;
         const kAcc = mapKeyAccess(key);

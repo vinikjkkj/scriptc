@@ -1268,6 +1268,33 @@ bool scr_str_starts_with(ScrStr *s, ScrStr *needle) {
          memcmp(s->data, needle->data, needle->len) == 0;
 }
 
+/* startsWith WITH a position. The argument is a UTF-16 index, not a byte
+ * offset, so this clamps and converts exactly the way scr_str_index_of
+ * does rather than indexing s->data directly -- the two must agree, because
+ * `startsWith(n, p)` and `indexOf(n, p) == p` are the same question and a
+ * program can ask it both ways. */
+bool scr_str_starts_with_at(ScrStr *s, ScrStr *needle, double position) {
+  double pos = scr_to_integer_or_infinity(position);
+  ScrSidx *e = scr_sidx(s);
+  size_t len16 = scr_sidx_len(s, e);
+  size_t start16 = pos <= 0               ? 0
+                   : pos >= (double)len16 ? len16
+                                          : (size_t)pos;
+  bool mid;
+  size_t start_b;
+  /* Per spec the EMPTY needle matches at any clamped position, including a
+   * position between the halves of an astral pair -- and including one past
+   * the end, which is why the clamp happens first. `"abc".startsWith("", 5)`
+   * is true in Node. */
+  if (needle->len == 0) return true;
+  start_b = scr_u16_to_byte_c(s, e, start16, &mid);
+  /* Needles are well-formed, so a match cannot begin on a low-surrogate
+   * half -- the same reasoning scr_str_index_of states at its own `mid`. */
+  if (mid) return false;
+  if (needle->len > s->len - start_b) return false;
+  return memcmp(s->data + start_b, needle->data, needle->len) == 0;
+}
+
 bool scr_str_ends_with(ScrStr *s, ScrStr *needle) {
   return needle->len <= s->len &&
          memcmp(s->data + (s->len - needle->len), needle->data,

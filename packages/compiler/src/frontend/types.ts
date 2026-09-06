@@ -1,6 +1,6 @@
 import * as ts from "./ts7/adapter.js";
 import type { IrBuiltinRendering, IrRecordShape, IrType, IrUnionDef } from "../ir/nodes.js";
-import { BYTES_ELEM_NAMES, ABORTCONTROLLER_T, ABORTSIGNAL_T, BIGINT, HEADERS_T, REQUEST_T, REQUESTINIT_T, RESPONSE_T, arrayOf, BOOL, bytesOf, canConvertToDyn, CHILD_T, DYN, F64, funcOf, isSupportedIndexValue, isSupportedMapKey, isSupportedMapValue, isSupportedSetElem, isUnitType, JSVAL, mapOf, NULL_T, PROCSTREAM_T, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, setOf, STRING, SYMBOL_T, typeEquals, typeKey, UNDEFINED_T, unionFuncSetArmsOk, VOID } from "../ir/nodes.js";
+import { BYTES_ELEM_NAMES, ABORTCONTROLLER_T, ABORTSIGNAL_T, BIGINT, HEADERS_T, REQUEST_T, REQUESTINIT_T, RESPONSE_T, arrayOf, BOOL, bytesOf, canConvertToDyn, CHILD_T, DYN, F64, funcOf, isRefCounted, isSupportedIndexValue, isSupportedMapKey, isSupportedMapValue, isSupportedSetElem, isSupportedWeakKey, isUnitType, JSVAL, mapOf, weakMapOf, NULL_T, PROCSTREAM_T, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, setOf, STRING, SYMBOL_T, typeEquals, typeKey, UNDEFINED_T, unionFuncSetArmsOk, VOID } from "../ir/nodes.js";
 
 import { isJsSourceFile } from "./program.js";
 import { isSqliteTypesPath } from "./shared.js";
@@ -878,6 +878,8 @@ function formatIrTypeInner(t: IrType, shapes: ShapeRegistry, unions: UnionRegist
       return "RTCPeerConnection";
     case "rtcDataChannel":
       return "RTCDataChannel";
+    case "weakmap":
+      return `WeakMap<${formatIrType(t.key, shapes, unions, seen)}, ${formatIrType(t.value, shapes, unions, seen)}>`;
     case "promise":
       return `Promise<${formatIrType(t.inner, shapes, unions, seen)}>`;
     case "generator":
@@ -2893,12 +2895,44 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
   // readonly-ness is a checker-only view (no mutating members on the
   // interface), so both map to the identical IR kinds and the read-side
   // method lowerings (.has/.get/.size/iteration) dispatch unchanged.
-  // WeakMap rides the ordinary identity-keyed Map. The two differ only in
-  // whether an entry keeps its key ALIVE, and a compiled program cannot
-  // observe that difference: there is no finalizer, no WeakRef surface, and
-  // WeakMap has no iteration by design. What changes is MEMORY — entries are
-  // retained until the map dies rather than until the key does. A documented
-  // divergence in footprint, not in behaviour.
+  // A WeakMap whose key kind the runtime can watch dying gets REAL weak
+  // semantics (ScrWeakMap, scr_weak.c): the table does not retain the key,
+  // and the entry is removed inside the key's own free path.
+  //
+  // isSupportedWeakKey is the fence, and it is narrower than "has identity"
+  // on purpose. It admits only kinds whose death passes through a refcount
+  // chokepoint this runtime owns — today `bytes`, whose scr_bytes_release is
+  // a plain `--rc == 0` free. Cycle-allocated kinds (arrays, records, class
+  // instances) can also be reclaimed by the collector's collectWhite, which
+  // no release-side hook observes; giving them a weak table without that
+  // hook would leave dead keys in an ADDRESS-keyed table, and a recycled
+  // address would then read the dead key's value. That is a wrong answer,
+  // so they keep the strong ride below until the collector hook lands.
+  if (isStdlibInterface("WeakMap")) {
+    const wargs = checker.getTypeArguments(widened as ts.TypeReference);
+    if (wargs.length === 2) {
+      const wkey = mapType(wargs[0]!, ctx);
+      const wval = mapType(wargs[1]!, ctx);
+      if (wkey && isSupportedWeakKey(wkey) && wval && isSupportedMapValue(wval) && isRefCounted(wval)) {
+        return weakMapOf(wkey, wval);
+      }
+    }
+  }
+  // KNOWN LIVE DEFECT, and it predates this change rather than being
+  // introduced by it. A WeakMap whose key is a CLASS INSTANCE or a RECORD
+  // still rides the ordinary identity-keyed Map, which RETAINS its keys —
+  // so such a WeakMap leaks exactly the objects it exists to release, for
+  // the whole life of the map. It compiles, and it behaves correctly in
+  // every observable way except memory, which is why nothing has caught it.
+  //
+  // The previous comment here called that "a documented divergence in
+  // footprint, not in behaviour" on the grounds that a compiled program
+  // cannot observe collection. That reasoning is why the defect survived:
+  // for a cache keyed by a long-lived object the divergence is unbounded
+  // growth, and "cannot observe it" is not the same as "it does not
+  // matter". These keys are cycle-allocated, so fixing them needs the
+  // collector hook named above — they are NOT fixed here, and this note
+  // stands until they are.
   if (
     isStdlibInterface("Map") ||
     isStdlibInterface("ReadonlyMap") ||

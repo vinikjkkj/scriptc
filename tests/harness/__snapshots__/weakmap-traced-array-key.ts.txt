@@ -1,0 +1,80 @@
+weakmap-traced-array-key.ts:24:7 - error SC2020: 'WeakMap<Rec[], string>' is part of the standard library types but has no scriptc lowering yet
+
+  23 | // 1. Array of RECORDS: records carry a cycle header, so the array is traced.
+  24 | const recordKeyed = new WeakMap<Rec[], string>();
+     |       ^~~~~~~~~~~
+  25 | 
+
+  hint: the type checker sees the full standard library, but only the supported surface compiles (https://scriptc.dev/limitations)
+
+weakmap-traced-array-key.ts:24:21 - error SC2020: 'new WeakMap' is part of the standard library types but has no scriptc lowering yet
+
+  23 | // 1. Array of RECORDS: records carry a cycle header, so the array is traced.
+  24 | const recordKeyed = new WeakMap<Rec[], string>();
+     |                     ^~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  25 | 
+
+  hint: WeakMap is supported, but only for keys whose death this runtime observes at a single refcount chokepoint it owns — Uint8Array, and arrays of strings/numbers/booleans/byte-arrays. A record, a class instance, a bare 'object' or an array of those is a cycle-collected value that can be reclaimed without passing through a release, so its entry could outlive it; because keys are matched by ADDRESS and the allocator reuses addresses, that would return a dead key's value rather than merely leak, and it is refused instead. Values must be a reference type (a scalar has no pointer for the table to hold). A strong Map accepts those keys today, but it RETAINS them — for a cache keyed on a long-lived object that is unbounded growth
+
+weakmap-traced-array-key.ts:28:7 - error SC2020: 'WeakMap<string[][], string>' is part of the standard library types but has no scriptc lowering yet
+
+  27 | //    the outer one is refused rather than guessed at.
+  28 | const nestedKeyed = new WeakMap<string[][], string>();
+     |       ^~~~~~~~~~~
+  29 | 
+
+  hint: the type checker sees the full standard library, but only the supported surface compiles (https://scriptc.dev/limitations)
+
+weakmap-traced-array-key.ts:28:21 - error SC2020: 'new WeakMap' is part of the standard library types but has no scriptc lowering yet
+
+  27 | //    the outer one is refused rather than guessed at.
+  28 | const nestedKeyed = new WeakMap<string[][], string>();
+     |                     ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  29 | 
+
+  hint: WeakMap is supported, but only for keys whose death this runtime observes at a single refcount chokepoint it owns — Uint8Array, and arrays of strings/numbers/booleans/byte-arrays. A record, a class instance, a bare 'object' or an array of those is a cycle-collected value that can be reclaimed without passing through a release, so its entry could outlive it; because keys are matched by ADDRESS and the allocator reuses addresses, that would return a dead key's value rather than merely leak, and it is refused instead. Values must be a reference type (a scalar has no pointer for the table to hold). A strong Map accepts those keys today, but it RETAINS them — for a cache keyed on a long-lived object that is unbounded growth
+
+weakmap-traced-array-key.ts:31:7 - error SC2020: 'WeakMap<object, number>' is part of the standard library types but has no scriptc lowering yet
+
+  30 | // 3. Bare `object` — phase 3, still waiting on the collector hook.
+  31 | const objectKeyed = new WeakMap<object, number>();
+     |       ^~~~~~~~~~~
+  32 | 
+
+  hint: the type checker sees the full standard library, but only the supported surface compiles (https://scriptc.dev/limitations)
+
+weakmap-traced-array-key.ts:31:21 - error SC2020: 'new WeakMap' is part of the standard library types but has no scriptc lowering yet
+
+  30 | // 3. Bare `object` — phase 3, still waiting on the collector hook.
+  31 | const objectKeyed = new WeakMap<object, number>();
+     |                     ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  32 | 
+
+  hint: WeakMap is supported, but only for keys whose death this runtime observes at a single refcount chokepoint it owns — Uint8Array, and arrays of strings/numbers/booleans/byte-arrays. A record, a class instance, a bare 'object' or an array of those is a cycle-collected value that can be reclaimed without passing through a release, so its entry could outlive it; because keys are matched by ADDRESS and the allocator reuses addresses, that would return a dead key's value rather than merely leak, and it is refused instead. Values must be a reference type (a scalar has no pointer for the table to hold). A strong Map accepts those keys today, but it RETAINS them — for a cache keyed on a long-lived object that is unbounded growth
+
+weakmap-traced-array-key.ts:35:7 - error SC2020: 'WeakMap<Uint8Array<ArrayBufferLike>, number>' is part of the standard library types but has no scriptc lowering yet
+
+  34 | //    admitted key kind is refused with one.
+  35 | const scalarValued = new WeakMap<Uint8Array, number>();
+     |       ^~~~~~~~~~~~
+  36 | 
+
+  hint: the type checker sees the full standard library, but only the supported surface compiles (https://scriptc.dev/limitations)
+
+weakmap-traced-array-key.ts:35:22 - error SC2020: 'new WeakMap' is part of the standard library types but has no scriptc lowering yet
+
+  34 | //    admitted key kind is refused with one.
+  35 | const scalarValued = new WeakMap<Uint8Array, number>();
+     |                      ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  36 | 
+
+  hint: WeakMap is supported, but only for keys whose death this runtime observes at a single refcount chokepoint it owns — Uint8Array, and arrays of strings/numbers/booleans/byte-arrays. A record, a class instance, a bare 'object' or an array of those is a cycle-collected value that can be reclaimed without passing through a release, so its entry could outlive it; because keys are matched by ADDRESS and the allocator reuses addresses, that would return a dead key's value rather than merely leak, and it is refused instead. Values must be a reference type (a scalar has no pointer for the table to hold). A strong Map accepts those keys today, but it RETAINS them — for a cache keyed on a long-lived object that is unbounded growth
+
+weakmap-traced-array-key.ts:37:13 - error SC2004: uses of 'recordKeyed' inherit the blocker on its declaration
+
+  36 | 
+  37 | console.log(recordKeyed, nestedKeyed, objectKeyed, scalarValued);
+     |             ^~~~~~~~~~~
+  38 | 
+
+  hint: the declaration of 'recordKeyed' did not compile — fix the diagnostic reported there and these sites clear with it

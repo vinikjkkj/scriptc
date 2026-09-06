@@ -1002,6 +1002,7 @@ bool scr_str_includes(ScrStr *s, ScrStr *needle);
 
 /* startsWith(needle) / endsWith(needle) — no position argument. */
 bool scr_str_starts_with(ScrStr *s, ScrStr *needle);
+bool scr_str_starts_with_at(ScrStr *s, ScrStr *needle, double position);
 bool scr_str_ends_with(ScrStr *s, ScrStr *needle);
 
 /* slice(start, end): UTF-16 indices, negatives count from length, clamped
@@ -1226,6 +1227,16 @@ typedef struct ScrArr {
   size_t len;
   size_t cap;
   ScrElemKind elem;
+  /* Set once this array has been used as a WeakMap key, never cleared.
+   * Rides the padding between `elem` and the 8-byte-aligned pointers
+   * below, so sizeof(ScrArr) is unchanged -- the same trick
+   * ScrBytes::weakkey uses. Only scr_arr_release reads it.
+   *
+   * ONLY AN UNTRACED ARRAY CAN EVER CARRY THIS. A traced array is a cycle
+   * node whose death can come from the collector without passing through
+   * scr_arr_release, so isSupportedWeakKey refuses it; see the note there
+   * and docs/estado-weakmap-cycle-keys.md. */
+  uint8_t weakkey;
   /* SCR_ELEM_REF only; NULL for every other element kind. elem_trace is
    * non-NULL exactly when the element type carries a cycle header: such
    * arrays are CYCLE-CAPABLE (an element can point back at the array that
@@ -7646,6 +7657,14 @@ typedef struct ScrBytes {
    * already carried before the pointer, so sizeof(ScrBytes) is unchanged
    * and no allocation, layout, or refcount assumption moves. */
   uint8_t flavor;
+  /* Set once this value has ever been used as a WeakMap key, and never
+   * cleared. It rides in the SAME padding `flavor` documented above, so
+   * sizeof(ScrBytes) is still unchanged and no allocation or refcount
+   * assumption moves. Its only reader is scr_bytes_release, which uses it
+   * to skip the weak-registry walk for the overwhelming majority of byte
+   * values that are not keys — see the head of scr_weak.c for why the
+   * eviction it guards has to happen in the free path and not later. */
+  uint8_t weakkey;
   uint8_t *data; /* len * elem_size bytes; owned unless backing is set */
   /* NULL for owners. A view (DataView, subarray, Buffer-slice) sets this
    * to the retained OWNER it aliases (chain depth is always exactly 1:
@@ -7655,6 +7674,53 @@ typedef struct ScrBytes {
 } ScrBytes;
 
 size_t scr_bytes_elem_size(ScrBytesElem elem); /* 1, 2, 4, 8 */
+
+/* ── WeakMap ───────────────────────────────────────────────────────────
+ * Reference-identity keys held WEAKLY: the table does not retain a key and
+ * an entry disappears the instant its key's refcount reaches zero. Values
+ * ARE held strongly. The whole argument — including why the eviction must
+ * happen inside the key's free path rather than in a later sweep, and
+ * which semantics (ephemerons) are deliberately NOT provided — is at the
+ * head of scr_weak.c and should be read before touching any of this.
+ *
+ * Keys are restricted to kinds with a single refcount chokepoint the
+ * runtime owns; today that is ScrBytes alone. Cycle-allocated kinds
+ * (arrays, records, class instances) can die inside the collector without
+ * passing through a release, so the frontend still refuses them. */
+typedef struct ScrWeakMap ScrWeakMap;
+
+/* key_mark stamps a key so its own free path knows to consult the weak
+ * registry. It is a FUNCTION POINTER and not a switch because the mark
+ * lives in a different struct field per key kind, and writing the wrong
+ * one would be a stray store into unrelated memory. The compiler knows the
+ * key type statically and passes the matching stamp. */
+ScrWeakMap *scr_weak_new(void *(*val_retain)(void *), void (*val_release)(void *),
+                         void (*key_mark)(void *));
+void scr_weak_set(ScrWeakMap *m, void *key, void *val); /* key borrowed, val retained */
+void *scr_weak_get_ref(ScrWeakMap *m, const void *key); /* +1, NULL when absent */
+int scr_weak_has(ScrWeakMap *m, const void *key);
+ScrWeakMap *scr_weak_retain(ScrWeakMap *m);
+void scr_weak_release(ScrWeakMap *m);
+void *scr_weak_retain_v(void *m);
+void scr_weak_release_v(void *m);
+
+/* Called from a key type's release at rc == 0, before the storage goes
+ * back. Guarded at every call site by the type's own weak-key mark so a
+ * non-key pays only a byte test. */
+void scr_weak_key_died(void *key);
+
+/* The death hook, reached through a POINTER rather than by name.
+ * scr_bytes.c is linked into every binary and scr_weak.c only into ones
+ * that construct a WeakMap, so a direct call would be an undefined symbol
+ * in the common program even though `weakkey` guarantees the branch is
+ * dead there. scr_weak_new installs it; it is NULL until then, which is
+ * also the state in which no key can carry the mark. */
+extern void (*scr_weak_died_hook)(void *key);
+
+/* The per-kind key stamps, one per admitted key kind. Each lives with its
+ * own type because each writes a field only that type has. */
+void scr_bytes_weak_mark(void *key); /* scr_bytes.c */
+void scr_arr_weak_mark(void *key);   /* scr_array.c -- UNTRACED arrays only */
 
 /* Stamp a FRESHLY constructed value (+1, unaliased) with its Node flavor
  * and answer it unchanged — no copy, no refcount step. Marking an aliased
@@ -8022,6 +8088,7 @@ ScrBytes *scr_bytes_fill_elem(ScrBytes *b, double v, double start, double end); 
  * (mutations visible both ways, JS-exactly). The view retains the OWNER
  * (chain depth exactly 1, the DataView rule) and its byteOffset composes.
  * Same index clamping as slice; never throws. */
+ScrBytes *scr_bytes_copy_within(ScrBytes *b, double target, double start, double end);
 ScrBytes *scr_bytes_subarray(ScrBytes *b, double start, double end); /* +1 */
 
 /* dst.set(src, offset): same-kind bulk copy (memmove — dst may be src).
