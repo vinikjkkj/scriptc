@@ -14,50 +14,50 @@ maps.ts:8:16 - error SC1090: Map keys of type 'boolean' (Map keys must be a stri
     |                ^~~~~~~~~~~~~~~~~~~~~~~~~~
   9 | 
 
-maps.ts:11:7 - error SC2009: values of type 'Map<string, () => void>' cannot be compiled: the Map shape is supported, but '() => void' values have no Map slot yet (functions, promises, and nested Maps stay out)
+maps.ts:21:7 - error SC2009: values of type 'Map<string, symbol>' cannot be compiled: the Map shape is supported, but 'symbol' values have no Map slot yet (symbols, bigints, generators and the runtime handle types stay out)
 
-  10 | // Values exclude functions (no closure story in the uniform value slot yet).
-  11 | const handlers = new Map<string, () => void>();
-     |       ^~~~~~~~
-  12 | 
+  20 | // different slot).
+  21 | const tagged = new Map<string, symbol>();
+     |       ^~~~~~
+  22 | 
 
   hint: the outer shape is supported — the named component is the blocker; restate it inside the compilable set (number, string, boolean, arrays, Maps, Sets, RegExp, functions, classes, records, unions of those, and 'unknown')
 
-maps.ts:11:18 - error SC1090: Map values of type '() => void' (Map values must be number, string, boolean, records, class instances, arrays, promises, or unions of those — not functions, Maps, 'unknown', or 'any') is not supported yet
+maps.ts:21:16 - error SC1090: Map values of type 'symbol' (Map values must be number, string, boolean, records, class instances, arrays, functions, promises, nested Maps/Sets, 'unknown', or unions of those — symbols, bigints, generators and the runtime handle types stay out) is not supported yet
 
-  10 | // Values exclude functions (no closure story in the uniform value slot yet).
-  11 | const handlers = new Map<string, () => void>();
-     |                  ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-  12 | 
+  20 | // different slot).
+  21 | const tagged = new Map<string, symbol>();
+     |                ^~~~~~~~~~~~~~~~~~~~~~~~~
+  22 | 
 
-maps.ts:17:17 - error SC2009: values of type 'Map<boolean, number>' cannot be compiled: the Map shape is supported, but keys are limited to numbers and strings — 'boolean' is outside that domain
+maps.ts:24:17 - error SC2009: values of type 'Map<boolean, number>' cannot be compiled: the Map shape is supported, but keys are limited to numbers and strings — 'boolean' is outside that domain
 
-  16 | // Map-typed slots elsewhere report the ordinary unsupported-type diagnostic.
-  17 | function useBad(m: Map<boolean, number>): number {
+  23 | // Map-typed slots elsewhere report the ordinary unsupported-type diagnostic.
+  24 | function useBad(m: Map<boolean, number>): number {
      |                 ^
-  18 |   return m.size;
+  25 |   return m.size;
 
   hint: the outer shape is supported — the named component is the blocker; restate it inside the compilable set (number, string, boolean, arrays, Maps, Sets, RegExp, functions, classes, records, unions of those, and 'unknown')
 
-maps.ts:32:28 - error SC1090: JSON.stringify of 'Map<string, number>' values (only number, string, boolean, records, arrays, unions of those, and 'unknown' stringify) are not supported yet
+maps.ts:39:28 - error SC1090: JSON.stringify of 'Map<string, number>' values (only number, string, boolean, records, arrays, unions of those, and 'unknown' stringify) are not supported yet
 
-  31 | const m = new Map<string, number>();
-  32 | console.log(JSON.stringify(m));
+  38 | const m = new Map<string, number>();
+  39 | console.log(JSON.stringify(m));
      |                            ^
-  33 | 
+  40 | 
 
-maps.ts:35:16 - error SC1090: Map methods as values (call 'get' directly) are not supported yet
+maps.ts:42:16 - error SC1090: Map methods as values (call 'get' directly) are not supported yet
 
-  34 | // Map methods have no bound-value form — call them directly.
-  35 | const getter = m.get;
+  41 | // Map methods have no bound-value form — call them directly.
+  42 | const getter = m.get;
      |                ^~~~~
-  36 | 
+  43 | 
 
-maps.ts:39:1 - error SC2004: uses of 'useBad' inherit the blocker on its declaration
+maps.ts:46:1 - error SC2004: uses of 'useBad' inherit the blocker on its declaration
 
-  38 | // them relevant; these references are what makes them count.
-  39 | useBad(new Map<boolean, number>());
+  45 | // them relevant; these references are what makes them count.
+  46 | useBad(new Map<boolean, number>());
      | ^~~~~~
-  40 | maybeMap(true);
+  47 | maybeMap(true);
 
   hint: the declaration of 'useBad' did not compile — fix the diagnostic reported there and these sites clear with it

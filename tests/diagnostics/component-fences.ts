@@ -5,8 +5,9 @@
 const byFlag = new Map<boolean, string>();
 console.log(byFlag);
 
-// Map values have no slot for functions.
-const listeners = new Map<string, () => void>();
+// Map values have no slot for symbols (closures DO have one — the
+// index-signature overflow store's func row, now the user Map's too).
+const listeners = new Map<string, symbol>();
 console.log(listeners);
 
 // Set elements are limited to numbers and strings.
