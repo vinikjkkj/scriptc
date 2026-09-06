@@ -811,6 +811,20 @@ ScrArr *scr_arr_fill_ref(ScrArr *a, void *v, double start, double end) {
   return scr_arr_retain(a);
 }
 
+/* `a.length = n` — the VALIDITY gate the spec puts in front of the store.
+ * ArraySetLength runs ToUint32(v) and compares it back against ToNumber(v);
+ * a mismatch is a RangeError("Invalid array length") thrown BEFORE any
+ * element moves. That rejects negatives, fractions, NaN and anything at or
+ * past 2^32 — Node's exact message and exact timing (`a.length = -1` leaves
+ * the array untouched). Catchable, so the emitter's pending check follows
+ * the call, and the truncate/grow pair below only runs on a valid length. */
+void scr_arr_length_gate(double n) {
+  if (!(n >= 0) || n > 4294967295.0 || n != trunc(n)) {
+    static const char msg[] = "Invalid array length";
+    scr_throw_error_msg(SCR_ERR_RANGE, msg, sizeof msg - 1);
+  }
+}
+
 /* ── length = n, the SHRINK half ──────────────────────────────────────────
  * Drops every element from index n on, releasing refcounted ones (the
  * unlink-then-release discipline scr_arr_set_slot uses: the slot is gone

@@ -10854,6 +10854,13 @@ class LlEmitter {
         // bound is already satisfied when the truncate did the work.
         const want = this.emitExpr(e.args[0]!);
         const fill = this.absentElemLl(e.receiver.type.elem);
+        // ArraySetLength's validity gate FIRST: a negative, fractional, NaN
+        // or >= 2^32 length is Node's catchable RangeError and the array is
+        // left untouched, so the pending check sits between the gate and
+        // the two arms.
+        this.declare(`declare void @scr_arr_length_gate(double)`);
+        B.line(`call void @scr_arr_length_gate(double ${want.name})`);
+        this.emitPendingCheck();
         this.declare(`declare void @scr_arr_truncate(ptr, double)`);
         B.line(`call void @scr_arr_truncate(ptr ${r.name}, double ${want.name})`);
         this.declare(`declare double @scr_arr_len(ptr)`);

@@ -1427,6 +1427,10 @@ void *scr_arr_copy_ref(ScrArr *a, double i);
 void scr_arr_set_f64(ScrArr *a, double i, double v);
 void scr_arr_set_bool(ScrArr *a, double i, bool v);
 void scr_arr_set_ref(ScrArr *a, double i, void *v);
+/* length = n, the validity gate: throws Node's catchable
+ * RangeError("Invalid array length") for a negative, fractional, NaN or
+ * >= 2^32 length, before anything moves. */
+void scr_arr_length_gate(double n);
 /* length = n, shrink half: drops elements from index n on, releasing
  * refcounted ones. Growing is the emitter's (it knows the absent value). */
 void scr_arr_truncate(ScrArr *a, double n);
