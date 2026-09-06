@@ -199,8 +199,16 @@ static inline void scr_cyc_stamp(ScrCycHdr *h, ScrTraceFn trace,
  * THE PEAK DOES NOT MOVE and that is the honest half: the arena still takes
  * 1,073 chunks at the high-water, because that is what the sync genuinely
  * needs at once. What changes is that it gives 1,236 of the 1,397 it ever
- * took back, and the ~160 left are one cached chunk per live size class
- * plus the classes that really are still populated.
+ * took back.
+ *
+ * THE ~160 LEFT ARE NOT ALL CACHE, and the arithmetic says so: at most 33 of
+ * them can be, one per size class, because that is the whole of what the
+ * current-chunk rule below retains. The other ~128 are chunks that still
+ * hold at least one LIVE block, which is the residual fragmentation any
+ * per-page reclaimer has — a chunk cannot come back while one survivor
+ * points into it. 10.0 MiB of chunk against a ~11 MiB working set is close
+ * enough to that working set that there is little left in this term to win;
+ * the next byte is somewhere else.
  *
  * THE NUMBER THAT EXPLAINS ALL OF IT is cycstat's `listhit`: 0 before and
  * 65,097,056 after. Routing carved blocks away from the size-class pool is
