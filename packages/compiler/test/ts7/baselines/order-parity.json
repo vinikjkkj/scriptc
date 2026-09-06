@@ -9243,6 +9243,24 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/5966-async-generator-manual-resume.ts": {
+   "order": [
+    "<repo>/tests/corpus/5966-async-generator-manual-resume.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/5967-stream-async-iterator-by-hand.ts": {
+   "order": [
+    "<repo>/tests/corpus/5967-stream-async-iterator-by-hand.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/5968-a-class-field-typed-async-iterator.ts": {
+   "order": [
+    "<repo>/tests/corpus/5968-a-class-field-typed-async-iterator.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/5970-require-of-what-nothing-resolves.cjs": {
    "order": [
     "<repo>/tests/corpus/5970-require-of-what-nothing-resolves.cjs"

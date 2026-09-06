@@ -19,12 +19,19 @@
  * feature growing. It is a bug to let that happen without recording it: move
  * the plant out of this file and into tests/corpus with Node as its oracle.
  *
- * Two of the fences here are OLDER than async generators and are pinned
- * anyway, because they are what actually stops the shape today and a change
- * to either would silently widen this feature: the generator-METHOD fence
- * (plant 2) and the stdlib-member fence that catches the direct resume
- * surface (plants 7 and 8). Each plant names the emitter it expects, so
- * "still refuses" can never be satisfied by an unrelated new refusal.
+ * One fence here is OLDER than async generators and is pinned anyway, because
+ * it is what actually stops the shape today and a change to it would silently
+ * widen this feature: the generator-METHOD fence (plant 2). Each plant names
+ * the emitter it expects, so "still refuses" can never be satisfied by an
+ * unrelated new refusal.
+ *
+ * WHAT MOVED. The direct resume surface -- `await g.next()` / `.return()` /
+ * `.throw()` on an async generator, and the same protocol over a stream's
+ * `[Symbol.asyncIterator]()` -- used to be two plants here and now compiles.
+ * They left for tests/corpus 5966..5968 with Node as their oracle, exactly as
+ * the paragraph above prescribes. What replaced them is the narrower boundary
+ * that surface actually has: the resume must be AWAITED IN PLACE, because the
+ * runtime still keeps no request queue.
  */
 import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -137,35 +144,60 @@ const PLANTS: readonly {
     ].join("\n"),
   },
   {
-    name: "a direct .next() on an async generator",
-    why: "the runtime keeps NO request queue: only the compiler's own strictly-sequential for-await desugar may resume one. Two overlapping requests would overwrite the in-flight promise and drop a settlement -- scr_agen_arm aborts rather than let that happen, and this fence is why that abort is unreachable",
-    accept: [{ code: "SC2020", fragment: "AsyncGenerator<number, void, void>.next" }],
+    name: "a direct resume whose promise is HELD instead of awaited",
+    why: "the runtime keeps NO request queue: `const a = g.next(); const b = g.next()` is legal JS and answers in order, but a second request arriving while one is in flight would overwrite the pending promise and drop a settlement -- scr_agen_arm aborts rather than let that happen. `await g.next()` compiles (tests/corpus/5966 scores it against Node); a resume that is not consumed where it is produced is the spelling that makes the overlap easy to write, and it stays refused until the queue exists",
+    accept: [{ code: "SC1071", fragment: "not awaited in place" }],
     src: [
       "async function* ok(): AsyncGenerator<number, void, void> {",
       "  yield 1",
+      "  yield 2",
       "}",
-      "async function direct(): Promise<void> {",
+      "async function held(): Promise<void> {",
       "  const g = ok()",
-      "  const r = await g.next()",
-      "  console.log(r.done)",
+      "  const first = g.next()",
+      "  const second = g.next()",
+      "  console.log((await first).value, (await second).value)",
       "}",
-      "direct()",
+      "held()",
       "",
     ].join("\n"),
   },
   {
-    name: "a direct .return() on an async generator",
-    why: "same queue-free reason as .next()",
-    accept: [{ code: "SC2020", fragment: "AsyncGenerator<number, void, void>.return" }],
+    name: "a resume through the OPTIONAL-member spelling `it.return!()`",
+    why: "AsyncIterator types `return` optional, so the non-null spelling wraps the member read in a NonNullExpression and the resume dispatch -- which keys on a bare property-access callee -- never sees it. It must refuse rather than fall through to the callee-as-value path, which would call a generator handle as if it were a function value",
+    accept: [{ code: "SC2020", fragment: ".return" }],
     src: [
-      "async function* ok(): AsyncGenerator<number, void, void> {",
-      "  yield 1",
+      "import { Readable } from 'node:stream'",
+      "async function closeIt(): Promise<void> {",
+      "  const s = Readable.from(['a'])",
+      "  const it = s[Symbol.asyncIterator]()",
+      "  await it.next()",
+      "  await it.return!()",
       "}",
-      "async function early(): Promise<void> {",
-      "  const g = ok()",
-      "  await g.return()",
+      "closeIt()",
+      "",
+    ].join("\n"),
+  },
+  {
+    name: "a CLASS INSTANCE in an AsyncIterator-typed slot",
+    why: "this is the soundness net under the AsyncIterator/AsyncIterableIterator mapping. Those types map to the same ScrGen-backed kind an `async function*` answers, which is only safe while nothing WITHOUT a ScrGen can reach such a slot. A user class with a `next` method structurally satisfies AsyncIterator, and handing it a generator handle it does not have is exactly the silent wrong answer this file exists to prevent",
+    accept: [
+      { code: "SC1090", fragment: "where 'AsyncGenerator" },
+      { code: "SC2002", fragment: "record shapes must match exactly" },
+    ],
+    src: [
+      "class MyIter {",
+      "  private i = 0",
+      "  public async next(): Promise<IteratorResult<number, undefined>> {",
+      "    this.i += 1",
+      "    return this.i <= 2 ? { done: false, value: this.i } : { done: true, value: undefined }",
+      "  }",
       "}",
-      "early()",
+      "async function main(): Promise<void> {",
+      "  const it: AsyncIterator<number, undefined, undefined> = new MyIter()",
+      "  console.log((await it.next()).done)",
+      "}",
+      "main()",
       "",
     ].join("\n"),
   },

@@ -3756,13 +3756,26 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
   // `.next()` answers a promise over the shared IteratorResult record
   // rather than the record itself.
   //
-  // AsyncIterableIterator is NOT admitted here even though the lib types
-  // AsyncGenerator as extending it: an AsyncIterableIterator-typed value
-  // need not be a generator object at all (any object with the protocol
-  // methods satisfies it), and there is no lowering for a user-supplied
-  // async iterator. Mapping it would hand such a value a ScrGen handle it
-  // does not have. It keeps its refusal.
-  if (isStdlibInterface("AsyncGenerator")) {
+  // AsyncIterator and AsyncIterableIterator ride the SAME mapping, for
+  // the same reason the synchronous Generator shares it with
+  // IterableIterator: the three channels are all a resume needs, and the
+  // handle a resume drives is a ScrGen either way. The worry that kept
+  // them refused — that an AsyncIterator-typed value need not be a
+  // generator object, so mapping the type would hand a plain object a
+  // ScrGen handle it does not have — is answered where it actually
+  // arises, at the COERCION: a record (an object literal, a class
+  // instance with a `next` method) into an async-generator slot is
+  // rejected by the record/generator kind mismatch (SC2002), exactly as
+  // it already is for IterableIterator. So the only values that reach an
+  // AsyncIterator slot are the ones that really carry a ScrGen: an
+  // `async function*` call, and a stream's `[Symbol.asyncIterator]()`.
+  // AsyncIterable is NOT here: it has no `next`, only the protocol
+  // method, and nothing could resume it.
+  if (
+    isStdlibInterface("AsyncGenerator") ||
+    isStdlibInterface("AsyncIterator") ||
+    isStdlibInterface("AsyncIterableIterator")
+  ) {
     const args = checker.getTypeArguments(widened as ts.TypeReference);
     const channels = genChannels(args[0], args[1], args[2], ctx);
     if (!channels) return null;
@@ -7211,6 +7224,8 @@ const STDLIB_CONTAINERS: Record<string, { role: (i: number) => string }> = {
   Promise: { role: () => "value" },
   Generator: { role: (i) => ["yield", "return", "next"][i] ?? "channel" },
   AsyncGenerator: { role: (i) => ["yield", "return", "next"][i] ?? "channel" },
+  AsyncIterator: { role: (i) => ["yield", "return", "next"][i] ?? "channel" },
+  AsyncIterableIterator: { role: (i) => ["yield", "return", "next"][i] ?? "channel" },
 };
 
 /** The `string | object`-family collapse domain (mapTypeInner's union

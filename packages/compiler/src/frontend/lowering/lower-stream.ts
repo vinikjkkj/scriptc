@@ -35,6 +35,7 @@ import { newFnCtx, own } from "./lowerer.js";
 import { appendImplicitUndefinedReturn } from "./lower-calls.js";
 import { bufEncoding, knownBufEncoding } from "./lower-containers.js";
 import { probeLower } from "./lower-exprs.js";
+import { genResultRecord } from "../types.js";
 import { BOOL, DYN, F64, IrExpr, IrFunction, IrLibFn, IrStmt, IrType, RUNTIME_STREAM_CLASSES, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, bytesOf, canBoxFuncIntoDyn, funcOf, typeEquals, typeKey } from "../../ir/nodes.js";
 
 const BYTES = bytesOf("u8");
@@ -2078,4 +2079,167 @@ export function lowerStreamProperty(L: Lowerer, expr: ts.PropertyAccessExpressio
     return propCall(BOOL);
   }
   return null;
+}
+
+/** `readable[Symbol.asyncIterator]()` — the EXPLICIT spelling of what the
+ * `for await (const chunk of readable)` desugar (lowerForAwaitReadable)
+ * does implicitly, for the code that drives the protocol by hand:
+ *
+ *     const it = source[Symbol.asyncIterator]()
+ *     const next = await it.next()
+ *     if (next.done === true) ...
+ *
+ * The handle a manual resume drives is a ScrGen, so the call lowers to a
+ * call of a lifted ASYNC GENERATOR whose whole body is the stream pump —
+ * the same `readable.nextChunkDyn` await, the same undefined-is-EOF
+ * sentinel, and the same destroy-on-close that the for-await desugar
+ * carries. Nothing new reaches the runtime or either backend: the fiber
+ * protocol, the spawn wrapper, agenResume and the interned IteratorResult
+ * record are all the async-generator machinery already shipped, and the
+ * two spellings of stream iteration now share one pump.
+ *
+ * IteratorClose: Node's `Readable.prototype[Symbol.asyncIterator]` runs
+ * its loop inside a try/finally that DESTROYS the stream on the way out
+ * (destroyOnReturn defaults on), so a consumer's `.return()` — or a
+ * `for await` that breaks — closes the stream. The finally below is that
+ * destroy, and it is the SAME statement lowerForAwaitReadable emits, so
+ * `s.destroyed` reads alike after either spelling exits early. A consumer
+ * that simply ABANDONS the iterator abandons the generator fiber with it
+ * and the finally does not run — the async-generator abandonment
+ * divergence, unchanged, not a new one.
+ *
+ * Chunks ride the dyn lane, exactly as the desugar's do: @types/node
+ * types the iterator's element `any`, so the runtime boxes by tag and the
+ * consumer reads through the checked-dynamic surface. A caller that has
+ * narrowed the channels to something concrete meets a named refusal here
+ * rather than a silently mistyped chunk. */
+export function lowerStreamAsyncIteratorCall(
+  L: Lowerer,
+  call: ts.CallExpression,
+  access: ts.ElementAccessExpression,
+): IrExpr | null {
+  if (call.arguments.length !== 0) return null;
+  const key = access.argumentExpression;
+  if (!ts.isPropertyAccessExpression(key) || key.name.text !== "asyncIterator") return null;
+  if (!L.isStdlibGlobal(key.expression, "Symbol")) return null;
+  const recvT = L.mapTypeOf(L.typeOf(access.expression));
+  if (recvT?.kind !== "object") return null;
+  const sides = streamSidesOf(L, L.classes.get(recvT.className));
+  if (sides !== "r" && sides !== "rw") return null;
+
+  const loc = locOf(call);
+  const agenT = L.irTypeOf(call);
+  if (agenT.kind !== "asyncGenerator") L.badType(call, L.typeOf(call));
+  // The pump yields what the runtime hands back: a checked-dynamic chunk.
+  // A narrowed yield channel would need a per-chunk conversion that the
+  // desugar does not have either.
+  if (agenT.yieldT.kind !== "dyn") {
+    L.noLowering(
+      `a stream async iterator yielding '${L.fmt(agenT.yieldT)}' (chunks arrive checked-dynamic)`,
+      call,
+    );
+  }
+  // Resumed values are DISCARDED by a stream: `it.next(v)` ignores v in
+  // Node too. Any channel is therefore safe to accept; nothing reads it.
+  const retT = agenT.retT;
+  if (retT.kind !== "dyn" && retT.kind !== "void" && retT.kind !== "undefinedT") {
+    L.noLowering(
+      `a stream async iterator returning '${L.fmt(retT)}' (the iterator completes with undefined)`,
+      call,
+    );
+  }
+
+  // One lifted pump per (stream class, channel triple): the same source
+  // spelling in two places is the same function.
+  const fnName = `%stream.asyncIter${recvT.className}$${typeKey(agenT)}`;
+  if (!L.liftedFns.some((f) => f.name === fnName)) {
+    const sId = "s.0";
+    const pId = "%p.0";
+    const cId = "%chunk.0";
+    const promiseT: IrType = { kind: "promise", inner: DYN };
+    const sRef: IrExpr = { kind: "varRef", localId: sId, type: recvT, loc };
+    const cRef: IrExpr = { kind: "varRef", localId: cId, type: DYN, loc };
+    const pump: IrStmt = {
+      kind: "while",
+      cond: { kind: "boolLit", value: true, type: BOOL, loc },
+      body: [
+        {
+          kind: "varDecl",
+          localId: pId,
+          init: { kind: "libCall", fn: "readable.nextChunkDyn", args: [sRef], type: promiseT, loc },
+          loc,
+        },
+        {
+          kind: "varDecl",
+          localId: cId,
+          init: {
+            kind: "awaitExpr",
+            value: { kind: "varRef", localId: pId, type: promiseT, loc },
+            type: DYN,
+            loc,
+          },
+          loc,
+        },
+        // EOF is the undefined sentinel — chunks are never undefined.
+        {
+          kind: "if",
+          cond: { kind: "dynTest", test: "undefined", value: cRef, type: BOOL, loc },
+          then: [{ kind: "break", loc }],
+          else_: null,
+          loc,
+        },
+        {
+          kind: "exprStmt",
+          expr: { kind: "yieldExpr", value: cRef, async: true, type: agenT.nextT, loc },
+          loc,
+        },
+      ],
+      loc,
+    };
+    const body: IrStmt[] = [
+      {
+        kind: "tryCatch",
+        tryBody: [pump],
+        catchLocalId: null,
+        catchBody: null,
+        finallyBody: [
+          {
+            kind: "exprStmt",
+            expr: { kind: "libCall", fn: "stream.destroy", args: [sRef], type: recvT, loc },
+            loc,
+          },
+        ],
+        loc,
+      },
+    ];
+    // The completion value is undefined in every admitted channel shape.
+    if (retT.kind === "dyn") {
+      body.push({
+        kind: "return",
+        value: { kind: "dynFrom", value: { kind: "unitLit", unit: "undefined", type: UNDEFINED_T, loc }, type: DYN, loc },
+        loc,
+      });
+    } else if (retT.kind === "undefinedT") {
+      body.push({ kind: "return", value: { kind: "unitLit", unit: "undefined", type: UNDEFINED_T, loc }, loc });
+    }
+    const rec = genResultRecord(agenT.yieldT, retT, L.shapes, L.unions);
+    if (!rec) L.badType(call, L.typeOf(call));
+    const lifted: IrFunction = {
+      name: fnName,
+      params: [{ localId: sId, name: "s", type: recvT }],
+      returnType: retT,
+      locals: [
+        { id: sId, name: "s", type: recvT, mutable: false },
+        { id: pId, name: "%p", type: promiseT, mutable: false },
+        { id: cId, name: "%chunk", type: DYN, mutable: false },
+      ],
+      async: true,
+      generator: { yieldT: agenT.yieldT, nextT: agenT.nextT, resultShapeId: rec.shapeId },
+      body,
+      loc,
+    };
+    L.liftedFns.push(lifted);
+  }
+  L.noteEdge(fnName);
+  return { kind: "call", callee: fnName, args: [L.lowerExpr(access.expression)], type: agenT, loc };
 }

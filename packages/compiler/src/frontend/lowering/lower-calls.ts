@@ -5,6 +5,7 @@
 import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
 import { lowerGenMethodCall } from "./lower-generators.js";
+import { lowerStreamAsyncIteratorCall } from "./lower-stream.js";
 import { lowerAbortMethodCall } from "./lower-abort.js";
 import { lowerFetchMethodCall } from "./lower-fetch.js";
 import { BIGINT, BOOL, BYTES_U8, CAUGHT, DYN, F64, IrExpr, IrFunction, IrLibFn, IrLocal, IrParam, IrStmt, IrType, JSVAL, STRING, SYMBOL_T, SrcLoc, UNDEFINED_T, VOID, arrayOf, canBoxFuncIntoDyn, canConvertToDyn, canDynCheckTo, canMarshalTypedFuncIntoIsland, funcOf, isUnitType, shapeHasAccessorSlots, typeEquals } from "../../ir/nodes.js";
@@ -5676,6 +5677,19 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
       L.unsupported("SC1090", expr, `method calls like '${expr.expression.getText()}'`);
     }
 
+    // `readable[Symbol.asyncIterator]()` -- the explicit spelling of the
+    // for-await desugar's own pump, lowered to a lifted async generator
+    // over the stream (lower-stream.ts). Ahead of the symbol-keyed member
+    // fence, which would otherwise refuse the callee READ before the call
+    // shape was ever consulted.
+    if (
+      ts.isElementAccessExpression(expr.expression) &&
+      !expr.expression.questionDotToken &&
+      !expr.questionDotToken
+    ) {
+      const si = lowerStreamAsyncIteratorCall(L, expr, expr.expression);
+      if (si) return si;
+    }
     // The ELEMENT spelling of a primitive method call — `x['toString']()`,
     // `s['charAt'](0)`: JS resolves it exactly like the dot form, so the
     // literal-keyed shapes with a static lowering route there before the

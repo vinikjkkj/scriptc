@@ -89,9 +89,32 @@ export function lowerYield(L: Lowerer, expr: ts.YieldExpression): IrExpr {
   return { kind: "yieldExpr", value, ...(isAsyncGen ? { async: true as const } : {}), type, loc };
 }
 
+/** True when this call's VALUE is consumed by an `await` right here —
+ * `await g.next()`, and the parenthesized/asserted spellings of it. A
+ * resume that is awaited in place cannot be the first half of an
+ * overlapping pair written in one statement. */
+function awaitedInPlace(call: ts.CallExpression): boolean {
+  let n: ts.Node = call;
+  let p: ts.Node | undefined = n.parent;
+  while (
+    p !== undefined &&
+    (ts.isParenthesizedExpression(p) || ts.isAsExpression(p) || ts.isNonNullExpression(p) ||
+      ts.isSatisfiesExpression(p))
+  ) {
+    n = p;
+    p = p.parent;
+  }
+  return p !== undefined && ts.isAwaitExpression(p) && p.expression === n;
+}
+
 /** `g.next(v)` / `g.return(v)` / `g.throw(e)` on a generator-typed
- * receiver → genResume. Null when this is not that call (the dispatch
- * chain moves on). */
+ * receiver → genResume, and the SAME call on an async-generator-typed
+ * receiver → agenResume, whose result is a `promise<IteratorResult>`
+ * rather than the record itself. The two share every argument rule: the
+ * channels are normalized identically (one genChannels), so a spelling
+ * that is legal on one flavour is legal on the other and the only
+ * difference is the delivery. Null when this is not that call (the
+ * dispatch chain moves on). */
 export function lowerGenMethodCall(
   L: Lowerer,
   call: ts.CallExpression,
@@ -100,14 +123,16 @@ export function lowerGenMethodCall(
   if (L.chainBlocked(access, call)) return null;
   const name = access.name.text;
   if (name !== "next" && name !== "return" && name !== "throw") return null;
-  if (L.mapTypeOf(L.typeOf(access.expression))?.kind !== "generator") return null;
+  const recvKind = L.mapTypeOf(L.typeOf(access.expression))?.kind;
+  if (recvKind !== "generator" && recvKind !== "asyncGenerator") return null;
   if (call.arguments.some(ts.isSpreadElement)) {
     L.unsupported("SC1090", call, "spread arguments");
   }
   const loc = locOf(call);
   const gen = L.lowerExpr(access.expression);
-  if (gen.type.kind !== "generator") return null;
-  const genT = gen.type;
+  if (gen.type.kind !== "generator" && gen.type.kind !== "asyncGenerator") return null;
+  const genT: AnyGenType = gen.type;
+  const isAsync = genT.kind === "asyncGenerator";
   const recT = resultRecordOf(L, genT);
   const argNode = call.arguments[0];
   let arg: IrExpr | null = null;
@@ -164,6 +189,42 @@ export function lowerGenMethodCall(
         `.throw() of a '${L.fmt(arg.type)}' value (throw numbers, strings, booleans, or Error instances)`,
       );
     }
+  }
+  if (isAsync) {
+    // A manual resume of an async generator OUTSIDE an async body has
+    // nowhere to park: the promise it answers could only be dropped, and
+    // dropping it drops the fiber's completion (and its rejection). The
+    // for-await desugar carries the same gate.
+    if (!L.ctx.isAsync) {
+      L.unsupported(
+        "SC1090",
+        call,
+        `.${name}() on an async generator outside an async function (the resume answers a promise that must be awaited)`,
+      );
+    }
+    // THE SEQUENCING GATE, and the reason this surface can be open at all.
+    // JS async generators keep a QUEUE of pending requests: `const a =
+    // g.next(); const b = g.next()` is legal and answers in order. The
+    // runtime has no such queue (scr_async.c, the SEQUENTIAL CONSUMERS
+    // note) — a second request arriving while one is in flight would
+    // overwrite the pending promise and drop a settlement, and
+    // scr_agen_arm aborts rather than let that happen. Until the queue
+    // exists, the resume must be CONSUMED where it is produced: only
+    // `await g.next()` compiles, so the spelling that makes the overlap
+    // easy to write cannot be written. That does not make the overlap
+    // unreachable — two async functions can each await a resume of the
+    // same generator concurrently, and the runtime's abort is still the
+    // backstop there — but it is a compile-time answer to the shape a
+    // program actually reaches for, and it is a refusal rather than a
+    // wrong answer.
+    if (!awaitedInPlace(call)) {
+      L.unsupported(
+        "SC1071",
+        call,
+        `an async generator resume that is not awaited in place (write 'await ${access.getText()}(...)'; the runtime keeps no request queue, so a resume whose promise is held rather than consumed could overlap the next one)`,
+      );
+    }
+    return { kind: "agenResume", mode: name, gen, arg, type: { kind: "promise", inner: recT }, loc };
   }
   return { kind: "genResume", mode: name, gen, arg, type: recT, loc };
 }
