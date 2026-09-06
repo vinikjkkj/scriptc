@@ -239,9 +239,24 @@ ScrArr *scr_arr_new_ref(void *(*elem_retain)(void *),
   return a;
 }
 
+/* ScrArr's weak-key stamp. Set only on arrays isSupportedWeakKey admitted,
+ * which is UNTRACED arrays alone -- see the note on ScrArr::weakkey. */
+void scr_arr_weak_mark(void *key) {
+  if (key != NULL) ((ScrArr *)key)->weakkey = 1;
+}
+
 void scr_arr_release(ScrArr *a) {
   if (!a || a->rc == SIZE_MAX) return; /* NULL: an uninitialized `let` local */
   if (--a->rc == 0) {
+    /* BEFORE anything is handed back, so no WeakMap can still hold this
+     * address once it stops naming this array. An UNTRACED array is a plain
+     * malloc/free that never reaches scr_cyc_free, so this is its only
+     * death chokepoint -- which is exactly why an untraced array can be a
+     * weak key today while a traced one cannot. The flag is never set on a
+     * traced array (isSupportedWeakKey refuses them), so the traced arm
+     * below stays untouched and will get its own hook in scr_cyc_free when
+     * phase 3 lands. */
+    if (a->weakkey && scr_weak_died_hook != NULL) scr_weak_died_hook(a);
     if (a->elem_trace) scr_cyc_on_dead(a);
     if (scr_elem_is_ref(a->elem)) {
       for (size_t i = 0; i < a->len; i++) scr_elem_release(a, a->data[i]);

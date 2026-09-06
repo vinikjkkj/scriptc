@@ -47,7 +47,85 @@ static ScrBytes *K(unsigned char tag) {
 }
 
 static ScrWeakMap *W(void) {
-  return scr_weak_new(&scr_str_retain_v, &scr_str_release_v);
+  return scr_weak_new(&scr_str_retain_v, &scr_str_release_v, &scr_bytes_weak_mark);
+}
+
+/* An UNTRACED array: trace NULL means scr_arr_new_ref uses a plain malloc
+ * and scr_arr_release a plain free, which is exactly the property that
+ * makes it an admissible weak key. */
+static ScrArr *A(const char *tag) {
+  ScrArr *a = scr_arr_new_ref(&scr_str_retain_v, &scr_str_release_v, NULL, 0);
+  ScrStr *e = S(tag);
+  scr_arr_push_ref(a, e);
+  scr_str_release(e);
+  return a;
+}
+
+static ScrWeakMap *WA(void) {
+  return scr_weak_new(&scr_str_retain_v, &scr_str_release_v, &scr_arr_weak_mark);
+}
+
+/* ── 8. UNTRACED ARRAY keys (phase 2) ────────────────────────────────── */
+static void test_array_keys(void) {
+  ScrWeakMap *m = WA();
+  ScrArr *k1 = A("alpha");
+  ScrArr *k2 = A("alpha"); /* equal CONTENTS, a different key */
+  ScrStr *v = S("arr-value");
+  size_t rc_before;
+
+  check(k1->elem_trace == NULL, "the array under test is UNTRACED");
+  rc_before = k1->rc;
+  scr_weak_set(m, k1, v);
+  check(k1->rc == rc_before, "set() does not retain an array key either");
+  check(k1->weakkey == 1, "the ARRAY stamp is the one that got written");
+
+  ScrStr *got = (ScrStr *)scr_weak_get_ref(m, k1);
+  check(got == v, "array-keyed hit returns the stored value");
+  if (got) scr_str_release(got);
+  check(!scr_weak_has(m, k2), "an equal-CONTENTS array is a different key");
+
+  scr_str_release(v);
+#ifdef SCR_RC_AUDIT
+  long live_before = scr_str_live_count();
+#endif
+  scr_arr_release(k1); /* THE DEATH, through the untraced free path */
+#ifdef SCR_RC_AUDIT
+  check(scr_str_live_count() == live_before - 1,
+        "the value is released when an ARRAY key dies");
+#endif
+  scr_arr_release(k2);
+  scr_weak_release(m);
+}
+
+/* ── 9. address reuse, array flavour ─────────────────────────────────── */
+static void test_array_address_reuse(void) {
+  ScrWeakMap *m = WA();
+  ScrStr *v = S("stale-arr");
+  ScrArr *k = A("gone");
+  void *dead = (void *)k;
+  int reused = 0, tries = 0;
+
+  scr_weak_set(m, k, v);
+  scr_str_release(v);
+  scr_arr_release(k);
+
+  for (; tries < 64 && !reused; tries++) {
+    ScrArr *fresh = A("new");
+    if ((void *)fresh == dead) {
+      reused = 1;
+      check(scr_weak_get_ref(m, fresh) == NULL,
+            "a recycled ARRAY address does not inherit the dead key value");
+      check(!scr_weak_has(m, fresh),
+            "has() false for an array reusing a dead address");
+    }
+    scr_arr_release(fresh);
+  }
+  if (!reused) {
+    fprintf(stderr, "NOTE: array address never recycled in %d tries — reuse case not exercised\n", tries);
+  } else {
+    check(1, "array address reuse was actually exercised");
+  }
+  scr_weak_release(m);
 }
 
 /* ── 1. get/set/has, and identity rather than value ──────────────────── */
@@ -224,6 +302,8 @@ int main(void) {
   test_multi_map_splice();
   test_overwrite_and_teardown();
   test_growth();
+  test_array_keys();
+  test_array_address_reuse();
   fprintf(stderr, "%ld/%ld cases passed\n", total - failed, total);
   return failed == 0 ? 0 : 1;
 }

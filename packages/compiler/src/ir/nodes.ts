@@ -780,7 +780,40 @@ export function weakMapOf(key: IrType, value: IrType): IrType {
  * address-keyed table is a WRONG ANSWER and not merely a leak. They stay
  * refused until that hook exists. */
 export function isSupportedWeakKey(t: IrType): boolean {
-  return t.kind === "bytes";
+  if (t.kind === "bytes") return true;
+  // An UNTRACED array is a plain refcounted value: scr_arr_new_ref only
+  // routes through scr_cyc_alloc when elem_trace is non-NULL, and
+  // scr_arr_release mirrors it with a free() that never reaches
+  // scr_cyc_free. So an untraced array has the same single death
+  // chokepoint ScrBytes has. A TRACED one is a cycle node the collector
+  // can reclaim without passing through any release, and admitting it
+  // would leave dead keys in an address-keyed table -- a wrong answer.
+  if (t.kind === "array") return isNeverTracedElem(t.elem);
+  return false;
+}
+
+/** Element kinds that can never carry a cycle header, whatever the
+ * emitter's trace fixpoint concludes.
+ *
+ * WHY A HAND-WRITTEN LIST AND NOT THE FIXPOINT. Tracedness is decided by
+ * `CEmitter.traceAdapterC`, which is a MODULE-level fixpoint and not a
+ * property of the type alone -- this predicate is a pure IrType function
+ * shared with the validator and the frontend, and cannot reach it. So it
+ * under-approximates: every kind here is acyclic by construction (a
+ * string, a number, a bool and a byte buffer hold no references back), so
+ * an array of them is untraced under any fixpoint. Kinds whose answer
+ * DEPENDS on the fixpoint -- record, object, union, array, func, dyn,
+ * promise, map, set -- are refused here even where the fixpoint would
+ * have said untraced. Refusing a key that would have been safe costs a
+ * diagnostic; admitting one that is traced costs a wrong answer, so the
+ * asymmetry is deliberate.
+ *
+ * The emitter re-checks this against the real fixpoint and throws if the
+ * two ever disagree; see the weak arm of mapNew. */
+function isNeverTracedElem(t: IrType): boolean {
+  return (
+    t.kind === "string" || t.kind === "f64" || t.kind === "bool" || t.kind === "bytes"
+  );
 }
 
 export function setOf(elem: IrType): IrType {

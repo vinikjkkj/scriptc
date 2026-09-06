@@ -88,7 +88,8 @@ struct ScrWeakMap {
   size_t tomb; /* tombstones */
   void *(*val_retain)(void *);
   void (*val_release)(void *);
-  struct ScrWeakMap *next; /* the global live list */
+  void (*key_mark)(void *); /* the key kind's own stamp; see scr_weak_new */
+  struct ScrWeakMap *next;  /* the global live list */
 };
 
 /* Every live WeakMap. Only scr_weak_key_died reads it. */
@@ -109,12 +110,14 @@ static size_t scr_weak_hash(const void *p, size_t cap) {
   return (size_t)(h >> 40) & (cap - 1u);
 }
 
-ScrWeakMap *scr_weak_new(void *(*val_retain)(void *), void (*val_release)(void *)) {
+ScrWeakMap *scr_weak_new(void *(*val_retain)(void *), void (*val_release)(void *),
+                         void (*key_mark)(void *)) {
   ScrWeakMap *m = (ScrWeakMap *)calloc(1, sizeof *m);
   if (!m) scr_weak_oom();
   m->rc = 1;
   m->val_retain = val_retain;
   m->val_release = val_release;
+  m->key_mark = key_mark;
   m->next = scr_weak_live;
   scr_weak_live = m;
   /* Arm the free path. Idempotent, and deliberately here rather than in a
@@ -183,7 +186,7 @@ void scr_weak_set(ScrWeakMap *m, void *key, void *val) {
   m->tab[s].key = key;
   m->tab[s].val = m->val_retain ? m->val_retain(val) : val;
   m->used++;
-  scr_weak_mark_key(key);
+  if (m->key_mark != NULL) m->key_mark(key);
 }
 
 /* The stored value at +1, or NULL when absent — the `_ref` convention

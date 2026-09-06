@@ -33,8 +33,21 @@ import { mixinResultBindingClassOf, type MixinInstanceInfo } from "./lower-mixin
  * ride the identity Map — routes the non-riding shapes here rather than
  * report them as Map key errors. */
 const WEAK_COLLECTION_HINTS = {
-  WeakMap: "weak collections observe garbage collection, which reference counting never exposes — a strong Map behaves identically in-language: use Map",
-  WeakSet: "weak collections observe garbage collection, which reference counting never exposes — a strong Set behaves identically in-language: use Set",
+  WeakMap:
+    "WeakMap is supported, but only for keys whose death this runtime observes at a " +
+    "single refcount chokepoint it owns — Uint8Array, and arrays of strings/numbers/" +
+    "booleans/byte-arrays. A record, a class instance, a bare 'object' or an array of " +
+    "those is a cycle-collected value that can be reclaimed without passing through a " +
+    "release, so its entry could outlive it; because keys are matched by ADDRESS and " +
+    "the allocator reuses addresses, that would return a dead key's value rather than " +
+    "merely leak, and it is refused instead. Values must be a reference type (a scalar " +
+    "has no pointer for the table to hold). A strong Map accepts those keys today, but " +
+    "it RETAINS them — for a cache keyed on a long-lived object that is unbounded growth",
+  WeakSet:
+    "WeakSet has no lowering yet. Its keys would ride the same machinery WeakMap now " +
+    "uses (packages/runtime/src/scr_weak.c) — nothing about reference counting prevents " +
+    "it, it simply has not been built. A strong Set behaves identically in-language but " +
+    "RETAINS its elements, which is the difference a WeakSet exists for",
 } as const;
 
 /** One entry of ClassInfo.methods — a method's ABI signature as the class

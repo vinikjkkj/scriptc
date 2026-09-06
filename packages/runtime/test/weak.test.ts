@@ -37,7 +37,7 @@ beforeAll(async () => {
   ]);
 });
 
-test("weakmap runtime: identity keys, no key retain, death splices, no address-reuse resurrection", async () => {
+test("weakmap runtime: identity keys (bytes and untraced arrays), no key retain, death splices, no address-reuse resurrection", async () => {
   const { stderr } = await execFileAsync(bin, []);
   expectCasesPassed(stderr);
 });

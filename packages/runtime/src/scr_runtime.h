@@ -1227,6 +1227,16 @@ typedef struct ScrArr {
   size_t len;
   size_t cap;
   ScrElemKind elem;
+  /* Set once this array has been used as a WeakMap key, never cleared.
+   * Rides the padding between `elem` and the 8-byte-aligned pointers
+   * below, so sizeof(ScrArr) is unchanged -- the same trick
+   * ScrBytes::weakkey uses. Only scr_arr_release reads it.
+   *
+   * ONLY AN UNTRACED ARRAY CAN EVER CARRY THIS. A traced array is a cycle
+   * node whose death can come from the collector without passing through
+   * scr_arr_release, so isSupportedWeakKey refuses it; see the note there
+   * and docs/estado-weakmap-cycle-keys.md. */
+  uint8_t weakkey;
   /* SCR_ELEM_REF only; NULL for every other element kind. elem_trace is
    * non-NULL exactly when the element type carries a cycle header: such
    * arrays are CYCLE-CAPABLE (an element can point back at the array that
@@ -7679,7 +7689,13 @@ size_t scr_bytes_elem_size(ScrBytesElem elem); /* 1, 2, 4, 8 */
  * passing through a release, so the frontend still refuses them. */
 typedef struct ScrWeakMap ScrWeakMap;
 
-ScrWeakMap *scr_weak_new(void *(*val_retain)(void *), void (*val_release)(void *));
+/* key_mark stamps a key so its own free path knows to consult the weak
+ * registry. It is a FUNCTION POINTER and not a switch because the mark
+ * lives in a different struct field per key kind, and writing the wrong
+ * one would be a stray store into unrelated memory. The compiler knows the
+ * key type statically and passes the matching stamp. */
+ScrWeakMap *scr_weak_new(void *(*val_retain)(void *), void (*val_release)(void *),
+                         void (*key_mark)(void *));
 void scr_weak_set(ScrWeakMap *m, void *key, void *val); /* key borrowed, val retained */
 void *scr_weak_get_ref(ScrWeakMap *m, const void *key); /* +1, NULL when absent */
 int scr_weak_has(ScrWeakMap *m, const void *key);
@@ -7701,10 +7717,10 @@ void scr_weak_key_died(void *key);
  * also the state in which no key can carry the mark. */
 extern void (*scr_weak_died_hook)(void *key);
 
-/* Stamps a value as "has been a WeakMap key". Defined in scr_bytes.c
- * because ScrBytes is the only admitted key kind, so the mark has exactly
- * one home; a second key kind would make this a dispatch. */
-void scr_weak_mark_key(void *key);
+/* The per-kind key stamps, one per admitted key kind. Each lives with its
+ * own type because each writes a field only that type has. */
+void scr_bytes_weak_mark(void *key); /* scr_bytes.c */
+void scr_arr_weak_mark(void *key);   /* scr_array.c -- UNTRACED arrays only */
 
 /* Stamp a FRESHLY constructed value (+1, unaliased) with its Node flavor
  * and answer it unchanged — no copy, no refcount step. Marking an aliased

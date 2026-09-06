@@ -168,9 +168,10 @@ bool scr_bytes_is_buffer(const ScrBytes *b, const ScrStr *why) {
  * binary in which no ScrBytes can carry the mark below. */
 void (*scr_weak_died_hook)(void *key) = NULL;
 
-/* The single home of the weak-key mark. ScrBytes is the only key kind the
- * frontend admits, so this is a store and not a dispatch. */
-void scr_weak_mark_key(void *key) {
+/* ScrBytes' weak-key stamp. One per key kind, each living with its own
+ * type, because each writes a field only that type has -- a shared stamp
+ * would be a stray store into whichever struct it guessed wrong. */
+void scr_bytes_weak_mark(void *key) {
   if (key != NULL) ((ScrBytes *)key)->weakkey = 1;
 }
 

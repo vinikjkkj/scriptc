@@ -1603,9 +1603,33 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
           }
           const wvNew = e.type.value;
           const wrcNew = isRefCounted(wvNew) ? vAdapters(wvNew) : null;
+          // The key's own stamp. Per-kind because each writes a field only
+          // that type has; picking wrong is a stray store, not a bad answer.
+          const wkNew = e.type.key;
+          let wMark: string;
+          if (wkNew.kind === "bytes") {
+            wMark = "&scr_bytes_weak_mark";
+          } else if (wkNew.kind === "array") {
+            // THE BOUNDARY, re-checked against the REAL fixpoint. The
+            // frontend predicate under-approximates tracedness from the type
+            // alone (isNeverTracedElem); here the module-level answer is
+            // available, so the two are made to agree. A traced array reaching
+            // this point would be a weak key whose collector death nothing
+            // observes -- a wrong answer rather than a leak -- so it is an
+            // emitter bug and not a silent demotion.
+            if (E.traceAdapterC(wkNew.elem) !== null) {
+              throw new Error(
+                "emitter bug: WeakMap key is a TRACED array — its death can come " +
+                  "from the collector, which scr_arr_release never sees (phase 3)",
+              );
+            }
+            wMark = "&scr_arr_weak_mark";
+          } else {
+            throw new Error(`emitter bug: WeakMap key kind ${wkNew.kind} has no stamp`);
+          }
           return E.newTemp(
             e.type,
-            `scr_weak_new(${wrcNew ? `&${wrcNew.retain}` : "NULL"}, ${wrcNew ? `&${wrcNew.release}` : "NULL"})`,
+            `scr_weak_new(${wrcNew ? `&${wrcNew.retain}` : "NULL"}, ${wrcNew ? `&${wrcNew.release}` : "NULL"}, ${wMark})`,
           );
         }
         // Empty map: the runtime stores the value kind's RC entry points as
