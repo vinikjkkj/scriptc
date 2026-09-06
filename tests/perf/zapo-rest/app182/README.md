@@ -55,10 +55,47 @@ entries are called `zapo-rest.ts`. Built into one directory they both write
 other's toolchain is still reading. A distinct `-o` filename is NOT enough;
 it must be a distinct directory.
 
-## Status at the time of writing
+## Status — measured 2026-09-06
 
-1.8.2 does not compile yet: 77 diagnostics against 0 on the 1.6.2 arm. The
-WeakMap group (12 of the 20) is fixed; `AsyncIterator`
-(`util/proto-stream.ts:64`, 1 root plus 24 cascade) and `zlib.createUnzip`
-(`client/persistence/history-blob.ts:102`) are owned by other blocks, and
-both sit on the streamed history-sync path that motivated the bump.
+Both numbers below are STRICT builds (no `--best-effort`, which defers
+refusals into runtime throws and would read low for no reason), counted by
+call site off the build log with
+
+```sh
+rg -a -c ' - error SC[0-9]{4}: ' <log>
+```
+
+and cross-checked against the compiler's own `N errors.` summary line. Both
+arms exit non-zero, so neither has a fence count — **n/a, not 0**.
+
+| revision | log bytes | sites | roots | cascade (SC2004) |
+|---|---|---|---|---|
+| `2197c855` (this directory's own commit) | 38,934 | **65** | 45 | 20 |
+| `0c5e3821` (main, four walls later) | 21,595 | **29** | 19 | 10 |
+
+The 77 that first motivated the bump was taken one commit earlier, before
+`9cd9bffa` closed the 12-site WeakMap group: 77 − 12 = the 65 recorded here.
+
+**37 sites closed, 1 uncovered, 28 unchanged** (65 − 37 + 1 = 29). Closed:
+all 25 of `util/proto-stream.ts` (the `AsyncIterator` root at `:64` and the
+`ProtoStreamReader` method wall it cascaded into), the 3 of
+`client/persistence/history-blob.ts` (`zlib.createUnzip`), the 4 of
+`transport/binary/decoder.ts` (`WeakMap<readonly string[], …>`), the 4
+`.startsWith`-with-position sites in `protocol/jid.ts` and
+`transport/binary/encoder.ts`, and `media/crypto/WaMediaCrypto.ts:508`
+(`copyWithin`). Uncovered: `util/proto-stream.ts:256` — `stack.length -= 1`,
+which the old `AsyncIterator` wall reached first and so hid.
+
+Remaining per file (sites): `crypto/nativeBackend.ts` 9,
+`transport/node/builders/privacy.ts` 5, `signal/session/encoding.ts` 4,
+`signal/session/SignalProtocol.ts` 4, `protocol/abprops.ts` 2, and one each in
+`client/coordinators/WaMessageDispatchCoordinator.ts`,
+`client/coordinators/WaPrivacyCoordinator.ts`, `client/events/privacy.ts`,
+`transport/binary/encoder.ts` and `util/proto-stream.ts`.
+
+The streamed history-sync path — `openHistoryBlobStream` inflating through
+`createUnzip`, then `streamProtoFields` walking it through
+`ProtoStreamReader` — is **one diagnostic away**: `history-blob.ts`,
+`history-sync.ts` and the `ProtoStreamReader` class are all clean, and the
+only refusal left on the path is the `stack.length -= 1` inside
+`streamProtoFields` itself.
