@@ -248,11 +248,11 @@ const platform = process.platform;
 
 /** A default-built hello-world: no regex, no engine. */
 export const STATIC_CLASS_MAX =
-  platform === "linux" ? 400_192 : platform === "win32" ? 679_424 : 369_192;
+  platform === "linux" ? 405_824 : platform === "win32" ? 685_056 : 374_824;
 
 /** A program that uses regex: libregexp + libunicode, never the engine. */
 export const REGEX_CLASS_MAX =
-  platform === "linux" ? 554_728 : platform === "win32" ? 821_248 : 521_728;
+  platform === "linux" ? 559_848 : platform === "win32" ? 826_368 : 526_848;
 
 /* ── the ARMED half of the guard ───────────────────────────────────────
  *
@@ -1158,13 +1158,200 @@ export const SIZE_DRIFT_PAGE = 4_096;
  * SCRIPTC_TARGET=x86_64-windows-gnu, per the trap recorded above: 0.15.2
  * builds this same base at 649,728, ~20 KB under, and reading either
  * column with it would invert the sign of this entry. */
-export const STATIC_CLASS_RECORDED = platform === "win32" ? 671_232 : null;
+/* 2026-09-06 - +5,632 STATIC OVER FIVE MERGES, AND NOT ONE BYTE OF IT IS A
+ * NEW TRANSLATION UNIT. The pair fired twice with the same complaint
+ * (island.test.ts's "static hello-world" and regex.test.ts's "regex-free
+ * program" are the same `console.log("hello","world")` weighed by two
+ * suites), reporting +4,608 against an anchor that four feature merges had
+ * landed on top of; a fifth (the cycle-arena rewrite) landed while this was
+ * being bisected and is accounted for at the end. The first job was to find
+ * out how much of the page was any of them. Bisected first-parent over the
+ * merges and then inside the one that moved, one build per revision, dist
+ * rebuilt at each, both classes weighed:
+ *
+ *                                            static    regex
+ *   c605b623  the recorded anchor           671,232  813,056
+ *   9cf90415  base of the four merges       673,792  816,128   +2,560/+3,072
+ *   9cd9bffa  WeakMap (the runtime)         673,792  816,128       +0/+0
+ *   3e2da583  startsWith with a position    674,816  816,640   +1,024/+512
+ *   57e47cbb  Uint8Array.copyWithin         675,840  817,152   +1,024/+512
+ *   ac387d76  untraced arrays as weak keys  675,840  817,152       +0/+0
+ *   22e9110f  the merge of those four       675,840  817,152       +0/+0
+ *   1eae4328  closure-in-Map + valueOf      673,792  816,128       +0/+0
+ *   a7f960cb  createUnzip / scr_zlib_stream 675,840  817,152       +0/+0
+ *   0c5e3821  AsyncIterator                 675,840  817,152       +0/+0
+ *   e7fde0b0  main, when the pair fired     675,840  817,152
+ *   bc266f01  the cycle-arena rewrite       676,864  818,176   +1,024/+1,024
+ *
+ * THE ANCHOR REPRODUCES TO THE BYTE on both classes, which is what makes
+ * the rest of the table readable: there is no toolchain difference between
+ * this run and the run that recorded 671,232 / 813,056, so every delta
+ * above is somebody's code.
+ *
+ * The split, said plainly:
+ *
+ *   +2,560 static / +3,072 regex   DRIFT, spent before any of the four
+ *                                  merges existed, silent because each is
+ *                                  under one SIZE_DRIFT_PAGE
+ *   +2,048 static / +1,024 regex   two features, in two commits
+ *   +1,024 static / +1,024 regex   the cycle-arena rewrite
+ *   ------
+ *   +5,632 / +5,120
+ *
+ * The fifth time this file records a bound reached mostly by drift, and
+ * the ratio is the same as every previous time: the features cost half of
+ * what the gap since the last recording cost.
+ *
+ * WHERE THE DRIFT WENT, because "drift" with no owner is how this pair
+ * stopped meaning anything before. Per-TU, anchor vs. the base of the four
+ * merges, comparing the object files the hello-world actually links (one
+ * fresh SCRIPTC_CACHE_DIR per revision, so each obj/ directory holds
+ * exactly that program's units and nothing else):
+ *
+ *   scr_async.o   .text 36,329 -> 38,268   +1,939   .bss +56
+ *   scr_cycle.o   .text  3,755 ->  3,890     +135   .bss +8
+ *
+ * and nothing else moved by a byte. That is the fiber-pool decay's
+ * follow-ups (4df29af9 turning it off by default, faced718 retiming the
+ * window, dae1f8f0 separating live stacks from pooled ones) plus the cycle
+ * arena's budget (5b5d2266). Both are always-linked TUs; a hello-world
+ * pays them and cannot reach them, same as everything else here.
+ *
+ * WHERE THE FEATURES WENT, same method, base of the four merges vs. main:
+ *
+ *   scr_bytes.o   .text 31,873 -> 32,657   +784   .bss +8
+ *   scr_string.o  .text 26,360 -> 27,148   +788
+ *   scr_array.o   .text 12,847 -> 12,923    +76
+ *
+ * +1,648 bytes of always-linked .text, which PE file alignment plus the
+ * matching .pdata/.xdata/.rdata turns into the +2,048 the binary gains.
+ * THE UNIT SETS ARE IDENTICAL on both sides -- twenty objects, the same
+ * twenty names -- so no program that could not reach a unit started
+ * linking one. Per function, sized from sorted .text addresses:
+ *
+ *   scr_bytes_copy_within    NEW   624   the whole of 57e47cbb
+ *   scr_str_starts_with_at   NEW   704   the whole of 3e2da583
+ *   scr_bytes_release         96 -> 128  +32   \  the WeakMap death hook,
+ *   scr_arr_release          240 -> 272  +32   |  and the two key stamps
+ *   scr_bytes_weak_mark      NEW    16         |  it needs; 104 bytes that
+ *   scr_arr_weak_mark        NEW    16         |  cost the binary ZERO --
+ *   scr_weak_died_hook       NEW     8 (.bss)  /  they land in padding
+ *
+ * (The three "growths" a naive symbol diff also reports -- scr_strdec_tail
+ * +112, scr_str_decode_uri_component +84, scr_arr_trap_oob +28 -- are each
+ * the LAST text symbol in their object and grew by exactly the tail
+ * alignment. They are not code. Check for that before attributing bytes to
+ * a function nobody touched.)
+ *
+ * WHERE THE CYCLE-ARENA REWRITE WENT, measured the same way after it
+ * landed as bc266f01 (625 changed lines in scr_cycle.c, the arena handing
+ * chunks back to the allocator instead of holding them behind a budget):
+ *
+ *   scr_cycle.o   .text 3,890 -> 4,586   +696   .data +328   .bss -16
+ *
+ * and, again, nothing else moved and no unit appeared or disappeared. 696
+ * bytes of code plus 328 of data is the +1,024 both classes gain.
+ *
+ * The arena block measured its own branch at +512 on the static class and
+ * called the guard passed. That is not wrong so much as not transferable:
+ * it branched from 9cf90415, without the four merges above, and those
+ * merges left the always-linked .text on a different 512-byte grain. The
+ * same source change is +512 there and +1,024 here. This file has recorded
+ * the same trap from the other side three times (deltas measured on
+ * different trees do not add); it holds for a single delta measured on the
+ * wrong tree too. Weigh a size change on the tree it will merge INTO.
+ *
+ * THE WeakMap GATE IS REAL, AND IT WAS CHECKED IN BOTH DIRECTIONS rather
+ * than believed. scr_weak.c is link-gated on moduleUsesWeakMap (cc.ts's
+ * `weak`), and the claim to test was that a program which cannot construct
+ * a WeakMap does not link it. Negative control: the hello-world's obj
+ * cache holds twenty units and scr_weak.o is not among them. Positive
+ * control, which is the half that makes the negative one mean anything:
+ * tests/corpus/7782-weakmap-uint8array-identity-keys.ts through the same
+ * compile() builds twenty-two units and scr_weak.o IS there, 1,806 bytes
+ * of .text and 8 of .bss. A program that uses the feature pays for it and
+ * a program that cannot reach it does not. This is a COST, not the defect
+ * the failure message invites you to look for.
+ *
+ * ONE CLAIM IN THE SOURCE WAS WRONG, and it is corrected in nodes.ts
+ * beside this. moduleUsesWeakMap's doc comment said a program with no
+ * WeakMap "keeps its exact link line and pays zero bytes -- and ... its
+ * scr_bytes_release stays byte-identical to the pre-WeakMap runtime as
+ * well." The link line half is true and now proven. The byte-identical
+ * half is false: the death-hook test compiles into scr_bytes_release
+ * unconditionally (only the hook's INSTALLATION is gated, which is the
+ * whole point of reaching it through a pointer), and the function is 96
+ * bytes before and 128 after. It cost the binary nothing because 104 bytes
+ * fit in the padding that was already there -- but "fell inside padding"
+ * and "byte-identical" are different statements, and only one of them
+ * survives the next TU that shifts the grain.
+ *
+ * WHAT THE 2,048 BOUGHT, since that is the question this file exists to
+ * answer. scr_str_starts_with_at (704 bytes) is String.prototype.startsWith
+ * with a position argument, which is a UTF-16 index and not a byte offset:
+ * it clamps and converts through scr_sidx/scr_u16_to_byte_c exactly the way
+ * scr_str_index_of does, because `startsWith(n, p)` and `indexOf(n, p) == p`
+ * are the same question and a program can ask it both ways. Most of the 704
+ * is those two helpers inlined, not the seven lines of logic.
+ * scr_bytes_copy_within (624 bytes) is Uint8Array.prototype.copyWithin, an
+ * overlapping in-place memmove with three relative-index clamps -- again,
+ * mostly scr_bytes_rel_index inlined three times.
+ *
+ * NEITHER IS GATED, on this file's standing precedent rather than by
+ * default: the win32 link line carries no -ffunction-sections and no
+ * --gc-sections (the 2026-08-17 entry established that the flags recover 48
+ * bytes and that this runtime's dead code is dead by PROGRAM reachability,
+ * which only a gate can see), so recovering 704 or 624 bytes would take a
+ * new link-gated TU per method. The scr_url.c gate recovered 16,384; the
+ * toString slot's 384 was recorded rather than gated for the same reason.
+ * These two sit in the same bracket. Recorded, deliberately, and whoever
+ * needs them back now knows the function names and the byte counts.
+ *
+ * THE REGEX HALF WAS OVER TOO, AND NOBODY SAW IT. At the revision that
+ * fired, 817,152 - 813,056 = 4,096 exactly, and recordedSizeComplaint fails
+ * at `>= page`, so the regex figure was as red as the static one; it is
+ * 5,120 over by bc266f01. It never printed: regex.test.ts asserts the
+ * STATIC complaint on the line before the regex one and vitest stops a test
+ * at its first failed expect, so the louder failure masked its neighbour.
+ * Both are re-anchored here. If a future reader fixes a static overrun by
+ * nudging one number, this is the trap -- measure the second class before
+ * assuming it is green.
+ *
+ * The two classes moved by DIFFERENT amounts again (+5,632 against +5,120),
+ * for the fifth time in this file, so neither figure below is derived from
+ * the other; both were weighed at every revision in the table. The class
+ * DISTANCE the ceilings protect is 141,312 bytes, untouched by any of this
+ * -- a 2 KB feature cannot hide a 140 KB library or a 620 KB engine.
+ *
+ * Ceilings move by the win32 rule (RECORDED + 2 x SIZE_DRIFT_PAGE), which
+ * this file has now failed to apply four times and paid for it each time:
+ *
+ *     685,056 = 676,864 + 8,192      826,368 = 818,176 + 8,192
+ *
+ * The ceilings this change inherited were RECORDED + 8,192 for the pair
+ * BEFORE this one, i.e. RECORDED + 2,560 and RECORDED + 3,072 as of
+ * bc266f01 -- both already inside a drift page of firing first with the
+ * uninformative message the loud pair exists to replace.
+ *
+ * linux and darwin cannot be weighed from this box, so theirs move by
+ * exactly what this costs here (+5,632 static, +5,120 regex), which
+ * preserves each platform's existing headroom rather than inventing new
+ * headroom for a platform nobody measured. Every byte identified above is
+ * always-linked C those platforms compile too; only the rounding is win32's.
+ *
+ * Measured with zig 0.16.0 (<zapo-work>/tools/zig) and
+ * SCRIPTC_TARGET=x86_64-windows-gnu, per the trap recorded above -- and
+ * that trap is why the anchor was re-measured at c605b623 first instead of
+ * trusting the recorded number: chocolatey's 0.15.2 on this box builds the
+ * same tree ~20 KB smaller, and a bisect run with it would have put every
+ * revision in the table under the anchor and read as a shrink. */
+export const STATIC_CLASS_RECORDED = platform === "win32" ? 676_864 : null;
 
 /** The regex program, same run, same tree. Deliberately NOT derived from
  * the static delta - and the 2026-08-24 entry is why: that change moved the
  * two classes by -7,680 and -6,656, so deriving either from the other would
  * have been 1,024 bytes wrong. */
-export const REGEX_CLASS_RECORDED = platform === "win32" ? 813_056 : null;
+export const REGEX_CLASS_RECORDED = platform === "win32" ? 818_176 : null;
 
 /** The complaint a recorded-figure check makes, or null when the size is
  * within one page of what was recorded. A string rather than a thrown

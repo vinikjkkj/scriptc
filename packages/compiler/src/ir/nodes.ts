@@ -9687,10 +9687,23 @@ export function moduleUsesSymbol(mod: IrModule): boolean {
  * The TYPE check is the whole test and is enough: a WeakMap value cannot
  * exist without a weakmap-typed expression somewhere (its construction, its
  * local, or its field), and every operation on one goes through a receiver
- * of that type. A program with no WeakMap keeps its exact link line and
- * pays zero bytes — and, because scr_weak_new is what installs the death
- * hook, its scr_bytes_release stays byte-identical to the pre-WeakMap
- * runtime as well. */
+ * of that type.
+ *
+ * A program with no WeakMap keeps its exact link line, and that half is now
+ * MEASURED rather than argued (tests/harness/size-class.ts, 2026-09-06): a
+ * hello-world compiles twenty runtime units and scr_weak.o is not among
+ * them, while tests/corpus/7782 compiles twenty-two and it is — 1,806 bytes
+ * of .text that only a program using the feature pays.
+ *
+ * An earlier version of this comment also claimed scr_bytes_release stays
+ * BYTE-IDENTICAL to the pre-WeakMap runtime, and that part was wrong. Only
+ * the hook's INSTALLATION is gated (scr_weak_new does it); the
+ * `weakkey && scr_weak_died_hook` test compiles into scr_bytes_release and
+ * scr_arr_release unconditionally, and they are 96/240 bytes before and
+ * 128/272 after. With the two key stamps and the hook pointer that is 104
+ * bytes every binary carries. It cost the static class ZERO because it fell
+ * inside padding that was already there — which is a different statement,
+ * and only one of the two survives the next unit that shifts the grain. */
 export function moduleUsesWeakMap(mod: IrModule): boolean {
   let found = false;
   const visit = (v: unknown): void => {
