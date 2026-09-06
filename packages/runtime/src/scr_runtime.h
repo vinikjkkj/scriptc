@@ -2224,6 +2224,18 @@ ScrStream *scr_stream_new_duplex(double rhwm, double whwm, bool auto_destroy,
     ScrClosure *write, ScrStreamChunkInv write_inv,
     ScrClosure *final_cb, ScrStreamPlainInv final_inv,
     ScrClosure *destroy, ScrStreamErrInv destroy_inv);
+/* The GENERIC native backing on a stream's state: an opaque pointer the
+ * constructing unit owns plus its destructor, run on BOTH teardown paths.
+ * scr_stream.c never inspects the payload -- node:zlib's streaming
+ * inflaters (scr_zlib_stream.c) hang their persistent z_stream here, so
+ * the stream unit names no zlib symbol and a gunzipSync-only program
+ * keeps its exact link line. */
+void scr_stream_set_ext(ScrStream *s, void *ext, void (*drop)(void *ext));
+void *scr_stream_ext(const ScrStream *s);
+/* Stamp the display name (a borrowed string literal) over the one the
+ * constructor set -- "Unzip" on a Transform, the way Node names it. */
+void scr_stream_set_cls(ScrStream *s, const char *cls);
+
 ScrStream *scr_stream_new_transform(double rhwm, double whwm, bool auto_destroy,
     bool emit_close, bool allow_half_open, bool readable_side, bool writable_side,
     ScrClosure *transform, ScrStreamChunkInv transform_inv,
@@ -8437,6 +8449,26 @@ ScrBytes *scr_zlib_deflate_raw(const ScrBytes *data);
 ScrBytes *scr_zlib_inflate_raw(const ScrBytes *data);
 ScrPromise *scr_zlib_deflate_raw_async(const ScrBytes *data);
 ScrPromise *scr_zlib_inflate_raw_async(const ScrBytes *data);
+
+/* ── node:zlib STREAMING decompression (scr_zlib_stream.c ─ its own TU,
+ * linked only when a create* appears on the IR, because it bridges zlib
+ * to scr_stream.c and a one-shot gunzipSync program must not owe the
+ * linker the whole stream engine) ──────────────────────────
+ * A Transform (+1) owning a z_stream that SURVIVES between writes, so a
+ * deflate block split across chunk boundaries decompresses without the
+ * caller ever holding the whole member. `mode` is scr_zlib_inflate_mode's
+ * (0 zlib / 1 raw / 2 gzip / 3 auto-detect), so createInflate is 0,
+ * createInflateRaw 1, createGunzip 2, createUnzip 3. Concatenated gzip
+ * members are inflated in sequence (Node's gunzip does); a stream that
+ * ends mid-member errors with Node's Z_BUF_ERROR "unexpected end of
+ * file" at flush. */
+ScrStream *scr_zlib_new_inflate_stream(double mode);
+/* The four the backends map, one symbol each over no arguments. */
+ScrStream *scr_zlib_create_inflate(void);
+ScrStream *scr_zlib_create_inflate_raw(void);
+ScrStream *scr_zlib_create_gunzip(void);
+ScrStream *scr_zlib_create_unzip(void);
+
 void scr_zlib_island_install(void);
 
 /* ── node:net (scr_net.c — compiled and linked ONLY when the program

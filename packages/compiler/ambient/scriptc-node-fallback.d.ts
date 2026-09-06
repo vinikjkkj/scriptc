@@ -2083,6 +2083,13 @@ declare module "zlib" {
   export function inflateSync(data: Uint8Array): Buffer;
   export function gzipSync(data: string | Uint8Array): Buffer;
   export function gunzipSync(data: Uint8Array): Buffer;
+  /* Lowered since the gzip twins landed, but the fallback never grew the
+   * declarations, so a corpus program could only reach them through
+   * @types/node. Declared now: unzipSync auto-detects zlib vs gzip
+   * framing, and the Raw pair is headerless DEFLATE. */
+  export function unzipSync(data: Uint8Array): Buffer;
+  export function deflateRawSync(data: string | Uint8Array): Buffer;
+  export function inflateRawSync(data: Uint8Array): Buffer;
   /* The CALLBACK compressor, declared for the one thing it is used for
    * here: `promisify(deflate)`. `level` is the only option with a lowering
    * (it changes the output bytes, so it reaches the codec); an options
@@ -2095,6 +2102,17 @@ declare module "zlib" {
     options: ZlibOptions,
     callback: (err: Error | null, result: Buffer) => void,
   ): void;
+  /* The STREAMING decompressors. Node types each as its own Transform
+   * subclass (Unzip/Gunzip/Inflate/InflateRaw); nothing anybody writes
+   * against them distinguishes one from a Transform, and this compiler
+   * lowers them to that class, so the fallback declares the class they
+   * actually are. Pipe them, pipeline them, or for-await them; errors
+   * (corrupt bytes, a stream that ends mid-member) arrive as the stream's
+   * 'error' event, not as a throw from the call. */
+  export function createInflate(): import("stream").Transform;
+  export function createInflateRaw(): import("stream").Transform;
+  export function createGunzip(): import("stream").Transform;
+  export function createUnzip(): import("stream").Transform;
 }
 declare module "node:zlib" {
   export * from "zlib";

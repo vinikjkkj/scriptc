@@ -9449,6 +9449,18 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/6120-zlib-create-unzip-stream.ts": {
+   "order": [
+    "<repo>/tests/corpus/6120-zlib-create-unzip-stream.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/6121-zlib-unzip-stream-teardown.ts": {
+   "order": [
+    "<repo>/tests/corpus/6121-zlib-unzip-stream-teardown.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/6180-immortal-undefined-and-unit-arm-temps.ts": {
    "order": [
     "<repo>/tests/corpus/6180-immortal-undefined-and-unit-arm-temps.ts"

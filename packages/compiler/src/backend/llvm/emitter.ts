@@ -458,6 +458,12 @@ const LIB_FN_SYMS: Record<string, string> = {
   "zlib.unzipAsync": "scr_zlib_unzip_async",
   "zlib.deflateRawSync": "scr_zlib_deflate_raw",
   "zlib.inflateRawSync": "scr_zlib_inflate_raw",
+  // The streaming decompressors (scr_zlib_stream.c): a %Transform out,
+  // no arguments in — the mode rides the symbol, like gunzip vs unzip.
+  "zlib.createInflate": "scr_zlib_create_inflate",
+  "zlib.createInflateRaw": "scr_zlib_create_inflate_raw",
+  "zlib.createGunzip": "scr_zlib_create_gunzip",
+  "zlib.createUnzip": "scr_zlib_create_unzip",
   "zlib.deflateRawAsync": "scr_zlib_deflate_raw_async",
   "zlib.inflateRawAsync": "scr_zlib_inflate_raw_async",
   // The CA-store unit. get/set throw (an unknown type name, a

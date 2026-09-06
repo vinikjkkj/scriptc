@@ -90,6 +90,13 @@ const RUNTIME_UNIT_DEPS: Readonly<Record<string, readonly string[]>> = {
   "scr_ws_global.c": ["scr_tls.c", "scr_url.c", "scr_ws_client.c"],
   "scr_ws_dispatch.c": ["scr_net.c", "scr_url.c", "scr_websocket.c", "scr_ws_client.c", "scr_ws_global.c"],
   "scr_zlib_island.c": ["scr_zlib.c"],
+  // The streaming decompressors: zlib on one side (inflate, inflateReset,
+  // inflateEnd), the Transform machinery on the other
+  // (scr_stream_new_transform, scr_stream_push, scr_stream_transform_done,
+  // scr_stream_flush_done, scr_stream_destroy_done, scr_stream_set_ext).
+  // The conjunction seam, scr_http_body.c's shape — split out precisely
+  // so neither half pays for a program that uses only the other.
+  "scr_zlib_stream.c": ["scr_stream.c", "scr_zlib.c"],
 };
 
 /** The edges an SCR_DYNAMIC build ADDS (the island exists only there, and
@@ -247,6 +254,19 @@ export interface CcOptions {
    * compares round-trips and fixed-blob inflation, never raw deflate
    * output. */
   zlib?: boolean;
+  /** The program builds a STREAMING zlib decompressor — createUnzip /
+   * createGunzip / createInflate / createInflateRaw (moduleUsesZlibStream
+   * on the IR): compiles scr_zlib_stream.c, the bridge unit that hangs a
+   * persistent z_stream off a Transform. Gated on its own use rather than
+   * folded into either half it joins, the scr_http_body.c pattern — a
+   * gunzipSync-only program must not owe the linker scr_stream.c, and a
+   * stream program with no zlib must not owe it libz. Implies BOTH `zlib`
+   * and `stream`: ir/nodes.ts guarantees it (every one of the four fns
+   * starts with "zlib." for moduleUsesZlib, and moduleUsesStream reads
+   * the same isZlibStreamFn predicate), and RUNTIME_UNIT_DEPS holds the
+   * edge so a gate that drifts fails at SELECTION with the gate named,
+   * not at the linker with a bare symbol. */
+  zlibStream?: boolean;
   bigint?: boolean;
   asym?: boolean;
   cipher?: boolean;
@@ -1465,6 +1485,11 @@ export async function compileLibArchive(opts: LibArchiveOptions): Promise<void> 
     ...(opts.requireVerdict ? ["scr_require.c"] : []),
     ...(opts.searchParams ? ["scr_url_params.c"] : []),
     ...(opts.emitter ? ["scr_events_emitter.c", "scr_dyn_handle.c"] : []),
+    // scr_zlib_stream.c is deliberately absent: it needs scr_stream.c,
+    // and library mode has no stream surface at all (no `stream` gate
+    // above), so a zlibStream archive could not be link-closed. A library
+    // that wants a streaming inflater exports the one-shot codec and lets
+    // the embedder's own stream do the framing.
     ...(opts.zlib ? ["scr_zlib.c"] : []),
     ...(opts.bigint ? ["scr_bigint.c"] : []),
     ...(opts.asym ? ["scr_asym.c"] : []),
@@ -2111,6 +2136,9 @@ export async function compileC(opts: CcOptions): Promise<void> {
           ? ["-I", vendorZlibDir(), ...zlibObjects]
           : ["-lz"]
         : []),
+    // The zlib ↔ stream bridge (createUnzip and friends). The -I/-lz it
+    // needs already rode the zlib arm above, which this gate implies.
+    ...(opts.zlibStream ? [rt(join(rtDir, "scr_zlib_stream.c"))] : []),
     // The zlib ↔ island bridge: only when BOTH halves are in the build
     // (the scr_inspect_island.c pattern) — the emitted main calls its
     // installer exactly then.

@@ -999,6 +999,48 @@ export function fsStreamClassOf(
   return declared ? irName : null;
 }
 
+/** node:zlib's STREAMING decompressor classes -> `%Transform`, the same
+ * type-only claim fsStreamClassOf makes for fs.ReadStream and for the
+ * same reason. Node declares `class Unzip extends Transform` (via
+ * ZlibBase) and the runtime backs createUnzip with exactly that value:
+ * a Transform with native _transform/_flush/_destroy over the shared
+ * machinery (scr_zlib_create_unzip). Every stream operation an Unzip
+ * supports is a Transform operation, so the honest static type IS the
+ * base class.
+ *
+ * Separate from runtimeStreamClassOf for the reason spelled out there:
+ * that function also drives the VALUE mapping, and answering from it
+ * would make `new Unzip()` compile as the options-object Transform
+ * constructor and `x instanceof Unzip` answer true for any Transform --
+ * a quiet wrong answer in both directions. Constructing and testing
+ * these four keep their fences; only createUnzip and friends mint one.
+ *
+ * The zlib-only surface Node hangs on them (bytesWritten, close(),
+ * flush(), params(), reset()) is not implemented and keeps fencing at
+ * its use site.
+ *
+ * The ambient module must be "zlib": nothing else declares these four
+ * names, but the check costs one walk and keeps the rule uniform. */
+export function zlibStreamClassOf(
+  decls: readonly ts.Node[],
+  symbolName: string | undefined,
+  isStdlibFile: (sf: ts.SourceFile) => boolean,
+): string | null {
+  if (
+    symbolName !== "Unzip" && symbolName !== "Gunzip" &&
+    symbolName !== "Inflate" && symbolName !== "InflateRaw"
+  ) {
+    return null;
+  }
+  const declared = decls.some(
+    (d) =>
+      ts.isClassDeclaration(d) &&
+      isStdlibFile(d.getSourceFile()) &&
+      isDeclaredInAmbientModule(d, "zlib"),
+  );
+  return declared ? "%Transform" : null;
+}
+
 function isDeclaredInAmbientModule(d: ts.Declaration, name: string): boolean {
   let node: ts.Node | undefined = d.parent;
   while (node) {
@@ -3488,7 +3530,10 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
       ? runtimeStreamClassOf(checker.declarationsOf(psym), psym.name, ctx.isStdlibFile) ??
         // node:fs's own two — the base class they extend (fsStreamClassOf
         // explains why this is a type-only claim).
-        fsStreamClassOf(checker.declarationsOf(psym), psym.name, ctx.isStdlibFile)
+        fsStreamClassOf(checker.declarationsOf(psym), psym.name, ctx.isStdlibFile) ??
+        // node:zlib's four streaming decompressors -- the Transform they
+        // extend, the fsStreamClassOf claim applied to zlib.
+        zlibStreamClassOf(checker.declarationsOf(psym), psym.name, ctx.isStdlibFile)
       : null;
     if (irName) return { kind: "object", className: irName };
   }

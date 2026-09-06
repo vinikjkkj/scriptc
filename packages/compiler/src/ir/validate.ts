@@ -1062,6 +1062,13 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "zlib.inflateRawSync": { argTypes: [BYTES_U8], result: BYTES_U8 },
   "zlib.deflateRawAsync": { argTypes: [BYTES_U8], result: { kind: "promise", inner: BYTES_U8 } },
   "zlib.inflateRawAsync": { argTypes: [BYTES_U8], result: { kind: "promise", inner: BYTES_U8 } },
+  // The streaming decompressors: no arguments (an options object fences
+  // at the call), and a %Transform out — the same class `new Transform()`
+  // makes, so every downstream stream lowering accepts it unchanged.
+  "zlib.createInflate": { argTypes: [], result: { kind: "object", className: "%Transform" } },
+  "zlib.createInflateRaw": { argTypes: [], result: { kind: "object", className: "%Transform" } },
+  "zlib.createGunzip": { argTypes: [], result: { kind: "object", className: "%Transform" } },
+  "zlib.createUnzip": { argTypes: [], result: { kind: "object", className: "%Transform" } },
   "process.stdoutWriteBytes": { argTypes: [BYTES_U8], result: BOOL },
   "process.stderrWriteBytes": { argTypes: [BYTES_U8], result: BOOL },
   "fsp.readFile": { argTypes: [STRING, STRING], result: { kind: "promise", inner: STRING } },
