@@ -2498,6 +2498,10 @@ export type IrArrIntrinsicMethod =
  * exception (rather than the static tier's deliberate index traps). */
 export const MAY_THROW_ARR_METHODS: ReadonlySet<IrArrIntrinsicMethod> = new Set([
   "with",
+  // `a.length = n` runs ArraySetLength's validity gate before it stores:
+  // a negative, fractional, NaN or >= 2^32 length is a catchable
+  // RangeError, thrown with the array untouched.
+  "setLength",
 ]);
 
 /** The Map method/property surface (mirrors ambient/scriptc.d.ts) plus the

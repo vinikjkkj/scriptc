@@ -20946,6 +20946,130 @@ export function compoundCombine(
   return null;
 }
 
+/** The split a compound assignment lowers to: statements that must run
+ * FIRST (`pre` — receiver temps, empty for every field spelling), the
+ * VALUE the operation yields, and the WRITE that stores it. `numericRead`
+ * is the ToNumeric read plus its combine, present only where the slot has
+ * one — the inc/dec-in-value-position path needs the OLD value and cannot
+ * recover it from the new. */
+interface CompoundParts {
+  pre?: IrStmt[];
+  natural: IrExpr;
+  write: (v: IrExpr) => IrStmt;
+  numericRead?: CompoundCombine["numericRead"];
+}
+
+/** Is `n` a numeric literal spelling a value strictly greater than zero?
+ * `a.length -= 1` and `a.length -= 2` are the shapes this proves; anything
+ * whose value is a runtime fact (an identifier, arithmetic, a unary minus)
+ * is not. */
+function positiveNumericLiteral(n: ts.Expression): boolean {
+  return ts.isNumericLiteral(n) && Number(n.text) > 0;
+}
+
+/** `a.length op= e` (and `a.length++` / `a.length--`, rhs null ≡ 1) — the
+ * COMPOUND spelling of the `.length` store lower-stmts already lowers
+ * through `arrIntrinsic setLength`. Null when the target is not an
+ * ARRAY's `length`, so the caller falls through to the field paths.
+ *
+ * Why it cannot ride the ordinary field path: `length` is not a declared
+ * FIELD of anything. `fieldTarget` answers null for it and the compound
+ * path's last line refuses with SC1090. The PLAIN assignment never met
+ * that wall because lower-stmts claims `a.length = n` before any field
+ * path runs; the compound form had no such claim, and `stack.length -= 1`
+ * (zapo-js 1.8.2's `util/proto-stream.ts:256`) is the spelling that found
+ * it.
+ *
+ * The RECEIVER is evaluated ONCE, into a hidden local, and both the read
+ * and the write go through that local — so `getStack().length -= 1` calls
+ * `getStack` exactly once, which is JS's reference model (the
+ * MemberExpression is evaluated to a Reference, that reference is read,
+ * the RHS runs, and the SAME reference is written). That is strictly more
+ * than the surrounding field machinery promises: `fieldCompoundParts`
+ * restricts itself to identifier/`this` receivers precisely because its
+ * `write` RE-LOWERS the receiver expression. Nothing here re-lowers
+ * anything, so the restriction does not apply and computed receivers are
+ * admitted.
+ *
+ * The local's initializer comes back as `pre`, NOT folded into the read:
+ * an `arrIntrinsic` emits its RECEIVER before its arguments, so a varDecl
+ * hidden inside the value would run after the write's receiver reference
+ * had already read the (still empty) slot. Callers place `pre` first.
+ *
+ * ORDER: the read is the LEFT operand of the combine and the RHS the
+ * right, and `bin` emits left before right — so a right-hand side that
+ * mutates the array (`a.length -= (a.push(1), 1)`) sees the length Node
+ * would have read. The write is the caller's, placed after the value.
+ *
+ * GROWTH: assigning a larger length appends holes, and a hole has no
+ * representation for a SCALAR element (0/false/"" would read where Node
+ * reads undefined) — the same wall `a.length = n` fences. Which arm runs
+ * is a runtime fact for most operators, so on a scalar-element array only
+ * the operator forms that CANNOT grow are admitted: `--` and `-=` by a
+ * positive literal, both of which land strictly below the current length.
+ * Everything else on such an array keeps the plain path's refusal. */
+function arrayLengthCompoundParts(
+  L: Lowerer,
+  access: ts.PropertyAccessExpression | ts.ElementAccessExpression,
+  op: CompoundOp,
+  rhsNode: ts.Expression | null,
+  loc: SrcLoc,
+): CompoundParts | null {
+  if (!ts.isPropertyAccessExpression(access)) return null;
+  if (access.questionDotToken !== undefined) return null;
+  if (access.name.text !== "length") return null;
+  if (L.mapTypeOf(L.typeOf(access.expression))?.kind !== "array") return null;
+  // Past the checker gate the path is COMMITTED (nothing below answers
+  // null), so lowering the receiver here cannot strand a diagnostic on a
+  // shape some other arm would have taken. The lowered value's own type is
+  // what the temp and the intrinsics are typed against — the checker's
+  // mapped type gates, it does not decide the representation.
+  const recv = L.lowerExpr(access.expression);
+  if (recv.type.kind !== "array") L.unsupported("SC1090", access, "compound '.length' assignment through this receiver");
+  const arrT = recv.type;
+
+  // The scalar-element growth wall, in the compound spelling.
+  const elem = arrT.elem;
+  const growable = elem.kind === "union" ? L.wrappedUndefined(elem, loc) !== null : isRefCounted(elem);
+  const provenShrink = op === "-" && (rhsNode === null || positiveNumericLiteral(rhsNode));
+  if (!growable && !provenShrink) {
+    L.noLowering(
+      `compound '.length' assignment on '${L.fmt(elem)}'-element arrays`,
+      access,
+      "a length that GROWS would read 0/false/empty where Node reads undefined, and only " +
+        "'a.length--' and 'a.length -= <positive literal>' are provably shrinks — " +
+        "assign 0 to clear, assign the wanted length directly, or rebuild the array",
+    );
+  }
+
+  // ONE evaluation of the receiver, pinned in a hidden local that `pre`
+  // initializes ahead of everything else.
+  const slot = L.declareHiddenLocal("%lenRecv", arrT);
+  const recvRef = (): IrExpr => ({ kind: "varRef", localId: slot.id, type: arrT, loc });
+  const pre: IrStmt[] = [{ kind: "varDecl", localId: slot.id, init: recv, loc }];
+  const read: IrExpr = { kind: "arrIntrinsic", method: "length", receiver: recvRef(), args: [], type: F64, loc };
+  const rhs: IrExpr = rhsNode ? L.lowerExpr(rhsNode) : { kind: "numLit", value: 1, type: F64, loc };
+  const combined = compoundCombine(L, op, read, rhs, F64, access, access, rhsNode ?? access, loc, rhsNode === null);
+  if (!combined) L.unsupported("SC1043", access);
+  return {
+    pre,
+    natural: combined.natural,
+    ...(combined.numericRead ? { numericRead: combined.numericRead } : {}),
+    write: (v) => ({
+      kind: "exprStmt",
+      expr: {
+        kind: "arrIntrinsic",
+        method: "setLength",
+        receiver: recvRef(),
+        args: [combined.toSlot(v)],
+        type: VOID,
+        loc,
+      },
+      loc,
+    }),
+  };
+}
+
 /** `obj.f op= e` (and `obj.f++` with rhs null ≡ 1) — the element spelling
    * `obj[k] op= e` included when k is a declared symbol-keyed field, split
    * into the VALUE the operation yields and the WRITE that stores it.
@@ -20959,9 +21083,19 @@ export function compoundCombine(
   export function fieldCompoundParts(L: Lowerer, access: ts.PropertyAccessExpression | ts.ElementAccessExpression,
     op: CompoundOp,
     rhsNode: ts.Expression | null,
-    loc: SrcLoc,): { natural: IrExpr; write: (v: IrExpr) => IrStmt; numericRead?: CompoundCombine["numericRead"] } {
+    loc: SrcLoc,): CompoundParts {
     if (access.expression.kind === ts.SyntaxKind.SuperKeyword) {
       L.unsupported("SC1090", access, "compound assignment through 'super' (read and write separately)");
+    }
+    // `a.length op= e` is not a FIELD compound at all — `length` has no
+    // field target, so every arm below refuses it. It is the `setLength`
+    // store the plain assignment already lowers, read-modify-written over
+    // one evaluation of the receiver; claimed BEFORE the computed-receiver
+    // fence because that fence exists for a re-lowering write this path
+    // does not perform.
+    {
+      const len = arrayLengthCompoundParts(L, access, op, rhsNode, loc);
+      if (len) return len;
     }
     if (!ts.isIdentifier(access.expression) && access.expression.kind !== ts.SyntaxKind.ThisKeyword) {
       L.unsupported("SC1090", access, "compound assignment to fields of computed receivers");
@@ -21049,7 +21183,14 @@ export function compoundCombine(
     rhsNode: ts.Expression | null,
     loc: SrcLoc,): IrStmt {
     const parts = fieldCompoundParts(L, access, op, rhsNode, loc);
-    return parts.write(parts.natural);
+    const write = parts.write(parts.natural);
+    // `pre` (the array-length path's receiver temp) has to run before the
+    // write's own receiver reference is emitted — an arrIntrinsic emits
+    // its receiver ahead of its arguments, so folding the temp into the
+    // value would read the slot one statement too early.
+    return parts.pre && parts.pre.length > 0
+      ? { kind: "block", body: [...parts.pre, write], loc }
+      : write;
   }
 
 /** `obj.f++` / `--obj.f` in VALUE position (`buf[this.pos++]` — the byte
@@ -21097,6 +21238,7 @@ export function compoundCombine(
     return {
       kind: "seqExpr",
       stmts: [
+        ...(parts.pre ?? []),
         { kind: "varDecl", localId: oldTmp.id, init: numeric.read, loc },
         { kind: "varDecl", localId: newTmp.id, init: numeric.combine(oldRef()), loc },
         parts.write(newRef()),
@@ -21120,7 +21262,11 @@ export function compoundCombine(
     const ref = (): IrExpr => ({ kind: "varRef", localId: tmp.id, type, loc });
     return {
       kind: "seqExpr",
-      stmts: [{ kind: "varDecl", localId: tmp.id, init: parts.natural, loc }, parts.write(ref())],
+      stmts: [
+        ...(parts.pre ?? []),
+        { kind: "varDecl", localId: tmp.id, init: parts.natural, loc },
+        parts.write(ref()),
+      ],
       result: ref(),
       type,
       loc,

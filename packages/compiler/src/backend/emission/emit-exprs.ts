@@ -1165,6 +1165,12 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             const want = E.emitExpr(e.args[0]!);
             const elemT = e.receiver.type.elem;
             const fill = E.absentElemC(elemT);
+            // ArraySetLength's validity gate FIRST: a negative, fractional,
+            // NaN or >= 2^32 length is Node's catchable RangeError and the
+            // array is left untouched, so the pending check sits between
+            // the gate and the two arms.
+            E.line(`scr_arr_length_gate(${want.name});`);
+            E.emitPendingCheck();
             E.line(`scr_arr_truncate(${r.name}, ${want.name});`);
             const g = `sc_i${E.tempCounter++}`;
             E.line(`for (double ${g} = scr_arr_len(${r.name}); ${g} <= ${want.name} - 1; ${g} += 1) {`);

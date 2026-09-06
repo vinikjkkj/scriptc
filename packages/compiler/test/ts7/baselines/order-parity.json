@@ -10773,9 +10773,45 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/7782-weakmap-uint8array-identity-keys.ts": {
+   "order": [
+    "<repo>/tests/corpus/7782-weakmap-uint8array-identity-keys.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/7783-primitive-valueof-identity.ts": {
    "order": [
     "<repo>/tests/corpus/7783-primitive-valueof-identity.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/7783-startswith-with-a-position.ts": {
+   "order": [
+    "<repo>/tests/corpus/7783-startswith-with-a-position.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/7784-typedarray-copywithin.ts": {
+   "order": [
+    "<repo>/tests/corpus/7784-typedarray-copywithin.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/7785-weakmap-untraced-array-keys.ts": {
+   "order": [
+    "<repo>/tests/corpus/7785-weakmap-untraced-array-keys.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/7786-compound-length-assignment.ts": {
+   "order": [
+    "<repo>/tests/corpus/7786-compound-length-assignment.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/7787-a-streaming-protobuf-descent-stack.ts": {
+   "order": [
+    "<repo>/tests/corpus/7787-a-streaming-protobuf-descent-stack.ts"
    ],
    "diags": []
   },
@@ -12551,6 +12587,12 @@
   "<repo>/tests/diagnostics/var-fences.ts": {
    "order": [
     "<repo>/tests/diagnostics/var-fences.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/weakmap-traced-array-key.ts": {
+   "order": [
+    "<repo>/tests/diagnostics/weakmap-traced-array-key.ts"
    ],
    "diags": []
   },
