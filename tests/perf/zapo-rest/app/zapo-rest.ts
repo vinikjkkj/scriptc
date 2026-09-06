@@ -50,6 +50,21 @@ const DB_PATH = envStr("ZAPO_DB", "zapo-state.sqlite");
 const DEFAULT_SESSION = envStr("ZAPO_SESSION", "default");
 const EVENT_BUFFER = envNum("ZAPO_EVENT_BUFFER", 1000);
 const AUTOCONNECT = envStr("ZAPO_AUTOCONNECT", "1") !== "0";
+/* A clean exit route, off by default.
+ *
+ * Every allocation-census instrument under tests/perf writes its report
+ * from atexit, or from the _Exit interposer those headers install. This
+ * service had no route out of the process: the memory rigs SIGKILL the
+ * child, so a census of the SETTLED heap - the state that matters for the
+ * retention question, minutes after a history sync - could never be
+ * dumped at all. One HTTP route fixes that for every such instrument at
+ * once, and it costs a shipped service nothing because the route does not
+ * exist unless ZAPO_REST_ALLOW_SHUTDOWN=1. */
+const ALLOW_SHUTDOWN = envStr("ZAPO_REST_ALLOW_SHUTDOWN", "0") !== "0";
+/* The exit is deferred by one timer turn so the response is written and
+ * the socket flushed before the process goes; a caller that read
+ * {"stopping":true} knows the exit was accepted. */
+const SHUTDOWN_DELAY_MS = envNum("ZAPO_REST_SHUTDOWN_MS", 250);
 
 /* ── the WebSocket push endpoint's dials ───────────────────────────────── */
 
@@ -1477,6 +1492,17 @@ async function registryRoute(method: string, path: string, p: Bag): Promise<unkn
  * serialized as {"ok":true,"result":...}. */
 async function route(method: string, path: string, p: Bag, sess: Session): Promise<unknown> {
   /* ── service ────────────────────────────────────────────────────────── */
+  if (path === "/shutdown") {
+    if (!ALLOW_SHUTDOWN) {
+      return { stopping: false, note: "set ZAPO_REST_ALLOW_SHUTDOWN=1 to enable /shutdown" };
+    }
+    const code = num(p, "code") !== undefined ? reqNum(p, "code") : 0;
+    setTimeout(() => {
+      console.log(`[shutdown] exiting with code ${code}`);
+      process.exit(code);
+    }, SHUTDOWN_DELAY_MS);
+    return { stopping: true, code, afterMs: SHUTDOWN_DELAY_MS };
+  }
   if (path === "/health") {
     return {
       ok: true,
