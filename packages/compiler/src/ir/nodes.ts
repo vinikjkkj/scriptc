@@ -4434,6 +4434,18 @@ export type IrLibFn =
   | "zlib.inflateRawSync"
   | "zlib.deflateRawAsync"
   | "zlib.inflateRawAsync"
+  /** node:zlib's STREAMING decompressors (scr_zlib_stream.c — its own
+   * unit, gated on these four, because it bridges zlib to scr_stream.c
+   * and a gunzipSync-only program must not owe the linker the stream
+   * engine). Each answers a `%Transform` owning a z_stream that survives
+   * between writes, so a member split across chunk boundaries inflates
+   * with a 16 KiB peak instead of a whole-payload one. Errors reach the
+   * consumer as a stream 'error', never a throw — the streaming
+   * counterpart of the one-shot forms' catchable throw. */
+  | "zlib.createInflate"
+  | "zlib.createInflateRaw"
+  | "zlib.createGunzip"
+  | "zlib.createUnzip"
   /** The Buffer overloads of the raw stream writes — same promptly
    * submitted streams as process.stdoutWrite/stderrWrite, constantly true. */
   | "process.stdoutWriteBytes"
@@ -8976,6 +8988,44 @@ export function moduleUsesEmitter(mod: IrModule): boolean {
   return found;
 }
 
+/** The four lib fns scr_zlib_stream.c implements. Named once because
+ * THREE gates read it and they must agree: moduleUsesStream (link
+ * scr_stream.c), moduleUsesZlib (link scr_zlib.c + libz), and
+ * moduleUsesZlibStream (link the bridge unit itself). The
+ * moduleEmbedsNetIsland lesson — three readers of one predicate that
+ * disagreed produced a binary that linked a bridge it never registered. */
+function isZlibStreamFn(fn: string): boolean {
+  return (
+    fn === "zlib.createInflate" || fn === "zlib.createInflateRaw" ||
+    fn === "zlib.createGunzip" || fn === "zlib.createUnzip"
+  );
+}
+
+/** True when the program builds a streaming zlib decompressor — the link
+ * switch for scr_zlib_stream.c, which bridges the two units it is gated
+ * beside (scr_zlib.c through moduleUsesZlib, since every one of these fns
+ * starts with "zlib."; scr_stream.c through moduleUsesStream, which reads
+ * the same predicate). The scr_http_body.c shape: a bridge TU gated on
+ * its own use so neither half it joins pays for it. */
+export function moduleUsesZlibStream(mod: IrModule): boolean {
+  let found = false;
+  const visit = (v: unknown): void => {
+    if (found || v === null || typeof v !== "object") return;
+    if (Array.isArray(v)) {
+      for (const item of v) visit(item);
+      return;
+    }
+    const node = v as { kind?: unknown; fn?: unknown };
+    if (node.kind === "libCall" && typeof node.fn === "string" && isZlibStreamFn(node.fn)) {
+      found = true;
+      return;
+    }
+    for (const key of Object.keys(v)) visit((v as Record<string, unknown>)[key]);
+  };
+  visit(mod);
+  return found;
+}
+
 /** True when the program touches the node:stream surface (scr_stream.c —
  * the moduleUsesEmitter story: the class defs ride the module whenever a
  * stream-typed value exists, and every stream libCall names its unit).
@@ -9008,6 +9058,15 @@ export function moduleUsesStream(mod: IrModule): boolean {
         // program whose only stream is a createReadStream still links it.
         node.fn === "fs.readStream" || node.fn === "fs.writeStream" ||
         node.fn === "fs.readStreamOpts" || node.fn === "fs.writeStreamOpts" ||
+        // node:zlib's create* answer a %Transform built by
+        // scr_zlib_stream.c out of scr_stream.c's constructor, so a
+        // program whose only stream is a createUnzip() still links the
+        // stream unit. The class-def test above answers true for the
+        // common case (a %Transform-typed value pulls the class defs in),
+        // but this walk is what the fs.readStream row exists for and the
+        // same hazard applies verbatim: a gate that misses here surfaces
+        // as "undefined symbol: scr_stream_new_transform".
+        isZlibStreamFn(node.fn) ||
         node.fn.startsWith("stream.set"))
     ) {
       found = true;

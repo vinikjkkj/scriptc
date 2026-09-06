@@ -254,6 +254,16 @@ struct ScrStreamState {
    * every other stream (see the fs-backed section at the end of this
    * file). Owned; the state drop closes a still-open fd. */
   struct ScrFsBacking *fs;
+
+  /* The GENERIC native backing: an opaque pointer owned by whichever
+   * unit constructed the stream, plus its destructor. Unlike `fs` above
+   * this unit knows nothing about the payload, which is the point --
+   * node:zlib's streaming inflaters live in scr_zlib_stream.c and hang
+   * their persistent z_stream here, so scr_stream.c never names a zlib
+   * symbol and a gunzipSync-only program keeps its exact link line.
+   * NULL (with a NULL drop) on every other stream. */
+  void *ext;
+  void (*ext_drop)(void *ext);
 };
 
 /* ── vtables and RC ───────────────────────────────────────────────────── */
@@ -351,6 +361,9 @@ static void scr_stream_state_drop(ScrStreamState *st, bool gc) {
   free(st->pipes.end);
   free(st->drain_srcs.src);
   scr_fs_backing_drop(st->fs); /* closes a still-open fd — no leak on any path */
+  /* The generic native backing (scr_zlib_stream.c's inflater today):
+   * runs on BOTH teardown paths, so an inflateEnd is never skipped. */
+  if (st->ext_drop != NULL) st->ext_drop(st->ext);
   free(st);
 }
 
@@ -2006,6 +2019,25 @@ ScrStream *scr_stream_new_passthrough(double rhwm, double whwm, bool auto_destro
   if (transform != NULL) s->st->is_transform = true;
   return s;
 }
+
+/* The GENERIC native backing: set once by the constructing unit, dropped
+ * on both teardown paths. `drop` may be NULL for a payload that needs no
+ * teardown; setting twice drops the previous one, which no caller does
+ * today but keeps the slot from silently leaking if one ever did. */
+void scr_stream_set_ext(ScrStream *s, void *ext, void (*drop)(void *)) {
+  ScrStreamState *st = s->st;
+  if (st->ext_drop != NULL && st->ext != ext) st->ext_drop(st->ext);
+  st->ext = ext;
+  st->ext_drop = drop;
+}
+
+void *scr_stream_ext(const ScrStream *s) { return s->st->ext; }
+
+/* The display name inspect reads back, so a zlib stream prints as
+ * Unzip/Gunzip/Inflate the way Node's does instead of the bare
+ * "Transform" its constructor stamped. Borrowed: every caller passes a
+ * string literal with static storage. */
+void scr_stream_set_cls(ScrStream *s, const char *cls) { s->cls = cls; }
 
 /* ── subclass initialization (the emitted super(options) call) ────────── */
 

@@ -616,6 +616,16 @@ const PATH_WIN32_MODULE_FNS: Record<string, BuiltinModuleFn | undefined> = {
   toNamespacedPath: { fn: "path.win32ToNamespacedPath", params: [STRING], result: STRING },
 };
 
+/** What node:zlib's create* decompressors answer. Node's Unzip/Gunzip/
+ * Inflate are all `Transform` subclasses and nothing in the consuming
+ * code distinguishes them from one, so they lower to the runtime
+ * `%Transform` class itself rather than four new classes: `pipeline`,
+ * `for await`, `.pipe()`, `.destroy(err)` and the writable half then all
+ * come from the existing stream surface with no new lowering. The
+ * DISPLAY name still reads Unzip/Gunzip/Inflate — scr_zlib_stream.c
+ * stamps it on the instance, the way the fs streams stamp ReadStream. */
+const ZLIB_STREAM_T: IrType = { kind: "object", className: "%Transform" };
+
 export const BUILTIN_MODULE_FNS: Record<string, Record<string, BuiltinModuleFn | undefined> | undefined> = {
   fs: {
     readFileSync: { fn: "fs.readFileSync", params: [STRING, STRING], result: STRING },
@@ -747,6 +757,20 @@ export const BUILTIN_MODULE_FNS: Record<string, Record<string, BuiltinModuleFn |
     unzipSync: { fn: "zlib.unzipSync", params: [BYTES_U8], result: BYTES_U8 },
     deflateRawSync: { fn: "zlib.deflateRawSync", params: [BYTES_U8], result: BYTES_U8 },
     inflateRawSync: { fn: "zlib.inflateRawSync", params: [BYTES_U8], result: BYTES_U8 },
+    // The STREAMING decompressors. Each answers a real %Transform, so
+    // pipeline(), for-await, .pipe() and .destroy(err) all come from the
+    // stream surface unchanged — the only new thing under them is a
+    // z_stream that survives between writes (scr_zlib_stream.c), which is
+    // what lets a member split across chunk boundaries inflate without
+    // anyone holding it whole. No options object lowers: every one of
+    // Node's knobs (chunkSize/windowBits/level/finishFlush) would have to
+    // reach the codec, and an argument at the call site fences by arity.
+    // The COMPRESSING halves (createGzip/createDeflate) have no lowering
+    // — see ZLIB_STREAM_HINT.
+    createInflate: { fn: "zlib.createInflate", params: [], result: ZLIB_STREAM_T },
+    createInflateRaw: { fn: "zlib.createInflateRaw", params: [], result: ZLIB_STREAM_T },
+    createGunzip: { fn: "zlib.createGunzip", params: [], result: ZLIB_STREAM_T },
+    createUnzip: { fn: "zlib.createUnzip", params: [], result: ZLIB_STREAM_T },
   },
   url: {
     // fileURLToPath accepts a URL value OR a string — the call lowering
@@ -1373,6 +1397,17 @@ export function builtinModulesArrayLit(loc: { file: string; start: number; end: 
 export const ZLIB_HINT =
   "deflateSync/inflateSync and the gzip twins (gzipSync, gunzipSync, unzipSync) are the lowered zlib surface";
 
+/** The streaming half's hint: the DEcompressors are Transforms now, the
+ * compressors are not. Compressing incrementally would need a persistent
+ * deflate state plus the level/strategy/flush knobs that decide the
+ * output bytes, and the one-shot forms already cover every compressing
+ * caller here — a compressed payload is produced whole by definition,
+ * where a decompressed one is exactly what you do not want whole. */
+export const ZLIB_STREAM_HINT =
+  "the lowered streaming zlib surface is the DECOMPRESSORS — createUnzip, createGunzip, " +
+  "createInflate, createInflateRaw (each a Transform: pipe it, pipeline it, or for-await it). " +
+  "Compressing has the one-shot forms: gzipSync, deflateSync, deflateRawSync";
+
 /** The loose-equality quartet's shared hint: == coercion has no lowering
  * anywhere in this compiler, and Node itself points at the strict forms. */
 const ASSERT_LOOSE_HINT =
@@ -1527,6 +1562,11 @@ export const BUILTIN_MODULE_FENCE_HINTS: Record<string, Record<string, string | 
   zlib: {
     brotliCompressSync: ZLIB_HINT,
     brotliDecompressSync: ZLIB_HINT,
+    createGzip: ZLIB_STREAM_HINT,
+    createDeflate: ZLIB_STREAM_HINT,
+    createDeflateRaw: ZLIB_STREAM_HINT,
+    createBrotliCompress: ZLIB_STREAM_HINT,
+    createBrotliDecompress: ZLIB_STREAM_HINT,
   },
   http2: {
     connect:

@@ -23,7 +23,7 @@ import { validateSidecar } from "./library/sidecar-validate.js";
 import { entryFunctionExports, type EntryExportInfo } from "./frontend/lib-exports.js";
 import { entryContractFacts, type ContractFacts } from "./frontend/lib-contract.js";
 import { moduleLibAsyncSurface, moduleLibNondeterministicSurface, moduleEmbedsBuiltin, moduleEmbedsNetIsland, moduleEmbedsCompressedNpm, moduleUsesAbortSignal, moduleUsesAssert, moduleUsesChildStream, moduleUsesCopying, moduleUsesDc, moduleUsesDgram, moduleUsesDynAsync, moduleUsesDynInvoke, moduleUsesEmitter, moduleUsesFetch, moduleUsesFetchStatic, moduleUsesFetchDispatch, moduleUsesFileHandle, moduleUsesFsWatch, moduleUsesAbortHttp, moduleUsesHttpBody, moduleUsesHttpPipe, moduleUsesHttp2, moduleUsesHttpServer, moduleUsesInspect, moduleUsesNet, moduleUsesNodeTest, moduleUsesProcessEvents, moduleUsesQs, moduleUsesRegex, moduleUsesRequireVerdict, moduleUsesSearchParams, moduleUsesSqlite, moduleUsesSqliteValue, moduleUsesStream, moduleUsesUrl, moduleUsesSymbol, moduleUsesTls, moduleUsesTlsCa, moduleUsesWsGlobal, moduleUsesWsDispatch, moduleUsesWrtc, moduleUsesDate, moduleUsesBigInt,
-  moduleUsesAsym, moduleUsesCipher, moduleUsesZlib, type IrLibSection, type IrModule, type IrRecordShape, type IrType, type SrcLoc } from "./ir/nodes.js";
+  moduleUsesAsym, moduleUsesCipher, moduleUsesZlib, moduleUsesZlibStream, type IrLibSection, type IrModule, type IrRecordShape, type IrType, type SrcLoc } from "./ir/nodes.js";
 import { serializeModule } from "./ir/serialize.js";
 import { validateModule } from "./ir/validate.js";
 import { canonicalBuiltinModule, checkPreflight, isNodeTypesPath, loadProgram, locOf, requiresOf, resolveNpmImport, type LoadResult } from "./frontend/program.js";
@@ -854,6 +854,11 @@ export async function compile(entryPath: string, opts: CompileOptions): Promise<
       asym: moduleUsesAsym(lowered.module),
       cipher: moduleUsesCipher(lowered.module),
       zlib: moduleUsesZlib(lowered.module) || moduleEmbedsCompressedNpm(lowered.module),
+      // The link switch for scr_zlib_stream.c, the createUnzip bridge.
+      // Narrower than `zlib` above on purpose: it is the only gate that
+      // also pulls scr_stream.c, so a gunzipSync program keeps its exact
+      // link line.
+      zlibStream: moduleUsesZlibStream(lowered.module),
       // The link switch for scr_assert.c: assert.* libCalls on the IR (the
       // regex switch also pulls it — scr_regex.c calls the assert helpers).
       assert: moduleUsesAssert(lowered.module),

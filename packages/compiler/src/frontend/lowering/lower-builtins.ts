@@ -1734,9 +1734,23 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
       const mode = L.lowerExprExpecting(modeNode, F64);
       return { kind: "libCall", fn: "fs.writeFileModeSync", args: [path, data, mode], type: VOID, loc };
     }
-    // zlib takes Buffers; a string argument (the lib admits it) gets the
-    // wrap-it-first hint instead of a generic type mismatch.
+    // zlib's CODECS take Buffers; a string argument (the lib admits it)
+    // gets the wrap-it-first hint instead of a generic type mismatch.
+    // The streaming constructors are not codecs — they take no data at
+    // all, only Node's options object, which has no lowering — so the
+    // Buffer hint would be nonsense there ("createUnzip(Buffer.from(s))"
+    // is not a thing). They get the options story instead.
     if (bi.module === "zlib" && expr.arguments.length >= 1) {
+      if (bi.member.startsWith("create")) {
+        L.noLowering(
+          `${bi.member} with an options object`,
+          expr.arguments[0]!,
+          "the streaming decompressors lower with Node's DEFAULTS only — chunkSize, " +
+            "windowBits, level and finishFlush each change what the codec does and none " +
+            "reaches it yet, so an options object would be silently ignored: call " +
+            `${bi.member}() with no arguments`,
+        );
+      }
       const dataIr = L.mapTypeOf(L.typeOf(expr.arguments[0]!));
       if (!(dataIr?.kind === "bytes" && dataIr.elem === "u8")) {
         L.noLowering(

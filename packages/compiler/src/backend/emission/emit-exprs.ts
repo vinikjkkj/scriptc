@@ -6093,6 +6093,18 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             return finish(`scr_zlib_deflate_raw_async(${arg(0)})`);
           case "zlib.inflateRawAsync":
             return finish(`scr_zlib_inflate_raw_async(${arg(0)})`);
+          // The streaming decompressors (scr_zlib_stream.c). One symbol
+          // taking the MODE, the scr_zlib_gunzip/scr_zlib_unzip shape:
+          // the mode is a constant of the call site, so it belongs on
+          // this side of the boundary rather than on the lib fn.
+          case "zlib.createInflate":
+            return finish(`scr_zlib_create_inflate()`);
+          case "zlib.createInflateRaw":
+            return finish(`scr_zlib_create_inflate_raw()`);
+          case "zlib.createGunzip":
+            return finish(`scr_zlib_create_gunzip()`);
+          case "zlib.createUnzip":
+            return finish(`scr_zlib_create_unzip()`);
           case "process.stdoutWriteBytes":
             return finish(`scr_process_stdout_write_bytes(${arg(0)})`);
           case "process.stderrWriteBytes":

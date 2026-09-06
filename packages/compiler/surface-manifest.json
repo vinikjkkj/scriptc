@@ -1827,6 +1827,70 @@
       "note": "deflateSync/inflateSync and the gzip twins (gzipSync, gunzipSync, unzipSync) are the lowered zlib surface"
     },
     {
+      "id": "node-builtin.zlib.createBrotliCompress",
+      "kind": "node-builtin",
+      "name": "zlib.createBrotliCompress",
+      "status": "unsupported",
+      "code": "SC2020",
+      "note": "the lowered streaming zlib surface is the DECOMPRESSORS — createUnzip, createGunzip, createInflate, createInflateRaw (each a Transform: pipe it, pipeline it, or for-await it). Compressing has the one-shot forms: gzipSync, deflateSync, deflateRawSync"
+    },
+    {
+      "id": "node-builtin.zlib.createBrotliDecompress",
+      "kind": "node-builtin",
+      "name": "zlib.createBrotliDecompress",
+      "status": "unsupported",
+      "code": "SC2020",
+      "note": "the lowered streaming zlib surface is the DECOMPRESSORS — createUnzip, createGunzip, createInflate, createInflateRaw (each a Transform: pipe it, pipeline it, or for-await it). Compressing has the one-shot forms: gzipSync, deflateSync, deflateRawSync"
+    },
+    {
+      "id": "node-builtin.zlib.createDeflate",
+      "kind": "node-builtin",
+      "name": "zlib.createDeflate",
+      "status": "unsupported",
+      "code": "SC2020",
+      "note": "the lowered streaming zlib surface is the DECOMPRESSORS — createUnzip, createGunzip, createInflate, createInflateRaw (each a Transform: pipe it, pipeline it, or for-await it). Compressing has the one-shot forms: gzipSync, deflateSync, deflateRawSync"
+    },
+    {
+      "id": "node-builtin.zlib.createDeflateRaw",
+      "kind": "node-builtin",
+      "name": "zlib.createDeflateRaw",
+      "status": "unsupported",
+      "code": "SC2020",
+      "note": "the lowered streaming zlib surface is the DECOMPRESSORS — createUnzip, createGunzip, createInflate, createInflateRaw (each a Transform: pipe it, pipeline it, or for-await it). Compressing has the one-shot forms: gzipSync, deflateSync, deflateRawSync"
+    },
+    {
+      "id": "node-builtin.zlib.createGunzip",
+      "kind": "node-builtin",
+      "name": "zlib.createGunzip",
+      "status": "static"
+    },
+    {
+      "id": "node-builtin.zlib.createGzip",
+      "kind": "node-builtin",
+      "name": "zlib.createGzip",
+      "status": "unsupported",
+      "code": "SC2020",
+      "note": "the lowered streaming zlib surface is the DECOMPRESSORS — createUnzip, createGunzip, createInflate, createInflateRaw (each a Transform: pipe it, pipeline it, or for-await it). Compressing has the one-shot forms: gzipSync, deflateSync, deflateRawSync"
+    },
+    {
+      "id": "node-builtin.zlib.createInflate",
+      "kind": "node-builtin",
+      "name": "zlib.createInflate",
+      "status": "static"
+    },
+    {
+      "id": "node-builtin.zlib.createInflateRaw",
+      "kind": "node-builtin",
+      "name": "zlib.createInflateRaw",
+      "status": "static"
+    },
+    {
+      "id": "node-builtin.zlib.createUnzip",
+      "kind": "node-builtin",
+      "name": "zlib.createUnzip",
+      "status": "static"
+    },
+    {
       "id": "node-builtin.zlib.deflateRawSync",
       "kind": "node-builtin",
       "name": "zlib.deflateRawSync",
