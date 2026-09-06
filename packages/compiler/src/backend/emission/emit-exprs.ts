@@ -1610,20 +1610,29 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
           if (wkNew.kind === "bytes") {
             wMark = "&scr_bytes_weak_mark";
           } else if (wkNew.kind === "array") {
-            // THE BOUNDARY, re-checked against the REAL fixpoint. The
-            // frontend predicate under-approximates tracedness from the type
-            // alone (isNeverTracedElem); here the module-level answer is
-            // available, so the two are made to agree. A traced array reaching
-            // this point would be a weak key whose collector death nothing
-            // observes -- a wrong answer rather than a leak -- so it is an
-            // emitter bug and not a silent demotion.
-            if (E.traceAdapterC(wkNew.elem) !== null) {
-              throw new Error(
-                "emitter bug: WeakMap key is a TRACED array — its death can come " +
-                  "from the collector, which scr_arr_release never sees (phase 3)",
-              );
-            }
-            wMark = "&scr_arr_weak_mark";
+            // THE FIXPOINT DECIDES THE STAMP, and this is the only place it
+            // can: tracedness is decided by traceAdapterC, a MODULE-level
+            // answer that the frontend's pure-IrType isSupportedWeakKey
+            // cannot reach. It used to decide ADMISSION here too and threw
+            // on a traced array, because before the scr_cyc_free hook such
+            // a key's collector death was unobserved. That hook exists now,
+            // so both shapes are admitted and the only question left is
+            // WHICH FIELD the mark goes in:
+            //
+            //   untraced -> plain malloc, no cycle header. ScrArr::weakkey,
+            //               read by scr_arr_release.
+            //   traced   -> scr_cyc_alloc. SCR_CYC_WEAKKEY in ScrCycHdr,
+            //               read by scr_cyc_free, which is where BOTH its
+            //               deaths land (scr_arr_gc_free from the release,
+            //               and the collector calling that same teardown).
+            //
+            // Getting this backwards is a stray store into a struct that
+            // has no such field (scr_cyc_weak_mark on a headerless array
+            // writes the 6 bytes before it), which is exactly why the stamp
+            // is a per-kind function pointer and not a switch in scr_weak.c.
+            wMark = E.traceAdapterC(wkNew.elem) !== null
+              ? "&scr_cyc_weak_mark"
+              : "&scr_arr_weak_mark";
           } else {
             throw new Error(`emitter bug: WeakMap key kind ${wkNew.kind} has no stamp`);
           }

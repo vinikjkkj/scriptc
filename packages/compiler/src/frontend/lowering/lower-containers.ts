@@ -3578,6 +3578,7 @@ function lowerOptionalDefaultArg(
       const wLoc = locOf(call);
       const wRecv = L.lowerExpr(access.expression);
       if (wRecv.type.kind !== "weakmap") return null;
+      weakKeyArgIsIdentity(L, call.arguments[0]!, receiverIr.key);
       const wKey = L.lowerExprExpecting(call.arguments[0]!, receiverIr.key);
       if (name === "set") {
         const wVal = L.lowerExprExpecting(call.arguments[1]!, receiverIr.value);
@@ -3676,6 +3677,52 @@ function lowerOptionalDefaultArg(
 
 /** The iterator methods the lowering DOES cover — in exactly one context. */
 const MAP_ITER_METHODS = new Set(["keys", "values", "entries"]);
+
+/** A WEAK map's key argument must reach the table as the CALLER'S OWN
+ * ADDRESS. This is the one place a width coercion could be inserted into a
+ * weak key position, and it is where the obligation is discharged.
+ *
+ * WHY THIS IS A SITE CHECK AND NOT A TYPE FENCE. The hazard is not a
+ * property of the key KIND, it is a property of this argument position.
+ * `lowerExprExpecting` runs `coerceToExpected` -> `widthCoerce`, whose
+ * record->record and ARRAY->ARRAY arms both answer a call to a helper that
+ * builds a FRESH value. Under a strong Map that costs a wasted slot and a
+ * lookup that misses -- already measured, on corpus m32, where
+ * `m.set(k1, "a"); m.get(k1)` answered `undefined` (see the inferred-key
+ * fence in lower-classes.ts). Under a WEAK map the same copy is worse: the
+ * entry is keyed on a temporary that dies at the end of the statement, so
+ * the table either holds an entry on an address the allocator is about to
+ * hand out again -- a wrong answer, and precisely the address-reuse hazard
+ * scr_weak.c exists to prevent -- or the death hook fires at once and the
+ * cache can never hit. A silently-useless cache is not an acceptable
+ * outcome either, so the site is refused by name instead.
+ *
+ * The proof is LOCAL: one mapped type against another, no fixpoint and no
+ * whole-program reasoning, checked exactly where the copy would be
+ * inserted. That is why this is the resolution rather than trying to prove
+ * "no coercion can occur" at the `new WeakMap` -- admission happens in
+ * mapType, a pure type->type function that cannot see the call sites, and
+ * the call sites can be in other functions and other modules.
+ *
+ * An unmapped argument type is left alone: `lowerExprExpecting` owns that
+ * diagnostic and names the type, which is the better message. */
+function weakKeyArgIsIdentity(L: Lowerer, arg: ts.Expression, keyT: IrType): void {
+  const argT = L.mapTypeOf(L.checker.getBaseTypeOfLiteralType(L.typeOf(arg)));
+  if (argT === null || typeEquals(argT, keyT)) return;
+  L.unsupported(
+    "SC1090",
+    arg,
+    `a WeakMap key of type '${L.checker.typeToString(L.typeOf(arg))}' on a table whose key ` +
+      `type is different (the two are assignable but not the same shape, so the lowering ` +
+      `would COPY this value to reshape it, and the entry would be keyed on the copy)`,
+    `a weak entry keyed on a copy is keyed on a temporary that dies at the end of the ` +
+      `statement, and the allocator hands its address straight back out — so the table ` +
+      `would either answer a LATER object with this value or lose the entry immediately. ` +
+      `Neither is a cache. Give the key the map's exact type: annotate the binding with it, ` +
+      `or widen the WeakMap's key parameter to the type the callers actually hold. A strong ` +
+      `Map accepts the copy today and misses its own entry when it does`,
+  );
+}
 
 /** `[...m.keys()]` / `[...m.values()]` / `[...m.entries()]` — the iterator
    * methods, lowered ONLY as the operand of a spread inside an array

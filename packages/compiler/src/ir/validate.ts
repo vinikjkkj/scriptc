@@ -2971,6 +2971,13 @@ function validateFunction(
             break;
           }
           for (const a of e.args) checkExpr(a);
+          // TYPE-equal is all this can check, and it is NOT the property the
+          // weak key needs. A width coercion answers a call whose result
+          // type IS the key type -- that is what makes it a coercion -- so a
+          // key that has been copied to reshape it passes here exactly like
+          // one that was not. The property that matters is that the address
+          // reaching the table is the CALLER'S, and it is only observable at
+          // the source site: weakKeyArgIsIdentity, in lower-containers.ts.
           expectType(e.args[0]!, wk, `WeakMap.${e.method} key`);
           if (e.method === "set") expectType(e.args[1]!, wv, "WeakMap.set value");
           break;

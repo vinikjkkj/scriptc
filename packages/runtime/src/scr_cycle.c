@@ -466,7 +466,8 @@ static void scr_cyc_ar_verify(const ScrCycChunk *c, const ScrCycHdr *h) {
   if (c->stride == 0 || off % c->stride != 0) {
     scr_trap("scriptc: cycle arena verify: block off the stride grid\n");
   }
-  if (c->blk != h->blk) {
+  /* Masked: blk's top bit is the weak-key stamp, not part of the class. */
+  if (c->blk != (h->blk & SCR_CYC_BLK_MASK)) {
     scr_trap("scriptc: cycle arena verify: chunk class does not match block\n");
   }
   if (c->used == 0) {
@@ -815,6 +816,22 @@ void *scr_cyc_alloc(size_t size, ScrTraceFn trace, ScrCycFreeFn free_fn) {
 #endif
 }
 
+/* The cycle-headered kinds' weak-key stamp, installed as a ScrWeakMap's
+ * key_mark. Only ever reached for a key the compiler proved carries a
+ * header (see the declaration in scr_runtime.h for why that proof is the
+ * caller's job and not this function's). One OR into a byte the free path
+ * already loads.
+ *
+ * The stamp is not cleared when the last map holding the key drops the
+ * entry — clearing would need a per-key count of how many maps hold it,
+ * and a stale mark costs one wasted registry walk in that key's own free,
+ * never a wrong answer. It IS cleared when the block is recycled, because
+ * scr_cyc_stamp rewrites blk wholesale at every allocation; that half is
+ * mandatory rather than a trade. */
+void scr_cyc_weak_mark(void *key) {
+  if (key != NULL) scr_cyc_hdr(key)->blk |= SCR_CYC_WEAKKEY;
+}
+
 /* THE ROUTE IS DECIDED BY PROVENANCE, AND THAT ORDER IS THE DESIGN. A
  * carved block goes to the chunk that owns it and nowhere else: not to
  * free(), which would corrupt the chunk, and not to the size-class pool,
@@ -825,6 +842,34 @@ void *scr_cyc_alloc(size_t size, ScrTraceFn trace, ScrCycFreeFn free_fn) {
 void scr_cyc_free(void *obj) {
   scr_cyc_live--;
   ScrCycHdr *h = scr_cyc_hdr(obj);
+  /* THE WEAKMAP DEATH HOOK, AND IT IS FIRST ON PURPOSE — before the arena
+   * give-back, before the pool give-back, before free(). All three hand
+   * this address to the next allocation, and a WeakMap entry that outlived
+   * its key by even one allocation is not a leak but a WRONG ANSWER: the
+   * table is keyed by address and the object that lands here next would
+   * read the dead key's value. See scr_weak.c's header.
+   *
+   * THIS IS THE CONVERGENCE POINT, and that is what makes one line enough.
+   * A cycle-headered object dies two ways and only two: ordinary release
+   * to zero, which runs the type's own teardown and ends in scr_cyc_free
+   * (scr_arr_gc_free, the emitted shape gcFrees, ~16 others); and the
+   * collector, whose collectWhite loop calls scr_cyc_free_of(hdr)(obj) —
+   * the same per-type teardown, reached without any release running. Both
+   * arrive here. The release-side hooks in scr_bytes.c and scr_array.c
+   * cover the kinds that never get a header at all.
+   *
+   * WHY THE EVICTION IS SAFE INSIDE THE COLLECTOR'S FREE LOOP, where the
+   * loop's own comment says teardowns must not touch traced (white,
+   * already-accounted) edges. Dropping the entry releases the VALUE, and a
+   * weakmap value can never be white: the weakmap v-adapters register NO
+   * trace (emit-types.ts, deliberately — see the ephemeron note in
+   * scr_weak.c), so markGray never decrements the value's refcount for the
+   * table's reference, so scan sees rc > 0 and blackens it. The one
+   * property that would break this is adding a trace over the values,
+   * which is also the wrong half of ephemeron support on its own. */
+  if ((h->blk & SCR_CYC_WEAKKEY) != 0 && scr_weak_died_hook != NULL) {
+    scr_weak_died_hook(obj);
+  }
   if (h->pad != 0) {
 #ifdef SCR_CYCEN_ON
     scr_cycen_note_free(h, 1, scr_cyc_live);
@@ -832,8 +877,10 @@ void scr_cyc_free(void *obj) {
     scr_cyc_ar_give(h);
     return;
   }
-  if (h->blk != 0 &&
-      scr_pool_give(&scr_cyc_blocks, h, (size_t)h->blk * SCR_POOL_GRAIN)) {
+  /* Masked: the top bit is the stamp above, not part of the size class. */
+  const uint8_t cls = h->blk & SCR_CYC_BLK_MASK;
+  if (cls != 0 &&
+      scr_pool_give(&scr_cyc_blocks, h, (size_t)cls * SCR_POOL_GRAIN)) {
 #ifdef SCR_CYCEN_ON
     scr_cycen_note_free(h, 1, scr_cyc_live);
 #endif

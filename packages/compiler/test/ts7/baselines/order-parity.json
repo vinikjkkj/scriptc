@@ -10803,6 +10803,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/7786-weakmap-traced-array-keys.ts": {
+   "order": [
+    "<repo>/tests/corpus/7786-weakmap-traced-array-keys.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/800-switch-basics.ts": {
    "order": [
     "<repo>/tests/corpus/800-switch-basics.ts"
@@ -12578,9 +12584,9 @@
    ],
    "diags": []
   },
-  "<repo>/tests/diagnostics/weakmap-traced-array-key.ts": {
+  "<repo>/tests/diagnostics/weakmap-refused-keys.ts": {
    "order": [
-    "<repo>/tests/diagnostics/weakmap-traced-array-key.ts"
+    "<repo>/tests/diagnostics/weakmap-refused-keys.ts"
    ],
    "diags": []
   },

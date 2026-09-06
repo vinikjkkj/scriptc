@@ -520,7 +520,33 @@ typedef struct ScrCycHdr {
   /* The block's physical size in SCR_POOL_GRAIN units, stamped by
    * scr_cyc_alloc so scr_cyc_free can hand the block back to the right
    * pool class. SCR_POOL_MAX / SCR_POOL_GRAIN is 32, so a byte holds it
-   * with room. 0 = not pooled, free it. */
+   * with room. 0 = not pooled, free it.
+   *
+   * THE TOP BIT IS THE WEAK-KEY STAMP (SCR_CYC_WEAKKEY), and it rides
+   * here because THIS HEADER HAS NO PADDING LEFT. ScrBytes::weakkey and
+   * ScrArr::weakkey each found a spare byte in their own struct;
+   * ScrCycHdr is exactly 16 bytes with every one of them assigned
+   * (4+4+1+1+1+1+4), and the one byte that used to be slack — `pad` — is
+   * now the block's chunk offset. Growing the header to make room costs
+   * 8 bytes on EVERY cycle-headered object (16 is the last size that
+   * keeps the object pointer 16-byte aligned), which is the trade the
+   * field comments above already refused once.
+   *
+   * `blk` is the one field with real slack and no hot writer. Its value
+   * is in [0, SCR_POOL_MAX / SCR_POOL_GRAIN] = [0, 32] — six bits — and
+   * it is written in exactly one place, scr_cyc_stamp, once per
+   * allocation. color, buffered and buf_index are all written on hot
+   * paths by single-instruction stores that a packed flag would turn
+   * into read-modify-writes, which is the thing their own comments say
+   * must not happen.
+   *
+   * That the stamp is CLEARED by scr_cyc_stamp is not incidental, it is
+   * the correct semantics: a block coming back out of the pool or the
+   * arena is a new object at a recycled address, and it must not inherit
+   * the previous occupant's mark. ScrBytes and ScrArr keep their mark
+   * for life (see the tail of scr_weak.c) because their storage is
+   * malloc'd afresh; a recycled cycle block is the case that argument
+   * does not cover. */
   uint8_t blk;
   uint8_t pad;
   /* Position in the candidate-root buffer (O(1) removal when rc hits 0).
@@ -536,6 +562,15 @@ typedef struct ScrCycHdr {
    * packed into one word. */
   uint32_t buf_index;
 } ScrCycHdr;
+
+/* ScrCycHdr::blk, split. The size class is the low bits; the top bit says
+ * "this object is a WeakMap key, consult the registry before handing the
+ * storage back" (see scr_cyc_free). Every read of the size class masks. */
+#define SCR_CYC_WEAKKEY 0x80u
+#define SCR_CYC_BLK_MASK 0x7fu
+_Static_assert((SCR_POOL_MAX / SCR_POOL_GRAIN) < SCR_CYC_WEAKKEY,
+               "the pool's size-class index no longer fits under "
+               "ScrCycHdr::blk's weak-key bit");
 
 static inline ScrCycHdr *scr_cyc_hdr(void *obj) { return (ScrCycHdr *)obj - 1; }
 
@@ -1234,8 +1269,10 @@ typedef struct ScrArr {
    *
    * ONLY AN UNTRACED ARRAY CAN EVER CARRY THIS. A traced array is a cycle
    * node whose death can come from the collector without passing through
-   * scr_arr_release, so isSupportedWeakKey refuses it; see the note there
-   * and docs/estado-weakmap-cycle-keys.md. */
+   * scr_arr_release; it is an admitted weak key too, but its stamp is
+   * SCR_CYC_WEAKKEY in the cycle header and its hook is in scr_cyc_free.
+   * The compiler picks between the two stamps from the real trace
+   * fixpoint, so exactly one fires. See docs/estado-weakmap-cycle-keys.md. */
   uint8_t weakkey;
   /* SCR_ELEM_REF only; NULL for every other element kind. elem_trace is
    * non-NULL exactly when the element type carries a cycle header: such
@@ -7697,8 +7734,11 @@ size_t scr_bytes_elem_size(ScrBytesElem elem); /* 1, 2, 4, 8 */
  *
  * Keys are restricted to kinds with a single refcount chokepoint the
  * runtime owns; today that is ScrBytes alone. Cycle-allocated kinds
- * (arrays, records, class instances) can die inside the collector without
- * passing through a release, so the frontend still refuses them. */
+ * (records, class instances) can die inside the collector without
+ * passing through a release; a TRACED ARRAY is such a value and is
+ * admitted anyway, because scr_cyc_free is now hooked and both of its
+ * death routes end there. Records and class instances stay refused for
+ * reasons of their own — see isSupportedWeakKey. */
 typedef struct ScrWeakMap ScrWeakMap;
 
 /* key_mark stamps a key so its own free path knows to consult the weak
@@ -7733,6 +7773,18 @@ extern void (*scr_weak_died_hook)(void *key);
  * own type because each writes a field only that type has. */
 void scr_bytes_weak_mark(void *key); /* scr_bytes.c */
 void scr_arr_weak_mark(void *key);   /* scr_array.c -- UNTRACED arrays only */
+/* scr_cycle.c -- every CYCLE-HEADERED key, whatever its type. This one is
+ * shared where the other two are not, and that is not a violation of the
+ * one-stamp-per-kind rule but the point of it: the field it writes lives
+ * in the CYCLE HEADER, which sits at a fixed negative offset from every
+ * cycle-allocated object regardless of what the object is. The rule is
+ * "write only a field this pointer certainly has"; scr_cyc_hdr(obj)->blk
+ * is such a field for every scr_cyc_alloc'd object and for no other.
+ * Passing it a headerless value (an untraced array, an acyclic class
+ * instance) would be the stray store the rule forbids, so the compiler
+ * picks between this and scr_arr_weak_mark from the REAL trace fixpoint,
+ * not from the type alone. */
+void scr_cyc_weak_mark(void *key);
 
 /* Stamp a FRESHLY constructed value (+1, unaliased) with its Node flavor
  * and answer it unchanged — no copy, no refcount step. Marking an aliased

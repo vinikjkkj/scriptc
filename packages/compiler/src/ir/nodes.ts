@@ -55,10 +55,12 @@ export type IrType =
    * requirement rather than a policy — keys are compared by ADDRESS and
    * the string/cycle arenas recycle addresses, so an entry outliving its
    * key would let a later object land on the address and read the dead
-   * key's value. Keys are therefore restricted to kinds with a single
-   * refcount chokepoint the runtime owns (`isSupportedWeakKey`: bytes
-   * today); cycle-allocated kinds can die inside the collector without
-   * passing through a release and are still refused. Values are held
+   * key's value. Keys are therefore restricted to kinds whose death
+   * reaches a chokepoint the runtime owns on EVERY route
+   * (`isSupportedWeakKey`: bytes and arrays today — a traced array's two
+   * routes converge on scr_cyc_free, which is hooked). Records, class
+   * instances and the dyn are still refused, for reasons of their own that
+   * the predicate spells out. Values are held
    * STRONGLY — ephemerons are not implemented, so a value that reaches
    * its own key keeps both alive. See the head of scr_weak.c. */
   | { kind: "weakmap"; key: IrType; value: IrType }
@@ -770,50 +772,59 @@ export function weakMapOf(key: IrType, value: IrType): IrType {
  *
  * The rule here is not "which types have identity" — records and class
  * instances have identity and JS allows them as WeakMap keys — it is
- * "whose death does this runtime observe at a single point it owns".
- * ScrBytes qualifies: `scr_bytes_release` is a plain `--rc == 0` free and
- * ScrBytes is not a cycle node, so the entry can be evicted exactly at
- * death. Arrays, records and class instances are `scr_cyc_alloc` nodes
- * that can also be reclaimed by the collector's collectWhite, which no
- * release-side hook can see; admitting them without a collector hook
- * would produce a table that silently keeps dead keys, which for an
- * address-keyed table is a WRONG ANSWER and not merely a leak. They stay
- * refused until that hook exists. */
+ * "whose death does this runtime observe at a single point it owns" --
+ * on EVERY route the value can die by, not just the common one.
+ *
+ * There are three such chokepoints and they are all hooked:
+ * `scr_bytes_release`, `scr_arr_release`, and -- since phase 3 --
+ * `scr_cyc_free`, which is where BOTH deaths of a cycle-headered object
+ * converge (ordinary release-to-zero runs the type's teardown, which ends
+ * there; the collector's collectWhite calls that same teardown directly).
+ *
+ * WHAT IS STILL REFUSED, and no longer for want of the collector hook:
+ *
+ *  - `record`. A record WIDTH-COERCES. Under a strong Map that costs a
+ *    wasted slot; under a weak one `set(k, v)` would key the entry on the
+ *    coercion's temporary, which dies at the end of the statement -- so
+ *    the table either holds an entry on an address the allocator is about
+ *    to hand out again (a wrong answer, the exact hazard this design
+ *    exists to prevent) or the death hook fires immediately and the cache
+ *    is silently useless. The strong-Map version of this is not
+ *    hypothetical: it was measured on corpus m32 (see the inference fence
+ *    in lower-classes.ts). Records keep the strong-Map ride they have
+ *    today, so nothing that compiles stops compiling.
+ *  - `object` (a class instance). Not for coercion -- an upcast is a
+ *    pointer reinterpret and copies nothing -- but because an ACYCLIC
+ *    class is emitted with `calloc` and a lean one-word header, no cycle
+ *    header at all, and so it never reaches scr_cyc_free. Whether a given
+ *    class is traced is `CEmitter`'s MODULE-level fixpoint, which this
+ *    pure IrType predicate cannot reach; admitting the kind would be
+ *    admitting a value whose safety depends on a fixpoint it cannot see.
+ *    They too keep the strong-Map ride.
+ *  - everything else (map, set, promise, func, dyn, ...). JS allows them;
+ *    no demand, and each owes its own value/ephemeron argument.
+ *
+ * `dyn` deserves its own line because bare `object` in TypeScript maps to
+ * it (types.ts, the NonPrimitive intrinsic) and that is what zapo-js's
+ * `WeakMap<object, Uint8Array>` at signal/session/encoding.ts:229 spells.
+ * A dyn key cannot be keyed on the BOX: the box is a boundary artifact and
+ * `scr_dyn_strict_eq` says so explicitly -- two boxes of one instance are
+ * ===-equal -- so an address-keyed table over boxes would miss every
+ * lookup. Keying on the payload is the sound design and it is a bigger
+ * change than this one: the stamp would have to switch on the runtime
+ * kind (breaking the statically-chosen key_mark), several payload kinds
+ * have no address at all, and set() would need a loud refusal for those. */
 export function isSupportedWeakKey(t: IrType): boolean {
   if (t.kind === "bytes") return true;
-  // An UNTRACED array is a plain refcounted value: scr_arr_new_ref only
-  // routes through scr_cyc_alloc when elem_trace is non-NULL, and
-  // scr_arr_release mirrors it with a free() that never reaches
-  // scr_cyc_free. So an untraced array has the same single death
-  // chokepoint ScrBytes has. A TRACED one is a cycle node the collector
-  // can reclaim without passing through any release, and admitting it
-  // would leave dead keys in an address-keyed table -- a wrong answer.
-  if (t.kind === "array") return isNeverTracedElem(t.elem);
+  // ANY array, traced or not, and the distinction that used to gate this
+  // now only picks the STAMP. An untraced array is a plain malloc whose
+  // one chokepoint is scr_arr_release; a traced one is a cycle node whose
+  // two chokepoints both end at scr_cyc_free. The emitter reads the real
+  // fixpoint and hands scr_weak_new the matching key_mark -- see the weak
+  // arm of mapNew, and note that picking wrong there is a stray store into
+  // a struct that has no such field, not a bad answer.
+  if (t.kind === "array") return true;
   return false;
-}
-
-/** Element kinds that can never carry a cycle header, whatever the
- * emitter's trace fixpoint concludes.
- *
- * WHY A HAND-WRITTEN LIST AND NOT THE FIXPOINT. Tracedness is decided by
- * `CEmitter.traceAdapterC`, which is a MODULE-level fixpoint and not a
- * property of the type alone -- this predicate is a pure IrType function
- * shared with the validator and the frontend, and cannot reach it. So it
- * under-approximates: every kind here is acyclic by construction (a
- * string, a number, a bool and a byte buffer hold no references back), so
- * an array of them is untraced under any fixpoint. Kinds whose answer
- * DEPENDS on the fixpoint -- record, object, union, array, func, dyn,
- * promise, map, set -- are refused here even where the fixpoint would
- * have said untraced. Refusing a key that would have been safe costs a
- * diagnostic; admitting one that is traced costs a wrong answer, so the
- * asymmetry is deliberate.
- *
- * The emitter re-checks this against the real fixpoint and throws if the
- * two ever disagree; see the weak arm of mapNew. */
-function isNeverTracedElem(t: IrType): boolean {
-  return (
-    t.kind === "string" || t.kind === "f64" || t.kind === "bool" || t.kind === "bytes"
-  );
 }
 
 export function setOf(elem: IrType): IrType {
