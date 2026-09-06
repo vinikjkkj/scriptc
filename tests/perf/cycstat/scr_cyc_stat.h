@@ -57,6 +57,19 @@ SCR_CS_SHARED unsigned long long scr_cs_free = 0;    /* ... in the teardowns */
  * a zero there under a starved pool means the branch did not run, which is
  * the one thing a passing test cannot tell you. */
 SCR_CS_SHARED unsigned long long scr_cs_archunk = 0; /* 64 KiB chunks taken */
+/* Chunks GIVEN BACK, which is the one number the old arena could never
+ * report anything but zero for. Read it against `archunk`: chunks - arfree
+ * is what the process still holds, and on a workload whose small-object
+ * population spikes and then settles that difference is the retention the
+ * heap census sees as 65,536-byte busy blocks. A zero here with a non-zero
+ * archunk is not "nothing emptied" unless the live set says so - check
+ * cycensus's live bytes before reading it that way. */
+SCR_CS_SHARED unsigned long long scr_cs_arfree = 0;  /* chunks released */
+/* The HIGH-WATER of chunks held at once, which is the only one of these
+ * four that bounds the retention: chunks-freed says reclamation happened,
+ * chunks-held-at-exit says what is left, and neither says what the process
+ * asked the OS for while it was busy. */
+SCR_CS_SHARED unsigned long long scr_cs_arpeak = 0;
 SCR_CS_SHARED unsigned long long scr_cs_arcarve = 0; /* blocks bump-carved */
 SCR_CS_SHARED unsigned long long scr_cs_arhit = 0;   /* popped off an arena list */
 SCR_CS_SHARED unsigned long long scr_cs_argive = 0;  /* pushed onto one */
@@ -126,9 +139,10 @@ SCR_CS_FN void scr_cs_report(void) {
           (double)scr_cs_tot / 1e6, (double)scr_cs_mark / 1e6,
           (double)scr_cs_scan / 1e6, (double)scr_cs_white / 1e6,
           (double)scr_cs_free / 1e6);
-  fprintf(f, "[cycstat] arena chunks=%llu carved=%llu listhit=%llu"
-             " listgive=%llu callocfallback=%llu\n",
-          scr_cs_archunk, scr_cs_arcarve, scr_cs_arhit, scr_cs_argive,
+  fprintf(f, "[cycstat] arena chunks=%llu freed=%llu held=%llu peakheld=%llu"
+             " carved=%llu listhit=%llu listgive=%llu callocfallback=%llu\n",
+          scr_cs_archunk, scr_cs_arfree, scr_cs_archunk - scr_cs_arfree,
+          scr_cs_arpeak, scr_cs_arcarve, scr_cs_arhit, scr_cs_argive,
           scr_cs_arcalloc);
   if (scr_cs_arcarve == 0) {
     fprintf(f, "[cycstat] ARENA NEVER CARVED - either SCR_CYCLE_ARENA=0 or the"
@@ -196,6 +210,10 @@ SCR_CS_FN void scr_cs_phase_end(unsigned long long *acc) {
 #define SCR_CS_PHASE_END(which) scr_cs_phase_end(&scr_cs_##which)
 #define SCR_CS_ADD(which, n) (scr_cs_##which += (unsigned long long)(n))
 #define SCR_CS_BUMP(which) (scr_cs_##which += 1u)
+#define SCR_CS_MAX(which, n)                                  \
+  ((unsigned long long)(n) > scr_cs_##which                   \
+       ? (void)(scr_cs_##which = (unsigned long long)(n))     \
+       : (void)0)
 #define SCR_CS_ARM() scr_cs_arm()
 
 #else /* not armed: every hook is nothing at all */
@@ -206,6 +224,7 @@ SCR_CS_FN void scr_cs_phase_end(unsigned long long *acc) {
 #define SCR_CS_PHASE_END(which) ((void)0)
 #define SCR_CS_ADD(which, n) ((void)0)
 #define SCR_CS_BUMP(which) ((void)0)
+#define SCR_CS_MAX(which, n) ((void)0)
 #define SCR_CS_ARM() ((void)0)
 
 #endif /* SCR_CYCSTAT_ON */

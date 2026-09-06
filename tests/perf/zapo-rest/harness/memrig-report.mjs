@@ -28,9 +28,18 @@ const phc = join(runRoot, `${tag}.phases.csv`)
 if (!existsSync(csv)) { console.log(`${tag}: NO SAMPLER CSV AT ${csv} — could not look`); process.exit(2) }
 if (!existsSync(phc)) { console.log(`${tag}: NO PHASES CSV AT ${phc} — could not look`); process.exit(2) }
 
+/* THE SAMPLER WRITES FIVE COLUMNS AND A HEADER: ms, workingSet,
+ * privateCommit, pageFaults, cpuMs. This reader used to require EXACTLY
+ * three and no header, which is the shape the PowerShell sampler pmon.exe
+ * replaced wrote — so every row of every real run was filtered out and the
+ * reader reported "0 SAMPLES — the sampler failed". It refused rather than
+ * lying, which is why nothing was quietly believed, but it could never
+ * report a run either. Three or more columns now, header dropped by the
+ * Number.isFinite test on the first field. */
 const rows = readFileSync(csv, 'utf8').trim().split(/\r?\n/)
     .map((l) => l.split(',').map(Number))
-    .filter((r) => r.length === 3 && Number.isFinite(r[0]))
+    .filter((r) => r.length >= 3 && Number.isFinite(r[0]) &&
+        Number.isFinite(r[1]) && Number.isFinite(r[2]))
 const phases = readFileSync(phc, 'utf8').trim().split(/\r?\n/).slice(1)
     .map((l) => { const i = l.indexOf(','); return { ms: Number(l.slice(0, i)), p: l.slice(i + 1) } })
 if (!rows.length) { console.log(`${tag}: 0 SAMPLES — the sampler failed; this is not a zero`); process.exit(2) }
