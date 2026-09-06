@@ -2765,6 +2765,8 @@ export class CEmitter {
       // A peer connection and a data channel are objects too.
       case "rtcPeerConnection":
       case "rtcDataChannel":
+      // A WeakMap is a JS object: always truthy.
+      case "weakmap":
         return `${t.name} != NULL`;
       case "void":
         throw new Error("emitter bug: truthiness of void");

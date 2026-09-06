@@ -163,9 +163,28 @@ bool scr_bytes_is_buffer(const ScrBytes *b, const ScrStr *why) {
   return b->flavor == SCR_BF_BUFFER;
 }
 
+/* Installed by scr_weak_new; see the note on the declaration. NULL in
+ * every binary that never constructs a WeakMap, which is also every
+ * binary in which no ScrBytes can carry the mark below. */
+void (*scr_weak_died_hook)(void *key) = NULL;
+
+/* The single home of the weak-key mark. ScrBytes is the only key kind the
+ * frontend admits, so this is a store and not a dispatch. */
+void scr_weak_mark_key(void *key) {
+  if (key != NULL) ((ScrBytes *)key)->weakkey = 1;
+}
+
 void scr_bytes_release(ScrBytes *b) {
   if (!b || b->rc == SIZE_MAX) return; /* NULL: an uninitialized `let` local */
   if (--b->rc == 0) {
+    /* BEFORE any storage goes back, so no WeakMap can still be holding
+     * this address when it stops naming this object. Doing it later —
+     * in a sweep, at a seam, anywhere — would let a recycled address be
+     * found under the dead key's entry and return the previous
+     * occupant's value: a wrong answer, not a leak. The full argument is
+     * at the head of scr_weak.c. Two loads on the cold rc == 0 path, and
+     * only for a value that has actually been a key. */
+    if (b->weakkey && scr_weak_died_hook != NULL) scr_weak_died_hook(b);
     if (b->backing) {
       scr_bytes_release(b->backing); /* a view: data points into the owner */
     } else {

@@ -18,7 +18,7 @@ import type {
   IrUnionDef,
   SrcLoc,
 } from "./nodes.js";
-import { settleOrValuePromiseTag, arrayOf, BOOL, BYTES_U8, bytesOf, canAdaptDynFuncTo, canDynCheckTo, canConvertToDyn, canExitIslandToType, canMarshalIntoIsland, canMarshalTypedFuncIntoIsland, CHILD_T, CHILDSTREAM_T, DGRAMSOCK_T, DV_BIG_SET_METHODS, DYN, DYN_HANDLE_KINDS, F64, ABORTCONTROLLER_T, ABORTSIGNAL_T, FILEHANDLE_T, FSWATCHER_T, HTTP2SESSION_T, HTTP2STREAM_T, HTTPCLIENTREQ_T, HTTPREQ_T, HTTPRES_T, HEADERS_T, REQUESTINIT_T, RESPONSE_T, islandPromisePayloadTag, isJsonSafeType, isRefCounted, isSupportedIndexValue, isSupportedMapKey, isSupportedMapValue, isSupportedSetElem, isUnitType, jsOpResultKind, JSVAL, NETSERVER_T, NETSOCKET_T, PROCSTREAM_T, REF_TRUTHY_KINDS, REGEX, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, SEARCH_PARAMS_T, SECURECTX_T, SPAWNRES_T, RTCPEERCONNECTION_T, RTCDATACHANNEL_T, SQLITEDB_T, SQLITESTMT_T, STATS_T, streamDuplexWidensToWritable, STRING, SYMBOL_T, TESTCTX_T, typeEquals, typeKey, unionFuncSetArmsOk, URL_T, VOID, wsGlobalPlan } from "./nodes.js";
+import { settleOrValuePromiseTag, arrayOf, BOOL, BYTES_U8, bytesOf, canAdaptDynFuncTo, canDynCheckTo, canConvertToDyn, canExitIslandToType, canMarshalIntoIsland, canMarshalTypedFuncIntoIsland, CHILD_T, CHILDSTREAM_T, DGRAMSOCK_T, DV_BIG_SET_METHODS, DYN, DYN_HANDLE_KINDS, F64, ABORTCONTROLLER_T, ABORTSIGNAL_T, FILEHANDLE_T, FSWATCHER_T, HTTP2SESSION_T, HTTP2STREAM_T, HTTPCLIENTREQ_T, HTTPREQ_T, HTTPRES_T, HEADERS_T, REQUESTINIT_T, RESPONSE_T, islandPromisePayloadTag, isJsonSafeType, isRefCounted, isSupportedIndexValue, isSupportedMapKey, isSupportedMapValue, isSupportedWeakKey, isSupportedSetElem, isUnitType, jsOpResultKind, JSVAL, NETSERVER_T, NETSOCKET_T, PROCSTREAM_T, REF_TRUTHY_KINDS, REGEX, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, SEARCH_PARAMS_T, SECURECTX_T, SPAWNRES_T, RTCPEERCONNECTION_T, RTCDATACHANNEL_T, SQLITEDB_T, SQLITESTMT_T, STATS_T, streamDuplexWidensToWritable, STRING, SYMBOL_T, TESTCTX_T, typeEquals, typeKey, unionFuncSetArmsOk, URL_T, VOID, wsGlobalPlan } from "./nodes.js";
 
 /** Per-method signature for strIntrinsic: `argTypes` lists every argument
  * position (optional ones included); `minArgs` is how many may be omitted
@@ -2908,6 +2908,24 @@ function validateFunction(
         break;
       }
       case "mapNew": {
+        // A WeakMap construction rides this node. Its own fences differ:
+        // the key must be a kind whose death the runtime observes
+        // (isSupportedWeakKey, narrower than isSupportedMapKey), the value
+        // must be refcounted (a scalar has no pointer to hold), and there
+        // is never a seed — WeakMap takes no iterable in anything this
+        // compiles.
+        if (e.type.kind === "weakmap") {
+          if (!isSupportedWeakKey(e.type.key)) {
+            err(`weak mapNew key kind ${e.type.key.kind} (frontend must fence)`, e.loc);
+          }
+          if (!isSupportedMapValue(e.type.value) || !isRefCounted(e.type.value)) {
+            err(`weak mapNew value kind ${e.type.value.kind} (frontend must fence)`, e.loc);
+          }
+          if ((e.seed?.length ?? 0) !== 0) {
+            err("weak mapNew carries a seed", e.loc);
+          }
+          break;
+        }
         if (e.type.kind !== "map") {
           err(`mapNew must be map-typed, got ${e.type.kind}`, e.loc);
           break;
@@ -2929,6 +2947,25 @@ function validateFunction(
       }
       case "mapIntrinsic": {
         checkExpr(e.receiver);
+        if (e.receiver.type.kind === "weakmap") {
+          // get/set/has only — the rest cannot be answered honestly by a
+          // table whose entries vanish with their keys.
+          if (e.method !== "get" && e.method !== "set" && e.method !== "has") {
+            err(`WeakMap.${e.method} has no weak lowering (frontend must fence)`, e.loc);
+            break;
+          }
+          const wk = e.receiver.type.key;
+          const wv = e.receiver.type.value;
+          const wantArgs = e.method === "set" ? 2 : 1;
+          if (e.args.length !== wantArgs) {
+            err(`WeakMap.${e.method}: ${e.args.length} args, expected ${wantArgs}`, e.loc);
+            break;
+          }
+          for (const a of e.args) checkExpr(a);
+          expectType(e.args[0]!, wk, `WeakMap.${e.method} key`);
+          if (e.method === "set") expectType(e.args[1]!, wv, "WeakMap.set value");
+          break;
+        }
         if (e.receiver.type.kind !== "map") {
           err(`mapIntrinsic ${e.method} on non-map ${e.receiver.type.kind}`, e.loc);
           break;

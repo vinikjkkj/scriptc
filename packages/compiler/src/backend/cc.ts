@@ -295,6 +295,9 @@ export interface CcOptions {
    * registry initializes lazily), so it cross-compiles everywhere.
    * Symbol-free binaries keep their exact link line. */
   symbol?: boolean;
+  /** Pull scr_weak.c in. Set from moduleUsesWeakMap; a program with no
+   * WeakMap keeps its exact link line and its exact scr_bytes_release. */
+  weak?: boolean;
   /** The program has a run-time-specifier `require` (the
    * module.requireVerdict libCall — moduleUsesRequireVerdict on the IR):
    * compiles scr_require.c into the binary. A WRITTEN specifier never
@@ -1418,6 +1421,9 @@ export interface LibArchiveOptions {
   assert?: boolean;
   inspect?: boolean;
   symbol?: boolean;
+  /** Pull scr_weak.c in. Set from moduleUsesWeakMap; a program with no
+   * WeakMap keeps its exact link line and its exact scr_bytes_release. */
+  weak?: boolean;
   /** The run-time-specifier require verdict (scr_require.c). A library
    * archive carries it for the same reason a program does: the emitted
    * module.requireVerdict libCall is an undefined symbol without it. */
@@ -1455,6 +1461,7 @@ export async function compileLibArchive(opts: LibArchiveOptions): Promise<void> 
     ...(opts.assert || regex || opts.symbol ? ["scr_assert.c"] : []),
     ...(opts.inspect ? ["scr_inspect.c"] : []),
     ...(opts.symbol ? ["scr_symbol.c"] : []),
+    ...(opts.weak ? ["scr_weak.c"] : []),
     ...(opts.requireVerdict ? ["scr_require.c"] : []),
     ...(opts.searchParams ? ["scr_url_params.c"] : []),
     ...(opts.emitter ? ["scr_events_emitter.c", "scr_dyn_handle.c"] : []),
@@ -2124,6 +2131,7 @@ export async function compileC(opts: CcOptions): Promise<void> {
       ? [rt(join(rtDir, "scr_dyn_handle.c"))]
       : []),
     ...(opts.symbol ? [rt(join(rtDir, "scr_symbol.c"))] : []),
+    ...(opts.weak ? [rt(join(rtDir, "scr_weak.c"))] : []),
     // The run-time-specifier require verdict. It calls only header-declared
     // things from units already in the base set, so it implies nothing.
     ...(opts.requireVerdict ? [rt(join(rtDir, "scr_require.c"))] : []),

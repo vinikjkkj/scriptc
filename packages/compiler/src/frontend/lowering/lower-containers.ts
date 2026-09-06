@@ -3557,6 +3557,42 @@ function lowerOptionalDefaultArg(
       const probed = probeLower(L, access.expression);
       if (probed?.type.kind === "map") { receiverIr = probed.type; inferred = true; }
     }
+    // A WeakMap receiver whose key kind the runtime can watch dying (see
+    // mapType in frontend/types.ts) reaches the SAME IR node against a
+    // different runtime. get/set/has only: a weak table cannot honestly
+    // answer size, clear or iteration, because an entry disappears when its
+    // key dies and any count would be a number the program cannot reason
+    // about. JS withholds them for the same reason, so refusing them here
+    // matches the language rather than restricting it.
+    if (receiverIr?.kind === "weakmap") {
+      if (name !== "get" && name !== "set" && name !== "has") {
+        L.noLowering(
+          `WeakMap.${name}`,
+          access,
+          "a weak collection answers get/set/has only — size, clear, delete and " +
+            "iteration would have to report entries whose keys may already be gone, " +
+            "and JS does not offer them on a WeakMap either",
+        );
+      }
+      if (!L.isStdlibMember(access)) return null;
+      const wLoc = locOf(call);
+      const wRecv = L.lowerExpr(access.expression);
+      if (wRecv.type.kind !== "weakmap") return null;
+      const wKey = L.lowerExprExpecting(call.arguments[0]!, receiverIr.key);
+      if (name === "set") {
+        const wVal = L.lowerExprExpecting(call.arguments[1]!, receiverIr.value);
+        return { kind: "mapIntrinsic", method: "set", receiver: wRecv, args: [wKey, wVal], type: VOID, loc: wLoc };
+      }
+      if (name === "has") {
+        return { kind: "mapIntrinsic", method: "has", receiver: wRecv, args: [wKey], type: BOOL, loc: wLoc };
+      }
+      // `get` answers `V | undefined` exactly as a Map's does: the miss is
+      // the undefined arm, and because `undefined` sorts last in canonical
+      // arm order a union V keeps its own tags.
+      const wType = L.irTypeOf(call);
+      if (wType.kind !== "union") L.badType(call, L.typeOf(call));
+      return { kind: "mapIntrinsic", method: "get", receiver: wRecv, args: [wKey], type: wType, loc: wLoc };
+    }
     if (receiverIr?.kind !== "map") {
       if (receiverIr === null) untypedContainerUseFence(L, access, "map");
       return null;

@@ -48,6 +48,20 @@ export type IrType =
    * object, union, or array — anything isRefCounted or scalar EXCEPT
    * func/promise/dyn/jsval/map (frontend-fenced, validator-checked). */
   | { kind: "map"; key: IrType; value: IrType }
+  /** ES `WeakMap<K, V>` — heap, refcounted, reference-identity keys held
+   * WEAKLY (ScrWeakMap). NOT a Map with a flag: the table does not retain
+   * its keys, and an entry is removed inside the key's own free path the
+   * instant its refcount hits zero. That timing is a correctness
+   * requirement rather than a policy — keys are compared by ADDRESS and
+   * the string/cycle arenas recycle addresses, so an entry outliving its
+   * key would let a later object land on the address and read the dead
+   * key's value. Keys are therefore restricted to kinds with a single
+   * refcount chokepoint the runtime owns (`isSupportedWeakKey`: bytes
+   * today); cycle-allocated kinds can die inside the collector without
+   * passing through a release and are still refused. Values are held
+   * STRONGLY — ephemerons are not implemented, so a value that reaches
+   * its own key keeps both alive. See the head of scr_weak.c. */
+  | { kind: "weakmap"; key: IrType; value: IrType }
   /** ES `Set<T>` — heap, refcounted, insertion-ordered. Map's sibling with
    * the value slot removed: ONE runtime representation (the backend lowers
    * sets onto the map runtime with a constant unit value), elements are
@@ -744,6 +758,31 @@ export function mapOf(key: IrType, value: IrType): IrType {
   return { kind: "map", key, value };
 }
 
+export function weakMapOf(key: IrType, value: IrType): IrType {
+  return { kind: "weakmap", key, value };
+}
+
+/** WeakMap KEYS. Deliberately NOT isSupportedMapKey, and deliberately not
+ * a widening of it: adding `bytes` there would silently legalise
+ * `Map<Uint8Array, V>` too, which is a different change with different
+ * consequences (a strong Map keyed by reference identity) and it should
+ * not ride in under this one.
+ *
+ * The rule here is not "which types have identity" — records and class
+ * instances have identity and JS allows them as WeakMap keys — it is
+ * "whose death does this runtime observe at a single point it owns".
+ * ScrBytes qualifies: `scr_bytes_release` is a plain `--rc == 0` free and
+ * ScrBytes is not a cycle node, so the entry can be evicted exactly at
+ * death. Arrays, records and class instances are `scr_cyc_alloc` nodes
+ * that can also be reclaimed by the collector's collectWhite, which no
+ * release-side hook can see; admitting them without a collector hook
+ * would produce a table that silently keeps dead keys, which for an
+ * address-keyed table is a WRONG ANSWER and not merely a leak. They stay
+ * refused until that hook exists. */
+export function isSupportedWeakKey(t: IrType): boolean {
+  return t.kind === "bytes";
+}
+
 export function setOf(elem: IrType): IrType {
   return { kind: "set", elem };
 }
@@ -810,6 +849,16 @@ export function isSupportedMapValue(t: IrType): boolean {
     case "object":
     case "union":
     case "array":
+      return true;
+    // A crypto KeyObject (WeakMap<Uint8Array, KeyObject> — zapo-js 1.8.2's
+    // X25519 key-object cache, crypto/curves/X25519.ts:116-117). Immutable
+    // and holding no references back, so it cannot cycle through the
+    // container; it already carries the same scr_keyobj_retain_v/
+    // release_v adapters an ARRAY element uses (`KeyObject[]`, the key
+    // ring idiom), so admitting it here adds no machinery — only the
+    // permission that was missing while the same value was legal one
+    // container over.
+    case "keyobj":
       return true;
     // A spawned child handle (Map<string, ChildProcess> — the mdns
     // publisher registry): an ordinary refcounted pointer value (the
@@ -986,6 +1035,8 @@ export function typeKey(t: IrType): string {
       return `bytes<${t.elem}>`;
     case "map":
       return `map<${typeKey(t.key)},${typeKey(t.value)}>`;
+    case "weakmap":
+      return `weakmap<${typeKey(t.key)},${typeKey(t.value)}>`;
     case "set":
       return `set<${typeKey(t.elem)}>`;
     case "func":
@@ -1132,6 +1183,12 @@ export function isRefCounted(t: IrType): boolean {
     t.kind === "array" ||
     t.kind === "map" ||
     t.kind === "set" ||
+    // A WeakMap is refcounted like any other container. Omitting it here
+    // was not a missing optimisation: with weakmap absent the emitter
+    // emitted NO release for the table at all, so its strongly-held VALUES
+    // were never freed. The RC audit caught it on corpus 7782 as 43 live
+    // objects at exit, against a strong-Map control that exited clean.
+    t.kind === "weakmap" ||
     // Every regex value is an immortal interned literal today, so its
     // retains/releases are no-ops — riding the uniform machinery anyway
     // means dynamic construction can arrive without a redesign.
@@ -7476,6 +7533,10 @@ function isJsonSafeAt(
     // Maps are not JSON (JSON.stringify(new Map()) is "{}" in Node — an
     // empty-object husk nobody wants; stringify/dynCheck reject instead).
     case "map":
+    // A WeakMap stringifies as "{}" for the same reason a Map does, and
+    // it could not honestly enumerate even if it wanted to: its entries
+    // are not reachable from the value.
+    case "weakmap":
     // Sets stringify as the same "{}" husk — rejected like Maps.
     case "set":
     // Regexes are not JSON (JSON.stringify(/a/) is "{}" in Node — the same
@@ -9502,6 +9563,34 @@ export function moduleUsesSymbol(mod: IrModule): boolean {
       return;
     }
     if (node.kind === "symbol") {
+      found = true;
+      return;
+    }
+    for (const key of Object.keys(v)) visit((v as Record<string, unknown>)[key]);
+  };
+  visit(mod);
+  return found;
+}
+
+/** True when any weakmap-kind type appears in the IR — the link switch
+ * that pulls scr_weak.c into the binary, on the scr_symbol.c precedent.
+ *
+ * The TYPE check is the whole test and is enough: a WeakMap value cannot
+ * exist without a weakmap-typed expression somewhere (its construction, its
+ * local, or its field), and every operation on one goes through a receiver
+ * of that type. A program with no WeakMap keeps its exact link line and
+ * pays zero bytes — and, because scr_weak_new is what installs the death
+ * hook, its scr_bytes_release stays byte-identical to the pre-WeakMap
+ * runtime as well. */
+export function moduleUsesWeakMap(mod: IrModule): boolean {
+  let found = false;
+  const visit = (v: unknown): void => {
+    if (found || v === null || typeof v !== "object") return;
+    if (Array.isArray(v)) {
+      for (const item of v) visit(item);
+      return;
+    }
+    if ((v as { kind?: unknown }).kind === "weakmap") {
       found = true;
       return;
     }

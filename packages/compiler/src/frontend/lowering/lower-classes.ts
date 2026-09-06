@@ -5,7 +5,7 @@
  * hierarchy registration. */
 import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
-import { BOOL, CLASS_PROPS_FIELD as IR_CLASS_PROPS_FIELD, DYN, F64, bytesOf, canConvertToDyn, IrClassDef, IrExpr, IrFunction, IrLocal, IrParam, IrStmt, IrType, JSVAL, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, STRING, SrcLoc, UNDEFINED_T, URL_T, VOID, arrayOf, isRefCounted, isSupportedMapKey, isSupportedMapValue, isSupportedSetElem, isUnitType, mapOf, setOf, typeEquals } from "../../ir/nodes.js";
+import { BOOL, CLASS_PROPS_FIELD as IR_CLASS_PROPS_FIELD, DYN, F64, bytesOf, canConvertToDyn, IrClassDef, IrExpr, IrFunction, IrLocal, IrParam, IrStmt, IrType, JSVAL, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, STRING, SrcLoc, UNDEFINED_T, URL_T, VOID, arrayOf, isRefCounted, isSupportedMapKey, isSupportedMapValue, isSupportedSetElem, isSupportedWeakKey, weakMapOf, isUnitType, mapOf, setOf, typeEquals } from "../../ir/nodes.js";
 import { lowerAbortControllerNew } from "./lower-abort.js";
 import { MAX_GENERIC_INSTANCES, bindingNeverReassigned, genericCallInstance, implicitAnyParamSymbolsOf, implicitCallInstance, implicitMonoFile, omittedArgFor, type GenericFnInfo, type ParamShape } from "./lower-calls.js";
 import { isGenericCallableMemberType, runtimeStreamClassOf, typeKey } from "../types.js";
@@ -8021,6 +8021,24 @@ export function lowerNew(L: Lowerer, expr: ts.NewExpression): IrExpr {
         // route there instead.
         if (symbol?.name === "WeakMap") {
           const weakKeyIr = targs[0] ? L.mapTypeOf(targs[0]) : null;
+          const weakValIr = targs[1] ? L.mapTypeOf(targs[1]) : null;
+          // THE REVERSAL. WEAK_COLLECTION_HINTS said weak collections
+          // "observe garbage collection, which reference counting never
+          // exposes". The second half of that is false: scr_bytes_release
+          // reaching `--rc == 0` IS the key's death, at the instant it
+          // happens. What reference counting cannot see unaided is a key
+          // held only by a CYCLE -- which is exactly why isSupportedWeakKey
+          // admits only kinds whose death passes through a release the
+          // runtime owns. Every other key still takes the hint below, and
+          // takes it truthfully: it is a statement about a collector hook
+          // that does not exist yet, not about reference counting as such.
+          if (
+            targs[0] && weakKeyIr && isSupportedWeakKey(weakKeyIr) &&
+            targs[1] && weakValIr && isSupportedMapValue(weakValIr) &&
+            isRefCounted(weakValIr)
+          ) {
+            return { kind: "mapNew", type: weakMapOf(weakKeyIr, weakValIr), loc };
+          }
           if (!targs[0] || !weakKeyIr || !isSupportedMapKey(weakKeyIr)) {
             L.noLowering("new WeakMap", expr, WEAK_COLLECTION_HINTS.WeakMap, symbol);
           }

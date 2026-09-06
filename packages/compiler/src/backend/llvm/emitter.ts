@@ -11047,6 +11047,12 @@ class LlEmitter {
     // Empty map: the runtime stores the value kind's RC entry points as
     // function pointers (scalar values pass nulls); the trace argument
     // doubles as the cycle-capability flag — exactly the C mapNew.
+    // WeakMap has no LLVM lowering yet: the C emitter grew it first (it is
+    // where scr_weak.c is wired), and a WeakMap program therefore takes the
+    // documented demotion to the C backend rather than a wrong answer. This
+    // is a REFUSAL, not a bug -- LlvmUnsupportedError is what selects the
+    // fallback and prints the one-line lane note.
+    if (e.type.kind === "weakmap") throw new LlvmUnsupportedError("weakmap:new");
     if (e.type.kind !== "map") throw new Error("llvm emitter bug: mapNew of non-map type");
     const B = this.B;
     const value = e.type.value;
@@ -11093,6 +11099,7 @@ class LlEmitter {
   private emitMapIntrinsic(e: IrExpr & { kind: "mapIntrinsic" }): LlValue {
     const B = this.B;
     const r = this.emitExpr(e.receiver);
+    if (e.receiver.type.kind === "weakmap") throw new LlvmUnsupportedError("weakmap:intrinsic");
     if (e.receiver.type.kind !== "map") throw new Error("llvm emitter bug: mapIntrinsic on non-map");
     const { key, value } = e.receiver.type;
     const kAcc = mapKeyAccess(key);
