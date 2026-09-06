@@ -201,10 +201,66 @@ static inline void scr_cyc_stamp(ScrCycHdr *h, ScrTraceFn trace,
 #define SCR_CYC_ARENA_CHUNK ((size_t)64 << 10)
 #endif
 
+/* THE ARENA'S CEILING, and the measurement that says it needs one.
+ *
+ * The arena does not return chunks - it cannot, because a chunk carries no
+ * header and a block cannot be traced back to the chunk it came from. That
+ * is fine for a program whose live small-object population is flat, and it
+ * is the whole of the retention for one whose population SPIKES. Measured
+ * on tests/perf/zapo-rest driven through a full WhatsApp history sync
+ * (packages/fake-server, no phone), at settled - sixty seconds after the
+ * last chunk decoded, with the process flat:
+ *
+ *   the CRT heap holds 96.40 MiB BUSY across 175,232 blocks, and
+ *   69.25 MiB of that - 72.49% - is 1,110 busy blocks of EXACTLY 65,536
+ *   bytes, i.e. this malloc and scr_string.c's. tests/perf/prof's
+ *   residency lane charges 65.81 MiB to THIS LINE alone, 75.07% of the
+ *   whole live heap, and tests/perf/cycstat counts the 1,053 chunks that
+ *   is. Three independent instruments, the same number.
+ *
+ *   Inside those 65.81 MiB, tests/perf/cycensus finds 4.33 MiB of live
+ *   cycle objects and 16.00 MiB parked on the size-class pool. The
+ *   remaining ~45 MiB is on this arena's own per-class free lists, and
+ *   `listhit=0` says not one block of it was ever handed back out: the
+ *   pool answers every reuse first, so the overflow list only grows.
+ *
+ * A budget is the same instrument SCR_POOL_BUDGET already is, in the same
+ * shape and for the same reason. Past it a miss falls back to calloc, and
+ * a calloc'd block is stamped pad=0, so it reaches free() and the NT heap
+ * can decommit it - which is exactly what the retention needs and what a
+ * carved block can never do. The check is one comparison on the CHUNK
+ * path, which runs once per 64 KiB (1,053 times in a run of 66 million
+ * allocations); the hot path is untouched.
+ *
+ * 0 is unbounded and is the default, so the shipped arm is today's
+ * behaviour. SCR_CYCLE_ARENA_BUDGET is an env knob, not a build flag, so
+ * both arms are the same binary. */
+#ifndef SCR_CYC_ARENA_BUDGET
+#define SCR_CYC_ARENA_BUDGET 0
+#endif
+
 /* One list per SCR_POOL_GRAIN class, indexed by ScrCycHdr::blk (1..32). */
 static void *scr_cyc_ar_free[SCR_POOL_MAX / SCR_POOL_GRAIN + 1u];
 static unsigned char *scr_cyc_ar_cur = NULL;
 static unsigned char *scr_cyc_ar_lim = NULL;
+/* Chunk bytes this arena has taken and will never give back. Only the
+ * budget reads it, and only the chunk path writes it. */
+static size_t scr_cyc_ar_held = 0;
+
+static size_t scr_cyc_ar_budget(void) {
+#ifdef SCR_RC_AUDIT
+  return 0;
+#else
+  static long long cached = -1;
+  if (cached < 0) {
+    const char *env = getenv("SCR_CYCLE_ARENA_BUDGET");
+    cached = env != NULL ? strtoll(env, NULL, 10)
+                         : (long long)SCR_CYC_ARENA_BUDGET;
+    if (cached < 0) cached = 0;
+  }
+  return (size_t)cached;
+#endif
+}
 
 static int scr_cyc_arena_on(void) {
 #ifdef SCR_RC_AUDIT
@@ -231,8 +287,14 @@ static void *scr_cyc_ar_take(size_t phys, uint8_t blk) {
   }
   stride = (phys + 15u) & ~(size_t)15u;
   if ((size_t)(scr_cyc_ar_lim - scr_cyc_ar_cur) < stride) {
-    unsigned char *c = (unsigned char *)malloc(SCR_CYC_ARENA_CHUNK);
+    unsigned char *c;
+    /* The ceiling. NULL here is not a failure: scr_cyc_alloc_miss falls
+     * back to calloc, and that block is stamped pad=0 and can be freed. */
+    size_t bud = scr_cyc_ar_budget();
+    if (bud != 0 && scr_cyc_ar_held + SCR_CYC_ARENA_CHUNK > bud) return NULL;
+    c = (unsigned char *)malloc(SCR_CYC_ARENA_CHUNK);
     if (c == NULL) return NULL;
+    scr_cyc_ar_held += SCR_CYC_ARENA_CHUNK;
     scr_cyc_ar_cur = c;
     scr_cyc_ar_lim = c + SCR_CYC_ARENA_CHUNK;
     SCR_CS_BUMP(archunk);
