@@ -312,6 +312,35 @@ export function computeMayThrow(mod: IrModule): { fns: Set<string>; indirect: bo
             f.throws = true;
           }
           break;
+        case "mapIntrinsic": {
+          // `set` on a WeakMap over `object` (the dyn) is the ONLY map
+          // method that throws. Its key's kind is a run-time fact, so the
+          // runtime -- not this analysis -- decides whether the value is a
+          // legal weak key, and it answers Node's
+          // `TypeError: Invalid value used as weak map key` for the kinds
+          // that have no address (a number, a string, a boolean) and its
+          // own text for the kinds whose death it cannot observe (a class
+          // instance, a record or tuple boundary copy, a Map, ...).
+          //
+          // WITHOUT THIS ARM THE THROW IS SWALLOWED AT THE CALL BOUNDARY,
+          // which is this file's own documented failure shape one paragraph
+          // up: `function put(k: object, v: Uint8Array) { cache.set(k, v) }`
+          // unwinds correctly inside `put`, and the caller -- told the call
+          // could not throw -- carries on with the exception still pending
+          // and reports it at exit, if at all. Measured on a tuple key: the
+          // program printed a cache MISS and exited 0 where node prints a
+          // hit and scriptc owes a TypeError.
+          //
+          // get/has are deliberately NOT here: a key the table can never
+          // hold cannot be present, so the read side answers
+          // undefined/false silently, which is exactly what node does.
+          const recv = rec["receiver"] as { type?: IrType } | undefined;
+          const rt = recv?.type;
+          if (rec["method"] === "set" && rt?.kind === "weakmap" && rt.key.kind === "dyn") {
+            f.throws = true;
+          }
+          break;
+        }
         case "regexIntrinsic":
           // replaceAll and matchAll without /g throw Node's TypeError;
           // split throws on a pattern with capture groups — all catchable.

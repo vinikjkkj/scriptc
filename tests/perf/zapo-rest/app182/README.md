@@ -75,6 +75,8 @@ arms exit non-zero, so neither has a fence count — **n/a, not 0**.
 | `6b38b02c` (main, two more lowerings later) | 19,261 | **24** | 14 | 10 |
 | `ad7b3153` (block/typerules, the two type-system rules) | 14,391 | **15** | 11 | 4 |
 | `036479ce` (block/typerules on main@`874e78b8`, all four rules) | 13,436 | **13** | 9 | 4 |
+| `7adee17b` (main, this arm's base for the WeakMap work) | 13,432 | **13** | 9 | 4 |
+| `block/weakdyn` (dyn WeakMap keys) | 10,548 | **9** | 5 | 4 |
 
 The 77 that first motivated the bump was taken one commit earlier, before
 `9cd9bffa` closed the 12-site WeakMap group: 77 − 12 = the 65 recorded here.
@@ -160,6 +162,41 @@ for an Error and for `null`, and TRAPS on a number where Node reads
 `undefined`. The other two are the keyed read's width and a promise-payload
 width lift, both of which live in the record-width neighbourhood rather
 than in the type rules.
+
+### 13 -> 9, and the WeakMap group is finished
+
+`block/weakdyn` closes the four `signal/session/encoding.ts` sites — the
+whole `WeakMap<object, Uint8Array>` group — leaving **9**. Measured on this
+box, both arms STRICT (no `--best-effort`), zig 0.16.0,
+`SCRIPTC_TARGET=x86_64-windows-gnu`, built under node v22.18.0 with
+`--provenance-sources`, counted off the build log with
+`rg -a -c ' - error SC[0-9]{4}: '` and cross-checked against the compiler's
+own `N errors.` line. Both arms exit non-zero, so neither has a fence count
+— **n/a, not 0**.
+
+| revision | log bytes | sites | roots | cascade (SC2004) |
+|---|---|---|---|---|
+| `7adee17b` (main, this branch's base) | 13,432 | **13** | 9 | 4 |
+| `block/weakdyn` | **10,548** | **9** | 5 | 4 |
+
+**4 closed, 0 uncovered, 9 unchanged** (13 − 4 = 9). The nine that remain
+are byte-identical between the two logs, file and line:
+
+| code | site |
+|---|---|
+| SC1031 | `crypto/nativeBackend.ts:73` |
+| SC2004 | `crypto/nativeBackend.ts:77,78,79,80` |
+| SC2002 | `protocol/abprops.ts:47` |
+| SC2020 | `protocol/abprops.ts:55` |
+| SC2003 | `client/coordinators/WaMessageDispatchCoordinator.ts:867` |
+| SC1090 | `client/events/privacy.ts:114` |
+
+What closed them is **not** the upstream one-token change the WeakMap doc
+previously recorded as "what it takes": zapo's source is untouched. `object`
+is the NonPrimitive intrinsic and lowers to the DYN, and a dyn-keyed table
+is now keyed on each value's PAYLOAD — for a static array crossing the
+boundary that is the ORIGIN the copy records, so `set` and `get` in adjacent
+statements agree. See `docs/estado-weakmap-cycle-keys.md` §3.
 
 The streamed history-sync path — `openHistoryBlobStream` inflating through
 `createUnzip`, then `streamProtoFields` walking it through

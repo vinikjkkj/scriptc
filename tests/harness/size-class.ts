@@ -1376,6 +1376,97 @@ export const SIZE_DRIFT_PAGE = 4_096;
  * leave the other exactly where it was recorded a week earlier. (The class
  * DISTANCE is 140,800 here against the 141,312 recorded -- the same +512,
  * on the static side, and nowhere near a library.) */
+
+/* 2026-09-07 — DYN WEAKMAP KEYS COST 208 BYTES OF CODE, AND THE FILE MOVES
+ * 512 ON ONE CLASS AND 0 ON THE OTHER. This is the entry that separates
+ * those two sentences, because reading only the file sizes gets it wrong.
+ *
+ *   base `7adee17b`   static 677,888   regex 818,688
+ *   block/weakdyn     static 677,888   regex 819,200
+ *                            +0               +512
+ *
+ * THE CODE GREW BY THE SAME AMOUNT IN BOTH. Section-by-section, and the two
+ * programs agree to the byte:
+ *
+ *              .text     .rdata   .pdata
+ *   static    +208        +8       +12
+ *   regex     +208        +8       +12
+ *
+ * All 208 bytes are `scr_json.c`, which is always linked. Compiled in
+ * isolation (`zig cc -O2 -target x86_64-windows-gnu -c`) its `.text` goes
+ * 122,240 -> 122,448, the same +208, and removing one addition at a time
+ * splits it exactly:
+ *
+ *   scr_dyn_origin_peek           176 bytes  (122,448 -> 122,272 without it)
+ *   the weak-key hook in
+ *     scr_dyn_release              32 bytes  (122,448 -> 122,416 without it)
+ *
+ * The 32 bytes are a test of `ScrCycHdr::blk`'s top bit, a clear, and an
+ * indirect call through `scr_weak_died_hook` — the give-back route
+ * `scr_cyc_free` cannot see, because a dead `ScrDyn` is PARKED on a
+ * freelist rather than freed (docs/estado-weakmap-cycle-keys.md §2d). The
+ * 176 are a hash lookup that answers which static object a static->dyn
+ * boundary copy was made from, which is where a `WeakMap<object, V>` key's
+ * identity lives.
+ *
+ * `scr_weak.c` GREW BY 316 LINES AND COSTS BOTH PROGRAMS NOTHING, which is
+ * the gate (`opts.weak`, from `moduleUsesWeakMap`) doing its job: neither
+ * of these programs constructs a WeakMap, and neither binary contains one
+ * byte of the unit. Checked rather than assumed — both are stripped, so
+ * `nm` has nothing to say, and a byte scan that only ever answers zero has
+ * proved nothing, so it was POSITIVE-CONTROLLED against corpus 7787, which
+ * does construct one:
+ *
+ *                                          7787  static  regex
+ *   "Invalid value used as weak map key"      1      0      0
+ *   "a tuple is a RECORD that converts"       1      0      0
+ *   "an ACYCLIC class is emitted with ..."    1      0      0
+ *
+ * Three strings the kind switch cannot run without, present where the unit
+ * is linked and absent where the gate keeps it out. The whole phase was
+ * written into that file for this reason even
+ * though `ScrDyn` lives elsewhere.
+ *
+ * SO WHY DOES ONE FILE MOVE AND THE OTHER NOT? PE file alignment is 512 and
+ * the two programs had different amounts of slack under it. Raw file
+ * offsets, base tree:
+ *
+ *   static  .text ends 537,638, next section starts 538,112   474 spare
+ *   regex   .text ends 624,086, next section starts 624,128    42 spare
+ *
+ * +208 fits in 474 and does not fit in 42. In the static program every
+ * section after `.text` keeps its file offset and the image is byte-for-byte
+ * the same size; in the regex program `.text`'s rounded end moves one unit
+ * and all five sections after it shift by exactly 512. The +512 is CARRY,
+ * not code. Anyone deriving one class's delta from the other's here would
+ * be 512 bytes wrong in whichever direction they went, which is the same
+ * trap the 2026-08-24 entry records from the other side.
+ *
+ * AND THE CONTROL HAS ALREADY MOVED, WHICH IS WORTH KNOWING BEFORE THE NEXT
+ * READER LEANS ON IT. The entry above calls the regex class the control on
+ * the grounds that 818,176 reproduced the `bc266f01` anchor to the byte at
+ * `874e78b8`/`37781755`. Measured here at `7adee17b`, the BASE tree — no
+ * change of mine in it — is 818,688, and the base static is 677,888 against
+ * the 677,376 that entry recorded. So BOTH classes picked up 512 bytes in
+ * main between `37781755` and `7adee17b` from work that is not this
+ * branch's, and the regex class is no longer reproducing its anchor. That
+ * is somebody else's drift to explain; it is recorded here so the next
+ * person does not spend the search this entry already spent.
+ *
+ * THE RECORDED FIGURES DO NOT MOVE, and for the reason the entry above
+ * gives rather than in spite of it. The 512 THIS branch adds is explained
+ * to the byte and could be anchored honestly; the 1,024 static and 512
+ * regex it inherits are not, and re-anchoring would bake those in and hand
+ * out a fresh 4,096-byte budget for them. Both classes end at +1,024 over
+ * their anchors, a quarter of the drift page, and `recordedSizeComplaint`
+ * is right to stay quiet. `STATIC_CLASS_MAX` and `REGEX_CLASS_MAX` keep
+ * 7,168 bytes of headroom each.
+ *
+ * Measured on one box, zig 0.16.0 (<zapo-work>/tools/zig) with
+ * `SCRIPTC_TARGET=x86_64-windows-gnu`, a SEPARATE `SCRIPTC_CACHE_DIR` per
+ * variant — without that the second build reuses the first's compiled
+ * runtime objects and the delta reads zero by construction — and each
+ * column run twice and byte-stable. */
 export const STATIC_CLASS_RECORDED = platform === "win32" ? 676_864 : null;
 
 /** The regex program, same run, same tree. Deliberately NOT derived from

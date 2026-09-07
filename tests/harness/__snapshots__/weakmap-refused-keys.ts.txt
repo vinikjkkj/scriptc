@@ -1,80 +1,80 @@
-weakmap-refused-keys.ts:40:7 - error SC2020: 'WeakMap<object, Uint8Array<ArrayBufferLike>>' is part of the standard library types but has no scriptc lowering yet
+weakmap-refused-keys.ts:52:17 - error SC1090: a WeakMap key of type 'Rec' on a table whose key type is 'object' (the key crosses into a dynamic value, and this kind arrives there with no address the runtime can watch die) is not supported yet
 
-  39 | // and it is the four together that a zapo census counts.
-  40 | const objectKeyed = new WeakMap<object, Uint8Array>();
-     |       ^~~~~~~~~~~
-  41 | const someRows: readonly Rec[] = [{ a: 1, b: "x" }];
+  51 | const oneRow: Rec = { a: 1, b: "x" };
+  52 | objectKeyed.set(oneRow, new Uint8Array([1]));
+     |                 ^~~~~~
+  53 | 
 
-  hint: the type checker sees the full standard library, but only the supported surface compiles (https://scriptc.dev/limitations)
+  hint: a weak entry is keyed by ADDRESS, so the runtime must see the key die before its storage goes back — a number, a string, a boolean and a bigint have no address at all, a record is COPIED at the crossing, and a class instance can be emitted with no cycle header and never reach a free the runtime hooks. A Uint8Array, an array, or a value that is already 'unknown' all cross with their identity intact. Otherwise hold this key strongly in a Map
 
-weakmap-refused-keys.ts:40:21 - error SC2020: 'new WeakMap' is part of the standard library types but has no scriptc lowering yet
+weakmap-refused-keys.ts:61:17 - error SC1090: a WeakMap key of type 'Holder' on a table whose key type is 'object' (the key crosses into a dynamic value, and this kind arrives there with no address the runtime can watch die) is not supported yet
 
-  39 | // and it is the four together that a zapo census counts.
-  40 | const objectKeyed = new WeakMap<object, Uint8Array>();
-     |                     ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-  41 | const someRows: readonly Rec[] = [{ a: 1, b: "x" }];
+  60 | }
+  61 | objectKeyed.set(new Holder(1), new Uint8Array([2]));
+     |                 ^~~~~~~~~~~~~
+  62 | 
 
-  hint: WeakMap is supported, but only for keys whose death this runtime observes on every route the value can die by — Uint8Array, and ARRAYS of any element type. A bare 'object' key is the dyn (TypeScript's 'object' is a top type over every non-primitive), and a dyn box is a boundary artifact rather than the value, so an address-keyed table over boxes would miss every lookup: name the concrete key type instead, which for an array-keyed cache is the array type itself. A RECORD key is refused because it width-coerces, so the entry would be keyed on the copy's address and not the caller's; a CLASS INSTANCE because an acyclic class is allocated without a cycle header and never reaches the collector-side hook. Values must be a reference type (a scalar has no pointer for the table to hold). A strong Map accepts the refused keys today, but it RETAINS them — for a cache keyed on a long-lived object that is unbounded growth
+  hint: a weak entry is keyed by ADDRESS, so the runtime must see the key die before its storage goes back — a number, a string, a boolean and a bigint have no address at all, a record is COPIED at the crossing, and a class instance can be emitted with no cycle header and never reach a free the runtime hooks. A Uint8Array, an array, or a value that is already 'unknown' all cross with their identity intact. Otherwise hold this key strongly in a Map
 
-weakmap-refused-keys.ts:42:1 - error SC2020: 'WeakMap<object, Uint8Array<ArrayBufferLike>>.set' is part of the standard library types but has no scriptc lowering yet
+weakmap-refused-keys.ts:66:17 - error SC1090: a WeakMap key of type 'Map<string, number>' on a table whose key type is 'object' (the key crosses into a dynamic value, and this kind arrives there with no address the runtime can watch die) is not supported yet
 
-  41 | const someRows: readonly Rec[] = [{ a: 1, b: "x" }];
-  42 | objectKeyed.set(someRows, new Uint8Array([1]));
-     | ^~~~~~~~~~~~~~~
-  43 | console.log(objectKeyed.has(someRows));
+  65 | const table = new Map<string, number>();
+  66 | objectKeyed.set(table, new Uint8Array([3]));
+     |                 ^~~~~
+  67 | 
 
-  hint: the type checker sees the full standard library, but only the supported surface compiles (https://scriptc.dev/limitations)
+  hint: a weak entry is keyed by ADDRESS, so the runtime must see the key die before its storage goes back — a number, a string, a boolean and a bigint have no address at all, a record is COPIED at the crossing, and a class instance can be emitted with no cycle header and never reach a free the runtime hooks. A Uint8Array, an array, or a value that is already 'unknown' all cross with their identity intact. Otherwise hold this key strongly in a Map
 
-weakmap-refused-keys.ts:43:13 - error SC2020: 'WeakMap<object, Uint8Array<ArrayBufferLike>>.has' is part of the standard library types but has no scriptc lowering yet
+weakmap-refused-keys.ts:71:29 - error SC1090: a WeakMap key of type 'Rec' on a table whose key type is 'object' (the key crosses into a dynamic value, and this kind arrives there with no address the runtime can watch die) is not supported yet
 
-  42 | objectKeyed.set(someRows, new Uint8Array([1]));
-  43 | console.log(objectKeyed.has(someRows));
-     |             ^~~~~~~~~~~~~~~
-  44 | 
+  70 | // an insert.
+  71 | console.log(objectKeyed.has(oneRow));
+     |                             ^~~~~~
+  72 | 
 
-  hint: the type checker sees the full standard library, but only the supported surface compiles (https://scriptc.dev/limitations)
+  hint: a weak entry is keyed by ADDRESS, so the runtime must see the key die before its storage goes back — a number, a string, a boolean and a bigint have no address at all, a record is COPIED at the crossing, and a class instance can be emitted with no cycle header and never reach a free the runtime hooks. A Uint8Array, an array, or a value that is already 'unknown' all cross with their identity intact. Otherwise hold this key strongly in a Map
 
-weakmap-refused-keys.ts:80:15 - error SC1090: a WeakMap key of type 'readonly Narrow[]' on a table whose key type is different (the two are assignable but not the same shape, so the lowering would COPY this value to reshape it, and the entry would be keyed on the copy) is not supported yet
+weakmap-refused-keys.ts:108:15 - error SC1090: a WeakMap key of type 'readonly Narrow[]' on a table whose key type is different (the two are assignable but not the same shape, so the lowering would COPY this value to reshape it, and the entry would be keyed on the copy) is not supported yet
 
-  79 | const narrowRows: readonly Narrow[] = [{ a: 1 }];
-  80 | wideKeyed.set(narrowRows, new Uint8Array([2]));
-     |               ^~~~~~~~~~
-  81 | 
+  107 | const narrowRows: readonly Narrow[] = [{ a: 1 }];
+  108 | wideKeyed.set(narrowRows, new Uint8Array([2]));
+      |               ^~~~~~~~~~
+  109 | 
 
   hint: a weak entry keyed on a copy is keyed on a temporary that dies at the end of the statement, and the allocator hands its address straight back out — so the table would either answer a LATER object with this value or lose the entry immediately. Neither is a cache. Give the key the map's exact type: annotate the binding with it, or widen the WeakMap's key parameter to the type the callers actually hold. A strong Map accepts the copy today and misses its own entry when it does
 
-weakmap-refused-keys.ts:85:7 - error SC2020: 'WeakMap<Uint8Array<ArrayBufferLike>, number>' is part of the standard library types but has no scriptc lowering yet
+weakmap-refused-keys.ts:113:7 - error SC2020: 'WeakMap<Uint8Array<ArrayBufferLike>, number>' is part of the standard library types but has no scriptc lowering yet
 
-  84 | // pointer, and a number is not one.
-  85 | const scalarValued = new WeakMap<Uint8Array, number>();
-     |       ^~~~~~~~~~~~
-  86 | 
+  112 | // pointer, and a number is not one.
+  113 | const scalarValued = new WeakMap<Uint8Array, number>();
+      |       ^~~~~~~~~~~~
+  114 | 
 
   hint: the type checker sees the full standard library, but only the supported surface compiles (https://scriptc.dev/limitations)
 
-weakmap-refused-keys.ts:85:22 - error SC2020: 'new WeakMap' is part of the standard library types but has no scriptc lowering yet
+weakmap-refused-keys.ts:113:22 - error SC2020: 'new WeakMap' is part of the standard library types but has no scriptc lowering yet
 
-  84 | // pointer, and a number is not one.
-  85 | const scalarValued = new WeakMap<Uint8Array, number>();
-     |                      ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-  86 | 
+  112 | // pointer, and a number is not one.
+  113 | const scalarValued = new WeakMap<Uint8Array, number>();
+      |                      ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  114 | 
 
-  hint: WeakMap is supported, but only for keys whose death this runtime observes on every route the value can die by — Uint8Array, and ARRAYS of any element type. A bare 'object' key is the dyn (TypeScript's 'object' is a top type over every non-primitive), and a dyn box is a boundary artifact rather than the value, so an address-keyed table over boxes would miss every lookup: name the concrete key type instead, which for an array-keyed cache is the array type itself. A RECORD key is refused because it width-coerces, so the entry would be keyed on the copy's address and not the caller's; a CLASS INSTANCE because an acyclic class is allocated without a cycle header and never reaches the collector-side hook. Values must be a reference type (a scalar has no pointer for the table to hold). A strong Map accepts the refused keys today, but it RETAINS them — for a cache keyed on a long-lived object that is unbounded growth
+  hint: WeakMap is supported, but only for keys whose death this runtime observes on every route the value can die by — Uint8Array, ARRAYS of any element type, and a bare 'object' (TypeScript's 'object' is a top type over every non-primitive, which lowers to the dyn). An 'object'-keyed table is keyed on each value's PAYLOAD rather than on its dyn box — the box is a boundary artifact and two boxes of one value are the same JS value — so it admits a Uint8Array, an array, or a value already typed 'unknown', and set() refuses the rest by name at run time. A RECORD key is refused because it width-coerces, so the entry would be keyed on the copy's address and not the caller's; a CLASS INSTANCE because an acyclic class is allocated without a cycle header and never reaches the collector-side hook. Values must be a reference type (a scalar has no pointer for the table to hold) — that is the one this program is most likely to have hit if its key type is fine. A strong Map accepts the refused keys today, but it RETAINS them — for a cache keyed on a long-lived object that is unbounded growth
 
-weakmap-refused-keys.ts:92:13 - error SC2020: 'WeakMap.delete' is part of the standard library types but has no scriptc lowering yet
+weakmap-refused-keys.ts:120:13 - error SC2020: 'WeakMap.delete' is part of the standard library types but has no scriptc lowering yet
 
-  91 | const admitted = new WeakMap<Uint8Array, Uint8Array>();
-  92 | console.log(admitted.delete(new Uint8Array([3])));
-     |             ^~~~~~~~~~~~~~~
-  93 | 
+  119 | const admitted = new WeakMap<Uint8Array, Uint8Array>();
+  120 | console.log(admitted.delete(new Uint8Array([3])));
+      |             ^~~~~~~~~~~~~~~
+  121 | 
 
   hint: a weak collection answers get/set/has only — size, clear, delete and iteration would have to report entries whose keys may already be gone, and JS does not offer them on a WeakMap either
 
-weakmap-refused-keys.ts:104:13 - error SC2004: uses of 'scalarValued' inherit the blocker on its declaration
+weakmap-refused-keys.ts:141:13 - error SC2004: uses of 'scalarValued' inherit the blocker on its declaration
 
-  103 | 
-  104 | console.log(scalarValued, wideKeyed, objectKeyed);
+  140 | 
+  141 | console.log(scalarValued, wideKeyed, objectKeyed);
       |             ^~~~~~~~~~~~
-  105 | 
+  142 | 
 
   hint: the declaration of 'scalarValued' did not compile — fix the diagnostic reported there and these sites clear with it

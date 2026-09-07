@@ -1639,6 +1639,18 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             wMark = E.traceAdapterC(wkNew.elem) !== null
               ? "&scr_cyc_weak_mark"
               : "&scr_arr_weak_mark";
+          } else if (wkNew.kind === "dyn") {
+            // NO STAMP HERE, and that is the whole difference. A dyn key's
+            // kind is a RUNTIME fact (`WeakMap<object, V>` -- object is the
+            // NonPrimitive intrinsic, which mapType lowers to the dyn), so
+            // nothing static can pick the field to write. The table gets a
+            // NULL key_mark (scr_weak_set already tolerates one) and the
+            // three intrinsics below route through scr_weak_dyn_*, where
+            // one switch derives the key ADDRESS and its stamp together
+            // from the value in hand. That locality is what the function
+            // pointer was buying: an arm cannot pick a stamp for a struct
+            // it did not just read the kind of.
+            wMark = "NULL";
           } else {
             throw new Error(`emitter bug: WeakMap key kind ${wkNew.kind} has no stamp`);
           }
@@ -1695,6 +1707,16 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             // pointer for the table to hold.
             throw new Error("emitter bug: scalar-valued WeakMap reached the emitter");
           }
+          // A DYN-KEYED table takes the `_dyn` entry points. Same table,
+          // same storage, same value convention -- the only difference is
+          // that the key argument arrives as a ScrDyn and the runtime, not
+          // this emitter, decides which ADDRESS inside it is the JS value
+          // and which stamp that address takes. The three names differ by a
+          // suffix on purpose: a dyn key silently taking the raw entry
+          // points would key the table on the BOX, which is the one wrong
+          // answer this design exists to prevent, and a suffix makes that
+          // a link error rather than a cache that never hits.
+          const wDyn = e.receiver.type.key.kind === "dyn" ? "_dyn" : "";
           switch (e.method) {
             case "get": {
               const wk = E.emitExpr(e.args[0]!);
@@ -1708,14 +1730,14 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
               }
               const wAbsent = E.unitInstanceRef(e.type.unionId, wUndefTag);
               if (wv.kind === "union") {
-                const wt = E.newTemp(e.type, `(ScrUnion *)scr_weak_get_ref(${r.name}, ${wk.name})`);
+                const wt = E.newTemp(e.type, `(ScrUnion *)scr_weak${wDyn}_get_ref(${r.name}, ${wk.name})`);
                 E.line(`if (!${wt.name}) ${wt.name} = ${wAbsent};`);
                 return wt;
               }
               const wTag = wdef.arms.findIndex((a) => typeEquals(a, wv));
               if (wTag < 0) throw new Error("emitter bug: WeakMap get union lacks its value arm");
               const wrc = vAdapters(wv);
-              const wval = E.newTemp(wv, `(${cType(wv).trim()})scr_weak_get_ref(${r.name}, ${wk.name})`);
+              const wval = E.newTemp(wv, `(${cType(wv).trim()})scr_weak${wDyn}_get_ref(${r.name}, ${wk.name})`);
               E.moveTemp(wval); // +1 on a hit, moves into the box; NULL on a miss
               const wPresent =
                 `scr_union_new_ref(${wTag}, ${wval.name}, &${wrc.retain}, &${wrc.release}, ` +
@@ -1732,12 +1754,19 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
               // temp is released normally. Moving it in as well would double
               // count -- the RC audit caught exactly that on corpus 7782 as
               // 43 live objects at exit.
-              E.line(`scr_weak_set(${r.name}, ${wk.name}, ${wval.name});${E.srcComment(e.loc)}`);
+              E.line(`scr_weak${wDyn}_set(${r.name}, ${wk.name}, ${wval.name});${E.srcComment(e.loc)}`);
+              // A DYN key can be REFUSED at run time, and only here: set is
+              // the one method with a lie to tell (Node throws for a
+              // primitive weak key and answers undefined/false on the read
+              // side, and scr_weak_dyn_* matches that exactly). So the
+              // throw has to be checked, and only for the dyn arm --
+              // scr_weak_set itself cannot throw at all.
+              if (wDyn !== "") E.emitPendingCheck();
               return { name: "", type: e.type };
             }
             case "has": {
               const wk = E.emitExpr(e.args[0]!);
-              return E.newTemp(e.type, `scr_weak_has(${r.name}, ${wk.name})`);
+              return E.newTemp(e.type, `scr_weak${wDyn}_has(${r.name}, ${wk.name})`);
             }
             default:
               throw new Error(`emitter bug: WeakMap.${e.method} reached the emitter`);

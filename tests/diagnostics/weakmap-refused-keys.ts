@@ -9,38 +9,66 @@
 //
 // What is left refused is refused for reasons that have nothing to do with
 // the collector hook, and each one is here.
+//
+// Its first case has since changed sides too, in a different way. Bare
+// `object` is ADMITTED now (it is the dyn, keyed on each value's payload --
+// corpus 7787), so what stands in its place is the ARGUMENT check that
+// survives the admission: a key whose static type already says the runtime
+// would refuse it is refused here instead, because a compile-time answer
+// beats a throw whenever the type is enough to give one.
 
 interface Rec {
   readonly a: number;
   readonly b: string;
 }
 
-// ── 1. BARE `object`, and the reason it is not "just another key kind" ──
+// ── 1. BARE `object` IS ADMITTED NOW — this is what it still refuses ────
 //
-// This is zapo-js 1.8.2's `prevSessionsSuffixCache`
-// (signal/session/encoding.ts:229) verbatim, and it is the one WeakMap in
-// that tree still refused. TypeScript's `object` is the NonPrimitive
-// intrinsic — a TOP type over every non-primitive — and mapType lowers it
-// to the DYN, not to any concrete heap kind.
+// zapo-js 1.8.2's `prevSessionsSuffixCache` (signal/session/encoding.ts:229)
+// used to be here in full and is not, because it compiles: corpus 7787 is
+// that side of the line. TypeScript's `object` is the NonPrimitive
+// intrinsic and mapType lowers it to the DYN, so such a table is keyed on
+// each value's PAYLOAD — scr_dyn_strict_eq's rule, arm for arm, because a
+// WeakMap and `===` must agree about what "the same object" is. The stamp
+// switches on the runtime kind in scr_weak.c, which is the one place in
+// this design where a key's field is not chosen statically.
 //
-// A dyn key cannot be keyed on its box. `scr_dyn_strict_eq` says so in as
-// many words: the box is a boundary artifact and the JS value is the
-// PAYLOAD, so two boxes of one object compare ===-equal. An address-keyed
-// table over boxes would therefore miss every lookup a program makes — a
-// silently useless cache, which is not a better outcome than a refusal.
-// Keying on the payload instead is the sound design and it is a larger
-// change: the stamp would have to switch on the RUNTIME kind (so it could
-// no longer be the statically-chosen key_mark function pointer that keeps
-// a stray store impossible), and several payload kinds — a number, a bool,
-// the unit singletons — have no address to key on at all, so set() would
-// owe them a loud refusal of its own.
+// Admitting the TYPE is not admitting every ARGUMENT, and that is what the
+// four sites below are. `weakKeyArgIsIdentity` refuses a key whose static
+// type already says the runtime would refuse it — a compile-time answer
+// beats a throw whenever the type is enough to give one — so what reaches
+// the runtime switch is only what nothing static could have decided.
 //
-// The call sites are here too, because they carry their own diagnostics
-// and it is the four together that a zapo census counts.
+// Each of these previously compiled, on the strong identity Map, and rode
+// its documented leak. Refusing them is the trade this file exists to
+// record: a diagnostic costs a site, and admitting a key whose death the
+// runtime cannot see costs a WRONG ANSWER that ships green.
 const objectKeyed = new WeakMap<object, Uint8Array>();
-const someRows: readonly Rec[] = [{ a: 1, b: "x" }];
-objectKeyed.set(someRows, new Uint8Array([1]));
-console.log(objectKeyed.has(someRows));
+
+// A RECORD. It crosses into dyn as a COPY, and the copy's origin is a
+// record — the kind isSupportedWeakKey refuses at the type level because a
+// width coercion rebuilds it, and the kind with no field to stamp.
+const oneRow: Rec = { a: 1, b: "x" };
+objectKeyed.set(oneRow, new Uint8Array([1]));
+
+// A CLASS INSTANCE. Not for coercion — an upcast is a pointer reinterpret
+// and copies nothing — but because an ACYCLIC class is emitted with calloc
+// and a lean one-word header, never reaches scr_cyc_free, and which
+// classes those are is a module-level fixpoint.
+class Holder {
+  constructor(readonly n: number) {}
+}
+objectKeyed.set(new Holder(1), new Uint8Array([2]));
+
+// A MAP. It has an address and a release, and scr_map_release carries no
+// weak-key stamp to read — the kind is refused until it does.
+const table = new Map<string, number>();
+objectKeyed.set(table, new Uint8Array([3]));
+
+// And the READ side takes the same check, because a key argument the
+// lowering would have to reshape is no more usable for a lookup than for
+// an insert.
+console.log(objectKeyed.has(oneRow));
 
 // ── 2. A KEY ARGUMENT THE LOWERING WOULD HAVE TO COPY ────────────────────
 //
@@ -91,14 +119,23 @@ const scalarValued = new WeakMap<Uint8Array, number>();
 const admitted = new WeakMap<Uint8Array, Uint8Array>();
 console.log(admitted.delete(new Uint8Array([3])));
 
-// NOT here, and deliberately: a RECORD-keyed or CLASS-INSTANCE-keyed
-// WeakMap still COMPILES. It rides the strong identity Map (types.ts), so
-// it has no diagnostic to pin — it has a documented leak instead, narrowed
-// but not removed by phase 3. A record is refused the weak ride because it
-// width-coerces (case 2's hazard, at the type level rather than the site);
-// a class instance because an ACYCLIC class is emitted with calloc and a
-// lean one-word header, never reaches scr_cyc_free at all, and whether a
-// given class is traced is a module-level fixpoint that
-// isSupportedWeakKey — a pure IrType function — cannot see.
+// NOT here, and deliberately: a WeakMap DECLARED with a record or a class
+// instance as its key type still COMPILES. It rides the strong identity Map
+// (types.ts), so it has no diagnostic to pin — it has a documented leak
+// instead, narrowed but not removed. Only a table declared over `object`
+// takes the weak ride and therefore the argument check in case 1; the two
+// spellings now diverge, and that is deliberate rather than an oversight.
+// `WeakMap<Rec, V>` is a promise this runtime cannot keep, so it is kept as
+// a strong Map with the leak written down; `WeakMap<object, V>` is a
+// promise it CAN keep for the payload kinds it can watch die, so it keeps
+// it and refuses the rest by name.
+
+// NOT here either: what the RUNTIME refuses. A number, a string, a boolean
+// and the units have no address to key on and set() throws Node's own
+// `TypeError: Invalid value used as weak map key` for them — but that is a
+// runtime answer, reachable only through a value whose static type is
+// already `object` or `unknown`, so no diagnostic exists to snapshot. It is
+// pinned as a differential instead, in corpus 7787, where every one of those
+// messages must match node byte for byte.
 
 console.log(scalarValued, wideKeyed, objectKeyed);
