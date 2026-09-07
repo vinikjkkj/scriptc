@@ -198,9 +198,119 @@ is now keyed on each value's PAYLOAD — for a static array crossing the
 boundary that is the ORIGIN the copy records, so `set` and `get` in adjacent
 statements agree. See `docs/estado-weakmap-cycle-keys.md` §3.
 
+### 9 -> 4 on `main`, and the last four are two groups
+
+`main` at `f3a913c4` carries `17dc06b9` (a TS object pattern over a dyn source
+binds the reads it desugars to), which closes the whole
+`crypto/nativeBackend.ts` group — the `:73` SC1031 destructure and the four
+SC2004 it cascaded into. Nothing else on this arm moved.
+
+Measured on this box, STRICT (no `--best-effort`), zig 0.16.0,
+`SCRIPTC_TARGET=x86_64-windows-gnu`, `SCRIPTC_CC=zigcc`, built under node
+v22.18.0 with `--provenance-sources`, counted off the build log with
+`rg -a -c ' - error SC[0-9]{4}: '` and cross-checked against the compiler's
+own `N errors.` line. Non-zero exit, so **no fence count — n/a, not 0**.
+
+| revision | log bytes | sites | roots | cascade (SC2004) |
+|---|---|---|---|---|
+| `7adee17b` (the WeakMap base) | 13,432 | 13 | 9 | 4 |
+| `block/weakdyn` | 10,548 | 9 | 5 | 4 |
+| **`f3a913c4` (main)** | **8,069** | **4** | **4** | **0** |
+
+**5 closed, 0 uncovered, 4 unchanged** (9 − 5 = 4). The cascade is gone
+entirely: every SC2004 on this arm was downstream of the one dyn destructure,
+so all four remaining diagnostics are **roots**.
+
+| code | site | what |
+|---|---|---|
+| SC2002 | `protocol/abprops.ts:47` | `{} as Record<AbPropName, AbPropConfigEntry>` — a 1,900-field record width |
+| SC2020 | `protocol/abprops.ts:55` | `Object.freeze(view)` where `view` is aliased, not a fresh literal |
+| SC2003 | `WaMessageDispatchCoordinator.ts:867` | `Promise.resolve({ phash: … })` — a width coercion inside a promise payload |
+| SC1090 | `client/events/privacy.ts:114` | `SETTING_VALUES[settingName]?.includes(value)` — `?.` over a keyed read whose IR union is wider than the checker's type |
+
+**The counting was positive-controlled rather than trusted.** A count that
+reads low mechanically is the standing hazard here, so the counter was first
+run against two logs whose answers are already recorded above:
+`weakdyn-base182.log` (13,432 bytes) and `weakdyn-head182.log` (10,548 bytes).
+It reproduced 13/9/4 and 9/5/4, file and line, with the compiler's own
+`N errors.` line agreeing in both.
+
+### What is left is not one merge
+
+`block/widthrest`'s `00d5cd1f` is aimed squarely at two of the four — its
+subject is "a keyed read is the width the signature declares, and a promise
+literal is built at the slot", which is the SC1090 and the SC2003 above. That
+would take the arm to **2**.
+
+The remaining pair is **both** in `protocol/abprops.ts`, and they are
+different problems that happen to share a file: `:47` is the record width,
+and `:55` is `Object.freeze` of an aliased value — frozen-ness is
+unobservable on a fresh literal and compiles there, but `view` is built by a
+loop and then frozen, so it would need the runtime frozen bit. Closing the
+width does not close the freeze. **Neither is on the streamed history-sync
+path**, so the arm reaching zero is gated on the record-width neighbourhood
+alone.
+
 The streamed history-sync path — `openHistoryBlobStream` inflating through
 `createUnzip`, then `streamProtoFields` walking it through
-`ProtoStreamReader` — is **one diagnostic away**: `history-blob.ts`,
-`history-sync.ts` and the `ProtoStreamReader` class are all clean, and the
-only refusal left on the path is the `stack.length -= 1` inside
-`streamProtoFields` itself.
+`ProtoStreamReader` — is **clean**. `history-blob.ts`, `history-sync.ts` and
+the `ProtoStreamReader` class carry no diagnostic, and the last refusal on
+the path, the `stack.length -= 1` inside `streamProtoFields`, was closed by
+the compound-`length` lowering at the `24 -> 15` step above. (This paragraph
+read "one diagnostic away" until then; it was written at the 29 row and the
+lowering landed two rows later.) **The mechanism the whole upgrade exists for
+already compiles** — every diagnostic left is somewhere else in the library.
+
+## What the 1.8.2 upgrade is expected to change, and what it is not
+
+### Expected to change: the PEAK of a history sync
+
+zapo-js 1.6.2 dispatches incoming stanzas fire-and-forget
+(`void runtime.handleIncomingMessageEvent(event)` in `WaClientFactory`), so
+every history-sync chunk WhatsApp pushes decodes and persists **concurrently**
+and the process's peak is the whole sync rather than one chunk. That is
+measured, in `../README.md` under "The peak of a history sync".
+
+1.8.2's **streamed history sync** — `openHistoryBlobStream` inflating through
+`createUnzip`, then `streamProtoFields` walking it through `ProtoStreamReader`
+— removes that pressure at the source: the blob is walked as a stream instead
+of being inflated into one fully-decoded graph. **That is the whole reason for
+the upgrade.** It is the only route to the fix that does not patch zapo, which
+the user has forbidden.
+
+**How much is not measured, and no number is promised here.** The nearest
+evidence on this box is the env-gated serialisation experiment against v1.6.2
+(`../harness/history-sync-serialise.patch`): −62% peak working set and −75%
+peak commit at 19,200 messages, −60% / −68% at 38,400, with the sync finishing
+*faster* rather than slower. That is the shape of win a one-chunk-at-a-time
+discipline buys on this workload — but 1.8.2's streaming is a **different
+mechanism** reaching the same pressure from the other side: it shrinks each
+chunk's own footprint rather than limiting how many are in flight. Those
+percentages are therefore an analogy, not a prediction. The figure for 1.8.2
+has to be measured on the 1.8.2 binary, which does not exist yet.
+
+### NOT changed by the upgrade: settled memory
+
+The settled-memory fix is the **cycle arena's chunk giveback** (`71c3af87`),
+which lives in the runtime and is already on `main`. It is independent of the
+zapo version and applies to **both** arms: settled working set 163.39 →
+104.50 MiB, with ~52 MiB handed back to the OS. A 1.6.2 binary rebuilt off
+current `main` already has it; 1.8.2 neither delivers it nor needs to.
+
+**Do not expect the two to add up.** The serialisation table's settled column
+(146.87 → 76.17 MiB at 19,200 messages) was measured 2026-09-05, *before* the
+arena giveback landed on 09-06. Both reduce settled memory by the same
+underlying route — fewer arena chunks retained past the sync — so they
+overlap. Whatever 1.8.2 is worth at settled must be measured against a
+**current-`main` 1.6.2 baseline**, not added to the arena's −58.9 MiB.
+
+### Also not changed
+
+* **The diagnostic count is not a memory statement.** It measures the
+  *compiler's* coverage of 1.8.2's source. Closing the last few is what makes
+  the binary buildable at all; it does not make the binary faster or smaller.
+* **The peak is where the two pieces of work divide cleanly.** The arena work
+  explicitly did *not* move the peak (248.34 → 247.69 MiB, −0.3%), because the
+  sync genuinely needs those chunks at once. So if the peak comes down on the
+  1.8.2 binary, the streamed sync is why — there is no other candidate in the
+  tree.

@@ -440,6 +440,65 @@ Also not present in this build:
   seen above 189 stacks against the 4096 cap, so **the decay is not known to
   fix an idle-10-MB-to-70-MB climb**; the instrument is here to settle it.
 
+* **Memory: where RSS settles after a history sync, and the one knob to leave
+  alone.** The number that matters for a long-lived service is not the peak —
+  a history sync's peak is transient and comes back down by itself — it is
+  **where the process settles once the sync goes quiet**. Measured on
+  `tests/perf/zapo-rest` driven through a full WhatsApp history sync with no
+  phone, settled = 45 s after the last chunk decoded then 60 s idle, read
+  through the `/shutdown` route:
+
+  | | before | now |
+  |---|---|---|
+  | settled working set | 163.39 MiB | **104.50 MiB** |
+  | CRT-heap busy at settled | 96.42 MiB | **40.66 MiB** |
+  | heap uncommitted (given back to the OS) | 8.55 MiB | **60.43 MiB** |
+  | peak working set | 248.34 MiB | 247.69 MiB |
+
+  **−58.9 MiB settled (−36%), with ~52 MiB handed back to the OS** rather
+  than held to process exit. The peak does not move, and that is the honest
+  half: the sync genuinely needs those chunks at once, so the peak is a
+  property of the workload and not of the allocator.
+
+  What changed is that the cycle arena — the block allocator every
+  cycle-headered object is carved from — now **hands a chunk back the moment
+  its last block is freed**. It used to free none, ever: 1,053 × 64 KiB
+  chunks taken and zero returned, 72% of a 96 MiB settled heap sitting at 4%
+  occupancy against a genuine working set of about 11 MiB. It now returns
+  1,236 of the 1,397 chunks it ever takes; the ~160 left are one cached chunk
+  per live size class.
+
+  **`SCR_CYCLE_ARENA_BUDGET` must stay off — it is now the *worse* arm.**
+  The knob caps how many bytes of chunk the arena may hold; past the cap a
+  miss falls back to `calloc`. That ceiling was worth −20 MiB back when a
+  chunk could never come back, and it is the reason the knob exists. With
+  the arena returning its own chunks it **costs +29 MiB**, because everything
+  past the cap is a `calloc`'d block carrying the allocator's own ~24 bytes
+  of per-block overhead and fragmenting the very heap the arena exists to
+  keep dense — 616,314 such fallbacks on the budgeted arm against 41,628 on
+  the unbudgeted one. Settled working set, matched peak modes:
+
+  | | no budget | `SCR_CYCLE_ARENA_BUDGET=16777216` |
+  |---|---|---|
+  | the old arena | 163.39 MiB | 143.02 MiB |
+  | this arena | **104.50 MiB** | 133.93 MiB |
+
+  It ships at `0` (unbounded), which is what it already shipped as, and
+  **there is no operational reason to set it**. It is kept only as the
+  diagnostic arm the table above is read from. The value is in **bytes**, and
+  it is an env knob rather than a build flag, so both rows above are the same
+  executable. `SCR_CYCLE_ARENA=0` turns the arena off entirely; that is a
+  debugging arm too, not a tuning one.
+
+* **Backend: this binary is compiled by the C backend, and that is the
+  target.** A program that uses `WeakMap` has no LLVM lowering
+  (`LlvmUnsupportedError("weakmap:new")`), so it takes the documented
+  demotion and the build prints which backend it chose. zapo uses `WeakMap`,
+  so **this service is a C-backend build by construction** — the demotion is
+  the expected and intended lane here, not a fallback or a caveat. Nothing
+  about the memory figures above depends on the backend: the cycle arena is
+  in the runtime, which both backends link.
+
 ---
 
 ## What was verified, and what was not
