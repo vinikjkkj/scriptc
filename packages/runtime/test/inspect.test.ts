@@ -40,6 +40,9 @@ beforeAll(async () => {
     join(testDir, "../src/scr_exception.c"),
     join(testDir, "../src/scr_object.c"),
     join(testDir, "../src/scr_cycle.c"),
+    // scr_json.c names scr_arr_release_v as the origin table's "this was an
+    // array" marker, and that symbol is defined here.
+    join(testDir, "../src/scr_union.c"),
     ...(process.platform === "linux" ? ["-D_GNU_SOURCE", "-lm"] : []),
   ]);
 });
