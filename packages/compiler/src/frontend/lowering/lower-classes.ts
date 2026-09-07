@@ -72,7 +72,7 @@ export interface ClassInfo {
   /** OWN fields only (declaration order) with their initializers: the
    * class's constructor runs exactly these — inherited fields initialize in
    * the base constructor, before/via super(). */
-  fieldOrder: { name: string; type: IrType; initializer: ts.Expression | undefined; /** Redeclared INHERITED field: the initializer assigns the base slot at this position; no new slot (def.fields excludes it). */ redeclared?: true }[];
+  fieldOrder: { name: string; type: IrType; initializer: ts.Expression | undefined; /** Redeclared INHERITED field: the initializer assigns the base slot at this position; no new slot (def.fields excludes it). */ redeclared?: true; /** BARE redeclare of an inherited undefined-armed slot (`override x: T;`, no initializer): Node [[Define]]s the own property to undefined at this position, so the lowering writes the interned undefined arm into the inherited slot — the reset itself, not a value the source spells. Carries `decl` as its blame node (there is no initializer expression to locate). */ resetsToUndefined?: { decl: ts.PropertyDeclaration } }[];
   /** OWN declared methods only — inherited lookups walk the base chain
    * (findMethodOn). An `abstract` entry is a signature with no body (and
    * no module function): it declares the vtable slot; concrete subclasses
@@ -2318,6 +2318,11 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
        * strictPropertyInitialization off) — checked against the
        * constructor's top-level assignments after the member loop. */
       const unguardedFields: { node: ts.Node; name: string; why: string }[] = [];
+      /** Bare redeclares that STRIPPED the inherited slot's undefined arm
+       * (`collection?: string` → `override collection: string`): the slot
+       * keeps the union, and reads through THIS class checked-extract the
+       * narrowed type — the deferred-init read path, joined below. */
+      const armedRedeclares: string[] = [];
       /** Parameter properties, in parameter order — spliced in FRONT of the
        * declared fields after the member loop (Node's layout, probed: the
        * transform hoists their definitions above every declared field). */
@@ -2868,20 +2873,89 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
             // builtin Error prefix included — reads, toString, and throw
             // reports all answer the overwritten name like Node). A BARE
             // redeclare writes undefined in Node (`class B extends A
-            // { x; }` reads undefined!) and a type-changing redeclare has
-            // no single slot type — both keep the fence.
+            // { x; }` reads undefined!) — the two arms below are the two
+            // ways to be exact about that write. A TYPE-CHANGING redeclare
+            // has no single slot type and keeps the fence: these layouts
+            // give the property ONE slot, and `override o: Wide` over an
+            // inherited `o: Narrow` needs that slot to answer both
+            // spellings, which the record model (a narrowing conversion
+            // COPIES into the narrower shape) cannot do.
             const baseType = fields.get(member.name.text)!;
-            if (member.initializer && typeEquals(type, baseType)) {
+            const sameType = typeEquals(type, baseType);
+            if (member.initializer && sameType) {
               fieldOrder.push({ name: member.name.text, type, initializer: member.initializer, redeclared: true });
               continue;
             }
-            L.unsupported(
-              "SC1090",
-              member.name,
-              member.initializer
-                ? "redeclaring inherited fields at a different type"
-                : "redeclaring inherited fields without an initializer (Node resets the field to undefined)",
-            );
+            // A BARE redeclare (`override options: T;`) — the reset. Node
+            // [[Define]]s the own property to undefined when this class's
+            // field initializers run, so the inherited slot goes to
+            // undefined AFTER super() returned and BEFORE the constructor
+            // body. Two ways to be exact about that, and they are the two
+            // arms below; anything else refuses rather than guess, because
+            // erasing a reset the program can observe is a silently wrong
+            // answer, not a missing feature.
+            if (!member.initializer) {
+              // (1) THE SLOT CAN HOLD IT. The inherited slot is an
+              // undefined-armed union and the redeclaration is that same
+              // union, or that union with the undefined arm removed (the
+              // `collection?: string` → `override collection: string`
+              // idiom). The reset is then WRITTEN — the interned undefined
+              // arm into the inherited slot, at this member's position —
+              // which is Node exactly, with no analysis to get wrong.
+              // Arm-removing redeclares additionally join deferredInitFields
+              // so reads through THIS class checked-extract the narrowed
+              // type (a read genuinely taken before the constructor's
+              // assignment throws the catchable TypeError where Node hands
+              // back an undefined the declared type cannot hold — the
+              // deferred-init trade, already ratified for `x!: T`). Reads
+              // through the BASE keep seeing the union, which is what the
+              // base's own declaration says.
+              const baseArms = baseType.kind === "union" ? L.unions.get(baseType.unionId)?.arms : undefined;
+              const baseAdmitsUndefined = baseArms?.some((a) => a.kind === "undefinedT") ?? false;
+              if (baseAdmitsUndefined && (sameType || typeEquals(type, L.stripUndefinedArm(baseType)))) {
+                fieldOrder.push({
+                  name: member.name.text,
+                  type: baseType,
+                  initializer: undefined,
+                  redeclared: true,
+                  resetsToUndefined: { decl: member },
+                });
+                if (!sameType) armedRedeclares.push(member.name.text);
+                continue;
+              }
+              // (2) THE RESET IS DEAD. The slot cannot hold undefined, so
+              // the reset cannot be written; it can only be ERASED — and
+              // erasing it is exact only where nothing observes the field
+              // between the reset and the constructor's own assignment.
+              // bareResetIsDead proves that syntactically (see it for the
+              // rule) and refuses everything it cannot prove.
+              if (sameType && bareResetIsDead(L, member, decl)) continue;
+            }
+            // The refusal names what actually blocks it. These two are
+            // INDEPENDENT and a redeclare can carry both — reporting only
+            // the missing initializer sent two rounds of work after the
+            // reset semantics when the real wall was the slot type.
+            const reasons: string[] = [];
+            // Type spellings are CAPPED: a deeply-expanded record runs to
+            // megabytes, and this message is a grouping key in the coverage
+            // report (report.ts's own width cap exists for the same reason).
+            const spell = (t: IrType): string => {
+              const s = L.fmt(t);
+              return s.length > 160 ? `${s.slice(0, 160)}…` : s;
+            };
+            if (!sameType) {
+              reasons.push(
+                `at a different type ('${spell(type)}' over the inherited '${spell(baseType)}' — these layouts give the property ONE slot, and one slot cannot answer both spellings)`,
+              );
+            }
+            if (!member.initializer) {
+              reasons.push(
+                sameType
+                  ? `without an initializer (Node resets the field to undefined when this class's initializers run, and '${spell(type)}' cannot hold undefined — assign it at the top of the constructor with nothing that could read it in between, or give the declaration an initializer)`
+                  : "without an initializer (Node resets the field to undefined when this class's initializers run)",
+              );
+            }
+            L.unsupported("SC1090", member.name, `redeclaring inherited fields ${reasons.join(", and ")}`);
           }
           if (L.findMethodOn(base, member.name.text)) {
             L.unsupported("SC1090", member.name, "fields shadowing inherited methods");
@@ -3435,6 +3509,7 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
       // all) leaves a window where Node reads undefined and these layouts
       // would read zeroed memory, so it fences instead.
       const deferredInitFields = new Set<string>(base?.deferredInitFields ?? []);
+      for (const name of armedRedeclares) deferredInitFields.add(name);
       const collectedFields = new Set<string>(base?.collectedFields ?? []);
       const absentTrackedFields = new Set<string>(base?.absentTrackedFields ?? []);
       if (unguardedFields.length > 0) {
@@ -6623,6 +6698,36 @@ export function lowerClassMembers(L: Lowerer, info: ClassInfo): IrFunction[] {
     const out: IrStmt[] = [];
     const thisType: IrType = { kind: "object", className: info.def.name };
     for (const f of info.fieldOrder) {
+      // A BARE redeclare of an inherited undefined-armed slot: Node's
+      // [[Define]] of the own property to undefined, at this member's
+      // position among the initializers. No source expression exists, so
+      // the write is built here (the static-field `tag?: string` shape
+      // verbatim) and blamed on the declaration.
+      if (f.resetsToUndefined) {
+        const loc = locOf(f.resetsToUndefined.decl);
+        const undefTag = f.type.kind === "union" ? L.armTag(f.type.unionId, UNDEFINED_T) : -1;
+        // The collection admitted the redeclare only with an undefined arm
+        // in the INHERITED slot's type, so the tag is there to be taken.
+        if (f.type.kind !== "union" || undefTag < 0) {
+          throw new Error(`lowerer bug: reset of '${f.name}' onto a slot with no undefined arm`);
+        }
+        out.push({
+          kind: "fieldSet",
+          obj: { kind: "varRef", localId: thisLocal.id, type: thisType, loc },
+          className: info.def.name,
+          field: f.name,
+          value: {
+            kind: "unionWrap",
+            unionId: f.type.unionId,
+            tag: undefTag,
+            value: { kind: "unitLit", unit: "undefined", type: UNDEFINED_T, loc },
+            type: f.type,
+            loc,
+          },
+          loc,
+        });
+        continue;
+      }
       if (!f.initializer) continue;
       L.stats.statementsTotal++;
       L.bumpFileStat(locOf(f.initializer).file, "total");
@@ -9639,6 +9744,155 @@ function hasLoopJump(node: ts.Node): boolean {
   };
   walk(node);
   return found;
+}
+
+/** IR kinds whose values coerce WITHOUT running user code. Everything else
+ * — a record, a class instance, an array — answers `+` and a template
+ * substitution through a `toString`/`valueOf`, which IS user code. */
+const INERT_OPERAND_KINDS: ReadonlySet<string> = new Set([
+  "f64", "string", "bool", "bigint", "undefinedT", "nullT",
+]);
+
+function inertOperand(L: Lowerer, e: ts.Expression): boolean {
+  const t = L.mapTypeOf(L.typeOf(e));
+  if (!t) return false;
+  if (t.kind === "union") {
+    const arms = L.unions.get(t.unionId)?.arms;
+    return arms !== undefined && arms.every((a) => INERT_OPERAND_KINDS.has(a.kind));
+  }
+  return INERT_OPERAND_KINDS.has(t.kind);
+}
+
+/** An expression that CANNOT run user code: a positive whitelist of
+ * identifiers, literals, and the operators that cannot reach a
+ * `toString`/`valueOf`.
+ *
+ * This is the fence that makes bareResetIsDead's window airtight. If
+ * nothing between the reset and the constructor's assignment can run user
+ * code, then nothing there can READ the instance — including through a
+ * `this` the BASE constructor leaked, which is the one escape a
+ * this-free-syntax check alone would miss (nobody is running to read it).
+ *
+ * A whitelist and not a blacklist on purpose: `a + b` and a template
+ * substitution LOOK inert and are not — either runs `toString`/`valueOf`
+ * on a non-primitive operand — so the coercing forms additionally require
+ * operands the IR types as scalars. */
+function inertExpr(L: Lowerer, node: ts.Expression): boolean {
+  const walk = (e: ts.Expression): boolean => {
+    if (ts.isParenthesizedExpression(e) || ts.isNonNullExpression(e)) return walk(e.expression);
+    if (ts.isAsExpression(e) || ts.isTypeAssertion(e)) return walk(e.expression);
+    if (ts.isIdentifier(e)) return true;
+    if (ts.isLiteralExpression(e)) return true;
+    if (
+      e.kind === ts.SyntaxKind.TrueKeyword || e.kind === ts.SyntaxKind.FalseKeyword ||
+      e.kind === ts.SyntaxKind.NullKeyword
+    ) {
+      return true;
+    }
+    if (ts.isObjectLiteralExpression(e)) {
+      return e.properties.every((prop) =>
+        ts.isPropertyAssignment(prop) && !ts.isComputedPropertyName(prop.name) && walk(prop.initializer));
+    }
+    if (ts.isArrayLiteralExpression(e)) {
+      return e.elements.every((x) => !ts.isSpreadElement(x) && walk(x));
+    }
+    if (ts.isConditionalExpression(e)) {
+      return walk(e.condition) && walk(e.whenTrue) && walk(e.whenFalse);
+    }
+    if (ts.isBinaryExpression(e)) {
+      if (!walk(e.left) || !walk(e.right)) return false;
+      const op = e.operatorToken.kind;
+      // The logical operators SELECT an operand; they never convert one.
+      if (
+        op === ts.SyntaxKind.QuestionQuestionToken || op === ts.SyntaxKind.BarBarToken ||
+        op === ts.SyntaxKind.AmpersandAmpersandToken
+      ) {
+        return true;
+      }
+      return inertOperand(L, e.left) && inertOperand(L, e.right);
+    }
+    if (ts.isPrefixUnaryExpression(e)) {
+      if (!walk(e.operand)) return false;
+      return e.operator === ts.SyntaxKind.ExclamationToken || inertOperand(L, e.operand);
+    }
+    if (ts.isTemplateExpression(e)) {
+      return e.templateSpans.every((span) => walk(span.expression) && inertOperand(L, span.expression));
+    }
+    return false;
+  };
+  return walk(node);
+}
+
+/** Is the RESET a bare redeclare performs — `override x: T;` with no
+ * initializer, which Node [[Define]]s to undefined right after super()
+ * returns — impossible for this program to OBSERVE?
+ *
+ * It is exactly when no code runs between the reset and the constructor's
+ * own assignment of the field. Node's order is: super() → this class's
+ * field initializers (the reset among them, in declaration order) → the
+ * constructor body. So the window is (a) the field initializers declared
+ * AFTER this one and (b) the constructor's top-level statements before
+ * the assignment. This proves the window empty of anything that could run:
+ *
+ *   - a constructor exists, with a body and a top-level `super(...)`
+ *     expression statement (the only super form these layouts lower);
+ *   - after it, a top-level `this.<name> = <rhs>` with an inert <rhs>;
+ *   - every top-level statement between super() and that assignment is
+ *     `this.<other> = <rhs>` for some OTHER field, with an inert <rhs>;
+ *   - every field initializer declared after this member is inert.
+ *
+ * Everything else refuses. The rule is syntactic on purpose: an erased
+ * reset that the program CAN observe is a silently wrong answer (Node
+ * reads undefined, the erased lowering reads whatever the base
+ * constructor left), which is worse than the refusal it replaces. */
+function bareResetIsDead(L: Lowerer, member: ts.PropertyDeclaration, decl: ts.ClassLikeDeclaration): boolean {
+  if (!ts.isIdentifier(member.name)) return false;
+  const name = member.name.text;
+
+  // (a) The initializers that run AFTER the reset, in Node's order.
+  let seen = false;
+  for (const m of decl.members) {
+    if (m === member) {
+      seen = true;
+      continue;
+    }
+    if (!seen) continue;
+    if (ts.isPropertyDeclaration(m) && !isStaticMember(m) && m.initializer && !inertExpr(L, m.initializer)) {
+      return false;
+    }
+  }
+
+  // (b) The constructor's top-level statements up to the assignment.
+  const ctor = decl.members.find((m): m is ts.ConstructorDeclaration =>
+    ts.isConstructorDeclaration(m) && m.body !== undefined);
+  if (!ctor?.body) return false;
+  const stmts = ctor.body.statements;
+  const superAt = stmts.findIndex((s) =>
+    ts.isExpressionStatement(s) && ts.isCallExpression(s.expression) &&
+    s.expression.expression.kind === ts.SyntaxKind.SuperKeyword);
+  if (superAt < 0) return false;
+  for (let i = superAt + 1; i < stmts.length; i++) {
+    const s = stmts[i]!;
+    if (
+      !ts.isExpressionStatement(s) || !ts.isBinaryExpression(s.expression) ||
+      s.expression.operatorToken.kind !== ts.SyntaxKind.EqualsToken ||
+      !ts.isPropertyAccessExpression(s.expression.left) ||
+      s.expression.left.expression.kind !== ts.SyntaxKind.ThisKeyword ||
+      !inertExpr(L, s.expression.right)
+    ) {
+      return false;
+    }
+    if (s.expression.left.name.text === name) return true;
+  }
+  return false;
+}
+
+/** A `static` member — the reset analysis only reasons about instance
+ * field initializers (statics run at class-evaluation time, not per
+ * construction). */
+function isStaticMember(m: ts.ClassElement): boolean {
+  return ts.canHaveModifiers(m) &&
+    (ts.getModifiers(m)?.some((x) => x.kind === ts.SyntaxKind.StaticKeyword) ?? false);
 }
 
 export function genericFieldFnNodeOf(member: ts.PropertyDeclaration): ts.FunctionExpression | ts.ArrowFunction | null {

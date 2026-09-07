@@ -10821,6 +10821,18 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/7788-a-bare-redeclare-onto-an-optional-slot.ts": {
+   "order": [
+    "<repo>/tests/corpus/7788-a-bare-redeclare-onto-an-optional-slot.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/7789-a-bare-redeclare-whose-reset-is-dead.ts": {
+   "order": [
+    "<repo>/tests/corpus/7789-a-bare-redeclare-whose-reset-is-dead.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/800-switch-basics.ts": {
    "order": [
     "<repo>/tests/corpus/800-switch-basics.ts"
@@ -11729,6 +11741,12 @@
   "<repo>/tests/diagnostics/fetch-typed-option-member.ts": {
    "order": [
     "<repo>/tests/diagnostics/fetch-typed-option-member.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/field-redeclare-bare.ts": {
+   "order": [
+    "<repo>/tests/diagnostics/field-redeclare-bare.ts"
    ],
    "diags": []
   },
