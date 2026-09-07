@@ -1,0 +1,16 @@
+WaAppStateMemoryStore=object
+WaAuthMemoryStore=object
+WaSignalMemoryStore=object
+WaPreKeyMemoryStore=object
+WaSessionMemoryStore=object
+WaIdentityMemoryStore=object
+SenderKeyMemoryStore=object
+WaRetryMemoryStore=object
+WaGroupMetadataMemoryStore=object
+WaChatMetadataMemoryStore=object
+WaDeviceListMemoryStore=object
+WaContactMemoryStore=object
+WaMessageSecretMemoryStore=object
+WaMessageMemoryStore=object
+WaThreadMemoryStore=object
+WaPrivacyTokenMemoryStore=object

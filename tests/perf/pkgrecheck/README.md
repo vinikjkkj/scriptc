@@ -1,5 +1,11 @@
 # pkgrecheck — re-measurement of store-*, media-utils, wam, voip on main `facbe036`
 
+> **SUPERSEDED, 2026-09-07.** The table below is main `facbe036`.
+> `tests/perf/pkgstatus-0907/` re-measures the same packages on main
+> `3f3dd523`, 266 commits later, and through `--provenance-sources`
+> against the published npm artifacts rather than a local source corpus.
+> Read that first; these numbers are kept as the earlier point.
+
 Previous measurements: `<blocks>\pkgstatus-lab\estado-pkgstatus.md` (main
 `16705f5c`, 8 packages, 147 modules) and
 `<blocks>\pkgstatus2-lab\estado-pkgstatus2.md` (main `7417b09f`, later
