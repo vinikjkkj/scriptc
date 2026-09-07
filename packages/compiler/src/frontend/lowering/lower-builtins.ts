@@ -9095,7 +9095,7 @@ const NUMBER_CONSTANTS: Record<string, number | undefined> = {
     access: ts.PropertyAccessExpression,): IrExpr | null {
     if (L.chainBlocked(call, access)) return null;
     const member = access.name.text;
-    if (member !== "decode" && member !== "encode") return null;
+    if (member !== "decode" && member !== "encode" && member !== "encodeInto") return null;
     const recv = access.expression;
     let cls: string | undefined;
     /** The `new TextEncoder()` node when the receiver IS the construction
@@ -9111,12 +9111,15 @@ const NUMBER_CONSTANTS: Record<string, number | undefined> = {
       if (!sym || !L.isStdlibSymbol(sym)) return null;
       cls = sym.name;
       ctorNode = recv;
-    } else if (member === "encode" && isStdlibInstanceOf(L, recv, "TextEncoder")) {
+    } else if ((member === "encode" || member === "encodeInto") && isStdlibInstanceOf(L, recv, "TextEncoder")) {
       cls = "TextEncoder";
     } else if (member === "decode" && isStdlibInstanceOf(L, recv, "TextDecoder")) {
       cls = "TextDecoder";
     }
-    if (!(cls === "TextDecoder" && member === "decode") && !(cls === "TextEncoder" && member === "encode")) {
+    if (
+      !(cls === "TextDecoder" && member === "decode") &&
+      !(cls === "TextEncoder" && (member === "encode" || member === "encodeInto"))
+    ) {
       return null;
     }
     const loc = locOf(call);
@@ -9160,6 +9163,7 @@ const NUMBER_CONSTANTS: Record<string, number | undefined> = {
     if (ctorArgs.length > 0) {
       L.noLowering("new TextEncoder with arguments", recv);
     }
+    if (member === "encodeInto") return lowerEncodeInto(L, call, recv, loc);
     if (call.arguments.length !== 1) {
       L.noLowering(
         `TextEncoder.encode with ${call.arguments.length} arguments`,
@@ -9178,6 +9182,209 @@ const NUMBER_CONSTANTS: Record<string, number | undefined> = {
       type: BYTES_U8,
       loc,
     };
+  }
+
+/** `enc.encodeInto(src, dest)` — the WHATWG encoder's IN-PLACE half.
+   *
+   * Two facts make this exact rather than approximate, and both are
+   * already in the tree:
+   *
+   *  1. THE TRUNCATION. `scr_bytes_write_str` (Buffer.prototype.write's
+   *     runtime) already backs a split multi-byte sequence off to its lead
+   *     byte — "whole chars only" — which is the encodeInto rule verbatim
+   *     ("partially encoded characters will not be written"). So `written`
+   *     is that call's own return value, with the length argument omitted
+   *     so the budget IS the destination's length. No new runtime unit,
+   *     no new always-linked byte.
+   *
+   *  2. THE COUNT. `read` is UTF-16 CODE UNITS, and the bytes just written
+   *     say how many: every non-continuation byte starts one code point,
+   *     which is one code unit below U+10000 and a surrogate PAIR — two —
+   *     at or above it, and the UTF-8 lead byte for that boundary is
+   *     exactly 0xF0. So the count is a walk of the written prefix, and it
+   *     needs nothing from the source string.
+   *
+   * Counting off the OUTPUT is also what makes the lone-surrogate corner
+   * come out right for free. ScrStr storage is well-formed UTF-8 (a lone
+   * surrogate became U+FFFD at string construction — the documented
+   * divergence), so a source Node would have read as one code unit and
+   * written as three bytes is stored as one U+FFFD and written as the same
+   * three bytes; the lead byte 0xEF counts 1, which is Node's `read`.
+   * Measured against Node v25.9.0 across the truncation corners — a
+   * destination too small for the last character, a destination of length
+   * 0, an astral character straddling the boundary, an unpaired surrogate
+   * at and one byte under its three-byte cost.
+   *
+   * The result is the checker's own EncodeIntoResult record, so a
+   * destructuring consumer and a `.written` reader see the shape the rest
+   * of the program agreed on. A destination that is not bytes<u8> fences:
+   * ArrayBuffer values have no representation, and encodeInto's whole
+   * point is writing THROUGH the argument (a subarray view aliases its
+   * backing — lower-containers' subarray discipline — which is what
+   * zapo's `writeUtf8` relies on). */
+  function lowerEncodeInto(L: Lowerer, call: ts.CallExpression, recv: ts.Expression, loc: SrcLoc): IrExpr {
+    if (call.arguments.length !== 2) {
+      L.noLowering(
+        `TextEncoder.encodeInto with ${call.arguments.length} arguments`,
+        call,
+        "encodeInto takes the source string and the destination Uint8Array",
+      );
+    }
+    const src = L.lowerExprExpecting(call.arguments[0]!, STRING);
+    const destNode = call.arguments[1]!;
+    const dest = L.lowerExpr(destNode);
+    if (!(dest.type.kind === "bytes" && dest.type.elem === "u8")) {
+      L.noLowering(
+        `TextEncoder.encodeInto into '${L.fmt(dest.type)}' values`,
+        destNode,
+        "the destination is a Uint8Array or Buffer (ArrayBuffer values have no representation)",
+      );
+    }
+    // The RESULT record comes from the checker, not from a shape this
+    // lowering invents: consumers already read `read`/`written` off that
+    // type, and a shape of our own would not be the one they hold.
+    const resT = L.mapTypeOf(L.typeOf(call));
+    const shape = resT !== null && resT.kind === "record" ? L.shapes.get(resT.shapeId) : undefined;
+    const numeric = (name: string): boolean =>
+      shape !== undefined && shape.fields.some((f) => f.name === name && f.type.kind === "f64");
+    if (resT === null || resT.kind !== "record" || shape === undefined ||
+        shape.fields.length !== 2 || !numeric("read") || !numeric("written")) {
+      L.noLowering(
+        "TextEncoder.encodeInto's result type",
+        call,
+        "the answer is the two-number { read, written } record encodeInto is declared to return",
+      );
+    }
+    const helper = internEncodeIntoHelper(L, resT, loc);
+    return { kind: "call", callee: helper, args: [src, dest], type: resT, loc };
+  }
+
+/** One `%text.encodeInto(s, dest)` per RESULT SHAPE, memoized per program:
+   *
+   *   %text.encodeInto(s, d) {
+   *     w = d.write(s, "utf8", 0);      // whole characters only
+   *     r = 0; i = 0;
+   *     while (i < w) {
+   *       b = d[i];
+   *       if ((b & 0xC0) !== 0x80) r = r + (b < 0xF0 ? 1 : 2);
+   *       i = i + 1;
+   *     }
+   *     return { read: r, written: w };
+   *   }
+   *
+   * A lifted function and not an inline expression because `read` is a
+   * walk, and because the destination must be evaluated ONCE — it is an
+   * lvalue the write goes through, and re-lowering `buf.subarray(off)` for
+   * the count would walk a second view. */
+  function internEncodeIntoHelper(L: Lowerer, resT: IrType & { kind: "record" }, loc: SrcLoc): string {
+    const key = `text:encodeInto:${resT.shapeId}`;
+    const found = L.arrHofHelpers.get(key);
+    if (found !== undefined) return found;
+    const name = `%text.encodeInto.${L.arrHofHelpers.size}`;
+    L.arrHofHelpers.set(key, name);
+    const s = (): IrExpr => ({ kind: "varRef", localId: "s.0", type: STRING, loc });
+    const d = (): IrExpr => ({ kind: "varRef", localId: "d.0", type: BYTES_U8, loc });
+    const w = (): IrExpr => ({ kind: "varRef", localId: "w.0", type: F64, loc });
+    const r = (): IrExpr => ({ kind: "varRef", localId: "r.0", type: F64, loc });
+    const i = (): IrExpr => ({ kind: "varRef", localId: "i.0", type: F64, loc });
+    const b = (): IrExpr => ({ kind: "varRef", localId: "b.0", type: F64, loc });
+    const num = (value: number): IrExpr => ({ kind: "numLit", value, type: F64, loc });
+    const bin = (op: "+" | "&", left: IrExpr, right: IrExpr): IrExpr =>
+      ({ kind: "bin", op, left, right, type: F64, loc });
+    const test = (op: "<" | "!==", left: IrExpr, right: IrExpr): IrExpr =>
+      ({ kind: "bin", op, left, right, type: BOOL, loc });
+    const body: IrStmt[] = [
+      {
+        kind: "varDecl",
+        localId: "w.0",
+        // The LENGTH argument is omitted, so the runtime's budget is the
+        // destination's own length — encodeInto's "as much as fits".
+        init: {
+          kind: "bytesIntrinsic",
+          method: "writeStr",
+          receiver: d(),
+          args: [s(), { kind: "strLit", value: "utf8", type: STRING, loc }, num(0)],
+          type: F64,
+          loc,
+        },
+        loc,
+      },
+      { kind: "varDecl", localId: "r.0", init: num(0), loc },
+      { kind: "varDecl", localId: "i.0", init: num(0), loc },
+      {
+        kind: "while",
+        cond: test("<", i(), w()),
+        body: [
+          {
+            kind: "varDecl",
+            localId: "b.0",
+            init: { kind: "bytesIntrinsic", method: "get", receiver: d(), args: [i()], type: F64, loc },
+            loc,
+          },
+          {
+            // A CONTINUATION byte (10xxxxxx) continues a code point that
+            // an earlier lead byte already counted.
+            kind: "if",
+            cond: test("!==", bin("&", b(), num(0xc0)), num(0x80)),
+            then: [
+              {
+                kind: "assign",
+                localId: "r.0",
+                value: bin("+", r(), {
+                  // 0xF0 is the four-byte lead boundary, which is exactly
+                  // the U+10000 boundary UTF-16 spends a surrogate pair on.
+                  kind: "ternary",
+                  cond: test("<", b(), num(0xf0)),
+                  then: num(1),
+                  else_: num(2),
+                  type: F64,
+                  loc,
+                }),
+                loc,
+              },
+            ],
+            else_: null,
+            loc,
+          },
+          { kind: "assign", localId: "i.0", value: bin("+", i(), num(1)), loc },
+        ],
+        loc,
+      },
+      {
+        kind: "return",
+        value: {
+          kind: "recordLit",
+          fields: [
+            { name: "read", value: r() },
+            { name: "written", value: w() },
+          ],
+          type: resT,
+          loc,
+        },
+        loc,
+      },
+    ];
+    const locals: IrLocal[] = [
+      { id: "s.0", name: "s", type: STRING, mutable: false },
+      { id: "d.0", name: "d", type: BYTES_U8, mutable: false },
+      { id: "w.0", name: "w", type: F64, mutable: false },
+      { id: "r.0", name: "r", type: F64, mutable: true },
+      { id: "i.0", name: "i", type: F64, mutable: true },
+      { id: "b.0", name: "b", type: F64, mutable: false },
+    ];
+    const fn: IrFunction = {
+      name,
+      params: [
+        { localId: "s.0", name: "s", type: STRING },
+        { localId: "d.0", name: "d", type: BYTES_U8 },
+      ],
+      returnType: resT,
+      locals,
+      body,
+      loc,
+    };
+    L.liftedFns.push(fn);
+    return name;
   }
 
 /** `String.fromCodePoint(...points)`, interned once per program. Takes

@@ -1,0 +1,17 @@
+require-outside-the-esm-rule.ts:26:12 - error SC2020: 'require' is part of the standard library types but has no scriptc lowering yet
+
+  25 | function load(): unknown {
+  26 |     return require("some-package");
+     |            ^~~~~~~
+  27 | }
+
+  hint: the type checker sees the full standard library, but only the supported surface compiles (https://scriptc.dev/limitations)
+
+require-outside-the-esm-rule.ts:30:20 - error SC2020: 'typeof globalThis.require' is part of the standard library types but has no scriptc lowering yet
+
+  29 | 
+  30 | console.log(String(globalThis.require("some-package")));
+     |                    ^~~~~~~~~~~~~~~~~~
+  31 | 
+
+  hint: the type checker sees the full standard library, but only the supported surface compiles (https://scriptc.dev/limitations)

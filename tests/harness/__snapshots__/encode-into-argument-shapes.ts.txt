@@ -1,0 +1,8 @@
+encode-into-argument-shapes.ts:34:20 - error SC2020: 'TextEncoder.encodeInto with 1 arguments' is part of the standard library types but has no scriptc lowering yet
+
+  33 | const pair: [string, Uint8Array] = ["hi", new Uint8Array(8)];
+  34 | console.log(String(enc.encodeInto(...pair).written));
+     |                    ^~~~~~~~~~~~~~~~~~~~~~~
+  35 | 
+
+  hint: encodeInto takes the source string and the destination Uint8Array

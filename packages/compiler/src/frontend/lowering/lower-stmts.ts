@@ -6584,6 +6584,19 @@ function isEsModuleStamp(expr: ts.Expression): boolean {
         return { kind: "block", body: [], loc: locOf(expr) };
       }
       if (topLevelJs) return { kind: "block", body: [], loc: locOf(expr) };
+      // An ES MODULE's `require(...)` in STATEMENT position. Node defines
+      // no `require` binding there at all, so the statement is that
+      // ReferenceError and nothing else — the same one fact the
+      // EXPRESSION form answers through ambientUndefVarRootOf's ES-module
+      // arm (esmUnboundRequireRoot). Spelled here because a require in
+      // statement position never reaches the expression path, and without
+      // it `require(x);` refused where `void require(x);` threw.
+      {
+        const root = ambientUndefVarRootOf(L, expr);
+        if (root !== null) {
+          return { kind: "exprStmt", expr: nsUndefRead(L, root.text, expr, F64), loc: locOf(expr) };
+        }
+      }
       L.unsupported(
         "SC1090",
         expr,
