@@ -1,0 +1,104 @@
+provenance: @zapo-js/store-mysql@1.2.0 ← https://github.com/vinikjkkj/zapo@refs/tags/v1.8.0 @ 9a49e1fffdec (source compiles statically)
+provenance: mysql2@3.24.3 ← https://github.com/sidorares/node-mysql2@refs/heads/master @ 83bda8069073 (source compiles statically)
+provenance: argo-codec@0.2.1: no provenance attestation published; island path used
+provenance: @zapo-js/native: not installed under the entry's node_modules; island path used
+<blocks>/wamcoord-prov/83bda806907364114946f1fd215ad34b51a1e71c/lib/base/connection.js:24:7 - error SC1010: the 'sql-escaper' module is not supported yet
+
+  23 | const Queue = require('../ring_queue.js');
+  24 | const SqlString = require('sql-escaper');
+     |       ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  25 | const { createLRU } = require('lru.min');
+
+  hint: relative imports (./file, ../dir/file), package.json-mediated project imports (#alias via the imports field, self-name references via exports), installed npm packages (their code runs under --dynamic), and the built-in fs, fs/promises, path, os, url, crypto, zlib, child_process, net, http, tls, https, http2, dgram, dns, util, util/types, string_decoder, querystring, readline, events, stream, stream/promises, stream/consumers, buffer, assert, assert/strict, worker_threads, cluster, tty, async_hooks, timers, timers/promises, diagnostics_channel, perf_hooks, and module modules (bare or node:-prefixed) and node:test (node:-prefixed only, like in Node) are supported
+
+<blocks>/wamcoord-prov/83bda806907364114946f1fd215ad34b51a1e71c/lib/base/connection.js:25:7 - error SC1010: the 'lru.min' module is not supported yet
+
+  24 | const SqlString = require('sql-escaper');
+  25 | const { createLRU } = require('lru.min');
+     |       ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  26 | const PacketParser = require('../packet_parser.js');
+
+  hint: relative imports (./file, ../dir/file), package.json-mediated project imports (#alias via the imports field, self-name references via exports), installed npm packages (their code runs under --dynamic), and the built-in fs, fs/promises, path, os, url, crypto, zlib, child_process, net, http, tls, https, http2, dgram, dns, util, util/types, string_decoder, querystring, readline, events, stream, stream/promises, stream/consumers, buffer, assert, assert/strict, worker_threads, cluster, tty, async_hooks, timers, timers/promises, diagnostics_channel, perf_hooks, and module modules (bare or node:-prefixed) and node:test (node:-prefixed only, like in Node) are supported
+
+<blocks>/wamcoord-prov/83bda806907364114946f1fd215ad34b51a1e71c/lib/base/pool.js:4:7 - error SC1010: the 'sql-escaper' module is not supported yet
+
+  3 | const process = require('process');
+  4 | const SqlString = require('sql-escaper');
+    |       ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  5 | const EventEmitter = require('events').EventEmitter;
+
+  hint: relative imports (./file, ../dir/file), package.json-mediated project imports (#alias via the imports field, self-name references via exports), installed npm packages (their code runs under --dynamic), and the built-in fs, fs/promises, path, os, url, crypto, zlib, child_process, net, http, tls, https, http2, dgram, dns, util, util/types, string_decoder, querystring, readline, events, stream, stream/promises, stream/consumers, buffer, assert, assert/strict, worker_threads, cluster, tty, async_hooks, timers, timers/promises, diagnostics_channel, perf_hooks, and module modules (bare or node:-prefixed) and node:test (node:-prefixed only, like in Node) are supported
+
+<blocks>/wamcoord-prov/83bda806907364114946f1fd215ad34b51a1e71c/lib/constants/ssl_profiles.js:3:7 - error SC1010: the 'aws-ssl-profiles' module is not supported yet
+
+  2 | 
+  3 | const awsCaBundle = require('aws-ssl-profiles');
+    |       ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  4 | 
+
+  hint: relative imports (./file, ../dir/file), package.json-mediated project imports (#alias via the imports field, self-name references via exports), installed npm packages (their code runs under --dynamic), and the built-in fs, fs/promises, path, os, url, crypto, zlib, child_process, net, http, tls, https, http2, dgram, dns, util, util/types, string_decoder, querystring, readline, events, stream, stream/promises, stream/consumers, buffer, assert, assert/strict, worker_threads, cluster, tty, async_hooks, timers, timers/promises, diagnostics_channel, perf_hooks, and module modules (bare or node:-prefixed) and node:test (node:-prefixed only, like in Node) are supported
+
+<blocks>/wamcoord-prov/83bda806907364114946f1fd215ad34b51a1e71c/lib/packets/packet.js:10:7 - error SC1010: the 'long' module is not supported yet
+
+   9 | const NativeBuffer = require('buffer').Buffer;
+  10 | const Long = require('long');
+     |       ^~~~~~~~~~~~~~~~~~~~~~
+  11 | const StringParser = require('../parsers/string.js');
+
+  hint: relative imports (./file, ../dir/file), package.json-mediated project imports (#alias via the imports field, self-name references via exports), installed npm packages (their code runs under --dynamic), and the built-in fs, fs/promises, path, os, url, crypto, zlib, child_process, net, http, tls, https, http2, dgram, dns, util, util/types, string_decoder, querystring, readline, events, stream, stream/promises, stream/consumers, buffer, assert, assert/strict, worker_threads, cluster, tty, async_hooks, timers, timers/promises, diagnostics_channel, perf_hooks, and module modules (bare or node:-prefixed) and node:test (node:-prefixed only, like in Node) are supported
+
+<blocks>/wamcoord-prov/83bda806907364114946f1fd215ad34b51a1e71c/lib/parsers/binary_parser.js:7:7 - error SC1010: the 'generate-function' module is not supported yet
+
+  6 | const helpers = require('../helpers');
+  7 | const genFunc = require('generate-function');
+    |       ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  8 | const parserCache = require('./parser_cache.js');
+
+  hint: relative imports (./file, ../dir/file), package.json-mediated project imports (#alias via the imports field, self-name references via exports), installed npm packages (their code runs under --dynamic), and the built-in fs, fs/promises, path, os, url, crypto, zlib, child_process, net, http, tls, https, http2, dgram, dns, util, util/types, string_decoder, querystring, readline, events, stream, stream/promises, stream/consumers, buffer, assert, assert/strict, worker_threads, cluster, tty, async_hooks, timers, timers/promises, diagnostics_channel, perf_hooks, and module modules (bare or node:-prefixed) and node:test (node:-prefixed only, like in Node) are supported
+
+<blocks>/wamcoord-prov/83bda806907364114946f1fd215ad34b51a1e71c/lib/parsers/parser_cache.js:3:7 - error SC1010: the 'lru.min' module is not supported yet
+
+  2 | 
+  3 | const { createLRU } = require('lru.min');
+    |       ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  4 | 
+
+  hint: relative imports (./file, ../dir/file), package.json-mediated project imports (#alias via the imports field, self-name references via exports), installed npm packages (their code runs under --dynamic), and the built-in fs, fs/promises, path, os, url, crypto, zlib, child_process, net, http, tls, https, http2, dgram, dns, util, util/types, string_decoder, querystring, readline, events, stream, stream/promises, stream/consumers, buffer, assert, assert/strict, worker_threads, cluster, tty, async_hooks, timers, timers/promises, diagnostics_channel, perf_hooks, and module modules (bare or node:-prefixed) and node:test (node:-prefixed only, like in Node) are supported
+
+<blocks>/wamcoord-prov/83bda806907364114946f1fd215ad34b51a1e71c/lib/parsers/string.js:3:7 - error SC1010: the 'iconv-lite' module is not supported yet
+
+  2 | 
+  3 | const Iconv = require('iconv-lite');
+    |       ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  4 | const { createLRU } = require('lru.min');
+
+  hint: relative imports (./file, ../dir/file), package.json-mediated project imports (#alias via the imports field, self-name references via exports), installed npm packages (their code runs under --dynamic), and the built-in fs, fs/promises, path, os, url, crypto, zlib, child_process, net, http, tls, https, http2, dgram, dns, util, util/types, string_decoder, querystring, readline, events, stream, stream/promises, stream/consumers, buffer, assert, assert/strict, worker_threads, cluster, tty, async_hooks, timers, timers/promises, diagnostics_channel, perf_hooks, and module modules (bare or node:-prefixed) and node:test (node:-prefixed only, like in Node) are supported
+
+<blocks>/wamcoord-prov/83bda806907364114946f1fd215ad34b51a1e71c/lib/parsers/string.js:4:7 - error SC1010: the 'lru.min' module is not supported yet
+
+  3 | const Iconv = require('iconv-lite');
+  4 | const { createLRU } = require('lru.min');
+    |       ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  5 | 
+
+  hint: relative imports (./file, ../dir/file), package.json-mediated project imports (#alias via the imports field, self-name references via exports), installed npm packages (their code runs under --dynamic), and the built-in fs, fs/promises, path, os, url, crypto, zlib, child_process, net, http, tls, https, http2, dgram, dns, util, util/types, string_decoder, querystring, readline, events, stream, stream/promises, stream/consumers, buffer, assert, assert/strict, worker_threads, cluster, tty, async_hooks, timers, timers/promises, diagnostics_channel, perf_hooks, and module modules (bare or node:-prefixed) and node:test (node:-prefixed only, like in Node) are supported
+
+<blocks>/wamcoord-prov/83bda806907364114946f1fd215ad34b51a1e71c/lib/parsers/text_parser.js:6:7 - error SC1010: the 'generate-function' module is not supported yet
+
+  5 | const helpers = require('../helpers');
+  6 | const genFunc = require('generate-function');
+    |       ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  7 | const parserCache = require('./parser_cache.js');
+
+  hint: relative imports (./file, ../dir/file), package.json-mediated project imports (#alias via the imports field, self-name references via exports), installed npm packages (their code runs under --dynamic), and the built-in fs, fs/promises, path, os, url, crypto, zlib, child_process, net, http, tls, https, http2, dgram, dns, util, util/types, string_decoder, querystring, readline, events, stream, stream/promises, stream/consumers, buffer, assert, assert/strict, worker_threads, cluster, tty, async_hooks, timers, timers/promises, diagnostics_channel, perf_hooks, and module modules (bare or node:-prefixed) and node:test (node:-prefixed only, like in Node) are supported
+
+<blocks>/wamcoord-prov/83bda806907364114946f1fd215ad34b51a1e71c/promise.js:3:7 - error SC1010: the 'sql-escaper' module is not supported yet
+
+  2 | 
+  3 | const SqlString = require('sql-escaper');
+    |       ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  4 | const EventEmitter = require('events').EventEmitter;
+
+  hint: relative imports (./file, ../dir/file), package.json-mediated project imports (#alias via the imports field, self-name references via exports), installed npm packages (their code runs under --dynamic), and the built-in fs, fs/promises, path, os, url, crypto, zlib, child_process, net, http, tls, https, http2, dgram, dns, util, util/types, string_decoder, querystring, readline, events, stream, stream/promises, stream/consumers, buffer, assert, assert/strict, worker_threads, cluster, tty, async_hooks, timers, timers/promises, diagnostics_channel, perf_hooks, and module modules (bare or node:-prefixed) and node:test (node:-prefixed only, like in Node) are supported
+
+11 errors.

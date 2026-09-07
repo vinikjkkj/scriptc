@@ -1,0 +1,17 @@
+ok   coordinator class name = WaWamCoordinator
+ok   enum UI_ACTION_TYPE.CHAT_OPEN = 3
+ok   enum SIZE_BUCKET.LT128 = 3
+ok   enum unknown key is null = null
+ok   kind boolean = bool
+ok   kind integer = int
+ok   kind timer = int
+ok   kind enum = int
+ok   kind number = float
+ok   kind string = string
+ok   kind unknown = null
+ok   UiAction resolved fields = 21:string=chatlist,5:int=2,8:bool=true,3:int=142,1:int=3
+ok   unresolvable enum field is dropped = 5:int=7
+ok   empty payload resolves to no fields = 0
+globals regular = 3=0,5=0,11=8,13=Desktop,15=Windows,17=2.3000.0,779=Chrome,899=2,3543=7,13293=false
+ok   the private channel carries fewer globals than regular = fewer
+WAM-ENTRY2: ALL PASS

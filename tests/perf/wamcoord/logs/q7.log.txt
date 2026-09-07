@@ -1,0 +1,58 @@
+# NOTE: vitest ANSI colour escapes (ESC[..m) stripped for committing; no other byte changed.
+ORACLE-NODE v25.9.0
+=== Q7 START 2026-09-07T17:50:45-03:00
+########## provenance harness suite, gate=off
+
+ RUN  v3.2.7 <blocks>/wamcoord
+
+ ✓ tests/harness/provenance-transitive-subpath.test.ts (5 tests) 10378ms
+   ✓ provenance: a subpath discovered inside another package's source > the refusal this fixes is real with the flag off  304ms
+   ✓ provenance: a subpath discovered inside another package's source > every subpath maps to its own source file, and each one is named  438ms
+   ✓ provenance: a subpath discovered inside another package's source > the static binary matches Node on both backends  9602ms
+ ✓ tests/harness/provenance-alias-baseurl.test.ts (10 tests) 10516ms
+   ✓ provenance: a package's alias baseUrl belongs to the config that spells it > the program lowers, and the alias target is in the counted statements  392ms
+   ✓ provenance: a package's alias baseUrl belongs to the config that spells it > the static binary matches Node on both backends  8904ms
+   ✓ provenance: two mapped packages spelling the same alias key > the first-mapped package's binary matches Node on both backends  389ms
+ ✓ tests/harness/provenance-dist-esm.test.ts (4 tests) 11972ms
+   ✓ provenance: two-flavor dist and type-only edges > every dist/esm subpath maps, and each one names its source file  9835ms
+   ✓ provenance: two-flavor dist and type-only edges > a package reached only by `import type` still registers  967ms
+   ✓ provenance: two-flavor dist and type-only edges > the generic-method cascade behind a type-only subpath import clears  1161ms
+ ✓ tests/harness/provenance.test.ts (6 tests) 29463ms
+   ✓ provenance sources > attested source compiles STATIC and byte-matches the island's published dist  24826ms
+   ✓ provenance sources > a generated .d.ts with a compiled twin flattens its class-intersection  2846ms
+   ✓ provenance sources > a checker error in the ATTESTED SOURCE does not gate the build  1206ms
+
+ Test Files  4 passed (4)
+      Tests  25 passed (25)
+   Start at  17:50:45
+   Duration  34.23s (transform 3.08s, setup 0ms, collect 17.18s, tests 62.33s, environment 1ms, prepare 658ms)
+
+VITEST-EXIT=0
+########## provenance harness suite, gate=on
+
+ RUN  v3.2.7 <blocks>/wamcoord
+
+ ✓ tests/harness/provenance-transitive-subpath.test.ts (5 tests) 1598ms
+   ✓ provenance: a subpath discovered inside another package's source > every subpath maps to its own source file, and each one is named  342ms
+   ✓ provenance: a subpath discovered inside another package's source > the static binary matches Node on both backends  940ms
+ ✓ tests/harness/provenance-alias-baseurl.test.ts (10 tests) 2286ms
+   ✓ provenance: a package's alias baseUrl belongs to the config that spells it > the program lowers, and the alias target is in the counted statements  309ms
+   ✓ provenance: a package's alias baseUrl belongs to the config that spells it > the static binary matches Node on both backends  857ms
+   ✓ provenance: two mapped packages spelling the same alias key > the first-mapped package's binary matches Node on both backends  350ms
+ ✓ tests/harness/provenance-dist-esm.test.ts (4 tests) 2502ms
+   ✓ provenance: two-flavor dist and type-only edges > every dist/esm subpath maps, and each one names its source file  976ms
+   ✓ provenance: two-flavor dist and type-only edges > a package reached only by `import type` still registers  608ms
+   ✓ provenance: two-flavor dist and type-only edges > the generic-method cascade behind a type-only subpath import clears  908ms
+ ✓ tests/harness/provenance.test.ts (6 tests) 4121ms
+   ✓ provenance sources > attested source compiles STATIC and byte-matches the island's published dist  980ms
+   ✓ provenance sources > a generated .d.ts with a compiled twin flattens its class-intersection  1913ms
+   ✓ provenance sources > a checker error in the ATTESTED SOURCE does not gate the build  559ms
+
+ Test Files  4 passed (4)
+      Tests  25 passed (25)
+   Start at  17:51:20
+   Duration  8.74s (transform 2.96s, setup 0ms, collect 16.43s, tests 10.51s, environment 1ms, prepare 709ms)
+
+VITEST-EXIT=0
+=== Q7 DONE 2026-09-07T17:51:29-03:00
+=== GATE-EXIT rc=0 ===

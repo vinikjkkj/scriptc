@@ -1,0 +1,9 @@
+{
+  "packages": {
+    "authoredjs": {
+      "dir": "./attested-src/authoredjs",
+      "commit": "2222222222222222222222222222222222222222",
+      "repo": "https://github.com/example/authoredjs"
+    }
+  }
+}

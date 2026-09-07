@@ -1,0 +1,135 @@
+provenance: zapo-js@1.8.2 ← https://github.com/vinikjkkj/zapo@refs/tags/v1.8.2 @ 757a8071b819 (source compiles statically)
+provenance: argo-codec@0.2.1: no provenance attestation published; island path used
+provenance: @zapo-js/native: not installed under the entry's node_modules; island path used
+provenance: @vinikjkkj/wa-wam@2.3000.1041713829-1ec0d3b: no source mapping for '@vinikjkkj/wa-wam' (published target: index.js); island path used
+<blocks>/wamcoord-lab/napp/pkgsrc/wam/globals.ts:1:1 - error SC2013: importing '@vinikjkkj/wa-wam' requires the embedded dynamic engine, which this build does not include — the package's implementation runs there
+
+  1 | import { WA_WAM_GLOBALS, type WaWamChannel, type WaWamGlobalName } from '@vinikjkkj/wa-wam'
+    | ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  2 | import { WA_VERSION } from 'zapo-js'
+
+  hint: build with --dynamic to run npm package code in the embedded engine (adds ~620KB to the binary); static builds never include it
+
+<blocks>/wamcoord-lab/napp/pkgsrc/wam/globals.ts:67:24 - error SC2013: values from the '@vinikjkkj/wa-wam' package run in the embedded dynamic engine, which this build does not include
+
+  66 |         if (raw === undefined || raw === null) continue
+  67 |         const global = WA_WAM_GLOBALS[name]
+     |                        ^~~~~~~~~~~~~~
+  68 |         if (global === undefined) continue
+
+  hint: build with --dynamic to run npm package code in the embedded engine (adds ~620KB to the binary); static builds never include it
+
+<blocks>/wamcoord-lab/napp/pkgsrc/wam/registry.ts:1:1 - error SC2013: importing '@vinikjkkj/wa-wam' requires the embedded dynamic engine, which this build does not include — the package's implementation runs there
+
+  1 | import {
+    | ^~~~~~~~
+  2 |     WA_WAM_ENUMS,
+
+  hint: build with --dynamic to run npm package code in the embedded engine (adds ~620KB to the binary); static builds never include it
+
+<blocks>/wamcoord-lab/napp/pkgsrc/wam/registry.ts:42:19 - error SC2013: values from the '@vinikjkkj/wa-wam' package run in the embedded dynamic engine, which this build does not include
+
+  41 | export function resolveWamEnumValue(enumName: WaWamEnumName, key: string): number | null {
+  42 |     const table = WA_WAM_ENUMS[enumName]
+     |                   ^~~~~~~~~~~~
+  43 |     if (table === undefined) return null
+
+  hint: build with --dynamic to run npm package code in the embedded engine (adds ~620KB to the binary); static builds never include it
+
+<blocks>/wamcoord-lab/napp/pkgsrc/wam/registry.ts:56:20 - error SC2013: values from the '@vinikjkkj/wa-wam' package run in the embedded dynamic engine, which this build does not include
+
+  55 | ): WamResolvedField[] {
+  56 |     const fields = WA_WAM_EVENTS[name].fields as Readonly<Record<string, WaWamField>>
+     |                    ^~~~~~~~~~~~~
+  57 |     const resolved: WamResolvedField[] = []
+
+  hint: build with --dynamic to run npm package code in the embedded engine (adds ~620KB to the binary); static builds never include it
+
+<blocks>/wamcoord-lab/napp/pkgsrc/wam/WaWamCoordinator.ts:1:1 - error SC2013: importing '@vinikjkkj/wa-wam' requires the embedded dynamic engine, which this build does not include — the package's implementation runs there
+
+  1 | import {
+    | ^~~~~~~~
+  2 |     WA_WAM_BUFFER_CONSTANTS,
+
+  hint: build with --dynamic to run npm package code in the embedded engine (adds ~620KB to the binary); static builds never include it
+
+<blocks>/wamcoord-lab/napp/pkgsrc/wam/WaWamCoordinator.ts:75:14 - error SC2013: values from the '@vinikjkkj/wa-wam' package run in the embedded dynamic engine, which this build does not include
+
+  74 |             options.flushIntervalMs ??
+  75 |             (WA_WAM_BUFFER_CONSTANTS.inMemoryBufferingDurationSecs ?? 5) * 1_000
+     |              ^~~~~~~~~~~~~~~~~~~~~~~
+  76 |         this.maxBufferSize =
+
+  hint: build with --dynamic to run npm package code in the embedded engine (adds ~620KB to the binary); static builds never include it
+
+<blocks>/wamcoord-lab/napp/pkgsrc/wam/WaWamCoordinator.ts:77:38 - error SC2013: values from the '@vinikjkkj/wa-wam' package run in the embedded dynamic engine, which this build does not include
+
+  76 |         this.maxBufferSize =
+  77 |             options.maxBufferSize ?? WA_WAM_BUFFER_CONSTANTS.maxBufferSize ?? 50_000
+     |                                      ^~~~~~~~~~~~~~~~~~~~~~~
+  78 |         this.globalsInput = {
+
+  hint: build with --dynamic to run npm package code in the embedded engine (adds ~620KB to the binary); static builds never include it
+
+<blocks>/wamcoord-lab/napp/pkgsrc/wam/WaWamCoordinator.ts:110:28 - error SC2013: values from the '@vinikjkkj/wa-wam' package run in the embedded dynamic engine, which this build does not include (instantiating 'commit' with <string>)
+
+  109 |         if (this.disposed) return
+  110 |         const definition = WA_WAM_EVENTS[name]
+      |                            ^~~~~~~~~~~~~
+  111 |         if (definition === undefined) return
+
+  hint: build with --dynamic to run npm package code in the embedded engine (adds ~620KB to the binary); static builds never include it
+
+<blocks>/wamcoord-lab/napp/pkgsrc/wam/wire/encoder.ts:1:1 - error SC2013: importing '@vinikjkkj/wa-wam' requires the embedded dynamic engine, which this build does not include — the package's implementation runs there
+
+  1 | import { WA_WAM_WIRE_FORMAT } from '@vinikjkkj/wa-wam'
+    | ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  2 | import { TEXT_ENCODER } from 'zapo-js/util'
+
+  hint: build with --dynamic to run npm package code in the embedded engine (adds ~620KB to the binary); static builds never include it
+
+<blocks>/wamcoord-lab/napp/pkgsrc/wam/wire/encoder.ts:9:14 - error SC2013: values from the '@vinikjkkj/wa-wam' package run in the embedded dynamic engine, which this build does not include
+
+   8 | 
+   9 | const MARK = WA_WAM_WIRE_FORMAT.markers
+     |              ^~~~~~~~~~~~~~~~~~
+  10 | const ENC = WA_WAM_WIRE_FORMAT.valueEncodingBits
+
+  hint: build with --dynamic to run npm package code in the embedded engine (adds ~620KB to the binary); static builds never include it
+
+<blocks>/wamcoord-lab/napp/pkgsrc/wam/wire/encoder.ts:10:13 - error SC2013: values from the '@vinikjkkj/wa-wam' package run in the embedded dynamic engine, which this build does not include
+
+   9 | const MARK = WA_WAM_WIRE_FORMAT.markers
+  10 | const ENC = WA_WAM_WIRE_FORMAT.valueEncodingBits
+     |             ^~~~~~~~~~~~~~~~~~
+  11 | 
+
+  hint: build with --dynamic to run npm package code in the embedded engine (adds ~620KB to the binary); static builds never include it
+
+<blocks>/wamcoord-lab/napp/pkgsrc/wam/wire/WamBatch.ts:1:1 - error SC2013: importing '@vinikjkkj/wa-wam' requires the embedded dynamic engine, which this build does not include — the package's implementation runs there
+
+  1 | import {
+    | ^~~~~~~~
+  2 |     WA_WAM_CHANNEL_WIRE_CODES,
+
+  hint: build with --dynamic to run npm package code in the embedded engine (adds ~620KB to the binary); static builds never include it
+
+<blocks>/wamcoord-lab/napp/pkgsrc/wam/wire/WamBatch.ts:39:32 - error SC2013: values from the '@vinikjkkj/wa-wam' package run in the embedded dynamic engine, which this build does not include
+
+  38 |         this.writer.writeString('WAM')
+  39 |         this.writer.writeUint8(WA_WAM_PROTOCOL_VERSION)
+     |                                ^~~~~~~~~~~~~~~~~~~~~~~
+  40 |         this.writer.writeUint8(streamId & 0xff)
+
+  hint: build with --dynamic to run npm package code in the embedded engine (adds ~620KB to the binary); static builds never include it
+
+<blocks>/wamcoord-lab/napp/pkgsrc/wam/wire/WamBatch.ts:42:32 - error SC2013: values from the '@vinikjkkj/wa-wam' package run in the embedded dynamic engine, which this build does not include
+
+  41 |         this.writer.writeUint16(sequenceNumber & 0xffff)
+  42 |         this.writer.writeUint8(WA_WAM_CHANNEL_WIRE_CODES[channel])
+     |                                ^~~~~~~~~~~~~~~~~~~~~~~~~
+  43 |         for (const [id, value] of initialGlobals) {
+
+  hint: build with --dynamic to run npm package code in the embedded engine (adds ~620KB to the binary); static builds never include it
+
+15 errors.

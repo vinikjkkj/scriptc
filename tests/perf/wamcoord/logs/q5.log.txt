@@ -1,0 +1,48 @@
+ORACLE-NODE v25.9.0
+=== Q5 START 2026-09-07T17:50:30-03:00
+### NPM LANE, gate ON: the PUBLISHED @zapo-js/wam@0.1.1 imported the way a real consumer imports it
+### npmwam-on  src=drivers/_x-wam-plus-zapo.ts  flags:[--provenance-sources --backend c]  AUTHORED_JS=1
+### node=v25.9.0  zig=0.16.0  tar=tar (GNU tar) 1.35  cc=zigcc  target=x86_64-windows-gnu
+BUILD rc=0  791s  log=69816B
+--- provenance notes ---
+1:provenance: zapo-js@1.8.2 ← https://github.com/vinikjkkj/zapo@refs/tags/v1.8.2 @ 757a8071b819 (source compiles statically)
+2:provenance: @zapo-js/wam@0.1.1 ← https://github.com/vinikjkkj/zapo@refs/heads/master @ 1dc6b9f8de93 (source compiles statically)
+3:provenance: @vinikjkkj/wa-wam@2.3000.1041713829-1ec0d3b ← https://github.com/vinikjkkj/wa-spec@refs/heads/master @ 1ec0d3b91d0e (source compiles statically)
+4:provenance: argo-codec@0.2.1: no provenance attestation published; island path used
+5:provenance: @zapo-js/native: not installed under the entry's node_modules; island path used
+6:provenance: @vinikjkkj/wa-wam: source tree's package.json says 2.3000.1041627196-aaa11ce, installed is 2.3000.1041713829-1ec0d3b (release tooling that bumps at publish) — the behavior differential is the check
+7:provenance: 40 alias key(s) are spelled by more than one mapped package with different targets ('zapo-js/store', 'zapo-js/signal', 'zapo-js/auth', 'zapo-js/appstate', 'zapo-js/retry', …); tsconfig "paths" is one table per program, so zapo-js's answer is used for all of them and @zapo-js/wam compile against zapo-js's checkout for those specifiers
+--- backend line (which backend actually ran) ---
+--- log error sites: pattern [ - error SCxxxx: ] over 69816 bytes ---
+LOG-SITES total=0
+--- compiler's own totals line (cross-check) ---
+BINARY bytes=34315264
+RUN exit=0  stdout=59B
+--- fences over EVERY emitted TU (.c, .partN.c, .scrh) ---
+    _x-wam-plus-zapo.c                         bytes=27263677       fences=0
+    _x-wam-plus-zapo.part1.c                   bytes=9914206        fences=0
+    _x-wam-plus-zapo.part10.c                  bytes=9825348        fences=0
+    _x-wam-plus-zapo.part11.c                  bytes=9771193        fences=0
+    _x-wam-plus-zapo.part12.c                  bytes=9770839        fences=0
+    _x-wam-plus-zapo.part13.c                  bytes=9771156        fences=0
+    _x-wam-plus-zapo.part14.c                  bytes=5300           fences=0
+    _x-wam-plus-zapo.part2.c                   bytes=11338997       fences=0
+    _x-wam-plus-zapo.part3.c                   bytes=9772060        fences=0
+    _x-wam-plus-zapo.part4.c                   bytes=9991751        fences=0
+    _x-wam-plus-zapo.part5.c                   bytes=9771726        fences=1
+    _x-wam-plus-zapo.part6.c                   bytes=9781951        fences=0
+    _x-wam-plus-zapo.part7.c                   bytes=9799580        fences=0
+    _x-wam-plus-zapo.part8.c                   bytes=9774997        fences=0
+    _x-wam-plus-zapo.part9.c                   bytes=9770738        fences=0
+    _x-wam-plus-zapo.scrh                      bytes=9620993        fences=0
+    TOTAL files=16 bytes=165944512 FENCES=1
+      1 [SC2020 at <blocks>/wamcoord-prov/757a8071b819699437b353865b17cacffe95e9fb/spec/proto/index.js:1]
+--- embedded-engine scan (must all read 0 for a static claim) ---
+    quickjs        0
+    ScrDyn         0
+    JS_NewRuntime  0
+ORACLE node v25.9.0 exit=0  stdout=59B
+ORACLE: MATCH (byte-exact)
+### DONE npmwam-on rc=0
+=== Q5 DONE 2026-09-07T18:03:50-03:00
+=== GATE-EXIT rc=0 ===

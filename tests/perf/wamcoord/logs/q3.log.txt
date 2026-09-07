@@ -1,0 +1,25 @@
+ORACLE-NODE v25.9.0
+=== Q3 START 2026-09-07T16:51:13-03:00 -- the minimal authored-JS probe, gate ON, STRICT (no --best-effort)
+### wawam-min-c  src=wawam-min.ts  flags:[--provenance-sources --backend c]  AUTHORED_JS=1
+### node=v25.9.0  zig=0.16.0  tar=tar (GNU tar) 1.35  cc=zigcc  target=x86_64-windows-gnu
+BUILD rc=0  237s  log=414B
+--- provenance notes ---
+1:provenance: @vinikjkkj/wa-wam@2.3000.1041713829-1ec0d3b ← https://github.com/vinikjkkj/wa-spec@refs/heads/master @ 1ec0d3b91d0e (source compiles statically)
+2:provenance: @vinikjkkj/wa-wam: source tree's package.json says 2.3000.1041627196-aaa11ce, installed is 2.3000.1041713829-1ec0d3b (release tooling that bumps at publish) — the behavior differential is the check
+--- backend line (which backend actually ran) ---
+--- log error sites: pattern [ - error SCxxxx: ] over 414 bytes ---
+LOG-SITES total=0
+--- compiler's own totals line (cross-check) ---
+BINARY bytes=2701824
+RUN exit=0  stdout=88B
+--- fences over EVERY emitted TU (.c, .partN.c, .scrh) ---
+    TOTAL files=0 bytes=0 FENCES=0
+--- embedded-engine scan (must all read 0 for a static claim) ---
+    quickjs        0
+    ScrDyn         0
+    JS_NewRuntime  0
+ORACLE node v25.9.0 exit=0  stdout=88B
+ORACLE: MATCH (byte-exact)
+### DONE wawam-min-c rc=0
+=== Q3 DONE 2026-09-07T16:55:14-03:00
+=== GATE-EXIT rc=0 ===

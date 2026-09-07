@@ -1,0 +1,619 @@
+# wam reaches a binary, and the last wall was already built
+
+Block `wamcoord`, branch `block/wamcoord`, worktree `<blocks>\wamcoord`, base
+main **`83432479`**. Lab `<blocks>\wamcoord-lab`. Measured 2026-09-07.
+
+Follows `tests/perf/pkgstatus-0907/`, which measured `wam` at **86 blocker
+sites** on main `3f3dd523` and listed *"a source mapping for
+`@vinikjkkj/wa-wam`"* under **what would change these numbers**, owner
+*compiler / provenance*.
+
+**That row is already implemented.** It landed on 2026-08-30 as
+`4676cdc1 feat(provenance): map an attested package that publishes the source it
+authored`, was defaulted OFF the same day because it produced a wrong binary,
+and both halves of that wrong binary were fixed before `3f3dd523`. The gate is
+still off, so `pkgstatus` measured the world without it and read the row as work
+not yet done. Turning it on is one environment variable, and with it `wam`
+compiles to **0 blocker sites** and a **running, byte-exact binary**.
+
+---
+
+## 0. What a reader should take away first
+
+1. **`wam` reaches a binary. Two of them, strict, no `--best-effort`, engine
+   scan `quickjs=0 ScrDyn=0 JS_NewRuntime=0`, oracle MATCH byte-exact.**
+   * the **published npm package** `@zapo-js/wam@0.1.1`, through
+     `--provenance-sources`, imported the way a real consumer imports it:
+     **34,315,264 B**, exit 0, MATCH.
+   * the same package's **source** on zapo-js 1.8.2, driving the 15-assertion
+     entry probe: **33,431,040 B**, exit 0, `WAM-ENTRY2: ALL PASS`, MATCH.
+2. **86 was never one number.** It is two independent facts multiplied
+   together, and each is closed by a different move:
+
+   | | gate OFF | gate ON |
+   | --- | --- | --- |
+   | driver names `@zapo-js/wam` only | **86** | **79** |
+   | driver names `zapo-js` too | **15** | **0** |
+
+   The rows are the **lane** (which zapo-js wins the alias table); the columns
+   are the **compiler flag** (`SCRIPTC_PROVENANCE_AUTHORED_JS`). 71 sites are
+   the lane. 15 are the flag. Neither move sees the other's sites.
+3. **The flag's cost on a package that is not `wam` is smaller than this
+   document first said, and §5 now carries the correction.** `store-mysql`
+   **does not link under either setting** — rc=1 both ways, so its fence count
+   is **n/a on both sides, not 0 → 20**. At the build the flag takes it from
+   `46 errors.` to `11 errors.`, all of them named missing modules. §5, §10.
+4. **The lane has a shape limit nobody had written down.** A mapped
+   authored-JavaScript body is JavaScript, so its parameters are `unknown`
+   whatever the `.d.ts` beside it declares. Measured twice on a fixture built
+   for it: `table[param]` builds and then throws `[SC1090]`; `switch (param)`
+   builds and then throws `[SC1100]`. The lane carries a package whose surface
+   is **data** (wa-wam: 0 fences over 11,044,135 B of emitted C) and does not
+   yet carry one whose surface is **functions taking arguments**. §6.
+5. **Nothing covered any of this.** The four provenance suites pass 25/25 with
+   the gate off AND with it on — they are indifferent to the mapping. A fifth
+   suite, `tests/harness/provenance-authored-js.test.ts`, is added here: 4
+   tests, both sides of the gate, including the `protocol=5` const read that
+   was the original silent wrong answer. §7.
+
+---
+
+## 1. Lane, flags, host state
+
+| | |
+| --- | --- |
+| repo | `<blocks>\wamcoord`, worktree of `<repo>`, branch `block/wamcoord` |
+| main | **`83432479`** |
+| compiler build | `packages/compiler` then `packages/cli`, `tsc -p tsconfig.json` under node **v22.18.0**, rc=0/0 |
+| measuring node | **v25.9.0**, resolved first on `PATH`, printed as line 1 of every log |
+| zig | **0.16.0**, the tree's (`<zapo-work>\tools\zig`) |
+| tar | **GNU tar 1.35** (`C:\Program Files\Git\usr\bin`), ahead of System32 |
+| `SCRIPTC_CC` / `SCRIPTC_TEST_CC` | `zigcc` / `zig cc` |
+| `SCRIPTC_TARGET` | `x86_64-windows-gnu` |
+| `SCRIPTC_TEST_WORKERS` | **unset** |
+| flags | `--provenance-sources`, strict, **no `--best-effort`** anywhere |
+| backend | `--backend c` on every build |
+| caches | everything under `<blocks>\wamcoord-*`; nothing on `C:` |
+
+The lab is `pkgstatus`'s driver tree (`napp/`), copied verbatim — same installed
+versions, same `pkgsrc/wam` (verified `diff -r -q` byte-identical to the zapo-js
+**1.8.2** attested checkout `757a8071b819`), so a difference between a number
+here and one there is the compiler or the driver, never the corpus.
+
+### The six analysis lanes
+
+| id | driver | names in the driver | gate |
+| --- | --- | --- | --- |
+| **A** | `drivers/wam.ts` | `@zapo-js/wam` | off |
+| **A+** | `drivers/wam.ts` | `@zapo-js/wam` | **on** |
+| **A2** | `drivers/_x-wam-plus-zapo.ts` | `zapo-js` **and** `@zapo-js/wam` | off |
+| **A2+** | `drivers/_x-wam-plus-zapo.ts` | both | **on** |
+| **F** | `pkgsrc/src-wam.ts` | the wam source on 1.8.2 | off |
+| **F+** | `pkgsrc/src-wam.ts` | the wam source on 1.8.2 | **on** |
+
+`_x-wam-plus-zapo.ts` is `drivers/wam.ts` with **one line added**, a value
+import of `zapo-js` — the same A/B `pkgstatus` ran on `store-sqlite`.
+
+---
+
+## 2. The instruments, controlled before any number was quoted
+
+### 2a. The blocker counter, against answers already on record
+
+`harness/tally2.mjs`, run against `tests/perf/pkgstatus-0907/sites/`:
+
+| control file | bytes | recorded | this block |
+| --- | --- | --- | --- |
+| `sites/src-wam.json` | 39,404 | 15 sites, 15 roots, 0 cascade, 3 messages | **15 / 15 / 0 / 3** ✔ |
+| `sites/wam.json` | 134,115 | 86 sites, 82 roots, 4 cascade, 12 messages | **86 / 82 / 4 / 12** ✔ |
+
+The 12 needs one word of definition, because two honest counters disagree on
+it. `tally2.mjs` prints **8 distinct ROOT messages**; the 4 `SC2004` cascade
+sites carry 4 further distinct messages of their own, and 8 + 4 = 12. Every
+"distinct messages" figure below is the ROOT count unless the row says
+otherwise.
+
+### 2b. The fence counter, against answers already on record
+
+`pkgstatus` §2a recorded four; all four reproduce:
+
+| control file | bytes scanned | recorded | this block |
+| --- | --- | --- | --- |
+| `pkgrecheck-lab/bin/store-sqlite-open.c` | 364,322 | total=5 distinct=5 | **5 / 5** ✔ |
+| `pkgrecheck-lab/bin/store-sqlite-names.c` | 107,026 | total=4 distinct=4 | **4 / 4** ✔ |
+| `pkgrecheck-lab/bin/drv-pg-cleanup2.c` | 94,121 | total=0 | **0** ✔ (file non-empty) |
+| `pkgrecheck-lab/bin/hello.c` | 2,193 | total=0 | **0** ✔ (file non-empty) |
+
+### 2c. The trap this block walked into anyway
+
+`build2.sh` first counted fences over `$OUT/$NAME.c` and printed
+
+    TOTAL files=0 bytes=0 FENCES=0
+
+for a build that had emitted **11,044,135 bytes** of C. The `-o` name and the
+translation-unit name are **different**: the TU is named after the SOURCE
+(`wawam-min.c`), not after the output (`wawam-min-c.exe`). `files=0 bytes=0` is
+what saved it — a count with no bytes beside it would have shipped as a zero.
+Every fence table below prints the file list and the byte total.
+
+---
+
+## 3. The measured start, and the 2x3 that explains 86
+
+`analyze()`, `--provenance-sources`, strict. Every row ran on THIS compiler at
+`83432479`; the two `pkgstatus` rows it reproduces are marked.
+
+| lane | blocker sites | roots | cascade | distinct root msgs | stmts reached / failed | island | fences | advisories | unreached |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| **A** (reproduces 86) | **86** | 82 | 4 | 8 | 1,462 / 76 | 0 | 0 | 0 | 189 |
+| **A+** | **79** | 75 | 4 | 6 | 1,484 / 74 | 0 | 0 | 0 | 184 |
+| **A2** | **15** | 15 | 0 | 3 | 48,023 / 10 | 0 | 1 | 56 | 8 |
+| **A2+** | **0** | 0 | 0 | 0 | **48,045 / 0** | 0 | 1 | 56 | 8 |
+| **F** (reproduces 15) | **15** | 15 | 0 | 3 | 48,022 / 10 | 0 | 1 | 56 | 8 |
+| **F+** | **0** | 0 | 0 | 0 | **48,044 / 0** | 0 | 1 | 56 | 8 |
+
+A reproduces `pkgstatus`'s 1,462 / 76 and F its 48,022 / 10 exactly, so the
+lab, the compiler and the counter all agree with the recorded survey before any
+new number is read.
+
+### 3a. The message and file clustering, which is the point of the table
+
+**A — 86 sites, 8 root messages, and 69 of them are one message in one file:**
+
+```
+69  SC1090  calls of the generic method 'commit' through this receiver     packages/wam/src/synthetic/fabrications.ts   (69 distinct lines)
+ 5  SC2013  importing '@vinikjkkj/wa-wam' requires the embedded engine     5 files, line 1 of each
+ 2  SC2011  WaClientPluginDefinition & { exposeAs: "wam"; … }              plugin.ts, WaWamCoordinator.ts
+ 2  SC2013  values from '@vinikjkkj/wa-wam' run in the embedded engine     registry.ts, globals.ts
+ 1  SC2011  WaClientDependencies                                           <prov>/src/client/WaClient.ts
+ 1  SC2001  WaClientConstructor                                            napp/drivers/wam.ts
+ 1  SC1090  RAW_WA_APPSTATE_SCHEMAS (declaration-only module)              <prov>/src/appstate-spec.ts
+ 1  SC2011  WaClientPluginContext                                          <prov>/src/client/WaClient.ts
++4  SC2004  cascade                                                        WaClient.ts, wam.ts x3
+```
+
+**A+ — 79 sites, 6 root messages.** Exactly the **7** `@vinikjkkj/wa-wam`
+`SC2013` sites left; nothing else moved. The 69 stayed, and they are the whole
+reason a gate-only reading of `wam` looks like almost no progress.
+
+**A2 and F — 15 sites, 3 root messages, all `SC2013`, all one package:**
+
+```
+9  values from '@vinikjkkj/wa-wam' run in the embedded dynamic engine
+5  importing '@vinikjkkj/wa-wam' requires the embedded dynamic engine
+1  … (instantiating 'commit' with <string>)
+
+4  WaWamCoordinator.ts     3  registry.ts     3  wire/encoder.ts
+3  wire/WamBatch.ts        2  globals.ts
+```
+
+**A2+ and F+ — no blocker sites at all.** `sections:` reads
+`runtimeFence=1 advisory=56 unreached=8` and nothing else.
+
+### 3b. The two axes are orthogonal, and the compiler says so unprompted
+
+Naming `zapo-js` in the driver is a **lane** fact. A2's own provenance notes
+carry the compiler's explanation, printed without being asked:
+
+> `40 alias key(s) are spelled by more than one mapped package with different
+> targets ('zapo-js/store', 'zapo-js/signal', …); tsconfig "paths" is one table
+> per program, so zapo-js's answer is used for all of them and @zapo-js/wam
+> compile against zapo-js's checkout for those specifiers`
+
+That is `pkgstatus` §5c's 41-key collision, seen from wam's side, and it takes
+`wam` from the July core its own attestation pins to 1.8.2. The 69 `commit`
+sites are downstream of `WaWamCoordinator` failing to compile on that older
+core: they are `SC1090`, never `SC2004`, so **no roots/cascade split can see
+them as fallout** — the correction `pkgstatus` bought, reproduced here from the
+other direction.
+
+`packages/wam/src` is byte-identical between wam's attested `1dc6b9f8de93` and
+the 1.8.2 tag (`diff -r -q`, empty). The 71-site difference is entirely which
+zapo-js the program compiles against.
+
+---
+
+## 4. The binaries
+
+`build2.sh`, `--backend c`, strict. `LOG-SITES` counts `` - error SCxxxx: ``
+over the build log; fences count `[SCxxxx at file:line]` over **every** emitted
+TU (`.c`, `.partN.c`, `.scrh`), byte total printed.
+
+| binary | lane | gate | rc | log sites | bytes | run | oracle | fences / bytes scanned | engine scan |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `srcwam-off` | F | off | **1** | **15**, all `SC2013`, compiler's own `15 errors.` | — | — | — | **n/a, NOT 0** | — |
+| `srcwam-on` | F | **on** | **0** | **0** | **34,314,240** | exit 0 | **MATCH byte-exact** | 1 / 164,961,837 over 15 TUs | 0 / 0 / 0 |
+| `srcwament-on` | F, 15 assertions | **on** | **0** | **0** | **33,431,040** | exit 0, `WAM-ENTRY2: ALL PASS` | **MATCH byte-exact** | 1 / 159,209,742 over 15 TUs | 0 / 0 / 0 |
+| `npmwam-on` | **A2, the published package** | **on** | **0** | **0** | **34,315,264** | exit 0 | **MATCH byte-exact** | 1 / 165,944,512 over 16 TUs | 0 / 0 / 0 |
+| `wawam-min-c` | the 6-line wa-wam probe | **on** | **0** | **0** | **2,701,824** | exit 0 | **MATCH byte-exact** | **0** / 11,044,135 | 0 / 0 / 0 |
+
+The one fence in the three large binaries is the same site in all three, and it
+is not wam's:
+
+    1  [SC2020 at <prov 757a8071>/spec/proto/index.js:1]   'require() with a run-time specifier'
+
+`pkgstatus` records that exact site as the single fence in `store-memory` and in
+`_x-waclient-182`. It is zapo's protobuf bundle, shared by everything that
+loads zapo-js.
+
+`npmwam-on`'s provenance notes are the claim in the compiler's own words:
+
+```
+provenance: zapo-js@1.8.2 ← …@refs/tags/v1.8.2 @ 757a8071b819 (source compiles statically)
+provenance: @zapo-js/wam@0.1.1 ← …@refs/heads/master @ 1dc6b9f8de93 (source compiles statically)
+provenance: @vinikjkkj/wa-wam@2.3000.1041713829-1ec0d3b ← …@refs/heads/master @ 1ec0d3b91d0e (source compiles statically)
+```
+
+### 4a. A recorded defect, retired by compiling rather than by reading
+
+`tests/perf/wamfix/BINARIES.md` keeps two binaries as **the reproduction of an
+open defect**: `wawam-min.c.exe` printed `protocol=0` where node prints `5` and
+then died `0xC0000005`, because the mapped twin's module-init function was
+emitted and never called. `provenance.ts`'s own comment says both halves are
+fixed. **That comment is a hypothesis until something compiles it.**
+
+Rebuilt here from the same probe source, on `83432479`, strict, gate on:
+
+    protocol=5
+    wire.regular=0
+    wire.private=2
+    CHAT_OPEN=3
+    LT128=3
+    WAWAM-MIN: reached the end
+
+exit 0, 88 bytes, byte-identical to node v25.9.0, **0 fences over 11,044,135
+bytes**, engine scan 0/0/0. **The comment is upheld. `tests/perf/wamfix/`'s two
+## 5. What the flag costs on a package that is not `wam`
+
+The gate is global. `store-mysql` is the other package whose island note names
+an authored-JavaScript entry (`mysql2/promise`), and `provenance.ts`'s own
+comment names it too. Lane A, same driver, same compiler, gate off then on.
+
+### 5a. The build: neither setting links, so there is no binary to lose
+
+| | gate OFF | gate ON |
+| --- | --- | --- |
+| `BUILD rc` | **1** | **1** |
+| log error sites / compiler's own line | 46 / `46 errors.` | **11** / `11 errors.` |
+| the codes | 20 SC1090, 20 SC2004, 3 SC2011, 2 SC2013, 1 SC2001 | **11 SC1010, nothing else** |
+| binary | none | none |
+| fences in an emitted TU | **n/a, NOT 0** | **n/a, NOT 0** |
+| log bytes scanned | 22,158 | 11,516 |
+
+With the gate on the build **stops at module link** — eleven
+`SC1010 the '<x>' module is not supported yet` — and never reaches the checker,
+so it reports none of the codes the OFF build reports (`SC2013` off=2 on=0,
+`SC2011` 3/0, `SC2001` 1/0, `SC2004` 20/0, `SC1090` 20/0). This is the shape
+`pkgstatus` recorded for `store-mongo`: *"the build stops at a module-link
+refusal and the survey does not."*
+
+**So the flag costs `store-mysql` no working binary, because it has none under
+either setting.** What it changes is the failure: 46 mixed errors become 11 that
+each name a module nobody has lowered (`lru.min`, `sql-escaper`,
+`generate-function`, `iconv-lite`, `long`, `aws-ssl-profiles`).
+
+### 5b. The survey, and the correction to how it was counted
+
+`analyze()`, the same two runs:
+
+| | gate OFF | gate ON |
+| --- | --- | --- |
+| blocker sites | **46** | **58** |
+| roots / cascade | 26 / 20 | 38 / 20 |
+| distinct root messages | 11 | **18** |
+| statements reached / failed | 1,462 / 24 | **1,523 / 44** |
+| `runtimeFence` **section** of the dump | 0 | 20 |
+
+**The last row is not a fence count on an artifact.** It is `analyze()`'s
+projection of what *would* fence, over code that never reaches a translation
+unit, because the build fails. An artifact-level fence count for this package
+is **n/a on both sides**. The first version of this document printed it as
+`0 → 20` beside artifact fence counts taken on real binaries, which invited
+exactly the comparison it cannot support.
+
+**And the closed/uncovered split was counted by MESSAGE and is wrong at site
+identity.** `harness/diffsites.mjs` compares the two dumps by
+`(section, code, file, line)`. 213 of the sites are identical in both. The rest:
+
+| | blockers | all sections |
+| --- | --- | --- |
+| only with the gate OFF (closed) | **3** | 6 |
+| only with the gate ON (uncovered) | **15** | 39 |
+
+46 − 3 + 15 = 58, which is the arithmetic the message tally could not show.
+Two of the three "closed" and two of the fifteen "uncovered" are **the same
+file and line**:
+
+```
+store-mysql/src/BaseMysqlStore.ts:13   SC2013 island refusal  ->  SC2009 'Pool' member 'getConnection' does not compile
+napp/drivers/store-mysql.ts:7          SC2011 island refusal  ->  SC2009 'WaMysqlStoreResult' member 'pool' does not compile
+```
+
+Those two sites were not closed and not opened — they were **re-diagnosed**, and
+strictly more informatively: an "it runs in the engine" refusal became a named
+member with a named type. So the honest ledger is **1 site removed**
+(`connection.ts:1`, the `mysql2` import), **2 re-diagnosed deeper**, and **13
+genuinely newly visible**.
+
+### 5c. Caused, or exposed?
+
+All 13 newly visible blockers live in `mysql2`'s own published artifact —
+`lib/parsers/*.js`, `lib/base/*.js`, `lib/packets/packet.js`,
+`lib/constants/ssl_profiles.js`, `promise.js`, `promise.d.ts` — and none in
+`store-mysql` or the driver. Eleven are `SC1010 module is not supported yet`
+against six third-party modules; two are `SC1090` in `promise.d.ts`
+(`extending computed expressions`, `extending 'QueryableAndExecutableBase'`).
+
+**Exposed, not caused.** Nothing about the flag creates them: they are
+properties of `mysql2` and of which modules have lowerings, and they hold
+under any setting *once that code is reachable*. Reachability is the only thing
+the flag grants. Not one already-reachable line got a worse diagnosis — the two
+that changed got a better one (5b).
+
+The same is true of all 20 `runtimeFence` entries: every one is in
+`mysql2/promise.js` (`SqlString` references, `exports.__defineGetter__`,
+`Connection.once`, `createPool`/`createPoolCluster` bindings). They are that
+file's own constructs, and they are a projection, not a binary's contents.
+
+er one, and the 20 fences are new code that can throw where
+before there was a build-time refusal.
+
+---
+
+## 6. The shape limit of the lane, measured
+
+A mapped authored-JavaScript file is JavaScript. Its function parameters are
+`unknown` inside the body whatever the `.d.ts` beside it declares, and the first
+thing done with one refuses. Both measured on the fixture added here, both as
+**runtime fences in a binary that built cleanly** — `analyze()` reported 0
+blockers each time:
+
+| body | outcome |
+| --- | --- |
+| `const code = CHANNEL_WIRE_CODES[channel]` | built; threw `indexing records with non-string or non-number keys are not supported yet` `[SC1090 at index.js:30]` |
+| `switch (channel) { … }` | built; threw `switch statements on 'unknown' values are not supported yet` `[SC1100 at index.js:35]` |
+
+So the lane carries a package whose published surface is **data** —
+`@vinikjkkj/wa-wam` is 1,657,939 bytes of frozen tables and compiles to **0
+fences over 11,044,135 bytes of C** — and does not yet carry one whose surface
+is **functions that take arguments**. That is the same wall `mysql2` hits in §5
+from the other side, and it is the honest scope of the flag: it is not a general
+"authored packages now compile" switch.
+
+---
+
+## 7. The coverage that did not exist
+
+The four existing provenance suites pass **25/25 with the gate off and 25/25
+with the gate on**, on the same tree, same compiler. They do not exercise the
+mapping in either direction — so the fix that made the `0xC0000005` go away is
+protected by nothing, and a default flip would ship untested.
+
+Added: **`tests/harness/provenance-authored-js.test.ts`** — 4 tests, both sides
+of the gate, offline (fixture manifest, no network):
+
+1. gate OFF: the tree is located, the mapping is refused, the note reads
+   `no source mapping for 'authoredjs' (published target: index.js)`, and the
+   island build still prints the right answer — the shipped default is a
+   refusal to compile statically, never a wrong number;
+2. gate ON: the package maps, and it maps to the **`.d.ts`**, not the `.js`
+   (taking the implementation directly would drop the types and send any
+   consumer naming one type token back to the island);
+3. gate ON: `analyze()` reports **0** blockers;
+4. gate ON: `dynamic:false` — no engine in the binary — and the output is
+   byte-identical to the island build, **`protocol=5` included**. That const is
+   the line that read `0` while the twin's init was never called.
+
+Fixture: `tests/fixtures/provenance/{node_modules,attested-src}/authoredjs`
+(CJS frozen tables + hand-written `.d.ts`, `main: index.js`, no build step —
+wa-wam's shape), `manifest-authoredjs.json`, `cases/authoredjs/main.ts`.
+
+All five provenance suites, default env: **5 files, 29 tests, 29 passed.**
+
+No compiler source was changed by this block. The default lane is byte-identical
+to base by construction, and lanes A and F reproduce `pkgstatus`'s recorded
+numbers exactly, which is the measurement of that.
+
+---
+
+## 8. The fork
+
+`wam` reaches a binary today. What it costs to make that the DEFAULT answer
+rather than one an environment variable buys:
+
+| move | clears | costs | who decides |
+| --- | --- | --- | --- |
+| **leave the gate as it is** and record that `wam` compiles behind it | nothing new; the objective's `wam` row is answerable with a flag named beside it | every consumer must know the variable exists; `pkgstatus`'s "compiler / provenance" row stays open-looking when it is not | — |
+| **flip `SCRIPTC_PROVENANCE_AUTHORED_JS` on by default** | `wam`'s last 15 sites without a flag; 1 `store-mysql` site removed and 2 re-diagnosed deeper | `store-mysql` gains 13 newly visible blockers, all of them `mysql2`'s own and all of them true under any setting — and it **linked under neither setting before or after**, so no working binary is at risk. What is unmeasured is the other packages: 33 of 122 installed packages could take this path, and only 2 have been measured. §10.3 | the user |
+| **flip it only for packages whose published entry has no imports** | `wam`, and nothing that can regress: wa-wam imports nothing, which is exactly why it fences 0 | a new rule to write and test; narrower than the flag, and it would not have helped `mysql2` anyway | the user, then compiler |
+| a `wam` release built against 1.8.2 (`pkgstatus`'s row) | the 71 lane sites for a driver that does **not** name `zapo-js` | nothing here; a real consumer names `zapo-js` and gets those 71 for free today | zapo release |
+
+The third row **was** the one worth arguing about, and §10.3 now settles it:
+"imports nothing" selects 21 of the 33 candidate packages, so it is a rule and
+not a fit to one case — but it is the **wrong** rule. `libmlow-wasm` imports
+nothing and exports five functions that take parameters, which is precisely the
+shape §6 shows this lane cannot carry. The predicate that matches the observed
+failure is about the exported **surface**, not the imports, and it is not
+cleanly decidable from a package manifest. §10.3 proposes a fourth option that
+needs no predicate at all.
+
+**This block did not flip the default.**
+
+---
+
+## 9. Reproducing
+
+```sh
+. harness/env.sh                          # rewrite the wamcoord-* paths for your block
+bash harness/q1.sh                        # lanes A, A2, F     (gate off)
+bash harness/q2.sh                        # lanes F+, A+, A2+  (gate on)
+bash harness/q3.sh                        # the minimal wa-wam probe, gate on
+bash harness/q4.sh                        # srcwam off/on + the 15-assertion entry
+bash harness/q5.sh                        # the published package, gate on
+bash harness/q6.sh                        # store-mysql blast radius, both ways
+bash harness/q7.sh                        # the four existing suites, both ways
+bash harness/q9.sh                        # all five suites, default env
+node harness/tally2.mjs sites/<name>.json # roots / cascade / messages / files
+```
+
+| what | where |
+| --- | --- |
+| every `analyze()` dump | `sites/*.json` |
+| every queue and build log, binary stdout, oracle stdout | `logs/*` — the logs are `<name>.log.txt`, **not** `<name>.log`: `.gitignore` line 24 is `*.log`, so the first version of this commit silently committed none of them. `tests/perf` carries 405 `.txt` files and 0 `.log` for exactly this reason. vitest's ANSI colour escapes are stripped from the four suite logs, which say so on their first line; no other byte differs |
+| the drivers, including the one-line A/B | `drivers/*.ts` |
+| the harness, including the corrected fence walk | `harness/*` |
+
+---
+
+## 10. The coordinator's five questions
+
+Everything below was measured after the first version of this document, on the
+same rig, same compiler at `83432479`, same host state as §1. Two answers
+correct §0 and §5 above; those sections have been rewritten rather than
+annotated, so the body no longer carries the wrong number anywhere.
+
+### 10.1 Does `store-mysql` produce a binary at all?
+
+**No — under neither setting.** `harness/qA.sh`, strict, `--backend c`, no
+`--best-effort` (no build this block ran ever received it; a grep of every log
+returns one hit and it is the word inside a comment):
+
+    gate OFF   BUILD rc=1   41s   LOG-SITES 46   compiler: "46 errors."   BINARY: none
+    gate ON    BUILD rc=1   10s   LOG-SITES 11   compiler: "11 errors."   BINARY: none
+
+So the two numbers did not coexist, and the coordinator was right to say so.
+**The 20 was never a fence count on an artifact** — it is the `runtimeFence`
+**section of the `analyze()` dump**, a projection over code that never reaches a
+translation unit. An artifact fence count for `store-mysql` is **n/a on both
+sides**, and the `0` on the OFF side would have been exactly the "no artifact
+read as zero" trap this document's own §2 is armed against. §5a carries the
+corrected table.
+
+**The flag therefore costs no working binary today**, because there is none to
+lose. It changes the failure mode: 46 mixed errors become 11, each naming a
+module with no lowering, at module-link time before the checker runs.
+
+### 10.2 Caused, or exposed?
+
+**Exposed.** `harness/diffsites.mjs` compares the two dumps by
+`(section, code, file, line)` rather than by message. All 13 genuinely new
+blockers are inside `mysql2`'s own published artifact and none in `store-mysql`
+or the driver; 11 are `SC1010` against six third-party modules and 2 are
+`SC1090` in `promise.d.ts`. They hold under any setting once that code is
+reachable, and reachability is the only thing the flag grants.
+
+The identity comparison also corrected the ledger itself: **not "closed 2,
+uncovered 14"** but **1 site removed, 2 re-diagnosed deeper** (an island refusal
+becoming a named member with a named type, which is strictly more informative),
+**13 newly visible**. §5b.
+
+### 10.3 Is "imports nothing" a rule, or a rule fitted to one case?
+
+Measured with `harness/predicate.mjs` over the lab's 122 installed packages,
+applying the compiler's own `publishedTargetOf` + `authoredJsEntry` tests:
+
+    authored-JavaScript candidates                     33 of 122
+    P1  "the mapped entry imports nothing"             21 of the 33
+    P2  "exports no declared function taking params"   26 of the 33
+
+So **P1 is a rule, not a fit** — it selects 21 packages, and it does separate the
+two cases that have actually been measured (`@vinikjkkj/wa-wam` 0 imports;
+`mysql2` root 1, `mysql2/promise` 3 — `bluebird`, `events`, `sql-escaper`).
+
+**But it is the wrong rule, and the counter-example is in the corpus:**
+
+    libmlow-wasm    imports = 0        exported declare-functions taking parameters = 5
+
+P1 admits it. §6 says the lane cannot carry it: every one of those five
+parameters is `unknown` inside the mapped body. And the converse exists too —
+`buffer`, `iconv-lite`, `token-types`, `long` all import something and export no
+parameter-taking function, so P1 rejects packages the failure mode does not.
+
+**"Imports nothing" is not a proxy for "surface is data".** They are different
+predicates that happen to agree on the two packages I had measured, which is
+exactly the shape of a generalisation that should not be trusted.
+
+Can the real predicate be stated directly? Partly, and that is the honest
+answer. The failure is per-*use*, not per-package: it fires when a mapped body
+does something with a parameter that needs a type. The compiler already decides
+that per site — it emits the fence. A package-level approximation ("no exported
+function takes a parameter") is (a) not decidable from the manifest, only from
+parsing the `.d.ts`, (b) blind to callable surfaces that are not
+`export declare function` — `sharp`'s 82,672-byte `.d.ts` scores 0 on P2 and is
+certainly not data — and (c) reachability-dependent anyway.
+
+**A fourth option that needs no predicate:** make the gate take a **package
+list** instead of a boolean —
+`SCRIPTC_PROVENANCE_AUTHORED_JS=@vinikjkkj/wa-wam`. `wam` gets its binary with a
+blast radius of exactly one named package, the general rule stays deferred until
+more than two packages have been measured, and the flag stops being a global
+switch whose cost nobody can bound. It is a small change to `authoredJsEntry`'s
+two lines and it is testable with the fixture already added here.
+
+### 10.4 Would a DefinitelyTyped-declaration rule close the same 15?
+
+**No.** The two rules take different inputs and select different packages.
+
+`@vinikjkkj/wa-wam` **ships its own `index.d.ts` inside its own attested tree**,
+beside its own `index.js` (2,037,013 B and 1,657,939 B). There is no
+`@types/wa-wam` — the lab's `@types` inventory is `better-sqlite3`, `node`,
+`pg`, `webidl-conversions`, `whatwg-url`, `ws`. A rule that pairs a package's
+JavaScript with a **separate `@types/*` package's** declaration has nothing to
+pair here, so it closes none of wam's 15.
+
+The caveat worth passing to that block: if their rule is written generally — *"a
+declaration twin from anywhere, paired with the published implementation"* —
+then it **is** `authoredJsEntry` widened, it inherits this same blast radius and
+this same §6 parameter limit, and it should face one fork rather than two. If it
+is written specifically as "`@types/*` only", the two are complementary and can
+be decided separately.
+
+### 10.5 Does the new suite write outside its own tmp, and is it order-independent?
+
+**Writes.** Only `node_modules/.cache/scriptc-tests/provenance-authored/<flavor>`
+— its own directory, distinct from all four siblings, which each have their own
+(`provenance`, `provenance-aliasbase`, `provenance-dist-esm`,
+`provenance-transitive`). Contents after a full run: three `.exe`, two `.pdb`,
+one 16,767-byte `main.c`. Plus the shared CAS at
+`node_modules/.cache/scriptc-tests/cas` that `vitest.config.ts` hands **every**
+suite. `git status tests/fixtures` after the runs: empty — the fixture tree is
+read-only to the test.
+
+**Order-independence.** One real hazard existed and is fixed: the first version
+`delete`d `SCRIPTC_PROVENANCE_MANIFEST` and `SCRIPTC_PROVENANCE_AUTHORED_JS` in
+`afterEach`. Both are process-global, so on a run where the *caller* had set the
+gate, this file would have silently cleared it for every file sharing its worker
+afterwards. It now **saves the entry values and restores them**, and the two
+tests that assert the shipped default `delete` the gate explicitly for their own
+duration instead of assuming it is unset.
+
+Measured three ways, `harness/qB.sh`, all five provenance suites:
+
+| run | result |
+| --- | --- |
+| default env, declared order | **5 files, 29 tests, 29 passed** |
+| `SCRIPTC_PROVENANCE_AUTHORED_JS=1` forced for the whole run | **29 passed** |
+| reversed file order, default env | **29 passed** |
+
+Run 2 is the one that matters for caller-independence: the two gate-OFF
+assertions hold with the gate forced on globally, which is what the explicit
+`delete` buys. There is no module-level state beyond those two variables; the
+compiler's `setProvenanceSources` is reset to `null` in `afterEach`, as in the
+sibling suite. Files run in separate workers and sequentially within one, so no
+concurrency hazard is introduced.
+
+### 10.6 `G:` footprint
+
+    <blocks>/wamcoord           405M   worktree (node_modules is pnpm-linked)
+    <blocks>/wamcoord-lab       934M   of which out/ 850M (emitted C, prunable)
+    <blocks>/wamcoord-zig       524M
+    <blocks>/wamcoord-cache     135M
+    <blocks>/wamcoord-zig-g      71M
+    <blocks>/wamcoord-prov       53M   three attested checkouts
+    <blocks>/wamcoord-tmp       3.7M
+                                 ----
+                          TOTAL  2.1G      disk: 31G free of 932G
+
+The 850M in `wamcoord-lab/out` is the emitted C of the five builds, kept because
+the fence counts in §4 are auditable only against it. It is the one item worth
+pruning on request; everything else is the rig.

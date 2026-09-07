@@ -1,0 +1,376 @@
+provenance: @zapo-js/store-mysql@1.2.0 ← https://github.com/vinikjkkj/zapo@refs/tags/v1.8.0 @ 9a49e1fffdec (source compiles statically)
+provenance: mysql2@3.24.3: no source mapping for 'mysql2/promise' (published target: ./promise.js); island path used
+provenance: argo-codec@0.2.1: no provenance attestation published; island path used
+provenance: @zapo-js/native: not installed under the entry's node_modules; island path used
+<blocks>/wamcoord-lab/napp/drivers/store-mysql.ts:7:7 - error SC2011: values of type 'WaMysqlStoreResult' have no static representation but run in the embedded dynamic engine, which this build does not include
+
+  6 | 
+  7 | const r = createMysqlStore({ pool: { host: '127.0.0.1', user: 'root', database: 'pkgstatus' } })
+    |       ^
+  8 | const s = r.stores
+
+  hint: build with --dynamic to run these values in the embedded engine (adds ~620KB to the binary), or restate the type inside the static surface (https://scriptc.dev/limitations describes the boundary)
+
+<blocks>/wamcoord-lab/napp/drivers/store-mysql.ts:7:11 - error SC2004: uses of 'createMysqlStore' inherit the blocker on its declaration
+
+  6 | 
+  7 | const r = createMysqlStore({ pool: { host: '127.0.0.1', user: 'root', database: 'pkgstatus' } })
+    |           ^~~~~~~~~~~~~~~~
+  8 | const s = r.stores
+
+  hint: the declaration of 'createMysqlStore' did not compile — fix the diagnostic reported there and these sites clear with it
+
+<blocks>/wamcoord-lab/napp/drivers/store-mysql.ts:8:11 - error SC2004: uses of 'r' inherit the blocker on its declaration
+
+  7 | const r = createMysqlStore({ pool: { host: '127.0.0.1', user: 'root', database: 'pkgstatus' } })
+  8 | const s = r.stores
+    |           ^~~~~~~~
+  9 | const c = r.caches
+
+  hint: the declaration of 'r' did not compile — fix the diagnostic reported there and these sites clear with it
+
+<blocks>/wamcoord-lab/napp/drivers/store-mysql.ts:9:11 - error SC2004: uses of 'r' inherit the blocker on its declaration
+
+   8 | const s = r.stores
+   9 | const c = r.caches
+     |           ^~~~~~~~
+  10 | console.log('auth=' + typeof s.auth('s1'))
+
+  hint: the declaration of 'r' did not compile — fix the diagnostic reported there and these sites clear with it
+
+<blocks>/wamcoord-lab/napp/drivers/store-mysql.ts:10:30 - error SC2004: uses of 's' inherit the blocker on its declaration
+
+   9 | const c = r.caches
+  10 | console.log('auth=' + typeof s.auth('s1'))
+     |                              ^
+  11 | console.log('preKey=' + typeof s.preKey('s1'))
+
+  hint: the declaration of 's' did not compile — fix the diagnostic reported there and these sites clear with it
+
+<blocks>/wamcoord-lab/napp/drivers/store-mysql.ts:11:32 - error SC2004: uses of 's' inherit the blocker on its declaration
+
+  10 | console.log('auth=' + typeof s.auth('s1'))
+  11 | console.log('preKey=' + typeof s.preKey('s1'))
+     |                                ^
+  12 | console.log('session=' + typeof s.session('s1'))
+
+  hint: the declaration of 's' did not compile — fix the diagnostic reported there and these sites clear with it
+
+<blocks>/wamcoord-lab/napp/drivers/store-mysql.ts:12:33 - error SC2004: uses of 's' inherit the blocker on its declaration
+
+  11 | console.log('preKey=' + typeof s.preKey('s1'))
+  12 | console.log('session=' + typeof s.session('s1'))
+     |                                 ^
+  13 | console.log('identity=' + typeof s.identity('s1'))
+
+  hint: the declaration of 's' did not compile — fix the diagnostic reported there and these sites clear with it
+
+<blocks>/wamcoord-lab/napp/drivers/store-mysql.ts:13:34 - error SC2004: uses of 's' inherit the blocker on its declaration
+
+  12 | console.log('session=' + typeof s.session('s1'))
+  13 | console.log('identity=' + typeof s.identity('s1'))
+     |                                  ^
+  14 | console.log('signal=' + typeof s.signal('s1'))
+
+  hint: the declaration of 's' did not compile — fix the diagnostic reported there and these sites clear with it
+
+<blocks>/wamcoord-lab/napp/drivers/store-mysql.ts:14:32 - error SC2004: uses of 's' inherit the blocker on its declaration
+
+  13 | console.log('identity=' + typeof s.identity('s1'))
+  14 | console.log('signal=' + typeof s.signal('s1'))
+     |                                ^
+  15 | console.log('senderKey=' + typeof s.senderKey('s1'))
+
+  hint: the declaration of 's' did not compile — fix the diagnostic reported there and these sites clear with it
+
+<blocks>/wamcoord-lab/napp/drivers/store-mysql.ts:15:35 - error SC2004: uses of 's' inherit the blocker on its declaration
+
+  14 | console.log('signal=' + typeof s.signal('s1'))
+  15 | console.log('senderKey=' + typeof s.senderKey('s1'))
+     |                                   ^
+  16 | console.log('appState=' + typeof s.appState('s1'))
+
+  hint: the declaration of 's' did not compile — fix the diagnostic reported there and these sites clear with it
+
+<blocks>/wamcoord-lab/napp/drivers/store-mysql.ts:16:34 - error SC2004: uses of 's' inherit the blocker on its declaration
+
+  15 | console.log('senderKey=' + typeof s.senderKey('s1'))
+  16 | console.log('appState=' + typeof s.appState('s1'))
+     |                                  ^
+  17 | console.log('messages=' + typeof s.messages('s1'))
+
+  hint: the declaration of 's' did not compile — fix the diagnostic reported there and these sites clear with it
+
+<blocks>/wamcoord-lab/napp/drivers/store-mysql.ts:17:34 - error SC2004: uses of 's' inherit the blocker on its declaration
+
+  16 | console.log('appState=' + typeof s.appState('s1'))
+  17 | console.log('messages=' + typeof s.messages('s1'))
+     |                                  ^
+  18 | console.log('threads=' + typeof s.threads('s1'))
+
+  hint: the declaration of 's' did not compile — fix the diagnostic reported there and these sites clear with it
+
+<blocks>/wamcoord-lab/napp/drivers/store-mysql.ts:18:33 - error SC2004: uses of 's' inherit the blocker on its declaration
+
+  17 | console.log('messages=' + typeof s.messages('s1'))
+  18 | console.log('threads=' + typeof s.threads('s1'))
+     |                                 ^
+  19 | console.log('contacts=' + typeof s.contacts('s1'))
+
+  hint: the declaration of 's' did not compile — fix the diagnostic reported there and these sites clear with it
+
+<blocks>/wamcoord-lab/napp/drivers/store-mysql.ts:19:34 - error SC2004: uses of 's' inherit the blocker on its declaration
+
+  18 | console.log('threads=' + typeof s.threads('s1'))
+  19 | console.log('contacts=' + typeof s.contacts('s1'))
+     |                                  ^
+  20 | console.log('privacyToken=' + typeof s.privacyToken('s1'))
+
+  hint: the declaration of 's' did not compile — fix the diagnostic reported there and these sites clear with it
+
+<blocks>/wamcoord-lab/napp/drivers/store-mysql.ts:20:38 - error SC2004: uses of 's' inherit the blocker on its declaration
+
+  19 | console.log('contacts=' + typeof s.contacts('s1'))
+  20 | console.log('privacyToken=' + typeof s.privacyToken('s1'))
+     |                                      ^
+  21 | console.log('retry=' + typeof c.retry('s1'))
+
+  hint: the declaration of 's' did not compile — fix the diagnostic reported there and these sites clear with it
+
+<blocks>/wamcoord-lab/napp/drivers/store-mysql.ts:21:31 - error SC2004: uses of 'c' inherit the blocker on its declaration
+
+  20 | console.log('privacyToken=' + typeof s.privacyToken('s1'))
+  21 | console.log('retry=' + typeof c.retry('s1'))
+     |                               ^
+  22 | console.log('groupMetadata=' + typeof c.groupMetadata('s1'))
+
+  hint: the declaration of 'c' did not compile — fix the diagnostic reported there and these sites clear with it
+
+<blocks>/wamcoord-lab/napp/drivers/store-mysql.ts:22:39 - error SC2004: uses of 'c' inherit the blocker on its declaration
+
+  21 | console.log('retry=' + typeof c.retry('s1'))
+  22 | console.log('groupMetadata=' + typeof c.groupMetadata('s1'))
+     |                                       ^
+  23 | console.log('chatMetadata=' + typeof c.chatMetadata('s1'))
+
+  hint: the declaration of 'c' did not compile — fix the diagnostic reported there and these sites clear with it
+
+<blocks>/wamcoord-lab/napp/drivers/store-mysql.ts:23:38 - error SC2004: uses of 'c' inherit the blocker on its declaration
+
+  22 | console.log('groupMetadata=' + typeof c.groupMetadata('s1'))
+  23 | console.log('chatMetadata=' + typeof c.chatMetadata('s1'))
+     |                                      ^
+  24 | console.log('deviceList=' + typeof c.deviceList('s1'))
+
+  hint: the declaration of 'c' did not compile — fix the diagnostic reported there and these sites clear with it
+
+<blocks>/wamcoord-lab/napp/drivers/store-mysql.ts:24:36 - error SC2004: uses of 'c' inherit the blocker on its declaration
+
+  23 | console.log('chatMetadata=' + typeof c.chatMetadata('s1'))
+  24 | console.log('deviceList=' + typeof c.deviceList('s1'))
+     |                                    ^
+  25 | console.log('messageSecret=' + typeof c.messageSecret('s1'))
+
+  hint: the declaration of 'c' did not compile — fix the diagnostic reported there and these sites clear with it
+
+<blocks>/wamcoord-lab/napp/drivers/store-mysql.ts:25:39 - error SC2004: uses of 'c' inherit the blocker on its declaration
+
+  24 | console.log('deviceList=' + typeof c.deviceList('s1'))
+  25 | console.log('messageSecret=' + typeof c.messageSecret('s1'))
+     |                                       ^
+  26 | 
+
+  hint: the declaration of 'c' did not compile — fix the diagnostic reported there and these sites clear with it
+
+<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/packages/store-mysql/src/appstate.store.ts:35:43 - error SC1090: extending classes not declared in the program ('BaseMysqlStore') is not supported yet
+
+  34 | 
+  35 | export class WaAppStateMysqlStore extends BaseMysqlStore implements WaAppStateStore {
+     |                                           ^~~~~~~~~~~~~~
+  36 |     public constructor(options: WaMysqlStorageOptions) {
+
+<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/packages/store-mysql/src/auth.store.ts:9:39 - error SC1090: extending classes not declared in the program ('BaseMysqlStore') is not supported yet
+
+   8 | 
+   9 | export class WaAuthMysqlStore extends BaseMysqlStore implements WaAuthStore {
+     |                                       ^~~~~~~~~~~~~~
+  10 |     public constructor(options: WaMysqlStorageOptions) {
+
+<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/packages/store-mysql/src/BaseMysqlStore.ts:13:24 - error SC2013: values from the 'mysql2' package run in the embedded dynamic engine, which this build does not include
+
+  12 | export abstract class BaseMysqlStore {
+  13 |     protected readonly pool: Pool
+     |                        ^~~~
+  14 |     protected readonly sessionId: string
+
+  hint: build with --dynamic to run npm package code in the embedded engine (adds ~620KB to the binary); static builds never include it
+
+<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/packages/store-mysql/src/chat-metadata.store.ts:13:47 - error SC1090: extending classes not declared in the program ('BaseMysqlStore') is not supported yet
+
+  12 | 
+  13 | export class WaChatMetadataMysqlStore extends BaseMysqlStore implements WaChatMetadataStore {
+     |                                               ^~~~~~~~~~~~~~
+  14 |     private readonly ttlMs: number
+
+<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/packages/store-mysql/src/connection.ts:1:1 - error SC2013: importing 'mysql2' requires the embedded dynamic engine, which this build does not include — the package's implementation runs there
+
+  1 | import mysql, { type Pool, type PoolOptions } from 'mysql2/promise'
+    | ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  2 | 
+
+  hint: build with --dynamic to run npm package code in the embedded engine (adds ~620KB to the binary); static builds never include it
+
+<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/packages/store-mysql/src/contact.store.ts:9:42 - error SC1090: extending classes not declared in the program ('BaseMysqlStore') is not supported yet
+
+   8 | 
+   9 | export class WaContactMysqlStore extends BaseMysqlStore implements WaContactStore {
+     |                                          ^~~~~~~~~~~~~~
+  10 |     public constructor(options: WaMysqlStorageOptions) {
+
+<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/packages/store-mysql/src/createMysqlStore.ts:142:34 - error SC2011: values of type 'WaMysqlStoreConfig' have no static representation but run in the embedded dynamic engine, which this build does not include
+
+  141 |  */
+  142 | export function createMysqlStore(config: WaMysqlStoreConfig): WaMysqlStoreResult {
+      |                                  ^~~~~~
+  143 |     const pool = isPool(config.pool) ? config.pool : createMysqlPool(config.pool)
+
+  hint: build with --dynamic to run these values in the embedded engine (adds ~620KB to the binary), or restate the type inside the static surface (https://scriptc.dev/limitations describes the boundary)
+
+<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/packages/store-mysql/src/device-list.store.ts:12:45 - error SC1090: extending classes not declared in the program ('BaseMysqlStore') is not supported yet
+
+  11 | 
+  12 | export class WaDeviceListMysqlStore extends BaseMysqlStore implements WaDeviceListStore {
+     |                                             ^~~~~~~~~~~~~~
+  13 |     private readonly ttlMs: number
+
+<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/packages/store-mysql/src/group-metadata.store.ts:9:48 - error SC1090: extending classes not declared in the program ('BaseMysqlStore') is not supported yet
+
+   8 | 
+   9 | export class WaGroupMetadataMysqlStore extends BaseMysqlStore implements WaGroupMetadataStore {
+     |                                                ^~~~~~~~~~~~~~
+  10 |     private readonly ttlMs: number
+
+<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/packages/store-mysql/src/identity.store.ts:17:43 - error SC1090: extending classes not declared in the program ('BaseMysqlStore') is not supported yet
+
+  16 | 
+  17 | export class WaIdentityMysqlStore extends BaseMysqlStore implements WaIdentityStore {
+     |                                           ^~~~~~~~~~~~~~
+  18 |     public constructor(options: WaMysqlStorageOptions) {
+
+<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/packages/store-mysql/src/message-secret.store.ts:11:48 - error SC1090: extending classes not declared in the program ('BaseMysqlStore') is not supported yet
+
+  10 | 
+  11 | export class WaMessageSecretMysqlStore extends BaseMysqlStore implements WaMessageSecretStore {
+     |                                                ^~~~~~~~~~~~~~
+  12 |     private readonly ttlMs: number
+
+<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/packages/store-mysql/src/message.store.ts:27:42 - error SC1090: extending classes not declared in the program ('BaseMysqlStore') is not supported yet
+
+  26 | 
+  27 | export class WaMessageMysqlStore extends BaseMysqlStore implements WaMessageStore {
+     |                                          ^~~~~~~~~~~~~~
+  28 |     public constructor(options: WaMysqlStorageOptions) {
+
+<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/packages/store-mysql/src/pre-key.store.ts:12:41 - error SC1090: extending classes not declared in the program ('BaseMysqlStore') is not supported yet
+
+  11 | 
+  12 | export class WaPreKeyMysqlStore extends BaseMysqlStore implements WaPreKeyStore {
+     |                                         ^~~~~~~~~~~~~~
+  13 |     public constructor(options: WaMysqlStorageOptions) {
+
+<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/packages/store-mysql/src/privacy-token.store.ts:7:47 - error SC1090: extending classes not declared in the program ('BaseMysqlStore') is not supported yet
+
+  6 | 
+  7 | export class WaPrivacyTokenMysqlStore extends BaseMysqlStore implements WaPrivacyTokenStore {
+    |                                               ^~~~~~~~~~~~~~
+  8 |     public constructor(options: WaMysqlStorageOptions) {
+
+<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/packages/store-mysql/src/retry.store.ts:19:40 - error SC1090: extending classes not declared in the program ('BaseMysqlStore') is not supported yet
+
+  18 | 
+  19 | export class WaRetryMysqlStore extends BaseMysqlStore implements WaRetryStore {
+     |                                        ^~~~~~~~~~~~~~
+  20 |     private readonly ttlMs: number
+
+<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/packages/store-mysql/src/sender-key.store.ts:24:44 - error SC1090: extending classes not declared in the program ('BaseMysqlStore') is not supported yet
+
+  23 | 
+  24 | export class WaSenderKeyMysqlStore extends BaseMysqlStore implements WaSenderKeyStore {
+     |                                            ^~~~~~~~~~~~~~
+  25 |     public constructor(options: WaMysqlStorageOptions) {
+
+<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/packages/store-mysql/src/session.store.ts:24:42 - error SC1090: extending classes not declared in the program ('BaseMysqlStore') is not supported yet
+
+  23 | 
+  24 | export class WaSessionMysqlStore extends BaseMysqlStore implements WaSessionStore {
+     |                                          ^~~~~~~~~~~~~~
+  25 |     public constructor(options: WaMysqlStorageOptions) {
+
+<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/packages/store-mysql/src/signal.store.ts:9:41 - error SC1090: extending classes not declared in the program ('BaseMysqlStore') is not supported yet
+
+   8 | 
+   9 | export class WaSignalMysqlStore extends BaseMysqlStore implements WaSignalStore {
+     |                                         ^~~~~~~~~~~~~~
+  10 |     public constructor(options: WaMysqlStorageOptions) {
+
+<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/packages/store-mysql/src/thread.store.ts:8:41 - error SC1090: extending classes not declared in the program ('BaseMysqlStore') is not supported yet
+
+  7 | 
+  8 | export class WaThreadMysqlStore extends BaseMysqlStore implements WaThreadStore {
+    |                                         ^~~~~~~~~~~~~~
+  9 |     public constructor(options: WaMysqlStorageOptions) {
+
+<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/abprops-spec.ts:25:30 - error SC1090: the reference to 'WA_ABPROPS_BY_CODE' (it has no compiled implementation — its module '../spec/abprops/index.d.ts' ships only a declaration file) is not supported yet
+
+  24 | // avoids allocating a parallel Map with 2000+ entries at module init.
+  25 | const AB_PROP_NAME_BY_CODE = WA_ABPROPS_BY_CODE as unknown as Readonly<
+     |                              ^~~~~~~~~~~~~~~~~~
+  26 |     Record<number, WaAbPropName | undefined>
+
+<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/appstate-spec.ts:78:31 - error SC1090: the reference to 'RAW_WA_APPSTATE_SCHEMAS' (it has no compiled implementation — its module '../spec/appstate/index.d.ts' ships only a declaration file) is not supported yet
+
+  77 | const SCHEMA_BY_ACTION_NAME_BUILDER: Record<string, WaAppstateActionKey> = {}
+  78 | for (const key of Object.keys(RAW_WA_APPSTATE_SCHEMAS) as WaAppstateActionKey[]) {
+     |                               ^~~~~~~~~~~~~~~~~~~~~~~
+  79 |     SCHEMA_BY_ACTION_NAME_BUILDER[RAW_WA_APPSTATE_SCHEMAS[key].name] = key
+
+<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/client/coordinators/WaAbPropsCoordinator.ts:35:18 - error SC1090: the reference to 'WA_ABPROPS' (it has no compiled implementation — its module '../../../spec/abprops/index.d.ts' ships only a declaration file) is not supported yet
+
+  34 | // from expanding into a 2000-member union at every call site.
+  35 | const AB_PROPS = WA_ABPROPS as Readonly<Record<WaAbPropName, WaAbProp>>
+     |                  ^~~~~~~~~~
+  36 | 
+
+<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/client/WaClient.ts:74:22 - error SC2011: values of type 'WaClientDependencies' have no static representation but run in the embedded dynamic engine, which this build does not include
+
+  73 |     private readonly stores!: ReturnType<WaClientOptions['store']['session']>
+  74 |     private readonly deps!: WaClientDependencies
+     |                      ^~~~
+  75 |     private readonly appStateSync!: WaAppStateSyncClient
+
+  hint: build with --dynamic to run these values in the embedded engine (adds ~620KB to the binary), or restate the type inside the static surface (https://scriptc.dev/limitations describes the boundary)
+
+<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/client/WaClient.ts:903:14 - error SC2001: values of type 'WaClientConstructor' cannot be compiled yet (supported: number, string, boolean, arrays, Maps, Sets, RegExp, functions, classes, records, unions of those, and 'unknown')
+
+  902 |  */
+  903 | export const WaClient = WaClientImpl as unknown as WaClientConstructor
+      |              ^~~~~~~~
+  904 | 
+
+<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/client/WaClient.ts:903:25 - error SC2004: uses of 'WaClientImpl' inherit the blocker on its declaration
+
+  902 |  */
+  903 | export const WaClient = WaClientImpl as unknown as WaClientConstructor
+      |                         ^~~~~~~~~~~~
+  904 | 
+
+  hint: the declaration of 'WaClientImpl' did not compile — fix the diagnostic reported there and these sites clear with it
+
+<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/protocol/abprops.ts:48:48 - error SC1090: the reference to 'WA_ABPROPS' (it has no compiled implementation — its module '../../spec/abprops/index.d.ts' ships only a declaration file) is not supported yet
+
+  47 |     const view = {} as Record<AbPropName, AbPropConfigEntry>
+  48 |     for (const [name, entry] of Object.entries(WA_ABPROPS)) {
+     |                                                ^~~~~~~~~~
+  49 |         view[name as AbPropName] = Object.freeze({
+
+46 errors.

@@ -1,0 +1,14 @@
+# NOTE: vitest ANSI colour escapes (ESC[..m) stripped for committing; no other byte changed.
+ORACLE-NODE v25.9.0
+=== QB START 2026-09-07T18:19:55-03:00
+########## 1/3 default env, declared order
+ Test Files  5 passed (5)
+      Tests  29 passed (29)
+########## 2/3 gate FORCED ON for the whole run
+ Test Files  5 passed (5)
+      Tests  29 passed (29)
+########## 3/3 reversed file order, default env
+ Test Files  5 passed (5)
+      Tests  29 passed (29)
+=== QB DONE 2026-09-07T18:20:23-03:00
+=== GATE-EXIT rc=0 ===
