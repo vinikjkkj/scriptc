@@ -33,12 +33,53 @@ Check with `diff`, not by eye.
 | --- | --- | --- | --- | --- |
 | `wam-wire-probe2.exe` (LLVM) | `--provenance-sources --npm-static '@vinikjkkj/wa-wam'` | **2,812,416** | `wire.test.ts` | **14/14 byte-exact, exit 0** |
 | `wam-wire-probe2.c.exe` (C) | same | **2,871,808** | same | **14/14 byte-exact, exit 0** |
-| `wam-entry2-be.c.exe` (C) | `--provenance-sources --best-effort`, **`SCRIPTC_PROVENANCE_AUTHORED_JS=1`** | **26,464,256** | node v25.9.0 | **WRONG — exits `0xC0000005`, prints nothing** |
-| `wawam-min.c.exe` (C) | `--provenance-sources`, **`SCRIPTC_PROVENANCE_AUTHORED_JS=1`** | **657,408** | node v25.9.0 | **WRONG — prints `protocol=0` where node prints `5`, then `0xC0000005`** |
+| `wam-entry2-be.c.exe` (C) | `--provenance-sources --best-effort`, **`SCRIPTC_PROVENANCE_AUTHORED_JS=1`** | **26,464,256** | node v25.9.0 | **WRONG when built, 2026-08-30 — exits `0xC0000005`, prints nothing. THE DEFECT IS FIXED; see below** |
+| `wawam-min.c.exe` (C) | `--provenance-sources`, **`SCRIPTC_PROVENANCE_AUTHORED_JS=1`** | **657,408** | node v25.9.0 | **WRONG when built, 2026-08-30 — `protocol=0` where node prints `5`, then `0xC0000005`. THE DEFECT IS FIXED; see below** |
 
-The two `wam-wire-probe2` binaries are the floor and they pass. **The other two
-are kept because they are the evidence for an open defect, not because they
-work.** Do not treat them as deliverables — they are the reproduction.
+The two `wam-wire-probe2` binaries are the floor and they pass. The other two
+were kept as the reproduction of a defect that was open when this file was
+written. **That defect is closed — see the section immediately below, added
+2026-09-07. The two binaries on disk are historical artifacts of a compiler
+that no longer exists.**
+
+## CLOSED 2026-09-07 — the two WRONG rows above no longer reproduce
+
+Block `wamcoord`, main `83432479`. The same probe source, rebuilt strict
+(**no `--best-effort`**), `--backend c`, zig 0.16.0, oracle node v25.9.0:
+
+```
+protocol=5          <- node prints 5; this binary now prints 5
+wire.regular=0
+wire.private=2
+CHAT_OPEN=3
+LT128=3
+WAWAM-MIN: reached the end
+```
+
+    BUILD rc=0   0 error sites   BINARY 2,701,824 B   RUN exit=0   88 B stdout
+    ORACLE: MATCH (byte-exact)
+    fences: 0 over 11,044,135 bytes of emitted C
+    engine scan: quickjs=0 ScrDyn=0 JS_NewRuntime=0
+
+What the rebuild showed: the `protocol=0` / `0xC0000005` pair was **one bug,
+and it was an edge dropped at RESOLUTION**, not the twin-init redirect this
+file's diagnosis pointed at. `orderedImportsOf` resolved the bare specifier
+through `resolveProjectImportSf7`, which answered null for any
+declaration-file resolution, so the module header saw `dep=null` and emitted
+no init call at all — the twin's init function was defined and never called,
+which is exactly the `sc_f__x25_init_0` symptom recorded below. Both halves
+landed before main `3f3dd523` (`program.ts` `resolveProjectImportSf7`; the
+three-valued binding kind in `lower-modules.ts`), and `7eca1660` corrected
+`provenance.ts`'s own note. Nothing in the test suite covered any of it, which
+is why the fix sat unnoticed behind a flag for a week;
+`tests/harness/provenance-authored-js.test.ts` now does, and asserts this
+`protocol=5` read specifically.
+
+The mapping is no longer a boolean flag either. It is a whitelist,
+`AUTHORED_JS_DEFAULT_PACKAGES`, and `@vinikjkkj/wa-wam` ships on it — so the
+probe above builds correctly with **no environment variable set at all**.
+
+Full measurement, both lanes and the published package: `tests/perf/wamcoord`.
 
 `wam-entry2.c` (141,409,061 bytes) is the emitted C for the entry, kept for the
 same reason: it is what a `0xC0000005` with no output looks like from the
@@ -52,9 +93,11 @@ a later build in the same output directory removed it. The number is a
 measurement in this README, not a file on disk. Regenerate it with the same
 command and `--backend llvm` if it is needed.
 
-**The two wrong binaries cannot be produced by a default build.** The mapping
-that creates them is off unless `SCRIPTC_PROVENANCE_AUTHORED_JS=1` is set
-(commit `b93ea18a`).
+**The two wrong binaries cannot be reproduced at all any more** — not by a
+default build and not by any flag. When this file was written the mapping was
+off unless `SCRIPTC_PROVENANCE_AUTHORED_JS=1` was set (commit `b93ea18a`); it
+is now on by default for `@vinikjkkj/wa-wam` and the binary it produces is
+byte-exact against node.
 
 See `<zapo-work>\estado-wamfix.md` for the full numbers and the diagnosis.
 

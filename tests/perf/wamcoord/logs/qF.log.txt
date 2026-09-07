@@ -1,0 +1,86 @@
+ORACLE-NODE v25.9.0
+=== QF START 2026-09-07T18:33:45-03:00
+FILES-SELECTED 96 of 100 harness suites, plus packages/*
+EXCLUDED (named as unrun): differential llvm-differential windows-differential linux-differential
+   ✓ server differential (79 programs) > net-close-order-phase  526ms
+   ✓ server differential (79 programs) > net-close-order-request  518ms
+   ✓ server differential (79 programs) > net-close-order-self  548ms
+   ✓ server differential (79 programs) > net-close-order-tick-between  515ms
+   ✓ server differential (79 programs) > net-close-order-two-busy  525ms
+   ✓ server differential (79 programs) > net-connect-lookup  4364ms
+   ✓ server differential (79 programs) > net-echo  1588ms
+   ✓ server differential (79 programs) > net-error-codes  3237ms
+   ✓ server differential (79 programs) > net-listen-opts  1259ms
+   ✓ server differential (79 programs) > net-once  1109ms
+   ✓ server differential (79 programs) > net-ordering  1092ms
+   ✓ server differential (79 programs) > net-pipe-proxy  1152ms
+   ✓ server differential (79 programs) > net-port-check  1028ms
+   ✓ server differential (79 programs) > net-read-arm-accepted  966ms
+   ✓ server differential (79 programs) > net-read-arm-eof-behind-bytes  1832ms
+   ✓ server differential (79 programs) > net-read-arm-eof  1165ms
+   ✓ server differential (79 programs) > net-read-arm-flood  2243ms
+   ✓ server differential (79 programs) > net-read-arm-paused  1985ms
+   ✓ server differential (79 programs) > net-read-arm-tick-between  729ms
+   ✓ server differential (79 programs) > net-read-arm-unread  1833ms
+   ✓ server differential (79 programs) > net-refused  3086ms
+   ✓ server differential (79 programs) > net-sock-members  1760ms
+   ✓ server differential (79 programs) > net-two-way  1076ms
+   ✓ server differential (79 programs) > net-unhandled-refused  3348ms
+   ✓ server differential (79 programs) > tls-connect-basic  1743ms
+   ✓ server differential (79 programs) > tls-demux  2199ms
+   ✓ server differential (79 programs) > tls-echo  1404ms
+   ✓ server differential (79 programs) > tls-handshake-fail  1346ms
+   ✓ server differential (79 programs) > upgrade-both  1437ms
+   ✓ server differential (79 programs) > upgrade-read-fairness  3953ms
+   ✓ server differential (79 programs) > ws-server  2718ms
+ ✓ tests/harness/coverage.test.ts (20 tests) 822482ms
+   ✓ mixed program: percentage and grouped blockers  1913ms
+   ✓ dynamic-capable blockers split from static rejections  1525ms
+   ✓ --dynamic analysis: island sites count as compiled-dynamically  1049ms
+   ✓ unreached blockers report in their own group  858ms
+   ✓ fully static program reports 100%  1308ms
+   ✓ fully static JavaScript program reports 100%  1956ms
+   ✓ JS inference gaps land where 'any' lands: SC2011 static, island dynamic  5439ms
+   ✓ dyn object-literal accessors: what lowers, and what refuses by name  1408ms
+   ✓ npm package sites attribute per package  1010ms
+   ✓ lazy edges inventory: unresolvable require()/import() targets mark as lazy traps  1325ms
+   ✓ lazy builtin edges mark in the builtins table, __require sites included  940ms
+   ✓ import fences no longer stop analysis: percentage plus module blockers  1658ms
+   ✓ a whole-export root that is REBOUND after the export keeps its fence  1231ms
+   ✓ a module.exports TABLE entry over a rebindable let keeps its fence  581ms
+   ✓ type errors block analysis  1258ms
+   ✓ type errors render the same code frame a build prints  1440ms
+   ✓ bare '.' and '..' imports are relative edges (the vercel-CLI dialect)  874ms
+   ✓ a cycle whose top level calls a builtin with a builtin function value is admitted  728ms
+   ✓ every corpus program is 100% static (corpus and coverage agree)  795977ms
+⎯⎯⎯⎯⎯⎯ Unhandled Errors ⎯⎯⎯⎯⎯⎯
+
+Vitest caught 2 unhandled errors during the test run.
+This might cause false positive tests. Resolve unhandled errors to make sure your tests are not affected.
+
+⎯⎯⎯⎯⎯⎯ Unhandled Error ⎯⎯⎯⎯⎯⎯⎯
+Error: [vitest-worker]: Timeout calling "onTaskUpdate"
+ ❯ Object.onTimeoutError node_modules/.pnpm/vitest@3.2.7_@edge-runtime+_aec0055de7c7effda46e3e3ca0e6aa78/node_modules/vitest/dist/chunks/rpc.-pEldfrD.js:53:10
+ ❯ Timeout._onTimeout node_modules/.pnpm/vitest@3.2.7_@edge-runtime+_aec0055de7c7effda46e3e3ca0e6aa78/node_modules/vitest/dist/chunks/index.B521nVV-.js:59:62
+ ❯ listOnTimeout node:internal/timers:605:17
+ ❯ processTimers node:internal/timers:541:7
+
+
+⎯⎯⎯⎯⎯⎯ Unhandled Error ⎯⎯⎯⎯⎯⎯⎯
+Error: [vitest-worker]: Timeout calling "onTaskUpdate"
+ ❯ Object.onTimeoutError node_modules/.pnpm/vitest@3.2.7_@edge-runtime+_aec0055de7c7effda46e3e3ca0e6aa78/node_modules/vitest/dist/chunks/rpc.-pEldfrD.js:53:10
+ ❯ Timeout._onTimeout node_modules/.pnpm/vitest@3.2.7_@edge-runtime+_aec0055de7c7effda46e3e3ca0e6aa78/node_modules/vitest/dist/chunks/index.B521nVV-.js:59:62
+ ❯ listOnTimeout node:internal/timers:605:17
+ ❯ processTimers node:internal/timers:541:7
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+
+
+ Test Files  93 passed | 3 skipped (96)
+      Tests  1858 passed | 49 skipped (1907)
+     Errors  2 errors
+   Start at  18:33:46
+   Duration  1042.51s (transform 7.15s, setup 0ms, collect 198.27s, tests 5091.10s, environment 27ms, prepare 20.26s)
+
+=== QF DONE 2026-09-07T18:51:09-03:00
+=== GATE-EXIT rc=0 ===

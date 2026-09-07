@@ -1,0 +1,266 @@
+[
+ {
+  "name": "@borewit/text-codec",
+  "mappedDefault": false,
+  "mappedAll": false,
+  "note": "@borewit/text-codec@0.2.2: no provenance attestation published; island path used",
+  "error": null,
+  "cls": "NOT-ATTESTED"
+ },
+ {
+  "name": "@ioredis/commands",
+  "mappedDefault": false,
+  "mappedAll": false,
+  "note": "@ioredis/commands@1.10.0: no provenance attestation published; island path used",
+  "error": null,
+  "cls": "NOT-ATTESTED"
+ },
+ {
+  "name": "@sec-ant/readable-stream",
+  "mappedDefault": true,
+  "mappedAll": true,
+  "note": "(mapped, no note)",
+  "error": null,
+  "cls": "MAPS-ON-DEFAULT"
+ },
+ {
+  "name": "@vinikjkkj/wa-wam",
+  "mappedDefault": true,
+  "mappedAll": true,
+  "note": "@vinikjkkj/wa-wam: source tree's package.json says 2.3000.1041627196-aaa11ce, installed is 2.3000.1041713829-1ec0d3b (release tooling that bumps at publish) — the behavior differential is the check",
+  "error": null,
+  "cls": "MAPS-ON-DEFAULT"
+ },
+ {
+  "name": "argo-codec",
+  "mappedDefault": false,
+  "mappedAll": false,
+  "note": "argo-codec@0.2.1: no provenance attestation published; island path used",
+  "error": null,
+  "cls": "NOT-ATTESTED"
+ },
+ {
+  "name": "aws-ssl-profiles",
+  "mappedDefault": true,
+  "mappedAll": true,
+  "note": "(mapped, no note)",
+  "error": null,
+  "cls": "MAPS-ON-DEFAULT"
+ },
+ {
+  "name": "base64-js",
+  "mappedDefault": false,
+  "mappedAll": false,
+  "note": "base64-js@1.5.1: no provenance attestation published; island path used",
+  "error": null,
+  "cls": "NOT-ATTESTED"
+ },
+ {
+  "name": "buffer",
+  "mappedDefault": false,
+  "mappedAll": false,
+  "note": "(no note naming it)",
+  "error": null,
+  "cls": "NOT-REACHED"
+ },
+ {
+  "name": "decompress-response",
+  "mappedDefault": false,
+  "mappedAll": false,
+  "note": "decompress-response@6.0.0: no provenance attestation published; island path used",
+  "error": null,
+  "cls": "NOT-ATTESTED"
+ },
+ {
+  "name": "denque",
+  "mappedDefault": false,
+  "mappedAll": false,
+  "note": "denque@2.1.0: no provenance attestation published; island path used",
+  "error": null,
+  "cls": "NOT-ATTESTED"
+ },
+ {
+  "name": "file-type",
+  "mappedDefault": false,
+  "mappedAll": false,
+  "note": "file-type@19.6.0: no provenance attestation published; island path used",
+  "error": null,
+  "cls": "NOT-ATTESTED"
+ },
+ {
+  "name": "file-uri-to-path",
+  "mappedDefault": false,
+  "mappedAll": false,
+  "note": "file-uri-to-path@1.0.0: no provenance attestation published; island path used",
+  "error": null,
+  "cls": "NOT-ATTESTED"
+ },
+ {
+  "name": "get-stream",
+  "mappedDefault": false,
+  "mappedAll": false,
+  "note": "get-stream@9.0.1: no provenance attestation published; island path used",
+  "error": null,
+  "cls": "NOT-ATTESTED"
+ },
+ {
+  "name": "iconv-lite",
+  "mappedDefault": false,
+  "mappedAll": false,
+  "note": "iconv-lite@0.7.3: no provenance attestation published; island path used",
+  "error": null,
+  "cls": "NOT-ATTESTED"
+ },
+ {
+  "name": "ieee754",
+  "mappedDefault": false,
+  "mappedAll": false,
+  "note": "ieee754@1.2.1: no provenance attestation published; island path used",
+  "error": null,
+  "cls": "NOT-ATTESTED"
+ },
+ {
+  "name": "ioredis",
+  "mappedDefault": false,
+  "mappedAll": false,
+  "note": "ioredis@5.11.1: no provenance attestation published; island path used",
+  "error": null,
+  "cls": "NOT-ATTESTED"
+ },
+ {
+  "name": "is-stream",
+  "mappedDefault": false,
+  "mappedAll": false,
+  "note": "is-stream@4.0.1: no provenance attestation published; island path used",
+  "error": null,
+  "cls": "NOT-ATTESTED"
+ },
+ {
+  "name": "libmlow-wasm",
+  "mappedDefault": false,
+  "mappedAll": false,
+  "note": "libmlow-wasm@0.1.1: no provenance attestation published; island path used",
+  "error": null,
+  "cls": "NOT-ATTESTED"
+ },
+ {
+  "name": "long",
+  "mappedDefault": false,
+  "mappedAll": false,
+  "note": "long@5.3.2: no provenance attestation published; island path used",
+  "error": null,
+  "cls": "NOT-ATTESTED"
+ },
+ {
+  "name": "lru.min",
+  "mappedDefault": true,
+  "mappedAll": true,
+  "note": "(mapped, no note)",
+  "error": null,
+  "cls": "MAPS-ON-DEFAULT"
+ },
+ {
+  "name": "mimic-response",
+  "mappedDefault": false,
+  "mappedAll": false,
+  "note": "mimic-response@3.1.0: no provenance attestation published; island path used",
+  "error": null,
+  "cls": "NOT-ATTESTED"
+ },
+ {
+  "name": "mysql2",
+  "mappedDefault": false,
+  "mappedAll": true,
+  "note": "(mapped, no note)",
+  "error": null,
+  "cls": "MOVES-UNDER-ALL"
+ },
+ {
+  "name": "peek-readable",
+  "mappedDefault": false,
+  "mappedAll": false,
+  "note": "peek-readable@5.4.2: no provenance attestation published; island path used",
+  "error": null,
+  "cls": "NOT-ATTESTED"
+ },
+ {
+  "name": "pg-types",
+  "mappedDefault": false,
+  "mappedAll": false,
+  "note": "pg-types@2.2.0: no provenance attestation published; island path used",
+  "error": null,
+  "cls": "NOT-ATTESTED"
+ },
+ {
+  "name": "postgres-array",
+  "mappedDefault": false,
+  "mappedAll": false,
+  "note": "postgres-array@2.0.0: no provenance attestation published; island path used",
+  "error": null,
+  "cls": "NOT-ATTESTED"
+ },
+ {
+  "name": "postgres-interval",
+  "mappedDefault": false,
+  "mappedAll": false,
+  "note": "postgres-interval@1.2.0: no provenance attestation published; island path used",
+  "error": null,
+  "cls": "NOT-ATTESTED"
+ },
+ {
+  "name": "safe-buffer",
+  "mappedDefault": false,
+  "mappedAll": false,
+  "note": "safe-buffer@5.2.1: no provenance attestation published; island path used",
+  "error": null,
+  "cls": "NOT-ATTESTED"
+ },
+ {
+  "name": "sharp",
+  "mappedDefault": false,
+  "mappedAll": false,
+  "note": "sharp@0.33.5: no provenance attestation published; island path used",
+  "error": null,
+  "cls": "NOT-ATTESTED"
+ },
+ {
+  "name": "sql-escaper",
+  "mappedDefault": true,
+  "mappedAll": true,
+  "note": "(mapped, no note)",
+  "error": null,
+  "cls": "MAPS-ON-DEFAULT"
+ },
+ {
+  "name": "standard-as-callback",
+  "mappedDefault": false,
+  "mappedAll": false,
+  "note": "standard-as-callback@2.1.0: no provenance attestation published; island path used",
+  "error": null,
+  "cls": "NOT-ATTESTED"
+ },
+ {
+  "name": "strtok3",
+  "mappedDefault": false,
+  "mappedAll": false,
+  "note": "strtok3@9.1.1: no provenance attestation published; island path used",
+  "error": null,
+  "cls": "NOT-ATTESTED"
+ },
+ {
+  "name": "token-types",
+  "mappedDefault": false,
+  "mappedAll": false,
+  "note": "token-types@6.1.2: no provenance attestation published; island path used",
+  "error": null,
+  "cls": "NOT-ATTESTED"
+ },
+ {
+  "name": "uint8array-extras",
+  "mappedDefault": false,
+  "mappedAll": false,
+  "note": "uint8array-extras@1.5.0: no provenance attestation published; island path used",
+  "error": null,
+  "cls": "NOT-ATTESTED"
+ }
+]

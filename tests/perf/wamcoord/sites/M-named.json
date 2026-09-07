@@ -1,0 +1,2046 @@
+{
+ "entry": "<blocks>/wamcoord-lab/napp/drivers/store-mysql.ts",
+ "flags": [
+  "--provenance-sources"
+ ],
+ "elapsedMs": 276219,
+ "crashed": null,
+ "preflightFailed": false,
+ "stats": {
+  "statementsTotal": 1523,
+  "statementsFailed": 44,
+  "statementsIsland": 0,
+  "functionsSkipped": 0
+ },
+ "unreachedStats": {
+  "statementsTotal": 12828,
+  "statementsFailed": 39,
+  "statementsIsland": 0,
+  "functionsSkipped": 165
+ },
+ "npmStatic": null,
+ "provenanceNotes": [
+  "@zapo-js/store-mysql@1.2.0 <- 9a49e1fffdec",
+  "mysql2@3.24.3 <- 83bda8069073",
+  "note: argo-codec@0.2.1: no provenance attestation published; island path used",
+  "note: @zapo-js/native: not installed under the entry's node_modules; island path used"
+ ],
+ "sites": [
+  {
+   "section": "blocker",
+   "code": "SC1010",
+   "message": "the 'lru.min' module is not supported yet",
+   "file": "<blocks>/wamcoord-prov/83bda806907364114946f1fd215ad34b51a1e71c/lib/parsers/parser_cache.js",
+   "line": 3
+  },
+  {
+   "section": "blocker",
+   "code": "SC1010",
+   "message": "the 'iconv-lite' module is not supported yet",
+   "file": "<blocks>/wamcoord-prov/83bda806907364114946f1fd215ad34b51a1e71c/lib/parsers/string.js",
+   "line": 3
+  },
+  {
+   "section": "blocker",
+   "code": "SC1010",
+   "message": "the 'lru.min' module is not supported yet",
+   "file": "<blocks>/wamcoord-prov/83bda806907364114946f1fd215ad34b51a1e71c/lib/parsers/string.js",
+   "line": 4
+  },
+  {
+   "section": "blocker",
+   "code": "SC1010",
+   "message": "the 'long' module is not supported yet",
+   "file": "<blocks>/wamcoord-prov/83bda806907364114946f1fd215ad34b51a1e71c/lib/packets/packet.js",
+   "line": 10
+  },
+  {
+   "section": "blocker",
+   "code": "SC1010",
+   "message": "the 'generate-function' module is not supported yet",
+   "file": "<blocks>/wamcoord-prov/83bda806907364114946f1fd215ad34b51a1e71c/lib/parsers/text_parser.js",
+   "line": 6
+  },
+  {
+   "section": "blocker",
+   "code": "SC1010",
+   "message": "the 'generate-function' module is not supported yet",
+   "file": "<blocks>/wamcoord-prov/83bda806907364114946f1fd215ad34b51a1e71c/lib/parsers/binary_parser.js",
+   "line": 7
+  },
+  {
+   "section": "blocker",
+   "code": "SC1010",
+   "message": "the 'aws-ssl-profiles' module is not supported yet",
+   "file": "<blocks>/wamcoord-prov/83bda806907364114946f1fd215ad34b51a1e71c/lib/constants/ssl_profiles.js",
+   "line": 3
+  },
+  {
+   "section": "blocker",
+   "code": "SC1010",
+   "message": "the 'sql-escaper' module is not supported yet",
+   "file": "<blocks>/wamcoord-prov/83bda806907364114946f1fd215ad34b51a1e71c/lib/base/connection.js",
+   "line": 24
+  },
+  {
+   "section": "blocker",
+   "code": "SC1010",
+   "message": "the 'lru.min' module is not supported yet",
+   "file": "<blocks>/wamcoord-prov/83bda806907364114946f1fd215ad34b51a1e71c/lib/base/connection.js",
+   "line": 25
+  },
+  {
+   "section": "blocker",
+   "code": "SC1010",
+   "message": "the 'sql-escaper' module is not supported yet",
+   "file": "<blocks>/wamcoord-prov/83bda806907364114946f1fd215ad34b51a1e71c/lib/base/pool.js",
+   "line": 4
+  },
+  {
+   "section": "blocker",
+   "code": "SC1010",
+   "message": "the 'sql-escaper' module is not supported yet",
+   "file": "<blocks>/wamcoord-prov/83bda806907364114946f1fd215ad34b51a1e71c/promise.js",
+   "line": 3
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "extending computed expressions are not supported yet",
+   "file": "<blocks>/wamcoord-prov/83bda806907364114946f1fd215ad34b51a1e71c/promise.d.ts",
+   "line": 21
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "extending classes not declared in the program ('QueryableAndExecutableBase') is not supported yet",
+   "file": "<blocks>/wamcoord-prov/83bda806907364114946f1fd215ad34b51a1e71c/promise.d.ts",
+   "line": 43
+  },
+  {
+   "section": "blocker",
+   "code": "SC2009",
+   "message": "values of type 'Pool' cannot be compiled: the record shape is supported, but its member 'getConnection' has type '() => Promise<PoolConnection>', which does not compile",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/packages/store-mysql/src/BaseMysqlStore.ts",
+   "line": 13
+  },
+  {
+   "section": "blocker",
+   "code": "SC2011",
+   "message": "values of type 'WaClientDependencies' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/client/WaClient.ts",
+   "line": 74
+  },
+  {
+   "section": "blocker",
+   "code": "SC2001",
+   "message": "values of type 'WaClientConstructor' cannot be compiled yet (supported: number, string, boolean, arrays, Maps, Sets, RegExp, functions, classes, records, unions of those, and 'unknown')",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/client/WaClient.ts",
+   "line": 903
+  },
+  {
+   "section": "blocker",
+   "code": "SC2009",
+   "message": "values of type 'WaMysqlStoreResult' cannot be compiled: the record shape is supported, but its member 'pool' has type 'Pool', which does not compile",
+   "file": "<blocks>/wamcoord-lab/napp/drivers/store-mysql.ts",
+   "line": 7
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "the reference to 'WA_ABPROPS' (it has no compiled implementation — its module '../../spec/abprops/index.d.ts' ships only a declaration file) is not supported yet",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/protocol/abprops.ts",
+   "line": 48
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "the reference to 'WA_ABPROPS_BY_CODE' (it has no compiled implementation — its module '../spec/abprops/index.d.ts' ships only a declaration file) is not supported yet",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/abprops-spec.ts",
+   "line": 25
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "the reference to 'WA_ABPROPS' (it has no compiled implementation — its module '../../../spec/abprops/index.d.ts' ships only a declaration file) is not supported yet",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/client/coordinators/WaAbPropsCoordinator.ts",
+   "line": 35
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "the reference to 'RAW_WA_APPSTATE_SCHEMAS' (it has no compiled implementation — its module '../spec/appstate/index.d.ts' ships only a declaration file) is not supported yet",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/appstate-spec.ts",
+   "line": 78
+  },
+  {
+   "section": "blocker",
+   "code": "SC2004",
+   "message": "uses of 'WaClientImpl' inherit the blocker on its declaration",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/client/WaClient.ts",
+   "line": 903
+  },
+  {
+   "section": "blocker",
+   "code": "SC2011",
+   "message": "values of type 'WaMysqlStoreConfig' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/packages/store-mysql/src/createMysqlStore.ts",
+   "line": 142
+  },
+  {
+   "section": "blocker",
+   "code": "SC2004",
+   "message": "uses of 'createMysqlStore' inherit the blocker on its declaration",
+   "file": "<blocks>/wamcoord-lab/napp/drivers/store-mysql.ts",
+   "line": 7
+  },
+  {
+   "section": "blocker",
+   "code": "SC2004",
+   "message": "uses of 'r' inherit the blocker on its declaration",
+   "file": "<blocks>/wamcoord-lab/napp/drivers/store-mysql.ts",
+   "line": 8
+  },
+  {
+   "section": "blocker",
+   "code": "SC2004",
+   "message": "uses of 'r' inherit the blocker on its declaration",
+   "file": "<blocks>/wamcoord-lab/napp/drivers/store-mysql.ts",
+   "line": 9
+  },
+  {
+   "section": "blocker",
+   "code": "SC2004",
+   "message": "uses of 's' inherit the blocker on its declaration",
+   "file": "<blocks>/wamcoord-lab/napp/drivers/store-mysql.ts",
+   "line": 10
+  },
+  {
+   "section": "blocker",
+   "code": "SC2004",
+   "message": "uses of 's' inherit the blocker on its declaration",
+   "file": "<blocks>/wamcoord-lab/napp/drivers/store-mysql.ts",
+   "line": 11
+  },
+  {
+   "section": "blocker",
+   "code": "SC2004",
+   "message": "uses of 's' inherit the blocker on its declaration",
+   "file": "<blocks>/wamcoord-lab/napp/drivers/store-mysql.ts",
+   "line": 12
+  },
+  {
+   "section": "blocker",
+   "code": "SC2004",
+   "message": "uses of 's' inherit the blocker on its declaration",
+   "file": "<blocks>/wamcoord-lab/napp/drivers/store-mysql.ts",
+   "line": 13
+  },
+  {
+   "section": "blocker",
+   "code": "SC2004",
+   "message": "uses of 's' inherit the blocker on its declaration",
+   "file": "<blocks>/wamcoord-lab/napp/drivers/store-mysql.ts",
+   "line": 14
+  },
+  {
+   "section": "blocker",
+   "code": "SC2004",
+   "message": "uses of 's' inherit the blocker on its declaration",
+   "file": "<blocks>/wamcoord-lab/napp/drivers/store-mysql.ts",
+   "line": 15
+  },
+  {
+   "section": "blocker",
+   "code": "SC2004",
+   "message": "uses of 's' inherit the blocker on its declaration",
+   "file": "<blocks>/wamcoord-lab/napp/drivers/store-mysql.ts",
+   "line": 16
+  },
+  {
+   "section": "blocker",
+   "code": "SC2004",
+   "message": "uses of 's' inherit the blocker on its declaration",
+   "file": "<blocks>/wamcoord-lab/napp/drivers/store-mysql.ts",
+   "line": 17
+  },
+  {
+   "section": "blocker",
+   "code": "SC2004",
+   "message": "uses of 's' inherit the blocker on its declaration",
+   "file": "<blocks>/wamcoord-lab/napp/drivers/store-mysql.ts",
+   "line": 18
+  },
+  {
+   "section": "blocker",
+   "code": "SC2004",
+   "message": "uses of 's' inherit the blocker on its declaration",
+   "file": "<blocks>/wamcoord-lab/napp/drivers/store-mysql.ts",
+   "line": 19
+  },
+  {
+   "section": "blocker",
+   "code": "SC2004",
+   "message": "uses of 's' inherit the blocker on its declaration",
+   "file": "<blocks>/wamcoord-lab/napp/drivers/store-mysql.ts",
+   "line": 20
+  },
+  {
+   "section": "blocker",
+   "code": "SC2004",
+   "message": "uses of 'c' inherit the blocker on its declaration",
+   "file": "<blocks>/wamcoord-lab/napp/drivers/store-mysql.ts",
+   "line": 21
+  },
+  {
+   "section": "blocker",
+   "code": "SC2004",
+   "message": "uses of 'c' inherit the blocker on its declaration",
+   "file": "<blocks>/wamcoord-lab/napp/drivers/store-mysql.ts",
+   "line": 22
+  },
+  {
+   "section": "blocker",
+   "code": "SC2004",
+   "message": "uses of 'c' inherit the blocker on its declaration",
+   "file": "<blocks>/wamcoord-lab/napp/drivers/store-mysql.ts",
+   "line": 23
+  },
+  {
+   "section": "blocker",
+   "code": "SC2004",
+   "message": "uses of 'c' inherit the blocker on its declaration",
+   "file": "<blocks>/wamcoord-lab/napp/drivers/store-mysql.ts",
+   "line": 24
+  },
+  {
+   "section": "blocker",
+   "code": "SC2004",
+   "message": "uses of 'c' inherit the blocker on its declaration",
+   "file": "<blocks>/wamcoord-lab/napp/drivers/store-mysql.ts",
+   "line": 25
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "extending classes not declared in the program ('BaseMysqlStore') is not supported yet",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/packages/store-mysql/src/thread.store.ts",
+   "line": 8
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "extending classes not declared in the program ('BaseMysqlStore') is not supported yet",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/packages/store-mysql/src/signal.store.ts",
+   "line": 9
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "extending classes not declared in the program ('BaseMysqlStore') is not supported yet",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/packages/store-mysql/src/session.store.ts",
+   "line": 24
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "extending classes not declared in the program ('BaseMysqlStore') is not supported yet",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/packages/store-mysql/src/sender-key.store.ts",
+   "line": 24
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "extending classes not declared in the program ('BaseMysqlStore') is not supported yet",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/packages/store-mysql/src/privacy-token.store.ts",
+   "line": 7
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "extending classes not declared in the program ('BaseMysqlStore') is not supported yet",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/packages/store-mysql/src/pre-key.store.ts",
+   "line": 12
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "extending classes not declared in the program ('BaseMysqlStore') is not supported yet",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/packages/store-mysql/src/message.store.ts",
+   "line": 27
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "extending classes not declared in the program ('BaseMysqlStore') is not supported yet",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/packages/store-mysql/src/identity.store.ts",
+   "line": 17
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "extending classes not declared in the program ('BaseMysqlStore') is not supported yet",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/packages/store-mysql/src/contact.store.ts",
+   "line": 9
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "extending classes not declared in the program ('BaseMysqlStore') is not supported yet",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/packages/store-mysql/src/auth.store.ts",
+   "line": 9
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "extending classes not declared in the program ('BaseMysqlStore') is not supported yet",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/packages/store-mysql/src/appstate.store.ts",
+   "line": 35
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "extending classes not declared in the program ('BaseMysqlStore') is not supported yet",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/packages/store-mysql/src/retry.store.ts",
+   "line": 19
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "extending classes not declared in the program ('BaseMysqlStore') is not supported yet",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/packages/store-mysql/src/message-secret.store.ts",
+   "line": 11
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "extending classes not declared in the program ('BaseMysqlStore') is not supported yet",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/packages/store-mysql/src/group-metadata.store.ts",
+   "line": 9
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "extending classes not declared in the program ('BaseMysqlStore') is not supported yet",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/packages/store-mysql/src/device-list.store.ts",
+   "line": 12
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "extending classes not declared in the program ('BaseMysqlStore') is not supported yet",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/packages/store-mysql/src/chat-metadata.store.ts",
+   "line": 13
+  },
+  {
+   "section": "runtimeFence",
+   "code": "SC1090",
+   "message": "the reference to 'createConnection' (a binding form with no lowering) is not supported yet",
+   "file": "<blocks>/wamcoord-prov/83bda806907364114946f1fd215ad34b51a1e71c/promise.js",
+   "line": 22
+  },
+  {
+   "section": "runtimeFence",
+   "code": "SC1090",
+   "message": "the reference to 'captureStackHolder' (a binding form with no lowering) is not supported yet",
+   "file": "<blocks>/wamcoord-prov/83bda806907364114946f1fd215ad34b51a1e71c/promise.js",
+   "line": 23
+  },
+  {
+   "section": "runtimeFence",
+   "code": "SC2020",
+   "message": "'Connection.once' is typed by @types/node but has no scriptc lowering yet",
+   "file": "<blocks>/wamcoord-prov/83bda806907364114946f1fd215ad34b51a1e71c/promise.js",
+   "line": 33
+  },
+  {
+   "section": "runtimeFence",
+   "code": "SC2020",
+   "message": "'Connection.once' is typed by @types/node but has no scriptc lowering yet",
+   "file": "<blocks>/wamcoord-prov/83bda806907364114946f1fd215ad34b51a1e71c/promise.js",
+   "line": 36
+  },
+  {
+   "section": "runtimeFence",
+   "code": "SC1090",
+   "message": "the reference to 'createPool' (a binding form with no lowering) is not supported yet",
+   "file": "<blocks>/wamcoord-prov/83bda806907364114946f1fd215ad34b51a1e71c/promise.js",
+   "line": 47
+  },
+  {
+   "section": "runtimeFence",
+   "code": "SC1090",
+   "message": "constructing values other than classes declared in the program is not supported yet",
+   "file": "<blocks>/wamcoord-prov/83bda806907364114946f1fd215ad34b51a1e71c/promise.js",
+   "line": 57
+  },
+  {
+   "section": "runtimeFence",
+   "code": "SC1090",
+   "message": "the reference to 'createPoolCluster' (a binding form with no lowering) is not supported yet",
+   "file": "<blocks>/wamcoord-prov/83bda806907364114946f1fd215ad34b51a1e71c/promise.js",
+   "line": 168
+  },
+  {
+   "section": "runtimeFence",
+   "code": "SC2004",
+   "message": "uses of 'corePoolCluster' inherit the blocker on its declaration",
+   "file": "<blocks>/wamcoord-prov/83bda806907364114946f1fd215ad34b51a1e71c/promise.js",
+   "line": 177
+  },
+  {
+   "section": "runtimeFence",
+   "code": "SC1090",
+   "message": "the reference to 'inheritEvents' (a binding form with no lowering) is not supported yet",
+   "file": "<blocks>/wamcoord-prov/83bda806907364114946f1fd215ad34b51a1e71c/promise.js",
+   "line": 65
+  },
+  {
+   "section": "runtimeFence",
+   "code": "SC1090",
+   "message": "the reference to 'PoolCluster' (a binding form with no lowering) is not supported yet",
+   "file": "<blocks>/wamcoord-prov/83bda806907364114946f1fd215ad34b51a1e71c/promise.js",
+   "line": 152
+  },
+  {
+   "section": "runtimeFence",
+   "code": "SC1090",
+   "message": "the reference to 'SqlString' (a binding form with no lowering) is not supported yet",
+   "file": "<blocks>/wamcoord-prov/83bda806907364114946f1fd215ad34b51a1e71c/promise.js",
+   "line": 183
+  },
+  {
+   "section": "runtimeFence",
+   "code": "SC1090",
+   "message": "the reference to 'SqlString' (a binding form with no lowering) is not supported yet",
+   "file": "<blocks>/wamcoord-prov/83bda806907364114946f1fd215ad34b51a1e71c/promise.js",
+   "line": 184
+  },
+  {
+   "section": "runtimeFence",
+   "code": "SC1090",
+   "message": "the reference to 'SqlString' (a binding form with no lowering) is not supported yet",
+   "file": "<blocks>/wamcoord-prov/83bda806907364114946f1fd215ad34b51a1e71c/promise.js",
+   "line": 185
+  },
+  {
+   "section": "runtimeFence",
+   "code": "SC1090",
+   "message": "the reference to 'SqlString' (a binding form with no lowering) is not supported yet",
+   "file": "<blocks>/wamcoord-prov/83bda806907364114946f1fd215ad34b51a1e71c/promise.js",
+   "line": 186
+  },
+  {
+   "section": "runtimeFence",
+   "code": "SC1090",
+   "message": "method calls like 'exports.__defineGetter__' is not supported yet",
+   "file": "<blocks>/wamcoord-prov/83bda806907364114946f1fd215ad34b51a1e71c/promise.js",
+   "line": 193
+  },
+  {
+   "section": "runtimeFence",
+   "code": "SC1090",
+   "message": "method calls like 'exports.__defineGetter__' is not supported yet",
+   "file": "<blocks>/wamcoord-prov/83bda806907364114946f1fd215ad34b51a1e71c/promise.js",
+   "line": 195
+  },
+  {
+   "section": "runtimeFence",
+   "code": "SC1090",
+   "message": "method calls like 'exports.__defineGetter__' is not supported yet",
+   "file": "<blocks>/wamcoord-prov/83bda806907364114946f1fd215ad34b51a1e71c/promise.js",
+   "line": 200
+  },
+  {
+   "section": "runtimeFence",
+   "code": "SC1090",
+   "message": "method calls like 'exports.__defineGetter__' is not supported yet",
+   "file": "<blocks>/wamcoord-prov/83bda806907364114946f1fd215ad34b51a1e71c/promise.js",
+   "line": 204
+  },
+  {
+   "section": "runtimeFence",
+   "code": "SC1090",
+   "message": "the reference to 'setMaxCache' (a binding form with no lowering) is not supported yet",
+   "file": "<blocks>/wamcoord-prov/83bda806907364114946f1fd215ad34b51a1e71c/promise.js",
+   "line": 209
+  },
+  {
+   "section": "runtimeFence",
+   "code": "SC1090",
+   "message": "the reference to 'clearCache' (a binding form with no lowering) is not supported yet",
+   "file": "<blocks>/wamcoord-prov/83bda806907364114946f1fd215ad34b51a1e71c/promise.js",
+   "line": 213
+  },
+  {
+   "section": "advisory",
+   "code": "SC6004",
+   "message": "this flow COPIES the record into a different shape, and the copy ends the member 'initSync'",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/crypto/nativeBackend.ts",
+   "line": 50
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "symbol-keyed property access outside class fields keyed by a module-level `const k = Symbol('desc')` (static shapes have no symbol-keyed storage) is not supported yet",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/client/plugins/install.ts",
+   "line": 37
+  },
+  {
+   "section": "unreached",
+   "code": "SC2020",
+   "message": "'Object.defineProperty' is part of the standard library types but has no scriptc lowering yet",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/client/plugins/install.ts",
+   "line": 42
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "the reference to 'WA_VERSION' (it has no compiled implementation — its module '../../../spec/version/index.d.ts' ships only a declaration file) is not supported yet",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/transport/noise/WaClientPayload.ts",
+   "line": 196
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "the reference to 'WA_VERSION' (it has no compiled implementation — its module '../../../spec/version/index.d.ts' ships only a declaration file) is not supported yet",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/transport/noise/WaClientPayload.ts",
+   "line": 234
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "the reference to 'RAW_WA_APPSTATE_SCHEMAS' (it has no compiled implementation — its module '../spec/appstate/index.d.ts' ships only a declaration file) is not supported yet",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/appstate-spec.ts",
+   "line": 92
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "namespace objects as first-class values (access 'proto' members directly: proto.<member>) are not supported yet",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/appstate-spec.ts",
+   "line": 97
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "effectful case tests in a union-typed switch (bind the test value to a const first) is not supported yet",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/message/crypto/addon-crypto.ts",
+   "line": 341
+  },
+  {
+   "section": "unreached",
+   "code": "SC2008",
+   "message": "values of type 'Message & $Properties' cannot be compiled: this intersection resolves to no runtime shape",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/message/crypto/addon-crypto.ts",
+   "line": 435
+  },
+  {
+   "section": "unreached",
+   "code": "SC2004",
+   "message": "uses of 'decoded' inherit the blocker on its declaration",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/message/crypto/addon-crypto.ts",
+   "line": 437
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'IMessage' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/message/encode/content.ts",
+   "line": 205
+  },
+  {
+   "section": "unreached",
+   "code": "SC2004",
+   "message": "uses of 'unwrapMessage' inherit the blocker on its declaration",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/message/crypto/addon-crypto.ts",
+   "line": 441
+  },
+  {
+   "section": "unreached",
+   "code": "SC2004",
+   "message": "uses of 'pollMsg' inherit the blocker on its declaration",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/message/crypto/addon-crypto.ts",
+   "line": 443
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "'Promise<{ fileEncSha256: Uint8Array; fileSha256: Uint8Array; firstFrameSidecar: Uint8Array | undefined; plaintextLength: number; streamingSidecar: Uint8Array | undefined }>' values where 'Promise<{ fileEncSha256: Uint8Array; fileSha256: Uint8Array; plaintextLength: number }>' is expected is not supported yet",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/media/transfer/WaMediaTransferClient.ts",
+   "line": 438
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'Promise<WaAppStateSyncResult> | null' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/appstate/sync/WaAppStateSyncClient.ts",
+   "line": 139
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "method calls like 'this.appStateSync.ensureInitialSyncKey' is not supported yet",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/client/coordinators/WaPassiveTasksCoordinator.ts",
+   "line": 132
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type '((event: WaAppStateMutationEvent) => void) | undefined' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/client/coordinators/WaAppStateMutationCoordinator.ts",
+   "line": 339
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "method calls like 'mutations.set' is not supported yet",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/client/coordinators/WaProfileCoordinator.ts",
+   "line": 606
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'IMessage' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/message/crypto/icdc.ts",
+   "line": 73
+  },
+  {
+   "section": "unreached",
+   "code": "SC2004",
+   "message": "uses of 'injectDeviceListMetadata' inherit the blocker on its declaration",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/retry/replay.ts",
+   "line": 232
+  },
+  {
+   "section": "unreached",
+   "code": "SC2004",
+   "message": "uses of 'injected' inherit the blocker on its declaration",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/retry/replay.ts",
+   "line": 233
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'IMessage' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/message/encode/device-sent.ts",
+   "line": 4
+  },
+  {
+   "section": "unreached",
+   "code": "SC2004",
+   "message": "uses of 'wrapDeviceSentMessage' inherit the blocker on its declaration",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/retry/replay.ts",
+   "line": 240
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "calls of the generic method 'emitEvent' with no defining object literal (the declaration is signature-only — only methods declared with a body in an object literal monomorphize) is not supported yet",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/client/coordinators/WaTrustedContactTokenCoordinator.ts",
+   "line": 171
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "effectful case tests in a union-typed switch (bind the test value to a const first) is not supported yet",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/message/primitives/media-retry.ts",
+   "line": 88
+  },
+  {
+   "section": "unreached",
+   "code": "SC2002",
+   "message": "record shapes must match exactly or width-coerce: expected '{ get chatMetadata(): { cleanupExpired: (number) => Promise<number>; clear: () => Promise<void>; deleteChatMetadata: (string) => Promise<number>; destroy: () => Promise<void> | undefined; getChatMetadata: (string, number | undefined) => Promise<null | { chatJid: string; ephemeralExpiration: number | undefined; ephemeralSettingTimestamp: number | undefined; updatedAtMs: number }>; upsertChatMetadata: ({ chatJid: string; ephemeralExpiration: number | undefined; ephemeralSettingTimestamp: number | undefined; updatedAtMs: number }) => Promise<void> }; get deviceList(): { cleanupExpired: (number) => Promise<number>; clear: () => Promise<void>; deleteUserDevices: (string) => Promise<number>; destroy: () => Promise<void> | undefined; findByAnyUserJid: (string, number | undefined) => Promise<null | { altUserJid: string | undefined; deviceJids: string[]; updatedAtMs: number; userJid: string }>; getUserDevicesBatch: (string[], number | undefined) => Promise<(null | { altUserJid: string | undefined; deviceJids: string[]; updatedAtMs: number; userJid: string })[]>; upsertUserDevicesBatch: ({ altUserJid: string | undefined; deviceJids: string[]; updatedAtMs: number; userJid: string }[]) => Promise<void> }; get groupMetadata(): { cleanupExpired: (number) => Promise<number>; clear: () => Promise<void>; deleteGroupMetadata: (string) => Promise<number>; destroy: () => Promise<void> | undefined; getGroupMetadata: (string, number | undefined) => Promise<null | { ephemeral: number | undefined; ephemeralTrigger: number | undefined; groupJid: string; participants: string[]; updatedAtMs: number }>; upsertGroupMetadata: ({ ephemeral: number | undefined; ephemeralTrigger: number | undefined; groupJid: string; participants: string[]; updatedAtMs: number }) => Promise<void> }; get messageSecret(): { cleanupExpired: (number) => Promise<number>; clear: () => Promise<void>; destroy: () => Promise<void> | undefined; get: (string, number | undefined) => Promise<null | { secret: Uint8Array; senderJid: string }>; getBatch: (string[], number | undefined) => Promise<(null | { secret: Uint8Array; senderJid: string })[]>; set: (string, { secret: Uint8Array; senderJid: string }) => Promise<void>; setBatch: ({ entry: { secret: Uint8Array; senderJid: string }; messageId: string }[]) => Promise<void> }; get retry(): { cleanupExpired: (number) => Promise<number>; clear: () => Promise<void>; deleteOutboundMessage: (string) => Promise<number>; destroy: () => Promise<void> | undefined; getOutboundMessage: (string) => Promise<null | { deliveredRequesterDeviceJids: string[] | undefined; eligibleRequesterDeviceJids: string[] | undefined; expiresAtMs: number; messageId: string; replayMode: string; replayPayload: Uint8Array | { ciphertext: Uint8Array; encType: string; mode: string; participant: string | undefined; to: string; type: string } | { mode: string; node: Uint8Array } | { mode: string; plaintext: Uint8Array; statusSetting: string | undefined; to: string; type: string }; state: string; toJid: string; updatedAtMs: number }>; getOutboundRequesterStatus: (string, string) => Promise<null | { delivered: boolean; eligible: boolean }>; getTtlMs: () => number | undefined; incrementInboundCounter: (string, string, number, number) => Promise<number>; markOutboundRequesterDelivered: (string, string, number, number) => Promise<void>; supportsRawReplayPayload: () => boolean | undefined; updateOutboundMessageState: (string, string, number, number) => Promise<void>; upsertOutboundMessage: ({ deliveredRequesterDeviceJids: string[] | undefined; eligibleRequesterDeviceJids: string[] | undefined; expiresAtMs: number; messageId: string; replayMode: string; replayPayload: Uint8Array | { ciphertext: Uint8Array; encType: string; mode: string; participant: string | undefined; to: string; type: string } | { mode: string; node: Uint8Array } | { mode: string; plaintext: Uint8Array; statusSetting: string | undefined; to: string; type: string }; state: string; toJid: string; updatedAtMs: number })…', got '{ get chatMetadata(): { cleanupExpired: (number) => Promise<number>; clear: () => Promise<void>; deleteChatMetadata: (string) => Promise<number>; destroy: () => Promise<void> | undefined; getChatMetadata: (string, number | undefined) => Promise<null | { chatJid: string; ephemeralExpiration: number | undefined; ephemeralSettingTimestamp: number | undefined; updatedAtMs: number }>; upsertChatMetadata: ({ chatJid: string; ephemeralExpiration: number | undefined; ephemeralSettingTimestamp: number | undefined; updatedAtMs: number }) => Promise<void> }; get deviceList(): { cleanupExpired: (number) => Promise<number>; clear: () => Promise<void>; deleteUserDevices: (string) => Promise<number>; destroy: () => Promise<void> | undefined; findByAnyUserJid: (string, number | undefined) => Promise<null | { altUserJid: string | undefined; deviceJids: string[]; updatedAtMs: number; userJid: string }>; getUserDevicesBatch: (string[], number | undefined) => Promise<(null | { altUserJid: string | undefined; deviceJids: string[]; updatedAtMs: number; userJid: string })[]>; upsertUserDevicesBatch: ({ altUserJid: string | undefined; deviceJids: string[]; updatedAtMs: number; userJid: string }[]) => Promise<void> }; get groupMetadata(): { cleanupExpired: (number) => Promise<number>; clear: () => Promise<void>; deleteGroupMetadata: (string) => Promise<number>; destroy: () => Promise<void> | undefined; getGroupMetadata: (string, number | undefined) => Promise<null | { ephemeral: number | undefined; ephemeralTrigger: number | undefined; groupJid: string; participants: string[]; updatedAtMs: number }>; upsertGroupMetadata: ({ ephemeral: number | undefined; ephemeralTrigger: number | undefined; groupJid: string; participants: string[]; updatedAtMs: number }) => Promise<void> }; get messageSecret(): { cleanupExpired: (number) => Promise<number>; clear: () => Promise<void>; destroy: () => Promise<void> | undefined; get: (string, number | undefined) => Promise<null | { secret: Uint8Array; senderJid: string }>; getBatch: (string[], number | undefined) => Promise<(null | { secret: Uint8Array; senderJid: string })[]>; set: (string, { secret: Uint8Array; senderJid: string }) => Promise<void>; setBatch: ({ entry: { secret: Uint8Array; senderJid: string }; messageId: string }[]) => Promise<void> }; get retry(): { cleanupExpired: (number) => Promise<number>; clear: () => Promise<void>; deleteOutboundMessage: (string) => Promise<number>; destroy: () => Promise<void> | undefined; getOutboundMessage: (string) => Promise<null | { deliveredRequesterDeviceJids: string[] | undefined; eligibleRequesterDeviceJids: string[] | undefined; expiresAtMs: number; messageId: string; replayMode: string; replayPayload: Uint8Array | { ciphertext: Uint8Array; encType: string; mode: string; participant: string | undefined; to: string; type: string } | { mode: string; node: Uint8Array } | { mode: string; plaintext: Uint8Array; statusSetting: string | undefined; to: string; type: string }; state: string; toJid: string; updatedAtMs: number }>; getOutboundRequesterStatus: (string, string) => Promise<null | { delivered: boolean; eligible: boolean }>; getTtlMs: () => number | undefined; incrementInboundCounter: (string, string, number, number) => Promise<number>; markOutboundRequesterDelivered: (string, string, number, number) => Promise<void>; supportsRawReplayPayload: () => boolean | undefined; updateOutboundMessageState: (string, string, number, number) => Promise<void>; upsertOutboundMessage: ({ deliveredRequesterDeviceJids: string[] | undefined; eligibleRequesterDeviceJids: string[] | undefined; expiresAtMs: number; messageId: string; replayMode: string; replayPayload: Uint8Array | { ciphertext: Uint8Array; encType: string; mode: string; participant: string | undefined; to: string; type: string } | { mode: string; node: Uint8Array } | { mode: string; plaintext: Uint8Array; statusSetting: string | undefined; to: string; type: string }; state: string; toJid: string; updatedAtMs: number })…' — field 'appState': '{ clear: () => Promise<void>; exportData: () => Promise<any>; getActiveSyncKey: () => Promise<any>; getCollectionState: (string) => Promise<{ hash: Uint8Array; indexValueMap: Map<string, Uint8Array>; initialized: boolean; version: number }>; getCollectionStates: (string[]) => Promise<{ hash: Uint8Array; indexValueMap: Map<string, Uint8Array>; initialized: boolean; version: number }[]>; getSyncKeyData: (Uint8Array) => Promise<Uint8Array | null>; getSyncKeyDataBatch: (Uint8Array[]) => Promise<(Uint8Array | null)[]>; getSyncKeysBatch: (Uint8Array[]) => Promise<any>; setCollectionStates: ({ collection: string; hash: Uint8Array; indexValueMap: Map<string, Uint8Array>; version: number }[]) => Promise<void>; upsertSyncKeys: (any) => Promise<number> }' does not lift into '{ clear: () => Promise<void>; exportData: () => Promise<{ collections: { critical_block: { hash: Uint8Array; indexValueMap: { [key: string]: Uint8Array }; version: number } | undefined; critical_unblock_low: { hash: Uint8Array; indexValueMap: { [key: string]: Uint8Array }; version: number } | undefined; regular: { hash: Uint8Array; indexValueMap: { [key: string]: Uint8Array }; version: number } | undefined; regular_high: { hash: Uint8Array; indexValueMap: { [key: string]: Uint8Array }; version: number } | undefined; regular_low: { hash: Uint8Array; indexValueMap: { [key: string]: Uint8Array }; version: number } | undefined }; keys: { fingerprint: { $unknowns: Uint8Array[] | undefined; currentIndex: number | null | undefined; deviceIndexes: number[] | null | undefined; rawId: number | null | undefined } | undefined; keyData: Uint8Array; keyId: Uint8Array; timestamp: number }[] }>; getActiveSyncKey: () => Promise<null | { fingerprint: { $unknowns: Uint8Array[] | undefined; currentIndex: number | null | undefined; deviceIndexes: number[] | null | undefined; rawId: number | null | undefined } | undefined; keyData: Uint8Array; keyId: Uint8Array; timestamp: number }>; getCollectionState: (string) => Promise<{ hash: Uint8Array; indexValueMap: Map<string, Uint8Array>; initialized: boolean; version: number }>; getCollectionStates: (string[]) => Promise<{ hash: Uint8Array; indexValueMap: Map<string, Uint8Array>; initialized: boolean; version: number }[]>; getSyncKeyData: (Uint8Array) => Promise<Uint8Array | null>; getSyncKeyDataBatch: (Uint8Array[]) => Promise<(Uint8Array | null)[]>; getSyncKeysBatch: (Uint8Array[]) => Promise<(null | { fingerprint: { $unknowns: Uint8Array[] | undefined; currentIndex: number | null | undefined; deviceIndexes: number[] | null | undefined; rawId: number | null | undefined } | undefined; keyData: Uint8Array; keyId: Uint8Array; timestamp: number })[]>; setCollectionStates: ({ collection: string; hash: Uint8Array; indexValueMap: Map<string, Uint8Array>; version: number }[]) => Promise<void>; upsertSyncKeys: ({ fingerprint: { $unknowns: Uint8Array[] | undefined; currentIndex: number | null | undefined; deviceIndexes: number[] | null | undefined; rawId: number | null | undefined } | undefined; keyData: Uint8Array; keyId: Uint8Array; timestamp: number }[]) => Promise<number> }'",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/client/WaClientFactory.ts",
+   "line": 277
+  },
+  {
+   "section": "unreached",
+   "code": "SC2002",
+   "message": "record shapes must match exactly or width-coerce: expected '{ addons: { autoDecrypt: boolean | undefined; persistAllSecrets: boolean | undefined } | undefined; appStateSyncTimeoutMs: number; chatEvents: { emitSnapshotMutations: boolean | undefined } | undefined; chatSocketUrls: string[] | undefined; companionHost: { includePem: boolean | undefined; persistence: { load: () => null | Promise<null | { companions: { addedAtSeconds: number; companionIdentityPublicKey: Uint8Array; deviceJid: string; keyIndex: number }[]; currentKeyIndex: number; rawId: number }> | { companions: { addedAtSeconds: number; companionIdentityPublicKey: Uint8Array; deviceJid: string; keyIndex: number }[]; currentKeyIndex: number; rawId: number }; save: ({ companions: { addedAtSeconds: number; companionIdentityPublicKey: Uint8Array; deviceJid: string; keyIndex: number }[]; currentKeyIndex: number; rawId: number }) => Promise<void> | undefined } | undefined } | undefined; connectTimeoutMs: number | undefined; dangerous: { disableAdvSignatureVerification: boolean | undefined; disableAppStateMacVerification: boolean | undefined; disableMediaMacVerification: boolean | undefined; disableNoiseCertificateChainVerification: boolean | undefined; disablePairSuccessHmacVerification: boolean | undefined; disableSenderKeySignatureVerification: boolean | undefined; disableSignedPreKeySignatureVerification: boolean | undefined } | undefined; deadSocketTimeoutMs: number; deviceBrowser: string; deviceOsDisplayName: string; deviceOsVersion: string | undefined; devicePlatform: string; history: { enabled: boolean | undefined; groupBundles: boolean | undefined; requireFullSync: boolean | undefined } | undefined; iqTimeoutMs: number; keepAliveIntervalMs: number; linkPreview: { allowPrivateHosts: boolean | undefined; enabled: boolean | undefined; fetchTimeoutMs: number | undefined; fetcher: { fetch: ({ logger: { child: ({ [key: string]: unknown }, { level: string | undefined } | undefined) => ...; debug: (string, { [key: string]: unknown } | undefined) => void; error: (string, { [key: string]: unknown } | undefined) => void; info: (string, { [key: string]: unknown } | undefined) => void; level: string; trace: (string, { [key: string]: unknown } | undefined) => void; warn: (string, { [key: string]: unknown } | undefined) => void }; matchedText: string; signal: AbortSignal | undefined; url: URL }) => Promise<null | { description: string | undefined; matchedText: string; previewType: number; thumbnail: { bytes: Uint8Array; height: number | undefined; width: number | undefined } | { contentLength: number; height: number | undefined; stream: Readable; width: number | undefined } | undefined; title: string | undefined }> } | undefined; maxHtmlBytes: number | undefined; maxThumbnailBytes: number | undefined; proxy: unknown; uploadHqThumbnail: boolean | undefined; userAgent: string | undefined } | undefined; logoutStoreClear: { appState: boolean | undefined; auth: boolean | undefined; contacts: boolean | undefined; deviceList: boolean | undefined; groupMetadata: boolean | undefined; identity: boolean | undefined; messageSecret: boolean | undefined; messages: boolean | undefined; preKey: boolean | undefined; privacyToken: boolean | undefined; retry: boolean | undefined; senderKey: boolean | undefined; session: boolean | undefined; signal: boolean | undefined; threads: boolean | undefined } | undefined; markOnlineOnConnect: boolean | undefined; maxReconnectAttempts: number | undefined; media: { generateProbe: boolean | undefined; generateStickerThumbnail: boolean | undefined; generateThumbnail: boolean | undefined; generateWaveform: boolean | undefined; normalizeVoiceNote: boolean | undefined; processor: { computeWaveform: (Uint8Array | Readable | string, { logger: { child: ({ [key: string]: unknown }, { level: string | undefined } | undefined) => ...; debug: (string, { [key: string]: unknown } | undefined) => void; error: (string, { [key: string]: unknown } | undefined) => void; info: (string, { [key: string]: unknown } | undefined) => void; leve…', got '{ addons: { autoDecrypt: boolean | undefined; persistAllSecrets: boolean | undefined } | undefined; appStateSyncTimeoutMs: number | undefined; chatEvents: { emitSnapshotMutations: boolean | undefined } | undefined; chatSocketUrls: string[] | undefined; companionHost: { includePem: boolean | undefined; persistence: { load: () => null | Promise<null | { companions: { addedAtSeconds: number; companionIdentityPublicKey: Uint8Array; deviceJid: string; keyIndex: number }[]; currentKeyIndex: number; rawId: number }> | { companions: { addedAtSeconds: number; companionIdentityPublicKey: Uint8Array; deviceJid: string; keyIndex: number }[]; currentKeyIndex: number; rawId: number }; save: ({ companions: { addedAtSeconds: number; companionIdentityPublicKey: Uint8Array; deviceJid: string; keyIndex: number }[]; currentKeyIndex: number; rawId: number }) => Promise<void> | undefined } | undefined } | undefined; connectTimeoutMs: number | undefined; dangerous: { disableAdvSignatureVerification: boolean | undefined; disableAppStateMacVerification: boolean | undefined; disableMediaMacVerification: boolean | undefined; disableNoiseCertificateChainVerification: boolean | undefined; disablePairSuccessHmacVerification: boolean | undefined; disableSenderKeySignatureVerification: boolean | undefined; disableSignedPreKeySignatureVerification: boolean | undefined } | undefined; deadSocketTimeoutMs: number | undefined; deviceBrowser: string | undefined; deviceOsDisplayName: string | undefined; deviceOsVersion: string | undefined; devicePlatform: string | undefined; history: { enabled: boolean | undefined; groupBundles: boolean | undefined; requireFullSync: boolean | undefined } | undefined; iqTimeoutMs: number | undefined; keepAliveIntervalMs: number | undefined; linkPreview: { allowPrivateHosts: boolean | undefined; enabled: boolean | undefined; fetchTimeoutMs: number | undefined; fetcher: { fetch: (any) => Promise<null | { description: string | undefined; matchedText: string; previewType: number; thumbnail: { bytes: Uint8Array; height: number | undefined; width: number | undefined } | { contentLength: number; height: number | undefined; stream: Readable; width: number | undefined } | undefined; title: string | undefined }> } | undefined; maxHtmlBytes: number | undefined; maxThumbnailBytes: number | undefined; proxy: unknown; uploadHqThumbnail: boolean | undefined; userAgent: string | undefined } | undefined; logoutStoreClear: { appState: boolean | undefined; auth: boolean | undefined; contacts: boolean | undefined; deviceList: boolean | undefined; groupMetadata: boolean | undefined; identity: boolean | undefined; messageSecret: boolean | undefined; messages: boolean | undefined; preKey: boolean | undefined; privacyToken: boolean | undefined; retry: boolean | undefined; senderKey: boolean | undefined; session: boolean | undefined; signal: boolean | undefined; threads: boolean | undefined } | undefined; markOnlineOnConnect: boolean | undefined; maxReconnectAttempts: number | undefined; media: { generateProbe: boolean | undefined; generateStickerThumbnail: boolean | undefined; generateThumbnail: boolean | undefined; generateWaveform: boolean | undefined; normalizeVoiceNote: boolean | undefined; processor: { computeWaveform: (Uint8Array | Readable | string, { logger: { child: ({ [key: string]: unknown }, { level: string | undefined } | undefined) => ...; debug: (string, { [key: string]: unknown } | undefined) => void; error: (string, { [key: string]: unknown } | undefined) => void; info: (string, { [key: string]: unknown } | undefined) => void; level: string; trace: (string, { [key: string]: unknown } | undefined) => void; warn: (string, { [key: string]: unknown } | undefined) => void } | undefined } | undefined) => Promise<null | { durationSeconds: number; waveform: Uint8Array }> | undefined; detectMimetype: (Uint8Array | string, { logger: { child: ({ [key: string]: unknown }, { level: string | undefined } | undefined) => ...; debug: (string, { [key: strin…' — spread field 'linkPreview': '{ allowPrivateHosts: boolean | undefined; enabled: boolean | undefined; fetchTimeoutMs: number | undefined; fetcher: { fetch: (any) => Promise<null | { description: string | undefined; matchedText: string; previewType: number; thumbnail: { bytes: Uint8Array; height: number | undefined; width: number | undefined } | { contentLength: number; height: number | undefined; stream: Readable; width: number | undefined } | undefined; title: string | undefined }> } | undefined; maxHtmlBytes: number | undefined; maxThumbnailBytes: number | undefined; proxy: unknown; uploadHqThumbnail: boolean | undefined; userAgent: string | undefined } | undefined' does not lift into '{ allowPrivateHosts: boolean | undefined; enabled: boolean | undefined; fetchTimeoutMs: number | undefined; fetcher: { fetch: ({ logger: { child: ({ [key: string]: unknown }, { level: string | undefined } | undefined) => ...; debug: (string, { [key: string]: unknown } | undefined) => void; error: (string, { [key: string]: unknown } | undefined) => void; info: (string, { [key: string]: unknown } | undefined) => void; level: string; trace: (string, { [key: string]: unknown } | undefined) => void; warn: (string, { [key: string]: unknown } | undefined) => void }; matchedText: string; signal: AbortSignal | undefined; url: URL }) => Promise<null | { description: string | undefined; matchedText: string; previewType: number; thumbnail: { bytes: Uint8Array; height: number | undefined; width: number | undefined } | { contentLength: number; height: number | undefined; stream: Readable; width: number | undefined } | undefined; title: string | undefined }> } | undefined; maxHtmlBytes: number | undefined; maxThumbnailBytes: number | undefined; proxy: unknown; uploadHqThumbnail: boolean | undefined; userAgent: string | undefined } | undefined'",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/client/WaClientFactory.ts",
+   "line": 279
+  },
+  {
+   "section": "unreached",
+   "code": "SC2004",
+   "message": "uses of 'sessionStore' inherit the blocker on its declaration",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/client/WaClientFactory.ts",
+   "line": 304
+  },
+  {
+   "section": "unreached",
+   "code": "SC1063",
+   "message": "this use of a catch binding is not supported yet",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/client/persistence/companion-host.ts",
+   "line": 64
+  },
+  {
+   "section": "unreached",
+   "code": "SC2020",
+   "message": "'writeFile with 3 arguments' is part of the standard library types but has no scriptc lowering yet",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/client/persistence/companion-host.ts",
+   "line": 94
+  },
+  {
+   "section": "unreached",
+   "code": "SC2020",
+   "message": "'fs/promises.rename' is typed by @types/node but has no scriptc lowering yet",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/client/persistence/companion-host.ts",
+   "line": 95
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "dynamic keyed reads of '{ child: ({ [key: string]: unknown }) => ... | undefined; debug: (...unknown) => void; error: (...unknown) => void; info: (...unknown) => void; level: string; trace: (...unknown) => void; warn: (...unknown) => void }' (the declared fields have no one common type) is not supported yet",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/infra/log/PinoLogger.ts",
+   "line": 137
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "Function.prototype.call on a compiled function value (compiled calls are direct — no runtime 'this' or arguments object exists to re-route; spell the call directly: 'Object.prototype.hasOwnProperty(...)') is not supported yet",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/infra/log/PinoLogger.ts",
+   "line": 141
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "dynamic keyed reads of '{ child: ({ [key: string]: unknown }) => ... | undefined; debug: (...unknown) => void; error: (...unknown) => void; info: (...unknown) => void; level: string; trace: (...unknown) => void; warn: (...unknown) => void }' (the declared fields have no one common type) is not supported yet",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/infra/log/PinoLogger.ts",
+   "line": 146
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "the reference to 'WA_MEX_PERSIST_IDS' (it has no compiled implementation — its module '../../../../spec/mex/index.d.ts' ships only a declaration file) is not supported yet (instantiating 'runMexQuery' with <string, null | { xwa2_group_query_by_id: { __typename: string | undefined; de...>)",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/transport/node/mex/client.ts",
+   "line": 56
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "the reference to 'WA_MEX_PERSIST_IDS' (it has no compiled implementation — its module '../../../../spec/mex/index.d.ts' ships only a declaration file) is not supported yet (instantiating 'runMexQuery' with <string, null | { xwa2_group_query_by_id: { __typename: string | undefined; id...>)",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/transport/node/mex/client.ts",
+   "line": 56
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "the reference to 'WA_MEX_PERSIST_IDS' (it has no compiled implementation — its module '../../../../spec/mex/index.d.ts' ships only a declaration file) is not supported yet (instantiating 'runMexQuery' with <string, null | { xwa2_group_update_users_role: { group_id: string | undefined...>)",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/transport/node/mex/client.ts",
+   "line": 56
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "the reference to 'WA_MEX_PERSIST_IDS' (it has no compiled implementation — its module '../../../../spec/mex/index.d.ts' ships only a declaration file) is not supported yet (instantiating 'runMexQuery' with <string, null | { wa_create_group_suspension_appeal: { appeal_creation_time: s...>)",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/transport/node/mex/client.ts",
+   "line": 56
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "the reference to 'WA_MEX_PERSIST_IDS' (it has no compiled implementation — its module '../../../../spec/mex/index.d.ts' ships only a declaration file) is not supported yet (instantiating 'runMexQuery' with <string, null | { xwa2_update_text_status: { result: string | undefined } | un...>)",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/transport/node/mex/client.ts",
+   "line": 56
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "the reference to 'WA_MEX_PERSIST_IDS' (it has no compiled implementation — its module '../../../../spec/mex/index.d.ts' ships only a declaration file) is not supported yet (instantiating 'runMexQuery' with <string, null | { xwa2_username_get: { username_info: { pin: string | undefine...>)",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/transport/node/mex/client.ts",
+   "line": 56
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "the reference to 'WA_MEX_PERSIST_IDS' (it has no compiled implementation — its module '../../../../spec/mex/index.d.ts' ships only a declaration file) is not supported yet (instantiating 'runMexQuery' with <string, null | { xwa2_username_set: { result: string | undefined } | undefined }>)",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/transport/node/mex/client.ts",
+   "line": 56
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "the reference to 'WA_MEX_PERSIST_IDS' (it has no compiled implementation — its module '../../../../spec/mex/index.d.ts' ships only a declaration file) is not supported yet (instantiating 'runMexQuery' with <string, null | { xwa2_users_updates_since: { updates: { __typename: string | ...>)",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/transport/node/mex/client.ts",
+   "line": 56
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "the reference to 'WA_MEX_PERSIST_IDS' (it has no compiled implementation — its module '../../../../spec/mex/index.d.ts' ships only a declaration file) is not supported yet (instantiating 'runMexQuery' with <string, null | { xwa2_username_check: { result: string | undefined; suggestio...>)",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/transport/node/mex/client.ts",
+   "line": 56
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "the reference to 'WA_MEX_PERSIST_IDS' (it has no compiled implementation — its module '../../../../spec/mex/index.d.ts' ships only a declaration file) is not supported yet (instantiating 'runMexQuery' with <string, null | { xwa2_username_pin_set: { result: string | undefined } | unde...>)",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/transport/node/mex/client.ts",
+   "line": 56
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "the reference to 'WA_MEX_PERSIST_IDS' (it has no compiled implementation — its module '../../../../spec/mex/index.d.ts' ships only a declaration file) is not supported yet (instantiating 'runMexQuery' with <string, null | { xwa2_newsletter_create: { id: string | undefined; state: { t...>)",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/transport/node/mex/client.ts",
+   "line": 56
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "the reference to 'WA_MEX_PERSIST_IDS' (it has no compiled implementation — its module '../../../../spec/mex/index.d.ts' ships only a declaration file) is not supported yet (instantiating 'runMexQuery' with <string, null | { xwa2_newsletter_update: { id: string | undefined; state: { t...>)",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/transport/node/mex/client.ts",
+   "line": 56
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "the reference to 'WA_MEX_PERSIST_IDS' (it has no compiled implementation — its module '../../../../spec/mex/index.d.ts' ships only a declaration file) is not supported yet (instantiating 'runMexQuery' with <string, null | { xwa2_newsletter_delete_v2: { id: string | undefined; state: ...>)",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/transport/node/mex/client.ts",
+   "line": 56
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "the reference to 'WA_MEX_PERSIST_IDS' (it has no compiled implementation — its module '../../../../spec/mex/index.d.ts' ships only a declaration file) is not supported yet (instantiating 'runMexQuery' with <string, null | { xwa2_newsletter_admin: { admin_count: number | undefined; ad...>)",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/transport/node/mex/client.ts",
+   "line": 56
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "the reference to 'WA_MEX_PERSIST_IDS' (it has no compiled implementation — its module '../../../../spec/mex/index.d.ts' ships only a declaration file) is not supported yet (instantiating 'runMexQuery' with <string, null | { xwa2_newsletter_admin: { capabilities: string[] | undefined;...>)",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/transport/node/mex/client.ts",
+   "line": 56
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "the reference to 'WA_MEX_PERSIST_IDS' (it has no compiled implementation — its module '../../../../spec/mex/index.d.ts' ships only a declaration file) is not supported yet (instantiating 'runMexQuery' with <string, null | { xwa2_newsletter_followers: { followers: { edges: { admin_pro...>)",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/transport/node/mex/client.ts",
+   "line": 56
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "the reference to 'WA_MEX_PERSIST_IDS' (it has no compiled implementation — its module '../../../../spec/mex/index.d.ts' ships only a declaration file) is not supported yet (instantiating 'runMexQuery' with <string, null | { xwa2_newsletter_admin_insights: { last_update_time: string |...>)",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/transport/node/mex/client.ts",
+   "line": 56
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "the reference to 'WA_MEX_PERSIST_IDS' (it has no compiled implementation — its module '../../../../spec/mex/index.d.ts' ships only a declaration file) is not supported yet (instantiating 'runMexQuery' with <string, null | { xwa2_channels_reports: { channels_reports: { appeal: { appea...>)",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/transport/node/mex/client.ts",
+   "line": 56
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "the reference to 'WA_MEX_PERSIST_IDS' (it has no compiled implementation — its module '../../../../spec/mex/index.d.ts' ships only a declaration file) is not supported yet (instantiating 'runMexQuery' with <string, null | { xwa2_newsletter_admin: { id: string | undefined; pending_adm...>)",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/transport/node/mex/client.ts",
+   "line": 56
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "the reference to 'WA_MEX_PERSIST_IDS' (it has no compiled implementation — its module '../../../../spec/mex/index.d.ts' ships only a declaration file) is not supported yet (instantiating 'runMexQuery' with <string, null | { xwa2_channel_enforcements: { admin_profiles: { appeal_creati...>)",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/transport/node/mex/client.ts",
+   "line": 56
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "the reference to 'WA_MEX_PERSIST_IDS' (it has no compiled implementation — its module '../../../../spec/mex/index.d.ts' ships only a declaration file) is not supported yet (instantiating 'runMexQuery' with <string, null | { voter_list: { votes: { vote_hash: string | undefined; voter_...>)",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/transport/node/mex/client.ts",
+   "line": 56
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "the reference to 'WA_MEX_PERSIST_IDS' (it has no compiled implementation — its module '../../../../spec/mex/index.d.ts' ships only a declaration file) is not supported yet (instantiating 'runMexQuery' with <string, null | { xwa2_newsletters_reaction_sender_list: { reactions: { reacti...>)",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/transport/node/mex/client.ts",
+   "line": 56
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "the reference to 'WA_MEX_PERSIST_IDS' (it has no compiled implementation — its module '../../../../spec/mex/index.d.ts' ships only a declaration file) is not supported yet (instantiating 'runMexQuery' with <string, null | { xwa2_newsletter_log_exposures: { __typename: string | undefi...>)",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/transport/node/mex/client.ts",
+   "line": 56
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "the reference to 'WA_MEX_PERSIST_IDS' (it has no compiled implementation — its module '../../../../spec/mex/index.d.ts' ships only a declaration file) is not supported yet (instantiating 'runMexQuery' with <string, null | { xwa2_newsletter_change_owner: { __typename: string | undefin...>)",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/transport/node/mex/client.ts",
+   "line": 56
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "the reference to 'WA_MEX_PERSIST_IDS' (it has no compiled implementation — its module '../../../../spec/mex/index.d.ts' ships only a declaration file) is not supported yet (instantiating 'runMexQuery' with <string, null | { xwa2_newsletter_admin_demote: { __typename: string | undefin...>)",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/transport/node/mex/client.ts",
+   "line": 56
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "the reference to 'WA_MEX_PERSIST_IDS' (it has no compiled implementation — its module '../../../../spec/mex/index.d.ts' ships only a declaration file) is not supported yet (instantiating 'runMexQuery' with <string, null | { xwa2_newsletter_admin_invite_create: { id: string | undefine...>)",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/transport/node/mex/client.ts",
+   "line": 56
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "the reference to 'WA_MEX_PERSIST_IDS' (it has no compiled implementation — its module '../../../../spec/mex/index.d.ts' ships only a declaration file) is not supported yet (instantiating 'runMexQuery' with <string, null | { xwa2_newsletter_admin_invite_accept: { __typename: string | ...>)",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/transport/node/mex/client.ts",
+   "line": 56
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "the reference to 'WA_MEX_PERSIST_IDS' (it has no compiled implementation — its module '../../../../spec/mex/index.d.ts' ships only a declaration file) is not supported yet (instantiating 'runMexQuery' with <string, null | { xwa2_newsletter_admin_invite_revoke: { __typename: string | ...>)",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/transport/node/mex/client.ts",
+   "line": 56
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "the reference to 'WA_MEX_PERSIST_IDS' (it has no compiled implementation — its module '../../../../spec/mex/index.d.ts' ships only a declaration file) is not supported yet (instantiating 'runMexQuery' with <string, null | { xwa2_newsletter: { id: string | undefined; state: { type: st...>)",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/transport/node/mex/client.ts",
+   "line": 56
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "the reference to 'WA_MEX_PERSIST_IDS' (it has no compiled implementation — its module '../../../../spec/mex/index.d.ts' ships only a declaration file) is not supported yet (instantiating 'runMexQuery' with <string, null | { xwa2_newsletter_subscribed: { id: string | undefined; state:...>)",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/transport/node/mex/client.ts",
+   "line": 56
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "the reference to 'WA_MEX_PERSIST_IDS' (it has no compiled implementation — its module '../../../../spec/mex/index.d.ts' ships only a declaration file) is not supported yet (instantiating 'runMexQuery' with <string, null | { xwa2_newsletters_directory_search: { page_info: { endCursor:...>)",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/transport/node/mex/client.ts",
+   "line": 56
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "the reference to 'WA_MEX_PERSIST_IDS' (it has no compiled implementation — its module '../../../../spec/mex/index.d.ts' ships only a declaration file) is not supported yet (instantiating 'runMexQuery' with <string, null | { xwa2_newsletters_recommended: { page_info: { endCursor: stri...>)",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/transport/node/mex/client.ts",
+   "line": 56
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "the reference to 'WA_MEX_PERSIST_IDS' (it has no compiled implementation — its module '../../../../spec/mex/index.d.ts' ships only a declaration file) is not supported yet (instantiating 'runMexQuery' with <string, null | { xwa2_newsletters_similar: { result: { id: string | undefined...>)",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/transport/node/mex/client.ts",
+   "line": 56
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "the reference to 'WA_MEX_PERSIST_IDS' (it has no compiled implementation — its module '../../../../spec/mex/index.d.ts' ships only a declaration file) is not supported yet (instantiating 'runMexQuery' with <string, null | { xwa2_newsletters_directory_list: { page_info: { endCursor: s...>)",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/transport/node/mex/client.ts",
+   "line": 56
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "the reference to 'WA_MEX_PERSIST_IDS' (it has no compiled implementation — its module '../../../../spec/mex/index.d.ts' ships only a declaration file) is not supported yet (instantiating 'runMexQuery' with <string, null | { xwa2_newsletters_directory_category_preview: { result: { cat...>)",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/transport/node/mex/client.ts",
+   "line": 56
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "the reference to 'WA_MEX_PERSIST_IDS' (it has no compiled implementation — its module '../../../../spec/mex/index.d.ts' ships only a declaration file) is not supported yet (instantiating 'runMexQuery' with <string, null | { xwa2_newsletter_message_integrity: { url_previews: { is_prev...>)",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/transport/node/mex/client.ts",
+   "line": 56
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "the reference to 'WA_MEX_PERSIST_IDS' (it has no compiled implementation — its module '../../../../spec/mex/index.d.ts' ships only a declaration file) is not supported yet (instantiating 'runMexQuery' with <string, null | { xwa2_newsletter: { id: string | undefined; thread_metadata: ...>)",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/transport/node/mex/client.ts",
+   "line": 56
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "extending classes not declared in the program ('Connection') is not supported yet",
+   "file": "<blocks>/wamcoord-prov/83bda806907364114946f1fd215ad34b51a1e71c/promise.d.ts",
+   "line": 86
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type '{ readonly operation: number; readonly keyId: Uint8Array<ArrayBufferLike>; readonly keyData: Uint8Array<ArrayBufferLike>; readonly index: string; readonly value: ISyncActionValue | null; readonly version: number; readonly iv?: Uint8Array<...> | undefined; }' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/appstate/crypto/WaAppStateCrypto.ts",
+   "line": 138
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'Readonly<WaClientOptions>' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/client/connection/WaConnectionManager.ts",
+   "line": 27
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'WaMediaMessageOptions' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/client/coordinators/WaMessageCoordinator.ts",
+   "line": 292
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'WaMessageDispatchCoordinatorOptions' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/client/coordinators/WaMessageDispatchCoordinator.ts",
+   "line": 245
+  },
+  {
+   "section": "unreached",
+   "code": "SC2005",
+   "message": "values of type 'WaMobileEmit' cannot be compiled: the signature keeps its type parameters, and a compiled function is always one concrete signature (generic functions monomorphize per pinned signature — declarations, methods, and never-reassigned bindings holding a generic arrow/function expression, an alias of a registered generic function, or a function initializer under a generic-signature annotation)",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/client/coordinators/WaMobileCoordinator.ts",
+   "line": 108
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'WaRetryCoordinatorOptions' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/client/coordinators/WaRetryCoordinator.ts",
+   "line": 198
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'QueryOutput' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/packages/store-mysql/src/helpers.ts",
+   "line": 13
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'QueryOutput' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/packages/store-mysql/src/helpers.ts",
+   "line": 17
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'QueryOutput' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/packages/store-mysql/src/helpers.ts",
+   "line": 21
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'PoolOptions' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/packages/store-mysql/src/connection.ts",
+   "line": 408
+  },
+  {
+   "section": "unreached",
+   "code": "SC2009",
+   "message": "values of type 'Pool' cannot be compiled: the record shape is supported, but its member 'getConnection' has type '() => Promise<PoolConnection>', which does not compile",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/packages/store-mysql/src/connection.ts",
+   "line": 432
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'IExternalBlobReference' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/appstate/utils.ts",
+   "line": 66
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'readonly CollectionResponsePayload[]' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/appstate/parsers/response-parser.ts",
+   "line": 32
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'WaSendContextInfo' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/message/context-info.ts",
+   "line": 35
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'IMessage' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/message/context-info.ts",
+   "line": 84
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'IMessage | undefined' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/message/context-info.ts",
+   "line": 116
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'IMessage | undefined' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/message/context-info.ts",
+   "line": 144
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'IMessage' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/message/context-info.ts",
+   "line": 165
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'IMessage' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/message/context-info.ts",
+   "line": 181
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'WaSendContextResolveInput' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/message/context-info.ts",
+   "line": 232
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'WaPersistIncomingEphemeralSettingOptions' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/client/persistence/ephemeral-setting.ts",
+   "line": 26
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type '(event: WaIncomingMessageEvent) => void' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/client/persistence/ephemeral-setting.ts",
+   "line": 100
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'readonly IWebMessageInfo[]' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/message/kinds/group-history.ts",
+   "line": 42
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'Promise<GroupHistory>' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/message/kinds/group-history.ts",
+   "line": 60
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'WaGroupHistoryMessageHandler' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/message/kinds/group-history.ts",
+   "line": 89
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'WaGroupHistoryBundleInput' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/client/persistence/group-history.ts",
+   "line": 43
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'WaGroupHistoryBundleInput' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/client/persistence/group-history.ts",
+   "line": 58
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'IMessageHistoryBundle' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/client/persistence/group-history.ts",
+   "line": 200
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'IWebMessageInfo' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/client/persistence/group-history.ts",
+   "line": 221
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'IHistorySyncNotification' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/client/persistence/history-sync.ts",
+   "line": 102
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'IHistorySyncNotification' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/client/persistence/history-sync.ts",
+   "line": 122
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'IMessage | undefined' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/message/encode/content.ts",
+   "line": 45
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'IMessage' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/message/encode/content.ts",
+   "line": 190
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'IMessage' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/message/encode/content.ts",
+   "line": 194
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'IMessage' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/message/encode/content.ts",
+   "line": 223
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'IMessage' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/message/encode/content.ts",
+   "line": 227
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'IMessage' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/message/encode/content.ts",
+   "line": 288
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'IMessage' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/message/encode/content.ts",
+   "line": 292
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'IMessage' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/message/encode/content.ts",
+   "line": 325
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'IMessage' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/message/encode/content.ts",
+   "line": 342
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'IMessage' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/message/encode/content.ts",
+   "line": 346
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'IMessage' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/message/encode/content.ts",
+   "line": 398
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'IMessage' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/message/encode/content.ts",
+   "line": 402
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'IMessage' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/message/encode/content.ts",
+   "line": 439
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'IMessage' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/message/encode/content.ts",
+   "line": 452
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'IMessage' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/message/encode/content.ts",
+   "line": 481
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'IMessage' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/message/encode/content.ts",
+   "line": 493
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'IMessage' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/message/encode/content.ts",
+   "line": 498
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'WaIncomingMessageEvent' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/client/persistence/mailbox.ts",
+   "line": 52
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'WaPersistIncomingMailboxOptions' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/client/persistence/mailbox.ts",
+   "line": 82
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'WaClientPluginDefinition' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/client/plugins/types.ts",
+   "line": 57
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'WaClientPluginInstallInput' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/client/plugins/install.ts",
+   "line": 58
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'WaAppStateMutation' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/client/events/appstate-mutation.ts",
+   "line": 12
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'ISyncActionValue | null' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/client/events/appstate-mutation.ts",
+   "line": 57
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'ISyncActionValue' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/client/coordinators/WaAppStateMutationCoordinator.ts",
+   "line": 196
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'IMessage' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/message/crypto/use-case-secret.ts",
+   "line": 41
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'IMessage' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/message/crypto/addon-crypto.ts",
+   "line": 253
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'WaDecodedAddon' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/message/crypto/addon-crypto.ts",
+   "line": 384
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'IMessage' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/message/kinds/bot.ts",
+   "line": 61
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'IMessage' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/message/kinds/bot.ts",
+   "line": 92
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'IMessage' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/message/kinds/bot.ts",
+   "line": 119
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'IMessage' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/message/kinds/bot.ts",
+   "line": 139
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'WaBotCoordinatorOptions' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/client/coordinators/WaBotCoordinator.ts",
+   "line": 329
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'WaBroadcastListCoordinatorOptions' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/client/coordinators/WaBroadcastListCoordinator.ts",
+   "line": 51
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'IMessage | null | undefined' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/message/encode/media-payload.ts",
+   "line": 85
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'WaSendMediaMessage' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/client/media.ts",
+   "line": 369
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'WaSendMediaMessage' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/client/media.ts",
+   "line": 388
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'WaSendMediaMessage' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/client/media.ts",
+   "line": 410
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'WaSendMediaMessage' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/client/media.ts",
+   "line": 422
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'WaSendMediaMessage' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/client/media.ts",
+   "line": 434
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'WaSendMediaMessage' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/client/media.ts",
+   "line": 446
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'WaSendMediaMessage' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/client/media.ts",
+   "line": 492
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'IMessage | WaIncomingMessageEvent' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/client/media.ts",
+   "line": 635
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'IMessage' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/message/addons/link-preview/builder.ts",
+   "line": 16
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'WaSendStickerPackMessage' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/message/kinds/sticker-pack.ts",
+   "line": 5
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'WaSendStickerPackMessage' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/message/kinds/sticker-pack.ts",
+   "line": 19
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'WaSendStickerPackMessage' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/message/kinds/sticker-pack.ts",
+   "line": 30
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'IMessage' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/client/messaging/messages.ts",
+   "line": 148
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'IMessage' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/client/messaging/messages.ts",
+   "line": 163
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'IMessage' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/client/messaging/messages.ts",
+   "line": 180
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'IMessage' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/client/messaging/messages.ts",
+   "line": 203
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'WaSendPollMessage' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/client/messaging/messages.ts",
+   "line": 221
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'WaSendEventMessage' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/client/messaging/messages.ts",
+   "line": 247
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'Promise<IMessage>' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/client/messaging/messages.ts",
+   "line": 304
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'Promise<IMessage>' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/client/messaging/messages.ts",
+   "line": 340
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'WaMediaMessageOptions' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/client/messaging/messages.ts",
+   "line": 378
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'WaMediaMessageOptions' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/client/messaging/messages.ts",
+   "line": 434
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'WaSendAudioMessage | WaSendDocumentMessage | WaSendImageMessage | WaSendPtvMessage | WaSendStickerMessage | WaSendVideoMessage' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/client/messaging/messages.ts",
+   "line": 452
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'WaSendAudioMessage | WaSendDocumentMessage | WaSendImageMessage | WaSendPtvMessage | WaSendStickerMessage | WaSendVideoMessage' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/client/messaging/messages.ts",
+   "line": 457
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'WaSendAudioMessage | WaSendDocumentMessage | WaSendImageMessage | WaSendPtvMessage | WaSendStickerMessage | WaSendVideoMessage' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/client/messaging/messages.ts",
+   "line": 465
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'WaMediaMessageOptions' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/client/messaging/messages.ts",
+   "line": 483
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'WaMediaMessageOptions' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/client/messaging/messages.ts",
+   "line": 781
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'WaMediaMessageOptions' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/client/messaging/messages.ts",
+   "line": 792
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'WaMediaMessageOptions' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/client/messaging/messages.ts",
+   "line": 841
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'WaMediaMessageOptions' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/client/messaging/messages.ts",
+   "line": 905
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'readonly IWebMessageInfo[]' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/client/coordinators/WaMessageCoordinator.ts",
+   "line": 99
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'BuildReportingTokenNodeInput' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/message/crypto/reporting-token.ts",
+   "line": 72
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'IMessage' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/message/crypto/reporting-token.ts",
+   "line": 123
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'IMessage' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/message/encode/device-sent.ts",
+   "line": 38
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'IMessage' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/client/coordinators/WaMessageDispatchCoordinator.ts",
+   "line": 179
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'IMessage' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/client/coordinators/WaMessageDispatchCoordinator.ts",
+   "line": 198
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'WaSendMessageContent' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/client/coordinators/WaMessageDispatchCoordinator.ts",
+   "line": 2079
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'WaSendContextInfo | null' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/client/coordinators/WaMessageDispatchCoordinator.ts",
+   "line": 2087
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'IHistorySync' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/client/messaging/companion-host.ts",
+   "line": 31
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'IProtocolMessage' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/client/messaging/companion-host.ts",
+   "line": 42
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'HistorySyncBootstrapInput' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/client/messaging/companion-host.ts",
+   "line": 66
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'WaSendMediaMessage' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/client/newsletter/content.ts",
+   "line": 142
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'IMessage' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/client/newsletter/content.ts",
+   "line": 168
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'BuildNewsletterContentOptions' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/client/newsletter/content.ts",
+   "line": 174
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'WaSendAudioMessage | WaSendDocumentMessage | WaSendImageMessage | WaSendPtvMessage | WaSendStickerMessage | WaSendVideoMessage' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/client/newsletter/content.ts",
+   "line": 189
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'BuildNewsletterContentOptions' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/client/newsletter/content.ts",
+   "line": 267
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'WaNewsletterMessagingDeps' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/client/newsletter/messaging.ts",
+   "line": 105
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'WaNewsletterMessagingDeps' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/client/newsletter/messaging.ts",
+   "line": 195
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'WaNewsletterMessagingDeps' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/client/coordinators/WaNewsletterCoordinator.ts",
+   "line": 60
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'ProcessNewsletterMessageOptions' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/message/kinds/newsletter.ts",
+   "line": 27
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'ProcessNewsletterMessageOptions' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/message/kinds/newsletter.ts",
+   "line": 57
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'ProcessNewsletterMessageOptions' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/message/kinds/newsletter.ts",
+   "line": 163
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'ProcessNewsletterMessageOptions' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/message/kinds/newsletter.ts",
+   "line": 180
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'ProcessNewsletterMessageOptions' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/message/kinds/newsletter.ts",
+   "line": 195
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'WaIncomingMessageAckHandlerOptions' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/message/primitives/incoming.ts",
+   "line": 124
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'IWebMessageInfo' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/message/primitives/incoming.ts",
+   "line": 209
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'IMessage' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/message/primitives/incoming.ts",
+   "line": 261
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'IMessage' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/message/primitives/incoming.ts",
+   "line": 277
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'IMessage' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/message/primitives/incoming.ts",
+   "line": 304
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'WaIncomingMessageAckHandlerOptions' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/message/primitives/incoming.ts",
+   "line": 328
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'WaIncomingMessageAckHandlerOptions' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/message/primitives/incoming.ts",
+   "line": 389
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'WaIncomingMessageAckHandlerOptions' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/message/primitives/incoming.ts",
+   "line": 462
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'WaIncomingMessageAckHandlerOptions' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/message/primitives/incoming.ts",
+   "line": 496
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'WaIncomingMessageAckHandlerOptions' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/message/primitives/incoming.ts",
+   "line": 577
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'WaIncomingMessageAckHandlerOptions' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/message/primitives/incoming.ts",
+   "line": 806
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'WaStatusCoordinatorOptions' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/client/coordinators/WaStatusCoordinator.ts",
+   "line": 54
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type '{ readonly publishProtocolMessageToDevice: PublishProtocolMessageToDeviceFn; readonly fanoutResolver: DeviceFanoutResolver; readonly getCurrentCredentials: () => WaAuthCredentials | null; readonly logger: Logger; }' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/client/messaging/key-protocol.ts",
+   "line": 35
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'IPeerDataOperationRequestMessage' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/message/primitives/peer-data-operation.ts",
+   "line": 48
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'PeerDataOperationRequesterOptions' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/message/primitives/peer-data-operation.ts",
+   "line": 60
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type '{ readonly logger: Logger; readonly emitEvent: <K extends keyof WaClientEventMap>(event: K, ...args: Parameters<WaClientEventMap[K]>) => void; ... 14 more ...; readonly incomingMessageAckOptions: WaIncomingMessageAckHandlerOptions; }' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/client/WaClientFactory.ts",
+   "line": 308
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type '{ readonly base: WaClientBase; readonly runtime: WaClientBuildRuntime; }' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/client/WaClientFactory.ts",
+   "line": 466
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'WaClientBehaviorPluginInput | WaClientExposePluginInput<string, unknown>' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/client/plugins/define.ts",
+   "line": 29
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'Pool | PoolOptions' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/wamcoord-prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/packages/store-mysql/src/createMysqlStore.ts",
+   "line": 114
+  }
+ ]
+}

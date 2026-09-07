@@ -1,30 +1,29 @@
-# NOTE: vitest ANSI colour escapes (ESC[..m) stripped for committing; no other byte changed.
 ORACLE-NODE v25.9.0
-=== Q9 START 2026-09-07T18:10:59-03:00 -- all five provenance suites, DEFAULT env (gate unset)
-   ✓ provenance: a package that publishes the source it authored > the mapped package compiles STATIC with no blockers  589ms
-   ✓ provenance: a package that publishes the source it authored > the static binary matches Node, const read included  1026ms
- ✓ tests/harness/provenance-alias-baseurl.test.ts (10 tests) 3596ms
-   ✓ provenance: a package's alias baseUrl belongs to the config that spells it > the refusal this fixes is real with the flag off  363ms
-   ✓ provenance: a package's alias baseUrl belongs to the config that spells it > the program lowers, and the alias target is in the counted statements  455ms
-   ✓ provenance: a package's alias baseUrl belongs to the config that spells it > the static binary matches Node on both backends  1479ms
-   ✓ provenance: two mapped packages spelling the same alias key > a package ENTRY beats an alias key that covers the same specifier  370ms
-   ✓ provenance: two mapped packages spelling the same alias key > the FIRST-mapped package gets its own checkout, and the borrow is announced  444ms
-   ✓ provenance: two mapped packages spelling the same alias key > the first-mapped package's binary matches Node on both backends  449ms
- ✓ tests/harness/provenance-dist-esm.test.ts (4 tests) 3876ms
-   ✓ provenance: two-flavor dist and type-only edges > every dist/esm subpath maps, and each one names its source file  1460ms
-   ✓ provenance: two-flavor dist and type-only edges > a package reached only by `import type` still registers  1009ms
-   ✓ provenance: two-flavor dist and type-only edges > the generic-method cascade behind a type-only subpath import clears  1398ms
- ✓ tests/harness/provenance.test.ts (6 tests) 6104ms
-   ✓ provenance sources > attested source compiles STATIC and byte-matches the island's published dist  1462ms
-   ✓ provenance sources > per-package attribution counts the source static; the @__PURE__ dead const elides  370ms
-   ✓ provenance sources > a generated .d.ts with a compiled twin flattens its class-intersection  2859ms
-   ✓ provenance sources > an unmappable package falls back to the island with a note, never a failure  314ms
-   ✓ provenance sources > a checker error in the ATTESTED SOURCE does not gate the build  809ms
+=== Q9 START 2026-09-07T18:58:08-03:00 -- all five provenance suites, DEFAULT env (gate unset)
+ ✓ tests/harness/provenance-authored-js.test.ts (9 tests) 2444ms
+   ✓ provenance: a package that publishes the source it authored > a package NOT on the list islands, and the note names it  948ms
+   ✓ provenance: a package that publishes the source it authored > named on the list, the mapped package compiles STATIC with no blockers  487ms
+   ✓ provenance: a package that publishes the source it authored > the static binary matches Node, const read included  954ms
+ ✓ tests/harness/provenance-alias-baseurl.test.ts (10 tests) 3301ms
+   ✓ provenance: a package's alias baseUrl belongs to the config that spells it > the refusal this fixes is real with the flag off  397ms
+   ✓ provenance: a package's alias baseUrl belongs to the config that spells it > the program lowers, and the alias target is in the counted statements  476ms
+   ✓ provenance: a package's alias baseUrl belongs to the config that spells it > the static binary matches Node on both backends  1332ms
+   ✓ provenance: two mapped packages spelling the same alias key > a package ENTRY beats an alias key that covers the same specifier  322ms
+   ✓ provenance: two mapped packages spelling the same alias key > the first-mapped package's binary matches Node on both backends  447ms
+ ✓ tests/harness/provenance-dist-esm.test.ts (4 tests) 3596ms
+   ✓ provenance: two-flavor dist and type-only edges > every dist/esm subpath maps, and each one names its source file  1365ms
+   ✓ provenance: two-flavor dist and type-only edges > a package reached only by `import type` still registers  971ms
+   ✓ provenance: two-flavor dist and type-only edges > the generic-method cascade behind a type-only subpath import clears  1250ms
+ ✓ tests/harness/provenance.test.ts (6 tests) 5490ms
+   ✓ provenance sources > attested source compiles STATIC and byte-matches the island's published dist  1343ms
+   ✓ provenance sources > per-package attribution counts the source static; the @__PURE__ dead const elides  403ms
+   ✓ provenance sources > a generated .d.ts with a compiled twin flattens its class-intersection  2587ms
+   ✓ provenance sources > a checker error in the ATTESTED SOURCE does not gate the build  698ms
 
  Test Files  5 passed (5)
-      Tests  29 passed (29)
-   Start at  18:11:00
-   Duration  12.53s (transform 4.21s, setup 0ms, collect 28.91s, tests 18.52s, environment 1ms, prepare 1.09s)
+      Tests  34 passed (34)
+   Start at  18:58:08
+   Duration  11.31s (transform 3.79s, setup 0ms, collect 26.21s, tests 17.13s, environment 1ms, prepare 967ms)
 
-=== Q9 DONE 2026-09-07T18:11:13-03:00
+=== Q9 DONE 2026-09-07T18:58:20-03:00
 === GATE-EXIT rc=0 ===

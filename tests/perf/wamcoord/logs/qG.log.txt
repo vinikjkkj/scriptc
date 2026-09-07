@@ -1,0 +1,40 @@
+ORACLE-NODE v25.9.0
+=== QG START 2026-09-07T18:55:09-03:00 -- option-2 table, pass 1: can each of the 33 move at all?
+NOT-ATTESTED            @borewit/text-codec          default=false all=false  @borewit/text-codec@0.2.2: no provenance attestation published; island path used
+NOT-ATTESTED            @ioredis/commands            default=false all=false  @ioredis/commands@1.10.0: no provenance attestation published; island path used
+MAPS-ON-DEFAULT         @sec-ant/readable-stream     default=true all=true  (mapped, no note)
+MAPS-ON-DEFAULT         @vinikjkkj/wa-wam            default=true all=true  @vinikjkkj/wa-wam: source tree's package.json says 2.3000.1041627196-aaa11ce, installed is 2.3000.1041713829-1
+NOT-ATTESTED            argo-codec                   default=false all=false  argo-codec@0.2.1: no provenance attestation published; island path used
+MAPS-ON-DEFAULT         aws-ssl-profiles             default=true all=true  (mapped, no note)
+NOT-ATTESTED            base64-js                    default=false all=false  base64-js@1.5.1: no provenance attestation published; island path used
+NOT-REACHED             buffer                       default=false all=false  (no note naming it)
+NOT-ATTESTED            decompress-response          default=false all=false  decompress-response@6.0.0: no provenance attestation published; island path used
+NOT-ATTESTED            denque                       default=false all=false  denque@2.1.0: no provenance attestation published; island path used
+NOT-ATTESTED            file-type                    default=false all=false  file-type@19.6.0: no provenance attestation published; island path used
+NOT-ATTESTED            file-uri-to-path             default=false all=false  file-uri-to-path@1.0.0: no provenance attestation published; island path used
+NOT-ATTESTED            get-stream                   default=false all=false  get-stream@9.0.1: no provenance attestation published; island path used
+NOT-ATTESTED            iconv-lite                   default=false all=false  iconv-lite@0.7.3: no provenance attestation published; island path used
+NOT-ATTESTED            ieee754                      default=false all=false  ieee754@1.2.1: no provenance attestation published; island path used
+NOT-ATTESTED            ioredis                      default=false all=false  ioredis@5.11.1: no provenance attestation published; island path used
+NOT-ATTESTED            is-stream                    default=false all=false  is-stream@4.0.1: no provenance attestation published; island path used
+NOT-ATTESTED            libmlow-wasm                 default=false all=false  libmlow-wasm@0.1.1: no provenance attestation published; island path used
+NOT-ATTESTED            long                         default=false all=false  long@5.3.2: no provenance attestation published; island path used
+MAPS-ON-DEFAULT         lru.min                      default=true all=true  (mapped, no note)
+NOT-ATTESTED            mimic-response               default=false all=false  mimic-response@3.1.0: no provenance attestation published; island path used
+MOVES-UNDER-ALL         mysql2                       default=false all=true  (mapped, no note)
+NOT-ATTESTED            peek-readable                default=false all=false  peek-readable@5.4.2: no provenance attestation published; island path used
+NOT-ATTESTED            pg-types                     default=false all=false  pg-types@2.2.0: no provenance attestation published; island path used
+NOT-ATTESTED            postgres-array               default=false all=false  postgres-array@2.0.0: no provenance attestation published; island path used
+NOT-ATTESTED            postgres-interval            default=false all=false  postgres-interval@1.2.0: no provenance attestation published; island path used
+NOT-ATTESTED            safe-buffer                  default=false all=false  safe-buffer@5.2.1: no provenance attestation published; island path used
+NOT-ATTESTED            sharp                        default=false all=false  sharp@0.33.5: no provenance attestation published; island path used
+MAPS-ON-DEFAULT         sql-escaper                  default=true all=true  (mapped, no note)
+NOT-ATTESTED            standard-as-callback         default=false all=false  standard-as-callback@2.1.0: no provenance attestation published; island path used
+NOT-ATTESTED            strtok3                      default=false all=false  strtok3@9.1.1: no provenance attestation published; island path used
+NOT-ATTESTED            token-types                  default=false all=false  token-types@6.1.2: no provenance attestation published; island path used
+NOT-ATTESTED            uint8array-extras            default=false all=false  uint8array-extras@1.5.0: no provenance attestation published; island path used
+
+TALLY {"NOT-ATTESTED":26,"MAPS-ON-DEFAULT":5,"NOT-REACHED":1,"MOVES-UNDER-ALL":1}
+candidates scanned = 33
+=== QG DONE 2026-09-07T18:55:17-03:00
+=== GATE-EXIT rc=0 ===

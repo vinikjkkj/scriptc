@@ -617,3 +617,188 @@ concurrency hazard is introduced.
 The 850M in `wamcoord-lab/out` is the emitted C of the five builds, kept because
 the fence counts in §4 are auditable only against it. It is the one item worth
 pruning on request; everything else is the rig.
+
+---
+
+## 11. Option 4 shipped: the gate is a whitelist, and `wam` needs no flag
+
+Decided by the coordinator after §10; this section is the change and its
+evidence. Compiler source is touched for the first time by this block:
+`packages/compiler/src/frontend/provenance.ts` and one export line in
+`packages/compiler/src/index.ts`.
+
+### 11.1 What the gate is now
+
+`AUTHORED_JS_DEFAULT_PACKAGES` — one exported constant, data, not a branch:
+
+    export const AUTHORED_JS_DEFAULT_PACKAGES: readonly string[] = ["@vinikjkkj/wa-wam"];
+
+`SCRIPTC_PROVENANCE_AUTHORED_JS` now reads four ways:
+
+| value | meaning |
+| --- | --- |
+| unset | the default whitelist above — **what ships** |
+| `pkg` or `a,b` | exactly those packages |
+| `1` / `true` / `all` (any case) | every package — **the original boolean spelling, unchanged** |
+| `` (empty), or whitespace-only | no package at all — the way to turn the lane fully off |
+
+**Precedence, because one value can look like both spellings at once:** if any
+comma-separated entry is an all-sentinel, **ALL wins** and the named entries are
+ignored, so `1,@scope/pkg` means every package and `1` is never read as the name
+of a package called `1`. The wider answer wins deliberately: the boolean
+spelling is the one already sitting in env templates, and silently narrowing it
+would change what those templates do. The rule is stated in the function's own
+doc comment, not only here.
+
+The allowlist is read on every call rather than cached — a caller can set the
+variable between two resolutions in one process (the suite does), and a cache
+would make the second answer with the first one's world.
+
+### 11.2 The headline: `wam` with no environment variable at all
+
+`harness/qC.sh`, `AUTHORED_JS=<unset>`, strict, no `--best-effort`,
+`--backend c`. The driver is the npm-lane one: the **published**
+`@zapo-js/wam@0.1.1`, imported the way a real consumer imports it.
+
+    BUILD rc=0   1402s   LOG-SITES total=0   (compiler printed no errors line)
+    BINARY bytes=34,315,264
+    RUN exit=0   59 B stdout
+    ORACLE node v25.9.0 exit=0   ORACLE: MATCH (byte-exact)
+    FENCES 1 over 165,944,512 bytes across 16 TUs  (zapo's spec/proto require)
+    engine scan: quickjs=0  ScrDyn=0  JS_NewRuntime=0
+
+    provenance: zapo-js@1.8.2 <- v1.8.2 @ 757a8071b819 (source compiles statically)
+    provenance: @zapo-js/wam@0.1.1 <- master @ 1dc6b9f8de93 (source compiles statically)
+    provenance: @vinikjkkj/wa-wam@2.3000... <- master @ 1ec0d3b91d0e (source compiles statically)
+
+Byte-identical in size to the flagged build of §4 (34,315,264 both), which is
+the check that the whitelist reaches the same program and not a similar one.
+
+### 11.3 The regression the whitelist exists to prevent
+
+A package **not** on the list must behave exactly as it did when the gate was a
+boolean set to off. `store-mysql`, lane A, four spellings, same compiler:
+
+| spelling | blockers | roots / cascade | `runtimeFence` section | stmts / failed |
+| --- | --- | --- | --- | --- |
+| old gate OFF (pre-change baseline) | 46 | 26 / 20 | 0 | 1,462 / 24 |
+| **unset (shipped default)** | **46** | **26 / 20** | **0** | **1,462 / 24** |
+| old gate ON (pre-change baseline) | 58 | 38 / 20 | 20 | 1,523 / 44 |
+| **`=1`** | **58** | **38 / 20** | **20** | **1,523 / 44** |
+| **`=mysql2`** | **58** | **38 / 20** | **20** | **1,523 / 44** |
+
+The default reproduces the old OFF exactly and `=1` reproduces the old ON
+exactly. Neither number is netted and neither is a fence count on an artifact —
+`store-mysql` still links under no setting (§5a), so its artifact fence count
+remains **n/a, not 0**.
+
+### 11.4 Coverage
+
+`tests/harness/provenance-authored-js.test.ts` — **9 tests**, up from 4. The
+five added ones are the four readings plus the constant itself:
+
+* the default list is data and is exactly `["@vinikjkkj/wa-wam"]` — if that
+  constant changes, the change is the review;
+* unset means the default list, **not** all (the fixture package is deliberately
+  not on the list, which is what makes this assertable);
+* an explicit list of one maps exactly that package, and a list naming somebody
+  else does not carry it in;
+* `1`, `true`, `all`, `ALL` all mean every package, and `1,other` resolves to
+  all — the precedence rule, asserted;
+* empty, and whitespace-only, mean no package.
+
+The save-and-restore discipline from §10.5 is kept: the file restores both
+environment variables to their entry values, and the assertions about the
+shipped default `delete` the variable explicitly rather than assuming it unset.
+
+### 11.5 Suites run, and suites NOT run
+
+`harness/qF.sh` — **96 of the 100 `tests/harness` suites plus every
+`packages/*` suite**:
+
+    Test Files  93 passed | 3 skipped (96)
+         Tests  1858 passed | 49 skipped (1907)
+        Errors  2 errors
+      Duration  1042.51s
+
+**The 2 errors are `[vitest-worker]: Timeout calling "onTaskUpdate"`** — vitest's
+reporter RPC timing out, twice, while a 23-minute compile was running on the
+same six cores. Not a test failure and not a program: 0 failed. Named here
+rather than swallowed, because a reader counting "errors" is entitled to know
+which kind they were.
+
+**NOT RUN, named as unrun:** `differential.test.ts`,
+`llvm-differential.test.ts`, `windows-differential.test.ts`,
+`linux-differential.test.ts` — the four corpus differential drivers. They are
+excluded for cost, not because they are irrelevant; no corpus program passes
+`--provenance-sources`, so the whitelist cannot reach them, but that is an
+argument and the full gate is the measurement. The `pnpm test` full gate was not
+run by this block.
+
+### 11.6 The table that decides option 2 later
+
+The question was: of the 33 authored-JavaScript candidates, how many move, which
+way, and does any move backwards. `harness/candidates.mjs`, resolution only —
+no build, no `analyze()` — because the authored probe is only **reached** for a
+package whose attested tree was located, so "can it move at all" is answerable
+first and cheaply, for all 33.
+
+| class | count | what it means |
+| --- | --- | --- |
+| **NOT-ATTESTED** | **26** | publishes no provenance attestation, so the mapping is never reached under any setting. **UNMEASURABLE through this lane — not 0** |
+| **ordinary TypeScript path** | **4** | `@sec-ant/readable-stream`, `aws-ssl-profiles`, `lru.min`, `sql-escaper` — they look like authored-JS candidates from their *published* shape but carry `src/*.ts` in their **attested** trees, so they map the normal way whatever this list says |
+| **NOT-REACHED** | **1** | `buffer` — resolves as the Node builtin, never enters as an npm package |
+| **on the default list** | **1** | `@vinikjkkj/wa-wam` |
+| **MOVES when widened to `all`** | **1** | **`mysql2`** |
+
+**So in zapo's dependency closure, flipping to `all` changes exactly one
+package, and it is the one already fully measured in §5.** It moves the way
+`mysql2` moved: deeper true walls uncovered, 1 site removed, 2 re-diagnosed, 13
+newly visible, and **no artifact on either side**. **Nothing moves backwards** —
+no package maps under the default and stops mapping under `all`, which the
+`default`/`all` pair in the scan checks directly for all 33.
+
+That corrects my own §10.3 wording, which said 31 of the 33 were unmeasured. The
+honest count is that 31 of the 33 **cannot be affected by this setting at all**
+in this corpus — 26 unreachable, 4 mapping by another rule, 1 a builtin — and
+the scan proves it rather than assuming it.
+
+**Verified, not assumed, that the whitelist does not leak.** Four packages map
+on the shipped default while not being on the list, which would be a bug if they
+used the authored path. `harness/checkmap.mjs` reads the mapped entry's
+extension: `.d.ts` is the authored path, `.ts` is the ordinary one.
+
+    @sec-ant/readable-stream  -> .../src/index/index.ts             ordinary TypeScript path
+    aws-ssl-profiles          -> .../src/index.ts                   ordinary TypeScript path
+    lru.min                   -> .../src/index.ts                   ordinary TypeScript path
+    sql-escaper               -> .../src/index.ts                   ordinary TypeScript path
+    @vinikjkkj/wa-wam         -> .../packages/wam/index.d.ts        AUTHORED-JS PATH
+
+Exactly one entry takes the authored path on the default, and it is the one on
+the list.
+
+**What this does and does not settle.** It settles that option 2 is close to
+free *in this corpus, today*. It does not settle option 2, for two reasons the
+whitelist is the right answer to: attestation is a per-publish property, so a
+package unreachable today becomes reachable the day it publishes with
+provenance and a wide setting would adopt it **silently**; and the §6 parameter
+limit is real, so the lane still has a shape it cannot carry. A list is where a
+package gets recorded as *checked*. Growing the array is a reviewable diff;
+widening a boolean is not.
+
+**What was left undone:** pass 2 — per-candidate `analyze()` and build under
+both settings — was not run for the 31 that cannot move, because a setting that
+provably never reaches them cannot change their numbers. For `mysql2`, the only
+mover, pass 2 already exists as §5. If the 26 unattested ones are wanted as
+measured island numbers rather than as unreachable, that is a different survey
+and a large one; say so and I will run it.
+
+### 11.7 `tests/perf/wamfix/BINARIES.md` corrected
+
+Its two `WRONG` rows recorded an open defect — `protocol=0` where node prints
+`5`, then `0xC0000005` — that §4a refuted by rebuilding. Both rows now say when
+they were built and that the defect is closed, and a new section carries the
+rebuild's numbers (`protocol=5`, exit 0, 2,701,824 B, MATCH byte-exact, 0 fences
+over 11,044,135 B), what the cause actually was (an edge dropped at resolution,
+not the twin-init redirect the file's own diagnosis blamed), and the note that
+the probe now builds with no environment variable at all.

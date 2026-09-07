@@ -468,7 +468,12 @@ const FLAVOR_DIR_RE =
  * Nothing here invents a file: every candidate is probed with isFile and
  * a subpath whose source twin is absent still maps to null, which the
  * caller turns into a named island-fallback note. */
-function mapEntryToSource(pkgDir: string, target: string, subpath: string): string | null {
+function mapEntryToSource(
+  pkgName: string,
+  pkgDir: string,
+  target: string,
+  subpath: string,
+): string | null {
   const rel = target.replace(/^\.\//, "");
   const stems = new Set<string>([rel]);
   /* The build-relative tails to look for under src/ and at the root, in
@@ -510,9 +515,79 @@ function mapEntryToSource(pkgDir: string, target: string, subpath: string): stri
   }
   for (const c of authored) {
     const abs = join(pkgDir, c);
-    if (authoredJsEntry(abs)) return abs;
+    if (authoredJsEntry(pkgName, abs)) return abs;
   }
   return null;
+}
+
+/** The packages the authored-JavaScript mapping is enabled for when the
+ * environment says nothing.
+ *
+ * DATA, and deliberately one named constant rather than a branch: a reader
+ * asking 'which packages does this apply to today' must be able to find the
+ * answer by name, and a reviewer must be able to see the whitelist grow in a
+ * diff. It is a WHITELIST, not a predicate -- blast radius exactly one entry
+ * per line, and no rule pretending to be a law.
+ *
+ * Why this one entry. @vinikjkkj/wa-wam publishes 1,657,939 bytes of frozen
+ * tables with a 2,037,013-byte hand-written .d.ts beside them and no build
+ * step, and it is what @zapo-js/wam's last 15 refusals are. Mapped, wam
+ * compiles to 0 blocker sites and a 34,315,264-byte binary that matches node
+ * byte-exact, with 0 fences over 11,044,135 bytes of emitted C for the
+ * package itself. Measured: tests/perf/wamcoord.
+ *
+ * Why a list and not every package. Not because the wider setting is known to
+ * be expensive -- it is measured, and in zapo's dependency closure it is
+ * nearly free. Of 122 installed packages, 33 look like authored-JavaScript
+ * candidates from their published shape; of those, 26 publish no provenance
+ * attestation so the mapping is never reached for them at all, 1 (`buffer`)
+ * resolves as a Node builtin, and 4 turn out to carry `src/*.ts` in their
+ * ATTESTED trees and so map through the ordinary TypeScript path whatever
+ * this list says. Exactly ONE package in that corpus changes behaviour when
+ * the setting is widened to `all`: mysql2 -- and mysql2 links under neither
+ * setting, so nothing that works today is at risk.
+ *
+ * The list is still the right shape, for two reasons that survive that
+ * measurement. The count above is one corpus, not a law: attestation is a
+ * per-publish property, so a package that is unreachable today becomes
+ * reachable the day it publishes with provenance, and the wide setting would
+ * adopt it silently. And a mapped body is JavaScript -- see authoredJsEntry
+ * -- so the lane has a shape it cannot carry, and a whitelist is a place to
+ * record which packages have been checked against it. Growing this array is
+ * a reviewable diff; widening a boolean is not.
+ *
+ * The measurement: tests/perf/wamcoord section 11. */
+export const AUTHORED_JS_DEFAULT_PACKAGES: readonly string[] = ["@vinikjkkj/wa-wam"];
+
+/** Values of SCRIPTC_PROVENANCE_AUTHORED_JS that mean EVERY package. `1` is
+ * the spelling that shipped first, when the gate was a boolean; env templates
+ * already set it and must keep meaning what they meant. */
+const AUTHORED_JS_ALL = new Set(["1", "true", "all"]);
+
+/** Which packages may map through {@link authoredJsEntry}, read from
+ * SCRIPTC_PROVENANCE_AUTHORED_JS:
+ *
+ *   unset            the default whitelist above
+ *   `1`/`true`/`all` every package (the original boolean spelling)
+ *   `` (empty)       no package at all -- the way to turn it fully off
+ *   `a,b`            exactly those packages, and nothing else
+ *
+ * PRECEDENCE, because one value can look like both spellings at once: if ANY
+ * comma-separated entry is an all-sentinel, ALL WINS and the named entries
+ * are ignored. So `1,@scope/pkg` means every package, and `1` is never read
+ * as the name of a package called `1`. The wider answer wins because the
+ * boolean spelling is the one already in env templates, and silently
+ * narrowing it would change what those templates do.
+ *
+ * Read on every call rather than cached: a caller may set the variable
+ * between two resolutions in one process (the test suite does), and a cache
+ * would make the second one answer with the first one's world. */
+function authoredJsAllowlist(): { readonly all: boolean; readonly names: ReadonlySet<string> } {
+  const raw = process.env["SCRIPTC_PROVENANCE_AUTHORED_JS"];
+  if (raw === undefined) return { all: false, names: new Set(AUTHORED_JS_DEFAULT_PACKAGES) };
+  const entries = raw.split(",").map((e) => e.trim()).filter((e) => e !== "");
+  if (entries.some((e) => AUTHORED_JS_ALL.has(e.toLowerCase()))) return { all: true, names: new Set() };
+  return { all: false, names: new Set(entries) };
 }
 
 /** True when `dts` is the declaration half of an AUTHORED-JavaScript entry:
@@ -541,36 +616,31 @@ function mapEntryToSource(pkgDir: string, target: string, subpath: string): stri
  * package to a body-less surface on which every exported VALUE refuses, which
  * is a worse answer than the island it replaced, not a better one. Such a
  * package keeps its named `no source mapping` note. */
-function authoredJsEntry(dts: string): boolean {
-  /* OFF BY DEFAULT. The wrong answer it was gated on is FIXED; the gate
-   * stays until the lane is adopted deliberately rather than as a side
-   * effect of this file.
+function authoredJsEntry(pkgName: string, dts: string): boolean {
+  /* WHITELISTED, not off, and not on. The wrong answer this was once gated
+   * on is FIXED and the fix is now measured, not asserted: the minimal probe
+   * rebuilt on main 83432479 prints protocol=5 and exits 0, byte-exact
+   * against node v25.9.0, 0 fences over 11,044,135 bytes of emitted C
+   * (tests/perf/wamcoord section 4a). The historical failure -- protocol=0
+   * then 0xC0000005, the twin's module-init function emitted and never
+   * called -- was an edge DROPPED AT RESOLUTION, not a redirect declining
+   * one; both halves landed in program.ts (resolveProjectImportSf7) and
+   * lower-modules.ts (the three-valued binding kind).
    *
-   * What it was gated on. Mapping @vinikjkkj/wa-wam made the 28,725-line
-   * twin lower and removed every one of the 13 wa-wam refusals at
-   * @zapo-js/wam's entry (18 blocker sites over 7 messages -> 5 over 5) --
-   * and produced a binary that printed
-   *
-   *     protocol=0        (node prints protocol=5)
-   *
-   * then died 0xC0000005 dereferencing a table that was never built. The
-   * twin's module-init function was emitted and never called.
-   *
-   * Where it actually was. NOT in the redirect that lower-modules.ts
-   * carries for exactly this case, and not in the
-   * `dep.isDeclarationFile && declTwinSourceOf(dep) !== null` guard that
-   * fronts it. The edge never reached either: orderedImportsOf resolved the
-   * bare specifier through resolveProjectImportSf7, which answered null for
-   * ANY declaration-file resolution, so the header saw dep=null and emitted
-   * no init call at all. SCRIPTC_TWININIT_WHY printing nothing was the
-   * ABSENCE of an edge, not a redirect declining one -- the two look
-   * identical from a probe that only fires once the edge exists.
-   *
-   * Both halves are fixed (program.ts resolveProjectImportSf7; the
-   * three-valued binding kind in lower-modules.ts), and the minimal probe
-   * now prints protocol=5 and exits 0, byte-exact against node v25.9.0 on
-   * both backends. Opt in with SCRIPTC_PROVENANCE_AUTHORED_JS=1. */
-  if (process.env["SCRIPTC_PROVENANCE_AUTHORED_JS"] === undefined) return false;
+   * What stays gated is not correctness, it is BLAST RADIUS. The lane maps a
+   * package's own JavaScript into the program, and a mapped body is
+   * JavaScript: its parameters are `unknown` whatever the .d.ts beside it
+   * declares. Measured on a fixture built for it, both as runtime fences in a
+   * binary that built clean -- `table[param]` throws SC1090, `switch (param)`
+   * throws SC1100. So the lane carries a package whose published surface is
+   * DATA and does not yet carry one whose surface is FUNCTIONS TAKING
+   * ARGUMENTS, and no package-manifest predicate separates those two: the
+   * one that was proposed (`the entry imports nothing`) selects 21 of 33
+   * candidates and admits libmlow-wasm, which imports nothing and exports
+   * five functions that take parameters. A named list is the honest shape
+   * until the 33 have been measured. */
+  const allow = authoredJsAllowlist();
+  if (!allow.all && !allow.names.has(pkgName)) return false;
   if (!isFile(dts)) return false;
   const stem = dts.replace(/\.d\.(ts|mts|cts)$/, "");
   return isFile(`${stem}.js`) || isFile(`${stem}.mjs`) || isFile(`${stem}.cjs`);
@@ -770,7 +840,7 @@ export async function resolveProvenanceSources(entryPath: string): Promise<Prove
       const nameLen = spec.startsWith("@") ? 2 : 1;
       const subpath = parts.length === nameLen ? "." : `./${parts.slice(nameLen).join("/")}`;
       const target = publishedTargetOf(tree.installed.pkgJson, subpath);
-      const source = target === null ? null : mapEntryToSource(tree.dir, target, subpath);
+      const source = target === null ? null : mapEntryToSource(name, tree.dir, target, subpath);
       if (source === null) {
         notes.push(
           `${name}@${tree.installed.version}: no source mapping for '${spec}' (published target: ${target ?? "unexported"}); island path used`,

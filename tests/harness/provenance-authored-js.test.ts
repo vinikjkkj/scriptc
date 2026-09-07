@@ -8,12 +8,20 @@
  * mapping the `.js` directly would compile the values and lose the types — and
  * lets the existing declaration-twin machinery supply the bodies.
  *
- * It is GATED (`SCRIPTC_PROVENANCE_AUTHORED_JS=1`), so this suite runs both
- * sides on purpose:
- *   * with the gate off the package must still island, and the compiler must
- *     say so by name — that is the shipped default, and it stays measured;
- *   * with the gate on the package must map, compile STATIC, and byte-match
- *     the island build of the same published file.
+ * The mapping is a WHITELIST, not a boolean: AUTHORED_JS_DEFAULT_PACKAGES
+ * names the packages it applies to when the environment says nothing, and
+ * SCRIPTC_PROVENANCE_AUTHORED_JS overrides it. All four readings of that
+ * variable are covered here, because each one is load-bearing for somebody:
+ *
+ *   unset            the default whitelist  — what ships
+ *   `pkg`            exactly that package   — what a consumer opts into
+ *   `1`/`true`/`all` every package          — what existing env templates
+ *                                             already say, and must keep
+ *                                             meaning
+ *   `` (empty)       no package at all      — the way to turn it fully off
+ *
+ * The fixture package is NOT on the default list, which is what lets the
+ * unset case assert that the default is a whitelist and not `all`.
  *
  * The const read is the load-bearing line. When this mapping first landed the
  * twin's module-init function was emitted and never called, so the binary
@@ -26,7 +34,13 @@ import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { afterEach, describe, expect, test } from "vitest";
-import { analyze, compile, resolveProvenanceSources, setProvenanceSources } from "@scriptc/compiler";
+import {
+  AUTHORED_JS_DEFAULT_PACKAGES,
+  analyze,
+  compile,
+  resolveProvenanceSources,
+  setProvenanceSources,
+} from "@scriptc/compiler";
 
 const execFileAsync = promisify(execFile);
 const repoRoot = join(import.meta.dirname, "../..");
@@ -77,10 +91,11 @@ afterEach(() => {
 });
 
 describe("provenance: a package that publishes the source it authored", () => {
-  test("with the gate OFF the package islands, and the note names it", async () => {
+  test("a package NOT on the list islands, and the note names it", async () => {
     process.env["SCRIPTC_PROVENANCE_MANIFEST"] = manifest;
-    /* Explicit, not assumed: this test asserts the SHIPPED DEFAULT, so it must
-     * hold even when the caller ran the whole suite with the gate on. */
+    /* Explicit, not assumed: this asserts the SHIPPED DEFAULT, so it must hold
+     * even when the caller ran the whole suite with the variable set. Unset is
+     * the default whitelist, and `authoredjs` is not on it. */
     delete process.env["SCRIPTC_PROVENANCE_AUTHORED_JS"];
     const sources = await resolveProvenanceSources(entry);
     /* Not "no packages resolved" — the tree WAS located and fetched. What is
@@ -95,9 +110,9 @@ describe("provenance: a package that publishes the source it authored", () => {
     expect(await buildAndRun("authoredjs-island", true)).toBe(EXPECTED);
   });
 
-  test("with the gate ON the package maps to its declaration half", async () => {
+  test("named on the list, the package maps to its declaration half", async () => {
     process.env["SCRIPTC_PROVENANCE_MANIFEST"] = manifest;
-    process.env["SCRIPTC_PROVENANCE_AUTHORED_JS"] = "1";
+    process.env["SCRIPTC_PROVENANCE_AUTHORED_JS"] = "authoredjs";
     const sources = await resolveProvenanceSources(entry);
     expect(sources.packages).toHaveLength(1);
     const pkg = sources.packages[0]!;
@@ -113,9 +128,9 @@ describe("provenance: a package that publishes the source it authored", () => {
     expect(sources.notes.join("\n")).not.toContain("no source mapping for 'authoredjs'");
   });
 
-  test("the mapped package compiles STATIC with no blockers", async () => {
+  test("named on the list, the mapped package compiles STATIC with no blockers", async () => {
     process.env["SCRIPTC_PROVENANCE_MANIFEST"] = manifest;
-    process.env["SCRIPTC_PROVENANCE_AUTHORED_JS"] = "1";
+    process.env["SCRIPTC_PROVENANCE_AUTHORED_JS"] = "authoredjs";
     setProvenanceSources(await resolveProvenanceSources(entry));
     const { coverage } = analyze(entry);
     expect(coverage.preflightFailed).toBe(false);
@@ -131,7 +146,7 @@ describe("provenance: a package that publishes the source it authored", () => {
     expect(island).toBe(EXPECTED);
 
     setProvenanceSources(null);
-    process.env["SCRIPTC_PROVENANCE_AUTHORED_JS"] = "1";
+    process.env["SCRIPTC_PROVENANCE_AUTHORED_JS"] = "authoredjs";
     setProvenanceSources(await resolveProvenanceSources(entry));
     /* dynamic: false — the embedded engine is NOT in this binary, so every
      * value read below came out of the compiled twin. `protocol=5` is the
@@ -139,5 +154,60 @@ describe("provenance: a package that publishes the source it authored", () => {
     const fromSource = await buildAndRun("authoredjs-static", false);
     expect(fromSource).toBe(island);
     expect(fromSource).toBe(EXPECTED);
+  });
+
+  /* The four readings of the variable, asserted on the MAPPING rather than on
+   * a build, so they are cheap enough to all be here. `authoredjs` is not on
+   * the default list, so `mapped` is a direct read of what the variable did. */
+  const mapped = async (): Promise<boolean> => {
+    const sources = await resolveProvenanceSources(entry);
+    return sources.packages.some((p) => p.name === "authoredjs");
+  };
+
+  test("the default list is DATA, and it names the package wam needs", () => {
+    /* If this constant ever changes, the change is the review. It is the whole
+     * blast radius of the shipped default. */
+    expect([...AUTHORED_JS_DEFAULT_PACKAGES]).toStrictEqual(["@vinikjkkj/wa-wam"]);
+    expect(AUTHORED_JS_DEFAULT_PACKAGES).not.toContain("authoredjs");
+  });
+
+  test("unset means the DEFAULT LIST, not all", async () => {
+    process.env["SCRIPTC_PROVENANCE_MANIFEST"] = manifest;
+    delete process.env["SCRIPTC_PROVENANCE_AUTHORED_JS"];
+    expect(await mapped()).toBe(false);
+  });
+
+  test("an explicit list of one maps exactly that package", async () => {
+    process.env["SCRIPTC_PROVENANCE_MANIFEST"] = manifest;
+    process.env["SCRIPTC_PROVENANCE_AUTHORED_JS"] = "authoredjs";
+    expect(await mapped()).toBe(true);
+    /* A list that names somebody ELSE must not carry this package in with it. */
+    process.env["SCRIPTC_PROVENANCE_AUTHORED_JS"] = "@vinikjkkj/wa-wam,some-other-pkg";
+    setProvenanceSources(null);
+    expect(await mapped()).toBe(false);
+  });
+
+  test("`1` still means ALL, which is what existing env templates say", async () => {
+    process.env["SCRIPTC_PROVENANCE_MANIFEST"] = manifest;
+    for (const spelling of ["1", "true", "all", "ALL"]) {
+      process.env["SCRIPTC_PROVENANCE_AUTHORED_JS"] = spelling;
+      setProvenanceSources(null);
+      expect(await mapped(), "spelling " + spelling).toBe(true);
+    }
+    /* PRECEDENCE: a value that looks like both spellings resolves to ALL, and
+     * `1` is never read as the name of a package called `1`. */
+    process.env["SCRIPTC_PROVENANCE_AUTHORED_JS"] = "1,some-other-pkg";
+    setProvenanceSources(null);
+    expect(await mapped()).toBe(true);
+  });
+
+  test("empty means NO package, which is how to turn the lane fully off", async () => {
+    process.env["SCRIPTC_PROVENANCE_MANIFEST"] = manifest;
+    process.env["SCRIPTC_PROVENANCE_AUTHORED_JS"] = "";
+    expect(await mapped()).toBe(false);
+    /* Whitespace-only is the same statement, not a package named ' '. */
+    process.env["SCRIPTC_PROVENANCE_AUTHORED_JS"] = "  ,  ";
+    setProvenanceSources(null);
+    expect(await mapped()).toBe(false);
   });
 });
