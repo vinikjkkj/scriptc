@@ -1344,7 +1344,38 @@ export const SIZE_DRIFT_PAGE = 4_096;
  * that trap is why the anchor was re-measured at c605b623 first instead of
  * trusting the recorded number: chocolatey's 0.15.2 on this box builds the
  * same tree ~20 KB smaller, and a bisect run with it would have put every
- * revision in the table under the anchor and read as a shrink. */
+ * revision in the table under the anchor and read as a shrink.
+ *
+ * 2026-09-07 -- A SIXTH ERROR CLASS COSTS NOTHING, AND THE +512 THAT SHOWED
+ * UP WITH IT IS SOMEBODY ELSE'S. `%ReferenceError` is a real runtime class
+ * now (kind 5, base %Error): one more `ScrVt` row in `scr_error_vts`, one
+ * more entry in `scr_error_names`, and two more interval stamps in every
+ * program's main(). That reads like always-linked growth, so it was
+ * weighed rather than assumed -- TWO WORKTREES, one variable:
+ *
+ *                                            static    regex
+ *   874e78b8  merged main, without it       677,376  818,176
+ *   37781755  the same tree, with it        677,376  818,176   +0/+0
+ *
+ * Zero on both classes. The ScrVt row and the name entry are about forty
+ * bytes and land inside padding the 512-byte PE file alignment was already
+ * carrying; the stamps are a few instructions in one function. Same box,
+ * same zig 0.16.0, same SCRIPTC_TARGET, separate SCRIPTC_CACHE_DIR per tree
+ * so each compiled its own runtime.
+ *
+ * THE RECORDED FIGURES DO NOT MOVE, and that is the finding rather than an
+ * omission. Both trees sit 512 bytes above the recorded 676,864 static, so
+ * that drift was spent in main BEFORE this change and is inherited, not
+ * bought; re-anchoring on it would hand the next reader a fresh 4,096-byte
+ * budget for growth nobody has explained. It is an eighth of a page and
+ * `recordedSizeComplaint` is right to stay quiet.
+ *
+ * THE REGEX CLASS IS THE CONTROL, and it is why the +512 can be called code
+ * rather than toolchain: 818,176 reproduces the bc266f01 anchor TO THE BYTE
+ * on both trees. A toolchain difference cannot move one class 512 bytes and
+ * leave the other exactly where it was recorded a week earlier. (The class
+ * DISTANCE is 140,800 here against the 141,312 recorded -- the same +512,
+ * on the static side, and nowhere near a library.) */
 export const STATIC_CLASS_RECORDED = platform === "win32" ? 676_864 : null;
 
 /** The regex program, same run, same tree. Deliberately NOT derived from
