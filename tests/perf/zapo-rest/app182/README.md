@@ -167,3 +167,65 @@ The streamed history-sync path — `openHistoryBlobStream` inflating through
 `history-sync.ts` and the `ProtoStreamReader` class are all clean, and the
 only refusal left on the path is the `stack.length -= 1` inside
 `streamProtoFields` itself.
+
+### The record-width four: two closed, two upheld
+
+Measured on `7adee17b` (this branch's base), strict, `--provenance-sources`,
+built under node v22.18.0, both arms counted by call site off the build log
+with `rg -a -c ' - error SC[0-9]{4}: '` and cross-checked against the
+compiler's own `N errors.` summary. Both builds exit non-zero, so neither has
+a fence count — **n/a, not 0**.
+
+| revision | log bytes | sites |
+|---|---|---|
+| `7adee17b` (base) | 15,062 | **13** |
+| `block/widthrest` | 11,621 | **11** |
+
+**2 closed, 0 uncovered, 11 unchanged.** The two are exactly the two the
+table above calls record-width, and the site list is otherwise identical
+line for line:
+
+* `client/coordinators/WaMessageDispatchCoordinator.ts:867` — SC2003. The
+  diagnosis held: the source is not a union. `Promise.resolve({ phash })`
+  inside the sender-key fanout's `customize` hook lands in a
+  `Promise<C> | C` slot, and `resolve<T>(value: T): Promise<Awaited<T>>`
+  puts a conditional type between the slot and T — so the literal keeps its
+  own inferred members and the value arrives as `Promise<{ phash: string }>`.
+  What stands between that and `Promise<C>` is a WIDTH COERCION INSIDE A
+  PROMISE PAYLOAD, the one conversion `coercibleValue` does not carry, so
+  `promiseCoerceAdapter` declines and the union path reports the mismatch in
+  a message about unions. Closed at the LITERAL: it is built at the slot's
+  shape, exactly as `const v: C = { phash }` is, so the promise is
+  constructed at the slot's payload and no conversion exists to run.
+  Teaching the width family into the payload instead would have routed it
+  through the adapter's `async (p) => coerce(await p)` — a microtask turn
+  node does not take, which is a wrong answer and not a cost.
+* `client/events/privacy.ts:114` — SC1090. The `?.` rule was not the bug and
+  the keyed read was: the HEADER-FAMILY canonicalization in
+  `mapRecordTypeInner` interns every index-signature shape whose slot
+  carries a `string[]` arm as one shape over the canonical outgoing slot
+  `number | string | string[] | undefined`, and its gate asked only that the
+  array arm be present. So `Readonly<Record<string, readonly string[] |
+  undefined>>` was swept into the header world and its reads handed out four
+  arms where the declaration (and tsc) say two — leaving `?.` three
+  surviving non-unit arms instead of one. The gate now also asks for the
+  `string` ARM, which is what says header world: a parsed header value IS a
+  string and the array arm is only the repeated-header case.
+
+The two `protocol/abprops.ts` sites are UPHELD, and they are two different
+walls, neither of them the exact-struct rule as such:
+
+* `:47` SC2002 — `{} as Record<AbPropName, AbPropConfigEntry>`. The
+  completion machinery is REACHABLE from this spelling and already serves
+  it when the value type is optional-flavored: the identical program with
+  `Record<Name, Entry | undefined>` compiles today and prints Node's `0` for
+  `Object.keys`. What refuses this one is the value type: `AbPropConfigEntry`
+  is a required record with no undefined arm, so there is no representation
+  of "absent" for the 1,900 completed members, and `Object.keys` would go
+  from Node's `[]` to 1,900 keys. That is the deferred required-added-field
+  class (the per-instance ownmask writer; `ownPresentCondC` falls back to
+  `true` when mask byte 0 is zero), not a rule that can move here.
+* `:55` SC2020 — `Object.freeze of a possibly-aliased value`, a
+  standard-library lowering fence with no record-width content at all. It
+  stands whatever happens to `:47`, so this file cannot reach zero from the
+  width side alone.

@@ -1636,6 +1636,23 @@ export class Lowerer {
    * construction — the runtime reads it key by key. Marked by the
    * lowering that knows the position, never inferred. */
   readonly dynObjectLiterals = new Set<ts.ObjectLiteralExpression>();
+  /** Object literals whose CONTEXTUAL TYPE the lowering supplies, because
+   * the checker's own answer at that position is not the slot's.
+   *
+   * `Promise.resolve<T>(value: T): Promise<Awaited<T>>` is the position:
+   * the conditional return type stands between the slot and T, so a
+   * literal written inside the call is inferred at its OWN members and
+   * the slot's type never reaches it. Built there and coerced afterwards
+   * the value is a WIDTH COPY, and a copy enumerates in the target
+   * shape's declared order rather than the order the program wrote --
+   * observable through Object.keys and JSON.stringify. Built AT the slot
+   * it is one recordLit whose spelling reconcileKeyOrders can see, which
+   * is what every ordinary contextually-typed literal already gets.
+   *
+   * Same shape as `dynObjectLiterals` one field down and the same
+   * discipline: set by the lowering that knows the position, for the one
+   * literal it is about, and removed as soon as that literal is down. */
+  readonly literalCtxOverride = new Map<ts.ObjectLiteralExpression, ts.Type>();
   /** Object literals whose destination SHAPE the lowering knows better than
    * the checker's contextual type does — an EMIT PAYLOAD, whose position in
    * the event's unified tuple is the type the registered listeners actually

@@ -10875,6 +10875,18 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/7792-a-keyed-read-hands-out-the-width-the-signature-declares.ts": {
+   "order": [
+    "<repo>/tests/corpus/7792-a-keyed-read-hands-out-the-width-the-signature-declares.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/7792-promise-resolve-of-a-literal-built-at-the-slots-shape.ts": {
+   "order": [
+    "<repo>/tests/corpus/7792-promise-resolve-of-a-literal-built-at-the-slots-shape.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/800-switch-basics.ts": {
    "order": [
     "<repo>/tests/corpus/800-switch-basics.ts"
@@ -12533,6 +12545,12 @@
   "<repo>/tests/diagnostics/promise-never-executor.ts": {
    "order": [
     "<repo>/tests/diagnostics/promise-never-executor.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/promise-resolve-literal-refusals.ts": {
+   "order": [
+    "<repo>/tests/diagnostics/promise-resolve-literal-refusals.ts"
    ],
    "diags": []
   },

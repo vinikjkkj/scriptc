@@ -9967,7 +9967,7 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
       if (ts.isMethodDeclaration(prop)) L.rejectThisInObjectMethod(prop.body ?? prop);
     }
 
-    const ctxType0 = L.checker.getContextualType(expr);
+    const ctxType0 = L.literalCtxOverride.get(expr) ?? L.checker.getContextualType(expr);
     // A `RequestInit` SLOT: the literal is not a record at all, it is a
     // fetch init VALUE built by the same key walk the call site takes
     // (lower-fetch.ts). Checked here, before any record shape is interned,

@@ -10747,6 +10747,101 @@ const NUMBER_CONSTANTS: Record<string, number | undefined> = {
           if (only !== null) resultT = { kind: "promise", inner: only };
         }
       }
+      // THE OBJECT LITERAL WRITTEN AT THE CALL, built at the SLOT's shape.
+      // Same defect as the bare `[]` above, one type-kind over, and the
+      // same cause: `resolve<T>(value: T): Promise<Awaited<T>>` puts a
+      // conditional type between the slot and T, so a literal written
+      // inside the call keeps its OWN inferred type and the slot's never
+      // reaches it. `Promise.resolve({ phash })` into a
+      // `Promise<{ a?; b?; phash? }> | { a?; b?; phash? }` slot therefore
+      // arrives as `Promise<{ phash: string }>` -- a PROMISE PAYLOAD that
+      // needs a width coercion, which is the one conversion
+      // `coercibleValue` does not carry, so `promiseCoerceAdapter`
+      // declines and the union coercion reports SC2003: a message about
+      // unions for a source that is not one. (zapo-js 1.8.2's
+      // `client/coordinators/WaMessageDispatchCoordinator.ts:867` is the
+      // site: the sender-key fanout hook returns
+      // `Promise.resolve({ phash: computePhashV2(t) })` into the
+      // customize slot's settle-or-value union.)
+      //
+      // The literal is BUILT AT THE SLOT, which costs NOTHING: the
+      // completion rule fills each missing optional-flavored member with
+      // its undefined arm exactly as `const v: C = { phash }` does one
+      // line up, the promise is constructed at the slot's payload, and no
+      // conversion exists to run. Teaching the width family into the
+      // payload instead would have routed it through
+      // `promiseCoerceAdapter`'s `async (p) => coerce(await p)`, and that
+      // is a MICROTASK TURN node does not take: `const q: Promise<Wide> =
+      // p` is a relabel in JS, not a re-fulfilment (7791's header).
+      //
+      // AT the slot and not COERCED INTO it, and the difference is
+      // observable. Lowered at its own members and width-copied
+      // afterwards, the value is a fresh struct that enumerates in the
+      // TARGET shape's declared order -- `{ c, a }` into `{ a?; b?; c? }`
+      // prints `a,c` where node prints `c,a`. Built at the slot it is one
+      // recordLit whose spelling reconcileKeyOrders sees and adopts, which
+      // is what every ordinary contextually-typed literal already gets.
+      // The override is the only way to say that here: the checker's
+      // contextual type at this position IS the literal's own.
+      //
+      // Sound because the literal is WRITTEN HERE: nothing else holds a
+      // reference to it, so there is no identity to preserve -- the very
+      // distinction the array rule above draws between a bare `[]` and a
+      // named `arr`. Guarded three ways, each an under-approximation:
+      //   - a SPREAD in the literal could carry runtime keys the slot's
+      //     shape has no slot for, and those would DROP;
+      //   - every member the literal names must exist on the slot's
+      //     shape, or building there would drop it (tsc never freshness-
+      //     checks this position, so an excess member really can arrive);
+      //   - `recordWidthPlan` must answer for the pair, which is the
+      //     width family's own statement that every slot member either
+      //     copies off the literal or completes to its undefined arm.
+      let literalAtSlot: ts.ObjectLiteralExpression | null = null;
+      if (argNode !== undefined && resultT?.kind === "promise" && resultT.inner.kind === "record") {
+        let bare: ts.Expression = argNode;
+        while (ts.isParenthesizedExpression(bare)) bare = bare.expression;
+        if (ts.isObjectLiteralExpression(bare) && !bare.properties.some((pr) => ts.isSpreadAssignment(pr))) {
+          const ctxTs = L.checker.getContextualType(call);
+          const parts: readonly ts.Type[] =
+            ctxTs === undefined ? [] : ctxTs.isUnionType() ? ctxTs.getTypes() : [ctxTs];
+          // Each constituent's PAYLOAD, as a checker type: a promise arm
+          // contributes its type argument, a plain arm contributes itself
+          // (the settle-or-value slot spells both and they name one type).
+          const payloads = new Map<string, { ir: IrType; ts: ts.Type }>();
+          for (const part of parts) {
+            const m = L.mapTypeOf(part);
+            const payloadTs =
+              m?.kind === "promise"
+                ? L.checker.getTypeArguments(part as ts.TypeReference)[0]
+                : part;
+            if (payloadTs === undefined) continue;
+            const ir = m?.kind === "promise" ? m.inner : m;
+            if (ir?.kind !== "record") continue;
+            // The type ARGUMENT must map to the same record the promise
+            // arm's payload does, or the override would build the literal
+            // at something the slot is not.
+            const argIr = L.mapTypeOf(payloadTs);
+            if (argIr === null || !typeEquals(argIr, ir)) continue;
+            payloads.set(typeKey(ir), { ir, ts: payloadTs });
+          }
+          const only = payloads.size === 1 ? [...payloads.values()][0]! : null;
+          const from = L.shapes.get(resultT.inner.shapeId);
+          const to = only !== null && only.ir.kind === "record" ? L.shapes.get(only.ir.shapeId) : undefined;
+          if (
+            only !== null &&
+            only.ir.kind === "record" &&
+            from !== undefined &&
+            to !== undefined &&
+            !typeEquals(only.ir, resultT.inner) &&
+            from.fields.every((f) => to.fields.some((t) => t.name === f.name)) &&
+            L.recordWidthPlan(resultT.inner.shapeId, only.ir.shapeId) !== null
+          ) {
+            resultT = { kind: "promise", inner: only.ir };
+            literalAtSlot = bare;
+            L.literalCtxOverride.set(bare, only.ts);
+          }
+        }
+      }
       if (resultT?.kind !== "promise") {
         L.noLowering(
           "Promise.resolve at this type",
@@ -10787,7 +10882,12 @@ const NUMBER_CONSTANTS: Record<string, number | undefined> = {
         // fulfill adapter — await it as the void promise instead.
         L.noLowering("Promise.resolve at a unit-typed promise", call);
       }
-      const value = L.lowerExprExpecting(argNode, resultT.inner);
+      let value: IrExpr;
+      try {
+        value = L.lowerExprExpecting(argNode, resultT.inner);
+      } finally {
+        if (literalAtSlot !== null) L.literalCtxOverride.delete(literalAtSlot);
+      }
       return { kind: "intrinsic", name: "promise.resolve", args: [value], type: resultT, loc };
     }
     return null; // reject lands on lowerPromiseRejectCall / the member fence

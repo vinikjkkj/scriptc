@@ -6914,9 +6914,33 @@ function mapRecordTypeInner(widened: ts.Type, ctx: TypeMapperCtx): IrType | Reco
     const armOk = (a: IrType): boolean =>
       a.kind === "f64" || a.kind === "string" || a.kind === "undefinedT" ||
       (a.kind === "array" && a.elem.kind === "string");
+    // ...and a `string` ARM is what says "header world" rather than
+    // "some record whose values happen to be string arrays". Every
+    // member of the family carries one, because a parsed header value IS
+    // a string and the array arm is only the repeated-header case:
+    // `IncomingHttpHeaders` is `Dict<string | string[]>`,
+    // `OutgoingHttpHeaders` is `Dict<number | string | string[]>`, and a
+    // literal spreading either inherits the same slot. WITHOUT this the
+    // gate swept in every `Record<string, string[] | undefined>` ever
+    // written and handed its keyed reads a slot two arms WIDER than the
+    // declaration -- `string[] | number | string | undefined` where the
+    // program (and tsc) say `string[] | undefined`. Nothing reads a
+    // number or a string out of that store at runtime, so the widening
+    // was never a wrong VALUE; it was a wrong TYPE, and the type is what
+    // the rest of the compiler reasons with. It cost zapo-js 1.8.2's
+    // `client/events/privacy.ts:114` an SC1090: `SETTING_VALUES[name]?.
+    // includes(v)` over `Readonly<Record<string, readonly string[] |
+    // undefined>>`, where `?.` leaves ONE non-unit arm at the declared
+    // width and THREE at the canonical one -- a sub-union the guard
+    // cannot prove, refused for a shape the program never wrote.
+    // Under-approximating on purpose: a slot with no `string` arm loses
+    // nothing but the widening, because the canonicalization's only
+    // product is a shared shape and nothing outside the header family
+    // shares a shape with it.
     if (
       slotDef !== undefined &&
       slotDef.arms.some((a) => a.kind === "array" && a.elem.kind === "string") &&
+      slotDef.arms.some((a) => a.kind === "string") &&
       slotDef.arms.every(armOk)
     ) {
       const armsRaw = [F64, STRING, arrayOf(STRING), UNDEFINED_T];
