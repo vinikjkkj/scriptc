@@ -10917,6 +10917,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/7796-a-promise-payload-adopts-the-callbacks-declared-return.ts": {
+   "order": [
+    "<repo>/tests/corpus/7796-a-promise-payload-adopts-the-callbacks-declared-return.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/800-switch-basics.ts": {
    "order": [
     "<repo>/tests/corpus/800-switch-basics.ts"
@@ -12587,6 +12593,12 @@
   "<repo>/tests/diagnostics/promise-never-executor.ts": {
    "order": [
     "<repo>/tests/diagnostics/promise-never-executor.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/promise-payload-adoption-refusals.ts": {
+   "order": [
+    "<repo>/tests/diagnostics/promise-payload-adoption-refusals.ts"
    ],
    "diags": []
   },
