@@ -1,0 +1,24 @@
+ORACLE-NODE v25.9.0
+=== QT1 START 2026-09-07T19:59:51-03:00
+### twolevel  src=twolevel.ts  flags:[--backend c]  AUTHORED_JS=<unset>
+### node=v25.9.0  zig=0.16.0  tar=tar (GNU tar) 1.35  cc=zigcc  target=x86_64-windows-gnu
+BUILD rc=0  2s  log=40B
+--- provenance notes ---
+--- backend line (which backend actually ran) ---
+--- log error sites: pattern [ - error SCxxxx: ] over 40 bytes ---
+LOG-SITES total=0
+--- compiler's own totals line (cross-check) ---
+BINARY bytes=680960
+RUN exit=0  stdout=33B
+--- fences over EVERY emitted TU (.c, .partN.c, .scrh) ---
+    twolevel.c                                 bytes=11500          fences=0
+    twolevel.c                                 bytes=11500          fences=0
+    TOTAL files=2 bytes=23000 FENCES=0
+--- embedded-engine scan (must all read 0 for a static claim) ---
+    quickjs        0
+    ScrDyn         0
+    JS_NewRuntime  0
+ORACLE node v25.9.0 exit=0  stdout=33B
+ORACLE: MATCH (byte-exact)
+### DONE twolevel rc=0
+=== QT1 DONE 2026-09-07T19:59:56-03:00

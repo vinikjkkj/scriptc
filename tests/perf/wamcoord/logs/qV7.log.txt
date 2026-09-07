@@ -1,0 +1,51 @@
+ORACLE-NODE v25.9.0
+=== QV7 START 2026-09-07T20:22:08-03:00 -- voip lane A2 strict build AFTER the change
+### voip-a2-after  src=drivers/_x-voip-plus-zapo.ts  flags:[--provenance-sources --backend c]  AUTHORED_JS=<unset>
+### node=v25.9.0  zig=0.16.0  tar=tar (GNU tar) 1.35  cc=zigcc  target=x86_64-windows-gnu
+BUILD rc=1  566s  log=29749B
+--- provenance notes ---
+1:provenance: zapo-js@1.8.2 ← https://github.com/vinikjkkj/zapo@refs/tags/v1.8.2 @ 757a8071b819 (source compiles statically)
+2:provenance: argo-codec@0.2.1: no provenance attestation published; island path used
+3:provenance: @zapo-js/native: not installed under the entry's node_modules; island path used
+4:provenance: @zapo-js/voip@1.0.0: no provenance attestation published; island path used
+--- backend line (which backend actually ran) ---
+--- log error sites: pattern [ - error SCxxxx: ] over 29749 bytes ---
+LOG-SITES total=47
+     16 LOG-CODE  SC2020
+     11 LOG-CODE  SC2003
+     10 LOG-CODE  SC1090
+      6 LOG-CODE  SC2004
+      2 LOG-CODE  SC2001
+      1 LOG-CODE  SC2012
+      1 LOG-CODE  SC2011
+--- compiler's own totals line (cross-check) ---
+404:47 errors.
+BINARY: none (rc=1) -- FENCE COUNT n/a, NOT 0
+--- last 25 log lines ---
+  1006 |             closeQuietly(conn.peerConnection, this.logger)
+       |                          ^~~~~~~~~~~~~~~~~~~
+  1007 |             closeQuietly(conn.udpSocket, this.logger)
+
+  hint: narrow the value to a SINGLE arm first (a discriminant check, or '!== undefined'/'!== null' for unit arms); a plain arm value widens into any union that contains it, and a whole union widens into any union whose arms include the source's
+
+<blocks>/wamcoord-prov/757a8071b819699437b353865b17cacffe95e9fb/packages/voip/src/relay/WaSctpRelay.ts:1007:26 - error SC2003: union types must match exactly: expected 'null | { close: () => void } | undefined', got 'dgram.Socket | null' (a union re-tags into another union only when every arm of the source has an identical arm in the destination, or is a record/array that width-coerces into exactly one destination arm)
+
+  1006 |             closeQuietly(conn.peerConnection, this.logger)
+  1007 |             closeQuietly(conn.udpSocket, this.logger)
+       |                          ^~~~~~~~~~~~~~
+  1008 |         }
+
+  hint: narrow the value to a SINGLE arm first (a discriminant check, or '!== undefined'/'!== null' for unit arms); a plain arm value widens into any union that contains it, and a whole union widens into any union whose arms include the source's
+
+<blocks>/wamcoord-prov/757a8071b819699437b353865b17cacffe95e9fb/packages/voip/src/WaVoipCoordinator.ts:224:47 - error SC2020: ''on' of 'call_inbound_audio' with a checked-dynamic listener' is part of the standard library types but has no scriptc lowering yet
+
+  223 |         })
+  224 |         this.manager.on('call_inbound_audio', (call, pcm) => {
+      |                                               ^~~~~~~~~~~~~~~~
+  225 |             ctx.emit('voip_call_inbound_audio', { call, pcm })
+
+  hint: the event's argument 1 is 'Float32Array', which cannot box into a dynamic value — annotate the listener's parameters with the emitted types
+
+47 errors.
+### DONE voip-a2-after rc=1
+=== QV7 DONE 2026-09-07T20:31:36-03:00

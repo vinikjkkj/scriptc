@@ -1,0 +1,44 @@
+ORACLE-NODE v25.9.0
+=== QT2 START 2026-09-07T20:04:11-03:00
+##### backend c
+### cmpound-c  src=cmpound.ts  flags:[--backend c]  AUTHORED_JS=<unset>
+### node=v25.9.0  zig=0.16.0  tar=tar (GNU tar) 1.35  cc=zigcc  target=x86_64-windows-gnu
+BUILD rc=0  2s  log=41B
+--- provenance notes ---
+--- backend line (which backend actually ran) ---
+--- log error sites: pattern [ - error SCxxxx: ] over 41 bytes ---
+LOG-SITES total=0
+--- compiler's own totals line (cross-check) ---
+BINARY bytes=684544
+RUN exit=0  stdout=48B
+--- fences over EVERY emitted TU (.c, .partN.c, .scrh) ---
+    cmpound.c                                  bytes=27745          fences=0
+    TOTAL files=1 bytes=27745 FENCES=0
+--- embedded-engine scan (must all read 0 for a static claim) ---
+    quickjs        0
+    ScrDyn         0
+    JS_NewRuntime  0
+ORACLE node v25.9.0 exit=0  stdout=48B
+ORACLE: MATCH (byte-exact)
+### DONE cmpound-c rc=0
+##### backend llvm
+### cmpound-llvm  src=cmpound.ts  flags:[--backend llvm]  AUTHORED_JS=<unset>
+### node=v25.9.0  zig=0.16.0  tar=tar (GNU tar) 1.35  cc=zigcc  target=x86_64-windows-gnu
+BUILD rc=0  3s  log=44B
+--- provenance notes ---
+--- backend line (which backend actually ran) ---
+--- log error sites: pattern [ - error SCxxxx: ] over 44 bytes ---
+LOG-SITES total=0
+--- compiler's own totals line (cross-check) ---
+BINARY bytes=684544
+RUN exit=0  stdout=48B
+--- fences over EVERY emitted TU (.c, .partN.c, .scrh) ---
+    TOTAL files=0 bytes=0 FENCES=0
+--- embedded-engine scan (must all read 0 for a static claim) ---
+    quickjs        0
+    ScrDyn         0
+    JS_NewRuntime  0
+ORACLE node v25.9.0 exit=0  stdout=48B
+ORACLE: MATCH (byte-exact)
+### DONE cmpound-llvm rc=0
+=== QT2 DONE 2026-09-07T20:04:22-03:00
