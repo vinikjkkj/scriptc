@@ -756,6 +756,42 @@ void scr_dyn_release(ScrDyn *d) {
     return;
   }
   scr_cyc_on_dead(d); /* drop any candidate-buffer entry before teardown */
+  /* THE WEAK-KEY DEATH HOOK, AND THE ROUTE scr_cyc_free CANNOT SEE.
+   *
+   * A dyn ARR or OBJ built in dyn-land has no second representation, so a
+   * WeakMap over `object` keys it on the BOX (scr_dyn_strict_eq's default
+   * arm: the box IS the JS value for these two kinds). Every other admitted
+   * weak key reaches a free, and scr_cyc_free's hook covers every
+   * cycle-headered one — but a ScrDyn usually does not reach scr_cyc_free
+   * at all. It is PARKED on the freelist below with its buffer intact, and
+   * scr_dyn_alloc hands the SAME ADDRESS straight back out, up to
+   * SCR_DYN_FREE_MAX deep. Left to scr_cyc_free the entry would survive the
+   * park and the next node at that address would read the dead key's value:
+   * the wrong answer the head of scr_weak.c exists to prevent, not a leak.
+   *
+   * So the hook goes HERE, above both of this function's exits (the park
+   * and the scr_cyc_free tail), and the collector's route keeps the one it
+   * already had — scr_dyn_gcfree ends at scr_cyc_free.
+   *
+   * THE STAMP IS CLEARED, and that half is required rather than tidy.
+   * scr_cyc_stamp rewrites `blk` wholesale at every scr_cyc_alloc, which is
+   * what makes a recycled cycle block arrive clean; the ScrDyn freelist
+   * BYPASSES that call, so a parked node would carry its mark into its next
+   * life and make an unrelated value walk the registry on its own free.
+   * Never a wrong answer (the walk finds nothing), but nothing here may
+   * rely on a mark outliving its object, and clearing it is one AND.
+   *
+   * The cost to a program with no WeakMap is one test of a byte
+   * scr_cyc_on_dead has just loaded: `blk`'s top bit, which only
+   * scr_cyc_weak_mark ever sets and which no key can carry before
+   * scr_weak_new has installed the hook. */
+  {
+    ScrCycHdr *wh = scr_cyc_hdr(d);
+    if ((wh->blk & SCR_CYC_WEAKKEY) != 0) {
+      wh->blk = (uint8_t)(wh->blk & (uint8_t)~SCR_CYC_WEAKKEY);
+      if (scr_weak_died_hook != NULL) scr_weak_died_hook(d);
+    }
+  }
 #ifdef SCR_DYNCEN_ON
   scr_dyncen_note_dead(d); /* the refcount's exit from the live set. It runs
                             * whether the node is then PARKED on a freelist
@@ -2024,6 +2060,49 @@ void *scr_dyn_origin_take(const ScrDyn *d, const char *tkey) {
    * cross-TU fallback and not the common path. */
   if (e->tkey != tkey && (e->tkey == NULL || tkey == NULL || strcmp(e->tkey, tkey) != 0)) return NULL;
   return e->obj; /* borrowed here; the emitted recovery retains it */
+}
+
+void *scr_dyn_origin_peek(const ScrDyn *d, int *is_array) {
+  /* scr_dyn_origin_take without the type-key question. The recovery asks
+   * "was this copy made from a live <tkey>?" because handing back an
+   * origin of the wrong SHAPE would be a pointer the caller reads as
+   * something it is not. A weak key asks only "which object is this copy
+   * OF?", and the answer is one pointer whatever type key names it — so
+   * comparing keys here could only turn a correct address into a NULL.
+   *
+   * `is_array` IS NOT A CONVENIENCE, and the reason it exists is a bug this
+   * function carried for one afternoon before a review caught it. The obvious invariant —
+   * "an SCR_DYN_ARR node's origin is an ScrArr, an SCR_DYN_OBJ node's is a
+   * record" — IS FALSE. A TUPLE is an IR *record* whose to-dyn converter
+   * builds `scr_dyn_new_arr()` (`emit-walkers.ts`, the record arm's
+   * `if (shape.tuple)`), so a tuple lvalue crossing the boundary produces
+   * an ARR node marked with a RECORD struct as its origin. Measured, not
+   * argued: `const t: [number, string] = [1, "a"]` handed to a function
+   * taking `object` emits
+   *   scr_dyn_origin_mark(sc_td_0(v), (void *)v, "record:r0", …)
+   * where `sc_td_0` returns `scr_dyn_new_arr()`. Casting that origin to
+   * `ScrArr *` reads `elem_trace` at offset 48 of a record and then stamps
+   * a field at offset 28 — or, worse, writes sixteen bytes BEFORE a
+   * calloc'd acyclic record. That is exactly the stray store the per-kind
+   * stamp rule exists to prevent, re-entered through the one kind pair
+   * where the node kind and the origin kind disagree.
+   *
+   * The RELEASE FUNCTION is the honest test, and not a proxy for one: it
+   * is the function that will actually be called to free this origin, so
+   * `release == scr_arr_release_v` IS the statement "this object is
+   * released as an ScrArr". Every array type gets that exact pair from
+   * `rcAdapters` regardless of element type (`emit-types.ts`, the `array`
+   * arm is one unconditional line), so the test is total. If the adapters
+   * are ever renamed the answer becomes NULL and the caller refuses — a
+   * cache miss, never a stray store, which is the direction a boundary
+   * check must fail in. */
+  if (is_array != NULL) *is_array = 0;
+  if (d == NULL || !d->static_copy || dyn_origin_cap == 0) return NULL;
+  if (d->kind != SCR_DYN_ARR && d->kind != SCR_DYN_OBJ) return NULL;
+  size_t i = dyn_origin_slot(d);
+  if (dyn_origin_tab[i].d == NULL) return NULL;
+  if (is_array != NULL && dyn_origin_tab[i].release == &scr_arr_release_v) *is_array = 1;
+  return dyn_origin_tab[i].obj;
 }
 
 void scr_dyn_origin_forget(ScrDyn *d) {

@@ -3705,10 +3705,67 @@ const MAP_ITER_METHODS = new Set(["keys", "values", "entries"]);
  * the call sites can be in other functions and other modules.
  *
  * An unmapped argument type is left alone: `lowerExprExpecting` owns that
- * diagnostic and names the type, which is the better message. */
+ * diagnostic and names the type, which is the better message.
+ *
+ * A DYN-KEYED TABLE (`WeakMap<object, V>`) is the one case where argT and
+ * keyT differing is NOT a copy hazard, and it needs its own list rather
+ * than an exemption. Three argument kinds cross into dyn with their
+ * identity intact and are admitted:
+ *
+ *   dyn     nothing happens at all;
+ *   bytes   the crossing SHARES the ScrBytes (scr_dyn_new_bytes_ref), so
+ *           the payload is the pointer the caller holds;
+ *   array   the crossing COPIES — and the copy is not anonymous. It is
+ *           marked with the ORIGIN it was made from (scr_dyn_origin_mark,
+ *           behind dynCopyIsObservable, which is true for exactly the
+ *           lvalue spellings a caller still names) and the runtime keys
+ *           the entry on that origin, so two crossings of one array make
+ *           two boxes and ONE key. The origin table is what makes this
+ *           different from the width coercion above, where the copy names
+ *           nothing.
+ *
+ * Everything else is refused HERE rather than at run time, because the
+ * static type already answers and a diagnostic beats a throw whenever it
+ * does. A `record` argument would key on a record origin, the kind
+ * isSupportedWeakKey refuses for width coercion; a class instance has no
+ * chokepoint; a number, a string or a bool is a primitive Node itself
+ * refuses.
+ *
+ * THIS CHECK IS NOT THE FENCE, IT IS THE PART OF IT THE TYPES CAN REACH.
+ * The crossing into dyn happens wherever a value meets an `object`
+ * parameter, which need not be a key position at all:
+ *
+ *   function put(k: object, v: Uint8Array) { cache.set(k, v) }
+ *   put(someRecord, bytes)   // crosses HERE; `k` is a plain dyn inside
+ *
+ * Inside `put` the argument's mapped type IS `dyn`, so this function
+ * admits it and scr_weak.c's kind switch is what actually decides. Every
+ * refusal listed above therefore exists twice, and the runtime copy is the
+ * load-bearing one -- which is also why scr_weak_dyn_set is registered in
+ * computeMayThrow: without that the throw it raises is swallowed at the
+ * `put(...)` call boundary. */
+const WEAK_DYN_KEY_ARG_KINDS = new Set(["dyn", "bytes", "array"]);
+
 function weakKeyArgIsIdentity(L: Lowerer, arg: ts.Expression, keyT: IrType): void {
   const argT = L.mapTypeOf(L.checker.getBaseTypeOfLiteralType(L.typeOf(arg)));
   if (argT === null || typeEquals(argT, keyT)) return;
+  if (keyT.kind === "dyn") {
+    if (WEAK_DYN_KEY_ARG_KINDS.has(argT.kind)) return;
+    L.unsupported(
+      "SC1090",
+      arg,
+      `a WeakMap key of type '${L.checker.typeToString(L.typeOf(arg))}' on a table whose ` +
+        `key type is 'object' (the key crosses into a dynamic value, and this kind ` +
+        `arrives there with no address the runtime can watch die)`,
+      `a weak entry is keyed by ADDRESS, so the runtime must see the key die before its ` +
+        `storage goes back — a number, a string, a boolean and a bigint have no address ` +
+        `at all, a record is COPIED at the crossing, and a class instance can be emitted ` +
+        `with no cycle header and never reach a free the runtime hooks. A Uint8Array, an ` +
+        `array, or a value that is already 'unknown' all cross with their identity ` +
+        `intact. Otherwise hold this key strongly in a Map`,
+    );
+    return;
+  }
   L.unsupported(
     "SC1090",
     arg,

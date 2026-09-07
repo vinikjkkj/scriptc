@@ -7800,6 +7800,75 @@ void scr_arr_weak_mark(void *key);   /* scr_array.c -- UNTRACED arrays only */
  * not from the type alone. */
 void scr_cyc_weak_mark(void *key);
 
+/* ── WeakMap over DYN keys ─────────────────────────────────────────────
+ * `WeakMap<object, V>` — TypeScript's bare `object` is the NonPrimitive
+ * intrinsic and mapType lowers it to the DYN, so such a table's key column
+ * is a ScrDyn and its kind is a RUNTIME fact. The three entry points below
+ * are what the emitter calls instead of scr_weak_set/get/has for that one
+ * key type; everything under them is the same table.
+ *
+ * TWO THINGS SEPARATE THIS FROM EVERY OTHER KEY KIND.
+ *
+ * 1. THE KEY IS THE PAYLOAD, NEVER THE BOX — for the kinds that HAVE a
+ *    payload. scr_dyn_strict_eq is the authority and this follows it arm
+ *    for arm: a ScrDyn wrapping a Uint8Array is a boundary artifact, the
+ *    JS value is the ScrBytes, and two boxes of one payload compare
+ *    ===-equal. A table keyed on boxes would miss every lookup a program
+ *    makes. For SCR_DYN_ARR and SCR_DYN_OBJ built in dyn-land there is no
+ *    second representation, so strict_eq's default arm answers `a == b`
+ *    and the BOX is the value — those key on themselves, and that is not
+ *    an exception to the rule but the rule applied.
+ *
+ * 2. THE STAMP SWITCHES ON THE RUNTIME KIND. Every other key kind hands
+ *    scr_weak_new a statically-chosen key_mark, precisely so a stray store
+ *    into a struct without the field is impossible. A dyn key cannot: the
+ *    kind is not known until the value arrives. So the switch is here, in
+ *    ONE function, next to the address it just derived — scr_bytes_weak_mark
+ *    for a ScrBytes payload, scr_arr_weak_mark or scr_cyc_weak_mark for an
+ *    array origin (chosen from `elem_trace`, which is the trace fixpoint's
+ *    own answer read off the object rather than recomputed), and
+ *    scr_cyc_weak_mark for a dyn box, which is always scr_cyc_alloc'd.
+ *    Each arm derives the address and the stamp TOGETHER, which is the
+ *    invariant the function-pointer design was buying.
+ *
+ * set() REFUSES LOUDLY and get/has DO NOT, which is exactly Node: `wm.set(1, v)`
+ * throws `TypeError: Invalid value used as weak map key` while `wm.get(1)`
+ * answers undefined and `wm.has(1)` answers false. Two refusal families:
+ * the PRIMITIVES (null, undefined, bool, number, string, bigint), where
+ * Node's own text is reproduced verbatim because Node refuses them for the
+ * same reason this does — there is no address; and the kinds that HAVE an
+ * address but whose death this runtime cannot observe on every route (a
+ * boxed class instance, a closure, a native handle, a promise, an island
+ * value, a Map, an ArrayBuffer, and a RECORD or TUPLE boundary copy), which get their own text
+ * naming the kind and the reason. Silently accepting either would be a
+ * table holding an address the allocator is about to hand out again. */
+void scr_weak_dyn_set(ScrWeakMap *m, ScrDyn *key, void *val);
+void *scr_weak_dyn_get_ref(ScrWeakMap *m, const ScrDyn *key); /* +1 or NULL */
+int scr_weak_dyn_has(ScrWeakMap *m, const ScrDyn *key);
+
+/* The static object a boundary copy was made FROM, borrowed, or NULL when
+ * this node is not a marked copy or its origin is gone. scr_dyn_origin_take
+ * with the type-key question removed: the recovery needs to know the origin
+ * is the right SHAPE, a weak key needs only its ADDRESS, and every tkey for
+ * one node names one pointer.
+ *
+ * THE NODE'S KIND DOES NOT TELL YOU WHAT THE ORIGIN IS, and the obvious
+ * belief that it does is false in exactly one place. dynCopyIsObservable
+ * answers true for `array` and `record` and nothing else, and the crossing
+ * lowers an array to SCR_DYN_ARR and a record to SCR_DYN_OBJ — except that
+ * a TUPLE is an IR *record* whose to-dyn converter builds
+ * `scr_dyn_new_arr()`, so a tuple crosses as an ARR node carrying a RECORD
+ * struct as its origin. Reading that origin as an `ScrArr *` is a stray
+ * store; the whole per-kind-stamp rule exists to make those impossible, and
+ * this is the one pair where the two kinds disagree.
+ *
+ * So the caller is told, and it is told by the ORIGIN rather than by the
+ * box: `*is_array` is set when the entry's recorded RELEASE FUNCTION is
+ * `scr_arr_release_v` — the function that will actually free this object,
+ * which is what "it is an ScrArr" means. Pass NULL only if you do not
+ * intend to dereference the result. See the body for the measurement. */
+void *scr_dyn_origin_peek(const ScrDyn *d, int *is_array);
+
 /* Stamp a FRESHLY constructed value (+1, unaliased) with its Node flavor
  * and answer it unchanged — no copy, no refcount step. Marking an aliased
  * value would rewrite a flavor its other holders can see, so these belong

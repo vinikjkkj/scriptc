@@ -2948,6 +2948,16 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
   // cycle-headered object's release-side and collector-side deaths converge.
   // Records and class instances stay on the strong ride below, for reasons
   // that are no longer about the collector hook — see isSupportedWeakKey.
+  //
+  // `object` — the NonPrimitive intrinsic, which lands here as the DYN —
+  // is admitted too, and it is the one key type whose safety is settled at
+  // RUN time. Its table is keyed on the value's payload rather than on the
+  // ScrDyn box (scr_dyn_strict_eq's rule, arm for arm), the stamp switches
+  // on the runtime kind in scr_weak.c, and the kinds with no address are
+  // refused by set() with Node's own TypeError. What the type admits, the
+  // ARGUMENT check narrows again: weakKeyArgIsIdentity refuses a key whose
+  // static type already says the runtime would, so a record or a number
+  // reaching one of these tables is a diagnostic and not a throw.
   if (isStdlibInterface("WeakMap")) {
     const wargs = checker.getTypeArguments(widened as ts.TypeReference);
     if (wargs.length === 2) {

@@ -801,19 +801,37 @@ export function weakMapOf(key: IrType, value: IrType): IrType {
  *    pure IrType predicate cannot reach; admitting the kind would be
  *    admitting a value whose safety depends on a fixpoint it cannot see.
  *    They too keep the strong-Map ride.
- *  - everything else (map, set, promise, func, dyn, ...). JS allows them;
- *    no demand, and each owes its own value/ephemeron argument.
+ *  - everything else (map, set, promise, func). JS allows them; no demand,
+ *    and each owes its own value/ephemeron argument.
  *
- * `dyn` deserves its own line because bare `object` in TypeScript maps to
- * it (types.ts, the NonPrimitive intrinsic) and that is what zapo-js's
- * `WeakMap<object, Uint8Array>` at signal/session/encoding.ts:229 spells.
- * A dyn key cannot be keyed on the BOX: the box is a boundary artifact and
- * `scr_dyn_strict_eq` says so explicitly -- two boxes of one instance are
- * ===-equal -- so an address-keyed table over boxes would miss every
- * lookup. Keying on the payload is the sound design and it is a bigger
- * change than this one: the stamp would have to switch on the runtime
- * kind (breaking the statically-chosen key_mark), several payload kinds
- * have no address at all, and set() would need a loud refusal for those. */
+ * `dyn` IS ADMITTED, and it is the one kind whose safety is decided at run
+ * time rather than here. Bare `object` in TypeScript is the NonPrimitive
+ * intrinsic and mapType lowers it to the DYN (types.ts), which is what
+ * zapo-js's `WeakMap<object, Uint8Array>` at signal/session/encoding.ts:229
+ * spells. Such a table is keyed on the PAYLOAD, never on the box: the box
+ * is a boundary artifact, `scr_dyn_strict_eq` says so arm by arm, and two
+ * boxes of one instance are ===-equal — so a table over boxes would miss
+ * every lookup a program makes.
+ *
+ * That costs the one property this predicate otherwise guarantees. Every
+ * other key kind picks its stamp STATICALLY, so writing a field the value
+ * does not have is impossible; a dyn key's kind is not known until it
+ * arrives, so the stamp switches on it at run time in scr_weak.c, in one
+ * function where each arm derives the address and the stamp together. The
+ * payload kinds with no address at all — a number, a bool, a string, a
+ * bigint — are refused by `set()` with Node's own
+ * `TypeError: Invalid value used as weak map key`, and the ones that have
+ * an address this runtime cannot key on soundly (a class instance, a
+ * closure, a handle, a promise, an island value, a Map, an ArrayBuffer, and
+ * a record or TUPLE boundary copy) are refused with their own text naming
+ * the reason. get/has answer
+ * undefined/false for both families, exactly as Node does.
+ *
+ * ADMITTING THE TYPE IS NOT ADMITTING EVERY ARGUMENT. weakKeyArgIsIdentity
+ * refuses a key argument whose STATIC type already says the runtime would
+ * refuse it, so a record or a number reaching a dyn-keyed table is a
+ * diagnostic rather than a throw — a compile-time answer is strictly
+ * better whenever the type is enough to give one. */
 export function isSupportedWeakKey(t: IrType): boolean {
   if (t.kind === "bytes") return true;
   // ANY array, traced or not, and the distinction that used to gate this
@@ -824,6 +842,10 @@ export function isSupportedWeakKey(t: IrType): boolean {
   // arm of mapNew, and note that picking wrong there is a stray store into
   // a struct that has no such field, not a bad answer.
   if (t.kind === "array") return true;
+  // The dyn. No stamp is chosen here at all: mapNew passes a NULL key_mark
+  // and the emitter routes get/set/has through scr_weak_dyn_*, which pick
+  // the address and its stamp together from the value in hand.
+  if (t.kind === "dyn") return true;
   return false;
 }
 

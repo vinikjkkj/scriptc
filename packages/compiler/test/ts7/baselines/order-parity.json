@@ -10821,6 +10821,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/7787-weakmap-object-keys-are-keyed-on-the-payload.ts": {
+   "order": [
+    "<repo>/tests/corpus/7787-weakmap-object-keys-are-keyed-on-the-payload.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/7788-a-bare-redeclare-onto-an-optional-slot.ts": {
    "order": [
     "<repo>/tests/corpus/7788-a-bare-redeclare-onto-an-optional-slot.ts"

@@ -445,6 +445,301 @@ static void test_growth(void) {
   scr_weak_release(m);
 }
 
+/* ── the DYN key cases ────────────────────────────────────────────────
+ *
+ * `WeakMap<object, V>` is the one key type whose address and whose stamp
+ * are both chosen at RUN time, so it is the one whose "picked the wrong
+ * field" failure mode no static reasoning rules out. Everything below is
+ * therefore a check on WHICH ADDRESS the table ended up keyed on, asked
+ * from outside through the public entry points.
+ *
+ * A dyn-keyed map takes a NULL key_mark: the stamp is per-VALUE here, and
+ * scr_weak_dyn_set applies it after the insert. */
+static ScrWeakMap *WD(void) {
+  return scr_weak_new(&scr_str_retain_v, &scr_str_release_v, NULL);
+}
+
+/* ── 13. the key is the PAYLOAD, not the box ──
+ * The property that decides whether a dyn-keyed table is a cache or a
+ * useless one. A ScrBytes crossing into dyn is SHARED, not copied, so two
+ * boxes of one buffer are two boundary artifacts over one JS value —
+ * scr_dyn_strict_eq answers ===-equal for them, and this table must agree.
+ * Keyed on the box, every single line below would miss. */
+static void test_dyn_bytes_payload(void) {
+  ScrWeakMap *m = WD();
+  ScrBytes *k = K(0xD1);
+  ScrStr *v = S("payload");
+  ScrDyn *box1 = scr_dyn_new_bytes_ref(k); /* retains k */
+  ScrDyn *box2 = scr_dyn_new_bytes_ref(k); /* a SECOND box of the SAME k */
+  check(box1 != box2, "the two boxes really are different nodes");
+
+  scr_weak_dyn_set(m, box1, v);
+  check(scr_weak_dyn_has(m, box2), "a second box of one payload finds the entry");
+  ScrStr *got = (ScrStr *)scr_weak_dyn_get_ref(m, box2);
+  check(got == v, "and reads the same value back");
+  scr_str_release(got);
+
+  /* The entry is keyed on the ScrBytes, so it must survive both boxes and
+   * die with the buffer. Dropping a box drops only a reference to k. */
+  scr_dyn_release(box1);
+  scr_dyn_release(box2);
+  check(scr_weak_has(m, k), "the entry outlives every box of its payload");
+  check(k->rc == 1, "and the table never retained the payload either");
+
+  ScrBytes *dead = k;
+  scr_bytes_release(k);
+  check(!scr_weak_has(m, dead), "the entry dies with the PAYLOAD, at its own release");
+
+  scr_str_release(v);
+  scr_weak_release(m);
+}
+
+/* ── 14. the boundary copy keys on its ORIGIN ──
+ * A static array crossing into dyn cannot alias (a packed ScrArr against a
+ * ScrDyn vector is different memory), so the converter copies — and every
+ * crossing makes a NEW copy. Keyed on the copy this is a cache that can
+ * never hit: `set` and `get` in adjacent statements are two boxes.
+ *
+ * scr_dyn_origin_mark is what makes it work: the copy records the object it
+ * was made from, and the table keys on THAT. This case is the whole reason
+ * zapo-js's `prevSessionsSuffixCache` compiles, and it is the one that
+ * fails loudly if anyone "simplifies" the resolution to use the box. */
+static void test_dyn_array_origin(void) {
+  ScrWeakMap *m = WD();
+  ScrArr *a = A("origin-elem"); /* untraced: its stamp must be ScrArr::weakkey */
+  ScrStr *v = S("origin");
+  ScrDyn *c1 = scr_dyn_origin_mark(scr_dyn_new_arr(), a, "array<f64>",
+                                   &scr_arr_retain_v, &scr_arr_release_v);
+  ScrDyn *c2 = scr_dyn_origin_mark(scr_dyn_new_arr(), a, "array<f64>",
+                                   &scr_arr_retain_v, &scr_arr_release_v);
+  check(c1 != c2, "two crossings really are two copies");
+
+  scr_weak_dyn_set(m, c1, v);
+  check(scr_weak_dyn_has(m, c2),
+        "the SECOND copy of one array finds the first's entry (THE origin property)");
+  check(scr_weak_has(m, a), "and the entry is keyed on the array itself");
+  check(a->weakkey == 1, "an UNTRACED origin takes ScrArr's own stamp");
+  /* And deliberately NO check that the cycle header is clean: an untraced
+   * array HAS no header, so scr_cyc_hdr(a) reads the sixteen bytes before
+   * the allocation. A first draft of this case asserted on those bytes and
+   * failed intermittently on heap garbage -- which is the stray read the
+   * whole per-kind-stamp rule exists to prevent, committed by the test
+   * meant to police it. What separates the two stamps is pinned in 14b
+   * instead, from the side that does have a header. */
+
+  /* The copies die at the end of their statements in real code; the entry
+   * must not. */
+  scr_dyn_release(c1);
+  scr_dyn_release(c2);
+  check(scr_weak_has(m, a), "the entry outlives the boundary copies");
+
+  ScrArr *dead = a;
+  scr_str_release(v);
+  scr_arr_release(a);
+  check(!scr_weak_has(m, dead), "and dies with the ORIGIN's own release");
+  scr_weak_release(m);
+}
+
+/* ── 14b. a TRACED origin takes the OTHER stamp ──
+ * The runtime switch reads `elem_trace` off the array rather than being
+ * told, so this is the arm that would be a stray store if it guessed. A
+ * traced array has a cycle header and its death lands in scr_cyc_free;
+ * ScrArr::weakkey must stay 0 or BOTH hooks would fire for one key. */
+static void test_dyn_array_origin_traced(void) {
+  ScrWeakMap *m = WD();
+  ScrArr *a = TA();
+  ScrStr *v = S("traced-origin");
+  ScrDyn *c = scr_dyn_origin_mark(scr_dyn_new_arr(), a, "array<array<f64>>",
+                                  &scr_arr_retain_v, &scr_arr_release_v);
+  scr_weak_dyn_set(m, c, v);
+  check(scr_weak_has(m, a), "a traced origin is keyed on the array too");
+  check((scr_cyc_hdr(a)->blk & SCR_CYC_WEAKKEY) != 0,
+        "a TRACED origin takes the CYCLE HEADER's stamp");
+  check(a->weakkey == 0,
+        "and NOT ScrArr::weakkey, or both hooks would fire for one key");
+  scr_dyn_release(c);
+  ScrArr *dead = a;
+  scr_str_release(v);
+  scr_arr_release(a);
+  check(!scr_weak_has(m, dead), "the traced origin's death splices the entry");
+  scr_weak_release(m);
+}
+
+/* ── 15. the loud refusals, and the silent reads ──
+ * Node throws `TypeError: Invalid value used as weak map key` from set()
+ * and answers undefined/false from get()/has(). A key the table can never
+ * hold cannot be present, so only the write side has a lie to tell. What is
+ * pinned here is that a refused set INSERTS NOTHING: a refusal that threw
+ * after writing the slot would be the address-reuse hazard with extra
+ * steps. */
+static void test_dyn_refusals(void) {
+  ScrWeakMap *m = WD();
+  ScrStr *v = S("refused");
+  ScrDyn *num = scr_dyn_new_num(42.0);
+  ScrDyn *nul = scr_dyn_new_null();
+
+  scr_weak_dyn_set(m, num, v);
+  check(scr_exc_pending(), "a NUMBER key throws from set()");
+  scr_exc_clear();
+  /* THE RAW ADDRESS, not scr_weak_dyn_has. The _dyn read refuses the same
+   * kinds set() does, so it answers false BEFORE consulting the table and
+   * would pass here even if the refused set had written a slot -- which is
+   * the one thing this case exists to pin. A first draft asked it that way
+   * and was checking nothing. */
+  check(!scr_weak_has(m, (void *)num), "and inserted nothing, on any address");
+  check(scr_weak_dyn_get_ref(m, num) == NULL, "get() on it answers NULL, silently");
+  check(!scr_exc_pending(), "the read side does not throw");
+
+  scr_weak_dyn_set(m, nul, v);
+  check(scr_exc_pending(), "a NULL key throws from set()");
+  scr_exc_clear();
+  check(!scr_weak_has(m, (void *)nul), "and inserted nothing");
+
+  /* THE STRING, which is the refusal with a real heap payload behind it
+   * and therefore the one a "has an address" rule would wrongly admit. JS
+   * says a string is a PRIMITIVE and Node throws for it; keying on the
+   * ScrStr would also be wrong twice over, because the arena interns and
+   * recycles them and two equal strings would be one key where JS has two
+   * primitives that are already ===-equal. */
+  ScrStr *sv = S("a-string-key");
+  ScrDyn *sbox = scr_dyn_new_str(sv);
+  scr_weak_dyn_set(m, sbox, v);
+  check(scr_exc_pending(), "a STRING key throws from set(), payload or no payload");
+  scr_exc_clear();
+  check(!scr_weak_has(m, (void *)sv), "and did NOT key on the ScrStr behind it");
+
+  /* A bare copy mark with no origin: an array reached THROUGH a boundary
+   * copy. Its lifetime is the enclosing copy's, so it is a temporary
+   * however it is keyed, and it is refused rather than cached uselessly. */
+  ScrDyn *orphan = scr_dyn_mark_static_copy(scr_dyn_new_arr());
+  scr_weak_dyn_set(m, orphan, v);
+  check(scr_exc_pending(), "a marked copy with no origin throws from set()");
+  scr_exc_clear();
+  check(!scr_weak_has(m, (void *)orphan), "and inserted nothing");
+
+  /* THE TUPLE, and it is the reason this whole resolution asks the ORIGIN
+   * what it is instead of asking the box. A tuple is an IR *record* whose
+   * to-dyn converter builds scr_dyn_new_arr(), so it arrives as an ARR
+   * node carrying a RECORD struct as its origin -- the one pair where the
+   * node kind and the origin kind disagree. An earlier draft trusted the
+   * node kind, cast the record to ScrArr *, read elem_trace at offset 48
+   * and stamped offset 28. It is stood up here with a record's own release
+   * adapter, which is exactly what the emitted crossing passes and what
+   * scr_dyn_origin_peek reads to tell the two apart.
+   *
+   * ScrStr stands in for the record: any object whose release is not
+   * scr_arr_release_v reproduces the case, and using a real one means the
+   * teardown is honest. */
+  ScrStr *fake_rec = S("not-an-array-and-long-enough-to-cover-offset-28");
+  const size_t frlen = fake_rec->len;
+  char frcopy[64];
+  memcpy(frcopy, fake_rec->data, frlen);
+  ScrDyn *tup = scr_dyn_origin_mark(scr_dyn_new_arr(), fake_rec, "record:r0",
+                                    &scr_str_retain_v, &scr_str_release_v);
+  scr_weak_dyn_set(m, tup, v);
+  check(scr_exc_pending(), "an ARR node whose origin is NOT an array throws from set()");
+  scr_exc_clear();
+  check(!scr_weak_has(m, (void *)fake_rec),
+        "and NOTHING was keyed on the non-array origin");
+  check(!scr_weak_has(m, (void *)tup), "nor on the box");
+  /* Belt and braces on the STAMP, since refusing to store is not the same
+   * as refusing to stamp: scr_arr_weak_mark writes 1 at offset 28 of
+   * whatever it is handed. ARMED and reported honestly -- reintroducing the
+   * bug (`if (0 && !org_is_arr)`) turns the two checks ABOVE red and leaves
+   * this one green, because the wrong branch reads elem_trace out of this
+   * object and takes the CYCLE stamp, which writes sixteen bytes BEFORE the
+   * allocation rather than into its data. So the entry checks are what
+   * catches it; this line is here to catch the other stamp if the arm ever
+   * picks that one instead. */
+  check(fake_rec->len == frlen && memcmp(fake_rec->data, frcopy, frlen) == 0,
+        "and the non-array origin was NOT STAMPED - no stray store");
+
+  scr_dyn_release(num);
+  scr_dyn_release(nul);
+  scr_dyn_release(orphan);
+  scr_dyn_release(tup);
+  scr_dyn_release(sbox);
+  scr_str_release(sv);
+  scr_str_release(fake_rec);
+  scr_str_release(v);
+  scr_weak_release(m);
+}
+
+/* ── 16. a dyn ARRAY/OBJECT built in dyn-land keys on ITSELF ──
+ * There is no second representation behind one, so scr_dyn_strict_eq's
+ * default arm answers `a == b` and the box IS the JS value. That makes the
+ * box the only honest key — and it puts a WeakMap key on the FREELIST,
+ * which is what the hook in scr_dyn_release is for.
+ *
+ * THE PARK ROUTE IS ONLY LIVE OUTSIDE THE AUDIT. scr_dyn_release parks a
+ * dead node on a per-shape freelist and scr_dyn_alloc hands the same
+ * address back out — except under SCR_RC_AUDIT, where the freelist is
+ * compiled out so ASan sees real frees. So the reuse half of this case
+ * runs in the plain binary and the eviction half runs in both; weak.test.ts
+ * builds the source twice for exactly that reason. */
+static void test_dyn_box_is_its_own_key(void) {
+  ScrWeakMap *m = WD();
+  ScrStr *v = S("boxed");
+  ScrDyn *o = scr_dyn_new_obj();
+  void *dead = (void *)o;
+
+  scr_weak_dyn_set(m, o, v);
+  check(scr_weak_dyn_has(m, o), "a dyn-land object keys on itself");
+  check(scr_weak_has(m, o), "and the raw address is what the table holds");
+  check((scr_cyc_hdr(o)->blk & SCR_CYC_WEAKKEY) != 0,
+        "its stamp is the cycle header's, which every ScrDyn has");
+
+  scr_str_release(v);
+  scr_dyn_release(o);
+  check(!scr_weak_has(m, dead),
+        "the entry is spliced when the box dies -- INCLUDING when it is only PARKED");
+  check(scr_weak_get_ref(m, dead) == NULL, "and get() on that address answers NULL");
+  scr_weak_release(m);
+}
+
+#ifndef SCR_RC_AUDIT
+/* ── 17. the freelist hands the address back, and it is clean ──
+ * The case the park hook exists for, and it cannot run under the audit
+ * because the audit compiles the freelist out. A parked ScrDyn keeps its
+ * address; scr_cyc_free never runs, so scr_cyc_free's hook never fires and
+ * scr_cyc_stamp never clears the mark. Both halves are the hook's job.
+ *
+ * It REPORTS when the allocator declined to recycle rather than passing
+ * quietly, the stance case 12 already takes: a reuse case that never
+ * reused has tested nothing. */
+static void test_dyn_freelist_reuse(void) {
+  ScrWeakMap *m = WD();
+  ScrStr *v = S("stale-dyn");
+  ScrDyn *k = scr_dyn_new_obj();
+  void *dead = (void *)k;
+  int reused = 0, tries = 0;
+
+  scr_weak_dyn_set(m, k, v);
+  scr_str_release(v);
+  scr_dyn_release(k); /* PARKED, not freed: same address, still resident */
+
+  for (; tries < 64 && !reused; tries++) {
+    ScrDyn *fresh = scr_dyn_new_obj();
+    if ((void *)fresh == dead) {
+      reused = 1;
+      check(scr_weak_dyn_get_ref(m, fresh) == NULL,
+            "a node off the FREELIST does not inherit the dead key's value");
+      check(!scr_weak_has(m, fresh), "has() false for a parked address handed back");
+      check((scr_cyc_hdr(fresh)->blk & SCR_CYC_WEAKKEY) == 0,
+            "and it comes back with a CLEAR stamp - scr_cyc_stamp never ran");
+    }
+    scr_dyn_release(fresh);
+  }
+  if (!reused) {
+    fprintf(stderr, "NOTE: dyn freelist never returned the same address in %d tries "
+                    "- park-reuse case not exercised\n", tries);
+  } else {
+    check(1, "dyn freelist address reuse was actually exercised");
+  }
+  scr_weak_release(m);
+}
+#endif
+
 int main(void) {
   test_basic_identity();
   test_key_not_retained();
@@ -458,6 +753,14 @@ int main(void) {
   test_cycle_keys();
   test_cycle_collector_death();
   test_cycle_address_reuse();
+  test_dyn_bytes_payload();
+  test_dyn_array_origin();
+  test_dyn_array_origin_traced();
+  test_dyn_refusals();
+  test_dyn_box_is_its_own_key();
+#ifndef SCR_RC_AUDIT
+  test_dyn_freelist_reuse();
+#endif
   fprintf(stderr, "%ld/%ld cases passed\n", total - failed, total);
   return failed == 0 ? 0 : 1;
 }
