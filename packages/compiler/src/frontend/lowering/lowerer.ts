@@ -12,6 +12,7 @@
  * - Lexical scoping is resolved here: locals get function-unique ids
  *   ("x.0", "x.1" for shadowing); the IR is scope-flat.
  */
+import { appendFileSync } from "node:fs";
 import { isRelativeSpecifier } from "../shared.js";
 import * as ts from "../ts7/adapter.js";
 import type { ScrDiagnostic } from "../../diagnostics/diagnostic.js";
@@ -502,6 +503,25 @@ export interface LowererMode {
  * the bodies discovery did NOT mark (plus deferred collection diagnostics
  * nothing flushed), reported separately: whole-program analysis without
  * letting unreached code fail builds. */
+/* ── MEASUREMENT ONLY (block/widendrop): the width-copy census ──────────
+ * SCRIPTC_WIDTH_CENSUS=<path> appends one JSONL row per INTERNED width
+ * helper — the (from,to) shape pair, the members the copy ends, and the
+ * source position of the flow that first asked for it. Off by default and
+ * never consulted by the compiler; this is scaffolding for the blast-radius
+ * count, not a shipping surface. */
+function widthCensus(kind: string, fromId: string, toId: string, dropped: string[], loc: { file: string; start: number }): void {
+  const out = process.env["SCRIPTC_WIDTH_CENSUS"];
+  if (out === undefined || out === "") return;
+  try {
+    appendFileSync(
+      out,
+      JSON.stringify({ prog: process.env["SCRIPTC_WIDTH_CENSUS_PROG"] ?? "", kind, from: fromId, to: toId, dropped, file: loc.file, start: loc.start }) + "\n",
+    );
+  } catch {
+    /* the census never fails a build */
+  }
+}
+
 export function lowerToIr(
   program: ts.Program,
   entry: ts.SourceFile,
@@ -6250,6 +6270,7 @@ export class Lowerer {
         this.recordWidthHelper(expr.type.shapeId, expected.shapeId, expr.loc) ??
         lowerRecordOvfCaptureHelper(this, expr.type.shapeId, expected.shapeId, expr.loc);
       if (!helper) return null;
+      this.censusSite(expr.type.shapeId, expected.shapeId, expr.loc);
       return { kind: "call", callee: helper, args: [expr], type: expected, loc: expr.loc };
     }
     // A CLASS INSTANCE flowing into the record an interface maps to. The
@@ -7329,6 +7350,7 @@ export class Lowerer {
         if (dst.kind !== "record" || value.type.kind !== "record") throw new Error("lowerer bug: width lift shape");
         const helper = this.recordWidthHelper(value.type.shapeId, dst.shapeId, loc);
         if (!helper) throw new Error("lowerer bug: planned width lift failed to intern");
+        this.censusSite(value.type.shapeId, dst.shapeId, loc);
         return { kind: "call", callee: helper, args: [value], type: dst, loc };
       }
       case "ovfCapture": {
@@ -7722,6 +7744,19 @@ export class Lowerer {
     return null;
   }
 
+  /** MEASUREMENT ONLY (block/widendrop) - one census row per FLOW that
+   * width-copies, so the count is call sites rather than shape pairs. */
+  censusSite(fromId: string, toId: string, loc: SrcLoc): void {
+    if (!process.env["SCRIPTC_WIDTH_CENSUS"]) return;
+    const from = this.shapes.get(fromId);
+    const to = this.shapes.get(toId);
+    if (!from || !to) return;
+    const dropped = from.fields
+      .filter((f) => !f.name.startsWith("%") && !to.fields.some((t) => t.name === f.name))
+      .map((f) => f.name);
+    widthCensus("site", fromId, toId, dropped, loc);
+  }
+
   recordWidthHelper(fromId: string, toId: string, loc: SrcLoc): string | null {
     const from = this.shapes.get(fromId);
     const to = this.shapes.get(toId);
@@ -7738,6 +7773,7 @@ export class Lowerer {
     const droppedByWidth = from.fields.filter(
       (f) => !f.name.startsWith("%") && !to.fields.some((t) => t.name === f.name),
     );
+    widthCensus("helper", fromId, toId, droppedByWidth.map((f) => f.name), loc);
     const key = `rec:${fromId}:${toId}`;
     const existing = this.widthHelpers.get(key);
     if (existing) return existing;
