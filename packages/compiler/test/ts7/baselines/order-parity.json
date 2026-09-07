@@ -10887,6 +10887,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/7793-a-fresh-local-behind-a-cast-is-still-fresh.ts": {
+   "order": [
+    "<repo>/tests/corpus/7793-a-fresh-local-behind-a-cast-is-still-fresh.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/800-switch-basics.ts": {
    "order": [
     "<repo>/tests/corpus/800-switch-basics.ts"
@@ -11825,6 +11831,12 @@
   "<repo>/tests/diagnostics/filter-narrow.ts": {
    "order": [
     "<repo>/tests/diagnostics/filter-narrow.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/freeze-behind-a-cast.ts": {
+   "order": [
+    "<repo>/tests/diagnostics/freeze-behind-a-cast.ts"
    ],
    "diags": []
   },

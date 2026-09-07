@@ -13414,7 +13414,30 @@ function freezeFreshLocal(L: Lowerer, ident: ts.Identifier, call: ts.CallExpress
   const list = decl.parent;
   if (!ts.isVariableDeclarationList(list) || (list.flags & ts.NodeFlags.Const) === 0) return false;
   // (1) a literal initializer: the allocation is HERE.
-  const init = decl.initializer;
+  //
+  // Through the CASTS, the way the argument position one function up
+  // already reads through them. `const acc = [] as string[]` and
+  // `const acc: string[] = []` are the same allocation at the same place --
+  // an `as`/`satisfies`/angle-bracket assertion is a type-level no-op that
+  // creates no reference -- so the theorem this arm rests on ("nothing else
+  // holds the value when the freeze runs") is untouched by the spelling.
+  // Reading only the bare literal made the two spellings disagree: the
+  // annotated one compiled and the cast one reported SC2020 on an identical
+  // program. It is not always a free choice, either -- a shape tsc will not
+  // let an annotation accept (`{} as Record<K, V>` over required keys, which
+  // is what zapo-js 1.8.2's `protocol/abprops.ts:55` writes) has the cast as
+  // its ONLY spelling, so the gap was not a style preference there but the
+  // whole fence.
+  let init = decl.initializer;
+  while (
+    init !== undefined &&
+    (ts.isParenthesizedExpression(init) ||
+      ts.isAsExpression(init) ||
+      ts.isSatisfiesExpression(init) ||
+      ts.isTypeAssertion(init))
+  ) {
+    init = init.expression;
+  }
   if (!init || !(ts.isArrayLiteralExpression(init) || ts.isObjectLiteralExpression(init))) {
     return false;
   }

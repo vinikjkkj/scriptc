@@ -168,22 +168,22 @@ The streamed history-sync path — `openHistoryBlobStream` inflating through
 only refusal left on the path is the `stack.length -= 1` inside
 `streamProtoFields` itself.
 
-### The record-width four: two closed, two upheld
+### The record-width four: three closed, one upheld
 
 Measured on `7adee17b` (this branch's base), strict, `--provenance-sources`,
-built under node v22.18.0, both arms counted by call site off the build log
-with `rg -a -c ' - error SC[0-9]{4}: '` and cross-checked against the
-compiler's own `N errors.` summary. Both builds exit non-zero, so neither has
-a fence count — **n/a, not 0**.
+built under node v22.18.0, counted by call site off the build log with
+`rg -a -c ' - error SC[0-9]{4}: '` and cross-checked against the compiler's
+own `N errors.` summary. Every build here exits non-zero, so none of them
+has a fence count — **n/a, not 0**.
 
 | revision | log bytes | sites |
 |---|---|---|
 | `7adee17b` (base) | 15,062 | **13** |
-| `block/widthrest` | 11,621 | **11** |
+| `block/widthrest`, the two width rules | 11,621 | **11** |
+| `block/widthrest`, plus the freeze initializer | 11,074 | **10** |
 
-**2 closed, 0 uncovered, 11 unchanged.** The two are exactly the two the
-table above calls record-width, and the site list is otherwise identical
-line for line:
+**3 closed, 0 uncovered, 10 unchanged**, and the site list is otherwise
+identical line for line.
 
 * `client/coordinators/WaMessageDispatchCoordinator.ts:867` — SC2003. The
   diagnosis held: the source is not a union. `Promise.resolve({ phash })`
@@ -211,21 +211,32 @@ line for line:
   surviving non-unit arms instead of one. The gate now also asks for the
   `string` ARM, which is what says header world: a parsed header value IS a
   string and the array arm is only the repeated-header case.
+* `protocol/abprops.ts:55` — SC2020, `Object.freeze of a possibly-aliased
+  value`. This one had been read as a reasoned refusal (an aliased target's
+  later writes would need the runtime frozen bit), and the reasoning is
+  sound — it just was not what refused this site. `freezeFreshLocal` proves
+  freshness by requiring the binding's initializer to BE the allocation, and
+  it read that initializer BARE: `const acc: string[] = []` passed and
+  `const acc = [] as string[]` did not, for the same allocation at the same
+  place. Measured, not argued — the two spellings differ by an SC2020 and
+  nothing else. The initializer now unwraps `as`/`satisfies`/parentheses and
+  the angle-bracket assertion exactly as the freeze ARGUMENT one function up
+  already does. Not a style question here: `{} as Record<AbPropName, …>` is
+  the only spelling tsc accepts for a bag keyed by a literal union, so the
+  cast was forced and the gap was the whole fence.
 
-The two `protocol/abprops.ts` sites are UPHELD, and they are two different
-walls, neither of them the exact-struct rule as such:
-
-* `:47` SC2002 — `{} as Record<AbPropName, AbPropConfigEntry>`. The
-  completion machinery is REACHABLE from this spelling and already serves
-  it when the value type is optional-flavored: the identical program with
-  `Record<Name, Entry | undefined>` compiles today and prints Node's `0` for
-  `Object.keys`. What refuses this one is the value type: `AbPropConfigEntry`
-  is a required record with no undefined arm, so there is no representation
-  of "absent" for the 1,900 completed members, and `Object.keys` would go
-  from Node's `[]` to 1,900 keys. That is the deferred required-added-field
-  class (the per-instance ownmask writer; `ownPresentCondC` falls back to
-  `true` when mask byte 0 is zero), not a rule that can move here.
-* `:55` SC2020 — `Object.freeze of a possibly-aliased value`, a
-  standard-library lowering fence with no record-width content at all. It
-  stands whatever happens to `:47`, so this file cannot reach zero from the
-  width side alone.
+`protocol/abprops.ts:47` — SC2002, `{} as Record<AbPropName,
+AbPropConfigEntry>` — is UPHELD, and the completion machinery is REACHABLE
+from this spelling: the identical program with `Record<Name, Entry |
+undefined>` compiles today and prints Node's `0` for `Object.keys`, so
+`recordWidthPlan`'s `absent` arm serves the empty-object-into-a-wide-record
+case whenever the value type is optional-flavored. What refuses THIS one is
+the value type. `AbPropConfigEntry` is a required record with no undefined
+arm, so there is no representation of "absent" for the 1,900 completed
+members and `Object.keys` would go from Node's `[]` to 1,900 keys. Nor is
+the loop's own filling an answer: it writes every key before the value
+escapes, but a keyed write only records presence once the per-instance
+ownmask has a WRITER at every record construction — the deferred
+required-added-field class, whose absence is why `ownPresentCondC` falls
+back to `true` when mask byte 0 is zero. Closing `:47` is that work and
+nothing smaller.
