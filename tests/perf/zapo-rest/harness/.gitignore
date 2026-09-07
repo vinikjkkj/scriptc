@@ -1,0 +1,5 @@
+# the sampler is built from pmon.c on the host that runs the rig; the source is
+# the artefact, the binary is not
+pmon.exe
+# what a run leaves behind (default MEMRIG_OUT)
+memrig-run/
