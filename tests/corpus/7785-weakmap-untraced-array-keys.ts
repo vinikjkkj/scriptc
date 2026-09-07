@@ -2,14 +2,18 @@
 // transport/binary/decoder.ts:87, `WeakMap<readonly string[], readonly
 // string[]>`.
 //
-// Why this key kind is admitted while a record-keyed one is not: an array
-// whose elements carry no cycle header is allocated by plain malloc
-// (scr_arr_new_ref only routes through scr_cyc_alloc when elem_trace is
-// non-NULL) and freed by a plain free in scr_arr_release, which never
-// reaches scr_cyc_free. That is one death chokepoint the runtime owns, the
-// same property ScrBytes has. A TRACED array is a cycle node the collector
-// can reclaim without passing through any release, and is refused — see
-// tests/diagnostics/weakmap-traced-array-key.ts for that side of the line.
+// What makes this key kind cheap: an array whose elements carry no cycle
+// header is allocated by plain malloc (scr_arr_new_ref only routes through
+// scr_cyc_alloc when elem_trace is non-NULL) and freed by a plain free in
+// scr_arr_release, which never reaches scr_cyc_free. One death chokepoint,
+// the same property ScrBytes has, and its stamp is ScrArr's own byte.
+//
+// A TRACED array used to be refused here and is now admitted through a
+// SECOND chokepoint — scr_cyc_free, where a cycle-headered object's
+// release-side and collector-side deaths converge. That is corpus 7786, and
+// the two files exist separately because they turn on different mechanisms
+// and different stamps. tests/diagnostics/weakmap-refused-keys.ts pins what
+// is still out.
 //
 // As with 7782, the in-language surface is all this can pin; the lifetime
 // property is pinned in C by packages/runtime/test/test_weak.c.

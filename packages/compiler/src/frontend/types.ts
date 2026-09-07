@@ -2942,14 +2942,12 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
   // and the entry is removed inside the key's own free path.
   //
   // isSupportedWeakKey is the fence, and it is narrower than "has identity"
-  // on purpose. It admits only kinds whose death passes through a refcount
-  // chokepoint this runtime owns — today `bytes`, whose scr_bytes_release is
-  // a plain `--rc == 0` free. Cycle-allocated kinds (arrays, records, class
-  // instances) can also be reclaimed by the collector's collectWhite, which
-  // no release-side hook observes; giving them a weak table without that
-  // hook would leave dead keys in an ADDRESS-keyed table, and a recycled
-  // address would then read the dead key's value. That is a wrong answer,
-  // so they keep the strong ride below until the collector hook lands.
+  // on purpose. It admits only kinds whose death passes through a chokepoint
+  // this runtime owns ON EVERY ROUTE: `bytes` and untraced arrays through
+  // their own releases, and TRACED arrays through scr_cyc_free, where a
+  // cycle-headered object's release-side and collector-side deaths converge.
+  // Records and class instances stay on the strong ride below, for reasons
+  // that are no longer about the collector hook — see isSupportedWeakKey.
   if (isStdlibInterface("WeakMap")) {
     const wargs = checker.getTypeArguments(widened as ts.TypeReference);
     if (wargs.length === 2) {
@@ -2972,9 +2970,17 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
   // cannot observe collection. That reasoning is why the defect survived:
   // for a cache keyed by a long-lived object the divergence is unbounded
   // growth, and "cannot observe it" is not the same as "it does not
-  // matter". These keys are cycle-allocated, so fixing them needs the
-  // collector hook named above — they are NOT fixed here, and this note
-  // stands until they are.
+  // matter".
+  //
+  // The collector hook these two were waiting on LANDED (scr_cyc_free), and
+  // it was not enough for either of them. A RECORD width-coerces, so the
+  // weak entry would be keyed on the copy's address and not the caller's. A
+  // CLASS INSTANCE does not coerce, but an ACYCLIC class is emitted with
+  // `calloc` and a lean header, never reaches scr_cyc_free at all, and
+  // whether a given class is traced is a module-level fixpoint no predicate
+  // here can see. Traced ARRAYS are the kind the hook did free up, and they
+  // are admitted above. So this note narrows rather than disappears, and it
+  // stands for records and class instances until each has its own answer.
   if (
     isStdlibInterface("Map") ||
     isStdlibInterface("ReadonlyMap") ||

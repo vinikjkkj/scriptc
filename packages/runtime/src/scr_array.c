@@ -239,8 +239,10 @@ ScrArr *scr_arr_new_ref(void *(*elem_retain)(void *),
   return a;
 }
 
-/* ScrArr's weak-key stamp. Set only on arrays isSupportedWeakKey admitted,
- * which is UNTRACED arrays alone -- see the note on ScrArr::weakkey. */
+/* ScrArr's weak-key stamp. UNTRACED arrays only: a traced one carries a
+ * cycle header and takes scr_cyc_weak_mark instead, because its death can
+ * arrive from the collector without scr_arr_release running at all. See
+ * the note on ScrArr::weakkey and the one in scr_arr_release below. */
 void scr_arr_weak_mark(void *key) {
   if (key != NULL) ((ScrArr *)key)->weakkey = 1;
 }
@@ -251,11 +253,15 @@ void scr_arr_release(ScrArr *a) {
     /* BEFORE anything is handed back, so no WeakMap can still hold this
      * address once it stops naming this array. An UNTRACED array is a plain
      * malloc/free that never reaches scr_cyc_free, so this is its only
-     * death chokepoint -- which is exactly why an untraced array can be a
-     * weak key today while a traced one cannot. The flag is never set on a
-     * traced array (isSupportedWeakKey refuses them), so the traced arm
-     * below stays untouched and will get its own hook in scr_cyc_free when
-     * phase 3 lands. */
+     * death chokepoint.
+     *
+     * A TRACED array is a weak key too now, and it does NOT come through
+     * here. Its stamp goes in the CYCLE HEADER (scr_cyc_weak_mark) and the
+     * hook that reads it is the first line of scr_cyc_free, because the
+     * collector can free a traced array through scr_arr_gc_free without
+     * this release ever running. So ScrArr::weakkey stays 0 on a traced
+     * array and exactly one of the two hooks fires for any given array —
+     * the compiler picks the stamp from the real trace fixpoint. */
     if (a->weakkey && scr_weak_died_hook != NULL) scr_weak_died_hook(a);
     if (a->elem_trace) scr_cyc_on_dead(a);
     if (scr_elem_is_ref(a->elem)) {

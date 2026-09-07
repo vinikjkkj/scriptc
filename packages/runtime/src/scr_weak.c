@@ -47,13 +47,30 @@
  * is exact for it. Anyone adding a WeakMap must re-check that; the check
  * is "can the value reach the key", and it is not automated.
  *
- * WHICH KEYS. Only kinds whose death has a single refcount chokepoint the
- * runtime owns. Today that is ScrBytes (Uint8Array), whose
- * `scr_bytes_release` is a plain `--rc == 0` free and is NOT a cycle
- * node. Arrays, records and class instances are `scr_cyc_alloc` nodes: they
- * can die through the collector's collectWhite without passing through
- * any release this file could hook, so they need a collector-side hook and
- * are deliberately still refused by the frontend.
+ * WHICH KEYS. Only kinds whose death reaches a chokepoint the runtime
+ * owns, on EVERY route the object can die by. There are two such
+ * chokepoints and between them they cover three admitted kinds:
+ *
+ *   - `scr_bytes_release` at `--rc == 0` — ScrBytes (Uint8Array). Not a
+ *     cycle node; one route, one hook.
+ *   - `scr_arr_release` at `--rc == 0` — an UNTRACED array. scr_arr_new_ref
+ *     routes through scr_cyc_alloc only when elem_trace is non-NULL, so an
+ *     untraced array is a plain malloc/free and has the same single route.
+ *   - `scr_cyc_free` — every CYCLE-HEADERED object, which among admitted
+ *     kinds means a TRACED array. This is the collector hook, and it is
+ *     one line because the two routes converge on it: ordinary release to
+ *     zero runs the type's teardown (scr_arr_gc_free) which ends in
+ *     scr_cyc_free, and the collector's collectWhite loop calls that same
+ *     teardown directly through scr_cyc_free_of(hdr). Verified by reading
+ *     both, and by test_weak.c's collector cases.
+ *
+ * RECORDS AND CLASS INSTANCES ARE STILL REFUSED, and no longer for want of
+ * the collector hook — that argument is now spent. They are refused for
+ * two reasons of their own, both in isSupportedWeakKey: a record
+ * WIDTH-COERCES (the copy would key the entry on a temporary), and an
+ * ACYCLIC class instance is calloc'd with no cycle header at all, so the
+ * hook below cannot see it and the frontend predicate cannot tell which
+ * classes those are.
  *
  * THE REGISTRY IS A LIST, NOT A TABLE. A key can sit in several maps, so
  * a death must reach all of them. Rather than a second pointer-keyed
@@ -220,11 +237,12 @@ static void scr_weak_drop(ScrWeakMap *m, const void *key) {
   m->tomb++;
 }
 
-/* THE DEATH HOOK. Called from a key type's release the moment its
- * refcount reaches zero and BEFORE its storage is handed back, so the
- * address can never be observed in this table after it stops being this
- * object. See the header comment on why lateness here is a wrong answer
- * rather than a leak. */
+/* THE DEATH HOOK. Called the moment a key stops being that key and BEFORE
+ * its storage is handed back, so the address can never be observed in this
+ * table after it stops naming this object. Three call sites, one per
+ * chokepoint listed at the top of this file — two releases and
+ * scr_cyc_free, which is also the collector's route. See the header
+ * comment on why lateness here is a wrong answer rather than a leak. */
 void scr_weak_key_died(void *key) {
   ScrWeakMap *m;
   for (m = scr_weak_live; m != NULL; m = m->next) scr_weak_drop(m, key);
@@ -259,7 +277,17 @@ void scr_weak_release(ScrWeakMap *m) {
 void *scr_weak_retain_v(void *m) { return scr_weak_retain((ScrWeakMap *)m); }
 void scr_weak_release_v(void *m) { scr_weak_release((ScrWeakMap *)m); }
 
-/* Keys keep their mark for life, even after every map holding them drops
- * the entry. Clearing it would need a per-key count of how many maps hold
- * it, and the only cost of a stale mark is one wasted list walk in that
- * key's own free - never a wrong answer. The trade is deliberate. */
+/* Keys keep their mark for as long as they exist, even after every map
+ * holding them drops the entry. Clearing it would need a per-key count of
+ * how many maps hold it, and the only cost of a stale mark is one wasted
+ * list walk in that key's own free - never a wrong answer. The trade is
+ * deliberate.
+ *
+ * For a CYCLE-HEADERED key "for life" ends at the free, not after it:
+ * scr_cyc_stamp rewrites ScrCycHdr::blk wholesale on every allocation, so
+ * a recycled block comes back with the stamp clear. That is required, not
+ * a bonus — the pool and the arena hand the same address out again, and an
+ * inherited stamp would make the NEXT object at that address walk the
+ * registry on its own free. Still not a wrong answer (the walk would find
+ * nothing), but the address-reuse story is why nothing here may rely on a
+ * mark outliving its object. */

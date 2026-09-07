@@ -1,0 +1,80 @@
+weakmap-refused-keys.ts:40:7 - error SC2020: 'WeakMap<object, Uint8Array<ArrayBufferLike>>' is part of the standard library types but has no scriptc lowering yet
+
+  39 | // and it is the four together that a zapo census counts.
+  40 | const objectKeyed = new WeakMap<object, Uint8Array>();
+     |       ^~~~~~~~~~~
+  41 | const someRows: readonly Rec[] = [{ a: 1, b: "x" }];
+
+  hint: the type checker sees the full standard library, but only the supported surface compiles (https://scriptc.dev/limitations)
+
+weakmap-refused-keys.ts:40:21 - error SC2020: 'new WeakMap' is part of the standard library types but has no scriptc lowering yet
+
+  39 | // and it is the four together that a zapo census counts.
+  40 | const objectKeyed = new WeakMap<object, Uint8Array>();
+     |                     ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  41 | const someRows: readonly Rec[] = [{ a: 1, b: "x" }];
+
+  hint: WeakMap is supported, but only for keys whose death this runtime observes on every route the value can die by — Uint8Array, and ARRAYS of any element type. A bare 'object' key is the dyn (TypeScript's 'object' is a top type over every non-primitive), and a dyn box is a boundary artifact rather than the value, so an address-keyed table over boxes would miss every lookup: name the concrete key type instead, which for an array-keyed cache is the array type itself. A RECORD key is refused because it width-coerces, so the entry would be keyed on the copy's address and not the caller's; a CLASS INSTANCE because an acyclic class is allocated without a cycle header and never reaches the collector-side hook. Values must be a reference type (a scalar has no pointer for the table to hold). A strong Map accepts the refused keys today, but it RETAINS them — for a cache keyed on a long-lived object that is unbounded growth
+
+weakmap-refused-keys.ts:42:1 - error SC2020: 'WeakMap<object, Uint8Array<ArrayBufferLike>>.set' is part of the standard library types but has no scriptc lowering yet
+
+  41 | const someRows: readonly Rec[] = [{ a: 1, b: "x" }];
+  42 | objectKeyed.set(someRows, new Uint8Array([1]));
+     | ^~~~~~~~~~~~~~~
+  43 | console.log(objectKeyed.has(someRows));
+
+  hint: the type checker sees the full standard library, but only the supported surface compiles (https://scriptc.dev/limitations)
+
+weakmap-refused-keys.ts:43:13 - error SC2020: 'WeakMap<object, Uint8Array<ArrayBufferLike>>.has' is part of the standard library types but has no scriptc lowering yet
+
+  42 | objectKeyed.set(someRows, new Uint8Array([1]));
+  43 | console.log(objectKeyed.has(someRows));
+     |             ^~~~~~~~~~~~~~~
+  44 | 
+
+  hint: the type checker sees the full standard library, but only the supported surface compiles (https://scriptc.dev/limitations)
+
+weakmap-refused-keys.ts:80:15 - error SC1090: a WeakMap key of type 'readonly Narrow[]' on a table whose key type is different (the two are assignable but not the same shape, so the lowering would COPY this value to reshape it, and the entry would be keyed on the copy) is not supported yet
+
+  79 | const narrowRows: readonly Narrow[] = [{ a: 1 }];
+  80 | wideKeyed.set(narrowRows, new Uint8Array([2]));
+     |               ^~~~~~~~~~
+  81 | 
+
+  hint: a weak entry keyed on a copy is keyed on a temporary that dies at the end of the statement, and the allocator hands its address straight back out — so the table would either answer a LATER object with this value or lose the entry immediately. Neither is a cache. Give the key the map's exact type: annotate the binding with it, or widen the WeakMap's key parameter to the type the callers actually hold. A strong Map accepts the copy today and misses its own entry when it does
+
+weakmap-refused-keys.ts:85:7 - error SC2020: 'WeakMap<Uint8Array<ArrayBufferLike>, number>' is part of the standard library types but has no scriptc lowering yet
+
+  84 | // pointer, and a number is not one.
+  85 | const scalarValued = new WeakMap<Uint8Array, number>();
+     |       ^~~~~~~~~~~~
+  86 | 
+
+  hint: the type checker sees the full standard library, but only the supported surface compiles (https://scriptc.dev/limitations)
+
+weakmap-refused-keys.ts:85:22 - error SC2020: 'new WeakMap' is part of the standard library types but has no scriptc lowering yet
+
+  84 | // pointer, and a number is not one.
+  85 | const scalarValued = new WeakMap<Uint8Array, number>();
+     |                      ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  86 | 
+
+  hint: WeakMap is supported, but only for keys whose death this runtime observes on every route the value can die by — Uint8Array, and ARRAYS of any element type. A bare 'object' key is the dyn (TypeScript's 'object' is a top type over every non-primitive), and a dyn box is a boundary artifact rather than the value, so an address-keyed table over boxes would miss every lookup: name the concrete key type instead, which for an array-keyed cache is the array type itself. A RECORD key is refused because it width-coerces, so the entry would be keyed on the copy's address and not the caller's; a CLASS INSTANCE because an acyclic class is allocated without a cycle header and never reaches the collector-side hook. Values must be a reference type (a scalar has no pointer for the table to hold). A strong Map accepts the refused keys today, but it RETAINS them — for a cache keyed on a long-lived object that is unbounded growth
+
+weakmap-refused-keys.ts:92:13 - error SC2020: 'WeakMap.delete' is part of the standard library types but has no scriptc lowering yet
+
+  91 | const admitted = new WeakMap<Uint8Array, Uint8Array>();
+  92 | console.log(admitted.delete(new Uint8Array([3])));
+     |             ^~~~~~~~~~~~~~~
+  93 | 
+
+  hint: a weak collection answers get/set/has only — size, clear, delete and iteration would have to report entries whose keys may already be gone, and JS does not offer them on a WeakMap either
+
+weakmap-refused-keys.ts:104:13 - error SC2004: uses of 'scalarValued' inherit the blocker on its declaration
+
+  103 | 
+  104 | console.log(scalarValued, wideKeyed, objectKeyed);
+      |             ^~~~~~~~~~~~
+  105 | 
+
+  hint: the declaration of 'scalarValued' did not compile — fix the diagnostic reported there and these sites clear with it

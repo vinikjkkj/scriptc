@@ -14,7 +14,12 @@
  *    the same address out again, so a table that evicted lazily would
  *    answer a NEW object with the PREVIOUS occupant's value;
  *  - a key in several maps is spliced from all of them;
- *  - values are held strongly and released exactly once.
+ *  - values are held strongly and released exactly once;
+ *  - and, since phase 3, that a key reclaimed by the COLLECTOR is spliced
+ *    too. That one is not merely unobservable from in-language, it is
+ *    unreachable: nothing a compiled program can write makes a cycle
+ *    collection happen at a point it can then look at. Cases 10-12 build
+ *    the ring in C and call scr_collect_cycles by hand.
  */
 #include "../src/scr_runtime.h"
 
@@ -124,6 +129,152 @@ static void test_array_address_reuse(void) {
     fprintf(stderr, "NOTE: array address never recycled in %d tries — reuse case not exercised\n", tries);
   } else {
     check(1, "array address reuse was actually exercised");
+  }
+  scr_weak_release(m);
+}
+
+/* A TRACED array: a non-NULL elem_trace is what routes scr_arr_new_ref
+ * through scr_cyc_alloc, so this array carries a CYCLE HEADER and can be
+ * reclaimed by the collector without scr_arr_release ever running. Its
+ * elements are arrays, which is also what lets the cycle cases below build
+ * a ring out of two of them. */
+static ScrArr *TA(void) {
+  return scr_arr_new_ref(&scr_arr_retain_v, &scr_arr_release_v, &scr_arr_trace_v, 0);
+}
+
+static ScrWeakMap *WC(void) {
+  return scr_weak_new(&scr_str_retain_v, &scr_str_release_v, &scr_cyc_weak_mark);
+}
+
+/* ── 10. TRACED array keys (phase 3): the stamp lands in the HEADER ── */
+static void test_cycle_keys(void) {
+  ScrWeakMap *m = WC();
+  ScrArr *k1 = TA();
+  ScrArr *k2 = TA();
+  ScrStr *v = S("cyc-value");
+  size_t rc_before;
+
+  check(k1->elem_trace != NULL, "the array under test is TRACED");
+  rc_before = k1->rc;
+  scr_weak_set(m, k1, v);
+  check(k1->rc == rc_before, "set() does not retain a cycle-headered key");
+  /* Trap 3, from the outside: a shared stamp would have written ScrArr's
+   * own byte. The cycle stamp must write the HEADER and leave that alone,
+   * or scr_arr_release would fire the hook a second time. */
+  check(k1->weakkey == 0, "the cycle stamp did NOT write ScrArr::weakkey");
+  check((scr_cyc_hdr(k1)->blk & SCR_CYC_WEAKKEY) != 0,
+        "the cycle stamp DID write SCR_CYC_WEAKKEY in the header");
+
+  ScrStr *got = (ScrStr *)scr_weak_get_ref(m, k1);
+  check(got == v, "cycle-keyed hit returns the stored value");
+  if (got) scr_str_release(got);
+  check(!scr_weak_has(m, k2), "another empty traced array is a different key");
+
+  scr_str_release(v);
+#ifdef SCR_RC_AUDIT
+  long live_before = scr_str_live_count();
+#endif
+  scr_arr_release(k1); /* death by ordinary release-to-zero */
+#ifdef SCR_RC_AUDIT
+  check(scr_str_live_count() == live_before - 1,
+        "the value is released when a TRACED key dies through its release");
+#endif
+  scr_arr_release(k2);
+  scr_weak_release(m);
+}
+
+/* ── 11. THE CASE THE COLLECTOR HOOK EXISTS FOR ──
+ * A key held only by a CYCLE. Nothing releases it to zero: its refcount
+ * never reaches 0 on its own, and scr_collect_cycles reclaims it by
+ * calling the per-type teardown DIRECTLY (scr_cyc_free_of(hdr)(obj)),
+ * which no release-side hook can see. Before scr_cyc_free was hooked, the
+ * entry survived its key here -- and since the arena hands the address
+ * out again, a later object at that address would have read this value.
+ * That is the wrong answer this whole design exists to prevent, so this is
+ * the case that decides whether phase 3 is real. */
+static void test_cycle_collector_death(void) {
+  ScrWeakMap *m = WC();
+  ScrStr *v = S("collected");
+  ScrArr *a, *b;
+  void *dead;
+
+  /* Drain the candidate-root buffer FIRST. The collector paces itself off
+   * how many candidates have accumulated, so without this an unrelated
+   * earlier case can push the count over the threshold and run a pass
+   * inside one of the releases below — which would still splice the entry
+   * correctly, but would rob the "a cycle keeps the key alive" check of
+   * its meaning. That check is what separates this case from case 10: it
+   * proves the key does NOT die by refcount, so the eviction that follows
+   * can only have come from the collector. */
+  scr_collect_cycles();
+  a = TA();
+  b = TA();
+
+  /* a -> b -> a, then drop both external references. Each is now held
+   * only by the other, so refcounting alone frees neither.
+   *
+   * The retains are load-bearing: scr_arr_push_ref MOVES ownership in (the
+   * emitter's moveTemp gives up the caller's reference), so pushing the
+   * bare pointers would build a CHAIN, not a ring — releasing b would free
+   * b, whose teardown would release a to zero, and the entry would be
+   * spliced by the ordinary release path with the collector never
+   * involved. That is a case-10 pass wearing case 11's name. */
+  scr_arr_push_ref(a, scr_arr_retain(b));
+  scr_arr_push_ref(b, scr_arr_retain(a));
+  scr_weak_set(m, a, v);
+  check(scr_weak_has(m, a), "the key is in the table before collection");
+  dead = (void *)a;
+  scr_str_release(v);
+  scr_arr_release(b);
+  scr_arr_release(a);
+  check(scr_weak_has(m, dead), "still there: a cycle keeps the key alive");
+
+  scr_collect_cycles();
+
+  check(!scr_weak_has(m, dead),
+        "the collector's free spliced the entry (THE phase-3 property)");
+  check(scr_weak_get_ref(m, dead) == NULL,
+        "and get() on the collected key's address answers NULL");
+  scr_weak_release(m);
+}
+
+/* ── 12. address reuse, cycle flavour ──
+ * The arena recycles far more aggressively than malloc does, so this is
+ * the flavour of the reuse test most likely to actually fire. It REPORTS
+ * when the allocator declined to recycle rather than passing quietly -- a
+ * reuse case that never reused has tested nothing. */
+static void test_cycle_address_reuse(void) {
+  ScrWeakMap *m = WC();
+  ScrStr *v = S("stale-cyc");
+  ScrArr *k = TA();
+  void *dead = (void *)k;
+  int reused = 0, tries = 0;
+
+  scr_weak_set(m, k, v);
+  scr_str_release(v);
+  scr_arr_release(k);
+
+  for (; tries < 64 && !reused; tries++) {
+    ScrArr *fresh = TA();
+    if ((void *)fresh == dead) {
+      reused = 1;
+      check(scr_weak_get_ref(m, fresh) == NULL,
+            "a recycled CYCLE-BLOCK address does not inherit the dead value");
+      check(!scr_weak_has(m, fresh),
+            "has() false for a cycle block reusing a dead address");
+      /* The recycled block must also come back with a CLEAR stamp, or the
+       * next object at this address walks the registry on its own free
+       * for no reason. scr_cyc_stamp rewriting blk is what buys this. */
+      check((scr_cyc_hdr(fresh)->blk & SCR_CYC_WEAKKEY) == 0,
+            "a recycled block does not inherit the previous key's stamp");
+    }
+    scr_arr_release(fresh);
+  }
+  if (!reused) {
+    fprintf(stderr, "NOTE: cycle block address never recycled in %d tries "
+                    "- reuse case not exercised\n", tries);
+  } else {
+    check(1, "cycle-block address reuse was actually exercised");
   }
   scr_weak_release(m);
 }
@@ -304,6 +455,9 @@ int main(void) {
   test_growth();
   test_array_keys();
   test_array_address_reuse();
+  test_cycle_keys();
+  test_cycle_collector_death();
+  test_cycle_address_reuse();
   fprintf(stderr, "%ld/%ld cases passed\n", total - failed, total);
   return failed == 0 ? 0 : 1;
 }
