@@ -147,6 +147,120 @@ console.log(JSON.stringify(rec));
   expect(a[0]!.message).toContain("dynamic");
 });
 
+/* ── the FILL half: a record built through a RUN-TIME KEY ────────────── */
+//
+// `{} as Record<Name, V | undefined>` is the only spelling tsc takes for a
+// bag keyed by a literal union, and a loop then fills it by a computed key.
+// The write-order walk saw a literal that spelled NOTHING and no field write
+// after it, so `Object.keys` answered the shape's order at exit 0 with no
+// diagnostic of any kind. A fence over every run-time-keyed write was built
+// once and TAKEN BACK OUT: it never asked where the key came from, and it
+// refused tests/corpus/7793, whose fill order IS its source shape's
+// enumeration order and DOES agree with the target's.
+//
+// The question asked instead is what ORDER the keys arrive in. It is a fact
+// for two sources — a record's own enumeration, and a literal array of
+// literal-typed elements — and unknown for the rest, and the three answers
+// below are the three things that can be done with it.
+
+test("a fill whose order is KNOWN becomes the shape's order: no row, no advice", () => {
+  // The order the fill proves is the only evidence there is, so the shape
+  // takes it — exactly what ONE out-of-order literal gets, one construction
+  // form over.
+  const r = lower(`
+type Name = "omega" | "alpha" | "zeta" | "mid";
+const view = {} as Record<Name, number | undefined>;
+let i = 0;
+for (const k of ["omega", "alpha", "zeta", "mid"]) { i = i + 1; view[k as Name] = i; }
+console.log(Object.keys(view).join(","), JSON.stringify(view));
+`);
+  expect(keyRisk(r)).toEqual([]);
+  expect(r.advisories.filter((d) => d.code === "SC6002")).toEqual([]);
+  expect(r.compiled).toBe(true);
+});
+
+test("a fill out of a record's OWN enumeration is silent — corpus 7793's shape", () => {
+  // The withdrawn fence refused this, and it is byte-identical to node.
+  const r = lower(`
+type Name = "alpha" | "beta" | "gamma";
+interface Entry { readonly code: number }
+const SOURCE: Record<Name, Entry> = { alpha: { code: 1 }, beta: { code: 2 }, gamma: { code: 3 } };
+const view = {} as Record<Name, Entry | undefined>;
+for (const [name, entry] of Object.entries(SOURCE)) { view[name as Name] = entry; }
+console.log(Object.keys(view).join(","), JSON.stringify(view));
+`);
+  expect(keyRisk(r)).toEqual([]);
+  expect(r.advisories.filter((d) => d.code === "SC6002")).toEqual([]);
+  expect(r.compiled).toBe(true);
+});
+
+test("TWO fills of one shape in two orders is a provable disagreement, and refuses", () => {
+  // No single declaredOrder serves both, so the re-pick stands down and the
+  // comparison the fill makes possible answers instead. The refusal names
+  // BOTH orders — the one the value is filled in and the one its shape
+  // enumerates.
+  const r = lower(`
+type Name = "omega" | "alpha" | "zeta";
+function forward(): string {
+  const view = {} as Record<Name, number | undefined>;
+  for (const k of ["omega", "alpha", "zeta"]) view[k as Name] = 1;
+  return Object.keys(view).join(",");
+}
+function backward(): string {
+  const view = {} as Record<Name, number | undefined>;
+  for (const k of ["zeta", "alpha", "omega"]) view[k as Name] = 2;
+  return Object.keys(view).join(",");
+}
+console.log(forward(), backward());
+`);
+  const rows = keyRisk(r);
+  expect(rows.length).toBe(2);
+  expect(rows[0]!.hint ?? "").toContain("omega,alpha,zeta");
+  expect(rows[0]!.hint ?? "").toContain("enumerates");
+  expect(rows[1]!.hint ?? "").toContain("zeta,alpha,omega");
+});
+
+test("a fill whose key sequence is a RUN-TIME fact ADVISES and compiles", () => {
+  // The residue. Refusing it is what the withdrawn fence did; saying nothing
+  // is what shipped the wrong object. Possibly-wrong takes SC6002, the same
+  // stance the dynamic-source half takes one node over.
+  const r = lower(`
+type Name = "omega" | "alpha" | "zeta";
+function fill(order: readonly string[]): string {
+  const view = {} as Record<Name, number | undefined>;
+  for (const k of order) view[k as Name] = 1;
+  return Object.keys(view).join(",");
+}
+console.log(fill(["zeta", "omega", "alpha"]));
+`);
+  expect(keyRisk(r)).toEqual([]);
+  expect(r.compiled, "the advice must not stop the build").toBe(true);
+  const a = r.advisories.filter((d) => d.code === "SC6002");
+  expect(a.length).toBe(1);
+  expect(a[0]!.severity).toBe("advice");
+  expect(a[0]!.message).toContain("computed KEY");
+});
+
+test("ONE KEY has one order, so an unknowable fill of a one-key shape says nothing", () => {
+  // The advice above is pinned by what it DECLINES as much as by what it
+  // says. A shape declaring fewer than two keys has no order to get wrong —
+  // the rule the re-pick, the literal half and presenceOrderRisk all already
+  // apply — so the same unknowable fill that advises on three keys is noise
+  // here and is not printed.
+  const r = lower(`
+type Only = "solo";
+function fill(order: readonly string[]): string {
+  const view = {} as Record<Only, number | undefined>;
+  for (const k of order) view[k as Only] = 1;
+  return Object.keys(view).join(",");
+}
+console.log(fill(["solo"]));
+`);
+  expect(keyRisk(r)).toEqual([]);
+  expect(r.advisories.filter((d) => d.code === "SC6002")).toEqual([]);
+  expect(r.compiled).toBe(true);
+});
+
 /* ── the armed half: five shapes that must produce NO row ─────────────── */
 
 test("a literal spelled the way its shape enumerates is silent", () => {
