@@ -7,16 +7,27 @@
  * fields copied across -- and the program ends up holding TWO objects
  * where JavaScript has one.
  *
- * Three faces, measured against node v25.9.0 on BOTH backends:
+ * Two faces are left here, measured against node v25.9.0 on BOTH backends:
  *
  *   the DROP        the members the destination does not name are gone
- *   the READ-BACK   widening back answers `undefined` for one of them
  *   the IDENTITY    a write through either name is invisible to the other
  *
- * The first two are DATA loss and the overflow grant fixes them. The third
- * is IDENTITY loss, it fires at every width copy including the ones that
- * drop nothing at all, and no grant can reach it -- row `granted` below is
- * 4701's own already-granted path, still answering wrongly.
+ * The first is DATA loss and the overflow grant fixes it. The second is
+ * IDENTITY loss, it fires at every width copy including the ones that drop
+ * nothing at all, and no grant can reach it -- row `granted` below is 4701's
+ * own already-granted path, still answering wrongly.
+ *
+ * A THIRD FACE USED TO BE HERE. The READ-BACK -- widening back to a type
+ * that names the ended member, and answering `undefined` for it -- needs an
+ * OPTIONAL-flavored member to be silent (a required one is refused by
+ * SC2002), and an optional member is exactly what SHAPE UNIFICATION can
+ * carry: the narrow shape gains the slot, the unset slot is the undefined
+ * arm no own-key surface reports, and the two shapes become one. That row
+ * started agreeing with node, which is what this file asks a row to do
+ * before it leaves, and it left -- for
+ * tests/corpus/7790-an-optional-member-the-width-view-does-not-name-survives-the-upcast.ts,
+ * with node's answers as the oracle. Every row still here has a REQUIRED
+ * extra member, which no layout can spell "absent" for.
  *
  * WHY THIS IS A HARNESS TEST. tests/corpus needs a program that compiles
  * and matches node byte for byte; this one compiles, runs, exits 0 and does
@@ -54,7 +65,6 @@ const BACKENDS = ["c", "llvm"] as const
 const SOURCE = `export {}
 interface A { a: number }
 interface B { a: number; b: number }
-interface OptB { a: number; b?: number }
 
 function take(x: A): A { return x }
 
@@ -64,25 +74,19 @@ const big: B = { a: 1, b: 2 }
 const narrowed = take(big)
 console.log("drop " + JSON.stringify(narrowed) + " " + Object.keys(narrowed).join(","))
 
-// (2) THE READ-BACK, through an OPTIONAL member (a required one is refused
-//     at compile time by SC2002, so the optional flavour is the silent one).
-const optBig: OptB = { a: 1, b: 2 }
-const optNarrow = take(optBig)
-console.log("readback " + String((optNarrow as unknown as OptB).b))
-
-// (3) A WRITE THROUGH the narrowed view.
+// (2) A WRITE THROUGH the narrowed view.
 const w1: B = { a: 1, b: 2 }
 const n1 = take(w1)
 n1.a = 9
 console.log("through " + w1.a + " " + n1.a)
 
-// (4) A WRITE TO THE ORIGINAL after the upcast.
+// (3) A WRITE TO THE ORIGINAL after the upcast.
 const w2: B = { a: 1, b: 2 }
 const n2 = take(w2)
 w2.a = 9
 console.log("source " + w2.a + " " + n2.a)
 
-// (5) THE DOUBLE ASSERTION - 4701's GRANTED path. Its own field names, so
+// (4) THE DOUBLE ASSERTION - 4701's GRANTED path. Its own field names, so
 //     the grant (per-shape and whole-program, keyed on field names plus type
 //     kinds) cannot reach the shapes the rows above use.
 interface A5 { z: number }
@@ -92,7 +96,7 @@ const asserted = w3 as unknown as A5
 asserted.z = 9
 console.log("granted " + w3.z + " " + asserted.z)
 
-// (6) THE CONTROL: an exact-shape binding ALIASES, and must keep aliasing.
+// (5) THE CONTROL: an exact-shape binding ALIASES, and must keep aliasing.
 const c1: A = { a: 1 }
 const c2: A = c1
 c2.a = 9
@@ -135,7 +139,6 @@ const lineOf = (out: string, label: string): string =>
  * `node --experimental-strip-types` on v25.9.0. */
 const NODE = {
   drop: `drop {"a":1,"b":2} a,b`,
-  readback: "readback 2",
   through: "through 9 9",
   source: "source 9 9",
   granted: "granted 9 9",
@@ -160,14 +163,6 @@ describe("a record flowing into a different shape is copied, not relabelled", ()
           "rule), so this position is the silent one. If this now reads node's answer the drop " +
           "is FIXED: move this row to tests/corpus.",
       ).toBe(`drop {"a":1} a`)
-
-      // ---- THE READ-BACK. node: `readback 2` ---------------------------
-      expect(
-        lineOf(out, "readback"),
-        "PINNED DEFECT: the member the copy ended is not on the value, so widening back to a " +
-          "type that names it completes to the undefined arm. A REQUIRED member is refused at " +
-          "compile time (SC2002) instead, so the optional flavour is the only silent one.",
-      ).toBe("readback undefined")
 
       // ---- THE IDENTITY, both directions. node: `9 9` twice ------------
       expect(

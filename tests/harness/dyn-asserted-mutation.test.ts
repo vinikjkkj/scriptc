@@ -333,8 +333,25 @@ console.log(JSON.stringify(back), Object.keys(back).join(","));`;
  *
  * `staticAssertionReceiver` closes it for the case that cannot invent an
  * answer: the field being written must already exist on the OPERAND's own
- * shape at an identical lowered type. The last two tests pin what that
- * deliberately leaves open. */
+ * shape at an identical lowered type.
+ *
+ * WHAT IT DELIBERATELY LEFT OPEN IS NOW CLOSED FROM THE OTHER END, and the
+ * last three rows below used to pin it. The rule declines a store to a field
+ * only the ASSERTED type declares, and it cannot see through a NAME the
+ * asserted value was bound to first, because both need the operand's own
+ * struct to have a slot it does not have. SHAPE UNIFICATION gives it one:
+ * `{n: number}` and `{n: number; m?: number}` are a width pair whose extra
+ * member is optional-flavored, so the layout can carry it, the two shapes
+ * become ONE, and the assertion is what JavaScript says it is -- the
+ * identity. No rule here widened; the shapes underneath stopped differing.
+ *
+ * The write to the asserted-only field LANDS (it does not refuse), which is
+ * the question `st-target-only-field` was pinned to force an answer to.
+ * `st-width-copy` is the ordinary width-copy BINDING and aliases now for the
+ * same reason and not because the assertion rule leaked into assignment: no
+ * copy happens where there is one shape. A pair the layout CANNOT merge --
+ * one whose extra member is required -- still copies, and
+ * tests/harness/record-width-unify.test.ts pins that half. */
 describe.each(["c", "llvm"] as const)("a write through a STATIC assertion reaches the object (%s backend)", (backend) => {
   const STATIC_LANDS: Array<[string, string]> = [
     ["st-widen", `interface A { n: number }
@@ -429,6 +446,38 @@ interface I { n: number }
 const c = new C();
 (c as I).n = 7;
 console.log(c.n);`],
+    // THE THREE THAT USED TO BE PINNED OPEN, in the order they were written.
+    //
+    // The store target is a NAME, so no syntactic rule can see the assertion
+    // that produced it -- and none has to: A and B are one shape, so `b` and
+    // `a` are one object.
+    ["st-name-bound", `interface A { n: number }
+interface B { n: number; m?: number }
+const a: A = { n: 1 };
+const b = a as B;
+b.n = 7;
+console.log(JSON.stringify(a));`],
+    // A field the ASSERTED type adds and the operand's shape used to have no
+    // slot for. It LANDS -- `{"n":1,"m":5}`, Node's own answer -- because the
+    // merged layout carries `m` and the write turns its undefined arm into a
+    // value, which is exactly when an own-key surface starts reporting it.
+    ["st-target-only-field", `interface A { n: number }
+interface B { n: number; m?: number }
+const a: A = { n: 1 };
+(a as B).m = 5;
+console.log(JSON.stringify(a));`],
+    // NOT an assertion: `const b: B = a` is a coercion, and the documented
+    // stance was that it copies. It aliases now because the coercion has
+    // nothing left to do, not because the assertion rule leaked into ordinary
+    // assignment -- the boundary this row was written to guard. The guard
+    // that replaces it is the DECLINED pair in record-width-unify.test.ts,
+    // whose extra member is required and which still copies.
+    ["st-width-copy", `interface A { n: number }
+interface B { n: number; m?: number }
+const a: A = { n: 1 };
+const b: B = a;
+b.n = 9;
+console.log(JSON.stringify(a), JSON.stringify(b));`],
   ];
   test.for(STATIC_LANDS)("%s", { timeout: 240_000 }, async ([name, src]) => {
     const { node, exe } = await bothWays(name, backend, src);
@@ -439,68 +488,3 @@ console.log(c.n);`],
   });
 });
 
-describe("what the STATIC half deliberately leaves open", () => {
-  /* Pinned, not fixed, and for the same reason as the dynamic sibling
-   * above: the store target is a NAME, so no syntactic rule can see the
-   * assertion that produced it. */
-  test("a static recovery bound to a name first still loses the write (both backends)", { timeout: 480_000 }, async () => {
-    const src = `interface A { n: number }
-interface B { n: number; m?: number }
-const a: A = { n: 1 };
-const b = a as B;
-b.n = 7;
-console.log(JSON.stringify(a));`;
-    for (const backend of ["c", "llvm"] as const) {
-      const { node, exe } = await bothWays("st-name-bound", backend, src);
-      expect(node.out.trim()).toBe('{"n":7}');
-      expect(exe.code, `${backend}: ${exe.err}`).toBe(0);
-      expect(
-        exe.out.trim(),
-        `${backend}: if this now prints {"n":7} the remainder is CLOSED — move the row into STATIC_LANDS`,
-      ).toBe('{"n":1}');
-    }
-  });
-
-  /* A field the ASSERTED type adds and the operand's shape has no slot for.
-   * Node grows the object; a monomorphic struct cannot, and the rule
-   * declines rather than trade a lost write for a refusal on a program that
-   * compiles today. Whoever closes this has to decide which of the two it
-   * is — that decision is the reason this row is pinned rather than
-   * quietly widened. */
-  test("a write to a field only the ASSERTED type declares is still lost (both backends)", { timeout: 480_000 }, async () => {
-    const src = `interface A { n: number }
-interface B { n: number; m?: number }
-const a: A = { n: 1 };
-(a as B).m = 5;
-console.log(JSON.stringify(a));`;
-    for (const backend of ["c", "llvm"] as const) {
-      const { node, exe } = await bothWays("st-target-only-field", backend, src);
-      expect(node.out.trim()).toBe('{"n":1,"m":5}');
-      expect(exe.code, `${backend}: ${exe.err}`).toBe(0);
-      expect(
-        exe.out.trim(),
-        `${backend}: if this changed, say in the report whether it LANDS or REFUSES — both are answers, silence is not`,
-      ).toBe('{"n":1}');
-    }
-  });
-
-  /* The DOCUMENTED width-copy stance, and NOT an assertion: `const b: B = a`
-   * is a coercion, which copies, and limitations/page.mdx says mutations
-   * through the narrower reference are invisible to the original. It is
-   * here as the boundary of the fix — if this ever starts aliasing, the
-   * assertion rule has leaked into ordinary assignment. */
-  test("an ordinary width-copy binding still copies (both backends)", { timeout: 480_000 }, async () => {
-    const src = `interface A { n: number }
-interface B { n: number; m?: number }
-const a: A = { n: 1 };
-const b: B = a;
-b.n = 9;
-console.log(JSON.stringify(a), JSON.stringify(b));`;
-    for (const backend of ["c", "llvm"] as const) {
-      const { node, exe } = await bothWays("st-width-copy", backend, src);
-      expect(node.out.trim()).toBe('{"n":9} {"n":9}');
-      expect(exe.code, `${backend}: ${exe.err}`).toBe(0);
-      expect(exe.out.trim(), `${backend}: the documented width-copy stance`).toBe('{"n":1} {"n":9}');
-    }
-  });
-});
