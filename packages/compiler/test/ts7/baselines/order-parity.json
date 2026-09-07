@@ -10809,6 +10809,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/7786-weakmap-traced-array-keys.ts": {
+   "order": [
+    "<repo>/tests/corpus/7786-weakmap-traced-array-keys.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/7787-a-streaming-protobuf-descent-stack.ts": {
    "order": [
     "<repo>/tests/corpus/7787-a-streaming-protobuf-descent-stack.ts"
@@ -12596,9 +12602,9 @@
    ],
    "diags": []
   },
-  "<repo>/tests/diagnostics/weakmap-traced-array-key.ts": {
+  "<repo>/tests/diagnostics/weakmap-refused-keys.ts": {
    "order": [
-    "<repo>/tests/diagnostics/weakmap-traced-array-key.ts"
+    "<repo>/tests/diagnostics/weakmap-refused-keys.ts"
    ],
    "diags": []
   },
