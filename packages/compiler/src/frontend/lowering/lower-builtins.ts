@@ -11077,23 +11077,42 @@ export function isConsoleLog(L: Lowerer, call: ts.CallExpression): boolean {
     // is `T | null`), so the entry contributes ITS OWN null arm to the
     // position's payload alongside the promise's.
     //
-    // ONE promise arm and ONE unit arm is the admitted shape: the adapter
-    // has to know at runtime which side it holds, and a second promise arm
-    // would make the payload a guess (widthLiftPlan's stance, and the same
-    // one the promise-into-union coercion above takes). Everything else
-    // keeps the fence.
-    const maybeArms = (t: IrType): { p: IrType & { kind: "promise" }; unit: IrType } | null => {
+    // ONE promise arm and ONE arm that is NOT a promise is the admitted
+    // shape: the adapter has to know at runtime which side it holds, and a
+    // SECOND PROMISE arm would make the payload a guess (widthLiftPlan's
+    // stance, and the same one the promise-into-union coercion above
+    // takes). That is the whole reason the rule exists, and it says
+    // nothing about WHAT the other arm is — that arm is only ever returned,
+    // never awaited, so a record settles its position exactly the way a
+    // null does.
+    //
+    // It was written as "one promise arm and one UNIT arm" because the
+    // shapes that asked for it were `Promise<T> | null` consts. The
+    // already-resolved spelling is just as ordinary — `Promise.all([
+    // options.localIdentity ?? requireLocalIdentity(store),
+    // generateSerializedKeyPair()])`, the two session openers in zapo's
+    // SignalProtocol — and it is what TypeScript writes wherever a caller
+    // MAY pass a value the callee would otherwise fetch.
+    //
+    // A dyn/jsval other arm stays out: `Promise.all` ADOPTS a thenable
+    // entry rather than passing it through, and only a static type can
+    // rule that out. For a static arm the checker rules it out for us —
+    // `Awaited<V>` unwraps a thenable V, so a thenable arm makes the
+    // payload computed here disagree with the checker's own tuple field
+    // and the result-shape check below declines.
+    const maybeArms = (t: IrType): { p: IrType & { kind: "promise" }; other: IrType } | null => {
       if (t.kind !== "union") return null;
       const def = L.unions.get(t.unionId);
       if (!def || def.arms.length !== 2) return null;
       const p = def.arms.find((a) => a.kind === "promise");
-      const unit = def.arms.find((a) => isUnitType(a));
-      if (!p || p.kind !== "promise" || !unit) return null;
-      return { p, unit };
+      const other = def.arms.find((a) => a.kind !== "promise");
+      if (!p || p.kind !== "promise" || !other) return null;
+      if (other.kind === "dyn" || other.kind === "jsval" || other.kind === "void") return null;
+      return { p, other };
     };
     const maybes = parts.map((e) => (e.type.kind === "promise" ? null : maybeArms(e.type)));
     if (parts.some((e, i) => e.type.kind !== "promise" && maybes[i] === null)) {
-      return no("an entry is neither a promise nor a promise-or-unit union");
+      return no("an entry is neither a promise nor a two-arm union with exactly one promise arm");
     }
 
     const inners = parts.map((e, i) =>
@@ -11101,7 +11120,7 @@ export function isConsoleLog(L: Lowerer, call: ts.CallExpression): boolean {
     );
     if (inners.some((t) => t.kind === "jsval" || t.kind === "dyn")) return no("a payload lives in the island");
     if (inners.some((t, i) => t.kind === "void" && maybes[i] !== null)) {
-      return no("a promise-or-unit entry carries a void payload");
+      return no("a promise-or-value entry carries a void payload");
     }
     // A `Promise<void>` ENTRY is the ordinary shape here, not a corner:
     // `const [padded] = await Promise.all([pad(x), ensureSession(a)])` and
@@ -11125,12 +11144,16 @@ export function isConsoleLog(L: Lowerer, call: ts.CallExpression): boolean {
       if (t.kind === "void") return unitOnlyUnion(L.unions);
       const m = maybes[i];
       if (!m) return t;
-      // `Awaited<Promise<P> | null>` is `P | null` — the entry's own unit
-      // arm joins the promise's payload arms.
+      // `Awaited<Promise<P> | V>` is `P | V` — the entry's own non-promise
+      // arm joins the promise's payload arms. Where the two coincide (the
+      // `options.localIdentity ?? requireLocalIdentity(store)` shape, whose
+      // caller-supplied value and loader result are the same type) the
+      // merge collapses to ONE type and the position is not a union at
+      // all — which the single-type extract below already serves.
       const inner = m.p.inner;
       const armList = inner.kind === "union" ? (L.unions.get(inner.unionId)?.arms ?? [inner]) : [inner];
       const seenArm = new Set<string>();
-      const merged = [...armList, m.unit].filter((a) => {
+      const merged = [...armList, m.other].filter((a) => {
         const k = typeKey(a);
         if (seenArm.has(k)) return false;
         seenArm.add(k);
@@ -11200,8 +11223,8 @@ export function isConsoleLog(L: Lowerer, call: ts.CallExpression): boolean {
       }
       const m = maybes[i];
       if (m) {
-        const adapter = maybeEntryAdapter(L, e.type as IrType & { kind: "union" }, m.p, m.unit, uT, loc);
-        if (adapter === null) return no("a promise-or-unit entry does not widen into the shared union");
+        const adapter = maybeEntryAdapter(L, e.type as IrType & { kind: "union" }, m.p, m.other, uT, loc);
+        if (adapter === null) return no("a promise-or-value entry does not widen into the shared union");
         wrapped.push({ kind: "call", callee: adapter, args: [e], type: wrapT, loc });
         continue;
       }
@@ -11312,16 +11335,23 @@ export function isConsoleLog(L: Lowerer, call: ts.CallExpression): boolean {
     };
   }
 
-  /** A `Promise<P> | null` entry of a heterogeneous `Promise.all` widened
+  /** A `Promise<P> | V` entry of a heterogeneous `Promise.all` widened
    * into the combinator's shared union: `async (v) => v is the promise arm
-   * ? await it : the unit`.
+   * ? await it : v itself`.
    *
    * `Promise.all` resolves a non-promise entry AS ITSELF, so the two arms
    * genuinely settle differently and the branch is the semantics, not an
    * optimization. The `await` sits inside the promise branch only: taking
-   * it on the unit arm would be harmless for the value but would cost the
-   * position a microtask turn it does not take in Node, and the unit arm
-   * is the one that fulfills IMMEDIATELY.
+   * it on the other arm would be harmless for the value but would cost the
+   * position a microtask turn it does not take in Node, and that arm is
+   * the one that fulfills IMMEDIATELY.
+   *
+   * `V` is a UNIT arm — the `Promise<T> | null` const — or any other
+   * static arm: `options.localIdentity ?? requireLocalIdentity(store)` is
+   * a record beside a promise of the same record. A unit keeps its
+   * literal (there is nothing to read out of the union box); anything else
+   * narrows out of the entry's own union, which is sound for the reason
+   * every narrow here is: the tag was just tested.
    *
    * Rejection rides through the awaited arm untouched, so the combinator
    * still sees the first rejection in TIME. Interned per (entry type,
@@ -11330,7 +11360,7 @@ export function isConsoleLog(L: Lowerer, call: ts.CallExpression): boolean {
     L: Lowerer,
     srcT: IrType & { kind: "union" },
     promiseArm: IrType & { kind: "promise" },
-    unitArm: IrType,
+    otherArm: IrType,
     uT: IrType,
     loc: SrcLoc,
   ): string | null {
@@ -11366,11 +11396,15 @@ export function isConsoleLog(L: Lowerer, call: ts.CallExpression): boolean {
         uT,
       );
       if (!typeEquals(fromPromise.type, uT)) return null;
-      const fromUnit = L.coerceToExpected(
-        { kind: "unitLit", unit: unitArm.kind === "nullT" ? "null" : "undefined", type: unitArm, loc },
+      const otherTag = L.armTag(srcT.unionId, otherArm);
+      if (otherTag < 0) return null;
+      const fromOther = L.coerceToExpected(
+        isUnitType(otherArm)
+          ? { kind: "unitLit", unit: otherArm.kind === "nullT" ? "null" : "undefined", type: otherArm, loc }
+          : { kind: "unionNarrow", unionId: srcT.unionId, tag: otherTag, value: vRef, type: otherArm, loc },
         uT,
       );
-      if (!typeEquals(fromUnit.type, uT)) return null;
+      if (!typeEquals(fromOther.type, uT)) return null;
       const body: IrStmt[] = [
         {
           kind: "if",
@@ -11379,7 +11413,7 @@ export function isConsoleLog(L: Lowerer, call: ts.CallExpression): boolean {
           else_: null,
           loc,
         },
-        { kind: "return", value: fromUnit, loc },
+        { kind: "return", value: fromOther, loc },
       ];
       const ctx = L.fnStack[L.fnStack.length - 1]!;
       L.liftedFns.push({
