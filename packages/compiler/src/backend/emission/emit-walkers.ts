@@ -8,7 +8,7 @@
 import type { CEmitter } from "./emitter.js";
 import { rcSitesRequested } from "./emitter.js";
 import { bytesAliasOnExtract } from "../../ir/nodes.js";
-import { CLASS_PROPS_FIELD, armDiscrimLits, dynErrorClassKind, isDynErrorClass, canAdaptDynFuncTo, dynRestApplyable, canBoxClassIntoDyn, canBoxFuncIntoDyn, dynCheckArmOrder, internalSlotFields, isUndefinedArmedUnion, nullProtoRule, OWNMASK_SRC_NULL_PROTO, OWNMASK_VALID, ownMaskKeyBit, slotStorageKey, unionHasDiscrim, DYN_BYTES_KINDS, DYN_HANDLE_KINDS, IrType, UNION_ARM_JS_OBJECT_KINDS, isRefCounted, strandedFuncReason, typeEquals, typeKey } from "../../ir/nodes.js";
+import { CLASS_PROPS_FIELD, armDiscrimLits, dynErrorClassKind, isDynErrorClass, canAdaptDynFuncTo, dynRestApplyable, canBoxClassIntoDyn, canBoxFuncIntoDyn, dynCheckArmOrder, internalSlotFields, isUndefinedArmedUnion, nullProtoRule, OWNMASK_COMPLETED, OWNMASK_SRC_NULL_PROTO, OWNMASK_VALID, ownMaskKeyBit, slotStorageKey, unionHasDiscrim, DYN_BYTES_KINDS, DYN_HANDLE_KINDS, IrType, UNION_ARM_JS_OBJECT_KINDS, isRefCounted, strandedFuncReason, typeEquals, typeKey } from "../../ir/nodes.js";
 import { cDecl, cStringLiteral, cType, elemAccess, releaseCallC, retainCallC, vAdapters } from "./emit-types.js";
 import { mangleClassStruct, mangleField, mangleFunction, mangleRecordNew, mangleRecordStruct } from "../mangle.js";
 import type { ClassMeta } from "./emit-shapes.js";
@@ -3159,6 +3159,21 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
           for (const f of dynFields) {
             const keyLit = cStringLiteral(Buffer.from(f.name, "utf8"));
             const keyLen = Buffer.byteLength(f.name, "utf8");
+            // THE ABSENT SLOT IS NOT READABLE, so the whole per-field
+            // emission has to sit BEHIND the question rather than compute
+            // the value and ask afterwards. On a shape a literal COMPLETED
+            // a required field of, that slot holds the allocator's zero -
+            // NULL for a record - and the converter below dereferences it
+            // before any mask test runs. Measured: `const u: unknown = bag`
+            // over a two-of-three-filled bag was an ACCESS VIOLATION, not a
+            // wrong key list.
+            //
+            // Folds away everywhere else. A shape with no completion emits
+            // no guard at all, so a crossing-armed shape's C is unchanged
+            // byte for byte, and its clear bit still means "inherited" and
+            // still demotes below.
+            const liveBit = shape.reqabsent === true ? ownMaskKeyBit(shape, f.name) : null;
+            const liveAt = d.length;
             // toDynExprC, not the converter directly: a FUNCTION field boxes
             // through the closure path (anonymous — the static name is gone
             // by the time a field flows through here), which the per-type
@@ -3278,6 +3293,15 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
               d.push(`    } else {`);
               d.push(`      ${setBase}`);
               d.push(`    }`);
+              d.push(`  }`);
+            }
+            if (liveBit) {
+              const m = `v->${OWNMASK_MEMBER}`;
+              d.splice(
+                liveAt,
+                0,
+                `  if (!(${m}[0] & ${OWNMASK_COMPLETED}) || (${m}[${liveBit.byte}] & ${liveBit.bit})) { /* ${f.name}: the completed literal may never have written this slot */`,
+              );
               d.push(`  }`);
             }
           }
@@ -4052,6 +4076,20 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
           d.push(`    if (${member}) ${releaseCallC(f.type, member)};`);
         }
         d.push(`    ${member} = v;`);
+      }
+      // A WRITE creates an own property, and a KEYED write is a write -
+      // recordSet's row (emit-stmts), which this helper is the dynamic-key
+      // spelling of. Without it the two disagree: `o.a = v` records the key
+      // and `o[k] = v` does not, on the same instance and the same field.
+      //
+      // It is what makes the completed literal usable rather than merely
+      // correct-when-empty: `{} as Record<K, V>` starts with every bit
+      // clear, and the loop that fills it is exactly this helper. Ignored
+      // on an instance whose byte 0 is zero, so every record built any
+      // other way is unaffected.
+      {
+        const bit = ownMaskKeyBit(shape, f.name);
+        if (bit) d.push(`    r->${OWNMASK_MEMBER}[${bit.byte}] |= ${bit.bit}; /* a keyed write is an own key */`);
       }
       d.push(`    return;`);
       d.push(`  }`);

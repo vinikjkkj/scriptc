@@ -9428,6 +9428,7 @@ const DV_SETTERS: Record<string, { method: IrBytesIntrinsicMethod; le: boolean }
           value: intoSlot(raw, ff.lift),
           loc,
         };
+        const at = body.length;
         body.push(
           utag >= 0 && ff.type.kind === "union"
             ? {
@@ -9439,6 +9440,18 @@ const DV_SETTERS: Record<string, { method: IrBytesIntrinsicMethod; le: boolean }
               }
             : write,
         );
+        // Object.assign copies the source's OWN keys, and this walk had no
+        // way to ask which those were - recordAssignHelper's row, missing
+        // from its index-signature twin. Two populations answer it
+        // differently from the declared field list: a record MATERIALISED
+        // out of a dynamic value (a member it merely inherited is not an
+        // own key and must not be copied) and one a literal COMPLETED
+        // (the slot was never written, and READING it is the trap, so the
+        // guard is what keeps `Object.assign(t, bag)` from throwing where
+        // Node copies the one key the value has).
+        L.noteOwnKeyGuard(plan.fromId, ff.name, sRef, loc, (present) => {
+          body[at] = { kind: "if", cond: present, then: [write], else_: null, loc };
+        });
       }
       // The source overflow by SLOT (recordOvfSlots): key and value come
       // out of one entry, so no key is looked back up. Object.assign(x, x)

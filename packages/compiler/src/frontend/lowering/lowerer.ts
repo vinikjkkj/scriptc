@@ -55,7 +55,7 @@ import type {
   IrUnionDef,
   SrcLoc,
 } from "../../ir/nodes.js";
-import { strandTrap, armDiscrimLits, arrayOf, BOOL, internalSlotFields, canAdaptDynFuncTo, canDynCheckTo, discrimSeparates, dynCheckArmOrder, funcOf, shapeHasAccessorSlots, canConvertToDyn, canCrossIslandBoundary, canExitIslandToType, canMarshalTypedFuncIntoIsland, DYN, F64, httpReqIsReadableIn, isJsonSafeType, isUndefinedArmedUnion, isUnitType, JSVAL, READABLE_T, RUNTIME_ERROR_CLASSES, streamDuplexWidensToWritable, STRING, typeEquals, UNDEFINED_T, VOID } from "../../ir/nodes.js";
+import { strandTrap, armDiscrimLits, arrayOf, BOOL, internalSlotFields, isRefCounted, canAdaptDynFuncTo, canDynCheckTo, discrimSeparates, dynCheckArmOrder, funcOf, shapeHasAccessorSlots, canConvertToDyn, canCrossIslandBoundary, canExitIslandToType, canMarshalTypedFuncIntoIsland, DYN, F64, httpReqIsReadableIn, isJsonSafeType, isUndefinedArmedUnion, isUnitType, JSVAL, READABLE_T, RUNTIME_ERROR_CLASSES, streamDuplexWidensToWritable, STRING, typeEquals, UNDEFINED_T, VOID } from "../../ir/nodes.js";
 import { type DynamicImportResolution, type NpmBuiltinUse, type NpmLazyTrap } from "../npm.js";
 import { provenanceActive } from "../provenance-registry.js";
 import {
@@ -1326,6 +1326,17 @@ export class Lowerer {
   /** Width-coercion helpers (%rec.width.N / %arr.width.N), interned per
    * (from, to) shape pair — see widthCoerce. */
   readonly widthHelpers = new Map<string, string>();
+  /** Shape ids some object literal COMPLETED a required field of - the
+   * `{} as Record<K, V>` spelling, where V has no undefined arm and the
+   * literal therefore names fewer fields than the shape declares.
+   * Registered by lowerObjectLiteral at the point it builds such a literal,
+   * so a shape only grows a hidden member for a construction the program
+   * actually contains.
+   *
+   * armOwnMasks turns each of these into `ownmask` (so the enumeration
+   * surfaces read the instance's bits) and `reqabsent` (so a read of a
+   * required field asks the bit before handing out the slot's zero). */
+  readonly requiredAbsentTargets = new Set<string>();
   /** (fromShape, toShape) pairs whose width plan is being computed — the
    * cycle guard for RECURSIVE shapes (a self-referential record narrowing
    * into a self-referential subset). Re-entering an in-progress pair
@@ -2827,6 +2838,50 @@ export class Lowerer {
     this.nullProtoRenderings.push({ shapeId, revise });
   }
 
+  /** Every `in` over a REQUIRED field that answered the static `true`,
+   * with the closure that re-spells it once the COMPLETION targets are
+   * known.
+   *
+   * `'k' in r` on a declared non-optional field is true for every value of
+   * the shape -- which is exactly what stopped being true when a literal
+   * was allowed to omit one. Like the own-key guards above, whether this
+   * program contains such a literal is decided after the whole walk, so
+   * the site registers here and armOwnMasks installs `recordSlotFilled`
+   * only for the shapes a completion actually targeted. Every other
+   * program keeps the literal `true` it had: same IR, same bytes. */
+  readonly slotFilledGuards: { shapeId: string; field: string; install: () => void }[] = [];
+
+  /** Register one `in` guard (see slotFilledGuards). */
+  noteSlotFilledGuard(shapeId: string, field: string, install: () => void): void {
+    this.slotFilledGuards.push({ shapeId, field, install });
+  }
+
+  /** Sites that copy EVERY declared field of a record into a fresh literal
+   * whose field list is fixed at compile time - an object SPREAD, and only
+   * that. Every other whole-shape copy in the compiler writes through a
+   * statement it can guard (Object.assign's two helpers) or asks the
+   * own-key question itself (JSON, the enumeration surfaces, the
+   * record-to-dyn walker); a literal cannot, because "this key is absent"
+   * has no spelling in a static field list.
+   *
+   * So the spread of a value some literal COMPLETED is refused rather than
+   * answered. Registered here and judged after the walk, because whether
+   * the source shape is such a value is decided by armOwnMasks; a program
+   * with no completion never sees this. What it would take to ANSWER it:
+   * build the result as a completed literal and copy field by field behind
+   * `recordKeyPresent` - the same statement form Object.assign already
+   * uses - which needs the spread desugar to produce statements plus a
+   * result rather than one literal. */
+  readonly completedSpreadSites: { shapeId: string; loc: SrcLoc }[] = [];
+
+  /** Register one whole-shape literal copy (see completedSpreadSites). */
+  noteCompletedSpreadSite(shapeId: string, loc: SrcLoc): void {
+    if (this.completedSpreadSites.some((s) => s.shapeId === shapeId && s.loc.start === loc.start && s.loc.file === loc.file)) {
+      return;
+    }
+    this.completedSpreadSites.push({ shapeId, loc });
+  }
+
   /** Register one own-key presence guard (see ownKeyGuards). */
   noteOwnKeyGuard(
     shapeId: string,
@@ -2981,6 +3036,43 @@ export class Lowerer {
           `[ownmask] ${r.id} fields=${r.fields.length} maskable=${maskable(r) ? "Y" : "n"} armed=${armed.has(r.id) ? "Y" : "n"}`,
         );
       }
+    }
+    // The COMPLETED-LITERAL targets arm for a different reason than a
+    // crossing does, and they arm the same member: a literal left a
+    // required field unwritten, and byte 0 is the only thing that can say
+    // so. `reqabsent` rides alongside and is NOT set for a crossing - there
+    // a clear bit means "the source inherited this from its prototype",
+    // whose value the read must still return, so trapping would break the
+    // very population the mask was built for. OWNMASK_COMPLETED keeps the
+    // two apart on the instance as well as on the shape.
+    for (const id of this.requiredAbsentTargets) {
+      const sh = byId.get(id);
+      if (!sh) continue;
+      armed.add(id);
+      sh.reqabsent = true;
+    }
+    // ...and the `in` sites over those shapes' required fields, which
+    // answered a static `true` because until now every value of a shape
+    // really did carry every declared field.
+    for (const g of this.slotFilledGuards) {
+      if (!this.requiredAbsentTargets.has(g.shapeId)) continue;
+      g.install();
+    }
+    // ...and the whole-shape LITERAL copies, which have no such spelling
+    // and are refused instead (completedSpreadSites).
+    for (const s of this.completedSpreadSites) {
+      if (!this.requiredAbsentTargets.has(s.shapeId)) continue;
+      this.pushDiag(
+        unsupportedDiag(
+          "SC1090",
+          s.loc,
+          `spreading a record some literal in this program completed a REQUIRED field of ` +
+            `(the spread builds a literal with every declared field, and a completed value's absent ` +
+            `key has no slot to be absent in)`,
+          `shape ${JSON.stringify(s.shapeId)} is built somewhere by '{} as ...' leaving a required member ` +
+            `unwritten - copy the fields you need by name, or build the value with every field present`,
+        ),
+      );
     }
     for (const r of records) {
       if (!armed.has(r.id)) continue;
@@ -7628,6 +7720,30 @@ export class Lowerer {
     } finally {
       this.widthPlanning.delete(key);
     }
+  }
+
+  /** Whether a REQUIRED field's slot can be left at the allocator's zero
+   * while its own-key bit carries "absent" - lowerObjectLiteral's
+   * completion gate, and the only claim that completion makes about the
+   * SLOT.
+   *
+   * It is a claim about the RC and TRACE walkers, not about the value: the
+   * slot is never legitimately read (reqabsent's trap sees to that), so
+   * all it has to be is inert while the record lives and while it dies.
+   * Every refcounted type is a POINTER whose release is `if (p)
+   * release(p)` and whose trace visitor already meets NULL on every
+   * partially-built literal - the window between the allocator's calloc
+   * and the last field write is a collection point like any other, so
+   * NULL-tolerance there is an invariant this arm relies on rather than
+   * one it introduces. f64 and bool have no pointer to tolerate.
+   *
+   * Everything else declines, and the shape mismatch stands. `dyn` never
+   * reaches here (the dyn undefined completed it), and neither does an
+   * undefined-armed union (wrappedUndefined completed it); what is left to
+   * decline is the by-value and unit-kind residue, where "the allocator's
+   * zero" is not a statement anyone has checked. */
+  reqAbsentSlotOk(t: IrType): boolean {
+    return isRefCounted(t) || t.kind === "f64" || t.kind === "bool";
   }
 
   /** The VALIDATED extraction as a width-plan step: a DYN source into a

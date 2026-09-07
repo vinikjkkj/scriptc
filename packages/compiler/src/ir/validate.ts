@@ -18,7 +18,7 @@ import type {
   IrUnionDef,
   SrcLoc,
 } from "./nodes.js";
-import { settleOrValuePromiseTag, arrayOf, BOOL, BYTES_U8, bytesOf, canAdaptDynFuncTo, canDynCheckTo, canConvertToDyn, canExitIslandToType, canMarshalIntoIsland, canMarshalTypedFuncIntoIsland, CHILD_T, CHILDSTREAM_T, DGRAMSOCK_T, DV_BIG_SET_METHODS, DYN, DYN_HANDLE_KINDS, F64, ABORTCONTROLLER_T, ABORTSIGNAL_T, FILEHANDLE_T, FSWATCHER_T, HTTP2SESSION_T, HTTP2STREAM_T, HTTPCLIENTREQ_T, HTTPREQ_T, HTTPRES_T, HEADERS_T, REQUESTINIT_T, RESPONSE_T, islandPromisePayloadTag, isJsonSafeType, isRefCounted, isDynErrorClass, isSupportedIndexValue, isSupportedMapKey, isSupportedMapValue, isSupportedWeakKey, isSupportedSetElem, isUnitType, jsOpResultKind, JSVAL, NETSERVER_T, NETSOCKET_T, PROCSTREAM_T, REF_TRUTHY_KINDS, REGEX, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, SEARCH_PARAMS_T, SECURECTX_T, SPAWNRES_T, RTCPEERCONNECTION_T, RTCDATACHANNEL_T, SQLITEDB_T, SQLITESTMT_T, STATS_T, streamDuplexWidensToWritable, STRING, SYMBOL_T, TESTCTX_T, typeEquals, typeKey, unionFuncSetArmsOk, URL_T, VOID, wsGlobalPlan } from "./nodes.js";
+import { settleOrValuePromiseTag, arrayOf, BOOL, BYTES_U8, bytesOf, internalSlotFields, ownMaskBit, canAdaptDynFuncTo, canDynCheckTo, canConvertToDyn, canExitIslandToType, canMarshalIntoIsland, canMarshalTypedFuncIntoIsland, CHILD_T, CHILDSTREAM_T, DGRAMSOCK_T, DV_BIG_SET_METHODS, DYN, DYN_HANDLE_KINDS, F64, ABORTCONTROLLER_T, ABORTSIGNAL_T, FILEHANDLE_T, FSWATCHER_T, HTTP2SESSION_T, HTTP2STREAM_T, HTTPCLIENTREQ_T, HTTPREQ_T, HTTPRES_T, HEADERS_T, REQUESTINIT_T, RESPONSE_T, islandPromisePayloadTag, isJsonSafeType, isRefCounted, isDynErrorClass, isSupportedIndexValue, isSupportedMapKey, isSupportedMapValue, isSupportedWeakKey, isSupportedSetElem, isUnitType, jsOpResultKind, JSVAL, NETSERVER_T, NETSOCKET_T, PROCSTREAM_T, REF_TRUTHY_KINDS, REGEX, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, SEARCH_PARAMS_T, SECURECTX_T, SPAWNRES_T, RTCPEERCONNECTION_T, RTCDATACHANNEL_T, SQLITEDB_T, SQLITESTMT_T, STATS_T, streamDuplexWidensToWritable, STRING, SYMBOL_T, TESTCTX_T, typeEquals, typeKey, unionFuncSetArmsOk, URL_T, VOID, wsGlobalPlan } from "./nodes.js";
 
 /** Per-method signature for strIntrinsic: `argTypes` lists every argument
  * position (optional ones included); `minArgs` is how many may be omitted
@@ -3519,7 +3519,30 @@ function validateFunction(
           if (!ft) err(`shape ${shape.id} has no field "${f.name}"`, e.loc);
           else expectType(f.value, ft, `recordLit field "${f.name}"`);
         }
-        if (e.fields.filter((f) => !f.overflow && !f.drop).length !== shape.fields.length) {
+        if (e.ownmask === true) {
+          // The COMPLETED literal (recordWidthHelper's required-absent
+          // arm). It is the one literal allowed to name fewer fields than
+          // the shape declares, and every fence here is about the mask
+          // being able to say so: the shape must have ARMED the mask (the
+          // backends size the struct from the flag, so byte 0 would be a
+          // store past the end otherwise), it must carry `reqabsent` (which
+          // is what makes the READ of an unwritten slot throw instead of
+          // handing out the allocator's zero), and each omitted field must
+          // take a BIT - an internal slot takes none, so "not own" would
+          // have no spelling for it and the omission no representation.
+          if (!shape.ownmask) {
+            err(`recordLit establishes the own-key mask of shape ${shape.id}, which is not armed`, e.loc);
+          }
+          if (!shape.reqabsent) {
+            err(`recordLit establishes the own-key mask of shape ${shape.id}, which is not reqabsent`, e.loc);
+          }
+          for (const sf of shape.fields) {
+            if (seen.has(sf.name)) continue;
+            if (ownMaskBit(shape, sf.name) === null || internalSlotFields(shape).includes(sf.name)) {
+              err(`recordLit omits field "${sf.name}" of shape ${shape.id}, which takes no own-key bit`, e.loc);
+            }
+          }
+        } else if (e.fields.filter((f) => !f.overflow && !f.drop).length !== shape.fields.length) {
           err(`recordLit does not initialize every field of shape ${shape.id}`, e.loc);
         }
         if (e.toStr) {
@@ -3549,6 +3572,18 @@ function validateFunction(
           if (!typeEquals(e.type, field.type)) {
             err(`recordGet ${e.shapeId}.${e.field} type mismatch`, e.loc);
           }
+        }
+        break;
+      }
+      case "recordSlotFilled": {
+        checkExpr(e.obj);
+        const shape = records.get(e.shapeId);
+        const field = shape?.fields.find((f) => f.name === e.field);
+        if (!shape) err(`recordSlotFilled on undeclared shape "${e.shapeId}"`, e.loc);
+        else if (!field) err(`shape ${e.shapeId} has no field "${e.field}"`, e.loc);
+        else {
+          expectType(e.obj, { kind: "record", shapeId: e.shapeId }, "recordSlotFilled receiver");
+          if (e.type.kind !== "bool") err(`recordSlotFilled must be bool, got ${e.type.kind}`, e.loc);
         }
         break;
       }
