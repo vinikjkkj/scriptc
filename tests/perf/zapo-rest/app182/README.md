@@ -198,6 +198,59 @@ is now keyed on each value's PAYLOAD — for a static array crossing the
 boundary that is the ORIGIN the copy records, so `set` and `get` in adjacent
 statements agree. See `docs/estado-weakmap-cycle-keys.md` §3.
 
+### 9 -> 4 on `main`, and the last four are two groups
+
+`main` at `f3a913c4` carries `17dc06b9` (a TS object pattern over a dyn source
+binds the reads it desugars to), which closes the whole
+`crypto/nativeBackend.ts` group — the `:73` SC1031 destructure and the four
+SC2004 it cascaded into. Nothing else on this arm moved.
+
+Measured on this box, STRICT (no `--best-effort`), zig 0.16.0,
+`SCRIPTC_TARGET=x86_64-windows-gnu`, `SCRIPTC_CC=zigcc`, built under node
+v22.18.0 with `--provenance-sources`, counted off the build log with
+`rg -a -c ' - error SC[0-9]{4}: '` and cross-checked against the compiler's
+own `N errors.` line. Non-zero exit, so **no fence count — n/a, not 0**.
+
+| revision | log bytes | sites | roots | cascade (SC2004) |
+|---|---|---|---|---|
+| `7adee17b` (the WeakMap base) | 13,432 | 13 | 9 | 4 |
+| `block/weakdyn` | 10,548 | 9 | 5 | 4 |
+| **`f3a913c4` (main)** | **8,069** | **4** | **4** | **0** |
+
+**5 closed, 0 uncovered, 4 unchanged** (9 − 5 = 4). The cascade is gone
+entirely: every SC2004 on this arm was downstream of the one dyn destructure,
+so all four remaining diagnostics are **roots**.
+
+| code | site | what |
+|---|---|---|
+| SC2002 | `protocol/abprops.ts:47` | `{} as Record<AbPropName, AbPropConfigEntry>` — a 1,900-field record width |
+| SC2020 | `protocol/abprops.ts:55` | `Object.freeze(view)` where `view` is aliased, not a fresh literal |
+| SC2003 | `WaMessageDispatchCoordinator.ts:867` | `Promise.resolve({ phash: … })` — a width coercion inside a promise payload |
+| SC1090 | `client/events/privacy.ts:114` | `SETTING_VALUES[settingName]?.includes(value)` — `?.` over a keyed read whose IR union is wider than the checker's type |
+
+**The counting was positive-controlled rather than trusted.** A count that
+reads low mechanically is the standing hazard here, so the counter was first
+run against two logs whose answers are already recorded above:
+`weakdyn-base182.log` (13,432 bytes) and `weakdyn-head182.log` (10,548 bytes).
+It reproduced 13/9/4 and 9/5/4, file and line, with the compiler's own
+`N errors.` line agreeing in both.
+
+### What is left is not one merge
+
+`block/widthrest`'s `00d5cd1f` is aimed squarely at two of the four — its
+subject is "a keyed read is the width the signature declares, and a promise
+literal is built at the slot", which is the SC1090 and the SC2003 above. That
+would take the arm to **2**.
+
+The remaining pair is **both** in `protocol/abprops.ts`, and they are
+different problems that happen to share a file: `:47` is the record width,
+and `:55` is `Object.freeze` of an aliased value — frozen-ness is
+unobservable on a fresh literal and compiles there, but `view` is built by a
+loop and then frozen, so it would need the runtime frozen bit. Closing the
+width does not close the freeze. **Neither is on the streamed history-sync
+path**, so the arm reaching zero is gated on the record-width neighbourhood
+alone.
+
 The streamed history-sync path — `openHistoryBlobStream` inflating through
 `createUnzip`, then `streamProtoFields` walking it through
 `ProtoStreamReader` — is **clean**. `history-blob.ts`, `history-sync.ts` and
