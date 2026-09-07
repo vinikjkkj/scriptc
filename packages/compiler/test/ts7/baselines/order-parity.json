@@ -10905,6 +10905,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/7794-completed-record-own-keys.ts": {
+   "order": [
+    "<repo>/tests/corpus/7794-completed-record-own-keys.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/800-switch-basics.ts": {
    "order": [
     "<repo>/tests/corpus/800-switch-basics.ts"
