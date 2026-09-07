@@ -10845,6 +10845,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/7790-an-optional-member-the-width-view-does-not-name-survives-the-upcast.ts": {
+   "order": [
+    "<repo>/tests/corpus/7790-an-optional-member-the-width-view-does-not-name-survives-the-upcast.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/800-switch-basics.ts": {
    "order": [
     "<repo>/tests/corpus/800-switch-basics.ts"
