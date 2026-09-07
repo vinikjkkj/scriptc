@@ -10911,6 +10911,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/7795-a-widening-copy-back-is-not-a-second-spelling.ts": {
+   "order": [
+    "<repo>/tests/corpus/7795-a-widening-copy-back-is-not-a-second-spelling.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/800-switch-basics.ts": {
    "order": [
     "<repo>/tests/corpus/800-switch-basics.ts"

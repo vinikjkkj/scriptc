@@ -3702,6 +3702,44 @@ export class Lowerer {
    * risk). */
   readonly literalSpellings = new Map<string, string[]>();
 
+  /** RESHAPING COPIES — the literals the COMPILER writes, which carry no
+   * order of their own.
+   *
+   * `%rec.width.N`, `%obj.width.N` and `%ctorwitness.N` build their record
+   * literal by walking the DESTINATION shape's own field list: the fields are read out
+   * of an existing value one at a time and put into the slots the target
+   * declares. A record enumerates by its shape, so such a literal answers
+   * whatever `declaredOrder` says both before and after a re-pick — it
+   * cannot disagree with one, and it is not a construction an order can be
+   * taken FROM either.
+   *
+   * The completeness rule in reconcileKeyOrders could not tell it from a
+   * source literal the spelling walk had missed, so ONE widening copy back
+   * to a shape (`n as B`) vetoed the re-pick of that shape for the whole
+   * program. On `main` today that is a silent wrong answer six lines long:
+   *
+   *     interface A { a?: number }
+   *     interface B extends A { b?: number }
+   *     function keep(x: A): A { return x }
+   *     const n: A = keep({ a: 1, b: 2 } as B)
+   *     const wide: B = n as B
+   *     console.log(JSON.stringify(n), wide.b)
+   *
+   * B's declaredOrder is its INTERFACE member order, `b,a` (own members
+   * before inherited), and the one literal in the program spells `a,b`.
+   * Without the widen-back the re-pick fires and the program prints Node's
+   * `{"a":1,"b":2}`; with it the fiction survives, shape unification then
+   * merges A into B carrying `b,a` — order-preserving with respect to both
+   * members, so obligation 2 is not violated and `order-not-preserved`
+   * correctly stays silent — and the program prints `{"b":2,"a":1}`. The
+   * same veto turns tests/corpus-shaped programs whose ONLY literal is
+   * correctly spelled into an SC1090 refusal (the `w9b` control), which is
+   * a right program made red. */
+  readonly reshapeLitSites = new Set<string>();
+  noteReshapeLit(loc: SrcLoc): void {
+    this.reshapeLitSites.add(this.keyRiskLocKey(loc));
+  }
+
   /** Record one literal's spelled key order (see literalSpellings). */
   noteLiteralSpelling(loc: SrcLoc, names: string[]): void {
     const k = this.keyRiskLocKey(loc);
@@ -4179,7 +4217,7 @@ export class Lowerer {
       // this walk cannot point at has no construction to take an order from.
       if (all.size === 0) { reject("no recordLit of this shape reached the IR"); continue; }
       let complete = true;
-      for (const site of all) if (!known.has(site)) { complete = false; break; }
+      for (const site of all) if (!known.has(site) && !this.reshapeLitSites.has(site)) { complete = false; break; }
       if (!complete) { reject("a recordLit of this shape reported no spelling"); continue; }
       const spelled = [...known.values()][0]!;
       if (spelled.length < 2) { reject("one key has one order"); continue; }
@@ -6994,6 +7032,9 @@ export class Lowerer {
     );
     const builder = `%ctorwitness.${this.retagHelpers.size}`;
     this.retagHelpers.set(key, builder);
+    // Built by walking the TARGET's field list, exactly like the width
+    // copy: a reshaping literal, and no evidence of any order.
+    this.noteReshapeLit(loc);
     const instT: IrType = { kind: "object", className };
     const fields: { name: string; value: IrExpr }[] = [];
     for (const [i, m] of plan.entries()) {
@@ -8049,6 +8090,10 @@ export class Lowerer {
     // Interned BEFORE the body builds: a recursive nested-width field
     // (self-referential shapes) resolves to this helper itself.
     this.widthHelpers.set(key, name);
+    // The literal below is a RESHAPING COPY, not a spelling — see
+    // reshapeLitSites for why one of these used to veto a whole shape's
+    // key-order re-pick.
+    this.noteReshapeLit(loc);
     const fromT: IrType = { kind: "record", shapeId: fromId };
     const toT: IrType = { kind: "record", shapeId: toId };
     const r: IrExpr = { kind: "varRef", localId: "r.0", type: fromT, loc };
@@ -8768,6 +8813,9 @@ export class Lowerer {
     if (existing) return existing;
     const name = `%obj.width.${this.widthHelpers.size}`;
     this.widthHelpers.set(key, name);
+    // The third reshaping literal, built from `to.fields` exactly like the
+    // other two — see reshapeLitSites.
+    this.noteReshapeLit(loc);
     const fromT: IrType = { kind: "object", className };
     const toT: IrType = { kind: "record", shapeId: toId };
     const o: IrExpr = { kind: "varRef", localId: "o.0", type: fromT, loc };
