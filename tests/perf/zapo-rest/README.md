@@ -133,6 +133,8 @@ is enforceable.
 | `harness/isolation.mjs` | the cross-session instrument: plants asymmetric rows for three session ids on **its own** connection and reports/asserts per-session, per-table counts read directly from the file. Aborts rather than print a reassuring table of zeroes. |
 | `harness/scan.sh` | the 100%-C proof, armed: engine markers beside a `--dynamic` control and beside positive controls that must be non-zero |
 | `harness/traps.sh` | counts `[SCxxxx]` deferred-refusal sites and trap sites across every emitted TU |
+| `harness/memrig.mts` | **the rig itself** — drives the binary through pairing and a history sync with no phone, and samples it kernel-side. See "Running it" below |
+| `harness/pmon.c` | the kernel-side sampler the rig spawns; build it once with `zig cc` |
 | `harness/memrig-report.mjs` | the memory time series of one memrig run: presync, peak, settled, +30 s, +60 s, in both working set and private commit |
 | `harness/memrig-rows.mjs` | row counts and history-sync integrity for a run's store — what a streaming or serialising change has to leave untouched |
 | `harness/memrig-throughput.mjs` | what a sync cost in wall time, and whether the `progress` a consumer sees was monotonic |
@@ -300,17 +302,132 @@ partial store land on a chunk boundary more often.
 
 ### Running it
 
-The rig is `packages/fake-server/memrig.ts` in the zapo checkout: it drives this
-binary through pairing and the whole post-login sequence with no phone, and
-samples the child's `WorkingSet64`/`PrivateMemorySize64` kernel-side. The three
-scripts here read what it leaves behind, and every one of them takes the run
-directory as an argument and exits 2 when it cannot look — a hardcoded run root
-that has moved prints a clean table of zeroes and is believed.
+The rig is **`harness/memrig.mts`**. It drives this binary through pairing and
+the whole post-login sequence with no phone, delivers the history sync, idles,
+and asks the service to exit through `/shutdown`; a separate sampler process
+(`harness/pmon.c`) records the child's `WorkingSet64` / `PrivateMemorySize64`
+kernel-side across the whole run, so peak and settled both come out of one
+series. The three readers take the run directory as an argument and exit 2 when
+they cannot look — a hardcoded run root that has moved prints a clean table of
+zeroes and is believed.
+
+**It used to live outside this repo** (`packages/fake-server/memrig.ts` in a
+zapo checkout) and was lost with the worktree that held it, which left every
+settled figure below real but unreproducible for a while. The readers survived
+only because they were committed. It is committed now; keep it that way.
+
+Build the sampler once:
 
 ```sh
-CHUNKS=8 CONVS=400 MSGS=6 TEXTLEN=300 IDLE_S=60 \
-  node --import tsx memrig.ts <exe> <tag>
+zig cc -O2 -o harness/pmon.exe harness/pmon.c -lpsapi
+```
+
+Then, **from the zapo checkout's root directory** (see below):
+
+```sh
+export ZAPO_FAKE_SERVER=<zapoRoot>/packages/fake-server
+export MEMRIG_OUT=<runRoot>            # default: harness/memrig-run
+cd <zapoRoot>
+node --import tsx <scriptc>/tests/perf/zapo-rest/harness/memrig.mts \
+  <exe> <tag> CHUNKS=8 CONVS=400 MSGS=6 TEXTLEN=300 IDLE_S=60 SAMPLE_MS=250
+
 node harness/memrig-report.mjs     <runRoot> <tag>     # presync/peak/settled/+30/+60
 node harness/memrig-rows.mjs       <runRoot> <tag>...  # row counts and integrity
 node harness/memrig-throughput.mjs <runRoot> <tag>...  # wall time and progress order
 ```
+
+Knobs are `KEY=VAL` arguments (equivalently environment; the rig reads each one
+in exactly one place, so the arm it records cannot disagree with the workload it
+ran). Any key it does not recognise is passed through to the child, which is how
+an env-gated arm — `SCR_CYCLE_ARENA_BUDGET=16777216` — is measured on the *same*
+executable as its control.
+
+**Three things the old instructions did not say, each of which silently breaks
+the measurement:**
+
+* **The launch directory is part of the protocol.** fake-server's sources import
+  `zapo-js/util`, `zapo-js/crypto` and friends, which are not packages but
+  tsconfig `paths` entries in the **zapo root's** `tsconfig.json`. tsx binds that
+  tsconfig at `--import` registration time, from the cwd the process was
+  launched in. Measured: `process.chdir()` inside the rig is too late and the
+  import still fails. The rig refuses rather than run from the wrong directory.
+* **The fake-server checkout needs its `node_modules`.** `bytesToHex` is
+  re-exported from `zapo-js/util`, so a bare provenance snapshot of
+  `packages/fake-server` — which has no `node_modules` and no sibling `src` to
+  resolve against — cannot be used. Point `ZAPO_FAKE_SERVER` at a materialised
+  checkout.
+* **`memrig-throughput.mjs` needs `<tag>.events.json`,** the service's own event
+  ring fetched over `GET /events?type=history_sync_chunk` **while the child is
+  still alive** — the only window in which it can be read. The rig this one was
+  rebuilt from never wrote that file, so the throughput reader could not read a
+  single run of it. This one writes it, and marks a count mismatch as a phase
+  rather than leaving an empty ring to look like a pass.
+
+## Reading a set of runs
+
+A single run is not a result. Settled working set on one arm has been measured
+to move ~20 MiB run to run, because a run lands in one of two **peak modes** —
+about 248 MiB or about 211 MiB — and settled tracks which mode it landed in.
+The mode is a property of the run, not of the arm: both arms produce both.
+
+The rule the shipped figures are read by, and the one to keep using:
+
+* **Group by peak mode, then take the median within a mode.** Never mix modes
+  into one average, and never quote a mean across modes — that number belongs
+  to no configuration.
+* **Compare arms within a mode**, never across. Two arms are comparable when
+  their peaks match; the peak is a property of the workload, so a mismatch
+  means the runs are not answering the same question.
+* **Say n.** A mode with one run in it is a reading, not a median.
+
+Worked from the 15 preserved runs behind the shipped table, all reproducible
+with `memrig-report.mjs`:
+
+| arm | runs in the ~248 mode | settled median | peak median |
+|---|---|---|---|
+| old arena | b1 166.28, b2 166.50, b4 159.17, b5 160.50 | **163.39** | 248.34 |
+| this arena | n1 105.14, n2 104.50, n3 104.17 | **104.50** | 247.69 |
+
+That is where the shipped `163.39 → 104.50` (−58.89 MiB, −36%) comes from. The
+two runs that landed in the ~211 mode are excluded from those cells and form
+their own, independent check — b3 146.74 against n4 98.37, a −48.37 MiB move in
+the same direction — which is the reason the headline is believed rather than
+attributed to mode luck.
+
+The `SCR_CYCLE_ARENA_BUDGET` cells sit in a **third** peak mode (~258 MiB) and
+have **n=1 each** (bbud 143.02, nbud3 133.93). They are matched to each other,
+which is what that comparison needs, but they are single readings and the
+±20 MiB run-to-run spread above applies to them too. The +29 MiB they show is
+larger than that spread; a smaller difference measured this way would not be.
+
+### Verified on a rebuild, 2026-09-07
+
+The rig in this directory was run against a **freshly built** `zapo-rest.exe`
+(31 min, rc=0, 67 advisories) to check that it still reproduces the record it
+was used to produce. Three runs, same host, sequential, `MEMRIG_OUT` on `G:`:
+
+| tag | arm | peak WS | settled WS | recorded counterpart |
+|---|---|---|---|---|
+| `aa1` | default | 210.53 | **98.18** | n4 98.37 (peak 212.23) |
+| `aa2` | default | 211.59 | **97.26** | n4 98.37 (peak 212.23) |
+| `bud1` | `SCR_CYCLE_ARENA_BUDGET=16777216` | 218.71 | **126.97** | nbud2 127.00 (peak 218.79) |
+
+All three landed in a low peak mode, so all three are read against the
+low-mode records rather than the ~248 headline cells.
+
+* **The A/A floor is 0.92 MiB** (98.18 vs 97.26, same arm, same binary, same
+  mode). Any claimed movement smaller than that is noise on this host.
+* **The budget arm costs +29.25 MiB** here (126.97 against the 97.72 A/A mean),
+  against **+29.43 MiB** in the record. The knob's documented penalty
+  reproduces. Note this figure spans two peak modes on both sides — the record
+  crosses them too (nbud2 218.79 against n4 212.23) — so it is the one number
+  in this file not read within a single mode.
+* **It reproduces across backends.** The record was taken from a build
+  documented as C-backend; this binary's emitted IR is headed `Generated by
+  scriptc (LLVM backend)`. Settled matches to 0.19 MiB on the default arm and
+  0.03 MiB on the budget arm, which is well inside the A/A floor. That is the
+  first *measurement* behind the claim that these figures are backend
+  independent; it had previously only been argued from where the arena lives.
+
+Reproduce with `harness/memrig-report.mjs <runRoot> <tag>`; the run
+directories are disposable, the readers exit 2 rather than print zeroes.
