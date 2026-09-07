@@ -387,3 +387,119 @@ ownmask has a WRITER at every record construction — the deferred
 required-added-field class, whose absence is why `ownPresentCondC` falls
 back to `true` when mask byte 0 is zero. Closing `:47` is that work and
 nothing smaller.
+
+## The 1.6.2 → 1.8.2 settled-memory A/B, measured 2026-09-07
+
+**The headline: the upgrade moves the PEAK, not the settled floor.** Working-set
+peak falls **25.6 MiB (−12.1%)**; settled working set **rises 6.5 MiB**, and
+private commit at peak **rises 131.7 MiB**. The streaming history sync does what
+it was written to do and does not, on this workload, reduce where the process
+settles.
+
+Rig: `harness/memrig.mts` with `harness/pmon.exe`, fake server from the zapo
+checkout at `v1.8.2-2-g44bf834`, documented workload
+(`CHUNKS=8 CONVS=400 MSGS=6 TEXTLEN=300 IDLE_S=60`, `SETTLE_MS=45000`,
+`PRESYNC_MS=20000`). 17 runs, arms **alternated** so host drift cannot load onto
+one side. Every run `rc=0`, `chunks 8/8`, `refusals 0`, and a clean `/shutdown`
+200 — no fallback kills, so no run is a kill artefact.
+
+### Grouped by peak mode, median within mode
+
+| | 1.6.2 arm | 1.8.2 arm | delta |
+|---|---|---|---|
+| dominant peak mode | **~211 MiB** (n=7) | **~186 MiB** (n=8) | |
+| peak working set | 211.25 | **185.62** | **−25.62 (−12.1%)** |
+| peak private commit | 583.42 | **715.07** | **+131.65 (+22.6%)** |
+| settled working set | **97.56** | **104.02** | **+6.45 (+6.6%)** |
+| presync baseline | 31.21 | 40.76 | +9.55 |
+| settled − presync | 66.30 | **63.40** | −2.90 |
+| within-mode settled spread | **0.93** | 2.29 | |
+
+Off-mode singletons, excluded from the medians and reported rather than
+dropped: 1.6.2 `o3` peak 247.00 settled 103.97; 1.8.2 `nn7` peak 215.28
+settled 107.16. Both move in the same direction as their arm's mode.
+
+**The instrument reproduced its own floor.** The 1.6.2 arm's within-mode spread
+is **0.93 MiB** against the **0.92 MiB** A/A floor recorded when the rig was
+rebuilt. The +6.45 MiB settled difference is seven times that floor and is a
+real signal; the −2.90 MiB retention difference is about three times it, and the
+1.8.2 arm's own spread is 2.29, so that one is weak.
+
+### What the settled number does and does not mean
+
+The 1.8.2 arm settles **higher in absolute terms**, and the honest reading is
+that **this is a floor effect, not retention**. Its presync baseline — measured
+after login and before a byte of history — is already **+9.55 MiB**, which is
+*larger* than the entire settled gap. Retention above each arm's own baseline is
+**66.30 vs 63.40 MiB**, i.e. 1.8.2 holds slightly *less* after the sync than
+1.6.2 does. The bigger binary (32,368,640 vs 27,950,592 bytes) starts higher and
+stays higher.
+
+So: **the arena fix is what bought the settled win** (163.39 → 104.50 in the
+record, and this 1.6.2 arm sits at 97.56 in the low mode). The 1.8.2 upgrade did
+not add to it and slightly gives back in absolute terms. Those are two
+independent results and only one of them belongs to this upgrade.
+
+**Private commit is the finding nobody was looking for.** 1.8.2 keeps 25.6 MiB
+fewer pages resident at peak while committing **131.7 MiB more**. Working set and
+commit charge answer different questions, and on this workload the upgrade moves
+them in *opposite* directions. Anything sizing a page file or packing services
+onto a host should read the commit column, not the working set.
+
+### Two caveats that limit this table, stated because they are load-bearing
+
+**1. The arms are not from the same compiler, and cannot currently be.** The
+1.6.2 arm is built at `c6e2dccf`, the 1.8.2 arm at `8fec0b90`. There is **no
+revision of `main` at which both arms compile** (see the regression below):
+1.6.2 needs a revision *before* `00d5cd1f`, and 1.8.2 needs `349b03a0`, which is
+after it. The comparison therefore carries the compiler delta between those two
+revisions as an uncontrolled variable.
+
+**2. The arms are on different backends.** 1.6.2 built LLVM (67 advisories),
+1.8.2 built C (77 advisories; `llvm refused: weakmap:intrinsic`). The record
+holds that settled figures are backend-independent to 0.19 MiB — inside the
+floor — but that was measured on the 1.6.2 arm alone and is assumed, not
+verified, for 1.8.2.
+
+**3. The peak modes do not overlap, so "compare within a mode" could not be
+honoured.** The rule was written for run-to-run mode variation *within* one arm.
+Here the arms sit in systematically different modes — 1.6.2 never landed near
+186 in 8 runs, 1.8.2 never near 211 in 9 — and that separation *is* the treatment
+effect rather than luck. The medians above are therefore mode-to-mode, which the
+rule forbids for noise and which is unavoidable here; it is flagged rather than
+hidden.
+
+## The 1.6.2 arm does not compile on current `main` — bisected to `00d5cd1f`
+
+Found while trying to build the baseline. The 1.6.2 arm fails with **one**
+diagnostic, `SC1090` at
+`zapo-js@1.6.2 src/client/coordinators/WaMessageDispatchCoordinator.ts:697:24`:
+
+```
+return Promise.resolve({ phash: computePhashV2(phashTargets) })
+```
+
+Bisected by building, not by reading:
+
+| revision | widthrest present | 1.6.2 arm |
+|---|---|---|
+| `c6e2dccf` | no | **builds**, rc=0, 67 advisories |
+| `e97fec08` | yes | fails, 1 × SC1090 |
+| `3f3dd523` | yes | fails, 1 × SC1090 |
+
+The `c6e2dccf` build's **67 advisories** match exactly the "31 min, rc=0, 67
+advisories" recorded when the rig was rebuilt, which identifies it as the same
+build that produced the A/A floor — so the arm was healthy that morning and is
+not merely untested.
+
+`00d5cd1f` is *"a keyed read is the width the signature declares, and a promise
+literal is built at the slot"*, and the refusing site is a promise literal at a
+slot. It closed the 1.8.2 spelling of this construct (`SC2003` at
+`WaMessageDispatchCoordinator.ts:867`) and opened the 1.6.2 spelling, which
+presents with the opposite direction: the *value* is the wide
+`Promise<{ customNodes…; extraParticipants…; phash: string | undefined }>` and
+the *expected* is the narrow `Promise<{ phash: string }>`, where the 1.8.2 case
+was narrow-into-wide.
+
+This is only visible if something still compiles the 1.6.2 arm. Nothing in CI
+does; it was found because a baseline needed building.
