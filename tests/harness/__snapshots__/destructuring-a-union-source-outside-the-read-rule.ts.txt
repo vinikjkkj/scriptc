@@ -1,0 +1,47 @@
+destructuring-a-union-source-outside-the-read-rule.ts:34:9 - error SC1031: object destructuring of non-record values (the source is union-typed) are not supported yet
+
+  33 | function withRest(target: Blocklist): string {
+  34 |   const { pnJid, ...rest } = target;
+     |         ^~~~~~~~~~~~~~~~~~
+  35 |   return String(pnJid) + JSON.stringify(rest);
+
+destructuring-a-union-source-outside-the-read-rule.ts:35:17 - error SC2004: uses of 'pnJid' inherit the blocker on its declaration
+
+  34 |   const { pnJid, ...rest } = target;
+  35 |   return String(pnJid) + JSON.stringify(rest);
+     |                 ^~~~~
+  36 | }
+
+  hint: the declaration of 'pnJid' did not compile — fix the diagnostic reported there and these sites clear with it
+
+destructuring-a-union-source-outside-the-read-rule.ts:40:9 - error SC1031: array destructuring of non-array values (the source is union-typed) are not supported yet
+
+  39 | function positions(pair: readonly [number, string] | readonly [string, number]): string {
+  40 |   const [first, second] = pair;
+     |         ^~~~~~~~~~~~~~~
+  41 |   return String(first) + "/" + String(second);
+
+destructuring-a-union-source-outside-the-read-rule.ts:41:17 - error SC2004: uses of 'first' inherit the blocker on its declaration
+
+  40 |   const [first, second] = pair;
+  41 |   return String(first) + "/" + String(second);
+     |                 ^~~~~
+  42 | }
+
+  hint: the declaration of 'first' did not compile — fix the diagnostic reported there and these sites clear with it
+
+destructuring-a-union-source-outside-the-read-rule.ts:46:11 - error SC1031: destructuring 'legacy' off a union-typed source (every arm must be a record answering 'legacy', exactly as a '.legacy' read on the same value must — narrow to a single arm first) is not supported yet
+
+  45 | function onlyOneArm(target: Blocklist): string {
+  46 |   const { legacy } = target as Blocklist & { readonly legacy?: boolean };
+     |           ^~~~~~
+  47 |   return String(legacy);
+
+destructuring-a-union-source-outside-the-read-rule.ts:47:17 - error SC2004: uses of 'legacy' inherit the blocker on its declaration
+
+  46 |   const { legacy } = target as Blocklist & { readonly legacy?: boolean };
+  47 |   return String(legacy);
+     |                 ^~~~~~
+  48 | }
+
+  hint: the declaration of 'legacy' did not compile — fix the diagnostic reported there and these sites clear with it

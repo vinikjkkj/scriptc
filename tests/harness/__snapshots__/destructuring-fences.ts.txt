@@ -1,64 +1,64 @@
-destructuring-fences.ts:27:9 - error SC1031: destructuring the method 'describe' (a detached method loses its receiver — call it through the instance) is not supported yet
+destructuring-fences.ts:30:9 - error SC1031: destructuring the method 'describe' (a detached method loses its receiver — call it through the instance) is not supported yet
 
-  26 | }
-  27 | const { describe } = new C(); // method extraction keeps the fence
+  29 | }
+  30 | const { describe } = new C(); // method extraction keeps the fence
      |         ^~~~~~~~
-  28 | console.log(describe());
+  31 | console.log(describe());
 
-destructuring-fences.ts:29:12 - error SC1031: rest bindings packing the remaining properties as 'unknown' (only plain record types pack) is not supported yet
+destructuring-fences.ts:32:12 - error SC1031: rest bindings packing the remaining properties as 'unknown' (only plain record types pack) is not supported yet
 
-  28 | console.log(describe());
-  29 | const { f, ...restOfC } = new C(); // rest over a class instance keeps the fence
+  31 | console.log(describe());
+  32 | const { f, ...restOfC } = new C(); // rest over a class instance keeps the fence
      |            ^~~~~~~~~~
-  30 | console.log(f, Object.keys(restOfC).length);
+  33 | console.log(f, Object.keys(restOfC).length);
 
-destructuring-fences.ts:31:9 - error SC1090: reading a property that has only a setter ('onlyIn' — Node would yield undefined) is not supported yet
+destructuring-fences.ts:34:9 - error SC1090: reading a property that has only a setter ('onlyIn' — Node would yield undefined) is not supported yet
 
-  30 | console.log(f, Object.keys(restOfC).length);
-  31 | const { onlyIn } = new C(); // tsc types the setter-only read; the fence names it
+  33 | console.log(f, Object.keys(restOfC).length);
+  34 | const { onlyIn } = new C(); // tsc types the setter-only read; the fence names it
      |         ^~~~~~
-  32 | console.log(onlyIn);
+  35 | console.log(onlyIn);
 
-destructuring-fences.ts:45:9 - error SC1031: object destructuring of non-record values (the source is union-typed) are not supported yet
+destructuring-fences.ts:48:11 - error SC1031: destructuring 'count' off a union-typed source (every arm must be a record answering 'count', exactly as a '.count' read on the same value must — narrow to a single arm first) is not supported yet
 
-  44 | function fromUnion(u: E1 | E2): string {
-  45 |   const { b } = u; // union source: narrow first
-     |         ^~~~~
-  46 |   return b;
+  47 | function fromUnion(u: E1 | E2): number {
+  48 |   const { count } = u as (E1 | E2) & { count?: number }; // only one arm has it
+     |           ^~~~~
+  49 |   return count ?? 0;
 
-destructuring-fences.ts:46:10 - error SC2004: uses of 'b' inherit the blocker on its declaration
+destructuring-fences.ts:49:10 - error SC2004: uses of 'count' inherit the blocker on its declaration
 
-  45 |   const { b } = u; // union source: narrow first
-  46 |   return b;
-     |          ^
-  47 | }
+  48 |   const { count } = u as (E1 | E2) & { count?: number }; // only one arm has it
+  49 |   return count ?? 0;
+     |          ^~~~~
+  50 | }
 
-  hint: the declaration of 'b' did not compile — fix the diagnostic reported there and these sites clear with it
+  hint: the declaration of 'count' did not compile — fix the diagnostic reported there and these sites clear with it
 
-destructuring-fences.ts:51:7 - error SC1031: object destructuring of non-record values (the source is array-typed) are not supported yet
+destructuring-fences.ts:54:7 - error SC1031: object destructuring of non-record values (the source is array-typed) are not supported yet
 
-  50 | const xs = [1, 2, 3];
-  51 | const { length: len } = xs; // object patterns over arrays keep the fence
+  53 | const xs = [1, 2, 3];
+  54 | const { length: len } = xs; // object patterns over arrays keep the fence
      |       ^~~~~~~~~~~~~~~
-  52 | console.log(len);
+  55 | console.log(len);
 
-destructuring-fences.ts:55:9 - error SC1031: rest bindings over index-signature shapes (the undeclared entries would need overflow packing) are not supported yet
+destructuring-fences.ts:58:9 - error SC1031: rest bindings over index-signature shapes (the undeclared entries would need overflow packing) are not supported yet
 
-  54 | const indexed: Record<string, number> = { a: 1 };
-  55 | const { ...allOfIt } = indexed; // index-signature rest needs overflow packing
+  57 | const indexed: Record<string, number> = { a: 1 };
+  58 | const { ...allOfIt } = indexed; // index-signature rest needs overflow packing
      |         ^~~~~~~~~~
-  56 | console.log(allOfIt["a"]);
+  59 | console.log(allOfIt["a"]);
 
-destructuring-fences.ts:60:4 - error SC1031: defaults on nested patterns in destructuring assignment (bind a variable with the default, then destructure it) is not supported yet
+destructuring-fences.ts:63:4 - error SC1031: defaults on nested patterns in destructuring assignment (bind a variable with the default, then destructure it) is not supported yet
 
-  59 | let sink = 0;
-  60 | ({ inner: { v: sink } = { v: 2 } } = holder); // a DEFAULT on a nested assignment target keeps the fence
+  62 | let sink = 0;
+  63 | ({ inner: { v: sink } = { v: 2 } } = holder); // a DEFAULT on a nested assignment target keeps the fence
      |    ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-  61 | console.log(sink);
+  64 | console.log(sink);
 
-destructuring-fences.ts:68:14 - error SC1031: rest bindings over instances of 'WithPrivate' (JS copies the non-public field 'hidden' into the rest object, which the rest type cannot name) is not supported yet
+destructuring-fences.ts:71:14 - error SC1031: rest bindings over instances of 'WithPrivate' (JS copies the non-public field 'hidden' into the rest object, which the rest type cannot name) is not supported yet
 
-  67 | }
-  68 | const { pub, ...restOfPriv } = new WithPrivate(); // JS copies 'hidden' into the rest object; the rest type cannot name it
+  70 | }
+  71 | const { pub, ...restOfPriv } = new WithPrivate(); // JS copies 'hidden' into the rest object; the rest type cannot name it
      |              ^~~~~~~~~~~~~
-  69 | console.log(pub, JSON.stringify(restOfPriv));
+  72 | console.log(pub, JSON.stringify(restOfPriv));

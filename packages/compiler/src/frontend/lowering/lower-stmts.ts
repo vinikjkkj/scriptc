@@ -31,7 +31,7 @@ import { namespaceConditionalOf } from "./lower-nsvalue.js";
 import { builtinMemberRequireDecl, builtinNamespaceDestructureModuleOf, createRequireBindingDecl, createRequireCalleeFileOf, createRequireNamespaceDecl, nodeRequireArgumentError, requireFnValueDeclType } from "./lower-builtins.js";
 import { lowerEnumDeclaration } from "./lower-enums.js";
 import { ctorObjectGlobalValue, dynAssertionReceiver, isDynSafeReadWidth, isImmutablePrimitiveWidth } from "./lower-exprs.js";
-import { keyedAccessOverIndexSignature, localTakesWidenedKeyedRead, narrowBridgeUnion, unitArmsOf } from "./lower-exprs.js";
+import { keyedAccessOverIndexSignature, localTakesWidenedKeyedRead, narrowBridgeUnion, unionFieldReadAt, unitArmsOf } from "./lower-exprs.js";
 import { abstractPropertyDeclOf, aliasTypeofNarrows, checkedJsNumber, compoundCombine, writeTypeOf, fnOwnCounters, fnOwnPropBox, fnOwnRoutableKey, fnOwnWhy, isMatchSliceType, lowerGroupsProjection, matchResultNamedGroupsOf, probeLower, pureReemittable, symbolFieldInfo, tonumWhy } from "./lower-exprs.js";
 import { UNSUPPORTED, checkerPanicDiag, isCheckerPanic, requiresDynamicDiag } from "../../diagnostics/diagnostic.js";
 import { isUnitOnlyTsType, unitOnlyUnion } from "../types.js";
@@ -2394,6 +2394,63 @@ export function lowerStmt(L: Lowerer, stmt: ts.Statement): IrStmt | IrStmt[] | n
         let value: IrExpr = { kind: "strIntrinsic", method: "length", receiver: srcRef(), args: [], type: F64, loc };
         if (el.initializer) value = applyBindingDefault(L, el, value);
         L.bindPatternTarget(el.name, value, isLet, out);
+      }
+      return;
+    }
+    // A UNION source under an OBJECT pattern (`const { pnJid, username,
+    // displayName } = target` over zapo's two-arm `WaBlocklistTarget`):
+    // destructuring IS one property read per bound name, and a union
+    // RECEIVER already answers a property read — the same-typed arm read
+    // (unionDisc), the lifted per-arm join switch, the index-signature
+    // keyed read. The kind fence below stood in FRONT of all three: the
+    // very same function written as `const pnJid = target.pnJid` compiles
+    // and runs Node-exact today, and the destructure spelling of it did
+    // not. So each element hands its name to that reader and binds what it
+    // answers — the identical IR node the dot access builds, which is why a
+    // destructure and the reads it desugars to cannot disagree.
+    //
+    // What stays fenced is the REST element: `{ a, ...rest }` binds the
+    // fields the pattern did not consume, and over a union that set is
+    // decided by the TAG at runtime — no one record shape spells it, and
+    // the checker's rest type is a union the packing loop has no form for.
+    // A whole-pattern fence is the honest answer there, so a rest anywhere
+    // in the pattern drops the pattern through to it. Defaults ride along
+    // untouched: applyBindingDefault tests the read's undefined arm, and
+    // the read's type is the join, so it behaves exactly as it does over a
+    // record field of the same type.
+    if (
+      srcType.kind === "union" &&
+      pattern.elements.length > 0 &&
+      pattern.elements.every((el) => el.name === undefined || el.dotDotDotToken === undefined)
+    ) {
+      // Two passes: every element's read resolves BEFORE any of them
+      // binds, so a pattern with one unservable name reports that name
+      // instead of half-binding the ones ahead of it.
+      const reads: { el: ts.BindingElement; value: IrExpr }[] = [];
+      for (const el of pattern.elements) {
+        if (el.name === undefined) continue;
+        const prop = el.propertyName ?? el.name;
+        const propName =
+          ts.isIdentifier(prop) || ts.isComputedPropertyName(prop) || ts.isStringLiteralLike(prop) || ts.isNumericLiteral(prop)
+            ? patternKeyNameOf(L, prop as ts.PropertyName)
+            : null;
+        if (propName === null) {
+          L.unsupported("SC1031", el, "destructuring with computed keys that do not fold to one property name");
+        }
+        const read = unionFieldReadAt(L, el, srcRef(), propName);
+        if (read === null) {
+          L.unsupported(
+            "SC1031",
+            el,
+            `destructuring '${propName}' off a union-typed source (every arm must be a record ` +
+              `answering '${propName}', exactly as a '.${propName}' read on the same value must — ` +
+              `narrow to a single arm first)`,
+          );
+        }
+        reads.push({ el, value: read });
+      }
+      for (const { el, value } of reads) {
+        L.bindPatternTarget(el.name!, el.initializer ? applyBindingDefault(L, el, value) : value, isLet, out);
       }
       return;
     }
