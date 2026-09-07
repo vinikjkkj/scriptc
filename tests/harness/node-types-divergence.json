@@ -39,10 +39,6 @@
       "3831-incoming-message-as-readable.ts",
       "3832-incoming-message-readable-teardown.ts"
     ],
-    "ChildProcessByStdio<null, Readable, Readable> and its members": [
-      "1565-spawn-pipe-streams.ts",
-      "1657-spawn-async-neutral.ts"
-    ],
     "singletons": [
       "1447-stdin-closed-events.ts: SC1090 reading 'length' off a value of type any",
       "1448-stream-columns.ts: SC2020 process.stdout/stderr.columns as a plain number",
@@ -54,6 +50,31 @@
       "2462-qs-stringify.ts: SC2020 querystring.stringify over a wide value union",
       "(CLOSED by block/elemresolve: 2620-ee-override-once-order.ts and 2622-ee-override-filter.ts, SC1090 .join() element type - the checker's element was wider than the array's own, and .join's joinable-union test read the checker's)",
       "3193-child-stream-into-unknown-round-trip.ts: SC2003 union re-tag ordering"
+    ],
+    "the unannotated data-listener chunk (was: ChildProcessByStdio and its members)": [
+      "CLOSED and REPLACED, the way the address() cluster above was. These two",
+      "were reported as the ChildProcessByStdio<...> fence: under @types/node a",
+      "tuple stdio selects an overload returning ChildProcessByStdio<I, O, E>, a",
+      "different SYMBOL NAME for the same child handle, and mapType matched only",
+      "'ChildProcess' -- so the RECEIVER fenced and the listener behind it was",
+      "never analysed. mapType now accepts both names and that fence is gone.",
+      "",
+      "What the receiver fence was HIDING is the codes recorded now, and they are",
+      "one cause: `child.stdout?.on('data', (chunk) => ...)` leaves chunk",
+      "unannotated, and @types/node types it `unknown` where the shipped fallback",
+      "types it `Buffer`. 1565 L17/L81 and 1657 L38/L41 are the SC1090 'data",
+      "listeners whose parameter is not Buffer ... got unknown'; 1565 L18 and",
+      "1657 L39/L42 the SC2020 'StringDecoder.write of unknown data' downstream",
+      "of it; 1565 L82 the SC1043 compare and L84 the SC2011 '>' on the any-typed",
+      "chunk.length. EXPOSED, not caused, and measured three ways: the same two",
+      "codes appear on base on a receiver base already mapped (an annotated",
+      "`const c: ChildProcess`, tests/perf/mediautils-0907/probes/",
+      "p-annot-optchain.ts); annotating the chunk in that probe gives zero; and",
+      "annotating ONLY the chunk in these two programs -- nothing else -- takes",
+      "them to ZERO diagnostics, so every code here is the chunk's.",
+      "",
+      "They therefore stay listed: the programs still diverge between the two",
+      "declaration worlds, just for the reason that was behind the first one."
     ]
   },
   "programs": [
@@ -82,6 +103,9 @@
       "name": "1565-spawn-pipe-streams.ts",
       "mode": "FENCE",
       "codes": [
+        "SC1043",
+        "SC1090",
+        "SC2011",
         "SC2020"
       ]
     },
@@ -103,6 +127,7 @@
       "name": "1657-spawn-async-neutral.ts",
       "mode": "FENCE",
       "codes": [
+        "SC1090",
         "SC2020"
       ]
     },

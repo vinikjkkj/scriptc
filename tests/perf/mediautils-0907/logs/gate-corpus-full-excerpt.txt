@@ -1,0 +1,27 @@
+# EXCERPT of gate-corpus-full.log (RE-RUN against the corrected compiler).
+# The full log is 143467 B of per-program pass lines.
+
+ORACLE-NODE v25.9.0
+zig=0.16.0  cc=zigcc  target=x86_64-windows-gnu  workers=[unset]
+=== START 2026-09-07T18:42:10-03:00
+
+ RUN  v3.2.7 <blocks>/mediautils
+
+  [... 1622 per-program pass lines elided ...]
+
+   ✓ differential corpus (1863 programs) > 997-fs-modules\main.ts  310ms
+
+ Test Files  1 passed (1)
+      Tests  1863 passed (1863)
+   Start at  18:42:11
+   Duration  828.85s (transform 4.83s, setup 0ms, collect 7.01s, tests 821.09s, environment 0ms, prepare 204ms)
+
+VITEST-EXIT=0
+=== DONE 2026-09-07T18:56:00-03:00
+=== GATE-EXIT rc=0 ===
+
+# COUNTED VERDICT over the full 143467-byte log:
+#   PASS-MARKERS        = 1622
+#   FAIL-MARKERS        = 0
+#   Failed Tests blocks = 0
+#   AssertionError      = 0

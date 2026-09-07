@@ -1,0 +1,96 @@
+ORACLE-NODE v25.9.0
+SHARD=1/20  zig=0.16.0  cc=zigcc  target=x86_64-windows-gnu
+SCRIPTC_TEST_WORKERS=[unset]
+=== START 2026-09-07T17:10:36-03:00
+
+ RUN  v3.2.7 <blocks>/mediautils
+
+ ✓ tests/harness/differential.test.ts (79 tests) 246335ms
+   ✓ differential corpus (79 programs, shard 1/20) > 001-hello.ts  48597ms
+   ✓ differential corpus (79 programs, shard 1/20) > 102-comparisons.ts  687ms
+   ✓ differential corpus (79 programs, shard 1/20) > 1351-path-parts.ts  812ms
+   ✓ differential corpus (79 programs, shard 1/20) > 1362-spawn-timers.ts  782ms
+   ✓ differential corpus (79 programs, shard 1/20) > 1364-union-truthiness.ts  910ms
+   ✓ differential corpus (79 programs, shard 1/20) > 1369-promise-union.ts  788ms
+   ✓ differential corpus (79 programs, shard 1/20) > 1405-bytes-unions-arrays.ts  846ms
+   ✓ differential corpus (79 programs, shard 1/20) > 1447-stdin-closed-events.ts  2136ms
+   ✓ differential corpus (79 programs, shard 1/20) > 1452-return-through-finally.ts  990ms
+   ✓ differential corpus (79 programs, shard 1/20) > 1460-console-error-warn.ts  733ms
+   ✓ differential corpus (79 programs, shard 1/20) > 1477-in-expressions.ts  831ms
+   ✓ differential corpus (79 programs, shard 1/20) > 1525-child-exit-signal.ts  836ms
+   ✓ differential corpus (79 programs, shard 1/20) > 1532-array-splice-shift.ts  1036ms
+   ✓ differential corpus (79 programs, shard 1/20) > 1558-any-joins-and-dyn-validation.ts  14262ms
+   ✓ differential corpus (79 programs, shard 1/20) > 1582-timer-sleep-resolve.ts  1254ms
+   ✓ differential corpus (79 programs, shard 1/20) > 1585-union-field-conditional-ctor.ts  746ms
+   ✓ differential corpus (79 programs, shard 1/20) > 1595-js-island-gap\main.js  28970ms
+   ✓ differential corpus (79 programs, shard 1/20) > 1635-inspect-buffer.ts  1810ms
+   ✓ differential corpus (79 programs, shard 1/20) > 1638-inspect-cjs.cjs  835ms
+   ✓ differential corpus (79 programs, shard 1/20) > 1652-ee-snapshot.ts  2272ms
+   ✓ differential corpus (79 programs, shard 1/20) > 1655-spawnsync-neutral.ts  1689ms
+   ✓ differential corpus (79 programs, shard 1/20) > 1670-symbol-registry.ts  2105ms
+   ✓ differential corpus (79 programs, shard 1/20) > 1694-stream-destroy.ts  775ms
+   ✓ differential corpus (79 programs, shard 1/20) > 1771-assert-dyn-deep.ts  1220ms
+   ✓ differential corpus (79 programs, shard 1/20) > 1794-searchparams-url-live.ts  1587ms
+   ✓ differential corpus (79 programs, shard 1/20) > 1795-dyn-handle-request.cjs  4903ms
+   ✓ differential corpus (79 programs, shard 1/20) > 1871-empty-array-never.ts  693ms
+   ✓ differential corpus (79 programs, shard 1/20) > 1880-json-declared-field-order.ts  1101ms
+   ✓ differential corpus (79 programs, shard 1/20) > 1963-namespace-aliases.ts  722ms
+   ✓ differential corpus (79 programs, shard 1/20) > 2080-destructuring-defaults.ts  1208ms
+   ✓ differential corpus (79 programs, shard 1/20) > 212-string-aliasing-append.ts  748ms
+   ✓ differential corpus (79 programs, shard 1/20) > 2251-tagged-templates-dyn.ts  723ms
+   ✓ differential corpus (79 programs, shard 1/20) > 2284-regexp-constructor.cjs  782ms
+   ✓ differential corpus (79 programs, shard 1/20) > 2369-promise-try.ts  917ms
+   ✓ differential corpus (79 programs, shard 1/20) > 2387-tonumber-argv.ts  712ms
+   ✓ differential corpus (79 programs, shard 1/20) > 2409-loop-body-return-not-terminal.ts  717ms
+   ✓ differential corpus (79 programs, shard 1/20) > 2441-console-process-argv.ts  716ms
+   ✓ differential corpus (79 programs, shard 1/20) > 2461-qs-parse-options.ts  1315ms
+   ✓ differential corpus (79 programs, shard 1/20) > 2473-option-table-widths.js  858ms
+   ✓ differential corpus (79 programs, shard 1/20) > 2475-variadic-wrapper-island.js  708ms
+   ✓ differential corpus (79 programs, shard 1/20) > 2480-recursive-record-tree.ts  810ms
+   ✓ differential corpus (79 programs, shard 1/20) > 2534-object-rest-decl.ts  940ms
+   ✓ differential corpus (79 programs, shard 1/20) > 2556-crypto-introspection.ts  856ms
+   ✓ differential corpus (79 programs, shard 1/20) > 2593-generic-inert-bindings.ts  688ms
+   ✓ differential corpus (79 programs, shard 1/20) > 2606-dynamic-import-cycle\main.ts  812ms
+   ✓ differential corpus (79 programs, shard 1/20) > 2626-stream-event-names.ts  1025ms
+   ✓ differential corpus (79 programs, shard 1/20) > 2682-uniform-tuple-binding-is-an-array.ts  869ms
+   ✓ differential corpus (79 programs, shard 1/20) > 2733-aes-cipher-handle.ts  11609ms
+   ✓ differential corpus (79 programs, shard 1/20) > 2841-decided-branches-and-a-forward-var.js  924ms
+   ✓ differential corpus (79 programs, shard 1/20) > 2975-format-percent-s-converts-where-console-log-inspects.js  905ms
+   ✓ differential corpus (79 programs, shard 1/20) > 3191-arraybuffer-into-unknown-round-trip.ts  816ms
+   ✓ differential corpus (79 programs, shard 1/20) > 3261-promise-void-widen.ts  1155ms
+   ✓ differential corpus (79 programs, shard 1/20) > 3423-filehandle-errors.ts  1391ms
+   ✓ differential corpus (79 programs, shard 1/20) > 3493-nullish-retag-three-arm-chain.ts  759ms
+   ✓ differential corpus (79 programs, shard 1/20) > 3561-promise-executor-resolves-with-a-promise.ts  1033ms
+   ✓ differential corpus (79 programs, shard 1/20) > 3582-optional-chained-string-and-object-members.ts  837ms
+   ✓ differential corpus (79 programs, shard 1/20) > 3801-regexp-runtime-flags.ts  1834ms
+   ✓ differential corpus (79 programs, shard 1/20) > 3841-classval-widening-slot.ts  760ms
+   ✓ differential corpus (79 programs, shard 1/20) > 3952-typeof-a-keyed-read-asks-whether-the-key-is-there.ts  1118ms
+   ✓ differential corpus (79 programs, shard 1/20) > 408-params-ctors-inheritance.ts  822ms
+   ✓ differential corpus (79 programs, shard 1/20) > 4631-readonly-map-in-a-record-through-unknown.ts  956ms
+   ✓ differential corpus (79 programs, shard 1/20) > 4901-object-assign-sources-the-key-walk-can-see.ts  1037ms
+   ✓ differential corpus (79 programs, shard 1/20) > 504-array-rc-stress.ts  820ms
+   ✓ differential corpus (79 programs, shard 1/20) > 5211-a-mixed-projection-is-half-alias-and-half-snapshot.ts  1012ms
+   ✓ differential corpus (79 programs, shard 1/20) > 5451-typeof-the-cjs-module-globals-in-a-commonjs-module.cjs  1076ms
+   ✓ differential corpus (79 programs, shard 1/20) > 5965-a-readable-listener-races-a-for-await.ts  826ms
+   ✓ differential corpus (79 programs, shard 1/20) > 5980-fetch-failures-all-reject.ts  31280ms
+   ✓ differential corpus (79 programs, shard 1/20) > 6000-ws-init-bag-ignores-agent.ts  18134ms
+   ✓ differential corpus (79 programs, shard 1/20) > 603-closures-rc-stress.ts  746ms
+   ✓ differential corpus (79 programs, shard 1/20) > 6060-ws-dispatcher-carries-the-upgrade.ts  17031ms
+   ✓ differential corpus (79 programs, shard 1/20) > 723-accessors-rc-stress.ts  910ms
+   ✓ differential corpus (79 programs, shard 1/20) > 7317-settler-field-identity-and-subclass.js  858ms
+   ✓ differential corpus (79 programs, shard 1/20) > 7411-a-served-package-value-fills-a-driver-shaped-record.ts  1122ms
+   ✓ differential corpus (79 programs, shard 1/20) > 7492-a-symbolic-alias-imported-from-another-module-still-resolves\main.ts  2202ms
+   ✓ differential corpus (79 programs, shard 1/20) > 7512-cycle-top-level-table-of-method-shorthands\main.ts  747ms
+   ✓ differential corpus (79 programs, shard 1/20) > 909-records-index-json.ts  953ms
+   ✓ differential corpus (79 programs, shard 1/20) > 957-builtins-namespace.ts  804ms
+   ✓ differential corpus (79 programs, shard 1/20) > 977-unions-unit-rc-stress.ts  689ms
+   ✓ differential corpus (79 programs, shard 1/20) > 996-fs-rc-stress.ts  820ms
+
+ Test Files  1 passed (1)
+      Tests  79 passed (79)
+   Start at  17:10:37
+   Duration  253.59s (transform 4.61s, setup 0ms, collect 6.60s, tests 246.33s, environment 0ms, prepare 211ms)
+
+VITEST-EXIT=0
+=== DONE 2026-09-07T17:14:50-03:00
+=== GATE-EXIT rc=0 ===

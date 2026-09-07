@@ -1,0 +1,44 @@
+{
+ "entry": "<blocks>/mediautils-work/napp/probes/p-bystdio-forms.ts",
+ "flags": [],
+ "elapsedMs": 637,
+ "crashed": null,
+ "preflightFailed": false,
+ "stats": {
+  "statementsTotal": 12,
+  "statementsFailed": 3,
+  "statementsIsland": 0,
+  "functionsSkipped": 0
+ },
+ "unreachedStats": {
+  "statementsTotal": 0,
+  "statementsFailed": 0,
+  "statementsIsland": 0,
+  "functionsSkipped": 0
+ },
+ "npmStatic": null,
+ "provenanceNotes": null,
+ "sites": [
+  {
+   "section": "blocker",
+   "code": "SC2003",
+   "message": "union types must match exactly: expected 'Readable', got 'Readable | null' (a union re-tags into another union only when every arm of the source has an identical arm in the destination, or is a record/array that width-coerces into exactly one destination arm)",
+   "file": "<blocks>/mediautils-work/napp/probes/p-bystdio-forms.ts",
+   "line": 6
+  },
+  {
+   "section": "blocker",
+   "code": "SC2003",
+   "message": "union types must match exactly: expected 'Readable', got 'Readable | null' (a union re-tags into another union only when every arm of the source has an identical arm in the destination, or is a record/array that width-coerces into exactly one destination arm)",
+   "file": "<blocks>/mediautils-work/napp/probes/p-bystdio-forms.ts",
+   "line": 8
+  },
+  {
+   "section": "blocker",
+   "code": "SC2003",
+   "message": "union types must match exactly: expected 'Readable', got 'Readable | null' (a union re-tags into another union only when every arm of the source has an identical arm in the destination, or is a record/array that width-coerces into exactly one destination arm)",
+   "file": "<blocks>/mediautils-work/napp/probes/p-bystdio-forms.ts",
+   "line": 10
+  }
+ ]
+}

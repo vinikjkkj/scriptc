@@ -6215,6 +6215,24 @@ let digestInputValueDispatches = 0;
     // stream class everywhere else.
     if (isChildStdioAccess(L, expr)) {
       const receiver = L.lowerExpr(expr.expression);
+      // The union is NOT the checker's opinion, it is the RUNTIME ABI:
+      // scr_child_stdout / scr_child_stderr answer a +1 handle OR NULL, and
+      // both emitters materialise exactly that as
+      //   raw != NULL ? scr_union_new_ref(streamTag, raw, ...) : <null arm>
+      // (emission/emit-exprs.ts and llvm/emitter.ts, each of which THROWS if
+      // this result is not a two-armed union; ir/validate.ts asserts the same
+      // contract). So the null arm is minted unconditionally even where the
+      // checker pins the slot non-null -- @types/node's tuple-stdio overload
+      // returns ChildProcessByStdio<I, O, E>, whose `stdout` is `Readable`
+      // rather than `Readable | null`.
+      //
+      // Minting a bare childStream there instead is a REAL BUG, not an
+      // optimisation, and it is invisible to a site count: analyze() never
+      // runs the validator or an emitter, so it reports a clean program while
+      // the build ICEs (SC9001) -- or, had the assertion been relaxed, while
+      // a NULL flowed on as a live stream handle. Narrowing the checker's
+      // non-null view belongs at the USE, through the checked extraction
+      // maybeNarrow and the `!` path already build, never here.
       const type: IrType = {
         kind: "union",
         unionId: L.unions.intern([CHILDSTREAM_T, { kind: "nullT" }]),

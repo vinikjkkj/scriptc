@@ -1,0 +1,213 @@
+provenance: zapo-js@1.8.2 ← https://github.com/vinikjkkj/zapo@refs/tags/v1.8.2 @ 757a8071b819 (source compiles statically)
+provenance: argo-codec@0.2.1: no provenance attestation published; island path used
+provenance: @zapo-js/native: not installed under the entry's node_modules; island path used
+provenance: file-type@19.6.0: no provenance attestation published; island path used
+provenance: sharp@0.33.5: no provenance attestation published; island path used
+<blocks>/mediautils-work/napp/pkgsrcN/media-utils/ffmpeg.ts:24:9 - error SC1090: 'instanceof' on values other than class instances (narrow union-typed values first) are not supported yet
+
+  23 | function inputToReadable(input: WaMediaProcessorInput): Readable {
+  24 |     if (input instanceof Readable) return input
+     |         ^~~~~~~~~~~~~~~~~~~~~~~~~
+  25 |     return Readable.from([input])
+
+<blocks>/mediautils-work/napp/pkgsrcN/media-utils/ffmpeg.ts:25:26 - error SC2020: 'Readable.from over a '(Uint8Array | string)[]' source' is part of the standard library types but has no scriptc lowering yet
+
+  24 |     if (input instanceof Readable) return input
+  25 |     return Readable.from([input])
+     |                          ^~~~~~~
+  26 | }
+
+  hint: string[] / Buffer[] arrays, a single string or Buffer, and an async generator yielding those are the supported sources — a synchronous generator and the async-iteration protocol have no lowering yet
+
+<blocks>/mediautils-work/napp/pkgsrcN/media-utils/ffmpeg.ts:30:9 - error SC2020: 'child_process.execFile' is typed by @types/node but has no scriptc lowering yet
+
+  29 |     return new Promise((resolve) => {
+  30 |         execFile(bin, ['-version'], { timeout: 5_000 }, (err) => resolve(!err))
+     |         ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  31 |     })
+
+  hint: the callback form has no lowering — promisify it: const execFileAsync = promisify(execFile) (from node:util), or use execFileSync
+
+<blocks>/mediautils-work/napp/pkgsrcN/media-utils/ffmpeg.ts:96:13 - error SC2020: 'child_process.execFile' is typed by @types/node but has no scriptc lowering yet
+
+  95 |         return await new Promise<WaMediaProcessorProbeResult | null>((resolve) => {
+  96 |             execFile(bin, args, { timeout: 10_000, maxBuffer: 1024 * 1024 }, (err, stdout) => {
+     |             ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  97 |                 if (err || !stdout) {
+
+  hint: the callback form has no lowering — promisify it: const execFileAsync = promisify(execFile) (from node:util), or use execFileSync
+
+<blocks>/mediautils-work/napp/pkgsrcN/media-utils/ffmpeg.ts:135:35 - error SC1090: 'Uint8Array' values where 'string' is expected is not supported yet
+
+  134 |         if (input instanceof Uint8Array) {
+  135 |             await writeFile(path, input)
+      |                                   ^~~~~
+  136 |             return path
+
+<blocks>/mediautils-work/napp/pkgsrcN/media-utils/ffmpeg.ts:180:17 - error SC2020: 'spawn option 'timeout'' is part of the standard library types but has no scriptc lowering yet
+
+  179 |                 stdio: ['ignore', 'pipe', 'ignore'],
+  180 |                 timeout: 15_000
+      |                 ^~~~~~~~~~~~~~~
+  181 |             })
+
+  hint: stdio, detached, env, cwd, and windowsHide are the supported options
+
+<blocks>/mediautils-work/napp/pkgsrcN/media-utils/ffmpeg.ts:183:57 - error SC2003: union types must match exactly: expected 'Uint8Array | Readable | string', got 'Readable' (a union re-tags into another union only when every arm of the source has an identical arm in the destination, or is a record/array that width-coerces into exactly one destination arm)
+
+  182 | 
+  183 |             const thumbPromise = generateImageThumbnail(proc.stdout, maxEdge)
+      |                                                         ^~~~~~~~~~~
+  184 | 
+
+  hint: narrow the value to a SINGLE arm first (a discriminant check, or '!== undefined'/'!== null' for unit arms); a plain arm value widens into any union that contains it, and a whole union widens into any union whose arms include the source's
+
+<blocks>/mediautils-work/napp/pkgsrcN/media-utils/ffmpeg.ts:227:21 - error SC2020: 'spawn with this stdin slot' is part of the standard library types but has no scriptc lowering yet
+
+  226 |         const proc = spawn(bin, args, {
+  227 |             stdio: [useFile ? 'ignore' : 'pipe', 'pipe', 'ignore'],
+      |                     ^~~~~~~~~~~~~~~~~~~~~~~~~~~
+  228 |             timeout: 30_000
+
+  hint: stdin takes "ignore" or "inherit" (fd stdin has no lowering)
+
+<blocks>/mediautils-work/napp/pkgsrcN/media-utils/ffmpeg.ts:289:17 - error SC2020: 'child.on("close", ...)' is part of the standard library types but has no scriptc lowering yet
+
+  288 | 
+  289 |         proc.on('close', (code) => {
+      |                 ^~~~~~~
+  290 |             if (bucketCount > 0) {
+
+  hint: "exit" and "error" are the supported child events (as literals)
+
+<blocks>/mediautils-work/napp/pkgsrcN/media-utils/ffmpeg.ts:306:13 - error SC2020: 'ChildProcess.stdin' is typed by @types/node but has no scriptc lowering yet
+
+  305 |             const stream = inputToReadable(input)
+  306 |             proc.stdin!.on('error', () => stream.destroy())
+      |             ^~~~~~~~~~
+  307 |             stream.pipe(proc.stdin!)
+
+  hint: on("exit" | "error", cb), pid, exitCode, killed, kill(signal?), and unref() are the supported ChildProcess members
+
+<blocks>/mediautils-work/napp/pkgsrcN/media-utils/ffmpeg.ts:307:25 - error SC2020: 'ChildProcess.stdin' is typed by @types/node but has no scriptc lowering yet
+
+  306 |             proc.stdin!.on('error', () => stream.destroy())
+  307 |             stream.pipe(proc.stdin!)
+      |                         ^~~~~~~~~~
+  308 |             stream.on('error', (err) => {
+
+  hint: on("exit" | "error", cb), pid, exitCode, killed, kill(signal?), and unref() are the supported ChildProcess members
+
+<blocks>/mediautils-work/napp/pkgsrcN/media-utils/ffmpeg.ts:369:17 - error SC2020: 'spawn with this stdin slot' is part of the standard library types but has no scriptc lowering yet
+
+  368 |     const proc = spawn(bin, args, {
+  369 |         stdio: [useFile ? 'ignore' : 'pipe', 'pipe', 'pipe'],
+      |                 ^~~~~~~~~~~~~~~~~~~~~~~~~~~
+  370 |         timeout: 60_000
+
+  hint: stdin takes "ignore" or "inherit" (fd stdin has no lowering)
+
+<blocks>/mediautils-work/napp/pkgsrcN/media-utils/ffmpeg.ts:383:13 - error SC2020: 'ReadableStream.destroy' is typed by @types/node but has no scriptc lowering yet
+
+  382 |             if (proc.exitCode === null) proc.kill('SIGKILL')
+  383 |             proc.stdout!.destroy(err)
+      |             ^~~~~~~~~~~~~~~~~~~~~~~~~
+  384 |         }
+
+  hint: on/once("data" | "end", cb) are the supported child-stream members
+
+<blocks>/mediautils-work/napp/pkgsrcN/media-utils/ffmpeg.ts:386:9 - error SC2020: 'ChildProcess.stdin' is typed by @types/node but has no scriptc lowering yet
+
+  385 |         inputStream.on('error', onSourceError)
+  386 |         proc.stdin!.on('error', () => inputStream!.destroy())
+      |         ^~~~~~~~~~
+  387 |         inputStream.pipe(proc.stdin!)
+
+  hint: on("exit" | "error", cb), pid, exitCode, killed, kill(signal?), and unref() are the supported ChildProcess members
+
+<blocks>/mediautils-work/napp/pkgsrcN/media-utils/ffmpeg.ts:387:26 - error SC2020: 'ChildProcess.stdin' is typed by @types/node but has no scriptc lowering yet
+
+  386 |         proc.stdin!.on('error', () => inputStream!.destroy())
+  387 |         inputStream.pipe(proc.stdin!)
+      |                          ^~~~~~~~~~
+  388 |     }
+
+  hint: on("exit" | "error", cb), pid, exitCode, killed, kill(signal?), and unref() are the supported ChildProcess members
+
+<blocks>/mediautils-work/napp/pkgsrcN/media-utils/ffmpeg.ts:391:9 - error SC2020: 'ReadableStream.destroy' is typed by @types/node but has no scriptc lowering yet
+
+  390 |     proc.on('error', (err) => {
+  391 |         proc.stdout!.destroy(err)
+      |         ^~~~~~~~~~~~~~~~~~~~~~~~~
+  392 |         inputStream?.destroy()
+
+  hint: on/once("data" | "end", cb) are the supported child-stream members
+
+<blocks>/mediautils-work/napp/pkgsrcN/media-utils/ffmpeg.ts:394:13 - error SC2020: 'child.on("close", ...)' is part of the standard library types but has no scriptc lowering yet
+
+  393 |     })
+  394 |     proc.on('close', (code) => {
+      |             ^~~~~~~
+  395 |         if (code !== 0 && !proc.stdout!.destroyed) {
+
+  hint: "exit" and "error" are the supported child events (as literals)
+
+<blocks>/mediautils-work/napp/pkgsrcN/media-utils/ffmpeg.ts:405:21 - error SC2020: 'stream.on("close", ...)' is part of the standard library types but has no scriptc lowering yet
+
+  404 | 
+  405 |     proc.stdout!.on('close', () => {
+      |                     ^~~~~~~
+  406 |         if (proc.exitCode === null) proc.kill('SIGKILL')
+
+  hint: "data" and "end" are the supported child-stream events (as literals)
+
+<blocks>/mediautils-work/napp/pkgsrcN/media-utils/ffmpeg.ts:410:12 - error SC2003: union types must match exactly: expected 'null | Readable', got 'Readable' (a union re-tags into another union only when every arm of the source has an identical arm in the destination, or is a record/array that width-coerces into exactly one destination arm)
+
+  409 | 
+  410 |     return proc.stdout!
+      |            ^~~~~~~~~~~~
+  411 | }
+
+  hint: narrow the value to a SINGLE arm first (a discriminant check, or '!== undefined'/'!== null' for unit arms); a plain arm value widens into any union that contains it, and a whole union widens into any union whose arms include the source's
+
+<blocks>/mediautils-work/napp/pkgsrcN/media-utils/sharp.ts:1:1 - error SC2013: importing 'sharp' requires the embedded dynamic engine, which this build does not include — the package's implementation runs there
+
+  1 | import sharp from 'sharp'
+    | ^~~~~~~~~~~~~~~~~~~~~~~~~
+  2 | import type {
+
+  hint: this build did NOT use the provenance lane for 'sharp': resolving its attested source threw on this run (the provenance note for it, above, says what), so the package fell back to the island and these sites are the FALLBACK's refusals, not the lane's answer -- re-run before changing any source; --dynamic would embed the engine rather than fix the resolution
+
+<blocks>/mediautils-work/napp/pkgsrcN/media-utils/sharp.ts:22:11 - error SC1031: object destructuring of non-record values (the source is dyn-typed) are not supported yet
+
+  21 | ): Promise<WaMediaProcessorImageResult> {
+  22 |     const { data, info } = await createPipeline(input)
+     |           ^~~~~~~~~~~~~~
+  23 |         .rotate()
+
+<blocks>/mediautils-work/napp/pkgsrcN/media-utils/sharp.ts:28:39 - error SC2004: uses of 'data' inherit the blocker on its declaration
+
+  27 |     return {
+  28 |         jpegThumbnail: new Uint8Array(data.buffer, data.byteOffset, data.byteLength),
+     |                                       ^~~~
+  29 |         width: info.width,
+
+  hint: the declaration of 'data' did not compile — fix the diagnostic reported there and these sites clear with it
+
+<blocks>/mediautils-work/napp/pkgsrcN/media-utils/sharp.ts:38:11 - error SC1031: object destructuring of non-record values (the source is dyn-typed) are not supported yet
+
+  37 | ): Promise<WaMediaProcessorStickerThumbnailResult> {
+  38 |     const { data, info } = await createPipeline(input)
+     |           ^~~~~~~~~~~~~~
+  39 |         .resize(maxEdge, maxEdge, { fit: 'inside', withoutEnlargement: true })
+
+<blocks>/mediautils-work/napp/pkgsrcN/media-utils/sharp.ts:43:38 - error SC2004: uses of 'data' inherit the blocker on its declaration
+
+  42 |     return {
+  43 |         pngThumbnail: new Uint8Array(data.buffer, data.byteOffset, data.byteLength),
+     |                                      ^~~~
+  44 |         width: info.width,
+
+  hint: the declaration of 'data' did not compile — fix the diagnostic reported there and these sites clear with it
+
+24 errors.

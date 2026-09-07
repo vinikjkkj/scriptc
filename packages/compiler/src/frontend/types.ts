@@ -3337,8 +3337,24 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
     return { kind: "hmac" };
   }
 
+  // ChildProcess, and the SAME handle under the name @types/node gives it
+  // when spawn's stdio is a tuple. `spawn(cmd, args, { stdio: ["ignore",
+  // "pipe", "pipe"] })` selects an overload whose return type is
+  // `ChildProcessByStdio<I, O, E>`, an interface that `extends ChildProcess`
+  // and only NARROWS stdin/stdout/stderr/stdio from `X | null` to the slot
+  // types the tuple pins. There is no second runtime object: it is the same
+  // child handle, so it maps to the same kind.
+  //
+  // Matching only "ChildProcess" made the whole async child surface
+  // unreachable for every program typed by real @types/node, while the
+  // corpus -- which compiles against the SHIPPED FALLBACK declarations,
+  // where spawn returns a plain ChildProcess -- passed. Measured, on one
+  // program (tests/corpus/1565-spawn-pipe-streams.ts's shape): 0 refusal
+  // sites under the fallback, 4 under @types/node 24.13.3, three of them
+  // reading `'ChildProcessByStdio<null, Readable, Readable>...' is typed by
+  // @types/node but has no scriptc lowering yet`.
   if (
-    psym?.name === "ChildProcess" &&
+    (psym?.name === "ChildProcess" || psym?.name === "ChildProcessByStdio") &&
     checker.declarationsOf(psym).some(
       (d) =>
         (ts.isInterfaceDeclaration(d) || ts.isClassDeclaration(d)) &&
