@@ -57,6 +57,8 @@
  *            dynamic value, then enumerated. SC6003 — a class instance
  *            projected into a shape that mixes methods with data, where a
  *            method of the class writes one of the copied data fields.
+ *            SC6004 — a record flowing into a different shape, where the
+ *            copy that flow compiles to is possibly observable.
  *   SC9xxx  internal compiler errors (still source-anchored)
  */
 import type { SrcLoc } from "../ir/nodes.js";
@@ -155,12 +157,19 @@ export function assertionOverflowsMembersDiag(
     loc,
     hint:
       "scriptc records are closed — a record value holds exactly the members its type names — so " +
-      "'as unknown as T' reshapes rather than relabels. The unnamed members are no longer dropped: " +
-      "the destination shape is granted an overflow portion and they ride in it, so " +
-      "JSON.stringify and Object.keys report them exactly as JavaScript does. Two things change " +
-      "anyway: widening back to a type that NAMES one reads it through a run-time checked " +
-      "extraction (it throws if the value really has no such key), and every value of the " +
-      "destination shape carries the overflow pointer. Name them on the asserted type if you want " +
+      "'as unknown as T' RESHAPES rather than relabels, and the reshape is a COPY. WHAT IS " +
+      "PRESERVED: the unnamed members are no longer dropped — the destination shape is granted " +
+      "an overflow portion and they ride in it, so JSON.stringify and Object.keys report them " +
+      "exactly as JavaScript does. WHAT IS NOT: the asserted value is a DIFFERENT OBJECT. " +
+      "JavaScript's assertion is the identity, so one object answers to both names; the copy " +
+      "gives two, and they diverge in both directions — a write through the asserted value " +
+      "leaves the original at its old value, and a write to the original is invisible through " +
+      "the assertion. Read and write through the original's own type if the two names have to " +
+      "agree. Two further consequences: widening back to a type that NAMES one of the moved " +
+      "members reads it through a run-time checked extraction (it throws if the value really " +
+      "has no such key), and every value of the destination shape carries an overflow pointer " +
+      "whose map its constructor allocates — a second heap allocation per instance, everywhere " +
+      "in the program and not only at the cast. Name them on the asserted type if you want " +
       "them in the struct",
   };
 }
@@ -306,9 +315,87 @@ export function assertionDropsMembersDiag(
       "'as unknown as T' reshapes rather than relabels. The unnamed members would normally ride in " +
       "an overflow store, but at least one of these is an ARRAY-INDEX-like key, and JavaScript " +
       "lists those first across the whole object while the overflow store can only append — so " +
-      "carrying them would answer Object.keys and JSON.stringify in the wrong ORDER. Name them on " +
-      "the asserted type (or keep the value at its original type) if anything downstream reads " +
-      "them back",
+      "carrying them would answer Object.keys and JSON.stringify in the wrong ORDER. The reshape " +
+      "is also a COPY, so the asserted value is a different object from the one asserted: a " +
+      "write through either name is invisible to the other, where JavaScript has one object and " +
+      "one answer. Name them on the asserted type (or keep the value at its original type) if " +
+      "anything downstream reads them back or writes through either name",
+  };
+}
+
+/** SC6004 — a record flowing into a DIFFERENT record shape. TypeScript's
+ * width subtyping is a relabel: `const n: Narrow = wide` and `take(wide)`
+ * hand the callee the very object the caller still names. scriptc's
+ * records are monomorphic structs, so the flow compiles to `%rec.width.N`
+ * — a fresh struct with the destination's fields copied across — and the
+ * program ends up holding TWO objects where JavaScript has one:
+ *
+ *     interface A { a: number }
+ *     interface B { a: number; b: number }
+ *     const big: B = { a: 1, b: 2 }
+ *     function take(x: A): A { return x }
+ *     const n = take(big)
+ *     n.a = 9;  console.log(big.a, n.a)     // Node: 9 9    scriptc: 1 9
+ *
+ * Two faces, and they are independent. The copy ENDS the members the
+ * destination does not name (measured: 83 of the corpus's 232 width-copy
+ * sites, 239 of zapo's 524). And it breaks object IDENTITY at every site,
+ * including the ones that end nothing at all (the other 149 and 285) —
+ * which is why neither a refusal aimed at dropped members nor the overflow
+ * grant can see the larger half.
+ *
+ * IT IS ADVICE AND NOT A REFUSAL, for SC6003's reasons and one of its own.
+ * Refusing walls mainstream TypeScript — 'pass a wider object where a
+ * narrower type is declared' is the pattern, and it is 239 sites across 43
+ * files in zapo alone. Making the flow ALIAS is not a lowering change: a
+ * width copy exists only where the two layouts differ (identical field
+ * lists intern to one shape), fields are sorted by name so the kept ones
+ * are not a prefix, and a record value carries no shape tag to resolve the
+ * offset — so an alias needs hidden classes, a fat pointer, or shape
+ * unification, all of which are changes to the core value model.
+ *
+ * THE ADMISSION RULE, and it is deliberately over-eager rather than wrong.
+ * Silent when the source is a LITERAL written at the flow: nothing else
+ * can hold a reference to it, so the copy is unobservable (12% of corpus
+ * sites, 13% of zapo's). Otherwise it speaks when the copy ends members,
+ * or when the program writes one of the fields the copy carries across —
+ * the same shape of test SC6003 applies to a class's own methods. */
+export function recordWidthCopyDiag(
+  dropped: string[],
+  written: string[],
+  sourceType: string,
+  targetType: string,
+  loc: SrcLoc,
+): ScrDiagnostic {
+  const brief = (t: string): string | null => (t.length <= TYPE_RENDER_BUDGET ? t : null);
+  const src = brief(sourceType);
+  const dst = brief(targetType);
+  const names = (xs: string[]): string => xs.map((d) => `'${d}'`).join(", ");
+  const ends =
+    dropped.length > 0
+      ? `ends ${dropped.length === 1 ? "the member" : "the members"} ${names(dropped)}`
+      : null;
+  const writes =
+    written.length > 0
+      ? `${written.length === 1 ? "the field" : "the fields"} ${names(written)} ${written.length === 1 ? "is" : "are"} written somewhere in this program`
+      : null;
+  return {
+    code: "SC6004",
+    severity: "advice",
+    message:
+      `this flow COPIES the record into a different shape` +
+      (src !== null && dst !== null ? ` ('${src}' into '${dst}')` : "") +
+      (ends !== null ? `, and the copy ${ends}` : "") +
+      (writes !== null ? `${ends !== null ? "; " : ", and "}${writes}` : ""),
+    loc,
+    hint:
+      "TypeScript's width subtyping is a relabel — the callee gets the very object the caller " +
+      "still names — but scriptc records are monomorphic structs, so a flow between two shapes " +
+      "compiles to a field-by-field COPY and the program then holds two objects where " +
+      "JavaScript has one. A write through either name is invisible to the other, and any " +
+      "member the destination shape does not name is not on the copy at all. Keep the value at " +
+      "its own type, or name the members you need on the destination type, if the two have to " +
+      "agree",
   };
 }
 
