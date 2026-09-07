@@ -10845,6 +10845,18 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/7790-destructuring-a-union-typed-source.ts": {
+   "order": [
+    "<repo>/tests/corpus/7790-destructuring-a-union-typed-source.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/7790-promise-all-over-an-already-resolved-entry.ts": {
+   "order": [
+    "<repo>/tests/corpus/7790-promise-all-over-an-already-resolved-entry.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/800-switch-basics.ts": {
    "order": [
     "<repo>/tests/corpus/800-switch-basics.ts"
@@ -11642,6 +11654,12 @@
   "<repo>/tests/diagnostics/delete-fences.ts": {
    "order": [
     "<repo>/tests/diagnostics/delete-fences.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/destructuring-a-union-source-outside-the-read-rule.ts": {
+   "order": [
+    "<repo>/tests/diagnostics/destructuring-a-union-source-outside-the-read-rule.ts"
    ],
    "diags": []
   },
@@ -12479,6 +12497,12 @@
   "<repo>/tests/diagnostics/process-module-import-fences.ts": {
    "order": [
     "<repo>/tests/diagnostics/process-module-import-fences.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/promise-all-entries-outside-the-one-promise-arm-rule.ts": {
+   "order": [
+    "<repo>/tests/diagnostics/promise-all-entries-outside-the-one-promise-arm-rule.ts"
    ],
    "diags": []
   },

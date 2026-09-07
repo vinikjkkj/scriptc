@@ -1,0 +1,53 @@
+promise-all-entries-outside-the-one-promise-arm-rule.ts:50:36 - error SC2020: 'Promise.all over this argument shape' is part of the standard library types but has no scriptc lowering yet
+
+  49 | async function threeArms(entry: Promise<A> | null | undefined): Promise<void> {
+  50 |   const [x, y] = await Promise.all([entry, loadB()]);
+     |                                    ^~~~~~~~~~~~~~~~
+  51 |   console.log(x, y.b);
+
+  hint: the entries must share ONE promise type — Promise.all([p, q]) lowers when p and q are the same Promise<T>
+
+promise-all-entries-outside-the-one-promise-arm-rule.ts:51:15 - error SC2004: uses of 'x' inherit the blocker on its declaration
+
+  50 |   const [x, y] = await Promise.all([entry, loadB()]);
+  51 |   console.log(x, y.b);
+     |               ^
+  52 | }
+
+  hint: the declaration of 'x' did not compile — fix the diagnostic reported there and these sites clear with it
+
+promise-all-entries-outside-the-one-promise-arm-rule.ts:57:36 - error SC2020: 'Promise.all over this argument shape' is part of the standard library types but has no scriptc lowering yet
+
+  56 | async function dynArm(entry: Promise<A> | any): Promise<void> {
+  57 |   const [x, y] = await Promise.all([entry, loadB()]);
+     |                                    ^~~~~~~~~~~~~~~~
+  58 |   console.log(x, y.b);
+
+  hint: the entries must share ONE promise type — Promise.all([p, q]) lowers when p and q are the same Promise<T>
+
+promise-all-entries-outside-the-one-promise-arm-rule.ts:58:15 - error SC2004: uses of 'x' inherit the blocker on its declaration
+
+  57 |   const [x, y] = await Promise.all([entry, loadB()]);
+  58 |   console.log(x, y.b);
+     |               ^
+  59 | }
+
+  hint: the declaration of 'x' did not compile — fix the diagnostic reported there and these sites clear with it
+
+promise-all-entries-outside-the-one-promise-arm-rule.ts:64:36 - error SC2020: 'Promise.all over this argument shape' is part of the standard library types but has no scriptc lowering yet
+
+  63 |   const jobs: [Promise<A>, Promise<B>] = [loadA(), loadB()];
+  64 |   const [x, y] = await Promise.all(jobs);
+     |                                    ^~~~
+  65 |   console.log(x.a, y.b);
+
+  hint: the entries must share ONE promise type — annotate the array (const ps: Promise<T>[] = [...]) so the result is Promise<T[]>, not a tuple
+
+promise-all-entries-outside-the-one-promise-arm-rule.ts:65:15 - error SC2004: uses of 'x' inherit the blocker on its declaration
+
+  64 |   const [x, y] = await Promise.all(jobs);
+  65 |   console.log(x.a, y.b);
+     |               ^
+  66 | }
+
+  hint: the declaration of 'x' did not compile — fix the diagnostic reported there and these sites clear with it

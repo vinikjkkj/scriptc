@@ -10,8 +10,11 @@
 // (a detached method loses its receiver), rest whose packed type is not
 // a plain record (a class of methods only packs '{}' — 'unknown'),
 // rest that would copy a NON-PUBLIC field (JS copies it; the rest type
-// cannot name it), setter-only properties, union sources (narrow
-// first), object patterns over arrays, index-signature rest packing,
+// cannot name it), setter-only properties, a union source whose arms do
+// not all ANSWER the bound name (the servable ones now bind from the
+// same read `u.name` does -- corpus 7790, boundary in
+// destructuring-a-union-source-outside-the-read-rule.ts), object
+// patterns over arrays, index-signature rest packing,
 // defaults on NESTED assignment targets (no single binding type to
 // test against), and assignment targets with no static write form.
 
@@ -41,9 +44,9 @@ interface E2 {
   b: string;
   label: string;
 }
-function fromUnion(u: E1 | E2): string {
-  const { b } = u; // union source: narrow first
-  return b;
+function fromUnion(u: E1 | E2): number {
+  const { count } = u as (E1 | E2) & { count?: number }; // only one arm has it
+  return count ?? 0;
 }
 console.log(fromUnion({ kind: "one", b: "s", count: 1 }));
 

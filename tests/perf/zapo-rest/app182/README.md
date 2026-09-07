@@ -55,7 +55,7 @@ entries are called `zapo-rest.ts`. Built into one directory they both write
 other's toolchain is still reading. A distinct `-o` filename is NOT enough;
 it must be a distinct directory.
 
-## Status — measured 2026-09-06
+## Status — measured 2026-09-07
 
 Both numbers below are STRICT builds (no `--best-effort`, which defers
 refusals into runtime throws and would read low for no reason), counted by
@@ -72,6 +72,8 @@ arms exit non-zero, so neither has a fence count — **n/a, not 0**.
 |---|---|---|---|---|
 | `2197c855` (this directory's own commit) | 38,934 | **65** | 45 | 20 |
 | `0c5e3821` (main, four walls later) | 21,595 | **29** | 19 | 10 |
+| `6b38b02c` (main, two more lowerings later) | 19,261 | **24** | 14 | 10 |
+| `ad7b3153` (block/typerules, the two type-system rules) | 14,391 | **15** | 11 | 4 |
 
 The 77 that first motivated the bump was taken one commit earlier, before
 `9cd9bffa` closed the 12-site WeakMap group: 77 − 12 = the 65 recorded here.
@@ -86,12 +88,35 @@ all 25 of `util/proto-stream.ts` (the `AsyncIterator` root at `:64` and the
 (`copyWithin`). Uncovered: `util/proto-stream.ts:256` — `stack.length -= 1`,
 which the old `AsyncIterator` wall reached first and so hid.
 
-Remaining per file (sites): `crypto/nativeBackend.ts` 9,
-`transport/node/builders/privacy.ts` 5, `signal/session/encoding.ts` 4,
-`signal/session/SignalProtocol.ts` 4, `protocol/abprops.ts` 2, and one each in
+### 29 -> 24 -> 15
+
+`6b38b02c` is the same arm five sites lower, with no work aimed at it: the
+compound-`length` lowering took `util/proto-stream.ts:256` (the site the old
+`AsyncIterator` wall had hidden) and `transport/binary/encoder.ts`, and the
+ES-module `require` rule took the three `crypto/nativeBackend.ts` reads that
+were SC2020 refusals.
+
+`ad7b3153` is aimed at it, and it is TYPE-SYSTEM RULES rather than missing
+lowerings: **9 sites closed, 0 uncovered, 15 unchanged** (24 - 9 = 15).
+Closed:
+
+* the four of `signal/session/SignalProtocol.ts` (`:111` and `:153`, plus
+  the two SC2004 on `local`) -- `Promise.all([options.localIdentity ??
+  requireLocalIdentity(store), generateSerializedKeyPair()])`. The
+  heterogeneous combinator already admitted a `Promise<T> | null` entry; its
+  rule was written as "one promise arm and one UNIT arm" while the reason
+  behind it only ever required "exactly one PROMISE arm";
+* the five of `transport/node/builders/privacy.ts` (`:169` plus four SC2004)
+  -- `const { pnJid, username, displayName } = target` over a union source.
+  The same three reads a union RECEIVER already answers now serve the
+  pattern; the identical function written as `target.pnJid` compiled before
+  the change and the destructure spelling of it did not.
+
+Remaining per file (sites): `crypto/nativeBackend.ts` 6,
+`signal/session/encoding.ts` 4, `protocol/abprops.ts` 2, and one each in
 `client/coordinators/WaMessageDispatchCoordinator.ts`,
-`client/coordinators/WaPrivacyCoordinator.ts`, `client/events/privacy.ts`,
-`transport/binary/encoder.ts` and `util/proto-stream.ts`.
+`client/coordinators/WaPrivacyCoordinator.ts` and
+`client/events/privacy.ts`.
 
 The streamed history-sync path — `openHistoryBlobStream` inflating through
 `createUnzip`, then `streamProtoFields` walking it through

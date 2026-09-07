@@ -19730,7 +19730,7 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
    * message and the narrowed-receiver retry. `value` is typed by the
    * union being read, which is NOT always the value the receiver lowered
    * to (the retry passes a re-tagged one). */
-  function lowerUnionFieldRead(L: Lowerer, expr: ts.PropertyAccessExpression, value: IrExpr, field: string): IrExpr | null {
+  function lowerUnionFieldRead(L: Lowerer, expr: ts.Node, value: IrExpr, field: string): IrExpr | null {
     if (value.type.kind !== "union") return null;
     const def = L.unions.get(value.type.unionId);
     if (!def) throw new Error(`lowerer bug: unknown union ${value.type.unionId}`);
@@ -19761,12 +19761,24 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
     // The arms answer DIFFERENT types (or through index signatures / unit
     // arms): the JOIN path — `env.PORTLESS_PORT` on `ProcessEnv |
     // Record<string, string>`, the tail read of `loaded?.config.script`.
-    const key: IrExpr = { kind: "strLit", value: field, type: STRING, loc: locOf(expr.name) };
+    const key: IrExpr = { kind: "strLit", value: field, type: STRING, loc: locOf(expr) };
     const keyed = lowerUnionKeyedRead(L, expr, value.type.unionId, value, key, field);
     if (keyed) return keyed;
     const joined = lowerUnionFieldJoinRead(L, expr, value, field);
     if (joined) return joined;
     return lowerUnionIntrinsicLengthRead(L, expr, value, field);
+  }
+
+  /** The union-receiver property read, addressed by a NODE rather than by
+   * a property-access expression: the same three readers `a.b` uses over a
+   * union (the same-typed arm read, the lifted join switch, the
+   * index-signature keyed read), asked for one field of a value that is
+   * already lowered. Destructuring is the caller — a pattern element is
+   * not an expression and has no access node to hand over, but the read it
+   * desugars to is character-for-character the one this serves. Null when
+   * no reader answers, and the caller writes the fence. */
+  export function unionFieldReadAt(L: Lowerer, at: ts.Node, value: IrExpr, field: string): IrExpr | null {
+    return lowerUnionFieldRead(L, at, value, field);
   }
 
   /** The FOURTH way a union receiver answers a literal read, and the only
@@ -19800,7 +19812,7 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
    * 'length')"). Sound narrowing never reaches it; an unsound one throws
    * what Node throws instead of answering a made-up number. At least one
    * arm must be intrinsic, so a unit-only union still declines. */
-  function lowerUnionIntrinsicLengthRead(L: Lowerer, expr: ts.PropertyAccessExpression, value: IrExpr, field: string): IrExpr | null {
+  function lowerUnionIntrinsicLengthRead(L: Lowerer, expr: ts.Node, value: IrExpr, field: string): IrExpr | null {
     if (field !== "length") return null;
     if (value.type.kind !== "union") return null;
     const fromId = value.type.unionId;
@@ -19883,7 +19895,7 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
    * Every arm must declare the field and every conversion must plan
    * (purely, before anything interns); index-signature arms stay with
    * unionKeyGet, whose helper owns the missing-key policy. */
-  function lowerUnionFieldJoinRead(L: Lowerer, expr: ts.PropertyAccessExpression, value: IrExpr, field: string): IrExpr | null {
+  function lowerUnionFieldJoinRead(L: Lowerer, expr: ts.Node, value: IrExpr, field: string): IrExpr | null {
     if (value.type.kind !== "union") return null;
     const fromId = value.type.unionId;
     const def = L.unions.get(fromId);
@@ -19990,7 +20002,7 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
    * arms (sub-union RE-TAGGING between distinct unions stays fenced).
    * Returns null when any arm cannot answer — the caller owns the fence
    * message. The caller (the property/element dispatch) maybeNarrows. */
-  function lowerUnionKeyedRead(L: Lowerer, expr: ts.Expression,
+  function lowerUnionKeyedRead(L: Lowerer, expr: ts.Node,
     unionId: string,
     value: IrExpr,
     key: IrExpr,
