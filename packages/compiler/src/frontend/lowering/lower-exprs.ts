@@ -13436,6 +13436,179 @@ function rejectThisInObjectMethodIn(L: Lowerer, node: ts.Node, mayStop: boolean)
     return null;
   }
 
+  /** Peel the type-level no-ops a key or an iterable can be written
+   * behind — they create no value and no reference. */
+  function peelTypeOps(e: ts.Expression): ts.Expression {
+    let x = e;
+    for (;;) {
+      if (ts.isParenthesizedExpression(x) || ts.isAsExpression(x) || ts.isSatisfiesExpression(x) || ts.isTypeAssertion(x)) {
+        x = x.expression;
+        continue;
+      }
+      return x;
+    }
+  }
+
+  /** The SHAPE a record-typed expression enumerates, as a fill-order
+   * source. Null wherever the enumeration is not a fact about a shape.
+   *
+   * The SHAPE and not its order: that shape's own declaredOrder may still
+   * be re-picked by reconcileKeyOrders, and reading it here would either
+   * bake a stale answer or force the source to be blocked from ever being
+   * re-picked — which was measured to refuse a correct `for...in` over
+   * `const FROM: Record<Slot, number> = { west: 1, east: 2 }`. The plan is
+   * resolved in that pass instead. An UNDEFINED-ARMED member has no static
+   * position (an absent optional contributes nothing at run time), so a
+   * shape carrying one gives up: the sequence would be an upper bound and
+   * a refusal built on it would be an invention. */
+  function recordEnumerationSource(L: Lowerer, e: ts.Expression): string | null {
+    const t = L.mapTypeOf(L.typeOf(e));
+    if (t?.kind !== "record") return null;
+    const s = L.shapes.get(t.shapeId);
+    if (!s || s.tuple || s.indexValue || !s.declaredOrder) return null;
+    if (s.fields.some((f) => f.name.startsWith("%"))) return null;
+    const order = s.declaredOrder;
+    if (s.fields.some((f) => order.includes(f.name) && isUndefinedArmedUnion(f.type, (u) => L.unions.get(u)))) {
+      return null;
+    }
+    return t.shapeId;
+  }
+
+  /** The KEY SEQUENCE an iterated expression yields at tuple position
+   * `slot` ("whole" for `for (const k of xs)`, an index for
+   * `for (const [k, v] of ...)`).
+   *
+   * Two sources, and only two: a record's own enumeration
+   * (`Object.keys`/`Object.entries`/`Object.getOwnPropertyNames` and
+   * `for...in`), and a literal array whose every element is
+   * literal-TYPED. Anything else is null — "say nothing" rather than
+   * guess, which is the whole difference between this and the fence that
+   * was withdrawn. */
+  type FillSeg = { names: string[] } | { shapeId: string };
+  function iteratedKeyOrder(L: Lowerer, e: ts.Expression, slot: number | "whole", depth: number): FillSeg[] | null {
+    if (depth > 4) return null;
+    const x = peelTypeOps(e);
+    if (ts.isArrayLiteralExpression(x)) {
+      if (slot !== "whole") return null;
+      const out: string[] = [];
+      for (const el of x.elements) {
+        if (ts.isSpreadElement(el) || ts.isOmittedExpression(el)) return null;
+        const t = peelTypeOps(el);
+        const lit = recordKeyLiteralText(t) ?? recordKeyTypeLiteralText(L, t);
+        if (lit === null) return null;
+        out.push(lit);
+      }
+      return [{ names: out }];
+    }
+    if (
+      ts.isCallExpression(x) &&
+      ts.isPropertyAccessExpression(x.expression) &&
+      ts.isIdentifier(x.expression.expression) &&
+      x.arguments.length === 1 &&
+      x.expression.expression.text === "Object"
+    ) {
+      const m = x.expression.name.text;
+      const want: number | "whole" = m === "entries" ? 0 : "whole";
+      if (m !== "keys" && m !== "entries" && m !== "getOwnPropertyNames") return null;
+      if (slot !== want) return null;
+      const src = recordEnumerationSource(L, x.arguments[0]!);
+      return src === null ? null : [{ shapeId: src }];
+    }
+    // A const array named once and iterated elsewhere: the same literal,
+    // one indirection away.
+    if (ts.isIdentifier(x)) {
+      const sym = L.resolveValueSymbol(x);
+      const decl = sym ? L.checker.valueDeclarationOf(sym) : undefined;
+      if (sym && decl && ts.isVariableDeclaration(decl) && decl.initializer && bindingNeverReassigned(L, sym, decl)) {
+        return iteratedKeyOrder(L, decl.initializer, slot, depth + 1);
+      }
+    }
+    return null;
+  }
+
+  /** THE FILL ORDER BEHIND A RUN-TIME KEY — the replacement for the fence
+   * that asked only whether a key was run-time and refused if it was.
+   *
+   * Answers the ORDER the keys of `r[k] = v` arrive in when `k` is a
+   * `for...of` / `for...in` binding over a source whose order is a fact,
+   * filtered to the names the target shape actually declares (a key naming
+   * no declared field throws at run time; a fill that can throw halfway is
+   * not an order). `provable` is false when the write is CONDITIONAL —
+   * still safe to re-pick an order from, never safe to refuse on. */
+  export function runtimeKeyFillOrder(
+    L: Lowerer,
+    keyNode: ts.Expression,
+    write: ts.Node,
+    shape: IrRecordShape,
+  ): { plan: FillSeg[]; provable: boolean } | null {
+    const key = peelTypeOps(keyNode);
+    if (!ts.isIdentifier(key)) return null;
+    const sym = L.resolveValueSymbol(key);
+    const decl = sym ? L.checker.valueDeclarationOf(sym) : undefined;
+    if (!decl) return null;
+    let slot: number | "whole" = "whole";
+    let d: ts.Node = decl;
+    if (ts.isBindingElement(d)) {
+      if (d.dotDotDotToken || d.propertyName) return null;
+      const pat = d.parent;
+      if (!ts.isArrayBindingPattern(pat)) return null;
+      slot = pat.elements.indexOf(d);
+      d = pat.parent;
+    }
+    if (!ts.isVariableDeclaration(d)) return null;
+    const list = d.parent;
+    if (!ts.isVariableDeclarationList(list)) return null;
+    const loop = list.parent;
+    let plan: FillSeg[] | null;
+    if (ts.isForOfStatement(loop) && loop.initializer === list && loop.awaitModifier === undefined) {
+      plan = iteratedKeyOrder(L, loop.expression, slot, 0);
+    } else if (ts.isForInStatement(loop) && loop.initializer === list && slot === "whole") {
+      const src = recordEnumerationSource(L, loop.expression);
+      plan = src === null ? null : [{ shapeId: src }];
+    } else {
+      return null;
+    }
+    if (plan === null || plan.length === 0) return null;
+    // A name segment is a fact NOW, so the "every key names a declared
+    // field" test runs here for it; a shape segment is checked in
+    // resolveFillPlans, once the shape it names has settled.
+    for (const seg of plan) {
+      if (!("names" in seg)) continue;
+      if (!seg.names.every((n) => shape.fields.some((f) => f.name === n))) return null;
+    }
+    // WHERE THE WRITE SITS IN THE BODY. Only a statement path of plain
+    // blocks makes it happen on every pass; anything else (an `if`, a
+    // `try`, a nested closure) fills a subsequence, and so does a body that
+    // can `continue` past it.
+    let provable = true;
+    let n: ts.Node | undefined = write;
+    while (n !== undefined && n !== loop.statement) {
+      if (!ts.isBlock(n) && !ts.isExpressionStatement(n) && n !== write) {
+        provable = false;
+        break;
+      }
+      n = n.parent;
+    }
+    if (n === undefined) return null; // the key escaped its loop; say nothing
+    if (provable) {
+      const jumps = (b: ts.Node): boolean => {
+        let found = false;
+        const walk = (x: ts.Node): void => {
+          if (found) return;
+          if (ts.isContinueStatement(x) || ts.isBreakStatement(x) || ts.isReturnStatement(x) || ts.isThrowStatement(x)) {
+            found = true;
+            return;
+          }
+          x.forEachChild(walk);
+        };
+        walk(b);
+        return found;
+      };
+      if (jumps(loop.statement)) provable = false;
+    }
+    return { plan, provable };
+  }
+
   /** Can every value a dynamic key can reach (declared fields + the
    * overflow) surface as the read's result type? dyn results need
    * dyn-convertible fields (JSON-safe, with the undefined arm allowed at
@@ -13930,6 +14103,15 @@ export function staticAssertionOperand(L: Lowerer, node: ts.Expression, field: s
           }
           const value = L.coerceInto(expr.right, L.lowerExpr(expr.right), common);
           if (!typeEquals(value.type, common)) L.badType(expr.right, L.typeOf(expr.right));
+          // THE FILL ORDER OF A RUN-TIME KEY. `{} as Record<Name, E|undefined>`
+          // followed by a keyed loop is the only construction of this shape
+          // TypeScript accepts, and until now the order those keys arrived in
+          // was invisible: the write-order walk saw a literal that spelled
+          // nothing and no field write after it, so `Object.keys` answered the
+          // shape's order at exit 0. It is told here.
+          if (litKey === null) {
+            L.noteKeyPresenceDynWrite(obj, runtimeKeyFillOrder(L, target.argumentExpression, expr, shape), locOf(expr));
+          }
           return { kind: "recordKeySet", obj, shapeId: receiverIr.shapeId, key, value, loc: locOf(expr) };
         }
         // A LITERAL key naming no declared field is a pure overflow insert

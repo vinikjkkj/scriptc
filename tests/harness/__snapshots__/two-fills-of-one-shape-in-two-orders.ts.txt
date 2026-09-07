@@ -1,0 +1,26 @@
+two-fills-of-one-shape-in-two-orders.ts:31:12 - error SC1090: Object.keys over a record this program does not build the way its shape enumerates (a record enumerates in its shape declared order, not per-object insertion order) are not supported yet
+
+  30 |     }
+  31 |     return Object.keys(view).join(",");
+     |            ^~~~~~~~~~~~~~~~~
+  32 | }
+
+  hint: this value's keys become present in the order "omega,alpha,zeta" where its shape "r1" enumerates "alpha,omega,zeta" - read the fields you need instead of enumerating, or build the value the way the shape enumerates it
+
+two-fills-of-one-shape-in-two-orders.ts:39:12 - error SC1090: Object.keys over a record this program does not build the way its shape enumerates (a record enumerates in its shape declared order, not per-object insertion order) are not supported yet
+
+  38 |     }
+  39 |     return Object.keys(view).join(",");
+     |            ^~~~~~~~~~~~~~~~~
+  40 | }
+
+  hint: this value's keys become present in the order "zeta,alpha,omega" where its shape "r1" enumerates "alpha,omega,zeta" - read the fields you need instead of enumerating, or build the value the way the shape enumerates it
+
+two-fills-of-one-shape-in-two-orders.ts:57:12 - error SC1090: JSON.stringify over a record this program does not build the way its shape enumerates (a record enumerates in its shape declared order, not per-object insertion order) are not supported yet
+
+  56 |     }
+  57 |     return JSON.stringify(out);
+     |            ^~~~~~~~~~~~~~~~~~~
+  58 | }
+
+  hint: this value's keys become present in the order "south,north" where its shape "r2" enumerates "north,south" - read the fields you need instead of enumerating, or build the value the way the shape enumerates it

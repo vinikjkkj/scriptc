@@ -220,6 +220,38 @@ export function keyOrderFromDynamicDiag(surface: string, detail: string, loc: Sr
   };
 }
 
+/** SC6002 for the OTHER way a record's own-key order can be a run-time
+ * fact: not a dynamic source materialised at a cast, but a fill through a
+ * KEY the program computes — `for (const k of order) view[k] = ...`.
+ *
+ * Where the key's source is one the walk can name (a record's enumeration,
+ * a literal array of literal-typed elements) the fill order is a fact and
+ * gets an answer, not an advice: reconcileKeyOrders re-picks declaredOrder
+ * to it and every surface reads Node's own answer, and a fill that
+ * PROVABLY disagrees with an order the shape cannot give up refuses. This
+ * is the residue — a key sequence that exists only at run time. Refusing it
+ * is what the withdrawn fence did, and it refused tests/corpus/7793, a
+ * program that answers exactly what Node answers; saying nothing is what
+ * shipped the wrong object. Possibly-wrong gets advice, which is the same
+ * stance the crossing half takes for the same reason. */
+export function keyOrderFromRuntimeFillDiag(surface: string, detail: string, loc: SrcLoc): ScrDiagnostic {
+  return {
+    code: "SC6002",
+    severity: "advice",
+    message:
+      `${surface} answers this value's own keys in its SHAPE's declared ORDER, and this program fills it through a computed KEY`,
+    loc,
+    hint:
+      detail +
+      ". A record is a monomorphic struct: the SET of its own keys is carried per instance, " +
+      "and their ORDER is the shape's, because no per-instance order is stored anywhere. " +
+      "Where the compiler can name the sequence a fill uses it re-picks the shape's order to " +
+      "match, so `for (const [k] of Object.entries(SOURCE))` and a fill over a literal array of " +
+      "key names both answer exactly what Node answers. This one it cannot name — spell the key " +
+      "sequence at the fill site, or read the fields you need instead of enumerating",
+  };
+}
+
 /** SC6003 — a class instance projected into a record shape that mixes
  * METHODS with DATA, where a method of that class WRITES one of the data
  * fields. The projection is then half alias and half snapshot, through one

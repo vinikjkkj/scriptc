@@ -34,6 +34,7 @@ import {
   unionMismatchDiag,
   UNSUPPORTED,
   keyOrderFromDynamicDiag,
+  keyOrderFromRuntimeFillDiag,
   projectionCopiesAMutatedFieldDiag,
   recordWidthCopyDiag,
   unsupportedDiag,
@@ -3693,7 +3694,40 @@ export class Lowerer {
    * reads as one sequence here and is two at run time. */
   readonly keyPresenceOrder = new Map<
     string,
-    { shapeId: string; names: string[]; writeLocs: Map<string, SrcLoc> }
+    {
+      shapeId: string;
+      names: string[];
+      writeLocs: Map<string, SrcLoc>;
+      /** The initializing literal's location key — the site whose recorded
+       * SPELLING this binding's finished order revises (reconcileKeyOrders). */
+      initLocKey: string;
+      /** A RUN-TIME KEYED write (`r[k] = v`) reached this binding. */
+      dynFilled: boolean;
+      /** ...and the walk could not name where at least one of those keys came
+       * from, so `names` is INCOMPLETE: neither a refusal nor a re-pick may be
+       * built on it. */
+      dynBlocked: boolean;
+      /** ...and every keyed write it CAN name happens on every pass of its
+       * loop. A write under an `if`, or in a body that can `continue`, fills a
+       * SUBSEQUENCE: still safe to re-pick an order from (a subsequence of a
+       * right order is right, because an enumeration only lists the keys that
+       * are PRESENT), never safe to refuse on. */
+      orderProvable: boolean;
+      /** THE FILL, UNRESOLVED, in fill order. A `names` segment is a literal
+       * array's own elements and is a fact the moment it is read. A `shapeId`
+       * segment is "whatever THAT shape enumerates", and it is NOT a fact
+       * yet: this pass may re-pick that shape's order out from under it, and
+       * reading it early is how a source whose own literal is out of order
+       * (`const FROM: Record<Slot, number> = { west: 1, east: 2 }`) gets its
+       * re-pick blocked and turns a correct `for...in` into a refusal.
+       * Resolved in reconcileKeyOrders, after every shape that is not itself
+       * a fill target has been decided. */
+      fillPlan: ({ names: string[] } | { shapeId: string })[];
+      /** The keyed write's own location — one site for every key the fill
+       * contributes, which is what presenceOrderRisk's before-this-surface
+       * filter compares against. */
+      dynWriteLoc?: SrcLoc;
+    }
   >();
 
   /** The SPELLED key order of a record literal, by location - the literal
@@ -3775,7 +3809,94 @@ export class Lowerer {
     if (spelled.length >= shape.declaredOrder.length) return;
     const k = this.keyRiskKey(localId);
     if (this.keyPresenceOrder.has(k)) return;
-    this.keyPresenceOrder.set(k, { shapeId: init.type.shapeId, names: [...spelled], writeLocs: new Map() });
+    this.keyPresenceOrder.set(k, {
+      shapeId: init.type.shapeId,
+      names: [...spelled],
+      writeLocs: new Map(),
+      initLocKey: this.keyRiskLocKey(init.loc),
+      dynFilled: false,
+      dynBlocked: false,
+      orderProvable: true,
+      fillPlan: [],
+    });
+  }
+
+  /** A RUN-TIME KEYED write `r[k] = v` onto a tracked binding, and the
+   * FILL ORDER the key came from.
+   *
+   * THIS IS THE HALF THE WITHDRAWN FENCE GOT WRONG. Its rule was "a
+   * run-time key destroys the order" and it never asked where the key came
+   * from, so it refused tests/corpus/7793 — which fills by a key out of
+   * `Object.entries(SOURCE)`, in an order that IS the source shape's
+   * enumeration order and DOES agree with the target's. Refusing a program
+   * that answers exactly what node answers is worse than the class it
+   * guards, so the question asked here is the narrower one: WHAT ORDER do
+   * these keys arrive in? `runtimeKeyFillOrder` answers it for the two
+   * sources a program can prove — a record's own enumeration and a literal
+   * array of literal-typed elements — and answers NULL everywhere else,
+   * where `dynBlocked` then says "this binding's key list is incomplete"
+   * and both the re-pick and the refusal stand down.
+   *
+   * The names arrive in FILL order, which is what `names` is: first
+   * appearance wins and a re-write does not move a key, JS's own rule. */
+  noteKeyPresenceDynWrite(
+    obj: IrExpr,
+    fill: { plan: ({ names: string[] } | { shapeId: string })[]; provable: boolean } | null,
+    loc: SrcLoc,
+  ): void {
+    if (obj.kind !== "varRef") return;
+    const e = this.keyPresenceOrder.get(this.keyRiskKey(obj.localId));
+    if (!e) return;
+    e.dynFilled = true;
+    if (fill === null) {
+      e.dynBlocked = true;
+      return;
+    }
+    if (!fill.provable) e.orderProvable = false;
+    e.fillPlan.push(...fill.plan);
+    // The write site is the same for every key this fill contributes, and
+    // presenceOrderRisk needs one per name; the names themselves land in
+    // `names` only once reconcileKeyOrders has resolved the plan.
+    e.dynWriteLoc = loc;
+  }
+
+  /** Resolve every dyn-filled binding's plan into `names`, now that the
+   * shapes a plan reads have their final order. Called once, from
+   * reconcileKeyOrders. A plan segment naming a shape that is ITSELF a fill
+   * target is unresolvable — its order is decided in the same pass, after
+   * this — so the binding blocks instead of reading a stale answer. */
+  private resolveFillPlans(fillTargets: ReadonlySet<string>): void {
+    for (const e of this.keyPresenceOrder.values()) {
+      if (!e.dynFilled || e.dynBlocked) continue;
+      const shape = this.shapes.get(e.shapeId);
+      const loc = e.dynWriteLoc;
+      if (!shape || loc === undefined) { e.dynBlocked = true; continue; }
+      // A STATIC field write beside the fill interleaves with it in source
+      // order, and the plan resolves afterwards — so appending the fill
+      // names here would put every one of them behind every static write,
+      // whatever the program does. That sequence is an invention, and a
+      // refusal built on it would be too.
+      if (e.writeLocs.size > 0) { e.dynBlocked = true; continue; }
+      const out: string[] = [];
+      for (const seg of e.fillPlan) {
+        if ("names" in seg) { out.push(...seg.names); continue; }
+        if (fillTargets.has(seg.shapeId)) { e.dynBlocked = true; break; }
+        const src = this.shapes.get(seg.shapeId);
+        if (!src?.declaredOrder) { e.dynBlocked = true; break; }
+        out.push(...src.declaredOrder);
+      }
+      if (e.dynBlocked) continue;
+      // A key naming no declared field throws the catchable TypeError at the
+      // write, so the rest of the sequence never happens and the order is
+      // not a fact.
+      if (!out.every((n) => shape.fields.some((f) => f.name === n))) { e.dynBlocked = true; continue; }
+      if (out.length === 0) { e.dynBlocked = true; continue; }
+      for (const n of out) {
+        if (e.names.includes(n)) continue;
+        e.names.push(n);
+        e.writeLocs.set(n, loc);
+      }
+    }
   }
 
   /** The order risk of a TRACKED binding as of one surface: the keys it
@@ -3786,6 +3907,11 @@ export class Lowerer {
   presenceOrderRisk(ref: string, at: SrcLoc): { why: "set" | "order" | "dyn"; detail: string } | null {
     const e = this.keyPresenceOrder.get(ref);
     if (!e) return null;
+    // AN UNKNOWABLE run-time key leaves `names` incomplete, and a
+    // conditional one leaves it an upper bound. Neither can carry a
+    // PROVABLE disagreement, and under-reporting is this walk's safe
+    // direction: it may miss a wrong order, it may not invent one.
+    if (e.dynBlocked || !e.orderProvable) return null;
     const shape = this.shapes.get(e.shapeId);
     if (!shape?.declaredOrder) return null;
     // Only what is present BEFORE this surface, and only within one file.
@@ -3804,6 +3930,43 @@ export class Lowerer {
         `this value's keys become present in the order ${JSON.stringify(got.join(","))} ` +
         `where its shape ${JSON.stringify(e.shapeId)} enumerates ${JSON.stringify(want.join(","))}`,
     };
+  }
+
+  /** THE RESIDUE OF THE FILL RULE, as advice rather than silence.
+   *
+   * A binding filled through a run-time key whose sequence the walk could
+   * NOT name has an incomplete `names`, so no refusal can be built on it —
+   * and a CONDITIONAL fill has an upper bound, which is the same. Both are
+   * possibly-wrong rather than provably-wrong, and possibly-wrong is what
+   * SC6002 is for one node over (the crossing half takes exactly this
+   * stance, for exactly this reason). Null where there is nothing to say:
+   * an order this walk did name, or one it named and that AGREES. */
+  presenceFillAdvice(ref: string): string | null {
+    const e = this.keyPresenceOrder.get(ref);
+    if (!e || !e.dynFilled) return null;
+    const shape = this.shapes.get(e.shapeId);
+    if (!shape?.declaredOrder) return null;
+    // ONE KEY HAS ONE ORDER, which is the rule the re-pick, the literal half
+    // and presenceOrderRisk all already apply. A shape that declares fewer
+    // than two keys has no order to get wrong, so an advice about it is
+    // noise and nothing else.
+    if (shape.declaredOrder.length < 2) return null;
+    if (e.dynBlocked) {
+      return (
+        `this value is filled through a key whose sequence is a run-time fact ` +
+        `(no literal array and no record enumeration names it), and its shape ` +
+        `${JSON.stringify(e.shapeId)} enumerates ${JSON.stringify(shape.declaredOrder.join(","))}`
+      );
+    }
+    if (e.orderProvable) return null;
+    const got = esOwnKeyOrder(e.names);
+    const want = shape.declaredOrder.filter((n) => got.includes(n));
+    if (want.length !== got.length || !want.some((n, i) => n !== got[i])) return null;
+    return (
+      `this value's keys can become present in the order ${JSON.stringify(got.join(","))} ` +
+      `— a CONDITIONAL fill, so the sequence is an upper bound rather than a fact — ` +
+      `where its shape ${JSON.stringify(e.shapeId)} enumerates ${JSON.stringify(want.join(","))}`
+    );
   }
 
   /** A record LITERAL the walk proved cannot enumerate Node-exactly. */
@@ -4152,47 +4315,118 @@ export class Lowerer {
     walk(functions);
     walk(this.globalsList);
 
+    // A WRITE-ORDER-TRACKED BINDING IS A VETO — except when its whole
+    // order is KNOWN, and then it is EVIDENCE. The veto is right for the
+    // static-write form (`r.b = 1; r.a = 2`), whose order is a property of
+    // the BINDING and not of the shape: two bindings of one shape can be
+    // filled two ways, so no single declaredOrder is right for both, and
+    // that population is refused by name today.
+    //
+    // A binding filled through a RUN-TIME KEY out of a source the walk can
+    // name is the other case, and it is why this pass changes at all: its
+    // order is a property of the SOURCE, the same for every value the site
+    // produces, and re-picking declaredOrder to it makes the program answer
+    // what Node answers instead of refusing it. So a fill whose order is
+    // fully known revises the recorded spelling of the literal that started
+    // the binding — `{} as Record<Name, E|undefined>` spells nothing and
+    // the fill spells everything — and the rest of this pass decides on it
+    // exactly as it decides on a literal.
+    // TWO PASSES, AND THE ORDER BETWEEN THEM IS THE POINT. A fill's order
+    // can be "whatever THAT shape enumerates", and that shape's own order is
+    // decided in this very pass — so every shape that is NOT a fill target is
+    // decided first, the plans are resolved against the answers, and the fill
+    // targets are decided last. Reading a source's order before it is settled
+    // was measured to turn a correct `for...in` into an SC1090: blocking the
+    // source from being re-picked (the only other way to keep the reading
+    // honest) refuses `const FROM: Record<Slot, number> = { west: 1, east: 2 }`
+    // for an order the re-pick would have given it.
+    const fillTargets = new Set<string>();
+    for (const e of this.keyPresenceOrder.values()) {
+      if (e.dynFilled && !e.dynBlocked) fillTargets.add(e.shapeId);
+    }
+
     const presenceShapes = new Set<string>();
-    for (const e of this.keyPresenceOrder.values()) presenceShapes.add(e.shapeId);
+    const filledOrders = new Map<string, Map<string, string[]>>();
+    const collectPresence = (): void => {
+      presenceShapes.clear();
+      filledOrders.clear();
+      for (const e of this.keyPresenceOrder.values()) {
+        if (!e.dynFilled || e.dynBlocked) {
+          presenceShapes.add(e.shapeId);
+          continue;
+        }
+        const order = esOwnKeyOrder(e.names);
+        let m = filledOrders.get(e.shapeId);
+        if (!m) filledOrders.set(e.shapeId, (m = new Map()));
+        const prev = m.get(e.initLocKey);
+        // TWO BINDINGS, ONE INITIALIZER, TWO ORDERS: one generic body
+        // instantiated twice, filled from two different sources. There is no
+        // per-shape order that serves both, so the shape goes back to being
+        // vetoed and the refusal half answers.
+        if (prev !== undefined && prev.join(",") !== order.join(",")) {
+          presenceShapes.add(e.shapeId);
+          continue;
+        }
+        m.set(e.initLocKey, order);
+      }
+    };
+    collectPresence();
 
     const rewritten: string[] = [];
-    for (const [shapeId, ev] of this.shapeOrderEvidence) {
+    const decide = (shapeId: string, ev: { spellings: Set<string>; blocked: boolean; locs: Map<string, string[]> }): void => {
       const reject = (reason: string): void => {
         if (why) console.error(`[keyorder] ${shapeId} NO-REWRITE ${reason}`);
       };
-      if (ev.blocked) { reject("a literal of this shape could not be spelled"); continue; }
-      if (ev.spellings.size !== 1) { reject(`${ev.spellings.size} distinct literal spellings`); continue; }
+      if (ev.blocked) { reject("a literal of this shape could not be spelled"); return; }
+      // A FILLED shape is judged on its REVISED spellings below, not on
+      // these: the `{}` a fill starts from spells nothing, and two of them
+      // read here as one spelling while their fills may differ (and the
+      // reverse — a `{}` beside a fully spelled literal reads as two here
+      // and may agree once the fill is counted).
+      if (!filledOrders.has(shapeId) && ev.spellings.size !== 1) {
+        reject(`${ev.spellings.size} distinct literal spellings`);
+        return;
+      }
       const shape = this.shapes.get(shapeId);
       if (!shape?.declaredOrder || shape.tuple || shape.indexValue || shape.builtin) {
         reject("shape carries no re-pickable order");
-        continue;
+        return;
       }
-      if (shape.fields.some((f) => f.name.startsWith("%"))) { reject("shape has internal slots"); continue; }
-      if (castShapes.has(shapeId)) { reject("a checked cast materialises this shape"); continue; }
-      if (this.enumOrderBakes.get(shapeId)?.blocked) { reject("an order consumer baked this shape and cannot be rebuilt"); continue; }
-      if (presenceShapes.has(shapeId)) { reject("a write-order-tracked binding names this shape"); continue; }
-      const known = ev.locs;
+      if (shape.fields.some((f) => f.name.startsWith("%"))) { reject("shape has internal slots"); return; }
+      if (castShapes.has(shapeId)) { reject("a checked cast materialises this shape"); return; }
+      if (this.enumOrderBakes.get(shapeId)?.blocked) { reject("an order consumer baked this shape and cannot be rebuilt"); return; }
+      if (presenceShapes.has(shapeId)) { reject("a write-order-tracked binding names this shape"); return; }
+      // The revision is LOCAL to this decision. `ev.locs` keeps the
+      // literal's own spelling, because the recompute at the tail of this
+      // pass writes the literal's diagnostic from it and "this literal
+      // spells ..." must stay true of the literal.
+      const known = new Map(ev.locs);
+      for (const [lk, ord] of filledOrders.get(shapeId) ?? []) {
+        if (known.has(lk)) known.set(lk, ord);
+      }
+      const spellings = new Set([...known.values()].map((v) => v.join(",")));
+      if (spellings.size !== 1) { reject(`${spellings.size} distinct filled spellings`); return; }
       const all = litSites.get(shapeId) ?? new Set<string>();
       // NO LITERAL IN THE EMITTED IR is not evidence, whatever the walk
       // recorded. A speculative lowering that was rolled back still reports
       // its spelling here, and a shape whose only values come from somewhere
       // this walk cannot point at has no construction to take an order from.
-      if (all.size === 0) { reject("no recordLit of this shape reached the IR"); continue; }
+      if (all.size === 0) { reject("no recordLit of this shape reached the IR"); return; }
       let complete = true;
       for (const site of all) if (!known.has(site)) { complete = false; break; }
-      if (!complete) { reject("a recordLit of this shape reported no spelling"); continue; }
+      if (!complete) { reject("a recordLit of this shape reported no spelling"); return; }
       const spelled = [...known.values()][0]!;
-      if (spelled.length < 2) { reject("one key has one order"); continue; }
+      if (spelled.length < 2) { reject("one key has one order"); return; }
       const declared = shape.declaredOrder;
-      if (!spelled.every((n) => declared.includes(n))) { reject("the spelling names a field the order does not"); continue; }
+      if (!spelled.every((n) => declared.includes(n))) { reject("the spelling names a field the order does not"); return; }
       // A PERMUTATION, never a new set: the spelled names take the front in
       // the order the program writes them, the rest keep theirs, and
       // esOwnKeyOrder re-applies JS's integer-key rule over the join so a
       // numeric name the spelling does not carry cannot be pushed behind a
       // string one.
       const next = esOwnKeyOrder([...spelled, ...declared.filter((n) => !spelled.includes(n))]);
-      if (next.length !== declared.length) { reject("compiler bug: rewrite is not a permutation"); continue; }
-      if (next.every((n, i) => n === declared[i])) { reject("already in this order"); continue; }
+      if (next.length !== declared.length) { reject("compiler bug: rewrite is not a permutation"); return; }
+      if (next.every((n, i) => n === declared[i])) { reject("already in this order"); return; }
       shape.declaredOrder = next;
       rewritten.push(shapeId);
       if (why) {
@@ -4200,6 +4434,20 @@ export class Lowerer {
           `[keyorder] ${shapeId} REWRITE ${JSON.stringify(declared.join(","))} -> ${JSON.stringify(next.join(","))}`,
         );
       }
+    };
+    // PASS 1 — every shape that no fill targets. Their orders are final
+    // after this, which is what makes the plans readable.
+    for (const [shapeId, ev] of this.shapeOrderEvidence) {
+      if (fillTargets.has(shapeId)) continue;
+      decide(shapeId, ev);
+    }
+    // The plans, against the answers pass 1 produced.
+    this.resolveFillPlans(fillTargets);
+    collectPresence();
+    // PASS 2 — the fill targets, on evidence that now includes the fill.
+    for (const [shapeId, ev] of this.shapeOrderEvidence) {
+      if (!fillTargets.has(shapeId)) continue;
+      decide(shapeId, ev);
     }
     if (rewritten.length === 0) return;
     // The baked consumers rebuild NOW — before moduleArtifacts collects the
@@ -4271,7 +4519,15 @@ export class Lowerer {
             (risk ? `RISK-${risk.why} ${risk.detail}` : "ok"),
         );
       }
-      if (!risk) continue;
+      if (!risk) {
+        const adv = u.ref !== null ? this.presenceFillAdvice(u.ref) : null;
+        if (adv !== null) {
+          this.pushAdvice(
+            keyOrderFromRuntimeFillDiag(u.crossing ? "widening into an 'unknown'/'object' slot" : u.surface, adv, u.loc),
+          );
+        }
+        continue;
+      }
       if (u.crossing) {
         // The same split as an enumeration: a cast whose source order the
         // compiler cannot see is POSSIBLY wrong and advises; the other two
