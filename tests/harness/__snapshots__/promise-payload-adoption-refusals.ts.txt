@@ -1,0 +1,20 @@
+promise-payload-adoption-refusals.ts:48:11 - error SC1090: 'Promise<{ bogus: number; phash: string }>' values where 'Promise<{ customNodes: string[] | undefined; extraParticipants: { jid: string }[] | undefined; phash: string | undefined }>' is expected is not supported yet
+
+  47 | // carries into `Fanout` inside a promise.
+  48 | run(() => Promise.resolve({ phash: "1", bogus: 1 }));
+     |           ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  49 | 
+
+promise-payload-adoption-refusals.ts:59:11 - error SC1090: 'Promise<{ phash: string }>' values where 'Promise<{ customNodes: string[] | undefined; extraParticipants: { jid: string }[] | undefined; phash: string | undefined }>' is expected is not supported yet
+
+  58 | const donor = { phash: "2" };
+  59 | run(() => Promise.resolve({ ...donor }));
+     |           ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  60 | 
+
+promise-payload-adoption-refusals.ts:73:11 - error SC1090: 'Promise<{ phash: string }>' values where 'Promise<{ customNodes: string[] | undefined; extraParticipants: { jid: string }[] | undefined; phash: string | undefined }>' is expected is not supported yet
+
+  72 | const named: { readonly phash: string } = { phash: "3" };
+  73 | run(() => Promise.resolve(named));
+     |           ^~~~~~~~~~~~~~~~~~~~~~
+  74 | 

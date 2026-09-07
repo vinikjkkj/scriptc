@@ -448,12 +448,18 @@ onto a host should read the commit column, not the working set.
 
 ### Two caveats that limit this table, stated because they are load-bearing
 
-**1. The arms are not from the same compiler, and cannot currently be.** The
-1.6.2 arm is built at `c6e2dccf`, the 1.8.2 arm at `8fec0b90`. There is **no
-revision of `main` at which both arms compile** (see the regression below):
-1.6.2 needs a revision *before* `00d5cd1f`, and 1.8.2 needs `349b03a0`, which is
-after it. The comparison therefore carries the compiler delta between those two
-revisions as an uncontrolled variable.
+**1. The arms are not from the same compiler.** The 1.6.2 arm is built at
+`c6e2dccf`, the 1.8.2 arm at `8fec0b90`. The comparison therefore carries the
+compiler delta between those two revisions as an uncontrolled variable, and the
+table above should be read with that in mind.
+
+This caveat originally read "*and cannot currently be*", because at the time
+there was **no revision of `main` at which both arms compile**: 1.6.2 needed a
+revision *before* `00d5cd1f` and 1.8.2 needed `349b03a0`, which is after it.
+**That is no longer true** -- `block/arm162` builds both (see "Closed on
+`block/arm162`" below), so a same-compiler A/B is available and this table can
+be re-taken without the delta. The delta stands as a caveat on THESE numbers,
+which were measured before the fix; it is no longer a standing limitation.
 
 **2. The arms are on different backends.** 1.6.2 built LLVM (67 advisories),
 1.8.2 built C (77 advisories; `llvm refused: weakmap:intrinsic`). The record
@@ -503,3 +509,72 @@ was narrow-into-wide.
 
 This is only visible if something still compiles the 1.6.2 arm. Nothing in CI
 does; it was found because a baseline needed building.
+
+### Closed on `block/arm162`, and the cause was not the direction
+
+**The bisect was right about the commit and the paragraph above is wrong about
+the mechanism.** `00d5cd1f` does its job on 1.6.2 too -- the literal *is* built
+at the slot, so the value *is* `Promise<C>`. What refuses is one frame out, and
+it is not a width direction at all.
+
+The two libraries' call site is the **same source line, byte for byte**:
+
+```ts
+return Promise.resolve({ phash: computePhashV2(phashTargets) })
+```
+
+Only the declaration moved. 1.6.2 spells `customize?: (f) => Promise<C>`; 1.8.2
+spells `customize?: (f) => Promise<C> | C`. **One arm in the signature decided
+whether the program built.**
+
+Reduced to fourteen lines: five spellings of the same conversion, one fails.
+
+| spelling | on `f8557d65` |
+|---|---|
+| `const a: Promise<C> = Promise.resolve({ phash })` | compiles |
+| `function b(): Promise<C> { return Promise.resolve({ phash }) }` | compiles |
+| **`takeNarrow(() => Promise.resolve({ phash }))`** | **SC1090** |
+| `takeUnion(() => Promise.resolve({ phash }))` | compiles |
+| `takeNarrow((): Promise<C> => Promise.resolve({ phash }))` | compiles |
+
+The failing one is the **unannotated arrow** -- the only one whose ABI return
+type the compiler picks for itself. `lambdaSignature` has an adoption ladder for
+exactly that: a UNION slot return adopts (which is why 1.8.2 compiles), a RECORD
+slot return adopts -- but `innerRet` peels a promise only in the ASYNC frame, so
+a **sync arrow returning a promise reaches neither arm**. It keeps the checker's
+inferred `Promise<{ phash: string }>` as its ABI while the body value is
+`Promise<C>`, and the return coercion is then asked for a width inside a promise
+payload, the one conversion `coercibleValue` does not carry.
+
+The promise twin of the record arm closes it. It **renames** the ABI's return
+slot to the type the value already has: no conversion, so no microtask turn, and
+one `funcCoerceAdapter` *fewer* at the call site rather than one more.
+
+### Both arms, measured on `block/arm162`
+
+Same box, both arms STRICT (no `--best-effort`), zig 0.16.0,
+`SCRIPTC_TARGET=x86_64-windows-gnu`, `SCRIPTC_CC=zigcc`, built under node
+v22.18.0 with `--provenance-sources`, **separate `-o` directories**. Sites
+counted off the build log with `rg -a -c ' - error SC[0-9]{4}: '` and
+cross-checked against the compiler's own `N errors.` line.
+
+| arm | revision | log bytes | sites | rc | advisories | backend |
+|---|---|---|---|---|---|---|
+| 1.6.2 | `f8557d65` (base) | 1,486 | **1** | 1 | n/a | n/a |
+| 1.6.2 | `block/arm162` | 83,741 | **0** | **0** | **67** | LLVM |
+| 1.8.2 | `f8557d65` (base) | 95,034 | **0** | 0 | 77 | c (`llvm refused: weakmap:intrinsic`) |
+| 1.8.2 | `block/arm162` | 95,034 | **0** | 0 | 77 | c (`llvm refused: weakmap:intrinsic`) |
+
+The base 1.6.2 row has a non-zero exit, so it has **no advisory count -- n/a,
+not 0**. Its one site is the SC1090 quoted above.
+
+**The 1.6.2 arm's 67 advisories are the same 67** recorded at `c6e2dccf` and in
+`../README.md`'s "31 min, rc=0, 67 advisories" -- the arm is back at the state
+that produced the A/A floor, not merely compiling.
+
+**The 1.8.2 arm did not move, and that is checked by bytes rather than by
+counting.** Its build log is the same 95,034 bytes and all sixteen emitted
+translation units (`zapo-rest.c`, `part1..14`, `zapo-rest.scrh` -- 162,782,917
+bytes of C) are **sha256-identical** before and after. Structurally it cannot
+move: the union arm is tested first in the same `if`/`else if` chain, so a
+settle-or-value slot never reaches the new rung.

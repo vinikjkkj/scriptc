@@ -7765,6 +7765,64 @@ const inliningPredicates = new Set<ts.Symbol>();
         !typeEquals(innerRet, ctxRet)
       ) {
         ret = isAsyncLike ? { kind: "promise", inner: ctxRet } : ctxRet;
+      } else if (
+        // The PROMISE twin of the record adoption above — the same rule one
+        // WRAPPER out, and the direction the record arm cannot see.
+        //
+        // A SYNC lambda that returns a promise: `innerRet` is the whole
+        // `Promise<R>` (the peel above is the ASYNC frame's, and an async
+        // body's payload lands on the record arm already), so a divergent
+        // PAYLOAD never reaches either arm and the ABI keeps the checker's
+        // inferred `Promise<R'>` while the body value is built at the
+        // slot's `Promise<R>`. That is a refusal the surrounding code
+        // MANUFACTURES, not one the program wrote:
+        //
+        //   customize?: (f: F) => Promise<{ a?; b?; phash? }>
+        //   customize: ({ f }) => Promise.resolve({ phash: computePhashV2(f) })
+        //
+        // The literal is built at the slot (lower-builtins' Promise.resolve
+        // override, 00d5cd1f) — which is what keeps the key ORDER the
+        // program wrote and what keeps the payload OFF promiseCoerceAdapter
+        // — so the value is `Promise<slot>` and the ABI says
+        // `Promise<{ phash: string }>`: WIDE value, NARROW slot, the exact
+        // mirror of the width the record arm admits, and it fenced SC1090
+        // at zapo-js 1.6.2's
+        // `client/coordinators/WaMessageDispatchCoordinator.ts:697`. The
+        // 1.8.2 spelling of the same call site does not fence only because
+        // its slot is a UNION (`Promise<C> | C`), which the union arm above
+        // adopts.
+        //
+        // Adopting costs NO CONVERSION and no microtask turn: it renames
+        // the ABI's return slot to the type the value already has, so the
+        // return coercion is identity where it used to be a refusal, and
+        // the closure VALUE then matches the callback slot exactly — one
+        // funcCoerceAdapter fewer at the call site, never one more.
+        // A body that does NOT already carry the slot's payload -- a NAMED
+        // `Promise<R'>` handed to `Promise.resolve`, which the literal rule
+        // declines because `(await p) === named` is observable -- is asked
+        // for the same payload conversion it was asked for before, one
+        // frame in. It does not exist either way, and moving it is a strict
+        // improvement: measured on this arm's base, `run(() =>
+        // Promise.resolve(named))` COMPILED rc=0 and then THREW at run time
+        // (funcCoerceAdapter's stranded invocation -- "the checker's loose
+        // function compatibility admitted the assignment, but the call has
+        // no exact lowering") where node prints the value. A compile-time
+        // fence naming both payloads is the honest answer to that program;
+        // a green build that cannot run is not.
+        // tests/diagnostics/promise-payload-adoption-refusals.ts pins it.
+        //
+        // Kept to the DIVERGENT pair (equal payloads adopt nothing) and to
+        // RECORD payloads on both sides, exactly as the record arm is —
+        // the promise-payload width family is a record-width question, and
+        // an array or union payload keeps its own disposition.
+        !isAsyncLike &&
+        ctxRet?.kind === "promise" &&
+        innerRet.kind === "promise" &&
+        ctxRet.inner.kind === "record" &&
+        innerRet.inner.kind === "record" &&
+        !typeEquals(innerRet.inner, ctxRet.inner)
+      ) {
+        ret = ctxRet;
       }
       // A VOID slot discards the callback's result (TS's void-returning
       // assignability rule; JS ignores the value), so an UNANNOTATED
