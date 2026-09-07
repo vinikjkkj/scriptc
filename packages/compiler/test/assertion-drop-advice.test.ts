@@ -118,11 +118,20 @@ test("a SINGLE assertion is not this rule", () => {
   // reasons about, and it has its own rules (SC2002 names the missing
   // members for the widening direction). Only the `unknown` waypoint —
   // the point where the checker stopped reasoning — is this one.
+  //
+  // Asserted against SC6001 SPECIFICALLY rather than against silence. When
+  // this test was written SC6001 was the only rule that could speak here,
+  // so "no advisory at all" and "not SC6001" were the same sentence. They
+  // are not any more: this program is an ordinary width copy that ENDS 'b',
+  // which is exactly SC6004's subject, and it answers `{"a":"x"}` where node
+  // answers `{"a":"x","b":"y"}`. Requiring silence here would be requiring
+  // the silent wrong answer.
   const r = lower(`${PRELUDE}
 const small = big as Small;
 console.log(JSON.stringify(small));
 `);
-  expect(r.advisories).toEqual([]);
+  expect(r.advisories.filter((a) => a.code === "SC6001")).toEqual([]);
+  expect(r.advisories.map((a) => a.code)).toContain("SC6004");
 });
 
 test("a program with no assertion at all is silent", () => {

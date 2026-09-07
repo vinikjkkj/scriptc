@@ -12,6 +12,7 @@
  * - Lexical scoping is resolved here: locals get function-unique ids
  *   ("x.0", "x.1" for shadowing); the IR is scope-flat.
  */
+import { appendFileSync } from "node:fs";
 import { isRelativeSpecifier } from "../shared.js";
 import * as ts from "../ts7/adapter.js";
 import type { ScrDiagnostic } from "../../diagnostics/diagnostic.js";
@@ -34,6 +35,7 @@ import {
   UNSUPPORTED,
   keyOrderFromDynamicDiag,
   projectionCopiesAMutatedFieldDiag,
+  recordWidthCopyDiag,
   unsupportedDiag,
   unsupportedTypeDiag,
 } from "../../diagnostics/diagnostic.js";
@@ -88,8 +90,10 @@ import { settleOrValueArms,
   isConstAssertionTypeNode,
   isUnitOnlyTsType,
   mapType,
+  overflowShapeKey,
   overflowShapeKeys,
   overflowShapeKeysDenied,
+  isArrayIndexKey,
   ShapeRegistry,
   typeKey,
   type TypeMapperCtx,
@@ -502,6 +506,25 @@ export interface LowererMode {
  * the bodies discovery did NOT mark (plus deferred collection diagnostics
  * nothing flushed), reported separately: whole-program analysis without
  * letting unreached code fail builds. */
+/* ── MEASUREMENT ONLY (block/widendrop): the width-copy census ──────────
+ * SCRIPTC_WIDTH_CENSUS=<path> appends one JSONL row per INTERNED width
+ * helper — the (from,to) shape pair, the members the copy ends, and the
+ * source position of the flow that first asked for it. Off by default and
+ * never consulted by the compiler; this is scaffolding for the blast-radius
+ * count, not a shipping surface. */
+function widthCensus(kind: string, fromId: string, toId: string, dropped: string[], loc: { file: string; start: number }): void {
+  const out = process.env["SCRIPTC_WIDTH_CENSUS"];
+  if (out === undefined || out === "") return;
+  try {
+    appendFileSync(
+      out,
+      JSON.stringify({ prog: process.env["SCRIPTC_WIDTH_CENSUS_PROG"] ?? "", kind, from: fromId, to: toId, dropped, file: loc.file, start: loc.start }) + "\n",
+    );
+  } catch {
+    /* the census never fails a build */
+  }
+}
+
 export function lowerToIr(
   program: ts.Program,
   entry: ts.SourceFile,
@@ -2566,6 +2589,10 @@ export class Lowerer {
     this.reconcileKeyOrders(functions);
     this.armKeyRiskFnReturns(functions);
     this.reportKeyEnumerationRisks();
+    // SC6004 rides the same timing, and for a weaker reason: an advisory
+    // needs no interning, so it only has to wait for the WRITE SET, which
+    // is not complete until the last body is lowered.
+    this.reportRecordWidthCopies(functions);
 
     if (this.remainder) {
       // Deferred collection diagnostics nothing flushed — declarations no
@@ -6250,6 +6277,7 @@ export class Lowerer {
         this.recordWidthHelper(expr.type.shapeId, expected.shapeId, expr.loc) ??
         lowerRecordOvfCaptureHelper(this, expr.type.shapeId, expected.shapeId, expr.loc);
       if (!helper) return null;
+      this.censusSite(expr.type.shapeId, expected.shapeId, expr.loc, expr);
       return { kind: "call", callee: helper, args: [expr], type: expected, loc: expr.loc };
     }
     // A CLASS INSTANCE flowing into the record an interface maps to. The
@@ -7329,6 +7357,7 @@ export class Lowerer {
         if (dst.kind !== "record" || value.type.kind !== "record") throw new Error("lowerer bug: width lift shape");
         const helper = this.recordWidthHelper(value.type.shapeId, dst.shapeId, loc);
         if (!helper) throw new Error("lowerer bug: planned width lift failed to intern");
+        this.censusSite(value.type.shapeId, dst.shapeId, loc, value);
         return { kind: "call", callee: helper, args: [value], type: dst, loc };
       }
       case "ovfCapture": {
@@ -7722,6 +7751,111 @@ export class Lowerer {
     return null;
   }
 
+  /** MEASUREMENT ONLY (block/widendrop) - one census row per FLOW that
+   * width-copies, so the count is call sites rather than shape pairs. */
+  censusSite(fromId: string, toId: string, loc: SrcLoc, src?: IrExpr): void {
+    const from = this.shapes.get(fromId);
+    const to = this.shapes.get(toId);
+    if (!from || !to) return;
+    const dropped = from.fields
+      .filter((f) => !f.name.startsWith("%") && !to.fields.some((t) => t.name === f.name))
+      .map((f) => f.name);
+    if (process.env["SCRIPTC_WIDTH_CENSUS"]) widthCensus("site", fromId, toId, dropped, loc);
+    // SC6004's site list. A LITERAL written at the flow is provably
+    // unobservable — nothing else can hold a reference to it — so it is
+    // never recorded, and the decision for everything else waits for the
+    // whole walk (the write set is a program-wide fact).
+    if (src !== undefined && (src.kind === "recordLit" || src.kind === "arrayLit")) return;
+    this.widthCopySites.push({ fromId, toId, dropped, loc });
+  }
+
+  /** SC6004's sites, decided in run() once the write set is known. */
+  readonly widthCopySites: { fromId: string; toId: string; dropped: string[]; loc: SrcLoc }[] = [];
+
+  /** SC6004's push. The admission rule is SC6003's shape: speak where the
+   * copy is POSSIBLY observed, stay silent where it provably is not. A
+   * copy that ends members is observable on its own (those members are
+   * gone). A copy that ends nothing is observable exactly when the program
+   * WRITES one of the fields it carries across — through either name, so
+   * both shapes' writes count. Over-eager rather than wrong: a write in a
+   * function this flow never reaches still counts, which is the right
+   * direction for advice. */
+  reportRecordWidthCopies(functions: IrFunction[]): void {
+    if (this.widthCopySites.length === 0) return;
+    const written = new Map<string, Set<string>>();
+    const seen = new Set<object>();
+    const walk = (n: unknown): void => {
+      if (n === null || typeof n !== "object") return;
+      if (seen.has(n)) return;
+      seen.add(n);
+      if (Array.isArray(n)) {
+        for (const x of n) walk(x);
+        return;
+      }
+      const o = n as Record<string, unknown>;
+      if (o["kind"] === "recordSet" && typeof o["shapeId"] === "string" && typeof o["field"] === "string") {
+        const s = written.get(o["shapeId"]) ?? new Set<string>();
+        s.add(o["field"]);
+        written.set(o["shapeId"], s);
+      }
+      for (const v of Object.values(o)) walk(v);
+    };
+    for (const fn of functions) walk(fn.body);
+    for (const s of this.widthCopySites) {
+      const to = this.shapes.get(s.toId);
+      if (!to) continue;
+      // SC6001 owns the double assertion, and since it names the identity
+      // split itself there is nothing left here to add at that span.
+      if (this.advisories.some((a) => a.code === "SC6001" && a.loc.start === s.loc.start && a.loc.file === s.loc.file)) continue;
+      // An OVERFLOW destination does not END the members it does not name:
+      // recordWidthHelper declines an index-signature target outright, the
+      // flow takes the capture helper, and they ride in the overflow. Only
+      // the identity half is true there.
+      const dropped = to.indexValue !== undefined ? [] : s.dropped;
+      const carried = to.fields.filter((f) => !f.name.startsWith("%")).map((f) => f.name);
+      const hit = new Set<string>();
+      for (const shapeId of [s.fromId, s.toId]) {
+        for (const f of written.get(shapeId) ?? []) if (carried.includes(f)) hit.add(f);
+      }
+      const writes = [...hit].sort();
+      if (dropped.length === 0 && writes.length === 0) continue;
+      this.pushAdvice(
+        recordWidthCopyDiag(
+          dropped,
+          writes,
+          this.fmt({ kind: "record", shapeId: s.fromId }),
+          this.fmt({ kind: "record", shapeId: s.toId }),
+          s.loc,
+        ),
+      );
+    }
+  }
+
+  /** MEASUREMENT ONLY (block/widendrop, SCRIPTC_WIDTH_GRANT=1): the
+   * overflow grant registered on the destination of an ORDINARY width
+   * copy, recursing into each same-named record field pair that ends
+   * members of its own - registerOverflowTargets' walk, reached from the
+   * assignability path instead of from a double assertion. */
+  grantWidthOverflow(fromId: string, toId: string, seen: Set<string>): void {
+    const pair = `${fromId}->${toId}`;
+    if (seen.has(pair)) return;
+    seen.add(pair);
+    const from = this.shapes.get(fromId);
+    const to = this.shapes.get(toId);
+    if (!from || !to || from.tuple || to.tuple || to.indexValue || to.fields.length === 0) return;
+    const kept = new Set(to.fields.map((f) => f.name));
+    const moved = from.fields.map((f) => f.name).filter((n) => !kept.has(n) && !n.startsWith("%"));
+    if (moved.length > 0) {
+      if (moved.some((n) => isArrayIndexKey(n))) overflowShapeKeysDenied.add(overflowShapeKey(to.fields));
+      else overflowShapeKeys.add(overflowShapeKey(to.fields));
+    }
+    for (const tf of to.fields) {
+      const ff = from.fields.find((f) => f.name === tf.name);
+      if (!ff || ff.type.kind !== "record" || tf.type.kind !== "record") continue;
+      this.grantWidthOverflow(ff.type.shapeId, tf.type.shapeId, seen);
+    }
+  }
+
   recordWidthHelper(fromId: string, toId: string, loc: SrcLoc): string | null {
     const from = this.shapes.get(fromId);
     const to = this.shapes.get(toId);
@@ -7738,6 +7872,12 @@ export class Lowerer {
     const droppedByWidth = from.fields.filter(
       (f) => !f.name.startsWith("%") && !to.fields.some((t) => t.name === f.name),
     );
+    widthCensus("helper", fromId, toId, droppedByWidth.map((f) => f.name), loc);
+    if (droppedByWidth.length > 0) {
+      // MEASUREMENT ONLY - see the dials above recordWidthHelper.
+      if (process.env["SCRIPTC_WIDTH_REFUSE"] === "1") return null;
+      if (process.env["SCRIPTC_WIDTH_GRANT"] === "1") this.grantWidthOverflow(fromId, toId, new Set());
+    }
     const key = `rec:${fromId}:${toId}`;
     const existing = this.widthHelpers.get(key);
     if (existing) return existing;
