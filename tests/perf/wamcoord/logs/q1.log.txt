@@ -1,0 +1,15 @@
+ORACLE-NODE v25.9.0
+=== Q1 START 2026-09-07T16:47:06-03:00
+WHICH-TAR /c/Program Files/Git/usr/bin/tar  tar (GNU tar) 1.35
+ZIG 0.16.0  AUTHORED_JS=<unset>
+--- A: drivers/wam.ts (lane A control, expect 86)
+sites=275 preflightFailed=false total=1462 failed=76 island=0 ms=774266
+EXIT=0
+--- A2: drivers/_x-wam-plus-zapo.ts (lane A + zapo-js named)
+sites=80 preflightFailed=false total=48023 failed=10 island=0 ms=801948
+EXIT=0
+--- F: napp/pkgsrc/src-wam.ts (lane F control, expect 15)
+sites=80 preflightFailed=false total=48022 failed=10 island=0 ms=1293252
+EXIT=0
+=== Q1 DONE 2026-09-07T17:35:05-03:00
+=== GATE-EXIT rc=0 ===

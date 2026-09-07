@@ -1,0 +1,10 @@
+ORACLE-NODE v25.9.0
+=== Q6 START 2026-09-07T17:44:51-03:00
+--- store-mysql lane A, gate OFF (pkgstatus recorded 46 sites)
+sites=255 preflightFailed=false total=1462 failed=24 island=0 ms=53224
+EXIT=0
+--- store-mysql lane A, gate ON
+sites=288 preflightFailed=false total=1523 failed=44 island=0 ms=56526
+EXIT=0
+=== Q6 DONE 2026-09-07T17:46:46-03:00
+=== GATE-EXIT rc=0 ===

@@ -1,0 +1,16 @@
+ORACLE-NODE v25.9.0
+=== QV1 START 2026-09-07T19:01:23-03:00
+--- VA: drivers/voip.ts  (npm lane, default env)
+sites=4 preflightFailed=false total=6 failed=2 island=0 ms=817
+EXIT=0
+--- VA2: drivers/_x-voip-plus-zapo.ts  (npm lane + zapo-js named)
+sites=128 preflightFailed=false total=48994 failed=58 island=0 ms=968396
+EXIT=0
+--- VF: pkgsrc/src-voip.ts  (source on zapo-js 1.8.2, default env)
+sites=129 preflightFailed=false total=48988 failed=59 island=0 ms=652420
+EXIT=0
+--- VFj: pkgsrc/src-voip.ts  (source, authored-JS widened to ALL)
+sites=129 preflightFailed=false total=48988 failed=59 island=0 ms=426183
+EXIT=0
+=== QV1 DONE 2026-09-07T19:35:39-03:00
+=== GATE-EXIT rc=0 ===

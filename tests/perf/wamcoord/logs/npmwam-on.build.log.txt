@@ -1,0 +1,7 @@
+provenance: zapo-js@1.8.2 ← https://github.com/vinikjkkj/zapo@refs/tags/v1.8.2 @ 757a8071b819 (source compiles statically)
+provenance: @zapo-js/wam@0.1.1 ← https://github.com/vinikjkkj/zapo@refs/heads/master @ 1dc6b9f8de93 (source compiles statically)
+provenance: @vinikjkkj/wa-wam@2.3000.1041713829-1ec0d3b ← https://github.com/vinikjkkj/wa-spec@refs/heads/master @ 1ec0d3b91d0e (source compiles statically)
+provenance: argo-codec@0.2.1: no provenance attestation published; island path used
+provenance: @zapo-js/native: not installed under the entry's node_modules; island path used
+provenance: @vinikjkkj/wa-wam: source tree's package.json says 2.3000.1041627196-aaa11ce, installed is 2.3000.1041713829-1ec0d3b (release tooling that bumps at publish) — the behavior differential is the check
+provenance: 40 alias key(s) are spelled by more than one mapped package with different targets ('zapo-js/store', 'zapo-js/signal', 'zapo-js/auth', 'zapo-js/appstate', 'zapo-js/retry', …); tsconfig "paths" is one table per program, so zapo-js's answer is used for all of them and @zapo-js/wam compile against zapo-js's checkout for those specifiers

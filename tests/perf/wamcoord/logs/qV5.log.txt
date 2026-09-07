@@ -1,0 +1,5 @@
+ORACLE-NODE v25.9.0
+=== QV5 START 2026-09-07T19:45:34-03:00 -- line-neutral substitution probe
+sites=119 preflightFailed=false total=48988 failed=49 island=0 ms=449880
+EXIT=0
+=== QV5 DONE 2026-09-07T19:53:06-03:00

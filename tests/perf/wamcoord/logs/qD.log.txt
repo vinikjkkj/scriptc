@@ -1,0 +1,13 @@
+ORACLE-NODE v25.9.0
+=== QD START 2026-09-07T18:31:29-03:00
+--- store-mysql, NO env var (shipped default) -- must equal the old gate-OFF 46
+sites=255 preflightFailed=false total=1462 failed=24 island=0 ms=49230
+EXIT=0
+--- store-mysql, =1 (the boolean spelling) -- must equal the old gate-ON 58
+sites=288 preflightFailed=false total=1523 failed=44 island=0 ms=48203
+EXIT=0
+--- store-mysql, =mysql2 (named explicitly) -- must also be 58
+sites=288 preflightFailed=false total=1523 failed=44 island=0 ms=276219
+EXIT=0
+=== QD DONE 2026-09-07T18:37:48-03:00
+=== GATE-EXIT rc=0 ===

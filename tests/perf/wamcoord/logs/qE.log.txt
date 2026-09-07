@@ -1,0 +1,16 @@
+ORACLE-NODE v25.9.0
+=== QE START 2026-09-07T18:32:13-03:00 -- the extended authored-JS suite
+
+ RUN  v3.2.7 <blocks>/wamcoord
+
+ ✓ tests/harness/provenance-authored-js.test.ts (9 tests) 1546ms
+   ✓ provenance: a package that publishes the source it authored > a package NOT on the list islands, and the note names it  579ms
+   ✓ provenance: a package that publishes the source it authored > named on the list, the mapped package compiles STATIC with no blockers  369ms
+   ✓ provenance: a package that publishes the source it authored > the static binary matches Node, const read included  557ms
+
+ Test Files  1 passed (1)
+      Tests  9 passed (9)
+   Start at  18:32:14
+   Duration  7.35s (transform 3.80s, setup 0ms, collect 5.28s, tests 1.55s, environment 0ms, prepare 179ms)
+
+=== QE DONE 2026-09-07T18:32:21-03:00

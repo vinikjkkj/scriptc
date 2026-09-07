@@ -1,0 +1,129 @@
+ORACLE-NODE v25.9.0
+=== Q4 START 2026-09-07T16:56:29-03:00
+### CONTROL: gate OFF, src-wam, strict -- expect rc=1 / 15 errors / fences n/a
+### srcwam-off  src=pkgsrc/src-wam.ts  flags:[--provenance-sources --backend c]  AUTHORED_JS=<unset>
+### node=v25.9.0  zig=0.16.0  tar=tar (GNU tar) 1.35  cc=zigcc  target=x86_64-windows-gnu
+BUILD rc=1  784s  log=8279B
+--- provenance notes ---
+1:provenance: zapo-js@1.8.2 ← https://github.com/vinikjkkj/zapo@refs/tags/v1.8.2 @ 757a8071b819 (source compiles statically)
+2:provenance: argo-codec@0.2.1: no provenance attestation published; island path used
+3:provenance: @zapo-js/native: not installed under the entry's node_modules; island path used
+4:provenance: @vinikjkkj/wa-wam@2.3000.1041713829-1ec0d3b: no source mapping for '@vinikjkkj/wa-wam' (published target: index.js); island path used
+--- backend line (which backend actually ran) ---
+--- log error sites: pattern [ - error SCxxxx: ] over 8279 bytes ---
+LOG-SITES total=15
+     15 LOG-CODE  SC2013
+--- compiler's own totals line (cross-check) ---
+135:15 errors.
+BINARY: none (rc=1) -- FENCE COUNT n/a, NOT 0
+--- last 25 log lines ---
+  1 | import {
+    | ^~~~~~~~
+  2 |     WA_WAM_CHANNEL_WIRE_CODES,
+
+  hint: build with --dynamic to run npm package code in the embedded engine (adds ~620KB to the binary); static builds never include it
+
+<blocks>/wamcoord-lab/napp/pkgsrc/wam/wire/WamBatch.ts:39:32 - error SC2013: values from the '@vinikjkkj/wa-wam' package run in the embedded dynamic engine, which this build does not include
+
+  38 |         this.writer.writeString('WAM')
+  39 |         this.writer.writeUint8(WA_WAM_PROTOCOL_VERSION)
+     |                                ^~~~~~~~~~~~~~~~~~~~~~~
+  40 |         this.writer.writeUint8(streamId & 0xff)
+
+  hint: build with --dynamic to run npm package code in the embedded engine (adds ~620KB to the binary); static builds never include it
+
+<blocks>/wamcoord-lab/napp/pkgsrc/wam/wire/WamBatch.ts:42:32 - error SC2013: values from the '@vinikjkkj/wa-wam' package run in the embedded dynamic engine, which this build does not include
+
+  41 |         this.writer.writeUint16(sequenceNumber & 0xffff)
+  42 |         this.writer.writeUint8(WA_WAM_CHANNEL_WIRE_CODES[channel])
+     |                                ^~~~~~~~~~~~~~~~~~~~~~~~~
+  43 |         for (const [id, value] of initialGlobals) {
+
+  hint: build with --dynamic to run npm package code in the embedded engine (adds ~620KB to the binary); static builds never include it
+
+15 errors.
+### DONE srcwam-off rc=1
+### TREATMENT: gate ON, src-wam, strict
+### srcwam-on  src=pkgsrc/src-wam.ts  flags:[--provenance-sources --backend c]  AUTHORED_JS=1
+### node=v25.9.0  zig=0.16.0  tar=tar (GNU tar) 1.35  cc=zigcc  target=x86_64-windows-gnu
+BUILD rc=0  1540s  log=69206B
+--- provenance notes ---
+1:provenance: zapo-js@1.8.2 ← https://github.com/vinikjkkj/zapo@refs/tags/v1.8.2 @ 757a8071b819 (source compiles statically)
+2:provenance: @vinikjkkj/wa-wam@2.3000.1041713829-1ec0d3b ← https://github.com/vinikjkkj/wa-spec@refs/heads/master @ 1ec0d3b91d0e (source compiles statically)
+3:provenance: argo-codec@0.2.1: no provenance attestation published; island path used
+4:provenance: @zapo-js/native: not installed under the entry's node_modules; island path used
+5:provenance: @vinikjkkj/wa-wam: source tree's package.json says 2.3000.1041627196-aaa11ce, installed is 2.3000.1041713829-1ec0d3b (release tooling that bumps at publish) — the behavior differential is the check
+--- backend line (which backend actually ran) ---
+--- log error sites: pattern [ - error SCxxxx: ] over 69206 bytes ---
+LOG-SITES total=0
+--- compiler's own totals line (cross-check) ---
+BINARY bytes=34314240
+RUN exit=0  stdout=43B
+--- fences over EVERY emitted TU (.c, .partN.c, .scrh) ---
+    src-wam.c                                  bytes=27263565       fences=0
+    src-wam.part1.c                            bytes=9815214        fences=0
+    src-wam.part10.c                           bytes=9709843        fences=0
+    src-wam.part11.c                           bytes=9737087        fences=0
+    src-wam.part12.c                           bytes=9714191        fences=0
+    src-wam.part13.c                           bytes=9626105        fences=0
+    src-wam.part2.c                            bytes=11265092       fences=0
+    src-wam.part3.c                            bytes=9711003        fences=0
+    src-wam.part4.c                            bytes=9869315        fences=0
+    src-wam.part5.c                            bytes=9720543        fences=1
+    src-wam.part6.c                            bytes=9747022        fences=0
+    src-wam.part7.c                            bytes=9727033        fences=0
+    src-wam.part8.c                            bytes=9721291        fences=0
+    src-wam.part9.c                            bytes=9713586        fences=0
+    src-wam.scrh                               bytes=9620947        fences=0
+    TOTAL files=15 bytes=164961837 FENCES=1
+      1 [SC2020 at <blocks>/wamcoord-prov/757a8071b819699437b353865b17cacffe95e9fb/spec/proto/index.js:1]
+--- embedded-engine scan (must all read 0 for a static claim) ---
+    quickjs        0
+    ScrDyn         0
+    JS_NewRuntime  0
+ORACLE node v25.9.0 exit=0  stdout=43B
+ORACLE: MATCH (byte-exact)
+### DONE srcwam-on rc=0
+### TREATMENT: gate ON, src-wam-entry (15 assertions), strict
+### srcwament-on  src=pkgsrc/src-wam-entry.ts  flags:[--provenance-sources --backend c]  AUTHORED_JS=1
+### node=v25.9.0  zig=0.16.0  tar=tar (GNU tar) 1.35  cc=zigcc  target=x86_64-windows-gnu
+BUILD rc=0  876s  log=67044B
+--- provenance notes ---
+1:provenance: @vinikjkkj/wa-wam@2.3000.1041713829-1ec0d3b ← https://github.com/vinikjkkj/wa-spec@refs/heads/master @ 1ec0d3b91d0e (source compiles statically)
+2:provenance: zapo-js@1.8.2 ← https://github.com/vinikjkkj/zapo@refs/tags/v1.8.2 @ 757a8071b819 (source compiles statically)
+3:provenance: @vinikjkkj/wa-wam: source tree's package.json says 2.3000.1041627196-aaa11ce, installed is 2.3000.1041713829-1ec0d3b (release tooling that bumps at publish) — the behavior differential is the check
+4:provenance: argo-codec@0.2.1: no provenance attestation published; island path used
+5:provenance: @zapo-js/native: not installed under the entry's node_modules; island path used
+--- backend line (which backend actually ran) ---
+--- log error sites: pattern [ - error SCxxxx: ] over 67044 bytes ---
+LOG-SITES total=0
+--- compiler's own totals line (cross-check) ---
+BINARY bytes=33431040
+RUN exit=0  stdout=697B
+--- fences over EVERY emitted TU (.c, .partN.c, .scrh) ---
+    src-wam-entry.c                            bytes=25496116       fences=0
+    src-wam-entry.part1.c                      bytes=9990094        fences=0
+    src-wam-entry.part10.c                     bytes=9999908        fences=0
+    src-wam-entry.part11.c                     bytes=10003269       fences=0
+    src-wam-entry.part12.c                     bytes=9995267        fences=0
+    src-wam-entry.part13.c                     bytes=208691         fences=0
+    src-wam-entry.part2.c                      bytes=10496276       fences=0
+    src-wam-entry.part3.c                      bytes=9989806        fences=0
+    src-wam-entry.part4.c                      bytes=10009220       fences=1
+    src-wam-entry.part5.c                      bytes=10002857       fences=0
+    src-wam-entry.part6.c                      bytes=10277081       fences=0
+    src-wam-entry.part7.c                      bytes=13345266       fences=0
+    src-wam-entry.part8.c                      bytes=10018894       fences=0
+    src-wam-entry.part9.c                      bytes=10009384       fences=0
+    src-wam-entry.scrh                         bytes=9367613        fences=0
+    TOTAL files=15 bytes=159209742 FENCES=1
+      1 [SC2020 at <blocks>/wamcoord-prov/757a8071b819699437b353865b17cacffe95e9fb/spec/proto/index.js:1]
+--- embedded-engine scan (must all read 0 for a static claim) ---
+    quickjs        0
+    ScrDyn         0
+    JS_NewRuntime  0
+ORACLE node v25.9.0 exit=0  stdout=697B
+ORACLE: MATCH (byte-exact)
+### DONE srcwament-on rc=0
+=== Q4 DONE 2026-09-07T17:50:08-03:00
+=== GATE-EXIT rc=0 ===

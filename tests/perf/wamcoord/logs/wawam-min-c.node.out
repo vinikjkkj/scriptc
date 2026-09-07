@@ -1,0 +1,6 @@
+protocol=5
+wire.regular=0
+wire.private=2
+CHAT_OPEN=3
+LT128=3
+WAWAM-MIN: reached the end

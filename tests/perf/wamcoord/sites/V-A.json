@@ -1,0 +1,55 @@
+{
+ "entry": "<blocks>/wamcoord-lab/napp/drivers/voip.ts",
+ "flags": [
+  "--provenance-sources"
+ ],
+ "elapsedMs": 817,
+ "crashed": null,
+ "preflightFailed": false,
+ "stats": {
+  "statementsTotal": 6,
+  "statementsFailed": 2,
+  "statementsIsland": 0,
+  "functionsSkipped": 0
+ },
+ "unreachedStats": {
+  "statementsTotal": 0,
+  "statementsFailed": 0,
+  "statementsIsland": 0,
+  "functionsSkipped": 0
+ },
+ "npmStatic": null,
+ "provenanceNotes": [
+  "note: @zapo-js/voip@1.0.0: no provenance attestation published; island path used"
+ ],
+ "sites": [
+  {
+   "section": "blocker",
+   "code": "SC2008",
+   "message": "values of type 'WaClientPluginDefinition & { readonly exposeAs: \"voip\"; readonly setup: (ctx: WaClientPluginContext) => WaVoipCoordinator; readonly __pluginEvents?: VoipEvents | undefined; }' cannot be compiled: this intersection resolves to no runtime shape",
+   "file": "<blocks>/wamcoord-lab/napp/drivers/voip.ts",
+   "line": 4
+  },
+  {
+   "section": "blocker",
+   "code": "SC2013",
+   "message": "importing '@zapo-js/voip' requires the embedded dynamic engine, which this build does not include — the package's implementation runs there",
+   "file": "<blocks>/wamcoord-lab/napp/drivers/voip.ts",
+   "line": 2
+  },
+  {
+   "section": "blocker",
+   "code": "SC2013",
+   "message": "values from the '@zapo-js/voip' package run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/wamcoord-lab/napp/drivers/voip.ts",
+   "line": 4
+  },
+  {
+   "section": "blocker",
+   "code": "SC2004",
+   "message": "uses of 'p' inherit the blocker on its declaration",
+   "file": "<blocks>/wamcoord-lab/napp/drivers/voip.ts",
+   "line": 5
+  }
+ ]
+}

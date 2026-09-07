@@ -1,0 +1,13 @@
+ORACLE-NODE v25.9.0
+=== Q2 START 2026-09-07T16:48:54-03:00   AUTHORED_JS=1
+--- F+: napp/pkgsrc/src-wam.ts, gate ON
+sites=65 preflightFailed=false total=48044 failed=0 island=0 ms=1028004
+EXIT=0
+--- A+: drivers/wam.ts, gate ON
+sites=263 preflightFailed=false total=1484 failed=74 island=0 ms=747959
+EXIT=0
+--- A2+: drivers/_x-wam-plus-zapo.ts, gate ON
+sites=65 preflightFailed=false total=48045 failed=0 island=0 ms=1523900
+EXIT=0
+=== Q2 DONE 2026-09-07T17:44:03-03:00
+=== GATE-EXIT rc=0 ===

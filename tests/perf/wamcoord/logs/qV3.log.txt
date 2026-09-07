@@ -1,0 +1,72 @@
+ORACLE-NODE v25.9.0
+=== QV3 START 2026-09-07T19:37:08-03:00
+--- the dgram tier question, DEFAULT backend (no --backend flag)
+### dgramprobe  src=dgramprobe.ts  flags:[]  AUTHORED_JS=<unset>
+### node=v25.9.0  zig=0.16.0  tar=tar (GNU tar) 1.35  cc=zigcc  target=x86_64-windows-gnu
+BUILD rc=0  2s  log=42B
+--- provenance notes ---
+--- backend line (which backend actually ran) ---
+--- log error sites: pattern [ - error SCxxxx: ] over 42 bytes ---
+LOG-SITES total=0
+--- compiler's own totals line (cross-check) ---
+BINARY bytes=698880
+RUN exit=0  stdout=10B
+--- fences over EVERY emitted TU (.c, .partN.c, .scrh) ---
+    TOTAL files=0 bytes=0 FENCES=0
+--- embedded-engine scan (must all read 0 for a static claim) ---
+    quickjs        0
+    ScrDyn         0
+    JS_NewRuntime  0
+ORACLE node v25.9.0 exit=0  stdout=10B
+ORACLE: MATCH (byte-exact)
+### DONE dgramprobe rc=0
+--- voip consumer lane, STRICT, --backend c: the compiler's own error line
+### voip-a2  src=drivers/_x-voip-plus-zapo.ts  flags:[--provenance-sources --backend c]  AUTHORED_JS=<unset>
+### node=v25.9.0  zig=0.16.0  tar=tar (GNU tar) 1.35  cc=zigcc  target=x86_64-windows-gnu
+BUILD rc=1  424s  log=34054B
+--- provenance notes ---
+1:provenance: zapo-js@1.8.2 ← https://github.com/vinikjkkj/zapo@refs/tags/v1.8.2 @ 757a8071b819 (source compiles statically)
+2:provenance: argo-codec@0.2.1: no provenance attestation published; island path used
+3:provenance: @zapo-js/native: not installed under the entry's node_modules; island path used
+4:provenance: @zapo-js/voip@1.0.0: no provenance attestation published; island path used
+--- backend line (which backend actually ran) ---
+--- log error sites: pattern [ - error SCxxxx: ] over 34054 bytes ---
+LOG-SITES total=58
+     21 LOG-CODE  SC1090
+     16 LOG-CODE  SC2020
+     11 LOG-CODE  SC2003
+      6 LOG-CODE  SC2004
+      2 LOG-CODE  SC2001
+      1 LOG-CODE  SC2012
+      1 LOG-CODE  SC2011
+--- compiler's own totals line (cross-check) ---
+481:58 errors.
+BINARY: none (rc=1) -- FENCE COUNT n/a, NOT 0
+--- last 25 log lines ---
+  1006 |             closeQuietly(conn.peerConnection, this.logger)
+       |                          ^~~~~~~~~~~~~~~~~~~
+  1007 |             closeQuietly(conn.udpSocket, this.logger)
+
+  hint: narrow the value to a SINGLE arm first (a discriminant check, or '!== undefined'/'!== null' for unit arms); a plain arm value widens into any union that contains it, and a whole union widens into any union whose arms include the source's
+
+<blocks>/wamcoord-prov/757a8071b819699437b353865b17cacffe95e9fb/packages/voip/src/relay/WaSctpRelay.ts:1007:26 - error SC2003: union types must match exactly: expected 'null | { close: () => void } | undefined', got 'dgram.Socket | null' (a union re-tags into another union only when every arm of the source has an identical arm in the destination, or is a record/array that width-coerces into exactly one destination arm)
+
+  1006 |             closeQuietly(conn.peerConnection, this.logger)
+  1007 |             closeQuietly(conn.udpSocket, this.logger)
+       |                          ^~~~~~~~~~~~~~
+  1008 |         }
+
+  hint: narrow the value to a SINGLE arm first (a discriminant check, or '!== undefined'/'!== null' for unit arms); a plain arm value widens into any union that contains it, and a whole union widens into any union whose arms include the source's
+
+<blocks>/wamcoord-prov/757a8071b819699437b353865b17cacffe95e9fb/packages/voip/src/WaVoipCoordinator.ts:224:47 - error SC2020: ''on' of 'call_inbound_audio' with a checked-dynamic listener' is part of the standard library types but has no scriptc lowering yet
+
+  223 |         })
+  224 |         this.manager.on('call_inbound_audio', (call, pcm) => {
+      |                                               ^~~~~~~~~~~~~~~~
+  225 |             ctx.emit('voip_call_inbound_audio', { call, pcm })
+
+  hint: the event's argument 1 is 'Float32Array', which cannot box into a dynamic value — annotate the listener's parameters with the emitted types
+
+58 errors.
+### DONE voip-a2 rc=1
+=== QV3 DONE 2026-09-07T19:44:17-03:00

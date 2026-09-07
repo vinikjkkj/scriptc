@@ -1,0 +1,3 @@
+plugin=object
+coordinator=WaWamCoordinator
+client=function

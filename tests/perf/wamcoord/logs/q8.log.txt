@@ -1,0 +1,19 @@
+# NOTE: vitest ANSI colour escapes (ESC[..m) stripped for committing; no other byte changed.
+ORACLE-NODE v25.9.0
+=== Q8 START 2026-09-07T18:10:32-03:00 -- the new authored-JS regression suite
+
+ RUN  v3.2.7 <blocks>/wamcoord
+
+ ✓ tests/harness/provenance-authored-js.test.ts (4 tests) 2607ms
+   ✓ provenance: a package that publishes the source it authored > with the gate OFF the package islands, and the note names it  1106ms
+   ✓ provenance: a package that publishes the source it authored > the mapped package compiles STATIC with no blockers  384ms
+   ✓ provenance: a package that publishes the source it authored > the static binary matches Node, const read included  1109ms
+
+ Test Files  1 passed (1)
+      Tests  4 passed (4)
+   Start at  18:10:33
+   Duration  8.46s (transform 3.92s, setup 0ms, collect 5.31s, tests 2.61s, environment 0ms, prepare 185ms)
+
+VITEST-EXIT=0
+=== Q8 DONE 2026-09-07T18:10:41-03:00
+=== GATE-EXIT rc=0 ===
