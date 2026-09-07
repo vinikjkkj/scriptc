@@ -13330,6 +13330,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/fixtures/node-types/child-stdio.ts": {
+   "order": [
+    "<repo>/tests/fixtures/node-types/child-stdio.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/fixtures/node-types/fenced.ts": {
    "order": [
     "<repo>/tests/fixtures/node-types/fenced.ts"

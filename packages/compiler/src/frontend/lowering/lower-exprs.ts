@@ -607,6 +607,30 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
             return { kind: "call", callee: helper, args: [inner], type: target, loc };
           }
         }
+        // The target the CHECKER names is not always an arm of the IR union:
+        // an intrinsic read can mint an arm the checker spells as a
+        // different type. `child.stdout` is the standing case -- its IR arm
+        // is childStream while @types/node types the slot `Readable`, which
+        // maps to the runtime %Readable CLASS -- so the lookup above finds
+        // no helper and the union falls through unnarrowed, to re-tag-fence
+        // (SC2003) at the use. Where the union is a nullable-of-ONE, `!`
+        // has exactly one thing it can mean, so narrow to that arm through
+        // the SAME checked helper: a lying assertion still throws the
+        // catchable TypeError, it is only the arm LOOKUP that changes.
+        // Additive: this runs only where the code above already gave up.
+        {
+          const arms = L.unions.get(inner.type.unionId)?.arms;
+          const solid = arms?.filter(
+            (a) => a.kind !== "nullT" && a.kind !== "undefinedT" && a.kind !== "void",
+          );
+          if (arms && solid && solid.length === 1 && solid.length < arms.length) {
+            const arm = solid[0]!;
+            const helper = L.narrowedArmHelper(inner.type.unionId, arm, loc);
+            if (helper) {
+              return { kind: "call", callee: helper, args: [inner], type: arm, loc };
+            }
+          }
+        }
         return inner;
       }
       return L.maybeNarrow(inner, expr);

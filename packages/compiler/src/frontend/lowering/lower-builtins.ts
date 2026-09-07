@@ -6215,10 +6215,23 @@ let digestInputValueDispatches = 0;
     // stream class everywhere else.
     if (isChildStdioAccess(L, expr)) {
       const receiver = L.lowerExpr(expr.expression);
-      const type: IrType = {
-        kind: "union",
-        unionId: L.unions.intern([CHILDSTREAM_T, { kind: "nullT" }]),
-      };
+      // The null arm is the CHECKER'S, not an invariant: `stdio: ["ignore",
+      // "pipe", "pipe"]` selects @types/node's ChildProcessByStdio<I, O, E>
+      // overload, which PINS the slot types the tuple asked for, so
+      // `child.stdout` there is `Readable`, never `Readable | null`. Minting
+      // the union anyway sends every read of it into the %Readable class
+      // spoke as `Readable | null`, where it re-tag-fences (SC2003) -
+      // measured on all three read forms (`?.`, `!`, and the plain member
+      // read). Where the checker itself says the slot cannot be null - the
+      // tuple overload, or a guard it narrowed - the IR says so too.
+      const slotT = L.typeOf(expr);
+      const NULLISH = ts.TypeFlags.Null | ts.TypeFlags.Undefined | ts.TypeFlags.Void;
+      const nullable =
+        (slotT.flags & NULLISH) !== 0 ||
+        (slotT.isUnionType() && slotT.getTypes().some((a) => (a.flags & NULLISH) !== 0));
+      const type: IrType = nullable
+        ? { kind: "union", unionId: L.unions.intern([CHILDSTREAM_T, { kind: "nullT" }]) }
+        : CHILDSTREAM_T;
       const read: IrExpr = {
         kind: "libCall",
         fn: name === "stdout" ? "child.stdout" : "child.stderr",
