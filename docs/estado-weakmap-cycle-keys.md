@@ -651,17 +651,19 @@ each has its own answer:
   shifts the five sections after `.text` by one unit. Deriving either
   class's delta from the other's here would be 512 bytes wrong.
 
-  Both stay inside `recordedSizeComplaint`'s page (each ends +1,024 over its
-  recorded anchor, and the drift page is 4,096) and keep 7,168 bytes under
-  `STATIC_CLASS_MAX`/`REGEX_CLASS_MAX`. The recorded figures are NOT
-  re-anchored, and the base drift beside them has since been bisected. The
+  Both keep 7,168 bytes under `STATIC_CLASS_MAX`/`REGEX_CLASS_MAX`. The two
+  recorded figures are now treated DIFFERENTLY, once the base drift beside
+  them was bisected. The
   static class was 677,376 at `874e78b8` and at `37781755` — reproducing
   the recorded entry to the byte — and 677,888 from `036479ce` onward: the
   `%ReferenceError` prototype fix, 48 bytes of always-linked `scr_json.c`,
   which landed one commit AFTER the size entry was written and so was never
   weighed. The regex class was 818,688 at all four revisions, so it never
   moved at all and its recorded 818,176 simply does not reproduce on this
-  configuration.
+  configuration. So the STATIC figure is now anchored at 677,888 — growth,
+  explained, with a named commit — and the REGEX figure is deliberately
+  left at 818,176, because anchoring it would record a discrepancy as if
+  it were growth.
 
   The two changes are mirror images, which is the arithmetic to keep: 48
   bytes carried the static file 512 and left regex alone, 208 bytes carried

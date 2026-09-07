@@ -1370,15 +1370,62 @@ export const SIZE_DRIFT_PAGE = 4_096;
  * budget for growth nobody has explained. It is an eighth of a page and
  * `recordedSizeComplaint` is right to stay quiet.
  *
+ * [2026-09-07: THE STATIC FIGURE HAS SINCE MOVED, 676,864 -> 677,888, and
+ * this paragraph's 676,864 is the historical value. The inherited 512 this
+ * entry names is now inside the anchor, together with a second 512 from
+ * `036479ce` that landed ONE COMMIT AFTER this entry was written and that
+ * this entry therefore could not have seen. Its measurement is
+ * reproducible today to the byte and its +0/+0 conclusion stands.]
+ *
  * THE REGEX CLASS IS THE CONTROL, and it is why the +512 can be called code
  * rather than toolchain: 818,176 reproduces the bc266f01 anchor TO THE BYTE
  * on both trees. A toolchain difference cannot move one class 512 bytes and
  * leave the other exactly where it was recorded a week earlier. (The class
  * DISTANCE is 140,800 here against the 141,312 recorded -- the same +512,
- * on the static side, and nowhere near a library.) */
+ * on the static side, and nowhere near a library.)
+ *
+ * [2026-09-07: THE CONTROL SENTENCE ABOVE IS RETRACTED. 818,176 does not
+ * reproduce on `SCRIPTC_TARGET=x86_64-windows-gnu` and did not on the day
+ * this entry was written either -- the regex program measures 818,688 at
+ * `874e78b8` itself. The entry's OTHER half is unaffected and was
+ * reproduced to the byte: static 677,376 on both trees, +0/+0 for
+ * `%ReferenceError`. So the conclusion stands and only the control's
+ * premise falls. See the top of the next dated group.] */
+/* 2026-09-07 — READ THIS BEFORE YOU TRUST `REGEX_CLASS_RECORDED`: IT DOES
+ * NOT REPRODUCE, AND IT IS THE ONLY FIGURE IN THIS FILE THAT DOES NOT.
+ *
+ * Built at four revisions today — `874e78b8`, `37781755`, `036479ce`,
+ * `7adee17b` — one worktree, one install, a separate `SCRIPTC_CACHE_DIR`
+ * per revision, zig 0.16.0, `SCRIPTC_TARGET=x86_64-windows-gnu`. The regex
+ * program is **818,688 at all four**, including `874e78b8`, which is
+ * BEFORE any commit the entry below discusses. The recorded 818,176 is one
+ * file-alignment unit low, and the claim two entries up that it
+ * "reproduces the `bc266f01` anchor TO THE BYTE" does not hold today.
+ *
+ * That claim was being used as the CONTROL proving there is no toolchain
+ * difference between runs, which is the worst possible number to be wrong
+ * about, so it gets the top of the entry rather than a footnote.
+ *
+ * A HYPOTHESIS, AND IT IS UNPROVEN. This file's own preamble says the
+ * regex floor was witnessed by running the suite with `SCRIPTC_TARGET`
+ * UNSET while the static figure was a direct `compile()` measurement, and
+ * the trap above prices that configuration difference at ~15 KB. A 512
+ * could have entered there. NOT ESTABLISHED — nobody has rebuilt the
+ * native flavour to check, and it is recorded as the next question rather
+ * than as the answer.
+ *
+ * THE FIGURE IS DELIBERATELY NOT MOVED. Anchoring it would record a
+ * discrepancy as if it were growth, which is the one thing an anchor must
+ * never do; the static class beside it IS anchored today because its
+ * change is explained to the byte. Whoever settles the configuration
+ * question can then move this in one honest line. Until then the class
+ * still guards: `REGEX_CLASS_MAX` is unaffected, and
+ * `recordedSizeComplaint` measures against a figure known to sit one unit
+ * low, which errs toward complaining early. */
 
 /* 2026-09-07 — DYN WEAKMAP KEYS COST 208 BYTES OF CODE, AND THE FILE MOVES
  * 512 ON ONE CLASS AND 0 ON THE OTHER. This is the entry that separates
+ * those two sentences, because reading only the file sizes gets it wrong.
  * those two sentences, because reading only the file sizes gets it wrong.
  *
  *   base `7adee17b`   static 677,888   regex 818,688
@@ -1499,12 +1546,20 @@ export const SIZE_DRIFT_PAGE = 4_096;
  * ITS CODE DELTA, and neither can be derived from the other — the same
  * warning the 2026-08-24 entry gives, arrived at from the opposite side.
  *
- * NOTHING IS RE-ANCHORED HERE. The static 512 now has a named commit and
- * could be anchored honestly; the regex figure cannot, because what it
- * would be anchoring is an unexplained discrepancy rather than growth.
- * Anchoring one and not the other would leave the pair less legible than
- * it is now. It is one honest line for whoever settles the regex
- * configuration question.
+ * THE PAIR IS DELIBERATELY SPLIT, and a first draft of this paragraph got
+ * that wrong too: it left BOTH figures alone on the grounds that splitting
+ * them made the pair less legible. That reasoning weighs tidiness against
+ * the rule the file exists for, and loses. The two figures are not the
+ * same kind of thing:
+ *
+ *   STATIC  is GROWTH, explained to the byte with a named commit, so it is
+ *           ANCHORED (676,864 -> 677,888; see the constant's own note).
+ *           Leaving it out would hand every future block 512 bytes of head
+ *           start inside the drift page for growth nobody explained.
+ *   REGEX   is a figure that DOES NOT REPRODUCE — 818,688 at four
+ *           revisions including one before this whole range. Anchoring it
+ *           would record a discrepancy as growth. It stays until somebody
+ *           settles the configuration question, and then it is one line.
  *
  * THE RECORDED FIGURES DO NOT MOVE, and for the reason the entry above
  * gives rather than in spite of it. The 512 THIS branch adds is explained
@@ -1520,7 +1575,39 @@ export const SIZE_DRIFT_PAGE = 4_096;
  * variant — without that the second build reuses the first's compiled
  * runtime objects and the delta reads zero by construction — and each
  * column run twice and byte-stable. */
-export const STATIC_CLASS_RECORDED = platform === "win32" ? 676_864 : null;
+
+/** The static hello-world's recorded size. MOVED 2026-09-07, 676,864 ->
+ * 677,888, and it carries its own justification because an anchor that
+ * does not is how this guard stops meaning anything.
+ *
+ * The 1,024 is TWO separate 512s and both are now explained:
+ *
+ *   +512  spent in main before 2026-08-31 and named "inherited" by the
+ *         entry that found it. Still unattributed to a commit, but it is
+ *         inside the figure either way — the alternative is leaving it as
+ *         a standing head start, which is worse than recording it.
+ *   +512  `036479ce`, bisected today: the fix that gave `%ReferenceError`
+ *         a prototype and replaced a contiguous-range test with a
+ *         membership test grew `scr_json.c` — ALWAYS LINKED — by 48 bytes
+ *         of `.text` in both size programs. 48 bytes carried the static
+ *         file a whole unit because its `.text` ended 10 bytes under the
+ *         boundary; the same 48 bytes moved the regex file 0, because
+ *         its slack was 90.
+ *
+ * WHY IT WAS NOT CAUGHT: the entry that weighed `%ReferenceError` measured
+ * `874e78b8` against `37781755` and correctly found +0/+0 — reproduced
+ * today, to the byte. `036479ce` landed ONE COMMIT LATER. That is a
+ * PROCESS gap, not a measurement error: the size entry was committed
+ * before the branch was finished. Nothing about the rig needs fixing;
+ * what needs fixing is weighing a branch at its tip rather than mid-way.
+ *
+ * Anchoring rather than leaving it: a growth that IS explained belongs in
+ * the figure. Left out, every future block inherits 512 bytes of head
+ * start inside the 4,096 drift page for growth nobody has explained, which
+ * is the exact failure this guard exists to prevent. Its sibling
+ * REGEX_CLASS_RECORDED is deliberately NOT moved, for the opposite reason
+ * — see the entry at the top of this group. */
+export const STATIC_CLASS_RECORDED = platform === "win32" ? 677_888 : null;
 
 /** The regex program, same run, same tree. Deliberately NOT derived from
  * the static delta - and the 2026-08-24 entry is why: that change moved the
