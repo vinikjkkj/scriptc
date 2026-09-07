@@ -2209,15 +2209,36 @@ export function lowerStmt(L: Lowerer, stmt: ts.Statement): IrStmt | IrStmt[] | n
       }
       return;
     }
-    // A CHECKED-DYNAMIC source in a JavaScript file (`const { x } = anyValue`
-    // — the Node-suite subscriber-payload idiom): each element is the
-    // per-site dyn member read (dynKeyGet — Node's TypeError on a nullish
-    // source, the undefined answer for absent members), with the JS
-    // default applied exactly when the read answers undefined (lazily,
-    // like a defaulted parameter). Bindings are dyn (the checker's `any`),
-    // nested object patterns recurse through this same branch. TS files
-    // keep the fence — annotations exist there.
-    if (srcType.kind === "dyn" && isJsSourceFile(pattern.getSourceFile())) {
+    // A CHECKED-DYNAMIC source (`const { x } = anyValue` — the Node-suite
+    // subscriber-payload idiom; `const { code, message } = (error ?? {}) as
+    // { code?: unknown; message?: unknown }` — zapo's backend-absence
+    // classifier): each element is the per-site dyn member read (dynKeyGet
+    // — Node's TypeError on a nullish source, the undefined answer for
+    // absent members), with the JS default applied exactly when the read
+    // answers undefined (lazily, like a defaulted parameter). Bindings are
+    // dyn, nested object patterns recurse through this same branch.
+    //
+    // TYPESCRIPT SOURCES take it too, under dynObjectPatternBindsOnlyDyn.
+    // They used to keep the fence on the reasoning that "annotations exist
+    // there" — and the annotated fix that reasoning points at is a checked
+    // cast, which is the one rewrite that does NOT preserve the semantics:
+    // MEASURED against v25.9.0, `const src = (error ?? {}) as { code?:
+    // unknown; message?: unknown }; src.code` answers correctly for an
+    // object and TRAPS on a number (`TypeError: expected object at $, got
+    // number`) where Node reads undefined, because the cast narrows the
+    // admitted receiver from "any JS value" to "an object". Destructuring
+    // is precisely the construct JS defines over every non-nullish value,
+    // so the cast is the wrong shape for it — and it is also unnecessary:
+    // the initializer of such a site is ALREADY dyn here (an all-`unknown`
+    // object type maps to dyn wholesale, so no dynCheck is on the value),
+    // and the dyn reads below answer what Node answers for every receiver
+    // kind the runtime can read. The refusal was never protecting the
+    // reads; what it protected against is a binding whose own type is not
+    // dyn, and that is what the predicate keeps refusing.
+    if (
+      srcType.kind === "dyn" &&
+      (isJsSourceFile(pattern.getSourceFile()) || dynObjectPatternBindsOnlyDyn(L, pattern))
+    ) {
       for (const el of pattern.elements) {
         if (el.name === undefined) continue;
         const loc = locOf(el);
@@ -2606,6 +2627,50 @@ export function lowerStmt(L: Lowerer, stmt: ts.Statement): IrStmt | IrStmt[] | n
    * when the type has no static mapping (the caller fences). */
   function patternBindingType(L: Lowerer, name: ts.BindingName): IrType | null {
     return L.mapTypeOf(L.typeOf(name));
+  }
+
+  /** Whether a TypeScript object pattern over a CHECKED-DYNAMIC source
+   * binds ONLY dyn — the gate that lets the JS lane's dyn destructure
+   * serve TS files too (the branch in lowerBindingPattern).
+   *
+   * The branch's reads are Node-exact for every receiver kind (measured
+   * against v25.9.0: a number, a string, a bool, a function, an array and
+   * an absent member all answer `undefined`; an object answers its member;
+   * null and undefined throw a TypeError). What is NOT exact is what
+   * happens AFTER the read when the binding's own type is something else:
+   * bindPatternTarget coerces the dyn into it, which for a concrete type
+   * is a dynCheck that TRAPS where JS binds undefined. That is the trade
+   * this predicate refuses to make -- a refusal costs a diagnostic, a trap
+   * is a wrong answer that ships.
+   *
+   * So an identifier binding is admitted only when its own checker type
+   * maps to dyn (or to nothing at all, which bindPatternTarget's dynStays
+   * rule also binds dyn): then `type` is DYN, the coercion is the
+   * identity, and no check is inserted. A nested OBJECT pattern recurses.
+   * Everything else -- a rest element (fenced inside the branch anyway), a
+   * nested ARRAY pattern, a binding the checker types concretely (the
+   * `number & { low; high }` protobuf-Long shape is the live one) -- keeps
+   * the fence.
+   *
+   * JavaScript files never consult this: there every binding is `any`, so
+   * the answer is uniformly dyn and the branch has served them since it
+   * was written. */
+  function dynObjectPatternBindsOnlyDyn(L: Lowerer, pattern: ts.ObjectBindingPattern): boolean {
+    for (const el of pattern.elements) {
+      if (el.name === undefined) continue;
+      if (el.dotDotDotToken !== undefined) return false;
+      if (ts.isIdentifier(el.name)) {
+        const t = patternBindingType(L, el.name);
+        if (t !== null && t.kind !== "dyn") return false;
+        continue;
+      }
+      if (ts.isObjectBindingPattern(el.name)) {
+        if (!dynObjectPatternBindsOnlyDyn(L, el.name)) return false;
+        continue;
+      }
+      return false;
+    }
+    return true;
   }
 
 /** The STATIC property name of a destructuring key: identifiers spell

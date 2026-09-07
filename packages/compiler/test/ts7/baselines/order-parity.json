@@ -10875,6 +10875,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/7792-destructuring-a-checked-dynamic-source.ts": {
+   "order": [
+    "<repo>/tests/corpus/7792-destructuring-a-checked-dynamic-source.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/800-switch-basics.ts": {
    "order": [
     "<repo>/tests/corpus/800-switch-basics.ts"
@@ -11678,6 +11684,12 @@
   "<repo>/tests/diagnostics/delete-fences.ts": {
    "order": [
     "<repo>/tests/diagnostics/delete-fences.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/destructuring-a-checked-dynamic-source-past-the-dyn-bindings.ts": {
+   "order": [
+    "<repo>/tests/diagnostics/destructuring-a-checked-dynamic-source-past-the-dyn-bindings.ts"
    ],
    "diags": []
   },
