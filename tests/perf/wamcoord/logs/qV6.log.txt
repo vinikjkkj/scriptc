@@ -1,0 +1,5 @@
+ORACLE-NODE v25.9.0
+=== QV6 START 2026-09-07T20:05:12-03:00 -- voip lane A2 AFTER the compound-assignment change
+sites=117 preflightFailed=false total=48994 failed=47 island=0 ms=981052
+EXIT=0
+=== QV6 DONE 2026-09-07T20:21:35-03:00

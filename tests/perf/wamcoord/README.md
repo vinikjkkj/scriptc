@@ -80,6 +80,16 @@ versions, same `pkgsrc/wam` (verified `diff -r -q` byte-identical to the zapo-js
 **1.8.2** attested checkout `757a8071b819`), so a difference between a number
 here and one there is the compiler or the driver, never the corpus.
 
+**Offline reproducibility, 2026-09-07.** This host s sandbox blocks network: a
+curl of codeload.github.com, registry.npmjs.org and a known-good control all
+return **HTTP 000**. And nine of the thirteen block roots the committed
+`tests/perf/*/env.sh` files name no longer exist on disk, `<blocks>/pkgstatus-prov`
+among them -- the provenance cache `pkgstatus-0907` was measured against. Those
+numbers stand, because the cache is content-addressed and refetchable, but they
+are **not reproducible offline today**: a reproduction goes to the network, and
+the network is closed. Every number in THIS document was produced against
+`<blocks>/wamcoord-prov`, which is intact.
+
 ### The six analysis lanes
 
 | id | driver | names in the driver | gate |
@@ -1160,3 +1170,184 @@ Ranked by sites, with what each would take:
 Two of those five are one compiler change each and together they are **22 of
 58**. That is the shape of the next step, and it is a smaller wall than the
 count suggests.
+
+---
+
+## 14. Taking the 22: one closed, one characterised and declined
+
+Two compiler changes were named in §13.8 as 22 of `voip`'s 58 sites. One is
+done. The other is not the change it looked like, and the measurement that says
+so is 13 lines.
+
+### 14.1 Compound assignment through a computed receiver — CLOSED, 11 sites
+
+`voip` writes `this.stats.connected++` and `conn.stats.sentBytes += n` eleven
+times. `fieldCompoundParts` refused every one:
+
+```ts
+if (!ts.isIdentifier(access.expression) && access.expression.kind !== ts.SyntaxKind.ThisKeyword) {
+  L.unsupported("SC1090", access, "compound assignment to fields of computed receivers");
+}
+```
+
+**The reason was never that the shape could not be emitted.** It was that the
+desugar evaluates the receiver **twice** — once for the read's field target,
+once when `write` re-derives it from the AST — and only an identifier or `this`
+is safe to evaluate twice. The file says so itself: *"Second, independent
+evaluation of the (side-effect-free) receiver."*
+
+So the fix is not to prove receivers pure. It is to stop evaluating them twice.
+A non-simple receiver is now pinned into a hidden local, **exactly the pattern
+`arrayLengthCompoundParts` already uses for `%lenRecv` twenty lines above**, and
+the read and the write both address that local. One evaluation, which is what
+JavaScript does.
+
+The checked-dynamic arm keeps the old restriction: its write re-lowers the
+receiver through `L.lowerExpr` and has no field target to re-point.
+
+**Is it a lowering change or a frontend predicate change?** Answered before
+touching it, by building:
+
+    c.stats.connected = c.stats.connected + 1     rc=0, runs, ORACLE MATCH byte-exact
+
+`fieldGet` over `fieldGet` already compiles. So the change emits **no new IR
+shape**, and:
+
+* `ir/validate.ts` asserts, for `fieldGet`/`fieldSet`, that the class is
+  declared, that `obj` has type `{ kind: "object", className }` and that the
+  field types match. A nested `fieldGet` receiver satisfies all three — its type
+  *is* the inner field's object type. **No assertion was relaxed, extended or
+  touched.**
+* Consumers of the two nodes: `emission/emit-exprs.ts` (`fieldGet`),
+  `emission/emit-stmts.ts` (`fieldSet`), `llvm/emitter.ts` (both). Every one
+  recurses into `e.obj` and addresses through a pointer — `obj->member` in C,
+  `classFieldPtr` in LLVM — so a two-level path writes the real object, not a
+  copy. There is no by-value receiver to lose a write into.
+
+**Correctness, both backends, node as oracle.** The probe's load-bearing lines
+count receiver evaluations:
+
+```
+a=2,5        two levels, through `this` and through a local
+b=1,41
+c=5          three levels
+calls=1      <- r.pick(1).stats.connected++   ONE evaluation of a call receiver
+d=1
+e=2,4,4      value position, postfix and prefix
+idx=1,f=44   <- r.conns[nextIdx()]!.stats... ONE evaluation of a side-effecting index
+```
+
+`calls=1` and `idx=1` are the whole point: under the old two-evaluation desugar
+they would read **2**. Both backends produce this byte-identically to node
+v25.9.0.
+
+**Negative control**, because a probe that passes proves nothing unless it
+failed before: rebuilt at base with the change reverted, the same program is
+`BUILD rc=1`, **9 errors, all `SC1090 compound assignment to fields of computed
+receivers`**.
+
+**`voip` lane A2, before and after** — the lane a consumer gets, same driver,
+same host:
+
+| | before | after |
+| --- | --- | --- |
+| `analyze()` blocker sites | **58** | **47** |
+| statements reached / failed | 48,994 / 58 | 48,994 / **47** |
+| build `LOG-SITES` | 58 | **47** |
+| **the compiler's own line** | `58 errors.` | **`47 errors.`** |
+| `SC1090` | 21 | **10** |
+| binary | none | none |
+| fences over emitted bytes | **n/a, NOT 0** | **n/a, NOT 0** |
+
+`harness/subdiff.mjs` over `(section, code, file, line)`:
+**11 cleared, 0 newly appearing.** All eleven are the `SC1090` compound sites in
+`WaSctpRelay.ts` at 347, 458, 664-666, 686-688, 720-722. No line-shift
+reconciliation is needed — `voip`'s source was not touched; this is the attested
+tree compiled twice by two compilers.
+
+**Regression test:** `tests/corpus/7797-a-compound-assignment-through-a-computed-receiver-evaluates-it-once.ts`.
+The repo's own convention (`record-width-copy.test.ts`) puts a program that
+*compiles and matches node byte for byte* in `tests/corpus`, not
+`tests/harness`. Verified by hand on **both** backends: rc=0, exit 0, ORACLE
+MATCH byte-exact, 684,544 B (C) and 686,592 B (LLVM).
+
+### 14.2 The union re-tag — NOT the change it looked like
+
+The other eleven read as *"a nominal type will not flow into a structural
+`{ close(): void }` arm"*. **That is false, and one probe says so.** Four
+sources into the same arm:
+
+```
+q(sock)            the structural arm itself      compiles
+q(new Closer())    a nominal CLASS with close()   compiles
+q(iface)           a nominal INTERFACE with it    compiles
+q(ch)              an RTCDataChannel HANDLE       REFUSES  SC2003
+```
+
+So nominal-to-structural already works. **Only a handle refuses**, and that is a
+much narrower — and much deeper — statement.
+
+`RTCDataChannel` is not a record. It is a primitive-like IR kind,
+`{ kind: "rtcDataChannel" }`, sitting in the same list as `date`, `request`,
+`response` and `classval` under the comment *"a peer connection and a data
+channel are JS objects: always truthy"*. **A handle has no shape**, so there is
+no field table for a structural arm to match against.
+
+Making `q(ch)` compile therefore means one of:
+
+* **box the handle into a record** with a `close` closure bound to it — an
+  adapter, which changes identity (`c === ch` would answer false where node
+  says true), the exact class of divergence the `Date` decision was made to
+  avoid; or
+* **give unions a handle-flavoured arm** and dispatch `.close()` on the arm tag
+  rather than a record slot — a runtime representation change to every union
+  carrying a structural arm.
+
+Both are representation work with semantics attached, not a predicate widening,
+and **neither is measured**. I am not doing it on this pass, and I am not
+calling it cheap — it is the same shape as §13.5's `Date` fork and it belongs
+with whoever owns the handle kinds.
+
+The repro is 13 lines and fast (520 ms), kept as
+`drivers/retag.ts` and `drivers/retag2.ts` so the next block starts from the
+narrow statement rather than the wide one.
+
+**The other route to those same eleven sites is one line in zapo**, and it is
+already proven: §13.4's line-neutral substitution widened `closeQuietly`'s
+parameter to name the four handle types and cleared all eleven, opening exactly
+one site behind them. That is a zapo change, not a compiler change, and it is
+available today.
+
+### 14.3 Where `voip` stands now
+
+**47 blocker sites** on lane A2, from 58. Still no binary, so **fence count
+n/a**. What is left, by cause:
+
+| sites | cause | state |
+| --- | --- | --- |
+| 11 | the handle-into-structural-arm re-tag | **characterised** (§14.2); one line in zapo, or a representation change in the compiler |
+| 9 | `new Date` (7), `Date.getTime` (2) | a decision with an owner (§13.5) |
+| 4 + 6 | reads off the untyped `peerConnection` handle, and the cascade behind them | not attempted |
+| ~17 | singletons | mixed |
+
+### 14.4 Suites run, and suites NOT run
+
+`lower-exprs.ts` is the expression lowerer and sits under most of the harness,
+so the scope was every `tests/harness` suite plus every `packages/*` suite:
+
+    Test Files  93 passed | 3 skipped (96)
+         Tests  1860 passed | 49 skipped (1909)
+        Errors  2 errors
+    failure markers in the log: 0
+
+The 2 errors are `[vitest-worker]: Timeout calling "onTaskUpdate"` — vitest's
+reporter RPC timing out under a concurrent compile, the same pair as §11.5, not
+test failures.
+
+**NOT RUN, named as unrun:** `differential.test.ts`,
+`llvm-differential.test.ts`, `windows-differential.test.ts`,
+`linux-differential.test.ts`, and the full `pnpm test` gate. That matters more
+than usual here, because the corpus program added in §14.1 is driven by
+`differential.test.ts` — so the suite that will run it is one I did not run. It
+was verified by hand instead, on both backends, with node as the oracle, which
+is what that suite does to it.

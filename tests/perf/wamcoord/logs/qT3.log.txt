@@ -1,0 +1,65 @@
+ORACLE-NODE v25.9.0
+=== QT3 START 2026-09-07T20:06:55-03:00
+SELECTED 96 of 100 harness suites, plus packages/*
+UNRUN: differential llvm-differential windows-differential linux-differential
+   ✓ provenance: a package's alias baseUrl belongs to the config that spells it > the static binary matches Node on both backends  3900ms
+   ✓ provenance: two mapped packages spelling the same alias key > a package ENTRY beats an alias key that covers the same specifier  612ms
+   ✓ provenance: two mapped packages spelling the same alias key > the FIRST-mapped package gets its own checkout, and the borrow is announced  460ms
+   ✓ provenance: two mapped packages spelling the same alias key > the first-mapped package's binary matches Node on both backends  559ms
+ ✓ tests/harness/provenance.test.ts (8 tests) 12667ms
+   ✓ provenance sources > attested source compiles STATIC and byte-matches the island's published dist  4105ms
+   ✓ provenance sources > per-package attribution counts the source static; the @__PURE__ dead const elides  881ms
+   ✓ provenance sources > a generated .d.ts with a compiled twin flattens its class-intersection  6079ms
+   ✓ provenance sources > an unmappable package falls back to the island with a note, never a failure  332ms
+   ✓ provenance sources > a checker error in the ATTESTED SOURCE does not gate the build  952ms
+   ✓ provenance sources > the suppression is scoped to provenance files: the DRIVER's own error still gates  307ms
+ ✓ tests/harness/coverage.test.ts (20 tests) 734690ms
+   ✓ mixed program: percentage and grouped blockers  978ms
+   ✓ dynamic-capable blockers split from static rejections  1278ms
+   ✓ --dynamic analysis: island sites count as compiled-dynamically  1041ms
+   ✓ unreached blockers report in their own group  1341ms
+   ✓ fully static program reports 100%  993ms
+   ✓ fully static JavaScript program reports 100%  1161ms
+   ✓ JS inference gaps land where 'any' lands: SC2011 static, island dynamic  3846ms
+   ✓ dyn object-literal accessors: what lowers, and what refuses by name  1055ms
+   ✓ npm package sites attribute per package  1089ms
+   ✓ lazy edges inventory: unresolvable require()/import() targets mark as lazy traps  1103ms
+   ✓ lazy builtin edges mark in the builtins table, __require sites included  619ms
+   ✓ import fences no longer stop analysis: percentage plus module blockers  1931ms
+   ✓ a whole-export root that is REBOUND after the export keeps its fence  729ms
+   ✓ a module.exports TABLE entry over a rebindable let keeps its fence  1099ms
+   ✓ type errors block analysis  969ms
+   ✓ type errors render the same code frame a build prints  1193ms
+   ✓ bare '.' and '..' imports are relative edges (the vercel-CLI dialect)  779ms
+   ✓ a cycle whose top level calls a builtin with a builtin function value is admitted  792ms
+   ✓ every corpus program is 100% static (corpus and coverage agree)  712690ms
+⎯⎯⎯⎯⎯⎯ Unhandled Errors ⎯⎯⎯⎯⎯⎯
+
+Vitest caught 2 unhandled errors during the test run.
+This might cause false positive tests. Resolve unhandled errors to make sure your tests are not affected.
+
+⎯⎯⎯⎯⎯⎯ Unhandled Error ⎯⎯⎯⎯⎯⎯⎯
+Error: [vitest-worker]: Timeout calling "onTaskUpdate"
+ ❯ Object.onTimeoutError node_modules/.pnpm/vitest@3.2.7_@edge-runtime+_aec0055de7c7effda46e3e3ca0e6aa78/node_modules/vitest/dist/chunks/rpc.-pEldfrD.js:53:10
+ ❯ Timeout._onTimeout node_modules/.pnpm/vitest@3.2.7_@edge-runtime+_aec0055de7c7effda46e3e3ca0e6aa78/node_modules/vitest/dist/chunks/index.B521nVV-.js:59:62
+ ❯ listOnTimeout node:internal/timers:605:17
+ ❯ processTimers node:internal/timers:541:7
+
+
+⎯⎯⎯⎯⎯⎯ Unhandled Error ⎯⎯⎯⎯⎯⎯⎯
+Error: [vitest-worker]: Timeout calling "onTaskUpdate"
+ ❯ Object.onTimeoutError node_modules/.pnpm/vitest@3.2.7_@edge-runtime+_aec0055de7c7effda46e3e3ca0e6aa78/node_modules/vitest/dist/chunks/rpc.-pEldfrD.js:53:10
+ ❯ Timeout._onTimeout node_modules/.pnpm/vitest@3.2.7_@edge-runtime+_aec0055de7c7effda46e3e3ca0e6aa78/node_modules/vitest/dist/chunks/index.B521nVV-.js:59:62
+ ❯ listOnTimeout node:internal/timers:605:17
+ ❯ processTimers node:internal/timers:541:7
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+
+
+ Test Files  93 passed | 3 skipped (96)
+      Tests  1860 passed | 49 skipped (1909)
+     Errors  2 errors
+   Start at  20:06:56
+   Duration  743.06s (transform 8.03s, setup 0ms, collect 189.77s, tests 3449.05s, environment 27ms, prepare 19.58s)
+
+=== QT3 DONE 2026-09-07T20:19:20-03:00

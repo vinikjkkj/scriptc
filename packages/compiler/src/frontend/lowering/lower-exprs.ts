@@ -21462,16 +21462,32 @@ function arrayLengthCompoundParts(
       const len = arrayLengthCompoundParts(L, access, op, rhsNode, loc);
       if (len) return len;
     }
-    if (!ts.isIdentifier(access.expression) && access.expression.kind !== ts.SyntaxKind.ThisKeyword) {
-      L.unsupported("SC1090", access, "compound assignment to fields of computed receivers");
-    }
+    /* A receiver that is neither an identifier nor `this` used to refuse
+     * here, and the reason was never that the SHAPE could not be emitted -- it
+     * was that the desugar below evaluates the receiver TWICE: once for the
+     * read's field target, once when `write` re-derives it from the AST. For
+     * `this.stats.connected++` that is a second read of `this.stats`; through
+     * an accessor it would be a second getter call, which JavaScript does not
+     * make -- JS evaluates the member expression's object exactly once.
+     *
+     * So the fix is not to prove receivers pure, it is to stop evaluating them
+     * twice. A non-simple receiver is pinned into a hidden local below, exactly
+     * the way arrayLengthCompoundParts already pins `%lenRecv`, and the read
+     * and the write both address that local. One evaluation, JS's order.
+     *
+     * This emits nothing new: `c.stats.connected = c.stats.connected + 1`
+     * already compiles, runs and matches Node byte-exactly, so fieldGet over
+     * fieldGet is a composition both emitters and ir/validate.ts already
+     * accept -- measured before the change, not assumed. */
+    const simpleRecv =
+      ts.isIdentifier(access.expression) || access.expression.kind === ts.SyntaxKind.ThisKeyword;
     // A CHECKED-DYNAMIC receiver (`context.actual++` — test/common's call
     // accounting; dot spelling only — symbol-keyed element targets are
     // static fields): read the member (dynKeyGet), combine under the
     // operator's own conversion, write back (dyn.keySet). The receiver is
     // an identifier (checked above), so evaluating it for read and write
     // matches JS's once-evaluation observably.
-    if (ts.isPropertyAccessExpression(access)) {
+    if (simpleRecv && ts.isPropertyAccessExpression(access)) {
       const probed = probeLower(L, access.expression);
       if (probed?.type.kind === "dyn") {
         const key: IrExpr = { kind: "strLit", value: access.name.text, type: STRING, loc: locOf(access.name) };
@@ -21502,11 +21518,34 @@ function arrayLengthCompoundParts(
     const targetOf = (): FieldTarget | null =>
       ts.isPropertyAccessExpression(access) ? L.fieldTarget(access, true) : symbolFieldTarget(L, access);
     const target = targetOf();
-    if (!target) L.unsupported("SC1090", access, "compound assignment to unsupported field targets");
+    if (!target) {
+      L.unsupported(
+        "SC1090",
+        access,
+        simpleRecv
+          ? "compound assignment to unsupported field targets"
+          : "compound assignment to fields of computed receivers",
+      );
+    }
+    /* ONE evaluation of a non-simple receiver, pinned ahead of everything
+     * else. `target.obj` is that receiver already lowered once; the read and
+     * the write both address it through the local rather than re-lowering the
+     * AST, so a getter in the chain runs once and a call runs once. */
+    const pre: IrStmt[] = [];
+    let readTarget: FieldTarget = target;
+    let writeTargetOf: () => FieldTarget = () => targetOf()!;
+    if (!simpleRecv) {
+      const recvT = target.obj.type;
+      const slot = L.declareHiddenLocal("%cmpRecv", recvT);
+      pre.push({ kind: "varDecl", localId: slot.id, init: target.obj, loc });
+      const ref = (): IrExpr => ({ kind: "varRef", localId: slot.id, type: recvT, loc });
+      readTarget = { ...target, obj: ref() };
+      writeTargetOf = (): FieldTarget => ({ ...target, obj: ref() });
+    }
     // Through an accessor target this desugars to get, op, set — with the
     // receiver an identifier/this, the observable order matches JS exactly:
     // getter, rhs side effects, setter (verified against Node).
-    const read = L.fieldGetExpr(target, locOf(access), access);
+    const read = L.fieldGetExpr(readTarget, locOf(access), access);
     const rhs: IrExpr = rhsNode
       ? L.lowerExpr(rhsNode)
       : { kind: "numLit", value: 1, type: F64, loc };
@@ -21524,21 +21563,23 @@ function arrayLengthCompoundParts(
     // (a bare `T` result into a `T | undefined` slot the setter does not
     // take) or strip a tag off a value that carries one — both silent. Named
     // fence; the two-statement spelling says which value goes where.
-    const compoundWriteT = writeTypeOf(target);
-    if (!typeEquals(compoundWriteT, target.fieldType)) {
+    const compoundWriteT = writeTypeOf(readTarget);
+    if (!typeEquals(compoundWriteT, readTarget.fieldType)) {
       L.unsupported(
         "SC1090",
         access,
         `compound assignment through the getter/setter pair '${target.field}', whose halves have different types (it reads as '${L.fmt(target.fieldType)}' and writes as '${L.fmt(compoundWriteT)}' — read, combine and assign in separate statements)`,
       );
     }
-    const combined = compoundCombine(L, op, read, rhs, target.fieldType, access, access, rhsNode ?? access, loc, rhsNode === null);
+    const combined = compoundCombine(L, op, read, rhs, readTarget.fieldType, access, access, rhsNode ?? access, loc, rhsNode === null);
     if (!combined) L.unsupported("SC1043", access);
-    // Second, independent evaluation of the (side-effect-free) receiver.
+    // A simple receiver is re-lowered -- identifier/this, so the second
+    // evaluation is not observable. A pinned one addresses its hidden local.
     return {
+      ...(pre.length > 0 ? { pre } : {}),
       natural: combined.natural,
       ...(combined.numericRead ? { numericRead: combined.numericRead } : {}),
-      write: (v) => L.fieldSetStmt(targetOf()!, combined.toSlot(v), loc, access),
+      write: (v) => L.fieldSetStmt(writeTargetOf(), combined.toSlot(v), loc, access),
     };
   }
 
