@@ -40,7 +40,7 @@ import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
 import { boundIdentifiersOf } from "./lowerer.js";
 import type { FileParts } from "./lower-modules.js";
-import { isCjsJsFile, locOf, resolveImport } from "../program.js";
+import { isCjsJsFile, isNodeEsmFile, locOf, resolveImport } from "../program.js";
 import { F64, IrExpr, IrStmt, IrType, STRING } from "../../ir/nodes.js";
 
 /** True when this module declaration produces NO runtime construct at all:
@@ -548,6 +548,77 @@ export function ambientNsRootOf(L: Lowerer, e: ts.Expression): ts.Identifier | n
   return root;
 }
 
+/** True when `root` is the ambient CommonJS `require` READ FROM AN ES
+ * MODULE — the one place a stdlib global is genuinely unbound.
+ *
+ * Node defines `require` as a MODULE-SCOPE binding of a CommonJS module
+ * and defines it NOWHERE ELSE: in an ES module the name has no binding
+ * at all, so every read of it is `ReferenceError: require is not
+ * defined` — not a resolution failure, not a module value. The standard
+ * library declares it ambiently all the same (`declare var require:
+ * NodeRequire`), which is why the checker accepts `require(spec)` in a
+ * .ts file with imports and the site reached the SC2020 lib fence.
+ *
+ * Measured against Node v25.9.0, three spellings of the same file:
+ *
+ *     a.mjs                typeof require "undefined"   require(x) ReferenceError
+ *     c.ts (has imports)   typeof require "undefined"   require(x) ReferenceError
+ *     b.cjs / d.ts         typeof require "function"    require(x) MODULE_NOT_FOUND
+ *
+ * The compiler ALREADY takes the first two rows: cjsModuleGlobalTypeOfAnswer
+ * (lower-exprs) answers `typeof require` with "undefined" in exactly these
+ * files, keyed on the same isNodeEsmFile. What was missing is the other
+ * half of that same fact — that every NON-typeof read there throws — and
+ * the gap between the two halves is what fenced zapo's optional native
+ * accelerator probe at SC2020.
+ *
+ * This is NOT the module-namespace refusal widening. No module value is
+ * ever produced here; the answer is a throw that happens BEFORE any
+ * specifier is looked at, so `require.resolve("<const>")` in an ES module
+ * needs no resolution lowering to be exact. The CommonJS side is
+ * untouched: isCjsJsFile gates the whole require family in lower-builtins
+ * (the MODULE_NOT_FOUND arm, the run-time-specifier verdict, the
+ * require.resolve/main/cache/extensions member fence) and this predicate
+ * cannot reach it.
+ *
+ * THE ONE MEASURED DIVERGENCE, and it is Node's LOADER, not the throw.
+ * When a `<cjs global> is not defined` ReferenceError escapes ESM module
+ * EVALUATION uncaught, Node's module job appends " in ES module scope, you
+ * can use import instead" to the message before it prints. The compiled
+ * program prints the undecorated message. It cannot be fixed by decorating
+ * at the throw site, and the reason is measured (v25.9.0, .mjs):
+ *
+ *   const m = require("x")                       decorated  (escapes eval)
+ *   function f(){return require("x")} f()        decorated  (escapes eval)
+ *   setTimeout(() => f(), 0)                     PLAIN      (escapes later)
+ *   try { require("x") } catch (e) e.message     PLAIN      (never escapes)
+ *
+ * So the suffix is a property of WHERE THE ERROR ENDS UP, not of where it
+ * was thrown, and no static position can decide it: the top-level try/catch
+ * row and the top-level bare row are the same site with opposite answers.
+ * The undecorated message is the one that is right whenever the program can
+ * OBSERVE it — which is every caught case, zapo's included — and the one it
+ * is wrong for is a crash that names the same error at the same line and
+ * still exits non-zero.
+ *
+ * Excluded, deliberately:
+ *   - a LOCAL binding named require (a createRequire const, a parameter,
+ *     a bundler banner's `const require = createRequire(import.meta.url)`)
+ *     — isStdlibGlobal is symbol-based, so a shadow never matches;
+ *   - a registered stdlibGlobalAlias (`const require = globalThis.require`)
+ *     — its value is whatever the right-hand side produced;
+ *   - `module`, `exports`, `__dirname`, `__filename`. Node erases those
+ *     in an ES module too and they belong to the same measured row, but
+ *     each has its own lowering to survey first and none of them is
+ *     reached by the sites this closes. */
+function esmUnboundRequireRoot(L: Lowerer, root: ts.Identifier): boolean {
+  if (root.text !== "require") return false;
+  if (!L.isStdlibGlobal(root, "require")) return false;
+  const sym = L.checker.getSymbolAtLocation(root);
+  if (sym !== undefined && L.stdlibGlobalAliases.has(sym)) return false;
+  return isNodeEsmFile(root.getSourceFile());
+}
+
 /** The ROOT identifier of an expression whose FIRST runtime step is a read
  * Node cannot serve — the `declare const __VERSION__` stance's CHAIN form,
  * widened over every chain shape whose root evaluates first. Three root
@@ -568,7 +639,11 @@ export function ambientNsRootOf(L: Lowerer, e: ts.Expression): ts.Identifier | n
  *   - a TRAP BINDING (L.trapBindings) — a binding whose own initializer
  *     provably threw before producing a value, so module init unwound and
  *     no reference to it can ever execute (any lowering is sound there;
- *     the trap keeps the shape honest if reachability analysis is wrong).
+ *     the trap keeps the shape honest if reachability analysis is wrong);
+ *   - the ambient CommonJS `require` inside an ES MODULE
+ *     (esmUnboundRequireRoot) — the one stdlib global that is genuinely
+ *     UNBOUND in the file it is read from, for the same reason: nothing
+ *     defines it there.
  *
  * The walk steps through parens, non-null/as/satisfies assertions,
  * property and element accesses (OPTIONAL chains included — `?.` guards
@@ -627,6 +702,10 @@ export function ambientUndefVarRootOf(L: Lowerer, e: ts.Expression): ts.Identifi
     const sym = L.resolveValueSymbol(root);
     if (!sym) return null;
     if (L.trapBindings.has(sym)) return root;
+    // The ONE stdlib global whose own chokepoint has nothing to stand on:
+    // in an ES module `require` is not declared at all, so the read is a
+    // ReferenceError before any member, argument or specifier matters.
+    if (esmUnboundRequireRoot(L, root)) return root;
     if (L.isStdlibSymbol(sym)) return null;
     if (ambientUndefinedFnSymbolOf(L, root) !== null) return root;
     if (ambientUndefinedClassSymbolOf(L, root) !== null) return root;
