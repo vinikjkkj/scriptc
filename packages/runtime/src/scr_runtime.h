@@ -877,9 +877,19 @@ enum {
   SCR_ERR_RANGE = 2,
   SCR_ERR_SYNTAX = 3,
   SCR_ERR_DOMEX = 4, /* DOMException — ScrDomException, the wider layout */
+  /* ReferenceError sits AFTER DOMException so DOMException keeps index 4:
+   * every `kind == SCR_ERR_DOMEX` test, and scr_json.c's kind-4 rendering
+   * special cases, stay index-stable across this addition. It is an
+   * ordinary ScrError layout with no hidden slots, so `extends
+   * ReferenceError` compiles the way the other four do and only
+   * DOMException stays fenced. */
+  SCR_ERR_REFERENCE = 5,
+  /* One past the last kind — the bound every table and every scan over
+   * them uses, so adding a kind is one line here and nowhere else. */
+  SCR_ERR_KINDS = 6,
 };
 
-extern ScrVt scr_error_vts[5]; /* indexed by SCR_ERR_*; main() stamps pre/post */
+extern ScrVt scr_error_vts[SCR_ERR_KINDS]; /* indexed by SCR_ERR_*; main() stamps pre/post */
 
 struct ScrDyn; /* full declaration below (the checked-dynamic tree section) */
 

@@ -1969,7 +1969,10 @@ class LlEmitter {
     appendAll(out, classShapes.typeDefs);
     out.push(
       ``,
-      `@scr_error_vts = external global [5 x %ScrVt]`,
+      // The bound is RUNTIME_ERROR_CLASSES' own size, not a literal: the
+      // table grew once (ReferenceError) and a stale literal here is an
+      // out-of-bounds GEP the verifier does not catch.
+      `@scr_error_vts = external global [${RUNTIME_ERROR_CLASSES.size} x %ScrVt]`,
       `declare void @scr_init()`,
       `declare void @scr_lib_init(i32, ptr)`,
     );
@@ -2094,7 +2097,7 @@ class LlEmitter {
     for (const iv of this.errorIntervals) {
       for (const [field, value] of [[0, iv.pre], [1, iv.post]] as const) {
         stamps.push(
-          `  store i64 ${value}, ptr getelementptr inbounds ([5 x %ScrVt], ptr @scr_error_vts, i64 0, i64 ${iv.kind}, i32 ${field})${field === 1 ? ` ; ${iv.lib}` : ""}`,
+          `  store i64 ${value}, ptr getelementptr inbounds ([${RUNTIME_ERROR_CLASSES.size} x %ScrVt], ptr @scr_error_vts, i64 0, i64 ${iv.kind}, i32 ${field})${field === 1 ? ` ; ${iv.lib}` : ""}`,
         );
       }
     }

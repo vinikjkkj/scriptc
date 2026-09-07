@@ -31,7 +31,7 @@
  *   ScrBytes { rc +0; len +8; elem +16; data +24 }.
  *   ScrDynPath { parent, key, index } — the %ScrDynPath type. */
 import type { IrFunction, IrRecordShape, IrType } from "../../ir/nodes.js";
-import { bytesAliasOnExtract } from "../../ir/nodes.js";
+import { bytesAliasOnExtract, dynErrorClassKind, isDynErrorClass } from "../../ir/nodes.js";
 import { armDiscrimLits, canAdaptDynFuncTo, dynRestApplyable, canBoxFuncIntoDyn, dynCheckArmOrder, internalSlotFields, isUndefinedArmedUnion, slotStorageKey, unionHasDiscrim, DYN_BYTES_KINDS, DYN_HANDLE_KINDS, isRefCounted, strandedFuncReason, typeKey } from "../../ir/nodes.js";
 import { nullProtoRule, OWNMASK_SRC_NULL_PROTO, OWNMASK_VALID, ownMaskKeyBit as maskKeyBit } from "../../ir/nodes.js";
 import { INTERNAL_SLOT_WANT_TEXT } from "../emission/emit-walkers.js";
@@ -778,12 +778,24 @@ export class LlDyn {
         // classInterval("%Error") was unreachable and untested; a
         // predicate that admits the leaf without this arm trades a fence
         // for an emitter crash.)
-        if (t.className === "%Error") {
-          this.host.declare(`declare zeroext i1 @scr_dyn_is_error_encoding(ptr)`);
-          const has = B.tmp();
-          B.line(`${has} = call zeroext i1 @scr_dyn_is_error_encoding(ptr %d)`);
-          B.terminate(`ret i1 ${has}`);
-          break;
+        // The ROOT matches on the marker; a SUBCLASS matches on the
+        // identity cache's preorder interval — dynErrorClassKind states
+        // why that is exact and why %DOMException stays out. The C
+        // walker's arm, call for call.
+        {
+          const errKind = dynErrorClassKind(t.className);
+          if (errKind !== null) {
+            const has = B.tmp();
+            if (errKind === 0) {
+              this.host.declare(`declare zeroext i1 @scr_dyn_is_error_encoding(ptr)`);
+              B.line(`${has} = call zeroext i1 @scr_dyn_is_error_encoding(ptr %d)`);
+            } else {
+              this.host.declare(`declare zeroext i1 @scr_dyn_err_instanceof(ptr, double)`);
+              B.line(`${has} = call zeroext i1 @scr_dyn_err_instanceof(ptr %d, double ${errKind}.0)`);
+            }
+            B.terminate(`ret i1 ${has}`);
+            break;
+          }
         }
         // "Is this dyn an instance of C?" — the same preorder-interval
         // test `x instanceof C` compiles to, run inside the runtime helper
@@ -1208,7 +1220,7 @@ export class LlDyn {
         // compare reference-equal (the tracing suite's shape); alien
         // %error objects rebuild once and cache the pair. The C walker's
         // arm exactly.
-        if (t.className !== "%Error") {
+        if (!isDynErrorClass(t.className)) {
           // The interval-checked REFERENCE unwrap: the same pointer back
           // (+1), so identity survives the round trip. The C walker's arm.
           host.declare(`declare ptr @scr_dyn_objinst_unbox(ptr, i64, i64, ptr, ptr)`);
@@ -1230,9 +1242,20 @@ export class LlDyn {
           B.terminate(`ret ptr ${r}`);
           break;
         }
-        host.declare(`declare zeroext i1 @scr_dyn_is_error_encoding(ptr)`);
+        // The ROOT validates the marker; a SUBCLASS validates the identity
+        // cache's interval, which subsumes it (no cache entry, no class).
+        // The extraction is the same call either way — every builtin error
+        // shares the ScrError layout and the pointer that comes back is the
+        // instance the value was built from.
+        const errKind = dynErrorClassKind(t.className)!;
         const hasMarker = B.tmp();
-        B.line(`${hasMarker} = call zeroext i1 @scr_dyn_is_error_encoding(ptr %d)`);
+        if (errKind === 0) {
+          host.declare(`declare zeroext i1 @scr_dyn_is_error_encoding(ptr)`);
+          B.line(`${hasMarker} = call zeroext i1 @scr_dyn_is_error_encoding(ptr %d)`);
+        } else {
+          host.declare(`declare zeroext i1 @scr_dyn_err_instanceof(ptr, double)`);
+          B.line(`${hasMarker} = call zeroext i1 @scr_dyn_err_instanceof(ptr %d, double ${errKind}.0)`);
+        }
         const lFail = B.newLabel("dce.f");
         const lGo = B.newLabel("dce.g");
         B.condBr(hasMarker, lGo, lFail);
@@ -2239,7 +2262,7 @@ export class LlDyn {
         // %Error keeps the checked-dynamic tree's ERROR ENCODING; every
         // other class boxes BY REFERENCE through its emitted descriptor —
         // the C walker's arm exactly.
-        if (t.className !== "%Error") {
+        if (!isDynErrorClass(t.className)) {
           host.declare(`declare ptr @scr_dyn_new_objinst(ptr, ptr)`);
           const desc = host.dynClassDesc(t.className);
           const r = B.tmp();

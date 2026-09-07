@@ -1591,10 +1591,13 @@ export interface IrClassDef {
  * `class Error` can never collide). `lib` is the standard-library name the
  * frontend recognizes; `kind` is the runtime's SCR_ERR_* index (backends
  * stamp scr_error_vts[kind] and pick constructor kinds by it). Every
- * emitted module carries all four class defs (flagged `runtime`) so the
+ * emitted module carries ALL of these class defs (flagged `runtime`) so the
  * program's preorder numbering always covers them — the runtime's own
- * throws (JSON/dynCheck/regex) mint instances of these classes whether or
- * not user code mentions Error. */
+ * throws (JSON/dynCheck/regex, and the erased-global read that spells
+ * ReferenceError) mint instances of these classes whether or not user code
+ * mentions Error. Adding a row therefore shifts every LATER preorder
+ * number in every program, which is diff noise in emitted output and not a
+ * behaviour change: the intervals still nest the same way. */
 export const RUNTIME_ERROR_CLASSES: ReadonlyMap<string, { lib: string; kind: number; base: string | null }> =
   new Map([
     ["%Error", { lib: "Error", kind: 0, base: null }],
@@ -1606,9 +1609,71 @@ export const RUNTIME_ERROR_CLASSES: ReadonlyMap<string, { lib: string; kind: num
     // cause) lives in runtime-side slots BEYOND the ScrError prefix the IR
     // fields describe, reached only through the error.dom* libCalls — so
     // user `extends DOMException` is fenced (the subclass layout would
-    // overlap the hidden slots), where the other four extend freely.
+    // overlap the hidden slots), where the others extend freely.
     ["%DOMException", { lib: "DOMException", kind: 4, base: "%Error" }],
+    // ReferenceError. It is LAST so DOMException keeps kind 4 — the runtime
+    // has `kind == SCR_ERR_DOMEX` tests and scr_json.c has kind-4 rendering
+    // cases, and renumbering them buys nothing.
+    //
+    // What made it worth a runtime class rather than a name compare: the
+    // runtime already THROWS this error — `scr_undef_global_read` is the
+    // erased-`declare const` stance and the ES-module `require` rule, whose
+    // whole subject is "Node defines no such binding here". Before this row
+    // that throw minted an SCR_ERR_ERROR wearing the string
+    // "ReferenceError", and `e instanceof ReferenceError` had no lowering
+    // at all. Answering it by COMPARING THE NAME would have been a silent
+    // wrong answer: `const e = new Error("x"); e.name = "ReferenceError"`
+    // compiles here and Node calls that instanceof false. A vtable with its
+    // own preorder interval is the only test that agrees with Node, and it
+    // is what `dyn.errInstanceof` was already built to ask.
+    //
+    // The layout is a plain ScrError — no hidden slots — so `extends
+    // ReferenceError` compiles like `extends TypeError`.
+    ["%ReferenceError", { lib: "ReferenceError", kind: 5, base: "%Error" }],
   ]);
+
+/** The SCR_ERR_* kind of a runtime error class the CHECKED-DYNAMIC TREE can
+ * carry both ways, or null.
+ *
+ * The tree's error encoding is Node's own shape — a [[Prototype]] link to
+ * `%Error.prototype%` plus the name/message/code data — and the runtime
+ * keeps an IDENTITY EDGE beside it (`scr_errdyn_cache`) from the dyn node
+ * back to the ScrError it was built from. That edge is what makes a
+ * SUBCLASS answerable: `scr_dyn_err_instanceof` reads the cached error's
+ * own vtable and compares it against `scr_error_vts[kind]`'s preorder
+ * interval — the identical test a static `x instanceof TypeError`
+ * compiles to, so the two spellings cannot disagree.
+ *
+ * The comment this replaces said the encoding "records a name string and
+ * not a class interval, so a dyn error validated into a %TypeError slot
+ * would answer that slot for any error at all". That was true of the
+ * MARKER test alone and false of the pair: the marker says "an error", the
+ * cache says WHICH one. Validating on the marker only is what would have
+ * been wrong; validating on both is exact, and an alien error-shaped
+ * object (no cache entry, so no class) answers FALSE — which is Node,
+ * where an object carrying Error.prototype is not a TypeError.
+ *
+ * `%DOMException` rides along, and its WIDER LAYOUT is the reason it is
+ * safe rather than the reason to exclude it: the interval test only
+ * succeeds on a CACHED pair, so the pointer handed back is the very
+ * ScrDomException the value was minted from, never a rebuilt ScrError
+ * wearing the name. An alien error-shaped object has no cache entry, so it
+ * fails the test and never reaches the extraction at all. (Excluding it
+ * left one class of the five ICE-ing where its four siblings answered —
+ * `v instanceof DOMException` on an 'unknown', then a read — which is the
+ * abort-instead-of-fence shape this tree keeps digging out.)
+ *
+ * Every builtin error shares the ScrError pointer type in the emitters, so
+ * one extraction call serves all of them. */
+export function dynErrorClassKind(className: string): number | null {
+  return RUNTIME_ERROR_CLASSES.get(className)?.kind ?? null;
+}
+
+/** Whether a class is one the error encoding carries — the predicate form
+ * of `dynErrorClassKind`, for the many sites that only need the yes/no. */
+export function isDynErrorClass(className: string): boolean {
+  return dynErrorClassKind(className) !== null;
+}
 
 /** The runtime-provided node:events EventEmitter class (ScrEmitter /
  * scr_emitter_*, scr_events_emitter.c — link-gated by moduleUsesEmitter,
@@ -8022,10 +8087,13 @@ export function canConvertToDyn(
   // V8. Folding it into the JSON-safe core would have made the emitted
   // stringify walkers claim a serialization that does not exist.
   if (t.kind === "bigint") return true;
-  // %Error converts as the checked-dynamic tree's error encoding ({%error, name, message,
-  // code?} — the caughtToDyn shape, scr_dyn_from_error): the dyn 'error'
-  // listener boundary (a mustCall-wrapped handler receiving the payload).
-  if (t.kind === "object" && t.className === "%Error") return true;
+  // The builtin error classes convert as the checked-dynamic tree's error
+  // encoding ({%error, name, message, code?} — the caughtToDyn shape,
+  // scr_dyn_from_error): the dyn 'error' listener boundary (a
+  // mustCall-wrapped handler receiving the payload). One call serves the
+  // whole hierarchy — the encoding carries the name and the identity edge
+  // carries the class, so a %TypeError going in comes back a %TypeError.
+  if (t.kind === "object" && isDynErrorClass(t.className)) return true;
   // Every OTHER class instance boxes by REFERENCE (SCR_DYN_OBJINST): the
   // object pointer plus its emitted descriptor, no copy, identity
   // preserved through the round trip. Nested leaves ride the same rule —
@@ -8375,7 +8443,9 @@ export function canDynCheckTo(
   // it would have stranded exactly the value `BigInt.asIntN(32, e)`
   // needs to read back out of an 'unknown' parameter.
   if (t.kind === "bigint") return true;
-  if (t.kind === "object" && t.className === "%Error") return true;
+  // The OUT direction of the error encoding: the marker test, plus — for a
+  // SUBCLASS target — the identity cache's interval test (dynErrorClassKind).
+  if (t.kind === "object" && isDynErrorClass(t.className)) return true;
   // The OUT direction of the instance box: an interval-checked
   // reference unwrap against the class's preorder interval (+1 — the
   // same object, never a copy, so identity survives the round trip).
@@ -8492,13 +8562,12 @@ export function canDynCheckTo(
     // dynMatch has the marker test added beside it — the SAME test
     // dynCheck performs, so no arm can match and then fail to check.
     //
-    // canBoxClassIntoDyn stays the answer for every OTHER class: the
-    // error hierarchy's SUBCLASSES (%TypeError, %RangeError, %SyntaxError,
-    // %DOMException) keep declining, because the error encoding records a
-    // `name` string and not a class interval, so a dyn error validated
-    // into a `%TypeError` slot would answer that slot for any error at
-    // all. Only the ROOT is exact.
-    if (x.kind === "object") return x.className === "%Error" || canBoxClassIntoDyn(x.className);
+    // The hierarchy's SUBCLASSES ride the same leaf: the marker test says
+    // "an error" and the identity cache's interval test says WHICH, so a
+    // %TypeError or %ReferenceError leaf is as exact as the root's
+    // (dynErrorClassKind states why, %DOMException included).
+    // canBoxClassIntoDyn remains the answer for every other class.
+    if (x.kind === "object") return isDynErrorClass(x.className) || canBoxClassIntoDyn(x.className);
     // A MAP or SET leaf — the record field a widened value carries one
     // container down, which is the ONLY shape zapo needs: the
     // `ReadonlyMap` inside `getCollectionState`'s returned record and
