@@ -21,12 +21,17 @@ static bool scr_error_traced = false;
 
 void scr_error_set_traced(void) { scr_error_traced = true; }
 
-static const char *const scr_error_names[5] = {
+static const char *const scr_error_names[SCR_ERR_KINDS] = {
     "Error", "TypeError", "RangeError", "SyntaxError",
     /* DOMException's DEFAULT name is "Error" too (WebIDL: the name
      * parameter defaults to "Error"); the class identity lives in the
      * vtable, never the name. */
-    "Error"};
+    "Error",
+    /* ReferenceError, appended so DOMException keeps index 4. The name
+     * lookup below must therefore SKIP index 4 rather than scan a range:
+     * scanning through it would map the string "Error" onto the
+     * DOMException kind. */
+    "ReferenceError"};
 
 /* The kind's BUILTIN name — this table, published. The dyn boundary needs
  * it to tell an error whose `name` is still its constructor's (a prototype
@@ -37,13 +42,13 @@ static const char *const scr_error_names[5] = {
  * drift apart. NULL for a kind out of range (a compiled `extends Error`
  * subclass carries its own vtable). */
 const char *scr_error_kind_name(int kind) {
-  return kind >= 0 && kind < 5 ? scr_error_names[kind] : NULL;
+  return kind >= 0 && kind < SCR_ERR_KINDS ? scr_error_names[kind] : NULL;
 }
 
-/* Which of the five builtin kinds is this error, by VTABLE identity? -1
+/* Which of the builtin kinds is this error, by VTABLE identity? -1
  * for a compiled subclass, whose vtable is its own. */
 int scr_error_kind_of(const ScrError *e) {
-  for (int i = 0; i < 5; i++) {
+  for (int i = 0; i < SCR_ERR_KINDS; i++) {
     if (e->vt == &scr_error_vts[i]) return i;
   }
   return -1;
@@ -111,12 +116,13 @@ static void scr_domex_reld(void *obj) {
 
 /* Defaults cover only the instants before main() stamps the program's real
  * preorder intervals; release is permanent. */
-ScrVt scr_error_vts[5] = {
-    {0, 4, &scr_error_reld}, /* Error */
+ScrVt scr_error_vts[SCR_ERR_KINDS] = {
+    {0, 5, &scr_error_reld}, /* Error */
     {1, 1, &scr_error_reld}, /* TypeError */
     {2, 2, &scr_error_reld}, /* RangeError */
     {3, 3, &scr_error_reld}, /* SyntaxError */
     {4, 4, &scr_domex_reld}, /* DOMException */
+    {5, 5, &scr_error_reld}, /* ReferenceError */
 };
 
 ScrError *scr_error_retain(ScrError *e) {
@@ -177,14 +183,14 @@ ScrError *scr_error_new(int kind, ScrStr *message) {
 }
 
 /* Was this error MINTED BY THE RUNTIME, or is it an instance of a user
- * class that extends Error? Runtime-minted errors carry one of the five
- * builtin vtables by address (scr_error_alloc: `e->vt = &scr_error_vts[kind]`);
+ * class that extends Error? Runtime-minted errors carry one of the builtin
+ * vtables by address (scr_error_alloc: `e->vt = &scr_error_vts[kind]`);
  * an emitted subclass carries its own static vtable, whose pre/post nest
  * INSIDE Error's interval — which is what makes instanceof work and is
  * exactly why the interval test cannot answer this question. Pointer
  * identity can. */
 static bool scr_error_runtime_minted(const ScrError *e) {
-  for (int i = 0; i < 5; i++) {
+  for (int i = 0; i < SCR_ERR_KINDS; i++) {
     if (e->vt == &scr_error_vts[i]) return true;
   }
   return false;
@@ -465,8 +471,18 @@ void scr_throw_domex_str(const char *name, ScrStr *message) {
 
 
 void scr_throw_error_named(ScrStr *name, ScrStr *message) {
+  /* The name decides the CLASS, which is what makes
+   * `<cjs global> is not defined` a real ReferenceError instance rather
+   * than an Error wearing the string: `error instanceof ReferenceError`
+   * is a vtable-interval test, and it can only answer true if the throw
+   * that minted this object picked the ReferenceError kind here.
+   *
+   * SCR_ERR_DOMEX is skipped, not ranged past: its entry in the name
+   * table is "Error" (WebIDL's default), so scanning it would map the
+   * plain name onto the DOMException class. */
   int kind = SCR_ERR_ERROR;
-  for (int i = 1; i < 4; i++) {
+  for (int i = 1; i < SCR_ERR_KINDS; i++) {
+    if (i == SCR_ERR_DOMEX) continue;
     const char *n = scr_error_names[i];
     if (name->len == strlen(n) && memcmp(name->data, n, name->len) == 0) {
       kind = i;

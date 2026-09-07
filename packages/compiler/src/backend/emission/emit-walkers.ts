@@ -8,7 +8,7 @@
 import type { CEmitter } from "./emitter.js";
 import { rcSitesRequested } from "./emitter.js";
 import { bytesAliasOnExtract } from "../../ir/nodes.js";
-import { CLASS_PROPS_FIELD, armDiscrimLits, canAdaptDynFuncTo, dynRestApplyable, canBoxClassIntoDyn, canBoxFuncIntoDyn, dynCheckArmOrder, internalSlotFields, isUndefinedArmedUnion, nullProtoRule, OWNMASK_SRC_NULL_PROTO, OWNMASK_VALID, ownMaskKeyBit, slotStorageKey, unionHasDiscrim, DYN_BYTES_KINDS, DYN_HANDLE_KINDS, IrType, UNION_ARM_JS_OBJECT_KINDS, isRefCounted, strandedFuncReason, typeEquals, typeKey } from "../../ir/nodes.js";
+import { CLASS_PROPS_FIELD, armDiscrimLits, dynErrorClassKind, isDynErrorClass, canAdaptDynFuncTo, dynRestApplyable, canBoxClassIntoDyn, canBoxFuncIntoDyn, dynCheckArmOrder, internalSlotFields, isUndefinedArmedUnion, nullProtoRule, OWNMASK_SRC_NULL_PROTO, OWNMASK_VALID, ownMaskKeyBit, slotStorageKey, unionHasDiscrim, DYN_BYTES_KINDS, DYN_HANDLE_KINDS, IrType, UNION_ARM_JS_OBJECT_KINDS, isRefCounted, strandedFuncReason, typeEquals, typeKey } from "../../ir/nodes.js";
 import { cDecl, cStringLiteral, cType, elemAccess, releaseCallC, retainCallC, vAdapters } from "./emit-types.js";
 import { mangleClassStruct, mangleField, mangleFunction, mangleRecordNew, mangleRecordStruct } from "../mangle.js";
 import type { ClassMeta } from "./emit-shapes.js";
@@ -1364,9 +1364,24 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
         // it; the marker it looked for was an own ENUMERABLE property of
         // every error the program could enumerate) is why it is now one
         // runtime call that the C and LLVM lanes both emit.
-        if (t.className === "%Error") {
-          d.push(`  return scr_dyn_is_error_encoding(d);`);
-          break;
+        // The ROOT matches on the marker alone — any error encoding is an
+        // Error, including an alien object rebuilt through the cache. A
+        // SUBCLASS adds the identity cache's interval test, the same
+        // question `x instanceof TypeError` asks: scr_dyn_err_instanceof
+        // reads the cached error's own vtable, so a user subclass of
+        // TypeError matches the TypeError arm and an alien error-shaped
+        // object matches neither. Match and check ask the same question
+        // here too — the branch below emits the identical call.
+        {
+          const errKind = dynErrorClassKind(t.className);
+          if (errKind !== null) {
+            d.push(
+              errKind === 0
+                ? `  return scr_dyn_is_error_encoding(d);`
+                : `  return scr_dyn_err_instanceof(d, ${errKind});`,
+            );
+            break;
+          }
         }
         const meta = E.classMeta.get(t.className);
         if (!meta) throw new Error(`emitter bug: dynMatch of unknown class ${t.className}`);
@@ -2192,7 +2207,7 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
         // %Error is the instance box's interval-checked unwrap;
         // %Error is the checked-dynamic tree's error encoding, whose
         // story is on its own branch below.
-        if (t.className !== "%Error") {
+        if (!isDynErrorClass(t.className)) {
           // Every other class: an interval-checked REFERENCE unwrap. The
           // pointer that comes back is the one that went in (+1), so
           // `unbox(box(x)) === x` — which is the half of this kind that
@@ -2222,14 +2237,27 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
         // suite's shape); alien error objects rebuild once and cache the
         // pair.
         if (soft) d.push(`  (void)path;`);
-        d.push(
-          fail(
-            `  `,
-            "class.Error",
-            `!scr_dyn_is_error_encoding(d)`,
-            `NULL`,
-          ),
-        );
+        {
+          // The ROOT validates the marker; a SUBCLASS validates the
+          // identity cache's interval instead, which SUBSUMES the marker
+          // (no cache entry, no class, so a non-error and an alien
+          // error-shaped object both fail). Either way the extraction is
+          // the same call: every builtin error shares the ScrError layout,
+          // and the pointer that comes back is the very instance the value
+          // was built from, so an out-and-back crossing compares
+          // reference-equal.
+          const errKind = dynErrorClassKind(t.className)!;
+          d.push(
+            fail(
+              `  `,
+              `class.${t.className.slice(1)}`,
+              errKind === 0
+                ? `!scr_dyn_is_error_encoding(d)`
+                : `!scr_dyn_err_instanceof(d, ${errKind})`,
+              `NULL`,
+            ),
+          );
+        }
         d.push(`  return scr_error_from_dyn(d);`);
         break;
       case "record": {
@@ -2976,7 +3004,10 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
         // %Error keeps the checked-dynamic tree's ERROR ENCODING ({%error,
         // name, message, code?}), the representation every caught value
         // and rejection reason already arrives as.
-        if (t.className === "%Error") {
+        // Every builtin error converts through the SAME call: the encoding
+        // records the name and the identity edge records the class, so a
+        // %TypeError going in comes back a %TypeError.
+        if (isDynErrorClass(t.className)) {
           d.push(`  return scr_dyn_from_error(v);`);
           break;
         }

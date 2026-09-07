@@ -1,0 +1,20 @@
+awaiting-a-maybe-promise-outside-the-one-unit-rule.ts:34:15 - error SC1090: awaiting 'null | Promise<unknown> | undefined' (the promise's inner type has no combined result union — await the promise arm after narrowing instead) is not supported yet
+
+  33 | async function twoUnitsDyn(p: Promise<unknown> | null | undefined): Promise<void> {
+  34 |     const r = await p;
+     |               ^~~~~~~
+  35 |     console.log(r === undefined ? "u" : r === null ? "n" : "v");
+
+awaiting-a-maybe-promise-outside-the-one-unit-rule.ts:40:15 - error SC1090: awaiting 'null | Promise<{ k: string; n: number } | { k: string; s: string }> | undefined' (the promise's inner type has no combined result union — await the promise arm after narrowing instead) is not supported yet
+
+  39 | async function twoUnitsUnion(p: Promise<Row> | null | undefined): Promise<void> {
+  40 |     const r = await p;
+     |               ^~~~~~~
+  41 |     console.log(r == null ? "-" : r.k);
+
+awaiting-a-maybe-promise-outside-the-one-unit-rule.ts:46:15 - error SC1090: awaiting 'null | Promise<void>' (narrow the null away first) is not supported yet
+
+  45 | async function voidBesideNull(p: Promise<void> | null): Promise<void> {
+  46 |     const r = await p;
+     |               ^~~~~~~
+  47 |     console.log(r === null ? "n" : "u");

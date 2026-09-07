@@ -10845,6 +10845,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/7790-an-optional-member-the-width-view-does-not-name-survives-the-upcast.ts": {
+   "order": [
+    "<repo>/tests/corpus/7790-an-optional-member-the-width-view-does-not-name-survives-the-upcast.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/7790-destructuring-a-union-typed-source.ts": {
    "order": [
     "<repo>/tests/corpus/7790-destructuring-a-union-typed-source.ts"
@@ -10854,6 +10860,18 @@
   "<repo>/tests/corpus/7790-promise-all-over-an-already-resolved-entry.ts": {
    "order": [
     "<repo>/tests/corpus/7790-promise-all-over-an-already-resolved-entry.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/7791-a-reference-error-is-its-own-class.ts": {
+   "order": [
+    "<repo>/tests/corpus/7791-a-reference-error-is-its-own-class.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/7791-awaiting-a-promise-that-may-be-absent.ts": {
+   "order": [
+    "<repo>/tests/corpus/7791-awaiting-a-promise-that-may-be-absent.ts"
    ],
    "diags": []
   },
@@ -11367,6 +11385,12 @@
   "<repo>/tests/diagnostics/assert-fences.ts": {
    "order": [
     "<repo>/tests/diagnostics/assert-fences.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/awaiting-a-maybe-promise-outside-the-one-unit-rule.ts": {
+   "order": [
+    "<repo>/tests/diagnostics/awaiting-a-maybe-promise-outside-the-one-unit-rule.ts"
    ],
    "diags": []
   },

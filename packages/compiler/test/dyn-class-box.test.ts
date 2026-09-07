@@ -272,7 +272,7 @@ describe("the class-instance dyn box's bookkeeping", () => {
     expect(cs.get("Readable")).toMatch(/vt=true/);
   });
 
-  test("every boxable class boxes in BOTH directions, and the error hierarchy in neither", () => {
+  test("every boxable class boxes in BOTH directions; the error hierarchy in neither, but crosses in both", () => {
     const noRec = (): undefined => undefined;
     const obj = (className: string): IrType => ({ kind: "object", className });
     const boxable = [
@@ -289,12 +289,30 @@ describe("the class-instance dyn box's bookkeeping", () => {
       expect(canDynCheckTo(obj(cls), noRec, noRec), `${cls} narrows`).toBe(true);
     }
     for (const cls of RUNTIME_ERROR_CLASSES.keys()) {
+      // Still false for the whole hierarchy, and that is the LOAD-BEARING
+      // half: an error is not an instance box. It crosses as the ERROR
+      // ENCODING instead — a different representation, which is the whole
+      // reason the hierarchy is held out of this predicate.
       expect(canBoxClassIntoDyn(cls), `${cls} keeps the error encoding`).toBe(false);
-      // %Error still crosses — through that OTHER representation, which is
-      // the whole reason the hierarchy is held out of this one.
-      const expected = cls === "%Error";
-      expect(canConvertToDyn(obj(cls), noRec, noRec), `${cls} widens`).toBe(expected);
-      expect(canDynCheckTo(obj(cls), noRec, noRec), `${cls} narrows`).toBe(expected);
+      // Through that other representation the WHOLE hierarchy crosses, in
+      // both directions, and this used to say `cls === "%Error"`.
+      //
+      // The reason recorded for the root-only rule was that the encoding
+      // "records a name string and not a class interval, so a dyn error
+      // validated into a %TypeError slot would answer that slot for any
+      // error at all". That was true of the MARKER test alone and false of
+      // the pair: the runtime keeps an IDENTITY EDGE beside the encoding
+      // (scr_errdyn_cache), and scr_dyn_err_instanceof has always read the
+      // cached error's own vtable against scr_error_vts[kind]'s preorder
+      // interval — the identical test a static `x instanceof TypeError`
+      // compiles to. The marker says "an error"; the cache says WHICH.
+      //
+      // What the root-only rule actually cost was an ICE, not a fence:
+      // `v instanceof TypeError` on an 'unknown' followed by `v.message`
+      // built a dynCheck the validator rejects, and analyze() aborts on
+      // that — so the program reported NOTHING, on every file.
+      expect(canConvertToDyn(obj(cls), noRec, noRec), `${cls} widens`).toBe(true);
+      expect(canDynCheckTo(obj(cls), noRec, noRec), `${cls} narrows`).toBe(true);
     }
   });
 });
@@ -401,22 +419,28 @@ describe("an %Error leaf crosses nested, which is the shape the emit trampoline 
     expect(canDynCheckTo(rec("rO"), getRecord, getUnion), "{ error?: Error } narrows").toBe(true);
   });
 
-  test("an array of errors crosses, and the ROOT only — subclasses stay out", () => {
+  test("an array of errors crosses, and so does an array of SUBCLASSES", () => {
     const arr: IrType = { kind: "array", elem: err };
     expect(canConvertToDyn(arr, getRecord, getUnion), "Error[] widens").toBe(true);
     expect(canDynCheckTo(arr, getRecord, getUnion), "Error[] narrows").toBe(true);
-    // %TypeError and the rest keep declining, nested as standing alone, and
-    // the reason is exactness: the encoding records a `name` STRING, not a
-    // class interval, so a dyn error validated into a `%TypeError` slot
-    // would answer that slot for every error there is. Only the root is a
-    // test the encoding can actually pass or fail.
+    // The subclasses used to decline here, nested as standing alone, on the
+    // stated ground that the encoding records a `name` STRING and not a
+    // class interval. It records BOTH: the encoding for the shape, and the
+    // runtime's identity cache for the class. `scr_dyn_err_instanceof`
+    // reads the cached error's own vtable and compares it against
+    // `scr_error_vts[kind]`'s preorder interval, so a %TypeError slot
+    // answers for a TypeError and refuses every other error — and an ALIEN
+    // error-shaped object, having no cache entry, refuses too, which is
+    // Node (an object carrying Error.prototype is not a TypeError).
+    //
+    // Symmetry is again the property under test: nested must agree with
+    // standing alone, in both directions, for every kind.
     for (const cls of RUNTIME_ERROR_CLASSES.keys()) {
-      if (cls === "%Error") continue;
       const nested: IrType = { kind: "array", elem: { kind: "object", className: cls } };
-      expect(canConvertToDyn(nested, getRecord, getUnion), `${cls}[] widens`).toBe(false);
-      expect(canDynCheckTo(nested, getRecord, getUnion), `${cls}[] narrows`).toBe(false);
+      expect(canConvertToDyn(nested, getRecord, getUnion), `${cls}[] widens`).toBe(true);
+      expect(canDynCheckTo(nested, getRecord, getUnion), `${cls}[] narrows`).toBe(true);
     }
-    expect(canDynCheckTo(rec("rT"), getRecord, getUnion), "{ error: TypeError } narrows").toBe(false);
+    expect(canDynCheckTo(rec("rT"), getRecord, getUnion), "{ error: TypeError } narrows").toBe(true);
   });
 
   test("an %Error arm is TRIED BEFORE any record arm, by the canonical order", () => {

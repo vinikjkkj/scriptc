@@ -1911,9 +1911,88 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
           const promiseArm = def.arms[promiseTag]!;
           const inner = promiseArm.kind === "promise" ? promiseArm.inner : VOID;
           const units = def.arms.filter(isUnitType);
+          if (inner.kind === "union" || inner.kind === "dyn") {
+            // A UNION or DYN payload. `awaitUnionExpr` cannot carry these:
+            // its result must be `void` or a union (the validator and both
+            // emitters agree), and the checker's answer here is a
+            // re-tagged union in the first case and the checked-dynamic
+            // value in the second — the arms it would have to build are
+            // exactly the ones the node has no shape for.
+            //
+            // Nothing about the SEMANTICS is missing, though, and this
+            // writes them out instead: the operand lands in a temp, the
+            // tag picks the branch, the promise arm parks on a real await
+            // and the unit arm takes `async.hop` — JS's one microtask turn
+            // for awaiting a non-thenable, the identical accounting the
+            // emitter's awaitUnionExpr performs and the same libCall the
+            // bare-unit await above already uses. Purely a frontend shape;
+            // no backend knows this happened.
+            //
+            // Exactly ONE unit arm is the admitted shape: the else branch
+            // answers with that arm's value, and two of them would need a
+            // second tag test to say which. `Promise<T> | null | undefined`
+            // keeps the fence rather than guessing.
+            //
+            // Both conversions have to land EXACTLY on the checker's own
+            // type for the await, and the fence stands if either does not:
+            // a dyn payload converts to itself and its unit rides the dyn
+            // encoding; a union payload re-tags through the ordinary
+            // helper. `jsval` stays out entirely — an island payload has
+            // its own boundary story and is not a re-tag.
+            const resultT = L.mapTypeOf(L.typeOf(expr));
+            const unitArm = units.length === 1 ? units[0]! : null;
+            const built = ((): IrExpr | null => {
+              if (resultT === null || unitArm === null) return null;
+              const vLocal = L.declareHiddenLocal("%awaitU", value.type);
+              const vRef: IrExpr = { kind: "varRef", localId: vLocal.id, type: value.type, loc };
+              const fromUnit = L.coerceToExpected(
+                { kind: "unitLit", unit: unitArm.kind === "nullT" ? "null" : "undefined", type: unitArm, loc },
+                resultT,
+              );
+              if (!typeEquals(fromUnit.type, resultT)) return null;
+              const awaited: IrExpr = {
+                kind: "awaitExpr",
+                value: { kind: "unionNarrow", unionId: value.type.unionId, tag: promiseTag, value: vRef, type: promiseArm, loc },
+                type: inner,
+                loc,
+              };
+              const fromPromise = L.coerceToExpected(awaited, resultT);
+              if (!typeEquals(fromPromise.type, resultT)) return null;
+              // A TERNARY, not an if-statement: `seqExpr` admits only
+              // straight-line statements (its emission point is
+              // mid-expression), while a ternary is the one expression
+              // form both emitters already expand INTO branches — the C
+              // lane writes `if (c) { … } else { … }` around a result
+              // temp, the LLVM lane splits blocks and moves each arm's
+              // value into a slot. So the await sits in a real branch and
+              // only one arm ever evaluates, which is what this needs.
+              //
+              // The unit arm's hop rides its own single-statement seqExpr,
+              // which IS straight-line.
+              return {
+                kind: "seqExpr",
+                stmts: [{ kind: "varDecl", localId: vLocal.id, init: value, loc }],
+                result: {
+                  kind: "ternary",
+                  cond: { kind: "unionIsTag", unionId: value.type.unionId, tag: promiseTag, negated: false, value: vRef, type: BOOL, loc },
+                  then: fromPromise,
+                  else_: {
+                    kind: "seqExpr",
+                    stmts: [{ kind: "exprStmt", expr: { kind: "libCall", fn: "async.hop", args: [], type: VOID, loc }, loc }],
+                    result: fromUnit,
+                    type: resultT,
+                    loc,
+                  },
+                  type: resultT,
+                  loc,
+                },
+                type: resultT,
+                loc,
+              };
+            })();
+            if (built) return built;
+          }
           if (inner.kind === "union" || inner.kind === "dyn" || inner.kind === "jsval") {
-            // A union inner would need an arm-wise re-tag into the result
-            // union; dyn/jsval inners have their own boundary stories.
             L.unsupported(
               "SC1090",
               expr,
