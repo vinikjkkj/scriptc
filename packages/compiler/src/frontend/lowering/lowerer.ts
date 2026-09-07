@@ -4452,7 +4452,7 @@ export class Lowerer {
       if (all.size === 0) { reject("no recordLit of this shape reached the IR"); return; }
       let complete = true;
       for (const site of all) if (!known.has(site) && !this.reshapeLitSites.has(site)) { complete = false; break; }
-      if (!complete) { reject("a recordLit of this shape reported no spelling"); continue; }
+      if (!complete) { reject("a recordLit of this shape reported no spelling"); return; }
       const spelled = [...known.values()][0]!;
       if (spelled.length < 2) { reject("one key has one order"); return; }
       const declared = shape.declaredOrder;

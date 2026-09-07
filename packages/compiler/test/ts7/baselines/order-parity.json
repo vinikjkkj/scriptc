@@ -10917,6 +10917,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/7796-the-fill-order-behind-a-run-time-key.ts": {
+   "order": [
+    "<repo>/tests/corpus/7796-the-fill-order-behind-a-run-time-key.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/800-switch-basics.ts": {
    "order": [
     "<repo>/tests/corpus/800-switch-basics.ts"
@@ -12713,6 +12719,12 @@
   "<repo>/tests/diagnostics/tuples.ts": {
    "order": [
     "<repo>/tests/diagnostics/tuples.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/two-fills-of-one-shape-in-two-orders.ts": {
+   "order": [
+    "<repo>/tests/diagnostics/two-fills-of-one-shape-in-two-orders.ts"
    ],
    "diags": []
   },
