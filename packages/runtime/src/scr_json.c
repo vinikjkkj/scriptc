@@ -4139,19 +4139,42 @@ static void scr_error_proto_teardown(void) {
  * base through its [[Prototype]] link - a tree, no cycle. The base is
  * created first (this function asks for it), so its teardown is registered
  * first and runs LAST. */
-static ScrDyn *scr_error_kind_proto[5];
+static ScrDyn *scr_error_kind_proto[SCR_ERR_KINDS];
 static bool scr_error_kind_proto_registered;
 
 static void scr_error_kind_proto_teardown(void) {
-  for (int i = 0; i < 5; i++) {
+  for (int i = 0; i < SCR_ERR_KINDS; i++) {
     scr_dyn_release(scr_error_kind_proto[i]);
     scr_error_kind_proto[i] = NULL;
   }
   scr_error_kind_proto_registered = false;
 }
 
+/* Which kinds get a prototype of their OWN, and why it is a membership
+ * test rather than a range. Every kind whose canonical name is not
+ * "Error" needs one, because the builder above HIDES a name that equals
+ * the canonical one -- it is a prototype property in Node, invisible to
+ * Object.keys -- and something has to carry it. A kind with no prototype
+ * of its own inherits %Error.prototype%'s name, so hiding "ReferenceError"
+ * against a missing prototype loses it and `e.name` reads "Error".
+ *
+ * That is exactly what the range `SCR_ERR_TYPE .. SCR_ERR_SYNTAX` did the
+ * moment ReferenceError became kind 5: corpus 2861 renders `e.name` off a
+ * TDZ throw and read "Error" where Node reads "ReferenceError". The range
+ * was correct only while the kinds needing a prototype happened to be
+ * contiguous, and it stopped being contiguous when a kind was appended
+ * past DOMException.
+ *
+ * SCR_ERR_ERROR is out because its name IS the base's. SCR_ERR_DOMEX is
+ * out because its name is never canonical in the hiding sense -- WebIDL
+ * defaults it to "Error" and the builder always writes it explicitly. */
+static bool scr_error_kind_has_proto(int kind) {
+  return kind == SCR_ERR_TYPE || kind == SCR_ERR_RANGE ||
+         kind == SCR_ERR_SYNTAX || kind == SCR_ERR_REFERENCE;
+}
+
 static ScrDyn *scr_dyn_error_kind_prototype(int kind) {
-  if (kind < SCR_ERR_TYPE || kind > SCR_ERR_SYNTAX) return scr_dyn_error_prototype();
+  if (!scr_error_kind_has_proto(kind)) return scr_dyn_error_prototype();
   if (scr_error_kind_proto[kind] == NULL) {
     ScrDyn *p = scr_dyn_new_obj(); /* +1, the process's */
     ScrDyn *base = scr_dyn_error_prototype(); /* +1 */

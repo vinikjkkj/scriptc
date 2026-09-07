@@ -75,6 +75,26 @@ console.log(classify(renamed));
 console.log(classify(42));
 console.log(classify("s"));
 
+// The NAME read back through the checked-dynamic tree, which is a
+// different question from `instanceof` and has its own table. The encoding
+// HIDES a name equal to the kind's canonical one -- in Node that is
+// `TypeError.prototype.name`, inherited and invisible to Object.keys -- so
+// something has to carry it, and that is the per-kind prototype. A kind
+// with no prototype of its own inherits %Error.prototype%'s name, so
+// hiding "ReferenceError" against a missing one loses it and this reads
+// "Error". Corpus 2861 caught exactly that when ReferenceError became a
+// kind whose index sits past the contiguous range the table used.
+function nameOf(v: unknown): string {
+    return v instanceof Error ? v.name : "?";
+}
+console.log("names", nameOf(new Error("a")), nameOf(new TypeError("b")), nameOf(new RangeError("c")));
+console.log("names", nameOf(new SyntaxError("d")), nameOf(new ReferenceError("e")));
+// An ASSIGNED name takes the other branch of that decision — it is an own
+// property, not the kind's — and survives regardless.
+const tagged = new ReferenceError("f");
+tagged.name = "Tagged";
+console.log("assigned", nameOf(tagged), tagged.message, String(tagged));
+
 // A catch binding tests against the class's interval directly.
 try {
     throw new ReferenceError("thrown");
