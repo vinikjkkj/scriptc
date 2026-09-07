@@ -654,12 +654,21 @@ each has its own answer:
   Both stay inside `recordedSizeComplaint`'s page (each ends +1,024 over its
   recorded anchor, and the drift page is 4,096) and keep 7,168 bytes under
   `STATIC_CLASS_MAX`/`REGEX_CLASS_MAX`. The recorded figures are NOT
-  re-anchored: the 512 this branch adds is explained to the byte, but the
-  1,024 static and 512 regex the BASE already carries are somebody else's
-  and unexplained, and anchoring would bake them in. Note that means the
-  regex class has stopped reproducing the 818,176 the previous entry called
-  its control — measured at 818,688 on the base tree, with nothing of this
-  branch in it. `tests/harness/size-class.ts` carries the full entry.
+  re-anchored, and the base drift beside them has since been bisected. The
+  static class was 677,376 at `874e78b8` and at `37781755` — reproducing
+  the recorded entry to the byte — and 677,888 from `036479ce` onward: the
+  `%ReferenceError` prototype fix, 48 bytes of always-linked `scr_json.c`,
+  which landed one commit AFTER the size entry was written and so was never
+  weighed. The regex class was 818,688 at all four revisions, so it never
+  moved at all and its recorded 818,176 simply does not reproduce on this
+  configuration.
+
+  The two changes are mirror images, which is the arithmetic to keep: 48
+  bytes carried the static file 512 and left regex alone, 208 bytes carried
+  the regex file 512 and left static alone, because slack under the
+  512-byte boundary was 10/90 at one revision and 474/42 at the next.
+  Neither class's file delta is its code delta.
+  `tests/harness/size-class.ts` carries the full entry.
 - **A distinct `-o` DIRECTORY per build variant.** The intermediate is named
   from the ENTRY basename and is deleted on completion unless `--keep-c`, so
   two variants of one entry built into one directory pull the file out from

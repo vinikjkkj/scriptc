@@ -1442,16 +1442,69 @@ export const SIZE_DRIFT_PAGE = 4_096;
  * be 512 bytes wrong in whichever direction they went, which is the same
  * trap the 2026-08-24 entry records from the other side.
  *
- * AND THE CONTROL HAS ALREADY MOVED, WHICH IS WORTH KNOWING BEFORE THE NEXT
- * READER LEANS ON IT. The entry above calls the regex class the control on
- * the grounds that 818,176 reproduced the `bc266f01` anchor to the byte at
- * `874e78b8`/`37781755`. Measured here at `7adee17b`, the BASE tree — no
- * change of mine in it — is 818,688, and the base static is 677,888 against
- * the 677,376 that entry recorded. So BOTH classes picked up 512 bytes in
- * main between `37781755` and `7adee17b` from work that is not this
- * branch's, and the regex class is no longer reproducing its anchor. That
- * is somebody else's drift to explain; it is recorded here so the next
- * person does not spend the search this entry already spent.
+ * THE BASE DRIFT, BISECTED — AND ONLY ONE CLASS EVER MOVED. A first draft
+ * of this paragraph said "BOTH classes picked up 512 bytes between
+ * `37781755` and `7adee17b`", inferred from two numbers rather than
+ * measured, and half of it was wrong. Built at four revisions in one
+ * worktree, one `pnpm install`, a SEPARATE `SCRIPTC_CACHE_DIR` per
+ * revision, zig 0.16.0, `SCRIPTC_TARGET=x86_64-windows-gnu`:
+ *
+ *                      static    regex    .text delta
+ *   874e78b8          677,376  818,688
+ *   37781755          677,376  818,688    +0        (%ReferenceError)
+ *   036479ce          677,888  818,688    +48
+ *   7adee17b          677,888  818,688    +0        (merge)
+ *
+ * TWO FINDINGS, and they point in different directions.
+ *
+ * 1. THE STATIC +512 IS `036479ce`, and it is 48 BYTES of code. The fix
+ *    that gave `%ReferenceError` a prototype and turned a contiguous-range
+ *    test into a membership test grew `scr_json.c` — always linked — by 48
+ *    bytes of `.text` in BOTH programs. It landed one commit AFTER the
+ *    entry above was written, so that entry never saw it and nothing is
+ *    wrong with its method: it weighed `874e78b8` against `37781755` and
+ *    correctly found +0/+0. It measured a tree that did not yet contain
+ *    the commit that moved the number.
+ *
+ * 2. THE REGEX CLASS NEVER MOVED, AND ITS RECORDED FIGURE DOES NOT
+ *    REPRODUCE. 818,688 at all four revisions, including `874e78b8` —
+ *    before any commit in the range. So the entry above is right that
+ *    `%ReferenceError` cost regex nothing, and wrong that the number was
+ *    818,176: on this configuration it was 818,688 before that branch
+ *    started. `REGEX_CLASS_RECORDED` is therefore an anchor nobody can
+ *    reproduce on the cross target, off by one file-alignment unit. Its
+ *    own preamble says the regex floor was historically witnessed with
+ *    `SCRIPTC_TARGET` UNSET while the static figure was a direct
+ *    `compile()` measurement — a configuration difference the trap two
+ *    entries up already records as worth ~15 KB — which is the most likely
+ *    place for a 512 to have entered. Named rather than corrected: this is
+ *    the reproducible fact, not the explanation.
+ *
+ * THE STATIC COLUMN IS THE CONTROL THAT MAKES THE REGEX ONE CREDIBLE.
+ * 677,376 at `874e78b8` reproduces the entry above TO THE BYTE, on this
+ * box, this toolchain, today. A rig that reproduces one recorded column
+ * exactly and misses the other by exactly one alignment unit is not a rig
+ * that is measuring wrong.
+ *
+ * AND THE TWO CHANGES ARE MIRROR IMAGES, which is the arithmetic anyone
+ * reading a file-size delta here needs. Slack under the 512-byte boundary
+ * is small and uncorrelated between the two programs:
+ *
+ *                  .text ends   boundary   slack    +48      +208
+ *   static @37781755   537,590    537,600      10  CARRIES     fits
+ *   regex  @37781755   624,038    624,128      90     fits  CARRIES
+ *
+ * 48 bytes moved the static file 512 and the regex file 0; 208 bytes moved
+ * the regex file 512 and the static file 0. NEITHER CLASS'S FILE DELTA IS
+ * ITS CODE DELTA, and neither can be derived from the other — the same
+ * warning the 2026-08-24 entry gives, arrived at from the opposite side.
+ *
+ * NOTHING IS RE-ANCHORED HERE. The static 512 now has a named commit and
+ * could be anchored honestly; the regex figure cannot, because what it
+ * would be anchoring is an unexplained discrepancy rather than growth.
+ * Anchoring one and not the other would leave the pair less legible than
+ * it is now. It is one honest line for whoever settles the regex
+ * configuration question.
  *
  * THE RECORDED FIGURES DO NOT MOVE, and for the reason the entry above
  * gives rather than in spite of it. The 512 THIS branch adds is explained
