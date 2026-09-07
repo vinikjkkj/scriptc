@@ -1,0 +1,26 @@
+promise-resolve-literal-refusals.ts:42:11 - error SC2003: union types must match exactly: expected 'Promise<{ customNodes: string[] | undefined; extraParticipants: { jid: string }[] | undefined; phash: string | undefined }> | { customNodes: string[] | undefined; extraParticipants: { jid: string }[] | undefined; phash: string | undefined }', got 'Promise<{ bogus: number; phash: string }>' (a union re-tags into another union only when every arm of the source has an identical arm in the destination, or is a record/array that width-coerces into exactly one destination arm)
+
+  41 | // every member the literal names to exist on the slot's shape.
+  42 | run(() => Promise.resolve({ phash: "1", bogus: 1 }));
+     |           ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  43 | 
+
+  hint: narrow the value to a SINGLE arm first (a discriminant check, or '!== undefined'/'!== null' for unit arms); a plain arm value widens into any union that contains it, and a whole union widens into any union whose arms include the source's
+
+promise-resolve-literal-refusals.ts:53:11 - error SC2003: union types must match exactly: expected 'Promise<{ customNodes: string[] | undefined; extraParticipants: { jid: string }[] | undefined; phash: string | undefined }> | { customNodes: string[] | undefined; extraParticipants: { jid: string }[] | undefined; phash: string | undefined }', got 'Promise<{ phash: string }>' (a union re-tags into another union only when every arm of the source has an identical arm in the destination, or is a record/array that width-coerces into exactly one destination arm)
+
+  52 | const donor = { phash: "2" };
+  53 | run(() => Promise.resolve({ ...donor }));
+     |           ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  54 | 
+
+  hint: narrow the value to a SINGLE arm first (a discriminant check, or '!== undefined'/'!== null' for unit arms); a plain arm value widens into any union that contains it, and a whole union widens into any union whose arms include the source's
+
+promise-resolve-literal-refusals.ts:64:11 - error SC2003: union types must match exactly: expected 'Promise<{ customNodes: string[] | undefined; extraParticipants: { jid: string }[] | undefined; phash: string | undefined }> | { customNodes: string[] | undefined; extraParticipants: { jid: string }[] | undefined; phash: string | undefined }', got 'Promise<{ phash: string }>' (a union re-tags into another union only when every arm of the source has an identical arm in the destination, or is a record/array that width-coerces into exactly one destination arm)
+
+  63 | const named: { readonly phash: string } = { phash: "3" };
+  64 | run(() => Promise.resolve(named));
+     |           ^~~~~~~~~~~~~~~~~~~~~~
+  65 | 
+
+  hint: narrow the value to a SINGLE arm first (a discriminant check, or '!== undefined'/'!== null' for unit arms); a plain arm value widens into any union that contains it, and a whole union widens into any union whose arms include the source's

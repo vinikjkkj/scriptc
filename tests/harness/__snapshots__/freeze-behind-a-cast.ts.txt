@@ -1,0 +1,35 @@
+freeze-behind-a-cast.ts:29:13 - error SC2020: 'Object.freeze of a possibly-aliased value' is part of the standard library types but has no scriptc lowering yet
+
+  28 | const aliased = shared as string[];
+  29 | console.log(Object.freeze(aliased).join("|"));
+     |             ^~~~~~~~~~~~~~~~~~~~~~
+  30 | shared.push("b");
+
+  hint: freeze of a FRESH object/array literal (and of primitives) compiles — frozen-ness is unobservable there; an aliased target's later writes would need the runtime frozen bit
+
+freeze-behind-a-cast.ts:46:20 - error SC2020: 'Object.freeze of a possibly-aliased value' is part of the standard library types but has no scriptc lowering yet
+
+  45 |     };
+  46 |     const frozen = Object.freeze(acc);
+     |                    ^~~~~~~~~~~~~~~~~~
+  47 |     later();
+
+  hint: freeze of a FRESH object/array literal (and of primitives) compiles — frozen-ness is unobservable there; an aliased target's later writes would need the runtime frozen bit
+
+freeze-behind-a-cast.ts:62:20 - error SC2020: 'Object.freeze of a possibly-aliased value' is part of the standard library types but has no scriptc lowering yet
+
+  61 |         if (r === "z") {
+  62 |             return Object.freeze(acc);
+     |                    ^~~~~~~~~~~~~~~~~~
+  63 |         }
+
+  hint: freeze of a FRESH object/array literal (and of primitives) compiles — frozen-ness is unobservable there; an aliased target's later writes would need the runtime frozen bit
+
+freeze-behind-a-cast.ts:65:12 - error SC2020: 'Object.freeze of a possibly-aliased value' is part of the standard library types but has no scriptc lowering yet
+
+  64 |     }
+  65 |     return Object.freeze(acc);
+     |            ^~~~~~~~~~~~~~~~~~
+  66 | }
+
+  hint: freeze of a FRESH object/array literal (and of primitives) compiles — frozen-ness is unobservable there; an aliased target's later writes would need the runtime frozen bit

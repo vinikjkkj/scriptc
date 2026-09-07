@@ -314,3 +314,76 @@ overlap. Whatever 1.8.2 is worth at settled must be measured against a
   sync genuinely needs those chunks at once. So if the peak comes down on the
   1.8.2 binary, the streamed sync is why — there is no other candidate in the
   tree.
+
+### The record-width four: three closed, one upheld
+
+Measured on `7adee17b` (this branch's base), strict, `--provenance-sources`,
+built under node v22.18.0, counted by call site off the build log with
+`rg -a -c ' - error SC[0-9]{4}: '` and cross-checked against the compiler's
+own `N errors.` summary. Every build here exits non-zero, so none of them
+has a fence count — **n/a, not 0**.
+
+| revision | log bytes | sites |
+|---|---|---|
+| `7adee17b` (base) | 15,062 | **13** |
+| `block/widthrest`, the two width rules | 11,621 | **11** |
+| `block/widthrest`, plus the freeze initializer | 11,074 | **10** |
+
+**3 closed, 0 uncovered, 10 unchanged**, and the site list is otherwise
+identical line for line.
+
+* `client/coordinators/WaMessageDispatchCoordinator.ts:867` — SC2003. The
+  diagnosis held: the source is not a union. `Promise.resolve({ phash })`
+  inside the sender-key fanout's `customize` hook lands in a
+  `Promise<C> | C` slot, and `resolve<T>(value: T): Promise<Awaited<T>>`
+  puts a conditional type between the slot and T — so the literal keeps its
+  own inferred members and the value arrives as `Promise<{ phash: string }>`.
+  What stands between that and `Promise<C>` is a WIDTH COERCION INSIDE A
+  PROMISE PAYLOAD, the one conversion `coercibleValue` does not carry, so
+  `promiseCoerceAdapter` declines and the union path reports the mismatch in
+  a message about unions. Closed at the LITERAL: it is built at the slot's
+  shape, exactly as `const v: C = { phash }` is, so the promise is
+  constructed at the slot's payload and no conversion exists to run.
+  Teaching the width family into the payload instead would have routed it
+  through the adapter's `async (p) => coerce(await p)` — a microtask turn
+  node does not take, which is a wrong answer and not a cost.
+* `client/events/privacy.ts:114` — SC1090. The `?.` rule was not the bug and
+  the keyed read was: the HEADER-FAMILY canonicalization in
+  `mapRecordTypeInner` interns every index-signature shape whose slot
+  carries a `string[]` arm as one shape over the canonical outgoing slot
+  `number | string | string[] | undefined`, and its gate asked only that the
+  array arm be present. So `Readonly<Record<string, readonly string[] |
+  undefined>>` was swept into the header world and its reads handed out four
+  arms where the declaration (and tsc) say two — leaving `?.` three
+  surviving non-unit arms instead of one. The gate now also asks for the
+  `string` ARM, which is what says header world: a parsed header value IS a
+  string and the array arm is only the repeated-header case.
+* `protocol/abprops.ts:55` — SC2020, `Object.freeze of a possibly-aliased
+  value`. This one had been read as a reasoned refusal (an aliased target's
+  later writes would need the runtime frozen bit), and the reasoning is
+  sound — it just was not what refused this site. `freezeFreshLocal` proves
+  freshness by requiring the binding's initializer to BE the allocation, and
+  it read that initializer BARE: `const acc: string[] = []` passed and
+  `const acc = [] as string[]` did not, for the same allocation at the same
+  place. Measured, not argued — the two spellings differ by an SC2020 and
+  nothing else. The initializer now unwraps `as`/`satisfies`/parentheses and
+  the angle-bracket assertion exactly as the freeze ARGUMENT one function up
+  already does. Not a style question here: `{} as Record<AbPropName, …>` is
+  the only spelling tsc accepts for a bag keyed by a literal union, so the
+  cast was forced and the gap was the whole fence.
+
+`protocol/abprops.ts:47` — SC2002, `{} as Record<AbPropName,
+AbPropConfigEntry>` — is UPHELD, and the completion machinery is REACHABLE
+from this spelling: the identical program with `Record<Name, Entry |
+undefined>` compiles today and prints Node's `0` for `Object.keys`, so
+`recordWidthPlan`'s `absent` arm serves the empty-object-into-a-wide-record
+case whenever the value type is optional-flavored. What refuses THIS one is
+the value type. `AbPropConfigEntry` is a required record with no undefined
+arm, so there is no representation of "absent" for the 1,900 completed
+members and `Object.keys` would go from Node's `[]` to 1,900 keys. Nor is
+the loop's own filling an answer: it writes every key before the value
+escapes, but a keyed write only records presence once the per-instance
+ownmask has a WRITER at every record construction — the deferred
+required-added-field class, whose absence is why `ownPresentCondC` falls
+back to `true` when mask byte 0 is zero. Closing `:47` is that work and
+nothing smaller.
