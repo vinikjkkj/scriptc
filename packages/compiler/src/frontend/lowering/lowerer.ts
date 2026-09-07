@@ -111,6 +111,7 @@ import { MixinFnShape, mixinCallClassInfoOf, mixinIntersectionInstanceType } fro
 import { ParamShape, FnSig, GenericFnInfo, GenericInstance, bindingNeverReassigned, bodyReadsArguments, isThisParameter, paramShape, paramShapes, checkDefaultParamBodyType, completeArgs, wrappedUndefined, undefinedArgFor, requireExactArityValue, bodyReturnType, declaredReturnType, collectSignature, collectSignatureInner, collectGenericSignature, genericFnOf, lowerGenericCall, lowerGenericFnValue, inferTypeParamBindings, lowerGenericInstance, lowerCall, lowerFfiCall, lowerTimersMemberCall, lowerPromiseMethodCall, lowerFilterNarrowCall, isTopLevelFnSymbol, lowerNestedFunctionDecl, lambdaSignature, lowerLambda, lowerFunction, validateFfiImports } from "./lower-calls.js";
 import { lowerArrayMethodCall, lowerBufferStaticCall, lowerBytesMethodCall, lowerBytesNew, lowerMapMethodCall, lowerMapForEachCall, buildMapForEachFn, lowerRecordOvfCaptureHelper, ovfCapturePlannable, dynSlotCheckOk, lowerEnvToPairsHelper, lowerSetMethodCall, lowerSetForEachCall, buildSetForEachFn, lowerRegexMethodCall, lowerStringMethodCall } from "./lower-containers.js";
 import { lowerStreamModuleCall, streamInstanceOfExpr } from "./lower-stream.js";
+import { unifyWidthShapes, type UnifyOutcome } from "./shape-unify.js";
 import { lowerEmitOverrideSpec, type EmitSpecCtx, type EmitSpecRequest } from "./lower-emitter.js";
 import { builtinImportOf, createRequireBindingDecl, createRequireNamespaceDecl, createRequireSpecOf, stripTypeCasts, lowerBuiltinModuleCall, lowerFsToUnixTimestampCall, lowerFsLadderCall, lowerChildArgsArg, lowerSpawnSyncCall, lowerSpawnCall, lowerExecSyncCall, recordToEnvPairs, lowerJsonMethodCall, fencedBuiltinImportOf, lowerCryptoComposedCall, lowerUrlMethodCall, lowerSearchParamsMethodCall, lowerStatsMethodCall, lowerFileHandleMethodCall, lowerChildMethodCall, lowerAtomicsCall, lowerBuiltinExtraProperty, promisifiedExecFileDecl, lowerPromisifiedSettledCall, type PromisifiedTarget, lowerExecFileAsyncCall, execFileAsyncHelper, lowerStringDecoderMethodCall, strdecHelper, lowerReadlineMethodCall, lowerDcChannelMethodCall, lowerDcChannelProperty, lowerAlsMethodCall, lowerDcTracingChannelMethodCall, lowerDcTracingChannelProperty, lowerJsonProperty, lowerErrorCodeProperty, lowerErrorPrototypeProperty, lowerUint8ArrayPrototypeProperty, lowerUint8ArrayStaticProperty, lowerProcessProperty, processVersionsMember, isProcessEnv, envValueType, lowerProcessEnvGet, lowerProcessMethodCall, lowerProcessOptionalMethodCall, lowerTimeoutMethodCall, envSnapshotHelper, isConsoleLog, consoleCallMember, lowerNumberStaticCall, lowerNumberStaticProperty, lowerDateCall, lowerTextCodecCall, lowerCryptoModuleCall, lowerFsConstantsProperty, lowerBuiltinConstantsProperty, builtinConstantBindingOf, builtinConstantsDestructureDecl, lowerProcessStreamProperty, lowerStringStaticCall, lowerStringLastIndexOfCall, lowerPromiseStaticCall } from "./lower-builtins.js";
 import { isIslandExpr, islandFuncValueFence, islandRegexpOf, jsvalIn, requireDynamicApi, islandGlobalFnOf, lowerDynamicImportCall, lowerFetchCall, lowerIslandMethodCall, lowerMathProperty, npmPackageOf, npmMemberFence, npmPackageOfSymbol } from "./lower-island.js";
@@ -2587,6 +2588,15 @@ export class Lowerer {
     // the program's own constructions prove one: a refusal is the answer
     // only for a disagreement that survives that.
     this.reconcileKeyOrders(functions);
+    // SHAPE UNIFICATION - width pairs the layout can afford to merge become
+    // ONE shape, and the copy between them the identity (shape-unify.ts).
+    // Here because this is the first point at which the edge set is COMPLETE:
+    // width helpers intern on demand while bodies lower, so nothing earlier
+    // can see the whole graph. After reconcileKeyOrders, whose declaredOrder
+    // is the input to the key-order obligation; before every consumer of the
+    // shape table below, SC6004 included - the advisory has to fall silent
+    // at exactly the sites this closed.
+    this.unifyOutcome = unifyWidthShapes(this, functions);
     this.armKeyRiskFnReturns(functions);
     this.reportKeyEnumerationRisks();
     // SC6004 rides the same timing, and for a weaker reason: an advisory
@@ -7760,7 +7770,14 @@ export class Lowerer {
     const dropped = from.fields
       .filter((f) => !f.name.startsWith("%") && !to.fields.some((t) => t.name === f.name))
       .map((f) => f.name);
-    if (process.env["SCRIPTC_WIDTH_CENSUS"]) widthCensus("site", fromId, toId, dropped, loc);
+    if (process.env["SCRIPTC_WIDTH_CENSUS"]) {
+      widthCensus("site", fromId, toId, dropped, loc);
+      // MEASUREMENT ONLY: the same flows, kept in memory so shape
+      // unification's report can say how many of them it closed. Literal
+      // sources included - they are width copies like any other, and the
+      // census counts them; only SC6004's advice sets them aside.
+      this.allWidthSites.push({ fromId, toId });
+    }
     // SC6004's site list. A LITERAL written at the flow is provably
     // unobservable — nothing else can hold a reference to it — so it is
     // never recorded, and the decision for everything else waits for the
@@ -7771,6 +7788,14 @@ export class Lowerer {
 
   /** SC6004's sites, decided in run() once the write set is known. */
   readonly widthCopySites: { fromId: string; toId: string; dropped: string[]; loc: SrcLoc }[] = [];
+
+  /** MEASUREMENT ONLY (the width census's dial): every width-copy flow this
+   * pass lowered, for the unification report's coverage count. */
+  readonly allWidthSites: { fromId: string; toId: string }[] = [];
+
+  /** What shape unification did on this run, for the report dial and for the
+   * tests that pin its coverage (shape-unify.ts). */
+  unifyOutcome: UnifyOutcome | null = null;
 
   /** SC6004's push. The admission rule is SC6003's shape: speak where the
    * copy is POSSIBLY observed, stay silent where it provably is not. A
