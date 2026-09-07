@@ -33,22 +33,46 @@ the shipped fallback declarations and behave exactly as before.
 ## The coverage hazard this fixture exists to close
 
 **A green corpus is not evidence that a subsystem is reachable.** The corpus
-compiles against the SHIPPED FALLBACK declarations; every real project
-installs @types/node. Where the two declaration sources spell the same
-runtime object differently, a subsystem can be certified by a passing corpus
-program and be unreachable for every real consumer — and nothing in the
-corpus can report it.
+compiles against the SHIPPED FALLBACK declarations; every real project installs
+@types/node. Where the two declaration sources spell the same runtime object
+differently, a subsystem can be certified by a passing corpus program and be
+unreachable for every real consumer.
 
-It has now happened twice, and both times the fix was a provenance/name
-question, not a missing runtime:
+This tree already MEASURES that gap and does not need convincing of it: the
+manifest in `tests/harness/node-types-divergence.json` lists the 49 corpus
+programs that are clean under the fallback and red under @types/node 24.13.3,
+and `tests/harness/node-types-divergence.test.ts` re-derives them and fails when
+the set moves in either direction. What this directory adds is the other half.
+The manifest records where a capability is MISSING in the real-types world; a
+fixture here proves one is PRESENT, by compiling and matching Node. A gap can be
+closed only against a fixture, and can be kept closed only by one.
 
-| subsystem | what the two sources disagreed about | measured |
+Two have been closed this way so far, and both were a provenance/name question
+rather than a missing runtime:
+
+| subsystem | what the two sources disagreed about | fixture |
 | --- | --- | --- |
-| node:stream classes | both places deciding "this is a node:stream class" excluded @types/node; `Readable` was claimed by the child-stdio mapping instead | stream-node-types.test.ts |
-| piped child stdio | a tuple `stdio` selects @types/node's `ChildProcessByStdio<I, O, E>` overload, a different SYMBOL NAME for the same handle; mapType matched `ChildProcess` only | **`tests/corpus/1565-spawn-pipe-streams.ts`'s shape: 0 refusal sites under the fallback, 4 under @types/node 24.13.3** (tests/perf/mediautils-0907 §5.1) |
+| node:stream classes | both places deciding "this is a node:stream class" excluded @types/node; `Readable` was claimed by the child-stdio mapping instead | `streams.ts` |
+| piped child stdio | a tuple `stdio` selects @types/node's `ChildProcessByStdio<I, O, E>` overload, a different SYMBOL NAME for the same handle; mapType matched `ChildProcess` only. The manifest had named this cluster exactly — `ChildProcessByStdio<null, Readable, Readable> and its members`, over `1565-spawn-pipe-streams.ts` and `1657-spawn-async-neutral.ts` | `child-stdio.ts` |
+
+The second one carries a lesson worth keeping. Closing that fence did not make
+those two programs clean: it revealed a SECOND divergence behind the first —
+their `data` listeners take an unannotated `chunk`, which @types/node types
+`unknown` where the fallback types `Buffer`. The manifest entry now records the
+deeper codes and says so. **A fence that is hiding another fence looks exactly
+like a fence that is alone**, and only closing the first one tells them apart.
 
 So: **when a corpus program is the only proof a surface works, it is proof on
 one lane only.** Anything whose declarations differ between the fallback and
-@types/node needs a fixture here too. That is what these files are for, and
-why each one is paired with a harness test that compiles it and compares
-against Node.
+@types/node needs a fixture here as well, paired with a harness test that
+compiles it and compares against Node.
+
+### One trap the site count will not catch
+
+`analyze()` does not run the IR validator or either emitter. A change to a
+lowering can therefore report a clean site count on every program and still
+fail the build. `child-stdio.ts` is the fixture that caught exactly that: a
+`child.stdout` result minted without its null arm passed every site count and
+ICEd (SC9001) in the validator, because `scr_child_stdout` answers +1-or-NULL
+and both emitters materialise that test off the two arms. **Run the harness
+suites for the files you touch; a green site count is not a green build.**

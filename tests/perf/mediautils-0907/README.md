@@ -52,21 +52,24 @@ not of measurement.
    the roots/cascade split hid a single cause behind many apparent ones — the
    `wam` shape — which is why distinct-message counts and per-file clustering
    are now reported as standard beside roots and cascade. §4, §4.1.
-5. **Three lowering changes, measured: 27 → 24 on the source lane and
+5. **Two lowering changes, measured: 27 → 24 on the source lane and
    32 → 29 on the npm lane — the same four sites on both** (build,
    `analyze()` and the compiler's own `24 errors.` line all agree). **4 closed,
-   1 uncovered**, never netted. The whole async child-stdio surface — which the
-   corpus proves works — was unreachable for *every* program typed by real
-   `@types/node`, and that is what the changes restore. §5.
-6. **A green corpus is not evidence that a subsystem is reachable — the most
-   transferable finding here.** The shape of
-   `tests/corpus/1565-spawn-pipe-streams.ts`, compiled verbatim against
-   `@types/node` 24.13.3 instead of the shipped fallback declarations, measured
-   **4 refusal sites where the corpus measures 0**. A subsystem the corpus
-   certifies, that no real consumer can reach, and that nothing in the corpus
-   can report. This is a known hazard in this tree and now has a named,
-   reproducible instance; it is written up **for corpus-coverage auditors in
-   `tests/fixtures/node-types/README.md`**, not only here. §5.1.
+   1 uncovered**, never netted. A **third change was shipped and then
+   retracted**: it produced these very numbers and still broke the build, because
+   it re-typed a libCall whose two arms are the runtime ABI. §5.2, §7.1.
+   The whole async child-stdio surface — which the corpus proves works — was
+   unreachable for *every* program typed by real `@types/node`, and that is what
+   the changes restore. §5.
+6. **A green corpus is not evidence that a subsystem is reachable — and this
+   tree already knew it.** `tests/harness/node-types-divergence.json` lists the
+   49 corpus programs that are clean under the shipped fallback declarations
+   and red under real `@types/node`, and its `fenceClusters` had already named
+   this exact cause: *"ChildProcessByStdio<null, Readable, Readable> and its
+   members"*, over `1565-spawn-pipe-streams.ts` and `1657-spawn-async-neutral.ts`.
+   **I did not discover the hazard; I closed one of its clusters.** What was
+   missing was the other half — the manifest records where a capability is
+   absent, and only a fixture can prove one present and keep it so. §5.1.
 
 ---
 
@@ -282,10 +285,10 @@ second package, found the same way — by compiling the same source two ways.
 
 ## 5. What was changed, and what it measured
 
-Three changes in `packages/compiler/src`. All three are in the same subsystem —
-the async child-process surface as **real `@types/node`** types it.
+Changes in `packages/compiler/src`, all in one subsystem — the async
+child-process surface as **real `@types/node`** types it.
 
-### 5.1 The finding that motivated all three
+### 5.1 The finding that motivated the changes
 
 `tests/corpus/1565-spawn-pipe-streams.ts` compiles, runs, and matches Node. It
 uses `spawn(cmd, args, { stdio: ["ignore","pipe","pipe"] })` and
@@ -308,30 +311,74 @@ tests/corpus/1565-spawn-pipe-streams.ts (fallback decls)   sites=0, 73 statement
 ```
 
 **0 under the fallback, 4 under `@types/node`.** A working, corpus-verified
-subsystem was unreachable for every real consumer, and the corpus could not see
-it because the corpus is not on that lane. This is the recorded
-"fallback `.d.ts` hides failures" hazard, in its most expensive form so far.
+subsystem was unreachable for every real consumer.
+
+**The tree had already recorded this**, and I found that only after the gate
+failed. `tests/harness/node-types-divergence.json` lists 49 corpus programs
+clean under the fallback and red under `@types/node`, re-derived on every run by
+`node-types-divergence.test.ts`; its `fenceClusters` names this one exactly —
+*"ChildProcessByStdio<null, Readable, Readable> and its members"* — over these
+two programs. So this is not a discovery. It is the closing of a cluster the
+instrument had been holding open, and the instrument is what proved the closure
+was real.
 
 ### 5.2 The changes
+
+Two changes, plus one that was tried, shipped in a first commit, and **taken
+back after it failed a suite I had not run**. The retraction is recorded here
+because it is the most useful thing in this section.
 
 1. **`frontend/types.ts` — `ChildProcessByStdio` maps to the `child` kind.**
    `spawn` with a tuple `stdio` selects an overload whose return type is
    `ChildProcessByStdio<I, O, E>`, an interface that `extends ChildProcess` and
    only *narrows* `stdin`/`stdout`/`stderr`/`stdio`. There is no second runtime
    object. `mapType` matched the name `ChildProcess` only.
-2. **`frontend/lowering/lower-builtins.ts` — `child.stdout`/`child.stderr` mint
-   the null arm only when the checker keeps one.** The read minted
-   `childStream | null` unconditionally. Under the tuple overload the checker
-   *pins* the slot non-null, and the spurious null arm sent every read into the
-   `%Readable` class spoke as `Readable | null`, where it re-tag-fenced
-   (`SC2003`) — on all three read forms.
-3. **`frontend/lowering/lower-exprs.ts` — `x!` on a nullable-of-one narrows to
-   that arm when the checker's target is not an IR arm.** `mapTypeOf(typeOf(x!))`
-   for `child.stdout!` is the `%Readable` **class**, which is not an arm of
-   `childStream | null`, so `narrowedArmHelper` found nothing and the union fell
-   through unnarrowed. The fallback uses the **same checked helper**, so a lying
-   `!` still throws the catchable `TypeError`; only the arm *lookup* changed.
-   It runs strictly where the existing code had already given up.
+2. **`frontend/lowering/lower-exprs.ts` — a narrowing finds its arm by SHAPE
+   when it cannot find it by NAME.** The arm a narrowing wants is normally
+   looked up from `mapTypeOf` of the checker type. That fails whenever an
+   intrinsic read mints an arm the checker spells as some other type:
+   `child.stdout`'s IR arm is `childStream`, while `@types/node` types the slot
+   `Readable`, which maps to the runtime `%Readable` **class**. Where the union
+   is a **nullable-of-one** and the checker has proved the value non-null — a
+   guard, a `!`, or a slot an overload pins — that single arm is the only thing
+   the narrowing can mean. One helper, `soleSolidArm`, is consulted by both the
+   `!` path and `maybeNarrow`, and both bridge through the **same checked
+   extraction** they use for a named arm, so a narrowing that turns out to be
+   wrong still throws the catchable `TypeError`.
+
+**Retracted: minting `child.stdout` without its null arm.** The first attempt
+made the *production* site type-directed — where the checker pinned the slot
+non-null, mint a bare `childStream`. It looked right, it produced exactly the
+site counts reported below, and it was **wrong**:
+
+> `SC9001 internal compiler error: libCall child.stdout must return the
+> 'Readable | null' union`
+
+`scr_child_stdout` / `scr_child_stderr` answer **+1-or-NULL**. Both emitters
+materialise precisely that, off the two arms:
+
+```c
+raw != NULL ? scr_union_new_ref(streamTag, raw, ...) : <null arm>
+```
+
+`emission/emit-exprs.ts` and `llvm/emitter.ts` each **throw** if the result is
+not a two-armed union, and `ir/validate.ts:4913` asserts the same contract. The
+null arm is not the checker's opinion — it is the runtime ABI. Relaxing the
+validator would have removed the ICE and let a `NULL` flow on as a live stream
+handle, which is a silent wrong answer rather than a failure.
+
+**Why no instrument I ran caught it.** `analyze()` does not run the IR validator
+or either emitter, so a site count is taken *before* the point where this breaks.
+The corpus never took the path (every corpus program is on the fallback
+declarations, where the slot is nullable and `?.` handles it). The only program
+that exercised it was the fixture added in the same commit — which had never
+been executed, because I gated on the corpus and ts7 and neither runs
+`tests/harness/`. **A green site count is not a green build.**
+
+The narrowing therefore belongs at the **use**, never at the production site,
+which is what change 2 does. The measured result is identical (§5.4), so nothing
+was traded away for correctness here — the first mechanism was simply the wrong
+place.
 
 ### 5.3 Probe matrix, before and after (all under `@types/node` 24.13.3)
 
@@ -342,7 +389,7 @@ it because the corpus is not on that lane. This is the recorded
 | `p-childstream-guard` | annotated `ChildProcess`, guard-narrowed read | 2 | **0** |
 | `p-childstream-bang` | annotated `ChildProcess`, `!` read | 1 | **0** |
 | `p-annot-optchain2` | annotated `ChildProcess`, `?.` read (control — already worked) | 0 | **0** |
-| `p-nonnull-plain` | `!` on `string \| null` (control for change 3) | 0 | **0** |
+| `p-nonnull-plain` | `!` on `string \| null` (control for the narrowing change) | 0 | **0** |
 | `p-annot-close` | `child.on("close")`, `stream.on("close")` | 2 | 2 — untouched, and correctly so |
 
 ### 5.4 The measured effect on media-utils — closed and uncovered, never netted
@@ -412,6 +459,53 @@ harness/build1.sh pkgsrcN/src-media-utils.ts src-media-utils --provenance-source
 `analyze()` 24 = build log 24 = the compiler's own `24 errors.` No binary, so
 the fence count is **n/a, not 0**.
 
+### 5.4b What closing the cluster EXPOSED — and the proof it is exposure
+
+Closing the `ChildProcessByStdio` fence did **not** make `1565` and `1657`
+clean. Their manifest codes deepened:
+
+| program | recorded | now |
+| --- | --- | --- |
+| `1565-spawn-pipe-streams.ts` | `SC2020` | `SC1043, SC1090, SC2011, SC2020` |
+| `1657-spawn-async-neutral.ts` | `SC2020` | `SC1090, SC2020` |
+
+**More codes, not fewer**, which is the direction that should be challenged. It
+is exposure, and all nine diagnostics are **one cause**: both programs write
+`child.stdout?.on("data", (chunk) => …)` with the parameter **unannotated**, and
+`@types/node` types that `unknown` where the shipped fallback types it `Buffer`.
+Every code, with its line:
+
+| program | line | code | what |
+| --- | --- | --- | --- |
+| 1565 | 17, 81 | `SC1090` | `data listeners whose parameter is not 'Buffer' … got 'unknown'` |
+| 1565 | 18 | `SC2020` | `StringDecoder.write of 'unknown' data` — `decoder.write(chunk)` |
+| 1565 | 82 | `SC1043` | comparing non-number, non-string — `total += chunk.length` |
+| 1565 | 84 | `SC2011` | `'>' on 'any'-typed values` — `chunk.length > maxChunk` |
+| 1657 | 38, 41 | `SC1090` | the same unannotated `data` listener, twice |
+| 1657 | 39, 42 | `SC2020` | `StringDecoder.write of 'unknown' data` |
+
+Previously the **receiver** fenced first (`ChildProcessByStdio<…>.stdout` has no
+lowering), so the callback behind it was never analysed. Three measurements say
+this is exposure rather than causation:
+
+1. **The same codes on BASE, with no change of mine in the picture.**
+   `probes/p-annot-optchain.ts` annotates the receiver `const child: ChildProcess`
+   — a name base's `mapType` already matched — and leaves `chunk` unannotated.
+   Measured on `83432479` **before the first rebuild**: `L8 SC1043` and
+   `L8 SC1090 … got 'unknown'`.
+2. **Annotating the chunk removes them.** `probes/p-annot-optchain2.ts` is that
+   probe with `(chunk: Buffer)`: **0 sites**, on base and after.
+3. **The decisive arm, on the corpus programs themselves.** Annotate *only* the
+   `data` parameter in `1565` and `1657` — two listeners each, nothing else
+   touched, same compiler — and both go to **ZERO diagnostics**. So every code
+   in the table is the chunk's, and with it fixed these two programs would leave
+   the manifest entirely.
+
+The manifest records the new codes and the closed cluster, in the same form the
+`address()` cluster used when block/address closed it. **A fence that is hiding
+another fence looks exactly like a fence that is alone**; only closing the first
+distinguishes them.
+
 ### 5.5 The regression test, on the lane that could see it
 
 The corpus cannot pin this: it compiles against the shipped fallback
@@ -431,9 +525,17 @@ Added, as its sibling:
   vendored, pinned `@types/node` and compares stdout against Node.
 
 `analyze()` on that fixture with the changes: **`sites=0`, 55 statements, 0
-failed.** Its before-number is not taken by reverting mid-run; it is the probe
-matrix in §5.3, which is the same three read forms in isolation and measured
-3 + 1 + 2 sites before and 0 after.
+failed.** Its before-number is the probe matrix in §5.3, which is the same three
+read forms in isolation and measured 3 + 1 + 2 sites before and 0 after.
+
+**And this fixture earned its place immediately.** It is the program that caught
+the retracted change in §5.2 — a `child.stdout` minted without its null arm
+passes every site count and ICEs in the IR validator, because `analyze()` never
+runs the validator or an emitter. Nothing else in the tree took that path: every
+corpus program is on the fallback declarations, where the slot is nullable and
+`?.` handles it. A fixture on the real-types lane was the only instrument that
+could fail, and it did — but only once it was actually **run**, which is the
+process failure recorded in §7.
 
 ---
 
@@ -516,34 +618,62 @@ is not.
 
 Judged by counting lines and failure markers, never by an exit code.
 
-| gate | command | verdict |
-| --- | --- | --- |
-| ts7, first run | `vitest run packages/compiler/test/ts7` | **1 failed / 90 passed (7 files)** — and the failure is not a behavior regression: `order-parity.test.ts`'s baseline accounting reported `2111 corpus entries vs 2110 recorded`, naming the one new fixture and tagging it `UNCOMMITTED`, i.e. *"record it in the same commit"* |
-| ts7 baseline, recorded | `SCRIPTC_UPDATE_BASELINES=1 vitest run …/order-parity.test.ts` | `UPDATE-EXIT=0`, baseline **387,554 → 387,703 B** |
-| ts7 baseline, additivity | `harness/gate-ts7-update.sh` + the flatten/compare step | **ADDED=2, CHANGED=0, REMOVED=0** over 4,220 → 4,222 entries; the two added are `.../child-stdio.ts/order` and `.../child-stdio.ts/diags`. Both files parse as JSON |
-| ts7, re-verify | `vitest run …/order-parity.test.ts` (no update flag) | **38 passed, `VERIFY-EXIT=0`** |
-| corpus differential, shard 1/20 | `SCRIPTC_TEST_SHARD=1/20 vitest run tests/harness/differential.test.ts` | **79 programs, 79 passed**, 253.59s |
-| corpus differential, full | `harness/gate-corpus-full.sh` | **1,863 passed / 0 failed**, 2067.75s. Counted from the log rather than the exit code: over **162,355 bytes**, `PASS-MARKERS=1834`, `FAIL-MARKERS=0`, `Failed Tests` blocks **0**, `AssertionError` lines **0** |
+| gate | verdict |
+| --- | --- |
+| `tests/harness/child-stdio-node-types.test.ts` | **1 passed** — the fixture compiles under `@types/node` and matches Node byte for byte |
+| `tests/harness/node-types-divergence.test.ts` | **5 passed**, including *"each listed program still diverges, with the recorded codes"* against the updated manifest |
+| `tests/harness/stream-node-types.test.ts` | **2 passed** (the sibling subsystem, unmoved) |
+| the three together | **3 files / 8 tests passed**, 9 pass marks, **0** failure markers |
+| ts7, 7 files | 90 passed + one baseline-accounting failure naming this branch's own new fixture; recorded additively (**ADDED=2, CHANGED=0, REMOVED=0**), re-verify **38 passed, exit 0** |
+| corpus differential, full | **1,863 passed / 0 failed**, `VITEST-EXIT=0`, 828.85s, re-run against the CORRECTED compiler. Counted over **143,467 bytes**: `PASS-MARKERS=1622`, `FAIL-MARKERS=0`, `Failed Tests` blocks **0**, `AssertionError` **0** |
+| attribution trailers | control arm **2**, both messages **0**, run as its own step |
 
-> **1,834 printed pass lines against 1,863 tests** is a reporter artifact, not 29
-> missing outcomes: vitest does not print a line for every test at this
-> verbosity. The outcome numbers are the totals line (1,863 passed, 0 failed)
-> and the three failure counters, all zero. Both numbers are given here so the
-> gap is visible rather than quietly reconciled.
-| attribution trailers | `harness/trailer-check.sh`, run as **its own step**, never chained | control arm (`ctl-trailered.txt`) reports **2** trailer lines; both commit messages report **0** |
+**The first corpus run does not count and was set aside.** It passed 1,863/0,
+but against the compiler carrying the retracted change — a build that ICEs on
+the one program that exercises the path. Its log is kept as
+`gate-corpus-full-STALE-wrongcompiler.log` in the lab and is deliberately NOT
+shipped, so it cannot be quoted as evidence for this branch. The row above is
+the re-run.
 
-**Blast radius, by RUNNING the corpus.** Change 3 is the one with reach beyond
-child stdio: `x!` on a nullable-of-one now narrows through a checked helper
-where it previously fell through, which changes CODE GENERATION, not just a
-diagnostic. Grepping emitted C would read zero by construction for that. Every
-corpus program was compiled and its native stdout/stderr/exit compared against
-Node: **0 divergences**.
+**One exit code to distrust, and the reason.** Running the three harness suites
+together reports `VITEST-EXIT=1` while every test passes:
 
-The baseline update is additive **by construction** —
-`SCRIPTC_UPDATE_BASELINES=1` cannot overwrite a live divergence — but that is a
-property of the tool, so the additivity is *also* checked independently, by
-flattening both JSON documents and comparing every pre-existing key byte for
-byte. `CHANGED=0` is the number that matters and it is measured, not assumed.
+```
+Vitest caught 1 unhandled error during the test run.
+Error: [vitest-worker]: Timeout calling "onTaskUpdate"
+ Test Files  3 passed (3)
+      Tests  8 passed (8)
+```
+
+It is vitest's reporter RPC channel timing out under a long single test, not a
+test failure. Isolated both ways: the two fast suites without the divergence
+test exit **0**; the divergence suite alone, warm, runs in 39s and exits **0**
+with 5/5. Cold it takes 169s, and that is when the channel times out. Nothing
+here is this branch's.
+
+### 7.1 The process failure this section exists to record
+
+The first version of this branch was reported as gated on **"corpus 1,863/0,
+ts7 green"**. Both were true. **Neither runs `tests/harness/`.** The commit
+shipped a new harness test that had never executed, and a lowering change whose
+consequence lives in the IR validator — which `analyze()` never reaches, because
+a site count is taken before it. The merge came back red on two files, and both
+were mine:
+
+* `child-stdio-node-types.test.ts` — `SC9001 internal compiler error: libCall
+  child.stdout must return the 'Readable | null' union`, on this branch's own
+  new fixture;
+* `node-types-divergence.test.ts` — two manifest programs' codes moved.
+
+The corpus could not have caught either. Every corpus program compiles against
+the fallback declarations, so none takes the tuple-stdio path at all. **A green
+site count is not a green build, and a green corpus is not a green tree.** When
+a change touches compiler source, run the suites that cover the files touched;
+if that is too expensive, say which ones were skipped so the reader can weight
+it.
+
+Skipped here, and named: the rest of `tests/harness/` and the `packages/*/src`
+unit suites. What was run is the table above.
 
 ---
 
@@ -568,8 +698,11 @@ bash harness/build1.sh pkgsrcN/src-media-utils.ts src-media-utils --provenance-s
 # 5. the probes (seconds each)
 for p in probes/*.ts; do node sites.mjs "napp/probes/$(basename $p)" "sites/$(basename $p .ts).json"; done
 
-# 6. blast radius: RUN the corpus
-bash harness/gate-corpus.sh 1/20
+# 6. the suites that cover the touched files -- NOT optional, see 7.1
+bash harness/gate-harness.sh      # child-stdio + stream + node-types-divergence
+
+# 7. blast radius: RUN the corpus
+bash harness/gate-corpus-full.sh
 ```
 
 ### Files
@@ -578,6 +711,6 @@ bash harness/gate-corpus.sh 1/20
 | --- | --- |
 | `drivers/` | the three drivers: lane A, lane A′, lane G |
 | `probes/` | one isolated gap per file, plus `sharp-stub.ts` (the §4.1 arm) and the tsconfig that puts them on real `@types/node` |
-| `sites/` | raw `analyze()` records: lane A, lane G before and after, lane A′, the sharp-stub arm |
-| `logs/*.txt` | the evidence logs. `*.log` is gitignored repo-wide and no `tests/perf` tree tracks one, so these carry the `.txt` extension the prior surveys use: `src-media-utils.build.txt` (the lane-G build, `24 errors.`, 12,058 B), `ab-media.txt` / `ab-media2.txt` (lane A′ before and after), `gate-corpus-1-20.txt`, `gate-corpus-full-excerpt.txt` (head, first/last pass lines, totals and the counted markers, verbatim), `gate-ts7-excerpt.txt` (including the baseline-accounting failure block), `gate-ts7-update.txt` |
+| `sites/` | raw `analyze()` records: lane A, lane G before (`src-media-utils.json`) and after (`-a5`), lane A′ before and after, the sharp-stub arm, the fixture, and the two base-arm probe records that prove §5.4b |
+| `logs/*.txt` | the evidence logs. `*.log` is gitignored repo-wide and no `tests/perf` tree tracks one, so these carry the `.txt` extension the prior surveys use: `src-media-utils.build.txt` (the lane-G build, `24 errors.`, 12,058 B), `ab-media.txt` / `ab-media5.txt` (lane A′ before and after), `gate-corpus-1-20.txt`, `gate-corpus-full-excerpt.txt` (head, first/last pass lines, totals and the counted markers, verbatim), `gate-ts7-excerpt.txt` (including the baseline-accounting failure block), `gate-ts7-update.txt` |
 | `harness/` | env, build, the hardened `sites.mjs`, `build1.sh`, and the corpus gate |

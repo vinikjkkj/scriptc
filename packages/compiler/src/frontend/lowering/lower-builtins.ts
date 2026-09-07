@@ -6215,23 +6215,28 @@ let digestInputValueDispatches = 0;
     // stream class everywhere else.
     if (isChildStdioAccess(L, expr)) {
       const receiver = L.lowerExpr(expr.expression);
-      // The null arm is the CHECKER'S, not an invariant: `stdio: ["ignore",
-      // "pipe", "pipe"]` selects @types/node's ChildProcessByStdio<I, O, E>
-      // overload, which PINS the slot types the tuple asked for, so
-      // `child.stdout` there is `Readable`, never `Readable | null`. Minting
-      // the union anyway sends every read of it into the %Readable class
-      // spoke as `Readable | null`, where it re-tag-fences (SC2003) -
-      // measured on all three read forms (`?.`, `!`, and the plain member
-      // read). Where the checker itself says the slot cannot be null - the
-      // tuple overload, or a guard it narrowed - the IR says so too.
-      const slotT = L.typeOf(expr);
-      const NULLISH = ts.TypeFlags.Null | ts.TypeFlags.Undefined | ts.TypeFlags.Void;
-      const nullable =
-        (slotT.flags & NULLISH) !== 0 ||
-        (slotT.isUnionType() && slotT.getTypes().some((a) => (a.flags & NULLISH) !== 0));
-      const type: IrType = nullable
-        ? { kind: "union", unionId: L.unions.intern([CHILDSTREAM_T, { kind: "nullT" }]) }
-        : CHILDSTREAM_T;
+      // The union is NOT the checker's opinion, it is the RUNTIME ABI:
+      // scr_child_stdout / scr_child_stderr answer a +1 handle OR NULL, and
+      // both emitters materialise exactly that as
+      //   raw != NULL ? scr_union_new_ref(streamTag, raw, ...) : <null arm>
+      // (emission/emit-exprs.ts and llvm/emitter.ts, each of which THROWS if
+      // this result is not a two-armed union; ir/validate.ts asserts the same
+      // contract). So the null arm is minted unconditionally even where the
+      // checker pins the slot non-null -- @types/node's tuple-stdio overload
+      // returns ChildProcessByStdio<I, O, E>, whose `stdout` is `Readable`
+      // rather than `Readable | null`.
+      //
+      // Minting a bare childStream there instead is a REAL BUG, not an
+      // optimisation, and it is invisible to a site count: analyze() never
+      // runs the validator or an emitter, so it reports a clean program while
+      // the build ICEs (SC9001) -- or, had the assertion been relaxed, while
+      // a NULL flowed on as a live stream handle. Narrowing the checker's
+      // non-null view belongs at the USE, through the checked extraction
+      // maybeNarrow and the `!` path already build, never here.
+      const type: IrType = {
+        kind: "union",
+        unionId: L.unions.intern([CHILDSTREAM_T, { kind: "nullT" }]),
+      };
       const read: IrExpr = {
         kind: "libCall",
         fn: name === "stdout" ? "child.stdout" : "child.stderr",

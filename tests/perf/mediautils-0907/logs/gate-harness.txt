@@ -1,0 +1,38 @@
+ORACLE-NODE v25.9.0
+=== START 2026-09-07T18:38:03-03:00
+
+ RUN  v3.2.7 <blocks>/mediautils
+
+ ✓ tests/harness/child-stdio-node-types.test.ts (1 test) 5901ms
+   ✓ node-types: piped child stdio lowers under @types/node and matches Node  5899ms
+ ✓ tests/harness/stream-node-types.test.ts (2 tests) 7351ms
+   ✓ node-types: the stream classes lower statically under @types/node and match Node  4977ms
+   ✓ node-types: EVERY class in RUNTIME_STREAM_CLASSES maps under @types/node  2372ms
+ ✓ tests/harness/node-types-divergence.test.ts (5 tests) 140372ms
+   ✓ node-types divergence: each listed program still diverges, with the recorded codes  136774ms
+   ✓ node-types: a builtin bound as a value compiles and matches Node (c)  1970ms
+   ✓ node-types: a builtin bound as a value compiles and matches Node (llvm)  1615ms
+⎯⎯⎯⎯⎯⎯ Unhandled Errors ⎯⎯⎯⎯⎯⎯
+
+Vitest caught 1 unhandled error during the test run.
+This might cause false positive tests. Resolve unhandled errors to make sure your tests are not affected.
+
+⎯⎯⎯⎯⎯⎯ Unhandled Error ⎯⎯⎯⎯⎯⎯⎯
+Error: [vitest-worker]: Timeout calling "onTaskUpdate"
+ ❯ Object.onTimeoutError node_modules/.pnpm/vitest@3.2.7_@edge-runtime+_aec0055de7c7effda46e3e3ca0e6aa78/node_modules/vitest/dist/chunks/rpc.-pEldfrD.js:53:10
+ ❯ Timeout._onTimeout node_modules/.pnpm/vitest@3.2.7_@edge-runtime+_aec0055de7c7effda46e3e3ca0e6aa78/node_modules/vitest/dist/chunks/index.B521nVV-.js:59:62
+ ❯ listOnTimeout node:internal/timers:605:17
+ ❯ processTimers node:internal/timers:541:7
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+
+
+ Test Files  3 passed (3)
+      Tests  8 passed (8)
+     Errors  1 error
+   Start at  18:38:04
+   Duration  149.63s (transform 6.54s, setup 0ms, collect 25.33s, tests 153.62s, environment 1ms, prepare 615ms)
+
+VITEST-EXIT=1
+=== DONE 2026-09-07T18:40:35-03:00
+=== GATE-EXIT rc=0 ===

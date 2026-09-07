@@ -619,12 +619,8 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
         // catchable TypeError, it is only the arm LOOKUP that changes.
         // Additive: this runs only where the code above already gave up.
         {
-          const arms = L.unions.get(inner.type.unionId)?.arms;
-          const solid = arms?.filter(
-            (a) => a.kind !== "nullT" && a.kind !== "undefinedT" && a.kind !== "void",
-          );
-          if (arms && solid && solid.length === 1 && solid.length < arms.length) {
-            const arm = solid[0]!;
+          const arm = soleSolidArm(L, inner.type.unionId);
+          if (arm !== null) {
             const helper = L.narrowedArmHelper(inner.type.unionId, arm, loc);
             if (helper) {
               return { kind: "call", callee: helper, args: [inner], type: arm, loc };
@@ -4146,6 +4142,32 @@ function instanceofGuardTargets(L: Lowerer, node: ts.Expression): ts.Expression[
   return out;
 }
 
+/** The single NON-NULLISH arm of a nullable-of-one union, or null.
+ *
+ * The arm a narrowing wants is normally found by NAME: mapTypeOf of the
+ * checker type, looked up with armTag. That fails whenever an intrinsic read
+ * mints an arm the checker spells as some other type. `child.stdout` is the
+ * standing case -- its IR arm is childStream, while @types/node types the slot
+ * `Readable`, which maps to the runtime %Readable CLASS -- and the libCall
+ * cannot simply mint the checker-shaped type instead, because the null arm is
+ * the RUNTIME ABI (scr_child_stdout answers +1-or-NULL and both emitters
+ * materialise that test off the two arms).
+ *
+ * So where the checker has proved non-null -- a guard, a `!`, or a slot an
+ * overload pins, as ChildProcessByStdio<I, O, E> pins stdout -- and the union
+ * has exactly ONE arm that is not a nullish unit, that arm is the only thing
+ * the narrowing can mean. Callers bridge to it through the same CHECKED
+ * extraction they use for a named arm, so a narrowing that turns out to be
+ * wrong still throws the catchable TypeError rather than misreading a NULL. */
+function soleSolidArm(L: Lowerer, unionId: string): IrType | null {
+  const arms = L.unions.get(unionId)?.arms;
+  if (!arms) return null;
+  const solid = arms.filter(
+    (a) => a.kind !== "nullT" && a.kind !== "undefinedT" && a.kind !== "void",
+  );
+  return solid.length === 1 && solid.length < arms.length ? solid[0]! : null;
+}
+
 /** The union ARM an `instanceof <Ctor>` guard selects, or null.
  *
  * Deliberately the SAME arms `lowerInstanceOf` already answers over a union
@@ -4448,7 +4470,16 @@ function instanceofGuardArm(L: Lowerer, rhs: ts.Expression, unionId: string): Ir
     if (!narrowed || narrowed.kind === "union" || narrowed.kind === "void" || isUnitType(narrowed)) {
       return expr;
     }
-    if (L.armTag(expr.type.unionId, narrowed) < 0) return expr;
+    if (L.armTag(expr.type.unionId, narrowed) < 0) {
+      // The checker named a type that is not an arm. If the union is a
+      // nullable-of-one and the checker has proved the value non-null, the
+      // narrowing has exactly one possible meaning -- see soleSolidArm.
+      // Without this, a guard-narrowed or overload-pinned `child.stdout`
+      // stays union-typed and re-tag-fences (SC2003) at its use.
+      const sole = soleSolidArm(L, expr.type.unionId);
+      if (sole !== null) return checkedArmBridge(L, expr, sole, expr.loc);
+      return expr;
+    }
     // A member READ through the bridge - `t.length` on a local that a
     // widened keyed read stored into. See memberRecvArmBridge.
     {
