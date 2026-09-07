@@ -10857,6 +10857,18 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/7791-a-reference-error-is-its-own-class.ts": {
+   "order": [
+    "<repo>/tests/corpus/7791-a-reference-error-is-its-own-class.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/7791-awaiting-a-promise-that-may-be-absent.ts": {
+   "order": [
+    "<repo>/tests/corpus/7791-awaiting-a-promise-that-may-be-absent.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/800-switch-basics.ts": {
    "order": [
     "<repo>/tests/corpus/800-switch-basics.ts"
@@ -11367,6 +11379,12 @@
   "<repo>/tests/diagnostics/assert-fences.ts": {
    "order": [
     "<repo>/tests/diagnostics/assert-fences.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/awaiting-a-maybe-promise-outside-the-one-unit-rule.ts": {
+   "order": [
+    "<repo>/tests/diagnostics/awaiting-a-maybe-promise-outside-the-one-unit-rule.ts"
    ],
    "diags": []
   },
