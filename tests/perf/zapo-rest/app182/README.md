@@ -200,7 +200,64 @@ statements agree. See `docs/estado-weakmap-cycle-keys.md` §3.
 
 The streamed history-sync path — `openHistoryBlobStream` inflating through
 `createUnzip`, then `streamProtoFields` walking it through
-`ProtoStreamReader` — is **one diagnostic away**: `history-blob.ts`,
-`history-sync.ts` and the `ProtoStreamReader` class are all clean, and the
-only refusal left on the path is the `stack.length -= 1` inside
-`streamProtoFields` itself.
+`ProtoStreamReader` — is **clean**. `history-blob.ts`, `history-sync.ts` and
+the `ProtoStreamReader` class carry no diagnostic, and the last refusal on
+the path, the `stack.length -= 1` inside `streamProtoFields`, was closed by
+the compound-`length` lowering at the `24 -> 15` step above. (This paragraph
+read "one diagnostic away" until then; it was written at the 29 row and the
+lowering landed two rows later.) **The mechanism the whole upgrade exists for
+already compiles** — every diagnostic left is somewhere else in the library.
+
+## What the 1.8.2 upgrade is expected to change, and what it is not
+
+### Expected to change: the PEAK of a history sync
+
+zapo-js 1.6.2 dispatches incoming stanzas fire-and-forget
+(`void runtime.handleIncomingMessageEvent(event)` in `WaClientFactory`), so
+every history-sync chunk WhatsApp pushes decodes and persists **concurrently**
+and the process's peak is the whole sync rather than one chunk. That is
+measured, in `../README.md` under "The peak of a history sync".
+
+1.8.2's **streamed history sync** — `openHistoryBlobStream` inflating through
+`createUnzip`, then `streamProtoFields` walking it through `ProtoStreamReader`
+— removes that pressure at the source: the blob is walked as a stream instead
+of being inflated into one fully-decoded graph. **That is the whole reason for
+the upgrade.** It is the only route to the fix that does not patch zapo, which
+the user has forbidden.
+
+**How much is not measured, and no number is promised here.** The nearest
+evidence on this box is the env-gated serialisation experiment against v1.6.2
+(`../harness/history-sync-serialise.patch`): −62% peak working set and −75%
+peak commit at 19,200 messages, −60% / −68% at 38,400, with the sync finishing
+*faster* rather than slower. That is the shape of win a one-chunk-at-a-time
+discipline buys on this workload — but 1.8.2's streaming is a **different
+mechanism** reaching the same pressure from the other side: it shrinks each
+chunk's own footprint rather than limiting how many are in flight. Those
+percentages are therefore an analogy, not a prediction. The figure for 1.8.2
+has to be measured on the 1.8.2 binary, which does not exist yet.
+
+### NOT changed by the upgrade: settled memory
+
+The settled-memory fix is the **cycle arena's chunk giveback** (`71c3af87`),
+which lives in the runtime and is already on `main`. It is independent of the
+zapo version and applies to **both** arms: settled working set 163.39 →
+104.50 MiB, with ~52 MiB handed back to the OS. A 1.6.2 binary rebuilt off
+current `main` already has it; 1.8.2 neither delivers it nor needs to.
+
+**Do not expect the two to add up.** The serialisation table's settled column
+(146.87 → 76.17 MiB at 19,200 messages) was measured 2026-09-05, *before* the
+arena giveback landed on 09-06. Both reduce settled memory by the same
+underlying route — fewer arena chunks retained past the sync — so they
+overlap. Whatever 1.8.2 is worth at settled must be measured against a
+**current-`main` 1.6.2 baseline**, not added to the arena's −58.9 MiB.
+
+### Also not changed
+
+* **The diagnostic count is not a memory statement.** It measures the
+  *compiler's* coverage of 1.8.2's source. Closing the last few is what makes
+  the binary buildable at all; it does not make the binary faster or smaller.
+* **The peak is where the two pieces of work divide cleanly.** The arena work
+  explicitly did *not* move the peak (248.34 → 247.69 MiB, −0.3%), because the
+  sync genuinely needs those chunks at once. So if the peak comes down on the
+  1.8.2 binary, the streamed sync is why — there is no other candidate in the
+  tree.
