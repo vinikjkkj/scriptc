@@ -6,6 +6,9 @@
 import { writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 
+import { requirePins } from "./pins.mjs";
+requirePins("sites.mjs");
+
 const WT = process.env.WT ?? "<blocks>/wamcoord";
 const { analyze } = await import(`file:///${WT}/packages/compiler/dist/index.js`);
 

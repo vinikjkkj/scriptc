@@ -8,6 +8,9 @@
 // resolved is UNMEASURED, never 0.
 import { mkdirSync, writeFileSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+
+import { requirePins } from "./pins.mjs";
+requirePins("candidates.mjs");
 const WT = process.env["WT"] ?? "<blocks>/wamcoord";
 const LAB = process.env["LAB"] ?? "<blocks>/wamcoord-lab";
 const { resolveProvenanceSources } = await import("file:///" + WT + "/packages/compiler/dist/index.js");

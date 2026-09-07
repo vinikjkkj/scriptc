@@ -4,6 +4,9 @@
 // the answer: `.d.ts` is the authored path, `.ts` is the ordinary one.
 import { writeFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
+
+import { requirePins } from "./pins.mjs";
+requirePins("checkmap.mjs");
 const WT = "<blocks>/wamcoord";
 const LAB = "<blocks>/wamcoord-lab";
 const { resolveProvenanceSources } = await import("file:///" + WT + "/packages/compiler/dist/index.js");

@@ -802,3 +802,150 @@ rebuild's numbers (`protocol=5`, exit 0, 2,701,824 B, MATCH byte-exact, 0 fences
 over 11,044,135 B), what the cause actually was (an edge dropped at resolution,
 not the twin-init redirect the file's own diagnosis blamed), and the note that
 the probe now builds with no environment variable at all.
+
+---
+
+## 12. An incident: five attested trees on the user's C: drive, and the guard
+
+**It was me.** One invocation out of thirty-four, and it was the script I wrote
+to verify that the whitelist does not leak.
+
+### 12.1 What happened, and the evidence it was this and not something else
+
+`<home>\.cache\scriptc\provenance` appeared at 18:56 on 2026-09-07:
+**254 files, 10.4 MB**, containing a checkout whose hash is present in exactly
+one block cache on `G:` — mine.
+
+The mechanism is `packages/compiler/src/frontend/provenance.ts:312`:
+
+```ts
+return process.env["SCRIPTC_PROVENANCE_CACHE"] ?? join(homedir(), ".cache", "scriptc", "provenance");
+```
+
+No warning, no error, unbounded size. An earlier occurrence of this same
+directory put **2.17 GB** on the user's drive.
+
+The invocation was `node checkmap.mjs`, run from a shell that had **not**
+sourced `env.sh` — the §11.6 script that reads each mapped entry's extension to
+prove the authored-JS whitelist does not leak. It resolves provenance for
+exactly five packages.
+
+**The fingerprint is exact.** Those same five trees, as they sit in my own
+pinned `G:` cache:
+
+| tree | files | bytes |
+| --- | --- | --- |
+| `lru.min` | 50 | 212,311 |
+| `@sec-ant/readable-stream` | 42 | 455,646 |
+| `sql-escaper` | 64 | 256,271 |
+| `aws-ssl-profiles` | 30 | 264,558 |
+| `wa-spec` (`@vinikjkkj/wa-wam`) | 68 | 9,715,795 |
+| **total** | **254** | **10,904,581 = 10.4 MB** |
+
+254 files and 10.4 MB, against 254 files and 10.4 MB observed on `C:`. That is
+not a coincidence and I am not going to argue it down.
+
+The timeline corroborates it: those four small trees entered my `G:` cache at
+**18:55:11–18:55:16**, written by `harness/qG.sh` (which *does* source
+`env.sh`); `checkmap.mjs` ran immediately after `qG` finished at 18:55:17; the
+`C:` directory was written at **18:56**. It is the same five trees extracted a
+second time, by a shell without the pin.
+
+### 12.2 The audit, in both directions
+
+Mechanical, over every entry point in the rig:
+
+| | count | verdict |
+| --- | --- | --- |
+| `.sh` entry points that source `env.sh` (all six pins) | 30 of 33 | pinned |
+| `.sh` that do not | 3 | `env.sh` itself, `early.sh`, `trailer-check.sh` — **none resolves provenance** |
+| `.mjs` that can trigger an extraction | **3** | `sites.mjs`, `candidates.mjs`, `checkmap.mjs` |
+| of those, invoked only from pinned scripts | 2 | `sites.mjs`, `candidates.mjs` |
+| of those, invoked bare | **1** | **`checkmap.mjs`** |
+
+The other thirty-three were right. **Being right thirty-three times out of
+thirty-four is not a mechanism**, which is the whole point of the fix below.
+
+### 12.3 The fix: a guard that refuses, not a convention to remember
+
+`harness/pins.mjs` — imported by all three resolving entry points, before the
+dynamic import of the compiler that would trigger an extraction. It requires all
+eight path variables to be set **and to point at `G:`**, and exits 2 naming each
+one that is not, with `homedir()` printed so the reader sees where the data
+would have gone.
+
+Checking the drive, not merely that the variable is set, is deliberate: "unset"
+is only one of the two ways to get there, and a pin copied from another block is
+the other.
+
+`harness/env.sh` gained the same check at source time, for the shell that sets
+some pins and not others.
+
+**Three controls, all run:**
+
+| control | result |
+| --- | --- |
+| bare shell, all pins unset — *the exact invocation that did it* | **exit 2**, refuses, names all eight |
+| pins set but `SCRIPTC_PROVENANCE_CACHE` pointed at `C:` | **refuses**, names that one |
+| pinned shell (positive control — a guard that always refuses is useless) | **exit 0**, and reproduces §11.6's answer unchanged |
+
+`<home>\.cache\scriptc` is absent, parent included, and nothing of
+mine has recreated it.
+
+### 12.4 Everything else of mine that could reach `C:`
+
+`homedir()`/`USERPROFILE` across the whole compiler and CLI is **three** call
+sites, and only one is a path the toolchain writes to:
+
+| site | risk |
+| --- | --- |
+| `frontend/provenance.ts:312` | **the one.** Unconditional home-drive default, silent, unbounded |
+| `backend/emission/emit-exprs.ts:3545,3563` | `scr_os_homedir()` / `scr_os_user_homedir()` — emitted *into the compiled program*, not a path the compiler writes |
+
+Everything else is safe by construction or already pinned:
+
+* `cc.ts` `cacheRootDir()` returns **null** when `SCRIPTC_CACHE_DIR` is unset —
+  caching is opt-in, there is no home fallback;
+* every `tmpdir()` caller (`cc.ts`, `emit-exprs.ts`, `provenance.ts`) is pinned
+  by `TMP`/`TEMP`/`TMPDIR` on win32;
+* zig ignores `TMP` and writes to `C:` on its own — pinned by
+  `ZIG_LOCAL_CACHE_DIR`/`ZIG_GLOBAL_CACHE_DIR`;
+* pnpm's store is already `G:\.pnpm-store\v11`; `npm_config_cache` is pinned;
+* `vitest.config.ts` defaults `SCRIPTC_CACHE_DIR` to `node_modules/.cache`
+  inside the worktree, which is on `G:`.
+
+**So `provenance.ts:312` is the only unconditional home-drive default in the
+toolchain**, and it is the one that has now fired three times this week.
+
+### 12.5 A second trap, found while auditing — and it has already fired twice
+
+Twelve committed `tests/perf/*/env.sh` files hardcode one block's private cache
+paths. **Two of them already name a different block's cache than their own:**
+
+    tests/perf/pkgstatus2/env.sh   ->  SCRIPTC_PROVENANCE_CACHE = <blocks>\wamfix-lab\prov
+    tests/perf/voipfix/env.sh      ->  SCRIPTC_PROVENANCE_CACHE = <blocks>\pkgstatus-lab\prov
+
+Copying one of these is the normal way to start a block, so copying one is the
+normal way to inherit somebody else's cache — and a copier who edits some lines
+and not others gets a mix, which is the other route to an unpinned variable.
+None of the twelve points at `C:`, so none of them caused *this*; they are the
+adjacent bug.
+
+`harness/env.sh` here is now derived from a single `BLOCK` name rather than a
+list of literals — `BLOCK=other . env.sh` yields `<blocks>\other-prov`, so the
+one edit cannot be half-done — and it carries the guard. The other eleven are
+not mine to change.
+
+### 12.6 The product finding, offered rather than taken
+
+`provenance.ts:312` is one line and I did **not** change it: refusing to run
+would break every legitimate user who has never set the variable, and choosing
+the alternative is not my call. What would have made this visible at zero cost
+is a note in the same place the lane already prints its other notes —
+
+    provenance: cache directory is <home>\.cache\scriptc\provenance
+    (set SCRIPTC_PROVENANCE_CACHE to place it elsewhere)
+
+— printed once per run when the variable is unset. The lane already prints five
+or six `provenance:` notes on every build, so this costs one line and no
+behaviour change. Say the word and I will write it with a test.
