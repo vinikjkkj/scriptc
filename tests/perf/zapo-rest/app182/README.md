@@ -74,6 +74,7 @@ arms exit non-zero, so neither has a fence count — **n/a, not 0**.
 | `0c5e3821` (main, four walls later) | 21,595 | **29** | 19 | 10 |
 | `6b38b02c` (main, two more lowerings later) | 19,261 | **24** | 14 | 10 |
 | `ad7b3153` (block/typerules, the two type-system rules) | 14,391 | **15** | 11 | 4 |
+| `036479ce` (block/typerules on main@`874e78b8`, all four rules) | 13,436 | **13** | 9 | 4 |
 
 The 77 that first motivated the bump was taken one commit earlier, before
 `9cd9bffa` closed the 12-site WeakMap group: 77 − 12 = the 65 recorded here.
@@ -112,11 +113,53 @@ Closed:
   pattern; the identical function written as `target.pnJid` compiled before
   the change and the destructure spelling of it did not.
 
-Remaining per file (sites): `crypto/nativeBackend.ts` 6,
-`signal/session/encoding.ts` 4, `protocol/abprops.ts` 2, and one each in
-`client/coordinators/WaMessageDispatchCoordinator.ts`,
-`client/coordinators/WaPrivacyCoordinator.ts` and
-`client/events/privacy.ts`.
+### 15 -> 13, and the type-system group is finished
+
+The `15` row was taken on `ad7b3153`, i.e. before this branch was
+rebased onto `874e78b8`; shape unification landed in between and was NOT
+weighed against this arm on its own, so the 15 -> 13 step below is
+attributed to the two rules named in it and to nothing else only
+because the closed set is exactly their two sites.
+
+`036479ce` closes the last two of the four rules. **2 more closed, 0
+uncovered** (15 - 2 = 13), for **11 of the 24 closed in total**:
+
+* `client/coordinators/WaPrivacyCoordinator.ts:383` --
+  `await activeRefresh?.catch(() => undefined)` over a
+  `Promise<unknown> | null`. `awaitUnionExpr`'s result must be `void` or a
+  union and the checker's answer here is neither, so the refusal was about
+  the NODE rather than the semantics; the lowering writes the semantics out
+  as a tag test over a ternary, and closes the union-payload shape with it.
+* `crypto/nativeBackend.ts:70` -- `error instanceof ReferenceError`.
+  `ReferenceError` is a real runtime class now (kind 5, base `%Error`),
+  because the alternative -- comparing the name -- answers TRUE for
+  `const e = new Error("x"); e.name = "ReferenceError"`, which Node calls
+  false. The class alone was not enough: reading `error.message` after the
+  narrow was a pre-existing INTERNAL COMPILER ERROR that fired for
+  `TypeError` too, and an ICE aborts `analyze()` and reports nothing at
+  all, so the whole builtin hierarchy now narrows out of `unknown` through
+  the runtime's identity cache.
+
+**The remaining 13 are 9 roots and 4 cascade**, and none of them is a
+type-system rule:
+
+| file | sites | what |
+|---|---|---|
+| `signal/session/encoding.ts` | 4 | `WeakMap<object, Uint8Array>` |
+| `crypto/nativeBackend.ts` | 5 | `:73` destructures a **dyn** source, plus its 4 SC2004 |
+| `protocol/abprops.ts` | 2 | a 1,900-field record width, and `Object.freeze` of a possibly-aliased value |
+| `client/coordinators/WaMessageDispatchCoordinator.ts` | 1 | SC2003: a width coercion inside a **promise payload** |
+| `client/events/privacy.ts` | 1 | SC1090: `?.` over a keyed read whose IR union is wider than the checker's type |
+
+The last three were judged and deliberately left. The dyn destructure is
+the honest refusal: the only static route from `unknown` to a named
+property is the checked cast, which narrows the admitted receiver from
+"any JS value" to "an object" — measured, the equivalent two-line spelling
+`const src = (error ?? {}) as {...}; src.code` compiles and matches Node
+for an Error and for `null`, and TRAPS on a number where Node reads
+`undefined`. The other two are the keyed read's width and a promise-payload
+width lift, both of which live in the record-width neighbourhood rather
+than in the type rules.
 
 The streamed history-sync path — `openHistoryBlobStream` inflating through
 `createUnzip`, then `streamProtoFields` walking it through
