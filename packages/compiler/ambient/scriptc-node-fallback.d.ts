@@ -514,9 +514,18 @@ declare var Buffer: BufferConstructor;
 /* The WHATWG encoders (Node globals). Only the COMPOSED forms lower —
  * `new TextEncoder().encode(s)` and `new TextDecoder().decode(bytes)`;
  * the label is typed as the utf-8 spellings (the one supported decoder;
- * other labels and the fatal/ignoreBOM options fence at the use site). */
+ * other labels and the fatal/ignoreBOM options fence at the use site).
+ * encodeInto lowers from a STORED encoder as well — its receiver is the
+ * stateless instance, like encode's. */
 interface TextEncoder {
   encode(input?: string): Uint8Array;
+  encodeInto(src: string, dest: Uint8Array): TextEncoderEncodeIntoResult;
+}
+/* util.EncodeIntoResult, spelled where @types/node spells it: the two
+ * numbers encodeInto answers — code units consumed and bytes written. */
+interface TextEncoderEncodeIntoResult {
+  read: number;
+  written: number;
 }
 declare var TextEncoder: { new (): TextEncoder };
 interface TextDecoder {
