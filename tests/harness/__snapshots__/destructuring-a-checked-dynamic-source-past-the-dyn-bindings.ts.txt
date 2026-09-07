@@ -1,0 +1,13 @@
+destructuring-a-checked-dynamic-source-past-the-dyn-bindings.ts:22:7 - error SC1031: object destructuring of non-record values (the source is dyn-typed) are not supported yet
+
+  21 | 
+  22 | const { low, high } = makeLong();
+     |       ^~~~~~~~~~~~~
+  23 | console.log(low + high);
+
+destructuring-a-checked-dynamic-source-past-the-dyn-bindings.ts:27:7 - error SC1031: object destructuring of non-record values (the source is dyn-typed) are not supported yet
+
+  26 | 
+  27 | const { a, ...rest } = anyish() as { a?: unknown; b?: unknown };
+     |       ^~~~~~~~~~~~~~
+  28 | console.log(String(a), rest === undefined);
