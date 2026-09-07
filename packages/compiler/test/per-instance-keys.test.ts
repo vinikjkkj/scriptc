@@ -186,6 +186,61 @@ console.log(Object.keys(o).join(","), v.inner);
   expect(r.codes).toContain("SC1090");
 });
 
+test("a WIDENING COPY BACK is not a construction, so it does not veto the re-pick", () => {
+  // The regression this pins, six lines and exit 0 on main:
+  //
+  //   interface A { a?: number }
+  //   interface B extends A { b?: number }
+  //   function keep(x: A): A { return x }
+  //   const n: A = keep({ a: 1, b: 2 } as B)
+  //   const wide: B = n as B
+  //   console.log(JSON.stringify(n), wide.b)
+  //
+  // node answers {"a":1,"b":2}; scriptc answered {"b":2,"a":1}. B's
+  // declaredOrder is its INTERFACE member order ("own before inherited",
+  // so b,a) and the program's one literal spells a,b — exactly the case
+  // reconcileKeyOrders exists to re-pick. The widen-back `n as B` interns a
+  // `%rec.width.N` whose body is a recordLit at B built from B's OWN field
+  // list, and the completeness rule read that compiler-written literal as
+  // "a construction of this shape reported no spelling" and stood the
+  // re-pick down. DROP THE SECOND EDGE and the same program was right,
+  // which is what made it look like a unification bug: shape-unify's
+  // obligation 2 is not violated here, it merges a shape whose order was
+  // already the fiction.
+  const r = lower(`
+interface A { a?: number }
+interface B extends A { b?: number }
+function keep(x: A): A { return x }
+const n: A = keep({ a: 1, b: 2 } as B)
+const wide: B = n as B
+console.log(JSON.stringify(n), wide.b)
+`);
+  expect(r.module).not.toBeNull();
+  // The shapes are unified by the time the module is out, so there is ONE
+  // record and its order is the LITERAL's, not the interface's.
+  const recs = r.module!.records ?? [];
+  expect(recs.length).toBe(1);
+  expect(recs[0]!.declaredOrder).toEqual(["a", "b"]);
+  // ...and no diagnostic: the single-edge form of this program never had
+  // one, and the widen-back is not a second opinion about the order.
+  expect(r.codes).not.toContain("SC1090");
+});
+
+test("the veto a REAL second spelling casts is untouched", () => {
+  // The tolerance above is not "ignore literals the walk did not spell".
+  // Two SOURCE literals disagreeing is still no-answer-available, and the
+  // widen-back does not make it answerable.
+  const r = lower(`
+interface A { a?: number; b?: number }
+interface B { a?: number; b?: number; c?: number }
+const p: A = { b: 1, a: 2 }
+const q: A = { a: 3, b: 4 }
+const wide: B = p as unknown as B
+console.log(JSON.stringify(p), JSON.stringify(q), wide.c)
+`);
+  expect(r.codes).toContain("SC1090");
+});
+
 test("a width copy still refuses to cross, and for its OWN reason", () => {
   // The key a width copy drops has no SLOT in the narrower shape, so no
   // per-instance key vector can carry it: this refusal outlives the order
