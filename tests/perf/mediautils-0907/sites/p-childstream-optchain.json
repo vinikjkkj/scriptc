@@ -1,0 +1,51 @@
+{
+ "entry": "<blocks>/mediautils-work/napp/probes/p-childstream-optchain.ts",
+ "flags": [],
+ "elapsedMs": 525,
+ "crashed": null,
+ "preflightFailed": false,
+ "stats": {
+  "statementsTotal": 5,
+  "statementsFailed": 4,
+  "statementsIsland": 0,
+  "functionsSkipped": 0
+ },
+ "unreachedStats": {
+  "statementsTotal": 0,
+  "statementsFailed": 0,
+  "statementsIsland": 0,
+  "functionsSkipped": 0
+ },
+ "npmStatic": null,
+ "provenanceNotes": null,
+ "sites": [
+  {
+   "section": "blocker",
+   "code": "SC2020",
+   "message": "'ChildProcessByStdio<null, Readable, Readable>' is typed by @types/node but has no scriptc lowering yet",
+   "file": "<blocks>/mediautils-work/napp/probes/p-childstream-optchain.ts",
+   "line": 7
+  },
+  {
+   "section": "blocker",
+   "code": "SC2020",
+   "message": "'ChildProcessByStdio<null, Readable, Readable>.stdout' is typed by @types/node but has no scriptc lowering yet",
+   "file": "<blocks>/mediautils-work/napp/probes/p-childstream-optchain.ts",
+   "line": 9
+  },
+  {
+   "section": "blocker",
+   "code": "SC2020",
+   "message": "'ChildProcessByStdio<null, Readable, Readable>.stdout' is typed by @types/node but has no scriptc lowering yet",
+   "file": "<blocks>/mediautils-work/napp/probes/p-childstream-optchain.ts",
+   "line": 10
+  },
+  {
+   "section": "blocker",
+   "code": "SC2020",
+   "message": "'ChildProcessByStdio<null, Readable, Readable>.on' is typed by @types/node but has no scriptc lowering yet",
+   "file": "<blocks>/mediautils-work/napp/probes/p-childstream-optchain.ts",
+   "line": 11
+  }
+ ]
+}

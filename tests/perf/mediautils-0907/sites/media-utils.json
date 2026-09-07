@@ -1,0 +1,62 @@
+{
+ "entry": "<blocks>/mediautils-work/napp/drivers/media-utils.ts",
+ "flags": [
+  "--provenance-sources"
+ ],
+ "elapsedMs": 416,
+ "crashed": null,
+ "preflightFailed": false,
+ "stats": {
+  "statementsTotal": 3,
+  "statementsFailed": 3,
+  "statementsIsland": 0,
+  "functionsSkipped": 0
+ },
+ "unreachedStats": {
+  "statementsTotal": 0,
+  "statementsFailed": 0,
+  "statementsIsland": 0,
+  "functionsSkipped": 0
+ },
+ "npmStatic": null,
+ "provenanceNotes": [
+  "note: @zapo-js/media-utils@1.0.0: no provenance attestation published; island path used"
+ ],
+ "sites": [
+  {
+   "section": "blocker",
+   "code": "SC2013",
+   "message": "values from the 'zapo-js' package run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/mediautils-work/napp/drivers/media-utils.ts",
+   "line": 4
+  },
+  {
+   "section": "blocker",
+   "code": "SC2013",
+   "message": "importing '@zapo-js/media-utils' requires the embedded dynamic engine, which this build does not include — the package's implementation runs there",
+   "file": "<blocks>/mediautils-work/napp/drivers/media-utils.ts",
+   "line": 2
+  },
+  {
+   "section": "blocker",
+   "code": "SC2013",
+   "message": "values from the '@zapo-js/media-utils' package run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/mediautils-work/napp/drivers/media-utils.ts",
+   "line": 4
+  },
+  {
+   "section": "blocker",
+   "code": "SC2004",
+   "message": "uses of 'p' inherit the blocker on its declaration",
+   "file": "<blocks>/mediautils-work/napp/drivers/media-utils.ts",
+   "line": 5
+  },
+  {
+   "section": "blocker",
+   "code": "SC2013",
+   "message": "values from the 'zapo-js' package run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/mediautils-work/napp/drivers/media-utils.ts",
+   "line": 6
+  }
+ ]
+}

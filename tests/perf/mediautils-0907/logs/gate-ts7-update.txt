@@ -1,0 +1,69 @@
+ORACLE-NODE v25.9.0
+baseline bytes BEFORE=387554
+=== UPDATE 2026-09-07T17:30:58-03:00
+
+ RUN  v3.2.7 <blocks>/mediautils
+
+stdout | packages/compiler/test/ts7/order-parity.test.ts > record MISSING baseline(s) from the current native frontend
+order-parity baselines: 2111 entries written; 1 added; 0 CHANGED; 0 dropped as no longer in the corpus
+
+ ✓ packages/compiler/test/ts7/order-parity.test.ts (4 tests) 1267ms
+   ✓ record MISSING baseline(s) from the current native frontend  865ms
+
+ Test Files  1 passed (1)
+      Tests  4 passed (4)
+   Start at  17:30:59
+   Duration  3.36s (transform 458ms, setup 0ms, collect 1.44s, tests 1.27s, environment 0ms, prepare 208ms)
+
+UPDATE-EXIT=0
+baseline bytes AFTER=387703
+=== VERIFY (no update flag) 2026-09-07T17:31:03-03:00
+
+ RUN  v3.2.7 <blocks>/mediautils
+
+stdout | packages/compiler/test/ts7/order-parity.test.ts
+order-parity: 643/643 sampled entries compared against a baseline; 0 REAL DIVERGENCE(S); 0 sampled entries had no baseline (not a regression — see the "baseline accounting" test for the corpus-wide list).
+
+ ✓ packages/compiler/test/ts7/order-parity.test.ts (38 tests) 212076ms
+   ✓ preflight/order canary vs recorded 5.9.3 baselines (643 entries) > tests/corpus/1054-comptime-modules/main.ts … +19  10568ms
+   ✓ preflight/order canary vs recorded 5.9.3 baselines (643 entries) > tests/corpus/1618-cjs-esm-poisoned-tail/main.mjs … +19  8085ms
+   ✓ preflight/order canary vs recorded 5.9.3 baselines (643 entries) > tests/corpus/1673-symbol-cjs.cjs … +19  7334ms
+   ✓ preflight/order canary vs recorded 5.9.3 baselines (643 entries) > tests/corpus/1795-dyn-handle-request.cjs … +19  7749ms
+   ✓ preflight/order canary vs recorded 5.9.3 baselines (643 entries) > tests/corpus/1954-generic-modules/main.ts … +19  7445ms
+   ✓ preflight/order canary vs recorded 5.9.3 baselines (643 entries) > tests/corpus/2160-dc-tracing-channel.cjs … +19  14363ms
+   ✓ preflight/order canary vs recorded 5.9.3 baselines (643 entries) > tests/corpus/2285-iferror-dyn.cjs … +19  18118ms
+   ✓ preflight/order canary vs recorded 5.9.3 baselines (643 entries) > tests/corpus/2457-private-members.js … +19  13482ms
+   ✓ preflight/order canary vs recorded 5.9.3 baselines (643 entries) > tests/corpus/2582-jsval-object-statics.js … +19  6872ms
+   ✓ preflight/order canary vs recorded 5.9.3 baselines (643 entries) > tests/corpus/2606-dynamic-import-cycle/main.ts … +19  5785ms
+   ✓ preflight/order canary vs recorded 5.9.3 baselines (643 entries) > tests/corpus/2657-top-level-await-cycle-dynamic/main.ts … +19  5826ms
+   ✓ preflight/order canary vs recorded 5.9.3 baselines (643 entries) > tests/corpus/2768-call-and-apply-on-a-function-value.js … +19  5838ms
+   ✓ preflight/order canary vs recorded 5.9.3 baselines (643 entries) > tests/corpus/2931-stdlib-existence-test-js.cjs … +19  5934ms
+   ✓ preflight/order canary vs recorded 5.9.3 baselines (643 entries) > tests/corpus/3111-this-constructor-through-an-implicit-prototype.js … +19  4787ms
+   ✓ preflight/order canary vs recorded 5.9.3 baselines (643 entries) > tests/corpus/3853-userinfo-is-not-getuid.js … +19  5019ms
+   ✓ preflight/order canary vs recorded 5.9.3 baselines (643 entries) > tests/corpus/5911-prototype-ctor-backlink-is-non-enumerable.js … +19  5409ms
+   ✓ preflight/order canary vs recorded 5.9.3 baselines (643 entries) > tests/corpus/7252-dyn-objlit-accessor-this-and-effects.js … +19  4603ms
+   ✓ preflight/order canary vs recorded 5.9.3 baselines (643 entries) > tests/corpus/7510-cycle-top-level-call-with-an-inert-callee-body/main.ts … +19  4456ms
+   ✓ preflight/order canary vs recorded 5.9.3 baselines (643 entries) > tests/corpus/1693-stream-pipe-backpressure.ts … +19  4349ms
+   ✓ preflight/order canary vs recorded 5.9.3 baselines (643 entries) > tests/corpus/4232-a-construct-thunk-parameter-that-takes-the-width-lift-plan.ts … +19  4437ms
+   ✓ preflight/order canary vs recorded 5.9.3 baselines (643 entries) > tests/diagnostics/a-subscribe-slot-whose-event-map-has-an-unspellable-handler.ts … +19  4765ms
+   ✓ preflight/order canary vs recorded 5.9.3 baselines (643 entries) > tests/diagnostics/class-values.ts … +19  4888ms
+   ✓ preflight/order canary vs recorded 5.9.3 baselines (643 entries) > tests/diagnostics/dyn-import-cycle-tdz/main.ts … +19  4945ms
+   ✓ preflight/order canary vs recorded 5.9.3 baselines (643 entries) > tests/diagnostics/function-forms.ts … +19  5163ms
+   ✓ preflight/order canary vs recorded 5.9.3 baselines (643 entries) > tests/diagnostics/instanceof-on-a-rejected-class.ts … +19  5373ms
+   ✓ preflight/order canary vs recorded 5.9.3 baselines (643 entries) > tests/diagnostics/new-target-field-initializer.ts … +19  4742ms
+   ✓ preflight/order canary vs recorded 5.9.3 baselines (643 entries) > tests/diagnostics/promise-resolve-null-placeholder-fences.ts … +19  4730ms
+   ✓ preflight/order canary vs recorded 5.9.3 baselines (643 entries) > tests/diagnostics/two-fills-of-one-shape-in-two-orders.ts … +19  4674ms
+   ✓ preflight/order canary vs recorded 5.9.3 baselines (643 entries) > tests/fixtures/npm/cases/4064-umd-bang-prototype-conjunction/main.ts … +19  4579ms
+   ✓ preflight/order canary vs recorded 5.9.3 baselines (643 entries) > tests/fixtures/npm/cases/cjs-esm-named/main.ts … +19  4318ms
+   ✓ preflight/order canary vs recorded 5.9.3 baselines (643 entries) > tests/fixtures/npm/cases/island-json-stringify/main.ts … +19  5148ms
+   ✓ preflight/order canary vs recorded 5.9.3 baselines (643 entries) > tests/fixtures/npm/cases/typed-callbacks/main.ts … +19  6496ms
+   ✓ preflight/order canary vs recorded 5.9.3 baselines (643 entries) > tests/fixtures/node-types/stdlib-surfaces.ts … +2  838ms
+
+ Test Files  1 passed (1)
+      Tests  38 passed (38)
+   Start at  17:31:04
+   Duration  214.67s (transform 645ms, setup 0ms, collect 1.83s, tests 212.08s, environment 0ms, prepare 297ms)
+
+VERIFY-EXIT=0
+=== DONE 2026-09-07T17:34:39-03:00
+=== GATE-EXIT rc=0 ===

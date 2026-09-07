@@ -1,0 +1,5 @@
+=== AB START 2026-09-07T16:56:40-03:00 ORACLE-NODE v25.9.0
+sites=93 preflightFailed=false total=47141 failed=31 island=0 ms=706007
+EXIT=0
+=== AB DONE 2026-09-07T17:08:29-03:00
+=== GATE-EXIT rc=0 ===

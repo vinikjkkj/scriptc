@@ -1,0 +1,40 @@
+ORACLE-NODE v25.9.0
+=== START 2026-09-07T17:26:58-03:00
+
+ RUN  v3.2.7 <blocks>/mediautils
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  packages/compiler/test/ts7/order-parity.test.ts > baseline accounting: the recorded set is exactly the corpus
+AssertionError: 2111 corpus entries vs 2110 recorded. unrecorded = shipped without a baseline (add them: SCRIPTC_UPDATE_BASELINES=1, which is ADDITIVE and cannot overwrite a live divergence). stale = recorded but gone from the corpus. Neither is a behavior regression; a chunk failure above is. Each offender is tagged with the commit that introduced it: an "UNCOMMITTED" tag means the file is in THIS working tree and the fix is to record it in the same commit, not to chase a ghost.: expected { …(2) } to deeply equal { unrecorded: [], stale: [] }
+
+- Expected
++ Received
+
+  {
+    "stale": [],
+-   "unrecorded": [],
++   "unrecorded": [
++     "<repo>/tests/fixtures/node-types/child-stdio.ts  ← added by UNCOMMITTED — this path has no add commit, so it is in YOUR working tree: record it in the same commit",
++   ],
+  }
+
+ ❯ packages/compiler/test/ts7/order-parity.test.ts:332:7
+    330|         `a chunk failure above is. Each offender is tagged with the co…
+    331|         `means the file is in THIS working tree and the fix is to reco…
+    332|     ).toEqual({ unrecorded: [], stale: [] });
+       |       ^
+    333|   });
+    334| 
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed | 6 passed (7)
+
+   Start at  17:26:59
+   Duration  193.24s (transform 3.78s, setup 0ms, collect 16.69s, tests 212.65s, environment 2ms, prepare 2.54s)
+
+VITEST-EXIT=1
+=== DONE 2026-09-07T17:30:13-03:00
+=== GATE-EXIT rc=0 ===

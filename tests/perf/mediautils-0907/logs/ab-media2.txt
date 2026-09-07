@@ -1,0 +1,5 @@
+=== AB2 (patched compiler) START 2026-09-07T17:10:35-03:00 ORACLE-NODE v25.9.0
+sites=90 preflightFailed=false total=47141 failed=28 island=0 ms=804236
+EXIT=0
+=== AB2 DONE 2026-09-07T17:24:03-03:00
+=== GATE-EXIT rc=0 ===

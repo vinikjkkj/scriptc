@@ -1,0 +1,42 @@
+# EXCERPT of gate-corpus-full.log -- the full log is 162,355 B of per-program
+# pass lines. Head, the counted markers, and the totals are reproduced verbatim.
+
+ORACLE-NODE v25.9.0
+zig=0.16.0  cc=zigcc  target=x86_64-windows-gnu  workers=[unset]
+=== START 2026-09-07T17:15:30-03:00
+
+ RUN  v3.2.7 <blocks>/mediautils
+
+  [... 1834 per-program pass lines elided ...]
+
+# first and last five pass lines, verbatim:
+   ✓ differential corpus (1863 programs) > 001-hello.ts  468ms
+   ✓ differential corpus (1863 programs) > 002-log-args.ts  675ms
+   ✓ differential corpus (1863 programs) > 100-number-format.ts  642ms
+   ✓ differential corpus (1863 programs) > 1000-json-stringify-basics.ts  1040ms
+   ✓ differential corpus (1863 programs) > 1001-json-escapes-unicode.ts  811ms
+  ...
+   ✓ differential corpus (1863 programs) > 993-fs-readdir.ts  604ms
+   ✓ differential corpus (1863 programs) > 994-fs-errors.ts  582ms
+   ✓ differential corpus (1863 programs) > 995-fs-uncaught.ts  487ms
+   ✓ differential corpus (1863 programs) > 997-fs-modules\main.ts  588ms
+   ✓ differential corpus (1863 programs) > 998-process-env.ts  504ms
+
+   ✓ differential corpus (1863 programs) > 995-fs-uncaught.ts  487ms
+   ✓ differential corpus (1863 programs) > 997-fs-modules\main.ts  588ms
+   ✓ differential corpus (1863 programs) > 998-process-env.ts  504ms
+
+ Test Files  1 passed (1)
+      Tests  1863 passed (1863)
+   Start at  17:15:31
+   Duration  2067.75s (transform 3.38s, setup 0ms, collect 4.97s, tests 2062.22s, environment 0ms, prepare 170ms)
+
+VITEST-EXIT=0
+=== DONE 2026-09-07T17:49:59-03:00
+=== GATE-EXIT rc=0 ===
+
+# COUNTED VERDICT over the full 162,355-byte log:
+#   PASS-MARKERS        = 1834
+#   FAIL-MARKERS        = 0
+#   Failed Tests blocks = 0
+#   AssertionError      = 0
