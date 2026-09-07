@@ -19,95 +19,95 @@ inheritance.ts:38:23 - error SC1090: extending classes not declared in the progr
      |                       ^~~~~~~~~~~
   39 | 
 
-inheritance.ts:45:3 - error SC1090: redeclaring inherited fields without an initializer (Node resets the field to undefined) is not supported yet
+inheritance.ts:50:3 - error SC1090: redeclaring inherited fields without an initializer (Node resets the field to undefined when this class's initializers run, and 'string' cannot hold undefined — assign it at the top of the constructor with nothing that could read it in between, or give the declaration an initializer) is not supported yet
 
-  44 |   // @ts-expect-error — tsc flags the overwrite (TS2612); the fence names Node's undefined reset
-  45 |   name!: string;
+  49 |   // @ts-expect-error — tsc flags the overwrite (TS2612); the fence names Node's undefined reset
+  50 |   name!: string;
      |   ^~~~
-  46 | }
+  51 | }
 
-inheritance.ts:49:3 - error SC1090: redeclaring inherited fields at a different type is not supported yet
+inheritance.ts:54:3 - error SC1090: redeclaring inherited fields at a different type ('number' over the inherited 'string' — these layouts give the property ONE slot, and one slot cannot answer both spellings) is not supported yet
 
-  48 |   // @ts-expect-error — tsc rejects the incompatible redeclare too; the fence names the reason
-  49 |   name: number = 2;
+  53 |   // @ts-expect-error — tsc rejects the incompatible redeclare too; the fence names the reason
+  54 |   name: number = 2;
      |   ^~~~
-  50 | }
+  55 | }
 
-inheritance.ts:55:3 - error SC1090: overriding a method with a different signature (parameters must match the base declaration exactly, except for trailing optional ones the override adds; the return type must match, or be a value the base's 'unknown' can hold) is not supported yet
+inheritance.ts:60:3 - error SC1090: overriding a method with a different signature (parameters must match the base declaration exactly, except for trailing optional ones the override adds; the return type must match, or be a value the base's 'unknown' can hold) is not supported yet
 
-  54 | class Bivariant extends Animal {
-  55 |   feed(other: Bivariant): string {
+  59 | class Bivariant extends Animal {
+  60 |   feed(other: Bivariant): string {
      |   ^~~~
-  56 |     return other.name;
+  61 |     return other.name;
 
-inheritance.ts:62:3 - error SC1090: super() calls anywhere but as a top-level constructor statement is not supported yet
+inheritance.ts:67:3 - error SC1090: super() calls anywhere but as a top-level constructor statement is not supported yet
 
-  61 | class Conditional extends Animal {
-  62 |   constructor(flag: boolean) {
+  66 | class Conditional extends Animal {
+  67 |   constructor(flag: boolean) {
      |   ^~~~~~~~~~~~~~~~~~~~~~~~~~~~
-  63 |     if (flag) {
+  68 |     if (flag) {
 
-inheritance.ts:64:7 - error SC1090: super() calls anywhere but as a top-level constructor statement is not supported yet
+inheritance.ts:69:7 - error SC1090: super() calls anywhere but as a top-level constructor statement is not supported yet
 
-  63 |     if (flag) {
-  64 |       super();
+  68 |     if (flag) {
+  69 |       super();
      |       ^~~~~~~
-  65 |     } else {
+  70 |     } else {
 
-inheritance.ts:66:7 - error SC1090: super() calls anywhere but as a top-level constructor statement is not supported yet
+inheritance.ts:71:7 - error SC1090: super() calls anywhere but as a top-level constructor statement is not supported yet
 
-  65 |     } else {
-  66 |       super();
+  70 |     } else {
+  71 |       super();
      |       ^~~~~~~
-  67 |     }
+  72 |     }
 
-inheritance.ts:73:13 - error SC1090: 'instanceof' on values other than class instances (narrow union-typed values first) are not supported yet
+inheritance.ts:78:13 - error SC1090: 'instanceof' on values other than class instances (narrow union-typed values first) are not supported yet
 
-  72 | const rec = { name: "r" };
-  73 | console.log(rec instanceof Animal);
+  77 | const rec = { name: "r" };
+  78 | console.log(rec instanceof Animal);
      |             ^~~~~~~~~~~~~~~~~~~~~
-  74 | 
+  79 | 
 
-inheritance.ts:80:13 - error SC1090: statically-decided 'instanceof' on computed operands (bind the value to a variable first) are not supported yet
+inheritance.ts:85:13 - error SC1090: statically-decided 'instanceof' on computed operands (bind the value to a variable first) are not supported yet
 
-  79 | }
-  80 | console.log(new Point() instanceof Point);
+  84 | }
+  85 | console.log(new Point() instanceof Point);
      |             ^~~~~~~~~~~~~~~~~~~~~~~~~~~~
-  81 | 
+  86 | 
 
-inheritance.ts:89:15 - error SC2004: uses of 'GenericAbstract' inherit the blocker on its declaration
+inheritance.ts:94:15 - error SC2004: uses of 'GenericAbstract' inherit the blocker on its declaration
 
-  88 | new Impl().usesLimit();
-  89 | const gaRef = GenericAbstract;
+  93 | new Impl().usesLimit();
+  94 | const gaRef = GenericAbstract;
      |               ^~~~~~~~~~~~~~~
-  90 | new Aliased();
+  95 | new Aliased();
 
   hint: the declaration of 'GenericAbstract' did not compile — fix the diagnostic reported there and these sites clear with it
 
-inheritance.ts:90:1 - error SC1090: constructing through a class value whose class has no lowering (the class declaration itself was rejected — see its own diagnostic) is not supported yet
+inheritance.ts:95:1 - error SC1090: constructing through a class value whose class has no lowering (the class declaration itself was rejected — see its own diagnostic) is not supported yet
 
-  89 | const gaRef = GenericAbstract;
-  90 | new Aliased();
+  94 | const gaRef = GenericAbstract;
+  95 | new Aliased();
      | ^~~~~~~~~~~~~
-  91 | new BareRepeat();
+  96 | new BareRepeat();
 
-inheritance.ts:91:1 - error SC1090: constructing through a class value whose class has no lowering (the class declaration itself was rejected — see its own diagnostic) is not supported yet
+inheritance.ts:96:1 - error SC1090: constructing through a class value whose class has no lowering (the class declaration itself was rejected — see its own diagnostic) is not supported yet
 
-  90 | new Aliased();
-  91 | new BareRepeat();
+  95 | new Aliased();
+  96 | new BareRepeat();
      | ^~~~~~~~~~~~~~~~
-  92 | new RetypedRepeat();
+  97 | new RetypedRepeat();
 
-inheritance.ts:92:1 - error SC1090: constructing through a class value whose class has no lowering (the class declaration itself was rejected — see its own diagnostic) is not supported yet
+inheritance.ts:97:1 - error SC1090: constructing through a class value whose class has no lowering (the class declaration itself was rejected — see its own diagnostic) is not supported yet
 
-  91 | new BareRepeat();
-  92 | new RetypedRepeat();
+  96 | new BareRepeat();
+  97 | new RetypedRepeat();
      | ^~~~~~~~~~~~~~~~~~~
-  93 | new Bivariant();
+  98 | new Bivariant();
 
-inheritance.ts:93:1 - error SC1090: constructing through a class value whose class has no lowering (the class declaration itself was rejected — see its own diagnostic) is not supported yet
+inheritance.ts:98:1 - error SC1090: constructing through a class value whose class has no lowering (the class declaration itself was rejected — see its own diagnostic) is not supported yet
 
-  92 | new RetypedRepeat();
-  93 | new Bivariant();
+  97 | new RetypedRepeat();
+  98 | new Bivariant();
      | ^~~~~~~~~~~~~~~
-  94 | 
+  99 | 

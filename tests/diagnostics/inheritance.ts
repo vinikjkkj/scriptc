@@ -38,8 +38,13 @@ let AnimalAlias = Animal;
 class Aliased extends AnimalAlias {}
 
 // redeclaring an inherited field: the slot-type-exact WITH-initializer form
-// lowers (corpus 2428); the BARE form (type stripping leaves `name;`, which
-// Node [[Define]]s back to undefined) and the type-changing form keep fences
+// lowers (corpus 2428), and so do the two BARE forms whose reset is exact
+// (corpus 7788/7789 — an undefined-armed slot takes the reset as a write,
+// and a slot that cannot hold undefined takes it as an erasure only where
+// nothing can observe the window). These two are neither. `BareRepeat` has
+// NO constructor to assign in, so the reset it needs cannot be written into
+// a `string` slot and cannot be proved dead; `RetypedRepeat` changes the
+// slot type, and one slot cannot answer both spellings.
 class BareRepeat extends Animal {
   // @ts-expect-error — tsc flags the overwrite (TS2612); the fence names Node's undefined reset
   name!: string;
