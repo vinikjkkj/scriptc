@@ -308,8 +308,14 @@ async function fetchAttestation(name: string, version: string): Promise<Attested
 
 /* ── source fetch (content-addressed by the attested commit) ──────────── */
 
+/** Where attested source checkouts are extracted. Unset means the user's HOME
+ * drive, which on Windows is very often not the drive the work is on. */
+function defaultCacheRoot(): string {
+  return join(homedir(), ".cache", "scriptc", "provenance");
+}
+
 function cacheRoot(): string {
-  return process.env["SCRIPTC_PROVENANCE_CACHE"] ?? join(homedir(), ".cache", "scriptc", "provenance");
+  return process.env["SCRIPTC_PROVENANCE_CACHE"] ?? defaultCacheRoot();
 }
 
 /** The cached source tree for an attested commit, fetching it once from
@@ -790,6 +796,29 @@ export async function resolveProvenanceSources(entryPath: string): Promise<Prove
   const entry = resolve(entryPath);
   const manifest = readManifest();
   const notes: string[] = [];
+  /* Say where the checkouts go when nobody has said. This lane extracts whole
+   * source trees, unbounded in size and count, and with the variable unset it
+   * puts them under homedir() -- which on Windows is routinely a different,
+   * smaller drive than the one the work is on. That has filled a user's C:
+   * drive three times, once with 2.17 GB, and every time it was silent: the
+   * only way to find out was to go looking for the directory.
+   *
+   * Emitted whenever the variable is UNSET, not lazily on first use. A lazy
+   * note would be more precise -- it would fire only on a run that really
+   * extracts -- but it could then only be tested with a network fetch, and
+   * every other test of this lane is offline behind a fixture manifest. A
+   * note that is hard to test is a note that rots. The wording is a statement
+   * of configuration rather than of action, so it stays true on a run that
+   * happens not to fetch anything.
+   *
+   * It is a note, deliberately, and not a refusal: refusing would break every
+   * user who has never set the variable, and choosing that is not this
+   * function's call. */
+  if (process.env["SCRIPTC_PROVENANCE_CACHE"] === undefined) {
+    notes.push(
+      `cache directory is ${defaultCacheRoot()} (SCRIPTC_PROVENANCE_CACHE is unset; set it to extract attested sources elsewhere)`,
+    );
+  }
   /** Packages whose provenance could not be DETERMINED on this run because
    * something threw on the way to it -- a failed attestation fetch, a failed
    * source fetch, an unreadable manifest dir. Distinct from a package that

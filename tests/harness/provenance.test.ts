@@ -13,6 +13,7 @@
  */
 import { execFile } from "node:child_process";
 import { mkdirSync } from "node:fs";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { afterEach, describe, expect, test } from "vitest";
@@ -234,5 +235,44 @@ describe("provenance sources", () => {
     const tsc = coverage.diagnostics.filter((d) => d.code === "SC0001");
     expect(tsc.length).toBeGreaterThan(0);
     expect(tsc.some((d) => d.loc.file.split("\\").join("/").endsWith("cases/foreignts/bad.ts"))).toBe(true);
+  });
+});
+
+/* The cache-directory note. This lane extracts whole source trees, and with
+ * SCRIPTC_PROVENANCE_CACHE unset it puts them under homedir() -- which filled
+ * a user's C: drive three times, silently, because nothing ever said where the
+ * data was going. The note costs one line and changes no behaviour.
+ *
+ * Both directions are asserted on purpose. A note that is only checked when it
+ * SHOULD appear rots into noise the day someone makes it unconditional; the
+ * `does not appear when set` half is what keeps it a signal. */
+describe("the provenance cache directory", () => {
+  const PRIOR = process.env["SCRIPTC_PROVENANCE_CACHE"];
+  const restore = (v: string | undefined): void => {
+    if (v === undefined) delete process.env["SCRIPTC_PROVENANCE_CACHE"];
+    else process.env["SCRIPTC_PROVENANCE_CACHE"] = v;
+  };
+  afterEach(() => {
+    restore(PRIOR);
+  });
+
+  test("names itself when SCRIPTC_PROVENANCE_CACHE is unset", async () => {
+    process.env["SCRIPTC_PROVENANCE_MANIFEST"] = join(fixtureDir, "manifest.json");
+    delete process.env["SCRIPTC_PROVENANCE_CACHE"];
+    const sources = await resolveProvenanceSources(entry);
+    const note = sources.notes.find((n) => n.startsWith("cache directory is "));
+    expect(note, "no cache-directory note among: " + sources.notes.join(" | ")).toBeDefined();
+    /* It must name a real absolute path, not the word 'undefined', and it must
+     * name the variable so the reader knows what to set. */
+    expect(note).toContain(homedir());
+    expect(note).toContain("SCRIPTC_PROVENANCE_CACHE");
+    expect(note).not.toContain("undefined");
+  });
+
+  test("stays silent when the variable is set", async () => {
+    process.env["SCRIPTC_PROVENANCE_MANIFEST"] = join(fixtureDir, "manifest.json");
+    process.env["SCRIPTC_PROVENANCE_CACHE"] = join(tmpdir(), "scriptc-prov-note-probe");
+    const sources = await resolveProvenanceSources(entry);
+    expect(sources.notes.filter((n) => n.startsWith("cache directory is "))).toHaveLength(0);
   });
 });
