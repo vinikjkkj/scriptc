@@ -22,6 +22,7 @@ import { setProvenanceUnfetched } from "../diagnostics/diagnostic.js";
 import { readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { tsgoPath } from "./shared.js";
+import { scannedDeclTwins } from "./provenance.js";
 
 export interface ProvenancePackageSource {
   /** Package name ("cookie"). */
@@ -227,6 +228,25 @@ export function provenanceDeclSiblings(): string[] {
       } catch { /* none */ }
     }
   }
+  /* The spec twins the prescan closure REACHED. A monorepo subpackage`s
+   * `dir` is its own subdirectory inside the attested tree, so the walk
+   * above -- rooted at each packageDir -- never sees the tree-shared `spec/`
+   * at the ROOT, and every consumer reached through the subpackage refuses
+   * at each spec reference with "ships only a declaration file" while the
+   * SAME tree entered through its root package compiles. Measured on the npm
+   * lane: store-sqlite 7 blocker sites -> 0 and a 28,888,576 B binary that
+   * matches Node; store-redis 46 -> 39, which is exactly what the same
+   * package scores when entered through its root package.
+   *
+   * OFF with SCRIPTC_PROVENANCE_SPEC_TWINS=off, which restores the walk
+   * above verbatim -- the null arm the A/B harness needs. */
+  const twinMode = process.env["SCRIPTC_PROVENANCE_SPEC_TWINS"] ?? "on";
+  if (twinMode !== "off" && twinMode !== "twophase") {
+    for (const impl of scannedDeclTwins()) if (!out.includes(impl)) out.push(impl);
+  }
+  if (process.env["SCRIPTC_PROVENANCE_SPEC_WHY"] !== undefined) {
+    console.error(`[spec-twins] ${twinMode}: ${out.length} root(s): ${out.join(" ")}`);
+  }
   return out;
 }
 
@@ -344,4 +364,38 @@ export function provenancePaths(): Record<string, string[]> | null {
   const paths: Record<string, string[]> = { ...state.externalPaths, ...state.aliasPaths };
   for (const [spec, file] of state.bySpecifier) paths[spec] = [file];
   return paths;
+}
+
+/** The EXACT answer the scan is validated against: the `.js` twins of every
+ * `.d.ts` the BUILT program loaded from inside a registered source tree.
+ *
+ * This is what the scan approximates. The scan rides the prescan closure and
+ * is therefore free, but it follows relative and alias edges only, so it can
+ * in principle miss a declaration the checker pulls in by another route.
+ * Both selected the same five twins on store-sqlite and on store-redis. Keep
+ * this reachable so a new driver can be re-validated before it is trusted:
+ * SCRIPTC_PROVENANCE_SPEC_TWINS=twophase makes program.ts use it instead. */
+export function provenanceSpecTwinsInProgram(files: readonly string[]): string[] {
+  if (state === null) return [];
+  const treeRoots: string[] = [];
+  for (const pkg of state.sources.packages) {
+    const i = pkg.dir.indexOf(pkg.commit);
+    if (i === -1) continue;
+    treeRoots.push(provenanceDirPrefix(pkg.dir.slice(0, i + pkg.commit.length)));
+  }
+  if (treeRoots.length === 0) return [];
+  const have = new Set(files.map((f) => tsgoPath(f)));
+  const out: string[] = [];
+  for (const f of files) {
+    const s = tsgoPath(f);
+    if (!s.endsWith(".d.ts")) continue;
+    if (!treeRoots.some((r) => s.startsWith(r))) continue;
+    const stem = s.slice(0, -".d.ts".length);
+    for (const ext of [".js", ".mjs", ".cjs"]) {
+      const impl = `${stem}${ext}`;
+      if (have.has(impl)) break;
+      try { if (statSync(impl).isFile()) { out.push(impl); break; } } catch { /* none */ }
+    }
+  }
+  return out;
 }
