@@ -949,3 +949,214 @@ is a note in the same place the lane already prints its other notes —
 — printed once per run when the variable is unset. The lane already prints five
 or six `provenance:` notes on every build, so this costs one line and no
 behaviour change. Say the word and I will write it with a test.
+
+---
+
+## 13. `voip`: the lane, the clusters, and one line that carries eleven sites
+
+Measured on `block/wamcoord` at `42cf77e5` (main `83432479` plus this block's
+three commits), same pins and host state as §1, `--provenance-sources`, strict,
+**no `--best-effort`** anywhere.
+
+### 13.1 The lane table, because a site count is two facts multiplied
+
+| lane | what the driver names | stmts reached / failed | blocker sites | roots / cascade | distinct root msgs |
+| --- | --- | --- | --- | --- | --- |
+| **A** | `@zapo-js/voip` alone | **6 / 2** | 4 | — | — |
+| **A2 — what a consumer gets** | `zapo-js` **and** `@zapo-js/voip` | **48,994 / 58** | **58** | 52 / 6 | **25** |
+| **F** | the source, on zapo-js 1.8.2 | 48,988 / 59 | 59 | 53 / 6 | 29 |
+| **F + authored-JS = all** | same | 48,988 / 59 | 59 | — | — |
+
+**Lane A is not `voip`'s status. It is the island boundary**, and the six
+statements are the driver's own — the give-away `pkgstatus` itself named. Its
+four sites are the fallback's refusals, not the package's.
+
+**Lane A2 is what shipping means**, and it is one site away from lane F. The two
+lanes agree because they are compiling the same code by two routes.
+
+The authored-JavaScript setting moves **nothing** here — 59 either way, to the
+site. `voip`'s island dependencies (`@roamhq/wrtc`, `libmlow-wasm`, `argo-codec`)
+publish no attestation, so the mapping is never reached for them. Measured, not
+assumed.
+
+### 13.2 Attestation, and why `pkgstatus`'s `UNMEASURED` row is the wrong lane
+
+`@zapo-js/voip@1.0.0` publishes **no provenance attestation**. The compiler says
+so unprompted, on lane A2, in the same run that measures 58 sites:
+
+    provenance: @zapo-js/voip@1.0.0: no provenance attestation published; island path used
+
+Both halves of that are true at once, and the pair is the whole point.
+**The npm PACKAGE islands. The package's SOURCE is inside zapo-js's attested
+tree** (`757a8071b819`, `packages/voip/src`), and the 40-key alias collision
+routes `@zapo-js/voip` into it as soon as the driver names `zapo-js`. Every site
+in the table below is in `packages/voip/src/...` — reached through zapo-js's
+attestation, never through voip's own.
+
+So `voip` is **not** one of the four packages that map by the ordinary
+TypeScript path (§11.6): it has no attestation of its own at all. It is reached
+because it is *vendored inside* something that does.
+
+`tests/perf/pkgstatus-0907` reports `voip`'s npm lane as **UNMEASURED**, which
+was the correct label for the lane it measured — and that lane is a driver that
+imports the package and nothing else. **No consumer does that.** A consumer
+imports `zapo-js` too, because the plugin exists to be handed to a `WaClient`,
+and that consumer gets 48,994 statements and 58 blockers. The row should read
+lane A2 with lane A beside it, labelled as the isolated driver's view.
+
+This is the third instance: `media-utils` 5 → 32, `wam` 86 → 15, `voip`
+UNMEASURED → 58. In all three the survey measured the way a **test driver**
+imports the package, not the way a **consumer** does.
+
+### 13.3 The clusters, before the count
+
+58 blocker sites, 52 roots + 6 cascade, **25 distinct root messages**. By file:
+
+```
+31  packages/voip/src/relay/WaSctpRelay.ts      <- more than half, in one file
+ 9  packages/voip/src/call/call-state.ts
+ 3  packages/voip/src/relay/relay-ack.ts
+ 3  packages/voip/src/crypto/srtp.ts
+ 2  packages/voip/src/bytes.ts
+ 2  packages/voip/src/call/WaCallMediaSession.ts
+ 1  packages/voip/src/crypto/primitives.ts
+ 1  packages/voip/src/WaVoipCoordinator.ts
+```
+
+By cause, and the count that matters is the number of **causes**, not of sites:
+
+| sites | cause | shape |
+| --- | --- | --- |
+| **11** | `closeQuietly`'s parameter type | **ONE cause — proven by substitution, §13.4** |
+| **11** | `SC1090` compound assignment to fields of computed receivers | one compiler gap: `this.stats.connected++`, `conn.stats.sentBytes += n` — a two-level member path |
+| **9** | `SC2020` `new Date` (7) and `Date.getTime` (2) | a **design decision**, not an oversight — §13.5 |
+| 4 | `SC1090` reads off `any` (`connectionState` ×2, `getStats`, `bufferedAmount`) + 6 `SC2004` inheriting them | the untyped `peerConnection` handle |
+| 2 | `SC1090` string conversion of a union with object arms | |
+| 2 | `SC1090` compound array-element assignment | |
+| ~11 | singletons | `bigint`, `MessageEvent`, `Function.name`, `send of ArrayBuffer`, `createCipheriv with this algorithm`, `ArrayBufferLike.byteLength`, `.buffer` outside `DataView`, `.replace()`, `createSocket` with a non-literal options argument, a function-typed value, a checked-dynamic listener |
+
+Roots-vs-cascade would call this **52 independent problems**. It is closer to
+**six causes and about eleven singletons**, and only two of the six are large.
+
+### 13.4 The substitution: one line carries eleven sites
+
+`WaSctpRelay.ts:22` declares
+
+```ts
+function closeQuietly(closeable: { close(): void } | null | undefined, logger: Logger): void
+```
+
+and calls it at eleven sites with four different handle types —
+`conn.channel` (`RTCDataChannel`), `ch` (`null | RTCDataChannel`),
+`conn.peerConnection` (`null | RTCPeerConnection`), `conn.udpSocket`
+(`dgram.Socket | null`) — in three cleanup paths (424-427, 636-638, 1004-1007).
+
+The probe replaces that **one line with one line** — the parameter widened to
+name the four handle types — and nothing else. Line-neutral on purpose: the
+first attempt added four lines, and the resulting identity diff was 37 "cleared"
+against 27 "added" that were the *same sites shifted by four*. A count would
+have called that a finding. It is not one, and it is exactly the failure mode a
+substitution probe is supposed to avoid.
+
+Line-neutral, `harness/subdiff.mjs` over `(section, code, file, line)`:
+
+```
+CLEARED by the substitution: 11
+  SC2003  WaSctpRelay.ts:424 425 426 427 636 637 638 1004 1005 1006 1007
+NEWLY APPEARING: 1
+  SC1090  WaSctpRelay.ts:24
+      '?.' on 'dgram.Socket | null | { close: () => void } | RTCDataChannel | RTCPeerConnection | undefined'
+```
+
+**All eleven, and exactly one deeper site behind them** — the optional call
+`closeable?.close()` through the widened six-arm union. 59 → 49.
+
+So `voip` does not have eleven union problems. It has **one**, and behind it
+**one more**. This is the `WaWamCoordinator` shape again: a cluster that
+roots-vs-cascade calls eleven roots, because `SC2003` is not the cascade marker.
+
+The probe is a **measurement, not a fix**: widening a parameter to name four
+foreign handle types is not something zapo should do, and zapo's source was not
+modified — `pkgsrc/voipB` is a copy.
+
+### 13.5 The Date cluster is a decision, and it is not cheap
+
+Nine of the 58 are `new Date` (7) and `Date.getTime` (2). These are **not** an
+oversight: `2fc8e048 fix(voip): the entry reaches a binary — a resolution row,
+and Date as a handle` mapped `Date` deliberately as **a shape with no values**,
+the way `request` and the WebRTC handles are, and deliberately **not** as the
+f64 epoch it would fit in. That commit's own reasoning:
+
+> a scalar answers `if (new Date(0))` false where node says true, and
+> `d1 === d2` true where node says false. Every dangerous spelling still refuses
+> by name.
+
+So a record can *carry* a `Date` today; constructing and observing one refuses,
+on purpose. Giving `voip` the two members it uses means giving `Date` a value
+representation with node-exact `==`/truthiness/identity semantics — the precise
+thing that commit declined — or special-casing `new Date()` and `getTime()` into
+an epoch scalar while leaving the rest a handle, which reintroduces the
+divergence at every place the two spellings meet. **I have not measured what
+else moves**, and I am not going to call it cheap. It is a design question with
+an owner and a written rationale, and it should go back to whoever owns `Date`.
+
+### 13.6 `voip` does NOT demote off the LLVM tier — the recorded claim is stale
+
+The standing note is *"no dgram program is on the LLVM tier — 16 of 20 dgram
+library functions are absent from the emitter, so every UDP build silently
+demotes to C."* **Refuted, by building, twice.**
+
+| probe | surface | backend | result |
+| --- | --- | --- | --- |
+| `dgramprobe` | `createSocket`, `bind`, `address`, `close` | **default** | rc=0, 698,880 B, exit 0, **ORACLE MATCH byte-exact** |
+| `dgramprobe2` | voip's own: `createSocket`, `bind`, `address`, `on('listening'/'message'/'error')`, `send`, `close` — a real UDP round trip | **default** | rc=0, 699,904 B, exit 0, **ORACLE MATCH byte-exact**, prints `port>0=true` / `msg=3` |
+
+**The artifact is the evidence, not the absence of a message.** Both builds
+emitted `<name>.ll` (10,390 and 15,592 bytes) and **no `.c`**, and neither log
+carries a `backend c (llvm refused: ...)` line. A demoted build would have left
+a `.c`.
+
+Counting the emitters rather than trusting the note: `dgram.*` lib entries are
+**32 in `backend/llvm/emitter.ts`** against **22 in `backend/emission/emit-exprs.ts`**
+— the LLVM side carries *more* of the surface than the C side, which is the
+opposite of the recorded claim.
+
+What this does **not** settle: `voip` does not compile, so it has never reached
+backend selection, and the two probes exercise the dgram calls `voip` makes but
+not every one of the twenty. The blanket claim is dead; a per-function audit is
+a separate job.
+
+### 13.7 The build, and the number that is n/a
+
+Consumer lane, strict, `--backend c`:
+
+    BUILD rc=1   424s   log=34,054 B
+    LOG-SITES total=58    21 SC1090 · 16 SC2020 · 11 SC2003 · 6 SC2004 · 2 SC2001 · 1 SC2012 · 1 SC2011
+    compiler's own line: "58 errors."
+    BINARY: none (rc=1) -- FENCE COUNT n/a, NOT 0
+
+`analyze()` says 58 blocker sites; the build says 58 log sites; the compiler
+says `58 errors.` Three instruments, one number. **`voip` does not reach a
+binary**, so there is no artifact and its fence count is **n/a**.
+
+### 13.8 Where `voip` actually stands
+
+**Not blocked behind another block.** `@roamhq/wrtc` was closed by `2fc8e048`
+(it was a resolution row, not a lowering gap) and does not appear in these 58 at
+all. `libmlow-wasm` is unreached on this entry. The wall is `voip`'s own code
+plus two compiler gaps, and the largest single item is now proven to be one
+line.
+
+Ranked by sites, with what each would take:
+
+| move | clears | measured? | owner |
+| --- | --- | --- | --- |
+| let a nominal handle re-tag into a structural `{ close(): void }` arm, **or** narrow at the four call sites | **11**, and opens 1 | **measured** (§13.4) | compiler, or zapo |
+| compound assignment through a two-level member path (`a.b.c++`, `a.b.c += n`) | **11** | not attempted | compiler |
+| give `Date` the two members `voip` uses | **9** | **not** measured, and not cheap (§13.5) | whoever owns `Date` |
+| a representation for the `peerConnection` handle instead of `any` | 4 + up to 6 cascade | not attempted | compiler / zapo |
+| the ~11 singletons | 11 | — | mixed |
+
+Two of those five are one compiler change each and together they are **22 of
+58**. That is the shape of the next step, and it is a smaller wall than the
+count suggests.

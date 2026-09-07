@@ -1,0 +1,25 @@
+ORACLE-NODE v25.9.0
+=== QV4 START 2026-09-07T19:44:18-03:00 -- voip's real dgram surface, DEFAULT backend
+### dgramprobe2  src=dgramprobe2.ts  flags:[]  AUTHORED_JS=<unset>
+### node=v25.9.0  zig=0.16.0  tar=tar (GNU tar) 1.35  cc=zigcc  target=x86_64-windows-gnu
+BUILD rc=0  2s  log=43B
+--- provenance notes ---
+--- backend line (which backend actually ran) ---
+--- log error sites: pattern [ - error SCxxxx: ] over 43 bytes ---
+LOG-SITES total=0
+--- compiler's own totals line (cross-check) ---
+BINARY bytes=699904
+RUN exit=0  stdout=18B
+--- fences over EVERY emitted TU (.c, .partN.c, .scrh) ---
+    TOTAL files=0 bytes=0 FENCES=0
+--- embedded-engine scan (must all read 0 for a static claim) ---
+    quickjs        0
+    ScrDyn         0
+    JS_NewRuntime  0
+ORACLE node v25.9.0 exit=0  stdout=18B
+ORACLE: MATCH (byte-exact)
+### DONE dgramprobe2 rc=0
+ARTIFACT CHECK:
+  ls: cannot access '<blocks>/wamcoord-lab/out/dgramprobe2.c': No such file or directory
+  -rw-r--r-- 1 vinicius 197121 15592 Sep  7 19:44 <blocks>/wamcoord-lab/out/dgramprobe2.ll
+=== QV4 DONE 2026-09-07T19:44:22-03:00

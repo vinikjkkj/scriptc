@@ -1,0 +1,6 @@
+ORACLE-NODE v25.9.0
+=== QV2 START 2026-09-07T19:36:54-03:00
+--- VB: pkgsrc/src-voipB.ts (closeQuietly's parameter widened to the four handle types)
+sites=119 preflightFailed=false total=48988 failed=49 island=0 ms=447003
+EXIT=0
+=== QV2 DONE 2026-09-07T19:44:22-03:00
