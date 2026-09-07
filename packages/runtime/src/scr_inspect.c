@@ -480,6 +480,24 @@ ScrStr *scr_insp_end(ScrStr *base, ScrStr *b0, ScrStr *b1, double recurse, bool 
   size_t entries = f->len;
   if (array_extras && entries > 6) insp_group(f, trailing_more);
   InspBuf out = {0};
+  /* NO ENTRIES AT ALL: `{}`, not `{  }`. Every caller that could be empty
+   * used to know it STATICALLY and returned the two characters itself --
+   * an empty Map, Set, array or object literal never reaches here. A
+   * record whose fields are skipped at RUN TIME can, because whether a
+   * completed literal ever wrote a slot is not a compile-time fact
+   * (IrRecordShape.reqabsent), and the frame then holds nothing while the
+   * framing below still writes the space it reserves between brace and
+   * first item. Node prints `{}` and `Map(0) {}`; this is that answer for
+   * the one caller that cannot ask for it up front. */
+  if (f->len == 0) {
+    if (base->len) {
+      ib_str(&out, base);
+      ib_char(&out, ' ');
+    }
+    ib_str(&out, b0);
+    ib_str(&out, b1);
+    goto done;
+  }
   if (g_cur_depth - recurse < 3 && entries == f->len) {
     size_t start = f->len + g_indent + insp_utf16_len(b0->data, b0->len) +
                    insp_utf16_len(base->data, base->len) + 10;

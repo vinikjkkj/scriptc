@@ -7,7 +7,7 @@
 import * as ts from "../ts7/adapter.js";
 import { dirname, relative } from "node:path";
 import type { Lowerer, WidthLift } from "./lowerer.js";
-import { strandTrap, BIGINT, BOOL, CAUGHT, DYN, isUndefinedArmedUnion, type IrBytesElem, type IrLibFn, type IrNumBinOp, DYN_HANDLE_KINDS, F64, IrExpr, IrFunction, IrJsOp, IrLocal, IrRecordShape, IrStmt, IrType, JSVAL, KEYOBJ, NULL_T, REF_TRUTHY_KINDS, REGEX, RUNTIME_ERROR_CLASSES, SEARCH_PARAMS_T, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, canAdaptDynFuncTo, canBoxFuncIntoDyn, canDynCheckTo, funcOf, isDynBytes, isJsonSafeType, isRefCounted, isUnitType, jsOpResultKind, httpReqIsReadableIn, shapeHasAccessorSlots, streamDuplexWidensToWritable, typeEquals, typeKey, unionFuncSetArmsOk } from "../../ir/nodes.js";
+import { strandTrap, BIGINT, BOOL, CAUGHT, DYN, internalSlotFields, ownMaskBit, isUndefinedArmedUnion, type IrBytesElem, type IrLibFn, type IrNumBinOp, DYN_HANDLE_KINDS, F64, IrExpr, IrFunction, IrJsOp, IrLocal, IrRecordShape, IrStmt, IrType, JSVAL, KEYOBJ, NULL_T, REF_TRUTHY_KINDS, REGEX, RUNTIME_ERROR_CLASSES, SEARCH_PARAMS_T, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, canAdaptDynFuncTo, canBoxFuncIntoDyn, canDynCheckTo, funcOf, isDynBytes, isJsonSafeType, isRefCounted, isUnitType, jsOpResultKind, httpReqIsReadableIn, shapeHasAccessorSlots, streamDuplexWidensToWritable, typeEquals, typeKey, unionFuncSetArmsOk } from "../../ir/nodes.js";
 import { lowerAbortProperty } from "./lower-abort.js";
 import { dynImportBindingDeclOf } from "./lower-island.js";
 import { lowerFetchProperty, lowerRequestInitLiteral } from "./lower-fetch.js";
@@ -11546,6 +11546,13 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
               type: f.type,
               loc: locOf(prop),
             };
+            // A whole-shape copy into a literal whose field list is fixed
+            // here. If some literal in this program COMPLETED a required
+            // field of this source shape, this read is of a slot that was
+            // never written and the copy has nowhere to put "absent" -
+            // judged after the walk, where that is known
+            // (Lowerer.completedSpreadSites).
+            L.noteCompletedSpreadSite(srcType.shapeId, locOf(prop));
           }
           // A liftable field widens into the target slot (arm wrap,
           // re-tag, nested reshape) — the same per-field rule the slot
@@ -11974,6 +11981,7 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
       type = { kind: "record", shapeId: narrowedId };
       shape = L.shapes.get(narrowedId)!;
     }
+    let completedRequired = false;
     if (fields.filter((f) => !f.overflow).length !== shape.fields.length) {
       const provided = new Set(fields.filter((f) => !f.overflow).map((f) => f.name));
       for (const f of shape.fields) {
@@ -11983,11 +11991,52 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
         // exactly that (the options-record call shape against
         // `{ plugins: unknown, ... }` — a JS caller the checker admits).
         const absent = L.wrappedUndefined(f.type, loc) ?? (f.type.kind === "dyn" ? dynUndefinedExpr(loc) : null);
-        if (!absent) throw shapeMismatch(expr); // only optional (undefined-armed) and 'unknown' fields may be omitted
-        fields.push({ name: f.name, value: absent });
+        if (absent) {
+          fields.push({ name: f.name, value: absent });
+          continue;
+        }
+        // A REQUIRED field with nothing to complete it. tsc rejects the
+        // omission on a fresh literal, so this is always an `as` cast
+        // smuggling a narrower literal past freshness -- and it is the one
+        // spelling TypeScript accepts for an accumulator keyed by a literal
+        // union, which is why zapo-js 1.8.2 writes
+        // `{} as Record<AbPropName, AbPropConfigEntry>` and why this was
+        // the last diagnostic on that arm.
+        //
+        // The SLOT cannot carry "absent": that is what required MEANS. The
+        // per-instance OWN-KEY MASK can, and does -- the literal omits the
+        // field entirely, leaves its bit clear, and every enumeration
+        // surface then answers what Node answers for `{}`: no such key.
+        // The slot keeps the allocator's zero, which nothing may read, and
+        // `reqabsent` turns a read of it into the catchable TypeError
+        // rather than a NULL dereference or a silent 0.
+        //
+        // Two gates, both about the mask being ABLE to say it. The field
+        // must take a BIT -- an INTERNAL SLOT takes none, because it is not
+        // a JS key on any surface and "not own" has no spelling for it
+        // there -- and the slot's zero must be inert for the RC and trace
+        // walkers, which every refcounted pointer and every f64/bool is.
+        // Where either fails the shape mismatch stands, exactly as before.
+        if (
+          shape.tuple !== true &&
+          L.reqAbsentSlotOk(f.type) &&
+          ownMaskBit(shape, f.name) !== null &&
+          !internalSlotFields(shape).includes(f.name)
+        ) {
+          completedRequired = true;
+          continue;
+        }
+        throw shapeMismatch(expr); // only optional (undefined-armed) and 'unknown' fields may be omitted
       }
     }
-    const lit: IrExpr = { kind: "recordLit", fields, type, loc };
+    if (completedRequired) L.requiredAbsentTargets.add(shape.id);
+    const lit: IrExpr = {
+      kind: "recordLit",
+      fields,
+      ...(completedRequired ? { ownmask: true as const } : {}),
+      type,
+      loc,
+    };
     return prelude.length === 0 ? lit : { kind: "seqExpr", stmts: prelude, result: lit, type, loc };
   }
 
@@ -18818,11 +18867,29 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
         const read: IrExpr = { kind: "recordGet", obj: recv, shapeId: recv.type.shapeId, field: key, type: field.type, loc };
         return { kind: "unionIsTag", unionId: field.type.unionId, tag: L.armTag(field.type.unionId, UNDEFINED_T), negated: true, value: read, type: BOOL, loc };
       }
-      // A declared non-optional field always exists on every value of the
-      // shape — statically true, but folding may only drop a
-      // side-effect-free receiver read.
+      // A declared non-optional field exists on every value of the shape —
+      // statically true, but folding may only drop a side-effect-free
+      // receiver read.
+      //
+      // ...unless some literal in this program COMPLETED that field, which
+      // is decided after the whole walk. The node is registered rather than
+      // asked (L.slotFilledGuards): a program with no such literal keeps
+      // this literal `true` and the same bytes, and one that has it asks
+      // the instance instead. Safe to re-read the receiver here for the
+      // same reason the fold was safe to drop it — this branch only runs
+      // for a pure one.
       if (recv.kind === "varRef" || recv.kind === "recordGet" || recv.kind === "fieldGet" || pureRecvNode) {
-        return { kind: "boolLit", value: true, type: BOOL, loc };
+        const node: IrExpr = { kind: "boolLit", value: true, type: BOOL, loc };
+        const shapeId = recv.type.shapeId;
+        L.noteSlotFilledGuard(shapeId, key, () => {
+          const n = node as unknown as Record<string, unknown>;
+          delete n["value"];
+          n["kind"] = "recordSlotFilled";
+          n["obj"] = recv;
+          n["shapeId"] = shapeId;
+          n["field"] = key;
+        });
+        return node;
       }
       L.unsupported("SC1090", expr, "statically-decided 'in' on computed receivers (bind the value to a variable first)");
     }

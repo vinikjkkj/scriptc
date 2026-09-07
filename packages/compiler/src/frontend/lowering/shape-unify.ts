@@ -457,6 +457,20 @@ function mergeable(L: Lowerer, id: string): string | null {
   const s = L.shapes.get(id);
   if (!s) return "not-mergeable-unknown-shape";
   if (s.tuple) return "not-mergeable-tuple";
+  // A shape some literal COMPLETED a required field of. Two reasons, and
+  // each is on its own sufficient.
+  //
+  // The rewrite below completes every field a merged literal did not name,
+  // and a completed literal's unnamed fields are exactly the ones no value
+  // can spell -- absentValue throws on them, which is how this rule was
+  // found rather than reasoned.
+  //
+  // And the arming runs AFTER this pass: requiredAbsentTargets holds the id
+  // the LOWERING recorded, so a merge that elided that id would leave the
+  // completed literal building a shape whose mask was never armed -- a store
+  // past the end of the struct, silently, at the one construction that most
+  // needs the bytes.
+  if (L.requiredAbsentTargets.has(id)) return "not-mergeable-completed-literal";
   if (s.indexValue !== undefined) return "not-mergeable-index-signature";
   if (s.builtin !== undefined) return "not-mergeable-builtin-rendering";
   if (internalSlotFields(s).length > 0 || s.fields.some((f) => f.name.startsWith("%"))) {

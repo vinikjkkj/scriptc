@@ -3,10 +3,10 @@
  * emitter's frames (see the discipline comment in emitter core). */
 import type { CEmitter, Temp } from "./emitter.js";
 import { rcSitesRequested, rcSiteLabel } from "./emitter.js";
-import { arrayOf, BOOL, BYTES_U8, bytesOf, canMarshalFuncIntoIsland, CHILDSTREAM_T, DYN, dynCopyIsObservable, F64, IrExpr, IrRecordShape, IrType, irFunctionJsName, islandPromisePayloadTag, isRefCounted, isUnitType, MAY_THROW_LIB_FNS, RUNTIME_ERROR_CLASSES, settleOrValuePromiseTag, STRING, typeEquals, typeKey } from "../../ir/nodes.js";
+import { ABSENT_KEY_TRAP_CODE, arrayOf, BOOL, BYTES_U8, bytesOf, ownMaskKeyBit, OWNMASK_COMPLETED, OWNMASK_VALID, canMarshalFuncIntoIsland, CHILDSTREAM_T, DYN, dynCopyIsObservable, F64, IrExpr, IrRecordShape, IrType, irFunctionJsName, islandPromisePayloadTag, isRefCounted, isUnitType, MAY_THROW_LIB_FNS, RUNTIME_ERROR_CLASSES, settleOrValuePromiseTag, STRING, typeEquals, typeKey } from "../../ir/nodes.js";
 import { boxAccess, BYTES_NUM_KIND_C, BYTES_NUM_VAR_C, bytesElemKindC, cDecl, cFnPtrCast, cNumberLiteral, cStringLiteral, cType, DV_GET_KIND_C, DV_SET_KIND_C, elemAccess, mapKeyAccess, mapKeyKindC, mapValKindC, retainCallC, vAdapters } from "./emit-types.js";
 import { mangleClassNew, mangleClassRetain, mangleClassStruct, mangleField, mangleFnClosure, mangleFunction, mangleGlobal, mangleLocal, mangleRecordNew, mangleRecordStruct, mangleVtStruct, mangleWrapper } from "../mangle.js";
-import { OVERFLOW_MEMBER, SRCPROTO_MEMBER, TOSTR_MEMBER, nullProtoCondC, ownPresentCondC } from "./emit-shapes.js";
+import { OVERFLOW_MEMBER, OWNMASK_MEMBER, SRCPROTO_MEMBER, TOSTR_MEMBER, nullProtoCondC, ownPresentCondC } from "./emit-shapes.js";
 import { dynDestrCheckHelper, dynIterNHelper, dynKeyGetHelper } from "./emit-walkers.js";
 import { genResultThunkFor } from "./emit-async.js";
 import { wsGlobalCtorFor } from "./emit-ws.js";
@@ -2206,7 +2206,56 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             ? e.field
             : mangleField(e.field);
         const field = `${obj.name}->${member}`;
+        // THE REQUIRED-ABSENT READ (IrRecordShape.reqabsent). On a shape a
+        // width completion targeted, a required field's slot may hold the
+        // allocator's zero rather than a value, and the mask is the only
+        // thing that knows. Handing the zero out is a NULL dereference for
+        // a record and a silent 0 for an f64, where JavaScript answers
+        // `undefined`; so the read asks the bit and throws the catchable
+        // TypeError instead - `narrow`'s stance, one node over.
+        //
+        // Scoped twice over. Only `reqabsent` shapes emit it, so every
+        // shape armed for a DYNCHECK crossing reads exactly as it did (and
+        // must: a clear bit there means the source INHERITED the member,
+        // whose value the read still has to return). And only a field with
+        // no undefined arm, because a field that has one is already
+        // carrying "absent" in the slot where every surface can see it.
+        if (e.kind === "recordGet") {
+          const shape = E.recordsById.get(e.shapeId);
+          const f = shape?.fields.find((x) => x.name === e.field);
+          const bit = shape?.reqabsent === true ? ownMaskKeyBit(shape, e.field) : null;
+          if (shape && f && bit && E.undefinedArmTag(f.type) < 0) {
+            const m = `${obj.name}->${OWNMASK_MEMBER}`;
+            const msg = Buffer.from(
+              `reading '${e.field}': this value was completed from a narrower record and never carried that key`
+                + ` (JavaScript answers undefined here, and ${e.shapeId}.${e.field} has no undefined arm to hold it)`,
+              "utf8",
+            );
+            E.line(
+              `if ((${m}[0] & ${OWNMASK_COMPLETED}) && !(${m}[${bit.byte}] & ${bit.bit})) {`
+                + ` scr_throw_error_msg_code(SCR_ERR_TYPE, ${cStringLiteral(msg)}, ${msg.length}, "${ABSENT_KEY_TRAP_CODE}"); }`,
+            );
+            E.emitPendingCheck();
+          }
+        }
         return E.newTemp(e.type, isRefCounted(e.type) ? retainCallC(e.type, field) : field);
+      }
+      case "recordSlotFilled": {
+        // `in`'s question on a shape a completion targeted. Only the
+        // COMPLETED bit sends it to the mask: a crossing's clear bit is an
+        // INHERITED member, which `in` answers true for, and a shape no
+        // completion targeted folds to the literal `true` this node
+        // replaced.
+        const shape = E.recordsById.get(e.shapeId);
+        if (!shape) throw new Error(`emitter bug: recordSlotFilled of unknown shape ${e.shapeId}`);
+        const bit = shape.reqabsent === true ? ownMaskKeyBit(shape, e.field) : null;
+        if (!bit) return E.newTemp(e.type, "true");
+        const obj = E.emitExpr(e.obj);
+        const m = `${obj.name}->${OWNMASK_MEMBER}`;
+        return E.newTemp(
+          e.type,
+          `(!(${m}[0] & ${OWNMASK_COMPLETED}) || ((${m}[${bit.byte}] & ${bit.bit}) != 0))`,
+        );
       }
       case "recordKeyPresent": {
         // The own-key question, one spelling (ownPresentCondC). On an
@@ -2238,6 +2287,20 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
         // map in the same interleaved order — the map takes ownership.
         if (e.type.kind !== "record") throw new Error("emitter bug: recordLit of non-record type");
         const rec = E.newTemp(e.type, `${mangleRecordNew(e.type.shapeId)}()`);
+        // THE COMPLETED literal (an `as` cast over a literal missing a
+        // REQUIRED member) establishes the instance's own-key mask. Byte 0
+        // goes first, before any field runs: a field initializer can throw,
+        // and the half-built record that unwinds is still released through
+        // the mask-aware surfaces, where "no keys yet" is the truthful
+        // answer at every point in between. Each written field's bit
+        // follows its own store, so an unwind never leaves a bit set over a
+        // slot the literal had not reached.
+        if (e.ownmask) {
+          E.line(
+            `${rec.name}->${OWNMASK_MEMBER}[0] = ${OWNMASK_VALID | OWNMASK_COMPLETED};`
+              + ` /* completed literal: the bits are the own keys */`,
+          );
+        }
         for (const f of e.fields) {
           // Each field initializer gets its OWN release scope. The value
           // itself still moves into the struct (moveTemp reaches through
@@ -2283,6 +2346,16 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             }
             if (isRefCounted(v.type)) E.moveTemp(v);
             E.line(`${rec.name}->${mangleField(f.name)} = ${v.name};`);
+            // A property the literal WRITES is one of the value's own keys
+            // - all of them, whatever the value. Only a completed literal
+            // owns the mask; every other literal leaves byte 0 zero and the
+            // surfaces read the undefined arm exactly as they always have.
+            if (e.ownmask) {
+              const bit = ownMaskKeyBit(E.recordsById.get(e.type.shapeId)!, f.name);
+              if (bit) {
+                E.line(`${rec.name}->${OWNMASK_MEMBER}[${bit.byte}] |= ${bit.bit}; /* own key ${f.name} */`);
+              }
+            }
           } finally {
             E.releaseFrame(E.frames.pop()!);
           }

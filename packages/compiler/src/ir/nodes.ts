@@ -1896,6 +1896,32 @@ export interface IrRecordShape {
    * module actually contains — the same construction SC6002 advises about,
    * which until now printed a note and shipped the wrong value. */
   ownmask?: true;
+  /** This shape is the TARGET of a required-absent width completion: some
+   * construction of it (recordWidthHelper's completed literal) leaves a
+   * REQUIRED field - one with no undefined arm, so no value of its type
+   * can mean "absent" - unwritten and its own-key bit CLEAR.
+   *
+   * `ownmask` alone cannot carry that. Byte 0 tells the enumeration
+   * surfaces to read the bits, and they then answer correctly: the key is
+   * not own, so Object.keys, JSON.stringify, hasOwn and the record-to-dyn
+   * walker all skip it, which is exactly Node's answer. But a plain READ
+   * of that field still loads the slot, and the slot holds the allocator's
+   * zero - NULL for a record, 0 for an f64 - where JavaScript answers
+   * `undefined`. A NULL is a segfault and a 0 is a silent wrong number.
+   *
+   * So a read of a required field on a shape carrying this flag asks the
+   * mask first and THROWS a catchable TypeError when the bit is clear.
+   * That is `narrow`'s and `dynOut`'s stance one node over: a checked
+   * extraction that throws only where the value genuinely is not there,
+   * and never a silent wrong answer. It costs one branch, and only on the
+   * shapes a completion actually targeted - every shape armed for a
+   * DYNCHECK crossing is untouched, which matters because there a clear
+   * bit means "inherited from the prototype", a value the read must still
+   * return.
+   *
+   * Set by armOwnMasks() alongside `ownmask`, from the targets
+   * recordWidthPlan's absentRequired arm recorded while lowering. */
+  reqabsent?: true;
   /** How Node RENDERS a value of this shape, for the shapes the frontend
    * interns from a BUILTIN whose rendering is not a plain object's. Every
    * member is part of the interned identity, on internalFieldNamesOf's
@@ -2078,6 +2104,21 @@ export function ownMaskKeyBit(shape: OwnMaskShape, name: string): { byte: number
  *          when bit 0 is set. */
 export const OWNMASK_VALID = 1;
 export const OWNMASK_SRC_NULL_PROTO = 2;
+/** bit 2  the instance was built by a COMPLETED LITERAL - an object
+ * literal that omitted a REQUIRED field of its shape, which only an `as`
+ * cast can spell (`{} as Record<AbPropName, AbPropConfigEntry>`). Set
+ * together with VALID, and the one thing that separates the two
+ * populations that now share the mask.
+ *
+ * Every surface that ENUMERATES asks VALID and nothing else: a crossing
+ * and a completion both mean "the bits, not the slots", and they agree.
+ * The READ is where they part. On a crossing a clear bit means the source
+ * INHERITED the member, and the slot holds the value JS would return, so
+ * the read must hand it over. On a completion a clear bit means the slot
+ * was never written and holds the allocator's zero, so the read must
+ * throw instead (IrRecordShape.reqabsent). One flag, asked only by the
+ * read, and the crossing population is bit-for-bit unaffected. */
+export const OWNMASK_COMPLETED = 4;
 
 /** Whether one record INSTANCE is a null-prototype object — the single
  * question the record→dyn walker and util.inspect's static renderer both
@@ -6805,7 +6846,23 @@ export type IrExpr =
    * whose class has a callable toString. It is not a field, carries no
    * key, and never appears on a source literal — a literal that names no
    * toString genuinely has none, and NULL is Node's answer. */
-  | { kind: "recordLit"; fields: { name: string; value: IrExpr; overflow?: true; drop?: true }[]; toStr?: IrExpr; type: IrType; loc: SrcLoc }
+  /** `ownmask: true` makes this literal ESTABLISH the instance's own-key
+   * mask instead of leaving it zeroed: byte 0 gets OWNMASK_VALID |
+   * OWNMASK_COMPLETED, and the bit of every field the literal WRITES is
+   * set. The fields it does NOT write - and it is the one literal allowed
+   * to omit any - keep a clear bit, which is what makes them absent to
+   * Object.keys, JSON.stringify, hasOwn and the record-to-dyn walker.
+   *
+   * The written bits are unconditional here, and that is exact rather than
+   * approximate: an object literal's properties ARE its own keys, all of
+   * them, whatever their values. (`{a: undefined}` has own key "a" in
+   * Node, and this is the one construction that can now say so.)
+   *
+   * It exists for the REQUIRED-absent completion: `{} as Record<K, V>`
+   * where V has no undefined arm. Only an `as` cast can spell an object
+   * literal missing a required member, which is why nothing else sets
+   * this. */
+  | { kind: "recordLit"; fields: { name: string; value: IrExpr; overflow?: true; drop?: true }[]; toStr?: IrExpr; ownmask?: true; type: IrType; loc: SrcLoc }
   /** Record field read `r.f` — mirrors `fieldGet`: refcounted fields come
    * out retained (+1). */
   | { kind: "recordGet"; obj: IrExpr; shapeId: string; field: string; type: IrType; loc: SrcLoc }
@@ -6828,6 +6885,22 @@ export type IrExpr =
    * declaration order — which is exactly why this is a node and not two
    * spellings chosen at lowering time. */
   | { kind: "recordKeyPresent"; obj: IrExpr; shapeId: string; field: string; type: IrType; loc: SrcLoc }
+  /** `in`'s question about a REQUIRED field of a shape some literal
+   * COMPLETED: was this slot ever written on THIS instance?
+   *
+   * It is not recordKeyPresent, and the difference is the whole reason it
+   * exists. `in` is "own OR INHERITED", and the two populations that carry
+   * a mask answer a clear bit oppositely: on a CROSSING a clear bit means
+   * the source object inherited the member from its prototype, and `in` is
+   * TRUE there (the value is even in the slot); on a COMPLETION it means
+   * the slot was never written at all, and `in` is FALSE. So this asks
+   * OWNMASK_COMPLETED first and answers `true` for everything else -
+   * which folds to the literal `true` this node replaced on every shape no
+   * completion targeted, so their emitted code does not move.
+   *
+   * Only REQUIRED fields need it. A field with an undefined arm carries
+   * "absent" in the slot where `in`'s existing tag test already reads it. */
+  | { kind: "recordSlotFilled"; obj: IrExpr; shapeId: string; field: string; type: IrType; loc: SrcLoc }
   /** Is `obj` a NULL-PROTOTYPE object? — nullProtoRule's question, as a
    * node, for the same reason recordKeyPresent is one: the answer depends
    * on ARMING, and arming is decided after the whole walk.
@@ -10892,6 +10965,19 @@ export function wsRefusalText(msg: string, site: string | undefined): string {
  * one observes a different error; what changes is that the throw now
  * carries a code. */
 export const STRAND_TRAP_CODE = "SC9004";
+
+/** The REQUIRED-ABSENT READ trap's code (IrRecordShape.reqabsent): a read
+ * of a required field whose own-key bit is clear on this instance, i.e. a
+ * key the value genuinely does not have and whose type has no `undefined`
+ * to hand back. Coded for the same reason SC9004 is - an uncoded throw is
+ * a refusal no instrument can count - and TypeError for the same reason
+ * too: it is the error JavaScript itself produces one step later, when the
+ * `undefined` it would have returned is used.
+ *
+ * A program that never reads an absent key never sees it. zapo's
+ * AB_PROP_CONFIGS is the motivating case and fills all 1,900 before the
+ * value escapes, so the trap is emitted and never taken. */
+export const ABSENT_KEY_TRAP_CODE = "SC9005";
 
 /** `throw new TypeError(message)` as a CODED fence — the one constructor
  * for a representability strand trap, so no site can reintroduce the

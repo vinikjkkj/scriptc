@@ -33,7 +33,7 @@
 import type { IrFunction, IrRecordShape, IrType } from "../../ir/nodes.js";
 import { bytesAliasOnExtract, dynErrorClassKind, isDynErrorClass } from "../../ir/nodes.js";
 import { armDiscrimLits, canAdaptDynFuncTo, dynRestApplyable, canBoxFuncIntoDyn, dynCheckArmOrder, internalSlotFields, isUndefinedArmedUnion, slotStorageKey, unionHasDiscrim, DYN_BYTES_KINDS, DYN_HANDLE_KINDS, isRefCounted, strandedFuncReason, typeKey } from "../../ir/nodes.js";
-import { nullProtoRule, OWNMASK_SRC_NULL_PROTO, OWNMASK_VALID, ownMaskKeyBit as maskKeyBit } from "../../ir/nodes.js";
+import { nullProtoRule, OWNMASK_COMPLETED, OWNMASK_SRC_NULL_PROTO, OWNMASK_VALID, ownMaskKeyBit as maskKeyBit } from "../../ir/nodes.js";
 import { INTERNAL_SLOT_WANT_TEXT } from "../emission/emit-walkers.js";
 import { mangleClassRelease, mangleClassRetain, mangleClassStruct, mangleFunction, mangleRecordNew, mangleRecordStruct } from "../mangle.js";
 import { dynMemberRows, type DynMemberClass } from "../dyn-members.js";
@@ -2423,6 +2423,43 @@ export class LlDyn {
         ];
         for (const f of dynFields) {
           const klen = Buffer.byteLength(f.name, "utf8");
+          // THE ABSENT SLOT IS NOT READABLE - emit-walkers.ts's row, and
+          // here the branch has to come before the LOAD as well as before
+          // the conversion. On a shape a literal COMPLETED a required field
+          // of, that slot holds the allocator's zero and the toDyn call one
+          // line down dereferences it. Folds away on every shape no
+          // completion targeted, so a crossing-armed shape's .ll is
+          // unchanged.
+          const liveBit = shape.reqabsent === true ? maskKeyBit(shape, f.name) : null;
+          let liveEnd: string | null = null;
+          if (liveBit) {
+            const lvp = B.tmp();
+            B.line(
+              `${lvp} = getelementptr inbounds %${struct}, ptr %v, i64 0, i32 ${ownMaskSlotIndex(shape)}, i64 0 ; ${f.name} completed?`,
+            );
+            const lv0 = B.tmp();
+            B.line(`${lv0} = load i8, ptr ${lvp}`);
+            const lcm = B.tmp();
+            B.line(`${lcm} = and i8 ${lv0}, ${OWNMASK_COMPLETED}`);
+            const notC = B.tmp();
+            B.line(`${notC} = icmp eq i8 ${lcm}, 0`);
+            const lbp = B.tmp();
+            B.line(
+              `${lbp} = getelementptr inbounds %${struct}, ptr %v, i64 0, i32 ${ownMaskSlotIndex(shape)}, i64 ${liveBit.byte}`,
+            );
+            const lbv = B.tmp();
+            B.line(`${lbv} = load i8, ptr ${lbp}`);
+            const lan = B.tmp();
+            B.line(`${lan} = and i8 ${lbv}, ${liveBit.bit}`);
+            const lset = B.tmp();
+            B.line(`${lset} = icmp ne i8 ${lan}, 0`);
+            const live = B.tmp();
+            B.line(`${live} = or i1 ${notC}, ${lset}`);
+            const lY = B.newLabel("tdl.y");
+            liveEnd = B.newLabel("tdl.e");
+            B.condBr(live, lY, liveEnd);
+            B.startBlock(lY);
+          }
           const fv = loadFieldOf(f.name, f.type);
           const conv = B.tmp();
           // Same rule as the ordered pass above: a FUNCTION field boxes
@@ -2566,6 +2603,10 @@ export class LlDyn {
             setPresent();
             B.br(lE);
             B.startBlock(lE);
+          }
+          if (liveEnd !== null) {
+            B.br(liveEnd);
+            B.startBlock(liveEnd);
           }
         }
         if (shape.indexValue) {

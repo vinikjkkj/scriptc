@@ -74,7 +74,7 @@ import type {
   IrUnionDef,
   SrcLoc,
 } from "../../ir/nodes.js";
-import { UNION_ARM_JS_OBJECT_KINDS, irFunctionJsName, settleOrValuePromiseTag, canBoxClassIntoDyn, CLASS_PROPS_FIELD, canMarshalFuncIntoIsland, CAUGHT, DYN, dynCopyIsObservable, F64, islandCallbackRet, islandPromisePayloadTag, isRefCounted, nullProtoRule, OWNMASK_SRC_NULL_PROTO, ownMaskKeyBit, isUnitType, REF_TRUTHY_KINDS, MAY_THROW_LIB_FNS, moduleEmbedsBuiltin, moduleEmbedsNetIsland, moduleUsesAbortSignal, moduleUsesChildStream, moduleUsesDgram, moduleUsesFetch, moduleUsesFetchStatic, moduleUsesFetchDispatch, moduleUsesFsWatch, moduleUsesHttp2, moduleUsesHttpServer, moduleUsesNet, moduleUsesProcessEvents, moduleUsesRegex, moduleUsesStream, moduleUsesWsGlobal, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, STRING, typeEquals, typeKey, VOID } from "../../ir/nodes.js";
+import { ABSENT_KEY_TRAP_CODE, OWNMASK_COMPLETED, OWNMASK_VALID, UNION_ARM_JS_OBJECT_KINDS, irFunctionJsName, settleOrValuePromiseTag, canBoxClassIntoDyn, CLASS_PROPS_FIELD, canMarshalFuncIntoIsland, CAUGHT, DYN, dynCopyIsObservable, F64, islandCallbackRet, islandPromisePayloadTag, isRefCounted, nullProtoRule, OWNMASK_SRC_NULL_PROTO, ownMaskKeyBit, isUnitType, REF_TRUTHY_KINDS, MAY_THROW_LIB_FNS, moduleEmbedsBuiltin, moduleEmbedsNetIsland, moduleUsesAbortSignal, moduleUsesChildStream, moduleUsesDgram, moduleUsesFetch, moduleUsesFetchStatic, moduleUsesFetchDispatch, moduleUsesFsWatch, moduleUsesHttp2, moduleUsesHttpServer, moduleUsesNet, moduleUsesProcessEvents, moduleUsesRegex, moduleUsesStream, moduleUsesWsGlobal, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, STRING, typeEquals, typeKey, VOID } from "../../ir/nodes.js";
 import { dynClassDisplayName } from "../dyn-members.js";
 import { computeMayThrow } from "../emission/may-throw.js";
 import { seqScopedLocals } from "../emission/emit-stmts.js";
@@ -3794,6 +3794,25 @@ class LlEmitter {
     return shape;
   }
 
+  /** `o->sc_own[byte] |= bit` for one field, or nothing when the shape has
+   * no mask or the field takes no bit - the .ll twin of the one line the C
+   * tier writes inline, spelled once so the three sites that set a bit
+   * (the completed literal, the keyed write's two arms) cannot drift. */
+  private emitOwnKeyBitSet(shape: IrRecordShape, objName: string, field: string): void {
+    const bit = ownMaskKeyBit(shape, field);
+    if (!bit) return;
+    const B = this.B;
+    const mp = B.tmp();
+    B.line(
+      `${mp} = getelementptr inbounds %${mangleRecordStruct(shape.id)}, ptr ${objName}, i64 0, i32 ${ownMaskSlotIndex(shape)}, i64 ${bit.byte} ; own key ${field}`,
+    );
+    const mv = B.tmp();
+    B.line(`${mv} = load i8, ptr ${mp}`);
+    const mo = B.tmp();
+    B.line(`${mo} = or i8 ${mv}, ${bit.bit}`);
+    B.line(`store i8 ${mo}, ptr ${mp}`);
+  }
+
   /** The field-slot pointer of a record member (rc header at index 0). */
   private recordFieldPtr(objName: string, shapeId: string, field: string): { ptr: string; type: IrType } {
     const shape = this.recordShape(shapeId);
@@ -4392,6 +4411,10 @@ class LlEmitter {
             } else {
               this.storeField(ptr, type, nv);
             }
+            // A KEYED write is a write, so it records an own key -
+            // recordKeySetHelper's row in the C tier, and recordSet's rule
+            // one spelling over.
+            this.emitOwnKeyBitSet(shape, obj.name, f.name);
             B.br(join);
             B.startBlock(ln);
           }
@@ -4422,6 +4445,9 @@ class LlEmitter {
           } else {
             this.storeField(ptr, type, v.name);
           }
+          // A KEYED write is a write - the dyn arm's row, one type-world
+          // over.
+          this.emitOwnKeyBitSet(shape, obj.name, f.name);
           B.br(join);
           B.startBlock(ln);
         }
@@ -5565,6 +5591,20 @@ class LlEmitter {
         const rec = B.tmp();
         B.line(`${rec} = call ptr @${mangleRecordNew(shapeId)}()`);
         const out = this.own({ name: rec, type: e.type });
+        // THE COMPLETED literal establishes the instance's own-key mask
+        // before the fields run - the C tier's row, and for its reason: a
+        // field initializer can throw, and the half-built record that
+        // unwinds is still released through the mask-aware surfaces, where
+        // "no keys yet" is the truthful answer at every point in between.
+        if (e.ownmask) {
+          const sh = this.recordsById.get(shapeId);
+          if (!sh) throw new Error(`llvm emitter bug: recordLit ownmask of unknown shape ${shapeId}`);
+          const vp = B.tmp();
+          B.line(
+            `${vp} = getelementptr inbounds %${mangleRecordStruct(shapeId)}, ptr ${rec}, i64 0, i32 ${ownMaskSlotIndex(sh)}, i64 0 ; completed literal: the bits are the own keys`,
+          );
+          B.line(`store i8 ${OWNMASK_VALID | OWNMASK_COMPLETED}, ptr ${vp}`);
+        }
         for (const f of e.fields) {
           // Each field initializer gets its OWN release scope — the
           // arrayLit case's reasoning one node over, and the C tier's
@@ -5596,6 +5636,10 @@ class LlEmitter {
             if (isRefCounted(v.type)) this.moveTemp(v);
             const { ptr, type } = this.recordFieldPtr(rec, shapeId, f.name);
             this.storeField(ptr, type, v.name);
+            // A property the literal WRITES is one of the value's own keys
+            // - emit-exprs's row, after its own store so an unwind never
+            // leaves a bit set over a slot the literal had not reached.
+            if (e.ownmask) this.emitOwnKeyBitSet(this.recordsById.get(shapeId)!, rec, f.name);
           } finally {
             this.releaseFrame(this.frames.pop()!);
           }
@@ -5619,10 +5663,84 @@ class LlEmitter {
       }
       case "recordGet": {
         const obj = this.emitExpr(e.obj);
+        // THE REQUIRED-ABSENT READ (IrRecordShape.reqabsent) - emit-exprs's
+        // twin, same two scopes: only a shape a width completion targeted,
+        // and only a field with no undefined arm of its own.
+        {
+          const shape = this.recordsById.get(e.shapeId);
+          const f = shape?.fields.find((x) => x.name === e.field);
+          const bit = shape?.reqabsent === true ? ownMaskKeyBit(shape, e.field) : null;
+          if (shape && f && bit && this.undefinedArmTag(f.type) < 0) {
+            const mi = ownMaskSlotIndex(shape);
+            const struct = mangleRecordStruct(shape.id);
+            const vp = B.tmp();
+            B.line(`${vp} = getelementptr inbounds %${struct}, ptr ${obj.name}, i64 0, i32 ${mi}, i64 0 ; ${e.field} own-mask valid`);
+            const v0 = B.tmp();
+            B.line(`${v0} = load i8, ptr ${vp}`);
+            const cmpl = B.tmp();
+            B.line(`${cmpl} = and i8 ${v0}, ${OWNMASK_COMPLETED}`);
+            const valid = B.tmp();
+            B.line(`${valid} = icmp ne i8 ${cmpl}, 0`);
+            const lChk = B.newLabel("reqabs.c");
+            const lJoin = B.newLabel("reqabs.j");
+            B.condBr(valid, lChk, lJoin);
+            B.startBlock(lChk);
+            const bp = B.tmp();
+            B.line(`${bp} = getelementptr inbounds %${struct}, ptr ${obj.name}, i64 0, i32 ${mi}, i64 ${bit.byte}`);
+            const bv = B.tmp();
+            B.line(`${bv} = load i8, ptr ${bp}`);
+            const msk = B.tmp();
+            B.line(`${msk} = and i8 ${bv}, ${bit.bit}`);
+            const own = B.tmp();
+            B.line(`${own} = icmp ne i8 ${msk}, 0`);
+            const lThrow = B.newLabel("reqabs.t");
+            B.condBr(own, lJoin, lThrow);
+            B.startBlock(lThrow);
+            const msg =
+              `reading '${e.field}': this value was completed from a narrower record and never carried that key`
+              + ` (JavaScript answers undefined here, and ${shape.id}.${e.field} has no undefined arm to hold it)`;
+            this.declare(`declare void @scr_throw_error_msg_code(i32, ptr, i64, ptr)`);
+            B.line(
+              `call void @scr_throw_error_msg_code(i32 1, ptr ${this.cstr(msg)}, i64 ${Buffer.byteLength(msg, "utf8")}, ptr ${this.cstr(ABSENT_KEY_TRAP_CODE)})`,
+            );
+            this.emitUnwind();
+            B.startBlock(lJoin);
+          }
+        }
         const { ptr, type } = this.recordFieldPtr(obj.name, e.shapeId, e.field);
         const v = this.loadField(ptr, type);
         if (isRefCounted(e.type)) return this.own({ name: this.retainValue(v, e.type), type: e.type });
         return { name: v, type: e.type };
+      }
+      case "recordSlotFilled": {
+        // `in`'s question on a shape a completion targeted - emit-exprs's
+        // twin, and folding the same way where no completion happened.
+        const shape = this.recordsById.get(e.shapeId);
+        if (!shape) throw new Error(`llvm emitter bug: recordSlotFilled of unknown shape ${e.shapeId}`);
+        const bit = shape.reqabsent === true ? ownMaskKeyBit(shape, e.field) : null;
+        if (!bit) return { name: "true", type: e.type };
+        const obj = this.emitExpr(e.obj);
+        const mi = ownMaskSlotIndex(shape);
+        const struct = mangleRecordStruct(shape.id);
+        const vp = B.tmp();
+        B.line(`${vp} = getelementptr inbounds %${struct}, ptr ${obj.name}, i64 0, i32 ${mi}, i64 0 ; ${e.field} slot-filled`);
+        const v0 = B.tmp();
+        B.line(`${v0} = load i8, ptr ${vp}`);
+        const cm = B.tmp();
+        B.line(`${cm} = and i8 ${v0}, ${OWNMASK_COMPLETED}`);
+        const notCompleted = B.tmp();
+        B.line(`${notCompleted} = icmp eq i8 ${cm}, 0`);
+        const bp = B.tmp();
+        B.line(`${bp} = getelementptr inbounds %${struct}, ptr ${obj.name}, i64 0, i32 ${mi}, i64 ${bit.byte}`);
+        const bv = B.tmp();
+        B.line(`${bv} = load i8, ptr ${bp}`);
+        const msk = B.tmp();
+        B.line(`${msk} = and i8 ${bv}, ${bit.bit}`);
+        const own = B.tmp();
+        B.line(`${own} = icmp ne i8 ${msk}, 0`);
+        const r = B.tmp();
+        B.line(`${r} = or i1 ${notCompleted}, ${own}`);
+        return { name: r, type: e.type };
       }
       case "recordKeyPresent": {
         // The own-key question, one spelling (emitOwnPresentLl). Unarmed

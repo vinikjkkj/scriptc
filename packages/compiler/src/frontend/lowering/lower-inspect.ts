@@ -614,12 +614,40 @@ function inspectHelper(L: Lowerer, t: IrType, loc: SrcLoc): string {
       for (const fname of order) {
         const ft = byName.get(fname);
         if (!ft) continue;
-        body.push(
-          entry(
-            concatAll([str(`${inspectKey(fname)}: `, loc), child(ft, get(fname, ft))], loc),
-            boolLit(false, loc),
-          ),
+        const st = entry(
+          concatAll([str(`${inspectKey(fname)}: `, loc), child(ft, get(fname, ft))], loc),
+          boolLit(false, loc),
         );
+        // A field some literal COMPLETED is not readable at all on an
+        // instance that literal built: the slot holds the allocator's zero,
+        // and this entry renders the field's VALUE. Measured before the
+        // guard existed, `console.log(bag)` over a partly-filled
+        // `{} as Record<K, V>` was an ACCESS VIOLATION - the renderer walks
+        // every declared field and the mask had no say.
+        //
+        // Registered rather than asked, like every other own-key question:
+        // which shapes a completion targeted is decided after the whole
+        // walk, and a program with none keeps this statement exactly as it
+        // is. Scoped to `recordSlotFilled` (not the own-key question) on
+        // purpose - it is the COMPLETED bit alone that makes a slot
+        // unreadable, and a crossing-armed shape must keep rendering the
+        // members it materialised.
+        const completable = ft.kind !== "dyn" && !(ft.kind === "union" && L.armTag(ft.unionId, UNDEFINED_T) >= 0);
+        if (completable) {
+          const holder = st as unknown as Record<string, unknown>;
+          const inner = { ...st } as IrStmt;
+          L.noteSlotFilledGuard(t.shapeId, fname, () => {
+            for (const k of Object.keys(holder)) delete holder[k];
+            Object.assign(holder, {
+              kind: "if",
+              cond: { kind: "recordSlotFilled", obj: v(), shapeId: t.shapeId, field: fname, type: BOOL, loc },
+              then: [inner],
+              else_: null,
+              loc,
+            });
+          });
+        }
+        body.push(st);
       }
       for (const [fname, desc] of internalSyms) {
         const ft = byName.get(fname);
