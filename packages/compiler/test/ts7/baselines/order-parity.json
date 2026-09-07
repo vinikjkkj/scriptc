@@ -10815,6 +10815,18 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/7788-textencoder-encode-into.ts": {
+   "order": [
+    "<repo>/tests/corpus/7788-textencoder-encode-into.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/7789-esm-require-is-not-defined.ts": {
+   "order": [
+    "<repo>/tests/corpus/7789-esm-require-is-not-defined.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/800-switch-basics.ts": {
    "order": [
     "<repo>/tests/corpus/800-switch-basics.ts"
@@ -11684,6 +11696,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/diagnostics/encode-into-argument-shapes.ts": {
+   "order": [
+    "<repo>/tests/diagnostics/encode-into-argument-shapes.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/diagnostics/enums.ts": {
    "order": [
     "<repo>/tests/diagnostics/enums.ts"
@@ -12473,6 +12491,12 @@
   "<repo>/tests/diagnostics/regex.ts": {
    "order": [
     "<repo>/tests/diagnostics/regex.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/require-outside-the-esm-rule.ts": {
+   "order": [
+    "<repo>/tests/diagnostics/require-outside-the-esm-rule.ts"
    ],
    "diags": []
   },
