@@ -1,0 +1,42 @@
+{
+ "entry": "<blocks>/pkgstatus3-lab/napp/drivers/store-memory.ts",
+ "flags": [
+  "--provenance-sources"
+ ],
+ "elapsedMs": 137947,
+ "crashed": null,
+ "preflightFailed": false,
+ "stats": {
+  "statementsTotal": 30690,
+  "statementsFailed": 0,
+  "statementsIsland": 0,
+  "functionsSkipped": 0
+ },
+ "unreachedStats": {
+  "statementsTotal": 1436,
+  "statementsFailed": 0,
+  "statementsIsland": 0,
+  "functionsSkipped": 1
+ },
+ "npmStatic": null,
+ "provenanceNotes": [
+  "zapo-js@1.8.2 <- 757a8071b819",
+  "note: @zapo-js/native: not installed under the entry's node_modules; island path used"
+ ],
+ "sites": [
+  {
+   "section": "runtimeFence",
+   "code": "SC2020",
+   "message": "'require() with a run-time specifier' is part of the standard library types but has no scriptc lowering yet",
+   "file": "<blocks>/pkgstatus-prov/757a8071b819699437b353865b17cacffe95e9fb/spec/proto/index.js",
+   "line": 1
+  },
+  {
+   "section": "unreached",
+   "code": "SC2001",
+   "message": "values of type 'WaMediaTransferClient' cannot be compiled yet (supported: number, string, boolean, arrays, Maps, Sets, RegExp, functions, classes, records, unions of those, and 'unknown')",
+   "file": "<blocks>/pkgstatus-prov/757a8071b819699437b353865b17cacffe95e9fb/src/appstate/utils.ts",
+   "line": 65
+  }
+ ]
+}

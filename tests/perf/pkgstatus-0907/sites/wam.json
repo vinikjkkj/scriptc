@@ -1,0 +1,1954 @@
+{
+ "entry": "<blocks>/pkgstatus3-lab/napp/drivers/wam.ts",
+ "flags": [
+  "--provenance-sources"
+ ],
+ "elapsedMs": 641658,
+ "crashed": null,
+ "preflightFailed": false,
+ "stats": {
+  "statementsTotal": 1462,
+  "statementsFailed": 76,
+  "statementsIsland": 0,
+  "functionsSkipped": 0
+ },
+ "unreachedStats": {
+  "statementsTotal": 11799,
+  "statementsFailed": 35,
+  "statementsIsland": 0,
+  "functionsSkipped": 121
+ },
+ "npmStatic": null,
+ "provenanceNotes": [
+  "@zapo-js/wam@0.1.1 <- 1dc6b9f8de93",
+  "note: @vinikjkkj/wa-wam@2.3000.1041713829-1ec0d3b: no source mapping for '@vinikjkkj/wa-wam' (published target: index.js); island path used",
+  "note: argo-codec@0.2.1: no provenance attestation published; island path used"
+ ],
+ "sites": [
+  {
+   "section": "blocker",
+   "code": "SC2011",
+   "message": "values of type 'WaClientDependencies' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/client/WaClient.ts",
+   "line": 68
+  },
+  {
+   "section": "blocker",
+   "code": "SC2001",
+   "message": "values of type 'WaClientConstructor' cannot be compiled yet (supported: number, string, boolean, arrays, Maps, Sets, RegExp, functions, classes, records, unions of those, and 'unknown')",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/client/WaClient.ts",
+   "line": 833
+  },
+  {
+   "section": "blocker",
+   "code": "SC2011",
+   "message": "values of type 'WaClientPluginDefinition & { readonly exposeAs: \"wam\"; readonly setup: (ctx: WaClientPluginContext) => WaWamCoordinator; readonly __pluginEvents?: {} | undefined; }' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/pkgstatus3-lab/napp/drivers/wam.ts",
+   "line": 4
+  },
+  {
+   "section": "blocker",
+   "code": "SC2013",
+   "message": "importing '@vinikjkkj/wa-wam' requires the embedded dynamic engine, which this build does not include — the package's implementation runs there",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/packages/wam/src/registry.ts",
+   "line": 1
+  },
+  {
+   "section": "blocker",
+   "code": "SC2013",
+   "message": "importing '@vinikjkkj/wa-wam' requires the embedded dynamic engine, which this build does not include — the package's implementation runs there",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/packages/wam/src/globals.ts",
+   "line": 1
+  },
+  {
+   "section": "blocker",
+   "code": "SC2013",
+   "message": "importing '@vinikjkkj/wa-wam' requires the embedded dynamic engine, which this build does not include — the package's implementation runs there",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/packages/wam/src/wire/encoder.ts",
+   "line": 1
+  },
+  {
+   "section": "blocker",
+   "code": "SC2013",
+   "message": "importing '@vinikjkkj/wa-wam' requires the embedded dynamic engine, which this build does not include — the package's implementation runs there",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/packages/wam/src/wire/WamBatch.ts",
+   "line": 1
+  },
+  {
+   "section": "blocker",
+   "code": "SC2013",
+   "message": "importing '@vinikjkkj/wa-wam' requires the embedded dynamic engine, which this build does not include — the package's implementation runs there",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/packages/wam/src/WaWamCoordinator.ts",
+   "line": 1
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "the reference to 'RAW_WA_APPSTATE_SCHEMAS' (it has no compiled implementation — its module '../spec/appstate/index.d.ts' ships only a declaration file) is not supported yet",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/appstate-spec.ts",
+   "line": 78
+  },
+  {
+   "section": "blocker",
+   "code": "SC2004",
+   "message": "uses of 'WaClientImpl' inherit the blocker on its declaration",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/client/WaClient.ts",
+   "line": 833
+  },
+  {
+   "section": "blocker",
+   "code": "SC2011",
+   "message": "values of type 'WaClientPluginContext' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/packages/wam/src/WaWamCoordinator.ts",
+   "line": 69
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/packages/wam/src/synthetic/fabrications.ts",
+   "line": 31
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/packages/wam/src/synthetic/fabrications.ts",
+   "line": 43
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/packages/wam/src/synthetic/fabrications.ts",
+   "line": 57
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/packages/wam/src/synthetic/fabrications.ts",
+   "line": 70
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/packages/wam/src/synthetic/fabrications.ts",
+   "line": 80
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/packages/wam/src/synthetic/fabrications.ts",
+   "line": 94
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/packages/wam/src/synthetic/fabrications.ts",
+   "line": 109
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/packages/wam/src/synthetic/fabrications.ts",
+   "line": 123
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/packages/wam/src/synthetic/fabrications.ts",
+   "line": 136
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/packages/wam/src/synthetic/fabrications.ts",
+   "line": 148
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/packages/wam/src/synthetic/fabrications.ts",
+   "line": 162
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/packages/wam/src/synthetic/fabrications.ts",
+   "line": 174
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/packages/wam/src/synthetic/fabrications.ts",
+   "line": 188
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/packages/wam/src/synthetic/fabrications.ts",
+   "line": 194
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/packages/wam/src/synthetic/fabrications.ts",
+   "line": 206
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/packages/wam/src/synthetic/fabrications.ts",
+   "line": 218
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/packages/wam/src/synthetic/fabrications.ts",
+   "line": 237
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/packages/wam/src/synthetic/fabrications.ts",
+   "line": 252
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/packages/wam/src/synthetic/fabrications.ts",
+   "line": 257
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/packages/wam/src/synthetic/fabrications.ts",
+   "line": 270
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/packages/wam/src/synthetic/fabrications.ts",
+   "line": 279
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/packages/wam/src/synthetic/fabrications.ts",
+   "line": 294
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/packages/wam/src/synthetic/fabrications.ts",
+   "line": 305
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/packages/wam/src/synthetic/fabrications.ts",
+   "line": 314
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/packages/wam/src/synthetic/fabrications.ts",
+   "line": 325
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/packages/wam/src/synthetic/fabrications.ts",
+   "line": 337
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/packages/wam/src/synthetic/fabrications.ts",
+   "line": 352
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/packages/wam/src/synthetic/fabrications.ts",
+   "line": 367
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/packages/wam/src/synthetic/fabrications.ts",
+   "line": 381
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/packages/wam/src/synthetic/fabrications.ts",
+   "line": 395
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/packages/wam/src/synthetic/fabrications.ts",
+   "line": 416
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/packages/wam/src/synthetic/fabrications.ts",
+   "line": 426
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/packages/wam/src/synthetic/fabrications.ts",
+   "line": 436
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/packages/wam/src/synthetic/fabrications.ts",
+   "line": 453
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/packages/wam/src/synthetic/fabrications.ts",
+   "line": 473
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/packages/wam/src/synthetic/fabrications.ts",
+   "line": 483
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/packages/wam/src/synthetic/fabrications.ts",
+   "line": 497
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/packages/wam/src/synthetic/fabrications.ts",
+   "line": 504
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/packages/wam/src/synthetic/fabrications.ts",
+   "line": 519
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/packages/wam/src/synthetic/fabrications.ts",
+   "line": 537
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/packages/wam/src/synthetic/fabrications.ts",
+   "line": 554
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/packages/wam/src/synthetic/fabrications.ts",
+   "line": 564
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/packages/wam/src/synthetic/fabrications.ts",
+   "line": 573
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/packages/wam/src/synthetic/fabrications.ts",
+   "line": 583
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/packages/wam/src/synthetic/fabrications.ts",
+   "line": 600
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/packages/wam/src/synthetic/fabrications.ts",
+   "line": 614
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/packages/wam/src/synthetic/fabrications.ts",
+   "line": 635
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/packages/wam/src/synthetic/fabrications.ts",
+   "line": 648
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/packages/wam/src/synthetic/fabrications.ts",
+   "line": 684
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/packages/wam/src/synthetic/fabrications.ts",
+   "line": 693
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/packages/wam/src/synthetic/fabrications.ts",
+   "line": 708
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/packages/wam/src/synthetic/fabrications.ts",
+   "line": 719
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/packages/wam/src/synthetic/fabrications.ts",
+   "line": 731
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/packages/wam/src/synthetic/fabrications.ts",
+   "line": 738
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/packages/wam/src/synthetic/fabrications.ts",
+   "line": 758
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/packages/wam/src/synthetic/fabrications.ts",
+   "line": 770
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/packages/wam/src/synthetic/fabrications.ts",
+   "line": 781
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/packages/wam/src/synthetic/fabrications.ts",
+   "line": 792
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/packages/wam/src/synthetic/fabrications.ts",
+   "line": 802
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/packages/wam/src/synthetic/fabrications.ts",
+   "line": 815
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/packages/wam/src/synthetic/fabrications.ts",
+   "line": 828
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/packages/wam/src/synthetic/fabrications.ts",
+   "line": 839
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/packages/wam/src/synthetic/fabrications.ts",
+   "line": 849
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/packages/wam/src/synthetic/fabrications.ts",
+   "line": 862
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/packages/wam/src/synthetic/fabrications.ts",
+   "line": 873
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/packages/wam/src/synthetic/fabrications.ts",
+   "line": 889
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/packages/wam/src/synthetic/fabrications.ts",
+   "line": 897
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/packages/wam/src/synthetic/fabrications.ts",
+   "line": 907
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "calls of the generic method 'commit' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' and interface-only methods are signature-only, and only class, static, and object-literal generic methods with bodies monomorphize) is not supported yet",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/packages/wam/src/synthetic/fabrications.ts",
+   "line": 916
+  },
+  {
+   "section": "blocker",
+   "code": "SC2013",
+   "message": "values from the '@vinikjkkj/wa-wam' package run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/packages/wam/src/wire/encoder.ts",
+   "line": 9
+  },
+  {
+   "section": "blocker",
+   "code": "SC2013",
+   "message": "values from the '@vinikjkkj/wa-wam' package run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/packages/wam/src/wire/encoder.ts",
+   "line": 10
+  },
+  {
+   "section": "blocker",
+   "code": "SC2011",
+   "message": "values of type 'WaClientPluginDefinition & { readonly exposeAs: \"wam\"; readonly setup: (ctx: WaClientPluginContext) => WaWamCoordinator; readonly __pluginEvents?: {} | undefined; }' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/packages/wam/src/plugin.ts",
+   "line": 27
+  },
+  {
+   "section": "blocker",
+   "code": "SC2004",
+   "message": "uses of 'wamPlugin' inherit the blocker on its declaration",
+   "file": "<blocks>/pkgstatus3-lab/napp/drivers/wam.ts",
+   "line": 4
+  },
+  {
+   "section": "blocker",
+   "code": "SC2004",
+   "message": "uses of 'p' inherit the blocker on its declaration",
+   "file": "<blocks>/pkgstatus3-lab/napp/drivers/wam.ts",
+   "line": 5
+  },
+  {
+   "section": "blocker",
+   "code": "SC2004",
+   "message": "uses of 'WaWamCoordinator' inherit the blocker on its declaration",
+   "file": "<blocks>/pkgstatus3-lab/napp/drivers/wam.ts",
+   "line": 6
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "symbol-keyed property access outside class fields keyed by a module-level `const k = Symbol('desc')` (static shapes have no symbol-keyed storage) is not supported yet",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/client/plugins/install.ts",
+   "line": 37
+  },
+  {
+   "section": "unreached",
+   "code": "SC2020",
+   "message": "'Object.defineProperty' is part of the standard library types but has no scriptc lowering yet",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/client/plugins/install.ts",
+   "line": 42
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "the reference to 'WA_VERSION' (it has no compiled implementation — its module '../../../spec/version/index.d.ts' ships only a declaration file) is not supported yet",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/transport/noise/WaClientPayload.ts",
+   "line": 173
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "the reference to 'WA_VERSION' (it has no compiled implementation — its module '../../../spec/version/index.d.ts' ships only a declaration file) is not supported yet",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/transport/noise/WaClientPayload.ts",
+   "line": 211
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "the reference to 'RAW_WA_APPSTATE_SCHEMAS' (it has no compiled implementation — its module '../spec/appstate/index.d.ts' ships only a declaration file) is not supported yet",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/appstate-spec.ts",
+   "line": 92
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "namespace objects as first-class values (access 'proto' members directly: proto.<member>) are not supported yet",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/appstate-spec.ts",
+   "line": 97
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "effectful case tests in a union-typed switch (bind the test value to a const first) is not supported yet",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/message/crypto/addon-crypto.ts",
+   "line": 192
+  },
+  {
+   "section": "unreached",
+   "code": "SC2008",
+   "message": "values of type 'Message & $Properties' cannot be compiled: this intersection resolves to no runtime shape",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/message/crypto/addon-crypto.ts",
+   "line": 286
+  },
+  {
+   "section": "unreached",
+   "code": "SC2004",
+   "message": "uses of 'decoded' inherit the blocker on its declaration",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/message/crypto/addon-crypto.ts",
+   "line": 288
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'IMessage' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/message/encode/content.ts",
+   "line": 188
+  },
+  {
+   "section": "unreached",
+   "code": "SC2004",
+   "message": "uses of 'unwrapMessage' inherit the blocker on its declaration",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/message/crypto/addon-crypto.ts",
+   "line": 292
+  },
+  {
+   "section": "unreached",
+   "code": "SC2004",
+   "message": "uses of 'pollMsg' inherit the blocker on its declaration",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/message/crypto/addon-crypto.ts",
+   "line": 294
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "'Promise<{ fileEncSha256: Uint8Array; fileSha256: Uint8Array; firstFrameSidecar: Uint8Array | undefined; plaintextLength: number; streamingSidecar: Uint8Array | undefined }>' values where 'Promise<{ fileEncSha256: Uint8Array; fileSha256: Uint8Array; plaintextLength: number }>' is expected is not supported yet",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/media/transfer/WaMediaTransferClient.ts",
+   "line": 438
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'Promise<WaAppStateSyncResult> | null' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/appstate/sync/WaAppStateSyncClient.ts",
+   "line": 139
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "method calls like 'this.appStateSync.ensureInitialSyncKey' is not supported yet",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/client/coordinators/WaPassiveTasksCoordinator.ts",
+   "line": 132
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type '((event: WaAppStateMutationEvent) => void) | undefined' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/client/coordinators/WaAppStateMutationCoordinator.ts",
+   "line": 339
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "method calls like 'mutations.set' is not supported yet",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/client/coordinators/WaProfileCoordinator.ts",
+   "line": 516
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'IMessage' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/message/crypto/icdc.ts",
+   "line": 73
+  },
+  {
+   "section": "unreached",
+   "code": "SC2004",
+   "message": "uses of 'injectDeviceListMetadata' inherit the blocker on its declaration",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/retry/replay.ts",
+   "line": 232
+  },
+  {
+   "section": "unreached",
+   "code": "SC2004",
+   "message": "uses of 'injected' inherit the blocker on its declaration",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/retry/replay.ts",
+   "line": 233
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'IMessage' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/message/encode/device-sent.ts",
+   "line": 4
+  },
+  {
+   "section": "unreached",
+   "code": "SC2004",
+   "message": "uses of 'wrapDeviceSentMessage' inherit the blocker on its declaration",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/retry/replay.ts",
+   "line": 240
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "calls of the generic method 'emitEvent' with no defining object literal (the declaration is signature-only — only methods declared with a body in an object literal monomorphize) is not supported yet",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/client/coordinators/WaTrustedContactTokenCoordinator.ts",
+   "line": 171
+  },
+  {
+   "section": "unreached",
+   "code": "SC2002",
+   "message": "record shapes must match exactly or width-coerce: expected '{ appState: { clear: () => Promise<void>; exportData: () => Promise<{ collections: { critical_block: { hash: Uint8Array; indexValueMap: { [key: string]: Uint8Array }; version: number } | undefined; critical_unblock_low: { hash: Uint8Array; indexValueMap: { [key: string]: Uint8Array }; version: number } | undefined; regular: { hash: Uint8Array; indexValueMap: { [key: string]: Uint8Array }; version: number } | undefined; regular_high: { hash: Uint8Array; indexValueMap: { [key: string]: Uint8Array }; version: number } | undefined; regular_low: { hash: Uint8Array; indexValueMap: { [key: string]: Uint8Array }; version: number } | undefined }; keys: { fingerprint: { $unknowns: Uint8Array[] | undefined; currentIndex: number | null | undefined; deviceIndexes: number[] | null | undefined; rawId: number | null | undefined } | undefined; keyData: Uint8Array; keyId: Uint8Array; timestamp: number }[] }>; getActiveSyncKey: () => Promise<null | { fingerprint: { $unknowns: Uint8Array[] | undefined; currentIndex: number | null | undefined; deviceIndexes: number[] | null | undefined; rawId: number | null | undefined } | undefined; keyData: Uint8Array; keyId: Uint8Array; timestamp: number }>; getCollectionState: (string) => Promise<{ hash: Uint8Array; indexValueMap: Map<string, Uint8Array>; initialized: boolean; version: number }>; getCollectionStates: (string[]) => Promise<{ hash: Uint8Array; indexValueMap: Map<string, Uint8Array>; initialized: boolean; version: number }[]>; getSyncKeyData: (Uint8Array) => Promise<Uint8Array | null>; getSyncKeyDataBatch: (Uint8Array[]) => Promise<(Uint8Array | null)[]>; getSyncKeysBatch: (Uint8Array[]) => Promise<(null | { fingerprint: { $unknowns: Uint8Array[] | undefined; currentIndex: number | null | undefined; deviceIndexes: number[] | null | undefined; rawId: number | null | undefined } | undefined; keyData: Uint8Array; keyId: Uint8Array; timestamp: number })[]>; setCollectionStates: ({ collection: string; hash: Uint8Array; indexValueMap: Map<string, Uint8Array>; version: number }[]) => Promise<void>; upsertSyncKeys: ({ fingerprint: { $unknowns: Uint8Array[] | undefined; currentIndex: number | null | undefined; deviceIndexes: number[] | null | undefined; rawId: number | null | undefined } | undefined; keyData: Uint8Array; keyId: Uint8Array; timestamp: number }[]) => Promise<number> }; auth: { clear: () => Promise<void>; load: () => Promise<null | { abPropsVersion: number | undefined; accountCreationTs: number | undefined; advSecretKey: Uint8Array; companionEncStatic: Uint8Array | undefined; connectionLocation: string | undefined; deviceInfo: { appVersion: string; device: string; deviceBoard: string | undefined; deviceModelType: string | undefined; localeCountryIso31661Alpha2: string | undefined; localeLanguageIso6391: string | undefined; manufacturer: string; mcc: string | undefined; mnc: string | undefined; osBuildNumber: string; osVersion: string; phoneId: string | undefined } | undefined; lastSuccessTs: number | undefined; meDisplayName: string | undefined; meJid: string | undefined; meLid: string | undefined; memClass: number | undefined; noiseKeyPair: { privKey: Uint8Array; pubKey: Uint8Array }; platform: string | undefined; propsVersion: number | undefined; pushName: string | undefined; registrationInfo: { identityKeyPair: { privKey: Uint8Array; pubKey: Uint8Array }; registrationId: number }; routingInfo: Uint8Array | undefined; serverHasPreKeys: boolean | undefined; serverStaticKey: Uint8Array | undefined; signedIdentity: { $unknowns: Uint8Array[] | undefined; accountSignature: Uint8Array | null | undefined; accountSignatureKey: Uint8Array | null | undefined; details: Uint8Array | null | undefined; deviceSignature: Uint8Array | null | undefined } | undefined; signedPreKey: { keyId: number; keyPair: { privKey: Uint8Array; pubKey: Uint8Array }; signature: Uint8Array; uploaded: boolean | undefined }; yearClass: number | undefined }>; save: ({ abPropsVersion: number | undefined; accountCreationTs: numbe…', got '{ appState: { clear: () => Promise<void>; exportData: () => Promise<any>; getActiveSyncKey: () => Promise<any>; getCollectionState: (string) => Promise<{ hash: Uint8Array; indexValueMap: Map<string, Uint8Array>; initialized: boolean; version: number }>; getCollectionStates: (string[]) => Promise<{ hash: Uint8Array; indexValueMap: Map<string, Uint8Array>; initialized: boolean; version: number }[]>; getSyncKeyData: (Uint8Array) => Promise<Uint8Array | null>; getSyncKeyDataBatch: (Uint8Array[]) => Promise<(Uint8Array | null)[]>; getSyncKeysBatch: (Uint8Array[]) => Promise<any>; setCollectionStates: ({ collection: string; hash: Uint8Array; indexValueMap: Map<string, Uint8Array>; version: number }[]) => Promise<void>; upsertSyncKeys: (any) => Promise<number> }; auth: { clear: () => Promise<void>; load: () => Promise<any>; save: (any) => Promise<void> }; contacts: { clear: () => Promise<void>; deleteByJid: (string) => Promise<number>; getByJid: (string) => Promise<null | { displayName: string | undefined; jid: string; lastUpdatedMs: number; lid: string | undefined; phoneNumber: string | undefined; pushName: string | undefined }>; getByPhoneNumber: (string) => Promise<null | { displayName: string | undefined; jid: string; lastUpdatedMs: number; lid: string | undefined; phoneNumber: string | undefined; pushName: string | undefined }>; upsert: ({ displayName: string | undefined; jid: string; lastUpdatedMs: number; lid: string | undefined; phoneNumber: string | undefined; pushName: string | undefined }) => Promise<void>; upsertBatch: ({ displayName: string | undefined; jid: string; lastUpdatedMs: number; lid: string | undefined; phoneNumber: string | undefined; pushName: string | undefined }[]) => Promise<void> }; destroy: () => Promise<void>; destroyCaches: () => Promise<void>; deviceList: { cleanupExpired: (number) => Promise<number>; clear: () => Promise<void>; deleteUserDevices: (string) => Promise<number>; destroy: () => Promise<void> | undefined; findByAnyUserJid: (string, number | undefined) => Promise<null | { altUserJid: string | undefined; deviceJids: string[]; updatedAtMs: number; userJid: string }>; getUserDevicesBatch: (string[], number | undefined) => Promise<(null | { altUserJid: string | undefined; deviceJids: string[]; updatedAtMs: number; userJid: string })[]>; upsertUserDevicesBatch: ({ altUserJid: string | undefined; deviceJids: string[]; updatedAtMs: number; userJid: string }[]) => Promise<void> }; groupMetadata: { cleanupExpired: (number) => Promise<number>; clear: () => Promise<void>; deleteGroupMetadata: (string) => Promise<number>; destroy: () => Promise<void> | undefined; getGroupMetadata: (string, number | undefined) => Promise<null | { ephemeral: number | undefined; groupJid: string; participants: string[]; updatedAtMs: number }>; upsertGroupMetadata: ({ ephemeral: number | undefined; groupJid: string; participants: string[]; updatedAtMs: number }) => Promise<void> }; identity: { clear: () => Promise<void>; getRemoteIdentities: ({ device: number; server: string | undefined; user: string }[]) => Promise<(Uint8Array | null)[]>; getRemoteIdentity: ({ device: number; server: string | undefined; user: string }) => Promise<Uint8Array | null>; setRemoteIdentities: ({ address: { device: number; server: string | undefined; user: string }; identityKey: Uint8Array }[]) => Promise<void>; setRemoteIdentity: ({ device: number; server: string | undefined; user: string }, Uint8Array) => Promise<void> }; messageSecret: { cleanupExpired: (number) => Promise<number>; clear: () => Promise<void>; destroy: () => Promise<void> | undefined; get: (string, number | undefined) => Promise<null | { secret: Uint8Array; senderJid: string }>; getBatch: (string[], number | undefined) => Promise<(null | { secret: Uint8Array; senderJid: string })[]>; set: (string, { secret: Uint8Array; senderJid: string }) => Promise<void>; setBatch: ({ entry: { secret: Uint8Array; senderJid: string }; messageId: string }[]) => Promise<void> }; messages: { cle…' — field 'appState': '{ clear: () => Promise<void>; exportData: () => Promise<any>; getActiveSyncKey: () => Promise<any>; getCollectionState: (string) => Promise<{ hash: Uint8Array; indexValueMap: Map<string, Uint8Array>; initialized: boolean; version: number }>; getCollectionStates: (string[]) => Promise<{ hash: Uint8Array; indexValueMap: Map<string, Uint8Array>; initialized: boolean; version: number }[]>; getSyncKeyData: (Uint8Array) => Promise<Uint8Array | null>; getSyncKeyDataBatch: (Uint8Array[]) => Promise<(Uint8Array | null)[]>; getSyncKeysBatch: (Uint8Array[]) => Promise<any>; setCollectionStates: ({ collection: string; hash: Uint8Array; indexValueMap: Map<string, Uint8Array>; version: number }[]) => Promise<void>; upsertSyncKeys: (any) => Promise<number> }' does not lift into '{ clear: () => Promise<void>; exportData: () => Promise<{ collections: { critical_block: { hash: Uint8Array; indexValueMap: { [key: string]: Uint8Array }; version: number } | undefined; critical_unblock_low: { hash: Uint8Array; indexValueMap: { [key: string]: Uint8Array }; version: number } | undefined; regular: { hash: Uint8Array; indexValueMap: { [key: string]: Uint8Array }; version: number } | undefined; regular_high: { hash: Uint8Array; indexValueMap: { [key: string]: Uint8Array }; version: number } | undefined; regular_low: { hash: Uint8Array; indexValueMap: { [key: string]: Uint8Array }; version: number } | undefined }; keys: { fingerprint: { $unknowns: Uint8Array[] | undefined; currentIndex: number | null | undefined; deviceIndexes: number[] | null | undefined; rawId: number | null | undefined } | undefined; keyData: Uint8Array; keyId: Uint8Array; timestamp: number }[] }>; getActiveSyncKey: () => Promise<null | { fingerprint: { $unknowns: Uint8Array[] | undefined; currentIndex: number | null | undefined; deviceIndexes: number[] | null | undefined; rawId: number | null | undefined } | undefined; keyData: Uint8Array; keyId: Uint8Array; timestamp: number }>; getCollectionState: (string) => Promise<{ hash: Uint8Array; indexValueMap: Map<string, Uint8Array>; initialized: boolean; version: number }>; getCollectionStates: (string[]) => Promise<{ hash: Uint8Array; indexValueMap: Map<string, Uint8Array>; initialized: boolean; version: number }[]>; getSyncKeyData: (Uint8Array) => Promise<Uint8Array | null>; getSyncKeyDataBatch: (Uint8Array[]) => Promise<(Uint8Array | null)[]>; getSyncKeysBatch: (Uint8Array[]) => Promise<(null | { fingerprint: { $unknowns: Uint8Array[] | undefined; currentIndex: number | null | undefined; deviceIndexes: number[] | null | undefined; rawId: number | null | undefined } | undefined; keyData: Uint8Array; keyId: Uint8Array; timestamp: number })[]>; setCollectionStates: ({ collection: string; hash: Uint8Array; indexValueMap: Map<string, Uint8Array>; version: number }[]) => Promise<void>; upsertSyncKeys: ({ fingerprint: { $unknowns: Uint8Array[] | undefined; currentIndex: number | null | undefined; deviceIndexes: number[] | null | undefined; rawId: number | null | undefined } | undefined; keyData: Uint8Array; keyId: Uint8Array; timestamp: number }[]) => Promise<number> }'",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/client/WaClientFactory.ts",
+   "line": 268
+  },
+  {
+   "section": "unreached",
+   "code": "SC2002",
+   "message": "record shapes must match exactly or width-coerce: expected '{ addons: { autoDecrypt: boolean | undefined; persistAllSecrets: boolean | undefined } | undefined; appStateSyncTimeoutMs: number; chatEvents: { emitSnapshotMutations: boolean | undefined } | undefined; chatSocketUrls: string[] | undefined; companionHost: { includePem: boolean | undefined; persistence: { load: () => null | Promise<null | { companions: { addedAtSeconds: number; companionIdentityPublicKey: Uint8Array; deviceJid: string; keyIndex: number }[]; currentKeyIndex: number; rawId: number }> | { companions: { addedAtSeconds: number; companionIdentityPublicKey: Uint8Array; deviceJid: string; keyIndex: number }[]; currentKeyIndex: number; rawId: number }; save: ({ companions: { addedAtSeconds: number; companionIdentityPublicKey: Uint8Array; deviceJid: string; keyIndex: number }[]; currentKeyIndex: number; rawId: number }) => Promise<void> | undefined } | undefined } | undefined; connectTimeoutMs: number | undefined; dangerous: { disableAdvSignatureVerification: boolean | undefined; disableAppStateMacVerification: boolean | undefined; disableMediaMacVerification: boolean | undefined; disableNoiseCertificateChainVerification: boolean | undefined; disablePairSuccessHmacVerification: boolean | undefined; disableSenderKeySignatureVerification: boolean | undefined; disableSignedPreKeySignatureVerification: boolean | undefined } | undefined; deadSocketTimeoutMs: number; deviceBrowser: string; deviceOsDisplayName: string; devicePlatform: string; history: { enabled: boolean | undefined; requireFullSync: boolean | undefined } | undefined; iqTimeoutMs: number; keepAliveIntervalMs: number; linkPreview: { allowPrivateHosts: boolean | undefined; enabled: boolean | undefined; fetchTimeoutMs: number | undefined; fetcher: { fetch: ({ logger: { child: ({ [key: string]: unknown }, { level: string | undefined } | undefined) => ...; debug: (string, { [key: string]: unknown } | undefined) => void; error: (string, { [key: string]: unknown } | undefined) => void; info: (string, { [key: string]: unknown } | undefined) => void; level: string; trace: (string, { [key: string]: unknown } | undefined) => void; warn: (string, { [key: string]: unknown } | undefined) => void }; matchedText: string; signal: AbortSignal | undefined; url: URL }) => Promise<null | { description: string | undefined; matchedText: string; previewType: number; thumbnail: { bytes: Uint8Array; height: number | undefined; width: number | undefined } | { contentLength: number; height: number | undefined; stream: Readable; width: number | undefined } | undefined; title: string | undefined }> } | undefined; maxHtmlBytes: number | undefined; maxThumbnailBytes: number | undefined; proxy: unknown; uploadHqThumbnail: boolean | undefined; userAgent: string | undefined } | undefined; logoutStoreClear: { appState: boolean | undefined; auth: boolean | undefined; contacts: boolean | undefined; deviceList: boolean | undefined; groupMetadata: boolean | undefined; identity: boolean | undefined; messageSecret: boolean | undefined; messages: boolean | undefined; preKey: boolean | undefined; privacyToken: boolean | undefined; retry: boolean | undefined; senderKey: boolean | undefined; session: boolean | undefined; signal: boolean | undefined; threads: boolean | undefined } | undefined; markOnlineOnConnect: boolean | undefined; maxReconnectAttempts: number | undefined; media: { generateProbe: boolean | undefined; generateStickerThumbnail: boolean | undefined; generateThumbnail: boolean | undefined; generateWaveform: boolean | undefined; normalizeVoiceNote: boolean | undefined; processor: { computeWaveform: (Uint8Array | Readable | string, { logger: { child: ({ [key: string]: unknown }, { level: string | undefined } | undefined) => ...; debug: (string, { [key: string]: unknown } | undefined) => void; error: (string, { [key: string]: unknown } | undefined) => void; info: (string, { [key: string]: unknown } | undefined) => void; level: string; trace: (string, { [key: string]: unknown } | undefined) => vo…', got '{ addons: { autoDecrypt: boolean | undefined; persistAllSecrets: boolean | undefined } | undefined; appStateSyncTimeoutMs: number | undefined; chatEvents: { emitSnapshotMutations: boolean | undefined } | undefined; chatSocketUrls: string[] | undefined; companionHost: { includePem: boolean | undefined; persistence: { load: () => null | Promise<null | { companions: { addedAtSeconds: number; companionIdentityPublicKey: Uint8Array; deviceJid: string; keyIndex: number }[]; currentKeyIndex: number; rawId: number }> | { companions: { addedAtSeconds: number; companionIdentityPublicKey: Uint8Array; deviceJid: string; keyIndex: number }[]; currentKeyIndex: number; rawId: number }; save: ({ companions: { addedAtSeconds: number; companionIdentityPublicKey: Uint8Array; deviceJid: string; keyIndex: number }[]; currentKeyIndex: number; rawId: number }) => Promise<void> | undefined } | undefined } | undefined; connectTimeoutMs: number | undefined; dangerous: { disableAdvSignatureVerification: boolean | undefined; disableAppStateMacVerification: boolean | undefined; disableMediaMacVerification: boolean | undefined; disableNoiseCertificateChainVerification: boolean | undefined; disablePairSuccessHmacVerification: boolean | undefined; disableSenderKeySignatureVerification: boolean | undefined; disableSignedPreKeySignatureVerification: boolean | undefined } | undefined; deadSocketTimeoutMs: number | undefined; deviceBrowser: string | undefined; deviceOsDisplayName: string | undefined; devicePlatform: string | undefined; history: { enabled: boolean | undefined; requireFullSync: boolean | undefined } | undefined; iqTimeoutMs: number | undefined; keepAliveIntervalMs: number | undefined; linkPreview: { allowPrivateHosts: boolean | undefined; enabled: boolean | undefined; fetchTimeoutMs: number | undefined; fetcher: { fetch: (any) => Promise<null | { description: string | undefined; matchedText: string; previewType: number; thumbnail: { bytes: Uint8Array; height: number | undefined; width: number | undefined } | { contentLength: number; height: number | undefined; stream: Readable; width: number | undefined } | undefined; title: string | undefined }> } | undefined; maxHtmlBytes: number | undefined; maxThumbnailBytes: number | undefined; proxy: unknown; uploadHqThumbnail: boolean | undefined; userAgent: string | undefined } | undefined; logoutStoreClear: { appState: boolean | undefined; auth: boolean | undefined; contacts: boolean | undefined; deviceList: boolean | undefined; groupMetadata: boolean | undefined; identity: boolean | undefined; messageSecret: boolean | undefined; messages: boolean | undefined; preKey: boolean | undefined; privacyToken: boolean | undefined; retry: boolean | undefined; senderKey: boolean | undefined; session: boolean | undefined; signal: boolean | undefined; threads: boolean | undefined } | undefined; markOnlineOnConnect: boolean | undefined; maxReconnectAttempts: number | undefined; media: { generateProbe: boolean | undefined; generateStickerThumbnail: boolean | undefined; generateThumbnail: boolean | undefined; generateWaveform: boolean | undefined; normalizeVoiceNote: boolean | undefined; processor: { computeWaveform: (Uint8Array | Readable | string, { logger: { child: ({ [key: string]: unknown }, { level: string | undefined } | undefined) => ...; debug: (string, { [key: string]: unknown } | undefined) => void; error: (string, { [key: string]: unknown } | undefined) => void; info: (string, { [key: string]: unknown } | undefined) => void; level: string; trace: (string, { [key: string]: unknown } | undefined) => void; warn: (string, { [key: string]: unknown } | undefined) => void } | undefined } | undefined) => Promise<null | { durationSeconds: number; waveform: Uint8Array }> | undefined; detectMimetype: (Uint8Array | string, { logger: { child: ({ [key: string]: unknown }, { level: string | undefined } | undefined) => ...; debug: (string, { [key: string]: unknown } | undefined) => void; error: (string, { [key: string]: unk…' — spread field 'linkPreview': '{ allowPrivateHosts: boolean | undefined; enabled: boolean | undefined; fetchTimeoutMs: number | undefined; fetcher: { fetch: (any) => Promise<null | { description: string | undefined; matchedText: string; previewType: number; thumbnail: { bytes: Uint8Array; height: number | undefined; width: number | undefined } | { contentLength: number; height: number | undefined; stream: Readable; width: number | undefined } | undefined; title: string | undefined }> } | undefined; maxHtmlBytes: number | undefined; maxThumbnailBytes: number | undefined; proxy: unknown; uploadHqThumbnail: boolean | undefined; userAgent: string | undefined } | undefined' does not lift into '{ allowPrivateHosts: boolean | undefined; enabled: boolean | undefined; fetchTimeoutMs: number | undefined; fetcher: { fetch: ({ logger: { child: ({ [key: string]: unknown }, { level: string | undefined } | undefined) => ...; debug: (string, { [key: string]: unknown } | undefined) => void; error: (string, { [key: string]: unknown } | undefined) => void; info: (string, { [key: string]: unknown } | undefined) => void; level: string; trace: (string, { [key: string]: unknown } | undefined) => void; warn: (string, { [key: string]: unknown } | undefined) => void }; matchedText: string; signal: AbortSignal | undefined; url: URL }) => Promise<null | { description: string | undefined; matchedText: string; previewType: number; thumbnail: { bytes: Uint8Array; height: number | undefined; width: number | undefined } | { contentLength: number; height: number | undefined; stream: Readable; width: number | undefined } | undefined; title: string | undefined }> } | undefined; maxHtmlBytes: number | undefined; maxThumbnailBytes: number | undefined; proxy: unknown; uploadHqThumbnail: boolean | undefined; userAgent: string | undefined } | undefined'",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/client/WaClientFactory.ts",
+   "line": 270
+  },
+  {
+   "section": "unreached",
+   "code": "SC2004",
+   "message": "uses of 'sessionStore' inherit the blocker on its declaration",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/client/WaClientFactory.ts",
+   "line": 294
+  },
+  {
+   "section": "unreached",
+   "code": "SC1063",
+   "message": "this use of a catch binding is not supported yet",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/client/persistence/companion-host.ts",
+   "line": 64
+  },
+  {
+   "section": "unreached",
+   "code": "SC2020",
+   "message": "'writeFile with 3 arguments' is part of the standard library types but has no scriptc lowering yet",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/client/persistence/companion-host.ts",
+   "line": 94
+  },
+  {
+   "section": "unreached",
+   "code": "SC2020",
+   "message": "'fs/promises.rename' is typed by @types/node but has no scriptc lowering yet",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/client/persistence/companion-host.ts",
+   "line": 95
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "dynamic keyed reads of '{ child: ({ [key: string]: unknown }) => ... | undefined; debug: (...unknown) => void; error: (...unknown) => void; info: (...unknown) => void; level: string; trace: (...unknown) => void; warn: (...unknown) => void }' (the declared fields have no one common type) is not supported yet",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/infra/log/PinoLogger.ts",
+   "line": 137
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "Function.prototype.call on a compiled function value (compiled calls are direct — no runtime 'this' or arguments object exists to re-route; spell the call directly: 'Object.prototype.hasOwnProperty(...)') is not supported yet",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/infra/log/PinoLogger.ts",
+   "line": 141
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "dynamic keyed reads of '{ child: ({ [key: string]: unknown }) => ... | undefined; debug: (...unknown) => void; error: (...unknown) => void; info: (...unknown) => void; level: string; trace: (...unknown) => void; warn: (...unknown) => void }' (the declared fields have no one common type) is not supported yet",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/infra/log/PinoLogger.ts",
+   "line": 146
+  },
+  {
+   "section": "unreached",
+   "code": "SC2013",
+   "message": "values from the '@vinikjkkj/wa-wam' package run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/packages/wam/src/registry.ts",
+   "line": 42
+  },
+  {
+   "section": "unreached",
+   "code": "SC2013",
+   "message": "values from the '@vinikjkkj/wa-wam' package run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/packages/wam/src/registry.ts",
+   "line": 56
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "the reference to 'WA_VERSION' (it has no compiled implementation — its module '../../../spec/version/index.d.ts' ships only a declaration file) is not supported yet",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/packages/wam/src/globals.ts",
+   "line": 42
+  },
+  {
+   "section": "unreached",
+   "code": "SC2013",
+   "message": "values from the '@vinikjkkj/wa-wam' package run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/packages/wam/src/globals.ts",
+   "line": 67
+  },
+  {
+   "section": "unreached",
+   "code": "SC2013",
+   "message": "values from the '@vinikjkkj/wa-wam' package run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/packages/wam/src/wire/WamBatch.ts",
+   "line": 39
+  },
+  {
+   "section": "unreached",
+   "code": "SC2013",
+   "message": "values from the '@vinikjkkj/wa-wam' package run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/packages/wam/src/wire/WamBatch.ts",
+   "line": 42
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "comparisons of union-typed values (narrow first: check a discriminant field, or compare with '!== undefined'/'!== null' for unit arms) are not supported yet",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/packages/wam/src/wire/WamBatch.ts",
+   "line": 51
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "the reference to 'WA_MEX_PERSIST_IDS' (it has no compiled implementation — its module '../../../../spec/mex/index.d.ts' ships only a declaration file) is not supported yet (instantiating 'runMexQuery' with <string, null | { xwa2_group_query_by_id: { __typename: string | undefined; de...>)",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/transport/node/mex/client.ts",
+   "line": 56
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "the reference to 'WA_MEX_PERSIST_IDS' (it has no compiled implementation — its module '../../../../spec/mex/index.d.ts' ships only a declaration file) is not supported yet (instantiating 'runMexQuery' with <string, null | { xwa2_group_query_by_id: { __typename: string | undefined; id...>)",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/transport/node/mex/client.ts",
+   "line": 56
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "the reference to 'WA_MEX_PERSIST_IDS' (it has no compiled implementation — its module '../../../../spec/mex/index.d.ts' ships only a declaration file) is not supported yet (instantiating 'runMexQuery' with <string, null | { xwa2_group_update_users_role: { group_id: string | undefined...>)",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/transport/node/mex/client.ts",
+   "line": 56
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "the reference to 'WA_MEX_PERSIST_IDS' (it has no compiled implementation — its module '../../../../spec/mex/index.d.ts' ships only a declaration file) is not supported yet (instantiating 'runMexQuery' with <string, null | { wa_create_group_suspension_appeal: { appeal_creation_time: s...>)",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/transport/node/mex/client.ts",
+   "line": 56
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "the reference to 'WA_MEX_PERSIST_IDS' (it has no compiled implementation — its module '../../../../spec/mex/index.d.ts' ships only a declaration file) is not supported yet (instantiating 'runMexQuery' with <string, null | { xwa2_update_text_status: { result: string | undefined } | un...>)",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/transport/node/mex/client.ts",
+   "line": 56
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "the reference to 'WA_MEX_PERSIST_IDS' (it has no compiled implementation — its module '../../../../spec/mex/index.d.ts' ships only a declaration file) is not supported yet (instantiating 'runMexQuery' with <string, null | { xwa2_username_get: { username_info: { pin: string | undefine...>)",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/transport/node/mex/client.ts",
+   "line": 56
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "the reference to 'WA_MEX_PERSIST_IDS' (it has no compiled implementation — its module '../../../../spec/mex/index.d.ts' ships only a declaration file) is not supported yet (instantiating 'runMexQuery' with <string, null | { xwa2_username_set: { result: string | undefined } | undefined }>)",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/transport/node/mex/client.ts",
+   "line": 56
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "the reference to 'WA_MEX_PERSIST_IDS' (it has no compiled implementation — its module '../../../../spec/mex/index.d.ts' ships only a declaration file) is not supported yet (instantiating 'runMexQuery' with <string, null | { xwa2_users_updates_since: { updates: { __typename: string | ...>)",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/transport/node/mex/client.ts",
+   "line": 56
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "the reference to 'WA_MEX_PERSIST_IDS' (it has no compiled implementation — its module '../../../../spec/mex/index.d.ts' ships only a declaration file) is not supported yet (instantiating 'runMexQuery' with <string, null | { xwa2_username_check: { result: string | undefined; suggestio...>)",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/transport/node/mex/client.ts",
+   "line": 56
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "the reference to 'WA_MEX_PERSIST_IDS' (it has no compiled implementation — its module '../../../../spec/mex/index.d.ts' ships only a declaration file) is not supported yet (instantiating 'runMexQuery' with <string, null | { xwa2_username_pin_set: { result: string | undefined } | unde...>)",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/transport/node/mex/client.ts",
+   "line": 56
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "the reference to 'WA_MEX_PERSIST_IDS' (it has no compiled implementation — its module '../../../../spec/mex/index.d.ts' ships only a declaration file) is not supported yet (instantiating 'runMexQuery' with <string, null | { xwa2_newsletter_create: { id: string | undefined; state: { t...>)",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/transport/node/mex/client.ts",
+   "line": 56
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "the reference to 'WA_MEX_PERSIST_IDS' (it has no compiled implementation — its module '../../../../spec/mex/index.d.ts' ships only a declaration file) is not supported yet (instantiating 'runMexQuery' with <string, null | { xwa2_newsletter_update: { id: string | undefined; state: { t...>)",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/transport/node/mex/client.ts",
+   "line": 56
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "the reference to 'WA_MEX_PERSIST_IDS' (it has no compiled implementation — its module '../../../../spec/mex/index.d.ts' ships only a declaration file) is not supported yet (instantiating 'runMexQuery' with <string, null | { xwa2_newsletter_delete_v2: { id: string | undefined; state: ...>)",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/transport/node/mex/client.ts",
+   "line": 56
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "the reference to 'WA_MEX_PERSIST_IDS' (it has no compiled implementation — its module '../../../../spec/mex/index.d.ts' ships only a declaration file) is not supported yet (instantiating 'runMexQuery' with <string, null | { xwa2_newsletter_admin: { admin_count: number | undefined; ad...>)",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/transport/node/mex/client.ts",
+   "line": 56
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "the reference to 'WA_MEX_PERSIST_IDS' (it has no compiled implementation — its module '../../../../spec/mex/index.d.ts' ships only a declaration file) is not supported yet (instantiating 'runMexQuery' with <string, null | { xwa2_newsletter_admin: { capabilities: string[] | undefined;...>)",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/transport/node/mex/client.ts",
+   "line": 56
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "the reference to 'WA_MEX_PERSIST_IDS' (it has no compiled implementation — its module '../../../../spec/mex/index.d.ts' ships only a declaration file) is not supported yet (instantiating 'runMexQuery' with <string, null | { xwa2_newsletter_followers: { followers: { edges: { admin_pro...>)",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/transport/node/mex/client.ts",
+   "line": 56
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "the reference to 'WA_MEX_PERSIST_IDS' (it has no compiled implementation — its module '../../../../spec/mex/index.d.ts' ships only a declaration file) is not supported yet (instantiating 'runMexQuery' with <string, null | { xwa2_newsletter_admin_insights: { last_update_time: string |...>)",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/transport/node/mex/client.ts",
+   "line": 56
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "the reference to 'WA_MEX_PERSIST_IDS' (it has no compiled implementation — its module '../../../../spec/mex/index.d.ts' ships only a declaration file) is not supported yet (instantiating 'runMexQuery' with <string, null | { xwa2_channels_reports: { channels_reports: { appeal: { appea...>)",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/transport/node/mex/client.ts",
+   "line": 56
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "the reference to 'WA_MEX_PERSIST_IDS' (it has no compiled implementation — its module '../../../../spec/mex/index.d.ts' ships only a declaration file) is not supported yet (instantiating 'runMexQuery' with <string, null | { xwa2_newsletter_admin: { id: string | undefined; pending_adm...>)",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/transport/node/mex/client.ts",
+   "line": 56
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "the reference to 'WA_MEX_PERSIST_IDS' (it has no compiled implementation — its module '../../../../spec/mex/index.d.ts' ships only a declaration file) is not supported yet (instantiating 'runMexQuery' with <string, null | { xwa2_channel_enforcements: { geosuspensions: { base_enforcem...>)",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/transport/node/mex/client.ts",
+   "line": 56
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "the reference to 'WA_MEX_PERSIST_IDS' (it has no compiled implementation — its module '../../../../spec/mex/index.d.ts' ships only a declaration file) is not supported yet (instantiating 'runMexQuery' with <string, null | { voter_list: { votes: { vote_hash: string | undefined; voter_...>)",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/transport/node/mex/client.ts",
+   "line": 56
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "the reference to 'WA_MEX_PERSIST_IDS' (it has no compiled implementation — its module '../../../../spec/mex/index.d.ts' ships only a declaration file) is not supported yet (instantiating 'runMexQuery' with <string, null | { xwa2_newsletters_reaction_sender_list: { reactions: { reacti...>)",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/transport/node/mex/client.ts",
+   "line": 56
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "the reference to 'WA_MEX_PERSIST_IDS' (it has no compiled implementation — its module '../../../../spec/mex/index.d.ts' ships only a declaration file) is not supported yet (instantiating 'runMexQuery' with <string, null | { xwa2_newsletter_log_exposures: { __typename: string | undefi...>)",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/transport/node/mex/client.ts",
+   "line": 56
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "the reference to 'WA_MEX_PERSIST_IDS' (it has no compiled implementation — its module '../../../../spec/mex/index.d.ts' ships only a declaration file) is not supported yet (instantiating 'runMexQuery' with <string, null | { xwa2_newsletter_change_owner: { __typename: string | undefin...>)",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/transport/node/mex/client.ts",
+   "line": 56
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "the reference to 'WA_MEX_PERSIST_IDS' (it has no compiled implementation — its module '../../../../spec/mex/index.d.ts' ships only a declaration file) is not supported yet (instantiating 'runMexQuery' with <string, null | { xwa2_newsletter_admin_demote: { __typename: string | undefin...>)",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/transport/node/mex/client.ts",
+   "line": 56
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "the reference to 'WA_MEX_PERSIST_IDS' (it has no compiled implementation — its module '../../../../spec/mex/index.d.ts' ships only a declaration file) is not supported yet (instantiating 'runMexQuery' with <string, null | { xwa2_newsletter_admin_invite_create: { id: string | undefine...>)",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/transport/node/mex/client.ts",
+   "line": 56
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "the reference to 'WA_MEX_PERSIST_IDS' (it has no compiled implementation — its module '../../../../spec/mex/index.d.ts' ships only a declaration file) is not supported yet (instantiating 'runMexQuery' with <string, null | { xwa2_newsletter_admin_invite_accept: { __typename: string | ...>)",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/transport/node/mex/client.ts",
+   "line": 56
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "the reference to 'WA_MEX_PERSIST_IDS' (it has no compiled implementation — its module '../../../../spec/mex/index.d.ts' ships only a declaration file) is not supported yet (instantiating 'runMexQuery' with <string, null | { xwa2_newsletter_admin_invite_revoke: { __typename: string | ...>)",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/transport/node/mex/client.ts",
+   "line": 56
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "the reference to 'WA_MEX_PERSIST_IDS' (it has no compiled implementation — its module '../../../../spec/mex/index.d.ts' ships only a declaration file) is not supported yet (instantiating 'runMexQuery' with <string, null | { xwa2_newsletter: { id: string | undefined; state: { type: st...>)",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/transport/node/mex/client.ts",
+   "line": 56
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "the reference to 'WA_MEX_PERSIST_IDS' (it has no compiled implementation — its module '../../../../spec/mex/index.d.ts' ships only a declaration file) is not supported yet (instantiating 'runMexQuery' with <string, null | { xwa2_newsletter_subscribed: { id: string | undefined; state:...>)",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/transport/node/mex/client.ts",
+   "line": 56
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "the reference to 'WA_MEX_PERSIST_IDS' (it has no compiled implementation — its module '../../../../spec/mex/index.d.ts' ships only a declaration file) is not supported yet (instantiating 'runMexQuery' with <string, null | { xwa2_newsletters_directory_search: { page_info: { endCursor:...>)",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/transport/node/mex/client.ts",
+   "line": 56
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "the reference to 'WA_MEX_PERSIST_IDS' (it has no compiled implementation — its module '../../../../spec/mex/index.d.ts' ships only a declaration file) is not supported yet (instantiating 'runMexQuery' with <string, null | { xwa2_newsletters_recommended: { page_info: { endCursor: stri...>)",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/transport/node/mex/client.ts",
+   "line": 56
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "the reference to 'WA_MEX_PERSIST_IDS' (it has no compiled implementation — its module '../../../../spec/mex/index.d.ts' ships only a declaration file) is not supported yet (instantiating 'runMexQuery' with <string, null | { xwa2_newsletters_similar: { result: { id: string | undefined...>)",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/transport/node/mex/client.ts",
+   "line": 56
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "the reference to 'WA_MEX_PERSIST_IDS' (it has no compiled implementation — its module '../../../../spec/mex/index.d.ts' ships only a declaration file) is not supported yet (instantiating 'runMexQuery' with <string, null | { xwa2_newsletters_directory_list: { page_info: { endCursor: s...>)",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/transport/node/mex/client.ts",
+   "line": 56
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "the reference to 'WA_MEX_PERSIST_IDS' (it has no compiled implementation — its module '../../../../spec/mex/index.d.ts' ships only a declaration file) is not supported yet (instantiating 'runMexQuery' with <string, null | { xwa2_newsletters_directory_category_preview: { result: { cat...>)",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/transport/node/mex/client.ts",
+   "line": 56
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "the reference to 'WA_MEX_PERSIST_IDS' (it has no compiled implementation — its module '../../../../spec/mex/index.d.ts' ships only a declaration file) is not supported yet (instantiating 'runMexQuery' with <string, null | { xwa2_newsletter_message_integrity: { url_previews: { is_prev...>)",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/transport/node/mex/client.ts",
+   "line": 56
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "the reference to 'WA_MEX_PERSIST_IDS' (it has no compiled implementation — its module '../../../../spec/mex/index.d.ts' ships only a declaration file) is not supported yet (instantiating 'runMexQuery' with <string, null | { xwa2_newsletter: { id: string | undefined; thread_metadata: ...>)",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/transport/node/mex/client.ts",
+   "line": 56
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type '{ readonly operation: number; readonly keyId: Uint8Array<ArrayBufferLike>; readonly keyData: Uint8Array<ArrayBufferLike>; readonly index: string; readonly value: ISyncActionValue | null; readonly version: number; readonly iv?: Uint8Array<...> | undefined; }' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/appstate/crypto/WaAppStateCrypto.ts",
+   "line": 138
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'Readonly<WaClientOptions>' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/client/connection/WaConnectionManager.ts",
+   "line": 27
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type '(event: WaIncomingAddonEvent) => void' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/client/coordinators/WaMessageCoordinator.ts",
+   "line": 137
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'WaMessageDispatchCoordinatorOptions' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/client/coordinators/WaMessageDispatchCoordinator.ts",
+   "line": 170
+  },
+  {
+   "section": "unreached",
+   "code": "SC2005",
+   "message": "values of type 'WaMobileEmit' cannot be compiled: the signature keeps its type parameters, and a compiled function is always one concrete signature (generic functions monomorphize per pinned signature — declarations, methods, and never-reassigned bindings holding a generic arrow/function expression, an alias of a registered generic function, or a function initializer under a generic-signature annotation)",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/client/coordinators/WaMobileCoordinator.ts",
+   "line": 107
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'WaRetryCoordinatorOptions' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/client/coordinators/WaRetryCoordinator.ts",
+   "line": 163
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'WaIncomingMessageEvent' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/packages/wam/src/synthetic/WaWamSyntheticUi.ts",
+   "line": 190
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'WaAppStateMutationEvent' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/packages/wam/src/WaWamAutoEmitter.ts",
+   "line": 214
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'IHistorySyncNotification' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/client/persistence/history-sync.ts",
+   "line": 54
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'IHistorySyncNotification' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/client/persistence/history-sync.ts",
+   "line": 69
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'IHistorySyncNotification' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/client/persistence/history-sync.ts",
+   "line": 305
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'IMessage | undefined' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/message/encode/content.ts",
+   "line": 31
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'IMessage' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/message/encode/content.ts",
+   "line": 173
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'IMessage' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/message/encode/content.ts",
+   "line": 177
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'IMessage' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/message/encode/content.ts",
+   "line": 204
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'IMessage' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/message/encode/content.ts",
+   "line": 266
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'IMessage' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/message/encode/content.ts",
+   "line": 300
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'IMessage' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/message/encode/content.ts",
+   "line": 317
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'IMessage' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/message/encode/content.ts",
+   "line": 371
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'IMessage' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/message/encode/content.ts",
+   "line": 409
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'IMessage' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/message/encode/content.ts",
+   "line": 422
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'WaIncomingMessageEvent' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/client/persistence/mailbox.ts",
+   "line": 52
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'WaPersistIncomingMailboxOptions' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/client/persistence/mailbox.ts",
+   "line": 82
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'WaClientPluginDefinition' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/client/plugins/types.ts",
+   "line": 57
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'WaClientPluginInstallInput' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/client/plugins/install.ts",
+   "line": 58
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'IExternalBlobReference' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/appstate/utils.ts",
+   "line": 66
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'readonly CollectionResponsePayload[]' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/appstate/parsers/response-parser.ts",
+   "line": 32
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'WaAppStateMutation' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/client/events/appstate-mutation.ts",
+   "line": 12
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'ISyncActionValue | null' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/client/events/appstate-mutation.ts",
+   "line": 57
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'ISyncActionValue' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/client/coordinators/WaAppStateMutationCoordinator.ts",
+   "line": 196
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'WaSendContextInfo' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/message/context-info.ts",
+   "line": 31
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'IMessage' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/message/context-info.ts",
+   "line": 64
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'IMessage | undefined' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/message/context-info.ts",
+   "line": 96
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'IMessage' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/message/context-info.ts",
+   "line": 117
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'IMessage' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/message/context-info.ts",
+   "line": 133
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'WaSendContextResolveInput' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/message/context-info.ts",
+   "line": 184
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'IMessage' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/message/crypto/use-case-secret.ts",
+   "line": 41
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'IMessage' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/message/crypto/addon-crypto.ts",
+   "line": 104
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'WaDecodedAddon' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/message/crypto/addon-crypto.ts",
+   "line": 235
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'IMessage' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/message/kinds/bot.ts",
+   "line": 61
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'IMessage' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/message/kinds/bot.ts",
+   "line": 92
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'IMessage' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/message/kinds/bot.ts",
+   "line": 119
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'IMessage' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/message/kinds/bot.ts",
+   "line": 139
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'WaBotCoordinatorOptions' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/client/coordinators/WaBotCoordinator.ts",
+   "line": 329
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'WaBroadcastListCoordinatorOptions' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/client/coordinators/WaBroadcastListCoordinator.ts",
+   "line": 51
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'IMessage | null | undefined' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/message/encode/media-payload.ts",
+   "line": 82
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'WaSendMediaMessage' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/client/media.ts",
+   "line": 369
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'WaSendMediaMessage' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/client/media.ts",
+   "line": 388
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'WaSendMediaMessage' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/client/media.ts",
+   "line": 410
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'WaSendMediaMessage' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/client/media.ts",
+   "line": 422
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'WaSendMediaMessage' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/client/media.ts",
+   "line": 434
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'WaSendMediaMessage' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/client/media.ts",
+   "line": 446
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'WaSendMediaMessage' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/client/media.ts",
+   "line": 492
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'IMessage | WaIncomingMessageEvent' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/client/media.ts",
+   "line": 635
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'BuildReportingTokenNodeInput' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/message/crypto/reporting-token.ts",
+   "line": 85
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'IMessage' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/message/crypto/reporting-token.ts",
+   "line": 136
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'IMessage' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/message/encode/device-sent.ts",
+   "line": 38
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'WaSendMessageContent' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/client/coordinators/WaMessageDispatchCoordinator.ts",
+   "line": 1828
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'WaSendContextInfo | null' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/client/coordinators/WaMessageDispatchCoordinator.ts",
+   "line": 1836
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'IHistorySync' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/client/messaging/companion-host.ts",
+   "line": 31
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'IProtocolMessage' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/client/messaging/companion-host.ts",
+   "line": 42
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'HistorySyncBootstrapInput' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/client/messaging/companion-host.ts",
+   "line": 66
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'WaSendStickerPackMessage' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/message/kinds/sticker-pack.ts",
+   "line": 5
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'WaSendStickerPackMessage' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/message/kinds/sticker-pack.ts",
+   "line": 19
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'WaSendStickerPackMessage' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/message/kinds/sticker-pack.ts",
+   "line": 30
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'WaSendMediaMessage' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/client/newsletter/content.ts",
+   "line": 133
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'IMessage' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/client/newsletter/content.ts",
+   "line": 139
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'WaSendAudioMessage | WaSendDocumentMessage | WaSendImageMessage | WaSendPtvMessage | WaSendStickerMessage | WaSendVideoMessage' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/client/newsletter/content.ts",
+   "line": 153
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'WaSendMessageContent' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/client/newsletter/content.ts",
+   "line": 232
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'WaSendMessageContent' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/client/newsletter/messaging.ts",
+   "line": 104
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'WaNewsletterMessagingOps' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/client/newsletter/messaging.ts",
+   "line": 192
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'WaNewsletterCoordinator' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/client/coordinators/WaNewsletterCoordinator.ts",
+   "line": 59
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'ProcessNewsletterMessageOptions' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/message/kinds/newsletter.ts",
+   "line": 27
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'ProcessNewsletterMessageOptions' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/message/kinds/newsletter.ts",
+   "line": 57
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'ProcessNewsletterMessageOptions' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/message/kinds/newsletter.ts",
+   "line": 163
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'ProcessNewsletterMessageOptions' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/message/kinds/newsletter.ts",
+   "line": 180
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'ProcessNewsletterMessageOptions' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/message/kinds/newsletter.ts",
+   "line": 195
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'WaIncomingMessageAckHandlerOptions' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/message/primitives/incoming.ts",
+   "line": 105
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'IWebMessageInfo' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/message/primitives/incoming.ts",
+   "line": 190
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'IMessage' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/message/primitives/incoming.ts",
+   "line": 242
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'IMessage' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/message/primitives/incoming.ts",
+   "line": 258
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'IMessage' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/message/primitives/incoming.ts",
+   "line": 285
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'WaIncomingMessageAckHandlerOptions' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/message/primitives/incoming.ts",
+   "line": 309
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'WaIncomingMessageAckHandlerOptions' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/message/primitives/incoming.ts",
+   "line": 370
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'WaIncomingMessageAckHandlerOptions' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/message/primitives/incoming.ts",
+   "line": 435
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'WaIncomingMessageAckHandlerOptions' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/message/primitives/incoming.ts",
+   "line": 512
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'WaIncomingMessageAckHandlerOptions' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/message/primitives/incoming.ts",
+   "line": 727
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'WaStatusCoordinatorOptions' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/client/coordinators/WaStatusCoordinator.ts",
+   "line": 54
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type '{ readonly publishProtocolMessageToDevice: PublishProtocolMessageToDeviceFn; readonly fanoutResolver: DeviceFanoutResolver; readonly getCurrentCredentials: () => WaAuthCredentials | null; readonly logger: Logger; }' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/client/messaging/key-protocol.ts",
+   "line": 35
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'IMessage' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/message/addons/link-preview/builder.ts",
+   "line": 16
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'IMessage' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/client/messaging/messages.ts",
+   "line": 148
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'IMessage' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/client/messaging/messages.ts",
+   "line": 163
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'IMessage' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/client/messaging/messages.ts",
+   "line": 180
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'IMessage' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/client/messaging/messages.ts",
+   "line": 203
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'WaSendPollMessage' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/client/messaging/messages.ts",
+   "line": 221
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'WaSendEventMessage' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/client/messaging/messages.ts",
+   "line": 243
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'Promise<IMessage>' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/client/messaging/messages.ts",
+   "line": 300
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'Promise<IMessage>' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/client/messaging/messages.ts",
+   "line": 336
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'WaMediaMessageOptions' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/client/messaging/messages.ts",
+   "line": 374
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'WaMediaMessageOptions' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/client/messaging/messages.ts",
+   "line": 430
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'WaSendAudioMessage | WaSendDocumentMessage | WaSendImageMessage | WaSendPtvMessage | WaSendStickerMessage | WaSendVideoMessage' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/client/messaging/messages.ts",
+   "line": 448
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'WaSendAudioMessage | WaSendDocumentMessage | WaSendImageMessage | WaSendPtvMessage | WaSendStickerMessage | WaSendVideoMessage' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/client/messaging/messages.ts",
+   "line": 453
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'WaSendAudioMessage | WaSendDocumentMessage | WaSendImageMessage | WaSendPtvMessage | WaSendStickerMessage | WaSendVideoMessage' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/client/messaging/messages.ts",
+   "line": 461
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'WaMediaMessageOptions' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/client/messaging/messages.ts",
+   "line": 479
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'WaMediaMessageOptions' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/client/messaging/messages.ts",
+   "line": 740
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'WaMediaMessageOptions' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/client/messaging/messages.ts",
+   "line": 801
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'WaMediaMessageOptions' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/client/messaging/messages.ts",
+   "line": 859
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'WaMediaMessageOptions' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/client/messaging/messages.ts",
+   "line": 883
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'IPeerDataOperationRequestMessage' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/message/primitives/peer-data-operation.ts",
+   "line": 48
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'PeerDataOperationRequesterOptions' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/message/primitives/peer-data-operation.ts",
+   "line": 60
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type '{ readonly logger: Logger; readonly emitEvent: <K extends keyof WaClientEventMap>(event: K, ...args: Parameters<WaClientEventMap[K]>) => void; ... 13 more ...; readonly incomingMessageAckOptions: WaIncomingMessageAckHandlerOptions; }' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/client/WaClientFactory.ts",
+   "line": 298
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type '{ readonly base: WaClientBase; readonly runtime: WaClientBuildRuntime; }' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/client/WaClientFactory.ts",
+   "line": 451
+  },
+  {
+   "section": "unreached",
+   "code": "SC2011",
+   "message": "values of type 'WaClientBehaviorPluginInput | WaClientExposePluginInput<string, unknown>' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/pkgstatus-prov/1dc6b9f8de936861df5edf9c9252b41083f95fb4/src/client/plugins/define.ts",
+   "line": 29
+  }
+ ]
+}

@@ -1,0 +1,36 @@
+# EXCERPT of block rest182's shipped zapo-rest build log.
+# Source: <blocks>\rest182-final.log (96,347 bytes, 1,082 lines), outside the
+# NOTE: the quoted lines keep the original log CRLF endings (it is 1081 CR /
+# 1082 LF); those bytes are evidence, not a formatting slip -- do not normalise.
+# repo and not this block's artefact. Quoted here because section 5c rests on
+# it. Re-derive with the rg commands shown beside each block.
+#
+# NOTE: PowerShell prefixed the first stderr line with 'node : ', so a
+# '^provenance:' anchor MISSES the zapo-js line. Anchor-free is required.
+
+## rg -a -n 'provenance: (zapo-js|@zapo-js)' -- the two mapped zapo packages
+17:node : provenance: zapo-js@1.8.2 ← https://github.com/vinikjkkj/zapo@refs/tags/v1.8.2 @ 757a8071b819 (source 
+25:provenance: @zapo-js/store-sqlite@1.2.0 ← https://github.com/vinikjkkj/zapo@refs/tags/v1.8.0 @ 9a49e1fffdec (source 
+28:provenance: @zapo-js/native: not installed under the entry's node_modules; island path used
+
+## sed -n '29,32p' -- the deciding note, as PowerShell wrapped it
+provenance: 41 alias key(s) are spelled by more than one mapped package with different targets ('zapo-js/store', 
+'zapo-js/signal', 'zapo-js/auth', 'zapo-js/appstate', 'zapo-js/retry', …); tsconfig "paths" is one table per 
+program, so zapo-js's answer is used for all of them and @zapo-js/store-sqlite compile against zapo-js's checkout for 
+those specifiers
+
+## which attested tree the diagnostics are actually in:
+## rg -a -o '(9a49e1fffdec[0-9a-f]*|757a8071b819[0-9a-f]*)' | sort | uniq -c
+      1 757a8071b819
+     77 757a8071b819699437b353865b17cacffe95e9fb
+      1 9a49e1fffdec
+
+## rg -a -c ' - error SC[0-9]{4}: '  -- error SITES in the shipped build
+0
+
+## the last lines
+members you need on the destination type, if the two have to agree
+77 advisories (the build succeeded).
+=== BUILD-EXIT rc=0 ===
+finished   2026-09-07T12:51:54.3769871-03:00
+ARTIFACT   <blocks>\rest182-out182\zapo-rest-182.exe 32368640 bytes

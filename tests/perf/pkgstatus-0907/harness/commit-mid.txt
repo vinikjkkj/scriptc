@@ -1,0 +1,33 @@
+WHAT THE STORES ARE ACTUALLY WAITING ON. All five store packages attest tag
+v1.8.0, and the monorepo checkout they pull aliases zapo-js to its own src/, so
+a driver that names ONLY the store package compiles v1.8.0's zapo-js and never
+the 1.8.2 in node_modules. The same seven zapo-js-core sites -- same file, same
+line -- block all five that way. Compile store-sqlite's own source
+(byte-identical between the two tags) against 1.8.2 instead and it is 47,078
+statements, 0 failed, 0 blocker sites, and a 28,903,424-byte binary that
+constructs all sixteen domains and matches node byte for byte. The same move
+takes wam from 86 sites to 15, all of them one island.
+
+THE store-sqlite DISCREPANCY, RESOLVED. This survey measures store-sqlite at 7
+sites while tests/perf/zapo-rest/app182 ships a 32,368,640-byte service built on
+the same package at zero errors. Same package, same source; what differs is
+which zapo-js it was compiled against, and the DRIVER decides that. app182
+imports zapo-js and the store package; this survey's driver imports only the
+store package. The shipped build's own log spells the rule: 41 alias keys are
+spelled by more than one mapped package with different targets, tsconfig paths
+is one table per program, so zapo-js's answer is used for all of them and
+@zapo-js/store-sqlite compiles against zapo-js's checkout for those specifiers.
+Of the provenance commits in that log, 77 are the 1.8.2 tree and every one is an
+advisory; the v1.8.0 commit appears once, in the note, never in a diagnostic
+path. All seven of this survey's sites are in zapo-js's src/ and zero are in
+store-sqlite. Neither number was wrong; the row was under-labelled, and it now
+says which lane it is.
+
+WHY THREE PACKAGES ALL READ EXACTLY 46. store-mysql, store-postgres and
+store-redis decompose identically: 7 shared zapo-js-core sites + 19 of their own
++ 20 from the driver scaffold. The 19 is 16x "extending classes not declared in
+the program (Base*Store)" -- one per store class over a base that imports an
+islanded database driver -- plus 2 island sites and 1 config type. The 20 is
+mine: one template generates all five store drivers. Only 19 of the 46 are the
+package's own code.
+

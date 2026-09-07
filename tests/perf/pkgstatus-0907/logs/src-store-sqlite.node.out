@@ -1,0 +1,16 @@
+auth=object
+preKey=object
+session=object
+identity=object
+signal=object
+senderKey=object
+appState=object
+messages=object
+threads=object
+contacts=object
+privacyToken=object
+retry=object
+groupMetadata=object
+chatMetadata=object
+deviceList=object
+messageSecret=object
