@@ -176,6 +176,37 @@ by three orders of magnitude. The last two rows are real refusals that
 survived a build with zero diagnostics — and neither fires in this run (exit
 0, no `SC` in the output).
 
+### 3.1 One refusal in this binary carries NO SC code at all
+
+Not found by any of the above, because it is not SC-coded. In
+`messaging.bench.c`:
+
+    "Cannot load module 'argo-codec': dynamic import() of npm packages runs
+     in the embedded dynamic engine, which this build does not include
+     (compile it statically with --npm-static argo-codec, or build with
+     --dynamic)"
+
+`argo-codec` has no provenance attestation, so it took the island path, and
+the island needs the engine this build does not link — the engine scan reads
+`quickjs 0` precisely because it was not linked. zapo reaches it through a
+**dynamic** `import('argo-codec')` at
+`src/transport/node/mex/argo-decoder.ts:32`, inside a `try { } catch { }`
+that sets the module to `null`.
+
+So the compiled binary would **silently lose argo decoding on the mex
+transport** and fall through to zapo's own
+`"argo response received but 'argo-codec' not installed"` warning, at exit 0.
+It never fires in this bench — `argo` appears 0 times in every run log, both
+lanes and node — but two things follow that outlive this bench:
+
+1. **An `SC`-code census cannot see this class of refusal.** "No `[SCxxxx]`
+   throws left in the emitted C" can be literally true of a binary that still
+   refuses to load a module.
+2. **The catch makes it a degradation, not a failure.** That is the
+   silent-wrong-answer shape, and it is invisible from outside the process.
+
+`--npm-static argo-codec` is the named next step; it was not measured here.
+
 **A binary byte hit is not a fence.** The clean static control — 0 fences in
 its C — still shows `SC2020 ×1` in its `.exe` bytes, because the string lives
 in the runtime and these PE binaries have no `.CRT` section. Read the TEXT
