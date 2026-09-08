@@ -13196,6 +13196,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/fixtures/npm/cases/npmstatic-dynimport-cjs/main.ts": {
+   "order": [
+    "<repo>/tests/fixtures/npm/cases/npmstatic-dynimport-cjs/main.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/fixtures/npm/cases/promise-bridge-forever/main.ts": {
    "order": [
     "<repo>/tests/fixtures/npm/cases/promise-bridge-forever/main.ts"
