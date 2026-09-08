@@ -1,0 +1,118 @@
+### lane   : exe
+### dir    : <blocks>/clientbench/lab/app/tree/packages/fake-server/bench-noprof
+### date   : Mon Sep  7 21:53:55 ESAST 2026
+### node   : v25.9.0
+### config : contacts=default groups=default members=default messages=default
+### exe    : <blocks>/clientbench/lab/out/np-argo/messaging.bench.exe (28395008 bytes, md5 c2efd5f31ef4bd0f6243debf7601054b)
+(running fake server in separate process)
+zapo-js messaging bench
+────────────────────────
+  contacts          : 1000
+  devices/contact   : 2
+  groups            : 4
+  members/group     : 500
+  messages/scenario : 1000
+  scenarios         : send_1to1, recv_1to1, send_group, recv_group
+  store             : memory
+  --expose-gc       : no
+
+paired in 160.90 ms
+built 1000 contacts (2 dev each) in 3.18 s, dispenser misses: 0
+built 4 groups × 500 members in 3.38 s, dispenser misses: 0
+
+──[ SEND 1:1 ]──────────────────────────────
+  messages          : 1000
+  elapsed           : 3.07 s
+  throughput        : 325.4 msg/s
+  avg / msg         : 3.07 ms
+  CPU time          : n/a (see tests/perf/cpuphase -- measured externally)
+  CPU %             : n/a
+  RSS before        : 29.27 MiB
+  RSS after         : 133.65 MiB
+  RSS delta         : 104.39 MiB
+  heap delta        : n/a (no V8 heap in a compiled binary; RSS above is comparable)
+
+──[ RECV 1:1 ]──────────────────────────────
+  messages          : 1000
+  elapsed           : 1.54 s
+  throughput        : 648.9 msg/s
+  avg / msg         : 1.54 ms
+  CPU time          : n/a (see tests/perf/cpuphase -- measured externally)
+  CPU %             : n/a
+  RSS before        : 133.65 MiB
+  RSS after         : 96.10 MiB
+  RSS delta         : 0.00 MiB
+  heap delta        : n/a (no V8 heap in a compiled binary; RSS above is comparable)
+
+──[ SEND group ]──────────────────────────────
+  messages          : 1000
+  elapsed           : 9.29 s
+  throughput        : 107.6 msg/s
+  avg / msg         : 9.29 ms
+  CPU time          : n/a (see tests/perf/cpuphase -- measured externally)
+  CPU %             : n/a
+  RSS before        : 93.02 MiB
+  RSS after         : 98.51 MiB
+  RSS delta         : 5.49 MiB
+  heap delta        : n/a (no V8 heap in a compiled binary; RSS above is comparable)
+
+──[ RECV group ]──────────────────────────────
+  messages          : 1000
+  elapsed           : 1.42 s
+  throughput        : 702.0 msg/s
+  avg / msg         : 1.42 ms
+  CPU time          : n/a (see tests/perf/cpuphase -- measured externally)
+  CPU %             : n/a
+  RSS before        : 98.73 MiB
+  RSS after         : 99.11 MiB
+  RSS delta         : 0.38 MiB
+  heap delta        : n/a (no V8 heap in a compiled binary; RSS above is comparable)
+
+[
+  {
+    "name": "SEND 1:1",
+    "messages": 1000,
+    "elapsedMs": 3073.0130999982357,
+    "throughputMsgsPerSec": 325.4135167860411,
+    "avgMsPerMsg": 3.073013099998236,
+    "cpuTimeMs": 0,
+    "cpuPercent": 0,
+    "rssDeltaBytes": 109457408,
+    "heapDeltaBytes": 0
+  },
+  {
+    "name": "RECV 1:1",
+    "messages": 1000,
+    "elapsedMs": 1541.1755999922752,
+    "throughputMsgsPerSec": 648.8553283642774,
+    "avgMsPerMsg": 1.5411755999922752,
+    "cpuTimeMs": 0,
+    "cpuPercent": 0,
+    "rssDeltaBytes": 0,
+    "heapDeltaBytes": 0
+  },
+  {
+    "name": "SEND group",
+    "messages": 1000,
+    "elapsedMs": 9291.453299999237,
+    "throughputMsgsPerSec": 107.6257898212847,
+    "avgMsPerMsg": 9.291453299999237,
+    "cpuTimeMs": 0,
+    "cpuPercent": 0,
+    "rssDeltaBytes": 5754880,
+    "heapDeltaBytes": 0
+  },
+  {
+    "name": "RECV group",
+    "messages": 1000,
+    "elapsedMs": 1424.5090999901295,
+    "throughputMsgsPerSec": 701.996217508845,
+    "avgMsPerMsg": 1.4245090999901295,
+    "cpuTimeMs": 0,
+    "cpuPercent": 0,
+    "rssDeltaBytes": 397312,
+    "heapDeltaBytes": 0
+  }
+]
+RUN_EXIT=0
+RUN_SECONDS=61

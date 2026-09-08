@@ -64,6 +64,15 @@ selects: `_store-factory.ts` switches on `ZAPO_BENCH_STORE`, whose default is
 because the switch names them. Removing the four unreachable arms is what
 takes 583 → 18; that is the substitution, and it is the whole delta.
 
+**Recorded, not chased.** The mongo arm is a **one-line change on zapo's
+side** — split `_store-factory.ts` so a backend's `@zapo-js/store-*` import
+is only named on the branch that uses it — and zapo is read-only test input to
+us, so this block does not make it. The compiler-side alternative (a
+provenance-mapped package's source stops being typechecked under the DRIVER's
+tsconfig, the `skipLibCheck` precedent one level out) is the higher-leverage
+form, and it belongs to whoever owns `store-mongo`. Nothing below measures
+into `store-mongo`, `store-redis`, or the provenance spec-twin walk.
+
 ### 18, and its ONE root
 
 17 × `SC1090` in `messaging.bench.ts` (`new InspectorSession()`, then
@@ -176,36 +185,130 @@ by three orders of magnitude. The last two rows are real refusals that
 survived a build with zero diagnostics — and neither fires in this run (exit
 0, no `SC` in the output).
 
-### 3.1 One refusal in this binary carries NO SC code at all
+### 3.1 THREE refusals in this binary carry no SC code at all
 
-Not found by any of the above, because it is not SC-coded. In
-`messaging.bench.c`:
+Not found by any `SC` census, because they are not `SC`-coded. Searching the
+**emitter for the message construction** — not the emitted C for a string I
+already knew — there is exactly **one** site in the whole compiler that puts a
+compiler-limitation refusal into the program without a code:
 
-    "Cannot load module 'argo-codec': dynamic import() of npm packages runs
-     in the embedded dynamic engine, which this build does not include
-     (compile it statically with --npm-static argo-codec, or build with
-     --dynamic)"
+    packages/compiler/src/frontend/lowering/lower-island.ts:770
+      `Cannot load module '${spec}': dynamic import() of npm packages runs in
+       the embedded dynamic engine, which this build does not include
+       (compile it statically with --npm-static ${spec}, or build with --dynamic)`
+      → libCall error.new → intrinsic promise.reject
 
-`argo-codec` has no provenance attestation, so it took the island path, and
-the island needs the engine this build does not link — the engine scan reads
-`quickjs 0` precisely because it was not linked. zapo reaches it through a
-**dynamic** `import('argo-codec')` at
-`src/transport/node/mex/argo-decoder.ts:32`, inside a `try { } catch { }`
-that sets the module to `null`.
+**How the sweep was bounded** (`harness/uncoded-sweep.mjs`, output in
+`runs/uncoded-sweep.txt`). Every other refusal reaches the program through a
+coded channel: the `runtimeFence` IR node (`nodes.ts:2544`, carrying
+`code: string`) emitted as `scr_throw_error_msg_code(..., "SCxxxx")`
+(`emit-stmts.ts:758`), `scr_fence_fatal(..., code)`,
+`scr_throw_lowering_fence`, or the compile-time `L.noLowering(...)` /
+`L.unsupported("SCxxxx", …)`. So the uncoded channel is "a
+compiler-limitation message lowered as an ordinary **value**". Corroborating
+by hand: there are 13 `fn: "error.new"` construction sites in the compiler; 12
+build Node-parity messages (`Reduce of empty array with no initial value`,
+`Cannot read properties of …`, DOMException, the startup-crash replay,
+`expected <T> at $.field`) and one — `lower-island.ts` — builds a
+compiler-limitation message. `promise.reject` has three lowering sites, two of
+which are the user's own `Promise.reject`.
 
-So the compiled binary would **silently lose argo decoding on the mex
-transport** and fall through to zapo's own
-`"argo response received but 'argo-codec' not installed"` warning, at exit 0.
-It never fires in this bench — `argo` appears 0 times in every run log, both
-lanes and node — but two things follow that outlive this bench:
+**The sweep carries three negative controls, and it needed all three.** Its
+first version reported **6** sites and still printed `selftest ok` — a false
+green, because the only control it had was one of the three files it was
+wrong about. The three it must reject:
+
+| control | why it looks like an uncoded refusal | why it is not |
+|---|---|---|
+| `lower-emitter.ts:411` | same vocabulary (*"symbol names have no lowering"*) | it is an `L.noLowering(...)` **hint** |
+| `lower-stmts.ts:2249` | *"has no lowering yet"* next to a `strLit` | `L.unsupported("SC1031", …)` — coded, code in the call |
+| `lower-sqlite.ts:101–108` | the `DB_REFUSALS` / `STMT_REFUSALS` entries sit a dozen lines from an unrelated `strLit` helper | they are **hint tables**, `Record<string, string>`, consumed by 11 later `L.noLowering(...)` calls |
+
+A proximity window cannot tell a hint table from an IR construction, so the
+sweep recognises the table declaration itself. With the controls in place the
+answer is **1 file, 1 template** — and the same three specifiers appear on the
+**LLVM** lane too, so this is a lowering property, not a backend one.
+
+**One template, three instances.** The message is parameterised by specifier,
+and the compiled bench carries three:
+
+| specifier | zapo's site | what zapo does with it | reachable in this bench? | what is silently lost |
+|---|---|---|---|---|
+| **`argo-codec`** | `src/transport/node/mex/argo-decoder.ts:32` | `try { … } catch { cachedArgo = null }` — **swallowed** | no | **argo decoding on the mex transport.** zapo degrades to its own `"argo response received but 'argo-codec' not installed"` warning and continues at exit 0 |
+| `ws` | `src/transport/WaWebSocket.ts:46` | caught, then discriminated on `err.code === 'ERR_MODULE_NOT_FOUND' \| 'MODULE_NOT_FOUND'`; **rethrown** if it is neither | no — only reached when `socketRuntime === 'node' && agent`, i.e. a proxy/agent on the websocket, which this bench does not set | nothing silently — it surfaces |
+| `bun:sqlite` | `packages/store-sqlite/src/connection.ts:329` | caught, **rethrown** with a clearer message (*"Run this in Bun or set storage.sqlite.driver to better-sqlite3"*) | no — only when the Bun sqlite driver is selected | nothing silently — it surfaces |
+
+**So one of the three is swallowed, and it is `argo-codec`.** `argo` appears
+**0 times** in every run log — both backends and node — so nothing in this
+bench takes that path; the finding is about what a compiled zapo *client*
+would do in production, not about this measurement.
+
+**The `ws` row carries its own sub-finding.** The compiler's refusal is a
+plain `Error` with **no `.code`**, so zapo's optional-dependency branch — the
+standard Node idiom, `err.code === 'ERR_MODULE_NOT_FOUND'` — does not fire and
+the compiler's message is rethrown in place of zapo's `"optional dependency
+\"ws\" is not installed. Install with: npm i ws"`. Stamping
+`ERR_MODULE_NOT_FOUND` on it would make that branch fire, and it would then
+give **wrong advice**: the package *is* installed, the build just cannot run
+it. That is a real trade-off, not an oversight, and it should be decided
+rather than drifted into.
+
+### 3.2 `--npm-static argo-codec` — measured. It closes the refusal.
+
+Same entry, same everything else, `--npm-static argo-codec` added:
+
+| | baseline `np-strict` | `--npm-static argo-codec` |
+|---|---:|---:|
+| build | exit 0, **0 errors** | exit 0, **0 errors** |
+| binary | 28,344,832 B | **28,395,008** B (**+50,176 B, +0.18%**) |
+| emitted C | 138,140,754 B, 16 files | 138,396,726 B, 16 files |
+| engine scan | `quickjs 0 / ScrDyn 0` | `quickjs 0 / ScrDyn 0` |
+| **uncoded module refusals** | **3** — `argo-codec`, `ws`, `bun:sqlite` | **2** — `ws`, `bun:sqlite` |
+| bracketed coded fence sites | 1 | **11** |
+| smoke run (4×20) | exit 0 | exit 0 |
+| full run (4×1,000) | exit 0 | exit 0, **0** `SC` codes and **0** `argo` lines in the output |
+
+`Cannot load module 'argo-codec'` is **gone from the emitted C**, and the
+package is genuinely in the program, not merely silenced: the C carries
+`argo-codec` ×13, `ArgoResponse` ×10 and `ArgoDecoderAvailable` ×10.
+
+**What it costs is a trade, and the trade is favourable.** The 1 → 11
+bracketed fence sites are all new, and all ten additions are inside
+argo-codec's own shipped CJS:
+
+    4 × SC1090  dist/cjs/decode.js:223, :240, :244  ·  dist/cjs/index.js:19
+    4 × SC1100  dist/cjs/decode.js:37, :141  ·  encode.js:63  ·  wire.js:38
+    2 × SC2020  dist/cjs/decode.js:6  ·  dist/cjs/encode.js:319
+
+So the refusal did not disappear; it **moved from one invisible
+module-level rejection into ten countable statement-level fences**, each of
+which fires only if that statement runs. That is a strict gain in
+observability, and it is the difference between a capability that switches
+itself off silently and one whose remaining gaps can be enumerated and closed.
+
+**What it does NOT establish:** that argo decoding *works* end to end. This
+bench never exercises the mex/argo path, so the ten new fences are unfired and
+unmeasured. Proving argo decode would need a bench that drives mex — which
+this one is not, and which nobody has built.
+
+**Build times are not comparable here and I am not reporting one.** The
+baseline took 1,433 s under four concurrent loads and this build took 676 s
+after they eased. If a build-time number matters, it needs a quiet window.
+
+**This is deliberate, and the rationale is written at the site.** `import()`'s
+failure channel is in-band in Node too, so the compiler models the refusal as
+a rejected promise catchable at the `await` — *"this build answers the same
+failure it would give for a missing loader, never a silent wrong value"*. Two
+things still follow that outlive this bench:
 
 1. **An `SC`-code census cannot see this class of refusal.** "No `[SCxxxx]`
    throws left in the emitted C" can be literally true of a binary that still
-   refuses to load a module.
-2. **The catch makes it a degradation, not a failure.** That is the
-   silent-wrong-answer shape, and it is invisible from outside the process.
-
-`--npm-static argo-codec` is the named next step; it was not measured here.
+   refuses to load three modules.
+2. **In-band is not the same as visible.** Node's own failure here means "not
+   installed", and every optional-dependency `catch` in the ecosystem is
+   written for that meaning. A compiled build reuses the channel with a
+   different meaning, and `argo-codec` shows what that costs: the program
+   keeps running with a capability silently switched off.
 
 **A binary byte hit is not a fence.** The clean static control — 0 fences in
 its C — still shows `SC2020 ×1` in its `.exe` bytes, because the string lives
@@ -267,6 +370,23 @@ Ordered by whether the compiler could close it instead.
 | 7 | drop `process.on('uncaughtException')` | no lowering. **`'unhandledRejection'` IS supported** — `bench-client5` removed both, and only one needed to go | yes |
 | 8 | drop the media `proxy` agent | zapo validates it as a proxy TRANSPORT (`dispatch(...)` or `addRequest(...)`) and a compiled `https.Agent` presents neither, so zapo refuses it *at construction*. Inert for messaging; **a media bench cannot skip it** | yes — a runtime-shape gap, not a lowering gap |
 
+### If you are here to compile a MEDIA bench, read this first
+
+Row 8 is the one that stops you, and it stops you at *construction*, before
+any media request is issued. `WaClient`'s `proxy: { mediaUpload, mediaDownload }`
+is validated as a proxy **transport**: zapo requires a dispatcher with
+`dispatch(...)` or an agent with `addRequest(...)`. A compiled `https.Agent`
+presents **neither**, so `new WaClient({ proxy: … })` is refused outright.
+
+Messaging gets to sidestep it — this bench builds the agent and never issues a
+media request, so the option can simply be dropped (`bench-client5` drops it,
+and that is why the messaging lane compiles). **A media bench cannot.** It
+needs the compiled `https.Agent` to present a proxy-transport shape, which is
+a runtime-shape gap on our side, not a missing lowering: the type checks, the
+object exists, and the duck-type test fails at run time. Closing it means
+giving the compiled `Agent` an `addRequest(...)` (or a dispatcher surface),
+not adding a lowering.
+
 ## 5. What the prior art already gave us
 
 | where | what it already achieved |
@@ -291,6 +411,7 @@ What was missing was the strict lane and the run: `22 errors flagless` →
 | `harness/run.sh` | the node lane on the same source | exit 0, 4 scenarios, both workloads |
 | `harness/ladder-noprofile.mjs` | its own self-test | refuses to write unless `InspectorSession`/`this.session` reach 0 **and** the scenario bodies, `mainSeparateProcess` and `WaClient` all survive |
 | `transport/*.diff` | `patch --dry-run` on pristine `bench/` | both apply |
+| `harness/uncoded-sweep.mjs` | one positive (`lower-island.ts` must be found) **and three negatives** (`lower-emitter.ts`, `lower-stmts.ts`, `lower-sqlite.ts` must not) | 1 file, 1 template. Its first version reported 6 and still said `selftest ok`, because its only control was one of the files it was wrong about |
 
 ## 7. Reproducing
 
@@ -310,7 +431,22 @@ Three traps this harness pays for so the next block does not:
   byte offset; an edit that shifts offsets makes it execute the middle of a
   command. One 488-second build was lost to `rovenance-sources: command not
   found`. `harness/build.sh` is copied to a frozen name before a long run.
-* **Do not source another block's `env.sh`.** `<blocks>\msgbench-lab\env.sh`
-  sets no `SCRIPTC_PROVENANCE_CACHE` at all, so every build under it used the
-  `C:` default; `tests/perf/pkgstatus2/env.sh:4` and
-  `tests/perf/voipfix/env.sh:4` point it at *other blocks'* lab directories.
+* **Do not source another block's `env.sh`.** `tests/perf/pkgstatus2/env.sh:4`
+  and `tests/perf/voipfix/env.sh:4` point `SCRIPTC_PROVENANCE_CACHE` at *other
+  blocks'* lab directories.
+
+### The 08-26 C:-drive fill — closed, do not re-open it
+
+`<blocks>\msgbench-lab\env.sh` sets `ZIG_*`, `SCRIPTC_CACHE_DIR`, `TMP`,
+`TEMP`, `TMPDIR`, `SCRIPTC_CC`, `SCRIPTC_TARGET` and `PATH` — and
+**`SCRIPTC_PROVENANCE_CACHE` not at all.** `provenance.ts:312` falls back to
+`homedir()/.cache/scriptc` when it is unset, so every build in that session
+resolved provenance onto the user's `C:` drive. That lab's own README says so
+without noticing: *"The provenance source cache is the default
+`~/.cache/scriptc/provenance` and was already warm with all five packages."*
+
+That is the origin of the 08-26 fill. It was one missing variable in one
+sourced file, not a leak elsewhere in the toolchain, and
+`harness/guard.mjs` is the fix: it refuses to start a build unless all eight
+variables are set **and** point at `G:`, and it is imported for effect by
+`harness/scc.mjs`, which is the only way this block invokes the CLI.
