@@ -1,0 +1,70 @@
+== probe-matrix  2026-09-08T01:27:49Z
+   main       325eb515
+   node       v25.9.0   zig 0.16.0
+   target     x86_64-windows-gnu   cc zigcc
+
+############ rtc-dc
+  oracle rc=0  13 lines
+  [noPkg] build rc=0  backend c (llvm refused: libCall:wrtc.newPeer)
+          run rc=0  size=1360896 B  MATCH byte-identical
+          engine  quickjs=0 ScrDyn=0 JS_NewRuntime=0 control=2  [control='pc.signalingState']
+          fences  coded=[none] uncoded-refusal-strings=0
+          tier    .ll=0 .c=1  C tier (demoted or refused)
+  [withPkg] build rc=0  backend c (llvm refused: libCall:wrtc.newPeer)
+          run rc=0  size=1360896 B  MATCH byte-identical
+          engine  quickjs=0 ScrDyn=0 JS_NewRuntime=0 control=2  [control='pc.signalingState']
+          fences  coded=[none] uncoded-refusal-strings=0
+          tier    .ll=0 .c=1  C tier (demoted or refused)
+
+############ rtc-signal
+  oracle rc=0  25 lines
+  [noPkg] build rc=0  backend c (llvm refused: libCall:wrtc.newPeer)
+          run rc=0  size=1511936 B  MATCH byte-identical
+          engine  quickjs=0 ScrDyn=0 JS_NewRuntime=0 control=1  [control='before offer, signalingState']
+          fences  coded=[none] uncoded-refusal-strings=0
+          tier    .ll=0 .c=1  C tier (demoted or refused)
+  [withPkg] build rc=0  backend c (llvm refused: libCall:wrtc.newPeer)
+          run rc=0  size=1511936 B  MATCH byte-identical
+          engine  quickjs=0 ScrDyn=0 JS_NewRuntime=0 control=1  [control='before offer, signalingState']
+          fences  coded=[none] uncoded-refusal-strings=0
+          tier    .ll=0 .c=1  C tier (demoted or refused)
+
+############ rtc-events
+  oracle rc=0  9 lines
+  [noPkg] build rc=0  backend c (llvm refused: libCall:wrtc.newPeer)
+          run rc=0  size=1361920 B  MATCH byte-identical
+          engine  quickjs=0 ScrDyn=0 JS_NewRuntime=0 control=1  [control='send on connecting throws name']
+          fences  coded=[none] uncoded-refusal-strings=0
+          tier    .ll=0 .c=1  C tier (demoted or refused)
+  [withPkg] build rc=0  backend c (llvm refused: libCall:wrtc.newPeer)
+          run rc=0  size=1361920 B  MATCH byte-identical
+          engine  quickjs=0 ScrDyn=0 JS_NewRuntime=0 control=1  [control='send on connecting throws name']
+          fences  coded=[none] uncoded-refusal-strings=0
+          tier    .ll=0 .c=1  C tier (demoted or refused)
+
+############ rtc-live
+  oracle rc=0  6 lines
+  [noPkg] build rc=0  backend c (llvm refused: libCall:wrtc.newPeer)
+          run rc=0  size=1359872 B  MATCH byte-identical
+          engine  quickjs=0 ScrDyn=0 JS_NewRuntime=0 control=5  [control='before']
+          fences  coded=[none] uncoded-refusal-strings=0
+          tier    .ll=0 .c=1  C tier (demoted or refused)
+  [withPkg] build rc=0  backend c (llvm refused: libCall:wrtc.newPeer)
+          run rc=0  size=1359872 B  MATCH byte-identical
+          engine  quickjs=0 ScrDyn=0 JS_NewRuntime=0 control=5  [control='before']
+          fences  coded=[none] uncoded-refusal-strings=0
+          tier    .ll=0 .c=1  C tier (demoted or refused)
+
+############ dgram-connected2
+  oracle rc=0  3 lines
+  [noPkg] build rc=0  (not stated)
+          run rc=0  size=700416 B  MATCH byte-identical
+          engine  quickjs=0 ScrDyn=0 JS_NewRuntime=0 control=1  [control='client connected']
+          fences  coded=[none] uncoded-refusal-strings=0
+          tier    .ll=1 .c=0  LLVM tier
+  [withPkg] build rc=0  (not stated)
+          run rc=0  size=700416 B  MATCH byte-identical
+          engine  quickjs=0 ScrDyn=0 JS_NewRuntime=0 control=1  [control='client connected']
+          fences  coded=[none] uncoded-refusal-strings=0
+          tier    .ll=1 .c=0  LLVM tier
+

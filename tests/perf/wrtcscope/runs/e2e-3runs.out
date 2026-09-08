@@ -1,0 +1,51 @@
+== e2e   main 325eb515   node v25.9.0   zig 0.16.0
+-- building wrtc_peer.exe
+   rc=0  errors=0  warnings=0
+-- building rtc-e2e.exe from TypeScript (strict, no --best-effort)
+   rc=0  size=1508864 B
+   backend: backend c (llvm refused: libCall:wrtc.newPeer)
+   tier by artifact: .ll=0 .c=1
+   engine scan: quickjs=0 ScrDyn=0 JS_NewRuntime=0 control(ice-ufrag)=4
+
+
+run 1, port 35202
+  ok   offer carries a 4-character ice-ufrag
+  ok   gathering is complete once the local description is set
+  ok   iceConnectionState reaches connected
+  ok   connectionState reaches connected
+  ok   the data channel reaches readyState=open
+  ok   send() actually sent
+  ok   onmessage fired from the loop with the relay's reply
+  ok   the close cascade ran
+  ok   a wrong fingerprint NEVER opens the channel
+  ok   a wrong fingerprint delivers no message
+  ok   and it is reported as a failure, not left hanging
+
+run 2, port 35204
+  ok   offer carries a 4-character ice-ufrag
+  ok   gathering is complete once the local description is set
+  ok   iceConnectionState reaches connected
+  ok   connectionState reaches connected
+  ok   the data channel reaches readyState=open
+  ok   send() actually sent
+  ok   onmessage fired from the loop with the relay's reply
+  ok   the close cascade ran
+  ok   a wrong fingerprint NEVER opens the channel
+  ok   a wrong fingerprint delivers no message
+  ok   and it is reported as a failure, not left hanging
+
+run 3, port 35206
+  ok   offer carries a 4-character ice-ufrag
+  ok   gathering is complete once the local description is set
+  ok   iceConnectionState reaches connected
+  ok   connectionState reaches connected
+  ok   the data channel reaches readyState=open
+  ok   send() actually sent
+  ok   onmessage fired from the loop with the relay's reply
+  ok   the close cascade ran
+  ok   a wrong fingerprint NEVER opens the channel
+  ok   a wrong fingerprint delivers no message
+  ok   and it is reported as a failure, not left hanging
+
+33 checks, 0 failures
+RESULT: PASS

@@ -1,0 +1,24 @@
+ARRCEN-ARM planted=7 exactRows=256
+ARRCEN-SLICE whole=100 empty=50
+ARRCEN-PUMP calls=0 iters=0 cycles=0 wallms=0
+ARRCEN-SLOT slice-src calls=1290 total=17240 max=41
+ARRCEN-SLOT slice-n calls=1290 total=4980 max=10
+ARRCEN-SLOT join-src calls=200 total=1000 max=5
+ARRCEN-SLOT join-outbytes calls=200 total=1800 max=9
+ARRCEN-SLOT str2num-bytes calls=0 total=0 max=0
+ARRCEN-SLOT jsonstr-bytes calls=0 total=0 max=0
+ARRCEN-SLOT mapkeys-entries calls=0 total=0 max=0
+ARRCEN-SLOT bytesget-len calls=140 total=5740 max=41
+ARRCEN-SLOT bytesset-len calls=0 total=0 max=0
+ARRCEN-KIND 0 calls=1290 elems=4980
+ARRCEN-ELEM buf get=140 set=0
+ARRCEN-ROW slice-src 10 1150
+ARRCEN-ROW slice-src 41 140
+ARRCEN-ROW slice-n 0 50
+ARRCEN-ROW slice-n 3 1000
+ARRCEN-ROW slice-n 7 140
+ARRCEN-ROW slice-n 10 100
+ARRCEN-ROW join-src 5 200
+ARRCEN-ROW join-outbytes 9 200
+ARRCEN-ROW bytesget-len 41 140
+ARRCEN-PHASES n=0 marks=0
