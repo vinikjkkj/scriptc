@@ -11,9 +11,10 @@ concurrency: ${{ github.workflow }}-${{ github.ref }}
 jobs:
   check-release:
     name: Check for new version
-    # The private mirror carries this file too; only the public repo
-    # publishes (the trusted publisher is pinned to it).
-    if: github.repository == 'vercel-labs/scriptc'
+    # This fork publishes its own packages under the @scriptc-fork scope;
+    # the guard keeps any further fork of THIS repo from trying to publish
+    # them (the trusted publisher is pinned to this repository).
+    if: github.repository == 'vinikjkkj/scriptc'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -34,10 +35,18 @@ jobs:
       - name: Compare package.json version to npm
         id: check
         run: |
+          # Read BOTH the name and the version from the CLI manifest. The
+          # name used to be hardcoded as "scriptc"; after the fork renamed
+          # the packages that check silently compared against the upstream
+          # package and would have published on every push.
+          NAME=$(node -p "require('./packages/cli/package.json').name")
           LOCAL_VERSION=$(node -p "require('./packages/cli/package.json').version")
+          echo "Package: $NAME"
           echo "Local version: $LOCAL_VERSION"
 
-          NPM_VERSION=$(npm view scriptc version 2>/dev/null || echo "0.0.0")
+          # A package that has never been published makes `npm view` fail;
+          # 0.0.0 then differs from any real version and the release runs.
+          NPM_VERSION=$(npm view "$NAME" version 2>/dev/null || echo "0.0.0")
           echo "npm version: $NPM_VERSION"
 
           if [ "$LOCAL_VERSION" != "$NPM_VERSION" ]; then
@@ -77,12 +86,20 @@ jobs:
       # Publishing uses npm trusted publishing (OIDC): the job's id-token
       # permission lets npm mint short-lived credentials, so no npm token
       # secret exists anywhere in this repo. All three packages —
-      # @scriptc/runtime, @scriptc/compiler, scriptc — must each be
-      # configured on npmjs.com with a GitHub Actions trusted publisher
-      # pointing at repository vercel-labs/scriptc, workflow release.yml,
-      # environment Release. A package missing that configuration fails
-      # with an OIDC authentication error before anything uploads.
-      # Trusted publishing requires npm >= 11.5.1 (bundled with Node 24).
+      # @scriptc-fork/runtime, @scriptc-fork/compiler, @scriptc-fork/scriptc
+      # — must each be configured on npmjs.com with a GitHub Actions
+      # trusted publisher pointing at repository vinikjkkj/scriptc,
+      # workflow release.yml, environment Release. A package missing that
+      # configuration fails with an OIDC authentication error before
+      # anything uploads. See RELEASING.md for the one-time setup, which
+      # a maintainer must do by hand on npmjs.com; it cannot be scripted
+      # from here. Trusted publishing requires npm >= 11.5.1 (bundled with
+      # Node 24).
+      #
+      # The upstream packages (@scriptc/runtime, @scriptc/compiler,
+      # scriptc) belong to vercel-labs and are configured with a trusted
+      # publisher pointing at THEIR repository. This workflow can never
+      # publish to them, by construction.
 
       - name: Install and build
         run: |
@@ -118,9 +135,19 @@ jobs:
           fi
 
           # Dependency order, so each package's deps are resolvable the
-          # moment it lands. pnpm pack rewrites workspace:* to the real
-          # version; npm publish on the tarball handles OIDC.
+          # moment it lands. npm publish on the tarball handles OIDC.
           # Re-runs skip anything already on the registry at this version.
+          #
+          # The workspace deps are written in the ALIAS form
+          # "@scriptc/runtime": "workspace:@scriptc-fork/runtime@*", which
+          # pnpm pack rewrites to "npm:@scriptc-fork/runtime@<version>".
+          # That is what keeps the fork's packages installable under the
+          # ORIGINAL @scriptc/* directory names, so the ~100 source files
+          # that import "@scriptc/compiler" by specifier — and the
+          # compiler's own self-referencing require.resolve calls in
+          # packages/compiler/src/frontend/shared.ts — resolve unchanged.
+          # If a packed manifest ever shows a bare "workspace:" spec, the
+          # rewrite did not happen and the tarball must NOT be published.
           publish_dir() {
             dir="$1"
             name=$(node -p "require('./$dir/package.json').name")
@@ -129,6 +156,11 @@ jobs:
               return 0
             fi
             tarball=$(cd "$dir" && pnpm pack --silent | tail -1)
+            if tar -xzOf "$dir/$tarball" package/package.json | grep -q '"workspace:'; then
+              echo "$name@$VERSION still carries a workspace: dependency spec after pnpm pack"
+              echo "Publishing it would produce an uninstallable package; aborting."
+              exit 1
+            fi
             npm publish "$dir/$tarball" $PROVENANCE --access public
           }
 

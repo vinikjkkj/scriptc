@@ -6,14 +6,24 @@ All notable changes to scriptc will be documented in this file.
 
 <!-- release:start -->
 
+## 0.1.0
+
+First release of this fork under its own name.
+
+### Changes
+
+- **The three packages are published as `@scriptc-fork/runtime`, `@scriptc-fork/compiler` and `@scriptc-fork/scriptc`**, from `vinikjkkj/scriptc`, and no longer as upstream's `@scriptc/runtime`, `@scriptc/compiler` and `scriptc`. The installed command is still `scriptc`. Inside the packages the workspace dependencies are kept as aliases (`"@scriptc/runtime": "npm:@scriptc-fork/runtime@0.1.0"`), so a consumer's tree still contains `node_modules/@scriptc/compiler` and every import specifier resolves as before. See RELEASING.md.
+- The version line moves to `0.1.0` to keep upstream's `0.0.x` line free and unambiguous. It carries the compiler work merged onto `main` since upstream `0.0.21`, which was developed without changelog entries; the commit history between the fork point and this release is the record.
+- New at the repository root: `COMPILING-ZAPO.md`, a guide to compiling a zapo application with this compiler.
+
+<!-- release:end -->
+
 ## 0.0.21
 
 ### Fixes
 
 - **Contract integer attestations cover synthesized tagged-record payloads.** Integer slots declared on lowered payload paths such as `TextInputEvent_set_composition.cursor` and `Msg_audio_event.at` now carry compile-time write obligations, so fractional writes refuse instead of surviving until runtime encoding. Distinct inline records whose underscore-joined synthesized names collide now refuse instead of reusing the wrong table entry and dropping an obligation.
 - Same-shaped contract integer slots with the same declared class now share one lowered proof obligation while retaining every source slot path in refusals. Differing-class collisions remain SC4009 until arm provenance can keep their assumptions distinct.
-
-<!-- release:end -->
 
 ## 0.0.20
 
