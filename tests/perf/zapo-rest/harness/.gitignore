@@ -3,3 +3,4 @@
 pmon.exe
 # what a run leaves behind (default MEMRIG_OUT)
 memrig-run/
+pmon.pdb
