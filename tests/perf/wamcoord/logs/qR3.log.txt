@@ -1,0 +1,5 @@
+ORACLE-NODE v25.9.0
+=== QR3 START 2026-09-07T23:48:40-03:00 -- minimal reproduction ladder
+sites=4 preflightFailed=false total=3 failed=2 island=0 ms=447
+EXIT=0
+=== QR3 DONE 2026-09-07T23:48:41-03:00

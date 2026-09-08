@@ -1844,10 +1844,13 @@ By file: the 16 are one per store class (`thread`, `signal`, `session`,
 `sender-key`, …), 2 in `createRedisStore.ts`, 1 in `BaseRedisStore.ts`, 1 in the
 driver.
 
-**Note what is absent: there is no site on `BaseRedisStore`'s own declaration
-saying why it failed to be declared.** The 16 subclass sites are the only
-evidence, and they name a consequence rather than a cause. That is itself worth
-recording before any fix is attempted.
+**CORRECTION, section 19.** This section first said there was no site on
+`BaseRedisStore`'s own declaration saying why it failed to be declared. **That
+is wrong.** There is one, and it is the single most important site in the
+package: `BaseRedisStore.ts:8`, `SC2013`, on the field `protected readonly
+redis: Redis`. I read it out of the by-file summary ("1 BaseRedisStore.ts")
+without opening what that 1 was -- a count quoted instead of an identity, which
+is the exact error this document keeps catching elsewhere.
 
 ### 18.3 NOT established — and two hypotheses already refuted
 
@@ -1890,3 +1893,152 @@ turned out to be a class-layout gap reproducible with a stdlib global.
 
 No build of `store-redis` was attempted, so there is **no binary and no fence
 count — n/a, not 0.**
+
+---
+
+## 19. `store-redis`: the mechanism, reproduced in three small files
+
+§18 left 39 measured and the mechanism unknown, with two candidate explanations
+already refuted. This section has the mechanism, a minimal reproduction, and the
+substitution that proves it is one cause.
+
+Measured at `41588bb7`, rebased onto `main` `0c66825d`.
+
+### 19.1 39 still holds on current main
+
+    drivers/_x-redis-plus-zapo.ts   46,994 statements / 19 failed
+                                    39 blocker sites, 20 roots + 19 cascade,
+                                    5 distinct root messages
+
+Unchanged from §18 to the site, so the number did not move under the rebase and
+there was nothing to stop for.
+
+### 19.2 The correction: the cause has a site, and I had missed it
+
+§18.2 said there was no site on `BaseRedisStore`'s own declaration. **Wrong.**
+Listing every site touching that file, in every section, finds it immediately:
+
+```
+[blocker] SC2013  BaseRedisStore.ts:8
+    values from the 'ioredis' package run in the embedded dynamic engine
+```
+
+and line 8 is
+
+```ts
+protected readonly redis: Redis
+```
+
+**The field declaration is the cause, and it carries its own diagnostic.** I
+reached the wrong conclusion by reading the by-file summary — "1
+BaseRedisStore.ts" — and never opening what that 1 was. A count quoted where an
+identity was needed, which is the error this document keeps catching in other
+people's numbers.
+
+So the chain is not mysterious, and every link has a site:
+
+```
+ioredis publishes no attestation      -> the package islands
+BaseRedisStore.ts:8  SC2013           -> the FIELD's type is an islanded type
+                                      -> the class cannot be declared
+16x  SC1090 extending classes not declared in the program ('BaseRedisStore')
+19x  SC2004 cascade in the driver
+```
+
+### 19.3 The minimal reproduction: three files, and the variable is CROSS-MODULE
+
+The first ladder (`drivers/redisbase.ts`) put base and subclass in the **same
+file**. It reproduced **half** the chain:
+
+```
+line 13  SC2013  values from the 'ioredis' package ...   <- the field, reproduced
+line 22  SC2013  the same, on an abstract class with a protected constructor
+```
+
+— and the subclasses did **not** say *extending classes not declared*. So
+`abstract`, `protected constructor` and the type-only import are **not** what
+produces that message.
+
+Adding one variable — putting the subclass in a **different module** — completes
+it (`drivers/rmod/base.ts`, `drivers/rmod/sub.ts`, `drivers/redismod.ts`, 26
+lines total):
+
+```
+rmod/base.ts:6   SC2013  values from the 'ioredis' package run in the embedded dynamic engine
+rmod/sub.ts:5    SC1090  extending classes not declared in the program ('RBase')
+redismod.ts:4    SC1090  constructing through a class value whose class has no lowering
+redismod.ts:5    SC1090  method calls like 's.who'
+```
+
+That is `store-redis`'s chain end to end, with no store package involved.
+
+**The mechanism, stated:** a **type-only** import of a type from an **islanded**
+package, used as a **field type**, raises `SC2013` on the field declaration and
+leaves the class undeclarable; a subclass **in another module** then reports
+*extending classes not declared in the program*, naming the consequence while
+the cause sits one module away with its own code.
+
+Two things this corrects:
+
+* the earlier probes were right to fail. A `bigint` field and an ambient
+  `declare class` field do not reproduce it, because neither is an *islanded
+  package* type — `SC2013` is specific to that, and no amount of general
+  "unrepresentable field type" reasoning reaches it;
+* **here the island really is the mechanism**, unlike the `whatwg-url` case.
+  That is now demonstrated rather than assumed, which was the whole point of
+  being told not to assume it.
+
+### 19.4 The substitution: one line, all four sites
+
+`drivers/rmodB/` is `rmod/` with exactly one line different in `base.ts` — the
+field's type stops being an islanded package type — and one matching type
+spelling in the subclass's constructor. Line-neutral in both files, 13 → 13 and
+9 → 9.
+
+| | baseline (`redismod.ts`) | probe (`redismodB.ts`) |
+| --- | --- | --- |
+| blocker sites | **4** | **0** |
+| statements reached / failed | 4 / 2 | **8 / 0** |
+
+**All four clear together, and the reach doubles** because the class now
+compiles. That is the single-cause claim proved on the minimal case, which is
+where it can be proved cleanly.
+
+### 19.5 What it costs, and who owns it
+
+`ioredis@5.11.1` publishes **no provenance attestation** — confirmed
+independently in §11.6's candidate scan, where it is one of the 26 NOT-ATTESTED
+packages. So the shortest path is **upstream, and neither ours nor zapo's**:
+if `ioredis` published provenance, its types would map and the field would lay
+out.
+
+`pkgstatus-0907` records `store-mysql` and `store-postgres` with **identical
+histograms** to `store-redis` and the same `Base*Store` shape, so this mechanism
+is one finding covering three packages, not one.
+
+There is a compiler-side alternative, and it is a **representation decision**,
+so it is named and not argued into scope: the field here is only ever used
+through a type-only import, so a class *could* in principle be laid out with an
+opaque slot for a field whose type is islanded, leaving only the **uses** of
+that field to refuse. That would take `store-redis` from 39 to roughly 4 — the
+two `SC2013` on `createRedisStore.ts`'s genuine **value** import of `ioredis`,
+which is a different and real island, plus the two `SC2011` on the package's own
+config and result types. Whether an islanded type should have an opaque runtime
+slot is the same class of question as `Date` and the WebRTC handles, with the
+same kind of cost attached, and it belongs to whoever owns the handle kinds.
+
+### 19.6 What was NOT done
+
+The `store-redis` **source-lane** substitution (`pkgsrc/storeredis` against
+`pkgsrc/storeredisB`) was set up and **failed preflight on both arms**, so it
+produced nothing and nothing is quoted from it. The baseline arm failed on my
+driver naming store methods the package does not export; the probe arm failed
+with **151 further `SC0001`s from the stub itself** — replacing `ioredis`'s
+precise types with a loose `...a: unknown[]` surface breaks the package's own
+typechecking. That is worth recording as a method note: **substituting a rich
+third-party type with a thin stub does not isolate one variable, it changes the
+program**, and the minimal reproduction above is what made the same question
+answerable in 26 lines instead.
+
+`store-redis` was not built, so there is **no binary and no fence count — n/a,
+not 0.** What is in front of it is the 39 above, 35 of which are this one cause.

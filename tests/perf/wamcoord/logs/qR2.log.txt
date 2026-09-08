@@ -1,0 +1,12 @@
+ORACLE-NODE v25.9.0
+=== QR2 START 2026-09-07T23:38:15-03:00  main=0c66825d
+--- CONFIRM: drivers/_x-redis-plus-zapo.ts must still read 39
+sites=103 preflightFailed=false total=46994 failed=19 island=0 ms=565623
+EXIT=0
+--- BASELINE: pkgsrc/src-storeredis.ts (source lane, unmodified)
+sites=2 preflightFailed=true total=0 failed=0 island=0 ms=25094
+EXIT=0
+--- PROBE: pkgsrc/src-storeredisB.ts (three type-only ioredis imports stubbed)
+sites=153 preflightFailed=true total=0 failed=0 island=0 ms=24259
+EXIT=0
+=== QR2 DONE 2026-09-07T23:48:37-03:00
