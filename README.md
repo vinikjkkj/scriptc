@@ -20,11 +20,23 @@ No changes to your code. No annotations, no dialect — the same TypeScript you 
 
 ## Install
 
+This is a fork of [`vercel-labs/scriptc`](https://github.com/vercel-labs/scriptc) and publishes its own packages under its own scope:
+
 ```console
-$ npm install -g scriptc
+$ npm install -g @scriptc-fork/scriptc
 ```
 
-Requires clang (preinstalled with Xcode Command Line Tools). macOS arm64 is the primary platform; Linux and Windows binaries build by cross-compilation, each verified by its own differential test lane.
+The installed command is still `scriptc`. Upstream's `npm install -g scriptc` is a **different** compiler that does not carry this fork's work — see [RELEASING.md](RELEASING.md) for what this repository publishes and why the packages were renamed.
+
+To work from a clone instead, which is also what contributors do:
+
+```console
+$ git clone https://github.com/vinikjkkj/scriptc && cd scriptc
+$ pnpm install && pnpm build
+$ pnpm scriptc build fib.ts      # or: node packages/cli/dist/main.js build fib.ts
+```
+
+Requires a C compiler. Plain `clang` is the default (preinstalled with Xcode Command Line Tools). Where there is no clang, set `SCRIPTC_CC=zigcc` and the driver becomes `zig cc`; cross-target builds (`SCRIPTC_TARGET=<triple>`) require `zigcc`, because the default clang path has no cross-target sysroots. macOS arm64 is the primary platform; Linux and Windows binaries build by cross-compilation, each verified by its own differential test lane.
 
 ## The idea: staticness you can see
 
