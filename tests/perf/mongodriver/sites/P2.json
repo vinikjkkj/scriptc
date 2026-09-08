@@ -1,0 +1,1703 @@
+{
+ "entry": "<blocks>/mongodriver/lab/napp/drivers/store-mongo.ts",
+ "flags": [
+  "--provenance-sources"
+ ],
+ "elapsedMs": 85843,
+ "crashed": null,
+ "preflightFailed": false,
+ "stats": {
+  "statementsTotal": 3131,
+  "statementsFailed": 148,
+  "statementsIsland": 0,
+  "functionsSkipped": 0
+ },
+ "unreachedStats": {
+  "statementsTotal": 17680,
+  "statementsFailed": 978,
+  "statementsIsland": 0,
+  "functionsSkipped": 283
+ },
+ "npmStatic": null,
+ "provenanceNotes": [
+  "@zapo-js/store-mongo@1.2.0 <- 9a49e1fffdec",
+  "mongodb@6.21.0 <- 387b6dd29e0a",
+  "bson@6.10.4 <- 302f96e9591c",
+  "mongodb-connection-string-url@3.0.2 <- 26e2c12671f3",
+  "@mongodb-js/saslprep@1.5.2 <- aff0d3bdf6e3",
+  "note: mongodb-client-encryption: not installed under the entry's node_modules; island path used",
+  "note: kerberos: not installed under the entry's node_modules; island path used",
+  "note: @mongodb-js/zstd: not installed under the entry's node_modules; island path used",
+  "note: @aws-sdk/credential-providers: not installed under the entry's node_modules; island path used",
+  "note: gcp-metadata: not installed under the entry's node_modules; island path used",
+  "note: snappy: not installed under the entry's node_modules; island path used",
+  "note: socks: not installed under the entry's node_modules; island path used",
+  "note: aws4: not installed under the entry's node_modules; island path used",
+  "note: whatwg-url@14.2.0: no provenance attestation published; island path used",
+  "note: sparse-bitfield@3.0.3: no provenance attestation published; island path used",
+  "note: argo-codec@0.2.1: no provenance attestation published; island path used",
+  "note: @zapo-js/native: skipped — provenance package limit (16) reached; island path used"
+ ],
+ "sites": [
+  {
+   "section": "blocker",
+   "code": "SC1012",
+   "message": "export = assignments are not supported yet",
+   "file": "<blocks>/mongodriver/probe/P2/prov/aff0d3bdf6e3d8332568d431e4448d895635e8d3/packages/saslprep/src/index.ts",
+   "line": 155
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "index signatures are not supported yet",
+   "file": "<blocks>/mongodriver/probe/P2/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/error.ts",
+   "line": 213
+  },
+  {
+   "section": "blocker",
+   "code": "SC2011",
+   "message": "values of type 'Record<string, false | CachedBSONElement | undefined>' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/mongodriver/probe/P2/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/cmap/wire_protocol/on_demand/document.ts",
+   "line": 62
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "extending classes not declared in the program ('OnDemandDocument') is not supported yet",
+   "file": "<blocks>/mongodriver/probe/P2/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/cmap/wire_protocol/responses.ts",
+   "line": 75
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "extending classes not declared in the program ('MongoDBResponse') is not supported yet",
+   "file": "<blocks>/mongodriver/probe/P2/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/cmap/wire_protocol/responses.ts",
+   "line": 222
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "extending the generic class 'CommandOperation' without a compiled concrete instantiation (the type arguments must map — see the instantiation's own diagnostic) is not supported yet",
+   "file": "<blocks>/mongodriver/probe/P2/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/operations/delete.ts",
+   "line": 44
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "extending the generic class 'CommandOperation' without a compiled concrete instantiation (the type arguments must map — see the instantiation's own diagnostic) is not supported yet",
+   "file": "<blocks>/mongodriver/probe/P2/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/operations/insert.ts",
+   "line": 13
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "extending the generic class 'CommandOperation' without a compiled concrete instantiation (the type arguments must map — see the instantiation's own diagnostic) is not supported yet",
+   "file": "<blocks>/mongodriver/probe/P2/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/operations/update.ts",
+   "line": 73
+  },
+  {
+   "section": "blocker",
+   "code": "SC2011",
+   "message": "values of type 'AnyBulkWriteOperation<Document>' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/mongodriver/probe/P2/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/bulk/common.ts",
+   "line": 1039
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "extending the generic class 'CommandOperation' without a compiled concrete instantiation (the type arguments must map — see the instantiation's own diagnostic) is not supported yet",
+   "file": "<blocks>/mongodriver/probe/P2/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/operations/find_and_modify.ts",
+   "line": 123
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "extending classes not declared in the program ('URL') is not supported yet",
+   "file": "<blocks>/mongodriver/probe/P2/prov/26e2c12671f39743abc8a6ba884b8d89b41ca0c5/src/index.ts",
+   "line": 101
+  },
+  {
+   "section": "blocker",
+   "code": "SC1071",
+   "message": "generator methods (a #private generator method compiles — privates never dispatch dynamically; or declare a module-level function* and call it from the method) are not supported yet",
+   "file": "<blocks>/mongodriver/probe/P2/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/cmap/connection.ts",
+   "line": 452
+  },
+  {
+   "section": "blocker",
+   "code": "SC2009",
+   "message": "values of type '{ toLocalBufferType(potentialBuffer: ArrayBuffer | Uint8Array<ArrayBufferLike> | NodeJsBuffer): NodeJsBuffer; ... 14 more ...; swap32(buffer: Uint8Array<...>): NodeJsBuffer; }' cannot be compiled: the record shape is supported, but its member 'toLocalBufferType' has type '(potentialBuffer: ArrayBuffer | Uint8Array<ArrayBufferLike> | NodeJsBuffer) => NodeJsBuffer', which does not compile",
+   "file": "<blocks>/mongodriver/probe/P2/prov/302f96e9591c6d4571480d69bb319266c281f67c/src/utils/node_byte_utils.ts",
+   "line": 62
+  },
+  {
+   "section": "blocker",
+   "code": "SC2009",
+   "message": "values of type '{ toLocalBufferType(potentialUint8array: ArrayBuffer | Uint8Array<ArrayBufferLike> | ArrayBufferViewWithTag): Uint8Array<...>; ... 14 more ...; swap32(buffer: Uint8Array<...>): Uint8Array<...>; }' cannot be compiled: the record shape is supported, but its member 'toLocalBufferType' has type '(potentialUint8array: ArrayBuffer | Uint8Array<ArrayBufferLike> | ArrayBufferViewWithTag) => Uint8Array<ArrayBufferLike>', which does not compile",
+   "file": "<blocks>/mongodriver/probe/P2/prov/302f96e9591c6d4571480d69bb319266c281f67c/src/utils/web_byte_utils.ts",
+   "line": 73
+  },
+  {
+   "section": "blocker",
+   "code": "SC2009",
+   "message": "values of type 'LongWASMHelpers | undefined' cannot be compiled: the union shape is supported, but its arm 'LongWASMHelpers' does not compile",
+   "file": "<blocks>/mongodriver/probe/P2/prov/302f96e9591c6d4571480d69bb319266c281f67c/src/long.ts",
+   "line": 51
+  },
+  {
+   "section": "blocker",
+   "code": "SC2020",
+   "message": "'WeakMap<WeakKey, any>' is part of the standard library types but has no scriptc lowering yet",
+   "file": "<blocks>/mongodriver/probe/P2/prov/302f96e9591c6d4571480d69bb319266c281f67c/src/objectid.ts",
+   "line": 11
+  },
+  {
+   "section": "blocker",
+   "code": "SC2009",
+   "message": "values of type '{ readonly Binary: (o: Binary) => Binary; readonly Code: (o: Code) => Code; readonly DBRef: (o: DBRef) => DBRef; readonly Decimal128: (o: Decimal128) => Decimal128; ... 8 more ...; readonly Timestamp: (o: Timestamp) => Timestamp; }' cannot be compiled: the record shape is supported, but its member 'Long' has type '(o: Long & { low_: number; high_: number; unsigned_: boolean | undefined; }) => Long', which does not compile",
+   "file": "<blocks>/mongodriver/probe/P2/prov/302f96e9591c6d4571480d69bb319266c281f67c/src/extended_json.ts",
+   "line": 303
+  },
+  {
+   "section": "blocker",
+   "code": "SC2009",
+   "message": "values of type '{ parse: (text: string, options?: EJSONOptions | undefined) => any; stringify: (value: any, replacer?: (string | number)[] | EJSONOptions | ((this: any, key: string, value: any) => any) | undefined, space?: string | ... 1 more ... | undefined, options?: EJSONOptions | undefined) => string; serialize: (value: any, op...' cannot be compiled: the record shape is supported, but its member 'parse' has type '(text: string, options?: EJSONOptions | undefined) => any', which does not compile",
+   "file": "<blocks>/mongodriver/probe/P2/prov/302f96e9591c6d4571480d69bb319266c281f67c/src/extended_json.ts",
+   "line": 505
+  },
+  {
+   "section": "blocker",
+   "code": "SC2009",
+   "message": "values of type 'OnDemand' cannot be compiled: the record shape is supported, but its member 'parseToElements' has type '(this: void, bytes: Uint8Array<ArrayBufferLike>, startOffset?: number | undefined) => Iterable<BSONElement>', which does not compile",
+   "file": "<blocks>/mongodriver/probe/P2/prov/302f96e9591c6d4571480d69bb319266c281f67c/src/parser/on_demand/index.ts",
+   "line": 24
+  },
+  {
+   "section": "blocker",
+   "code": "SC2009",
+   "message": "values of type '{ toLocalBufferType(this: void, buffer: Buffer<ArrayBufferLike> | Uint8Array<ArrayBufferLike>): Buffer<ArrayBufferLike>; equals(this: void, seqA: Uint8Array<...>, seqB: Uint8Array<...>): boolean; compare(this: void, seqA: Uint8Array<...>, seqB: Uint8Array<...>): -1 | ... 1 more ... | 1; toBase64(this: void, uint8arr...' cannot be compiled: the record shape is supported, but its member 'toLocalBufferType' has type '(this: void, buffer: Buffer<ArrayBufferLike> | Uint8Array<ArrayBufferLike>) => Buffer<ArrayBufferLike>', which does not compile",
+   "file": "<blocks>/mongodriver/probe/P2/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/utils.ts",
+   "line": 49
+  },
+  {
+   "section": "blocker",
+   "code": "SC2009",
+   "message": "values of type 'Set<unknown>' cannot be compiled: the Set shape is supported, but elements are limited to numbers and strings — 'unknown' is outside that domain",
+   "file": "<blocks>/mongodriver/probe/P2/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/utils.ts",
+   "line": 1013
+  },
+  {
+   "section": "blocker",
+   "code": "SC2020",
+   "message": "'util.promisify of this target' is part of the standard library types but has no scriptc lowering yet",
+   "file": "<blocks>/mongodriver/probe/P2/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/utils.ts",
+   "line": 1324
+  },
+  {
+   "section": "blocker",
+   "code": "SC2009",
+   "message": "values of type 'AWS4 | { kModuleError: MongoMissingDependencyError; }' cannot be compiled: the union shape is supported, but its arm 'AWS4' does not compile",
+   "file": "<blocks>/mongodriver/probe/P2/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/deps.ts",
+   "line": 247
+  },
+  {
+   "section": "blocker",
+   "code": "SC2020",
+   "message": "'util.promisify of this target' is part of the standard library types but has no scriptc lowering yet",
+   "file": "<blocks>/mongodriver/probe/P2/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/cmap/wire_protocol/compression.ts",
+   "line": 46
+  },
+  {
+   "section": "blocker",
+   "code": "SC2020",
+   "message": "'util.promisify of this target' is part of the standard library types but has no scriptc lowering yet",
+   "file": "<blocks>/mongodriver/probe/P2/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/cmap/wire_protocol/compression.ts",
+   "line": 47
+  },
+  {
+   "section": "blocker",
+   "code": "SC2011",
+   "message": "values of type 'Record<keyof MongoClientOptions, OptionDescriptor>' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/mongodriver/probe/P2/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/connection_string.ts",
+   "line": 634
+  },
+  {
+   "section": "blocker",
+   "code": "SC2009",
+   "message": "values of type 'CaseInsensitiveMap<any>' cannot be compiled: the record shape is supported, but its member 'get' has type '(k: string) => any', which does not compile",
+   "file": "<blocks>/mongodriver/probe/P2/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/connection_string.ts",
+   "line": 1299
+  },
+  {
+   "section": "blocker",
+   "code": "SC2009",
+   "message": "values of type 'Map<EnvironmentName, () => Workflow>' cannot be compiled: the Map shape is supported, but keys are limited to numbers and strings — 'EnvironmentName' is outside that domain",
+   "file": "<blocks>/mongodriver/probe/P2/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/cmap/auth/mongodb_oidc.ts",
+   "line": 123
+  },
+  {
+   "section": "blocker",
+   "code": "SC2011",
+   "message": "values of type '{ unassigned_code_points: bitfield.BitFieldInstance; commonly_mapped_to_nothing: bitfield.BitFieldInstance; non_ASCII_space_characters: bitfield.BitFieldInstance; prohibited_characters: bitfield.BitFieldInstance; bidirectional_r_al: bitfield.BitFieldInstance; bidirectional_l: bitfield.BitFieldInstance; }' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/mongodriver/probe/P2/prov/aff0d3bdf6e3d8332568d431e4448d895635e8d3/packages/saslprep/src/index.ts",
+   "line": 40
+  },
+  {
+   "section": "blocker",
+   "code": "SC2011",
+   "message": "values of type '(model: ClientInsertOneModel<Document>, index: number, pkFactory: PkFactory) => ClientInsertOperation' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/mongodriver/probe/P2/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/operations/client_bulk_write/command_builder.ts",
+   "line": 256
+  },
+  {
+   "section": "blocker",
+   "code": "SC2011",
+   "message": "values of type '(model: ClientDeleteOneModel<Document>, index: number) => Document' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/mongodriver/probe/P2/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/operations/client_bulk_write/command_builder.ts",
+   "line": 284
+  },
+  {
+   "section": "blocker",
+   "code": "SC2011",
+   "message": "values of type '(model: ClientDeleteManyModel<Document>, index: number) => Document' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/mongodriver/probe/P2/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/operations/client_bulk_write/command_builder.ts",
+   "line": 297
+  },
+  {
+   "section": "blocker",
+   "code": "SC2011",
+   "message": "values of type '(model: ClientUpdateOneModel<Document>, index: number, options: BSONSerializeOptions) => ClientUpdateOperation' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/mongodriver/probe/P2/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/operations/client_bulk_write/command_builder.ts",
+   "line": 345
+  },
+  {
+   "section": "blocker",
+   "code": "SC2011",
+   "message": "values of type '(model: ClientUpdateManyModel<Document>, index: number, options: BSONSerializeOptions) => ClientUpdateOperation' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/mongodriver/probe/P2/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/operations/client_bulk_write/command_builder.ts",
+   "line": 359
+  },
+  {
+   "section": "blocker",
+   "code": "SC2011",
+   "message": "values of type '(model: ClientReplaceOneModel<Document>, index: number) => ClientReplaceOneOperation' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/mongodriver/probe/P2/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/operations/client_bulk_write/command_builder.ts",
+   "line": 435
+  },
+  {
+   "section": "blocker",
+   "code": "SC2011",
+   "message": "values of type 'WaClientDependencies' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/mongodriver/probe/P2/prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/client/WaClient.ts",
+   "line": 74
+  },
+  {
+   "section": "blocker",
+   "code": "SC2001",
+   "message": "values of type 'WaClientConstructor' cannot be compiled yet (supported: number, string, boolean, arrays, Maps, Sets, RegExp, functions, classes, records, unions of those, and 'unknown')",
+   "file": "<blocks>/mongodriver/probe/P2/prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/client/WaClient.ts",
+   "line": 903
+  },
+  {
+   "section": "blocker",
+   "code": "SC2013",
+   "message": "importing 'whatwg-url' requires the embedded dynamic engine, which this build does not include — the package's implementation runs there",
+   "file": "<blocks>/mongodriver/probe/P2/prov/26e2c12671f39743abc8a6ba884b8d89b41ca0c5/src/index.ts",
+   "line": 1
+  },
+  {
+   "section": "blocker",
+   "code": "SC2020",
+   "message": "'JSON.stringify with replacer/space parameters' is part of the standard library types but has no scriptc lowering yet",
+   "file": "<blocks>/mongodriver/probe/P2/prov/302f96e9591c6d4571480d69bb319266c281f67c/src/parser/utils.ts",
+   "line": 46
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "Error constructor options ('cause') are not supported yet",
+   "file": "<blocks>/mongodriver/probe/P2/prov/302f96e9591c6d4571480d69bb319266c281f67c/src/error.ts",
+   "line": 27
+  },
+  {
+   "section": "blocker",
+   "code": "SC2020",
+   "message": "'ArrayBuffer.isView' is part of the standard library types but has no scriptc lowering yet",
+   "file": "<blocks>/mongodriver/probe/P2/prov/302f96e9591c6d4571480d69bb319266c281f67c/src/binary.ts",
+   "line": 127
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "typeof expressions on statically-typed values are not supported yet",
+   "file": "<blocks>/mongodriver/probe/P2/prov/302f96e9591c6d4571480d69bb319266c281f67c/src/long.ts",
+   "line": 165
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "the reference to 'wasm' (a binding form with no lowering) is not supported yet",
+   "file": "<blocks>/mongodriver/probe/P2/prov/302f96e9591c6d4571480d69bb319266c281f67c/src/long.ts",
+   "line": 620
+  },
+  {
+   "section": "blocker",
+   "code": "SC1043",
+   "message": "comparing non-number, non-string values are not supported yet",
+   "file": "<blocks>/mongodriver/probe/P2/prov/302f96e9591c6d4571480d69bb319266c281f67c/src/long.ts",
+   "line": 701
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "the reference to 'wasm' (a binding form with no lowering) is not supported yet",
+   "file": "<blocks>/mongodriver/probe/P2/prov/302f96e9591c6d4571480d69bb319266c281f67c/src/long.ts",
+   "line": 843
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "the reference to 'wasm' (a binding form with no lowering) is not supported yet",
+   "file": "<blocks>/mongodriver/probe/P2/prov/302f96e9591c6d4571480d69bb319266c281f67c/src/long.ts",
+   "line": 875
+  },
+  {
+   "section": "blocker",
+   "code": "SC1043",
+   "message": "comparing non-number, non-string values are not supported yet",
+   "file": "<blocks>/mongodriver/probe/P2/prov/302f96e9591c6d4571480d69bb319266c281f67c/src/long.ts",
+   "line": 983
+  },
+  {
+   "section": "blocker",
+   "code": "SC1043",
+   "message": "comparing non-number, non-string values are not supported yet",
+   "file": "<blocks>/mongodriver/probe/P2/prov/302f96e9591c6d4571480d69bb319266c281f67c/src/long.ts",
+   "line": 1005
+  },
+  {
+   "section": "blocker",
+   "code": "SC1043",
+   "message": "comparing non-number, non-string values are not supported yet",
+   "file": "<blocks>/mongodriver/probe/P2/prov/302f96e9591c6d4571480d69bb319266c281f67c/src/long.ts",
+   "line": 1027
+  },
+  {
+   "section": "blocker",
+   "code": "SC2020",
+   "message": "'BigInt' is part of the standard library types but has no scriptc lowering yet",
+   "file": "<blocks>/mongodriver/probe/P2/prov/302f96e9591c6d4571480d69bb319266c281f67c/src/long.ts",
+   "line": 1081
+  },
+  {
+   "section": "blocker",
+   "code": "SC1100",
+   "message": "operators on 'unknown' values are not supported yet",
+   "file": "<blocks>/mongodriver/probe/P2/prov/302f96e9591c6d4571480d69bb319266c281f67c/src/long.ts",
+   "line": 288
+  },
+  {
+   "section": "blocker",
+   "code": "SC2020",
+   "message": "'new Array(count) with 'number' elements' is part of the standard library types but has no scriptc lowering yet",
+   "file": "<blocks>/mongodriver/probe/P2/prov/302f96e9591c6d4571480d69bb319266c281f67c/src/decimal128.ts",
+   "line": 634
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "increment/decrement of non-number targets are not supported yet",
+   "file": "<blocks>/mongodriver/probe/P2/prov/302f96e9591c6d4571480d69bb319266c281f67c/src/decimal128.ts",
+   "line": 727
+  },
+  {
+   "section": "blocker",
+   "code": "SC2020",
+   "message": "'string.substr' is part of the standard library types but has no scriptc lowering yet",
+   "file": "<blocks>/mongodriver/probe/P2/prov/302f96e9591c6d4571480d69bb319266c281f67c/src/decimal128.ts",
+   "line": 317
+  },
+  {
+   "section": "blocker",
+   "code": "SC1045",
+   "message": "increment/decrement of array elements or computed receivers in expression position is not supported yet",
+   "file": "<blocks>/mongodriver/probe/P2/prov/302f96e9591c6d4571480d69bb319266c281f67c/src/decimal128.ts",
+   "line": 448
+  },
+  {
+   "section": "blocker",
+   "code": "SC1043",
+   "message": "comparing non-number, non-string values are not supported yet",
+   "file": "<blocks>/mongodriver/probe/P2/prov/302f96e9591c6d4571480d69bb319266c281f67c/src/int_32.ts",
+   "line": 35
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "'in' on 'Uint8Array | number | m20.ObjectId | { __id: string | undefined; id: Uint8Array | string; toHexString: () => string } | string | undefined' receivers (only process.env, Error instances, record-typed values, and unions of fixed record shapes answer; narrow first: check a discriminant field, or compare with '!== undefined'/'!== null' for unit arms) is not supported yet",
+   "file": "<blocks>/mongodriver/probe/P2/prov/302f96e9591c6d4571480d69bb319266c281f67c/src/objectid.ts",
+   "line": 91
+  },
+  {
+   "section": "blocker",
+   "code": "SC2020",
+   "message": "'ArrayBuffer.isView' is part of the standard library types but has no scriptc lowering yet",
+   "file": "<blocks>/mongodriver/probe/P2/prov/302f96e9591c6d4571480d69bb319266c281f67c/src/objectid.ts",
+   "line": 109
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "the static member 'cacheHexString' of class 'm20.ObjectId' (static accessors and initializer-less static fields have no lowering, and Function members like .call/.bind/.prototype have no value form) is not supported yet",
+   "file": "<blocks>/mongodriver/probe/P2/prov/302f96e9591c6d4571480d69bb319266c281f67c/src/objectid.ts",
+   "line": 139
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "the static member 'cacheHexString' of class 'm20.ObjectId' (static accessors and initializer-less static fields have no lowering, and Function members like .call/.bind/.prototype have no value form) is not supported yet",
+   "file": "<blocks>/mongodriver/probe/P2/prov/302f96e9591c6d4571480d69bb319266c281f67c/src/objectid.ts",
+   "line": 169
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "the static member 'cacheHexString' of class 'm20.ObjectId' (static accessors and initializer-less static fields have no lowering, and Function members like .call/.bind/.prototype have no value form) is not supported yet",
+   "file": "<blocks>/mongodriver/probe/P2/prov/302f96e9591c6d4571480d69bb319266c281f67c/src/objectid.ts",
+   "line": 176
+  },
+  {
+   "section": "blocker",
+   "code": "SC2020",
+   "message": "'new Date' is part of the standard library types but has no scriptc lowering yet",
+   "file": "<blocks>/mongodriver/probe/P2/prov/302f96e9591c6d4571480d69bb319266c281f67c/src/objectid.ts",
+   "line": 284
+  },
+  {
+   "section": "blocker",
+   "code": "SC2020",
+   "message": "'Date.setTime' is part of the standard library types but has no scriptc lowering yet",
+   "file": "<blocks>/mongodriver/probe/P2/prov/302f96e9591c6d4571480d69bb319266c281f67c/src/objectid.ts",
+   "line": 286
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "bound method references (call 'toHexString' directly) are not supported yet",
+   "file": "<blocks>/mongodriver/probe/P2/prov/302f96e9591c6d4571480d69bb319266c281f67c/src/objectid.ts",
+   "line": 366
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "the static member 'cacheHexString' of class 'm20.ObjectId' (static accessors and initializer-less static fields have no lowering, and Function members like .call/.bind/.prototype have no value form) is not supported yet",
+   "file": "<blocks>/mongodriver/probe/P2/prov/302f96e9591c6d4571480d69bb319266c281f67c/src/objectid.ts",
+   "line": 377
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "assignment to non-variables as an expression (only `x = e` over a variable yields a value; write property/destructuring assignments as statements) is not supported yet",
+   "file": "<blocks>/mongodriver/probe/P2/prov/302f96e9591c6d4571480d69bb319266c281f67c/src/objectid.ts",
+   "line": 188
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "super() calls anywhere but as a top-level constructor statement is not supported yet",
+   "file": "<blocks>/mongodriver/probe/P2/prov/302f96e9591c6d4571480d69bb319266c281f67c/src/timestamp.ts",
+   "line": 69
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "typeof expressions on statically-typed values are not supported yet",
+   "file": "<blocks>/mongodriver/probe/P2/prov/302f96e9591c6d4571480d69bb319266c281f67c/src/timestamp.ts",
+   "line": 70
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "super() calls anywhere but as a top-level constructor statement is not supported yet",
+   "file": "<blocks>/mongodriver/probe/P2/prov/302f96e9591c6d4571480d69bb319266c281f67c/src/timestamp.ts",
+   "line": 67
+  },
+  {
+   "section": "blocker",
+   "code": "SC2020",
+   "message": "'JSON.parse with a reviver' is part of the standard library types but has no scriptc lowering yet",
+   "file": "<blocks>/mongodriver/probe/P2/prov/302f96e9591c6d4571480d69bb319266c281f67c/src/extended_json.ts",
+   "line": 422
+  },
+  {
+   "section": "blocker",
+   "code": "SC2009",
+   "message": "values of type '(string | number)[] | EJSONOptions | ((this: any, key: string, value: any) => any) | undefined' cannot be compiled: the union shape is supported, but its arm '(this: any, key: string, value: any) => any' does not compile",
+   "file": "<blocks>/mongodriver/probe/P2/prov/302f96e9591c6d4571480d69bb319266c281f67c/src/extended_json.ts",
+   "line": 459
+  },
+  {
+   "section": "blocker",
+   "code": "SC2004",
+   "message": "uses of 'stringify' inherit the blocker on its declaration",
+   "file": "<blocks>/mongodriver/probe/P2/prov/302f96e9591c6d4571480d69bb319266c281f67c/src/extended_json.ts",
+   "line": 489
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "Error constructor options ('cause') are not supported yet",
+   "file": "<blocks>/mongodriver/probe/P2/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/error.ts",
+   "line": 157
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "statically-decided Array.isArray on computed arguments (bind the value to a variable first) are not supported yet",
+   "file": "<blocks>/mongodriver/probe/P2/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/read_preference.ts",
+   "line": 92
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "statically-decided Array.isArray on computed arguments (bind the value to a variable first) are not supported yet",
+   "file": "<blocks>/mongodriver/probe/P2/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/read_preference.ts",
+   "line": 119
+  },
+  {
+   "section": "blocker",
+   "code": "SC2009",
+   "message": "values of type 'MongoOptions' cannot be compiled: the record shape is supported, but its member 'pkFactory' has type 'PkFactory', which does not compile",
+   "file": "<blocks>/mongodriver/probe/P2/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/sessions.ts",
+   "line": 113
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "reading 'transaction' from a value of type 'ClientSession' is not supported yet",
+   "file": "<blocks>/mongodriver/probe/P2/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/read_preference.ts",
+   "line": 154
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "'instanceof' on values other than class instances (narrow union-typed values first) are not supported yet",
+   "file": "<blocks>/mongodriver/probe/P2/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/read_preference.ts",
+   "line": 166
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "assignment to non-variables are not supported yet",
+   "file": "<blocks>/mongodriver/probe/P2/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/read_preference.ts",
+   "line": 177
+  },
+  {
+   "section": "blocker",
+   "code": "SC2020",
+   "message": "'new Set(values)' is part of the standard library types but has no scriptc lowering yet",
+   "file": "<blocks>/mongodriver/probe/P2/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/read_preference.ts",
+   "line": 212
+  },
+  {
+   "section": "blocker",
+   "code": "SC2020",
+   "message": "'Set<\"nearest\" | \"primary\" | \"primaryPreferred\" | \"secondary\" | \"secondaryPreferred\" | null>.has' is part of the standard library types but has no scriptc lowering yet",
+   "file": "<blocks>/mongodriver/probe/P2/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/read_preference.ts",
+   "line": 221
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "using the result of request.end(...) (the result is void here — call it as its own statement) is not supported yet",
+   "file": "<blocks>/mongodriver/probe/P2/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/utils.ts",
+   "line": 1200
+  },
+  {
+   "section": "blocker",
+   "code": "SC2020",
+   "message": "'new Set(values)' is part of the standard library types but has no scriptc lowering yet",
+   "file": "<blocks>/mongodriver/probe/P2/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/operations/operation.ts",
+   "line": 174
+  },
+  {
+   "section": "blocker",
+   "code": "SC2020",
+   "message": "'Object.defineProperty' is part of the standard library types but has no scriptc lowering yet",
+   "file": "<blocks>/mongodriver/probe/P2/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/operations/operation.ts",
+   "line": 175
+  },
+  {
+   "section": "blocker",
+   "code": "SC2020",
+   "message": "'Symbol.asyncDispose' is part of the standard library types but has no scriptc lowering yet",
+   "file": "<blocks>/mongodriver/probe/P2/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/resource_management.ts",
+   "line": 21
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "module namespace objects as values (access 'crypto' members directly) are not supported yet",
+   "file": "<blocks>/mongodriver/probe/P2/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/client-side-encryption/crypto_callbacks.ts",
+   "line": 13
+  },
+  {
+   "section": "blocker",
+   "code": "SC2020",
+   "message": "'Cipheriv | Decipheriv.setAutoPadding' is typed by @types/node but has no scriptc lowering yet",
+   "file": "<blocks>/mongodriver/probe/P2/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/client-side-encryption/crypto_callbacks.ts",
+   "line": 14
+  },
+  {
+   "section": "blocker",
+   "code": "SC2020",
+   "message": "'Cipheriv | Decipheriv.update' is typed by @types/node but has no scriptc lowering yet",
+   "file": "<blocks>/mongodriver/probe/P2/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/client-side-encryption/crypto_callbacks.ts",
+   "line": 15
+  },
+  {
+   "section": "blocker",
+   "code": "SC2020",
+   "message": "'Cipheriv | Decipheriv.final' is typed by @types/node but has no scriptc lowering yet",
+   "file": "<blocks>/mongodriver/probe/P2/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/client-side-encryption/crypto_callbacks.ts",
+   "line": 16
+  },
+  {
+   "section": "blocker",
+   "code": "SC2020",
+   "message": "'createHmac with this algorithm' is part of the standard library types but has no scriptc lowering yet",
+   "file": "<blocks>/mongodriver/probe/P2/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/client-side-encryption/crypto_callbacks.ts",
+   "line": 55
+  },
+  {
+   "section": "blocker",
+   "code": "SC2020",
+   "message": "'dns.promises' is typed by @types/node but has no scriptc lowering yet",
+   "file": "<blocks>/mongodriver/probe/P2/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/connection_string.ts",
+   "line": 55
+  },
+  {
+   "section": "blocker",
+   "code": "SC2020",
+   "message": "'dns.TIMEOUT' is typed by @types/node but has no scriptc lowering yet",
+   "file": "<blocks>/mongodriver/probe/P2/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/connection_string.ts",
+   "line": 57
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "the static member 'isAWSSDKInstalled' of class 'm109.AWSTemporaryCredentialProvider' (static accessors and initializer-less static fields have no lowering, and Function members like .call/.bind/.prototype have no value form) is not supported yet",
+   "file": "<blocks>/mongodriver/probe/P2/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/cmap/auth/mongodb_aws.ts",
+   "line": 44
+  },
+  {
+   "section": "blocker",
+   "code": "SC2020",
+   "message": "'timers/promises setTimeout with a resolve value or options' is part of the standard library types but has no scriptc lowering yet",
+   "file": "<blocks>/mongodriver/probe/P2/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/cmap/auth/mongodb_oidc/callback_workflow.ts",
+   "line": 169
+  },
+  {
+   "section": "blocker",
+   "code": "SC2020",
+   "message": "'Number of an 'any'-typed value' is part of the standard library types but has no scriptc lowering yet",
+   "file": "<blocks>/mongodriver/probe/P2/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/cmap/auth/mongodb_oidc/azure_machine_workflow.ts",
+   "line": 54
+  },
+  {
+   "section": "blocker",
+   "code": "SC2002",
+   "message": "record shapes must match exactly or width-coerce: expected '{ cache: m141.TokenCache; execute: (m125.Connection, m101.MongoCredentials, { [key: string]: unknown } | undefined) => Promise<void>; reauthenticate: (m125.Connection, m101.MongoCredentials) => Promise<void>; speculativeAuth: (m125.Connection, m101.MongoCredentials) => Promise<{ [key: string]: unknown }> }', got 'm144.HumanCallbackWorkflow'",
+   "file": "<blocks>/mongodriver/probe/P2/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/mongo_client_auth_providers.ts",
+   "line": 82
+  },
+  {
+   "section": "blocker",
+   "code": "SC2002",
+   "message": "record shapes must match exactly or width-coerce: expected '{ cache: m141.TokenCache; execute: (m125.Connection, m101.MongoCredentials, { [key: string]: unknown } | undefined) => Promise<void>; reauthenticate: (m125.Connection, m101.MongoCredentials) => Promise<void>; speculativeAuth: (m125.Connection, m101.MongoCredentials) => Promise<{ [key: string]: unknown }> }', got 'm137.AutomatedCallbackWorkflow'",
+   "file": "<blocks>/mongodriver/probe/P2/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/mongo_client_auth_providers.ts",
+   "line": 84
+  },
+  {
+   "section": "blocker",
+   "code": "SC2020",
+   "message": "'Map<EnvironmentName, () => Workflow>.get' is part of the standard library types but has no scriptc lowering yet",
+   "file": "<blocks>/mongodriver/probe/P2/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/mongo_client_auth_providers.ts",
+   "line": 87
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "the reference to 'WA_ABPROPS' (it has no compiled implementation — its module '../../spec/abprops/index.d.ts' ships only a declaration file) is not supported yet",
+   "file": "<blocks>/mongodriver/probe/P2/prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/protocol/abprops.ts",
+   "line": 48
+  },
+  {
+   "section": "blocker",
+   "code": "SC2020",
+   "message": "'PropertyDescriptor.get' is part of the standard library types but has no scriptc lowering yet",
+   "file": "<blocks>/mongodriver/probe/P2/prov/302f96e9591c6d4571480d69bb319266c281f67c/src/parser/utils.ts",
+   "line": 5
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "Function.prototype.call on a compiled function value (compiled calls are direct — no runtime 'this' or arguments object exists to re-route; spell the call directly: 'g(...)') is not supported yet",
+   "file": "<blocks>/mongodriver/probe/P2/prov/302f96e9591c6d4571480d69bb319266c281f67c/src/parser/utils.ts",
+   "line": 10
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "library functions as values (call 'require('crypto').randomBytes' directly) are not supported yet",
+   "file": "<blocks>/mongodriver/probe/P2/prov/302f96e9591c6d4571480d69bb319266c281f67c/src/utils/node_byte_utils.ts",
+   "line": 55
+  },
+  {
+   "section": "blocker",
+   "code": "SC2006",
+   "message": "values of type 'NodeJsBuffer' cannot be compiled: this index signature is outside the supported shape (string or number keys; values limited to numbers, strings, booleans, records, classes, arrays, unions, functions, Maps, Sets, RegExps, Promises, 'unknown', or 'any')",
+   "file": "<blocks>/mongodriver/probe/P2/prov/302f96e9591c6d4571480d69bb319266c281f67c/src/utils/node_byte_utils.ts",
+   "line": 32
+  },
+  {
+   "section": "blocker",
+   "code": "SC2004",
+   "message": "uses of 'nodejsMathRandomBytes' inherit the blocker on its declaration",
+   "file": "<blocks>/mongodriver/probe/P2/prov/302f96e9591c6d4571480d69bb319266c281f67c/src/utils/node_byte_utils.ts",
+   "line": 57
+  },
+  {
+   "section": "blocker",
+   "code": "SC2009",
+   "message": "values of type '{ toLocalBufferType(potentialBuffer: ArrayBuffer | Uint8Array<ArrayBufferLike> | NodeJsBuffer): NodeJsBuffer; ... 14 more ...; swap32(buffer: Uint8Array<...>): NodeJsBuffer; }' cannot be compiled: the record shape is supported, but its member 'toLocalBufferType' has type '(potentialBuffer: ArrayBuffer | Uint8Array<ArrayBufferLike> | NodeJsBuffer) => NodeJsBuffer', which does not compile",
+   "file": "<blocks>/mongodriver/probe/P2/prov/302f96e9591c6d4571480d69bb319266c281f67c/src/utils/node_byte_utils.ts",
+   "line": 62
+  },
+  {
+   "section": "blocker",
+   "code": "SC2020",
+   "message": "'globalThis' is part of the standard library types but has no scriptc lowering yet",
+   "file": "<blocks>/mongodriver/probe/P2/prov/302f96e9591c6d4571480d69bb319266c281f67c/src/utils/web_byte_utils.ts",
+   "line": 50
+  },
+  {
+   "section": "blocker",
+   "code": "SC2004",
+   "message": "uses of 'crypto' inherit the blocker on its declaration",
+   "file": "<blocks>/mongodriver/probe/P2/prov/302f96e9591c6d4571480d69bb319266c281f67c/src/utils/web_byte_utils.ts",
+   "line": 53
+  },
+  {
+   "section": "blocker",
+   "code": "SC2009",
+   "message": "values of type '{ toLocalBufferType(potentialUint8array: ArrayBuffer | Uint8Array<ArrayBufferLike> | ArrayBufferViewWithTag): Uint8Array<...>; ... 14 more ...; swap32(buffer: Uint8Array<...>): Uint8Array<...>; }' cannot be compiled: the record shape is supported, but its member 'toLocalBufferType' has type '(potentialUint8array: ArrayBuffer | Uint8Array<ArrayBufferLike> | ArrayBufferViewWithTag) => Uint8Array<ArrayBufferLike>', which does not compile",
+   "file": "<blocks>/mongodriver/probe/P2/prov/302f96e9591c6d4571480d69bb319266c281f67c/src/utils/web_byte_utils.ts",
+   "line": 73
+  },
+  {
+   "section": "blocker",
+   "code": "SC2004",
+   "message": "uses of 'nodeJsByteUtils' inherit the blocker on its declaration",
+   "file": "<blocks>/mongodriver/probe/P2/prov/302f96e9591c6d4571480d69bb319266c281f67c/src/utils/byte_utils.ts",
+   "line": 63
+  },
+  {
+   "section": "blocker",
+   "code": "SC2020",
+   "message": "'new WeakMap' is part of the standard library types but has no scriptc lowering yet",
+   "file": "<blocks>/mongodriver/probe/P2/prov/302f96e9591c6d4571480d69bb319266c281f67c/src/objectid.ts",
+   "line": 11
+  },
+  {
+   "section": "blocker",
+   "code": "SC2009",
+   "message": "values of type '{ readonly Binary: (o: Binary) => Binary; readonly Code: (o: Code) => Code; readonly DBRef: (o: DBRef) => DBRef; readonly Decimal128: (o: Decimal128) => Decimal128; ... 8 more ...; readonly Timestamp: (o: Timestamp) => Timestamp; }' cannot be compiled: the record shape is supported, but its member 'Long' has type '(o: Long & { low_: number; high_: number; unsigned_: boolean | undefined; }) => Long', which does not compile",
+   "file": "<blocks>/mongodriver/probe/P2/prov/302f96e9591c6d4571480d69bb319266c281f67c/src/extended_json.ts",
+   "line": 303
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "functions with optional or defaulted parameters as values, except where the target type spells the completed signature with required parameters (a '(x?: T) => R' function flows into a '(x: T | undefined) => R' slot, and a package/'any' slot takes any signature that can cross the island boundary; otherwise call the function directly) are not supported yet",
+   "file": "<blocks>/mongodriver/probe/P2/prov/302f96e9591c6d4571480d69bb319266c281f67c/src/extended_json.ts",
+   "line": 511
+  },
+  {
+   "section": "blocker",
+   "code": "SC2004",
+   "message": "uses of 'stringify' inherit the blocker on its declaration",
+   "file": "<blocks>/mongodriver/probe/P2/prov/302f96e9591c6d4571480d69bb319266c281f67c/src/extended_json.ts",
+   "line": 512
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "functions with optional or defaulted parameters as values, except where the target type spells the completed signature with required parameters (a '(x?: T) => R' function flows into a '(x: T | undefined) => R' slot, and a package/'any' slot takes any signature that can cross the island boundary; otherwise call the function directly) are not supported yet",
+   "file": "<blocks>/mongodriver/probe/P2/prov/302f96e9591c6d4571480d69bb319266c281f67c/src/extended_json.ts",
+   "line": 513
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "functions with optional or defaulted parameters as values, except where the target type spells the completed signature with required parameters (a '(x?: T) => R' function flows into a '(x: T | undefined) => R' slot, and a package/'any' slot takes any signature that can cross the island boundary; otherwise call the function directly) are not supported yet",
+   "file": "<blocks>/mongodriver/probe/P2/prov/302f96e9591c6d4571480d69bb319266c281f67c/src/extended_json.ts",
+   "line": 514
+  },
+  {
+   "section": "blocker",
+   "code": "SC2020",
+   "message": "'Object.freeze of a possibly-aliased value' is part of the standard library types but has no scriptc lowering yet",
+   "file": "<blocks>/mongodriver/probe/P2/prov/302f96e9591c6d4571480d69bb319266c281f67c/src/extended_json.ts",
+   "line": 515
+  },
+  {
+   "section": "blocker",
+   "code": "SC2020",
+   "message": "'Object.freeze of a possibly-aliased value' is part of the standard library types but has no scriptc lowering yet",
+   "file": "<blocks>/mongodriver/probe/P2/prov/302f96e9591c6d4571480d69bb319266c281f67c/src/parser/on_demand/index.ts",
+   "line": 30
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "the reference to 'onDemand' (a binding form with no lowering) is not supported yet",
+   "file": "<blocks>/mongodriver/probe/P2/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/bson.ts",
+   "line": 40
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "the reference to 'onDemand' (a binding form with no lowering) is not supported yet",
+   "file": "<blocks>/mongodriver/probe/P2/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/bson.ts",
+   "line": 41
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "the reference to 'onDemand' (a binding form with no lowering) is not supported yet",
+   "file": "<blocks>/mongodriver/probe/P2/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/bson.ts",
+   "line": 42
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "the reference to 'onDemand' (a binding form with no lowering) is not supported yet",
+   "file": "<blocks>/mongodriver/probe/P2/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/bson.ts",
+   "line": 43
+  },
+  {
+   "section": "blocker",
+   "code": "SC2009",
+   "message": "values of type '{ toLocalBufferType(this: void, buffer: Buffer<ArrayBufferLike> | Uint8Array<ArrayBufferLike>): Buffer<ArrayBufferLike>; equals(this: void, seqA: Uint8Array<...>, seqB: Uint8Array<...>): boolean; compare(this: void, seqA: Uint8Array<...>, seqB: Uint8Array<...>): -1 | ... 1 more ... | 1; toBase64(this: void, uint8arr...' cannot be compiled: the record shape is supported, but its member 'toLocalBufferType' has type '(this: void, buffer: Buffer<ArrayBufferLike> | Uint8Array<ArrayBufferLike>) => Buffer<ArrayBufferLike>', which does not compile",
+   "file": "<blocks>/mongodriver/probe/P2/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/utils.ts",
+   "line": 49
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "Function.prototype.call on a compiled function value (compiled calls are direct — no runtime 'this' or arguments object exists to re-route; spell the call directly: 'Object.prototype.toString(...)') is not supported yet",
+   "file": "<blocks>/mongodriver/probe/P2/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/utils.ts",
+   "line": 126
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "Set elements of type 'unknown' (Set elements must be string or number — Map's key kinds — or a server handle, which stores under reference identity) is not supported yet",
+   "file": "<blocks>/mongodriver/probe/P2/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/utils.ts",
+   "line": 1013
+  },
+  {
+   "section": "blocker",
+   "code": "SC2020",
+   "message": "'Symbol.dispose' is part of the standard library types but has no scriptc lowering yet",
+   "file": "<blocks>/mongodriver/probe/P2/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/utils.ts",
+   "line": 1445
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "redeclaring inherited fields at a different type ('{ authdb: string | undefined; bsonRegExp: boolean | undefined; bypassPinningCheck: boolean | undefined; checkKeys: boolean | undefined; collation: { alternate: …' over the inherited '{ bsonRegExp: boolean | undefined; bypassPinningCheck: boolean | undefined; checkKeys: boolean | undefined; enableUtf8Validation: boolean | undefined; fieldsAsR…' — these layouts give the property ONE slot, and one slot cannot answer both spellings), and without an initializer (Node resets the field to undefined when this class's initializers run) is not supported yet (instantiating class 'CommandOperation' with <m41.CursorResponse>)",
+   "file": "<blocks>/mongodriver/probe/P2/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/operations/command.ts",
+   "line": 93
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "extending the generic class 'CommandOperation' without a compiled concrete instantiation (the type arguments must map — see the instantiation's own diagnostic) is not supported yet",
+   "file": "<blocks>/mongodriver/probe/P2/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/operations/aggregate.ts",
+   "line": 50
+  },
+  {
+   "section": "blocker",
+   "code": "SC2004",
+   "message": "uses of 'AggregateOperation' inherit the blocker on its declaration",
+   "file": "<blocks>/mongodriver/probe/P2/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/operations/aggregate.ts",
+   "line": 153
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "redeclaring inherited fields at a different type ('{ authdb: string | undefined; bsonRegExp: boolean | undefined; bypassPinningCheck: boolean | undefined; checkKeys: boolean | undefined; collation: { alternate: …' over the inherited '{ bsonRegExp: boolean | undefined; bypassPinningCheck: boolean | undefined; checkKeys: boolean | undefined; enableUtf8Validation: boolean | undefined; fieldsAsR…' — these layouts give the property ONE slot, and one slot cannot answer both spellings), and without an initializer (Node resets the field to undefined when this class's initializers run) is not supported yet (instantiating class 'CommandOperation' with <{ databases: { empty: boolean | undefined; name: string; sizeOnDisk: number |...>)",
+   "file": "<blocks>/mongodriver/probe/P2/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/operations/command.ts",
+   "line": 93
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "extending the generic class 'CommandOperation' without a compiled concrete instantiation (the type arguments must map — see the instantiation's own diagnostic) is not supported yet",
+   "file": "<blocks>/mongodriver/probe/P2/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/operations/list_databases.ts",
+   "line": 29
+  },
+  {
+   "section": "blocker",
+   "code": "SC2004",
+   "message": "uses of 'ListDatabasesOperation' inherit the blocker on its declaration",
+   "file": "<blocks>/mongodriver/probe/P2/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/operations/list_databases.ts",
+   "line": 68
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "redeclaring inherited fields at a different type ('{ authdb: string | undefined; bsonRegExp: boolean | undefined; bypassPinningCheck: boolean | undefined; checkKeys: boolean | undefined; collation: { alternate: …' over the inherited '{ bsonRegExp: boolean | undefined; bypassPinningCheck: boolean | undefined; checkKeys: boolean | undefined; enableUtf8Validation: boolean | undefined; fieldsAsR…' — these layouts give the property ONE slot, and one slot cannot answer both spellings), and without an initializer (Node resets the field to undefined when this class's initializers run) is not supported yet (instantiating class 'CommandOperation' with <boolean>)",
+   "file": "<blocks>/mongodriver/probe/P2/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/operations/command.ts",
+   "line": 93
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "extending the generic class 'CommandOperation' without a compiled concrete instantiation (the type arguments must map — see the instantiation's own diagnostic) is not supported yet",
+   "file": "<blocks>/mongodriver/probe/P2/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/operations/remove_user.ts",
+   "line": 12
+  },
+  {
+   "section": "blocker",
+   "code": "SC2004",
+   "message": "uses of 'RemoveUserOperation' inherit the blocker on its declaration",
+   "file": "<blocks>/mongodriver/probe/P2/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/operations/remove_user.ts",
+   "line": 36
+  },
+  {
+   "section": "blocker",
+   "code": "SC2004",
+   "message": "uses of 'DeleteOperation' inherit the blocker on its declaration",
+   "file": "<blocks>/mongodriver/probe/P2/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/operations/delete.ts",
+   "line": 166
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "extending classes not declared in the program ('DeleteOperation') is not supported yet",
+   "file": "<blocks>/mongodriver/probe/P2/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/operations/delete.ts",
+   "line": 101
+  },
+  {
+   "section": "blocker",
+   "code": "SC2004",
+   "message": "uses of 'DeleteOneOperation' inherit the blocker on its declaration",
+   "file": "<blocks>/mongodriver/probe/P2/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/operations/delete.ts",
+   "line": 171
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "extending classes not declared in the program ('DeleteOperation') is not supported yet",
+   "file": "<blocks>/mongodriver/probe/P2/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/operations/delete.ts",
+   "line": 123
+  },
+  {
+   "section": "blocker",
+   "code": "SC2004",
+   "message": "uses of 'DeleteManyOperation' inherit the blocker on its declaration",
+   "file": "<blocks>/mongodriver/probe/P2/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/operations/delete.ts",
+   "line": 178
+  },
+  {
+   "section": "blocker",
+   "code": "SC2004",
+   "message": "uses of 'InsertOperation' inherit the blocker on its declaration",
+   "file": "<blocks>/mongodriver/probe/P2/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/operations/insert.ts",
+   "line": 99
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "extending classes not declared in the program ('InsertOperation') is not supported yet",
+   "file": "<blocks>/mongodriver/probe/P2/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/operations/insert.ts",
+   "line": 69
+  },
+  {
+   "section": "blocker",
+   "code": "SC2004",
+   "message": "uses of 'InsertOneOperation' inherit the blocker on its declaration",
+   "file": "<blocks>/mongodriver/probe/P2/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/operations/insert.ts",
+   "line": 104
+  },
+  {
+   "section": "blocker",
+   "code": "SC2004",
+   "message": "uses of 'UpdateOperation' inherit the blocker on its declaration",
+   "file": "<blocks>/mongodriver/probe/P2/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/operations/update.ts",
+   "line": 294
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "extending classes not declared in the program ('UpdateOperation') is not supported yet",
+   "file": "<blocks>/mongodriver/probe/P2/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/operations/update.ts",
+   "line": 129
+  },
+  {
+   "section": "blocker",
+   "code": "SC2004",
+   "message": "uses of 'UpdateOneOperation' inherit the blocker on its declaration",
+   "file": "<blocks>/mongodriver/probe/P2/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/operations/update.ts",
+   "line": 300
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "extending classes not declared in the program ('UpdateOperation') is not supported yet",
+   "file": "<blocks>/mongodriver/probe/P2/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/operations/update.ts",
+   "line": 166
+  },
+  {
+   "section": "blocker",
+   "code": "SC2004",
+   "message": "uses of 'UpdateManyOperation' inherit the blocker on its declaration",
+   "file": "<blocks>/mongodriver/probe/P2/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/operations/update.ts",
+   "line": 307
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "extending classes not declared in the program ('UpdateOperation') is not supported yet",
+   "file": "<blocks>/mongodriver/probe/P2/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/operations/update.ts",
+   "line": 218
+  },
+  {
+   "section": "blocker",
+   "code": "SC2004",
+   "message": "uses of 'ReplaceOneOperation' inherit the blocker on its declaration",
+   "file": "<blocks>/mongodriver/probe/P2/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/operations/update.ts",
+   "line": 313
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "extending generic classes are not supported yet",
+   "file": "<blocks>/mongodriver/probe/P2/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/mongo_logger.ts",
+   "line": 103
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "constructing through a class value whose class has no lowering (the class declaration itself was rejected — see its own diagnostic) is not supported yet",
+   "file": "<blocks>/mongodriver/probe/P2/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/mongo_logger.ts",
+   "line": 124
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "redeclaring inherited fields at a different type ('{ batchSize: number | undefined; bsonRegExp: boolean | undefined; bypassPinningCheck: boolean | undefined; checkKeys: boolean | undefined; comment: unknown; ena…' over the inherited '{ bsonRegExp: boolean | undefined; bypassPinningCheck: boolean | undefined; checkKeys: boolean | undefined; enableUtf8Validation: boolean | undefined; fieldsAsR…' — these layouts give the property ONE slot, and one slot cannot answer both spellings), and without an initializer (Node resets the field to undefined when this class's initializers run) is not supported yet",
+   "file": "<blocks>/mongodriver/probe/P2/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/operations/get_more.ts",
+   "line": 43
+  },
+  {
+   "section": "blocker",
+   "code": "SC2004",
+   "message": "uses of 'GetMoreOperation' inherit the blocker on its declaration",
+   "file": "<blocks>/mongodriver/probe/P2/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/operations/get_more.ts",
+   "line": 108
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "extending the generic class 'AbstractOperation' without a compiled concrete instantiation (the type arguments must map — see the instantiation's own diagnostic) is not supported yet",
+   "file": "<blocks>/mongodriver/probe/P2/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/operations/kill_cursors.ts",
+   "line": 21
+  },
+  {
+   "section": "blocker",
+   "code": "SC2004",
+   "message": "uses of 'KillCursorsOperation' inherit the blocker on its declaration",
+   "file": "<blocks>/mongodriver/probe/P2/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/operations/kill_cursors.ts",
+   "line": 64
+  },
+  {
+   "section": "blocker",
+   "code": "SC2004",
+   "message": "uses of 'ClientSession' inherit the blocker on its declaration",
+   "file": "<blocks>/mongodriver/probe/P2/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/sessions.ts",
+   "line": 826
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "generic classes as values ('typeof m70.AbstractCursor' keeps the type parameter — instantiation expressions ('m70.AbstractCursor<number>') and concrete constructor-typed slots compile) are not supported yet",
+   "file": "<blocks>/mongodriver/probe/P2/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/cursor/abstract_cursor.ts",
+   "line": 1229
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "redeclaring inherited fields at a different type ('{ authdb: string | undefined; bsonRegExp: boolean | undefined; bypassPinningCheck: boolean | undefined; checkKeys: boolean | undefined; collation: { alternate: …' over the inherited '{ bsonRegExp: boolean | undefined; bypassPinningCheck: boolean | undefined; checkKeys: boolean | undefined; enableUtf8Validation: boolean | undefined; fieldsAsR…' — these layouts give the property ONE slot, and one slot cannot answer both spellings), and without an initializer (Node resets the field to undefined when this class's initializers run) is not supported yet (instantiating class 'CommandOperation' with <number>)",
+   "file": "<blocks>/mongodriver/probe/P2/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/operations/command.ts",
+   "line": 93
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "extending the generic class 'CommandOperation' without a compiled concrete instantiation (the type arguments must map — see the instantiation's own diagnostic) is not supported yet",
+   "file": "<blocks>/mongodriver/probe/P2/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/operations/count.ts",
+   "line": 25
+  },
+  {
+   "section": "blocker",
+   "code": "SC2004",
+   "message": "uses of 'CountOperation' inherit the blocker on its declaration",
+   "file": "<blocks>/mongodriver/probe/P2/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/operations/count.ts",
+   "line": 74
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "extending the generic class 'CommandOperation' without a compiled concrete instantiation (the type arguments must map — see the instantiation's own diagnostic) is not supported yet",
+   "file": "<blocks>/mongodriver/probe/P2/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/operations/find.ts",
+   "line": 89
+  },
+  {
+   "section": "blocker",
+   "code": "SC2004",
+   "message": "uses of 'FindOperation' inherit the blocker on its declaration",
+   "file": "<blocks>/mongodriver/probe/P2/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/operations/find.ts",
+   "line": 257
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "extending the generic class 'CommandOperation' without a compiled concrete instantiation (the type arguments must map — see the instantiation's own diagnostic) is not supported yet",
+   "file": "<blocks>/mongodriver/probe/P2/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/operations/indexes.ts",
+   "line": 364
+  },
+  {
+   "section": "blocker",
+   "code": "SC2004",
+   "message": "uses of 'ListIndexesOperation' inherit the blocker on its declaration",
+   "file": "<blocks>/mongodriver/probe/P2/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/operations/indexes.ts",
+   "line": 411
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "redeclaring inherited fields at a different type ('{ authdb: string | undefined; bsonRegExp: boolean | undefined; bypassPinningCheck: boolean | undefined; checkKeys: boolean | undefined; collation: { alternate: …' over the inherited '{ bsonRegExp: boolean | undefined; bypassPinningCheck: boolean | undefined; checkKeys: boolean | undefined; enableUtf8Validation: boolean | undefined; fieldsAsR…' — these layouts give the property ONE slot, and one slot cannot answer both spellings), and without an initializer (Node resets the field to undefined when this class's initializers run) is not supported yet (instantiating class 'CommandOperation' with <string[]>)",
+   "file": "<blocks>/mongodriver/probe/P2/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/operations/command.ts",
+   "line": 93
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "extending the generic class 'CommandOperation' without a compiled concrete instantiation (the type arguments must map — see the instantiation's own diagnostic) is not supported yet",
+   "file": "<blocks>/mongodriver/probe/P2/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/operations/indexes.ts",
+   "line": 245
+  },
+  {
+   "section": "blocker",
+   "code": "SC2004",
+   "message": "uses of 'CreateIndexesOperation' inherit the blocker on its declaration",
+   "file": "<blocks>/mongodriver/probe/P2/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/operations/indexes.ts",
+   "line": 417
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "extending the generic class 'CommandOperation' without a compiled concrete instantiation (the type arguments must map — see the instantiation's own diagnostic) is not supported yet",
+   "file": "<blocks>/mongodriver/probe/P2/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/operations/indexes.ts",
+   "line": 331
+  },
+  {
+   "section": "blocker",
+   "code": "SC2004",
+   "message": "uses of 'DropIndexOperation' inherit the blocker on its declaration",
+   "file": "<blocks>/mongodriver/probe/P2/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/operations/indexes.ts",
+   "line": 418
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "extending the generic class 'CommandOperation' without a compiled concrete instantiation (the type arguments must map — see the instantiation's own diagnostic) is not supported yet",
+   "file": "<blocks>/mongodriver/probe/P2/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/operations/distinct.ts",
+   "line": 28
+  },
+  {
+   "section": "blocker",
+   "code": "SC2004",
+   "message": "uses of 'DistinctOperation' inherit the blocker on its declaration",
+   "file": "<blocks>/mongodriver/probe/P2/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/operations/distinct.ts",
+   "line": 87
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "extending the generic class 'CommandOperation' without a compiled concrete instantiation (the type arguments must map — see the instantiation's own diagnostic) is not supported yet",
+   "file": "<blocks>/mongodriver/probe/P2/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/operations/estimated_document_count.ts",
+   "line": 20
+  },
+  {
+   "section": "blocker",
+   "code": "SC2004",
+   "message": "uses of 'EstimatedDocumentCountOperation' inherit the blocker on its declaration",
+   "file": "<blocks>/mongodriver/probe/P2/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/operations/estimated_document_count.ts",
+   "line": 56
+  },
+  {
+   "section": "blocker",
+   "code": "SC2004",
+   "message": "uses of 'FindAndModifyOperation' inherit the blocker on its declaration",
+   "file": "<blocks>/mongodriver/probe/P2/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/operations/find_and_modify.ts",
+   "line": 314
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "extending the generic class 'CommandOperation' without a compiled concrete instantiation (the type arguments must map — see the instantiation's own diagnostic) is not supported yet",
+   "file": "<blocks>/mongodriver/probe/P2/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/operations/rename.ts",
+   "line": 19
+  },
+  {
+   "section": "blocker",
+   "code": "SC2004",
+   "message": "uses of 'RenameOperation' inherit the blocker on its declaration",
+   "file": "<blocks>/mongodriver/probe/P2/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/operations/rename.ts",
+   "line": 55
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "extending the generic class 'CommandOperation' without a compiled concrete instantiation (the type arguments must map — see the instantiation's own diagnostic) is not supported yet",
+   "file": "<blocks>/mongodriver/probe/P2/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/operations/list_collections.ts",
+   "line": 29
+  },
+  {
+   "section": "blocker",
+   "code": "SC2004",
+   "message": "uses of 'ListCollectionsOperation' inherit the blocker on its declaration",
+   "file": "<blocks>/mongodriver/probe/P2/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/operations/list_collections.ts",
+   "line": 103
+  },
+  {
+   "section": "blocker",
+   "code": "SC2011",
+   "message": "values of type 'CollectionPrivate' have no static representation but run in the embedded dynamic engine, which this build does not include (instantiating class 'Collection' with <{ [key: string]: unknown }>)",
+   "file": "<blocks>/mongodriver/probe/P2/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/collection.ts",
+   "line": 170
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "extending the generic class 'CommandOperation' without a compiled concrete instantiation (the type arguments must map — see the instantiation's own diagnostic) is not supported yet",
+   "file": "<blocks>/mongodriver/probe/P2/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/operations/create_collection.ts",
+   "line": 115
+  },
+  {
+   "section": "blocker",
+   "code": "SC2004",
+   "message": "uses of 'CreateCollectionOperation' inherit the blocker on its declaration",
+   "file": "<blocks>/mongodriver/probe/P2/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/operations/create_collection.ts",
+   "line": 221
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "extending the generic class 'CommandOperation' without a compiled concrete instantiation (the type arguments must map — see the instantiation's own diagnostic) is not supported yet",
+   "file": "<blocks>/mongodriver/probe/P2/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/operations/drop.ts",
+   "line": 20
+  },
+  {
+   "section": "blocker",
+   "code": "SC2004",
+   "message": "uses of 'DropCollectionOperation' inherit the blocker on its declaration",
+   "file": "<blocks>/mongodriver/probe/P2/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/operations/drop.ts",
+   "line": 131
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "extending the generic class 'CommandOperation' without a compiled concrete instantiation (the type arguments must map — see the instantiation's own diagnostic) is not supported yet",
+   "file": "<blocks>/mongodriver/probe/P2/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/operations/drop.ts",
+   "line": 110
+  },
+  {
+   "section": "blocker",
+   "code": "SC2004",
+   "message": "uses of 'DropDatabaseOperation' inherit the blocker on its declaration",
+   "file": "<blocks>/mongodriver/probe/P2/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/operations/drop.ts",
+   "line": 132
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "extending the generic class 'CommandOperation' without a compiled concrete instantiation (the type arguments must map — see the instantiation's own diagnostic) is not supported yet",
+   "file": "<blocks>/mongodriver/probe/P2/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/operations/stats.ts",
+   "line": 15
+  },
+  {
+   "section": "blocker",
+   "code": "SC2004",
+   "message": "uses of 'DbStatsOperation' inherit the blocker on its declaration",
+   "file": "<blocks>/mongodriver/probe/P2/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/operations/stats.ts",
+   "line": 37
+  },
+  {
+   "section": "blocker",
+   "code": "SC2009",
+   "message": "values of type 'AWS4 | { kModuleError: MongoMissingDependencyError; }' cannot be compiled: the union shape is supported, but its arm 'AWS4' does not compile",
+   "file": "<blocks>/mongodriver/probe/P2/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/deps.ts",
+   "line": 249
+  },
+  {
+   "section": "blocker",
+   "code": "SC2004",
+   "message": "uses of 'loadAws4' inherit the blocker on its declaration",
+   "file": "<blocks>/mongodriver/probe/P2/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/deps.ts",
+   "line": 247
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "the reference to 'onDemand' (a binding form with no lowering) is not supported yet",
+   "file": "<blocks>/mongodriver/probe/P2/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/cmap/commands.ts",
+   "line": 33
+  },
+  {
+   "section": "blocker",
+   "code": "SC2011",
+   "message": "values of type 'Record<keyof MongoClientOptions, OptionDescriptor>' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/mongodriver/probe/P2/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/connection_string.ts",
+   "line": 634
+  },
+  {
+   "section": "blocker",
+   "code": "SC2009",
+   "message": "values of type 'CaseInsensitiveMap<any>' cannot be compiled: the record shape is supported, but its member 'get' has type '(k: string) => any', which does not compile",
+   "file": "<blocks>/mongodriver/probe/P2/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/connection_string.ts",
+   "line": 1299
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "Map keys of type 'any' (Map keys must be a string, a number, or a CLASS INSTANCE - those key by reference identity. A record/interface type cannot: a width coercion copies it, and a copy would miss its own entry) is not supported yet",
+   "file": "<blocks>/mongodriver/probe/P2/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/cmap/auth/mongodb_oidc.ts",
+   "line": 123
+  },
+  {
+   "section": "blocker",
+   "code": "SC2020",
+   "message": "'Map<EnvironmentName, () => Workflow>.set' is part of the standard library types but has no scriptc lowering yet",
+   "file": "<blocks>/mongodriver/probe/P2/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/cmap/auth/mongodb_oidc.ts",
+   "line": 124
+  },
+  {
+   "section": "blocker",
+   "code": "SC2020",
+   "message": "'Map<EnvironmentName, () => Workflow>.set' is part of the standard library types but has no scriptc lowering yet",
+   "file": "<blocks>/mongodriver/probe/P2/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/cmap/auth/mongodb_oidc.ts",
+   "line": 125
+  },
+  {
+   "section": "blocker",
+   "code": "SC2020",
+   "message": "'Map<EnvironmentName, () => Workflow>.set' is part of the standard library types but has no scriptc lowering yet",
+   "file": "<blocks>/mongodriver/probe/P2/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/cmap/auth/mongodb_oidc.ts",
+   "line": 126
+  },
+  {
+   "section": "blocker",
+   "code": "SC2020",
+   "message": "'Map<EnvironmentName, () => Workflow>.set' is part of the standard library types but has no scriptc lowering yet",
+   "file": "<blocks>/mongodriver/probe/P2/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/cmap/auth/mongodb_oidc.ts",
+   "line": 127
+  },
+  {
+   "section": "blocker",
+   "code": "SC2020",
+   "message": "'string.codePointAt' is part of the standard library types but has no scriptc lowering yet",
+   "file": "<blocks>/mongodriver/probe/P2/prov/aff0d3bdf6e3d8332568d431e4448d895635e8d3/packages/saslprep/src/index.ts",
+   "line": 4
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "assignment to non-variables are not supported yet",
+   "file": "<blocks>/mongodriver/probe/P2/prov/aff0d3bdf6e3d8332568d431e4448d895635e8d3/packages/saslprep/src/index.ts",
+   "line": 153
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "assignment to non-variables are not supported yet",
+   "file": "<blocks>/mongodriver/probe/P2/prov/aff0d3bdf6e3d8332568d431e4448d895635e8d3/packages/saslprep/src/index.ts",
+   "line": 154
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "'export =' assignments (use named ESM exports: export function f() {} / export const x = ...) are not supported yet",
+   "file": "<blocks>/mongodriver/probe/P2/prov/aff0d3bdf6e3d8332568d431e4448d895635e8d3/packages/saslprep/src/index.ts",
+   "line": 155
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "redeclaring inherited fields at a different type ('{ authdb: string | undefined; bsonRegExp: boolean | undefined; bypassPinningCheck: boolean | undefined; checkKeys: boolean | undefined; collation: { alternate: …' over the inherited '{ bsonRegExp: boolean | undefined; bypassPinningCheck: boolean | undefined; checkKeys: boolean | undefined; enableUtf8Validation: boolean | undefined; fieldsAsR…' — these layouts give the property ONE slot, and one slot cannot answer both spellings), and without an initializer (Node resets the field to undefined when this class's initializers run) is not supported yet (instantiating class 'CommandOperation' with <m41.ClientBulkWriteCursorResponse>)",
+   "file": "<blocks>/mongodriver/probe/P2/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/operations/command.ts",
+   "line": 93
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "extending the generic class 'CommandOperation' without a compiled concrete instantiation (the type arguments must map — see the instantiation's own diagnostic) is not supported yet",
+   "file": "<blocks>/mongodriver/probe/P2/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/operations/client_bulk_write/client_bulk_write.ts",
+   "line": 14
+  },
+  {
+   "section": "blocker",
+   "code": "SC2004",
+   "message": "uses of 'ClientBulkWriteOperation' inherit the blocker on its declaration",
+   "file": "<blocks>/mongodriver/probe/P2/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/operations/client_bulk_write/client_bulk_write.ts",
+   "line": 65
+  },
+  {
+   "section": "blocker",
+   "code": "SC2011",
+   "message": "values of type 'PkFactory' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/mongodriver/probe/P2/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/operations/client_bulk_write/command_builder.ts",
+   "line": 259
+  },
+  {
+   "section": "blocker",
+   "code": "SC2011",
+   "message": "values of type 'ClientDeleteOneModel<Document>' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/mongodriver/probe/P2/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/operations/client_bulk_write/command_builder.ts",
+   "line": 285
+  },
+  {
+   "section": "blocker",
+   "code": "SC2011",
+   "message": "values of type 'ClientDeleteManyModel<Document>' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/mongodriver/probe/P2/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/operations/client_bulk_write/command_builder.ts",
+   "line": 298
+  },
+  {
+   "section": "blocker",
+   "code": "SC2011",
+   "message": "values of type 'ClientUpdateOneModel<Document>' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/mongodriver/probe/P2/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/operations/client_bulk_write/command_builder.ts",
+   "line": 346
+  },
+  {
+   "section": "blocker",
+   "code": "SC2011",
+   "message": "values of type 'ClientUpdateManyModel<Document>' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/mongodriver/probe/P2/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/operations/client_bulk_write/command_builder.ts",
+   "line": 360
+  },
+  {
+   "section": "blocker",
+   "code": "SC2011",
+   "message": "values of type 'ClientReplaceOneModel<Document>' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/mongodriver/probe/P2/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/operations/client_bulk_write/command_builder.ts",
+   "line": 436
+  },
+  {
+   "section": "blocker",
+   "code": "SC2011",
+   "message": "values of type 'MongoClientPrivate' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/mongodriver/probe/P2/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/mongo_client.ts",
+   "line": 397
+  },
+  {
+   "section": "blocker",
+   "code": "SC2004",
+   "message": "uses of 'MongoClient' inherit the blocker on its declaration",
+   "file": "<blocks>/mongodriver/probe/P2/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/mongo_client.ts",
+   "line": 1040
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "generic classes as values ('typeof m159.ChangeStream' keeps the type parameter — instantiation expressions ('m159.ChangeStream<number>') and concrete constructor-typed slots compile) are not supported yet",
+   "file": "<blocks>/mongodriver/probe/P2/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/change_stream.ts",
+   "line": 1110
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "the reference to 'WA_ABPROPS_BY_CODE' (it has no compiled implementation — its module '../spec/abprops/index.d.ts' ships only a declaration file) is not supported yet",
+   "file": "<blocks>/mongodriver/probe/P2/prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/abprops-spec.ts",
+   "line": 25
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "the reference to 'WA_ABPROPS' (it has no compiled implementation — its module '../../../spec/abprops/index.d.ts' ships only a declaration file) is not supported yet",
+   "file": "<blocks>/mongodriver/probe/P2/prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/client/coordinators/WaAbPropsCoordinator.ts",
+   "line": 35
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "the reference to 'RAW_WA_APPSTATE_SCHEMAS' (it has no compiled implementation — its module '../spec/appstate/index.d.ts' ships only a declaration file) is not supported yet",
+   "file": "<blocks>/mongodriver/probe/P2/prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/appstate-spec.ts",
+   "line": 78
+  },
+  {
+   "section": "blocker",
+   "code": "SC2004",
+   "message": "uses of 'WaClientImpl' inherit the blocker on its declaration",
+   "file": "<blocks>/mongodriver/probe/P2/prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/client/WaClient.ts",
+   "line": 903
+  },
+  {
+   "section": "blocker",
+   "code": "SC2011",
+   "message": "values of type 'WaMongoStoreConfig' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/mongodriver/probe/P2/prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/packages/store-mongo/src/createMongoStore.ts",
+   "line": 117
+  },
+  {
+   "section": "blocker",
+   "code": "SC2004",
+   "message": "uses of 'createMongoStore' inherit the blocker on its declaration",
+   "file": "<blocks>/mongodriver/lab/napp/drivers/store-mongo.ts",
+   "line": 7
+  },
+  {
+   "section": "blocker",
+   "code": "SC2004",
+   "message": "uses of 'r' inherit the blocker on its declaration",
+   "file": "<blocks>/mongodriver/lab/napp/drivers/store-mongo.ts",
+   "line": 8
+  },
+  {
+   "section": "blocker",
+   "code": "SC2004",
+   "message": "uses of 'r' inherit the blocker on its declaration",
+   "file": "<blocks>/mongodriver/lab/napp/drivers/store-mongo.ts",
+   "line": 9
+  },
+  {
+   "section": "blocker",
+   "code": "SC2020",
+   "message": "'this.constructor' is part of the standard library types but has no scriptc lowering yet (instantiating class 'AbstractOperation' with <m41.CursorResponse>)",
+   "file": "<blocks>/mongodriver/probe/P2/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/operations/operation.ts",
+   "line": 92
+  },
+  {
+   "section": "blocker",
+   "code": "SC2020",
+   "message": "'this.constructor' is part of the standard library types but has no scriptc lowering yet (instantiating class 'AbstractOperation' with <{ databases: { empty: boolean | undefined; name: string; sizeOnDisk: number |...>)",
+   "file": "<blocks>/mongodriver/probe/P2/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/operations/operation.ts",
+   "line": 92
+  },
+  {
+   "section": "blocker",
+   "code": "SC2020",
+   "message": "'this.constructor' is part of the standard library types but has no scriptc lowering yet (instantiating class 'AbstractOperation' with <boolean>)",
+   "file": "<blocks>/mongodriver/probe/P2/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/operations/operation.ts",
+   "line": 92
+  },
+  {
+   "section": "blocker",
+   "code": "SC2020",
+   "message": "'this.constructor' is part of the standard library types but has no scriptc lowering yet (instantiating class 'AbstractOperation' with <{ [key: string]: unknown }>)",
+   "file": "<blocks>/mongodriver/probe/P2/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/operations/operation.ts",
+   "line": 92
+  },
+  {
+   "section": "blocker",
+   "code": "SC2020",
+   "message": "'this.constructor' is part of the standard library types but has no scriptc lowering yet (instantiating class 'AbstractOperation' with <number>)",
+   "file": "<blocks>/mongodriver/probe/P2/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/operations/operation.ts",
+   "line": 92
+  },
+  {
+   "section": "blocker",
+   "code": "SC2020",
+   "message": "'this.constructor' is part of the standard library types but has no scriptc lowering yet (instantiating class 'AbstractOperation' with <string[]>)",
+   "file": "<blocks>/mongodriver/probe/P2/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/operations/operation.ts",
+   "line": 92
+  },
+  {
+   "section": "blocker",
+   "code": "SC2020",
+   "message": "'this.constructor' is part of the standard library types but has no scriptc lowering yet (instantiating class 'AbstractOperation' with <string>)",
+   "file": "<blocks>/mongodriver/probe/P2/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/operations/operation.ts",
+   "line": 92
+  },
+  {
+   "section": "blocker",
+   "code": "SC2020",
+   "message": "'this.constructor' is part of the standard library types but has no scriptc lowering yet (instantiating class 'AbstractOperation' with <m41.ClientBulkWriteCursorResponse>)",
+   "file": "<blocks>/mongodriver/probe/P2/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/operations/operation.ts",
+   "line": 92
+  },
+  {
+   "section": "blocker",
+   "code": "SC2001",
+   "message": "values of type 'EmptyNode | HeadNode<T>' cannot be compiled yet (supported: number, string, boolean, arrays, Maps, Sets, RegExp, functions, classes, records, unions of those, and 'unknown') (instantiating class 'List' with <Uint8Array>)",
+   "file": "<blocks>/mongodriver/probe/P2/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/utils.ts",
+   "line": 674
+  },
+  {
+   "section": "blocker",
+   "code": "SC2001",
+   "message": "values of type 'List<Buffer<ArrayBufferLike>>' cannot be compiled yet (supported: number, string, boolean, arrays, Maps, Sets, RegExp, functions, classes, records, unions of those, and 'unknown')",
+   "file": "<blocks>/mongodriver/probe/P2/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/utils.ts",
+   "line": 813
+  },
+  {
+   "section": "blocker",
+   "code": "SC2011",
+   "message": "values of type 'DbPrivate' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/mongodriver/probe/P2/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/db.ts",
+   "line": 127
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "extending classes not declared in the program ('CursorResponse') is not supported yet",
+   "file": "<blocks>/mongodriver/probe/P2/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/cmap/wire_protocol/responses.ts",
+   "line": 369
+  },
+  {
+   "section": "blocker",
+   "code": "SC2011",
+   "message": "values of type 'ServerPrivate' have no static representation but run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/mongodriver/probe/P2/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/sdam/server.ts",
+   "line": 119
+  },
+  {
+   "section": "advisory",
+   "code": "SC6004",
+   "message": "this flow COPIES the record into a different shape, and the copy ends the member 'initSync'",
+   "file": "<blocks>/mongodriver/probe/P2/prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/src/crypto/nativeBackend.ts",
+   "line": 50
+  },
+  {
+   "section": "advisory",
+   "code": "SC6004",
+   "message": "this flow COPIES the record into a different shape, and the copy ends the members 'bsonRegExp', 'bypassPinningCheck', 'checkKeys', 'enableUtf8Validation', 'fieldsAsRaw', 'ignoreUndefined', 'minInternalBufferSize', 'omitMaxTimeMS', 'promoteBuffers', 'promoteLongs', 'promoteValues', 'raw', 'serializeFunctions', 'signal', 'timeoutMS', 'useBigInt64', 'willRetryWrite'",
+   "file": "<blocks>/mongodriver/probe/P2/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/operations/operation.ts",
+   "line": 76
+  },
+  {
+   "section": "advisory",
+   "code": "SC6004",
+   "message": "this flow COPIES the record into a different shape, and the copy ends the members 'bypassPinningCheck', 'omitMaxTimeMS', 'readPreference', 'session', 'signal', 'timeoutMS', 'willRetryWrite'",
+   "file": "<blocks>/mongodriver/probe/P2/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/operations/operation.ts",
+   "line": 79
+  }
+ ],
+ "trimmed": "unreached sites dropped (1435 entries); unreachedStats kept"
+}
