@@ -10929,6 +10929,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/7797-a-compound-assignment-through-a-computed-receiver-evaluates-it-once.ts": {
+   "order": [
+    "<repo>/tests/corpus/7797-a-compound-assignment-through-a-computed-receiver-evaluates-it-once.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/800-switch-basics.ts": {
    "order": [
     "<repo>/tests/corpus/800-switch-basics.ts"
