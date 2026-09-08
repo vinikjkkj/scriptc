@@ -1627,14 +1627,9 @@ dynamic-only  SC2012  string.prototype.replaceAll
 So `jid.replace('@', ':0@')` refusing is the manifest's recorded answer, not a
 surprise. Classified as a capability gap with a known status.
 
-**One observation I could not resolve and am not asserting.** In
-`drivers/repl.ts`, `s.replace('@', ':0@')` over a `declare const s: string`
-**did not raise the fence**, while the same call over a function parameter
-(`drivers/repl2.ts`) does, three times out of three. Both files analysed clean
-with no `unreached` section, so it is not an unreached-code artefact. If the
-fence really can be missed on some receiver shapes that is a **false green**,
-which matters more than the site it hides. Both probes are committed; this is an
-observation with a reproduction, not a claim.
+**That reading is now REFUTED, by mechanism — see section 17.** It is not a
+missed fence: the ambient receiver read throws before the call is reached, so
+no refusal is owed and none fires.
 
 ### 16.5 The last `any` is zapo's type, not a narrowing gap
 
@@ -1662,3 +1657,136 @@ work `voip` justifies, and it is the user's, not this block's. What is settled
 is the shape: **`voip` is not 45 problems, and it is not one problem. It is 19
 that are not ours, 9 that are a decision already made, and a 17-site tail with
 no twelfth cause in it.**
+
+---
+
+## 17. The false green, refuted: two lowerings, both correct
+
+§16.4 recorded an unresolved observation — `.replace()` raising `SC2012` 3/3
+over a function parameter and **not** raising it over a `declare const`
+receiver. If a fence could be missed on some receiver shapes, every "0 strict
+errors" this project has quoted would inherit the doubt, because a green build
+would stop being evidence that the refusal cannot fire.
+
+**It is not a miss.** The two calls take different lowerings and both are
+correct. Decided by mechanism, as follows.
+
+### 17.1 It was never an instrument disagreement
+
+The first thing to rule out: `analyze()` and the build reporting different
+things. They do not. On `drivers/repl.ts` both report **exactly one** site, and
+the same one:
+
+    analyze()   1 blocker, line 5
+    BUILD       rc=1, LOG-SITES 1, "1 error.", line 5:11
+
+Line 5 is the literal receiver. Neither instrument reports the ambient-receiver
+call on line 3. So the difference is in the compiler's lowering, not in how it
+was measured.
+
+### 17.2 The mechanism, read out of the emitted C
+
+Minimal program (`drivers/amb1.ts`), three lines, ambient receiver only:
+
+```ts
+declare const s: string
+const a = s.replace('@', ':0@')
+console.log('a=' + a)
+```
+
+`BUILD rc=0`, **0 sites**, a 677,888-byte binary — and a 2,219-byte translation
+unit whose whole body is:
+
+```c
+ScrStr *sc_t2 = (ScrStr *)&sc_lit_0;
+double  sc_t3 = (scr_undef_global_read(sc_t2), 0);
+if (scr_exc_pending()) { return; }
+```
+
+**`scr_undef_global_read` is the whole answer.** A `declare const` is an ambient
+binding with no runtime value, so *reading* it is an undefined-global read,
+which throws a `ReferenceError`. The compiler emits that read, checks for a
+pending exception, and returns. **The member call is never emitted at all** —
+`grep` for a string-replace symbol in the TU answers **0**, and the TU carries
+**0** `[SCxxxx]` fences. There is no `.replace()` in the program to refuse.
+
+And Node agrees, for the same reason:
+
+    binary:  Uncaught ReferenceError: s is not defined
+    node:    ReferenceError: s is not defined
+
+Both throw the same error class on the same line. (The texts differ in
+formatting — one line against Node's stack — which is why this is not a corpus
+program.)
+
+### 17.3 It is about reachability, not about `.replace()`
+
+The decisive control, because "dynamic-only method" and "unreadable receiver"
+are confounded in the original observation. `drivers/amb2.ts` puts a **fully
+supported** method on the same ambient receiver:
+
+```ts
+declare const s: string
+console.log('u=' + s.toUpperCase())
+```
+
+`BUILD rc=0`, 0 sites, **0 `toUpperCase` symbols in the emitted C**, and the
+identical `ReferenceError` at run time. So the silence has nothing to do with
+`.replace()`'s support status: **any** member call on an unreadable receiver is
+unreachable, and unreachable code owes no diagnostic.
+
+### 17.4 One variable changed, and the fence fires
+
+`drivers/amb3.ts` is `amb1.ts` with exactly one thing different — the receiver
+is a real string instead of an ambient binding:
+
+```ts
+function f(s: string): string { return s.replace('@', ':0@') }
+console.log('a=' + f('u@v'))
+```
+
+    BUILD rc=1   LOG-SITES 1   1 SC2012
+
+**Silence and refusal turn on reachability alone.** Every real receiver tried
+refuses: a parameter (3/3 in `drivers/repl2.ts`), a literal, a local.
+
+### 17.5 The boundary, closed
+
+The remaining risk in this area is not the fence but the lowering itself: if an
+ambient binding's global genuinely existed at run time, an unconditional
+undefined-global read would throw where Node succeeds.
+
+**That program cannot be written.** `drivers/amb4.ts` tries to define the global
+first and is refused before it gets there:
+
+    SC2020: 'globalThis' is part of the standard library types but has no scriptc lowering yet
+
+`globalThis` has no lowering, so there is no compilable way to make an ambient
+binding exist at run time. The undefined-global lowering therefore cannot
+diverge from Node in any program that compiles.
+
+### 17.6 What is pinned, and what this costs
+
+`tests/diagnostics/a-dynamic-only-call-on-a-receiver-that-cannot-be-read.ts`
+carries **both** shapes in one file, and its snapshot is the assertion:
+
+    exactly one SC2012, on the REAL receiver at line 31
+    nothing at all on the ambient receiver at line 26
+
+So a future change that starts refusing the ambient call, or stops refusing the
+real one, fails that snapshot. Diagnostics suite: **155 programs, 155 passed, 1
+snapshot written.**
+
+**No compiler source was changed by this investigation**, so the suite scope is
+the diagnostics suite alone, and that is what was run. No green is in doubt: the
+refusal fires wherever the call is reached, and where it does not fire there is
+no call.
+
+### 17.7 The general form, worth keeping
+
+*A refusal is owed only where the code is reached.* An expression whose receiver
+provably throws first emits no call, so it carries no site — and a site census
+that finds nothing there is right, not blind. The way to tell that apart from a
+missed fence is to change **one** thing about the receiver and watch the site
+appear, then read the emitted code for the mechanism. Two outcomes look
+identical from the outside; the emitted C does not.

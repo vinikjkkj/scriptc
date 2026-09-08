@@ -1,0 +1,10 @@
+<blocks>/wamcoord-lab/napp/amb4.ts:6:3 - error SC2020: 'globalThis' is part of the standard library types but has no scriptc lowering yet
+
+  5 | declare const injected: string
+  6 | ;(globalThis as unknown as { injected: string }).injected = 'u@v'
+    |   ^~~~~~~~~~
+  7 | console.log('a=' + injected)
+
+  hint: the type checker sees the full standard library, but only the supported surface compiles (https://scriptc.dev/limitations)
+
+1 error.
