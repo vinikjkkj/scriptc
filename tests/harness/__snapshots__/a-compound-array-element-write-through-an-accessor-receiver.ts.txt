@@ -1,0 +1,6 @@
+a-compound-array-element-write-through-an-accessor-receiver.ts:22:1 - error SC1090: compound array-element assignment through this target (supported: a numeric array or typed array; a receiver that is an identifier, `this`, or a chain of plain data fields over them — an accessor link is refused because a getter would run twice; and an index that can be evaluated twice — a literal, an identifier, or arithmetic over those) is not supported yet
+
+  21 | const h = new Holder()
+  22 | h.viaGetter[1] += 10
+     | ^~~~~~~~~~~~~~
+  23 | console.log('calls=' + String(h.calls))

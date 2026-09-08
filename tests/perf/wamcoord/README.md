@@ -1351,3 +1351,174 @@ than usual here, because the corpus program added in §14.1 is driven by
 `differential.test.ts` — so the suite that will run it is one I did not run. It
 was verified by hand instead, on both backends, with node as the oracle, which
 is what that suite does to it.
+
+---
+
+## 15. The other 36, characterised — and the two that were not compiler gaps
+
+§14 accounted for 11 of `voip`'s 47 (the handle re-tag, declined). This section
+characterises the rest. Two of the three largest causes turned out not to be
+compiler work at all, which is the useful part.
+
+### 15.1 The census, with messages and files beside the roots
+
+| | |
+| --- | --- |
+| blocker sites | **47** |
+| roots / cascade | 41 / 6 |
+| **distinct root messages** | **24** |
+| already accounted | 11 handle re-tag (declined, §14.2) + 9 `Date` (out of scope, §13.5) |
+| **left to characterise** | **21 roots + 6 cascade = 27 sites over 18 distinct messages** |
+
+18 messages for 21 roots is the shape of a long tail, not a wall. By file:
+`WaSctpRelay.ts` 20, `call-state.ts` 9 (all `Date`), `relay-ack.ts` 3,
+`srtp.ts` 3, `bytes.ts` 2, `WaCallMediaSession.ts` 2, and two singletons.
+
+The largest sub-clusters in that tail were:
+
+| sites | cause | verdict |
+| --- | --- | --- |
+| **10** | reads off a value of type `any` (4 roots + all 6 cascade) | **8 of them are `as any` in zapo** — §15.2 |
+| **2** | compound array-element assignment through a field-chain receiver | **CLOSED** — §15.3 |
+| 2 | `String()` of a union with object arms | not attempted |
+| 2 | `getStats` (1 root + 1 cascade) | a real 2-site gap — §15.2 |
+
+### 15.2 The `any` cluster is three casts in zapo, not a compiler gap
+
+The ten-site cluster reads as *"the compiler cannot see through the
+`peerConnection` handle"*. It is not that. zapo writes the `any` itself:
+
+```ts
+const connState = (pc as any).connectionState          // WaSctpRelay.ts:274
+const connState = (pc as any)?.connectionState || 'unknown'   // :583
+const buffered  = (conn.channel as any)?.bufferedAmount       // :586
+const stats     = (pc as any).getStats?.()                    // :252
+```
+
+And **the compiler already supports three of those four members.**
+`lower-wrtc.ts` carries `connectionState`, `bufferedAmount`, `readyState`,
+`iceConnectionState`, `close`, `send` and two dozen more on the two handles. The control is one line away in the same file:
+`pc?.iceConnectionState` at :582 carries **no cast and no site**.
+
+**Proved by line-neutral substitution.** Three casts removed, one line for one
+line, 1,026 lines before and after; baseline and probe both analysed on the
+**same** compiler (`harness/qV9.sh` / `qV10.sh` — an earlier pair was discarded
+because the baseline predated a lowering change and would have credited the cast
+removal with two sites it did not clear):
+
+```
+CLEARED by the substitution: 8
+  SC1090  WaSctpRelay.ts:274  reading 'connectionState' from a value of type 'any'
+  SC1090  WaSctpRelay.ts:583  reading 'connectionState' from a value of type 'any'
+  SC1090  WaSctpRelay.ts:586  reading 'bufferedAmount'  from a value of type 'any'
+  SC2004  WaSctpRelay.ts:277 279 282 587 599   the five cascades behind them
+NEWLY APPEARING: 0
+```
+
+**Eight sites are three `as any` casts in zapo.** Per the standing rule this is
+named and stopped at: **we do not change zapo, and the deliverable is a compiler
+that takes it as-is.** Recording it is what is useful — if zapo drops those three
+casts, eight sites go without a compiler change.
+
+The fourth cast is different. **`getStats` is genuinely absent** from the
+compiler's WebRTC surface, so :252 and its cascade at :253 stay whatever zapo
+writes. That is a real gap, and it is **2 sites**.
+
+### 15.3 Compound array-element assignment through a field chain — CLOSED, 2 sites
+
+`srtp.ts` writes `this.ivBuffer[4 + i] ^= this.ssrcBuffer[i]` twice.
+`lowerElemCompound` refused because the receiver was not a bare identifier or
+`this`.
+
+**The same diagnosis as §14.1, one function over**, and the file states it
+itself: *"JS evaluates a compound target's receiver and index exactly once, so
+re-lowering them is only faithful when they are repeatable."* The function
+already carries `repeatableIndexExpr` for the index half. **The receiver half
+was missing**, so the receiver rule was a hard `isIdentifier || this`.
+
+Added `repeatableRecvExpr`, written to match its sibling: an identifier, `this`,
+or a chain of **plain data fields** over them. A class or record field read runs
+no user code, so evaluating it twice is indistinguishable from evaluating it
+once.
+
+**The accessor link is refused, deliberately.** `o.viaGetter[i] += 1` would call
+the getter twice where JS calls it once, and a getter that hands back a fresh
+array each call would take the write into an object the program has already
+discarded — a silent wrong answer, which is worse than a refusal. Each link is
+resolved through `fieldTarget`; only the `class` and `record` containers pass,
+while `accessor`, `recordAccessor` and the index-signature overflow container
+keep the fence.
+
+**The stale text was fixed too.** The diagnostic still said *"a bare identifier
+receiver"* and the function's doc comment still described the old rule; both now
+state the repeatability rule and why an accessor is excluded. A diagnostic that
+describes a rule the compiler no longer has is the same class of defect this
+block has been correcting all session.
+
+**Correctness, both backends, node as oracle:**
+
+```
+a=225,45      this.<field>[4 + i] ^= this.<field>[i]   over typed arrays
+b=3,12,3,4    identifier.<field>[index] over a numeric array
+c=12          a two-link field chain
+d=12          read through an ALIAS taken before the write -- the write landed
+              on the object itself, not on a copy
+```
+
+**Negative control:** rebuilt at base with only this change reverted, the same
+program is `BUILD rc=1`, **4 errors**, all `SC1090` array-element compound.
+**Accessor control:** the getter program refuses, before and after.
+
+### 15.4 `voip` lane A2, both lowering changes
+
+| | §13 | after §14.1 | after §15.3 |
+| --- | --- | --- | --- |
+| `analyze()` blocker sites | **58** | 47 | **45** |
+| statements reached / failed | 48,994 / 58 | 48,994 / 47 | 48,994 / **45** |
+| roots / cascade | 52 / 6 | 41 / 6 | **39 / 6** |
+| distinct root messages | 25 | 24 | **23** |
+| binary | none | none | none |
+| fences over emitted bytes | **n/a, NOT 0** | **n/a, NOT 0** | **n/a, NOT 0** |
+
+`subdiff.mjs`, identity-level: **2 cleared, 0 newly appearing**, both the
+`srtp.ts` array-element sites.
+
+**The build agrees, on its own instrument.** Strict, `--backend c`: `BUILD rc=1`, `LOG-SITES total=45`, and the compiler prints **`45 errors.`** — 16 `SC2020`, 11 `SC2003`, 8 `SC1090`, 6 `SC2004`, 2 `SC2001`, 1 `SC2012`, 1 `SC2011`. `SC1090` is 21 at section 13, 10 after section 14.1, **8** now. `voip` still does not reach a binary, so its fence count remains **n/a, NOT 0**.
+
+### 15.5 Where the remaining 45 sit
+
+| sites | cause | who |
+| --- | --- | --- |
+| 11 | handle into a structural arm | **compiler**, representation work — declined, §14.2. One line in zapo is the alternative |
+| 9 | `Date` | **decision with an owner**, out of scope |
+| 8 | reads off `as any` | **zapo** — three casts, members already supported |
+| 2 | `getStats` absent from the WebRTC surface | **compiler**, a real 2-site gap |
+| 2 | `String()` of a union with object arms | compiler, not attempted |
+| 13 | singletons | mixed |
+
+**Of the 45, 19 are not compiler work** — 8 are zapo's casts, 11 are a
+representation decision. That is the number worth carrying forward: the wall is
+smaller than the count, and it is smaller in a way a site count cannot show.
+
+### 15.6 Suites run, and suites NOT run
+
+`lower-stmts.ts` is the statement lowerer, so the same scope as §14.4: every
+`tests/harness` suite plus every `packages/*` suite.
+
+    Test Files  93 passed | 3 skipped (96)
+         Tests  1860 passed | 49 skipped (1909)
+        Errors  3 errors
+    failure markers in the log: 0
+
+All **3** errors are `[vitest-worker]: Timeout calling "onTaskUpdate"`, verified
+by grouping them — the reporter RPC timing out under four concurrent jobs, one
+more than §14.4's two because the box was busier. Not failures.
+
+Then `diagnostics.test.ts` on its own, to generate the new fixture's snapshot:
+**154 tests passed, 1 snapshot written.**
+
+**NOT RUN, named as unrun:** `differential.test.ts`,
+`llvm-differential.test.ts`, `windows-differential.test.ts`,
+`linux-differential.test.ts`, and the full `pnpm test` gate. Both corpus
+programs added by this block are driven by the first of those, so both were
+verified by hand instead, on both backends, with node as the oracle.

@@ -1,0 +1,23 @@
+ORACLE-NODE v25.9.0
+=== QT5 START 2026-09-07T21:20:55-03:00 -- diagnostics suite, generating the new fixture snapshot
+   ✓ diagnostics corpus (154 programs) > json-dyn.ts  301ms
+   ✓ diagnostics corpus (154 programs) > mixed-compare.ts  300ms
+   ✓ diagnostics corpus (154 programs) > module-out-of-scope.ts  323ms
+   ✓ diagnostics corpus (154 programs) > namespace-conditional.ts  407ms
+   ✓ diagnostics corpus (154 programs) > node-fallback-fence.ts  443ms
+   ✓ diagnostics corpus (154 programs) > object-create-fences.ts  348ms
+   ✓ diagnostics corpus (154 programs) > options-record.ts  441ms
+   ✓ diagnostics corpus (154 programs) > outside-world.ts  307ms
+   ✓ diagnostics corpus (154 programs) > polymorphic-recursion-is-a-chain-not-a-population.ts  384ms
+   ✓ diagnostics corpus (154 programs) > spi-off/main.ts  368ms
+   ✓ diagnostics corpus (154 programs) > stdlib-fence.ts  406ms
+   ✓ diagnostics corpus (154 programs) > union-spread-into-union-slot.ts  356ms
+   ✓ diagnostics corpus (154 programs) > unions.ts  300ms
+
+  Snapshots  1 written
+ Test Files  1 passed (1)
+      Tests  154 passed (154)
+   Start at  21:20:56
+   Duration  45.78s (transform 4.50s, setup 0ms, collect 6.24s, tests 38.87s, environment 0ms, prepare 193ms)
+
+=== QT5 DONE 2026-09-07T21:21:42-03:00
