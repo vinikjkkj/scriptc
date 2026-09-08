@@ -364,6 +364,12 @@ compiler change at all**. We do not change zapo; this is a finding.
 
 ## 10. `send_group` is NOT curve25519, and the inherited attribution is refuted
 
+> **PARTLY SUPERSEDED BY §12.** The refutation of the 44.18% node-lane
+> figure stands. But this section then adopted `cpuphase`'s `scr_arr_slice`
+> **21.0%** as the corrected owner, and §12 refutes that too — by counting.
+> I repeated the exact error I had just diagnosed: I trusted a profile
+> share instead of a call count.
+
 `tests/perf/clientbench/README.md:157` attributes the compiled client's one
 regression — `send_group` — to *"zapo's own curve25519 field arithmetic
 (44.18% of non-idle samples)"*, citing `tests/perf/cpuphase`.
@@ -434,3 +440,167 @@ million small copies."*
 **No fix is proposed here and none was measured.** The claim is only that the
 attribution was wrong, that the corrected owner is scriptc's own code, and
 that an instrument for the next question already exists.
+
+---
+
+## 11. The `scr_arr_slice` census — instrument self-test
+
+Before pointing `tests/perf/arrcensus` at `send_group`, it was scored against
+a program whose slice and join behaviour is known exactly
+(`probes/slice-known.ts`): 1,000 partial slices (3 of 10), 100 whole-array
+slices, 50 empty slices, 200 joins of a 5-element array. **The prediction was
+written down before the run.**
+
+| predicted | reported | |
+| --- | --- | --- |
+| slice calls 1,150, all src=10 | `slice-src calls=1150`, `ROW slice-src 10 1150` | ok |
+| slice-n: 3 ×1000 | `ROW slice-n 3 1000` | ok |
+| slice-n: 10 ×100 | `ROW slice-n 10 100` | ok |
+| slice-n: 0 ×50 | `ROW slice-n 0 50` | ok |
+| slice whole 100 | `ARRCEN-SLICE whole=100` | ok |
+| slice empty 50 | `ARRCEN-SLICE empty=50` | ok |
+| join 200 calls, src=5 | `ROW join-src 5 200` | ok |
+| join output 9 B ×200 | `ROW join-outbytes 9 200` | ok |
+
+**Eight of eight exact.** And it reports the expected NULLs in the same run —
+`str2num`, `jsonstr`, `mapkeys`, `bytesset` all `calls=0` for a program that
+uses none of them. It can say "yes" and it can say "no".
+
+### A property of the ARM control that was not written down
+
+`SCR_ARRCEN_ARM=n` is the instrument's positive control: it plants slices of
+`src=41`/`n=7` before `main`. Measured here, `planted` reads `n` but the
+planted **rows** read `n × 20`, constant across `n=1, 3, 7`:
+
+    ARM=1 -> planted=1, slice-src row41 = 20
+    ARM=3 -> planted=3, slice-src row41 = 60
+    ARM=7 -> planted=7, slice-src row41 = 140
+
+The planting constructor is `static` (so one copy per **translation unit**,
+each with its own `done` guard) while `scr_arrcen_planted` is `selectany` (one
+shared instance). So the multiplier is the TU count.
+
+The header's documented check — *"the row must then read at least n, and
+planted must equal n"* — still passes, so **the control is sound**. But an
+armed run's slice counts are inflated by `20n` and **must never be read as the
+real ones**. The unarmed run is the one to read, and `census.sh` runs both in
+that order for exactly this reason.
+
+### `SCRIPTC_NO_CACHE=1` is no longer required, and the header's note is stale
+
+`scr_arr_census.h`'s usage block says to set it *"(the header is outside
+packages/runtime/src and so is not in the build-cache key)"*. That was true
+once. `cc.ts`'s cache-flavor discriminator now **folds the CONTENTS of every
+file a `-include` names** into the key — its own comment explains that hashing
+the flag string alone let a header edit go unnoticed and cost a block three
+runs that had measured the previous instrument.
+
+Verified in both directions on this tree, with no `SCRIPTC_NO_CACHE`:
+
+* build with `SCRIPTC_PROF_CFLAGS` unset → the program writes **no report**
+  (the census is genuinely absent, not silently cached in);
+* rebuild with it set → report written, and identical to the first
+  instrumented build (1,150 / whole=100 / empty=50).
+
+This matters beyond tidiness: it is the difference between a cached bench
+build and a cold one.
+
+---
+
+## 12. The census answer: `scr_arr_slice` is not 21% of anything
+
+Run on `548e73b7` (main `77ff3fe5`), `bench-noprof`, **the shipped default
+workload** — 1,000 contacts × 2 devices, 4 groups × 500 members, 1,000
+messages × 4 scenarios, exit 0, all four scenarios present in the transcript.
+Build 815 s, 28,882,944 B, 15 emitted TUs. Armed control first
+(`planted=5`, planted rows present), then the unarmed run for the numbers.
+
+### `scr_arr_slice`, whole program, full workload
+
+    calls                 4,015
+    elements copied           2        (total. two.)
+    max copied length         1
+    empty (n = 0)         4,013        99.95% of all calls
+    source length      mean 0.50, max 5
+    calls with source >= 256 elements     0
+
+**`cpuphase`'s `scr_arr_slice` 21.0% cannot be true.** This is a
+whole-program count, so it is an *upper bound* on any single phase — no phase
+markers are needed to say that `send_group`'s slice cost is at most this, and
+this is 4,015 calls that move two elements in the entire run.
+
+It is neither a quadratic nor a million small copies. **It is almost nothing**,
+and 99.95% of it is the degenerate empty slice that still allocates
+(`n ? n : 1`). Whatever the sampler attributed to that symbol, the function
+did not do it. The most likely mechanism is symbolisation: a `static` or
+inlined function has no symbol of its own, so its samples land on the nearest
+symbol that does. **Not confirmed** — confirming it needs the sampler's own
+instrument, not this one.
+
+### `scr_arr_join` — real, and the one array cost that survives
+
+    calls          4,017
+    elements   1,014,169   mean 252.5, max 500      <- 500 = members/group
+    out bytes 30,184,222   mean 7,514, max 14,999
+    top source lengths: 256..511 x2,008,  8 x1,004,  2 x1,000
+
+30 MB of string built by an initial 64-byte `malloc` grown by doubling
+(`scr_join_append`). 2,008 of the calls join arrays of 256–511 elements, and
+`max 500` is exactly the group size — so this is the group fan-out, and the
+7.3% is plausible where the 21.0% is not. **Unaddressed.**
+
+### What the census says the phase actually spends itself on
+
+    scr_bytes_get   336,490,043 calls      scr_bytes_set   189,944,781
+    TOTAL element accesses  526,434,824
+      f64   482,252,788   91.61%
+      u8     36,043,389    6.85%
+      u32      7,036,032    1.34%
+      i8       1,102,615    0.21%
+    dominant buffer length: 16  (314,255,551 get / 167,997,434 set,
+                                 equal to the f64 counts to the access)
+
+Half a billion typed-array element accesses, 91.6% of them on a
+**sixteen-element `Float64Array`** — tweetnacl-style GF(2^255−19) limbs.
+
+### This half was already found, and fixed, by someone else
+
+`scr_runtime.h` on this same main already carries the identical finding, with
+`send_group`-scoped numbers (f64 92.15%, u8 6.27%) that match this
+whole-program run to within a percent, the identification of
+`src/crypto/math/fe.ts`'s `export type Fe = Float64Array`, and the history:
+a **u8-only** fast arm was priced at 10.63 G instructions removed, the A/B
+measured **1.000x**, and that null was misread as "the phase is stalled"
+when the real reason was that only 6.27% of accesses ever entered the arm.
+The f64 arm landed in **`734015a8`** and is on by default, with
+`SCR_NO_F64ARM` kept as the A/B control.
+
+So this run **independently reproduces that result on a different instrument
+run** — worth having as a cross-check, but not new. The new part is the slice
+refutation above.
+
+### A caveat that must travel with these numbers
+
+Under `SCR_ARRCEN_ON` **every fast arm is compiled out** and both accessors
+become plain forwards — deliberately, so the census can count calls that the
+inline arm would otherwise satisfy invisibly. These are therefore **valid
+counts and not a performance profile of the shipping binary**.
+
+And this run has **no phase data**: `bench-noprof` has no phase markers. My
+earlier grep found `phase-begin=1` in it and I read that as a marker — it is a
+**comment** at `:485` mentioning the markers. The instrument reported
+`phases: 0` and the reader printed `NONE`, which is how it was caught. The
+per-phase split would need `ladder-phasemarks.mjs` applied and a rebuild; it
+is not needed for the slice refutation, which a whole-program bound settles.
+
+### Corrected picture for `send_group`
+
+| claim | status |
+| --- | --- |
+| curve25519 field arithmetic, 44.18% | node-lane profile; not the compiled lane (§10) |
+| `scr_arr_slice` 21.0% | **REFUTED by call count** — 4,015 calls, 2 elements |
+| `scr_arr_join` 7.3% | **stands**; 30 MB over 4,017 calls; unaddressed |
+| `add_and_denorm128` 7.0% | software f128 FMA from compiler_rt; caller still unidentified (§10) |
+| typed-array element access | the real volume, 526 M; **already fixed** in `734015a8` |
+
+**No optimisation is proposed here and none was written.**
