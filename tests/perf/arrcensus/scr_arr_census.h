@@ -29,8 +29,12 @@
  * HOW TO USE IT
  *   SCRIPTC_PROF_CFLAGS="-include <win>/tests/perf/arrcensus/scr_arr_census.h
  *                        -I<win>/tests/perf/arrcensus"
- *   SCRIPTC_NO_CACHE=1              (the header is outside packages/runtime/src
- *                                    and so is not in the build-cache key)
+ *   SCRIPTC_NO_CACHE is NOT needed. This note used to say it was, on the
+ *   reasoning that a header outside packages/runtime/src is not in the
+ *   build-cache key. cc.ts folds the CONTENTS of every -include'd file into
+ *   the cache flavor, so editing this header alone changes the key.
+ *   Verified both directions: an edit here rebuilds, and an unchanged tree
+ *   hits the cache. Setting it costs a full cold rebuild for nothing.
  *   SCR_ARRCEN_OUT=<file>           where the report is written
  *   SCR_ARRCEN_ARM=<n>              THE POSITIVE CONTROL: n synthetic slices
  *                                   of a known length are recorded before
@@ -115,14 +119,40 @@ SCR_ARRCEN_SHARED long long scr_arrcen_kind_elems[SCR_ARRCEN_KINDS];
 /* THE ELEMENT KIND OF EVERY TYPED-ARRAY ACCESS. The length histogram above
  * says a 16-element buffer carries 93.8% of the reads; it does NOT say what
  * KIND of buffer, and the two accessors' fast arm serves `SCR_BYTES_U8` and
- * nothing else. An access on any other kind fails that arm's FIRST branch
- * and tail-calls the full function, so an instruction saving priced as
- * `accesses x per-access delta` is a saving on the accesses that ENTER the
- * arm -- which the length row cannot tell apart from the ones that do not.
+ * nothing else. THAT IS NOW STALE: 734015a8 added an f64 arm and hoisted the
+ * index check ahead of the kind test, so the shipping arm serves U8 AND F64.
+ * A kind split still cannot say which accesses ENTER the arm, because the
+ * arm's predicate is index-first and the kind test is its LAST clause --
+ * which is what ARRCEN-ARMR below measures, per failing clause.
  * Indexed by ScrBytesElem in scr_runtime.h's own order. */
 #define SCR_ARRCEN_ELEMS 9
 SCR_ARRCEN_SHARED long long scr_arrcen_bget_elem[SCR_ARRCEN_ELEMS];
 SCR_ARRCEN_SHARED long long scr_arrcen_bset_elem[SCR_ARRCEN_ELEMS];
+
+/* WHY AN ACCESS DOES NOT ENTER THE FAST ARM.
+ *
+ * A counterfactual evaluated on the counting path: under SCR_ARRCEN_ON the
+ * arms are compiled out and every access reaches the full function, so this
+ * re-runs the SHIPPING arm's predicate -- clause for clause, in its order --
+ * and records the FIRST clause that would have declined. The order is the
+ * arm's own and it matters: index window, then whole, then in-bounds, then
+ * kind, then (u8 store only) the value window. A kind histogram cannot
+ * produce this because kind is the arm's LAST clause, so an out-of-bounds
+ * f64 store counts as f64 by kind and as a MISS here.
+ *
+ * Mirrors scr_runtime.h's scr_bytes_{get,set}_inl as of 734015a8. If that
+ * arm changes, this changes with it or it silently measures the old one. */
+#define SCR_ARRCEN_HAS_ARM 1
+#define SCR_ARRCEN_ARMR_HIT_F64 0
+#define SCR_ARRCEN_ARMR_HIT_U8  1
+#define SCR_ARRCEN_ARMR_IDX     2  /* negative, NaN, +-inf, or >= 2^53      */
+#define SCR_ARRCEN_ARMR_FRAC    3  /* in window but not a whole number      */
+#define SCR_ARRCEN_ARMR_OOB     4  /* whole, in window, past the length     */
+#define SCR_ARRCEN_ARMR_KIND    5  /* index fine; element kind not u8/f64   */
+#define SCR_ARRCEN_ARMR_VAL     6  /* u8 store, value outside the int64 win */
+#define SCR_ARRCEN_ARMRS 7
+SCR_ARRCEN_SHARED long long scr_arrcen_armr_get[SCR_ARRCEN_ARMRS];
+SCR_ARRCEN_SHARED long long scr_arrcen_armr_set[SCR_ARRCEN_ARMRS];
 /* a slice whose copied length EQUALS the source length is a whole-array copy
  * wearing a slice's name, and it is the shape a reference would replace. */
 SCR_ARRCEN_SHARED long long scr_arrcen_slice_whole = 0;
@@ -159,6 +189,45 @@ SCR_ARRCEN_FN void scr_arrcen_note_bytes(int slot, long long len, int elem) {
   if (elem < 0 || elem >= SCR_ARRCEN_ELEMS) elem = SCR_ARRCEN_ELEMS - 1;
   if (slot == SCR_ARRCEN_BYTESGET) scr_arrcen_bget_elem[elem]++;
   else if (slot == SCR_ARRCEN_BYTESSET) scr_arrcen_bset_elem[elem]++;
+}
+
+/* The shipping arm's predicate, in the shipping arm's order. SCR_FAST_*
+ * are not visible here (this header is -include'd BEFORE scr_runtime.h), so
+ * the three bounds are spelled out; they are 2^53 and +-2^63 exactly, each
+ * representable, and a mismatch with scr_runtime.h is a measurement bug. */
+SCR_ARRCEN_FN void scr_arrcen_note_arm(int slot, long long len, int elem,
+                                       double i, double v) {
+  int r;
+  long long n;
+  if (!(i >= 0.0 && i < 9007199254740992.0)) {
+    r = SCR_ARRCEN_ARMR_IDX;            /* NaN fails both, as in the arm */
+  } else {
+    n = (long long)i;
+    if ((double)n != i) r = SCR_ARRCEN_ARMR_FRAC;
+    else if ((unsigned long long)n >= (unsigned long long)len)
+      r = SCR_ARRCEN_ARMR_OOB;
+    else if (elem == 4) r = SCR_ARRCEN_ARMR_HIT_F64;   /* SCR_BYTES_F64 */
+    else if (elem != 0) r = SCR_ARRCEN_ARMR_KIND;      /* not SCR_BYTES_U8 */
+    else if (slot == SCR_ARRCEN_BYTESSET &&
+             !(v >= -9223372036854775808.0 && v < 9223372036854775808.0))
+      r = SCR_ARRCEN_ARMR_VAL;
+    else r = SCR_ARRCEN_ARMR_HIT_U8;
+  }
+  if (slot == SCR_ARRCEN_BYTESGET) scr_arrcen_armr_get[r]++;
+  else scr_arrcen_armr_set[r]++;
+}
+
+SCR_ARRCEN_FN const char *scr_arrcen_armr_name(int r) {
+  switch (r) {
+    case SCR_ARRCEN_ARMR_HIT_F64: return "HIT-f64";
+    case SCR_ARRCEN_ARMR_HIT_U8:  return "HIT-u8";
+    case SCR_ARRCEN_ARMR_IDX:     return "MISS-index-window";
+    case SCR_ARRCEN_ARMR_FRAC:    return "MISS-fractional";
+    case SCR_ARRCEN_ARMR_OOB:     return "MISS-out-of-bounds";
+    case SCR_ARRCEN_ARMR_KIND:    return "MISS-kind";
+    case SCR_ARRCEN_ARMR_VAL:     return "MISS-value-window";
+  }
+  return "?";
 }
 
 SCR_ARRCEN_FN const char *scr_arrcen_elem_name(int e) {
@@ -404,6 +473,12 @@ SCR_ARRCEN_FN void scr_arrcen_report(void) {
     if (scr_arrcen_bget_elem[i] == 0 && scr_arrcen_bset_elem[i] == 0) continue;
     fprintf(f, "ARRCEN-ELEM %s get=%lld set=%lld\n", scr_arrcen_elem_name(i),
             scr_arrcen_bget_elem[i], scr_arrcen_bset_elem[i]);
+  }
+  for (i = 0; i < SCR_ARRCEN_ARMRS; i++) {
+    if (scr_arrcen_armr_get[i] == 0 && scr_arrcen_armr_set[i] == 0) continue;
+    fprintf(f, "ARRCEN-ARMR %s get=%lld set=%lld\n",
+            scr_arrcen_armr_name(i),
+            scr_arrcen_armr_get[i], scr_arrcen_armr_set[i]);
   }
   for (s = 0; s < SCR_ARRCEN_SLOTS; s++) {
     for (i = 0; i < SCR_ARRCEN_ROWS; i++) {

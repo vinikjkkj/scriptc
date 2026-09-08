@@ -125,3 +125,26 @@ for (const p of phases) {
     () => phKinds.get(p),
     phWhole.get(p) ?? 0, phEmpty.get(p) ?? 0)
 }
+
+/* ---- ARRCEN-ARMR: why an access does not enter the fast arm ----
+ * Kind alone cannot answer this. The shipping arm (734015a8) tests the
+ * INDEX first and the kind LAST, so an out-of-bounds f64 store is "f64" in
+ * the kind split and a MISS here. Regexes below use [0-9] and [^ ] rather
+ * than the backslash classes on purpose: this file gets appended to through
+ * shells that eat one backslash. */
+const armr = []
+for (const m of text.matchAll(/^ARRCEN-ARMR ([^ ]+) get=([0-9]+) set=([0-9]+)/gm))
+  armr.push({ why: m[1], get: +m[2], set: +m[3] })
+if (armr.length) {
+  const tot = armr.reduce((a, r) => a + r.get + r.set, 0)
+  const hit = armr.filter(r => r.why.startsWith('HIT')).reduce((a, r) => a + r.get + r.set, 0)
+  console.log('')
+  console.log('=== FAST-ARM COVERAGE (counterfactual: the shipping arm predicate, clause by clause) ===')
+  console.log(`  accesses ${tot.toLocaleString()}   ENTER the arm ${hit.toLocaleString()} (${(100 * hit / tot).toFixed(2)}%)   miss ${(tot - hit).toLocaleString()} (${(100 * (tot - hit) / tot).toFixed(2)}%)`)
+  for (const r of armr.sort((a, b) => (b.get + b.set) - (a.get + a.set))) {
+    const n = r.get + r.set
+    console.log(`    ${r.why.padEnd(20)} ${n.toLocaleString().padStart(15)}  ${(100 * n / tot).toFixed(4).padStart(8)}%   get ${r.get.toLocaleString()}  set ${r.set.toLocaleString()}`)
+  }
+  const miss = armr.filter(r => !r.why.startsWith('HIT') && r.get + r.set > 0)
+  console.log(`  the miss, if any: ${miss.length ? miss.map(r => `${r.why} ${(100 * (r.get + r.set) / tot).toFixed(4)}%`).join(', ') : 'NONE — every access enters the arm'}`)
+}

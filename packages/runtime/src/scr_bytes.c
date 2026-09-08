@@ -317,6 +317,9 @@ double scr_bytes_get(const ScrBytes *b, double i) {
    * undefined -- unless that header is -include'd. The profile gives this
    * function a SHARE; only a count prices a per-call change. */
   scr_arrcen_note_bytes(SCR_ARRCEN_BYTESGET, (long long)b->len, (int)b->elem);
+#ifdef SCR_ARRCEN_HAS_ARM
+  scr_arrcen_note_arm(SCR_ARRCEN_BYTESGET, (long long)b->len, (int)b->elem, i, 0.0);
+#endif
 #endif
   size_t idx = scr_bytes_check_index(b, i);
   switch (b->elem) {
@@ -392,6 +395,9 @@ void scr_bytes_set_fast(ScrBytes *b, double i, double v) { scr_bytes_set_inl(b, 
 void scr_bytes_set(ScrBytes *b, double i, double v) {
 #ifdef SCR_ARRCEN_ON
   scr_arrcen_note_bytes(SCR_ARRCEN_BYTESSET, (long long)b->len, (int)b->elem);
+#ifdef SCR_ARRCEN_HAS_ARM
+  scr_arrcen_note_arm(SCR_ARRCEN_BYTESSET, (long long)b->len, (int)b->elem, i, v);
+#endif
 #endif
   size_t idx = scr_bytes_check_index(b, i);
   switch (b->elem) {
