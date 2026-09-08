@@ -1,0 +1,349 @@
+--- bench/server-process.ts	2026-09-07 19:57:14.212247400 -0300
++++ bench-client5/server-process.ts	2026-09-07 19:57:14.204225500 -0300
+@@ -4,13 +4,18 @@
+  * entire fake-server + FakePeer stack in its own V8 isolate so CPU
+  * profiles captured by the parent only contain zapo-js lib code.
+  *
+- * Communicates with the parent via `process.send` / `process.on('message')`
+- * using a simple JSON-RPC-ish protocol (no batching, strict request/
+- * response ordering).
++ * Communicates with the parent over a loopback SOCKET: the parent listens
++ * and this process connects back (the port arrives on argv). It used to be
++ * forked over Node's IPC channel, which a compiled parent cannot open. The
++ * protocol is unchanged -- a simple JSON-RPC-ish exchange, no batching,
++ * strict request/response ordering -- and binary crosses as raw bytes in
++ * the frame (./rpc-frame) rather than base64 or a number[].
+  */
+ 
+ import { writeFile } from 'node:fs/promises'
+-import inspector from 'node:inspector/promises'
++import { connect, type Socket } from 'node:net'
++import { FrameReader, encodeFrame } from './rpc-frame'
++import { Session as InspectorSession } from './__inspector-stub'
+ import { resolve as resolvePath } from 'node:path'
+ 
+ import type { FakePeer } from '../src/api/FakePeer'
+@@ -24,7 +29,7 @@
+ // ─── State ────────────────────────────────────────────────────────────
+ 
+ let server: FakeWaServer | null = null
+-let profilerSession: inspector.Session | null = null
++let profilerSession: InspectorSession | null = null
+ let pipeline: WaFakeConnectionPipeline | null = null
+ const peersById = new Map<string, FakePeer>()
+ let peerIdCounter = 0
+@@ -32,7 +37,9 @@
+ // ─── Protocol ─────────────────────────────────────────────────────────
+ 
+ interface RpcRequest {
+-    readonly id: number
++    // Optional: a NOTIFICATION (pairingMaterial) carries no id and expects
++    // no reply. The dispatcher checks for a number before replying.
++    readonly id?: number
+     readonly method: string
+     readonly params: Record<string, unknown>
+ }
+@@ -43,9 +50,44 @@
+     readonly error?: string
+ }
+ 
+-function reply(id: number, result?: unknown, error?: string): void {
++// ─── Control channel ──────────────────────────────────────────────────
++//
++// The parent used to fork() this file and talk over Node's IPC channel. A
++// COMPILED parent cannot open that channel, so the parent now listens on a
++// loopback socket and this process connects back to it. Only the transport
++// changed: the protocol below is the same JSON-RPC-ish request/response,
++// and binary rides the frame as RAW BYTES (see ./rpc-frame) rather than
++// base64 or a number[], which matters because the parent is measuring
++// memory and CPU.
++
++type ChannelListener = (msg: RpcRequest, blobs: readonly Uint8Array[]) => void
++
++let channel: Socket | null = null
++const channelReader = new FrameReader()
++const channelListeners: ChannelListener[] = []
++
++function channelSend(msg: unknown, blobs: readonly Uint8Array[] = []): void {
++    if (!channel) throw new Error('control channel not connected')
++    channel.write(encodeFrame(JSON.stringify(msg), blobs))
++}
++
++function channelOn(fn: ChannelListener): void {
++    channelListeners.push(fn)
++}
++
++function channelOff(fn: ChannelListener): void {
++    const i = channelListeners.indexOf(fn)
++    if (i >= 0) channelListeners.splice(i, 1)
++}
++
++function reply(
++    id: number,
++    result?: unknown,
++    error?: string,
++    blobs: readonly Uint8Array[] = []
++): void {
+     const msg: RpcResponse = error !== undefined ? { id, error } : { id, result }
+-    process.send!(msg)
++    channelSend(msg, blobs)
+ }
+ 
+ // ─── Handlers ─────────────────────────────────────────────────────────
+@@ -81,33 +123,32 @@
+     // client's QR stanza and extracts the material. The client emits
+     // `auth_qr` → the parent relays the parsed material back to us via
+     // a `pairingMaterial` IPC call.
+-    let ipcHandler: ((msg: RpcRequest) => void) | null = null
++    let ipcHandler: ChannelListener | null = null
+     const materialPromise = new Promise<{
+         readonly advSecretKey: Uint8Array
+         readonly identityPublicKey: Uint8Array
+     }>((resolve) => {
+-        const handler = (msg: RpcRequest) => {
++        const handler = (msg: RpcRequest, blobs: readonly Uint8Array[]) => {
+             if (msg.method === 'pairingMaterial') {
+-                process.removeListener('message', handler)
++                channelOff(handler)
+                 ipcHandler = null
+-                const p = msg.params as {
+-                    advSecretKey: number[]
+-                    identityPublicKey: number[]
++                // attachments 0..1: advSecretKey, identityPublicKey -- raw
++                // bytes off the frame, no number[] round-trip.
++                const [advSecretKey, identityPublicKey] = blobs
++                if (advSecretKey === undefined || identityPublicKey === undefined) {
++                    throw new Error('pairingMaterial: expected 2 attachments')
+                 }
+-                resolve({
+-                    advSecretKey: new Uint8Array(p.advSecretKey),
+-                    identityPublicKey: new Uint8Array(p.identityPublicKey)
+-                })
++                resolve({ advSecretKey, identityPublicKey })
+             }
+         }
+         ipcHandler = handler
+-        process.on('message', handler)
++        channelOn(handler)
+     })
+ 
+     try {
+         await server.runPairing(pipeline, { deviceJid: params.deviceJid }, () => materialPromise)
+     } finally {
+-        if (ipcHandler) process.removeListener('message', ipcHandler)
++        if (ipcHandler) channelOff(ipcHandler)
+     }
+ }
+ 
+@@ -205,34 +246,60 @@
+     })
+ }
+ 
+-// IPC runs with `serialization: 'advanced'` (see ServerRpc.spawn), so
+-// Uint8Array fields cross the boundary intact – no number[] round-trip
+-// here.
+-interface MediaDescriptorInput {
++// The three Uint8Array fields arrive as frame ATTACHMENTS 0..2 (mediaKey,
++// fileSha256, fileEncSha256) rather than inside the JSON: raw bytes, no
++// number[] round-trip, which is the property the old
++// `serialization: 'advanced'` was there to provide.
++interface MediaDescriptorJson {
++    readonly directPath: string
++    readonly fileLength: number
++    readonly mimetype?: string
++}
++
++/** Rebuilds the descriptor from its JSON half plus attachments 0..2. */
++function descriptorOf(
++    json: MediaDescriptorJson,
++    blobs: readonly Uint8Array[]
++): {
+     readonly directPath: string
+     readonly mediaKey: Uint8Array
+     readonly fileSha256: Uint8Array
+     readonly fileEncSha256: Uint8Array
+     readonly fileLength: number
+     readonly mimetype?: string
++} {
++    const [mediaKey, fileSha256, fileEncSha256] = blobs
++    if (mediaKey === undefined || fileSha256 === undefined || fileEncSha256 === undefined) {
++        throw new Error(
++            `media descriptor: expected 3 attachments (mediaKey, fileSha256, fileEncSha256), got ${blobs.length}`
++        )
++    }
++    return {
++        directPath: json.directPath,
++        mediaKey,
++        fileSha256,
++        fileEncSha256,
++        fileLength: json.fileLength,
++        ...(json.mimetype !== undefined ? { mimetype: json.mimetype } : {})
++    }
+ }
+ 
+-async function handlePeerSendImageMessage(params: {
+-    peerId: string
+-    descriptor: MediaDescriptorInput
+-}): Promise<void> {
++async function handlePeerSendImageMessage(
++    params: { peerId: string; descriptor: MediaDescriptorJson },
++    blobs: readonly Uint8Array[]
++): Promise<void> {
+     const peer = peersById.get(params.peerId)
+     if (!peer) throw new Error(`peer ${params.peerId} not found`)
+-    await peer.sendImageMessage(params.descriptor)
++    await peer.sendImageMessage(descriptorOf(params.descriptor, blobs))
+ }
+ 
+-async function handlePeerSendVideoMessage(params: {
+-    peerId: string
+-    descriptor: MediaDescriptorInput
+-}): Promise<void> {
++async function handlePeerSendVideoMessage(
++    params: { peerId: string; descriptor: MediaDescriptorJson },
++    blobs: readonly Uint8Array[]
++): Promise<void> {
+     const peer = peersById.get(params.peerId)
+     if (!peer) throw new Error(`peer ${params.peerId} not found`)
+-    await peer.sendVideoMessage(params.descriptor)
++    await peer.sendVideoMessage(descriptorOf(params.descriptor, blobs))
+ }
+ 
+ async function handlePublishMediaBlob(params: {
+@@ -246,25 +313,23 @@
+         | 'ptt'
+         | 'history'
+         | 'md-app-state'
+-    plaintext: Uint8Array
+-}): Promise<{
+-    path: string
+-    mediaKey: Uint8Array
+-    fileSha256: Uint8Array
+-    fileEncSha256: Uint8Array
+-    fileLength: number
++}, blobs: readonly Uint8Array[]): Promise<{
++    value: { path: string; fileLength: number }
++    attachments: readonly Uint8Array[]
+ }> {
+     if (!server) throw new Error('server not started')
++    // attachment 0 is the plaintext: raw bytes, so a multi-MB payload
++    // costs its own size and no more.
++    const plaintext = blobs[0]
++    if (plaintext === undefined) throw new Error('publishMediaBlob: missing plaintext attachment')
+     const blob = await server.publishMediaBlob({
+         mediaType: params.mediaType,
+-        plaintext: params.plaintext
++        plaintext
+     })
+     return {
+-        path: blob.path,
+-        mediaKey: blob.mediaKey,
+-        fileSha256: blob.fileSha256,
+-        fileEncSha256: blob.fileEncSha256,
+-        fileLength: blob.fileLength
++        value: { path: blob.path, fileLength: blob.fileLength },
++        // attachments 0..2, the order the parent reassembles by
++        attachments: [blob.mediaKey, blob.fileSha256, blob.fileEncSha256]
+     }
+ }
+ 
+@@ -450,7 +515,7 @@
+     heap?: boolean
+     outDir?: string
+ }): Promise<void> {
+-    profilerSession = new inspector.Session()
++    profilerSession = new InspectorSession()
+     profilerSession.connect()
+     if (params.heap) {
+         await profilerSession.post('HeapProfiler.startTrackingHeapObjects', {
+@@ -508,7 +573,7 @@
+     label?: string
+     outDir?: string
+ }): Promise<{ path: string }> {
+-    const session = new inspector.Session()
++    const session = new InspectorSession()
+     session.connect()
+     const chunks: string[] = []
+     const onChunk = (msg: { params: { chunk: string } }): void => {
+@@ -755,7 +820,10 @@
+ 
+ const handlers: Record<
+     string,
+-    (params: Record<string, unknown>) => Promise<unknown> | void | number
++    (
++        params: Record<string, unknown>,
++        blobs: readonly Uint8Array[]
++    ) => Promise<unknown> | void | number
+ > = {
+     start: handleStart,
+     waitForAuthenticatedPipeline: handleWaitForAuthenticatedPipeline,
+@@ -818,7 +886,12 @@
+     ) => Promise<void>
+ }
+ 
+-process.on('message', async (msg: RpcRequest) => {
++async function onFrame(msg: RpcRequest, blobs: readonly Uint8Array[]): Promise<void> {
++    // Every registered listener sees the frame first: the pairing flow
++    // installs a one-shot listener for `pairingMaterial`, which carries no
++    // id and expects no reply.
++    for (const fn of [...channelListeners]) fn(msg, blobs)
++
+     // Skip non-RPC messages (e.g. pairingMaterial handled inline)
+     if (
+         msg === null ||
+@@ -835,11 +908,51 @@
+         return
+     }
+     try {
+-        const result = await handler(msg.params ?? {})
+-        reply(msg.id, result ?? null)
++        const out = await handler(msg.params ?? {}, blobs)
++        // A handler may answer with attachments of its own (the media
++        // blob's digests); anything else replies with plain JSON.
++        if (out !== null && typeof out === 'object' && 'attachments' in out) {
++            const withBin = out as { value: unknown; attachments: readonly Uint8Array[] }
++            reply(msg.id, withBin.value ?? null, undefined, withBin.attachments)
++        } else {
++            reply(msg.id, out ?? null)
++        }
+     } catch (err) {
+         reply(msg.id, undefined, (err as Error).message ?? String(err))
+     }
+-})
++}
+ 
+-process.send!({ ready: true })
++// The port arrives on argv (and BENCH_RPC_PORT as a belt-and-braces
++// second spelling). Connecting is the LAST thing this file does: the
++// parent treats the connection plus a `{ready:true}` frame as the signal
++// that the child is up, and it times out rather than hanging if neither
++// arrives.
++const portText = process.argv[2] ?? process.env.BENCH_RPC_PORT
++const port = Number(portText)
++if (!Number.isFinite(port) || port <= 0) {
++    console.error(
++        `[server-process] no control-channel port: pass it as argv[2] or BENCH_RPC_PORT (got ${String(portText)})`
++    )
++    process.exit(2)
++}
++
++const sock = connect(port, '127.0.0.1', () => {
++    sock.setNoDelay(true)
++    channel = sock
++    channelSend({ ready: true })
++})
++sock.on('data', (chunk: Buffer) => {
++    for (const frame of channelReader.push(chunk)) {
++        // Same honesty as the parent's half: a notification (pairingMaterial)
++        // carries no id, so the parsed shape must allow its absence.
++        void onFrame(JSON.parse(frame.json) as RpcRequest, frame.blobs)
++    }
++})
++sock.on('error', (err: Error) => {
++    console.error(`[server-process] control channel error: ${err.message}`)
++    process.exit(3)
++})
++sock.on('close', () => {
++    // The parent went away; nothing left to serve.
++    process.exit(0)
++})

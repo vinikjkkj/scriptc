@@ -1,0 +1,566 @@
+provenance: zapo-js@1.6.2 ← https://github.com/vinikjkkj/zapo@refs/tags/v1.6.2 @ 250f9af5229a (source compiles statically)
+provenance: @zapo-js/store-sqlite@1.0.2 ← https://github.com/vinikjkkj/zapo@refs/tags/v1.2.1 @ ff43c244ac7a (source compiles statically)
+provenance: argo-codec@0.2.1: no provenance attestation published; island path used
+provenance: 36 alias key(s) are spelled by more than one mapped package with different targets ('zapo-js/store', 'zapo-js/signal', 'zapo-js/auth', 'zapo-js/appstate', 'zapo-js/retry', …); tsconfig "paths" is one table per program, so zapo-js's answer is used for all of them and @zapo-js/store-sqlite compile against zapo-js's checkout for those specifiers
+<blocks>/clientbench/lab/app/tree/packages/fake-server/bench-noprof/messaging.bench.ts:615:20 - advice SC6004: this flow COPIES the record into a different shape ('{ peerId: string; sendConversation: (string) => Promise<void>; sendGroupConversation: (string, string) => Promise<void> }' into '{ sendConversation: (string) => Promise<void>; sendGroupConversation: (string, string) => Promise<void> }'), and the copy ends the member 'peerId'
+
+  614 |         const t = performance.now()
+  615 |         contacts = await rpc.buildContacts(config.contacts, config.contactDevices)
+      |                    ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  616 |         const misses = await rpc.dispenserMisses()
+
+  hint: TypeScript's width subtyping is a relabel — the callee gets the very object the caller still names — but scriptc records are monomorphic structs, so a flow between two shapes compiles to a field-by-field COPY and the program then holds two objects where JavaScript has one. A write through either name is invisible to the other, and any member the destination shape does not name is not on the copy at all. Keep the value at its own type, or name the members you need on the destination type, if the two have to agree
+
+<blocks>/clientbench/lab/app/tree/packages/fake-server/bench-noprof/messaging.bench.ts:626:18 - advice SC6004: this flow COPIES the record into a different shape ('{ peerId: string; sendConversation: (string) => Promise<void>; sendGroupConversation: (string, string) => Promise<void> }' into '{ sendConversation: (string) => Promise<void>; sendGroupConversation: (string, string) => Promise<void> }'), and the copy ends the member 'peerId'
+
+  625 |         const t = performance.now()
+  626 |         groups = await rpc.buildGroups(config.groups, config.groupMembers)
+      |                  ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  627 |         const misses = await rpc.dispenserMisses()
+
+  hint: TypeScript's width subtyping is a relabel — the callee gets the very object the caller still names — but scriptc records are monomorphic structs, so a flow between two shapes compiles to a field-by-field COPY and the program then holds two objects where JavaScript has one. A write through either name is invisible to the other, and any member the destination shape does not name is not on the copy at all. Keep the value at its own type, or name the members you need on the destination type, if the two have to agree
+
+<blocks>/clientbench/prov/250f9af5229a545eec28ddbd3e8774a397cdb0bb/src/appstate/sync/WaAppStateSyncClient.ts:1158:16 - advice SC6004: this flow COPIES the record into a different shape, and the copy ends the member 'operationCode'
+
+  1157 |         this.setCollectionState(collection, patchVersion, nextState.hash, nextState.indexValueMap)
+  1158 |         return decryptedMutations
+       |                ^~~~~~~~~~~~~~~~~~
+  1159 |     }
+
+  hint: TypeScript's width subtyping is a relabel — the callee gets the very object the caller still names — but scriptc records are monomorphic structs, so a flow between two shapes compiles to a field-by-field COPY and the program then holds two objects where JavaScript has one. A write through either name is invisible to the other, and any member the destination shape does not name is not on the copy at all. Keep the value at its own type, or name the members you need on the destination type, if the two have to agree
+
+<blocks>/clientbench/prov/250f9af5229a545eec28ddbd3e8774a397cdb0bb/src/auth/credentials-flow.ts:204:38 - advice SC6003: this projection of '%m101.WaMobileTcpSocket' COPIES the field 'readyState', and a method of '%m101.WaMobileTcpSocket' writes it
+
+  203 |             url: effectiveMobileTransport.tcpUrl ?? 'tcp://g.whatsapp.net:443',
+  204 |             rawWebSocketConstructor: WaMobileTcpSocketCtor,
+      |                                      ^~~~~~~~~~~~~~~~~~~~~
+  205 |             connectTimeoutMs: socketOptions.connectTimeoutMs,
+
+  hint: the target shape names both methods and data, so the projected record binds the methods to the live instance while the data rides a copy taken here — a call through the projection reaches the object and a read of one of these fields does not, so the two disagree after the first such call (JavaScript has one object and one answer). Read the field through the instance's own type, or return the value the method computed, if the reads have to see the writes
+
+<blocks>/clientbench/prov/250f9af5229a545eec28ddbd3e8774a397cdb0bb/src/auth/WaAuthClient.ts:76:48 - advice SC6004: this flow COPIES the record into a different shape, and the copy ends the members 'dangerous', 'mobileTransport', 'requireFullSync', 'version'
+
+  75 |     public constructor(options: WaAuthClientOptions, deps: WaAuthClientDeps) {
+  76 |         const device = resolveWaDeviceIdentity(options)
+     |                                                ^~~~~~~
+  77 |         this.options = Object.freeze({
+
+  hint: TypeScript's width subtyping is a relabel — the callee gets the very object the caller still names — but scriptc records are monomorphic structs, so a flow between two shapes compiles to a field-by-field COPY and the program then holds two objects where JavaScript has one. A write through either name is invisible to the other, and any member the destination shape does not name is not on the copy at all. Keep the value at its own type, or name the members you need on the destination type, if the two have to agree
+
+<blocks>/clientbench/prov/250f9af5229a545eec28ddbd3e8774a397cdb0bb/src/client/connection/WaConnectionManager.ts:308:68 - advice SC6004: this flow COPIES the record into a different shape ('{ linkPreview: unknown; mediaDownload: unknown; mediaUpload: unknown; ws: unknown }' into '{ ws: unknown }'), and the copy ends the members 'linkPreview', 'mediaDownload', 'mediaUpload'
+
+  307 |         })
+  308 |         const commsConfig = await this.authClient.buildCommsConfig(this.options, {
+      |                                                                    ^~~~~~~~~~~~
+  309 |             noiseTrustedRootCa: this.options.testHooks?.noiseRootCa,
+
+  hint: TypeScript's width subtyping is a relabel — the callee gets the very object the caller still names — but scriptc records are monomorphic structs, so a flow between two shapes compiles to a field-by-field COPY and the program then holds two objects where JavaScript has one. A write through either name is invisible to the other, and any member the destination shape does not name is not on the copy at all. Keep the value at its own type, or name the members you need on the destination type, if the two have to agree
+
+<blocks>/clientbench/prov/250f9af5229a545eec28ddbd3e8774a397cdb0bb/src/client/coordinators/WaAppStateMutationCoordinator.ts:475:48 - advice SC6004: this flow COPIES the record into a different shape, and the copy ends the members '$unknowns', 'agentAction', 'aiThreadRenameAction', 'androidUnsupportedActions', 'archiveChatAction', 'autoOrganizeBusinessChatSetting', 'avatarUpdatedAction', 'bizAiSettingsNudgeAction', 'botWelcomeRequestAction', 'bubbleLockMessageAction', 'businessBroadcastCampaignAction', 'businessBroadcastInsightsAction', 'businessBroadcastListAction', 'callLogAction', 'chatAssignment', 'chatAssignmentOpenedStatus', 'chatLockSettings', 'clearChatAction', 'coexV2VersionAction', 'contactAction', 'ctwaPerCustomerDataSharingAction', 'customPaymentMethodsAction', 'customerDataAction', 'deleteChatAction', 'deleteIndividualCallLog', 'deleteMessageForMeAction', 'detectedOutcomesStatusAction', 'deviceCapabilities', 'externalWebBetaAction', 'favoritesAction', 'interactiveMessageAction', 'keyExpiration', 'labelAssociationAction', 'labelEditAction', 'labelReorderingAction', 'lidContactAction', 'localeSetting', 'lockChatAction', 'maibaAiFeaturesControlAction', 'markChatAsReadAction', 'marketingMessageAction', 'marketingMessageBroadcastAction', 'merchantPaymentPartnerAction', 'musicUserIdAction', 'muteAction', 'newsletterSavedInterestsAction', 'noteEditAction', 'notificationActivitySettingAction', 'nuxAction', 'outContactAction', 'paymentInfoAction', 'paymentTosAction', 'pinAction', 'pnForLidChatAction', 'primaryFeature', 'primaryVersionAction', 'privacySettingChannelsPersonalisedRecommendationAction', 'privacySettingDisableLinkPreviewsAction', 'privacySettingRelayAllCalls', 'privateProcessingSettingAction', 'pushNameSetting', 'quickReplyAction', 'recentEmojiWeightsAction', 'removeRecentStickerAction', 'settingsSyncAction', 'starAction', 'statusPostOptInNotificationPreferencesAction', 'statusPrivacy', 'stickerAction', 'subscriptionAction', 'subscriptionsSyncV2Action', 'threadPinAction', 'timeFormatAction', 'timestamp', 'ugcBot', 'unarchiveChatsSetting', 'userStatusMuteAction', 'usernameChatStartMode', 'waffleAccountLinkStateAction', 'wamoUserIdentifierAction', 'wasaRootSecretAction'
+
+  474 |                 try {
+  475 |                     this.handleNctSaltMutation(mutation)
+      |                                                ^~~~~~~~
+  476 |                     const event = parseAppStateMutationEvent(mutation)
+
+  hint: TypeScript's width subtyping is a relabel — the callee gets the very object the caller still names — but scriptc records are monomorphic structs, so a flow between two shapes compiles to a field-by-field COPY and the program then holds two objects where JavaScript has one. A write through either name is invisible to the other, and any member the destination shape does not name is not on the copy at all. Keep the value at its own type, or name the members you need on the destination type, if the two have to agree
+
+<blocks>/clientbench/prov/250f9af5229a545eec28ddbd3e8774a397cdb0bb/src/client/coordinators/WaAppStateMutationCoordinator.ts:1005:17 - advice SC6004: this flow COPIES the record into a different shape, and the copy ends the members '$unknowns', 'agentAction', 'aiThreadRenameAction', 'androidUnsupportedActions', 'archiveChatAction', 'autoOrganizeBusinessChatSetting', 'avatarUpdatedAction', 'bizAiSettingsNudgeAction', 'botWelcomeRequestAction', 'bubbleLockMessageAction', 'businessBroadcastCampaignAction', 'businessBroadcastInsightsAction', 'businessBroadcastListAction', 'callLogAction', 'chatAssignment', 'chatAssignmentOpenedStatus', 'chatLockSettings', 'clearChatAction', 'coexV2VersionAction', 'contactAction', 'ctwaPerCustomerDataSharingAction', 'customPaymentMethodsAction', 'customerDataAction', 'deleteChatAction', 'deleteIndividualCallLog', 'deleteMessageForMeAction', 'detectedOutcomesStatusAction', 'deviceCapabilities', 'externalWebBetaAction', 'favoritesAction', 'interactiveMessageAction', 'keyExpiration', 'labelAssociationAction', 'labelEditAction', 'labelReorderingAction', 'lidContactAction', 'localeSetting', 'lockChatAction', 'maibaAiFeaturesControlAction', 'markChatAsReadAction', 'marketingMessageAction', 'marketingMessageBroadcastAction', 'merchantPaymentPartnerAction', 'musicUserIdAction', 'muteAction', 'nctSaltSyncAction', 'newsletterSavedInterestsAction', 'noteEditAction', 'notificationActivitySettingAction', 'nuxAction', 'outContactAction', 'paymentInfoAction', 'paymentTosAction', 'pinAction', 'pnForLidChatAction', 'primaryFeature', 'primaryVersionAction', 'privacySettingChannelsPersonalisedRecommendationAction', 'privacySettingDisableLinkPreviewsAction', 'privacySettingRelayAllCalls', 'privateProcessingSettingAction', 'pushNameSetting', 'quickReplyAction', 'recentEmojiWeightsAction', 'removeRecentStickerAction', 'settingsSyncAction', 'starAction', 'statusPostOptInNotificationPreferencesAction', 'stickerAction', 'subscriptionAction', 'subscriptionsSyncV2Action', 'threadPinAction', 'timeFormatAction', 'timestamp', 'ugcBot', 'unarchiveChatsSetting', 'userStatusMuteAction', 'usernameChatStartMode', 'waffleAccountLinkStateAction', 'wamoUserIdentifierAction', 'wasaRootSecretAction'
+
+  1004 |                 indexArgs: {},
+  1005 |                 value,
+       |                 ^~~~~
+  1006 |                 timestamp
+
+  hint: TypeScript's width subtyping is a relabel — the callee gets the very object the caller still names — but scriptc records are monomorphic structs, so a flow between two shapes compiles to a field-by-field COPY and the program then holds two objects where JavaScript has one. A write through either name is invisible to the other, and any member the destination shape does not name is not on the copy at all. Keep the value at its own type, or name the members you need on the destination type, if the two have to agree
+
+<blocks>/clientbench/prov/250f9af5229a545eec28ddbd3e8774a397cdb0bb/src/client/coordinators/WaAppStateMutationCoordinator.ts:1046:17 - advice SC6004: this flow COPIES the record into a different shape, and the copy ends the members '$unknowns', 'agentAction', 'aiThreadRenameAction', 'androidUnsupportedActions', 'archiveChatAction', 'autoOrganizeBusinessChatSetting', 'avatarUpdatedAction', 'bizAiSettingsNudgeAction', 'botWelcomeRequestAction', 'bubbleLockMessageAction', 'businessBroadcastCampaignAction', 'businessBroadcastInsightsAction', 'callLogAction', 'chatAssignment', 'chatAssignmentOpenedStatus', 'chatLockSettings', 'clearChatAction', 'coexV2VersionAction', 'contactAction', 'ctwaPerCustomerDataSharingAction', 'customPaymentMethodsAction', 'customerDataAction', 'deleteChatAction', 'deleteIndividualCallLog', 'deleteMessageForMeAction', 'detectedOutcomesStatusAction', 'deviceCapabilities', 'externalWebBetaAction', 'favoritesAction', 'interactiveMessageAction', 'keyExpiration', 'labelAssociationAction', 'labelEditAction', 'labelReorderingAction', 'lidContactAction', 'localeSetting', 'lockChatAction', 'maibaAiFeaturesControlAction', 'markChatAsReadAction', 'marketingMessageAction', 'marketingMessageBroadcastAction', 'merchantPaymentPartnerAction', 'musicUserIdAction', 'muteAction', 'nctSaltSyncAction', 'newsletterSavedInterestsAction', 'noteEditAction', 'notificationActivitySettingAction', 'nuxAction', 'outContactAction', 'paymentInfoAction', 'paymentTosAction', 'pinAction', 'pnForLidChatAction', 'primaryFeature', 'primaryVersionAction', 'privacySettingChannelsPersonalisedRecommendationAction', 'privacySettingDisableLinkPreviewsAction', 'privacySettingRelayAllCalls', 'privateProcessingSettingAction', 'pushNameSetting', 'quickReplyAction', 'recentEmojiWeightsAction', 'removeRecentStickerAction', 'settingsSyncAction', 'starAction', 'statusPostOptInNotificationPreferencesAction', 'statusPrivacy', 'stickerAction', 'subscriptionAction', 'subscriptionsSyncV2Action', 'threadPinAction', 'timeFormatAction', 'timestamp', 'ugcBot', 'unarchiveChatsSetting', 'userStatusMuteAction', 'usernameChatStartMode', 'waffleAccountLinkStateAction', 'wamoUserIdentifierAction', 'wasaRootSecretAction'
+
+  1045 |                 indexArgs: { id: input.id },
+  1046 |                 value,
+       |                 ^~~~~
+  1047 |                 timestamp
+
+  hint: TypeScript's width subtyping is a relabel — the callee gets the very object the caller still names — but scriptc records are monomorphic structs, so a flow between two shapes compiles to a field-by-field COPY and the program then holds two objects where JavaScript has one. A write through either name is invisible to the other, and any member the destination shape does not name is not on the copy at all. Keep the value at its own type, or name the members you need on the destination type, if the two have to agree
+
+<blocks>/clientbench/prov/250f9af5229a545eec28ddbd3e8774a397cdb0bb/src/client/coordinators/WaBotCoordinator.ts:394:58 - advice SC6004: this flow COPIES the record into a different shape, and the copy ends the members 'aiThreadId', 'aiThreadType', 'botJid', 'capabilities', 'extraMentionedJids', 'personaId'
+
+  393 |                 })
+  394 |                 return sendMessage(fbidBotJid, enriched, opts)
+      |                                                          ^~~~
+  395 |             }
+
+  hint: TypeScript's width subtyping is a relabel — the callee gets the very object the caller still names — but scriptc records are monomorphic structs, so a flow between two shapes compiles to a field-by-field COPY and the program then holds two objects where JavaScript has one. A write through either name is invisible to the other, and any member the destination shape does not name is not on the copy at all. Keep the value at its own type, or name the members you need on the destination type, if the two have to agree
+
+<blocks>/clientbench/prov/250f9af5229a545eec28ddbd3e8774a397cdb0bb/src/client/coordinators/WaBotCoordinator.ts:426:45 - advice SC6004: this flow COPIES the record into a different shape, and the copy ends the members 'aiThreadId', 'aiThreadType', 'botJid', 'capabilities', 'extraMentionedJids', 'personaId'
+
+  425 |             }
+  426 |             return sendMessage(to, wrapped, opts)
+      |                                             ^~~~
+  427 |         },
+
+  hint: TypeScript's width subtyping is a relabel — the callee gets the very object the caller still names — but scriptc records are monomorphic structs, so a flow between two shapes compiles to a field-by-field COPY and the program then holds two objects where JavaScript has one. A write through either name is invisible to the other, and any member the destination shape does not name is not on the copy at all. Keep the value at its own type, or name the members you need on the destination type, if the two have to agree
+
+<blocks>/clientbench/prov/250f9af5229a545eec28ddbd3e8774a397cdb0bb/src/client/coordinators/WaMessageDispatchCoordinator.ts:314:24 - advice SC6004: this flow COPIES the record into a different shape, and the copy ends the members 'isBroadcast', 'isGroup', 'isNewsletter', 'participantAlt', 'recipientAlt', 'recipientJid', 'remoteJidAlt', 'senderDevice', 'senderUsername', 'serverId'
+
+  313 |                 optionsLevel: options.contextInfo,
+  314 |                 quote: options.quote,
+      |                        ^~~~~~~~~~~~~
+  315 |                 forward: options.forward,
+
+  hint: TypeScript's width subtyping is a relabel — the callee gets the very object the caller still names — but scriptc records are monomorphic structs, so a flow between two shapes compiles to a field-by-field COPY and the program then holds two objects where JavaScript has one. A write through either name is invisible to the other, and any member the destination shape does not name is not on the copy at all. Keep the value at its own type, or name the members you need on the destination type, if the two have to agree
+
+<blocks>/clientbench/prov/250f9af5229a545eec28ddbd3e8774a397cdb0bb/src/client/coordinators/WaMessageDispatchCoordinator.ts:412:15 - advice SC6004: this flow COPIES the record into a different shape, and the field 'botMessageSecret' is written somewhere in this program
+
+  411 |         const messageWithOverride = options.messageSecret
+  412 |             ? {
+      |               ^
+  413 |                   ...message,
+
+  hint: TypeScript's width subtyping is a relabel — the callee gets the very object the caller still names — but scriptc records are monomorphic structs, so a flow between two shapes compiles to a field-by-field COPY and the program then holds two objects where JavaScript has one. A write through either name is invisible to the other, and any member the destination shape does not name is not on the copy at all. Keep the value at its own type, or name the members you need on the destination type, if the two have to agree
+
+<blocks>/clientbench/prov/250f9af5229a545eec28ddbd3e8774a397cdb0bb/src/client/coordinators/WaMessageDispatchCoordinator.ts:807:74 - advice SC6004: this flow COPIES the record into a different shape, and the copy ends the members 'additionalAttributes', 'contextInfo', 'customNodes', 'disableGroupEphemeralAutoInject', 'editKey', 'expectedIdentity', 'expirationSeconds', 'forward', 'id', 'mentions', 'messageSecret', 'quote', 'viewOnce'
+
+  806 |             },
+  807 |             async () => this.deps.messageClient.publishNode(messageNode, sendOptions)
+      |                                                                          ^~~~~~~~~~~
+  808 |         )
+
+  hint: TypeScript's width subtyping is a relabel — the callee gets the very object the caller still names — but scriptc records are monomorphic structs, so a flow between two shapes compiles to a field-by-field COPY and the program then holds two objects where JavaScript has one. A write through either name is invisible to the other, and any member the destination shape does not name is not on the copy at all. Keep the value at its own type, or name the members you need on the destination type, if the two have to agree
+
+<blocks>/clientbench/prov/250f9af5229a545eec28ddbd3e8774a397cdb0bb/src/client/coordinators/WaMessageDispatchCoordinator.ts:912:13 - advice SC6004: this flow COPIES the record into a different shape, and the copy ends the member 'jid'
+
+  911 |             participantEncryptRequests,
+  912 |             resolvedFanoutTargets
+      |             ^~~~~~~~~~~~~~~~~~~~~
+  913 |         )
+
+  hint: TypeScript's width subtyping is a relabel — the callee gets the very object the caller still names — but scriptc records are monomorphic structs, so a flow between two shapes compiles to a field-by-field COPY and the program then holds two objects where JavaScript has one. A write through either name is invisible to the other, and any member the destination shape does not name is not on the copy at all. Keep the value at its own type, or name the members you need on the destination type, if the two have to agree
+
+<blocks>/clientbench/prov/250f9af5229a545eec28ddbd3e8774a397cdb0bb/src/client/coordinators/WaMessageDispatchCoordinator.ts:983:74 - advice SC6004: this flow COPIES the record into a different shape, and the copy ends the members 'additionalAttributes', 'contextInfo', 'customNodes', 'disableGroupEphemeralAutoInject', 'editKey', 'expectedIdentity', 'expirationSeconds', 'forward', 'id', 'mentions', 'messageSecret', 'quote', 'viewOnce'
+
+  982 |             },
+  983 |             async () => this.deps.messageClient.publishNode(messageNode, sendOptions)
+      |                                                                          ^~~~~~~~~~~
+  984 |         )
+
+  hint: TypeScript's width subtyping is a relabel — the callee gets the very object the caller still names — but scriptc records are monomorphic structs, so a flow between two shapes compiles to a field-by-field COPY and the program then holds two objects where JavaScript has one. A write through either name is invisible to the other, and any member the destination shape does not name is not on the copy at all. Keep the value at its own type, or name the members you need on the destination type, if the two have to agree
+
+<blocks>/clientbench/prov/250f9af5229a545eec28ddbd3e8774a397cdb0bb/src/client/coordinators/WaMessageDispatchCoordinator.ts:1155:27 - advice SC6004: this flow COPIES the record into a different shape ('{ address: { device: number; server: string | undefined; user: string }; ciphertext: Uint8Array; encType: string; jid: string }' into '{ ciphertext: Uint8Array | undefined; encType: string | undefined; jid: string }'), and the copy ends the member 'address'
+
+  1154 |             groupCiphertext: groupCiphertext.ciphertext,
+  1155 |             participants: distributionParticipants,
+       |                           ^~~~~~~~~~~~~~~~~~~~~~~~
+  1156 |             deviceIdentity:
+
+  hint: TypeScript's width subtyping is a relabel — the callee gets the very object the caller still names — but scriptc records are monomorphic structs, so a flow between two shapes compiles to a field-by-field COPY and the program then holds two objects where JavaScript has one. A write through either name is invisible to the other, and any member the destination shape does not name is not on the copy at all. Keep the value at its own type, or name the members you need on the destination type, if the two have to agree
+
+<blocks>/clientbench/prov/250f9af5229a545eec28ddbd3e8774a397cdb0bb/src/client/coordinators/WaMessageDispatchCoordinator.ts:1180:74 - advice SC6004: this flow COPIES the record into a different shape, and the copy ends the members 'additionalAttributes', 'contextInfo', 'customNodes', 'disableGroupEphemeralAutoInject', 'editKey', 'expectedIdentity', 'expirationSeconds', 'forward', 'id', 'mentions', 'messageSecret', 'quote', 'viewOnce'
+
+  1179 |             },
+  1180 |             async () => this.deps.messageClient.publishNode(messageNode, sendOptions)
+       |                                                                          ^~~~~~~~~~~
+  1181 |         )
+
+  hint: TypeScript's width subtyping is a relabel — the callee gets the very object the caller still names — but scriptc records are monomorphic structs, so a flow between two shapes compiles to a field-by-field COPY and the program then holds two objects where JavaScript has one. A write through either name is invisible to the other, and any member the destination shape does not name is not on the copy at all. Keep the value at its own type, or name the members you need on the destination type, if the two have to agree
+
+<blocks>/clientbench/prov/250f9af5229a545eec28ddbd3e8774a397cdb0bb/src/client/coordinators/WaMessageDispatchCoordinator.ts:1359:32 - advice SC6004: this flow COPIES the record into a different shape, and the copy ends the member 'session'
+
+  1358 |                 await this.deps.sessionResolver.ensureSessionsBatch(pendingTargetJids)
+  1359 |             availableTargets = resolvedTargets
+       |                                ^~~~~~~~~~~~~~~
+  1360 |             prefetchedAvailableTargets = resolvedTargets
+
+  hint: TypeScript's width subtyping is a relabel — the callee gets the very object the caller still names — but scriptc records are monomorphic structs, so a flow between two shapes compiles to a field-by-field COPY and the program then holds two objects where JavaScript has one. A write through either name is invisible to the other, and any member the destination shape does not name is not on the copy at all. Keep the value at its own type, or name the members you need on the destination type, if the two have to agree
+
+<blocks>/clientbench/prov/250f9af5229a545eec28ddbd3e8774a397cdb0bb/src/client/coordinators/WaMessageDispatchCoordinator.ts:1666:74 - advice SC6004: this flow COPIES the record into a different shape, and the copy ends the members 'additionalAttributes', 'contextInfo', 'customNodes', 'disableGroupEphemeralAutoInject', 'editKey', 'expectedIdentity', 'expirationSeconds', 'forward', 'id', 'mentions', 'messageSecret', 'quote', 'viewOnce'
+
+  1665 |             },
+  1666 |             async () => this.deps.messageClient.publishNode(messageNode, sendOptions)
+       |                                                                          ^~~~~~~~~~~
+  1667 |         )
+
+  hint: TypeScript's width subtyping is a relabel — the callee gets the very object the caller still names — but scriptc records are monomorphic structs, so a flow between two shapes compiles to a field-by-field COPY and the program then holds two objects where JavaScript has one. A write through either name is invisible to the other, and any member the destination shape does not name is not on the copy at all. Keep the value at its own type, or name the members you need on the destination type, if the two have to agree
+
+<blocks>/clientbench/prov/250f9af5229a545eec28ddbd3e8774a397cdb0bb/src/client/coordinators/WaNewsletterCoordinator.ts:62:42 - advice SC6004: this flow COPIES the record into a different shape, and the copy ends the members 'generateStanzaId', 'getMediaConn', 'mediaTransfer', 'publishMessageNode', 'sendNode'
+
+  61 | ): WaNewsletterCoordinator {
+  62 |     const mexDeps: WaNewsletterMexDeps = options
+     |                                          ^~~~~~~
+  63 |     return {
+
+  hint: TypeScript's width subtyping is a relabel — the callee gets the very object the caller still names — but scriptc records are monomorphic structs, so a flow between two shapes compiles to a field-by-field COPY and the program then holds two objects where JavaScript has one. A write through either name is invisible to the other, and any member the destination shape does not name is not on the copy at all. Keep the value at its own type, or name the members you need on the destination type, if the two have to agree
+
+<blocks>/clientbench/prov/250f9af5229a545eec28ddbd3e8774a397cdb0bb/src/client/coordinators/WaStatusCoordinator.ts:62:23 - advice SC6004: this flow COPIES the record into a different shape, and the fields 'description', 'jpegThumbnail', 'mediaKey', 'mediaKeyTimestamp', 'thumbnailDirectPath', 'thumbnailEncSha256', 'thumbnailHeight', 'thumbnailSha256', 'thumbnailWidth', 'title' are written somewhere in this program
+
+  61 |                 built.message.conversation && !built.message.extendedTextMessage
+  62 |                     ? {
+     |                       ^
+  63 |                           ...built.message,
+
+  hint: TypeScript's width subtyping is a relabel — the callee gets the very object the caller still names — but scriptc records are monomorphic structs, so a flow between two shapes compiles to a field-by-field COPY and the program then holds two objects where JavaScript has one. A write through either name is invisible to the other, and any member the destination shape does not name is not on the copy at all. Keep the value at its own type, or name the members you need on the destination type, if the two have to agree
+
+<blocks>/clientbench/prov/250f9af5229a545eec28ddbd3e8774a397cdb0bb/src/client/events/dirty.ts:385:35 - advice SC6004: this flow COPIES the record into a different shape ('{ protocols: string[]; timestamp: number; type: string }' into '{ timestamp: number; type: string }'), and the copy ends the member 'protocols'
+
+  384 |             'dirty.clear',
+  385 |             buildClearDirtyBitsIq(dirtyBits),
+      |                                   ^~~~~~~~~
+  386 |             WA_DEFAULTS.IQ_TIMEOUT_MS,
+
+  hint: TypeScript's width subtyping is a relabel — the callee gets the very object the caller still names — but scriptc records are monomorphic structs, so a flow between two shapes compiles to a field-by-field COPY and the program then holds two objects where JavaScript has one. A write through either name is invisible to the other, and any member the destination shape does not name is not on the copy at all. Keep the value at its own type, or name the members you need on the destination type, if the two have to agree
+
+<blocks>/clientbench/prov/250f9af5229a545eec28ddbd3e8774a397cdb0bb/src/client/newsletter/content.ts:166:31 - advice SC6004: this flow COPIES the record into a different shape, and the copy ends the members 'expirationSeconds', 'mentionedJids', 'quotedMessageId', 'quotedParticipant', 'quotedRemoteJid', 'raw'; the fields '$unknowns', 'actionLink', 'afterReadDuration', 'aiProvenance', 'alwaysShowAdAttribution', 'botMessageSharingInfo', 'businessInteractionPills', 'businessMessageForwardInfo', 'conversionData', 'conversionDelaySeconds', 'conversionSource', 'crossAppSource', 'ctwaPayload', 'ctwaSignals', 'dataSharingContext', 'disappearingMode', 'entryPointConversionApp', 'entryPointConversionDelaySeconds', 'entryPointConversionExternalMedium', 'entryPointConversionExternalSource', 'entryPointConversionSource', 'ephemeralSettingTimestamp', 'ephemeralSharedSecret', 'expiration', 'externalAdReply', 'featureEligibilities', 'forwardOrigin', 'forwardedAiBotMessageInfo', 'forwardedNewsletterMessageInfo', 'forwardingScore', 'groupMentions', 'groupSubject', 'instagramThreadLink', 'isForwarded', 'isGroupStatus', 'isQuestion', 'isSampled', 'isSpoiler', 'mediaDomainInfo', 'memberLabel', 'mentionedJid', 'nonJidMentions', 'pairedMediaType', 'parentGroupJid', 'partiallySelectedContent', 'participant', 'placeholderKey', 'posterStatusId', 'questionReplyQuotedMessage', 'quotedAd', 'quotedMessage', 'quotedType', 'rankingVersion', 'remoteJid', 'smbClientCampaignId', 'smbServerCampaignId', 'stanzaId', 'statusAttributionType', 'statusAttributions', 'statusAudienceMetadata', 'statusSourceType', 'trustBannerAction', 'trustBannerType', 'urlTrackingMap', 'utm' are written somewhere in this program
+
+  165 |             return {
+  166 |                 imageMessage: {
+      |                               ^
+  167 |                     ...content,
+
+  hint: TypeScript's width subtyping is a relabel — the callee gets the very object the caller still names — but scriptc records are monomorphic structs, so a flow between two shapes compiles to a field-by-field COPY and the program then holds two objects where JavaScript has one. A write through either name is invisible to the other, and any member the destination shape does not name is not on the copy at all. Keep the value at its own type, or name the members you need on the destination type, if the two have to agree
+
+<blocks>/clientbench/prov/250f9af5229a545eec28ddbd3e8774a397cdb0bb/src/client/newsletter/messaging.ts:318:37 - advice SC6004: this flow COPIES the record into a different shape, and the copy ends the members 'generateStanzaId', 'getMediaConn', 'mediaTransfer', 'publishMessageNode', 'sendNode'
+
+  317 |         follow: async (newsletterJid) => {
+  318 |             await ensureTosAccepted(deps, 'consumer')
+      |                                     ^~~~
+  319 |             await runMex(deps, 'JoinNewsletter', { newsletter_id: newsletterJid })
+
+  hint: TypeScript's width subtyping is a relabel — the callee gets the very object the caller still names — but scriptc records are monomorphic structs, so a flow between two shapes compiles to a field-by-field COPY and the program then holds two objects where JavaScript has one. A write through either name is invisible to the other, and any member the destination shape does not name is not on the copy at all. Keep the value at its own type, or name the members you need on the destination type, if the two have to agree
+
+<blocks>/clientbench/prov/250f9af5229a545eec28ddbd3e8774a397cdb0bb/src/client/newsletter/messaging.ts:319:26 - advice SC6004: this flow COPIES the record into a different shape, and the copy ends the members 'generateStanzaId', 'getMediaConn', 'mediaTransfer', 'publishMessageNode', 'sendNode'
+
+  318 |             await ensureTosAccepted(deps, 'consumer')
+  319 |             await runMex(deps, 'JoinNewsletter', { newsletter_id: newsletterJid })
+      |                          ^~~~
+  320 |         },
+
+  hint: TypeScript's width subtyping is a relabel — the callee gets the very object the caller still names — but scriptc records are monomorphic structs, so a flow between two shapes compiles to a field-by-field COPY and the program then holds two objects where JavaScript has one. A write through either name is invisible to the other, and any member the destination shape does not name is not on the copy at all. Keep the value at its own type, or name the members you need on the destination type, if the two have to agree
+
+<blocks>/clientbench/prov/250f9af5229a545eec28ddbd3e8774a397cdb0bb/src/client/newsletter/messaging.ts:322:26 - advice SC6004: this flow COPIES the record into a different shape, and the copy ends the members 'generateStanzaId', 'getMediaConn', 'mediaTransfer', 'publishMessageNode', 'sendNode'
+
+  321 |         unfollow: async (newsletterJid) => {
+  322 |             await runMex(deps, 'LeaveNewsletter', { newsletter_id: newsletterJid })
+      |                          ^~~~
+  323 |         },
+
+  hint: TypeScript's width subtyping is a relabel — the callee gets the very object the caller still names — but scriptc records are monomorphic structs, so a flow between two shapes compiles to a field-by-field COPY and the program then holds two objects where JavaScript has one. A write through either name is invisible to the other, and any member the destination shape does not name is not on the copy at all. Keep the value at its own type, or name the members you need on the destination type, if the two have to agree
+
+<blocks>/clientbench/prov/250f9af5229a545eec28ddbd3e8774a397cdb0bb/src/client/newsletter/messaging.ts:330:26 - advice SC6004: this flow COPIES the record into a different shape, and the copy ends the members 'generateStanzaId', 'getMediaConn', 'mediaTransfer', 'publishMessageNode', 'sendNode'
+
+  329 |             const value = input.mute ? WA_NEWSLETTER_MUTE_VALUES.ON : WA_NEWSLETTER_MUTE_VALUES.OFF
+  330 |             await runMex(deps, 'UpdateNewsletterUserSetting', {
+      |                          ^~~~
+  331 |                 input: {
+
+  hint: TypeScript's width subtyping is a relabel — the callee gets the very object the caller still names — but scriptc records are monomorphic structs, so a flow between two shapes compiles to a field-by-field COPY and the program then holds two objects where JavaScript has one. A write through either name is invisible to the other, and any member the destination shape does not name is not on the copy at all. Keep the value at its own type, or name the members you need on the destination type, if the two have to agree
+
+<blocks>/clientbench/prov/250f9af5229a545eec28ddbd3e8774a397cdb0bb/src/client/persistence/history-sync.ts:183:37 - advice SC6004: this flow COPIES the record into a different shape ('{ high: number; low: number; toNumber: () => number; unsigned: boolean }' into '{ toNumber: () => number }'), and the copy ends the members 'high', 'low', 'unsigned'
+
+  182 |             pinned: conversation.pinned ?? undefined,
+  183 |             muteEndMs: longToNumber(conversation.muteEndTime) || undefined,
+      |                                     ^~~~~~~~~~~~~~~~~~~~~~~~
+  184 |             markedAsUnread: conversation.markedAsUnread ?? undefined,
+
+  hint: TypeScript's width subtyping is a relabel — the callee gets the very object the caller still names — but scriptc records are monomorphic structs, so a flow between two shapes compiles to a field-by-field COPY and the program then holds two objects where JavaScript has one. A write through either name is invisible to the other, and any member the destination shape does not name is not on the copy at all. Keep the value at its own type, or name the members you need on the destination type, if the two have to agree
+
+<blocks>/clientbench/prov/250f9af5229a545eec28ddbd3e8774a397cdb0bb/src/client/WaClient.ts:323:66 - advice SC6004: this flow COPIES the record into a different shape, and the copy ends the members 'fromMe', 'isBroadcast', 'isGroup', 'isNewsletter', 'participantAlt', 'recipientAlt', 'recipientJid', 'remoteJidAlt', 'senderUsername', 'serverId'
+
+  322 |             if (protocolType === proto.Message.ProtocolMessage.Type.APP_STATE_SYNC_KEY_REQUEST) {
+  323 |                 await this.appStateSync.handleIncomingKeyRequest(event.key, protocolMessage)
+      |                                                                  ^~~~~~~~~
+  324 |                 return
+
+  hint: TypeScript's width subtyping is a relabel — the callee gets the very object the caller still names — but scriptc records are monomorphic structs, so a flow between two shapes compiles to a field-by-field COPY and the program then holds two objects where JavaScript has one. A write through either name is invisible to the other, and any member the destination shape does not name is not on the copy at all. Keep the value at its own type, or name the members you need on the destination type, if the two have to agree
+
+<blocks>/clientbench/prov/250f9af5229a545eec28ddbd3e8774a397cdb0bb/src/client/WaClient.ts:328:64 - advice SC6004: this flow COPIES the record into a different shape, and the copy ends the members 'fromMe', 'isBroadcast', 'isGroup', 'isNewsletter', 'participantAlt', 'recipientAlt', 'recipientJid', 'remoteJidAlt', 'senderUsername', 'serverId'
+
+  327 |             if (protocolType === proto.Message.ProtocolMessage.Type.APP_STATE_SYNC_KEY_SHARE) {
+  328 |                 await this.appStateSync.handleIncomingKeyShare(event.key, protocolMessage)
+      |                                                                ^~~~~~~~~
+  329 |                 return
+
+  hint: TypeScript's width subtyping is a relabel — the callee gets the very object the caller still names — but scriptc records are monomorphic structs, so a flow between two shapes compiles to a field-by-field COPY and the program then holds two objects where JavaScript has one. A write through either name is invisible to the other, and any member the destination shape does not name is not on the copy at all. Keep the value at its own type, or name the members you need on the destination type, if the two have to agree
+
+<blocks>/clientbench/prov/250f9af5229a545eec28ddbd3e8774a397cdb0bb/src/client/WaClientFactory.ts:262:44 - advice SC6004: this flow COPIES the record into a different shape, and the copy ends the members 'addons', 'appStateSyncTimeoutMs', 'chatEvents', 'chatSocketUrls', 'companionHost', 'connectTimeoutMs', 'dangerous', 'deadSocketTimeoutMs', 'history', 'iqTimeoutMs', 'keepAliveIntervalMs', 'linkPreview', 'logoutStoreClear', 'markOnlineOnConnect', 'maxReconnectAttempts', 'media', 'mediaTimeoutMs', 'messageAckTimeoutMs', 'messageMaxAttempts', 'messageRetryDelayMs', 'mobileTransport', 'nodeQueryTimeoutMs', 'plugins', 'privacyToken', 'protocols', 'proxy', 'reconnectIntervalMs', 'recoverFromClientTooOld', 'requireFullSync', 'sessionId', 'signPasskeyAssertion', 'signalFetchKeyBundlesTimeoutMs', 'store', 'testHooks', 'timeoutIntervalMs', 'url', 'urls', 'version', 'writeBehind'
+
+  261 | 
+  262 |     const device = resolveWaDeviceIdentity(options)
+      |                                            ^~~~~~~
+  263 |     const sessionId = options.sessionId.trim()
+
+  hint: TypeScript's width subtyping is a relabel — the callee gets the very object the caller still names — but scriptc records are monomorphic structs, so a flow between two shapes compiles to a field-by-field COPY and the program then holds two objects where JavaScript has one. A write through either name is invisible to the other, and any member the destination shape does not name is not on the copy at all. Keep the value at its own type, or name the members you need on the destination type, if the two have to agree
+
+<blocks>/clientbench/prov/250f9af5229a545eec28ddbd3e8774a397cdb0bb/src/client/WaClientFactory.ts:604:24 - advice SC6004: this flow COPIES the record into a different shape, and the copy ends the members 'disableAppStateMacVerification', 'disableMediaMacVerification', 'disableSenderKeySignatureVerification'
+
+  603 |             version: options.version,
+  604 |             dangerous: options.dangerous,
+      |                        ^~~~~~~~~~~~~~~~~
+  605 |             mobileTransport: options.mobileTransport
+
+  hint: TypeScript's width subtyping is a relabel — the callee gets the very object the caller still names — but scriptc records are monomorphic structs, so a flow between two shapes compiles to a field-by-field COPY and the program then holds two objects where JavaScript has one. A write through either name is invisible to the other, and any member the destination shape does not name is not on the copy at all. Keep the value at its own type, or name the members you need on the destination type, if the two have to agree
+
+<blocks>/clientbench/prov/250f9af5229a545eec28ddbd3e8774a397cdb0bb/src/media/transfer/WaMediaTransferClient.ts:127:74 - advice SC6004: this flow COPIES the record into a different shape, and the copy ends the members 'agent', 'maxBytes', 'signal'
+
+  126 |     public async downloadStream(request: StreamDownloadRequest): Promise<StreamTransferResponse> {
+  127 |         const { urls, headers, timeoutMs } = this.resolveTransferRequest(request)
+      |                                                                          ^~~~~~~
+  128 |         const agent = request.agent ?? this.defaultDownloadAgent
+
+  hint: TypeScript's width subtyping is a relabel — the callee gets the very object the caller still names — but scriptc records are monomorphic structs, so a flow between two shapes compiles to a field-by-field COPY and the program then holds two objects where JavaScript has one. A write through either name is invisible to the other, and any member the destination shape does not name is not on the copy at all. Keep the value at its own type, or name the members you need on the destination type, if the two have to agree
+
+<blocks>/clientbench/prov/250f9af5229a545eec28ddbd3e8774a397cdb0bb/src/media/transfer/WaMediaTransferClient.ts:164:74 - advice SC6004: this flow COPIES the record into a different shape, and the copy ends the members 'agent', 'body', 'contentLength', 'contentType', 'maxBytes', 'method', 'signal'
+
+  163 |         const bodyIsBytes = request.body instanceof Uint8Array
+  164 |         const { urls, headers, timeoutMs } = this.resolveTransferRequest(request, {
+      |                                                                          ^~~~~~~
+  165 |             'content-type': request.contentType,
+
+  hint: TypeScript's width subtyping is a relabel — the callee gets the very object the caller still names — but scriptc records are monomorphic structs, so a flow between two shapes compiles to a field-by-field COPY and the program then holds two objects where JavaScript has one. A write through either name is invisible to the other, and any member the destination shape does not name is not on the copy at all. Keep the value at its own type, or name the members you need on the destination type, if the two have to agree
+
+<blocks>/clientbench/prov/250f9af5229a545eec28ddbd3e8774a397cdb0bb/src/media/transfer/WaMediaTransferClient.ts:278:52 - advice SC6004: this flow COPIES the record into a different shape, and the copy ends the members 'fileEncSha256', 'fileSha256', 'mediaKey', 'mediaType'
+
+  277 |     ): Promise<WaMediaReadableDecryptionResult> {
+  278 |         const response = await this.downloadStream(request)
+      |                                                    ^~~~~~~
+  279 |         await this.assertSuccessfulResponse(response)
+
+  hint: TypeScript's width subtyping is a relabel — the callee gets the very object the caller still names — but scriptc records are monomorphic structs, so a flow between two shapes compiles to a field-by-field COPY and the program then holds two objects where JavaScript has one. A write through either name is invisible to the other, and any member the destination shape does not name is not on the copy at all. Keep the value at its own type, or name the members you need on the destination type, if the two have to agree
+
+<blocks>/clientbench/prov/250f9af5229a545eec28ddbd3e8774a397cdb0bb/src/message/crypto/addon-crypto.ts:86:55 - advice SC6004: this flow COPIES the record into a different shape, and the copy ends the members 'ciphertext', 'iv', 'messageSecret', 'parentMsgOriginalSender'
+
+  85 |     const iv = assertAddonIv(input.iv)
+  86 |     const additionalData = resolveAddonAdditionalData(input)
+     |                                                       ^~~~~
+  87 |     return aesGcmDecrypt(secret, iv, toBytesView(input.ciphertext), additionalData)
+
+  hint: TypeScript's width subtyping is a relabel — the callee gets the very object the caller still names — but scriptc records are monomorphic structs, so a flow between two shapes compiles to a field-by-field COPY and the program then holds two objects where JavaScript has one. A write through either name is invisible to the other, and any member the destination shape does not name is not on the copy at all. Keep the value at its own type, or name the members you need on the destination type, if the two have to agree
+
+<blocks>/clientbench/prov/250f9af5229a545eec28ddbd3e8774a397cdb0bb/src/message/encode/content.ts:183:50 - advice SC6004: this flow COPIES the record into a different shape, and the copy ends the members 'annotations', 'caption', 'externalShareFullVideoDurationInSeconds', 'gifAttribution', 'gifPlayback', 'height', 'interactiveAnnotations', 'jpegThumbnail', 'metadataUrl', 'motionPhotoPresentationOffsetMs', 'processedVideos', 'staticUrl', 'thumbnailDirectPath', 'thumbnailEncSha256', 'thumbnailSha256', 'videoSourceType', 'width'; the fields '$unknowns', 'accessibilityLabel', 'backgroundArgb', 'contextInfo', 'directPath', 'fileEncSha256', 'fileLength', 'fileSha256', 'mediaKey', 'mediaKeyTimestamp', 'mimetype', 'ptt', 'seconds', 'streamingSidecar', 'url', 'viewOnce', 'waveform' are written somewhere in this program
+
+  182 |         const media = message[field]
+  183 |         if (media) return { ...message, [field]: { ...media, viewOnce: true } }
+      |                                                  ^~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  184 |     }
+
+  hint: TypeScript's width subtyping is a relabel — the callee gets the very object the caller still names — but scriptc records are monomorphic structs, so a flow between two shapes compiles to a field-by-field COPY and the program then holds two objects where JavaScript has one. A write through either name is invisible to the other, and any member the destination shape does not name is not on the copy at all. Keep the value at its own type, or name the members you need on the destination type, if the two have to agree
+
+<blocks>/clientbench/prov/250f9af5229a545eec28ddbd3e8774a397cdb0bb/src/signal/session/encoding.ts:235:53 - advice SC6004: this flow COPIES the record into a different shape, and the copy ends the member 'prevSessions'
+
+  234 |     return proto.RecordStructure.encode({
+  235 |         currentSession: encodeSignalSessionSnapshot(record),
+      |                                                     ^~~~~~
+  236 |         previousSessions: record.prevSessions as Proto.ISessionStructure[]
+
+  hint: TypeScript's width subtyping is a relabel — the callee gets the very object the caller still names — but scriptc records are monomorphic structs, so a flow between two shapes compiles to a field-by-field COPY and the program then holds two objects where JavaScript has one. A write through either name is invisible to the other, and any member the destination shape does not name is not on the copy at all. Keep the value at its own type, or name the members you need on the destination type, if the two have to agree
+
+<blocks>/clientbench/prov/250f9af5229a545eec28ddbd3e8774a397cdb0bb/src/signal/session/SignalProtocol.ts:99:66 - advice SC6004: this flow COPIES the record into a different shape ('{ id: number; publicKey: Uint8Array; signature: Uint8Array }' into '{ id: number; publicKey: Uint8Array }'), and the copy ends the member 'signature'
+
+   98 |             ])
+   99 |             const session = await initiateSessionOutgoing(local, remoteBundle, localOneTimeBase)
+      |                                                                  ^~~~~~~~~~~~
+  100 |             // Keep writes ordered: a stored session without matching remote identity causes false mismatch checks.
+
+  hint: TypeScript's width subtyping is a relabel — the callee gets the very object the caller still names — but scriptc records are monomorphic structs, so a flow between two shapes compiles to a field-by-field COPY and the program then holds two objects where JavaScript has one. A write through either name is invisible to the other, and any member the destination shape does not name is not on the copy at all. Keep the value at its own type, or name the members you need on the destination type, if the two have to agree
+
+<blocks>/clientbench/prov/250f9af5229a545eec28ddbd3e8774a397cdb0bb/src/signal/session/SignalProtocol.ts:467:51 - advice SC6004: this flow COPIES the record into a different shape, and the copy ends the member 'prevSessions'
+
+  466 |                   prevSessions: [
+  467 |                       encodeSignalSessionSnapshot(currentSession),
+      |                                                   ^~~~~~~~~~~~~~
+  468 |                       ...currentSession.prevSessions.slice(0, MAX_PREV_SESSIONS - 1)
+
+  hint: TypeScript's width subtyping is a relabel — the callee gets the very object the caller still names — but scriptc records are monomorphic structs, so a flow between two shapes compiles to a field-by-field COPY and the program then holds two objects where JavaScript has one. A write through either name is invisible to the other, and any member the destination shape does not name is not on the copy at all. Keep the value at its own type, or name the members you need on the destination type, if the two have to agree
+
+<blocks>/clientbench/prov/250f9af5229a545eec28ddbd3e8774a397cdb0bb/src/signal/session/SignalRatchet.ts:243:53 - advice SC6004: this flow COPIES the record into a different shape, and the copy ends the member 'prevSessions'
+
+  242 |                     prevSessions: [
+  243 |                         encodeSignalSessionSnapshot(session),
+      |                                                     ^~~~~~~
+  244 |                         ...session.prevSessions.slice(0, i),
+
+  hint: TypeScript's width subtyping is a relabel — the callee gets the very object the caller still names — but scriptc records are monomorphic structs, so a flow between two shapes compiles to a field-by-field COPY and the program then holds two objects where JavaScript has one. A write through either name is invisible to the other, and any member the destination shape does not name is not on the copy at all. Keep the value at its own type, or name the members you need on the destination type, if the two have to agree
+
+<blocks>/clientbench/prov/250f9af5229a545eec28ddbd3e8774a397cdb0bb/src/signal/session/SignalSession.ts:50:87 - advice SC6004: this flow COPIES the record into a different shape, and the copy ends the member 'prevSessions'
+
+  49 |         const decoded = decodeSignalSessionSnapshot(rawPrev, `prevSessions[${index}]`)
+  50 |         const prevSessions: RawSignalSessionSnapshot[] = [encodeSignalSessionSnapshot(session)]
+     |                                                                                       ^~~~~~~
+  51 |         for (let i = 0; i < session.prevSessions.length; i += 1) {
+
+  hint: TypeScript's width subtyping is a relabel — the callee gets the very object the caller still names — but scriptc records are monomorphic structs, so a flow between two shapes compiles to a field-by-field COPY and the program then holds two objects where JavaScript has one. A write through either name is invisible to the other, and any member the destination shape does not name is not on the copy at all. Keep the value at its own type, or name the members you need on the destination type, if the two have to agree
+
+<blocks>/clientbench/prov/250f9af5229a545eec28ddbd3e8774a397cdb0bb/src/store/locks/appstate.lock.ts:12:26 - advice SC6004: this flow COPIES the record into a different shape, and the copy ends the members 'clear', 'exportData', 'getActiveSyncKey', 'getCollectionState', 'getCollectionStates', 'getSyncKeyData', 'getSyncKeyDataBatch', 'getSyncKeysBatch', 'setCollectionStates', 'upsertSyncKeys'
+
+  11 |     const gate = new SharedExclusiveGate()
+  12 |     const destroyStore = store as { destroy?: () => Promise<void> }
+     |                          ^~~~~
+  13 |     return {
+
+  hint: TypeScript's width subtyping is a relabel — the callee gets the very object the caller still names — but scriptc records are monomorphic structs, so a flow between two shapes compiles to a field-by-field COPY and the program then holds two objects where JavaScript has one. A write through either name is invisible to the other, and any member the destination shape does not name is not on the copy at all. Keep the value at its own type, or name the members you need on the destination type, if the two have to agree
+
+<blocks>/clientbench/prov/250f9af5229a545eec28ddbd3e8774a397cdb0bb/src/store/locks/auth.lock.ts:9:26 - advice SC6004: this flow COPIES the record into a different shape, and the copy ends the members 'clear', 'load', 'save'
+
+   8 |     const lock = new StoreLock()
+   9 |     const destroyStore = store as { destroy?: () => Promise<void> }
+     |                          ^~~~~
+  10 |     return {
+
+  hint: TypeScript's width subtyping is a relabel — the callee gets the very object the caller still names — but scriptc records are monomorphic structs, so a flow between two shapes compiles to a field-by-field COPY and the program then holds two objects where JavaScript has one. A write through either name is invisible to the other, and any member the destination shape does not name is not on the copy at all. Keep the value at its own type, or name the members you need on the destination type, if the two have to agree
+
+<blocks>/clientbench/prov/250f9af5229a545eec28ddbd3e8774a397cdb0bb/src/store/locks/contact.lock.ts:11:26 - advice SC6004: this flow COPIES the record into a different shape, and the copy ends the members 'clear', 'deleteByJid', 'getByJid', 'getByPhoneNumber', 'upsert', 'upsertBatch'
+
+  10 |     const gate = new SharedExclusiveGate()
+  11 |     const destroyStore = store as { destroy?: () => Promise<void> }
+     |                          ^~~~~
+  12 |     return {
+
+  hint: TypeScript's width subtyping is a relabel — the callee gets the very object the caller still names — but scriptc records are monomorphic structs, so a flow between two shapes compiles to a field-by-field COPY and the program then holds two objects where JavaScript has one. A write through either name is invisible to the other, and any member the destination shape does not name is not on the copy at all. Keep the value at its own type, or name the members you need on the destination type, if the two have to agree
+
+<blocks>/clientbench/prov/250f9af5229a545eec28ddbd3e8774a397cdb0bb/src/store/locks/identity.lock.ts:7:26 - advice SC6004: this flow COPIES the record into a different shape, and the copy ends the members 'clear', 'getRemoteIdentities', 'getRemoteIdentity', 'setRemoteIdentities', 'setRemoteIdentity'
+
+  6 |     const gate = new SharedExclusiveGate()
+  7 |     const destroyStore = store as { destroy?: () => Promise<void> }
+    |                          ^~~~~
+  8 |     return {
+
+  hint: TypeScript's width subtyping is a relabel — the callee gets the very object the caller still names — but scriptc records are monomorphic structs, so a flow between two shapes compiles to a field-by-field COPY and the program then holds two objects where JavaScript has one. A write through either name is invisible to the other, and any member the destination shape does not name is not on the copy at all. Keep the value at its own type, or name the members you need on the destination type, if the two have to agree
+
+<blocks>/clientbench/prov/250f9af5229a545eec28ddbd3e8774a397cdb0bb/src/store/locks/message-secret.lock.ts:9:26 - advice SC6004: this flow COPIES the record into a different shape, and the copy ends the members 'cleanupExpired', 'clear', 'get', 'getBatch', 'set', 'setBatch'
+
+   8 |     const gate = new SharedExclusiveGate()
+   9 |     const destroyStore = store as { destroy?: () => Promise<void> }
+     |                          ^~~~~
+  10 |     return {
+
+  hint: TypeScript's width subtyping is a relabel — the callee gets the very object the caller still names — but scriptc records are monomorphic structs, so a flow between two shapes compiles to a field-by-field COPY and the program then holds two objects where JavaScript has one. A write through either name is invisible to the other, and any member the destination shape does not name is not on the copy at all. Keep the value at its own type, or name the members you need on the destination type, if the two have to agree
+
+<blocks>/clientbench/prov/250f9af5229a545eec28ddbd3e8774a397cdb0bb/src/store/locks/pre-key.lock.ts:16:26 - advice SC6004: this flow COPIES the record into a different shape, and the copy ends the members 'clear', 'consumePreKeyById', 'getOrGenPreKeys', 'getOrGenSinglePreKey', 'getPreKeyById', 'getPreKeysById', 'getServerHasPreKeys', 'markKeyAsUploaded', 'putPreKey', 'setServerHasPreKeys'
+
+  15 |     const gate = new SharedExclusiveGate()
+  16 |     const destroyStore = store as { destroy?: () => Promise<void> }
+     |                          ^~~~~
+  17 |     return {
+
+  hint: TypeScript's width subtyping is a relabel — the callee gets the very object the caller still names — but scriptc records are monomorphic structs, so a flow between two shapes compiles to a field-by-field COPY and the program then holds two objects where JavaScript has one. A write through either name is invisible to the other, and any member the destination shape does not name is not on the copy at all. Keep the value at its own type, or name the members you need on the destination type, if the two have to agree
+
+<blocks>/clientbench/prov/250f9af5229a545eec28ddbd3e8774a397cdb0bb/src/store/locks/sender-key.lock.ts:25:26 - advice SC6004: this flow COPIES the record into a different shape, and the copy ends the members 'clear', 'deleteDeviceSenderKey', 'getDeviceSenderKey', 'getDeviceSenderKeyDistributions', 'getGroupSenderKeyList', 'markForgetSenderKey', 'upsertSenderKey', 'upsertSenderKeyDistribution', 'upsertSenderKeyDistributions'
+
+  24 |     const gate = new SharedExclusiveGate()
+  25 |     const destroyStore = store as { destroy?: () => Promise<void> }
+     |                          ^~~~~
+  26 |     return {
+
+  hint: TypeScript's width subtyping is a relabel — the callee gets the very object the caller still names — but scriptc records are monomorphic structs, so a flow between two shapes compiles to a field-by-field COPY and the program then holds two objects where JavaScript has one. A write through either name is invisible to the other, and any member the destination shape does not name is not on the copy at all. Keep the value at its own type, or name the members you need on the destination type, if the two have to agree
+
+<blocks>/clientbench/prov/250f9af5229a545eec28ddbd3e8774a397cdb0bb/src/store/locks/session.lock.ts:7:26 - advice SC6004: this flow COPIES the record into a different shape, and the copy ends the members 'clear', 'deleteSession', 'getSession', 'getSessionsBatch', 'hasSession', 'hasSessions', 'setSession', 'setSessionsBatch'
+
+  6 |     const gate = new SharedExclusiveGate()
+  7 |     const destroyStore = store as { destroy?: () => Promise<void> }
+    |                          ^~~~~
+  8 |     return {
+
+  hint: TypeScript's width subtyping is a relabel — the callee gets the very object the caller still names — but scriptc records are monomorphic structs, so a flow between two shapes compiles to a field-by-field COPY and the program then holds two objects where JavaScript has one. A write through either name is invisible to the other, and any member the destination shape does not name is not on the copy at all. Keep the value at its own type, or name the members you need on the destination type, if the two have to agree
+
+<blocks>/clientbench/prov/250f9af5229a545eec28ddbd3e8774a397cdb0bb/src/store/locks/signal.lock.ts:14:26 - advice SC6004: this flow COPIES the record into a different shape, and the copy ends the members 'clear', 'getRegistrationInfo', 'getSignedPreKey', 'getSignedPreKeyById', 'getSignedPreKeyRotationTs', 'setRegistrationInfo', 'setSignedPreKey', 'setSignedPreKeyRotationTs'
+
+  13 |     const gate = new SharedExclusiveGate()
+  14 |     const destroyStore = store as { destroy?: () => Promise<void> }
+     |                          ^~~~~
+  15 |     let cachedRegInfo: RegistrationInfo | null | undefined
+
+  hint: TypeScript's width subtyping is a relabel — the callee gets the very object the caller still names — but scriptc records are monomorphic structs, so a flow between two shapes compiles to a field-by-field COPY and the program then holds two objects where JavaScript has one. A write through either name is invisible to the other, and any member the destination shape does not name is not on the copy at all. Keep the value at its own type, or name the members you need on the destination type, if the two have to agree
+
+<blocks>/clientbench/prov/250f9af5229a545eec28ddbd3e8774a397cdb0bb/src/store/locks/thread.lock.ts:11:26 - advice SC6004: this flow COPIES the record into a different shape, and the copy ends the members 'clear', 'deleteByJid', 'getByJid', 'list', 'upsert', 'upsertBatch'
+
+  10 |     const gate = new SharedExclusiveGate()
+  11 |     const destroyStore = store as { destroy?: () => Promise<void> }
+     |                          ^~~~~
+  12 |     return {
+
+  hint: TypeScript's width subtyping is a relabel — the callee gets the very object the caller still names — but scriptc records are monomorphic structs, so a flow between two shapes compiles to a field-by-field COPY and the program then holds two objects where JavaScript has one. A write through either name is invisible to the other, and any member the destination shape does not name is not on the copy at all. Keep the value at its own type, or name the members you need on the destination type, if the two have to agree
+
+<blocks>/clientbench/prov/250f9af5229a545eec28ddbd3e8774a397cdb0bb/src/store/memory/device-list.store.ts:147:16 - advice SC6004: this flow COPIES the record into a different shape ('{ altUserJid: string | undefined; deviceJids: string[]; expiresAtMs: number; updatedAtMs: number; userJid: string }' into '{ altUserJid: string | undefined; deviceJids: string[]; updatedAtMs: number; userJid: string }'), and the copy ends the member 'expiresAtMs'
+
+  146 |         }
+  147 |         return record
+      |                ^~~~~~
+  148 |     }
+
+  hint: TypeScript's width subtyping is a relabel — the callee gets the very object the caller still names — but scriptc records are monomorphic structs, so a flow between two shapes compiles to a field-by-field COPY and the program then holds two objects where JavaScript has one. A write through either name is invisible to the other, and any member the destination shape does not name is not on the copy at all. Keep the value at its own type, or name the members you need on the destination type, if the two have to agree
+
+<blocks>/clientbench/prov/250f9af5229a545eec28ddbd3e8774a397cdb0bb/src/store/memory/group-metadata.store.ts:91:16 - advice SC6004: this flow COPIES the record into a different shape ('{ ephemeral: number | undefined; expiresAtMs: number; groupJid: string; participants: string[]; updatedAtMs: number }' into '{ ephemeral: number | undefined; groupJid: string; participants: string[]; updatedAtMs: number }'), and the copy ends the member 'expiresAtMs'
+
+  90 |         }
+  91 |         return record
+     |                ^~~~~~
+  92 |     }
+
+  hint: TypeScript's width subtyping is a relabel — the callee gets the very object the caller still names — but scriptc records are monomorphic structs, so a flow between two shapes compiles to a field-by-field COPY and the program then holds two objects where JavaScript has one. A write through either name is invisible to the other, and any member the destination shape does not name is not on the copy at all. Keep the value at its own type, or name the members you need on the destination type, if the two have to agree
+
+<blocks>/clientbench/prov/250f9af5229a545eec28ddbd3e8774a397cdb0bb/src/transport/node/builders/message.ts:197:37 - advice SC6004: this flow COPIES the record into a different shape, and the copy ends the members 'botParticipants', 'customNodes', 'decryptFail', 'deviceIdentity', 'mediatype', 'participants'
+
+  196 | 
+  197 |     const attrs = buildMessageAttrs(input)
+      |                                     ^~~~~
+  198 |     const content: BinaryNode[] = [
+
+  hint: TypeScript's width subtyping is a relabel — the callee gets the very object the caller still names — but scriptc records are monomorphic structs, so a flow between two shapes compiles to a field-by-field COPY and the program then holds two objects where JavaScript has one. A write through either name is invisible to the other, and any member the destination shape does not name is not on the copy at all. Keep the value at its own type, or name the members you need on the destination type, if the two have to agree
+
+<blocks>/clientbench/prov/250f9af5229a545eec28ddbd3e8774a397cdb0bb/src/transport/node/builders/message.ts:207:32 - advice SC6004: this flow COPIES the record into a different shape, and the copy ends the members 'additionalAttributes', 'addressingMode', 'decryptFail', 'edit', 'id', 'participants', 'peerRecipientPn', 'phash', 'to', 'type'
+
+  206 |     ]
+  207 |     pushOptionalNodes(content, input)
+      |                                ^~~~~
+  208 | 
+
+  hint: TypeScript's width subtyping is a relabel — the callee gets the very object the caller still names — but scriptc records are monomorphic structs, so a flow between two shapes compiles to a field-by-field COPY and the program then holds two objects where JavaScript has one. A write through either name is invisible to the other, and any member the destination shape does not name is not on the copy at all. Keep the value at its own type, or name the members you need on the destination type, if the two have to agree
+
+<blocks>/clientbench/prov/250f9af5229a545eec28ddbd3e8774a397cdb0bb/src/transport/node/builders/message.ts:217:37 - advice SC6004: this flow COPIES the record into a different shape, and the copy ends the members 'botParticipants', 'customNodes', 'decryptFail', 'deviceIdentity', 'groupCiphertext', 'mediatype', 'participants'
+
+  216 | export function buildGroupSenderKeyMessageNode(input: GroupSenderKeyMessageInput): BinaryNode {
+  217 |     const attrs = buildMessageAttrs(input)
+      |                                     ^~~~~
+  218 |     const content: BinaryNode[] = []
+
+  hint: TypeScript's width subtyping is a relabel — the callee gets the very object the caller still names — but scriptc records are monomorphic structs, so a flow between two shapes compiles to a field-by-field COPY and the program then holds two objects where JavaScript has one. A write through either name is invisible to the other, and any member the destination shape does not name is not on the copy at all. Keep the value at its own type, or name the members you need on the destination type, if the two have to agree
+
+<blocks>/clientbench/prov/250f9af5229a545eec28ddbd3e8774a397cdb0bb/src/transport/node/builders/message.ts:234:32 - advice SC6004: this flow COPIES the record into a different shape, and the copy ends the members 'additionalAttributes', 'addressingMode', 'decryptFail', 'edit', 'groupCiphertext', 'id', 'participants', 'peerRecipientPn', 'phash', 'to', 'type'
+
+  233 |     })
+  234 |     pushOptionalNodes(content, input)
+      |                                ^~~~~
+  235 | 
+
+  hint: TypeScript's width subtyping is a relabel — the callee gets the very object the caller still names — but scriptc records are monomorphic structs, so a flow between two shapes compiles to a field-by-field COPY and the program then holds two objects where JavaScript has one. A write through either name is invisible to the other, and any member the destination shape does not name is not on the copy at all. Keep the value at its own type, or name the members you need on the destination type, if the two have to agree
+
+<blocks>/clientbench/prov/250f9af5229a545eec28ddbd3e8774a397cdb0bb/src/transport/noise/WaClientPayload.ts:192:39 - advice SC6004: this flow COPIES the record into a different shape, and the copy ends the members 'device', 'lidDbMigrated', 'username'
+
+  191 |     }
+  192 |     const common = buildCommonPayload(config)
+      |                                       ^~~~~~
+  193 |     return proto.ClientPayload.encode({
+
+  hint: TypeScript's width subtyping is a relabel — the callee gets the very object the caller still names — but scriptc records are monomorphic structs, so a flow between two shapes compiles to a field-by-field COPY and the program then holds two objects where JavaScript has one. A write through either name is invisible to the other, and any member the destination shape does not name is not on the copy at all. Keep the value at its own type, or name the members you need on the destination type, if the two have to agree
+
+<blocks>/clientbench/prov/250f9af5229a545eec28ddbd3e8774a397cdb0bb/src/transport/noise/WaClientPayload.ts:213:39 - advice SC6004: this flow COPIES the record into a different shape, and the copy ends the members 'buildHash', 'deviceProps', 'registrationInfo', 'requireFullSync', 'signedPreKey'
+
+  212 |     const version = parseVersion(versionBase)
+  213 |     const common = buildCommonPayload(config, version)
+      |                                       ^~~~~~
+  214 |     const devicePairingData = {
+
+  hint: TypeScript's width subtyping is a relabel — the callee gets the very object the caller still names — but scriptc records are monomorphic structs, so a flow between two shapes compiles to a field-by-field COPY and the program then holds two objects where JavaScript has one. A write through either name is invisible to the other, and any member the destination shape does not name is not on the copy at all. Keep the value at its own type, or name the members you need on the destination type, if the two have to agree
+
+<blocks>/clientbench/prov/250f9af5229a545eec28ddbd3e8774a397cdb0bb/src/transport/noise/WaClientPayload.ts:216:76 - advice SC6004: this flow COPIES the record into a different shape, and the copy ends the members 'buildHash', 'deviceProps', 'passive', 'pull', 'registrationInfo', 'signedPreKey', 'userAgent', 'versionBase', 'webInfo'
+
+  215 |         buildHash: config.buildHash ?? md5Bytes(versionBase),
+  216 |         deviceProps: config.deviceProps ?? defaultDeviceProps(versionBase, config, version),
+      |                                                                            ^~~~~~
+  217 |         eRegid: intToBytes(4, registrationId),
+
+  hint: TypeScript's width subtyping is a relabel — the callee gets the very object the caller still names — but scriptc records are monomorphic structs, so a flow between two shapes compiles to a field-by-field COPY and the program then holds two objects where JavaScript has one. A write through either name is invisible to the other, and any member the destination shape does not name is not on the copy at all. Keep the value at its own type, or name the members you need on the destination type, if the two have to agree
+
+62 advisories (the build succeeded).
+<blocks>\clientbench\lab\out\np-strict\messaging.bench.exe
+BUILD_EXIT=0
+BUILD_SECONDS=1433

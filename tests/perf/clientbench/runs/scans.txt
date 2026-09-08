@@ -1,0 +1,56 @@
+# harness/fences.mjs over out/np-strict/ (16 emitted files, 138,140,754 bytes)
+files seen by extension: .c=15 .exe=1 .pdb=1 .scrh=1
+TEXT fences (.c/.h/.scrh/.ll): 3786 occurrence(s) over 16 file(s)
+    SC9004  x3683
+    SC9002  x92
+    SC9003  x7
+    SC1090  x2
+    SC2020  x2
+BINARY fences (.exe/.o/.a): 18 occurrence(s) over 1 file(s)
+    SC2020  x6
+    SC9003  x6
+    SC9004  x3
+    SC9002  x2
+    SC1090  x1
+
+# positive control: the 2026-08-26 --best-effort C of the same bench
+files seen by extension: .c=1
+TEXT fences (.c/.h/.scrh/.ll): 2107 occurrence(s) over 1 file(s)
+    SC9004  x1908
+    SC9002  x86
+    SC1090  x80
+    SC2020  x12
+    SC2004  x8
+    SC9003  x7
+    SC2012  x4
+    SC2011  x2
+BINARY fences (.exe/.o/.a): n/a (0 files of that kind were present — nothing to count)
+
+# harness/engine.mjs
+out/np-strict/messaging.bench.exe  28344832 bytes
+  quickjs 0   ScrDyn 0   JS_NewRuntime 0   JS_Eval 0   __island_eval 0
+  discriminating: quickjs/ScrDyn — the other three read 0 even under --dynamic
+out/ctrl-dyn/ctrl.exe  1860096 bytes
+  quickjs 1   ScrDyn 1   JS_NewRuntime 0   JS_Eval 0   __island_eval 0
+  discriminating: quickjs/ScrDyn — the other three read 0 even under --dynamic
+out/ctrl-static/ctrl.exe  679936 bytes
+  quickjs 0   ScrDyn 0   JS_NewRuntime 0   JS_Eval 0   __island_eval 0
+  discriminating: quickjs/ScrDyn — the other three read 0 even under --dynamic
+# harness/fences.mjs over out/np-llvm/ — the .ll interns identical strings, so it counts DISTINCT MESSAGES where the C counts SITES
+files seen by extension: .exe=1 .ll=1 .pdb=1
+TEXT fences (.c/.h/.scrh/.ll): 6 occurrence(s) over 1 file(s)
+    SC2020  x2
+    SC9002  x1
+    SC9004  x1
+    SC1090  x1
+    SC9003  x1
+BINARY fences (.exe/.o/.a): 10 occurrence(s) over 1 file(s)
+    SC2020  x6
+    SC9002  x1
+    SC9004  x1
+    SC1090  x1
+    SC9003  x1
+
+out/np-llvm/messaging.bench.exe  27048960 bytes
+  quickjs 0   ScrDyn 0   JS_NewRuntime 0   JS_Eval 0   __island_eval 0
+  discriminating: quickjs/ScrDyn — the other three read 0 even under --dynamic

@@ -1,0 +1,32 @@
+provenance: zapo-js@1.6.2 ← https://github.com/vinikjkkj/zapo@refs/tags/v1.6.2 @ 250f9af5229a (source compiles statically)
+provenance: @zapo-js/store-sqlite@1.0.2 ← https://github.com/vinikjkkj/zapo@refs/tags/v1.2.1 @ ff43c244ac7a (source compiles statically)
+provenance: @zapo-js/store-postgres@1.0.2 ← https://github.com/vinikjkkj/zapo@refs/tags/v1.2.1 @ ff43c244ac7a (source compiles statically)
+provenance: @zapo-js/store-mysql@1.0.2 ← https://github.com/vinikjkkj/zapo@refs/tags/v1.2.1 @ ff43c244ac7a (source compiles statically)
+provenance: @zapo-js/store-redis@1.1.0 ← https://github.com/vinikjkkj/zapo@refs/tags/v1.3.0 @ 1c2d85b6865b (source compiles statically)
+provenance: @zapo-js/store-mongo@1.0.2 ← https://github.com/vinikjkkj/zapo@refs/tags/v1.2.1 @ ff43c244ac7a (source compiles statically)
+provenance: mongodb@7.6.0 ← https://github.com/mongodb/node-mongodb-native@refs/heads/main @ 0fb2c132cf73 (source compiles statically)
+provenance: bson@7.3.2 ← https://github.com/mongodb/js-bson@refs/heads/main @ 9cd2e68c8d0c (source compiles statically)
+provenance: argo-codec@0.2.1: no provenance attestation published; island path used
+provenance: pg@8.23.0: no provenance attestation published; island path used
+provenance: mysql2@3.24.2: no source mapping for 'mysql2/promise' (published target: ./promise.js); island path used
+provenance: ioredis@6.0.0: no provenance attestation published; island path used
+provenance: mongodb-client-encryption: not installed under the entry's node_modules; island path used
+provenance: kerberos: not installed under the entry's node_modules; island path used
+provenance: @mongodb-js/zstd: not installed under the entry's node_modules; island path used
+provenance: @aws-sdk/credential-providers: not installed under the entry's node_modules; island path used
+provenance: gcp-metadata: skipped — provenance package limit (16) reached; island path used
+provenance: snappy: skipped — provenance package limit (16) reached; island path used
+provenance: socks: skipped — provenance package limit (16) reached; island path used
+provenance: mongodb-connection-string-url: skipped — provenance package limit (16) reached; island path used
+provenance: @mongodb-js/saslprep: skipped — provenance package limit (16) reached; island path used
+provenance: 36 alias key(s) are spelled by more than one mapped package with different targets ('zapo-js/store', 'zapo-js/signal', 'zapo-js/auth', 'zapo-js/appstate', 'zapo-js/retry', …); tsconfig "paths" is one table per program, so zapo-js's answer is used for all of them and @zapo-js/store-sqlite, @zapo-js/store-postgres, @zapo-js/store-mysql, @zapo-js/store-redis, @zapo-js/store-mongo compile against zapo-js's checkout for those specifiers
+<blocks>/clientbench/lab/app/tree/packages/fake-server/bench-clientonly/messaging.bench.ts:52:1 - error SC1010: the 'node:inspector/promises' module (it drives the V8 inspector protocol — debugger, profiler, heap access — and a compiled binary embeds no V8 engine to inspect) is not supported yet
+
+  51 | import { mkdir, writeFile } from 'node:fs/promises'
+  52 | import * as inspector from 'node:inspector/promises'
+     | ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  53 | import { resolve as resolvePath } from 'node:path'
+
+  hint: relative imports (./file, ../dir/file), package.json-mediated project imports (#alias via the imports field, self-name references via exports), installed npm packages (their code runs under --dynamic), and the built-in fs, fs/promises, path, os, url, crypto, zlib, child_process, net, http, tls, https, http2, dgram, dns, util, util/types, string_decoder, querystring, readline, events, stream, stream/promises, stream/consumers, buffer, assert, assert/strict, worker_threads, cluster, tty, async_hooks, timers, timers/promises, diagnostics_channel, perf_hooks, and module modules (bare or node:-prefixed) and node:test (node:-prefixed only, like in Node) are supported
+
+1 error.
