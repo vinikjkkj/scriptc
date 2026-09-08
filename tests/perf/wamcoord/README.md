@@ -61,7 +61,7 @@ compiles to **0 blocker sites** and a **running, byte-exact binary**.
    already supports; 11 are a representation decision that was declined with
    its cost written down. A site count cannot show that, and it changes what
    "voip is blocked on 45 things" means in a status table. The compiler-side
-   tail is **17 sites over 14 distinct messages**, and it is a tail: after the
+   tail is **17 sites over 16 distinct messages**, and it is a tail: after the
    two lowering fixes in sections 14 and 15 the largest remaining cause is two
    sites. Sections 15.5 and 16.
 
