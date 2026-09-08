@@ -1,0 +1,390 @@
+provenance: zapo-js@1.8.2 ← https://github.com/vinikjkkj/zapo@refs/tags/v1.8.2 @ 757a8071b819 (source compiles statically)
+provenance: argo-codec@0.2.1: no provenance attestation published; island path used
+provenance: @zapo-js/native: not installed under the entry's node_modules; island path used
+provenance: @zapo-js/voip@1.0.0: no provenance attestation published; island path used
+<blocks>/wamcoord-prov/757a8071b819699437b353865b17cacffe95e9fb/packages/voip/src/bytes.ts:94:30 - error SC2020: 'ArrayBufferLike.byteLength' is part of the standard library types but has no scriptc lowering yet
+
+  93 |         bytes.byteOffset === 0 &&
+  94 |         bytes.byteLength === bytes.buffer.byteLength &&
+     |                              ^~~~~~~~~~~~~~~~~~~~~~~
+  95 |         bytes.buffer instanceof ArrayBuffer
+
+  hint: the type checker sees the full standard library, but only the supported surface compiles (https://scriptc.dev/limitations)
+
+<blocks>/wamcoord-prov/757a8071b819699437b353865b17cacffe95e9fb/packages/voip/src/bytes.ts:99:12 - error SC1090: '.buffer' outside new DataView(x.buffer, ...) / Buffer.from(x.buffer, ...) (no free-standing ArrayBuffer value exists; subarray() answers an aliasing view directly) is not supported yet
+
+   98 |     }
+   99 |     return bytes.slice().buffer
+      |            ^~~~~~~~~~~~~~~~~~~~
+  100 | }
+
+<blocks>/wamcoord-prov/757a8071b819699437b353865b17cacffe95e9fb/packages/voip/src/call/call-state.ts:55:44 - error SC2020: 'new Date' is part of the standard library types but has no scriptc lowering yet
+
+  54 |         this.stateData = init.stateData
+  55 |         this.createdAt = init.createdAt ?? new Date()
+     |                                            ^~~~~~~~~~
+  56 |         this.groupJid = init.groupJid
+
+  hint: Date values have no representation — Date.now() and the composed new Date(ms?).toISOString() form compile
+
+<blocks>/wamcoord-prov/757a8071b819699437b353865b17cacffe95e9fb/packages/voip/src/call/call-state.ts:167:32 - error SC2020: 'new Date' is part of the standard library types but has no scriptc lowering yet
+
+  166 |                 s.state = CallState.Connecting
+  167 |                 s.acceptedAt = new Date()
+      |                                ^~~~~~~~~~
+  168 |                 break
+
+  hint: Date values have no representation — Date.now() and the composed new Date(ms?).toISOString() form compile
+
+<blocks>/wamcoord-prov/757a8071b819699437b353865b17cacffe95e9fb/packages/voip/src/call/call-state.ts:176:32 - error SC2020: 'new Date' is part of the standard library types but has no scriptc lowering yet
+
+  175 |                 s.state = CallState.Connecting
+  176 |                 s.acceptedAt = new Date()
+      |                                ^~~~~~~~~~
+  177 |                 break
+
+  hint: Date values have no representation — Date.now() and the composed new Date(ms?).toISOString() form compile
+
+<blocks>/wamcoord-prov/757a8071b819699437b353865b17cacffe95e9fb/packages/voip/src/call/call-state.ts:185:29 - error SC2020: 'new Date' is part of the standard library types but has no scriptc lowering yet
+
+  184 |                 s.state = CallState.Ended
+  185 |                 s.endedAt = new Date()
+      |                             ^~~~~~~~~~
+  186 |                 s.endReason = transition.reason
+
+  hint: Date values have no representation — Date.now() and the composed new Date(ms?).toISOString() form compile
+
+<blocks>/wamcoord-prov/757a8071b819699437b353865b17cacffe95e9fb/packages/voip/src/call/call-state.ts:195:29 - error SC2020: 'new Date' is part of the standard library types but has no scriptc lowering yet
+
+  194 |                 s.state = CallState.Ended
+  195 |                 s.endedAt = new Date()
+      |                             ^~~~~~~~~~
+  196 |                 s.endReason = transition.reason
+
+  hint: Date values have no representation — Date.now() and the composed new Date(ms?).toISOString() form compile
+
+<blocks>/wamcoord-prov/757a8071b819699437b353865b17cacffe95e9fb/packages/voip/src/call/call-state.ts:205:33 - error SC2020: 'new Date' is part of the standard library types but has no scriptc lowering yet
+
+  204 |                 s.state = CallState.Active
+  205 |                 s.connectedAt = new Date()
+      |                                 ^~~~~~~~~~
+  206 |                 s.videoOff = this.mediaType !== CallMediaType.Video
+
+  hint: Date values have no representation — Date.now() and the composed new Date(ms?).toISOString() form compile
+
+<blocks>/wamcoord-prov/757a8071b819699437b353865b17cacffe95e9fb/packages/voip/src/call/call-state.ts:215:63 - error SC2020: 'Date.getTime' is part of the standard library types but has no scriptc lowering yet
+
+  214 |                 if (s.state === CallState.Active && s.connectedAt) {
+  215 |                     s.durationSecs = Math.floor((Date.now() - s.connectedAt.getTime()) / 1000)
+      |                                                               ^~~~~~~~~~~~~~~~~~~~~
+  216 |                 } else if (s.state === CallState.OnHold && s.connectedAt) {
+
+  hint: the type checker sees the full standard library, but only the supported surface compiles (https://scriptc.dev/limitations)
+
+<blocks>/wamcoord-prov/757a8071b819699437b353865b17cacffe95e9fb/packages/voip/src/call/call-state.ts:217:63 - error SC2020: 'Date.getTime' is part of the standard library types but has no scriptc lowering yet
+
+  216 |                 } else if (s.state === CallState.OnHold && s.connectedAt) {
+  217 |                     s.durationSecs = Math.floor((Date.now() - s.connectedAt.getTime()) / 1000)
+      |                                                               ^~~~~~~~~~~~~~~~~~~~~
+  218 |                 }
+
+  hint: the type checker sees the full standard library, but only the supported surface compiles (https://scriptc.dev/limitations)
+
+<blocks>/wamcoord-prov/757a8071b819699437b353865b17cacffe95e9fb/packages/voip/src/call/call-state.ts:221:29 - error SC2020: 'new Date' is part of the standard library types but has no scriptc lowering yet
+
+  220 |                 s.state = CallState.Ended
+  221 |                 s.endedAt = new Date()
+      |                             ^~~~~~~~~~
+  222 |                 s.endReason = transition.reason
+
+  hint: Date values have no representation — Date.now() and the composed new Date(ms?).toISOString() form compile
+
+<blocks>/wamcoord-prov/757a8071b819699437b353865b17cacffe95e9fb/packages/voip/src/call/WaCallMediaSession.ts:978:16 - error SC2012: '.replace()' on strings runs in the embedded dynamic engine, which this build does not include
+
+  977 |         if (/:\d+@/.test(jid)) return jid
+  978 |         return jid.replace('@', ':0@')
+      |                ^~~~~~~~~~~~~~~~~~~~~~~
+  979 |     }
+
+  hint: build with --dynamic to run this call in the embedded engine (adds ~620KB to the binary); static builds never include it
+
+<blocks>/wamcoord-prov/757a8071b819699437b353865b17cacffe95e9fb/packages/voip/src/call/WaCallMediaSession.ts:1163:21 - error SC2001: values of type '(ep: RelayEndpoint) => "" | Uint8Array<ArrayBufferLike> | undefined' cannot be compiled yet (supported: number, string, boolean, arrays, Maps, Sets, RegExp, functions, classes, records, unions of those, and 'unknown')
+
+  1162 |         const relays = uniqueEndpoints
+  1163 |             .filter((ep) => ep.key && ep.rawToken)
+       |                     ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  1164 |             .map((ep) => ({
+
+<blocks>/wamcoord-prov/757a8071b819699437b353865b17cacffe95e9fb/packages/voip/src/crypto/primitives.ts:27:20 - error SC2020: 'createCipheriv with this algorithm' is part of the standard library types but has no scriptc lowering yet
+
+  26 | export function aesCtr128(key: Uint8Array, iv: Uint8Array, data: Uint8Array): Uint8Array {
+  27 |     const cipher = createCipheriv('aes-128-ctr', key, iv)
+     |                    ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  28 |     const output = toBytesView(cipher.update(data))
+
+  hint: aes-256-gcm, aes-256-cbc and aes-256-ctr are the lowered ciphers (the options argument has no lowering either)
+
+<blocks>/wamcoord-prov/757a8071b819699437b353865b17cacffe95e9fb/packages/voip/src/crypto/srtp.ts:83:74 - error SC2001: values of type 'bigint' cannot be compiled yet (supported: number, string, boolean, arrays, Maps, Sets, RegExp, functions, classes, records, unions of those, and 'unknown')
+
+  82 |         if (this.isReplayed(index)) {
+  83 |             throw new SrtpError('replay', `SRTP replay detected: index ${index}`)
+     |                                                                          ^~~~~
+  84 |         }
+
+<blocks>/wamcoord-prov/757a8071b819699437b353865b17cacffe95e9fb/packages/voip/src/relay/relay-ack.ts:36:38 - error SC2011: values of type 'any' run in the embedded dynamic engine, which this build does not include
+
+  35 |         if (child.tag === 'user' && Array.isArray(child.content)) {
+  36 |             for (const deviceNode of child.content) {
+     |                                      ^~~~~~~~~~~~~
+  37 |                 if (
+
+  hint: build with --dynamic to run 'any'-typed code in the embedded engine (adds ~620KB to the binary), or stay static with 'unknown' and a checked cast ('x as T')
+
+<blocks>/wamcoord-prov/757a8071b819699437b353865b17cacffe95e9fb/packages/voip/src/relay/relay-ack.ts:106:34 - error SC1090: string conversions of unions with object arms (narrow first: check a discriminant field, or compare with '!== undefined'/'!== null' for unit arms) are not supported yet
+
+  105 |                         ? bytesToBase64(rcNode.content)
+  106 |                         : String(rcNode.content)
+      |                                  ^~~~~~~~~~~~~~
+  107 |                 tokens.set(tokenId, tokenData)
+
+<blocks>/wamcoord-prov/757a8071b819699437b353865b17cacffe95e9fb/packages/voip/src/relay/relay-ack.ts:118:34 - error SC1090: string conversions of unions with object arms (narrow first: check a discriminant field, or compare with '!== undefined'/'!== null' for unit arms) are not supported yet
+
+  117 |                         ? bytesToBase64(rcNode.content)
+  118 |                         : String(rcNode.content)
+      |                                  ^~~~~~~~~~~~~~
+  119 |                 authTokens.set(authTokenId, authTokenData)
+
+<blocks>/wamcoord-prov/757a8071b819699437b353865b17cacffe95e9fb/packages/voip/src/relay/WaSctpRelay.ts:252:39 - error SC1090: reading 'getStats' from a value of type 'any' is not supported yet
+
+  251 |                     try {
+  252 |                         const stats = (pc as any).getStats?.()
+      |                                       ^~~~~~~~~~~~~~~~~~~~
+  253 |                         if (stats) {
+
+<blocks>/wamcoord-prov/757a8071b819699437b353865b17cacffe95e9fb/packages/voip/src/relay/WaSctpRelay.ts:253:29 - error SC2004: uses of 'stats' inherit the blocker on its declaration
+
+  252 |                         const stats = (pc as any).getStats?.()
+  253 |                         if (stats) {
+      |                             ^~~~~
+  254 |                             stats.forEach((report: any) => {
+
+  hint: the declaration of 'stats' did not compile — fix the diagnostic reported there and these sites clear with it
+
+<blocks>/wamcoord-prov/757a8071b819699437b353865b17cacffe95e9fb/packages/voip/src/relay/WaSctpRelay.ts:274:35 - error SC1090: reading 'connectionState' from a value of type 'any' is not supported yet
+
+  273 |             pc.onconnectionstatechange = () => {
+  274 |                 const connState = (pc as any).connectionState
+      |                                   ^~~~~~~~~~~~~~~~~~~~~~~~~~~
+  275 |                 this.logger.debug('peer connection state changed', {
+
+<blocks>/wamcoord-prov/757a8071b819699437b353865b17cacffe95e9fb/packages/voip/src/relay/WaSctpRelay.ts:277:28 - error SC2004: uses of 'connState' inherit the blocker on its declaration
+
+  276 |                     connectionId,
+  277 |                     state: connState
+      |                            ^~~~~~~~~
+  278 |                 })
+
+  hint: the declaration of 'connState' did not compile — fix the diagnostic reported there and these sites clear with it
+
+<blocks>/wamcoord-prov/757a8071b819699437b353865b17cacffe95e9fb/packages/voip/src/relay/WaSctpRelay.ts:279:21 - error SC2004: uses of 'connState' inherit the blocker on its declaration
+
+  278 |                 })
+  279 |                 if (connState === 'connected') {
+      |                     ^~~~~~~~~
+  280 |                     this.logger.debug('sctp dtls fully connected', { connectionId })
+
+  hint: the declaration of 'connState' did not compile — fix the diagnostic reported there and these sites clear with it
+
+<blocks>/wamcoord-prov/757a8071b819699437b353865b17cacffe95e9fb/packages/voip/src/relay/WaSctpRelay.ts:282:21 - error SC2004: uses of 'connState' inherit the blocker on its declaration
+
+  281 |                 }
+  282 |                 if (connState === 'failed') {
+      |                     ^~~~~~~~~
+  283 |                     this.logger.warn('sctp peer connection failed', { connectionId })
+
+  hint: the declaration of 'connState' did not compile — fix the diagnostic reported there and these sites clear with it
+
+<blocks>/wamcoord-prov/757a8071b819699437b353865b17cacffe95e9fb/packages/voip/src/relay/WaSctpRelay.ts:301:14 - error SC1090: assignment to non-variables are not supported yet
+
+  300 |             }
+  301 |             ;(pc as any).ondatachannel = (event: any) => {
+      |              ^~~~~~~~~~~~~~~~~~~~~~~~~
+  302 |                 const incomingChannel = event.channel as DataChannelClass
+
+<blocks>/wamcoord-prov/757a8071b819699437b353865b17cacffe95e9fb/packages/voip/src/relay/WaSctpRelay.ts:367:34 - error SC2020: 'MessageEvent' is typed by @types/node but has no scriptc lowering yet
+
+  366 | 
+  367 |             channel.onmessage = (event: MessageEvent) => {
+      |                                  ^~~~~
+  368 |                 const buffer = toBytesView(event.data as ArrayBuffer | ArrayBufferView)
+
+  hint: the type checker sees everything @types/node declares, but only the supported surface compiles (https://scriptc.dev/limitations)
+
+<blocks>/wamcoord-prov/757a8071b819699437b353865b17cacffe95e9fb/packages/voip/src/relay/WaSctpRelay.ts:424:22 - error SC2003: union types must match exactly: expected 'null | { close: () => void } | undefined', got 'null | RTCDataChannel' (a union re-tags into another union only when every arm of the source has an identical arm in the destination, or is a record/array that width-coerces into exactly one destination arm)
+
+  423 |         if (conn.connectionTimeout) clearTimeout(conn.connectionTimeout)
+  424 |         closeQuietly(conn.channel, this.logger)
+      |                      ^~~~~~~~~~~~
+  425 |         for (const ch of conn.incomingChannels) closeQuietly(ch, this.logger)
+
+  hint: narrow the value to a SINGLE arm first (a discriminant check, or '!== undefined'/'!== null' for unit arms); a plain arm value widens into any union that contains it, and a whole union widens into any union whose arms include the source's
+
+<blocks>/wamcoord-prov/757a8071b819699437b353865b17cacffe95e9fb/packages/voip/src/relay/WaSctpRelay.ts:425:62 - error SC2003: union types must match exactly: expected 'null | { close: () => void } | undefined', got 'RTCDataChannel' (a union re-tags into another union only when every arm of the source has an identical arm in the destination, or is a record/array that width-coerces into exactly one destination arm)
+
+  424 |         closeQuietly(conn.channel, this.logger)
+  425 |         for (const ch of conn.incomingChannels) closeQuietly(ch, this.logger)
+      |                                                              ^~
+  426 |         closeQuietly(conn.peerConnection, this.logger)
+
+  hint: narrow the value to a SINGLE arm first (a discriminant check, or '!== undefined'/'!== null' for unit arms); a plain arm value widens into any union that contains it, and a whole union widens into any union whose arms include the source's
+
+<blocks>/wamcoord-prov/757a8071b819699437b353865b17cacffe95e9fb/packages/voip/src/relay/WaSctpRelay.ts:426:22 - error SC2003: union types must match exactly: expected 'null | { close: () => void } | undefined', got 'null | RTCPeerConnection' (a union re-tags into another union only when every arm of the source has an identical arm in the destination, or is a record/array that width-coerces into exactly one destination arm)
+
+  425 |         for (const ch of conn.incomingChannels) closeQuietly(ch, this.logger)
+  426 |         closeQuietly(conn.peerConnection, this.logger)
+      |                      ^~~~~~~~~~~~~~~~~~~
+  427 |         closeQuietly(conn.udpSocket, this.logger)
+
+  hint: narrow the value to a SINGLE arm first (a discriminant check, or '!== undefined'/'!== null' for unit arms); a plain arm value widens into any union that contains it, and a whole union widens into any union whose arms include the source's
+
+<blocks>/wamcoord-prov/757a8071b819699437b353865b17cacffe95e9fb/packages/voip/src/relay/WaSctpRelay.ts:427:22 - error SC2003: union types must match exactly: expected 'null | { close: () => void } | undefined', got 'dgram.Socket | null' (a union re-tags into another union only when every arm of the source has an identical arm in the destination, or is a record/array that width-coerces into exactly one destination arm)
+
+  426 |         closeQuietly(conn.peerConnection, this.logger)
+  427 |         closeQuietly(conn.udpSocket, this.logger)
+      |                      ^~~~~~~~~~~~~~
+  428 | 
+
+  hint: narrow the value to a SINGLE arm first (a discriminant check, or '!== undefined'/'!== null' for unit arms); a plain arm value widens into any union that contains it, and a whole union widens into any union whose arms include the source's
+
+<blocks>/wamcoord-prov/757a8071b819699437b353865b17cacffe95e9fb/packages/voip/src/relay/WaSctpRelay.ts:441:47 - error SC2020: 'createSocket with a non-literal options argument' is part of the standard library types but has no scriptc lowering yet
+
+  440 |         try {
+  441 |             const socket = dgram.createSocket(isIPv6(relayInfo.ip) ? 'udp6' : 'udp4')
+      |                                               ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  442 |             conn.udpSocket = socket
+
+  hint: pass the options as an object literal: createSocket({ type: "udp4" })
+
+<blocks>/wamcoord-prov/757a8071b819699437b353865b17cacffe95e9fb/packages/voip/src/relay/WaSctpRelay.ts:583:35 - error SC1090: reading 'connectionState' from a value of type 'any' is not supported yet
+
+  582 |                 const iceState = pc?.iceConnectionState || 'unknown'
+  583 |                 const connState = (pc as any)?.connectionState || 'unknown'
+      |                                   ^~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  584 |                 let bufferedAmount: number | undefined
+
+<blocks>/wamcoord-prov/757a8071b819699437b353865b17cacffe95e9fb/packages/voip/src/relay/WaSctpRelay.ts:586:38 - error SC1090: reading 'bufferedAmount' from a value of type 'any' is not supported yet
+
+  585 |                 try {
+  586 |                     const buffered = (conn.channel as any)?.bufferedAmount
+      |                                      ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  587 |                     if (buffered !== undefined) {
+
+<blocks>/wamcoord-prov/757a8071b819699437b353865b17cacffe95e9fb/packages/voip/src/relay/WaSctpRelay.ts:587:25 - error SC2004: uses of 'buffered' inherit the blocker on its declaration
+
+  586 |                     const buffered = (conn.channel as any)?.bufferedAmount
+  587 |                     if (buffered !== undefined) {
+      |                         ^~~~~~~~
+  588 |                         bufferedAmount = buffered
+
+  hint: the declaration of 'buffered' did not compile — fix the diagnostic reported there and these sites clear with it
+
+<blocks>/wamcoord-prov/757a8071b819699437b353865b17cacffe95e9fb/packages/voip/src/relay/WaSctpRelay.ts:599:21 - error SC2004: uses of 'connState' inherit the blocker on its declaration
+
+  598 |                     iceState,
+  599 |                     connState,
+      |                     ^~~~~~~~~
+  600 |                     sentPackets: conn.stats.sentPackets,
+
+  hint: the declaration of 'connState' did not compile — fix the diagnostic reported there and these sites clear with it
+
+<blocks>/wamcoord-prov/757a8071b819699437b353865b17cacffe95e9fb/packages/voip/src/relay/WaSctpRelay.ts:636:62 - error SC2003: union types must match exactly: expected 'null | { close: () => void } | undefined', got 'RTCDataChannel' (a union re-tags into another union only when every arm of the source has an identical arm in the destination, or is a record/array that width-coerces into exactly one destination arm)
+
+  635 |         if (conn.connectionTimeout) clearTimeout(conn.connectionTimeout)
+  636 |         for (const ch of conn.incomingChannels) closeQuietly(ch, this.logger)
+      |                                                              ^~
+  637 |         closeQuietly(conn.peerConnection, this.logger)
+
+  hint: narrow the value to a SINGLE arm first (a discriminant check, or '!== undefined'/'!== null' for unit arms); a plain arm value widens into any union that contains it, and a whole union widens into any union whose arms include the source's
+
+<blocks>/wamcoord-prov/757a8071b819699437b353865b17cacffe95e9fb/packages/voip/src/relay/WaSctpRelay.ts:637:22 - error SC2003: union types must match exactly: expected 'null | { close: () => void } | undefined', got 'null | RTCPeerConnection' (a union re-tags into another union only when every arm of the source has an identical arm in the destination, or is a record/array that width-coerces into exactly one destination arm)
+
+  636 |         for (const ch of conn.incomingChannels) closeQuietly(ch, this.logger)
+  637 |         closeQuietly(conn.peerConnection, this.logger)
+      |                      ^~~~~~~~~~~~~~~~~~~
+  638 |         closeQuietly(conn.udpSocket, this.logger)
+
+  hint: narrow the value to a SINGLE arm first (a discriminant check, or '!== undefined'/'!== null' for unit arms); a plain arm value widens into any union that contains it, and a whole union widens into any union whose arms include the source's
+
+<blocks>/wamcoord-prov/757a8071b819699437b353865b17cacffe95e9fb/packages/voip/src/relay/WaSctpRelay.ts:638:22 - error SC2003: union types must match exactly: expected 'null | { close: () => void } | undefined', got 'dgram.Socket | null' (a union re-tags into another union only when every arm of the source has an identical arm in the destination, or is a record/array that width-coerces into exactly one destination arm)
+
+  637 |         closeQuietly(conn.peerConnection, this.logger)
+  638 |         closeQuietly(conn.udpSocket, this.logger)
+      |                      ^~~~~~~~~~~~~~
+  639 | 
+
+  hint: narrow the value to a SINGLE arm first (a discriminant check, or '!== undefined'/'!== null' for unit arms); a plain arm value widens into any union that contains it, and a whole union widens into any union whose arms include the source's
+
+<blocks>/wamcoord-prov/757a8071b819699437b353865b17cacffe95e9fb/packages/voip/src/relay/WaSctpRelay.ts:676:17 - error SC2020: 'Function.name' is part of the standard library types but has no scriptc lowering yet
+
+  675 |             let arrayBufferToSend: ArrayBuffer
+  676 |             if (data.constructor.name === 'SharedArrayBuffer') {
+      |                 ^~~~~~~~~~~~~~~~~~~~~
+  677 |                 const uint8 = new Uint8Array(data)
+
+  hint: the type checker sees the full standard library, but only the supported surface compiles (https://scriptc.dev/limitations)
+
+<blocks>/wamcoord-prov/757a8071b819699437b353865b17cacffe95e9fb/packages/voip/src/relay/WaSctpRelay.ts:684:31 - error SC2020: 'send of ArrayBuffer' is part of the standard library types but has no scriptc lowering yet
+
+  683 | 
+  684 |             conn.channel.send(arrayBufferToSend)
+      |                               ^~~~~~~~~~~~~~~~~
+  685 | 
+
+  hint: only a string and a Uint8Array/Buffer payload are served; an ArrayBuffer or a wider view has no lowering here
+
+<blocks>/wamcoord-prov/757a8071b819699437b353865b17cacffe95e9fb/packages/voip/src/relay/WaSctpRelay.ts:1004:26 - error SC2003: union types must match exactly: expected 'null | { close: () => void } | undefined', got 'null | RTCDataChannel' (a union re-tags into another union only when every arm of the source has an identical arm in the destination, or is a record/array that width-coerces into exactly one destination arm)
+
+  1003 |             if (conn.connectionTimeout) clearTimeout(conn.connectionTimeout)
+  1004 |             closeQuietly(conn.channel, this.logger)
+       |                          ^~~~~~~~~~~~
+  1005 |             for (const ch of conn.incomingChannels) closeQuietly(ch, this.logger)
+
+  hint: narrow the value to a SINGLE arm first (a discriminant check, or '!== undefined'/'!== null' for unit arms); a plain arm value widens into any union that contains it, and a whole union widens into any union whose arms include the source's
+
+<blocks>/wamcoord-prov/757a8071b819699437b353865b17cacffe95e9fb/packages/voip/src/relay/WaSctpRelay.ts:1005:66 - error SC2003: union types must match exactly: expected 'null | { close: () => void } | undefined', got 'RTCDataChannel' (a union re-tags into another union only when every arm of the source has an identical arm in the destination, or is a record/array that width-coerces into exactly one destination arm)
+
+  1004 |             closeQuietly(conn.channel, this.logger)
+  1005 |             for (const ch of conn.incomingChannels) closeQuietly(ch, this.logger)
+       |                                                                  ^~
+  1006 |             closeQuietly(conn.peerConnection, this.logger)
+
+  hint: narrow the value to a SINGLE arm first (a discriminant check, or '!== undefined'/'!== null' for unit arms); a plain arm value widens into any union that contains it, and a whole union widens into any union whose arms include the source's
+
+<blocks>/wamcoord-prov/757a8071b819699437b353865b17cacffe95e9fb/packages/voip/src/relay/WaSctpRelay.ts:1006:26 - error SC2003: union types must match exactly: expected 'null | { close: () => void } | undefined', got 'null | RTCPeerConnection' (a union re-tags into another union only when every arm of the source has an identical arm in the destination, or is a record/array that width-coerces into exactly one destination arm)
+
+  1005 |             for (const ch of conn.incomingChannels) closeQuietly(ch, this.logger)
+  1006 |             closeQuietly(conn.peerConnection, this.logger)
+       |                          ^~~~~~~~~~~~~~~~~~~
+  1007 |             closeQuietly(conn.udpSocket, this.logger)
+
+  hint: narrow the value to a SINGLE arm first (a discriminant check, or '!== undefined'/'!== null' for unit arms); a plain arm value widens into any union that contains it, and a whole union widens into any union whose arms include the source's
+
+<blocks>/wamcoord-prov/757a8071b819699437b353865b17cacffe95e9fb/packages/voip/src/relay/WaSctpRelay.ts:1007:26 - error SC2003: union types must match exactly: expected 'null | { close: () => void } | undefined', got 'dgram.Socket | null' (a union re-tags into another union only when every arm of the source has an identical arm in the destination, or is a record/array that width-coerces into exactly one destination arm)
+
+  1006 |             closeQuietly(conn.peerConnection, this.logger)
+  1007 |             closeQuietly(conn.udpSocket, this.logger)
+       |                          ^~~~~~~~~~~~~~
+  1008 |         }
+
+  hint: narrow the value to a SINGLE arm first (a discriminant check, or '!== undefined'/'!== null' for unit arms); a plain arm value widens into any union that contains it, and a whole union widens into any union whose arms include the source's
+
+<blocks>/wamcoord-prov/757a8071b819699437b353865b17cacffe95e9fb/packages/voip/src/WaVoipCoordinator.ts:224:47 - error SC2020: ''on' of 'call_inbound_audio' with a checked-dynamic listener' is part of the standard library types but has no scriptc lowering yet
+
+  223 |         })
+  224 |         this.manager.on('call_inbound_audio', (call, pcm) => {
+      |                                               ^~~~~~~~~~~~~~~~
+  225 |             ctx.emit('voip_call_inbound_audio', { call, pcm })
+
+  hint: the event's argument 1 is 'Float32Array', which cannot box into a dynamic value — annotate the listener's parameters with the emitted types
+
+45 errors.

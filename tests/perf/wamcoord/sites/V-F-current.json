@@ -1,0 +1,843 @@
+{
+ "entry": "<blocks>/wamcoord-lab/napp/pkgsrc/src-voip.ts",
+ "flags": [
+  "--provenance-sources"
+ ],
+ "elapsedMs": 1394691,
+ "crashed": null,
+ "preflightFailed": false,
+ "stats": {
+  "statementsTotal": 48988,
+  "statementsFailed": 46,
+  "statementsIsland": 0,
+  "functionsSkipped": 0
+ },
+ "unreachedStats": {
+  "statementsTotal": 2737,
+  "statementsFailed": 16,
+  "statementsIsland": 0,
+  "functionsSkipped": 0
+ },
+ "npmStatic": null,
+ "provenanceNotes": [
+  "zapo-js@1.8.2 <- 757a8071b819",
+  "note: @zapo-js/native: not installed under the entry's node_modules; island path used",
+  "note: argo-codec@0.2.1: no provenance attestation published; island path used",
+  "note: libmlow-wasm@0.1.1: no provenance attestation published; island path used",
+  "note: @roamhq/wrtc@0.10.0: no provenance attestation published; island path used"
+ ],
+ "sites": [
+  {
+   "section": "blocker",
+   "code": "SC2020",
+   "message": "'ArrayBufferLike.byteLength' is part of the standard library types but has no scriptc lowering yet",
+   "file": "<blocks>/wamcoord-lab/napp/pkgsrc/voip/bytes.ts",
+   "line": 94
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "'.buffer' outside new DataView(x.buffer, ...) / Buffer.from(x.buffer, ...) (no free-standing ArrayBuffer value exists; subarray() answers an aliasing view directly) is not supported yet",
+   "file": "<blocks>/wamcoord-lab/napp/pkgsrc/voip/bytes.ts",
+   "line": 99
+  },
+  {
+   "section": "blocker",
+   "code": "SC2020",
+   "message": "'createCipheriv with this algorithm' is part of the standard library types but has no scriptc lowering yet",
+   "file": "<blocks>/wamcoord-lab/napp/pkgsrc/voip/crypto/primitives.ts",
+   "line": 27
+  },
+  {
+   "section": "blocker",
+   "code": "SC2011",
+   "message": "values of type 'any' run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/wamcoord-lab/napp/pkgsrc/voip/relay/relay-ack.ts",
+   "line": 36
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "string conversions of unions with object arms (narrow first: check a discriminant field, or compare with '!== undefined'/'!== null' for unit arms) are not supported yet",
+   "file": "<blocks>/wamcoord-lab/napp/pkgsrc/voip/relay/relay-ack.ts",
+   "line": 106
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "string conversions of unions with object arms (narrow first: check a discriminant field, or compare with '!== undefined'/'!== null' for unit arms) are not supported yet",
+   "file": "<blocks>/wamcoord-lab/napp/pkgsrc/voip/relay/relay-ack.ts",
+   "line": 118
+  },
+  {
+   "section": "blocker",
+   "code": "SC2020",
+   "message": "'new Date' is part of the standard library types but has no scriptc lowering yet",
+   "file": "<blocks>/wamcoord-lab/napp/pkgsrc/voip/call/call-state.ts",
+   "line": 55
+  },
+  {
+   "section": "blocker",
+   "code": "SC2020",
+   "message": "'new Date' is part of the standard library types but has no scriptc lowering yet",
+   "file": "<blocks>/wamcoord-lab/napp/pkgsrc/voip/call/call-state.ts",
+   "line": 167
+  },
+  {
+   "section": "blocker",
+   "code": "SC2020",
+   "message": "'new Date' is part of the standard library types but has no scriptc lowering yet",
+   "file": "<blocks>/wamcoord-lab/napp/pkgsrc/voip/call/call-state.ts",
+   "line": 176
+  },
+  {
+   "section": "blocker",
+   "code": "SC2020",
+   "message": "'new Date' is part of the standard library types but has no scriptc lowering yet",
+   "file": "<blocks>/wamcoord-lab/napp/pkgsrc/voip/call/call-state.ts",
+   "line": 185
+  },
+  {
+   "section": "blocker",
+   "code": "SC2020",
+   "message": "'new Date' is part of the standard library types but has no scriptc lowering yet",
+   "file": "<blocks>/wamcoord-lab/napp/pkgsrc/voip/call/call-state.ts",
+   "line": 195
+  },
+  {
+   "section": "blocker",
+   "code": "SC2020",
+   "message": "'new Date' is part of the standard library types but has no scriptc lowering yet",
+   "file": "<blocks>/wamcoord-lab/napp/pkgsrc/voip/call/call-state.ts",
+   "line": 205
+  },
+  {
+   "section": "blocker",
+   "code": "SC2020",
+   "message": "'Date.getTime' is part of the standard library types but has no scriptc lowering yet",
+   "file": "<blocks>/wamcoord-lab/napp/pkgsrc/voip/call/call-state.ts",
+   "line": 215
+  },
+  {
+   "section": "blocker",
+   "code": "SC2020",
+   "message": "'Date.getTime' is part of the standard library types but has no scriptc lowering yet",
+   "file": "<blocks>/wamcoord-lab/napp/pkgsrc/voip/call/call-state.ts",
+   "line": 217
+  },
+  {
+   "section": "blocker",
+   "code": "SC2020",
+   "message": "'new Date' is part of the standard library types but has no scriptc lowering yet",
+   "file": "<blocks>/wamcoord-lab/napp/pkgsrc/voip/call/call-state.ts",
+   "line": 221
+  },
+  {
+   "section": "blocker",
+   "code": "SC2001",
+   "message": "values of type 'bigint' cannot be compiled yet (supported: number, string, boolean, arrays, Maps, Sets, RegExp, functions, classes, records, unions of those, and 'unknown')",
+   "file": "<blocks>/wamcoord-lab/napp/pkgsrc/voip/crypto/srtp.ts",
+   "line": 83
+  },
+  {
+   "section": "blocker",
+   "code": "SC2020",
+   "message": "'Promise<typeof import(\"<blocks>/wamcoord-lab/napp/node_modules/libmlow-wasm/dist/index\")>.then' is part of the standard library types but has no scriptc lowering yet",
+   "file": "<blocks>/wamcoord-lab/napp/pkgsrc/voip/media/mlow-codec.ts",
+   "line": 30
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "reading 'getStats' from a value of type 'any' is not supported yet",
+   "file": "<blocks>/wamcoord-lab/napp/pkgsrc/voip/relay/WaSctpRelay.ts",
+   "line": 252
+  },
+  {
+   "section": "blocker",
+   "code": "SC2004",
+   "message": "uses of 'stats' inherit the blocker on its declaration",
+   "file": "<blocks>/wamcoord-lab/napp/pkgsrc/voip/relay/WaSctpRelay.ts",
+   "line": 253
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "reading 'connectionState' from a value of type 'any' is not supported yet",
+   "file": "<blocks>/wamcoord-lab/napp/pkgsrc/voip/relay/WaSctpRelay.ts",
+   "line": 274
+  },
+  {
+   "section": "blocker",
+   "code": "SC2004",
+   "message": "uses of 'connState' inherit the blocker on its declaration",
+   "file": "<blocks>/wamcoord-lab/napp/pkgsrc/voip/relay/WaSctpRelay.ts",
+   "line": 277
+  },
+  {
+   "section": "blocker",
+   "code": "SC2004",
+   "message": "uses of 'connState' inherit the blocker on its declaration",
+   "file": "<blocks>/wamcoord-lab/napp/pkgsrc/voip/relay/WaSctpRelay.ts",
+   "line": 279
+  },
+  {
+   "section": "blocker",
+   "code": "SC2004",
+   "message": "uses of 'connState' inherit the blocker on its declaration",
+   "file": "<blocks>/wamcoord-lab/napp/pkgsrc/voip/relay/WaSctpRelay.ts",
+   "line": 282
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "assignment to non-variables are not supported yet",
+   "file": "<blocks>/wamcoord-lab/napp/pkgsrc/voip/relay/WaSctpRelay.ts",
+   "line": 301
+  },
+  {
+   "section": "blocker",
+   "code": "SC2020",
+   "message": "'MessageEvent' is typed by @types/node but has no scriptc lowering yet",
+   "file": "<blocks>/wamcoord-lab/napp/pkgsrc/voip/relay/WaSctpRelay.ts",
+   "line": 367
+  },
+  {
+   "section": "blocker",
+   "code": "SC2003",
+   "message": "union types must match exactly: expected 'null | { close: () => void } | undefined', got 'null | RTCDataChannel' (a union re-tags into another union only when every arm of the source has an identical arm in the destination, or is a record/array that width-coerces into exactly one destination arm)",
+   "file": "<blocks>/wamcoord-lab/napp/pkgsrc/voip/relay/WaSctpRelay.ts",
+   "line": 424
+  },
+  {
+   "section": "blocker",
+   "code": "SC2003",
+   "message": "union types must match exactly: expected 'null | { close: () => void } | undefined', got 'RTCDataChannel' (a union re-tags into another union only when every arm of the source has an identical arm in the destination, or is a record/array that width-coerces into exactly one destination arm)",
+   "file": "<blocks>/wamcoord-lab/napp/pkgsrc/voip/relay/WaSctpRelay.ts",
+   "line": 425
+  },
+  {
+   "section": "blocker",
+   "code": "SC2003",
+   "message": "union types must match exactly: expected 'null | { close: () => void } | undefined', got 'null | RTCPeerConnection' (a union re-tags into another union only when every arm of the source has an identical arm in the destination, or is a record/array that width-coerces into exactly one destination arm)",
+   "file": "<blocks>/wamcoord-lab/napp/pkgsrc/voip/relay/WaSctpRelay.ts",
+   "line": 426
+  },
+  {
+   "section": "blocker",
+   "code": "SC2003",
+   "message": "union types must match exactly: expected 'null | { close: () => void } | undefined', got 'dgram.Socket | null' (a union re-tags into another union only when every arm of the source has an identical arm in the destination, or is a record/array that width-coerces into exactly one destination arm)",
+   "file": "<blocks>/wamcoord-lab/napp/pkgsrc/voip/relay/WaSctpRelay.ts",
+   "line": 427
+  },
+  {
+   "section": "blocker",
+   "code": "SC2020",
+   "message": "'createSocket with a non-literal options argument' is part of the standard library types but has no scriptc lowering yet",
+   "file": "<blocks>/wamcoord-lab/napp/pkgsrc/voip/relay/WaSctpRelay.ts",
+   "line": 441
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "reading 'connectionState' from a value of type 'any' is not supported yet",
+   "file": "<blocks>/wamcoord-lab/napp/pkgsrc/voip/relay/WaSctpRelay.ts",
+   "line": 583
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "reading 'bufferedAmount' from a value of type 'any' is not supported yet",
+   "file": "<blocks>/wamcoord-lab/napp/pkgsrc/voip/relay/WaSctpRelay.ts",
+   "line": 586
+  },
+  {
+   "section": "blocker",
+   "code": "SC2004",
+   "message": "uses of 'buffered' inherit the blocker on its declaration",
+   "file": "<blocks>/wamcoord-lab/napp/pkgsrc/voip/relay/WaSctpRelay.ts",
+   "line": 587
+  },
+  {
+   "section": "blocker",
+   "code": "SC2004",
+   "message": "uses of 'connState' inherit the blocker on its declaration",
+   "file": "<blocks>/wamcoord-lab/napp/pkgsrc/voip/relay/WaSctpRelay.ts",
+   "line": 599
+  },
+  {
+   "section": "blocker",
+   "code": "SC2003",
+   "message": "union types must match exactly: expected 'null | { close: () => void } | undefined', got 'RTCDataChannel' (a union re-tags into another union only when every arm of the source has an identical arm in the destination, or is a record/array that width-coerces into exactly one destination arm)",
+   "file": "<blocks>/wamcoord-lab/napp/pkgsrc/voip/relay/WaSctpRelay.ts",
+   "line": 636
+  },
+  {
+   "section": "blocker",
+   "code": "SC2003",
+   "message": "union types must match exactly: expected 'null | { close: () => void } | undefined', got 'null | RTCPeerConnection' (a union re-tags into another union only when every arm of the source has an identical arm in the destination, or is a record/array that width-coerces into exactly one destination arm)",
+   "file": "<blocks>/wamcoord-lab/napp/pkgsrc/voip/relay/WaSctpRelay.ts",
+   "line": 637
+  },
+  {
+   "section": "blocker",
+   "code": "SC2003",
+   "message": "union types must match exactly: expected 'null | { close: () => void } | undefined', got 'dgram.Socket | null' (a union re-tags into another union only when every arm of the source has an identical arm in the destination, or is a record/array that width-coerces into exactly one destination arm)",
+   "file": "<blocks>/wamcoord-lab/napp/pkgsrc/voip/relay/WaSctpRelay.ts",
+   "line": 638
+  },
+  {
+   "section": "blocker",
+   "code": "SC2020",
+   "message": "'Function.name' is part of the standard library types but has no scriptc lowering yet",
+   "file": "<blocks>/wamcoord-lab/napp/pkgsrc/voip/relay/WaSctpRelay.ts",
+   "line": 676
+  },
+  {
+   "section": "blocker",
+   "code": "SC2020",
+   "message": "'send of ArrayBuffer' is part of the standard library types but has no scriptc lowering yet",
+   "file": "<blocks>/wamcoord-lab/napp/pkgsrc/voip/relay/WaSctpRelay.ts",
+   "line": 684
+  },
+  {
+   "section": "blocker",
+   "code": "SC2003",
+   "message": "union types must match exactly: expected 'null | { close: () => void } | undefined', got 'null | RTCDataChannel' (a union re-tags into another union only when every arm of the source has an identical arm in the destination, or is a record/array that width-coerces into exactly one destination arm)",
+   "file": "<blocks>/wamcoord-lab/napp/pkgsrc/voip/relay/WaSctpRelay.ts",
+   "line": 1004
+  },
+  {
+   "section": "blocker",
+   "code": "SC2003",
+   "message": "union types must match exactly: expected 'null | { close: () => void } | undefined', got 'RTCDataChannel' (a union re-tags into another union only when every arm of the source has an identical arm in the destination, or is a record/array that width-coerces into exactly one destination arm)",
+   "file": "<blocks>/wamcoord-lab/napp/pkgsrc/voip/relay/WaSctpRelay.ts",
+   "line": 1005
+  },
+  {
+   "section": "blocker",
+   "code": "SC2003",
+   "message": "union types must match exactly: expected 'null | { close: () => void } | undefined', got 'null | RTCPeerConnection' (a union re-tags into another union only when every arm of the source has an identical arm in the destination, or is a record/array that width-coerces into exactly one destination arm)",
+   "file": "<blocks>/wamcoord-lab/napp/pkgsrc/voip/relay/WaSctpRelay.ts",
+   "line": 1006
+  },
+  {
+   "section": "blocker",
+   "code": "SC2003",
+   "message": "union types must match exactly: expected 'null | { close: () => void } | undefined', got 'dgram.Socket | null' (a union re-tags into another union only when every arm of the source has an identical arm in the destination, or is a record/array that width-coerces into exactly one destination arm)",
+   "file": "<blocks>/wamcoord-lab/napp/pkgsrc/voip/relay/WaSctpRelay.ts",
+   "line": 1007
+  },
+  {
+   "section": "blocker",
+   "code": "SC2012",
+   "message": "'.replace()' on strings runs in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/wamcoord-lab/napp/pkgsrc/voip/call/WaCallMediaSession.ts",
+   "line": 978
+  },
+  {
+   "section": "blocker",
+   "code": "SC2001",
+   "message": "values of type '(ep: RelayEndpoint) => \"\" | Uint8Array<ArrayBufferLike> | undefined' cannot be compiled yet (supported: number, string, boolean, arrays, Maps, Sets, RegExp, functions, classes, records, unions of those, and 'unknown')",
+   "file": "<blocks>/wamcoord-lab/napp/pkgsrc/voip/call/WaCallMediaSession.ts",
+   "line": 1163
+  },
+  {
+   "section": "blocker",
+   "code": "SC2020",
+   "message": "''on' of 'call_inbound_audio' with a checked-dynamic listener' is part of the standard library types but has no scriptc lowering yet",
+   "file": "<blocks>/wamcoord-lab/napp/pkgsrc/voip/WaVoipCoordinator.ts",
+   "line": 224
+  },
+  {
+   "section": "runtimeFence",
+   "code": "SC2020",
+   "message": "'require() with a run-time specifier' is part of the standard library types but has no scriptc lowering yet",
+   "file": "<blocks>/wamcoord-prov/757a8071b819699437b353865b17cacffe95e9fb/spec/proto/index.js",
+   "line": 1
+  },
+  {
+   "section": "advisory",
+   "code": "SC6003",
+   "message": "this projection of '%m119.WaMobileTcpSocket' COPIES the field 'readyState', and a method of '%m119.WaMobileTcpSocket' writes it",
+   "file": "<blocks>/wamcoord-prov/757a8071b819699437b353865b17cacffe95e9fb/src/auth/credentials-flow.ts",
+   "line": 211
+  },
+  {
+   "section": "advisory",
+   "code": "SC6004",
+   "message": "this flow COPIES the record into a different shape ('{ high: number; low: number; toNumber: () => number; unsigned: boolean }' into '{ toNumber: () => number }'), and the copy ends the members 'high', 'low', 'unsigned'",
+   "file": "<blocks>/wamcoord-prov/757a8071b819699437b353865b17cacffe95e9fb/src/message/context-info.ts",
+   "line": 158
+  },
+  {
+   "section": "advisory",
+   "code": "SC6004",
+   "message": "this flow COPIES the record into a different shape, and the copy ends the member 'initSync'",
+   "file": "<blocks>/wamcoord-prov/757a8071b819699437b353865b17cacffe95e9fb/src/crypto/nativeBackend.ts",
+   "line": 50
+  },
+  {
+   "section": "advisory",
+   "code": "SC6004",
+   "message": "this flow COPIES the record into a different shape, and the copy ends the members '$unknowns', 'contextInfo', 'mediaKeyTimestamp', 'messageHistoryMetadata', 'mimetype'",
+   "file": "<blocks>/wamcoord-prov/757a8071b819699437b353865b17cacffe95e9fb/src/client/persistence/group-history.ts",
+   "line": 92
+  },
+  {
+   "section": "advisory",
+   "code": "SC6004",
+   "message": "this flow COPIES the record into a different shape, and the copy ends the members '$unknowns', 'chunkOrder', 'encHandle', 'fileLength', 'fullHistorySyncOnDemandRequestMetadata', 'initialHistBootstrapInlinePayload', 'messageAccessStatus', 'oldestMsgInChunkTimestampSec', 'originalMessageId', 'peerDataRequestSessionId', 'progress', 'syncType'",
+   "file": "<blocks>/wamcoord-prov/757a8071b819699437b353865b17cacffe95e9fb/src/client/persistence/history-sync.ts",
+   "line": 146
+  },
+  {
+   "section": "advisory",
+   "code": "SC6004",
+   "message": "this flow COPIES the record into a different shape, and the copy ends the members 'annotations', 'caption', 'externalShareFullVideoDurationInSeconds', 'gifAttribution', 'gifPlayback', 'height', 'interactiveAnnotations', 'jpegThumbnail', 'metadataUrl', 'motionPhotoPresentationOffsetMs', 'processedVideos', 'staticUrl', 'thumbnailDirectPath', 'thumbnailEncSha256', 'thumbnailSha256', 'videoSourceType', 'width'; the fields '$unknowns', 'accessibilityLabel', 'backgroundArgb', 'contextInfo', 'directPath', 'fileEncSha256', 'fileLength', 'fileSha256', 'mediaKey', 'mediaKeyTimestamp', 'mimetype', 'ptt', 'seconds', 'streamingSidecar', 'url', 'viewOnce', 'waveform' are written somewhere in this program",
+   "file": "<blocks>/wamcoord-prov/757a8071b819699437b353865b17cacffe95e9fb/src/message/encode/content.ts",
+   "line": 200
+  },
+  {
+   "section": "advisory",
+   "code": "SC6004",
+   "message": "this flow COPIES the record into a different shape, and the copy ends the member 'operationCode'",
+   "file": "<blocks>/wamcoord-prov/757a8071b819699437b353865b17cacffe95e9fb/src/appstate/sync/WaAppStateSyncClient.ts",
+   "line": 1158
+  },
+  {
+   "section": "advisory",
+   "code": "SC6004",
+   "message": "this flow COPIES the record into a different shape, and the copy ends the member 'prevSessions'",
+   "file": "<blocks>/wamcoord-prov/757a8071b819699437b353865b17cacffe95e9fb/src/signal/session/SignalSession.ts",
+   "line": 57
+  },
+  {
+   "section": "advisory",
+   "code": "SC6004",
+   "message": "this flow COPIES the record into a different shape, and the copy ends the member 'prevSessions'",
+   "file": "<blocks>/wamcoord-prov/757a8071b819699437b353865b17cacffe95e9fb/src/signal/session/SignalRatchet.ts",
+   "line": 244
+  },
+  {
+   "section": "advisory",
+   "code": "SC6004",
+   "message": "this flow COPIES the record into a different shape ('{ id: number; publicKey: Uint8Array; signature: Uint8Array }' into '{ id: number; publicKey: Uint8Array }'), and the copy ends the member 'signature'",
+   "file": "<blocks>/wamcoord-prov/757a8071b819699437b353865b17cacffe95e9fb/src/signal/session/SignalProtocol.ts",
+   "line": 115
+  },
+  {
+   "section": "advisory",
+   "code": "SC6004",
+   "message": "this flow COPIES the record into a different shape, and the copy ends the member 'prevSessions'",
+   "file": "<blocks>/wamcoord-prov/757a8071b819699437b353865b17cacffe95e9fb/src/signal/session/SignalProtocol.ts",
+   "line": 476
+  },
+  {
+   "section": "advisory",
+   "code": "SC6004",
+   "message": "this flow COPIES the record into a different shape, and the copy ends the members 'connectAttemptCount', 'device', 'lidDbMigrated', 'loginCounter', 'username'",
+   "file": "<blocks>/wamcoord-prov/757a8071b819699437b353865b17cacffe95e9fb/src/transport/noise/WaClientPayload.ts",
+   "line": 213
+  },
+  {
+   "section": "advisory",
+   "code": "SC6004",
+   "message": "this flow COPIES the record into a different shape, and the copy ends the members 'buildHash', 'deviceProps', 'registrationInfo', 'requireFullSync', 'signedPreKey'",
+   "file": "<blocks>/wamcoord-prov/757a8071b819699437b353865b17cacffe95e9fb/src/transport/noise/WaClientPayload.ts",
+   "line": 236
+  },
+  {
+   "section": "advisory",
+   "code": "SC6004",
+   "message": "this flow COPIES the record into a different shape, and the copy ends the members 'buildHash', 'deviceProps', 'passive', 'pull', 'registrationInfo', 'signedPreKey', 'userAgent', 'versionBase', 'webInfo'",
+   "file": "<blocks>/wamcoord-prov/757a8071b819699437b353865b17cacffe95e9fb/src/transport/noise/WaClientPayload.ts",
+   "line": 239
+  },
+  {
+   "section": "advisory",
+   "code": "SC6004",
+   "message": "this flow COPIES the record into a different shape, and the copy ends the members 'dangerous', 'mobileTransport', 'requireFullSync', 'version'",
+   "file": "<blocks>/wamcoord-prov/757a8071b819699437b353865b17cacffe95e9fb/src/auth/WaAuthClient.ts",
+   "line": 82
+  },
+  {
+   "section": "advisory",
+   "code": "SC6004",
+   "message": "this flow COPIES the record into a different shape ('{ browser: string; osDisplayName: string; osVersion: null | string; platform: string }' into '{ browser: string; osDisplayName: string; platform: string }'), and the copy ends the member 'osVersion'",
+   "file": "<blocks>/wamcoord-prov/757a8071b819699437b353865b17cacffe95e9fb/src/auth/WaAuthClient.ts",
+   "line": 113
+  },
+  {
+   "section": "advisory",
+   "code": "SC6004",
+   "message": "this flow COPIES the record into a different shape ('{ linkPreview: unknown; mediaDownload: unknown; mediaUpload: unknown; ws: unknown }' into '{ ws: unknown }'), and the copy ends the members 'linkPreview', 'mediaDownload', 'mediaUpload'",
+   "file": "<blocks>/wamcoord-prov/757a8071b819699437b353865b17cacffe95e9fb/src/client/connection/WaConnectionManager.ts",
+   "line": 308
+  },
+  {
+   "section": "advisory",
+   "code": "SC6004",
+   "message": "this flow COPIES the record into a different shape, and the copy ends the members '$unknowns', 'agentAction', 'aiThreadRenameAction', 'androidUnsupportedActions', 'archiveChatAction', 'autoOrganizeBusinessChatSetting', 'avatarUpdatedAction', 'bizAiSettingsNudgeAction', 'botWelcomeRequestAction', 'bubbleLockMessageAction', 'businessBroadcastCampaignAction', 'businessBroadcastInsightsAction', 'businessBroadcastListAction', 'callLogAction', 'chatAssignment', 'chatAssignmentOpenedStatus', 'chatLockSettings', 'clearChatAction', 'coexV2VersionAction', 'contactAction', 'ctwaPerCustomerDataSharingAction', 'customPaymentMethodsAction', 'customerDataAction', 'deleteChatAction', 'deleteIndividualCallLog', 'deleteMessageForMeAction', 'detectedOutcomesStatusAction', 'deviceCapabilities', 'externalWebBetaAction', 'favoritesAction', 'interactiveMessageAction', 'keyExpiration', 'labelAssociationAction', 'labelEditAction', 'labelReorderingAction', 'lidContactAction', 'localeSetting', 'lockChatAction', 'maibaAiFeaturesControlAction', 'markChatAsReadAction', 'marketingMessageAction', 'marketingMessageBroadcastAction', 'merchantPaymentPartnerAction', 'musicUserIdAction', 'muteAction', 'newsletterSavedInterestsAction', 'noteEditAction', 'notificationActivitySettingAction', 'nuxAction', 'outContactAction', 'paymentInfoAction', 'paymentTosAction', 'pinAction', 'pnForLidChatAction', 'primaryFeature', 'primaryVersionAction', 'privacySettingChannelsPersonalisedRecommendationAction', 'privacySettingDisableLinkPreviewsAction', 'privacySettingRelayAllCalls', 'privateProcessingSettingAction', 'pushNameSetting', 'quickReplyAction', 'recentEmojiWeightsAction', 'removeRecentStickerAction', 'settingsSyncAction', 'starAction', 'statusPostOptInNotificationPreferencesAction', 'statusPrivacy', 'stickerAction', 'subscriptionAction', 'subscriptionsSyncV2Action', 'threadPinAction', 'timeFormatAction', 'timestamp', 'ugcBot', 'unarchiveChatsSetting', 'userStatusMuteAction', 'usernameChatStartMode', 'waffleAccountLinkStateAction', 'wamoUserIdentifierAction', 'wasaRootSecretAction'",
+   "file": "<blocks>/wamcoord-prov/757a8071b819699437b353865b17cacffe95e9fb/src/client/coordinators/WaAppStateMutationCoordinator.ts",
+   "line": 475
+  },
+  {
+   "section": "advisory",
+   "code": "SC6004",
+   "message": "this flow COPIES the record into a different shape, and the copy ends the members '$unknowns', 'agentAction', 'aiThreadRenameAction', 'androidUnsupportedActions', 'archiveChatAction', 'autoOrganizeBusinessChatSetting', 'avatarUpdatedAction', 'bizAiSettingsNudgeAction', 'botWelcomeRequestAction', 'bubbleLockMessageAction', 'businessBroadcastCampaignAction', 'businessBroadcastInsightsAction', 'businessBroadcastListAction', 'callLogAction', 'chatAssignment', 'chatAssignmentOpenedStatus', 'chatLockSettings', 'clearChatAction', 'coexV2VersionAction', 'contactAction', 'ctwaPerCustomerDataSharingAction', 'customPaymentMethodsAction', 'customerDataAction', 'deleteChatAction', 'deleteIndividualCallLog', 'deleteMessageForMeAction', 'detectedOutcomesStatusAction', 'deviceCapabilities', 'externalWebBetaAction', 'favoritesAction', 'interactiveMessageAction', 'keyExpiration', 'labelAssociationAction', 'labelEditAction', 'labelReorderingAction', 'lidContactAction', 'localeSetting', 'lockChatAction', 'maibaAiFeaturesControlAction', 'markChatAsReadAction', 'marketingMessageAction', 'marketingMessageBroadcastAction', 'merchantPaymentPartnerAction', 'musicUserIdAction', 'muteAction', 'nctSaltSyncAction', 'newsletterSavedInterestsAction', 'noteEditAction', 'notificationActivitySettingAction', 'nuxAction', 'outContactAction', 'paymentInfoAction', 'paymentTosAction', 'pinAction', 'pnForLidChatAction', 'primaryFeature', 'primaryVersionAction', 'privacySettingChannelsPersonalisedRecommendationAction', 'privacySettingDisableLinkPreviewsAction', 'privacySettingRelayAllCalls', 'privateProcessingSettingAction', 'pushNameSetting', 'quickReplyAction', 'recentEmojiWeightsAction', 'removeRecentStickerAction', 'settingsSyncAction', 'starAction', 'statusPostOptInNotificationPreferencesAction', 'stickerAction', 'subscriptionAction', 'subscriptionsSyncV2Action', 'threadPinAction', 'timeFormatAction', 'timestamp', 'ugcBot', 'unarchiveChatsSetting', 'userStatusMuteAction', 'usernameChatStartMode', 'waffleAccountLinkStateAction', 'wamoUserIdentifierAction', 'wasaRootSecretAction'",
+   "file": "<blocks>/wamcoord-prov/757a8071b819699437b353865b17cacffe95e9fb/src/client/coordinators/WaAppStateMutationCoordinator.ts",
+   "line": 1005
+  },
+  {
+   "section": "advisory",
+   "code": "SC6004",
+   "message": "this flow COPIES the record into a different shape, and the copy ends the members '$unknowns', 'agentAction', 'aiThreadRenameAction', 'androidUnsupportedActions', 'archiveChatAction', 'autoOrganizeBusinessChatSetting', 'avatarUpdatedAction', 'bizAiSettingsNudgeAction', 'botWelcomeRequestAction', 'bubbleLockMessageAction', 'businessBroadcastCampaignAction', 'businessBroadcastInsightsAction', 'callLogAction', 'chatAssignment', 'chatAssignmentOpenedStatus', 'chatLockSettings', 'clearChatAction', 'coexV2VersionAction', 'contactAction', 'ctwaPerCustomerDataSharingAction', 'customPaymentMethodsAction', 'customerDataAction', 'deleteChatAction', 'deleteIndividualCallLog', 'deleteMessageForMeAction', 'detectedOutcomesStatusAction', 'deviceCapabilities', 'externalWebBetaAction', 'favoritesAction', 'interactiveMessageAction', 'keyExpiration', 'labelAssociationAction', 'labelEditAction', 'labelReorderingAction', 'lidContactAction', 'localeSetting', 'lockChatAction', 'maibaAiFeaturesControlAction', 'markChatAsReadAction', 'marketingMessageAction', 'marketingMessageBroadcastAction', 'merchantPaymentPartnerAction', 'musicUserIdAction', 'muteAction', 'nctSaltSyncAction', 'newsletterSavedInterestsAction', 'noteEditAction', 'notificationActivitySettingAction', 'nuxAction', 'outContactAction', 'paymentInfoAction', 'paymentTosAction', 'pinAction', 'pnForLidChatAction', 'primaryFeature', 'primaryVersionAction', 'privacySettingChannelsPersonalisedRecommendationAction', 'privacySettingDisableLinkPreviewsAction', 'privacySettingRelayAllCalls', 'privateProcessingSettingAction', 'pushNameSetting', 'quickReplyAction', 'recentEmojiWeightsAction', 'removeRecentStickerAction', 'settingsSyncAction', 'starAction', 'statusPostOptInNotificationPreferencesAction', 'statusPrivacy', 'stickerAction', 'subscriptionAction', 'subscriptionsSyncV2Action', 'threadPinAction', 'timeFormatAction', 'timestamp', 'ugcBot', 'unarchiveChatsSetting', 'userStatusMuteAction', 'usernameChatStartMode', 'waffleAccountLinkStateAction', 'wamoUserIdentifierAction', 'wasaRootSecretAction'",
+   "file": "<blocks>/wamcoord-prov/757a8071b819699437b353865b17cacffe95e9fb/src/client/coordinators/WaAppStateMutationCoordinator.ts",
+   "line": 1046
+  },
+  {
+   "section": "advisory",
+   "code": "SC6004",
+   "message": "this flow COPIES the record into a different shape, and the copy ends the members 'ciphertext', 'iv', 'messageSecret', 'parentMsgOriginalSender'",
+   "file": "<blocks>/wamcoord-prov/757a8071b819699437b353865b17cacffe95e9fb/src/message/crypto/addon-crypto.ts",
+   "line": 235
+  },
+  {
+   "section": "advisory",
+   "code": "SC6004",
+   "message": "this flow COPIES the record into a different shape, and the copy ends the members 'aiThreadId', 'aiThreadType', 'botJid', 'capabilities', 'extraMentionedJids', 'personaId'",
+   "file": "<blocks>/wamcoord-prov/757a8071b819699437b353865b17cacffe95e9fb/src/client/coordinators/WaBotCoordinator.ts",
+   "line": 394
+  },
+  {
+   "section": "advisory",
+   "code": "SC6004",
+   "message": "this flow COPIES the record into a different shape, and the copy ends the members 'aiThreadId', 'aiThreadType', 'botJid', 'capabilities', 'extraMentionedJids', 'personaId'",
+   "file": "<blocks>/wamcoord-prov/757a8071b819699437b353865b17cacffe95e9fb/src/client/coordinators/WaBotCoordinator.ts",
+   "line": 426
+  },
+  {
+   "section": "advisory",
+   "code": "SC6004",
+   "message": "this flow COPIES the record into a different shape, and the copy ends the members 'agent', 'maxBytes', 'signal'",
+   "file": "<blocks>/wamcoord-prov/757a8071b819699437b353865b17cacffe95e9fb/src/media/transfer/WaMediaTransferClient.ts",
+   "line": 127
+  },
+  {
+   "section": "advisory",
+   "code": "SC6004",
+   "message": "this flow COPIES the record into a different shape, and the copy ends the members 'agent', 'body', 'contentLength', 'contentType', 'maxBytes', 'method', 'signal'",
+   "file": "<blocks>/wamcoord-prov/757a8071b819699437b353865b17cacffe95e9fb/src/media/transfer/WaMediaTransferClient.ts",
+   "line": 164
+  },
+  {
+   "section": "advisory",
+   "code": "SC6004",
+   "message": "this flow COPIES the record into a different shape, and the copy ends the members 'fileEncSha256', 'fileSha256', 'mediaKey', 'mediaType'",
+   "file": "<blocks>/wamcoord-prov/757a8071b819699437b353865b17cacffe95e9fb/src/media/transfer/WaMediaTransferClient.ts",
+   "line": 278
+  },
+  {
+   "section": "advisory",
+   "code": "SC6004",
+   "message": "this flow COPIES the record into a different shape, and the copy ends the members 'botParticipants', 'customNodes', 'decryptFail', 'deviceIdentity', 'mediatype', 'participants'",
+   "file": "<blocks>/wamcoord-prov/757a8071b819699437b353865b17cacffe95e9fb/src/transport/node/builders/message.ts",
+   "line": 221
+  },
+  {
+   "section": "advisory",
+   "code": "SC6004",
+   "message": "this flow COPIES the record into a different shape, and the copy ends the members 'additionalAttributes', 'addressingMode', 'decryptFail', 'edit', 'id', 'participants', 'peerRecipientPn', 'phash', 'to', 'type'",
+   "file": "<blocks>/wamcoord-prov/757a8071b819699437b353865b17cacffe95e9fb/src/transport/node/builders/message.ts",
+   "line": 229
+  },
+  {
+   "section": "advisory",
+   "code": "SC6004",
+   "message": "this flow COPIES the record into a different shape, and the copy ends the members 'botParticipants', 'customNodes', 'decryptFail', 'deviceIdentity', 'groupCiphertext', 'mediatype', 'participants'",
+   "file": "<blocks>/wamcoord-prov/757a8071b819699437b353865b17cacffe95e9fb/src/transport/node/builders/message.ts",
+   "line": 239
+  },
+  {
+   "section": "advisory",
+   "code": "SC6004",
+   "message": "this flow COPIES the record into a different shape, and the copy ends the members 'additionalAttributes', 'addressingMode', 'decryptFail', 'edit', 'groupCiphertext', 'id', 'participants', 'peerRecipientPn', 'phash', 'to', 'type'",
+   "file": "<blocks>/wamcoord-prov/757a8071b819699437b353865b17cacffe95e9fb/src/transport/node/builders/message.ts",
+   "line": 254
+  },
+  {
+   "section": "advisory",
+   "code": "SC6004",
+   "message": "this flow COPIES the record into a different shape, and the copy ends the members 'isBroadcast', 'isGroup', 'isNewsletter', 'participantAlt', 'recipientAlt', 'recipientJid', 'recipientUsername', 'remoteJidAlt', 'senderDevice', 'senderUsername', 'serverId'",
+   "file": "<blocks>/wamcoord-prov/757a8071b819699437b353865b17cacffe95e9fb/src/client/coordinators/WaMessageDispatchCoordinator.ts",
+   "line": 472
+  },
+  {
+   "section": "advisory",
+   "code": "SC6004",
+   "message": "this flow COPIES the record into a different shape, and the field 'botMessageSecret' is written somewhere in this program",
+   "file": "<blocks>/wamcoord-prov/757a8071b819699437b353865b17cacffe95e9fb/src/client/coordinators/WaMessageDispatchCoordinator.ts",
+   "line": 584
+  },
+  {
+   "section": "advisory",
+   "code": "SC6004",
+   "message": "this flow COPIES the record into a different shape, and the copy ends the members 'additionalAttributes', 'contextInfo', 'customNodes', 'disableDirectEphemeralAutoInject', 'disableGroupEphemeralAutoInject', 'disappearingModeTrigger', 'editKey', 'ephemeralSettingTimestamp', 'expectedIdentity', 'expirationSeconds', 'forward', 'id', 'mentions', 'messageSecret', 'quote', 'viewOnce'",
+   "file": "<blocks>/wamcoord-prov/757a8071b819699437b353865b17cacffe95e9fb/src/client/coordinators/WaMessageDispatchCoordinator.ts",
+   "line": 984
+  },
+  {
+   "section": "advisory",
+   "code": "SC6004",
+   "message": "this flow COPIES the record into a different shape, and the copy ends the member 'jid'",
+   "file": "<blocks>/wamcoord-prov/757a8071b819699437b353865b17cacffe95e9fb/src/client/coordinators/WaMessageDispatchCoordinator.ts",
+   "line": 1156
+  },
+  {
+   "section": "advisory",
+   "code": "SC6004",
+   "message": "this flow COPIES the record into a different shape, and the copy ends the members 'additionalAttributes', 'contextInfo', 'customNodes', 'disableDirectEphemeralAutoInject', 'disableGroupEphemeralAutoInject', 'disappearingModeTrigger', 'editKey', 'ephemeralSettingTimestamp', 'expectedIdentity', 'expirationSeconds', 'forward', 'id', 'mentions', 'messageSecret', 'quote', 'viewOnce'",
+   "file": "<blocks>/wamcoord-prov/757a8071b819699437b353865b17cacffe95e9fb/src/client/coordinators/WaMessageDispatchCoordinator.ts",
+   "line": 1216
+  },
+  {
+   "section": "advisory",
+   "code": "SC6004",
+   "message": "this flow COPIES the record into a different shape ('{ address: { device: number; server: string | undefined; user: string }; ciphertext: Uint8Array; encType: string; jid: string }' into '{ ciphertext: Uint8Array | undefined; encType: string | undefined; jid: string }'), and the copy ends the member 'address'",
+   "file": "<blocks>/wamcoord-prov/757a8071b819699437b353865b17cacffe95e9fb/src/client/coordinators/WaMessageDispatchCoordinator.ts",
+   "line": 1388
+  },
+  {
+   "section": "advisory",
+   "code": "SC6004",
+   "message": "this flow COPIES the record into a different shape, and the copy ends the members 'additionalAttributes', 'contextInfo', 'customNodes', 'disableDirectEphemeralAutoInject', 'disableGroupEphemeralAutoInject', 'disappearingModeTrigger', 'editKey', 'ephemeralSettingTimestamp', 'expectedIdentity', 'expirationSeconds', 'forward', 'id', 'mentions', 'messageSecret', 'quote', 'viewOnce'",
+   "file": "<blocks>/wamcoord-prov/757a8071b819699437b353865b17cacffe95e9fb/src/client/coordinators/WaMessageDispatchCoordinator.ts",
+   "line": 1413
+  },
+  {
+   "section": "advisory",
+   "code": "SC6004",
+   "message": "this flow COPIES the record into a different shape, and the copy ends the member 'session'",
+   "file": "<blocks>/wamcoord-prov/757a8071b819699437b353865b17cacffe95e9fb/src/client/coordinators/WaMessageDispatchCoordinator.ts",
+   "line": 1625
+  },
+  {
+   "section": "advisory",
+   "code": "SC6004",
+   "message": "this flow COPIES the record into a different shape, and the copy ends the members 'additionalAttributes', 'contextInfo', 'customNodes', 'disableDirectEphemeralAutoInject', 'disableGroupEphemeralAutoInject', 'disappearingModeTrigger', 'editKey', 'ephemeralSettingTimestamp', 'expectedIdentity', 'expirationSeconds', 'forward', 'id', 'mentions', 'messageSecret', 'quote', 'viewOnce'",
+   "file": "<blocks>/wamcoord-prov/757a8071b819699437b353865b17cacffe95e9fb/src/client/coordinators/WaMessageDispatchCoordinator.ts",
+   "line": 1938
+  },
+  {
+   "section": "advisory",
+   "code": "SC6004",
+   "message": "this flow COPIES the record into a different shape, and the copy ends the members 'disappearingModeInitiator', 'disappearingModeTrigger', 'expirationSeconds', 'mentionedJids', 'quotedMessageId', 'quotedParticipant', 'quotedRemoteJid', 'raw'; the fields '$unknowns', 'actionLink', 'afterReadDuration', 'aiProvenance', 'alwaysShowAdAttribution', 'botMessageSharingInfo', 'businessInteractionPills', 'businessMessageForwardInfo', 'conversionData', 'conversionDelaySeconds', 'conversionSource', 'crossAppSource', 'ctwaPayload', 'ctwaSignals', 'dataSharingContext', 'disappearingMode', 'entryPointConversionApp', 'entryPointConversionDelaySeconds', 'entryPointConversionExternalMedium', 'entryPointConversionExternalSource', 'entryPointConversionSource', 'ephemeralSettingTimestamp', 'ephemeralSharedSecret', 'expiration', 'externalAdReply', 'featureEligibilities', 'forwardOrigin', 'forwardedAiBotMessageInfo', 'forwardedNewsletterMessageInfo', 'forwardingScore', 'groupMentions', 'groupSubject', 'instagramThreadLink', 'isForwarded', 'isGroupStatus', 'isQuestion', 'isSampled', 'isSpoiler', 'mediaDomainInfo', 'memberLabel', 'mentionedJid', 'nonJidMentions', 'pairedMediaType', 'parentGroupJid', 'partiallySelectedContent', 'participant', 'placeholderKey', 'posterStatusId', 'questionReplyQuotedMessage', 'quotedAd', 'quotedMessage', 'quotedType', 'rankingVersion', 'remoteJid', 'smbClientCampaignId', 'smbServerCampaignId', 'stanzaId', 'statusAttributionType', 'statusAttributions', 'statusAudienceMetadata', 'statusSourceType', 'trustBannerAction', 'trustBannerType', 'urlTrackingMap', 'utm' are written somewhere in this program",
+   "file": "<blocks>/wamcoord-prov/757a8071b819699437b353865b17cacffe95e9fb/src/client/newsletter/content.ts",
+   "line": 202
+  },
+  {
+   "section": "advisory",
+   "code": "SC6004",
+   "message": "this flow COPIES the record into a different shape, and the copy ends the members 'generateStanzaId', 'getMediaConn', 'linkPreviewResolver', 'mediaTransfer', 'publishMessageNode', 'sendNode'",
+   "file": "<blocks>/wamcoord-prov/757a8071b819699437b353865b17cacffe95e9fb/src/client/newsletter/messaging.ts",
+   "line": 321
+  },
+  {
+   "section": "advisory",
+   "code": "SC6004",
+   "message": "this flow COPIES the record into a different shape, and the copy ends the members 'generateStanzaId', 'getMediaConn', 'linkPreviewResolver', 'mediaTransfer', 'publishMessageNode', 'sendNode'",
+   "file": "<blocks>/wamcoord-prov/757a8071b819699437b353865b17cacffe95e9fb/src/client/newsletter/messaging.ts",
+   "line": 322
+  },
+  {
+   "section": "advisory",
+   "code": "SC6004",
+   "message": "this flow COPIES the record into a different shape, and the copy ends the members 'generateStanzaId', 'getMediaConn', 'linkPreviewResolver', 'mediaTransfer', 'publishMessageNode', 'sendNode'",
+   "file": "<blocks>/wamcoord-prov/757a8071b819699437b353865b17cacffe95e9fb/src/client/newsletter/messaging.ts",
+   "line": 325
+  },
+  {
+   "section": "advisory",
+   "code": "SC6004",
+   "message": "this flow COPIES the record into a different shape, and the copy ends the members 'generateStanzaId', 'getMediaConn', 'linkPreviewResolver', 'mediaTransfer', 'publishMessageNode', 'sendNode'",
+   "file": "<blocks>/wamcoord-prov/757a8071b819699437b353865b17cacffe95e9fb/src/client/newsletter/messaging.ts",
+   "line": 333
+  },
+  {
+   "section": "advisory",
+   "code": "SC6004",
+   "message": "this flow COPIES the record into a different shape, and the copy ends the members 'generateStanzaId', 'getMediaConn', 'linkPreviewResolver', 'mediaTransfer', 'publishMessageNode', 'sendNode'",
+   "file": "<blocks>/wamcoord-prov/757a8071b819699437b353865b17cacffe95e9fb/src/client/coordinators/WaNewsletterCoordinator.ts",
+   "line": 62
+  },
+  {
+   "section": "advisory",
+   "code": "SC6004",
+   "message": "this flow COPIES the record into a different shape, and the fields 'description', 'jpegThumbnail', 'mediaKey', 'mediaKeyTimestamp', 'thumbnailDirectPath', 'thumbnailEncSha256', 'thumbnailHeight', 'thumbnailSha256', 'thumbnailWidth', 'title' are written somewhere in this program",
+   "file": "<blocks>/wamcoord-prov/757a8071b819699437b353865b17cacffe95e9fb/src/client/coordinators/WaStatusCoordinator.ts",
+   "line": 62
+  },
+  {
+   "section": "advisory",
+   "code": "SC6004",
+   "message": "this flow COPIES the record into a different shape ('{ protocols: string[]; timestamp: number; type: string }' into '{ timestamp: number; type: string }'), and the copy ends the member 'protocols'",
+   "file": "<blocks>/wamcoord-prov/757a8071b819699437b353865b17cacffe95e9fb/src/client/events/dirty.ts",
+   "line": 392
+  },
+  {
+   "section": "advisory",
+   "code": "SC6004",
+   "message": "this flow COPIES the record into a different shape ('{ bytes: Uint8Array; height: number | undefined; width: number | undefined }' into '{ height: number | undefined; width: number | undefined }'), and the copy ends the member 'bytes'",
+   "file": "<blocks>/wamcoord-prov/757a8071b819699437b353865b17cacffe95e9fb/src/client/messaging/link-preview.ts",
+   "line": 161
+  },
+  {
+   "section": "advisory",
+   "code": "SC6004",
+   "message": "this flow COPIES the record into a different shape ('{ contentLength: number; height: number | undefined; stream: Readable; width: number | undefined }' into '{ height: number | undefined; width: number | undefined }'), and the copy ends the members 'contentLength', 'stream'",
+   "file": "<blocks>/wamcoord-prov/757a8071b819699437b353865b17cacffe95e9fb/src/client/messaging/link-preview.ts",
+   "line": 192
+  },
+  {
+   "section": "advisory",
+   "code": "SC6004",
+   "message": "this flow COPIES the record into a different shape, and the copy ends the members 'addons', 'appStateSyncTimeoutMs', 'chatEvents', 'chatSocketUrls', 'companionHost', 'connectTimeoutMs', 'dangerous', 'deadSocketTimeoutMs', 'history', 'iqTimeoutMs', 'keepAliveIntervalMs', 'linkPreview', 'logoutStoreClear', 'markOnlineOnConnect', 'maxReconnectAttempts', 'media', 'mediaTimeoutMs', 'messageAckTimeoutMs', 'messageMaxAttempts', 'messageRetryDelayMs', 'mobileTransport', 'nodeQueryTimeoutMs', 'plugins', 'privacyToken', 'protocols', 'proxy', 'reconnectIntervalMs', 'recoverFromClientTooOld', 'requireFullSync', 'sessionId', 'signPasskeyAssertion', 'signalFetchKeyBundlesTimeoutMs', 'store', 'testHooks', 'timeoutIntervalMs', 'url', 'urls', 'version', 'writeBehind'",
+   "file": "<blocks>/wamcoord-prov/757a8071b819699437b353865b17cacffe95e9fb/src/client/WaClientFactory.ts",
+   "line": 271
+  },
+  {
+   "section": "advisory",
+   "code": "SC6004",
+   "message": "this flow COPIES the record into a different shape, and the copy ends the members 'disableAppStateMacVerification', 'disableMediaMacVerification', 'disableSenderKeySignatureVerification'",
+   "file": "<blocks>/wamcoord-prov/757a8071b819699437b353865b17cacffe95e9fb/src/client/WaClientFactory.ts",
+   "line": 623
+  },
+  {
+   "section": "advisory",
+   "code": "SC6004",
+   "message": "this flow COPIES the record into a different shape, and the copy ends the members 'fromMe', 'isBroadcast', 'isGroup', 'isNewsletter', 'participantAlt', 'recipientAlt', 'recipientJid', 'recipientUsername', 'remoteJidAlt', 'senderUsername', 'serverId'",
+   "file": "<blocks>/wamcoord-prov/757a8071b819699437b353865b17cacffe95e9fb/src/client/WaClient.ts",
+   "line": 339
+  },
+  {
+   "section": "advisory",
+   "code": "SC6004",
+   "message": "this flow COPIES the record into a different shape, and the copy ends the members 'fromMe', 'isBroadcast', 'isGroup', 'isNewsletter', 'participantAlt', 'recipientAlt', 'recipientJid', 'recipientUsername', 'remoteJidAlt', 'senderUsername', 'serverId'",
+   "file": "<blocks>/wamcoord-prov/757a8071b819699437b353865b17cacffe95e9fb/src/client/WaClient.ts",
+   "line": 344
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "'Promise<{ fileEncSha256: Uint8Array; fileSha256: Uint8Array; firstFrameSidecar: Uint8Array | undefined; plaintextLength: number; streamingSidecar: Uint8Array | undefined }>' values where 'Promise<{ fileEncSha256: Uint8Array; fileSha256: Uint8Array; plaintextLength: number }>' is expected is not supported yet",
+   "file": "<blocks>/wamcoord-prov/757a8071b819699437b353865b17cacffe95e9fb/src/media/transfer/WaMediaTransferClient.ts",
+   "line": 438
+  },
+  {
+   "section": "unreached",
+   "code": "SC1063",
+   "message": "this use of a catch binding is not supported yet",
+   "file": "<blocks>/wamcoord-prov/757a8071b819699437b353865b17cacffe95e9fb/src/client/persistence/companion-host.ts",
+   "line": 64
+  },
+  {
+   "section": "unreached",
+   "code": "SC2020",
+   "message": "'writeFile with 3 arguments' is part of the standard library types but has no scriptc lowering yet",
+   "file": "<blocks>/wamcoord-prov/757a8071b819699437b353865b17cacffe95e9fb/src/client/persistence/companion-host.ts",
+   "line": 94
+  },
+  {
+   "section": "unreached",
+   "code": "SC2020",
+   "message": "'fs/promises.rename' is typed by @types/node but has no scriptc lowering yet",
+   "file": "<blocks>/wamcoord-prov/757a8071b819699437b353865b17cacffe95e9fb/src/client/persistence/companion-host.ts",
+   "line": 95
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "dynamic keyed reads of '{ child: ({ [key: string]: unknown }) => ... | undefined; debug: (...unknown) => void; error: (...unknown) => void; info: (...unknown) => void; level: string; trace: (...unknown) => void; warn: (...unknown) => void }' (the declared fields have no one common type) is not supported yet",
+   "file": "<blocks>/wamcoord-prov/757a8071b819699437b353865b17cacffe95e9fb/src/infra/log/PinoLogger.ts",
+   "line": 137
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "Function.prototype.call on a compiled function value (compiled calls are direct — no runtime 'this' or arguments object exists to re-route; spell the call directly: 'Object.prototype.hasOwnProperty(...)') is not supported yet",
+   "file": "<blocks>/wamcoord-prov/757a8071b819699437b353865b17cacffe95e9fb/src/infra/log/PinoLogger.ts",
+   "line": 141
+  },
+  {
+   "section": "unreached",
+   "code": "SC1090",
+   "message": "dynamic keyed reads of '{ child: ({ [key: string]: unknown }) => ... | undefined; debug: (...unknown) => void; error: (...unknown) => void; info: (...unknown) => void; level: string; trace: (...unknown) => void; warn: (...unknown) => void }' (the declared fields have no one common type) is not supported yet",
+   "file": "<blocks>/wamcoord-prov/757a8071b819699437b353865b17cacffe95e9fb/src/infra/log/PinoLogger.ts",
+   "line": 146
+  },
+  {
+   "section": "unreached",
+   "code": "SC2020",
+   "message": "'child_process.execFile' is typed by @types/node but has no scriptc lowering yet",
+   "file": "<blocks>/wamcoord-lab/napp/pkgsrc/voip/media/WaAudioEngine.ts",
+   "line": 22
+  },
+  {
+   "section": "unreached",
+   "code": "SC2020",
+   "message": "'fs/promises.access' is typed by @types/node but has no scriptc lowering yet",
+   "file": "<blocks>/wamcoord-lab/napp/pkgsrc/voip/media/WaAudioEngine.ts",
+   "line": 197
+  },
+  {
+   "section": "unreached",
+   "code": "SC2020",
+   "message": "'ChildProcessByStdio<null, Readable, Readable>' is typed by @types/node but has no scriptc lowering yet",
+   "file": "<blocks>/wamcoord-lab/napp/pkgsrc/voip/media/WaAudioEngine.ts",
+   "line": 229
+  },
+  {
+   "section": "unreached",
+   "code": "SC2020",
+   "message": "'ChildProcessByStdio<null, Readable, Readable>.stdout' is typed by @types/node but has no scriptc lowering yet",
+   "file": "<blocks>/wamcoord-lab/napp/pkgsrc/voip/media/WaAudioEngine.ts",
+   "line": 254
+  },
+  {
+   "section": "unreached",
+   "code": "SC2020",
+   "message": "'ChildProcessByStdio<null, Readable, Readable>.stderr' is typed by @types/node but has no scriptc lowering yet",
+   "file": "<blocks>/wamcoord-lab/napp/pkgsrc/voip/media/WaAudioEngine.ts",
+   "line": 267
+  },
+  {
+   "section": "unreached",
+   "code": "SC2020",
+   "message": "'ChildProcessByStdio<null, Readable, Readable>.on' is typed by @types/node but has no scriptc lowering yet",
+   "file": "<blocks>/wamcoord-lab/napp/pkgsrc/voip/media/WaAudioEngine.ts",
+   "line": 270
+  },
+  {
+   "section": "unreached",
+   "code": "SC2020",
+   "message": "'ChildProcessByStdio<null, Readable, Readable>.on' is typed by @types/node but has no scriptc lowering yet",
+   "file": "<blocks>/wamcoord-lab/napp/pkgsrc/voip/media/WaAudioEngine.ts",
+   "line": 273
+  },
+  {
+   "section": "unreached",
+   "code": "SC2012",
+   "message": "'Math.sin' runs in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/wamcoord-lab/napp/pkgsrc/voip/media/WaAudioEngine.ts",
+   "line": 295
+  },
+  {
+   "section": "unreached",
+   "code": "SC2020",
+   "message": "'Date.getTime' is part of the standard library types but has no scriptc lowering yet",
+   "file": "<blocks>/wamcoord-lab/napp/pkgsrc/voip/call/WaCallMediaSession.ts",
+   "line": 242
+  }
+ ]
+}

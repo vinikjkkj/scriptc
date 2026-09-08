@@ -7292,7 +7292,7 @@ function isEsModuleStamp(expr: ts.Expression): boolean {
           L.unsupported(
             "SC1090",
             expr.left,
-            "compound array-element assignment through this target (supported: a numeric array or typed array, a bare identifier receiver, and an index that can be evaluated twice — a literal, an identifier, or arithmetic over those)",
+            "compound array-element assignment through this target (supported: a numeric array or typed array; a receiver that is an identifier, `this`, or a chain of plain data fields over them — an accessor link is refused because a getter would run twice; and an index that can be evaluated twice — a literal, an identifier, or arithmetic over those)",
           );
         }
         if (ts.isPropertyAccessExpression(expr.left)) {
@@ -7456,6 +7456,33 @@ function isEsModuleStamp(expr: ts.Expression): boolean {
    * desugared to `x = x op e` (x read before e, like JS). Serves the bare-
    * identifier form and the namespace-qualified spelling (`N.x += v`),
    * whose target is the member's module global. */
+    /** A RECEIVER expression that can be evaluated twice with the same result
+   * and no effect in between -- the receiver half of repeatableIndexExpr's
+   * rule, and written the same way because `lowerElemCompound` re-lowers
+   * BOTH halves.
+   *
+   * A bare identifier and `this` were the whole set. A property-access chain
+   * over them (`this.ivBuffer[4 + i] ^= x`) is just as repeatable PROVIDED
+   * every link is a plain data field: a class or record field read runs no
+   * user code, so doing it twice is indistinguishable from doing it once.
+   *
+   * An ACCESSOR link is exactly what this must refuse. `o.viaGetter[i] += 1`
+   * would call the getter twice where JS calls it once, and if that getter
+   * returns a fresh array each time the write lands on an object the program
+   * has already thrown away -- a silent wrong answer, not a refusal. So each
+   * link is resolved through fieldTarget and only the `class`/`record`
+   * containers pass; `accessor`, `recordAccessor` and the index-signature
+   * overflow container keep the fence. */
+  function repeatableRecvExpr(L: Lowerer, e: ts.Expression): boolean {
+    if (ts.isParenthesizedExpression(e)) return repeatableRecvExpr(L, e.expression);
+    if (ts.isIdentifier(e) || e.kind === ts.SyntaxKind.ThisKeyword) return true;
+    if (!ts.isPropertyAccessExpression(e)) return false;
+    if (e.questionDotToken !== undefined) return false;
+    if (!repeatableRecvExpr(L, e.expression)) return false;
+    const t = L.fieldTarget(e);
+    return t !== null && (t.container === "class" || t.container === "record");
+  }
+
   /** An index expression that can be evaluated TWICE with the same result
    * and no effect in between: a literal, a plain identifier read, or
    * arithmetic over those. JS evaluates a compound target's receiver and
@@ -7492,11 +7519,15 @@ function isEsModuleStamp(expr: ts.Expression): boolean {
   /** `a[i] op= v` over an array of numbers or a typed array: read the
    * element, combine, write it back.
    *
-   * Admitted only when the receiver is a bare identifier (or `this`) and
-   * the index is repeatable, because the read and the write each lower
-   * their own copy of both. Under that rule the double evaluation is
-   * unobservable, which is the same bargain lowerFieldCompound already
-   * strikes for `o.f += v`. Anything else keeps the fence.
+   * Admitted only when the receiver and the index are both REPEATABLE,
+   * because the read and the write each lower their own copy of both. The
+   * receiver rule is repeatableRecvExpr: an identifier, `this`, or a chain
+   * of plain data fields over them -- a field read runs no user code, so
+   * doing it twice is indistinguishable from doing it once. An accessor
+   * link keeps the fence, because a getter called twice where JS calls it
+   * once is a silent wrong answer. Under that rule the double evaluation is
+   * unobservable, which is the same bargain lowerFieldCompound strikes for
+   * `o.f += v`. Anything else keeps the fence.
    *
    * Numeric elements only: the combined value is the f64 arithmetic the
    * variable path uses, and a typed array's store coerces it to the
@@ -7505,7 +7536,7 @@ function isEsModuleStamp(expr: ts.Expression): boolean {
     const target = expr.left as ts.ElementAccessExpression;
     if (target.questionDotToken !== undefined) return null;
     const recvNode = target.expression;
-    if (!ts.isIdentifier(recvNode) && recvNode.kind !== ts.SyntaxKind.ThisKeyword) return null;
+    if (!repeatableRecvExpr(L, recvNode)) return null;
     if (!repeatableIndexExpr(target.argumentExpression)) return null;
     const recv = L.lowerExpr(recvNode);
     const numericArray = recv.type.kind === "array" && recv.type.elem.kind === "f64";
