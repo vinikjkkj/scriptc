@@ -56,6 +56,15 @@ compiles to **0 blocker sites** and a **running, byte-exact binary**.
    tests, both sides of the gate, including the `protocol=5` const read that
    was the original silent wrong answer. §7.
 
+6. **`voip` is at 45 blocker sites, and nineteen of the 45 are not compiler
+   work at all.** 8 are `any` casts zapo writes over a surface `lower-wrtc.ts`
+   already supports; 11 are a representation decision that was declined with
+   its cost written down. A site count cannot show that, and it changes what
+   "voip is blocked on 45 things" means in a status table. The compiler-side
+   tail is **17 sites over 14 distinct messages**, and it is a tail: after the
+   two lowering fixes in sections 14 and 15 the largest remaining cause is two
+   sites. Sections 15.5 and 16.
+
 ---
 
 ## 1. Lane, flags, host state
@@ -1522,3 +1531,134 @@ Then `diagnostics.test.ts` on its own, to generate the new fixture's snapshot:
 `linux-differential.test.ts`, and the full `pnpm test` gate. Both corpus
 programs added by this block are driven by the first of those, so both were
 verified by hand instead, on both backends, with node as the oracle.
+
+---
+
+## 16. The compiler-side tail: seventeen sites, sixteen messages, and no twelfth cause
+
+§15 left `voip` at 45. Of those, **19 are not compiler work** — 8 `any` casts
+zapo writes over a surface `lower-wrtc.ts` already supports, and 11 the
+representation decision declined in §14.2 — and 9 are `Date`, out of scope. What
+remains that is ours is **17 sites**.
+
+**They carry 16 distinct messages: one pair and fifteen singletons.** There is
+no third eleven-in-one-line result in `voip`, and this section is the evidence
+for that rather than an attempt to manufacture one.
+
+### 16.1 The three-way split
+
+| sites | message | class |
+| --- | --- | --- |
+| **2** | `String()` of a union with an **array** arm | capability — §16.2 |
+| 2 | `getStats` (1 root + 1 cascade) | capability **and** zapo-side, both needed — §16.3 |
+| 1 | `ArrayBufferLike.byteLength` | capability, stdlib surface |
+| 1 | `createCipheriv with this algorithm` (`aes-128-ctr`, a string literal) | capability, stdlib surface |
+| 1 | `.replace()` on strings | capability — **dynamic-only in the shipped surface manifest**, §16.4 |
+| 1 | `MessageEvent` typed by `@types/node` | capability, types surface |
+| 1 | `createSocket` with a non-literal options argument | capability |
+| 1 | `Function.name` | capability |
+| 1 | `send of ArrayBuffer` | capability |
+| 1 | `'on'` of `call_inbound_audio` with a checked-dynamic listener | capability |
+| 1 | assignment to non-variables | capability |
+| 1 | `bigint` | **representation** — no value type, the `Date` shape |
+| 1 | `.buffer` outside `new DataView(x.buffer)` / `Buffer.from(x.buffer)` | **representation** — *"no free-standing ArrayBuffer value exists"* |
+| 1 | a function-typed value `(ep: RelayEndpoint) => "" \| Uint8Array \| undefined` | **representation** |
+| 1 | values of type `any` (`relay-ack.ts:36`) | **zapo-side** — §16.5 |
+
+**13 capability · 3 representation · 1 zapo-side.**
+
+### 16.2 The only pair, and why it is not worth taking
+
+`relay-ack.ts:106` and `:118` are the same expression twice:
+
+```ts
+rcNode.content instanceof Uint8Array ? bytesToBase64(rcNode.content) : String(rcNode.content)
+```
+
+**`instanceof` narrowing is not the problem** — probed, four variants:
+
+```
+String(string | Uint8Array)                  compiles
+String(string | Uint8Array | undefined)      compiles
+String(string | Uint8Array | { tag: string })  compiles   <- a RECORD arm is fine
+String(string | Uint8Array | T[])            REFUSES SC1090
+```
+
+The rule is in `lower-exprs.ts` and it is deliberate: the per-union `sc_us_*`
+ToString helper handles `undefined`, `null`, `string`, `f64`, `bool` and plain
+data records, and *"Array, class and every other ref arm stay fenced."* Records
+were added on purpose because they answer a **constant**
+(`Object.prototype.toString`'s text).
+
+An array arm does not. `String([a, b])` is a **recursive join** — every element
+stringified in turn, each of which may itself be a record, an array or a union.
+Adding it means implementing that recursion inside the per-union helper, in both
+emitters. For **two sites** whose arms are `string | WaNode[]`, so the value the
+recursion would faithfully produce is `"[object Object],[object Object]"`.
+
+**Not taken.** It is a real capability gap, it is correctly classified as one,
+and the ratio is wrong. Recorded so the next reader does not re-derive it.
+
+### 16.3 `getStats` needs BOTH halves
+
+`WaSctpRelay.ts:252` is `(pc as any).getStats?.()`, and it is the one site where
+the zapo cast and the compiler gap are **both** load-bearing:
+
+* the cast makes the read a read off `any`, so removing the compiler gap alone
+  changes nothing;
+* `getStats` is genuinely **absent** from `lower-wrtc.ts`'s surface (unlike
+  `connectionState` and `bufferedAmount`, which are present — §15.2), so
+  removing the cast alone changes nothing either.
+
+Both, or neither. And what `getStats()` answers is an `RTCStatsReport` — another
+handle — which zapo immediately walks with `(report: any) => …`, so supporting it
+properly is a second representation question, not a member addition.
+
+### 16.4 `.replace()` is a declared gap, and one probe reading needs its own look
+
+`packages/compiler/surface-manifest.json` — the shipped artifact — is
+unambiguous:
+
+```
+dynamic-only  SC2012  string.prototype.replace
+dynamic-only  SC2012  string.prototype.replaceAll
+```
+
+So `jid.replace('@', ':0@')` refusing is the manifest's recorded answer, not a
+surprise. Classified as a capability gap with a known status.
+
+**One observation I could not resolve and am not asserting.** In
+`drivers/repl.ts`, `s.replace('@', ':0@')` over a `declare const s: string`
+**did not raise the fence**, while the same call over a function parameter
+(`drivers/repl2.ts`) does, three times out of three. Both files analysed clean
+with no `unreached` section, so it is not an unreached-code artefact. If the
+fence really can be missed on some receiver shapes that is a **false green**,
+which matters more than the site it hides. Both probes are committed; this is an
+observation with a reproduction, not a claim.
+
+### 16.5 The last `any` is zapo's type, not a narrowing gap
+
+`relay-ack.ts:36` iterates `child.content` after `Array.isArray(child.content)`.
+The obvious suspicion is that `Array.isArray` fails to narrow. **It does not** —
+probed with `string | Uint8Array | { tag: string }[] | undefined`: the guard
+narrows, the `for…of` compiles, and reading `.tag` off the element compiles. The
+`any` comes from zapo's own declared node type. **zapo-side**, named and stopped
+at.
+
+### 16.6 The honest conclusion
+
+`voip`'s remaining compiler-side wall is **a long tail of 17 sites over 16
+messages**, and it does not have another large shared cause. Ranked, the work
+is: one 2-site item whose fix is recursive `ToString` in a union helper, one
+2-site item that needs a zapo change *and* a compiler change, and thirteen
+singletons — nine of them single stdlib-surface entries (`byteLength`,
+`aes-128-ctr`, `MessageEvent`, `Function.name`, `send of ArrayBuffer`, a
+non-literal `createSocket` options bag, a checked-dynamic listener,
+`.replace()`, and one assignment form), three representation decisions of the
+`Date` kind, and one zapo type.
+
+Whether that is worth doing is a decision about how much single-entry surface
+work `voip` justifies, and it is the user's, not this block's. What is settled
+is the shape: **`voip` is not 45 problems, and it is not one problem. It is 19
+that are not ours, 9 that are a decision already made, and a 17-site tail with
+no twelfth cause in it.**

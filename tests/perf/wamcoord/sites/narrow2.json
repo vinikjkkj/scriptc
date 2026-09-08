@@ -1,0 +1,37 @@
+{
+ "entry": "<blocks>/wamcoord-lab/napp/narrow2.ts",
+ "flags": [],
+ "elapsedMs": 252,
+ "crashed": null,
+ "preflightFailed": false,
+ "stats": {
+  "statementsTotal": 11,
+  "statementsFailed": 2,
+  "statementsIsland": 0,
+  "functionsSkipped": 0
+ },
+ "unreachedStats": {
+  "statementsTotal": 0,
+  "statementsFailed": 0,
+  "statementsIsland": 0,
+  "functionsSkipped": 0
+ },
+ "npmStatic": null,
+ "provenanceNotes": null,
+ "sites": [
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "string conversions of unions with object arms (narrow first: check a discriminant field, or compare with '!== undefined'/'!== null' for unit arms) are not supported yet",
+   "file": "<blocks>/wamcoord-lab/napp/narrow2.ts",
+   "line": 12
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "string conversions of unions with object arms (narrow first: check a discriminant field, or compare with '!== undefined'/'!== null' for unit arms) are not supported yet",
+   "file": "<blocks>/wamcoord-lab/napp/narrow2.ts",
+   "line": 13
+  }
+ ]
+}
