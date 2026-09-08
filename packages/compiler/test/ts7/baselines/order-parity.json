@@ -10791,6 +10791,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/7783-weakmap-keyobject-cache-truthiness.ts": {
+   "order": [
+    "<repo>/tests/corpus/7783-weakmap-keyobject-cache-truthiness.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/7784-typedarray-copywithin.ts": {
    "order": [
     "<repo>/tests/corpus/7784-typedarray-copywithin.ts"
