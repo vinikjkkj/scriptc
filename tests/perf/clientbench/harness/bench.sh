@@ -28,7 +28,7 @@ set -u
 TAG=$1; REPS=$2; shift 2
 ARMS="$*"
 OUT="$LAB/out/bench-$TAG.txt"
-CP="$LAB/bin/cpuphase.exe"   # built from tests/perf/cpuphase/cpuphase.c; see bin/README.md
+CP="$LAB/bin/cpuphase.exe"
 [ -x "$CP" ] || { echo "no cpuphase.exe at $CP -- build it first"; exit 2; }
 
 # Which node runs the fake-server child, named EXPLICITLY. A compiled parent
@@ -60,6 +60,12 @@ export ZAPO_BENCH_JSON=1
   echo "### workload   : $WORKLOAD"
   echo "### started    : $(date)"
   echo "### host-load  : $(nproc 2>/dev/null || echo '?') cpus"
+  # A floor names the host state it was measured in. "Quiet" is a claim, so
+  # record what was actually alive: every node/zig/tsc/vitest process outside
+  # this block, with the CPU seconds it has accumulated. The user's own MCP
+  # servers are not ours to stop and are expected to appear here.
+  echo "### residual   : $(powershell.exe -NoProfile -Command "(Get-CimInstance Win32_Process | Where-Object { \$_.Name -match 'node|zig|tsc|vitest' -and \$_.CommandLine -notlike '*clientbench*' }).Count" 2>/dev/null | tr -d '\r') foreign node/zig/tsc/vitest process(es)"
+  powershell.exe -NoProfile -Command "Get-CimInstance Win32_Process | Where-Object { \$_.Name -match 'node|zig|tsc|vitest' -and \$_.CommandLine -notlike '*clientbench*' } | ForEach-Object { \$c=(Get-Process -Id \$_.ProcessId -ErrorAction SilentlyContinue); '### residual   :   pid ' + \$_.ProcessId + '  ' + \$_.Name + '  cpu ' + ('{0:N1}' -f \$c.TotalProcessorTime.TotalSeconds) + ' s  ' + \$_.CommandLine.Substring(0,[Math]::Min(70,\$_.CommandLine.Length)) }" 2>/dev/null | tr -d '\r'
   echo "### target     : ${SCRIPTC_TARGET}"
   echo "### zig        : $(zig version)"
   echo "### cc         : ${SCRIPTC_CC}"
@@ -84,9 +90,35 @@ for arm in $ARMS; do
   fi
 done
 
+# ORDER ROTATION (a Latin square). A fixed arm order does NOT cancel a
+# position-dependent bias, and this host has one: across two A/A runs of the
+# same binary in a FIXED order, the arm that ran SECOND was faster on
+# recv_group in 6 of 6 reps, on both its wall and its cycles, while every
+# other metric sat at chance (2/6 to 4/6). A paired design only cancels what
+# is symmetric between the positions, so the positions have to be rotated.
+#
+# Rep r starts at arm ((r-1) mod n) and cycles. Over n reps each arm occupies
+# each position exactly once. For n=2 this is plain ABBA, which is what the
+# committed floor was measured under, so a 2-arm floor stays valid for a
+# 4-arm run under the same rule.
+NARMS=$(echo "$ARMS" | wc -w)
+if [ "$REPS" -gt 0 ] && [ $((REPS % NARMS)) -ne 0 ]; then
+  echo "### WARNING   : $REPS reps over $NARMS arms is not a whole number of rotations," >> "$OUT"
+  echo "### WARNING   :   so the position balance is incomplete" >> "$OUT"
+fi
+
 r=1
 while [ "$r" -le "$REPS" ]; do
-  for arm in $ARMS; do
+  ORDER="$ARMS"
+  k=$(( (r - 1) % NARMS )); i=0
+  while [ $i -lt $k ]; do
+    first=$(echo "$ORDER" | cut -d' ' -f1)
+    rest=$(echo "$ORDER" | cut -s -d' ' -f2-)
+    ORDER="$rest $first"
+    i=$((i + 1))
+  done
+  pos=1
+  for arm in $ORDER; do
     label=$(echo "$arm" | cut -d: -f1)
     lane=$(echo "$arm" | cut -d: -f2)
     src=$(echo "$arm" | cut -d: -f3)
@@ -101,9 +133,10 @@ while [ "$r" -le "$REPS" ]; do
       dir="$APP/tree/packages/fake-server/$src"
       set -- node --import tsx "$dir/messaging.bench.ts"
     fi
-    echo "===ARM $label REP $r $(date +%H:%M:%S) lane=$lane src=$src" >> "$OUT"
+    echo "===ARM $label REP $r $(date +%H:%M:%S) lane=$lane src=$src pos=$pos" >> "$OUT"
     ( cd "$dir" && "$CP" -- "$@" ) >> "$OUT" 2>&1
     echo "===ARMEXIT $label REP $r rc=$?" >> "$OUT"
+    pos=$((pos + 1))
   done
   r=$((r + 1))
 done

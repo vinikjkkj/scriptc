@@ -570,3 +570,143 @@ believed.
 * **`store-mongo`, `store-redis`, the provenance spec-twin walk.** Another
   block's; nothing here reaches into them.
 * **The mongo arm's 517 sites.** A recorded one-line change on zapo's side.
+
+---
+
+# 9. THE NUMBERS — first strict bench, quiet window, 2026-09-07
+
+Machine quiet by arrangement: two other blocks idle, no gate running, 27.7 GB
+free RAM. The **six residual processes** in every log header are the user's own
+MCP servers (0.1–22 s accumulated CPU between them) and were not stopped; a
+floor names the host state it was measured in, and this is that state.
+
+Lane, backend, binary and node are on every header. `zig 0.16.0`,
+`x86_64-windows-gnu`, `SCRIPTC_CC=zigcc`, node **v25.9.0 read back from the
+executable that was actually spawned** (`BENCH_NODE`), shipped workload
+(1,000 contacts × 2 devices, 4 groups × 500 members, 1,000 messages/scenario).
+16 runs in the comparison, **all rc=0**.
+
+## 9.1 The gate failed twice first, and both faults were mine
+
+This is the most important part of the section, because the numbers below
+would have been wrong without it.
+
+**Failure 1 — a position-dependent bias the paired design did not cancel.**
+Two A/A runs of the *same binary* in a fixed arm order: the arm that ran
+**second** was faster on `recv_group` in **6 of 6 reps**, on both its wall and
+its cycles, while every other metric sat at chance (2/6 to 4/6). A two-sided
+sign test puts that at p = 0.031. A paired design only cancels what is
+symmetric between the positions, so the positions have to be rotated.
+`bench.sh` now runs rep *r* starting at arm `(r-1) mod n` and cycling — a
+Latin square, and plain ABBA when n = 2. The same metric on the same binary
+re-centred immediately: `cycles:recv_group` 0.9870 → 1.0012, `wall:RECV group`
+0.9565 → 0.9979. Evidence in `runs/order-effect.txt`.
+
+**Failure 2 — `max|r-1|` over 4 reps is not a bound.** With the bias fixed the
+gate still failed on the same metric, so the estimator was the fault: the
+maximum of a small sample under-estimates spread and swings wildly.
+`cycles:recv_group` read **±0.80%** in one 4-rep A/A and **±8.30%** in the very
+next one, same binary. A gate built on the first would have called a 0.9% A/A
+difference a result. `benchstat.mjs` now **pools** every A/A log passed with
+`--floor` and prints the rep count.
+
+**The gate then passed**: an independent 4-rep A/A scored against a pooled
+8-rep floor came back **DRAW on all 13 metrics** (`runs/window-results.txt`,
+section 1). The floor used below pools **12 A/A reps**.
+
+## 9.2 Every lane against node — medians of per-rep ratios, 4 reps
+
+`n/a` where a lane cannot produce the number: the compiled lanes have no
+`process.cpuUsage()` and no V8 heap, which is exactly why CPU and RSS come
+from `cpuphase` for **both** lanes rather than from either lane's own runtime.
+
+| metric | floor | `c` / node | `llvm` / node | `argo` / node |
+|---|---:|---|---|---|
+| **peak RSS** | ±5.55% | **0.323 — 67.7% smaller** | **0.338 — 66.2% smaller** | **0.329 — 67.1% smaller** |
+| cycles send_1to1 | ±3.47% | **0.802 — 19.8% fewer** | **0.795 — 20.5% fewer** | **0.792 — 20.8% fewer** |
+| cycles recv_1to1 | ±6.71% | **0.871 — 12.9% fewer** | **0.874 — 12.6% fewer** | **0.889 — 11.1% fewer** |
+| cycles recv_group | ±8.30% | **0.887 — 11.3% fewer** | **0.908 — 9.3% fewer** | **0.895 — 10.5% fewer** |
+| cycles **send_group** | ±4.01% | **1.858 — 85.8% MORE** | **2.079 — 107.9% MORE** | **1.868 — 86.8% MORE** |
+| wall RECV 1:1 | ±5.73% | 1.038 — **DRAW** | 1.033 — **DRAW** | 1.017 — **DRAW** |
+| wall RECV group | ±9.62% | 1.038 — **DRAW** | 1.073 — **DRAW** | 1.083 — **DRAW** |
+| wall SEND 1:1 | ±3.91% | 1.253 — 25.3% slower | 1.243 — 24.3% slower | 1.238 — 23.8% slower |
+| wall **SEND group** | ±4.92% | 2.768 — 176.8% slower | 3.197 — 219.7% slower | 2.782 — 178.2% slower |
+| cpuMs recv_group | ±29.74% | 0.859 — **DRAW** | 0.958 — **DRAW** | 0.948 — **DRAW** |
+
+Absolute medians, for scale:
+
+| | node | `c` | `llvm` | `argo` |
+|---|---:|---:|---:|---:|
+| peak RSS (MiB) | **500.4** | **161.8** | **169.2** | **164.2** |
+| SEND 1:1 wall (ms) | 1,823.2 | 2,285.6 | 2,280.7 | 2,263.4 |
+| SEND group wall (ms) | 2,109.1 | 5,873.5 | 6,771.9 | 5,927.2 |
+| send_1to1 (Mcycles) | 10,221.7 | 8,200.4 | 8,178.0 | 8,121.8 |
+| send_group (Mcycles) | 14,915.7 | 27,848.8 | 31,115.8 | 28,023.3 |
+
+### The preliminary RSS observation is CONFIRMED
+
+It was flagged as preliminary at 30 MiB against 152 MiB on a reduced workload
+with no floor. At the shipped workload, with a 12-rep floor of ±5.55%, it is
+**500.4 MiB → 161.8 MiB, a ratio of 0.323 with a [0.3226 .. 0.3301] range
+across four reps** — far outside the floor and remarkably tight. **A compiled
+zapo messaging client uses about a third of the memory the same source uses
+under node.** That is the headline.
+
+### Three scenarios out of four cost FEWER cycles compiled
+
+`send_1to1`, `recv_1to1` and `recv_group` all run on 9–21% fewer CPU cycles
+compiled than under node, on every backend. Those are real wins outside the
+floor.
+
+### `send_group` is the whole regression, and it is one phase
+
+`send_group` costs **86–108% more cycles** and **177–220% more wall** compiled.
+Everything else is a win or a draw. This is the phase `tests/perf/cpuphase`
+already attributed to zapo's own curve25519 field arithmetic (44.18% of
+non-idle samples) — the compiled lane pays roughly double for it. It is one
+phase, one code path, and it now has a measured size.
+
+### A dissociation worth naming: fewer cycles, more wall
+
+`SEND 1:1` costs **20% fewer cycles** and **25% more wall** on every compiled
+lane. Fewer cycles with more elapsed time is time spent **not executing** —
+blocked, not spinning. That is the shape the user/kernel split exists to
+separate, and it points at the loop-turn/RPC-depth cost this fleet has already
+identified rather than at codegen quality.
+
+## 9.3 LLVM against C — the shipping backend is slower on `send_group`
+
+| metric | floor | `llvm` / `c` |
+|---|---:|---|
+| cycles send_group | ±4.01% | **1.117 — 11.7% MORE** |
+| wall SEND group | ±4.92% | **1.151 — 15.1% slower** |
+| cpuMs send_group | ±3.85% | **1.117 — 11.7% MORE** |
+| all 10 other metrics | — | **DRAW** |
+
+The lane that ships is a draw with the C lane everywhere **except** the one
+phase that is already the regression, where it is a further 12–15% worse. If
+`send_group` gets attention, this is a second, independent reason to look at
+it — and a reason to measure both backends rather than assuming they agree.
+
+## 9.4 `--npm-static argo-codec` costs nothing measurable at run time
+
+| `argo` / `c` | result |
+|---|---|
+| all 13 metrics | **DRAW** |
+
+Closing the uncoded `argo-codec` module refusal costs **+50,176 bytes (+0.18%)
+of binary** and, at run time, **nothing this instrument can detect** — peak
+RSS, cycles, CPU ms and wall are all draws against the plain C lane on a
+12-rep floor. It remains true that this bench never drives mex, so the ten
+fences inside argo-codec are still unfired: **"argo closed" is a build result,
+not a runtime one.**
+
+## 9.5 What these numbers are not
+
+* Not a build-time comparison. Build times were taken under contention and
+  none is claimed.
+* Not a statement about `store-mongo`, `store-redis` or the provenance
+  spec-twin walk — another block's, untouched.
+* Not a claim about any scenario marked DRAW. `wall:RECV 1:1` and
+  `wall:RECV group` are draws on all three compiled lanes and should be
+  reported as draws, not as small wins.

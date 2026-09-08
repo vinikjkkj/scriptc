@@ -113,18 +113,36 @@ function ratios(runs, base, arm) {
   return out
 }
 
-/** The floor's half-width per metric: how far from 1.0 an A/A pair wandered. */
-function floorOf(path) {
-  const { runs } = parse(path)
-  const labels = [...new Set(runs.map((r) => r.arm))]
-  if (labels.length !== 2) {
-    console.error(`floor log has ${labels.length} arm(s); an A/A floor needs exactly 2`)
-    process.exit(2)
-  }
-  const rs = ratios(runs, labels[0], labels[1])
+/** The floor's half-width per metric: how far from 1.0 an A/A pair wandered.
+ *
+ * POOLED over as many A/A logs as are given, because max|r-1| over a handful
+ * of reps is NOT a bound -- it is the maximum of a small sample, and it moves
+ * enormously. Measured, on this host, same binary both arms: cycles:recv_group
+ * read +-0.80% in one 4-rep A/A and +-8.30% in the very next one. A gate built
+ * on the first would have called a 0.9% A/A difference a result. Pooling every
+ * A/A rep available is the cheapest honest fix; `n` is printed so a reader can
+ * see how thin the estimate still is. */
+function floorOf(paths) {
   const half = new Map()
-  for (const [k, vs] of rs) half.set(k, Math.max(...vs.map((v) => Math.abs(v - 1))))
-  return { half, labels, reps: new Set(runs.map((r) => r.rep)).size, ratios: rs }
+  const counts = new Map()
+  let reps = 0
+  const labelSets = []
+  for (const path of [paths].flat()) {
+    const { runs } = parse(path)
+    const labels = [...new Set(runs.map((r) => r.arm))]
+    if (labels.length !== 2) {
+      console.error(`floor log ${path} has ${labels.length} arm(s); an A/A floor needs exactly 2`)
+      process.exit(2)
+    }
+    labelSets.push(`${path} (${labels.join('/')})`)
+    reps += new Set(runs.map((r) => r.rep)).size
+    for (const [k, vs] of ratios(runs, labels[0], labels[1])) {
+      const w = Math.max(...vs.map((v) => Math.abs(v - 1)))
+      half.set(k, Math.max(half.get(k) ?? 0, w))
+      counts.set(k, (counts.get(k) ?? 0) + vs.length)
+    }
+  }
+  return { half, counts, reps, sources: labelSets }
 }
 
 /* ── report ──────────────────────────────────────────────────────────── */
@@ -148,7 +166,7 @@ function report(logPath, baseLabel, floorPath) {
      * half-width IS the observed deviation, so every metric is a DRAW by
      * construction and the verdict column means nothing. The floor has to be
      * a SEPARATE A/A run. */
-    if (resolve(floorPath) === resolve(logPath) && !process.argv.includes('--degenerate-floor-ok')) {
+    if ([floorPath].flat().some((f) => resolve(f) === resolve(logPath)) && !process.argv.includes('--degenerate-floor-ok')) {
       console.error(
         `\nREFUSING: --floor is the same file as the measurement log.\n` +
           `  A self-referential floor makes every metric a DRAW by construction.\n` +
@@ -158,7 +176,8 @@ function report(logPath, baseLabel, floorPath) {
       process.exit(2)
     }
     fl = floorOf(floorPath)
-    console.log(`floor: A/A over ${fl.reps} rep(s) from ${floorPath}`)
+    console.log(`floor: A/A over ${fl.reps} rep(s), pooled from ${fl.sources.length} log(s):`)
+    for (const src of fl.sources) console.log(`         ${src}`)
     const worst = [...fl.half.entries()].sort((a, b) => b[1] - a[1])[0]
     if (worst) console.log(`       widest metric ${worst[0]} +/- ${(worst[1] * 100).toFixed(2)}%`)
   } else {
@@ -268,6 +287,7 @@ if (argv.includes('--selftest')) {
     process.exit(2)
   }
   const bi = argv.indexOf('--base')
-  const fi = argv.indexOf('--floor')
-  report(log, bi >= 0 ? argv[bi + 1] : undefined, fi >= 0 ? argv[fi + 1] : undefined)
+  const floors = []
+  for (let i = 0; i < argv.length; i++) if (argv[i] === '--floor') floors.push(argv[i + 1])
+  report(log, bi >= 0 ? argv[bi + 1] : undefined, floors.length > 0 ? floors : undefined)
 }

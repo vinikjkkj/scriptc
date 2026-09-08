@@ -1,0 +1,192 @@
+# THE WINDOW RUN, 2026-09-07. Machine quiet by arrangement; the six residual
+# processes in each header are the user's own MCP servers, not ours to stop.
+
+############ 1. THE GATE: independent A/A vs the pooled floor ############
+### bench-tag  : floorv3
+### arms       : a:exe:bb-c b:exe:bb-c
+### reps       : 4
+### workload   : shipped-default (1000x2 contacts, 4x500 groups, 1000 msgs/scenario)
+### started    : Mon Sep  7 23:07:55 ESAST 2026
+### host-load  : 12 cpus
+### residual   : 6 foreign node/zig/tsc/vitest process(es)
+### residual   :   pid 3212  node.exe  cpu 6.7 s  "C:\nvm4w\nodejs\\node.exe"  "C:\nvm4w\nodejs\node_modules\npm\bin\npx
+### residual   :   pid 14504  node.exe  cpu 0.5 s  C:\nvm4w\nodejs\node.exe <home>\AppData\Local\npm-cache\_np
+### residual   :   pid 14916  node.exe  cpu 0.5 s  C:\nvm4w\nodejs\node.exe <home>\AppData\Roaming\npm/node_mo
+### residual   :   pid 35948  node.exe  cpu 0.2 s  C:\nvm4w\nodejs\node.exe <home>/Documents/Programacao/uimcp
+### residual   :   pid 27264  node.exe  cpu 0.3 s  C:\nvm4w\nodejs\node.exe --require <home>\Documents\Program
+### residual   :   pid 27568  node.exe  cpu 22.4 s  C:\nvm4w\nodejs\node.exe --require <home>\Documents\Program
+### target     : x86_64-windows-gnu
+### zig        : 0.16.0
+### cc         : zigcc
+### bench-node : <home>/AppData/Local/nvm/v25.9.0/node -> v25.9.0
+### PATH node  : <home>/AppData/Local/nvm/v25.9.0/node -> v25.9.0
+### arm a : exe  <blocks>/clientbench/lab/out/bb-c/messaging.bench.exe  28345856 bytes  md5 6832f2ef114cfd665748412ddd9ffb39
+### arm b : exe  <blocks>/clientbench/lab/out/bb-c/messaging.bench.exe  28345856 bytes  md5 6832f2ef114cfd665748412ddd9ffb39
+### finished   : Mon Sep  7 23:15:58 ESAST 2026
+
+base arm: a   arms: a, b   reps: 4
+
+REFUSING: --floor is the same file as the measurement log.
+  A self-referential floor makes every metric a DRAW by construction.
+  Take a separate A/A run (the same binary as both arms) and pass that.
+  --degenerate-floor-ok overrides, for inspecting an A/A log's own spread.
+
+############ 2. EVERY LANE vs NODE ############
+### bench-tag  : main
+### arms       : c:exe:bb-c llvm:exe:bb-llvm node:node:bench-bench argo:exe:bb-argo
+### reps       : 4
+### workload   : shipped-default (1000x2 contacts, 4x500 groups, 1000 msgs/scenario)
+### started    : Mon Sep  7 23:16:46 ESAST 2026
+### host-load  : 12 cpus
+### residual   : 6 foreign node/zig/tsc/vitest process(es)
+### residual   :   pid 3212  node.exe  cpu 6.7 s  "C:\nvm4w\nodejs\\node.exe"  "C:\nvm4w\nodejs\node_modules\npm\bin\npx
+### residual   :   pid 14504  node.exe  cpu 0.5 s  C:\nvm4w\nodejs\node.exe <home>\AppData\Local\npm-cache\_np
+### residual   :   pid 14916  node.exe  cpu 0.5 s  C:\nvm4w\nodejs\node.exe <home>\AppData\Roaming\npm/node_mo
+### residual   :   pid 35948  node.exe  cpu 0.2 s  C:\nvm4w\nodejs\node.exe <home>/Documents/Programacao/uimcp
+### residual   :   pid 27264  node.exe  cpu 0.3 s  C:\nvm4w\nodejs\node.exe --require <home>\Documents\Program
+### residual   :   pid 27568  node.exe  cpu 22.5 s  C:\nvm4w\nodejs\node.exe --require <home>\Documents\Program
+### target     : x86_64-windows-gnu
+### zig        : 0.16.0
+### cc         : zigcc
+### bench-node : <home>/AppData/Local/nvm/v25.9.0/node -> v25.9.0
+### PATH node  : <home>/AppData/Local/nvm/v25.9.0/node -> v25.9.0
+### arm c : exe  <blocks>/clientbench/lab/out/bb-c/messaging.bench.exe  28345856 bytes  md5 6832f2ef114cfd665748412ddd9ffb39
+### arm llvm : exe  <blocks>/clientbench/lab/out/bb-llvm/messaging.bench.exe  27048960 bytes  md5 3c488367dd275792cb5a87ad6a84cede
+### arm node : node <blocks>/clientbench/lab/app/tree/packages/fake-server/bench-bench  entry md5 83c65a1665ae60532a233ba7963825b1
+### arm argo : exe  <blocks>/clientbench/lab/out/bb-argo/messaging.bench.exe  28395008 bytes  md5 733b3490f4f3b7ac39bbe941d6dcadb2
+### finished   : Mon Sep  7 23:32:55 ESAST 2026
+
+base arm: node   arms: c, llvm, node, argo   reps: 4
+floor: A/A over 12 rep(s), pooled from 3 log(s):
+         out/bench-floor2.txt (a/b)
+         out/bench-floorv2.txt (a/b)
+         out/bench-floorv3.txt (a/b)
+       widest metric cpuMs:recv_group +/- 29.74%
+
+=== c / node ===
+  metric                         median      [min .. max]   verdict
+  cpuMs:recv_1to1                0.8582   [0.7750 .. 0.8970]   FASTER/SMALLER by 14.2%
+  cpuMs:recv_group               0.8592   [0.8334 .. 0.8946]   DRAW (inside floor +/-29.74%)
+  cpuMs:send_1to1                0.8116   [0.7978 .. 0.8333]   FASTER/SMALLER by 18.8%
+  cpuMs:send_group               1.8421   [1.7133 .. 1.9647]   SLOWER/LARGER by 84.2%
+  cycles:recv_1to1               0.8707   [0.8559 .. 0.8755]   FASTER/SMALLER by 12.9%
+  cycles:recv_group              0.8869   [0.8829 .. 0.8890]   FASTER/SMALLER by 11.3%
+  cycles:send_1to1               0.8016   [0.7927 .. 0.8079]   FASTER/SMALLER by 19.8%
+  cycles:send_group              1.8583   [1.8466 .. 1.8806]   SLOWER/LARGER by 85.8%
+  peakRSS                        0.3231   [0.3226 .. 0.3301]   FASTER/SMALLER by 67.7%
+  wall:RECV 1:1                  1.0384   [1.0121 .. 1.0526]   DRAW (inside floor +/-5.73%)
+  wall:RECV group                1.0384   [1.0318 .. 1.0640]   DRAW (inside floor +/-9.62%)
+  wall:SEND 1:1                  1.2527   [1.2381 .. 1.2631]   SLOWER/LARGER by 25.3%
+  wall:SEND group                2.7676   [2.7436 .. 2.8077]   SLOWER/LARGER by 176.8%
+
+=== llvm / node ===
+  metric                         median      [min .. max]   verdict
+  cpuMs:recv_1to1                0.8584   [0.7750 .. 0.9412]   FASTER/SMALLER by 14.2%
+  cpuMs:recv_group               0.9582   [0.8612 .. 1.0277]   DRAW (inside floor +/-29.74%)
+  cpuMs:send_1to1                0.8033   [0.7978 .. 0.8276]   FASTER/SMALLER by 19.7%
+  cpuMs:send_group               2.0583   [1.9231 .. 2.1804]   SLOWER/LARGER by 105.8%
+  cycles:recv_1to1               0.8742   [0.8642 .. 0.8795]   FASTER/SMALLER by 12.6%
+  cycles:recv_group              0.9075   [0.8979 .. 0.9119]   FASTER/SMALLER by 9.3%
+  cycles:send_1to1               0.7951   [0.7888 .. 0.8048]   FASTER/SMALLER by 20.5%
+  cycles:send_group              2.0794   [2.0649 .. 2.0968]   SLOWER/LARGER by 107.9%
+  peakRSS                        0.3380   [0.3260 .. 0.3401]   FASTER/SMALLER by 66.2%
+  wall:RECV 1:1                  1.0333   [1.0075 .. 1.0448]   DRAW (inside floor +/-5.73%)
+  wall:RECV group                1.0725   [1.0356 .. 1.1136]   DRAW (inside floor +/-9.62%)
+  wall:SEND 1:1                  1.2429   [1.2325 .. 1.2585]   SLOWER/LARGER by 24.3%
+  wall:SEND group                3.1968   [3.1528 .. 3.2338]   SLOWER/LARGER by 219.7%
+
+=== argo / node ===
+  metric                         median      [min .. max]   verdict
+  cpuMs:recv_1to1                0.8720   [0.7875 .. 0.9265]   FASTER/SMALLER by 12.8%
+  cpuMs:recv_group               0.9480   [0.8055 .. 1.0285]   DRAW (inside floor +/-29.74%)
+  cpuMs:send_1to1                0.7978   [0.7869 .. 0.8276]   FASTER/SMALLER by 20.2%
+  cpuMs:send_group               1.8393   [1.7706 .. 1.9608]   SLOWER/LARGER by 83.9%
+  cycles:recv_1to1               0.8894   [0.8747 .. 0.8953]   FASTER/SMALLER by 11.1%
+  cycles:recv_group              0.8953   [0.8893 .. 0.9073]   FASTER/SMALLER by 10.5%
+  cycles:send_1to1               0.7920   [0.7850 .. 0.8003]   FASTER/SMALLER by 20.8%
+  cycles:send_group              1.8684   [1.8508 .. 1.9251]   SLOWER/LARGER by 86.8%
+  peakRSS                        0.3291   [0.3246 .. 0.3397]   FASTER/SMALLER by 67.1%
+  wall:RECV 1:1                  1.0173   [0.9829 .. 1.0358]   DRAW (inside floor +/-5.73%)
+  wall:RECV group                1.0826   [1.0686 .. 1.1301]   DRAW (inside floor +/-9.62%)
+  wall:SEND 1:1                  1.2384   [1.2264 .. 1.2500]   SLOWER/LARGER by 23.8%
+  wall:SEND group                2.7823   [2.7417 .. 2.9021]   SLOWER/LARGER by 178.2%
+
+############ 3. LLVM and ARGO vs the C lane ############
+### bench-tag  : main
+### arms       : c:exe:bb-c llvm:exe:bb-llvm node:node:bench-bench argo:exe:bb-argo
+### reps       : 4
+### workload   : shipped-default (1000x2 contacts, 4x500 groups, 1000 msgs/scenario)
+### started    : Mon Sep  7 23:16:46 ESAST 2026
+### host-load  : 12 cpus
+### residual   : 6 foreign node/zig/tsc/vitest process(es)
+### residual   :   pid 3212  node.exe  cpu 6.7 s  "C:\nvm4w\nodejs\\node.exe"  "C:\nvm4w\nodejs\node_modules\npm\bin\npx
+### residual   :   pid 14504  node.exe  cpu 0.5 s  C:\nvm4w\nodejs\node.exe <home>\AppData\Local\npm-cache\_np
+### residual   :   pid 14916  node.exe  cpu 0.5 s  C:\nvm4w\nodejs\node.exe <home>\AppData\Roaming\npm/node_mo
+### residual   :   pid 35948  node.exe  cpu 0.2 s  C:\nvm4w\nodejs\node.exe <home>/Documents/Programacao/uimcp
+### residual   :   pid 27264  node.exe  cpu 0.3 s  C:\nvm4w\nodejs\node.exe --require <home>\Documents\Program
+### residual   :   pid 27568  node.exe  cpu 22.5 s  C:\nvm4w\nodejs\node.exe --require <home>\Documents\Program
+### target     : x86_64-windows-gnu
+### zig        : 0.16.0
+### cc         : zigcc
+### bench-node : <home>/AppData/Local/nvm/v25.9.0/node -> v25.9.0
+### PATH node  : <home>/AppData/Local/nvm/v25.9.0/node -> v25.9.0
+### arm c : exe  <blocks>/clientbench/lab/out/bb-c/messaging.bench.exe  28345856 bytes  md5 6832f2ef114cfd665748412ddd9ffb39
+### arm llvm : exe  <blocks>/clientbench/lab/out/bb-llvm/messaging.bench.exe  27048960 bytes  md5 3c488367dd275792cb5a87ad6a84cede
+### arm node : node <blocks>/clientbench/lab/app/tree/packages/fake-server/bench-bench  entry md5 83c65a1665ae60532a233ba7963825b1
+### arm argo : exe  <blocks>/clientbench/lab/out/bb-argo/messaging.bench.exe  28395008 bytes  md5 733b3490f4f3b7ac39bbe941d6dcadb2
+### finished   : Mon Sep  7 23:32:55 ESAST 2026
+
+base arm: c   arms: c, llvm, node, argo   reps: 4
+floor: A/A over 12 rep(s), pooled from 3 log(s):
+         out/bench-floor2.txt (a/b)
+         out/bench-floorv2.txt (a/b)
+         out/bench-floorv3.txt (a/b)
+       widest metric cpuMs:recv_group +/- 29.74%
+
+=== llvm / c ===
+  metric                         median      [min .. max]   verdict
+  cpuMs:recv_1to1                1.0079   [0.9844 .. 1.0492]   DRAW (inside floor +/-6.25%)
+  cpuMs:recv_group               1.0941   [1.0333 .. 1.1934]   DRAW (inside floor +/-29.74%)
+  cpuMs:send_1to1                0.9931   [0.9863 .. 1.0000]   DRAW (inside floor +/-4.11%)
+  cpuMs:send_group               1.1172   [1.1098 .. 1.1225]   SLOWER/LARGER by 11.7%
+  cycles:recv_1to1               1.0065   [0.9954 .. 1.0138]   DRAW (inside floor +/-6.71%)
+  cycles:recv_group              1.0238   [1.0123 .. 1.0294]   DRAW (inside floor +/-8.30%)
+  cycles:send_1to1               0.9917   [0.9877 .. 1.0039]   DRAW (inside floor +/-3.47%)
+  cycles:send_group              1.1168   [1.1083 .. 1.1292]   SLOWER/LARGER by 11.7%
+  peakRSS                        1.0352   [1.0106 .. 1.0525]   DRAW (inside floor +/-5.55%)
+  wall:RECV 1:1                  0.9940   [0.9821 .. 1.0084]   DRAW (inside floor +/-5.73%)
+  wall:RECV group                1.0378   [0.9943 .. 1.0467]   DRAW (inside floor +/-9.62%)
+  wall:SEND 1:1                  0.9921   [0.9883 .. 1.0037]   DRAW (inside floor +/-3.91%)
+  wall:SEND group                1.1508   [1.1438 .. 1.1657]   SLOWER/LARGER by 15.1%
+
+=== node / c ===
+  metric                         median      [min .. max]   verdict
+  cpuMs:recv_1to1                1.1653   [1.1148 .. 1.2903]   SLOWER/LARGER by 16.5%
+  cpuMs:recv_group               1.1639   [1.1178 .. 1.1999]   DRAW (inside floor +/-29.74%)
+  cpuMs:send_1to1                1.2321   [1.2000 .. 1.2535]   SLOWER/LARGER by 23.2%
+  cpuMs:send_group               0.5433   [0.5090 .. 0.5837]   FASTER/SMALLER by 45.7%
+  cycles:recv_1to1               1.1485   [1.1421 .. 1.1684]   SLOWER/LARGER by 14.8%
+  cycles:recv_group              1.1276   [1.1249 .. 1.1326]   SLOWER/LARGER by 12.8%
+  cycles:send_1to1               1.2475   [1.2378 .. 1.2615]   SLOWER/LARGER by 24.7%
+  cycles:send_group              0.5381   [0.5318 .. 0.5415]   FASTER/SMALLER by 46.2%
+  peakRSS                        3.0949   [3.0292 .. 3.0996]   SLOWER/LARGER by 209.5%
+  wall:RECV 1:1                  0.9631   [0.9500 .. 0.9880]   DRAW (inside floor +/-5.73%)
+  wall:RECV group                0.9631   [0.9399 .. 0.9692]   DRAW (inside floor +/-9.62%)
+  wall:SEND 1:1                  0.7983   [0.7917 .. 0.8077]   FASTER/SMALLER by 20.2%
+  wall:SEND group                0.3613   [0.3562 .. 0.3645]   FASTER/SMALLER by 63.9%
+
+=== argo / c ===
+  metric                         median      [min .. max]   verdict
+  cpuMs:recv_1to1                1.0245   [0.9844 .. 1.0475]   DRAW (inside floor +/-6.25%)
+  cpuMs:recv_group               1.0853   [0.9354 .. 1.2331]   DRAW (inside floor +/-29.74%)
+  cpuMs:send_1to1                0.9863   [0.9796 .. 0.9931]   DRAW (inside floor +/-4.11%)
+  cpuMs:send_group               0.9980   [0.9900 .. 1.0429]   DRAW (inside floor +/-3.85%)
+  cycles:recv_1to1               1.0204   [1.0084 .. 1.0386]   DRAW (inside floor +/-6.71%)
+  cycles:recv_group              1.0096   [1.0072 .. 1.0207]   DRAW (inside floor +/-8.30%)
+  cycles:send_1to1               0.9904   [0.9778 .. 0.9985]   DRAW (inside floor +/-3.47%)
+  cycles:send_group              1.0013   [0.9960 .. 1.0386]   DRAW (inside floor +/-4.01%)
+  peakRSS                        1.0194   [1.0044 .. 1.0289]   DRAW (inside floor +/-5.55%)
+  wall:RECV 1:1                  0.9776   [0.9529 .. 1.0070]   DRAW (inside floor +/-5.73%)
+  wall:RECV group                1.0427   [1.0357 .. 1.0621]   DRAW (inside floor +/-9.62%)
+  wall:SEND 1:1                  0.9903   [0.9780 .. 0.9988]   DRAW (inside floor +/-3.91%)
+  wall:SEND group                1.0018   [0.9957 .. 1.0444]   DRAW (inside floor +/-4.92%)
