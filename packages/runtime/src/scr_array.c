@@ -607,9 +607,21 @@ bool scr_arr_includes_ref(ScrArr *a, void *v) {
 
 /* ── join ──────────────────────────────────────────────────────────────── */
 
+#ifdef SCR_ARRCEN_ON
+/* Reset by scr_arr_join at entry and read at its exit. Single-threaded by
+ * construction here: the compiled programs this census runs against have
+ * one JS thread, and scr_str_raw -- the only other caller of
+ * scr_join_append -- is never nested inside a join. */
+static long long scr_join_grows, scr_join_moved;
+#endif
+
 static void scr_join_append(char **buf, size_t *len, size_t *cap,
                              const char *bytes, size_t n) {
   if (*len + n > *cap) {
+#ifdef SCR_ARRCEN_ON
+    scr_join_grows++;
+    scr_join_moved += (long long)*len;   /* bytes live when realloc is asked */
+#endif
     size_t cap2 = *cap;
     while (*len + n > cap2) {
       if (cap2 > SIZE_MAX / 2) scr_arr_oom();
@@ -710,6 +722,10 @@ ScrArr *scr_arr_slice(ScrArr *a, double start, double end) {
 }
 
 ScrStr *scr_arr_join(ScrArr *a, ScrStr *sep) {
+#ifdef SCR_ARRCEN_ON
+  scr_join_grows = 0;
+  scr_join_moved = 0;
+#endif
   size_t cap = 64, len = 0;
   char *buf = malloc(cap);
   if (!buf) scr_arr_oom();
@@ -739,8 +755,13 @@ ScrStr *scr_arr_join(ScrArr *a, ScrStr *sep) {
     }
   }
 #ifdef SCR_ARRCEN_ON
+#ifdef SCR_ARRCEN_HAS_JOIN
+  scr_arrcen_note_join((long long)a->len, (long long)len, (int)a->elem,
+                       scr_join_grows, scr_join_moved);
+#else
   scr_arrcen_note(SCR_ARRCEN_JOIN_SRC, (long long)a->len);
   scr_arrcen_note(SCR_ARRCEN_JOIN_OUT, (long long)len);
+#endif
 #endif
   ScrStr *out = scr_str_new(buf, len);
   free(buf);

@@ -92,7 +92,21 @@
  * 32-byte key is distinguishable from a thousand walks of a megabyte. */
 #define SCR_ARRCEN_BYTESGET 7   /* scr_bytes_get, buffer length              */
 #define SCR_ARRCEN_BYTESSET 8   /* scr_bytes_set, buffer length              */
-#define SCR_ARRCEN_SLOTS 9
+/* THE JOIN GROWTH PATH. scr_arr_join builds into a 64-byte malloc grown by
+ * doubling, then scr_str_new COPIES the whole thing again into the result
+ * and frees the buffer -- so every emitted byte is memcpy'd at least twice,
+ * once by scr_join_append and once by scr_str_new, before any realloc
+ * copying. These two slots price the third cost:
+ *   join-grows       growth events per join (realloc calls)
+ *   join-movedbytes  bytes LIVE at each growth, summed -- the exposure if
+ *                    realloc relocates. An UPPER BOUND on realloc copying,
+ *                    because realloc may extend in place and then moves
+ *                    nothing. Named "moved" for what it risks, not what it
+ *                    is; the two are distinguished by the allocator, which
+ *                    this instrument cannot see. */
+#define SCR_ARRCEN_JOIN_GROW 9  /* scr_arr_join, growth events per join      */
+#define SCR_ARRCEN_JOIN_MOVED 10 /* scr_arr_join, bytes live at growth       */
+#define SCR_ARRCEN_SLOTS 11
 
 /* scr_arr_slice by element kind — the ref arm retains per element through a
  * function pointer, the scalar arms could be one memcpy, and which of the two
@@ -143,6 +157,7 @@ SCR_ARRCEN_SHARED long long scr_arrcen_bset_elem[SCR_ARRCEN_ELEMS];
  * Mirrors scr_runtime.h's scr_bytes_{get,set}_inl as of 734015a8. If that
  * arm changes, this changes with it or it silently measures the old one. */
 #define SCR_ARRCEN_HAS_ARM 1
+#define SCR_ARRCEN_HAS_JOIN 1
 #define SCR_ARRCEN_ARMR_HIT_F64 0
 #define SCR_ARRCEN_ARMR_HIT_U8  1
 #define SCR_ARRCEN_ARMR_IDX     2  /* negative, NaN, +-inf, or >= 2^53      */
@@ -151,6 +166,12 @@ SCR_ARRCEN_SHARED long long scr_arrcen_bset_elem[SCR_ARRCEN_ELEMS];
 #define SCR_ARRCEN_ARMR_KIND    5  /* index fine; element kind not u8/f64   */
 #define SCR_ARRCEN_ARMR_VAL     6  /* u8 store, value outside the int64 win */
 #define SCR_ARRCEN_ARMRS 7
+/* scr_arr_join by ELEMENT KIND. Only SCR_ELEM_F64 pays a per-element
+ * scr_f64_to_str; SCR_ELEM_STR is a plain memcpy of bytes that already
+ * exist. Indexed by ScrArrElem in scr_runtime.h's order. */
+#define SCR_ARRCEN_JOINKS 8
+SCR_ARRCEN_SHARED long long scr_arrcen_joink_calls[SCR_ARRCEN_JOINKS];
+SCR_ARRCEN_SHARED long long scr_arrcen_joink_elems[SCR_ARRCEN_JOINKS];
 SCR_ARRCEN_SHARED long long scr_arrcen_armr_get[SCR_ARRCEN_ARMRS];
 SCR_ARRCEN_SHARED long long scr_arrcen_armr_set[SCR_ARRCEN_ARMRS];
 /* a slice whose copied length EQUALS the source length is a whole-array copy
@@ -217,6 +238,29 @@ SCR_ARRCEN_FN void scr_arrcen_note_arm(int slot, long long len, int elem,
   else scr_arrcen_armr_set[r]++;
 }
 
+SCR_ARRCEN_FN void scr_arrcen_note_join(long long srclen, long long outlen,
+                                        int elem, long long grows,
+                                        long long moved) {
+  scr_arrcen_note(SCR_ARRCEN_JOIN_SRC, srclen);
+  scr_arrcen_note(SCR_ARRCEN_JOIN_OUT, outlen);
+  scr_arrcen_note(SCR_ARRCEN_JOIN_GROW, grows);
+  scr_arrcen_note(SCR_ARRCEN_JOIN_MOVED, moved);
+  if (elem < 0 || elem >= SCR_ARRCEN_JOINKS) elem = SCR_ARRCEN_JOINKS - 1;
+  scr_arrcen_joink_calls[elem]++;
+  scr_arrcen_joink_elems[elem] += srclen;
+}
+
+SCR_ARRCEN_FN const char *scr_arrcen_joink_name(int e) {
+  switch (e) {
+    case 0: return "f64";
+    case 1: return "bool";
+    case 2: return "str";
+    case 3: return "arr";
+    case 4: return "bytes";
+  }
+  return "other";
+}
+
 SCR_ARRCEN_FN const char *scr_arrcen_armr_name(int r) {
   switch (r) {
     case SCR_ARRCEN_ARMR_HIT_F64: return "HIT-f64";
@@ -269,6 +313,8 @@ SCR_ARRCEN_FN const char *scr_arrcen_name(int s) {
     case SCR_ARRCEN_SLICE_N: return "slice-n";
     case SCR_ARRCEN_JOIN_SRC: return "join-src";
     case SCR_ARRCEN_JOIN_OUT: return "join-outbytes";
+    case SCR_ARRCEN_JOIN_GROW: return "join-grows";
+    case SCR_ARRCEN_JOIN_MOVED: return "join-movedbytes";
     case SCR_ARRCEN_STR2NUM: return "str2num-bytes";
     case SCR_ARRCEN_JSONSTR: return "jsonstr-bytes";
     case SCR_ARRCEN_MAPKEYS: return "mapkeys-entries";
@@ -479,6 +525,12 @@ SCR_ARRCEN_FN void scr_arrcen_report(void) {
     fprintf(f, "ARRCEN-ARMR %s get=%lld set=%lld\n",
             scr_arrcen_armr_name(i),
             scr_arrcen_armr_get[i], scr_arrcen_armr_set[i]);
+  }
+  for (i = 0; i < SCR_ARRCEN_JOINKS; i++) {
+    if (scr_arrcen_joink_calls[i] == 0) continue;
+    fprintf(f, "ARRCEN-JOINK %s calls=%lld elems=%lld\n",
+            scr_arrcen_joink_name(i),
+            scr_arrcen_joink_calls[i], scr_arrcen_joink_elems[i]);
   }
   for (s = 0; s < SCR_ARRCEN_SLOTS; s++) {
     for (i = 0; i < SCR_ARRCEN_ROWS; i++) {
