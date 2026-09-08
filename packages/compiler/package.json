@@ -1,12 +1,12 @@
 {
-  "name": "@scriptc/compiler",
-  "version": "0.0.21",
+  "name": "@scriptc-fork/compiler",
+  "version": "0.1.0",
   "description": "The scriptc compiler — TypeScript/JavaScript frontend, typed IR, LLVM and C backends",
   "license": "Apache-2.0",
-  "homepage": "https://scriptc.dev",
+  "homepage": "https://github.com/vinikjkkj/scriptc",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/vercel-labs/scriptc.git",
+    "url": "git+https://github.com/vinikjkkj/scriptc.git",
     "directory": "packages/compiler"
   },
   "type": "module",
@@ -33,8 +33,11 @@
     "build": "node node_modules/typescript5/bin/tsc -p tsconfig.json"
   },
   "dependencies": {
-    "@scriptc/runtime": "workspace:*",
+    "@scriptc/runtime": "workspace:@scriptc-fork/runtime@*",
     "typescript": "7.0.2",
     "typescript5": "npm:typescript@5.9.3"
+  },
+  "devDependencies": {
+    "@scriptc/compiler": "workspace:@scriptc-fork/compiler@*"
   }
 }

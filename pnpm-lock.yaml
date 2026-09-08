@@ -36,13 +36,13 @@ importers:
   packages/cli:
     dependencies:
       '@scriptc/compiler':
-        specifier: workspace:*
+        specifier: workspace:@scriptc-fork/compiler@*
         version: link:../compiler
 
   packages/compiler:
     dependencies:
       '@scriptc/runtime':
-        specifier: workspace:*
+        specifier: workspace:@scriptc-fork/runtime@*
         version: link:../runtime
       typescript:
         specifier: 7.0.2
@@ -50,6 +50,10 @@ importers:
       typescript5:
         specifier: npm:typescript@5.9.3
         version: typescript@5.9.3
+    devDependencies:
+      '@scriptc/compiler':
+        specifier: workspace:@scriptc-fork/compiler@*
+        version: 'link:'
 
   packages/runtime: {}
 
