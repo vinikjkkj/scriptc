@@ -84,7 +84,7 @@ Neither is optional.
 | | |
 | --- | --- |
 | repo | `<blocks>\storestatus\wt`, worktree of `<repo>`, branch `block/storestatus` |
-| `main` | **`f91fcd55`** |
+| `main` | **`f91fcd55`** — see the note below on the commit id |
 | compiler build | `packages/compiler` then `packages/cli`, `tsc -p tsconfig.json` under node **v22.18.0**, rc=0/0 |
 | measuring node | **v25.9.0**, read back from the **spawned** process on every run |
 | zig | **0.16.0** — the tree's (`<zapo-work>\tools\zig`), not Chocolatey's 0.15.2, which builds this size class ~20 KB apart |
@@ -94,6 +94,15 @@ Neither is optional.
 | backend | **`--backend c`** on every build in this document |
 | flags | `--provenance-sources`, strict, **no `--best-effort`** |
 | caches | everything under `<blocks>\storestatus\`; `<home>\.cache\scriptc` verified **absent** before the first build and again at the end |
+
+> **The commit id was relabelled after these numbers were taken.** `main` was
+> rewritten while this survey ran, and the base this block branched from,
+> `f91fcd55`, is no longer an ancestor of `main`; its twin on the rewritten
+> history is **`49d8859a1`**, and the two carry the **same tree hash**
+> (`f6295c60ea0d52ea182b4d1f6d430a96df2d899d`) with `packages/` byte-identical.
+> So every number here is a measurement of that tree under either name.
+> Branch `block/storestatus` is based on the pre-rewrite id and will need a
+> rebase before it can be merged.
 
 `--best-effort` is absent on purpose: it defers a statement with no static
 lowering into a runtime throw, so a diagnostic count taken under it is not a
