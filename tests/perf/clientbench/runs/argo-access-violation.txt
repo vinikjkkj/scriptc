@@ -1,0 +1,60 @@
+# The 0xC0000005 on the argo path, SPLIT: it is not zapo's mex machinery.
+#
+# bm-argo4  bench-mex   = direct import('argo-codec') probe + client.message.getReachoutTimelock()
+# bm-argo5  bench-mex2  = the SAME tree with the getReachoutTimelock() call REMOVED.
+#                        Only the direct import probe is left. Built by the CURRENT
+#                        compiler, a different binary, 1038 s.
+
+  bm-argo4  28,403,712 B  md5 931cb864dbeee641df0c2b4d806d7ff1  -> 0xC0000005
+  bm-argo5  28,396,544 B  md5 cf9e16e958a110f7b19876d4f450f351  -> 0xC0000005
+
+# Both die at the same point: after the server registers the w:mex handler and BEFORE
+# the client's first probe line, i.e. at or inside `await import('argo-codec')`.
+# So the fault is in the import itself, not in runMexQuery/parseMexResultPayload/
+# decodeMexArgoResponse. It is also not an artifact of the predecessor's build.
+
+== bm-argo5, init-path census (harness/initpath.mjs) ==
+scanned 16 emitted file(s); 9 distinct fence site(s)
+
+  ON THE MODULE-INIT PATH (fires on first import):
+    (none)
+
+  INSIDE A CALLED FUNCTION (fires only if that function runs):
+    SC1100  node_modules/argo-codec/dist/cjs/decode.js:141
+         in sc_f__x25_m314_readDesc_x25_0
+
+== bm-argo5 run ==
+### lane   : exe
+### dir    : <blocks>/clientbench/lab/app/tree/packages/fake-server/bench-mex2
+### date   : Tue Sep  8 12:01:21 ESAST 2026
+### node   : v25.9.0
+### config : contacts=20 groups=1 members=10 messages=20
+### exe    : <blocks>/clientbench/lab/out/bm-argo5/messaging.bench.exe (28396544 bytes, md5 cf9e16e958a110f7b19876d4f450f351)
+(running fake server in separate process)
+zapo-js messaging bench
+────────────────────────
+  contacts          : 20
+  devices/contact   : 2
+  groups            : 1
+  members/group     : 10
+  messages/scenario : 20
+  scenarios         : send_1to1, recv_1to1, send_group, recv_group
+  store             : memory
+  --expose-gc       : no
+
+[mex-probe] server registered w:mex handler, 114B argo payload
+[server-process] control channel error: read ECONNRESET
+RUN_EXIT=139
+RUN_SECONDS=1
+
+# NOT localized further. gdb on bm-argo4 puts 5 program frames under
+# ntdll!RtlUserFiberStart (so: on a scriptc fiber, where the import's async task runs)
+# with RVAs 875FE7 / 95E506 / 845BDF / 2D7C33 / 526C0 at image base 0x7ff644760000.
+# Naming those needs a PDB reader: llvm-pdbutil is not installed in WSL (rc=127) and
+# there is no llvm-symbolizer under <zapo-work>\tools, so the route
+# tests/perf/pdb-symbols.mjs documents is shut on this host until one is installed.
+
+# It also does NOT reproduce in the small apps (out/da-argo, out/rc-dyn), which run the
+# same namespace builder over the same package, and it does NOT happen in bm-argo3,
+# whose barrel init aborted on a fence. So it needs the barrel init to COMPLETE plus
+# something the bench has and the small apps do not.

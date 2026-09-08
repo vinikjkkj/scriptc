@@ -1030,6 +1030,14 @@ with **0xC0000005** on every run (4/4, including under gdb), immediately after t
 server registers the `w:mex` handler and before the client's first probe line.
 `RUN_EXIT=139`.
 
+**Split, at the cost of one 1,038 s build.** `bench-mex2` is the same tree with the
+`getReachoutTimelock()` call removed, leaving only the direct `import('argo-codec')`
+probe. `bm-argo5` (28,396,544 B, md5 `cf9e16e958a110f7b19876d4f450f351`, built by the
+current compiler, `init-path 0`) dies at **the same point with the same 0xC0000005**.
+So the fault is in the import itself, not in `runMexQuery` / `parseMexResultPayload` /
+`decodeMexArgoResponse`, and it is not an artifact of the predecessor's build.
+`runs/argo-access-violation.txt`.
+
 What is known:
 
 * gdb: 5 program frames under `ntdll!RtlUserFiberStart`, so the fault is on a
