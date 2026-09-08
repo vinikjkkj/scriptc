@@ -1,3 +1,8 @@
+> **STORE ROWS SUPERSEDED, 2026-09-08** -- see
+> `tests/perf/storestatus/CORRECTIONS-pkgstatus-0907.md`. Measured at
+> `3f3dd523`; re-measured at `f91fcd55`, where the three islanded store rows
+> read **39**, not 46, over ~47,000 statements rather than ~1,450.
+
 | package (driver) | binary? | bytes | oracle | build error SITES | compiler's own line | analyse state | stmts reached / failed | blocker SITES | roots | cascade SC2004 | distinct msgs | runtime fences | advisories | unreached SITES |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
 | `store-memory` | **yes** | 17,807,360 | MATCH | 0 | (none - 0 errors) | ANALYSED | 30690 / 0 | 0 | 0 | 0 | 0 | 1 | 0 | 1 |

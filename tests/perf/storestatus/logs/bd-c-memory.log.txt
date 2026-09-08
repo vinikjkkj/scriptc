@@ -1,0 +1,39 @@
+### c-store-memory  src=drivers/store-memory.ts  flags:[--provenance-sources --backend c]
+### node=v25.9.0  zig=0.16.0  tar=tar (GNU tar) 1.35  cc=zigcc  target=x86_64-windows-gnu
+### wt=<blocks>/storestatus/wt  head=f91fcd55
+BUILD rc=0  338s  log=266B
+--- provenance notes (the driver's alias table, in the compiler's words) ---
+1:provenance: zapo-js@1.8.2 ← https://github.com/vinikjkkj/zapo@refs/tags/v1.8.2 @ 757a8071b819 (source compiles statically)
+2:provenance: @zapo-js/native: not installed under the entry's node_modules; island path used
+--- log error SITES: pattern [ - error SCxxxx: ] over 266 bytes ---
+LOG-SITES total=0
+--- uncoded refusals (a refusal need not carry a code) ---
+LOG-UNCODED total=0
+--- compiler's own totals line (cross-check) ---
+BINARY bytes=18467328
+RUN exit=0  stdout=467B
+=== fences: c-store-memory
+    NO emitted TU at all: fence count ABSENT, not 0
+=== fences: store-memory
+    store-memory.c                         bytes=8786903     fences=0      non-SC900x=0
+    store-memory.part1.c                   bytes=8525317     fences=1      non-SC900x=1
+    store-memory.part10.c                  bytes=5490331     fences=0      non-SC900x=0
+    store-memory.part2.c                   bytes=8522977     fences=0      non-SC900x=0
+    store-memory.part3.c                   bytes=8622657     fences=0      non-SC900x=0
+    store-memory.part4.c                   bytes=10700146    fences=0      non-SC900x=0
+    store-memory.part5.c                   bytes=8552728     fences=0      non-SC900x=0
+    store-memory.part6.c                   bytes=8846933     fences=0      non-SC900x=0
+    store-memory.part7.c                   bytes=8547447     fences=0      non-SC900x=0
+    store-memory.part8.c                   bytes=8613089     fences=0      non-SC900x=0
+    store-memory.part9.c                   bytes=8525842     fences=0      non-SC900x=0
+    store-memory.scrh                      bytes=2102033     fences=0      non-SC900x=0
+    TOTAL files=12 bytes=95836403 FENCES=1  NON-SC900x=1
+      1 SC2020
+    --- the non-SC900x fences, verbatim ---
+      1 [SC2020 at <blocks>/storestatus/prov/757a8071b819699437b353865b17cacffe95e9fb/spec/proto/index.js:1]
+ORACLE node v25.9.0 exit=0  stdout=467B
+ORACLE: MATCH (byte-exact)
+--- engine scan: is quickjs linked in? ---
+ENGINE-SCAN c-store-memory.exe           bytes=18467328    quickjs=0 ScrDyn=0 | (non-discriminating: JS_NewRuntime=0 JS_Eval=0 __island_eval=0)
+### DONE c-store-memory rc=0
+GATE-EXIT rc=0

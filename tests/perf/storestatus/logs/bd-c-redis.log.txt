@@ -1,0 +1,50 @@
+### bx-store-redis  src=drivers/_x-redis-plus-zapo.ts  flags:[--provenance-sources --backend c]
+### node=v25.9.0  zig=0.16.0  tar=tar (GNU tar) 1.35  cc=zigcc  target=x86_64-windows-gnu
+### wt=<blocks>/storestatus/wt  head=f91fcd55
+BUILD rc=1  591s  log=19574B
+--- provenance notes (the driver's alias table, in the compiler's words) ---
+1:provenance: zapo-js@1.8.2 ← https://github.com/vinikjkkj/zapo@refs/tags/v1.8.2 @ 757a8071b819 (source compiles statically)
+2:provenance: @zapo-js/store-redis@1.3.0 ← https://github.com/vinikjkkj/zapo@refs/tags/v1.8.0 @ 9a49e1fffdec (source compiles statically)
+3:provenance: argo-codec@0.2.1: no provenance attestation published; island path used
+4:provenance: @zapo-js/native: not installed under the entry's node_modules; island path used
+5:provenance: ioredis@5.11.1: no provenance attestation published; island path used
+6:provenance: 41 alias key(s) are spelled by more than one mapped package with different targets ('zapo-js/store', 'zapo-js/signal', 'zapo-js/auth', 'zapo-js/appstate', 'zapo-js/retry', …); tsconfig "paths" is one table per program, so zapo-js's answer is used for all of them and @zapo-js/store-redis compile against zapo-js's checkout for those specifiers
+--- log error SITES: pattern [ - error SCxxxx: ] over 19574 bytes ---
+LOG-SITES total=39
+     19 LOG-CODE  SC2004
+     16 LOG-CODE  SC1090
+      2 LOG-CODE  SC2013
+      2 LOG-CODE  SC2011
+--- uncoded refusals (a refusal need not carry a code) ---
+LOG-UNCODED total=0
+--- compiler's own totals line (cross-check) ---
+325:39 errors.
+BINARY: none (rc=1) -- FENCE COUNT n/a, NOT 0; ENGINE SCAN n/a
+--- last 25 log lines ---
+     |                                            ^~~~~~~~~~~~~~
+  16 |     public constructor(options: WaRedisStorageOptions) {
+
+<blocks>/storestatus/prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/packages/store-redis/src/session.store.ts:14:42 - error SC1090: extending classes not declared in the program ('BaseRedisStore') is not supported yet
+
+  13 | 
+  14 | export class WaSessionRedisStore extends BaseRedisStore implements WaSessionStore {
+     |                                          ^~~~~~~~~~~~~~
+  15 |     public constructor(options: WaRedisStorageOptions) {
+
+<blocks>/storestatus/prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/packages/store-redis/src/signal.store.ts:8:41 - error SC1090: extending classes not declared in the program ('BaseRedisStore') is not supported yet
+
+  7 | 
+  8 | export class WaSignalRedisStore extends BaseRedisStore implements WaSignalStore {
+    |                                         ^~~~~~~~~~~~~~
+  9 |     public constructor(options: WaRedisStorageOptions) {
+
+<blocks>/storestatus/prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/packages/store-redis/src/thread.store.ts:64:41 - error SC1090: extending classes not declared in the program ('BaseRedisStore') is not supported yet
+
+  63 | 
+  64 | export class WaThreadRedisStore extends BaseRedisStore implements WaThreadStore {
+     |                                         ^~~~~~~~~~~~~~
+  65 |     public constructor(options: WaRedisStorageOptions) {
+
+39 errors.
+### DONE bx-store-redis rc=1
+GATE-EXIT rc=0

@@ -1,0 +1,4 @@
+### analyse b-store-sqlite  src=drivers/store-sqlite.ts  flags:[--provenance-sources]  head=f91fcd55  node=v25.9.0
+sites=61 preflightFailed=false total=46963 failed=0 island=0 ms=620888
+### analyse b-store-sqlite rc=0  624s  json=33738B
+GATE-EXIT rc=0

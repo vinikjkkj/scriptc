@@ -1,0 +1,4 @@
+### analyse c-store-postgres  src=drivers/_x-postgres-plus-zapo.ts  flags:[--provenance-sources]  head=f91fcd55  node=v25.9.0
+sites=106 preflightFailed=false total=46993 failed=19 island=0 ms=668539
+### analyse c-store-postgres rc=0  670s  json=46259B
+GATE-EXIT rc=0

@@ -1,0 +1,22 @@
+{
+ "entry": "<blocks>/storestatus/lab/napp/drivers/store-sqlite.ts",
+ "flags": [
+  "--provenance-sources"
+ ],
+ "elapsedMs": 219760,
+ "crashed": {
+  "name": "Error",
+  "message": "EPIPE: broken pipe, write",
+  "stack": "Error: EPIPE: broken pipe, write\n    at writeSync (node:fs:912:3)\n    at SyncRpcChannel.writeAllBuf (file:///<blocks>/storestatus/wt/node_modules/.pnpm/typescript@7.0.2/node_modules/typescript/dist/api/syncChannel.js:495:27)\n    at SyncRpcChannel.writeTuple (file:///<blocks>/storestatus/wt/node_modules/.pnpm/typescript@7.0.2/node_modules/typescript/dist/api/syncChannel.js:314:18)\n    at SyncRpcChannel.requestBytesSync (file:///<blocks>/storestatus/wt/node_modules/.pnpm/typescript@7.0.2/node_modules/typescript/dist/api/syncChannel.js:221:14)\n    at SyncRpcChannel.requestSync (file:///<blocks>/storestatus/wt/node_modules/.pnpm/typescript@7.0.2/node_modules/typescript/dist/api/syncChannel.js:164:29)"
+ },
+ "preflightFailed": null,
+ "stats": null,
+ "unreachedStats": null,
+ "npmStatic": null,
+ "provenanceNotes": [
+  "@zapo-js/store-sqlite@1.2.0 <- 9a49e1fffdec",
+  "note: argo-codec@0.2.1: no provenance attestation published; island path used",
+  "note: @zapo-js/native: not installed under the entry's node_modules; island path used"
+ ],
+ "sites": []
+}

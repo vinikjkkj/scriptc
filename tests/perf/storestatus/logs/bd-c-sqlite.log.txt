@@ -1,0 +1,25 @@
+### c-store-sqlite  src=drivers/_x-sqlite-plus-zapo.ts  flags:[--provenance-sources --backend c]
+### node=v25.9.0  zig=0.16.0  tar=tar (GNU tar) 1.35  cc=zigcc  target=x86_64-windows-gnu
+### wt=<blocks>/storestatus/wt  head=f91fcd55
+BUILD rc=0  982s  log=66396B
+--- provenance notes (the driver's alias table, in the compiler's words) ---
+1:provenance: zapo-js@1.8.2 ← https://github.com/vinikjkkj/zapo@refs/tags/v1.8.2 @ 757a8071b819 (source compiles statically)
+2:provenance: @zapo-js/store-sqlite@1.2.0 ← https://github.com/vinikjkkj/zapo@refs/tags/v1.8.0 @ 9a49e1fffdec (source compiles statically)
+3:provenance: argo-codec@0.2.1: no provenance attestation published; island path used
+4:provenance: @zapo-js/native: not installed under the entry's node_modules; island path used
+5:provenance: 41 alias key(s) are spelled by more than one mapped package with different targets ('zapo-js/store', 'zapo-js/signal', 'zapo-js/auth', 'zapo-js/appstate', 'zapo-js/retry', …); tsconfig "paths" is one table per program, so zapo-js's answer is used for all of them and @zapo-js/store-sqlite compile against zapo-js's checkout for those specifiers
+--- log error SITES: pattern [ - error SCxxxx: ] over 66396 bytes ---
+LOG-SITES total=0
+--- uncoded refusals (a refusal need not carry a code) ---
+LOG-UNCODED total=0
+--- compiler's own totals line (cross-check) ---
+BINARY bytes=28903936
+RUN exit=0  stdout=282B
+=== fences: c-store-sqlite
+    NO emitted TU at all: fence count ABSENT, not 0
+ORACLE node v25.9.0 exit=0  stdout=282B
+ORACLE: MATCH (byte-exact)
+--- engine scan: is quickjs linked in? ---
+ENGINE-SCAN c-store-sqlite.exe           bytes=28903936    quickjs=0 ScrDyn=0 | (non-discriminating: JS_NewRuntime=0 JS_Eval=0 __island_eval=0)
+### DONE c-store-sqlite rc=0
+GATE-EXIT rc=0

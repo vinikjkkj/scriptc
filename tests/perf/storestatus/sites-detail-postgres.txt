@@ -1,0 +1,144 @@
+
+=== c-store-postgres  [ANALYSED]  ms=668539
+    stmts total=46993 failed=19 island=0 fnsSkipped=0   | unreached total=2472 failed=7
+    BLOCKER SITES=39  (roots=20  cascade/SC2004=19)   distinct messages=9   runtimeFence=1  advisory=53   unreached-sites=13
+    prov: zapo-js@1.8.2 <- 757a8071b819
+    prov: @zapo-js/store-postgres@1.2.0 <- 9a49e1fffdec
+    prov: note: argo-codec@0.2.1: no provenance attestation published; island path used
+    prov: note: @zapo-js/native: not installed under the entry's node_modules; island path used
+    prov: note: pg@8.23.0: no provenance attestation published; island path used
+    prov: note: 41 alias key(s) are spelled by more than one mapped package with different targets ('zapo-js/store', 'zapo-js/signal', 'zapo-js/auth', 'zapo-js/appstate', 'zapo-js/retry', …); tsconfig "paths" is one table per program, so zapo-js's answer is used for all of them and @zapo-js/store-postgres compile against zapo-js's checkout for those specifiers
+    -- BLOCKER SITES BY OWNER (whose source the site is in):
+          20  the driver  (roots=1 cascade=19)
+          19  @zapo-js/store-postgres@1.2.0 :: packages/store-postgres  (roots=19 cascade=0)
+    -- BLOCKER ROOTS by code (SITES):
+          16 SC1090  files=16
+             @zapo-js/store-postgres@1.2.0/packages/store-postgres/src/thread.store.ts:1
+             @zapo-js/store-postgres@1.2.0/packages/store-postgres/src/signal.store.ts:1
+             @zapo-js/store-postgres@1.2.0/packages/store-postgres/src/session.store.ts:1
+             @zapo-js/store-postgres@1.2.0/packages/store-postgres/src/sender-key.store.ts:1
+             @zapo-js/store-postgres@1.2.0/packages/store-postgres/src/privacy-token.store.ts:1
+             @zapo-js/store-postgres@1.2.0/packages/store-postgres/src/pre-key.store.ts:1
+             @zapo-js/store-postgres@1.2.0/packages/store-postgres/src/message.store.ts:1
+             @zapo-js/store-postgres@1.2.0/packages/store-postgres/src/identity.store.ts:1
+             @zapo-js/store-postgres@1.2.0/packages/store-postgres/src/contact.store.ts:1
+             @zapo-js/store-postgres@1.2.0/packages/store-postgres/src/auth.store.ts:1
+             @zapo-js/store-postgres@1.2.0/packages/store-postgres/src/appstate.store.ts:1
+             @zapo-js/store-postgres@1.2.0/packages/store-postgres/src/retry.store.ts:1
+             @zapo-js/store-postgres@1.2.0/packages/store-postgres/src/message-secret.store.ts:1
+             @zapo-js/store-postgres@1.2.0/packages/store-postgres/src/group-metadata.store.ts:1
+             @zapo-js/store-postgres@1.2.0/packages/store-postgres/src/device-list.store.ts:1
+             @zapo-js/store-postgres@1.2.0/packages/store-postgres/src/chat-metadata.store.ts:1
+               16x  extending classes not declared in the program ('BasePgStore') is not supported yet
+           2 SC2013  files=2
+             @zapo-js/store-postgres@1.2.0/packages/store-postgres/src/BasePgStore.ts:1
+             @zapo-js/store-postgres@1.2.0/packages/store-postgres/src/connection.ts:1
+                1x  values from the 'pg' package run in the embedded dynamic engine, which this build does not include
+                1x  importing 'pg' requires the embedded dynamic engine, which this build does not include — the package's implementation runs there
+           2 SC2011  files=2
+             <app>/drivers/_x-postgres-plus-zapo.ts:1
+             @zapo-js/store-postgres@1.2.0/packages/store-postgres/src/createPostgresStore.ts:1
+                1x  values of type 'WaPgStoreResult' have no static representation but run in the embedded dynamic engine, which this build does not include
+                1x  values of type 'WaPgStoreConfig' have no static representation but run in the embedded dynamic engine, which this build does not include
+    -- BLOCKER CASCADE (SC2004) by code (SITES):
+          19 SC2004  files=1
+             <app>/drivers/_x-postgres-plus-zapo.ts:19
+               11x  uses of 's' inherit the blocker on its declaration
+                5x  uses of 'c' inherit the blocker on its declaration
+                2x  uses of 'r' inherit the blocker on its declaration
+                1x  uses of 'createPostgresStore' inherit the blocker on its declaration
+    -- RUNTIME FENCES by code (SITES):
+           1 SC2020  files=1
+             zapo-js@1.8.2/spec/proto/index.js:1
+                1x  'require() with a run-time specifier' is part of the standard library types but has no scriptc lowering yet
+    -- ADVISORIES by code (SITES):
+          52 SC6004  files=26
+             zapo-js@1.8.2/src/client/coordinators/WaMessageDispatchCoordinator.ts:9
+             zapo-js@1.8.2/src/transport/node/builders/message.ts:4
+             zapo-js@1.8.2/src/client/newsletter/messaging.ts:4
+             zapo-js@1.8.2/src/transport/noise/WaClientPayload.ts:3
+             zapo-js@1.8.2/src/client/coordinators/WaAppStateMutationCoordinator.ts:3
+             zapo-js@1.8.2/src/media/transfer/WaMediaTransferClient.ts:3
+             zapo-js@1.8.2/src/signal/session/SignalProtocol.ts:2
+             zapo-js@1.8.2/src/auth/WaAuthClient.ts:2
+             zapo-js@1.8.2/src/client/coordinators/WaBotCoordinator.ts:2
+             zapo-js@1.8.2/src/client/messaging/link-preview.ts:2
+             zapo-js@1.8.2/src/client/WaClientFactory.ts:2
+             zapo-js@1.8.2/src/client/WaClient.ts:2
+             zapo-js@1.8.2/src/message/context-info.ts:1
+             zapo-js@1.8.2/src/crypto/nativeBackend.ts:1
+             zapo-js@1.8.2/src/client/persistence/group-history.ts:1
+             zapo-js@1.8.2/src/client/persistence/history-sync.ts:1
+             zapo-js@1.8.2/src/message/encode/content.ts:1
+             zapo-js@1.8.2/src/appstate/sync/WaAppStateSyncClient.ts:1
+             zapo-js@1.8.2/src/signal/session/SignalSession.ts:1
+             zapo-js@1.8.2/src/signal/session/SignalRatchet.ts:1
+             zapo-js@1.8.2/src/client/connection/WaConnectionManager.ts:1
+             zapo-js@1.8.2/src/message/crypto/addon-crypto.ts:1
+             zapo-js@1.8.2/src/client/newsletter/content.ts:1
+             zapo-js@1.8.2/src/client/coordinators/WaNewsletterCoordinator.ts:1
+             zapo-js@1.8.2/src/client/coordinators/WaStatusCoordinator.ts:1
+             zapo-js@1.8.2/src/client/events/dirty.ts:1
+                5x  this flow COPIES the record into a different shape, and the copy ends the members 'generateStanzaId', 'getMediaConn', 'linkPreviewResolver', 'mediaTra
+                4x  this flow COPIES the record into a different shape, and the copy ends the members 'additionalAttributes', 'contextInfo', 'customNodes', 'disableDirect
+                3x  this flow COPIES the record into a different shape, and the copy ends the member 'prevSessions'
+                2x  this flow COPIES the record into a different shape, and the copy ends the members 'aiThreadId', 'aiThreadType', 'botJid', 'capabilities', 'extraMentio
+                2x  this flow COPIES the record into a different shape, and the copy ends the members 'fromMe', 'isBroadcast', 'isGroup', 'isNewsletter', 'participantAlt'
+                1x  this flow COPIES the record into a different shape ('{ high: number; low: number; toNumber: () => number; unsigned: boolean }' into '{ toNumber: () =>
+                1x  this flow COPIES the record into a different shape, and the copy ends the member 'initSync'
+                1x  this flow COPIES the record into a different shape, and the copy ends the members '$unknowns', 'contextInfo', 'mediaKeyTimestamp', 'messageHistoryMeta
+                1x  this flow COPIES the record into a different shape, and the copy ends the members '$unknowns', 'chunkOrder', 'encHandle', 'fileLength', 'fullHistorySy
+                1x  this flow COPIES the record into a different shape, and the copy ends the members 'annotations', 'caption', 'externalShareFullVideoDurationInSeconds',
+                1x  this flow COPIES the record into a different shape, and the copy ends the member 'operationCode'
+                1x  this flow COPIES the record into a different shape ('{ id: number; publicKey: Uint8Array; signature: Uint8Array }' into '{ id: number; publicKey: Uint
+                1x  this flow COPIES the record into a different shape, and the copy ends the members 'connectAttemptCount', 'device', 'lidDbMigrated', 'loginCounter', 'u
+                1x  this flow COPIES the record into a different shape, and the copy ends the members 'buildHash', 'deviceProps', 'registrationInfo', 'requireFullSync', '
+                1x  this flow COPIES the record into a different shape, and the copy ends the members 'buildHash', 'deviceProps', 'passive', 'pull', 'registrationInfo', '
+                1x  this flow COPIES the record into a different shape, and the copy ends the members 'dangerous', 'mobileTransport', 'requireFullSync', 'version'
+                1x  this flow COPIES the record into a different shape ('{ browser: string; osDisplayName: string; osVersion: null | string; platform: string }' into '{ b
+                1x  this flow COPIES the record into a different shape ('{ linkPreview: unknown; mediaDownload: unknown; mediaUpload: unknown; ws: unknown }' into '{ ws: 
+                1x  this flow COPIES the record into a different shape, and the copy ends the members '$unknowns', 'agentAction', 'aiThreadRenameAction', 'androidUnsuppor
+                1x  this flow COPIES the record into a different shape, and the copy ends the members '$unknowns', 'agentAction', 'aiThreadRenameAction', 'androidUnsuppor
+                1x  this flow COPIES the record into a different shape, and the copy ends the members '$unknowns', 'agentAction', 'aiThreadRenameAction', 'androidUnsuppor
+                1x  this flow COPIES the record into a different shape, and the copy ends the members 'ciphertext', 'iv', 'messageSecret', 'parentMsgOriginalSender'
+                1x  this flow COPIES the record into a different shape, and the copy ends the members 'agent', 'maxBytes', 'signal'
+                1x  this flow COPIES the record into a different shape, and the copy ends the members 'agent', 'body', 'contentLength', 'contentType', 'maxBytes', 'method
+                1x  this flow COPIES the record into a different shape, and the copy ends the members 'fileEncSha256', 'fileSha256', 'mediaKey', 'mediaType'
+                1x  this flow COPIES the record into a different shape, and the copy ends the members 'botParticipants', 'customNodes', 'decryptFail', 'deviceIdentity', '
+                1x  this flow COPIES the record into a different shape, and the copy ends the members 'additionalAttributes', 'addressingMode', 'decryptFail', 'edit', 'id
+                1x  this flow COPIES the record into a different shape, and the copy ends the members 'botParticipants', 'customNodes', 'decryptFail', 'deviceIdentity', '
+                1x  this flow COPIES the record into a different shape, and the copy ends the members 'additionalAttributes', 'addressingMode', 'decryptFail', 'edit', 'gr
+                1x  this flow COPIES the record into a different shape, and the copy ends the members 'isBroadcast', 'isGroup', 'isNewsletter', 'participantAlt', 'recipie
+                1x  this flow COPIES the record into a different shape, and the field 'botMessageSecret' is written somewhere in this program
+                1x  this flow COPIES the record into a different shape, and the copy ends the member 'jid'
+                1x  this flow COPIES the record into a different shape ('{ address: { device: number; server: string | undefined; user: string }; ciphertext: Uint8Array; 
+                1x  this flow COPIES the record into a different shape, and the copy ends the member 'session'
+                1x  this flow COPIES the record into a different shape, and the copy ends the members 'disappearingModeInitiator', 'disappearingModeTrigger', 'expirationS
+                1x  this flow COPIES the record into a different shape, and the fields 'description', 'jpegThumbnail', 'mediaKey', 'mediaKeyTimestamp', 'thumbnailDirectPa
+                1x  this flow COPIES the record into a different shape ('{ protocols: string[]; timestamp: number; type: string }' into '{ timestamp: number; type: string
+                1x  this flow COPIES the record into a different shape ('{ bytes: Uint8Array; height: number | undefined; width: number | undefined }' into '{ height: num
+                1x  this flow COPIES the record into a different shape ('{ contentLength: number; height: number | undefined; stream: Readable; width: number | undefined 
+                1x  this flow COPIES the record into a different shape, and the copy ends the members 'addons', 'appStateSyncTimeoutMs', 'chatEvents', 'chatSocketUrls', '
+                1x  this flow COPIES the record into a different shape, and the copy ends the members 'disableAppStateMacVerification', 'disableMediaMacVerification', 'di
+           1 SC6003  files=1
+             zapo-js@1.8.2/src/auth/credentials-flow.ts:1
+                1x  this projection of '%m119.WaMobileTcpSocket' COPIES the field 'readyState', and a method of '%m119.WaMobileTcpSocket' writes it
+    -- UNREACHED by code (SITES):
+           6 SC2013  files=3
+             @zapo-js/store-postgres@1.2.0/packages/store-postgres/src/helpers.ts:3
+             @zapo-js/store-postgres@1.2.0/packages/store-postgres/src/connection.ts:2
+             @zapo-js/store-postgres@1.2.0/packages/store-postgres/src/createPostgresStore.ts:1
+                6x  values from the 'pg' package run in the embedded dynamic engine, which this build does not include
+           4 SC1090  files=2
+             zapo-js@1.8.2/src/infra/log/PinoLogger.ts:3
+             zapo-js@1.8.2/src/media/transfer/WaMediaTransferClient.ts:1
+                2x  dynamic keyed reads of '{ child: ({ [key: string]: unknown }) => ... | undefined; debug: (...unknown) => void; error: (...unknown) => void; info: (...
+                1x  'Promise<{ fileEncSha256: Uint8Array; fileSha256: Uint8Array; firstFrameSidecar: Uint8Array | undefined; plaintextLength: number; streamingSidecar: Ui
+                1x  Function.prototype.call on a compiled function value (compiled calls are direct — no runtime 'this' or arguments object exists to re-route; spell the 
+           2 SC2020  files=1
+             zapo-js@1.8.2/src/client/persistence/companion-host.ts:2
+                1x  'writeFile with 3 arguments' is part of the standard library types but has no scriptc lowering yet
+                1x  'fs/promises.rename' is typed by @types/node but has no scriptc lowering yet
+           1 SC1063  files=1
+             zapo-js@1.8.2/src/client/persistence/companion-host.ts:1
+                1x  this use of a catch binding is not supported yet

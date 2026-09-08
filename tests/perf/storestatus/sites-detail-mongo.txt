@@ -1,0 +1,1134 @@
+
+=== c-store-mongo  [ANALYSED]  ms=483964
+    stmts total=48647 failed=177 island=0 fnsSkipped=0   | unreached total=7199 failed=1153
+    BLOCKER SITES=284  (roots=244  cascade/SC2004=40)   distinct messages=180   runtimeFence=1  advisory=55   unreached-sites=1496
+    prov: zapo-js@1.8.2 <- 757a8071b819
+    prov: @zapo-js/store-mongo@1.2.0 <- 9a49e1fffdec
+    prov: mongodb@6.21.0 <- 387b6dd29e0a
+    prov: bson@6.10.4 <- 302f96e9591c
+    prov: mongodb-connection-string-url@3.0.2 <- 26e2c12671f3
+    prov: note: argo-codec@0.2.1: no provenance attestation published; island path used
+    prov: note: @zapo-js/native: not installed under the entry's node_modules; island path used
+    prov: note: mongodb-client-encryption: not installed under the entry's node_modules; island path used
+    prov: note: kerberos: not installed under the entry's node_modules; island path used
+    prov: note: @mongodb-js/zstd: not installed under the entry's node_modules; island path used
+    prov: note: @aws-sdk/credential-providers: not installed under the entry's node_modules; island path used
+    prov: note: gcp-metadata: not installed under the entry's node_modules; island path used
+    prov: note: snappy: not installed under the entry's node_modules; island path used
+    prov: note: socks: not installed under the entry's node_modules; island path used
+    prov: note: aws4: not installed under the entry's node_modules; island path used
+    prov: note: whatwg-url@14.2.0: no provenance attestation published; island path used
+    prov: note: @mongodb-js/saslprep: skipped — provenance package limit (16) reached; island path used
+    prov: note: 41 alias key(s) are spelled by more than one mapped package with different targets ('zapo-js/store', 'zapo-js/signal', 'zapo-js/auth', 'zapo-js/appstate', 'zapo-js/retry', …); tsconfig "paths" is one table per program, so zapo-js's answer is used for all of them and @zapo-js/store-mongo compile against zapo-js's checkout for those specifiers
+    -- BLOCKER SITES BY OWNER (whose source the site is in):
+         197  mongodb@6.21.0 :: src/  (roots=165 cascade=32)
+          81  bson@6.10.4 :: src/  (roots=76 cascade=5)
+           3  the driver  (roots=0 cascade=3)
+           2  mongodb-connection-string-url@3.0.2 :: src/  (roots=2 cascade=0)
+           1  @zapo-js/store-mongo@1.2.0 :: packages/store-mongo  (roots=1 cascade=0)
+    -- BLOCKER ROOTS by code (SITES):
+         144 SC1090  files=52
+             mongodb@6.21.0/src/error.ts:14
+             mongodb@6.21.0/src/read_preference.ts:9
+             bson@6.10.4/src/long.ts:8
+             bson@6.10.4/src/parser/on_demand/parse_to_elements.ts:8
+             mongodb@6.21.0/src/operations/operation.ts:8
+             bson@6.10.4/src/decimal128.ts:7
+             bson@6.10.4/src/objectid.ts:7
+             mongodb@6.21.0/src/operations/command.ts:6
+             mongodb@6.21.0/src/utils.ts:5
+             mongodb@6.21.0/src/operations/update.ts:4
+             mongodb@6.21.0/src/bson.ts:4
+             mongodb@6.21.0/src/cmap/wire_protocol/responses.ts:3
+             mongodb@6.21.0/src/operations/delete.ts:3
+             bson@6.10.4/src/regexp.ts:3
+             bson@6.10.4/src/timestamp.ts:3
+             mongodb@6.21.0/src/cmap/connection.ts:3
+             mongodb@6.21.0/src/cmap/auth/mongodb_oidc/azure_machine_workflow.ts:3
+             bson@6.10.4/src/extended_json.ts:3
+             mongodb@6.21.0/src/operations/indexes.ts:3
+             bson@6.10.4/src/error.ts:2
+             mongodb@6.21.0/src/operations/insert.ts:2
+             mongodb@6.21.0/src/cmap/auth/mongodb_oidc/gcp_machine_workflow.ts:2
+             mongodb@6.21.0/src/cmap/auth/mongodb_oidc.ts:2
+             mongodb@6.21.0/src/mongo_client_auth_providers.ts:2
+             mongodb@6.21.0/src/mongo_logger.ts:2
+             mongodb@6.21.0/src/operations/drop.ts:2
+             mongodb@6.21.0/src/operations/find_and_modify.ts:1
+             mongodb-connection-string-url@3.0.2/src/index.ts:1
+             mongodb@6.21.0/src/client-side-encryption/errors.ts:1
+             mongodb@6.21.0/src/cmap/errors.ts:1
+             mongodb@6.21.0/src/client-side-encryption/crypto_callbacks.ts:1
+             mongodb@6.21.0/src/cmap/auth/mongodb_aws.ts:1
+             bson@6.10.4/src/parser/utils.ts:1
+             bson@6.10.4/src/utils/node_byte_utils.ts:1
+             mongodb@6.21.0/src/operations/aggregate.ts:1
+             mongodb@6.21.0/src/operations/list_databases.ts:1
+             mongodb@6.21.0/src/operations/remove_user.ts:1
+             mongodb@6.21.0/src/operations/get_more.ts:1
+             mongodb@6.21.0/src/operations/kill_cursors.ts:1
+             mongodb@6.21.0/src/cursor/abstract_cursor.ts:1
+             mongodb@6.21.0/src/operations/count.ts:1
+             mongodb@6.21.0/src/operations/find.ts:1
+             mongodb@6.21.0/src/operations/distinct.ts:1
+             mongodb@6.21.0/src/operations/estimated_document_count.ts:1
+             mongodb@6.21.0/src/operations/rename.ts:1
+             mongodb@6.21.0/src/operations/list_collections.ts:1
+             mongodb@6.21.0/src/operations/create_collection.ts:1
+             mongodb@6.21.0/src/operations/stats.ts:1
+             mongodb@6.21.0/src/cmap/commands.ts:1
+             mongodb@6.21.0/src/cmap/auth/mongodb_oidc/token_machine_workflow.ts:1
+             mongodb@6.21.0/src/operations/client_bulk_write/client_bulk_write.ts:1
+             mongodb@6.21.0/src/change_stream.ts:1
+               37x  constructing through a class value whose class has no lowering (the class declaration itself was rejected — see its own diagnostic) is not supported y
+               21x  extending the generic class 'CommandOperation' without a compiled concrete instantiation (the type arguments must map — see the instantiation's own di
+                5x  extending classes not declared in the program ('MongoError') is not supported yet
+                5x  the reference to 'onDemand' (a binding form with no lowering) is not supported yet
+                4x  the static member 'cacheHexString' of class 'm343.ObjectId' (static accessors and initializer-less static fields have no lowering, and Function member
+                3x  the reference to 'wasm' (a binding form with no lowering) is not supported yet
+                3x  functions with optional or defaulted parameters as values, except where the target type spells the completed signature with required parameters (a '(x
+                3x  extending classes not declared in the program ('UpdateOperation') is not supported yet
+                2x  accessors sharing a name with a field is not supported yet
+                2x  extending classes not declared in the program ('MongoDriverError') is not supported yet
+                2x  extending classes not declared in the program ('MongoRuntimeError') is not supported yet
+                2x  extending classes not declared in the program ('MongoNetworkError') is not supported yet
+                2x  typeof expressions on statically-typed values are not supported yet
+                2x  super() calls anywhere but as a top-level constructor statement is not supported yet
+                2x  extending classes not declared in the program ('MongoAPIError') is not supported yet
+                2x  statically-decided Array.isArray on computed arguments (bind the value to a variable first) are not supported yet
+                2x  extending classes not declared in the program ('MongoOIDCError') is not supported yet
+                2x  extending classes not declared in the program ('DeleteOperation') is not supported yet
+                1x  extending classes not declared in the program ('OnDemandDocument') is not supported yet
+                1x  extending classes not declared in the program ('MongoDBResponse') is not supported yet
+                1x  extending classes not declared in the program ('URL') is not supported yet
+                1x  increment/decrement of non-number targets are not supported yet
+                1x  'in' on 'Uint8Array | number | m343.ObjectId | { __id: string | undefined; id: Uint8Array | string; toHexString: () => string } | string | undefined' 
+                1x  bound method references (call 'toHexString' directly) are not supported yet
+                1x  assignment to non-variables as an expression (only `x = e` over a variable yields a value; write property/destructuring assignments as statements) is 
+                1x  extending classes not declared in the program ('BSONError') is not supported yet
+                1x  reading 'transaction' from a value of type 'ClientSession' is not supported yet
+                1x  'instanceof' on values other than class instances (narrow union-typed values first) are not supported yet
+                1x  assignment to non-variables are not supported yet
+                1x  using the result of request.end(...) (the result is void here — call it as its own statement) is not supported yet
+                1x  module namespace objects as values (access 'crypto' members directly) are not supported yet
+                1x  reading 'delayedTimeoutId' from a value of type 'Connection' is not supported yet
+                1x  method calls like 'this.bufferPool.append' is not supported yet
+                1x  reading 'length' from a value of type 'BufferPool' is not supported yet
+                1x  the static member 'isAWSSDKInstalled' of class 'm432.AWSTemporaryCredentialProvider' (static accessors and initializer-less static fields have no lowe
+                1x  Function.prototype.call on a compiled function value (compiled calls are direct — no runtime 'this' or arguments object exists to re-route; spell the 
+                1x  library functions as values (call 'require('crypto').randomBytes' directly) are not supported yet
+                1x  Function.prototype.call on a compiled function value (compiled calls are direct — no runtime 'this' or arguments object exists to re-route; spell the 
+                1x  Set elements of type 'unknown' (Set elements must be string or number — Map's key kinds — or a server handle, which stores under reference identity) i
+                1x  redeclaring inherited fields at a different type ('{ authdb: string | undefined; bsonRegExp: boolean | undefined; bypassPinningCheck: boolean | undefi
+                1x  redeclaring inherited fields at a different type ('{ authdb: string | undefined; bsonRegExp: boolean | undefined; bypassPinningCheck: boolean | undefi
+                1x  redeclaring inherited fields at a different type ('{ authdb: string | undefined; bsonRegExp: boolean | undefined; bypassPinningCheck: boolean | undefi
+                1x  extending classes not declared in the program ('InsertOperation') is not supported yet
+                1x  extending generic classes are not supported yet
+                1x  redeclaring inherited fields at a different type ('{ batchSize: number | undefined; bsonRegExp: boolean | undefined; bypassPinningCheck: boolean | und
+                1x  extending the generic class 'AbstractOperation' without a compiled concrete instantiation (the type arguments must map — see the instantiation's own d
+                1x  generic classes as values ('typeof m393.AbstractCursor' keeps the type parameter — instantiation expressions ('m393.AbstractCursor<number>') and concr
+                1x  redeclaring inherited fields at a different type ('{ authdb: string | undefined; bsonRegExp: boolean | undefined; bypassPinningCheck: boolean | undefi
+                1x  redeclaring inherited fields at a different type ('{ authdb: string | undefined; bsonRegExp: boolean | undefined; bypassPinningCheck: boolean | undefi
+                1x  Map keys of type 'any' (Map keys must be a string, a number, or a CLASS INSTANCE - those key by reference identity. A record/interface type cannot: a 
+                1x  redeclaring inherited fields at a different type ('{ authdb: string | undefined; bsonRegExp: boolean | undefined; bypassPinningCheck: boolean | undefi
+                1x  generic classes as values ('typeof m481.ChangeStream' keeps the type parameter — instantiation expressions ('m481.ChangeStream<number>') and concrete 
+                1x  method calls like 'response.toObject' is not supported yet (instantiating class 'AbstractOperation' with <m364.CursorResponse>)
+                1x  method calls like 'response.toObject' is not supported yet (instantiating class 'AbstractOperation' with <{ databases: { empty: boolean | undefined; n
+                1x  method calls like 'response.toObject' is not supported yet (instantiating class 'AbstractOperation' with <boolean>)
+                1x  method calls like 'response.toObject' is not supported yet (instantiating class 'AbstractOperation' with <{ [key: string]: unknown }>)
+                1x  method calls like 'response.toObject' is not supported yet (instantiating class 'AbstractOperation' with <number>)
+                1x  method calls like 'response.toObject' is not supported yet (instantiating class 'AbstractOperation' with <string[]>)
+                1x  method calls like 'response.toObject' is not supported yet (instantiating class 'AbstractOperation' with <string>)
+                1x  method calls like 'response.toObject' is not supported yet (instantiating class 'AbstractOperation' with <m364.ClientBulkWriteCursorResponse>)
+                1x  extending classes not declared in the program ('CursorResponse') is not supported yet
+          45 SC2020  files=19
+             mongodb@6.21.0/src/operations/operation.ts:10
+             bson@6.10.4/src/objectid.ts:5
+             mongodb@6.21.0/src/client-side-encryption/crypto_callbacks.ts:4
+             mongodb@6.21.0/src/cmap/auth/mongodb_oidc.ts:4
+             mongodb@6.21.0/src/utils.ts:2
+             mongodb@6.21.0/src/cmap/wire_protocol/compression.ts:2
+             bson@6.10.4/src/parser/utils.ts:2
+             bson@6.10.4/src/decimal128.ts:2
+             bson@6.10.4/src/extended_json.ts:2
+             mongodb@6.21.0/src/read_preference.ts:2
+             mongodb@6.21.0/src/connection_string.ts:2
+             bson@6.10.4/src/binary.ts:1
+             bson@6.10.4/src/long.ts:1
+             mongodb@6.21.0/src/resource_management.ts:1
+             mongodb@6.21.0/src/cmap/auth/mongodb_oidc/callback_workflow.ts:1
+             mongodb@6.21.0/src/cmap/auth/mongodb_oidc/azure_machine_workflow.ts:1
+             mongodb@6.21.0/src/mongo_client_auth_providers.ts:1
+             bson@6.10.4/src/utils/web_byte_utils.ts:1
+             bson@6.10.4/src/parser/on_demand/index.ts:1
+                4x  'Map<EnvironmentName, () => Workflow>.set' is part of the standard library types but has no scriptc lowering yet
+                3x  'util.promisify of this target' is part of the standard library types but has no scriptc lowering yet
+                2x  'ArrayBuffer.isView' is part of the standard library types but has no scriptc lowering yet
+                2x  'new Set(values)' is part of the standard library types but has no scriptc lowering yet
+                2x  'Object.freeze of a possibly-aliased value' is part of the standard library types but has no scriptc lowering yet
+                1x  'WeakMap<WeakKey, any>' is part of the standard library types but has no scriptc lowering yet
+                1x  'JSON.stringify with replacer/space parameters' is part of the standard library types but has no scriptc lowering yet
+                1x  'BigInt' is part of the standard library types but has no scriptc lowering yet
+                1x  'new Array(count) with 'number' elements' is part of the standard library types but has no scriptc lowering yet
+                1x  'string.substr' is part of the standard library types but has no scriptc lowering yet
+                1x  'new Date' is part of the standard library types but has no scriptc lowering yet
+                1x  'Date.setTime' is part of the standard library types but has no scriptc lowering yet
+                1x  'JSON.parse with a reviver' is part of the standard library types but has no scriptc lowering yet
+                1x  'Set<"nearest" | "primary" | "primaryPreferred" | "secondary" | "secondaryPreferred" | null>.has' is part of the standard library types but has no scr
+                1x  'Object.defineProperty' is part of the standard library types but has no scriptc lowering yet
+                1x  'Symbol.asyncDispose' is part of the standard library types but has no scriptc lowering yet
+                1x  'Cipheriv | Decipheriv.setAutoPadding' is typed by @types/node but has no scriptc lowering yet
+                1x  'Cipheriv | Decipheriv.update' is typed by @types/node but has no scriptc lowering yet
+                1x  'Cipheriv | Decipheriv.final' is typed by @types/node but has no scriptc lowering yet
+                1x  'createHmac with this algorithm' is part of the standard library types but has no scriptc lowering yet
+                1x  'dns.promises' is typed by @types/node but has no scriptc lowering yet
+                1x  'dns.TIMEOUT' is typed by @types/node but has no scriptc lowering yet
+                1x  'timers/promises setTimeout with a resolve value or options' is part of the standard library types but has no scriptc lowering yet
+                1x  'Number of an 'any'-typed value' is part of the standard library types but has no scriptc lowering yet
+                1x  'Map<EnvironmentName, () => Workflow>.get' is part of the standard library types but has no scriptc lowering yet
+                1x  'PropertyDescriptor.get' is part of the standard library types but has no scriptc lowering yet
+                1x  'globalThis' is part of the standard library types but has no scriptc lowering yet
+                1x  'new WeakMap' is part of the standard library types but has no scriptc lowering yet
+                1x  'Symbol.dispose' is part of the standard library types but has no scriptc lowering yet
+                1x  'this.constructor' is part of the standard library types but has no scriptc lowering yet (instantiating class 'AbstractOperation' with <m364.CursorRes
+                1x  'this.constructor' is part of the standard library types but has no scriptc lowering yet (instantiating class 'AbstractOperation' with <{ databases: {
+                1x  'this.constructor' is part of the standard library types but has no scriptc lowering yet (instantiating class 'AbstractOperation' with <boolean>)
+                1x  'this.constructor' is part of the standard library types but has no scriptc lowering yet (instantiating class 'AbstractOperation' with <{ [key: string
+                1x  'this.constructor' is part of the standard library types but has no scriptc lowering yet (instantiating class 'AbstractOperation' with <number>)
+                1x  'this.constructor' is part of the standard library types but has no scriptc lowering yet (instantiating class 'AbstractOperation' with <string[]>)
+                1x  'this.constructor' is part of the standard library types but has no scriptc lowering yet (instantiating class 'AbstractOperation' with <string>)
+                1x  'this.constructor' is part of the standard library types but has no scriptc lowering yet (instantiating class 'AbstractOperation' with <m364.ClientBul
+          21 SC2011  files=9
+             mongodb@6.21.0/src/operations/client_bulk_write/command_builder.ts:12
+             mongodb@6.21.0/src/connection_string.ts:2
+             mongodb@6.21.0/src/cmap/wire_protocol/on_demand/document.ts:1
+             mongodb@6.21.0/src/bulk/common.ts:1
+             mongodb@6.21.0/src/collection.ts:1
+             mongodb@6.21.0/src/mongo_client.ts:1
+             @zapo-js/store-mongo@1.2.0/packages/store-mongo/src/createMongoStore.ts:1
+             mongodb@6.21.0/src/db.ts:1
+             mongodb@6.21.0/src/sdam/server.ts:1
+                2x  values of type 'Record<keyof MongoClientOptions, OptionDescriptor>' have no static representation but run in the embedded dynamic engine, which this b
+                1x  values of type 'Record<string, false | CachedBSONElement | undefined>' have no static representation but run in the embedded dynamic engine, which thi
+                1x  values of type 'AnyBulkWriteOperation<Document>' have no static representation but run in the embedded dynamic engine, which this build does not inclu
+                1x  values of type '(model: ClientInsertOneModel<Document>, index: number, pkFactory: PkFactory) => ClientInsertOperation' have no static representation b
+                1x  values of type '(model: ClientDeleteOneModel<Document>, index: number) => Document' have no static representation but run in the embedded dynamic engi
+                1x  values of type '(model: ClientDeleteManyModel<Document>, index: number) => Document' have no static representation but run in the embedded dynamic eng
+                1x  values of type '(model: ClientUpdateOneModel<Document>, index: number, options: BSONSerializeOptions) => ClientUpdateOperation' have no static represe
+                1x  values of type '(model: ClientUpdateManyModel<Document>, index: number, options: BSONSerializeOptions) => ClientUpdateOperation' have no static repres
+                1x  values of type '(model: ClientReplaceOneModel<Document>, index: number) => ClientReplaceOneOperation' have no static representation but run in the emb
+                1x  values of type 'CollectionPrivate' have no static representation but run in the embedded dynamic engine, which this build does not include (instantiat
+                1x  values of type 'PkFactory' have no static representation but run in the embedded dynamic engine, which this build does not include
+                1x  values of type 'ClientDeleteOneModel<Document>' have no static representation but run in the embedded dynamic engine, which this build does not includ
+                1x  values of type 'ClientDeleteManyModel<Document>' have no static representation but run in the embedded dynamic engine, which this build does not inclu
+                1x  values of type 'ClientUpdateOneModel<Document>' have no static representation but run in the embedded dynamic engine, which this build does not includ
+                1x  values of type 'ClientUpdateManyModel<Document>' have no static representation but run in the embedded dynamic engine, which this build does not inclu
+                1x  values of type 'ClientReplaceOneModel<Document>' have no static representation but run in the embedded dynamic engine, which this build does not inclu
+                1x  values of type 'MongoClientPrivate' have no static representation but run in the embedded dynamic engine, which this build does not include
+                1x  values of type 'WaMongoStoreConfig' have no static representation but run in the embedded dynamic engine, which this build does not include
+                1x  values of type 'DbPrivate' have no static representation but run in the embedded dynamic engine, which this build does not include
+                1x  values of type 'ServerPrivate' have no static representation but run in the embedded dynamic engine, which this build does not include
+          19 SC2009  files=10
+             bson@6.10.4/src/extended_json.ts:4
+             mongodb@6.21.0/src/utils.ts:3
+             bson@6.10.4/src/utils/node_byte_utils.ts:2
+             bson@6.10.4/src/utils/web_byte_utils.ts:2
+             mongodb@6.21.0/src/deps.ts:2
+             mongodb@6.21.0/src/connection_string.ts:2
+             bson@6.10.4/src/long.ts:1
+             bson@6.10.4/src/parser/on_demand/index.ts:1
+             mongodb@6.21.0/src/cmap/auth/mongodb_oidc.ts:1
+             mongodb@6.21.0/src/sessions.ts:1
+                2x  values of type '{ toLocalBufferType(potentialBuffer: ArrayBuffer | Uint8Array<ArrayBufferLike> | NodeJsBuffer): NodeJsBuffer; ... 14 more ...; swap32(
+                2x  values of type '{ toLocalBufferType(potentialUint8array: ArrayBuffer | Uint8Array<ArrayBufferLike> | ArrayBufferViewWithTag): Uint8Array<...>; ... 14 
+                2x  values of type '{ readonly Binary: (o: Binary) => Binary; readonly Code: (o: Code) => Code; readonly DBRef: (o: DBRef) => DBRef; readonly Decimal128: 
+                2x  values of type '{ toLocalBufferType(this: void, buffer: Buffer<ArrayBufferLike> | Uint8Array<ArrayBufferLike>): Buffer<ArrayBufferLike>; equals(this: 
+                2x  values of type 'AWS4 | { kModuleError: MongoMissingDependencyError; }' cannot be compiled: the union shape is supported, but its arm 'AWS4' does not c
+                2x  values of type 'CaseInsensitiveMap<any>' cannot be compiled: the record shape is supported, but its member 'get' has type '(k: string) => any', which 
+                1x  values of type 'LongWASMHelpers | undefined' cannot be compiled: the union shape is supported, but its arm 'LongWASMHelpers' does not compile
+                1x  values of type '{ parse: (text: string, options?: EJSONOptions | undefined) => any; stringify: (value: any, replacer?: (string | number)[] | EJSONOpti
+                1x  values of type 'OnDemand' cannot be compiled: the record shape is supported, but its member 'parseToElements' has type '(this: void, bytes: Uint8Array
+                1x  values of type 'Set<unknown>' cannot be compiled: the Set shape is supported, but elements are limited to numbers and strings — 'unknown' is outside t
+                1x  values of type 'Map<EnvironmentName, () => Workflow>' cannot be compiled: the Map shape is supported, but keys are limited to numbers and strings — 'E
+                1x  values of type '(string | number)[] | EJSONOptions | ((this: any, key: string, value: any) => any) | undefined' cannot be compiled: the union shape is
+                1x  values of type 'MongoOptions' cannot be compiled: the record shape is supported, but its member 'pkFactory' has type 'PkFactory', which does not compi
+           5 SC1043  files=2
+             bson@6.10.4/src/long.ts:4
+             bson@6.10.4/src/int_32.ts:1
+                5x  comparing non-number, non-string values are not supported yet
+           2 SC2013  files=2
+             mongodb-connection-string-url@3.0.2/src/index.ts:1
+             mongodb@6.21.0/src/cmap/auth/scram.ts:1
+                1x  importing 'whatwg-url' requires the embedded dynamic engine, which this build does not include — the package's implementation runs there
+                1x  importing '@mongodb-js/saslprep' requires the embedded dynamic engine, which this build does not include — the package's implementation runs there
+           2 SC2001  files=1
+             mongodb@6.21.0/src/utils.ts:2
+                1x  values of type 'EmptyNode | HeadNode<T>' cannot be compiled yet (supported: number, string, boolean, arrays, Maps, Sets, RegExp, functions, classes, r
+                1x  values of type 'List<Buffer<ArrayBufferLike>>' cannot be compiled yet (supported: number, string, boolean, arrays, Maps, Sets, RegExp, functions, clas
+           2 SC2002  files=1
+             mongodb@6.21.0/src/mongo_client_auth_providers.ts:2
+                1x  record shapes must match exactly or width-coerce: expected '{ cache: m464.TokenCache; execute: (m448.Connection, m424.MongoCredentials, { [key: string
+                1x  record shapes must match exactly or width-coerce: expected '{ cache: m464.TokenCache; execute: (m448.Connection, m424.MongoCredentials, { [key: string
+           1 SC1071  files=1
+             mongodb@6.21.0/src/cmap/connection.ts:1
+                1x  generator methods (a #private generator method compiles — privates never dispatch dynamically; or declare a module-level function* and call it from th
+           1 SC1100  files=1
+             bson@6.10.4/src/long.ts:1
+                1x  operators on 'unknown' values are not supported yet
+           1 SC1045  files=1
+             bson@6.10.4/src/decimal128.ts:1
+                1x  increment/decrement of array elements or computed receivers in expression position is not supported yet
+           1 SC2006  files=1
+             bson@6.10.4/src/utils/node_byte_utils.ts:1
+                1x  values of type 'NodeJsBuffer' cannot be compiled: this index signature is outside the supported shape (string or number keys; values limited to number
+    -- BLOCKER CASCADE (SC2004) by code (SITES):
+          40 SC2004  files=28
+             mongodb@6.21.0/src/operations/update.ts:4
+             mongodb@6.21.0/src/operations/delete.ts:3
+             mongodb@6.21.0/src/operations/indexes.ts:3
+             <app>/drivers/_x-mongo-plus-zapo.ts:3
+             bson@6.10.4/src/extended_json.ts:2
+             mongodb@6.21.0/src/operations/insert.ts:2
+             mongodb@6.21.0/src/operations/drop.ts:2
+             bson@6.10.4/src/utils/node_byte_utils.ts:1
+             bson@6.10.4/src/utils/web_byte_utils.ts:1
+             bson@6.10.4/src/utils/byte_utils.ts:1
+             mongodb@6.21.0/src/operations/aggregate.ts:1
+             mongodb@6.21.0/src/operations/list_databases.ts:1
+             mongodb@6.21.0/src/operations/remove_user.ts:1
+             mongodb@6.21.0/src/operations/get_more.ts:1
+             mongodb@6.21.0/src/operations/kill_cursors.ts:1
+             mongodb@6.21.0/src/sessions.ts:1
+             mongodb@6.21.0/src/operations/count.ts:1
+             mongodb@6.21.0/src/operations/find.ts:1
+             mongodb@6.21.0/src/operations/distinct.ts:1
+             mongodb@6.21.0/src/operations/estimated_document_count.ts:1
+             mongodb@6.21.0/src/operations/find_and_modify.ts:1
+             mongodb@6.21.0/src/operations/rename.ts:1
+             mongodb@6.21.0/src/operations/list_collections.ts:1
+             mongodb@6.21.0/src/operations/create_collection.ts:1
+             mongodb@6.21.0/src/operations/stats.ts:1
+             mongodb@6.21.0/src/deps.ts:1
+             mongodb@6.21.0/src/operations/client_bulk_write/client_bulk_write.ts:1
+             mongodb@6.21.0/src/mongo_client.ts:1
+                2x  uses of 'stringify' inherit the blocker on its declaration
+                2x  uses of 'r' inherit the blocker on its declaration
+                1x  uses of 'nodejsMathRandomBytes' inherit the blocker on its declaration
+                1x  uses of 'crypto' inherit the blocker on its declaration
+                1x  uses of 'nodeJsByteUtils' inherit the blocker on its declaration
+                1x  uses of 'AggregateOperation' inherit the blocker on its declaration
+                1x  uses of 'ListDatabasesOperation' inherit the blocker on its declaration
+                1x  uses of 'RemoveUserOperation' inherit the blocker on its declaration
+                1x  uses of 'DeleteOperation' inherit the blocker on its declaration
+                1x  uses of 'DeleteOneOperation' inherit the blocker on its declaration
+                1x  uses of 'DeleteManyOperation' inherit the blocker on its declaration
+                1x  uses of 'InsertOperation' inherit the blocker on its declaration
+                1x  uses of 'InsertOneOperation' inherit the blocker on its declaration
+                1x  uses of 'UpdateOperation' inherit the blocker on its declaration
+                1x  uses of 'UpdateOneOperation' inherit the blocker on its declaration
+                1x  uses of 'UpdateManyOperation' inherit the blocker on its declaration
+                1x  uses of 'ReplaceOneOperation' inherit the blocker on its declaration
+                1x  uses of 'GetMoreOperation' inherit the blocker on its declaration
+                1x  uses of 'KillCursorsOperation' inherit the blocker on its declaration
+                1x  uses of 'ClientSession' inherit the blocker on its declaration
+                1x  uses of 'CountOperation' inherit the blocker on its declaration
+                1x  uses of 'FindOperation' inherit the blocker on its declaration
+                1x  uses of 'ListIndexesOperation' inherit the blocker on its declaration
+                1x  uses of 'CreateIndexesOperation' inherit the blocker on its declaration
+                1x  uses of 'DropIndexOperation' inherit the blocker on its declaration
+                1x  uses of 'DistinctOperation' inherit the blocker on its declaration
+                1x  uses of 'EstimatedDocumentCountOperation' inherit the blocker on its declaration
+                1x  uses of 'FindAndModifyOperation' inherit the blocker on its declaration
+                1x  uses of 'RenameOperation' inherit the blocker on its declaration
+                1x  uses of 'ListCollectionsOperation' inherit the blocker on its declaration
+                1x  uses of 'CreateCollectionOperation' inherit the blocker on its declaration
+                1x  uses of 'DropCollectionOperation' inherit the blocker on its declaration
+                1x  uses of 'DropDatabaseOperation' inherit the blocker on its declaration
+                1x  uses of 'DbStatsOperation' inherit the blocker on its declaration
+                1x  uses of 'loadAws4' inherit the blocker on its declaration
+                1x  uses of 'ClientBulkWriteOperation' inherit the blocker on its declaration
+                1x  uses of 'MongoClient' inherit the blocker on its declaration
+                1x  uses of 'createMongoStore' inherit the blocker on its declaration
+    -- RUNTIME FENCES by code (SITES):
+           1 SC2020  files=1
+             zapo-js@1.8.2/spec/proto/index.js:1
+                1x  'require() with a run-time specifier' is part of the standard library types but has no scriptc lowering yet
+    -- ADVISORIES by code (SITES):
+          54 SC6004  files=27
+             zapo-js@1.8.2/src/client/coordinators/WaMessageDispatchCoordinator.ts:9
+             zapo-js@1.8.2/src/transport/node/builders/message.ts:4
+             zapo-js@1.8.2/src/client/newsletter/messaging.ts:4
+             zapo-js@1.8.2/src/transport/noise/WaClientPayload.ts:3
+             zapo-js@1.8.2/src/client/coordinators/WaAppStateMutationCoordinator.ts:3
+             zapo-js@1.8.2/src/media/transfer/WaMediaTransferClient.ts:3
+             zapo-js@1.8.2/src/signal/session/SignalProtocol.ts:2
+             zapo-js@1.8.2/src/auth/WaAuthClient.ts:2
+             zapo-js@1.8.2/src/client/coordinators/WaBotCoordinator.ts:2
+             zapo-js@1.8.2/src/client/messaging/link-preview.ts:2
+             zapo-js@1.8.2/src/client/WaClientFactory.ts:2
+             zapo-js@1.8.2/src/client/WaClient.ts:2
+             mongodb@6.21.0/src/operations/operation.ts:2
+             zapo-js@1.8.2/src/message/context-info.ts:1
+             zapo-js@1.8.2/src/crypto/nativeBackend.ts:1
+             zapo-js@1.8.2/src/client/persistence/group-history.ts:1
+             zapo-js@1.8.2/src/client/persistence/history-sync.ts:1
+             zapo-js@1.8.2/src/message/encode/content.ts:1
+             zapo-js@1.8.2/src/appstate/sync/WaAppStateSyncClient.ts:1
+             zapo-js@1.8.2/src/signal/session/SignalSession.ts:1
+             zapo-js@1.8.2/src/signal/session/SignalRatchet.ts:1
+             zapo-js@1.8.2/src/client/connection/WaConnectionManager.ts:1
+             zapo-js@1.8.2/src/message/crypto/addon-crypto.ts:1
+             zapo-js@1.8.2/src/client/newsletter/content.ts:1
+             zapo-js@1.8.2/src/client/coordinators/WaNewsletterCoordinator.ts:1
+             zapo-js@1.8.2/src/client/coordinators/WaStatusCoordinator.ts:1
+             zapo-js@1.8.2/src/client/events/dirty.ts:1
+                5x  this flow COPIES the record into a different shape, and the copy ends the members 'generateStanzaId', 'getMediaConn', 'linkPreviewResolver', 'mediaTra
+                4x  this flow COPIES the record into a different shape, and the copy ends the members 'additionalAttributes', 'contextInfo', 'customNodes', 'disableDirect
+                3x  this flow COPIES the record into a different shape, and the copy ends the member 'prevSessions'
+                2x  this flow COPIES the record into a different shape, and the copy ends the members 'aiThreadId', 'aiThreadType', 'botJid', 'capabilities', 'extraMentio
+                2x  this flow COPIES the record into a different shape, and the copy ends the members 'fromMe', 'isBroadcast', 'isGroup', 'isNewsletter', 'participantAlt'
+                1x  this flow COPIES the record into a different shape ('{ high: number; low: number; toNumber: () => number; unsigned: boolean }' into '{ toNumber: () =>
+                1x  this flow COPIES the record into a different shape, and the copy ends the member 'initSync'
+                1x  this flow COPIES the record into a different shape, and the copy ends the members '$unknowns', 'contextInfo', 'mediaKeyTimestamp', 'messageHistoryMeta
+                1x  this flow COPIES the record into a different shape, and the copy ends the members '$unknowns', 'chunkOrder', 'encHandle', 'fileLength', 'fullHistorySy
+                1x  this flow COPIES the record into a different shape, and the copy ends the members 'annotations', 'caption', 'externalShareFullVideoDurationInSeconds',
+                1x  this flow COPIES the record into a different shape, and the copy ends the member 'operationCode'
+                1x  this flow COPIES the record into a different shape ('{ id: number; publicKey: Uint8Array; signature: Uint8Array }' into '{ id: number; publicKey: Uint
+                1x  this flow COPIES the record into a different shape, and the copy ends the members 'connectAttemptCount', 'device', 'lidDbMigrated', 'loginCounter', 'u
+                1x  this flow COPIES the record into a different shape, and the copy ends the members 'buildHash', 'deviceProps', 'registrationInfo', 'requireFullSync', '
+                1x  this flow COPIES the record into a different shape, and the copy ends the members 'buildHash', 'deviceProps', 'passive', 'pull', 'registrationInfo', '
+                1x  this flow COPIES the record into a different shape, and the copy ends the members 'dangerous', 'mobileTransport', 'requireFullSync', 'version'
+                1x  this flow COPIES the record into a different shape ('{ browser: string; osDisplayName: string; osVersion: null | string; platform: string }' into '{ b
+                1x  this flow COPIES the record into a different shape ('{ linkPreview: unknown; mediaDownload: unknown; mediaUpload: unknown; ws: unknown }' into '{ ws: 
+                1x  this flow COPIES the record into a different shape, and the copy ends the members '$unknowns', 'agentAction', 'aiThreadRenameAction', 'androidUnsuppor
+                1x  this flow COPIES the record into a different shape, and the copy ends the members '$unknowns', 'agentAction', 'aiThreadRenameAction', 'androidUnsuppor
+                1x  this flow COPIES the record into a different shape, and the copy ends the members '$unknowns', 'agentAction', 'aiThreadRenameAction', 'androidUnsuppor
+                1x  this flow COPIES the record into a different shape, and the copy ends the members 'ciphertext', 'iv', 'messageSecret', 'parentMsgOriginalSender'
+                1x  this flow COPIES the record into a different shape, and the copy ends the members 'agent', 'maxBytes', 'signal'
+                1x  this flow COPIES the record into a different shape, and the copy ends the members 'agent', 'body', 'contentLength', 'contentType', 'maxBytes', 'method
+                1x  this flow COPIES the record into a different shape, and the copy ends the members 'fileEncSha256', 'fileSha256', 'mediaKey', 'mediaType'
+                1x  this flow COPIES the record into a different shape, and the copy ends the members 'botParticipants', 'customNodes', 'decryptFail', 'deviceIdentity', '
+                1x  this flow COPIES the record into a different shape, and the copy ends the members 'additionalAttributes', 'addressingMode', 'decryptFail', 'edit', 'id
+                1x  this flow COPIES the record into a different shape, and the copy ends the members 'botParticipants', 'customNodes', 'decryptFail', 'deviceIdentity', '
+                1x  this flow COPIES the record into a different shape, and the copy ends the members 'additionalAttributes', 'addressingMode', 'decryptFail', 'edit', 'gr
+                1x  this flow COPIES the record into a different shape, and the copy ends the members 'isBroadcast', 'isGroup', 'isNewsletter', 'participantAlt', 'recipie
+                1x  this flow COPIES the record into a different shape, and the field 'botMessageSecret' is written somewhere in this program
+                1x  this flow COPIES the record into a different shape, and the copy ends the member 'jid'
+                1x  this flow COPIES the record into a different shape ('{ address: { device: number; server: string | undefined; user: string }; ciphertext: Uint8Array; 
+                1x  this flow COPIES the record into a different shape, and the copy ends the member 'session'
+                1x  this flow COPIES the record into a different shape, and the copy ends the members 'disappearingModeInitiator', 'disappearingModeTrigger', 'expirationS
+                1x  this flow COPIES the record into a different shape, and the fields 'description', 'jpegThumbnail', 'mediaKey', 'mediaKeyTimestamp', 'thumbnailDirectPa
+                1x  this flow COPIES the record into a different shape ('{ protocols: string[]; timestamp: number; type: string }' into '{ timestamp: number; type: string
+                1x  this flow COPIES the record into a different shape ('{ bytes: Uint8Array; height: number | undefined; width: number | undefined }' into '{ height: num
+                1x  this flow COPIES the record into a different shape ('{ contentLength: number; height: number | undefined; stream: Readable; width: number | undefined 
+                1x  this flow COPIES the record into a different shape, and the copy ends the members 'addons', 'appStateSyncTimeoutMs', 'chatEvents', 'chatSocketUrls', '
+                1x  this flow COPIES the record into a different shape, and the copy ends the members 'disableAppStateMacVerification', 'disableMediaMacVerification', 'di
+                1x  this flow COPIES the record into a different shape, and the copy ends the members 'bsonRegExp', 'bypassPinningCheck', 'checkKeys', 'enableUtf8Validati
+                1x  this flow COPIES the record into a different shape, and the copy ends the members 'bypassPinningCheck', 'omitMaxTimeMS', 'readPreference', 'session', 
+           1 SC6003  files=1
+             zapo-js@1.8.2/src/auth/credentials-flow.ts:1
+                1x  this projection of '%m119.WaMobileTcpSocket' COPIES the field 'readyState', and a method of '%m119.WaMobileTcpSocket' writes it
+    -- UNREACHED by code (SITES):
+         981 SC1090  files=116
+             mongodb@6.21.0/src/operations/execute_operation.ts:142
+             bson@6.10.4/src/parser/deserializer.ts:45
+             mongodb@6.21.0/src/sdam/monitor.ts:44
+             mongodb@6.21.0/src/error.ts:43
+             mongodb@6.21.0/src/gridfs/upload.ts:38
+             mongodb@6.21.0/src/gridfs/download.ts:31
+             mongodb@6.21.0/src/sessions.ts:29
+             mongodb@6.21.0/src/sdam/topology.ts:29
+             bson@6.10.4/src/binary.ts:27
+             mongodb@6.21.0/src/utils.ts:27
+             mongodb@6.21.0/src/bulk/common.ts:25
+             mongodb@6.21.0/src/cmap/auth/scram.ts:21
+             mongodb@6.21.0/src/cmap/handshake/client_metadata.ts:17
+             mongodb@6.21.0/src/mongo_logger.ts:16
+             @zapo-js/store-mongo@1.2.0/packages/store-mongo/src/pre-key.store.ts:16
+             mongodb@6.21.0/src/cmap/auth/mongo_credentials.ts:14
+             bson@6.10.4/src/extended_json.ts:11
+             mongodb@6.21.0/src/cmap/commands.ts:11
+             mongodb@6.21.0/src/cmap/auth/mongodb_aws.ts:11
+             mongodb@6.21.0/src/cursor/explainable_cursor.ts:11
+             bson@6.10.4/src/parser/serializer.ts:10
+             mongodb@6.21.0/src/sdam/server.ts:10
+             mongodb@6.21.0/src/cursor/find_cursor.ts:10
+             @zapo-js/store-mongo@1.2.0/packages/store-mongo/src/appstate.store.ts:10
+             @zapo-js/store-mongo@1.2.0/packages/store-mongo/src/retry.store.ts:10
+             mongodb@6.21.0/src/cmap/wire_protocol/compression.ts:9
+             mongodb@6.21.0/src/sdam/server_description.ts:9
+             @zapo-js/store-mongo@1.2.0/packages/store-mongo/src/signal.store.ts:9
+             @zapo-js/store-mongo@1.2.0/packages/store-mongo/src/sender-key.store.ts:9
+             mongodb@6.21.0/src/timeout.ts:8
+             mongodb@6.21.0/src/client-side-encryption/providers/azure.ts:8
+             mongodb@6.21.0/src/cmap/wire_protocol/on_data.ts:8
+             mongodb@6.21.0/src/cmap/connect.ts:8
+             mongodb@6.21.0/src/cmap/auth/mongodb_oidc/human_callback_workflow.ts:8
+             @zapo-js/store-mongo@1.2.0/packages/store-mongo/src/BaseMongoStore.ts:8
+             @zapo-js/store-mongo@1.2.0/packages/store-mongo/src/session.store.ts:8
+             mongodb@6.21.0/src/operations/operation.ts:8
+             mongodb@6.21.0/src/sdam/topology_description.ts:7
+             @zapo-js/store-mongo@1.2.0/packages/store-mongo/src/device-list.store.ts:7
+             @zapo-js/store-mongo@1.2.0/packages/store-mongo/src/message.store.ts:7
+             @zapo-js/store-mongo@1.2.0/packages/store-mongo/src/contact.store.ts:7
+             mongodb@6.21.0/src/write_concern.ts:6
+             mongodb@6.21.0/src/deps.ts:6
+             mongodb@6.21.0/src/cmap/auth/mongodb_oidc/automated_callback_workflow.ts:6
+             mongodb@6.21.0/src/cmap/auth/x509.ts:6
+             @zapo-js/store-mongo@1.2.0/packages/store-mongo/src/thread.store.ts:6
+             @zapo-js/store-mongo@1.2.0/packages/store-mongo/src/message-secret.store.ts:6
+             bson@6.10.4/src/long.ts:5
+             mongodb@6.21.0/src/operations/drop.ts:5
+             mongodb@6.21.0/src/client-side-encryption/errors.ts:5
+             mongodb@6.21.0/src/cmap/command_monitoring_events.ts:5
+             mongodb@6.21.0/src/cmap/connection_pool_events.ts:5
+             mongodb@6.21.0/src/cmap/auth/mongodb_oidc/callback_workflow.ts:5
+             @zapo-js/store-mongo@1.2.0/packages/store-mongo/src/identity.store.ts:5
+             @zapo-js/store-mongo@1.2.0/packages/store-mongo/src/group-metadata.store.ts:5
+             @zapo-js/store-mongo@1.2.0/packages/store-mongo/src/chat-metadata.store.ts:5
+             @zapo-js/store-mongo@1.2.0/packages/store-mongo/src/privacy-token.store.ts:5
+             bson@6.10.4/src/double.ts:4
+             bson@6.10.4/src/int_32.ts:4
+             mongodb@6.21.0/src/sdam/server_selection.ts:4
+             mongodb@6.21.0/src/cmap/auth/aws_temporary_credentials.ts:4
+             mongodb@6.21.0/src/cmap/auth/mongodb_oidc/token_cache.ts:4
+             zapo-js@1.8.2/src/infra/log/PinoLogger.ts:3
+             mongodb@6.21.0/src/admin.ts:3
+             mongodb@6.21.0/src/cmap/auth/auth_provider.ts:3
+             mongodb@6.21.0/src/cmap/stream_description.ts:3
+             mongodb@6.21.0/src/cmap/wire_protocol/shared.ts:3
+             mongodb@6.21.0/src/cmap/connection.ts:3
+             mongodb@6.21.0/src/connection_string.ts:3
+             @zapo-js/store-mongo@1.2.0/packages/store-mongo/src/auth.store.ts:3
+             mongodb@6.21.0/src/operations/find_and_modify.ts:3
+             mongodb@6.21.0/src/cmap/errors.ts:3
+             bson@6.10.4/src/parser/utils.ts:2
+             bson@6.10.4/src/decimal128.ts:2
+             bson@6.10.4/src/objectid.ts:2
+             bson@6.10.4/src/parser/calculate_size.ts:2
+             bson@6.10.4/src/timestamp.ts:2
+             bson@6.10.4/src/error.ts:2
+             mongodb@6.21.0/src/cmap/wire_protocol/responses.ts:2
+             mongodb@6.21.0/src/transactions.ts:2
+             mongodb@6.21.0/src/cmap/auth/gssapi.ts:2
+             mongodb-connection-string-url@3.0.2/src/index.ts:2
+             mongodb-connection-string-url@3.0.2/src/redact.ts:2
+             mongodb@6.21.0/src/operations/client_bulk_write/command_builder.ts:2
+             mongodb@6.21.0/src/operations/command.ts:2
+             mongodb@6.21.0/src/operations/run_command.ts:2
+             mongodb@6.21.0/src/operations/profiling_level.ts:2
+             zapo-js@1.8.2/src/media/transfer/WaMediaTransferClient.ts:1
+             bson@6.10.4/src/parse_utf8.ts:1
+             bson@6.10.4/src/utils/latin.ts:1
+             bson@6.10.4/src/utils/web_byte_utils.ts:1
+             bson@6.10.4/src/regexp.ts:1
+             mongodb@6.21.0/src/bson.ts:1
+             mongodb@6.21.0/src/read_preference.ts:1
+             mongodb@6.21.0/src/sdam/common.ts:1
+             mongodb@6.21.0/src/read_concern.ts:1
+             mongodb@6.21.0/src/explain.ts:1
+             mongodb@6.21.0/src/sort.ts:1
+             mongodb@6.21.0/src/cursor/list_collections_cursor.ts:1
+             mongodb@6.21.0/src/cmap/auth/mongodb_oidc.ts:1
+             mongodb@6.21.0/src/cmap/auth/plain.ts:1
+             mongodb@6.21.0/src/mongo_client_auth_providers.ts:1
+             mongodb@6.21.0/src/sdam/srv_polling.ts:1
+             mongodb@6.21.0/src/cursor/list_indexes_cursor.ts:1
+             @zapo-js/store-mongo@1.2.0/packages/store-mongo/src/helpers.ts:1
+             mongodb@6.21.0/src/operations/validate_collection.ts:1
+             mongodb@6.21.0/src/bulk/ordered.ts:1
+             mongodb@6.21.0/src/bulk/unordered.ts:1
+             mongodb@6.21.0/src/cursor/aggregation_cursor.ts:1
+             mongodb@6.21.0/src/cursor/list_search_indexes_cursor.ts:1
+             mongodb@6.21.0/src/operations/search_indexes/create.ts:1
+             mongodb@6.21.0/src/operations/search_indexes/drop.ts:1
+             mongodb@6.21.0/src/operations/search_indexes/update.ts:1
+             mongodb@6.21.0/src/cursor/run_command_cursor.ts:1
+             mongodb@6.21.0/src/operations/set_profiling_level.ts:1
+             mongodb@6.21.0/src/cursor/client_bulk_write_cursor.ts:1
+              174x  constructing through a class value whose class has no lowering (the class declaration itself was rejected — see its own diagnostic) is not supported y
+               30x  assignment to non-variables are not supported yet
+               25x  calls of the generic method 'findOne' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' an
+               20x  reading 's' from a value of type 'GridFSBucketReadStream' is not supported yet
+               16x  'instanceof' against a class value whose class has no lowering (the class declaration itself was rejected — see its own diagnostic) is not supported y
+               16x  method calls like 'col.updateOne' is not supported yet
+               13x  reading 's' from a value of type 'BulkOperationBase' is not supported yet
+               12x  'instanceof' right-hand sides other than classes declared in the program is not supported yet
+               12x  extending classes not declared in the program ('MongoAPIError') is not supported yet
+               11x  calls of the generic method 'command' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class' an
+                8x  'instanceof' on values other than class instances (narrow union-typed values first) are not supported yet
+                8x  extending classes not declared in the program ('MongoRuntimeError') is not supported yet
+                7x  object spread involving index-signature shapes (overflow keys are runtime state — copy the fields you need explicitly) are not supported yet
+                7x  reading 's' from a value of type 'Topology' is not supported yet
+                7x  reading 'timeoutContext' from a value of type 'GridFSBucketWriteStream' is not supported yet
+                6x  assignment to non-array elements are not supported yet
+                6x  reading 'code' from a value of type 'MongoError' is not supported yet
+                6x  reading 'client' from a value of type 'Db' is not supported yet
+                6x  reading 'credentials' from a value of type 'AuthContext' is not supported yet
+                6x  reading 'state' from a value of type 'GridFSBucketWriteStream' is not supported yet
+                6x  method calls like 'operation.hasAspect' is not supported yet (instantiating 'tryOperation' with <m374.RemoveUserOperation, boolean>)
+                6x  method calls like 'operation.hasAspect' is not supported yet (instantiating 'tryOperation' with <m376.ValidateCollectionOperation, { [key: string]: un
+                6x  method calls like 'operation.hasAspect' is not supported yet (instantiating 'tryOperation' with <m373.ListDatabasesOperation, { databases: { empty: bo
+                6x  method calls like 'operation.hasAspect' is not supported yet (instantiating 'tryOperation' with <m415.DropCollectionOperation, boolean>)
+                5x  'this' in static methods (it names the RECEIVER class — a dynamic value; reference the class by name instead) are not supported yet
+                5x  symbol-keyed property access outside class fields keyed by a module-level `const k = Symbol('desc')` (static shapes have no symbol-keyed storage) is n
+                5x  extending classes not declared in the program ('MongoDriverError') is not supported yet
+                5x  method calls like 'this.bulkOperation.addToOperationsList' is not supported yet
+                5x  bound method references (call 'log' directly) are not supported yet
+                5x  logical assignment (&&=, ||=) — write the if out is not supported yet
+                5x  method calls like 'metadataDocument.ifItFitsItSits' is not supported yet
+                5x  extending classes not declared in the program ('MongoCryptError') is not supported yet
+                5x  calls of the generic method 'emitAndLogHeartbeat' through this receiver (no compiled declaration with a body resolves statically here — ambient 'decla
+                5x  method calls like 'col.bulkWrite' is not supported yet
+                5x  method calls like 'col.deleteOne' is not supported yet
+                5x  method calls like 'col.createIndex' is not supported yet
+                4x  method calls like 'session.inTransaction' is not supported yet
+                4x  reading 'nonce' from a value of type 'AuthContext' is not supported yet
+                4x  reading 'description' from a value of type 'Topology' is not supported yet
+                4x  reading 'client' from a value of type 'Topology' is not supported yet
+                4x  reading 'pos' from a value of type 'GridFSBucketWriteStream' is not supported yet
+                4x  method calls like 'col.deleteMany' is not supported yet
+                3x  tuple indexing with a non-literal index (tuples are fixed-shape — use t[0], t[1], ...) is not supported yet
+                3x  indexing records with non-string or non-number keys are not supported yet
+                3x  extending classes not declared in the program ('MongoServerError') is not supported yet
+                3x  reading 'description' on a union-typed value (every arm must be an object/record with a same-typed field 'description'; narrow first: check a discrimi
+                3x  method calls like 'EJSON.stringify' is not supported yet
+                3x  method calls like 'extendedMetadata.ifItFitsItSits' is not supported yet
+                3x  'Uint8Array' values where 'number' is expected is not supported yet
+                3x  'm337.Long' values where 'number' is expected is not supported yet
+                3x  reading 'options' from a value of type 'AuthContext' is not supported yet
+                3x  reading 'connection' from a value of type 'AuthContext' is not supported yet
+                3x  reading 'id' from a value of type 'Connection' is not supported yet
+                3x  reading 'rttPinger' from a value of type 'Monitor' is not supported yet
+                3x  reading 'options' from a value of type 'Monitor' is not supported yet
+                3x  extending the generic class 'AbstractCursor' without a compiled concrete instantiation (the type arguments must map — see the instantiation's own diag
+                3x  compound assignment to unsupported field targets are not supported yet
+                3x  method calls like 'metaCol.updateOne' is not supported yet
+                3x  method calls like 'col.find({ $or: orFilters }).toArray' is not supported yet
+                3x  method calls like 'skCol.deleteMany' is not supported yet
+                3x  extending classes not declared in the program ('FindAndModifyOperation') is not supported yet
+                2x  dynamic keyed reads of '{ child: ({ [key: string]: unknown }) => ... | undefined; debug: (...unknown) => void; error: (...unknown) => void; info: (...
+                2x  element access on non-array values are not supported yet
+                2x  reading '_bsontype' on a union-typed value (every arm must be an object/record with a same-typed field '_bsontype'; narrow first: check a discriminant
+                2x  extending classes not declared in the program ('BSONError') is not supported yet
+                2x  method calls like 'error.hasErrorLabel' is not supported yet
+                2x  statically-decided Array.isArray on computed arguments (bind the value to a variable first) are not supported yet
+                2x  reading 'loadBalanced' from a value of type 'Server' is not supported yet
+                2x  reading 'description' from a value of type 'Server' is not supported yet
+                2x  overriding an accessor with a different type (the property type must match the base declaration exactly) is not supported yet
+                2x  reading 'topology' from a value of type 'MongoClient' is not supported yet
+                2x  method calls like 'SEVERITY_LEVEL_MAP.getNumericSeverityLevel' is not supported yet
+                2x  reading 'transaction' from a value of type 'ClientSession' is not supported yet
+                2x  '.includes()' on union-element arrays (union values have no stable identity — loop and compare the narrowed values instead) are not supported yet
+                2x  constructing through a union of class values (annotate the slot with the common constructor type — e.g. `new () => Base` — or narrow first) are not su
+                2x  reading 'topologyVersion' from a value of type 'MongoError' is not supported yet
+                2x  method calls like 'unconsumedPromises.shift' is not supported yet
+                2x  reading 'connection' from a value of type 'Monitor' is not supported yet
+                2x  method calls like 'monitor.addRttSample' is not supported yet
+                2x  method calls like 'connection.destroy' is not supported yet
+                2x  the reference to 'aws4' (a binding form with no lowering) is not supported yet
+                2x  the reference to 'randomBytes' (a binding form with no lowering) is not supported yet
+                2x  reading 'accessToken' from a value of type 'Connection' is not supported yet
+                2x  method calls like 'Timeout.expires' is not supported yet
+                2x  accessors sharing a name with a field is not supported yet
+                2x  method calls like 'TimeoutError.is' is not supported yet
+                2x  method calls like 'timeout.clear' is not supported yet
+                2x  calls of the generic method 'removeAllListeners' through this receiver (the interface declaration is signature-only and generic methods dispatch stati
+                2x  calls of the generic method 'emitAndLog' through this receiver (no compiled declaration with a body resolves statically here — ambient 'declare class'
+                2x  calls of the generic method 'on' through this receiver (the interface declaration is signature-only and generic methods dispatch statically, so the re
+                2x  reading 'waitQueue' from a value of type 'Topology' is not supported yet
+                2x  reading 'chunkSizeBytes' from a value of type 'GridFSBucketWriteStream' is not supported yet
+                2x  reading 'id' from a value of type 'GridFSBucketWriteStream' is not supported yet
+                2x  method calls like 'col
+            .find({
+                '_id.session_id': this.sessionId,
+                '_id.key_id': { $in: binaryIds }
+        
+                2x  method calls like 'topology.selectServer' is not supported yet (instantiating 'tryOperation' with <m374.RemoveUserOperation, boolean>)
+                2x  reading 's' from a value of type 'Topology' is not supported yet (instantiating 'tryOperation' with <m374.RemoveUserOperation, boolean>)
+                2x  constructing through a class value whose class has no lowering (the class declaration itself was rejected — see its own diagnostic) is not supported y
+                2x  method calls like 'topology.selectServer' is not supported yet (instantiating 'tryOperation' with <m376.ValidateCollectionOperation, { [key: string]: 
+                2x  reading 's' from a value of type 'Topology' is not supported yet (instantiating 'tryOperation' with <m376.ValidateCollectionOperation, { [key: string]
+                2x  constructing through a class value whose class has no lowering (the class declaration itself was rejected — see its own diagnostic) is not supported y
+         146 SC2020  files=42
+             mongodb@6.21.0/src/gridfs/download.ts:15
+             mongodb@6.21.0/src/cmap/handshake/client_metadata.ts:14
+             mongodb@6.21.0/src/utils.ts:13
+             bson@6.10.4/src/extended_json.ts:11
+             mongodb@6.21.0/src/cmap/auth/scram.ts:10
+             bson@6.10.4/src/parser/serializer.ts:8
+             mongodb@6.21.0/src/operations/operation.ts:8
+             @zapo-js/store-mongo@1.2.0/packages/store-mongo/src/appstate.store.ts:6
+             bson@6.10.4/src/binary.ts:4
+             bson@6.10.4/src/parser/deserializer.ts:4
+             mongodb@6.21.0/src/error.ts:4
+             @zapo-js/store-mongo@1.2.0/packages/store-mongo/src/retry.store.ts:4
+             mongodb@6.21.0/src/mongo_logger.ts:3
+             mongodb@6.21.0/src/cmap/auth/gssapi.ts:3
+             mongodb@6.21.0/src/cmap/auth/mongo_credentials.ts:3
+             mongodb@6.21.0/src/client-side-encryption/crypto_callbacks.ts:3
+             mongodb@6.21.0/src/sdam/srv_polling.ts:3
+             zapo-js@1.8.2/src/client/persistence/companion-host.ts:2
+             bson@6.10.4/src/parser/utils.ts:2
+             mongodb@6.21.0/src/cmap/wire_protocol/on_data.ts:2
+             mongodb@6.21.0/src/gridfs/upload.ts:2
+             @zapo-js/store-mongo@1.2.0/packages/store-mongo/src/chat-metadata.store.ts:2
+             bson@6.10.4/src/utils/web_byte_utils.ts:1
+             bson@6.10.4/src/db_ref.ts:1
+             bson@6.10.4/src/long.ts:1
+             bson@6.10.4/src/parser/calculate_size.ts:1
+             mongodb@6.21.0/src/write_concern.ts:1
+             mongodb@6.21.0/src/sort.ts:1
+             mongodb@6.21.0/src/cursor/abstract_cursor.ts:1
+             mongodb@6.21.0/src/deps.ts:1
+             mongodb@6.21.0/src/cmap/commands.ts:1
+             mongodb@6.21.0/src/cmap/wire_protocol/compression.ts:1
+             mongodb@6.21.0/src/sdam/server_description.ts:1
+             mongodb@6.21.0/src/cmap/stream_description.ts:1
+             mongodb@6.21.0/src/sdam/topology_description.ts:1
+             mongodb@6.21.0/src/cmap/connection.ts:1
+             mongodb@6.21.0/src/cmap/connection_pool_events.ts:1
+             mongodb@6.21.0/src/cmap/auth/mongodb_oidc/automated_callback_workflow.ts:1
+             mongodb@6.21.0/src/cmap/auth/mongodb_oidc/human_callback_workflow.ts:1
+             @zapo-js/store-mongo@1.2.0/packages/store-mongo/src/group-metadata.store.ts:1
+             @zapo-js/store-mongo@1.2.0/packages/store-mongo/src/device-list.store.ts:1
+             @zapo-js/store-mongo@1.2.0/packages/store-mongo/src/message-secret.store.ts:1
+               12x  'new Date' is part of the standard library types but has no scriptc lowering yet
+               11x  'Map<any, any>.set' is part of the standard library types but has no scriptc lowering yet
+                7x  'Date.setTime' is part of the standard library types but has no scriptc lowering yet
+                5x  'GridFSBucketReadStream.destroyed' is typed by @types/node but has no scriptc lowering yet
+                4x  'Object.assign' is part of the standard library types but has no scriptc lowering yet
+                4x  'MongoError.message' is part of the standard library types but has no scriptc lowering yet
+                4x  'Buffer.from with this argument shape' is part of the standard library types but has no scriptc lowering yet
+                4x  'GridFSBucketReadStream.destroy' is typed by @types/node but has no scriptc lowering yet
+                3x  'Symbol.toStringTag' is part of the standard library types but has no scriptc lowering yet
+                3x  'globalThis' is part of the standard library types but has no scriptc lowering yet
+                3x  'ArrayBufferLike.slice' is part of the standard library types but has no scriptc lowering yet
+                3x  'Object.freeze of a possibly-aliased value' is part of the standard library types but has no scriptc lowering yet
+                2x  'BigInt' is part of the standard library types but has no scriptc lowering yet
+                2x  'any[].length' is part of the standard library types but has no scriptc lowering yet
+                2x  'Object.defineProperty' is part of the standard library types but has no scriptc lowering yet
+                2x  'Date.getTime' is part of the standard library types but has no scriptc lowering yet
+                2x  'Promise.race over non-promise entries' is part of the standard library types but has no scriptc lowering yet
+                2x  'Buffer.isBuffer of 'unknown' values' is part of the standard library types but has no scriptc lowering yet
+                2x  'GridFSBucketReadStream.push' is typed by @types/node but has no scriptc lowering yet
+                2x  'AnyBulkWriteOperation<IndexValueDoc>[].push' is part of the standard library types but has no scriptc lowering yet
+                1x  'writeFile with 3 arguments' is part of the standard library types but has no scriptc lowering yet
+                1x  'fs/promises.rename' is typed by @types/node but has no scriptc lowering yet
+                1x  'ArrayBuffer.isView' is part of the standard library types but has no scriptc lowering yet
+                1x  'Object.keys' is part of the standard library types but has no scriptc lowering yet
+                1x  'Set<unknown> | undefined.has' is part of the standard library types but has no scriptc lowering yet
+                1x  'RegExp.ignoreCase' is part of the standard library types but has no scriptc lowering yet
+                1x  'RegExp.global' is part of the standard library types but has no scriptc lowering yet
+                1x  'RegExp.multiline' is part of the standard library types but has no scriptc lowering yet
+                1x  'number | Int32.valueOf' is part of the standard library types but has no scriptc lowering yet
+                1x  'Date.toISOString' is part of the standard library types but has no scriptc lowering yet
+                1x  'Date.getUTCMilliseconds' is part of the standard library types but has no scriptc lowering yet
+                1x  'Number of number | string | undefined values' is part of the standard library types but has no scriptc lowering yet
+                1x  'any[].forEach' is part of the standard library types but has no scriptc lowering yet
+                1x  'Function.name' is part of the standard library types but has no scriptc lowering yet
+                1x  'process.hrtime' is typed by @types/node but has no scriptc lowering yet
+                1x  'Set<unknown>.has' is part of the standard library types but has no scriptc lowering yet
+                1x  'url.parse' is typed by @types/node but has no scriptc lowering yet
+                1x  'request with a non-literal options argument' is part of the standard library types but has no scriptc lowering yet
+                1x  'typeof import("node:fs/promises").access' is typed by @types/node but has no scriptc lowering yet
+                1x  'Buffer.isBuffer of '{ [key: string]: unknown }' values' is part of the standard library types but has no scriptc lowering yet
+                1x  'Buffer.isBuffer of '{ __@kDecoratedKeys@2803: string[] | undefined; [key: string]: unknown }' values' is part of the standard library types but has n
+                1x  'URL.port' is typed by @types/node but has no scriptc lowering yet
+                1x  'Array.from with this argument shape' is part of the standard library types but has no scriptc lowering yet
+                1x  'string.codePointAt' is part of the standard library types but has no scriptc lowering yet
+                1x  'Object' is part of the standard library types but has no scriptc lowering yet
+                1x  'Set<AbstractCursor<any, AbstractCursorEvents>>.delete' is part of the standard library types but has no scriptc lowering yet
+                1x  'new Proxy' is part of the standard library types but has no scriptc lowering yet
+                1x  'typeof import("node:dns/promises").lookup' is typed by @types/node but has no scriptc lowering yet
+                1x  'typeof import("node:dns/promises").resolvePtr' is typed by @types/node but has no scriptc lowering yet
+                1x  'typeof import("node:dns/promises").resolveCname' is typed by @types/node but has no scriptc lowering yet
+                1x  'Reflect.set' is part of the standard library types but has no scriptc lowering yet
+                1x  'Process.version' is typed by @types/node but has no scriptc lowering yet
+                1x  'Buffer.concat of 'number[]' values' is part of the standard library types but has no scriptc lowering yet
+                1x  'ZlibOptions' is typed by @types/node but has no scriptc lowering yet
+                1x  'crypto.randomFillSync' is typed by @types/node but has no scriptc lowering yet
+                1x  'crypto.createSign' is typed by @types/node but has no scriptc lowering yet
+                1x  'Sign.sign' is typed by @types/node but has no scriptc lowering yet
+                1x  'MongoError.stack' is part of the standard library types but has no scriptc lowering yet
+                1x  'AbortSignal.throwIfAborted' is typed by @types/node but has no scriptc lowering yet
+                1x  'Timeout.then' is part of the standard library types but has no scriptc lowering yet
+                1x  'new Set(values)' is part of the standard library types but has no scriptc lowering yet
+                1x  'Transform in objectMode' is part of the standard library types but has no scriptc lowering yet
+                1x  'Hash.update with 2 arguments' is part of the standard library types but has no scriptc lowering yet
+                1x  'createHash with this algorithm' is part of the standard library types but has no scriptc lowering yet
+                1x  'createHmac with this algorithm' is part of the standard library types but has no scriptc lowering yet
+                1x  'crypto.pbkdf2Sync with this digest' is part of the standard library types but has no scriptc lowering yet
+                1x  'crypto.timingSafeEqual' is typed by @types/node but has no scriptc lowering yet
+                1x  'then with a rejection handler of this shape' is part of the standard library types but has no scriptc lowering yet
+                1x  'typeof import("node:dns/promises").resolveSrv' is typed by @types/node but has no scriptc lowering yet
+                1x  'SrvRecord.name' is typed by @types/node but has no scriptc lowering yet
+                1x  'Promise<void> | undefined.then' is part of the standard library types but has no scriptc lowering yet
+                1x  'GridFSBucketReadStream.emit' is typed by @types/node but has no scriptc lowering yet
+                1x  'GridFSBucketReadStream.once' is typed by @types/node but has no scriptc lowering yet
+                1x  'Buffer.from with this encoding' is part of the standard library types but has no scriptc lowering yet
+                1x  'AnyBulkWriteOperation<SyncKeyDoc>[].push' is part of the standard library types but has no scriptc lowering yet
+                1x  'AnyBulkWriteOperation<SyncKeyDoc>[].length' is part of the standard library types but has no scriptc lowering yet
+                1x  'AnyBulkWriteOperation<CollectionVersionDoc>[].push' is part of the standard library types but has no scriptc lowering yet
+                1x  'AnyBulkWriteOperation<IndexValueDoc>[].length' is part of the standard library types but has no scriptc lowering yet
+                1x  'this.constructor' is part of the standard library types but has no scriptc lowering yet (instantiating class 'AbstractOperation' with <m364.CursorRes
+                1x  'this.constructor' is part of the standard library types but has no scriptc lowering yet (instantiating class 'AbstractOperation' with <{ databases: {
+                1x  'this.constructor' is part of the standard library types but has no scriptc lowering yet (instantiating class 'AbstractOperation' with <boolean>)
+                1x  'this.constructor' is part of the standard library types but has no scriptc lowering yet (instantiating class 'AbstractOperation' with <{ [key: string
+                1x  'this.constructor' is part of the standard library types but has no scriptc lowering yet (instantiating class 'AbstractOperation' with <number>)
+                1x  'this.constructor' is part of the standard library types but has no scriptc lowering yet (instantiating class 'AbstractOperation' with <string[]>)
+                1x  'this.constructor' is part of the standard library types but has no scriptc lowering yet (instantiating class 'AbstractOperation' with <string>)
+                1x  'this.constructor' is part of the standard library types but has no scriptc lowering yet (instantiating class 'AbstractOperation' with <m364.ClientBul
+                1x  'Function' is part of the standard library types but has no scriptc lowering yet
+         122 SC2009  files=28
+             @zapo-js/store-mongo@1.2.0/packages/store-mongo/src/sender-key.store.ts:13
+             @zapo-js/store-mongo@1.2.0/packages/store-mongo/src/appstate.store.ts:13
+             @zapo-js/store-mongo@1.2.0/packages/store-mongo/src/pre-key.store.ts:12
+             @zapo-js/store-mongo@1.2.0/packages/store-mongo/src/retry.store.ts:11
+             @zapo-js/store-mongo@1.2.0/packages/store-mongo/src/session.store.ts:7
+             @zapo-js/store-mongo@1.2.0/packages/store-mongo/src/signal.store.ts:7
+             @zapo-js/store-mongo@1.2.0/packages/store-mongo/src/device-list.store.ts:6
+             @zapo-js/store-mongo@1.2.0/packages/store-mongo/src/message-secret.store.ts:6
+             mongodb@6.21.0/src/utils.ts:5
+             @zapo-js/store-mongo@1.2.0/packages/store-mongo/src/group-metadata.store.ts:5
+             @zapo-js/store-mongo@1.2.0/packages/store-mongo/src/chat-metadata.store.ts:5
+             mongodb@6.21.0/src/gridfs/download.ts:4
+             @zapo-js/store-mongo@1.2.0/packages/store-mongo/src/identity.store.ts:4
+             mongodb@6.21.0/src/sort.ts:4
+             mongodb@6.21.0/src/cmap/auth/gssapi.ts:3
+             mongodb@6.21.0/src/connection_string.ts:3
+             mongodb@6.21.0/src/cursor/abstract_cursor.ts:2
+             mongodb@6.21.0/src/operations/indexes.ts:2
+             bson@6.10.4/src/code.ts:1
+             mongodb@6.21.0/src/mongo_logger.ts:1
+             mongodb@6.21.0/src/cmap/handshake/client_metadata.ts:1
+             mongodb@6.21.0/src/gridfs/upload.ts:1
+             @zapo-js/store-mongo@1.2.0/packages/store-mongo/src/BaseMongoStore.ts:1
+             mongodb@6.21.0/src/client-side-encryption/state_machine.ts:1
+             mongodb@6.21.0/src/operations/client_bulk_write/results_merger.ts:1
+             mongodb@6.21.0/src/gridfs/index.ts:1
+             mongodb@6.21.0/src/operations/find.ts:1
+             mongodb@6.21.0/src/deps.ts:1
+                8x  values of type 'Collection<PreKeyDoc>' cannot be compiled: the record shape is supported, but its member 's' has type 'CollectionPrivate', which does 
+                8x  values of type 'Collection<OutboundDoc>' cannot be compiled: the record shape is supported, but its member 's' has type 'CollectionPrivate', which doe
+                7x  values of type 'Collection<SessionDoc>' cannot be compiled: the record shape is supported, but its member 's' has type 'CollectionPrivate', which does
+                7x  values of type 'Collection<DistributionDoc>' cannot be compiled: the record shape is supported, but its member 's' has type 'CollectionPrivate', which
+                7x  values of type 'Collection<SyncKeyDoc>' cannot be compiled: the record shape is supported, but its member 's' has type 'CollectionPrivate', which does
+                6x  values of type 'Collection<MetaDoc>' cannot be compiled: the record shape is supported, but its member 's' has type 'CollectionPrivate', which does no
+                6x  values of type 'Collection<SenderKeyDoc>' cannot be compiled: the record shape is supported, but its member 's' has type 'CollectionPrivate', which do
+                6x  values of type 'Collection<DeviceListDoc>' cannot be compiled: the record shape is supported, but its member 's' has type 'CollectionPrivate', which d
+                6x  values of type 'Collection<MessageSecretDoc>' cannot be compiled: the record shape is supported, but its member 's' has type 'CollectionPrivate', whic
+                5x  values of type 'Collection<GroupMetadataDoc>' cannot be compiled: the record shape is supported, but its member 's' has type 'CollectionPrivate', whic
+                5x  values of type 'Collection<ChatMetadataDoc>' cannot be compiled: the record shape is supported, but its member 's' has type 'CollectionPrivate', which
+                4x  values of type 'Collection<IdentityDoc>' cannot be compiled: the record shape is supported, but its member 's' has type 'CollectionPrivate', which doe
+                3x  values of type 'Collection<SignedPreKeyDoc>' cannot be compiled: the record shape is supported, but its member 's' has type 'CollectionPrivate', which
+                3x  values of type 'Collection<InboundDoc>' cannot be compiled: the record shape is supported, but its member 's' has type 'CollectionPrivate', which does
+                3x  values of type 'Sort' cannot be compiled: the union shape is supported, but 'ReadonlyMap<string, SortDirection>' arms have no home in a compiled union
+                2x  values of type 'KerberosClient' cannot be compiled: the record shape is supported, but its member 'step' has type '{ (challenge: string): Promise<stri
+                2x  values of type 'FindOptions<Document>' cannot be compiled: the record shape is supported, but its member 'sort' has type 'Sort | undefined', which doe
+                2x  values of type 'Collection<RegistrationDoc>' cannot be compiled: the record shape is supported, but its member 's' has type 'CollectionPrivate', which
+                2x  values of type 'Collection<CollectionVersionDoc>' cannot be compiled: the record shape is supported, but its member 's' has type 'CollectionPrivate', 
+                2x  values of type 'Collection<IndexValueDoc>' cannot be compiled: the record shape is supported, but its member 's' has type 'CollectionPrivate', which d
+                2x  values of type 'MongoOptions' cannot be compiled: the record shape is supported, but its member 'pkFactory' has type 'PkFactory', which does not compi
+                1x  values of type 'string | Function' cannot be compiled: the union shape is supported, but its arm 'Function' does not compile
+                1x  values of type 'any[] | Set<any>' cannot be compiled: the union shape is supported, but its arm 'any[]' does not compile
+                1x  values of type 'unknown[]' cannot be compiled: the array shape is supported, but 'unknown' elements have no array representation yet
+                1x  values of type '{ write: { (buffer: string | Uint8Array<ArrayBufferLike>, cb?: ((err?: Error | null | undefined) => void) | undefined): boolean; (str:
+                1x  values of type 'Promise<KerberosClient>' cannot be compiled: the Promise shape is supported, but its value type 'KerberosClient' does not compile
+                1x  values of type 'Map<any, any>' cannot be compiled: the Map shape is supported, but its key type 'any' does not compile
+                1x  values of type '(this: AbortSignal, event: Event) => void' cannot be compiled: the function shape is supported, but its signature is variadic ('argume
+                1x  values of type 'GridFSBucketReadStreamPrivate' cannot be compiled: the record shape is supported, but its member 'files' has type 'Collection<GridFSFi
+                1x  values of type 'Collection<GridFSChunk>' cannot be compiled: the record shape is supported, but its member 's' has type 'CollectionPrivate', which doe
+                1x  values of type '(session: ClientSession) => Promise<{ initialized: false; version: number; hash: Readonly<Uint8Array<ArrayBufferLike>>; indexValueMap:
+                1x  values of type '(session: ClientSession) => Promise<({ initialized: false; version: number; hash: Readonly<Uint8Array<ArrayBufferLike>>; indexValueMap
+                1x  values of type 'T | undefined' cannot be compiled: the union shape is supported, but 'T' arms have no home in a compiled union yet (no runtime narrowi
+                1x  values of type 'AbstractCursor<any, AbstractCursorEvents>' cannot be compiled: the record shape is supported, but its member 'transform' has type '((d
+                1x  values of type 'symbol | AbstractCursor<any, AbstractCursorEvents>' cannot be compiled: the union shape is supported, but its arm 'AbstractCursor<any,
+                1x  values of type 'StateMachineExecutable' cannot be compiled: the record shape is supported, but its member 'askForKMSCredentials' has type '() => Promi
+                1x  values of type 'ClientBulkWriteResultAccumulation' cannot be compiled: the record shape is supported, but its member 'insertResults' has type 'Map<num
+                1x  values of type 'GridFSBucketPrivate' cannot be compiled: the record shape is supported, but its member '_chunksCollection' has type 'Collection<GridFS
+                1x  values of type 'TopologyProvider' cannot be compiled: the union shape is supported, but its arm 'AbstractCursor<any, AbstractCursorEvents>' does not c
+                1x  values of type 'Collection<Document>' cannot be compiled: the record shape is supported, but its member 's' has type 'CollectionPrivate', which does n
+                1x  values of type 'Sort | undefined' cannot be compiled: the union shape is supported, but 'ReadonlyMap<string, SortDirection>' arms have no home in a co
+                1x  values of type 'IndexSpecification' cannot be compiled: the union shape is supported, but 'Map<string, IndexDirection>' arms have no home in a compile
+                1x  values of type 'IndexDescription' cannot be compiled: the record shape is supported, but its member 'key' has type 'Map<string, IndexDirection> | { [k
+                1x  values of type 'CredentialProvider | { kModuleError: MongoMissingDependencyError; }' cannot be compiled: the union shape is supported, but its arm 'Cr
+                1x  values of type 'CaseInsensitiveMap<any>' cannot be compiled: the record shape is supported, but its member 'get' has type '(k: string) => any', which 
+                1x  values of type 'GridFSBucketReadStreamOptions' cannot be compiled: the record shape is supported, but its member 'sort' has type 'Sort | undefined', w
+                1x  values of type 'FindCursor<GridFSChunk>' cannot be compiled: the record shape is supported, but its member 'transform' has type '((doc: GridFSChunk) =
+         102 SC2004  files=27
+             mongodb@6.21.0/src/operations/execute_operation.ts:16
+             mongodb@6.21.0/src/mongo_logger.ts:8
+             mongodb@6.21.0/src/cmap/auth/gssapi.ts:8
+             mongodb@6.21.0/src/cmap/auth/mongodb_aws.ts:7
+             mongodb@6.21.0/src/cmap/wire_protocol/compression.ts:5
+             mongodb@6.21.0/src/sdam/monitor.ts:5
+             mongodb@6.21.0/src/cmap/auth/mongodb_oidc.ts:5
+             mongodb@6.21.0/src/cmap/auth/scram.ts:5
+             mongodb@6.21.0/src/bulk/common.ts:4
+             mongodb@6.21.0/src/resource_management.ts:4
+             mongodb@6.21.0/src/cmap/handshake/client_metadata.ts:4
+             mongodb@6.21.0/src/gridfs/download.ts:4
+             @zapo-js/store-mongo@1.2.0/packages/store-mongo/src/sender-key.store.ts:4
+             mongodb@6.21.0/src/cmap/connect.ts:3
+             mongodb@6.21.0/src/cmap/auth/plain.ts:3
+             @zapo-js/store-mongo@1.2.0/packages/store-mongo/src/appstate.store.ts:3
+             bson@6.10.4/src/parser/deserializer.ts:2
+             mongodb@6.21.0/src/utils.ts:2
+             mongodb@6.21.0/src/cmap/wire_protocol/on_data.ts:2
+             bson@6.10.4/src/utils/web_byte_utils.ts:1
+             bson@6.10.4/src/extended_json.ts:1
+             mongodb@6.21.0/src/sessions.ts:1
+             mongodb@6.21.0/src/client-side-encryption/mongocryptd_manager.ts:1
+             mongodb@6.21.0/src/cmap/connection_pool_events.ts:1
+             mongodb@6.21.0/src/cmap/auth/x509.ts:1
+             mongodb@6.21.0/src/sdam/topology.ts:1
+             @zapo-js/store-mongo@1.2.0/packages/store-mongo/src/BaseMongoStore.ts:1
+               14x  uses of 'credentials' inherit the blocker on its declaration
+                6x  uses of 'createStdioLogger' inherit the blocker on its declaration
+                6x  uses of 'connection' inherit the blocker on its declaration
+                5x  uses of 'zstd' inherit the blocker on its declaration
+                4x  uses of 'faasEnv' inherit the blocker on its declaration
+                3x  uses of 'options' inherit the blocker on its declaration
+                3x  uses of 'buf' inherit the blocker on its declaration
+                3x  uses of 'session' inherit the blocker on its declaration (instantiating 'executeOperation' with <m374.RemoveUserOperation, boolean>)
+                3x  uses of 'session' inherit the blocker on its declaration (instantiating 'executeOperation' with <m376.ValidateCollectionOperation, { [key: string]: un
+                3x  uses of 'session' inherit the blocker on its declaration (instantiating 'executeOperation' with <m373.ListDatabasesOperation, { databases: { empty: bo
+                3x  uses of 'session' inherit the blocker on its declaration (instantiating 'executeOperation' with <m415.DropCollectionOperation, boolean>)
+                2x  uses of 'writeError' inherit the blocker on its declaration
+                2x  uses of 'currentOp' inherit the blocker on its declaration
+                2x  uses of 'response' inherit the blocker on its declaration
+                2x  uses of 'skResult' inherit the blocker on its declaration
+                1x  uses of 'navigator' inherit the blocker on its declaration
+                1x  uses of 'optionsArray' inherit the blocker on its declaration
+                1x  uses of 'object' inherit the blocker on its declaration
+                1x  uses of 'serializeArray' inherit the blocker on its declaration
+                1x  uses of 'ctor' inherit the blocker on its declaration
+                1x  uses of 'isSuperset' inherit the blocker on its declaration
+                1x  uses of 'message' inherit the blocker on its declaration
+                1x  uses of 'severities' inherit the blocker on its declaration
+                1x  uses of 'MongoClient' inherit the blocker on its declaration
+                1x  uses of 'ClientSession' inherit the blocker on its declaration
+                1x  uses of 'AbstractCursor' inherit the blocker on its declaration
+                1x  uses of 'ChangeStream' inherit the blocker on its declaration
+                1x  uses of 'topology' inherit the blocker on its declaration
+                1x  uses of 'makeKerberosClient' inherit the blocker on its declaration
+                1x  uses of 'negotiate' inherit the blocker on its declaration
+                1x  uses of 'finalize' inherit the blocker on its declaration
+                1x  uses of 'spawn' inherit the blocker on its declaration
+                1x  uses of 'unconsumedPromises' inherit the blocker on its declaration
+                1x  uses of 'addAbortListener' inherit the blocker on its declaration
+                1x  uses of 'maxConnecting' inherit the blocker on its declaration
+                1x  uses of 'makeSocket' inherit the blocker on its declaration
+                1x  uses of 'makeConnection' inherit the blocker on its declaration
+                1x  uses of 'performInitialHandshake' inherit the blocker on its declaration
+                1x  uses of 'connect' inherit the blocker on its declaration
+                1x  uses of 'saslStartResponse' inherit the blocker on its declaration
+                1x  uses of 'sign' inherit the blocker on its declaration
+                1x  uses of 'reauthenticating' inherit the blocker on its declaration
+                1x  uses of 'username' inherit the blocker on its declaration
+                1x  uses of 'valueParts' inherit the blocker on its declaration
+                1x  uses of 'server1' inherit the blocker on its declaration
+                1x  uses of 'identifier' inherit the blocker on its declaration
+                1x  uses of 'senderDocs' inherit the blocker on its declaration
+                1x  uses of 'distDocs' inherit the blocker on its declaration
+                1x  uses of 'keyDocs' inherit the blocker on its declaration
+                1x  uses of 'versionDocs' inherit the blocker on its declaration
+                1x  uses of 'valueDocs' inherit the blocker on its declaration
+                1x  uses of 'result' inherit the blocker on its declaration (instantiating 'withSession' with <void>)
+                1x  uses of 'server' inherit the blocker on its declaration (instantiating 'tryOperation' with <m374.RemoveUserOperation, boolean>)
+                1x  uses of 'server' inherit the blocker on its declaration (instantiating 'tryOperation' with <m376.ValidateCollectionOperation, { [key: string]: unknown
+                1x  uses of 'server' inherit the blocker on its declaration (instantiating 'tryOperation' with <m373.ListDatabasesOperation, { databases: { empty: boolean
+                1x  uses of 'server' inherit the blocker on its declaration (instantiating 'tryOperation' with <m415.DropCollectionOperation, boolean>)
+          93 SC2011  files=32
+             mongodb@6.21.0/src/collection.ts:22
+             mongodb@6.21.0/src/cursor/abstract_cursor.ts:12
+             mongodb@6.21.0/src/cmap/connect.ts:8
+             mongodb@6.21.0/src/bulk/common.ts:6
+             mongodb@6.21.0/src/resource_management.ts:4
+             mongodb@6.21.0/src/operations/client_bulk_write/command_builder.ts:4
+             mongodb@6.21.0/src/sdam/monitor.ts:3
+             mongodb@6.21.0/src/gridfs/download.ts:3
+             @zapo-js/store-mongo@1.2.0/packages/store-mongo/src/appstate.store.ts:3
+             bson@6.10.4/src/parser/deserializer.ts:2
+             mongodb@6.21.0/src/utils.ts:2
+             mongodb@6.21.0/src/sdam/topology.ts:2
+             mongodb@6.21.0/src/cmap/auth/scram.ts:2
+             mongodb@6.21.0/src/connection_string.ts:2
+             bson@6.10.4/src/parser/calculate_size.ts:1
+             bson@6.10.4/src/extended_json.ts:1
+             mongodb@6.21.0/src/cmap/connection_pool.ts:1
+             mongodb@6.21.0/src/operations/drop.ts:1
+             mongodb@6.21.0/src/deps.ts:1
+             mongodb@6.21.0/src/cmap/auth/auth_provider.ts:1
+             mongodb@6.21.0/src/cmap/handshake/client_metadata.ts:1
+             mongodb@6.21.0/src/cmap/commands.ts:1
+             mongodb@6.21.0/src/cmap/command_monitoring_events.ts:1
+             mongodb@6.21.0/src/mongo_types.ts:1
+             mongodb@6.21.0/src/cmap/auth/mongodb_aws.ts:1
+             mongodb@6.21.0/src/encrypter.ts:1
+             mongodb@6.21.0/src/operations/client_bulk_write/executor.ts:1
+             mongodb@6.21.0/src/operations/update.ts:1
+             mongodb@6.21.0/src/operations/find_and_modify.ts:1
+             mongodb@6.21.0/src/client-side-encryption/client_encryption.ts:1
+             mongodb@6.21.0/src/cmap/connection.ts:1
+             @zapo-js/store-mongo@1.2.0/packages/store-mongo/src/createMongoStore.ts:1
+                8x  values of type 'ConnectionOptions' have no static representation but run in the embedded dynamic engine, which this build does not include
+                4x  values of type 'any[]' have no static representation but run in the embedded dynamic engine, which this build does not include
+                4x  destructuring on 'any'-typed values runs in the embedded dynamic engine, which this build does not include
+                3x  values of type 'any' run in the embedded dynamic engine, which this build does not include
+                3x  the '+' operator on 'any'-typed values runs in the embedded dynamic engine, which this build does not include
+                3x  values of type 'MakeConnectionOptions' have no static representation but run in the embedded dynamic engine, which this build does not include
+                2x  values of type '{ index: number; code: any; errmsg: any; errInfo: any; op: Document; }' have no static representation but run in the embedded dynamic 
+                2x  values of type 'MongoClientOptions' have no static representation but run in the embedded dynamic engine, which this build does not include
+                2x  values of type '(callback: Callback) => void' have no static representation but run in the embedded dynamic engine, which this build does not include
+                2x  values of type 'readonly AnyClientBulkWriteModel<Document>[]' have no static representation but run in the embedded dynamic engine, which this build d
+                1x  values of type 'Document' have no static representation but run in the embedded dynamic engine, which this build does not include
+                1x  values of type 'any[] | Document[]' have no static representation but run in the embedded dynamic engine, which this build does not include
+                1x  the '-' operator on 'any'-typed values runs in the embedded dynamic engine, which this build does not include
+                1x  values of type 'Readonly<ConnectionPoolOptions>' have no static representation but run in the embedded dynamic engine, which this build does not inclu
+                1x  values of type '((doc: TSchema) => any) | undefined' have no static representation but run in the embedded dynamic engine, which this build does not i
+                1x  values of type '{ kModuleError: any; }' have no static representation but run in the embedded dynamic engine, which this build does not include
+                1x  values of type '{ name: string; version: any; }' have no static representation but run in the embedded dynamic engine, which this build does not inclu
+                1x  values of type '[string, any][]' have no static representation but run in the embedded dynamic engine, which this build does not include
+                1x  values of type 'TopologyPrivate' have no static representation but run in the embedded dynamic engine, which this build does not include
+                1x  values of type '{ saslContinue: number; conversationId: any; payload: Uint8Array<ArrayBufferLike>; }' have no static representation but run in the emb
+                1x  values of type '{ saslContinue: number; conversationId: any; payload: Binary; }' have no static representation but run in the embedded dynamic engine,
+                1x  values of type '{ saslContinue: number; conversationId: any; payload: Buffer<ArrayBuffer>; }' have no static representation but run in the embedded dy
+                1x  values of type 'CollectionPrivate' have no static representation but run in the embedded dynamic engine, which this build does not include (instantiat
+                1x  the '>' operator on 'any'-typed values runs in the embedded dynamic engine, which this build does not include
+                1x  the '<' operator on 'any'-typed values runs in the embedded dynamic engine, which this build does not include
+                1x  the '<=' operator on 'any'-typed values runs in the embedded dynamic engine, which this build does not include
+                1x  values of type 'CollectionPrivate' have no static representation but run in the embedded dynamic engine, which this build does not include (instantiat
+                1x  values of type 'CollectionPrivate' have no static representation but run in the embedded dynamic engine, which this build does not include (instantiat
+                1x  values of type 'CollectionPrivate' have no static representation but run in the embedded dynamic engine, which this build does not include (instantiat
+                1x  values of type 'CollectionPrivate' have no static representation but run in the embedded dynamic engine, which this build does not include (instantiat
+                1x  values of type '((doc: TSchema) => any) | undefined' have no static representation but run in the embedded dynamic engine, which this build does not i
+                1x  values of type 'CollectionPrivate' have no static representation but run in the embedded dynamic engine, which this build does not include (instantiat
+                1x  values of type '((doc: TSchema) => any) | undefined' have no static representation but run in the embedded dynamic engine, which this build does not i
+                1x  values of type 'CollectionPrivate' have no static representation but run in the embedded dynamic engine, which this build does not include (instantiat
+                1x  values of type 'CollectionPrivate' have no static representation but run in the embedded dynamic engine, which this build does not include (instantiat
+                1x  values of type 'CollectionPrivate' have no static representation but run in the embedded dynamic engine, which this build does not include (instantiat
+                1x  values of type '((doc: TSchema) => any) | undefined' have no static representation but run in the embedded dynamic engine, which this build does not i
+                1x  values of type 'CollectionPrivate' have no static representation but run in the embedded dynamic engine, which this build does not include (instantiat
+                1x  values of type 'CollectionPrivate' have no static representation but run in the embedded dynamic engine, which this build does not include (instantiat
+                1x  values of type 'CollectionPrivate' have no static representation but run in the embedded dynamic engine, which this build does not include (instantiat
+                1x  values of type '((doc: TSchema) => any) | undefined' have no static representation but run in the embedded dynamic engine, which this build does not i
+                1x  values of type 'AnyBulkWriteOperation<SyncKeyDoc>[]' have no static representation but run in the embedded dynamic engine, which this build does not i
+                1x  values of type 'AnyBulkWriteOperation<CollectionVersionDoc>[]' have no static representation but run in the embedded dynamic engine, which this build 
+                1x  values of type '((doc: TSchema) => any) | undefined' have no static representation but run in the embedded dynamic engine, which this build does not i
+                1x  values of type 'AnyBulkWriteOperation<IndexValueDoc>[]' have no static representation but run in the embedded dynamic engine, which this build does no
+                1x  values of type 'CollectionPrivate' have no static representation but run in the embedded dynamic engine, which this build does not include (instantiat
+                1x  values of type 'CollectionPrivate' have no static representation but run in the embedded dynamic engine, which this build does not include (instantiat
+                1x  values of type 'CollectionPrivate' have no static representation but run in the embedded dynamic engine, which this build does not include (instantiat
+                1x  values of type 'CollectionPrivate' have no static representation but run in the embedded dynamic engine, which this build does not include (instantiat
+                1x  values of type 'CollectionPrivate' have no static representation but run in the embedded dynamic engine, which this build does not include (instantiat
+                1x  values of type '((doc: TSchema) => any) | undefined' have no static representation but run in the embedded dynamic engine, which this build does not i
+                1x  values of type 'CollectionPrivate' have no static representation but run in the embedded dynamic engine, which this build does not include (instantiat
+                1x  values of type '((doc: TSchema) => any) | undefined' have no static representation but run in the embedded dynamic engine, which this build does not i
+                1x  values of type 'CollectionPrivate' have no static representation but run in the embedded dynamic engine, which this build does not include (instantiat
+                1x  values of type '((doc: TSchema) => any) | undefined' have no static representation but run in the embedded dynamic engine, which this build does not i
+                1x  values of type 'CollectionPrivate' have no static representation but run in the embedded dynamic engine, which this build does not include (instantiat
+                1x  values of type 'CollectionPrivate' have no static representation but run in the embedded dynamic engine, which this build does not include (instantiat
+                1x  values of type 'CollectionPrivate' have no static representation but run in the embedded dynamic engine, which this build does not include (instantiat
+                1x  values of type '((doc: TSchema) => any) | undefined' have no static representation but run in the embedded dynamic engine, which this build does not i
+                1x  values of type '((doc: TSchema) => any) | undefined' have no static representation but run in the embedded dynamic engine, which this build does not i
+                1x  values of type 'UpdateOptions & { multi?: boolean | undefined; } & { sort?: Sort | undefined; }' have no static representation but run in the embedded
+                1x  values of type 'FindOneAndReplaceOptions | FindOneAndUpdateOptions' have no static representation but run in the embedded dynamic engine, which this b
+                1x  values of type 'MongoClient | MongoClientOptions | undefined' have no static representation but run in the embedded dynamic engine, which this build d
+                1x  values of type 'OptionDescriptor' have no static representation but run in the embedded dynamic engine, which this build does not include
+                1x  values of type 'ClientDeleteManyModel<Document> | ClientDeleteOneModel<Document>' have no static representation but run in the embedded dynamic engine
+                1x  values of type 'ClientUpdateManyModel<Document> | ClientUpdateOneModel<Document>' have no static representation but run in the embedded dynamic engine
+                1x  values of type 'AnyClientBulkWriteModel<Document>' have no static representation but run in the embedded dynamic engine, which this build does not inc
+                1x  values of type 'TopologyOptions | undefined' have no static representation but run in the embedded dynamic engine, which this build does not include
+                1x  values of type '((doc: TSchema) => any) | undefined' have no static representation but run in the embedded dynamic engine, which this build does not i
+                1x  values of type 'Db | { readonly uri: string; readonly database: string; readonly options?: MongoClientOptions | undefined; }' have no static represent
+          12 SC1031  files=8
+             mongodb@6.21.0/src/cmap/auth/mongodb_oidc.ts:3
+             mongodb@6.21.0/src/cmap/auth/mongodb_aws.ts:2
+             mongodb@6.21.0/src/cmap/auth/scram.ts:2
+             mongodb@6.21.0/src/mongo_logger.ts:1
+             mongodb@6.21.0/src/cmap/auth/gssapi.ts:1
+             mongodb@6.21.0/src/sdam/monitor.ts:1
+             mongodb@6.21.0/src/cmap/auth/plain.ts:1
+             mongodb@6.21.0/src/cmap/auth/x509.ts:1
+               11x  object destructuring of class instances (read the fields directly — accessors make the desugar observable) are not supported yet
+                1x  destructuring the property 'message' the class 'ServerSelectionEvent' does not declare is not supported yet
+           8 SC2001  files=7
+             mongodb@6.21.0/src/cmap/wire_protocol/on_data.ts:2
+             bson@6.10.4/src/extended_json.ts:1
+             mongodb@6.21.0/src/admin.ts:1
+             mongodb@6.21.0/src/sdam/topology_description.ts:1
+             mongodb@6.21.0/src/sessions.ts:1
+             mongodb-connection-string-url@3.0.2/src/redact.ts:1
+             mongodb@6.21.0/src/sdam/topology.ts:1
+                1x  values of type '(k: string) => boolean' cannot be compiled yet (supported: number, string, boolean, arrays, Maps, Sets, RegExp, functions, classes, re
+                1x  values of type 'RunCommandOperation<Document>' cannot be compiled yet (supported: number, string, boolean, arrays, Maps, Sets, RegExp, functions, clas
+                1x  values of type 'List<Buffer<ArrayBufferLike>>' cannot be compiled yet (supported: number, string, boolean, arrays, Maps, Sets, RegExp, functions, clas
+                1x  values of type 'List<PendingPromises>' cannot be compiled yet (supported: number, string, boolean, arrays, Maps, Sets, RegExp, functions, classes, rec
+                1x  values of type '(sd: ServerDescription) => MongoError | null' cannot be compiled yet (supported: number, string, boolean, arrays, Maps, Sets, RegExp, 
+                1x  values of type 'List<ServerSession>' cannot be compiled yet (supported: number, string, boolean, arrays, Maps, Sets, RegExp, functions, classes, recor
+                1x  values of type 'Readonly<ConnectionString>' cannot be compiled yet (supported: number, string, boolean, arrays, Maps, Sets, RegExp, functions, classes
+                1x  values of type 'List<ServerSelectionRequest>' cannot be compiled yet (supported: number, string, boolean, arrays, Maps, Sets, RegExp, functions, class
+           7 SC2006  files=6
+             mongodb@6.21.0/src/client-side-encryption/providers/index.ts:2
+             mongodb@6.21.0/src/client-side-encryption/client_encryption.ts:1
+             mongodb@6.21.0/src/client-side-encryption/auto_encrypter.ts:1
+             mongodb@6.21.0/src/client-side-encryption/providers/aws.ts:1
+             mongodb@6.21.0/src/client-side-encryption/providers/azure.ts:1
+             mongodb@6.21.0/src/client-side-encryption/providers/gcp.ts:1
+                7x  values of type 'KMSProviders' cannot be compiled: this index signature is outside the supported shape (string or number keys; values limited to number
+           5 SC1063  files=2
+             mongodb@6.21.0/src/operations/execute_operation.ts:4
+             zapo-js@1.8.2/src/client/persistence/companion-host.ts:1
+                1x  this use of a catch binding is not supported yet
+                1x  this use of a catch binding is not supported yet (instantiating 'tryOperation' with <m374.RemoveUserOperation, boolean>)
+                1x  this use of a catch binding is not supported yet (instantiating 'tryOperation' with <m376.ValidateCollectionOperation, { [key: string]: unknown }>)
+                1x  this use of a catch binding is not supported yet (instantiating 'tryOperation' with <m373.ListDatabasesOperation, { databases: { empty: boolean | unde
+                1x  this use of a catch binding is not supported yet (instantiating 'tryOperation' with <m415.DropCollectionOperation, boolean>)
+           4 SC2002  files=3
+             mongodb@6.21.0/src/cmap/auth/aws_temporary_credentials.ts:2
+             bson@6.10.4/src/regexp.ts:1
+             mongodb@6.21.0/src/cmap/auth/scram.ts:1
+                2x  record shapes must match exactly or width-coerce: expected '{ AccessKeyId: string | undefined; Expiration: Date | undefined; RoleArn: string | undefin
+                1x  record shapes must match exactly or width-coerce: expected 'm345.BSONRegExp', got '{ $options: string; $regex: m345.BSONRegExp | string }'
+                1x  record shapes must match exactly or width-coerce: expected '{ client: { [key: string]: unknown }; compression: string[]; hello: boolean | undefined; h
+           4 SC1100  files=4
+             mongodb@6.21.0/src/utils.ts:1
+             mongodb@6.21.0/src/connection_string.ts:1
+             @zapo-js/store-mongo@1.2.0/packages/store-mongo/src/group-metadata.store.ts:1
+             @zapo-js/store-mongo@1.2.0/packages/store-mongo/src/chat-metadata.store.ts:1
+                1x  passing 'unknown' values where 'URL' is expected (argument 1 of url.hostname) is not supported yet
+                1x  switch statements on 'unknown' values are not supported yet
+                1x  storing '{ _id: { group_jid: string; session_id: string } | undefined; ephemeral: number | undefined; ephemeralTrigger: number | undefined; expires_at
+                1x  storing '{ _id: { chat_jid: string; session_id: string } | undefined; ephemeralExpiration: number | undefined; ephemeralSettingTimestamp: number | und
+           2 SC2012  files=2
+             bson@6.10.4/src/double.ts:1
+             mongodb@6.21.0/src/cmap/auth/scram.ts:1
+                1x  'Math.sign' runs in the embedded dynamic engine, which this build does not include
+                1x  '.replace()' on strings runs in the embedded dynamic engine, which this build does not include
+           2 SC1101  files=2
+             bson@6.10.4/src/extended_json.ts:1
+             mongodb@6.21.0/src/utils.ts:1
+                2x  converting typed values to 'unknown' is not supported yet
+           2 SC1042  files=2
+             bson@6.10.4/src/bson.ts:1
+             mongodb@6.21.0/src/cmap/auth/mongo_credentials.ts:1
+                2x  logical operators on mixed operand types are not supported yet
+           2 SC2003  files=2
+             mongodb@6.21.0/src/bulk/common.ts:1
+             mongodb@6.21.0/src/gridfs/upload.ts:1
+                1x  union types must match exactly: expected '{ [key: string]: unknown } | undefined', got 'Error | m356.MongoError | undefined' (a union re-tags into ano
+                1x  union types must match exactly: expected '(Error | m356.MongoError | undefined) => void', got '(Error | m356.MongoError | undefined, unknown) => void'
+           1 SC2010  files=1
+             mongodb@6.21.0/src/client-side-encryption/mongocryptd_manager.ts:1
+                1x  destructuring 'number' values (the engine reads through JS's wrapper coercion) requires the embedded dynamic engine, which this build does not include
+           1 SC2013  files=1
+             mongodb@6.21.0/src/cmap/auth/scram.ts:1
+                1x  values from the '@mongodb-js/saslprep' package run in the embedded dynamic engine, which this build does not include
+           1 SC0004  files=1
+             mongodb@6.21.0/src/cmap/auth/scram.ts:1
+                1x  the TypeScript checker crashed answering a query here (an upstream typescript-go bug): panic: interface conversion: checker.TypeData is *checker.TypeR
+           1 SC1045  files=1
+             mongodb@6.21.0/src/gridfs/download.ts:1
+                1x  increment/decrement of array elements or computed receivers in expression position is not supported yet
