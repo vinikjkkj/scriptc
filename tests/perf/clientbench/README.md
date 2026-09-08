@@ -250,8 +250,19 @@ the compiler's message is rethrown in place of zapo's `"optional dependency
 \"ws\" is not installed. Install with: npm i ws"`. Stamping
 `ERR_MODULE_NOT_FOUND` on it would make that branch fire, and it would then
 give **wrong advice**: the package *is* installed, the build just cannot run
-it. That is a real trade-off, not an oversight, and it should be decided
-rather than drifted into.
+it.
+
+> **DECIDED (coordinator, 2026-09-07): do not stamp a code.** A clear message
+> rethrown beats a familiar message that is false. The option **not taken**
+> was stamping `ERR_MODULE_NOT_FOUND`, which would make zapo's
+> optional-dependency branch fire and tell the user to `npm i ws` for a
+> package already on disk. This is a deliberate choice, **not an oversight** —
+> do not "fix" it by adding the code.
+>
+> If it is ever closed properly, the shape is a **distinct** code meaning
+> *"present, but not runnable in this build"*, which every optional-dependency
+> `catch` in the ecosystem would have to learn. That is an ecosystem-facing
+> decision and not one this project makes unilaterally.
 
 ### 3.2 `--npm-static argo-codec` — measured. It closes the refusal.
 
@@ -285,6 +296,13 @@ module-level rejection into ten countable statement-level fences**, each of
 which fires only if that statement runs. That is a strict gain in
 observability, and it is the difference between a capability that switches
 itself off silently and one whose remaining gaps can be enumerated and closed.
+
+> ### "argo closed" does NOT mean "argo works"
+>
+> The refusal is closed. The **capability is unproven.** Ten fences sit inside
+> argo-codec's own code and this bench never drives mex, so not one of them
+> has been executed. Anyone quoting `--npm-static argo-codec` as "argo works"
+> is quoting a build result as a runtime result.
 
 **What it does NOT establish:** that argo decoding *works* end to end. This
 bench never exercises the mex/argo path, so the ten new fences are unfired and
@@ -450,3 +468,98 @@ sourced file, not a leak elsewhere in the toolchain, and
 `harness/guard.mjs` is the fix: it refuses to start a build unless all eight
 variables are set **and** point at `G:`, and it is imported for effect by
 `harness/scc.mjs`, which is the only way this block invokes the CLI.
+
+---
+
+# 8. THE MEASUREMENT PROTOCOL — declared before the numbers exist
+
+Every performance figure this project has quoted for this bench was taken
+under `--best-effort`, so none of them measured the program that ships. These
+are the first strict numbers, and the protocol is written down **before** the
+run so it cannot be shaped by what comes out.
+
+## 8.1 The arms
+
+| label | lane | binary / source | what it answers |
+|---|---|---|---|
+| `c` | compiled | `out/bb-c/messaging.bench.exe`, `--backend c` | the readable-C lane |
+| `llvm` | compiled | `out/bb-llvm/messaging.bench.exe`, explicit `--backend llvm` | **the lane that ships** |
+| `node` | interpreted | the same `bench-bench/messaging.bench.ts` under `node --import tsx` | the comparison that matters |
+| `argo` | compiled | `out/bb-argo/messaging.bench.exe`, `--backend c --npm-static argo-codec` | the only honest cost of closing the uncoded refusal |
+
+All four run the **same source**, `bench-bench`, which is `bench-noprof` plus
+two `console.log` phase markers. Neither lane gets an instrument the other
+does not. Every binary is rebuilt from that source; the pre-marker binaries
+are not eligible arms.
+
+## 8.2 What is measured, and by what
+
+| number | instrument | why that one |
+|---|---|---|
+| wall ms **per scenario** | the bench's own `elapsedMs` | measured inside the same source both lanes execute — the one directly comparable timing number |
+| **peak RSS** | `cpuphase.exe`, `PeakWorkingSetSize`, sampled from the parent | the compiled lane has no V8 heap and `process.memoryUsage()`'s heap fields are refused by name; only an external number exists for both lanes |
+| **CPU** per phase | `cpuphase.exe`, `QueryProcessCycleTime` (Mcycles) plus the `GetProcessTimes` user/kernel split | `process.cpuUsage()` has no lowering, so the bench prints `n/a` for CPU on purpose. Cycles are exact to the context switch; the tick-quantised split is kept only because cycles give no user/kernel breakdown, and on a socket-bound workload that split is what separates "spinning" from "blocked" |
+
+`cpuphase` echoes the child's stdout byte-for-byte, so the bench's JSON still
+parses and the two lanes stay diffable.
+
+## 8.3 The rules the tooling enforces, so they cannot be forgotten in a hurry
+
+1. **Ratios are formed inside a rep.** Every arm of a rep runs back to back.
+   This host drifts ~10% per rep — a recorded session has the *same* arm at
+   22.3 s and 30.2 s — so an across-rep ratio is not a measurement.
+   `benchstat.mjs` only ever divides two arms of the same rep.
+2. **Median of the per-rep ratios, with `[min .. max]` beside it.** A median
+   without its spread is a claim without an error bar.
+3. **A floor is a draw, not a value.** The A/A floor runs the *same binary* as
+   two arms. Any delta inside the floor's half-width prints as `DRAW`.
+   Without `--floor`, `benchstat.mjs` refuses to call anything a difference
+   and prints `floor: UNKNOWN`.
+4. **A non-zero exit is never averaged away.** Truncated runs are listed
+   before any table.
+5. **Every number names its lane, binary, zig, target and node.** `bench.sh`
+   writes that header — including each arm's exe size and md5, and
+   `BENCH_NODE --version` read back from **the executable that will actually
+   be spawned**, not from `PATH` — before it runs anything.
+
+## 8.4 The harness self-test
+
+`node harness/benchstat.mjs --selftest`, recorded in
+`runs/benchstat-selftest.txt`:
+
+    A/A with +-22% host drift  -> ratio exactly 1.0000  [NO DIFFERENCE]
+    A/B with a real +20%       -> ratio 1.2000          [seen, not swallowed]
+
+The drift is applied **per rep to both arms**, the way the host actually
+drifts, so a tool that compared across reps would fail the first case. The
+second case is the negative control: without it, a parser that silently
+returned nothing would also "pass" the first.
+
+A real A/A dry run on this host, through the whole pipeline, is in
+`runs/bench-floor-dry.txt` (raw log: `runs/bench-floor-dry-raw.txt`) — the same
+binary as both arms, so the harness is shown producing a null result on real
+data, not only on synthetic data, before it is trusted on A/B. Every metric
+reads DRAW; the widest is `wall:SEND 1:1` at +/-10.44% on a contended host
+with the reduced smoke workload, which is exactly why the window run uses the
+shipped workload, where each scenario is seconds rather than tens of
+milliseconds.
+
+**The floor must come from a SEPARATE A/A run.** A floor taken from the log
+being measured is self-referential — its half-width IS the observed deviation,
+so every metric is a DRAW by construction and the verdict column means
+nothing. `benchstat.mjs` refuses that combination outright
+(`--degenerate-floor-ok` overrides it, and the dry run above passes it
+deliberately, to inspect an A/A log's own spread). In the window the protocol
+is therefore **two** A/A runs: the first is the floor, the second is scored
+against it and must come back DRAW on every metric. That is the non-degenerate
+form of the same check, and it is the last gate before any A/B number is
+believed.
+
+## 8.5 What is NOT measured, and why
+
+* **Build times.** They need the quiet window too; the numbers already in this
+  README (1,433 s vs 676 s) differ by host load, not by lane, and none is
+  claimed.
+* **`store-mongo`, `store-redis`, the provenance spec-twin walk.** Another
+  block's; nothing here reaches into them.
+* **The mongo arm's 517 sites.** A recorded one-line change on zapo's side.

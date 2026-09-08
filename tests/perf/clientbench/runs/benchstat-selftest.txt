@@ -1,0 +1,6 @@
+# node harness/benchstat.mjs --selftest
+selftest ok:
+  A/A with +-22% host drift  -> ratio exactly 1.0000 on 2 metric(s)  [NO DIFFERENCE]
+  A/B with a real +20%       -> ratio 1.2000  [seen, not swallowed]
+  (11 synthetic lines parsed; drift applied per rep to BOTH arms,
+   so a tool comparing ACROSS reps would fail the first case)
