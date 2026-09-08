@@ -1,0 +1,27 @@
+# THE ANSWER: does a COMPILED zapo decode argo correctly?
+# instrument: harness/mexprobe/decode-answer.ts over harness/mexprobe/argo-decoder-copy.ts
+# (zapo's src/transport/node/mex/argo-decoder.ts byte for byte, only the @util/bytes
+#  TEXT_DECODER import inlined), driving argo-codec's OWN 114-byte encoding of the
+#  payload the fake server answers w:mex with. Answer is VALUES, not 'no throw'.
+
+== NODE ORACLE (node --import tsx, v25.9.0) ==
+[decode-answer] bytes=114
+[decode-answer] isMexArgoDecoderAvailable = true
+[decode-answer] OK isActive=true enforcementType=SOFT_BLOCK enforcementEndsAt=1767225600
+
+== COMPILED, --npm-static argo-codec, argo-codec's two init fences SUBSTITUTED ==
+== (harness/initpath.mjs says init-path 0: not one fence is on the path) ==
+[decode-answer] bytes=114
+[decode-answer] isMexArgoDecoderAvailable = false
+[decode-answer] DECODE THREW: argo-codec not installed
+exit=0
+
+== COMPILED, NO --npm-static (the uncoded module refusal arm) ==
+[decode-answer] bytes=114
+[decode-answer] isMexArgoDecoderAvailable = false
+[decode-answer] DECODE THREW: argo-codec not installed
+exit=0
+
+# The two compiled arms are byte-identical in their output. Three different causes
+# -- an uncoded module refusal, a module-init fence, and a namespace with no exports
+# -- all arrive at the same "'argo-codec' not installed" line.

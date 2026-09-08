@@ -1,0 +1,69 @@
+# The two --npm-static reporting fixes, both arms controlled.
+
+== 1. the confirmation line, POSITIVE arm (--npm-static argo-codec) ==
+npm-static: argo-codec compiled statically into the program
+<blocks>\clientbench\lab\out\fl-neg2\report-control.exe
+BUILD_EXIT=0
+
+== 1. the confirmation line, FALLBACK arm (--npm-static ws) ==
+npm-static: ws FELL BACK to the island — SC1012: require() destructuring with defaults, rest, or nested patterns are not supported yet
+<blocks>\clientbench\lab\out\fb-ws\fallback-control.exe
+
+== 2. the fence-location qualifier, in the emitted C of the positive arm ==
+-- QUALIFIED (line 19 of a 17-line file: it is in the table the rewrite appends)
+SC1090 at <blocks>/clientbench/lab/app/node_modules/argo-codec/dist/cjs/decode.js:223]
+SC1090 at <blocks>/clientbench/lab/app/node_modules/argo-codec/dist/cjs/decode.js:240]
+SC1090 at <blocks>/clientbench/lab/app/node_modules/argo-codec/dist/cjs/decode.js:244]
+SC1090 at <blocks>/clientbench/lab/app/node_modules/argo-codec/dist/cjs/index.js:19 (in the export table --npm-static appends; the file on disk is 17 lines)]
+-- NOT qualified (decode.js is not rewritten at all, so its lines are its own)
+SC2020 at <blocks>/clientbench/lab/app/node_modules/argo-codec/dist/cjs/decode.js:6]
+SC2020 at <blocks>/clientbench/lab/app/node_modules/argo-codec/dist/cjs/encode.js:319]
+
+== 2. SCRIPTC_FENCELOC_TRACE=1: every location the helper rendered, and the count
+==    it judged against. 'null' = the file was not rewritten. This is what found the
+==    two bake sites the half-written version never routed through the helper.
+[fenceloc] <blocks>/clientbench/lab/app/node_modules/argo-codec/dist/cjs/wire.js:38 originalLines=null
+[fenceloc] <blocks>/clientbench/lab/app/node_modules/argo-codec/dist/cjs/decode.js:223 originalLines=null
+[fenceloc] <blocks>/clientbench/lab/app/node_modules/argo-codec/dist/cjs/decode.js:240 originalLines=null
+[fenceloc] <blocks>/clientbench/lab/app/node_modules/argo-codec/dist/cjs/decode.js:244 originalLines=null
+[fenceloc] <blocks>/clientbench/lab/app/node_modules/argo-codec/dist/cjs/decode.js:141 originalLines=null
+[fenceloc] <blocks>/clientbench/lab/app/node_modules/argo-codec/dist/cjs/decode.js:37 originalLines=null
+[fenceloc] <blocks>/clientbench/lab/app/node_modules/argo-codec/dist/cjs/decode.js:6 originalLines=null
+[fenceloc] <blocks>/clientbench/lab/app/node_modules/argo-codec/dist/cjs/encode.js:63 originalLines=328
+[fenceloc] <blocks>/clientbench/lab/app/node_modules/argo-codec/dist/cjs/encode.js:319 originalLines=328
+[fenceloc] <blocks>/clientbench/lab/app/node_modules/argo-codec/dist/cjs/index.js:19 originalLines=17
+
+== 2. the artifact the qualifier names, read with harness/rewrite-probe.mjs ==
+-- on disk: 17 lines; rewritten: 30 parts; the appended table starts at line 19
+on disk: split=18 trailingNewline=true realLines=17
+rewritten: 30 split-parts
+  1 | "use strict";
+  2 |                                                               
+  3 |                                                                                                                                                                                                          
+  4 | var encode_js_1 = require("./encode.js");
+  5 |                                                                                                                 
+  6 | var decode_js_1 = require("./decode.js");
+  7 |                                                                                                                 
+  8 | var wire_js_1 = require("./wire.js");
+  9 |                                                                                                                                       
+ 10 |                                                                                                                       
+ 11 |                                                                                                                       
+ 12 |                                                                                                                       
+ 13 |                                                                                                                     
+ 14 |                                                                                                               
+ 15 | var buf_js_1 = require("./buf.js");
+ 16 |                                                                                                        
+ 17 |                                                                                                              
+ 18 | 
+ 19 | const __scriptc_e0 = encode_js_1.encode;
+ 20 | const __scriptc_e1 = decode_js_1.decode;
+ 21 | const __scriptc_e2 = wire_js_1.FieldErrorSentinel;
+ 22 | const __scriptc_e3 = wire_js_1.pathToWire;
+ 23 | const __scriptc_e4 = wire_js_1.wireToPath;
+ 24 | const __scriptc_e5 = wire_js_1.ERROR_WIRE;
+ 25 | const __scriptc_e6 = wire_js_1.isLabeled;
+ 26 | const __scriptc_e7 = wire_js_1.unwrap;
+ 27 | const __scriptc_e8 = buf_js_1.Buf;
+ 28 | const __scriptc_e9 = buf_js_1.Reader;
+ 29 | module.exports = {encode: __scriptc_e0,decode: __scriptc_e1,FieldErrorSentinel: __scriptc_e2,pathToWire: __scriptc_e3,wireToPath: __scriptc_e4,ERROR_WIRE: __scriptc_e5,isLabeled: __scriptc_e6,unwrap: __scriptc_e7,Buf: __scriptc_e8,Reader: __scriptc_e9,__esModule: true,};
+ 30 | 

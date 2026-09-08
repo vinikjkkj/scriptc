@@ -1,0 +1,58 @@
+# THE CONTROL that makes it a defect and not a limitation.
+# zapo's spelling is `cachedArgo = await import('argo-codec')` -- the namespace STORED
+# into a module-level `let cachedArgo: ArgoModule | null | undefined`.
+
+== the SAME spelling against a LOCAL program module (harness/nscontrol/dyn-store-local.ts) ==
+<blocks>/clientbench/lab/app/nscontrol/dyn-store-local.ts:16:24 - error SC2012: 'import()' of './locmod.js' in this position runs in the embedded dynamic engine, which this build does not include
+
+  15 |     try {
+  16 |         cached = await import('./locmod.js')
+     |                        ^~~~~~~~~~~~~~~~~~~~~
+  17 |     } catch {
+
+  hint: the static tier serves this import at a CONST binding, where the names resolve to the module's own declarations (a class stays a class): `const ns = await import("./locmod.js")` for member reads and Object.keys, or `const { a, b } = await import("./locmod.js")` for named exports. A namespace stored, passed on, or awaited anywhere else has no static value to be — Node's namespace object is exotic and this build materializes no stand-in for it
+
+1 error.
+
+== the two spellings the static tier says it DOES serve, against an npm-static package ==
+-- const ns = await import('argo-codec'); new ns.Reader(...)
+<blocks>/clientbench/lab/app/nscontrol/dyn-argo-const.ts:7:17 - error SC2001: values of type 'typeof Reader' cannot be compiled yet (supported: number, string, boolean, arrays, Maps, Sets, RegExp, functions, classes, records, unions of those, and 'unknown')
+
+  6 |   console.log('  decode = ' + typeof ns.decode)
+  7 |   const r = new ns.Reader(new Uint8Array([7, 2, 3]))
+    |                 ^~~~~~~~~
+  8 |   console.log('  new Reader ok')
+
+1 error.
+-- const { Reader } = await import('argo-codec')
+<blocks>/clientbench/lab/app/nscontrol/dyn-argo-destr.ts:3:9 - error SC1031: object destructuring of non-record values (the source is dyn-typed) are not supported yet
+
+  2 | export async function main(): Promise<void> {
+  3 |   const { Reader } = await import('argo-codec')
+    |         ^~~~~~~~~~
+  4 |   console.log('  Reader = ' + typeof Reader)
+
+<blocks>/clientbench/lab/app/nscontrol/dyn-argo-destr.ts:4:38 - error SC2004: uses of 'Reader' inherit the blocker on its declaration
+
+  3 |   const { Reader } = await import('argo-codec')
+  4 |   console.log('  Reader = ' + typeof Reader)
+    |                                      ^~~~~~
+  5 |   const r = new Reader(new Uint8Array([7, 2, 3]))
+
+  hint: the declaration of 'Reader' did not compile — fix the diagnostic reported there and these sites clear with it
+
+<blocks>/clientbench/lab/app/nscontrol/dyn-argo-destr.ts:5:17 - error SC2004: uses of 'Reader' inherit the blocker on its declaration
+
+  4 |   console.log('  Reader = ' + typeof Reader)
+  5 |   const r = new Reader(new Uint8Array([7, 2, 3]))
+    |                 ^~~~~~
+  6 |   console.log('  new Reader ok')
+
+  hint: the declaration of 'Reader' did not compile — fix the diagnostic reported there and these sites clear with it
+
+3 errors.
+
+# So: a LOCAL module in zapo's position is a build-stopping SC2012 carrying the right
+# teaching; the npm-static package in the same position COMPILES and answers a wrong
+# value. And the two spellings the tier does serve are not served for an npm-static
+# package either -- the arm at lower-island.ts:725 returns before the position gate.

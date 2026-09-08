@@ -1,0 +1,89 @@
+# initpath.mjs — which deferred fences sit on a module INIT path, read off the emitted C
+# instrument: harness/initpath.mjs; keyed on the enclosing C function (sc_f__x25_init_N),
+# NOT on indentation (an indentation heuristic was proven wrong by executing it).
+
+## POSITIVE CONTROL — out/bm-argo (--npm-static argo-codec, argo-codec PRISTINE)
+## expect the two fences laddering found one 15-minute rebuild at a time
+scanned 16 emitted file(s); 11 distinct fence site(s)
+
+  ON THE MODULE-INIT PATH (fires on first import):
+    SC2020  node_modules/argo-codec/dist/cjs/decode.js:6
+         in sc_f__x25_init_314  <- init of bench-mex/messaging.bench.ts:1
+    SC1090  node_modules/argo-codec/dist/cjs/index.js:19
+         in sc_f__x25_init_315  <- init of bench-mex/messaging.bench.ts:1
+
+  INSIDE A CALLED FUNCTION (fires only if that function runs):
+    SC1100  node_modules/argo-codec/dist/cjs/decode.js:141
+         in sc_f__x25_m314_readDesc_x25_0
+    SC1090  node_modules/argo-codec/dist/cjs/decode.js:223
+         in sc_f__x25_m314_decode_x25_0
+    SC1090  node_modules/argo-codec/dist/cjs/decode.js:240
+         in sc_f__x25_m314_decode_x25_0
+    SC1090  node_modules/argo-codec/dist/cjs/decode.js:244
+         in sc_f__x25_m314_decode_x25_0
+    SC1100  node_modules/argo-codec/dist/cjs/decode.js:37
+         in sc_f__x25_m314_readValue_x25_0
+    SC2020  node_modules/argo-codec/dist/cjs/encode.js:319
+         in sc_f__x25_m313_encode_x25_0
+    SC1100  node_modules/argo-codec/dist/cjs/encode.js:63
+         in sc_f__x25_m313_writeValue_x25_0
+    SC1100  node_modules/argo-codec/dist/cjs/wire.js:38
+         in sc_f__x25_m312_isLabeled_x25_0
+    SC2020  prov/250f9af5229a545eec28ddbd3e8774a397cdb0bb/spec/proto/index.js:1
+         in sc_f__x25_fn1249
+
+  init-path 2   other 9
+
+## out/bm-argo4 (same, BOTH init fences substituted) — expect the null
+scanned 16 emitted file(s); 9 distinct fence site(s)
+
+  ON THE MODULE-INIT PATH (fires on first import):
+    (none)
+
+  INSIDE A CALLED FUNCTION (fires only if that function runs):
+    SC1100  node_modules/argo-codec/dist/cjs/decode.js:141
+         in sc_f__x25_m314_readDesc_x25_0
+    SC1090  node_modules/argo-codec/dist/cjs/decode.js:223
+         in sc_f__x25_m314_decode_x25_0
+    SC1090  node_modules/argo-codec/dist/cjs/decode.js:240
+         in sc_f__x25_m314_decode_x25_0
+    SC1090  node_modules/argo-codec/dist/cjs/decode.js:244
+         in sc_f__x25_m314_decode_x25_0
+    SC1100  node_modules/argo-codec/dist/cjs/decode.js:37
+         in sc_f__x25_m314_readValue_x25_0
+    SC2020  node_modules/argo-codec/dist/cjs/encode.js:319
+         in sc_f__x25_m313_encode_x25_0
+    SC1100  node_modules/argo-codec/dist/cjs/encode.js:63
+         in sc_f__x25_m313_writeValue_x25_0
+    SC1100  node_modules/argo-codec/dist/cjs/wire.js:38
+         in sc_f__x25_m312_isLabeled_x25_0
+    SC2020  prov/250f9af5229a545eec28ddbd3e8774a397cdb0bb/spec/proto/index.js:1
+         in sc_f__x25_fn1249
+
+  init-path 0   other 9
+
+## out/da-argo (mexprobe/decode-answer.ts, current compiler) — expect the null
+scanned 1 emitted file(s); 8 distinct fence site(s)
+
+  ON THE MODULE-INIT PATH (fires on first import):
+    (none)
+
+  INSIDE A CALLED FUNCTION (fires only if that function runs):
+    SC1100  node_modules/argo-codec/dist/cjs/decode.js:141
+         in sc_f__x25_m4_readDesc_x25_0
+    SC1090  node_modules/argo-codec/dist/cjs/decode.js:223
+         in sc_f__x25_m4_decode_x25_0
+    SC1090  node_modules/argo-codec/dist/cjs/decode.js:240
+         in sc_f__x25_m4_decode_x25_0
+    SC1090  node_modules/argo-codec/dist/cjs/decode.js:244
+         in sc_f__x25_m4_decode_x25_0
+    SC1100  node_modules/argo-codec/dist/cjs/decode.js:37
+         in sc_f__x25_m4_readValue_x25_0
+    SC2020  node_modules/argo-codec/dist/cjs/encode.js:319
+         in sc_f__x25_m3_encode_x25_0
+    SC1100  node_modules/argo-codec/dist/cjs/encode.js:63
+         in sc_f__x25_m3_writeValue_x25_0
+    SC1100  node_modules/argo-codec/dist/cjs/wire.js:38
+         in sc_f__x25_m2_isLabeled_x25_0
+
+  init-path 0   other 8

@@ -1,0 +1,81 @@
+# The THIRD wall: even with the namespace out of the way, zapo's ReaderLike does not
+# accept --npm-static's INFERRED Reader.
+#
+# harness/mexprobe/argo-decoder-static.ts is argo-decoder-copy.ts with ONE change:
+# `import { Reader as ArgoReader } from 'argo-codec'` replaces the stored dynamic
+# namespace, and `new argo.Reader(...)` becomes `new ArgoReader(...)`. Every other
+# line is zapo's.
+
+== NODE ORACLE (still correct) ==
+[decode-static] bytes=114
+[decode-static] isMexArgoDecoderAvailable = true
+[decode-static] OK isActive=true enforcementType=SOFT_BLOCK enforcementEndsAt=1767225600
+
+== COMPILED, --npm-static argo-codec ==
+<blocks>/clientbench/lab/app/mexprobe/argo-decoder-static.ts:70:16 - error SC2011: the '<' operator on 'any'-typed values runs in the embedded dynamic engine, which this build does not include
+
+  69 |     if (!inline) {
+  70 |         while (r.pos < r.end) {
+     |                ^~~~~~~~~~~~~
+  71 |             const len = r.label()
+
+  hint: build with --dynamic to run 'any'-typed code in the embedded engine (adds ~620KB to the binary), or stay static with 'unknown' and a checked cast ('x as T')
+
+<blocks>/clientbench/lab/app/mexprobe/argo-decoder-static.ts:76:23 - error SC2002: record shapes must match exactly or width-coerce: expected '{ arr: Uint8Array; bitset: () => number; bytes: (number) => Uint8Array; end: number; label: () => number; pos: number }', got 'm0.Reader'
+
+  75 |     } else {
+  76 |         segments.push(r)
+     |                       ^
+  77 |     }
+
+  hint: width subtyping compiles as a copy (each expected field copied off the source; extra fields drop) — this pair is outside the copy's rules; build a literal with exactly the expected fields instead
+
+2 errors.
+
+== CONTROL: the same program with NO --npm-static (the package has no static story) ==
+<blocks>/clientbench/lab/app/mexprobe/argo-decoder-static.ts:32:1 - error SC2013: importing 'argo-codec' requires the embedded dynamic engine, which this build does not include — the package's implementation runs there
+
+  31 |  */
+  32 | import { Reader as ArgoReader } from 'argo-codec'
+     | ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  33 | 
+
+  hint: build with --dynamic to run npm package code in the embedded engine (adds ~620KB to the binary); static builds never include it
+
+<blocks>/clientbench/lab/app/mexprobe/argo-decoder-static.ts:63:15 - error SC2013: values from the 'argo-codec' package run in the embedded dynamic engine, which this build does not include
+
+  62 | 
+  63 |     const r = new ArgoReader(bytes)
+     |               ^~~~~~~~~~~~~~~~~~~~~
+  64 |     const flags = r.bitset()
+
+  hint: build with --dynamic to run npm package code in the embedded engine (adds ~620KB to the binary); static builds never include it
+
+<blocks>/clientbench/lab/app/mexprobe/argo-decoder-static.ts:70:16 - error SC2013: values from the 'argo-codec' package run in the embedded dynamic engine, which this build does not include
+
+  69 |     if (!inline) {
+  70 |         while (r.pos < r.end) {
+     |                ^~~~~
+  71 |             const len = r.label()
+
+  hint: build with --dynamic to run npm package code in the embedded engine (adds ~620KB to the binary); static builds never include it
+
+<blocks>/clientbench/lab/app/mexprobe/argo-decoder-static.ts:76:23 - error SC2004: uses of 'r' inherit the blocker on its declaration
+
+  75 |     } else {
+  76 |         segments.push(r)
+     |                       ^
+  77 |     }
+
+  hint: the declaration of 'r' did not compile — fix the diagnostic reported there and these sites clear with it
+
+4 errors.
+
+# --npm-static deliberately DROPS the package's .d.ts (a declaration is a claim about
+# the body). So Reader's members type from the shipped JS: r.pos is 'any' (SC2011 on
+# '<') and the class m0.Reader does not width-coerce into zapo's structural ReaderLike
+# record (SC2002). Under node the .d.ts makes both fine. Three independent walls, then:
+#   1. the dynamic-import namespace has none of the package's exports;
+#   2. a class export crosses that namespace as a trap by design;
+#   3. with the namespace bypassed entirely, the inferred surface does not satisfy the
+#      structural interface zapo declares for it.
