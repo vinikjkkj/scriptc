@@ -14,6 +14,7 @@
     "test:watch": "vitest",
     "lint": "eslint packages/compiler/src packages/cli/src",
     "manifest": "tsx scripts/surface-manifest.mjs",
+    "release:dry-run": "node scripts/release-dry-run.mjs",
     "scriptc": "tsx packages/cli/src/main.ts"
   },
   "devDependencies": {

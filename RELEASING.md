@@ -79,20 +79,23 @@ Publishing uses npm trusted publishing (OIDC) — there is no npm token secret a
 
 ## Verifying a release candidate without publishing
 
-The publishable shape can be checked offline, end to end, without touching the registry:
+Do not press the button on a release nobody has rehearsed. One command rehearses it:
 
 ```console
-$ pnpm install --frozen-lockfile
-$ pnpm build
-$ (cd packages/runtime  && pnpm pack --pack-destination /tmp/tarballs)
-$ (cd packages/compiler && pnpm pack --pack-destination /tmp/tarballs)
-$ (cd packages/cli      && pnpm pack --pack-destination /tmp/tarballs)
+$ pnpm release:dry-run
 ```
 
-Then read each tarball's manifest and require that (a) no `workspace:` spec survives, and (b) the workspace deps read `npm:@scriptc-fork/<pkg>@<version>`:
+`scripts/release-dry-run.mjs` builds the workspace, checks that the **workspace** CLI still compiles and runs a program, packs the three packages, checks each packed manifest (versions agree, no `workspace:` spec survived the rewrite, the workspace deps read `npm:@scriptc-fork/<pkg>@<version>`, and the CLI still declares `bin.scriptc`), extracts the three tarballs into the `node_modules` layout npm produces from those alias specs, then compiles and runs a real program through the **installed** CLI. It ends by printing `hello from the fork` from a binary built by the tarballs you are about to publish, or by naming what is wrong. It contacts no registry and publishes nothing.
 
-```console
-$ tar -xzOf /tmp/tarballs/scriptc-fork-scriptc-0.1.0.tgz package/package.json
-```
+The workspace check is not redundant with the artifact check, and this is the subtle part. The two resolve `@scriptc/compiler` by different routes: a consumer gets a directory literally named `@scriptc/compiler` because of the `npm:` alias, while the workspace gets there only through the self-alias devDependency on `packages/compiler`. Deleting that devDependency leaves a **perfectly good tarball** and a dead local build — the artifact check passes, the workspace check fails and names the missing devDependency. Verified by doing exactly that and watching the script go red.
 
-For a full check, extract the three tarballs into a hand-built consumer tree — `node_modules/@scriptc/runtime`, `node_modules/@scriptc/compiler`, `node_modules/@scriptc-fork/scriptc`, plus `typescript` and `typescript5` copied out of the workspace — and run `node node_modules/@scriptc-fork/scriptc/dist/main.js build hello.ts`. That reproduces the directory layout npm produces from the alias specs, which is the only thing the aliasing has to get right.
+It also runs two negative controls and refuses to report success unless both fail as designed:
+
+- **A** — the packed-manifest guard, handed a synthetic manifest that still carries a `workspace:` spec, must reject it.
+- **B** — the same build, in a copy of the consumer tree where `@scriptc/compiler` has been renamed to `@scriptc-fork/compiler` (the layout you would get if the alias were dropped), must **fail**.
+
+Control B is the one that earns the report. Without it a passing run is consistent with the compiler coming from somewhere else entirely — a globally installed `scriptc`, or the workspace resolving through a parent directory — and the dry run would print `ok` while proving nothing about the tarballs. If control B ever passes, the script says so and exits non-zero.
+
+Useful flags: `--dir <path>` puts the sandbox somewhere other than the system temp directory (it defaults to `os.tmpdir()`, which honours `TMPDIR`/`TMP`; set it if your temp lives on a small disk), `--keep` leaves the sandbox for inspection, and `--no-build` reuses the current `dist/`.
+
+The script needs a `tar` binary, which every supported platform has. It passes both paths to `tar` relative and slash-separated on purpose: a drive-lettered argument is read as a remote host spec by bsdtar, and GNU tar — what a Git install puts on `PATH` — escapes the backslashes and then cannot find the directory.
