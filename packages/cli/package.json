@@ -1,12 +1,12 @@
 {
-  "name": "scriptc",
-  "version": "0.0.21",
+  "name": "@scriptc-fork/scriptc",
+  "version": "0.1.0",
   "description": "Compile ordinary TypeScript and JavaScript to small, fast native executables — no Node, no V8, no JavaScript engine in the binary",
   "license": "Apache-2.0",
-  "homepage": "https://scriptc.dev",
+  "homepage": "https://github.com/vinikjkkj/scriptc",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/vercel-labs/scriptc.git",
+    "url": "git+https://github.com/vinikjkkj/scriptc.git",
     "directory": "packages/cli"
   },
   "type": "module",
@@ -23,6 +23,9 @@
     "build": "node ../../node_modules/typescript/bin/tsc -p tsconfig.json"
   },
   "dependencies": {
-    "@scriptc/compiler": "workspace:*"
+    "@scriptc/compiler": "workspace:@scriptc-fork/compiler@*"
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }
