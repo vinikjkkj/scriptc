@@ -184,6 +184,43 @@ function bareImportsOf(
  * and the ordering below is the guard on the cap: a value import is what
  * a static build cannot proceed without, so value specifiers claim their
  * slots before type-only ones. */
+/* The DECLARATION TWINS the closure walk took an edge to.
+ *
+ * A relative edge landing on a `.d.ts` is not enqueued -- a declaration has
+ * no runtime imports the bare-import walk needs -- but when an implementation
+ * sits beside it under the same stem, that pair is one module with both
+ * halves, and declTwinOf (program.ts) will only find the `.js` if it is a
+ * program ROOT. Roots are fixed before ts.createProgram, so referencedness
+ * cannot be decided in the pass that needs it. This walk is the earliest pass
+ * that knows the edge was TAKEN, so it is where the twin is recorded.
+ *
+ * Why by REFERENCE and not by listing the tree`s `spec/` directory: a listing
+ * cannot tell a referenced module from an unreferenced one. Selecting by
+ * presence put every spec module into every subpackage compile -- measured on
+ * store-sqlite at 60.7s -> 489.7s. Selecting by reference is the difference,
+ * and it is not a guess about which modules matter: where a driver does reach
+ * all of them it still gets all of them (store-sqlite and store-redis both
+ * select all five, proto included -- excluding proto by hand reintroduces
+ * three WaClient blockers).
+ *
+ * Cost is one stat per declaration edge; the traversal already happens. */
+const declTwinsSeen = new Set<string>();
+
+function noteDeclTwin(dts: string): void {
+  const stem = dts.slice(0, -".d.ts".length);
+  for (const ext of [".js", ".mjs", ".cjs"]) {
+    if (isFile(`${stem}${ext}`)) {
+      declTwinsSeen.add(`${stem}${ext}`);
+      return;
+    }
+  }
+}
+
+/** The recorded twins, slash-spelled, for provenanceDeclSiblings. */
+export function scannedDeclTwins(): string[] {
+  return [...declTwinsSeen].map((f) => tsgoPath(f));
+}
+
 function bareImportsWalk(
   roots: readonly string[],
   viaAlias: (spec: string) => string | null,
@@ -221,6 +258,7 @@ function bareImportsWalk(
       if (isRelativeSpecifier(spec)) {
         const dep = resolveRelativeModule(file, spec);
         if (dep !== null && !dep.endsWith(".json") && !dep.endsWith(".d.ts")) queue.push(dep);
+        else if (dep !== null && dep.endsWith(".d.ts")) noteDeclTwin(dep);
         continue;
       }
       if (spec.startsWith("#") || spec.startsWith("node:")) continue;
@@ -793,6 +831,7 @@ const MAX_ROUNDS = 32;
  * mapped. Never throws for a package failure — those become notes and the
  * package keeps its island path. */
 export async function resolveProvenanceSources(entryPath: string): Promise<ProvenanceSources> {
+  declTwinsSeen.clear();
   const entry = resolve(entryPath);
   const manifest = readManifest();
   const notes: string[] = [];

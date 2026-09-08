@@ -49,7 +49,7 @@ import {
   tscPassthroughDiag,
   unsupportedDiag,
 } from "../diagnostics/diagnostic.js";
-import { provenanceDeclSiblings } from "./provenance-registry.js";
+import { provenanceDeclSiblings, provenanceSpecTwinsInProgram } from "./provenance-registry.js";
 import { clearResolveCaches, isNodeModulesPath, nearestPkgJsonPath, projectDtsRuntimeSibling, resolveBareModule, resolveProjectImport, resolveRelativeModule, resolveTypeDirective, setProjectRealm } from "./resolve.js";
 import { clearNpmResolutionCaches, probeNodeImportRefusal, probeNodeRequireRefusal } from "./npm.js";
 import { isNpmStaticPackage, npmStaticActive, npmStaticFsShadow, npmStaticPackageOfPath, npmStaticPackages, npmStaticRewroteExports, reportNpmStaticOffender, setNpmStaticPackages } from "./npm-static.js";
@@ -294,11 +294,19 @@ function loadProgram7(host: ts.Ts7Host, entryPath: string): LoadResult & { dispo
     }
     if (npm !== null && isJsSourceFileName(npm.typesFile)) npmStaticRoots.push(npm.typesFile);
   }
-  const program = ts.createProgram(
-    [...coreRoots, overridesDtsPath(), ...provenanceDeclSiblings(), ...npmStaticRoots],
-    options,
-    host,
-  );
+  const baseRoots = [...coreRoots, overridesDtsPath(), ...provenanceDeclSiblings(), ...npmStaticRoots];
+  let program = ts.createProgram(baseRoots, options, host);
+  /* The two-phase ORACLE for the prescan`s spec-twin selection (see
+   * provenanceSpecTwinsInProgram). Off by default -- the scan already put the
+   * reached twins in baseRoots -- and reachable so a new driver`s selection can
+   * be re-validated against the exact answer before the cheap one is trusted. */
+  if (process.env["SCRIPTC_PROVENANCE_SPEC_TWINS"] === "twophase") {
+    const extra = provenanceSpecTwinsInProgram(program.getSourceFiles().map((s) => s.fileName));
+    if (process.env["SCRIPTC_PROVENANCE_SPEC_WHY"] !== undefined) {
+      console.error(`[spec-twins] twophase: ${extra.length} root(s): ${extra.join(" ")}`);
+    }
+    if (extra.length > 0) program = ts.createProgram([...baseRoots, ...extra], options, host);
+  }
   if (process.env["SCRIPTC_DYNNS_TRACE"]) {
     for (const r of npmStaticRoots) {
       console.error(`[dynns] root in program: ${r} -> ${program.getSourceFile(r) !== undefined}`);
