@@ -28,7 +28,7 @@ set -u
 TAG=$1; REPS=$2; shift 2
 ARMS="$*"
 OUT="$LAB/out/bench-$TAG.txt"
-CP="$LAB/bin/cpuphase.exe"
+CP="$LAB/bin/cpuphase.exe"   # built from tests/perf/cpuphase/cpuphase.c; see bin/README.md
 [ -x "$CP" ] || { echo "no cpuphase.exe at $CP -- build it first"; exit 2; }
 
 # Which node runs the fake-server child, named EXPLICITLY. A compiled parent
