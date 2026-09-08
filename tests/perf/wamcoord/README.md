@@ -1790,3 +1790,103 @@ that finds nothing there is right, not blind. The way to tell that apart from a
 missed fence is to change **one** thing about the receiver and watch the site
 appear, then read the emitted code for the mechanism. Two outcomes look
 identical from the outside; the emitted C does not.
+
+---
+
+## 18. `store-redis` on current main: 39 reproduced, on BOTH lanes — PARTIAL
+
+**Status: partial and paused.** The starting measurement is done and reproduces
+the expected number. The single-cause claim is **not** verified, and the
+mechanism is **not** established — two obvious candidates were tried and neither
+reproduces. Nothing below rests on an unfinished run.
+
+Measured at `e48c5e52`, which carries the spec-twin change `d2c952ca`
+(`main` was `325eb515` at rebase time; it has since moved to `0c66825d`, one
+commit ahead of this measurement — a ts7 baseline record, no compiler change).
+`--provenance-sources`, strict, no `--best-effort`, node v25.9.0 measuring.
+
+### 18.1 39 reproduced, and the lane difference is gone
+
+| lane | driver names | stmts reached / failed | blocker sites | roots / cascade | distinct root msgs |
+| --- | --- | --- | --- | --- | --- |
+| **A** — the isolated driver | `@zapo-js/store-redis` | **46,878 / 19** | **39** | 20 / 19 | 5 |
+| **A2** — consumer shape | `zapo-js` **and** the store | **46,994 / 19** | **39** | 20 / 19 | 5 |
+
+**39 is reproduced.** The spec-twin change behaves as measured.
+
+Two things moved, and the second is new:
+
+1. **Reach opened by a factor of 32** — `pkgstatus-0907` recorded ~1,450
+   statements on this lane; it is now **46,878**. That is the same shape as the
+   spec-twin change's recorded effect on `store-mongo` (3,131 → 48,563).
+2. **The lane difference collapsed.** `pkgstatus` recorded lane A at **46** and
+   lane A2 at **39**, the seven-site zapo-js-core cluster being what the extra
+   `zapo-js` import removed. Both lanes now read **39**, to the site. The lane
+   trap that governs `wam`, `media-utils`, `voip` and `store-sqlite`
+   **no longer applies to `store-redis`**: the spec-twin fix removed the reason
+   it existed here. A status table that still says "46 isolated / 39 as a
+   consumer" for this package is out of date.
+
+### 18.2 The 39, clustered
+
+Five distinct root messages, 20 roots + 19 `SC2004` cascade:
+
+```
+16  SC1090  extending classes not declared in the program ('BaseRedisStore')
+ 1  SC2013  importing 'ioredis' requires the embedded dynamic engine
+ 1  SC2013  values from the 'ioredis' package run in the embedded dynamic engine
+ 1  SC2011  values of type 'WaRedisStoreConfig' have no static representation
+ 1  SC2011  values of type 'WaRedisStoreResult' have no static representation
++19 SC2004  cascade
+```
+
+By file: the 16 are one per store class (`thread`, `signal`, `session`,
+`sender-key`, …), 2 in `createRedisStore.ts`, 1 in `BaseRedisStore.ts`, 1 in the
+driver.
+
+**Note what is absent: there is no site on `BaseRedisStore`'s own declaration
+saying why it failed to be declared.** The 16 subclass sites are the only
+evidence, and they name a consequence rather than a cause. That is itself worth
+recording before any fix is attempted.
+
+### 18.3 NOT established — and two hypotheses already refuted
+
+**The single-cause claim is unverified.** "39 faces, one cause" has been right
+three times today and wrong once; the substitution that would settle it — stub
+the base class so it compiles, re-measure, see whether 16 + 19 collapse — has
+**not been run**. Until it is, 39 is a count, not a diagnosis.
+
+**The mechanism is not the obvious one.** `BaseRedisStore` imports `ioredis`
+with `import type` — a **type-only** import, so no runtime value of the islanded
+package crosses into it. Its field `protected readonly redis: Redis` is typed by
+a name the checker knows and the compiler cannot lay out. The natural hypothesis
+is therefore *"a class carrying a field of unrepresentable type cannot be
+declared, and the island is only why the type is unrepresentable"* — which would
+mean the island is not the mechanism.
+
+**Both attempts to reproduce that without an island FAILED to reproduce it:**
+
+| probe | base class field | result |
+| --- | --- | --- |
+| `drivers/baseext.ts` | `bigint` | **0 blockers** — the subclass compiles |
+| `drivers/baseext2.ts` | an ambient `declare class Opaque` | **0 blockers** — two subclasses compile |
+
+So neither "a refused scalar type" nor "an ambient class type" in a base-class
+field reproduces `extending classes not declared in the program`. The simple
+field-representability story is **refuted**, and the mechanism is currently
+**unknown**. It is specifically not safe to write down "ioredis islands,
+therefore the base class does not compile" — that is the first line of the log,
+not a demonstrated cause, and the `whatwg-url` case had exactly this shape and
+turned out to be a class-layout gap reproducible with a stdlib global.
+
+### 18.4 What happens next, when work resumes
+
+1. Substitute: stub `BaseRedisStore` so it compiles, re-measure line-neutrally,
+   and see whether the 16 and the 19 clear together.
+2. Find the mechanism by narrowing what *does* reproduce the message, starting
+   from the two probes that do not.
+3. Only then decide whether it is a compiler capability, a representation
+   decision, or a zapo-side pattern.
+
+No build of `store-redis` was attempted, so there is **no binary and no fence
+count — n/a, not 0.**

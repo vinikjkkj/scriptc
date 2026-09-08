@@ -1,0 +1,9 @@
+ORACLE-NODE v25.9.0
+=== QR1 START 2026-09-07T22:12:19-03:00
+--- RA: drivers/store-redis.ts  (isolated driver; pkgstatus recorded 46)
+sites=103 preflightFailed=false total=46878 failed=19 island=0 ms=783630
+EXIT=0
+--- RA2: drivers/_x-redis-plus-zapo.ts  (consumer shape; pkgstatus recorded 39)
+sites=103 preflightFailed=false total=46994 failed=19 island=0 ms=419179
+EXIT=0
+=== QR1 DONE 2026-09-07T22:32:28-03:00
