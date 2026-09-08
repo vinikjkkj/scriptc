@@ -3,6 +3,7 @@
  * function/lambda lowering and signature collection, and monomorphizing
  * generic instantiation (bounded by MAX_GENERIC_INSTANCES). */
 import * as ts from "../ts7/adapter.js";
+import { fenceLocationText } from "../../diagnostics/diagnostic.js";
 import type { Lowerer } from "./lowerer.js";
 import { lowerGenMethodCall } from "./lower-generators.js";
 import { lowerStreamAsyncIteratorCall } from "./lower-stream.js";
@@ -8512,7 +8513,7 @@ const inliningPredicates = new Set<ts.Symbol>();
           {
             kind: "runtimeFence",
             code: first.code,
-            message: `${first.message} [${first.code} at ${first.loc.file}:${pos.line + 1}]`,
+            message: `${first.message} [${first.code} at ${fenceLocationText(first.loc.file, pos.line + 1)}]`,
             loc,
           },
         ],
@@ -11788,7 +11789,7 @@ export function lowerFunction(L: Lowerer, decl: ts.FunctionDeclaration): IrFunct
             {
               kind: "runtimeFence",
               code: first.code,
-              message: `${first.message} [${first.code} at ${first.loc.file}:${pos.line + 1}]`,
+              message: `${first.message} [${first.code} at ${fenceLocationText(first.loc.file, pos.line + 1)}]`,
               loc,
             },
           ],

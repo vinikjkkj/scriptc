@@ -70,9 +70,17 @@ const offenders = new Map<string, string>();
  * the host probes the same file many times, and the rewrite parses. */
 const rewriteCache = new Map<string, string | null>();
 
-/** Files the rewrite actually replaced, by normalized path — the question
- * cycle admission asks (npmStaticRewroteExports). */
-const rewrittenPaths = new Set<string>();
+/** Files the rewrite actually replaced, by normalized path, mapped to the
+ * ORIGINAL file's line count — two questions off one record.
+ *
+ * The line count exists because the rewrite APPENDS its canonical export
+ * table at the tail (npm-static-rewrite.ts: recognized plumbing is
+ * space-padded in place so every original line/offset survives, then one
+ * table is appended). So a diagnostic location at or below this count names
+ * a real line in the file on disk, and one ABOVE it names a line the
+ * compiler generated — which a reader cannot open, and which reads as a
+ * broken census rather than as a compiler-generated statement. */
+const rewrittenPaths = new Map<string, number>();
 
 const rewriteKeyOf = (path: string): string =>
   path.split(String.fromCharCode(92)).join("/").toLowerCase();
@@ -88,6 +96,13 @@ const rewriteKeyOf = (path: string): string =>
  * its assignment still stands in the AST for the analysis to find. */
 export function npmStaticRewroteExports(fileName: string): boolean {
   return rewrittenPaths.has(rewriteKeyOf(fileName));
+}
+
+/** The ORIGINAL line count of an npm-static-rewritten file, or null when the
+ * file was not rewritten. A location above it belongs to the appended export
+ * table, not to anything on disk. */
+export function npmStaticOriginalLineCount(fileName: string): number | null {
+  return rewrittenPaths.get(rewriteKeyOf(fileName)) ?? null;
 }
 
 export function setNpmStaticPackages(packages: Iterable<string>): void {
@@ -393,8 +408,18 @@ export function npmStaticFsShadow(): NpmStaticFsShadow | null {
         const hit = rewriteCache.get(path);
         if (hit !== undefined) return hit ?? undefined;
         let rewritten: string | null = null;
+        let originalLines = 0;
         try {
-          const answer = rewriteBundlerCjsExports(readFileSync(path, "utf8"), path);
+          const original = readFileSync(path, "utf8");
+          // The count a READER would get from the file on disk: a trailing
+          // newline terminates the last line, it does not open a new one.
+          // Measured on argo-codec's dist/cjs/index.js — 17 lines, and the
+          // naive split length says 18, which would have reported "the file
+          // on disk is 18 lines" for a 17-line file and left line 18 (which
+          // no editor shows) unqualified.
+          const parts = original.split(String.fromCharCode(10));
+          originalLines = parts.length - (parts[parts.length - 1] === "" ? 1 : 0);
+          const answer = rewriteBundlerCjsExports(original, path);
           if (answer !== null && typeof answer === "object") {
             reportNpmStaticOffender(target.pkg, answer.degrade);
           } else {
@@ -404,7 +429,7 @@ export function npmStaticFsShadow(): NpmStaticFsShadow | null {
           rewritten = null; // unreadable/unparseable: fall through untouched
         }
         rewriteCache.set(path, rewritten);
-        if (rewritten !== null) rewrittenPaths.add(rewriteKeyOf(path));
+        if (rewritten !== null) rewrittenPaths.set(rewriteKeyOf(path), originalLines);
         return rewritten ?? undefined;
       }
       return undefined;

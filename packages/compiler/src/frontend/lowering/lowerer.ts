@@ -13,6 +13,7 @@
  *   ("x.0", "x.1" for shadowing); the IR is scope-flat.
  */
 import { appendFileSync } from "node:fs";
+import { fenceLocationText } from "../../diagnostics/diagnostic.js";
 import { isRelativeSpecifier } from "../shared.js";
 import * as ts from "../ts7/adapter.js";
 import type { ScrDiagnostic } from "../../diagnostics/diagnostic.js";
@@ -775,7 +776,7 @@ export function ladderFenceExpr(L: Lowerer, surface: string, node: ts.Node, hint
   const pos = ts.getLineAndCharacterOfPosition(sf, loc.start);
   return {
     kind: "strLit",
-    value: `${d.message} [${d.code} at ${loc.file}:${pos.line + 1}]`,
+    value: `${d.message} [${d.code} at ${fenceLocationText(loc.file, pos.line + 1)}]`,
     type: STRING,
     loc,
   };

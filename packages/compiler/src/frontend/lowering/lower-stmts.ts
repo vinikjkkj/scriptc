@@ -10,6 +10,7 @@ import { PoisonError, boundIdentifiersOf, dynFallbackType, dynUndefinedExpr, imp
 import { wholeExportRootRebindable } from "./lower-modules.js";
 import { dynImportBindingDeclOf, dynImportBindingStmts } from "./lower-island.js";
 import { fenceCatchProbe } from "./fence-catch.js";
+import { fenceLocationText } from "../../diagnostics/diagnostic.js";
 import { enforceLibBoundary } from "./lib-boundary.js";
 import { recordKeyReadRow } from "./keyread-census.js";
 import { cjsExportAssignmentOf, cjsExportDiscardReason, cjsExportTargetLiteral, commaWholeExportRecordOf, isCjsJsFile, isCjsWholeExportAssign, isJsSourceFile, locOf, requireSpecOf, topLevelJsStatementOf } from "../program.js";
@@ -138,7 +139,7 @@ export function provenanceElidedConstDecl(L: Lowerer, decl: ts.VariableDeclarati
         d ? L.program.getSourceFile(loc.file) ?? sf : sf,
         loc.start,
       );
-      return `${loc.file}:${pos.line + 1}`;
+      return fenceLocationText(loc.file, pos.line + 1);
     };
     return {
       kind: "runtimeFence",

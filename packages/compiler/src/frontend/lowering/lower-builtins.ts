@@ -3,6 +3,7 @@
  * methods), JSON.parse/stringify, process properties/methods and
  * process.env access, and console.log detection. */
 import { readFileSync } from "node:fs";
+import { fenceLocationText } from "../../diagnostics/diagnostic.js";
 import { builtinModules } from "node:module";
 import { dirname, resolve } from "node:path";
 import * as ts from "../ts7/adapter.js";
@@ -802,7 +803,7 @@ import { KEYOBJ, HASH_T, HMAC_T, CIPHER_T, DECIPHER_T, BOOL, BYTES_U8, CAUGHT, C
     const sf = call.getSourceFile();
     const pos = ts.getLineAndCharacterOfPosition(sf, loc.start);
     fenceCatchProbe("require-runtime-specifier", call, loc.file, pos.line + 1);
-    return { text: `${d.message} [${d.code} at ${loc.file}:${pos.line + 1}]`, code: d.code };
+    return { text: `${d.message} [${d.code} at ${fenceLocationText(loc.file, pos.line + 1)}]`, code: d.code };
   }
 
 /** The builtin modules whose `constants` object bakes as literals at

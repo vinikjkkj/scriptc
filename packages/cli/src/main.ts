@@ -299,6 +299,21 @@ async function main(): Promise<number> {
     if (result.llvmRefusal !== undefined) {
       process.stderr.write(`scriptc: backend c (llvm refused: ${result.llvmRefusal})\n`);
     }
+    // --npm-static outcomes. Silence here IS dishonest: the opt-in changes
+    // what is in the binary, and without a line the only mention of the
+    // package stays the provenance note ("no provenance attestation
+    // published; island path used") -- which reads as though the island were
+    // used even when the package was compiled in. Measured on argo-codec:
+    // the opt-in could be confirmed only by scanning the emitted C for the
+    // package's symbols. Both outcomes print, because a silent FALLBACK is
+    // the more expensive of the two to discover late.
+    for (const st of result.npmStatic ?? []) {
+      process.stderr.write(
+        st.status === "static"
+          ? `npm-static: ${st.package} compiled statically into the program\n`
+          : `npm-static: ${st.package} FELL BACK to the island — ${st.detail ?? "no reason recorded"}\n`,
+      );
+    }
     // SC6xxx ADVICE: the build succeeded and these say something true
     // about what it compiled to that the source does not show. On stderr,
     // after the binary is real, and NEVER counted as an error — the exit
