@@ -1,0 +1,128 @@
+### lane   : node
+### dir    : <blocks>/clientbench/lab/app/tree/packages/fake-server/bench-mex
+### date   : Tue Sep  8 00:35:33 ESAST 2026
+### node   : v25.9.0
+### config : contacts=20 groups=1 members=10 messages=20
+(running fake server in separate process)
+zapo-js messaging bench
+────────────────────────
+  contacts          : 20
+  devices/contact   : 2
+  groups            : 1
+  members/group     : 10
+  messages/scenario : 20
+  scenarios         : send_1to1, recv_1to1, send_group, recv_group
+  store             : memory
+  --expose-gc       : no
+
+[mex-probe] server registered w:mex handler, 114B argo payload
+[mex-probe] import(argo-codec) OK, Reader=function
+[mex-probe] OK isActive=true enforcementType=SOFT_BLOCK enforcementEndsAt=1767225600
+paired in 288.69 ms
+built 20 contacts (2 dev each) in 127.23 ms, dispenser misses: 0
+built 1 groups × 10 members in 25.94 ms, dispenser misses: 0
+
+[phase-begin] send_1to1
+[phase-end] send_1to1
+──[ SEND 1:1 ]──────────────────────────────
+  messages          : 20
+  elapsed           : 109.75 ms
+  throughput        : 182.2 msg/s
+  avg / msg         : 5.49 ms
+  CPU time          : n/a (see tests/perf/cpuphase -- measured externally)
+  CPU %             : n/a
+  RSS before        : 149.73 MiB
+  RSS after         : 150.97 MiB
+  RSS delta         : 1.24 MiB
+  heap delta        : n/a (no V8 heap in a compiled binary; RSS above is comparable)
+
+[phase-begin] recv_1to1
+[phase-end] recv_1to1
+──[ RECV 1:1 ]──────────────────────────────
+  messages          : 20
+  elapsed           : 68.20 ms
+  throughput        : 293.2 msg/s
+  avg / msg         : 3.41 ms
+  CPU time          : n/a (see tests/perf/cpuphase -- measured externally)
+  CPU %             : n/a
+  RSS before        : 150.97 MiB
+  RSS after         : 151.51 MiB
+  RSS delta         : 0.54 MiB
+  heap delta        : n/a (no V8 heap in a compiled binary; RSS above is comparable)
+
+[phase-begin] send_group
+[phase-end] send_group
+──[ SEND group ]──────────────────────────────
+  messages          : 20
+  elapsed           : 69.58 ms
+  throughput        : 287.5 msg/s
+  avg / msg         : 3.48 ms
+  CPU time          : n/a (see tests/perf/cpuphase -- measured externally)
+  CPU %             : n/a
+  RSS before        : 152.56 MiB
+  RSS after         : 157.18 MiB
+  RSS delta         : 4.62 MiB
+  heap delta        : n/a (no V8 heap in a compiled binary; RSS above is comparable)
+
+[phase-begin] recv_group
+[phase-end] recv_group
+──[ RECV group ]──────────────────────────────
+  messages          : 20
+  elapsed           : 68.38 ms
+  throughput        : 292.5 msg/s
+  avg / msg         : 3.42 ms
+  CPU time          : n/a (see tests/perf/cpuphase -- measured externally)
+  CPU %             : n/a
+  RSS before        : 157.34 MiB
+  RSS after         : 159.17 MiB
+  RSS delta         : 1.82 MiB
+  heap delta        : n/a (no V8 heap in a compiled binary; RSS above is comparable)
+
+[
+  {
+    "name": "SEND 1:1",
+    "messages": 20,
+    "elapsedMs": 109.75469999999996,
+    "throughputMsgsPerSec": 182.22454254806408,
+    "avgMsPerMsg": 5.487734999999998,
+    "cpuTimeMs": 0,
+    "cpuPercent": 0,
+    "rssDeltaBytes": 1302528,
+    "heapDeltaBytes": 0
+  },
+  {
+    "name": "RECV 1:1",
+    "messages": 20,
+    "elapsedMs": 68.20190000000002,
+    "throughputMsgsPerSec": 293.24696232802887,
+    "avgMsPerMsg": 3.410095000000001,
+    "cpuTimeMs": 0,
+    "cpuPercent": 0,
+    "rssDeltaBytes": 569344,
+    "heapDeltaBytes": 0
+  },
+  {
+    "name": "SEND group",
+    "messages": 20,
+    "elapsedMs": 69.57529999999997,
+    "throughputMsgsPerSec": 287.4583365073526,
+    "avgMsPerMsg": 3.4787649999999983,
+    "cpuTimeMs": 0,
+    "cpuPercent": 0,
+    "rssDeltaBytes": 4841472,
+    "heapDeltaBytes": 0
+  },
+  {
+    "name": "RECV group",
+    "messages": 20,
+    "elapsedMs": 68.38040000000001,
+    "throughputMsgsPerSec": 292.4814712987932,
+    "avgMsPerMsg": 3.4190200000000006,
+    "cpuTimeMs": 0,
+    "cpuPercent": 0,
+    "rssDeltaBytes": 1912832,
+    "heapDeltaBytes": 0
+  }
+]
+RUN_EXIT=0
+RUN_SECONDS=62
