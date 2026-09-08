@@ -5,6 +5,7 @@
  * ToBoolean/ToString coercion helpers, and field/element reads and writes
  * (FieldTarget). */
 import * as ts from "../ts7/adapter.js";
+import { fenceLocationText } from "../../diagnostics/diagnostic.js";
 import { dirname, relative } from "node:path";
 import type { Lowerer, WidthLift } from "./lowerer.js";
 import { strandTrap, BIGINT, BOOL, CAUGHT, DYN, internalSlotFields, ownMaskBit, isUndefinedArmedUnion, type IrBytesElem, type IrLibFn, type IrNumBinOp, DYN_HANDLE_KINDS, F64, IrExpr, IrFunction, IrJsOp, IrLocal, IrRecordShape, IrStmt, IrType, JSVAL, KEYOBJ, NULL_T, REF_TRUTHY_KINDS, REGEX, RUNTIME_ERROR_CLASSES, SEARCH_PARAMS_T, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, canAdaptDynFuncTo, canBoxFuncIntoDyn, canDynCheckTo, funcOf, isDynBytes, isJsonSafeType, isRefCounted, isUnitType, jsOpResultKind, httpReqIsReadableIn, shapeHasAccessorSlots, streamDuplexWidensToWritable, typeEquals, typeKey, unionFuncSetArmsOk } from "../../ir/nodes.js";
@@ -788,7 +789,7 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
               {
                 kind: "runtimeFence",
                 code: first.code,
-                message: `${first.message} [${first.code} at ${first.loc.file}:${pos.line + 1}]`,
+                message: `${first.message} [${first.code} at ${fenceLocationText(first.loc.file, pos.line + 1)}]`,
                 loc: locOf(valueNode),
               },
             ],
@@ -8402,7 +8403,7 @@ function rejectSuperInObjectMethod(L: Lowerer, node: ts.Node): void {
             {
               kind: "runtimeFence",
               code: first.code,
-              message: `${first.message} [${first.code} at ${first.loc.file}:${pos.line + 1}]`,
+              message: `${first.message} [${first.code} at ${fenceLocationText(first.loc.file, pos.line + 1)}]`,
               loc: locOf(prop),
             },
           ],
@@ -8462,7 +8463,7 @@ function rejectSuperInObjectMethod(L: Lowerer, node: ts.Node): void {
               {
                 kind: "runtimeFence",
                 code: first.code,
-                message: `${first.message} [${first.code} at ${first.loc.file}:${pos.line + 1}]`,
+                message: `${first.message} [${first.code} at ${fenceLocationText(first.loc.file, pos.line + 1)}]`,
                 loc: locOf(prop),
               },
             ],

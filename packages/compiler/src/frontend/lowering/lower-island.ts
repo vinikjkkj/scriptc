@@ -6,7 +6,7 @@ import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
 import { BOOL, DYN, F64, IrExpr, IrStmt, IrType, JSVAL, MAX_ISLAND_CALLBACK_ARITY, STRING, VOID, arrayOf, canBoxFuncIntoDyn, canMarshalTypedFuncIntoIsland, funcOf, islandPromisePayloadTag, isUnitType, typeEquals } from "../../ir/nodes.js";
 import { ISLAND_SURFACE, IslandFnEntry, STATIC_MATH_CONSTS, STATIC_MATH_FNS, boundaryIntoIslandMsg } from "./surfaces.js";
-import { requiresDynamicApiDiag, requiresDynamicPackageDiag } from "../../diagnostics/diagnostic.js";
+import { requiresDynamicApiDiag, requiresDynamicPackageDiag, fenceLocationText} from "../../diagnostics/diagnostic.js";
 import { canonicalBuiltinModule, dynamicImportSpecOf, isCjsJsFile, isJsSourceFile, locOf, npmPackageNameOf, npmStaticDepSf7 } from "../program.js";
 import { runtimePackageOfTypesPackage } from "../shared.js";
 import { isRelativeSpecifier } from "../shared.js";
@@ -79,7 +79,7 @@ import { PoisonError, dynUndefinedExpr, newFnCtx, own } from "./lowerer.js";
         {
           kind: "runtimeFence",
           code: first.code,
-          message: `${first.message} [${first.code} at ${first.loc.file}:${pos.line + 1}]`,
+          message: `${first.message} [${first.code} at ${fenceLocationText(first.loc.file, pos.line + 1)}]`,
           loc,
         },
       ],

@@ -62,6 +62,38 @@
  *   SC9xxx  internal compiler errors (still source-anchored)
  */
 import type { SrcLoc } from "../ir/nodes.js";
+import { npmStaticOriginalLineCount } from "../frontend/npm-static.js";
+
+/** The `file:line` a deferred fence carries in its baked message.
+ *
+ * Normally that is exactly the source location. But --npm-static SERVES a
+ * REWRITTEN text to the checker and the lowering: recognized export plumbing
+ * is space-padded in place (so every original line survives) and one
+ * canonical export table is APPENDED at the tail. A fence inside that table
+ * therefore cites a line the file on disk does not have -- measured, a fence
+ * cited `argo-codec/dist/cjs/index.js:19` for a file that is 17 lines long,
+ * and a reader chasing it concludes the census is broken rather than that the
+ * statement is compiler-generated. Name the artifact instead. */
+export function fenceLocationText(file: string, line1: number): string {
+  const originalLines = npmStaticOriginalLineCount(file);
+  // SCRIPTC_FENCELOC_TRACE: every location this helper renders, with the
+  // line count it judged against. `null` means the file was NOT rewritten
+  // (argo-codec: decode.js, wire.js and buf.js are served untouched — only
+  // encode.js and index.js get a table), so its lines are the file's own
+  // and no qualifier is owed. Without this the check can only say "yes":
+  // a call site that never reaches here looks exactly like a file that
+  // needed no qualifier, and two such sites were missed that way.
+  if (process.env["SCRIPTC_FENCELOC_TRACE"] === "1") {
+    process.stderr.write(`[fenceloc] ${file}:${line1} originalLines=${String(originalLines)}\n`);
+  }
+  if (originalLines !== null && line1 > originalLines) {
+    return (
+      `${file}:${line1} (in the export table --npm-static appends; ` +
+      `the file on disk is ${originalLines} lines)`
+    );
+  }
+  return `${file}:${line1}`;
+}
 
 /* Internal prioritization buckets. NEVER rendered to users — user-facing
  * output says only what is and isn't supported (plus hints); scheduling is

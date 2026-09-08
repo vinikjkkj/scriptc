@@ -178,6 +178,15 @@ export type CompileResult =
        * same way it renders diagnostics on the failure branch. */
       advisories?: ScrDiagnostic[];
       sourceTexts?: Map<string, string>;
+      /** --npm-static: each opted-in package's outcome. Present only when
+       * the flag was used. A build that OPTS IN and then falls back to the
+       * island otherwise reports nothing at all -- the only line naming the
+       * package stays the provenance note ("no provenance attestation
+       * published; island path used"), which reads as though the island were
+       * used even when the package was compiled in. Measured: the opt-in
+       * could be confirmed only by scanning the emitted C for the package's
+       * symbols. */
+      npmStatic?: NpmStaticStatus[];
     }
   | { ok: false; diagnostics: ScrDiagnostic[]; sourceTexts: Map<string, string> };
 
@@ -695,6 +704,7 @@ export async function compile(entryPath: string, opts: CompileOptions): Promise<
   let lowered: LowerResult;
   let entryText: string;
   let sourceTexts: Map<string, string>;
+  let npmStaticStatuses: NpmStaticStatus[] = [];
   // The frontend (and its tsgo server) is released as soon as lowering
   // ends — clang and the link never hold it open.
   try {
@@ -730,6 +740,9 @@ export async function compile(entryPath: string, opts: CompileOptions): Promise<
     }
     entryText = fe.entryText();
     sourceTexts = fe.sourceTexts();
+    // Captured BEFORE dispose: the frontend owns these and the return is
+    // built long after the tsgo server is released.
+    npmStaticStatuses = fe.npmStatic;
   } finally {
     fe.dispose();
   }
@@ -1004,6 +1017,7 @@ export async function compile(entryPath: string, opts: CompileOptions): Promise<
     ...(irPath !== undefined ? { irPath } : {}),
     ...(llvmRefusal !== undefined ? { llvmRefusal } : {}),
     ...(lowered.advisories.length > 0 ? { advisories: lowered.advisories, sourceTexts } : {}),
+    ...(npmStaticStatuses.length > 0 ? { npmStatic: npmStaticStatuses } : {}),
   };
 }
 

@@ -32,6 +32,7 @@ import type { Lowerer } from "./lowerer.js";
 import { locOf } from "../program.js";
 import { IrExpr, wsGlobalPlan } from "../../ir/nodes.js";
 import { stdlibGlobalNameOf } from "./surfaces.js";
+import { fenceLocationText } from "../../diagnostics/diagnostic.js";
 
 /** `globalThis` behind the casts a program needs to name a global the
  * ambient types do not declare for it — `(globalThis as typeof
@@ -81,9 +82,10 @@ export function lowerWebSocketGlobal(L: Lowerer, expr: ts.PropertyAccessExpressi
   // location on the path: where the program READ globalThis.WebSocket and
   // got the constructor those refusals belong to. Rendered here because the
   // backends have no source text to turn an offset into a line.
-  const site = `${loc.file}:${
-    ts.getLineAndCharacterOfPosition(expr.getSourceFile(), loc.start).line + 1
-  }`;
+  const site = fenceLocationText(
+    loc.file,
+    ts.getLineAndCharacterOfPosition(expr.getSourceFile(), loc.start).line + 1,
+  );
   const getRecord = (id: string) => L.shapes.get(id);
   const getUnion = (id: string) => L.unions.get(id);
   const mapped = L.mapTypeOf(L.typeOf(expr));

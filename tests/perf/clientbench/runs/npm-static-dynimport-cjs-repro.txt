@@ -1,0 +1,19 @@
+# THE REPRO, with no zapo and no argo-codec in it: this repo's own fixture.
+#
+# tests/fixtures/npm/cases/npmstatic-dynimport-cjs/main.ts dynamically imports
+# 'gtdefine' -- the Object.defineProperty(exports,'n',{get}) family that
+# npm-static-rewrite.ts rewrites into `module.exports = {…}`, i.e. an `export=`.
+
+== NODE ==
+leaf function
+WIDTH number
+
+== COMPILED, --backend c --npm-static gtdefine, build ok, npmStatic status 'static',
+== zero diagnostics, exit 0 ==
+leaf undefined
+WIDTH undefined
+exit=0
+
+# Every named export is missing and nothing says so. tests/harness/module-ns-value.test.ts
+# pins namespace behaviour on ESM-source packages, where getExports() carries every name,
+# so the CJS barrel shape -- the shape --npm-static's OWN rewrite emits -- has no coverage.

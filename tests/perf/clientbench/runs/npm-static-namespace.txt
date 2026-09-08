@@ -1,0 +1,89 @@
+# WHY it answers null: the namespace --npm-static builds for a dynamic import()
+
+== the 10-export census, compiled (harness/mexprobe/report-control.ts, out/rc-dyn) ==
+  encode = undefined
+  decode = undefined
+  Reader = undefined
+  Buf = undefined
+  pathToWire = undefined
+  wireToPath = undefined
+  FieldErrorSentinel = undefined
+  ERROR_WIRE = undefined
+  isLabeled = undefined
+  unwrap = undefined
+exit=0
+
+== what NODE answers for the same namespace ==
+  encode = function
+  decode = function
+  Reader = function
+  Buf = function
+  pathToWire = function
+  wireToPath = function
+  FieldErrorSentinel = function
+  ERROR_WIRE = object
+  isLabeled = function
+  unwrap = function
+  Object.keys = Buf,ERROR_WIRE,FieldErrorSentinel,Reader,decode,encode,isLabeled,pathToWire,unwrap,wireToPath
+
+== the emitted builder, read off out/da-argo/decode-answer.c ==
+static ScrDyn * sc_f__x25_dynnsd_m5_(void) { /* <blocks>/clientbench/lab/app/mexprobe/decode-answer.ts:14 */
+  sc_f__x25_init_5(); /* <blocks>/clientbench/lab/app/mexprobe/decode-answer.ts:14 */
+  if (scr_exc_pending()) {
+    return NULL;
+  }
+  bool sc_t0 = sc_g_m5__x25_dynnsbuilt;
+  if (sc_t0) {
+  }
+  else {
+    ScrDyn *sc_t1 = scr_dyn_new_obj();
+    ScrStr *sc_t2 = (ScrStr *)&sc_lit_53;
+    ScrClosure *sc_t3 = scr_closure_new((void *)&sc_f__x25_fn0_dyntrap, 0);
+    ScrDyn *sc_t4 = sc_dfb_0(sc_t3, NULL, NULL);
+    scr_dyn_key_set(sc_t1, sc_t2, sc_t4);
+    scr_dyn_mark_module_ns(sc_t1);
+    scr_dyn_release(sc_g_m5__x25_dynnsobj);
+    sc_g_m5__x25_dynnsobj = sc_t1; /* <blocks>/clientbench/lab/app/mexprobe/decode-answer.ts:14 */
+    scr_closure_release(sc_t3);
+    scr_dyn_release(sc_t4);
+    bool sc_t5 = true;
+    sc_g_m5__x25_dynnsbuilt = sc_t5; /* <blocks>/clientbench/lab/app/mexprobe/decode-answer.ts:14 */
+  }
+  ScrDyn *sc_t6 = scr_dyn_retain(sc_g_m5__x25_dynnsobj);
+  return sc_t6; /* <blocks>/clientbench/lab/app/mexprobe/decode-answer.ts:14 */
+}
+
+== the one key it sets ==
+120-static SCR_STR_LIT(8) sc_lit_53 =
+121:    { SCR_STR_IMMORTAL, 7, 7, "default" };
+122-static SCR_STR_LIT(5) sc_lit_54 =
+
+== zapo's loadArgo, compiled: the dyn-check into ArgoModule|null|undefined ==
+  }
+  /* try */ /* <blocks>/clientbench/lab/app/mexprobe/decode-answer.ts:13 */
+  {
+    ScrPromise *sc_t4 = scr_promise_new();
+    ScrDyn *sc_t5 = sc_f__x25_dynnsd_m5_();
+    if (scr_exc_pending()) {
+      scr_promise_release(sc_t4);
+      scr_dyn_release(sc_t5);
+      goto sc_catch_0;
+    }
+    scr_promise_fulfill_ref(sc_t4, sc_t5, scr_dyn_retain_v, scr_dyn_release_v, &scr_dyn_trace_v); /* <blocks>/clientbench/lab/app/mexprobe/decode-answer.ts:14 */
+    ScrDyn *sc_t6 = scr_await_dyn(sc_t4);
+    if (scr_exc_pending()) {
+      scr_promise_release(sc_t4);
+      scr_dyn_release(sc_t6);
+      goto sc_catch_0;
+    }
+    ScrUnion *sc_t7 = sc_dc_0(sc_t6, NULL);
+    if (scr_exc_pending()) {
+      scr_promise_release(sc_t4);
+      scr_dyn_release(sc_t6);
+      scr_union_release(sc_t7);
+      goto sc_catch_0;
+    }
+    scr_union_release(sc_g_m0_cachedArgo);
+    sc_g_m0_cachedArgo = sc_t7; /* <blocks>/clientbench/lab/app/mexprobe/decode-answer.ts:13 */
+    scr_promise_release(sc_t4);
+    scr_dyn_release(sc_t6);

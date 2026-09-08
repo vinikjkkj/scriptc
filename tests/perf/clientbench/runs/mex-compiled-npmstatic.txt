@@ -1,0 +1,129 @@
+### lane   : exe
+### dir    : <blocks>/clientbench/lab/app/tree/packages/fake-server/bench-mex
+### date   : Tue Sep  8 00:53:46 ESAST 2026
+### node   : v25.9.0
+### config : contacts=20 groups=1 members=10 messages=20
+### exe    : <blocks>/clientbench/lab/out/bm-argo/messaging.bench.exe (28404224 bytes, md5 750b700f1e4273f43db53a0b996c080f)
+(running fake server in separate process)
+zapo-js messaging bench
+────────────────────────
+  contacts          : 20
+  devices/contact   : 2
+  groups            : 1
+  members/group     : 10
+  messages/scenario : 20
+  scenarios         : send_1to1, recv_1to1, send_group, recv_group
+  store             : memory
+  --expose-gc       : no
+
+[mex-probe] server registered w:mex handler, 114B argo payload
+[mex-probe] import(argo-codec) FAILED: 'new TextDecoder with arguments' is part of the standard library types but has no scriptc lowering yet [SC2020 at <blocks>/clientbench/lab/app/node_modules/argo-codec/dist/cjs/decode.js:6]
+[mex-probe] THREW mex/FetchReachoutTimelock argo response received but 'argo-codec' not installed; 114B; strings: � xwa2_fetch_account_reachout_timelockis_activeenforcement_typeSOFT_BLOCKtime_enforcement_ends �䭕 H *
+paired in 262.24 ms
+built 20 contacts (2 dev each) in 290.08 ms, dispenser misses: 0
+built 1 groups × 10 members in 26.88 ms, dispenser misses: 0
+
+[phase-begin] send_1to1
+[phase-end] send_1to1
+──[ SEND 1:1 ]──────────────────────────────
+  messages          : 20
+  elapsed           : 109.12 ms
+  throughput        : 183.3 msg/s
+  avg / msg         : 5.46 ms
+  CPU time          : n/a (see tests/perf/cpuphase -- measured externally)
+  CPU %             : n/a
+  RSS before        : 24.75 MiB
+  RSS after         : 27.81 MiB
+  RSS delta         : 3.06 MiB
+  heap delta        : n/a (no V8 heap in a compiled binary; RSS above is comparable)
+
+[phase-begin] recv_1to1
+[phase-end] recv_1to1
+──[ RECV 1:1 ]──────────────────────────────
+  messages          : 20
+  elapsed           : 57.63 ms
+  throughput        : 347.0 msg/s
+  avg / msg         : 2.88 ms
+  CPU time          : n/a (see tests/perf/cpuphase -- measured externally)
+  CPU %             : n/a
+  RSS before        : 27.81 MiB
+  RSS after         : 28.50 MiB
+  RSS delta         : 0.70 MiB
+  heap delta        : n/a (no V8 heap in a compiled binary; RSS above is comparable)
+
+[phase-begin] send_group
+[phase-end] send_group
+──[ SEND group ]──────────────────────────────
+  messages          : 20
+  elapsed           : 145.30 ms
+  throughput        : 137.6 msg/s
+  avg / msg         : 7.26 ms
+  CPU time          : n/a (see tests/perf/cpuphase -- measured externally)
+  CPU %             : n/a
+  RSS before        : 28.65 MiB
+  RSS after         : 28.75 MiB
+  RSS delta         : 0.10 MiB
+  heap delta        : n/a (no V8 heap in a compiled binary; RSS above is comparable)
+
+[phase-begin] recv_group
+[phase-end] recv_group
+──[ RECV group ]──────────────────────────────
+  messages          : 20
+  elapsed           : 72.23 ms
+  throughput        : 276.9 msg/s
+  avg / msg         : 3.61 ms
+  CPU time          : n/a (see tests/perf/cpuphase -- measured externally)
+  CPU %             : n/a
+  RSS before        : 28.95 MiB
+  RSS after         : 29.03 MiB
+  RSS delta         : 0.08 MiB
+  heap delta        : n/a (no V8 heap in a compiled binary; RSS above is comparable)
+
+[
+  {
+    "name": "SEND 1:1",
+    "messages": 20,
+    "elapsedMs": 109.11679999530315,
+    "throughputMsgsPerSec": 183.28983255429853,
+    "avgMsPerMsg": 5.455839999765158,
+    "cpuTimeMs": 0,
+    "cpuPercent": 0,
+    "rssDeltaBytes": 3211264,
+    "heapDeltaBytes": 0
+  },
+  {
+    "name": "RECV 1:1",
+    "messages": 20,
+    "elapsedMs": 57.63019999861717,
+    "throughputMsgsPerSec": 347.0402670905167,
+    "avgMsPerMsg": 2.8815099999308584,
+    "cpuTimeMs": 0,
+    "cpuPercent": 0,
+    "rssDeltaBytes": 729088,
+    "heapDeltaBytes": 0
+  },
+  {
+    "name": "SEND group",
+    "messages": 20,
+    "elapsedMs": 145.29919999837875,
+    "throughputMsgsPerSec": 137.64700700501558,
+    "avgMsPerMsg": 7.264959999918938,
+    "cpuTimeMs": 0,
+    "cpuPercent": 0,
+    "rssDeltaBytes": 106496,
+    "heapDeltaBytes": 0
+  },
+  {
+    "name": "RECV group",
+    "messages": 20,
+    "elapsedMs": 72.22969999909401,
+    "throughputMsgsPerSec": 276.894407705568,
+    "avgMsPerMsg": 3.6114849999547003,
+    "cpuTimeMs": 0,
+    "cpuPercent": 0,
+    "rssDeltaBytes": 86016,
+    "heapDeltaBytes": 0
+  }
+]
+RUN_EXIT=0
+RUN_SECONDS=60

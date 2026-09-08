@@ -710,3 +710,367 @@ not a runtime one.**
 * Not a claim about any scenario marked DRAW. `wall:RECV 1:1` and
   `wall:RECV group` are draws on all three compiled lanes and should be
   reported as draws, not as small wins.
+
+---
+
+# 10. THE MEX/ARGO HOLE — driven, and the answer is that `--npm-static` does NOT close it
+
+`main` at `51d4c9c0`. The gap named in §3: `--npm-static argo-codec` removes an
+uncoded module refusal and introduces ten coded fences inside argo-codec's own
+CJS, and **this bench never drove mex, so those ten were unfired and
+unmeasured**. They are fired now.
+
+## 10.1 Driving mex needed no zapo edit at all
+
+**Server.** `FakeWaServer.registerIqHandler(matcher, respond, label)` is a
+public extension point — its own header says a caller may *"wire every
+response via `registerIqHandler`"*, and the bench's `server-process.ts`
+already registers two handlers of its own. `harness/ladder-mexprobe.mjs` adds a
+third, for `w:mex`, answering `<result format="argo">` with bytes from
+**argo-codec's own encoder**. **Nothing under `fake-server/src` is touched**,
+so no other bench dir is affected. The server stays a Node process.
+
+**Client.** `client.message.getReachoutTimelock()` is public zapo API. It
+reaches `runMexQuery` → `parseMexResultPayload` → the `format === 'argo'`
+branch → `decodeMexArgoResponse`. No internal import, no reach-around.
+
+**The fixture is a genuine cross-implementation test.** argo-codec's `encode`
+produces 114 bytes that zapo's *hand-written* decoder reads back exactly, and
+the payload is the shape `parseReachoutTimelockMexResponse` expects, so a
+correct decode is observable as **values**, not merely as "no throw":
+
+    [mex-probe] OK isActive=true enforcementType=SOFT_BLOCK enforcementEndsAt=1767225600
+
+That is the node lane (`runs/mex-node-oracle.txt`) and it is the oracle.
+
+## 10.2 A correction I owe: the degradation is NOT silent
+
+I wrote twice that a compiled zapo *"keeps running with argo decoding silently
+switched off"*. **That is wrong, and I am correcting it plainly.**
+
+`loadArgo()` swallows the module-load error into `null` — but
+`isMexArgoDecoderAvailable()` has exactly **one** caller, `client.ts:108`, and
+that caller **throws**:
+
+    mex/FetchReachoutTimelock argo response received but 'argo-codec' not installed; 114B; strings: …
+
+The *refusal* is swallowed. The *consequence* is loud, named, and carries the
+payload. What is wrong is the **message**: the package IS installed, and in the
+`--npm-static` build it is compiled into the binary. Every failure on this path
+reports "not installed" whatever the real cause was.
+
+## 10.3 The three outcomes, kept separate
+
+### (a) What FIRES — two, in order, both on the module-initialisation path
+
+| build | what the direct-import probe reported |
+|---|---|
+| `bm-plain` (no `--npm-static`) | `Cannot load module 'argo-codec': dynamic import() of npm packages runs in the embedded dynamic engine…` — the **uncoded** refusal, as predicted |
+| `bm-argo` (`--npm-static argo-codec`) | **`SC2020` at `argo-codec/dist/cjs/decode.js:6`** — `'new TextDecoder with arguments' … has no scriptc lowering yet` |
+| `bm-argo2` (same, with `decode.js:6` substituted) | **`SC1090` at `argo-codec/dist/cjs/index.js:19`** — `functions with optional or defaulted parameters as values … are not supported yet` |
+
+`decode.js:6` is `const TEXT_DEC = new TextDecoder('utf-8', { fatal: false })`
+at **module top level**, so it runs on first import. Substituting it for the
+behaviour-identical `new TextDecoder()` (utf-8 and `fatal:false` are the
+defaults; `harness/patch-argo-textdecoder.mjs`, reversible, self-tested, and
+verified not to change the node oracle's answer) did **not** produce a working
+decode — it revealed **the next module-init fence behind it**.
+
+**So `--npm-static argo-codec` does not deliver argo decoding.** It converts one
+invisible module-level rejection into a **queue** of statement-level fences on
+the module-init path, and because zapo's `catch` swallows every one of them
+into the same `"'argo-codec' not installed"` message, **the outward behaviour
+of `bm-plain` and `bm-argo` is identical**. Anyone measuring only the outward
+behaviour would conclude `--npm-static` changed nothing at all.
+
+This is the Aug-26 lesson again, in a new place: *laddering one rebuild at a
+time is the wrong instrument*. Each rebuild costs ~15 minutes and reveals
+exactly one more fence.
+
+### (b) What is structurally clear — the decode path itself is fence-free
+
+All ten fence sites are in `decode.js`, `encode.js`, `wire.js` and `index.js`.
+**`buf.js` carries none** — and `buf.js` is the *only* module zapo's decoder
+touches: `argo-decoder.ts` uses `argo.Reader` and nothing else
+(`label()`, `bytes()`, `bitset()`, `pos`, `end`). So once module
+initialisation completes, zapo's argo decode path has no fence in it.
+
+The corollary is that the remaining work is **module init only**, not the
+codec. I state that as structure, not as a proof of unreachability: my first
+attempt to classify the ten by indentation called `index.js:19` a function
+body, and executing it proved that wrong. **The measurement corrected the
+heuristic, and the heuristic is not to be trusted again.**
+
+### (c) What remains UNMEASURED
+
+**Whether a compiled zapo decodes argo correctly.** Still unknown, because
+module initialisation has never completed. The oracle proves the *fixture* and
+the *decoder logic* are right; nothing yet proves the compiled lane reproduces
+it. It stays unmeasured, and "argo closed" stays a build result.
+
+## 10.4 Two reporting defects found on the way
+
+1. **A `--npm-static` fence can cite a line past the end of the file it
+   names.** `index.js:19` — the on-disk `dist/cjs/index.js` is **17 lines** and
+   `dist/esm/index.js` is **4**. The location is against the *rewritten* module
+   `--npm-static` produces, not against anything on disk. A reader chasing it
+   finds nothing and concludes the census is broken.
+2. **A `--npm-static` build prints no confirmation that it worked.** The build
+   log's only line about the package is still
+   `provenance: argo-codec@0.2.1: no provenance attestation published; island
+   path used` — which reads as though the island were used, when the package
+   was in fact compiled in. There is no positive line. I could only confirm the
+   opt-in took effect by scanning the emitted C for `ArgoResponse` and
+   `ArgoDecoderAvailable`.
+
+## 10.5 What would close it
+
+One lowering at a time, in the order the queue reveals them —
+`new TextDecoder(<args>)` first, then `SC1090` on functions with optional or
+defaulted parameters used as values — with the caveat that the queue's length
+is unknown until each is closed. A cheaper instrument than rebuilding would be
+a build-time report of **which deferred fences sit on a module's
+initialisation path**, since those are the ones that fire unconditionally on
+first import; that distinction does not exist in the census today.
+
+## 10.6 The rebase moved nothing
+
+`bb-c` rebuilt at `51d4c9c0` (two merges after the `2b718025` the window arms
+were built at) is **byte-identical**: `28,345,856` bytes, md5
+`6832f2ef114cfd665748412ddd9ffb39`. Every §9 number stands unchanged.
+
+# 11. THE ARGO ANSWER — a compiled zapo does NOT decode argo, and the fences were never the wall
+
+Taken over after a machine restart killed the block mid-edit. §10 left three
+things open: an unfinished compiler diff, "the whole module-init fence set in
+one pass", and the open question. All three are answered here, and the answer
+to the third is not the one the fence queue predicted.
+
+## 11.1 The inherited diff — what it was, and what was missing
+
+91 uncommitted lines across 9 files. They were the §10.4 reporting fixes, and
+the intent was complete; the coverage was not. Three faults, all found by
+running the thing rather than reading it:
+
+| fault | how it showed |
+|---|---|
+| the "original line count" was `split('\n').length` | counts a trailing newline as an 18th line of a 17-line file, so the qualifier would have reported the wrong number for the very file that motivated it |
+| `lower-stmts.ts` `deferredFenceStmt` never called the helper | this is the site that bakes EVERY module-init statement fence — i.e. the exact site `index.js:19` comes from. The fix could not have worked |
+| `lower-ws.ts`'s pre-rendered backend site never called it | the two `ws` init-bag refusals would still cite an unqualified location |
+
+There is also a mundane explanation for why the predecessor's own control runs
+printed nothing: `diagnostic.ts` was last written at **01:52:39** and the last
+`pnpm build` was at **01:20**. The trace they were trying to read was never in
+the `dist` they were running.
+
+Finished, controlled on both arms, and committed. `runs/npm-static-reporting.txt`.
+`SCRIPTC_FENCELOC_TRACE=1` is what found the two missing bake sites: without it a
+call site that never reaches the helper looks exactly like a file that needed no
+qualifier.
+
+## 11.2 The whole fence set in ONE pass — `harness/initpath.mjs`
+
+Laddering is retired. A module's top-level statements are emitted into
+`sc_f__x25_init_N`, so the ENCLOSING C FUNCTION of a fence says whether it is on
+the initialisation path. That is read off the artifact; no indentation heuristic
+is involved, and the one that was tried in §10.3 is not used again.
+
+| build | distinct fence sites | **on the init path** | in a called function |
+|---|---:|---:|---:|
+| `bm-argo` — `--npm-static argo-codec`, argo-codec pristine | 11 | **2** | 9 |
+| `bm-argo4` — same, both init fences substituted | 9 | **0** | 9 |
+| `da-argo` — `mexprobe/decode-answer.ts`, current compiler | 8 | **0** | 8 |
+
+The two it names on the pristine arm are `SC2020 decode.js:6` and
+`SC1090 index.js:19` — exactly the two the ladder found at one 15-minute rebuild
+each, in the same order. That is the positive control; the `0` rows are the
+instrument reporting the expected null. `runs/initpath-census.txt`.
+
+Two things it produced that nobody asked for: the enclosing-function names attribute
+each remaining fence to `decode`/`encode`/`writeValue`/`isLabeled` by name, and one
+fence nobody had counted sits in `prov/.../spec/proto/index.js:1`, outside argo-codec
+entirely.
+
+## 11.3 THE ANSWER: no — and not for any reason on the fence list
+
+`harness/mexprobe/decode-answer.ts` is the question at the smallest scale that can
+answer it: zapo's `src/transport/node/mex/argo-decoder.ts` byte for byte (only the
+`@util/bytes` `TEXT_DECODER` import inlined, because that alias points into the zapo
+tree), driven over argo-codec's OWN 114-byte encoding of the payload the fake server
+answers `w:mex` with. Correctness is observable as VALUES.
+
+```
+NODE ORACLE                     isMexArgoDecoderAvailable = true
+                                OK isActive=true enforcementType=SOFT_BLOCK enforcementEndsAt=1767225600
+
+COMPILED --npm-static argo-codec, init-path fences 0, build exit 0, no fence fires
+                                isMexArgoDecoderAvailable = false
+                                DECODE THREW: argo-codec not installed
+
+COMPILED, no --npm-static       isMexArgoDecoderAvailable = false
+                                DECODE THREW: argo-codec not installed
+```
+
+The two compiled arms are **byte-identical in their output**. Three different causes
+— an uncoded module refusal, a module-init fence, and a namespace with no exports —
+all arrive at the same line. `runs/mex-decode-answer.txt`.
+
+**"argo closed" was a build result and it stays one. The capability is not there.**
+
+### What actually stands in the way
+
+`lower-island.ts:725`. For a `--npm-static` package, `import()` takes a dedicated
+arm (`npmStaticDepSf7` → `staticDynNsBuilderOf`) that returns
+`promise.resolve(<dyn namespace object>)` **before** the static tier's position gate.
+Four consequences, each measured:
+
+1. **The namespace is nearly empty.** It is built from `modSym.getExports()`.
+   argo-codec's rewritten CJS barrel is `module.exports = {…}` — an `export=` — so
+   that table holds ONE entry, mapped to `default`. The emitted builder
+   `sc_f__x25_dynnsd_m5_` does exactly one `scr_dyn_key_set`, with the literal
+   `"default"`, whose value is `sc_f__x25_fn0_dyntrap`. Compiled, all ten named
+   exports read `undefined`; Node answers ten functions and
+   `Object.keys` = `Buf,ERROR_WIRE,FieldErrorSentinel,Reader,decode,encode,isLabeled,pathToWire,unwrap,wireToPath`.
+   **The compiled namespace and Node's share no key at all.** Node synthesizes those
+   names with cjs-module-lexer; this build does not, though `frontend/cjs-lexer.ts`
+   is already in the tree.
+2. **A class could not cross anyway.** `exportDynValue` maps a class export to a
+   trap by design, so `new argo.Reader(bytes)` — which is the whole of zapo's decode
+   path — has nothing to bind to even once the names are present.
+3. **The two spellings the tier says it DOES serve are not served here.** Because
+   the arm returns early, `const ns = await import('argo-codec')` refuses SC2001 at
+   `new ns.Reader(...)` and `const { Reader } = await import('argo-codec')` refuses
+   SC1031 "the source is dyn-typed".
+4. **zapo's spelling ends in `null`.** `loadArgo()` stores the namespace into
+   `let cachedArgo: ArgoModule | null | undefined`; the emitted `sc_dc_0` dyn-check
+   against that union fails, `cachedArgo` becomes `null`, `catch` never runs, and
+   every caller reports "'argo-codec' not installed".
+
+### The control that makes this a DEFECT and not a limitation
+
+The identical spelling against a LOCAL program module is a **build-stopping SC2012**
+carrying the right teaching:
+
+> the static tier serves this import at a CONST binding … A namespace stored, passed
+> on, or awaited anywhere else has no static value to be — Node's namespace object is
+> exotic and this build materializes no stand-in for it
+
+`--npm-static` exempts the package from that rule and answers a wrong value instead.
+`runs/npm-static-namespace-control.txt`.
+
+### The repro, with no zapo and no argo-codec in it
+
+`tests/fixtures/npm/cases/npmstatic-dynimport-cjs/main.ts` dynamically imports
+**this repo's own** `gtdefine` fixture — the `Object.defineProperty(exports,'n',{get})`
+family that `npm-static-rewrite.ts` itself rewrites into `module.exports = {…}`.
+
+```
+node                                    leaf function     WIDTH number
+compiled --backend c --npm-static gtdefine
+  build ok, npmStatic status "static",
+  zero diagnostics, exit 0              leaf undefined    WIDTH undefined
+```
+
+`tests/harness/module-ns-value.test.ts` pins namespace behaviour thoroughly — a mutable
+export refuses SC1013 by name, an assignment and a delete both refuse loudly — but every
+package it stages is ESM source, where `getExports()` carries every name. The CJS barrel
+shape, which is the shape `--npm-static`'s own rewrite emits, has no coverage there.
+`runs/npm-static-dynimport-cjs-repro.txt`.
+
+### And no lane compiles `loadArgo()` correctly -- only one is honest about it
+
+| lane | build | run |
+|---|---|---|
+| `--npm-static argo-codec`, static | exit 0, no fence fires | answers `null` -- **silent wrong value** |
+| no flag, static | exit 0 | answers `null` (the in-band module refusal, swallowed by zapo's `catch`) |
+| `--dynamic` (the island, quickjs) | **REFUSES**, SC1090 at the same line | -- |
+
+The island lane's refusal names the real shape: the namespace is `any` and cannot exit
+into the declared `ArgoModule | null | undefined`. That is the same fact the static lane
+discovers at run time and reports as "not installed". `runs/npm-static-namespace-control.txt`.
+
+The file already states the doctrine this breaks. At `lower-island.ts:1257`, for
+`export *` re-exports it says a namespace built without them "answers `undefined` for
+a name Node answers, silently" — and refuses to build. The CJS `export=` case walks
+straight past the same doctrine.
+
+### What it would take
+
+1. **Smallest honest change:** apply the position gate to npm-static packages too.
+   zapo's `loadArgo()` then fails to BUILD, naming the real cause, instead of running
+   and lying. It does not make argo work; it stops the silence.
+2. **Fill the namespace:** for an `export=` module take the named exports from the
+   export symbol's type properties, or from `cjsLexedExportsOf` (already in the tree,
+   and it is Node's own rule). Reaches `decode`, `encode`, `isLabeled`; `Reader` still
+   crosses as a trap.
+3. **What zapo actually needs:** a class that stays a class through a dynamically
+   imported namespace, and a namespace value that survives being stored in a typed
+   variable. The comment at `lowerOwnModuleImport` says the static tier deliberately
+   materializes no such value — so this is a design call, not a bug fix.
+3b. **A third wall sits behind both.** Bypass the namespace entirely --
+   `harness/mexprobe/argo-decoder-static.ts` is the same decoder with
+   `import { Reader as ArgoReader } from 'argo-codec'` in place of the stored
+   dynamic namespace, one change, every other line zapo's -- and it still does not
+   compile: `--npm-static` DROPS the package's .d.ts on purpose, so `r.pos` types
+   as `any` (SC2011 on `<`) and the inferred class `m0.Reader` does not width-coerce
+   into zapo's structural `ReaderLike` record (SC2002). The node lane is fine because
+   the .d.ts is there. Without `--npm-static` the static import has no story at all.
+   `runs/mex-decode-static-import.txt`.
+
+4. **Zapo-side, a FINDING and not a change:** `const { Reader } = await import(...)`
+   inside `loadArgo` would be a served spelling, but zapo caches the module in a
+   module-level `let`, which is the shape that has no static value. No zapo edit was
+   made and none is proposed.
+
+## 11.4 UNASKED-FOR: a deterministic ACCESS_VIOLATION on the argo path
+
+`out/bm-argo4/messaging.bench.exe` — 28,403,712 B, md5 `931cb864dbeee641df0c2b4d806d7ff1`,
+the `--npm-static argo-codec` bench with BOTH module-init fences substituted — dies
+with **0xC0000005** on every run (4/4, including under gdb), immediately after the
+server registers the `w:mex` handler and before the client's first probe line.
+`RUN_EXIT=139`.
+
+**Split, at the cost of one 1,038 s build.** `bench-mex2` is the same tree with the
+`getReachoutTimelock()` call removed, leaving only the direct `import('argo-codec')`
+probe. `bm-argo5` (28,396,544 B, md5 `cf9e16e958a110f7b19876d4f450f351`, built by the
+current compiler, `init-path 0`) dies at **the same point with the same 0xC0000005**.
+So the fault is in the import itself, not in `runMexQuery` / `parseMexResultPayload` /
+`decodeMexArgoResponse`, and it is not an artifact of the predecessor's build.
+`runs/argo-access-violation.txt`.
+
+What is known:
+
+* gdb: 5 program frames under `ntdll!RtlUserFiberStart`, so the fault is on a
+  **scriptc fiber** — inside async task execution, which is where
+  `await import('argo-codec')` runs (`sc_as__x25_m0_loadArgo` → `scr_async_spawn`).
+* Image base `0x7ff644760000` (`.text` at `+0x1000`), no ASLR movement between runs.
+  Faulting RVAs: `#0 0x875FE7  #1 0x95E506  #2 0x845BDF  #3 0x2D7C33  #4 0x0526C0`.
+* It needs argo-codec's barrel init to COMPLETE: `bm-argo3`, whose earlier and wrong
+  substitution left an `SC2020` at `index.js:5` so init aborted early, runs the whole
+  workload to exit 0.
+* It does NOT reproduce in `da-argo` / `rc-dyn`, which run the same namespace builder
+  over the same package. So it needs something the bench has and they do not.
+
+Not localized further, and the reason is nameable: symbolizing needs a PDB reader, and
+the route `tests/perf/pdb-symbols.mjs` documents — WSL `llvm-pdbutil` — is not
+installed on this host (`wsl -e which llvm-pdbutil` → 127), nor is there an
+`llvm-symbolizer` under `<zapo-work>\tools`. **What it would take:** `llvm-pdbutil` in
+WSL and one `--resolve` against `out/bm-argo4/messaging.bench.pdb` with those five RVAs.
+
+This is a RUNTIME error in a compiled zapo, which is squarely the block's objective, so
+it is recorded here rather than left in a log.
+
+## 11.5 Structure that fell out on the way
+
+* Of argo-codec's five shipped CJS modules, **only `encode.js` and `index.js` are
+  rewritten** by `--npm-static`. `decode.js`, `wire.js` and `buf.js` are served
+  untouched, so their fence locations are their own and need no qualifier. The
+  §10.3(b) claim that `buf.js` carries no fence still holds, and now so does the
+  reason it needs none.
+* The rewritten `index.js` is 30 parts: lines 1–17 space-padded in place, 18 blank,
+  19–29 the appended table, and line 19 is `const __scriptc_e0 = encode_js_1.encode;`
+  — read with `harness/rewrite-probe.mjs`, not inferred.
+* A `--npm-static` fallback names its reason well: `--npm-static ws` reports
+  `SC1012: require() destructuring with defaults, rest, or nested patterns are not
+  supported yet`. That is the negative arm of the confirmation line, and without it the
+  line is a check that can only say yes.
