@@ -26,7 +26,7 @@
 set -u
 
 WT="${WRTCSCOPE_WT:?source tests/perf/wrtcscope/harness/env.sh first}"
-LAB="${WRTCSCOPE_LAB:-<blocks>/wrtcscope/lab}"
+LAB="${WRTCSCOPE_LAB:-${BLOCKS_ROOT:-<blocks>}/wrtcscope/lab}"
 OUT="${WRTCSCOPE_OUT:-$LAB/out}"
 CLI="$WT/packages/cli/dist/main.js"
 ORACLE="$LAB/oracle"

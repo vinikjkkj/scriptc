@@ -1,7 +1,7 @@
 #!/bin/bash
 # Substitution probe: does one parameter type carry eleven SC2003 sites?
-. <blocks>/wamcoord-lab/env.sh
-L=<blocks>/wamcoord-lab
+. ${BLOCKS_ROOT:-<blocks>}/wamcoord-lab/env.sh
+L=${BLOCKS_ROOT:-<blocks>}/wamcoord-lab
 {
   echo "ORACLE-NODE $(node --version)"
   echo "=== QV2 START $(date -Is)"

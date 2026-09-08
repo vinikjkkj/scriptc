@@ -16,8 +16,8 @@
 # provenance attestation at all, which no zapo-js bump can fix.
 # media-utils re-runs here because its own tsconfig has NO "DOM" in lib and the
 # first lane-F run gave it one.
-. <blocks>/pkgstatus3-lab/env.sh
-L=<blocks>/pkgstatus3-lab
+. ${BLOCKS_ROOT:-<blocks>}/pkgstatus3-lab/env.sh
+L=${BLOCKS_ROOT:-<blocks>}/pkgstatus3-lab
 {
   echo "=== QUEUE-G START $(date -Is)  node=$(node --version)"
   for p in store-sqlite store-redis media-utils; do

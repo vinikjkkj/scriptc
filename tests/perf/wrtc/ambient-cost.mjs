@@ -26,12 +26,12 @@ import { performance } from "node:perf_hooks";
 const label = process.argv[2] ?? "unlabelled";
 const count = Number(process.argv[3] ?? "60");
 
-const repoRoot = "<blocks>/wrtc";
+const repoRoot = `${process.env.BLOCKS_ROOT ?? "<blocks>"}/wrtc`;
 /* Import the built compiler by PATH: this script lives outside the
  * worktree, so a bare specifier resolves against the lab directory and
  * finds nothing. dist/index.js's own imports still resolve from inside
  * the worktree, which is what we want. */
-const { analyze } = await import("file:///<blocks>/wrtc/packages/compiler/dist/index.js");
+const { analyze } = await import(`file:///${process.env.BLOCKS_ROOT ?? "<blocks>"}/wrtc/packages/compiler/dist/index.js`);
 
 /* The same selection rule the test uses -- sorted, so the sample is the
  * same set of files in the same order on both sides of the comparison. */
@@ -71,5 +71,5 @@ const out = {
   minMs: Math.round((per[0] ?? 0) * 100) / 100,
   maxMs: Math.round((per[per.length - 1] ?? 0) * 100) / 100,
 };
-writeFileSync(`<blocks>/wrtc-tmp/ambient-cost-${label}.json`, JSON.stringify(out, null, 1));
+writeFileSync(`${process.env.BLOCKS_ROOT ?? "<blocks>"}/wrtc-tmp/ambient-cost-${label}.json`, JSON.stringify(out, null, 1));
 console.log(JSON.stringify(out));

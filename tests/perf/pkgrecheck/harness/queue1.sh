@@ -1,5 +1,5 @@
 #!/bin/bash
-L=<blocks>/pkgrecheck-lab
+L=${BLOCKS_ROOT:-<blocks>}/pkgrecheck-lab
 bash $L/bo.sh drivers/drv-pg-cleanup2.ts   store-postgres-cleanup2 --provenance-sources
 bash $L/bo.sh drivers/drv-redis-helpers.ts store-redis-helpers     --provenance-sources
 bash $L/bo.sh drivers/drv-mysql-helpers2.ts store-mysql-helpers2   --provenance-sources

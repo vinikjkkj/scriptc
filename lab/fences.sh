@@ -4,8 +4,8 @@
 # A new element kind that ANSWERS where its neighbours refuse is a silent
 # divergence; one that refuses where they answer is a regression.
 set -u
-WT=<blocks>/twobyte
-TMPD=<blocks>/twobyte-tmp/fences
+WT=${BLOCKS_ROOT:-<blocks>}/twobyte
+TMPD=${BLOCKS_ROOT:-<blocks>}/twobyte-tmp/fences
 mkdir -p "$TMPD"
 run() { # $1 = tag, $2 = source text
   printf '%s\n' "$2" > "$TMPD/$1.ts"

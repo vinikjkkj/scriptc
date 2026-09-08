@@ -1,7 +1,7 @@
 /* Is the SAME cluster of zapo-js-core blocker sites present in every store
  * package's record? A shared cluster is one fix, not five. */
 import { readFileSync } from "node:fs";
-const LAB = "<blocks>/pkgstatus3-lab";
+const LAB = `${process.env.BLOCKS_ROOT ?? "<blocks>"}/pkgstatus3-lab`;
 const key = (s) =>
   `${s.code} ${String(s.file).replace(/\\/g, "/").replace(/^.*?[0-9a-f]{40}\//, "")}:${s.line}`;
 const sets = new Map();

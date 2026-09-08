@@ -3,9 +3,13 @@
 # Scores MATCH / WRONG / TRAP / DID-NOT-RUN per backend. Never gates on exit
 # status: a run that prints an uncaught error can still exit 0.
 set -u
-WT=<blocks>/twobyte
-OUT=${OUT:-<blocks>/twobyte-lab/runs/progs}
-NODE25=<home>/AppData/Local/nvm/v25.9.0/node.exe
+WT=${BLOCKS_ROOT:-<blocks>}/twobyte
+OUT=${OUT:-${BLOCKS_ROOT:-<blocks>}/twobyte-lab/runs/progs}
+# NOTE: PATH is colon-separated, so a Windows-spelled root splits into two entries --
+# the drive letter becomes an entry of its own and the rest of the path is lost.
+# *_ROOT_POSIX holds the MSYS spelling: a different VALUE, not a restyling of one.
+# Do not collapse the pair back into a single variable.
+NODE25=${HOME_ROOT_POSIX:-<home>}/AppData/Local/nvm/v25.9.0/node.exe
 mkdir -p "$OUT"
 for f in "$@"; do
   n=$(basename "$f" .ts)

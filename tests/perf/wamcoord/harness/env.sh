@@ -19,7 +19,7 @@
 # for a shell that sets some of these and not others.
 
 BLOCK="${BLOCK:-wamcoord}"
-ROOT="<blocks>\\${BLOCK}"
+ROOT="${BLOCKS_ROOT:-<blocks>}\\${BLOCK}"
 
 export TMP="${ROOT}-tmp"
 export TEMP="$TMP"
@@ -34,21 +34,25 @@ export ZIG_GLOBAL_CACHE_DIR="${ROOT}-zig-g"
 # a detached shell that loses it produces 8 corpus failures that look like code.
 # It is also exactly why every cache above must be pinned explicitly -- they are
 # the things that would otherwise be derived from it.
-export USERPROFILE='<home>'
+export USERPROFILE="${HOME_ROOT:-<home>}"
 
 export SCRIPTC_TARGET=x86_64-windows-gnu
 export SCRIPTC_CC=zigcc
 export SCRIPTC_TEST_CC='zig cc'
 unset SCRIPTC_TEST_WORKERS
 
-export WT="<blocks>/${BLOCK}"
-export LAB="<blocks>/${BLOCK}-lab"
-export NODE22='<home>/AppData/Local/nvm/v22.18.0'
-export NODE25='<home>/AppData/Local/nvm/v25.9.0'
+export WT="${BLOCKS_ROOT:-<blocks>}/${BLOCK}"
+export LAB="${BLOCKS_ROOT:-<blocks>}/${BLOCK}-lab"
+export NODE22="${HOME_ROOT:-<home>}/AppData/Local/nvm/v22.18.0"
+# NOTE: PATH is colon-separated, so a Windows-spelled root splits into two entries --
+# the drive letter becomes an entry of its own and the rest of the path is lost.
+# *_ROOT_POSIX holds the MSYS spelling: a different VALUE, not a restyling of one.
+# Do not collapse the pair back into a single variable.
+export NODE25="${HOME_ROOT_POSIX:-<home>}/AppData/Local/nvm/v25.9.0"
 # GNU tar (Git usr/bin) MUST precede System32: bsdtar rejects --force-local and
 # the provenance lane then silently falls back to the island and reports phantom
 # SC2013s while finishing fast.
-export PATH="${PS_NODE:-$NODE25}:<zapo-work>/tools/zig:/c/Program Files/Git/usr/bin:/c/msys64/ucrt64/bin:$PATH"
+export PATH="${PS_NODE:-$NODE25}:${ZAPO_WORK_ROOT_POSIX:-<zapo-work>}/tools/zig:/c/Program Files/Git/usr/bin:/c/msys64/ucrt64/bin:$PATH"
 
 scriptc_check_pins() {
   local bad=0 v

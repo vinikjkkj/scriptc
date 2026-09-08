@@ -3,10 +3,10 @@
 # `node --version` is the first line of the log, because Start-Process /
 # nohup inherit v22 and a v22 gate reads as a phantom failure set.
 # pnpm is never used here: v25's pnpm purges v22's node_modules on `exec`.
-. <blocks>/twobyte/lab/env.sh
+. ${BLOCKS_ROOT:-<blocks>}/twobyte/lab/env.sh
 export PATH="$NODE25:$PATH"
-cd <blocks>/twobyte || exit 1
-LOG=<blocks>/twobyte-lab/runs/gate-full.log
+cd ${BLOCKS_ROOT:-<blocks>}/twobyte || exit 1
+LOG=${BLOCKS_ROOT:-<blocks>}/twobyte-lab/runs/gate-full.log
 {
   echo "node $("$NODE25/node.exe" --version)"
   date

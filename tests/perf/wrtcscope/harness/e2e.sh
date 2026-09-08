@@ -26,7 +26,7 @@
 
 set -u
 WT="${WRTCSCOPE_WT:?source tests/perf/wrtcscope/harness/env.sh first}"
-LAB="${WRTCSCOPE_LAB:-<blocks>/wrtcscope/lab}"
+LAB="${WRTCSCOPE_LAB:-${BLOCKS_ROOT:-<blocks>}/wrtcscope/lab}"
 BIN="$LAB/e2e"
 RUNS="${1:-1}"
 PROBES="$WT/tests/perf/wrtc/probes"

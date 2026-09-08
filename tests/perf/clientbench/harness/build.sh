@@ -10,7 +10,7 @@
 # directory: given a directory lld-link fails "Is a directory" AFTER the whole
 # typecheck and codegen have already been paid for.
 set -u
-. <blocks>/clientbench/lab/env.sh || exit 1
+. ${BLOCKS_ROOT:-<blocks>}/clientbench/lab/env.sh || exit 1
 DIR=$1; TAG=$2; shift 2
 mkdir -p "$LAB/out/$TAG"
 # -o is a FILE path, not a directory: lld-link refuses "Is a directory".

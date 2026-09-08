@@ -7,8 +7,8 @@ import { join } from "node:path";
 
 import { requirePins } from "./pins.mjs";
 requirePins("checkmap.mjs");
-const WT = "<blocks>/wamcoord";
-const LAB = "<blocks>/wamcoord-lab";
+const WT = `${process.env.BLOCKS_ROOT ?? "<blocks>"}/wamcoord`;
+const LAB = `${process.env.BLOCKS_ROOT ?? "<blocks>"}/wamcoord-lab`;
 const { resolveProvenanceSources } = await import("file:///" + WT + "/packages/compiler/dist/index.js");
 const dir = join(LAB, "napp", "cand");
 mkdirSync(dir, { recursive: true });

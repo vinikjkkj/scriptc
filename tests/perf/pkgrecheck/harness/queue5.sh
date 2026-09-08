@@ -1,5 +1,5 @@
 #!/bin/bash
-. <blocks>/pkgrecheck-lab/env.sh
+. ${BLOCKS_ROOT:-<blocks>}/pkgrecheck-lab/env.sh
 cd "$LAB/app" || exit 1
 run() {  # $1 name  $2 entry  $3.. flags
   N="$1"; S="$2"; shift 2

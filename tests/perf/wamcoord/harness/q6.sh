@@ -2,8 +2,8 @@
 # Blast radius of the gate on a package that is NOT wam: store-mysql, whose
 # island note names mysql2/promise -- the other authored-JS entry the
 # provenance code comment calls out by name. Paired, same compiler, same host.
-. <blocks>/wamcoord-lab/env.sh
-L=<blocks>/wamcoord-lab
+. ${BLOCKS_ROOT:-<blocks>}/wamcoord-lab/env.sh
+L=${BLOCKS_ROOT:-<blocks>}/wamcoord-lab
 {
   echo "ORACLE-NODE $(node --version)"
   echo "=== Q6 START $(date -Is)"

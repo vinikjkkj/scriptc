@@ -2,7 +2,7 @@
 # The gate, under node v25.9.0, with vitest's own exit code captured into its
 # OWN variable immediately (a later command's status is not the gate's).
 #   $1 = output tag
-. <blocks>/wamvoip/env.sh
+. ${BLOCKS_ROOT:-<blocks>}/wamvoip/env.sh
 cd "$WT" || exit 1
 TAG="${1:-gate}"
 export PATH="$NODE25:$PATH"

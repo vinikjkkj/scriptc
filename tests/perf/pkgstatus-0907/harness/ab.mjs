@@ -2,7 +2,7 @@
  * read off the files rather than typed. Refuses to write a block if an arm is
  * missing -- a half-run A/B is not a result. */
 import { readFileSync, existsSync, writeFileSync } from "node:fs";
-const LAB = "<blocks>/pkgstatus3-lab/sites";
+const LAB = `${process.env.BLOCKS_ROOT ?? "<blocks>"}/pkgstatus3-lab/sites`;
 const rd = (n) => {
   const p = `${LAB}/${n}.json`;
   if (!existsSync(p)) return null;
@@ -48,5 +48,5 @@ L.push("");
 L.push("Provenance notes on the `+ zapo-js` arms:");
 L.push("");
 for (const [label, , B] of rows) for (const n of B.notes) L.push(`- \`${label}\`: ${n}`);
-writeFileSync("<blocks>/pkgstatus3-lab/ab-result.md", L.join("\n") + "\n");
+writeFileSync(`${process.env.BLOCKS_ROOT ?? "<blocks>"}/pkgstatus3-lab/ab-result.md`, L.join("\n") + "\n");
 console.log(L.join("\n"));

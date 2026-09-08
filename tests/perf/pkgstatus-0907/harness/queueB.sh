@@ -7,8 +7,8 @@
 # The two armed controls run FIRST in the same lane: typesprobe must cross
 # preflight, typesprobe-neg must fail it. A run where both agree is a broken
 # query, not a clean lane.
-. <blocks>/pkgstatus3-lab/env.sh
-L=<blocks>/pkgstatus3-lab
+. ${BLOCKS_ROOT:-<blocks>}/pkgstatus3-lab/env.sh
+L=${BLOCKS_ROOT:-<blocks>}/pkgstatus3-lab
 OUT="$L/sites"
 mkdir -p "$OUT"
 cd "$L/napp" || exit 1

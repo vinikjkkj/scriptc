@@ -1,6 +1,6 @@
 #!/bin/bash
 # build-and-oracle: $1 = driver path relative to $LAB/app, $2 = name, $3.. = flags
-. <blocks>/pkgrecheck-lab/env.sh
+. ${BLOCKS_ROOT:-<blocks>}/pkgrecheck-lab/env.sh
 cd "$LAB/app" || exit 1
 SRC="$1"; NAME="$2"; shift 2
 mkdir -p "$LAB/bin"

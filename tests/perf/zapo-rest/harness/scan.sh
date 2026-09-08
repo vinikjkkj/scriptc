@@ -13,7 +13,7 @@ set -u
 # SCAN_ROOT  the block root to search for libqjs.a (the structural proof).
 #            It used to be one block's absolute path, which is why the
 #            structural half of this scan was only ever true for that block.
-CTL=${SCAN_CTL:-<blocks>/_artifacts/spreadargs-lab/dyn-ctl.exe}
+CTL=${SCAN_CTL:-${BLOCKS_ROOT:-<blocks>}/_artifacts/spreadargs-lab/dyn-ctl.exe}
 ROOT=${SCAN_ROOT:-$PWD}
 BINS="$*"
 

@@ -5,7 +5,7 @@
 import { cpSync, mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 const BS = String.fromCharCode(92);
-const WT = process.env.WT ?? "<blocks>/mediautils";
+const WT = process.env.WT ?? `${process.env.BLOCKS_ROOT ?? "<blocks>"}/mediautils`;
 const { analyze } = await import(`file:///${WT}/packages/compiler/dist/index.js`);
 const corpus = join(WT, "tests/corpus");
 const nodeTypesDir = join(WT, "tests/fixtures/node-types");

@@ -1,6 +1,6 @@
 /* Check the specific claims §5 makes, mechanically, against the records. */
 import { readFileSync } from "node:fs";
-const LAB = "<blocks>/pkgstatus3-lab/sites";
+const LAB = `${process.env.BLOCKS_ROOT ?? "<blocks>"}/pkgstatus3-lab/sites`;
 const rd = (n) => JSON.parse(readFileSync(`${LAB}/${n}.json`, "utf8"));
 const blk = (r) => r.sites.filter((s) => s.section === "blocker");
 

@@ -3,7 +3,7 @@
 #   $1 = output dir, $2.. = extra compiler flags.
 # Every run carries its own two control rows, so a sweep that reports "nothing"
 # can be told apart from a sweep whose query is broken.
-. <blocks>/remeasure/lab/env.sh
+. ${BLOCKS_ROOT:-<blocks>}/remeasure/lab/env.sh
 OUT="$1"; shift
 mkdir -p "$OUT"
 LOCK="$OUT/.lock"

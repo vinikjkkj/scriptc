@@ -1,7 +1,7 @@
 #!/bin/bash
 # One scriptc build, detached, so the 10-minute shell timeout cannot orphan a
 # tsgo/zig child.  $1 = driver (relative to lab/app), $2 = tag, $3.. = flags.
-. <blocks>/wamvoip/env.sh
+. ${BLOCKS_ROOT:-<blocks>}/wamvoip/env.sh
 cd "$LAB/app" || exit 1
 DRV="$1"; TAG="$2"; shift 2
 mkdir -p "$LAB/bin" "$LAB/out"

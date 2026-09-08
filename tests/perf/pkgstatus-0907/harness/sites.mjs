@@ -6,7 +6,7 @@
 import { writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 
-const WT = process.env.WT ?? "<blocks>/pkgstatus";
+const WT = process.env.WT ?? `${process.env.BLOCKS_ROOT ?? "<blocks>"}/pkgstatus`;
 const { analyze } = await import(`file:///${WT}/packages/compiler/dist/index.js`);
 
 const argv = process.argv.slice(2);

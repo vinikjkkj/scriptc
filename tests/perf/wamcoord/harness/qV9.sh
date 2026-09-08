@@ -2,8 +2,8 @@
 # The probe in qV8 is a COPY of the pkgsrc voip tree, so its baseline must be
 # that same tree on the SAME compiler. V-F.json predates the compound-assignment
 # change and would attribute eleven cleared sites to the cast removal.
-. <blocks>/wamcoord-lab/env.sh
-L=<blocks>/wamcoord-lab
+. ${BLOCKS_ROOT:-<blocks>}/wamcoord-lab/env.sh
+L=${BLOCKS_ROOT:-<blocks>}/wamcoord-lab
 while ! grep -q "QV8 DONE" "$L/logs/qV8.log" 2>/dev/null; do sleep 20; done
 {
   echo "ORACLE-NODE $(node --version)"

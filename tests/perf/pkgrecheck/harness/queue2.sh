@@ -1,5 +1,5 @@
 #!/bin/bash
-L=<blocks>/pkgrecheck-lab
+L=${BLOCKS_ROOT:-<blocks>}/pkgrecheck-lab
 bash $L/bo.sh drivers/voip-stun.ts  voip-stun  --provenance-sources
 bash $L/bo.sh drivers/voip-ssrc.ts  voip-ssrc  --provenance-sources
 bash $L/bo.sh drivers/store-sqlite-names.ts store-sqlite-names-be --best-effort

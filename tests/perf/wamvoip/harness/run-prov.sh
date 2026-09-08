@@ -1,7 +1,7 @@
 #!/bin/bash
 # One long provenance analysis, launched detached so the 10-minute shell
 # timeout cannot orphan a tsgo child. $1 = entry, $2 = out tag, $3.. = flags.
-. <blocks>/wamvoip/env.sh
+. ${BLOCKS_ROOT:-<blocks>}/wamvoip/env.sh
 cd "$LAB/app" || exit 1
 ENTRY="$1"; TAG="$2"; shift 2
 mkdir -p "$LAB/out"

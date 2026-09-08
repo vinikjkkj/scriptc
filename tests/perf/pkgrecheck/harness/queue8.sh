@@ -1,5 +1,5 @@
 #!/bin/bash
-. <blocks>/pkgrecheck-lab/env.sh
+. ${BLOCKS_ROOT:-<blocks>}/pkgrecheck-lab/env.sh
 cd "$LAB/app" || exit 1
 for d in drv-media drv-redis drv-postgres hello store-sqlite-names; do
   timeout 1800 node "$WT/packages/cli/dist/main.js" build "drivers/$d.ts" --dynamic -o "$LAB/dynctl/$d-dyn.exe" > "$LAB/dynctl/$d-dyn.log" 2>&1

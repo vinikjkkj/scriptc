@@ -8,7 +8,7 @@ import { resolve } from "node:path";
 
 const slash = (s) => s.split("\\").join("/");
 
-const WT = process.env.WT ?? "<blocks>/wamfix";
+const WT = process.env.WT ?? `${process.env.BLOCKS_ROOT ?? "<blocks>"}/wamfix`;
 const { resolveProvenanceSources } = await import(`file:///${WT}/packages/compiler/dist/index.js`);
 const entry = resolve(process.argv[2]);
 const out = resolve(process.argv[3]);

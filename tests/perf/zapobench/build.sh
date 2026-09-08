@@ -5,18 +5,18 @@
 # the emitted TU about 94,000 times and two directories make the md5s always
 # differ and the byte counts never do.
 set -u
-. <blocks>/zapobench/lab/env.sh
+. ${BLOCKS_ROOT:-<blocks>}/zapobench/lab/env.sh
 CC_ROOT="$1"; TAG="$2"; CDIR="$3"; PROV="$4"
-APP=<zapo-work>/zapobench-artifacts/app
-OUT=<zapo-work>/zapobench-artifacts
-LOG=<blocks>/zapobench/lab/build-$TAG.log
+APP=${ZAPO_WORK_ROOT:-<zapo-work>}/zapobench-artifacts/app
+OUT=${ZAPO_WORK_ROOT:-<zapo-work>}/zapobench-artifacts
+LOG=${BLOCKS_ROOT:-<blocks>}/zapobench/lab/build-$TAG.log
 # One cache dir per arm.  The shared object cache is known-defective (empty
 # key directories, and stale objects under live keys), and a control taken
 # through a poisoned cache is not a control.
-export SCRIPTC_CACHE_DIR='<blocks>\zapobench\'"$CDIR"
+export SCRIPTC_CACHE_DIR="${BLOCKS_ROOT:-<blocks>}"'\zapobench\'"$CDIR"
 export SCRIPTC_PROVENANCE_CACHE="$PROV"
 export SCRIPTC_TRAP_TRACE=1
-mkdir -p "<blocks>/zapobench/$CDIR" "$OUT/tu" "$OUT/exe"
+mkdir -p "${BLOCKS_ROOT:-<blocks>}/zapobench/$CDIR" "$OUT/tu" "$OUT/exe"
 echo "SCRIPTC_CACHE_DIR=$SCRIPTC_CACHE_DIR SCRIPTC_PROVENANCE_CACHE=$SCRIPTC_PROVENANCE_CACHE" > "$LOG"
 # --keep-c writes the emitted C beside the -o TARGET, not in the app dir.
 rm -f "$OUT/exe/ixmax3.c"

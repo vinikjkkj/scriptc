@@ -6,8 +6,8 @@
 # Still strict, still --provenance-sources, still NO --best-effort.
 # hello.ts runs first as the control: it must produce a C TU with 0 fences and
 # a non-zero byte size, so a 0 elsewhere can be told from an unread file.
-. <blocks>/pkgstatus3-lab/env.sh
-L=<blocks>/pkgstatus3-lab
+. ${BLOCKS_ROOT:-<blocks>}/pkgstatus3-lab/env.sh
+L=${BLOCKS_ROOT:-<blocks>}/pkgstatus3-lab
 {
   echo "=== QUEUE-H START $(date -Is)"
   bash "$L/build1.sh" hello.ts ctl-hello-c --provenance-sources --backend c

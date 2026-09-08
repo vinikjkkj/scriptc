@@ -1,5 +1,5 @@
 #!/bin/bash
-. <blocks>/pkgrecheck-lab/env.sh
+. ${BLOCKS_ROOT:-<blocks>}/pkgrecheck-lab/env.sh
 cd "$LAB/app" || exit 1
 mkdir -p "$LAB/dynctl"
 for b in "" "--backend c"; do

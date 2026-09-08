@@ -3,8 +3,8 @@
 # program compiles and its native stdout/stderr/exit is compared against node.
 # Sharded so the wall time is bounded and reportable; the shard is named in
 # the log.
-. <blocks>/mediautils-work/env.sh
-cd <blocks>/mediautils || exit 1
+. ${BLOCKS_ROOT:-<blocks>}/mediautils-work/env.sh
+cd ${BLOCKS_ROOT:-<blocks>}/mediautils || exit 1
 SHARD="${1:-1/20}"
 TAG=$(echo "$SHARD" | tr '/' '-')
 {
@@ -16,5 +16,5 @@ TAG=$(echo "$SHARD" | tr '/' '-')
     tests/harness/differential.test.ts 2>&1
   echo "VITEST-EXIT=$?"
   echo "=== DONE $(date -Is)"
-} > "<blocks>/mediautils-work/logs/gate-corpus-$TAG.log" 2>&1
-echo "=== GATE-EXIT rc=$? ===" >> "<blocks>/mediautils-work/logs/gate-corpus-$TAG.log"
+} > "${BLOCKS_ROOT:-<blocks>}/mediautils-work/logs/gate-corpus-$TAG.log" 2>&1
+echo "=== GATE-EXIT rc=$? ===" >> "${BLOCKS_ROOT:-<blocks>}/mediautils-work/logs/gate-corpus-$TAG.log"

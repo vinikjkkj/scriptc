@@ -23,7 +23,7 @@ TOOLS="${3:-$WT/tests/perf/fakebench}"
 SUF="${4:-}"
 APP="$ROOT/app"
 PROV_COMMIT="${FB_PROV_COMMIT:-250f9af5229a545eec28ddbd3e8774a397cdb0bb}"
-ZAPO_SRC="${FB_ZAPO_SRC:-<zapo-work>/caches/provenance/$PROV_COMMIT}"
+ZAPO_SRC="${FB_ZAPO_SRC:-${ZAPO_WORK_ROOT:-<zapo-work>}/caches/provenance/$PROV_COMMIT}"
 
 export SCC="$WT/packages/cli/dist/main.js"
 export FB_APP="$APP"

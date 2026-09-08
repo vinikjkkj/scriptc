@@ -2,7 +2,9 @@
  * numbers, so the fence location qualifier can be checked against the artifact
  * instead of guessed. Usage: node rewrite-probe.mjs <file.js> */
 import { readFileSync } from 'node:fs'
-import { rewriteBundlerCjsExports } from 'file:///<blocks>/clientbench/work/packages/compiler/dist/frontend/npm-static-rewrite.js'
+/* A static specifier cannot carry a variable, so this one import is dynamic:
+ * the compiler under probe lives in a worktree whose root is BLOCKS_ROOT. */
+const { rewriteBundlerCjsExports } = await import(`file:///${process.env.BLOCKS_ROOT ?? '<blocks>'}/clientbench/work/packages/compiler/dist/frontend/npm-static-rewrite.js`)
 const p = process.argv[2]
 const src = readFileSync(p, 'utf8')
 const raw = src.split('\n')

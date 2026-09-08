@@ -2,9 +2,9 @@
 # Everything that must wait for the gate to stop holding the CPU.
 # Run from <blocks>/wrtc.  . <blocks>/wrtc-lab/env.sh first.
 set -u
-W=<blocks>/wrtc
-T=<blocks>/wrtc-tmp
-LAB=<blocks>/wrtc-lab
+W=${BLOCKS_ROOT:-<blocks>}/wrtc
+T=${BLOCKS_ROOT:-<blocks>}/wrtc-tmp
+LAB=${BLOCKS_ROOT:-<blocks>}/wrtc-lab
 
 echo "=== 1. stage 2: connected-mode node:dgram, the FNA relay path's real prerequisite ==="
 cd "$W"
@@ -33,7 +33,9 @@ node "$LAB/ambient-cost.mjs" with-ambient 60
 
 echo "--- removing the ambient root and rebuilding ---"
 python - <<'PY'
-p = '<blocks>/wrtc/packages/compiler/src/frontend/program.ts'
+# The heredoc is quoted, so the shell does not expand here: read the root in Python.
+import os
+p = (os.environ.get('BLOCKS_ROOT') or '<blocks>') + '/wrtc/packages/compiler/src/frontend/program.ts'
 b = open(p, 'rb').read()
 o = b'    wrtcDtsPath(),'
 assert b.count(o) == 1, b.count(o)
@@ -52,7 +54,7 @@ echo
 echo "=== 3. the timing-out test, ALONE and uncontended ==="
 echo "(filtered runs skip the suite lock; this is the attribution run)"
 cd "$W"
-<home>/AppData/Local/nvm/v25.9.0/node node_modules/vitest/vitest.mjs run \
+${HOME_ROOT:-<home>}/AppData/Local/nvm/v25.9.0/node node_modules/vitest/vitest.mjs run \
   tests/harness/coverage.test.ts -t "every corpus program is 100% static" \
   > "$T/corpus-solo.log" 2>&1
 echo "solo rc=$?"

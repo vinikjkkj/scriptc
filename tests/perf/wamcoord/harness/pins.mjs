@@ -54,7 +54,7 @@ export function requirePins(who) {
     `  homedir() is ${homedir()} -- an unpinned cache extracts THERE, silently.`,
     "",
     "  Fix: source the block env before running.",
-    "      . <blocks>/wamcoord-lab/env.sh && node <script>",
+    `      . ${process.env.BLOCKS_ROOT ?? "<blocks>"}/wamcoord-lab/env.sh && node <script>`,
     "",
   ];
   process.stderr.write(lines.join("\n") + "\n");

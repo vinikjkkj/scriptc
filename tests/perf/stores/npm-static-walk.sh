@@ -1,10 +1,10 @@
 #!/bin/bash
 # Collect EVERY module named across ALL island-fallback lines each round.
 probe="$1"; pkgs="$2"
-cd <blocks>/stores/wt && . ./lab-env.sh
+cd ${BLOCKS_ROOT:-<blocks>}/stores/wt && . ./lab-env.sh
 for i in $(seq 1 60); do
   out=$(timeout 900 node packages/cli/dist/main.js coverage \
-        <blocks>/stores/lab/drivers/probes/$probe.ts --npm-static "$pkgs" 2>&1)
+        ${BLOCKS_ROOT:-<blocks>}/stores/lab/drivers/probes/$probe.ts --npm-static "$pkgs" 2>&1)
   # every "the 'X' module is not supported yet", root package name only
   mods=$(echo "$out" | rg -o "the '([^']+)' module is not supported yet" -r '$1' \
         | sed -E 's#^(@[^/]+/[^/]+).*#\1#; s#^([^@/][^/]*)/.*#\1#' | sort -u)

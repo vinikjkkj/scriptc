@@ -23,7 +23,7 @@
 #
 # The bench dir is a COPY. zapo is read-only test input.
 set -u
-. <blocks>/clientbench/lab/env.sh || exit 1
+. ${BLOCKS_ROOT:-<blocks>}/clientbench/lab/env.sh || exit 1
 
 TAG=$1; REPS=$2; shift 2
 ARMS="$*"

@@ -5,8 +5,8 @@
 #
 # Controls run FIRST, in the same lane, so a queue that reports "nothing" can
 # be told apart from a queue whose instrument is broken.
-. <blocks>/pkgstatus3-lab/env.sh
-L=<blocks>/pkgstatus3-lab
+. ${BLOCKS_ROOT:-<blocks>}/pkgstatus3-lab/env.sh
+L=${BLOCKS_ROOT:-<blocks>}/pkgstatus3-lab
 {
   echo "=== QUEUE-A START $(date -Is)"
   bash "$L/build1.sh" hello.ts ctl-hello --provenance-sources
