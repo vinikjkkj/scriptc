@@ -90,3 +90,93 @@ statements, so the emitter reports and then rethrows the first refusal.
 PREDICTION that only a post-fix STRICT build can settle, and it will be
 settled by the artifact — a .ll and no .c — not by the census and not by
 the absence of a refusal message.
+
+
+================================================================
+OUTCOME — recorded 2026-09-08, after the census landed
+================================================================
+
+The prediction above is UNCHANGED. Nothing in it has been edited to fit
+the result; this section is appended below it, which is the only honest
+way to score a prediction.
+
+WHAT THE CENSUS SAID (SCRIPTC_LLVM_CENSUS=1, app182, strict):
+
+  3 distinct tier refusals, 0 distinct downstream errors, 17 sites:
+    10  weakmap:intrinsic     %m50.x25519PrivateKeyObject
+     5  weakmap:new           %init.50
+     2  truthy:union:keyobj   %m50.x25519PrivateKeyObject
+
+  Artifact lane before the fix: DEMOTED to C (15 .c files, no .ll).
+
+SCORED, CLAUSE BY CLAUSE:
+
+  P1  WRONG. I predicted cluster 1 ONLY. There is a third refusal, from
+      cluster 6: truthy:union:keyobj. Two sites.
+
+  P1a RIGHT. weakmap:intrinsic (10) outnumbers weakmap:new (5), and I
+      predicted the ordering without predicting the ratio.
+
+  P1b RIGHT on the bound, by luck rather than by reasoning. I said "2,
+      and at most 4 if the dyn-keyed path raises a separate tag". The
+      answer is 3 — inside the bound, but the third tag is not the dyn
+      one I was hedging against. A bound that contains the answer for the
+      wrong reason is not a successful prediction of the mechanism.
+
+  P1d RIGHT, and for the stated reason. Cluster 2c did not appear. The
+      three stream-construction sites are identical in 1.6.1 and 1.8.2
+      and the 1.6.2 arm builds clean, so they are not reached from this
+      entry.
+
+  P1e RIGHT, and for the stated reason. Cluster 4 did not appear. The
+      only runtime-class subclassing in 1.8.2 is `extends EventEmitter`,
+      which is in the allow-list.
+
+  P2  The falsification clause fired as designed but on a branch it did
+      not enumerate. I listed cluster 2c, cluster 4, cluster 5 and an
+      UNCLASSIFIED tag as the things that would surprise me. A cluster-6
+      tag was not on the list, and it should have been: I had already
+      classified cluster 6 as "real but narrow, reach unmeasured", and
+      "unmeasured" is exactly the column a surprise comes out of. I
+      predicted from the two clusters I had evidence about and treated
+      silence in the rest as absence.
+
+WHY I MISSED IT, WHICH IS THE PART WORTH KEEPING:
+
+  I reasoned about WeakMap as a feature and asked which other FEATURES
+  1.8.2 had gained. truthy:union:keyobj is not another feature. It is
+  the second half of the same idiom:
+
+      const cached = privateKeyObjectCache.get(privKey);  // weakmap:intrinsic
+      if (cached) { return cached; }                      // truthy:union:keyobj
+
+  `get` on a WeakMap<Uint8Array, KeyObject> answers `KeyObject |
+  undefined`, so the truthiness test on the NEXT LINE is what reads the
+  lookup. Both refusals are in the same function (%m50.x25519Private-
+  KeyObject) and the census said so in the `fn` column, which I could
+  have read as the clue it was. A WeakMap whose values are handles
+  arrives WITH a truthiness test on those handles; closing one without
+  the other moves the wall down one line.
+
+  The general form: a "delta between versions" model finds new features
+  and is blind to the constructs those features DRAG IN. Reach is not
+  per-construct, it is per-idiom.
+
+AND THE THIRD REFUSAL WAS NOT A DELIBERATE ONE, WHICH HAD TO BE CHECKED:
+
+  Cluster 9 exists for refusals that prevent a WRONG ANSWER, and
+  truthy:union:jsval|dyn are in it. keyobj is not. There are TWO sets
+  and they differ by exactly the five crypto/key handles:
+
+    REF_TRUTHY_KINDS           may a BARE value be lowered at toBool?
+                               a policy question, owned by the frontend
+                               and ir/validate.ts
+    UNION_ARM_JS_OBJECT_KINDS  is this ARM's payload a JS object?
+                               a fact, and the only question a per-union
+                               truthiness helper asks
+
+  The C backend's unionTruthyHelper reads the SECOND and answers
+  `return true`. The LLVM site read the FIRST. So this was a one-token
+  drift between two lanes, not a correctness fence — and the comment
+  sitting on that very line already described both sets without noticing
+  it was reading the wrong one.

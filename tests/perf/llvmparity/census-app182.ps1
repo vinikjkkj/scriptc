@@ -19,6 +19,10 @@
 
 param(
   [switch]$SelfTest,
+  # The SHIPPING lane: no census, no recovery boundary, a real artifact.
+  # This is what settles "is zapo-js 1.8.2 on the LLVM tier" -- a census
+  # run deliberately yields nothing linkable, so it can never answer it.
+  [switch]$NoCensus,
   [string]$OutRoot = "<blocks>\llvmparity"
 )
 
@@ -27,7 +31,8 @@ $repo = Split-Path -Parent (Split-Path -Parent (Split-Path -Parent $PSScriptRoot
 Set-Location $repo
 . "$PSScriptRoot\env.ps1"
 
-$env:SCRIPTC_LLVM_CENSUS = "1"
+if ($NoCensus) { Remove-Item Env:\SCRIPTC_LLVM_CENSUS -ErrorAction SilentlyContinue }
+else { $env:SCRIPTC_LLVM_CENSUS = "1" }
 $cli = "packages\cli\dist\main.js"
 
 function Invoke-Probe {
@@ -62,7 +67,7 @@ if ($SelfTest) {
   exit 0
 }
 
-Write-Output "===== CENSUS: tests/perf/zapo-rest/app182 (zapo-js 1.8.2) ====="
+Write-Output ("===== " + $(if ($NoCensus) { "STRICT BUILD (shipping lane)" } else { "CENSUS" }) + ": tests/perf/zapo-rest/app182 (zapo-js 1.8.2) =====")
 # --provenance-sources is REQUIRED: @zapo-js/store-sqlite is only compilable
 # from its attested source. STRICT -- no --best-effort, which would defer
 # per-statement refusals into runtime throws and make the count a lie.
