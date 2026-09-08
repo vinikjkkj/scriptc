@@ -10935,6 +10935,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/7798-a-compound-array-element-assignment-through-a-field-chain-receiver.ts": {
+   "order": [
+    "<repo>/tests/corpus/7798-a-compound-array-element-assignment-through-a-field-chain-receiver.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/800-switch-basics.ts": {
    "order": [
     "<repo>/tests/corpus/800-switch-basics.ts"
@@ -11373,6 +11379,12 @@
   "<repo>/tests/diagnostics/a-cast-that-spells-a-record-over-a-value-that-is-not-one.ts": {
    "order": [
     "<repo>/tests/diagnostics/a-cast-that-spells-a-record-over-a-value-that-is-not-one.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/a-compound-array-element-write-through-an-accessor-receiver.ts": {
+   "order": [
+    "<repo>/tests/diagnostics/a-compound-array-element-write-through-an-accessor-receiver.ts"
    ],
    "diags": []
   },
