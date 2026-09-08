@@ -678,3 +678,114 @@ two significant figures, not to the access.
 30,184,222 output bytes from a 64-byte `malloc` grown by doubling, 2,008 of
 them joining 256–511-element arrays, max source **500 = members per group**.
 It is the group fan-out by construction and it is unaddressed.
+
+---
+
+## 14. `scr_arr_join` is 4.3 ms. The third attribution falls, and `send_group` is crypto after all
+
+Third census build (`2af9e858`, 1,025 s, 28,987,392 B), same workload, armed
+control then unarmed. `join-src`, `join-outbytes` and every `slice` counter
+reproduced the two earlier runs **exactly** — join is deterministic, as the
+precision caveat says.
+
+### The three candidate costs, separated
+
+**1. Per-element conversion: ZERO.** Every one of the 4,017 joins is
+`SCR_ELEM_STR`:
+
+    ARRCEN-JOINK str calls=4017 elems=1,014,169     (no f64, no bool)
+
+`scr_f64_to_str` is never called from join in this workload. The candidate is
+not small — it is **empty**.
+
+**2. Reallocation: real, bounded, and sharply bimodal.**
+
+    join-grows        total 16,064   mean 4.00/join   max 8
+    join-movedbytes   total 32,650,080  = 1.0817x output bytes
+
+      2,008 joins (256-511 elements, ~14,999 B out)  ->  8 growths each
+      2,009 joins (8 and 2 elements, 8 and 58 B out) ->  0 growths, ever
+
+2,008 x 8 = 16,064 exactly. **Half the joins never grow at all.** The
+`moved` figure is an *upper bound* — `realloc` may extend in place and then
+copy nothing; the instrument cannot see which happened, because that is the
+allocator's business. The independent growth model predicted 1.05-1.08x
+before the run; measured **1.0817x**.
+
+**3. Allocation churn: negligible.** 4,017 `malloc` + 16,064 `realloc` +
+4,017 `scr_str_alloc` + 4,017 `free` = **28,115** allocator operations, in a
+run that performs 528 million element accesses.
+
+**And a fourth the source only shows on reading:** `scr_str_new(buf, len)`
+copies the finished buffer into a fresh allocation and frees the buffer, so
+**every emitted byte is memcpy'd twice** — 60.4 MB of guaranteed copying over
+2,024,321 append memcpys whose mean piece is **14.9 bytes**.
+
+### Then it was measured, not estimated
+
+`join_replay.c` replays the exact measured shape — 2,008 x ~500 elements,
+1,004 x 8, 1,000 x 2 — through a verbatim `scr_join_append` and
+`scr_arr_join`'s own `scr_str_new`-and-free tail. It emits **30,172,052**
+bytes against the measured **30,184,222**, faithful to 0.04%.
+
+    the whole run's join work: 4.28, 4.42, 4.31 ms   (3 runs)
+
+| | |
+| --- | --- |
+| 7.3% of `send_group` would be | **845 ms** (this build) / **983 ms** (clientbench) |
+| measured replay | **4.3 ms** |
+| gap | **197x - 229x** |
+
+The replay is a **floor**: isolated, everything warm, none of the real
+program's cache pressure. But cache effects are worth single-digit multiples,
+not **229x**. **`scr_arr_join` at 7.3% is refuted.**
+
+### Three for three, and that is a finding about the instrument
+
+Every array attribution `cpuphase` made for `send_group` has now fallen to a
+count:
+
+| claim | fate |
+| --- | --- |
+| curve25519 field arithmetic 44.18% | wrong lane (section 10) |
+| `scr_arr_slice` **21.0%** | 4,015 calls moving **2 elements** (section 12) |
+| `scr_arr_join` **7.3%** | **4.3 ms against 845 ms claimed** (section 14) |
+
+Three refutations, three different mechanisms of being wrong, and the
+symbolisation hypothesis from section 12 is now much stronger: a `static` or
+inlined function has no symbol, so its samples land on the nearest one that
+does, and `scr_array.c`'s exported functions are exactly the kind of nearby
+symbol that collects them. **`cpuphase`'s symbol attribution for this binary
+should not be believed without a count.** That is worth more than any one of
+the three.
+
+### So where does `send_group` actually go? Back to crypto
+
+The one thing the census found that is *not* small is the typed-array element
+path: **528,299,181 accesses, 91.6% of them f64 on sixteen-element
+`Float64Array`** — the GF(2^255-19) limbs of `src/crypto/math/fe.ts`. At the
+~20 instructions per access measured for the arm, that is order **10 G
+instructions**, the right size for an 11.6-second phase in which nothing else
+measured exceeds single-digit milliseconds.
+
+So `send_group` **is** the crypto. The inherited "array work, **not** crypto"
+headline was wrong on both symbols it named, and the original 44.18% was
+directionally right about the domain while being unusable as a number. The one
+real lever there — the element accessors — was found and pulled by another
+block in `734015a8`.
+
+### What a fix would cost and risk, if anyone wants it anyway
+
+Presizing the buffer (a pre-pass summing `s->len`) would remove all 16,064
+reallocations and let the join build straight into the `ScrStr`, removing the
+second copy: **~30 MB of memcpy and 16 k reallocs**.
+
+- **It costs an extra full traversal of every joined array**, paid by *every*
+  caller. Here **2,009 of 4,017 joins never grow at all** and would pay the
+  pre-pass for nothing.
+- **`scr_arr_join` is shared by the whole corpus**, and changing its allocation
+  behaviour perturbs the allocator's block reuse — which `scr_string.c`'s
+  one-slot spare-string cache is deliberately tuned around.
+- **The ceiling is 4.3 ms of 11,577 ms — 0.037%.**
+
+**Not worth doing. I have not written it.**
