@@ -1,0 +1,39 @@
+# A/A DRY RUN through the whole pipeline, on a CONTENDED host (two other builds running).
+# Purpose: show the harness producing a null result on REAL data before it is trusted on A/B.
+# This is NOT the recorded floor -- that is taken in the quiet window, from a SEPARATE A/A log.
+# --degenerate-floor-ok is passed deliberately: floor and measurement are the same file here,
+# which the tool otherwise refuses because it would make every verdict a DRAW by construction.
+
+### bench-tag  : floor-dry
+### arms       : a:exe:np-strict b:exe:np-strict
+### reps       : 2
+### workload   : REDUCED smoke (contacts=20 groups=1 members=10 msgs=20)
+### started    : Mon Sep  7 22:06:04 ESAST 2026
+### host-load  : 12 cpus
+### target     : x86_64-windows-gnu
+### zig        : 0.16.0
+### cc         : zigcc
+### bench-node : <home>/AppData/Local/nvm/v25.9.0/node -> v25.9.0
+### PATH node  : <home>/AppData/Local/nvm/v25.9.0/node -> v25.9.0
+### arm a : exe  <blocks>/clientbench/lab/out/np-strict/messaging.bench.exe  28344832 bytes  md5 ad6ae80d250c993de416128c43096b2e
+### arm b : exe  <blocks>/clientbench/lab/out/np-strict/messaging.bench.exe  28344832 bytes  md5 ad6ae80d250c993de416128c43096b2e
+### finished   : Mon Sep  7 22:10:07 ESAST 2026
+
+base arm: a   arms: a, b   reps: 2
+floor: A/A over 2 rep(s) from out/bench-floor-dry.txt
+       widest metric wall:SEND 1:1 +/- 10.44%
+
+=== b / a ===
+  metric                         median      [min .. max]   verdict
+  peakRSS                        0.9956   [0.9794 .. 1.0118]   DRAW (inside floor +/-2.06%)
+  wall:RECV 1:1                  0.9761   [0.9148 .. 1.0373]   DRAW (inside floor +/-8.52%)
+  wall:RECV group                0.9967   [0.9957 .. 0.9976]   DRAW (inside floor +/-0.43%)
+  wall:SEND 1:1                  0.9556   [0.8956 .. 1.0156]   DRAW (inside floor +/-10.44%)
+  wall:SEND group                0.9631   [0.8981 .. 1.0280]   DRAW (inside floor +/-10.19%)
+
+# The guard, fired:
+
+REFUSING: --floor is the same file as the measurement log.
+  A self-referential floor makes every metric a DRAW by construction.
+  Take a separate A/A run (the same binary as both arms) and pass that.
+  --degenerate-floor-ok overrides, for inspecting an A/A log's own spread.

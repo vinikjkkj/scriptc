@@ -54,3 +54,24 @@ BINARY fences (.exe/.o/.a): 10 occurrence(s) over 1 file(s)
 out/np-llvm/messaging.bench.exe  27048960 bytes
   quickjs 0   ScrDyn 0   JS_NewRuntime 0   JS_Eval 0   __island_eval 0
   discriminating: quickjs/ScrDyn — the other three read 0 even under --dynamic
+
+# --npm-static argo-codec build
+files seen by extension: .c=15 .exe=1 .pdb=1 .scrh=1
+TEXT fences (.c/.h/.scrh/.ll): 3811 occurrence(s) over 16 file(s)
+    SC9004  x3687
+    SC9002  x92
+    SC1090  x11
+    SC1100  x8
+    SC9003  x7
+    SC2020  x6
+BINARY fences (.exe/.o/.a): 32 occurrence(s) over 1 file(s)
+    SC2020  x10
+    SC9003  x6
+    SC1090  x6
+    SC1100  x5
+    SC9004  x3
+    SC9002  x2
+
+out/np-argo/messaging.bench.exe  28395008 bytes
+  quickjs 0   ScrDyn 0   JS_NewRuntime 0   JS_Eval 0   __island_eval 0
+  discriminating: quickjs/ScrDyn — the other three read 0 even under --dynamic

@@ -1,0 +1,1292 @@
+### bench-tag  : floor2
+### arms       : a:exe:bb-c b:exe:bb-c
+### reps       : 4
+### workload   : shipped-default (1000x2 contacts, 4x500 groups, 1000 msgs/scenario)
+### started    : Mon Sep  7 22:50:06 ESAST 2026
+### host-load  : 12 cpus
+### residual   : 6 foreign node/zig/tsc/vitest process(es)
+### residual   :   pid 3212  node.exe  cpu 6.7 s  "C:\nvm4w\nodejs\\node.exe"  "C:\nvm4w\nodejs\node_modules\npm\bin\npx
+### residual   :   pid 14504  node.exe  cpu 0.5 s  C:\nvm4w\nodejs\node.exe <home>\AppData\Local\npm-cache\_np
+### residual   :   pid 14916  node.exe  cpu 0.5 s  C:\nvm4w\nodejs\node.exe <home>\AppData\Roaming\npm/node_mo
+### residual   :   pid 35948  node.exe  cpu 0.2 s  C:\nvm4w\nodejs\node.exe <home>/Documents/Programacao/uimcp
+### residual   :   pid 27264  node.exe  cpu 0.3 s  C:\nvm4w\nodejs\node.exe --require <home>\Documents\Program
+### residual   :   pid 27568  node.exe  cpu 22.3 s  C:\nvm4w\nodejs\node.exe --require <home>\Documents\Program
+### target     : x86_64-windows-gnu
+### zig        : 0.16.0
+### cc         : zigcc
+### bench-node : <home>/AppData/Local/nvm/v25.9.0/node -> v25.9.0
+### PATH node  : <home>/AppData/Local/nvm/v25.9.0/node -> v25.9.0
+### arm a : exe  <blocks>/clientbench/lab/out/bb-c/messaging.bench.exe  28345856 bytes  md5 6832f2ef114cfd665748412ddd9ffb39
+### arm b : exe  <blocks>/clientbench/lab/out/bb-c/messaging.bench.exe  28345856 bytes  md5 6832f2ef114cfd665748412ddd9ffb39
+===ARM a REP 1 22:50:07 lane=exe src=bb-c pos=1
+(running fake server in separate process)
+zapo-js messaging bench
+────────────────────────
+  contacts          : 1000
+  devices/contact   : 2
+  groups            : 4
+  members/group     : 500
+  messages/scenario : 1000
+  scenarios         : send_1to1, recv_1to1, send_group, recv_group
+  store             : memory
+  --expose-gc       : no
+
+paired in 142.35 ms
+built 1000 contacts (2 dev each) in 2.58 s, dispenser misses: 0
+built 4 groups × 500 members in 2.49 s, dispenser misses: 0
+
+[phase-begin] send_1to1
+[phase-end] send_1to1
+──[ SEND 1:1 ]──────────────────────────────
+  messages          : 1000
+  elapsed           : 2.26 s
+  throughput        : 441.8 msg/s
+  avg / msg         : 2.26 ms
+  CPU time          : n/a (see tests/perf/cpuphase -- measured externally)
+  CPU %             : n/a
+  RSS before        : 29.23 MiB
+  RSS after         : 132.72 MiB
+  RSS delta         : 103.49 MiB
+  heap delta        : n/a (no V8 heap in a compiled binary; RSS above is comparable)
+
+[phase-begin] recv_1to1
+[phase-end] recv_1to1
+──[ RECV 1:1 ]──────────────────────────────
+  messages          : 1000
+  elapsed           : 1.14 s
+  throughput        : 878.6 msg/s
+  avg / msg         : 1.14 ms
+  CPU time          : n/a (see tests/perf/cpuphase -- measured externally)
+  CPU %             : n/a
+  RSS before        : 132.72 MiB
+  RSS after         : 95.34 MiB
+  RSS delta         : 0.00 MiB
+  heap delta        : n/a (no V8 heap in a compiled binary; RSS above is comparable)
+
+[phase-begin] send_group
+[phase-end] send_group
+──[ SEND group ]──────────────────────────────
+  messages          : 1000
+  elapsed           : 5.79 s
+  throughput        : 172.6 msg/s
+  avg / msg         : 5.79 ms
+  CPU time          : n/a (see tests/perf/cpuphase -- measured externally)
+  CPU %             : n/a
+  RSS before        : 90.70 MiB
+  RSS after         : 98.94 MiB
+  RSS delta         : 8.24 MiB
+  heap delta        : n/a (no V8 heap in a compiled binary; RSS above is comparable)
+
+[phase-begin] recv_group
+[phase-end] recv_group
+──[ RECV group ]──────────────────────────────
+  messages          : 1000
+  elapsed           : 933.82 ms
+  throughput        : 1070.9 msg/s
+  avg / msg         : 0.93 ms
+  CPU time          : n/a (see tests/perf/cpuphase -- measured externally)
+  CPU %             : n/a
+  RSS before        : 99.15 MiB
+  RSS after         : 99.45 MiB
+  RSS delta         : 0.30 MiB
+  heap delta        : n/a (no V8 heap in a compiled binary; RSS above is comparable)
+
+[
+  {
+    "name": "SEND 1:1",
+    "messages": 1000,
+    "elapsedMs": 2263.5291000008583,
+    "throughputMsgsPerSec": 441.7880026369534,
+    "avgMsPerMsg": 2.2635291000008584,
+    "cpuTimeMs": 0,
+    "cpuPercent": 0,
+    "rssDeltaBytes": 108519424,
+    "heapDeltaBytes": 0
+  },
+  {
+    "name": "RECV 1:1",
+    "messages": 1000,
+    "elapsedMs": 1138.2358999997377,
+    "throughputMsgsPerSec": 878.552503923159,
+    "avgMsPerMsg": 1.1382358999997377,
+    "cpuTimeMs": 0,
+    "cpuPercent": 0,
+    "rssDeltaBytes": 0,
+    "heapDeltaBytes": 0
+  },
+  {
+    "name": "SEND group",
+    "messages": 1000,
+    "elapsedMs": 5792.690700009465,
+    "throughputMsgsPerSec": 172.63134729399,
+    "avgMsPerMsg": 5.792690700009465,
+    "cpuTimeMs": 0,
+    "cpuPercent": 0,
+    "rssDeltaBytes": 8642560,
+    "heapDeltaBytes": 0
+  },
+  {
+    "name": "RECV group",
+    "messages": 1000,
+    "elapsedMs": 933.8180000036955,
+    "throughputMsgsPerSec": 1070.8724826422736,
+    "avgMsPerMsg": 0.9338180000036955,
+    "cpuTimeMs": 0,
+    "cpuPercent": 0,
+    "rssDeltaBytes": 319488,
+    "heapDeltaBytes": 0
+  }
+]
+
+[cpuphase] phase             wall_ms    Mcycles   user_ms   kern_ms    cpu_ms    cpu%    ioRead   ioWrite    ioOther  pageFaults
+[cpuphase] send_1to1            2264     8120.1    2062.5     187.5    2250.0   99.4%         0        12          5       53461
+[cpuphase] recv_1to1            1138     3568.8     718.8     281.2    1000.0   87.8%         0         9        203       14784
+[cpuphase] send_group           7675    27533.1    6984.4     703.1    7687.5  100.2%         0         9         34       73483
+[cpuphase] recv_group            949     1838.7     281.2     296.9     578.1   60.9%         0        11       2105         136
+
+[cpumem] samples=3812  firstRSS=1.98 MiB  peakRSS=160.82 MiB  finalRSS=47.16 MiB  peakWS(os)=161.19 MiB  totalFaults=150086
+[cpumem] startup trajectory (ms -> RSS MiB, faults):
+[cpumem]        0      1.98           0
+[cpumem]       64     18.61        4294
+[cpumem]      126     18.61        4294
+[cpumem]      188     18.61        4294
+[cpumem]      249     18.61        4294
+[cpumem]      311     18.61        4294
+[cpumem]      372     18.61        4294
+[cpumem]      434     18.66        4308
+[cpumem]      497     21.65        5111
+[cpumem]      559     22.52        5334
+[cpumem]      623     24.71        6243
+[cpumem]      687     24.89        6287
+[cpumem]      750     25.10        6503
+[cpumem]      811     25.15        6515
+[cpumem]      875     25.20        6529
+[cpumem]      938     25.25        6540
+[cpumem]     1000     25.29        6550
+[cpumem]     1063     25.32        6560
+[cpumem]     1126     25.37        6572
+[cpumem]     1188     25.39        6578
+[cpumem]     1249     25.42        6584
+[cpumem]     1314     25.45        6593
+[cpumem]     1376     25.46        6596
+[cpumem]     1437     25.49        6603
+[cpumem]     1499     25.50        6606
+[cpumem] phase            rssBegin     rssMax     rssEnd       faults
+[cpumem] send_1to1           35.11     136.43     136.43        53461
+[cpumem] recv_1to1          133.70     160.82      95.77        14784
+[cpumem] send_group          95.23     145.13     103.75        73483
+[cpumem] recv_group          99.14      99.45      99.45          136
+===ARMEXIT a REP 1 rc=0
+===ARM b REP 1 22:51:07 lane=exe src=bb-c pos=2
+(running fake server in separate process)
+zapo-js messaging bench
+────────────────────────
+  contacts          : 1000
+  devices/contact   : 2
+  groups            : 4
+  members/group     : 500
+  messages/scenario : 1000
+  scenarios         : send_1to1, recv_1to1, send_group, recv_group
+  store             : memory
+  --expose-gc       : no
+
+paired in 137.92 ms
+built 1000 contacts (2 dev each) in 2.56 s, dispenser misses: 0
+built 4 groups × 500 members in 2.49 s, dispenser misses: 0
+
+[phase-begin] send_1to1
+[phase-end] send_1to1
+──[ SEND 1:1 ]──────────────────────────────
+  messages          : 1000
+  elapsed           : 2.25 s
+  throughput        : 443.6 msg/s
+  avg / msg         : 2.25 ms
+  CPU time          : n/a (see tests/perf/cpuphase -- measured externally)
+  CPU %             : n/a
+  RSS before        : 29.35 MiB
+  RSS after         : 136.78 MiB
+  RSS delta         : 107.43 MiB
+  heap delta        : n/a (no V8 heap in a compiled binary; RSS above is comparable)
+
+[phase-begin] recv_1to1
+[phase-end] recv_1to1
+──[ RECV 1:1 ]──────────────────────────────
+  messages          : 1000
+  elapsed           : 1.13 s
+  throughput        : 884.3 msg/s
+  avg / msg         : 1.13 ms
+  CPU time          : n/a (see tests/perf/cpuphase -- measured externally)
+  CPU %             : n/a
+  RSS before        : 136.78 MiB
+  RSS after         : 94.62 MiB
+  RSS delta         : 0.00 MiB
+  heap delta        : n/a (no V8 heap in a compiled binary; RSS above is comparable)
+
+[phase-begin] send_group
+[phase-end] send_group
+──[ SEND group ]──────────────────────────────
+  messages          : 1000
+  elapsed           : 5.78 s
+  throughput        : 173.0 msg/s
+  avg / msg         : 5.78 ms
+  CPU time          : n/a (see tests/perf/cpuphase -- measured externally)
+  CPU %             : n/a
+  RSS before        : 90.14 MiB
+  RSS after         : 97.99 MiB
+  RSS delta         : 7.84 MiB
+  heap delta        : n/a (no V8 heap in a compiled binary; RSS above is comparable)
+
+[phase-begin] recv_group
+[phase-end] recv_group
+──[ RECV group ]──────────────────────────────
+  messages          : 1000
+  elapsed           : 931.15 ms
+  throughput        : 1073.9 msg/s
+  avg / msg         : 0.93 ms
+  CPU time          : n/a (see tests/perf/cpuphase -- measured externally)
+  CPU %             : n/a
+  RSS before        : 98.22 MiB
+  RSS after         : 98.55 MiB
+  RSS delta         : 0.34 MiB
+  heap delta        : n/a (no V8 heap in a compiled binary; RSS above is comparable)
+
+[
+  {
+    "name": "SEND 1:1",
+    "messages": 1000,
+    "elapsedMs": 2254.129200011492,
+    "throughputMsgsPerSec": 443.63029412639787,
+    "avgMsPerMsg": 2.2541292000114916,
+    "cpuTimeMs": 0,
+    "cpuPercent": 0,
+    "rssDeltaBytes": 112652288,
+    "heapDeltaBytes": 0
+  },
+  {
+    "name": "RECV 1:1",
+    "messages": 1000,
+    "elapsedMs": 1130.8388000130653,
+    "throughputMsgsPerSec": 884.2993360224697,
+    "avgMsPerMsg": 1.1308388000130654,
+    "cpuTimeMs": 0,
+    "cpuPercent": 0,
+    "rssDeltaBytes": 0,
+    "heapDeltaBytes": 0
+  },
+  {
+    "name": "SEND group",
+    "messages": 1000,
+    "elapsedMs": 5779.655900001526,
+    "throughputMsgsPerSec": 173.02068104084466,
+    "avgMsPerMsg": 5.779655900001526,
+    "cpuTimeMs": 0,
+    "cpuPercent": 0,
+    "rssDeltaBytes": 8224768,
+    "heapDeltaBytes": 0
+  },
+  {
+    "name": "RECV group",
+    "messages": 1000,
+    "elapsedMs": 931.1467999964952,
+    "throughputMsgsPerSec": 1073.9445165936927,
+    "avgMsPerMsg": 0.9311467999964953,
+    "cpuTimeMs": 0,
+    "cpuPercent": 0,
+    "rssDeltaBytes": 352256,
+    "heapDeltaBytes": 0
+  }
+]
+
+[cpuphase] phase             wall_ms    Mcycles   user_ms   kern_ms    cpu_ms    cpu%    ioRead   ioWrite    ioOther  pageFaults
+[cpuphase] send_1to1            2254     8086.9    2000.0     250.0    2250.0   99.8%         0        12          5       56281
+[cpuphase] recv_1to1            1131     3696.0     796.9     234.4    1031.2   91.2%         0        12        152       16932
+[cpuphase] send_group           7665    27502.4    7062.5     562.5    7625.0   99.5%         0        13         26       74495
+[cpuphase] recv_group            947     1845.6     281.2     203.1     484.4   51.2%         0        13       2130         150
+
+[cpumem] samples=3813  firstRSS=1.98 MiB  peakRSS=169.75 MiB  finalRSS=37.25 MiB  peakWS(os)=169.88 MiB  totalFaults=156126
+[cpumem] startup trajectory (ms -> RSS MiB, faults):
+[cpumem]        0      1.98           0
+[cpumem]       52     18.66        4309
+[cpumem]      114     18.66        4309
+[cpumem]      175     18.66        4309
+[cpumem]      236     18.66        4309
+[cpumem]      298     18.66        4309
+[cpumem]      359     18.66        4309
+[cpumem]      420     18.66        4309
+[cpumem]      483     21.34        5030
+[cpumem]      546     22.09        5224
+[cpumem]      610     24.40        6164
+[cpumem]      673     24.47        6182
+[cpumem]      738     24.79        6427
+[cpumem]      799     24.85        6442
+[cpumem]      861     24.92        6461
+[cpumem]      923     24.97        6474
+[cpumem]      987     25.02        6486
+[cpumem]     1049     25.07        6498
+[cpumem]     1113     25.12        6513
+[cpumem]     1176     25.16        6521
+[cpumem]     1239     25.18        6527
+[cpumem]     1300     25.21        6536
+[cpumem]     1362     25.23        6540
+[cpumem]     1424     25.26        6548
+[cpumem]     1485     25.60        6635
+[cpumem] phase            rssBegin     rssMax     rssEnd       faults
+[cpumem] send_1to1           35.38     140.25     140.25        56281
+[cpumem] recv_1to1          142.45     169.75      95.64        16932
+[cpumem] send_group          94.51     144.36     105.48        74495
+[cpumem] recv_group          97.97      98.55      98.55          150
+===ARMEXIT b REP 1 rc=0
+===ARM b REP 2 22:52:07 lane=exe src=bb-c pos=1
+(running fake server in separate process)
+zapo-js messaging bench
+────────────────────────
+  contacts          : 1000
+  devices/contact   : 2
+  groups            : 4
+  members/group     : 500
+  messages/scenario : 1000
+  scenarios         : send_1to1, recv_1to1, send_group, recv_group
+  store             : memory
+  --expose-gc       : no
+
+paired in 139.34 ms
+built 1000 contacts (2 dev each) in 2.55 s, dispenser misses: 0
+built 4 groups × 500 members in 2.48 s, dispenser misses: 0
+
+[phase-begin] send_1to1
+[phase-end] send_1to1
+──[ SEND 1:1 ]──────────────────────────────
+  messages          : 1000
+  elapsed           : 2.27 s
+  throughput        : 440.6 msg/s
+  avg / msg         : 2.27 ms
+  CPU time          : n/a (see tests/perf/cpuphase -- measured externally)
+  CPU %             : n/a
+  RSS before        : 29.41 MiB
+  RSS after         : 135.29 MiB
+  RSS delta         : 105.88 MiB
+  heap delta        : n/a (no V8 heap in a compiled binary; RSS above is comparable)
+
+[phase-begin] recv_1to1
+[phase-end] recv_1to1
+──[ RECV 1:1 ]──────────────────────────────
+  messages          : 1000
+  elapsed           : 1.14 s
+  throughput        : 875.9 msg/s
+  avg / msg         : 1.14 ms
+  CPU time          : n/a (see tests/perf/cpuphase -- measured externally)
+  CPU %             : n/a
+  RSS before        : 135.30 MiB
+  RSS after         : 97.59 MiB
+  RSS delta         : 0.00 MiB
+  heap delta        : n/a (no V8 heap in a compiled binary; RSS above is comparable)
+
+[phase-begin] send_group
+[phase-end] send_group
+──[ SEND group ]──────────────────────────────
+  messages          : 1000
+  elapsed           : 6.14 s
+  throughput        : 163.0 msg/s
+  avg / msg         : 6.14 ms
+  CPU time          : n/a (see tests/perf/cpuphase -- measured externally)
+  CPU %             : n/a
+  RSS before        : 90.52 MiB
+  RSS after         : 99.14 MiB
+  RSS delta         : 8.62 MiB
+  heap delta        : n/a (no V8 heap in a compiled binary; RSS above is comparable)
+
+[phase-begin] recv_group
+[phase-end] recv_group
+──[ RECV group ]──────────────────────────────
+  messages          : 1000
+  elapsed           : 915.10 ms
+  throughput        : 1092.8 msg/s
+  avg / msg         : 0.92 ms
+  CPU time          : n/a (see tests/perf/cpuphase -- measured externally)
+  CPU %             : n/a
+  RSS before        : 99.37 MiB
+  RSS after         : 99.70 MiB
+  RSS delta         : 0.33 MiB
+  heap delta        : n/a (no V8 heap in a compiled binary; RSS above is comparable)
+
+[
+  {
+    "name": "SEND 1:1",
+    "messages": 1000,
+    "elapsedMs": 2269.7685000002384,
+    "throughputMsgsPerSec": 440.5735651014167,
+    "avgMsPerMsg": 2.2697685000002386,
+    "cpuTimeMs": 0,
+    "cpuPercent": 0,
+    "rssDeltaBytes": 111026176,
+    "heapDeltaBytes": 0
+  },
+  {
+    "name": "RECV 1:1",
+    "messages": 1000,
+    "elapsedMs": 1141.6190999895334,
+    "throughputMsgsPerSec": 875.9489045069132,
+    "avgMsPerMsg": 1.1416190999895335,
+    "cpuTimeMs": 0,
+    "cpuPercent": 0,
+    "rssDeltaBytes": 0,
+    "heapDeltaBytes": 0
+  },
+  {
+    "name": "SEND group",
+    "messages": 1000,
+    "elapsedMs": 6135.686200007796,
+    "throughputMsgsPerSec": 162.9809555773451,
+    "avgMsPerMsg": 6.135686200007796,
+    "cpuTimeMs": 0,
+    "cpuPercent": 0,
+    "rssDeltaBytes": 9039872,
+    "heapDeltaBytes": 0
+  },
+  {
+    "name": "RECV group",
+    "messages": 1000,
+    "elapsedMs": 915.1000000089407,
+    "throughputMsgsPerSec": 1092.7767457001746,
+    "avgMsPerMsg": 0.9151000000089407,
+    "cpuTimeMs": 0,
+    "cpuPercent": 0,
+    "rssDeltaBytes": 344064,
+    "heapDeltaBytes": 0
+  }
+]
+
+[cpuphase] phase             wall_ms    Mcycles   user_ms   kern_ms    cpu_ms    cpu%    ioRead   ioWrite    ioOther  pageFaults
+[cpuphase] send_1to1            2270     8141.5    2015.6     250.0    2265.6   99.8%         0         9          5       55134
+[cpuphase] recv_1to1            1142     3667.7     765.6     265.6    1031.2   90.3%         0         6        168       16625
+[cpuphase] send_group           8069    28902.4    7531.2     468.8    8000.0   99.1%         0         8         43       74861
+[cpuphase] recv_group            932     1862.2     312.5     265.6     578.1   62.0%         0         9       2039         146
+
+[cpumem] samples=3833  firstRSS=1.98 MiB  peakRSS=167.84 MiB  finalRSS=46.30 MiB  peakWS(os)=167.87 MiB  totalFaults=155026
+[cpumem] startup trajectory (ms -> RSS MiB, faults):
+[cpumem]        0      1.98           0
+[cpumem]       50     18.62        4298
+[cpumem]      112     18.62        4298
+[cpumem]      174     18.62        4298
+[cpumem]      235     18.62        4298
+[cpumem]      296     18.62        4298
+[cpumem]      358     18.62        4298
+[cpumem]      420     19.14        4432
+[cpumem]      481     21.37        5038
+[cpumem]      544     22.44        5313
+[cpumem]      607     23.84        5675
+[cpumem]      670     24.74        6252
+[cpumem]      733     25.06        6513
+[cpumem]      796     25.11        6525
+[cpumem]      857     25.18        6542
+[cpumem]      921     25.21        6550
+[cpumem]      982     25.25        6561
+[cpumem]     1045     25.32        6578
+[cpumem]     1110     25.36        6589
+[cpumem]     1171     25.41        6602
+[cpumem]     1233     25.43        6607
+[cpumem]     1297     25.46        6615
+[cpumem]     1359     25.48        6620
+[cpumem]     1422     25.50        6626
+[cpumem]     1484     25.52        6630
+[cpumem] phase            rssBegin     rssMax     rssEnd       faults
+[cpumem] send_1to1           39.02     138.85     138.85        55134
+[cpumem] recv_1to1          141.47     167.84      98.52        16625
+[cpumem] send_group          97.49     145.54     106.16        74861
+[cpumem] recv_group          99.12      99.68      99.68          146
+===ARMEXIT b REP 2 rc=0
+===ARM a REP 2 22:53:08 lane=exe src=bb-c pos=2
+(running fake server in separate process)
+zapo-js messaging bench
+────────────────────────
+  contacts          : 1000
+  devices/contact   : 2
+  groups            : 4
+  members/group     : 500
+  messages/scenario : 1000
+  scenarios         : send_1to1, recv_1to1, send_group, recv_group
+  store             : memory
+  --expose-gc       : no
+
+paired in 146.68 ms
+built 1000 contacts (2 dev each) in 2.55 s, dispenser misses: 0
+built 4 groups × 500 members in 2.50 s, dispenser misses: 0
+
+[phase-begin] send_1to1
+[phase-end] send_1to1
+──[ SEND 1:1 ]──────────────────────────────
+  messages          : 1000
+  elapsed           : 2.27 s
+  throughput        : 439.7 msg/s
+  avg / msg         : 2.27 ms
+  CPU time          : n/a (see tests/perf/cpuphase -- measured externally)
+  CPU %             : n/a
+  RSS before        : 29.36 MiB
+  RSS after         : 133.15 MiB
+  RSS delta         : 103.80 MiB
+  heap delta        : n/a (no V8 heap in a compiled binary; RSS above is comparable)
+
+[phase-begin] recv_1to1
+[phase-end] recv_1to1
+──[ RECV 1:1 ]──────────────────────────────
+  messages          : 1000
+  elapsed           : 1.17 s
+  throughput        : 858.1 msg/s
+  avg / msg         : 1.17 ms
+  CPU time          : n/a (see tests/perf/cpuphase -- measured externally)
+  CPU %             : n/a
+  RSS before        : 133.15 MiB
+  RSS after         : 96.82 MiB
+  RSS delta         : 0.00 MiB
+  heap delta        : n/a (no V8 heap in a compiled binary; RSS above is comparable)
+
+[phase-begin] send_group
+[phase-end] send_group
+──[ SEND group ]──────────────────────────────
+  messages          : 1000
+  elapsed           : 5.85 s
+  throughput        : 171.0 msg/s
+  avg / msg         : 5.85 ms
+  CPU time          : n/a (see tests/perf/cpuphase -- measured externally)
+  CPU %             : n/a
+  RSS before        : 93.19 MiB
+  RSS after         : 99.14 MiB
+  RSS delta         : 5.95 MiB
+  heap delta        : n/a (no V8 heap in a compiled binary; RSS above is comparable)
+
+[phase-begin] recv_group
+[phase-end] recv_group
+──[ RECV group ]──────────────────────────────
+  messages          : 1000
+  elapsed           : 931.60 ms
+  throughput        : 1073.4 msg/s
+  avg / msg         : 0.93 ms
+  CPU time          : n/a (see tests/perf/cpuphase -- measured externally)
+  CPU %             : n/a
+  RSS before        : 99.36 MiB
+  RSS after         : 99.73 MiB
+  RSS delta         : 0.37 MiB
+  heap delta        : n/a (no V8 heap in a compiled binary; RSS above is comparable)
+
+[
+  {
+    "name": "SEND 1:1",
+    "messages": 1000,
+    "elapsedMs": 2274.039800003171,
+    "throughputMsgsPerSec": 439.74604138353493,
+    "avgMsPerMsg": 2.274039800003171,
+    "cpuTimeMs": 0,
+    "cpuPercent": 0,
+    "rssDeltaBytes": 108838912,
+    "heapDeltaBytes": 0
+  },
+  {
+    "name": "RECV 1:1",
+    "messages": 1000,
+    "elapsedMs": 1165.3069999963045,
+    "throughputMsgsPerSec": 858.1429614712442,
+    "avgMsPerMsg": 1.1653069999963046,
+    "cpuTimeMs": 0,
+    "cpuPercent": 0,
+    "rssDeltaBytes": 0,
+    "heapDeltaBytes": 0
+  },
+  {
+    "name": "SEND group",
+    "messages": 1000,
+    "elapsedMs": 5848.211799994111,
+    "throughputMsgsPerSec": 170.99243909069898,
+    "avgMsPerMsg": 5.848211799994111,
+    "cpuTimeMs": 0,
+    "cpuPercent": 0,
+    "rssDeltaBytes": 6242304,
+    "heapDeltaBytes": 0
+  },
+  {
+    "name": "RECV group",
+    "messages": 1000,
+    "elapsedMs": 931.5974000096321,
+    "throughputMsgsPerSec": 1073.425065365855,
+    "avgMsPerMsg": 0.9315974000096321,
+    "cpuTimeMs": 0,
+    "cpuPercent": 0,
+    "rssDeltaBytes": 385024,
+    "heapDeltaBytes": 0
+  }
+]
+
+[cpuphase] phase             wall_ms    Mcycles   user_ms   kern_ms    cpu_ms    cpu%    ioRead   ioWrite    ioOther  pageFaults
+[cpuphase] send_1to1            2274     8160.1    2031.2     234.4    2265.6   99.6%         0        10          5       53755
+[cpuphase] recv_1to1            1166     3662.7     812.5     203.1    1015.6   87.1%         0         8        205       15938
+[cpuphase] send_group           7771    27788.7    6968.8     734.4    7703.1   99.1%         0         8         63       74074
+[cpuphase] recv_group            947     1847.4     359.4     140.6     500.0   52.8%         0         8       2071         154
+
+[cpumem] samples=3813  firstRSS=1.98 MiB  peakRSS=163.77 MiB  finalRSS=47.04 MiB  peakWS(os)=163.84 MiB  totalFaults=152160
+[cpumem] startup trajectory (ms -> RSS MiB, faults):
+[cpumem]        0      1.98           0
+[cpumem]       54     18.63        4300
+[cpumem]      115     18.63        4300
+[cpumem]      177     18.63        4300
+[cpumem]      239     18.63        4300
+[cpumem]      301     18.63        4300
+[cpumem]      362     18.63        4300
+[cpumem]      424     18.63        4300
+[cpumem]      487     21.29        5017
+[cpumem]      550     21.98        5196
+[cpumem]      613     24.16        5757
+[cpumem]      676     24.44        6174
+[cpumem]      740     24.73        6421
+[cpumem]      801     24.79        6436
+[cpumem]      865     24.87        6455
+[cpumem]      927     24.91        6466
+[cpumem]      990     24.96        6480
+[cpumem]     1052     25.00        6489
+[cpumem]     1116     25.05        6502
+[cpumem]     1177     25.10        6515
+[cpumem]     1240     25.12        6520
+[cpumem]     1304     25.16        6529
+[cpumem]     1366     25.18        6534
+[cpumem]     1429     25.53        6625
+[cpumem]     1491     25.55        6629
+[cpumem] phase            rssBegin     rssMax     rssEnd       faults
+[cpumem] send_1to1           39.25     136.72     136.72        53755
+[cpumem] recv_1to1          137.57     163.77      97.61        15938
+[cpumem] send_group          96.82     145.61     106.42        74074
+[cpumem] recv_group          99.13      99.73      99.73          154
+===ARMEXIT a REP 2 rc=0
+===ARM a REP 3 22:54:08 lane=exe src=bb-c pos=1
+(running fake server in separate process)
+zapo-js messaging bench
+────────────────────────
+  contacts          : 1000
+  devices/contact   : 2
+  groups            : 4
+  members/group     : 500
+  messages/scenario : 1000
+  scenarios         : send_1to1, recv_1to1, send_group, recv_group
+  store             : memory
+  --expose-gc       : no
+
+paired in 139.34 ms
+built 1000 contacts (2 dev each) in 2.54 s, dispenser misses: 0
+built 4 groups × 500 members in 2.51 s, dispenser misses: 0
+
+[phase-begin] send_1to1
+[phase-end] send_1to1
+──[ SEND 1:1 ]──────────────────────────────
+  messages          : 1000
+  elapsed           : 2.29 s
+  throughput        : 435.8 msg/s
+  avg / msg         : 2.29 ms
+  CPU time          : n/a (see tests/perf/cpuphase -- measured externally)
+  CPU %             : n/a
+  RSS before        : 29.35 MiB
+  RSS after         : 149.38 MiB
+  RSS delta         : 120.03 MiB
+  heap delta        : n/a (no V8 heap in a compiled binary; RSS above is comparable)
+
+[phase-begin] recv_1to1
+[phase-end] recv_1to1
+──[ RECV 1:1 ]──────────────────────────────
+  messages          : 1000
+  elapsed           : 1.21 s
+  throughput        : 828.5 msg/s
+  avg / msg         : 1.21 ms
+  CPU time          : n/a (see tests/perf/cpuphase -- measured externally)
+  CPU %             : n/a
+  RSS before        : 149.38 MiB
+  RSS after         : 97.26 MiB
+  RSS delta         : 0.00 MiB
+  heap delta        : n/a (no V8 heap in a compiled binary; RSS above is comparable)
+
+[phase-begin] send_group
+[phase-end] send_group
+──[ SEND group ]──────────────────────────────
+  messages          : 1000
+  elapsed           : 5.83 s
+  throughput        : 171.6 msg/s
+  avg / msg         : 5.83 ms
+  CPU time          : n/a (see tests/perf/cpuphase -- measured externally)
+  CPU %             : n/a
+  RSS before        : 90.87 MiB
+  RSS after         : 98.89 MiB
+  RSS delta         : 8.02 MiB
+  heap delta        : n/a (no V8 heap in a compiled binary; RSS above is comparable)
+
+[phase-begin] recv_group
+[phase-end] recv_group
+──[ RECV group ]──────────────────────────────
+  messages          : 1000
+  elapsed           : 907.05 ms
+  throughput        : 1102.5 msg/s
+  avg / msg         : 0.91 ms
+  CPU time          : n/a (see tests/perf/cpuphase -- measured externally)
+  CPU %             : n/a
+  RSS before        : 99.12 MiB
+  RSS after         : 99.42 MiB
+  RSS delta         : 0.30 MiB
+  heap delta        : n/a (no V8 heap in a compiled binary; RSS above is comparable)
+
+[
+  {
+    "name": "SEND 1:1",
+    "messages": 1000,
+    "elapsedMs": 2294.5597999989986,
+    "throughputMsgsPerSec": 435.8134401206002,
+    "avgMsPerMsg": 2.2945597999989986,
+    "cpuTimeMs": 0,
+    "cpuPercent": 0,
+    "rssDeltaBytes": 125861888,
+    "heapDeltaBytes": 0
+  },
+  {
+    "name": "RECV 1:1",
+    "messages": 1000,
+    "elapsedMs": 1207.0653000026941,
+    "throughputMsgsPerSec": 828.4555939084389,
+    "avgMsPerMsg": 1.207065300002694,
+    "cpuTimeMs": 0,
+    "cpuPercent": 0,
+    "rssDeltaBytes": 0,
+    "heapDeltaBytes": 0
+  },
+  {
+    "name": "SEND group",
+    "messages": 1000,
+    "elapsedMs": 5827.516599997878,
+    "throughputMsgsPerSec": 171.59968278775287,
+    "avgMsPerMsg": 5.827516599997878,
+    "cpuTimeMs": 0,
+    "cpuPercent": 0,
+    "rssDeltaBytes": 8409088,
+    "heapDeltaBytes": 0
+  },
+  {
+    "name": "RECV group",
+    "messages": 1000,
+    "elapsedMs": 907.0533000081778,
+    "throughputMsgsPerSec": 1102.471045517374,
+    "avgMsPerMsg": 0.9070533000081777,
+    "cpuTimeMs": 0,
+    "cpuPercent": 0,
+    "rssDeltaBytes": 315392,
+    "heapDeltaBytes": 0
+  }
+]
+
+[cpuphase] phase             wall_ms    Mcycles   user_ms   kern_ms    cpu_ms    cpu%    ioRead   ioWrite    ioOther  pageFaults
+[cpuphase] send_1to1            2295     8229.9    1953.1     328.1    2281.2   99.4%         0        10          6       59897
+[cpuphase] recv_1to1            1207     3765.2     843.8     234.4    1078.1   89.3%         0         9        218        8727
+[cpuphase] send_group           7801    27965.9    7234.4     546.9    7781.2   99.7%         0         9         38       74032
+[cpuphase] recv_group            923     1841.4     203.1     343.8     546.9   59.3%         0        10       2034         140
+
+[cpumem] samples=3815  firstRSS=1.98 MiB  peakRSS=163.98 MiB  finalRSS=36.40 MiB  peakWS(os)=164.00 MiB  totalFaults=150943
+[cpumem] startup trajectory (ms -> RSS MiB, faults):
+[cpumem]        0      1.98           0
+[cpumem]       59     18.62        4298
+[cpumem]      120     18.62        4298
+[cpumem]      182     18.62        4298
+[cpumem]      243     18.62        4298
+[cpumem]      305     18.62        4298
+[cpumem]      367     19.16        4436
+[cpumem]      429     19.16        4436
+[cpumem]      492     21.96        5191
+[cpumem]      555     22.54        5339
+[cpumem]      618     24.79        6264
+[cpumem]      681     24.87        6285
+[cpumem]      745     25.17        6527
+[cpumem]      807     25.22        6540
+[cpumem]      870     25.28        6555
+[cpumem]      931     25.33        6567
+[cpumem]      994     25.36        6574
+[cpumem]     1057     25.39        6583
+[cpumem]     1119     25.44        6596
+[cpumem]     1181     25.47        6604
+[cpumem]     1245     25.50        6610
+[cpumem]     1307     25.53        6618
+[cpumem]     1368     25.55        6624
+[cpumem]     1430     25.57        6629
+[cpumem]     1492     25.58        6632
+[cpumem] phase            rssBegin     rssMax     rssEnd       faults
+[cpumem] send_1to1           37.81     147.75     147.75        59897
+[cpumem] recv_1to1          149.43     163.98      98.20         8727
+[cpumem] send_group          97.18     144.98     105.33        74032
+[cpumem] recv_group          98.91      99.41      99.41          140
+===ARMEXIT a REP 3 rc=0
+===ARM b REP 3 22:55:08 lane=exe src=bb-c pos=2
+(running fake server in separate process)
+zapo-js messaging bench
+────────────────────────
+  contacts          : 1000
+  devices/contact   : 2
+  groups            : 4
+  members/group     : 500
+  messages/scenario : 1000
+  scenarios         : send_1to1, recv_1to1, send_group, recv_group
+  store             : memory
+  --expose-gc       : no
+
+paired in 153.35 ms
+built 1000 contacts (2 dev each) in 2.61 s, dispenser misses: 0
+built 4 groups × 500 members in 2.66 s, dispenser misses: 0
+
+[phase-begin] send_1to1
+[phase-end] send_1to1
+──[ SEND 1:1 ]──────────────────────────────
+  messages          : 1000
+  elapsed           : 2.38 s
+  throughput        : 419.4 msg/s
+  avg / msg         : 2.38 ms
+  CPU time          : n/a (see tests/perf/cpuphase -- measured externally)
+  CPU %             : n/a
+  RSS before        : 29.34 MiB
+  RSS after         : 147.30 MiB
+  RSS delta         : 117.96 MiB
+  heap delta        : n/a (no V8 heap in a compiled binary; RSS above is comparable)
+
+[phase-begin] recv_1to1
+[phase-end] recv_1to1
+──[ RECV 1:1 ]──────────────────────────────
+  messages          : 1000
+  elapsed           : 1.23 s
+  throughput        : 812.5 msg/s
+  avg / msg         : 1.23 ms
+  CPU time          : n/a (see tests/perf/cpuphase -- measured externally)
+  CPU %             : n/a
+  RSS before        : 147.30 MiB
+  RSS after         : 97.06 MiB
+  RSS delta         : 0.00 MiB
+  heap delta        : n/a (no V8 heap in a compiled binary; RSS above is comparable)
+
+[phase-begin] send_group
+[phase-end] send_group
+──[ SEND group ]──────────────────────────────
+  messages          : 1000
+  elapsed           : 5.78 s
+  throughput        : 173.1 msg/s
+  avg / msg         : 5.78 ms
+  CPU time          : n/a (see tests/perf/cpuphase -- measured externally)
+  CPU %             : n/a
+  RSS before        : 90.50 MiB
+  RSS after         : 98.55 MiB
+  RSS delta         : 8.05 MiB
+  heap delta        : n/a (no V8 heap in a compiled binary; RSS above is comparable)
+
+[phase-begin] recv_group
+[phase-end] recv_group
+──[ RECV group ]──────────────────────────────
+  messages          : 1000
+  elapsed           : 905.84 ms
+  throughput        : 1104.0 msg/s
+  avg / msg         : 0.91 ms
+  CPU time          : n/a (see tests/perf/cpuphase -- measured externally)
+  CPU %             : n/a
+  RSS before        : 98.77 MiB
+  RSS after         : 99.09 MiB
+  RSS delta         : 0.32 MiB
+  heap delta        : n/a (no V8 heap in a compiled binary; RSS above is comparable)
+
+[
+  {
+    "name": "SEND 1:1",
+    "messages": 1000,
+    "elapsedMs": 2384.2462000101805,
+    "throughputMsgsPerSec": 419.4197730065503,
+    "avgMsPerMsg": 2.3842462000101805,
+    "cpuTimeMs": 0,
+    "cpuPercent": 0,
+    "rssDeltaBytes": 123686912,
+    "heapDeltaBytes": 0
+  },
+  {
+    "name": "RECV 1:1",
+    "messages": 1000,
+    "elapsedMs": 1230.8203999996185,
+    "throughputMsgsPerSec": 812.466221717084,
+    "avgMsPerMsg": 1.2308203999996186,
+    "cpuTimeMs": 0,
+    "cpuPercent": 0,
+    "rssDeltaBytes": 0,
+    "heapDeltaBytes": 0
+  },
+  {
+    "name": "SEND group",
+    "messages": 1000,
+    "elapsedMs": 5777.210500001907,
+    "throughputMsgsPerSec": 173.0939179037478,
+    "avgMsPerMsg": 5.777210500001908,
+    "cpuTimeMs": 0,
+    "cpuPercent": 0,
+    "rssDeltaBytes": 8437760,
+    "heapDeltaBytes": 0
+  },
+  {
+    "name": "RECV group",
+    "messages": 1000,
+    "elapsedMs": 905.8375000059605,
+    "throughputMsgsPerSec": 1103.9507637886707,
+    "avgMsPerMsg": 0.9058375000059604,
+    "cpuTimeMs": 0,
+    "cpuPercent": 0,
+    "rssDeltaBytes": 339968,
+    "heapDeltaBytes": 0
+  }
+]
+
+[cpuphase] phase             wall_ms    Mcycles   user_ms   kern_ms    cpu_ms    cpu%    ioRead   ioWrite    ioOther  pageFaults
+[cpuphase] send_1to1            2384     8515.1    2078.1     296.9    2375.0   99.6%         0        13          6       60320
+[cpuphase] recv_1to1            1231     3681.6     687.5     328.1    1015.6   82.5%         0        10        279        8862
+[cpuphase] send_group           7687    27500.9    7000.0     609.4    7609.4   99.0%         0         8         60       74078
+[cpuphase] recv_group            921     1827.8     296.9     265.6     562.5   61.1%         0         9       2101         143
+
+[cpumem] samples=3813  firstRSS=1.97 MiB  peakRSS=162.02 MiB  finalRSS=32.67 MiB  peakWS(os)=162.16 MiB  totalFaults=151667
+[cpumem] startup trajectory (ms -> RSS MiB, faults):
+[cpumem]        0      1.97           0
+[cpumem]       64     18.61        4294
+[cpumem]      125     18.61        4294
+[cpumem]      187     18.61        4294
+[cpumem]      248     18.61        4294
+[cpumem]      310     18.61        4294
+[cpumem]      371     18.61        4294
+[cpumem]      432     18.61        4294
+[cpumem]      495     21.26        5011
+[cpumem]      558     22.01        5202
+[cpumem]      621     24.55        5860
+[cpumem]      684     24.39        6161
+[cpumem]      746     24.60        6439
+[cpumem]      809     24.67        6456
+[cpumem]      872     24.73        6472
+[cpumem]      935     24.79        6486
+[cpumem]      996     24.84        6499
+[cpumem]     1060     24.88        6510
+[cpumem]     1122     24.92        6521
+[cpumem]     1186     24.97        6533
+[cpumem]     1250     24.98        6536
+[cpumem]     1312     25.01        6544
+[cpumem]     1374     25.37        6635
+[cpumem]     1437     25.39        6640
+[cpumem] phase            rssBegin     rssMax     rssEnd       faults
+[cpumem] send_1to1           30.84     143.38     143.38        60320
+[cpumem] recv_1to1          147.31     162.02      97.03         8862
+[cpumem] send_group          93.57     144.91     102.63        74078
+[cpumem] recv_group          98.77      99.09      99.09          143
+===ARMEXIT b REP 3 rc=0
+===ARM b REP 4 22:56:08 lane=exe src=bb-c pos=1
+(running fake server in separate process)
+zapo-js messaging bench
+────────────────────────
+  contacts          : 1000
+  devices/contact   : 2
+  groups            : 4
+  members/group     : 500
+  messages/scenario : 1000
+  scenarios         : send_1to1, recv_1to1, send_group, recv_group
+  store             : memory
+  --expose-gc       : no
+
+paired in 137.46 ms
+built 1000 contacts (2 dev each) in 2.54 s, dispenser misses: 0
+built 4 groups × 500 members in 2.50 s, dispenser misses: 0
+
+[phase-begin] send_1to1
+[phase-end] send_1to1
+──[ SEND 1:1 ]──────────────────────────────
+  messages          : 1000
+  elapsed           : 2.27 s
+  throughput        : 439.6 msg/s
+  avg / msg         : 2.27 ms
+  CPU time          : n/a (see tests/perf/cpuphase -- measured externally)
+  CPU %             : n/a
+  RSS before        : 29.39 MiB
+  RSS after         : 149.59 MiB
+  RSS delta         : 120.21 MiB
+  heap delta        : n/a (no V8 heap in a compiled binary; RSS above is comparable)
+
+[phase-begin] recv_1to1
+[phase-end] recv_1to1
+──[ RECV 1:1 ]──────────────────────────────
+  messages          : 1000
+  elapsed           : 1.16 s
+  throughput        : 865.6 msg/s
+  avg / msg         : 1.16 ms
+  CPU time          : n/a (see tests/perf/cpuphase -- measured externally)
+  CPU %             : n/a
+  RSS before        : 149.59 MiB
+  RSS after         : 96.54 MiB
+  RSS delta         : 0.00 MiB
+  heap delta        : n/a (no V8 heap in a compiled binary; RSS above is comparable)
+
+[phase-begin] send_group
+[phase-end] send_group
+──[ SEND group ]──────────────────────────────
+  messages          : 1000
+  elapsed           : 5.81 s
+  throughput        : 172.0 msg/s
+  avg / msg         : 5.81 ms
+  CPU time          : n/a (see tests/perf/cpuphase -- measured externally)
+  CPU %             : n/a
+  RSS before        : 93.77 MiB
+  RSS after         : 99.11 MiB
+  RSS delta         : 5.35 MiB
+  heap delta        : n/a (no V8 heap in a compiled binary; RSS above is comparable)
+
+[phase-begin] recv_group
+[phase-end] recv_group
+──[ RECV group ]──────────────────────────────
+  messages          : 1000
+  elapsed           : 899.98 ms
+  throughput        : 1111.1 msg/s
+  avg / msg         : 0.90 ms
+  CPU time          : n/a (see tests/perf/cpuphase -- measured externally)
+  CPU %             : n/a
+  RSS before        : 99.34 MiB
+  RSS after         : 99.66 MiB
+  RSS delta         : 0.32 MiB
+  heap delta        : n/a (no V8 heap in a compiled binary; RSS above is comparable)
+
+[
+  {
+    "name": "SEND 1:1",
+    "messages": 1000,
+    "elapsedMs": 2274.5744000077248,
+    "throughputMsgsPerSec": 439.64268656000166,
+    "avgMsPerMsg": 2.2745744000077246,
+    "cpuTimeMs": 0,
+    "cpuPercent": 0,
+    "rssDeltaBytes": 126046208,
+    "heapDeltaBytes": 0
+  },
+  {
+    "name": "RECV 1:1",
+    "messages": 1000,
+    "elapsedMs": 1155.2882999926805,
+    "throughputMsgsPerSec": 865.5848068454736,
+    "avgMsPerMsg": 1.1552882999926806,
+    "cpuTimeMs": 0,
+    "cpuPercent": 0,
+    "rssDeltaBytes": 0,
+    "heapDeltaBytes": 0
+  },
+  {
+    "name": "SEND group",
+    "messages": 1000,
+    "elapsedMs": 5813.983999997377,
+    "throughputMsgsPerSec": 171.9990973488147,
+    "avgMsPerMsg": 5.813983999997378,
+    "cpuTimeMs": 0,
+    "cpuPercent": 0,
+    "rssDeltaBytes": 5607424,
+    "heapDeltaBytes": 0
+  },
+  {
+    "name": "RECV group",
+    "messages": 1000,
+    "elapsedMs": 899.9827000051737,
+    "throughputMsgsPerSec": 1111.1324695399717,
+    "avgMsPerMsg": 0.8999827000051737,
+    "cpuTimeMs": 0,
+    "cpuPercent": 0,
+    "rssDeltaBytes": 339968,
+    "heapDeltaBytes": 0
+  }
+]
+
+[cpuphase] phase             wall_ms    Mcycles   user_ms   kern_ms    cpu_ms    cpu%    ioRead   ioWrite    ioOther  pageFaults
+[cpuphase] send_1to1            2275     8159.2    2015.6     265.6    2281.2  100.3%         0        11          6       59297
+[cpuphase] recv_1to1            1155     3460.6     703.1     234.4     937.5   81.1%         0         9        264        8026
+[cpuphase] send_group           7703    27633.4    7156.2     515.6    7671.9   99.6%         0         9         30       73428
+[cpuphase] recv_group            916     1839.1     250.0     281.2     531.2   58.0%         0        11       2056         144
+
+[cpumem] samples=3813  firstRSS=1.98 MiB  peakRSS=162.22 MiB  finalRSS=38.23 MiB  peakWS(os)=162.50 MiB  totalFaults=149128
+[cpumem] startup trajectory (ms -> RSS MiB, faults):
+[cpumem]        0      1.98           0
+[cpumem]       52     18.69        4316
+[cpumem]      113     18.69        4316
+[cpumem]      175     18.69        4316
+[cpumem]      237     18.69        4316
+[cpumem]      298     18.69        4316
+[cpumem]      360     19.23        4454
+[cpumem]      422     19.23        4454
+[cpumem]      485     21.87        5165
+[cpumem]      548     22.58        5348
+[cpumem]      611     26.16        6271
+[cpumem]      675     24.89        6291
+[cpumem]      738     25.24        6562
+[cpumem]      800     25.28        6572
+[cpumem]      863     25.34        6587
+[cpumem]      925     25.38        6598
+[cpumem]      988     25.42        6607
+[cpumem]     1053     25.46        6617
+[cpumem]     1116     25.50        6628
+[cpumem]     1178     25.54        6639
+[cpumem]     1242     25.56        6644
+[cpumem]     1306     25.60        6653
+[cpumem]     1368     25.61        6657
+[cpumem]     1430     25.64        6663
+[cpumem]     1491     25.65        6666
+[cpumem] phase            rssBegin     rssMax     rssEnd       faults
+[cpumem] send_1to1           40.98     149.58     149.58        59297
+[cpumem] recv_1to1          151.38     162.22      97.48         8026
+[cpumem] send_group          96.46     145.52     106.32        73428
+[cpumem] recv_group          99.10      99.66      99.66          144
+===ARMEXIT b REP 4 rc=0
+===ARM a REP 4 22:57:09 lane=exe src=bb-c pos=2
+(running fake server in separate process)
+zapo-js messaging bench
+────────────────────────
+  contacts          : 1000
+  devices/contact   : 2
+  groups            : 4
+  members/group     : 500
+  messages/scenario : 1000
+  scenarios         : send_1to1, recv_1to1, send_group, recv_group
+  store             : memory
+  --expose-gc       : no
+
+paired in 139.98 ms
+built 1000 contacts (2 dev each) in 2.55 s, dispenser misses: 0
+built 4 groups × 500 members in 2.50 s, dispenser misses: 0
+
+[phase-begin] send_1to1
+[phase-end] send_1to1
+──[ SEND 1:1 ]──────────────────────────────
+  messages          : 1000
+  elapsed           : 2.28 s
+  throughput        : 437.9 msg/s
+  avg / msg         : 2.28 ms
+  CPU time          : n/a (see tests/perf/cpuphase -- measured externally)
+  CPU %             : n/a
+  RSS before        : 29.44 MiB
+  RSS after         : 146.85 MiB
+  RSS delta         : 117.41 MiB
+  heap delta        : n/a (no V8 heap in a compiled binary; RSS above is comparable)
+
+[phase-begin] recv_1to1
+[phase-end] recv_1to1
+──[ RECV 1:1 ]──────────────────────────────
+  messages          : 1000
+  elapsed           : 1.15 s
+  throughput        : 867.3 msg/s
+  avg / msg         : 1.15 ms
+  CPU time          : n/a (see tests/perf/cpuphase -- measured externally)
+  CPU %             : n/a
+  RSS before        : 146.85 MiB
+  RSS after         : 97.72 MiB
+  RSS delta         : 0.00 MiB
+  heap delta        : n/a (no V8 heap in a compiled binary; RSS above is comparable)
+
+[phase-begin] send_group
+[phase-end] send_group
+──[ SEND group ]──────────────────────────────
+  messages          : 1000
+  elapsed           : 5.80 s
+  throughput        : 172.3 msg/s
+  avg / msg         : 5.80 ms
+  CPU time          : n/a (see tests/perf/cpuphase -- measured externally)
+  CPU %             : n/a
+  RSS before        : 91.50 MiB
+  RSS after         : 99.14 MiB
+  RSS delta         : 7.64 MiB
+  heap delta        : n/a (no V8 heap in a compiled binary; RSS above is comparable)
+
+[phase-begin] recv_group
+[phase-end] recv_group
+──[ RECV group ]──────────────────────────────
+  messages          : 1000
+  elapsed           : 900.94 ms
+  throughput        : 1110.0 msg/s
+  avg / msg         : 0.90 ms
+  CPU time          : n/a (see tests/perf/cpuphase -- measured externally)
+  CPU %             : n/a
+  RSS before        : 99.38 MiB
+  RSS after         : 99.71 MiB
+  RSS delta         : 0.33 MiB
+  heap delta        : n/a (no V8 heap in a compiled binary; RSS above is comparable)
+
+[
+  {
+    "name": "SEND 1:1",
+    "messages": 1000,
+    "elapsedMs": 2283.6882000118494,
+    "throughputMsgsPerSec": 437.8881495270726,
+    "avgMsPerMsg": 2.2836882000118495,
+    "cpuTimeMs": 0,
+    "cpuPercent": 0,
+    "rssDeltaBytes": 123117568,
+    "heapDeltaBytes": 0
+  },
+  {
+    "name": "RECV 1:1",
+    "messages": 1000,
+    "elapsedMs": 1153.0034999996424,
+    "throughputMsgsPerSec": 867.3000558977576,
+    "avgMsPerMsg": 1.1530034999996424,
+    "cpuTimeMs": 0,
+    "cpuPercent": 0,
+    "rssDeltaBytes": 0,
+    "heapDeltaBytes": 0
+  },
+  {
+    "name": "SEND group",
+    "messages": 1000,
+    "elapsedMs": 5803.732299998403,
+    "throughputMsgsPerSec": 172.3029161769359,
+    "avgMsPerMsg": 5.803732299998402,
+    "cpuTimeMs": 0,
+    "cpuPercent": 0,
+    "rssDeltaBytes": 8007680,
+    "heapDeltaBytes": 0
+  },
+  {
+    "name": "RECV group",
+    "messages": 1000,
+    "elapsedMs": 900.9375999867916,
+    "throughputMsgsPerSec": 1109.9547848981556,
+    "avgMsPerMsg": 0.9009375999867916,
+    "cpuTimeMs": 0,
+    "cpuPercent": 0,
+    "rssDeltaBytes": 348160,
+    "heapDeltaBytes": 0
+  }
+]
+
+[cpuphase] phase             wall_ms    Mcycles   user_ms   kern_ms    cpu_ms    cpu%    ioRead   ioWrite    ioOther  pageFaults
+[cpuphase] send_1to1            2284     8193.1    1890.6     375.0    2265.6   99.2%         0         9          6       60412
+[cpuphase] recv_1to1            1153     3523.7     750.0     250.0    1000.0   86.7%         0        11        239        9117
+[cpuphase] send_group           7684    27567.7    7171.9     500.0    7671.9   99.8%         0        12         25       73333
+[cpuphase] recv_group            917     1841.6     203.1     281.2     484.4   52.8%         0        10       2053         149
+
+[cpumem] samples=3812  firstRSS=1.97 MiB  peakRSS=162.29 MiB  finalRSS=36.68 MiB  peakWS(os)=162.39 MiB  totalFaults=151084
+[cpumem] startup trajectory (ms -> RSS MiB, faults):
+[cpumem]        0      1.97           0
+[cpumem]       52     18.61        4295
+[cpumem]      113     18.61        4295
+[cpumem]      174     18.61        4295
+[cpumem]      236     18.61        4295
+[cpumem]      297     18.61        4295
+[cpumem]      359     18.61        4295
+[cpumem]      420     18.61        4295
+[cpumem]      482     21.13        4978
+[cpumem]      546     21.97        5193
+[cpumem]      609     24.40        5821
+[cpumem]      672     24.36        6155
+[cpumem]      736     24.71        6416
+[cpumem]      800     24.77        6432
+[cpumem]      862     24.84        6449
+[cpumem]      924     24.89        6463
+[cpumem]      985     24.94        6476
+[cpumem]     1048     24.98        6486
+[cpumem]     1112     25.04        6500
+[cpumem]     1174     25.08        6511
+[cpumem]     1238     25.10        6516
+[cpumem]     1300     25.47        6612
+[cpumem]     1364     25.49        6616
+[cpumem]     1426     25.51        6622
+[cpumem]     1488     25.53        6626
+[cpumem] phase            rssBegin     rssMax     rssEnd       faults
+[cpumem] send_1to1           33.91     146.85     146.85        60412
+[cpumem] recv_1to1          150.65     162.29      98.67         9117
+[cpumem] send_group          97.79     145.39     103.48        73333
+[cpumem] recv_group          99.37      99.70      99.70          149
+===ARMEXIT a REP 4 rc=0
+### finished   : Mon Sep  7 22:58:09 ESAST 2026

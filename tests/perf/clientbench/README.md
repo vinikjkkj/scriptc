@@ -64,6 +64,15 @@ selects: `_store-factory.ts` switches on `ZAPO_BENCH_STORE`, whose default is
 because the switch names them. Removing the four unreachable arms is what
 takes 583 → 18; that is the substitution, and it is the whole delta.
 
+**Recorded, not chased.** The mongo arm is a **one-line change on zapo's
+side** — split `_store-factory.ts` so a backend's `@zapo-js/store-*` import
+is only named on the branch that uses it — and zapo is read-only test input to
+us, so this block does not make it. The compiler-side alternative (a
+provenance-mapped package's source stops being typechecked under the DRIVER's
+tsconfig, the `skipLibCheck` precedent one level out) is the higher-leverage
+form, and it belongs to whoever owns `store-mongo`. Nothing below measures
+into `store-mongo`, `store-redis`, or the provenance spec-twin walk.
+
 ### 18, and its ONE root
 
 17 × `SC1090` in `messaging.bench.ts` (`new InspectorSession()`, then
@@ -176,36 +185,148 @@ by three orders of magnitude. The last two rows are real refusals that
 survived a build with zero diagnostics — and neither fires in this run (exit
 0, no `SC` in the output).
 
-### 3.1 One refusal in this binary carries NO SC code at all
+### 3.1 THREE refusals in this binary carry no SC code at all
 
-Not found by any of the above, because it is not SC-coded. In
-`messaging.bench.c`:
+Not found by any `SC` census, because they are not `SC`-coded. Searching the
+**emitter for the message construction** — not the emitted C for a string I
+already knew — there is exactly **one** site in the whole compiler that puts a
+compiler-limitation refusal into the program without a code:
 
-    "Cannot load module 'argo-codec': dynamic import() of npm packages runs
-     in the embedded dynamic engine, which this build does not include
-     (compile it statically with --npm-static argo-codec, or build with
-     --dynamic)"
+    packages/compiler/src/frontend/lowering/lower-island.ts:770
+      `Cannot load module '${spec}': dynamic import() of npm packages runs in
+       the embedded dynamic engine, which this build does not include
+       (compile it statically with --npm-static ${spec}, or build with --dynamic)`
+      → libCall error.new → intrinsic promise.reject
 
-`argo-codec` has no provenance attestation, so it took the island path, and
-the island needs the engine this build does not link — the engine scan reads
-`quickjs 0` precisely because it was not linked. zapo reaches it through a
-**dynamic** `import('argo-codec')` at
-`src/transport/node/mex/argo-decoder.ts:32`, inside a `try { } catch { }`
-that sets the module to `null`.
+**How the sweep was bounded** (`harness/uncoded-sweep.mjs`, output in
+`runs/uncoded-sweep.txt`). Every other refusal reaches the program through a
+coded channel: the `runtimeFence` IR node (`nodes.ts:2544`, carrying
+`code: string`) emitted as `scr_throw_error_msg_code(..., "SCxxxx")`
+(`emit-stmts.ts:758`), `scr_fence_fatal(..., code)`,
+`scr_throw_lowering_fence`, or the compile-time `L.noLowering(...)` /
+`L.unsupported("SCxxxx", …)`. So the uncoded channel is "a
+compiler-limitation message lowered as an ordinary **value**". Corroborating
+by hand: there are 13 `fn: "error.new"` construction sites in the compiler; 12
+build Node-parity messages (`Reduce of empty array with no initial value`,
+`Cannot read properties of …`, DOMException, the startup-crash replay,
+`expected <T> at $.field`) and one — `lower-island.ts` — builds a
+compiler-limitation message. `promise.reject` has three lowering sites, two of
+which are the user's own `Promise.reject`.
 
-So the compiled binary would **silently lose argo decoding on the mex
-transport** and fall through to zapo's own
-`"argo response received but 'argo-codec' not installed"` warning, at exit 0.
-It never fires in this bench — `argo` appears 0 times in every run log, both
-lanes and node — but two things follow that outlive this bench:
+**The sweep carries three negative controls, and it needed all three.** Its
+first version reported **6** sites and still printed `selftest ok` — a false
+green, because the only control it had was one of the three files it was
+wrong about. The three it must reject:
+
+| control | why it looks like an uncoded refusal | why it is not |
+|---|---|---|
+| `lower-emitter.ts:411` | same vocabulary (*"symbol names have no lowering"*) | it is an `L.noLowering(...)` **hint** |
+| `lower-stmts.ts:2249` | *"has no lowering yet"* next to a `strLit` | `L.unsupported("SC1031", …)` — coded, code in the call |
+| `lower-sqlite.ts:101–108` | the `DB_REFUSALS` / `STMT_REFUSALS` entries sit a dozen lines from an unrelated `strLit` helper | they are **hint tables**, `Record<string, string>`, consumed by 11 later `L.noLowering(...)` calls |
+
+A proximity window cannot tell a hint table from an IR construction, so the
+sweep recognises the table declaration itself. With the controls in place the
+answer is **1 file, 1 template** — and the same three specifiers appear on the
+**LLVM** lane too, so this is a lowering property, not a backend one.
+
+**One template, three instances.** The message is parameterised by specifier,
+and the compiled bench carries three:
+
+| specifier | zapo's site | what zapo does with it | reachable in this bench? | what is silently lost |
+|---|---|---|---|---|
+| **`argo-codec`** | `src/transport/node/mex/argo-decoder.ts:32` | `try { … } catch { cachedArgo = null }` — **swallowed** | no | **argo decoding on the mex transport.** zapo degrades to its own `"argo response received but 'argo-codec' not installed"` warning and continues at exit 0 |
+| `ws` | `src/transport/WaWebSocket.ts:46` | caught, then discriminated on `err.code === 'ERR_MODULE_NOT_FOUND' \| 'MODULE_NOT_FOUND'`; **rethrown** if it is neither | no — only reached when `socketRuntime === 'node' && agent`, i.e. a proxy/agent on the websocket, which this bench does not set | nothing silently — it surfaces |
+| `bun:sqlite` | `packages/store-sqlite/src/connection.ts:329` | caught, **rethrown** with a clearer message (*"Run this in Bun or set storage.sqlite.driver to better-sqlite3"*) | no — only when the Bun sqlite driver is selected | nothing silently — it surfaces |
+
+**So one of the three is swallowed, and it is `argo-codec`.** `argo` appears
+**0 times** in every run log — both backends and node — so nothing in this
+bench takes that path; the finding is about what a compiled zapo *client*
+would do in production, not about this measurement.
+
+**The `ws` row carries its own sub-finding.** The compiler's refusal is a
+plain `Error` with **no `.code`**, so zapo's optional-dependency branch — the
+standard Node idiom, `err.code === 'ERR_MODULE_NOT_FOUND'` — does not fire and
+the compiler's message is rethrown in place of zapo's `"optional dependency
+\"ws\" is not installed. Install with: npm i ws"`. Stamping
+`ERR_MODULE_NOT_FOUND` on it would make that branch fire, and it would then
+give **wrong advice**: the package *is* installed, the build just cannot run
+it.
+
+> **DECIDED (coordinator, 2026-09-07): do not stamp a code.** A clear message
+> rethrown beats a familiar message that is false. The option **not taken**
+> was stamping `ERR_MODULE_NOT_FOUND`, which would make zapo's
+> optional-dependency branch fire and tell the user to `npm i ws` for a
+> package already on disk. This is a deliberate choice, **not an oversight** —
+> do not "fix" it by adding the code.
+>
+> If it is ever closed properly, the shape is a **distinct** code meaning
+> *"present, but not runnable in this build"*, which every optional-dependency
+> `catch` in the ecosystem would have to learn. That is an ecosystem-facing
+> decision and not one this project makes unilaterally.
+
+### 3.2 `--npm-static argo-codec` — measured. It closes the refusal.
+
+Same entry, same everything else, `--npm-static argo-codec` added:
+
+| | baseline `np-strict` | `--npm-static argo-codec` |
+|---|---:|---:|
+| build | exit 0, **0 errors** | exit 0, **0 errors** |
+| binary | 28,344,832 B | **28,395,008** B (**+50,176 B, +0.18%**) |
+| emitted C | 138,140,754 B, 16 files | 138,396,726 B, 16 files |
+| engine scan | `quickjs 0 / ScrDyn 0` | `quickjs 0 / ScrDyn 0` |
+| **uncoded module refusals** | **3** — `argo-codec`, `ws`, `bun:sqlite` | **2** — `ws`, `bun:sqlite` |
+| bracketed coded fence sites | 1 | **11** |
+| smoke run (4×20) | exit 0 | exit 0 |
+| full run (4×1,000) | exit 0 | exit 0, **0** `SC` codes and **0** `argo` lines in the output |
+
+`Cannot load module 'argo-codec'` is **gone from the emitted C**, and the
+package is genuinely in the program, not merely silenced: the C carries
+`argo-codec` ×13, `ArgoResponse` ×10 and `ArgoDecoderAvailable` ×10.
+
+**What it costs is a trade, and the trade is favourable.** The 1 → 11
+bracketed fence sites are all new, and all ten additions are inside
+argo-codec's own shipped CJS:
+
+    4 × SC1090  dist/cjs/decode.js:223, :240, :244  ·  dist/cjs/index.js:19
+    4 × SC1100  dist/cjs/decode.js:37, :141  ·  encode.js:63  ·  wire.js:38
+    2 × SC2020  dist/cjs/decode.js:6  ·  dist/cjs/encode.js:319
+
+So the refusal did not disappear; it **moved from one invisible
+module-level rejection into ten countable statement-level fences**, each of
+which fires only if that statement runs. That is a strict gain in
+observability, and it is the difference between a capability that switches
+itself off silently and one whose remaining gaps can be enumerated and closed.
+
+> ### "argo closed" does NOT mean "argo works"
+>
+> The refusal is closed. The **capability is unproven.** Ten fences sit inside
+> argo-codec's own code and this bench never drives mex, so not one of them
+> has been executed. Anyone quoting `--npm-static argo-codec` as "argo works"
+> is quoting a build result as a runtime result.
+
+**What it does NOT establish:** that argo decoding *works* end to end. This
+bench never exercises the mex/argo path, so the ten new fences are unfired and
+unmeasured. Proving argo decode would need a bench that drives mex — which
+this one is not, and which nobody has built.
+
+**Build times are not comparable here and I am not reporting one.** The
+baseline took 1,433 s under four concurrent loads and this build took 676 s
+after they eased. If a build-time number matters, it needs a quiet window.
+
+**This is deliberate, and the rationale is written at the site.** `import()`'s
+failure channel is in-band in Node too, so the compiler models the refusal as
+a rejected promise catchable at the `await` — *"this build answers the same
+failure it would give for a missing loader, never a silent wrong value"*. Two
+things still follow that outlive this bench:
 
 1. **An `SC`-code census cannot see this class of refusal.** "No `[SCxxxx]`
    throws left in the emitted C" can be literally true of a binary that still
-   refuses to load a module.
-2. **The catch makes it a degradation, not a failure.** That is the
-   silent-wrong-answer shape, and it is invisible from outside the process.
-
-`--npm-static argo-codec` is the named next step; it was not measured here.
+   refuses to load three modules.
+2. **In-band is not the same as visible.** Node's own failure here means "not
+   installed", and every optional-dependency `catch` in the ecosystem is
+   written for that meaning. A compiled build reuses the channel with a
+   different meaning, and `argo-codec` shows what that costs: the program
+   keeps running with a capability silently switched off.
 
 **A binary byte hit is not a fence.** The clean static control — 0 fences in
 its C — still shows `SC2020 ×1` in its `.exe` bytes, because the string lives
@@ -267,6 +388,23 @@ Ordered by whether the compiler could close it instead.
 | 7 | drop `process.on('uncaughtException')` | no lowering. **`'unhandledRejection'` IS supported** — `bench-client5` removed both, and only one needed to go | yes |
 | 8 | drop the media `proxy` agent | zapo validates it as a proxy TRANSPORT (`dispatch(...)` or `addRequest(...)`) and a compiled `https.Agent` presents neither, so zapo refuses it *at construction*. Inert for messaging; **a media bench cannot skip it** | yes — a runtime-shape gap, not a lowering gap |
 
+### If you are here to compile a MEDIA bench, read this first
+
+Row 8 is the one that stops you, and it stops you at *construction*, before
+any media request is issued. `WaClient`'s `proxy: { mediaUpload, mediaDownload }`
+is validated as a proxy **transport**: zapo requires a dispatcher with
+`dispatch(...)` or an agent with `addRequest(...)`. A compiled `https.Agent`
+presents **neither**, so `new WaClient({ proxy: … })` is refused outright.
+
+Messaging gets to sidestep it — this bench builds the agent and never issues a
+media request, so the option can simply be dropped (`bench-client5` drops it,
+and that is why the messaging lane compiles). **A media bench cannot.** It
+needs the compiled `https.Agent` to present a proxy-transport shape, which is
+a runtime-shape gap on our side, not a missing lowering: the type checks, the
+object exists, and the duck-type test fails at run time. Closing it means
+giving the compiled `Agent` an `addRequest(...)` (or a dispatcher surface),
+not adding a lowering.
+
 ## 5. What the prior art already gave us
 
 | where | what it already achieved |
@@ -291,6 +429,7 @@ What was missing was the strict lane and the run: `22 errors flagless` →
 | `harness/run.sh` | the node lane on the same source | exit 0, 4 scenarios, both workloads |
 | `harness/ladder-noprofile.mjs` | its own self-test | refuses to write unless `InspectorSession`/`this.session` reach 0 **and** the scenario bodies, `mainSeparateProcess` and `WaClient` all survive |
 | `transport/*.diff` | `patch --dry-run` on pristine `bench/` | both apply |
+| `harness/uncoded-sweep.mjs` | one positive (`lower-island.ts` must be found) **and three negatives** (`lower-emitter.ts`, `lower-stmts.ts`, `lower-sqlite.ts` must not) | 1 file, 1 template. Its first version reported 6 and still said `selftest ok`, because its only control was one of the files it was wrong about |
 
 ## 7. Reproducing
 
@@ -310,7 +449,264 @@ Three traps this harness pays for so the next block does not:
   byte offset; an edit that shifts offsets makes it execute the middle of a
   command. One 488-second build was lost to `rovenance-sources: command not
   found`. `harness/build.sh` is copied to a frozen name before a long run.
-* **Do not source another block's `env.sh`.** `<blocks>\msgbench-lab\env.sh`
-  sets no `SCRIPTC_PROVENANCE_CACHE` at all, so every build under it used the
-  `C:` default; `tests/perf/pkgstatus2/env.sh:4` and
-  `tests/perf/voipfix/env.sh:4` point it at *other blocks'* lab directories.
+* **Do not source another block's `env.sh`.** `tests/perf/pkgstatus2/env.sh:4`
+  and `tests/perf/voipfix/env.sh:4` point `SCRIPTC_PROVENANCE_CACHE` at *other
+  blocks'* lab directories.
+
+### The 08-26 C:-drive fill — closed, do not re-open it
+
+`<blocks>\msgbench-lab\env.sh` sets `ZIG_*`, `SCRIPTC_CACHE_DIR`, `TMP`,
+`TEMP`, `TMPDIR`, `SCRIPTC_CC`, `SCRIPTC_TARGET` and `PATH` — and
+**`SCRIPTC_PROVENANCE_CACHE` not at all.** `provenance.ts:312` falls back to
+`homedir()/.cache/scriptc` when it is unset, so every build in that session
+resolved provenance onto the user's `C:` drive. That lab's own README says so
+without noticing: *"The provenance source cache is the default
+`~/.cache/scriptc/provenance` and was already warm with all five packages."*
+
+That is the origin of the 08-26 fill. It was one missing variable in one
+sourced file, not a leak elsewhere in the toolchain, and
+`harness/guard.mjs` is the fix: it refuses to start a build unless all eight
+variables are set **and** point at `G:`, and it is imported for effect by
+`harness/scc.mjs`, which is the only way this block invokes the CLI.
+
+---
+
+# 8. THE MEASUREMENT PROTOCOL — declared before the numbers exist
+
+Every performance figure this project has quoted for this bench was taken
+under `--best-effort`, so none of them measured the program that ships. These
+are the first strict numbers, and the protocol is written down **before** the
+run so it cannot be shaped by what comes out.
+
+## 8.1 The arms
+
+| label | lane | binary / source | bytes | md5 | what it answers |
+|---|---|---|---:|---|---|
+| `c` | compiled | `out/bb-c`, `--backend c` | 28,345,856 | `6832f2ef114cfd665748412ddd9ffb39` | the readable-C lane |
+| `llvm` | compiled | `out/bb-llvm`, explicit `--backend llvm` | 27,048,960 | `3c488367dd275792cb5a87ad6a84cede` | **the lane that ships** |
+| `argo` | compiled | `out/bb-argo`, `--backend c --npm-static argo-codec` | 28,395,008 | `733b3490f4f3b7ac39bbe941d6dcadb2` | the only honest cost of closing the uncoded refusal |
+| `node` | interpreted | `bench-bench/messaging.bench.ts` under `node --import tsx` | — | entry `83c65a1665ae60532a233ba7963825b1` | the comparison that matters |
+
+All three compiled arms rebuilt from the marked source with **0 strict
+errors**, all three read `quickjs 0 / ScrDyn 0`, and all three were smoke-run
+through the full pipeline before the window: exit 0, four phase rows and a
+peak-RSS line each. `bb-argo` carries **2** uncoded module refusals where
+`bb-c` and `bb-llvm` carry **3** — the `--npm-static` difference, unchanged by
+the phase marks.
+
+All four run the **same source**, `bench-bench`, which is `bench-noprof` plus
+two `console.log` phase markers. Neither lane gets an instrument the other
+does not. Every binary is rebuilt from that source; the pre-marker binaries
+are not eligible arms.
+
+## 8.2 What is measured, and by what
+
+| number | instrument | why that one |
+|---|---|---|
+| wall ms **per scenario** | the bench's own `elapsedMs` | measured inside the same source both lanes execute — the one directly comparable timing number |
+| **peak RSS** | `cpuphase.exe`, `PeakWorkingSetSize`, sampled from the parent | the compiled lane has no V8 heap and `process.memoryUsage()`'s heap fields are refused by name; only an external number exists for both lanes |
+| **CPU** per phase | `cpuphase.exe`, `QueryProcessCycleTime` (Mcycles) plus the `GetProcessTimes` user/kernel split | `process.cpuUsage()` has no lowering, so the bench prints `n/a` for CPU on purpose. Cycles are exact to the context switch; the tick-quantised split is kept only because cycles give no user/kernel breakdown, and on a socket-bound workload that split is what separates "spinning" from "blocked" |
+
+`cpuphase` echoes the child's stdout byte-for-byte, so the bench's JSON still
+parses and the two lanes stay diffable.
+
+## 8.3 The rules the tooling enforces, so they cannot be forgotten in a hurry
+
+1. **Ratios are formed inside a rep.** Every arm of a rep runs back to back.
+   This host drifts ~10% per rep — a recorded session has the *same* arm at
+   22.3 s and 30.2 s — so an across-rep ratio is not a measurement.
+   `benchstat.mjs` only ever divides two arms of the same rep.
+2. **Median of the per-rep ratios, with `[min .. max]` beside it.** A median
+   without its spread is a claim without an error bar.
+3. **A floor is a draw, not a value.** The A/A floor runs the *same binary* as
+   two arms. Any delta inside the floor's half-width prints as `DRAW`.
+   Without `--floor`, `benchstat.mjs` refuses to call anything a difference
+   and prints `floor: UNKNOWN`.
+4. **A non-zero exit is never averaged away.** Truncated runs are listed
+   before any table.
+5. **Every number names its lane, binary, zig, target and node.** `bench.sh`
+   writes that header — including each arm's exe size and md5, and
+   `BENCH_NODE --version` read back from **the executable that will actually
+   be spawned**, not from `PATH` — before it runs anything.
+
+## 8.4 The harness self-test
+
+`node harness/benchstat.mjs --selftest`, recorded in
+`runs/benchstat-selftest.txt`:
+
+    A/A with +-22% host drift  -> ratio exactly 1.0000  [NO DIFFERENCE]
+    A/B with a real +20%       -> ratio 1.2000          [seen, not swallowed]
+
+The drift is applied **per rep to both arms**, the way the host actually
+drifts, so a tool that compared across reps would fail the first case. The
+second case is the negative control: without it, a parser that silently
+returned nothing would also "pass" the first.
+
+A real A/A dry run on this host, through the whole pipeline, is in
+`runs/bench-floor-dry.txt` (raw log: `runs/bench-floor-dry-raw.txt`) — the same
+binary as both arms, so the harness is shown producing a null result on real
+data, not only on synthetic data, before it is trusted on A/B. Every metric
+reads DRAW; the widest is `wall:SEND 1:1` at +/-10.44% on a contended host
+with the reduced smoke workload, which is exactly why the window run uses the
+shipped workload, where each scenario is seconds rather than tens of
+milliseconds.
+
+**The floor must come from a SEPARATE A/A run.** A floor taken from the log
+being measured is self-referential — its half-width IS the observed deviation,
+so every metric is a DRAW by construction and the verdict column means
+nothing. `benchstat.mjs` refuses that combination outright
+(`--degenerate-floor-ok` overrides it, and the dry run above passes it
+deliberately, to inspect an A/A log's own spread). In the window the protocol
+is therefore **two** A/A runs: the first is the floor, the second is scored
+against it and must come back DRAW on every metric. That is the non-degenerate
+form of the same check, and it is the last gate before any A/B number is
+believed.
+
+## 8.5 What is NOT measured, and why
+
+* **Build times.** They need the quiet window too; the numbers already in this
+  README (1,433 s vs 676 s) differ by host load, not by lane, and none is
+  claimed.
+* **`store-mongo`, `store-redis`, the provenance spec-twin walk.** Another
+  block's; nothing here reaches into them.
+* **The mongo arm's 517 sites.** A recorded one-line change on zapo's side.
+
+---
+
+# 9. THE NUMBERS — first strict bench, quiet window, 2026-09-07
+
+Machine quiet by arrangement: two other blocks idle, no gate running, 27.7 GB
+free RAM. The **six residual processes** in every log header are the user's own
+MCP servers (0.1–22 s accumulated CPU between them) and were not stopped; a
+floor names the host state it was measured in, and this is that state.
+
+Lane, backend, binary and node are on every header. `zig 0.16.0`,
+`x86_64-windows-gnu`, `SCRIPTC_CC=zigcc`, node **v25.9.0 read back from the
+executable that was actually spawned** (`BENCH_NODE`), shipped workload
+(1,000 contacts × 2 devices, 4 groups × 500 members, 1,000 messages/scenario).
+16 runs in the comparison, **all rc=0**.
+
+## 9.1 The gate failed twice first, and both faults were mine
+
+This is the most important part of the section, because the numbers below
+would have been wrong without it.
+
+**Failure 1 — a position-dependent bias the paired design did not cancel.**
+Two A/A runs of the *same binary* in a fixed arm order: the arm that ran
+**second** was faster on `recv_group` in **6 of 6 reps**, on both its wall and
+its cycles, while every other metric sat at chance (2/6 to 4/6). A two-sided
+sign test puts that at p = 0.031. A paired design only cancels what is
+symmetric between the positions, so the positions have to be rotated.
+`bench.sh` now runs rep *r* starting at arm `(r-1) mod n` and cycling — a
+Latin square, and plain ABBA when n = 2. The same metric on the same binary
+re-centred immediately: `cycles:recv_group` 0.9870 → 1.0012, `wall:RECV group`
+0.9565 → 0.9979. Evidence in `runs/order-effect.txt`.
+
+**Failure 2 — `max|r-1|` over 4 reps is not a bound.** With the bias fixed the
+gate still failed on the same metric, so the estimator was the fault: the
+maximum of a small sample under-estimates spread and swings wildly.
+`cycles:recv_group` read **±0.80%** in one 4-rep A/A and **±8.30%** in the very
+next one, same binary. A gate built on the first would have called a 0.9% A/A
+difference a result. `benchstat.mjs` now **pools** every A/A log passed with
+`--floor` and prints the rep count.
+
+**The gate then passed**: an independent 4-rep A/A scored against a pooled
+8-rep floor came back **DRAW on all 13 metrics** (`runs/window-results.txt`,
+section 1). The floor used below pools **12 A/A reps**.
+
+## 9.2 Every lane against node — medians of per-rep ratios, 4 reps
+
+`n/a` where a lane cannot produce the number: the compiled lanes have no
+`process.cpuUsage()` and no V8 heap, which is exactly why CPU and RSS come
+from `cpuphase` for **both** lanes rather than from either lane's own runtime.
+
+| metric | floor | `c` / node | `llvm` / node | `argo` / node |
+|---|---:|---|---|---|
+| **peak RSS** | ±5.55% | **0.323 — 67.7% smaller** | **0.338 — 66.2% smaller** | **0.329 — 67.1% smaller** |
+| cycles send_1to1 | ±3.47% | **0.802 — 19.8% fewer** | **0.795 — 20.5% fewer** | **0.792 — 20.8% fewer** |
+| cycles recv_1to1 | ±6.71% | **0.871 — 12.9% fewer** | **0.874 — 12.6% fewer** | **0.889 — 11.1% fewer** |
+| cycles recv_group | ±8.30% | **0.887 — 11.3% fewer** | **0.908 — 9.3% fewer** | **0.895 — 10.5% fewer** |
+| cycles **send_group** | ±4.01% | **1.858 — 85.8% MORE** | **2.079 — 107.9% MORE** | **1.868 — 86.8% MORE** |
+| wall RECV 1:1 | ±5.73% | 1.038 — **DRAW** | 1.033 — **DRAW** | 1.017 — **DRAW** |
+| wall RECV group | ±9.62% | 1.038 — **DRAW** | 1.073 — **DRAW** | 1.083 — **DRAW** |
+| wall SEND 1:1 | ±3.91% | 1.253 — 25.3% slower | 1.243 — 24.3% slower | 1.238 — 23.8% slower |
+| wall **SEND group** | ±4.92% | 2.768 — 176.8% slower | 3.197 — 219.7% slower | 2.782 — 178.2% slower |
+| cpuMs recv_group | ±29.74% | 0.859 — **DRAW** | 0.958 — **DRAW** | 0.948 — **DRAW** |
+
+Absolute medians, for scale:
+
+| | node | `c` | `llvm` | `argo` |
+|---|---:|---:|---:|---:|
+| peak RSS (MiB) | **500.4** | **161.8** | **169.2** | **164.2** |
+| SEND 1:1 wall (ms) | 1,823.2 | 2,285.6 | 2,280.7 | 2,263.4 |
+| SEND group wall (ms) | 2,109.1 | 5,873.5 | 6,771.9 | 5,927.2 |
+| send_1to1 (Mcycles) | 10,221.7 | 8,200.4 | 8,178.0 | 8,121.8 |
+| send_group (Mcycles) | 14,915.7 | 27,848.8 | 31,115.8 | 28,023.3 |
+
+### The preliminary RSS observation is CONFIRMED
+
+It was flagged as preliminary at 30 MiB against 152 MiB on a reduced workload
+with no floor. At the shipped workload, with a 12-rep floor of ±5.55%, it is
+**500.4 MiB → 161.8 MiB, a ratio of 0.323 with a [0.3226 .. 0.3301] range
+across four reps** — far outside the floor and remarkably tight. **A compiled
+zapo messaging client uses about a third of the memory the same source uses
+under node.** That is the headline.
+
+### Three scenarios out of four cost FEWER cycles compiled
+
+`send_1to1`, `recv_1to1` and `recv_group` all run on 9–21% fewer CPU cycles
+compiled than under node, on every backend. Those are real wins outside the
+floor.
+
+### `send_group` is the whole regression, and it is one phase
+
+`send_group` costs **86–108% more cycles** and **177–220% more wall** compiled.
+Everything else is a win or a draw. This is the phase `tests/perf/cpuphase`
+already attributed to zapo's own curve25519 field arithmetic (44.18% of
+non-idle samples) — the compiled lane pays roughly double for it. It is one
+phase, one code path, and it now has a measured size.
+
+### A dissociation worth naming: fewer cycles, more wall
+
+`SEND 1:1` costs **20% fewer cycles** and **25% more wall** on every compiled
+lane. Fewer cycles with more elapsed time is time spent **not executing** —
+blocked, not spinning. That is the shape the user/kernel split exists to
+separate, and it points at the loop-turn/RPC-depth cost this fleet has already
+identified rather than at codegen quality.
+
+## 9.3 LLVM against C — the shipping backend is slower on `send_group`
+
+| metric | floor | `llvm` / `c` |
+|---|---:|---|
+| cycles send_group | ±4.01% | **1.117 — 11.7% MORE** |
+| wall SEND group | ±4.92% | **1.151 — 15.1% slower** |
+| cpuMs send_group | ±3.85% | **1.117 — 11.7% MORE** |
+| all 10 other metrics | — | **DRAW** |
+
+The lane that ships is a draw with the C lane everywhere **except** the one
+phase that is already the regression, where it is a further 12–15% worse. If
+`send_group` gets attention, this is a second, independent reason to look at
+it — and a reason to measure both backends rather than assuming they agree.
+
+## 9.4 `--npm-static argo-codec` costs nothing measurable at run time
+
+| `argo` / `c` | result |
+|---|---|
+| all 13 metrics | **DRAW** |
+
+Closing the uncoded `argo-codec` module refusal costs **+50,176 bytes (+0.18%)
+of binary** and, at run time, **nothing this instrument can detect** — peak
+RSS, cycles, CPU ms and wall are all draws against the plain C lane on a
+12-rep floor. It remains true that this bench never drives mex, so the ten
+fences inside argo-codec are still unfired: **"argo closed" is a build result,
+not a runtime one.**
+
+## 9.5 What these numbers are not
+
+* Not a build-time comparison. Build times were taken under contention and
+  none is claimed.
+* Not a statement about `store-mongo`, `store-redis` or the provenance
+  spec-twin walk — another block's, untouched.
+* Not a claim about any scenario marked DRAW. `wall:RECV 1:1` and
+  `wall:RECV group` are draws on all three compiled lanes and should be
+  reported as draws, not as small wins.

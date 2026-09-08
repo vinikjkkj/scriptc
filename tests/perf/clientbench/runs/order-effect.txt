@@ -1,0 +1,21 @@
+# The order-effect defect, with the evidence that found it and the fix that removed it.
+# Two A/A runs of the SAME binary (bb-c, md5 6832f2ef114cfd665748412ddd9ffb39) in a FIXED
+# arm order. Sign test: is the arm that runs SECOND faster/smaller?
+
+  cyc:recv_1to1          second-arm faster 3/6
+  cyc:recv_group         second-arm faster 6/6   <== SYSTEMATIC
+  cyc:send_1to1          second-arm faster 4/6
+  cyc:send_group         second-arm faster 3/6
+  peakRSS                second-arm faster 2/6
+  wall:RECV 1:1          second-arm faster 4/6
+  wall:RECV group        second-arm faster 6/6   <== SYSTEMATIC
+  wall:SEND 1:1          second-arm faster 4/6
+  wall:SEND group        second-arm faster 3/6
+
+# recv_group is 6/6 on BOTH its wall and its cycles; every other metric is at chance.
+# Under the null that position does not matter, 6/6 in one direction is p=0.031 (two-sided sign test).
+
+# After the fix (cyclic rotation; for 2 arms that is ABBA), the SAME metric on the SAME
+# binary re-centres on 1.0 and the direction stops being consistent:
+#   cycles:recv_group  median 0.9870 (fixed order) -> 1.0012 (rotated)
+#   wall:RECV group    median 0.9565 (fixed order) -> 0.9979 (rotated)

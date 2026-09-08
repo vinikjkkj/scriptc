@@ -1,0 +1,21 @@
+# harness/uncoded-sweep.mjs — the emitter-side sweep, with its three negative controls
+UNCODED refusal construction sites: 2 line(s) in 1 file(s)
+  <blocks>/clientbench/work/packages/compiler/src/frontend/lowering/lower-island.ts:771
+      `embedded dynamic engine, which this build does not include ` +
+  <blocks>/clientbench/work/packages/compiler/src/frontend/lowering/lower-island.ts:772
+      `(compile it statically with --npm-static ${spec}, or build with --dynamic)`;
+selftest ok: the known uncoded site is found; all three coded controls are rejected
+
+out/np-strict: 3 uncoded module refusal(s) over 16 emitted file(s)
+  ws x1
+  argo-codec x1
+  bun:sqlite x1
+
+out/np-argo: 2 uncoded module refusal(s) over 16 emitted file(s)
+  ws x1
+  bun:sqlite x1
+
+out/np-llvm: 3 uncoded module refusal(s) over 1 emitted file(s)
+  ws x1
+  argo-codec x1
+  bun:sqlite x1

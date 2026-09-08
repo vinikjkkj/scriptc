@@ -1,0 +1,60 @@
+# The four window arms, rebuilt from bench-bench (the phase-marked source).
+# Taken BEFORE the quiet window: identity, engine scan, uncoded refusals, and a smoke run each.
+
+== bb-c  rc=0 errs=0
+out/bb-c/messaging.bench.exe  28345856 bytes
+  quickjs 0   ScrDyn 0   JS_NewRuntime 0   JS_Eval 0   __island_eval 0
+out/bb-c: 3 uncoded module refusal(s) over 16 emitted file(s)
+  ws x1
+  argo-codec x1
+  bun:sqlite x1
+
+== bb-llvm  rc=0 errs=0
+out/bb-llvm/messaging.bench.exe  27048960 bytes
+  quickjs 0   ScrDyn 0   JS_NewRuntime 0   JS_Eval 0   __island_eval 0
+out/bb-llvm: 3 uncoded module refusal(s) over 1 emitted file(s)
+  ws x1
+  argo-codec x1
+  bun:sqlite x1
+
+== bb-argo  rc=0 errs=0
+out/bb-argo/messaging.bench.exe  28395008 bytes
+  quickjs 0   ScrDyn 0   JS_NewRuntime 0   JS_Eval 0   __island_eval 0
+
+out/bb-argo: 2 uncoded module refusal(s) over 16 emitted file(s)
+  ws x1
+  bun:sqlite x1
+
+== node arm entry md5
+83c65a1665ae60532a233ba7963825b1 *app/tree/packages/fake-server/bench-bench/messaging.bench.ts
+
+== smoke: node arm phase table
+[cpuphase] send_1to1             129      558.4     125.0      15.6     140.6  109.4%         0         1          2         315
+[cpuphase] recv_1to1              69      240.9      31.2      15.6      46.9   67.5%         0         2          3         208
+[cpuphase] send_group            106      478.7     109.4      31.2     140.6  132.4%         0         1         23        1523
+[cpuphase] recv_group             78      205.6      46.9       0.0      46.9   60.1%         0         2         43         554
+[cpumem] samples=3982  firstRSS=32.24 MiB  peakRSS=152.44 MiB  finalRSS=54.41 MiB  peakWS(os)=153.23 MiB  totalFaults=58071
+
+== smoke: c and llvm arms
+===ARM c REP 1 22:23:17 lane=exe src=bb-c
+[cpuphase] send_1to1              76      273.9      46.9      15.6      62.5   81.9%         0        10          5        1032
+[cpuphase] recv_1to1              35       73.5      31.2       0.0      31.2   88.8%         0         6         26         173
+[cpuphase] send_group            118      416.9      93.8      15.6     109.4   92.3%         0         7         12          85
+[cpuphase] recv_group             60       72.9      15.6       0.0      15.6   26.1%         0        13        122          67
+[cpumem] samples=3903  firstRSS=1.95 MiB  peakRSS=30.20 MiB  finalRSS=27.80 MiB  peakWS(os)=30.20 MiB  totalFaults=8277
+===ARMEXIT c REP 1 rc=0
+===ARM llvm REP 1 22:24:17 lane=exe src=bb-llvm
+[cpuphase] send_1to1              98      337.6      93.8       0.0      93.8   95.6%         0        12          6        1089
+[cpuphase] recv_1to1              49      105.7      31.2       0.0      31.2   64.1%         0        13         27         215
+[cpuphase] send_group            195      637.5     171.9       0.0     171.9   88.1%         0         0         11         111
+[cpuphase] recv_group             77       91.9      15.6       0.0      15.6   20.3%         0        10        124          28
+[cpumem] samples=3875  firstRSS=1.97 MiB  peakRSS=29.89 MiB  finalRSS=27.75 MiB  peakWS(os)=29.89 MiB  totalFaults=8323
+===ARMEXIT llvm REP 1 rc=0
+
+== smoke: argo arm
+[cpuphase] send_1to1              55      194.6      31.2      15.6      46.9   84.8%         0        11          5        1074
+[cpuphase] recv_1to1              28       59.4      31.2       0.0      31.2  109.7%         0        10         23         315
+[cpuphase] send_group             87      302.4      46.9      46.9      93.8  107.4%         0         9         13         109
+[cpuphase] recv_group             42       47.7      46.9       0.0      46.9  112.9%         0         3        106          64
+[cpumem] samples=3877  firstRSS=1.98 MiB  peakRSS=30.72 MiB  finalRSS=23.95 MiB  peakWS(os)=30.72 MiB  totalFaults=8625
+===ARMEXIT argo REP 1 rc=0
