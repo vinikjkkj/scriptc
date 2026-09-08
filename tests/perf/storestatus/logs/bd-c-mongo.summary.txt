@@ -1,0 +1,24 @@
+### bx-store-mongo  src=drivers/_x-mongo-plus-zapo.ts  flags:[--provenance-sources --backend c]
+### node=v25.9.0  zig=0.16.0  tar=tar (GNU tar) 1.35  cc=zigcc  target=x86_64-windows-gnu
+### wt=<blocks>/storestatus/wt  head=f91fcd55
+BUILD rc=1  432s  log=156004B
+LOG-SITES total=284
+    144 LOG-CODE  SC1090
+     45 LOG-CODE  SC2020
+     40 LOG-CODE  SC2004
+     21 LOG-CODE  SC2011
+     19 LOG-CODE  SC2009
+      5 LOG-CODE  SC1043
+      2 LOG-CODE  SC2013
+      2 LOG-CODE  SC2002
+      2 LOG-CODE  SC2001
+      1 LOG-CODE  SC2006
+      1 LOG-CODE  SC1100
+      1 LOG-CODE  SC1071
+      1 LOG-CODE  SC1045
+LOG-UNCODED total=0
+2269:284 errors.
+BINARY: none (rc=1) -- FENCE COUNT n/a, NOT 0; ENGINE SCAN n/a
+284 errors.
+### DONE bx-store-mongo rc=1
+GATE-EXIT rc=0

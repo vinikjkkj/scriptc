@@ -1,0 +1,6 @@
+### arming the engine scan on head=f91fcd55
+static rc=0
+dynamic rc=0
+ENGINE-SCAN ctl-hello-static.exe         bytes=677888      quickjs=0 ScrDyn=0 | (non-discriminating: JS_NewRuntime=0 JS_Eval=0 __island_eval=0)
+ENGINE-SCAN ctl-hello-dynamic.exe        bytes=1857536     quickjs=1 ScrDyn=1 | (non-discriminating: JS_NewRuntime=0 JS_Eval=0 __island_eval=0)
+### a marker is USABLE only where the two rows differ.

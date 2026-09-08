@@ -1,0 +1,4 @@
+### analyse c-store-mongo  src=drivers/_x-mongo-plus-zapo.ts  flags:[--provenance-sources]  head=f91fcd55  node=v25.9.0
+sites=1836 preflightFailed=false total=48647 failed=177 island=0 ms=483964
+### analyse c-store-mongo rc=0  487s  json=635857B
+GATE-EXIT rc=0

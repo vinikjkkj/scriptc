@@ -1,0 +1,55 @@
+{
+ "entry": "<blocks>/storestatus/lab/napp/pgbaseD.ts",
+ "flags": [
+  "--provenance-sources"
+ ],
+ "elapsedMs": 504,
+ "crashed": null,
+ "preflightFailed": false,
+ "stats": {
+  "statementsTotal": 3,
+  "statementsFailed": 2,
+  "statementsIsland": 0,
+  "functionsSkipped": 0
+ },
+ "unreachedStats": {
+  "statementsTotal": 0,
+  "statementsFailed": 0,
+  "statementsIsland": 0,
+  "functionsSkipped": 2
+ },
+ "npmStatic": null,
+ "provenanceNotes": [
+  "note: pg@8.23.0: no provenance attestation published; island path used"
+ ],
+ "sites": [
+  {
+   "section": "blocker",
+   "code": "SC2013",
+   "message": "values from the 'pg' package run in the embedded dynamic engine, which this build does not include",
+   "file": "<blocks>/storestatus/lab/napp/pgbasemodD/base.ts",
+   "line": 11
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "extending classes not declared in the program ('XBase') is not supported yet",
+   "file": "<blocks>/storestatus/lab/napp/pgbasemodD/sub.ts",
+   "line": 3
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "constructing through a class value whose class has no lowering (the class declaration itself was rejected — see its own diagnostic) is not supported yet",
+   "file": "<blocks>/storestatus/lab/napp/pgbaseD.ts",
+   "line": 3
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "method calls like 's.who' is not supported yet",
+   "file": "<blocks>/storestatus/lab/napp/pgbaseD.ts",
+   "line": 4
+  }
+ ]
+}

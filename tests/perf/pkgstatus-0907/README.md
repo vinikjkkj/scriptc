@@ -1,5 +1,13 @@
 # pkgstatus — the named packages, measured on main `3f3dd523`, 2026-09-07
 
+> **STORE ROWS SUPERSEDED, 2026-09-08.** Measured again on `main` `f91fcd55`,
+> 56 commits later, by `tests/perf/storestatus/`. The spec-twin fix `d2c952ca`
+> opens reach by ~32x, so every `store-*` row below is stale in its statement
+> count and three of them in their site count (46 -> 39). Which rows and why:
+> **`tests/perf/storestatus/CORRECTIONS-pkgstatus-0907.md`**. Nothing here was
+> measured wrongly and nothing here has been rewritten -- these are what the
+> compiler did at `3f3dd523`.
+
 The standing objective, verbatim: *"the store-\* packages, media-utils, wam and
 voip must reach binaries, and their status must be measured and true (islanded
 is never zero)."*

@@ -1,0 +1,58 @@
+### bx-store-mongo  src=drivers/_x-mongo-plus-zapo.ts  flags:[--provenance-sources --backend c]
+### node=v25.9.0  zig=0.16.0  tar=tar (GNU tar) 1.35  cc=zigcc  target=x86_64-windows-gnu
+### wt=<blocks>/storestatus/wt  head=f91fcd55
+BUILD rc=1  432s  log=156004B
+--- provenance notes (the driver's alias table, in the compiler's words) ---
+1:provenance: zapo-js@1.8.2 ← https://github.com/vinikjkkj/zapo@refs/tags/v1.8.2 @ 757a8071b819 (source compiles statically)
+2:provenance: @zapo-js/store-mongo@1.2.0 ← https://github.com/vinikjkkj/zapo@refs/tags/v1.8.0 @ 9a49e1fffdec (source compiles statically)
+3:provenance: mongodb@6.21.0 ← https://github.com/mongodb/node-mongodb-native@refs/heads/6.x @ 387b6dd29e0a (source compiles statically)
+4:provenance: bson@6.10.4 ← https://github.com/mongodb/js-bson@refs/heads/main @ 302f96e9591c (source compiles statically)
+5:provenance: mongodb-connection-string-url@3.0.2 ← https://github.com/mongodb-js/mongodb-connection-string-url@refs/heads/main @ 26e2c12671f3 (source compiles statically)
+6:provenance: argo-codec@0.2.1: no provenance attestation published; island path used
+7:provenance: @zapo-js/native: not installed under the entry's node_modules; island path used
+8:provenance: mongodb-client-encryption: not installed under the entry's node_modules; island path used
+9:provenance: kerberos: not installed under the entry's node_modules; island path used
+10:provenance: @mongodb-js/zstd: not installed under the entry's node_modules; island path used
+11:provenance: @aws-sdk/credential-providers: not installed under the entry's node_modules; island path used
+12:provenance: gcp-metadata: not installed under the entry's node_modules; island path used
+13:provenance: snappy: not installed under the entry's node_modules; island path used
+14:provenance: socks: not installed under the entry's node_modules; island path used
+15:provenance: aws4: not installed under the entry's node_modules; island path used
+16:provenance: whatwg-url@14.2.0: no provenance attestation published; island path used
+17:provenance: @mongodb-js/saslprep: skipped — provenance package limit (16) reached; island path used
+18:provenance: 41 alias key(s) are spelled by more than one mapped package with different targets ('zapo-js/store', 'zapo-js/signal', 'zapo-js/auth', 'zapo-js/appstate', 'zapo-js/retry', …); tsconfig "paths" is one table per program, so zapo-js's answer is used for all of them and @zapo-js/store-mongo compile against zapo-js's checkout for those specifiers
+--- log error SITES: pattern [ - error SCxxxx: ] over 156004 bytes ---
+LOG-SITES total=284
+    144 LOG-CODE  SC1090
+     45 LOG-CODE  SC2020
+     40 LOG-CODE  SC2004
+     21 LOG-CODE  SC2011
+     19 LOG-CODE  SC2009
+      5 LOG-CODE  SC1043
+      2 LOG-CODE  SC2013
+      2 LOG-CODE  SC2002
+      2 LOG-CODE  SC2001
+      1 LOG-CODE  SC2006
+      1 LOG-CODE  SC1100
+      1 LOG-CODE  SC1071
+      1 LOG-CODE  SC1045
+--- uncoded refusals (a refusal need not carry a code) ---
+LOG-UNCODED total=0
+--- compiler's own totals line (cross-check) ---
+2269:284 errors.
+BINARY: none (rc=1) -- FENCE COUNT n/a, NOT 0; ENGINE SCAN n/a
+--- last 25 log lines ---
+  1324 | export const randomBytes = promisify(crypto.randomBytes);
+       |                                      ^~~~~~~~~~~~~~~~~~
+  1325 | 
+
+  hint: the promisifiable targets are child_process.execFile and the callback builtins with a synchronous lowering (zlib.deflate, zlib.unzip, zlib.deflateRaw, zlib.inflateRaw, crypto.randomInt, crypto.generateKeyPair, crypto.sign, crypto.verify, crypto.randomBytes, crypto.pbkdf2)
+
+<blocks>/storestatus/prov/387b6dd29e0aef37fb36607c4a0c652ef0878029/src/utils.ts:1445:41 - error SC2020: 'Symbol.dispose' is part of the standard library types but has no scriptc lowering yet
+
+  1444 | /** @internal */
+  1445 | export const kDispose: unique symbol = (Symbol.dispose as any) ?? Symbol('dispose');
+       |                                         ^~~~~~~~~~~~~~
+  1446 | 
+
+  hint: the typ

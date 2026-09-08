@@ -1,0 +1,50 @@
+### bx-store-postgres  src=drivers/_x-postgres-plus-zapo.ts  flags:[--provenance-sources --backend c]
+### node=v25.9.0  zig=0.16.0  tar=tar (GNU tar) 1.35  cc=zigcc  target=x86_64-windows-gnu
+### wt=<blocks>/storestatus/wt  head=f91fcd55
+BUILD rc=1  506s  log=19518B
+--- provenance notes (the driver's alias table, in the compiler's words) ---
+1:provenance: zapo-js@1.8.2 ← https://github.com/vinikjkkj/zapo@refs/tags/v1.8.2 @ 757a8071b819 (source compiles statically)
+2:provenance: @zapo-js/store-postgres@1.2.0 ← https://github.com/vinikjkkj/zapo@refs/tags/v1.8.0 @ 9a49e1fffdec (source compiles statically)
+3:provenance: argo-codec@0.2.1: no provenance attestation published; island path used
+4:provenance: @zapo-js/native: not installed under the entry's node_modules; island path used
+5:provenance: pg@8.23.0: no provenance attestation published; island path used
+6:provenance: 41 alias key(s) are spelled by more than one mapped package with different targets ('zapo-js/store', 'zapo-js/signal', 'zapo-js/auth', 'zapo-js/appstate', 'zapo-js/retry', …); tsconfig "paths" is one table per program, so zapo-js's answer is used for all of them and @zapo-js/store-postgres compile against zapo-js's checkout for those specifiers
+--- log error SITES: pattern [ - error SCxxxx: ] over 19518 bytes ---
+LOG-SITES total=39
+     19 LOG-CODE  SC2004
+     16 LOG-CODE  SC1090
+      2 LOG-CODE  SC2013
+      2 LOG-CODE  SC2011
+--- uncoded refusals (a refusal need not carry a code) ---
+LOG-UNCODED total=0
+--- compiler's own totals line (cross-check) ---
+325:39 errors.
+BINARY: none (rc=1) -- FENCE COUNT n/a, NOT 0; ENGINE SCAN n/a
+--- last 25 log lines ---
+     |                                         ^~~~~~~~~~~
+  20 |     public constructor(options: WaPgStorageOptions) {
+
+<blocks>/storestatus/prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/packages/store-postgres/src/session.store.ts:19:39 - error SC1090: extending classes not declared in the program ('BasePgStore') is not supported yet
+
+  18 | 
+  19 | export class WaSessionPgStore extends BasePgStore implements WaSessionStore {
+     |                                       ^~~~~~~~~~~
+  20 |     public constructor(options: WaPgStorageOptions) {
+
+<blocks>/storestatus/prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/packages/store-postgres/src/signal.store.ts:9:38 - error SC1090: extending classes not declared in the program ('BasePgStore') is not supported yet
+
+   8 | 
+   9 | export class WaSignalPgStore extends BasePgStore implements WaSignalStore {
+     |                                      ^~~~~~~~~~~
+  10 |     public constructor(options: WaPgStorageOptions) {
+
+<blocks>/storestatus/prov/9a49e1fffdec8bbfae14cd64c98ffa88c36ef13e/packages/store-postgres/src/thread.store.ts:26:38 - error SC1090: extending classes not declared in the program ('BasePgStore') is not supported yet
+
+  25 | 
+  26 | export class WaThreadPgStore extends BasePgStore implements WaThreadStore {
+     |                                      ^~~~~~~~~~~
+  27 |     public constructor(options: WaPgStorageOptions) {
+
+39 errors.
+### DONE bx-store-postgres rc=1
+GATE-EXIT rc=0
