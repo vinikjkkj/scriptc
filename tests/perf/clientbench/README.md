@@ -958,6 +958,37 @@ carrying the right teaching:
 `--npm-static` exempts the package from that rule and answers a wrong value instead.
 `runs/npm-static-namespace-control.txt`.
 
+### The repro, with no zapo and no argo-codec in it
+
+`tests/fixtures/npm/cases/npmstatic-dynimport-cjs/main.ts` dynamically imports
+**this repo's own** `gtdefine` fixture — the `Object.defineProperty(exports,'n',{get})`
+family that `npm-static-rewrite.ts` itself rewrites into `module.exports = {…}`.
+
+```
+node                                    leaf function     WIDTH number
+compiled --backend c --npm-static gtdefine
+  build ok, npmStatic status "static",
+  zero diagnostics, exit 0              leaf undefined    WIDTH undefined
+```
+
+`tests/harness/module-ns-value.test.ts` pins namespace behaviour thoroughly — a mutable
+export refuses SC1013 by name, an assignment and a delete both refuse loudly — but every
+package it stages is ESM source, where `getExports()` carries every name. The CJS barrel
+shape, which is the shape `--npm-static`'s own rewrite emits, has no coverage there.
+`runs/npm-static-dynimport-cjs-repro.txt`.
+
+### And no lane compiles `loadArgo()` correctly -- only one is honest about it
+
+| lane | build | run |
+|---|---|---|
+| `--npm-static argo-codec`, static | exit 0, no fence fires | answers `null` -- **silent wrong value** |
+| no flag, static | exit 0 | answers `null` (the in-band module refusal, swallowed by zapo's `catch`) |
+| `--dynamic` (the island, quickjs) | **REFUSES**, SC1090 at the same line | -- |
+
+The island lane's refusal names the real shape: the namespace is `any` and cannot exit
+into the declared `ArgoModule | null | undefined`. That is the same fact the static lane
+discovers at run time and reports as "not installed". `runs/npm-static-namespace-control.txt`.
+
 The file already states the doctrine this breaks. At `lower-island.ts:1257`, for
 `export *` re-exports it says a namespace built without them "answers `undefined` for
 a name Node answers, silently" — and refuses to build. The CJS `export=` case walks

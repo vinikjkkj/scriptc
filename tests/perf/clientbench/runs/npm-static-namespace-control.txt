@@ -56,3 +56,21 @@
 # teaching; the npm-static package in the same position COMPILES and answers a wrong
 # value. And the two spellings the tier does serve are not served for an npm-static
 # package either -- the arm at lower-island.ts:725 returns before the position gate.
+
+== FOURTH LANE: --dynamic (the island, quickjs) on the SAME program ==
+<blocks>/clientbench/lab/app/mexprobe/argo-decoder-copy.ts:32:22 - error SC1090: using an 'any' value where 'null | { Reader: (Uint8Array) => { arr: Uint8Array; bitset: () => number; bytes: (number) => Uint8Array; end: number; label: () => number; pos: number } } | undefined' is expected (an 'any' value can only exit to numbers, strings, booleans, JSON-safe records/arrays/unions, and 'T | undefined' over those) is not supported yet
+
+  31 |     try {
+  32 |         cachedArgo = await import('argo-codec')
+     |                      ^~~~~~~~~~~~~~~~~~~~~~~~~~
+  33 |     } catch {
+
+1 error.
+
+# So no lane compiles zapo's loadArgo() correctly, and only ONE of the three is honest:
+#   --npm-static (static)  : builds, runs, answers null            <- silent wrong value
+#   no flag      (static)  : builds, runs, answers null            <- in-band refusal, swallowed
+#   --dynamic    (island)  : REFUSES at build time, SC1090 at the same line
+# The island lane's refusal names the real shape: the namespace is 'any' and cannot exit
+# into the declared 'ArgoModule | null | undefined'. That is the same fact the static
+# lane discovers at run time and reports as "not installed".
