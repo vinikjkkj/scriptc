@@ -480,12 +480,19 @@ run so it cannot be shaped by what comes out.
 
 ## 8.1 The arms
 
-| label | lane | binary / source | what it answers |
-|---|---|---|---|
-| `c` | compiled | `out/bb-c/messaging.bench.exe`, `--backend c` | the readable-C lane |
-| `llvm` | compiled | `out/bb-llvm/messaging.bench.exe`, explicit `--backend llvm` | **the lane that ships** |
-| `node` | interpreted | the same `bench-bench/messaging.bench.ts` under `node --import tsx` | the comparison that matters |
-| `argo` | compiled | `out/bb-argo/messaging.bench.exe`, `--backend c --npm-static argo-codec` | the only honest cost of closing the uncoded refusal |
+| label | lane | binary / source | bytes | md5 | what it answers |
+|---|---|---|---:|---|---|
+| `c` | compiled | `out/bb-c`, `--backend c` | 28,345,856 | `6832f2ef114cfd665748412ddd9ffb39` | the readable-C lane |
+| `llvm` | compiled | `out/bb-llvm`, explicit `--backend llvm` | 27,048,960 | `3c488367dd275792cb5a87ad6a84cede` | **the lane that ships** |
+| `argo` | compiled | `out/bb-argo`, `--backend c --npm-static argo-codec` | 28,395,008 | `733b3490f4f3b7ac39bbe941d6dcadb2` | the only honest cost of closing the uncoded refusal |
+| `node` | interpreted | `bench-bench/messaging.bench.ts` under `node --import tsx` | — | entry `83c65a1665ae60532a233ba7963825b1` | the comparison that matters |
+
+All three compiled arms rebuilt from the marked source with **0 strict
+errors**, all three read `quickjs 0 / ScrDyn 0`, and all three were smoke-run
+through the full pipeline before the window: exit 0, four phase rows and a
+peak-RSS line each. `bb-argo` carries **2** uncoded module refusals where
+`bb-c` and `bb-llvm` carry **3** — the `--npm-static` difference, unchanged by
+the phase marks.
 
 All four run the **same source**, `bench-bench`, which is `bench-noprof` plus
 two `console.log` phase markers. Neither lane gets an instrument the other
