@@ -4,8 +4,8 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 
-const LAB = "<blocks>/pkgstatus3-lab";
-const DOC = "<blocks>/pkgstatus/tests/perf/pkgstatus-0907/README.md";
+const LAB = `${process.env.BLOCKS_ROOT ?? "<blocks>"}/pkgstatus3-lab`;
+const DOC = `${process.env.BLOCKS_ROOT ?? "<blocks>"}/pkgstatus/tests/perf/pkgstatus-0907/README.md`;
 const HEAD_END = "<!--SECTIONS-BELOW-->";
 
 const run = (args) => execFileSync(process.execPath, args, { encoding: "utf8", maxBuffer: 1 << 28 });

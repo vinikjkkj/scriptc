@@ -5,7 +5,7 @@
 # confirmation line on stderr, and the fence-location qualifier baked into the
 # emitted C.
 set -u
-. <blocks>/clientbench/lab/env.sh || exit 1
+. ${BLOCKS_ROOT:-<blocks>}/clientbench/lab/env.sh || exit 1
 TAG=$1; shift
 mkdir -p "$LAB/out/$TAG"
 cd "$APP" || exit 1

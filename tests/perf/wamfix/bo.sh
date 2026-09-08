@@ -2,7 +2,7 @@
 # build-and-oracle: $1 = driver path relative to $LAB/app, $2 = name, $3.. = flags
 # Builds on BOTH backends, runs both, runs the same source under node v25.9.0,
 # and scans for the engine with the only two markers that discriminate.
-. <blocks>/wamfix-lab/env.sh
+. ${BLOCKS_ROOT:-<blocks>}/wamfix-lab/env.sh
 cd "$LAB/app" || exit 1
 SRC="$1"; NAME="$2"; shift 2
 mkdir -p "$LAB/bin"

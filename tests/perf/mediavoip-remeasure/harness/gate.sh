@@ -1,5 +1,5 @@
 #!/bin/bash
-. <blocks>/remeasure/lab/env.sh
+. ${BLOCKS_ROOT:-<blocks>}/remeasure/lab/env.sh
 export PATH="$NODE25:$PATH"
 cd "$WT" || exit 1
 echo "node: $(node --version)"

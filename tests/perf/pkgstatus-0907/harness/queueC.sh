@@ -5,8 +5,8 @@
 # absent -- not zero. Still no --best-effort.
 #
 # $1.. = names to rebuild (must match drivers/<name>.ts).
-. <blocks>/pkgstatus3-lab/env.sh
-L=<blocks>/pkgstatus3-lab
+. ${BLOCKS_ROOT:-<blocks>}/pkgstatus3-lab/env.sh
+L=${BLOCKS_ROOT:-<blocks>}/pkgstatus3-lab
 {
   echo "=== QUEUE-C START $(date -Is)"
   bash "$L/build1.sh" hello.ts ctl-hello-c --provenance-sources --backend c

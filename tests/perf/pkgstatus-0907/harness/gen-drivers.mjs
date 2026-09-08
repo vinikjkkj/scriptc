@@ -3,7 +3,7 @@
 // difference between two packages is the package, not the driver.
 import { writeFileSync, mkdirSync, readdirSync, rmSync } from "node:fs";
 
-const DIR = "<blocks>/pkgstatus3-lab/napp/drivers";
+const DIR = `${process.env.BLOCKS_ROOT ?? "<blocks>"}/pkgstatus3-lab/napp/drivers`;
 mkdirSync(DIR, { recursive: true });
 for (const f of readdirSync(DIR)) rmSync(`${DIR}/${f}`);
 

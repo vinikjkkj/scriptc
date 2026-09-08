@@ -11,8 +11,8 @@
 #
 # Its own tsconfig carries lib ["ES2020","DOM"], matching
 # packages/voip/tsconfig.json in that tree.
-. <blocks>/pkgstatus3-lab/env.sh
-L=<blocks>/pkgstatus3-lab
+. ${BLOCKS_ROOT:-<blocks>}/pkgstatus3-lab/env.sh
+L=${BLOCKS_ROOT:-<blocks>}/pkgstatus3-lab
 {
   echo "=== QUEUE-F START $(date -Is)  node=$(node --version)"
   for p in media-utils voip wam; do

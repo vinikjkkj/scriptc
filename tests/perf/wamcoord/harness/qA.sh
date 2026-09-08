@@ -1,8 +1,8 @@
 #!/bin/bash
 # Q1 from the coordinator: does store-mysql LINK, under either setting?
 # Strict, no --best-effort, both sides, same compiler, same host.
-. <blocks>/wamcoord-lab/env.sh
-L=<blocks>/wamcoord-lab
+. ${BLOCKS_ROOT:-<blocks>}/wamcoord-lab/env.sh
+L=${BLOCKS_ROOT:-<blocks>}/wamcoord-lab
 {
   echo "ORACLE-NODE $(node --version)"
   echo "=== QA START $(date -Is)"

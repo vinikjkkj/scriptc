@@ -1,5 +1,5 @@
 #!/bin/bash
-. <blocks>/pkgstatus-lab/env.sh
+. ${BLOCKS_ROOT:-<blocks>}/pkgstatus-lab/env.sh
 export SCRIPTC_TEST_WORKERS=2
 export PATH="$NODE25:$PATH"
 cd "$WT" || exit 1

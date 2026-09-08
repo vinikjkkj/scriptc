@@ -1,9 +1,9 @@
 #!/bin/bash
 # Regenerate every derived artefact in tests/perf/pkgstatus-0907 from the raw
 # records, so nothing in the document is hand-transcribed.
-. <blocks>/pkgstatus3-lab/env.sh
-L=<blocks>/pkgstatus3-lab
-D=<blocks>/pkgstatus/tests/perf/pkgstatus-0907
+. ${BLOCKS_ROOT:-<blocks>}/pkgstatus3-lab/env.sh
+L=${BLOCKS_ROOT:-<blocks>}/pkgstatus3-lab
+D=${BLOCKS_ROOT:-<blocks>}/pkgstatus/tests/perf/pkgstatus-0907
 NAMES="store-memory store-sqlite store-mongo store-mysql store-postgres store-redis media-utils wam voip"
 FNAMES="src-store-sqlite src-store-redis src-media-utils src-voip src-wam"
 

@@ -3,8 +3,8 @@
 #  E1  _x-waclient-182 -- does the zapo-js the driver INSTALLS (1.8.2) carry the
 #      same root blockers the store packages hit inside their attested v1.8.0
 #      checkout? If it does, the store lane's blockers are not a version skew.
-. <blocks>/pkgstatus3-lab/env.sh
-L=<blocks>/pkgstatus3-lab
+. ${BLOCKS_ROOT:-<blocks>}/pkgstatus3-lab/env.sh
+L=${BLOCKS_ROOT:-<blocks>}/pkgstatus3-lab
 {
   echo "=== QUEUE-E START $(date -Is)"
   timeout 5400 node "$L/sites.mjs" "$L/napp/drivers/_x-waclient-182.ts" \

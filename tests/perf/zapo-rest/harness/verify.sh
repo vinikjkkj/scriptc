@@ -32,7 +32,7 @@ export ZAPO_SESSION=verify
 # counts move underneath the restart diff for reasons that have nothing to do
 # with persistence. Set ZAPO_AUTOCONNECT=1 to watch real connect attempts.
 export ZAPO_AUTOCONNECT=${ZAPO_AUTOCONNECT:-0}
-export USERPROFILE='<home>'
+export USERPROFILE="${HOME_ROOT:-<home>}"
 
 H="-H x-api-key:$TOKEN"
 B="http://127.0.0.1:$PORT"

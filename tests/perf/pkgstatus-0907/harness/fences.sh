@@ -9,7 +9,7 @@
 # entirely convincing false zero.
 #
 # Usage: bash fences.sh <out-dir> <program-basename> ...
-. <blocks>/pkgstatus3-lab/env.sh
+. ${BLOCKS_ROOT:-<blocks>}/pkgstatus3-lab/env.sh
 OUT="$1"; shift
 for base in "$@"; do
   tot=0; files=0; bytes=0

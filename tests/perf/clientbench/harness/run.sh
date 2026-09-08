@@ -11,7 +11,7 @@
 # CB_FULL=1 for the shipped default (1000 contacts x 2 devices, 4 groups x
 # 500 members, 1000 messages/scenario).
 set -u
-. <blocks>/clientbench/lab/env.sh || exit 1
+. ${BLOCKS_ROOT:-<blocks>}/clientbench/lab/env.sh || exit 1
 LANE=$1; TAG=$2; DIR=${3:-bench-clientonly-unmasked}
 BENCH="$APP/tree/packages/fake-server/$DIR"
 

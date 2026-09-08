@@ -2,8 +2,8 @@
 # Q5: order- and caller-independence. Run all five provenance suites THREE ways
 # on the same tree: default env, gate forced ON for the whole run, and the five
 # files in reversed order. A file that leaks env or depends on order breaks here.
-. <blocks>/wamcoord-lab/env.sh
-L=<blocks>/wamcoord-lab
+. ${BLOCKS_ROOT:-<blocks>}/wamcoord-lab/env.sh
+L=${BLOCKS_ROOT:-<blocks>}/wamcoord-lab
 cd "$WT" || exit 1
 F="tests/harness/provenance.test.ts tests/harness/provenance-alias-baseurl.test.ts tests/harness/provenance-dist-esm.test.ts tests/harness/provenance-transitive-subpath.test.ts tests/harness/provenance-authored-js.test.ts"
 R="tests/harness/provenance-authored-js.test.ts tests/harness/provenance-transitive-subpath.test.ts tests/harness/provenance-dist-esm.test.ts tests/harness/provenance-alias-baseurl.test.ts tests/harness/provenance.test.ts"

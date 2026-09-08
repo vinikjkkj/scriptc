@@ -7,7 +7,7 @@
 #     what was scanned is printed beside every count.
 #   * a non-zero build emits no TU: its fence count is n/a, never 0.
 #   * the compiler's own "N errors." line is printed verbatim as a cross-check.
-. <blocks>/wamcoord-lab/env.sh
+. ${BLOCKS_ROOT:-<blocks>}/wamcoord-lab/env.sh
 cd "$LAB/napp" || exit 1
 SRC="$1"; NAME="$2"; shift 2
 SBASE=$(basename "$SRC" .ts)

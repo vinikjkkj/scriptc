@@ -1,7 +1,7 @@
 #!/bin/bash
-. <blocks>/wamcoord-lab/env.sh
+. ${BLOCKS_ROOT:-<blocks>}/wamcoord-lab/env.sh
 export SCRIPTC_PROVENANCE_AUTHORED_JS=1
-L=<blocks>/wamcoord-lab
+L=${BLOCKS_ROOT:-<blocks>}/wamcoord-lab
 mkdir -p "$L/sites" "$L/logs"
 {
   echo "ORACLE-NODE $(node --version)"

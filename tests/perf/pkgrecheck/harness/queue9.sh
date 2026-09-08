@@ -1,5 +1,5 @@
 #!/bin/bash
-. <blocks>/pkgrecheck-lab/env.sh
+. ${BLOCKS_ROOT:-<blocks>}/pkgrecheck-lab/env.sh
 cd "$LAB/app" || exit 1
 run() { N="$1"; S="$2"; shift 2
   timeout 3600 node "$WT/packages/cli/dist/main.js" build "$S" -o "$LAB/diag/$N.exe" --no-keep-c "$@" > "$LAB/diag/$N.log" 2>&1

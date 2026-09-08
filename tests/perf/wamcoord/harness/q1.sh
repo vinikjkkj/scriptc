@@ -1,6 +1,6 @@
 #!/bin/bash
-. <blocks>/wamcoord-lab/env.sh
-L=<blocks>/wamcoord-lab
+. ${BLOCKS_ROOT:-<blocks>}/wamcoord-lab/env.sh
+L=${BLOCKS_ROOT:-<blocks>}/wamcoord-lab
 mkdir -p "$L/sites" "$L/logs"
 {
   echo "ORACLE-NODE $(node --version)"

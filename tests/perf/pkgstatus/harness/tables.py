@@ -13,7 +13,7 @@ A zero and an islanded must never look alike.
 """
 import json, os, re, sys, glob, collections
 
-LAB = "<blocks>/pkgstatus-lab"
+LAB = (os.environ.get("BLOCKS_ROOT") or "<blocks>") + "/pkgstatus-lab"
 
 # Fold block-specific roots so two blocks' messages compare. Both appear in
 # site `file` fields AND inside diagnostic text (SC0001 quotes a node_modules

@@ -5,8 +5,8 @@
 # block's cache, which a lab purge would take out from under this one. It
 # now derives from BLOCK; the original literal is recorded here.
 BLOCK="${BLOCK:-pkgstatus2}"
-ROOT="<blocks>\\${BLOCK}"
-ROOTP="<blocks>/${BLOCK}"
+ROOT="${BLOCKS_ROOT:-<blocks>}\\${BLOCK}"
+ROOTP="${BLOCKS_ROOT:-<blocks>}/${BLOCK}"
 
 export ZIG_GLOBAL_CACHE_DIR="${ROOT}\.zig"
 export ZIG_LOCAL_CACHE_DIR="${ROOT}\.zig"
@@ -22,8 +22,12 @@ export SCRIPTC_TEST_WORKERS=2
 export SCRIPTC_GENERIC_SLOT=1
 export WT="${ROOTP}"
 export LAB="${ROOTP}-lab"
-export PATH="<home>/AppData/Local/nvm/v25.9.0:<zapo-work>/tools/zig:$PATH"
-export NODE25='<home>/AppData/Local/nvm/v25.9.0'
+# NOTE: PATH is colon-separated, so a Windows-spelled root splits into two entries --
+# the drive letter becomes an entry of its own and the rest of the path is lost.
+# *_ROOT_POSIX holds the MSYS spelling: a different VALUE, not a restyling of one.
+# Do not collapse the pair back into a single variable.
+export PATH="${HOME_ROOT_POSIX:-<home>}/AppData/Local/nvm/v25.9.0:${ZAPO_WORK_ROOT_POSIX:-<zapo-work>}/tools/zig:$PATH"
+export NODE25="${HOME_ROOT_POSIX:-<home>}/AppData/Local/nvm/v25.9.0"
 
 # GUARD. An unpinned cache extracts under homedir(), which on Windows is the
 # user's C: drive: provenance.ts falls back to

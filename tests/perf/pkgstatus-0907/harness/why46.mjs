@@ -4,7 +4,7 @@
  * per-cause counts inside (b). If the three decompose identically, the number
  * is a shared SHAPE plus a shared SCAFFOLD, not a coincidence. */
 import { readFileSync } from "node:fs";
-const LAB = "<blocks>/pkgstatus3-lab/sites";
+const LAB = `${process.env.BLOCKS_ROOT ?? "<blocks>"}/pkgstatus3-lab/sites`;
 const norm = (f) => String(f).split(String.fromCharCode(92)).join("/");
 for (const p of ["store-mysql", "store-postgres", "store-redis", "store-sqlite"]) {
   const r = JSON.parse(readFileSync(`${LAB}/${p}.json`, "utf8"));

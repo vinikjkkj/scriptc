@@ -1,6 +1,6 @@
 #!/bin/bash
 # flagless (or arbitrary-flag) diagnostic count, default backend, no cc if it fails
-. <blocks>/pkgrecheck-lab/env.sh
+. ${BLOCKS_ROOT:-<blocks>}/pkgrecheck-lab/env.sh
 cd "$LAB/app" || exit 1
 SRC="$1"; NAME="$2"; shift 2
 mkdir -p "$LAB/diag"

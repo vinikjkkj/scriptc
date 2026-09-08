@@ -2,8 +2,8 @@
 # The default lane is untouched by construction (the gate is off by default).
 # This asks the other half: IF the default were flipped, do the compiler's own
 # provenance tests still pass? Run twice on the same tree, gate OFF then ON.
-. <blocks>/wamcoord-lab/env.sh
-L=<blocks>/wamcoord-lab
+. ${BLOCKS_ROOT:-<blocks>}/wamcoord-lab/env.sh
+L=${BLOCKS_ROOT:-<blocks>}/wamcoord-lab
 cd "$WT" || exit 1
 {
   echo "ORACLE-NODE $(node --version)"

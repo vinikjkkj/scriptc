@@ -16,7 +16,7 @@ set -eu
 OUT="${1:?usage: build.sh <scratch-dir>}"
 HERE="$(cd "$(dirname "$0")" && pwd)"
 REPO="$(cd "$HERE/../.." && pwd)"
-ZIG="${ZIG:-<zapo-work>/tools/zig/zig.exe}"
+ZIG="${ZIG:-${ZAPO_WORK_ROOT:-<zapo-work>}/tools/zig/zig.exe}"
 TARGET="${SCRIPTC_TARGET:-x86_64-windows-gnu}"
 
 MBEDTLS="$REPO/packages/runtime/vendor/mbedtls"

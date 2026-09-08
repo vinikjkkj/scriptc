@@ -1,9 +1,9 @@
 #!/bin/bash
 # The headline, with NO environment variable set at all: the published
 # @zapo-js/wam must now reach a binary on the shipped default.
-. <blocks>/wamcoord-lab/env.sh
+. ${BLOCKS_ROOT:-<blocks>}/wamcoord-lab/env.sh
 unset SCRIPTC_PROVENANCE_AUTHORED_JS
-L=<blocks>/wamcoord-lab
+L=${BLOCKS_ROOT:-<blocks>}/wamcoord-lab
 {
   echo "ORACLE-NODE $(node --version)"
   echo "=== QC START $(date -Is)   AUTHORED_JS=${SCRIPTC_PROVENANCE_AUTHORED_JS:-<UNSET, the shipped default>}"

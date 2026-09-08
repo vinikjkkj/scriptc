@@ -1,6 +1,6 @@
 #!/bin/bash
-. <blocks>/wamcoord-lab/env.sh
-L=<blocks>/wamcoord-lab
+. ${BLOCKS_ROOT:-<blocks>}/wamcoord-lab/env.sh
+L=${BLOCKS_ROOT:-<blocks>}/wamcoord-lab
 {
   echo "ORACLE-NODE $(node --version)"
   echo "=== QV6 START $(date -Is) -- voip lane A2 AFTER the compound-assignment change"

@@ -9,13 +9,13 @@
 # imports the store-mongo SOURCE COPY carried in that lab, not the npm package.
 # That is a different lane from my own store-mongo driver and the two numbers
 # are not interchangeable.
-. <blocks>/pkgstatus3-lab/env.sh
-L=<blocks>/pkgstatus3-lab
+. ${BLOCKS_ROOT:-<blocks>}/pkgstatus3-lab/env.sh
+L=${BLOCKS_ROOT:-<blocks>}/pkgstatus3-lab
 {
   echo "=== QUEUE-D START $(date -Is)  node=$(node --version)"
-  echo "--- entry: <blocks>/mongoredecl-lab/app/drivers/drv-mongo.ts (read-only)"
+  echo "--- entry: ${BLOCKS_ROOT:-<blocks>}/mongoredecl-lab/app/drivers/drv-mongo.ts (read-only)"
   timeout 5400 node "$L/sites.mjs" \
-    "<blocks>/mongoredecl-lab/app/drivers/drv-mongo.ts" \
+    "${BLOCKS_ROOT:-<blocks>}/mongoredecl-lab/app/drivers/drv-mongo.ts" \
     "$L/sites/xcheck-mongoredecl-drv-mongo.json" --provenance-sources 2>&1
   echo "EXIT=$?"
   echo "=== QUEUE-D DONE $(date -Is)"

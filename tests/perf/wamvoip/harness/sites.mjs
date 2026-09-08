@@ -8,7 +8,7 @@ import { writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
-const WT = process.env.WT ?? "<blocks>/wamvoip";
+const WT = process.env.WT ?? `${process.env.BLOCKS_ROOT ?? "<blocks>"}/wamvoip`;
 const compiler = await import(pathToFileURL(`${WT}/packages/compiler/dist/index.js`).href);
 const provmod = await import(
   pathToFileURL(`${WT}/packages/compiler/dist/frontend/provenance.js`).href

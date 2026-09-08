@@ -4,11 +4,11 @@
 # stops growing (a fixpoint that still fails is reported as such, never as
 # success), or when a diagnostic cannot be attributed to a cell.
 set -u
-source <blocks>/viewtype/lab/env.sh
+source ${BLOCKS_ROOT:-<blocks>}/viewtype/lab/env.sh
 S="$1"          # shape key: D | U | K
 DIR="$2"        # directory holding probe-$S.ts
 BACKEND="${3:-llvm}"
-L=<blocks>/viewtype/lab
+L=${BLOCKS_ROOT:-<blocks>}/viewtype/lab
 cd "$DIR" || exit 2
 [ -f "disabled-$S.json" ] || echo '[]' > "disabled-$S.json"
 for i in 1 2 3 4 5 6 7 8 9 10; do

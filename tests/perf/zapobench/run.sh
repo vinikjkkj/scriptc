@@ -6,8 +6,8 @@
 # with the client wrapped in runner.exe so BOTH lanes are measured by the same
 # kernel counter (PeakWorkingSetSize) read from outside the process.
 set -u
-. <blocks>/zapobench/lab/env.sh
-A=<zapo-work>/zapobench-artifacts
+. ${BLOCKS_ROOT:-<blocks>}/zapobench/lab/env.sh
+A=${ZAPO_WORK_ROOT:-<zapo-work>}/zapobench-artifacts
 LAB="$1"; MODE="$2"; PORT="$3"; shift 3
 mkdir -p "$A/raw"
 export DV_RUNNER="$A/runner/runner.exe"

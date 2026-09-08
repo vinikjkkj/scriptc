@@ -17,7 +17,7 @@
 #        sh tests/perf/wrtcscope/harness/self-test.sh [probe] [lane]
 
 set -u
-LAB="${WRTCSCOPE_LAB:-<blocks>/wrtcscope/lab}"
+LAB="${WRTCSCOPE_LAB:-${BLOCKS_ROOT:-<blocks>}/wrtcscope/lab}"
 OUT="${WRTCSCOPE_OUT:-$LAB/out}"
 P="${1:-rtc-dc}"
 LANE="${2:-noPkg}"

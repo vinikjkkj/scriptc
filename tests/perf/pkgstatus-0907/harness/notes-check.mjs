@@ -1,7 +1,7 @@
 /* Cross-check the claims made about provenance notes, so none is asserted
  * from memory. Prints the note lines that carry each claim. */
 import { readFileSync, readdirSync } from "node:fs";
-const LAB = "<blocks>/pkgstatus3-lab/sites";
+const LAB = `${process.env.BLOCKS_ROOT ?? "<blocks>"}/pkgstatus3-lab/sites`;
 const recs = readdirSync(LAB).filter((f) => f.endsWith(".json") && !f.startsWith("_ctl"));
 const tally = {};
 for (const f of recs) {

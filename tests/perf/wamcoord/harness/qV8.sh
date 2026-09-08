@@ -1,6 +1,6 @@
 #!/bin/bash
-. <blocks>/wamcoord-lab/env.sh
-L=<blocks>/wamcoord-lab
+. ${BLOCKS_ROOT:-<blocks>}/wamcoord-lab/env.sh
+L=${BLOCKS_ROOT:-<blocks>}/wamcoord-lab
 {
   echo "ORACLE-NODE $(node --version)"
   echo "=== QV8 START $(date -Is) -- three `as any` casts removed, line-neutral"

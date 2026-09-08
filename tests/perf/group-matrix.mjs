@@ -121,7 +121,7 @@ for (const s of SCENARIOS) {
 
 /* The runtimes. A Node lane is an interpreter PATH plus a label, because
  * "node" is not one runtime here. */
-const NODE25 = flag('node25', '<home>\\AppData\\Local\\nvm\\v25.9.0\\node.exe')
+const NODE25 = flag('node25', `${process.env.HOME_ROOT ?? "<home>"}\\AppData\\Local\\nvm\\v25.9.0\\node.exe`)
 const NODE22 = flag('node22', process.execPath)
 const WANT = flag('runtimes', 'node25,exe').split(',').map((s) => s.trim())
 

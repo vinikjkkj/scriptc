@@ -3,7 +3,7 @@
 import fs from "node:fs";
 import path from "node:path";
 
-const ROOT = "<blocks>/pkgstatus-lab/app/pkgs";
+const ROOT = `${process.env.BLOCKS_ROOT ?? "<blocks>"}/pkgstatus-lab/app/pkgs`;
 
 function walk(d, out = []) {
   for (const e of fs.readdirSync(d, { withFileTypes: true })) {

@@ -12,7 +12,7 @@
 #     never 0. The script says so in words.
 #   * the per-code tally is cross-checked against the compiler's own
 #     "N errors." line, printed verbatim.
-. <blocks>/mediautils-work/env.sh
+. ${BLOCKS_ROOT:-<blocks>}/mediautils-work/env.sh
 cd "$LAB/napp" || exit 1
 SRC="$1"; NAME="$2"; shift 2
 OUT="$LAB/out"

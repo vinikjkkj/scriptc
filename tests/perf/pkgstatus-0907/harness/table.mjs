@@ -13,7 +13,7 @@
  */
 import { readFileSync, existsSync } from "node:fs";
 
-const LAB = "<blocks>/pkgstatus3-lab";
+const LAB = `${process.env.BLOCKS_ROOT ?? "<blocks>"}/pkgstatus3-lab`;
 const NAMES = process.argv.slice(2);
 const CASCADE = new Set(["SC2004"]);
 

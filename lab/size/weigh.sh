@@ -2,11 +2,11 @@
 # Weigh the two size classes with the CLI, which size-class.ts records as
 # agreeing with the harness to the byte. $1 is a label for the output.
 set -u
-. <blocks>/twobyte/lab/env.sh
-cd <blocks>/twobyte || exit 1
+. ${BLOCKS_ROOT:-<blocks>}/twobyte/lab/env.sh
+cd ${BLOCKS_ROOT:-<blocks>}/twobyte || exit 1
 . lab/size/progs.sh
 lab=$1
-out=<blocks>/twobyte-tmp/size
+out=${BLOCKS_ROOT:-<blocks>}/twobyte-tmp/size
 for p in static regex; do
   rm -f "$out/$lab-$p.exe"
   node packages/cli/dist/main.js build "$out/$p.ts" --keep-c -o "$out/$lab-$p.exe" >/dev/null 2>&1

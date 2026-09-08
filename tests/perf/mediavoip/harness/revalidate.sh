@@ -3,7 +3,7 @@
 # analyzed" nor "not analyzable" is DID-NOT-REPORT, not "no diagnostics".
 # Re-runs those. Prints what it found so a clean sweep can say "nothing
 # changed" out loud.
-. <blocks>/mediavoip/lab/env.sh
+. ${BLOCKS_ROOT:-<blocks>}/mediavoip/lab/env.sh
 OUT="${1:-$LAB/cov}"
 cd "$LAB/app" || exit 1
 bad=0

@@ -1,8 +1,8 @@
 #!/bin/bash
 # voip, the lane table. A site count is two facts multiplied; measure both axes
 # before quoting one number.
-. <blocks>/wamcoord-lab/env.sh
-L=<blocks>/wamcoord-lab
+. ${BLOCKS_ROOT:-<blocks>}/wamcoord-lab/env.sh
+L=${BLOCKS_ROOT:-<blocks>}/wamcoord-lab
 {
   echo "ORACLE-NODE $(node --version)"
   echo "=== QV1 START $(date -Is)"

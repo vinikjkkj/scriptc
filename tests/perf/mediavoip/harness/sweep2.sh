@@ -1,6 +1,6 @@
 #!/bin/bash
 # Per-module site dump. $1 = output dir, $2.. = extra compiler flags.
-. <blocks>/mediavoip/lab/env.sh
+. ${BLOCKS_ROOT:-<blocks>}/mediavoip/lab/env.sh
 OUT="$1"; shift
 mkdir -p "$OUT"
 LOCK="$OUT/.lock"

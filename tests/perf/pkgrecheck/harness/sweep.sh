@@ -2,7 +2,7 @@
 # Per-module site dump. $1 = output dir, $2.. = extra compiler flags.
 # Controls run FIRST, in the same lane as the corpus, so a sweep that reports
 # "nothing" can be told apart from a sweep whose query is broken.
-. <blocks>/pkgrecheck-lab/env.sh
+. ${BLOCKS_ROOT:-<blocks>}/pkgrecheck-lab/env.sh
 OUT="$1"; shift
 mkdir -p "$OUT"
 LOCK="$OUT/.lock"

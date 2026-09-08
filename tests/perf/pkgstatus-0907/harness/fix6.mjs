@@ -1,5 +1,5 @@
 import { readFileSync, writeFileSync } from "node:fs";
-const p = "<blocks>/pkgstatus3-lab/sect6.md";
+const p = `${process.env.BLOCKS_ROOT ?? "<blocks>"}/pkgstatus3-lab/sect6.md`;
 let s = readFileSync(p, "utf8");
 // The python heredoc ate \b and \a into control bytes 0x08 / 0x07.
 s = s.replace(

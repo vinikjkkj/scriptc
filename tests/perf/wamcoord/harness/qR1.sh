@@ -2,8 +2,8 @@
 # store-redis on current main (spec-twin change merged). Both lanes, because
 # pkgstatus recorded 46 for the isolated driver and 39 for the consumer-shaped
 # one, and "46 -> 39" could be either the lane or the spec-twin fix.
-. <blocks>/wamcoord-lab/env.sh
-L=<blocks>/wamcoord-lab
+. ${BLOCKS_ROOT:-<blocks>}/wamcoord-lab/env.sh
+L=${BLOCKS_ROOT:-<blocks>}/wamcoord-lab
 {
   echo "ORACLE-NODE $(node --version)"
   echo "=== QR1 START $(date -Is)"

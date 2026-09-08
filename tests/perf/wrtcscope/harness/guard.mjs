@@ -38,7 +38,7 @@ for (const name of REQUIRED) {
 /* A positive control for the check itself: the guard must be able to fail.
  * WRTCSCOPE_GUARD_SELFTEST=1 injects a known-bad value and expects a hit. */
 if (process.env.WRTCSCOPE_GUARD_SELFTEST === '1') {
-  const bad = '<home>\\.cache\\scriptc'
+  const bad = `${process.env.HOME_ROOT ?? "<home>"}\\.cache\\scriptc`
   if (onG(bad)) {
     console.error('guard self-test FAILED: onG() accepted a C: path')
     process.exit(3)
@@ -59,7 +59,7 @@ if (problems.length > 0) {
 
 /* Second belt: if the C: fallback directory already exists, something ran
  * unguarded. Say so loudly; do not delete it (it is the user's drive). */
-const CFALLBACK = '<home>\\.cache\\scriptc'
+const CFALLBACK = `${process.env.HOME_ROOT ?? "<home>"}\\.cache\\scriptc`
 if (existsSync(CFALLBACK)) {
   console.error(`WARNING: ${CFALLBACK} EXISTS — something resolved provenance without a pin.`)
   console.error('         Not deleting it. Report it.')

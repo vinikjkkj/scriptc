@@ -1,6 +1,6 @@
 #!/bin/bash
-. <blocks>/wamcoord-lab/env.sh
-L=<blocks>/wamcoord-lab
+. ${BLOCKS_ROOT:-<blocks>}/wamcoord-lab/env.sh
+L=${BLOCKS_ROOT:-<blocks>}/wamcoord-lab
 while ! grep -q "QC DONE" "$L/logs/qC.log" 2>/dev/null; do sleep 30; done
 {
   echo "ORACLE-NODE $(node --version)"

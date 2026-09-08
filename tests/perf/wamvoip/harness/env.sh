@@ -2,8 +2,8 @@
 # With BLOCK unset this file resolves to exactly the paths it always did,
 # apart from the one line noted below where that is the point.
 BLOCK="${BLOCK:-wamvoip}"
-ROOT="<blocks>\\${BLOCK}"
-ROOTP="<blocks>/${BLOCK}"
+ROOT="${BLOCKS_ROOT:-<blocks>}\\${BLOCK}"
+ROOTP="${BLOCKS_ROOT:-<blocks>}/${BLOCK}"
 
 export ZIG_GLOBAL_CACHE_DIR="${ROOT}\.zig"
 export ZIG_LOCAL_CACHE_DIR="${ROOT}\.zig"
@@ -25,12 +25,16 @@ export SCRIPTC_CC=zigcc
 export SCRIPTC_TEST_CC='zig cc'
 export SCRIPTC_TARGET=x86_64-windows-gnu
 export SCRIPTC_TEST_WORKERS=2
-export PATH="<zapo-work>/tools/zig:$PATH"
+# NOTE: PATH is colon-separated, so a Windows-spelled root splits into two entries --
+# the drive letter becomes an entry of its own and the rest of the path is lost.
+# *_ROOT_POSIX holds the MSYS spelling: a different VALUE, not a restyling of one.
+# Do not collapse the pair back into a single variable.
+export PATH="${ZAPO_WORK_ROOT_POSIX:-<zapo-work>}/tools/zig:$PATH"
 export WT="${ROOTP}"
 export LAB="${ROOTP}/lab"
-export ZSRC='<zapo-work>/caches/provenance/250f9af5229a545eec28ddbd3e8774a397cdb0bb'
+export ZSRC="${ZAPO_WORK_ROOT:-<zapo-work>}/caches/provenance/250f9af5229a545eec28ddbd3e8774a397cdb0bb"
 export ZPKG="$ZSRC/packages"
-export NODE25='<home>/AppData/Local/nvm/v25.9.0'
+export NODE25="${HOME_ROOT_POSIX:-<home>}/AppData/Local/nvm/v25.9.0"
 export SCRIPTC="${ROOTP}/packages/cli/dist/main.js"
 
 # GUARD. An unpinned cache extracts under homedir(), which on Windows is the

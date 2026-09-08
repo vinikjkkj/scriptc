@@ -1,8 +1,8 @@
 #!/bin/bash
 # The regression check the whitelist exists for: a package NOT on the list must
 # behave exactly as it did when the gate was off, and `=1` must still mean all.
-. <blocks>/wamcoord-lab/env.sh
-L=<blocks>/wamcoord-lab
+. ${BLOCKS_ROOT:-<blocks>}/wamcoord-lab/env.sh
+L=${BLOCKS_ROOT:-<blocks>}/wamcoord-lab
 {
   echo "ORACLE-NODE $(node --version)"
   echo "=== QD START $(date -Is)"

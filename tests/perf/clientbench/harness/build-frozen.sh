@@ -8,7 +8,7 @@
 # Writes  out/<tag>.log  and  out/<tag>/  (its OWN -o directory: two variant
 # builds sharing an -o collide on the .ll path).
 set -u
-. <blocks>/clientbench/lab/env.sh || exit 1
+. ${BLOCKS_ROOT:-<blocks>}/clientbench/lab/env.sh || exit 1
 DIR=$1; TAG=$2; shift 2
 mkdir -p "$LAB/out/$TAG"
 # -o is a FILE path, not a directory: lld-link refuses "Is a directory".

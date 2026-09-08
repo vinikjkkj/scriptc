@@ -2,8 +2,8 @@
 # With BLOCK unset this file resolves to exactly the paths it always did,
 # apart from the one line noted below where that is the point.
 BLOCK="${BLOCK:-pkgrecheck}"
-ROOT="<blocks>\\${BLOCK}"
-ROOTP="<blocks>/${BLOCK}"
+ROOT="${BLOCKS_ROOT:-<blocks>}\\${BLOCK}"
+ROOTP="${BLOCKS_ROOT:-<blocks>}/${BLOCK}"
 
 export ZIG_GLOBAL_CACHE_DIR="${ROOT}\.zig"
 export ZIG_LOCAL_CACHE_DIR="${ROOT}\.zig"
@@ -19,8 +19,12 @@ export SCRIPTC_TEST_WORKERS=3
 export SCRIPTC_GENERIC_SLOT=1
 export WT="${ROOTP}"
 export LAB="${ROOTP}-lab"
-export NODE25='<home>/AppData/Local/nvm/v25.9.0'
-export PATH="<home>/AppData/Local/nvm/v25.9.0:<zapo-work>/tools/zig:/c/msys64/ucrt64/bin:/c/Program Files/Git/bin:$PATH"
+# NOTE: PATH is colon-separated, so a Windows-spelled root splits into two entries --
+# the drive letter becomes an entry of its own and the rest of the path is lost.
+# *_ROOT_POSIX holds the MSYS spelling: a different VALUE, not a restyling of one.
+# Do not collapse the pair back into a single variable.
+export NODE25="${HOME_ROOT_POSIX:-<home>}/AppData/Local/nvm/v25.9.0"
+export PATH="${HOME_ROOT_POSIX:-<home>}/AppData/Local/nvm/v25.9.0:${ZAPO_WORK_ROOT_POSIX:-<zapo-work>}/tools/zig:/c/msys64/ucrt64/bin:/c/Program Files/Git/bin:$PATH"
 
 # GUARD. An unpinned cache extracts under homedir(), which on Windows is the
 # user's C: drive: provenance.ts falls back to

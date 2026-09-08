@@ -1,5 +1,5 @@
 #!/bin/bash
-L=<blocks>/pkgrecheck-lab
+L=${BLOCKS_ROOT:-<blocks>}/pkgrecheck-lab
 bash $L/bo.sh drivers/voip-callstate.ts voip-callstate
 bash $L/bo.sh drivers/store-sqlite-open.ts store-sqlite-open --provenance-sources --best-effort
 echo QUEUE4_DONE

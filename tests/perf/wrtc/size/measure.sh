@@ -9,8 +9,8 @@
 #       that pins the triple reads ~2.5 KB low on both programs.
 set -u
 LABEL="${1:?label}"
-W=<blocks>/wrtcjoin
-D=<blocks>/wrtcjoin-lab/size/$LABEL
+W=${BLOCKS_ROOT:-<blocks>}/wrtcjoin
+D=${BLOCKS_ROOT:-<blocks>}/wrtcjoin-lab/size/$LABEL
 rm -rf "$D"; mkdir -p "$D"
 
 printf 'console.log("hello", "world");\n' > "$D/size-static.ts"

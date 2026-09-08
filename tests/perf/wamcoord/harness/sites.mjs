@@ -9,7 +9,7 @@ import { resolve } from "node:path";
 import { requirePins } from "./pins.mjs";
 requirePins("sites.mjs");
 
-const WT = process.env.WT ?? "<blocks>/wamcoord";
+const WT = process.env.WT ?? `${process.env.BLOCKS_ROOT ?? "<blocks>"}/wamcoord`;
 const { analyze } = await import(`file:///${WT}/packages/compiler/dist/index.js`);
 
 const argv = process.argv.slice(2);

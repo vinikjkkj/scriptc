@@ -4,7 +4,7 @@
 # outside the LLVM tier FAILS with the construct named instead of silently
 # emitting C and reporting a C-lane number as if it were both lanes.
 set -u
-. <blocks>/clientbench/lab/env.sh || exit 1
+. ${BLOCKS_ROOT:-<blocks>}/clientbench/lab/env.sh || exit 1
 DIR=$1; TAG=$2; shift 2
 mkdir -p "$LAB/out/$TAG"
 rm -f "$LAB/out/$TAG.log" "$LAB/out/$TAG.exit"

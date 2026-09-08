@@ -3,8 +3,8 @@ ial() { :; }
 # With BLOCK unset this file resolves to exactly the paths it always did,
 # apart from the one line noted below where that is the point.
 BLOCK="${BLOCK:-pkgstatus}"
-ROOT="<blocks>\\${BLOCK}"
-ROOTP="<blocks>/${BLOCK}"
+ROOT="${BLOCKS_ROOT:-<blocks>}\\${BLOCK}"
+ROOTP="${BLOCKS_ROOT:-<blocks>}/${BLOCK}"
 
 export TMP="${ROOT}-tmp"
 export TEMP="${ROOT}-tmp"
@@ -14,18 +14,22 @@ export npm_config_cache="${ROOT}-npmcache"
 export SCRIPTC_PROVENANCE_CACHE="${ROOT}-prov"
 export ZIG_LOCAL_CACHE_DIR="${ROOT}-zig"
 export ZIG_GLOBAL_CACHE_DIR="${ROOT}-zig-g"
-export USERPROFILE='<home>'
+export USERPROFILE="${HOME_ROOT:-<home>}"
 export SCRIPTC_TARGET=x86_64-windows-gnu
 export SCRIPTC_CC=zigcc
 export SCRIPTC_TEST_CC='zig cc'
 unset SCRIPTC_TEST_WORKERS
 export WT="${ROOTP}"
 export LAB="${ROOTP}3-lab"
-export NODE22='<home>/AppData/Local/nvm/v22.18.0'
-export NODE25='<home>/AppData/Local/nvm/v25.9.0'
+export NODE22="${HOME_ROOT:-<home>}/AppData/Local/nvm/v22.18.0"
+# NOTE: PATH is colon-separated, so a Windows-spelled root splits into two entries --
+# the drive letter becomes an entry of its own and the rest of the path is lost.
+# *_ROOT_POSIX holds the MSYS spelling: a different VALUE, not a restyling of one.
+# Do not collapse the pair back into a single variable.
+export NODE25="${HOME_ROOT_POSIX:-<home>}/AppData/Local/nvm/v25.9.0"
 # GNU tar (Git usr/bin) MUST precede System32; bsdtar rejects --force-local and
 # the provenance lane silently falls back to the island if it wins.
-export PATH="${PS_NODE:-$NODE25}:<zapo-work>/tools/zig:/c/Program Files/Git/usr/bin:/c/msys64/ucrt64/bin:$PATH"
+export PATH="${PS_NODE:-$NODE25}:${ZAPO_WORK_ROOT_POSIX:-<zapo-work>}/tools/zig:/c/Program Files/Git/usr/bin:/c/msys64/ucrt64/bin:$PATH"
 
 # GUARD. An unpinned cache extracts under homedir(), which on Windows is the
 # user's C: drive: provenance.ts falls back to

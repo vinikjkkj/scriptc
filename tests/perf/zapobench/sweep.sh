@@ -8,7 +8,7 @@ P=$BASE
 for i in $(seq 1 "$RUNS"); do
   for spec in "$@"; do
     LBL="${spec%%:*}"; MODE="${spec#*:}"
-    <blocks>/zapobench/lab/run.sh "$LBL-$i" "$MODE" "$P" --disconnect 2>&1 \
+    ${BLOCKS_ROOT:-<blocks>}/zapobench/lab/run.sh "$LBL-$i" "$MODE" "$P" --disconnect 2>&1 \
       | grep -E "^(drv exit|CMP stanza\.count|MEM peakWorkingSetBytes|MEM cpuTotalMs|D> client exit)"
     P=$((P+1))
   done

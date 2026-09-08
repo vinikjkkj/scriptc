@@ -26,8 +26,8 @@
 # Usage: sh tests/perf/wrtcscope/harness/census.sh [build|run|all]
 set -u
 
-WT=<blocks>/wrtcscope/wt
-LAB=<blocks>/wrtcscope/lab
+WT=${BLOCKS_ROOT:-<blocks>}/wrtcscope/wt
+LAB=${BLOCKS_ROOT:-<blocks>}/wrtcscope/lab
 APP=$LAB/cb/app
 OUT=$LAB/cen/bench
 CLI=$WT/packages/cli/dist/main.js
@@ -38,7 +38,7 @@ STEP=${1:-all}
 
 # The census header, as WINDOWS paths: `zig cc` is a native binary spawned by
 # node and never sees an MSYS mount point.
-WINWT='<blocks>\wrtcscope\wt'
+WINWT="${BLOCKS_ROOT:-<blocks>}\wrtcscope\wt"
 export SCRIPTC_PROF_CFLAGS="-include ${WINWT}\tests\perf\arrcensus\scr_arr_census.h -I${WINWT}\tests\perf\arrcensus"
 
 mkdir -p "$OUT"

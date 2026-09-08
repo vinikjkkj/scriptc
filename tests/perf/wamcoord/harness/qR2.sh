@@ -1,7 +1,7 @@
 #!/bin/bash
 # Confirm 39 on current main FIRST; only then the substitution pair.
-. <blocks>/wamcoord-lab/env.sh
-L=<blocks>/wamcoord-lab
+. ${BLOCKS_ROOT:-<blocks>}/wamcoord-lab/env.sh
+L=${BLOCKS_ROOT:-<blocks>}/wamcoord-lab
 {
   echo "ORACLE-NODE $(node --version)"
   echo "=== QR2 START $(date -Is)  main=0c66825d"

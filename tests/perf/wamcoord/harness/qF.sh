@@ -4,8 +4,8 @@
 # wide; the whitelist itself can only act when provenance sources are set.
 # Scope: EVERY tests/harness suite plus every packages/* suite, MINUS the four
 # corpus differential drivers, which are named as UNRUN in the report.
-. <blocks>/wamcoord-lab/env.sh
-L=<blocks>/wamcoord-lab
+. ${BLOCKS_ROOT:-<blocks>}/wamcoord-lab/env.sh
+L=${BLOCKS_ROOT:-<blocks>}/wamcoord-lab
 cd "$WT" || exit 1
 FILES=$(ls tests/harness/*.test.ts | grep -vE "(^|/)(differential|windows-differential|linux-differential|llvm-differential)\.test\.ts$" | tr '\n' ' ')
 {
