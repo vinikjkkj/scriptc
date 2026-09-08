@@ -1,0 +1,590 @@
+<title>Store-Mongo's 238</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,600;1,8..60,400&family=JetBrains+Mono:wght@400;500;700&display=swap">
+
+<style>
+/* ── tokens ───────────────────────────────────────────────────────────────
+   Complete light palette on bare :root. Dark redefines ONLY tokens, twice:
+   once behind prefers-color-scheme for the un-stamped default state, once
+   behind [data-theme="dark"] so an explicit choice wins either direction.
+   No component rule ever lives inside a media or [data-theme] block.        */
+:root {
+  --paper:   #f1f1f3;
+  --surface: #ffffff;
+  --sunken:  #e8e8ec;
+  --ink:     #16161c;
+  --muted:   #5d5d6b;
+  --faint:   #8a8a99;
+  --rule:    #d7d7de;
+  --rule-hi: #b9b9c4;
+  /* the accent IS the thesis: oxblood = sites ADDED, green = sites CLEARED */
+  --added:   #8c2f39;
+  --added-bg:#8c2f3922;
+  --cleared: #2c6049;
+  --cleared-bg:#2c604922;
+  --shadow:  0 1px 2px #16161c14, 0 8px 24px #16161c0d;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper:   #121217;
+    --surface: #1a1a21;
+    --sunken:  #0d0d11;
+    --ink:     #e9e9ef;
+    --muted:   #9c9cab;
+    --faint:   #6f6f7e;
+    --rule:    #2c2c37;
+    --rule-hi: #3d3d4a;
+    --added:   #e0838c;
+    --added-bg:#e0838c1f;
+    --cleared: #6dbb96;
+    --cleared-bg:#6dbb961f;
+    --shadow:  0 1px 2px #0006, 0 8px 24px #0004;
+  }
+}
+:root[data-theme="dark"] {
+  --paper:   #121217;
+  --surface: #1a1a21;
+  --sunken:  #0d0d11;
+  --ink:     #e9e9ef;
+  --muted:   #9c9cab;
+  --faint:   #6f6f7e;
+  --rule:    #2c2c37;
+  --rule-hi: #3d3d4a;
+  --added:   #e0838c;
+  --added-bg:#e0838c1f;
+  --cleared: #6dbb96;
+  --cleared-bg:#6dbb961f;
+  --shadow:  0 1px 2px #0006, 0 8px 24px #0004;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  background: var(--paper);
+  color: var(--ink);
+  font-family: "Source Serif 4", Georgia, "Times New Roman", serif;
+  font-size: 17px;
+  line-height: 1.62;
+  margin: 0;
+  padding: 0 20px 120px;
+  -webkit-font-smoothing: antialiased;
+}
+
+.wrap { max-width: 1080px; margin: 0 auto; }
+.col  { max-width: 66ch; }
+
+/* ── masthead ─────────────────────────────────────────────────────────── */
+.mast { padding: 72px 0 40px; border-bottom: 2px solid var(--ink); margin-bottom: 44px; }
+.kicker {
+  font-family: Archivo, "Helvetica Neue", Arial, sans-serif;
+  font-size: 11.5px; font-weight: 600; letter-spacing: .16em; text-transform: uppercase;
+  color: var(--muted); margin: 0 0 20px;
+}
+h1 {
+  font-family: Archivo, "Helvetica Neue", Arial, sans-serif;
+  font-weight: 700; font-size: clamp(34px, 6vw, 60px); line-height: 1.02;
+  letter-spacing: -.025em; text-wrap: balance; margin: 0 0 22px; max-width: 20ch;
+}
+.standfirst { font-size: 20px; line-height: 1.5; color: var(--muted); max-width: 60ch; margin: 0 0 32px; }
+.standfirst strong { color: var(--ink); font-weight: 600; }
+
+.meta {
+  font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px; color: var(--faint); line-height: 1.9;
+  display: flex; flex-wrap: wrap; gap: 4px 22px;
+}
+.meta b { color: var(--muted); font-weight: 500; }
+
+/* ── sections ─────────────────────────────────────────────────────────── */
+section { margin: 0 0 68px; }
+h2 {
+  font-family: Archivo, "Helvetica Neue", Arial, sans-serif;
+  font-weight: 600; font-size: 27px; line-height: 1.2; letter-spacing: -.015em;
+  text-wrap: balance; margin: 0 0 6px; max-width: 30ch;
+}
+.eyebrow {
+  font-family: Archivo, "Helvetica Neue", Arial, sans-serif;
+  font-size: 11px; font-weight: 600; letter-spacing: .15em; text-transform: uppercase;
+  color: var(--faint); margin: 0 0 12px;
+}
+p { margin: 0 0 18px; }
+.col > p:last-child { margin-bottom: 0; }
+strong { font-weight: 600; }
+em { font-style: italic; }
+
+code, .m {
+  font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: .86em; font-variant-ligatures: none;
+}
+p code, li code, td code, th code {
+  background: var(--sunken); border-radius: 3px; padding: .1em .32em;
+}
+
+/* ── the delta chart: the page's one bold moment ──────────────────────── */
+.arms { margin: 30px 0 12px; }
+.armhead {
+  display: grid; grid-template-columns: 210px 1fr 96px;
+  gap: 18px; align-items: end; padding: 0 0 8px;
+  border-bottom: 1px solid var(--rule-hi);
+  font-family: Archivo, "Helvetica Neue", Arial, sans-serif;
+  font-size: 11px; font-weight: 600; letter-spacing: .13em; text-transform: uppercase; color: var(--faint);
+}
+.armhead .axis { display: flex; justify-content: space-between; }
+.armhead .axis .l { color: var(--cleared); }
+.armhead .axis .r { color: var(--added); }
+.arm {
+  display: grid; grid-template-columns: 210px 1fr 96px;
+  gap: 18px; align-items: center;
+  padding: 13px 0; border-bottom: 1px solid var(--rule);
+}
+.arm .name {
+  font-family: "JetBrains Mono", ui-monospace, Menlo, monospace;
+  font-size: 12.5px; line-height: 1.4; color: var(--ink);
+}
+.arm .name b { font-weight: 700; }
+.arm .name span { display: block; color: var(--muted); font-size: 11px; margin-top: 2px; }
+.bars { display: grid; grid-template-columns: 1fr 1fr; align-items: center; height: 26px; }
+.bars .lt { display: flex; justify-content: flex-end; }
+.bars .rt { display: flex; justify-content: flex-start; }
+.bar {
+  height: 22px; border-radius: 2px; display: flex; align-items: center;
+  font-family: "JetBrains Mono", ui-monospace, Menlo, monospace;
+  font-size: 11.5px; font-weight: 700; color: var(--surface);
+  padding: 0 6px; min-width: 22px;
+}
+.bar.c { background: var(--cleared); justify-content: flex-end; }
+.bar.a { background: var(--added); justify-content: flex-start; }
+.bar.zero { background: none; color: var(--faint); font-weight: 400; }
+.arm .net {
+  font-family: "JetBrains Mono", ui-monospace, Menlo, monospace;
+  font-size: 12.5px; text-align: right; font-variant-numeric: tabular-nums;
+}
+.arm .net b { font-weight: 700; }
+.up   { color: var(--added); }
+.down { color: var(--cleared); }
+.midline { position: relative; }
+.armnote { font-size: 14.5px; color: var(--muted); margin: 16px 0 0; max-width: 62ch; }
+
+/* ── data blocks ──────────────────────────────────────────────────────── */
+.slab {
+  background: var(--surface); border: 1px solid var(--rule); border-radius: 4px;
+  box-shadow: var(--shadow); padding: 20px 22px; margin: 26px 0;
+  overflow-x: auto;
+}
+.slab.tight { padding: 4px 22px 8px; }
+pre {
+  font-family: "JetBrains Mono", ui-monospace, Menlo, monospace;
+  font-size: 12.5px; line-height: 1.7; margin: 0; color: var(--ink);
+  overflow-x: auto; white-space: pre;
+}
+pre .dim { color: var(--faint); }
+pre .hi  { color: var(--added); font-weight: 700; }
+pre .ok  { color: var(--cleared); font-weight: 700; }
+
+table { border-collapse: collapse; width: 100%; font-size: 14.5px; }
+th, td { text-align: left; padding: 10px 14px 10px 0; border-bottom: 1px solid var(--rule); vertical-align: top; }
+th {
+  font-family: Archivo, "Helvetica Neue", Arial, sans-serif;
+  font-size: 10.5px; font-weight: 600; letter-spacing: .12em; text-transform: uppercase;
+  color: var(--faint); border-bottom-color: var(--rule-hi); white-space: nowrap;
+}
+td.n, th.n { text-align: right; font-family: "JetBrains Mono", ui-monospace, Menlo, monospace; font-variant-numeric: tabular-nums; white-space: nowrap; }
+tr:last-child td { border-bottom: none; }
+
+/* ── split bar for the three-way classification ───────────────────────── */
+.split { display: flex; height: 40px; border-radius: 3px; overflow: hidden; margin: 24px 0 10px; }
+.split div { display: flex; align-items: center; justify-content: center;
+  font-family: "JetBrains Mono", ui-monospace, Menlo, monospace; font-size: 12px; font-weight: 700; color: var(--surface); }
+.legend { display: flex; flex-wrap: wrap; gap: 8px 24px; font-size: 13.5px; color: var(--muted); }
+.legend span { display: flex; align-items: center; gap: 8px; }
+.sw { width: 11px; height: 11px; border-radius: 2px; flex: none; }
+
+/* ── callout ──────────────────────────────────────────────────────────── */
+.pull {
+  border-left: 3px solid var(--added); background: var(--added-bg);
+  padding: 18px 22px; margin: 30px 0; border-radius: 0 4px 4px 0;
+}
+.pull p { margin: 0; font-size: 18.5px; line-height: 1.48; }
+.pull p + p { margin-top: 12px; font-size: 15.5px; color: var(--muted); }
+
+ul, ol { margin: 0 0 18px; padding-left: 1.15em; }
+li { margin: 0 0 9px; }
+li::marker { color: var(--faint); }
+
+.chain {
+  font-family: "JetBrains Mono", ui-monospace, Menlo, monospace;
+  font-size: 12.5px; line-height: 1.75;
+}
+.chain .step { display: flex; gap: 14px; align-items: baseline; padding: 7px 0; }
+.chain .count { color: var(--added); font-weight: 700; min-width: 34px; text-align: right; }
+.chain .arrowrow { color: var(--rule-hi); padding-left: 48px; }
+
+footer {
+  border-top: 2px solid var(--ink); margin-top: 80px; padding-top: 26px;
+  font-size: 14px; color: var(--muted);
+}
+footer .col { max-width: 72ch; }
+
+@media (max-width: 700px) {
+  .armhead, .arm { grid-template-columns: 1fr; gap: 8px; }
+  .armhead .axis { display: none; }
+  .arm .net { text-align: left; }
+}
+@media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+</style>
+
+<div class="wrap">
+
+<header class="mast">
+  <p class="kicker">Block mongodriver · scriptc · main f91fcd55 · 2026-09-08</p>
+  <h1>Store-Mongo's 238</h1>
+  <p class="standfirst">
+    <code>store-mongo</code> does not reach a binary because we do not fully compile the
+    mongodb driver. This is what its 238 blocker sites actually are — and why
+    <strong>fixing the largest cause makes the number go up.</strong>
+  </p>
+  <div class="meta">
+    <span><b>lane</b> default, --provenance-sources</span>
+    <span><b>reached</b> 48,563 statements</span>
+    <span><b>build</b> rc=1, no binary</span>
+    <span><b>zig</b> 0.16.0 · x86_64-windows-gnu</span>
+    <span><b>node</b> v25.9.0</span>
+  </div>
+</header>
+
+<section>
+  <div class="col">
+    <p class="eyebrow">Where the 238 live</p>
+    <h2>226 of them are not our code</h2>
+    <p>
+      The honest sentence is “we do not fully compile the mongodb driver”, not
+      “the store package is broken”. <code>@zapo-js/store-mongo</code>'s own source
+      contributes exactly one site, and that one is cascade off two mongodb types
+      it names in a config union.
+    </p>
+  </div>
+
+  <div class="slab tight">
+    <table>
+      <thead><tr><th>Owner</th><th class="n">Sites</th><th>What they are</th></tr></thead>
+      <tbody>
+        <tr><td><code>mongodb@6.21.0</code></td><td class="n">167</td><td>the driver stack</td></tr>
+        <tr><td><code>bson@6.10.4</code></td><td class="n">59</td><td>the driver stack</td></tr>
+        <tr><td><code>@mongodb-js/saslprep@1.5.2</code></td><td class="n">6</td><td>one file, six causes</td></tr>
+        <tr><td>the test driver</td><td class="n">3</td><td>cascade off the factory call</td></tr>
+        <tr><td><code>mongodb-connection-string-url</code></td><td class="n">2</td><td><code>extends URL</code>, and an unattested dependency</td></tr>
+        <tr><td><code>@zapo-js/store-mongo</code></td><td class="n">1</td><td>cascade — its own source has none</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="col">
+    <p>
+      Those 226 sites carry 168 distinct messages. Normalise the quoted identifiers
+      out of them and they collapse to <strong>58 causes</strong> — 26 clusters
+      carrying 194 sites, and 32 one-offs.
+    </p>
+  </div>
+
+  <div class="split" role="img" aria-label="226 sites split: 86 cascade, 65 representation decisions, 75 capability gaps">
+    <div style="width:38.1%;background:var(--faint)">86 cascade</div>
+    <div style="width:28.8%;background:var(--muted)">65 representation</div>
+    <div style="width:33.1%;background:var(--added)">75 capability</div>
+  </div>
+  <div class="legend">
+    <span><i class="sw" style="background:var(--faint)"></i> downstream of another site — 9 of them carry no cascade code at all</span>
+    <span><i class="sw" style="background:var(--muted)"></i> <code>Date</code>, <code>WeakMap</code>, <code>BigInt</code>, <code>globalThis</code>, <code>Object.freeze</code> — 30 stdlib surfaces, deliberately parked</span>
+    <span><i class="sw" style="background:var(--added)"></i> constructs the compiler could learn</span>
+  </div>
+</section>
+
+<section>
+  <div class="col">
+    <p class="eyebrow">The largest cause</p>
+    <h2>One line gates the entire operations subsystem</h2>
+    <p>
+      Over half of mongodb's sites sit downstream of a single field declaration in
+      <code>src/operations/command.ts</code>:
+    </p>
+  </div>
+
+  <div class="slab">
+<pre><span class="dim">// mongodb/src/operations/command.ts:93</span>
+export abstract class CommandOperation&lt;T&gt; extends AbstractOperation&lt;T&gt; {
+  <span class="hi">override options: CommandOperationOptions;</span>
+</pre>
+  </div>
+
+  <div class="col">
+    <p>
+      A class field redeclared at a different record shape. The compiler refuses it —
+      <em>“these layouts give the property one slot, and one slot cannot answer both
+      spellings”</em> — and everything below it falls:
+    </p>
+  </div>
+
+  <div class="slab">
+    <div class="chain">
+      <div class="step"><span class="count">6</span><span><code>redeclaring inherited fields at a different type</code> — one per instantiation</span></div>
+      <div class="arrowrow">↓ so <code>CommandOperation&lt;T&gt;</code> has no compiled concrete instantiation</div>
+      <div class="step"><span class="count">22</span><span><code>extending the generic class 'CommandOperation' without a compiled concrete instantiation</code></span></div>
+      <div class="arrowrow">↓ so <code>DeleteOperation</code>, <code>InsertOperation</code>, <code>UpdateOperation</code>… are not classes in the program</div>
+      <div class="step"><span class="count">9</span><span><code>extending classes not declared in the program</code> — carrying <em>no</em> cascade code</span></div>
+      <div class="step"><span class="count">32</span><span><code>SC2004 uses of 'AggregateOperation' inherit the blocker on its declaration</code></span></div>
+    </div>
+  </div>
+
+  <div class="col">
+    <p>
+      Fourteen lines of plain TypeScript reproduce the whole chain, message for
+      message, with no mongodb in sight. Five sibling probes narrow it: an
+      initializer does not help, it is not about genericity, and the
+      already-shipped <em>undefined-arm removal</em> case still works. The gate is
+      precisely <strong>a field redeclared at a record whose member set or member
+      optionality differs from the inherited one.</strong>
+    </p>
+  </div>
+</section>
+
+<section>
+  <div class="col">
+    <p class="eyebrow">Proof by substitution</p>
+    <h2>Five arms, one control, and a control that failed</h2>
+    <p>
+      Each arm is the same compiler, the same entry, the same flags — only a
+      <em>copy</em> of the attested source tree differs, edited on exactly one line,
+      line-neutral. Arm P0 is that copy with <em>no</em> edit, and it reproduces the
+      baseline site-for-site; without it every other arm is void.
+    </p>
+  </div>
+
+  <div class="arms">
+    <div class="armhead">
+      <div>Arm — the one line changed</div>
+      <div class="axis"><span class="l">◀ cleared</span><span class="r">added ▶</span></div>
+      <div style="text-align:right">Net</div>
+    </div>
+
+    <div class="arm">
+      <div class="name"><b>P1</b> operation.ts:92<span>the <code>this.constructor</code> read</span></div>
+      <div class="bars"><div class="lt"><div class="bar c" style="width:11%">8</div></div><div class="rt"><div class="bar a zero">0</div></div></div>
+      <div class="net">242 → <b class="down">234</b></div>
+    </div>
+
+    <div class="arm">
+      <div class="name"><b>P2</b> operation.ts:152<span>the <code>response.toObject</code> call</span></div>
+      <div class="bars"><div class="lt"><div class="bar c" style="width:11%">8</div></div><div class="rt"><div class="bar a zero">0</div></div></div>
+      <div class="net">242 → <b class="down">234</b></div>
+    </div>
+
+    <div class="arm">
+      <div class="name"><b>P3</b> both of the above<span>exactly additive, nothing downstream</span></div>
+      <div class="bars"><div class="lt"><div class="bar c" style="width:22%">16</div></div><div class="rt"><div class="bar a zero">0</div></div></div>
+      <div class="net">242 → <b class="down">226</b></div>
+    </div>
+
+    <div class="arm">
+      <div class="name"><b>P5a</b> command.ts:93<span><code>override</code> → <code>declare</code>, one token</span></div>
+      <div class="bars"><div class="lt"><div class="bar c" style="width:34%">25</div></div><div class="rt"><div class="bar a" style="width:100%">73</div></div></div>
+      <div class="net">242 → <b class="up">290</b></div>
+    </div>
+
+    <div class="arm">
+      <div class="name"><b>P4</b> all three lines<span>the whole spine removed</span></div>
+      <div class="bars"><div class="lt"><div class="bar c" style="width:56%">41</div></div><div class="rt"><div class="bar a" style="width:100%">73</div></div></div>
+      <div class="net">242 → <b class="up">274</b></div>
+    </div>
+  </div>
+
+  <p class="armnote">
+    P1 and P2 are exactly additive and clear nothing downstream — so
+    <code>this.constructor</code> and <code>response.toObject</code> are <em>not</em>
+    gates on the <code>extends</code> family. <strong>P5a is.</strong> One token on
+    one line clears 19 of the 22 <code>extends</code> refusals, without touching
+    <code>operation.ts</code> at all.
+  </p>
+
+  <div class="col">
+    <p>
+      One arm was wrong, and the instrument said so. P2's first substitute returned a
+      record that did not satisfy <code>TResult</code>: 8 sites cleared and
+      <strong>7 new ones appeared at the same line</strong>. A thin stub does not
+      isolate a variable, it changes the program — visible only because the differ
+      reports site identities, never counts.
+    </p>
+    <p>
+      And the rig itself failed a control first. The launcher set the probe cache in
+      the environment, and the runner re-sourced the environment file and reset it —
+      so all six arms read the <em>unpatched</em> tree and each reported a perfect
+      <code>0 cleared, 0 added</code>, which reads exactly like “this line is not the
+      cause”. Every arm now asserts, from its own output record, which tree produced
+      it.
+    </p>
+  </div>
+</section>
+
+<section>
+  <div class="col">
+    <p class="eyebrow">The finding that reframes the objective</p>
+    <h2>238 is a floor, not a work estimate</h2>
+  </div>
+
+  <div class="pull">
+    <p>Arm P4 removes the largest cause in <code>store-mongo</code>. It clears 41 sites and <strong>adds 73</strong>.</p>
+    <p>24 of those are artifacts of removing the declaration rather than fixing it. The other <strong>49 are real</strong> — refusals inside the 22 operation classes that had never been analysed, because a class the compiler refuses to instantiate never has its body walked. Seventeen of the 49 are <em>more of the same cause</em>.</p>
+  </div>
+
+  <div class="col">
+    <p>
+      The honest arithmetic is <code>242 − 41 + 49 = 250</code>. The blocker count is
+      suppressed by the refusals themselves: every refusal hides its own subtree.
+      P4, P5a and P5b expose the <em>identical</em> 73 sites by identity, which is the
+      cross-check that <code>command.ts:93</code> alone causes the exposure.
+    </p>
+    <p>
+      This means no count of blocker sites — this one included — can be read as an
+      estimate of remaining work, and it means progress on this objective will look
+      like regression on the dashboard for a while.
+    </p>
+  </div>
+</section>
+
+<section>
+  <div class="col">
+    <p class="eyebrow">The build</p>
+    <h2>“1 error” was hiding 237</h2>
+    <p>
+      The build stops at a single error and never reaches lowering:
+      <code>SC1012 export =</code> in <code>@mongodb-js/saslprep</code>. Routed past
+      that one module-link refusal, the build runs to completion and prints its whole
+      list for the first time — and it matches the survey exactly.
+    </p>
+  </div>
+
+  <div class="slab">
+<pre>237 errors.
+  SC1090 <span class="hi">94</span>   SC2020 <span class="hi">45</span>   SC2004 <span class="hi">41</span>   SC2011 <span class="hi">22</span>   SC2009 <span class="hi">19</span>
+  mongodb 165   bson 59   zapo-js 8   driver 3   connection-string-url 2
+
+compared key by key against analyze()'s blockers:
+  build error sites : 211 distinct (file, line, code)
+  analyze blockers  : 211 distinct (file, line, code)
+  only in build     : <span class="ok">0</span>
+  only in analyze   : <span class="ok">0</span>
+</pre>
+  </div>
+
+  <div class="col">
+    <p>
+      They are the same set. The earlier reading — that a build's error count and
+      <code>analyze()</code>'s site count are different questions that can differ by
+      240 — holds <em>only</em> because the build stops at the first module-link
+      refusal. It still says nothing about the IR validator or either emitter: that
+      build errored before lowering. A closed site count is still not a build.
+    </p>
+  </div>
+</section>
+
+<section>
+  <div class="col">
+    <p class="eyebrow">The shortest path, honestly</p>
+    <h2>There isn't a short one, and part of it isn't ours</h2>
+    <p>
+      Two packages on <code>store-mongo</code>'s critical path publish no provenance
+      attestation, so the compiler cannot reach their source at all:
+      <code>whatwg-url@14.2.0</code>, which <code>MongoClient</code> needs to parse a
+      URI, and <code>sparse-bitfield@3.0.3</code> under saslprep. Neither is a package
+      we control.
+    </p>
+    <p>
+      The <code>--npm-static</code> escape was tested rather than assumed, and the
+      compiler named its own reasons. It is not shut — it is a short chain of small
+      packages deeper.
+    </p>
+  </div>
+
+  <div class="slab tight">
+    <table>
+      <thead><tr><th>Run</th><th>What the compiler said</th><th class="n">Δ sites</th></tr></thead>
+      <tbody>
+        <tr>
+          <td><code>whatwg-url,<br>sparse-bitfield</code></td>
+          <td><code>sparse-bitfield</code> needs <code>memory-pager</code>;<br><code>whatwg-url</code> needs <code>tr46</code></td>
+          <td class="n">0</td>
+        </tr>
+        <tr>
+          <td><code>+ tr46,<br>memory-pager</code></td>
+          <td><span style="color:var(--cleared);font-weight:600">both bitfield packages compile statically</span>; <code>tr46</code> now needs <code>punycode/</code>, <code>whatwg-url</code> needs <code>webidl-conversions</code></td>
+          <td class="n">0</td>
+        </tr>
+        <tr>
+          <td><code>@mongodb-js/<br>saslprep</code></td>
+          <td>reports <code>status: static</code> — but every site still resolves to the attested <em>TypeScript</em>. Provenance wins, and the status line does not say so</td>
+          <td class="n">0</td>
+        </tr>
+        <tr>
+          <td><code>auto</code></td>
+          <td>only <code>whatwg-url</code> is even eligible, and its types come from a third-party <code>@types</code> package</td>
+          <td class="n">0</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="col">
+    <p>
+      Ranked by what was measured, the route to a binary is: those two attestations
+      (or a compiler that follows a published <code>.esm-wrapper.mjs</code> to its
+      CommonJS sibling); the parked <code>class X extends URL</code>, which
+      <code>store-mongo</code> cannot route around; the redeclared-field slot; the
+      ~49 sites behind it and whatever <em>they</em> expose; and a 65-site
+      representation bucket, each item with semantics attached.
+    </p>
+    <p>
+      The redeclared-field slot is the one worth naming carefully. 71 of mongodb's 87
+      redeclared fields would be served by a single slot holding the union of both
+      member sets. But the obstacle is in the compiler's own source, not a guess:
+      a narrowing conversion in the record model <strong>copies</strong>, so one slot
+      cannot serve two spellings by coercion. Fixing it means a non-copying narrowing
+      view for field slots — the record layout, the IR, the validator and both
+      emitters. That is expensive, and it is the user's call, not this block's.
+    </p>
+  </div>
+</section>
+
+<section>
+  <div class="col">
+    <p class="eyebrow">Found while measuring</p>
+    <h2>Six things nobody was looking for</h2>
+    <ul>
+      <li><strong>The provenance cache extracts 2.1 GB to compile 2 MB.</strong> mongodb's attested checkout is 2,157 MB — <code>docs/</code> is 1,247 MB and <code>test/</code> is 865 MB. <code>src/</code> is 2 MB. All five checkouts minus those two directories is <strong>23.4 MB</strong> and produces a site-for-site identical analysis.</li>
+      <li><strong>Only 5 of 17 packages are source-mapped, and one was dropped by a cap</strong> — <code>@zapo-js/native: skipped — provenance package limit (16) reached</code>.</li>
+      <li><strong>The spec-twin fix already on main closed <code>store-mongo</code>'s entire zapo-side cluster.</strong> Diffed by site identity, the default lane clears exactly those 7 sites and adds 3 in <code>cmap/connection.ts</code> the old lane never reached.</li>
+      <li><strong><code>this.constructor</code> is filed beside <code>Date</code> and <code>WeakMap</code></strong> under “standard library surface with no lowering”, because <code>constructor</code> is an <code>Object.prototype</code> member. Mechanically it is a lowering, not a representation decision — any triage bucketing by diagnostic code puts it in the wrong pile.</li>
+      <li><strong><code>--npm-static</code> compiles a package's implementation without making its exported type representable.</strong> <code>sparse-bitfield</code> reads <code>static</code>, and the site that depends on its type is unchanged.</li>
+      <li><strong>Two hypotheses of mine, both refuted by their own probes and withdrawn.</strong> bson's five <code>SC1043</code> sites are not a mis-attributed location, and the redeclare message's “without an initializer” clause is not misleading — it is dropped when an initializer is present.</li>
+    </ul>
+  </div>
+</section>
+
+<footer>
+  <div class="col">
+    <p>
+      Every instrument is committed under <code>tests/perf/mongodriver/</code> and
+      negative-controlled in both directions: the differ self-diffs to 0/0/0, reports
+      3 cleared for 3 dropped sites, and reports <em>5 moved</em> — not 5 cleared plus
+      5 added — for 5 sites shifted by four lines. The patcher refuses any path
+      outside a probe directory, so every attested checkout was only ever read; the
+      classifier prints <code>UNCLASSIFIED</code> and exits non-zero rather than
+      folding anything silently, and it is 0.
+    </p>
+    <p style="color:var(--faint);font-size:13px">
+      Reported numbers are the default configuration. The substitution arms ran with
+      <code>SCRIPTC_PROVENANCE_SPEC_TWINS=off</code>, and that lane's relationship to
+      the default one is measured, not assumed.
+    </p>
+  </div>
+</footer>
+
+</div>
