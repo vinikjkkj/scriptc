@@ -312,3 +312,125 @@ a demotion line.
 The oracle is `npm install @roamhq/wrtc@^0.10.0` in a lab project of this
 block's own. **zapo is never installed into and never modified.**
 Recorded output: `runs/probe-matrix.out`, `runs/e2e-3runs.out`.
+
+---
+
+## 9. The cost statement for the seven compiler-side sites
+
+All seven are in `packages/voip/src/relay/WaSctpRelay.ts`. Sizing is by
+comparison with work already done in `lower-wrtc.ts` (25,358 bytes, twelve
+members served), NOT by measurement — no fix was built, and every estimate
+here is a judgement, labelled as one.
+
+| site | what it is | class | rough cost | risk |
+| --- | --- | --- | --- | --- |
+| `:441` | `dgram.createSocket(isIPv6(ip) ? 'udp6' : 'udp4')` — a **non-literal** options argument | dgram widening | **smallest**. The literal arm already lowers; this needs a runtime-selected family | low; `udp6` may be untested on that path |
+| `:684` | `channel.send` of an **`ArrayBuffer`** | WebRTC surface | small. `send` of `Uint8Array` already lowers; one more declared arm | low |
+| `:367` | outbound `channel.onmessage = (e: MessageEvent) => …` | WebRTC surface | **medium, and not really a WebRTC problem.** `MessageEvent.data` is `any` in zapo's real `@types/node`; needs a representation for a DOM event object, or a narrowing that serves `.data` without one | medium — the `any`-typed-DOM-object question is bigger than this clause |
+| `:676` | `data.constructor.name === 'SharedArrayBuffer'` — `Function.name` | not WebRTC | medium; needs a name on constructor values | medium — reaches the object model |
+| `:252`, `:253` | `getStats?.()` | WebRTC surface | **medium-large, two problems stacked**: absent from `lower-wrtc.ts` *and* behind `(pc as any)`. `RTCStatsReport` is a further handle with a map-like surface | medium; degrades safely today |
+| `:301` | `ondatachannel` | WebRTC surface | **largest by far** — below | high |
+
+**Only `:684` and `:367` are WebRTC-surface work in the ordinary sense.**
+`:441` is dgram, `:676` is the object model, and `:252`/`:253` are as much a
+handle-representation question as a WebRTC one.
+
+### `:301` is the one real feature, and it is not a lowering
+
+`ondatachannel` does not refuse because nobody wrote the table row. It refuses
+because **the SCTP association is offerer-only and does not accept an inbound
+DCEP `DATA_CHANNEL_OPEN`**. Closing it is transport work in
+`scr_sctp_assoc.c` — accept an inbound stream, mint a channel handle from C,
+fire a handler with it — not a row in `lower-wrtc.ts`.
+
+It is also **the only one of the seven whose refusal currently protects
+against a silent wrong answer.** It is reached through `(pc as any)`, so no
+type error names it; if it merely never fired, `conn.incomingChannels` would
+stay empty and nothing would say why.
+
+**What we do not know:** whether zapo's relay path needs inbound channels in
+production. It is written, so WhatsApp's relay presumably opens one at least
+sometimes — but nothing here has met that relay. That question decides whether
+`:301` is first on the list or last, and it is the user's to answer.
+
+### The 19 that are not compiler work
+
+11 declined handle-representation sites (`closeQuietly`) and 8 sites from four
+`as any` casts over members `lower-wrtc.ts` **already supports**. If zapo
+dropped the casts and widened one parameter type, all 19 close with **no
+compiler change at all**. We do not change zapo; this is a finding.
+
+---
+
+## 10. `send_group` is NOT curve25519, and the inherited attribution is refuted
+
+`tests/perf/clientbench/README.md:157` attributes the compiled client's one
+regression — `send_group` — to *"zapo's own curve25519 field arithmetic
+(44.18% of non-idle samples)"*, citing `tests/perf/cpuphase`.
+
+**`cpuphase` does not say that about the compiled binary. Its own later,
+better-instrumented section says the opposite.**
+
+The 44.18% is `cpuphase` §1, and that section names its lane in its own
+header: *"Shares of non-idle samples, **node lane**, `--cpu-prof`"*. It was
+measured to kill the protobuf hypothesis, and for that it is sound. But it
+describes where **node** spends `send_group`. The regression is
+compiled-versus-node, so the question is where the **compiled binary** spends
+it — a different profile on a different instrument.
+
+`cpuphase` §"Three compute phases, full workload, shipping binary" answers
+exactly that, phase-scoped and cycle-weighted:
+
+| phase | dominant self-time |
+| --- | --- |
+| `send_group` | `scr_arr_slice` **21.0%**, `scr_arr_join` 7.3%, `add_and_denorm128` 7.0%, `feMul` **5.8%** — *"array work, **not** crypto"* |
+
+and it says in terms: ***"`send_group` and `recv_group` had never been
+attributed at all**, and neither is crypto-bound."*
+
+So in the compiled lane field arithmetic (`feMul`) is **5.8%**, while
+scriptc's **own array runtime** is `21.0 + 7.3 = 28.3%` — about five times
+larger. The owner is not zapo's TypeScript. It is `scr_array.c`.
+
+### `add_and_denorm128` is not curve25519 either — it is a *software* FMA
+
+It appears in **no source file in this repository**. It is
+`fn add_and_denorm128(a: f128, b: f128, scale: i32) f128` at
+**`lib/compiler_rt/fma.zig:271`** in the tree's zig 0.16.0, reached from
+`fmaq` (f128) via `fmal` (`c_longdouble`). That is **software 128-bit
+floating-point multiply-add**, contributed by the toolchain, at 7.0% of a hot
+phase.
+
+Neither `emit-c.ts` nor any runtime `.c`/`.h` mentions `fma`, `fmal`, `fmaq`,
+`long double` or `__float128` — so nothing in scriptc asks for it directly and
+it arrives through libc.
+
+**Hypothesis, explicitly not a measurement:** `scr_json.c:6872` calls
+`strtod`, and mingw-w64's `strtod` is `__mingw_strtod`, which works in long
+double. `scr_json.c:6796` describes a fast path *"bit-identical to strtod"*
+with *"everything else falls back"*, so the **fallback rate** is the thing to
+measure. Confirming the caller needs a symbol-level profile — `clientbench`'s
+instrument and its territory. **Not re-measured here.**
+
+### What this changes
+
+The prize moves from unreachable to reachable. Curve25519 field arithmetic is
+zapo's TypeScript and **we may not edit it**. `scr_array.c` and the JSON
+number path are **scriptc's own C**, and a software f128 FMA in a hot loop is
+a toolchain/lowering question, not an algorithmic one.
+
+`scr_arr_slice` has already had one round of this work — its own comment
+describes replacing a per-element retain-kind test with a single `memcpy` — so
+the remaining 21.0% is more likely **call volume and allocation** (it mints a
+fresh `ScrArr` per call, and `n ? n : 1` means even an empty slice allocates)
+than per-element cost. **Unverified.**
+
+The honest next step is a call-count and size histogram, and the instrument
+already exists: `scr_array.c` carries `SCR_ARRCEN_ON` /
+`scr_arrcen_note_slice(len, n, elem)`, inert unless a header is `-include`d,
+whose own comment says it is *"the only way to tell a quadratic here from a
+million small copies."*
+
+**No fix is proposed here and none was measured.** The claim is only that the
+attribution was wrong, that the corrected owner is scriptc's own code, and
+that an instrument for the next question already exists.
