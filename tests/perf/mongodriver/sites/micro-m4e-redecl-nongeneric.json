@@ -1,0 +1,44 @@
+{
+ "entry": "<blocks>/mongodriver/lab/micro/m4e-redecl-nongeneric.ts",
+ "flags": [],
+ "elapsedMs": 388,
+ "crashed": null,
+ "preflightFailed": false,
+ "stats": {
+  "statementsTotal": 1,
+  "statementsFailed": 1,
+  "statementsIsland": 0,
+  "functionsSkipped": 0
+ },
+ "unreachedStats": {
+  "statementsTotal": 1,
+  "statementsFailed": 0,
+  "statementsIsland": 0,
+  "functionsSkipped": 2
+ },
+ "npmStatic": null,
+ "provenanceNotes": null,
+ "sites": [
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "redeclaring inherited fields at a different type ('{ authdb: string | undefined; dbName: string | undefined; session: string | undefined; timeoutMS: number | undefined }' over the inherited '{ session: string | undefined; timeoutMS: number | undefined }' — these layouts give the property ONE slot, and one slot cannot answer both spellings), and without an initializer (Node resets the field to undefined when this class's initializers run) is not supported yet",
+   "file": "<blocks>/mongodriver/lab/micro/m4e-redecl-nongeneric.ts",
+   "line": 11
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "extending classes not declared in the program ('Cmd') is not supported yet",
+   "file": "<blocks>/mongodriver/lab/micro/m4e-redecl-nongeneric.ts",
+   "line": 14
+  },
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "constructing through a class value whose class has no lowering (the class declaration itself was rejected — see its own diagnostic) is not supported yet",
+   "file": "<blocks>/mongodriver/lab/micro/m4e-redecl-nongeneric.ts",
+   "line": 15
+  }
+ ]
+}

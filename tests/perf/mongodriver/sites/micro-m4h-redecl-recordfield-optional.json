@@ -1,0 +1,22 @@
+{
+ "entry": "<blocks>/mongodriver/lab/micro/m4h-redecl-recordfield-optional.ts",
+ "flags": [],
+ "elapsedMs": 424,
+ "crashed": null,
+ "preflightFailed": false,
+ "stats": {
+  "statementsTotal": 4,
+  "statementsFailed": 0,
+  "statementsIsland": 0,
+  "functionsSkipped": 0
+ },
+ "unreachedStats": {
+  "statementsTotal": 1,
+  "statementsFailed": 0,
+  "statementsIsland": 0,
+  "functionsSkipped": 0
+ },
+ "npmStatic": null,
+ "provenanceNotes": null,
+ "sites": []
+}

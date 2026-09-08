@@ -1,0 +1,169 @@
+test(mongodriver): store-mongo's 226 are 58 causes, one line gates the operations subsystem, and the count GROWS when you fix it
+
+store-mongo reports 238 blocker sites on the lane a consumer gets (main
+f91fcd55, default configuration, --provenance-sources, 48,563 statements
+reached). 226 of them are inside mongodb@6.21.0 and bson@6.10.4. This
+measures what those 226 are, proves the shared causes by line-neutral
+substitution on a copy of the attested tree, and prices the route to a
+binary.
+
+WHAT THE 226 ARE. 168 distinct raw messages collapse to 58 message
+families -- 26 clusters carrying 194 sites and 32 singletons. Split three
+ways with zero unclassified: 86 cascade (77 the compiler labels, 9 that
+carry no cascade code at all), 65 representation decisions with semantics
+attached, 75 capability gaps. The representation bucket is 30 distinct
+standard-library surfaces at 45 sites -- new Date, WeakMap, BigInt,
+globalThis, Object.freeze, JSON reviver, Symbol.dispose, util.promisify --
+the family that is deliberately parked, and it is not where the leverage
+is.
+
+THE LARGEST CAUSE IS ONE LINE, AND IT IS A CAPABILITY.
+mongodb/src/operations/command.ts:93
+
+  override options: CommandOperationOptions;
+
+a class field redeclared at a different record shape. Arm P5a changes that
+one token to `declare` and clears 25 sites, including 19 of the 22
+"extending the generic class 'CommandOperation' without a compiled
+concrete instantiation" refusals -- the whole mongodb operations
+subsystem. The two other candidates in the same spine are NOT gates on it:
+arm P1 (operation.ts:92, `this.constructor`) clears exactly 8 and adds 0;
+arm P2 (operation.ts:152, `response.toObject`) clears exactly 8 and adds
+0; arm P3 (both) clears 16 and adds 0, and the 22 extends refusals stay.
+
+micro/m4-redecl-wider.ts reproduces the whole chain in 14 lines of plain
+TypeScript, and five sibling probes decompose it: an initializer does not
+help (m4c), it is not about genericity (m4e), the already-shipped
+undefined-arm-removal case still works (m4g, m4h), and `declare` clears it
+while leaving a read of a member the base slot does not carry (m4d) --
+so it is a LAYOUT problem, exactly as the diagnostic says.
+
+redecl-shape.mjs measures all 87 redeclared fields in mongodb against
+their inherited slots, with a named positive control: 58 are pure width
+extensions, 13 more differ only in optional members, 11 are neither
+(8 of those are SERVER_COMMAND_RESPONSE_TYPE, a covariant class-VALUE
+field), 5 are non-record. So 71 of 87 would be served by one slot holding
+the union of both member sets -- and command.ts:93 itself is in the
+second group, not the first, because CommandOperationOptions drops
+Abortable's optional `signal`. A width-only rule would miss the very site
+that gates everything.
+
+The obstacle is named in the compiler's own source, not guessed:
+lower-classes.ts says a type-changing redeclare "needs that slot to
+answer both spellings, which the record model (a narrowing conversion
+COPIES into the narrower shape) cannot do", and widthCoerce's
+record->record arm does build a fresh value. Fixing it means a
+non-copying narrowing view for field slots, which touches the record
+layout, the IR, ir/validate.ts and both emitters. That is a decision for
+the user; this block measured it and did not attempt it.
+
+THE HEADLINE: 238 IS A FLOOR, NOT A WORK ESTIMATE. Arm P4 removes the
+whole spine. It clears 41 sites and ADDS 73. Of the 73, 24 are artifacts
+of removing the declaration rather than fixing it, and 49 are genuinely
+newly-exposed refusals inside the 22 operation classes -- code that had
+never been analysed, because a class the compiler refuses to instantiate
+never has its body walked. SEVENTEEN of those 49 are MORE
+"redeclaring inherited fields at a different type", one per subclass's own
+`override options: XOptions`. The honest arithmetic is 242 - 41 + 49 =
+250: fixing the single largest cause makes the measured wall grow. P4,
+P5a and P5b expose the IDENTICAL 73 sites by identity, which is the
+cross-check that command.ts:93 alone causes the exposure.
+
+THE BUILD IS A DIFFERENT QUESTION FROM THE SURVEY. The build stops at one
+error -- SC1012 `export =` at @mongodb-js/saslprep index.ts:155 -- and
+never reaches lowering. But "one error" is not "one fix": that same file
+carries six blocker sites (the SC1012, its SC1090 lowering twin, two
+`assignment to non-variables` for the expando lines, `string.codePointAt`,
+and a sparse-bitfield type with no static representation).
+
+AND "1 ERROR" WAS HIDING THE REST. SCRIPTC_PROVENANCE_MANIFEST can point a
+package at any directory; pointed at node_modules/@mongodb-js/saslprep it
+clears all six saslprep sites, SC1012 included -- but the package ISLANDS
+rather than compiles, with the lane naming the reason: "no source mapping
+for '@mongodb-js/saslprep' (published target: ./dist/.esm-wrapper.mjs)",
+the same class that islands mysql2/promise and @vinikjkkj/wa-wam. So it is
+not the static route -- but it is the first run in which the build gets
+PAST preflight, and it prints its whole error list: 237 errors
+(SC1090 94, SC2020 45, SC2004 41, SC2011 22, SC2009 19, ...; mongodb 165,
+bson 59, zapo 8, driver 3, mongodb-connection-string-url 2).
+
+Compared key by key against analyze()'s blocker set for the same
+configuration: 211 distinct (file, line, code) keys on each side, 0 only
+in the build, 0 only in analyze. THEY ARE THE SAME SET. The earlier
+reading -- that a build's error count and analyze()'s site count "are
+different questions that can differ by 240" -- holds only because the
+build stops at the first module-link refusal; remove that one refusal and
+the two instruments agree site for site. This says nothing about
+ir/validate.ts or either emitter: that build still errored before
+lowering, so a closed site count is still not a build.
+
+THE UPSTREAM WALL NOBODY HAD NAMED. mongodb-connection-string-url has two
+sites, and only one of them is the parked `extends URL`. The other is
+`importing 'whatwg-url' requires the embedded dynamic engine`:
+whatwg-url@14.2.0 publishes NO provenance attestation, and neither does
+sparse-bitfield@3.0.3 under saslprep. Both are on store-mongo's critical
+path and neither is ours. The --npm-static escape was tested rather than
+assumed: with `--npm-static whatwg-url,sparse-bitfield` the result is
+242 -> 242, and the compiler names the reason -- sparse-bitfield needs
+'memory-pager', whatwg-url needs 'tr46'. Chasing one level down,
+sparse-bitfield and memory-pager DO compile statically, while whatwg-url
+now needs 'webidl-conversions' and tr46 needs 'punycode/'. The route is
+not shut; it is a short chain of small packages deeper.
+
+FOUND WHILE MEASURING, NOT ASKED FOR.
+* The provenance cache extracts 2.1 GB to compile 2 MB. mongodb's attested
+  checkout is 2,157 MB, of which docs/ is 1,247 MB and test/ is 865 MB;
+  src/ is 2 MB. Arm P0 proves it: all five checkouts minus docs/ and test/
+  is 23.4 MB and produces a site-for-site IDENTICAL analysis. This is
+  almost certainly the 2.17 GB that reached the user's C: drive.
+* Only 5 of 17 packages are source-mapped, and one was dropped by a cap:
+  "@zapo-js/native: skipped -- provenance package limit (16) reached".
+* The spec-twin fix already on main closed store-mongo's ENTIRE
+  zapo-js-core cluster: diffed by site identity, the default lane clears
+  exactly those 7 sites against the twins-off lane and adds 3 in
+  mongodb/src/cmap/connection.ts that the old lane never reached.
+* `this.constructor` is filed under SC2020 "standard library surface with
+  no lowering", beside Date and WeakMap, because `constructor` is an
+  Object.prototype member. Mechanically it is a lowering, not a
+  representation decision; any triage bucketing by code puts it in the
+  wrong pile.
+* One 8-line idiom in bson (Object.create(null), member assignments,
+  Object.freeze) costs 8 sites across two packages.
+* --npm-static makes a package's implementation compile without making its
+  exported TYPE representable: sparse-bitfield reads "static" and its
+  BitFieldInstance SC2011 in saslprep is unchanged.
+* Two hypotheses of mine, both refuted by their own probes and withdrawn:
+  the bson SC1043 sites are not a mis-attributed location (micro/m1, m1b,
+  m2 report 0 sites), and the redeclare message's "without an initializer"
+  clause is not misleading (it is dropped when an initializer is present).
+
+INSTRUMENTS, AND THE CONTROL THAT FAILED. run-sites.ps1 sources env.ps1 on
+its first line, and the first run-arm.ps1 set the probe cache root in the
+ENVIRONMENT before calling it -- so env.ps1 reset it and all six arms read
+the UNPATCHED tree, each reporting a perfect 0 cleared / 0 added, which
+reads exactly like "this line is not the cause". verify-arm.mjs now
+asserts from the RECORD which tree produced it, and those six records were
+discarded and re-run. Separately, cluster.mjs's own family normaliser did
+not strip the "(instantiating class 'C' with <T>)" suffix -- the type
+arguments are unquoted -- so eight refusals of one line counted as eight
+causes and the family total read 77 instead of 58.
+
+Every instrument is negative-controlled in both directions: sitediff
+self-diffs to 0/0/0, reports 3 cleared for 3 dropped sites, and reports
+5 MOVED (not 5 cleared + 5 added) for 5 sites shifted by four lines --
+the exact trap that once produced "37 cleared against 27 added".
+patch-arm refuses any path outside a \probe\ directory, so
+<blocks>\mongodriver\prov and every attested checkout were only ever
+read. classify prints UNCLASSIFIED and exits non-zero rather than folding
+anything silently; it is 0. The committed site records are trimmed of
+their `unreached` entries, and the trimmed copies reproduce every number
+in the README exactly.
+
+Host: win32 x86_64, zig 0.16.0 from the tree, SCRIPTC_TARGET
+x86_64-windows-gnu, SCRIPTC_CC=zigcc. Compiler built under node v22.18.0;
+every analysis and build under node v25.9.0. Reported numbers are the
+DEFAULT configuration; the substitution arms ran with
+SCRIPTC_PROVENANCE_SPEC_TWINS=off and that lane's relationship to the
+default one is measured, not assumed. No file under <zapo-work>,
+<zapo-rest>, any *-lab directory, or any provenance checkout was
+modified. <home>\.cache\scriptc verified absent throughout.

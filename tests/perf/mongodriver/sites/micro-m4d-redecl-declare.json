@@ -1,0 +1,30 @@
+{
+ "entry": "<blocks>/mongodriver/lab/micro/m4d-redecl-declare.ts",
+ "flags": [],
+ "elapsedMs": 409,
+ "crashed": null,
+ "preflightFailed": false,
+ "stats": {
+  "statementsTotal": 4,
+  "statementsFailed": 1,
+  "statementsIsland": 0,
+  "functionsSkipped": 0
+ },
+ "unreachedStats": {
+  "statementsTotal": 4,
+  "statementsFailed": 0,
+  "statementsIsland": 0,
+  "functionsSkipped": 0
+ },
+ "npmStatic": null,
+ "provenanceNotes": null,
+ "sites": [
+  {
+   "section": "blocker",
+   "code": "SC1090",
+   "message": "reading 'dbName' from a value of type 'CmdOpts' is not supported yet",
+   "file": "<blocks>/mongodriver/lab/micro/m4d-redecl-declare.ts",
+   "line": 15
+  }
+ ]
+}

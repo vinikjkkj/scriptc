@@ -1,0 +1,22 @@
+{
+ "entry": "<blocks>/mongodriver/lab/micro/m3b-no-this-constructor.ts",
+ "flags": [],
+ "elapsedMs": 400,
+ "crashed": null,
+ "preflightFailed": false,
+ "stats": {
+  "statementsTotal": 6,
+  "statementsFailed": 0,
+  "statementsIsland": 0,
+  "functionsSkipped": 0
+ },
+ "unreachedStats": {
+  "statementsTotal": 5,
+  "statementsFailed": 0,
+  "statementsIsland": 0,
+  "functionsSkipped": 0
+ },
+ "npmStatic": null,
+ "provenanceNotes": null,
+ "sites": []
+}

@@ -1,0 +1,9 @@
+{
+  "packages": {
+    "@mongodb-js/saslprep": {
+      "dir": "<blocks>/mongodriver/lab/napp/node_modules/@mongodb-js/saslprep",
+      "commit": "0000000000000000000000000000000000000000",
+      "repo": "local-dist-probe"
+    }
+  }
+}
