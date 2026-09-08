@@ -604,3 +604,77 @@ is not needed for the slice refutation, which a whole-program bound settles.
 | typed-array element access | the real volume, 526 M; **already fixed** in `734015a8` |
 
 **No optimisation is proposed here and none was written.**
+
+---
+
+## 13. The coverage question is closed: 98.46%, and the whole residual is one clause
+
+Second census build on `5115e55e` (908 s, 28,944,384 B, +61,440 for the
+classifier), same shipped default workload, armed control then unarmed.
+
+**The brief's premise was the pre-`734015a8` state.** "93.73% of the traffic
+misses the arm" was true of the **u8-only** arm. `734015a8` added an f64 arm
+*and hoisted the index check ahead of the kind test*, so the shipping arm
+serves u8 **and** f64. Measured, not reasoned:
+
+    accesses            528,299,181     (= bytesget + bytesset exactly:
+                                           every access is classified)
+    ENTER the arm       520,158,947     98.4592%
+      HIT-f64           484,115,396     91.6366%
+      HIT-u8             36,043,551      6.8226%
+    MISS                  8,140,234      1.5408%
+      MISS-kind           8,140,234      1.5408%
+      MISS-index-window           0
+      MISS-fractional             0
+      MISS-out-of-bounds          0
+      MISS-value-window           0
+
+### The whole miss is the kind clause, and it is two kinds
+
+    u32   5,024,016 get + 2,012,016 set = 7,036,032
+    i8      501,777 get +   602,425 set = 1,104,202
+                                          ---------
+                                          8,140,234   = MISS-kind, exactly
+
+The four zeros are a result in their own right. In 528 million typed-array
+accesses this program never once indexes with a fractional number, a negative,
+a NaN, an infinity, a value past 2^53, or an out-of-bounds index. Index form
+is **not** a coverage problem here; nothing but element kind is.
+
+### Confirming the inherited 6.27% on a separate instrument
+
+The u8 share is **6.82%** whole-program against the inherited **6.27%** of
+`send_group`, and `HIT-u8` equals the u8 kind count to the access — so under
+the old arm *every* u8 access entered and *nothing* else did, which makes the
+u8 share exactly the old arm's coverage. The inherited number is **confirmed**
+in magnitude and in meaning, from a different build and a different run.
+
+### What raising coverage would take — and why it is not worth taking
+
+| class | accesses | what it needs |
+| --- | --- | --- |
+| u32 / i8 **reads** | 5,525,793 (1.05%) | **small widening.** Pure loads, no coercion — a 4-byte memcpy and a sign-extended byte, the same shape as the f64 read arm. Two more branches after the already-shared index check. |
+| u32 / i8 **writes** | 2,614,441 (0.49%) | **semantics attached.** `ToUint32` and `ToInt8` are wrapping coercions and need the int64 value window, exactly as the u8 store arm does. A known shape, not a new one — but it is coercion semantics and getting it wrong is silent. |
+| everything else | **0** | **nothing to do.** No index-form miss exists to fix. |
+
+**The ceiling is the finding.** Capturing the entire residual is worth about
+**0.16 G instructions** against the **9.68 G** the f64 arm already takes —
+**1 : 59**. And the cost is not zero: every kind added is another branch on the
+path that **98.46%** of accesses already take, so a wider arm can lose the hits
+more than it wins the misses. This lever has been pulled. **I do not recommend
+widening it, and I have not written it.**
+
+### Precision of these numbers
+
+Across two independent builds and runs, `scr_arr_slice` and `scr_arr_join`
+reproduced **exactly** (4,015 / 2,016 / 4,017 / 1,014,169) while the element
+accesses moved **+0.35%**. The nondeterminism is therefore inside the crypto —
+random keys and nonces — and not in the message plumbing. Read these shares to
+two significant figures, not to the access.
+
+### The board
+
+`scr_arr_join` is now the live lever, not the fallback: 4,017 calls,
+30,184,222 output bytes from a 64-byte `malloc` grown by doubling, 2,008 of
+them joining 256–511-element arrays, max source **500 = members per group**.
+It is the group fan-out by construction and it is unaddressed.
