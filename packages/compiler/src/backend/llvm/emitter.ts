@@ -74,7 +74,7 @@ import type {
   IrUnionDef,
   SrcLoc,
 } from "../../ir/nodes.js";
-import { ABSENT_KEY_TRAP_CODE, OWNMASK_COMPLETED, OWNMASK_VALID, UNION_ARM_JS_OBJECT_KINDS, irFunctionJsName, settleOrValuePromiseTag, canBoxClassIntoDyn, CLASS_PROPS_FIELD, canMarshalFuncIntoIsland, CAUGHT, DYN, dynCopyIsObservable, F64, islandCallbackRet, islandPromisePayloadTag, isRefCounted, nullProtoRule, OWNMASK_SRC_NULL_PROTO, ownMaskKeyBit, isUnitType, REF_TRUTHY_KINDS, MAY_THROW_LIB_FNS, moduleEmbedsBuiltin, moduleEmbedsNetIsland, moduleUsesAbortSignal, moduleUsesChildStream, moduleUsesDgram, moduleUsesFetch, moduleUsesFetchStatic, moduleUsesFetchDispatch, moduleUsesFsWatch, moduleUsesHttp2, moduleUsesHttpServer, moduleUsesNet, moduleUsesProcessEvents, moduleUsesRegex, moduleUsesStream, moduleUsesWsGlobal, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, STRING, typeEquals, typeKey, VOID } from "../../ir/nodes.js";
+import { ABSENT_KEY_TRAP_CODE, OWNMASK_COMPLETED, OWNMASK_VALID, UNION_ARM_JS_OBJECT_KINDS, irFunctionJsName, settleOrValuePromiseTag, canBoxClassIntoDyn, CLASS_PROPS_FIELD, canMarshalFuncIntoIsland, CAUGHT, DYN, dynCopyIsObservable, F64, islandCallbackRet, islandPromisePayloadTag, isRefCounted, nullProtoRule, OWNMASK_SRC_NULL_PROTO, ownMaskKeyBit, isUnitType, MAY_THROW_LIB_FNS, moduleEmbedsBuiltin, moduleEmbedsNetIsland, moduleUsesAbortSignal, moduleUsesChildStream, moduleUsesDgram, moduleUsesFetch, moduleUsesFetchStatic, moduleUsesFetchDispatch, moduleUsesFsWatch, moduleUsesHttp2, moduleUsesHttpServer, moduleUsesNet, moduleUsesProcessEvents, moduleUsesRegex, moduleUsesStream, moduleUsesWsGlobal, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, STRING, typeEquals, typeKey, VOID } from "../../ir/nodes.js";
 import { dynClassDisplayName } from "../dyn-members.js";
 import { computeMayThrow } from "../emission/may-throw.js";
 import { seqScopedLocals } from "../emission/emit-stmts.js";
@@ -3609,25 +3609,42 @@ class LlEmitter {
             }
             default: {
               // Every arm kind whose truthiness is the CONSTANT true — JS
-              // objects ([] and {} included), plus symbol. REF_TRUTHY_KINDS is
-              // the shared authority: the frontend folds `if (x)` on those
-              // kinds with it, and the C lane's per-union helper answers them
-              // `true` from its own CLOSED enumeration (UNION_ARM_JS_OBJECT_KINDS,
-              // this set plus the five crypto handles). Reading a set here
-              // instead of
-              // carrying a second hand-maintained list is what stops the two
-              // lanes drifting as handle kinds are added — this list had
-              // silently lost the whole net/http/h2/dgram/tls family, so a
-              // truthiness test on a `Socket | undefined` refused on LLVM
-              // while C answered it.
-              if (REF_TRUTHY_KINDS.has(arm.kind)) {
+              // objects ([] and {} included), plus symbol.
+              //
+              // THE SET HERE IS UNION_ARM_JS_OBJECT_KINDS, and which of the
+              // two sets this reads is load-bearing. There are two, they
+              // differ by exactly the five crypto/key handles (keyobj, hash,
+              // hmac, cipher, decipher), and they answer DIFFERENT questions:
+              //
+              //   REF_TRUTHY_KINDS          may a BARE value of this kind be
+              //                             lowered at toBool? A policy
+              //                             question — no program has asked
+              //                             to write `if (hash)` — and the
+              //                             frontend and ir/validate.ts own
+              //                             it.
+              //   UNION_ARM_JS_OBJECT_KINDS is this ARM's payload a JS
+              //                             object? A fact about the runtime
+              //                             value, and the only question a
+              //                             per-union truthiness helper asks.
+              //
+              // This site read the FIRST one and so refused a `KeyObject |
+              // undefined` test that the C lane answers `true` — its
+              // unionTruthyHelper (emit-walkers.ts) reads the second, as does
+              // the unionEq site below. That is the same drift this comment
+              // was already describing: the list had silently lost the whole
+              // net/http/h2/dgram/tls family once, and the crypto handles
+              // were the residue of it. A KeyObject IS a JS object; constant
+              // true is Node's answer.
+              if (UNION_ARM_JS_OBJECT_KINDS.has(arm.kind)) {
                 B.line(`store i1 true, ptr ${slot} ; ${arm.kind}: objects are truthy`);
                 break;
               }
               // Deliberately still refused: jsval (only the engine can
-              // answer) and dyn. Value-dependent, so a constant would be a
-              // silent wrong answer rather than a missing feature. bigint is
-              // NOT in this list any more -- it is answered above.
+              // answer). Value-dependent, so a constant would be a silent
+              // wrong answer rather than a missing feature. dyn and caught
+              // never reach here — ir/validate.ts's checkTruthyUnion fences
+              // both upstream. bigint is NOT in this list any more; it is
+              // answered above.
               throw new LlvmUnsupportedError(`truthy:union:${arm.kind}`);
             }
           }
@@ -11190,12 +11207,10 @@ class LlEmitter {
     // Empty map: the runtime stores the value kind's RC entry points as
     // function pointers (scalar values pass nulls); the trace argument
     // doubles as the cycle-capability flag — exactly the C mapNew.
-    // WeakMap has no LLVM lowering yet: the C emitter grew it first (it is
-    // where scr_weak.c is wired), and a WeakMap program therefore takes the
-    // documented demotion to the C backend rather than a wrong answer. This
-    // is a REFUSAL, not a bug -- LlvmUnsupportedError is what selects the
-    // fallback and prints the one-line lane note.
-    if (e.type.kind === "weakmap") throw new LlvmUnsupportedError("weakmap:new");
+    // A WeakMap rides this same IR node (identical shape: a construction
+    // with a key/value type and no seed) but a DIFFERENT runtime — it is
+    // not scr_map with a flag. See emitWeakMapNew.
+    if (e.type.kind === "weakmap") return this.emitWeakMapNew(e);
     if (e.type.kind !== "map") throw new Error("llvm emitter bug: mapNew of non-map type");
     const B = this.B;
     const value = e.type.value;
@@ -11239,10 +11254,138 @@ class LlEmitter {
     this.B.line(`call void @scr_map_set_${kAcc}_${vAcc}(ptr ${m}, ${kTy} ${key}, ${vTy} ${value})`);
   }
 
+  /** `new WeakMap()` — scr_weak.c, not scr_map.c. It does not retain keys,
+   * and it is spliced by the key's OWN free path; only the value adapters
+   * cross over from the map lowering, because only values are held.
+   * emit-exprs.ts's mapNew weak arm is the twin this mirrors.
+   *
+   * THE KEY STAMP is a function pointer rather than a switch inside
+   * scr_weak.c because the mark lives in a different struct field per key
+   * kind: picking wrong is a stray store into memory that has no such
+   * field, not a wrong answer. bytes take scr_bytes_weak_mark. An ARRAY
+   * takes scr_arr_weak_mark when UNTRACED (a plain malloc whose one
+   * chokepoint is scr_arr_release) and scr_cyc_weak_mark when TRACED (a
+   * cycle node whose two deaths — the release and the collector — both end
+   * at scr_cyc_free). Only the trace FIXPOINT distinguishes those, which is
+   * why the choice is made here and not in the frontend's pure-IrType
+   * isSupportedWeakKey.
+   *
+   * A DYN KEY passes NO stamp at all. Its kind is a RUNTIME fact, so
+   * nothing static can pick the field to write; scr_weak_new tolerates a
+   * null key_mark and the intrinsics route through scr_weak_dyn_*, which
+   * derive the key address and its stamp together from the value in hand. */
+  private emitWeakMapNew(e: IrExpr & { kind: "mapNew" }): LlValue {
+    if (e.type.kind !== "weakmap") throw new Error("llvm emitter bug: emitWeakMapNew of non-weakmap");
+    if ((e.seed?.length ?? 0) !== 0) throw new Error("llvm emitter bug: seeded WeakMap construction");
+    const B = this.B;
+    const value = e.type.value;
+    const rc = isRefCounted(value) ? vAdapters(this, value) : { retain: "null", release: "null" };
+    const key = e.type.key;
+    let mark: string;
+    if (key.kind === "bytes") {
+      mark = "@scr_bytes_weak_mark";
+      this.declare(`declare void ${mark}(ptr)`);
+    } else if (key.kind === "array") {
+      mark = traceAdapter(this, key.elem) !== null ? "@scr_cyc_weak_mark" : "@scr_arr_weak_mark";
+      this.declare(`declare void ${mark}(ptr)`);
+    } else if (key.kind === "dyn") {
+      mark = "null";
+    } else {
+      throw new Error(`llvm emitter bug: WeakMap key kind ${key.kind} has no stamp`);
+    }
+    this.declare(`declare ptr @scr_weak_new(ptr, ptr, ptr)`);
+    const m = B.tmp();
+    B.line(`${m} = call ptr @scr_weak_new(ptr ${rc.retain}, ptr ${rc.release}, ptr ${mark})`);
+    return this.own({ name: m, type: e.type });
+  }
+
+  /** WeakMap get/set/has, and deliberately nothing else: entries vanish
+   * when their keys die, so a size, a clear or an iteration would be a
+   * number the program cannot reason about. JS does not offer them either.
+   *
+   * A DYN-KEYED table takes the `_dyn` entry points — same table, same
+   * storage, same value convention. The only difference is that the key
+   * arrives as a ScrDyn and the RUNTIME, not this emitter, decides which
+   * address inside it is the JS value and which stamp that address takes.
+   * The suffix is deliberate: a dyn key silently taking the raw entry
+   * points would key the table on the BOX, which is the one wrong answer
+   * this design exists to prevent, and a suffix makes that a link error
+   * rather than a cache that never hits. */
+  private emitWeakMapIntrinsic(e: IrExpr & { kind: "mapIntrinsic" }, recv: LlValue, wm: IrType & { kind: "weakmap" }): LlValue {
+    const B = this.B;
+    const value = wm.value;
+    if (elemAccess(value) !== "ref") {
+      // Scalar-valued weak maps are frontend-refused: a scalar has no
+      // pointer for the table to hold.
+      throw new Error("llvm emitter bug: scalar-valued WeakMap reached the emitter");
+    }
+    const dyn = wm.key.kind === "dyn" ? "_dyn" : "";
+    const k = this.emitExpr(e.args[0]!);
+    switch (e.method) {
+      case "get": {
+        if (e.type.kind !== "union") throw new Error("llvm emitter bug: WeakMap get result is not a union");
+        const def = this.unionsById.get(e.type.unionId);
+        const undefTag = this.undefinedArmTag(e.type);
+        if (!def || undefTag < 0) throw new Error("llvm emitter bug: WeakMap get union lacks its undefined arm");
+        this.declare(`declare ptr @scr_weak${dyn}_get_ref(ptr, ptr)`);
+        const raw = B.tmp();
+        B.line(`${raw} = call ptr @scr_weak${dyn}_get_ref(ptr ${recv.name}, ptr ${k.name})`);
+        if (value.kind === "union") {
+          // The stored box IS the result: `undefined` sorts last in
+          // canonical arm order, so V's tags coincide with the result
+          // union's and no re-tag exists.
+          const absent = this.unitInstanceRef(e.type.unionId, undefTag);
+          const isnull = B.tmp();
+          const t = B.tmp();
+          B.line(`${isnull} = icmp eq ptr ${raw}, null`);
+          B.line(`${t} = select i1 ${isnull}, ptr ${absent}, ptr ${raw}`);
+          return this.own({ name: t, type: e.type });
+        }
+        const valueTag = def.arms.findIndex((a) => typeEquals(a, value));
+        if (valueTag < 0) throw new Error("llvm emitter bug: WeakMap get union lacks its value arm");
+        // +1 on a hit and NULL on a miss; that ownership MOVES into the
+        // fresh union box, which is exactly wrapNullable's contract.
+        return this.wrapNullable(raw, raw, value, valueTag, e.type, undefTag);
+      }
+      case "set": {
+        const v = this.emitExpr(e.args[1]!);
+        this.declare(`declare void @scr_weak${dyn}_set(ptr, ptr, ptr)`);
+        // The key is BORROWED and never retained -- that is the whole
+        // point of a weak table. And there is NO moveTemp here, unlike
+        // scr_map_set_*_ref: scr_weak_set takes the value BORROWED and
+        // retains its own reference, so the caller's temp releases
+        // normally at statement end. Moving it in as well double counts,
+        // which the C twin records as having surfaced on corpus 7782 as
+        // 43 live objects at exit.
+        B.line(`call void @scr_weak${dyn}_set(ptr ${recv.name}, ptr ${k.name}, ptr ${v.name})`);
+        // A DYN key can be REFUSED at run time, and only here: set is the
+        // one method with a lie to tell (Node throws for a primitive weak
+        // key while the read side answers undefined/false, and
+        // scr_weak_dyn_* matches that exactly). scr_weak_set itself
+        // cannot throw at all, so the check is the dyn arm's alone.
+        if (dyn !== "") this.emitPendingCheck();
+        return { name: "", type: e.type };
+      }
+      case "has": {
+        // scr_weak_has returns a C `int`, NOT the zero-extended i1 the
+        // scr_map_has family answers with — read the prototype, not the
+        // neighbour.
+        this.declare(`declare i32 @scr_weak${dyn}_has(ptr, ptr)`);
+        const raw = B.tmp();
+        const t = B.tmp();
+        B.line(`${raw} = call i32 @scr_weak${dyn}_has(ptr ${recv.name}, ptr ${k.name})`);
+        B.line(`${t} = icmp ne i32 ${raw}, 0`);
+        return { name: t, type: e.type };
+      }
+      default:
+        throw new Error(`llvm emitter bug: WeakMap.${e.method} reached the emitter`);
+    }
+  }
+
   private emitMapIntrinsic(e: IrExpr & { kind: "mapIntrinsic" }): LlValue {
     const B = this.B;
     const r = this.emitExpr(e.receiver);
-    if (e.receiver.type.kind === "weakmap") throw new LlvmUnsupportedError("weakmap:intrinsic");
+    if (e.receiver.type.kind === "weakmap") return this.emitWeakMapIntrinsic(e, r, e.receiver.type);
     if (e.receiver.type.kind !== "map") throw new Error("llvm emitter bug: mapIntrinsic on non-map");
     const { key, value } = e.receiver.type;
     const kAcc = mapKeyAccess(key);
