@@ -1,0 +1,10 @@
+<blocks>/wamcoord-lab/napp/amb3.ts:5:12 - error SC2012: '.replace()' on strings runs in the embedded dynamic engine, which this build does not include
+
+  4 | function f(s: string): string {
+  5 |     return s.replace('@', ':0@')
+    |            ^~~~~~~~~~~~~~~~~~~~~
+  6 | }
+
+  hint: build with --dynamic to run this call in the embedded engine (adds ~620KB to the binary); static builds never include it
+
+1 error.

@@ -1,0 +1,1 @@
+<blocks>\wamcoord-lab\out\amb1.exe

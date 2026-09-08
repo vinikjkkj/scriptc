@@ -61,7 +61,7 @@ compiles to **0 blocker sites** and a **running, byte-exact binary**.
    already supports; 11 are a representation decision that was declined with
    its cost written down. A site count cannot show that, and it changes what
    "voip is blocked on 45 things" means in a status table. The compiler-side
-   tail is **17 sites over 14 distinct messages**, and it is a tail: after the
+   tail is **17 sites over 16 distinct messages**, and it is a tail: after the
    two lowering fixes in sections 14 and 15 the largest remaining cause is two
    sites. Sections 15.5 and 16.
 
@@ -1627,14 +1627,9 @@ dynamic-only  SC2012  string.prototype.replaceAll
 So `jid.replace('@', ':0@')` refusing is the manifest's recorded answer, not a
 surprise. Classified as a capability gap with a known status.
 
-**One observation I could not resolve and am not asserting.** In
-`drivers/repl.ts`, `s.replace('@', ':0@')` over a `declare const s: string`
-**did not raise the fence**, while the same call over a function parameter
-(`drivers/repl2.ts`) does, three times out of three. Both files analysed clean
-with no `unreached` section, so it is not an unreached-code artefact. If the
-fence really can be missed on some receiver shapes that is a **false green**,
-which matters more than the site it hides. Both probes are committed; this is an
-observation with a reproduction, not a claim.
+**That reading is now REFUTED, by mechanism — see section 17.** It is not a
+missed fence: the ambient receiver read throws before the call is reached, so
+no refusal is owed and none fires.
 
 ### 16.5 The last `any` is zapo's type, not a narrowing gap
 
@@ -1662,3 +1657,388 @@ work `voip` justifies, and it is the user's, not this block's. What is settled
 is the shape: **`voip` is not 45 problems, and it is not one problem. It is 19
 that are not ours, 9 that are a decision already made, and a 17-site tail with
 no twelfth cause in it.**
+
+---
+
+## 17. The false green, refuted: two lowerings, both correct
+
+§16.4 recorded an unresolved observation — `.replace()` raising `SC2012` 3/3
+over a function parameter and **not** raising it over a `declare const`
+receiver. If a fence could be missed on some receiver shapes, every "0 strict
+errors" this project has quoted would inherit the doubt, because a green build
+would stop being evidence that the refusal cannot fire.
+
+**It is not a miss.** The two calls take different lowerings and both are
+correct. Decided by mechanism, as follows.
+
+### 17.1 It was never an instrument disagreement
+
+The first thing to rule out: `analyze()` and the build reporting different
+things. They do not. On `drivers/repl.ts` both report **exactly one** site, and
+the same one:
+
+    analyze()   1 blocker, line 5
+    BUILD       rc=1, LOG-SITES 1, "1 error.", line 5:11
+
+Line 5 is the literal receiver. Neither instrument reports the ambient-receiver
+call on line 3. So the difference is in the compiler's lowering, not in how it
+was measured.
+
+### 17.2 The mechanism, read out of the emitted C
+
+Minimal program (`drivers/amb1.ts`), three lines, ambient receiver only:
+
+```ts
+declare const s: string
+const a = s.replace('@', ':0@')
+console.log('a=' + a)
+```
+
+`BUILD rc=0`, **0 sites**, a 677,888-byte binary — and a 2,219-byte translation
+unit whose whole body is:
+
+```c
+ScrStr *sc_t2 = (ScrStr *)&sc_lit_0;
+double  sc_t3 = (scr_undef_global_read(sc_t2), 0);
+if (scr_exc_pending()) { return; }
+```
+
+**`scr_undef_global_read` is the whole answer.** A `declare const` is an ambient
+binding with no runtime value, so *reading* it is an undefined-global read,
+which throws a `ReferenceError`. The compiler emits that read, checks for a
+pending exception, and returns. **The member call is never emitted at all** —
+`grep` for a string-replace symbol in the TU answers **0**, and the TU carries
+**0** `[SCxxxx]` fences. There is no `.replace()` in the program to refuse.
+
+And Node agrees, for the same reason:
+
+    binary:  Uncaught ReferenceError: s is not defined
+    node:    ReferenceError: s is not defined
+
+Both throw the same error class on the same line. (The texts differ in
+formatting — one line against Node's stack — which is why this is not a corpus
+program.)
+
+### 17.3 It is about reachability, not about `.replace()`
+
+The decisive control, because "dynamic-only method" and "unreadable receiver"
+are confounded in the original observation. `drivers/amb2.ts` puts a **fully
+supported** method on the same ambient receiver:
+
+```ts
+declare const s: string
+console.log('u=' + s.toUpperCase())
+```
+
+`BUILD rc=0`, 0 sites, **0 `toUpperCase` symbols in the emitted C**, and the
+identical `ReferenceError` at run time. So the silence has nothing to do with
+`.replace()`'s support status: **any** member call on an unreadable receiver is
+unreachable, and unreachable code owes no diagnostic.
+
+### 17.4 One variable changed, and the fence fires
+
+`drivers/amb3.ts` is `amb1.ts` with exactly one thing different — the receiver
+is a real string instead of an ambient binding:
+
+```ts
+function f(s: string): string { return s.replace('@', ':0@') }
+console.log('a=' + f('u@v'))
+```
+
+    BUILD rc=1   LOG-SITES 1   1 SC2012
+
+**Silence and refusal turn on reachability alone.** Every real receiver tried
+refuses: a parameter (3/3 in `drivers/repl2.ts`), a literal, a local.
+
+### 17.5 The boundary, closed
+
+The remaining risk in this area is not the fence but the lowering itself: if an
+ambient binding's global genuinely existed at run time, an unconditional
+undefined-global read would throw where Node succeeds.
+
+**That program cannot be written.** `drivers/amb4.ts` tries to define the global
+first and is refused before it gets there:
+
+    SC2020: 'globalThis' is part of the standard library types but has no scriptc lowering yet
+
+`globalThis` has no lowering, so there is no compilable way to make an ambient
+binding exist at run time. The undefined-global lowering therefore cannot
+diverge from Node in any program that compiles.
+
+### 17.6 What is pinned, and what this costs
+
+`tests/diagnostics/a-dynamic-only-call-on-a-receiver-that-cannot-be-read.ts`
+carries **both** shapes in one file, and its snapshot is the assertion:
+
+    exactly one SC2012, on the REAL receiver at line 31
+    nothing at all on the ambient receiver at line 26
+
+So a future change that starts refusing the ambient call, or stops refusing the
+real one, fails that snapshot. Diagnostics suite: **155 programs, 155 passed, 1
+snapshot written.**
+
+**No compiler source was changed by this investigation**, so the suite scope is
+the diagnostics suite alone, and that is what was run. No green is in doubt: the
+refusal fires wherever the call is reached, and where it does not fire there is
+no call.
+
+### 17.7 The general form, worth keeping
+
+*A refusal is owed only where the code is reached.* An expression whose receiver
+provably throws first emits no call, so it carries no site — and a site census
+that finds nothing there is right, not blind. The way to tell that apart from a
+missed fence is to change **one** thing about the receiver and watch the site
+appear, then read the emitted code for the mechanism. Two outcomes look
+identical from the outside; the emitted C does not.
+
+---
+
+## 18. `store-redis` on current main: 39 reproduced, on BOTH lanes — PARTIAL
+
+**Status: partial and paused.** The starting measurement is done and reproduces
+the expected number. The single-cause claim is **not** verified, and the
+mechanism is **not** established — two obvious candidates were tried and neither
+reproduces. Nothing below rests on an unfinished run.
+
+Measured at `e48c5e52`, which carries the spec-twin change `d2c952ca`
+(`main` was `325eb515` at rebase time; it has since moved to `0c66825d`, one
+commit ahead of this measurement — a ts7 baseline record, no compiler change).
+`--provenance-sources`, strict, no `--best-effort`, node v25.9.0 measuring.
+
+### 18.1 39 reproduced, and the lane difference is gone
+
+| lane | driver names | stmts reached / failed | blocker sites | roots / cascade | distinct root msgs |
+| --- | --- | --- | --- | --- | --- |
+| **A** — the isolated driver | `@zapo-js/store-redis` | **46,878 / 19** | **39** | 20 / 19 | 5 |
+| **A2** — consumer shape | `zapo-js` **and** the store | **46,994 / 19** | **39** | 20 / 19 | 5 |
+
+**39 is reproduced.** The spec-twin change behaves as measured.
+
+Two things moved, and the second is new:
+
+1. **Reach opened by a factor of 32** — `pkgstatus-0907` recorded ~1,450
+   statements on this lane; it is now **46,878**. That is the same shape as the
+   spec-twin change's recorded effect on `store-mongo` (3,131 → 48,563).
+2. **The lane difference collapsed.** `pkgstatus` recorded lane A at **46** and
+   lane A2 at **39**, the seven-site zapo-js-core cluster being what the extra
+   `zapo-js` import removed. Both lanes now read **39**, to the site. The lane
+   trap that governs `wam`, `media-utils`, `voip` and `store-sqlite`
+   **no longer applies to `store-redis`**: the spec-twin fix removed the reason
+   it existed here. A status table that still says "46 isolated / 39 as a
+   consumer" for this package is out of date.
+
+### 18.2 The 39, clustered
+
+Five distinct root messages, 20 roots + 19 `SC2004` cascade:
+
+```
+16  SC1090  extending classes not declared in the program ('BaseRedisStore')
+ 1  SC2013  importing 'ioredis' requires the embedded dynamic engine
+ 1  SC2013  values from the 'ioredis' package run in the embedded dynamic engine
+ 1  SC2011  values of type 'WaRedisStoreConfig' have no static representation
+ 1  SC2011  values of type 'WaRedisStoreResult' have no static representation
++19 SC2004  cascade
+```
+
+By file: the 16 are one per store class (`thread`, `signal`, `session`,
+`sender-key`, …), 2 in `createRedisStore.ts`, 1 in `BaseRedisStore.ts`, 1 in the
+driver.
+
+**CORRECTION, section 19.** This section first said there was no site on
+`BaseRedisStore`'s own declaration saying why it failed to be declared. **That
+is wrong.** There is one, and it is the single most important site in the
+package: `BaseRedisStore.ts:8`, `SC2013`, on the field `protected readonly
+redis: Redis`. I read it out of the by-file summary ("1 BaseRedisStore.ts")
+without opening what that 1 was -- a count quoted instead of an identity, which
+is the exact error this document keeps catching elsewhere.
+
+### 18.3 NOT established — and two hypotheses already refuted
+
+**The single-cause claim is unverified.** "39 faces, one cause" has been right
+three times today and wrong once; the substitution that would settle it — stub
+the base class so it compiles, re-measure, see whether 16 + 19 collapse — has
+**not been run**. Until it is, 39 is a count, not a diagnosis.
+
+**The mechanism is not the obvious one.** `BaseRedisStore` imports `ioredis`
+with `import type` — a **type-only** import, so no runtime value of the islanded
+package crosses into it. Its field `protected readonly redis: Redis` is typed by
+a name the checker knows and the compiler cannot lay out. The natural hypothesis
+is therefore *"a class carrying a field of unrepresentable type cannot be
+declared, and the island is only why the type is unrepresentable"* — which would
+mean the island is not the mechanism.
+
+**Both attempts to reproduce that without an island FAILED to reproduce it:**
+
+| probe | base class field | result |
+| --- | --- | --- |
+| `drivers/baseext.ts` | `bigint` | **0 blockers** — the subclass compiles |
+| `drivers/baseext2.ts` | an ambient `declare class Opaque` | **0 blockers** — two subclasses compile |
+
+So neither "a refused scalar type" nor "an ambient class type" in a base-class
+field reproduces `extending classes not declared in the program`. The simple
+field-representability story is **refuted**, and the mechanism is currently
+**unknown**. It is specifically not safe to write down "ioredis islands,
+therefore the base class does not compile" — that is the first line of the log,
+not a demonstrated cause, and the `whatwg-url` case had exactly this shape and
+turned out to be a class-layout gap reproducible with a stdlib global.
+
+### 18.4 What happens next, when work resumes
+
+1. Substitute: stub `BaseRedisStore` so it compiles, re-measure line-neutrally,
+   and see whether the 16 and the 19 clear together.
+2. Find the mechanism by narrowing what *does* reproduce the message, starting
+   from the two probes that do not.
+3. Only then decide whether it is a compiler capability, a representation
+   decision, or a zapo-side pattern.
+
+No build of `store-redis` was attempted, so there is **no binary and no fence
+count — n/a, not 0.**
+
+---
+
+## 19. `store-redis`: the mechanism, reproduced in three small files
+
+§18 left 39 measured and the mechanism unknown, with two candidate explanations
+already refuted. This section has the mechanism, a minimal reproduction, and the
+substitution that proves it is one cause.
+
+Measured at `41588bb7`, rebased onto `main` `0c66825d`.
+
+### 19.1 39 still holds on current main
+
+    drivers/_x-redis-plus-zapo.ts   46,994 statements / 19 failed
+                                    39 blocker sites, 20 roots + 19 cascade,
+                                    5 distinct root messages
+
+Unchanged from §18 to the site, so the number did not move under the rebase and
+there was nothing to stop for.
+
+### 19.2 The correction: the cause has a site, and I had missed it
+
+§18.2 said there was no site on `BaseRedisStore`'s own declaration. **Wrong.**
+Listing every site touching that file, in every section, finds it immediately:
+
+```
+[blocker] SC2013  BaseRedisStore.ts:8
+    values from the 'ioredis' package run in the embedded dynamic engine
+```
+
+and line 8 is
+
+```ts
+protected readonly redis: Redis
+```
+
+**The field declaration is the cause, and it carries its own diagnostic.** I
+reached the wrong conclusion by reading the by-file summary — "1
+BaseRedisStore.ts" — and never opening what that 1 was. A count quoted where an
+identity was needed, which is the error this document keeps catching in other
+people's numbers.
+
+So the chain is not mysterious, and every link has a site:
+
+```
+ioredis publishes no attestation      -> the package islands
+BaseRedisStore.ts:8  SC2013           -> the FIELD's type is an islanded type
+                                      -> the class cannot be declared
+16x  SC1090 extending classes not declared in the program ('BaseRedisStore')
+19x  SC2004 cascade in the driver
+```
+
+### 19.3 The minimal reproduction: three files, and the variable is CROSS-MODULE
+
+The first ladder (`drivers/redisbase.ts`) put base and subclass in the **same
+file**. It reproduced **half** the chain:
+
+```
+line 13  SC2013  values from the 'ioredis' package ...   <- the field, reproduced
+line 22  SC2013  the same, on an abstract class with a protected constructor
+```
+
+— and the subclasses did **not** say *extending classes not declared*. So
+`abstract`, `protected constructor` and the type-only import are **not** what
+produces that message.
+
+Adding one variable — putting the subclass in a **different module** — completes
+it (`drivers/rmod/base.ts`, `drivers/rmod/sub.ts`, `drivers/redismod.ts`, 26
+lines total):
+
+```
+rmod/base.ts:6   SC2013  values from the 'ioredis' package run in the embedded dynamic engine
+rmod/sub.ts:5    SC1090  extending classes not declared in the program ('RBase')
+redismod.ts:4    SC1090  constructing through a class value whose class has no lowering
+redismod.ts:5    SC1090  method calls like 's.who'
+```
+
+That is `store-redis`'s chain end to end, with no store package involved.
+
+**The mechanism, stated:** a **type-only** import of a type from an **islanded**
+package, used as a **field type**, raises `SC2013` on the field declaration and
+leaves the class undeclarable; a subclass **in another module** then reports
+*extending classes not declared in the program*, naming the consequence while
+the cause sits one module away with its own code.
+
+Two things this corrects:
+
+* the earlier probes were right to fail. A `bigint` field and an ambient
+  `declare class` field do not reproduce it, because neither is an *islanded
+  package* type — `SC2013` is specific to that, and no amount of general
+  "unrepresentable field type" reasoning reaches it;
+* **here the island really is the mechanism**, unlike the `whatwg-url` case.
+  That is now demonstrated rather than assumed, which was the whole point of
+  being told not to assume it.
+
+### 19.4 The substitution: one line, all four sites
+
+`drivers/rmodB/` is `rmod/` with exactly one line different in `base.ts` — the
+field's type stops being an islanded package type — and one matching type
+spelling in the subclass's constructor. Line-neutral in both files, 13 → 13 and
+9 → 9.
+
+| | baseline (`redismod.ts`) | probe (`redismodB.ts`) |
+| --- | --- | --- |
+| blocker sites | **4** | **0** |
+| statements reached / failed | 4 / 2 | **8 / 0** |
+
+**All four clear together, and the reach doubles** because the class now
+compiles. That is the single-cause claim proved on the minimal case, which is
+where it can be proved cleanly.
+
+### 19.5 What it costs, and who owns it
+
+`ioredis@5.11.1` publishes **no provenance attestation** — confirmed
+independently in §11.6's candidate scan, where it is one of the 26 NOT-ATTESTED
+packages. So the shortest path is **upstream, and neither ours nor zapo's**:
+if `ioredis` published provenance, its types would map and the field would lay
+out.
+
+`pkgstatus-0907` records `store-mysql` and `store-postgres` with **identical
+histograms** to `store-redis` and the same `Base*Store` shape, so this mechanism
+is one finding covering three packages, not one.
+
+There is a compiler-side alternative, and it is a **representation decision**,
+so it is named and not argued into scope: the field here is only ever used
+through a type-only import, so a class *could* in principle be laid out with an
+opaque slot for a field whose type is islanded, leaving only the **uses** of
+that field to refuse. That would take `store-redis` from 39 to roughly 4 — the
+two `SC2013` on `createRedisStore.ts`'s genuine **value** import of `ioredis`,
+which is a different and real island, plus the two `SC2011` on the package's own
+config and result types. Whether an islanded type should have an opaque runtime
+slot is the same class of question as `Date` and the WebRTC handles, with the
+same kind of cost attached, and it belongs to whoever owns the handle kinds.
+
+### 19.6 What was NOT done
+
+The `store-redis` **source-lane** substitution (`pkgsrc/storeredis` against
+`pkgsrc/storeredisB`) was set up and **failed preflight on both arms**, so it
+produced nothing and nothing is quoted from it. The baseline arm failed on my
+driver naming store methods the package does not export; the probe arm failed
+with **151 further `SC0001`s from the stub itself** — replacing `ioredis`'s
+precise types with a loose `...a: unknown[]` surface breaks the package's own
+typechecking. That is worth recording as a method note: **substituting a rich
+third-party type with a thin stub does not isolate one variable, it changes the
+program**, and the minimal reproduction above is what made the same question
+answerable in 26 lines instead.
+
+`store-redis` was not built, so there is **no binary and no fence count — n/a,
+not 0.** What is in front of it is the 39 above, 35 of which are this one cause.

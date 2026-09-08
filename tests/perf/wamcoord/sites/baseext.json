@@ -1,0 +1,22 @@
+{
+ "entry": "<blocks>/wamcoord-lab/napp/baseext.ts",
+ "flags": [],
+ "elapsedMs": 485,
+ "crashed": null,
+ "preflightFailed": false,
+ "stats": {
+  "statementsTotal": 6,
+  "statementsFailed": 0,
+  "statementsIsland": 0,
+  "functionsSkipped": 0
+ },
+ "unreachedStats": {
+  "statementsTotal": 0,
+  "statementsFailed": 0,
+  "statementsIsland": 0,
+  "functionsSkipped": 0
+ },
+ "npmStatic": null,
+ "provenanceNotes": null,
+ "sites": []
+}
