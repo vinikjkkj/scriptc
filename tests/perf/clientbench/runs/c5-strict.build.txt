@@ -1,0 +1,135 @@
+provenance: zapo-js@1.6.2 ← https://github.com/vinikjkkj/zapo@refs/tags/v1.6.2 @ 250f9af5229a (source compiles statically)
+provenance: @zapo-js/store-sqlite@1.0.2 ← https://github.com/vinikjkkj/zapo@refs/tags/v1.2.1 @ ff43c244ac7a (source compiles statically)
+provenance: argo-codec@0.2.1: no provenance attestation published; island path used
+provenance: 36 alias key(s) are spelled by more than one mapped package with different targets ('zapo-js/store', 'zapo-js/signal', 'zapo-js/auth', 'zapo-js/appstate', 'zapo-js/retry', …); tsconfig "paths" is one table per program, so zapo-js's answer is used for all of them and @zapo-js/store-sqlite compile against zapo-js's checkout for those specifiers
+<blocks>/clientbench/lab/app/tree/packages/fake-server/bench-client5/__inspector-stub.ts:8:22 - error SC2011: values of type '(...args: any[]) => void' have no static representation but run in the embedded dynamic engine, which this build does not include
+
+  7 |   disconnect(): void {}
+  8 |   on(_event: string, _fn: (...args: any[]) => void): void {}
+    |                      ^~~
+  9 |   removeListener(_event: string, _fn: (...args: any[]) => void): void {}
+
+  hint: build with --dynamic to run these values in the embedded engine (adds ~620KB to the binary), or restate the type inside the static surface (https://scriptc.dev/limitations describes the boundary)
+
+<blocks>/clientbench/lab/app/tree/packages/fake-server/bench-client5/messaging.bench.ts:168:24 - error SC1090: constructing through a class value whose class has no lowering (the class declaration itself was rejected — see its own diagnostic) is not supported yet
+
+  167 |         await mkdir(this.options.outDir, { recursive: true })
+  168 |         this.session = new InspectorSession()
+      |                        ^~~~~~~~~~~~~~~~~~~~~~
+  169 |         this.session.connect()
+
+<blocks>/clientbench/lab/app/tree/packages/fake-server/bench-client5/messaging.bench.ts:169:9 - error SC1090: method calls like 'this.session.connect' is not supported yet
+
+  168 |         this.session = new InspectorSession()
+  169 |         this.session.connect()
+      |         ^~~~~~~~~~~~~~~~~~~~~~
+  170 |         if (this.options.heap) {
+
+<blocks>/clientbench/lab/app/tree/packages/fake-server/bench-client5/messaging.bench.ts:171:19 - error SC1090: method calls like 'this.session.post' is not supported yet
+
+  170 |         if (this.options.heap) {
+  171 |             await this.session.post('HeapProfiler.startTrackingHeapObjects', {
+      |                   ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  172 |                 trackAllocations: true
+
+<blocks>/clientbench/lab/app/tree/packages/fake-server/bench-client5/messaging.bench.ts:177:19 - error SC1090: method calls like 'this.session.post' is not supported yet
+
+  176 |         if (this.options.cpu) {
+  177 |             await this.session.post('Profiler.enable')
+      |                   ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  178 |             await this.session.post('Profiler.start')
+
+<blocks>/clientbench/lab/app/tree/packages/fake-server/bench-client5/messaging.bench.ts:178:19 - error SC1090: method calls like 'this.session.post' is not supported yet
+
+  177 |             await this.session.post('Profiler.enable')
+  178 |             await this.session.post('Profiler.start')
+      |                   ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  179 |             console.log('[cpu] profiling started')
+
+<blocks>/clientbench/lab/app/tree/packages/fake-server/bench-client5/messaging.bench.ts:194:23 - error SC1090: method calls like 'this.session.post' is not supported yet
+
+  193 |             try {
+  194 |                 await this.session.post('Profiler.start')
+      |                       ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  195 |             } catch {
+
+<blocks>/clientbench/lab/app/tree/packages/fake-server/bench-client5/messaging.bench.ts:210:39 - error SC1090: method calls like 'this.session.post' is not supported yet
+
+  209 |             try {
+  210 |                 const result = (await this.session.post('Profiler.stop')) as {
+      |                                       ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  211 |                     profile: unknown
+
+<blocks>/clientbench/lab/app/tree/packages/fake-server/bench-client5/messaging.bench.ts:217:23 - error SC1090: method calls like 'this.session.post' is not supported yet
+
+  216 |                 // Restart for the next scenario.
+  217 |                 await this.session.post('Profiler.start')
+      |                       ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  218 |             } catch (err) {
+
+<blocks>/clientbench/lab/app/tree/packages/fake-server/bench-client5/messaging.bench.ts:233:39 - error SC1090: method calls like 'this.session.post' is not supported yet
+
+  232 |             try {
+  233 |                 const result = (await this.session.post('Profiler.stop')) as {
+      |                                       ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  234 |                     profile: unknown
+
+<blocks>/clientbench/lab/app/tree/packages/fake-server/bench-client5/messaging.bench.ts:247:13 - error SC1090: method calls like 'this.session.disconnect' is not supported yet
+
+  246 |         try {
+  247 |             this.session.disconnect()
+      |             ^~~~~~~~~~~~~~~~~~~~~~~~~
+  248 |         } catch {
+
+<blocks>/clientbench/lab/app/tree/packages/fake-server/bench-client5/messaging.bench.ts:261:9 - error SC1090: method calls like 'this.session.on' is not supported yet
+
+  260 |         }
+  261 |         this.session.on(
+      |         ^~~~~~~~~~~~~~~~
+  262 |             'HeapProfiler.addHeapSnapshotChunk',
+
+<blocks>/clientbench/lab/app/tree/packages/fake-server/bench-client5/messaging.bench.ts:266:19 - error SC1090: method calls like 'this.session.post' is not supported yet
+
+  265 |         try {
+  266 |             await this.session.post('HeapProfiler.takeHeapSnapshot', { reportProgress: false })
+      |                   ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  267 |         } finally {
+
+<blocks>/clientbench/lab/app/tree/packages/fake-server/bench-client5/messaging.bench.ts:268:13 - error SC1090: method calls like 'this.session.removeListener' is not supported yet
+
+  267 |         } finally {
+  268 |             this.session.removeListener('HeapProfiler.addHeapSnapshotChunk', onChunk)
+      |             ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  269 |         }
+
+<blocks>/clientbench/lab/app/tree/packages/fake-server/bench-client5/messaging.bench.ts:284:9 - error SC1090: method calls like 'this.session.on' is not supported yet
+
+  283 |         }
+  284 |         this.session.on(
+      |         ^~~~~~~~~~~~~~~~
+  285 |             'HeapProfiler.addHeapSnapshotChunk',
+
+<blocks>/clientbench/lab/app/tree/packages/fake-server/bench-client5/messaging.bench.ts:290:19 - error SC1090: method calls like 'this.session.post' is not supported yet
+
+  289 |             // Take snapshot WHILE tracking is still active to capture trace stacks.
+  290 |             await this.session.post('HeapProfiler.takeHeapSnapshot', {
+      |                   ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  291 |                 reportProgress: false,
+
+<blocks>/clientbench/lab/app/tree/packages/fake-server/bench-client5/messaging.bench.ts:294:19 - error SC1090: method calls like 'this.session.post' is not supported yet
+
+  293 |             })
+  294 |             await this.session.post('HeapProfiler.stopTrackingHeapObjects')
+      |                   ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  295 |         } finally {
+
+<blocks>/clientbench/lab/app/tree/packages/fake-server/bench-client5/messaging.bench.ts:296:13 - error SC1090: method calls like 'this.session.removeListener' is not supported yet
+
+  295 |         } finally {
+  296 |             this.session.removeListener('HeapProfiler.addHeapSnapshotChunk', onChunk)
+      |             ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  297 |         }
+
+18 errors.
+BUILD_EXIT=1
+BUILD_SECONDS=542

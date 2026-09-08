@@ -1,0 +1,432 @@
+--- bench/server-rpc.ts	2026-09-07 19:57:14.214252900 -0300
++++ bench-client5/server-rpc.ts	2026-09-07 19:57:14.206231300 -0300
+@@ -5,9 +5,11 @@
+  * modes with minimal changes.
+  */
+ 
+-import { fork, type ChildProcess } from 'node:child_process'
++import { spawn, type ChildProcess } from 'node:child_process'
++import { createServer, type Server, type Socket } from 'node:net'
+ import * as https from 'node:https'
+ import { resolve as resolvePath } from 'node:path'
++import { FrameReader, encodeFrame } from './rpc-frame'
+ 
+ interface RpcRequest {
+     readonly id: number
+@@ -60,12 +62,20 @@
+ 
+ export class ServerRpc {
+     private child: ChildProcess | null = null
++    private listener: Server | null = null
++    private sock: Socket | null = null
++    private readonly reader = new FrameReader()
+     private nextId = 1
+     private readonly pending = new Map<
+         number,
+-        { resolve: (v: unknown) => void; reject: (e: Error) => void }
++        {
++            resolve: (v: { result: unknown; blobs: readonly Uint8Array[] }) => void
++            reject: (e: Error) => void
++        }
+     >()
+     private readyPromise: Promise<void> | null = null
++    private readyResolve: (() => void) | null = null
++    private stopping = false
+ 
+     public serverUrl = ''
+     public noiseRootCa: { publicKey: Uint8Array; serial: number } = {
+@@ -74,57 +84,215 @@
+     }
+     public mediaProxyAgent: https.Agent | null = null
+ 
++    /**
++     * Starts the fake server in its own Node process and opens the
++     * control channel.
++     *
++     * NOT fork(): a compiled binary cannot open Node's IPC channel, and
++     * fork() spawns process.execPath, which in a compiled binary is the
++     * BINARY ITSELF -- so a mechanical port would re-launch the bench
++     * rather than start a child (measured: it forks a bomb). The parent
++     * LISTENS on a loopback socket and the child connects back, which is
++     * a transport both a compiled binary and Node can speak.
++     *
++     * Which node runs the child therefore has to come from outside: the
++     * parent cannot ask itself. BENCH_NODE names it; otherwise "node" is
++     * looked up on PATH. A missing or wrong interpreter fails LOUDLY
++     * below rather than hanging, because a hang in a bench is the worst
++     * outcome there is.
++     */
+     public async spawn(): Promise<void> {
+-        const entry = resolvePath(__dirname, 'server-process.ts')
+-        // serialization: 'advanced' switches IPC to V8's structured
+-        // clone, which preserves Uint8Array / Buffer in place. Without
+-        // it every typed-array crossing the boundary would round-trip
+-        // through `number[]` + JSON, inflating memory and CPU for
+-        // multi-MB media payloads (publishMediaBlob, peerSend*Message).
+-        this.child = fork(entry, [], {
+-            execArgv: ['--import', 'tsx'],
+-            stdio: ['pipe', 'inherit', 'inherit', 'ipc'],
+-            serialization: 'advanced'
+-        })
+-        this.child.on('message', (msg: RpcResponse & { ready?: boolean }) => {
+-            if (msg.ready) return // handled by readyPromise
+-            const waiter = this.pending.get(msg.id)
+-            if (!waiter) return
+-            this.pending.delete(msg.id)
+-            if (msg.error) {
+-                waiter.reject(new Error(msg.error))
+-            } else {
+-                waiter.resolve(msg.result)
+-            }
++        const entry = resolvePath(import.meta.dirname, 'server-process.ts')
++        const nodeBin = process.env.BENCH_NODE ?? 'node'
++        // The child is TypeScript with extensionless relative imports, so it
++        // needs a loader; `tsx` is the project's, resolved from the child's
++        // cwd. BENCH_NODE_IMPORT takes an absolute specifier for trees where
++        // tsx is installed somewhere else.
++        const loader = process.env.BENCH_NODE_IMPORT ?? 'tsx'
++
++        // Every promise below is Promise<void> and the socket is carried in
++        // a captured slot. Promise<never> -- the natural type for "this one
++        // only ever rejects" -- ICEs the compiler (SC9001: newPromise<void>
++        // resolve takes no argument), and a race over mixed payload types
++        // would need `.then`, which has no static lowering either.
++        let accepted: Socket | null = null
++
++        const connected = new Promise<void>((resolve, reject) => {
++            const server = createServer((sock: Socket) => {
++                // One child, one connection: stop listening as soon as it
++                // arrives so a stray connect cannot be mistaken for it.
++                this.listener?.close()
++                sock.setNoDelay(true)
++                accepted = sock
++                resolve()
++            })
++            server.on('error', reject)
++            this.listener = server
++            server.listen(0, '127.0.0.1')
+         })
+ 
+-        this.readyPromise = new Promise<void>((resolve, reject) => {
+-            const onMsg = (msg: { ready?: boolean }): void => {
+-                if (msg.ready) {
+-                    this.child!.removeListener('message', onMsg)
+-                    resolve()
++        const port = await new Promise<number>((resolve, reject) => {
++            const server = this.listener!
++            server.on('listening', () => {
++                const addr = server.address()
++                if (addr === null || typeof addr === 'string') {
++                    reject(new Error('bench control channel: listener has no port'))
++                    return
+                 }
+-            }
+-            this.child!.on('message', onMsg)
+-            this.child!.on('error', reject)
+-            this.child!.on('exit', (code) => {
+-                if (code !== 0) reject(new Error(`server process exited with code ${code}`))
++                resolve(addr.port)
++            })
++            server.on('error', reject)
++        })
++
++        // No `env`: omitting it inherits the parent's environment, which is
++        // what the child needs (PATH, and BENCH_* if the caller set them).
++        // Spreading process.env to add one key would be an object spread of
++        // a compiler-served global -- the port travels on argv instead, which
++        // the child reads first.
++        this.child = spawn(nodeBin, ['--import', loader, entry, String(port)], {
++            stdio: ['ignore', 'inherit', 'inherit']
++        })
++
++        // Every way this can fail without a message, given a name. A child
++        // that never connects is the dangerous one: it is a hang, and a
++        // hang in a bench costs a whole run.
++        const childFailed = new Promise<void>((_resolve, reject) => {
++            this.child!.on('error', (err: Error) => {
++                reject(
++                    new Error(
++                        `bench control channel: could not start the server child with '${nodeBin}' ` +
++                            `(${err.message}). Set BENCH_NODE to a Node executable -- a compiled ` +
++                            `bench cannot use process.execPath, which names the bench binary itself`
++                    )
++                )
++            })
++            this.child!.on('exit', (code: number | null) => {
++                reject(new Error(`server process exited with code ${code}`))
+             })
+         })
+ 
+-        await this.readyPromise
++        const timedOut = new Promise<void>((_resolve, reject) => {
++            setTimeout(() => {
++                reject(
++                    new Error(
++                        `bench control channel: the server child did not connect to 127.0.0.1:${port} ` +
++                            `within 60s (node used: '${nodeBin}', loader: '${loader}')`
++                    )
++                )
++            }, 60_000)
++        })
++
++        await Promise.race([connected, childFailed, timedOut])
++        // The cast widens what the checker narrowed: `accepted` is assigned
++        // inside the createServer callback, which flow analysis cannot see,
++        // so without it the slot reads as `null` and everything after the
++        // guard types as `never`.
++        const sock = accepted as Socket | null
++        if (sock === null) throw new Error('bench control channel: no connection accepted')
++        this.sock = sock
++        sock.on('data', (chunk: Buffer) => {
++            for (const frame of this.reader.push(chunk)) this.dispatch(frame.json, frame.blobs)
++        })
++        // A socket with no 'error' listener throws on ECONNRESET, and the
++        // child's death at teardown is exactly that. During shutdown it is
++        // expected; before it, every in-flight call has to be failed rather
++        // than left pending, or the bench hangs instead of reporting.
++        sock.on('error', (err: Error) => {
++            if (this.stopping) return
++            this.failPending(new Error(`bench control channel: ${err.message}`))
++        })
++        sock.on('close', () => {
++            if (this.stopping) return
++            this.failPending(new Error('bench control channel: the server process closed the channel'))
++        })
++
++        this.readyPromise = new Promise<void>((resolve, reject) => {
++            this.readyResolve = resolve
++            void childFailed.catch(reject)
++        })
++        await Promise.race([this.readyPromise, childFailed, timedOut])
++    }
++
++    /** One decoded frame from the child: a `{ready:true}` announcement or
++     * a response keyed by request id. */
++    private dispatch(json: string, blobs: readonly Uint8Array[]): void {
++        // `id` is OPTIONAL here on purpose. A `{ready:true}` frame carries
++        // no id, so spelling this as RpcResponse (whose id is required) is
++        // a lie about the wire -- one Node ignores and the compiled lane
++        // catches: it threw `expected number at $.id, got undefined` at the
++        // first frame. The cast is checked, so it has to describe what can
++        // actually arrive.
++        const msg = JSON.parse(json) as {
++            id?: number
++            result?: unknown
++            error?: string
++            ready?: boolean
++        }
++        if (msg.ready) {
++            this.readyResolve?.()
++            this.readyResolve = null
++            return
++        }
++        if (typeof msg.id !== 'number') return
++        const waiter = this.pending.get(msg.id)
++        if (!waiter) return
++        this.pending.delete(msg.id)
++        if (msg.error !== undefined) {
++            waiter.reject(new Error(msg.error))
++            return
++        }
++        waiter.resolve({ result: msg.result, blobs })
+     }
+ 
+-    private call(method: string, params: Record<string, unknown> = {}): Promise<unknown> {
+-        if (!this.child) throw new Error('server not spawned')
++    /** Rejects every in-flight call. A dead channel must fail the bench,
++     * not leave it waiting on answers that can never come. */
++    private failPending(err: Error): void {
++        for (const [, waiter] of this.pending) waiter.reject(err)
++        this.pending.clear()
++    }
++
++    /**
++     * One request/response over the control channel. `blobs` are the
++     * call's binary arguments, carried as RAW BYTES in the frame and
++     * reassembled positionally by the method's handler in the child --
++     * never base64 and never a `number[]`, because inflating a payload
++     * would corrupt what this bench measures.
++     */
++    private async call(
++        method: string,
++        params: Record<string, unknown> = {},
++        blobs: readonly Uint8Array[] = []
++    ): Promise<unknown> {
++        return (await this.callBin(method, params, blobs)).result
++    }
++
++    /** call(), keeping the response's attachments. */
++    private callBin(
++        method: string,
++        params: Record<string, unknown> = {},
++        blobs: readonly Uint8Array[] = []
++    ): Promise<{ result: unknown; blobs: readonly Uint8Array[] }> {
++        const sock = this.sock
++        if (!sock) throw new Error('server not spawned')
+         const id = this.nextId++
+         return new Promise((resolve, reject) => {
+             this.pending.set(id, { resolve, reject })
+             const msg: RpcRequest = { id, method, params }
+-            this.child!.send(msg)
++            sock.write(encodeFrame(JSON.stringify(msg), blobs))
+         })
+     }
+ 
++    /** A one-way notification: no id, no reply expected. */
++    private notify(
++        method: string,
++        params: Record<string, unknown>,
++        blobs: readonly Uint8Array[] = []
++    ): void {
++        const sock = this.sock
++        if (!sock) throw new Error('server not spawned')
++        sock.write(encodeFrame(JSON.stringify({ method, params }), blobs))
++    }
++
+     public async start(): Promise<void> {
+         const result = (await this.call('start')) as {
+             url: string
+@@ -136,9 +304,15 @@
+             serial: result.noiseRootCa.serial
+         }
+         // keepAlive: true mirrors what real-world WhatsApp clients do and
+-        // matches the in-process FakeWaServer.mediaProxyAgent so the
+-        // --separate-process bench numbers stay comparable.
+-        this.mediaProxyAgent = new https.Agent({ rejectUnauthorized: false, keepAlive: true })
++        // matches the in-process FakeWaServer.mediaProxyAgent. The compiled
++        // runtime refuses it by name ("compiled clients dial one connection
++        // per request and close it with the response"), so it is dropped
++        // here. INERT for this bench: messaging runs no media request, so
++        // this agent is constructed and never used. It is NOT inert for
++        // messaging-media.bench.ts, where connection reuse is part of what
++        // is being measured -- that one needs the runtime to support
++        // keepAlive, not a bench edit.
++        this.mediaProxyAgent = new https.Agent({ rejectUnauthorized: false })
+     }
+ 
+     public async waitForAuthenticatedPipeline(): Promise<void> {
+@@ -162,14 +336,12 @@
+         advSecretKey: Uint8Array
+         identityPublicKey: Uint8Array
+     }): void {
+-        if (!this.child) throw new Error('server not spawned')
+-        this.child.send({
+-            method: 'pairingMaterial',
+-            params: {
+-                advSecretKey: Array.from(material.advSecretKey),
+-                identityPublicKey: Array.from(material.identityPublicKey)
+-            }
+-        })
++        // Raw bytes as attachments 0..1, not the number[] this used to build:
++        // Array.from over a Uint8Array has no static lowering, and bytes are
++        // what the frame carries natively anyway. Two 32-byte keys, so the
++        // change is immaterial to the measurement -- it just stops inflating
++        // them through a JSON array.
++        this.notify('pairingMaterial', {}, [material.advSecretKey, material.identityPublicKey])
+     }
+ 
+     public async triggerPreKeyUpload(force = false): Promise<void> {
+@@ -221,11 +393,35 @@
+     }
+ 
+     public async peerSendImageMessage(peerId: string, descriptor: MediaDescriptor): Promise<void> {
+-        await this.call('peerSendImageMessage', { peerId, descriptor })
++        await this.call(
++            'peerSendImageMessage',
++            {
++                peerId,
++                descriptor: {
++                    directPath: descriptor.directPath,
++                    fileLength: descriptor.fileLength,
++                    ...(descriptor.mimetype !== undefined ? { mimetype: descriptor.mimetype } : {})
++                }
++            },
++            // attachments 0..2: mediaKey, fileSha256, fileEncSha256
++            [descriptor.mediaKey, descriptor.fileSha256, descriptor.fileEncSha256]
++        )
+     }
+ 
+     public async peerSendVideoMessage(peerId: string, descriptor: MediaDescriptor): Promise<void> {
+-        await this.call('peerSendVideoMessage', { peerId, descriptor })
++        await this.call(
++            'peerSendVideoMessage',
++            {
++                peerId,
++                descriptor: {
++                    directPath: descriptor.directPath,
++                    fileLength: descriptor.fileLength,
++                    ...(descriptor.mimetype !== undefined ? { mimetype: descriptor.mimetype } : {})
++                }
++            },
++            // attachments 0..2: mediaKey, fileSha256, fileEncSha256
++            [descriptor.mediaKey, descriptor.fileSha256, descriptor.fileEncSha256]
++        )
+     }
+ 
+     public async publishMediaBlob(input: {
+@@ -247,15 +443,27 @@
+         readonly fileEncSha256: Uint8Array
+         readonly fileLength: number
+     }> {
+-        return (await this.call('publishMediaBlob', {
+-            mediaType: input.mediaType,
+-            plaintext: input.plaintext
+-        })) as {
+-            readonly path: string
+-            readonly mediaKey: Uint8Array
+-            readonly fileSha256: Uint8Array
+-            readonly fileEncSha256: Uint8Array
+-            readonly fileLength: number
++        // The one call in this file with a genuinely large payload. The
++        // plaintext rides as attachment 0 -- raw bytes, so a multi-MB blob
++        // costs its own size and nothing more -- and the three digests come
++        // back as attachments 0..2 in a fixed order the child mirrors.
++        const res = await this.callBin(
++            'publishMediaBlob',
++            { mediaType: input.mediaType },
++            [input.plaintext]
++        )
++        const meta = res.result as { readonly path: string; readonly fileLength: number }
++        if (res.blobs.length !== 3) {
++            throw new Error(
++                `publishMediaBlob: expected 3 attachments (mediaKey, fileSha256, fileEncSha256), got ${res.blobs.length}`
++            )
++        }
++        return {
++            path: meta.path,
++            mediaKey: res.blobs[0]!,
++            fileSha256: res.blobs[1]!,
++            fileEncSha256: res.blobs[2]!,
++            fileLength: meta.fileLength
+         }
+     }
+ 
+@@ -457,9 +665,15 @@
+     public async stop(): Promise<void> {
+         try {
+             await this.call('stop')
++            this.stopping = true
+         } catch {
+             // best-effort
+         }
++        this.stopping = true
++        this.sock?.end()
++        this.sock = null
++        this.listener?.close()
++        this.listener = null
+         this.child?.kill()
+         this.child = null
+     }
+@@ -471,7 +685,11 @@
+         devicesPerContact: number
+     ): Promise<readonly RemoteContactFixture[]> {
+         const out: RemoteContactFixture[] = []
+-        const deviceIds = Array.from({ length: devicesPerContact }, (_, i) => i + 1)
++        // A plain loop: Array.from's (arrayLike, mapFn) form has no static
++        // lowering, and this one is on the live path -- buildContacts runs
++        // for every messaging scenario.
++        const deviceIds: number[] = []
++        for (let d = 0; d < devicesPerContact; d += 1) deviceIds.push(d + 1)
+         for (let i = 0; i < count; i += 1) {
+             await this.ensurePreKeyPool(devicesPerContact)
+             const userJid = `5511${String(7_000_000_000 + i).padStart(10, '0')}@s.whatsapp.net`
