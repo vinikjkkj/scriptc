@@ -89,22 +89,36 @@ statement count from 46,963 to 1,557. `proto` is referenced. Both candidates
 select it. The 8.1x is the cost of compiling the spec surface these drivers
 genuinely use, not waste to be trimmed.
 
-## The store-mongo cliff -- READ THIS BEFORE ENABLING
+## store-mongo: it DOES terminate, and the fix helps it
 
-`store-mongo` is the one driver where turning this ON is a REGRESSION IN
-USABILITY, and it is not buried here because someone will hit it.
+An earlier draft of this file said store-mongo's armed analyze "does not
+return". That was wrong -- it was written while the run was still going, from
+runs that had been killed or were being sampled mid-flight. It completes.
+Corrected, on a contended host:
 
-  * OFF (and before this change): analyze completes and reports 242 blockers
-    (1,692 sites, 3,131 statements / 149 failed). 164 of the 242 are mongodb's
-    own files and 59 are bson; the driver reaches no binary either way.
-  * ON: the analyze does not return in any run attempted so far. Sampled at
-    24 minutes it held 2.5 GB RSS and was still consuming CPU (35% of one core
-    on a contended host), so it is progressing rather than deadlocked -- but
-    "the compiler used to answer in about 84 seconds and now does not answer"
-    is a real change and it is opt-out, not opt-in-only.
+  * OFF (pre-fix):  1,692 sites, 242 blockers,  3,131 statements / 149 failed
+  * ON  (this fix): 1,543 sites, 238 blockers, 48,563 statements / 147 failed
 
-Nothing that WORKS is lost: store-mongo produces no binary in either arm. What
-is lost is a fast, complete diagnostic answer on that driver.
+Reached statements go up 15.5x and all four declaration-file blockers close;
+"ships only a declaration file" appears zero times. What it costs is wall
+clock: the armed analyze took about 26 minutes against roughly 84 seconds for
+the off arm, both under a four-load machine, so both figures are contended
+floors and the RATIO is the only part worth quoting until someone re-measures
+quiet.
+
+store-mongo still reaches no binary, in either arm. Its remaining 238 blockers
+are, by attested tree:
+
+    mongodb   167     (387b6dd2...)
+    bson       59     (302f96e9...)
+    other       9
+    driver      3
+    zapo core   1     (9a49e1ff...)
+
+226 of 238 are mongodb's and bson's own sources. We do not fully compile the
+mongodb driver -- that is unchanged by this work and is the next wall on that
+driver, not something this fix was ever going to move. What DID move is zapo's
+side: one blocker left in the attested zapo tree.
 
 THE ESCAPE HATCH IS VERIFIED, on store-mongo itself:
 
@@ -116,7 +130,8 @@ single raw textual difference across all 1,692 sites is a checker-internal
 unique-symbol serial inside one SC2020 message (`__@kDecoratedKeys@354` vs
 `@1962`) on an `unreached` site; scrubbing those serials makes the two runs
 byte-identical. That is a program-construction artifact, not a behaviour
-change.
+change. Anyone who wants the fast diagnostic answer back on store-mongo has
+it, exactly.
 
 ## Arms
 
