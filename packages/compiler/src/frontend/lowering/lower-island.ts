@@ -7,11 +7,12 @@ import type { Lowerer } from "./lowerer.js";
 import { BOOL, DYN, F64, IrExpr, IrStmt, IrType, JSVAL, MAX_ISLAND_CALLBACK_ARITY, STRING, VOID, arrayOf, canBoxFuncIntoDyn, canMarshalTypedFuncIntoIsland, funcOf, islandPromisePayloadTag, isUnitType, typeEquals } from "../../ir/nodes.js";
 import { ISLAND_SURFACE, IslandFnEntry, STATIC_MATH_CONSTS, STATIC_MATH_FNS, boundaryIntoIslandMsg } from "./surfaces.js";
 import { requiresDynamicApiDiag, requiresDynamicPackageDiag, fenceLocationText} from "../../diagnostics/diagnostic.js";
-import { canonicalBuiltinModule, dynamicImportSpecOf, isCjsJsFile, isJsSourceFile, locOf, npmPackageNameOf, npmStaticDepSf7 } from "../program.js";
+import { canonicalBuiltinModule, cjsExportAssignmentOf, cjsExportDiscardReason, cjsExportTargetLiteral, dynamicImportSpecOf, isCjsJsFile, isJsSourceFile, locOf, npmPackageNameOf, npmStaticDepSf7 } from "../program.js";
 import { runtimePackageOfTypesPackage } from "../shared.js";
 import { isRelativeSpecifier } from "../shared.js";
 import { dynamicImportModuleTargetOf, dynamicImportProgramTargetOf, staticDynImportBindingShape } from "./lower-modules.js";
 import { pureReemittable } from "./lower-exprs.js";
+import { cjsLexedExportsOf } from "../cjs-lexer.js";
 import { moduleNsStarExports } from "./lower-namespaces.js";
 import { PoisonError, dynUndefinedExpr, newFnCtx, own } from "./lowerer.js";
 
@@ -1217,6 +1218,277 @@ import { PoisonError, dynUndefinedExpr, newFnCtx, own } from "./lowerer.js";
     }
   }
 
+/** The module's kept `module.exports = <table>` literal, or null — the
+   * LAST table statement a later one does not discard, resolved through
+   * the identifier/Proxy indirections (cjsExportTargetLiteral), exactly
+   * the literal isCjsExportTableLiteral admits and resolveValueSymbol
+   * re-resolves member reads through. */
+  function cjsKeptExportTableOf(dep: ts.SourceFile): ts.ObjectLiteralExpression | null {
+    let table: ts.ObjectLiteralExpression | null = null;
+    for (const stmt of dep.statements) {
+      const cjs = cjsExportAssignmentOf(stmt);
+      if (cjs?.kind !== "table") continue;
+      if (cjsExportDiscardReason(stmt) !== null) continue;
+      table = cjsExportTargetLiteral(cjs.expr.right, dep);
+    }
+    return table;
+  }
+
+/** The namespace fields for a CommonJS `export =` dependency, and the
+   * prelude that computes each value ONCE.
+   *
+   * WHY THIS EXISTS. `getExports()` on an `export =` module holds ONE
+   * entry — `export=` — so the ESM path below built a namespace with a
+   * single `default` key, and `default` resolved to no global, so it
+   * crossed as a TRAP function. Measured on the parent of this change,
+   * node v25.9.0, on this repo's own `gtdefine` fixture: node answers
+   * `WIDTH,__esModule,default,leaf,module.exports` and the compiled
+   * namespace answered `default` alone — the two share NO key — with the
+   * build green, status "static", zero diagnostics, exit 0.
+   *
+   * WHAT NODE ANSWERS, and where each key comes from. Node runs
+   * cjs-module-lexer over the package's entry and materializes one live
+   * binding per detected name, plus `default` and (v25 and newer only —
+   * v20/v21/v22 measured without it) the `module.exports` alias, which is
+   * the SAME object as `default`. The name set is the lexer's, and
+   * npm-static-rewrite.ts states LEXER PARITY as its contract: the
+   * canonical table it appends answers the same names to cjs-lexer.ts
+   * that the original answers to Node. So the table's own properties ARE
+   * the name set, and each one's value is the value a member read through
+   * the same table resolves to (cjsExportValueSymbol) — the two cannot
+   * disagree, because they ask one function.
+   *
+   * WHAT IT REFUSES, and why refusing beats shortening. moduleNsOwnKeys
+   * (lower-namespaces.ts) already refuses the CJS namespace outright for
+   * `Object.keys`, on the rule that "a partially-known key set is worse
+   * than no answer"; the `export *` arm in the builder below refuses for
+   * the same reason. Every shape whose full name set is not readable off
+   * the table takes that same refusal here — a `module.exports =` that is
+   * not a table (a single-value or forwarding export), a spread entry (a
+   * star re-export the table cannot enumerate), and any key or value form
+   * the resolution above does not cover.
+   *
+   * TWO MEASURED DIVERGENCES, both on the `default` OBJECT and neither on
+   * the namespace itself. `Object.keys(ns.default)` answers the table's
+   * order and includes `__esModule`, where node answers module.exports'
+   * runtime insertion order and omits `__esModule` (tsc stamps it with a
+   * NON-enumerable `Object.defineProperty`, and the rewrite respells it
+   * as a plain property because Node's lexer links `import { __esModule }`
+   * there). Reads through it agree: `ns.default.leaf === ns.leaf` is true
+   * here and true in node, because both keys name one local. */
+  function cjsExportTableNsOf(
+    L: Lowerer,
+    dep: ts.SourceFile,
+    loc: IrExpr["loc"],
+  ): { prelude: IrStmt[]; fields: { key: IrExpr; value: IrExpr }[] } | null {
+    const modSym = L.checker.getSymbolAtLocation(dep);
+    const expEq = modSym?.getExports().get("export=" as ts.__String);
+    if (expEq === undefined) return null;
+    const what = `a namespace of '${baseNameOf(dep.fileName)}', a CommonJS \`export =\` module`;
+    const why =
+      `Node assembles that namespace from module.exports through its own lexer, and this build ` +
+      `reads the name set off the canonical export table --npm-static's rewrite appends ` +
+      `(npm-static-rewrite.ts's lexer-parity contract). A name it cannot read there would be ` +
+      `MISSING from the namespace and answer \`undefined\` where Node answers a value, silently — ` +
+      `import the names statically (\`import { x } from "..."\`), which resolves through the same ` +
+      `table with no namespace object in between`;
+    const table = cjsKeptExportTableOf(dep);
+    if (table === null) {
+      L.unsupported("SC1090", dep, `${what} whose \`module.exports\` is not a static export table`, why);
+    }
+    const prelude: IrStmt[] = [];
+    const named: { name: string; value: IrExpr }[] = [];
+    const strLit = (value: string): IrExpr => ({ kind: "strLit", value, type: STRING, loc });
+    /* ONE local per name, so the namespace key and the `default` object's
+     * key are the SAME value: node's `ns.leaf === ns.default.leaf` is
+     * true, and two separately-built closures would have compared false. */
+    const bind = (exportName: string, value: IrExpr): void => {
+      const slot = L.declareHiddenLocal("%dynnsv", DYN);
+      prelude.push({ kind: "varDecl", localId: slot.id, init: value, loc });
+      named.push({ name: exportName, value: { kind: "varRef", localId: slot.id, type: DYN, loc } });
+    };
+    for (const prop of table.properties) {
+      if (!ts.isPropertyAssignment(prop) && !ts.isShorthandPropertyAssignment(prop)) {
+        // A spread is a star re-export the table does not enumerate;
+        // methods and accessors are neither shape the rewrite emits.
+        L.unsupported("SC1090", prop, `${what} whose export table has an entry that is not \`name: value\``, why);
+      }
+      const keyNode = prop.name;
+      if (!ts.isIdentifier(keyNode) && !ts.isStringLiteral(keyNode)) {
+        L.unsupported("SC1090", prop, `${what} whose export table has a computed key`, why);
+      }
+      const exportName = keyNode.text;
+      const propSym = L.checker.getSymbolAtLocation(keyNode);
+      const valueSym = propSym === undefined ? null : L.cjsExportValueSymbol(propSym);
+      let value: IrExpr | null = null;
+      if (valueSym !== null) {
+        value = exportDynValue(L, exportName, valueSym, loc);
+      } else if (ts.isPropertyAssignment(prop)) {
+        // The rewrite's own `__esModule: true` marker, and the scalar
+        // entries a hand-written table spells inline. Node binds the
+        // VALUE here, not a live view of a binding — there is none.
+        value = dynLiteralExprOf(prop.initializer, loc);
+      }
+      if (value === null) {
+        L.unsupported(
+          "SC1090",
+          prop,
+          `${what} whose '${exportName}' export the build cannot give a value ` +
+            `(its table entry is neither a binding this build compiled nor a literal)`,
+          why,
+        );
+      }
+      bind(exportName, value);
+    }
+    // MEMBER exports the table does not carry: `module.exports = { … };
+    // module.exports.extra = "extra";` is one module.exports object to
+    // Node's lexer, and reading only the table left `extra` out —
+    // `undefined` where node answers "extra", silently, measured. The
+    // checker's expando properties on the `export =` type carry them,
+    // keyed by the same property symbol the member READ resolves through
+    // (resolveValueSymbol's cjsModuleExportSymbol path), so the namespace
+    // and a member access give one answer.
+    for (const ps of L.checker.getPropertiesOfType(L.checker.getTypeOfSymbol(expEq))) {
+      const n = ps.name;
+      if (named.some((e) => e.name === n)) continue;
+      const vs = L.cjsExportValueSymbol(ps);
+      const value = exportDynValue(L, n, vs ?? ps, loc);
+      if (value === null) continue; // a pure type surface: Node has no key for it either
+      bind(n, value);
+    }
+    // NODE'S OWN RULE, as the last word. Everything above reads the
+    // CHECKER; the name set Node materializes is its LEXER's, and
+    // cjs-lexer.ts mirrors that lexer exactly (it is what npm-static's
+    // rewrite is held to). A name the lexer sees and this namespace does
+    // not would read `undefined` where Node answers a value — the whole
+    // defect — so it refuses instead.
+    //
+    // NOT a formality: it caught two shapes in this change's own first
+    // cut, both silent, both at exit 0. `module.exports = { hi };
+    // module.exports.extra = "extra";` came out `default,hi,
+    // module.exports` against node's `default,extra,hi,module.exports`.
+    // And a `__esModule` stamp AFTER the table (an exemption this check
+    // briefly carried) came out `default,hi,module.exports` against
+    // node's `__esModule,default,hi,module.exports`. `__esModule` is a
+    // namespace key like any other where the lexer sees it, and the
+    // rewrite's own table spells it for exactly that reason.
+    const lexed = cjsLexedExportsOf(dep.text, dep.fileName);
+    for (const n of lexed.exports) {
+      if (named.some((e) => e.name === n)) continue;
+      L.unsupported(
+        "SC1090",
+        dep,
+        `${what} whose '${n}' export Node's CommonJS lexer sees and this build cannot place`,
+        why,
+      );
+    }
+    // A re-export needs no separate arm: the rewrite spells one as a
+    // SPREAD in the table, which the syntactic scan above refuses, and an
+    // un-rewritten `module.exports = require("./x")` has no table at all.
+    //
+    // `default` IS module.exports, and under node v25+ so is the
+    // `module.exports` alias key — ONE object, which is what makes
+    // `ns.default === ns["module.exports"]` true there (measured: true on
+    // v25.2.1/v25.9.0/v26.7.0, and the key is absent on v20/v21/v22 —
+    // recorded under the Node this repository gates under, the rule
+    // sqlite-dynimport.test.ts states for the same alias key).
+    const expSlot = L.declareHiddenLocal("%dynnsexports", DYN);
+    prelude.push({
+      kind: "varDecl",
+      localId: expSlot.id,
+      // MARKED like the namespace: this object is a snapshot too, and a
+      // write landing on it could not reach what Node would write.
+      init: {
+        kind: "dynObjLit",
+        fields: named.map((e) => ({ key: strLit(e.name), value: e.value })),
+        staticCopy: true,
+        type: DYN,
+        loc,
+      },
+      loc,
+    });
+    const expRef: IrExpr = { kind: "varRef", localId: expSlot.id, type: DYN, loc };
+    // Node's namespace keys are sorted (code-unit order); `default` and
+    // the alias win over a table entry of the same name, exactly as
+    // Node's interop installs them over the lexer's.
+    const byName = new Map<string, IrExpr>(named.map((e) => [e.name, e.value]));
+    byName.set("default", expRef);
+    byName.set("module.exports", expRef);
+    const fields = [...byName.keys()]
+      .sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))
+      .map((n) => ({ key: strLit(n), value: byName.get(n)! }));
+    return { prelude, fields };
+  }
+
+/** A checked-dynamic value for a table entry spelled as a plain literal
+   * (`__esModule: true`, `WIDTH: 7`, `name: "x"`): the value Node binds
+   * for that name. Null for every other initializer — a member chain or a
+   * call has no value here, and guessing one is the silent answer this
+   * whole path exists to stop. */
+  function dynLiteralExprOf(init: ts.Expression, loc: IrExpr["loc"]): IrExpr | null {
+    let e = init;
+    while (ts.isParenthesizedExpression(e)) e = e.expression;
+    if (e.kind === ts.SyntaxKind.TrueKeyword || e.kind === ts.SyntaxKind.FalseKeyword) {
+      return {
+        kind: "dynFrom",
+        value: { kind: "boolLit", value: e.kind === ts.SyntaxKind.TrueKeyword, type: BOOL, loc },
+        type: DYN,
+        loc,
+      };
+    }
+    if (ts.isNumericLiteral(e)) {
+      return { kind: "dynFrom", value: { kind: "numLit", value: Number(e.text), type: F64, loc }, type: DYN, loc };
+    }
+    if (
+      ts.isPrefixUnaryExpression(e) &&
+      e.operator === ts.SyntaxKind.MinusToken &&
+      ts.isNumericLiteral(e.operand)
+    ) {
+      return { kind: "dynFrom", value: { kind: "numLit", value: -Number(e.operand.text), type: F64, loc }, type: DYN, loc };
+    }
+    if (ts.isStringLiteral(e) || ts.isNoSubstitutionTemplateLiteral(e)) {
+      return { kind: "dynFrom", value: { kind: "strLit", value: e.text, type: STRING, loc }, type: DYN, loc };
+    }
+    return null;
+  }
+
+/** The namespace fields of an ESM dependency: the checker's own export
+   * table, plus the `export *` chain it does not carry, sorted the way
+   * Node sorts namespace keys (code-unit order). Type-only exports erase.
+   * Unchanged from when it was inline in the builder — only a CommonJS
+   * `export =` dependency takes a different path now. */
+  function esmNsFieldsOf(L: Lowerer, dep: ts.SourceFile, loc: IrExpr["loc"]): { key: IrExpr; value: IrExpr }[] {
+    const entries: [string, ts.Symbol][] = [];
+    const modSym = L.checker.getSymbolAtLocation(dep);
+    modSym?.getExports().forEach((sym: ts.Symbol, key: ts.__String) => {
+      const n = String(key);
+      if (!n.startsWith("__")) entries.push([n, sym]);
+    });
+    // getExports() carries the module's OWN table only — `export *`
+    // re-exports are not in it, and a namespace built without them
+    // answers `undefined` for a name Node answers, silently. Walked.
+    const star = moduleNsStarExports(L, dep);
+    if (star.unresolved !== null) {
+      L.unsupported(
+        "SC1090",
+        dep,
+        `a namespace of a module whose \`export * from "${star.unresolved}"\` names a module the build did not compile`,
+        "the namespace would silently omit every name that star contributes, which is worse than refusing to build it",
+      );
+    }
+    for (const pair of star.entries) {
+      if (!entries.some(([k]) => k === pair[0])) entries.push(pair);
+    }
+    entries.sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
+    const fields: { key: IrExpr; value: IrExpr }[] = [];
+    for (const [exportName, sym] of entries) {
+      const value = exportDynValue(L, exportName, sym, loc);
+      if (value === null) continue;
+      fields.push({ key: { kind: "strLit", value: exportName, type: STRING, loc }, value });
+    }
+    return fields;
+  }
+
   function staticDynNsBuilderOf(L: Lowerer, dep: ts.SourceFile, loc: IrExpr["loc"]): string | null {
     const cached = L.dynNsBuilders.get(dep);
     if (cached !== undefined) return cached;
@@ -1241,44 +1513,13 @@ import { PoisonError, dynUndefinedExpr, newFnCtx, own } from "./lowerer.js";
         expr: { kind: "call", callee: initName, args: [], type: VOID, loc },
         loc,
       });
-      // Node sorts module-namespace keys (code-unit order); type-only
-      // exports erase. A CommonJS `export=` becomes the namespace's
-      // `default`, exactly Node's CJS-to-ESM view.
-      const entries: [string, ts.Symbol][] = [];
-      const modSym = L.checker.getSymbolAtLocation(dep);
-      modSym?.getExports().forEach((sym: ts.Symbol, key: ts.__String) => {
-        const n = String(key);
-        if (n === "export=") {
-          if (!entries.some(([k]) => k === "default")) entries.push(["default", sym]);
-          return;
-        }
-        if (!n.startsWith("__")) entries.push([n, sym]);
-      });
-      // getExports() carries the module's OWN table only — `export *`
-      // re-exports are not in it, and a namespace built without them
-      // answers `undefined` for a name Node answers, silently. Walked.
-      const star = moduleNsStarExports(L, dep);
-      if (star.unresolved !== null) {
-        L.unsupported(
-          "SC1090",
-          dep,
-          `a namespace of a module whose \`export * from "${star.unresolved}"\` names a module the build did not compile`,
-          "the namespace would silently omit every name that star contributes, which is worse than refusing to build it",
-        );
-      }
-      for (const pair of star.entries) {
-        if (!entries.some(([k]) => k === pair[0])) entries.push(pair);
-      }
-      entries.sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
-      const fields: { key: IrExpr; value: IrExpr }[] = [];
-      for (const [exportName, sym] of entries) {
-        const value = exportDynValue(L, exportName, sym, loc);
-        if (value === null) continue;
-        fields.push({
-          key: { kind: "strLit", value: exportName, type: STRING, loc },
-          value,
-        });
-      }
+      // A CommonJS `export =` module holds ONE entry in getExports(), so
+      // the ESM walk would build a namespace of `default` alone — see
+      // cjsExportTableNsOf, which reads the name set off the module's
+      // export table instead, the way Node reads it off its lexer.
+      const cjs = cjsExportTableNsOf(L, dep, loc);
+      const prelude: IrStmt[] = cjs?.prelude ?? [];
+      const fields: { key: IrExpr; value: IrExpr }[] = cjs?.fields ?? esmNsFieldsOf(L, dep, loc);
       // INTERNED, because Node answers the SAME namespace object for
       // every import of one module: measured on v25.9.0, two `import()`
       // sites of one package compare `===` true, and two fresh literals
@@ -1293,6 +1534,10 @@ import { PoisonError, dynUndefinedExpr, newFnCtx, own } from "./lowerer.js";
         cond: { kind: "varRef", localId: builtGid, type: BOOL, loc },
         then: [],
         else_: [
+          // The CJS path's per-name slots, computed ONCE so the namespace
+          // key and the `default` object's key are one value (empty for
+          // an ESM dependency, whose fields are self-contained).
+          ...prelude,
           {
             kind: "assign",
             localId: nsGid,

@@ -603,11 +603,22 @@ describe(`npm-static pilots${sanitize ? " (sanitized)" : ""}`, () => {
   // void-init preamble, own member export beside the stars).
   // 2468: the Object.defineProperty(exports, 'n', { get }) re-export
   // family plus a scalar member export.
+  // npmstatic-dynimport-cjs: 2468's package reached through a dynamic
+  // `import()` instead of a static one — the NAMESPACE over the same
+  // rewritten table. It is here and not in npm.test.ts's flagless lane
+  // for the same reason as the numbered cases (it needs the opt-in; see
+  // npm-cases.ts). Measured on the parent of this change: this built green with
+  // status "static" and zero diagnostics and printed `leaf undefined /
+  // WIDTH undefined` where node prints `leaf function / WIDTH number` —
+  // the namespace's only key was `default`, and node's five and its one
+  // shared nothing. tests/harness/module-ns-value.test.ts pins the cells
+  // one by one; this row is the end-to-end differential.
   test.for([
     ["2465-getter-table", "gtable"],
     ["2466-getter-star", "gtstar"],
     ["2467-star-barrel", "gtbarrel"],
     ["2468-defineprop-exports", "gtdefine"],
+    ["npmstatic-dynimport-cjs", "gtdefine"],
   ] as const)("bundler-emitted CJS %s compiles statically and byte-matches Node", async ([caseDir, pkg]) => {
     const entry = join(fixturesRoot, "npm/cases", caseDir, "main.ts");
     const { coverage } = analyze(entry, { npmStatic: [pkg] });

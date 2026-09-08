@@ -2113,8 +2113,14 @@ export class Lowerer {
 
   /** The local VALUE symbol behind a CJS export-table property symbol —
    * see resolveValueSymbol. Null when `symbol` is not such a property (or
-   * the property's value is not a plain identifier reference). */
-  private cjsExportValueSymbol(symbol: ts.Symbol): ts.Symbol | null {
+   * the property's value is not a plain identifier reference).
+   *
+   * PUBLIC because the dynamic-import namespace BUILDER needs the same
+   * answer a member access gets: `import("pkg")` of an `export =` module
+   * has to give each table name the value `ns.name` would read, and the
+   * two must not resolve a name differently (lower-island's
+   * cjsExportTableNsOf). */
+  cjsExportValueSymbol(symbol: ts.Symbol): ts.Symbol | null {
     const d = this.checker.declarationsOf(symbol)[0];
     if (!d) return null;
     // MEMBER-form class exports (`exports.C = C` — commander's error.js):
