@@ -281,6 +281,93 @@ boxsites      1 crossing, RETAINED in a field, and it marks an ORIGIN
 One slot, 256 B of box plus 45.7–91.4 B of origin slot plus a pinned source,
 per envelope — and all of it removable at compile time.
 
+## A union-typed field allocates — a different lever entirely
+
+**CONFIRMED from the emitted code, not reasoned about.** A field typed
+`T | null` / `T | undefined` / `T?` is not a nullable pointer. It is emitted as
+
+```c
+struct sc_rs_r0 {          /* interface Chain { name: string; next?: Chain } */
+  size_t rc;
+  ScrStr *sc_fld_name;
+  ScrUnion *sc_fld_next;   /* <-- a pointer to a SEPARATE allocation */
+};
+```
+
+and a **populated** arm reaches `scr_union_new_ref` →`scr_union_alloc` →
+`scr_cyc_alloc(sizeof(ScrUnion), …)`: its own cycle-headered heap block. There
+is no nullable-pointer case and no inlining.
+
+A **unit** arm costs nothing. It is an immortal static singleton taken by
+address:
+
+```c
+ScrUnion sc_unit_0 = { .rc = SIZE_MAX, .tag = 0 };   /* u506 unit arm */
+```
+
+**That is where the `−1` comes from.** The reading that prompted this — 3,000
+`Node` records with two `Node | null` fields reporting **8,999** live arena
+slots — resolves exactly: `3,000` records plus `5,999` *populated* union
+fields, i.e. one null field in the whole structure taking the singleton. The
+arithmetic holds under the confirmed mechanism.
+
+### The price
+
+`sizeof(ScrUnion)` is **48** (measured by `sizes.c`, not computed: `rc` 8 +
+`tag` 4 + pad 4 + three RC/trace function pointers 24 + `slot` 8). With the
+16-byte `ScrCycHdr` and the 8-byte pool grain that is
+
+> **64 bytes per *populated* union-typed field, per instance** — the same 64
+> as a dyn node.
+
+The three function pointers are the reason it is 48 and not 16: `arm_retain`,
+`arm_release` and `arm_trace` are stored **per instance**, although for a
+given field they are a property of the *type*.
+
+### The prevalence, on `app182` (zapo-js 1.8.2)
+
+```
+ 2,306 record shapes with a struct definition
+24,058 declared fields across them
+ 7,666 of those are ScrUnion *              (31.9%)
+ 1,521 shapes carry at least one            (66.0%)
+13,207 union constructor call sites         (12,218 ref + 682 f64 + 307 bool)
+ 1,736 unit-arm singletons, over 1,229 distinct unions
+```
+
+For scale, the same artifact has **26,469** static→dyn crossings. The two are
+the same order — but a union field allocates in ordinary statically typed
+code, with no `unknown` anywhere in sight.
+
+### It is NOT the mechanism this lane has been costing
+
+| | `unknown` boxing | union-typed field |
+|---|---|---|
+| what triggers it | a **crossing** (`dynFrom`) into a dyn slot | the **representation** of an ordinary typed field |
+| shape | transitive deep copy of the reachable tree | one flat 64 B node per populated field |
+| where it happens | only at `unknown` slots | every `T?` field in every record |
+| the fix | narrow the slot, or box by reference | collapse the union into the field |
+
+Different lever, different fix, and a **much larger blast radius**: 66% of
+shapes carry a union field, against the 178 `unknown` slots the source survey
+found.
+
+### The route, and the number that is missing
+
+For a **two-arm** union of one unit arm and one pointer-shaped ref arm, the
+tag is implied by null-ness and the three RC hooks are constant for the field,
+so the field could be a plain nullable pointer with the hooks emitted
+statically at each use site — no allocation at all. The edges to settle first:
+the record's own trace has to gain an arm, because removing the `ScrUnion`
+removes a node from the collector's graph; and a union with three or more
+arms, or with any scalar arm, genuinely needs the tag and the slot.
+
+**The number that sizes that fix — how many of the 7,666 union fields are the
+collapsible two-arm shape — is NOT in this report.** Arity lives in the union
+*definitions* (`mod.unions[].arms`), which the IR carries and the emitted C
+does not; the tag histogram of the constructor calls hints at it and cannot
+settle it. It needs an `--emit-ir` build of `app182`, which has not been run.
+
 ## The cycle trap: a third divergence, and it is a hard abort
 
 `cyc1.ts` / `cyc2.ts`, recorded in `cyc-baseline.txt`. A cyclic value crossing
