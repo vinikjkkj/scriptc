@@ -98,8 +98,17 @@ if [ "$STEP" = run ]; then
     arena)  KNOBS="$KNOBS SCR_PAGECEN_EVERY=1" ;;
     memmap) KNOBS="$KNOBS SCR_MEMMAP_MS=2000 SCR_MEMMAP_SELFTEST=32" ;;
   esac
-  echo "=== run $ARM/$TAG: $KNOBS"
-  ( cd "$REPO" && node --import tsx tests/perf/zapo-rest/harness/memrig.mts \
+  # THE LAUNCH DIRECTORY IS PART OF THE PROTOCOL, and this script had it wrong
+  # in its first commit. fake-server's sources import zapo-js/util and friends,
+  # which are not node_modules packages but tsconfig "paths" entries in the
+  # ZAPO ROOT's tsconfig.json; tsx reads the tsconfig from the directory the
+  # process was LAUNCHED in, at --import registration time, before a line of
+  # memrig runs. chdir() inside it is too late, and memrig refuses rather than
+  # produce a number it could not have measured -- so a run from $REPO exits 2
+  # and measures nothing. Run from the zapo root, name the rig absolutely.
+  ZAPO_ROOT=$(cd "$ZAPO_FAKE_SERVER/../.." && pwd)
+  echo "=== run $ARM/$TAG from $ZAPO_ROOT: $KNOBS"
+  ( cd "$ZAPO_ROOT" && node --import tsx "$P/zapo-rest/harness/memrig.mts" \
       "$OUT/zapo-rest-182.exe" "$TAG" $KNOBS )
   exit $?
 fi
