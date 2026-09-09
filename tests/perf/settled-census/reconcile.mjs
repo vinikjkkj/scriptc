@@ -277,12 +277,30 @@ function settledWs(phasesText, rssText) {
     return best ? +best[col] : 0
   }
   const settledMs = ph.has('IDLE-60s') ? ph.get('IDLE-60s') : null
+  /* Nearest whole SAMPLE, so a span can be taken between two phases. cols
+   * 3 and 4 are pageFaults and cpuMs -- the pair that answers what a page
+   * return would COST, as opposed to what it could recover. */
+  const row = (ms) => {
+    let best = null, bd = Infinity
+    for (const r of rows) { const d = Math.abs(+r[0] - ms); if (d < bd) { bd = d; best = r } }
+    return best
+  }
+  const span = (a, b) => {
+    if (!ph.has(a) || !ph.has(b)) return null
+    const ra = row(ph.get(a)), rb = row(ph.get(b))
+    const dt = (+rb[0] - +ra[0]) / 1000
+    if (dt <= 0) return null
+    return { sec: dt, faults: +rb[3] - +ra[3], cpuMs: +rb[4] - +ra[4] }
+  }
   return {
     presync: ph.has('PRESYNC-BASELINE') ? at(ph.get('PRESYNC-BASELINE'), 1) : 0,
     settled: settledMs !== null ? at(settledMs, 1) : 0,
     settledCommit: settledMs !== null ? at(settledMs, 2) : 0,
     peak: Math.max(...rows.map((r) => +r[1])),
     peakCommit: Math.max(...rows.map((r) => +r[2])),
+    burst: span('PRESYNC-BASELINE', 'SYNC-DONE-r1'),
+    settling: span('SYNC-DONE-r1', 'SETTLED-r1'),
+    plateau: span('SETTLED-r1', 'IDLE-60s'),
   }
 }
 
@@ -537,8 +555,51 @@ if (hc.free.size === 0) {
     console.log('                          memory; recovers WORKING SET only.')
     console.log('    => reachable here:    ' + mib(usable) + ' MiB of WORKING SET, and')
     console.log('       0.00 MiB of COMMIT. Settled was ' + mib(ws.settled) +
-      ' MiB working set against ' + mib(ws.settledCommit) + ' MiB commit,')
-    console.log('       so which number the complaint is about decides whether this is a fix.')
+      ' MiB working set against ' + mib(ws.settledCommit) + ' MiB commit.')
+    console.log('       The complaint ("idle 10 MB, 70-100 MB after a sync") is a Task')
+    console.log('       Manager reading, whose default Memory column IS the working set,')
+    console.log('       so this lands on the number the user is actually watching.')
+
+    /* [8] WHAT IT WOULD COST, which is the other constraint ("nao quero
+     * perder performance alguma") and is answerable from this run's own
+     * counters rather than from a new instrument.
+     *
+     * A discarded page is not paid for at discard; it is paid for if and
+     * when the allocator hands that hole back out and something touches
+     * it. So the cost is a RATE, and pmon already recorded the thing that
+     * bounds it: page faults per second, phase by phase. A plateau that
+     * takes essentially no faults is a plateau that would not fault the
+     * discarded pages back either. */
+    const P = ws.plateau, B = ws.burst
+    if (P && B) {
+      const NS_REFAULT = 1131   /* vmprobe arm 1: 1146 ns re-touch vs 15 ns null */
+      const NS_DISCARD = 3719   /* vmprobe arm 1: the DiscardVirtualMemory call */
+      const pages = hc.page.pages
+      const refaultMs = pages * NS_REFAULT / 1e6
+      const discardMs = pages * NS_DISCARD / 1e6
+      console.log('\n== [8] WHAT RETURNING IT WOULD COST ==')
+      console.log('  page faults, by phase (pmon, this run):')
+      console.log('    the burst        ' + B.sec.toFixed(1) + 's  ' +
+        B.faults.toLocaleString() + ' faults = ' + Math.round(B.faults / B.sec).toLocaleString() +
+        '/s   cpu ' + Math.round(B.cpuMs) + 'ms')
+      console.log('    settled plateau  ' + P.sec.toFixed(1) + 's  ' +
+        P.faults.toLocaleString() + ' faults = ' + Math.round(P.faults / P.sec).toLocaleString() +
+        '/s   cpu ' + Math.round(P.cpuMs) + 'ms')
+      console.log('  discarding ' + pages.toLocaleString() + ' pages costs ~' +
+        discardMs.toFixed(0) + ' ms ONCE, paid on an idle plateau running at ' +
+        (100 * P.cpuMs / (P.sec * 1000)).toFixed(1) + '% CPU.')
+      console.log('  faulting them ALL back costs ~' + refaultMs.toFixed(0) +
+        ' ms, and only a sync would touch that many —')
+      console.log('  which is ' + (100 * refaultMs / B.cpuMs).toFixed(2) +
+        '% of the ' + Math.round(B.cpuMs) + ' ms of CPU that sync already spends.')
+      const verdict = (P.faults / P.sec) < 5
+      console.log(verdict
+        ? '  => the plateau takes ~0 faults/s, so the discard is FREE while idle, and the\n' +
+          '     worst-case repayment is a rounding error on the next sync. The performance\n' +
+          '     constraint is satisfied by arithmetic, not by hope.'
+        : '  => the plateau faults at a real rate; a discard would be repaid during idle,\n' +
+          '     and the policy must skip the allocator hot free-list head.')
+    }
   }
 }
 
