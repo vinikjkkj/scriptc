@@ -378,12 +378,31 @@ holds **1,020** nodes, so:
 > chasing was measured.
 
 That is a sparse-survivor fragmentation shape, and it is a *different* claim
-from "64 bytes per field". **It is a mechanism with a named amplification and
-it is UNMEASURED on the real workload.** Which of the three numbers it moves —
-peak, live, or committed-free — is exactly what a measurement has to say, and
-nothing here says it. The 64-byte figure is a live-bytes cost; the 64 KiB
-pinning would be a committed-free cost; and a workload whose union nodes die
-in cohorts pays neither.
+from "64 bytes per field".
+
+**AND IT IS BOUNDED, BY MEASUREMENT, AT ABOUT 10 MiB — SO IT IS NOT THE
+SETTLED RETENTION.** The census measured **161 cycle-arena chunks held at
+exit = 10.06 MiB**, corroborated independently by a heap histogram finding
+**218 blocks of exactly 65,536 B** (161 cycle + 55 string = 216, agreeing to
+99.1%). Those blocks sit on the **busy** side of the heap — part of the
+40.65 MiB live, not of the 72.84 MiB committed-but-free. Chunk pinning by
+sparse survivors therefore **cannot be the 72.84 MiB**, and the settled
+plateau is not where this finding pays.
+
+The bound is written here rather than left as "would land here" for a specific
+reason: a reader who finds the 1,020x amplification convincing and does not
+know the arena is 161 chunks will over-read it — which is the same shape as
+reading the string arena's inability to call `free()` as an explanation for
+105 MiB when it is 3.44 MiB of it.
+
+So, relocated rather than softened:
+
+| number | verdict |
+|---|---|
+| **live bytes** | **real, and possibly large** — 64 B per populated union field across 31.9% of declared fields, in every shipping build |
+| **peak** | **real**, same mechanism |
+| **settled committed-free** | **bounded at ~10 MiB by measurement**; not the plateau |
+| a cohort workload | **pays neither** — the chunk empties and is returned |
 
 ### It is NOT the mechanism this lane has been costing
 
