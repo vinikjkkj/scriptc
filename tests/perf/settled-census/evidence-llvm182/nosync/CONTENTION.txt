@@ -1,0 +1,25 @@
+CONTENDED
+Sampled DURING the census run, not reconstructed afterwards.
+when                : 2026-09-09T18:58:09.3815290-03:00
+free physical GB    : 14.24
+CPU load percent    : 68
+foreign node/tsc/zig: 38
+
+Concurrent jobs on the box, per the coordinator:
+  - full-suite gate on main (2,214 tests in, launched 18:28)
+  - pagereturn compiling the differential corpus (6,856 file writes/20min)
+
+CONSEQUENCE. Every RSS-derived figure from this pass -- settled working
+set, settled commit, peak, presync -- was taken under load and must be
+labelled CONTENDED wherever it is quoted. This rig is bimodal: ~21% of
+runs sit ~30 MiB higher with private commit up, and a mode-blind floor
+reads +/-12.63% against +/-0.26% mode-matched. Load is exactly the kind
+of pressure that pushes a run into the other mode, so these numbers
+cannot be used as a floor, cannot be compared across arms, and cannot
+be mode-matched against anything.
+
+WHAT SURVIVES CONTENTION, and is the reason the pass was kept: the
+census COUNTS. busy, busyBlocks, free, freeBlocks, uncommitted, runs,
+runMax, wholePages, HCFREE, HCSIZE, and both arenas' chunk counts are
+structural facts about what the heap CONTAINS, not about how fast the
+machine got there. A contended run reaches the same settled heap.

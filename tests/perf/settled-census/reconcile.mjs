@@ -18,6 +18,16 @@
  * cycstat (both arenas' chunk counts), heapcen (every heap walked, exact
  * busy-size histogram), phases.csv and rss.csv (the kernel-side series).
  *
+ * WHICH ARM, AND IT MUST BE NAMED EVERY TIME. All figures here are the
+ * UNSERIALISED arm -- the shipping dispatch, not the env-gated
+ * history-sync serialisation experiment. That experiment measured -62%
+ * peak working set and -75% peak commit on this workload and is FORBIDDEN
+ * TO SHIP (it patches zapo, which the user has ruled out). It therefore
+ * bounds what any runtime-side change can claim: a fix here is competing
+ * for the residue that discipline would already have removed, and a figure
+ * that does not name its arm will eventually be compared against one that
+ * had it. Every number in this file is unserialised.
+ *
  * PROVENANCE, STATED BECAUSE IT LIMITS THE CLAIM. This run is from the
  * 09-06 arenafree work, NOT from e6f48fb2f, and its binary is the 1.6.2-era
  * arm. The STRUCTURAL conclusion -- fragmentation dominates, both arenas
@@ -298,6 +308,12 @@ function settledWs(phasesText, rssText) {
     settledCommit: settledMs !== null ? at(settledMs, 2) : 0,
     peak: Math.max(...rows.map((r) => +r[1])),
     peakCommit: Math.max(...rows.map((r) => +r[2])),
+    /* The rig marks SYNC-DONE-r1 even when it sent ZERO chunks, so that
+     * phase is bookkeeping and not the treatment. The ARM line memrig
+     * writes from the knobs it actually used is the signal. Plain
+     * indexOf, no regex: three heredocs on this branch have eaten a
+     * backslash and turned one into a literal newline. */
+    sync: phasesText.indexOf('ARM CHUNKS=0') < 0 && ph.has('SYNC-DONE-r1'),
     burst: span('PRESYNC-BASELINE', 'SYNC-DONE-r1'),
     settling: span('SYNC-DONE-r1', 'SETTLED-r1'),
     plateau: span('SETTLED-r1', 'IDLE-60s'),
@@ -328,11 +344,32 @@ const hc = readHeapcen(readFileSync(join(DIR, 'n1.heapcen.txt'), 'utf8'))
 const ws = settledWs(readFileSync(join(DIR, 'n1.phases.csv'), 'utf8'), readFileSync(join(DIR, 'n1.rss.csv'), 'utf8'))
 const crt = hc.heaps.find((h) => h.crt) ?? hc.heaps[0]
 
-console.log('\n== the settled process, arm n1 ==')
-console.log('  presync baseline   ' + mib(ws.presync) + ' MiB working set')
-console.log('  peak               ' + mib(ws.peak) + ' MiB')
-console.log('  settled (+60s)     ' + mib(ws.settled) + ' MiB')
-console.log('  retention          ' + mib(ws.settled - ws.presync) + ' MiB above baseline')
+/* CONTENTION PROVENANCE. A run taken on a loaded box yields census COUNTS
+ * that are still exact -- they are facts about what the heap contains --
+ * and RSS figures that are not trustworthy, because this rig is bimodal
+ * (~21% of runs sit ~30 MiB higher with commit up; mode-blind +/-12.63%
+ * against +/-0.26% mode-matched) and load is exactly the pressure that
+ * pushes a run into the other mode. So the two classes are labelled
+ * differently rather than presented together, and the label travels in the
+ * evidence directory rather than in someone's memory. */
+const contFile = argAt('--contention') ?? join(DIR, 'CONTENTION.txt')
+const CONT = existsSync(contFile) ? readFileSync(contFile, 'utf8') : ''
+const CONTENDED = /(^|\n)CONTENDED/.test(CONT)
+if (CONT) {
+  console.log('\n' + '='.repeat(70))
+  console.log(CONT.trim())
+  console.log('='.repeat(70))
+}
+const rss = (v) => mib(v) + (CONTENDED ? ' [CONTENDED]' : '')
+
+console.log('\n== the settled process ==')
+console.log('  presync baseline   ' + rss(ws.presync) + ' MiB working set')
+console.log('  peak               ' + rss(ws.peak) + ' MiB')
+console.log('  settled (+60s)     ' + rss(ws.settled) + ' MiB')
+console.log('  retention          ' + rss(ws.settled - ws.presync) + ' MiB above baseline')
+if (CONTENDED)
+  console.log('  ^ these four are RSS and were taken under load: NOT a floor, NOT\n' +
+    '    comparable across arms, NOT mode-matchable. The counts below are.')
 console.log('\n  CRT heap busy      ' + mib(crt.busy) + ' MiB in ' + crt.nbusy + ' blocks')
 console.log('  CRT heap FREE      ' + mib(crt.free) + ' MiB in ' + crt.nfree +
   ' blocks, mean ' + Math.round(crt.free / crt.nfree) + ' B')
@@ -389,9 +426,27 @@ console.log('\n== [2] both arenas are a small share of the settled process ==')
 const arenaBytes = predicted * 65536
 console.log('  arenas             ' + mib(arenaBytes) + ' MiB  (cycle ' + mib(cs.cycHeld * 65536) +
   ' + string ' + mib(cs.strChunks * 65536) + ')')
-ok(arenaBytes / ws.settled < 0.20,
+/* An assertion whose denominator is an RSS figure cannot pass or fail on a
+ * contended sample -- it would be adjudicating load. Reported as a NOTE
+ * instead, so the reading is still visible and is not mistaken for a
+ * verdict. The pure-count assertions around it are unaffected. */
+const okRss = (cond, msg) => {
+  if (CONTENDED) { console.log('  NOTE  ' + msg + '  (RSS denominator, contended: not adjudicated)'); return }
+  ok(cond, msg)
+}
+okRss(arenaBytes / ws.settled < 0.20,
   'arenas are under 20% of settled working set (' + (100 * arenaBytes / ws.settled).toFixed(1) + '%)')
-ok(crt.free > crt.busy,
+/* POST-SYNC ONLY. This and the pinning bound below describe the heap a
+ * history sync LEAVES BEHIND. On the CHUNKS=0 control no sync ran, so
+ * there is no fragmentation to hold and the relation is expected to
+ * invert -- asserting it there would be adjudicating the absence of the
+ * treatment. An assertion that cannot apply must say so rather than fail:
+ * a red line that means nothing trains the reader to ignore red lines. */
+const okSync = (cond, msg) => {
+  if (!ws.sync) { console.log('  N/A   ' + msg + '  (no sync in this arm: post-sync assertion, not applicable)'); return }
+  ok(cond, msg)
+}
+okSync(crt.free > crt.busy,
   'the heap holds MORE committed-free than busy (' + mib(crt.free) + ' vs ' + mib(crt.busy) + ' MiB)')
 
 /* THE AMPLIFICATION BOUND, so a real mechanism is not mistaken for a
@@ -409,11 +464,11 @@ ok(crt.free > crt.busy,
   const pin = cs.cycHeld * 65536
   console.log('  sparse-survivor chunk pinning is bounded at ' + mib(pin) +
     ' MiB (' + cs.cycHeld + ' chunks held), and it is BUSY, not free')
-  ok(pin < crt.free * 0.25,
+  okSync(pin < crt.free * 0.25,
     'that bound is under a quarter of the committed-free space (' + mib(pin) +
     ' vs ' + mib(crt.free) + ' MiB) — the 1,020x amplification is real and is NOT the retention')
 }
-ok(Math.abs(crt.free - (ws.settled - ws.presync)) / (ws.settled - ws.presync) < 0.15,
+okRss(Math.abs(crt.free - (ws.settled - ws.presync)) / (ws.settled - ws.presync) < 0.15,
   'committed-free space accounts for the retention to within 15% (' + mib(crt.free) +
   ' free vs ' + mib(ws.settled - ws.presync) + ' retained)')
 

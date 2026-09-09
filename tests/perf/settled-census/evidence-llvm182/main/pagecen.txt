@@ -1,0 +1,1118 @@
+[pagecen] ARMED tests/perf/pagecensus/scr_page_census.h at=pass page=4096 chunk=65536 pages/chunk=16
+[pagecen] SYNTH ok allfree want=15 got=15 onelive want=14 got=14 alllive want=0 got=0
+[pagecen] SELFTEST ok on 8/8 chunks (carved-freelist == used)
+[pagecen] chunks=8 cur=8 part=0 full=0 nolive=0 held=0.50 MiB
+[pagecen] slots carved=759 free=0 live=759 livebytes=49296 occupancy=0.0940
+[pagecen] CEILING aligned freepages=110 = 0.43 MiB of 0.50 MiB held (85.9%)
+[pagecen] actual (malloc-placed) freepages=108 = 0.42 MiB (alignment cost 0.01 MiB)
+[pagecen] NOLIVE CHECK ok 0 pages from 0 empty chunks (15 each)
+[pagecen] freepages by role cur=110 part=0 full=0
+[pagecen] histogram freepages/chunk: 6:1 14:1 15:6
+[pagecen] policy threshold: T chunks pages MiB
+[pagecen]   T=1 8 110 0.43
+[pagecen]   T=2 8 110 0.43
+[pagecen]   T=3 8 110 0.43
+[pagecen]   T=4 8 110 0.43
+[pagecen]   T=5 8 110 0.43
+[pagecen]   T=6 8 110 0.43
+[pagecen]   T=7 7 104 0.41
+[pagecen]   T=8 7 104 0.41
+[pagecen]   T=9 7 104 0.41
+[pagecen]   T=10 7 104 0.41
+[pagecen]   T=11 7 104 0.41
+[pagecen]   T=12 7 104 0.41
+[pagecen]   T=13 7 104 0.41
+[pagecen]   T=14 7 104 0.41
+[pagecen]   T=15 6 90 0.35
+[pagecen] ARMED tests/perf/pagecensus/scr_page_census.h at=pass page=4096 chunk=65536 pages/chunk=16
+[pagecen] SYNTH ok allfree want=15 got=15 onelive want=14 got=14 alllive want=0 got=0
+[pagecen] SELFTEST ok on 11/11 chunks (carved-freelist == used)
+[pagecen] chunks=11 cur=11 part=0 full=0 nolive=0 held=0.69 MiB
+[pagecen] slots carved=1091 free=0 live=1091 livebytes=71312 occupancy=0.0989
+[pagecen] CEILING aligned freepages=150 = 0.59 MiB of 0.69 MiB held (85.2%)
+[pagecen] actual (malloc-placed) freepages=148 = 0.58 MiB (alignment cost 0.01 MiB)
+[pagecen] NOLIVE CHECK ok 0 pages from 0 empty chunks (15 each)
+[pagecen] freepages by role cur=150 part=0 full=0
+[pagecen] histogram freepages/chunk: 2:1 13:1 15:9
+[pagecen] policy threshold: T chunks pages MiB
+[pagecen]   T=1 11 150 0.59
+[pagecen]   T=2 11 150 0.59
+[pagecen]   T=3 10 148 0.58
+[pagecen]   T=4 10 148 0.58
+[pagecen]   T=5 10 148 0.58
+[pagecen]   T=6 10 148 0.58
+[pagecen]   T=7 10 148 0.58
+[pagecen]   T=8 10 148 0.58
+[pagecen]   T=9 10 148 0.58
+[pagecen]   T=10 10 148 0.58
+[pagecen]   T=11 10 148 0.58
+[pagecen]   T=12 10 148 0.58
+[pagecen]   T=13 10 148 0.58
+[pagecen]   T=14 9 135 0.53
+[pagecen]   T=15 9 135 0.53
+[pagecen] ARMED tests/perf/pagecensus/scr_page_census.h at=pass page=4096 chunk=65536 pages/chunk=16
+[pagecen] SYNTH ok allfree want=15 got=15 onelive want=14 got=14 alllive want=0 got=0
+[pagecen] SELFTEST ok on 12/12 chunks (carved-freelist == used)
+[pagecen] chunks=12 cur=11 part=0 full=1 nolive=0 held=0.75 MiB
+[pagecen] slots carved=1757 free=1 live=1756 livebytes=114208 occupancy=0.1452
+[pagecen] CEILING aligned freepages=154 = 0.60 MiB of 0.75 MiB held (80.2%)
+[pagecen] actual (malloc-placed) freepages=154 = 0.60 MiB (alignment cost 0.00 MiB)
+[pagecen] NOLIVE CHECK ok 0 pages from 0 empty chunks (15 each)
+[pagecen] freepages by role cur=154 part=0 full=0
+[pagecen] histogram freepages/chunk: 0:1 7:1 13:1 14:1 15:8
+[pagecen] policy threshold: T chunks pages MiB
+[pagecen]   T=1 11 154 0.60
+[pagecen]   T=2 11 154 0.60
+[pagecen]   T=3 11 154 0.60
+[pagecen]   T=4 11 154 0.60
+[pagecen]   T=5 11 154 0.60
+[pagecen]   T=6 11 154 0.60
+[pagecen]   T=7 11 154 0.60
+[pagecen]   T=8 10 147 0.57
+[pagecen]   T=9 10 147 0.57
+[pagecen]   T=10 10 147 0.57
+[pagecen]   T=11 10 147 0.57
+[pagecen]   T=12 10 147 0.57
+[pagecen]   T=13 10 147 0.57
+[pagecen]   T=14 9 134 0.52
+[pagecen]   T=15 8 120 0.47
+[pagecen] ARMED tests/perf/pagecensus/scr_page_census.h at=pass page=4096 chunk=65536 pages/chunk=16
+[pagecen] SYNTH ok allfree want=15 got=15 onelive want=14 got=14 alllive want=0 got=0
+[pagecen] SELFTEST ok on 12/12 chunks (carved-freelist == used)
+[pagecen] chunks=12 cur=11 part=0 full=1 nolive=0 held=0.75 MiB
+[pagecen] slots carved=2253 free=1 live=2252 livebytes=145952 occupancy=0.1856
+[pagecen] CEILING aligned freepages=147 = 0.57 MiB of 0.75 MiB held (76.6%)
+[pagecen] actual (malloc-placed) freepages=147 = 0.57 MiB (alignment cost 0.00 MiB)
+[pagecen] NOLIVE CHECK ok 0 pages from 0 empty chunks (15 each)
+[pagecen] freepages by role cur=147 part=0 full=0
+[pagecen] histogram freepages/chunk: 0:2 13:1 14:1 15:8
+[pagecen] policy threshold: T chunks pages MiB
+[pagecen]   T=1 10 147 0.57
+[pagecen]   T=2 10 147 0.57
+[pagecen]   T=3 10 147 0.57
+[pagecen]   T=4 10 147 0.57
+[pagecen]   T=5 10 147 0.57
+[pagecen]   T=6 10 147 0.57
+[pagecen]   T=7 10 147 0.57
+[pagecen]   T=8 10 147 0.57
+[pagecen]   T=9 10 147 0.57
+[pagecen]   T=10 10 147 0.57
+[pagecen]   T=11 10 147 0.57
+[pagecen]   T=12 10 147 0.57
+[pagecen]   T=13 10 147 0.57
+[pagecen]   T=14 9 134 0.52
+[pagecen]   T=15 8 120 0.47
+[pagecen] ARMED tests/perf/pagecensus/scr_page_census.h at=pass page=4096 chunk=65536 pages/chunk=16
+[pagecen] SYNTH ok allfree want=15 got=15 onelive want=14 got=14 alllive want=0 got=0
+[pagecen] SELFTEST ok on 13/13 chunks (carved-freelist == used)
+[pagecen] chunks=13 cur=11 part=1 full=1 nolive=0 held=0.81 MiB
+[pagecen] slots carved=2866 free=2 live=2864 livebytes=185120 occupancy=0.2173
+[pagecen] CEILING aligned freepages=154 = 0.60 MiB of 0.81 MiB held (74.0%)
+[pagecen] actual (malloc-placed) freepages=152 = 0.59 MiB (alignment cost 0.01 MiB)
+[pagecen] NOLIVE CHECK ok 0 pages from 0 empty chunks (15 each)
+[pagecen] freepages by role cur=154 part=0 full=0
+[pagecen] histogram freepages/chunk: 0:2 7:1 13:1 14:1 15:8
+[pagecen] policy threshold: T chunks pages MiB
+[pagecen]   T=1 11 154 0.60
+[pagecen]   T=2 11 154 0.60
+[pagecen]   T=3 11 154 0.60
+[pagecen]   T=4 11 154 0.60
+[pagecen]   T=5 11 154 0.60
+[pagecen]   T=6 11 154 0.60
+[pagecen]   T=7 11 154 0.60
+[pagecen]   T=8 10 147 0.57
+[pagecen]   T=9 10 147 0.57
+[pagecen]   T=10 10 147 0.57
+[pagecen]   T=11 10 147 0.57
+[pagecen]   T=12 10 147 0.57
+[pagecen]   T=13 10 147 0.57
+[pagecen]   T=14 9 134 0.52
+[pagecen]   T=15 8 120 0.47
+[pagecen] ARMED tests/perf/pagecensus/scr_page_census.h at=pass page=4096 chunk=65536 pages/chunk=16
+[pagecen] SYNTH ok allfree want=15 got=15 onelive want=14 got=14 alllive want=0 got=0
+[pagecen] SELFTEST ok on 14/14 chunks (carved-freelist == used)
+[pagecen] chunks=14 cur=11 part=1 full=2 nolive=0 held=0.88 MiB
+[pagecen] slots carved=3657 free=2 live=3655 livebytes=235744 occupancy=0.2569
+[pagecen] CEILING aligned freepages=156 = 0.61 MiB of 0.88 MiB held (69.6%)
+[pagecen] actual (malloc-placed) freepages=156 = 0.61 MiB (alignment cost 0.00 MiB)
+[pagecen] NOLIVE CHECK ok 0 pages from 0 empty chunks (15 each)
+[pagecen] freepages by role cur=156 part=0 full=0
+[pagecen] histogram freepages/chunk: 0:3 10:1 12:1 14:1 15:8
+[pagecen] policy threshold: T chunks pages MiB
+[pagecen]   T=1 11 156 0.61
+[pagecen]   T=2 11 156 0.61
+[pagecen]   T=3 11 156 0.61
+[pagecen]   T=4 11 156 0.61
+[pagecen]   T=5 11 156 0.61
+[pagecen]   T=6 11 156 0.61
+[pagecen]   T=7 11 156 0.61
+[pagecen]   T=8 11 156 0.61
+[pagecen]   T=9 11 156 0.61
+[pagecen]   T=10 11 156 0.61
+[pagecen]   T=11 10 146 0.57
+[pagecen]   T=12 10 146 0.57
+[pagecen]   T=13 9 134 0.52
+[pagecen]   T=14 9 134 0.52
+[pagecen]   T=15 8 120 0.47
+[pagecen] ARMED tests/perf/pagecensus/scr_page_census.h at=pass page=4096 chunk=65536 pages/chunk=16
+[pagecen] SYNTH ok allfree want=15 got=15 onelive want=14 got=14 alllive want=0 got=0
+[pagecen] SELFTEST ok on 15/15 chunks (carved-freelist == used)
+[pagecen] chunks=15 cur=11 part=1 full=3 nolive=0 held=0.94 MiB
+[pagecen] slots carved=4927 free=2 live=4925 livebytes=317024 occupancy=0.3225
+[pagecen] CEILING aligned freepages=153 = 0.60 MiB of 0.94 MiB held (63.8%)
+[pagecen] actual (malloc-placed) freepages=153 = 0.60 MiB (alignment cost 0.00 MiB)
+[pagecen] NOLIVE CHECK ok 0 pages from 0 empty chunks (15 each)
+[pagecen] freepages by role cur=153 part=0 full=0
+[pagecen] histogram freepages/chunk: 0:4 7:1 12:1 14:1 15:8
+[pagecen] policy threshold: T chunks pages MiB
+[pagecen]   T=1 11 153 0.60
+[pagecen]   T=2 11 153 0.60
+[pagecen]   T=3 11 153 0.60
+[pagecen]   T=4 11 153 0.60
+[pagecen]   T=5 11 153 0.60
+[pagecen]   T=6 11 153 0.60
+[pagecen]   T=7 11 153 0.60
+[pagecen]   T=8 10 146 0.57
+[pagecen]   T=9 10 146 0.57
+[pagecen]   T=10 10 146 0.57
+[pagecen]   T=11 10 146 0.57
+[pagecen]   T=12 10 146 0.57
+[pagecen]   T=13 9 134 0.52
+[pagecen]   T=14 9 134 0.52
+[pagecen]   T=15 8 120 0.47
+[pagecen] ARMED tests/perf/pagecensus/scr_page_census.h at=pass page=4096 chunk=65536 pages/chunk=16
+[pagecen] SYNTH ok allfree want=15 got=15 onelive want=14 got=14 alllive want=0 got=0
+[pagecen] SELFTEST ok on 16/16 chunks (carved-freelist == used)
+[pagecen] chunks=16 cur=11 part=1 full=4 nolive=0 held=1.00 MiB
+[pagecen] slots carved=6311 free=2 live=6309 livebytes=405600 occupancy=0.3868
+[pagecen] CEILING aligned freepages=147 = 0.57 MiB of 1.00 MiB held (57.4%)
+[pagecen] actual (malloc-placed) freepages=147 = 0.57 MiB (alignment cost 0.00 MiB)
+[pagecen] NOLIVE CHECK ok 0 pages from 0 empty chunks (15 each)
+[pagecen] freepages by role cur=147 part=0 full=0
+[pagecen] histogram freepages/chunk: 0:5 2:1 11:1 14:1 15:8
+[pagecen] policy threshold: T chunks pages MiB
+[pagecen]   T=1 11 147 0.57
+[pagecen]   T=2 11 147 0.57
+[pagecen]   T=3 10 145 0.57
+[pagecen]   T=4 10 145 0.57
+[pagecen]   T=5 10 145 0.57
+[pagecen]   T=6 10 145 0.57
+[pagecen]   T=7 10 145 0.57
+[pagecen]   T=8 10 145 0.57
+[pagecen]   T=9 10 145 0.57
+[pagecen]   T=10 10 145 0.57
+[pagecen]   T=11 10 145 0.57
+[pagecen]   T=12 9 134 0.52
+[pagecen]   T=13 9 134 0.52
+[pagecen]   T=14 9 134 0.52
+[pagecen]   T=15 8 120 0.47
+[pagecen] ARMED tests/perf/pagecensus/scr_page_census.h at=pass page=4096 chunk=65536 pages/chunk=16
+[pagecen] SYNTH ok allfree want=15 got=15 onelive want=14 got=14 alllive want=0 got=0
+[pagecen] SELFTEST ok on 18/18 chunks (carved-freelist == used)
+[pagecen] chunks=18 cur=11 part=1 full=6 nolive=0 held=1.12 MiB
+[pagecen] slots carved=8135 free=2 live=8133 livebytes=522336 occupancy=0.4428
+[pagecen] CEILING aligned freepages=151 = 0.59 MiB of 1.12 MiB held (52.4%)
+[pagecen] actual (malloc-placed) freepages=150 = 0.59 MiB (alignment cost 0.00 MiB)
+[pagecen] NOLIVE CHECK ok 0 pages from 0 empty chunks (15 each)
+[pagecen] freepages by role cur=151 part=0 full=0
+[pagecen] histogram freepages/chunk: 0:7 6:1 11:1 14:1 15:8
+[pagecen] policy threshold: T chunks pages MiB
+[pagecen]   T=1 11 151 0.59
+[pagecen]   T=2 11 151 0.59
+[pagecen]   T=3 11 151 0.59
+[pagecen]   T=4 11 151 0.59
+[pagecen]   T=5 11 151 0.59
+[pagecen]   T=6 11 151 0.59
+[pagecen]   T=7 10 145 0.57
+[pagecen]   T=8 10 145 0.57
+[pagecen]   T=9 10 145 0.57
+[pagecen]   T=10 10 145 0.57
+[pagecen]   T=11 10 145 0.57
+[pagecen]   T=12 9 134 0.52
+[pagecen]   T=13 9 134 0.52
+[pagecen]   T=14 9 134 0.52
+[pagecen]   T=15 8 120 0.47
+[pagecen] ARMED tests/perf/pagecensus/scr_page_census.h at=pass page=4096 chunk=65536 pages/chunk=16
+[pagecen] SYNTH ok allfree want=15 got=15 onelive want=14 got=14 alllive want=0 got=0
+[pagecen] SELFTEST ok on 21/21 chunks (carved-freelist == used)
+[pagecen] chunks=21 cur=11 part=1 full=9 nolive=0 held=1.31 MiB
+[pagecen] slots carved=10754 free=3 live=10751 livebytes=689888 occupancy=0.5013
+[pagecen] CEILING aligned freepages=157 = 0.61 MiB of 1.31 MiB held (46.7%)
+[pagecen] actual (malloc-placed) freepages=157 = 0.61 MiB (alignment cost 0.00 MiB)
+[pagecen] NOLIVE CHECK ok 0 pages from 0 empty chunks (15 each)
+[pagecen] freepages by role cur=157 part=0 full=0
+[pagecen] histogram freepages/chunk: 0:10 10:1 13:1 14:1 15:8
+[pagecen] policy threshold: T chunks pages MiB
+[pagecen]   T=1 11 157 0.61
+[pagecen]   T=2 11 157 0.61
+[pagecen]   T=3 11 157 0.61
+[pagecen]   T=4 11 157 0.61
+[pagecen]   T=5 11 157 0.61
+[pagecen]   T=6 11 157 0.61
+[pagecen]   T=7 11 157 0.61
+[pagecen]   T=8 11 157 0.61
+[pagecen]   T=9 11 157 0.61
+[pagecen]   T=10 11 157 0.61
+[pagecen]   T=11 10 147 0.57
+[pagecen]   T=12 10 147 0.57
+[pagecen]   T=13 10 147 0.57
+[pagecen]   T=14 9 134 0.52
+[pagecen]   T=15 8 120 0.47
+[pagecen] ARMED tests/perf/pagecensus/scr_page_census.h at=pass page=4096 chunk=65536 pages/chunk=16
+[pagecen] SYNTH ok allfree want=15 got=15 onelive want=14 got=14 alllive want=0 got=0
+[pagecen] SELFTEST ok on 24/24 chunks (carved-freelist == used)
+[pagecen] chunks=24 cur=11 part=0 full=13 nolive=0 held=1.50 MiB
+[pagecen] slots carved=13888 free=1 live=13887 livebytes=890592 occupancy=0.5662
+[pagecen] CEILING aligned freepages=156 = 0.61 MiB of 1.50 MiB held (40.6%)
+[pagecen] actual (malloc-placed) freepages=156 = 0.61 MiB (alignment cost 0.00 MiB)
+[pagecen] NOLIVE CHECK ok 0 pages from 0 empty chunks (15 each)
+[pagecen] freepages by role cur=156 part=0 full=0
+[pagecen] histogram freepages/chunk: 0:13 9:1 13:1 14:1 15:8
+[pagecen] policy threshold: T chunks pages MiB
+[pagecen]   T=1 11 156 0.61
+[pagecen]   T=2 11 156 0.61
+[pagecen]   T=3 11 156 0.61
+[pagecen]   T=4 11 156 0.61
+[pagecen]   T=5 11 156 0.61
+[pagecen]   T=6 11 156 0.61
+[pagecen]   T=7 11 156 0.61
+[pagecen]   T=8 11 156 0.61
+[pagecen]   T=9 11 156 0.61
+[pagecen]   T=10 10 147 0.57
+[pagecen]   T=11 10 147 0.57
+[pagecen]   T=12 10 147 0.57
+[pagecen]   T=13 10 147 0.57
+[pagecen]   T=14 9 134 0.52
+[pagecen]   T=15 8 120 0.47
+[pagecen] ARMED tests/perf/pagecensus/scr_page_census.h at=pass page=4096 chunk=65536 pages/chunk=16
+[pagecen] SYNTH ok allfree want=15 got=15 onelive want=14 got=14 alllive want=0 got=0
+[pagecen] SELFTEST ok on 28/28 chunks (carved-freelist == used)
+[pagecen] chunks=28 cur=11 part=1 full=16 nolive=0 held=1.75 MiB
+[pagecen] slots carved=18075 free=2 live=18073 livebytes=1158496 occupancy=0.6313
+[pagecen] CEILING aligned freepages=154 = 0.60 MiB of 1.75 MiB held (34.4%)
+[pagecen] actual (malloc-placed) freepages=154 = 0.60 MiB (alignment cost 0.00 MiB)
+[pagecen] NOLIVE CHECK ok 0 pages from 0 empty chunks (15 each)
+[pagecen] freepages by role cur=154 part=0 full=0
+[pagecen] histogram freepages/chunk: 0:17 8:1 12:1 14:1 15:8
+[pagecen] policy threshold: T chunks pages MiB
+[pagecen]   T=1 11 154 0.60
+[pagecen]   T=2 11 154 0.60
+[pagecen]   T=3 11 154 0.60
+[pagecen]   T=4 11 154 0.60
+[pagecen]   T=5 11 154 0.60
+[pagecen]   T=6 11 154 0.60
+[pagecen]   T=7 11 154 0.60
+[pagecen]   T=8 11 154 0.60
+[pagecen]   T=9 10 146 0.57
+[pagecen]   T=10 10 146 0.57
+[pagecen]   T=11 10 146 0.57
+[pagecen]   T=12 10 146 0.57
+[pagecen]   T=13 9 134 0.52
+[pagecen]   T=14 9 134 0.52
+[pagecen]   T=15 8 120 0.47
+[pagecen] ARMED tests/perf/pagecensus/scr_page_census.h at=pass page=4096 chunk=65536 pages/chunk=16
+[pagecen] SYNTH ok allfree want=15 got=15 onelive want=14 got=14 alllive want=0 got=0
+[pagecen] SELFTEST ok on 33/33 chunks (carved-freelist == used)
+[pagecen] chunks=33 cur=11 part=0 full=22 nolive=0 held=2.06 MiB
+[pagecen] slots carved=23416 free=1 live=23415 livebytes=1500384 occupancy=0.6938
+[pagecen] CEILING aligned freepages=150 = 0.59 MiB of 2.06 MiB held (28.4%)
+[pagecen] actual (malloc-placed) freepages=150 = 0.59 MiB (alignment cost 0.00 MiB)
+[pagecen] NOLIVE CHECK ok 0 pages from 0 empty chunks (15 each)
+[pagecen] freepages by role cur=150 part=0 full=0
+[pagecen] histogram freepages/chunk: 0:22 7:1 9:1 14:1 15:8
+[pagecen] policy threshold: T chunks pages MiB
+[pagecen]   T=1 11 150 0.59
+[pagecen]   T=2 11 150 0.59
+[pagecen]   T=3 11 150 0.59
+[pagecen]   T=4 11 150 0.59
+[pagecen]   T=5 11 150 0.59
+[pagecen]   T=6 11 150 0.59
+[pagecen]   T=7 11 150 0.59
+[pagecen]   T=8 10 143 0.56
+[pagecen]   T=9 10 143 0.56
+[pagecen]   T=10 9 134 0.52
+[pagecen]   T=11 9 134 0.52
+[pagecen]   T=12 9 134 0.52
+[pagecen]   T=13 9 134 0.52
+[pagecen]   T=14 9 134 0.52
+[pagecen]   T=15 8 120 0.47
+[pagecen] ARMED tests/perf/pagecensus/scr_page_census.h at=pass page=4096 chunk=65536 pages/chunk=16
+[pagecen] SYNTH ok allfree want=15 got=15 onelive want=14 got=14 alllive want=0 got=0
+[pagecen] SELFTEST ok on 40/40 chunks (carved-freelist == used)
+[pagecen] chunks=40 cur=11 part=0 full=29 nolive=0 held=2.50 MiB
+[pagecen] slots carved=30273 free=1 live=30272 livebytes=1939232 occupancy=0.7398
+[pagecen] CEILING aligned freepages=154 = 0.60 MiB of 2.50 MiB held (24.1%)
+[pagecen] actual (malloc-placed) freepages=154 = 0.60 MiB (alignment cost 0.00 MiB)
+[pagecen] NOLIVE CHECK ok 0 pages from 0 empty chunks (15 each)
+[pagecen] freepages by role cur=154 part=0 full=0
+[pagecen] histogram freepages/chunk: 0:29 5:1 14:1 15:9
+[pagecen] policy threshold: T chunks pages MiB
+[pagecen]   T=1 11 154 0.60
+[pagecen]   T=2 11 154 0.60
+[pagecen]   T=3 11 154 0.60
+[pagecen]   T=4 11 154 0.60
+[pagecen]   T=5 11 154 0.60
+[pagecen]   T=6 10 149 0.58
+[pagecen]   T=7 10 149 0.58
+[pagecen]   T=8 10 149 0.58
+[pagecen]   T=9 10 149 0.58
+[pagecen]   T=10 10 149 0.58
+[pagecen]   T=11 10 149 0.58
+[pagecen]   T=12 10 149 0.58
+[pagecen]   T=13 10 149 0.58
+[pagecen]   T=14 10 149 0.58
+[pagecen]   T=15 9 135 0.53
+[pagecen] ARMED tests/perf/pagecensus/scr_page_census.h at=pass page=4096 chunk=65536 pages/chunk=16
+[pagecen] SYNTH ok allfree want=15 got=15 onelive want=14 got=14 alllive want=0 got=0
+[pagecen] SELFTEST ok on 48/48 chunks (carved-freelist == used)
+[pagecen] chunks=48 cur=11 part=2 full=35 nolive=0 held=3.00 MiB
+[pagecen] slots carved=39323 free=3 live=39320 livebytes=2518304 occupancy=0.8005
+[pagecen] CEILING aligned freepages=140 = 0.55 MiB of 3.00 MiB held (18.2%)
+[pagecen] actual (malloc-placed) freepages=140 = 0.55 MiB (alignment cost 0.00 MiB)
+[pagecen] NOLIVE CHECK ok 0 pages from 0 empty chunks (15 each)
+[pagecen] freepages by role cur=140 part=0 full=0
+[pagecen] histogram freepages/chunk: 0:37 3:2 14:1 15:8
+[pagecen] policy threshold: T chunks pages MiB
+[pagecen]   T=1 11 140 0.55
+[pagecen]   T=2 11 140 0.55
+[pagecen]   T=3 11 140 0.55
+[pagecen]   T=4 9 134 0.52
+[pagecen]   T=5 9 134 0.52
+[pagecen]   T=6 9 134 0.52
+[pagecen]   T=7 9 134 0.52
+[pagecen]   T=8 9 134 0.52
+[pagecen]   T=9 9 134 0.52
+[pagecen]   T=10 9 134 0.52
+[pagecen]   T=11 9 134 0.52
+[pagecen]   T=12 9 134 0.52
+[pagecen]   T=13 9 134 0.52
+[pagecen]   T=14 9 134 0.52
+[pagecen]   T=15 8 120 0.47
+[pagecen] ARMED tests/perf/pagecensus/scr_page_census.h at=pass page=4096 chunk=65536 pages/chunk=16
+[pagecen] SYNTH ok allfree want=15 got=15 onelive want=14 got=14 alllive want=0 got=0
+[pagecen] SELFTEST ok on 60/60 chunks (carved-freelist == used)
+[pagecen] chunks=60 cur=11 part=2 full=47 nolive=0 held=3.75 MiB
+[pagecen] slots carved=51039 free=3 live=51036 livebytes=3268128 occupancy=0.8311
+[pagecen] CEILING aligned freepages=148 = 0.58 MiB of 3.75 MiB held (15.4%)
+[pagecen] actual (malloc-placed) freepages=147 = 0.57 MiB (alignment cost 0.00 MiB)
+[pagecen] NOLIVE CHECK ok 0 pages from 0 empty chunks (15 each)
+[pagecen] freepages by role cur=148 part=0 full=0
+[pagecen] histogram freepages/chunk: 0:50 14:2 15:8
+[pagecen] policy threshold: T chunks pages MiB
+[pagecen]   T=1 10 148 0.58
+[pagecen]   T=2 10 148 0.58
+[pagecen]   T=3 10 148 0.58
+[pagecen]   T=4 10 148 0.58
+[pagecen]   T=5 10 148 0.58
+[pagecen]   T=6 10 148 0.58
+[pagecen]   T=7 10 148 0.58
+[pagecen]   T=8 10 148 0.58
+[pagecen]   T=9 10 148 0.58
+[pagecen]   T=10 10 148 0.58
+[pagecen]   T=11 10 148 0.58
+[pagecen]   T=12 10 148 0.58
+[pagecen]   T=13 10 148 0.58
+[pagecen]   T=14 10 148 0.58
+[pagecen]   T=15 8 120 0.47
+[pagecen] ARMED tests/perf/pagecensus/scr_page_census.h at=pass page=4096 chunk=65536 pages/chunk=16
+[pagecen] SYNTH ok allfree want=15 got=15 onelive want=14 got=14 alllive want=0 got=0
+[pagecen] SELFTEST ok on 75/75 chunks (carved-freelist == used)
+[pagecen] chunks=75 cur=15 part=2 full=58 nolive=0 held=4.69 MiB
+[pagecen] slots carved=61457 free=88 live=61369 livebytes=3929664 occupancy=0.7995
+[pagecen] CEILING aligned freepages=221 = 0.86 MiB of 4.69 MiB held (18.4%)
+[pagecen] actual (malloc-placed) freepages=219 = 0.86 MiB (alignment cost 0.01 MiB)
+[pagecen] NOLIVE CHECK ok 0 pages from 0 empty chunks (15 each)
+[pagecen] freepages by role cur=221 part=0 full=0
+[pagecen] histogram freepages/chunk: 0:60 12:1 14:1 15:13
+[pagecen] policy threshold: T chunks pages MiB
+[pagecen]   T=1 15 221 0.86
+[pagecen]   T=2 15 221 0.86
+[pagecen]   T=3 15 221 0.86
+[pagecen]   T=4 15 221 0.86
+[pagecen]   T=5 15 221 0.86
+[pagecen]   T=6 15 221 0.86
+[pagecen]   T=7 15 221 0.86
+[pagecen]   T=8 15 221 0.86
+[pagecen]   T=9 15 221 0.86
+[pagecen]   T=10 15 221 0.86
+[pagecen]   T=11 15 221 0.86
+[pagecen]   T=12 15 221 0.86
+[pagecen]   T=13 14 209 0.82
+[pagecen]   T=14 14 209 0.82
+[pagecen]   T=15 13 195 0.76
+[pagecen] ARMED tests/perf/pagecensus/scr_page_census.h at=pass page=4096 chunk=65536 pages/chunk=16
+[pagecen] SYNTH ok allfree want=15 got=15 onelive want=14 got=14 alllive want=0 got=0
+[pagecen] SELFTEST ok on 86/86 chunks (carved-freelist == used)
+[pagecen] chunks=86 cur=23 part=6 full=57 nolive=0 held=5.38 MiB
+[pagecen] slots carved=65455 free=1805 live=63650 livebytes=4090736 occupancy=0.7258
+[pagecen] CEILING aligned freepages=335 = 1.31 MiB of 5.38 MiB held (24.3%)
+[pagecen] actual (malloc-placed) freepages=326 = 1.27 MiB (alignment cost 0.04 MiB)
+[pagecen] NOLIVE CHECK ok 0 pages from 0 empty chunks (15 each)
+[pagecen] freepages by role cur=328 part=7 full=0
+[pagecen] histogram freepages/chunk: 0:61 2:1 5:1 9:1 11:1 12:1 13:1 14:2 15:17
+[pagecen] policy threshold: T chunks pages MiB
+[pagecen]   T=1 25 335 1.31
+[pagecen]   T=2 25 335 1.31
+[pagecen]   T=3 24 333 1.30
+[pagecen]   T=4 24 333 1.30
+[pagecen]   T=5 24 333 1.30
+[pagecen]   T=6 23 328 1.28
+[pagecen]   T=7 23 328 1.28
+[pagecen]   T=8 23 328 1.28
+[pagecen]   T=9 23 328 1.28
+[pagecen]   T=10 22 319 1.25
+[pagecen]   T=11 22 319 1.25
+[pagecen]   T=12 21 308 1.20
+[pagecen]   T=13 20 296 1.16
+[pagecen]   T=14 19 283 1.11
+[pagecen]   T=15 17 255 1.00
+[pagecen] ARMED tests/perf/pagecensus/scr_page_census.h at=pass page=4096 chunk=65536 pages/chunk=16
+[pagecen] SYNTH ok allfree want=15 got=15 onelive want=14 got=14 alllive want=0 got=0
+[pagecen] SELFTEST ok on 101/101 chunks (carved-freelist == used)
+[pagecen] chunks=101 cur=24 part=9 full=68 nolive=1 held=6.31 MiB
+[pagecen] slots carved=81796 free=2434 live=79362 livebytes=5058384 occupancy=0.7642
+[pagecen] CEILING aligned freepages=338 = 1.32 MiB of 6.31 MiB held (20.9%)
+[pagecen] actual (malloc-placed) freepages=334 = 1.30 MiB (alignment cost 0.02 MiB)
+[pagecen] NOLIVE CHECK ok 15 pages from 1 empty chunks (15 each)
+[pagecen] freepages by role cur=314 part=24 full=0
+[pagecen] histogram freepages/chunk: 0:75 1:1 2:1 8:1 9:1 11:1 12:1 13:2 14:1 15:17
+[pagecen] policy threshold: T chunks pages MiB
+[pagecen]   T=1 26 338 1.32
+[pagecen]   T=2 25 337 1.32
+[pagecen]   T=3 24 335 1.31
+[pagecen]   T=4 24 335 1.31
+[pagecen]   T=5 24 335 1.31
+[pagecen]   T=6 24 335 1.31
+[pagecen]   T=7 24 335 1.31
+[pagecen]   T=8 24 335 1.31
+[pagecen]   T=9 23 327 1.28
+[pagecen]   T=10 22 318 1.24
+[pagecen]   T=11 22 318 1.24
+[pagecen]   T=12 21 307 1.20
+[pagecen]   T=13 20 295 1.15
+[pagecen]   T=14 18 269 1.05
+[pagecen]   T=15 17 255 1.00
+[pagecen] ARMED tests/perf/pagecensus/scr_page_census.h at=pass page=4096 chunk=65536 pages/chunk=16
+[pagecen] SYNTH ok allfree want=15 got=15 onelive want=14 got=14 alllive want=0 got=0
+[pagecen] SELFTEST ok on 105/105 chunks (carved-freelist == used)
+[pagecen] chunks=105 cur=24 part=9 full=72 nolive=1 held=6.56 MiB
+[pagecen] slots carved=85955 free=3234 live=82721 livebytes=5273280 occupancy=0.7663
+[pagecen] CEILING aligned freepages=360 = 1.41 MiB of 6.56 MiB held (21.4%)
+[pagecen] actual (malloc-placed) freepages=353 = 1.38 MiB (alignment cost 0.03 MiB)
+[pagecen] NOLIVE CHECK ok 15 pages from 1 empty chunks (15 each)
+[pagecen] freepages by role cur=327 part=33 full=0
+[pagecen] histogram freepages/chunk: 0:78 2:1 8:1 9:2 11:1 12:1 13:2 14:2 15:17
+[pagecen] policy threshold: T chunks pages MiB
+[pagecen]   T=1 27 360 1.41
+[pagecen]   T=2 27 360 1.41
+[pagecen]   T=3 26 358 1.40
+[pagecen]   T=4 26 358 1.40
+[pagecen]   T=5 26 358 1.40
+[pagecen]   T=6 26 358 1.40
+[pagecen]   T=7 26 358 1.40
+[pagecen]   T=8 26 358 1.40
+[pagecen]   T=9 25 350 1.37
+[pagecen]   T=10 23 332 1.30
+[pagecen]   T=11 23 332 1.30
+[pagecen]   T=12 22 321 1.25
+[pagecen]   T=13 21 309 1.21
+[pagecen]   T=14 19 283 1.11
+[pagecen]   T=15 17 255 1.00
+[pagecen] ARMED tests/perf/pagecensus/scr_page_census.h at=pass page=4096 chunk=65536 pages/chunk=16
+[pagecen] SYNTH ok allfree want=15 got=15 onelive want=14 got=14 alllive want=0 got=0
+[pagecen] SELFTEST ok on 103/103 chunks (carved-freelist == used)
+[pagecen] chunks=103 cur=24 part=22 full=57 nolive=1 held=6.44 MiB
+[pagecen] slots carved=84402 free=12720 live=71682 livebytes=4608560 occupancy=0.6827
+[pagecen] CEILING aligned freepages=444 = 1.73 MiB of 6.44 MiB held (26.9%)
+[pagecen] actual (malloc-placed) freepages=433 = 1.69 MiB (alignment cost 0.04 MiB)
+[pagecen] NOLIVE CHECK ok 15 pages from 1 empty chunks (15 each)
+[pagecen] freepages by role cur=329 part=115 full=0
+[pagecen] histogram freepages/chunk: 0:68 1:2 2:1 7:1 9:1 11:2 12:2 13:3 14:6 15:17
+[pagecen] policy threshold: T chunks pages MiB
+[pagecen]   T=1 35 444 1.73
+[pagecen]   T=2 33 442 1.73
+[pagecen]   T=3 32 440 1.72
+[pagecen]   T=4 32 440 1.72
+[pagecen]   T=5 32 440 1.72
+[pagecen]   T=6 32 440 1.72
+[pagecen]   T=7 32 440 1.72
+[pagecen]   T=8 31 433 1.69
+[pagecen]   T=9 31 433 1.69
+[pagecen]   T=10 30 424 1.66
+[pagecen]   T=11 30 424 1.66
+[pagecen]   T=12 28 402 1.57
+[pagecen]   T=13 26 378 1.48
+[pagecen]   T=14 23 339 1.32
+[pagecen]   T=15 17 255 1.00
+[pagecen] ARMED tests/perf/pagecensus/scr_page_census.h at=pass page=4096 chunk=65536 pages/chunk=16
+[pagecen] SYNTH ok allfree want=15 got=15 onelive want=14 got=14 alllive want=0 got=0
+[pagecen] SELFTEST ok on 107/107 chunks (carved-freelist == used)
+[pagecen] chunks=107 cur=24 part=10 full=73 nolive=1 held=6.69 MiB
+[pagecen] slots carved=88108 free=4410 live=83698 livebytes=5337152 occupancy=0.7611
+[pagecen] CEILING aligned freepages=369 = 1.44 MiB of 6.69 MiB held (21.6%)
+[pagecen] actual (malloc-placed) freepages=363 = 1.42 MiB (alignment cost 0.02 MiB)
+[pagecen] NOLIVE CHECK ok 15 pages from 1 empty chunks (15 each)
+[pagecen] freepages by role cur=321 part=48 full=0
+[pagecen] histogram freepages/chunk: 0:79 1:1 7:2 8:1 11:2 12:1 14:3 15:18
+[pagecen] policy threshold: T chunks pages MiB
+[pagecen]   T=1 28 369 1.44
+[pagecen]   T=2 27 368 1.44
+[pagecen]   T=3 27 368 1.44
+[pagecen]   T=4 27 368 1.44
+[pagecen]   T=5 27 368 1.44
+[pagecen]   T=6 27 368 1.44
+[pagecen]   T=7 27 368 1.44
+[pagecen]   T=8 25 354 1.38
+[pagecen]   T=9 24 346 1.35
+[pagecen]   T=10 24 346 1.35
+[pagecen]   T=11 24 346 1.35
+[pagecen]   T=12 22 324 1.27
+[pagecen]   T=13 21 312 1.22
+[pagecen]   T=14 21 312 1.22
+[pagecen]   T=15 18 270 1.05
+[pagecen] ARMED tests/perf/pagecensus/scr_page_census.h at=pass page=4096 chunk=65536 pages/chunk=16
+[pagecen] SYNTH ok allfree want=15 got=15 onelive want=14 got=14 alllive want=0 got=0
+[pagecen] SELFTEST ok on 122/122 chunks (carved-freelist == used)
+[pagecen] chunks=122 cur=24 part=34 full=64 nolive=1 held=7.62 MiB
+[pagecen] slots carved=101306 free=11404 live=89902 livebytes=6091184 occupancy=0.7618
+[pagecen] CEILING aligned freepages=355 = 1.39 MiB of 7.62 MiB held (18.2%)
+[pagecen] actual (malloc-placed) freepages=347 = 1.36 MiB (alignment cost 0.03 MiB)
+[pagecen] NOLIVE CHECK ok 15 pages from 1 empty chunks (15 each)
+[pagecen] freepages by role cur=264 part=91 full=0
+[pagecen] histogram freepages/chunk: 0:93 2:1 3:2 4:1 5:1 6:1 9:1 13:1 14:5 15:16
+[pagecen] policy threshold: T chunks pages MiB
+[pagecen]   T=1 29 355 1.39
+[pagecen]   T=2 29 355 1.39
+[pagecen]   T=3 28 353 1.38
+[pagecen]   T=4 26 347 1.36
+[pagecen]   T=5 25 343 1.34
+[pagecen]   T=6 24 338 1.32
+[pagecen]   T=7 23 332 1.30
+[pagecen]   T=8 23 332 1.30
+[pagecen]   T=9 23 332 1.30
+[pagecen]   T=10 22 323 1.26
+[pagecen]   T=11 22 323 1.26
+[pagecen]   T=12 22 323 1.26
+[pagecen]   T=13 22 323 1.26
+[pagecen]   T=14 21 310 1.21
+[pagecen]   T=15 16 240 0.94
+[pagecen] ARMED tests/perf/pagecensus/scr_page_census.h at=pass page=4096 chunk=65536 pages/chunk=16
+[pagecen] SYNTH ok allfree want=15 got=15 onelive want=14 got=14 alllive want=0 got=0
+[pagecen] SELFTEST ok on 110/110 chunks (carved-freelist == used)
+[pagecen] chunks=110 cur=24 part=28 full=58 nolive=2 held=6.88 MiB
+[pagecen] slots carved=94001 free=21107 live=72894 livebytes=4683904 occupancy=0.6497
+[pagecen] CEILING aligned freepages=520 = 2.03 MiB of 6.88 MiB held (29.5%)
+[pagecen] actual (malloc-placed) freepages=510 = 1.99 MiB (alignment cost 0.04 MiB)
+[pagecen] NOLIVE CHECK ok 30 pages from 2 empty chunks (15 each)
+[pagecen] freepages by role cur=340 part=180 full=0
+[pagecen] histogram freepages/chunk: 0:69 2:3 7:1 8:1 9:1 10:2 11:1 12:2 13:3 14:9 15:18
+[pagecen] policy threshold: T chunks pages MiB
+[pagecen]   T=1 41 520 2.03
+[pagecen]   T=2 41 520 2.03
+[pagecen]   T=3 38 514 2.01
+[pagecen]   T=4 38 514 2.01
+[pagecen]   T=5 38 514 2.01
+[pagecen]   T=6 38 514 2.01
+[pagecen]   T=7 38 514 2.01
+[pagecen]   T=8 37 507 1.98
+[pagecen]   T=9 36 499 1.95
+[pagecen]   T=10 35 490 1.91
+[pagecen]   T=11 33 470 1.84
+[pagecen]   T=12 32 459 1.79
+[pagecen]   T=13 30 435 1.70
+[pagecen]   T=14 27 396 1.55
+[pagecen]   T=15 18 270 1.05
+[pagecen] ARMED tests/perf/pagecensus/scr_page_census.h at=pass page=4096 chunk=65536 pages/chunk=16
+[pagecen] SYNTH ok allfree want=15 got=15 onelive want=14 got=14 alllive want=0 got=0
+[pagecen] SELFTEST ok on 137/137 chunks (carved-freelist == used)
+[pagecen] chunks=137 cur=24 part=21 full=92 nolive=1 held=8.56 MiB
+[pagecen] slots carved=111028 free=4409 live=106619 livebytes=7419984 occupancy=0.8264
+[pagecen] CEILING aligned freepages=336 = 1.31 MiB of 8.56 MiB held (15.3%)
+[pagecen] actual (malloc-placed) freepages=330 = 1.29 MiB (alignment cost 0.02 MiB)
+[pagecen] NOLIVE CHECK ok 15 pages from 1 empty chunks (15 each)
+[pagecen] freepages by role cur=294 part=42 full=0
+[pagecen] histogram freepages/chunk: 0:110 2:1 3:1 5:1 7:1 8:1 10:2 12:1 13:1 14:4 15:14
+[pagecen] policy threshold: T chunks pages MiB
+[pagecen]   T=1 27 336 1.31
+[pagecen]   T=2 27 336 1.31
+[pagecen]   T=3 26 334 1.30
+[pagecen]   T=4 25 331 1.29
+[pagecen]   T=5 25 331 1.29
+[pagecen]   T=6 24 326 1.27
+[pagecen]   T=7 24 326 1.27
+[pagecen]   T=8 23 319 1.25
+[pagecen]   T=9 22 311 1.21
+[pagecen]   T=10 22 311 1.21
+[pagecen]   T=11 20 291 1.14
+[pagecen]   T=12 20 291 1.14
+[pagecen]   T=13 19 279 1.09
+[pagecen]   T=14 18 266 1.04
+[pagecen]   T=15 14 210 0.82
+[pagecen] ARMED tests/perf/pagecensus/scr_page_census.h at=pass page=4096 chunk=65536 pages/chunk=16
+[pagecen] SYNTH ok allfree want=15 got=15 onelive want=14 got=14 alllive want=0 got=0
+[pagecen] SELFTEST ok on 195/195 chunks (carved-freelist == used)
+[pagecen] chunks=195 cur=24 part=19 full=152 nolive=1 held=12.19 MiB
+[pagecen] slots carved=155314 free=1386 live=153928 livebytes=11286960 occupancy=0.8832
+[pagecen] CEILING aligned freepages=321 = 1.25 MiB of 12.19 MiB held (10.3%)
+[pagecen] actual (malloc-placed) freepages=317 = 1.24 MiB (alignment cost 0.02 MiB)
+[pagecen] NOLIVE CHECK ok 15 pages from 1 empty chunks (15 each)
+[pagecen] freepages by role cur=293 part=28 full=0
+[pagecen] histogram freepages/chunk: 0:169 1:1 2:3 6:1 12:1 14:4 15:16
+[pagecen] policy threshold: T chunks pages MiB
+[pagecen]   T=1 26 321 1.25
+[pagecen]   T=2 25 320 1.25
+[pagecen]   T=3 22 314 1.23
+[pagecen]   T=4 22 314 1.23
+[pagecen]   T=5 22 314 1.23
+[pagecen]   T=6 22 314 1.23
+[pagecen]   T=7 21 308 1.20
+[pagecen]   T=8 21 308 1.20
+[pagecen]   T=9 21 308 1.20
+[pagecen]   T=10 21 308 1.20
+[pagecen]   T=11 21 308 1.20
+[pagecen]   T=12 21 308 1.20
+[pagecen]   T=13 20 296 1.16
+[pagecen]   T=14 20 296 1.16
+[pagecen]   T=15 16 240 0.94
+[pagecen] ARMED tests/perf/pagecensus/scr_page_census.h at=pass page=4096 chunk=65536 pages/chunk=16
+[pagecen] SYNTH ok allfree want=15 got=15 onelive want=14 got=14 alllive want=0 got=0
+[pagecen] SELFTEST ok on 263/263 chunks (carved-freelist == used)
+[pagecen] chunks=263 cur=24 part=17 full=222 nolive=1 held=16.44 MiB
+[pagecen] slots carved=203017 free=1408 live=201609 livebytes=15712848 occupancy=0.9116
+[pagecen] CEILING aligned freepages=321 = 1.25 MiB of 16.44 MiB held (7.6%)
+[pagecen] actual (malloc-placed) freepages=316 = 1.23 MiB (alignment cost 0.02 MiB)
+[pagecen] NOLIVE CHECK ok 15 pages from 1 empty chunks (15 each)
+[pagecen] freepages by role cur=293 part=28 full=0
+[pagecen] histogram freepages/chunk: 0:237 2:2 3:2 7:1 11:1 13:2 14:3 15:15
+[pagecen] policy threshold: T chunks pages MiB
+[pagecen]   T=1 26 321 1.25
+[pagecen]   T=2 26 321 1.25
+[pagecen]   T=3 24 317 1.24
+[pagecen]   T=4 22 311 1.21
+[pagecen]   T=5 22 311 1.21
+[pagecen]   T=6 22 311 1.21
+[pagecen]   T=7 22 311 1.21
+[pagecen]   T=8 21 304 1.19
+[pagecen]   T=9 21 304 1.19
+[pagecen]   T=10 21 304 1.19
+[pagecen]   T=11 21 304 1.19
+[pagecen]   T=12 20 293 1.14
+[pagecen]   T=13 20 293 1.14
+[pagecen]   T=14 18 267 1.04
+[pagecen]   T=15 15 225 0.88
+[pagecen] ARMED tests/perf/pagecensus/scr_page_census.h at=pass page=4096 chunk=65536 pages/chunk=16
+[pagecen] SYNTH ok allfree want=15 got=15 onelive want=14 got=14 alllive want=0 got=0
+[pagecen] SELFTEST ok on 268/268 chunks (carved-freelist == used)
+[pagecen] chunks=268 cur=24 part=134 full=110 nolive=1 held=16.75 MiB
+[pagecen] slots carved=211581 free=26891 live=184690 livebytes=14256096 occupancy=0.8117
+[pagecen] CEILING aligned freepages=361 = 1.41 MiB of 16.75 MiB held (8.4%)
+[pagecen] actual (malloc-placed) freepages=356 = 1.39 MiB (alignment cost 0.02 MiB)
+[pagecen] NOLIVE CHECK ok 15 pages from 1 empty chunks (15 each)
+[pagecen] freepages by role cur=252 part=109 full=0
+[pagecen] histogram freepages/chunk: 0:236 1:3 2:1 3:1 5:2 7:1 9:1 10:1 11:1 12:1 13:1 14:4 15:15
+[pagecen] policy threshold: T chunks pages MiB
+[pagecen]   T=1 32 361 1.41
+[pagecen]   T=2 29 358 1.40
+[pagecen]   T=3 28 356 1.39
+[pagecen]   T=4 27 353 1.38
+[pagecen]   T=5 27 353 1.38
+[pagecen]   T=6 25 343 1.34
+[pagecen]   T=7 25 343 1.34
+[pagecen]   T=8 24 336 1.31
+[pagecen]   T=9 24 336 1.31
+[pagecen]   T=10 23 327 1.28
+[pagecen]   T=11 22 317 1.24
+[pagecen]   T=12 21 306 1.20
+[pagecen]   T=13 20 294 1.15
+[pagecen]   T=14 19 281 1.10
+[pagecen]   T=15 15 225 0.88
+[pagecen] ARMED tests/perf/pagecensus/scr_page_census.h at=pass page=4096 chunk=65536 pages/chunk=16
+[pagecen] SYNTH ok allfree want=15 got=15 onelive want=14 got=14 alllive want=0 got=0
+[pagecen] SELFTEST ok on 252/252 chunks (carved-freelist == used)
+[pagecen] chunks=252 cur=24 part=159 full=69 nolive=3 held=15.75 MiB
+[pagecen] slots carved=199266 free=65293 live=133973 livebytes=10092192 occupancy=0.6111
+[pagecen] CEILING aligned freepages=649 = 2.54 MiB of 15.75 MiB held (16.1%)
+[pagecen] actual (malloc-placed) freepages=642 = 2.51 MiB (alignment cost 0.03 MiB)
+[pagecen] NOLIVE CHECK ok 45 pages from 3 empty chunks (15 each)
+[pagecen] freepages by role cur=300 part=349 full=0
+[pagecen] histogram freepages/chunk: 0:187 1:5 2:1 3:4 4:1 5:2 6:2 7:3 8:2 9:5 10:8 11:5 12:2 13:4 14:4 15:17
+[pagecen] policy threshold: T chunks pages MiB
+[pagecen]   T=1 65 649 2.54
+[pagecen]   T=2 60 644 2.52
+[pagecen]   T=3 59 642 2.51
+[pagecen]   T=4 55 630 2.46
+[pagecen]   T=5 54 626 2.45
+[pagecen]   T=6 52 616 2.41
+[pagecen]   T=7 50 604 2.36
+[pagecen]   T=8 47 583 2.28
+[pagecen]   T=9 45 567 2.21
+[pagecen]   T=10 40 522 2.04
+[pagecen]   T=11 32 442 1.73
+[pagecen]   T=12 27 387 1.51
+[pagecen]   T=13 25 363 1.42
+[pagecen]   T=14 21 311 1.21
+[pagecen]   T=15 17 255 1.00
+[pagecen] ARMED tests/perf/pagecensus/scr_page_census.h at=pass page=4096 chunk=65536 pages/chunk=16
+[pagecen] SYNTH ok allfree want=15 got=15 onelive want=14 got=14 alllive want=0 got=0
+[pagecen] SELFTEST ok on 199/199 chunks (carved-freelist == used)
+[pagecen] chunks=199 cur=24 part=106 full=69 nolive=2 held=12.44 MiB
+[pagecen] slots carved=154626 free=60310 live=94316 livebytes=6929344 occupancy=0.5313
+[pagecen] CEILING aligned freepages=878 = 3.43 MiB of 12.44 MiB held (27.6%)
+[pagecen] actual (malloc-placed) freepages=868 = 3.39 MiB (alignment cost 0.04 MiB)
+[pagecen] NOLIVE CHECK ok 30 pages from 2 empty chunks (15 each)
+[pagecen] freepages by role cur=278 part=600 full=0
+[pagecen] histogram freepages/chunk: 0:114 1:5 2:3 3:2 4:2 5:1 6:5 7:3 8:1 9:4 10:11 11:10 12:3 13:9 14:10 15:16
+[pagecen] policy threshold: T chunks pages MiB
+[pagecen]   T=1 85 878 3.43
+[pagecen]   T=2 80 873 3.41
+[pagecen]   T=3 77 867 3.39
+[pagecen]   T=4 75 861 3.36
+[pagecen]   T=5 73 853 3.33
+[pagecen]   T=6 72 848 3.31
+[pagecen]   T=7 67 818 3.20
+[pagecen]   T=8 64 797 3.11
+[pagecen]   T=9 63 789 3.08
+[pagecen]   T=10 59 753 2.94
+[pagecen]   T=11 48 643 2.51
+[pagecen]   T=12 38 533 2.08
+[pagecen]   T=13 35 497 1.94
+[pagecen]   T=14 26 380 1.48
+[pagecen]   T=15 16 240 0.94
+[pagecen] ARMED tests/perf/pagecensus/scr_page_census.h at=pass page=4096 chunk=65536 pages/chunk=16
+[pagecen] SYNTH ok allfree want=15 got=15 onelive want=14 got=14 alllive want=0 got=0
+[pagecen] SELFTEST ok on 139/139 chunks (carved-freelist == used)
+[pagecen] chunks=139 cur=24 part=49 full=66 nolive=1 held=8.69 MiB
+[pagecen] slots carved=117255 free=17396 live=99859 livebytes=6875488 occupancy=0.7548
+[pagecen] CEILING aligned freepages=388 = 1.52 MiB of 8.69 MiB held (17.4%)
+[pagecen] actual (malloc-placed) freepages=379 = 1.48 MiB (alignment cost 0.04 MiB)
+[pagecen] NOLIVE CHECK ok 15 pages from 1 empty chunks (15 each)
+[pagecen] freepages by role cur=243 part=145 full=0
+[pagecen] histogram freepages/chunk: 0:104 1:2 2:3 4:2 6:1 8:1 9:2 10:1 12:2 13:2 14:5 15:14
+[pagecen] policy threshold: T chunks pages MiB
+[pagecen]   T=1 35 388 1.52
+[pagecen]   T=2 33 386 1.51
+[pagecen]   T=3 30 380 1.48
+[pagecen]   T=4 30 380 1.48
+[pagecen]   T=5 28 372 1.45
+[pagecen]   T=6 28 372 1.45
+[pagecen]   T=7 27 366 1.43
+[pagecen]   T=8 27 366 1.43
+[pagecen]   T=9 26 358 1.40
+[pagecen]   T=10 24 340 1.33
+[pagecen]   T=11 23 330 1.29
+[pagecen]   T=12 23 330 1.29
+[pagecen]   T=13 21 306 1.20
+[pagecen]   T=14 19 280 1.09
+[pagecen]   T=15 14 210 0.82
+[pagecen] ARMED tests/perf/pagecensus/scr_page_census.h at=pass page=4096 chunk=65536 pages/chunk=16
+[pagecen] SYNTH ok allfree want=15 got=15 onelive want=14 got=14 alllive want=0 got=0
+[pagecen] SELFTEST ok on 186/186 chunks (carved-freelist == used)
+[pagecen] chunks=186 cur=24 part=17 full=145 nolive=1 held=11.62 MiB
+[pagecen] slots carved=150308 free=3718 live=146590 livebytes=10683920 occupancy=0.8765
+[pagecen] CEILING aligned freepages=315 = 1.23 MiB of 11.62 MiB held (10.6%)
+[pagecen] actual (malloc-placed) freepages=310 = 1.21 MiB (alignment cost 0.02 MiB)
+[pagecen] NOLIVE CHECK ok 15 pages from 1 empty chunks (15 each)
+[pagecen] freepages by role cur=260 part=55 full=0
+[pagecen] histogram freepages/chunk: 0:159 1:3 2:1 4:1 5:1 10:1 12:1 13:1 14:4 15:14
+[pagecen] policy threshold: T chunks pages MiB
+[pagecen]   T=1 27 315 1.23
+[pagecen]   T=2 24 312 1.22
+[pagecen]   T=3 23 310 1.21
+[pagecen]   T=4 23 310 1.21
+[pagecen]   T=5 22 306 1.20
+[pagecen]   T=6 21 301 1.18
+[pagecen]   T=7 21 301 1.18
+[pagecen]   T=8 21 301 1.18
+[pagecen]   T=9 21 301 1.18
+[pagecen]   T=10 21 301 1.18
+[pagecen]   T=11 20 291 1.14
+[pagecen]   T=12 20 291 1.14
+[pagecen]   T=13 19 279 1.09
+[pagecen]   T=14 18 266 1.04
+[pagecen]   T=15 14 210 0.82
+[pagecen] ARMED tests/perf/pagecensus/scr_page_census.h at=pass page=4096 chunk=65536 pages/chunk=16
+[pagecen] SYNTH ok allfree want=15 got=15 onelive want=14 got=14 alllive want=0 got=0
+[pagecen] SELFTEST ok on 257/257 chunks (carved-freelist == used)
+[pagecen] chunks=257 cur=24 part=20 full=213 nolive=1 held=16.06 MiB
+[pagecen] slots carved=201014 free=1969 live=199045 livebytes=15339632 occupancy=0.9108
+[pagecen] CEILING aligned freepages=310 = 1.21 MiB of 16.06 MiB held (7.5%)
+[pagecen] actual (malloc-placed) freepages=305 = 1.19 MiB (alignment cost 0.02 MiB)
+[pagecen] NOLIVE CHECK ok 15 pages from 1 empty chunks (15 each)
+[pagecen] freepages by role cur=282 part=28 full=0
+[pagecen] histogram freepages/chunk: 0:232 1:2 5:2 8:1 11:1 13:1 14:4 15:14
+[pagecen] policy threshold: T chunks pages MiB
+[pagecen]   T=1 25 310 1.21
+[pagecen]   T=2 23 308 1.20
+[pagecen]   T=3 23 308 1.20
+[pagecen]   T=4 23 308 1.20
+[pagecen]   T=5 23 308 1.20
+[pagecen]   T=6 21 298 1.16
+[pagecen]   T=7 21 298 1.16
+[pagecen]   T=8 21 298 1.16
+[pagecen]   T=9 20 290 1.13
+[pagecen]   T=10 20 290 1.13
+[pagecen]   T=11 20 290 1.13
+[pagecen]   T=12 19 279 1.09
+[pagecen]   T=13 19 279 1.09
+[pagecen]   T=14 18 266 1.04
+[pagecen]   T=15 14 210 0.82
+[pagecen] ARMED tests/perf/pagecensus/scr_page_census.h at=pass page=4096 chunk=65536 pages/chunk=16
+[pagecen] SYNTH ok allfree want=15 got=15 onelive want=14 got=14 alllive want=0 got=0
+[pagecen] SELFTEST ok on 275/275 chunks (carved-freelist == used)
+[pagecen] chunks=275 cur=24 part=152 full=99 nolive=1 held=17.19 MiB
+[pagecen] slots carved=218686 free=25313 live=193373 livebytes=15017840 occupancy=0.8333
+[pagecen] CEILING aligned freepages=311 = 1.21 MiB of 17.19 MiB held (7.1%)
+[pagecen] actual (malloc-placed) freepages=307 = 1.20 MiB (alignment cost 0.02 MiB)
+[pagecen] NOLIVE CHECK ok 15 pages from 1 empty chunks (15 each)
+[pagecen] freepages by role cur=250 part=61 full=0
+[pagecen] histogram freepages/chunk: 0:246 1:1 2:1 3:4 4:2 5:1 7:1 10:1 14:4 15:14
+[pagecen] policy threshold: T chunks pages MiB
+[pagecen]   T=1 29 311 1.21
+[pagecen]   T=2 28 310 1.21
+[pagecen]   T=3 27 308 1.20
+[pagecen]   T=4 23 296 1.16
+[pagecen]   T=5 21 288 1.12
+[pagecen]   T=6 20 283 1.11
+[pagecen]   T=7 20 283 1.11
+[pagecen]   T=8 19 276 1.08
+[pagecen]   T=9 19 276 1.08
+[pagecen]   T=10 19 276 1.08
+[pagecen]   T=11 18 266 1.04
+[pagecen]   T=12 18 266 1.04
+[pagecen]   T=13 18 266 1.04
+[pagecen]   T=14 18 266 1.04
+[pagecen]   T=15 14 210 0.82
+[pagecen] ARMED tests/perf/pagecensus/scr_page_census.h at=pass page=4096 chunk=65536 pages/chunk=16
+[pagecen] SYNTH ok allfree want=15 got=15 onelive want=14 got=14 alllive want=0 got=0
+[pagecen] SELFTEST ok on 260/260 chunks (carved-freelist == used)
+[pagecen] chunks=260 cur=24 part=163 full=73 nolive=1 held=16.25 MiB
+[pagecen] slots carved=204881 free=53197 live=151684 livebytes=11569056 occupancy=0.6790
+[pagecen] CEILING aligned freepages=490 = 1.91 MiB of 16.25 MiB held (11.8%)
+[pagecen] actual (malloc-placed) freepages=480 = 1.88 MiB (alignment cost 0.04 MiB)
+[pagecen] NOLIVE CHECK ok 15 pages from 1 empty chunks (15 each)
+[pagecen] freepages by role cur=281 part=209 full=0
+[pagecen] histogram freepages/chunk: 0:213 1:6 2:2 3:3 6:2 8:1 9:1 10:2 11:2 12:2 13:3 14:8 15:15
+[pagecen] policy threshold: T chunks pages MiB
+[pagecen]   T=1 47 490 1.91
+[pagecen]   T=2 41 484 1.89
+[pagecen]   T=3 39 480 1.88
+[pagecen]   T=4 36 471 1.84
+[pagecen]   T=5 36 471 1.84
+[pagecen]   T=6 36 471 1.84
+[pagecen]   T=7 34 459 1.79
+[pagecen]   T=8 34 459 1.79
+[pagecen]   T=9 33 451 1.76
+[pagecen]   T=10 32 442 1.73
+[pagecen]   T=11 30 422 1.65
+[pagecen]   T=12 28 400 1.56
+[pagecen]   T=13 26 376 1.47
+[pagecen]   T=14 23 337 1.32
+[pagecen]   T=15 15 225 0.88
+[pagecen] ARMED tests/perf/pagecensus/scr_page_census.h at=pass page=4096 chunk=65536 pages/chunk=16
+[pagecen] SYNTH ok allfree want=15 got=15 onelive want=14 got=14 alllive want=0 got=0
+[pagecen] SELFTEST ok on 242/242 chunks (carved-freelist == used)
+[pagecen] chunks=242 cur=24 part=148 full=70 nolive=1 held=15.12 MiB
+[pagecen] slots carved=191196 free=81953 live=109243 livebytes=8142000 occupancy=0.5134
+[pagecen] CEILING aligned freepages=904 = 3.53 MiB of 15.12 MiB held (23.3%)
+[pagecen] actual (malloc-placed) freepages=894 = 3.49 MiB (alignment cost 0.04 MiB)
+[pagecen] NOLIVE CHECK ok 15 pages from 1 empty chunks (15 each)
+[pagecen] freepages by role cur=268 part=636 full=0
+[pagecen] histogram freepages/chunk: 0:149 1:6 2:3 3:2 4:1 5:3 6:7 7:5 8:10 9:4 10:8 11:6 12:7 13:5 14:11 15:15
+[pagecen] policy threshold: T chunks pages MiB
+[pagecen]   T=1 93 904 3.53
+[pagecen]   T=2 87 898 3.51
+[pagecen]   T=3 84 892 3.48
+[pagecen]   T=4 82 886 3.46
+[pagecen]   T=5 81 882 3.45
+[pagecen]   T=6 78 867 3.39
+[pagecen]   T=7 71 825 3.22
+[pagecen]   T=8 66 790 3.09
+[pagecen]   T=9 56 710 2.77
+[pagecen]   T=10 52 674 2.63
+[pagecen]   T=11 44 594 2.32
+[pagecen]   T=12 38 528 2.06
+[pagecen]   T=13 31 444 1.73
+[pagecen]   T=14 26 379 1.48
+[pagecen]   T=15 15 225 0.88
+[pagecen] ARMED tests/perf/pagecensus/scr_page_census.h at=pass page=4096 chunk=65536 pages/chunk=16
+[pagecen] SYNTH ok allfree want=15 got=15 onelive want=14 got=14 alllive want=0 got=0
+[pagecen] SELFTEST ok on 127/127 chunks (carved-freelist == used)
+[pagecen] chunks=127 cur=24 part=38 full=65 nolive=1 held=7.94 MiB
+[pagecen] slots carved=108594 free=19322 live=89272 livebytes=6011696 occupancy=0.7223
+[pagecen] CEILING aligned freepages=413 = 1.61 MiB of 7.94 MiB held (20.3%)
+[pagecen] actual (malloc-placed) freepages=403 = 1.57 MiB (alignment cost 0.04 MiB)
+[pagecen] NOLIVE CHECK ok 15 pages from 1 empty chunks (15 each)
+[pagecen] freepages by role cur=244 part=169 full=0
+[pagecen] histogram freepages/chunk: 0:90 1:2 2:3 5:1 6:2 7:1 8:2 9:1 10:1 12:2 13:1 14:6 15:15
+[pagecen] policy threshold: T chunks pages MiB
+[pagecen]   T=1 37 413 1.61
+[pagecen]   T=2 35 411 1.61
+[pagecen]   T=3 32 405 1.58
+[pagecen]   T=4 32 405 1.58
+[pagecen]   T=5 32 405 1.58
+[pagecen]   T=6 31 400 1.56
+[pagecen]   T=7 29 388 1.52
+[pagecen]   T=8 28 381 1.49
+[pagecen]   T=9 26 365 1.43
+[pagecen]   T=10 25 356 1.39
+[pagecen]   T=11 24 346 1.35
+[pagecen]   T=12 24 346 1.35
+[pagecen]   T=13 22 322 1.26
+[pagecen]   T=14 21 309 1.21
+[pagecen]   T=15 15 225 0.88
+[pagecen] ARMED tests/perf/pagecensus/scr_page_census.h at=pass page=4096 chunk=65536 pages/chunk=16
+[pagecen] SYNTH ok allfree want=15 got=15 onelive want=14 got=14 alllive want=0 got=0
+[pagecen] SELFTEST ok on 166/166 chunks (carved-freelist == used)
+[pagecen] chunks=166 cur=24 part=12 full=130 nolive=1 held=10.38 MiB
+[pagecen] slots carved=134820 free=4495 live=130325 livebytes=9352112 occupancy=0.8597
+[pagecen] CEILING aligned freepages=314 = 1.23 MiB of 10.38 MiB held (11.8%)
+[pagecen] actual (malloc-placed) freepages=307 = 1.20 MiB (alignment cost 0.03 MiB)
+[pagecen] NOLIVE CHECK ok 15 pages from 1 empty chunks (15 each)
+[pagecen] freepages by role cur=272 part=42 full=0
+[pagecen] histogram freepages/chunk: 0:140 1:2 4:3 5:1 14:5 15:15
+[pagecen] policy threshold: T chunks pages MiB
+[pagecen]   T=1 26 314 1.23
+[pagecen]   T=2 24 312 1.22
+[pagecen]   T=3 24 312 1.22
+[pagecen]   T=4 24 312 1.22
+[pagecen]   T=5 21 300 1.17
+[pagecen]   T=6 20 295 1.15
+[pagecen]   T=7 20 295 1.15
+[pagecen]   T=8 20 295 1.15
+[pagecen]   T=9 20 295 1.15
+[pagecen]   T=10 20 295 1.15
+[pagecen]   T=11 20 295 1.15
+[pagecen]   T=12 20 295 1.15
+[pagecen]   T=13 20 295 1.15
+[pagecen]   T=14 20 295 1.15
+[pagecen]   T=15 15 225 0.88
+[pagecen] ARMED tests/perf/pagecensus/scr_page_census.h at=pass page=4096 chunk=65536 pages/chunk=16
+[pagecen] SYNTH ok allfree want=15 got=15 onelive want=14 got=14 alllive want=0 got=0
+[pagecen] SELFTEST ok on 207/207 chunks (carved-freelist == used)
+[pagecen] chunks=207 cur=24 part=88 full=95 nolive=1 held=12.94 MiB
+[pagecen] slots carved=170021 free=10877 live=159144 livebytes=11715072 occupancy=0.8636
+[pagecen] CEILING aligned freepages=309 = 1.21 MiB of 12.94 MiB held (9.3%)
+[pagecen] actual (malloc-placed) freepages=303 = 1.18 MiB (alignment cost 0.02 MiB)
+[pagecen] NOLIVE CHECK ok 15 pages from 1 empty chunks (15 each)
+[pagecen] freepages by role cur=251 part=58 full=0
+[pagecen] histogram freepages/chunk: 0:182 1:2 3:2 9:1 12:1 14:5 15:14
+[pagecen] policy threshold: T chunks pages MiB
+[pagecen]   T=1 25 309 1.21
+[pagecen]   T=2 23 307 1.20
+[pagecen]   T=3 23 307 1.20
+[pagecen]   T=4 21 301 1.18
+[pagecen]   T=5 21 301 1.18
+[pagecen]   T=6 21 301 1.18
+[pagecen]   T=7 21 301 1.18
+[pagecen]   T=8 21 301 1.18
+[pagecen]   T=9 21 301 1.18
+[pagecen]   T=10 20 292 1.14
+[pagecen]   T=11 20 292 1.14
+[pagecen]   T=12 20 292 1.14
+[pagecen]   T=13 19 280 1.09
+[pagecen]   T=14 19 280 1.09
+[pagecen]   T=15 14 210 0.82
+[pagecen] ARMED tests/perf/pagecensus/scr_page_census.h at=pass page=4096 chunk=65536 pages/chunk=16
+[pagecen] SYNTH ok allfree want=15 got=15 onelive want=14 got=14 alllive want=0 got=0
+[pagecen] SELFTEST ok on 194/194 chunks (carved-freelist == used)
+[pagecen] chunks=194 cur=24 part=110 full=60 nolive=2 held=12.12 MiB
+[pagecen] slots carved=155664 free=43240 live=112424 livebytes=8086272 occupancy=0.6360
+[pagecen] CEILING aligned freepages=543 = 2.12 MiB of 12.12 MiB held (17.5%)
+[pagecen] actual (malloc-placed) freepages=536 = 2.09 MiB (alignment cost 0.03 MiB)
+[pagecen] NOLIVE CHECK ok 30 pages from 2 empty chunks (15 each)
+[pagecen] freepages by role cur=265 part=278 full=0
+[pagecen] histogram freepages/chunk: 0:138 1:8 2:4 3:2 5:1 6:1 7:2 8:4 9:1 10:2 11:2 12:2 13:4 14:8 15:15
+[pagecen] policy threshold: T chunks pages MiB
+[pagecen]   T=1 56 543 2.12
+[pagecen]   T=2 48 535 2.09
+[pagecen]   T=3 44 527 2.06
+[pagecen]   T=4 42 521 2.04
+[pagecen]   T=5 42 521 2.04
+[pagecen]   T=6 41 516 2.02
+[pagecen]   T=7 40 510 1.99
+[pagecen]   T=8 38 496 1.94
+[pagecen]   T=9 34 464 1.81
+[pagecen]   T=10 33 455 1.78
+[pagecen]   T=11 31 435 1.70
+[pagecen]   T=12 29 413 1.61
+[pagecen]   T=13 27 389 1.52
+[pagecen]   T=14 23 337 1.32
+[pagecen]   T=15 15 225 0.88
+[pagecen] ARMED tests/perf/pagecensus/scr_page_census.h at=pass page=4096 chunk=65536 pages/chunk=16
+[pagecen] SYNTH ok allfree want=15 got=15 onelive want=14 got=14 alllive want=0 got=0
+[pagecen] SELFTEST ok on 148/148 chunks (carved-freelist == used)
+[pagecen] chunks=148 cur=24 part=61 full=63 nolive=3 held=9.25 MiB
+[pagecen] slots carved=111217 free=31959 live=79258 livebytes=5675072 occupancy=0.5851
+[pagecen] CEILING aligned freepages=518 = 2.02 MiB of 9.25 MiB held (21.9%)
+[pagecen] actual (malloc-placed) freepages=511 = 2.00 MiB (alignment cost 0.03 MiB)
+[pagecen] NOLIVE CHECK ok 45 pages from 3 empty chunks (15 each)
+[pagecen] freepages by role cur=332 part=186 full=0
+[pagecen] histogram freepages/chunk: 0:96 1:11 2:3 6:1 7:1 8:1 9:2 10:1 11:2 12:2 13:3 14:8 15:17
+[pagecen] policy threshold: T chunks pages MiB
+[pagecen]   T=1 52 518 2.02
+[pagecen]   T=2 41 507 1.98
+[pagecen]   T=3 38 501 1.96
+[pagecen]   T=4 38 501 1.96
+[pagecen]   T=5 38 501 1.96
+[pagecen]   T=6 38 501 1.96
+[pagecen]   T=7 37 495 1.93
+[pagecen]   T=8 36 488 1.91
+[pagecen]   T=9 35 480 1.88
+[pagecen]   T=10 33 462 1.80
+[pagecen]   T=11 32 452 1.77
+[pagecen]   T=12 30 430 1.68
+[pagecen]   T=13 28 406 1.59
+[pagecen]   T=14 25 367 1.43
+[pagecen]   T=15 17 255 1.00
+[pagecen] ARMED tests/perf/pagecensus/scr_page_census.h at=pass page=4096 chunk=65536 pages/chunk=16
+[pagecen] SYNTH ok allfree want=15 got=15 onelive want=14 got=14 alllive want=0 got=0
+[pagecen] SELFTEST ok on 125/125 chunks (carved-freelist == used)
+[pagecen] chunks=125 cur=24 part=36 full=65 nolive=1 held=7.81 MiB
+[pagecen] slots carved=104121 free=13523 live=90598 livebytes=6146656 occupancy=0.7503
+[pagecen] CEILING aligned freepages=360 = 1.41 MiB of 7.81 MiB held (18.0%)
+[pagecen] actual (malloc-placed) freepages=355 = 1.39 MiB (alignment cost 0.02 MiB)
+[pagecen] NOLIVE CHECK ok 15 pages from 1 empty chunks (15 each)
+[pagecen] freepages by role cur=248 part=112 full=0
+[pagecen] histogram freepages/chunk: 0:95 1:3 2:1 7:1 8:1 11:1 12:2 13:3 14:4 15:14
+[pagecen] policy threshold: T chunks pages MiB
+[pagecen]   T=1 30 360 1.41
+[pagecen]   T=2 27 357 1.39
+[pagecen]   T=3 26 355 1.39
+[pagecen]   T=4 26 355 1.39
+[pagecen]   T=5 26 355 1.39
+[pagecen]   T=6 26 355 1.39
+[pagecen]   T=7 26 355 1.39
+[pagecen]   T=8 25 348 1.36
+[pagecen]   T=9 24 340 1.33
+[pagecen]   T=10 24 340 1.33
+[pagecen]   T=11 24 340 1.33
+[pagecen]   T=12 23 329 1.29
+[pagecen]   T=13 21 305 1.19
+[pagecen]   T=14 18 266 1.04
+[pagecen]   T=15 14 210 0.82
+[pagecen] ARMED tests/perf/pagecensus/scr_page_census.h at=pass page=4096 chunk=65536 pages/chunk=16
+[pagecen] SYNTH ok allfree want=15 got=15 onelive want=14 got=14 alllive want=0 got=0
+[pagecen] SELFTEST ok on 117/117 chunks (carved-freelist == used)
+[pagecen] chunks=117 cur=24 part=35 full=58 nolive=4 held=7.31 MiB
+[pagecen] slots carved=99382 free=26320 live=73062 livebytes=4696560 occupancy=0.6125
+[pagecen] CEILING aligned freepages=592 = 2.31 MiB of 7.31 MiB held (31.6%)
+[pagecen] actual (malloc-placed) freepages=581 = 2.27 MiB (alignment cost 0.04 MiB)
+[pagecen] NOLIVE CHECK ok 60 pages from 4 empty chunks (15 each)
+[pagecen] freepages by role cur=342 part=250 full=0
+[pagecen] histogram freepages/chunk: 0:70 2:3 7:2 8:1 9:2 10:1 11:1 12:5 13:3 14:9 15:20
+[pagecen] policy threshold: T chunks pages MiB
+[pagecen]   T=1 47 592 2.31
+[pagecen]   T=2 47 592 2.31
+[pagecen]   T=3 44 586 2.29
+[pagecen]   T=4 44 586 2.29
+[pagecen]   T=5 44 586 2.29
+[pagecen]   T=6 44 586 2.29
+[pagecen]   T=7 44 586 2.29
+[pagecen]   T=8 42 572 2.23
+[pagecen]   T=9 41 564 2.20
+[pagecen]   T=10 39 546 2.13
+[pagecen]   T=11 38 536 2.09
+[pagecen]   T=12 37 525 2.05
+[pagecen]   T=13 32 465 1.82
+[pagecen]   T=14 29 426 1.66
+[pagecen]   T=15 20 300 1.17

@@ -1,0 +1,7 @@
+[cycstat] ARMED tests/perf/cycstat/scr_cyc_stat.h
+[cycstat] passes=22 roots=2824 freed=4315
+[cycstat] Mcycles total=114.7 mark=58.1 scan=55.7 white=0.5 teardown=0.4
+[cycstat] arena chunks=119 freed=12 held=107 peakheld=108 carved=99034 listhit=94227 listgive=120217 callocfallback=13
+[cycstat] strarena chunks=3 carved=7430 listhit=0 listgive=0 mallocfallback=0
+[cycstat] strintern hit=958 miss=272 put=272 evict=0 refuse=0 hitRate=0.7789 evictPerPut=0.0000
+[cycstat] STRING INTERN NEVER EVICTED - read this against the SCR_STRING_INTERN_WAYS=1 control on the SAME binary, which must evict heavily. A zero here with no such control is an untested branch, not a collision-free table.
