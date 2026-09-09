@@ -23,8 +23,9 @@
 #
 #     poolstat -> prof / cycensus / strcen -> heapcensus -> dyncensus / u16census
 #
-# chunkcensus does not interpose at all -- it samples at the loop seam and
-# registers only atexit -- so it is free to sit anywhere, and goes last.
+# pagecensus reports at exit, or after every collector pass under
+# SCR_PAGECEN_EVERY, and does not contend for the _Exit chain, so it is free
+# to sit anywhere; it goes last.
 #
 # WHY THREE INSTRUMENTED ARMS AND NOT ONE BINARY. Every instrument is inside
 # the peak it reports: memmap's own INSTRUMENT class has measured 3.5-6.6 MiB
@@ -49,8 +50,8 @@ case "$ARM" in
   # The decisive arm for the page-decommit question.
   #   cycstat      chunk counts for BOTH arenas (the string arena has no arfree)
   #   heapcensus   exact-size histogram of busy blocks, every heap
-  #   chunkcensus  per-chunk occupancy and the page ceiling
-  arena)   FLAGS="-include $PW/cycstat/scr_cyc_stat.h -DSCR_CYCSTAT_ON -include $PW/heapcensus/scr_heap_census.h -include $PW/chunkcensus/scr_chunk_census.h -I$PW/chunkcensus" ;;
+  #   pagecensus   per-chunk occupancy and the arena page ceiling
+  arena)   FLAGS="-include $PW/cycstat/scr_cyc_stat.h -DSCR_CYCSTAT_ON -include $PW/heapcensus/scr_heap_census.h -include $PW/pagecensus/scr_page_census.h -DSCR_PAGECEN_ON" ;;
   # What the live objects ARE, and what boxing into `unknown` costs.
   objects) FLAGS="-include $PW/cycensus/scr_cyc_census.h -include $PW/dyncensus/scr_str_census.h -I$PW/dyncensus -include $PW/dyncensus/scr_dyn_census.h" ;;
   # The top-down region map, which closes against RSS by construction.
@@ -68,23 +69,11 @@ if [ "$STEP" = build ]; then
   # delete each other's intermediate mid-build. A distinct -o FILENAME is not
   # enough. (app182/README.md, "Build".)
   [ -n "$FLAGS" ] && export SCRIPTC_PROF_CFLAGS="$FLAGS"
-  # A GAP THE CACHE FIX DOES NOT CLOSE, and it is specific to this arm.
-  #
-  # 77735c1ad folds the CONTENTS of every -include'd file into both cache
-  # keys, which is what makes an edited census header rebuild. chunkcensus is
-  # -include'd like the rest, so scr_chunk_census.h is covered. Its two WALK
-  # headers are not: they reach the compile by #include from scr_cycle.c and
-  # scr_string.c, are named nowhere on the command line, and live under
-  # tests/perf/ which the runtime fingerprint does not cover. Editing only a
-  # walk header therefore still leaves every key input identical.
-  #
-  # Editing the runtime .c files that include them does invalidate the key
-  # (they ARE in the fingerprint), so the first build after wiring the hooks
-  # is correctly keyed; it is a later walk-header-only edit that would serve
-  # a stale binary. Until profFlavor() also covers the -I directories an
-  # instrument names, this arm turns the cache off rather than betting on
-  # remembering that distinction.
-  case "$ARM" in arena) export SCRIPTC_NO_CACHE=1 ;; esac
+  # profFlavor() folds the CONTENTS of every -include'd file into both cache
+  # keys (77735c1ad), and every instrument here now arrives that way -- the
+  # two walk headers that reached the compiler by #include from a runtime .c,
+  # and were therefore outside the key, went with tests/perf/chunkcensus.
+  # So the cache is safe to leave on for every arm.
   echo "=== build $ARM"
   echo "=== SCRIPTC_PROF_CFLAGS: ${SCRIPTC_PROF_CFLAGS:-<none>}"
   ( cd "$REPO" && node packages/cli/dist/main.js build \
@@ -100,13 +89,13 @@ if [ "$STEP" = run ]; then
   export MEMRIG_OUT="$OUTROOT/rig/$TAG"
   export MEMRIG_PMON="$P/zapo-rest/harness/pmon.exe"
   mkdir -p "$MEMRIG_OUT"
-  # The documented workload. SCR_CHUNKCEN_MS samples THROUGH the burst as well
-  # as at the ends, which is what attributes the growth rather than only
-  # bracketing it; it is passed only on the arena arm, since the other
-  # binaries carry no seam hook and would silently write nothing.
+  # The documented workload. SCR_PAGECEN_EVERY reports after every collector
+  # pass, so the arena's occupancy is sampled THROUGH the burst rather than
+  # only at the ends; it is passed on the arena arm only, since the other
+  # binaries carry no pagecensus hook and would silently write nothing.
   KNOBS="CHUNKS=8 CONVS=400 MSGS=6 TEXTLEN=300 IDLE_S=60 SETTLE_MS=45000 PRESYNC_MS=20000"
   case "$ARM" in
-    arena)  KNOBS="$KNOBS SCR_CHUNKCEN_MS=2000 SCR_CHUNKCEN_CHUNKS=1" ;;
+    arena)  KNOBS="$KNOBS SCR_PAGECEN_EVERY=1" ;;
     memmap) KNOBS="$KNOBS SCR_MEMMAP_MS=2000 SCR_MEMMAP_SELFTEST=32" ;;
   esac
   echo "=== run $ARM/$TAG: $KNOBS"

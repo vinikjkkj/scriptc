@@ -31,6 +31,25 @@ const CHURN = Number(
 const HELD = Number(
   process.env["ARENA_HELD"] !== undefined ? process.env["ARENA_HELD"] : "300"
 );
+/* WHERE THE SURVIVORS SIT, which is a different question from how many of
+ * them there are, and the page ceiling turns entirely on it.
+ *
+ * 0 (the default) keeps the behaviour this fixture has always had: `held`
+ * is built in one run of consecutive allocations, so the survivors are
+ * CLUSTERED and the chunks between them empty completely and are returned.
+ *
+ * N > 1 builds HELD*N nodes and keeps every Nth, so the SAME NUMBER of
+ * survivors is spread across N times as many chunks. No chunk empties, so
+ * none is returned, and the free space is chopped into holes the size of
+ * one block.
+ *
+ * The pair is what makes the ceiling credible in both directions: a number
+ * that read near zero for every input would be indistinguishable from one
+ * that was never computed. Varying the survivor COUNT (ARENA_HELD) cannot
+ * show that, because it moves live bytes and free pages together. */
+const SCATTER = Number(
+  process.env["ARENA_SCATTER"] !== undefined ? process.env["ARENA_SCATTER"] : "0"
+);
 
 /* A chain plus a self-edge on every node: the self-edge is what makes each
  * node a cycle the refcount alone can never free. */
@@ -53,7 +72,29 @@ function main(): void {
     for (let i = 0; i < big.length; i += 1000) sink += big[i]!.v;
     big.length = 0;
   }
-  const held = build(HELD);
+  let held: Node[];
+  if (SCATTER > 1) {
+    const wide = build(HELD * SCATTER);
+    held = [];
+    for (let i = 0; i < wide.length; i += SCATTER) {
+      const n = wide[i]!;
+      /* THE CHAIN HAS TO BE CUT, and forgetting it does not fail loudly.
+       * build() links every node to its predecessor through `next`, so a
+       * survivor transitively retains its ENTIRE prefix: keeping every
+       * 20th would retain all 20/20 of them, the arena would report the
+       * scattered arm as full, and it would look identical to the
+       * clustered one. That is not hypothetical — it is the exact defect
+       * that made an earlier version of this control read 97.7%
+       * occupancy on both arms. `self` is left alone: it is what makes a
+       * dropped node a cycle only the collector can free, which is the
+       * path the real workload's garbage takes. */
+      n.next = null;
+      held.push(n);
+    }
+    wide.length = 0;
+  } else {
+    held = build(HELD);
+  }
   for (let i = 0; i < CHURN; i++) {
     const small = build(3);
     sink += small[0]!.v + held[i % held.length]!.v;

@@ -3065,13 +3065,6 @@ bool scr_loop_run(ScrPromise *top_level) {
      * block, so a heap-wide walk cannot land between two allocations
      * of one turn. Off unless SCR_HEAP_TRIM_MS says otherwise. */
     scr_heap_trim(now);
-#ifdef SCR_CHUNKCEN_ON
-    /* And the same seam again for tests/perf/chunkcensus: the arenas
-     * are mutated by THIS thread under no lock, so a whole-arena walk
-     * is only sound where the loop has already decided it has no
-     * runnable work. Off unless SCR_CHUNKCEN_MS says otherwise. */
-    scr_kc_seam(now);
-#endif
     double due = scr_ntimers > 0 ? scr_timers[0].deadline_ms : now + SCR_IO_POLL_MS;
     /* A pool with entries left to free caps the sleep at its next window;
      * an empty one does not (see scr_stack_pool_decay_due). */
@@ -3085,14 +3078,6 @@ bool scr_loop_run(ScrPromise *top_level) {
       double trim_due = scr_heap_trim_due(now);
       if (trim_due >= 0 && trim_due < due) due = trim_due;
     }
-#ifdef SCR_CHUNKCEN_ON
-    /* Likewise the census window; see scr_stack_pool_decay_due for
-     * what an uncapped sleep does to a periodic seam. */
-    {
-      double kc_due = scr_kc_due(now);
-      if (kc_due >= 0 && kc_due < due) due = kc_due;
-    }
-#endif
     /* An armed island timer (AbortSignal.timeout) caps the sleep: it must
      * fire on time even while the poller waits on socket readiness. */
     if (scr_island_deadline_fn != NULL) {

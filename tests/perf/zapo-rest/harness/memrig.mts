@@ -157,7 +157,7 @@ writeFileSync(PH, 'ms,phase\n')
 for (const k of ['SCR_HEAP_TRIM_MS', 'SCR_HEAP_TRIM_STAT', 'SCR_HEAP_TRIM_CENSUS',
     'SCR_FIBER_POOL_DECAY_MS', 'SCR_CYCEN_OUT', 'SCR_STRING_ARENA', 'SCR_CYCLE_ARENA',
     'SCR_CYCLE_ARENA_BUDGET', 'SCR_STRING_INTERN', 'ZAPO_SQLITE_CACHE_KB', 'ZAPO_EVENT_BUFFER',
-    'SCR_CHUNKCEN_MS', 'SCR_CHUNKCEN_CHUNKS', 'SCR_MEMMAP_MS', 'SCR_MEMMAP_SELFTEST',
+    'SCR_PAGECEN_EVERY', 'SCR_MEMMAP_MS', 'SCR_MEMMAP_SELFTEST',
     'SCR_CYCLE_IDLE_PACE',
     'CHUNKS', 'CONVS', 'MSGS', 'TEXTLEN', 'ROUNDS', 'IDLE_S']) {
     const v = extraEnv[k] ?? process.env[k]
@@ -209,14 +209,11 @@ async function main() {
         SCR_CYCSTAT_OUT: join(OUT, `${tag}.cycstat.txt`),
         SCR_STRCEN_OUT: join(OUT, `${tag}.strcen.txt`),
         SCR_DYNCEN_OUT: join(OUT, `${tag}.dyncen.txt`),
-        /* tests/perf/chunkcensus samples at the loop seam rather than at
-         * exit, so its file holds a SERIES; the snapshot to read against
-         * SETTLED-r<n> is the last one before the shutdown request, joined
-         * on its epoch= column. Unlike the others it needs a period as
-         * well as a path -- SCR_CHUNKCEN_MS, unset here so an ordinary run
-         * carries the negative control (one integer compare at the seam)
-         * and a census run passes it explicitly. */
-        SCR_CHUNKCEN_OUT: join(OUT, `${tag}.chunkcen.txt`),
+        /* tests/perf/pagecensus: how full the arena's remaining chunks are
+         * and how many whole free pages sit inside them, which is the
+         * ceiling on anything a per-page reclaimer could return. Reports at
+         * exit, or after every collector pass under SCR_PAGECEN_EVERY. */
+        SCR_PAGECEN_OUT: join(OUT, `${tag}.pagecen.txt`),
         SCR_MEMMAP_OUT: join(OUT, `${tag}.memmap.txt`),
         ZAPO_WS_URL: server.url, ZAPO_WS_CA_PUB: bytesToHex(server.noiseRootCa.publicKey),
         ZAPO_WS_CA_SERIAL: String(server.noiseRootCa.serial),
