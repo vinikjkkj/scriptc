@@ -337,11 +337,21 @@ function settledWs(phasesText, rssText) {
 
 /* ---- load ------------------------------------------------------------ */
 
-const need = ['n1.cycstat.txt', 'n1.heapcen.txt', 'n1.phases.csv', 'n1.rss.csv']
-for (const f of need) if (!existsSync(join(DIR, f))) { console.error('missing evidence: ' + f); process.exit(2) }
-const cs = readCycstat(readFileSync(join(DIR, 'n1.cycstat.txt'), 'utf8'))
-const hc = readHeapcen(readFileSync(join(DIR, 'n1.heapcen.txt'), 'utf8'))
-const ws = settledWs(readFileSync(join(DIR, 'n1.phases.csv'), 'utf8'), readFileSync(join(DIR, 'n1.rss.csv'), 'utf8'))
+/* Two naming conventions exist in this tree: the arenafree evidence came in
+ * as n1.*, later runs as bare names. Accept either rather than renaming
+ * committed evidence, and name the file that is actually missing. */
+const pick = (a, b) => {
+  for (const f of [a, b]) if (existsSync(join(DIR, f))) return join(DIR, f)
+  console.error('missing evidence: neither ' + a + ' nor ' + b + ' under ' + DIR)
+  process.exit(2)
+}
+const F_CYC = pick('n1.cycstat.txt', 'cycstat.txt')
+const F_HEAP = pick('n1.heapcen.txt', 'heapcen.txt')
+const F_PH = pick('n1.phases.csv', 'phases.csv')
+const F_RSS = pick('n1.rss.csv', 'rss.csv')
+const cs = readCycstat(readFileSync(F_CYC, 'utf8'))
+const hc = readHeapcen(readFileSync(F_HEAP, 'utf8'))
+const ws = settledWs(readFileSync(F_PH, 'utf8'), readFileSync(F_RSS, 'utf8'))
 const crt = hc.heaps.find((h) => h.crt) ?? hc.heaps[0]
 
 /* CONTENTION PROVENANCE. A run taken on a loaded box yields census COUNTS
@@ -600,11 +610,41 @@ if (hc.free.size === 0) {
    * whether the CRT-heap page route is worth anything at all. */
   if (hc.page) {
     const shaped = 100 * hc.page.pageBytes / crt.free
+    /* THE RUN-MERGED NUMBER IS NOT A SAFE CEILING, and reporting it alone
+     * was this lane's mistake. A run is contiguous free bytes spanning
+     * SEVERAL free blocks; a whole page inside a run can still straddle the
+     * boundary between two of them, and the allocator keeps its free-list
+     * links at the start of each block. Discarding the page a block starts
+     * on has been shown to stall a process inside the allocator on links
+     * that read back as zeroes. The safe unit is a page lying strictly
+     * INSIDE one free block, past its header.
+     *
+     * That bound needs no addresses: a block of S bytes contains at least
+     * floor((S-4095)/4096) whole pages wherever it lands, and at most
+     * floor(S/4096). Both are printed, because the spread IS the alignment
+     * uncertainty and hiding it would repeat the same error one level down. */
+    let inertLo = 0, inertHi = 0, small = 0, nfree = 0
+    for (const [sz, r] of hc.free) {
+      nfree += r.n
+      inertLo += Math.max(0, Math.floor((sz - 4095) / 4096)) * r.n
+      inertHi += Math.floor(sz / 4096) * r.n
+      if (sz < 8192) small += r.n
+    }
     console.log('\n== [7] THE PAGE-SHAPED FRACTION OF THE COMMITTED-FREE SPACE ==')
     console.log('  committed-free   ' + mib(crt.free) + ' MiB in ' + crt.nfree + ' blocks')
     console.log('  contiguous runs  ' + hc.page.runs + ', longest ' + hc.page.runMax + ' B')
-    console.log('  PAGE-SHAPED      ' + hc.page.pages + ' whole 4 KiB pages = ' +
-      mib(hc.page.pageBytes) + ' MiB = ' + shaped.toFixed(2) + '% of the free space')
+    console.log('  run-merged       ' + hc.page.pages + ' pages = ' +
+      mib(hc.page.pageBytes) + ' MiB (' + shaped.toFixed(1) + '%)   UNSAFE, do not quote')
+    console.log('    a run spans several free blocks; a page inside it can straddle a')
+    console.log('    block boundary, and the allocator keeps its links at each block start')
+    console.log('  BLOCK-INERT      ' + inertLo + '-' + inertHi + ' pages = ' +
+      mib(inertLo * 4096) + '-' + mib(inertHi * 4096) + ' MiB (' +
+      (100 * inertLo * 4096 / crt.free).toFixed(1) + '-' +
+      (100 * inertHi * 4096 / crt.free).toFixed(1) + '%)   the safe bound')
+    console.log('  ' + small + ' of ' + nfree + ' free blocks (' +
+      (100 * small / nfree).toFixed(1) + '%) are under 8 KiB and hold no whole interior page')
+    console.log('  Even this is NOT established as reclaimable: whether the heap keeps')
+    console.log('  metadata inside free blocks is unsettled. Until it is, treat it as 0.')
     console.log('  (a CEILING: computed from where the live blocks actually are.')
     console.log('   No reclaimer on any OS can return more than this.)')
 
