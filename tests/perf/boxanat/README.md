@@ -653,20 +653,52 @@ own release. That is the same per-field type substitution, in
 `untracedRefFields`' sibling emission — mechanical, but it has to be done, and
 `scr_union_release` is NULL-tolerant where `A`'s release may not be.
 
-## Populated, not declared — and what would measure it
+## Populated, not declared — and the instrument I first named was wrong
 
-**2,425 is the declared cap and I cannot turn it into a saving from the
-artifact.** 64 B is charged per *populated* field per *instance*: a field
-holding its unit arm costs nothing (the immortal singleton), and how often a
-hot instance leaves a nullable field null is a run-time fact.
+**2,425 is the declared cap and the artifact cannot turn it into a saving.**
+64 B is charged per *populated* field per *instance*: a field holding its unit
+arm costs nothing (the immortal singleton), and how often a hot instance leaves
+a nullable field null is a run-time fact.
 
-The instrument exists and needs a run, not a build change: `scr_union.c`
-already keeps **`scr_live_unions`** under `SCR_RC_AUDIT`, incremented in
-`scr_union_alloc` and decremented in both teardowns. Live union nodes **are**
-populated union fields, one for one. The caveat is the usual one and it is in
-this README already: `SCR_RC_AUDIT` forces `scr_cyc_arena_on()` to 0, so that
-run counts correctly and places differently — good for the count, useless for
-the byte placement.
+**I first proposed `scr_live_unions` under `SCR_RC_AUDIT`, and it answers the
+wrong question.** That counter is a *leak detector*: `scr_console.c` reads it
+**at exit**, prints only when some count is non-zero, and `_Exit(99)`s. On an
+RC-clean program it reads **0** — which is not a small population, it is no
+information at all. A check that can only say "yes" is not a check, and this
+one can only say "you leaked".
+
+**The right instrument already exists: `tests/perf/cycensus`.** It keys every
+`scr_cyc_alloc` on the `ScrCycFreeFn` it is handed, which *"identifies the
+object kind EXACTLY"* — and a `ScrUnion`'s free function is
+`scr_union_gcfree`. Its `snap` columns are each kind's live count at the
+census's own **high-water mark** (`live` is at exit), so it reports population
+at peak rather than leakage at exit. It separates `live` (the program holds it)
+from `pool` (the allocator kept it), which a malloc-level lane cannot.
+
+And it is better on the axis that decides byte placement: **cycensus needs no
+`SCR_RC_AUDIT`, so the cycle arena stays ON** and the run places blocks the way
+a shipping binary does. The RC-audit route would have forced
+`scr_cyc_arena_on()` to 0 and measured a different allocator.
+
+### The run, and it is machine time only
+
+`harness/memrig.mts` *"drives the binary through pairing and a history sync
+with no phone"* and samples kernel-side via `harness/pmon.c`. No pairing, no
+live session, nothing near the user's `zapo-state.sqlite`. So:
+
+```
+SCRIPTC_PROF_CFLAGS="-include <repo>/tests/perf/cycensus/scr_cyc_census.h"
+  build app182            ->  one provenance build
+SCR_CYCEN_OUT=<file> node --import tsx memrig.mts <exe> <tag>
+  ->  the scr_union_gcfree row's snap liveN = POPULATED union fields at peak
+```
+
+**Every figure from it names the unserialised arm.** `PLAN-RETENTION.md` §10
+measures a five-line promise gate in `WaClient.ts` taking settled from 146.87
+to 76.17 MiB — forbidden to us, and *upstream of the same mechanism*: a
+serialised sync bursts an eighth as hard and shreds an eighth as much heap. A
+populated-union count taken on the shipped, unserialised arm is the only one
+that describes what our end can be worth, and it must be labelled as such.
 
 ## The cycle trap: a third divergence, and it is a hard abort
 
