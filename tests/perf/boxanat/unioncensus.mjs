@@ -154,7 +154,8 @@ export function countUnionFieldsInC(text) {
   let n = 0;
   const shapes = new Set();
   for (const l of lines) {
-    if (head.test(l)) { inStruct = true; continue; }
+    const h = head.exec(l);
+    if (h) { inStruct = true; shapes.add(h[1]); continue; }
     if (!inStruct) continue;
     if (l.startsWith("};")) { inStruct = false; continue; }
     if (fld.test(l)) { n++; }
@@ -287,6 +288,11 @@ function selfTest() {
   // A ScrUnion mentioned OUTSIDE a struct is not a field.
   ok("only struct members count",
      countUnionFieldsInC("ScrUnion *scr_union_new_ref(uint32_t tag);").fields === 0);
+  ok("it counts the structs it saw", countUnionFieldsInC(structC).shapes === 2);
+  // A part TU of a split build defines no structs; the CLI refuses on this
+  // rather than reporting a delta that looks like reader disagreement.
+  ok("a file with no structs reports zero shapes",
+     countUnionFieldsInC("void sc_f_x(void) { ScrUnion *u; }").shapes === 0);
   ok("reconcile agrees when equal", reconcile(3, 3).agree === true);
   ok("reconcile disagrees when not", reconcile(3, 4).agree === false);
   ok("reconcile reports the delta", reconcile(3, 4).delta === -1);
@@ -326,6 +332,17 @@ function main() {
   if (args.includes("--reconcile")) {
     const cPath = args[args.indexOf("--reconcile") + 1];
     const c = countUnionFieldsInC(readFileSync(cPath, "utf8"));
+    // A SPLIT BUILD PUTS EVERY STRUCT IN THE SHARED HEADER. zapo emits
+    // fifteen translation units and one `.scrh`, and all 7,666 ScrUnion *
+    // slots are in the header -- a part TU defines no record structs at all.
+    // Without this, pointing --reconcile at a part gives "IR 7666, C 0",
+    // which reads as a disagreement between the two readers when it is only
+    // the wrong file.
+    if (c.shapes === 0) {
+      console.error(`REFUSED — ${cPath} defines no record structs at all.`);
+      console.error("In a split build they live in the shared .scrh, not in the part TUs.");
+      process.exit(3);
+    }
     const irTotal = summarise(rows).fields;
     const r = reconcile(irTotal, c.fields);
     console.log(`RECONCILE  IR union-typed record fields : ${r.ir}`);
