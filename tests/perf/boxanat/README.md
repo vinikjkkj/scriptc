@@ -92,6 +92,37 @@ boxes compare unequal where node compares them equal. **Materialising is not
 only expensive here, it is already observably wrong on identity** — a
 by-reference box would answer node's `true`.
 
+## The staleness divergence, which is the sharper one
+
+`snap1.ts` mutates the source *after* the crossing and then reads the box
+dynamically. `snap2.ts` does both readings in one program. Against node
+v25.9.0:
+
+```
+                                scriptc   node
+recovered at the static type:   42        42
+read through the box:            1        42     <-- divergence
+JSON of the box:                {"id":"m0","n":1}
+                                          {"id":"m0","n":42}
+agree?                          false     true
+```
+
+**One box, two answers, exit 0, no diagnostic.** The crossing takes a
+*snapshot*; the recovery hands back the *origin*. So a value recovered at its
+static type sees a write made since the crossing and the same box read
+dynamically does not — and node's answer is the origin's, both times.
+
+The `static_copy` mark already refuses a write made *through* the box, for
+exactly this reason ("a silently dropped write is the one answer worse than a
+refusal"). The refusal covers one direction only: a write made through the
+**original**, which is what an ordinary program does, is silently invisible to
+every dynamic read of the copy.
+
+So materialising is not a memory cost with a correctness cost attached. It is
+the **cause** of two silent wrong answers — this one and the `===` one above —
+and a by-reference or lazily-materialised box would answer node on both. The
+memory is the side effect.
+
 ## Usage
 
 ```sh
