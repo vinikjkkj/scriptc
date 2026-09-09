@@ -133,35 +133,57 @@ ok(M.presync > 0.9 * M.exe,
   'the idle floor is the BINARY: presync ' + mib(M.presync) + ' MiB against a ' +
   mib(M.exe) + ' MiB executable')
 
-/* THE CEILING, IN THE COLUMN THE USER IS READING. Stated as arithmetic
- * because it is what they have to be told, and stated twice because the
- * two columns give different answers and both are true. */
-const fragPriv = M.crtFree
-const bestPriv = M.settledPriv - fragPriv
-const discardPriv = M.settledPriv - M.pageShaped
+/* WHAT IS ACTUALLY OWNABLE, recomputed after five routes closed. This
+ * block previously offered the page-shaped figure as a deliverable; that
+ * measure was run-merged and unsafe, and CRT-heap discard has since been
+ * refuted outright. Nothing here rests on it.
+ *
+ * Closed: zapo-side serialisation (works -- -62% peak WS, -75% commit,
+ * -48% settled, and faster -- but forbidden, it patches zapo), copy-out
+ * (no handle indirection, nothing can move), sub-heaps (refuted, every
+ * HeapCreate reserves its own region), CRT-heap page discard (refuted),
+ * and raising SCR_POOL_MAX (refuted -- the Windows LFH already buckets to
+ * 16 KB, so those blocks were never unrecycled, only unrecycled by us).
+ *
+ * What is left is what we allocate ourselves, where no LFH or foreign
+ * metadata objection applies. */
+const ownCycPages = 2.31 * MiB   // pagecen CEILING aligned, settled, run privws
+const ownStr      = M.strArena   // unfreeable BY CONSTRUCTION; a registry fixes it
+const retention   = M.settledPriv - M.presyncPriv
+
 console.log(NL + 'in PRIVATE working set — the column Task Manager shows and the user quoted:')
-console.log('  idle              ' + mib(M.presencePriv || M.presyncPriv) + ' MiB   (their "10 MB")')
+console.log('  idle              ' + mib(M.presyncPriv) + ' MiB   (their "10 MB")')
 console.log('  settled           ' + mib(M.settledPriv) + ' MiB   (their "70-100 MB")')
-console.log('  retention         ' + mib(M.settledPriv - M.presyncPriv) + ' MiB')
-console.log('  of which fragmentation ' + mib(fragPriv) + ' MiB = ' +
-  (100 * fragPriv / (M.settledPriv - M.presyncPriv)).toFixed(0) + '% of what they see')
-console.log('  page-shaped discard    ' + mib(M.pageShaped) + ' MiB = ' +
-  (100 * M.pageShaped / (M.settledPriv - M.presyncPriv)).toFixed(0) +
-  '% of it, and it returns THIS column')
-console.log('  -> discard alone      ' + mib(discardPriv) + ' MiB settled')
-console.log('  -> all fragmentation  ' + mib(bestPriv) + ' MiB settled, against idle ' +
-  mib(M.presyncPriv))
+console.log('  retention         ' + mib(retention) + ' MiB' + NL)
+console.log('  what it is made of, in their column:')
+console.log('    fragmentation         ' + mib(M.crtFree) + ' MiB  ' +
+  (100 * M.crtFree / retention).toFixed(0) + '%  cause is CONCURRENT chunk processing;')
+console.log('                                        the fix that works is zapo-side and forbidden')
+console.log('    retained messages     ' + mib(payload) + ' MiB  ' +
+  (100 * payload / retention).toFixed(0) + '%  data the program was asked to keep')
+console.log('    service state         ' + mib(M.liveFixed) + ' MiB  ' +
+  (100 * M.liveFixed / retention).toFixed(0) + '%')
+console.log('    our own arenas        ' + mib(M.cycArena + M.strArena) + ' MiB  ' +
+  (100 * (M.cycArena + M.strArena) / retention).toFixed(0) + '%  cycle ' +
+  mib(M.cycArena) + ' + string ' + mib(M.strArena))
+console.log(NL + '  OWNABLE TODAY, with every refuted route removed:')
+console.log('    cycle arena page return   ' + mib(ownCycPages) +
+  ' MiB   ours, 61.25% occupancy, no foreign metadata')
+console.log('    string arena chunks       up to ' + mib(ownStr) +
+  ' MiB   never recycles at all (listgive=0); needs a registry')
+console.log('    total                     ' + mib(ownCycPages + ownStr) + ' MiB = ' +
+  (100 * (ownCycPages + ownStr) / retention).toFixed(1) + '% of what the user sees')
 console.log(NL + 'in TOTAL working set, where the binary IS a floor:')
 console.log('  idle ' + mib(M.presync) + ' MiB against a ' + mib(M.exe) +
-  ' MiB executable; the image is file-backed and')
-console.log('  is therefore NOT in the private column above. Both statements hold.')
+  ' MiB executable; the image is file-backed and is')
+console.log('  therefore NOT in the private column above. Both statements hold.')
 
 ok(M.presyncPriv < M.presync * 0.5,
   'private idle (' + mib(M.presyncPriv) + ') is under half of total idle (' + mib(M.presync) +
   ') — the columns differ by the resident image and must never be conflated')
-ok(M.pageShaped / (M.settledPriv - M.presyncPriv) > 0.3,
-  'page-shaped discard is over 30% of the retention the user can actually see (' +
-  (100 * M.pageShaped / (M.settledPriv - M.presyncPriv)).toFixed(0) + '%)')
+ok((ownCycPages + ownStr) < M.crtFree,
+  'what we can own (' + mib(ownCycPages + ownStr) + ' MiB) is far less than the fragmentation (' +
+  mib(M.crtFree) + ' MiB) — the bulk of the retention is not reachable from the runtime')
 
 if (ran < 6) { console.log(NL + 'REFUSED: only ' + ran + ' checks ran'); process.exit(2) }
 console.log(NL + (fails ? 'PLATEAU FAILED (' + fails + ')' : 'PLATEAU OK'))
