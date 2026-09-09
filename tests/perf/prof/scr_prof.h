@@ -186,6 +186,11 @@ typedef struct {
    * in every other lane. */
   long long live;
   long long snap;
+#ifdef SCR_PROF_STACKS
+  /* 0 unknown, 1 capture, -1 skip. Resolved once per ROW so the filter costs
+   * one signed-char test per allocation instead of a strstr. */
+  signed char stk_want;
+#endif
 } ScrProfRow;
 
 /* "file:line" as one compile-time literal. Each expansion is its own static
@@ -587,7 +592,33 @@ SCR_PROF_NI SCR_PROF_FN void scr_prof_note_size(ScrProfRow *r, size_t n) {
 #define SCR_PROF_STACK_DEPTH 10u
 #endif
 #ifndef SCR_PROF_STACK_SLOTS
-#define SCR_PROF_STACK_SLOTS (1u << 14)
+#define SCR_PROF_STACK_SLOTS (1u << 17)
+#endif
+/* THE SITE FILTER, AND WHY IT IS NOT OPTIONAL.
+ *
+ * The first armed run of this lane lost 5,409,633 of 5,426,047 allocations --
+ * 99.7%. Depth 10 makes almost every call path distinct, so a 16,384-slot
+ * table saturated during process STARTUP and every allocation after that
+ * probed all slots, matched nothing, found nothing free, and was counted lost.
+ * Both arms then reported an identical 16,414 attributed allocations, so the
+ * two-run difference was exactly zero: the lane produced no information at
+ * all while looking like it had a table full of data.
+ *
+ * Raising the slot count alone does not fix that -- distinct stacks are
+ * unbounded and the table would fill later rather than never. The fix is to
+ * stop capturing stacks the question does not need. SCR_PROF_STACK_SITE is a
+ * substring matched against the allocation site's "file:line"; only sites that
+ * match are walked. Attributing 1.28 GiB at scr_array.c:172 needs that one
+ * site's callers, and nothing else.
+ *
+ * It also removes the cost objection: the walk stops running on the other
+ * 99% of allocations, so the lane is no longer seconds of overhead.
+ *
+ * Unset means capture EVERYTHING, which is the behaviour that failed; the
+ * report says so by name rather than letting a saturated table read as data.
+ */
+#ifndef SCR_PROF_STACK_SITE
+#define SCR_PROF_STACK_SITE ""
 #endif
 typedef struct {
   void *fr[SCR_PROF_STACK_DEPTH];
@@ -596,12 +627,47 @@ typedef struct {
 } ScrProfStack;
 SCR_PROF_SHARED ScrProfStack scr_prof_stk[SCR_PROF_STACK_SLOTS];
 SCR_PROF_SHARED long long scr_prof_stacks_lost = 0;
+SCR_PROF_SHARED long long scr_prof_stacks_full = 0;
 SCR_PROF_SHARED long long scr_prof_stacks_n = 0;
+SCR_PROF_SHARED long long scr_prof_stacks_skipped = 0;
 
-SCR_PROF_NI SCR_PROF_FN void scr_prof_note_stack(size_t n) {
+/* Resolved once per row; see ScrProfRow::stk_want. */
+SCR_PROF_NI SCR_PROF_FN int scr_prof_stack_want(ScrProfRow *r) {
+  const char *pat = SCR_PROF_STACK_SITE;
+  const char *n;
+  if (r == NULL) return pat[0] == '\0';
+  if (r->stk_want != 0) return r->stk_want > 0;
+  if (pat[0] == '\0') {
+    r->stk_want = 1;
+    return 1;
+  }
+  n = r->name;
+  r->stk_want = -1;
+  if (n != NULL) {
+    const char *a;
+    for (a = n; *a != '\0'; a++) {
+      const char *x = a, *y = pat;
+      while (*y != '\0' && *x == *y) {
+        x++;
+        y++;
+      }
+      if (*y == '\0') {
+        r->stk_want = 1;
+        break;
+      }
+    }
+  }
+  return r->stk_want > 0;
+}
+
+SCR_PROF_NI SCR_PROF_FN void scr_prof_note_stack(ScrProfRow *row, size_t n) {
   void *fr[SCR_PROF_STACK_DEPTH];
   unsigned got = 0, i;
   unsigned h = 2166136261u;
+  if (!scr_prof_stack_want(row)) {
+    scr_prof_stacks_skipped++;
+    return;
+  }
 #ifdef _WIN32
   got = (unsigned)RtlCaptureStackBackTrace(0, (ULONG)SCR_PROF_STACK_DEPTH, fr, NULL);
 #else
@@ -640,11 +706,13 @@ SCR_PROF_NI SCR_PROF_FN void scr_prof_note_stack(size_t n) {
       return;
     }
   }
-  scr_prof_stacks_lost++;
+  /* Distinct from a failed walk: the table is FULL, which means every number
+   * above is a sample of whatever ran first and not of the workload. */
+  scr_prof_stacks_full++;
 }
-#define SCR_PROF_NOTE_STACK(n) scr_prof_note_stack((n))
+#define SCR_PROF_NOTE_STACK(r, n) scr_prof_note_stack((r), (n))
 #else
-#define SCR_PROF_NOTE_STACK(n) ((void)0)
+#define SCR_PROF_NOTE_STACK(r, n) ((void)0)
 #endif
 
 SCR_PROF_FN void scr_prof_write(FILE *f) {
@@ -781,12 +849,23 @@ SCR_PROF_FN void scr_prof_write(FILE *f) {
       }
       fprintf(f, "\n");
     }
-    fprintf(f, "PROF-STACKS-TOTAL rows=%lld count=%lld bytes=%lld lost=%lld\n",
-            srows, scount, sbytes, scr_prof_stacks_lost);
+    fprintf(f, "PROF-STACKS-TOTAL rows=%lld count=%lld bytes=%lld lost=%lld"
+               " tablefull=%lld skipped=%lld site=\"%s\"\n",
+            srows, scount, sbytes, scr_prof_stacks_lost, scr_prof_stacks_full,
+            scr_prof_stacks_skipped, SCR_PROF_STACK_SITE);
+    if (scr_prof_stacks_full != 0) {
+      fprintf(f, "PROF-STACKS TABLE FULL - %lld allocations found no free"
+                 " slot. Every row above is whatever ran FIRST, not a sample"
+                 " of the workload, and differencing two such tables gives"
+                 " zero. Narrow SCR_PROF_STACK_SITE or raise"
+                 " SCR_PROF_STACK_SLOTS.\n", scr_prof_stacks_full);
+    }
     if (srows == 0) {
       fprintf(f, "PROF-STACKS NOTHING RECORDED - no stack was captured."
-                 " On a non-Windows target the walk is not implemented and"
-                 " this is that, not an absence of allocations.\n");
+                 " Either SCR_PROF_STACK_SITE matched no allocation site (see"
+                 " skipped= above), or this is a non-Windows target where the"
+                 " walk is not implemented. Neither is an absence of\n"
+                 " allocations.\n");
     }
     if (scr_prof_stacks_lost != 0) {
       fprintf(f, "PROF-STACKS LOST %lld allocations could not be keyed to a"
@@ -866,7 +945,7 @@ SCR_PROF_FN void *scr_prof_malloc(size_t n, const char *site) {
     r->bytes += (long long)n;
   }
   SCR_PROF_NOTE_SIZE(r, n);
-  SCR_PROF_NOTE_STACK(n);
+  SCR_PROF_NOTE_STACK(r, n);
 #ifdef SCR_PROF_LIVE
   scr_prof_live_add(p, n, r);
 #endif
@@ -882,7 +961,7 @@ SCR_PROF_FN void *scr_prof_calloc(size_t a, size_t b, const char *site) {
     r->bytes += (long long)(a * b);
   }
   SCR_PROF_NOTE_SIZE(r, a * b);
-  SCR_PROF_NOTE_STACK(a * b);
+  SCR_PROF_NOTE_STACK(r, a * b);
 #ifdef SCR_PROF_LIVE
   scr_prof_live_add(p, a * b, r);
 #endif
@@ -905,7 +984,7 @@ SCR_PROF_FN void *scr_prof_realloc(void *q, size_t n, const char *site) {
     r->bytes += (long long)n;
   }
   SCR_PROF_NOTE_SIZE(r, n);
-  SCR_PROF_NOTE_STACK(n);
+  SCR_PROF_NOTE_STACK(r, n);
 #ifdef SCR_PROF_LIVE
   scr_prof_live_add(p, n, r);
 #endif
