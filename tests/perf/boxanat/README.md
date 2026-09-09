@@ -163,11 +163,95 @@ the **cause** of two silent wrong answers — this one and the `===` one above �
 and a by-reference or lazily-materialised box would answer node on both. The
 memory is the side effect.
 
+## The audit surface for a by-reference box — and a premise that does not hold
+
+`objaudit.mjs` enumerates every place the runtime decides something about an
+`SCR_DYN_OBJ`, and classifies **how each one fails for a kind it has never
+heard of**.
+
+```
+140 functions in 19 files
+  kind decisions   161
+    if (kind != OBJ)     66   miss = the default value / the else branch
+    if (kind == OBJ)     72   miss = the else branch
+    case OBJ:            23   miss = the switch's default arm
+  direct v.obj reads    121
+
+  loud         3   throws, aborts or refuses by name
+  silent     130   returns a value, breaks, or takes the else
+  nodefault    7   a kind switch with no default arm at all
+```
+
+A new dyn kind was chosen over a lazily-emptied `SCR_DYN_OBJ` on the argument
+that a missed reader would then **refuse loudly** rather than answer `{}`.
+The argument is right; the premise is **not**. Only **3 of 140 sites (2.1%)**
+refuse a kind they have not been taught. The rest answer it, because the
+overwhelming majority are not switches at all — they are
+`if (d->kind != SCR_DYN_OBJ) return <default>;` guards on inbound library
+options.
+
+Two are worse than a default, and both are one-line answers to very common
+questions:
+
+| site | default | what a new object-like kind gets |
+|---|---|---|
+| `scr_dyn_truthy` | `return false` | an object that is **falsy** |
+| `scr_dyn_typeof_native` | `return "undefined"` | `typeof o === "undefined"` |
+
+The runtime already knows. `scr_dyn_truthy`'s own comment says the default's
+unconditional false "**is a wrong branch in silence, not a fence**".
+
+Others fail silently in ways a caller cannot see: `scr_tls_opts_validate`
+returns `true` (= valid, options ignored), `scr_stream_parse_dyn_opts` returns
+`true`, `scr_qs_stringify` returns `""`, `scr_dyn_obj_has_own_prop` returns
+`false`.
+
+**So the loudness has to be built, not inherited.** That is the real size of
+the by-reference route, and this file makes it a number instead of an
+impression.
+
+One case shows why the verdict column is a human's and not the scanner's:
+`scr_weak_dyn_key`'s default *returns* a refusal **descriptor** that
+`scr_weak_dyn_set` turns into a throw. It is genuinely loud; the scan reads it
+as silent. Widening the pattern until it caught that would have made it catch
+things that are not refusals — in the direction that flatters the argument
+this lane is correcting. So a person overrides, with a reason, in the
+manifest.
+
+### The manifest is a guard, not a census
+
+`objaudit.tsv` holds the mechanical columns plus a human `verdict` and `note`.
+`--check` fails if a site **appears, disappears, changes how it fails, or is
+still `REVIEW`** — so a new decision site cannot reach a merge without someone
+classifying it, and a rescan cannot go green by forgetting (verdicts carry
+across `--tsv --merge`).
+
+It currently fails, correctly: **25 of 140 classified, 115 at `REVIEW`.** The
+25 are the ones actually read; the rest are the job.
+
+| verdict | n | meaning |
+|---|---|---|
+| `force` | 12 | needs the member table; must materialise first |
+| `refonly` | 5 | answers with no table — name the new kind in its list |
+| `teardown` | 4 | RC/collector arm; must drop the origin |
+| `creator` | 3 | the origin table's own kind gate |
+| `loud-at-caller` | 1 | already refuses, where the scan cannot see it |
+| `REVIEW` | 115 | undecided |
+
+`scr_dyn_json_write_raw` is the sharpest of the 25: its default **is** loud,
+and that is the **wrong** answer — `JSON.stringify` of a boxed record must
+serialise. Inheriting the refusal there would be a regression, which is why
+"loud by default" is not a safe resting state either.
+
 ## Usage
 
 ```sh
 node tests/perf/boxanat/boxanat.mjs  --self-test          # 32 checks, both lanes
 node tests/perf/boxanat/boxsites.mjs --self-test          # 12 checks
+node tests/perf/boxanat/objaudit.mjs --self-test          # 20 checks
+node tests/perf/boxanat/objaudit.mjs packages/runtime/src [--list] [--class silent]
+node tests/perf/boxanat/objaudit.mjs packages/runtime/src --check tests/perf/boxanat/objaudit.tsv
+node tests/perf/boxanat/objaudit.mjs packages/runtime/src --tsv --merge tests/perf/boxanat/objaudit.tsv
 node tests/perf/boxanat/boxanat.mjs  <program.c|.ll> [--top N] [--names] [--json]
 node tests/perf/boxanat/boxsites.mjs <program.c>    [--top N] [--bucket <b>] [--json]
 ```
