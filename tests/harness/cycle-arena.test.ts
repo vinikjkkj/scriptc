@@ -57,7 +57,8 @@ const src = join(repoRoot, "tests/fixtures/cycle-arena/churn.ts");
  * under a path containing a space cannot be quoted through that, so this
  * file says it cannot look rather than reporting a green it did not earn. */
 const cycstat = join(repoRoot, "tests/perf/cycstat/scr_cyc_stat.h").replace(/\\/g, "/");
-const pathIsQuotable = !/\s/.test(cycstat);
+const pagecen = join(repoRoot, "tests/perf/pagecensus/scr_page_census.h").replace(/\\/g, "/");
+const pathIsQuotable = !/\s/.test(cycstat) && !/\s/.test(pagecen);
 
 /* The arena is compiled out under SCR_RC_AUDIT (that lane exists to prove
  * every logical free is a real free, so it must reach free() for every
@@ -126,6 +127,7 @@ describe.skipIf(!armable)("the cycle arena returns its chunks", () => {
   const key = createHash("sha256")
     .update(readFileSync(src))
     .update(readFileSync(join(repoRoot, "packages/runtime/src/scr_cycle.c")))
+    .update(readFileSync(pagecen))
     .update(sanitize ? "san" : "plain")
     .digest("hex")
     .slice(0, 16);
@@ -139,7 +141,8 @@ describe.skipIf(!armable)("the cycle arena returns its chunks", () => {
      * binary never shares a cache entry with an ordinary one. */
     const prev = process.env["SCRIPTC_PROF_CFLAGS"];
     process.env["SCRIPTC_PROF_CFLAGS"] =
-      `-include ${cycstat} -DSCR_CYCSTAT_ON -DSCR_CYC_ARENA_VERIFY=1`;
+      `-include ${cycstat} -DSCR_CYCSTAT_ON -DSCR_CYC_ARENA_VERIFY=1` +
+      ` -include ${pagecen} -DSCR_PAGECEN_ON`;
     try {
       const result = await compile(src, {
         outPath: join(dir, exeName("churn")),
@@ -204,5 +207,86 @@ describe.skipIf(!armable)("the cycle arena returns its chunks", () => {
     expect(a, `no [cycstat] arena line in:\n${stderr}`).not.toBeNull();
     expect(a!.callocfallback).toBeGreaterThan(0);
     expect(a!.peakheld).toBeLessThanOrEqual(1);
+  }, 600_000);
+
+  /* ── the page census ───────────────────────────────────────────────────
+   * tests/perf/pagecensus measures the WHOLE FREE PAGES inside the chunks
+   * the arena still holds — the ceiling on any per-page reclaimer. It is an
+   * instrument, so what is asserted here is that it can be wrong: its
+   * synthetic arm has a known answer including a case whose answer is ZERO,
+   * its walk reconciles with the arena's own `used`, and its chunk count
+   * reconciles with cycstat's `held` on the SAME run. The megabytes belong
+   * to tests/perf/zapo-rest, for the reason at the top of this file. */
+  interface Pages {
+    readonly chunks: number;
+    readonly full: number;
+    readonly nolive: number;
+    readonly free: number;
+  }
+
+  function parsePages(stderr: string): Pages | null {
+    const s = stderr.replace(/\r\n/g, "\n");
+    const c = /^\[pagecen] chunks=(\d+) cur=(\d+) part=(\d+) full=(\d+) nolive=(\d+)/m.exec(s);
+    const f = /^\[pagecen] CEILING aligned freepages=(\d+)/m.exec(s);
+    if (c === null || f === null) return null;
+    return {
+      chunks: Number(c[1]),
+      full: Number(c[4]),
+      nolive: Number(c[5]),
+      free: Number(f[1]),
+    };
+  }
+
+  test("the census validates its own arithmetic before it reports any", async () => {
+    const { stderr } = await run(bin);
+    /* The synthetic arm, and the third case is the one that matters: a chunk
+     * with every slot live must report ZERO free pages. An instrument that
+     * can only say "yes" cannot adjudicate a ceiling. */
+    expect(stderr).toContain(
+      "[pagecen] SYNTH ok allfree want=15 got=15 onelive want=14 got=14 alllive want=0 got=0"
+    );
+    expect(stderr).toMatch(/^\[pagecen] SELFTEST ok on (\d+)\/\1 chunks/m);
+    expect(stderr).toContain("[pagecen] NOLIVE CHECK ok");
+    expect(stderr).not.toContain("SELFTEST FAILED");
+    expect(stderr).not.toContain("NOLIVE CHECK FAILED");
+    expect(stderr).not.toContain("SYNTH NOT RUN");
+
+    const p = parsePages(stderr);
+    expect(p, `no [pagecen] chunk line in:\n${stderr}`).not.toBeNull();
+    const a = parseArena(stderr);
+    expect(a).not.toBeNull();
+    /* Two independent counters of the same thing: the census walked its own
+     * list of every chunk, cycstat subtracted two totals. */
+    expect(p!.chunks).toBe(a!.held);
+    expect(p!.free).toBeGreaterThan(0);
+  }, 600_000);
+
+  test("SCR_CYCLE_ARENA=0 makes the census refuse rather than print zeroes", async () => {
+    const { stderr } = await run(bin, { SCR_CYCLE_ARENA: "0" });
+    expect(stderr).toContain("[pagecen] NO CHUNKS");
+    /* The synthetic arm still runs on this arm, which is what proves the
+     * refusal above is about the arena and not about the hooks. */
+    expect(stderr).toContain("[pagecen] SYNTH ok");
+    expect(stderr).not.toMatch(/^\[pagecen] CEILING/m);
+  }, 600_000);
+
+  test("survivors cost free pages, and a full chunk contributes none", async () => {
+    /* Same binary, one knob: many more survivors spread over many more
+     * chunks. The census must see chunks that are FULL — reachable from
+     * neither the current slot nor the partial list — and they must
+     * contribute nothing, which is the invariant the walk's all-chunk list
+     * exists to be able to check rather than assume. */
+    const { stderr } = await run(bin, { ARENA_HELD: "3000", ARENA_CHURN: "40000" });
+    const p = parsePages(stderr);
+    expect(p, `no [pagecen] chunk line in:\n${stderr}`).not.toBeNull();
+    expect(p!.full).toBeGreaterThan(0);
+    expect(stderr).toContain("[pagecen] freepages by role");
+    expect(stderr).toMatch(/^\[pagecen] freepages by role cur=\d+ part=\d+ full=0$/m);
+    expect(stderr).not.toContain("[pagecen] NOTE a FULL chunk reported free pages");
+    /* More chunks held, and a strictly lower share of them free, than the
+     * default arm above: the census responds to occupancy. */
+    const base = parsePages((await run(bin)).stderr)!;
+    expect(p!.chunks).toBeGreaterThan(base.chunks);
+    expect(p!.free / p!.chunks).toBeLessThan(base.free / base.chunks);
   }, 600_000);
 });
