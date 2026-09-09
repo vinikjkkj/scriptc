@@ -1,0 +1,625 @@
+PROF-KIND alloc
+PROF 14691 940224 0 0 0 19d5baa 0 <repo>\packages\runtime\src\scr_array.c:224
+PROF 26056 1699416 0 0 0 19e582e 0 <repo>\packages\runtime\src\scr_json.c:1636
+PROF 0 0 16 0 0 1a24c76 0 <repo>\packages\runtime\src\scr_stream.c:1156
+PROF 8 64 0 0 0 1a24488 0 <repo>\packages\runtime\src\scr_stream.c:1697
+PROF 0 0 8 0 0 1a24acb 0 <repo>\packages\runtime\src\scr_stream.c:361
+PROF 5 360 0 0 0 1a1ffc0 0 <repo>\packages\runtime\src\scr_weak.c:146
+PROF 0 0 18886 0 0 19d6f1f 0 <repo>\packages\runtime\src\scr_bytes.c:192
+PROF 10 523776 0 0 0 19e9f02 0 <repo>\packages\runtime\src\scr_cycle.c:1110
+PROF 0 0 275 0 0 19ea55f 0 <repo>\packages\runtime\src\scr_cycle.c:622
+PROF 39 1248 0 0 0 1a1f39d 0 <repo>\packages\runtime\src\scr_events_emitter.c:339
+PROF 0 0 125 0 0 1a1f6ac 0 <repo>\packages\runtime\src\scr_events_emitter.c:628
+PROF 1 32 0 0 0 19f886b 0 <repo>\packages\runtime\src\scr_sqlite.c:455
+PROF 0 0 36 0 0 19d5d72 0 <repo>\packages\runtime\src\scr_array.c:767
+PROF 0 0 24 0 0 19e122c 0 <repo>\packages\runtime\src\scr_url.c:93
+PROF 3412 136480 0 0 0 19d71cb 0 <repo>\packages\runtime\src\scr_bytes.c:593
+PROF 51 1224 0 0 0 19e6ebc 0 <repo>\packages\runtime\src\scr_async.c:455
+PROF 3270 143424 0 0 0 19d7c8b 0 <repo>\packages\runtime\src\scr_bytes.c:732
+PROF 2 1536 0 0 0 19e56af 0 <repo>\packages\runtime\src\scr_json.c:2002
+PROF 0 0 3654 0 0 1a159e9 0 <repo>\packages\runtime\src\scr_inspect.c:628
+PROF 4 256 0 0 0 19e102e 0 <repo>\packages\runtime\src\scr_url.c:181
+PROF 0 0 3260 0 0 19d7f34 0 <repo>\packages\runtime\src\scr_bytes.c:1034
+PROF 0 0 51 0 0 19e76b6 0 <repo>\packages\runtime\src\scr_async.c:419
+PROF 2 20 0 0 0 1a2c1e1 0 <repo>\packages\runtime\src\scr_ws_client.c:213
+PROF 0 0 62833 0 0 19d6f61 0 <repo>\packages\runtime\src\scr_bytes.c:197
+PROF 89313 27894696 0 0 0 19d478d 0 <repo>\packages\runtime\src\scr_string.c:635
+PROF 2 1024 0 0 0 1a2a22a 0 <repo>\packages\runtime\src\scr_http.c:811
+PROF 15 512 0 0 0 1a2a949 0 <repo>\packages\runtime\src\scr_http.c:1521
+PROF 28 1568 0 0 0 19dd72b 0 <repo>\packages\runtime\src\scr_lib.c:3915
+PROF 0 0 270 0 0 19e25bc 0 <repo>\packages\runtime\src\scr_json.c:906
+PROF 0 0 4 0 0 19db147 0 <repo>\packages\runtime\src\scr_error.c:101
+PROF 0 0 65 0 0 1a13dc1 0 <repo>\packages\runtime\src\scr_cipher_value.c:121
+PROF 1 192 0 0 0 19e57ac 0 <repo>\packages\runtime\src\scr_json.c:3116
+PROF 0 0 32 0 0 19e7f2f 0 <repo>\packages\runtime\src\scr_async.c:2582
+PROF 1 768 0 0 0 1a2671b 0 <repo>\packages\runtime\src\scr_loop_wsapoll.c:104
+PROF 1 68 0 0 0 19f8777 0 <repo>\packages\runtime\src\scr_sqlite.c:429
+PROF 0 0 1 0 0 1a2d5b5 0 <repo>\packages\runtime\src\scr_ws_global.c:545
+PROF 4 320 0 0 0 19e0846 0 <repo>\packages\runtime\src\scr_url.c:522
+PROF 0 0 9323 0 0 19f7964 0 <repo>\packages\runtime\src\scr_bigint.c:66
+PROF 0 0 3 0 0 1a27060 0 <repo>\packages\runtime\src\scr_net.c:349
+PROF 0 0 2 0 0 1a291bf 0 <repo>\packages\runtime\src\scr_http.c:665
+PROF 0 0 16 0 0 1a2597e 0 <repo>\packages\runtime\src\scr_stream.c:2721
+PROF 85565 13005880 0 0 0 19e7123 0 <repo>\packages\runtime\src\scr_async.c:2091
+PROF 0 0 8 0 0 1a24939 0 <repo>\packages\runtime\src\scr_stream.c:326
+PROF 28 896 0 0 0 19dd76c 0 <repo>\packages\runtime\src\scr_lib.c:3926
+PROF 1 128 0 0 0 1a2a334 0 <repo>\packages\runtime\src\scr_http.c:1210
+PROF 0 0 85573 0 0 19e7d2a 0 <repo>\packages\runtime\src\scr_async.c:2085
+PROF 28 1792 0 0 0 19e11ae 0 <repo>\packages\runtime\src\scr_url.c:70
+PROF 32 83940 0 0 0 1a2bfc0 0 <repo>\packages\runtime\src\scr_websocket.c:392
+PROF 40567 1622680 0 0 0 19d7119 0 <repo>\packages\runtime\src\scr_bytes.c:529
+PROF 0 0 1 0 0 19e56f1 0 <repo>\packages\runtime\src\scr_json.c:2010
+PROF 8217 574390 0 0 0 19eb911 0 <repo>\packages\runtime\src\scr_regex.c:239
+PROF 6 240 0 0 0 19db189 0 <repo>\packages\runtime\src\scr_error.c:170
+PROF 0 0 7331 0 0 19d9700 0 <repo>\packages\runtime\src\scr_map.c:281
+PROF 7566 940544 0 0 0 19d9fc7 0 <repo>\packages\runtime\src\scr_map.c:117
+PROF 0 0 8 0 0 1a259ed 0 <repo>\packages\runtime\src\scr_stream.c:2792
+PROF 8 16 0 0 0 1a24646 0 <repo>\packages\runtime\src\scr_stream.c:3227
+PROF 0 0 1 0 0 1a2b8ad 0 <repo>\packages\runtime\src\scr_websocket.c:377
+PROF 1515 392720 0 0 0 1a0a600 0 <repo>\packages\runtime\vendor\sqlite\sqlite3.c:28108
+PROF 0 0 1 0 0 1a2b8f3 0 <repo>\packages\runtime\src\scr_websocket.c:378
+PROF 8217 131472 0 0 0 19eb953 0 <repo>\packages\runtime\src\scr_regex.c:333
+PROF 42 1680 0 0 0 19f9f78 0 <repo>\packages\runtime\src\scr_sqlite.c:561
+PROF 0 0 19 0 0 19dd6a9 0 <repo>\packages\runtime\src\scr_lib.c:3858
+PROF 0 0 1 0 0 19e7f72 0 <repo>\packages\runtime\src\scr_async.c:2593
+PROF 0 0 22230 0 0 19e7d7c 0 <repo>\packages\runtime\src\scr_async.c:1607
+PROF 1 128 0 0 0 19e3309 0 <repo>\packages\runtime\src\scr_json.c:4081
+PROF 0 0 2 0 0 1a28f76 0 <repo>\packages\runtime\src\scr_http.c:250
+PROF 1 32 0 0 0 1a1f982 0 <repo>\packages\runtime\src\scr_symbol.c:45
+PROF 0 0 6520 0 0 19ebad9 0 <repo>\packages\runtime\src\scr_regex.c:613
+PROF 0 0 1110 0 0 19f842b 0 <repo>\packages\runtime\src\scr_bigint.c:538
+PROF 0 0 11240 0 0 19e6e7a 0 <repo>\packages\runtime\src\scr_async.c:399
+PROF 9 193213 0 0 0 19dead2 0 <repo>\packages\runtime\src\scr_lib.c:3989
+PROF 8 128 0 0 0 1a24602 0 <repo>\packages\runtime\src\scr_stream.c:3226
+PROF 0 0 16 0 0 1a248f6 0 <repo>\packages\runtime\src\scr_stream.c:322
+PROF 4 128 0 0 0 1a12a6f 0 <repo>\packages\runtime\src\scr_asym.c:81
+PROF 0 0 4 0 0 19f86c3 0 <repo>\packages\runtime\src\scr_sqlite.c:376
+PROF 0 0 564730 0 0 19d5bec 0 <repo>\packages\runtime\src\scr_array.c:273
+PROF 0 0 256 0 0 19f8964 0 <repo>\packages\runtime\src\scr_sqlite.c:1099
+PROF 0 0 627463 0 0 19d5c2e 0 <repo>\packages\runtime\src\scr_array.c:277
+PROF 20 861 0 0 0 19d8d4d 0 <repo>\packages\runtime\src\scr_bytes_io.c:887
+PROF 3667 234688 0 0 0 1a158c7 0 <repo>\packages\runtime\src\scr_inspect.c:276
+PROF 1 32768 0 0 0 19da14a 0 <repo>\packages\runtime\src\scr_closure.c:521
+PROF 0 0 53177 0 0 19e6e38 0 <repo>\packages\runtime\src\scr_async.c:394
+PROF 1110 22832 0 0 0 19f8362 0 <repo>\packages\runtime\src\scr_bigint.c:528
+PROF 4 2624 0 0 0 1a27ea7 0 <repo>\packages\runtime\src\scr_net.c:917
+PROF 16 256 0 0 0 1a2575d 0 <repo>\packages\runtime\src\scr_stream.c:2682
+PROF 125 1088 0 0 0 1a1f661 0 <repo>\packages\runtime\src\scr_events_emitter.c:587
+PROF 2 176 0 0 0 1a2a491 0 <repo>\packages\runtime\src\scr_http.c:2059
+PROF 2 144 0 0 0 1a2cd90 0 <repo>\packages\runtime\src\scr_ws_global.c:384
+PROF 0 0 3270 0 0 19d7cd1 0 <repo>\packages\runtime\src\scr_bytes.c:796
+PROF 65 76960 0 0 0 1a13d61 0 <repo>\packages\runtime\src\scr_cipher_value.c:90
+PROF 8 128 0 0 0 1a2453f 0 <repo>\packages\runtime\src\scr_stream.c:2841
+PROF 0 0 4 0 0 19e06a0 0 <repo>\packages\runtime\src\scr_url.c:52
+PROF 99 42880 0 0 0 19d6599 0 <repo>\packages\runtime\src\scr_array.c:630
+PROF 0 0 570 0 0 19e562d 0 <repo>\packages\runtime\src\scr_json.c:737
+PROF 15 512 0 0 0 1a2a9cd 0 <repo>\packages\runtime\src\scr_http.c:1523
+PROF 1 96 0 0 0 1a2931d 0 <repo>\packages\runtime\src\scr_http.c:2087
+PROF 0 0 7331 0 0 19d9780 0 <repo>\packages\runtime\src\scr_map.c:283
+PROF 0 0 6706 0 0 19d97c0 0 <repo>\packages\runtime\src\scr_map.c:288
+PROF 0 0 534160 0 0 19ded9e 0 <repo>\packages\runtime\src\scr_lib.c:4314
+PROF 1110 22832 0 0 0 19f83e8 0 <repo>\packages\runtime\src\scr_bigint.c:530
+PROF 0 0 3667 0 0 1a15988 0 <repo>\packages\runtime\src\scr_inspect.c:541
+PROF 56830 1818560 0 0 0 19e7df9 0 <repo>\packages\runtime\src\scr_async.c:2137
+PROF 1235 39520 0 0 0 19e2360 0 <repo>\packages\runtime\src\scr_json.c:143
+PROF 15 162 0 0 0 1a2a907 0 <repo>\packages\runtime\src\scr_http.c:1518
+PROF 0 0 1 0 0 19f8828 0 <repo>\packages\runtime\src\scr_sqlite.c:447
+PROF 2 192 0 0 0 1a2c227 0 <repo>\packages\runtime\src\scr_ws_client.c:240
+PROF 26326 631824 0 0 0 19e7cc1 0 <repo>\packages\runtime\src\scr_async.c:1626
+PROF 16 8320 0 0 0 1a25262 0 <repo>\packages\runtime\src\scr_stream.c:1873
+PROF 0 0 3 0 0 19da7e5 0 <repo>\packages\runtime\src\scr_exception.c:118
+PROF 0 0 1110 0 0 19f84b1 0 <repo>\packages\runtime\src\scr_bigint.c:540
+PROF 38 2490368 0 0 0 19d47d0 0 <repo>\packages\runtime\src\scr_string.c:596
+PROF 0 0 96 0 0 19e566e 0 <repo>\packages\runtime\src\scr_json.c:738
+PROF 0 0 9 0 0 19deb13 0 <repo>\packages\runtime\src\scr_lib.c:3997
+PROF 0 0 2 0 0 1a28ff8 0 <repo>\packages\runtime\src\scr_http.c:252
+PROF 0 0 16 0 0 1a2593a 0 <repo>\packages\runtime\src\scr_stream.c:2720
+PROF 0 0 1 0 0 1a27120 0 <repo>\packages\runtime\src\scr_net.c:732
+PROF 1 64 0 0 0 19eb88e 0 <repo>\packages\runtime\src\scr_regex.c:101
+PROF 4 256 0 0 0 1a12a2f 0 <repo>\packages\runtime\src\scr_asym.c:72
+PROF 3 73 0 0 0 19daee0 0 <repo>\packages\runtime\src\scr_error.c:404
+PROF 30429 21894248 0 0 0 19e9f45 0 <repo>\packages\runtime\src\scr_cycle.c:755
+PROF 534160 10939840 0 0 0 19ded5d 0 <repo>\packages\runtime\src\scr_lib.c:4279
+PROF 0 0 8 0 0 19e73b9 0 <repo>\packages\runtime\src\scr_async.c:3696
+PROF 11240 1438720 0 0 0 19e70e0 0 <repo>\packages\runtime\src\scr_async.c:1246
+PROF 0 0 14281 0 0 1a0a5b4 0 <repo>\packages\runtime\vendor\sqlite\sqlite3.c:28062
+PROF 20040 314016 0 0 0 19e57ee 0 <repo>\packages\runtime\src\scr_json.c:94
+PROF 0 0 15 0 0 1a2aa0f 0 <repo>\packages\runtime\src\scr_http.c:1529
+PROF 0 0 150 0 0 19da007 0 <repo>\packages\runtime\src\scr_map.c:120
+PROF 0 0 19 0 0 19dd6ea 0 <repo>\packages\runtime\src\scr_lib.c:3859
+PROF 0 0 3 0 0 19daf3a 0 <repo>\packages\runtime\src\scr_error.c:411
+PROF 0 0 1436 0 0 19e25fd 0 <repo>\packages\runtime\src\scr_json.c:907
+PROF 1110 22832 0 0 0 19f83a5 0 <repo>\packages\runtime\src\scr_bigint.c:529
+PROF 0 0 2 0 0 1a2a1e9 0 <repo>\packages\runtime\src\scr_http.c:891
+PROF 3282 210048 0 0 0 1a121d0 0 <repo>\packages\runtime\src\scr_asym.c:34
+PROF 1 32 0 0 0 1a260c0 0 <repo>\packages\runtime\src\scr_loop_wsapoll.c:116
+PROF 0 0 7331 0 0 19d9740 0 <repo>\packages\runtime\src\scr_map.c:282
+PROF 2 128 0 0 0 1a29241 0 <repo>\packages\runtime\src\scr_http.c:793
+PROF 0 0 1697 0 0 19eaca1 0 <repo>\packages\runtime\src\scr_regex.c:367
+PROF 0 0 8 0 0 1a1e90d 0 <repo>\packages\runtime\src\scr_zlib_stream.c:99
+PROF 7512 95312 0 0 0 19d9f87 0 <repo>\packages\runtime\src\scr_map.c:171
+PROF 0 0 2 0 0 1a2c3b2 0 <repo>\packages\runtime\src\scr_ws_client.c:296
+PROF 37 608 0 0 0 1a1f3e8 0 <repo>\packages\runtime\src\scr_events_emitter.c:348
+PROF 16825 39126059 0 0 0 1a09fd8 0 <repo>\packages\runtime\vendor\sqlite\sqlite3.c:28035
+PROF 0 0 30 0 0 19e7674 0 <repo>\packages\runtime\src\scr_async.c:220
+PROF 2 16384 0 0 0 1a2a4d3 0 <repo>\packages\runtime\src\scr_http.c:1992
+PROF 140 6720 0 0 0 1a1f2fb 0 <repo>\packages\runtime\src\scr_events_emitter.c:144
+PROF 8 1920 0 0 0 19e72f0 0 <repo>\packages\runtime\src\scr_async.c:3635
+PROF 0 0 32 0 0 1a2c006 0 <repo>\packages\runtime\src\scr_websocket.c:396
+PROF 6786 868608 0 0 0 19d96c0 0 <repo>\packages\runtime\src\scr_map.c:249
+PROF 0 0 2 0 0 1a2907a 0 <repo>\packages\runtime\src\scr_http.c:277
+PROF 0 0 4 0 0 19e116e 0 <repo>\packages\runtime\src\scr_url.c:244
+PROF 0 0 16 0 0 1a1dc2c 0 <repo>\packages\runtime\vendor\zlib\zutil.c:294
+PROF 0 0 20 0 0 19d8d92 0 <repo>\packages\runtime\src\scr_bytes_io.c:901
+PROF 0 0 1110 0 0 19f846e 0 <repo>\packages\runtime\src\scr_bigint.c:539
+PROF 613057 39235648 0 0 0 19d5b68 0 <repo>\packages\runtime\src\scr_array.c:179
+PROF 0 0 89299 0 0 19d456b 0 <repo>\packages\runtime\src\scr_string.c:791
+PROF 0 0 30406 0 0 19e9ec0 0 <repo>\packages\runtime\src\scr_cycle.c:983
+PROF 78 270720 0 0 0 19dea91 0 <repo>\packages\runtime\src\scr_lib.c:3805
+PROF 1 256 0 0 0 1a15883 0 <repo>\packages\runtime\src\scr_inspect.c:257
+PROF 0 0 104 0 0 19e7257 0 <repo>\packages\runtime\src\scr_async.c:2887
+PROF 4 100 0 0 0 19f89a8 0 <repo>\packages\runtime\src\scr_sqlite.c:1117
+PROF 0 0 8 0 0 1a25a31 0 <repo>\packages\runtime\src\scr_stream.c:2795
+PROF 7 336 0 0 0 1a26fa0 0 <repo>\packages\runtime\src\scr_net.c:289
+PROF 0 0 1697 0 0 19eac5f 0 <repo>\packages\runtime\src\scr_regex.c:366
+PROF 6 129024 0 0 0 19ea5e1 0 <repo>\packages\runtime\src\scr_cycle.c:1195
+PROF 3 192 0 0 0 19da788 0 <repo>\packages\runtime\src\scr_exception.c:83
+PROF 0 0 8 0 0 1a24a88 0 <repo>\packages\runtime\src\scr_stream.c:360
+PROF 2 1496 0 0 0 19e2945 0 <repo>\packages\runtime\src\scr_json.c:1757
+PROF 8 448 0 0 0 1a244fb 0 <repo>\packages\runtime\src\scr_stream.c:2837
+PROF 0 0 2 0 0 1a28fb7 0 <repo>\packages\runtime\src\scr_http.c:251
+PROF 2 304 0 0 0 1a2b821 0 <repo>\packages\runtime\src\scr_websocket.c:359
+PROF 8 768 0 0 0 1a1e230 0 <repo>\packages\runtime\src\scr_zlib_stream.c:250
+PROF 36 2304 0 0 0 19d5cf4 0 <repo>\packages\runtime\src\scr_array.c:730
+PROF 0 0 14705 0 0 1a16495 0 <repo>\packages\runtime\src\scr_inspect.c:73
+PROF 256 9972 0 0 0 19f88fd 0 <repo>\packages\runtime\src\scr_sqlite.c:1077
+PROF 0 0 1 0 0 1a271a0 0 <repo>\packages\runtime\src\scr_net.c:741
+PROF 104 4160 0 0 0 1a257e5 0 <repo>\packages\runtime\src\scr_stream.c:475
+PROF 0 0 4 0 0 19e0806 0 <repo>\packages\runtime\src\scr_url.c:520
+PROF 1 384 0 0 0 19e7018 0 <repo>\packages\runtime\src\scr_async.c:963
+PROF 0 0 3641 0 0 19e75f0 0 <repo>\packages\runtime\src\scr_async.c:265
+PROF 391 25624576 0 0 0 19e9f97 0 <repo>\packages\runtime\src\scr_cycle.c:592
+PROF 3260 146700 0 0 0 19d7ef1 0 <repo>\packages\runtime\src\scr_bytes.c:1019
+PROF 0 0 2 0 0 1a2a77b 0 <repo>\packages\runtime\src\scr_http.c:1815
+PROF 10 264704 0 0 0 1a2c04c 0 <repo>\packages\runtime\src\scr_websocket.c:338
+PROF 18 432 0 0 0 1a1ed29 0 <repo>\packages\runtime\src\scr_events_emitter.c:126
+PROF 1 64 0 0 0 19e257b 0 <repo>\packages\runtime\src\scr_json.c:434
+PROF 2 608 0 0 0 1a2a658 0 <repo>\packages\runtime\src\scr_http.c:1635
+PROF 9326 484556 0 0 0 19f7d88 0 <repo>\packages\runtime\src\scr_bigint.c:39
+PROF 2 8192 0 0 0 1a27fb8 0 <repo>\packages\runtime\src\scr_net.c:1102
+PROF 15 512 0 0 0 1a2a98b 0 <repo>\packages\runtime\src\scr_http.c:1522
+PROF 681702 483924064 0 0 0 19d63dc 0 <repo>\packages\runtime\src\scr_array.c:172
+PROF 16 319360 0 0 0 1a1dbe6 0 <repo>\packages\runtime\vendor\zlib\zutil.c:288
+PROF 1 232 0 0 0 1a27da7 0 <repo>\packages\runtime\src\scr_net.c:1486
+PROF 0 0 1 0 0 1a2cb5c 0 <repo>\packages\runtime\src\scr_ws_client.c:403
+PROF 0 0 28 0 0 19dd7ee 0 <repo>\packages\runtime\src\scr_lib.c:3946
+PROF 0 0 2 0 0 1a2913d 0 <repo>\packages\runtime\src\scr_http.c:653
+PROF 0 0 2 0 0 1a2c3f8 0 <repo>\packages\runtime\src\scr_ws_client.c:299
+PROF 2 1568 0 0 0 19d4528 0 <repo>\packages\runtime\src\scr_string.c:749
+PROF 19 760 0 0 0 19dd668 0 <repo>\packages\runtime\src\scr_lib.c:3838
+PROF 10 523776 0 0 0 19ea624 0 <repo>\packages\runtime\src\scr_cycle.c:1294
+PROF 9 65408 0 0 0 19e7ed5 0 <repo>\packages\runtime\src\scr_async.c:596
+PROF 0 0 2 0 0 1a12228 0 <repo>\packages\runtime\src\scr_asym.c:57
+PROF 19091 763640 0 0 0 19d7631 0 <repo>\packages\runtime\src\scr_bytes.c:43
+PROF 0 0 104 0 0 1a25828 0 <repo>\packages\runtime\src\scr_stream.c:4451
+PROF 0 0 28 0 0 19dd7ad 0 <repo>\packages\runtime\src\scr_lib.c:3944
+PROF 0 0 16 0 0 1a24b51 0 <repo>\packages\runtime\src\scr_stream.c:367
+PROF 0 0 2 0 0 1a290fc 0 <repo>\packages\runtime\src\scr_http.c:652
+PROF 40 4096 0 0 0 1a25af5 0 <repo>\packages\runtime\src\scr_stream.c:565
+PROF 2 1070 0 0 0 1a2c36c 0 <repo>\packages\runtime\src\scr_ws_client.c:290
+PROF 10 219 0 0 0 19dc482 0 <repo>\packages\runtime\src\scr_lib.c:279
+PROF 8 195840 0 0 0 19e7c7f 0 <repo>\packages\runtime\src\scr_async.c:643
+PROF 8 1216 0 0 0 19e7333 0 <repo>\packages\runtime\src\scr_async.c:3642
+PROF 30 960 0 0 0 19e709d 0 <repo>\packages\runtime\src\scr_async.c:1233
+PROF 0 0 10 0 0 19dc4da 0 <repo>\packages\runtime\src\scr_lib.c:285
+PROF 1 152 0 0 0 19e717c 0 <repo>\packages\runtime\src\scr_async.c:2507
+PROF 5 120 0 0 0 1a27020 0 <repo>\packages\runtime\src\scr_net.c:315
+PROF 2 432 0 0 0 1a2a739 0 <repo>\packages\runtime\src\scr_http.c:1774
+PROF 2 128 0 0 0 1a29200 0 <repo>\packages\runtime\src\scr_http.c:792
+PROF 0 0 1 0 0 1a2b867 0 <repo>\packages\runtime\src\scr_websocket.c:376
+PROF 0 0 3 0 0 1a2064b 0 <repo>\packages\runtime\src\scr_weak.c:200
+PROF 19091 20892983 0 0 0 19d7672 0 <repo>\packages\runtime\src\scr_bytes.c:52
+PROF 0 0 20 0 0 19eab10 0 <repo>\packages\runtime\src\scr_regex.c:71
+PROF 104 2496 0 0 0 19e6f94 0 <repo>\packages\runtime\src\scr_async.c:892
+PROF 0 0 4 0 0 1a26fe0 0 <repo>\packages\runtime\src\scr_net.c:300
+PROF 0 0 4 0 0 19f8a19 0 <repo>\packages\runtime\src\scr_sqlite.c:1126
+PROF 4 116 0 0 0 19e06df 0 <repo>\packages\runtime\src\scr_url.c:352
+PROF 19213 581328 0 0 0 19e281f 0 <repo>\packages\runtime\src\scr_json.c:1406
+PROF 16 256 0 0 0 1a257a1 0 <repo>\packages\runtime\src\scr_stream.c:2683
+PROF 7512 1524992 0 0 0 19d9f47 0 <repo>\packages\runtime\src\scr_map.c:164
+PROF 0 0 6520 0 0 19eba97 0 <repo>\packages\runtime\src\scr_regex.c:612
+PROF 0 0 3281 0 0 1a12268 0 <repo>\packages\runtime\src\scr_asym.c:60
+PROF 18376 1177408 0 0 0 1a16452 0 <repo>\packages\runtime\src\scr_inspect.c:49
+PROF 16 1024 0 0 0 1a24c32 0 <repo>\packages\runtime\src\scr_stream.c:1211
+PROF 7 1536 0 0 0 1a2060a 0 <repo>\packages\runtime\src\scr_weak.c:187
+PROF 8 228480 0 0 0 19e6084 0 <repo>\packages\runtime\src\scr_json.c:1208
+PROF 0 0 7 0 0 19e60c6 0 <repo>\packages\runtime\src\scr_json.c:1215
+PROF 0 0 4 0 0 19e112e 0 <repo>\packages\runtime\src\scr_url.c:243
+PROF 0 0 104 0 0 1a1ea7b 0 <repo>\packages\runtime\src\scr_events_emitter.c:198
+PROF 90 5418 0 0 0 19eab51 0 <repo>\packages\runtime\src\scr_regex.c:74
+PROF 0 0 28 0 0 19dd82f 0 <repo>\packages\runtime\src\scr_lib.c:3947
+PROF 32 4864 0 0 0 19e71bf 0 <repo>\packages\runtime\src\scr_async.c:2517
+PROF 0 0 24451 0 0 19d641e 0 <repo>\packages\runtime\src\scr_array.c:210
+PROF 0 0 16 0 0 1a1eac6 0 <repo>\packages\runtime\src\scr_events_emitter.c:201
+PROF-TOTAL rows=242 count=2403045 bytes=705071272 freed=2236202 lost=0 cycles=72063520252 framesLost=0 resyncs=0
+PROF-SIZEHIST ARMED buckets=40 exactGranule=8 exactMax=8192
+PROFHIST 19d5baa 6:14691 <repo>\packages\runtime\src\scr_array.c:224
+PROFHIST 19e582e 4:10771 5:7515 6:6646 7:705 8:279 9:82 10:39 11:15 12:3 13:1 <repo>\packages\runtime\src\scr_json.c:1636
+PROFHIST 1a24488 3:8 <repo>\packages\runtime\src\scr_stream.c:1697
+PROFHIST 1a1ffc0 6:5 <repo>\packages\runtime\src\scr_weak.c:146
+PROFHIST 19e9f02 9:1 10:1 11:1 12:1 13:1 14:1 15:1 16:1 17:1 18:1 <repo>\packages\runtime\src\scr_cycle.c:1110
+PROFHIST 1a1f39d 5:39 <repo>\packages\runtime\src\scr_events_emitter.c:339
+PROFHIST 19f886b 5:1 <repo>\packages\runtime\src\scr_sqlite.c:455
+PROFHIST 19d71cb 5:3412 <repo>\packages\runtime\src\scr_bytes.c:593
+PROFHIST 19e6ebc 4:51 <repo>\packages\runtime\src\scr_async.c:455
+PROFHIST 19d7c8b 2:61 3:1599 5:3 6:1607 <repo>\packages\runtime\src\scr_bytes.c:732
+PROFHIST 19e56af 9:1 10:1 <repo>\packages\runtime\src\scr_json.c:2002
+PROFHIST 19e102e 6:4 <repo>\packages\runtime\src\scr_url.c:181
+PROFHIST 1a2c1e1 3:2 <repo>\packages\runtime\src\scr_ws_client.c:213
+PROFHIST 19d478d 8:89282 9:21 10:10 <repo>\packages\runtime\src\scr_string.c:635
+PROFHIST 1a2a22a 9:2 <repo>\packages\runtime\src\scr_http.c:811
+PROFHIST 1a2a949 3:2 4:4 5:8 6:1 <repo>\packages\runtime\src\scr_http.c:1521
+PROFHIST 19dd72b 5:28 <repo>\packages\runtime\src\scr_lib.c:3915
+PROFHIST 19e57ac 7:1 <repo>\packages\runtime\src\scr_json.c:3116
+PROFHIST 1a2671b 9:1 <repo>\packages\runtime\src\scr_loop_wsapoll.c:104
+PROFHIST 19f8777 6:1 <repo>\packages\runtime\src\scr_sqlite.c:429
+PROFHIST 19e0846 6:4 <repo>\packages\runtime\src\scr_url.c:522
+PROFHIST 19e7123 7:85565 <repo>\packages\runtime\src\scr_async.c:2091
+PROFHIST 19dd76c 5:28 <repo>\packages\runtime\src\scr_lib.c:3926
+PROFHIST 1a2a334 7:1 <repo>\packages\runtime\src\scr_http.c:1210
+PROFHIST 19e11ae 6:28 <repo>\packages\runtime\src\scr_url.c:70
+PROFHIST 1a2bfc0 4:2 5:24 6:1 7:2 8:1 15:2 <repo>\packages\runtime\src\scr_websocket.c:392
+PROFHIST 19d7119 5:40567 <repo>\packages\runtime\src\scr_bytes.c:529
+PROFHIST 19eb911 1:9 2:12 3:1665 4:11 6:6520 <repo>\packages\runtime\src\scr_regex.c:239
+PROFHIST 19db189 5:6 <repo>\packages\runtime\src\scr_error.c:170
+PROFHIST 19d9fc7 6:7422 7:31 8:23 9:20 10:13 11:21 12:23 13:6 14:3 15:2 16:2 <repo>\packages\runtime\src\scr_map.c:117
+PROFHIST 1a24646 1:8 <repo>\packages\runtime\src\scr_stream.c:3227
+PROFHIST 1a0a600 5:291 6:382 7:394 8:249 9:163 10:26 11:6 12:2 13:2 <repo>\packages\runtime\vendor\sqlite\sqlite3.c:28108
+PROFHIST 19eb953 4:8217 <repo>\packages\runtime\src\scr_regex.c:333
+PROFHIST 19f9f78 5:42 <repo>\packages\runtime\src\scr_sqlite.c:561
+PROFHIST 19e3309 7:1 <repo>\packages\runtime\src\scr_json.c:4081
+PROFHIST 1a1f982 5:1 <repo>\packages\runtime\src\scr_symbol.c:45
+PROFHIST 19dead2 9:1 14:8 <repo>\packages\runtime\src\scr_lib.c:3989
+PROFHIST 1a24602 4:8 <repo>\packages\runtime\src\scr_stream.c:3226
+PROFHIST 1a12a6f 5:4 <repo>\packages\runtime\src\scr_asym.c:81
+PROFHIST 19d8d4d 5:20 <repo>\packages\runtime\src\scr_bytes_io.c:887
+PROFHIST 1a158c7 6:3667 <repo>\packages\runtime\src\scr_inspect.c:276
+PROFHIST 19da14a 15:1 <repo>\packages\runtime\src\scr_closure.c:521
+PROFHIST 19f8362 3:355 4:513 5:242 <repo>\packages\runtime\src\scr_bigint.c:528
+PROFHIST 1a27ea7 9:4 <repo>\packages\runtime\src\scr_net.c:917
+PROFHIST 1a2575d 4:16 <repo>\packages\runtime\src\scr_stream.c:2682
+PROFHIST 1a1f661 3:115 4:10 <repo>\packages\runtime\src\scr_events_emitter.c:587
+PROFHIST 1a2a491 6:2 <repo>\packages\runtime\src\scr_http.c:2059
+PROFHIST 1a2cd90 6:2 <repo>\packages\runtime\src\scr_ws_global.c:384
+PROFHIST 1a13d61 10:65 <repo>\packages\runtime\src\scr_cipher_value.c:90
+PROFHIST 1a2453f 4:8 <repo>\packages\runtime\src\scr_stream.c:2841
+PROFHIST 19d6599 7:33 8:23 9:22 10:21 <repo>\packages\runtime\src\scr_array.c:630
+PROFHIST 1a2a9cd 3:2 4:4 5:8 6:1 <repo>\packages\runtime\src\scr_http.c:1523
+PROFHIST 1a2931d 6:1 <repo>\packages\runtime\src\scr_http.c:2087
+PROFHIST 19f83e8 3:355 4:513 5:242 <repo>\packages\runtime\src\scr_bigint.c:530
+PROFHIST 19e7df9 5:56830 <repo>\packages\runtime\src\scr_async.c:2137
+PROFHIST 19e2360 5:1235 <repo>\packages\runtime\src\scr_json.c:143
+PROFHIST 1a2a907 2:4 3:11 <repo>\packages\runtime\src\scr_http.c:1518
+PROFHIST 1a2c227 6:2 <repo>\packages\runtime\src\scr_ws_client.c:240
+PROFHIST 19e7cc1 4:26326 <repo>\packages\runtime\src\scr_async.c:1626
+PROFHIST 1a25262 9:16 <repo>\packages\runtime\src\scr_stream.c:1873
+PROFHIST 19d47d0 16:38 <repo>\packages\runtime\src\scr_string.c:596
+PROFHIST 19eb88e 6:1 <repo>\packages\runtime\src\scr_regex.c:101
+PROFHIST 1a12a2f 6:4 <repo>\packages\runtime\src\scr_asym.c:72
+PROFHIST 19daee0 4:3 <repo>\packages\runtime\src\scr_error.c:404
+PROFHIST 19e9f45 8:19 9:30409 14:1 <repo>\packages\runtime\src\scr_cycle.c:755
+PROFHIST 19ded5d 2:114960 4:419200 <repo>\packages\runtime\src\scr_lib.c:4279
+PROFHIST 19e70e0 7:11240 <repo>\packages\runtime\src\scr_async.c:1246
+PROFHIST 19e57ee 3:6806 4:11866 5:1363 6:5 <repo>\packages\runtime\src\scr_json.c:94
+PROFHIST 19f83a5 3:355 4:513 5:242 <repo>\packages\runtime\src\scr_bigint.c:529
+PROFHIST 1a121d0 6:3282 <repo>\packages\runtime\src\scr_asym.c:34
+PROFHIST 1a260c0 5:1 <repo>\packages\runtime\src\scr_loop_wsapoll.c:116
+PROFHIST 1a29241 6:2 <repo>\packages\runtime\src\scr_http.c:793
+PROFHIST 19d9f87 3:7416 4:27 5:15 6:14 7:13 8:11 9:6 10:4 11:3 12:2 13:1 <repo>\packages\runtime\src\scr_map.c:171
+PROFHIST 1a1f3e8 4:36 5:1 <repo>\packages\runtime\src\scr_events_emitter.c:348
+PROFHIST 1a09fd8 3:976 4:2253 5:2416 6:2756 7:1103 8:369 9:304 10:226 11:35 12:6277 13:48 14:17 15:1 16:44 <repo>\packages\runtime\vendor\sqlite\sqlite3.c:28035
+PROFHIST 1a2a4d3 13:2 <repo>\packages\runtime\src\scr_http.c:1992
+PROFHIST 1a1f2fb 5:140 <repo>\packages\runtime\src\scr_events_emitter.c:144
+PROFHIST 19e72f0 7:8 <repo>\packages\runtime\src\scr_async.c:3635
+PROFHIST 19d96c0 7:6786 <repo>\packages\runtime\src\scr_map.c:249
+PROFHIST 19d5b68 6:613057 <repo>\packages\runtime\src\scr_array.c:179
+PROFHIST 19dea91 6:46 7:16 8:4 9:3 10:1 15:8 <repo>\packages\runtime\src\scr_lib.c:3805
+PROFHIST 1a15883 8:1 <repo>\packages\runtime\src\scr_inspect.c:257
+PROFHIST 19f89a8 4:4 <repo>\packages\runtime\src\scr_sqlite.c:1117
+PROFHIST 1a26fa0 5:7 <repo>\packages\runtime\src\scr_net.c:289
+PROFHIST 19ea5e1 11:1 12:1 13:1 14:1 15:1 16:1 <repo>\packages\runtime\src\scr_cycle.c:1195
+PROFHIST 19da788 6:3 <repo>\packages\runtime\src\scr_exception.c:83
+PROFHIST 19e2945 9:2 <repo>\packages\runtime\src\scr_json.c:1757
+PROFHIST 1a244fb 5:8 <repo>\packages\runtime\src\scr_stream.c:2837
+PROFHIST 1a2b821 7:2 <repo>\packages\runtime\src\scr_websocket.c:359
+PROFHIST 1a1e230 6:8 <repo>\packages\runtime\src\scr_zlib_stream.c:250
+PROFHIST 19d5cf4 6:36 <repo>\packages\runtime\src\scr_array.c:730
+PROFHIST 19f88fd 2:236 6:3 7:12 8:1 10:4 <repo>\packages\runtime\src\scr_sqlite.c:1077
+PROFHIST 1a257e5 5:104 <repo>\packages\runtime\src\scr_stream.c:475
+PROFHIST 19e7018 8:1 <repo>\packages\runtime\src\scr_async.c:963
+PROFHIST 19e9f97 16:391 <repo>\packages\runtime\src\scr_cycle.c:592
+PROFHIST 19d7ef1 5:3260 <repo>\packages\runtime\src\scr_bytes.c:1019
+PROFHIST 1a2c04c 8:2 9:4 15:2 16:1 17:1 <repo>\packages\runtime\src\scr_websocket.c:338
+PROFHIST 1a1ed29 4:18 <repo>\packages\runtime\src\scr_events_emitter.c:126
+PROFHIST 19e257b 6:1 <repo>\packages\runtime\src\scr_json.c:434
+PROFHIST 1a2a658 8:2 <repo>\packages\runtime\src\scr_http.c:1635
+PROFHIST 19f7d88 5:7117 6:2209 <repo>\packages\runtime\src\scr_bigint.c:39
+PROFHIST 1a27fb8 12:2 <repo>\packages\runtime\src\scr_net.c:1102
+PROFHIST 1a2a98b 3:2 4:4 5:8 6:1 <repo>\packages\runtime\src\scr_http.c:1522
+PROFHIST 19d63dc 5:157295 6:442006 7:12988 8:11177 9:10853 10:10491 11:9781 12:8524 13:7376 14:5952 15:3899 16:1360 <repo>\packages\runtime\src\scr_array.c:172
+PROFHIST 1a1dbe6 12:8 15:8 <repo>\packages\runtime\vendor\zlib\zutil.c:288
+PROFHIST 1a27da7 7:1 <repo>\packages\runtime\src\scr_net.c:1486
+PROFHIST 19d4528 9:1 10:1 <repo>\packages\runtime\src\scr_string.c:749
+PROFHIST 19dd668 5:19 <repo>\packages\runtime\src\scr_lib.c:3838
+PROFHIST 19ea624 9:1 10:1 11:1 12:1 13:1 14:1 15:1 16:1 17:1 18:1 <repo>\packages\runtime\src\scr_cycle.c:1294
+PROFHIST 19e7ed5 7:1 8:1 9:1 10:1 11:1 12:1 13:1 14:1 15:1 <repo>\packages\runtime\src\scr_async.c:596
+PROFHIST 19d7631 5:19091 <repo>\packages\runtime\src\scr_bytes.c:43
+PROFHIST 1a25af5 5:16 6:8 7:8 8:8 <repo>\packages\runtime\src\scr_stream.c:565
+PROFHIST 1a2c36c 9:2 <repo>\packages\runtime\src\scr_ws_client.c:290
+PROFHIST 19dc482 1:3 2:2 3:1 4:2 6:2 <repo>\packages\runtime\src\scr_lib.c:279
+PROFHIST 19e7c7f 9:1 10:1 11:1 12:1 13:1 14:1 15:1 16:1 <repo>\packages\runtime\src\scr_async.c:643
+PROFHIST 19e7333 7:8 <repo>\packages\runtime\src\scr_async.c:3642
+PROFHIST 19e709d 5:30 <repo>\packages\runtime\src\scr_async.c:1233
+PROFHIST 19e717c 7:1 <repo>\packages\runtime\src\scr_async.c:2507
+PROFHIST 1a27020 4:5 <repo>\packages\runtime\src\scr_net.c:315
+PROFHIST 1a2a739 7:2 <repo>\packages\runtime\src\scr_http.c:1774
+PROFHIST 1a29200 6:2 <repo>\packages\runtime\src\scr_http.c:792
+PROFHIST 19d7672 0:73 1:3235 2:11 3:1615 4:1674 5:11549 6:38 7:145 8:41 9:5 10:3 11:2 12:12 13:386 14:260 15:8 16:10 18:16 19:8 <repo>\packages\runtime\src\scr_bytes.c:52
+PROFHIST 19e6f94 4:104 <repo>\packages\runtime\src\scr_async.c:892
+PROFHIST 19e06df 4:4 <repo>\packages\runtime\src\scr_url.c:352
+PROFHIST 19e281f 3:7434 4:4514 5:3597 6:3593 7:29 8:20 9:5 10:5 11:5 12:5 13:5 14:1 <repo>\packages\runtime\src\scr_json.c:1406
+PROFHIST 1a257a1 4:16 <repo>\packages\runtime\src\scr_stream.c:2683
+PROFHIST 19d9f47 7:7416 8:27 9:15 10:14 11:13 12:11 13:6 14:4 15:3 16:2 17:1 <repo>\packages\runtime\src\scr_map.c:164
+PROFHIST 1a16452 6:18359 7:15 8:2 <repo>\packages\runtime\src\scr_inspect.c:49
+PROFHIST 1a24c32 6:16 <repo>\packages\runtime\src\scr_stream.c:1211
+PROFHIST 1a2060a 7:4 8:2 9:1 <repo>\packages\runtime\src\scr_weak.c:187
+PROFHIST 19e6084 9:1 10:1 11:1 12:1 13:1 14:1 15:1 16:1 <repo>\packages\runtime\src\scr_json.c:1208
+PROFHIST 19eab51 1:10 2:14 3:25 4:20 5:10 8:11 <repo>\packages\runtime\src\scr_regex.c:74
+PROFHIST 19e71bf 7:32 <repo>\packages\runtime\src\scr_async.c:2517
+PROFEXACT 0 118638
+PROFEXACT 8 28744
+PROFEXACT 16 24235
+PROFEXACT 24 462482
+PROFEXACT 32 232017
+PROFEXACT 40 70700
+PROFEXACT 48 13078
+PROFEXACT 56 1040
+PROFEXACT 64 1108390
+PROFEXACT 72 1790
+PROFEXACT 80 7902
+PROFEXACT 88 764
+PROFEXACT 96 7261
+PROFEXACT 104 240
+PROFEXACT 112 27
+PROFEXACT 120 65
+PROFEXACT 128 39179
+PROFEXACT 136 25
+PROFEXACT 144 506
+PROFEXACT 152 85708
+PROFEXACT 160 16
+PROFEXACT 168 9
+PROFEXACT 176 76
+PROFEXACT 184 9
+PROFEXACT 192 710
+PROFEXACT 200 51
+PROFEXACT 208 4
+PROFEXACT 216 7
+PROFEXACT 224 57
+PROFEXACT 232 70
+PROFEXACT 240 28
+PROFEXACT 248 108
+PROFEXACT 256 11344
+PROFEXACT 264 2164
+PROFEXACT 272 9721
+PROFEXACT 280 2168
+PROFEXACT 288 9629
+PROFEXACT 296 2181
+PROFEXACT 304 9610
+PROFEXACT 312 2350
+PROFEXACT 320 9621
+PROFEXACT 328 23524
+PROFEXACT 336 18733
+PROFEXACT 344 34
+PROFEXACT 352 24
+PROFEXACT 360 5
+PROFEXACT 368 25
+PROFEXACT 376 3
+PROFEXACT 384 296
+PROFEXACT 392 20
+PROFEXACT 400 9
+PROFEXACT 408 1
+PROFEXACT 416 20
+PROFEXACT 432 1
+PROFEXACT 440 18
+PROFEXACT 448 1
+PROFEXACT 456 1
+PROFEXACT 464 18
+PROFEXACT 472 3
+PROFEXACT 480 1
+PROFEXACT 488 25
+PROFEXACT 496 2
+PROFEXACT 504 4
+PROFEXACT 512 10955
+PROFEXACT 520 45
+PROFEXACT 528 12
+PROFEXACT 536 17
+PROFEXACT 544 6
+PROFEXACT 560 1617
+PROFEXACT 568 24
+PROFEXACT 576 1
+PROFEXACT 584 18
+PROFEXACT 592 1
+PROFEXACT 600 2
+PROFEXACT 608 17
+PROFEXACT 616 1
+PROFEXACT 624 5
+PROFEXACT 632 19218
+PROFEXACT 656 20
+PROFEXACT 672 3
+PROFEXACT 680 22
+PROFEXACT 704 13
+PROFEXACT 712 19
+PROFEXACT 736 1
+PROFEXACT 768 85
+PROFEXACT 776 5
+PROFEXACT 792 2
+PROFEXACT 808 2
+PROFEXACT 824 2
+PROFEXACT 840 3
+PROFEXACT 848 2
+PROFEXACT 856 2
+PROFEXACT 872 1
+PROFEXACT 896 1
+PROFEXACT 904 21
+PROFEXACT 920 9610
+PROFEXACT 960 2
+PROFEXACT 984 3
+PROFEXACT 992 1
+PROFEXACT 1016 189
+PROFEXACT 1024 10555
+PROFEXACT 1040 8
+PROFEXACT 1064 1
+PROFEXACT 1072 1
+PROFEXACT 1088 1
+PROFEXACT 1096 69
+PROFEXACT 1128 8
+PROFEXACT 1184 65
+PROFEXACT 1232 8
+PROFEXACT 1240 1
+PROFEXACT 1248 10
+PROFEXACT 1256 1
+PROFEXACT 1264 8
+PROFEXACT 1272 3
+PROFEXACT 1288 8
+PROFEXACT 1296 2
+PROFEXACT 1304 23
+PROFEXACT 1312 1
+PROFEXACT 1320 6
+PROFEXACT 1328 16
+PROFEXACT 1352 12
+PROFEXACT 1408 34
+PROFEXACT 1472 1
+PROFEXACT 1536 40
+PROFEXACT 1552 2
+PROFEXACT 1560 2
+PROFEXACT 1576 10
+PROFEXACT 1600 1
+PROFEXACT 1648 1
+PROFEXACT 1712 3
+PROFEXACT 1768 1
+PROFEXACT 1792 1
+PROFEXACT 1800 1
+PROFEXACT 1984 2
+PROFEXACT 2008 2
+PROFEXACT 2016 2
+PROFEXACT 2024 19
+PROFEXACT 2048 9829
+PROFEXACT 2056 19
+PROFEXACT 2064 2
+PROFEXACT 2088 1
+PROFEXACT 2296 2
+PROFEXACT 2408 2
+PROFEXACT 2416 1
+PROFEXACT 2464 1
+PROFEXACT 2504 2
+PROFEXACT 2536 1
+PROFEXACT 2576 1
+PROFEXACT 2752 1
+PROFEXACT 2808 2
+PROFEXACT 2928 1
+PROFEXACT 3008 2
+PROFEXACT 3072 16
+PROFEXACT 3136 1
+PROFEXACT 3584 1
+PROFEXACT 4040 2
+PROFEXACT 4096 8575
+PROFEXACT 4104 2446
+PROFEXACT 4112 19
+PROFEXACT 4168 1
+PROFEXACT 4184 1
+PROFEXACT 4208 1
+PROFEXACT 4344 2
+PROFEXACT 4376 1426
+PROFEXACT 4424 1
+PROFEXACT 4504 2
+PROFEXACT 4808 2
+PROFEXACT 4944 1
+PROFEXACT 5024 1
+PROFEXACT 5184 1
+PROFEXACT 5504 2
+PROFEXACT 5552 2
+PROFEXACT 5744 2
+PROFEXACT 5864 1
+PROFEXACT 5904 1
+PROFEXACT 5944 2
+PROFEXACT 6024 1
+PROFEXACT 6144 5
+PROFEXACT 6184 3
+PROFEXACT 6224 3
+PROFEXACT 6264 49
+PROFEXACT 6304 14
+PROFEXACT 6344 16
+PROFEXACT 6384 2
+PROFEXACT 6424 50
+PROFEXACT 6464 24
+PROFEXACT 6504 64
+PROFEXACT 6544 65
+PROFEXACT 6584 37
+PROFEXACT 6624 78
+PROFEXACT 6664 104
+PROFEXACT 6672 1
+PROFEXACT 6704 96
+PROFEXACT 6728 1
+PROFEXACT 6744 156
+PROFEXACT 6784 233
+PROFEXACT 6824 251
+PROFEXACT 6864 2
+PROFEXACT 6904 5
+PROFEXACT 6944 3
+PROFEXACT 6984 2
+PROFEXACT 7024 2
+PROFEXACT 7064 6
+PROFEXACT 7104 4
+PROFEXACT 7144 5
+PROFEXACT 7152 8
+PROFEXACT 7168 1
+PROFEXACT 7184 11
+PROFEXACT 7224 29
+PROFEXACT 7264 37
+PROFEXACT 7304 31
+PROFEXACT 7344 6
+PROFEXACT 7384 10
+PROFEXACT 7424 26
+PROFEXACT 7464 14
+PROFEXACT 7504 16
+PROFEXACT 7544 17
+PROFEXACT 7584 36
+PROFEXACT 7624 30
+PROFEXACT 7664 20
+PROFEXACT 7704 32
+PROFEXACT 7744 35
+PROFEXACT 7784 44
+PROFEXACT 7800 2
+PROFEXACT 7824 48
+PROFEXACT 7848 1
+PROFEXACT 7864 58
+PROFEXACT 7904 77
+PROFEXACT 7944 89
+PROFEXACT 7984 145
+PROFEXACT 8024 116
+PROFEXACT 8064 130
+PROFEXACT 8104 29
+PROFEXACT 8144 5
+PROFEXACT 8184 1
+PROF-SIZEHIST-TOTAL rows=133 noted=2403045 over8k=19914
+PROF-STACKS ARMED depth=10 slots=131072
+PROFSTACK 2 2616 125184 124ec4 98e43 a87c7 a9178 8e4c6 11e629 11d349 aa55c 8b736
+PROFSTACK 12 15708 125184 124ec4 98e43 a87c7 b1f25 8b736 83679 854f8 525c9f cc2b9e
+PROFSTACK 6 7926 125184 124ec4 98e43 892a4 894c7 89048 9b8ad 9127f cd8b1 caba0
+PROFSTACK 5 6702 125184 124ec4 98e43 a87c7 aea29 8b736 83679 854f8 525c9f cc2b9e
+PROFSTACK 1 1309 125184 124ec4 98e43 ce341 cb89b 9389f ea543 cd8fd caba0 9389f
+PROFSTACK 6 7854 125184 124ec4 98e43 a87c7 b1f25 8b736 8c384 b736e af880 8b736
+PROFSTACK 22 29384 125184 124ec4 98e43 9160a ccbd7 ca1e0 9389f bfe42 92430 8b5c3
+PROFSTACK 2 2617 125184 124ec4 98e43 a87c7 b0b0e 8b736 83679 854f8 525c9f cc2b9e
+PROFSTACK 2 2704 125184 124ec4 98e43 9160a ccbd7 ca1e0 9389f bfe42 92430 9254d
+PROF-STACKS-TOTAL rows=9 count=58 bytes=76820 lost=0 tablefull=0 skipped=2402987 site="" sizeband=1300..1400
