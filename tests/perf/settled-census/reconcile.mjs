@@ -56,14 +56,85 @@
  *   scr_cyc_alloc blocks, and these are plain realloc, so every entries
  *   array is a CRT-heap block whatever its size.
  *
- *   PREDICTION: if boxing is what fragments the heap, HCFREE on a settled
- *   run shows peaks at the DIAGNOSTIC sizes -- 768, 1536, 3072, 6144,
- *   12288 -- where nothing else observed lands. If the free holes are
- *   broad, or concentrate at sizes not in the series, boxing is not the
- *   cause and the entries-array limb dies with the 64-byte one.
- *
  *   The small end (24, 48, 96, 192) is deliberately NOT diagnostic: many
  *   populations land there and a peak proves nothing.
+ *
+ *   AND A PEAK AT 3*2^n IS NOT EVIDENCE OF BOXING ON THIS WORKLOAD. This
+ *   is registered BEFORE the reading precisely so the result cannot later
+ *   be read as a confirmation. The ladder is real arithmetic, and two
+ *   blocks derived it independently -- but the emitted code says it is not
+ *   on the history-sync path at all:
+ *
+ *     scr_dyn_obj_set appears ZERO times in the whole binary's emitted
+ *     code; a notification boxes four SCALARS, not a record; there is no
+ *     88-90 member record anywhere in the tree (the largest generated
+ *     proto types are 108, 81, 72 and 63); and the sync-path records are
+ *     3-12 fields, which are arena-carved and never reach malloc.
+ *
+ *   So holes at 3*2^n come from somewhere else -- JSON, app-state, the
+ *   island path -- and finding them CONFIRMS NOTHING about boxing during a
+ *   sync. The busy side already pointed this way: the whole series sums to
+ *   1.52 MiB of 40.64 MiB, with the 3,072 class at twelve blocks.
+ *
+ * THE SHARPER PREDICTION, and it is neither this block's nor the
+ * coordinator's -- it comes from reading scr_string.c's allocation bands.
+ *
+ *   scr_str_alloc serves from the pool or the string arena only while
+ *   cap <= 243, and scr_str_release keeps a single spare only for
+ *   cap >= 512. The band 244..511 is therefore raw malloc/free with NO
+ *   recycling of any kind: every string in it is a fresh malloc and its
+ *   death is a fresh hole.
+ *
+ *   The rig's message bodies are 'x'.repeat(300) plus a short suffix, so
+ *   lengths are 309-311, and the request is 8*ceil((cap+13)/8):
+ *       309 -> 8*ceil(322/8) = 328
+ *       311 -> 8*ceil(324/8) = 328
+ *   All three land on the same request.
+ *
+ *   PREDICTION: a mode at 328 B, population near 19,200 per round
+ *   (CHUNKS 8 * CONVS 400 * MSGS 6), ABSENT from a CHUNKS=0 control.
+ *
+ *   REFUTED IF: no 328 mode; or a 328 mode that survives CHUNKS=0 (then it
+ *   is not the message bodies); or a population off by more than ~2x from
+ *   19,200 per round with no coalescing account of the difference.
+ *
+ *   THE COALESCING CAVEAT, registered rather than discovered afterwards:
+ *   the NT heap merges a freed block with adjacent free neighbours, so the
+ *   mode may appear at small integer MULTIPLES of 328 rather than at 328
+ *   itself. The observed 710 B mean free-hole size is consistent with
+ *   roughly two coalesced 328s plus per-block overhead. Multiples are
+ *   therefore an expected form of the same prediction -- but that is
+ *   stated NOW, so that reading 656 or 984 later is a confirmation of
+ *   something written down and not a fit invented to rescue it.
+ *
+ *   A NEAR-COLLISION TO NOT FALL INTO. 4 * 328 = 1312, and the settled
+ *   busy side has a real population at 1328 B (4,097 blocks, 5.31 MiB).
+ *   Those are DIFFERENT sizes, 16 bytes apart, and an exact-size table is
+ *   what keeps them apart -- but a reader rounding or bucketing would
+ *   merge them and read a coalesced-body mode that is not there. 1328 is
+ *   also not a multiple of 24, so it is not an entries array either; it is
+ *   a third population and it is unattributed.
+ *
+ * THE THREE LADDERS ARE ARITHMETICALLY SEPARABLE, which is what lets this
+ * histogram attribute rather than merely count:
+ *
+ *   scr_arr_grow        cap * 8, doubling from 4   exact powers of two
+ *   scr_dyn_obj_put_k   cap * 24, doubling from 1  3 * 2^n
+ *   scr_str_alloc       8*ceil((cap+13)/8)         dense multiples of 8
+ *
+ * SIZES ARE COMPARED ON cbData, never cbData + cbOverhead. Every ladder
+ * above is a REQUEST size; folding the heap's own per-block header into
+ * the key would shift all three by an amount that varies with the bucket
+ * and make them incomparable. scr_heap_census.h keys HCFREE and HCSIZE on
+ * cbData for exactly this reason.
+ *
+ * ONE THING THAT EXPLAINS NOTHING HERE, recorded so no one spends a window
+ * on it: cachedNctSalt does NOT pin a decompressed chunk on this workload.
+ * The rig never sends nctSalt, the field is optional, protobuf omits it,
+ * and the assignment never runs. It contributes zero to the 105.14 MiB,
+ * zero to the live total and zero to this histogram. The defect is real
+ * against real WhatsApp traffic and must not be used to explain one
+ * measured byte of this run.
  *
  * THE DISCRIMINATOR, checked here on the busy side because it can be. The
  * two largest non-chunk busy populations are 4,376 B (2,555 blocks) and
@@ -210,22 +281,64 @@ for (const s of [4376, 1328]) {
     'the ' + s + ' B population (' + (r ? r.n : 0) + ' blocks, ' + mib(r ? r.bytes : 0) +
     ' MiB) is NOT a multiple of 24, so it cannot be an entries array')
 }
+/* The message-body band. 244..511 is raw malloc/free with no recycling,
+ * and the rig's bodies all request 328 B. Multiples are an expected form
+ * of the same prediction because the NT heap coalesces adjacent frees. */
+const STRMODE = 328
+const MULT = [1, 2, 3, 4].map((k) => k * STRMODE)
+const PER_ROUND = 8 * 400 * 6
+
+console.log('\n== [5] the message-body band: 244..511 is raw malloc/free, no recycling ==')
+console.log('  predicted mode ' + STRMODE + ' B (bodies are 309-311 chars; 8*ceil((cap+13)/8))')
+console.log('  predicted population ~' + PER_ROUND + ' per round, ABSENT under CHUNKS=0')
+console.log('  coalescing may move it to multiples: ' + MULT.join(' '))
+
 if (hc.free.size === 0) {
-  console.log('  free-side histogram ABSENT in this evidence (predates HCFREE).')
-  console.log('  -> the prediction above is REGISTERED and UNTESTED. Re-run with a')
-  console.log('     report from a binary carrying the current heapcensus to test it.')
+  console.log('\n  FREE-SIDE HISTOGRAM ABSENT in this evidence (it predates HCFREE).')
+  console.log('  -> [4] and [5] are REGISTERED and UNTESTED. Re-run with --dir pointed at')
+  console.log('     a report from a binary carrying the current heapcensus.')
 } else {
-  let diagN = 0, diagB = 0, allB = 0
-  for (const [sz, r] of hc.free) { allB += r.bytes; if (DIAG.includes(sz)) { diagN += r.n; diagB += r.bytes } }
-  const share = 100 * diagB / allB
-  console.log('  free holes at DIAGNOSTIC entries sizes: ' + diagN + ' holes, ' +
-    mib(diagB) + ' MiB = ' + share.toFixed(1) + '% of free bytes')
-  console.log(share >= 20
-    ? '  -> entries arrays are a MAJOR component of the fragmentation'
-    : '  -> entries arrays are NOT the fragmentation; the boxing link is refuted on this evidence')
+  let allB = 0, allN = 0
+  for (const [, r] of hc.free) { allB += r.bytes; allN += r.n }
+
+  let diagN = 0, diagB = 0
+  for (const [sz, r] of hc.free) if (DIAG.includes(sz)) { diagN += r.n; diagB += r.bytes }
+  const dshare = 100 * diagB / allB
+  console.log('\n  [4] holes at DIAGNOSTIC 3*2^n sizes: ' + diagN + ' holes, ' +
+    mib(diagB) + ' MiB = ' + dshare.toFixed(1) + '% of free bytes')
+  console.log(dshare >= 20
+    ? '      -> a large 3*2^n population EXISTS. Note it is NOT evidence of boxing on\n' +
+      '         the sync path: scr_dyn_obj_set is emitted zero times. Attribute it to\n' +
+      '         JSON / app-state / the island path before claiming anything.'
+    : '      -> entries arrays are not a major component; consistent with the emitted\n' +
+      '         code, which puts that ladder off the sync path entirely.')
+
+  /* Rank the top holes so the mode is read off the data, not assumed. */
+  const top = [...hc.free.entries()].sort((a, b) => b[1].bytes - a[1].bytes).slice(0, 8)
+  console.log('\n  top free-hole sizes by bytes:')
+  for (const [sz, r] of top)
+    console.log('      ' + String(sz).padStart(8) + ' B  ' + String(r.n).padStart(9) +
+      ' holes  ' + mib(r.bytes).padStart(8) + ' MiB' +
+      (MULT.includes(sz) ? '   <- ' + (sz / STRMODE) + 'x the predicted body mode' : ''))
+
+  let mN = 0, mB = 0
+  for (const [sz, r] of hc.free) if (MULT.includes(sz)) { mN += r.n; mB += r.bytes }
+  console.log('\n  [5] holes at ' + STRMODE + ' B or a small multiple: ' + mN + ' holes, ' +
+    mib(mB) + ' MiB = ' + (100 * mB / allB).toFixed(1) + '% of free bytes')
+  const exact = hc.free.get(STRMODE)
+  console.log('      exactly ' + STRMODE + ' B: ' + (exact ? exact.n : 0) + ' holes' +
+    ' (predicted ~' + PER_ROUND + ' per round)')
+  console.log(mN >= PER_ROUND / 2
+    ? '      -> CONSISTENT with the prediction. It is not confirmed until a CHUNKS=0\n' +
+      '         control shows the mode ABSENT; without that control it is a coincidence\n' +
+      '         of size, since 328 is an unremarkable number for a heap to hold.'
+    : '      -> REFUTED on this evidence: the band is not where the free space is.')
+
   if (hc.page)
-    console.log('  page ceiling: ' + hc.page.pages + ' whole pages = ' + mib(hc.page.pageBytes) +
-      ' MiB of ' + mib(crt.free) + ' MiB free (' + (100 * hc.page.pageBytes / crt.free).toFixed(2) + '%)')
+    console.log('\n  page ceiling: ' + hc.page.pages + ' whole pages = ' + mib(hc.page.pageBytes) +
+      ' MiB of ' + mib(crt.free) + ' MiB free (' +
+      (100 * hc.page.pageBytes / crt.free).toFixed(2) + '%), longest run ' +
+      hc.page.runMax + ' B')
 }
 
 console.log(fails ? '\nRECONCILE FAILED (' + fails + ')' : '\nRECONCILE OK')

@@ -98,6 +98,18 @@ if [ "$STEP" = run ]; then
     arena)  KNOBS="$KNOBS SCR_PAGECEN_EVERY=1" ;;
     memmap) KNOBS="$KNOBS SCR_MEMMAP_MS=2000 SCR_MEMMAP_SELFTEST=32" ;;
   esac
+  # CENSUS_EXTRA is appended LAST so it overrides, which is what makes the
+  # no-sync control a one-liner on the same binary:
+  #
+  #   CENSUS_EXTRA="CHUNKS=0" census-arms.sh arena run nosync
+  #
+  # THAT CONTROL IS NOT OPTIONAL for the free-side prediction. A mode at
+  # 328 B in HCFREE means nothing on its own -- 328 is an unremarkable
+  # number for a heap to hold -- and only becomes evidence that it is the
+  # message bodies if it is ABSENT when no history is delivered. A run
+  # without its control is a coincidence of size, so both are staged here
+  # rather than left to be remembered under a clock.
+  KNOBS="$KNOBS ${CENSUS_EXTRA:-}"
   # THE LAUNCH DIRECTORY IS PART OF THE PROTOCOL, and this script had it wrong
   # in its first commit. fake-server's sources import zapo-js/util and friends,
   # which are not node_modules packages but tsconfig "paths" entries in the
