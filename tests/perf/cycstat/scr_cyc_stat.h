@@ -114,10 +114,15 @@ SCR_CS_SHARED unsigned long long scr_cs_sirefuse = 0;
 SCR_CS_SHARED unsigned long long scr_cs_t0 = 0;
 SCR_CS_SHARED unsigned long long scr_cs_p0 = 0;
 SCR_CS_SHARED int scr_cs_registered = 0;
+SCR_CS_SHARED int scr_cs_reported = 0;
 
 SCR_CS_FN unsigned long long scr_cs_now(void) { return __builtin_ia32_rdtsc(); }
 
 SCR_CS_FN void scr_cs_report(void) {
+  /* Idempotent: the atexit registration and the _Exit interposer can both
+   * fire, and two reports in one file is a corrupt measurement. */
+  if (scr_cs_reported) return;
+  scr_cs_reported = 1;
   FILE *f = stderr;
   const char *out = getenv("SCR_CYCSTAT_OUT");
   if (out != NULL && *out != '\0') {
@@ -192,6 +197,45 @@ SCR_CS_FN void scr_cs_arm(void) {
     atexit(scr_cs_report);
   }
 }
+
+/* ATEXIT ALONE CANNOT REPORT ON THIS TARGET, and this header spent a whole
+ * measurement not knowing it.
+ *
+ * zapo's entry ends in `process.exit(0)`, which lowers to `_Exit` and skips
+ * every atexit handler. So a cycstat-instrumented zapo run produced NO output
+ * at all -- not the file named by SCR_CYCSTAT_OUT, not the stderr fallback,
+ * not even the unconditional ARMED line whose entire job is to prove the
+ * hooks compiled. From the outside that is indistinguishable from "the change
+ * did nothing", which is the shape this tree has been bitten by repeatedly.
+ * The binary was checked and DID carry the census (22 `cycstat` strings in the
+ * exe, and a different sha from its uninstrumented sibling): compiled in,
+ * never run.
+ *
+ * tests/perf/cycensus/scr_cyc_census.h already had this exact problem and
+ * already solved it, in a comment eight lines long, one directory over. This
+ * is that solution ported, not a second design.
+ *
+ * scr_cs_report is made IDEMPOTENT rather than relying on being called once:
+ * both routes may fire in a program that exits normally after an interposed
+ * `_Exit` never ran, and a doubled report is a corrupt one. */
+__attribute__((constructor)) SCR_CS_FN void scr_cs_install(void) {
+  scr_cs_arm();
+}
+
+/* COMPOSITION, stated because it is a footgun rather than a feature. A macro
+ * cannot extend a macro it cannot name, so chaining is by explicit knowledge
+ * of the other reporter -- exactly as cycensus chains onto scr_prof's. If
+ * cycensus is also -include'd it must come FIRST, so that SCR_CYCEN_ON is
+ * defined when this is read and both reports survive; included the other way
+ * round, this one wins and cycensus's is silently lost. */
+#ifdef _Exit
+#undef _Exit
+#endif
+#ifdef SCR_CYCEN_ON
+#define _Exit(c) (scr_cs_report(), scr_cycen_report(), _Exit(c))
+#else
+#define _Exit(c) (scr_cs_report(), _Exit(c))
+#endif
 
 SCR_CS_FN void scr_cs_pass_begin(void) {
   scr_cs_arm();
