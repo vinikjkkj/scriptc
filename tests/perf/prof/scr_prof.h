@@ -620,6 +620,28 @@ SCR_PROF_NI SCR_PROF_FN void scr_prof_note_size(ScrProfRow *r, size_t n) {
 #ifndef SCR_PROF_STACK_SITE
 #define SCR_PROF_STACK_SITE ""
 #endif
+/* THE SIZE BAND, the same filter keyed on the other axis.
+ *
+ * The site filter answers "who calls this line". A residue investigation asks
+ * the opposite question: a free-side census finds a population of holes at ONE
+ * SIZE and needs to know which allocations made them, with no site to start
+ * from. Keying on size collapses the distinct-stack count exactly as the site
+ * filter does, because one size class is reached from far fewer paths than the
+ * whole program is.
+ *
+ * Set both to the same value for an exact class -- MIN=1344 MAX=1344 captures
+ * only 1,344-byte allocations. Defaults admit everything, so the band is inert
+ * unless asked for. The two filters AND.
+ *
+ * The report echoes the band for the same reason it echoes `site` and
+ * `skipped`: a run that captured nothing must not read as a workload that
+ * allocated nothing. */
+#ifndef SCR_PROF_STACK_SIZE_MIN
+#define SCR_PROF_STACK_SIZE_MIN 0u
+#endif
+#ifndef SCR_PROF_STACK_SIZE_MAX
+#define SCR_PROF_STACK_SIZE_MAX ((size_t)-1)
+#endif
 typedef struct {
   void *fr[SCR_PROF_STACK_DEPTH];
   long long count;
@@ -664,6 +686,10 @@ SCR_PROF_NI SCR_PROF_FN void scr_prof_note_stack(ScrProfRow *row, size_t n) {
   void *fr[SCR_PROF_STACK_DEPTH];
   unsigned got = 0, i;
   unsigned h = 2166136261u;
+  if (n < (size_t)SCR_PROF_STACK_SIZE_MIN || n > (size_t)SCR_PROF_STACK_SIZE_MAX) {
+    scr_prof_stacks_skipped++;
+    return;
+  }
   if (!scr_prof_stack_want(row)) {
     scr_prof_stacks_skipped++;
     return;
@@ -850,9 +876,12 @@ SCR_PROF_FN void scr_prof_write(FILE *f) {
       fprintf(f, "\n");
     }
     fprintf(f, "PROF-STACKS-TOTAL rows=%lld count=%lld bytes=%lld lost=%lld"
-               " tablefull=%lld skipped=%lld site=\"%s\"\n",
+               " tablefull=%lld skipped=%lld site=\"%s\""
+               " sizeband=%llu..%llu\n",
             srows, scount, sbytes, scr_prof_stacks_lost, scr_prof_stacks_full,
-            scr_prof_stacks_skipped, SCR_PROF_STACK_SITE);
+            scr_prof_stacks_skipped, SCR_PROF_STACK_SITE,
+            (unsigned long long)SCR_PROF_STACK_SIZE_MIN,
+            (unsigned long long)SCR_PROF_STACK_SIZE_MAX);
     if (scr_prof_stacks_full != 0) {
       fprintf(f, "PROF-STACKS TABLE FULL - %lld allocations found no free"
                  " slot. Every row above is whatever ran FIRST, not a sample"
@@ -862,8 +891,11 @@ SCR_PROF_FN void scr_prof_write(FILE *f) {
     }
     if (srows == 0) {
       fprintf(f, "PROF-STACKS NOTHING RECORDED - no stack was captured."
-                 " Either SCR_PROF_STACK_SITE matched no allocation site (see"
-                 " skipped= above), or this is a non-Windows target where the"
+                 " Either a filter admitted nothing -- SCR_PROF_STACK_SITE"
+                 " matched no allocation site, or SCR_PROF_STACK_SIZE_MIN/MAX"
+                 " excluded every size; both show in skipped= and the echoed"
+                 " site= and sizeband= above -- or this is a non-Windows"
+                 " target where the"
                  " walk is not implemented. Neither is an absence of\n"
                  " allocations.\n");
     }
