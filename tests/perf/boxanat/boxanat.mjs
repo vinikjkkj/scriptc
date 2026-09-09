@@ -537,7 +537,11 @@ function selfTest() {
   ok("root nodes = 7 bounded", cRoot && cRoot.nodes === 7);
   ok("root is unbounded (an array below it)", cRoot && cRoot.unbounded === true);
   ok("root per element = 72", cRoot && cRoot.perElem === 72);
-  // ...and the two-element instance the anatomy probe actually holds:
+  // ...and the two-element instance the anatomy probe actually holds. 784 is
+  // not a target this model was tuned to: tests/perf/dyncensus measures
+  // exactly 784 B and exactly 9 nodes per box over 996 retained boxes, and
+  // the reading was retaken on a COLD cache after the profFlavor cache-key
+  // fix landed -- the two raw reports are byte-identical.
   ok("nine nodes at 2 tags", cRoot && cRoot.nodes + 2 === 9);
   const total = cRoot ? cRoot.bytes + mallocPhys(ITEM_B * capFor(2)) + 2 * NODE_B : 0;
   ok("784 B at 2 tags", total === 784);

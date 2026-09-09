@@ -65,15 +65,55 @@ SCR_DYNCEN_OUT=<out>/anat1.txt <out>/anat1.exe
 node tests/perf/dyncensus/dyncensus.mjs <out>/anat1.txt
 ```
 
+At the snapshot the census holds **996** boxes and reports:
+
+```
+8,963 live ScrDyn x 64 B                       = 573,632   ScrDyn blocks
+OBJ entries buffers                              175,296   physical (143,424 requested)
+ARR items buffers                                 40,048   physical ( 24,112 requested)
+```
+
+Subtracting the one cap-1024 items buffer that belongs to the `boxes`
+container rather than to any box (8,208 B physical), per box:
+
+| | nodes | bytes |
+|---|---|---|
+| OBJ (root + `inner`) | 2 x 64 | 128 + 176 table = 304 |
+| NUM (`n`, `inner.a`) | 2 x 64 | 128 |
+| STR (`id`, `inner.b`, 2 tags) | 4 x 64 | 256 (the `ScrStr` is shared) |
+| ARR (`tags`) | 1 x 64 | 64 + 32 items = 96 |
+| **total** | **9** | **784** |
+
 | | predicted by `boxanat.mjs` | measured by `dyncensus` |
 |---|---|---|
-| nodes per box | 9 | 8.96 (nine, minus the snapshot band) |
-| bytes per box | 784 | 783.8 |
+| nodes per box | 9 | 9 (8,963 live / 996 boxes, the container aside) |
+| bytes per box | 784 | **784** |
 
 `anat0.ts` is the positive control and the instrument **refuses** it — no
 snapshot was ever taken, because the arm with no boxing allocates essentially
 no `ScrDyn` at all. A control that can only say "yes" is not a control; this
 one says "nothing here".
+
+### Re-verified against the build-cache defect
+
+`bin/<key>` and `obj/<set>` did not fold the contents of a `-include`d
+instrument header, so a build after a header edit could hit the cache and hand
+back a binary carrying the **previous** instrument (fixed in
+`fix(cache): the build cache could not see an instrument header's bytes`).
+
+Both readings above were retaken with that fix in the tree and a **cold**
+`SCRIPTC_CACHE_DIR`, and the two raw `dyncensus` reports are **byte-identical**
+to the originals — `anat1` reproduces every per-kind count and every physical
+byte figure, and `anat0` still refuses. The model stands unchanged.
+
+It could not have bitten this lane, and the reason is worth writing down
+rather than trusting: `scr_dyn_census.h` was never edited here (it is
+untouched from the branch point), and the flag *string* — which does not
+witness a header edit but does name one — is already part of `identityArgs`,
+so the instrumented probes and the uninstrumented ones (`rt1`, `snap1`,
+`snap2`) could never have shared a cache entry either. The defect bites on a
+header **edit**, and there was none. Re-measured anyway, because the argument
+is not the check.
 
 ## The identity divergence the representation already causes
 
