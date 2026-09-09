@@ -185,3 +185,35 @@ notification" was read off `nobuffer/out-buf/zapo-rest.ll`, which is **1.8.2**
 not exist in the 1.6.2 artifact at all. That reading describes the other arm
 and must not be carried over to this one without redoing it against a 1.6.2
 artifact.
+
+### Concentrated or spread? The static list cannot say, and here is how far it gets
+
+Read from `rest182-out162nw/zapo-rest.ll` (**arm: zapo-js 1.6.2, `app/`** — the
+arm the measurement was taken on).
+
+**7,569 array-growing call sites** (`scr_arr_push` / `push_ref` / `set_slot` /
+`unshift`) spread across **1,683 emitted functions**. The concentration curve:
+
+| share of static sites | functions |
+|---|---|
+| 50% | 67 |
+| 90% | 927 |
+
+A long tail, and the largest single holder is `sc_f__x25_init_193` with 1,263
+sites — an **init** function that builds static tables once, not the sync path.
+The `Object.keys` / `Object.entries` helper family is 23 functions holding 556
+sites between them.
+
+**But static site count is not dynamic byte attribution, and this question is
+about bytes.** One push inside a hot loop outweighs a thousand sites that run
+once — `init_193` is exactly that shape in reverse. So the honest answer is
+that the static list **cannot** settle whether the ~170,740 large grows are
+concentrated: it says only that the *opportunity* is spread, which is
+consistent with either outcome.
+
+The thing that settles it is per-site caller attribution, which is the
+`SCR_PROF_STACKS` half of the queued build. That is the same instrument the
+concentration question and the "which TypeScript" question both need, so one
+build answers both — and if the answer is "concentrated", a targeted fix may
+be available; if "spread", a growth-policy change is the only lever and its
+blast radius is corpus-wide.
