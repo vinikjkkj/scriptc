@@ -217,3 +217,86 @@ concentration question and the "which TypeScript" question both need, so one
 build answers both — and if the answer is "concentrated", a targeted fix may
 be available; if "spread", a growth-policy change is the only lever and its
 blast radius is corpus-wide.
+
+## Pass 2 — the size shape, 2026-09-09 (artifact: `out/zapo-rest-prof2.exe`, arm: `app/` 1.6.2)
+
+Same two-run protocol, `-DSCR_PROF_SIZEHIST -DSCR_PROF_STACKS`. Both arms
+clean-exit 0, `events-captured n=0` and `n=8`.
+
+**The stack half failed and is reported as a failure, not a result.**
+`lost=5,409,633` of 5,426,047 — 99.7%. The 16,384-slot table saturated during
+startup, so both arms recorded an identical 16,414 allocations and the
+difference between them is exactly zero. No attribution came out of this run.
+The instrument is fixed (a site filter, and `tablefull` counted separately
+from a failed walk so a saturated table can never again read as data); the
+re-run is not launched.
+
+### `scr_array.c:172` is bimodal, and both modes are now visible
+
+Octave histogram of the burst's 1,436,752 grows at that site (bucket *b*
+covers [2^b, 2^(b+1)); `cap` is always a power of two so a grow lands on the
+bucket floor):
+
+| octave | bytes | grows | ≈ MiB |
+|---|---|---|---|
+| 5 | 32 | 365,846 | 11.2 |
+| 6 | 64 | 883,666 | 54.0 |
+| 7 | 128 | 25,944 | 3.2 |
+| 8 | 256 | 22,558 | 5.5 |
+| 9 | 512 | 22,187 | 10.8 |
+| 10 | 1,024 | 21,446 | 20.9 |
+| 11 | 2,048 | 20,100 | 39.3 |
+| 12 | 4,096 | 18,845 | 73.6 |
+| 13 | 8,192 | 17,648 | 137.9 |
+| 14 | 16,384 | 15,533 | 242.7 |
+| 15 | 32,768 | 14,506 | 453.3 |
+| 16 | 65,536 | 8,473 | 529.6 |
+
+**87.0% of the grows are ≤64 B** — the first sizing, exactly as the ratio
+predicted. **And 2.7% of the grows (octaves 14–16, 38,512 of them) carry
+~1,226 MiB, about 77% of the site's bytes.** The tail is remarkably *flat*
+from octave 7 to 15 — 15,000–26,000 grows in every octave — which is the
+signature of arrays climbing the whole ladder rather than of a few big ones.
+
+So the mean of 998 B described neither population, as suspected. A presize
+would have to know the final size of arrays reaching **8,192–16,384 elements**,
+and there are tens of thousands of them per run.
+
+`scr_array.c:179` is monomorphic: **1,254,966 allocations, all in octave 6** —
+every `ScrArr` header is exactly 64 B.
+
+### The exact table: 328 B is real, and the multiplicity was 4
+
+Top exact sizes the burst added (bucket covers [lo, lo+8)):
+
+| lo | delta | MiB |
+|---|---|---|
+| 64 | 2,440,080 | 148.9 |
+| 24 | 948,928 | 21.7 |
+| 32 | 530,474 | 16.2 |
+| 152 | 135,882 | 19.7 |
+| 128 | 87,926 | 10.7 |
+| **328** | **76,796** | **24.0** |
+| **336** | **71,526** | **22.9** |
+
+**328 is a real, sharp exact mode.** The registered prediction named the size
+correctly and the count wrongly: 76,796 is **4.00×** the 19,200 message bodies
+(76,796 / 19,200 = 3.999), and 336 carries another 71,526. So the message body
+produces about four heap strings of that class each, not one.
+
+The registered criterion was "population within 2×", and 4.00× fails it, so
+**the prediction stays refuted** — but for a far more informative reason than
+the first reading suggested. The site-total of 301,903 was never the 328
+population; the exact table separates them and the site is a mixture.
+
+`over8k=58,701` in the burst: allocations at or above 8 KiB are outside the
+exact table and are in the octave histogram only.
+
+### Caveats
+
+* **Attribution lane, not a timing lane.** The stack walk ran on every one of
+  5.4M allocations. Instrumented peak, `profTableBytes` and cycle counts from
+  this build mean nothing and must never be compared with the clean 105.14 MiB.
+* Burst allocation count moved 4,871,991 → 5,426,047 (+11%) between pass 1 and
+  pass 2. Run-to-run variation on a workload with timers; the shape is stable,
+  the absolute counts are not to three digits.
