@@ -2404,6 +2404,22 @@ export async function compileC(opts: CcOptions): Promise<void> {
     .update(fingerprint).update("\0")
     .update(identityArgs.join("\x1f")).update("\0")
     .update(cBytes);
+  // THE FORCED INCLUDES' CONTENTS, and this cache is where that mattered
+  // most. `identityArgs` above carries `-include <path>` — the NAME of an
+  // instrument header — while `fingerprint` covers only the runtime src and
+  // vendor trees, and an instrument lives in tests/perf/. So editing a
+  // census header left every input of this key byte-identical: the build
+  // hit, copied the PREVIOUS binary onto outPath, and the run reported the
+  // previous instrument's numbers with no diagnostic anywhere. Measured, not
+  // supposed: a deliberately broken page census rebuilt to a byte-identical
+  // exe (same sha256) and printed its pre-break answer, and the harness test
+  // that exists to catch exactly that passed in 1.3 s.
+  //
+  // profFlavor() already folds those bytes and was already used by the five
+  // vendored caches for this same reason; it was simply never wired into the
+  // two keyspaces here. It returns "" when SCRIPTC_PROF_CFLAGS is unset, and
+  // the guard keeps an ordinary build's key byte-for-byte historical.
+  if (profFlavor() !== "") key.update("\0prof\0").update(profFlavor());
   // The shared header and the other units of a split program. Every byte
   // the compiler will read has to be in the key, or an edit that lands in
   // one part alone is served the previous binary out of the cache.
@@ -2470,7 +2486,11 @@ export async function compileC(opts: CcOptions): Promise<void> {
   ];
 
   let objects: Map<string, string> | null = null;
-  const objKeyPrefix = `obj-v2\0${ccName}\0${cv}\0${fingerprint}\0`;
+  // profFlavor() for the same reason as the binary key above: `cflags` names
+  // a forced include, the fingerprint cannot see it, and a stale runtime
+  // object under a live key is the worst failure a cache has. Empty when
+  // SCRIPTC_PROF_CFLAGS is unset, so an ordinary build's prefix is unchanged.
+  const objKeyPrefix = `obj-v2\0${ccName}\0${cv}\0${fingerprint}\0${profFlavor()}`;
   try {
     objects = await ensureRuntimeObjects(root, driver.argv, cflags, rtInputs, objKeyPrefix);
     // Between the presence check inside ensureRuntimeObjects and the link
