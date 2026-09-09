@@ -186,6 +186,11 @@ typedef struct {
    * in every other lane. */
   long long live;
   long long snap;
+#ifdef SCR_PROF_STACKS
+  /* 0 unknown, 1 capture, -1 skip. Resolved once per ROW so the filter costs
+   * one signed-char test per allocation instead of a strstr. */
+  signed char stk_want;
+#endif
 } ScrProfRow;
 
 /* "file:line" as one compile-time literal. Each expansion is its own static
@@ -500,6 +505,242 @@ SCR_PROF_SHARED int scr_prof_reported = 0;
  * nothing else. Nothing about the TABLE is reset by a dump -- `snap` stays
  * the process-wide high-water it always was, and `live` is read at the
  * instant of the dump, which is the whole point of taking one at an edge. */
+/* ---- the SIZE HISTOGRAM and the CALLER STACK (-DSCR_PROF_SIZEHIST,
+ *      -DSCR_PROF_STACKS; both add-ons to -DSCR_PROF_ALLOC) --------------
+ *
+ * WHY BOTH EXIST. The alloc lane reports COUNT and TOTAL BYTES per site, and
+ * a run on the zapo history sync produced a site with 1,350,463 calls at a
+ * mean of 998 B -- which turned out to be two populations, not one: about
+ * 87% of the calls are a 32-byte first sizing and about 97% of the bytes are
+ * repeated doubling on a minority of arrays. A mean over a bimodal
+ * population is the number that produces a confident wrong policy, and the
+ * lane could not see the shape. It can now.
+ *
+ * The same run had `rva2` at 0 on every row: the (callee, call site) pair is
+ * filled only by scr_prof_row2 under SCR_PROF_EDGES, which instruments
+ * __cyg_profile_func_enter/exit -- the CPU lane. The ALLOC lane never
+ * recorded a caller at all, so "which emitted function allocated this" was
+ * unanswerable however good the symbolisation was.
+ *
+ * WHY A STACK AND NOT ONE RETURN ADDRESS. __builtin_return_address(0) inside
+ * the interposer names the RUNTIME function that called malloc, which the
+ * site string already names. The interesting frame is the compiled-program
+ * one, and it sits at a DIFFERENT DEPTH per path: scr_arr_grow is reached
+ * from scr_arr_new at one depth and from scr_arr_push_slot at another. Any
+ * fixed depth is a guess that has to be re-guessed with a rebuild. So the
+ * whole short stack is recorded and the OFFLINE reader picks the first frame
+ * that resolves into the emitted program -- tests/perf/pdb-symbols.mjs
+ * already maps an RVA to a name, and scr_prof_base() is
+ * GetModuleHandleW(NULL), so every frame stored here is a true
+ * image-relative RVA on the same scale as `rva` and `rva2`.
+ *
+ * COST. The histogram is two adds on the allocation path. The stack walk is
+ * not cheap and is not pretended to be: RtlCaptureStackBackTrace at depth 10
+ * runs per allocation, and on a run making 4.6M of them it is seconds. This
+ * is an attribution lane, never a timing lane, and a build carrying it must
+ * not be used for a cycle or wall-clock number.
+ *
+ * REFUSALS. Both print an ARMED line and, if they recorded nothing, say so
+ * by name -- an all-zero histogram means the hooks did not run, not that
+ * nothing was allocated. The stack table prints `stacksLost` for the
+ * allocations whose stack it could not key, because those are missing from
+ * the attribution and their absence must not read as zero.
+ */
+#if defined(SCR_PROF_SIZEHIST) || defined(SCR_PROF_STACKS)
+#ifndef SCR_PROF_ALLOC
+#error "SCR_PROF_SIZEHIST / SCR_PROF_STACKS are add-ons to SCR_PROF_ALLOC"
+#endif
+#endif
+
+#ifdef SCR_PROF_SIZEHIST
+/* 40 octaves covers one byte to a terabyte. Per ROW, so a site's shape is
+ * visible without mixing it with every other site's. BSS, so only the rows a
+ * run actually touches become resident. */
+#define SCR_PROF_HB 40u
+SCR_PROF_SHARED long long scr_prof_hist[SCR_PROF_SLOTS][SCR_PROF_HB];
+/* And a process-wide EXACT table at the allocator's own 8-byte granularity,
+ * to 8 KiB. The octave histogram separates 32 B from 7.7 KB; it cannot tell
+ * 328 from 312, and two registered predictions turn on exactly that. */
+#define SCR_PROF_EXACT_MAX 8192u
+#define SCR_PROF_EXACT_N (SCR_PROF_EXACT_MAX / 8u)
+SCR_PROF_SHARED long long scr_prof_exact[SCR_PROF_EXACT_N];
+SCR_PROF_SHARED long long scr_prof_exact_over = 0;
+SCR_PROF_SHARED long long scr_prof_hist_n = 0;
+
+SCR_PROF_NI SCR_PROF_FN void scr_prof_note_size(ScrProfRow *r, size_t n) {
+  unsigned b = 0;
+  size_t v = n;
+  while (v >= 2u && b + 1u < SCR_PROF_HB) {
+    v >>= 1;
+    b++;
+  }
+  if (r != NULL) {
+    size_t idx = (size_t)(r - scr_prof_tbl);
+    if (idx < SCR_PROF_SLOTS) scr_prof_hist[idx][b]++;
+  }
+  if (n < SCR_PROF_EXACT_MAX) scr_prof_exact[n / 8u]++;
+  else scr_prof_exact_over++;
+  scr_prof_hist_n++;
+}
+#define SCR_PROF_NOTE_SIZE(r, n) scr_prof_note_size((r), (n))
+#else
+#define SCR_PROF_NOTE_SIZE(r, n) ((void)0)
+#endif
+
+#ifdef SCR_PROF_STACKS
+#ifndef SCR_PROF_STACK_DEPTH
+#define SCR_PROF_STACK_DEPTH 10u
+#endif
+#ifndef SCR_PROF_STACK_SLOTS
+#define SCR_PROF_STACK_SLOTS (1u << 17)
+#endif
+/* THE SITE FILTER, AND WHY IT IS NOT OPTIONAL.
+ *
+ * The first armed run of this lane lost 5,409,633 of 5,426,047 allocations --
+ * 99.7%. Depth 10 makes almost every call path distinct, so a 16,384-slot
+ * table saturated during process STARTUP and every allocation after that
+ * probed all slots, matched nothing, found nothing free, and was counted lost.
+ * Both arms then reported an identical 16,414 attributed allocations, so the
+ * two-run difference was exactly zero: the lane produced no information at
+ * all while looking like it had a table full of data.
+ *
+ * Raising the slot count alone does not fix that -- distinct stacks are
+ * unbounded and the table would fill later rather than never. The fix is to
+ * stop capturing stacks the question does not need. SCR_PROF_STACK_SITE is a
+ * substring matched against the allocation site's "file:line"; only sites that
+ * match are walked. Attributing 1.28 GiB at scr_array.c:172 needs that one
+ * site's callers, and nothing else.
+ *
+ * It also removes the cost objection: the walk stops running on the other
+ * 99% of allocations, so the lane is no longer seconds of overhead.
+ *
+ * Unset means capture EVERYTHING, which is the behaviour that failed; the
+ * report says so by name rather than letting a saturated table read as data.
+ */
+#ifndef SCR_PROF_STACK_SITE
+#define SCR_PROF_STACK_SITE ""
+#endif
+/* THE SIZE BAND, the same filter keyed on the other axis.
+ *
+ * The site filter answers "who calls this line". A residue investigation asks
+ * the opposite question: a free-side census finds a population of holes at ONE
+ * SIZE and needs to know which allocations made them, with no site to start
+ * from. Keying on size collapses the distinct-stack count exactly as the site
+ * filter does, because one size class is reached from far fewer paths than the
+ * whole program is.
+ *
+ * Set both to the same value for an exact class -- MIN=1344 MAX=1344 captures
+ * only 1,344-byte allocations. Defaults admit everything, so the band is inert
+ * unless asked for. The two filters AND.
+ *
+ * The report echoes the band for the same reason it echoes `site` and
+ * `skipped`: a run that captured nothing must not read as a workload that
+ * allocated nothing. */
+#ifndef SCR_PROF_STACK_SIZE_MIN
+#define SCR_PROF_STACK_SIZE_MIN 0u
+#endif
+#ifndef SCR_PROF_STACK_SIZE_MAX
+#define SCR_PROF_STACK_SIZE_MAX ((size_t)-1)
+#endif
+typedef struct {
+  void *fr[SCR_PROF_STACK_DEPTH];
+  long long count;
+  long long bytes;
+} ScrProfStack;
+SCR_PROF_SHARED ScrProfStack scr_prof_stk[SCR_PROF_STACK_SLOTS];
+SCR_PROF_SHARED long long scr_prof_stacks_lost = 0;
+SCR_PROF_SHARED long long scr_prof_stacks_full = 0;
+SCR_PROF_SHARED long long scr_prof_stacks_n = 0;
+SCR_PROF_SHARED long long scr_prof_stacks_skipped = 0;
+
+/* Resolved once per row; see ScrProfRow::stk_want. */
+SCR_PROF_NI SCR_PROF_FN int scr_prof_stack_want(ScrProfRow *r) {
+  const char *pat = SCR_PROF_STACK_SITE;
+  const char *n;
+  if (r == NULL) return pat[0] == '\0';
+  if (r->stk_want != 0) return r->stk_want > 0;
+  if (pat[0] == '\0') {
+    r->stk_want = 1;
+    return 1;
+  }
+  n = r->name;
+  r->stk_want = -1;
+  if (n != NULL) {
+    const char *a;
+    for (a = n; *a != '\0'; a++) {
+      const char *x = a, *y = pat;
+      while (*y != '\0' && *x == *y) {
+        x++;
+        y++;
+      }
+      if (*y == '\0') {
+        r->stk_want = 1;
+        break;
+      }
+    }
+  }
+  return r->stk_want > 0;
+}
+
+SCR_PROF_NI SCR_PROF_FN void scr_prof_note_stack(ScrProfRow *row, size_t n) {
+  void *fr[SCR_PROF_STACK_DEPTH];
+  unsigned got = 0, i;
+  unsigned h = 2166136261u;
+  if (n < (size_t)SCR_PROF_STACK_SIZE_MIN || n > (size_t)SCR_PROF_STACK_SIZE_MAX) {
+    scr_prof_stacks_skipped++;
+    return;
+  }
+  if (!scr_prof_stack_want(row)) {
+    scr_prof_stacks_skipped++;
+    return;
+  }
+#ifdef _WIN32
+  got = (unsigned)RtlCaptureStackBackTrace(0, (ULONG)SCR_PROF_STACK_DEPTH, fr, NULL);
+#else
+  (void)fr;
+#endif
+  if (got == 0) {
+    scr_prof_stacks_lost++;
+    return;
+  }
+  for (i = got; i < SCR_PROF_STACK_DEPTH; i++) fr[i] = NULL;
+  for (i = 0; i < SCR_PROF_STACK_DEPTH; i++) {
+    h ^= (unsigned)((size_t)fr[i] >> 4);
+    h *= 16777619u;
+  }
+  for (i = 0; i < SCR_PROF_STACK_SLOTS; i++) {
+    unsigned j = (h + i) & (SCR_PROF_STACK_SLOTS - 1u);
+    ScrProfStack *s = &scr_prof_stk[j];
+    unsigned k;
+    int same = 1;
+    if (s->count == 0 && s->fr[0] == NULL) {
+      for (k = 0; k < SCR_PROF_STACK_DEPTH; k++) s->fr[k] = fr[k];
+      s->count = 1;
+      s->bytes = (long long)n;
+      scr_prof_stacks_n++;
+      return;
+    }
+    for (k = 0; k < SCR_PROF_STACK_DEPTH; k++) {
+      if (s->fr[k] != fr[k]) {
+        same = 0;
+        break;
+      }
+    }
+    if (same) {
+      s->count++;
+      s->bytes += (long long)n;
+      return;
+    }
+  }
+  /* Distinct from a failed walk: the table is FULL, which means every number
+   * above is a sample of whatever ran first and not of the workload. */
+  scr_prof_stacks_full++;
+}
+#define SCR_PROF_NOTE_STACK(r, n) scr_prof_note_stack((r), (n))
+#else
+#define SCR_PROF_NOTE_STACK(r, n) ((void)0)
+#endif
+
 SCR_PROF_FN void scr_prof_write(FILE *f) {
   size_t base = scr_prof_base();
 #ifdef SCR_PROF_ALLOC
@@ -560,6 +801,110 @@ SCR_PROF_FN void scr_prof_write(FILE *f) {
              * quote, and it has to be measured on an uninstrumented
              * build. */
             (long long)(sizeof scr_prof_tbl + sizeof scr_prof_ptbl));
+  }
+#endif
+#ifdef SCR_PROF_SIZEHIST
+  /* PROFHIST is one line per ROW that recorded anything: the octave
+   * histogram of that site's allocation sizes. Bucket b covers [2^b,
+   * 2^(b+1)). Only non-empty buckets are printed, as "b:count".
+   *
+   * PROFEXACT is process-wide at the allocator's own 8-byte granularity,
+   * because the octave buckets cannot tell 312 from 328 and two registered
+   * predictions turn on exactly that. Sizes at or above 8 KiB fall into the
+   * `over` counter rather than being silently dropped. */
+  {
+    long long hrows = 0;
+    unsigned i, b;
+    fprintf(f, "PROF-SIZEHIST ARMED buckets=%u exactGranule=8 exactMax=%u\n",
+            (unsigned)SCR_PROF_HB, (unsigned)SCR_PROF_EXACT_MAX);
+    if (scr_prof_hist_n == 0) {
+      fprintf(f, "PROF-SIZEHIST NOTHING RECORDED - the hooks did not run."
+                 " This is not a measurement that nothing was allocated.\n");
+    }
+    for (i = 0; i < SCR_PROF_SLOTS; i++) {
+      ScrProfRow *r = &scr_prof_tbl[i];
+      int any = 0;
+      if (r->key == NULL) continue;
+      for (b = 0; b < SCR_PROF_HB; b++) {
+        if (scr_prof_hist[i][b] != 0) {
+          any = 1;
+          break;
+        }
+      }
+      if (!any) continue;
+      hrows++;
+      fprintf(f, "PROFHIST %llx",
+              (unsigned long long)((size_t)r->key - base));
+      for (b = 0; b < SCR_PROF_HB; b++) {
+        if (scr_prof_hist[i][b] != 0) {
+          fprintf(f, " %u:%lld", b, scr_prof_hist[i][b]);
+        }
+      }
+      fprintf(f, " %s\n", r->name ? r->name : "?");
+    }
+    for (i = 0; i < SCR_PROF_EXACT_N; i++) {
+      if (scr_prof_exact[i] != 0) {
+        fprintf(f, "PROFEXACT %u %lld\n", i * 8u, scr_prof_exact[i]);
+      }
+    }
+    fprintf(f, "PROF-SIZEHIST-TOTAL rows=%lld noted=%lld over8k=%lld\n", hrows,
+            scr_prof_hist_n, scr_prof_exact_over);
+  }
+#endif
+#ifdef SCR_PROF_STACKS
+  /* One line per distinct captured stack, frames as image-relative RVAs on
+   * the same scale as `rva`. The reader resolves them offline and picks the
+   * first frame that lands in the emitted program -- the depth of that frame
+   * varies by path, which is why the whole stack is stored rather than one
+   * chosen return address. */
+  {
+    long long srows = 0, scount = 0, sbytes = 0;
+    unsigned i, k;
+    fprintf(f, "PROF-STACKS ARMED depth=%u slots=%u\n",
+            (unsigned)SCR_PROF_STACK_DEPTH, (unsigned)SCR_PROF_STACK_SLOTS);
+    for (i = 0; i < SCR_PROF_STACK_SLOTS; i++) {
+      ScrProfStack *s = &scr_prof_stk[i];
+      if (s->count == 0) continue;
+      srows++;
+      scount += s->count;
+      sbytes += s->bytes;
+      fprintf(f, "PROFSTACK %lld %lld", s->count, s->bytes);
+      for (k = 0; k < SCR_PROF_STACK_DEPTH; k++) {
+        fprintf(f, " %llx",
+                s->fr[k] ? (unsigned long long)((size_t)s->fr[k] - base) : 0ULL);
+      }
+      fprintf(f, "\n");
+    }
+    fprintf(f, "PROF-STACKS-TOTAL rows=%lld count=%lld bytes=%lld lost=%lld"
+               " tablefull=%lld skipped=%lld site=\"%s\""
+               " sizeband=%llu..%llu\n",
+            srows, scount, sbytes, scr_prof_stacks_lost, scr_prof_stacks_full,
+            scr_prof_stacks_skipped, SCR_PROF_STACK_SITE,
+            (unsigned long long)SCR_PROF_STACK_SIZE_MIN,
+            (unsigned long long)SCR_PROF_STACK_SIZE_MAX);
+    if (scr_prof_stacks_full != 0) {
+      fprintf(f, "PROF-STACKS TABLE FULL - %lld allocations found no free"
+                 " slot. Every row above is whatever ran FIRST, not a sample"
+                 " of the workload, and differencing two such tables gives"
+                 " zero. Narrow SCR_PROF_STACK_SITE or raise"
+                 " SCR_PROF_STACK_SLOTS.\n", scr_prof_stacks_full);
+    }
+    if (srows == 0) {
+      fprintf(f, "PROF-STACKS NOTHING RECORDED - no stack was captured."
+                 " Either a filter admitted nothing -- SCR_PROF_STACK_SITE"
+                 " matched no allocation site, or SCR_PROF_STACK_SIZE_MIN/MAX"
+                 " excluded every size; both show in skipped= and the echoed"
+                 " site= and sizeband= above -- or this is a non-Windows"
+                 " target where the"
+                 " walk is not implemented. Neither is an absence of\n"
+                 " allocations.\n");
+    }
+    if (scr_prof_stacks_lost != 0) {
+      fprintf(f, "PROF-STACKS LOST %lld allocations could not be keyed to a"
+                 " stack; they are absent from the attribution above and"
+                 " their absence is not a zero.\n",
+              scr_prof_stacks_lost);
+    }
   }
 #endif
 }
@@ -631,6 +976,8 @@ SCR_PROF_FN void *scr_prof_malloc(size_t n, const char *site) {
     r->count++;
     r->bytes += (long long)n;
   }
+  SCR_PROF_NOTE_SIZE(r, n);
+  SCR_PROF_NOTE_STACK(r, n);
 #ifdef SCR_PROF_LIVE
   scr_prof_live_add(p, n, r);
 #endif
@@ -645,6 +992,8 @@ SCR_PROF_FN void *scr_prof_calloc(size_t a, size_t b, const char *site) {
     r->count++;
     r->bytes += (long long)(a * b);
   }
+  SCR_PROF_NOTE_SIZE(r, a * b);
+  SCR_PROF_NOTE_STACK(r, a * b);
 #ifdef SCR_PROF_LIVE
   scr_prof_live_add(p, a * b, r);
 #endif
@@ -666,6 +1015,8 @@ SCR_PROF_FN void *scr_prof_realloc(void *q, size_t n, const char *site) {
     r->count++;
     r->bytes += (long long)n;
   }
+  SCR_PROF_NOTE_SIZE(r, n);
+  SCR_PROF_NOTE_STACK(r, n);
 #ifdef SCR_PROF_LIVE
   scr_prof_live_add(p, n, r);
 #endif

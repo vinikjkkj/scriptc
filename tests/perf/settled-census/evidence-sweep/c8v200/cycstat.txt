@@ -1,0 +1,6 @@
+[cycstat] ARMED tests/perf/cycstat/scr_cyc_stat.h
+[cycstat] passes=34 roots=93630 freed=52213
+[cycstat] Mcycles total=472.3 mark=233.6 scan=211.6 white=5.6 teardown=20.1
+[cycstat] arena chunks=390 freed=274 held=116 peakheld=317 carved=307668 listhit=20674226 listgive=20908830 callocfallback=30429
+[cycstat] strarena chunks=38 carved=59129 listhit=0 listgive=0 mallocfallback=0
+[cycstat] strintern hit=196243 miss=60808 put=60650 evict=10108 refuse=158 hitRate=0.7634 evictPerPut=0.1667
