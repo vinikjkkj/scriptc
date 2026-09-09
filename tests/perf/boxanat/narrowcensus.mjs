@@ -68,7 +68,41 @@
 // scores `read-escapes`. Every such miss moves a slot OUT of the narrowable
 // set. The number this prints is a floor.
 
-import { readFileSync } from "node:fs";
+import { readFileSync, statSync } from "node:fs";
+
+/** Loading a big IR dump, with the failure named rather than thrown raw.
+ *
+ * zapo's emitted C is 163 MB across fifteen translation units, so its IR JSON
+ * is large enough that `readFileSync(..., "utf8")` can exceed V8's maximum
+ * string length before `JSON.parse` is ever reached. That failure surfaces as
+ * a bare "Invalid string length" with no file and no size, which is a
+ * fifteen-minute detour the first time somebody meets it. */
+export function loadIr(path) {
+  let size = -1;
+  try { size = statSync(path).size; } catch { /* reported below */ }
+  let text;
+  try {
+    text = readFileSync(path, "utf8");
+  } catch (e) {
+    const mb = size >= 0 ? (size / 1048576).toFixed(1) + " MB" : "unknown size";
+    // Only the LENGTH failure gets the streaming advice. A missing or
+    // unreadable file got it too in the first version, which sent the reader
+    // hunting for a V8 limit when the path was simply wrong.
+    const isLength = /string length|Invalid string/i.test(e.message);
+    throw new Error(
+      `could not read ${path} (${mb}) as one string: ${e.message}` +
+      (isLength
+        ? ". V8 caps string length; an IR dump this large needs a streaming reader, not a bigger --max-old-space-size."
+        : ""),
+    );
+  }
+  try {
+    return JSON.parse(text);
+  } catch (e) {
+    throw new Error(`${path} (${(text.length / 1048576).toFixed(1)} MB of text) is not valid JSON: ${e.message}`);
+  }
+}
+
 
 /** A structural key for an IR type. NOT the compiler's `typeKey` — it is only
  * ever compared against another key from the SAME module, where structural
@@ -306,7 +340,15 @@ function main() {
     console.error("usage: narrowcensus.mjs <program.ir.json> [--list] [--json] [--top N]");
     process.exit(2);
   }
-  const rows = analyze(JSON.parse(readFileSync(f, "utf8")));
+  let rows;
+  try {
+    rows = analyze(loadIr(f));
+  } catch (e) {
+    // The same shape as every other refusal in this lane: one line
+    // naming what could not be done, not a stack trace.
+    console.error("REFUSED — " + e.message);
+    process.exit(4);
+  }
   const topN = args.includes("--top") ? Number(args[args.indexOf("--top") + 1]) : 40;
   if (args.includes("--json")) {
     console.log(JSON.stringify(rows.map((r) => ({ ...r, writes: [...r.writes], recovered: [...r.recovered] })), null, 2));
