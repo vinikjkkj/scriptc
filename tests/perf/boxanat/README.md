@@ -6,6 +6,46 @@ representation change cannot be argued from a single scalar. This lane reads
 the anatomy off the artifact the compiler emitted, and validates the model
 against a physical measurement.
 
+## Which zapo, and which figures depend on it
+
+**Every claim about zapo source names its arm.** Two conclusions in this
+investigation have already turned on it, and the wrong version was convincing
+both times.
+
+| figure | arm | version |
+|---|---|---|
+| 1,905 / 1,904 converters, 1,158 copying, 747 by reference, 218 cyclic | `app182` | zapo-js **1.8.2** |
+| median 304 B, mean 3,142–3,143 B, max 92,992 B | `app182` | **1.8.2** |
+| the 88–90 member app-state mutation shapes | `app182` | **1.8.2** |
+| 26,469 crossings, 88 origin-marked, 16,023 entries-array writes | `app182` | **1.8.2** |
+| the 178 `unknown` slots outliving their statement | provenance `757a8071b819` | **1.8.2** |
+
+Both artifacts read here are 1.8.2 — the `.ll` from another block's rig and
+the `.c` built in this one — confirmed by the entry path recorded in each.
+
+**The settled-memory figures this objective started from are `app/`, which is
+zapo-js 1.6.2**: 2,794 B per retained value, 163.39 → 104.50 MiB, the 105.14
+MiB the census itemised. 1.6.2 downloads and decodes a history blob whole;
+1.8.2 streams proto fields. They are different programs with different sync
+architectures.
+
+**So the mean of 3,143 B is NOT "an independent bracket on the 2,794".** That
+claim, made in an earlier revision of this file, crosses an arm boundary: it
+compares a 1.8.2 converter graph against a 1.6.2 heap. The agreement in order
+of magnitude is worth noting and nothing more, and it is withdrawn as
+corroboration.
+
+**What does NOT depend on the arm**: the anatomy of a box, the cost model and
+its 784 B validation, the three divergences (`rt1`, `snap2`, `cyc1`/`cyc2`),
+and the 140-site audit. Those are properties of the **compiler and the
+runtime**, and they hold for any program either arm compiles.
+
+`narrowcensus.mjs` is about **the compiler's behaviour**, and it has no zapo
+reading yet. If its result is ever used to argue about the measured
+retention, it has to be taken on **1.6.2** — the arm those numbers came from.
+A slot that is narrowable in one version and not the other is a finding to
+name, never a union to take silently.
+
 ## What a crossing actually emits
 
 A static value flowing into an `unknown` slot is lowered to `dynFrom`, and
@@ -38,8 +78,15 @@ subtree.
 
 **The origin also holds a strong reference to the source** for the box's whole
 life (`scr_json.c`'s `dyn_origin_tab`: "the static origin, RETAINED for the
-copy's lifetime"). So a retained observable crossing retains **both**
-representations, not one.
+copy's lifetime"), so such a crossing retains **both** representations.
+
+**But it is rare, and an earlier revision of this file overstated it.** The
+mark is emitted only where `dynCopyIsObservable` holds — the operand must be
+an lvalue the program still names. Counted on the artifact (`app182`, 1.8.2):
+**88 `scr_dyn_origin_mark` call sites against 26,469 crossings, 0.33%.** The
+mechanism is real and it doubles the cost of the crossings that carry it; it
+is not a term on the typical box, and "it doubles the honest cost of every
+retained box" is withdrawn.
 
 `sizeof(ScrDyn)` is **48**, not the 104 the comment above `ScrRva` in
 `scr_runtime.h` still names; that comment is stale.
@@ -162,6 +209,41 @@ So materialising is not a memory cost with a correctness cost attached. It is
 the **cause** of two silent wrong answers — this one and the `===` one above —
 and a by-reference or lazily-materialised box would answer node on both. The
 memory is the side effect.
+
+## What the C lane can and cannot attribute
+
+`boxsites.mjs` on `app182` (zapo-js **1.8.2**, 14-part split build, 163 MB of
+emitted C, 1m52s):
+
+```
+26,469 static-to-dyn crossings in 10,195 emitted functions
+    88 of them mark an ORIGIN                    (0.33%)
+ 5,963 RETAINED (field/global/container)
+   418 ESCAPING (returned/passed)
+ 9,969 TRANSIENT
+10,119 UNCLASSIFIED
+```
+
+The crossing count and the origin count are **ground-truthed against the
+artifact**: `grep -c 'scr_dyn_origin_mark('` is exactly 88, and `sc_td_N(`
+appears 37,438 times of which 1,904 are definitions and 1,904 declarations.
+
+**The retention split is NOT reportable yet, and the per-site attribution is
+not available from this lane at all.** Two reasons, both measured:
+
+1. **38% unclassified.** A bucket census with more than a third undecided
+   cannot support "how many boxes are retained". The floor — at least 5,963
+   crossings outlive their statement — is all it currently says.
+2. **The compiler stamps every `/* file:line */` with the ENTRY file.** All
+   106,161 loc comments in the artifact name `zapo-rest.ts` and not one names
+   a zapo-js source file, so the "one row per source line" grouping
+   degenerates: the top row claims 17,622 crossings on a single entry-file
+   line. That is the back-scan latching onto the nearest available comment,
+   not an idiom.
+
+Both are stated rather than worked around because the alternative is a table
+that looks like an answer. Per-idiom attribution needs the IR, where the slot
+and its shape are still named — the same place `narrowcensus.mjs` reads.
 
 ## Which `unknown` slots never needed to be dynamic
 

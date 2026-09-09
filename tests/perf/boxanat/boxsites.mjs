@@ -50,7 +50,16 @@ import { readFileSync } from "node:fs";
  * same call wrapped in the origin mark when the source is an lvalue whose
  * mutation would be observable (ir/nodes.ts's dynCopyIsObservable). */
 const CROSS = /(\w+)\s*=\s*(?:scr_dyn_origin_mark\s*\(\s*)?(sc_td_\d+)\s*\(/g;
-const FN_HEAD = /^static\s+[\w *]+?\s(sc_f_[A-Za-z0-9_$]+)\s*\(.*\{\s*(?:\/\*\s*(.*?)\s*\*\/)?/;
+/* `static` is OPTIONAL, and that is not tidiness — it is the difference
+ * between a census and a page of zeroes. A single-TU build emits every
+ * program function `static`; a SPLIT build (zapo is 14 parts plus the shared
+ * header) emits them with external linkage so the parts can call each other.
+ * On zapo's artifact there are ZERO `static sc_f_` heads and 20,390 plain
+ * ones, so a `static`-only pattern attributes every crossing in the program
+ * to "(top level)" and every retention bucket collapses. Caught by reading
+ * the artifact rather than by trusting the probe builds, all of which are
+ * single-TU. */
+const FN_HEAD = /^(?:static\s+)?[\w *]+?\s\*?(sc_f_[A-Za-z0-9_$]+)\s*\(.*\{\s*(?:\/\*\s*(.*?)\s*\*\/)?/;
 /* The emitter anchors statements with `/* <file>:<line> *​/`. */
 const LOC = /\/\*\s*([^*]*?\.(?:ts|js|mjs|cjs)):(\d+)\s*\*\//;
 
@@ -83,7 +92,25 @@ export function parse(text) {
     fns.push({ name: "(converter)", start: i, end: j, isConverter: true });
   }
   fns.sort((a, b) => a.start - b.start);
-  const fnAt = (ln) => fns.find((f) => ln >= f.start && ln <= f.end) ?? null;
+  /* Line -> enclosing function, by BINARY SEARCH over the sorted extents.
+   *
+   * This was `fns.find(...)`, called once per line: a linear scan over every
+   * function in the file, for every line in the file. On zapo's 163 MB of
+   * emitted C that is thousands of functions times 3.4 million lines, and it
+   * ran past ten minutes twice without emitting a row. Nothing about the
+   * classification changed — only the lookup. */
+  const fnAt = (ln) => {
+    let lo = 0;
+    let hi = fns.length - 1;
+    while (lo <= hi) {
+      const mid = (lo + hi) >> 1;
+      const f = fns[mid];
+      if (ln < f.start) hi = mid - 1;
+      else if (ln > f.end) lo = mid + 1;
+      else return f;
+    }
+    return null;
+  };
 
   const sites = [];
   for (let i = 0; i < lines.length; i++) {
@@ -116,14 +143,38 @@ export function parse(text) {
 /** What happens to the crossing's result inside the function that made it.
  * The scan is FORWARD from the crossing to the end of its function, which is
  * where the C emitter puts every use of a temp it owns. */
-export function classify(lines, host, temp) {
+/** Every line of one function, indexed by the temp names it mentions.
+ *
+ * Built ONCE per function. The first version of this file re-scanned the
+ * enclosing function for every crossing in it, compiling a fresh regex per
+ * line, which is O(sites x function length): on zapo's 163 MB of emitted C
+ * that ran for twelve minutes at 99% CPU without producing a row. The
+ * measurement is the same; only the order of the loops changed. */
+export function indexTemps(lines, host) {
+  if (host && host.tempIndex) return host.tempIndex;
   const from = host ? host.start : 0;
   const to = host ? host.end : lines.length - 1;
-  const t = temp.replace(/[$]/g, "\\$&");
-  const uses = [];
+  const ix = new Map();
   for (let k = from; k <= to; k++) {
-    if (new RegExp(`\\b${t}\\b`).test(lines[k])) uses.push(lines[k]);
+    const l = lines[k];
+    if (l === undefined) continue;
+    // The emitter's temps are `sc_t<n>`; nothing else can be a crossing's
+    // result or an argument vector.
+    const seen = l.match(/\bsc_t\d+\b/g);
+    if (seen === null) continue;
+    for (const name of new Set(seen)) {
+      let a = ix.get(name);
+      if (a === undefined) { a = []; ix.set(name, a); }
+      a.push(l);
+    }
   }
+  if (host) host.tempIndex = ix;
+  return ix;
+}
+
+export function classify(lines, host, temp) {
+  const uses = indexTemps(lines, host).get(temp) ?? [];
+  const t = temp.replace(/[$]/g, "\\$&");
   let released = false;
   let argOf = null;
   for (const u of uses) {
@@ -143,7 +194,9 @@ export function classify(lines, host, temp) {
     if (call) return "passed";
   }
   if (argOf) {
-    for (const u of uses.concat(lines.slice(from, to + 1))) {
+    // The argument vector's own uses, from the same index — the call that
+    // consumes it mentions it by name, so nothing outside that set can be it.
+    for (const u of indexTemps(lines, host).get(argOf) ?? []) {
       const iv = new RegExp(`scr_dyn_invoke\\s*\\([^,]+,\\s*"([^"]+)"\\s*,\\s*${argOf}\\b`).exec(u);
       if (iv) return RETAINING_METHODS.has(iv[1]) ? "container" : "transient";
     }
@@ -270,6 +323,27 @@ function selfTest() {
     "}",
   ].join("\n");
   ok("returned bucket", parse(retC).sites[0]?.bucket === "returned");
+
+  // THE SPLIT-BUILD SPELLING. zapo compiles to 14 parts plus a shared
+  // header, and a function the other parts call cannot be `static`. A
+  // `static`-only head pattern matched NOTHING on that artifact -- 20,390
+  // heads, none of them static -- so every crossing landed at "(top level)"
+  // and every bucket collapsed. The probe builds are all single-TU and would
+  // never have shown it.
+  const splitC = [
+    "void sc_f_wsSendText(sc_rs_r1882 *sc_l_sub_0, ScrStr *sc_l_text_0) { /* p.ts:562 */",
+    "  sc_rs_r2 *sc_t0 = sc_rnew_r2();",
+    "  ScrDyn *sc_t2 = sc_td_0(sc_l_sub_0);",
+    "  sc_t0->sc_fld_held = sc_t2;",
+    "}",
+  ].join("\n");
+  const sp = parse(splitC);
+  ok("a non-static (split-build) head is found", sp.sites[0]?.fn === "sc_f_wsSendText");
+  ok("...and the crossing still buckets", sp.sites[0]?.bucket === "field");
+  // ...and the control that says the case above can fail: the single-TU
+  // spelling must keep working too.
+  ok("the static spelling still works",
+     parse(splitC.replace("void sc_f_", "static void sc_f_")).sites[0]?.fn === "sc_f_wsSendText");
 
   // A CONVERTER's own body is not a crossing. Without this the census would
   // count every nested field of every shape as a site of its own.
