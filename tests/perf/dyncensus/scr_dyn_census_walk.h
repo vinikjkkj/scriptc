@@ -51,6 +51,12 @@ static void scr_dyncen_walk(ScrDynCenKind *rows) {
     if (d->buffer) r->f_buffer++;
     if (d->null_proto) r->f_nullproto++;
     if (d->static_copy) r->f_staticcopy++;
+    /* The three running totals this node is about to add to, snapshotted
+     * so a boundary copy's own side bytes can be recovered by difference
+     * below. Cheaper and far less error-prone than threading `if
+     * (d->static_copy)` through the nine places they are accumulated. */
+    {
+      long long sc0_side = r->phys_side, sc0_key = r->phys_key, sc0_str = r->str_phys;
     switch ((int)d->kind) {
     case SCR_DYN_OBJ: {
       long long len = (long long)d->v.obj.len, cap = (long long)d->v.obj.cap;
@@ -197,6 +203,18 @@ static void scr_dyncen_walk(ScrDynCenKind *rows) {
     default:
       break; /* NULL / BOOL / NUM hold no pointer at all; and the ARM's
               * synthetic row, whose kind is not a real ScrDynKind. */
+    }
+    /* Charge a boundary copy for its own block plus exactly the side, key
+     * and string bytes it just added. A node that added none contributes
+     * only its 64-byte block, which is correct: a boxed number IS a
+     * 64-byte block and nothing else. */
+    if (d->static_copy) {
+      r->sc_n++;
+      r->sc_node_phys +=
+          (long long)scr_dyncen_phys((long long)(sizeof(ScrCycHdr) + sizeof(ScrDyn)));
+      r->sc_side_phys += (r->phys_side - sc0_side) + (r->phys_key - sc0_key) +
+                         (r->str_phys - sc0_str);
+    }
     }
   }
 }

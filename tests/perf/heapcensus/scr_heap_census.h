@@ -145,6 +145,111 @@ SCR_HC_FN void scr_hc_note(size_t size, size_t overhead) {
   scr_hc_lost++;
 }
 
+/* -- THE FREE SIDE, which is where the retention actually is -------------
+ *
+ * This census was written to identify the BUSY blocks, and it did. But on
+ * the settled zapo process the busy side is 40.65 MiB and the free side is
+ * 72.84 MiB: the heap holds nearly twice as much committed-but-free space
+ * as it holds live data, and retention above the presync baseline (75.4
+ * MiB) is almost exactly that free space. Until now this file reported the
+ * free side as two scalars -- `free=` and `freeBlocks=` -- which is enough
+ * to know the number and not enough to know anything about it.
+ *
+ * Two questions, and they need different instruments:
+ *
+ * 1. WHAT SIZE ARE THE HOLES. A second exact-size table, identical to the
+ *    busy one. 107,512 holes averaging 710 B could be one population or
+ *    twenty, and the mean cannot tell them apart. There is a specific
+ *    hypothesis to test: a ScrDyn node is exactly 64 bytes (ScrCycHdr 16 +
+ *    sizeof(ScrDyn) 48) and boxing a record allocates one per scalar in the
+ *    whole reachable tree, so a sync that boxes app-state records churns
+ *    hundreds of thousands of 64-byte blocks and frees them again. If the
+ *    hole distribution has a hard peak at or just above 64 B, boxing is not
+ *    merely a consumer of memory but the CAUSE of the fragmentation. If the
+ *    holes are broad with no 64 B structure, it is something else. The
+ *    table answers it either way, which is the point.
+ *
+ * 2. HOW MUCH OF IT COULD EVER BE GIVEN BACK. A free block is not a
+ *    returnable page. The OS reclaims at 4 KiB granularity, so what matters
+ *    is CONTIGUOUS free runs and the whole aligned pages inside them --
+ *    exactly the arithmetic tests/perf/chunkcensus does inside a 64 KiB
+ *    arena chunk, applied to the heap. HeapWalk yields entries in address
+ *    order within a region, so a run is extended while the next entry
+ *    begins exactly where the previous one ended and is also free; anything
+ *    else closes it. UNCOMMITTED entries close a run rather than extending
+ *    it: those bytes are not committed, so returning them is not a thing
+ *    that can happen.
+ *
+ * This is the number that decides the objective. scr_async.c already
+ * measured that HeapCompact releases 0.00 MiB on every fragmented arm and
+ * HeapOptimizeResources 1.5-1.8%, and attributed it to live blocks pinning
+ * their subsegments -- but that was a differential over two API calls, not
+ * a measurement of how much free space is page-shaped. If the whole-page
+ * total is a small fraction of the free total, then no reclaimer on any OS
+ * can have those bytes, and the only route left is not to create the holes.
+ *
+ * NEW LINE PREFIXES, never new columns on the existing ones. HCSIZE and the
+ * [heapcen] header lines are parsed positionally by readers already written
+ * against them; widening either would break every report in the tree. Same
+ * discipline as DYNCEN-*-BOX. */
+SCR_HC_SHARED ScrHcRow scr_hc_ftbl[SCR_HEAPCEN_SLOTS] = {{0, 0, 0}};
+SCR_HC_SHARED size_t scr_hc_frows = 0;
+SCR_HC_SHARED size_t scr_hc_flost = 0;
+
+SCR_HC_FN void scr_hc_fnote(size_t size) {
+  unsigned long long x = (unsigned long long)size;
+  x ^= x >> 33;
+  x *= 0xff51afd7ed558ccdULL;
+  x ^= x >> 29;
+  x *= 0xc4ceb9fe1a85ec53ULL;
+  x ^= x >> 32;
+  unsigned h = (unsigned)(x & (SCR_HEAPCEN_SLOTS - 1u));
+  for (unsigned i = 0; i < SCR_HEAPCEN_SLOTS; i++) {
+    unsigned j = (h + i) & (SCR_HEAPCEN_SLOTS - 1u);
+    if (scr_hc_ftbl[j].n != 0 && scr_hc_ftbl[j].size != size) continue;
+    if (scr_hc_ftbl[j].n == 0) {
+      scr_hc_ftbl[j].size = size;
+      scr_hc_frows++;
+    }
+    scr_hc_ftbl[j].n++;
+    scr_hc_ftbl[j].bytes += size;
+    return;
+  }
+  scr_hc_flost++;
+}
+
+/* Contiguous-run accumulator. Bucket b holds runs of [2^b, 2^(b+1)) bytes;
+ * bucket 12 is therefore the first that can contain a whole 4 KiB page and
+ * is where the reader looks first. */
+#define SCR_HC_RUNB 40
+SCR_HC_SHARED size_t scr_hc_runhist[SCR_HC_RUNB] = {0};
+SCR_HC_SHARED size_t scr_hc_runpg[SCR_HC_RUNB] = {0};
+SCR_HC_SHARED size_t scr_hc_runs = 0;
+SCR_HC_SHARED size_t scr_hc_runbytes = 0;
+SCR_HC_SHARED size_t scr_hc_runmax = 0;
+SCR_HC_SHARED size_t scr_hc_pages = 0;
+SCR_HC_SHARED size_t scr_hc_pagebytes = 0;
+
+/* Closes one run: [lo, hi) of contiguous committed free bytes. The pages
+ * counted are the WHOLE 4 KiB pages wholly inside it, which is the only
+ * unit a decommit could act on. */
+SCR_HC_FN void scr_hc_run_close(size_t lo, size_t hi) {
+  if (hi <= lo) return;
+  size_t len = hi - lo;
+  unsigned b = 0;
+  while (b + 1 < SCR_HC_RUNB && ((size_t)1 << (b + 1)) <= len) b++;
+  scr_hc_runs++;
+  scr_hc_runbytes += len;
+  if (len > scr_hc_runmax) scr_hc_runmax = len;
+  size_t plo = (lo + 4095u) & ~(size_t)4095u;
+  size_t phi = hi & ~(size_t)4095u;
+  size_t npg = phi > plo ? (phi - plo) / 4096u : 0;
+  scr_hc_runhist[b]++;
+  scr_hc_runpg[b] += npg;
+  scr_hc_pages += npg;
+  scr_hc_pagebytes += npg * 4096u;
+}
+
 /* THE ARM. A census that cannot tell "found none" from "could not look"
  * reports zero and is believed, so a known population is planted before the
  * walk: SCR_HEAPCEN_ARM blocks of an unusual size that nothing else in this
@@ -199,20 +304,40 @@ SCR_HC_FN void scr_hc_report(void) {
     size_t busy = 0, freeb = 0, nbusy = 0, nfree = 0, unc = 0, nregion = 0;
     memset(&e, 0, sizeof e);
     scr_hc_HeapLock(heaps[k]);
+    /* The open contiguous free run, in address space. Zero means none.
+     * HeapWalk yields entries in address order within a region; a run is
+     * extended only while the next entry begins EXACTLY where the previous
+     * ended and is itself committed-free. Anything else -- a busy block, an
+     * uncommitted span, a new region -- closes it. */
+    size_t runlo = 0, runhi = 0;
     while (scr_hc_HeapWalk(heaps[k], &e)) {
       if (e.wFlags & SCR_HC_BUSY) {
         busy += (size_t)e.cbData + e.cbOverhead;
         nbusy++;
         if (heaps[k] == crt) scr_hc_note((size_t)e.cbData, (size_t)e.cbOverhead);
+        scr_hc_run_close(runlo, runhi); runlo = runhi = 0;
       } else if (e.wFlags & SCR_HC_UNCOMMITTED) {
         unc += (size_t)e.cbData;
+        scr_hc_run_close(runlo, runhi); runlo = runhi = 0;
       } else if (e.wFlags & SCR_HC_REGION) {
+        scr_hc_run_close(runlo, runhi); runlo = runhi = 0;
         nregion++;
       } else {
         freeb += (size_t)e.cbData + e.cbOverhead;
         nfree++;
+        if (heaps[k] == crt) {
+          size_t lo = (size_t)(uintptr_t)e.lpData;
+          size_t hi = lo + (size_t)e.cbData;
+          scr_hc_fnote((size_t)e.cbData);
+          /* Extend only on exact adjacency. Anything else closes the open
+           * run and starts a new one -- two free blocks with a busy block
+           * between them are two runs, which is the whole point. */
+          if (runhi != 0 && lo == runhi) runhi = hi;
+          else { scr_hc_run_close(runlo, runhi); runlo = lo; runhi = hi; }
+        }
       }
     }
+    scr_hc_run_close(runlo, runhi); runlo = runhi = 0;
     scr_hc_HeapUnlock(heaps[k]);
     fprintf(f,
             "[heapcen] heap %lu %p%s busy=%zu busyBlocks=%zu free=%zu"
@@ -232,6 +357,29 @@ SCR_HC_FN void scr_hc_report(void) {
 
   /* one line per DISTINCT BUSY SIZE on the CRT heap, unsorted and
    * unaggregated - the reader ranks and folds, this only counts. */
+  /* The free side. HCFREE mirrors HCSIZE exactly so one reader serves
+   * both; HCRUN is the contiguous-run histogram, and HCPAGE is the number
+   * the objective turns on. `pageBytes` is a CEILING and not a forecast:
+   * it is the whole 4 KiB pages lying inside contiguous committed-free
+   * runs, computed from where the live blocks actually are, and no
+   * reclaimer on any OS can return more than it. Read it against `free=`
+   * -- the ratio is what says whether the retained free space is
+   * page-shaped at all, or whether the only route left is not to create
+   * the holes. */
+  for (size_t i = 0; i < SCR_HEAPCEN_SLOTS; i++)
+    if (scr_hc_ftbl[i].n)
+      fprintf(f, "HCFREE %zu %zu %zu\n", scr_hc_ftbl[i].size,
+              scr_hc_ftbl[i].n, scr_hc_ftbl[i].bytes);
+  for (unsigned b = 0; b < SCR_HC_RUNB; b++)
+    if (scr_hc_runhist[b])
+      fprintf(f, "HCRUN %zu %zu %zu\n", (size_t)1 << b, scr_hc_runhist[b],
+              scr_hc_runpg[b]);
+  fprintf(f,
+          "[heapcen] HCPAGE runs=%zu runBytes=%zu runMax=%zu wholePages=%zu"
+          " pageBytes=%zu freeRows=%zu freeLost=%zu\n",
+          scr_hc_runs, scr_hc_runbytes, scr_hc_runmax, scr_hc_pages,
+          scr_hc_pagebytes, scr_hc_frows, scr_hc_flost);
+
   size_t tn = 0, tb = 0;
   for (size_t i = 0; i < SCR_HEAPCEN_SLOTS; i++) {
     if (scr_hc_tbl[i].n == 0) continue;

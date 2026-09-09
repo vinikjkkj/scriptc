@@ -561,6 +561,7 @@ static void *scr_str_ar_free[SCR_POOL_CLASSES + 1];
 static unsigned char *scr_str_ar_cur;
 static unsigned char *scr_str_ar_lim;
 
+
 static int scr_str_arena_on(void) {
   static int cached = -1;
   /* Armed HERE and not at the carve: this is called on every pool miss in

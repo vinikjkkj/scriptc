@@ -209,6 +209,8 @@ for (const k of ['SCR_HEAP_TRIM_MS', 'SCR_HEAP_TRIM_STAT', 'SCR_HEAP_TRIM_CENSUS
     'SCR_FIBER_POOL_DECAY_MS', 'SCR_CYCEN_OUT', 'SCR_STRING_ARENA', 'SCR_CYCLE_ARENA',
     'SCR_CYCLE_ARENA_BUDGET', 'SCR_STRING_INTERN', 'ZAPO_SQLITE_CACHE_KB', 'ZAPO_EVENT_BUFFER',
     'ZAPO_MSG_KEEP',
+    'SCR_PAGECEN_EVERY', 'SCR_MEMMAP_MS', 'SCR_MEMMAP_SELFTEST',
+    'SCR_CYCLE_IDLE_PACE',
     'CHUNKS', 'CONVS', 'MSGS', 'TEXTLEN', 'ROUNDS', 'IDLE_S',
     'LIVEMSGS', 'LIVE_TEXTLEN', 'WS_CAPTURE']) {
     const v = extraEnv[k] ?? process.env[k]
@@ -260,6 +262,12 @@ async function main() {
         SCR_CYCSTAT_OUT: join(OUT, `${tag}.cycstat.txt`),
         SCR_STRCEN_OUT: join(OUT, `${tag}.strcen.txt`),
         SCR_DYNCEN_OUT: join(OUT, `${tag}.dyncen.txt`),
+        /* tests/perf/pagecensus: how full the arena's remaining chunks are
+         * and how many whole free pages sit inside them, which is the
+         * ceiling on anything a per-page reclaimer could return. Reports at
+         * exit, or after every collector pass under SCR_PAGECEN_EVERY. */
+        SCR_PAGECEN_OUT: join(OUT, `${tag}.pagecen.txt`),
+        SCR_MEMMAP_OUT: join(OUT, `${tag}.memmap.txt`),
         ZAPO_WS_URL: server.url, ZAPO_WS_CA_PUB: bytesToHex(server.noiseRootCa.publicKey),
         ZAPO_WS_CA_SERIAL: String(server.noiseRootCa.serial),
         ...extraEnv
