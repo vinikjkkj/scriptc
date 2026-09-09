@@ -645,6 +645,49 @@ measurement nobody has taken. If it turns out the retained boxes are read
 almost exclusively through forcing consumers, then narrowing is the whole fix
 — and that would be worth knowing before a lowering is written, not after.
 
+### The teardown gaps — what a reader-shaped audit cannot see
+
+The audit classifies every site that *reads* an OBJ dyn. **A destructor reads
+nothing**, so none of its categories reach the teardown paths, and a new kind
+that never gets freed produces no wrong answer anywhere a reader could be
+asked. Four kind-gated sites, all in `scr_json.c`:
+
+| line | site | what a new kind gets |
+|---|---|---|
+| 686 | `gcfree`: `if (static_copy && (ARR \|\| OBJ)) origin_forget` | **origin never forgotten** |
+| 816 / 820 | `release`: `origin_forget` sits *inside* the `case ARR` / `case OBJ` arms | **origin never forgotten** |
+| 737 / 906 | the payload tail, `if ARR free(items) else if OBJ free(entries)` | **heap payload never freed** |
+| 568 / 878 | freelist selection, `ARR ? free_arr : OBJ ? free_obj : free_misc` | falls to `free_misc` — **safe**, because `scr_dyn_alloc`'s misc arm `memset`s the payload |
+
+**They compose into something worse than a leak, and that is the part worth
+stating.** The origin table is keyed by `ScrDyn *`. A box whose origin is never
+forgotten is freed, its **address recycled** off `free_misc` by the next
+allocation, and the table still holds that address as a live key. The next
+`scr_dyn_origin_take` on the recycled node then hands back the **previous**
+object's origin — retained, of the wrong type, and belonging to a different
+value.
+
+That is the WeakMap stale-key class exactly, and `scr_weak.c`'s own header
+already spells out why an address-keyed table must be purged at death: *"a
+WeakMap entry that outlived its key by even one allocation is not a leak but a
+WRONG ANSWER: the table is keyed by address and the object that lands here next
+would read the dead key's value."* The same sentence applies to
+`dyn_origin_tab`, one file over.
+
+And the un-forgotten entry holds a **strong** reference, so the source record
+leaks alongside it — the retention this whole lane exists to remove.
+
+**So the reference box's teardown is a precondition, not a follow-up.** Three
+edits before it can exist at all: widen both `origin_forget` gates, extend the
+payload tail, and leave the freelist arm alone. `scr_dyn_release` and
+`scr_dyn_gcfree` were already `teardown` in the manifest for the origin
+reason; the payload tail was not, because nothing reads it.
+
+Together with the three ungated arm accessors (`scr_dyn_ext`, `scr_dyn_ext_w`,
+`scr_dyn_obj_unset`, which read `d->v.obj.*` with no kind test and are safe
+only while every caller gates), these are the two places where the design is
+constrained by code the audit's categories were never shaped to find.
+
 ### The manifest is a guard, not a census
 
 `objaudit.tsv` holds the mechanical columns plus a human `verdict` and `note`.
