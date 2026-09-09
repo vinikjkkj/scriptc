@@ -358,7 +358,23 @@ struct ScrCycChunk {
    * land — was no, but only after a second load of the class table to
    * prove it. One byte answers it. */
   uint8_t avail;
+#ifdef SCR_CHUNKCEN_ON
+  /* tests/perf/chunkcensus only. THE ARENA CANNOT OTHERWISE ENUMERATE ITS
+   * OWN CHUNKS: a chunk that is neither current nor on scr_cyc_ar_part[]
+   * is full, and a full chunk is on no list at all (see the "Exhausted"
+   * branch in scr_cyc_ar_refill). Nothing in the shipping runtime needs
+   * to walk chunks, so nothing keeps a list; a census of how full they
+   * are does, and so would any future page-decommit pass. Two stores per
+   * 64 KiB, and absent this define the struct and both paths are exactly
+   * as they were. */
+  ScrCycChunk *allnext;
+  ScrCycChunk **allprevp;
+#endif
 };
+
+#ifdef SCR_CHUNKCEN_ON
+static ScrCycChunk *scr_cyc_ar_all = NULL;
+#endif
 
 /* THE EMPTY CHUNK, and it is not a placeholder. Every class starts pointing
  * at this one shared object whose free list is permanently NULL, so the hot
@@ -522,6 +538,12 @@ static ScrCycChunk *scr_cyc_ar_new(uint8_t blk, size_t stride) {
   c->blk = blk;
   c->avail = 1; /* the caller makes it current the moment it returns */
   scr_cyc_ar_held += SCR_CYC_ARENA_CHUNK;
+#ifdef SCR_CHUNKCEN_ON
+  c->allnext = scr_cyc_ar_all;
+  c->allprevp = &scr_cyc_ar_all;
+  if (c->allnext != NULL) c->allnext->allprevp = &c->allnext;
+  scr_cyc_ar_all = c;
+#endif
   SCR_CS_BUMP(archunk);
   SCR_CS_MAX(arpeak, scr_cyc_ar_held / SCR_CYC_ARENA_CHUNK);
   return c;
@@ -531,10 +553,21 @@ static ScrCycChunk *scr_cyc_ar_new(uint8_t blk, size_t stride) {
  * `avail` here can only mean "on the partial list". */
 static void scr_cyc_ar_release(ScrCycChunk *c) {
   if (c->avail) scr_cyc_ar_unlink(c);
+#ifdef SCR_CHUNKCEN_ON
+  *c->allprevp = c->allnext;
+  if (c->allnext != NULL) c->allnext->allprevp = c->allprevp;
+#endif
   scr_cyc_ar_held -= SCR_CYC_ARENA_CHUNK;
   SCR_CS_BUMP(arfree);
   free(c->raw);
 }
+
+#ifdef SCR_CHUNKCEN_ON
+/* The census's cycle-arena walk. Included HERE and not -include'd: it
+ * needs ScrCycChunk, the class tables and scr_cyc_ar_held, none of which
+ * exist when a force-included header is processed. */
+#include "scr_chunk_census_walk.h"
+#endif
 
 /* THE HOT ARM, and the whole of it: the class's current chunk, one pop off
  * its free list, one increment. Two dependent loads where the size-class

@@ -561,6 +561,15 @@ static void *scr_str_ar_free[SCR_POOL_CLASSES + 1];
 static unsigned char *scr_str_ar_cur;
 static unsigned char *scr_str_ar_lim;
 
+#ifdef SCR_CHUNKCEN_ON
+/* tests/perf/chunkcensus. This arena keeps NO record of the chunks it
+ * mallocs -- `k` below goes into scr_str_ar_cur/_lim and both are
+ * overwritten by the next chunk -- so its occupancy is not merely
+ * uncounted, it is unreachable. The census's registry is included here,
+ * before scr_str_ar_take, which notes each chunk as it is taken. */
+#include "scr_str_chunk_walk.h"
+#endif
+
 static int scr_str_arena_on(void) {
   static int cached = -1;
   /* Armed HERE and not at the carve: this is called on every pool miss in
@@ -594,6 +603,11 @@ static void *scr_str_ar_take(size_t r) {
   if ((size_t)(scr_str_ar_lim - scr_str_ar_cur) < r) {
     unsigned char *k = (unsigned char *)malloc(SCR_STR_ARENA_CHUNK);
     if (k == NULL) return NULL;
+#ifdef SCR_CHUNKCEN_ON
+    /* BEFORE the two stores below: this is the last moment at which the
+     * outgoing chunk's final carve position is still readable. */
+    scr_kc_str_note(k);
+#endif
     scr_str_ar_cur = k;
     scr_str_ar_lim = k + SCR_STR_ARENA_CHUNK;
     SCR_CS_BUMP(sarchunk);
