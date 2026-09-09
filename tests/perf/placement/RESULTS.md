@@ -115,3 +115,73 @@ workload rather than assumed.
   must not be compared with the 105.14 MiB clean settled figure.
 * **One run per arm.** Allocation counts are load-independent and the ratio is
   73×, so the attribution is safe; nothing here is a timing claim.
+
+## Addendum — the array target, read after the run
+
+### Symbol resolution: the route works, but there is nothing to resolve
+
+`llvm-pdbutil` **is** installed in this host's WSL Arch image at
+`/usr/sbin/llvm-pdbutil`, and `scr_prof_base()` is `GetModuleHandleW(NULL)`,
+so the dump's RVAs are true image-relative and `pdb-symbols.mjs` would map
+them. That wall is not ours.
+
+**But the allocation lane records no call site.** `rva2` is **0 on all 208
+PROF rows**; `key2` is only ever filled by `scr_prof_row2` under
+`SCR_PROF_EDGES`, which instruments `__cyg_profile_func_enter/exit` — the CPU
+lane, not the malloc interposer. So "which TypeScript allocates the 1.28 GiB"
+needs the alloc hook to capture `__builtin_return_address(0)` and a rebuild.
+It is an instrument change, not a symbolisation problem.
+
+### The growth shape: true by count, false by bytes
+
+Static, from the 1.6.2 artifact — 4,738 `scr_arr_new` / `scr_arr_new_ref` call
+sites:
+
+| initial_cap | sites |
+|---|---|
+| **1** | **3,147** |
+| 0 | 254 |
+| 2 | 110 |
+| 3 | 37 |
+| 4 | 22 |
+| 5..256 | 22 |
+| non-constant | 9 |
+
+`scr_arr_grow` floors at 4, so `initial_cap = 1` means **cap 4, a 32-byte
+buffer**, in one realloc.
+
+Dynamic: 1,350,463 grows over 1,179,723 arrays. If ~1.18M of those grows are
+the initial 32-byte sizing, that is 37.7 MiB — leaving **~170,740 grows
+carrying ~1,247 MiB, a mean near 7.7 KB**.
+
+> **By COUNT the arrays are one-shot: ~87% of grows are the initial cap-4
+> sizing. By BYTES they are not: ~97% of the 1.28 GiB is repeated doubling on
+> the minority of arrays that are pushed into.**
+
+Both halves matter and they point at different fixes. A presize helps only if
+the FINAL size of a push-built array is knowable, and the compiler currently
+emits `initial_cap = 1` at two thirds of its call sites. Nothing should be
+proposed until the size distribution of that 170,740 is known, and this dump
+cannot give it — `PROF` carries count and total bytes per site and no
+histogram.
+
+### Retraction: the 64 B headers are not the census's ≤64 B busy population
+
+`scr_array.c:179` `PROFLIVE` in the burst dump: **snap 4,621,632 B (72,213
+headers) at peak RSS, live 12,608 B (197 headers) at the dump.** They do not
+survive.
+
+The candidate is withdrawn — with the caveat that this dump cannot actually
+adjudicate it either way: `snap` is sampled at peak RSS and `live` at exit,
+and **neither is the SETTLED point** where the census counted 161,408. The
+exit dump is after shutdown teardown. So "they do not survive to exit" is what
+was measured; "they are not the settled population" does not follow from it.
+
+### A third arm split, in my own reading
+
+The sync-path IR exploration that produced "four scalar boxing walkers per
+notification" was read off `nobuffer/out-buf/zapo-rest.ll`, which is **1.8.2**
+— while the measurement in this file is **1.6.2**. `streamProtoFields` does
+not exist in the 1.6.2 artifact at all. That reading describes the other arm
+and must not be carried over to this one without redoing it against a 1.6.2
+artifact.
