@@ -75,7 +75,10 @@ const argv = process.argv.slice(2);
 const selftest = argv.includes("--selftest");
 const topIdx = argv.indexOf("--top");
 const TOP = topIdx >= 0 ? Number(argv[topIdx + 1]) : 30;
-const files = argv.filter((a, i) => !a.startsWith("--") && i !== topIdx + 1);
+/* topIdx is -1 when --top is absent, so an unguarded `i !== topIdx + 1`
+ * excludes index 0 -- the first FILE. It never showed here because every
+ * invocation so far passed --top. */
+const files = argv.filter((a, i) => !a.startsWith("--") && !(topIdx >= 0 && i === topIdx + 1));
 
 const MB = (b) => (b / 1048576).toFixed(2);
 
