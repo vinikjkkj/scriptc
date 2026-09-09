@@ -554,6 +554,51 @@ the reasons are specific rather than a shrug:
 shapes flow here" where the truth is "none this walk can see" — 8 of the 10
 rows. Corrected before quoting, and now a self-test.
 
+## SC6004 — the same shape one level up, and already someone's workstream
+
+The build emits **77 advisories, 76 of them `SC6004`**: *"this flow COPIES the
+record into a different shape."* Read against this objective the phrase *"the
+program then holds two objects where JavaScript has one"* is a statement about
+retained memory, and it is the same diagnosis as this lane's — **scriptc
+materialises where JavaScript aliases** — one level up: a relabel in
+TypeScript, a copy in scriptc.
+
+Three questions, answered off the artifact this block already has.
+
+**Are they hot?** Mostly yes. By directory: **33 `src/client`** (9 of them in
+`WaMessageDispatchCoordinator.ts` alone), **13 `src/store`**, **10
+`src/message`** (7 in `message/encode/media-payload.ts`), **7
+`src/transport`**, 6 `src/signal`, 3 `src/media`, 2 `src/auth`, 1 each
+`src/crypto` and `src/appstate`. Message dispatch, media payload encoding,
+transport builders and signal session encoding are per-message paths, not
+startup.
+
+**How big are the copies?** 73 of the 76 name the members the copy drops. The
+widest name `$unknowns, agentAction, aiThreadRenameAction,
+androidUnsupportedActions, archiveChatAction, autoOrganizeBusiness…` — **the
+same 88–90 member app-state mutation shapes this lane prices at 92,992 B per
+box.** So the widest records in the program are on both lists.
+
+**Does the by-reference box reach them? No — zero, and structurally.** `SC6004`
+is a **record → record** flow, lowered to `%rec.width.N`: a fresh struct with
+the destination's fields copied across. The box is **record → dyn**: a struct
+becoming an `ScrDyn` tree. Different lowering, different helper, different
+mechanism; nothing about how a dyn box is represented touches struct layout.
+
+**And it is not uncounted.** `frontend/lowering/shape-unify.ts` is a pass that
+already closes this class *at the layout* — where a narrow shape can afford to
+carry the wider one's extra members, the two become **one** shape and the copy
+collapses to the identity, with no runtime cost and neither backend changed.
+**Its cap is +2 fields**, deliberately: *"a one-field view of a 62-field
+message is what gets allocated in a loop; growing it by sixty-one to spare a
+copy is a trade nobody asked for. The measured components run to +109."*
+
+So **the 76 are that pass's documented decline set** — the edges past the cap —
+and `SC6004` "falls silent at exactly the sites this closed and keeps speaking
+at every one it did not". The reach of this block's fix into them is zero, and
+the reach of a *different* fix into them is somebody's existing workstream, not
+a new investigation.
+
 ## The cycle trap: a third divergence, and it is a hard abort
 
 `cyc1.ts` / `cyc2.ts`, recorded in `cyc-baseline.txt`. A cyclic value crossing
