@@ -300,3 +300,56 @@ exact table and are in the octave histogram only.
 * Burst allocation count moved 4,871,991 → 5,426,047 (+11%) between pass 1 and
   pass 2. Run-to-run variation on a workload with timers; the shape is stable,
   the absolute counts are not to three digits.
+
+## Correction: the array change is a THROUGHPUT change, not the fragmentation fix
+
+The `perf(array)` commit that removes the doubling ladder from the CRT heap is
+titled "the doubling ladder stops shredding the heap". **That over-claims, and
+the free-side census is what corrects it.**
+
+| registered prediction | share of committed-free bytes |
+|---|---|
+| powers of two (`scr_arr_grow`) | **9.6%** |
+| `3 × 2ⁿ` entries ladder | 0.1% |
+| the 328 B mode | **refuted — zero holes at 328, either arm** |
+| **1,344 B × 15,766 holes** | **57.3% = 20.21 MiB** |
+
+**A site can allocate three quarters of everything and leave a tenth of the
+holes.** Allocation volume and residue are different measurements, and only
+the free-side one describes what is *retained*. The octave histogram in this
+file was a measurement of the allocation stream, and it stands — the
+bimodality, the flat tail, the 1,582.6 MiB reconciling both ways. The step
+that does not follow is from that to "therefore this is the retention", and
+nothing on the allocation side could have caught it.
+
+So the change should be read as:
+
+* **a throughput change on its own terms.** Every doubling today `memcpy`s the
+  whole array; reserve-and-commit removes that outright, on 1,449,126 grows
+  per sync. That is independent of residue share, and "no performance loss" is
+  half the objective — a change that is *faster* is worth having where its
+  memory share is modest.
+* **with a 9.6%-of-residue memory side-effect** that moves **commit**, which
+  the discard route cannot touch.
+
+It is **not** the fragmentation fix. The dominant population is 1,344 B ×
+15,766, sync-created, all dead, and unidentified.
+
+### On reconsidering the complexity against a 9.6% target
+
+Reviewed, and the honest answer is that it does not shrink usefully:
+
+* The reserve-and-commit core is ~40 lines and is exactly what delivers the
+  throughput win. There is no smaller way to stop copying on grow.
+* **The exceeded-reservation fallback is correctness-required, not
+  scale-required.** Any fixed reservation can be exceeded; the alternative to
+  copying back out is trapping. It stays whether the target is 9.6% or 96%,
+  and the fixture exercises it deliberately because no ordinary workload does.
+* The one genuinely scale-tunable number is `SCR_ARR_VM_RESERVE` (16 MiB).
+  Measured peak concurrent array data at this site is under 1 MiB and the
+  largest array is 64 KiB, so 16 MiB is ~256× headroom — but address space is
+  free on x64 and lowering it only makes the fallback fire more often, which
+  costs copies and gives back part of the win.
+
+No simplification is being performed for its own sake. What changed is the
+claim, not the code.
