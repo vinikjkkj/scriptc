@@ -93,20 +93,80 @@ to the heap's 16-byte granularity. Compare on `cbData`, not on the sum.
 | sync-path records reaching the CRT heap | the four record types `settleHistorySyncChunk` builds are 3–12 fields (24–96 B), under `SCR_POOL_MAX`, so `scr_cyc_alloc` serves them from the cycle arena |
 | `cachedNctSalt` contributing to any measured figure | the rig never sends `nctSalt` — see below |
 
-## `cachedNctSalt` does not fire in any measurement this objective rests on
+## Read the histogram on EXACT sizes; bucketing destroys the answer
 
-`WaTrustedContactTokenCoordinator.ts:289` stores `historySync.nctSalt` — a
-32-byte `subarray` **view**, which `scr_bytes.c:518` confirms aliases its
-owner in the compiled runtime too — on a coordinator field with no bound and
-no eviction, pinning the whole decompressed chunk for the life of the client.
+The census reports a real busy population at **1328 B** — 4,097 blocks,
+5.31 MiB. **4 x 328 = 1312.** Those are sixteen bytes apart. Any table that
+rounds, buckets, or bins by power-of-two merges them and reports a
+"coalesced-body mode" at four-times-the-string-class that is not there.
 
-**But the rig never sends one.** `memrig.mts:281` calls `sendHistorySync({
-chunkOrder, progress, conversations })`, and the fake server's
-`BuildHistorySyncInput.nctSalt` is optional
-(`fake-server/src/protocol/push/history-sync.ts:41`, `:92`), so the field is
-absent from the encoded proto and the assignment never runs.
+So: compare on exact `cbData`, no binning, and print the two neighbours
+separately. If 328 and 1328 both appear as distinct modes, they are two
+populations. If only 1328 appears, the 328 prediction is refuted and must not
+be rescued by calling 1328 a coalesced run of four.
 
-So it contributes **zero** to the 105.14 MiB settled figure, zero to the
-40.65 MiB live, and zero to the free-hole histogram. It is a real latent
-defect against real WhatsApp traffic — where `nctSalt` is present — and it
-must not be used to explain one byte of what has been measured here.
+1328 is also **not a multiple of 24**, so it is not the dyn entries ladder
+either, and it is not a power of two so it is not an array buffer.
+
+### A candidate for it: a bytes payload, which obeys no ladder at all
+
+`scr_bytes_alloc` (`scr_bytes.c:42`) makes **two** allocations per bytes
+object:
+
+* `malloc(sizeof(ScrBytes))` — a small fixed header, one per live
+  `Uint8Array` / `Buffer`. A candidate for part of the 161,408 busy blocks at
+  64 B and under, alongside `scr_arr_new`'s `malloc(sizeof(ScrArr))`.
+* `calloc(len, elem_size)` — the payload, at **exactly** the requested length.
+
+That is the fourth signature and it is the one that explains an
+unattributable size: **a bytes payload is not rounded to any class**, so it
+can land on any number at all, 1328 included. It is also the only one of the
+four that can produce a size which is **not a multiple of 8**.
+
+> **PREDICTION.** Free or busy blocks whose size fits none of the three
+> ladders — and in particular any size that is not a multiple of 8 — are
+> `scr_bytes_alloc` payloads. If the 1328 population is bytes payloads, a
+> `CHUNKS=0` control should show far fewer of them, and `profdiff.mjs` should
+> attribute them to a bytes-allocating site.
+
+Refuted if 1328 tracks the sync but no bytes-allocating site moves with it.
+
+## `cachedNctSalt`: retracted as a live defect, and the version split is why
+
+**It fires zero times in every measurement this objective rests on**, and that
+much is version-independent and verified at both ends: `memrig.mts:281` calls
+`sendHistorySync({ chunkOrder, progress, conversations })` with no `nctSalt`,
+and the fake server's field is optional
+(`fake-server/src/protocol/push/history-sync.ts:41`, `:92`), so the proto omits
+it and the assignment never runs. It contributes zero to the 105.14 MiB
+settled, zero to the live total, zero to the histogram, and it may not be used
+to explain one measured byte.
+
+**As a defect it is retracted, and the reason is the arm split again.** The
+copy that removes it is present in **1.8.2** and absent in **1.6.2**:
+
+| arm | path | copy at origin |
+|---|---|---|
+| `app182` / 1.8.2 | streaming field reader, `event.value.slice()` | **yes** |
+| `app` / 1.6.2 | `history-sync.ts:275`, `onNctSalt(historySync.nctSalt)` | **no** |
+
+In 1.6.2 nothing on the path copies: `onNctSalt` passes the decoded field
+straight to `hydrateNctSaltFromHistorySync`, which does `this.cachedNctSalt =
+salt` (`WaTrustedContactTokenCoordinator.ts:283-286`). And the decoded field
+really is a view — the vendored protobufjs in `spec/proto/index.js` sets
+`_slice = Array.prototype.subarray` for the base reader and
+`Buffer.prototype.slice` for the buffer reader, and both alias.
+
+So this was **fixed upstream between 1.6.2 and 1.8.2**, not left open. It is
+not a finding to send anyone. What it is, is the second time in this
+investigation that a conclusion turned on which arm was being read, after the
+`streamProtoFields` / `downloadHistorySyncBlob` split. Any claim about zapo
+source here must name its version.
+
+### The lesson, which is worth more than the case
+
+**Follow a value to its origin before calling a consumption site a defect.**
+Storing a reference tells you what is *held*, not where it came from. The
+harder half had been verified — that a `subarray` view survives compilation
+with chain depth 1 to an owner — which is exactly what made the conclusion
+look solid while the easy half went unchecked.
