@@ -505,10 +505,27 @@ typedef struct ScrCycHdr {
    * (see scr_cyc_base below) rather than as pointers. EVERY cycle-headered object carries this
    * header, and on zapo that is the single largest term in the heap:
    * two 8-byte function pointers were 16 of the 32 header bytes and 16
-   * of the 104 physical bytes of a ScrDyn. Storing them as RVAs is a
-   * runtime-only change -- scr_cyc_alloc keeps taking real function
-   * pointers, so none of the 1,451 call sites (1,434 of them in the
-   * emitted TU) moves. */
+   * of the 104 physical bytes a ScrDyn cost BEFORE this change. Storing
+   * them as RVAs is a runtime-only change -- scr_cyc_alloc keeps taking
+   * real function pointers, so none of the 1,451 call sites (1,434 of
+   * them in the emitted TU) moves.
+   *
+   * THOSE TWO NUMBERS ARE HISTORY, NOT THE LAYOUT, and they read as
+   * present tense. They describe the state this change replaced.
+   * Measured on x86_64-windows-gnu today -- tests/perf/dyncensus prints
+   * all three in its LAYOUT line, and tests/perf/boxanat builds its cost
+   * model on them:
+   *
+   *     sizeof(ScrCycHdr)   16      (was 32)
+   *     sizeof(ScrDyn)      48      (was 72)
+   *     one dyn node        64 physical, = scr_pool_bytes(16 + 48) at
+   *                         the 8-byte grain   (was 104)
+   *
+   * Spelled out rather than corrected in place, because a stale constant
+   * in a header is how the next reader builds a wrong model of the heap.
+   * 104 against 64 is a 1.6x error on the most numerous object in the
+   * program, and it survives every gate in this project because nothing
+   * compiles against a comment. */
   int32_t trace_off;
   int32_t free_off;
   /* color, buffered and blk were a uint32 each and needed 2, 1 and 6
