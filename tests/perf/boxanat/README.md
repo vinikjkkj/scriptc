@@ -6,6 +6,48 @@ representation change cannot be argued from a single scalar. This lane reads
 the anatomy off the artifact the compiler emitted, and validates the model
 against a physical measurement.
 
+## The NaN literals, and why they do not touch this lane
+
+`--emit-ir` refused to serialise zapo for 27 minutes because the IR carried a
+NaN (fixed: NaN now rides the `$nonfinite` sentinel with `Infinity` and `-0`).
+The follow-up question was whether that NaN sits near the event ring.
+
+**It does not, and my own first answer was wrong.** I reported the source grep
+— `Number.NaN` in `mcp-server/src/runtime.ts:510` — as though it were in the
+compiled program. The artifact says otherwise: **neither
+`parseEnvPositiveInt` nor `buildRuntimeConfigFromEnv` appears anywhere in the
+emitted C.** `zapo-rest.ts` is a REST driver and does not wire the MCP server,
+so that site is not compiled at all. A source grep names what is *written*;
+only the artifact names what is *built*.
+
+What the artifact does carry is **11 NaN literals across 10 functions**,
+spelled `double sc_tN = NAN;`:
+
+| function | source |
+|---|---|
+| `SignalDeviceSyncApi_parseUserDeviceJids` | JID parsing |
+| `parseOsVersion` (x2) | version parsing |
+| `WaKeepAlive_run`, `WaKeepAlive_normalizeJitterRatio` | the keep-alive loop |
+| `WaMobileCoordinator_updateAccountKeyIndex` | account key index |
+| `nowMs`, `nowSeconds` | time helpers |
+| `fn462`, `fn1377_n`, `fn1389_n` | anonymous |
+
+So they are **not** one cold env parser: the keep-alive loop and the time
+helpers recur for the life of the process. The typical shape is a union
+unwrap falling back to NaN as JS's "absent number" —
+`if (tag == 1 || tag == 2) { x = NAN; } else { x = scr_union_get_f64(u); }`.
+
+**None of them can interact with the boxing anatomy, and that is structural
+rather than lucky.** A NaN is an `f64`. `f64` boxes through
+`scr_dyn_new_num` — one 64-byte `SCR_DYN_NUM` node, no member table, no
+subtree. The transitive per-leaf copy is a **record and array** mechanism and
+scalars are excluded from it by construction. Checked as well as argued: a
+scan for a `NAN` temp flowing into any `sc_td_` converter or `scr_dyn_new_num`
+within its function finds **zero**.
+
+Closed. The NaN was a serialiser defect worth fixing for everyone reaching for
+`--emit-ir`; it is not a term in the retention story.
+
 ## Which zapo, and which figures depend on it
 
 **Every claim about zapo source names its arm.** Two conclusions in this
