@@ -12,6 +12,11 @@
  * It writes, into <MEMRIG_OUT>:
  *   <tag>.rss.csv      the sampler's series          -- read by memrig-report.mjs
  *   <tag>.phases.csv   this rig's markers            -- read by memrig-report.mjs
+ *   <tag>.ws.jsonl     every frame a subscriber attached BEFORE the traffic
+ *                      received, one JSON frame per line (WS_CAPTURE)
+ *   <tag>.wslate.jsonl what a subscriber attached AFTER all the traffic, with
+ *                      ?since=0, receives. The contrast between this file and
+ *                      the one above IS the retention question.
  *   <tag>/state.sqlite the service's store           -- read by memrig-rows.mjs
  *   <tag>.client.log   the child's combined output   -- read by memrig-throughput.mjs
  *   <tag>.<census>.txt whatever censuses the binary was built with
@@ -53,6 +58,21 @@
  *   PRESYNC_MS 20000 quiet time after login before PRESYNC-BASELINE
  *   SHUTDOWN_WAIT_MS 30000
  *
+ *   LIVEMSGS 0       after the last history round, deliver this many REAL
+ *                    inbound messages, one `message` event each. The history
+ *                    sync produces only CHUNKS tiny events however many
+ *                    messages it carries, so this is the only knob that can
+ *                    fill a per-event ring. LIVE_TEXTLEN 300 sizes them.
+ *   WS_CAPTURE 1     attach a WebSocket subscriber BEFORE any traffic and log
+ *                    every frame to <tag>.ws.jsonl. Works on a build with no
+ *                    polling route, which is why it is the default readback.
+ *   WS_ACK_EVERY 4   acks per this many events; the service closes a
+ *                    subscriber 64 events past its last ack, and a lagging
+ *                    one on a NO-RETENTION build loses what it missed rather
+ *                    than recovering it from a ring -- so a slack cadence
+ *                    would make the two arms differ in delivery for a reason
+ *                    that is the rig, not the design.
+ *
  * Any other KEY=VAL is passed straight to the child, which is how an env-gated
  * arm (SCR_CYCLE_ARENA_BUDGET=...) is measured on the SAME executable as its
  * control.
@@ -87,6 +107,37 @@ const CHUNKS = N('CHUNKS', 8), CONVS = N('CONVS', 400), MSGS = N('MSGS', 6)
 const TEXTLEN = N('TEXTLEN', 300), IDLE_S = N('IDLE_S', 60), SAMPLE_MS = N('SAMPLE_MS', 250)
 const ROUNDS = N('ROUNDS', 1), SETTLE_MS = N('SETTLE_MS', 45000), PRESYNC_MS = N('PRESYNC_MS', 20000)
 const SHUTDOWN_WAIT_MS = N('SHUTDOWN_WAIT_MS', 30000)
+
+/* LIVE MESSAGES — added for the no-buffer experiment, default 0, so every
+ * existing arm and every existing number is unchanged.
+ *
+ * The documented workload delivers its 19,200 messages as a HISTORY SYNC, and
+ * zapo-rest deliberately pushes only `{received, progress, syncType}` per
+ * chunk rather than parking the payload in its event ring: eight tiny events
+ * for the whole sync. A workload that never fills the ring cannot measure the
+ * ring. LIVEMSGS drives real inbound `message` events, one push() each, so the
+ * ring can be taken to its cap and the question "what does the buffer cost"
+ * has an arm in which the buffer is actually full. */
+const LIVEMSGS = N('LIVEMSGS', 0)
+const LIVE_TEXTLEN = N('LIVE_TEXTLEN', 300)
+/* Yield to the event loop every this many sends, so the rig does not starve
+ * the socket it is writing to. */
+const LIVE_YIELD_EVERY = N('LIVE_YIELD_EVERY', 25)
+const LIVE_DRAIN_MS = N('LIVE_DRAIN_MS', 60000)
+
+/* WS CAPTURE — a subscriber attached BEFORE any traffic, on every run.
+ *
+ * The polling /events route is the only event readback the rig used to have,
+ * and a build with no ring cannot answer it. A WebSocket subscriber works on
+ * BOTH arms, so it is the readback that can cross-check them; and attaching it
+ * before the traffic is exactly the condition a no-retention build requires of
+ * a consumer, which makes the capture a test of the feature and not just an
+ * instrument. WS_CAPTURE=0 turns it off. */
+const WS_CAPTURE = N('WS_CAPTURE', 1)
+/* The service closes a subscriber that sits WS_WINDOW (64) events past its
+ * last ack, so a capture that never acks stalls after 64 frames and would
+ * report a truncated stream as a delivery failure. */
+const WS_ACK_EVERY = N('WS_ACK_EVERY', 4)
 
 const OUT = resolve(process.env.MEMRIG_OUT ?? join(HERE, 'memrig-run'))
 const PMON = resolve(process.env.MEMRIG_PMON ?? join(HERE, 'pmon.exe'))
@@ -157,7 +208,9 @@ writeFileSync(PH, 'ms,phase\n')
 for (const k of ['SCR_HEAP_TRIM_MS', 'SCR_HEAP_TRIM_STAT', 'SCR_HEAP_TRIM_CENSUS',
     'SCR_FIBER_POOL_DECAY_MS', 'SCR_CYCEN_OUT', 'SCR_STRING_ARENA', 'SCR_CYCLE_ARENA',
     'SCR_CYCLE_ARENA_BUDGET', 'SCR_STRING_INTERN', 'ZAPO_SQLITE_CACHE_KB', 'ZAPO_EVENT_BUFFER',
-    'CHUNKS', 'CONVS', 'MSGS', 'TEXTLEN', 'ROUNDS', 'IDLE_S']) {
+    'ZAPO_MSG_KEEP',
+    'CHUNKS', 'CONVS', 'MSGS', 'TEXTLEN', 'ROUNDS', 'IDLE_S',
+    'LIVEMSGS', 'LIVE_TEXTLEN', 'WS_CAPTURE']) {
     const v = extraEnv[k] ?? process.env[k]
     if (v !== undefined) appendFileSync(PH, `0,ARM ${k}=${v}\n`)
 }
@@ -247,6 +300,78 @@ async function main() {
 
     const pipeline = await loginPromise
     phase('login-pipeline')
+
+    /* ── the WebSocket subscriber, attached BEFORE any traffic ───────────
+     *
+     * Everything below this point that the service emits should reach this
+     * socket. On the buffered arm that is a cross-check of the polling route;
+     * on a no-retention arm it is the ONLY readback there is, and the fact
+     * that it must be attached first is the feature under test rather than an
+     * inconvenience.
+     *
+     * The frames land in <tag>.ws.jsonl verbatim, one per line, so a reader
+     * can assert on VALUES and not merely on "no error". */
+    const wsPath = join(OUT, `${tag}.ws.jsonl`)
+    let wsFrames = 0, wsEvents = 0, wsHello: any = null, wsGaps = 0, wsLastSeq = 0
+    let wsSock: any = null
+    /* BUFFERED, not one appendFileSync per frame. A ring-loaded run delivers
+     * ~1,500 frames INSIDE the window whose memory is being measured, and
+     * 1,500 synchronous writes from the rig process are host noise the
+     * measurement does not need. Flushed every 100 frames and at the end, so a
+     * run that dies still leaves most of its capture behind. */
+    let wsPending: string[] = []
+    const wsFlush = () => {
+        if (wsPending.length === 0) return
+        appendFileSync(wsPath, wsPending.join('\n') + '\n')
+        wsPending = []
+    }
+    if (WS_CAPTURE) {
+        writeFileSync(wsPath, '')
+        const url = `ws://127.0.0.1:${PORT}/s/drive/events/ws`
+        /* The session is built asynchronously by the service's store init, so
+         * the route answers 404 until it exists. Retry, and REFUSE rather than
+         * carry on silently: a run whose subscriber never attached cannot
+         * distinguish "delivered nothing" from "was not listening". */
+        for (let attempt = 1; attempt <= 60; attempt++) {
+            const sock: any = new (globalThis as any).WebSocket(url)
+            const opened = await new Promise<boolean>((r) => {
+                sock.onopen = () => r(true)
+                sock.onerror = () => r(false)
+                setTimeout(() => r(false), 2000)
+            })
+            if (opened) { wsSock = sock; break }
+            try { sock.close() } catch { /* never opened */ }
+            await sleep(500)
+        }
+        if (wsSock === null) {
+            phase('ws-ATTACH-FAILED — no subscriber; this run cannot report delivery')
+        } else {
+            phase('ws-attached')
+            wsSock.onmessage = (m: any) => {
+                const text = typeof m.data === 'string' ? m.data : String(m.data)
+                appendFileSync(wsPath, text + '\n')
+                wsFrames++
+                try {
+                    const j = JSON.parse(text)
+                    if (j.type === '$hello') { wsHello = j; return }
+                    if (j.type === '$gap') { wsGaps++; return }
+                    if (j.type === '$lag') return
+                    wsEvents++
+                    if (typeof j.seq === 'number') {
+                        wsLastSeq = j.seq
+                        /* Ack or stall: the window is the whole backpressure
+                         * policy and the compiled socket surface has no
+                         * 'drain'. */
+                        if (wsEvents % WS_ACK_EVERY === 0) {
+                            try { wsSock.send(JSON.stringify({ ack: j.seq })) } catch { /* closing */ }
+                        }
+                    }
+                } catch { /* a frame that is not JSON is still counted above */ }
+            }
+            wsSock.onclose = (e: any) => phase(`ws-closed code=${e?.code ?? '?'} frames=${wsFrames}`)
+        }
+    }
+
     const self = await server.createFakePeer({ jid: `${SELF}@s.whatsapp.net` }, pipeline)
     /* The app-state key share is part of the real post-login sequence; without
      * it the client keeps retrying and the baseline never goes quiet. */
@@ -288,6 +413,39 @@ async function main() {
         const want = round * CHUNKS
         for (let w = 0; w < 180 && decoded < want; w++) await sleep(1000)
         phase(`SYNC-DONE-r${round}`)
+
+        /* THE LIVE BURST GOES HERE, not after the settle: the settled sample is
+         * the whole point, and a ring filled after it would be measured empty.
+         * Last round only — the ring is bounded, so filling it once is filling
+         * it, and doing it every round would only lengthen the run. */
+        if (LIVEMSGS > 0 && round === ROUNDS) {
+            phase(`LIVE-START n=${LIVEMSGS} textlen=${LIVE_TEXTLEN}`)
+            const liveText = 'y'.repeat(LIVE_TEXTLEN)
+            for (let i = 1; i <= LIVEMSGS; i++) {
+                await self.sendConversation(`${liveText} live-${round}-${i}`)
+                if (i % LIVE_YIELD_EVERY === 0) await sleep(0)
+                if (i % 250 === 0) phase(`live-sent-${i}`)
+            }
+            phase(`LIVE-SENT n=${LIVEMSGS}`)
+            /* Sent is not received. Wait for the service's OWN seq to stop
+             * moving before calling the burst drained; a settle timed from
+             * "sent" would measure a process still decrypting. */
+            let lastSeq = -1, still = 0
+            const t0 = Date.now()
+            while (Date.now() - t0 < LIVE_DRAIN_MS) {
+                await sleep(1000)
+                let seq = -1
+                try {
+                    const r = await fetch(`http://127.0.0.1:${PORT}/health`)
+                    const j: any = await r.json()
+                    seq = j?.result?.counts?.seq ?? -1
+                } catch { /* the reader below reports what it got */ }
+                if (seq === lastSeq && seq > 0) { still++; if (still >= 3) break } else { still = 0 }
+                lastSeq = seq
+            }
+            phase(`LIVE-DRAINED seq=${lastSeq} afterMs=${Date.now() - t0}`)
+        }
+
         /* Settle, so the reading is retention and not a transient. This wait is
          * the definition of "settled" the README quotes; it is a knob so a
          * longer one can be shown to change nothing. */
@@ -296,6 +454,52 @@ async function main() {
     }
     for (let s = 30; s <= IDLE_S; s += 30) { await sleep(30000); phase(`IDLE-${s}s`) }
     phase('END')
+
+    /* THE LATE SUBSCRIBER — the contrast that makes the early one mean
+     * something.
+     *
+     * A second socket, attached only NOW, with ?since=0: it asks for
+     * everything from the beginning of the session, after all the traffic is
+     * over. On a build with a ring it gets a replay. On a build without one it
+     * gets a $gap naming exactly what it missed and nothing else.
+     *
+     * Without this, "the early subscriber received N events" cannot be
+     * distinguished from "this build delivers to everyone and the removal did
+     * nothing"; and a no-retention build that silently delivered nothing to
+     * ANY subscriber would look identical to one working as designed. */
+    if (WS_CAPTURE) {
+        const latePath = join(OUT, `${tag}.wslate.jsonl`)
+        writeFileSync(latePath, '')
+        let lateFrames = 0, lateEvents = 0, lateGaps = 0, lateGapSpan = ''
+        const lateSock: any = new (globalThis as any).WebSocket(
+            `ws://127.0.0.1:${PORT}/s/drive/events/ws?since=0`)
+        const lateOpened = await new Promise<boolean>((r) => {
+            lateSock.onopen = () => r(true)
+            lateSock.onerror = () => r(false)
+            setTimeout(() => r(false), 3000)
+        })
+        if (!lateOpened) phase('wslate-ATTACH-FAILED')
+        else {
+            lateSock.onmessage = (m: any) => {
+                const t = typeof m.data === 'string' ? m.data : String(m.data)
+                appendFileSync(latePath, t + '\n')
+                lateFrames++
+                try {
+                    const j = JSON.parse(t)
+                    if (j.type === '$hello') return
+                    if (j.type === '$gap') { lateGaps++; lateGapSpan = `${j.fromSeq}..${j.toSeq}`; return }
+                    if (j.type === '$lag') return
+                    lateEvents++
+                    if (lateEvents % WS_ACK_EVERY === 0 && typeof j.seq === 'number') {
+                        try { lateSock.send(JSON.stringify({ ack: j.seq })) } catch { /* closing */ }
+                    }
+                } catch { /* counted as a frame above */ }
+            }
+            await sleep(4000)
+            phase(`wslate-frames=${lateFrames} events=${lateEvents} gaps=${lateGaps} gapSpan=${lateGapSpan || 'none'}`)
+            try { lateSock.close() } catch { /* already closed */ }
+        }
+    }
 
     /* The service's own event ring, fetched WHILE THE CHILD IS STILL ALIVE --
      * this is the only window in which it can be read at all, and it is what
@@ -325,13 +529,31 @@ async function main() {
             n = Array.isArray(arr) ? arr.length : -1
         } catch { /* the reader will report the shape it got */ }
         phase(`events-captured ${res.status} n=${n}`)
-        /* Silence here would be indistinguishable from a healthy run whose
-         * ring was empty, and an empty ring is not a pass. */
-        if (n !== CHUNKS * ROUNDS) {
+        /* A build with NO EVENT RING answers this route 410 Gone and says so
+         * in the body. That is a designed answer, not a failure, and it must
+         * not be recorded as a count mismatch — but it must not be silent
+         * either, because "this arm cannot be polled" is exactly the fact a
+         * reader of these phases needs. */
+        if (res.status === 410 && body.includes('no event retention')) {
+            phase('events-ring-disabled 410 — this build retains no events; the WS capture is the readback')
+        } else if (n !== CHUNKS * ROUNDS) {
+            /* Silence here would be indistinguishable from a healthy run whose
+             * ring was empty, and an empty ring is not a pass. */
             phase(`events-COUNT-MISMATCH want=${CHUNKS * ROUNDS} got=${n}`)
         }
     } catch (e) {
         phase(`events-fetch-failed ${String(e).slice(0, 120)}`)
+    }
+
+    /* What the socket that was attached before the traffic actually received.
+     * Recorded as phases so it lands in the same artefact the memory numbers
+     * do: a run that saved memory by delivering nothing is not the feature,
+     * and this is the line that would show it. */
+    if (WS_CAPTURE) {
+        phase(`ws-frames=${wsFrames} events=${wsEvents} gaps=${wsGaps} lastSeq=${wsLastSeq} hello=${wsHello ? 'yes' : 'NO'}`)
+        if (wsHello) phase(`ws-hello retention=${wsHello.retention ?? 'n/a'} buffered=${wsHello.buffered ?? 'n/a'} window=${wsHello.window}`)
+        if (wsSock !== null && wsEvents === 0) phase('ws-DELIVERED-NOTHING — a subscriber was attached and received no event')
+        try { wsSock?.close() } catch { /* already closed */ }
     }
 
     /* A CLEAN EXIT, not a SIGKILL. Every allocation census under tests/perf

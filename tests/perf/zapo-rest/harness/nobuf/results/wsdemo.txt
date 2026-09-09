@@ -1,0 +1,30 @@
+
+===== smokebuf
+  -- the subscriber attached BEFORE the traffic --
+    $hello  sessionId=drive  seq=3  since=3  window=64
+            buffered=3   retention=ABSENT
+            (a ring is present and reports its depth)
+    frames=130  events=128  $gap=0  $lag=1
+    by type: message=123 message_protocol=3 history_sync_chunk=2
+    seq range 4..131, 128 delivered, 0 missing inside the range
+  -- the subscriber attached AFTER all the traffic, ?since=0 --
+    frames=137  replayed events=131  $gap=0
+    $hello buffered=131 retention=ABSENT
+    VERDICT: this build REPLAYED 131 event(s) to a late subscriber — a ring is present.
+
+===== smokenobuf
+  -- the subscriber attached BEFORE the traffic --
+    $hello  sessionId=drive  seq=3  since=3  window=64
+            buffered=ABSENT   retention=none
+            (no ring: the field the buffered build sends is absent)
+    frames=119  events=116  $gap=1  $lag=1
+    by type: message=111 message_protocol=3 history_sync_chunk=2
+    seq range 4..119, 116 delivered, 0 missing inside the range
+  -- the subscriber attached AFTER all the traffic, ?since=0 --
+    frames=2  replayed events=0  $gap=1
+    $hello buffered=ABSENT retention=none
+    $gap 1..131  reason=this build retains no events; anything that happened before you subscribed is gone
+    VERDICT: this build replayed NOTHING and said so with a $gap — retention is gone,
+             and the loss is legible to the consumer rather than silent.
+
+wsverify: every early subscriber received events; every late one was accounted for.
