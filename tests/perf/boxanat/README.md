@@ -700,6 +700,62 @@ serialised sync bursts an eighth as hard and shreds an eighth as much heap. A
 populated-union count taken on the shipped, unserialised arm is the only one
 that describes what our end can be worth, and it must be labelled as such.
 
+## MEASURED: 14,868 populated union fields at peak, and the fix is worth under 1 MiB
+
+`tests/perf/cycensus` on the LLVM (shipping-lane) `app182` binary, driven by
+`memrig.mts` at `CHUNKS=8 CONVS=400 MSGS=6` (19,200 messages), **unserialised
+sync**, arena **on**, clean exit 0. Census arm validated and subtracted.
+
+```
+atPeak       objects  B/obj      atExit   held%      allocs  size   kind
+951,552 B     14,868   64.0     451,968   47.50%  1,270,234    48   scr_union_gcfree
+```
+
+* **14,868 populated union fields live at peak** — one `ScrUnion` node per
+  populated field per instance — costing **951,552 B (929 KiB)**, which is
+  **11.46%** of the live cycle heap at peak.
+* **7,062 still live at exit**, **451,968 B (441 KiB)**, 9.63% of live at exit.
+* **1,270,234 allocated over the run** against 14,868 live at peak: unions
+  churn hard and survive rarely.
+
+**So the union collapse is worth at most 0.91 MiB at peak and 0.43 MiB at
+exit** — and that is the ceiling with *every* union collapsed, which is not on
+offer, because only 2,425 of 7,666 declared field slots are the collapsible
+two-arm shape.
+
+**The collapsible share of the POPULATED count is not measured and cannot be,
+without a representation change.** `cycensus` keys on `ScrCycFreeFn`, which
+names the kind (`scr_union_gcfree`) and cannot separate one union id from
+another; and `ScrUnion` itself carries only a numeric `tag`, no interned type
+key, so nothing at run time knows which union definition a node came from.
+Adding one to find out would cost memory to measure a memory saving.
+
+Taking the declared-slot share of 31.6% as a prior gives **≈0.29 MiB at peak
+and ≈0.14 MiB at exit** — but that assumes the populated mix matches the
+declared mix, and it probably does not: `u3` (`string | null`) alone is 991 of
+the 7,666 slots and is the kind of field that is usually filled.
+
+**Arms, because these numbers compose with nothing until they are named.**
+This is **1.8.2** (`app182`), the arm the 2,425 cap was counted on, driven from
+the **1.6.2** fake-server fixture (established practice — `census-arms.sh`
+does the same), on the **unserialised** sync. The ledger's **13.63 MiB cycle
+arena** row is **1.6.2** with a different sync architecture, and this run's own
+cycle total is 43.4 MB at exit (4.69 MB live + 38.75 MB pool slack). **Do not
+subtract 0.43 from 13.63.** They are different programs.
+
+### What it means for the route
+
+The union collapse is a **correctness-neutral, trace-neutral, cycle-free**
+change worth **well under a megabyte** of settled bytes on this workload. Its
+value is not the bytes: it is that each removed node is a potential **chunk
+pinner**, and a 64 KiB arena chunk is freed only when all 1,020 of its slots
+are dead. 7,062 survivors at exit can pin far more than 441 KiB — but *how
+much* depends on placement, which is `pagereturn`'s measurement and not this
+one's.
+
+**Reported as a small true figure rather than a large declared one.** 2,425
+ships as a cap; 14,868 / 951,552 B is the population it is capped against.
+
 ## The cycle trap: a third divergence, and it is a hard abort
 
 `cyc1.ts` / `cyc2.ts`, recorded in `cyc-baseline.txt`. A cyclic value crossing
