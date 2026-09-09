@@ -1,12 +1,12 @@
 file	fn	guard_ne	test_eq	case_arm	arm_read	missClass	verdict	note
-scr_assert.c	scr_assert_cf_value	0	0	1	4	nodefault	REVIEW	
-scr_assert.c	scr_assert_dyn_deep_eq	0	0	1	5	nodefault	REVIEW	
-scr_assert.c	scr_assert_expects_err_dyn	0	1	0	2	silent	REVIEW	
+scr_assert.c	scr_assert_cf_value	0	0	1	4	nodefault	force	builds a comparison-frame entry per member
+scr_assert.c	scr_assert_dyn_deep_eq	0	0	1	5	nodefault	force	compares member by member; a reference box must compare as its source object
+scr_assert.c	scr_assert_expects_err_dyn	0	1	0	2	silent	force	walks the expected object
 scr_async_dyn.c	scr_process_emit_warning	0	1	0	0	silent	REVIEW	
-scr_bytes_io.c	scr_fs_encoding_chk	0	1	0	0	silent	REVIEW	
-scr_bytes_io.c	scr_fs_mkdtemp_sync_chk	0	1	0	2	silent	REVIEW	
-scr_bytes_io.c	scr_fs_read_file_sync_dyn	0	1	0	0	silent	REVIEW	
-scr_bytes_io.c	scr_fs_stream_opts_chk	0	1	0	0	silent	REVIEW	
+scr_bytes_io.c	scr_fs_encoding_chk	0	1	0	0	silent	force	reads options.encoding
+scr_bytes_io.c	scr_fs_mkdtemp_sync_chk	0	1	0	2	silent	force	walks opts->v.obj.len
+scr_bytes_io.c	scr_fs_read_file_sync_dyn	0	1	0	0	silent	force	reads options.encoding
+scr_bytes_io.c	scr_fs_stream_opts_chk	0	1	0	0	silent	force	reads options.fd
 scr_dc.c	dc_tc_trace_sync_body	0	2	0	0	silent	REVIEW	
 scr_dc.c	dc_tc_wrapped_cb	0	2	0	0	silent	REVIEW	
 scr_dc.c	dc_tp_entry	0	2	0	0	silent	REVIEW	
@@ -16,38 +16,38 @@ scr_dyn_invoke.c	dyn_define_accessor_desc	1	0	0	0	silent	REVIEW
 scr_dyn_invoke.c	dyn_define_data_desc	1	1	0	0	silent	REVIEW	
 scr_dyn_invoke.c	dyn_define_one	1	1	0	0	silent	REVIEW	
 scr_dyn_invoke.c	dyn_effective_attrs	0	1	0	0	silent	REVIEW	
-scr_dyn_invoke.c	dyn_install_descs	1	0	0	2	silent	REVIEW	
+scr_dyn_invoke.c	dyn_install_descs	1	0	0	2	silent	force	walks descs->v.obj.len
 scr_dyn_invoke.c	dyn_kind_knows	0	0	1	0	silent	REVIEW	
 scr_dyn_invoke.c	dyn_list_from_array_like	0	1	0	0	silent	REVIEW	
 scr_dyn_invoke.c	dyn_notfn_buf	0	0	1	0	nodefault	REVIEW	
 scr_dyn_invoke.c	dyn_str_buf	0	0	1	0	nodefault	REVIEW	
-scr_dyn_invoke.c	scr_cls_props_count	1	0	0	2	silent	REVIEW	
+scr_dyn_invoke.c	scr_cls_props_count	1	0	0	2	silent	force	walks tbl->v.obj.len
 scr_dyn_invoke.c	scr_cls_props_define	2	0	0	0	silent	REVIEW	
-scr_dyn_invoke.c	scr_cls_props_ensure	0	1	0	0	silent	REVIEW	
+scr_dyn_invoke.c	scr_cls_props_ensure	0	1	0	0	silent	force	a new kind here builds a FRESH EMPTY props table and discards the existing one -- silent, and destructive
 scr_dyn_invoke.c	scr_cls_props_get	1	0	0	0	silent	REVIEW	
-scr_dyn_invoke.c	scr_cls_props_has	1	0	0	0	silent	REVIEW	
+scr_dyn_invoke.c	scr_cls_props_has	1	0	0	0	silent	force	keyed read on the class props table
 scr_dyn_invoke.c	scr_dyn_define_prop	1	0	0	0	silent	REVIEW	
 scr_dyn_invoke.c	scr_dyn_define_props	3	1	0	2	silent	REVIEW	
 scr_dyn_invoke.c	scr_dyn_has_intrinsic_method	0	1	0	0	silent	REVIEW	
 scr_dyn_invoke.c	scr_dyn_intrinsic_method_get	0	1	0	0	silent	REVIEW	
 scr_dyn_invoke.c	scr_dyn_invoke	0	1	0	0	silent	REVIEW	
-scr_http.c	scr_http_dynh_agent_invoke	0	1	0	0	silent	REVIEW	
-scr_http.c	scr_http_dynh_opt_str	1	0	0	0	silent	REVIEW	
-scr_http.c	scr_http_dynh_pairs	0	0	0	3	silent	REVIEW	
+scr_http.c	scr_http_dynh_agent_invoke	0	1	0	0	silent	force	reads options.family
+scr_http.c	scr_http_dynh_opt_str	1	0	0	0	silent	force	keyed read; misses silently as NULL
+scr_http.c	scr_http_dynh_pairs	0	0	0	3	silent	force	walks headers->v.obj.len into a pair array
 scr_http.c	scr_http_dynh_res_invoke	0	1	0	0	silent	REVIEW	
-scr_http.c	scr_http_res_write_head_dyn	1	0	0	2	silent	REVIEW	
-scr_http2.c	scr_h2_dom_to_pairs	0	0	0	3	silent	REVIEW	
-scr_http2.c	scr_h2_dyn_end_opt	1	0	0	0	silent	REVIEW	
+scr_http.c	scr_http_res_write_head_dyn	1	0	0	2	silent	force	walks the header object
+scr_http2.c	scr_h2_dom_to_pairs	0	0	0	3	silent	force	walks headers->v.obj.len
+scr_http2.c	scr_h2_dyn_end_opt	1	0	0	0	silent	force	reads options.endStream; misses silently as the default
 scr_http2.c	scr_h2_dynh_session_invoke	0	3	0	0	silent	REVIEW	
 scr_http2.c	scr_h2_dynh_stream_invoke	0	1	0	0	silent	REVIEW	
-scr_http2.c	scr_http2_create_secure_server_dyn	0	1	0	3	silent	REVIEW	
-scr_http2.c	scr_http2_session_settings	0	1	0	0	silent	REVIEW	
-scr_inspect.c	insp_emit_slots	1	0	0	2	silent	REVIEW	
-scr_inspect.c	insp_slot_count	1	0	0	2	silent	REVIEW	
-scr_inspect.c	scr_cls_props_inspect	1	0	0	2	silent	REVIEW	
+scr_http2.c	scr_http2_create_secure_server_dyn	0	1	0	3	silent	force	walks the options object
+scr_http2.c	scr_http2_session_settings	0	1	0	0	silent	force	reads a fixed key table off the settings object
+scr_inspect.c	insp_emit_slots	1	0	0	2	silent	force	walks the slots table
+scr_inspect.c	insp_slot_count	1	0	0	2	silent	force	walks the slots table
+scr_inspect.c	scr_cls_props_inspect	1	0	0	2	silent	force	walks the class props table
 scr_inspect.c	scr_insp_dyn	0	0	1	3	nodefault	REVIEW	
 scr_inspect.c	scr_insp_fmt_s	0	1	0	0	silent	REVIEW	
-scr_island.c	isl_dyn_unmarshalable	0	0	1	2	silent	REVIEW	
+scr_island.c	isl_dyn_unmarshalable	0	0	1	2	silent	force	walks every member to decide marshalability
 scr_island.c	isl_from_dyn	0	0	1	2	loud	force	marshalling into the island reads every member
 scr_json.c	scr_bytes_from_dyn	0	1	0	0	silent	REVIEW	
 scr_json.c	scr_domex_new	0	1	0	0	silent	REVIEW	
@@ -66,13 +66,13 @@ scr_json.c	scr_dyn_inspect_lite	0	0	1	0	silent	refonly	"{ ... }", exactly as SCR
 scr_json.c	scr_dyn_instance_of	1	1	0	0	silent	REVIEW	
 scr_json.c	scr_dyn_is_error_encoding	0	1	0	0	silent	REVIEW	
 scr_json.c	scr_dyn_is_minted_proto	0	1	0	0	silent	REVIEW	
-scr_json.c	scr_dyn_is_null_proto	0	1	0	0	silent	REVIEW	
+scr_json.c	scr_dyn_is_null_proto	0	1	0	0	silent	refonly	reads the null_proto flag, which lives on ScrDyn and not in the OBJ arm; the crossing must set it on the reference box exactly as scr_dyn_new_obj_flavor does today
 scr_json.c	scr_dyn_json_tojson	1	0	0	0	silent	force	looks up toJSON on the object and its chain
 scr_json.c	scr_dyn_json_write_raw	0	0	1	3	loud	force	JSON.stringify of a boxed record must SERIALISE. Its default is loud, which here is the wrong answer, not a safe one -- the loudness would be a regression
 scr_json.c	scr_dyn_key_delete	0	1	0	0	silent	REVIEW	
 scr_json.c	scr_dyn_key_set	0	1	0	0	silent	REVIEW	
 scr_json.c	scr_dyn_kind_name	0	0	1	0	nodefault	refonly	"object", exactly as SCR_DYN_OBJ
-scr_json.c	scr_dyn_mark_module_ns	0	1	0	0	silent	REVIEW	
+scr_json.c	scr_dyn_mark_module_ns	0	1	0	0	silent	unreachable	a module NAMESPACE snapshot is built by this function's own caller and is never a boundary reference box; the kind gate is not what keeps one out
 scr_json.c	scr_dyn_mark_static_copy	0	1	0	1	silent	REVIEW	
 scr_json.c	scr_dyn_minted_proto_has_ctor	1	0	0	0	silent	REVIEW	
 scr_json.c	scr_dyn_obj_acc_fence	0	0	0	3	silent	REVIEW	
@@ -87,10 +87,10 @@ scr_json.c	scr_dyn_obj_has_own_prop	1	0	0	0	silent	force	'k' in o is silently fa
 scr_json.c	scr_dyn_obj_hidden_attrs	1	0	0	0	silent	REVIEW	
 scr_json.c	scr_dyn_obj_hidden_sealed	1	0	0	0	silent	REVIEW	
 scr_json.c	scr_dyn_obj_key_order	1	0	0	3	silent	REVIEW	
-scr_json.c	scr_dyn_obj_key_present	2	0	0	0	silent	REVIEW	
-scr_json.c	scr_dyn_obj_own_data	1	0	0	0	silent	REVIEW	
+scr_json.c	scr_dyn_obj_key_present	2	0	0	0	silent	force	own members then the chain; misses silently as false
+scr_json.c	scr_dyn_obj_own_data	1	0	0	0	silent	force	member lookup, then the hidden table
 scr_json.c	scr_dyn_obj_own_enum_read	1	0	0	2	silent	REVIEW	
-scr_json.c	scr_dyn_obj_proto_ref	1	0	0	0	silent	REVIEW	
+scr_json.c	scr_dyn_obj_proto_ref	1	0	0	0	silent	force	reads scr_dyn_ext(d)->proto; a reference box has no ext table
 scr_json.c	scr_dyn_obj_put_hidden	1	0	0	0	silent	REVIEW	
 scr_json.c	scr_dyn_obj_put_k	0	0	0	9	silent	force	the member store; a write also has to meet the static_copy refusal
 scr_json.c	scr_dyn_obj_resolve	1	0	0	0	silent	REVIEW	
@@ -106,7 +106,7 @@ scr_json.c	scr_dyn_origin_take	1	0	0	0	silent	creator	the recovery. This is the 
 scr_json.c	scr_dyn_own_names_fence	1	0	0	5	silent	REVIEW	
 scr_json.c	scr_dyn_proto_chain_ctor	2	0	0	0	silent	REVIEW	
 scr_json.c	scr_dyn_proto_chain_is_fn_pub	1	0	0	0	silent	REVIEW	
-scr_json.c	scr_dyn_proto_get	2	0	0	0	silent	REVIEW	
+scr_json.c	scr_dyn_proto_get	2	0	0	0	silent	force	walks the [[Prototype]] chain through scr_dyn_ext, which is an OBJ-arm field a reference box does not have
 scr_json.c	scr_dyn_release	0	4	1	6	silent	teardown	must drop the origin; the static_copy test here is already kind-gated to ARR/OBJ
 scr_json.c	scr_dyn_specific_type	0	0	1	0	silent	refonly	"an instance of Object"; the default already says this, so it is right by accident and should be made right on purpose
 scr_json.c	scr_dyn_string_coerce_js	0	2	0	0	silent	REVIEW	
@@ -125,14 +125,14 @@ scr_json.c	scr_sc_clone	0	0	1	2	silent	REVIEW
 scr_json.c	scr_sc_validate_options	1	0	0	0	silent	REVIEW	
 scr_json.c	scr_u8_from_impl	0	1	1	0	silent	REVIEW	
 scr_json.c	scr_u8_from_source_ok	0	0	1	0	silent	REVIEW	
-scr_net.c	scr_net_connect_opts_chk	1	0	0	0	silent	REVIEW	
+scr_net.c	scr_net_connect_opts_chk	1	0	0	0	silent	force	reads connect options -- and NOTE its miss is LOUD (scr_dyn_arg_type_fail), unlike the other guards, so a missed teaching here is a visible error rather than a wrong answer
 scr_net.c	scr_net_dynh_srv_invoke	0	1	0	0	silent	REVIEW	
 scr_qs.c	scr_qs_stringify	1	0	0	0	silent	force	misses silently by returning the empty string
 scr_runtime.h	scr_dyn_ext	0	0	0	1	silent	REVIEW	
 scr_sqlite_value.c	sv_database_ctor	0	1	0	0	silent	REVIEW	
 scr_sqlite_value.c	sv_db_pragma	0	1	0	0	silent	REVIEW	
-scr_sqlite.c	scr_sqlite_bind	0	1	0	0	silent	REVIEW	
-scr_stream.c	scr_stream_dyn_err	0	1	0	0	silent	REVIEW	
+scr_sqlite.c	scr_sqlite_bind	0	1	0	0	silent	force	named-parameter binding reads the object
+scr_stream.c	scr_stream_dyn_err	0	1	0	0	silent	force	reads .message off an error-shaped object
 scr_stream.c	scr_stream_parse_dyn_opts	1	0	0	0	silent	force	misses silently by returning true; the stream options are then ignored
 scr_tls.c	scr_tls_connect_dyn	1	0	0	2	silent	force	walks the member table
 scr_tls.c	scr_tls_opts_validate	1	0	0	0	silent	force	misses silently by returning true, i.e. "valid" -- the TLS options are then ignored

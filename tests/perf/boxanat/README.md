@@ -555,12 +555,38 @@ It currently fails, correctly: **25 of 140 classified, 115 at `REVIEW`.** The
 
 | verdict | n | meaning |
 |---|---|---|
-| `force` | 12 | needs the member table; must materialise first |
-| `refonly` | 5 | answers with no table — name the new kind in its list |
-| `teardown` | 4 | RC/collector arm; must drop the origin |
+| `force` | 42 | reads members, so it needs the table materialised first |
+| `refonly` | 6 | answers from the node with no table — name the new kind in its list |
+| `teardown` | 4 | an RC/collector arm; must drop the origin |
 | `creator` | 3 | the origin table's own kind gate |
-| `loud-at-caller` | 1 | already refuses, where the scan cannot see it |
-| `REVIEW` | 115 | undecided |
+| `unreachable` | 1 | the new kind cannot arrive here, with the argument for why |
+| `loud-at-caller` | 1 | already refuses, somewhere the scan cannot see |
+| `REVIEW` | 83 | undecided |
+
+**How a verdict is reached, so a second pair of hands can match it.** Open the
+function and answer one question: *does it read `v.obj.entries`, directly or
+through `scr_dyn_obj_get` / `scr_dyn_ext`?* If yes it is `force`, whatever its
+miss path looks like. If it answers from the node itself — a flag, the kind, a
+name — it is `refonly` and the only work is naming the new kind in its list.
+`teardown` and `creator` are the two closed sets: the RC/collector arms, and
+the three origin-table entry points.
+
+Two verdicts exist because the mechanical scan cannot see the answer, and both
+are arguments rather than classifications:
+
+* `loud-at-caller` — `scr_weak_dyn_key` returns a refusal **descriptor** its
+  caller throws on. Genuinely loud; the scan reads it as silent.
+* `unreachable` — `scr_dyn_mark_module_ns` sets a flag on a namespace snapshot
+  its own caller built. A boundary reference box never arrives, and the kind
+  gate is not what keeps it out.
+
+**Two rows carry a warning the family does not share.** `scr_net_connect_opts_chk`
+is a `force` whose miss is **loud** (`scr_dyn_arg_type_fail`), unlike every
+other options guard — a missed teaching there is a visible error, not a wrong
+answer. And `scr_cls_props_ensure` is a `force` whose miss builds a **fresh
+empty** props table and discards the live one: silent, and destructive rather
+than merely wrong. Neither is deducible from the guard shape, which is the
+whole reason the column is a person's.
 
 `scr_dyn_json_write_raw` is the sharpest of the 25: its default **is** loud,
 and that is the **wrong** answer — `JSON.stringify` of a boxed record must
