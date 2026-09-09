@@ -13,33 +13,58 @@ surfaces as a crash six weeks after it ships.
 
 ## 1. A region must enumerate VIEWS, not live blocks
 
-**`subarray` aliases.** `scr_bytes.c:518` — *"a same-elem VIEW over the
-receiver's storage"* — with a chain depth of exactly one to an owner, and
-`scr_runtime.h:7732` carries the owner pointer that makes it so. Every `bytes`
-field of a decoded protobuf message is such a view into the single
-decompressed blob, not a copy.
+This is structural: it does not depend on any particular caller, and it is
+stated here without one, because the example it was first written with turned
+out not to hold.
 
-So a survivor may be **32 bytes whose liveness pins megabytes**, and
-copy-out's natural implementation — copy the survivor's own length, then
-destroy the region — is a **use-after-free**: the 32 bytes are copied, the
-owner is destroyed under the copy's backing pointer, and the view's `data`
-now points into returned memory. Nothing crashes at the copy. It crashes at
-the next read, arbitrarily later, with no line pointing back here.
+**Views exist and they alias.** `scr_bytes.c:457` separates the two operations
+by name — *"slice (copy) / subarray (view)"* — and the two implementations are
+explicit: `scr_bytes_slice` (`:469`) allocates and `memcpy`s, while
+`scr_bytes_subarray` (`:524`) is *"a same-elem VIEW over the receiver's
+storage"*, with a chain depth of exactly one to an owner and the owner pointer
+at `scr_runtime.h:7732`. `DataView` and `Buffer.slice` take the same view
+branch; the header comment names the JS subtlety exactly — *"only the plain
+typed arrays' slice() copies"*.
 
-A correct copy-out must, for each survivor, either
+**So a live object can be N bytes whose liveness pins far more than N.** The
+consequence for a region is not a slowdown, it is a use-after-free:
 
-* **materialise the view** — copy the viewed *window* into a fresh owner and
-  re-point the view (correct, and in the `nctSalt` case it also removes a
-  multi-megabyte pin as a side effect), or
-* **promote the owner** — copy the whole backing buffer out of the region and
-  keep the view pointing into it (correct, and pays the full blob).
+> copy the survivor's own length, then destroy the region -> the bytes are
+> copied, the owner is freed under the copy's backing pointer, and the view's
+> `data` now points into returned memory.
 
-Choosing per survivor needs the view's window, which the runtime has. What it
-must never do is treat `sizeof(survivor)` as the amount to copy.
+Nothing fails at the copy. It fails at the next read, arbitrarily later, with
+no line pointing back here.
 
-The same applies to anything else with a borrowed interior pointer: `DataView`,
-`Buffer.slice`, and the string arena's carved blocks, which are interior
-pointers into a 64 KiB chunk by construction.
+A correct copy-out must, per survivor, either **materialise the view** — copy
+the viewed *window* into a fresh owner and re-point the view — or **promote
+the owner** — copy the whole backing buffer and leave the view pointing into
+it. Choosing needs the view's window, which the runtime has. What it must
+never do is treat `sizeof(survivor)` as the amount to copy.
+
+The same holds for the string arena's carved blocks, which are interior
+pointers into a 64 KiB chunk by construction (`scr_string.c:595`) and whose
+release goes to the arena's own free list rather than to `free()`. An address
+inside a region is not necessarily an address the region may reclaim.
+
+### 1a. Store-dependent retention (the user's observation)
+
+A decoded protobuf's `bytes` fields are views: the vendored protobufjs sets
+`_slice = Array.prototype.subarray` for the base reader and
+`Buffer.prototype.slice` for the buffer reader, and both alias. So **a store
+that retains a decoded object retains the blob it was decoded from**, however
+small the field it kept.
+
+That makes retention a property of the *store*, not only of the code that
+decodes. A store which serialises on write (SQLite) drops the view at the
+write boundary; an in-memory store which keeps the object holds the whole
+decompressed chunk behind it. Same program, same decode path, different
+retention.
+
+**Unmeasured.** Every figure this objective rests on was taken on the SQLite
+store. Running the same rig against the memory store would size this class,
+and it is worth doing one day — but nothing here should be read as having
+measured it.
 
 ## 2. The survivor fraction is not a design input
 
@@ -92,5 +117,7 @@ A region *trimmed* mid-phase and then allocated back into pays that per page.
 * Whether the store driver retains bound buffers (`better-sqlite3`'s `auto`
   driver, `packages/store-sqlite/src/connection.ts`) — if it does, the
   aliasing in precondition 1 propagates past the region boundary.
+* The size of the store-dependent retention class in 1a: the same rig against
+  the memory store rather than SQLite.
 * Cycle-level, mode-matched A/B on the allocation path. The seven-rep wall
   clock in `placement.c` supports **not slower** and nothing stronger.
