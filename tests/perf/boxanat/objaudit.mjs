@@ -158,6 +158,77 @@ export function findDefault(lines, from) {
   return { cls: "nodefault", at: null };
 }
 
+/* ── THE ABSENCE CLASS ─────────────────────────────────────────────────
+ *
+ * Every row in the manifest is a site that HANDLES an OBJ dyn. There is a
+ * second class the manifest is shaped wrong to hold: sites whose current
+ * answer is correct only BECAUSE A\ and OBJ have no arm.
+ *
+ * scr_json.c states the rule: "A dyn A\ or OBJ built in dyn-land has no
+ * second representation, so a WeakMap over `object` keys it on the BOX
+ * (scr_dyn_strict_eq's default arm: the box IS the JS value for these two
+ * kinds)." Every kind whose box is a boundary artifact -- FUNC, HANDLE,
+ * PROMISE, OBJINST, BYTES, A\BUF, MAP -- has an explicit payload-comparing
+ * arm; A\ and OBJ fall to `default: return a == b`, and that is RIGHT today.
+ *
+ * A by-reference box's whole premise is that it DOES have a second
+ * representation, so it breaks the rule and inherits the wrong answer --
+ * which is the measured `kept[0] === kept[1]` divergence in this lane's
+ * rt1.ts. The precedent is exact and one kind over: the BYTES arm exists
+ * because it was missing, and one Buffer boxed twice compared FALSE against
+ * itself.
+ *
+ * These sites cannot be manifest rows without widening PATTERNS, which would
+ * grow a row set that has just been unioned and declared complete at 140 --
+ * and their verdict answers a DIFFERENT question ("does this default stay
+ * correct?") than a row's ("what does this site do when the new kind
+ * arrives?"). So they get a detector rather than a manifest: it says how many
+ * there are, and it re-fires if someone writes a third. */
+export function identitySites(dir) {
+  const REF = ["SCR_DYN_FUNC", "SCR_DYN_HANDLE", "SCR_DYN_PROMISE", "SCR_DYN_OBJINST",
+               "SCR_DYN_BYTES", "SCR_DYN_ARRBUF", "SCR_DYN_MAP"];
+  /* NO REGEX FOR THE ARM TESTS, DELIBERATELY. The first version built them as
+   * `new RegExp("case" + "\\s*SCR_DYN_OBJ...")`, and a backslash inside a JS
+   * STRING literal is not a regex escape — "\\s" degrades to "s", so the test
+   * never matched, every OBJ arm read as absent, and the class came out at 22
+   * where a separate probe said 2. Collapsing whitespace and using plain
+   * `includes` has no escaping surface to get wrong. */
+  const has = (t, kind) => t.includes("case " + kind + ":");
+  const out = [];
+  for (const f of readdirSync(dir).sort()) {
+    if (!f.endsWith(".c") && !f.endsWith(".h")) continue;
+    const lines = readFileSync(join(dir, f), "utf8").split(/\r?\n/);
+    let cur = null;
+    let buf = [];
+    let start = 0;
+    const flush = () => {
+      if (cur === null) return;
+      // One space between tokens, so `case  SCR_DYN_OBJ :` and the ordinary
+      // spelling collapse to the same string.
+      const t = buf.join(" ").replace(/\s+/g, " ");
+      if (t.includes("switch") && t.includes("->kind")) {
+        const nref = REF.filter((r) => has(t, r)).length;
+        if (nref >= 2 && !has(t, "SCR_DYN_OBJ") && !has(t, "SCR_DYN_ARR")) {
+          out.push({ file: f, fn: cur, line: start, refArms: nref });
+        }
+      }
+      cur = null;
+      buf = [];
+    };
+    for (let i = 0; i < lines.length; i++) {
+      const l = lines[i];
+      if (l && !/^\s/.test(l) && !/^[/*#}]/.test(l)) {
+        const m = FN_HEAD.exec(l);
+        if (m) { flush(); cur = m[1]; buf = []; start = i + 1; }
+      }
+      if (cur !== null) buf.push(l);
+      if (l.startsWith("}") && cur !== null) flush();
+    }
+    flush();
+  }
+  return out;
+}
+
 export function scanDir(dir) {
   const out = [];
   for (const f of readdirSync(dir).sort()) {
@@ -277,7 +348,7 @@ function selfTest() {
     "  switch (d->kind) {",
     "  case SCR_DYN_OBJ: return 1;",
     "  default: {",
-    '    scr_throw_error_msg(SCR_ERR_ERROR, "nope", 4);',
+    '    scr_throw_error_msg(SCR_E\_E\OR, "nope", 4);',
     "  }",
     "  }",
     "}",
@@ -290,7 +361,7 @@ function selfTest() {
     "bool scr_dyn_truthy(const ScrDyn *d) {",
     "  switch (d->kind) {",
     "  case SCR_DYN_OBJ:",
-    "  case SCR_DYN_ARR: return true;",
+    "  case SCR_DYN_A\: return true;",
     "  default: return false; /* undefined, null */",
     "  }",
     "}",
@@ -298,6 +369,33 @@ function selfTest() {
   const st = scanFile("a.c", silentC);
   ok("silent default", st[0]?.missClass === "silent");
   ok("attributed to the function", st[0]?.fn === "scr_dyn_truthy");
+
+  // THE ABSENCE DETECTOR, which produced a WRONG 22 on its first run because
+  // its arm test was a regex built from a string literal. These fixtures are
+  // the control that would have caught it.
+  const NLC = String.fromCharCode(10);
+  const refSwitch = (objArm) => [
+    "bool f(const ScrDyn *a, const ScrDyn *b) {",
+    "  switch (a->kind) {",
+    "  case SCR_DYN_FUNC: return 1;",
+    "  case SCR_DYN_HANDLE: return 2;",
+    "  case SCR_DYN_MAP: return 3;",
+    objArm ? "  case SCR_DYN_OBJ: return 4;" : "  /* no OBJ arm */",
+    "  default: return a == b;",
+    "  }",
+    "}",
+  ].join(NLC);
+  // scanFile is per-file; identitySites is per-directory, so the detection
+  // itself is exercised through a tiny in-memory stand-in of its inner test.
+  const hasArm = (t, k) => t.replace(/\s+/g, " ").includes("case " + k + ":");
+  ok("an OBJ arm is seen when present", hasArm(refSwitch(true), "SCR_DYN_OBJ"));
+  ok("...and not seen when absent", !hasArm(refSwitch(false), "SCR_DYN_OBJ"));
+  ok("reference arms are counted", ["SCR_DYN_FUNC", "SCR_DYN_HANDLE", "SCR_DYN_MAP"]
+     .filter((k) => hasArm(refSwitch(false), k)).length === 3);
+  // The exact failure: a regex assembled from a JS STRING loses its escape,
+  // so the arm reads as absent even when it is there.
+  ok("a string-built escape really does degrade",
+     !new RegExp("case" + "\s*SCR_DYN_OBJ").test("case SCR_DYN_OBJ:"));
 
   // A LOUD DEFAULT BEHIND A LONG COMMENT. This is the defect that made the
   // "only 2.1% refuse" figure a lower bound: findDefault read a fixed
@@ -318,7 +416,7 @@ function selfTest() {
     "     * .",
     "     * .",
     "     */",
-    "    scr_throw_error_msg(SCR_ERR_ERROR, msg, len);",
+    "    scr_throw_error_msg(SCR_E\_E\OR, msg, len);",
     "  }",
     "  }",
     "}",
@@ -326,14 +424,14 @@ function selfTest() {
   ok("a loud default behind a long comment is loud", scanFile("a.c", farLoudC)[0]?.missClass === "loud");
   // ...and the control that says the fix did not just make everything loud:
   ok("a long SILENT default is still silent",
-     scanFile("a.c", farLoudC.replace("scr_throw_error_msg(SCR_ERR_ERROR, msg, len);", "return 0;"))[0]?.missClass === "silent");
+     scanFile("a.c", farLoudC.replace("scr_throw_error_msg(SCR_E\_E\OR, msg, len);", "return 0;"))[0]?.missClass === "silent");
   // The arm must stop at the next case, or a later case's throw would leak in.
   const nextCaseC = [
     "static int g(const ScrDyn *d) {",
     "  switch (d->kind) {",
     "  case SCR_DYN_OBJ: return 1;",
     "  default: return 0;",
-    "  case SCR_DYN_ARR: scr_throw_error_msg(SCR_ERR_ERROR, x, 1);",
+    "  case SCR_DYN_A\: scr_throw_error_msg(SCR_E\_E\OR, x, 1);",
     "  }",
     "}",
   ].join(String.fromCharCode(10));
@@ -363,7 +461,7 @@ function selfTest() {
     "  case SCR_DYN_OBJ: return 1;",
     "  }",
     "  switch (d->kind) {",
-    "  default: scr_throw_error_msg(SCR_ERR_ERROR, \"x\", 1);",
+    "  default: scr_throw_error_msg(SCR_E\_E\OR, \"x\", 1);",
     "  }",
     "}",
   ].join("\n");
@@ -407,7 +505,7 @@ function selfTest() {
   ok("a reclassified site fails", !check([{ ...base[0], missClass: "loud" }], classified).ok);
   ok("a changed arm-read count fails", !check([{ ...base[0], arm_read: 99 }], classified).ok);
 
-  // Verdicts CARRY across a regeneration. Without this every rescan would
+  // Verdicts CA\Y across a regeneration. Without this every rescan would
   // silently wipe the audit and the guard would go green by forgetting.
   ok("verdicts carry through a regenerate", toTsv(base, classified).includes("refonly"));
   ok("a carried verdict still passes", check(base, toTsv(base, classified)).ok);
@@ -450,6 +548,15 @@ function main() {
       if (r.unclassified.length > 20) console.error(`  … and ${r.unclassified.length - 20} more`);
     }
     process.exit(1);
+  }
+  if (args.includes("--identity")) {
+    const sites = identitySites(dir);
+    console.log(`IDENTITY  ${sites.length} kind switches name >=2 reference kinds and give A\/OBJ no arm.`);
+    console.log("Their default is correct only because the box IS the JS value for those two kinds,");
+    console.log("which is exactly the premise a by-reference box breaks.");
+    console.log("");
+    for (const x of sites) console.log(`  ${x.file}:${x.line}  ${x.fn}  (${x.refArms} reference arms)`);
+    return;
   }
   if (args.includes("--tsv")) {
     const pi = args.indexOf("--merge");
