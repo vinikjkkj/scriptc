@@ -479,6 +479,35 @@ ok(cs.strChunks * 65536 < 0.06 * ws.settled,
   'and it is under 6% of settled — a real defect, NOT the retention (' +
   (100 * cs.strChunks * 65536 / ws.settled).toFixed(1) + '%)')
 
+/* RESIDUE SHAPE, NOT ALLOCATION ORIGIN.
+ *
+ * The sizes below classify HOLES. The NT heap coalesces a freed block with
+ * adjacent free neighbours, so a hole of size X may be several smaller dead
+ * blocks merged, and the merge stops where a live block sits. A hole is
+ * then the SPACING BETWEEN SURVIVORS rather than a size anything asked for.
+ *
+ * Not hypothetical here. An exact 8-byte-bucket table over the ALLOCATION
+ * side finds buckets 1320, 1328 and 1352 populated and 1344 ABSENT,
+ * identically in a sync run and in a control. Nothing requests 1,344 bytes,
+ * so 15,766 holes of it cannot be an allocation site.
+ *
+ * CONSEQUENCE, stated because a table of shares implies they are disjoint
+ * and they are NOT: a hole counted at 1,344 may be the coalesced remains of
+ * blocks allocated on a ladder this file also counts. The powers-of-two
+ * figure is therefore a LOWER BOUND on that ladder's share of the residue,
+ * the 1,344 figure is not a separate mechanism, and the two must not be
+ * summed or ranked against one another.
+ *
+ * WHAT THIS CENSUS CANNOT DO: tell a coalesced hole from a virgin one.
+ * PROCESS_HEAP_ENTRY carries no provenance for a free block -- HeapWalk
+ * says where it is and how big, and nothing about what it was.
+ *
+ * WHAT IT CAN DO, and what settles it: move the survivors and watch. Payload
+ * fixed, only history-sync CONCURRENCY varied (CHUNK_GAP_MS): busy stays
+ * within 7% while free falls 45.37 -> 3.60 MiB, the 1,344 class goes
+ * 15,758 -> 35, AND the powers-of-two share goes 5.53 -> 0.96 MiB. Two
+ * supposedly distinct categories collapsing together under ONE placement
+ * change is what proves they are the same bytes at different stages. */
 console.log('\n== [4] the entries-array prediction, registered before the free side exists ==')
 const SERIES = [1, 2, 4, 8, 16, 32, 64, 128, 256, 512].map((c) => c * 24)
 const DIAG = [768, 1536, 3072, 6144, 12288]

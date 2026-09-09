@@ -66,7 +66,8 @@ function read(dir) {
     if (Number(m[1]) === SIZE) holes = Number(m[2])
   }
   const ch = knob('CHUNKS'), cv = knob('CONVS'), ms = knob('MSGS'), tl = knob('TEXTLEN')
-  return { dir, ch, cv, ms, tl, msgs: (ch ?? 0) * (cv ?? 0) * (ms ?? 0), holes, freeBytes }
+  const gap = knob('CHUNK_GAP_MS') ?? 0
+  return { dir, ch, cv, ms, tl, gap, msgs: (ch ?? 0) * (cv ?? 0) * (ms ?? 0), holes, freeBytes }
 }
 
 const dirs = [...(existsSync(DIR) ? readdirSync(DIR).map((d) => join(DIR, d)) : []), ...EXTRA]
@@ -99,17 +100,26 @@ if (a && c)
   ok(Math.abs(a.holes - c.holes) / c.holes < 0.15,
     '8 chunks gives ' + a.holes + ' at ' + a.msgs + ' messages and ' + c.holes +
     ' at ' + c.msgs + ' — doubling the messages moves it under 15%')
+/* THE DECISIVE PAIR. Same payload, same binary; only the delivery gap
+ * differs, so only CONCURRENCY differs. Per-chunk machinery would allocate
+ * the same amount either way; failed recycling collapses. It collapses. */
+const g0 = rows.find((r) => r.gap === 0 && r.ch === 8 && r.cv === 200)
+const gN = rows.find((r) => r.gap > 0)
+if (g0 && gN)
+  ok(gN.holes < g0.holes / 100,
+    'serialising chunk delivery collapses the class ' + g0.holes + ' -> ' + gN.holes +
+    ' on an identical payload — it is stranded recycling, not an allocation site')
 const z = rows.find((r) => r.ch === 0)
 if (z) ok(z.holes === 0, 'the CHUNKS=0 control has none of the class at all (' + z.holes + ')')
 
 /* A CHECKER THAT RAN NO CHECKS MUST NOT SAY OK. Every assertion here is
  * guarded on a row being found, so a parse failure skips all of them and
  * the old spelling printed a pass over an empty table. It happened. */
-const MIN_CHECKS = 3
+const MIN_CHECKS = 4
 if (ran < MIN_CHECKS) {
   console.log('\n  REFUSED: only ' + ran + ' of ' + MIN_CHECKS + ' checks could run — the\n' +
     '  workload knobs did not parse, so the table above describes nothing.')
   process.exit(2)
 }
-console.log(fails ? '\nSWEEP FAILED (' + fails + ')' : '\nSWEEP OK — per-chunk machinery, not per-message payload')
+console.log(fails ? '\nSWEEP FAILED (' + fails + ')' : '\nSWEEP OK — CONCURRENCY, not per-chunk machinery and not per-message payload')
 process.exit(fails ? 1 : 0)
