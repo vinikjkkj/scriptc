@@ -28,7 +28,7 @@ function moduleWith(opts: { callee: string; classes?: IrClassDef[]; extra?: IrFu
     loc: LOC,
   };
   return {
-    irVersion: 3,
+    irVersion: 4,
     sourceFile: "t.ts",
     entry: "main",
     functions: [entry, ...(opts.extra ?? [])],
