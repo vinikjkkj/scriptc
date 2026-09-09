@@ -153,7 +153,12 @@ function report(ctl, bst) {
   console.log("control " + (ctl.total ?? "(no PROF-TOTAL)"));
   console.log("burst   " + (bst.total ?? "(no PROF-TOTAL)"));
   console.log("");
-  console.log("  allocMiB   keptMiB   liveMiB     count  site");
+  /* meanB is the registered predictions' discriminator: a site with a
+   * large count and a mean near 328 is the uncovered string band, and one
+   * near 1328 is the population the census could not attribute. It is a
+   * MEAN, so a site that mixes sizes will sit between classes and must not
+   * be read as either -- the exact-size histogram is what adjudicates. */
+  console.log("  allocMiB   keptMiB   liveMiB     count     meanB  site");
   for (const r of rows.slice(0, TOP)) {
     console.log(
       MB(r.bytes).padStart(10) +
@@ -163,6 +168,8 @@ function report(ctl, bst) {
         (anyLive ? MB(r.live) : "--").padStart(9) +
         " " +
         String(r.count).padStart(9) +
+        " " +
+        (r.count > 0 ? (r.bytes / r.count).toFixed(0) : "--").padStart(9) +
         "  " +
         r.name,
     );
