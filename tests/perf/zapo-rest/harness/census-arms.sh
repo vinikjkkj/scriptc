@@ -68,9 +68,22 @@ if [ "$STEP" = build ]; then
   # delete each other's intermediate mid-build. A distinct -o FILENAME is not
   # enough. (app182/README.md, "Build".)
   [ -n "$FLAGS" ] && export SCRIPTC_PROF_CFLAGS="$FLAGS"
-  # The chunkcensus walk headers reach the compile by #include from a runtime
-  # .c rather than through -include, so their contents are not in the build
-  # cache's flavor key. Off for any arm that carries them.
+  # A GAP THE CACHE FIX DOES NOT CLOSE, and it is specific to this arm.
+  #
+  # 77735c1ad folds the CONTENTS of every -include'd file into both cache
+  # keys, which is what makes an edited census header rebuild. chunkcensus is
+  # -include'd like the rest, so scr_chunk_census.h is covered. Its two WALK
+  # headers are not: they reach the compile by #include from scr_cycle.c and
+  # scr_string.c, are named nowhere on the command line, and live under
+  # tests/perf/ which the runtime fingerprint does not cover. Editing only a
+  # walk header therefore still leaves every key input identical.
+  #
+  # Editing the runtime .c files that include them does invalidate the key
+  # (they ARE in the fingerprint), so the first build after wiring the hooks
+  # is correctly keyed; it is a later walk-header-only edit that would serve
+  # a stale binary. Until profFlavor() also covers the -I directories an
+  # instrument names, this arm turns the cache off rather than betting on
+  # remembering that distinction.
   case "$ARM" in arena) export SCRIPTC_NO_CACHE=1 ;; esac
   echo "=== build $ARM"
   echo "=== SCRIPTC_PROF_CFLAGS: ${SCRIPTC_PROF_CFLAGS:-<none>}"

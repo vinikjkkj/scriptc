@@ -142,6 +142,62 @@ abandoned tail, 15 of 16 pages free, `releasable=NEVER`, `misalignedChunks=1`**.
 The program barely uses strings, so the absolute figure is trivial; it proves
 the arithmetic and the `NEVER`.
 
+## Where every number above came from, and why the cache defect does not touch it
+
+`77735c1ad` records that the build cache could not see an instrument
+header's bytes: across a header edit every key input was identical, the
+build hit, and the run reported the **previous** instrument's numbers. Any
+figure taken from a rebuilt instrumented binary before that fix is suspect.
+Sorted, rather than asserted clean:
+
+| number | source | at risk? |
+|---|---|---|
+| the four-arm control table | rebuilt instrumented binaries | **no** — every control build ran with `SCRIPTC_NO_CACHE=1`, so the cache was bypassed rather than trusted |
+| LLVM tier | the emitted artifact (`occupancy-control.ll`, no `.c`) | no |
+| string arena `releasable=NEVER` | `scr_string.c` source | no |
+| "the arena cannot enumerate its chunks" | `scr_cycle.c` source | no |
+| the `DYNCEN-*-BOX` counter | never run; syntax-checked only | no readings exist |
+
+The control table also carries **positive evidence that the binaries were
+genuinely rebuilt**, independent of the cache setting: the third rebuild
+introduced a new environment knob, `KC_MODE`, and the clustered arm
+responded to it. A stale binary cannot answer a knob it was not compiled
+with. Likewise the sparse arm moved 97.7% → 9.6% across the rebuild that
+unchained the nodes, and 0% → 96.3% on the dense arm across the rebuild
+that moved the exit inside the timer. Three rebuilds, three behaviour
+changes that follow the source edits. A cache hit would have produced none
+of them.
+
+**The fix does not cover this lane completely.** `profFlavor()` folds the
+contents of every `-include`d file, so `scr_chunk_census.h` is in the key.
+The two **walk** headers are not: they arrive by `#include` from
+`scr_cycle.c` and `scr_string.c`, are named nowhere on the command line,
+and live under `tests/perf/` which the runtime fingerprint does not cover.
+Editing a runtime `.c` invalidates the key, so wiring the hooks is safe; a
+later walk-header-only edit is not. Until `profFlavor()` also covers the
+`-I` directories an instrument names, the arena arm keeps `SCRIPTC_NO_CACHE=1`.
+
+## What this composes with, from the other blocks
+
+* The page-return route's ceiling has been independently bounded at
+  **≤ 9.44 MiB, ≤ 9.0% of settled** — 161 chunks held at exit is 10.06 MiB
+  and one page per chunk is an unreturnable header. That agrees exactly
+  with this instrument's structure: the `ideal` map pins page 0 of every
+  chunk for the `ScrCycChunk` header in the first 256 bytes.
+* That bound is taken **before subtracting live blocks**. The controls here
+  say the subtraction is the whole story: the sparse arm's naive bound is
+  15 of 16 pages free, and its measured ceiling is **4.2%**, because
+  scattered survivors touch every page. So the true ceiling on zapo should
+  be expected *well below* 9.44 MiB — a prediction this lane can settle in
+  one run, not a measurement.
+* **A retained box pins two representations, not one.** `scr_dyn_origin_mark`
+  holds the source struct at +1 for the box's whole life and keeps a
+  side-table slot besides, so a retained `unknown` crossing costs the dyn
+  tree *plus* the original tree *plus* a hash slot. The `DYNCEN-*-BOX`
+  counter added here measures **only the dyn half** and says so in its own
+  comment; reporting it alone would understate the cost. Counting the
+  origin table is the remaining work on that question.
+
 ## Two controls that were wrong, and what caught them
 
 Both were caught by the self-test requiring the arms to **differ**, and a
