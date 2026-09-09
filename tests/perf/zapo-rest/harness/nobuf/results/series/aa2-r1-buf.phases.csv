@@ -1,0 +1,45 @@
+ms,phase
+0,ARM CHUNKS=8
+0,ARM CONVS=400
+0,ARM MSGS=6
+0,ARM TEXTLEN=300
+0,ARM IDLE_S=60
+1788909074263,client-spawn
+1788909074340,client-registered-login
+1788909074347,pair-success-sent
+1788909074361,client-registered-login
+1788909074363,login-pipeline
+1788909074456,ws-attached
+1788909074471,prekeys-uploaded
+1788909074568,prekeys-uploaded
+1788909094479,PRESYNC-BASELINE
+1788909094480,ROUND-1-START
+1788909094517,chunk-sent-1
+1788909094559,chunk-sent-2
+1788909094593,chunk-sent-3
+1788909094625,chunk-sent-4
+1788909094649,chunk-sent-5
+1788909094681,chunk-sent-6
+1788909094702,chunk-sent-7
+1788909094725,chunk-sent-8
+1788909094725,all-chunks-sent-r1
+1788909095271,chunk-decoded-1
+1788909103151,chunk-decoded-2
+1788909103153,chunk-decoded-3
+1788909103154,chunk-decoded-4
+1788909103155,chunk-decoded-5
+1788909103156,chunk-decoded-6
+1788909103157,chunk-decoded-7
+1788909104217,chunk-decoded-8
+1788909104804,SYNC-DONE-r1
+1788909149813,SETTLED-r1
+1788909179827,IDLE-30s
+1788909209831,IDLE-60s
+1788909209832,END
+1788909213842,wslate-frames=30 events=29 gaps=0 gapSpan=none
+1788909213853,events-captured 200 n=8
+1788909213853,ws-frames=27 events=26 gaps=0 lastSeq=29 hello=yes
+1788909213853,ws-hello retention=n/a buffered=3 window=64
+1788909213859,ws-closed code=1005 frames=27
+1788909213861,shutdown-requested 200 {"ok":true,"result":{"stopping":true,"code":0,"afterMs":250}}
+1788909214171,clean-exit code=0

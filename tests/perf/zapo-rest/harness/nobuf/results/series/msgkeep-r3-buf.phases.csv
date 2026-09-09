@@ -1,0 +1,58 @@
+ms,phase
+0,ARM ZAPO_MSG_KEEP=1000
+0,ARM CHUNKS=8
+0,ARM CONVS=400
+0,ARM MSGS=6
+0,ARM TEXTLEN=300
+0,ARM IDLE_S=60
+0,ARM LIVEMSGS=1500
+0,ARM LIVE_TEXTLEN=300
+1788918955149,client-spawn
+1788918955242,client-registered-login
+1788918955250,pair-success-sent
+1788918955265,client-registered-login
+1788918955267,login-pipeline
+1788918955385,ws-attached
+1788918955412,prekeys-uploaded
+1788918955529,prekeys-uploaded
+1788918975428,PRESYNC-BASELINE
+1788918975429,ROUND-1-START
+1788918975470,chunk-sent-1
+1788918975516,chunk-sent-2
+1788918975543,chunk-sent-3
+1788918975566,chunk-sent-4
+1788918975587,chunk-sent-5
+1788918975618,chunk-sent-6
+1788918975641,chunk-sent-7
+1788918975665,chunk-sent-8
+1788918975665,all-chunks-sent-r1
+1788918976199,chunk-decoded-1
+1788918986739,chunk-decoded-2
+1788918986740,chunk-decoded-3
+1788918986741,chunk-decoded-4
+1788918986742,chunk-decoded-5
+1788918986743,chunk-decoded-6
+1788918986743,chunk-decoded-7
+1788918986747,chunk-decoded-8
+1788918987754,SYNC-DONE-r1
+1788918987755,LIVE-START n=1500 textlen=300
+1788918987831,live-sent-250
+1788918987891,live-sent-500
+1788918987942,live-sent-750
+1788918987981,live-sent-1000
+1788918988019,live-sent-1250
+1788918988053,live-sent-1500
+1788918988054,LIVE-SENT n=1500
+1788918992587,LIVE-DRAINED seq=1529 afterMs=4533
+1788919037599,SETTLED-r1
+1788919067604,IDLE-30s
+1788919097605,IDLE-60s
+1788919097605,END
+1788919101615,wslate-frames=2 events=0 gaps=1 gapSpan=1..1529
+1788919101622,events-captured 410 n=-1
+1788919101622,events-ring-disabled 410 — this build retains no events; the WS capture is the readback
+1788919101623,ws-frames=209 events=204 gaps=2 lastSeq=390 hello=yes
+1788919101623,ws-hello retention=none buffered=n/a window=64
+1788919101628,ws-closed code=1005 frames=209
+1788919101629,shutdown-requested 200 {"ok":true,"result":{"stopping":true,"code":0,"afterMs":250}}
+1788919101942,clean-exit code=0

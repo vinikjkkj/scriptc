@@ -1,0 +1,2 @@
+{"type":"$hello","sessionId":"drive","seq":131,"since":0,"window":64,"lagCloseMs":30000,"retention":"none","note":"acknowledge with {\"ack\":<seq>}; the server sends at most `window` events past your last ack. This build keeps NO event ring: subscribe BEFORE the traffic you want, because an event with no subscriber attached is dropped."}
+{"type":"$gap","fromSeq":1,"toSeq":131,"reason":"this build retains no events; anything that happened before you subscribed is gone"}

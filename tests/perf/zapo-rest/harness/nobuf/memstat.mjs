@@ -126,8 +126,78 @@ function parsePair(path) {
     return { header, runs, path }
 }
 
+/* ── PEAK MODES ─────────────────────────────────────────────────────────
+ *
+ * This workload's peak is BIMODAL, and treating that as noise is the single
+ * biggest way to get a wrong answer out of it.
+ *
+ * Measured here over 14 A/A runs -- the SAME binary, the same knobs:
+ *
+ *     11 runs   183.77 .. 184.68 MiB     spread 0.91 MiB  (0.5%)
+ *      3 runs   210.57 .. 214.35 MiB
+ *      nothing in between
+ *
+ * The step is +14% working set and +19% private commit, and it is DISCRETE:
+ * a run either takes it or it does not. Commit going UP by ~140 MiB rules out
+ * OS working-set trimming, which would push resident pages down and leave
+ * commit alone -- this is the program choosing a different allocation path,
+ * not the host leaning on it. An earlier block on this rig saw the same thing
+ * from the other side and called them "peak modes" (~211 vs ~186 MiB),
+ * excluding off-mode singletons by hand.
+ *
+ * Pooling both modes into one `max|r-1|` produced a +/-12.63% "floor", and
+ * then reported a +16.23% difference between two arms THAT WERE THE SAME
+ * EXECUTABLE. Both numbers are artefacts of averaging across a mode switch.
+ * Within the low mode the spread is 0.91 MiB -- which is the 0.92 MiB A/A
+ * floor this rig recorded historically, so the instrument is fine and it was
+ * the statistic that was wrong.
+ *
+ * So: classify every run, compare only WITHIN a mode, and report the mode
+ * incidence per arm as a result in its own right -- if a change makes the
+ * expensive mode more or less likely, that is a real effect and it would be
+ * invisible in a median.
+ */
+
+/** Split runs into modes on the largest relative gap in peak working set.
+ * Returns a threshold, or null when the runs are unimodal. */
+function modeThreshold(peaks) {
+    const s = [...peaks].sort((a, b) => a - b)
+    if (s.length < 4) return null
+    const gaps = []
+    for (let i = 1; i < s.length; i++) gaps.push({ g: s[i] / s[i - 1], at: i })
+    gaps.sort((a, b) => b.g - a.g)
+    const best = gaps[0], second = gaps[1]
+    /* TWO conditions, and the second one is the one that matters.
+     *
+     * A bare "gap > 6%" threshold is not enough, and the self-test proved it:
+     * fed an A/A series carrying 8% continuous host drift, it found a 6% gap
+     * between two adjacent samples, declared two modes, and excluded every
+     * repetition -- turning a clean null into "nothing to compare". Drift is
+     * a spread of similar gaps; a mode is ONE gap that dwarfs the rest.
+     *
+     * So the largest gap must also be at least 3x the next largest. On the
+     * real data that is 14% against ~0.3% (a factor of ~45). On drift, every
+     * gap is comparable and nothing splits. */
+    if (best.g < 1.06) return null
+    if (second !== undefined && best.g - 1 < 3 * (second.g - 1)) return null
+    /* THIRD: both sides must be populated. A "mode" with one member is an
+     * outlier, and excluding every repetition that does not share it would
+     * throw away the measurement to accommodate a single run. The real split
+     * is 11 against 3; the self-test's lone -8.3% sample is 1 against 7 and
+     * must stay in the pool where it widens the floor honestly. */
+    const nLow = best.at, nHigh = s.length - best.at
+    if (nLow < 2 || nHigh < 2) return null
+    return (s[best.at] + s[best.at - 1]) / 2
+}
+
+const modeOf = (run, thr) => {
+    const p = run.metrics.get('peakWS')
+    if (thr === null || typeof p !== 'number') return 'single'
+    return p > thr ? 'HIGH' : 'low'
+}
+
 /** Per-rep ratios treatment/control for one log. */
-function ratios(parsed, runRoot, controlArm, treatArm) {
+function ratios(parsed, runRoot, controlArm, treatArm, thr = null) {
     const byRep = new Map()
     for (const r of parsed.runs) {
         if (!byRep.has(r.rep)) byRep.set(r.rep, {})
@@ -142,9 +212,33 @@ function ratios(parsed, runRoot, controlArm, treatArm) {
             const cv = c.metrics.get(key), tv = t.metrics.get(key)
             if (typeof cv === 'number' && typeof tv === 'number' && cv !== 0) per.set(key, tv / cv)
         }
-        out.push({ rep, control: c, treat: t, per, treatPos: t.pos })
+        const cMode = modeOf(c, thr), tMode = modeOf(t, thr)
+        out.push({
+            rep, control: c, treat: t, per, treatPos: t.pos,
+            cMode, tMode, modeMatched: cMode === tMode,
+        })
     }
     return out
+}
+
+/** Every run mentioned by these logs, for the global mode split. */
+function allPeaks(logs, runRoot) {
+    /* DEDUPED BY TAG. An A/A log is routinely passed as both the measurement
+     * and its own floor, which counted every run twice and let a lone outlier
+     * reach the two-member minimum below and masquerade as a mode. The
+     * self-test caught it. A run is one observation however many times its
+     * log is named. */
+    const seen = new Set()
+    const peaks = []
+    for (const l of logs) {
+        for (const r of parsePair(l).runs) {
+            if (seen.has(r.tag)) continue
+            seen.add(r.tag)
+            const p = readRun(runRoot, r.tag).metrics.get('peakWS')
+            if (typeof p === 'number') peaks.push(p)
+        }
+    }
+    return peaks
 }
 
 const median = (xs) => {
@@ -160,11 +254,43 @@ const pct = (r) => `${((r - 1) * 100 >= 0 ? '+' : '')}${((r - 1) * 100).toFixed(
 
 function report({ pairLog, floorLogs, runRoot, controlArm, treatArm }) {
     const parsed = parsePair(pairLog)
-    const reps = ratios(parsed, runRoot, controlArm, treatArm)
+    /* One split for every log in play, so a rep in the A/B and a rep in the
+     * floor are classified by the same rule. */
+    const thr = modeThreshold(allPeaks([pairLog, ...floorLogs], runRoot))
+    const repsAll = ratios(parsed, runRoot, controlArm, treatArm, thr)
+    const reps = thr === null ? repsAll : repsAll.filter((r) => r.modeMatched)
 
     console.log(`\n===== memstat  ${pairLog}`)
     for (const h of parsed.header) console.log(h)
     console.log(`control=${controlArm}  treatment=${treatArm}  reps=${reps.length}  runRoot=${runRoot}`)
+
+    /* ── the mode report, before any ratio ──────────────────────────── */
+    if (thr === null) {
+        console.log(`\n-- peak modes: UNIMODAL (no gap above 6% in peak working set) --`)
+    } else {
+        console.log(`\n-- peak modes: BIMODAL, split at ${MiB(thr)} MiB peak working set --`)
+        const inc = new Map()
+        for (const r of repsAll) {
+            for (const [arm, run] of [[controlArm, r.control], [treatArm, r.treat]]) {
+                const k = `${arm}:${modeOf(run, thr)}`
+                inc.set(k, (inc.get(k) ?? 0) + 1)
+            }
+        }
+        for (const arm of [controlArm, treatArm]) {
+            const lo = inc.get(`${arm}:low`) ?? 0, hi = inc.get(`${arm}:HIGH`) ?? 0
+            console.log(`   ${arm.padEnd(7)} low=${lo}  HIGH=${hi}  (the HIGH mode is ~+14% WS, ~+19% commit, and DISCRETE)`)
+        }
+        const split = repsAll.filter((r) => !r.modeMatched)
+        if (split.length) {
+            console.log(`   ${split.length} of ${repsAll.length} repetition(s) had the two arms in DIFFERENT modes and are`)
+            console.log(`   EXCLUDED from every ratio below — such a pair measures the mode, not the arm:`)
+            for (const r of split) console.log(`     rep ${r.rep}: ${controlArm}=${r.cMode} ${treatArm}=${r.tMode}`)
+        } else {
+            console.log(`   every repetition had both arms in the same mode; none excluded`)
+        }
+        console.log(`   MODE INCIDENCE IS ITSELF A RESULT: if one arm takes the expensive mode more`)
+        console.log(`   often, that is a real effect and no median would show it.`)
+    }
 
     if (!reps.length) {
         console.log('NO PAIRED REPETITIONS — nothing to compare. This is a failure to measure, not a draw.')
@@ -212,7 +338,8 @@ function report({ pairLog, floorLogs, runRoot, controlArm, treatArm }) {
     const floorSamples = new Map()
     for (const fl of floorLogs) {
         const fp = parsePair(fl)
-        const fr = ratios(fp, runRoot, controlArm, treatArm)
+        const frAll = ratios(fp, runRoot, controlArm, treatArm, thr)
+        const fr = thr === null ? frAll : frAll.filter((r) => r.modeMatched)
         floorN += fr.length
         for (const r of fr) for (const [k, v] of r.per) {
             if (!floorSamples.has(k)) floorSamples.set(k, [])

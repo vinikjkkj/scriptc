@@ -66,8 +66,12 @@
  *   WS_CAPTURE 1     attach a WebSocket subscriber BEFORE any traffic and log
  *                    every frame to <tag>.ws.jsonl. Works on a build with no
  *                    polling route, which is why it is the default readback.
- *   WS_ACK_EVERY 16  acks per this many events; the service closes a
- *                    subscriber 64 events past its last ack.
+ *   WS_ACK_EVERY 4   acks per this many events; the service closes a
+ *                    subscriber 64 events past its last ack, and a lagging
+ *                    one on a NO-RETENTION build loses what it missed rather
+ *                    than recovering it from a ring -- so a slack cadence
+ *                    would make the two arms differ in delivery for a reason
+ *                    that is the rig, not the design.
  *
  * Any other KEY=VAL is passed straight to the child, which is how an env-gated
  * arm (SCR_CYCLE_ARENA_BUDGET=...) is measured on the SAME executable as its
@@ -133,7 +137,7 @@ const WS_CAPTURE = N('WS_CAPTURE', 1)
 /* The service closes a subscriber that sits WS_WINDOW (64) events past its
  * last ack, so a capture that never acks stalls after 64 frames and would
  * report a truncated stream as a delivery failure. */
-const WS_ACK_EVERY = N('WS_ACK_EVERY', 16)
+const WS_ACK_EVERY = N('WS_ACK_EVERY', 4)
 
 const OUT = resolve(process.env.MEMRIG_OUT ?? join(HERE, 'memrig-run'))
 const PMON = resolve(process.env.MEMRIG_PMON ?? join(HERE, 'pmon.exe'))
