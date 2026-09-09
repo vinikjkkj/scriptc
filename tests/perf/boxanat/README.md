@@ -163,6 +163,43 @@ the **cause** of two silent wrong answers — this one and the `===` one above �
 and a by-reference or lazily-materialised box would answer node on both. The
 memory is the side effect.
 
+## The cycle trap: a third divergence, and it is a hard abort
+
+`cyc1.ts` / `cyc2.ts`, recorded in `cyc-baseline.txt`. A cyclic value crossing
+into `unknown` meets `scr_dyn_from_enter`'s re-entry fence — a cyclic value has
+no finite deep copy — and the process **aborts**:
+
+```
+scriptc: cannot convert a circular structure into a checked-dynamic value
+         (unknown-typed slots deep-copy; break the cycle first)
+exit -1073740791          (0xC0000409, the fast-fail path, after the fence prints)
+```
+
+node runs both programs to completion. **218 of zapo's 1,905 converters reach
+a cycle**, so this is a fifth of the shapes that cross, not a corner.
+
+`cyc2` is the case that decides the route. It crosses the cycle and then
+**only recovers it at its static type** — the box is never read dynamically.
+node prints `recovered a same=true`; scriptc aborts before reaching the line.
+The deep copy the fence is protecting is a copy **nothing in the program ever
+looks at**: the recovery hands back the origin, which is the same pointer node
+would have passed.
+
+So under a lazy box the trap does not move to a better place — **it was never
+owed**. The fence stops a deep copy that cannot terminate; where no deep copy
+is attempted, refusing is a false positive.
+
+`cyc1` keeps its own entry because it distinguishes a half fix from a whole
+one: its only use of the box is `typeof`, which `objaudit.tsv` classes
+`refonly`. If `cyc2` stops trapping and `cyc1` does not, materialisation was
+deferred but the table-free operations were not taught to answer without
+forcing.
+
+Both must move to `tests/corpus/` when the fix lands, where the differential
+compares them against node automatically. They are not there today for the
+honest reason: they fail, and a failing corpus program is a red gate, not a
+record.
+
 ## The audit surface for a by-reference box — and a premise that does not hold
 
 `objaudit.mjs` enumerates every place the runtime decides something about an
