@@ -599,6 +599,75 @@ at every one it did not". The reach of this block's fix into them is zero, and
 the reach of a *different* fix into them is somebody's existing workstream, not
 a new investigation.
 
+## The trace edge, settled: the collapse is trace-neutral by construction
+
+I called this unanswerable from the IR. That was half right and it blocked the
+wrong thing: it is unanswerable from the IR **alone**, and it is already
+answered in the **emitter**, which is where the lowering lives anyway.
+
+**One predicate drives both the grading and the visit** (`emit-shapes.ts:665`):
+
+```ts
+const tracedFields = s.fields.filter((f) => E.traceAdapterC(f.type) !== null);
+...tracedFields.map((f) => `  visit(o->${mangleField(f.name)}, ctx);`)
+```
+
+So a record's trace is **already per-field and already generic**. Measured on a
+real artifact — `Chain { name: string; next?: Chain }` emits
+
+```c
+static void sc_rtrace_r0(void *o0, ScrTraceVisit visit, void *ctx) {
+  sc_rs_r0 *o = (sc_rs_r0 *)o0;
+  visit(o->sc_fld_next, ctx); /* next */
+}
+```
+
+It visits the union field and emits **nothing** for the `ScrStr *` field. The
+"visit only traceable fields" discipline is in place and correct today.
+
+**And the grading is invariant under the collapse.** `traceAdapterC` has
+```ts
+case "union": return E.tracedUnions.has(t.unionId) ? "scr_union_trace_v" : null;
+```
+and the fixpoint (`emitter.ts:1153`) removes a union from `tracedUnions` when
+`!u.arms.some(cycleCapable)`. A unit arm is never cycle-capable, so for a
+two-arm `{unit, A}` union:
+
+> `tracedUnions.has(U)`  ⟺  `cycleCapable(A)`
+
+**Before** the collapse the field contributes `scr_union_trace_v` iff `A` is
+cycle-capable. **After**, the field has type `A` and contributes
+`traceAdapterC(A)` iff `A` is cycle-capable. **Same condition, same
+`tracedFields` membership, same visit emitted or omitted, same shape grading.**
+
+So the trace edge needs **no new mechanism and no new predicate**: replace the
+field's type in the shape table and the existing fixpoint recomputes the right
+answer. The hazard named for `SCR_DYN_OBJINST` — visiting an object that
+carries no header — cannot arise, because the same `cycleCapable(A)` that
+decides `arm_trace` today decides the visit after.
+
+**What this does not settle**, and it belongs to the lowering rather than to
+the trace: the field's **release** path. `sc_rrelease_r0` calls
+`scr_union_release(o->sc_fld_next)` today; a collapsed field must call `A`'s
+own release. That is the same per-field type substitution, in
+`untracedRefFields`' sibling emission — mechanical, but it has to be done, and
+`scr_union_release` is NULL-tolerant where `A`'s release may not be.
+
+## Populated, not declared — and what would measure it
+
+**2,425 is the declared cap and I cannot turn it into a saving from the
+artifact.** 64 B is charged per *populated* field per *instance*: a field
+holding its unit arm costs nothing (the immortal singleton), and how often a
+hot instance leaves a nullable field null is a run-time fact.
+
+The instrument exists and needs a run, not a build change: `scr_union.c`
+already keeps **`scr_live_unions`** under `SCR_RC_AUDIT`, incremented in
+`scr_union_alloc` and decremented in both teardowns. Live union nodes **are**
+populated union fields, one for one. The caveat is the usual one and it is in
+this README already: `SCR_RC_AUDIT` forces `scr_cyc_arena_on()` to 0, so that
+run counts correctly and places differently — good for the count, useless for
+the byte placement.
+
 ## The cycle trap: a third divergence, and it is a hard abort
 
 `cyc1.ts` / `cyc2.ts`, recorded in `cyc-baseline.txt`. A cyclic value crossing
