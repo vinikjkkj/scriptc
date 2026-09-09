@@ -39,6 +39,21 @@
 //      reported apart and never counted as a win, because "narrowable" for a
 //      slot nothing uses is a number that flatters the route.
 //
+// WHICH ZAPO. This lane is about THE COMPILER'S BEHAVIOUR -- what its lowering
+// does with an `unknown` field -- so the arm it is run on does not change the
+// conclusion, and `app182` (zapo-js 1.8.2) is the one used because that is the
+// artifact this block builds.
+//
+// SAY SO WHEREVER THE RESULT IS QUOTED, because every settled-memory figure
+// this objective rests on came from `app/` (zapo-js 1.6.2): 2,794 B per
+// retained value, 163.39 -> 104.50 MiB, the 105.14 MiB the census itemised.
+// 1.6.2 downloads and decodes a history blob whole; 1.8.2 streams proto
+// fields. They are different programs with different sync architectures, and
+// anyone connecting a narrowable-slot count to a retention number is crossing
+// that boundary -- which is allowed, and has to be deliberate. A slot that is
+// narrowable in one version and not the other is a finding to name, never a
+// union to take silently.
+//
 // IT UNDER-COUNTS ON PURPOSE. A read that lands in a local and is cast on the
 // next line is two expressions, and this lane sees only the first, so it
 // scores `read-escapes`. Every such miss moves a slot OUT of the narrowable

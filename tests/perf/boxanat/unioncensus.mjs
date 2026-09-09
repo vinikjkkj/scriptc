@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // unioncensus.mjs — how many union-typed fields could stop allocating.
 //
-//   node unioncensus.mjs <program.ir.json> [--list] [--json] [--top N]
+//   node unioncensus.mjs <program.ir.json> [--reconcile <program.c>] [--list] [--json]
 //   node unioncensus.mjs --self-test
 //
 // Build the input with `scriptc build <entry> --emit-ir`.
@@ -101,6 +101,40 @@ export function analyze(mod) {
   return rows;
 }
 
+/** THE CROSS-LANE CONTROL, and it runs before either number is quoted.
+ *
+ * The IR says how many record fields are union-typed. The emitted C says the
+ * same thing independently: every one of them is an `ScrUnion *` slot in a
+ * `struct sc_rs_r<n>`. Two readers, two artifacts, one number -- and if they
+ * disagree, one of them is wrong and NEITHER figure may be used.
+ *
+ * This is not decoration. Both of this block's earlier readers produced a
+ * confident zero from a pattern that did not match the split build, and the
+ * only thing that would have caught either at the time was a second count of
+ * the same quantity from a different file. */
+export function countUnionFieldsInC(text) {
+  const lines = text.split(/\r?\n/);
+  const head = /^struct (sc_rs_r[0-9]+) \{/;
+  const fld = /^\s+ScrUnion \*sc_fld_/;
+  let inStruct = false;
+  let n = 0;
+  const shapes = new Set();
+  for (const l of lines) {
+    if (head.test(l)) { inStruct = true; continue; }
+    if (!inStruct) continue;
+    if (l.startsWith("};")) { inStruct = false; continue; }
+    if (fld.test(l)) { n++; }
+  }
+  return { fields: n, shapes: shapes.size };
+}
+
+export function reconcile(irFields, cFields) {
+  return {
+    ir: irFields, c: cFields, agree: irFields === cFields,
+    delta: irFields - cFields,
+  };
+}
+
 export function summarise(rows) {
   const byVerdict = new Map();
   const fieldsBy = new Map();
@@ -198,6 +232,31 @@ function selfTest() {
   ok("a missing definition is reported", holed[0]?.verdict === "MISSING-DEF");
   ok("...and still counted in the denominator", summarise(holed).fields === 1);
 
+  // THE CROSS-LANE CONTROL. Counting ScrUnion * slots out of the emitted C is
+  // the independent half; it has to see the SPLIT build's spelling, which is
+  // what defeated two earlier readers in this block.
+  const structC = [
+    "struct sc_rs_r0 { /* record r0 { name; next } */",
+    "  size_t rc;",
+    "  ScrStr *sc_fld_name; /* name */",
+    "  ScrUnion *sc_fld_next; /* next */",
+    "};",
+    "struct sc_rs_r1 {",
+    "  size_t rc;",
+    "  ScrUnion *sc_fld_a;",
+    "  ScrUnion *sc_fld_b;",
+    "};",
+  ].join(String.fromCharCode(10));
+  ok("counts ScrUnion * slots in the C", countUnionFieldsInC(structC).fields === 3);
+  ok("a non-union field is not counted",
+     countUnionFieldsInC(structC).fields !== 4);
+  // A ScrUnion mentioned OUTSIDE a struct is not a field.
+  ok("only struct members count",
+     countUnionFieldsInC("ScrUnion *scr_union_new_ref(uint32_t tag);").fields === 0);
+  ok("reconcile agrees when equal", reconcile(3, 3).agree === true);
+  ok("reconcile disagrees when not", reconcile(3, 4).agree === false);
+  ok("reconcile reports the delta", reconcile(3, 4).delta === -1);
+
   // Positive controls: an empty module reads zero, and the fixture above does
   // not — a census that can only say "nothing" is not a census.
   ok("empty module reads 0", analyze({ unions: [], records: [] }).length === 0);
@@ -220,6 +279,23 @@ function main() {
   }
   const rows = analyze(JSON.parse(readFileSync(f, "utf8")));
   const topN = args.includes("--top") ? Number(args[args.indexOf("--top") + 1]) : 40;
+  // --reconcile RUNS FIRST AND CAN REFUSE. Neither number below may be quoted
+  // until the two artifacts agree on how many union-typed fields there are.
+  if (args.includes("--reconcile")) {
+    const cPath = args[args.indexOf("--reconcile") + 1];
+    const c = countUnionFieldsInC(readFileSync(cPath, "utf8"));
+    const irTotal = summarise(rows).fields;
+    const r = reconcile(irTotal, c.fields);
+    console.log(`RECONCILE  IR union-typed record fields : ${r.ir}`);
+    console.log(`           C  ScrUnion * struct slots   : ${r.c}`);
+    if (!r.agree) {
+      console.error(`REFUSED — the two readers disagree by ${r.delta}. One of them is wrong,`);
+      console.error("and NEITHER figure may be used until it is resolved.");
+      process.exit(3);
+    }
+    console.log("           agree — the census below may be quoted.");
+    console.log("");
+  }
   if (args.includes("--json")) console.log(JSON.stringify(rows, null, 2));
   else console.log(render(rows, args.includes("--list"), topN));
 }
