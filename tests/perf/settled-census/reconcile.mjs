@@ -122,6 +122,21 @@
  *   is not the message bodies); or a population off by more than ~2x from
  *   19,200 per round with no coalescing account of the difference.
  *
+ *   >>> REFUTED, on the second of those criteria, before this instrument
+ *   ran. A profiler difference over the burst puts the uncovered string
+ *   band at 301,903 calls with a mean of 312 bytes -- not 328 -- and
+ *   301,903 against a predicted 19,200 per round is 15.7x off, far outside
+ *   the ~2x the criterion allowed. The band is 89.71 MiB, 5.2% of the
+ *   burst. The prediction and its refutation are both kept here rather
+ *   than the prediction being quietly replaced: the sequence is the
+ *   record, and a file that only ever shows its surviving guesses is not
+ *   evidence of anything.
+ *
+ *   What survives is the reason the band was interesting -- 244..511 is
+ *   still raw malloc/free with no recycling -- and the arithmetic that
+ *   distinguishes 312 from 328 from 1328 at all, which is why HCFREE
+ *   compares on cbData with no binning.
+ *
  *   THE COALESCING CAVEAT, registered rather than discovered afterwards:
  *   the NT heap merges a freed block with adjacent free neighbours, so the
  *   mode may appear at small integer MULTIPLES of 328 rather than at 328
@@ -138,6 +153,31 @@
  *   merge them and read a coalesced-body mode that is not there. 1328 is
  *   also not a multiple of 24, so it is not an entries array either; it is
  *   a third population and it is unattributed.
+ *
+ * WHAT THE BURST ACTUALLY ALLOCATES, measured by a profiler difference
+ * over the sync and registered here BEFORE this histogram is read. It
+ * changes what the free side should be expected to look like.
+ *
+ *   the whole burst        1,721.70 MiB allocated, 21.00 MiB kept = 1.22%
+ *   scr_array.c:172        1,285.01 MiB over 1,350,463 calls, mean 998 B,
+ *                          survival 0.00% -- 74.6% of the whole burst
+ *   scr_json.c:1636        241,519 reallocs, 20.24 MiB during the burst
+ *                          (the dyn entries array: 25,665 -> 267,184)
+ *   uncovered string band  89.71 MiB over 301,903 calls, mean 312 B, 5.2%
+ *
+ * So the residue this histogram is looking at is dominated by ~1.35M
+ * ARRAY reallocs at a mean near 1 KB, freed at 0.00% survival -- not by a
+ * string mode and not by entries arrays. An allocation with 0.00% survival
+ * contributes nothing to the BUSY side and everything to the free side,
+ * which is exactly the population HCFREE exists to see and the busy-side
+ * histogram could never have shown.
+ *
+ * The 3*2^n ladder is now on the sync path by MEASUREMENT rather than by
+ * symbol count: scr_json.c:1636 is the entries realloc and it moves by
+ * 241,519 calls across the burst. Holes at those sizes are real. What
+ * still has to separate them from everything else is the CHUNKS=0
+ * control, because "real during a sync" and "still there when settled"
+ * are different claims and only the control tests the second.
  *
  * THE THREE LADDERS ARE ARITHMETICALLY SEPARABLE, which is what lets this
  * histogram attribute rather than merely count:
@@ -426,6 +466,24 @@ if (hc.free.size === 0) {
       '         control shows the mode ABSENT; without that control it is a coincidence\n' +
       '         of size, since 328 is an unremarkable number for a heap to hold.'
     : '      -> REFUTED on this evidence: the band is not where the free space is.')
+
+  /* [6] The array ladder, which the burst profile says should dominate:
+   * scr_array.c:172 is 74.6% of everything allocated during the sync, at
+   * 0.00% survival and a mean near 1 KB. scr_arr_grow requests cap*8
+   * doubling from 4, so its sizes are EXACT POWERS OF TWO -- separable
+   * from 3*2^n above 24 and from the dense multiples of 8 the string
+   * allocator produces. */
+  const POW2 = []
+  for (let b = 5; b <= 20; b++) POW2.push(1 << b)
+  let pN = 0, pB = 0
+  for (const [sz, r] of hc.free) if (POW2.includes(sz)) { pN += r.n; pB += r.bytes }
+  console.log('\n  [6] holes at EXACT powers of two (scr_arr_grow, cap*8 doubling): ' +
+    pN + ' holes, ' + mib(pB) + ' MiB = ' + (100 * pB / allB).toFixed(1) + '% of free bytes')
+  console.log(pB / allB >= 0.3
+    ? '      -> CONSISTENT with the burst profile: 1.35M array reallocs at 0.00%\n' +
+      '         survival are the residue. Still needs CHUNKS=0 to show it is the SYNC.'
+    : '      -> NOT dominated by the array ladder, which the burst profile did not\n' +
+      '         predict. Attribute the remainder before claiming anything.')
 
   if (hc.page)
     console.log('\n  page ceiling: ' + hc.page.pages + ' whole pages = ' + mib(hc.page.pageBytes) +
