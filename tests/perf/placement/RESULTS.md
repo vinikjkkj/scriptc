@@ -353,3 +353,52 @@ Reviewed, and the honest answer is that it does not shrink usefully:
 
 No simplification is being performed for its own sake. What changed is the
 claim, not the code.
+
+## The `SCR_CYC_ARENA_CHUNK` sweep, priced before spending four builds
+
+### The malloc-traffic objection is small, and it is arithmetic
+
+From `[cycstat] arena chunks=1397 freed=1236 held=161 peakheld=1073
+carved=1283046` (arm `app/` 1.6.2):
+
+* 1,283,046 carves / 1,397 chunks = **918 carves per 64 KiB chunk**, so the
+  mean stride is 65,280/918 ≈ **71 bytes**.
+* At 4 KiB the carve region is 4,096 − 256 = 3,840 bytes, so ≈ **54 carves per
+  chunk**, and the run needs ≈ **23,760 chunks** against 1,397.
+* That is **+22,363 malloc/free pairs against 4,871,991 allocation calls —
+  +0.46%.**
+
+So a 16× smaller chunk does *not* multiply heap traffic 16× in any way that
+matters: the chunks were 0.03% of allocations and become 0.5%. They are also
+uniform 4 KiB blocks, which is the shape the LFH recycles best. The objection
+is real and must still be measured on the free side, but it is not the thing
+that decides this.
+
+### What decides it is survivors-per-chunk, and that is unmeasured
+
+Chunks held at exit are 161 × 64 KiB = **10.06 MiB**. At 4 KiB the held bytes
+are (number of distinct 4 KiB chunks containing at least one survivor) × 4 KiB.
+At most 33 of the 161 are the per-class cache, so ~128 chunks hold survivors.
+Writing *k* for the mean survivors per held chunk, S = 128k, and the 4 KiB
+figure is bounded above by S × 4 KiB:
+
+| k (survivors per 64 KiB chunk) | S | held at 4 KiB (upper bound) | vs 10.06 MiB |
+|---:|---:|---:|---:|
+| 1 | 128 | 0.50 MiB | **20× better** |
+| 10 | 1,280 | 5.00 MiB | 2× better |
+| 16 | 2,048 | 8.00 MiB | 1.25× better |
+| ≥20 | ≥2,560 | ≥10.0 MiB | **no better at all** |
+
+**The sweep's entire payoff turns on a number nobody has measured.** A 64 KiB
+chunk holds 918 slots; whether its survivors number one or twenty decides
+whether this is a 20× win or nothing, and no amount of sweeping tells you
+which — four builds would produce four numbers with no explanation.
+
+`tests/perf/pagecensus` measures exactly this and has never been run on
+zapo-rest: it reports live slots per chunk and the free-pages-per-chunk
+histogram, which is the same distribution seen from the other side. **One
+armed run gives the ceiling before any sweep**, and it is the run that would
+have to supply the sweep's baseline anyway.
+
+That is the same order that has closed five routes today: measure the term the
+answer depends on, then decide whether to build.
