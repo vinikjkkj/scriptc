@@ -54,6 +54,15 @@
 // narrowable in one version and not the other is a finding to name, never a
 // union to take silently.
 //
+// WHAT IT COVERS, AND WHAT IT DOES NOT. Record FIELDS only. An `unknown` that
+// is a module-level binding, an array element type, or a Map value is not a
+// record field and is not counted here. The read-only survey of zapo-js 1.8.2
+// source found 178 `unknown` slots that outlive their statement: 137 fields,
+// 24 collection element types, 14 retained closure captures, 3 module
+// bindings. So this lane sees about three quarters of them and is silent
+// about the rest -- which matters most for the collection case, because the
+// MCP event ring is exactly that shape.
+//
 // IT UNDER-COUNTS ON PURPOSE. A read that lands in a local and is cast on the
 // next line is two expressions, and this lane sees only the first, so it
 // scores `read-escapes`. Every such miss moves a slot OUT of the narrowable
