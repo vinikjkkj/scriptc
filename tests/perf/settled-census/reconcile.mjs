@@ -59,22 +59,46 @@
  *   The small end (24, 48, 96, 192) is deliberately NOT diagnostic: many
  *   populations land there and a peak proves nothing.
  *
- *   AND A PEAK AT 3*2^n IS NOT EVIDENCE OF BOXING ON THIS WORKLOAD. This
- *   is registered BEFORE the reading precisely so the result cannot later
- *   be read as a confirmation. The ladder is real arithmetic, and two
- *   blocks derived it independently -- but the emitted code says it is not
- *   on the history-sync path at all:
+ *   IS A PEAK AT 3*2^n EVIDENCE OF BOXING? AMBIGUOUS -- and the way that
+ *   was established is the lesson, not the answer.
  *
- *     scr_dyn_obj_set appears ZERO times in the whole binary's emitted
- *     code; a notification boxes four SCALARS, not a record; there is no
- *     88-90 member record anywhere in the tree (the largest generated
- *     proto types are 108, 81, 72 and 63); and the sync-path records are
- *     3-12 fields, which are arena-carved and never reach malloc.
+ *   This file previously said the ladder was EXCLUDED, on the grounds that
+ *   scr_dyn_obj_set appears zero times in the emitted code. That zero was
+ *   a grep of the wrong symbol. Counted on the 1.8.2 .c artifact:
  *
- *   So holes at 3*2^n come from somewhere else -- JSON, app-state, the
- *   island path -- and finding them CONFIRMS NOTHING about boxing during a
- *   sync. The busy side already pointed this way: the whole series sums to
- *   1.52 MiB of 40.64 MiB, with the 3,072 class at twelve blocks.
+ *       scr_dyn_obj_set(              3
+ *       scr_dyn_obj_set_lit(     11,512
+ *       scr_dyn_obj_set_present_lit(  4,508
+ *
+ *   All three route through scr_dyn_obj_put_k into the same v.obj.entries
+ *   array with the same cap*24 doubling, and the record converter always
+ *   calls the _lit form because the key is a compiler-emitted literal. All
+ *   16,023 sites are inside sc_td_ converters -- the crossing is the only
+ *   writer of that array. So the ladder IS on the sync path's emitted
+ *   code, and holes at 3*2^n are consistent with boxing again.
+ *
+ *   WHAT DISCRIMINATES IS THE CHUNKS=0 CONTROL, NOT A SYMBOL COUNT.
+ *   Emitted call sites are not executions: a binary can carry 16,023 of
+ *   them and run four per notification. Only a run with no history
+ *   delivered can say which sizes belong to the sync.
+ *
+ *   Likewise corrected: 88-90 member records DO exist in 1.8.2 --
+ *   record:r981 has 90 members -- as APP-STATE MUTATION shapes rather
+ *   than generated proto types. "The largest generated proto types are
+ *   108, 81, 72 and 63" and "a 90-member record exists" are both true;
+ *   "there is no 88-90 member record in the tree" was not.
+ *
+ *   THE SMALL END (24, 48, 96, 192) REMAINS NOT DIAGNOSTIC whatever the
+ *   above: many populations land there and a peak proves nothing.
+ *
+ * A ZERO IS A CLAIM ABOUT THE PATTERN UNTIL A POSITIVE CONTROL SAYS
+ * OTHERWISE. Three greps in this investigation have now returned zero and
+ * been wrong: this file's scr_dyn_obj_set count, which missed two _lit
+ * variants carrying 16,023 of the 16,023 real sites; an attribution sweep
+ * whose pattern required `static` and so matched nothing; and a
+ * machine-path scan that MSYS had rewritten before the matcher saw it.
+ * Every zero quoted here is now expected to name the pattern that
+ * produced it and to have been run against a case that must match.
  *
  * THE SHARPER PREDICTION, and it is neither this block's nor the
  * coordinator's -- it comes from reading scr_string.c's allocation bands.
@@ -307,11 +331,13 @@ if (hc.free.size === 0) {
   console.log('\n  [4] holes at DIAGNOSTIC 3*2^n sizes: ' + diagN + ' holes, ' +
     mib(diagB) + ' MiB = ' + dshare.toFixed(1) + '% of free bytes')
   console.log(dshare >= 20
-    ? '      -> a large 3*2^n population EXISTS. Note it is NOT evidence of boxing on\n' +
-      '         the sync path: scr_dyn_obj_set is emitted zero times. Attribute it to\n' +
-      '         JSON / app-state / the island path before claiming anything.'
-    : '      -> entries arrays are not a major component; consistent with the emitted\n' +
-      '         code, which puts that ladder off the sync path entirely.')
+    ? '      -> a large 3*2^n population EXISTS, and it is CONSISTENT with boxing:\n' +
+      '         16,023 emitted sites (scr_dyn_obj_set_lit 11,512, _present_lit 4,508,\n' +
+      '         plain 3) all write this array, all inside sc_td_ converters. Consistent\n' +
+      '         is not confirmed -- emitted sites are not executions. The CHUNKS=0\n' +
+      '         control is what decides it; without that run, claim nothing.'
+    : '      -> entries arrays are not a major component of the free space, whatever\n' +
+      '         the emitted site count says.')
 
   /* Rank the top holes so the mode is read off the data, not assumed. */
   const top = [...hc.free.entries()].sort((a, b) => b[1].bytes - a[1].bytes).slice(0, 8)
