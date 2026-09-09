@@ -402,3 +402,74 @@ have to supply the sweep's baseline anyway.
 
 That is the same order that has closed five routes today: measure the term the
 answer depends on, then decide whether to build.
+
+## CORRECTION: 61.25% occupancy kills the chunk-size sweep, and it is my own table that falls
+
+`memcensus` measured the cycle arena at settle: **117 chunks, 61.25%
+occupancy, 2.31 MiB page-returnable.** That number invalidates the table
+immediately above, and the sweep it was pricing.
+
+The sweep rests on *"one survivor pins 64 KiB"*. At 61.25% occupancy the
+chunks are not sparsely pinned — they are **mostly full**:
+
+| | |
+|---|---|
+| held | 117 × 64 KiB = **7.31 MiB** |
+| genuinely live inside it | 61.25% = **4.48 MiB** |
+| free-but-held | **2.83 MiB** |
+| of that, page-shaped | **2.31 MiB** |
+
+A 64 KiB chunk carries ~918 slots at the measured 71-byte mean stride, so
+61.25% occupancy is roughly **560 live objects per chunk**, not one. My table
+priced *k* = 1, 10, 16, 20 and said *"≥20: no better at all"*. The measured *k*
+is off the bottom of it by more than an order of magnitude.
+
+**So the chunk-size sweep is dead before it is built**, and the arithmetic is
+short: the live objects need 4.48 MiB of slots wherever they sit. At 4 KiB the
+carve region is 3,840 B of every 4,096, so they need ≥1,224 chunks = **≥4.78
+MiB even with perfect packing**, against 7.31 MiB now — an upper bound of
+~2.5 MiB, achievable only if the survivors repack perfectly, which nothing
+makes them do. And it adds a 256-byte header to every 4 KiB chunk, 6.25%
+overhead where it is 0.4% today.
+
+**Four builds saved.** The term the sweep turned on was measurable, it has now
+been measured, and it says no.
+
+## Page return is the better lever on the same bytes, and it is not additive with the sweep
+
+| lever | recovers | of the 2.83 MiB available | touches the allocation path |
+|---|---|---|---|
+| chunk shrink to 4 KiB | ≤2.5 MiB (upper bound, perfect packing) | ≤88% | yes — 17× more chunk refills |
+| **page return inside chunks** | **2.31 MiB (measured)** | **82%** | **no** |
+
+They are **not additive**: both target the same 2.83 MiB of free-in-chunk
+space. And they are worse than non-additive — at the small end they are
+**mutually exclusive**, because page return needs interior pages to return:
+
+| chunk | pages | returnable (page 0 holds the 256-byte header) |
+|---:|---:|---:|
+| 64 KiB | 16 | up to 15 |
+| 8 KiB | 2 | up to 1 |
+| **4 KiB** | **1** | **0** |
+
+Shrinking the chunk to 4 KiB does not merely fail to help — **it destroys the
+lever that does.**
+
+## Why page return applies here and not on the CRT heap
+
+The route was refuted on the CRT heap for one reason: the allocator keeps
+free-list links and headers inside free blocks, and discarding a page holding
+them stalls the process in the allocator — demonstrated by the poison control
+in `discardsafe.c`.
+
+**The cycle arena has none of that.** The chunk header is ours and sits in the
+first 256 bytes; the free list is ours; `tests/perf/pagecensus` already walks
+every chunk and reports whole free pages per chunk, with the header's page
+excluded by construction. There is no foreign metadata anywhere in a chunk's
+carve region. **The objection that killed discard does not transfer**, and
+`vmprobe.c`'s numbers say what the mechanism costs: `MEM_DECOMMIT` on a
+reservation we own returns commit as well as working set at 456 ns/page, and a
+returned page costs ~1.15 µs to fault back.
+
+That is the lever worth building on the arena's 7.25 MiB, and it is the one
+this branch was originally chartered for.
