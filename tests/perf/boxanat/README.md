@@ -553,6 +553,56 @@ things that are not refusals — in the direction that flatters the argument
 this lane is correcting. So a person overrides, with a reason, in the
 manifest.
 
+### Does `force` at 114 of 140 sink the lazy box? Not on this evidence
+
+The worry is exact: if nearly every consumer materialises, a lazy box is
+forced by almost anything that touches it and the prize shrinks to whatever
+traffic goes through the `refonly` sites plus the sites never reached.
+
+**I could not answer the reachability half from the artifact, and both
+attempts failed in opposite directions.** Recorded because either one, taken
+alone, would have been quotable and wrong:
+
+* **Call-only** (`name(` in a body) said 2,002 of 3,743 runtime functions
+  reachable and put 22 of 42 `force` sites out of reach — but it also declared
+  `scr_dyn_trace` and `scr_dyn_gcfree` dead, which is impossible: they are
+  installed as **function pointers** by `scr_cyc_alloc`. Every `_invoke`,
+  `_ctor`, `_cb` and `_thunk` in the runtime is reached the same way. Unsound,
+  and unsound in the direction that flatters laziness.
+* **Identifier-level** (any mention, to catch pointer installs) said 3,743 of
+  3,743 — vacuous, because `scr_runtime.h` declares every function at file
+  scope and the seed swallowed the header.
+
+The sound instrument is the **linked image** — the PDB's procedure records for
+`zapo-rest.exe`, which `tests/perf/pdb-symbols.mjs` reads through WSL's
+`llvm-pdbutil` — and even that answers *survived the link*, not *executes on a
+sync*. **Only runtime traffic settles it**, and that needs a running
+`zapo-rest`.
+
+**What the site list does say, and it is not nothing.** Of the 42 `force` rows
+classified here, 14 are the **dyn core** (`scr_json.c`, `scr_dyn_invoke.c`:
+the keyed read and write, the prototype walk, `toJSON`, `String()`, the class
+props table) and 28 are **library surface** — TLS/HTTP2/fs/qs/sqlite/assert
+option and header walkers. The library-surface 28 receive **options objects
+and headers built fresh per API call**. A retained box from an event ring
+never arrives there. They inflate the static count and cannot force a
+retained value.
+
+**And the count is of operation KINDS, not of touches.** "114 of 140 force"
+says almost every *kind* of dynamic operation needs the member table. It does
+not say a retained box meets one. A lazy box is forced only if something
+**reads** it — and the largest `unknown` population in zapo, the MCP event
+ring, is written on every event and read only when a client asks for the
+buffer. Laziness pays exactly in proportion to boxes that are never read, and
+that is the population this ring is built to hold.
+
+So the honest position: **`force` at 114 does not sink the route, and it does
+not vindicate it either.** It relocates the question from "how many sites
+force?" to "how many retained boxes are ever touched?", which is a runtime
+measurement nobody has taken. If it turns out the retained boxes are read
+almost exclusively through forcing consumers, then narrowing is the whole fix
+— and that would be worth knowing before a lowering is written, not after.
+
 ### The manifest is a guard, not a census
 
 `objaudit.tsv` holds the mechanical columns plus a human `verdict` and `note`.
