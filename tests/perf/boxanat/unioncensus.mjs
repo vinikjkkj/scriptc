@@ -214,12 +214,13 @@ function render(rows, list, topN) {
 }
 
 /* ── the self-test ───────────────────────────────────────────────────────
- * THIS LANE HAS NOT YET BEEN RUN ON A REAL ARTIFACT. zapo's `--emit-ir` build
- * has not been taken, so every fixture below is written from the schema
- * (`IrUnionDef` in ir/nodes.ts: `arms` is an IrType[] in canonical order, and
- * an arm's index IS its runtime tag). That is stated rather than hidden: the
- * first real run has to be checked against the emitted `ScrUnion *` field
- * count, which tests/perf/boxanat's README records as 7,666 for app182. */
+ * Every fixture below is written from the schema (`IrUnionDef` in
+ * ir/nodes.ts: `arms` is an IrType[] in canonical order, and an arm's index
+ * IS its runtime tag), and the schema reading has since been confirmed
+ * against a real artifact: on app182 this lane counts 7,666 union-typed
+ * record fields and the emitted `.scrh` independently counts 7,666
+ * `ScrUnion *` struct slots. That agreement is what licenses the census, and
+ * `--reconcile` re-runs it on every invocation rather than trusting it once. */
 function selfTest() {
   const fails = [];
   let n = 0;
@@ -306,7 +307,7 @@ function selfTest() {
     console.error("SELF-TEST FAILED:\n  " + fails.join("\n  "));
     process.exit(1);
   }
-  console.log(`unioncensus self-test: ok (${n} checks) — NOT yet run on a real artifact`);
+  console.log(`unioncensus self-test: ok (${n} checks)`);
 }
 
 function main() {

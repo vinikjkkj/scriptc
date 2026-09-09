@@ -195,6 +195,15 @@ export function analyze(mod) {
       // An index-signature shape's `unknown` VALUES live in the overflow map,
       // not in a declared field: a different slot with different readers.
       row.verdict = "index-signature";
+    } else if (row.writes.size === 0 && row.opaqueWrites === 0) {
+      // READ BUT NEVER WRITTEN BY A dynFrom THIS WALK CAN SEE. Not
+      // polymorphic -- there is no second writer type, there is no writer at
+      // all. The value arrives from somewhere the IR walk does not attribute
+      // to a field write: a dynCheck materialiser building the record, a
+      // library handing one back, or a shape only ever constructed
+      // dynamically. Called `polymorphic` in the first version, which read as
+      // "two shapes flow here" when the truth is "none that we can see".
+      row.verdict = "no-writer";
     } else if (!row.mono) {
       row.verdict = row.opaqueWrites > 0 ? "opaque-write" : "polymorphic";
     } else if (row.otherReads > 0) {
@@ -217,7 +226,7 @@ export function summarise(rows) {
 }
 
 const ORDER = ["NARROWABLE", "read-escapes", "polymorphic", "opaque-write",
-               "write-only", "recovered-at-another-type", "index-signature", "unused"];
+               "no-writer", "write-only", "recovered-at-another-type", "index-signature", "unused"];
 
 function render(rows, list, topN) {
   const by = summarise(rows);
@@ -304,6 +313,21 @@ function selfTest() {
     functions: [{ body: [lit("r0", "held", dynFrom("r1"))] }],
   };
   ok("write-only is not narrowable", analyze(woMod)[0]?.verdict === "write-only");
+  // A field READ but never written by any dynFrom is not polymorphic: there
+  // is no second writer type, there is no writer at all. It arrives from
+  // somewhere this walk cannot attribute -- a dynCheck materialiser, a
+  // library, a shape only ever built dynamically. Called `polymorphic` in the
+  // first version, which read as "two shapes flow here" when the truth is
+  // "none that we can see", and on zapo that mislabel covered 8 of 10 rows.
+  const nwMod = {
+    records: [rec("r0", "held"), { id: "r1", fields: [] }],
+    functions: [{ body: [chk(get("r0", "held"), "r1")] }],
+  };
+  ok("read with no writer is no-writer", analyze(nwMod)[0]?.verdict === "no-writer");
+  ok("...and is not called polymorphic", analyze(nwMod)[0]?.verdict !== "polymorphic");
+  // ...and the control: a genuine two-writer field must STILL be polymorphic.
+  ok("two writer types is still polymorphic", analyze(polyMod)[0]?.verdict === "polymorphic");
+
   ok("unused is its own bucket",
      analyze({ records: [rec("r0", "held")], functions: [] })[0]?.verdict === "unused");
 

@@ -492,6 +492,68 @@ the owning record's trace has to visit the field directly, and per-shape cycle
 grading is not in the IR. The lane reports the ref arm's kind so that
 follow-up has a list, and claims nothing about it.
 
+## The readout: both censuses on real zapo (app182, zapo-js 1.8.2)
+
+`--emit-ir` build `GATE-EXIT 0 after 32.3 min`; the IR is **458 MB** and parses
+in 4 s. **The reconciliation agrees exactly** — the IR counts **7,666**
+union-typed record fields and the emitted `.scrh` counts **7,666** `ScrUnion *`
+struct slots, two readers over two artifacts. So the numbers below may be
+quoted.
+
+### The union fix has a ceiling of 31.6%
+
+```
+1,467 union definitions behind 7,666 declared record fields
+
+  COLLAPSIBLE      643 unions   2,425 fields   two arms, one unit + one pointer
+  multi-arm        623 unions   4,287 fields   null-ness cannot encode 3 tags
+  scalar-arm        10 unions     727 fields   f64/bool lives in `slot`; 0 is legal
+  two-ref           54 unions      20 fields
+  two-unit           1 union       31 fields
+  unmodelled-arm   136 unions     176 fields   an arm kind this lane does not model
+```
+
+**2,425 of 7,666 (31.6%)** are the shape a nullable pointer could carry with no
+allocation. At 64 B per populated field per instance **that is the ceiling on
+the fix, not 7,666** — the other 68% genuinely need the tag and the slot.
+
+The single largest is `u3`: two arms, **991 fields**, ref arm `string`. So
+`string | null` is the most common union field in zapo and it is collapsible.
+`u39` (`array`, 669 fields) follows. The largest *non*-collapsible is `u41` —
+three arms, 854 fields.
+
+### The narrowing route finds nothing on zapo
+
+```
+145 record fields declared `unknown`
+
+  index-signature   96     Record<string, unknown> overflow values, a different slot
+  opaque-write      24     written from a dyn this walk cannot attribute
+  no-writer          8     read, never written by any dynFrom
+  read-escapes       7     read flows somewhere this lane cannot follow
+  unused             6
+  polymorphic        2     genuinely two writer types
+  write-only         2
+  NARROWABLE         0
+```
+
+**Zero of 43 live `unknown` fields are narrowable.** The route that was ordered
+first because it cannot cost a cycle also **cannot pay** on this program, and
+the reasons are specific rather than a shrug:
+
+* **96 of 145 are index-signature values** — `Record<string, unknown>`, whose
+  values live in the overflow map and are not declared fields at all. The
+  dominant `unknown` shape in zapo is not the shape this route addresses.
+* **24 are `opaque-write`** — filled from a dyn that is not a `dynFrom`
+  (JSON, the island, another slot), so no single static type flows in.
+* The lane is a **floor** and covers **record fields only**, so 0 is a floor
+  too — but a floor of zero with 96 of the population in a bucket the route
+  structurally cannot reach is not a near miss.
+
+`no-writer` was called `polymorphic` in the first reading, which said "two
+shapes flow here" where the truth is "none this walk can see" — 8 of the 10
+rows. Corrected before quoting, and now a self-test.
+
 ## The cycle trap: a third divergence, and it is a hard abort
 
 `cyc1.ts` / `cyc2.ts`, recorded in `cyc-baseline.txt`. A cyclic value crossing
