@@ -163,6 +163,42 @@ the **cause** of two silent wrong answers — this one and the `===` one above �
 and a by-reference or lazily-materialised box would answer node on both. The
 memory is the side effect.
 
+## Which `unknown` slots never needed to be dynamic
+
+`narrowcensus.mjs` reads the serialized IR (`scriptc build <entry> --emit-ir`)
+and asks, per `unknown`-typed record field, the one question the narrowing
+pass has to answer:
+
+* is **every write** a `dynFrom` of the same static type `T`?
+* is **every read** consumed directly by a `dynCheck` back to that same `T`?
+
+If both, the slot was never dynamic. It can carry the pointer, and the box,
+its member table, its whole subtree and its origin-table entry all cease to
+exist — with **no run-time mechanism at all**, which is why this route cannot
+cost a cycle and why it goes first.
+
+It reads the **IR**, which is the only level that can answer it: the emitted
+C and `.ll` still have the crossings but have lost which record *field* a
+value came out of, and a census over the frontend's 122 `dynFrom` creation
+sites would be a census of the lowering rather than of the program.
+
+**It under-counts on purpose.** A read that lands in a local and is cast on
+the next line is two expressions; this lane sees only the first and scores it
+`read-escapes`. Every such miss moves a slot *out* of the narrowable set, so
+the number is a floor.
+
+`narrow1.ts` is the shape, and the three instruments agree on it end to end:
+
+```
+narrowcensus  record:r1.data   NARROWABLE   written as record:r0
+boxanat       record:r0        3 nodes, 256 B per box
+boxsites      1 crossing, RETAINED in a field, and it marks an ORIGIN
+              (so the box also pins the source for its whole life)
+```
+
+One slot, 256 B of box plus 45.7–91.4 B of origin slot plus a pinned source,
+per envelope — and all of it removable at compile time.
+
 ## The cycle trap: a third divergence, and it is a hard abort
 
 `cyc1.ts` / `cyc2.ts`, recorded in `cyc-baseline.txt`. A cyclic value crossing
@@ -286,6 +322,8 @@ serialise. Inheriting the refusal there would be a regression, which is why
 node tests/perf/boxanat/boxanat.mjs  --self-test          # 32 checks, both lanes
 node tests/perf/boxanat/boxsites.mjs --self-test          # 12 checks
 node tests/perf/boxanat/objaudit.mjs --self-test          # 20 checks
+node tests/perf/boxanat/narrowcensus.mjs --self-test       # 13 checks
+node tests/perf/boxanat/narrowcensus.mjs <program.ir.json> [--list]
 node tests/perf/boxanat/objaudit.mjs packages/runtime/src [--list] [--class silent]
 node tests/perf/boxanat/objaudit.mjs packages/runtime/src --check tests/perf/boxanat/objaudit.tsv
 node tests/perf/boxanat/objaudit.mjs packages/runtime/src --tsv --merge tests/perf/boxanat/objaudit.tsv
