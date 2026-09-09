@@ -501,10 +501,21 @@ heard of**.
     case OBJ:            23   miss = the switch's default arm
   direct v.obj reads    121
 
-  loud         3   throws, aborts or refuses by name
-  silent     130   returns a value, breaks, or takes the else
+  loud         4   throws, aborts or refuses by name
+  silent     129   returns a value, breaks, or takes the else
   nodefault    7   a kind switch with no default arm at all
 ```
+
+**That `loud` figure is a LOWER BOUND and always will be.** `findDefault`
+originally classified from a fixed six-line window, so `scr_sc_clone`'s throw —
+sitting behind a seven-line comment — read as `silent` when it is loud. The
+window is now the whole default arm (to the next `case` at the same depth, or
+the end of the switch), which moved the count from 3 to 4. But a refusal
+reached through a *caller* is still invisible to any scan: `scr_weak_dyn_key`
+returns a refusal **descriptor**, and `scr_net_connect_opts_chk` and
+`scr_process_emit_warning` are `if`-guards whose miss path throws. Those are
+`loud` in fact and `silent` to the tool, which is why the verdict column is a
+person's and why this number may only ever be read as "at least".
 
 A new dyn kind was chosen over a lazily-emptied `SCR_DYN_OBJ` on the argument
 that a missed reader would then **refuse loudly** rather than answer `{}`.

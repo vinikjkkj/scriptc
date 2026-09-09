@@ -117,8 +117,34 @@ export function findDefault(lines, from) {
   for (let j = from; j < lines.length; j++) {
     const l = lines[j];
     if (/^\s*default\s*:/.test(l) && depth <= 0) {
-      const body = lines.slice(j, j + 6).join("\n");
-      return { cls: LOUD.test(body) ? "loud" : "silent", at: j + 1 };
+      /* THE WHOLE DEFAULT ARM, not a fixed window.
+       *
+       * This read `lines.slice(j, j + 6)`, and six lines is not the arm. A
+       * default whose throw sits behind a seven-line comment -- scr_sc_clone
+       * is the one that was caught -- read as `silent` when it is loud: the
+       * scr_weak_dyn_key problem in reverse, and in the direction that makes
+       * the "only 2.1% refuse" figure look worse than it is.
+       *
+       * The arm runs to the next `case` at the same depth, or to the end of
+       * the switch. Comments are skipped for BRACE counting (a `{` in prose
+       * would unbalance it) but are still scanned for the loud markers,
+       * because a refusal is often spelled out beside the call that makes
+       * it. */
+      let d2 = 0;
+      const body = [];
+      for (let k = j; k < lines.length; k++) {
+        const m = lines[k];
+        if (k > j && d2 <= 0 && /^\s*case\s/.test(m)) break;
+        body.push(m);
+        if (!COMMENT.test(m)) {
+          for (const ch of m) {
+            if (ch === "{") d2++;
+            else if (ch === "}") d2--;
+          }
+        }
+        if (d2 < 0) break; /* the switch closed */
+      }
+      return { cls: LOUD.test(body.join("\n")) ? "loud" : "silent", at: j + 1 };
     }
     if (!COMMENT.test(l)) {
       for (const ch of l) {
@@ -272,6 +298,46 @@ function selfTest() {
   const st = scanFile("a.c", silentC);
   ok("silent default", st[0]?.missClass === "silent");
   ok("attributed to the function", st[0]?.fn === "scr_dyn_truthy");
+
+  // A LOUD DEFAULT BEHIND A LONG COMMENT. This is the defect that made the
+  // "only 2.1% refuse" figure a lower bound: findDefault read a fixed
+  // six-line window, so scr_sc_clone's throw sat outside it behind a
+  // seven-line comment and the row read `silent` when it is loud -- the
+  // scr_weak_dyn_key problem in reverse, and in the direction that flatters
+  // this file's own argument.
+  const farLoudC = [
+    "static int f(const ScrDyn *d) {",
+    "  switch (d->kind) {",
+    "  case SCR_DYN_OBJ: return 1;",
+    "  default: {",
+    "    /* Node names the value by its String() rendering, which for a",
+    "     * function IS its source text, so the message has to be built",
+     + "",
+    "     * rather than picked from a table. Seven lines of reasoning here,",
+    "     * deliberately, because the previous window was six.",
+    "     * .",
+    "     * .",
+    "     */",
+    "    scr_throw_error_msg(SCR_ERR_ERROR, msg, len);",
+    "  }",
+    "  }",
+    "}",
+  ].join(String.fromCharCode(10));
+  ok("a loud default behind a long comment is loud", scanFile("a.c", farLoudC)[0]?.missClass === "loud");
+  // ...and the control that says the fix did not just make everything loud:
+  ok("a long SILENT default is still silent",
+     scanFile("a.c", farLoudC.replace("scr_throw_error_msg(SCR_ERR_ERROR, msg, len);", "return 0;"))[0]?.missClass === "silent");
+  // The arm must stop at the next case, or a later case's throw would leak in.
+  const nextCaseC = [
+    "static int g(const ScrDyn *d) {",
+    "  switch (d->kind) {",
+    "  case SCR_DYN_OBJ: return 1;",
+    "  default: return 0;",
+    "  case SCR_DYN_ARR: scr_throw_error_msg(SCR_ERR_ERROR, x, 1);",
+    "  }",
+    "}",
+  ].join(String.fromCharCode(10));
+  ok("the arm stops at the next case", scanFile("a.c", nextCaseC)[0]?.missClass === "silent");
 
   // A GUARD is silent by construction, and has no case arm to be misread as
   // one.

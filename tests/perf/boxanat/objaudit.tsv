@@ -73,7 +73,7 @@ scr_json.c	scr_dyn_key_delete	0	1	0	0	silent	REVIEW
 scr_json.c	scr_dyn_key_set	0	1	0	0	silent	REVIEW	
 scr_json.c	scr_dyn_kind_name	0	0	1	0	nodefault	refonly	"object", exactly as SCR_DYN_OBJ
 scr_json.c	scr_dyn_mark_module_ns	0	1	0	0	silent	unreachable	a module NAMESPACE snapshot is built by this function's own caller and is never a boundary reference box; the kind gate is not what keeps one out
-scr_json.c	scr_dyn_mark_static_copy	0	1	0	1	silent	REVIEW	
+scr_json.c	scr_dyn_mark_static_copy	0	1	0	1	silent	refonly	SET the mark, do not materialise. A write THROUGH the box must still refuse: teaching write-through means landing a dynamic key/value on a typed record field, which needs per-field runtime validation and is a larger piece of work than the reference box itself. Until that exists, static_copy is exactly what makes scr_dyn_key_set and the array mutators refuse loudly instead of dropping the write. The recursion arm is a no-op on an unmaterialised box (there is no subtree yet); the materialiser owns marking what it builds. THIS ROW FLIPS if write-through is ever implemented -- then the mark must NOT be set.
 scr_json.c	scr_dyn_minted_proto_has_ctor	1	0	0	0	silent	REVIEW	
 scr_json.c	scr_dyn_obj_acc_fence	0	0	0	3	silent	REVIEW	
 scr_json.c	scr_dyn_obj_accessor_get	1	0	0	0	silent	REVIEW	
@@ -121,7 +121,7 @@ scr_json.c	scr_dyn_typeof_native	0	0	1	0	silent	refonly	must answer "object"; th
 scr_json.c	scr_error_proto_to_string_thunk	1	0	0	0	silent	REVIEW	
 scr_json.c	scr_jb_put_dyn_raw	0	0	1	3	nodefault	REVIEW	
 scr_json.c	scr_jb_put_recv_ctor	0	2	0	0	silent	REVIEW	
-scr_json.c	scr_sc_clone	0	0	1	2	silent	REVIEW	
+scr_json.c	scr_sc_clone	0	0	1	2	loud	REVIEW	
 scr_json.c	scr_sc_validate_options	1	0	0	0	silent	REVIEW	
 scr_json.c	scr_u8_from_impl	0	1	1	0	silent	REVIEW	
 scr_json.c	scr_u8_from_source_ok	0	0	1	0	silent	REVIEW	
