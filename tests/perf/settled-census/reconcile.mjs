@@ -183,14 +183,23 @@ const mib = (b) => (b / MiB).toFixed(2)
 /* ---- parse ---------------------------------------------------------- */
 
 function readCycstat(text) {
-  const out = {}
+  const out = { arenaOff: false, strArenaOff: false }
   for (const line of text.split(/\r?\n/)) {
     const cyc = line.match(/arena chunks=(\d+).*?held=(\d+)/)
     if (cyc) { out.cycChunks = +cyc[1]; out.cycHeld = +cyc[2] }
+    const carv = line.match(/arena .*carved=(\d+)/)
+    if (carv && !line.includes("strarena")) out.cycCarved = +carv[1]
     const str = line.match(/strarena chunks=(\d+)/)
     if (str) out.strChunks = +str[1]
+    const scarv = line.match(/strarena .*carved=(\d+)/)
+    if (scarv) out.strCarved = +scarv[1]
     const give = line.match(/strarena .*listgive=(\d+)/)
     if (give) out.strGive = +give[1]
+    /* cycstat's own refusal lines. They are the difference between "the
+     * arena found nothing" and "the arena was not running", and only one
+     * of those makes the block-size histogram mean what this file says. */
+    if (line.includes("ARENA NEVER CARVED") && !line.includes("STRING")) out.arenaOff = true
+    if (line.includes("STRING ARENA NEVER CARVED")) out.strArenaOff = true
   }
   return out
 }
@@ -263,6 +272,44 @@ console.log('  CRT heap FREE      ' + mib(crt.free) + ' MiB in ' + crt.nfree +
   ' blocks, mean ' + Math.round(crt.free / crt.nfree) + ' B')
 console.log('  CRT uncommitted    ' + mib(crt.unc) + ' MiB')
 
+/* THE CONFIGURATION FIRST, because every size below means something else
+ * under the other one, and it is the kind of fact that is obvious to
+ * whoever ran it and invisible to everyone after.
+ *
+ * A ScrUnion -- the node behind every populated `T | null` field -- is 48
+ * bytes, 64 with its ScrCycHdr. Where it comes from depends entirely on
+ * whether the cycle arena is running:
+ *
+ *   arena ON   (SCR_CYC_ARENA 1, budget 0: every shipping build) the node
+ *              is bump-carved out of a 64 KiB chunk, and the only malloc
+ *              is one 64 KiB block per ~1,020 nodes. Union nodes NEVER
+ *              appear as 64-byte CRT-heap blocks.
+ *   arena OFF  scr_cyc_alloc_miss falls through scr_pool_take to
+ *              calloc(1, 64), so EVERY union node is its own 64-byte
+ *              block on the heap.
+ *
+ * SCR_RC_AUDIT forces scr_cyc_arena_on() to 0; so does SCR_CYCLE_ARENA=0,
+ * or exceeding a budget if one is set. So a histogram taken under RC audit
+ * and one taken under a shipping build are histograms of two different
+ * allocators, and the >=64 B population is not the same population. They
+ * must never be compared, and this file refuses rather than let them be. */
+console.log('\n== [0] the allocator configuration these sizes only mean anything under ==')
+const arenaOn = !cs.arenaOff && (cs.cycCarved ?? 0) > 0
+const strOn = !cs.strArenaOff && (cs.strCarved ?? 0) > 0
+console.log('  cycle arena  ' + (arenaOn ? 'ON' : 'OFF') +
+  '   carved=' + (cs.cycCarved ?? 0) + ' chunks=' + cs.cycChunks + ' held=' + cs.cycHeld)
+console.log('  string arena ' + (strOn ? 'ON' : 'OFF') + '   carved=' + (cs.strCarved ?? 0))
+ok(arenaOn,
+  'the cycle arena was ON (carved>0 and no "ARENA NEVER CARVED" refusal), so union\n' +
+  '        nodes were bump-carved and are ABSENT from the block-size histogram')
+{
+  const b64 = hc.sizes.get(64)
+  console.log('  cross-check: ' + (b64 ? b64.n : 0) + ' busy blocks at exactly 64 B' +
+    (arenaOn
+      ? ' — consistent with union nodes\n        being arena-carved rather than malloc\'d; these 64 B blocks are something else.'
+      : ' — under an arena-OFF build these\n        WOULD be union nodes and the attribution below does not hold.'))
+}
+
 console.log('\n== [1] the three-way arena reconciliation ==')
 const chunkBlocks = hc.sizes.get(65536)?.n ?? 0
 const predicted = cs.cycHeld + cs.strChunks
@@ -280,6 +327,26 @@ ok(arenaBytes / ws.settled < 0.20,
   'arenas are under 20% of settled working set (' + (100 * arenaBytes / ws.settled).toFixed(1) + '%)')
 ok(crt.free > crt.busy,
   'the heap holds MORE committed-free than busy (' + mib(crt.free) + ' vs ' + mib(crt.busy) + ' MiB)')
+
+/* THE AMPLIFICATION BOUND, so a real mechanism is not mistaken for a
+ * magnitude. scr_cyc_ar_give releases a chunk only when `used` reaches
+ * zero, so ONE live node pins a whole 64 KiB chunk: at ~1,020 nodes per
+ * chunk that is a 1,020x amplification, and it sounds like it could be
+ * the retention. It cannot be, and the ceiling is in this run's own
+ * numbers rather than in an argument: whatever the arena is holding at
+ * exit is `held` chunks, and every one of those is a BUSY 64 KiB block on
+ * the heap -- corroborated independently by the histogram's blocks of
+ * exactly 65,536 B. So sparse-survivor pinning is bounded above by the
+ * arena's held total and sits entirely on the busy side; it cannot
+ * account for a byte of the committed-FREE space. */
+{
+  const pin = cs.cycHeld * 65536
+  console.log('  sparse-survivor chunk pinning is bounded at ' + mib(pin) +
+    ' MiB (' + cs.cycHeld + ' chunks held), and it is BUSY, not free')
+  ok(pin < crt.free * 0.25,
+    'that bound is under a quarter of the committed-free space (' + mib(pin) +
+    ' vs ' + mib(crt.free) + ' MiB) — the 1,020x amplification is real and is NOT the retention')
+}
 ok(Math.abs(crt.free - (ws.settled - ws.presync)) / (ws.settled - ws.presync) < 0.15,
   'committed-free space accounts for the retention to within 15% (' + mib(crt.free) +
   ' free vs ' + mib(ws.settled - ws.presync) + ' retained)')
