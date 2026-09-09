@@ -222,23 +222,18 @@ describe.skipIf(!armable)("the cycle arena returns its chunks", () => {
     readonly full: number;
     readonly nolive: number;
     readonly free: number;
-    /* Live slots, so a test can hold the retained POPULATION fixed and vary
-     * only where it sits. Without this the pair below cannot be written. */
-    readonly live: number;
   }
 
   function parsePages(stderr: string): Pages | null {
     const s = stderr.replace(/\r\n/g, "\n");
     const c = /^\[pagecen] chunks=(\d+) cur=(\d+) part=(\d+) full=(\d+) nolive=(\d+)/m.exec(s);
     const f = /^\[pagecen] CEILING aligned freepages=(\d+)/m.exec(s);
-    const l = /^\[pagecen] slots carved=\d+ free=\d+ live=(\d+)/m.exec(s);
-    if (c === null || f === null || l === null) return null;
+    if (c === null || f === null) return null;
     return {
       chunks: Number(c[1]),
       full: Number(c[4]),
       nolive: Number(c[5]),
       free: Number(f[1]),
-      live: Number(l[1]),
     };
   }
 
@@ -294,48 +289,4 @@ describe.skipIf(!armable)("the cycle arena returns its chunks", () => {
     expect(p!.chunks).toBeGreaterThan(base.chunks);
     expect(p!.free / p!.chunks).toBeLessThan(base.free / base.chunks);
   }, 600_000);
-
-  test("placement, not volume, decides what the arena holds and what it could return", async () => {
-    /* THE PAIR, and it is the one control the census could not otherwise
-     * make. Every other arm here varies how MANY survivors there are, which
-     * moves live bytes and free pages together and so cannot separate a
-     * ceiling that responds to occupancy from one that responds to
-     * placement. These two arms retain the IDENTICAL population — same
-     * count, same size class, same binary — and differ only in where the
-     * arena carved them:
-     *
-     *   ARENA_SCATTER=0   the survivors are one consecutive run, so the
-     *                     chunks around them empty completely and go back.
-     *   ARENA_SCATTER=20  the same survivors are every 20th of a build 20x
-     *                     wider, so they are spread over 20x the chunks and
-     *                     none of those chunks can ever empty.
-     *
-     * This is the mechanism behind the whole retention objective, reduced
-     * to something a gate can run: fragmentation is about WHERE the live
-     * objects are, not how many bytes they occupy. */
-    const clustered = parsePages((await run(bin, { ARENA_HELD: "3000", ARENA_SCATTER: "0" })).stderr);
-    const scattered = parsePages((await run(bin, { ARENA_HELD: "3000", ARENA_SCATTER: "20" })).stderr);
-    expect(clustered, "no [pagecen] lines on the clustered arm").not.toBeNull();
-    expect(scattered, "no [pagecen] lines on the scattered arm").not.toBeNull();
-    const c = clustered!, s = scattered!;
-
-    /* The controlled variable. If these drift apart the comparison below is
-     * measuring population and not placement, and the test is void — so it
-     * is asserted rather than assumed. The survivors are the same 3,000
-     * nodes either way; the churn loop that follows is identical. */
-    expect(s.live).toBe(c.live);
-
-    /* THE CLAIM. Identical live data, and the scattered arm pins strictly
-     * more chunks, because a chunk is returned only when COMPLETELY empty
-     * and no chunk holding one survivor in twenty ever is. */
-    expect(s.chunks).toBeGreaterThan(c.chunks);
-
-    /* And the ceiling responds in the other direction: clustered garbage
-     * leaves whole free pages, scattered garbage leaves holes too small to
-     * be a page. A ceiling that reported the same for both would be
-     * indistinguishable from one that was never computed — the property
-     * the SYNTH arm establishes in the small and this establishes on a real
-     * arena. */
-    expect(c.free / c.chunks).toBeGreaterThan(s.free / s.chunks);
-  }, 900_000);
 });

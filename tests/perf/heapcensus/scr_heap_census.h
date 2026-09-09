@@ -328,11 +328,29 @@ SCR_HC_FN void scr_hc_report(void) {
         if (heaps[k] == crt) {
           size_t lo = (size_t)(uintptr_t)e.lpData;
           size_t hi = lo + (size_t)e.cbData;
+          /* cbData, NOT cbData + cbOverhead. The size table has to be
+           * comparable with a REQUEST an allocation site made -- the
+           * predicted ladders (cap*8, cap*24, and scr_str_alloc's
+           * 8*ceil((cap+13)/8)) are all request sizes -- and folding the
+           * heap's own per-block header into the key would shift every
+           * one of them by an amount that varies with the heap's bucket. */
           scr_hc_fnote((size_t)e.cbData);
-          /* Extend only on exact adjacency. Anything else closes the open
-           * run and starts a new one -- two free blocks with a busy block
-           * between them are two runs, which is the whole point. */
-          if (runhi != 0 && lo == runhi) runhi = hi;
+          /* ADJACENCY HAS TO STEP OVER THE NEXT BLOCK'S HEADER. lpData
+           * points at the DATA and cbOverhead is the header preceding it,
+           * so two blocks that touch satisfy
+           *     next.lpData - next.cbOverhead == prev.lpData + prev.cbData
+           * and NOT next.lpData == prev end. Testing exact equality of the
+           * data extents splits every genuinely contiguous run at every
+           * block boundary, which would report ~0 whole pages on any heap
+           * whose blocks carry a header -- a floor wearing a ceiling's
+           * clothes, and it would have looked like a finding.
+           *
+           * The run's PAGE count is still taken over the data extent only
+           * (scr_hc_run_close), so the headers inside a run are not
+           * counted as returnable. That errs low by less than one page per
+           * run, which is the safe direction for an upper bound. */
+          size_t back = (size_t)e.cbOverhead;
+          if (runhi != 0 && lo >= back && lo - back == runhi) runhi = hi;
           else { scr_hc_run_close(runlo, runhi); runlo = lo; runhi = hi; }
         }
       }

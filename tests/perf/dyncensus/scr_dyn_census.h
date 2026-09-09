@@ -225,8 +225,17 @@ typedef struct {
    * It does NOT include the retained static original that
    * scr_dyn_origin_mark keeps alive for the copy's lifetime, nor that
    * table's own slot: neither is a ScrDyn and this walk cannot see them.
-   * The sum here is therefore a FLOOR on what boxing retains, and is
-   * labelled as one in the report. */
+   * The sum here is therefore a FLOOR, and is labelled as one.
+   *
+   * HOW MUCH OF A FLOOR, measured rather than feared. That omission was
+   * described to this lane as a doubling -- every retained box pinning
+   * its source struct as well -- which would have made the figure below
+   * half the honest cost. Ground-truthed on the 1.8.2 artifact it is
+   * 88 origin-mark call sites against 26,469 crossings: 0.33%. The
+   * mechanism is real and it does double the crossings that carry it,
+   * but it is not a term on the typical box, and this floor is very
+   * nearly the whole cost rather than half of it. Nothing in this lane
+   * is scaled by it, and nothing should be. */
   long long sc_n, sc_node_phys, sc_side_phys;
   /* STR only: the ScrStr behind the pointer. */
   long long str_len_sum, str_len_max, str_phys;
