@@ -3,3 +3,5 @@
 pmon.exe
 # what a run leaves behind (default MEMRIG_OUT)
 memrig-run/
+# zig cc emits a .pdb beside the .exe on this target
+pmon.pdb

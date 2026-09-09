@@ -131,6 +131,14 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
+/* For the epoch stamp on every snapshot. The loop's own scr_now_ms() is a
+ * monotonic uptime clock, so a census line carrying only that cannot be
+ * joined to memrig's phases.csv, which is written with Date.now(). One
+ * epoch-seconds column makes the two series joinable; phase boundaries are
+ * tens of seconds apart, so seconds are resolution enough. time() rather
+ * than GetSystemTimeAsFileTime because a force-included header must not
+ * pull in <windows.h> -- it collides with scr_fetch_dispatch.c on fd_set. */
+#include <time.h>
 
 /* The linkage rule for a header force-included into every TU on this
  * target: shared DATA is selectany with an explicit initialiser, every
@@ -236,8 +244,9 @@ SCR_KC_FN void scr_kc_snapshot(double now, const char *why) {
   FILE *f = scr_kc_stream();
   int rows = scr_kc_want_rows();
   scr_kc_seq++;
-  fprintf(f, "CHUNKCEN-SNAP %llu ms=%.0f why=%s\n",
-          (unsigned long long)scr_kc_seq, now < 0 ? 0.0 : now, why);
+  fprintf(f, "CHUNKCEN-SNAP %llu ms=%.0f epoch=%lld why=%s\n",
+          (unsigned long long)scr_kc_seq, now < 0 ? 0.0 : now,
+          (long long)time(0), why);
   if (scr_kc_cyc_walk != 0) scr_kc_cyc_walk(f, rows);
   else fprintf(f, "CHUNKCEN-CYC WALK-ABSENT\n");
   if (scr_kc_str_walk != 0) scr_kc_str_walk(f, rows);
