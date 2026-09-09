@@ -303,11 +303,40 @@ SCR_PC_FN void scr_pc_note_chunk(const void *basev, const void *rawv,
  * truncated) later. */
 #define SCR_PC_SYNTH_GRAN 256u
 #define SCR_PC_SYNTH_STRIDE 64u
-SCR_PC_SHARED unsigned scr_pc_synth_want[3] = {0, 0, 0};
-SCR_PC_SHARED unsigned scr_pc_synth_got[3] = {0, 0, 0};
+SCR_PC_SHARED unsigned scr_pc_synth_want[5] = {0, 0, 0, 0, 0};
+SCR_PC_SHARED unsigned scr_pc_synth_got[5] = {0, 0, 0, 0, 0};
 SCR_PC_SHARED int scr_pc_synth_ran = 0;
 
-SCR_PC_FN void scr_pc_synth_case(int idx, long keep, unsigned want) {
+/* keep_mode: 0 none live, 1 one slot live (arg = slot), 2 all live,
+ * 3 CLUSTERED (arg survivors packed into one page), 4 SCATTERED (arg
+ * survivors, one on each of pages 1..arg). Modes 3 and 4 exist to prove the
+ * census can tell those two apart at the SAME live count, which is the whole
+ * property a ceiling depends on. */
+SCR_PC_FN int scr_pc_synth_live(int mode, long arg, unsigned long i) {
+  switch (mode) {
+    case 0: return 0;
+    case 1: return (long)i == arg;
+    case 2: return 1;
+    /* The slot grid starts at the header zone, so the first slot lying at
+     * the start of page p is (p*PAGE - GRAN)/STRIDE, NOT p*per_page. With
+     * GRAN 256 and STRIDE 64 that is 64p-4, and its offset is exactly
+     * p*PAGE -- which is what makes both cases below land where they claim. */
+    case 3: {
+      unsigned long first = (3ul * SCR_PC_PAGE - SCR_PC_SYNTH_GRAN) / SCR_PC_SYNTH_STRIDE;
+      return i >= first && i < first + (unsigned long)arg;
+    }
+    case 4: {
+      unsigned long p;
+      for (p = 1ul; p <= (unsigned long)arg && p < SCR_PC_PPC; p++) {
+        if (i == (p * SCR_PC_PAGE - SCR_PC_SYNTH_GRAN) / SCR_PC_SYNTH_STRIDE) return 1;
+      }
+      return 0;
+    }
+    default: return 0;
+  }
+}
+
+SCR_PC_FN void scr_pc_synth_case(int idx, int mode, long arg, unsigned want) {
   static unsigned char buf[2u * SCR_PC_CHUNK];
   unsigned char *base = (unsigned char *)(void *)(((uintptr_t)(void *)buf +
                                                    (SCR_PC_CHUNK - 1u)) &
@@ -319,14 +348,15 @@ SCR_PC_FN void scr_pc_synth_case(int idx, long keep, unsigned want) {
   unsigned long i, flen = 0;
   /* keep < 0 means "no slot is live" and keep >= nslots means "every slot
    * is live"; otherwise exactly slot `keep` stays off the free list. */
-  for (i = 0; i < nslots; i++) {
-    unsigned char *b;
-    if (keep >= (long)nslots) break;
-    if ((long)i == keep) continue;
-    b = cs + i * SCR_PC_SYNTH_STRIDE;
-    memcpy(b, &head, sizeof(void *));
-    head = (void *)b;
-    flen++;
+  {
+    for (i = 0; i < nslots; i++) {
+      unsigned char *b;
+      if (scr_pc_synth_live(mode, arg, i)) continue;
+      b = cs + i * SCR_PC_SYNTH_STRIDE;
+      memcpy(b, &head, sizeof(void *));
+      head = (void *)b;
+      flen++;
+    }
   }
   scr_pc_reset();
   scr_pc_note_chunk(base, base, base + SCR_PC_CHUNK, SCR_PC_SYNTH_GRAN,
@@ -343,14 +373,22 @@ SCR_PC_FN void scr_pc_synth_case(int idx, long keep, unsigned want) {
 }
 
 SCR_PC_FN void scr_pc_synth(void) {
-  unsigned long nslots = (SCR_PC_CHUNK - SCR_PC_SYNTH_GRAN) / SCR_PC_SYNTH_STRIDE;
   /* The survivor's slot for the `onelive` case: the first slot whose offset
    * from the chunk base lands on page 3, spelled as arithmetic so the
    * expected 14 is derived and not asserted. */
   long k = (long)((3u * SCR_PC_PAGE - SCR_PC_SYNTH_GRAN) / SCR_PC_SYNTH_STRIDE);
-  scr_pc_synth_case(0, -1, SCR_PC_PPC - 1u);
-  scr_pc_synth_case(1, k, SCR_PC_PPC - 2u);
-  scr_pc_synth_case(2, (long)nslots, 0u);
+  long n = (long)(SCR_PC_PPC - 1u); /* 15 survivors, both ways */
+  scr_pc_synth_case(0, 0, 0, SCR_PC_PPC - 1u);
+  scr_pc_synth_case(1, 1, k, SCR_PC_PPC - 2u);
+  scr_pc_synth_case(2, 2, 0, 0u);
+  /* THE DISCRIMINATION PAIR, and it is the case the whole instrument exists
+   * to get right. Fifteen survivors packed into ONE page leave fourteen
+   * pages returnable; the SAME fifteen survivors, one per page, leave NONE.
+   * Identical live count, identical live bytes, answers 14 and 0. A census
+   * that reports the same number for both is measuring occupancy and not
+   * placement, and placement is the entire question. */
+  scr_pc_synth_case(3, 3, n, SCR_PC_PPC - 2u);
+  scr_pc_synth_case(4, 4, n, 0u);
   scr_pc_synth_ran = 1;
 }
 
@@ -380,13 +418,14 @@ SCR_PC_FN void scr_pc_report(const char *when) {
                " exercised against a known answer in this process. Every"
                " number below is unvalidated.\n");
   } else {
-    static const char *const nm[3] = {"allfree", "onelive", "alllive"};
+    static const char *const nm[5] = {"allfree", "onelive", "alllive",
+                                     "clustered15", "scattered15"};
     int i, bad = 0;
-    for (i = 0; i < 3; i++) {
+    for (i = 0; i < 5; i++) {
       if (scr_pc_synth_got[i] != scr_pc_synth_want[i]) bad = 1;
     }
     fprintf(f, "[pagecen] SYNTH %s", bad ? "FAILED" : "ok");
-    for (i = 0; i < 3; i++) {
+    for (i = 0; i < 5; i++) {
       fprintf(f, " %s want=%u got=%u", nm[i], scr_pc_synth_want[i],
               scr_pc_synth_got[i]);
     }
