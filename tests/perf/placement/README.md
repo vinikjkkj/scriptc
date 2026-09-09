@@ -119,7 +119,10 @@ build; each is a claim a profiler run can confirm or refute.
   observed holes.** `scr_arr_grow` (`scr_array.c:165`) is `cap × 8` bytes,
   first cap 4, doubling, raw `realloc`. `scr_dyn_obj_put_k` (`scr_json.c:1585`)
   is `cap × 24`, first cap 1, doubling, raw `realloc`, and never shrinks —
-  but it is not on this path.
+  and it is written from about 16,000 emitted call sites across
+  `scr_dyn_obj_set` / `_lit` / `_present_lit`. Whether the SYNC reaches it
+  is decided by the `CHUNKS=0` control, not by a symbol count — see
+  `PREDICTIONS.md`.
 * **The string allocator has an uncovered band, and the workload sits in it.**
   `scr_str_alloc` (`scr_string.c:616`) serves a heap string from the pool or
   the string arena only while `scr_pool_bytes(sizeof(ScrStr) + cap + 1) <=

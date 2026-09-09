@@ -25,12 +25,11 @@ histogram can attribute rather than merely count.
 string's request is `cap + 13` rounded up to `SCR_POOL_GRAIN` (8).
 
 The `3 × 2ⁿ` family is the dyn entries array, which the census block already
-registered independently. **It is not on the history-sync path** — the emitted
-IR of an `app/` build reaches four scalar boxing walkers per notification and
-`scr_dyn_obj_set` appears zero times in emitted code anywhere in the binary —
-so `3 × 2ⁿ` holes in a settled `app/` process come from somewhere else
-(JSON, app-state, the island path), and finding them is not a confirmation of
-boxing during the sync.
+registered independently. **`3 × 2ⁿ` is AMBIGUOUS, not excluded** — see the
+correction below. The ladder is written from sixteen thousand emitted call
+sites and nothing else writes that array, so a `3 × 2ⁿ` mode may or may not be
+the sync. **The discriminator is the `CHUNKS=0` control, not any symbol
+count.**
 
 ## The lead: the uncovered string band, 244 ≤ cap ≤ 511
 
@@ -88,8 +87,8 @@ to the heap's 16-byte granularity. Compare on `cbData`, not on the sum.
 
 | excluded | evidence |
 |---|---|
-| dyn entries arrays on the sync path | four scalar walkers per notification (`sc_td_0` a string, `sc_td_15/17/737` a number); `scr_dyn_obj_set` count zero in emitted code |
-| an 88–90 member record anywhere | largest generated proto types are 108, 81, 72, 63; `WA_APPSTATE_SCHEMAS` has 66 entries |
+| ~~dyn entries arrays on the sync path~~ | **WITHDRAWN — see the correction below.** What survives is narrower: the four converters the sync path calls *directly* are scalar (`sc_td_0` a string, `sc_td_15/17/737` a number). That is a one-level-deep fact about direct call sites and cannot exclude the ladder from the path. |
+| ~~an 88–90 member record anywhere~~ | **WITHDRAWN — false.** `%sc_rs_r986` is 91 fields = **90 members** in the same artifact I claimed it absent from. |
 | sync-path records reaching the CRT heap | the four record types `settleHistorySyncChunk` builds are 3–12 fields (24–96 B), under `SCR_POOL_MAX`, so `scr_cyc_alloc` serves them from the cycle arena |
 | `cachedNctSalt` contributing to any measured figure | the rig never sends `nctSalt` — see below |
 
@@ -170,3 +169,66 @@ Storing a reference tells you what is *held*, not where it came from. The
 harder half had been verified — that a `subarray` view survives compilation
 with chain depth 1 to an owner — which is exactly what made the conclusion
 look solid while the easy half went unchecked.
+
+## Correction: two withdrawn exclusions, and both were pattern claims
+
+Neither of these was refuted by new data. Both were wrong when written, and
+the checks that produced them could not have said so.
+
+### `scr_dyn_obj_set` "appears zero times"
+
+It does not. Counted on the two `.ll` artifacts on disk, `@scr_dyn_obj_set(`
+appears 4 times, `@scr_dyn_obj_set_lit(` **11,513** times (1.8.2) and
+**11,679** (1.6.2), and `@scr_dyn_obj_set_present_lit(` **4,509** and
+**4,460**. All three route through `scr_dyn_obj_put_k` into the same
+`v.obj.entries` array with the same `cap × 24` doubling, and the
+record-to-dyn converter never calls the bare form — the key is a
+compiler-emitted literal, which is the entire point of the `key_static`
+optimisation, so it calls `_lit`.
+
+**The zero was mine, not the binary's.** The awk that produced it accumulated
+three counters and then printed with
+
+```
+END { for (k in setr) if (setr[k] >= 8) ... }
+```
+
+— iterating the `scr_box_set_ref` array and filtering on the `scr_box_set_ref`
+column. Any function that wrote entries without also being box-heavy could not
+appear, whatever its count. The pattern matched; the report suppressed it.
+
+### "no 88–90 member record in the tree"
+
+False, and demonstrably so in the very artifact used to claim it:
+`%sc_rs_r986` is 91 fields, and the first field is the refcount, so it is a
+**90-member** record. Eight record types sit in the 85–95 field band in each
+artifact. The claim came from an exact three-wide window applied to *field*
+counts as though they were *member* counts — off by one, onto a window narrow
+enough for the off-by-one to miss.
+
+### The standing rule this earns
+
+> **A search that returns zero is a claim about the search until a positive
+> control says otherwise.**
+
+Three instances in this investigation now: the page-arithmetic control that
+would have printed a plausible number from the wrong slots, the boxing block's
+own first attribution attempt whose pattern required `static`, and this. The
+cost each time was a *registered exclusion* — the most expensive kind of
+wrong, because it stops other people looking.
+
+Every exclusion in the table above now names the artifact it was counted on
+and the exact pattern, so the next reader can re-run it rather than trust it.
+
+### What this does and does not change
+
+It does not touch the runtime observation: four scalar boxes per
+*notification* may be exactly right about what a history sync **executes**,
+and emitted call sites are not executions. What it removes is the inference
+from that to "the ladder is not on this path", which never followed —
+the converter extraction was one level deep and about direct calls.
+
+It makes the `CHUNKS=0` control **more** load-bearing, not less. A `3 × 2ⁿ`
+mode that is present in the burst and absent from the control is the sync,
+whatever the symbol counts say; one present in both is not. That is now the
+only discriminator, and it is a measurement rather than a reading.
