@@ -339,6 +339,52 @@ For scale, the same artifact has **26,469** static→dyn crossings. The two are
 the same order — but a union field allocates in ordinary statically typed
 code, with no `unknown` anywhere in sight.
 
+### Can a `ScrUnion` reach malloc? Yes — twice, at two very different sizes
+
+Traced through the runtime source, not inferred.
+
+`scr_union_alloc` calls `scr_cyc_alloc(48, …)`, which computes
+`phys = scr_pool_bytes(16 + 48) = 64` and size class `blk = 8`. From there:
+
+**The default path — 64 KiB chunks.** The arena is ON in every shipping build
+(`#define SCR_CYC_ARENA 1`, and `SCR_CYC_ARENA_BUDGET 0` means *no* budget).
+A node is bump-carved out of the class-8 chunk; when that chunk is full,
+`scr_cyc_ar_new` calls **`malloc(64 << 10)`** for the next one. So union nodes
+DO reach the CRT heap — as **one 64 KiB block per 1,020 nodes**, never as a
+64-byte block.
+
+**The fallback path — 64 B `calloc`.** `scr_cyc_alloc_miss` goes arena →
+`scr_pool_take` → **`calloc(1, 64)`**. It is taken when the arena is off
+(`SCR_CYCLE_ARENA=0`), under **`SCR_RC_AUDIT`** (which forces
+`scr_cyc_arena_on()` to 0), past a budget if one is set, or if the chunk
+`malloc` fails.
+
+**So the census's attribution is safe, and for the reason suspected.** In a
+default build union nodes cannot appear among busy blocks at exactly 64 B —
+`3,596` there is consistent with union nodes being absent from that bucket
+entirely. **But that holds only while the arena is on.** A binary measured
+under `SCR_RC_AUDIT`, or with `SCR_CYCLE_ARENA=0`, puts every union node into
+the CRT heap as its own 64-byte block. Any histogram compared across those two
+configurations is comparing two different allocators.
+
+### The chunk is the retention story, not the node
+
+A chunk goes back to `free()` only when `--c->used == 0` **and** it is not its
+class's current chunk (`scr_cyc_ar_give`). At a 64-byte stride a 64 KiB chunk
+holds **1,020** nodes, so:
+
+> **one live union node can pin 65,536 bytes** — a 1,020x amplification, and
+> it lands on the CRT heap, which is where the retention this objective is
+> chasing was measured.
+
+That is a sparse-survivor fragmentation shape, and it is a *different* claim
+from "64 bytes per field". **It is a mechanism with a named amplification and
+it is UNMEASURED on the real workload.** Which of the three numbers it moves —
+peak, live, or committed-free — is exactly what a measurement has to say, and
+nothing here says it. The 64-byte figure is a live-bytes cost; the 64 KiB
+pinning would be a committed-free cost; and a workload whose union nodes die
+in cohorts pays neither.
+
 ### It is NOT the mechanism this lane has been costing
 
 | | `unknown` boxing | union-typed field |
