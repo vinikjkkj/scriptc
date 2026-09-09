@@ -414,6 +414,23 @@ collapsible two-arm shape — is NOT in this report.** Arity lives in the union
 does not; the tag histogram of the constructor calls hints at it and cannot
 settle it. It needs an `--emit-ir` build of `app182`, which has not been run.
 
+`unioncensus.mjs` is the reader that answers it, written and self-tested (18
+checks) against the `IrUnionDef` schema and **not yet run on a real
+artifact** — so the window is one command, not an exploration. It classifies
+each union as `COLLAPSIBLE` (exactly two arms, one unit and one
+pointer-shaped) or one of the four shapes that genuinely need the tag and the
+slot: `multi-arm`, `scalar-arm` (an `f64`/`bool` payload lives in `slot`, and
+0 is a legal value), `two-ref`, `two-unit`. It weights by **declared field**,
+not by union, because one collapsible union behind forty fields is worth forty
+allocations. Its first real run must be checked against the **7,666**
+`ScrUnion *` field count this README records, which is the cross-lane control.
+
+It deliberately does **not** answer whether a collapse is *sound* for a given
+field: removing the `ScrUnion` removes a node from the collector's graph, so
+the owning record's trace has to visit the field directly, and per-shape cycle
+grading is not in the IR. The lane reports the ref arm's kind so that
+follow-up has a list, and claims nothing about it.
+
 ## The cycle trap: a third divergence, and it is a hard abort
 
 `cyc1.ts` / `cyc2.ts`, recorded in `cyc-baseline.txt`. A cyclic value crossing
