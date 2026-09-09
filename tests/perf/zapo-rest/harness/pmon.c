@@ -8,14 +8,28 @@
  * that has freed memory to its own allocator but not to the OS still owns
  * the pages, and only the OS can say so.
  *
- * Five columns, and the header is written first:
+ * Six columns, and the header is written first:
  *
  *   ms             epoch milliseconds, the same clock Date.now() gives the
  *                  rig, so a sample can be joined to a phase marker
- *   workingSet     WorkingSetSize      — resident pages (== WorkingSet64)
+ *   workingSet     WorkingSetSize      — resident pages, TOTAL (== WorkingSet64)
  *   privateCommit  PrivateUsage        — commit charge (== PrivateMemorySize64)
  *   pageFaults     PageFaultCount
  *   cpuMs          kernel + user CPU, milliseconds, one decimal
+ *   privateWS      resident PRIVATE pages only, -1 if it could not be read
+ *
+ * THE SIXTH COLUMN IS APPENDED, NEVER INSERTED. memrig-report.mjs and this
+ * project's other readers take these positionally, so putting privateWS in
+ * its logical place beside workingSet would silently shift privateCommit
+ * and every figure derived from it. Same discipline as HCFREE and
+ * DYNCEN-BOX: new data gets a new column at the end.
+ *
+ * WHY IT WAS ADDED. workingSet is the TOTAL and includes file-backed shared
+ * pages; a statically linked 30.6 MiB executable's image is file-backed.
+ * Task Manager's Processes tab shows the PRIVATE working set, so a
+ * complaint phrased as "idle 10 MB, 70-100 MB after a sync" is denominated
+ * in privateWS and not in workingSet. Reporting only the total overstates
+ * an idle service by roughly the size of its binary.
  *
  * Working set and private commit are BOTH recorded because they answer
  * different questions and a history sync moves them by different factors:
@@ -52,6 +66,50 @@ static long long now_ms(void)
     return (long long)(u.QuadPart / 10000ULL) - 11644473600000LL;
 }
 
+/* PRIVATE working set, which is the column Task Manager's Processes tab
+ * shows as "Memory" and is therefore the column the user's complaint is
+ * denominated in. It is NOT WorkingSetSize: that total includes file-backed
+ * shared pages, and a statically linked 30.6 MiB executable's image is
+ * file-backed. Reporting only the total conflates two quantities that
+ * differ by the size of the binary -- a 2x error on an idle service.
+ *
+ * QueryWorkingSet returns one entry per resident page; bit 8 of each is
+ * Shared. Private pages are the ones with it clear. The buffer is grown and
+ * kept, not reallocated per sample, and a failure returns 0 rather than a
+ * guess -- the caller prints -1 so "could not read" is distinguishable from
+ * "no private pages", which is the distinction every instrument on this
+ * project has had to learn once. */
+static SIZE_T private_ws(HANDLE h)
+{
+    static PSAPI_WORKING_SET_INFORMATION *buf = NULL;
+    static SIZE_T cap = 0; /* bytes */
+    SIZE_T need;
+    if (cap == 0) {
+        cap = sizeof(PSAPI_WORKING_SET_INFORMATION) + 65536 * sizeof(ULONG_PTR);
+        buf = (PSAPI_WORKING_SET_INFORMATION *)malloc(cap);
+        if (!buf) { cap = 0; return 0; }
+    }
+    for (;;) {
+        if (QueryWorkingSet(h, buf, (DWORD)cap)) break;
+        if (GetLastError() != ERROR_BAD_LENGTH) return 0;
+        /* NumberOfEntries is set even on the short call: grow to it, with
+         * headroom, because the set can grow between the two calls. */
+        need = sizeof(PSAPI_WORKING_SET_INFORMATION) +
+               (buf->NumberOfEntries + 4096) * sizeof(ULONG_PTR);
+        if (need <= cap) return 0; /* not a length problem; do not spin */
+        free(buf);
+        buf = (PSAPI_WORKING_SET_INFORMATION *)malloc(need);
+        if (!buf) { cap = 0; return 0; }
+        cap = need;
+    }
+    {
+        SIZE_T i, n = (SIZE_T)buf->NumberOfEntries, priv = 0;
+        for (i = 0; i < n; i++)
+            if (!(buf->WorkingSetInfo[i].Flags & 0x100)) priv++;
+        return priv * 4096u;
+    }
+}
+
 static double filetime_ms(FILETIME ft)
 {
     ULARGE_INTEGER u;
@@ -74,6 +132,14 @@ int main(int argc, char **argv)
      * the child to be ours; VM_READ would be refused across an elevation
      * boundary and there is no reason to ask for it. */
     HANDLE h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+    /* QueryWorkingSet needs QUERY_INFORMATION + VM_READ, which the comment
+     * above declined to ask for because nothing needed them. The private
+     * working set does. Opened SEPARATELY so a refusal costs only that
+     * column: h keeps the limited rights every other counter uses, and a
+     * NULL hpriv prints -1 rather than a zero that reads as a measurement. */
+    HANDLE hpriv = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, FALSE, pid);
+    if (!hpriv)
+        fprintf(stderr, "pmon: no privateWS column (OpenProcess VM_READ failed %lu)\n", GetLastError());
     if (!h) {
         fprintf(stderr, "pmon: OpenProcess(%lu) failed %lu\n", pid, GetLastError());
         return 3;
@@ -85,7 +151,7 @@ int main(int argc, char **argv)
         CloseHandle(h);
         return 4;
     }
-    fprintf(f, "ms,workingSet,privateCommit,pageFaults,cpuMs\n");
+    fprintf(f, "ms,workingSet,privateCommit,pageFaults,cpuMs,privateWS\n");
     fflush(f);
 
     for (;;) {
@@ -108,12 +174,13 @@ int main(int argc, char **argv)
         if (GetExitCodeProcess(h, &code) && code != STILL_ACTIVE)
             break;
 
-        fprintf(f, "%lld,%llu,%llu,%lu,%.1f\n",
+        fprintf(f, "%lld,%llu,%llu,%lu,%.1f,%lld\n",
                 now_ms(),
                 (unsigned long long)pmc.WorkingSetSize,
                 (unsigned long long)pmc.PrivateUsage,
                 (unsigned long)pmc.PageFaultCount,
-                cpu_ms);
+                cpu_ms,
+                (long long)(hpriv ? (long long)private_ws(hpriv) : -1));
         fflush(f);
         Sleep(interval);
     }

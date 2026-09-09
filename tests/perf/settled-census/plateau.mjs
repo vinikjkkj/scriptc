@@ -20,20 +20,46 @@
  *     live heap (excl. arena chunks) = 10.32 MiB + 693 bytes per message
  *
  * to within +/-0.3 MiB. That is the same one-knob shape that settled the
- * concurrency question, and it refutes a figure this objective was
- * steering on: an event held as `unknown` was believed to cost ~2.7 KB, so
- * 19,200 of them would be ~49 MiB and most of the plateau. Measured, the
- * rate is 693 B/message and the payload is 12.69 MiB -- 3.9x lower. The
- * live side is NOT dominated by retained message payload.
+ * concurrency question.
  *
- * THE FLOOR IS THE BINARY, and it is the finding that bounds everything.
- * Presync working set -- the service idle, logged in, before a byte of
- * history -- is 32.0 MiB across seven runs, spread 0.53 MiB, and the
- * executable is 30.61 MiB. A 30.6 MiB statically linked binary cannot idle
- * near 10 MB, so "returns to near its idle level" is not reachable by
- * memory work of any kind; what IS reachable is returning to THIS binary's
- * idle level, and the gap between those two is not a defect anyone can fix
- * in the allocator.
+ * IT IS NOT A REFUTATION OF THE 2.7 KB FIGURE, and calling it one would be
+ * comparing two different quantities. That figure is bytes per retained
+ * EVENT IN THE RING, derived from a 2.66 MiB delta over ~1,000 ring
+ * entries on the no-buffer arm. This slope is the marginal live heap per
+ * additional MESSAGE delivered, across every structure that retains one,
+ * and README-183 records that the ring never held the payloads at all --
+ * push() and rememberMessage() receive the same object and the typed array
+ * retains it independently. Different structures, different populations:
+ * both can be right and neither tests the other.
+ *
+ * WHAT DOES FOLLOW, and it needs no comparison: the TOTAL marginal cost of
+ * every retained message is 12.69 MiB at 19,200 messages, which is smaller
+ * than the 36.51 MiB of fragmentation it was supposed to dwarf. The live
+ * side is not what dominates, whatever any per-event figure says.
+ *
+ * THE FLOOR IS THE BINARY -- IN THE TOTAL COLUMN, WHICH IS NOT THE ONE THE
+ * USER IS READING. Both halves of that matter and neither cancels the other.
+ *
+ * Total presync working set is 32.08 MiB against a 30.61 MiB executable, so
+ * in THAT column the binary is a floor and no allocator work can move it.
+ * But a mapped image is FILE-BACKED, not private, and Task Manager's
+ * Processes tab reports the private working set. Measured on the shipped
+ * arm with pmon's privateWS column:
+ *
+ *              total WS   private WS   private commit
+ *   idle          32.08        13.30            18.49
+ *   settled      104.48        84.59           198.84
+ *
+ * "idle 10 MB, 70-100 MB after a sync" fits 13.30 and 84.59; it does not
+ * fit 32.08. So the user is reading private working set, the binary is not
+ * in their number, and the retention they see is 71.29 MiB rather than
+ * 72.40 of a 104 MiB total.
+ *
+ * THE CONSEQUENCE IS IN OUR FAVOUR, and it is why the column had to be
+ * checked before writing anything to them: fragmentation is 36.51 MiB, so
+ * it is 51% of the retention they can see, and the 24.86 MiB of
+ * page-shaped discard -- which returns WORKING SET, exactly this column --
+ * is 35% of their complaint rather than the 24% of a total-WS denominator.
  */
 const NL = String.fromCharCode(10)
 const MiB = 1024 * 1024
@@ -44,9 +70,17 @@ const mib = (b) => (b / MiB).toFixed(2)
  * from are committed under evidence-llvm182/ and evidence-sweep/ and a
  * reader that recomputed them would drift from what was actually observed. */
 const M = {
-  settledWs:   104.13 * MiB,  // evidence-llvm182/main, CONTENDED
-  settledCommit: 196.87 * MiB,
-  presync:      32.00 * MiB,  // 7 runs, 31.99-32.52, spread 0.53
+  /* THREE COLUMNS, NEVER ONE. workingSet is the TOTAL and includes
+   * file-backed shared pages; privateWs excludes them and is what Task
+   * Manager's Processes tab shows; privateCommit is the charge against
+   * the commit limit. They differ by 2-3x here and this objective is
+   * denominated in the second. Measured on the shipped arm, run
+   * `privws`, 385 samples, none unreadable. */
+  settledWs:   104.48 * MiB,  // total
+  settledPriv:  84.59 * MiB,  // PRIVATE — the user's column
+  presyncPriv:  13.30 * MiB,  // idle, private
+  settledCommit: 198.84 * MiB,
+  presync:      32.08 * MiB,  // idle, TOTAL (7 runs, 31.99-32.52)
   exe:          32092160,     // zapo-rest-182.exe, LLVM tier
   crtBusy:      33.62 * MiB,  // evidence-llvm182/main
   crtFree:      36.51 * MiB,
@@ -92,20 +126,43 @@ ok(payload < M.crtFree,
   'retained message payload (' + mib(payload) + ' MiB) is SMALLER than the fragmentation (' +
   mib(M.crtFree) + ' MiB) — the live side is not what dominates')
 ok(payload / M.settledWs < 0.25,
-  'payload is under a quarter of the plateau (' + (100 * payload / M.settledWs).toFixed(1) +
-  '%), against the ~49 MiB the 2.7 KB/event figure predicted')
+  'total retained payload is under a quarter of the plateau (' +
+  (100 * payload / M.settledWs).toFixed(1) + '%). NOT compared to the 2.7 KB/event ' +
+  'figure: that is per RING ENTRY and this is per MESSAGE, different structures')
 ok(M.presync > 0.9 * M.exe,
   'the idle floor is the BINARY: presync ' + mib(M.presync) + ' MiB against a ' +
   mib(M.exe) + ' MiB executable')
 
-/* THE CEILING ON THE WHOLE OBJECTIVE, stated as arithmetic rather than as
- * an opinion, because it is what the user has to be told. */
-const best = M.presync + M.liveFixed + payload + M.cycArena + M.strArena
-console.log(NL + 'the best case memory work could reach, if ALL fragmentation went:')
-console.log('  ' + mib(best) + ' MiB, against ' + mib(M.settledWs) + ' now and a target of "near idle".')
-console.log('  Idle IS ' + mib(M.presync) + ' MiB on this binary, so "near 10 MB" is not reachable:')
-console.log('  the executable is ' + mib(M.exe) + ' MiB before it allocates anything.')
+/* THE CEILING, IN THE COLUMN THE USER IS READING. Stated as arithmetic
+ * because it is what they have to be told, and stated twice because the
+ * two columns give different answers and both are true. */
+const fragPriv = M.crtFree
+const bestPriv = M.settledPriv - fragPriv
+const discardPriv = M.settledPriv - M.pageShaped
+console.log(NL + 'in PRIVATE working set — the column Task Manager shows and the user quoted:')
+console.log('  idle              ' + mib(M.presencePriv || M.presyncPriv) + ' MiB   (their "10 MB")')
+console.log('  settled           ' + mib(M.settledPriv) + ' MiB   (their "70-100 MB")')
+console.log('  retention         ' + mib(M.settledPriv - M.presyncPriv) + ' MiB')
+console.log('  of which fragmentation ' + mib(fragPriv) + ' MiB = ' +
+  (100 * fragPriv / (M.settledPriv - M.presyncPriv)).toFixed(0) + '% of what they see')
+console.log('  page-shaped discard    ' + mib(M.pageShaped) + ' MiB = ' +
+  (100 * M.pageShaped / (M.settledPriv - M.presyncPriv)).toFixed(0) +
+  '% of it, and it returns THIS column')
+console.log('  -> discard alone      ' + mib(discardPriv) + ' MiB settled')
+console.log('  -> all fragmentation  ' + mib(bestPriv) + ' MiB settled, against idle ' +
+  mib(M.presyncPriv))
+console.log(NL + 'in TOTAL working set, where the binary IS a floor:')
+console.log('  idle ' + mib(M.presync) + ' MiB against a ' + mib(M.exe) +
+  ' MiB executable; the image is file-backed and')
+console.log('  is therefore NOT in the private column above. Both statements hold.')
 
-if (ran < 4) { console.log(NL + 'REFUSED: only ' + ran + ' checks ran'); process.exit(2) }
+ok(M.presyncPriv < M.presync * 0.5,
+  'private idle (' + mib(M.presyncPriv) + ') is under half of total idle (' + mib(M.presync) +
+  ') — the columns differ by the resident image and must never be conflated')
+ok(M.pageShaped / (M.settledPriv - M.presyncPriv) > 0.3,
+  'page-shaped discard is over 30% of the retention the user can actually see (' +
+  (100 * M.pageShaped / (M.settledPriv - M.presyncPriv)).toFixed(0) + '%)')
+
+if (ran < 6) { console.log(NL + 'REFUSED: only ' + ran + ' checks ran'); process.exit(2) }
 console.log(NL + (fails ? 'PLATEAU FAILED (' + fails + ')' : 'PLATEAU OK'))
 process.exit(fails ? 1 : 0)
