@@ -358,6 +358,17 @@ struct ScrCycChunk {
    * land — was no, but only after a second load of the class table to
    * prove it. One byte answers it. */
   uint8_t avail;
+#ifdef SCR_PAGECEN_ON
+  /* tests/perf/pagecensus's list of EVERY live chunk, and it exists because
+   * the two lists above cannot answer the census's question. A chunk that is
+   * neither current nor on its class's partial list is FULL — reachable from
+   * nothing — and the census has to be able to SHOW that a full chunk
+   * contributes no free page rather than infer it from an invariant. These
+   * two fields are compiled in only when the census is armed, so the
+   * shipping struct is byte-identical to its parent's. */
+  ScrCycChunk *all_next;
+  ScrCycChunk **all_prevp;
+#endif
 };
 
 /* THE EMPTY CHUNK, and it is not a placeholder. Every class starts pointing
@@ -372,7 +383,14 @@ struct ScrCycChunk {
  * the block and no block lives here. */
 static ScrCycChunk scr_cyc_ar_empty = {NULL, NULL, NULL, NULL,
                                        NULL, NULL, 1u,   0u,
-                                       0u,   0u};
+                                       0u,   0u
+#ifdef SCR_PAGECEN_ON
+                                       /* never on the census's all-chunk
+                                        * list: it is not a chunk. */
+                                       ,
+                                       NULL, NULL
+#endif
+};
 
 /* The class's CURRENT chunk — the one and only one the hot path looks at,
  * the same shape as mimalloc's `pages_free_direct` slot. It is deliberately
@@ -397,6 +415,72 @@ static ScrCycChunk *scr_cyc_ar_part[SCR_POOL_MAX / SCR_POOL_GRAIN + 1u];
  * so the budget below is a ceiling on residency and not on lifetime
  * allocation. Only the budget reads it. */
 static size_t scr_cyc_ar_held = 0;
+
+/* ── the page census hook ─────────────────────────────────────────────────
+ * The arena frees a chunk only when it is COMPLETELY empty, so one survivor
+ * keeps 64 KiB. tests/perf/pagecensus asks how much of what is still held is
+ * whole free pages — the ceiling on any per-page reclaimer. Everything below
+ * is nothing at all unless that header was force-included with
+ * -DSCR_PAGECEN_ON; see its comment for the controls. */
+#ifdef SCR_PAGECEN_ON
+_Static_assert(SCR_PC_CHUNK == SCR_CYC_ARENA_CHUNK,
+               "the page census was compiled for a different chunk size");
+static ScrCycChunk *scr_cyc_ar_all = NULL;
+
+static void scr_cyc_ar_pagecensus(const char *when) {
+  ScrCycChunk *c;
+  scr_pc_reset();
+  for (c = scr_cyc_ar_all; c != NULL; c = c->all_next) {
+    int role = scr_cyc_ar_cur[c->blk] == c
+                   ? SCR_PC_CUR
+                   : (c->avail ? SCR_PC_PART : SCR_PC_FULL);
+    scr_pc_note_chunk(c, c->raw, c->lim, SCR_CYC_ARENA_GRAN, c->stride, c->bump,
+                      c->used, c->freelist, role);
+  }
+  scr_pc_report(when);
+}
+
+static void scr_cyc_ar_pagecensus_exit(void) { scr_cyc_ar_pagecensus("exit"); }
+
+/* Armed from the allocation miss and from the collector pass rather than
+ * from a constructor: this target's PE images run no .CRT teardown and the
+ * census must be registered by whichever hook the program actually reaches,
+ * including a program whose arena is switched off — that arm has to be able
+ * to print NO CHUNKS. */
+static void scr_pc_arm(void) {
+  if (!scr_pc_registered) {
+    scr_pc_registered = 1;
+    /* The synthetic arm first, and BEFORE any chunk exists: it resets the
+     * accumulators, so running it later would erase a real reading. */
+    scr_pc_synth();
+    atexit(scr_cyc_ar_pagecensus_exit);
+  }
+}
+#define SCR_PC_ARM() scr_pc_arm()
+#define SCR_PC_PASS()                                     \
+  do {                                                    \
+    if (scr_pc_every_on()) scr_cyc_ar_pagecensus("pass"); \
+  } while (0)
+#define SCR_PC_LINK(c)                                          \
+  do {                                                          \
+    (c)->all_next = scr_cyc_ar_all;                             \
+    (c)->all_prevp = &scr_cyc_ar_all;                           \
+    if ((c)->all_next != NULL)                                  \
+      (c)->all_next->all_prevp = &(c)->all_next;                \
+    scr_cyc_ar_all = (c);                                       \
+  } while (0)
+#define SCR_PC_UNLINK(c)                                        \
+  do {                                                          \
+    *(c)->all_prevp = (c)->all_next;                            \
+    if ((c)->all_next != NULL)                                  \
+      (c)->all_next->all_prevp = (c)->all_prevp;                \
+  } while (0)
+#else
+#define SCR_PC_ARM() ((void)0)
+#define SCR_PC_PASS() ((void)0)
+#define SCR_PC_LINK(c) ((void)0)
+#define SCR_PC_UNLINK(c) ((void)0)
+#endif
 
 static size_t scr_cyc_ar_budget(void) {
 #ifdef SCR_RC_AUDIT
@@ -522,6 +606,7 @@ static ScrCycChunk *scr_cyc_ar_new(uint8_t blk, size_t stride) {
   c->blk = blk;
   c->avail = 1; /* the caller makes it current the moment it returns */
   scr_cyc_ar_held += SCR_CYC_ARENA_CHUNK;
+  SCR_PC_LINK(c);
   SCR_CS_BUMP(archunk);
   SCR_CS_MAX(arpeak, scr_cyc_ar_held / SCR_CYC_ARENA_CHUNK);
   return c;
@@ -531,6 +616,7 @@ static ScrCycChunk *scr_cyc_ar_new(uint8_t blk, size_t stride) {
  * `avail` here can only mean "on the partial list". */
 static void scr_cyc_ar_release(ScrCycChunk *c) {
   if (c->avail) scr_cyc_ar_unlink(c);
+  SCR_PC_UNLINK(c);
   scr_cyc_ar_held -= SCR_CYC_ARENA_CHUNK;
   SCR_CS_BUMP(arfree);
   free(c->raw);
@@ -657,6 +743,11 @@ static __attribute__((noinline)) void *scr_cyc_alloc_miss(size_t size,
   size_t phys = scr_pool_bytes(sizeof(ScrCycHdr) + size);
   uint8_t blk = phys <= SCR_POOL_MAX ? (uint8_t)(phys / SCR_POOL_GRAIN) : 0u;
   ScrCycHdr *h = NULL;
+  /* Nothing at all in an unarmed build. Here rather than in the hot path
+   * because a program that never misses never has a chunk to census, and
+   * here rather than in scr_cyc_ar_new so the SCR_CYCLE_ARENA=0 arm still
+   * arms and can print its NO CHUNKS refusal. */
+  SCR_PC_ARM();
   if (blk != 0 && scr_cyc_arena_on()) h = scr_cyc_ar_refill(phys, blk);
   if (h == NULL) h = (ScrCycHdr *)scr_pool_take(&scr_cyc_blocks, phys);
   if (h == NULL) {
@@ -1258,5 +1349,10 @@ void scr_collect_cycles(void) {
   scr_nwhite = 0;
 
   SCR_CS_PASS_END();
+  /* The end of a sweep is the one point in the process where the arena's
+   * free lists are as long as they are going to get, which is why it is
+   * both where the census reads and where a per-page reclaimer would run.
+   * Nothing at all unless SCR_PAGECEN_EVERY says otherwise. */
+  SCR_PC_PASS();
   scr_collecting = false;
 }
