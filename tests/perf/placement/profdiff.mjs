@@ -32,10 +32,25 @@
  *   PROF-TOTAL rows=.. count=.. bytes=.. freed=.. lost=.. ...
  *   PROF-LIVE-TOTAL rows=.. livePeak=.. liveNow=.. ...
  *
- * `freed` is bytes freed at that site's allocations, so bytes minus freed is
- * what the site left behind; `live` is a differently-computed sample of the
- * same thing. Both are reported, because a site where they disagree is a site
- * to distrust.
+ * `freed` IS A COUNT OF FREES AT THE **FREE SITE**, NOT BYTES AT THE ALLOC
+ * SITE. scr_prof.h line 678 is `r->freed++`, and the row it lands on is the
+ * one for the `free()` call location -- a separate row with count=0 and
+ * bytes=0. Verified on a real dump: every allocation row carries freed=0
+ * while 92 pure free-site rows carry the whole 4,326,100.
+ * The first version of this reader computed "kept = bytes - freed" and printed
+ * a megabyte figure from it -- a byte total minus a call count -- which came
+ * out as "1721.70 MiB allocated, of which 1721.70 MiB never freed" on a
+ * process that settles near 100 MiB. The selftest did not catch it: it
+ * asserted the arithmetic this file implements, not the SEMANTICS of a field
+ * defined in another file. A fixture cannot check a units misreading of an
+ * external format; only reading that format's definition can.
+ *
+ * So what survives is `live` (LIVE lane, BYTES: what the site has allocated
+ * and not yet had freed, at the instant of the dump) and `snap` (the same
+ * figure sampled when process-wide live was at its high-water). The free
+ * RATE, freed/count, is printed because it separates a site that churns from
+ * one that accumulates -- but it is a ratio of counts and says nothing about
+ * bytes.
  *
  * -------------------------------------------------------------------------
  * IT REFUSES TO REPORT A SILENT ZERO.
@@ -130,8 +145,14 @@ function diff(ctl, bst) {
 }
 
 function report(ctl, bst) {
-  const rows = diff(ctl, bst).filter((r) => r.count !== 0 || r.bytes !== 0);
+  const all = diff(ctl, bst);
+  /* Allocation rows and free rows are DISJOINT in this format; mixing them
+   * produced a "freed%" column that read 0.0 everywhere while the totals
+   * disagreed by 4.18 million frees. */
+  const rows = all.filter((r) => r.count !== 0 || r.bytes !== 0);
+  const freeRows = all.filter((r) => r.count === 0 && r.bytes === 0 && r.freed !== 0);
   rows.sort((x, y) => y.bytes - x.bytes);
+  freeRows.sort((x, y) => y.freed - x.freed);
   const anyLive = bst.liveRows > 0;
   if (!anyLive) {
     console.log("LIVE COLUMN ABSENT -- the burst dump has no PROFLIVE rows, so");
@@ -140,15 +161,15 @@ function report(ctl, bst) {
     console.log("");
   }
   const tot = rows.reduce((s, r) => s + r.bytes, 0);
-  const kept = rows.reduce((s, r) => s + (r.bytes - r.freed), 0);
+  const nAlloc = rows.reduce((s, r) => s + r.count, 0);
+  const nFreed = rows.reduce((s, r) => s + r.freed, 0);
+  const liveB = rows.reduce((s, r) => s + r.live, 0);
   console.log("sites moved by the burst:         " + rows.length);
   console.log("bytes allocated during the burst: " + MB(tot) + " MiB");
-  console.log("of which never freed at exit:     " + MB(kept) + " MiB");
-  if (anyLive) {
-    console.log(
-      "live-at-dump delta:               " + MB(rows.reduce((s, r) => s + r.live, 0)) + " MiB",
-    );
-  }
+  console.log("allocation calls during burst:    " + nAlloc);
+  console.log("free calls during burst (separate rows, free-site attributed): " + nFreed);
+  console.log("still live at the dump (BYTES):   " + MB(liveB) + " MiB" +
+    (tot > 0 ? "  = " + (100 * liveB / tot).toFixed(3) + "% of what the burst allocated" : ""));
   console.log("");
   console.log("control " + (ctl.total ?? "(no PROF-TOTAL)"));
   console.log("burst   " + (bst.total ?? "(no PROF-TOTAL)"));
@@ -158,14 +179,14 @@ function report(ctl, bst) {
    * near 1328 is the population the census could not attribute. It is a
    * MEAN, so a site that mixes sizes will sit between classes and must not
    * be read as either -- the exact-size histogram is what adjudicates. */
-  console.log("  allocMiB   keptMiB   liveMiB     count     meanB  site");
+  console.log("  allocMiB   liveMiB   live%     count     meanB  site");
   for (const r of rows.slice(0, TOP)) {
     console.log(
       MB(r.bytes).padStart(10) +
         " " +
-        MB(r.bytes - r.freed).padStart(9) +
-        " " +
         (anyLive ? MB(r.live) : "--").padStart(9) +
+        " " +
+        (anyLive && r.bytes > 0 ? (100 * r.live / r.bytes).toFixed(2) : "--").padStart(7) +
         " " +
         String(r.count).padStart(9) +
         " " +
@@ -173,6 +194,14 @@ function report(ctl, bst) {
         "  " +
         r.name,
     );
+  }
+  if (freeRows.length > 0) {
+    console.log("");
+    console.log("free sites (disjoint rows; count and bytes are 0 by construction)");
+    console.log("     frees  site");
+    for (const r of freeRows.slice(0, 8)) {
+      console.log(String(r.freed).padStart(10) + "  " + r.name);
+    }
   }
 }
 
@@ -185,8 +214,8 @@ if (selftest) {
    * freed, so it allocated a lot and kept nothing. */
   const ctl = parse(
     [
-      "PROF 10 1000 1000 0 0 aa 0 alpha",
-      "PROF 7 700 700 0 0 bb 0 beta",
+      "PROF 10 1000 10 0 0 aa 0 alpha",
+      "PROF 7 700 7 0 0 bb 0 beta",
       "PROFLIVE 0 0 aa alpha",
       "PROF-TOTAL rows=2 count=17 bytes=1700 freed=1700 lost=0",
     ].join("\n"),
@@ -194,9 +223,9 @@ if (selftest) {
   );
   const bst = parse(
     [
-      "PROF 1010 101000 1000 0 0 aa 0 alpha",
-      "PROF 7 700 700 0 0 bb 0 beta",
-      "PROF 5 5000 5000 0 0 cc 0 gamma",
+      "PROF 1010 101000 10 0 0 aa 0 alpha",
+      "PROF 7 700 7 0 0 bb 0 beta",
+      "PROF 5 5000 5 0 0 cc 0 gamma",
       "PROFLIVE 0 100000 aa alpha",
       "PROF-TOTAL rows=3 count=1022 bytes=106700 freed=6700 lost=0",
     ].join("\n"),
@@ -207,12 +236,13 @@ if (selftest) {
   const cases = [
     ["alpha count", by("alpha").count, 1000],
     ["alpha bytes", by("alpha").bytes, 100000],
-    ["alpha kept", by("alpha").bytes - by("alpha").freed, 100000],
+    ["alpha freed COUNT (not bytes)", by("alpha").freed, 0],
     ["alpha live", by("alpha").live, 100000],
     ["beta bytes must cancel to 0", by("beta").bytes, 0],
     ["beta count must cancel to 0", by("beta").count, 0],
     ["gamma bytes", by("gamma").bytes, 5000],
-    ["gamma kept must be 0", by("gamma").bytes - by("gamma").freed, 0],
+    ["gamma freed count", by("gamma").freed, 5],
+    ["gamma freed% is 100 of its 5 allocs", Math.round(100 * by("gamma").freed / by("gamma").count), 100],
   ];
   let bad = 0;
   for (const [what, got, want] of cases) {
