@@ -266,15 +266,23 @@ function settledWs(phasesText, rssText) {
     if (i > 0 && !ph.has(l.slice(i + 1))) ph.set(l.slice(i + 1), +l.slice(0, i))
   }
   const rows = rssText.split(/\r?\n/).slice(1).filter(Boolean).map((l) => l.split(','))
-  const at = (ms) => {
+  /* col 1 is workingSet, col 2 is privateCommit (pmon.c writes five
+   * columns: ms, workingSet, privateCommit, pageFaults, cpuMs). BOTH are
+   * read because the two answer different questions and this workload
+   * moves them by different factors -- and because the only mechanism
+   * available on heap pages returns one of them and not the other. */
+  const at = (ms, col) => {
     let best = null, bd = Infinity
     for (const r of rows) { const d = Math.abs(+r[0] - ms); if (d < bd) { bd = d; best = r } }
-    return best ? +best[1] : 0
+    return best ? +best[col] : 0
   }
+  const settledMs = ph.has('IDLE-60s') ? ph.get('IDLE-60s') : null
   return {
-    presync: ph.has('PRESYNC-BASELINE') ? at(ph.get('PRESYNC-BASELINE')) : 0,
-    settled: ph.has('IDLE-60s') ? at(ph.get('IDLE-60s')) : 0,
+    presync: ph.has('PRESYNC-BASELINE') ? at(ph.get('PRESYNC-BASELINE'), 1) : 0,
+    settled: settledMs !== null ? at(settledMs, 1) : 0,
+    settledCommit: settledMs !== null ? at(settledMs, 2) : 0,
     peak: Math.max(...rows.map((r) => +r[1])),
+    peakCommit: Math.max(...rows.map((r) => +r[2])),
   }
 }
 
@@ -485,11 +493,53 @@ if (hc.free.size === 0) {
     : '      -> NOT dominated by the array ladder, which the burst profile did not\n' +
       '         predict. Attribute the remainder before claiming anything.')
 
-  if (hc.page)
-    console.log('\n  page ceiling: ' + hc.page.pages + ' whole pages = ' + mib(hc.page.pageBytes) +
-      ' MiB of ' + mib(crt.free) + ' MiB free (' +
-      (100 * hc.page.pageBytes / crt.free).toFixed(2) + '%), longest run ' +
-      hc.page.runMax + ' B')
+  /* [7] THE HEADLINE, reported as its own number rather than left to be
+   * inferred from the distribution above. This is the figure that decides
+   * whether the CRT-heap page route is worth anything at all. */
+  if (hc.page) {
+    const shaped = 100 * hc.page.pageBytes / crt.free
+    console.log('\n== [7] THE PAGE-SHAPED FRACTION OF THE COMMITTED-FREE SPACE ==')
+    console.log('  committed-free   ' + mib(crt.free) + ' MiB in ' + crt.nfree + ' blocks')
+    console.log('  contiguous runs  ' + hc.page.runs + ', longest ' + hc.page.runMax + ' B')
+    console.log('  PAGE-SHAPED      ' + hc.page.pages + ' whole 4 KiB pages = ' +
+      mib(hc.page.pageBytes) + ' MiB = ' + shaped.toFixed(2) + '% of the free space')
+    console.log('  (a CEILING: computed from where the live blocks actually are.')
+    console.log('   No reclaimer on any OS can return more than this.)')
+
+    /* AND WHAT COULD ACT ON IT, because a prize we cannot touch is not a
+     * prize. Measured by tests/perf/pagecensus/vmprobe.c on this host
+     * (Windows 11 26200, x86_64, zig 0.16.0 cc -O2), 4096 chunks of 64 KiB
+     * keeping one page each -- the arena's own shape:
+     *
+     *   arm  chunk from    call                   dWS      dCOMMIT  ns/page
+     *   1    malloc        DiscardVirtualMemory  -224.05    +0.00     3719
+     *   2    VirtualAlloc  VirtualFree DECOMMIT  -239.99  -240.00      456
+     *   3    VirtualAlloc  DiscardVirtualMemory  -240.00    +0.00     2255
+     *
+     * On CRT-heap pages THE HEAP OWNS THE RESERVATION, so MEM_DECOMMIT is
+     * not available to us -- it needs the reservation and is not
+     * transparent (a decommitted page reads back as an access violation,
+     * not a soft fault, so the owner must re-commit before reusing it).
+     * That leaves arm 1: DiscardVirtualMemory, which is transparent and
+     * works on memory this process did not reserve.
+     *
+     * AND IT RETURNS WORKING SET ONLY, NOT COMMIT. That is not a caveat,
+     * it decides whether this answers the complaint at all: "idle 10 MB,
+     * 70-100 MB after a sync, never returns" is a WORKING SET observation
+     * if it came from Task Manager's default column, and a COMMIT one if
+     * it came from private bytes. Discard moves the first and leaves the
+     * second exactly where it was. */
+    const usable = hc.page.pageBytes
+    console.log('\n  what could act on it, on THIS host (vmprobe.c):')
+    console.log('    MEM_DECOMMIT          NOT AVAILABLE — the CRT heap owns the reservation,')
+    console.log('                          and it is not transparent (re-commit required).')
+    console.log('    DiscardVirtualMemory  available, transparent, ~3.7 us/page on malloc"d')
+    console.log('                          memory; recovers WORKING SET only.')
+    console.log('    => reachable here:    ' + mib(usable) + ' MiB of WORKING SET, and')
+    console.log('       0.00 MiB of COMMIT. Settled was ' + mib(ws.settled) +
+      ' MiB working set against ' + mib(ws.settledCommit) + ' MiB commit,')
+    console.log('       so which number the complaint is about decides whether this is a fix.')
+  }
 }
 
 console.log(fails ? '\nRECONCILE FAILED (' + fails + ')' : '\nRECONCILE OK')
