@@ -150,6 +150,16 @@ SCR_PC_SHARED void (*scr_pc_walk_fn)(const char *) = NULL;
 /* Idempotent guard for the EXIT report only. The periodic report under
  * SCR_PAGECEN_EVERY is deliberately not guarded -- it is meant to repeat. */
 SCR_PC_SHARED int scr_pc_reported = 0;
+/* The arena's OWN chunk count, set by the walk from scr_cyc_ar_held just
+ * before the report. It exists so a cross-check can compare two independent
+ * counters AT ONE INSTANT: the walked list against the byte counter. The
+ * obvious cross-check -- this census against cycstat's `held` -- is NOT
+ * that, because the two reports run at different points in the atexit
+ * chain and this program frees chunks between them (measured: cycstat saw
+ * arfree=166, the census saw 168, and both were right about their own
+ * instant). Comparing across instruments that sample at different moments
+ * is not a cross-check, it is a race. */
+SCR_PC_SHARED unsigned long scr_pc_arena_held = 0;
 SCR_PC_SHARED int scr_pc_every = -1;
 SCR_PC_SHARED FILE *scr_pc_file = NULL;
 
@@ -181,7 +191,7 @@ SCR_PC_FN void scr_pc_note_chunk(const void *basev, const void *rawv,
                                  const void *limv, unsigned long hdrzone,
                                  unsigned long stride, const void *bumpv,
                                  unsigned long used, const void *freelistv,
-                                 int role) {
+                                 int role, unsigned gone) {
   static unsigned char live[SCR_PC_MAXSLOTS];
   unsigned char upage[SCR_PC_PPC + 2];
   const unsigned char *base = (const unsigned char *)basev;
@@ -191,6 +201,7 @@ SCR_PC_FN void scr_pc_note_chunk(const void *basev, const void *rawv,
   const unsigned char *cs = base + hdrzone;
   const void *b;
   unsigned long nslots, i, flen = 0, nlive, off, p, p0, p1;
+  unsigned long gone_slots = 0;
   unsigned long freepg = 0;
 
   (void)raw;
@@ -227,7 +238,45 @@ SCR_PC_FN void scr_pc_note_chunk(const void *basev, const void *rawv,
     }
     memcpy(&b, bp, sizeof(void *));
   }
-  nlive = nslots >= flen ? nslots - flen : 0;
+  /* SLOTS ON RETURNED PAGES ARE FREE AND DELIBERATELY NOT ON THE LIST.
+   * scr_cyc_pr_sweep_chunk unthreads them before the discard, because the
+   * list links live in the very pages that go. Without accounting for them
+   * here they read as LIVE, and the walk's own reconciliation
+   * (carved - freelist == used) fails -- which is exactly what it did the
+   * first time page return and this census were armed in one binary. The
+   * instrument was right and the walk was incomplete; this is the walk
+   * catching up, not the check being loosened.
+   *
+   * The page indexing must match the sweep's, which is ABSOLUTE: a chunk base
+   * is 256-aligned and therefore almost never page-aligned, so page k covers
+   * [first + k*PAGE, first + (k+1)*PAGE) with first = align_up(carve start). */
+  if (gone != 0u) {
+    uintptr_t fst = ((uintptr_t)(const void *)cs + (SCR_PC_PAGE - 1u)) &
+                    ~(uintptr_t)(SCR_PC_PAGE - 1u);
+    uintptr_t lst = (uintptr_t)(const void *)bump & ~(uintptr_t)(SCR_PC_PAGE - 1u);
+    if (lst > fst) {
+      unsigned npg = (unsigned)((lst - fst) / SCR_PC_PAGE);
+      for (i = 0; i < nslots; i++) {
+        uintptr_t a, z;
+        unsigned k0, k1, k;
+        if (!live[i]) continue;
+        a = (uintptr_t)(const void *)(cs + i * stride);
+        z = a + stride;
+        if (z <= fst || a >= lst) continue;
+        k0 = a <= fst ? 0u : (unsigned)((a - fst) / SCR_PC_PAGE);
+        k1 = (unsigned)((z - 1u - fst) / SCR_PC_PAGE);
+        if (k1 >= npg) k1 = npg - 1u;
+        for (k = k0; k <= k1; k++) {
+          if ((gone >> k) & 1u) {
+            live[i] = 0;
+            gone_slots++;
+            break;
+          }
+        }
+      }
+    }
+  }
+  nlive = nslots >= flen + gone_slots ? nslots - flen - gone_slots : 0;
 
   /* THE SELF-TEST: the census recomputed the live count from geometry; the
    * chunk carries its own. They must agree. */
@@ -368,7 +417,7 @@ SCR_PC_FN void scr_pc_synth_case(int idx, int mode, long arg, unsigned want) {
   scr_pc_reset();
   scr_pc_note_chunk(base, base, base + SCR_PC_CHUNK, SCR_PC_SYNTH_GRAN,
                     SCR_PC_SYNTH_STRIDE, bump, (unsigned long)(nslots - flen),
-                    head, SCR_PC_CUR);
+                    head, SCR_PC_CUR, 0u);
   scr_pc_synth_want[idx] = want;
   scr_pc_synth_got[idx] = (unsigned)scr_pc_pages_aligned;
   /* A synthetic chunk that fails the walk's own selftest would make the
@@ -462,9 +511,10 @@ SCR_PC_FN void scr_pc_report(const char *when) {
             scr_pc_chunks, scr_pc_chunks);
   }
   fprintf(f, "[pagecen] chunks=%llu cur=%llu part=%llu full=%llu"
-             " nolive=%llu held=%.2f MiB\n",
+             " nolive=%llu held=%.2f MiB arenaheld=%lu\n",
           scr_pc_chunks, scr_pc_role[SCR_PC_CUR], scr_pc_role[SCR_PC_PART],
-          scr_pc_role[SCR_PC_FULL], scr_pc_empty_chunks, heldmib);
+          scr_pc_role[SCR_PC_FULL], scr_pc_empty_chunks, heldmib,
+          scr_pc_arena_held);
   fprintf(f, "[pagecen] slots carved=%llu free=%llu live=%llu livebytes=%llu"
              " occupancy=%.4f\n",
           scr_pc_slots, scr_pc_free_slots, scr_pc_live_slots,

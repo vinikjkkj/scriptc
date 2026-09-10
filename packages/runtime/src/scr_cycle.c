@@ -526,12 +526,27 @@ long long scr_cyc_pr_stat(int which) {
                       : scr_cyc_pr_chunks;
 }
 
+#ifndef SCR_CYC_PAGERETURN_STAT
+/* The counters READ in an ordinary build, but their report does not ship.
+ * The three-way diagnosis below is ~930 bytes of .rdata and its code another
+ * few hundred, and a shipping binary carries it for a line nobody will ever
+ * ask it to print. Measured: the whole page-return block cost the regex
+ * program exactly one 4096-byte page, which is the size guard`s tolerance to
+ * the byte, and the strings were the difference. Diagnostics belong in an
+ * instrumented build, which is where every census in tests/perf already
+ * lives. Build with -DSCR_CYC_PAGERETURN_STAT=1 and the env knob works.
+ *
+ * scr_cyc_pr_stat() stays in every build: it is four loads and it is how a
+ * harness reads the counters without parsing text. */
+#define SCR_CYC_PAGERETURN_STAT 0
+#endif
+#if SCR_CYC_PAGERETURN_STAT
 /* SCR_CYCLE_PAGERETURN_STAT=1 prints the counters at exit. It exists because
  * two arms of one binary printing the same answer is NOT evidence the return
  * path ran -- a sweep that returned nothing prints the same answer. A zero
  * here is the only thing that can say it did not, and the knob-off arm is the
  * control that shows the counter can read zero. */
-static void scr_cyc_pr_report(void) {
+static __attribute__((cold)) void scr_cyc_pr_report(void) {
   fprintf(stderr, "[pgret] pages=%lld revived=%lld sweeps=%lld chunks=%lld failed=%lld\n",
           scr_cyc_pr_pages, scr_cyc_pr_revived, scr_cyc_pr_sweeps,
           scr_cyc_pr_chunks, scr_cyc_pr_failed);
@@ -567,7 +582,7 @@ static void scr_cyc_pr_report(void) {
   }
 }
 
-static void scr_cyc_pr_arm(void) {
+static __attribute__((cold)) void scr_cyc_pr_arm(void) {
   static int armed = 0;
   const char *e;
   if (armed) return;
@@ -575,6 +590,10 @@ static void scr_cyc_pr_arm(void) {
   e = getenv("SCR_CYCLE_PAGERETURN_STAT");
   if (e != NULL && strtol(e, NULL, 10) != 0) atexit(scr_cyc_pr_report);
 }
+
+#else
+#define scr_cyc_pr_arm() ((void)0)
+#endif
 
 static int scr_cyc_pr_on(void) {
   static int cached = -1;
@@ -587,7 +606,7 @@ static int scr_cyc_pr_on(void) {
 
 /* The platform call. NULL/failure is a slower program, never a broken one:
  * every caller leaves the pages threaded and simply does not return them. */
-static int scr_cyc_discard(void *p, size_t n) {
+static __attribute__((cold)) int scr_cyc_discard(void *p, size_t n) {
 #ifdef _WIN32
   if (!scr_cyc_discard_looked) {
     scr_cyc_discard_looked = 1;
@@ -629,7 +648,7 @@ static unsigned scr_cyc_pr_thresh(void) {
  * at their real addresses: first = align_up(cs), last = align_down(bump), and
  * page k covers [first + k*PAGE, first + (k+1)*PAGE). The chunk header falls
  * below `first` by construction, so it needs no special case. */
-static void scr_cyc_pr_sweep_chunk(ScrCycChunk *c, unsigned thresh) {
+static __attribute__((cold, noinline, minsize)) void scr_cyc_pr_sweep_chunk(ScrCycChunk *c, unsigned thresh) {
   unsigned char *base = (unsigned char *)(void *)c;
   unsigned char *cs = base + SCR_CYC_ARENA_GRAN;
   size_t stride = (size_t)c->stride, nslots, i;
@@ -738,7 +757,7 @@ static void scr_cyc_pr_sweep_chunk(ScrCycChunk *c, unsigned thresh) {
  * other pages are resident. `pad` is re-stamped because the discard zeroed
  * it, and a block whose pad reads 0 is routed to free() by scr_cyc_free --
  * which would hand a chunk-interior pointer to the CRT heap. */
-static int scr_cyc_pr_revive(ScrCycChunk *c) {
+static __attribute__((cold, noinline, minsize)) int scr_cyc_pr_revive(ScrCycChunk *c) {
   unsigned char *base = (unsigned char *)(void *)c;
   unsigned char *cs = base + SCR_CYC_ARENA_GRAN;
   size_t stride = (size_t)c->stride, nslots, i;
@@ -788,7 +807,7 @@ static int scr_cyc_pr_revive(ScrCycChunk *c) {
  * free space are visited, and those are exactly the ones reachable from the
  * current slot and the partial lists -- a chunk on neither is FULL, so it has
  * no free page by construction. */
-static void scr_cyc_pr_sweep(void) {
+static __attribute__((cold, noinline, minsize)) void scr_cyc_pr_sweep(void) {
   unsigned i;
   unsigned thresh;
   /* Armed BEFORE the knob test, so the knob-off arm still writes a report --
@@ -837,12 +856,13 @@ static void scr_cyc_ar_pagecensus(const char *when) {
                    ? SCR_PC_CUR
                    : (c->avail ? SCR_PC_PART : SCR_PC_FULL);
     scr_pc_note_chunk(c, c->raw, c->lim, SCR_CYC_ARENA_GRAN, c->stride, c->bump,
-                      c->used, c->freelist, role);
+                      c->used, c->freelist, role, c->gone);
   }
+  /* One instant: the byte counter read here, the list walked just above. */
+  scr_pc_arena_held = (unsigned long)(scr_cyc_ar_held / SCR_CYC_ARENA_CHUNK);
   scr_pc_report(when);
 }
 
-static void scr_cyc_ar_pagecensus_exit(void) { scr_cyc_ar_pagecensus("exit"); }
 
 /* Armed from the allocation miss and from the collector pass rather than
  * from a constructor: this target's PE images run no .CRT teardown and the

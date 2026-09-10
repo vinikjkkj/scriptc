@@ -264,6 +264,20 @@ long long scr_arr_vm_stat(int which) {
                       : scr_arr_vm_refused;
 }
 
+#ifndef SCR_ARR_VM_STAT
+/* The counters are always kept; their REPORT does not ship.
+ *
+ * atexit() is an AMBIENT SYMBOL. library-mode builds audit for exactly that
+ * and this call site failed the audit -- "undefined reference to atexit" --
+ * on the first full gate after it landed, in both the C and the LLVM arm. A
+ * diagnostic that nothing in a shipping build will ever ask for must not
+ * drag a CRT registration into every link, and the same reasoning gates the
+ * page-return report in scr_cycle.c. Build with -DSCR_ARR_VM_STAT=1 and the
+ * env knob works; scr_arr_vm_stat() is always available for a harness that
+ * would rather read numbers than parse text. */
+#define SCR_ARR_VM_STAT 0
+#endif
+#if SCR_ARR_VM_STAT
 /* SCR_ARRAY_VM_STAT=1 prints the three counters at exit. It exists because
  * "both arms printed the same thing" is NOT evidence that the reservation
  * path ran -- a promotion that never happened also prints the same thing.
@@ -293,6 +307,10 @@ static void scr_arr_vm_arm(void) {
   armed = 1;
   atexit(scr_arr_vm_report);
 }
+
+#else
+#define scr_arr_vm_arm() ((void)0)
+#endif
 
 static int scr_arr_vm_on(void) {
   static int cached = -1;

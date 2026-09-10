@@ -533,7 +533,7 @@ The three `off` arms are an A/A/A triple with a **0.14 MiB spread (0.18%)**,
 which is the within-mode floor. Against it:
 
 > **settled private WS 79.98 → 77.92 MiB, −2.06 MiB (−2.6%)**, about 15× the
-> within-mode spread. Against the 71.29 MiB of retention the user sees, 2.9%.
+> within-mode spread. Against the 72.12 MiB of retention the user sees, 2.8%.
 
 **This is not the delivery measurement.** It has no shared A/A floor, it was
 taken while the box was not reserved, and it is three arms with one excluded.
@@ -600,5 +600,5 @@ at 3.79% and this does not approach it. The hot path is untouched by
 construction: the sweep runs at the end of a collector pass and the revival
 only on a refill that would otherwise have taken a fresh chunk.
 
-Against the **71.29 MiB** of retention the user actually sees, −2.05 MiB is
-**2.9%**.
+Against the **72.12 MiB** of retention the user actually sees, −2.05 MiB is
+**2.8%**.

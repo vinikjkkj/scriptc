@@ -83,7 +83,20 @@ describe.skipIf(!armable)("large array data is reservation-backed", () => {
 
   beforeAll(async () => {
     mkdirSync(dir, { recursive: true });
-    const result = await compile(src, { outPath: join(dir, exeName("grow")), outDir: dir });
+    /* The counters' REPORT is behind a build flag, because its atexit() is an
+     * ambient symbol and library-mode audits for exactly that -- it failed
+     * that audit in both emission arms on the first full gate after it
+     * landed. The env knob still selects it at run time; this makes the code
+     * present to select. */
+    const prev = process.env["SCRIPTC_PROF_CFLAGS"];
+    process.env["SCRIPTC_PROF_CFLAGS"] = "-DSCR_ARR_VM_STAT=1";
+    let result;
+    try {
+      result = await compile(src, { outPath: join(dir, exeName("grow")), outDir: dir });
+    } finally {
+      if (prev === undefined) delete process.env["SCRIPTC_PROF_CFLAGS"];
+      else process.env["SCRIPTC_PROF_CFLAGS"] = prev;
+    }
     if (!result.ok) {
       throw new Error(result.diagnostics.map((d) => `${d.code}: ${d.message}`).join("\n"));
     }

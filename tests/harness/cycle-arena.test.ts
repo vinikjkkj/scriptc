@@ -221,18 +221,23 @@ describe.skipIf(!armable)("the cycle arena returns its chunks", () => {
     readonly chunks: number;
     readonly full: number;
     readonly nolive: number;
+    readonly arenaHeld: number;
     readonly free: number;
   }
 
   function parsePages(stderr: string): Pages | null {
     const s = stderr.replace(/\r\n/g, "\n");
-    const c = /^\[pagecen] chunks=(\d+) cur=(\d+) part=(\d+) full=(\d+) nolive=(\d+)/m.exec(s);
+    const c =
+      /^\[pagecen] chunks=(\d+) cur=(\d+) part=(\d+) full=(\d+) nolive=(\d+) held=[\d.]+ MiB arenaheld=(\d+)/m.exec(
+        s,
+      );
     const f = /^\[pagecen] CEILING aligned freepages=(\d+)/m.exec(s);
     if (c === null || f === null) return null;
     return {
       chunks: Number(c[1]),
       full: Number(c[4]),
       nolive: Number(c[5]),
+      arenaHeld: Number(c[6]),
       free: Number(f[1]),
     };
   }
@@ -259,11 +264,17 @@ describe.skipIf(!armable)("the cycle arena returns its chunks", () => {
 
     const p = parsePages(stderr);
     expect(p, `no [pagecen] chunk line in:\n${stderr}`).not.toBeNull();
-    const a = parseArena(stderr);
-    expect(a).not.toBeNull();
-    /* Two independent counters of the same thing: the census walked its own
-     * list of every chunk, cycstat subtracted two totals. */
-    expect(p!.chunks).toBe(a!.held);
+    /* TWO INDEPENDENT COUNTERS AT ONE INSTANT: the census walked its own list
+     * of every chunk; `arenaheld` is the arena's own byte counter divided by
+     * the chunk size, read in the same call. They must agree exactly.
+     *
+     * This used to compare against cycstat's `held`, and that was wrong: the
+     * two reports run at different points in the atexit chain, and this
+     * program frees chunks between them. Measured during the gate failure --
+     * cycstat reported arfree=166 and the census saw 168, and each was right
+     * about its own instant. Comparing instruments that sample at different
+     * moments is a race wearing a cross-check's clothes. */
+    expect(p!.chunks).toBe(p!.arenaHeld);
     expect(p!.free).toBeGreaterThan(0);
   }, 600_000);
 
@@ -277,22 +288,67 @@ describe.skipIf(!armable)("the cycle arena returns its chunks", () => {
   }, 600_000);
 
   test("survivors cost free pages, and a full chunk contributes none", async () => {
-    /* Same binary, one knob: many more survivors spread over many more
-     * chunks. The census must see chunks that are FULL — reachable from
-     * neither the current slot nor the partial list — and they must
-     * contribute nothing, which is the invariant the walk's all-chunk list
-     * exists to be able to check rather than assume. */
-    const { stderr } = await run(bin, { ARENA_HELD: "3000", ARENA_CHURN: "40000" });
-    const p = parsePages(stderr);
-    expect(p, `no [pagecen] chunk line in:\n${stderr}`).not.toBeNull();
-    expect(p!.full).toBeGreaterThan(0);
-    expect(stderr).toContain("[pagecen] freepages by role");
-    expect(stderr).toMatch(/^\[pagecen] freepages by role cur=\d+ part=\d+ full=0$/m);
-    expect(stderr).not.toContain("[pagecen] NOTE a FULL chunk reported free pages");
-    /* More chunks held, and a strictly lower share of them free, than the
-     * default arm above: the census responds to occupancy. */
-    const base = parsePages((await run(bin)).stderr)!;
-    expect(p!.chunks).toBeGreaterThan(base.chunks);
-    expect(p!.free / p!.chunks).toBeLessThan(base.free / base.chunks);
+    /* EVERY collector pass, and the assertion is over ALL of them.
+     *
+     * A single record cannot carry this. The exit report is registered by a
+     * constructor so it runs at the END of the atexit chain, after the
+     * runtime has torn the arena down -- 3 chunks against 204 at the busiest
+     * pass -- and the last few PASS records are post-drain for the same
+     * reason: the fixture has dropped its survivors by then. Picking "the
+     * last one" or "the third from last" would be fitting an index to an
+     * answer.
+     *
+     * What is actually being claimed is an INVARIANT: a chunk that is full --
+     * reachable from neither the current slot nor the partial list -- has no
+     * free block and therefore contributes no free page, ever. So: full
+     * chunks must OCCUR somewhere in the run, and in EVERY record they must
+     * contribute zero. */
+    const { stderr } = await run(bin, {
+      ARENA_HELD: "3000",
+      ARENA_CHURN: "40000",
+      SCR_PAGECEN_EVERY: "1",
+    });
+    const passes = stderr.split("[pagecen] ARMED").filter((r) => r.includes("at=pass"));
+    expect(passes.length, `no at=pass record in:
+${stderr.slice(0, 400)}`).toBeGreaterThan(0);
+
+    const parsed = passes.map(parsePages).filter((x): x is Pages => x !== null);
+    expect(parsed.length).toBeGreaterThan(0);
+
+    /* The census's own list and the arena's byte counter, every sample. */
+    for (const r of parsed) expect(r.chunks).toBe(r.arenaHeld);
+
+    /* FULL chunks occur: this arm exists to produce them. */
+    expect(Math.max(...parsed.map((r) => r.full))).toBeGreaterThan(0);
+
+    /* And in every record they contribute nothing. */
+    for (const r of passes) {
+      expect(r).toMatch(/^\[pagecen] freepages by role cur=\d+ part=\d+ full=0$/m);
+      expect(r).not.toContain("[pagecen] NOTE a FULL chunk reported free pages");
+    }
+
+    /* Denser survivors, measured as PERSISTENCE rather than at any single
+     * sample -- how many collector passes still see a chunk pinned full.
+     *
+     * Every single-sample anchor was tried and every one is incomparable.
+     * Both arms peak at the same 56 chunks and the same 53 full chunks,
+     * because both peaks are the spike, which `ARENA_HELD` does not change.
+     * The last sample is post-drain in both. And the last sample that still
+     * has a full chunk is, in the sparse arm, still inside the spike (53)
+     * while in the dense arm it is long after it (6) -- so that anchor
+     * compares two different moments and inverts the answer.
+     *
+     * What `ARENA_HELD` actually changes is how LONG survivors keep chunks
+     * pinned, and counting the passes that see one is monotone in survivors
+     * and immune to the spike dominating both extremes. */
+    const pinnedPasses = (rs: Pages[]) => rs.filter((r) => r.full > 0).length;
+    const baseErr = (await run(bin, { SCR_PAGECEN_EVERY: "1" })).stderr;
+    const baseParsed = baseErr
+      .split("[pagecen] ARMED")
+      .filter((r) => r.includes("at=pass"))
+      .map(parsePages)
+      .filter((x): x is Pages => x !== null);
+    expect(baseParsed.length).toBeGreaterThan(0);
+    expect(pinnedPasses(parsed)).toBeGreaterThan(pinnedPasses(baseParsed));
   }, 600_000);
 });
