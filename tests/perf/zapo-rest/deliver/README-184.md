@@ -188,6 +188,22 @@ comparison reads +0.75%.
 So: **anything under about 1% on settled memory, or under 4% on CPU, is
 inside our noise floor.** Those are the numbers to beat.
 
+**Where that floor came from, stated because it is not from this exact
+binary.** It was measured over 12 runs of our own build of this program,
+compiled from the same source tree and the same dependencies but at an
+earlier commit than the one that produced the executable you have. The
+comparison in §2 is unaffected by that: **both of its arms are this very
+binary**, with a single environment switch between them, so nothing about
+where the floor came from can reach the difference it measures. What is
+borrowed is only the yardstick.
+
+We expect a yardstick to travel, because what it measures are properties of
+the machine and the test rig — the first-run position effect, the two peak
+modes, the ~28.7 MB swing — and none of those care which commit built the
+executable. **And it is checked rather than assumed**: the switched-off arm
+of §2 is the same workload on the same machine, so it should settle close to
+the figure this floor was measured at, and §2 says whether it did.
+
 ---
 
 ## 6. What this build will and will not do
