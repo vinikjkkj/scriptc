@@ -552,3 +552,53 @@ both headers; until then, no exit-time census on this program is trustworthy.
 **`rig.ps1` clobbered `MEMRIG_PMON`** unconditionally, so a caller choosing a
 different sampler silently got the wrong one — which is how the first run came
 back with a five-column CSV and no `privateWS`. Now guarded.
+
+## DELIVERY A/B — cycle-arena page return, shipping build, paired
+
+`out/zapo-rest-plain.exe` (**plain build, no census, no profiler**), one binary,
+arms separated by `SCR_CYCLE_PAGERETURN`. Six rotated repetitions through
+`delivery-ab-knob.sh` — `delivery-ab.sh`'s rotation verbatim plus a per-arm
+environment, because the treatment is an env knob and that script selects arms
+by exe path.
+
+**`modestat` refused, correctly, and named the fix.** The session is
+*unimodal* by its detector (HIGH incidence 0/6 in both arms), drift is
+essentially nil (half-to-half −0.03%), but the peak range is 17.57% — so it
+reported *"pairing is needed and this unpaired tool must not be used"*. The
+rotation already produces pairs, so the answer is a paired analysis, not a
+looser threshold.
+
+**One repetition classified manually and labelled**, exactly as `memcensus` did
+for the same documented detector limitation: `base-r6` peaks at **245.91 MiB**
+against a **209.15–211.78** band for the other eleven runs — a 34 MiB gap, one
+outlier, which is precisely the shape that fails `modestat`'s 3×-clearer-gap
+requirement and gets reported as unimodal. Repetition 6 is excluded whole
+(both arms), leaving five paired repetitions.
+
+| metric | base | fixed | Δ | Δ% | floor% | ×floor | verdict |
+|---|---:|---:|---:|---:|---:|---:|---|
+| **settled privateWS** | 80.02 | 77.97 | **−2.05 MiB** | **−2.56%** | 0.75 | **3.4×** | **CLEARS** |
+| **peak WS** | 211.07 | 210.28 | −0.79 MiB | −0.38% | 0.12 | 3.1× | **CLEARS** |
+| settled privateCommit | 196.05 | 195.79 | −0.26 MiB | −0.13% | 0.28 | 0.5× | **DRAW** |
+| cpuToSettled | 10784.38 ms | 10784.40 ms | **+0.02 ms** | **0.00%** | 3.79 | 0.0× | **DRAW** |
+
+Per-repetition `privateWS` deltas: **−2.10, −2.26, −1.92, −1.97, −2.00** —
+**5/5 negative**, spread 0.34 MiB (0.42%), which is half the within-mode floor
+on its own. Position is balanced across the kept repetitions: base first on
+three, fixed first on two.
+
+**The commit draw is a confirmation, not a disappointment.** `DiscardVirtualMemory`
+returns the working set and leaves the commit charge untouched — measured
+directly in `../pagecensus/vmprobe.c` (−224.05 MiB WS, +0.00 commit). A
+commit-column result would have meant the mechanism was not the one we chose.
+`MEM_DECOMMIT` is the form that moves commit, and it stays deferred with its
+price recorded: it needs the arena off `malloc` onto an owned reservation.
+
+**And the CPU column is a draw at 0.00%**, which is the answer "no performance
+loss" requires — stated as a draw, not as a win. The floor there is the loosest
+at 3.79% and this does not approach it. The hot path is untouched by
+construction: the sweep runs at the end of a collector pass and the revival
+only on a refill that would otherwise have taken a fresh chunk.
+
+Against the **71.29 MiB** of retention the user actually sees, −2.05 MiB is
+**2.9%**.
