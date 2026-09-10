@@ -369,11 +369,18 @@ enum { SCR_CYC_BLACK = 0, SCR_CYC_PURPLE = 1, SCR_CYC_GRAY = 2, SCR_CYC_WHITE = 
 #endif
 
 /* SCR_POOL_BUDGET: the total PHYSICAL BYTES one pool may hold across all
- * classes, as an alternative bound to the per-class depth above. 0, the
- * default, is the shipped behaviour and compiles to the same code it always
- * did -- the depth field is not even declared under a budget, and the
- * budget field is not declared without one, so neither arm carries the
- * other's cost.
+ * classes, as an alternative bound to the per-class depth above.
+ *
+ * THE DEFAULT IS 16 MiB, AND HAS BEEN SINCE 7bd0e4ce3. This paragraph said
+ * "0, the default, is the shipped behaviour" until that commit measured the
+ * bound is never reached on zapo and turned it on -- and its own promise
+ * that "every claim the measurement moved is rewritten in place" missed
+ * this sentence. Three descriptions of this knob were stale at once: this
+ * one, the worst-case note above, and tests/perf/poolstat's header.
+ *
+ * 0 restores the per-class depth cap. The depth field is not declared under
+ * a budget and the budget field is not declared without one, so neither arm
+ * carries the other's cost.
  *
  * The curve this exists to price is the block comment above: on the
  * messaging bench a `store.clear()` frees 200,000 blocks of ONE class at

@@ -816,64 +816,63 @@ under 3 MB because the cycle arena has the machinery and still holds chunks.
 The measurement says worse than that and for a different reason: the cycle
 arena's list is *working* (83% returned); the string arena's is *unreachable*.
 
-## Scoping the pool question — and the instrument's own premise is stale
+## RETRACTED: the pool budget is not an unexamined term — it was measured when it shipped
 
-`tests/perf/poolstat` already answers "what does `scr_str_blocks` hold at
-settle", exactly and per size class:
+I proposed `SCR_POOL_BUDGET` as *"the largest unexamined term on the board"*:
+16 MiB per pool across four pools, **up to 64 MiB**, against 72.12 MB of
+retention. **That is wrong, and it was knowable from this tree before I said
+it.**
+
+`7bd0e4ce3 perf(runtime): the size-class pools' byte budget ships on, because
+on zapo the bound is never reached` **is the commit that set the constant**,
+and it carries the control run, per pool, on zapo:
 
 ```
-POOLSTAT <pool> ... hits= accepts= rejects= bytesNow= bytesMax=
-                    bytesAccepted= blocksNow= depthMax= ...
-POOLSTAT-CLASS <pool> <class> <depthMax> <depthNow>
+                 gives   rejected by depth 64   rejected by 16 MiB
+cyc             80,136    20,184  25.19%                 0
+jsonkey         17,946     1,192   6.64%                 0
+dynext           1,722        15   0.87%                 0
+str             35,521         0   0.00%                 0
+TOTAL          135,325    21,391  15.81%                 0
 ```
 
-`bytesNow` / `blocksNow` at report time is the settle figure; the
-`POOLSTAT-CLASS` rows are the per-class split. It names all **four** pools
-separately — `scr_cyc_blocks`, `scr_str_blocks`, `scr_json_key_blocks`,
-`scr_dyn_ext_blocks` — and it **already carries the `_Exit` interposer**, so
-it does not hit the trap that made `cycstat` silent. One build plus one rig
-run; no new instrument.
+* **Zero rejected gives at 16 MiB, and zero at 1 MiB.** The bound is never
+  approached.
+* **The largest pool's byte high-water is 614,880 B — 3.67% of the bound.**
+* Turning the budget on moved pool retention **41.0 KiB → 616.7 KiB**, and
+  peak WS by **+48 KiB of 27,906 KiB (+0.172%)**, inside a **+0.316%** A/A
+  floor.
 
-**But its stated premise is out of date, and the correction changes the
-question.** The header opens with `SCR_POOL_BUDGET`, *"defaulting to 0 (off,
-per-class depth instead)"*. It is not 0 any more:
+**616.7 KiB is 0.83% of the 72.12 MB the user sees.** The whole sweep range —
+16 MiB down to depth-64 — is **~575 KiB**, and going back costs **21,391
+`free()` calls and 11,976 pool misses** in a 46-second session. The trade was
+measured in both directions and settled.
 
-```c
-#ifndef SCR_POOL_BUDGET
-#define SCR_POOL_BUDGET 16777216      /* 16 MiB, and the byte branch is live */
-#endif
-```
+### What I actually got wrong
 
-So `scr_pool_give` takes the **budget** branch, not the `SCR_POOL_DEPTH 64`
-branch, and the runtime's own worst-case note — *"64 × (8 + 16 + … + 256) =
-270 KiB, and there are FOUR pools"* — describes the arm that is **off**.
+**I read a capacity as an occupancy.** `16 MiB × 4` is what the pools *may*
+hold; what they *do* hold is ~600 KiB. A bound can only ever retain blocks the
+program itself allocated and freed, so it cannot exceed that program's own live
+peak in the ≤256 B classes — which the header says, two paragraphs above the
+constant I was quoting.
 
-**That single fact explains `listgive=0` exactly.** A pool that could hold
-only 270 KiB would have refused long before 3.06 MiB of string blocks and
-pushed the overflow onto the arena's freelist. A pool that may hold **16 MiB**
-never refuses, so `scr_str_ar_give` is never reached — which is precisely what
-was measured.
+**And my evidence was consistent with the true answer all along.** `listgive=0`
+on the string arena is explained by the pool never refusing — and `str` is the
+one pool of four with **0.00% depth rejections**, i.e. the one that never
+saturates even at depth 64. I used that fact to argue the pool must be holding
+a great deal; it is equally the signature of a pool that is barely used.
 
-**And it makes the interesting number much larger than the string arena's.**
-Four pools at a 16 MiB budget each is up to **64 MiB of blocks the program has
-dropped and the allocator has kept**, against the **71.29 MiB** the user
-actually sees. The string arena's 3.06 MiB is a rounding error beside that,
-and it is the *same* memory seen from the other side: those 49 chunks are held
-because their blocks sit in `scr_str_blocks`, not because the arena forgot
-`k`.
+### What stands
 
-**What is NOT settled by arithmetic**, and why the run is still needed: with
-the budget at 16 MiB and only 3.06 MiB carved, the bound never binds, so
-nothing forces a split between *live* and *parked*. `bytesNow` / `blocksNow`
-is the only thing that separates them, and a routing change is worth designing
-only if the parked share is large.
+The three stale descriptions are real and are now fixed: `poolstat`'s header,
+the worst-case note, and the knob's own paragraph — which still said *"0, the
+default, is the shipped behaviour"* after `7bd0e4ce3` turned it on, despite
+that commit promising to rewrite every claim its measurement moved. Being
+mis-documented in three places is how a settled question came back.
 
-**The accounting trap is named in advance.** If the pools hold most of it,
-routing frees back to the arena moves memory between two owners we already
-control and recovers little — the shape that made a `SCR_POOL_MAX` sweep look
-like an 18.45 MiB win when 77% of it was the number changing columns. The
-figure to watch is not "arena chunks freed" but total bytes returned to the
-OS.
+**No `poolstat` run is needed to close this.** The run would re-measure
+614,880 B. The route is closed with a number, and the number was already in the
+tree.
 
 ## The cycle trap: a third divergence, and it is a hard abort
 
