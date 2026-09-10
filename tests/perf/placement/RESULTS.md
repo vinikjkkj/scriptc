@@ -473,3 +473,82 @@ returned page costs ~1.15 µs to fault back.
 
 That is the lever worth building on the arena's 7.25 MiB, and it is the one
 this branch was originally chartered for.
+
+## The page-return histogram on zapo-rest — the reading the policy needed
+
+`out/zapo-rest-pc.exe`, arm `app/` 1.6.2, `-DSCR_PAGECEN_ON -DSCR_CYCSTAT_ON`,
+one rig run, page return OFF so this is what is *available*. Reported at the
+last collector pass before shutdown (see the `_Exit` note below).
+
+```
+SYNTH ok allfree 15 onelive 14 alllive 0 clustered15 14 scattered15 0
+SELFTEST ok on 204/204 chunks (carved-freelist == used)
+chunks=204 cur=25 part=85 full=94 nolive=4 held=12.75 MiB
+slots carved=182679 free=67515 live=115164 occupancy=0.5672
+CEILING aligned freepages=835 = 3.26 MiB of 12.75 MiB held (25.6%)
+actual (malloc-placed) freepages=825 = 3.22 MiB (alignment cost 0.04 MiB)
+histogram freepages/chunk: 0:136 2:1 3:2 4:2 5:1 7:2 9:1 10:6 11:4 12:7 13:6 14:15 15:21
+```
+
+**It is the good case, and that was the open question.** The distribution is
+bimodal: **136 of 204 chunks offer nothing at all**, and of the 68 that do,
+**59 offer ten pages or more** — 21 of them offer the full 15. The returnable
+space is concentrated in nearly-empty chunks, not smeared one page at a time.
+
+The trade curve makes the policy cheap:
+
+| threshold | chunks touched | pages | MiB |
+|---:|---:|---:|---:|
+| T=1 | 68 | 835 | 3.26 |
+| **T=10** | **59** | **791** | **3.09** |
+| T=14 | 36 | 525 | 2.05 |
+
+**T=10 takes 95% of the bytes while touching 59 chunks** — ~59 syscalls per
+sweep, which at the 456 ns–3.7 µs per page from `vmprobe.c` is under 3 ms.
+
+**Alignment costs almost nothing here**: 835 pages ideal against 825 real, a
+gap of 0.04 MiB. The shipping code uses the ACTUAL model, so it gives up 1.2%
+of the ceiling and no more.
+
+**Two independent instruments agree on occupancy**: this census says 56.72%
+live; `memcensus`'s heap-side itemisation says 61.25%. Different sample points
+— the last collector pass here against the settled walk there, which is also
+why 204 chunks / 12.75 MiB appears against 117 / 7.31 — but the *shape* is the
+same from both sides.
+
+## Provisional A/B — not the delivery number
+
+Three interleaved pairs, one binary, env knob. **`on2` is the high mode** and
+is excluded: peak WS 246.02 against 210.45–211.33 for every other arm, and
+peak private commit 697 against ~583, which is the documented bimodality
+(~21% of runs, +30 MiB, commit up).
+
+| | settled WS | settled privateWS | peak WS |
+|---|---:|---:|---:|
+| off1 / off2 / off3 | 97.37 / 97.48 / 97.34 | 79.98 / 80.09 / 79.95 | ~211 |
+| on1 / on3 | 95.42 / 95.20 | 78.04 / 77.80 | ~210.6 |
+| ~~on2~~ (high mode) | ~~100.16~~ | ~~82.69~~ | ~~246.02~~ |
+
+The three `off` arms are an A/A/A triple with a **0.14 MiB spread (0.18%)**,
+which is the within-mode floor. Against it:
+
+> **settled private WS 79.98 → 77.92 MiB, −2.06 MiB (−2.6%)**, about 15× the
+> within-mode spread. Against the 71.29 MiB of retention the user sees, 2.9%.
+
+**This is not the delivery measurement.** It has no shared A/A floor, it was
+taken while the box was not reserved, and it is three arms with one excluded.
+It goes through `delivery-ab.sh` with `modestat` when the floor is down.
+
+## Two traps found, both worth carrying
+
+**The exit report is lost.** This service leaves through `_Exit`, and
+`cycstat` and `pagecensus` register plain `atexit` handlers where
+`tests/perf/prof/scr_prof.h` interposes `_Exit` explicitly and they do not —
+so `SCR_PAGECEN_OUT` and `SCR_CYCSTAT_OUT` produced **no file at all** on the
+first run, silently. `SCR_PAGECEN_EVERY=1` works around it by reporting at
+every collector pass. The proper fix is to port scr_prof.h's interposer to
+both headers; until then, no exit-time census on this program is trustworthy.
+
+**`rig.ps1` clobbered `MEMRIG_PMON`** unconditionally, so a caller choosing a
+different sampler silently got the wrong one — which is how the first run came
+back with a five-column CSV and no `privateWS`. Now guarded.
