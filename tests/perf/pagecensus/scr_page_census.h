@@ -639,6 +639,18 @@ __attribute__((constructor)) SCR_PC_FN void scr_pc_install(void) {
  * the census headers, so that SCR_CYCSTAT_ON / SCR_CYCEN_ON are already
  * defined when it is read. Included first, it wins and theirs are silently
  * lost -- which is the same failure it exists to fix, one header along. */
+/* A COMPILE-TIME CHECK, because a comment is not a mechanism. The chain
+ * below is spelled by explicit knowledge of the other reporters, so this
+ * header must be read AFTER them; read first it would silently drop theirs.
+ * cycstat sets its own include guard, so "cycstat is armed but has not been
+ * read yet" is exactly the bad order and is detectable here. */
+#if defined(SCR_CYCSTAT_ON) && !defined(SCR_CYC_STAT_H)
+#error "scr_page_census.h must be -included AFTER tests/perf/cycstat/scr_cyc_stat.h"
+#endif
+#if defined(SCR_CYCEN_ON) && !defined(SCR_CYC_CENSUS_H)
+#error "scr_page_census.h must be -included AFTER tests/perf/cycensus/scr_cyc_census.h"
+#endif
+
 #ifdef _Exit
 #undef _Exit
 #endif
