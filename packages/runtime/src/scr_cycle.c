@@ -358,6 +358,21 @@ struct ScrCycChunk {
    * land — was no, but only after a second load of the class table to
    * prove it. One byte answers it. */
   uint8_t avail;
+  /* Bitmap of this chunk's pages that have been UNTHREADED and handed back
+   * (see the page-return block below). Bit p set means no block overlapping
+   * page p is on `freelist`, and those blocks are free. 16 pages at 64 KiB. */
+  uint16_t gone;
+#ifdef SCR_PAGECEN_ON
+  /* tests/perf/pagecensus's list of EVERY live chunk, and it exists because
+   * the two lists above cannot answer the census's question. A chunk that is
+   * neither current nor on its class's partial list is FULL — reachable from
+   * nothing — and the census has to be able to SHOW that a full chunk
+   * contributes no free page rather than infer it from an invariant. These
+   * two fields are compiled in only when the census is armed, so the
+   * shipping struct is byte-identical to its parent's. */
+  ScrCycChunk *all_next;
+  ScrCycChunk **all_prevp;
+#endif
 };
 
 /* THE EMPTY CHUNK, and it is not a placeholder. Every class starts pointing
@@ -372,7 +387,18 @@ struct ScrCycChunk {
  * the block and no block lives here. */
 static ScrCycChunk scr_cyc_ar_empty = {NULL, NULL, NULL, NULL,
                                        NULL, NULL, 1u,   0u,
-                                       0u,   0u};
+                                       0u,   0u,
+                                       /* gone: no page of a non-chunk is
+                                        * returned, and nothing may read it
+                                        * as a pointer. */
+                                       0u
+#ifdef SCR_PAGECEN_ON
+                                       /* never on the census's all-chunk
+                                        * list: it is not a chunk. */
+                                       ,
+                                       NULL, NULL
+#endif
+};
 
 /* The class's CURRENT chunk — the one and only one the hot path looks at,
  * the same shape as mimalloc's `pages_free_direct` slot. It is deliberately
@@ -397,6 +423,495 @@ static ScrCycChunk *scr_cyc_ar_part[SCR_POOL_MAX / SCR_POOL_GRAIN + 1u];
  * so the budget below is a ceiling on residency and not on lifetime
  * allocation. Only the budget reads it. */
 static size_t scr_cyc_ar_held = 0;
+
+/* ── returning whole free pages inside a live chunk ─────────────────────
+ *
+ * A chunk comes back to the allocator only when `used == 0`, so a chunk with
+ * one live block keeps all 64 KiB. Measured at settle on the zapo history
+ * sync: 117 chunks, 7.31 MiB held, 61.25% of it genuinely live -- and
+ * 2.31 MiB of the remaining 2.83 MiB is whole free PAGES. This returns those
+ * pages to the OS without moving an object or changing a pointer.
+ *
+ * WHY THIS WORKS HERE WHEN IT DID NOT ON THE CRT HEAP. The same idea was
+ * refuted against the process heap and the refutation is recorded in
+ * tests/perf/placement/discardsafe.c: that allocator keeps free-list links
+ * and headers INSIDE free blocks, so a discarded page takes its bookkeeping
+ * with it -- the poison arm there stalls the process inside the allocator,
+ * where the null arm finishes the same work in seconds. The cycle arena has
+ * no foreign metadata anywhere in a chunk's carve region: the chunk header is
+ * ours and sits in the first 256 bytes, the free list is ours, and the header
+ * page is excluded by construction below. Different allocator, different
+ * answer, and the reason is auditable rather than hopeful.
+ *
+ * DiscardVirtualMemory, not MEM_DECOMMIT, and that was a decision rather than
+ * a default. Decommit returns the commit charge too, but it leaves the pages
+ * MEM_RESERVE and NOT TOUCHABLE -- Windows has no auto-commit-on-fault, so
+ * every re-carve would have to re-commit first -- and it requires the chunk to
+ * own its reservation, which means taking the arena off malloc. Discard is
+ * transparent, needs no reservation, and returns the PRIVATE WORKING SET,
+ * which is the column the retention is actually read in. The decommit form
+ * stays available if commit ever becomes the target; its price is the
+ * allocation-path change, and tests/perf/pagecensus/vmprobe.c has both costs.
+ *
+ * THE ONE THING THAT MAKES THIS NON-TRIVIAL is that the free list is
+ * INTRUSIVE: a free block's first eight bytes are the next pointer, and a
+ * discarded page reads back as zeroes. So a page cannot be returned while any
+ * block on it is still threaded. The sweep below UNTHREADS first and records
+ * the page in `gone`; the refill re-threads on demand. `pad` -- the block's
+ * offset to its own chunk, stamped once at carve and relied on by
+ * scr_cyc_free to route the block home -- is also zeroed by the discard, so
+ * the revival re-stamps it. A revived block whose `pad` read 0 would be sent
+ * to free() and corrupt the heap.
+ *
+ * SLOTS STRADDLE PAGES. The stride is not a page divisor, so a block can
+ * cover two pages. A page is returnable only if every block overlapping it is
+ * free; a block is re-threaded only when every page it overlaps is resident.
+ * A block spanning two returned pages is therefore revived exactly once, when
+ * the second of them comes back, and needs no per-block state to say so --
+ * `gone` carries it.
+ *
+ * COST ON THE HOT PATH IS ZERO. Nothing is added to scr_cyc_alloc or
+ * scr_cyc_free. The sweep runs at the end of a collector pass, over the
+ * chunks that have free space at all; the revival runs only on a refill that
+ * would otherwise have taken a new chunk.
+ *
+ * SCR_CYCLE_PAGERETURN=0 is an ENV knob, so both arms are one binary and the
+ * comparison carries no code-layout confound.
+ */
+#ifndef SCR_CYC_PAGERETURN
+#define SCR_CYC_PAGERETURN 1
+#endif
+#ifndef SCR_CYC_PAGE
+#define SCR_CYC_PAGE 4096u
+#endif
+#define SCR_CYC_PPC ((unsigned)(SCR_CYC_ARENA_CHUNK / SCR_CYC_PAGE))
+
+#if SCR_CYC_PAGERETURN && !defined(SCR_RC_AUDIT)
+#ifdef _WIN32
+/* winsock.h's own guard: this file does not want sockets, and windows.h
+ * drags them in with a `fd_set` that collides with the runtime's own. Same
+ * arrangement tests/perf/prof/scr_prof.h uses and for the same reason. */
+#ifndef _WINSOCKAPI_
+#define _WINSOCKAPI_
+#endif
+#include <windows.h>
+#elif defined(__linux__) || defined(__unix__) || defined(__APPLE__)
+#include <sys/mman.h>
+#endif
+_Static_assert(SCR_CYC_PPC <= 16, "the `gone` bitmap is a uint16_t");
+
+#ifdef _WIN32
+typedef unsigned long(__stdcall *ScrCycDiscardFn)(void *, size_t);
+static ScrCycDiscardFn scr_cyc_discard_fn;
+static int scr_cyc_discard_looked;
+#endif
+
+static long long scr_cyc_pr_pages = 0;   /* pages returned */
+static long long scr_cyc_pr_revived = 0; /* pages faulted back deliberately */
+static long long scr_cyc_pr_sweeps = 0;
+static long long scr_cyc_pr_chunks = 0;  /* chunks that gave up a page */
+static long long scr_cyc_pr_failed = 0;  /* discard calls the OS refused */
+/* Chunks the sweep LOOKED at, whatever it decided. Without it, pages=0 has
+ * three indistinguishable causes and the report can only name one: never
+ * called, called and refused, called and nothing available. `sweeps` separates
+ * the first, `failed` the second, and this separates "the arena held no chunk
+ * with free space" from "chunks existed and none met the threshold" -- which
+ * are inertness and placement respectively, and want different responses. */
+static long long scr_cyc_pr_visited = 0;
+
+long long scr_cyc_pr_stat(int which) {
+  return which == 0   ? scr_cyc_pr_pages
+         : which == 1 ? scr_cyc_pr_revived
+         : which == 2 ? scr_cyc_pr_sweeps
+                      : scr_cyc_pr_chunks;
+}
+
+#ifndef SCR_CYC_PAGERETURN_STAT
+/* The counters READ in an ordinary build, but their report does not ship.
+ * The three-way diagnosis below is ~930 bytes of .rdata and its code another
+ * few hundred, and a shipping binary carries it for a line nobody will ever
+ * ask it to print. Measured: the whole page-return block cost the regex
+ * program exactly one 4096-byte page, which is the size guard`s tolerance to
+ * the byte, and the strings were the difference. Diagnostics belong in an
+ * instrumented build, which is where every census in tests/perf already
+ * lives. Build with -DSCR_CYC_PAGERETURN_STAT=1 and the env knob works.
+ *
+ * scr_cyc_pr_stat() stays in every build: it is four loads and it is how a
+ * harness reads the counters without parsing text. */
+#define SCR_CYC_PAGERETURN_STAT 0
+#endif
+#if SCR_CYC_PAGERETURN_STAT
+/* SCR_CYCLE_PAGERETURN_STAT=1 prints the counters at exit. It exists because
+ * two arms of one binary printing the same answer is NOT evidence the return
+ * path ran -- a sweep that returned nothing prints the same answer. A zero
+ * here is the only thing that can say it did not, and the knob-off arm is the
+ * control that shows the counter can read zero. */
+static __attribute__((cold)) void scr_cyc_pr_report(void) {
+  fprintf(stderr, "[pgret] pages=%lld revived=%lld sweeps=%lld chunks=%lld failed=%lld\n",
+          scr_cyc_pr_pages, scr_cyc_pr_revived, scr_cyc_pr_sweeps,
+          scr_cyc_pr_chunks, scr_cyc_pr_failed);
+  fprintf(stderr, "[pgret] visited=%lld\n", scr_cyc_pr_visited);
+  /* THE THREE-WAY, named rather than left to the reader. A zero page count is
+   * not one fact. */
+  if (scr_cyc_pr_sweeps == 0) {
+    fprintf(stderr, "[pgret] NEVER SWEPT - the collector never reached the"
+                    " sweep point, or SCR_CYCLE_PAGERETURN=0. The path is"
+                    " INERT in this run; this is not a measurement of what it"
+                    " would return.\n");
+  } else if (scr_cyc_pr_visited == 0) {
+    fprintf(stderr, "[pgret] NOTHING VISITED - swept %lld times and found no"
+                    " chunk with free space at all. The arena held nothing"
+                    " to return.\n", scr_cyc_pr_sweeps);
+  } else if (scr_cyc_pr_chunks == 0) {
+    fprintf(stderr, "[pgret] NOTHING MET THE THRESHOLD - looked at %lld chunks"
+                    " over %lld sweeps and none offered enough whole free"
+                    " pages. That is PLACEMENT, not inertness.\n",
+            scr_cyc_pr_visited, scr_cyc_pr_sweeps);
+  }
+  if (scr_cyc_pr_failed != 0) {
+    fprintf(stderr, "[pgret] DISCARD REFUSED %lld times - the pages were"
+                    " unthreaded and are still resident. Sound, but returning"
+                    " nothing.\n", scr_cyc_pr_failed);
+  }
+  if (scr_cyc_pr_pages == 0 && scr_cyc_pr_sweeps != 0 &&
+      scr_cyc_pr_visited != 0 && scr_cyc_pr_chunks != 0 &&
+      scr_cyc_pr_failed == 0) {
+    fprintf(stderr, "[pgret] NOTHING RETURNED and no cause identified - chunks"
+                    " free page, or SCR_CYCLE_PAGERETURN=0, or the platform"
+                    " call is absent. Not a measurement of the return path.\n");
+  }
+}
+
+static __attribute__((cold)) void scr_cyc_pr_arm(void) {
+  static int armed = 0;
+  const char *e;
+  if (armed) return;
+  armed = 1;
+  e = getenv("SCR_CYCLE_PAGERETURN_STAT");
+  if (e != NULL && strtol(e, NULL, 10) != 0) atexit(scr_cyc_pr_report);
+}
+
+#else
+#define scr_cyc_pr_arm() ((void)0)
+#endif
+
+static int scr_cyc_pr_on(void) {
+  static int cached = -1;
+  if (cached < 0) {
+    const char *e = getenv("SCR_CYCLE_PAGERETURN");
+    cached = e != NULL ? (strtol(e, NULL, 10) != 0) : (SCR_CYC_PAGERETURN != 0);
+  }
+  return cached;
+}
+
+/* The platform call. NULL/failure is a slower program, never a broken one:
+ * every caller leaves the pages threaded and simply does not return them. */
+static __attribute__((cold)) int scr_cyc_discard(void *p, size_t n) {
+#ifdef _WIN32
+  if (!scr_cyc_discard_looked) {
+    scr_cyc_discard_looked = 1;
+    scr_cyc_discard_fn = (ScrCycDiscardFn)(void *)GetProcAddress(
+        GetModuleHandleA("kernel32.dll"), "DiscardVirtualMemory");
+  }
+  return scr_cyc_discard_fn != NULL && scr_cyc_discard_fn(p, n) == 0;
+#elif defined(MADV_DONTNEED)
+  return madvise(p, n, MADV_DONTNEED) == 0;
+#else
+  (void)p; (void)n;
+  return 0;
+#endif
+}
+
+/* Slots are at most one per 16 bytes of chunk. */
+static unsigned char scr_cyc_pr_freemap[SCR_CYC_ARENA_CHUNK / 16u];
+
+static unsigned scr_cyc_pr_thresh(void) {
+  static int cached = -1;
+  if (cached < 0) {
+    const char *e = getenv("SCR_CYCLE_PAGERETURN_MIN");
+    cached = e != NULL ? (int)strtol(e, NULL, 10) : 1;
+    if (cached < 1) cached = 1;
+  }
+  return (unsigned)cached;
+}
+
+/* PAGE BOUNDARIES ARE ABSOLUTE, NOT CHUNK-RELATIVE, and the first version of
+ * this file got that wrong. A chunk base is 256-aligned (that is what makes
+ * ScrCycHdr::pad a valid chunk map) and is therefore almost never
+ * page-aligned, so `base + p * PAGE` is not a page boundary. The counters
+ * caught it immediately -- 935 chunks swept, 947 pages revived, and ZERO
+ * pages actually returned, because every discard call was refused. It is the
+ * same distinction tests/perf/pagecensus/scr_page_census.h draws between its
+ * ALIGNED and ACTUAL models; the shipping code needs ACTUAL.
+ *
+ * So the candidate pages are the whole pages strictly inside the carve region
+ * at their real addresses: first = align_up(cs), last = align_down(bump), and
+ * page k covers [first + k*PAGE, first + (k+1)*PAGE). The chunk header falls
+ * below `first` by construction, so it needs no special case. */
+static __attribute__((cold, noinline, minsize)) void scr_cyc_pr_sweep_chunk(ScrCycChunk *c, unsigned thresh) {
+  unsigned char *base = (unsigned char *)(void *)c;
+  unsigned char *cs = base + SCR_CYC_ARENA_GRAN;
+  size_t stride = (size_t)c->stride, nslots, i;
+  uintptr_t first, last;
+  unsigned npages, k, n = 0;
+  unsigned mask = 0;
+  unsigned char used_page[SCR_CYC_PPC + 2u];
+  void *b;
+  size_t guard;
+
+  scr_cyc_pr_visited++;
+  if (stride == 0 || c->bump <= cs) return;
+  nslots = (size_t)(c->bump - cs) / stride;
+  if (nslots == 0 || nslots > sizeof scr_cyc_pr_freemap) return;
+  first = ((uintptr_t)(void *)cs + (SCR_CYC_PAGE - 1u)) & ~(uintptr_t)(SCR_CYC_PAGE - 1u);
+  last = (uintptr_t)(void *)c->bump & ~(uintptr_t)(SCR_CYC_PAGE - 1u);
+  if (last <= first) return;
+  npages = (unsigned)((last - first) / SCR_CYC_PAGE);
+  if (npages > SCR_CYC_PPC) npages = SCR_CYC_PPC;
+
+  memset(scr_cyc_pr_freemap, 0, nslots);
+  guard = 0;
+  for (b = c->freelist; b != NULL && guard <= nslots; guard++) {
+    unsigned char *bp = (unsigned char *)b;
+    size_t idx;
+    if (bp < cs || bp >= c->bump) break;
+    idx = (size_t)(bp - cs) / stride;
+    if (idx < nslots) scr_cyc_pr_freemap[idx] = 1;
+    __builtin_memcpy(&b, bp, sizeof(void *));
+  }
+
+  memset(used_page, 0, sizeof used_page);
+  for (i = 0; i < nslots; i++) {
+    uintptr_t a = (uintptr_t)(void *)(cs + i * stride);
+    uintptr_t z = a + stride;
+    unsigned k0, k1;
+    int on_gone = 0;
+    if (z <= first || a >= last) continue;
+    k0 = a <= first ? 0u : (unsigned)((a - first) / SCR_CYC_PAGE);
+    k1 = (unsigned)((z - 1u - first) / SCR_CYC_PAGE);
+    if (k1 >= npages) k1 = npages - 1u;
+    /* A block on an already-returned page is free and deliberately unlisted;
+     * without this it reads as live and pins its own page forever. */
+    for (k = k0; k <= k1; k++) {
+      if ((c->gone >> k) & 1u) on_gone = 1;
+    }
+    if (on_gone) scr_cyc_pr_freemap[i] = 1;
+    if (scr_cyc_pr_freemap[i]) continue;
+    for (k = k0; k <= k1; k++) used_page[k] = 1;
+  }
+
+  for (k = 0; k < npages; k++) {
+    if (used_page[k] || ((c->gone >> k) & 1u)) continue;
+    mask |= 1u << k;
+    n++;
+  }
+  if (n < thresh) return;
+
+  /* UNTHREAD FIRST: the next pointers live in the pages about to go. */
+  {
+    void **link = &c->freelist;
+    while (*link != NULL) {
+      unsigned char *bp = (unsigned char *)*link;
+      uintptr_t a = (uintptr_t)(void *)bp;
+      uintptr_t z = a + stride;
+      void *next;
+      __builtin_memcpy(&next, bp, sizeof(void *));
+      if (z > first && a < last) {
+        unsigned k0 = a <= first ? 0u : (unsigned)((a - first) / SCR_CYC_PAGE);
+        unsigned k1 = (unsigned)((z - 1u - first) / SCR_CYC_PAGE);
+        unsigned kk;
+        int hit = 0;
+        if (k1 >= npages) k1 = npages - 1u;
+        for (kk = k0; kk <= k1; kk++) {
+          if ((mask >> kk) & 1u) hit = 1;
+        }
+        if (hit) {
+          *link = next;
+          continue;
+        }
+      }
+      link = (void **)(void *)bp;
+    }
+  }
+  for (k = 0; k < npages; k++) {
+    unsigned q;
+    if (!((mask >> k) & 1u)) continue;
+    q = k;
+    while (q + 1u < npages && ((mask >> (q + 1u)) & 1u)) q++;
+    if (scr_cyc_discard((void *)(first + (uintptr_t)k * SCR_CYC_PAGE),
+                        (size_t)(q - k + 1u) * SCR_CYC_PAGE)) {
+      scr_cyc_pr_pages += (long long)(q - k + 1u);
+    } else {
+      scr_cyc_pr_failed++;
+    }
+    /* `gone` records UNTHREADED, not discarded: the revival's correctness
+     * rests on "no block on a gone page is on the free list", and that is
+     * true whether or not the platform call succeeded. */
+    c->gone |= (uint16_t)((((1u << (q - k + 1u)) - 1u) << k));
+    k = q;
+  }
+  scr_cyc_pr_chunks++;
+}
+
+/* Bring the lowest returned page back and re-thread the blocks on it whose
+ * other pages are resident. `pad` is re-stamped because the discard zeroed
+ * it, and a block whose pad reads 0 is routed to free() by scr_cyc_free --
+ * which would hand a chunk-interior pointer to the CRT heap. */
+static __attribute__((cold, noinline, minsize)) int scr_cyc_pr_revive(ScrCycChunk *c) {
+  unsigned char *base = (unsigned char *)(void *)c;
+  unsigned char *cs = base + SCR_CYC_ARENA_GRAN;
+  size_t stride = (size_t)c->stride, nslots, i;
+  uintptr_t first, last;
+  unsigned npages, k, target;
+
+  if (c->gone == 0 || stride == 0 || c->bump <= cs) return 0;
+  first = ((uintptr_t)(void *)cs + (SCR_CYC_PAGE - 1u)) & ~(uintptr_t)(SCR_CYC_PAGE - 1u);
+  last = (uintptr_t)(void *)c->bump & ~(uintptr_t)(SCR_CYC_PAGE - 1u);
+  if (last <= first) return 0;
+  npages = (unsigned)((last - first) / SCR_CYC_PAGE);
+  if (npages > SCR_CYC_PPC) npages = SCR_CYC_PPC;
+  for (target = 0; target < npages; target++) {
+    if ((c->gone >> target) & 1u) break;
+  }
+  if (target >= npages) return 0;
+  c->gone &= (uint16_t)(~(1u << target));
+  scr_cyc_pr_revived++;
+  nslots = (size_t)(c->bump - cs) / stride;
+  for (i = 0; i < nslots; i++) {
+    uintptr_t a = (uintptr_t)(void *)(cs + i * stride);
+    uintptr_t z = a + stride;
+    unsigned k0, k1;
+    int still_out = 0;
+    if (z <= first || a >= last) continue;
+    k0 = a <= first ? 0u : (unsigned)((a - first) / SCR_CYC_PAGE);
+    k1 = (unsigned)((z - 1u - first) / SCR_CYC_PAGE);
+    if (k1 >= npages) k1 = npages - 1u;
+    if (target < k0 || target > k1) continue;
+    for (k = k0; k <= k1; k++) {
+      if ((c->gone >> k) & 1u) still_out = 1;
+    }
+    if (still_out) continue; /* comes back with the last of its pages */
+    {
+      ScrCycHdr *h = (ScrCycHdr *)(void *)(cs + i * stride);
+      h->pad = (uint8_t)(((uintptr_t)(void *)h - (uintptr_t)(void *)c) /
+                         SCR_CYC_ARENA_GRAN);
+      __builtin_memcpy(h, &c->freelist, sizeof(void *));
+      c->freelist = h;
+    }
+  }
+  return 1;
+}
+
+/* THE SWEEP POINT is the end of a collector pass: the free lists are as long
+ * as they are going to get and nothing is mid-allocation. Only chunks with
+ * free space are visited, and those are exactly the ones reachable from the
+ * current slot and the partial lists -- a chunk on neither is FULL, so it has
+ * no free page by construction. */
+static __attribute__((cold, noinline, minsize)) void scr_cyc_pr_sweep(void) {
+  unsigned i;
+  unsigned thresh;
+  /* Armed BEFORE the knob test, so the knob-off arm still writes a report --
+   * and that report says NOTHING RETURNED by name rather than being silent.
+   * An instrument that says nothing in the arm it exists to refute is not an
+   * instrument. */
+  scr_cyc_pr_arm();
+  if (!scr_cyc_pr_on()) return;
+  thresh = scr_cyc_pr_thresh();
+  scr_cyc_pr_sweeps++;
+  for (i = 0; i <= SCR_POOL_MAX / SCR_POOL_GRAIN; i++) {
+    ScrCycChunk *c = scr_cyc_ar_cur[i];
+    ScrCycChunk *n;
+    if (c != &scr_cyc_ar_empty) scr_cyc_pr_sweep_chunk(c, thresh);
+    for (c = scr_cyc_ar_part[i]; c != NULL; c = n) {
+      n = c->next;
+      scr_cyc_pr_sweep_chunk(c, thresh);
+    }
+  }
+}
+#define SCR_CYC_PR_SWEEP() scr_cyc_pr_sweep()
+
+#define SCR_CYC_PR_REVIVE(c) \
+  ((c)->gone != 0 && scr_cyc_pr_on() && scr_cyc_pr_revive(c))
+#else
+#define SCR_CYC_PR_REVIVE(c) 0
+#define SCR_CYC_PR_SWEEP() ((void)0)
+#endif
+
+/* ── the page census hook ─────────────────────────────────────────────────
+ * The arena frees a chunk only when it is COMPLETELY empty, so one survivor
+ * keeps 64 KiB. tests/perf/pagecensus asks how much of what is still held is
+ * whole free pages — the ceiling on any per-page reclaimer. Everything below
+ * is nothing at all unless that header was force-included with
+ * -DSCR_PAGECEN_ON; see its comment for the controls. */
+#ifdef SCR_PAGECEN_ON
+_Static_assert(SCR_PC_CHUNK == SCR_CYC_ARENA_CHUNK,
+               "the page census was compiled for a different chunk size");
+static ScrCycChunk *scr_cyc_ar_all = NULL;
+
+static void scr_cyc_ar_pagecensus(const char *when) {
+  ScrCycChunk *c;
+  scr_pc_reset();
+  for (c = scr_cyc_ar_all; c != NULL; c = c->all_next) {
+    int role = scr_cyc_ar_cur[c->blk] == c
+                   ? SCR_PC_CUR
+                   : (c->avail ? SCR_PC_PART : SCR_PC_FULL);
+    scr_pc_note_chunk(c, c->raw, c->lim, SCR_CYC_ARENA_GRAN, c->stride, c->bump,
+                      c->used, c->freelist, role, c->gone);
+  }
+  /* One instant: the byte counter read here, the list walked just above. */
+  scr_pc_arena_held = (unsigned long)(scr_cyc_ar_held / SCR_CYC_ARENA_CHUNK);
+  scr_pc_report(when);
+}
+
+
+/* Armed from the allocation miss and from the collector pass rather than
+ * from a constructor: this target's PE images run no .CRT teardown and the
+ * census must be registered by whichever hook the program actually reaches,
+ * including a program whose arena is switched off — that arm has to be able
+ * to print NO CHUNKS. */
+static void scr_pc_arm(void) {
+  if (!scr_pc_registered) {
+    scr_pc_registered = 1;
+    /* The synthetic arm first, and BEFORE any chunk exists: it resets the
+     * accumulators, so running it later would erase a real reading. */
+    scr_pc_synth();
+    /* Hand the walk to the header, which owns both exit routes -- atexit AND
+     * the _Exit interposer. This program leaves through _Exit, so atexit
+     * alone reported nothing at all. */
+    scr_pc_walk_fn = scr_cyc_ar_pagecensus;
+    /* BOTH routes, as cycstat does: the constructor's atexit covers a normal
+     * return, the header's _Exit interposer covers process.exit(), and
+     * scr_pc_report_exit is idempotent so a program that does both reports
+     * once. Registering here as well means a target whose constructors do not
+     * run still gets the atexit route. */
+    scr_pc_install();
+  }
+}
+#define SCR_PC_ARM() scr_pc_arm()
+#define SCR_PC_PASS()                                     \
+  do {                                                    \
+    if (scr_pc_every_on()) scr_cyc_ar_pagecensus("pass"); \
+  } while (0)
+#define SCR_PC_LINK(c)                                          \
+  do {                                                          \
+    (c)->all_next = scr_cyc_ar_all;                             \
+    (c)->all_prevp = &scr_cyc_ar_all;                           \
+    if ((c)->all_next != NULL)                                  \
+      (c)->all_next->all_prevp = &(c)->all_next;                \
+    scr_cyc_ar_all = (c);                                       \
+  } while (0)
+#define SCR_PC_UNLINK(c)                                        \
+  do {                                                          \
+    *(c)->all_prevp = (c)->all_next;                            \
+    if ((c)->all_next != NULL)                                  \
+      (c)->all_next->all_prevp = (c)->all_prevp;                \
+  } while (0)
+#else
+#define SCR_PC_ARM() ((void)0)
+#define SCR_PC_PASS() ((void)0)
+#define SCR_PC_LINK(c) ((void)0)
+#define SCR_PC_UNLINK(c) ((void)0)
+#endif
 
 static size_t scr_cyc_ar_budget(void) {
 #ifdef SCR_RC_AUDIT
@@ -521,7 +1036,9 @@ static ScrCycChunk *scr_cyc_ar_new(uint8_t blk, size_t stride) {
   c->stride = (uint32_t)stride;
   c->blk = blk;
   c->avail = 1; /* the caller makes it current the moment it returns */
+  c->gone = 0;
   scr_cyc_ar_held += SCR_CYC_ARENA_CHUNK;
+  SCR_PC_LINK(c);
   SCR_CS_BUMP(archunk);
   SCR_CS_MAX(arpeak, scr_cyc_ar_held / SCR_CYC_ARENA_CHUNK);
   return c;
@@ -531,6 +1048,7 @@ static ScrCycChunk *scr_cyc_ar_new(uint8_t blk, size_t stride) {
  * `avail` here can only mean "on the partial list". */
 static void scr_cyc_ar_release(ScrCycChunk *c) {
   if (c->avail) scr_cyc_ar_unlink(c);
+  SCR_PC_UNLINK(c);
   scr_cyc_ar_held -= SCR_CYC_ARENA_CHUNK;
   SCR_CS_BUMP(arfree);
   free(c->raw);
@@ -596,6 +1114,10 @@ static ScrCycHdr *scr_cyc_ar_refill(size_t phys, uint8_t blk) {
     /* Exhausted: no free block and no room to carve another. It stops being
      * the current chunk and goes on NO list — it is full, so there is
      * nothing to allocate from it. The first free INTO it relinks it. */
+    /* Before giving the chunk up, take back a page it returned earlier. This
+     * is the only place the re-fault is paid, and it is paid instead of
+     * taking a whole new chunk. */
+    if (SCR_CYC_PR_REVIVE(c)) continue;
     c->avail = 0;
     scr_cyc_ar_cur[blk] = &scr_cyc_ar_empty;
   }
@@ -657,6 +1179,11 @@ static __attribute__((noinline)) void *scr_cyc_alloc_miss(size_t size,
   size_t phys = scr_pool_bytes(sizeof(ScrCycHdr) + size);
   uint8_t blk = phys <= SCR_POOL_MAX ? (uint8_t)(phys / SCR_POOL_GRAIN) : 0u;
   ScrCycHdr *h = NULL;
+  /* Nothing at all in an unarmed build. Here rather than in the hot path
+   * because a program that never misses never has a chunk to census, and
+   * here rather than in scr_cyc_ar_new so the SCR_CYCLE_ARENA=0 arm still
+   * arms and can print its NO CHUNKS refusal. */
+  SCR_PC_ARM();
   if (blk != 0 && scr_cyc_arena_on()) h = scr_cyc_ar_refill(phys, blk);
   if (h == NULL) h = (ScrCycHdr *)scr_pool_take(&scr_cyc_blocks, phys);
   if (h == NULL) {
@@ -1258,5 +1785,11 @@ void scr_collect_cycles(void) {
   scr_nwhite = 0;
 
   SCR_CS_PASS_END();
+  /* The end of a sweep is the one point in the process where the arena's
+   * free lists are as long as they are going to get, which is why it is
+   * both where the census reads and where a per-page reclaimer would run.
+   * Nothing at all unless SCR_PAGECEN_EVERY says otherwise. */
+  SCR_CYC_PR_SWEEP();
+  SCR_PC_PASS();
   scr_collecting = false;
 }

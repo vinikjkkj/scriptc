@@ -1312,6 +1312,14 @@ typedef struct ScrArr {
    * The compiler picks between the two stamps from the real trace
    * fixpoint, so exactly one fires. See docs/estado-weakmap-cycle-keys.md. */
   uint8_t weakkey;
+  /* 1 = `data` is a VirtualAlloc/mmap RESERVATION rather than a heap block,
+   * so the free path must release the reservation and the grow path commits
+   * instead of realloc'ing. Rides the same padding `weakkey` does, between
+   * `elem` and the 8-byte-aligned pointers below, so sizeof(ScrArr) is
+   * unchanged at 64 bytes -- which matters, because 1,254,966 of these
+   * headers are allocated per history sync and they are monomorphic in the
+   * 64-byte size class. See the note above scr_arr_grow. */
+  uint8_t vmbacked;
   /* SCR_ELEM_REF only; NULL for every other element kind. elem_trace is
    * non-NULL exactly when the element type carries a cycle header: such
    * arrays are CYCLE-CAPABLE (an element can point back at the array that

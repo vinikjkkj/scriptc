@@ -160,6 +160,232 @@ static void *scr_elem_retain_p(const ScrArr *a, void *p) {
   return p;
 }
 
+/* ── large array data: a reservation, not the CRT heap ──────────────────
+ *
+ * THE MECHANISM THIS REMOVES. scr_arr_grow doubles, and `realloc` on a heap
+ * whose neighbours are busy cannot extend in place, so every step allocates a
+ * new block, copies, and frees the old one. An array that reaches octave 15
+ * also allocated at 7, 8, 9 ... 14 and abandoned every one. By the geometric
+ * series those droppings sum to about the final size -- so roughly half the
+ * bytes this line ever asks for are allocated only to be thrown away one step
+ * later. And each dropping is exactly one size class SMALLER than the request
+ * that follows it, so nothing that comes after can ever fit the hole it left.
+ * That is the heap-shredder, measured: 217,359 free blocks in the scattered
+ * arm against 1,026 in the contiguous one, with identical live data.
+ *
+ * MEASURED SHAPE, from tests/perf/placement/RESULTS.md pass 2 (artifact
+ * out/zapo-rest-prof2.exe, arm app/ 1.6.2). Octave histogram of this line's
+ * 1,449,126 grows, and `cap` is always a power of two so a grow lands exactly
+ * on its octave floor and count x 2^b is exact -- it reconciles with the
+ * site's own byte total to 1582.6 MiB both ways:
+ *
+ *   oct  5    32 B   376,272 grows    11.5 MiB     87.0% of GROWS
+ *   oct  6    64 B   885,408          54.0 MiB     are these two
+ *   oct  7   128 B    26,004           3.2 MiB
+ *   oct  8   256 B    22,611           5.5 MiB     the flat tail: 15k-26k
+ *   oct  9   512 B    22,208          10.8 MiB     grows in EVERY octave,
+ *   oct 10  1024 B    21,464          21.0 MiB     which is tens of
+ *   oct 11  2048 B    20,122          39.3 MiB     thousands of arrays each
+ *   oct 12  4096 B    18,859          73.7 MiB     climbing the WHOLE
+ *   oct 13  8192 B    17,664         138.0 MiB     ladder, not a few big
+ *   oct 14 16384 B    15,535         242.7 MiB     ones
+ *   oct 15 32768 B    14,506         453.3 MiB
+ *   oct 16 65536 B     8,473         529.6 MiB
+ *
+ * THE THRESHOLD IS READ OFF THAT TABLE, not rounded to taste. 8,192 bytes --
+ * octave 13 -- because:
+ *
+ *   it captures 1,363.6 MiB of the 1,582.6, or 86.2%, leaving the 87.0% of
+ *   grows that are 64 B or under exactly where they are, which is where they
+ *   belong: the size-class heap serves them well and a reservation would not;
+ *
+ *   VirtualAlloc reserves on a 64 KiB granularity, so the address-space waste
+ *   is 8x the promotion size here. At octave 10 it would be 64x, and that is
+ *   the reason this cannot simply replace malloc for all arrays;
+ *
+ *   commit is page-granular, so the first commit at 8,192 bytes is exactly
+ *   two pages with nothing wasted. Below one page it would round up and the
+ *   saving would go backwards.
+ *
+ * HOW MUCH ADDRESS SPACE. The whole-run count (38,512 grows in octaves 14-16)
+ * is NOT the live-at-once count and must not be used for this. The residency
+ * lane answers it directly: this site's PROFLIVE `snap` -- its live bytes
+ * sampled when process-wide live was at its high-water -- is 924,416 bytes in
+ * the burst arm against 82,688 in the control. Under one megabyte of array
+ * data live at peak, so with the largest arrays at 64 KiB the peak concurrent
+ * promoted array count is of the order of ten, not thousands. At 16 MiB
+ * reserved each that is ~160 MiB of ADDRESS SPACE (not memory) against a
+ * 128 TiB user half. `snap` is sampled at the process-wide peak rather than
+ * at this site's own, so treat it as an order of magnitude and not a bound --
+ * which is why the fallback below exists and is counted rather than assumed
+ * unreachable.
+ *
+ * `a->data` STAYS A PLAIN `uint64_t *`. Every other site in the runtime
+ * indexes it directly and none of them learn anything about this. There is no
+ * tagging and no offset: the reservation base IS the data pointer, because
+ * commit starts at the base. The only bookkeeping is one byte, and it rides
+ * the existing padding beside `weakkey`, so sizeof(ScrArr) is still 64 and
+ * the header stays in the size class it already occupied.
+ *
+ * SCR_ARRAY_VM=0 is an ENV knob, not a build flag, so the A/B is one binary
+ * and carries no code-layout confound.
+ */
+#ifndef SCR_ARR_VM
+#define SCR_ARR_VM 1
+#endif
+#ifndef SCR_ARR_VM_MIN
+#define SCR_ARR_VM_MIN 8192u
+#endif
+#ifndef SCR_ARR_VM_RESERVE
+#define SCR_ARR_VM_RESERVE ((size_t)16 << 20)
+#endif
+
+#if SCR_ARR_VM && !defined(SCR_RC_AUDIT)
+
+#ifdef _WIN32
+#ifndef _WINSOCKAPI_
+#define _WINSOCKAPI_
+#endif
+#include <windows.h>
+#else
+#include <sys/mman.h>
+#include <unistd.h>
+#endif
+
+/* Counted, not assumed: a fallback that fires often would mean the
+ * reservation is sized wrong, and a silent one would hide that. */
+static long long scr_arr_vm_promoted = 0;
+static long long scr_arr_vm_overflow = 0;
+static long long scr_arr_vm_refused = 0;
+
+long long scr_arr_vm_stat(int which) {
+  return which == 0   ? scr_arr_vm_promoted
+         : which == 1 ? scr_arr_vm_overflow
+                      : scr_arr_vm_refused;
+}
+
+#ifndef SCR_ARR_VM_STAT
+/* The counters are always kept; their REPORT does not ship.
+ *
+ * atexit() is an AMBIENT SYMBOL. library-mode builds audit for exactly that
+ * and this call site failed the audit -- "undefined reference to atexit" --
+ * on the first full gate after it landed, in both the C and the LLVM arm. A
+ * diagnostic that nothing in a shipping build will ever ask for must not
+ * drag a CRT registration into every link, and the same reasoning gates the
+ * page-return report in scr_cycle.c. Build with -DSCR_ARR_VM_STAT=1 and the
+ * env knob works; scr_arr_vm_stat() is always available for a harness that
+ * would rather read numbers than parse text. */
+#define SCR_ARR_VM_STAT 0
+#endif
+#if SCR_ARR_VM_STAT
+/* SCR_ARRAY_VM_STAT=1 prints the three counters at exit. It exists because
+ * "both arms printed the same thing" is NOT evidence that the reservation
+ * path ran -- a promotion that never happened also prints the same thing.
+ * The test that asserts correctness has to be able to assert that the code
+ * it is checking was reached, and a zero here is the only thing that can say
+ * it was not. */
+static void scr_arr_vm_report(void) {
+  fprintf(stderr, "[arrvm] promoted=%lld overflow=%lld refused=%lld min=%u reserve=%llu\n",
+          scr_arr_vm_promoted, scr_arr_vm_overflow, scr_arr_vm_refused,
+          (unsigned)SCR_ARR_VM_MIN, (unsigned long long)SCR_ARR_VM_RESERVE);
+  if (scr_arr_vm_promoted == 0) {
+    fprintf(stderr, "[arrvm] NOTHING PROMOTED - no array reached %u bytes, or"
+                    " SCR_ARRAY_VM=0. This is not a measurement of the"
+                    " reservation path.\n", (unsigned)SCR_ARR_VM_MIN);
+  }
+}
+
+static void scr_arr_vm_arm(void) {
+  static int armed = 0;
+  const char *e;
+  if (armed) return;
+  e = getenv("SCR_ARRAY_VM_STAT");
+  if (e == NULL || strtol(e, NULL, 10) == 0) {
+    armed = 1;
+    return;
+  }
+  armed = 1;
+  atexit(scr_arr_vm_report);
+}
+
+#else
+#define scr_arr_vm_arm() ((void)0)
+#endif
+
+static int scr_arr_vm_on(void) {
+  static int cached = -1;
+  if (cached < 0) {
+    const char *e = getenv("SCR_ARRAY_VM");
+    cached = e != NULL ? (strtol(e, NULL, 10) != 0) : 1;
+  }
+  return cached;
+}
+
+static size_t scr_arr_vm_page(void) {
+  static size_t p = 0;
+  if (p == 0) {
+#ifdef _WIN32
+    SYSTEM_INFO si;
+    GetSystemInfo(&si);
+    p = (size_t)si.dwPageSize;
+#else
+    long v = sysconf(_SC_PAGESIZE);
+    p = v > 0 ? (size_t)v : 4096u;
+#endif
+    if (p == 0) p = 4096u;
+  }
+  return p;
+}
+
+/* Reserve without committing. NULL is a refusal, never a trap: every caller
+ * falls back to realloc, so a failure here is a slower array and not a
+ * broken one. */
+static void *scr_arr_vm_reserve(void) {
+#ifdef _WIN32
+  return VirtualAlloc(NULL, SCR_ARR_VM_RESERVE, MEM_RESERVE, PAGE_READWRITE);
+#else
+  void *p = mmap(NULL, SCR_ARR_VM_RESERVE, PROT_NONE,
+                 MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  return p == MAP_FAILED ? NULL : p;
+#endif
+}
+
+/* Commit [0, want) of an existing reservation. Idempotent on already-committed
+ * pages on both platforms, which is what lets the caller compute the range
+ * from `cap` alone and keep no second field. */
+static int scr_arr_vm_commit(void *base, size_t want) {
+  size_t pg = scr_arr_vm_page();
+  size_t n = (want + pg - 1u) & ~(pg - 1u);
+  if (n > SCR_ARR_VM_RESERVE) return 0;
+#ifdef _WIN32
+  return VirtualAlloc(base, n, MEM_COMMIT, PAGE_READWRITE) != NULL;
+#else
+  return mprotect(base, n, PROT_READ | PROT_WRITE) == 0;
+#endif
+}
+
+static void scr_arr_vm_release(void *base) {
+#ifdef _WIN32
+  VirtualFree(base, 0, MEM_RELEASE);
+#else
+  munmap(base, SCR_ARR_VM_RESERVE);
+#endif
+}
+
+#define SCR_ARR_VM_ON() scr_arr_vm_on()
+#define SCR_ARR_VM_RELEASE(a)                     \
+  do {                                            \
+    if ((a)->vmbacked) scr_arr_vm_release((a)->data); \
+    else free((a)->data);                         \
+  } while (0)
+
+#else /* the arena is compiled out: every array is a heap array */
+
+#define SCR_ARR_VM_ON() 0
+#define SCR_ARR_VM_RELEASE(a) free((a)->data)
+
+#endif
+
 /* ── lifecycle ─────────────────────────────────────────────────────────── */
 
 static void scr_arr_grow(ScrArr *a, size_t need) {
@@ -169,10 +395,58 @@ static void scr_arr_grow(ScrArr *a, size_t need) {
     if (cap > SIZE_MAX / 2 / sizeof(uint64_t)) scr_arr_oom();
     cap *= 2;
   }
-  uint64_t *data = realloc(a->data, cap * sizeof(uint64_t));
-  if (!data) scr_arr_oom();
-  a->data = data;
-  a->cap = cap;
+  {
+    size_t want = cap * sizeof(uint64_t);
+#if SCR_ARR_VM && !defined(SCR_RC_AUDIT)
+    if (a->vmbacked) {
+      /* Already reserved: commit the next step. No copy, no free, and the
+       * heap never hears about it. This is the step that used to shred. */
+      if (want <= SCR_ARR_VM_RESERVE && scr_arr_vm_commit(a->data, want)) {
+        a->cap = cap;
+        return;
+      }
+      /* Past the reservation: fall back to the heap, once, by copying out.
+       * Counted -- a fallback that fires often means the reservation is
+       * sized wrong, and a silent one would hide that. */
+      {
+        uint64_t *heap = (uint64_t *)malloc(want);
+        if (!heap) scr_arr_oom();
+        memcpy(heap, a->data, a->len * sizeof(uint64_t));
+        scr_arr_vm_release(a->data);
+        a->vmbacked = 0;
+        a->data = heap;
+        a->cap = cap;
+        scr_arr_vm_overflow++;
+        return;
+      }
+    }
+    if (want >= SCR_ARR_VM_MIN) {
+      void *base;
+      scr_arr_vm_arm();
+      if (!SCR_ARR_VM_ON()) goto heap;
+      base = scr_arr_vm_reserve();
+      if (base != NULL && scr_arr_vm_commit(base, want)) {
+        memcpy(base, a->data, a->len * sizeof(uint64_t));
+        free(a->data);
+        a->data = (uint64_t *)base;
+        a->vmbacked = 1;
+        a->cap = cap;
+        scr_arr_vm_promoted++;
+        return;
+      }
+      if (base != NULL) scr_arr_vm_release(base);
+      /* A refusal is a slower array, never a broken one. */
+      scr_arr_vm_refused++;
+    }
+  heap:;
+#endif
+    {
+      uint64_t *data = (uint64_t *)realloc(a->data, want);
+      if (!data) scr_arr_oom();
+      a->data = data;
+      a->cap = cap;
+    }
+  }
 }
 
 ScrArr *scr_arr_new(ScrElemKind elem, size_t initial_cap) {
@@ -186,6 +460,7 @@ ScrArr *scr_arr_new(ScrElemKind elem, size_t initial_cap) {
   a->elem_release = NULL;
   a->elem_trace = NULL;
   a->data = NULL;
+  a->vmbacked = 0;
   if (initial_cap > 0) scr_arr_grow(a, initial_cap);
 #ifdef SCR_RC_AUDIT
   scr_live_arrays++;
@@ -207,7 +482,7 @@ void scr_arr_trace_v(void *a0, ScrTraceVisit visit, void *ctx) {
 
 static void scr_arr_gc_free(void *a0) {
   ScrArr *a = (ScrArr *)a0;
-  free(a->data);
+  SCR_ARR_VM_RELEASE(a);
 #ifdef SCR_RC_AUDIT
   scr_live_arrays--;
 #endif
@@ -232,6 +507,7 @@ ScrArr *scr_arr_new_ref(void *(*elem_retain)(void *),
   a->elem_release = elem_release;
   a->elem_trace = elem_trace;
   a->data = NULL;
+  a->vmbacked = 0;
   if (initial_cap > 0) scr_arr_grow(a, initial_cap);
 #ifdef SCR_RC_AUDIT
   scr_live_arrays++;
@@ -270,7 +546,7 @@ void scr_arr_release(ScrArr *a) {
     if (a->elem_trace) {
       scr_arr_gc_free(a);
     } else {
-      free(a->data);
+      SCR_ARR_VM_RELEASE(a);
 #ifdef SCR_RC_AUDIT
       scr_live_arrays--;
 #endif

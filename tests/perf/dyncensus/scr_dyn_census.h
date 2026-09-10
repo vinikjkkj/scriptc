@@ -205,6 +205,38 @@ typedef struct {
   /* the same buffers and keys priced at what malloc charges rather than
    * at what the policy asked for (scr_dyncen_phys). */
   long long phys_side, phys_key;
+  /* WHAT BOXING INTO `unknown` COSTS, in bytes rather than in nodes.
+   *
+   * f_staticcopy above already counts the live BOUNDARY COPIES -- the
+   * nodes scr_dyn_mark_static_copy stamped when a statically-typed record
+   * or array crossed into an `unknown` slot and was deep-copied. A count
+   * is not a cost: the whole point of the crossing is that it MATERIALISES
+   * a compiled struct into an ordered property table with one 64-byte
+   * ScrDyn per leaf, recursively, so the interesting quantity is bytes and
+   * the multiplier is whatever the shape happens to be.
+   *
+   * Charged per node, from the same walk that is already visiting it:
+   *   sc_node_phys  the node's own block, scr_pool_bytes(hdr + ScrDyn)
+   *   sc_side_phys  the physical side/key/string bytes THAT NODE added,
+   *                 recovered by diffing the running totals across the
+   *                 switch rather than by threading a condition through
+   *                 every one of the nine places they are accumulated.
+   *
+   * It does NOT include the retained static original that
+   * scr_dyn_origin_mark keeps alive for the copy's lifetime, nor that
+   * table's own slot: neither is a ScrDyn and this walk cannot see them.
+   * The sum here is therefore a FLOOR, and is labelled as one.
+   *
+   * HOW MUCH OF A FLOOR, measured rather than feared. That omission was
+   * described to this lane as a doubling -- every retained box pinning
+   * its source struct as well -- which would have made the figure below
+   * half the honest cost. Ground-truthed on the 1.8.2 artifact it is
+   * 88 origin-mark call sites against 26,469 crossings: 0.33%. The
+   * mechanism is real and it does double the crossings that carry it,
+   * but it is not a term on the typical box, and this floor is very
+   * nearly the whole cost rather than half of it. Nothing in this lane
+   * is scaled by it, and nothing should be. */
+  long long sc_n, sc_node_phys, sc_side_phys;
   /* STR only: the ScrStr behind the pointer. */
   long long str_len_sum, str_len_max, str_phys;
   long long str_hist[SCR_DYNCEN_BUCKETS];
@@ -531,6 +563,16 @@ SCR_DYNCEN_FN void scr_dyncen_report(void) {
           fprintf(f, "\n");
           fprintf(f, "DYNCEN-%s-PHYS %u side=%lld key=%lld\n", tag, k,
                   r->phys_side, r->phys_key);
+          /* A SEPARATE LINE, not three more columns on the row above: the
+           * existing reader parses that row positionally and widening it
+           * would break every report already written against it. `floor`
+           * is in the name because the retained static original and the
+           * origin table's slot are not ScrDyn and this walk cannot see
+           * them -- see the field comment in this file. */
+          if (r->sc_n)
+            fprintf(f, "DYNCEN-%s-BOX %u n=%lld nodePhys=%lld sidePhys=%lld floor=%lld\n",
+                    tag, k, r->sc_n, r->sc_node_phys, r->sc_side_phys,
+                    r->sc_node_phys + r->sc_side_phys);
           fprintf(f, "DYNCEN-%s-CAP %u", tag, k);
           for (b = 0; b < SCR_DYNCEN_CAPS; b++)
             fprintf(f, " %lld/%lld/%lld", r->cap_hist[b], r->cap_cap_sum[b],

@@ -1,0 +1,40 @@
+ms,phase
+0,ARM CHUNKS=8
+0,ARM CONVS=400
+0,ARM MSGS=6
+0,ARM TEXTLEN=300
+0,ARM ROUNDS=1
+0,ARM IDLE_S=60
+1788722274766,client-spawn
+1788722275124,client-registered-login
+1788722275138,pair-success-sent
+1788722275165,client-registered-login
+1788722275168,login-pipeline
+1788722275373,prekeys-uploaded
+1788722275562,prekeys-uploaded
+1788722295372,PRESYNC-BASELINE
+1788722295373,ROUND-1-START
+1788722295446,chunk-sent-1
+1788722295505,chunk-sent-2
+1788722295560,chunk-sent-3
+1788722295622,chunk-sent-4
+1788722295684,chunk-sent-5
+1788722295733,chunk-sent-6
+1788722295796,chunk-sent-7
+1788722295862,chunk-sent-8
+1788722295863,all-chunks-sent-r1
+1788722296036,chunk-decoded-1
+1788722297448,chunk-decoded-2
+1788722298218,chunk-decoded-3
+1788722299040,chunk-decoded-4
+1788722299814,chunk-decoded-5
+1788722300522,chunk-decoded-6
+1788722301307,chunk-decoded-7
+1788722302213,chunk-decoded-8
+1788722302905,SYNC-DONE-r1
+1788722347911,SETTLED-r1
+1788722377917,IDLE-30s
+1788722407927,IDLE-60s
+1788722407928,END
+1788722407985,shutdown-requested 200 {"ok":true,"result":{"stopping":true,"code":0,"afterMs":250}}
+1788722408372,clean-exit code=0
