@@ -108,7 +108,8 @@ static struct {
   unsigned long queued;      /* linked onto the worklist */
   unsigned long requeued;    /* queue attempt on an already-queued map */
   unsigned long unlinked;    /* freed while queued */
-  unsigned long passes;      /* scr_map_idle_shrink calls that did work */
+  unsigned long turns;       /* scr_map_idle_shrink calls, work or not */
+  unsigned long passes;      /* ... of those, the ones that did work */
   unsigned long visited;     /* maps taken off the worklist */
   unsigned long skip_iter;   /* skipped: iteration in flight (iter_depth) */
   unsigned long skip_small;  /* skipped: ecap already at or below the floor */
@@ -125,6 +126,7 @@ static ScrMap *scr_map_sh_head = NULL;
 
 #if SCR_MAP_SHRINK_STAT
 static void scr_map_shrink_arm(void);
+static void scr_map_shrink_tick(void);
 #endif
 
 static bool scr_map_shrink_on(void) {
@@ -345,12 +347,22 @@ static bool scr_map_shrink_one(ScrMap *m) {
  * lost. Runs BEFORE scr_collect_cycles_idle's pace gate: this is not a
  * collection and must not be paced by the root count. */
 void scr_map_idle_shrink(void) {
+  scr_map_sh.turns++;
+#if SCR_MAP_SHRINK_STAT
+  /* THE REPORTER RUNS BEFORE THE EARLY RETURNS, and that is the point.
+   * It used to sit below them, so it could only speak on a turn that
+   * already had work -- meaning the NEVER RAN state it exists to
+   * distinguish could never be printed, and a workload where no map goes
+   * sparse produced NO FILE AT ALL. That is indistinguishable from a
+   * broken instrument, and it cost a 40-minute zapo run to find. A
+   * reporter downstream of the condition it reports on is not an
+   * instrument. */
+  scr_map_shrink_arm();
+  scr_map_shrink_tick();
+#endif
   if (!scr_map_shrink_on()) return;
   if (scr_map_sh_head == NULL) return;
   scr_map_sh.passes++;
-#if SCR_MAP_SHRINK_STAT
-  scr_map_shrink_arm();
-#endif
   ScrMap *m = scr_map_sh_head;
   scr_map_sh_head = NULL;
   while (m != NULL) {
@@ -386,8 +398,10 @@ void scr_map_shrink_report(const char *when) {
   if (!scr_map_shrink_on()) {
     fprintf(f, "DISABLED -- SCR_MAP_SHRINK=0, the pass was compiled in and never armed\n");
   } else if (scr_map_sh.passes == 0) {
-    fprintf(f, "NEVER RAN -- no pass executed (queued=%lu). A zero byte delta here "
-               "says nothing about the mechanism.\n", scr_map_sh.queued);
+    fprintf(f, "NEVER RAN -- %lu idle turns, no pass did work (queued=%lu). "
+               "Compiled in and armed; nothing became a shrink candidate. "
+               "A zero byte delta says nothing about the mechanism.\n",
+            scr_map_sh.turns, scr_map_sh.queued);
   } else if (scr_map_sh.shrunk == 0) {
     fprintf(f, "RAN AND NOTHING SHRANK -- passes=%lu visited=%lu "
                "skip_iter=%lu skip_small=%lu skip_dense=%lu failed=%lu\n",
@@ -407,6 +421,27 @@ void scr_map_shrink_report(const char *when) {
   if (f != stderr) fclose(f);
 }
 static void scr_map_shrink_atexit(void) { scr_map_shrink_report("atexit"); }
+
+/* PERIODIC REPORT, and it is not a nicety: zapo-rest leaves through _Exit,
+ * which skips atexit, so an exit-only report produces NO FILE AT ALL on the
+ * one target that matters -- silently. That already cost a run once, and
+ * SCR_PAGECEN_EVERY=1 is the same workaround for the same reason.
+ * SCR_MAP_SHRINK_EVERY=N reports every N passes that did work; the LAST
+ * line written is then the answer, whether or not exit handlers run. */
+static void scr_map_shrink_tick(void) {
+  static long every = -1;
+  if (every < 0) {
+    const char *e = getenv("SCR_MAP_SHRINK_EVERY");
+    every = (e != NULL) ? strtol(e, NULL, 10) : 0;
+    if (every < 0) every = 0;
+  }
+  if (every == 0) return;
+  /* Keyed on TURNS, not passes: passes can legitimately stay 0 for a whole
+   * run, and 0 % n == 0 would then report on every idle turn rather than
+   * never. */
+  if ((scr_map_sh.turns % (unsigned long)every) != 0) return;
+  scr_map_shrink_report("every");
+}
 static void scr_map_shrink_arm(void) {
   static bool armed = false;
   if (armed) return;

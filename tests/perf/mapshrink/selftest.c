@@ -94,6 +94,29 @@ static ScrMap *build(size_t n) {
 int main(void) {
   size_t N = 4000, KEEP = 50;
 
+  /* ---- 8: CAN THE INSTRUMENT REPORT ITS OWN SILENCE? (own process) ----
+   * The first zapo run produced NO FILE AT ALL, because the periodic
+   * reporter sat below scr_map_idle_shrink's early returns and could only
+   * speak on a turn that already had work. A missing file and a workload
+   * where nothing goes sparse were therefore the same observation. This
+   * arm drives idle turns with an EMPTY worklist and requires the NEVER
+   * RAN line to be written -- the cheap proof that emission works, before
+   * another 40-minute run is spent on it. */
+  {
+    const char *nr = getenv("SCR_MAP_SELFTEST_NEVERRAN");
+    if (nr != NULL && nr[0] == '1') {
+      printf("[8] instrument must report its own silence\n");
+      reset_counters();
+      ScrMap *q = build(200);            /* dense: never a candidate */
+      for (int i = 0; i < 5; i++) scr_map_idle_shrink();
+      ok(scr_map_sh.turns == 5, "idle turns counted with an empty worklist");
+      ok(scr_map_sh.passes == 0, "no pass did work");
+      scr_map_release(q);
+      printf("\n%d checks, %d failures\n", checks, failures);
+      return failures == 0 ? 0 : 1;
+    }
+  }
+
   /* ---- 5: the knob, in its own process ---- */
   {
     const char *env = getenv("SCR_MAP_SHRINK");
