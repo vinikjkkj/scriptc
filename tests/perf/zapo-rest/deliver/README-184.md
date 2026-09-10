@@ -54,10 +54,11 @@ ballpark, and the difference is not a regression this build introduced.**
 
 This breakdown comes from an **instrumented build**, because only one can
 itemise a heap. Its own settled figure is 84.59 MB against the shipping
-build's 85.25 — within 0.8%, which is why the shares below are meaningful
-for the binary you actually run. They are shares of that arm's own 71.29 MB
-of retention, against the 72.12 MB measured on the shipping build: the two
-agree to about 1%, and the four rows account for 97% of either.
+build's 85.25 — within 0.8% — and its retention of 71.29 MB against the
+shipping build's 72.12 MB, within about 1%. That agreement is why the
+breakdown transfers to the binary you actually run. The shares are taken
+against the **72.12 MB** figure quoted everywhere else in this file, and the
+four rows account for 97% of it.
 
 | | MB | share |
 |---|---|---|
@@ -97,7 +98,7 @@ to the allocation path than the one costed here. The defect is real — an
 arena that cannot free a chunk *even in principle* is a bug — but the payoff
 is not where we expected it.
 
-**Runtime total: −2.05 MB, which is 2.9% of the 72.12 MB you are seeing.**
+**Runtime total: −2.05 MB, which is 2.8% of the 72.12 MB you are seeing.**
 
 One of them did convert to near zero, and this file says so. A small true
 number is worth more than a large one we have already refuted internally.
@@ -184,13 +185,23 @@ inside our noise floor.** Those are the numbers to beat.
 ## 6. What this build will and will not do
 
 **It will not return to idle after a sync.** Realistically the plateau lands
-near **83 MB** without the scheduling change in §3 (85.25 now, less the
-2.05 MB above), and near **50 MB** with it — that change removes roughly
-33 MB of fragmentation.
+near **83 MB** without the scheduling change in §3 (85.25 settled, less the
+2.05 MB above), and near **50 MB** with it — that change takes the 36.51 MB
+of fragmentation down to about 3.6 MB, so roughly 33 MB comes off 83.
 
 **Its idle floor is 13.14 MB** private working set (31.21 MB total),
 measured two independent ways that agree to 0.02 MB, and flat from 15 s to
 5 minutes after login. Your ~10 MB and our 13 MB are the same ballpark.
+
+**Worth saying plainly, because it shaped this report twice.** A draft of
+this file told you that the service does not idle at 10 MB and that you must
+be remembering a different program. That would have been **wrong** — not
+merely unproven. It came from the total-working-set column, which counts the
+executable's image and which you were never reading, and from an idle figure
+extracted across a boundary bug. Both times tonight that one of your own
+observations appeared to conflict with a measurement of ours, **your
+observation was the sound one.** We have taken that as the default reading
+rather than the exception.
 
 What the total column adds is the executable's mapped image: it is 29.8 MB
 on disk and about **18 MB of it is resident**, shared and file-backed, which
