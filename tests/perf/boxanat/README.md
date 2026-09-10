@@ -756,6 +756,66 @@ one's.
 **Reported as a small true figure rather than a large declared one.** 2,425
 ships as a cap; 14,868 / 951,552 B is the population it is capped against.
 
+## MEASURED: a chunk list on the string arena would recover ZERO
+
+`cycstat` on the LLVM shipping-lane `app182` binary, `memrig.mts` at
+`CHUNKS=8 CONVS=400 MSGS=6`, unserialised, clean exit 0. **One run, and it
+carries its own control** — the cycle arena is instrumented by the same header
+in the same process:
+
+```
+arena     chunks=671 freed=556 held=115 peakheld=317 carved=527850
+          listhit=46,442,561 listgive=46,897,347 callocfallback=60829
+strarena  chunks=49  carved=75,645
+          listhit=0  listgive=0  mallocfallback=0
+```
+
+**The cycle arena's chunk list works**: 671 taken, **556 freed**, 115 held —
+83% returned, and its per-class freelists moved 46.9 million blocks.
+
+**The string arena's freelist moved zero.** `listgive=0` — not "rarely", not
+"few": **no block has ever been returned to it.** So:
+
+> A `used` counter decremented in `scr_str_ar_give` would **never decrement**.
+> No chunk can reach `used == 0`. **The chunk list recovers nothing** — it is
+> inert by measurement, not by placement.
+
+### Why, and it is one line in the release path
+
+`scr_str_release` tries the size-class pool **first**:
+
+```c
+if (scr_pool_give(&scr_str_blocks, s, sizeof(ScrStr) + s->cap + 1)) return;
+/* The pool refused: ... the arena's own list catches it first. */
+if (scr_str_arena_on()) { ... scr_str_ar_give(s, r); return; }
+```
+
+`scr_pool_give` refuses only past its budget/depth. On this workload it
+**never refused once in 75,645 carves**, so `scr_str_ar_give` is unreachable
+in practice. The string arena is a bump allocator that feeds the pool and
+never gets anything back; the blocks live on `scr_str_blocks`' freelist, which
+is a different owner with a different lifetime.
+
+### What this changes
+
+The brief's fix — *"give the string arena the chunk list the cycle arena
+already has"* — is correct about the defect and **cannot pay on this
+workload**. `k` really is unrecoverable after one carve, and an arena that
+cannot free a chunk even in principle really is a bug. But the reclamation it
+would enable has **no input**.
+
+Recovering the **49 chunks = 3.06 MiB** needs the blocks to come back, which
+means changing where freed strings go — routing arena-carved blocks to the
+arena rather than the pool, or making the pool itself return them. That is a
+behaviour change to the allocation path, not a bookkeeping addition, and it
+collides directly with the brief's own second hazard: *"do not let the chunk
+list change quietly alter which sizes reach the arena."*
+
+**Predicted and honoured.** This README already said the recovery might be far
+under 3 MB because the cycle arena has the machinery and still holds chunks.
+The measurement says worse than that and for a different reason: the cycle
+arena's list is *working* (83% returned); the string arena's is *unreachable*.
+
 ## The cycle trap: a third divergence, and it is a hard abort
 
 `cyc1.ts` / `cyc2.ts`, recorded in `cyc-baseline.txt`. A cyclic value crossing
