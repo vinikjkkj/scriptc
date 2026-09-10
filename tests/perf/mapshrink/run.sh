@@ -83,5 +83,21 @@ if ! grep -q "undefined symbol: scr_map" "$dep/ctl.log"; then
 fi
 echo "  ok -- detector proven: it flags a deliberate hard edge"
 
+echo "== arm E: the instrument must be able to report its own SILENCE =="
+# The failure this arm exists for: the first zapo run produced NO FILE AT
+# ALL, because the periodic reporter sat BELOW scr_map_idle_shrink early
+# returns and could therefore only speak on a turn that already did work.
+# "No map went sparse" and "the instrument is broken" were then the same
+# observation. A reporter downstream of the condition it reports on is not
+# an instrument.
+nr="$out/never"
+mkdir -p "$nr"
+rm -f "$nr/report.txt"
+env SCR_MAP_SELFTEST_NEVERRAN=1 SCR_MAP_SHRINK_EVERY=1 SCR_MAP_SHRINK_OUT="$nr/report.txt" "$out/st.exe" > "$nr/out.txt" 2>&1 || { echo "arm E: selftest failed"; cat "$nr/out.txt"; exit 1; }
+test -f "$nr/report.txt" || { echo "FAILED: no report written on a silent run"; exit 1; }
+grep -q "NEVER RAN" "$nr/report.txt" || { echo "FAILED: report exists but does not carry NEVER RAN"; cat "$nr/report.txt"; exit 1; }
+if grep -q "SHRANK" "$nr/report.txt"; then echo "FAILED: a silent run claimed SHRANK"; exit 1; fi
+echo "  ok -- silence is reported: $(grep -c "NEVER RAN" "$nr/report.txt") line(s)"
+
 echo
 echo "ALL ARMS PASSED"
