@@ -1,5 +1,15 @@
 # Lifetime segregation of the sync burst — design
 
+> **ARM: the source read here is `app/`, zapo-js 1.6.2 -- retired.** The user
+> has instructed that nothing be run on the old version; 1.8.2 only. The two
+> line references below (`history-sync.ts:275` and the 1,344 neighbourhood)
+> are 1.6.2 source, and 1.6.2 does not share 1.8.2's history-sync
+> architecture, so the sites they name may not exist on the live arm. **The
+> design argument is version-independent -- segregating a burst's allocations
+> by lifetime is a property of the allocator, not of zapo -- but every site,
+> line number and figure attributed to zapo here must be re-derived against
+> `app182/` before it is acted on.**
+
 Forward direction: can the burst's allocations be made to land together?
 (`memcensus` works the residue backwards to a site; this works placement
 forwards. Convergence is the cross-check.)

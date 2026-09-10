@@ -56,31 +56,50 @@ Controls live in `tests/harness/cycle-arena.test.ts`.
 
 ### On the zapo-rest workload
 
-The instrument is workload-agnostic; the reading that matters is the settled
-state of a WhatsApp history sync, which is `tests/perf/zapo-rest` and its rig.
+The instrument is workload-agnostic -- it walks whatever chunks the arena holds
+and knows nothing about the program -- and that much is true on any arm. The
+reading that matters is the settled state of a WhatsApp history sync, which is
+`tests/perf/zapo-rest` and its rig.
+
+**Build `app182/` (zapo-js 1.8.2).** By the user's instruction nothing is to be
+run on the old version, so the `app/` (1.6.2) arm is retired; see the banner in
+`tests/perf/zapo-rest/README.md`. Rebuild `dist` first -- the note there says
+why a green gate cannot catch a stale one.
 
 ```sh
-cd <repo>/tests/perf/zapo-rest/app && npm install
+cd <repo>/tests/perf/zapo-rest/app182 && npm install
+cd <repo> && pnpm build
 cd <repo> && node packages/cli/dist/main.js build \
-  tests/perf/zapo-rest/app/zapo-rest.ts -o <out>/zapo-rest-pc.exe --provenance-sources
+  tests/perf/zapo-rest/app182/zapo-rest.ts -o <out-182>/zapo-rest-pc.exe --provenance-sources
 
 # the rig; see harness/memrig.mts for ZAPO_FAKE_SERVER and the launch-cwd rule
-node --import tsx tests/perf/zapo-rest/harness/memrig.mts <out>/zapo-rest-pc.exe pc1 \
+node --import tsx tests/perf/zapo-rest/harness/memrig.mts <out-182>/zapo-rest-pc.exe pc1 \
   CHUNKS=8 CONVS=400 MSGS=6 TEXTLEN=300 ROUNDS=1 IDLE_S=60 \
   SCR_PAGECEN_OUT=<runroot>/pc1.pagecen.txt
 ```
 
-Those are the dials the arena-reclamation figures were taken on (1,053 → 160
-chunks held, 163.39 → 104.50 MiB settled), so a census taken with them is
-directly comparable to `[cycstat] arena … held=`.
+Those are the dials the arena-reclamation figures were taken on, so a census
+taken with them is directly comparable to `[cycstat] arena … held=`. **The dial
+set is the comparability claim, and it carries across arms. The figures do
+not.** The numbers this section used to quote (1,053 → 160 chunks held,
+163.39 → 104.50 MiB settled) were taken through the `app/` 1.6.2 recipe that
+stood here, and the two arms do not share a history-sync architecture --
+whole-blob `downloadHistorySyncBlob` against `streamProtoFields`. They are
+**retired**: do not quote them as zapo numbers, and re-measure on `app182/`
+before this section states any.
 
 **The bound this route is working inside, before any reading.** cycstat on that
-workload reports 161 chunks held at exit — 10.06 MiB against a 104.50 MiB
+workload reported 161 chunks held at exit — 10.06 MiB against a 104.50 MiB
 settled working set. Every chunk's first page carries the chunk header and can
-never be returned, which is another 0.63 MiB off. So the whole route cannot
-recover more than **9.44 MiB, 9.0% of settled**, however sparse the chunks turn
-out to be; the census says how much of that 9.44 MiB is actually free. Read any
-result against that ceiling rather than against the heap.
+never be returned, which is another 0.63 MiB off. So the whole route could not
+recover more than **9.44 MiB, 9.0% of settled**, however sparse the chunks
+turned out to be; the census says how much of that is actually free.
+
+*(All four of those numbers are the retired 1.6.2 arm, and they go with the
+figures above.* **What carries across arms is the SHAPE of the bound, not its
+value:** *the ceiling is chunks-held minus one unreturnable header page per
+chunk, and it is always a fraction of the settled set rather than of the heap.
+Recompute it from a cycstat reading on `app182/` before quoting a ceiling.)*
 
 ## The probe
 

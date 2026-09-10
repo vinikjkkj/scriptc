@@ -5,6 +5,14 @@ identical live bytes it returned **72.09 MiB** when the garbage was contiguous
 and **3.39 MiB** when the same garbage was scattered. Nothing about the
 allocator needs replacing; what defeats it is where the survivors sit.
 
+**Those two numbers are version-independent and stay.** They come from
+`poolsim.c` / `placement.c` -- standalone C against the CRT heap, with no zapo
+in the process at all -- so the zapo-arm retirement below does not reach them.
+The same is true of `../pagecensus/vmprobe.c`'s platform table and of the
+census self-tests. **Every zapo figure in this directory is a different
+matter: it was measured on `app/` (1.6.2), which is retired.** See the banner
+at the top of `RESULTS.md`.
+
 | file | question |
 |---|---|
 | `placement.c` | **what a mechanism is worth**, as a curve over the survivor fraction |
@@ -66,8 +74,17 @@ the same rate in both runs cancels to zero and drops out.
 
 ### The build and the two runs
 
+> **RETIRED RECIPE (1.6.2).** By the user's instruction nothing is to be run on
+> the old zapo version -- 1.8.2 only. The entry below is `app/`, which is
+> zapo-js 1.6.2, so **do not run this**; it is kept because the readings in
+> `RESULTS.md` were taken through it and a reader has to be able to see how.
+> To take this measurement on the live arm, swap both `app/` for `app182/` and
+> use a separate `-o` directory (see `../zapo-rest/app182/README.md`), and
+> `pnpm build` first -- `../zapo-rest/README.md` says why a green gate cannot
+> catch a stale `dist`.
+
 ```sh
-cd <repo>/tests/perf/zapo-rest/app && npm install
+cd <repo>/tests/perf/zapo-rest/app && npm install   # RETIRED -- 1.6.2
 cd <repo>
 export SCRIPTC_PROF_CFLAGS="-include <repo>/tests/perf/prof/scr_prof.h -DSCR_PROF_ALLOC -DSCR_PROF_LIVE"
 node packages/cli/dist/main.js build tests/perf/zapo-rest/app/zapo-rest.ts \
@@ -90,20 +107,34 @@ node tests/perf/placement/profdiff.mjs <runroot>/ctl.prof.txt <runroot>/bst.prof
 "nothing survives the sync" — the most wrong answer this tool could give.
 `profdiff.mjs` refuses by name instead.
 
-**Use `app/`, not `app182/`, and the reason is not that it is smaller.** The
-two arms have *different history-sync architectures*, verified from the
+**REVERSED: use `app182/`, not `app/`.** This section used to argue for `app/`
+and the argument was internally sound; it is overridden by the user, who has
+instructed that nothing be run on the old version. The reasoning is kept
+because it says exactly what the switch costs.
+
+The two arms have *different history-sync architectures*, verified from the
 emitted IR: `app182` (zapo-js 1.8.2) contains `streamProtoFields` /
 `ProtoStreamReader` and no `downloadHistorySyncBlob`; `app` (1.6.2) contains
 `downloadHistorySyncBlob` twelve times and no streaming reader. 1.6.2
 downloads the whole blob, inflates it whole, and decodes the entire object
-graph at once. Every settled figure this objective rests on — 163.39 → 104.50
-MiB, and the 105.14 MiB the heap census itemised — was taken on `app/`, so
-that is the arm whose allocation profile explains them.
+graph at once.
+
+Every settled figure this objective used to rest on — 163.39 → 104.50 MiB, and
+the 105.14 MiB the heap census itemised — was taken on `app/`. **Those figures
+are retired with the arm**, and because the architectures differ they are not
+stale readings of the same program: they cannot be adjusted, only re-measured.
+Everything downstream that was derived from them — the ceilings, the
+percentages of settled, the delivery A/B in `RESULTS.md` — is superseded and
+labelled there. Nothing in this file may be quoted as a current zapo number
+unless it names 1.8.2.
 
 ## What is already known from reading, before any profiler run
 
 Established from the runtime source and the emitted IR of a prior `app/`
-build; each is a claim a profiler run can confirm or refute.
+(1.6.2, retired) build; each is a claim a profiler run can confirm or refute.
+**Re-derive these against `app182/` before relying on them:** they are readings
+of source and IR, so they are cheap to redo, but they are readings of the
+*other* program.
 
 * **The decode path is statically typed end to end.** `streamProtoFields`,
   `settleHistorySyncChunk` and `consumeHistorySyncStream` allocate arrays,
