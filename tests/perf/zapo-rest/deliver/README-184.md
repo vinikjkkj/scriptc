@@ -16,6 +16,10 @@ the instrumented builds that can itemise memory are not the binary you run,
 and blending the two is how a number ends up being quoted for something it
 never measured.
 
+Throughout this file **MB means 1,048,576 bytes**, which is the same unit
+Windows Task Manager displays, so the figures here and the ones on your
+screen are directly comparable.
+
 Numbers are **private working set** unless stated. That is the column Task
 Manager's Processes tab shows under "Memory", and it is the one your
 complaint was phrased in. The *total* working set runs about 18 MB higher
@@ -71,10 +75,14 @@ four rows account for 97% of it.
 
 ## 2. What this build changes
 
-**Cycle-arena page return: −2.05 MB** of settled private working set
-(−2.56%), measured against the shared floor with rotation and mode
-matching. That is **3.4× the 0.75% floor**, and every one of five
-repetitions was negative — −2.10, −2.26, −1.92, −1.97, −2.00, spread
+**Cycle-arena page return: −2.05 MB** of settled private working set,
+measured against the shared floor with rotation and mode matching. That is
+**−2.56% of the settled plateau** and **2.8% of the 72.12 MB of retention** —
+two different denominators for one measurement, both given so neither is
+mistaken for the other.
+
+The change clears our measurement noise by **3.4×** (the floor on that metric
+is 0.75%), and every one of five repetitions was negative — −2.10, −2.26, −1.92, −1.97, −2.00, spread
 0.34 MB. Peak working set −0.79 MB (3.1× its floor). Private commit is a
 **draw, by design**: the mechanism returns resident pages and leaves the
 commit charge untouched. **CPU +0.02 ms — 0.00%, against a 3.79% floor.**
