@@ -34,6 +34,13 @@
  * this test builds -- so each stub ABORTS rather than returning a
  * plausible value. A stub that quietly answers would let the test pass
  * through a path it was never meant to touch. */
+/* scr_cycle.c owns this pointer; this test does not link scr_cycle.c, so it
+ * supplies the definition and then ASSERTS that scr_map.c installs itself
+ * into it. That edge is why five gate builds went red: a direct call from
+ * the collector to the map is an undefined symbol in every TU that links
+ * scr_cycle.c without scr_map.c. */
+void (*scr_cyc_idle_hook)(void) = NULL;
+
 static void stub_hit(const char *who) {
   printf("  FAIL  unexpected call into stub: %s\n", who);
   exit(2);
@@ -112,12 +119,16 @@ int main(void) {
   /* ---- 1 + 2: a sparse map shrinks, and the survivors survive ---- */
   printf("[1] sparse map shrinks\n");
   reset_counters();
+  ok(scr_cyc_idle_hook == NULL, "hook is NULL before any map goes sparse");
   ScrMap *m = build(N);
+  ok(scr_cyc_idle_hook == NULL, "building a dense map installs nothing");
   size_t ecap0 = m->ecap, nb0 = m->nbuckets;
   ok(ecap0 >= N, "built: ecap >= N");
   for (size_t i = KEEP; i < N; i++) scr_map_delete_f64(m, (double)i);
   ok(m->nlive == KEEP, "deleted down to KEEP live");
   ok(scr_map_sh.queued >= 1, "delete queued the map");
+  ok(scr_cyc_idle_hook == scr_map_idle_shrink,
+     "the collector hook was installed by the first queue");
   ok(m->sh_queued == 1, "map carries the queued flag");
 
   scr_map_idle_shrink();

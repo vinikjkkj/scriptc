@@ -1517,12 +1517,28 @@ static size_t scr_cyc_idle_pace(void) {
   return cached;
 }
 
+/* Between-turns work that is NOT collection, registered by whoever owns it.
+ *
+ * A DIRECT CALL TO scr_map_idle_shrink HERE WAS A LINK ERROR, and the
+ * reason is worth keeping: scr_cycle.c is linked by unit test TUs that do
+ * NOT link scr_map.c (packages/runtime/test/{intern,number,tonumber}), so a
+ * hard edge from the collector to the map broke five builds that had never
+ * depended on maps. The full suite is the only thing that exercises those
+ * link lines -- a single-file self-test cannot see them.
+ *
+ * So the collector owns a pointer and calls through it, the same shape as
+ * the pagecensus walk hook. NO CONSTRUCTOR is involved: scr_map.c installs
+ * this at the moment the first map becomes a shrink candidate, which
+ * removes the init-order question entirely. Before that moment there is
+ * nothing to shrink, so NULL is not merely safe here, it is correct. */
+void (*scr_cyc_idle_hook)(void) = NULL;
+
 void scr_collect_cycles_idle(void) {
-  /* Give sparse map tables back FIRST, before the pace gate below can
-   * return early. This is not a collection: pacing it by the cycle-root
-   * count would tie "does memory come back" to an unrelated threshold,
-   * and a burst that leaves sparse maps need not leave cycle roots. */
-  scr_map_idle_shrink();
+  /* Runs FIRST, before the pace gate below can return early. This is not a
+   * collection: pacing it by the cycle-root count would tie "does memory
+   * come back" to an unrelated threshold, and a burst that leaves sparse
+   * maps need not leave cycle roots. */
+  if (scr_cyc_idle_hook != NULL) scr_cyc_idle_hook();
 
   size_t pace = scr_cyc_idle_pace();
   if (pace != 0) {
