@@ -143,6 +143,13 @@ SCR_PC_SHARED unsigned long long scr_pc_bad_used = 0;  /* selftest mismatch */
 SCR_PC_SHARED unsigned long long scr_pc_bad_slot = 0;  /* free entry off grid */
 SCR_PC_SHARED unsigned long long scr_pc_bad_loop = 0;  /* free list too long */
 SCR_PC_SHARED int scr_pc_registered = 0;
+/* Set once by scr_cycle.c, which owns the chunk walk: this header cannot see
+ * ScrCycChunk and must be called back into. NULL means the arena side never
+ * armed, which the report says by name rather than printing an empty walk. */
+SCR_PC_SHARED void (*scr_pc_walk_fn)(const char *) = NULL;
+/* Idempotent guard for the EXIT report only. The periodic report under
+ * SCR_PAGECEN_EVERY is deliberately not guarded -- it is meant to repeat. */
+SCR_PC_SHARED int scr_pc_reported = 0;
 SCR_PC_SHARED int scr_pc_every = -1;
 SCR_PC_SHARED FILE *scr_pc_file = NULL;
 
@@ -303,11 +310,40 @@ SCR_PC_FN void scr_pc_note_chunk(const void *basev, const void *rawv,
  * truncated) later. */
 #define SCR_PC_SYNTH_GRAN 256u
 #define SCR_PC_SYNTH_STRIDE 64u
-SCR_PC_SHARED unsigned scr_pc_synth_want[3] = {0, 0, 0};
-SCR_PC_SHARED unsigned scr_pc_synth_got[3] = {0, 0, 0};
+SCR_PC_SHARED unsigned scr_pc_synth_want[5] = {0, 0, 0, 0, 0};
+SCR_PC_SHARED unsigned scr_pc_synth_got[5] = {0, 0, 0, 0, 0};
 SCR_PC_SHARED int scr_pc_synth_ran = 0;
 
-SCR_PC_FN void scr_pc_synth_case(int idx, long keep, unsigned want) {
+/* keep_mode: 0 none live, 1 one slot live (arg = slot), 2 all live,
+ * 3 CLUSTERED (arg survivors packed into one page), 4 SCATTERED (arg
+ * survivors, one on each of pages 1..arg). Modes 3 and 4 exist to prove the
+ * census can tell those two apart at the SAME live count, which is the whole
+ * property a ceiling depends on. */
+SCR_PC_FN int scr_pc_synth_live(int mode, long arg, unsigned long i) {
+  switch (mode) {
+    case 0: return 0;
+    case 1: return (long)i == arg;
+    case 2: return 1;
+    /* The slot grid starts at the header zone, so the first slot lying at
+     * the start of page p is (p*PAGE - GRAN)/STRIDE, NOT p*per_page. With
+     * GRAN 256 and STRIDE 64 that is 64p-4, and its offset is exactly
+     * p*PAGE -- which is what makes both cases below land where they claim. */
+    case 3: {
+      unsigned long first = (3ul * SCR_PC_PAGE - SCR_PC_SYNTH_GRAN) / SCR_PC_SYNTH_STRIDE;
+      return i >= first && i < first + (unsigned long)arg;
+    }
+    case 4: {
+      unsigned long p;
+      for (p = 1ul; p <= (unsigned long)arg && p < SCR_PC_PPC; p++) {
+        if (i == (p * SCR_PC_PAGE - SCR_PC_SYNTH_GRAN) / SCR_PC_SYNTH_STRIDE) return 1;
+      }
+      return 0;
+    }
+    default: return 0;
+  }
+}
+
+SCR_PC_FN void scr_pc_synth_case(int idx, int mode, long arg, unsigned want) {
   static unsigned char buf[2u * SCR_PC_CHUNK];
   unsigned char *base = (unsigned char *)(void *)(((uintptr_t)(void *)buf +
                                                    (SCR_PC_CHUNK - 1u)) &
@@ -319,14 +355,15 @@ SCR_PC_FN void scr_pc_synth_case(int idx, long keep, unsigned want) {
   unsigned long i, flen = 0;
   /* keep < 0 means "no slot is live" and keep >= nslots means "every slot
    * is live"; otherwise exactly slot `keep` stays off the free list. */
-  for (i = 0; i < nslots; i++) {
-    unsigned char *b;
-    if (keep >= (long)nslots) break;
-    if ((long)i == keep) continue;
-    b = cs + i * SCR_PC_SYNTH_STRIDE;
-    memcpy(b, &head, sizeof(void *));
-    head = (void *)b;
-    flen++;
+  {
+    for (i = 0; i < nslots; i++) {
+      unsigned char *b;
+      if (scr_pc_synth_live(mode, arg, i)) continue;
+      b = cs + i * SCR_PC_SYNTH_STRIDE;
+      memcpy(b, &head, sizeof(void *));
+      head = (void *)b;
+      flen++;
+    }
   }
   scr_pc_reset();
   scr_pc_note_chunk(base, base, base + SCR_PC_CHUNK, SCR_PC_SYNTH_GRAN,
@@ -343,14 +380,22 @@ SCR_PC_FN void scr_pc_synth_case(int idx, long keep, unsigned want) {
 }
 
 SCR_PC_FN void scr_pc_synth(void) {
-  unsigned long nslots = (SCR_PC_CHUNK - SCR_PC_SYNTH_GRAN) / SCR_PC_SYNTH_STRIDE;
   /* The survivor's slot for the `onelive` case: the first slot whose offset
    * from the chunk base lands on page 3, spelled as arithmetic so the
    * expected 14 is derived and not asserted. */
   long k = (long)((3u * SCR_PC_PAGE - SCR_PC_SYNTH_GRAN) / SCR_PC_SYNTH_STRIDE);
-  scr_pc_synth_case(0, -1, SCR_PC_PPC - 1u);
-  scr_pc_synth_case(1, k, SCR_PC_PPC - 2u);
-  scr_pc_synth_case(2, (long)nslots, 0u);
+  long n = (long)(SCR_PC_PPC - 1u); /* 15 survivors, both ways */
+  scr_pc_synth_case(0, 0, 0, SCR_PC_PPC - 1u);
+  scr_pc_synth_case(1, 1, k, SCR_PC_PPC - 2u);
+  scr_pc_synth_case(2, 2, 0, 0u);
+  /* THE DISCRIMINATION PAIR, and it is the case the whole instrument exists
+   * to get right. Fifteen survivors packed into ONE page leave fourteen
+   * pages returnable; the SAME fifteen survivors, one per page, leave NONE.
+   * Identical live count, identical live bytes, answers 14 and 0. A census
+   * that reports the same number for both is measuring occupancy and not
+   * placement, and placement is the entire question. */
+  scr_pc_synth_case(3, 3, n, SCR_PC_PPC - 2u);
+  scr_pc_synth_case(4, 4, n, 0u);
   scr_pc_synth_ran = 1;
 }
 
@@ -380,13 +425,14 @@ SCR_PC_FN void scr_pc_report(const char *when) {
                " exercised against a known answer in this process. Every"
                " number below is unvalidated.\n");
   } else {
-    static const char *const nm[3] = {"allfree", "onelive", "alllive"};
+    static const char *const nm[5] = {"allfree", "onelive", "alllive",
+                                     "clustered15", "scattered15"};
     int i, bad = 0;
-    for (i = 0; i < 3; i++) {
+    for (i = 0; i < 5; i++) {
       if (scr_pc_synth_got[i] != scr_pc_synth_want[i]) bad = 1;
     }
     fprintf(f, "[pagecen] SYNTH %s", bad ? "FAILED" : "ok");
-    for (i = 0; i < 3; i++) {
+    for (i = 0; i < 5; i++) {
       fprintf(f, " %s want=%u got=%u", nm[i], scr_pc_synth_want[i],
               scr_pc_synth_got[i]);
     }
@@ -485,6 +531,76 @@ SCR_PC_FN int scr_pc_every_on(void) {
   }
   return scr_pc_every;
 }
+
+/* ATEXIT ALONE CANNOT REPORT ON THIS TARGET, and this header spent a whole
+ * measurement run producing no file at all because of it.
+ *
+ * zapo's entry ends in `process.exit(0)`, which lowers to `_Exit` and skips
+ * every atexit handler. A pagecensus-instrumented zapo-rest run wrote NOTHING
+ * -- not the file named by SCR_PAGECEN_OUT, not the stderr fallback, not even
+ * the unconditional ARMED line whose whole job is to prove the hooks are
+ * compiled in. From the outside that is indistinguishable from "the census
+ * found nothing", and the workaround used at the time (SCR_PAGECEN_EVERY=1,
+ * which reports on every collector pass) answers a DIFFERENT question:
+ * periodic emission is a trajectory, and the number that belongs in a report
+ * is the settled one at exit.
+ *
+ * This is cycstat's fix (785e07dda), which is cycensus's fix before it,
+ * ported rather than redesigned.
+ *
+ * WHY THE TRAP STAYED HIDDEN: scr_heap_census.h calls scr_cs_report()
+ * directly over _Exit, so any arm that happened to -include heapcensus got
+ * cycstat's output anyway -- by composition, not by design. An arm without it
+ * silently got nothing. That is why this file registers BOTH routes rather
+ * than trusting whichever other header may be in the arm. */
+SCR_PC_FN void scr_pc_report_exit(void) {
+  if (scr_pc_reported) return;
+  scr_pc_reported = 1;
+  if (scr_pc_walk_fn != NULL) {
+    scr_pc_walk_fn("exit");
+  } else {
+    FILE *f = scr_pc_out();
+    fprintf(f, "[pagecen] NO WALK INSTALLED - the arena side never armed, so"
+               " there is nothing to walk. Either no cycle-headered object"
+               " was ever allocated, or scr_cycle.c was compiled without"
+               " SCR_PAGECEN_ON while this header was included. Not a"
+               " measurement of an empty arena.\n");
+    fflush(f);
+  }
+}
+
+/* A SEPARATE FLAG from scr_pc_registered, which scr_cycle.c's arm guards on.
+ * The first version of this reused it, so the constructor claimed it, the
+ * arena-side arm early-returned, and the synthetic control and the walk hook
+ * were both silently skipped -- an instrument that disarmed itself while
+ * looking installed. */
+SCR_PC_SHARED int scr_pc_atexit_done = 0;
+
+__attribute__((constructor)) SCR_PC_FN void scr_pc_install(void) {
+  if (!scr_pc_atexit_done) {
+    scr_pc_atexit_done = 1;
+    atexit(scr_pc_report_exit);
+  }
+}
+
+/* COMPOSITION, and it is a footgun rather than a feature: a macro cannot
+ * extend a macro it cannot name, so the chain is spelled by explicit
+ * knowledge of the other reporters. THIS HEADER MUST BE -include*d LAST of
+ * the census headers, so that SCR_CYCSTAT_ON / SCR_CYCEN_ON are already
+ * defined when it is read. Included first, it wins and theirs are silently
+ * lost -- which is the same failure it exists to fix, one header along. */
+#ifdef _Exit
+#undef _Exit
+#endif
+#if defined(SCR_CYCSTAT_ON) && defined(SCR_CYCEN_ON)
+#define _Exit(c) (scr_pc_report_exit(), scr_cs_report(), scr_cycen_report(), _Exit(c))
+#elif defined(SCR_CYCSTAT_ON)
+#define _Exit(c) (scr_pc_report_exit(), scr_cs_report(), _Exit(c))
+#elif defined(SCR_CYCEN_ON)
+#define _Exit(c) (scr_pc_report_exit(), scr_cycen_report(), _Exit(c))
+#else
+#define _Exit(c) (scr_pc_report_exit(), _Exit(c))
+#endif
 
 #endif /* SCR_PAGECEN_ON */
 #endif /* SCR_PAGE_CENSUS_H */

@@ -239,11 +239,17 @@ describe.skipIf(!armable)("the cycle arena returns its chunks", () => {
 
   test("the census validates its own arithmetic before it reports any", async () => {
     const { stderr } = await run(bin);
-    /* The synthetic arm, and the third case is the one that matters: a chunk
-     * with every slot live must report ZERO free pages. An instrument that
-     * can only say "yes" cannot adjudicate a ceiling. */
+    /* The synthetic arm. Two of the five cases carry the weight. `alllive`
+     * is a chunk with every slot live and must report ZERO free pages: an
+     * instrument that can only say "yes" cannot adjudicate a ceiling. And
+     * `clustered15` against `scattered15` is the SAME fifteen survivors of
+     * the same size placed two ways -- packed into one page, and one per
+     * page -- which must answer 14 and 0. A census that returns the same
+     * number for those two is measuring occupancy, not placement, and
+     * placement is the whole question. */
     expect(stderr).toContain(
-      "[pagecen] SYNTH ok allfree want=15 got=15 onelive want=14 got=14 alllive want=0 got=0"
+      "[pagecen] SYNTH ok allfree want=15 got=15 onelive want=14 got=14" +
+        " alllive want=0 got=0 clustered15 want=14 got=14 scattered15 want=0 got=0"
     );
     expect(stderr).toMatch(/^\[pagecen] SELFTEST ok on (\d+)\/\1 chunks/m);
     expect(stderr).toContain("[pagecen] NOLIVE CHECK ok");
