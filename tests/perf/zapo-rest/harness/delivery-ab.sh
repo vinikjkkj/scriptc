@@ -53,7 +53,12 @@ LOG=$OUT/pair.log
 : "${ZAPO_FAKE_SERVER:?set it to the zapo checkout packages/fake-server}"
 ZR=$(cd "$ZAPO_FAKE_SERVER/../.." && pwd)
 mkdir -p "$OUT"
-: > "$LOG"
+# APPEND=1 pools further repetitions into an existing run instead of starting
+# over: the pair log is kept and REP_START continues the numbering, so the
+# rotation carries on in phase (odd repetitions run the control first). This
+# exists because an underpowered result is fixed by MORE runs of the same
+# thing, and re-running from scratch would throw away the ones already paid for.
+if [ -z "${APPEND:-}" ]; then : > "$LOG"; fi
 
 W="CHUNKS=${CHUNKS:-8} CONVS=${CONVS:-400} MSGS=${MSGS:-6} TEXTLEN=${TEXTLEN:-300}"
 W="$W IDLE_S=${IDLE_S:-60} SETTLE_MS=${SETTLE_MS:-20000} PRESYNC_MS=${PRESYNC_MS:-15000}"
@@ -79,7 +84,7 @@ run_one() {
     > "$OUT/$tag.driver.log" 2>&1 || echo "  RUN FAILED: $tag (see $tag.driver.log)"
 }
 
-r=1
+r=${REP_START:-1}
 while [ "$r" -le "$N" ]; do
   # rotate: odd repetitions run the control first, even ones the treatment
   if [ $((r % 2)) -eq 1 ]; then

@@ -32,61 +32,70 @@ image, which is shared and file-backed and so is not in your column.
 
 | | private WS | total WS | private commit |
 |---|---|---|---|
-| idle (logged in, before history) | **13.14** MB | 31.21 | — |
-| settled (+60 s after the sync) | **85.25** MB | 104.76 | 198.93 |
-| retention | **72.12 MB** | | |
+| idle (logged in, before history) | **12.83** MB | 30.99 | — |
+| settled (+60 s after the sync) | **82.29** MB | 101.58 | 196.78 |
+| retention | **69.45 MB** | | |
 
-**Spreads: idle ±0.09 MB, settled ±4.53 MB.**
+**Measured on the binary you have**, 24 runs of it, in its shipped
+configuration. Spreads: idle ±0.27 MB, settled ±2.19 MB.
 
-The idle figure is measured twice, two ways, and they agree. Across the 12
-runs above, sampled 5 s after login and before a byte of history: **13.14 MB,
-spread 0.09**. And in three dedicated runs that deliver *no history at all*
-and then sit for five minutes: **13.16 MB at 15 s, 13.12 MB at 5 minutes,
-spread 0.07** — flat, not still falling.
+The idle figure is measured two ways that agree. Across these runs, sampled
+5 s after login and before a byte of history: **12.83 MB**. And in dedicated
+runs that deliver *no history at all* and then sit for five minutes, idle is
+**flat** from 15 s to 5 minutes — it is a floor, not a number still falling.
 
-An earlier draft of this file reported idle as 17.72 MB with a ±5.98 spread
-and guessed it was still settling. That was wrong, and it was our extraction
-rather than the program: the marker we sampled against is written about
-0.02 s before the first history chunk arrives, so roughly a third of the
-samples were taken *after the burst had already started*. The spread was a
-coin flip on that boundary. Corrected above.
+An earlier draft reported idle as 17.72 MB with a ±5.98 spread and guessed it
+was still settling. That was wrong, and it was our extraction rather than the
+program: the marker we sampled against is written about 0.02 s before the
+first history chunk arrives, so roughly a third of the samples were taken
+*after the burst had already started*. The spread was a coin flip on that
+boundary. Corrected above.
 
-**So if you have seen about 10 MB at idle, we are reading 13 MB — the same
+**So if you have seen about 10 MB at idle, we are reading 12.8 MB — the same
 ballpark, and the difference is not a regression this build introduced.**
 
-### What the 72.12 MB is made of, census arm
+### What the 69.45 MB is made of, census arm
 
 This breakdown comes from an **instrumented build**, because only one can
-itemise a heap. Its own settled figure is 84.59 MB against the shipping
-build's 85.25 — within 0.8% — and its retention of 71.29 MB against the
-shipping build's 72.12 MB, within about 1%. That agreement is why the
-breakdown transfers to the binary you actually run. The shares are taken
-against the **72.12 MB** figure quoted everywhere else in this file, and the
-four rows account for 97% of it.
+itemise a heap, and like the shipping build it is zapo-js 1.8.2. Comparing
+like with like — neither returning pages — its settled figure is 84.59 MB
+against this binary's 83.56 with page return switched off, within 1.2%.
+That agreement is why the breakdown transfers to
+the binary you actually run. The shares are taken against the **69.45 MB**
+figure quoted everywhere else in this file, and the four rows account for
+99% of it.
+
+One row is adjusted for what this build now does: fragmentation measured
+**36.51 MB** on an instrumented build that has no page return, and the
+shipping default returns **1.27 MB** of it (§2), so **35.24 MB** remains.
 
 | | MB | share |
 |---|---|---|
-| fragmentation — free space the allocator cannot return | **36.51** | 51% |
+| fragmentation — free space the allocator cannot return | **35.24** | 51% |
 | the messages themselves | 12.69 | 18% |
-| service state | 10.32 | 14% |
-| our own memory pools | 10.25 | 14% |
+| service state | 10.32 | 15% |
+| our own memory pools | 10.25 | 15% |
 
 ---
 
 ## 2. What this build changes
 
-**Cycle-arena page return: −2.05 MB** of settled private working set,
-measured against the shared floor with rotation and mode matching. That is
-**−2.56% of the settled plateau** and **2.8% of the 72.12 MB of retention** —
-two different denominators for one measurement, both given so neither is
-mistaken for the other.
+**Cycle-arena page return: −1.27 MB** of settled private working set.
+Measured **on this binary**, both arms the same executable with one
+environment switch between them, 24 runs, arm order rotated, 19 comparable
+after excluding the high-peak mode.
 
-The change clears our measurement noise by **3.4×** (the floor on that metric
-is 0.75%), and every one of five repetitions was negative — −2.10, −2.26, −1.92, −1.97, −2.00, spread
-0.34 MB. Peak working set −0.79 MB (3.1× its floor). Private commit is a
-**draw, by design**: the mechanism returns resident pages and leaves the
-commit charge untouched. **CPU +0.02 ms — 0.00%, against a 3.79% floor.**
-No measurable performance cost.
+- **−1.52% of the settled plateau**, and **1.8% of the 69.45 MB of
+  retention** — two denominators for one measurement, both given so neither
+  is mistaken for the other
+- **p = 0.018**, so it separates from zero; and **2.0× our 0.75% floor**
+- total working set moves with it: **−1.23%**, p = 0.018
+- **CPU: no measurable effect.** −7.4% at p = 0.37, which is noise — the
+  same metric read +7.0% on the first half of these runs and flipped sign
+  when the rest arrived. There is no performance cost and no performance win
+- peak private commit is **+0.09%** at p = 0.034. Statistically separable,
+  practically nothing: 0.65 MB on 715, and the mechanism returns resident
+  pages rather than commit charge, so this is the expected shape
 
 **String arena: 0 MB.** The predicted fix recovers nothing, and we can say
 why rather than guessing. The arena has handed **zero** blocks back to its
@@ -106,7 +115,7 @@ to the allocation path than the one costed here. The defect is real — an
 arena that cannot free a chunk *even in principle* is a bug — but the payoff
 is not where we expected it.
 
-**Runtime total: −2.05 MB, which is 2.8% of the 72.12 MB you are seeing.**
+**Runtime total: −1.27 MB, which is 1.8% of the 69.45 MB you are seeing.**
 
 One of them did convert to near zero, and this file says so. A small true
 number is worth more than a large one we have already refuted internally.
@@ -202,20 +211,21 @@ the machine and the test rig — the first-run position effect, the two peak
 modes, the ~28.7 MB swing — and none of those care which commit built the
 executable. **And it is checked rather than assumed**: the switched-off arm
 of §2 is the same workload on the same machine, so it should settle close to
-the figure this floor was measured at, and §2 says whether it did.
+the figure this floor was measured at. **It did: 83.56 MB against 85.25, a
+gap of 1.99%.** The yardstick transferred, measured rather than argued.
 
 ---
 
 ## 6. What this build will and will not do
 
 **It will not return to idle after a sync.** Realistically the plateau lands
-near **83 MB** without the scheduling change in §3 (85.25 settled, less the
-2.05 MB above), and near **50 MB** with it — that change takes the 36.51 MB
-of fragmentation down to about 3.6 MB, so roughly 33 MB comes off 83.
+at about **82 MB** as shipped, and near **51 MB** with the scheduling change
+in §3 — that change takes the remaining 35.24 MB of fragmentation down to
+about 3.6 MB, so roughly 32 MB comes off 82.
 
-**Its idle floor is 13.14 MB** private working set (31.21 MB total),
+**Its idle floor is 12.83 MB** private working set (30.99 MB total),
 measured two independent ways that agree to 0.02 MB, and flat from 15 s to
-5 minutes after login. Your ~10 MB and our 13 MB are the same ballpark.
+5 minutes after login. Your ~10 MB and our 12.8 MB are the same ballpark.
 
 **Worth saying plainly, because it shaped this report twice.** A draft of
 this file told you that the service does not idle at 10 MB and that you must

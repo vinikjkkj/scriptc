@@ -57,8 +57,20 @@ const METRICS = [
     ['settledWS', 'settled working set (total)'],
     ['settledPrivWS', 'settled working set (PRIVATE)'],
     ['settledPriv', 'settled private commit'],
-    ['cpuToSettledMs', 'CPU to settled (ms)'],
+    ['cpuToSettledMs', 'CPU to settled (ms)', 'ms'],
 ]
+/* THE FORMATTER HAD ONE UNIT AND THE TABLE HAS TWO. Every row was printed
+ * through MiB(), so cpuToSettledMs -- milliseconds -- was divided by
+ * 1,048,576 and labelled MiB: 10,438 ms rendered as "0.01 MiB". The
+ * PERCENTAGE was never affected, because it is a ratio of raw medians
+ * computed before any formatting, so the verdicts stood; only the absolute
+ * column was unreadable. That is still not cosmetic, because CPU is the
+ * "no performance loss" half of this objective and a column nobody can read
+ * is a column nobody checks. */
+const UNIT = new Map(METRICS.map((m) => [m[0], m[2] ?? 'MiB']))
+const fmt = (key, v) => UNIT.get(key) === 'ms'
+    ? v.toFixed(0).padStart(7) + ' ms '
+    : MiB(v).padStart(7) + ' MiB'
 
 function readRun(runRoot, tag) {
     const csv = join(runRoot, `${tag}.rss.csv`)
@@ -215,7 +227,7 @@ function analyse({ logs, runRoot, controlArm, treatArm, label }) {
         if (res === null) { console.log(`   ${key.padEnd(12)} too few comparable runs (${c.length} vs ${t.length}) — n/a, not 0`); continue }
         const verdict = res.p < 0.05 ? (res.obs < 1 ? `${treatArm} LOWER` : `${treatArm} HIGHER`) : 'DRAW'
         console.log(`   ${key.padEnd(12)} ${pct(res.obs).padStart(8)}  ` +
-            `${MiB(median(c)).padStart(7)} -> ${MiB(median(t)).padStart(7)} MiB  ` +
+            `${fmt(key, median(c))} -> ${fmt(key, median(t))}  ` +
             `n=${res.nc}v${res.nt}  p=${res.p.toFixed(4)}  ${verdict}   ${what}`)
         out.push([key, verdict, res])
     }
