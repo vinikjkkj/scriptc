@@ -125,6 +125,7 @@ static ScrMap *scr_map_sh_head = NULL;
 
 #if SCR_MAP_SHRINK_STAT
 static void scr_map_shrink_arm(void);
+static void scr_map_shrink_tick(void);
 #endif
 
 static bool scr_map_shrink_on(void) {
@@ -350,6 +351,7 @@ void scr_map_idle_shrink(void) {
   scr_map_sh.passes++;
 #if SCR_MAP_SHRINK_STAT
   scr_map_shrink_arm();
+  scr_map_shrink_tick();
 #endif
   ScrMap *m = scr_map_sh_head;
   scr_map_sh_head = NULL;
@@ -407,6 +409,24 @@ void scr_map_shrink_report(const char *when) {
   if (f != stderr) fclose(f);
 }
 static void scr_map_shrink_atexit(void) { scr_map_shrink_report("atexit"); }
+
+/* PERIODIC REPORT, and it is not a nicety: zapo-rest leaves through _Exit,
+ * which skips atexit, so an exit-only report produces NO FILE AT ALL on the
+ * one target that matters -- silently. That already cost a run once, and
+ * SCR_PAGECEN_EVERY=1 is the same workaround for the same reason.
+ * SCR_MAP_SHRINK_EVERY=N reports every N passes that did work; the LAST
+ * line written is then the answer, whether or not exit handlers run. */
+static void scr_map_shrink_tick(void) {
+  static long every = -1;
+  if (every < 0) {
+    const char *e = getenv("SCR_MAP_SHRINK_EVERY");
+    every = (e != NULL) ? strtol(e, NULL, 10) : 0;
+    if (every < 0) every = 0;
+  }
+  if (every == 0) return;
+  if ((scr_map_sh.passes % (unsigned long)every) != 0) return;
+  scr_map_shrink_report("every");
+}
 static void scr_map_shrink_arm(void) {
   static bool armed = false;
   if (armed) return;
