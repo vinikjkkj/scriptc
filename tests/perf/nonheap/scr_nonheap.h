@@ -149,6 +149,10 @@ typedef struct { SCR_NH_UPTR lo, hi; unsigned cls; } ScrNhRange;
 
 SCR_NH_SHARED ScrNhRange scr_nh_range[SCR_NH_MAXRANGE];
 SCR_NH_SHARED unsigned scr_nh_nrange = 0;
+/* Loaded module count, the real bound on TLS slot indices. Declared
+ * here rather than beside the collect state because both the image
+ * walk that sets it and the TLS walk that reads it precede that. */
+SCR_NH_SHARED unsigned scr_nh_nmod = 0;
 /* THE SATURATION TELL. memmap's table clipped at exactly SCR_MM_MAXREG with
  * no refusal, and a documented limit in a commit message protected nobody
  * when a later run walked into it. Every cap here sets this instead. */
@@ -207,6 +211,7 @@ SCR_NH_FN unsigned scr_nh_image_writable(void) {
   if (needed > (SCR_NH_DWORD)sizeof mods) scr_nh_overflowed("module table");
   n = (unsigned)(needed / sizeof(void *));
   if (n > SCR_NH_MAXMOD) n = SCR_NH_MAXMOD;
+  scr_nh_nmod = n;
   for (i = 0; i < n; i++) {
     const unsigned char *base = (const unsigned char *)mods[i];
     unsigned long e_lfanew;
@@ -236,5 +241,322 @@ SCR_NH_FN unsigned scr_nh_image_writable(void) {
   }
   return found;
 }
+
+/* ---- stacks and TEB/static-TLS, bounded by thread count ----------------- */
+
+typedef struct {
+  void *BaseAddress; void *AllocationBase; SCR_NH_DWORD AllocationProtect;
+  SCR_NH_DWORD __a; SCR_NH_UPTR RegionSize; SCR_NH_DWORD State, Protect, Type;
+  SCR_NH_DWORD __b;
+} SCR_NH_MBI;
+__declspec(dllimport) SCR_NH_UPTR __stdcall VirtualQuery(const void *, SCR_NH_MBI *, SCR_NH_UPTR);
+__declspec(dllimport) void *__stdcall GetProcAddress(SCR_NH_HANDLE, const char *);
+
+/* A thread's TEB carries StackBase (+0x08) and StackLimit (+0x10) on x64, and
+ * the loader places the static TLS block in the TEB's own allocation. Both are
+ * reached through NtQueryInformationThread, resolved by name rather than
+ * linked, so this header adds no import an ordinary build would not have. */
+typedef struct {
+  long ExitStatus; void *TebBaseAddress;
+  SCR_NH_UPTR UniqueProcess, UniqueThread, AffinityMask;
+  long Priority, BasePriority;
+} SCR_NH_TBI;
+typedef long(__stdcall *SCR_NH_NTQIT)(SCR_NH_HANDLE, int, void *, SCR_NH_DWORD, SCR_NH_DWORD *);
+
+SCR_NH_FN unsigned scr_nh_stacks(void) {
+  SCR_NH_THREADENTRY32 te;
+  SCR_NH_HANDLE snap;
+  SCR_NH_DWORD me = GetCurrentProcessId();
+  SCR_NH_NTQIT q = (SCR_NH_NTQIT)GetProcAddress(GetModuleHandleA("ntdll.dll"),
+                                                "NtQueryInformationThread");
+  unsigned found = 0;
+  if (!q) { scr_nh_overflowed("NtQueryInformationThread unavailable"); return 0; }
+  snap = CreateToolhelp32Snapshot(0x00000004u, 0);
+  if (snap == (SCR_NH_HANDLE)(SCR_NH_UPTR)-1) return 0;
+  te.dwSize = sizeof te;
+  if (Thread32First(snap, &te)) {
+    do {
+      SCR_NH_HANDLE th;
+      SCR_NH_TBI tbi;
+      SCR_NH_DWORD got = 0;
+      const unsigned char *teb;
+      SCR_NH_UPTR base = 0, limit = 0;
+      SCR_NH_MBI mbi;
+      if (te.th32OwnerProcessID != me) continue;
+      if (found >= SCR_NH_MAXTHREAD) { scr_nh_overflowed("thread table"); break; }
+      th = OpenThread(0x0040u /* QUERY_INFORMATION */, 0, te.th32ThreadID);
+      if (!th) continue;
+      if (q(th, 0 /* ThreadBasicInformation */, &tbi, (SCR_NH_DWORD)sizeof tbi, &got) == 0
+          && tbi.TebBaseAddress) {
+        teb = (const unsigned char *)tbi.TebBaseAddress;
+        memcpy(&base, teb + 0x08, sizeof base);
+        memcpy(&limit, teb + 0x10, sizeof limit);
+        /* StackLimit is the lowest COMMITTED byte; the pages between it and
+         * StackBase are the ones that can be resident. The reservation below
+         * StackLimit is uncommitted and cannot be in a working set. */
+        scr_nh_add_range(limit, base, SCR_NH_STACK);
+        /* The TEB's own allocation carries the static TLS block the loader
+         * places beside it. Bounded by thread count, one region each. */
+        /* BaseAddress, NOT AllocationBase: RegionSize is measured from the
+         * QUERIED address onward, so [AllocationBase, AllocationBase+RegionSize)
+         * need not contain the TEB at all. It did not, and the tls class read
+         * a clean zero -- the same shape as memmap's CLASS IMAGE 0.00 that
+         * this lane exists to correct. */
+        if (VirtualQuery(teb, &mbi, sizeof mbi))
+          scr_nh_add_range((SCR_NH_UPTR)mbi.BaseAddress,
+                           (SCR_NH_UPTR)mbi.BaseAddress + mbi.RegionSize, SCR_NH_TLS);
+        /* AND THE STATIC TLS BLOCKS, which are NOT in the TEB's region. The
+         * arm planted a 256 KiB __thread array and the tls class did not move
+         * by a byte: the loader puts anything of size in a separate block
+         * reached through TEB->ThreadLocalStoragePointer (+0x58 on x64), one
+         * slot per module that declares TLS. Bounded by threads x modules.
+         * Found by the arm; it would otherwise have fallen silently into the
+         * residual and been reported as unexplained. */
+        {
+          const void *const *tls = 0;
+          memcpy(&tls, teb + 0x58, sizeof tls);
+          if (tls && VirtualQuery(tls, &mbi, sizeof mbi) && mbi.State == 0x1000u) {
+            SCR_NH_UPTR slots = mbi.RegionSize / sizeof(void *);
+            SCR_NH_UPTR si;
+            unsigned live = 0;
+            /* BOUNDED BY MODULE COUNT, which is the real bound. The slot
+             * REGION's size is not a count of anything: it is sparse, and past
+             * the real slot array it holds unrelated data whose non-NULL words
+             * this walk was treating as TLS blocks -- 227 ranges and a
+             * spurious overflow on a two-thread process. A TLS index is
+             * assigned per module that declares TLS, so the count cannot
+             * exceed the number of loaded modules. */
+            SCR_NH_UPTR bound = scr_nh_nmod ? scr_nh_nmod : SCR_NH_MAXMOD;
+            if (slots > bound) slots = bound;
+            for (si = 0; si < slots; si++) {
+              SCR_NH_MBI bm;
+              if (!tls[si]) continue;
+              if (++live > SCR_NH_MAXMOD) { scr_nh_overflowed("tls slot array"); break; }
+              if (!VirtualQuery(tls[si], &bm, sizeof bm)) continue;
+              if (bm.State != 0x1000u) continue; /* MEM_COMMIT */
+              scr_nh_add_range((SCR_NH_UPTR)bm.BaseAddress,
+                               (SCR_NH_UPTR)bm.BaseAddress + bm.RegionSize, SCR_NH_TLS);
+            }
+          }
+        }
+        found++;
+      }
+      CloseHandle(th);
+    } while (Thread32Next(snap, &te));
+  }
+  CloseHandle(snap);
+  return found;
+}
+
+/* ---- the resident page set, and the attribution ------------------------- */
+
+SCR_NH_SHARED SCR_NH_UPTR scr_nh_cls_bytes[SCR_NH_NCLASS];
+SCR_NH_SHARED SCR_NH_UPTR scr_nh_priv_bytes = 0;    /* all private resident */
+SCR_NH_SHARED SCR_NH_UPTR scr_nh_shared_bytes = 0;  /* all shared resident */
+SCR_NH_SHARED SCR_NH_UPTR scr_nh_resid_bytes = 0;   /* private, unattributed */
+SCR_NH_SHARED unsigned scr_nh_collected = 0;
+
+SCR_NH_FN void scr_nh_collect(void) {
+  SCR_NH_UPTR cap, i, n;
+  SCR_NH_WSINFO *buf;
+  scr_nh_stacks();
+  scr_nh_image_writable();
+  /* One QueryWorkingSet: one entry per RESIDENT page, bit 8 = Shared. That is
+   * pmon.c's rule verbatim, and scr_nh_priv_bytes must equal its privateWS
+   * column for the same process at the same moment. */
+  /* SIZED TO WHAT IS NEEDED, not to a fixed ceiling. The first version
+   * committed a flat 2 MiB and every page of it went resident -- 2,101,248 B
+   * of instrument-self against a 14.46 MiB target, which is precisely the
+   * 2 MiB region table this lane rejected memmap for. Ask once, grow to the
+   * answer, and the footprint becomes the working set's own size. */
+  cap = sizeof(SCR_NH_WSINFO) + (SCR_NH_UPTR)1024 * sizeof(SCR_NH_WSBLOCK);
+  for (;;) {
+    buf = (SCR_NH_WSINFO *)VirtualAlloc(0, cap, 0x1000u | 0x2000u, 0x04u);
+    if (!buf) { scr_nh_overflowed("working-set buffer"); return; }
+    if (QueryWorkingSet(GetCurrentProcess(), buf, (SCR_NH_DWORD)cap)) break;
+    /* On ERROR_BAD_LENGTH the call leaves the required count in the first
+     * word. Grow to it with headroom -- the set can move between calls. */
+    n = buf->NumberOfEntries;
+    VirtualFree(buf, 0, 0x8000u);
+    buf = 0;
+    if (n == 0 || cap > (SCR_NH_UPTR)512 << 20) {
+      /* A refused read is NOT zero private pages, and the two must never look
+       * alike -- pmon prints -1 for exactly this. */
+      scr_nh_overflowed("QueryWorkingSet refused");
+      return;
+    }
+    cap = sizeof(SCR_NH_WSINFO) + (n + n / 4 + 1024) * sizeof(SCR_NH_WSBLOCK);
+  }
+  scr_nh_self_bytes = cap;
+  n = buf->NumberOfEntries;
+  for (i = 0; i < n; i++) {
+    SCR_NH_UPTR f = buf->WorkingSetInfo[i].Flags;
+    SCR_NH_UPTR va = f & ~(SCR_NH_UPTR)0xFFF;
+    unsigned r, hit = 0;
+    if (f & 0x100u) { scr_nh_shared_bytes += SCR_NH_PAGE; continue; }
+    scr_nh_priv_bytes += SCR_NH_PAGE;
+    /* The instrument's own buffer is a class, and it is subtracted rather
+     * than left in the residual -- the fourth condition, applied to itself. */
+    if (va >= (SCR_NH_UPTR)buf && va < (SCR_NH_UPTR)buf + cap) {
+      scr_nh_cls_bytes[SCR_NH_SELF] += SCR_NH_PAGE;
+      continue;
+    }
+    for (r = 0; r < scr_nh_nrange; r++) {
+      if (va >= scr_nh_range[r].lo && va < scr_nh_range[r].hi) {
+        scr_nh_cls_bytes[scr_nh_range[r].cls] += SCR_NH_PAGE;
+        hit = 1;
+        break;
+      }
+    }
+    if (!hit) scr_nh_resid_bytes += SCR_NH_PAGE;
+  }
+  scr_nh_collected = 1;
+  VirtualFree(buf, 0, 0x8000u);
+}
+
+/* ---- the arm: ONE SPECIMEN OF EVERY CLASS -------------------------------
+ * memmap's self-test planted 32 MiB of PRIVATE, attributed 32 MiB exactly,
+ * and passed -- while CLASS IMAGE read 0.00 for a 36.73 MB executable. It
+ * only ever exercised the PRIVATE path. This arm touches a stack page, the
+ * TEB/TLS region and a writable image page, so a class that stops working
+ * cannot hide behind a class that still does. */
+#ifdef SCR_NONHEAP_ARM
+/* THE ARM PLANTS A KNOWN QUANTITY IN EACH CLASS AND CHECKS IT ARRIVED.
+ *
+ * The first version of this arm touched ONE page of stack and ONE page of a
+ * writable section, and it was INERT: armed and unarmed runs came back
+ * identical (stack 24576 both ways), because both pages were already resident
+ * for other reasons. That is memmap's defect exactly -- a self-test that
+ * exercises a path without moving it -- reproduced here, and caught only by
+ * running the unarmed control beside the armed one.
+ *
+ * So the arm plants SCR_NH_ARM_BYTES per class, and the report collects
+ * TWICE: once before touching and once after. A class whose delta does not
+ * reach the planted amount says so by name. One run, no external comparison,
+ * and a class that stops being attributed cannot hide behind one that still
+ * is. */
+#ifndef SCR_NH_ARM_BYTES
+#define SCR_NH_ARM_BYTES (256u * 1024u)
+#endif
+SCR_NH_SHARED volatile unsigned char scr_nh_arm_image[SCR_NH_ARM_BYTES] = { 1 };
+SCR_NH_SHARED __thread volatile unsigned char scr_nh_arm_tls[SCR_NH_ARM_BYTES];
+SCR_NH_SHARED SCR_NH_UPTR scr_nh_arm_before[SCR_NH_NCLASS];
+
+SCR_NH_FN void scr_nh_arm_touch(void) {
+  volatile unsigned char onstack[SCR_NH_ARM_BYTES];
+  unsigned i;
+  for (i = 0; i < SCR_NH_ARM_BYTES; i += SCR_NH_PAGE) onstack[i] = 1;
+  for (i = 0; i < SCR_NH_ARM_BYTES; i += SCR_NH_PAGE) scr_nh_arm_image[i] = 1;
+  for (i = 0; i < SCR_NH_ARM_BYTES; i += SCR_NH_PAGE) scr_nh_arm_tls[i] = 1;
+  /* Keep the stack pages live across the second collect: without this the
+   * compiler is free to reuse the frame and the pages stay resident but the
+   * measurement stops meaning anything. */
+  if (onstack[0] == 0) scr_nh_arm_image[0] = 0;
+}
+
+SCR_NH_FN void scr_nh_arm_snapshot_before(void) {
+  unsigned c;
+  scr_nh_collect();
+  for (c = 0; c < SCR_NH_NCLASS; c++) scr_nh_arm_before[c] = scr_nh_cls_bytes[c];
+  /* Reset for the second, reported pass. The ranges are re-derived there. */
+  for (c = 0; c < SCR_NH_NCLASS; c++) scr_nh_cls_bytes[c] = 0;
+  scr_nh_priv_bytes = scr_nh_shared_bytes = scr_nh_resid_bytes = 0;
+  scr_nh_nrange = 0;
+  scr_nh_collected = 0;
+}
+#endif
+
+/* ---- the report --------------------------------------------------------- */
+
+SCR_NH_FN void scr_nh_report(void) {
+  FILE *f = stderr;
+  const char *out;
+  SCR_NH_UPTR sum = 0;
+  unsigned c;
+  if (scr_nh_reported) return;
+  scr_nh_reported = 1;
+#ifdef SCR_NONHEAP_ARM
+  scr_nh_arm_snapshot_before();
+  scr_nh_arm_touch();
+#endif
+  scr_nh_collect();
+  out = getenv("SCR_NONHEAP_OUT");
+  if (out && *out) { FILE *g = fopen(out, "w"); if (g) f = g; }
+  fprintf(f, "[nonheap] ARMED tests/perf/nonheap/scr_nonheap.h\n");
+  if (!scr_nh_collected) {
+    fprintf(f, "[nonheap] REFUSED - no page set was collected. This is not a"
+               " measurement of zero.\n");
+  }
+  if (scr_nh_overflow) {
+    fprintf(f, "[nonheap] REFUSED - %s overflowed or was unavailable. A"
+               " truncated walk reads as a complete one with smaller numbers.\n",
+            scr_nh_overflow_what ? scr_nh_overflow_what : "a table");
+  }
+  fprintf(f, "[nonheap] ranges=%u threads=%u privateWS=%llu sharedWS=%llu\n",
+          scr_nh_nrange, scr_nh_thread_count(),
+          (unsigned long long)scr_nh_priv_bytes,
+          (unsigned long long)scr_nh_shared_bytes);
+  for (c = 0; c < SCR_NH_NCLASS; c++) {
+    fprintf(f, "[nonheap] CLASS %-16s %llu\n", scr_nh_class_name[c],
+            (unsigned long long)scr_nh_cls_bytes[c]);
+    sum += scr_nh_cls_bytes[c];
+  }
+  fprintf(f, "[nonheap] CLASS %-16s %llu\n", "residual",
+          (unsigned long long)scr_nh_resid_bytes);
+  sum += scr_nh_resid_bytes;
+  /* THE CROSS-CHECK, against a total this same report prints. memmap put
+   * CLASS HEAP 3.08 MiB four lines above its own HEAPTOTAL of 73.1 MiB and
+   * nothing noticed. */
+#ifdef SCR_NONHEAP_ARM
+  {
+    /* Each planted class must have MOVED by what was planted. A class that
+     * did not is named, because an inert arm is how a broken classifier
+     * passes its own self-test. */
+    /* STACK and IMAGE are checked by DELTA: their pages are not resident until
+     * the arm writes them, so touching MUST move the class.
+     *
+     * TLS is checked by PRESENCE, and that is a fact about the loader rather
+     * than a weaker test. A static __thread block is committed and zeroed at
+     * thread start, so it is ALREADY resident before the arm writes it and its
+     * delta is legitimately zero. Asking TLS for a delta printed "DID NOT
+     * MOVE" while the class was in fact correct: the arm's premise was wrong,
+     * not the classifier. TLS must instead ACCOUNT for at least what was
+     * planted. */
+    static const unsigned armed[2] = { SCR_NH_STACK, SCR_NH_IMAGEW };
+    unsigned a;
+    for (a = 0; a < 2; a++) {
+      unsigned k = armed[a];
+      SCR_NH_UPTR d = scr_nh_cls_bytes[k] > scr_nh_arm_before[k]
+                          ? scr_nh_cls_bytes[k] - scr_nh_arm_before[k] : 0;
+      fprintf(f, "[nonheap] ARM %-16s planted %u moved %llu%s\n",
+              scr_nh_class_name[k], (unsigned)SCR_NH_ARM_BYTES,
+              (unsigned long long)d,
+              d * 10u >= (SCR_NH_UPTR)SCR_NH_ARM_BYTES * 9u ? "" : "   <-- DID NOT MOVE");
+    }
+    fprintf(f, "[nonheap] ARM %-16s planted %u present %llu%s\n",
+            scr_nh_class_name[SCR_NH_TLS], (unsigned)SCR_NH_ARM_BYTES,
+            (unsigned long long)scr_nh_cls_bytes[SCR_NH_TLS],
+            scr_nh_cls_bytes[SCR_NH_TLS] >= (SCR_NH_UPTR)SCR_NH_ARM_BYTES
+                ? "" : "   <-- DOES NOT ACCOUNT FOR THE PLANT");
+  }
+#endif
+  if (sum != scr_nh_priv_bytes) {
+    fprintf(f, "[nonheap] MISMATCH - classes sum to %llu but privateWS is"
+               " %llu. The split does not account for the total it splits.\n",
+            (unsigned long long)sum, (unsigned long long)scr_nh_priv_bytes);
+  } else {
+    fprintf(f, "[nonheap] classes sum to privateWS exactly (%llu)\n",
+            (unsigned long long)sum);
+  }
+  if (f != stderr) fclose(f);
+}
+
+/* atexit alone cannot report on this target: zapo's entry ends in
+ * process.exit(0), which lowers to _Exit. Same port as cycstat's. */
+__attribute__((constructor)) SCR_NH_FN void scr_nh_install(void) { atexit(scr_nh_report); }
+#ifdef _Exit
+#undef _Exit
+#endif
+#define _Exit(c) (scr_nh_report(), _Exit(c))
 
 #endif /* SCR_NONHEAP_H */
