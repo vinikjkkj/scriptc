@@ -18,8 +18,9 @@ never measured.
 
 Numbers are **private working set** unless stated. That is the column Task
 Manager's Processes tab shows under "Memory", and it is the one your
-complaint was phrased in. The *total* working set is 15–20 MB higher because
-it also counts the executable's mapped image, which is shared and file-backed.
+complaint was phrased in. The *total* working set runs about 18 MB higher
+(31.21 idle, 104.76 settled) because it also counts the executable's mapped
+image, which is shared and file-backed and so is not in your column.
 
 ### The plateau, shipping arm
 
@@ -27,35 +28,36 @@ it also counts the executable's mapped image, which is shared and file-backed.
 
 | | private WS | total WS | private commit |
 |---|---|---|---|
-| idle (logged in, before history) | **17.72** MB | 36.08 | — |
+| idle (logged in, before history) | **13.14** MB | 31.21 | — |
 | settled (+60 s after the sync) | **85.25** MB | 104.76 | 198.93 |
-| retention | **67.53 MB** | | |
+| retention | **72.12 MB** | | |
 
-**Spreads across those 12 runs: settled ±4.53 MB, idle ±5.98 MB.**
+**Spreads: idle ±0.09 MB, settled ±4.53 MB.**
 
-**The idle figure is not a floor and should not be read as one.** It is
-sampled 15 s after login while the service is still settling, it is by far
-the noisiest thing in this document, and across the 12 runs it spans roughly
-**12 to 24 MB** — still falling at the moment we look. **If you have seen
-about 10 MB at idle, that is consistent with the same process measured after
-a longer settle**, not a disagreement about the facts. We have not yet
-measured a long-settled idle and this file will not pretend otherwise.
+The idle figure is measured twice, two ways, and they agree. Across the 12
+runs above, sampled 5 s after login and before a byte of history: **13.14 MB,
+spread 0.09**. And in three dedicated runs that deliver *no history at all*
+and then sit for five minutes: **13.16 MB at 15 s, 13.12 MB at 5 minutes,
+spread 0.07** — flat, not still falling.
 
-**The solid number is the plateau itself: 85.25 MB, spread 4.53.** That is
-where the process sits after a sync and it is what this work is about.
+An earlier draft of this file reported idle as 17.72 MB with a ±5.98 spread
+and guessed it was still settling. That was wrong, and it was our extraction
+rather than the program: the marker we sampled against is written about
+0.02 s before the first history chunk arrives, so roughly a third of the
+samples were taken *after the burst had already started*. The spread was a
+coin flip on that boundary. Corrected above.
 
-The retention figure of **67.53 MB** is the gap between the two rows above,
-measured on the same runs — so it inherits the idle row's uncertainty. Note
-which way that cuts: **if a longer-settled idle is lower, the retention is
-larger than 67.53, not smaller.** Nothing below depends on resolving it.
+**So if you have seen about 10 MB at idle, we are reading 13 MB — the same
+ballpark, and the difference is not a regression this build introduced.**
 
-### What the 67.53 MB is made of, census arm
+### What the 72.12 MB is made of, census arm
 
 This breakdown comes from an **instrumented build**, because only one can
 itemise a heap. Its own settled figure is 84.59 MB against the shipping
 build's 85.25 — within 0.8%, which is why the shares below are meaningful
 for the binary you actually run. They are shares of that arm's own 71.29 MB
-of retention.
+of retention, against the 72.12 MB measured on the shipping build: the two
+agree to about 1%, and the four rows account for 97% of either.
 
 | | MB | share |
 |---|---|---|
@@ -68,23 +70,46 @@ of retention.
 
 ## 2. What this build changes
 
-> **[PENDING — page return]** `pagereturn`'s mode-matched figure for cycle-arena
-> page return goes here. Measured ceiling was 2.31 MB; the provisional
-> unmatched reading was −2.06 MB, which is **the same size as this rig's
-> measurement artifact** (see §5) and is being re-measured against a shared
-> floor before it is quoted.
+**Cycle-arena page return: −2.05 MB** of settled private working set
+(−2.56%), measured against the shared floor with rotation and mode
+matching. That is **3.4× the 0.75% floor**, and every one of five
+repetitions was negative — −2.10, −2.26, −1.92, −1.97, −2.00, spread
+0.34 MB. Peak working set −0.79 MB (3.1× its floor). Private commit is a
+**draw, by design**: the mechanism returns resident pages and leaves the
+commit charge untouched. **CPU +0.02 ms — 0.00%, against a 3.79% floor.**
+No measurable performance cost.
 
-> **[PENDING — string arena]** The string arena currently never recycles a
-> block at all and cannot free a chunk *even in principle*: the pointer
-> `malloc` returned is overwritten by the next chunk and no free path exists.
-> It holds 3.00 MB. Fixing it is correct and necessary regardless of yield —
-> but the yield may be **much less than 3 MB**, because the cycle arena
-> *already has* the chunk list that fix would add and still holds 7.25 MB at
-> 61% occupancy: one live block pins a whole 64 KB chunk whatever the
-> bookkeeping says. The measured figure goes here, whatever it turns out to be.
+**String arena: 0 MB.** The predicted fix recovers nothing, and we can say
+why rather than guessing. The arena has handed **zero** blocks back to its
+own free list in 75,645 allocations, so no chunk can ever reach "empty" and
+a chunk list has nothing to release. The cause is one line: on release, a
+block is offered to a size-class pool *first*, and that pool has never once
+refused — so the arena is a bump allocator that feeds the pool and never
+gets anything back.
 
-**If either converts to near zero, this file will say so.** A small true
+That zero is trustworthy because the same code, in the same process, moved
+**46.9 million** blocks through the cycle arena's list and freed 83% of its
+chunks. The instrument is demonstrably alive three lines above the zero.
+
+**3.06 MB does sit in 49 chunks it cannot release**, but those blocks are
+owned by the pool, and recovering them needs a different and riskier change
+to the allocation path than the one costed here. The defect is real — an
+arena that cannot free a chunk *even in principle* is a bug — but the payoff
+is not where we expected it.
+
+**Runtime total: −2.05 MB, which is 2.9% of the 72.12 MB you are seeing.**
+
+One of them did convert to near zero, and this file says so. A small true
 number is worth more than a large one we have already refuted internally.
+
+**One further avenue is open and not yet measured:** memory our own allocator
+pools retain after the program has released it. A budget in that code is 16 MB
+per pool across four pools, where the note beside it describes a 270 KB cap
+that is not in fact compiled in — which would also explain the string-arena
+zero above, since a pool that never refuses is a pool that never hands
+anything back. **If it pays, a second build will follow. If it turns out to be
+memory that merely changes owner, we will say that instead.** Six routes have
+already closed tonight, several after looking at least this promising.
 
 ---
 
@@ -159,15 +184,13 @@ inside our noise floor.** Those are the numbers to beat.
 ## 6. What this build will and will not do
 
 **It will not return to idle after a sync.** Realistically the plateau lands
-near **80 MB** without the scheduling change in §3, and near **52 MB** with
-it (85.25 now, less roughly 33 MB of fragmentation that change removes).
+near **83 MB** without the scheduling change in §3 (85.25 now, less the
+2.05 MB above), and near **50 MB** with it — that change removes roughly
+33 MB of fragmentation.
 
-**What its idle floor actually is, we have not established.** Our idle
-samples average 17.72 MB private working set (36.08 MB total) but are taken
-15 s after login, still falling, spanning 12–24 MB. A longer-settled idle is
-plausibly lower, and **your ~10 MB is compatible with that** — we are not
-claiming you misremembered. A dedicated long-idle measurement is the one
-piece of this report still outstanding.
+**Its idle floor is 13.14 MB** private working set (31.21 MB total),
+measured two independent ways that agree to 0.02 MB, and flat from 15 s to
+5 minutes after login. Your ~10 MB and our 13 MB are the same ballpark.
 
 What the total column adds is the executable's mapped image: it is 29.8 MB
 on disk and about **18 MB of it is resident**, shared and file-backed, which
