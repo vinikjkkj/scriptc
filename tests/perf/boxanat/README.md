@@ -816,6 +816,65 @@ under 3 MB because the cycle arena has the machinery and still holds chunks.
 The measurement says worse than that and for a different reason: the cycle
 arena's list is *working* (83% returned); the string arena's is *unreachable*.
 
+## Scoping the pool question — and the instrument's own premise is stale
+
+`tests/perf/poolstat` already answers "what does `scr_str_blocks` hold at
+settle", exactly and per size class:
+
+```
+POOLSTAT <pool> ... hits= accepts= rejects= bytesNow= bytesMax=
+                    bytesAccepted= blocksNow= depthMax= ...
+POOLSTAT-CLASS <pool> <class> <depthMax> <depthNow>
+```
+
+`bytesNow` / `blocksNow` at report time is the settle figure; the
+`POOLSTAT-CLASS` rows are the per-class split. It names all **four** pools
+separately — `scr_cyc_blocks`, `scr_str_blocks`, `scr_json_key_blocks`,
+`scr_dyn_ext_blocks` — and it **already carries the `_Exit` interposer**, so
+it does not hit the trap that made `cycstat` silent. One build plus one rig
+run; no new instrument.
+
+**But its stated premise is out of date, and the correction changes the
+question.** The header opens with `SCR_POOL_BUDGET`, *"defaulting to 0 (off,
+per-class depth instead)"*. It is not 0 any more:
+
+```c
+#ifndef SCR_POOL_BUDGET
+#define SCR_POOL_BUDGET 16777216      /* 16 MiB, and the byte branch is live */
+#endif
+```
+
+So `scr_pool_give` takes the **budget** branch, not the `SCR_POOL_DEPTH 64`
+branch, and the runtime's own worst-case note — *"64 × (8 + 16 + … + 256) =
+270 KiB, and there are FOUR pools"* — describes the arm that is **off**.
+
+**That single fact explains `listgive=0` exactly.** A pool that could hold
+only 270 KiB would have refused long before 3.06 MiB of string blocks and
+pushed the overflow onto the arena's freelist. A pool that may hold **16 MiB**
+never refuses, so `scr_str_ar_give` is never reached — which is precisely what
+was measured.
+
+**And it makes the interesting number much larger than the string arena's.**
+Four pools at a 16 MiB budget each is up to **64 MiB of blocks the program has
+dropped and the allocator has kept**, against the **71.29 MiB** the user
+actually sees. The string arena's 3.06 MiB is a rounding error beside that,
+and it is the *same* memory seen from the other side: those 49 chunks are held
+because their blocks sit in `scr_str_blocks`, not because the arena forgot
+`k`.
+
+**What is NOT settled by arithmetic**, and why the run is still needed: with
+the budget at 16 MiB and only 3.06 MiB carved, the bound never binds, so
+nothing forces a split between *live* and *parked*. `bytesNow` / `blocksNow`
+is the only thing that separates them, and a routing change is worth designing
+only if the parked share is large.
+
+**The accounting trap is named in advance.** If the pools hold most of it,
+routing frees back to the arena moves memory between two owners we already
+control and recovers little — the shape that made a `SCR_POOL_MAX` sweep look
+like an 18.45 MiB win when 77% of it was the number changing columns. The
+figure to watch is not "arena chunks freed" but total bytes returned to the
+OS.
+
 ## The cycle trap: a third divergence, and it is a hard abort
 
 `cyc1.ts` / `cyc2.ts`, recorded in `cyc-baseline.txt`. A cyclic value crossing
