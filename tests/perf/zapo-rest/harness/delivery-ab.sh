@@ -29,9 +29,22 @@ set -u
 
 MODE=${1:?usage: delivery-ab.sh floor|ab ...}
 case "$MODE" in
-  floor) CTL=${2:?exe}; TRT=$CTL; N=${3:-6}; CARM=base; TARM=base2 ;;
-  ab)    CTL=${2:?control exe}; TRT=${3:?treat exe}; N=${4:-6}; CARM=base; TARM=fixed ;;
-  *)     echo "usage: delivery-ab.sh floor <exe> N | ab <ctl> <treat> N"; exit 2 ;;
+  floor) CTL=${2:?exe}; TRT=$CTL; N=${3:-6}; CARM=base; TARM=base2
+         KNOB=""; KCTL=""; KTRT="" ;;
+  ab)    CTL=${2:?control exe}; TRT=${3:?treat exe}; N=${4:-6}; CARM=base; TARM=fixed
+         KNOB=""; KCTL=""; KTRT="" ;;
+  # THE PREFERRED SHAPE when the change is env-gated, and page return is:
+  # scr_cycle.c reads SCR_CYCLE_PAGERETURN. ONE binary runs both arms, so the
+  # comparison carries no build confound at all -- not a different compile, not
+  # a different dependency tree, not a different entry. Everything this project
+  # got wrong tonight about arms came from two binaries being compared as if
+  # they were one; this shape makes that impossible.
+  #   delivery-ab.sh abknob <exe> SCR_CYCLE_PAGERETURN 0 1 6
+  abknob) CTL=${2:?exe}; TRT=$CTL; KNOB=${3:?env var}; KCTL=${4:?control value}
+          KTRT=${5:?treat value}; N=${6:-6}; CARM=off; TARM=on ;;
+  *)     echo "usage: delivery-ab.sh floor <exe> N"
+         echo "       delivery-ab.sh ab <ctl> <treat> N"
+         echo "       delivery-ab.sh abknob <exe> <VAR> <ctlVal> <treatVal> N"; exit 2 ;;
 esac
 
 REPO=${REPO_ROOT:-$(cd "$(dirname "$0")/../../../.." && pwd)}
@@ -46,17 +59,23 @@ W="CHUNKS=${CHUNKS:-8} CONVS=${CONVS:-400} MSGS=${MSGS:-6} TEXTLEN=${TEXTLEN:-30
 W="$W IDLE_S=${IDLE_S:-60} SETTLE_MS=${SETTLE_MS:-20000} PRESYNC_MS=${PRESYNC_MS:-15000}"
 W="$W CHUNK_GAP_MS=${CHUNK_GAP_MS:-0}"
 echo "workload: $W"
-echo "control=$CARM $CTL"
-echo "treat  =$TARM $TRT"
+echo "control=$CARM $CTL ${KNOB:+($KNOB=$KCTL)}"
+echo "treat  =$TARM $TRT ${KNOB:+($KNOB=$KTRT)}"
 
 run_one() {
   arm=$1; rep=$2; pos=$3; exe=$4
   tag="${arm}-r${rep}"
-  echo "===ARM $arm REP $rep POS $pos TAG $tag" >> "$LOG"
+  # The knob value for THIS arm, recorded in the pair log beside the tag so a
+  # reader can see which arm was which without trusting the arm name.
+  kv=""
+  if [ -n "${KNOB:-}" ]; then
+    if [ "$arm" = "$CARM" ]; then kv="$KNOB=$KCTL"; else kv="$KNOB=$KTRT"; fi
+  fi
+  echo "===ARM $arm REP $rep POS $pos TAG $tag ${kv}" >> "$LOG"
   echo "  rep $rep pos $pos  $arm"
   MEMRIG_OUT="$OUT" \
   MEMRIG_PMON="$REPO/tests/perf/zapo-rest/harness/pmon.exe" \
-  sh -c "cd '$ZR' && node --import tsx '$REPO/tests/perf/zapo-rest/harness/memrig.mts' '$exe' '$tag' $W" \
+  sh -c "cd '$ZR' && ${kv:+env $kv }node --import tsx '$REPO/tests/perf/zapo-rest/harness/memrig.mts' '$exe' '$tag' $W" \
     > "$OUT/$tag.driver.log" 2>&1 || echo "  RUN FAILED: $tag (see $tag.driver.log)"
 }
 
