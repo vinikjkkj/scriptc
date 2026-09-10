@@ -152,9 +152,18 @@ function modeThreshold(peaks) {
 }
 
 /** Is the low mode stable enough over time for an unpaired test to be sound? */
+/* COMPARABLE means "not in the HIGH mode", which is not the same as "low".
+ * modeThreshold returns null when the peak distribution is UNIMODAL -- a
+ * quiet box, no second mode to separate -- and every run is then labelled
+ * 'single'. Both the drift check and the metric filters selected 'low'
+ * literally, so a unimodal session produced zero comparable runs and the
+ * tool refused. That is the GOOD case being rejected: nothing needed
+ * separating. A 12-run A/A floor on an idle machine hit it exactly. */
+const comparableMode = (r) => r.mode !== 'HIGH'
+
 function driftCheck(runs) {
-    const lows = runs.filter((r) => r.mode === 'low').sort((a, b) => a.startMs - b.startMs)
-    if (lows.length < 6) return { ok: false, why: 'fewer than 6 low-mode runs — cannot assess drift' }
+    const lows = runs.filter(comparableMode).sort((a, b) => a.startMs - b.startMs)
+    if (lows.length < 6) return { ok: false, why: 'fewer than 6 comparable runs — cannot assess drift' }
     const vals = lows.map((r) => r.metrics.get('peakWS'))
     const range = Math.max(...vals) / Math.min(...vals) - 1
     const firstHalf = median(vals.slice(0, Math.floor(vals.length / 2)))
@@ -193,17 +202,17 @@ function analyse({ logs, runRoot, controlArm, treatArm, label }) {
     console.log(`   HIGH-mode incidence:  ${controlArm}=${inc(controlArm)}   ${treatArm}=${inc(treatArm)}`)
 
     const drift = driftCheck(runs)
-    console.log(`   drift check: n=${drift.n ?? '?'} low-mode runs over ${drift.spanMin ? drift.spanMin.toFixed(0) : '?'} min, ` +
+    console.log(`   drift check: n=${drift.n ?? '?'} comparable runs over ${drift.spanMin ? drift.spanMin.toFixed(0) : '?'} min, ` +
         `range ${drift.range !== undefined ? (drift.range * 100).toFixed(2) + '%' : 'n/a'}, ` +
         `half-to-half ${drift.halfShift !== undefined ? (drift.halfShift * 100).toFixed(2) + '%' : 'n/a'} — ${drift.ok ? 'STABLE, unpaired test is sound' : 'UNSTABLE'}`)
     if (!drift.ok) { console.log(`   REFUSING: ${drift.why}`); return null }
 
     const out = []
     for (const [key, what] of METRICS) {
-        const c = runs.filter((r) => r.arm === controlArm && r.mode === 'low').map((r) => r.metrics.get(key)).filter(Number.isFinite)
-        const t = runs.filter((r) => r.arm === treatArm && r.mode === 'low').map((r) => r.metrics.get(key)).filter(Number.isFinite)
+        const c = runs.filter((r) => r.arm === controlArm && comparableMode(r)).map((r) => r.metrics.get(key)).filter(Number.isFinite)
+        const t = runs.filter((r) => r.arm === treatArm && comparableMode(r)).map((r) => r.metrics.get(key)).filter(Number.isFinite)
         const res = permTest(c, t)
-        if (res === null) { console.log(`   ${key.padEnd(12)} too few low-mode runs (${c.length} vs ${t.length}) — n/a, not 0`); continue }
+        if (res === null) { console.log(`   ${key.padEnd(12)} too few comparable runs (${c.length} vs ${t.length}) — n/a, not 0`); continue }
         const verdict = res.p < 0.05 ? (res.obs < 1 ? `${treatArm} LOWER` : `${treatArm} HIGHER`) : 'DRAW'
         console.log(`   ${key.padEnd(12)} ${pct(res.obs).padStart(8)}  ` +
             `${MiB(median(c)).padStart(7)} -> ${MiB(median(t)).padStart(7)} MiB  ` +
