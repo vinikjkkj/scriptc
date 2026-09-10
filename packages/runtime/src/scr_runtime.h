@@ -248,14 +248,25 @@ enum { SCR_CYC_BLACK = 0, SCR_CYC_PURPLE = 1, SCR_CYC_GRAY = 2, SCR_CYC_WHITE = 
  *
  * WHAT IT IS NOT. It is not an arena and it does not defer frees: a
  * pooled block is reusable immediately and the pool never walks. The
- * depth cap is what keeps it from becoming a memory leak with good
- * manners - peak RSS is one of the compiled binary's real wins (14-27x
- * better than Node) and an unbounded free list would spend it. At
- * SCR_POOL_DEPTH 64 and 32 classes the worst case a pool can hold is
- * 64 * (8 + 16 + ... + 256) = 270 KiB, and there are FOUR pools, not
- * the two this line said until the byte budget was measured:
+ * cap is what keeps it from becoming a memory leak with good manners -
+ * peak RSS is one of the compiled binary's real wins (14-27x better than
+ * Node) and an unbounded free list would spend it.
+ *
+ * WHICH CAP IS LIVE, because this passage named the wrong one. At
+ * SCR_POOL_DEPTH 64 and 32 classes a pool's worst case is
+ * 64 * (8 + 16 + ... + 256) = 270 KiB -- but that is the DEPTH arm, and
+ * SCR_POOL_BUDGET now defaults to 16777216, so scr_pool_give compiles the
+ * BYTE arm and the depth arm is the one that is off. The live worst case
+ * per pool is therefore 16 MiB, not 270 KiB, and there are FOUR pools --
+ * not the two this line said until the byte budget was measured:
  * scr_cyc_blocks (scr_cycle.c), scr_str_blocks (scr_string.c), and
- * scr_json_key_blocks and scr_dyn_ext_blocks (both scr_json.c).
+ * scr_json_key_blocks and scr_dyn_ext_blocks (both scr_json.c). Up to
+ * 64 MiB of blocks the program has dropped and this pool has kept.
+ *
+ * That is not a hypothetical bound. zapo's string arena carves 3.06 MiB
+ * and its own freelist receives ZERO blocks, because scr_str_release
+ * tries the pool first and reaches the arena's list only on a REFUSAL --
+ * and a 16 MiB pool does not refuse. Measured, tests/perf/cycstat.
  *
  * THE GRAIN IS 8, NOT 16, AND THAT WAS MEASURED. 16 is the obvious
  * choice - it is malloc's own alignment - and it is 7% faster here

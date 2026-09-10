@@ -3,11 +3,39 @@
  * WHY THIS EXISTS
  * ---------------
  * `scr_runtime.h` ships `SCR_POOL_BUDGET`, a total-physical-bytes bound on
- * one size-class pool, defaulting to 0 (off, per-class depth instead). The
- * open question it was left off for is peak RSS on zapo, and an A/B of peak
- * RSS is only worth running if the knob CHANGES SOMETHING on zapo. A budget
- * that is never reached cannot move peak RSS by a byte, and an A/B over an
- * inert change is indistinguishable from a real null.
+ * one size-class pool. The open question is peak RSS on zapo, and an A/B of
+ * peak RSS is only worth running if the knob CHANGES SOMETHING on zapo. A
+ * budget that is never reached cannot move peak RSS by a byte, and an A/B
+ * over an inert change is indistinguishable from a real null.
+ *
+ * THE DEFAULT IS 16 MiB AND THE BYTE BRANCH IS LIVE. This paragraph used to
+ * say the budget defaults to 0 -- "off, per-class depth instead" -- and it
+ * has not been true since:
+ *
+ *     #ifndef SCR_POOL_BUDGET
+ *     #define SCR_POOL_BUDGET 16777216
+ *     #endif
+ *
+ * so `scr_pool_give` compiles its `p->bytes + r > SCR_POOL_BUDGET` arm and
+ * the `p->n[c] >= SCR_POOL_DEPTH` arm is the one that is off. Stated in
+ * capitals because THIS FILE IS THE CONTROL FOR THAT KNOB: a reader who
+ * takes the old sentence at face value reasons about a 270 KiB cap when the
+ * live bound is sixty times that, and every conclusion drawn from the
+ * smaller number is wrong in the direction of "the pool cannot be holding
+ * much".
+ *
+ * MEASURED CONSEQUENCE, which is how the staleness was caught. zapo's string
+ * arena carves 3.06 MiB across 49 chunks and its own per-class freelist
+ * receives ZERO blocks (`cycstat`: `strarena ... listhit=0 listgive=0`).
+ * That is only possible because `scr_str_blocks` never refuses a give:
+ * `scr_str_release` tries the pool first and reaches the arena's list only
+ * on a refusal. A 270 KiB pool would have refused long before 3.06 MiB and
+ * pushed the overflow onto that list; a 16 MiB pool never does. The zero and
+ * this constant are the same fact from two sides.
+ *
+ * And it is what makes the question worth asking at all: four pools at a
+ * 16 MiB budget is up to 64 MiB of blocks the program has dropped and the
+ * allocator has kept.
  *
  * So this header answers the control question by an exact count, before any
  * A/B: for every pool in the program, how many blocks pass through it, how
@@ -16,8 +44,12 @@
  * how many gives a set of OTHER bounds would have turned away - so one run
  * prices the whole curve rather than one point.
  *
- * THERE ARE FOUR POOLS, NOT TWO. scr_runtime.h's block comment prices the
- * worst case as "270 KiB, and there are two pools". The tree has four
+ * THERE ARE FOUR POOLS, NOT TWO, AND THE 270 KiB IS THE OFF ARM'S.
+ * scr_runtime.h's block comment prices the worst case as "270 KiB, and there
+ * are two pools" -- both halves are stale. That figure is
+ * `SCR_POOL_DEPTH 64` summed over the classes, i.e. the branch the live
+ * default does not take; under the 16 MiB budget one pool alone may hold
+ * sixty times it. The tree has four
  * `static ScrPool`: scr_cyc_blocks (scr_cycle.c), scr_str_blocks
  * (scr_string.c), scr_json_key_blocks and scr_dyn_ext_blocks (both
  * scr_json.c). Each is registered by name from its own TU, so the report
