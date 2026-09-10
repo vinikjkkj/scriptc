@@ -1750,6 +1750,15 @@ typedef struct ScrMap {
    * values before the index type is what stops it. */
   uint32_t *buckets;
   size_t iter_depth; /* > 0: an iteration is active — no compaction */
+  /* Idle-shrink worklist links (scr_map.c). NOT a registry of live
+   * maps: a map is on this list only while it is a shrink candidate,
+   * i.e. a delete or a clear left it sparse and the between-turns pass
+   * has not visited it yet. Doubly linked so a free unlinks in O(1)
+   * rather than scanning; no retain is taken, because retaining would
+   * mark a garbage map live to the collector. */
+  struct ScrMap *sh_prev;
+  struct ScrMap *sh_next;
+  uint8_t sh_queued;
 } ScrMap;
 
 /* retain/release/trace are NULL for scalar value kinds; retain/release are
@@ -1765,6 +1774,15 @@ void scr_map_release_v(void *m);
 void scr_map_trace_v(void *m, ScrTraceVisit visit, void *ctx);
 
 double scr_map_size(const ScrMap *m); /* live entries (Map.size) */
+
+/* Give sparse maps' tables back, at the event loop's BETWEEN-TURNS point.
+ * scr_map_compact densifies in place and never lowers ecap; this lowers it
+ * and reallocs entries/live/buckets down. Called from scr_collect_cycles_idle
+ * BEFORE its pace gate -- it is not a collection and must not be paced by the
+ * cycle-root count. Skips any map with an iteration in flight: compaction
+ * renumbers entry indices, and an async iteration holds iter_depth across
+ * exactly this point. */
+void scr_map_idle_shrink(void);
 void scr_map_clear(ScrMap *m);
 
 bool scr_map_has_f64(const ScrMap *m, double key);
