@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 import { validateModule } from "../src/ir/validate.js";
-import { deserializeModule, serializeModule } from "../src/ir/serialize.js";
+import { deserializeModule, IR_VERSION, serializeModule } from "../src/ir/serialize.js";
 import { fibModule } from "./fixtures/fib-ir.js";
 import { BOOL, DYN, F64, type IrExpr, type IrModule } from "../src/ir/nodes.js";
 
@@ -16,7 +16,7 @@ test("fib module JSON round-trips", () => {
 test("validator rejects type mismatches and bad references", () => {
   const loc = { file: "t.ts", start: 0, end: 0 };
   const bad: IrModule = {
-    irVersion: 3,
+    irVersion: 4,
     sourceFile: "t.ts",
     entry: "__main",
     functions: [
@@ -64,7 +64,7 @@ test("validator rejects out-of-range and duplicated dynArrLit spread indices", (
     loc,
   });
   const moduleWith = (spreads: { at: number; what: string | null }[]): IrModule => ({
-    irVersion: 3,
+    irVersion: 4,
     sourceFile: "t.ts",
     entry: "__main",
     functions: [
@@ -106,7 +106,7 @@ test("validator rejects out-of-range and duplicated dynArrLit spread indices", (
 });
 
 
-test("serializer round-trips ±Infinity and refuses NaN", () => {
+test("serializer round-trips ±Infinity, -0 and NaN", () => {
   const mod = structuredClone(fibModule);
   const fn = mod.functions[0]!;
   const stmt = fn.body[0]!;
@@ -128,13 +128,38 @@ test("serializer round-trips ±Infinity and refuses NaN", () => {
   if (stmt3.kind === "if" && stmt3.cond.kind === "bin" && stmt3.cond.right.kind === "numLit") {
     expect(stmt3.cond.right.value).toBe(-Infinity);
   }
+  // NaN ROUND-TRIPS. It used to be refused as "a frontend bug", which was
+  // wrong twice over: `NaN` is a legal global, and the compiler's own
+  // lowering bakes it (lower-exprs.ts's identifier arm and
+  // NUMBER_CONSTANTS.NaN in lower-builtins.ts). The refusal made --emit-ir
+  // unusable for any program containing a NaN literal, which zapo is.
   if (stmt.kind === "if" && stmt.cond.kind === "bin" && stmt.cond.right.kind === "numLit") {
     stmt.cond.right.value = NaN;
   }
-  expect(() => serializeModule(mod)).toThrow(/NaN/);
+  const back3 = deserializeModule(serializeModule(mod));
+  const stmt4 = back3.functions[0]!.body[0]!;
+  if (stmt4.kind === "if" && stmt4.cond.kind === "bin" && stmt4.cond.right.kind === "numLit") {
+    expect(Number.isNaN(stmt4.cond.right.value)).toBe(true);
+  } else {
+    throw new Error("round-trip lost the statement shape");
+  }
+  // ...and the sentinel really is in the JSON, so a reader that does not know
+  // the tag cannot mistake it for a plain number.
+  expect(serializeModule(mod)).toContain('"$nonfinite": "nan"');
+
+  // -0 keeps its sign: String(-0) is "0" but 1/-0 is -Infinity, and
+  // JSON.stringify(-0) prints "0", so only the sentinel carries it.
+  if (stmt.kind === "if" && stmt.cond.kind === "bin" && stmt.cond.right.kind === "numLit") {
+    stmt.cond.right.value = -0;
+  }
+  const back4 = deserializeModule(serializeModule(mod));
+  const stmt5 = back4.functions[0]!.body[0]!;
+  if (stmt5.kind === "if" && stmt5.cond.kind === "bin" && stmt5.cond.right.kind === "numLit") {
+    expect(Object.is(stmt5.cond.right.value, -0)).toBe(true);
+  }
 });
 
 test("deserializer enforces IR version", () => {
-  const json = serializeModule(fibModule).replace('"irVersion": 3', '"irVersion": 99');
+  const json = serializeModule(fibModule).replace(`"irVersion": ${IR_VERSION}`, '"irVersion": 99');
   expect(() => deserializeModule(json)).toThrow(/version mismatch/);
 });

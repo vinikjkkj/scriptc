@@ -1,0 +1,59 @@
+# The cycle trap, as it fires TODAY. Recorded so that when a by-reference or
+# lazily materialised box moves it, the movement is a reviewed edit to this
+# file and not an unnoticed drift.
+#
+# Taken on x86_64-windows-gnu, zig 0.16.0 (the tree's), --backend c, against
+# the node the corpus differential spawns (v25.9.0). Reproduce with:
+#
+#   node packages/cli/dist/main.js build tests/perf/boxanat/cyc1.ts -o <out>/cyc1.exe --backend c
+#   <out>/cyc1.exe ; node tests/perf/boxanat/cyc1.ts
+#
+# exit -1073740791 is 0xC0000409 — the runtime's fast-fail abort path, taken
+# after the fence prints. It is a DESIGNED abort, not a crash.
+
+cyc1  a cyclic value crossed into `unknown`, then `typeof` read off the box
+  scriptc  stdout: "built the cycle"
+           stderr: scriptc: cannot convert a circular structure into a checked-dynamic value (unknown-typed slots deep-copy; break the cycle first)
+           exit:   -1073740791
+  node     stdout: "built the cycle" / "crossed: object"
+           exit:   0
+  verdict  DIVERGES. node has no trouble here: it passes the reference.
+
+cyc2  the same cycle, crossed and then ONLY recovered at its static type
+  scriptc  stdout: (nothing — the trap fires at the crossing, before the
+                   recovery the program was written to reach)
+           stderr: scriptc: cannot convert a circular structure into a checked-dynamic value (unknown-typed slots deep-copy; break the cycle first)
+           exit:   -1073740791
+  node     stdout: "recovered a same=true"
+           exit:   0
+  verdict  DIVERGES, and this is the case that decides the route. The box is
+           never read dynamically. The deep copy the trap is protecting is a
+           copy NOTHING IN THE PROGRAM EVER LOOKS AT — the recovery hands back
+           the origin (scr_dyn_origin_take), which is the same pointer node
+           would have passed.
+
+# WHAT THE FIX DOES TO THESE TWO, and why the new site is correct.
+#
+# 218 of zapo's 1,905 converters reach a cycle (tests/perf/boxanat/boxanat.mjs),
+# so this is not a corner: it is a fifth of the shapes that cross.
+#
+# cyc2  the trap DISAPPEARS. A lazily materialised box does not build the copy
+#       at the crossing, and nothing in the program ever asks for it, so there
+#       is no circular structure to convert and the program prints node's
+#       answer. This is not "the error moved somewhere better" — the error was
+#       never owed. The fence exists to stop a deep copy that cannot terminate;
+#       where no deep copy is attempted, refusing is a false positive.
+#
+# cyc1  the trap MOVES, from the crossing to the `typeof` read. `typeof` is a
+#       refonly operation (objaudit.tsv: scr_dyn_typeof_native answers
+#       "object" with no member table), so under a complete fix cyc1 also stops
+#       trapping and prints node's answer. It keeps its own line here because
+#       it is the case that distinguishes a fix that only defers materialisation
+#       from one that also teaches the table-free operations to answer without
+#       forcing — if cyc1 still traps and cyc2 does not, the second half is
+#       missing.
+#
+# WHEN THIS FILE CHANGES, both entries must be re-recorded together and the
+# programs must MOVE to tests/corpus/, where the differential compares them
+# against node automatically. They are not there today for the honest reason:
+# they FAIL, and a corpus program that fails is a red gate, not a record.

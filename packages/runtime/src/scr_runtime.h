@@ -248,14 +248,25 @@ enum { SCR_CYC_BLACK = 0, SCR_CYC_PURPLE = 1, SCR_CYC_GRAY = 2, SCR_CYC_WHITE = 
  *
  * WHAT IT IS NOT. It is not an arena and it does not defer frees: a
  * pooled block is reusable immediately and the pool never walks. The
- * depth cap is what keeps it from becoming a memory leak with good
- * manners - peak RSS is one of the compiled binary's real wins (14-27x
- * better than Node) and an unbounded free list would spend it. At
- * SCR_POOL_DEPTH 64 and 32 classes the worst case a pool can hold is
- * 64 * (8 + 16 + ... + 256) = 270 KiB, and there are FOUR pools, not
- * the two this line said until the byte budget was measured:
+ * cap is what keeps it from becoming a memory leak with good manners -
+ * peak RSS is one of the compiled binary's real wins (14-27x better than
+ * Node) and an unbounded free list would spend it.
+ *
+ * WHICH CAP IS LIVE, because this passage named the wrong one. At
+ * SCR_POOL_DEPTH 64 and 32 classes a pool's worst case is
+ * 64 * (8 + 16 + ... + 256) = 270 KiB -- but that is the DEPTH arm, and
+ * SCR_POOL_BUDGET now defaults to 16777216, so scr_pool_give compiles the
+ * BYTE arm and the depth arm is the one that is off. The live worst case
+ * per pool is therefore 16 MiB, not 270 KiB, and there are FOUR pools --
+ * not the two this line said until the byte budget was measured:
  * scr_cyc_blocks (scr_cycle.c), scr_str_blocks (scr_string.c), and
- * scr_json_key_blocks and scr_dyn_ext_blocks (both scr_json.c).
+ * scr_json_key_blocks and scr_dyn_ext_blocks (both scr_json.c). Up to
+ * 64 MiB of blocks the program has dropped and this pool has kept.
+ *
+ * That is not a hypothetical bound. zapo's string arena carves 3.06 MiB
+ * and its own freelist receives ZERO blocks, because scr_str_release
+ * tries the pool first and reaches the arena's list only on a REFUSAL --
+ * and a 16 MiB pool does not refuse. Measured, tests/perf/cycstat.
  *
  * THE GRAIN IS 8, NOT 16, AND THAT WAS MEASURED. 16 is the obvious
  * choice - it is malloc's own alignment - and it is 7% faster here
@@ -358,11 +369,18 @@ enum { SCR_CYC_BLACK = 0, SCR_CYC_PURPLE = 1, SCR_CYC_GRAY = 2, SCR_CYC_WHITE = 
 #endif
 
 /* SCR_POOL_BUDGET: the total PHYSICAL BYTES one pool may hold across all
- * classes, as an alternative bound to the per-class depth above. 0, the
- * default, is the shipped behaviour and compiles to the same code it always
- * did -- the depth field is not even declared under a budget, and the
- * budget field is not declared without one, so neither arm carries the
- * other's cost.
+ * classes, as an alternative bound to the per-class depth above.
+ *
+ * THE DEFAULT IS 16 MiB, AND HAS BEEN SINCE 7bd0e4ce3. This paragraph said
+ * "0, the default, is the shipped behaviour" until that commit measured the
+ * bound is never reached on zapo and turned it on -- and its own promise
+ * that "every claim the measurement moved is rewritten in place" missed
+ * this sentence. Three descriptions of this knob were stale at once: this
+ * one, the worst-case note above, and tests/perf/poolstat's header.
+ *
+ * 0 restores the per-class depth cap. The depth field is not declared under
+ * a budget and the budget field is not declared without one, so neither arm
+ * carries the other's cost.
  *
  * The curve this exists to price is the block comment above: on the
  * messaging bench a `store.clear()` frees 200,000 blocks of ONE class at
@@ -505,10 +523,27 @@ typedef struct ScrCycHdr {
    * (see scr_cyc_base below) rather than as pointers. EVERY cycle-headered object carries this
    * header, and on zapo that is the single largest term in the heap:
    * two 8-byte function pointers were 16 of the 32 header bytes and 16
-   * of the 104 physical bytes of a ScrDyn. Storing them as RVAs is a
-   * runtime-only change -- scr_cyc_alloc keeps taking real function
-   * pointers, so none of the 1,451 call sites (1,434 of them in the
-   * emitted TU) moves. */
+   * of the 104 physical bytes a ScrDyn cost BEFORE this change. Storing
+   * them as RVAs is a runtime-only change -- scr_cyc_alloc keeps taking
+   * real function pointers, so none of the 1,451 call sites (1,434 of
+   * them in the emitted TU) moves.
+   *
+   * THOSE TWO NUMBERS ARE HISTORY, NOT THE LAYOUT, and they read as
+   * present tense. They describe the state this change replaced.
+   * Measured on x86_64-windows-gnu today -- tests/perf/dyncensus prints
+   * all three in its LAYOUT line, and tests/perf/boxanat builds its cost
+   * model on them:
+   *
+   *     sizeof(ScrCycHdr)   16      (was 32)
+   *     sizeof(ScrDyn)      48      (was 72)
+   *     one dyn node        64 physical, = scr_pool_bytes(16 + 48) at
+   *                         the 8-byte grain   (was 104)
+   *
+   * Spelled out rather than corrected in place, because a stale constant
+   * in a header is how the next reader builds a wrong model of the heap.
+   * 104 against 64 is a 1.6x error on the most numerous object in the
+   * program, and it survives every gate in this project because nothing
+   * compiles against a comment. */
   int32_t trace_off;
   int32_t free_off;
   /* color, buffered and blk were a uint32 each and needed 2, 1 and 6
