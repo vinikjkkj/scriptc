@@ -31,10 +31,23 @@ it also counts the executable's mapped image, which is shared and file-backed.
 | settled (+60 s after the sync) | **85.25** MB | 104.76 | 198.93 |
 | retention | **67.53 MB** | | |
 
-**Spreads across those 12 runs: settled ±4.53 MB, idle ±5.98 MB.** The idle
-figure is the noisy one and should not be treated as precise — it is sampled
-15 s after login while the service is still settling. Settled is the solid
-number.
+**Spreads across those 12 runs: settled ±4.53 MB, idle ±5.98 MB.**
+
+**The idle figure is not a floor and should not be read as one.** It is
+sampled 15 s after login while the service is still settling, it is by far
+the noisiest thing in this document, and across the 12 runs it spans roughly
+**12 to 24 MB** — still falling at the moment we look. **If you have seen
+about 10 MB at idle, that is consistent with the same process measured after
+a longer settle**, not a disagreement about the facts. We have not yet
+measured a long-settled idle and this file will not pretend otherwise.
+
+**The solid number is the plateau itself: 85.25 MB, spread 4.53.** That is
+where the process sits after a sync and it is what this work is about.
+
+The retention figure of **67.53 MB** is the gap between the two rows above,
+measured on the same runs — so it inherits the idle row's uncertainty. Note
+which way that cuts: **if a longer-settled idle is lower, the retention is
+larger than 67.53, not smaller.** Nothing below depends on resolving it.
 
 ### What the 67.53 MB is made of, census arm
 
@@ -143,18 +156,22 @@ inside our noise floor.** Those are the numbers to beat.
 
 ---
 
-## 6. Two things this build will not do
+## 6. What this build will and will not do
 
 **It will not return to idle after a sync.** Realistically the plateau lands
 near **80 MB** without the scheduling change in §3, and near **52 MB** with
 it (85.25 now, less roughly 33 MB of fragmentation that change removes).
 
-**It does not idle at 10 MB either.** This binary's own idle floor is
-**17.72 MB** private working set (36.08 MB total). The gap between those two
-is the executable's mapped image: it is 29.8 MB on disk and about **18 MB of
-it is resident**, shared and file-backed, which is why it shows in the total
-column and not in the one you are reading. If
-you remember 10 MB, that was a different program, not a regression here.
+**What its idle floor actually is, we have not established.** Our idle
+samples average 17.72 MB private working set (36.08 MB total) but are taken
+15 s after login, still falling, spanning 12–24 MB. A longer-settled idle is
+plausibly lower, and **your ~10 MB is compatible with that** — we are not
+claiming you misremembered. A dedicated long-idle measurement is the one
+piece of this report still outstanding.
+
+What the total column adds is the executable's mapped image: it is 29.8 MB
+on disk and about **18 MB of it is resident**, shared and file-backed, which
+is why it shows there and not in the column you are reading.
 
 ---
 

@@ -152,7 +152,11 @@ const ownStr      = M.strArena   // unfreeable BY CONSTRUCTION; a registry fixes
 const retention   = M.settledPriv - M.presyncPriv
 
 console.log(NL + 'in PRIVATE working set — the column Task Manager shows and the user quoted:')
-console.log('  idle              ' + mib(M.presyncPriv) + ' MiB   (their "10 MB")')
+console.log('  idle              ' + mib(M.presyncPriv) + ' MiB   NOT A FLOOR: sampled 15 s')
+console.log('                                 after login, still falling; the shipping arm')
+console.log('                                 spans 12-24 MiB across 12 runs. A long-settled')
+console.log('                                 idle has never been measured, and their')
+console.log('                                 "10 MB" is compatible with one.')
 console.log('  settled           ' + mib(M.settledPriv) + ' MiB   (their "70-100 MB")')
 console.log('  retention         ' + mib(retention) + ' MiB' + NL)
 console.log('  what it is made of, in their column:')
