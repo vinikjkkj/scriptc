@@ -171,6 +171,12 @@ console.log('    cycle arena page return   ' + mib(ownCycPages) +
   ' MiB   ours, 61.25% occupancy, no foreign metadata')
 console.log('    string arena chunks       up to ' + mib(ownStr) +
   ' MiB   never recycles at all (listgive=0); needs a registry')
+console.log('      ...but "up to" is doing real work in that sentence. The cycle arena')
+console.log('      ALREADY has the chunk list this fix would add, and it still holds')
+console.log('      7.25 MiB at 61% occupancy, because chunks rarely reach used==0. The')
+console.log('      string arena inherits exactly that placement problem, so the yield')
+console.log('      may be considerably under 3 MiB. The fix is correct and necessary;')
+console.log('      its SIZE is not established, and the handover must not imply it is.')
 console.log('    total                     ' + mib(ownCycPages + ownStr) + ' MiB = ' +
   (100 * (ownCycPages + ownStr) / retention).toFixed(1) + '% of what the user sees')
 console.log(NL + 'in TOTAL working set, where the binary IS a floor:')
