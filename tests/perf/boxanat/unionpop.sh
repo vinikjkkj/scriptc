@@ -58,6 +58,17 @@ export MEMRIG_OUT="${MEMRIG_OUT:-$OUT_DIR/memrig-run}"
 export MEMRIG_PMON="${MEMRIG_PMON:-$H/pmon.exe}"
 # The sampler is one C file. Build it rather than refuse over it.
 [ -f "$MEMRIG_PMON" ] || zig cc -O2 -o "$MEMRIG_PMON" "$H/pmon.c" -lpsapi
+# WHICH COLUMNS THIS RUN WILL HAVE, said out loud rather than discovered later.
+# The tree's pmon.c is FIVE-column; `privateWS` -- the column the delivery
+# report is denominated in -- lives on block/memcensus and is not on main yet.
+# This lane counts union nodes and does not need it, so this STATES rather than
+# refuses; a lane that needs private WS must check for the column itself and
+# refuse, because a missing column reads as a missing field, not as a failure.
+if grep -q privateWS "$H/pmon.c" 2>/dev/null; then
+  echo "sampler     $H/pmon.c (six-column, privateWS present)"
+else
+  echo "sampler     $H/pmon.c (FIVE-column: no privateWS in this tree)"
+fi
 
 # THE LAUNCH DIRECTORY IS PART OF THE PROTOCOL. fake-server imports zapo-js/*
 # through tsconfig "paths" at the ZAPO ROOT, and tsx reads the tsconfig from
