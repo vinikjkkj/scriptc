@@ -59,6 +59,15 @@ case "$ARM" in
   *) echo "usage: census-arms.sh {plain|arena|objects|memmap} {build|run} [runTag]"; exit 2 ;;
 esac
 
+# THE ENTRY IS app182 AND ONLY app182. tests/perf/zapo-rest/app/ is zapo-js
+# 1.6.2 and the user has ruled that version out entirely -- not for arms, not
+# for controls, not for floors. Nothing here reaches it today; this refuses so
+# that stays true if someone parameterises the entry later.
+case "${ENTRY:-app182}" in
+  app182) : ;;
+  *) echo "census-arms.sh: refusing entry '${ENTRY}' -- 1.8.2 (app182) only"; exit 2 ;;
+esac
+
 OUT=$OUTROOT/$ARM
 mkdir -p "$OUT"
 

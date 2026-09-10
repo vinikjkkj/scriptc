@@ -37,12 +37,40 @@
 import { readFileSync, existsSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 
+/* THREE MEMORY COLUMNS, NOT ONE, plus a CPU column.
+ *
+ * workingSet is the TOTAL and includes file-backed shared pages; on this
+ * binary the mapped image is ~19 MiB of it, so an idle service reads 32 MiB
+ * total against 13 MiB private. Task Manager's Processes tab -- and
+ * therefore the complaint this work exists to answer -- shows the PRIVATE
+ * working set. Reporting only the total is a 2-3x error on the quantity
+ * that matters.
+ *
+ * cpuToSettled is here because "no performance loss" is an explicit
+ * requirement and an unmeasured half is a failed half. It is total CPU
+ * consumed by the time the plateau is reached, so a fix that saves memory
+ * by doing more work cannot pass unnoticed. */
 const METRICS = [
-    ['peakWS', 'peak working set'],
+    ['peakWS', 'peak working set (total)'],
+    ['peakPrivWS', 'peak working set (PRIVATE)'],
     ['peakPriv', 'peak private commit'],
-    ['settledWS', 'settled working set'],
+    ['settledWS', 'settled working set (total)'],
+    ['settledPrivWS', 'settled working set (PRIVATE)'],
     ['settledPriv', 'settled private commit'],
+    ['cpuToSettledMs', 'CPU to settled (ms)', 'ms'],
 ]
+/* THE FORMATTER HAD ONE UNIT AND THE TABLE HAS TWO. Every row was printed
+ * through MiB(), so cpuToSettledMs -- milliseconds -- was divided by
+ * 1,048,576 and labelled MiB: 10,438 ms rendered as "0.01 MiB". The
+ * PERCENTAGE was never affected, because it is a ratio of raw medians
+ * computed before any formatting, so the verdicts stood; only the absolute
+ * column was unreadable. That is still not cosmetic, because CPU is the
+ * "no performance loss" half of this objective and a column nobody can read
+ * is a column nobody checks. */
+const UNIT = new Map(METRICS.map((m) => [m[0], m[2] ?? 'MiB']))
+const fmt = (key, v) => UNIT.get(key) === 'ms'
+    ? v.toFixed(0).padStart(7) + ' ms '
+    : MiB(v).padStart(7) + ' MiB'
 
 function readRun(runRoot, tag) {
     const csv = join(runRoot, `${tag}.rss.csv`)
@@ -61,7 +89,20 @@ function readRun(runRoot, tag) {
     const peakP = rows.reduce((a, b) => (b[2] > a[2] ? b : a))
     const settled = markRe(/^SETTLED-r/) ?? markRe(/^SYNC-DONE/)
     const m = new Map([['peakWS', peakW[1]], ['peakPriv', peakP[2]]])
-    if (settled) { m.set('settledWS', settled[1]); m.set('settledPriv', settled[2]) }
+    /* Column 5 is privateWS and column 4 is cpuMs; pmon appends them, so an
+     * older CSV simply lacks them and the metric is omitted rather than
+     * defaulted. -1 is pmon's "could not read", which must never be
+     * averaged in as if it were a measurement. */
+    const hasPriv = rows.every((r) => r.length >= 6 && r[5] >= 0)
+    if (hasPriv) {
+        const peakPW = rows.reduce((a, b) => (b[5] > a[5] ? b : a))
+        m.set('peakPrivWS', peakPW[5])
+    }
+    if (settled) {
+        m.set('settledWS', settled[1]); m.set('settledPriv', settled[2])
+        if (hasPriv && settled.length >= 6 && settled[5] >= 0) m.set('settledPrivWS', settled[5])
+        if (settled.length >= 5 && Number.isFinite(settled[4])) m.set('cpuToSettledMs', settled[4])
+    }
     return { metrics: m, startMs: phases.length ? phases[0].ms : 0 }
 }
 
@@ -123,9 +164,18 @@ function modeThreshold(peaks) {
 }
 
 /** Is the low mode stable enough over time for an unpaired test to be sound? */
+/* COMPARABLE means "not in the HIGH mode", which is not the same as "low".
+ * modeThreshold returns null when the peak distribution is UNIMODAL -- a
+ * quiet box, no second mode to separate -- and every run is then labelled
+ * 'single'. Both the drift check and the metric filters selected 'low'
+ * literally, so a unimodal session produced zero comparable runs and the
+ * tool refused. That is the GOOD case being rejected: nothing needed
+ * separating. A 12-run A/A floor on an idle machine hit it exactly. */
+const comparableMode = (r) => r.mode !== 'HIGH'
+
 function driftCheck(runs) {
-    const lows = runs.filter((r) => r.mode === 'low').sort((a, b) => a.startMs - b.startMs)
-    if (lows.length < 6) return { ok: false, why: 'fewer than 6 low-mode runs — cannot assess drift' }
+    const lows = runs.filter(comparableMode).sort((a, b) => a.startMs - b.startMs)
+    if (lows.length < 6) return { ok: false, why: 'fewer than 6 comparable runs — cannot assess drift' }
     const vals = lows.map((r) => r.metrics.get('peakWS'))
     const range = Math.max(...vals) / Math.min(...vals) - 1
     const firstHalf = median(vals.slice(0, Math.floor(vals.length / 2)))
@@ -164,20 +214,20 @@ function analyse({ logs, runRoot, controlArm, treatArm, label }) {
     console.log(`   HIGH-mode incidence:  ${controlArm}=${inc(controlArm)}   ${treatArm}=${inc(treatArm)}`)
 
     const drift = driftCheck(runs)
-    console.log(`   drift check: n=${drift.n ?? '?'} low-mode runs over ${drift.spanMin ? drift.spanMin.toFixed(0) : '?'} min, ` +
+    console.log(`   drift check: n=${drift.n ?? '?'} comparable runs over ${drift.spanMin ? drift.spanMin.toFixed(0) : '?'} min, ` +
         `range ${drift.range !== undefined ? (drift.range * 100).toFixed(2) + '%' : 'n/a'}, ` +
         `half-to-half ${drift.halfShift !== undefined ? (drift.halfShift * 100).toFixed(2) + '%' : 'n/a'} — ${drift.ok ? 'STABLE, unpaired test is sound' : 'UNSTABLE'}`)
     if (!drift.ok) { console.log(`   REFUSING: ${drift.why}`); return null }
 
     const out = []
     for (const [key, what] of METRICS) {
-        const c = runs.filter((r) => r.arm === controlArm && r.mode === 'low').map((r) => r.metrics.get(key)).filter(Number.isFinite)
-        const t = runs.filter((r) => r.arm === treatArm && r.mode === 'low').map((r) => r.metrics.get(key)).filter(Number.isFinite)
+        const c = runs.filter((r) => r.arm === controlArm && comparableMode(r)).map((r) => r.metrics.get(key)).filter(Number.isFinite)
+        const t = runs.filter((r) => r.arm === treatArm && comparableMode(r)).map((r) => r.metrics.get(key)).filter(Number.isFinite)
         const res = permTest(c, t)
-        if (res === null) { console.log(`   ${key.padEnd(12)} too few low-mode runs (${c.length} vs ${t.length}) — n/a, not 0`); continue }
+        if (res === null) { console.log(`   ${key.padEnd(12)} too few comparable runs (${c.length} vs ${t.length}) — n/a, not 0`); continue }
         const verdict = res.p < 0.05 ? (res.obs < 1 ? `${treatArm} LOWER` : `${treatArm} HIGHER`) : 'DRAW'
         console.log(`   ${key.padEnd(12)} ${pct(res.obs).padStart(8)}  ` +
-            `${MiB(median(c)).padStart(7)} -> ${MiB(median(t)).padStart(7)} MiB  ` +
+            `${fmt(key, median(c))} -> ${fmt(key, median(t))}  ` +
             `n=${res.nc}v${res.nt}  p=${res.p.toFixed(4)}  ${verdict}   ${what}`)
         out.push([key, verdict, res])
     }

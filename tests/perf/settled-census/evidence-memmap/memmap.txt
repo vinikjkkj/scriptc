@@ -1,0 +1,22 @@
+MEMMAP v1 tag=- why=highwater snapshots=2 pid=33428
+KERNEL wsNow=203644928 wsPeak=224116736 privateUsage=747597824 faults=92722
+WALK resident=206757888 committed=469856256 sharedResident=21245952 orphanResident=141418496 orphanUnresolved=108085248 regions=32768
+CLASS INSTRUMENT resident=3952640 committed=0 residentMiB=3.76
+CLASS IMAGE resident=0 committed=0 residentMiB=0.00
+CLASS MAPPED resident=331776 committed=0 residentMiB=0.31
+CLASS STACK resident=65277952 committed=469794816 residentMiB=62.25
+CLASS HEAP resident=3235840 committed=0 residentMiB=3.08
+CLASS PRIVATE resident=133959680 committed=61440 residentMiB=127.75
+COVERAGE walkResident=206757888 wsPeak=224116736 pct=92 attempts=2 triesThisPeak=1
+ORPHANCLS total=141418496 INSTRUMENT=3952640 IMAGE=0 MAPPED=331776 STACK=0 HEAP=3235840 PRIVATE=133898240 unresolved=108085248
+STACKSUM bases=16383 resident=65277952 committed=469794816 residentPerBase=3984 committedPerBase=28675 maxRes=73728 minRes=0
+COST heapWalkMs=0 vmWalkMs=625 pageBucketMs=93
+HEAPTOTAL heaps=3 committed=73146368 uncommitted=10887168 busyBytes=75082679 busyCount=162783 freeBytes=1865360 freeCount=9313 overhead=2495865 mallocHeapIdx=1
+HEAP 0 handle=0x25b9cde0000 walked=1 err=259 committed=73097216 busyBytes=75063357 busyCount=162772 freeBytes=1853136 freeCount=9310 overhead=2495603
+HEAP 1 handle=0x25b9cd30000 walked=1 err=259 committed=4096 busyBytes=0 busyCount=0 freeBytes=2144 freeCount=1 overhead=32
+HEAP 2 handle=0x25b9d0e0000 walked=1 err=259 committed=45056 busyBytes=19322 busyCount=11 freeBytes=10080 freeCount=2 overhead=230
+REGION cls=3 base=0xdc747ee000 allocBase=0xdc73800000 size=73728 resident=73728 protect=0x4
+FIBERS n/a - scr_fiber_stat.h was not -include'd. This is NOT a zero.
+PHASEHITS 0
+SKIPPEDWALKS 0
+END

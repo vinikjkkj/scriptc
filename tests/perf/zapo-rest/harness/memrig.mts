@@ -106,6 +106,12 @@ const N = (k: string, d: number) => Number(extraEnv[k] ?? process.env[k] ?? d)
 const CHUNKS = N('CHUNKS', 8), CONVS = N('CONVS', 400), MSGS = N('MSGS', 6)
 const TEXTLEN = N('TEXTLEN', 300), IDLE_S = N('IDLE_S', 60), SAMPLE_MS = N('SAMPLE_MS', 250)
 const ROUNDS = N('ROUNDS', 1), SETTLE_MS = N('SETTLE_MS', 45000), PRESYNC_MS = N('PRESYNC_MS', 20000)
+/* Gap between history-sync chunk deliveries. 0 (the default) is the shipped
+ * behaviour and what every figure so far was taken under: all CHUNKS are
+ * pushed back to back, so the service decodes and persists them CONCURRENTLY.
+ * A positive gap lets each chunk finish before the next arrives, which is the
+ * only way to vary CONCURRENCY while holding the payload fixed. */
+const CHUNK_GAP_MS = N('CHUNK_GAP_MS', 0)
 const SHUTDOWN_WAIT_MS = N('SHUTDOWN_WAIT_MS', 30000)
 
 /* LIVE MESSAGES — added for the no-buffer experiment, default 0, so every
@@ -208,7 +214,7 @@ writeFileSync(PH, 'ms,phase\n')
 for (const k of ['SCR_HEAP_TRIM_MS', 'SCR_HEAP_TRIM_STAT', 'SCR_HEAP_TRIM_CENSUS',
     'SCR_FIBER_POOL_DECAY_MS', 'SCR_CYCEN_OUT', 'SCR_STRING_ARENA', 'SCR_CYCLE_ARENA',
     'SCR_CYCLE_ARENA_BUDGET', 'SCR_STRING_INTERN', 'ZAPO_SQLITE_CACHE_KB', 'ZAPO_EVENT_BUFFER',
-    'ZAPO_MSG_KEEP',
+    'ZAPO_MSG_KEEP', 'CHUNK_GAP_MS',
     'SCR_PAGECEN_EVERY', 'SCR_MEMMAP_MS', 'SCR_MEMMAP_SELFTEST',
     'SCR_CYCLE_IDLE_PACE',
     'CHUNKS', 'CONVS', 'MSGS', 'TEXTLEN', 'ROUNDS', 'IDLE_S',
@@ -416,6 +422,7 @@ async function main() {
                 conversations: conversations as any
             })
             phase(`chunk-sent-${c}`)
+            if (CHUNK_GAP_MS > 0) await sleep(CHUNK_GAP_MS)
         }
         phase(`all-chunks-sent-r${round}`)
         const want = round * CHUNKS
