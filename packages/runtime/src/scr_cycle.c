@@ -1518,6 +1518,12 @@ static size_t scr_cyc_idle_pace(void) {
 }
 
 void scr_collect_cycles_idle(void) {
+  /* Give sparse map tables back FIRST, before the pace gate below can
+   * return early. This is not a collection: pacing it by the cycle-root
+   * count would tie "does memory come back" to an unrelated threshold,
+   * and a burst that leaves sparse maps need not leave cycle roots. */
+  scr_map_idle_shrink();
+
   size_t pace = scr_cyc_idle_pace();
   if (pace != 0) {
     size_t want = scr_cyc_live / pace;

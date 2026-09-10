@@ -1,6 +1,7 @@
 # zapo-rest — a compiled WhatsApp REST service over the SQLite store
 
-`app/zapo-rest.ts` is one entry program that compiles to a single native
+The entry program -- `app182/zapo-rest.ts` on the live arm, `app/zapo-rest.ts`
+on the retired one (see **Build**) -- compiles to a single native
 executable which runs **N real zapo WhatsApp clients at once**, persists them all
 to **one SQLite file over one SQLite connection**, and serves zapo's public API
 as plain JSON over HTTP.
@@ -15,10 +16,40 @@ built `.exe` plus generated docs.
 
 ## Build
 
+> **1.8.2 ONLY.** The user has instructed that nothing is to be run on the old
+> zapo version -- 1.8.2 only. (The instruction was given in Portuguese; this
+> is its content, and it was unambiguous.)
+> **`app/` is zapo-js 1.6.2 and is retired.** Build `app182/` instead and see
+> `app182/README.md`, which carries the same recipe with the 1.8.2 entry. The
+> recipe below is kept only so that older reports naming it stay readable; do
+> not run it.
+
+> **REBUILD `dist` FIRST -- and the gate structurally cannot tell you this.**
+> The command below runs `packages/cli/dist/main.js`: the *built* compiler, not
+> `src`. `vitest.config.ts` aliases `@scriptc/compiler` to **`src`**, so a green
+> gate exercises the sources and never loads `dist` at all. A `dist` that is
+> weeks stale therefore passes every test and then miscompiles.
+>
+> Measured 2026-09-10 in the main worktree: `packages/compiler/dist/index.js`
+> was from **Aug 26**, with **55 source files newer than it**. A delivery build
+> through that `dist` produced **86 SC2020/SC1090 refusals inside zapo-js's own
+> source** and no binary, while the identical program built clean from a
+> worktree whose `dist` was current. Nothing in the 86 diagnostics pointed at
+> `dist`; three plausible causes (stale provenance, `--keep-c`, wrong working
+> directory) were each checked and refuted before the mtimes were compared.
+>
+> So: run `pnpm build` before any `cli/dist`-driven build, then confirm it took
+> -- `packages/compiler/dist/index.js` should be newer than every
+> `packages/compiler/src/**/*.ts`. `dist` is gitignored, so rebuilding it
+> cannot dirty the tree.
+
 ```sh
+# RETIRED (1.6.2, out of scope by user instruction) -- kept for reading old
+# reports, not for running. The live arm is app182/.
 # the app dir supplies the deps and the tsconfig; the entry path is absolute
 cd tests/perf/zapo-rest/app && npm install
 cd <worktree>
+pnpm build                       # see the dist note above
 node packages/cli/dist/main.js build \
   tests/perf/zapo-rest/app/zapo-rest.ts \
   -o <out>/zapo-rest.exe \

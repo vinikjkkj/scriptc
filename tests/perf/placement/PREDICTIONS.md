@@ -1,7 +1,17 @@
 # Registered before the histogram lands
 
+> **ARM: `app/`, zapo-js 1.6.2 -- retired.** By the user's instruction nothing
+> is to be run on the old version; 1.8.2 only. The predictions here were
+> registered against 1.6.2 and adjudicated against a 1.6.2 histogram, so **no
+> figure in this file is a current zapo number**. What survives is the method
+> (register the prediction before the reading exists) and the *source-level*
+> comparisons that name both arms explicitly, which are readings of code
+> rather than of a run. A prediction is arm-specific: re-register, do not
+> port, if this is redone on `app182/`.
+
 The census block is measuring the free-hole size distribution on the settled
-`app/` process. This file writes down, **before that reading exists**, what
+`app/` (1.6.2, retired) process. This file writes down, **before that reading
+exists**, what
 each candidate allocator ladder must produce if it is the source — so the
 histogram confirms or refutes a number that was written down, rather than
 being interpreted after the fact.

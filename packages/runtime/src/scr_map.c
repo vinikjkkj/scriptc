@@ -40,6 +40,141 @@ long scr_map_live_count(void) { return scr_live_maps; }
  * one rather than a silent truncation. */
 #define SCR_MAP_MAX_ENTRIES ((size_t)UINT32_MAX - 1)
 
+/* â”€â”€ idle shrink: give a sparse map's tables back â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+ * THE DEFECT. scr_map_compact drops tombstones but only ever densifies IN
+ * PLACE: `ecap` is never reduced and `entries`/`live`/`buckets` are never
+ * realloc'd down. scr_map_clear is worse -- it sets nentries to 0 and
+ * frees nothing at all. So a map that held 200,000 entries and was
+ * cleared keeps every byte of its three tables for the life of the map,
+ * which is the "memory never comes back" shape this objective is about.
+ *
+ * WHERE IT RUNS, AND WHY THAT IS THE WHOLE DESIGN. The shrink runs from
+ * scr_collect_cycles_idle -- the event loop's BETWEEN-TURNS point -- and
+ * NOT at the end of scr_collect_cycles, where the cycle arena's page
+ * return already sweeps. That is not a stylistic choice. A measured audit
+ * of every site that caches one of these buffer pointers in a C local
+ * across a call gave:
+ *
+ *     mover-on-grow (today's realloc contract)   0 sites
+ *     end of scr_collect_cycles                  0 sites for scr_map,
+ *                                                9 for ScrDyn::obj.entries
+ *     between loop turns                         0 by construction
+ *
+ * scr_map is safe in all three, but a collection can begin inside
+ * scr_cyc_on_release, which the runtime calls from the middle of
+ * arbitrary functions -- 771 of 3,461 runtime functions can reach one.
+ * Page return survives that because it only touches FREE pages no live
+ * pointer names; a table move is a different proposition. Between turns
+ * no C local is live at all, so the hazard is zero by construction rather
+ * than by audit, and the audit is what says the difference is real.
+ *
+ * THE SECOND INVARIANT, WHICH A POINTER COUNT CANNOT SEE. Zero cached
+ * pointers does not make a move safe: compaction renumbers ENTRY INDICES,
+ * and the forEach desugar iterates by plain index. iter_depth exists for
+ * exactly that, and it is NOT redundant here -- a synchronous forEach
+ * cannot span a loop turn, but an async iteration (`for await` over a map)
+ * holds iter_depth across precisely the point this pass runs. A map with
+ * an iteration in flight is skipped, counted separately, and picked up on
+ * a later pass.
+ *
+ * REACHING THE MAPS. There is no registry of live maps and this does not
+ * add one: a map is linked into a WORKLIST only when a delete or a clear
+ * leaves it sparse, and the pass drains that list. Cost is two pointers
+ * and a flag per map, paid only in the struct, plus O(1) link/unlink. No
+ * retain is taken -- retaining would set the cycle color to BLACK through
+ * scr_map_retain and tell the collector a garbage map is live -- so both
+ * free paths unlink instead. */
+
+#ifndef SCR_MAP_SHRINK
+#define SCR_MAP_SHRINK 1
+#endif
+
+#ifndef SCR_MAP_SHRINK_STAT
+#define SCR_MAP_SHRINK_STAT 0
+#endif
+
+/* Below this capacity the tail is not worth a realloc: 32 entries is 512
+ * bytes of ScrMapEntry, and a map this small is usually about to grow
+ * again. */
+#ifndef SCR_MAP_SHRINK_MIN_ECAP
+#define SCR_MAP_SHRINK_MIN_ECAP 32
+#endif
+
+/* Counters first, and the code that bumps them after -- a byte delta on an
+ * inert path is the failure shape this instrument exists to refuse. Every
+ * outcome is counted, including the ones that do nothing, so that "never
+ * ran", "ran and nothing shrank" and "shrank" cannot read alike. */
+static struct {
+  unsigned long queued;      /* linked onto the worklist */
+  unsigned long requeued;    /* queue attempt on an already-queued map */
+  unsigned long unlinked;    /* freed while queued */
+  unsigned long passes;      /* scr_map_idle_shrink calls that did work */
+  unsigned long visited;     /* maps taken off the worklist */
+  unsigned long skip_iter;   /* skipped: iteration in flight (iter_depth) */
+  unsigned long skip_small;  /* skipped: ecap already at or below the floor */
+  unsigned long skip_dense;  /* visited, compacted, but no tail to give back */
+  unsigned long shrunk;      /* tables actually realloc'd down */
+  unsigned long failed;      /* a shrinking realloc refused (old kept) */
+  unsigned long long ebytes; /* ... of which entries */
+  unsigned long long lbytes; /* ... of which live */
+  unsigned long long bbytes; /* ... of which buckets */
+} scr_map_sh = {0};
+
+/* The worklist. Doubly linked so a free is O(1) rather than a scan. */
+static ScrMap *scr_map_sh_head = NULL;
+
+#if SCR_MAP_SHRINK_STAT
+static void scr_map_shrink_arm(void);
+#endif
+
+static bool scr_map_shrink_on(void) {
+#if !SCR_MAP_SHRINK
+  return false;
+#else
+  static bool once = false;
+  static bool on = true;
+  if (!once) {
+    const char *env = getenv("SCR_MAP_SHRINK");
+    if (env != NULL && env[0] == '0' && env[1] == 0) on = false;
+    once = true;
+  }
+  return on;
+#endif
+}
+
+static void scr_map_sh_unlink(ScrMap *m) {
+  if (!m->sh_queued) return;
+  scr_map_sh.unlinked++;
+  if (m->sh_prev) m->sh_prev->sh_next = m->sh_next;
+  else scr_map_sh_head = m->sh_next;
+  if (m->sh_next) m->sh_next->sh_prev = m->sh_prev;
+  m->sh_prev = NULL;
+  m->sh_next = NULL;
+  m->sh_queued = 0;
+}
+
+/* Called where a map LOSES entries. Cheap and total: the policy check is
+ * two comparisons, and a map that is not worth shrinking is never linked,
+ * so the pass walks candidates rather than the heap. */
+static void scr_map_sh_queue(ScrMap *m) {
+  /* Already-queued is the COMMON case on a bulk delete -- the
+   * self-test saw 1,998 requeue attempts against 1 queue for a
+   * 4,000-entry drain -- so it is tested first, one load and one
+   * branch, ahead of the policy comparisons and the knob.
+   * Correct when disabled too: nothing is ever queued, so the flag
+   * is always 0 and the knob check below still runs. */
+  if (m->sh_queued) { scr_map_sh.requeued++; return; }
+  if (!scr_map_shrink_on()) return;
+  if (m->ecap <= SCR_MAP_SHRINK_MIN_ECAP) return;
+  if (m->nlive > m->ecap / 2) return;
+  m->sh_prev = NULL;
+  m->sh_next = scr_map_sh_head;
+  if (scr_map_sh_head) scr_map_sh_head->sh_prev = m;
+  scr_map_sh_head = m;
+  m->sh_queued = 1;
+  scr_map_sh.queued++;
+}
+
 static void scr_map_oom(void) {
   scr_trap("scriptc: out of memory\n");
 }
@@ -146,6 +281,135 @@ static void scr_map_compact(ScrMap *m) {
   if (m->nbuckets > 0) scr_map_rebuild_buckets(m, m->nbuckets);
 }
 
+/* Shrink one visited map. Compaction first (it is what makes the tail
+ * dead), then the three tables down to the next power of two that holds
+ * the survivors. Returns true if anything was given back. */
+static bool scr_map_shrink_one(ScrMap *m) {
+  /* Index stability, not pointer stability: compaction renumbers entries
+   * and an async iteration holds iter_depth across a loop turn. Skipped,
+   * not dropped -- the map stays a candidate for a later pass. */
+  if (m->iter_depth != 0) { scr_map_sh.skip_iter++; return false; }
+  if (m->ecap <= SCR_MAP_SHRINK_MIN_ECAP) { scr_map_sh.skip_small++; return false; }
+
+  if (m->nlive < m->nentries) scr_map_compact(m);
+
+  size_t want = SCR_MAP_SHRINK_MIN_ECAP;
+  while (want < m->nentries) want *= 2;
+  /* Only a HALVING is worth the realloc and the bucket rebuild. */
+  if (want > m->ecap / 2) { scr_map_sh.skip_dense++; return false; }
+
+  size_t oldecap = m->ecap;
+  size_t oldnb = m->nbuckets;
+
+  ScrMapEntry *e2 = realloc(m->entries, want * sizeof *e2);
+  if (e2 == NULL) { scr_map_sh.failed++; return false; }
+  m->entries = e2;
+  uint8_t *l2 = realloc(m->live, want * sizeof *l2);
+  if (l2 == NULL) {
+    /* entries already moved; ecap must describe the SMALLER of the two or
+     * a later append walks off the live array. Take the shrink on entries
+     * only and leave live oversized -- oversized is safe, undersized is
+     * not. */
+    m->ecap = want;
+    scr_map_sh.failed++;
+    scr_map_sh.ebytes += (unsigned long long)(oldecap - want) * sizeof *e2;
+    scr_map_sh.shrunk++;
+    return true;
+  }
+  m->live = l2;
+  m->ecap = want;
+  scr_map_sh.ebytes += (unsigned long long)(oldecap - want) * sizeof *e2;
+  scr_map_sh.lbytes += (unsigned long long)(oldecap - want) * sizeof *l2;
+
+  /* Buckets: the invariant scr_map_reserve_append relies on is
+   * nbuckets >= 2 * (nentries + 1), so size for the new capacity and
+   * never below it. rebuild_buckets already mallocs the new table and
+   * frees the old, so the shrink is the same call with a smaller size. */
+  size_t wantnb = 8;
+  while (wantnb < 2 * (want + 1)) wantnb *= 2;
+  if (wantnb < oldnb) {
+    scr_map_rebuild_buckets(m, wantnb);
+    scr_map_sh.bbytes += (unsigned long long)(oldnb - wantnb) * sizeof(uint32_t);
+  }
+  scr_map_sh.shrunk++;
+  return true;
+}
+
+/* The between-turns pass. Drains the worklist; a map that cannot be
+ * shrunk right now (an iteration is in flight) is re-queued so it is not
+ * lost. Runs BEFORE scr_collect_cycles_idle's pace gate: this is not a
+ * collection and must not be paced by the root count. */
+void scr_map_idle_shrink(void) {
+  if (!scr_map_shrink_on()) return;
+  if (scr_map_sh_head == NULL) return;
+  scr_map_sh.passes++;
+#if SCR_MAP_SHRINK_STAT
+  scr_map_shrink_arm();
+#endif
+  ScrMap *m = scr_map_sh_head;
+  scr_map_sh_head = NULL;
+  while (m != NULL) {
+    ScrMap *next = m->sh_next;
+    m->sh_prev = NULL;
+    m->sh_next = NULL;
+    m->sh_queued = 0;
+    scr_map_sh.visited++;
+    bool busy = (m->iter_depth != 0);
+    scr_map_shrink_one(m);
+    /* Only an ITERATION is a reason to come back; "nothing to give back"
+     * is an answer, not a deferral, and re-queueing it would spin. */
+    if (busy) scr_map_sh_queue(m);
+    m = next;
+  }
+}
+
+#if SCR_MAP_SHRINK_STAT
+/* Diagnostic only, and OFF by default: this arm references atexit, which
+ * is an ambient symbol that fails the library-mode audit (the same reason
+ * scr_array.c's SCR_ARR_VM_STAT report is gated). Note also that a program
+ * leaving through _Exit -- zapo-rest does -- skips atexit entirely, so on
+ * that target read the counters from a test rather than from exit. */
+#include <stdio.h>
+void scr_map_shrink_report(const char *when) {
+  FILE *f = stderr;
+  const char *out = getenv("SCR_MAP_SHRINK_OUT");
+  if (out != NULL) {
+    FILE *g = fopen(out, "a");
+    if (g != NULL) f = g;
+  }
+  fprintf(f, "[mapshrink] %s: ", when != NULL ? when : "(unnamed)");
+  if (!scr_map_shrink_on()) {
+    fprintf(f, "DISABLED -- SCR_MAP_SHRINK=0, the pass was compiled in and never armed\n");
+  } else if (scr_map_sh.passes == 0) {
+    fprintf(f, "NEVER RAN -- no pass executed (queued=%lu). A zero byte delta here "
+               "says nothing about the mechanism.\n", scr_map_sh.queued);
+  } else if (scr_map_sh.shrunk == 0) {
+    fprintf(f, "RAN AND NOTHING SHRANK -- passes=%lu visited=%lu "
+               "skip_iter=%lu skip_small=%lu skip_dense=%lu failed=%lu\n",
+            scr_map_sh.passes, scr_map_sh.visited, scr_map_sh.skip_iter,
+            scr_map_sh.skip_small, scr_map_sh.skip_dense, scr_map_sh.failed);
+  } else {
+    fprintf(f, "SHRANK -- passes=%lu visited=%lu shrunk=%lu bytes=%llu "
+               "(entries=%llu live=%llu buckets=%llu) "
+               "queued=%lu requeued=%lu unlinked=%lu "
+               "skip_iter=%lu skip_small=%lu skip_dense=%lu failed=%lu\n",
+            scr_map_sh.passes, scr_map_sh.visited, scr_map_sh.shrunk,
+            (scr_map_sh.ebytes + scr_map_sh.lbytes + scr_map_sh.bbytes), scr_map_sh.ebytes, scr_map_sh.lbytes,
+            scr_map_sh.bbytes, scr_map_sh.queued, scr_map_sh.requeued,
+            scr_map_sh.unlinked, scr_map_sh.skip_iter, scr_map_sh.skip_small,
+            scr_map_sh.skip_dense, scr_map_sh.failed);
+  }
+  if (f != stderr) fclose(f);
+}
+static void scr_map_shrink_atexit(void) { scr_map_shrink_report("atexit"); }
+static void scr_map_shrink_arm(void) {
+  static bool armed = false;
+  if (armed) return;
+  armed = true;
+  atexit(scr_map_shrink_atexit);
+}
+#endif
+
 /* Make room to append one entry. Prefers compaction (tombstone-heavy maps
  * reuse their storage) and grows otherwise; while an iteration is active it
  * ONLY grows — indices must stay stable under callback mutation. */
@@ -229,6 +493,7 @@ static void scr_map_gcfree(void *o) {
       if (m->live[e]) scr_map_release_key(m, m->entries[e].key);
     }
   }
+  scr_map_sh_unlink(m);
   free(m->entries);
   free(m->live);
   free(m->buckets);
@@ -278,6 +543,7 @@ void scr_map_release(ScrMap *m) {
       scr_map_release_key(m, m->entries[e].key);
       scr_map_release_val(m, m->entries[e].val);
     }
+    scr_map_sh_unlink(m);
     free(m->entries);
     free(m->live);
     free(m->buckets);
@@ -299,6 +565,20 @@ void scr_map_trace_v(void *m, ScrTraceVisit visit, void *ctx) {
 
 double scr_map_size(const ScrMap *m) { return (double)m->nlive; }
 
+/* A RETENTION BUG IN ITS OWN RIGHT, and not a subclause of the idle
+ * shrink below: clear() releases every key and value and sets nentries to
+ * 0, but it FREES NOTHING. entries, live and buckets all keep the capacity
+ * the map reached at its peak, for the life of the map. A reader of this
+ * function would reasonably assume it frees -- `map.clear()` is the most
+ * explicit thing a caller can say about no longer wanting the contents --
+ * and it does not. A cleared 200,000-entry map holds roughly 4.8 MB of
+ * tables afterwards (entries 3.2 MB, live 0.2, buckets 1.4).
+ *
+ * That is the user's complaint in miniature, inside our own runtime:
+ * memory that never comes back after a burst. It is why clear() queues,
+ * and the queue is the FIX rather than the description -- but the bug is
+ * this function's, it predates the shrink, and it should be read as its
+ * own defect. See tests/perf/mapshrink/README.md. */
 void scr_map_clear(ScrMap *m) {
   for (size_t e = 0; e < m->nentries; e++) {
     if (!m->live[e]) continue;
@@ -314,6 +594,7 @@ void scr_map_clear(ScrMap *m) {
     m->nentries = 0;
   }
   for (size_t i = 0; i < m->nbuckets; i++) m->buckets[i] = SCR_MAP_BUCKET_EMPTY;
+  scr_map_sh_queue(m);
 }
 
 /* ── has / delete ──────────────────────────────────────────────────────── */
@@ -334,6 +615,7 @@ static bool scr_map_delete_found(ScrMap *m, size_t e) {
   m->nlive--;
   scr_map_release_key(m, m->entries[e].key);
   scr_map_release_val(m, m->entries[e].val);
+  scr_map_sh_queue(m);
   return true;
 }
 

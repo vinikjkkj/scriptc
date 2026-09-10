@@ -2,6 +2,15 @@
 # delivery-ab-knob.sh - delivery-ab.sh with a PER-ARM ENVIRONMENT, for a
 # treatment that is an env knob rather than a second binary.
 #
+# ARM: 1.8.2 ONLY. This script is arm-agnostic -- it takes the exe from its
+# caller -- so nothing here refuses. That makes the arm the caller s
+# responsibility, and the user has instructed that nothing be run on the old
+# zapo version: build from app182/, never app/. The -2.05 MiB in
+# ../../placement/RESULTS.md was taken through this script on the retired
+# 1.6.2 arm and is superseded; do not treat it as this tool known-good
+# output. The live figure is the 1.8.2 A/B in ../README.md -- settled
+# privateWS -1.52%, 83.57 -> 82.30 MiB, p=0.018 over 19 comparable runs.
+#
 # The rotation, the workload plumbing and the modestat call are COPIED
 # VERBATIM from delivery-ab.sh and must stay that way: position within a
 # repetition is a 28.7 MiB effect on this box, so an arm order invented here

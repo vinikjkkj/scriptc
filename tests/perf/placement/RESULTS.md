@@ -1,5 +1,26 @@
 # RESULTS — the two-run difference, 2026-09-09
 
+> ## ARM BANNER — read before quoting any number in this file
+>
+> **Every zapo number below was measured on `app/` — zapo-js 1.6.2 — and 1.6.2
+> is retired.** The user has instructed that nothing is to be run on the old
+> version: 1.8.2 only.
+>
+> So: **no figure in this file may be quoted as a current zapo number.** Unless
+> a line says 1.8.2 explicitly, its arm is the retired one. The two arms do not
+> share a history-sync architecture -- 1.6.2 downloads a whole blob through
+> `downloadHistorySyncBlob`, 1.8.2 streams through `streamProtoFields` -- so
+> these are not stale readings of the same thing, they are readings of a
+> different program.
+>
+> **What survives the retirement is the mechanism, and only where it never
+> touched zapo.** Those claims are version-independent and are marked as such
+> where they appear: the `vmprobe.c` platform table (`DiscardVirtualMemory`
+> returns working set and not commit; `MEM_DECOMMIT` returns both and leaves
+> the range untouchable), the census self-tests, the free-list arithmetic, and
+> the paired/rotated method itself. A mechanism claim stated in terms of a
+> zapo figure is a zapo figure.
+
 `app/` (zapo-js 1.6.2), `--provenance-sources`, `-DSCR_PROF_ALLOC
 -DSCR_PROF_LIVE`. One binary, two runs through `memrig.mts`: `CHUNKS=0`
 (control) and `CHUNKS=8` (burst), both `CONVS=400 MSGS=6 TEXTLEN=300 ROUNDS=1
@@ -555,6 +576,50 @@ back with a five-column CSV and no `privateWS`. Now guarded.
 
 ## DELIVERY A/B — cycle-arena page return, shipping build, paired
 
+> ### SUPERSEDED — this is not the delivery result
+>
+> **The −2.05 MiB below is retired, not caveated.** It was measured on the
+> `app/` 1.6.2 arm, and 1.6.2 is out of scope by the user's instruction.
+>
+> **The delivery figure is now the 1.8.2 one, and it has landed** — `cc2fd4ca6`,
+> 24 runs of the shipping binary (`zapo-rest-182.exe`, 31,258,624 bytes, built
+> from `f8812f6c9`), both arms the same executable with `SCR_CYCLE_PAGERETURN`
+> between them, rotated, 19 comparable after the high-peak mode is excluded:
+>
+> > **settled privateWS −1.52%, 83.57 → 82.30 MiB (−1.27 MB), p=0.018,
+> > 2.0x the 0.75% floor.** cpuToSettled is a DRAW. See
+> > `../zapo-rest/README.md`, which carries it in full.
+>
+> So reporting −2.05 MiB — or its −2.56%, or its 3.4x floor clearance, or
+> "2.8% of the 72.12 MiB the user sees" — as the result is wrong.
+>
+> **The retirement was the right call and the two numbers say why.** The sign
+> carried but the magnitude did not: −2.56% on 1.6.2 against −1.52% on 1.8.2,
+> and 3.4x the floor against 2.0x. Had this been adjusted or relabelled rather
+> than retired, the overstatement would have survived as a live claim. (Part
+> of that gap is sample size rather than arm — the 1.8.2 estimate was −2.42%
+> at n=9 and fell to −1.52% at n=19 — which is a second reason not to have
+> carried a five-repetition figure across an arm change.)
+>
+> It is superseded rather than merely re-labelled because 1.8.2 streams history
+> sync instead of buffering it, which changes the arena's allocation shape
+> directly. A page-return route reads the free space between survivors; a
+> different survivor distribution is a different reading. The sign was not
+> assumed to carry either; in the event it did, and the magnitude did not.
+>
+> **Two findings in this section do survive, because they never depended on the
+> arm.** (1) The commit column being a DRAW is the platform behaviour of
+> `DiscardVirtualMemory`, measured standalone in `../pagecensus/vmprobe.c`
+> (−224.05 MiB WS, +0.00 commit) with no zapo in the process. (2) The CPU cost
+> is zero *by construction* -- the sweep runs at the end of a collector pass
+> and revival only on a refill that would otherwise have taken a fresh chunk,
+> so no hot path is touched. Both hold on 1.8.2, and (2) is now **confirmed**
+> there: the 1.8.2 A/B reports cpuToSettled as a draw, and demonstrably noise
+> rather than merely insignificant, since it read +7.01% on the first half and
+> −7.40% on the whole. A metric that changes sign when the sample doubles is
+> not measuring a treatment. The 0.00% figure below is still 1.6.2 and is not
+> the citation for that.
+>
 `out/zapo-rest-plain.exe` (**plain build, no census, no profiler**), one binary,
 arms separated by `SCR_CYCLE_PAGERETURN`. Six rotated repetitions through
 `delivery-ab-knob.sh` — `delivery-ab.sh`'s rotation verbatim plus a per-arm
