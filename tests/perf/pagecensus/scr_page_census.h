@@ -143,6 +143,13 @@ SCR_PC_SHARED unsigned long long scr_pc_bad_used = 0;  /* selftest mismatch */
 SCR_PC_SHARED unsigned long long scr_pc_bad_slot = 0;  /* free entry off grid */
 SCR_PC_SHARED unsigned long long scr_pc_bad_loop = 0;  /* free list too long */
 SCR_PC_SHARED int scr_pc_registered = 0;
+/* Set once by scr_cycle.c, which owns the chunk walk: this header cannot see
+ * ScrCycChunk and must be called back into. NULL means the arena side never
+ * armed, which the report says by name rather than printing an empty walk. */
+SCR_PC_SHARED void (*scr_pc_walk_fn)(const char *) = NULL;
+/* Idempotent guard for the EXIT report only. The periodic report under
+ * SCR_PAGECEN_EVERY is deliberately not guarded -- it is meant to repeat. */
+SCR_PC_SHARED int scr_pc_reported = 0;
 SCR_PC_SHARED int scr_pc_every = -1;
 SCR_PC_SHARED FILE *scr_pc_file = NULL;
 
@@ -524,6 +531,76 @@ SCR_PC_FN int scr_pc_every_on(void) {
   }
   return scr_pc_every;
 }
+
+/* ATEXIT ALONE CANNOT REPORT ON THIS TARGET, and this header spent a whole
+ * measurement run producing no file at all because of it.
+ *
+ * zapo's entry ends in `process.exit(0)`, which lowers to `_Exit` and skips
+ * every atexit handler. A pagecensus-instrumented zapo-rest run wrote NOTHING
+ * -- not the file named by SCR_PAGECEN_OUT, not the stderr fallback, not even
+ * the unconditional ARMED line whose whole job is to prove the hooks are
+ * compiled in. From the outside that is indistinguishable from "the census
+ * found nothing", and the workaround used at the time (SCR_PAGECEN_EVERY=1,
+ * which reports on every collector pass) answers a DIFFERENT question:
+ * periodic emission is a trajectory, and the number that belongs in a report
+ * is the settled one at exit.
+ *
+ * This is cycstat's fix (785e07dda), which is cycensus's fix before it,
+ * ported rather than redesigned.
+ *
+ * WHY THE TRAP STAYED HIDDEN: scr_heap_census.h calls scr_cs_report()
+ * directly over _Exit, so any arm that happened to -include heapcensus got
+ * cycstat's output anyway -- by composition, not by design. An arm without it
+ * silently got nothing. That is why this file registers BOTH routes rather
+ * than trusting whichever other header may be in the arm. */
+SCR_PC_FN void scr_pc_report_exit(void) {
+  if (scr_pc_reported) return;
+  scr_pc_reported = 1;
+  if (scr_pc_walk_fn != NULL) {
+    scr_pc_walk_fn("exit");
+  } else {
+    FILE *f = scr_pc_out();
+    fprintf(f, "[pagecen] NO WALK INSTALLED - the arena side never armed, so"
+               " there is nothing to walk. Either no cycle-headered object"
+               " was ever allocated, or scr_cycle.c was compiled without"
+               " SCR_PAGECEN_ON while this header was included. Not a"
+               " measurement of an empty arena.\n");
+    fflush(f);
+  }
+}
+
+/* A SEPARATE FLAG from scr_pc_registered, which scr_cycle.c's arm guards on.
+ * The first version of this reused it, so the constructor claimed it, the
+ * arena-side arm early-returned, and the synthetic control and the walk hook
+ * were both silently skipped -- an instrument that disarmed itself while
+ * looking installed. */
+SCR_PC_SHARED int scr_pc_atexit_done = 0;
+
+__attribute__((constructor)) SCR_PC_FN void scr_pc_install(void) {
+  if (!scr_pc_atexit_done) {
+    scr_pc_atexit_done = 1;
+    atexit(scr_pc_report_exit);
+  }
+}
+
+/* COMPOSITION, and it is a footgun rather than a feature: a macro cannot
+ * extend a macro it cannot name, so the chain is spelled by explicit
+ * knowledge of the other reporters. THIS HEADER MUST BE -include*d LAST of
+ * the census headers, so that SCR_CYCSTAT_ON / SCR_CYCEN_ON are already
+ * defined when it is read. Included first, it wins and theirs are silently
+ * lost -- which is the same failure it exists to fix, one header along. */
+#ifdef _Exit
+#undef _Exit
+#endif
+#if defined(SCR_CYCSTAT_ON) && defined(SCR_CYCEN_ON)
+#define _Exit(c) (scr_pc_report_exit(), scr_cs_report(), scr_cycen_report(), _Exit(c))
+#elif defined(SCR_CYCSTAT_ON)
+#define _Exit(c) (scr_pc_report_exit(), scr_cs_report(), _Exit(c))
+#elif defined(SCR_CYCEN_ON)
+#define _Exit(c) (scr_pc_report_exit(), scr_cycen_report(), _Exit(c))
+#else
+#define _Exit(c) (scr_pc_report_exit(), _Exit(c))
+#endif
 
 #endif /* SCR_PAGECEN_ON */
 #endif /* SCR_PAGE_CENSUS_H */

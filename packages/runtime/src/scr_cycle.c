@@ -511,6 +511,13 @@ static long long scr_cyc_pr_revived = 0; /* pages faulted back deliberately */
 static long long scr_cyc_pr_sweeps = 0;
 static long long scr_cyc_pr_chunks = 0;  /* chunks that gave up a page */
 static long long scr_cyc_pr_failed = 0;  /* discard calls the OS refused */
+/* Chunks the sweep LOOKED at, whatever it decided. Without it, pages=0 has
+ * three indistinguishable causes and the report can only name one: never
+ * called, called and refused, called and nothing available. `sweeps` separates
+ * the first, `failed` the second, and this separates "the arena held no chunk
+ * with free space" from "chunks existed and none met the threshold" -- which
+ * are inertness and placement respectively, and want different responses. */
+static long long scr_cyc_pr_visited = 0;
 
 long long scr_cyc_pr_stat(int which) {
   return which == 0   ? scr_cyc_pr_pages
@@ -528,8 +535,33 @@ static void scr_cyc_pr_report(void) {
   fprintf(stderr, "[pgret] pages=%lld revived=%lld sweeps=%lld chunks=%lld failed=%lld\n",
           scr_cyc_pr_pages, scr_cyc_pr_revived, scr_cyc_pr_sweeps,
           scr_cyc_pr_chunks, scr_cyc_pr_failed);
-  if (scr_cyc_pr_pages == 0) {
-    fprintf(stderr, "[pgret] NOTHING RETURNED - no chunk offered a whole"
+  fprintf(stderr, "[pgret] visited=%lld\n", scr_cyc_pr_visited);
+  /* THE THREE-WAY, named rather than left to the reader. A zero page count is
+   * not one fact. */
+  if (scr_cyc_pr_sweeps == 0) {
+    fprintf(stderr, "[pgret] NEVER SWEPT - the collector never reached the"
+                    " sweep point, or SCR_CYCLE_PAGERETURN=0. The path is"
+                    " INERT in this run; this is not a measurement of what it"
+                    " would return.\n");
+  } else if (scr_cyc_pr_visited == 0) {
+    fprintf(stderr, "[pgret] NOTHING VISITED - swept %lld times and found no"
+                    " chunk with free space at all. The arena held nothing"
+                    " to return.\n", scr_cyc_pr_sweeps);
+  } else if (scr_cyc_pr_chunks == 0) {
+    fprintf(stderr, "[pgret] NOTHING MET THE THRESHOLD - looked at %lld chunks"
+                    " over %lld sweeps and none offered enough whole free"
+                    " pages. That is PLACEMENT, not inertness.\n",
+            scr_cyc_pr_visited, scr_cyc_pr_sweeps);
+  }
+  if (scr_cyc_pr_failed != 0) {
+    fprintf(stderr, "[pgret] DISCARD REFUSED %lld times - the pages were"
+                    " unthreaded and are still resident. Sound, but returning"
+                    " nothing.\n", scr_cyc_pr_failed);
+  }
+  if (scr_cyc_pr_pages == 0 && scr_cyc_pr_sweeps != 0 &&
+      scr_cyc_pr_visited != 0 && scr_cyc_pr_chunks != 0 &&
+      scr_cyc_pr_failed == 0) {
+    fprintf(stderr, "[pgret] NOTHING RETURNED and no cause identified - chunks"
                     " free page, or SCR_CYCLE_PAGERETURN=0, or the platform"
                     " call is absent. Not a measurement of the return path.\n");
   }
@@ -608,6 +640,7 @@ static void scr_cyc_pr_sweep_chunk(ScrCycChunk *c, unsigned thresh) {
   void *b;
   size_t guard;
 
+  scr_cyc_pr_visited++;
   if (stride == 0 || c->bump <= cs) return;
   nslots = (size_t)(c->bump - cs) / stride;
   if (nslots == 0 || nslots > sizeof scr_cyc_pr_freemap) return;
@@ -822,7 +855,16 @@ static void scr_pc_arm(void) {
     /* The synthetic arm first, and BEFORE any chunk exists: it resets the
      * accumulators, so running it later would erase a real reading. */
     scr_pc_synth();
-    atexit(scr_cyc_ar_pagecensus_exit);
+    /* Hand the walk to the header, which owns both exit routes -- atexit AND
+     * the _Exit interposer. This program leaves through _Exit, so atexit
+     * alone reported nothing at all. */
+    scr_pc_walk_fn = scr_cyc_ar_pagecensus;
+    /* BOTH routes, as cycstat does: the constructor's atexit covers a normal
+     * return, the header's _Exit interposer covers process.exit(), and
+     * scr_pc_report_exit is idempotent so a program that does both reports
+     * once. Registering here as well means a target whose constructors do not
+     * run still gets the atexit route. */
+    scr_pc_install();
   }
 }
 #define SCR_PC_ARM() scr_pc_arm()
