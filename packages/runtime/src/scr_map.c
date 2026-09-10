@@ -173,6 +173,11 @@ static void scr_map_sh_queue(ScrMap *m) {
   scr_map_sh_head = m;
   m->sh_queued = 1;
   scr_map_sh.queued++;
+  /* Install the collector's between-turns hook here rather than from a
+   * constructor. This is the first instant the pass has anything to do, so
+   * there is no init-order question and no cost in a program that links
+   * scr_map.c but never makes a map sparse. */
+  scr_cyc_idle_hook = scr_map_idle_shrink;
 }
 
 static void scr_map_oom(void) {

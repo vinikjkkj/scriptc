@@ -14,9 +14,35 @@ Three arms, and the third is the one that matters most.
 | A, shrink enabled | 31 checks over seven outcome classes |
 | B, `SCR_MAP_SHRINK=0` | 5 checks: disabled does nothing, loudly. A **separate process**, because the knob is cached on first use, so an in-process "disabled" arm would prove nothing |
 | C, **negative control** | injects a bail-out into `scr_map_shrink_one` and **requires** the suite to fail. Broken, it reports 7 failures and exits 1 |
+| D, **link shape** | `scr_cycle.c` must not depend on `scr_map.c`. Reads the linker's answer, and proves its own detector by flagging a deliberate hard edge |
 
 Arm C exists because a suite that only ever prints `ok` has not been shown
-able to print `FAIL`. It is also why nothing in this directory may be named
+able to print `FAIL`.
+
+## Arm D, and the gap that put it there
+
+The first version of this change called `scr_map_idle_shrink()` **by name**
+from `scr_collect_cycles_idle`. That is an undefined symbol in every TU
+that links `scr_cycle.c` without `scr_map.c` -- and three of the runtime's
+own unit tests do exactly that (`intern`, `number`, `tonumber`). Five gate
+builds went red, every one of them `Command failed: zig cc` rather than an
+assertion, on a dependency edge that had never existed before.
+
+**Arms A to C could not have caught it.** They build one file with one
+`zig cc` and never touch a link line, so they stayed green while the gate
+went red. That is the gap arm D closes, and it is checked the only way a
+link problem can be: by asking the linker.
+
+The collector now owns `scr_cyc_idle_hook` and calls through it. `scr_map.c`
+installs itself at the moment the **first map becomes a shrink candidate**,
+not from a constructor -- which removes the init-order question entirely,
+since before that instant there is nothing to shrink and NULL is not merely
+safe there but correct. Same shape as the pagecensus walk hook.
+
+Verified against the actual pre-fix file rather than only a synthetic one:
+the old `scr_cycle.c`, compiled and linked alone, still reports `undefined
+symbol: scr_map_idle_shrink` -- so arm D would have caught the regression
+that caused it. It is also why nothing in this directory may be named
 `scr_map.c`: `selftest.c` does `#include "scr_map.c"`, and a quoted include
 searches the includer's directory before any `-I`, which is exactly the
 mechanism arm C uses to substitute a broken copy.
