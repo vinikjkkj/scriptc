@@ -87,6 +87,30 @@ SCR_CS_SHARED unsigned long long scr_cs_sarcarve = 0;  /* blocks bump-carved */
 SCR_CS_SHARED unsigned long long scr_cs_sarhit = 0;    /* popped off a list */
 SCR_CS_SHARED unsigned long long scr_cs_sargive = 0;   /* pushed onto one */
 SCR_CS_SHARED unsigned long long scr_cs_sarmalloc = 0; /* fell back to malloc */
+/* THE CHUNK RECLAMATION TRIO, and it is three counters rather than one for a
+ * reason this project has now paid for twice in one day.
+ *
+ * "chunks returned = 0" has three causes that look identical from outside,
+ * and the byte delta is the same for all of them:
+ *
+ *   chunkgive == 0    the accounting never ran. INERT CODE.
+ *   chunkgive  > 0
+ *   chunkfree == 0    the accounting ran and no chunk ever emptied. That is
+ *                     the PLACEMENT problem, not a bug -- the cycle arena
+ *                     holds 13.63 MiB in exactly this state.
+ *   chunkforeign      gives whose block belonged to NO chunk. Real and
+ *                     expected: scr_str_ar_give is a sink for blocks the
+ *                     malloc fallback produced, which were never carved. A
+ *                     `used` scheme that decremented for one of these would
+ *                     free a chunk somebody is still handing out.
+ *
+ * A sibling shipped page-return code whose every call the OS refused, and it
+ * reported zero pages returned with no error; it surfaced only because a
+ * `failed` counter separated a refused call from an absent one. This is that
+ * shape, for this arena. */
+SCR_CS_SHARED unsigned long long scr_cs_sarchunkgive = 0;    /* gives charged to a chunk */
+SCR_CS_SHARED unsigned long long scr_cs_sarchunkfree = 0;    /* chunks free()d at used==0 */
+SCR_CS_SHARED unsigned long long scr_cs_sarchunkforeign = 0; /* gives owned by no chunk */
 /* The content-intern cache in scr_string.c. A HIT is an allocation that did
  * not happen; a MISS is a probe that found nothing; a PUT is an allocation
  * that happened and was cached; an EVICT is a resident entry the table let
@@ -157,6 +181,25 @@ SCR_CS_FN void scr_cs_report(void) {
              " listgive=%llu mallocfallback=%llu\n",
           scr_cs_sarchunk, scr_cs_sarcarve, scr_cs_sarhit, scr_cs_sargive,
           scr_cs_sarmalloc);
+  fprintf(f, "[cycstat] strarena reclaim taken=%llu freed=%llu charged=%llu"
+             " foreign=%llu held=%llu\n",
+          scr_cs_sarchunk, scr_cs_sarchunkfree, scr_cs_sarchunkgive,
+          scr_cs_sarchunkforeign,
+          scr_cs_sarchunk - scr_cs_sarchunkfree);
+  /* The two ways "freed=0" happens, told apart LOUDLY rather than left to be
+     inferred from a byte delta that is identical in both. */
+  if (scr_cs_sarchunk > 0 && scr_cs_sarchunkfree == 0) {
+    if (scr_cs_sarchunkgive == 0) {
+      fprintf(f, "[cycstat] strarena NO CHUNK EVER FREED and NOTHING WAS EVER"
+                 " CHARGED TO A CHUNK - the reclamation path did not run."
+                 " Inert code, not a measurement of placement.\n");
+    } else {
+      fprintf(f, "[cycstat] strarena NO CHUNK EVER FREED, but %llu gives were"
+                 " charged to a chunk - the path ran and no chunk reached"
+                 " used==0. That is placement, not a bug.\n",
+              scr_cs_sarchunkgive);
+    }
+  }
   fprintf(f, "[cycstat] strintern hit=%llu miss=%llu put=%llu evict=%llu"
              " refuse=%llu hitRate=%.4f evictPerPut=%.4f\n",
           scr_cs_sihit, scr_cs_simiss, scr_cs_siput, scr_cs_sievict,
