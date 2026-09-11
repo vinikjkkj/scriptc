@@ -2109,6 +2109,21 @@ static void scr_fiber_pool_decay(double now) {
     fputs(scr_utoa(lo, nb), stderr);
     fputs(" decayedTotal=", stderr);
     fputs(scr_utoa((size_t)scr_stack_pool_decayed, nb), stderr);
+    /* THE POISON AND CLAMP COUNTERS RIDE THIS LINE, and that is not
+     * tidiness. The teardown report is UNREACHABLE in the binary these
+     * counters exist for: zapo-rest ends through process.exit, which
+     * lowers to _Exit and skips loop teardown, so a run there prints no
+     * counters at all -- verified, not assumed. This line prints once
+     * per window and was observed reaching stderr from a real
+     * zapo-rest run, so it is the only place the numbers survive. */
+#ifdef _WIN32
+    fputs(" poisoned=", stderr);
+    fputs(scr_utoa((size_t)scr_stack_poisoned, nb), stderr);
+    fputs(" unlocatable=", stderr);
+    fputs(scr_utoa((size_t)scr_stack_poison_unlocatable, nb), stderr);
+#endif
+    fputs(" clampApplied=", stderr);
+    fputs(scr_utoa((size_t)scr_pool_clamp_applied, nb), stderr);
     fputc('\n', stderr);
   }
   scr_stack_pool_lo = scr_stack_pool_n;
