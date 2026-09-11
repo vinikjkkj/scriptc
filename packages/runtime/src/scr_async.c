@@ -1835,6 +1835,19 @@ static unsigned long long scr_stack_pool_decayed = 0;
 static unsigned long long scr_loop_turns = 0;
 static unsigned long long scr_pool_clamp_elig = 0;
 static unsigned long long scr_pool_clamp_applied = 0;
+/* THE HONEST ONE. `applied` counts the clamp modifying `due`, and it is
+ * recorded BEFORE the socket and child caps below can lower `due` again -- so
+ * with a live socket it reads large and means nothing, which is worse than
+ * absent because it looks like data. `survived` counts only the turns where
+ * the clamp's value was still the final `due` when the loop actually slept,
+ * which is the only form in which the clamp can have changed anything.
+ *
+ * It is also the direct measurement of the one hypothesis still standing: the
+ * socket gap at a connection restart, where `net` is momentarily false, the
+ * 1 ms cap does not apply, and the clamp is live again. Those turns are
+ * exactly what this counts, and `applied - survived` is how often it fired
+ * and was overridden. */
+static unsigned long long scr_pool_clamp_survived = 0;
 
 static bool scr_stack_pool_decay_clamp(void) {
   static bool once = false;
@@ -2124,6 +2137,8 @@ static void scr_fiber_pool_decay(double now) {
 #endif
     fputs(" clampApplied=", stderr);
     fputs(scr_utoa((size_t)scr_pool_clamp_applied, nb), stderr);
+    fputs(" clampSurvived=", stderr);
+    fputs(scr_utoa((size_t)scr_pool_clamp_survived, nb), stderr);
     fputc('\n', stderr);
   }
   scr_stack_pool_lo = scr_stack_pool_n;
@@ -2149,9 +2164,10 @@ static void scr_fiber_pool_teardown(void) {
   if (getenv("SCR_LOOP_WAKE_STAT") != NULL) {
     fprintf(stderr,
             "[loopwake] turns=%llu clampEligible=%llu clampApplied=%llu"
-            " decayedTotal=%llu clamp=%d\n",
+            " clampSurvived=%llu decayedTotal=%llu clamp=%d\n",
             scr_loop_turns, scr_pool_clamp_elig, scr_pool_clamp_applied,
-            scr_stack_pool_decayed, scr_stack_pool_decay_clamp() ? 1 : 0);
+            scr_pool_clamp_survived, scr_stack_pool_decayed,
+            scr_stack_pool_decay_clamp() ? 1 : 0);
 #ifdef _WIN32
     fprintf(stderr, "[fiberpoison] poisoned=%llu unlocatable=%llu armed=%d",
             scr_stack_poisoned, scr_stack_poison_unlocatable,
@@ -3447,6 +3463,7 @@ bool scr_loop_run(ScrPromise *top_level) {
     double due = scr_ntimers > 0 ? scr_timers[0].deadline_ms : now + SCR_IO_POLL_MS;
     /* A pool with entries left to free caps the sleep at its next window;
      * an empty one does not (see scr_stack_pool_decay_due). */
+    double pool_clamp_due = -1.0; /* the value the clamp set, if it fired */
     {
       double pool_due = scr_stack_pool_decay_due(now);
       if (pool_due >= 0 && pool_due < due) {
@@ -3455,6 +3472,7 @@ bool scr_loop_run(ScrPromise *top_level) {
         scr_pool_clamp_elig++;
         if (scr_stack_pool_decay_clamp()) {
           due = pool_due;
+          pool_clamp_due = pool_due;
           scr_pool_clamp_applied++;
         }
       }
@@ -3596,6 +3614,14 @@ bool scr_loop_run(ScrPromise *top_level) {
         now = due;
       }
     }
+    /* DID THE CLAMP ACTUALLY DECIDE THE SLEEP? Every later cap only ever
+     * LOWERS `due`, so the clamp survived iff `due` is still the exact value
+     * it set. Checked HERE because this is the single point at which `due` is
+     * final for the turn: the io, events/net and children branches each apply
+     * their own caps inside themselves, and the immediates check zeroes it
+     * earlier. Exact double comparison is correct rather than sloppy -- a
+     * surviving value is the same double copied through, never recomputed. */
+    if (pool_clamp_due >= 0 && due == pool_clamp_due) scr_pool_clamp_survived++;
     while (scr_ntimers > 0 && scr_timers[0].deadline_ms <= now) {
       ScrTimer t = scr_timer_pop();
       /* Timer callbacks are plain sync closures, run on the main stack.
