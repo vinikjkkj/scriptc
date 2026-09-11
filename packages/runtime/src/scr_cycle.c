@@ -800,11 +800,18 @@ static __attribute__((unused)) void scr_cyc_vm_give(void *p) { (void)p; }
  * defined in BOTH arms so linking never depends on which way the feature was
  * compiled, and idempotent so being reached twice costs a duplicate line
  * rather than doubled counters. */
-static int scr_cyc_arenavm_reported = 0;
-void scr_cyc_arenavm_report(void) {
-  if (scr_cyc_arenavm_reported) return;
-  scr_cyc_arenavm_reported = 1;
-  SCR_CYC_VM_REPORT();
+/* DEFINED BELOW, outside the page-return block, because it calls BOTH
+ * reporters and must exist however either feature was compiled. */
+void scr_cyc_arenavm_report(void);
+
+/* AN ABSENT INSTRUMENT MUST SAY SO IN ITS OWN VOICE. A build without the
+ * page-return reporter that simply printed nothing would be indistinguishable
+ * from a sweep that ran and returned nothing -- the exact confusion these
+ * counters exist to prevent, reintroduced by the build flag. So the absence
+ * announces itself and names which flag would fix it. */
+static __attribute__((cold, unused)) void scr_cyc_pr_absent(const char *why) {
+  fprintf(stderr, "[pgret] NOT COMPILED IN (%s) - whether the sweep fired is"
+                  " UNOBSERVED in this binary. This is NOT a zero.\n", why);
 }
 
 #if SCR_CYC_PAGERETURN && !defined(SCR_RC_AUDIT)
@@ -856,7 +863,14 @@ long long scr_cyc_pr_stat(int which) {
  * path ran -- a sweep that returned nothing prints the same answer. A zero
  * here is the only thing that can say it did not, and the knob-off arm is the
  * control that shows the counter can read zero. */
+static int scr_cyc_pr_reported = 0;
 static __attribute__((cold)) void scr_cyc_pr_report(void) {
+  /* IDEMPOTENT, because there are now two ways in and a harness may take both:
+   * the _Exit interposition (the only one that fires in zapo-rest) and the
+   * atexit arm below (the only one that fires in a test driver that returns
+   * from main). Two reports of the same counters would read as two sweeps. */
+  if (scr_cyc_pr_reported) return;
+  scr_cyc_pr_reported = 1;
   fprintf(stderr, "[pgret] pages=%lld revived=%lld sweeps=%lld chunks=%lld failed=%lld\n",
           scr_cyc_pr_pages, scr_cyc_pr_revived, scr_cyc_pr_sweeps,
           scr_cyc_pr_chunks, scr_cyc_pr_failed);
@@ -890,12 +904,6 @@ static __attribute__((cold)) void scr_cyc_pr_report(void) {
                     " free page, or SCR_CYCLE_PAGERETURN=0, or the platform"
                     " call is absent. Not a measurement of the return path.\n");
   }
-  /* CHAINED, not separately registered. process.exit lowers to _Exit in these
-   * binaries and atexit handlers never run, so a second registration would be
-   * a second thing that silently does not happen. Hanging the reservation
-   * counters off the report that is already reached is the difference between
-   * having the numbers and believing we do. */
-  SCR_CYC_VM_REPORT();
 }
 
 static __attribute__((cold)) void scr_cyc_pr_arm(void) {
@@ -907,8 +915,14 @@ static __attribute__((cold)) void scr_cyc_pr_arm(void) {
   if (e != NULL && strtol(e, NULL, 10) != 0) atexit(scr_cyc_pr_report);
 }
 
+#define SCR_CYC_PR_REPORT() scr_cyc_pr_report()
+
 #else
 #define scr_cyc_pr_arm() ((void)0)
+/* The reporter is not in this build. Say which flag would put it there rather
+ * than printing nothing, because printing nothing is what a sweep that
+ * returned nothing also does. */
+#define SCR_CYC_PR_REPORT() scr_cyc_pr_absent("built without -DSCR_CYC_PAGERETURN_STAT=1")
 #endif
 
 static int scr_cyc_pr_on(void) {
@@ -1185,7 +1199,40 @@ static __attribute__((cold, noinline, minsize)) void scr_cyc_pr_sweep(void) {
 #else
 #define SCR_CYC_PR_REVIVE(c) 0
 #define SCR_CYC_PR_SWEEP() ((void)0)
+/* Page return compiled out altogether -- SCR_CYC_PAGERETURN=0 or SCR_RC_AUDIT.
+ * Still not silent, and for a different reason than the one above, so it says
+ * which. */
+#define SCR_CYC_PR_REPORT() scr_cyc_pr_absent("page return is compiled out")
 #endif
+
+/* THE SINGLE ENTRY POINT FOR BOTH SETS OF COUNTERS, and the only way either
+ * leaves a zapo-rest process: process.exit() lowers to _Exit, which skips
+ * every atexit handler, so the arm scr_cyc_pr_arm installs is silently dead in
+ * exactly the binary a measurement is taken on. An instrument that cannot
+ * report is indistinguishable from a treatment that did nothing.
+ *
+ * BOTH REPORTS FIRE TOGETHER AND UNCONDITIONALLY. The page-return counters
+ * answer "did the baseline arm's sweep fire at all", which is not optional
+ * context for the reservation A/B -- comparing against a baseline whose
+ * behaviour is unobserved is not a control. And they print even when every
+ * counter reads zero, for the same reason the >= 520,192 census row is kept
+ * when it is empty: a line that disappears when there is nothing to say
+ * cannot tell you there was nothing to say.
+ *
+ * NON-STATIC so tests/perf/heapcensus/scr_heap_census.h and
+ * tests/perf/arenavm/scr_arenavm_stat.h can each declare it extern and chain
+ * it from their _Exit interposition, exactly as that census already does for
+ * scr_cs_report(). Defined in BOTH arms of both features so linking never
+ * depends on how anything was compiled, and idempotent so being reached twice
+ * costs nothing. */
+static int scr_cyc_arenavm_reported = 0;
+void scr_cyc_arenavm_report(void) {
+  if (scr_cyc_arenavm_reported) return;
+  scr_cyc_arenavm_reported = 1;
+  SCR_CYC_PR_REPORT();
+  SCR_CYC_VM_REPORT();
+}
+
 
 /* ── the page census hook ─────────────────────────────────────────────────
  * The arena frees a chunk only when it is COMPLETELY empty, so one survivor
