@@ -1660,6 +1660,56 @@ static double scr_stack_pool_next_ms = 0;
  * to the page by tests/harness/island.test.ts. */
 static unsigned long long scr_stack_pool_decayed = 0;
 
+/* -- THE POLL CLAMP, AND WHY IT IS NOW A KNOB ------------------------
+ *
+ * scr_stack_pool_decay_due caps the loop's sleep so a decay window cannot
+ * be slept through. That fixed a real defect -- a trim that never RAN read
+ * exactly like a trim that did not work -- but it has a consequence nobody
+ * costed: AN IDLE-TIME HOUSEKEEPING TASK SHORTENS THE I/O POLL DEADLINE.
+ * With a timer pending further out than the window, the loop stops sleeping
+ * to its natural deadline and wakes on the window instead, which reorders
+ * socket reads against timers and microtasks.
+ *
+ * It bites only when the natural deadline EXCEEDS the window. With no
+ * timers the floor is SCR_IO_POLL_MS = 1000 ms, shorter than any sane
+ * window, so the clamp never fires and an idle process is unaffected. A
+ * handshake holding a 10 s keepalive is the opposite case, and that is the
+ * shape the pairing fault was reported on.
+ *
+ * THE DECAY DOES NOT NEED THE CLAMP TO FUNCTION. scr_fiber_pool_decay is
+ * called unconditionally at the top of the sleep seam, before and
+ * independent of the `due` computation, so it runs on whatever wakeups the
+ * loop already has. Removing the clamp costs the decay its PROMPTNESS, not
+ * its function: a window still elapses and still runs on the next natural
+ * wakeup, so the pool drains slightly later and still drains.
+ *
+ * SCR_FIBER_POOL_DECAY_CLAMP=0 removes it. Default 1 is the current shipped
+ * behaviour, so nothing changes unless asked. Env knob, not a build flag,
+ * so both arms are one binary and the comparison carries no code-layout
+ * confound. */
+#ifndef SCR_FIBER_POOL_DECAY_CLAMP
+#define SCR_FIBER_POOL_DECAY_CLAMP 1
+#endif
+
+/* Loop-wakeup accounting for the clamp A/B. `eligible` is counted the same
+ * way in BOTH arms -- it records that the clamp WOULD have shortened this
+ * sleep -- so the two arms are comparable rather than each measuring only
+ * its own behaviour. `applied` counts the times it actually did. */
+static unsigned long long scr_loop_turns = 0;
+static unsigned long long scr_pool_clamp_elig = 0;
+static unsigned long long scr_pool_clamp_applied = 0;
+
+static bool scr_stack_pool_decay_clamp(void) {
+  static bool once = false;
+  static bool cached = SCR_FIBER_POOL_DECAY_CLAMP != 0;
+  if (!once) {
+    const char *env = getenv("SCR_FIBER_POOL_DECAY_CLAMP");
+    if (env != NULL) cached = strtol(env, NULL, 10) != 0;
+    once = true;
+  }
+  return cached;
+}
+
 static size_t scr_stack_pool_max(void) {
   static bool once = false;
   static size_t cached = SCR_FIBER_POOL;
@@ -1920,6 +1970,22 @@ static void scr_fiber_pool_teardown(void) {
   SCR_FST_POOLED(0);
   scr_stack_pool_lo = (size_t)-1;
   scr_stack_pool_next_ms = 0;
+  /* SCR_LOOP_WAKE_STAT=1 prints the clamp accounting at loop teardown.
+   * ALWAYS prints when armed, all-zero lines included: a clamp that never
+   * fired and an instrument that never ran produce the same silence, and
+   * this file has already made that exact mistake once. */
+  if (getenv("SCR_LOOP_WAKE_STAT") != NULL) {
+    fprintf(stderr,
+            "[loopwake] turns=%llu clampEligible=%llu clampApplied=%llu"
+            " decayedTotal=%llu clamp=%d\n",
+            scr_loop_turns, scr_pool_clamp_elig, scr_pool_clamp_applied,
+            scr_stack_pool_decayed, scr_stack_pool_decay_clamp() ? 1 : 0);
+    if (scr_pool_clamp_elig == 0) {
+      fputs("[loopwake] CLAMP NEVER ELIGIBLE - no sleep was ever longer than"
+            " the decay window, so this run does not exercise the clamp at"
+            " all. Not evidence either way.\n", stderr);
+    }
+  }
 }
 
 /* -- returning free heap pages to the OS at the idle seam -------------
@@ -3190,6 +3256,7 @@ bool scr_loop_run(ScrPromise *top_level) {
     double now = scr_now_ms();
     /* The loop has no runnable work at this point and is about to block:
      * the one place a fiber-stack trim can never race a switch. */
+    scr_loop_turns++;
     scr_fiber_pool_decay(now);
     /* And the same seam for the heap itself: the loop is about to
      * block, so a heap-wide walk cannot land between two allocations
@@ -3200,7 +3267,15 @@ bool scr_loop_run(ScrPromise *top_level) {
      * an empty one does not (see scr_stack_pool_decay_due). */
     {
       double pool_due = scr_stack_pool_decay_due(now);
-      if (pool_due >= 0 && pool_due < due) due = pool_due;
+      if (pool_due >= 0 && pool_due < due) {
+        /* Counted BEFORE the knob is consulted, so both arms record the
+         * same eligibility and only `applied` differs between them. */
+        scr_pool_clamp_elig++;
+        if (scr_stack_pool_decay_clamp()) {
+          due = pool_due;
+          scr_pool_clamp_applied++;
+        }
+      }
     }
     /* Likewise the heap trim: a turn that sleeps past its window is a
      * window that never ran (see scr_heap_trim_due). */
