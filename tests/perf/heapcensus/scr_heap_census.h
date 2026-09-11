@@ -424,6 +424,16 @@ SCR_HC_FN void scr_hc_report(void) {
    * with, so its report is called here rather than being silently absent. */
   scr_cs_report();
 #endif
+#ifdef SCR_CYC_ARENAVM_ON
+  /* Same reason, same arrangement: scr_cycle.c's reservation counters are
+   * registered with atexit and _Exit skips them. They are the half of this
+   * census that says whether the arena's 64 KiB chunks were DECOMMITTED or
+   * merely freed -- without them a busy/free split cannot be attributed. */
+  {
+    extern void scr_cyc_arenavm_report(void);
+    scr_cyc_arenavm_report();
+  }
+#endif
   if (f != stderr) fclose(f);
 }
 

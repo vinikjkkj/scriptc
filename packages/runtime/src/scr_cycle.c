@@ -330,6 +330,52 @@ _Static_assert(SCR_CYC_ARENA_CHUNK >= SCR_CYC_ARENA_GRAN * 4,
 #define SCR_CYC_ARENA_BUDGET 0
 #endif
 
+/* WHERE A CHUNK'S 64 KiB COMES FROM, and it is the difference between
+ * returning WORKING SET and returning COMMIT.
+ *
+ * The page-return block below hands whole free pages back with
+ * DiscardVirtualMemory, and the comment there says why that was right at the
+ * time and exactly what it costs: discard needs no reservation, so it works
+ * on malloc'd memory, but it returns only the private working set -- the
+ * commit charge stays. Decommit returns both, and requires the chunk to own
+ * its reservation, "which means taking the arena off malloc". This is that
+ * change, and that comment is its specification.
+ *
+ * WHAT IT BANKS, measured on the sync arm (CHUNKS=8 CONVS=400 MSGS=6, census
+ * at +60 s idle, memcensus/logs/rec-census-main/n1.heapcen.txt):
+ * `HCFREE 65520 47 3079440` -- 47 free CRT-heap blocks of 65,520 usable
+ * bytes, 2.94 MiB, and 65,520 plus a 16-byte header is SCR_CYC_ARENA_CHUNK
+ * exactly. Those are arena chunks this file already handed back with free(),
+ * which the CRT heap then kept. On the same census the whole backend -- free
+ * blocks over 16,384 B, which is the only band that is genuine loss rather
+ * than reusable LFH slot inventory -- is 11.49 MiB. So this is 25.6% of the
+ * part that is actually lost.
+ *
+ * It also runs ~8x cheaper per page than the discard it replaces (456 ns
+ * against 3,719; tests/perf/pagecensus/vmprobe.c has both costs), recovers
+ * ~7% more pages, and makes the 256-byte alignment carve in scr_cyc_ar_new a
+ * no-op, because a Windows reservation is already 64 KiB-aligned.
+ *
+ * THE ONE PLACE IT CAN BE SILENTLY WRONG rather than merely slower is the
+ * revival, and it is called out again at the line itself: a MEM_DECOMMITted
+ * page is NOT TOUCHABLE. Windows has no auto-commit-on-fault, so a touch is
+ * an access violation and not a soft fault (vmprobe.c:52). scr_cyc_pr_revive
+ * has to re-commit explicitly before it re-stamps `pad` and re-threads.
+ *
+ * AND THE COUPLING THAT IS EASY TO MISS: this knob selects THE ALLOCATOR AND
+ * THE DISCARD VERB TOGETHER. MEM_DECOMMIT inside a malloc'd block hands back
+ * pages the CRT heap still believes are its own -- a corruption that surfaces
+ * weeks later, somewhere else. scr_cyc_discard therefore takes the chunk's
+ * own `vm` flag and refuses to decommit anything this file did not reserve.
+ *
+ * SCR_CYCLE_ARENA_VM=0 restores the malloc arm. Env knob, not a build flag,
+ * so both arms are one binary and the A/B carries no code-layout confound --
+ * the arrangement SCR_ARRAY_VM=0 already uses in scr_array.c, whose
+ * reserve/commit/release trio this copies rather than redesigns. */
+#ifndef SCR_CYC_ARENA_VM
+#define SCR_CYC_ARENA_VM 1
+#endif
+
 /* One chunk serves one size class. `used` is the whole of the reclamation
  * contract: it counts blocks HANDED TO THE PROGRAM and not yet returned,
  * so it is incremented at the two places a block leaves this chunk (the
@@ -358,6 +404,15 @@ struct ScrCycChunk {
    * land — was no, but only after a second load of the class table to
    * prove it. One byte answers it. */
   uint8_t avail;
+  /* 1 = these 64 KiB are a slot in a reservation this file owns, so they go
+   * back with MEM_DECOMMIT and come back with MEM_COMMIT. 0 = malloc'd, and
+   * nothing may decommit inside them. PER CHUNK, not global: flipping the
+   * knob cannot retroactively change how memory already out was taken, so
+   * both kinds can be live at once and each has to be given back its own
+   * way. Read by scr_cyc_ar_release (which allocator), by scr_cyc_discard
+   * (which verb), and by scr_cyc_pr_revive (whether a touch needs a commit
+   * first). */
+  uint8_t vm;
   /* Bitmap of this chunk's pages that have been UNTHREADED and handed back
    * (see the page-return block below). Bit p set means no block overlapping
    * page p is on `freelist`, and those blocks are free. 16 pages at 64 KiB. */
@@ -486,7 +541,9 @@ static size_t scr_cyc_ar_held = 0;
 #endif
 #define SCR_CYC_PPC ((unsigned)(SCR_CYC_ARENA_CHUNK / SCR_CYC_PAGE))
 
-#if SCR_CYC_PAGERETURN && !defined(SCR_RC_AUDIT)
+/* Hoisted out of the page-return guard: the reservation arm needs the same
+ * headers and the two are independent knobs, so neither may own the include. */
+#if (SCR_CYC_PAGERETURN || SCR_CYC_ARENA_VM) && !defined(SCR_RC_AUDIT)
 #ifdef _WIN32
 /* winsock.h's own guard: this file does not want sockets, and windows.h
  * drags them in with a `fd_set` that collides with the runtime's own. Same
@@ -498,6 +555,259 @@ static size_t scr_cyc_ar_held = 0;
 #elif defined(__linux__) || defined(__unix__) || defined(__APPLE__)
 #include <sys/mman.h>
 #endif
+#endif
+
+/* --- THE RESERVATION ---------------------------------------------------
+ *
+ * scr_array.c:345-369 already owns a reserve / commit / release trio for
+ * ScrArr::data, and this is that trio COPIED rather than redesigned: same
+ * shape, same "NULL is a refusal and never a trap" contract, same POSIX arm.
+ * What differs is only what sits on top -- an array owns its whole
+ * reservation and releases it outright, whereas chunks are uniform 64 KiB
+ * and want to be recycled, so a reservation here is a SLAB of slots with a
+ * bitmap and MEM_DECOMMIT in place of MEM_RELEASE.
+ *
+ * ONE RESERVATION IS 1,024 SLOTS = 64 MiB OF ADDRESS SPACE, which costs
+ * nothing until committed -- that is the whole point of separating reserve
+ * from commit. The arena's measured peak is 277 chunks (17.8 MiB, cycstat
+ * `peakheld` on the sync arm), so one reservation covers it 3.7x over and
+ * the second is never expected to be taken. SCR_CYC_VM_RES_MAX caps the
+ * address space at 4 GiB so that a runaway cannot exhaust a 64-bit space
+ * quietly; past it scr_cyc_vm_take refuses and the caller uses malloc.
+ *
+ * A SLOT IS 64 KiB ON A 64 KiB BOUNDARY because the reservation base is
+ * 64 KiB-aligned (Windows allocation granularity) and the slots tile it. That
+ * is what makes the 256-byte alignment carve in scr_cyc_ar_new a no-op, and
+ * it is why ScrCycHdr::pad stays a valid chunk map on this arm. */
+#if SCR_CYC_ARENA_VM && !defined(SCR_RC_AUDIT)
+
+#define SCR_CYC_VM_RES_SLOTS 1024u
+#define SCR_CYC_VM_RES_WORDS (SCR_CYC_VM_RES_SLOTS / 64u)
+#define SCR_CYC_VM_RESERVE ((size_t)SCR_CYC_VM_RES_SLOTS * SCR_CYC_ARENA_CHUNK)
+#define SCR_CYC_VM_RES_MAX 64u
+
+typedef struct {
+  unsigned char *base;
+  uint64_t freemap[SCR_CYC_VM_RES_WORDS]; /* 1 = slot available */
+  unsigned nfree;                         /* popcount of freemap, maintained */
+} ScrCycVmRes;
+
+static ScrCycVmRes scr_cyc_vm_res[SCR_CYC_VM_RES_MAX];
+static unsigned scr_cyc_vm_nres;
+
+/* COUNTERS, AND A ZERO IN ANY OF THEM HAS TO NAME ITS OWN CAUSE. Two arms of
+ * one binary printing the same settled figure is NOT evidence the reservation
+ * ran: a reservation that was never taken prints the same figure as one that
+ * was taken and returned nothing. `reserved` separates "never reserved" from
+ * "reserved and never recycled", and `refused` separates both from "tried and
+ * the platform said no". */
+static long long scr_cyc_vm_taken = 0;
+static long long scr_cyc_vm_given = 0;
+static long long scr_cyc_vm_reserved = 0;
+static long long scr_cyc_vm_refused = 0;
+static long long scr_cyc_vm_recommit = 0;
+static long long scr_cyc_vm_recommitfail = 0;
+
+static int scr_cyc_vm_on(void) {
+  static int cached = -1;
+  if (cached < 0) {
+    const char *e = getenv("SCR_CYCLE_ARENA_VM");
+    cached = e != NULL ? (strtol(e, NULL, 10) != 0) : (SCR_CYC_ARENA_VM != 0);
+  }
+  return cached;
+}
+
+/* Reserve without committing. NULL is a refusal, never a trap. */
+static void *scr_cyc_vm_reserve_slab(void) {
+#ifdef _WIN32
+  return VirtualAlloc(NULL, SCR_CYC_VM_RESERVE, MEM_RESERVE, PAGE_READWRITE);
+#else
+  void *p = mmap(NULL, SCR_CYC_VM_RESERVE, PROT_NONE,
+                 MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  return p == MAP_FAILED ? NULL : p;
+#endif
+}
+
+/* Idempotent on already-committed pages on both platforms, which is what lets
+ * the revival commit one page without tracking whether it already did. */
+static int scr_cyc_vm_commit(void *p, size_t n) {
+#ifdef _WIN32
+  return VirtualAlloc(p, n, MEM_COMMIT, PAGE_READWRITE) != NULL;
+#else
+  return mprotect(p, n, PROT_READ | PROT_WRITE) == 0;
+#endif
+}
+
+static __attribute__((unused)) int scr_cyc_vm_recommit_page(void *p, size_t n) {
+  int ok = scr_cyc_vm_commit(p, n);
+  if (ok) scr_cyc_vm_recommit++;
+  return ok;
+}
+
+/* Give the pages and their commit charge back, leaving the slot RESERVED so
+ * the address range stays ours. */
+static void scr_cyc_vm_decommit(void *p, size_t n) {
+#ifdef _WIN32
+  (void)VirtualFree(p, n, MEM_DECOMMIT);
+#else
+  /* madvise first -- some kernels want the mapping still accessible -- then
+   * PROT_NONE, so that "returned but still reserved" means the same thing on
+   * both platforms and a stray touch faults on both. */
+  (void)madvise(p, n, MADV_DONTNEED);
+  (void)mprotect(p, n, PROT_NONE);
+#endif
+}
+
+/* A committed, 64 KiB-aligned 64 KiB, or NULL. NULL is always survivable:
+ * every caller falls back to malloc. */
+static void *scr_cyc_vm_take(void) {
+  unsigned r, w;
+  for (r = 0; r < scr_cyc_vm_nres; r++) {
+    ScrCycVmRes *R = &scr_cyc_vm_res[r];
+    if (R->nfree == 0) continue;
+    for (w = 0; w < SCR_CYC_VM_RES_WORDS; w++) {
+      uint64_t m = R->freemap[w];
+      unsigned b;
+      unsigned char *p;
+      if (m == 0) continue;
+      b = (unsigned)__builtin_ctzll(m);
+      p = R->base + ((size_t)(w * 64u + b) * SCR_CYC_ARENA_CHUNK);
+      if (!scr_cyc_vm_commit(p, SCR_CYC_ARENA_CHUNK)) {
+        /* The slot stays marked free: nothing was handed out, so nothing has
+         * to be given back. Commit failure is a real condition (the system
+         * commit limit), not a corrupt state. */
+        scr_cyc_vm_refused++;
+        return NULL;
+      }
+      R->freemap[w] = m & ~((uint64_t)1 << b);
+      R->nfree--;
+      scr_cyc_vm_taken++;
+      return p;
+    }
+  }
+  if (scr_cyc_vm_nres >= SCR_CYC_VM_RES_MAX) {
+    scr_cyc_vm_refused++;
+    return NULL;
+  }
+  {
+    ScrCycVmRes *R = &scr_cyc_vm_res[scr_cyc_vm_nres];
+    unsigned char *p = (unsigned char *)scr_cyc_vm_reserve_slab();
+    if (p == NULL) {
+      scr_cyc_vm_refused++;
+      return NULL;
+    }
+    R->base = p;
+    for (w = 0; w < SCR_CYC_VM_RES_WORDS; w++) R->freemap[w] = ~(uint64_t)0;
+    R->nfree = SCR_CYC_VM_RES_SLOTS;
+    scr_cyc_vm_nres++;
+    scr_cyc_vm_reserved++;
+    if (!scr_cyc_vm_commit(p, SCR_CYC_ARENA_CHUNK)) {
+      scr_cyc_vm_refused++;
+      return NULL; /* the slab stays, with every slot still free */
+    }
+    R->freemap[0] &= ~(uint64_t)1;
+    R->nfree--;
+    scr_cyc_vm_taken++;
+    return p;
+  }
+}
+
+static void scr_cyc_vm_give(void *p) {
+  unsigned char *q = (unsigned char *)p;
+  unsigned r;
+  for (r = 0; r < scr_cyc_vm_nres; r++) {
+    ScrCycVmRes *R = &scr_cyc_vm_res[r];
+    size_t off;
+    unsigned i;
+    if (q < R->base || q >= R->base + SCR_CYC_VM_RESERVE) continue;
+    off = (size_t)(q - R->base);
+    if (off % SCR_CYC_ARENA_CHUNK != 0) {
+      scr_trap("scriptc: cycle arena vm: chunk is not on a slot boundary\n");
+    }
+    /* The WHOLE slot, including pages the page-return sweep already gave
+     * back. MEM_DECOMMIT over an already-decommitted page succeeds, so this
+     * needs no per-page state and `gone` can be forgotten here. */
+    scr_cyc_vm_decommit(q, SCR_CYC_ARENA_CHUNK);
+    i = (unsigned)(off / SCR_CYC_ARENA_CHUNK);
+    R->freemap[i / 64u] |= (uint64_t)1 << (i % 64u);
+    R->nfree++;
+    scr_cyc_vm_given++;
+    return;
+  }
+  /* A vm-flagged chunk that belongs to no reservation is memory corruption or
+   * a mixed-up flag, and both are worse than a loud stop. */
+  scr_trap("scriptc: cycle arena vm: chunk is in no reservation\n");
+}
+
+static __attribute__((cold)) void scr_cyc_vm_report(void) {
+  fprintf(stderr,
+          "[arenavm] reserved=%lld taken=%lld given=%lld refused=%lld"
+          " recommit=%lld recommitfail=%lld slabs=%u\n",
+          scr_cyc_vm_reserved, scr_cyc_vm_taken, scr_cyc_vm_given,
+          scr_cyc_vm_refused, scr_cyc_vm_recommit, scr_cyc_vm_recommitfail,
+          scr_cyc_vm_nres);
+  if (scr_cyc_vm_reserved == 0) {
+    fprintf(stderr,
+            "[arenavm] NOTHING RESERVED - SCR_CYCLE_ARENA_VM=0, or the arena"
+            " never took a chunk at all. The reservation path is INERT in this"
+            " run; this is NOT a measurement of what it would return.\n");
+  } else if (scr_cyc_vm_given == 0) {
+    fprintf(stderr,
+            "[arenavm] NOTHING GIVEN BACK - %lld slots taken and none reached"
+            " used==0. That is PLACEMENT, not inertness, and it is the same"
+            " condition that keeps the malloc arm's chunks resident.\n",
+            scr_cyc_vm_taken);
+  }
+  if (scr_cyc_vm_refused != 0) {
+    fprintf(stderr,
+            "[arenavm] REFUSED %lld times - those chunks came from malloc and"
+            " are NOT decommittable. A mixed run; the arm is not clean.\n",
+            scr_cyc_vm_refused);
+  }
+  if (scr_cyc_vm_recommitfail != 0) {
+    fprintf(stderr,
+            "[arenavm] RE-COMMIT FAILED %lld times - those pages stayed `gone`"
+            " and their chunks cannot grow. Sound, but wasting a chunk"
+            " each.\n",
+            scr_cyc_vm_recommitfail);
+  }
+}
+
+#define SCR_CYC_VM_ON() scr_cyc_vm_on()
+#define SCR_CYC_VM_RECOMMIT(p, n) scr_cyc_vm_recommit_page((p), (n))
+#define SCR_CYC_VM_REPORT() scr_cyc_vm_report()
+
+#else /* compiled out: every chunk is a malloc chunk */
+
+static __attribute__((unused)) long long scr_cyc_vm_recommitfail = 0;
+static __attribute__((unused)) void *scr_cyc_vm_take(void) { return NULL; }
+static __attribute__((unused)) void scr_cyc_vm_give(void *p) { (void)p; }
+#define SCR_CYC_VM_ON() 0
+#define SCR_CYC_VM_RECOMMIT(p, n) ((void)(p), (void)(n), 1)
+#define SCR_CYC_VM_REPORT() ((void)0)
+
+#endif
+
+/* THE ONLY WAY THESE NUMBERS LEAVE A zapo-rest PROCESS, and it is not
+ * decoration. process.exit() lowers to _Exit, which skips every atexit
+ * handler, so the arm scr_cyc_pr_arm installs is silently dead in exactly the
+ * binary the measurement is taken on -- and an instrument that cannot report
+ * is indistinguishable from a treatment that did nothing.
+ *
+ * tests/perf/heapcensus/scr_heap_census.h interposes _Exit and already calls
+ * scr_cs_report() from there for exactly this reason. This is the same
+ * arrangement: NON-STATIC so that header can declare it extern and chain it,
+ * defined in BOTH arms so linking never depends on which way the feature was
+ * compiled, and idempotent so being reached twice costs a duplicate line
+ * rather than doubled counters. */
+static int scr_cyc_arenavm_reported = 0;
+void scr_cyc_arenavm_report(void) {
+  if (scr_cyc_arenavm_reported) return;
+  scr_cyc_arenavm_reported = 1;
+  SCR_CYC_VM_REPORT();
+}
+
+#if SCR_CYC_PAGERETURN && !defined(SCR_RC_AUDIT)
 _Static_assert(SCR_CYC_PPC <= 16, "the `gone` bitmap is a uint16_t");
 
 #ifdef _WIN32
@@ -580,6 +890,12 @@ static __attribute__((cold)) void scr_cyc_pr_report(void) {
                     " free page, or SCR_CYCLE_PAGERETURN=0, or the platform"
                     " call is absent. Not a measurement of the return path.\n");
   }
+  /* CHAINED, not separately registered. process.exit lowers to _Exit in these
+   * binaries and atexit handlers never run, so a second registration would be
+   * a second thing that silently does not happen. Hanging the reservation
+   * counters off the report that is already reached is the difference between
+   * having the numbers and believing we do. */
+  SCR_CYC_VM_REPORT();
 }
 
 static __attribute__((cold)) void scr_cyc_pr_arm(void) {
@@ -606,8 +922,14 @@ static int scr_cyc_pr_on(void) {
 
 /* The platform call. NULL/failure is a slower program, never a broken one:
  * every caller leaves the pages threaded and simply does not return them. */
-static __attribute__((cold)) int scr_cyc_discard(void *p, size_t n) {
+static __attribute__((cold)) int scr_cyc_discard(void *p, size_t n, int vm) {
 #ifdef _WIN32
+  /* OWNED MEMORY ONLY, and this branch is the whole of that guarantee.
+   * Decommit returns the commit charge as well as the working set, but it is
+   * legal only inside a reservation this file made. `vm` is the chunk's own
+   * flag rather than a read of the knob, because the knob can change while
+   * malloc'd chunks are still live. */
+  if (vm) return VirtualFree(p, n, MEM_DECOMMIT) != 0;
   if (!scr_cyc_discard_looked) {
     scr_cyc_discard_looked = 1;
     scr_cyc_discard_fn = (ScrCycDiscardFn)(void *)GetProcAddress(
@@ -615,9 +937,16 @@ static __attribute__((cold)) int scr_cyc_discard(void *p, size_t n) {
   }
   return scr_cyc_discard_fn != NULL && scr_cyc_discard_fn(p, n) == 0;
 #elif defined(MADV_DONTNEED)
+  /* POSIX has one verb for both arms and it is the right one either way:
+   * MADV_DONTNEED on private anonymous memory drops the pages AND the charge,
+   * and they fault back as zeroes with no re-commit needed. The commit versus
+   * working-set distinction the `vm` flag exists for is a Windows
+   * distinction. Saying so costs a comment; leaving it out invites a reader
+   * to conclude the POSIX arm was forgotten. */
+  (void)vm;
   return madvise(p, n, MADV_DONTNEED) == 0;
 #else
-  (void)p; (void)n;
+  (void)p; (void)n; (void)vm;
   return 0;
 #endif
 }
@@ -739,7 +1068,7 @@ static __attribute__((cold, noinline, minsize)) void scr_cyc_pr_sweep_chunk(ScrC
     q = k;
     while (q + 1u < npages && ((mask >> (q + 1u)) & 1u)) q++;
     if (scr_cyc_discard((void *)(first + (uintptr_t)k * SCR_CYC_PAGE),
-                        (size_t)(q - k + 1u) * SCR_CYC_PAGE)) {
+                        (size_t)(q - k + 1u) * SCR_CYC_PAGE, c->vm)) {
       scr_cyc_pr_pages += (long long)(q - k + 1u);
     } else {
       scr_cyc_pr_failed++;
@@ -774,6 +1103,27 @@ static __attribute__((cold, noinline, minsize)) int scr_cyc_pr_revive(ScrCycChun
     if ((c->gone >> target) & 1u) break;
   }
   if (target >= npages) return 0;
+  /* THE ONE PLACE THE RESERVATION ARM CAN BE SILENTLY WRONG RATHER THAN
+   * MERELY SLOWER. Under the malloc arm the page was DISCARDED: still
+   * committed, still touchable, and the writes below simply fault in a zero
+   * page. Under the reservation arm it was DECOMMITTED: MEM_RESERVE, and not
+   * touchable at all, because Windows has no auto-commit-on-fault. The very
+   * next statements re-stamp `pad` and thread blocks onto the free list --
+   * WRITES -- so without this the revival is an access violation, not a slow
+   * path.
+   *
+   * ORDER IS LOAD-BEARING: commit first, clear `gone` second. A failed commit
+   * must leave the bit SET, because `gone` is the invariant the revival rests
+   * on -- "no block on a gone page is on the free list" -- and a cleared bit
+   * over an uncommitted page would let the next sweep read those blocks as
+   * live and let a refill thread them. Leaving it set costs a chunk that
+   * cannot grow; clearing it wrongly costs the process. */
+  if (c->vm &&
+      !SCR_CYC_VM_RECOMMIT((void *)(first + (uintptr_t)target * SCR_CYC_PAGE),
+                           SCR_CYC_PAGE)) {
+    scr_cyc_vm_recommitfail++;
+    return 0;
+  }
   c->gone &= (uint16_t)(~(1u << target));
   scr_cyc_pr_revived++;
   nslots = (size_t)(c->bump - cs) / stride;
@@ -1018,10 +1368,27 @@ static void scr_cyc_ar_unlink(ScrCycChunk *c) {
 static ScrCycChunk *scr_cyc_ar_new(uint8_t blk, size_t stride) {
   unsigned char *raw, *base;
   ScrCycChunk *c;
+  int vm;
   size_t bud = scr_cyc_ar_budget();
   if (bud != 0 && scr_cyc_ar_held + SCR_CYC_ARENA_CHUNK > bud) return NULL;
-  raw = (unsigned char *)malloc(SCR_CYC_ARENA_CHUNK);
+  /* The reservation first, malloc as the FALLBACK -- and it is a fallback,
+   * not a second arm: a refused reservation (address space gone, the
+   * SCR_CYC_VM_RES_MAX ceiling reached, a failed commit) has to leave a
+   * working program, exactly as a refused chunk already falls back to calloc
+   * one level up. A slower program, never a broken one. */
+  vm = 0;
+  raw = NULL;
+  if (SCR_CYC_VM_ON()) {
+    raw = (unsigned char *)scr_cyc_vm_take();
+    if (raw != NULL) vm = 1;
+  }
+  if (raw == NULL) raw = (unsigned char *)malloc(SCR_CYC_ARENA_CHUNK);
   if (raw == NULL) return NULL;
+  /* A NO-OP ON THE RESERVATION ARM, and left in rather than branched around:
+   * a Windows reservation is 64 KiB-aligned by the allocation granularity, so
+   * aligning up to 256 returns `raw` unchanged. One expression for both arms
+   * is worth more than the three instructions it costs on a path that runs
+   * once per 64 KiB. */
   base = (unsigned char *)(void *)(((uintptr_t)(void *)raw +
                                     (SCR_CYC_ARENA_GRAN - 1u)) &
                                    ~(uintptr_t)(SCR_CYC_ARENA_GRAN - 1u));
@@ -1036,6 +1403,12 @@ static ScrCycChunk *scr_cyc_ar_new(uint8_t blk, size_t stride) {
   c->stride = (uint32_t)stride;
   c->blk = blk;
   c->avail = 1; /* the caller makes it current the moment it returns */
+  c->vm = (uint8_t)vm;
+  /* A REUSED RESERVATION SLOT COMES BACK FULLY COMMITTED, so `gone = 0` is a
+   * statement about the memory and not only about the header: scr_cyc_vm_give
+   * decommits the whole 64 KiB and scr_cyc_vm_take commits the whole 64 KiB,
+   * so no page of a fresh chunk is ever missing. Were that asymmetric, a
+   * recycled slot would start with pages that read as present and are not. */
   c->gone = 0;
   scr_cyc_ar_held += SCR_CYC_ARENA_CHUNK;
   SCR_PC_LINK(c);
@@ -1051,7 +1424,8 @@ static void scr_cyc_ar_release(ScrCycChunk *c) {
   SCR_PC_UNLINK(c);
   scr_cyc_ar_held -= SCR_CYC_ARENA_CHUNK;
   SCR_CS_BUMP(arfree);
-  free(c->raw);
+  if (c->vm) scr_cyc_vm_give(c->raw);
+  else free(c->raw);
 }
 
 /* THE HOT ARM, and the whole of it: the class's current chunk, one pop off
