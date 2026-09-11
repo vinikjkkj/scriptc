@@ -24,7 +24,17 @@
  *
  * MUTUALLY EXCLUSIVE WITH THE HEAP CENSUS BY CONSTRUCTION: both interpose
  * _Exit, and that header raises #error rather than chaining silently if
- * something got there first. Use one or the other, never both -- the census
+ * something got there first.
+ *
+ * AND ONE TRAP THAT IS NOT SYMMETRIC, worth knowing before adding a third
+ * instrument to a build that uses this one. tests/perf/cycstat/scr_cyc_stat.h
+ * opens its interposition with `#ifdef _Exit / #undef _Exit / #endif` -- it
+ * CLOBBERS whatever was there rather than chaining to it or refusing. So
+ * -including cycstat after this header does not fail the build; it silently
+ * removes this report, and the run comes back with every reservation counter
+ * missing and no error to say why. If both are ever wanted in one binary,
+ * chain scr_cyc_arenavm_report into cycstat's own macro explicitly rather
+ * than relying on include order. Use one or the other, never both -- the census
  * build already calls scr_cyc_arenavm_report itself under
  * -DSCR_CYC_ARENAVM_ON=1, so pairing them would be a duplicate report as well
  * as a build failure.
