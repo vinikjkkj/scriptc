@@ -368,12 +368,48 @@ _Static_assert(SCR_CYC_ARENA_CHUNK >= SCR_CYC_ARENA_GRAN * 4,
  * weeks later, somewhere else. scr_cyc_discard therefore takes the chunk's
  * own `vm` flag and refuses to decommit anything this file did not reserve.
  *
- * SCR_CYCLE_ARENA_VM=0 restores the malloc arm. Env knob, not a build flag,
- * so both arms are one binary and the A/B carries no code-layout confound --
- * the arrangement SCR_ARRAY_VM=0 already uses in scr_array.c, whose
- * reserve/commit/release trio this copies rather than redesigns. */
+ * SCR_CYCLE_ARENA_VM=1 arms it. Env knob, not a build flag, so both arms are
+ * one binary and the A/B carries no code-layout confound -- the arrangement
+ * SCR_ARRAY_VM=0 already uses in scr_array.c, whose reserve/commit/release
+ * trio this copies rather than redesigns.
+ *
+ * DEFAULT 0, AND THAT IS DELIBERATE RATHER THAN TIMID. The mechanism is
+ * proved at artifact level: with it armed the 65,520 B free-block population
+ * is ABSENT from the CRT heap where the malloc arm leaves 47 of them, the
+ * busy 64 KiB population falls 169 -> 24, and recommit == revived exactly
+ * across 1,182 chunk lifetimes with zero re-commit failures.
+ *
+ * What is NOT proved is any benefit. The four-arm A/B (sync shape, mirrored
+ * order, one binary) came back at -0.62 MiB settled private WS against a
+ * measured 0.87 MiB reproducibility floor, and -2.88 MiB commit against a
+ * 3.10 MiB floor -- right sign in both columns, neither clearing its own
+ * noise. The prize was also mis-sized going in: 2.94 MiB was a SNAPSHOT of
+ * freed chunks, while `taken - given` leaves 112 chunks still held at exit
+ * that the malloc arm holds too, so the settled plateau is the wrong instant
+ * to catch a cumulative 553-chunk flow.
+ *
+ * A capability should land; a behaviour change nobody can measure should not.
+ * So this ships OFF: merging adds the knob, the counters and the reservation
+ * path without changing what any existing build does. Turning it on is a
+ * separate decision that needs a measurement that resolves.
+ *
+ * TWO MACROS, NOT ONE, AND THE DIFFERENCE IS THE WHOLE POINT. The first cut of
+ * this flip set SCR_CYC_ARENA_VM to 0 -- and that does not default the feature
+ * off, it COMPILES IT OUT: the guard below is `#if SCR_CYC_ARENA_VM`, so the
+ * reservation path, the counters and the report all vanish and
+ * SCR_CYCLE_ARENA_VM=1 in the environment can no longer reach anything.
+ * Measured: zero VM symbols in the object, 18 KB smaller. That ships the
+ * absence of a capability while claiming to ship the capability.
+ *
+ * So SCR_CYC_ARENA_VM stays 1 -- the code is BUILT -- and
+ * SCR_CYC_ARENA_VM_DEFAULT is what scr_cyc_vm_on() falls back to when the
+ * environment says nothing. Same separation SCR_FIBER_POOL_DECAY_MS uses in
+ * scr_async.c: always compiled, runtime default 0. */
 #ifndef SCR_CYC_ARENA_VM
 #define SCR_CYC_ARENA_VM 1
+#endif
+#ifndef SCR_CYC_ARENA_VM_DEFAULT
+#define SCR_CYC_ARENA_VM_DEFAULT 0
 #endif
 
 /* One chunk serves one size class. `used` is the whole of the reclamation
@@ -612,7 +648,8 @@ static int scr_cyc_vm_on(void) {
   static int cached = -1;
   if (cached < 0) {
     const char *e = getenv("SCR_CYCLE_ARENA_VM");
-    cached = e != NULL ? (strtol(e, NULL, 10) != 0) : (SCR_CYC_ARENA_VM != 0);
+    cached = e != NULL ? (strtol(e, NULL, 10) != 0)
+                       : (SCR_CYC_ARENA_VM_DEFAULT != 0);
   }
   return cached;
 }
