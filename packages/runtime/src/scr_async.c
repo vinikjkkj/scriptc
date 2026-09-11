@@ -577,7 +577,139 @@ typedef struct ScrStack {
   ScrCtx ctx;
   char *mem;             /* POSIX only; Windows fibers own their stack */
   struct ScrStack *next; /* free-list link; meaningful only while pooled */
+  /* The stack's own address range, learned by the fiber itself on first
+   * entry (see scr_stack_note_region). Only the POISON arm reads it; it is
+   * recorded unconditionally because the recording is two VirtualQuery
+   * calls on a path that runs once per stack, and a field that is only
+   * populated when a diagnostic is armed cannot be checked by the
+   * diagnostic that needs it. NULL means the stack was never entered --
+   * PRISTINE -- and cannot be located, which the arm counts rather than
+   * silently skips. */
+  void *res_base;
+  size_t res_size;
 } ScrStack;
+
+/* -- THE POISONING ARM: make a reclaimed stack FAULT instead of go quiet --
+ *
+ * Three mechanisms for the reported pairing fault have been proposed and all
+ * three are refuted: a use-after-free on a pooled stack (ScrStack is confined
+ * to this translation unit and no native binding can hold one), the decay
+ * shortening the I/O poll (the socket cap overrides it whenever `net` is
+ * pending), and DeleteFiber running library destructors (the binary imports
+ * no Fls* at all, and FLS callbacks are the only thing DeleteFiber runs).
+ *
+ * Reading has now been wrong about the mechanism three times, so this stops
+ * arguing and makes the failure point at itself.
+ *
+ * WHAT IT DOES. Instead of DeleteFiber, decommit the stack's reservation and
+ * LEAVE IT RESERVED. Every byte of physical memory and commit goes back --
+ * the whole reclaim the decay exists for -- but the address range stays owned
+ * and untouchable, so any access to a reclaimed stack is an access violation
+ * at the exact offending instruction instead of a silent read of whatever now
+ * occupies that address.
+ *
+ * DELIBERATELY NOT DeleteFiber: that RELEASES the reservation and hands the
+ * addresses back for reuse, which is precisely the condition being ruled out.
+ * The cost is that the FIBER object itself leaks, and it is NOT negligible:
+ * MEASURED at 1,689 bytes per reclaimed stack (settled private WS 18.77 MiB
+ * with this armed against 4.26 without, over 9,001 poisoned stacks). A FIBER
+ * holds a full x64 CONTEXT, so that figure is structural rather than
+ * surprising.
+ *
+ * SO THIS ARM DOES NOT DELIVER THE DECAY'S MEMORY WIN. The stack pages come
+ * back -- that is what MEM_DECOMMIT does -- but the per-fiber object does
+ * not, so a run with this armed retains MORE than an unpoisoned one, not
+ * less. Anyone reading RSS during a poisoned run must not mistake that for
+ * the fault being investigated. It is the price of keeping the address
+ * range owned, and it is why this is a diagnostic and never a default.
+ *
+ * IT TESTS THE ARGUMENT RATHER THAN RESTATING IT. The confinement argument
+ * says nothing can hold such a pointer. A clean run with this armed confirms
+ * that by experiment and retires the whole class; a fault hands over an
+ * address, a faulting instruction and a stack instead of a deduction.
+ *
+ * It also covers the one avenue reading could not reach: address reuse
+ * exposing a latent dangling pointer anywhere ABOVE the runtime, which is
+ * benign while the pool holds the pages and live once they go back. A
+ * poisoned range faults on first touch where a released one returns
+ * plausible bytes.
+ *
+ * SCR_FIBER_POOL_POISON=1 arms it. Default 0. */
+#ifdef _WIN32
+static unsigned long long scr_stack_poisoned = 0;
+static unsigned long long scr_stack_poison_unlocatable = 0;
+
+static bool scr_stack_poison_on(void) {
+  static bool once = false;
+  static bool cached = false;
+  if (!once) {
+    const char *e = getenv("SCR_FIBER_POOL_POISON");
+    cached = e != NULL && strtol(e, NULL, 10) != 0;
+    once = true;
+  }
+  return cached;
+}
+
+/* Learn the running fiber's own stack reservation. Called FROM the fiber, on
+ * its own stack, so a VirtualQuery of a local lands inside it and
+ * AllocationBase is the base of the whole reservation CreateFiberEx made.
+ * The region walk sums the pieces the stack has been split into (guard,
+ * committed, uncommitted) -- they share an AllocationBase, which is the
+ * termination condition. Documented API only; no TEB offsets. */
+static void scr_stack_note_region(ScrStack *s) {
+  MEMORY_BASIC_INFORMATION mbi;
+  volatile char probe = 0;
+  unsigned char *p;
+  void *base;
+  size_t total = 0;
+  (void)probe;
+  if (VirtualQuery((LPCVOID)&probe, &mbi, sizeof mbi) == 0) return;
+  base = mbi.AllocationBase;
+  if (base == NULL) return;
+  for (p = (unsigned char *)base;;) {
+    MEMORY_BASIC_INFORMATION m;
+    if (VirtualQuery((LPCVOID)p, &m, sizeof m) == 0) break;
+    if (m.AllocationBase != base) break;
+    total += (size_t)m.RegionSize;
+    p += m.RegionSize;
+  }
+  if (total == 0) return;
+  s->res_base = base;
+  s->res_size = total;
+}
+
+/* THE POSITIVE CONTROL, and the arm is worth nothing without it. A poisoning
+ * pass that silently poisons nothing produces a clean run indistinguishable
+ * from one that proves the stacks are untouched -- the same "found none vs
+ * there are none" confusion this file has already made twice.
+ *
+ * SCR_FIBER_POOL_POISON_SELFTEST=1 touches the FIRST poisoned range on
+ * purpose. An access violation there is a PASS: it proves the poisoning is
+ * real and that a stray access to a reclaimed stack really does fault at the
+ * offending instruction. Reaching the line after the read is a FAIL and says
+ * so, because it means the range is still readable and a clean production run
+ * would have meant nothing. */
+static void scr_stack_poison_selftest(ScrStack *s) {
+  static bool done = false;
+  const char *e;
+  if (done) return;
+  e = getenv("SCR_FIBER_POOL_POISON_SELFTEST");
+  if (e == NULL || strtol(e, NULL, 10) == 0) return;
+  done = true;
+  fputs("[fiberpoison] SELFTEST: reading a just-poisoned stack on purpose."
+        " AN ACCESS VIOLATION HERE IS A PASS.\n", stderr);
+  fflush(stderr);
+  {
+    volatile unsigned char *q = (volatile unsigned char *)s->res_base;
+    unsigned char v = q[4096 < s->res_size ? 4096 : 0];
+    (void)v;
+  }
+  fputs("[fiberpoison] SELFTEST FAILED: that read did NOT fault, so the range"
+        " is still accessible and POISONING IS INERT. A clean run with this"
+        " arm proves nothing.\n", stderr);
+  fflush(stderr);
+}
+#endif
 
 struct ScrFiber {
   ScrStack *st;      /* the context we run on; NULL on the stackless
@@ -1462,6 +1594,11 @@ static void scr_trampoline(void) {
    * value carried across the switch. The one thing that does survive is
    * `st`, which is the pooled object itself. */
   ScrStack *st = scr_current->st;
+#ifdef _WIN32
+  /* Recorded from ON the stack, which is the only place it can be learned
+   * without undocumented TEB offsets. Once is enough; re-entry is a no-op. */
+  if (st->res_base == NULL) scr_stack_note_region(st);
+#endif
   for (;;) {
     ScrFiber *self = scr_current;
     self->entry(self, self->argpack);
@@ -1758,7 +1895,27 @@ static size_t scr_stack_reserve(void) {
 static void scr_stack_free(ScrStack *s) {
   SCR_FST_FREED_ONE();
 #ifdef _WIN32
-  DeleteFiber(s->ctx);
+  if (scr_stack_poison_on()) {
+    if (s->res_base != NULL) {
+      /* Physical memory and commit go back; the range stays RESERVED and
+       * PAGE_NOACCESS, so a later touch faults here rather than reading
+       * whatever took the address. No DeleteFiber: that would release the
+       * reservation and reopen it for reuse. The FIBER object leaks, which
+       * is why this arm is not a shipping default. */
+      VirtualFree(s->res_base, s->res_size, MEM_DECOMMIT);
+      scr_stack_poisoned++;
+      scr_stack_poison_selftest(s);
+    } else {
+      /* PRISTINE: created and never entered, so it never learned its own
+       * address and cannot be poisoned. COUNTED, not skipped in silence --
+       * an arm that quietly poisons nothing reports a clean run that means
+       * nothing at all. */
+      scr_stack_poison_unlocatable++;
+      DeleteFiber(s->ctx);
+    }
+  } else {
+    DeleteFiber(s->ctx);
+  }
 #else
   free(s->mem);
 #endif
@@ -1980,6 +2137,16 @@ static void scr_fiber_pool_teardown(void) {
             " decayedTotal=%llu clamp=%d\n",
             scr_loop_turns, scr_pool_clamp_elig, scr_pool_clamp_applied,
             scr_stack_pool_decayed, scr_stack_pool_decay_clamp() ? 1 : 0);
+#ifdef _WIN32
+    fprintf(stderr, "[fiberpoison] poisoned=%llu unlocatable=%llu armed=%d",
+            scr_stack_poisoned, scr_stack_poison_unlocatable,
+            scr_stack_poison_on() ? 1 : 0);
+    fputs(scr_stack_poison_on() && scr_stack_poisoned == 0
+              ? " -- ARMED BUT POISONED NOTHING: no stack was ever reclaimed,"
+                " so this run does not test the claim at all.\n"
+              : "\n",
+          stderr);
+#endif
     if (scr_pool_clamp_elig == 0) {
       fputs("[loopwake] CLAMP NEVER ELIGIBLE - no sleep was ever longer than"
             " the decay window, so this run does not exercise the clamp at"
