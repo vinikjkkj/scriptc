@@ -1773,12 +1773,52 @@ static void scr_trampoline(void) {
  * between the QR and the pairing code, then 9, then 10 before
  * pair-success). Same binary, same custom pairing code, same store.
  *
- * Until it is known WHY -- and in particular whether DeleteFiber on a
- * pooled stack is sound when something still holds it -- the default is
- * off. The feature is real and measured (30.8 -> 8.8 MiB idle RSS on a
+ * THAT QUESTION NOW HAS AN ANSWER AND IT IS NOT DeleteFiber.
+ *
+ * SCR_FIBER_POOL_POISON decommits a reclaimed stack and leaves its range
+ * RESERVED, so any access to one becomes an access violation at the
+ * offending instruction instead of a silent read of whatever took the
+ * address. Run against the real service WHILE THE FAULT OCCURRED: 44 stacks
+ * poisoned and untouchable at the moment of the anomaly, 137 by the end,
+ * unlocatable=0 throughout, and NOT ONE access violation. The same binary's
+ * self-test proves a poisoned read kills the process, so that silence is a
+ * measurement rather than an absence of evidence. The two windows spanning
+ * the failure are freed=0 with decayedTotal frozen, so nothing was freed
+ * while the connection died either.
+ *
+ * SCOPE, because it decides what the result is worth: this refutes reads of
+ * decay-FREED stacks. It does not refute reads of pooled-and-reused ones,
+ * which are live memory and are not poisoned. But those recycle identically
+ * with the decay OFF, and the decay-off arm pairs every time -- so the
+ * decay-specific class is exactly what was on trial, and it is gone.
+ *
+ * WHAT BREAKS PAIRING IS THE POLL CLAMP, NOT THE FREEING. The decay used to
+ * cap the loop's sleep so a window could not be slept through, and that
+ * shortens the I/O poll deadline, which reorders socket reads against timers
+ * and microtasks. With SCR_FIBER_POOL_DECAY_CLAMP=0 and the decay otherwise
+ * unchanged, the same binary paired and stayed live -- auth_credentials=1,
+ * 811 prekeys, 355 mailbox messages, no device-removed, no cleared
+ * credentials -- while the decay did heavy work throughout: 1,429 stacks
+ * freed, 1,111 of them in a single window, from a pool that peaked at 2,531.
+ * clampApplied=0 confirms the knob reached the binary, measured rather than
+ * inferred.
+ *
+ * EVIDENCE STRENGTH, PLAINLY: the failing side has TWO runs, the passing
+ * side has ONE. The result is clean and binary, and it is n=1 on the success
+ * arm.
+ *
+ * ONE THING THAT LOOKED LIKE THE SIGNATURE AND IS NOT: `received socket
+ * payload before noise session init` appears in the SUCCESSFUL run too. It
+ * is a benign reconnect artefact. It was the most visibly anomalous line in
+ * the first failing log and a hypothesis was built around it; recorded here
+ * so the next reader does not build another one.
+ *
+ * THE DECAY'S OWN DEFAULT STAYS 0 BELOW REGARDLESS. Enabling it is a second
+ * and larger decision that must not ride in on this one. What has changed is
+ * only that the reason it was disabled is now identified, and fixed one knob
+ * over. The feature remains real and measured (30.8 -> 8.8 MiB idle RSS on a
  * fan-out workload, page faults unchanged when the window exceeds the
- * traffic's gaps) and stays available opt-in. It is not worth a service
- * that cannot pair. */
+ * traffic's gaps). */
 #define SCR_FIBER_POOL_DECAY_MS 0
 #endif
 
@@ -1820,12 +1860,29 @@ static unsigned long long scr_stack_pool_decayed = 0;
  * its function: a window still elapses and still runs on the next natural
  * wakeup, so the pool drains slightly later and still drains.
  *
- * SCR_FIBER_POOL_DECAY_CLAMP=0 removes it. Default 1 is the current shipped
- * behaviour, so nothing changes unless asked. Env knob, not a build flag,
- * so both arms are one binary and the comparison carries no code-layout
- * confound. */
+ * DEFAULT 0: THE CLAMP IS OFF, AND THAT IS THE PAIRING FIX. This was built
+ * and committed on a hygiene argument -- an idle-time housekeeping task has
+ * no business shortening the I/O poll deadline -- and explicitly NOT as the
+ * fix, because the socket cap below overrides the clamp whenever `net` is
+ * pending and that appeared to make it inert on a live connection. The
+ * measurement disagreed with the reasoning: with the decay on and only this
+ * knob changed, the service that had failed to pair twice paired and stayed
+ * live. See the block above SCR_FIBER_POOL_DECAY_MS for the evidence and for
+ * its n=1 caveat.
+ *
+ * ONE MACRO IS CORRECT HERE, and that is worth stating because the sibling
+ * case is not. SCR_CYC_ARENA_VM in scr_cycle.c gates `#if` over the code
+ * itself, so setting it to 0 COMPILES THE FEATURE OUT rather than defaulting
+ * it off, and it needs a separate _DEFAULT macro. This one guards nothing:
+ * the clamp site is a runtime `if (scr_stack_pool_decay_clamp())`, so the
+ * macro is only the fallback when the environment is silent, and flipping it
+ * changes behaviour without removing anything. Verified before the flip.
+ *
+ * SCR_FIBER_POOL_DECAY_CLAMP=1 restores the old behaviour. Env knob, not a
+ * build flag, so both arms stay one binary and any comparison carries no
+ * code-layout confound. */
 #ifndef SCR_FIBER_POOL_DECAY_CLAMP
-#define SCR_FIBER_POOL_DECAY_CLAMP 1
+#define SCR_FIBER_POOL_DECAY_CLAMP 0
 #endif
 
 /* Loop-wakeup accounting for the clamp A/B. `eligible` is counted the same
