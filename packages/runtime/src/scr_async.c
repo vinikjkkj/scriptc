@@ -1762,7 +1762,8 @@ static void scr_trampoline(void) {
  * 20s, still descending. Near-identical reclaim, no burst cost, so 5000
  * is the default: a one-second lull is not idleness for a server. */
 #ifndef SCR_FIBER_POOL_DECAY_MS
-/* OFF by default until the pairing fault below is understood.
+/* ON by default, 5000 ms. It was off; the pairing fault below is why, and it
+ * is now understood and fixed one knob over.
  *
  * A user's compiled WhatsApp service reached `[auth] paired` and was then
  * dropped by the server with `stream:error device removed`, reproducibly,
@@ -1813,13 +1814,38 @@ static void scr_trampoline(void) {
  * the first failing log and a hypothesis was built around it; recorded here
  * so the next reader does not build another one.
  *
- * THE DECAY'S OWN DEFAULT STAYS 0 BELOW REGARDLESS. Enabling it is a second
- * and larger decision that must not ride in on this one. What has changed is
- * only that the reason it was disabled is now identified, and fixed one knob
- * over. The feature remains real and measured (30.8 -> 8.8 MiB idle RSS on a
- * fan-out workload, page faults unchanged when the window exceeds the
- * traffic's gaps). */
-#define SCR_FIBER_POOL_DECAY_MS 0
+ * WHAT TURNING IT ON IS WORTH, on the shipped binary, three arms rotated with
+ * one environment variable between them:
+ *
+ *   working set held   64.04 -> 16.62 MiB   returned 47.42 MiB   -74.0%
+ *   private commit     +157.34 -> +18.6     returned 138.7       -88.2%
+ *
+ * The two ON arms agree (17.00 / 16.25) with the OFF arm between them in
+ * position, so that is not a position effect.
+ *
+ * AND WHAT IS LEFT IS NOT WASTE. Measured against a MATCHED floor -- same
+ * binary, same session, LIVEMSGS=0 arms that held -0.86 and -0.13 MiB, so a
+ * run with no burst returns to its own floor -- the remaining 13.86 MiB of
+ * held working set sits against 12.98 MiB of held LIVE heap objects. Those
+ * agree to 0.88 MiB, inside the burst arms' own 4.02 MiB spread. What remains
+ * is data the program was asked to keep.
+ *
+ * The free heap does stay large: +31.54 MiB held, of which at most ~0.9 MiB
+ * can be resident. It costs COMMIT, not working set -- which is why the
+ * user-visible number improves by 74% while a loaded box can still feel the
+ * commit charge.
+ *
+ * SAFE BECAUSE THE CLAMP IS OFF, not because the freeing was ever unsafe.
+ * SCR_FIBER_POOL_POISON refuted the decay-freed-stack class by experiment on
+ * real infrastructure with the fault occurring: 44 stacks poisoned and
+ * untouchable at the anomaly, 137 by the end, and not one access violation in
+ * a binary whose self-test proves a poisoned read kills the process. The
+ * clamp -- which shortened the I/O poll deadline -- is what broke pairing, and
+ * it defaults to 0 below.
+ *
+ * EVIDENCE STRENGTH, PLAINLY: the failing side has TWO runs, the passing side
+ * has ONE. */
+#define SCR_FIBER_POOL_DECAY_MS 5000
 #endif
 
 static ScrStack *scr_stack_pool = NULL;
