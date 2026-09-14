@@ -52,6 +52,7 @@
  * about, with nothing said. The ENTRY half of it is also the order
  * provenancePaths has always used (bySpecifier is written last). */
 import { readFileSync, statSync } from "node:fs";
+import { builtinModules } from "node:module";
 import { dirname, join, relative, resolve } from "node:path";
 import ts from "typescript5";
 import { tsgoPath } from "./shared.js";
@@ -66,6 +67,31 @@ function isFile(p: string): boolean {
 }
 
 const SOURCE_EXT = /\.(ts|tsx|mts|cts|js|mjs|cjs|jsx)$/;
+
+/* Node's OWN builtin list, not scriptc's supported subset: the question here
+ * is only "would Node resolve this itself", and an unsupported builtin is
+ * still a builtin. Same set and same test the prescan uses
+ * (provenance.ts NODE_BUILTINS). */
+const NODE_BUILTINS = new Set(builtinModules);
+
+function packageNameOf(specifier: string): string {
+  const parts = specifier.split("/");
+  return specifier.startsWith("@") ? parts.slice(0, 2).join("/") : parts[0]!;
+}
+
+/** Specifiers no tree alias may claim, whatever its table says, because
+ * something ABOVE the alias table already answers them: a builtin, and a
+ * package-internal "#" import (the package.json "imports" field). The
+ * prescan skips both before it ever consults viaAlias; the rewrite has to
+ * skip the same ones or tsgo resolves a file for a specifier the preflight
+ * and the lowering resolve somewhere else entirely. */
+function aboveTheAliasTable(specifier: string): boolean {
+  return (
+    specifier.startsWith("#") ||
+    specifier.startsWith("node:") ||
+    NODE_BUILTINS.has(packageNameOf(specifier))
+  );
+}
 
 /** The TypeScript file an alias target pattern points at, probing the
  * extensions and the directory index. The twin of provenance.ts's
@@ -209,6 +235,7 @@ export function provenanceAliasRewrite(fileName: string, read: () => string | un
     // have to apply it identically: a specifier the preflight resolves to an
     // npm package and tsgo resolves into the checkout is one import the two
     // worlds disagree about, with nothing said.
+    if (aboveTheAliasTable(spec)) continue;
     if (provenanceEntryFor(spec) !== null || isProvenanceExternalSpecifier(spec)) continue;
     const target = aliasTargetFile(scope.patterns, spec);
     if (target === null) continue;
