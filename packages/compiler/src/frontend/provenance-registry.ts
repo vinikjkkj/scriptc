@@ -424,6 +424,21 @@ export function provenanceEntryFor(specifier: string): string | null {
   return state?.bySpecifier.get(specifier) ?? null;
 }
 
+/** True when `specifier` was recorded as an ORDINARY npm package a mapped
+ * tree imports — resolved in the DRIVER's installed tree, not in the
+ * checkout (ProvenancePackageSource.external says why).
+ *
+ * The prescan's alias table already loses to this: a specifier naming a
+ * package the driver has installed is not resolved through a tree's aliases,
+ * because Node resolves it to the installed package and the compiler has to
+ * agree. The per-tree rewrite has to lose to it for the same reason and by
+ * the same test, or tsgo would answer the tree's in-repo copy for a
+ * specifier the preflight and the lowering resolve to an npm package —
+ * the two worlds disagreeing about one import, silently. */
+export function isProvenanceExternalSpecifier(specifier: string): boolean {
+  return state !== null && Object.hasOwn(state.externalPaths, specifier);
+}
+
 /** True when any provenance package is registered. */
 export function provenanceActive(): boolean {
   return state !== null && state.bySpecifier.size > 0;

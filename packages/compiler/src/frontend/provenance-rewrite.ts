@@ -41,17 +41,21 @@
  * frontend forces allowImportingTsExtensions with bundler resolution, so the
  * explicit form needs no probing and cannot land on a .tsx/.mts twin.
  *
- * What is NOT rewritten: a specifier that is a registered package ENTRY.
- * "zapo-js/store" is spelled by store-sqlite's source AND is a subpath
- * export of the installed zapo-js, and Node resolves it to the installed
- * package -- one copy, shared module state. The entry mapping is the answer
- * that matches Node, so it keeps precedence over the tree's own alias,
- * exactly as provenancePaths has always ordered them (bySpecifier last). */
+ * What is NOT rewritten: a specifier that names a package the DRIVER has
+ * installed -- a registered package ENTRY, or an EXTERNAL (installed but not
+ * attestable). "zapo-js/store" is spelled by store-sqlite's source AND is a
+ * subpath export of the installed zapo-js, and Node resolves it to the
+ * installed package -- one copy, shared module state. That is the same rule
+ * the prescan applies (bareImportsOf's viaAlias) and the two must apply it
+ * identically: a specifier the preflight resolves to an npm package while
+ * tsgo resolves it into the checkout is one import the two worlds disagree
+ * about, with nothing said. The ENTRY half of it is also the order
+ * provenancePaths has always used (bySpecifier is written last). */
 import { readFileSync, statSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 import ts from "typescript5";
 import { tsgoPath } from "./shared.js";
-import { provenanceAliasScopeOf, provenanceEntryFor, type AliasPattern } from "./provenance-registry.js";
+import { isProvenanceExternalSpecifier, provenanceAliasScopeOf, provenanceEntryFor, type AliasPattern } from "./provenance-registry.js";
 
 function isFile(p: string): boolean {
   try {
@@ -199,8 +203,13 @@ export function provenanceAliasRewrite(fileName: string, read: () => string | un
   for (const { spec, start, end } of spans) {
     // A registered package ENTRY keeps precedence over the tree's own alias:
     // that is Node's answer (the installed package, one copy) and it is the
-    // order provenancePaths has always used.
-    if (provenanceEntryFor(spec) !== null) continue;
+    // order provenancePaths has always used. So does an EXTERNAL — a package
+    // the driver has installed that simply was not attestable. Both are the
+    // same rule the prescan applies (bareImportsOf's viaAlias), and the two
+    // have to apply it identically: a specifier the preflight resolves to an
+    // npm package and tsgo resolves into the checkout is one import the two
+    // worlds disagree about, with nothing said.
+    if (provenanceEntryFor(spec) !== null || isProvenanceExternalSpecifier(spec)) continue;
     const target = aliasTargetFile(scope.patterns, spec);
     if (target === null) continue;
     edits.push({ start, end, text: relativeSpecifier(fileName, target) });
