@@ -7,6 +7,11 @@
       "types": "./dist/index.d.ts",
       "require": "./dist/index.js",
       "default": "./dist/index.js"
+    },
+    "./extra": {
+      "types": "./dist/extra.d.ts",
+      "require": "./dist/extra.js",
+      "default": "./dist/extra.js"
     }
   }
 }
