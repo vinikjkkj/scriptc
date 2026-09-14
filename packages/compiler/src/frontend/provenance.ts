@@ -140,11 +140,38 @@ function resolveAliasTarget(target: string): string | null {
 function bareImportsOf(
   roots: readonly string[],
   aliases?: Record<string, string[]>,
+  /** True when the specifier's PACKAGE is installed in the driver's tree —
+   * see the shadowing rule below. Omitted for the driver's own closure,
+   * which has no alias table to shadow anything with. */
+  installed?: (specifier: string) => boolean,
 ): string[] {
   const aliasEntries = Object.entries(aliases ?? {}).sort(
     (a, b) => b[0].replace(/\*.*$/, "").length - a[0].replace(/\*.*$/, "").length,
   );
   const viaAlias = (spec: string): string | null => {
+    /* A TREE ALIAS MUST NOT SHADOW AN INSTALLED PACKAGE.
+     *
+     * zapo's monorepo tsconfig maps `zapo-js/store` to its OWN src/store,
+     * and every package in the repo extends that config — so
+     * @zapo-js/store-sqlite's source, which spells `zapo-js/store` exactly
+     * as its PUBLISHED dist does, resolved into its own checkout. That is
+     * right inside the repo, where the two are one commit; it is wrong
+     * here, where the tree is 1.8.0 and the installed zapo-js the program
+     * actually loads is 1.8.2. Node resolves that specifier to the
+     * installed package: one copy, one module state. A compiler that must
+     * reproduce Node cannot answer a second copy.
+     *
+     * Declining the alias here is what puts the specifier back into the
+     * bare set, so the pipeline maps it as a SUBPATH ENTRY of the installed
+     * package — and entries already outrank aliases everywhere downstream
+     * (provenancePaths writes bySpecifier last, resolveProjectImport tries
+     * provenanceEntryFor first). Purely internal aliases (`@client/*`,
+     * `@store/*`) name nothing installed and are untouched; those are
+     * scoped per tree instead (provenance-rewrite.ts).
+     *
+     * This also REMOVES 12 of the 41 colliding keys on zapo-rest: every
+     * `zapo-js/...` key stops being an alias at all. */
+    if (installed?.(spec) === true) return null;
     for (const [key, targets] of aliasEntries) {
       const star = key.indexOf("*");
       let subbed: string[];
@@ -835,6 +862,26 @@ export async function resolveProvenanceSources(entryPath: string): Promise<Prove
   const entry = resolve(entryPath);
   const manifest = readManifest();
   const notes: string[] = [];
+  /* Does the DRIVER have this specifier's package installed? — the test a
+   * source tree's alias table has to lose to (bareImportsOf's viaAlias says
+   * why). Asked from the entry's directory, which is where Node would ask
+   * from for the program's own graph; a checkout in the content-addressed
+   * cache has no node_modules of its own, so asking from the file's own
+   * location answers nothing (or, worse, whatever sits above the user's
+   * HOME — see provenanceInstalledCounterpart). Memoized by package name:
+   * the walk is a stat per level and the same handful of names recur across
+   * every tree. */
+  const installedSeen = new Map<string, boolean>();
+  const entryDir = dirname(entry);
+  const installedInDriverTree = (specifier: string): boolean => {
+    const name = packageNameOf(specifier);
+    let hit = installedSeen.get(name);
+    if (hit === undefined) {
+      hit = findInstalled(entryDir, name) !== null;
+      installedSeen.set(name, hit);
+    }
+    return hit;
+  };
   /* Say where the checkouts go when nobody has said. This lane extracts whole
    * source trees, unbounded in size and count, and with the variable unset it
    * puts them under homedir() -- which on Windows is routinely a different,
@@ -937,7 +984,7 @@ export async function resolveProvenanceSources(entryPath: string): Promise<Prove
     // tree's remaining bare imports resolve against the DRIVER's installed
     // tree: the checkout in the source cache has no node_modules, so
     // nothing resolves from where these files sit.
-    const treeBare = bareImportsOf(added, tree.aliases);
+    const treeBare = bareImportsOf(added, tree.aliases, installedInDriverTree);
     for (const spec of treeBare) {
       if (Object.hasOwn(tree.external, spec)) continue;
       const r = resolveBareModule(entry, spec);
@@ -1070,18 +1117,29 @@ export async function resolveProvenanceSources(entryPath: string): Promise<Prove
       ...(Object.keys(tree.external).length > 0 ? { external: tree.external } : {}),
     });
   }
-  /* An alias key that TWO mapped packages spell differently has exactly one
-   * answer, because tsconfig "paths" is one flat table per program and
-   * cannot be scoped to the package that declared it. The registry resolves
-   * such a key to the FIRST package mapped -- the one the driver's own
-   * imports reached -- and every later package spelling it borrows that
-   * answer.
+  /* An alias key that TWO mapped packages spell differently used to have
+   * exactly one answer, because tsconfig "paths" is one flat table per
+   * program and cannot be scoped to the package that declared it. The
+   * registry resolved such a key to the FIRST package mapped -- the one the
+   * driver's own imports reached -- and every later package spelling it
+   * borrowed that answer.
    *
-   * The borrow is not a refusal. Two checkouts of one monorepo export the
-   * same names with the same signatures, so the program typechecks,
-   * compiles, runs and prints the other commit's values. It cannot be made
-   * per-file here, so it is at least made LOUD -- once, naming the shape,
-   * rather than once per key.
+   * The borrow was not a refusal. Two checkouts of one monorepo export the
+   * same names with the same signatures, so the program typechecked,
+   * compiled, ran and printed the other commit's values. Measured on
+   * zapo-rest 1.8.2, moving `@zapo-js/store-sqlite` ahead of `zapo-js` in
+   * the entry's import list moved 325 of the program's 350 modules into the
+   * other checkout -- a different VERSION of the program's main dependency
+   * -- with zero diagnostics.
+   *
+   * IT IS NOW SCOPED PER TREE (provenance-rewrite.ts): each mapped
+   * checkout's own source is served to the checker with its alias
+   * specifiers already rewritten to relative ones, so the shared table no
+   * longer decides for anybody's files and the import order is not
+   * load-bearing. The note stays because the INPUT shape is still worth
+   * saying out loud -- and because the flat table is still what a file
+   * OUTSIDE every mapped tree (the driver's own source) would resolve
+   * against, where first-mapped-wins still holds.
    *
    * Keys that are also a package ENTRY are excluded: `provenancePaths()`
    * writes the entry table after the alias table and `resolveSpecifier`
@@ -1111,15 +1169,12 @@ export async function resolveProvenanceSources(entryPath: string): Promise<Prove
   }
   if (collided.size > 0) {
     const examples = [...collided].slice(0, 5).map((k) => `'${k}'`).join(", ");
-    // The winner is per KEY, so it is only named when there is one of them.
-    // Naming the first key's winner for a set with several would be the same
-    // class of quiet inaccuracy this note exists to end.
-    const who = winners.size === 1 ? `${[...winners][0]}'s` : "the first-mapped package's";
     notes.push(
       `${collided.size} alias key(s) are spelled by more than one mapped package with different ` +
         `targets (${examples}${collided.size > 5 ? ", …" : ""}); tsconfig "paths" is one table per ` +
-        `program, so ${who} answer is used for all of them and ${[...borrowers].join(", ")} ` +
-        `compile against ${who} checkout for those specifiers`,
+        `program, so each mapped checkout's own source is rewritten to resolve those specifiers ` +
+        `against ITS OWN tree (${[...new Set([...winners, ...borrowers])].join(", ")}) before the ` +
+        `checker sees it — the import order does not decide`,
     );
   }
 

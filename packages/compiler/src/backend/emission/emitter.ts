@@ -56,6 +56,7 @@ import { agenSettleThunkFor, emitAsyncScaffolding, childDataThunkFor, childExitT
 import { emitNpmEmbedding, islandAdapter, islandTypedAdapter } from "./emit-island.js";
 import { emitFunction, emitBlock, emitStmts, emitStmt, emitTryCatch, emitSwitch, mergeBrace, emitBranchInto, emitCondition } from "./emit-stmts.js";
 import fs from "node:fs";
+import { servedSourceText } from "../../source-text.js";
 import { emitExpr } from "./emit-exprs.js";
 
 /** SCRIPTC_RC_SITES=1 at BUILD time: emit the RC-audit per-SITE table — one
@@ -95,7 +96,12 @@ function lineStartsOf(file: string): number[] | null {
   let starts = rcLineIndex.get(file);
   if (starts === undefined) {
     try {
-      const text = fs.readFileSync(file, "utf8");
+      // The text the COMPILER SERVED, when it differs from the disk's — a
+      // --provenance-sources tree whose own path-alias specifiers were
+      // rewritten per tree before tsgo parsed them. A SrcLoc's offset is an
+      // offset into THAT text; indexing the disk bytes instead answers a
+      // later line the further into the file the site is.
+      const text = servedSourceText(file) ?? fs.readFileSync(file, "utf8");
       starts = [0];
       for (let i = 0; i < text.length; i++) if (text.charCodeAt(i) === 10) starts.push(i + 1);
     } catch {

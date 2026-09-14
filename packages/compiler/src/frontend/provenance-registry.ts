@@ -23,6 +23,8 @@ import { readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { tsgoPath } from "./shared.js";
 import { scannedDeclTwins } from "./provenance.js";
+import { clearProvenanceAliasRewrites } from "./provenance-rewrite.js";
+import { clearServedSourceText } from "../source-text.js";
 
 export interface ProvenancePackageSource {
   /** Package name ("cookie"). */
@@ -81,10 +83,31 @@ export interface ProvenanceSources {
 /** One tsconfig path-alias pattern, pre-split around its single '*'
  * (tsc allows at most one). A key with no '*' is an exact alias: `suffix`
  * is null and `prefix` is the whole key. */
-interface AliasPattern {
+export interface AliasPattern {
   prefix: string;
   suffix: string | null;
   targets: string[];
+}
+
+/** One attested source TREE's own alias table — the scope tsconfig "paths"
+ * actually has and the flat program-wide table cannot express.
+ *
+ * The unit is the TREE (the {repo, commit} checkout), not the package: a
+ * monorepo subpackage's `dir` is a subdirectory of the checkout while its
+ * alias targets point at the checkout ROOT, so files reached through those
+ * aliases sit OUTSIDE the package dir and a package-scoped lookup would miss
+ * every one of them. Packages of one tree share one tsconfig and therefore
+ * one table, so merging them per tree loses nothing. */
+export interface AliasScope {
+  /** Slash-spelled, slash-TERMINATED; a prefix compare against a TypeScript
+   * file name (see provenanceDirPrefix for why both sides are normalised). */
+  root: string;
+  /** Longest-literal-prefix first, so tsc's "most specific pattern wins" is
+   * a linear scan. */
+  patterns: AliasPattern[];
+  /** The distinct literal prefixes, for the substring prefilter that keeps
+   * the rewriter from parsing files that cannot match. */
+  prefixes: string[];
 }
 
 interface RegistryState {
@@ -95,6 +118,9 @@ interface RegistryState {
   aliasPaths: Record<string, string[]>;
   externalPaths: Record<string, string[]>;
   packageDirs: string[];
+  /** Per-TREE alias tables. Longest root first so a nested checkout (none
+   * exist today, but nothing forbids one) resolves to the inner tree. */
+  aliasScopes: AliasScope[];
   sources: ProvenanceSources;
 }
 
@@ -108,11 +134,27 @@ export function setProvenanceSources(sources: ProvenanceSources | null): void {
   // this, and a package that never fetched must not be told to try
   // --dynamic.
   setProvenanceUnfetched(sources?.unfetched ?? []);
+  // One compile's served text and rewrite counters must not answer the
+  // next one's questions: the in-process API compiles more than once per
+  // process (the --npm-static fallback loop reloads the whole frontend,
+  // and the test harness compiles dozens of programs in one worker), and a
+  // stale served text would hand the C emitter a line index for a file
+  // some earlier program shadowed.
+  clearServedSourceText();
+  clearProvenanceAliasRewrites();
   if (sources === null || sources.packages.length === 0) {
     state =
       sources === null
         ? null
-        : { bySpecifier: new Map(), aliases: [], aliasPaths: {}, externalPaths: {}, packageDirs: [], sources };
+        : {
+            bySpecifier: new Map(),
+            aliases: [],
+            aliasPaths: {},
+            externalPaths: {},
+            packageDirs: [],
+            aliasScopes: [],
+            sources,
+          };
     return;
   }
   const bySpecifier = new Map<string, string>();
@@ -159,7 +201,130 @@ export function setProvenanceSources(sources: ProvenanceSources | null): void {
   }
   // tsc's rule: among matching patterns the longest literal prefix wins.
   aliases.sort((a, b) => b.prefix.length - a.prefix.length);
-  state = { bySpecifier, aliases, aliasPaths, externalPaths, packageDirs, sources };
+  state = {
+    bySpecifier,
+    aliases,
+    aliasPaths,
+    externalPaths,
+    packageDirs,
+    aliasScopes: buildAliasScopes(sources.packages),
+    sources,
+  };
+}
+
+/** The deepest directory that contains `dir` and every one of `targets` —
+ * the CHECKOUT an alias table is written against. Compared segment by
+ * segment, never as raw strings: `…/aliasmono` is not a prefix of
+ * `…/aliasmono2`, and a string compare says it is.
+ *
+ * NOT derived from the commit digest in the cache path. That works for the
+ * content-addressed cache and silently does nothing for every other layout —
+ * a manifest-pinned tree (SCRIPTC_PROVENANCE_MANIFEST) names a plain
+ * directory with no digest in it, so a digest-based root left the whole
+ * fixture suite unscoped while passing every assertion it had. A tree root
+ * has to be derived from the paths that are actually there.
+ *
+ * Null when the result would be shallower than two segments: an alias
+ * target pointing outside the checkout would otherwise pull the root up to
+ * the drive and scope half the filesystem to one table. */
+function aliasTreeRootOf(pkg: ProvenancePackageSource): string | null {
+  const dirSegs = tsgoPath(pkg.dir).split("/").filter((s) => s !== "");
+  let common = dirSegs;
+  for (const targets of Object.values(pkg.aliases ?? {})) {
+    for (const t of targets) {
+      // A target is a PATTERN (`…/src/core/*`) as often as a file, so only
+      // the literal head before any '*' can be compared.
+      const star = t.indexOf("*");
+      const segs = tsgoPath(star < 0 ? t : t.slice(0, star)).split("/").filter((s) => s !== "");
+      let i = 0;
+      while (i < common.length && i < segs.length && common[i] === segs[i]) i++;
+      // A target that shares nothing with the package directory is not part
+      // of this checkout; it must not be allowed to shrink the root.
+      if (i < 2) continue;
+      if (i < common.length) common = common.slice(0, i);
+    }
+  }
+  if (common.length < 2) return null;
+  return provenanceDirPrefix(common.join("/"));
+}
+
+/** One alias table per source TREE, merged from the packages of that tree.
+ *
+ * Order-independent by construction: the root is derived from the package's
+ * own paths, the patterns come from that tree's own tsconfig, and packages
+ * of one tree carry the same table (they extend one shared config), so the
+ * merge below is idempotent for the normal case. Where two packages of one tree DO
+ * disagree on a key the targets concatenate, which is the same
+ * first-that-exists-wins rule tsc applies within a key — but now bounded to
+ * one checkout, where both answers are the same commit. */
+function buildAliasScopes(packages: readonly ProvenancePackageSource[]): AliasScope[] {
+  /* Group by COMMIT, then take the shallowest root in the group.
+   *
+   * Two packages of one checkout can derive two different roots — a
+   * subpackage whose aliases all point inside its own directory derives
+   * that directory, while its sibling derives the repo root — and a nested
+   * pair of scopes would hand a file the inner table, which is missing the
+   * outer one's keys. They are one checkout and must be one scope. The
+   * commit is the content address, so grouping by it is exact and
+   * order-independent; a registry with no commit falls back to its own
+   * derived root, which is the single-package case where nesting cannot
+   * arise. */
+  const groupRoot = new Map<string, string>();
+  for (const pkg of packages) {
+    const root = aliasTreeRootOf(pkg);
+    if (root === null) continue;
+    const group = pkg.commit === "" ? root : pkg.commit;
+    const have = groupRoot.get(group);
+    if (have === undefined || root.length < have.length) groupRoot.set(group, root);
+  }
+  const byRoot = new Map<string, Map<string, string[]>>();
+  for (const pkg of packages) {
+    const own = aliasTreeRootOf(pkg);
+    if (own === null) continue;
+    const root = groupRoot.get(pkg.commit === "" ? own : pkg.commit) ?? own;
+    let table = byRoot.get(root);
+    if (table === undefined) byRoot.set(root, (table = new Map()));
+    for (const [key, targets] of Object.entries(pkg.aliases ?? {})) {
+      if (targets.length === 0) continue;
+      const have = table.get(key);
+      if (have === undefined) {
+        table.set(key, [...targets]);
+        continue;
+      }
+      for (const t of targets) if (!have.includes(t)) have.push(t);
+    }
+  }
+  const scopes: AliasScope[] = [];
+  for (const [root, table] of byRoot) {
+    const patterns: AliasPattern[] = [];
+    for (const [key, targets] of table) {
+      const star = key.indexOf("*");
+      patterns.push(
+        star < 0
+          ? { prefix: key, suffix: null, targets }
+          : { prefix: key.slice(0, star), suffix: key.slice(star + 1), targets },
+      );
+    }
+    if (patterns.length === 0) continue;
+    patterns.sort((a, b) => b.prefix.length - a.prefix.length);
+    scopes.push({ root, patterns, prefixes: [...new Set(patterns.map((p) => p.prefix))] });
+  }
+  // Longest root first: a checkout nested inside another must answer for its
+  // own files rather than the outer one's.
+  scopes.sort((a, b) => b.root.length - a.root.length);
+  return scopes;
+}
+
+/** The alias table that OWNS `fileName` — the one its own tsconfig would
+ * have applied — or null when the file is not inside a mapped source tree
+ * (every file of a flagless build, and the driver's own sources). */
+export function provenanceAliasScopeOf(fileName: string): AliasScope | null {
+  if (state === null) return null;
+  const f = tsgoPath(fileName);
+  for (const scope of state.aliasScopes) {
+    if (f.startsWith(scope.root)) return scope;
+  }
+  return null;
 }
 
 /** The candidate absolute targets an alias pattern maps `specifier` to,

@@ -18,6 +18,12 @@ const TS5_ISLANDS = [
   // BEFORE the 7.0.2 program reads the file — a text→text parser island
   // beside cjs-lexer.ts (only strings cross its boundary).
   "packages/compiler/src/frontend/npm-static-rewrite.ts",
+  // --provenance-sources' per-tree alias rewrite: the same shape and the
+  // same place as npm-static-rewrite.ts — inside the fs shadow, text in,
+  // text out, before the 7.0.2 program reads the file. It must agree with
+  // provenance.ts's prescan about what a module specifier IS, which is the
+  // second reason it is the same parser.
+  "packages/compiler/src/frontend/provenance-rewrite.ts",
 ];
 
 const ts5Fence = {
