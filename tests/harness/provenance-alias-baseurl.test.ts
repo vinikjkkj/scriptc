@@ -45,6 +45,14 @@ const outDir = join(repoRoot, "node_modules/.cache/scriptc-tests/provenance-alia
 
 const entry = join(fixtureDir, "cases/aliasbase/main.ts");
 const collideEntry = join(fixtureDir, "cases/aliascollide/main.ts");
+/* The same two imports in the other order — the one variable the
+ * import-order differential moves. */
+const swappedEntry = join(fixtureDir, "cases/aliascollide/main-swapped.ts");
+/* A subpath of an INSTALLED package that the importing tree's own tsconfig
+ * also claims — the shadowing case the entry-beats-alias precedence cannot
+ * reach, because the specifier never becomes an entry. */
+const shadowManifest = join(fixtureDir, "manifest-aliasshadow.json");
+const shadowEntry = join(fixtureDir, "cases/aliasshadow/main.ts");
 
 const EXPECTED = "[core-1.0.0:HI]\n";
 
@@ -131,9 +139,10 @@ describe("provenance: a package's alias baseUrl belongs to the config that spell
     expect(pkg, "aliaspkg must be mapped").toBeDefined();
 
     const aliases = pkg!.aliases ?? {};
-    // `aliaspkg2` is the decoy key the collision suite below uses; it is in
-    // the same table and must be read here so this assertion stays exact.
-    expect(Object.keys(aliases).sort()).toEqual(["@core", "@core/*", "aliaspkg2"]);
+    // `aliaspkg2` and `aliaspkg2/*` are the decoy keys the two shadowing
+    // suites below use; they are in the same table and must be read here so
+    // this assertion stays exact.
+    expect(Object.keys(aliases).sort()).toEqual(["@core", "@core/*", "aliaspkg2", "aliaspkg2/*"]);
 
     // WHICH file. The bug produced an absolute path one level short, so
     // "is a string" and "is absolute" both passed while it named nothing.
@@ -287,7 +296,7 @@ describe("provenance: two mapped packages spelling the same alias key", () => {
     expect(files.some((f) => f.includes("/aliaspkg2-decoy/"))).toBe(false);
   });
 
-  test("the FIRST-mapped package gets its own checkout, and the borrow is announced", async () => {
+  test("EVERY mapped package gets its own checkout, whichever was mapped first", async () => {
     process.env["SCRIPTC_PROVENANCE_MANIFEST"] = collideManifest;
     const sources = await resolveProvenanceSources(collideEntry);
     setProvenanceSources(sources);
@@ -297,26 +306,30 @@ describe("provenance: two mapped packages spelling the same alias key", () => {
     expect(coverage.diagnostics).toHaveLength(0);
     const files = [...(coverage.statsByFile ?? [])].map(([f]) => slash(f));
 
-    // What the fix delivers: the package the driver's own imports reached
-    // is compiled against ITS OWN checkout.
+    // The package the driver's own imports reached first is compiled
+    // against its own checkout — it always was; the flat table happened to
+    // agree with it.
     expect(files.some((f) => f.endsWith("/attested-src/aliasmono/src/core/index.ts"))).toBe(true);
 
-    // What it does NOT deliver, asserted rather than hoped. tsconfig
-    // "paths" is one flat table per program, so `@core` has exactly one
-    // answer and aliaspkg2 borrows aliasmono's. This assertion is
-    // deliberately the WRONG-ANSWER shape: if someone ever scopes aliases
-    // per declaring package, this line fails and they must come here and
-    // read why it was written.
-    expect(files.some((f) => f.endsWith("/attested-src/aliasmono2/src/core/index.ts"))).toBe(false);
+    /* And so is the SECOND one. This line used to read `.toBe(false)` and
+     * carried an invitation to whoever ever scoped aliases per declaring
+     * package; this is that change. `@core` still has one entry in the
+     * program-wide "paths" table, because tsgo takes one table per program
+     * and exposes no per-file resolution hook — the scoping is done in the
+     * TEXT instead, by rewriting each checkout's own alias specifiers to
+     * relative ones as its source is served (provenance-rewrite.ts).
+     *
+     * Both cores in one program is the whole point: they are different
+     * commits of the same file, and each package must see its own. */
+    expect(files.some((f) => f.endsWith("/attested-src/aliasmono2/src/core/index.ts"))).toBe(true);
 
-    // Which is why the borrow has to be LOUD. Before this, the same
-    // substitution happened with no note, no diagnostic and no mention of
-    // the word "alias" anywhere in the build.
+    // The note stays, because the INPUT shape is still worth saying out
+    // loud — but it may no longer claim a borrow, because there is none.
     const named = sources.notes.filter((n) => n.includes("'@core'"));
     expect(named).toHaveLength(1);
     expect(named[0]).toContain("different targets");
-    expect(named[0]).toContain("aliaspkg2");
-    expect(named[0]).toContain("aliaspkg's checkout");
+    expect(named[0]).toContain("ITS OWN tree");
+    expect(named[0]).not.toContain("compile against");
     // ONE note, not one per key: on zapo's bench the per-key form printed
     // 41 lines. And it must not fire for a key that is also a package
     // ENTRY, because there the entry decides and the alias never does —
@@ -325,16 +338,162 @@ describe("provenance: two mapped packages spelling the same alias key", () => {
     expect(sources.notes.some((n) => n.includes("'aliaspkg2'"))).toBe(false);
   });
 
-  test("the first-mapped package's binary matches Node on both backends", async () => {
-    // Only the half the fix makes correct is compiled and compared. The
-    // borrowed half is known to diverge from Node and is pinned above by
-    // shape, not by output: asserting a wrong string byte-for-byte would
-    // make a defect look like a specification.
+  test("the IMPORT ORDER of the driver does not change what is compiled", async () => {
+    /* The differential, in the smallest program that has the shape.
+     *
+     * The order the driver spells its imports in is the order the pipeline
+     * maps the packages in, which was the order the flat "paths" table was
+     * written in. Two arms, one variable, and the arms must agree on the
+     * module set — not merely on the diagnostic count, because the defect
+     * produced ZERO diagnostics in both directions and only ever moved
+     * which FILE answered.
+     *
+     * Self-test: on the unfixed compiler this fails — swapped, aliasmono's
+     * own core drops out of the program and aliasmono2's takes its place. */
+    const setFor = async (file: string): Promise<string[]> => {
+      process.env["SCRIPTC_PROVENANCE_MANIFEST"] = collideManifest;
+      const sources = await resolveProvenanceSources(file);
+      setProvenanceSources(sources);
+      const { coverage } = analyze(file);
+      expect(coverage.preflightFailed, file).toBe(false);
+      expect(coverage.diagnostics, file).toHaveLength(0);
+      return [...(coverage.statsByFile ?? [])]
+        .map(([f]) => slash(f))
+        .filter((f) => f.includes("/attested-src/"))
+        .sort();
+    };
+    const plain = await setFor(collideEntry);
+    const swapped = await setFor(swappedEntry);
+
+    // Armed: the two arms really were mapped in opposite orders, or the
+    // comparison below is between two identical runs and can only pass.
+    process.env["SCRIPTC_PROVENANCE_MANIFEST"] = collideManifest;
+    expect((await resolveProvenanceSources(collideEntry)).packages.map((p) => p.name)).toEqual([
+      "aliaspkg",
+      "aliaspkg2",
+    ]);
+    expect((await resolveProvenanceSources(swappedEntry)).packages.map((p) => p.name)).toEqual([
+      "aliaspkg2",
+      "aliaspkg",
+    ]);
+
+    expect(swapped).toEqual(plain);
+    // And the set is the right one, not merely a stable one: both cores.
+    expect(plain.some((f) => f.endsWith("/attested-src/aliasmono/src/core/index.ts"))).toBe(true);
+    expect(plain.some((f) => f.endsWith("/attested-src/aliasmono2/src/core/index.ts"))).toBe(true);
+  });
+
+  test("BOTH packages' answers match Node, in either import order", async () => {
+    /* The half this used to skip. Only the first-mapped package was
+     * compiled and compared, because the borrowed half was known to diverge
+     * from Node and asserting a wrong string byte-for-byte would have made
+     * a defect look like a specification. There is no borrowed half now, so
+     * the whole program is compared — and in both import orders. */
     process.env["SCRIPTC_PROVENANCE_MANIFEST"] = manifest;
-    const sources = await resolveProvenanceSources(entry);
+    let sources = await resolveProvenanceSources(entry);
     setProvenanceSources(sources);
-    const oracle = await nodeOracle(entry);
+    let oracle = await nodeOracle(entry);
     expect(oracle).toBe(EXPECTED);
     expect(await buildAndRun("aliasfirst-c", entry, "c")).toBe(oracle);
-  }, 240_000);
+
+    for (const [name, file] of [["collide", collideEntry], ["collide-swapped", swappedEntry]] as const) {
+      process.env["SCRIPTC_PROVENANCE_MANIFEST"] = collideManifest;
+      sources = await resolveProvenanceSources(file);
+      setProvenanceSources(sources);
+      oracle = await nodeOracle(file);
+      // Node reads the PUBLISHED dists, each built from its own repo, so
+      // the oracle carries both cores' answers. That is what makes this an
+      // oracle and not a snapshot of our own output.
+      expect(oracle).toContain("core-1.0.0");
+      expect(oracle).toContain("core-2.0.0");
+      expect(await buildAndRun(`aliascollide-${name}-c`, file, "c"), name).toBe(oracle);
+    }
+  }, 300_000);
+});
+
+/* The OTHER half of "whose answer is this": a tree alias that shadows a
+ * SUBPATH of an installed package.
+ *
+ * The `aliaspkg2` decoy above is caught by a precedence that was already
+ * there — the driver spells `aliaspkg2`, so the pipeline maps it as a
+ * package ENTRY, and entries beat aliases. A subpath spelled ONLY inside a
+ * mapped tree never gets that far. The prescan resolved it through the
+ * tree's own alias table, walked into the in-repo copy, and never recorded
+ * it as a bare import at all, so the package it names was never looked up,
+ * never attested, never mapped — and nothing said so.
+ *
+ * On zapo that is 8 of the 41 colliding keys: @zapo-js/store-sqlite's
+ * source spells `zapo-js/store`, `zapo-js/util`, `zapo-js/proto` and five
+ * more exactly as its PUBLISHED dist does, and zapo's monorepo config maps
+ * every one of them to its own src/. The installed zapo-js is 1.8.2 and the
+ * store-sqlite checkout is 1.8.0, so the alias answer is a second copy of a
+ * module the program already has — different code, separate module state,
+ * and not what Node loads.
+ */
+describe("provenance: a tree alias may not shadow an installed package's subpath", () => {
+  test("the fixture gives the two answers DIFFERENT strings from one signature", () => {
+    for (const rel of [
+      "attested-src/aliasmono/packages/shadowpkg/src/index.ts",
+      "attested-src/aliasmono/packages/aliaspkg2-decoy/src/extra.ts",
+      "attested-src/aliasmono2/packages/aliaspkg2/src/extra.ts",
+      "node_modules/shadowpkg/dist/index.js",
+      "node_modules/aliaspkg2/dist/extra.js",
+    ]) {
+      expect(isFile(join(fixtureDir, rel)), rel).toBe(true);
+    }
+    // Same name, same signature, different answer — without this the wrong
+    // resolution is undetectable, which is how it survived.
+    const real = readFileSync(join(fixtureDir, "attested-src/aliasmono2/packages/aliaspkg2/src/extra.ts"), "utf8");
+    const decoy = readFileSync(join(fixtureDir, "attested-src/aliasmono/packages/aliaspkg2-decoy/src/extra.ts"), "utf8");
+    expect(real).toContain("export function extra(s: string): string");
+    expect(decoy).toContain("export function extra(s: string): string");
+    expect(real).toContain("REAL/");
+    expect(decoy).toContain("DECOY/");
+    // Armed: the alias really does claim the subpath, or the test proves
+    // nothing about shadowing.
+    const paths = JSON.parse(
+      readFileSync(join(fixtureDir, "attested-src/aliasmono/packages/tsconfig.paths.json"), "utf8"),
+    ) as { compilerOptions: { paths: Record<string, string[]> } };
+    expect(paths.compilerOptions.paths["aliaspkg2/*"]).toEqual(["packages/aliaspkg2-decoy/src/*"]);
+  });
+
+  test("the shadowed package is MAPPED, and its own source is what compiles", async () => {
+    process.env["SCRIPTC_PROVENANCE_MANIFEST"] = shadowManifest;
+    const sources = await resolveProvenanceSources(shadowEntry);
+    // The whole failure in one assertion: before, aliaspkg2 was not in this
+    // list at all. Nothing had asked for it, so nothing reported it either.
+    expect(sources.packages.map((p) => p.name).sort()).toEqual(["aliaspkg2", "shadowpkg"]);
+    const two = sources.packages.find((p) => p.name === "aliaspkg2")!;
+    expect(slash(two.entries["aliaspkg2/extra"]!)).toMatch(
+      /\/attested-src\/aliasmono2\/packages\/aliaspkg2\/src\/extra\.ts$/,
+    );
+    // Nothing FELL BACK: no island, no unattested package, no version skew.
+    // The one note is the informational collision report — the two repos do
+    // both spell `@core`, which is the other suite's subject — and it must
+    // not claim a borrow.
+    expect(sources.notes).toHaveLength(1);
+    expect(sources.notes[0]).toContain("alias key(s)");
+    expect(sources.notes[0]).toContain("ITS OWN tree");
+    expect(sources.notes.some((n) => n.includes("island path used"))).toBe(false);
+
+    setProvenanceSources(sources);
+    const { coverage } = analyze(shadowEntry);
+    expect(coverage.preflightFailed).toBe(false);
+    expect(coverage.diagnostics).toHaveLength(0);
+    const files = [...(coverage.statsByFile ?? [])].map(([f]) => slash(f));
+    expect(files.some((f) => f.endsWith("/attested-src/aliasmono2/packages/aliaspkg2/src/extra.ts"))).toBe(true);
+    expect(files.some((f) => f.includes("/aliaspkg2-decoy/"))).toBe(false);
+  });
+
+  test("the binary matches Node, which is the only thing that settles it", async () => {
+    process.env["SCRIPTC_PROVENANCE_MANIFEST"] = shadowManifest;
+    const sources = await resolveProvenanceSources(shadowEntry);
+    setProvenanceSources(sources);
+    const oracle = await nodeOracle(shadowEntry);
+    // Node reads the published dists: `aliaspkg2/extra` is the installed
+    // package's subpath, from anywhere, and the in-repo copy is not a thing
+    // Node can see at all.
+    expect(oracle).toBe("[REAL/ZZ]\n");
+    expect(await buildAndRun("aliasshadow-c", shadowEntry, "c")).toBe(oracle);
+  }, 300_000);
 });

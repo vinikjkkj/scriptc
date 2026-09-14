@@ -1,0 +1,12 @@
+{
+  "name": "shadowpkg",
+  "version": "1.1.0",
+  "type": "commonjs",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "require": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
+  }
+}

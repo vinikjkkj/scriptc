@@ -54,6 +54,8 @@ import { clearResolveCaches, isNodeModulesPath, nearestPkgJsonPath, projectDtsRu
 import { clearNpmResolutionCaches, probeNodeImportRefusal, probeNodeRequireRefusal } from "./npm.js";
 import { isNpmStaticPackage, npmStaticActive, npmStaticFsShadow, npmStaticPackageOfPath, npmStaticPackages, npmStaticRewroteExports, reportNpmStaticOffender, setNpmStaticPackages } from "./npm-static.js";
 import { isProvenanceSourceFile, isProvenanceSpecifier, provenancePaths } from "./provenance-registry.js";
+import { provenanceAliasRewrite, readSourceForRewrite } from "./provenance-rewrite.js";
+import { setServedSourceText } from "../source-text.js";
 import { cjsLexerVisibleNames } from "./cjs-lexer.js";
 import {
   ADOPTED_OPTIONS,
@@ -382,8 +384,32 @@ export function loadProgram(
   // the checker, so its resolution lands on the JS Node actually loads;
   // resolve.ts answers the same sibling for scriptc's own edges).
   const npmShadow = npmStaticFsShadow();
+  // Three shadows compose now: the third is --provenance-sources' PER-TREE
+  // path aliases (provenance-rewrite.ts). tsconfig "paths" is one table per
+  // program and two attested checkouts routinely spell the same alias key,
+  // so each mapped tree's own alias specifiers are rewritten to relative
+  // ones as its source is served — the only hook tsgo has that knows WHICH
+  // FILE is asking is this one. Flag off (or no aliases) => every call
+  // answers null on the scope lookup and nothing is read or parsed.
+  //
+  // It sits UNDER npm-static's: a package opted into --npm-static is served
+  // that shadow's replacement content, and the rewriter is handed the same
+  // bytes to work from rather than the disk's.
   const fsShadow = {
-    readFile: (path: string) => npmShadow?.readFile(path),
+    readFile: (path: string) => {
+      const above = npmShadow?.readFile(path);
+      const rewritten = provenanceAliasRewrite(path, () => above ?? readSourceForRewrite(path));
+      if (rewritten !== null) {
+        // srcSite (the C emitter) turns a SrcLoc OFFSET into file:line:col
+        // by reading the file off disk a second time. The rewrite changes no
+        // lines but does change the offsets after each import, so the disk
+        // index would answer a later line than the offset came from. Record
+        // what was actually served.
+        setServedSourceText(path, rewritten);
+        return rewritten;
+      }
+      return above;
+    },
     hideFile: (path: string) =>
       (npmShadow?.hideFile(path) ?? false) || projectDtsRuntimeSibling(path) !== null,
   };

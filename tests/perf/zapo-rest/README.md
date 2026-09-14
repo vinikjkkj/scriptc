@@ -75,24 +75,58 @@ count under `--best-effort` is not zero refusals**; `harness/traps.sh` counts
 the deferred sites in the emitted module, and it aborts rather than scan fewer
 translation units than the build produced.
 
-### Import order is load-bearing
+### Import order WAS load-bearing — it is not any more
 
 ```ts
 import { WaClient, createStore } from "zapo-js";
 import { createSqliteStore, openSqliteConnection } from "@zapo-js/store-sqlite";
 ```
 
-The two provenance checkouts collide on ~39 tsconfig `paths` alias keys, the
-paths table is one per program, and **the first package seen wins**. With
-`@zapo-js/store-sqlite` imported first, `zapo-js`'s own `@client` / `@store`
-aliases are lost and its barrel fails with 21 × `SC1014 re-exports from
-packages or builtin modules`. The build log names the winner:
+The two provenance checkouts collide on 41 tsconfig `paths` alias keys and the
+paths table is one per program, so **the first package seen used to win** for
+all of them. The failure was not the loud one this section used to describe.
+Measured at `a3f1d52b6` by swapping exactly those two import lines and
+comparing the module graphs:
 
 ```
-provenance: 40 alias key(s) are spelled by more than one mapped package ...
-  so zapo-js's answer is used for all of them            <- what you want
-  so @zapo-js/store-sqlite's answer is used for all of them  <- barrel will fail
+zapo-js first:            350 modules — 326 from zapo-js@1.8.2's checkout
+@zapo-js/store-sqlite first: 349 modules — 347 from the store-sqlite checkout
+                                              (which is zapo-js@1.8.0)
+diagnostics, both arms:   0
 ```
+
+Moving one import line compiled the program against a different VERSION of its
+main dependency and said nothing. That is the defect; the `SC1014` barrel
+failure this section used to name was one visible symptom of it on an older
+revision and no longer reproduces.
+
+Aliases are now scoped **per attested checkout**: each mapped tree's source is
+served to the checker with its own alias specifiers already rewritten to
+relative ones, so the shared table decides nothing (see
+`packages/compiler/src/frontend/provenance-rewrite.ts`). Both orders now
+produce the same 350 modules, the same 0 diagnostics, and the same binary.
+
+The build log still names the colliding keys, because the INPUT shape is worth
+saying out loud — but it no longer names a winner:
+
+```
+provenance: 33 alias key(s) are spelled by more than one mapped package with
+  different targets (...); tsconfig "paths" is one table per program, so each
+  mapped checkout's own source is rewritten to resolve those specifiers
+  against ITS OWN tree (...) before the checker sees it — the import order
+  does not decide
+```
+
+(41 → 33 because the `zapo-js/...` keys stopped being aliases at all: a tree
+alias may no longer shadow a specifier that names an INSTALLED package, since
+Node resolves those to the installed package and the compiler has to agree.)
+
+**Reproducing the differential.** Swap the two import blocks in
+`app182/zapo-rest.ts` in place — same path, same file name, and the swap is a
+permutation of two adjacent blocks so the file length does not change — build
+each arm into its OWN output directory, and compare. Entering through a
+differently NAMED file instead would change every translation unit, because
+the emitted C carries the module's source file name.
 
 ## The push endpoint — `/s/<sessionId>/events/ws`
 
