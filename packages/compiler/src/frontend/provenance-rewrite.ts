@@ -154,8 +154,12 @@ function specifierSpans(text: string, fileName: string): { spec: string; start: 
 }
 
 /** How many specifiers were rewritten, per file -- the only way to tell "no
- * aliases in this tree" from "the rewriter never ran". Read by the
- * SCRIPTC_PROVENANCE_ALIAS_WHY report. */
+ * aliases in this tree" from "the rewriter never ran". The two look
+ * identical from outside, and the second is how a pass like this fails
+ * silently: the tree-root derivation was digest-based at first, which is a
+ * shape the manifest-pinned fixtures do not have, so the whole fixture suite
+ * ran unscoped and passed every assertion it had. Exported so a harness can
+ * positive-control the pass rather than infer it from a green result. */
 const rewritten = new Map<string, number>();
 
 export function provenanceAliasRewrites(): ReadonlyMap<string, number> {
