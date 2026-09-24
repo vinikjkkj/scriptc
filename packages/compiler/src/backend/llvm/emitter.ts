@@ -5078,6 +5078,76 @@ class LlEmitter {
 
   // ── expressions ─────────────────────────────────────────────────────────
 
+  /** ToUint32 inline (upperf-a probe, ported from upstream #366). Fast path
+   * is one fptosi+trunc for |v| <= 2^53; the cold arm does the spec's
+   * trunc/modulo wrap and answers 0 for NaN and both infinities. */
+  private emitToUint32(value: string): string {
+    const B = this.B;
+    const aboveMin = B.tmp();
+    const belowMax = B.tmp();
+    const fast = B.tmp();
+    B.line(`${aboveMin} = fcmp oge double ${value}, ${f64Lit(-9007199254740992)}`);
+    B.line(`${belowMax} = fcmp ole double ${value}, ${f64Lit(9007199254740992)}`);
+    B.line(`${fast} = and i1 ${aboveMin}, ${belowMax}`);
+
+    const fastLabel = B.newLabel("uint32.coerce.fast");
+    const slowLabel = B.newLabel("uint32.coerce.slow");
+    const done = B.newLabel("uint32.coerce.done");
+    B.condBr(fast, fastLabel, slowLabel);
+
+    B.startBlock(fastLabel);
+    const signed = B.tmp();
+    const fastU32 = B.tmp();
+    B.line(`${signed} = fptosi double ${value} to i64`);
+    B.line(`${fastU32} = trunc i64 ${signed} to i32`);
+    B.br(done);
+
+    B.startBlock(slowLabel);
+    const ordered = B.tmp();
+    const belowInf = B.tmp();
+    const aboveNegInf = B.tmp();
+    const finiteRange = B.tmp();
+    const finite = B.tmp();
+    B.line(`${ordered} = fcmp ord double ${value}, ${value}`);
+    B.line(`${belowInf} = fcmp olt double ${value}, ${F64_INF}`);
+    B.line(`${aboveNegInf} = fcmp ogt double ${value}, ${f64Lit(-Infinity)}`);
+    B.line(`${finiteRange} = and i1 ${belowInf}, ${aboveNegInf}`);
+    B.line(`${finite} = and i1 ${ordered}, ${finiteRange}`);
+    const finiteLabel = B.newLabel("uint32.coerce.finite");
+    const nonfiniteLabel = B.newLabel("uint32.coerce.nonfinite");
+    const slowDone = B.newLabel("uint32.coerce.slow.done");
+    B.condBr(finite, finiteLabel, nonfiniteLabel);
+
+    B.startBlock(finiteLabel);
+    this.declare(`declare double @llvm.trunc.f64(double)`);
+    const truncated = B.tmp();
+    const residue = B.tmp();
+    const negative = B.tmp();
+    const wrapped = B.tmp();
+    const normalized = B.tmp();
+    const finiteU32 = B.tmp();
+    B.line(`${truncated} = call double @llvm.trunc.f64(double ${value})`);
+    B.line(`${residue} = frem double ${truncated}, ${f64Lit(4294967296)}`);
+    B.line(`${negative} = fcmp olt double ${residue}, ${f64Lit(0)}`);
+    B.line(`${wrapped} = fadd double ${residue}, ${f64Lit(4294967296)}`);
+    B.line(`${normalized} = select i1 ${negative}, double ${wrapped}, double ${residue}`);
+    B.line(`${finiteU32} = fptoui double ${normalized} to i32`);
+    B.br(slowDone);
+
+    B.startBlock(nonfiniteLabel);
+    B.br(slowDone);
+
+    B.startBlock(slowDone);
+    const slowU32 = B.tmp();
+    B.line(`${slowU32} = phi i32 [ ${finiteU32}, %${finiteLabel} ], [ 0, %${nonfiniteLabel} ]`);
+    B.br(done);
+
+    B.startBlock(done);
+    const out = B.tmp();
+    B.line(`${out} = phi i32 [ ${fastU32}, %${fastLabel} ], [ ${slowU32}, %${slowDone} ]`);
+    return out;
+  }
+
   private emitExpr(e: IrExpr): LlValue {
     const B = this.B;
     switch (e.kind) {
@@ -5142,13 +5212,13 @@ class LlEmitter {
         // where JS answers NaN), and both lanes call the same wrapper so
         // they cannot drift on the edges.
         const libm: Record<string, string> = { "%": "fmod", "**": "scr_math_pow" };
-        const bit: Record<string, string> = {
-          "&": "scr_bit_and",
-          "|": "scr_bit_or",
-          "^": "scr_bit_xor",
-          "<<": "scr_bit_shl",
-          ">>": "scr_bit_shr",
-          ">>>": "scr_bit_ushr",
+        const bit: Record<string, "and" | "or" | "xor" | "shl" | "ashr" | "lshr"> = {
+          "&": "and",
+          "|": "or",
+          "^": "xor",
+          "<<": "shl",
+          ">>": "ashr",
+          ">>>": "lshr",
         };
         if ((e.op === "===" || e.op === "!==") && e.left.type.kind === "bool") {
           B.line(`${t} = icmp ${e.op === "===" ? "eq" : "ne"} i1 ${l.name}, ${r.name}`);
@@ -5160,8 +5230,22 @@ class LlEmitter {
           if (e.left.type.kind !== "f64") throw new LlvmUnsupportedError(`bin:${e.op}:${e.left.type.kind}`, e.loc);
           if (arith[e.op] !== undefined) B.line(`${t} = ${arith[e.op]} double ${l.name}, ${r.name}`);
           else B.line(`${t} = fcmp ${cmp[e.op]} double ${l.name}, ${r.name}`);
+        } else if (bit[e.op] !== undefined) {
+          if (e.left.type.kind !== "f64" || e.right.type.kind !== "f64") {
+            throw new LlvmUnsupportedError(`bin:${e.op}:${e.left.type.kind}:${e.right.type.kind}`, e.loc);
+          }
+          const left = this.emitToUint32(l.name);
+          let right = this.emitToUint32(r.name);
+          if (e.op === "<<" || e.op === ">>" || e.op === ">>>") {
+            const shift = B.tmp();
+            B.line(`${shift} = and i32 ${right}, 31`);
+            right = shift;
+          }
+          const result = B.tmp();
+          B.line(`${result} = ${bit[e.op]} i32 ${left}, ${right}`);
+          B.line(`${t} = ${e.op === ">>>" ? "uitofp" : "sitofp"} i32 ${result} to double`);
         } else {
-          const fn = libm[e.op] ?? bit[e.op];
+          const fn = libm[e.op];
           if (fn === undefined) throw new LlvmUnsupportedError(`bin:${e.op}`, e.loc);
           this.declare(`declare double @${fn}(double, double)`);
           B.line(`${t} = call double @${fn}(double ${l.name}, double ${r.name})`);
@@ -5174,8 +5258,10 @@ class LlEmitter {
         if (e.op === "-") B.line(`${t} = fneg double ${v.name}`);
         else if (e.op === "!") B.line(`${t} = xor i1 ${v.name}, true`);
         else {
-          this.declare(`declare double @scr_bit_not(double)`);
-          B.line(`${t} = call double @scr_bit_not(double ${v.name})`);
+          const value = this.emitToUint32(v.name);
+          const result = B.tmp();
+          B.line(`${result} = xor i32 ${value}, -1`);
+          B.line(`${t} = sitofp i32 ${result} to double`);
         }
         return { name: t, type: e.type };
       }
