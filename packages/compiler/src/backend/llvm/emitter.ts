@@ -80,6 +80,8 @@ import { computeMayThrow } from "../emission/may-throw.js";
 import { seqScopedLocals } from "../emission/emit-stmts.js";
 import { mangleAgenSettleThunk, mangleArgPack, mangleAsyncSpawn, mangleClassNew, mangleClassObj, mangleClassRetain, mangleClassStruct, mangleFnClosure, mangleFunction, mangleGenDrop, mangleGenResThunk, mangleGenSpawn, mangleGlobal, mangleLocal, mangleRecordNew, mangleRecordStruct, mangleResolveThunk, mangleTrampoline, mangleVtStruct, mangleWrapper } from "../mangle.js";
 import { BlockBuilder } from "./blocks.js";
+import { isStableReceiverOperand } from "../../ir/analysis.js";
+import { SCR_BYTES_LEN_OFFSET } from "./runtime-layout.js";
 import {
   buildClassGraph,
   classFieldIndex,
@@ -3912,6 +3914,43 @@ class LlEmitter {
     return { kind: "global", slot: `@${mangleGlobal(id)}`, type: g };
   }
 
+  /** Evaluate a container receiver as a BORROW: load the pointer out of
+   * the binding's slot WITHOUT retaining it, and do not put it on the
+   * statement frame. The binding owns the value for the whole access, so
+   * the retain/release pair around each indexed read disappears -- in a
+   * byte loop that pair is most of the per-iteration cost, paid once for
+   * the read, once for the write and once more for the length test.
+   *
+   * Sound only when nothing evaluated after the receiver can overwrite the
+   * binding, which isStableReceiverOperand decides; every other shape
+   * falls back to the owned path, so the conservative answer is always
+   * today's behaviour.
+   *
+   * Boxed and captured bindings are refused: the slot holds a box pointer,
+   * the read through it is itself a +1, and the binding is shared, so any
+   * other capture can replace the contents underneath the borrow. A TDZ
+   * global is refused because its read must run the guard.
+   *
+   * NOT ownImmortal: an immortal is OWNED (a +1 whose release happens to
+   * be a runtime no-op because rc is UINT32_MAX). A borrow was never +1,
+   * so releasing it would really decrement. It stays off the frame
+   * entirely instead of joining it with a skip flag. */
+  private emitStableReceiver(receiver: IrExpr, following: IrExpr[]): LlValue {
+    if (
+      receiver.kind === "varRef" &&
+      !this.captureIds.has(receiver.localId) &&
+      following.every((operand) => isStableReceiverOperand(operand, receiver.localId))
+    ) {
+      const b = this.binding(receiver.localId);
+      if (b.kind !== "boxed" && !(b.kind === "global" && this.tdzGlobals.has(receiver.localId))) {
+        const t = this.B.tmp();
+        this.B.line(`${t} = load ${this.llType(b.type)}, ptr ${b.slot}`);
+        return { name: t, type: receiver.type };
+      }
+    }
+    return this.emitExpr(receiver);
+  }
+
   /** Loads a boxed binding's box pointer out of its slot. */
   private loadBox(slot: string): string {
     const b = this.B.tmp();
@@ -4291,7 +4330,9 @@ class LlEmitter {
         // Typed-array element write: same evaluation order as arraySet;
         // the value is a scalar (the runtime coerces JS-exactly), so no
         // ownership moves. Any invalid index traps — no append.
-        const arr = this.emitExpr(s.arr);
+        // The receiver may be BORROWED: index and value are checked
+        // stable, and the write coerces a scalar without user code.
+        const arr = this.emitStableReceiver(s.arr, [s.index, s.value]);
         const idx = this.emitExpr(s.index);
         const v = this.emitExpr(s.value);
         // The write twin of the read site above -- same fast arm, same
@@ -5078,6 +5119,76 @@ class LlEmitter {
 
   // ── expressions ─────────────────────────────────────────────────────────
 
+  /** ToUint32 inline (upperf-a probe, ported from upstream #366). Fast path
+   * is one fptosi+trunc for |v| <= 2^53; the cold arm does the spec's
+   * trunc/modulo wrap and answers 0 for NaN and both infinities. */
+  private emitToUint32(value: string): string {
+    const B = this.B;
+    const aboveMin = B.tmp();
+    const belowMax = B.tmp();
+    const fast = B.tmp();
+    B.line(`${aboveMin} = fcmp oge double ${value}, ${f64Lit(-9007199254740992)}`);
+    B.line(`${belowMax} = fcmp ole double ${value}, ${f64Lit(9007199254740992)}`);
+    B.line(`${fast} = and i1 ${aboveMin}, ${belowMax}`);
+
+    const fastLabel = B.newLabel("uint32.coerce.fast");
+    const slowLabel = B.newLabel("uint32.coerce.slow");
+    const done = B.newLabel("uint32.coerce.done");
+    B.condBr(fast, fastLabel, slowLabel);
+
+    B.startBlock(fastLabel);
+    const signed = B.tmp();
+    const fastU32 = B.tmp();
+    B.line(`${signed} = fptosi double ${value} to i64`);
+    B.line(`${fastU32} = trunc i64 ${signed} to i32`);
+    B.br(done);
+
+    B.startBlock(slowLabel);
+    const ordered = B.tmp();
+    const belowInf = B.tmp();
+    const aboveNegInf = B.tmp();
+    const finiteRange = B.tmp();
+    const finite = B.tmp();
+    B.line(`${ordered} = fcmp ord double ${value}, ${value}`);
+    B.line(`${belowInf} = fcmp olt double ${value}, ${F64_INF}`);
+    B.line(`${aboveNegInf} = fcmp ogt double ${value}, ${f64Lit(-Infinity)}`);
+    B.line(`${finiteRange} = and i1 ${belowInf}, ${aboveNegInf}`);
+    B.line(`${finite} = and i1 ${ordered}, ${finiteRange}`);
+    const finiteLabel = B.newLabel("uint32.coerce.finite");
+    const nonfiniteLabel = B.newLabel("uint32.coerce.nonfinite");
+    const slowDone = B.newLabel("uint32.coerce.slow.done");
+    B.condBr(finite, finiteLabel, nonfiniteLabel);
+
+    B.startBlock(finiteLabel);
+    this.declare(`declare double @llvm.trunc.f64(double)`);
+    const truncated = B.tmp();
+    const residue = B.tmp();
+    const negative = B.tmp();
+    const wrapped = B.tmp();
+    const normalized = B.tmp();
+    const finiteU32 = B.tmp();
+    B.line(`${truncated} = call double @llvm.trunc.f64(double ${value})`);
+    B.line(`${residue} = frem double ${truncated}, ${f64Lit(4294967296)}`);
+    B.line(`${negative} = fcmp olt double ${residue}, ${f64Lit(0)}`);
+    B.line(`${wrapped} = fadd double ${residue}, ${f64Lit(4294967296)}`);
+    B.line(`${normalized} = select i1 ${negative}, double ${wrapped}, double ${residue}`);
+    B.line(`${finiteU32} = fptoui double ${normalized} to i32`);
+    B.br(slowDone);
+
+    B.startBlock(nonfiniteLabel);
+    B.br(slowDone);
+
+    B.startBlock(slowDone);
+    const slowU32 = B.tmp();
+    B.line(`${slowU32} = phi i32 [ ${finiteU32}, %${finiteLabel} ], [ 0, %${nonfiniteLabel} ]`);
+    B.br(done);
+
+    B.startBlock(done);
+    const out = B.tmp();
+    B.line(`${out} = phi i32 [ ${fastU32}, %${fastLabel} ], [ ${slowU32}, %${slowDone} ]`);
+    return out;
+  }
+
   private emitExpr(e: IrExpr): LlValue {
     const B = this.B;
     switch (e.kind) {
@@ -5142,13 +5253,13 @@ class LlEmitter {
         // where JS answers NaN), and both lanes call the same wrapper so
         // they cannot drift on the edges.
         const libm: Record<string, string> = { "%": "fmod", "**": "scr_math_pow" };
-        const bit: Record<string, string> = {
-          "&": "scr_bit_and",
-          "|": "scr_bit_or",
-          "^": "scr_bit_xor",
-          "<<": "scr_bit_shl",
-          ">>": "scr_bit_shr",
-          ">>>": "scr_bit_ushr",
+        const bit: Record<string, "and" | "or" | "xor" | "shl" | "ashr" | "lshr"> = {
+          "&": "and",
+          "|": "or",
+          "^": "xor",
+          "<<": "shl",
+          ">>": "ashr",
+          ">>>": "lshr",
         };
         if ((e.op === "===" || e.op === "!==") && e.left.type.kind === "bool") {
           B.line(`${t} = icmp ${e.op === "===" ? "eq" : "ne"} i1 ${l.name}, ${r.name}`);
@@ -5160,8 +5271,22 @@ class LlEmitter {
           if (e.left.type.kind !== "f64") throw new LlvmUnsupportedError(`bin:${e.op}:${e.left.type.kind}`, e.loc);
           if (arith[e.op] !== undefined) B.line(`${t} = ${arith[e.op]} double ${l.name}, ${r.name}`);
           else B.line(`${t} = fcmp ${cmp[e.op]} double ${l.name}, ${r.name}`);
+        } else if (bit[e.op] !== undefined) {
+          if (e.left.type.kind !== "f64" || e.right.type.kind !== "f64") {
+            throw new LlvmUnsupportedError(`bin:${e.op}:${e.left.type.kind}:${e.right.type.kind}`, e.loc);
+          }
+          const left = this.emitToUint32(l.name);
+          let right = this.emitToUint32(r.name);
+          if (e.op === "<<" || e.op === ">>" || e.op === ">>>") {
+            const shift = B.tmp();
+            B.line(`${shift} = and i32 ${right}, 31`);
+            right = shift;
+          }
+          const result = B.tmp();
+          B.line(`${result} = ${bit[e.op]} i32 ${left}, ${right}`);
+          B.line(`${t} = ${e.op === ">>>" ? "uitofp" : "sitofp"} i32 ${result} to double`);
         } else {
-          const fn = libm[e.op] ?? bit[e.op];
+          const fn = libm[e.op];
           if (fn === undefined) throw new LlvmUnsupportedError(`bin:${e.op}`, e.loc);
           this.declare(`declare double @${fn}(double, double)`);
           B.line(`${t} = call double @${fn}(double ${l.name}, double ${r.name})`);
@@ -5174,8 +5299,10 @@ class LlEmitter {
         if (e.op === "-") B.line(`${t} = fneg double ${v.name}`);
         else if (e.op === "!") B.line(`${t} = xor i1 ${v.name}, true`);
         else {
-          this.declare(`declare double @scr_bit_not(double)`);
-          B.line(`${t} = call double @scr_bit_not(double ${v.name})`);
+          const value = this.emitToUint32(v.name);
+          const result = B.tmp();
+          B.line(`${result} = xor i32 ${value}, -1`);
+          B.line(`${t} = sitofp i32 ${result} to double`);
         }
         return { name: t, type: e.type };
       }
@@ -11716,13 +11843,41 @@ class LlEmitter {
         : call("scr_bytes_write_var", "double (ptr, double, double, double, i1 zeroext, i1 zeroext)",
             `ptr ${r0.name}, double ${rest[0]!.name}, double ${rest[1]!.name}, double ${rest[2]!.name}, i1 ${spec.sign}, i1 ${spec.le}`, false, true);
     }
-    const r = this.emitExpr(e.receiver);
-    const args = e.args.map((a) => this.emitExpr(a));
     const method = e.method;
+    // length/byteLength/get copy a scalar out without running user code,
+    // so a stable binding can keep owning its receiver across the access.
+    // The readNum/writeNum family above deliberately does NOT borrow: it
+    // is fallible and its result rides a pending check.
+    const directElementAccess =
+      method === "length" || method === "byteLength" || method === "get";
+    const r = directElementAccess
+      ? this.emitStableReceiver(e.receiver, e.args)
+      : this.emitExpr(e.receiver);
+    const args = e.args.map((a) => this.emitExpr(a));
     const NAN = f64Lit(NaN);
     switch (method) {
-      case "length":
-        return call("scr_bytes_len", "double (ptr)", `ptr ${r.name}`, false, false);
+      case "length": {
+        // scr_bytes_len's entire body is `return (double)b->len`. In a
+        // byte loop this is the CONDITION, paid once per iteration, so
+        // the call was a stack frame around a field load.
+        //
+        // This is the one place this lane needs ScrBytes's layout, and
+        // the offset is not a literal here: it comes from
+        // runtime-layout.ts, which runtime-layout.test.ts proves against
+        // scr_runtime.h by compiling _Static_assert through the real
+        // toolchain. Before that guard existed this would have been an
+        // unchecked second copy of the layout, which is exactly what the
+        // comment on the element accessors below still refuses.
+        //
+        // `len` is size_t, hence i64 and UNSIGNED.
+        const lenPtr = B.tmp();
+        const raw = B.tmp();
+        const out = B.tmp();
+        B.line(`${lenPtr} = getelementptr inbounds i8, ptr ${r.name}, i64 ${SCR_BYTES_LEN_OFFSET}`);
+        B.line(`${raw} = load i64, ptr ${lenPtr}`);
+        B.line(`${out} = uitofp i64 ${raw} to double`);
+        return { name: out, type: e.type };
+      }
       case "byteLength":
         return call("scr_bytes_byte_len", "double (ptr)", `ptr ${r.name}`, false, false);
       case "get":
@@ -11730,12 +11885,41 @@ class LlEmitter {
         // scr_bytes_get_FAST, not scr_bytes_get: the u8-in-bounds arm
         // without the element switch or the double-domain bound, which is
         // 18.2 executed instructions per read cheaper and answers the same
-        // double for every input (scr_runtime.h). This lane calls where
-        // the C lane inlines, because it has no knowledge of ScrBytes's
-        // field offsets and putting them here would be a second,
-        // unchecked copy of the layout -- and the call is only 1.9
-        // instructions worse than the inline. This is one of exactly two
-        // sites that lower `bytes[i]` on this lane.
+        // double for every input (scr_runtime.h). This lane CALLS where
+        // the C lane inlines, and it stays that way -- but the reason has
+        // changed, so read this before reversing it.
+        //
+        // The old reason was that the emitter had no knowledge of
+        // ScrBytes's field offsets and putting them here would be a
+        // second, unchecked copy of the layout. That objection is now
+        // ANSWERED, and it was never quite true: this file already
+        // declares eighteen runtime struct bodies as LLVM types and
+        // reaches ScrBytes and ScrDyn by raw byte offset in thirty-odd
+        // places. It was an unnoticed inconsistency, not a principle.
+        // runtime-layout.ts now holds those offsets and
+        // runtime-layout.test.ts proves them against scr_runtime.h by
+        // compiling _Static_assert through the real toolchain, which is
+        // what let `length` above stop calling.
+        //
+        // Three reasons the ELEMENT accessors stay out of line anyway:
+        //
+        //  - scr_bytes_get_fast is already just scr_bytes_get_inl behind
+        //    a symbol (scr_bytes.c), so this lane already gets the fast
+        //    arm. Inlining buys the call, and the call was measured at
+        //    1.9 instructions worse than the inline.
+        //  - SCR_ARRCEN_ON compiles the fast arm OUT so tests/perf's
+        //    arrcensus can count accesses. An emitter-side inline is
+        //    invisible to that switch: the census would stop seeing this
+        //    lane's reads entirely and report a collapse that is not
+        //    real. SCR_NO_F64ARM, the A/B control for the f64 arm, loses
+        //    the same way.
+        //  - it would add ScrBytes ->data and ->elem to the raw-offset
+        //    debt, and the durable fix for that debt is to give ScrBytes
+        //    a DECLARED body so its accesses become typed GEPs that
+        //    cannot be wrong -- not to add more offsets that merely get
+        //    checked.
+        //
+        // This is one of exactly two sites that lower `bytes[i]` here.
         return call("scr_bytes_get_fast", "double (ptr, double)", `ptr ${r.name}, double ${args[0]!.name}`, false, false);
       case "slice":
         return call(

@@ -9,6 +9,7 @@ import { mangleClassNew, mangleClassRetain, mangleClassStruct, mangleField, mang
 import { OVERFLOW_MEMBER, OWNMASK_MEMBER, SRCPROTO_MEMBER, TOSTR_MEMBER, nullProtoCondC, ownPresentCondC } from "./emit-shapes.js";
 import { dynDestrCheckHelper, dynIterNHelper, dynKeyGetHelper } from "./emit-walkers.js";
 import { genResultThunkFor } from "./emit-async.js";
+import { isStableReceiverOperand } from "../../ir/analysis.js";
 import { wsGlobalCtorFor } from "./emit-ws.js";
 
 
@@ -44,6 +45,36 @@ function armNoteC(E: CEmitter, unionId: string, arm: IrType, tag?: number): stri
   const n = def?.arms.length ?? -1;
   const t = tag ?? (def ? def.arms.findIndex((a) => typeEquals(a, arm)) : -1);
   return ` /*ARMS=${n},TAG=${t}*/`;
+}
+
+/** Evaluate a container receiver as a BORROW when it is a direct, unboxed
+ * binding and every operand evaluated after it is stable. The binding's
+ * scope (or the global slot) keeps the value alive for the whole access,
+ * so the retain/release pair around every indexed read disappears. In a
+ * byte loop that pair is the bulk of the per-iteration cost: the receiver
+ * is retained and released once per read, once per write, and once more
+ * for the length in the condition.
+ *
+ * Any shape that is not provably stable falls back to the owned temp, so
+ * the conservative answer is always the old behaviour. Boxed bindings are
+ * refused outright: a capture box is a shared binding whose contents can
+ * be replaced through any other capture, and the box read is itself a +1.
+ * A TDZ global is refused because the read has to run its guard. */
+export function emitStableReceiver(E: CEmitter, receiver: IrExpr, following: IrExpr[]): Temp {
+  if (
+    receiver.kind === "varRef" &&
+    following.every((operand) => isStableReceiverOperand(operand, receiver.localId))
+  ) {
+    const local = E.currentLocals.get(receiver.localId);
+    if (local && !local.boxed) {
+      return E.newBorrowedTemp(receiver.type, mangleLocal(receiver.localId));
+    }
+    const global = !local ? E.globalsById.get(receiver.localId) : undefined;
+    if (global && !global.tdz) {
+      return E.newBorrowedTemp(receiver.type, mangleGlobal(receiver.localId));
+    }
+  }
+  return E.emitExpr(receiver);
 }
 
 export function emitExpr(E: CEmitter, e: IrExpr): Temp {
@@ -1355,12 +1386,25 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
           E.emitPendingCheck();
           return t;
         }
-        const r = E.emitExpr(e.receiver);
-        const args = e.args.map((a) => E.emitExpr(a));
         const method = e.method;
+        // length/byteLength/get copy a scalar out without running user
+        // code, so a stable binding can keep owning its receiver across
+        // the access instead of the emitter taking a reference for it.
+        const directElementAccess =
+          method === "length" || method === "byteLength" || method === "get";
+        const r = directElementAccess
+          ? emitStableReceiver(E, e.receiver, e.args)
+          : E.emitExpr(e.receiver);
+        const args = e.args.map((a) => E.emitExpr(a));
         switch (method) {
           case "length":
-            return E.newTemp(e.type, `scr_bytes_len(${r.name})`);
+            // scr_bytes_len's entire body is `return (double)b->len`, so
+            // the call is a stack frame around a field load. In a byte
+            // loop it is the CONDITION, paid once per iteration. The C
+            // backend knows the struct (it includes the header), so this
+            // is not new layout knowledge -- unlike the LLVM twin, which
+            // spells the offset and is pinned by runtime-layout.test.ts.
+            return E.newTemp(e.type, `(double)${r.name}->len`);
           case "byteLength":
             return E.newTemp(e.type, `scr_bytes_byte_len(${r.name})`);
           case "get":
