@@ -8,6 +8,7 @@ import { mangleField, mangleGlobal, mangleLocal, mangleRawParam } from "../mangl
 import { BOOL, CAUGHT, IrExpr, IrStmt, RUNTIME_ERROR_CLASSES, isRefCounted, ownMaskKeyBit } from "../../ir/nodes.js";
 import { boxAccess, cDecl, cStringLiteral, elemAccess, vAdapters } from "./emit-types.js";
 import { OVERFLOW_MEMBER, OWNMASK_MEMBER } from "./emit-shapes.js";
+import { emitStableReceiver } from "./emit-exprs.js";
 
 
 
@@ -465,7 +466,10 @@ export function emitStmt(E: CEmitter, s: IrStmt): void {
         // Typed-array element write: same evaluation order as arraySet;
         // the value is a scalar (the runtime coerces JS-exactly), so no
         // ownership moves. Any invalid index traps — no append.
-        const arr = E.emitExpr(s.arr);
+        // The receiver may be BORROWED for the same reason the read side
+        // borrows: index and value are checked stable, and the write
+        // coerces a scalar without ever running user code.
+        const arr = emitStableReceiver(E, s.arr, [s.index, s.value]);
         const idx = E.emitExpr(s.index);
         const v = E.emitExpr(s.value);
         // The inline arm's twin of the read site in emit-exprs — same

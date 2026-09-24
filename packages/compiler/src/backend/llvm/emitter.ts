@@ -80,6 +80,7 @@ import { computeMayThrow } from "../emission/may-throw.js";
 import { seqScopedLocals } from "../emission/emit-stmts.js";
 import { mangleAgenSettleThunk, mangleArgPack, mangleAsyncSpawn, mangleClassNew, mangleClassObj, mangleClassRetain, mangleClassStruct, mangleFnClosure, mangleFunction, mangleGenDrop, mangleGenResThunk, mangleGenSpawn, mangleGlobal, mangleLocal, mangleRecordNew, mangleRecordStruct, mangleResolveThunk, mangleTrampoline, mangleVtStruct, mangleWrapper } from "../mangle.js";
 import { BlockBuilder } from "./blocks.js";
+import { isStableReceiverOperand } from "../../ir/analysis.js";
 import {
   buildClassGraph,
   classFieldIndex,
@@ -3912,6 +3913,43 @@ class LlEmitter {
     return { kind: "global", slot: `@${mangleGlobal(id)}`, type: g };
   }
 
+  /** Evaluate a container receiver as a BORROW: load the pointer out of
+   * the binding's slot WITHOUT retaining it, and do not put it on the
+   * statement frame. The binding owns the value for the whole access, so
+   * the retain/release pair around each indexed read disappears -- in a
+   * byte loop that pair is most of the per-iteration cost, paid once for
+   * the read, once for the write and once more for the length test.
+   *
+   * Sound only when nothing evaluated after the receiver can overwrite the
+   * binding, which isStableReceiverOperand decides; every other shape
+   * falls back to the owned path, so the conservative answer is always
+   * today's behaviour.
+   *
+   * Boxed and captured bindings are refused: the slot holds a box pointer,
+   * the read through it is itself a +1, and the binding is shared, so any
+   * other capture can replace the contents underneath the borrow. A TDZ
+   * global is refused because its read must run the guard.
+   *
+   * NOT ownImmortal: an immortal is OWNED (a +1 whose release happens to
+   * be a runtime no-op because rc is UINT32_MAX). A borrow was never +1,
+   * so releasing it would really decrement. It stays off the frame
+   * entirely instead of joining it with a skip flag. */
+  private emitStableReceiver(receiver: IrExpr, following: IrExpr[]): LlValue {
+    if (
+      receiver.kind === "varRef" &&
+      !this.captureIds.has(receiver.localId) &&
+      following.every((operand) => isStableReceiverOperand(operand, receiver.localId))
+    ) {
+      const b = this.binding(receiver.localId);
+      if (b.kind !== "boxed" && !(b.kind === "global" && this.tdzGlobals.has(receiver.localId))) {
+        const t = this.B.tmp();
+        this.B.line(`${t} = load ${this.llType(b.type)}, ptr ${b.slot}`);
+        return { name: t, type: receiver.type };
+      }
+    }
+    return this.emitExpr(receiver);
+  }
+
   /** Loads a boxed binding's box pointer out of its slot. */
   private loadBox(slot: string): string {
     const b = this.B.tmp();
@@ -4291,7 +4329,9 @@ class LlEmitter {
         // Typed-array element write: same evaluation order as arraySet;
         // the value is a scalar (the runtime coerces JS-exactly), so no
         // ownership moves. Any invalid index traps — no append.
-        const arr = this.emitExpr(s.arr);
+        // The receiver may be BORROWED: index and value are checked
+        // stable, and the write coerces a scalar without user code.
+        const arr = this.emitStableReceiver(s.arr, [s.index, s.value]);
         const idx = this.emitExpr(s.index);
         const v = this.emitExpr(s.value);
         // The write twin of the read site above -- same fast arm, same
@@ -11802,9 +11842,17 @@ class LlEmitter {
         : call("scr_bytes_write_var", "double (ptr, double, double, double, i1 zeroext, i1 zeroext)",
             `ptr ${r0.name}, double ${rest[0]!.name}, double ${rest[1]!.name}, double ${rest[2]!.name}, i1 ${spec.sign}, i1 ${spec.le}`, false, true);
     }
-    const r = this.emitExpr(e.receiver);
-    const args = e.args.map((a) => this.emitExpr(a));
     const method = e.method;
+    // length/byteLength/get copy a scalar out without running user code,
+    // so a stable binding can keep owning its receiver across the access.
+    // The readNum/writeNum family above deliberately does NOT borrow: it
+    // is fallible and its result rides a pending check.
+    const directElementAccess =
+      method === "length" || method === "byteLength" || method === "get";
+    const r = directElementAccess
+      ? this.emitStableReceiver(e.receiver, e.args)
+      : this.emitExpr(e.receiver);
+    const args = e.args.map((a) => this.emitExpr(a));
     const NAN = f64Lit(NaN);
     switch (method) {
       case "length":

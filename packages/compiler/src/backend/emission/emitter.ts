@@ -2344,6 +2344,26 @@ export class CEmitter {
     return { name, type };
   }
 
+  /** A BORROWED compiler temp: the value is read straight out of the
+   * binding that already owns it, with no retain, and it does NOT join the
+   * release frame. Only sound where a surrounding operation has proved
+   * that nothing evaluated before the temp's last use can overwrite that
+   * binding (isStableReceiverOperand).
+   *
+   * Distinct from newImmortalTemp, and the difference matters: an immortal
+   * IS owned (+1 on a value whose rc is SIZE_MAX, so the release is a
+   * runtime no-op and may be skipped). A borrow was never +1 at all, so a
+   * release of it would really decrement. It therefore stays OUT of the
+   * frame entirely rather than joining it with a skip flag. A consumer
+   * that later tries to take ownership of one hits moveTemp's "not found
+   * in any frame" emitter bug -- loud at compile time, which is the
+   * correct failure for an unsound borrow. */
+  newBorrowedTemp(type: IrType, init: string): Temp {
+    const name = `sc_t${this.tempCounter++}`;
+    this.line(`${cDecl(type, name)} = ${init};`);
+    return { name, type };
+  }
+
   /** newTemp for a MAY-THROW runtime call: the result joins its frame
    * BEFORE the standard pending check, so an unwind releases the dummy
    * (NULL for refcounted kinds) harmlessly and the value is only read past
