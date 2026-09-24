@@ -238,7 +238,7 @@ function paramFacts(checker: CheckerLike, n: ts.Node): { want: string; wantArmed
   try {
     const t = checker.getTypeOfSymbolAtLocation(p, decl ?? call);
     want = checker.typeToString(t).replace(/\s+/g, " ").slice(0, 80);
-    const parts = t.isUnionType() ? t.getTypes() : [t];
+    const parts = t.isUnionType() ? ts.constituentTypes(t) : [t];
     armed = parts.some((x) => (x.flags & ts.TypeFlags.Undefined) !== 0) ? "yes" : "no";
     // An OPTIONAL parameter (`v?: string`) whose reported type omits the
     // arm still accepts undefined at the call — record it distinctly so

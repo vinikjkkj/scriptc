@@ -714,7 +714,7 @@ export function neverTaintedJsType(L: Lowerer, node: ts.Node, t: ts.Type): boole
   if (!isJsSourceFile(node.getSourceFile())) return false;
   const walk = (x: ts.Type, depth: number): boolean => {
     if (depth === 0) return false;
-    if (x.isUnionType()) return x.getTypes().some((a) => walk(a, depth - 1));
+    if (x.isUnionType()) return ts.constituentTypes(x).some((a) => walk(a, depth - 1));
     if (L.checker.isArrayType(x) || L.checker.isTupleType(x)) {
       return L.checker
         .getTypeArguments(x as ts.TypeReference)
@@ -4728,7 +4728,7 @@ export class Lowerer {
     if (tp.constraint !== undefined) {
       try {
         const ct = this.checker.getTypeFromTypeNode(tp.constraint);
-        const arms = ct.isUnionType() ? ct.getTypes() : [ct];
+        const arms = ct.isUnionType() ? ts.constituentTypes(ct) : [ct];
         card = String(arms.length);
         closed = arms.every((a) => a.isStringLiteralType()) ? "y" : "n";
         parts.push(`ctext=${this.checker.typeToString(ct).slice(0, 90)}`);
@@ -4862,7 +4862,7 @@ export class Lowerer {
     // story through its callable arm. After the package check: a
     // package-declared generic signature stays the package's story.
     {
-      const parts = widened.isUnionType() ? widened.getTypes() : [widened];
+      const parts = widened.isUnionType() ? ts.constituentTypes(widened) : [widened];
       if (
         parts.some((p) =>
           this.checker.getCallSignatures(p).some((s) => (s.typeParameters?.length ?? 0) > 0),
@@ -5365,9 +5365,9 @@ export class Lowerer {
     const armIsAnyArray = (c: ts.Type): boolean =>
       anyElemArray(c) ||
       ((c.flags & ts.TypeFlags.Intersection) !== 0 &&
-        (c as ts.UnionOrIntersectionType).getTypes().some(anyElemArray));
+        ts.constituentTypes(c).some(anyElemArray));
     if (!t.isUnionType()) return false;
-    const parts = t.getTypes();
+    const parts = ts.constituentTypes(t);
     return parts.length > 0 && parts.every(armIsAnyArray);
   }
 
@@ -11737,7 +11737,7 @@ export class Lowerer {
       } else {
         const t = this.typeOf(d.initializer);
         if (!isUnitOnlyTsType(t)) return null;
-        for (const p of t.isUnionType() ? t.getTypes() : [t]) {
+        for (const p of t.isUnionType() ? ts.constituentTypes(t) : [t]) {
           units.add((p.flags & ts.TypeFlags.Null) !== 0 ? "null" : "undefined");
         }
       }
@@ -13272,7 +13272,7 @@ export class Lowerer {
       const d = this.checker.valueDeclarationOf(symbol);
       if (d && ts.isVariableDeclaration(d) && d.initializer === undefined) {
         const t = this.checker.getTypeOfSymbol(symbol);
-        const parts = t.isUnionType() ? t.getTypes() : [t];
+        const parts = t.isUnionType() ? ts.constituentTypes(t) : [t];
         if (parts.some((p) => this.checker.getCallSignatures(p).some((s) => (s.typeParameters?.length ?? 0) > 0))) {
           this.unsupported(
             "SC1030",
@@ -13948,7 +13948,7 @@ export class Lowerer {
     if (depth > 6) return true; // unreadable counts as open — the safe side
     if ((t.flags & ts.TypeFlags.TypeParameter) !== 0) return true;
     if (t.isConditionalType()) return true;
-    if (t.isUnionType()) return t.getTypes().some((a) => this.mentionsTypeParam(a, depth + 1));
+    if (t.isUnionType()) return ts.constituentTypes(t).some((a) => this.mentionsTypeParam(a, depth + 1));
     let args: readonly ts.Type[] = [];
     try {
       args = this.checker.getTypeArguments(t as ts.TypeReference);
