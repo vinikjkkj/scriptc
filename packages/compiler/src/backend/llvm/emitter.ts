@@ -81,6 +81,7 @@ import { seqScopedLocals } from "../emission/emit-stmts.js";
 import { mangleAgenSettleThunk, mangleArgPack, mangleAsyncSpawn, mangleClassNew, mangleClassObj, mangleClassRetain, mangleClassStruct, mangleFnClosure, mangleFunction, mangleGenDrop, mangleGenResThunk, mangleGenSpawn, mangleGlobal, mangleLocal, mangleRecordNew, mangleRecordStruct, mangleResolveThunk, mangleTrampoline, mangleVtStruct, mangleWrapper } from "../mangle.js";
 import { BlockBuilder } from "./blocks.js";
 import { isStableReceiverOperand } from "../../ir/analysis.js";
+import { SCR_BYTES_LEN_OFFSET } from "./runtime-layout.js";
 import {
   buildClassGraph,
   classFieldIndex,
@@ -11855,8 +11856,28 @@ class LlEmitter {
     const args = e.args.map((a) => this.emitExpr(a));
     const NAN = f64Lit(NaN);
     switch (method) {
-      case "length":
-        return call("scr_bytes_len", "double (ptr)", `ptr ${r.name}`, false, false);
+      case "length": {
+        // scr_bytes_len's entire body is `return (double)b->len`. In a
+        // byte loop this is the CONDITION, paid once per iteration, so
+        // the call was a stack frame around a field load.
+        //
+        // This is the one place this lane needs ScrBytes's layout, and
+        // the offset is not a literal here: it comes from
+        // runtime-layout.ts, which runtime-layout.test.ts proves against
+        // scr_runtime.h by compiling _Static_assert through the real
+        // toolchain. Before that guard existed this would have been an
+        // unchecked second copy of the layout, which is exactly what the
+        // comment on the element accessors below still refuses.
+        //
+        // `len` is size_t, hence i64 and UNSIGNED.
+        const lenPtr = B.tmp();
+        const raw = B.tmp();
+        const out = B.tmp();
+        B.line(`${lenPtr} = getelementptr inbounds i8, ptr ${r.name}, i64 ${SCR_BYTES_LEN_OFFSET}`);
+        B.line(`${raw} = load i64, ptr ${lenPtr}`);
+        B.line(`${out} = uitofp i64 ${raw} to double`);
+        return { name: out, type: e.type };
+      }
       case "byteLength":
         return call("scr_bytes_byte_len", "double (ptr)", `ptr ${r.name}`, false, false);
       case "get":
@@ -11864,12 +11885,41 @@ class LlEmitter {
         // scr_bytes_get_FAST, not scr_bytes_get: the u8-in-bounds arm
         // without the element switch or the double-domain bound, which is
         // 18.2 executed instructions per read cheaper and answers the same
-        // double for every input (scr_runtime.h). This lane calls where
-        // the C lane inlines, because it has no knowledge of ScrBytes's
-        // field offsets and putting them here would be a second,
-        // unchecked copy of the layout -- and the call is only 1.9
-        // instructions worse than the inline. This is one of exactly two
-        // sites that lower `bytes[i]` on this lane.
+        // double for every input (scr_runtime.h). This lane CALLS where
+        // the C lane inlines, and it stays that way -- but the reason has
+        // changed, so read this before reversing it.
+        //
+        // The old reason was that the emitter had no knowledge of
+        // ScrBytes's field offsets and putting them here would be a
+        // second, unchecked copy of the layout. That objection is now
+        // ANSWERED, and it was never quite true: this file already
+        // declares eighteen runtime struct bodies as LLVM types and
+        // reaches ScrBytes and ScrDyn by raw byte offset in thirty-odd
+        // places. It was an unnoticed inconsistency, not a principle.
+        // runtime-layout.ts now holds those offsets and
+        // runtime-layout.test.ts proves them against scr_runtime.h by
+        // compiling _Static_assert through the real toolchain, which is
+        // what let `length` above stop calling.
+        //
+        // Three reasons the ELEMENT accessors stay out of line anyway:
+        //
+        //  - scr_bytes_get_fast is already just scr_bytes_get_inl behind
+        //    a symbol (scr_bytes.c), so this lane already gets the fast
+        //    arm. Inlining buys the call, and the call was measured at
+        //    1.9 instructions worse than the inline.
+        //  - SCR_ARRCEN_ON compiles the fast arm OUT so tests/perf's
+        //    arrcensus can count accesses. An emitter-side inline is
+        //    invisible to that switch: the census would stop seeing this
+        //    lane's reads entirely and report a collapse that is not
+        //    real. SCR_NO_F64ARM, the A/B control for the f64 arm, loses
+        //    the same way.
+        //  - it would add ScrBytes ->data and ->elem to the raw-offset
+        //    debt, and the durable fix for that debt is to give ScrBytes
+        //    a DECLARED body so its accesses become typed GEPs that
+        //    cannot be wrong -- not to add more offsets that merely get
+        //    checked.
+        //
+        // This is one of exactly two sites that lower `bytes[i]` here.
         return call("scr_bytes_get_fast", "double (ptr, double)", `ptr ${r.name}, double ${args[0]!.name}`, false, false);
       case "slice":
         return call(

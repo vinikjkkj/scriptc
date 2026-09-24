@@ -1398,7 +1398,13 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
         const args = e.args.map((a) => E.emitExpr(a));
         switch (method) {
           case "length":
-            return E.newTemp(e.type, `scr_bytes_len(${r.name})`);
+            // scr_bytes_len's entire body is `return (double)b->len`, so
+            // the call is a stack frame around a field load. In a byte
+            // loop it is the CONDITION, paid once per iteration. The C
+            // backend knows the struct (it includes the header), so this
+            // is not new layout knowledge -- unlike the LLVM twin, which
+            // spells the offset and is pinned by runtime-layout.test.ts.
+            return E.newTemp(e.type, `(double)${r.name}->len`);
           case "byteLength":
             return E.newTemp(e.type, `scr_bytes_byte_len(${r.name})`);
           case "get":
