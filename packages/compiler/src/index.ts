@@ -35,7 +35,7 @@ import { isJsSourceFileName, isRelativeSpecifier } from "./frontend/shared.js";
 import { lowerToIr, type LowerOptions, type LowerResult } from "./frontend/lowering/lowerer.js";
 import type { CoverageInput, NpmStaticStatus } from "./coverage/report.js";
 import { loadFfiProfile, type FfiProfile } from "./ffi/profile.js";
-import { FrontendInputTracker } from "./frontend/input-tracker.js";
+import { FrontendInputTracker, trackedRealpath } from "./frontend/input-tracker.js";
 import {
   compilerImplementationDir,
   compilerImplementationFingerprint,
@@ -893,6 +893,33 @@ function advisorySourceSubset(
   return subset;
 }
 
+/** Realpath the handful of paths that SELECT a dependency tree, so the input
+ * snapshot records what each one actually resolved to.
+ *
+ * Resolution only calls realpath where it needs a canonical module key — npm
+ * package directories, tsgo's lib files — so an entry reached through a
+ * junction or a workspace symlink produces no realpath probe of its own.
+ * Verified, not assumed: a build through a directory junction recorded eleven
+ * probes under the linked path and not one realpath among them.
+ *
+ * Content still invalidates the cache either way; what these probes add is the
+ * AUDIT. Both failures this project has written down were silent at exit 0 —
+ * a workspace symlink compiling an attested package's published source instead
+ * of the working tree, and an entry path selecting the other version of its
+ * dependency graph — and in both the problem was never the fix, it was that
+ * there was no signal. A snapshot that names the resolved target is the
+ * signal. The cost is a few realpath calls per build, not one per file. */
+function recordResolutionAnchors(entryPath: string): void {
+  trackedRealpath(entryPath);
+  trackedRealpath(dirname(resolve(entryPath)));
+  const provenance = provenanceSources();
+  if (provenance === null) return;
+  for (const pkg of provenance.packages) {
+    trackedRealpath(pkg.dir);
+    if (pkg.installedDir !== undefined) trackedRealpath(pkg.installedDir);
+  }
+}
+
 /** Everything that is an input to this build and is NOT a file. See
  * frontend/early-cache.ts for why the SCRIPTC_* env rule is a blanket. */
 async function earlyCacheOptionsFor(
@@ -939,7 +966,19 @@ export async function compile(entryPath: string, opts: CompileOptions): Promise<
   // The census lanes stop after the frontend and report a failed compile with
   // no artifact. They must neither read nor write an entry.
   const root = keyReadCensusOnly() ? null : cacheRootDir();
-  if (root === null) return compileTracked(entryPath, opts, null, null);
+  // SCRIPTC_INPUT_SNAPSHOT turns the tracker on WITHOUT caching anything: the
+  // snapshot is a machine-readable record of every file this build read, every
+  // candidate it probed and missed, and every path it resolved through a
+  // symlink. That record is the signal whose absence has cost this project
+  // real time twice — a workspace-symlinked dependency compiling the published
+  // source instead of the working tree, and an entry path selecting the other
+  // version of its dependency graph, both at exit 0 with no diagnostic. It is
+  // deliberately independent of SCRIPTC_CACHE_DIR: auditing a build must not
+  // require opting into a cache.
+  const snapshotPath = process.env["SCRIPTC_INPUT_SNAPSHOT"];
+  if (root === null && snapshotPath === undefined) {
+    return compileTracked(entryPath, opts, null, null);
+  }
   const tracker = new FrontendInputTracker();
   return tracker.run(() => compileTracked(entryPath, opts, root, tracker));
 }
@@ -963,6 +1002,7 @@ async function compileTracked(
   // lowering. That placement is the whole point — cc.ts's key needs the
   // emitted TU's bytes, so it cannot exist until the work it would save has
   // already been done.
+  if (inputs !== null) recordResolutionAnchors(entryPath);
   const earlyOptions = cacheRoot === null ? null : await earlyCacheOptionsFor(entryPath, opts);
   if (process.env["SCRIPTC_CACHE_DEBUG"] === "1") {
     process.stderr.write(
@@ -1158,6 +1198,13 @@ async function compileTracked(
     advisorySourceTexts: advisorySourceSubset(lowered.advisories, sourceTexts),
     npmStatic: npmStaticStatuses,
   };
+  const snapshotPath = process.env["SCRIPTC_INPUT_SNAPSHOT"];
+  if (snapshotPath !== undefined && inputs !== null) {
+    // Never a build failure: this is an instrument.
+    await writeFile(snapshotPath, `${JSON.stringify(inputs.snapshot(), null, 2)}\n`).catch(
+      () => undefined,
+    );
+  }
   if (cacheRoot !== null && earlyOptions !== null && inputs !== null) {
     if (process.env["SCRIPTC_CACHE_DEBUG"] === "1") {
       const snapshot = inputs.snapshot();
