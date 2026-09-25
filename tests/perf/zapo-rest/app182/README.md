@@ -467,6 +467,24 @@ holds that settled figures are backend-independent to 0.19 MiB — inside the
 floor — but that was measured on the 1.6.2 arm alone and is assumed, not
 verified, for 1.8.2.
 
+> **RETIRED 2026-09-25 (`be80b44f2`, block/strconcat).** The backend half of
+> this caveat is gone: **1.8.2 now builds on LLVM**, and the two arms are no
+> longer split across lanes. A frontend-and-emit run over this entry emitted
+> `zapo-rest.ll` (224,933,639 bytes) and **zero `SC` diagnostics** — a strict
+> build, clean, on the default lane. `weakmap:intrinsic` stopped being a tier
+> refusal somewhere between that measurement and this one; `block/weakdyn`'s
+> dyn `WeakMap` keys are the likely cause, which would date the change to
+> roughly 2026-09-16. Independently corroborated: `jsredund`'s
+> `RECIPE-combined-TU.md` names `zapo-rest.ll` for the current build, and
+> `jsprof` compared two `.ll` of 224,935,984 bytes across its arms.
+>
+> The rows below keep their `c (llvm refused: ...)` entries because they were
+> TRUE WHEN TAKEN and deleting a measurement is worse than dating it. What
+> was wrong was not the number, it was the tense: nothing said when it
+> stopped holding, so a reader a year later reads a frozen fact as a current
+> one. This is the third document in one session to do that. Take the lane
+> from a build, never from this table.
+
 **3. The peak modes do not overlap, so "compare within a mode" could not be
 honoured.** The rule was written for run-to-run mode variation *within* one arm.
 Here the arms sit in systematically different modes — 1.6.2 never landed near

@@ -80,7 +80,7 @@ import { computeMayThrow } from "../emission/may-throw.js";
 import { seqScopedLocals } from "../emission/emit-stmts.js";
 import { mangleAgenSettleThunk, mangleArgPack, mangleAsyncSpawn, mangleClassNew, mangleClassObj, mangleClassRetain, mangleClassStruct, mangleFnClosure, mangleFunction, mangleGenDrop, mangleGenResThunk, mangleGenSpawn, mangleGlobal, mangleLocal, mangleRecordNew, mangleRecordStruct, mangleResolveThunk, mangleTrampoline, mangleVtStruct, mangleWrapper } from "../mangle.js";
 import { BlockBuilder } from "./blocks.js";
-import { isStableReceiverOperand } from "../../ir/analysis.js";
+import { isStableReceiverOperand, writesLocal } from "../../ir/analysis.js";
 import { SCR_BYTES_LEN_OFFSET } from "./runtime-layout.js";
 import {
   buildClassGraph,
@@ -3295,6 +3295,56 @@ class LlEmitter {
     return t;
   }
 
+  /** `s += x` (and its spelled-out twin `s = s + x`) over a NON-BOXED
+   * string local: the accumulator's OWN reference moves into the concat
+   * instead of a second one being retained beside it. The C lane's
+   * emitStrAccum, statement for statement -- see its comment for the whole
+   * argument; the short version:
+   *
+   * `scr_str_concat` appends in place only when `a->rc == 1`, and the
+   * generic assign path below retains the binding for the operand and
+   * releases the old value AFTER the call, so an accumulator arrives at
+   * rc == 2 every iteration and the in-place arm is unreachable. Moving the
+   * binding's own reference in costs exactly one retain/release PAIR on one
+   * object; the frame entry for the loaded value IS the old-binding release
+   * the generic path emitted, at the same point.
+   *
+   * The three preconditions, all required: the binding is a NON-BOXED local
+   * (nothing outside this frame can name it -- a capture would have boxed
+   * it, and a module global is writable from anywhere, so both take the old
+   * path); the OPERAND IS EMITTED FIRST, so the window in which the slot
+   * holds a reference it no longer owns contains only the concat call,
+   * which traps rather than unwinding, and an unwind cannot double-release
+   * through the scope entry that still lists the local; and `writesLocal`
+   * proves the operand does not reassign the binding, which is what makes
+   * evaluating it before the (side-effect-free) load unobservable.
+   *
+   * A READ of the accumulator inside the operand stays correct: it retains,
+   * the call sees rc == 2, and the copy path answers as it always did. */
+  private emitStrAccum(
+    s: Extract<IrStmt, { kind: "assign" }>,
+    b: { kind: "global" | "local" | "boxed"; slot: string; type: IrType; local?: IrLocal },
+  ): boolean {
+    if (b.kind !== "local" || b.local?.tdz === true) return false;
+    // A string-specific rewrite, so a string-specific test: what it
+    // rewrites into is scr_str_concat BY NAME, not a type-directed adapter.
+    if (b.type.kind !== "string") return false;
+    const v = s.value;
+    if (v.kind !== "strConcat" || v.type.kind !== "string") return false;
+    if (v.left.kind !== "varRef" || v.left.localId !== s.localId) return false;
+    if (writesLocal(v.right, s.localId)) return false;
+    const B = this.B;
+    const r = this.emitExpr(v.right);
+    const acc = B.tmp();
+    B.line(`${acc} = load ptr, ptr ${b.slot} ; += accumulator: the binding's own reference moves into the concat`);
+    this.own({ name: acc, type: b.type });
+    this.declare(`declare ptr @scr_str_concat(ptr, ptr)`);
+    const t = B.tmp();
+    B.line(`${t} = call ptr @scr_str_concat(ptr ${acc}, ptr ${r.name})`);
+    B.line(`store ptr ${t}, ptr ${b.slot}`);
+    return true;
+  }
+
   /** Strike a refcounted temp from its frame: ownership is being moved. */
   private moveTemp(v: LlValue): void {
     if (!isRefCounted(v.type)) return;
@@ -4272,6 +4322,7 @@ class LlEmitter {
       }
       case "assign": {
         const b = this.binding(s.localId);
+        if (this.emitStrAccum(s, b)) break;
         const v = this.emitExpr(s.value);
         if (b.kind === "boxed") {
           if (isRefCounted(v.type)) this.moveTemp(v); // set_ref releases the old value
