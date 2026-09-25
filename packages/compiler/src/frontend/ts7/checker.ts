@@ -224,7 +224,15 @@ export class CheckerFacade {
      * does not shim; going around the facade forfeits memoization only. */
     readonly raw: Checker,
     private readonly options: { autoPrefetch?: boolean; project?: Project } = {},
-  ) {}
+  ) {
+    /* MEASUREMENT ONLY (block jsredund). The redundancy census needs a live
+     * ts7 client object to reach the prototypes it counts on; this is the one
+     * place that has one. No-op unless a --require preload installed the hook,
+     * which nothing in a normal build does. */
+    const install = (globalThis as { __REDUND_INSTALL__?: (raw: unknown, proto: unknown) => void })
+      .__REDUND_INSTALL__;
+    if (install) install(raw, CheckerFacade.prototype);
+  }
 
   /* ── the symbol-declaration surface (phase 3) ─────────────────────────
    * 7's Symbol carries declarations as NodeHandles (server references),

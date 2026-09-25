@@ -1562,9 +1562,23 @@ function memoUsableUnder(entry: TypeMapperCtx, ctx: TypeMapperCtx): boolean {
   );
 }
 
+/* MEASUREMENT ONLY (block jsredund): the mapTypeMemo's own hit/miss split.
+ * A memo's VALUE is its hit rate and a memo's HEADROOM is how often a stored
+ * answer is present but declined; neither is visible from outside. Inert
+ * unless a --require preload installed the sink. */
+const redundNote = (globalThis as { __REDUND_NOTE__?: (op: string, key?: unknown) => void })
+  .__REDUND_NOTE__;
+
 export function mapType(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
   if (mapTypeDepth >= MAP_TYPE_MAX_DEPTH) return null;
   const hit = process.env.SCRIPTC_NO_MEMO ? undefined : mapTypeMemo.get(type);
+  if (redundNote) {
+    const tid = (type as unknown as { id?: number }).id;
+    redundNote("mapType.call", tid);
+    if (hit === undefined) redundNote("mapType.absent", tid);
+    else if (memoUsableUnder(hit.ctx, ctx)) redundNote("mapType.hit", tid);
+    else redundNote("mapType.declined", tid);
+  }
   // Same run, same registries, same mapping mode: see memoUsableUnder.
   if (hit !== undefined && memoUsableUnder(hit.ctx, ctx)) {
     if (process.env.SCRIPTC_MEMO_AUDIT) {
@@ -1596,6 +1610,13 @@ export function mapType(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
     // mapping that comes later. Successes still cache: they are the type's
     // answer either way.
     const speculativeRefusal = result === null && (ctx.restTupleFromErasure === true || ctx.speculative === true);
+    if (redundNote) {
+      const tid = (type as unknown as { id?: number }).id;
+      if (speculativeRefusal) redundNote("mapType.nostore.speculative", tid);
+      else if (contextResolutions !== sensitivityAtEntry) redundNote("mapType.nostore.contextRes", tid);
+      else if (memoSensitivity !== memoSensitivityAtEntry) redundNote("mapType.nostore.memoSens", tid);
+      else redundNote("mapType.stored", tid);
+    }
     if (
       !speculativeRefusal &&
       contextResolutions === sensitivityAtEntry &&

@@ -1924,6 +1924,12 @@ export class Lowerer {
     this.registerBuiltinErrorClasses();
     registerBuiltinEmitterClass(this);
     registerBuiltinStreamClasses(this);
+    /* MEASUREMENT ONLY (block jsredund): hands the lowerer's own method
+     * surface to the redundancy census. No-op unless a --require preload
+     * installed the hook, which nothing in a normal build does. */
+    const install2 = (globalThis as { __REDUND_INSTALL2__?: (proto: unknown, label: string) => void })
+      .__REDUND_INSTALL2__;
+    if (install2) install2(Lowerer.prototype, "Lowerer");
   }
 
   registerBuiltinErrorClasses(): void {
