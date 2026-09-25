@@ -71,3 +71,51 @@ export function isStableReceiverOperand(e: IrExpr, receiverLocalId: string): boo
       return false;
   }
 }
+
+/** True when evaluating `e` cannot WRITE the binding `localId`.
+ *
+ * The precondition for MOVING a non-boxed local's own reference into an
+ * operand instead of retaining a second one — see the accumulator fast
+ * path in the C and LLVM assign lowerings.
+ *
+ * A NON-BOXED local is nameable from exactly one place: the function that
+ * declares it. A capture would have made it `boxed` (IrLocal.boxed: "the
+ * variable lives in a refcounted box; all access, including in the
+ * declaring function, goes through the box"), so no call, no closure and
+ * no runtime helper reached from this expression can reassign it. That
+ * leaves the writes spelled INSIDE this expression tree: `assignExpr`,
+ * `incDec`, and the `assign`/`varDecl` statements a `seqExpr` region
+ * carries. The caller is responsible for the non-boxed precondition; this
+ * function only looks for the spellings.
+ *
+ * Structural rather than a per-kind whitelist ON PURPOSE. IrExpr has well
+ * over a hundred arms and grows; a whitelist that forgets one is merely
+ * conservative, but a BLACKLIST that forgets one is a use-after-free. A
+ * generic walk of the node graph cannot forget an arm, because it never
+ * enumerates them: it descends every own property of every object and
+ * every element of every array, and answers false the moment it meets a
+ * node whose `kind` is a writer naming `localId`. Bodies reached only by
+ * NAME (a `call`'s callee, a `closure`'s function) are correctly not
+ * descended into — they cannot name a non-boxed local of this frame. */
+export function writesLocal(e: IrExpr, localId: string): boolean {
+  const seen = new Set<object>();
+  const walk = (n: unknown): boolean => {
+    if (n === null || typeof n !== "object") return false;
+    if (seen.has(n)) return false;
+    seen.add(n);
+    if (Array.isArray(n)) return n.some(walk);
+    const rec = n as Record<string, unknown>;
+    const kind = rec["kind"];
+    if (
+      (kind === "assignExpr" || kind === "assign" || kind === "incDec" || kind === "varDecl") &&
+      rec["localId"] === localId
+    ) {
+      return true;
+    }
+    for (const k in rec) {
+      if (walk(rec[k])) return true;
+    }
+    return false;
+  };
+  return walk(e);
+}

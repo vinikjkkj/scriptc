@@ -3,12 +3,13 @@
  * branch/condition helpers they share with expression emission. All frame,
  * scope, and temp state lives on CEmitter; these functions drive it. */
 import type { CEmitter, ScopeEntry } from "./emitter.js";
-import type { IrFunction } from "../../ir/nodes.js";
+import type { IrFunction, IrLocal } from "../../ir/nodes.js";
 import { mangleField, mangleGlobal, mangleLocal, mangleRawParam } from "../mangle.js";
 import { BOOL, CAUGHT, IrExpr, IrStmt, RUNTIME_ERROR_CLASSES, isRefCounted, ownMaskKeyBit } from "../../ir/nodes.js";
 import { boxAccess, cDecl, cStringLiteral, elemAccess, vAdapters } from "./emit-types.js";
 import { OVERFLOW_MEMBER, OWNMASK_MEMBER } from "./emit-shapes.js";
 import { emitStableReceiver } from "./emit-exprs.js";
+import { writesLocal } from "../../ir/analysis.js";
 
 
 
@@ -310,6 +311,7 @@ export function emitStmt(E: CEmitter, s: IrStmt): void {
           break;
         }
         const target = mangleLocal(s.localId);
+        if (emitStrAccum(E, s, local)) break;
         const v = E.emitExpr(s.value);
         if (local!.boxed) {
           // A scalar TDZ box (forward-captured const): the initializing
@@ -1086,3 +1088,76 @@ export function emitStmt(E: CEmitter, s: IrStmt): void {
     frame.length = 0;
     return t.name;
   }
+
+/** `s += x` (and its spelled-out twin `s = s + x`) over a NON-BOXED string
+ * local: the accumulator's OWN reference moves into the concat instead of a
+ * second one being retained beside it.
+ *
+ * WHY. `scr_str_concat` appends in place when `a->rc == 1` -- the whole
+ * point of the arm is the append loop, where each iteration's result is the
+ * next iteration's left operand. The generic assign path could never reach
+ * it. It emits the value first and releases the OLD binding afterwards, so
+ * the sequence is `retain(s)` then `concat` then `release(temp)` then
+ * `release(s)`: at the call the accumulator is at rc == 2, the variable plus
+ * the emitted temp, every iteration. The guard is correct and the copy path
+ * is taken, which makes string accumulation O(n^2) in bytes with the O(n)
+ * path sitting unreachable one branch away.
+ *
+ * WHAT CHANGES. Exactly one retain/release PAIR on the same object goes
+ * away. The frame entry for the moved temp IS the old-binding release the
+ * generic path emitted, at the same point in the same order; the reference
+ * count is identical at every instruction except inside the call, where it
+ * is 1 instead of 2. On the in-place arm concat answers `a` at rc == 2 (the
+ * caller's moved-in reference plus the returned one), the store takes one
+ * and the frame release drops the other; on the copy path the moved-in
+ * reference is the last one and the frame release frees the old buffer,
+ * exactly as before.
+ *
+ * WHY IT IS SAFE. Three things carry it, and all three are required:
+ *
+ * 1. NON-BOXED. A captured local is `boxed` and lives in a shared
+ *    refcounted box, so a closure could hold it; a non-boxed local is
+ *    nameable only from this function's own frame, which is why no call in
+ *    the operand can reassign it. Boxed and TDZ locals take the old path.
+ *    Module GLOBALS are deliberately excluded too -- any function can write
+ *    one, so the reorder below would not be sound over them.
+ *
+ * 2. THE OPERAND IS EMITTED FIRST. Between the move and the store the
+ *    binding holds a reference it no longer owns, and an unwind through
+ *    that window would release it twice -- once from the frame, once from
+ *    the scope entry that still lists the local. So the window contains
+ *    nothing but the concat call, which cannot unwind: `scr_str_size_check`
+ *    TRAPS rather than throwing, and the intern probe is pure. Reordering
+ *    the LEFT operand after the right is unobservable because reading a
+ *    non-boxed local has no side effect and, by (3), its value cannot have
+ *    changed.
+ *
+ * 3. `writesLocal` -- the operand contains no `assignExpr`/`incDec`/nested
+ *    `assign` naming this binding. That is the only way a write could be
+ *    spelled, given (1). A READ of the accumulator inside the operand is
+ *    allowed and stays correct: it retains, so the call sees rc == 2 and
+ *    simply takes the copy path (`s = s + s` also fails `a != b`).
+ *
+ * NOT COVERED, on purpose: module globals (1), boxed/captured accumulators
+ * (1), and a LEFT-NESTED chain `s = s + a + b`, whose leftmost leaf is the
+ * binding but whose top-level left operand is another `strConcat`. The
+ * right-nested spelling `s += a + b` IS covered, and so is the two-piece
+ * template literal, which lowers to one strConcat over the binding. */
+function emitStrAccum(E: CEmitter, s: Extract<IrStmt, { kind: "assign" }>, local: IrLocal): boolean {
+  if (local.boxed || local.tdz) return false;
+  // A string-specific rewrite, so a string-specific test: what it rewrites
+  // into is scr_str_concat BY NAME, not a type-directed adapter.
+  if (local.type.kind !== "string") return false;
+  const v = s.value;
+  if (v.kind !== "strConcat" || v.type.kind !== "string") return false;
+  if (v.left.kind !== "varRef" || v.left.localId !== s.localId) return false;
+  if (writesLocal(v.right, s.localId)) return false;
+  const target = mangleLocal(s.localId);
+  const r = E.emitExpr(v.right);
+  E.line(`/* += accumulator: the binding's own reference moves into the concat */`);
+  const acc = E.newTemp(local.type, target);
+  const res = E.newTemp(v.type, `scr_str_concat(${acc.name}, ${r.name})`);
+  E.moveTemp(res);
+  E.line(`${target} = ${res.name};${E.srcComment(s.loc)}`);
+  return true;
+}

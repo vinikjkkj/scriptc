@@ -10947,6 +10947,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/7799-an-append-accumulator-moves-its-own-reference-into-the-concat.ts": {
+   "order": [
+    "<repo>/tests/corpus/7799-an-append-accumulator-moves-its-own-reference-into-the-concat.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/800-switch-basics.ts": {
    "order": [
     "<repo>/tests/corpus/800-switch-basics.ts"
