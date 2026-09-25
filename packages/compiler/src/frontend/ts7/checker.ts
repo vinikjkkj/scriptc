@@ -113,6 +113,12 @@ const PREFETCH_MAX_DEPTH = 512;
  * sampled — 30.5% of the whole frontend, nearly all of it blocked
  * reading the tsgo channel.
  *
+ * THAT 30.5% IS HISTORY, NOT A STANDING FIGURE. It is what the sweep cost
+ * BEFORE this constant existed — it is the case FOR the cap, and the cap
+ * collected it. Measured again after, the whole sweep is 0.50% of the
+ * frontend. The closing note at the bottom of this comment carries the
+ * current numbers; read it before treating anything here as a target.
+ *
  * Above this many nodes the file keeps the per-node path, which is not a
  * fallback bolted on for this: getTypeAtLocation/getSymbolAtLocation
  * already answer a memo miss with a direct memoized call, and have since
@@ -164,10 +170,47 @@ const PREFETCH_MAX_DEPTH = 512;
  * total CPU 585.9 vs 692.4 (-15.4%), wall 571.6 s vs 676.7 s (-15.5%).
  *
  * The frontend is 45.8% of an 877 s end-to-end build of that program, so
- * this is worth roughly 7% of a whole build — real, free, and NOT the big
- * lever. The big one is to keep the batching and SCOPE it to the subtree
- * the lowering is about to walk, so nodes nobody asks about are never
- * queried at all, in a batch or otherwise. */
+ * this is worth roughly 7% of a whole build — real and free.
+ *
+ * ── AFTER THE CAP: THE SWEEP IS 0.50% OF THE FRONTEND ──────────────────
+ *
+ * This paragraph used to end "and NOT the big lever", and name the big one
+ * as scoping the batch to the subtree the lowering is about to walk. That
+ * sentence outlived its evidence, and it was a trap: the 30.5% above was
+ * measured before the cap, the cap is what collected it (29b48e0a9, where
+ * the -15.4% is banked), and the leftover is small. Someone went and got
+ * the number rather than inheriting the claim.
+ *
+ * MEASURED on app182 (zapo-rest against zapo-js 1.8.2,
+ * --provenance-sources), from a full --cpu-prof of the real build,
+ * attributing each frame to callers that are not already inside the frame
+ * — a naive attribution double-counts recursion and can report an
+ * inclusive total larger than the profile's own busy count:
+ *
+ *     prefetchTypes     4,283 inclusive samples
+ *     prefetchSymbols   4,060
+ *                       8,343 of 1,657,214 busy  =  0.50%
+ *
+ * Inclusive, so the sweep's own share of channel blocking is already in
+ * it; the sweep is at most 2.4% of all time blocked on the tsgo channel.
+ *
+ * THE WASTE IS REAL AND IT IS STILL NOT WORTH MUCH, which is the whole
+ * lesson. Counting nodes rather than milliseconds, over the same build:
+ * the sweep asks the checker about 773,125 nodes to answer questions about
+ * 154,066 — 80.1% of what it queries is for nobody. Declaration files are
+ * the sharpest instance by far: ten of them are swept for 35,868 nodes to
+ * answer TWENTY-ONE questions, because the lowering never walks a .d.ts,
+ * it arrives one declaration at a time through symbol.declarations. But
+ * 80.1% of 0.50% is 0.40%, and scoping the sweep to the declaration —
+ * built, measured, and proved behaviour-neutral on 154 corpus programs
+ * whose emitted .ll and diagnostics are byte-identical either way — buys
+ * about 0.023% of the frontend. It was not merged. It is recorded on
+ * branch block/jsscope at 7ae7ef583 if the trade ever changes.
+ *
+ * So: this file is not where the frontend's time goes. When that build was
+ * profiled, 55.27% of non-idle work was inside canDynCheckTo, and 42.3% of
+ * the whole frontend sat under a single caller of it. Do not come to the
+ * prefetch sweep looking for a lever. */
 const PREFETCH_MAX_NODES = 100_000;
 
 /** The 7.0.2 client identity-dedupes immutable types but does NOT memoize
