@@ -1226,7 +1226,7 @@ function spreadWalkableAsDyn(L: Lowerer, t: IrType): boolean {
     // a bare `void`/`undefined` keeps its existing path.
     if (
       retTsType.isUnionType() &&
-      retTsType.getTypes().every((p) => (p.flags & (ts.TypeFlags.Void | ts.TypeFlags.Undefined)) !== 0)
+      ts.constituentTypes(retTsType).every((p) => (p.flags & (ts.TypeFlags.Void | ts.TypeFlags.Undefined)) !== 0)
     ) {
       return VOID;
     }
@@ -1290,7 +1290,7 @@ function spreadWalkableAsDyn(L: Lowerer, t: IrType): boolean {
    * instead of the generic supported-types recitation; a no-op for every
    * other unmappable type (the caller's badType reports those). */
   function fenceGenericSignatureResult(L: Lowerer, blame: ts.Node, t: ts.Type): void {
-    const parts = t.isUnionType() ? t.getTypes() : [t];
+    const parts = t.isUnionType() ? ts.constituentTypes(t) : [t];
     if (!parts.some((p) => L.checker.getCallSignatures(p).some((s) => (s.typeParameters?.length ?? 0) > 0))) {
       return;
     }
@@ -2091,8 +2091,8 @@ const SYMBOLIC_PAIR_BUDGET = 256;
       // unbound type parameter surfaces as a mapping diagnostic later).
       if (declared.isUnionType()) {
         const unitFlags = ts.TypeFlags.Undefined | ts.TypeFlags.Null;
-        const dParts = declared.getTypes().filter((t) => !(t.flags & unitFlags));
-        const iParts: readonly ts.Type[] = inst.isUnionType() ? inst.getTypes().filter((t) => !(t.flags & unitFlags)) : [inst];
+        const dParts = ts.constituentTypes(declared).filter((t) => !(t.flags & unitFlags));
+        const iParts: readonly ts.Type[] = inst.isUnionType() ? ts.constituentTypes(inst).filter((t) => !(t.flags & unitFlags)) : [inst];
         if (dParts.length === 1 && iParts.length === 1) unify(dParts[0]!, iParts[0]!, depth + 1);
         return;
       }
@@ -2533,7 +2533,7 @@ const SYMBOLIC_PAIR_BUDGET = 256;
         // A `Fn | undefined`-flavored slot: the value can only inhabit the
         // one callable arm — judge by it (the requireExactArityValue union
         // rule).
-        const callable = pinT.getTypes().map((t) => L.checker.getCallSignatures(t)).filter((s) => s.length === 1);
+        const callable = ts.constituentTypes(pinT).map((t) => L.checker.getCallSignatures(t)).filter((s) => s.length === 1);
         if (callable.length === 1) target = callable[0]![0]!;
       }
     }

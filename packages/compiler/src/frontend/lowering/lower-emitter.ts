@@ -1968,7 +1968,7 @@ function keySetOfSignature(L: Lowerer, sig: ts.Signature): { keys: string[]; map
     return null;
   }
   const keys: string[] = [];
-  for (const k of keysT.isUnionType() ? keysT.getTypes() : [keysT]) {
+  for (const k of keysT.isUnionType() ? ts.constituentTypes(keysT) : [keysT]) {
     if (!k.isStringLiteralType()) return null;
     keys.push(k.value);
   }

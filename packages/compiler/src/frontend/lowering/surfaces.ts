@@ -1957,6 +1957,19 @@ export const BUILTIN_MODULE_FENCE_HINTS: Record<string, Record<string, string | 
    * type-space merge this test was written for still matches. */
   export function isStdlibSymbol(L: Lowerer, symbol: ts.Symbol | undefined): boolean {
     if (!symbol) return false;
+    // Memoized per Lowerer (the map is its field; see the comment there).
+    // The walk below reads only declarationsOf - itself memoized, and
+    // immutable for the snapshot - and isStdlibFile, which is a property of
+    // the program. Nothing it touches is written by the lowering, so the
+    // answer for a symbol cannot change once taken.
+    const memo = L.stdlibSymbolAnswer.get(symbol);
+    if (memo !== undefined) return memo;
+    const answer = computeIsStdlibSymbol(L, symbol);
+    L.stdlibSymbolAnswer.set(symbol, answer);
+    return answer;
+  }
+
+  function computeIsStdlibSymbol(L: Lowerer, symbol: ts.Symbol): boolean {
     // ONE isStdlibFile call per declaration, which is what the `.some`
     // this replaced cost: the kind test only runs for a declaration that
     // is already known not to be the library's. This sits on a hot path
@@ -2178,7 +2191,7 @@ export const BUILTIN_MODULE_FENCE_HINTS: Record<string, Record<string, string | 
    * `in` deliberately does NOT use this: `'unref' in null` throws. */
   export function stdlibHandleTypeOfAnswersObject(L: Lowerer, node: ts.Expression): boolean {
     const t = L.typeOf(node);
-    const arms: readonly ts.Type[] = t.isUnionType() ? t.getTypes() : [t];
+    const arms: readonly ts.Type[] = t.isUnionType() ? ts.constituentTypes(t) : [t];
     let sawHandle = false;
     for (const a of arms) {
       if (handleInterfaceOf(L, a) !== null) { sawHandle = true; continue; }
@@ -2645,7 +2658,7 @@ export const BUILTIN_MODULE_FENCE_HINTS: Record<string, Record<string, string | 
         if ((ap.flags & ts.SymbolFlags.Optional) !== 0) return true;
         const at = L.checker.getTypeOfSymbol(ap);
         return (at.flags & ts.TypeFlags.Undefined) !== 0 ||
-          (at.isUnionType() && at.getTypes().some((a) => (a.flags & ts.TypeFlags.Undefined) !== 0));
+          (at.isUnionType() && ts.constituentTypes(at).some((a) => (a.flags & ts.TypeFlags.Undefined) !== 0));
       })();
       if (assertedOptional && RUNTIME_IDENTITY_ABSENT.has(name)) {
         const st = L.mapTypeOf(L.typeOf(access));
@@ -2679,7 +2692,7 @@ export const BUILTIN_MODULE_FENCE_HINTS: Record<string, Record<string, string | 
     const gt = L.checker.getTypeOfSymbol(gp);
     const admitsUndefined = (t: ts.Type): boolean =>
       (t.flags & ts.TypeFlags.Undefined) !== 0 ||
-      (t.isUnionType() && t.getTypes().some((a) => (a.flags & ts.TypeFlags.Undefined) !== 0));
+      (t.isUnionType() && ts.constituentTypes(t).some((a) => (a.flags & ts.TypeFlags.Undefined) !== 0));
     if (!admitsUndefined(gt)) return why("declared-present");
     const t = L.mapTypeOf(L.typeOf(access));
     const loc = locOf(access);

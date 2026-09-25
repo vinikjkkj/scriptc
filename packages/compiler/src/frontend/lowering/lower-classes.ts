@@ -1094,7 +1094,7 @@ function constStringReturnOf(body: ts.Block): ts.Expression | null {
    * makes a pathological nesting a refusal, never a hang. */
   function dynBoxIsFaithful(L: Lowerer, t: ts.Type, seen = new Set<ts.Type>(), depth = 0): boolean {
     if (depth > 6) return false;
-    const arms: readonly ts.Type[] = t.isUnionType() ? t.getTypes() : [t];
+    const arms: readonly ts.Type[] = t.isUnionType() ? ts.constituentTypes(t) : [t];
     return arms.every((a) => {
       if (seen.has(a)) return true;
       seen.add(a);
@@ -1167,7 +1167,7 @@ function constStringReturnOf(body: ts.Block): ts.Expression | null {
   }
 
   function isDeferredCallbackField(L: Lowerer, site: ts.Node, t: ts.Type): boolean {
-    const arms: readonly ts.Type[] = t.isUnionType() ? t.getTypes() : [t];
+    const arms: readonly ts.Type[] = t.isUnionType() ? ts.constituentTypes(t) : [t];
     let sawFn = false;
     for (const a of arms) {
       if ((a.flags & (ts.TypeFlags.Undefined | ts.TypeFlags.Null | ts.TypeFlags.Never)) !== 0) continue;
@@ -1304,7 +1304,7 @@ function constStringReturnOf(body: ts.Block): ts.Expression | null {
    * A union is checked ARM BY ARM: one Map arm is enough, and it is the
    * same wrong answer whichever arm the value takes. */
   function dynBoxLosesMethodTable(L: Lowerer, t: ts.Type): boolean {
-    const arms: readonly ts.Type[] = t.isUnionType() ? t.getTypes() : [t];
+    const arms: readonly ts.Type[] = t.isUnionType() ? ts.constituentTypes(t) : [t];
     return arms.some((a) => {
       const sym = a.getSymbol();
       if (sym === undefined || !DYN_LOSES_METHODS.has(sym.name)) return false;
@@ -7369,7 +7369,7 @@ function executorResolveAdoptionUnion(
     return n === "Promise" || n === "PromiseLike";
   };
   const carriesPromise = (t: ts.Type): boolean =>
-    isPromiseRef(t) || (t.isUnionType() && t.getTypes().some(isPromiseRef));
+    isPromiseRef(t) || (t.isUnionType() && ts.constituentTypes(t).some(isPromiseRef));
   let wanted = false;
   const walk = (n: ts.Node): void => {
     if (wanted) return;

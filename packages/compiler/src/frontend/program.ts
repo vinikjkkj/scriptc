@@ -1065,7 +1065,7 @@ function nonInertTopLevel7(
    * ToString/ToNumber/ToPrimitive can never reach a user valueOf. */
   const primitiveTyped = (e: ts.Expression): boolean => {
     const t = checker.getTypeAtLocation(e);
-    const parts = t.isUnionType() ? t.getTypes() : [t];
+    const parts = t.isUnionType() ? ts.constituentTypes(t) : [t];
     return parts.every((p) => (p.flags & PRIM) !== 0);
   };
   /** The identifier's symbol lives entirely in declaration files — a
@@ -1131,7 +1131,7 @@ function nonInertTopLevel7(
    * and the spread is as inert as the operand; a user iterable's own
    * Symbol.iterator IS user code and keeps the refusal. */
   const stdlibIterableType = (t: ts.Type): boolean => {
-    const parts = t.isUnionType() ? t.getTypes() : [t];
+    const parts = t.isUnionType() ? ts.constituentTypes(t) : [t];
     return parts.every((p) => {
       if ((p.flags & ts.TypeFlags.StringLike) !== 0) return true;
       const s = p.getSymbol();
@@ -1363,7 +1363,7 @@ function nonInertTopLevel7(
    * carries no user code into whatever it is handed to. */
   const builtinTyped = (a: ts.Expression): boolean => {
     const t = checker.getTypeAtLocation(a);
-    const parts = t.isUnionType() ? t.getTypes() : [t];
+    const parts = t.isUnionType() ? ts.constituentTypes(t) : [t];
     return parts.every((p) => {
       if ((p.flags & PRIM) !== 0) return true;
       const s = p.getSymbol();

@@ -167,11 +167,11 @@ function castConstructorArm(
   // the link precisely because of this node), so the arm is dropped
   // rather than represented — the same narrowing `if (!ctor) throw` does
   // one line later in every program that writes this.
-  const armsOf = (x: ts.Type): readonly ts.Type[] => (x.isUnionType() ? x.getTypes() : [x]);
+  const armsOf = (x: ts.Type): readonly ts.Type[] => (x.isUnionType() ? ts.constituentTypes(x) : [x]);
   const parts: ts.Type[] = [];
   for (const arm of armsOf(t)) {
     if ((arm.flags & (ts.TypeFlags.Undefined | ts.TypeFlags.Null)) !== 0) continue;
-    if (arm.isIntersectionType()) parts.push(...arm.getTypes());
+    if (arm.isIntersectionType()) parts.push(...ts.constituentTypes(arm));
     else parts.push(arm);
   }
   const found: IrExpr[] = [];
