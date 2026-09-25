@@ -894,6 +894,36 @@ function advisorySourceSubset(
   return subset;
 }
 
+/** Report the frontend's input snapshot: the probe census under
+ * SCRIPTC_CACHE_DEBUG, the full JSON under SCRIPTC_INPUT_SNAPSHOT.
+ *
+ * Called the moment the frontend is done and BEFORE the census-only exit, so
+ * the probe count is obtainable from the frontend-only lane
+ * (SCRIPTC_KEYREAD_CENSUS_ONLY=1) without paying for codegen, clang and the
+ * link. That split matters operationally: a COUNT is deterministic and
+ * tolerates a loaded machine, while a CLOCK needs an empty one — and on a
+ * shared box a measurement that only works empty is a measurement that may
+ * never happen.
+ *
+ * Never a build failure: this is an instrument. */
+async function reportFrontendInputs(inputs: FrontendInputTracker | null): Promise<void> {
+  if (inputs === null) return;
+  const snapshot = inputs.snapshot();
+  if (process.env["SCRIPTC_CACHE_DEBUG"] === "1") {
+    const byOp = new Map<string, number>();
+    for (const probe of snapshot.probes) byOp.set(probe.op, (byOp.get(probe.op) ?? 0) + 1);
+    process.stderr.write(
+      `scriptc: frontend input probes ${snapshot.probes.length} stable=${snapshot.stable} ` +
+        [...byOp].sort().map(([op, n]) => `${op}=${n}`).join(" ") +
+        "\n",
+    );
+  }
+  const path = process.env["SCRIPTC_INPUT_SNAPSHOT"];
+  if (path !== undefined && path !== "") {
+    await writeFile(path, `${JSON.stringify(snapshot, null, 2)}\n`).catch(() => undefined);
+  }
+}
+
 /** Realpath the handful of paths that SELECT a dependency tree, so the input
  * snapshot records what each one actually resolved to.
  *
@@ -1113,6 +1143,8 @@ async function compileTracked(
     fe.dispose();
   }
 
+  await reportFrontendInputs(inputs);
+
   // SCRIPTC_KEYREAD_CENSUS_ONLY: the keyed-read destination census wants
   // the FRONTEND only. Stopping here — after lowering and validation,
   // before any codegen, cc invocation or output file — is what keeps the
@@ -1212,24 +1244,7 @@ async function compileTracked(
     advisorySourceTexts: advisorySourceSubset(lowered.advisories, sourceTexts),
     npmStatic: npmStaticStatuses,
   };
-  const snapshotPath = process.env["SCRIPTC_INPUT_SNAPSHOT"];
-  if (snapshotPath !== undefined && inputs !== null) {
-    // Never a build failure: this is an instrument.
-    await writeFile(snapshotPath, `${JSON.stringify(inputs.snapshot(), null, 2)}\n`).catch(
-      () => undefined,
-    );
-  }
   if (cacheRoot !== null && earlyOptions !== null && inputs !== null) {
-    if (process.env["SCRIPTC_CACHE_DEBUG"] === "1") {
-      const snapshot = inputs.snapshot();
-      const byOp = new Map<string, number>();
-      for (const probe of snapshot.probes) byOp.set(probe.op, (byOp.get(probe.op) ?? 0) + 1);
-      process.stderr.write(
-        `scriptc: frontend input probes ${snapshot.probes.length} stable=${snapshot.stable} ` +
-          [...byOp].sort().map(([op, n]) => `${op}=${n}`).join(" ") +
-          "\n",
-      );
-    }
     const meta: EarlyBuildMetadata = {
       backend: plan.backend,
       llvmRefusal: plan.llvmRefusal ?? null,
