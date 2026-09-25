@@ -226,7 +226,7 @@ function cacheKey(options: EarlyBuildCacheOptions): string {
     .update(options.provenance).update("\0")
     .update(options.target).update("\0")
     .update(options.cc).update("\0")
-    .update(options.environment).update(" ")
+    .update(options.environment).update("\0")
     .update(options.profFlavor)
     .digest("hex");
 }
