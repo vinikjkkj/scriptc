@@ -42,5 +42,8 @@ export default defineConfig({
       ? { maxWorkers: Number(workers), minWorkers: 1 }
       : {}),
     globalSetup: ["./tests/harness/suite-lock.mjs"],
+    // Gate-cost accounting, off unless asked: the collector installs the
+    // compiler’s phase tap and writes one JSONL row per test.
+    ...(process.env["SCRIPTC_PHASE_LOG"] ? { setupFiles: ["./tests/harness/phase-collect.ts"] } : {}),
   },
 });
