@@ -2,7 +2,7 @@
  * crypto, child_process spawn/spawnSync and child/stats/spawn-result
  * methods), JSON.parse/stringify, process properties/methods and
  * process.env access, and console.log detection. */
-import { readFileSync } from "node:fs";
+import { trackedReadFile } from "../input-tracker.js";
 import { fenceLocationText } from "../../diagnostics/diagnostic.js";
 import { builtinModules } from "node:module";
 import { dirname, resolve } from "node:path";
@@ -356,12 +356,9 @@ import { KEYOBJ, HASH_T, HMAC_T, CIPHER_T, DECIPHER_T, BOOL, BYTES_U8, CAUGHT, C
       const abs = spec.startsWith("/")
         ? spec
         : resolve(dirname(cr.baseFile.fileName), spec);
-      let text: string | null = null;
-      try {
-        text = readFileSync(abs, "utf8");
-      } catch {
-        /* the fence below speaks */
-      }
+      // Tracked: a createRequire'd JSON document is a semantic INPUT, so
+      // the early build cache must see its bytes.
+      const text: string | null = trackedReadFile(abs);
       if (text === null) {
         L.noLowering(
           `createRequire's require of '${spec}' (no file at ${abs})`,

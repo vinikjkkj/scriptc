@@ -51,7 +51,7 @@
  * tsgo resolves it into the checkout is one import the two worlds disagree
  * about, with nothing said. The ENTRY half of it is also the order
  * provenancePaths has always used (bySpecifier is written last). */
-import { readFileSync, statSync } from "node:fs";
+import { trackedFileExists, trackedReadFile } from "./input-tracker.js";
 import { builtinModules } from "node:module";
 import { dirname, join, relative, resolve } from "node:path";
 import ts from "typescript5";
@@ -60,7 +60,7 @@ import { isProvenanceExternalSpecifier, provenanceAliasScopeOf, provenanceEntryF
 
 function isFile(p: string): boolean {
   try {
-    return statSync(p).isFile();
+    return trackedFileExists(p);
   } catch {
     return false;
   }
@@ -255,9 +255,7 @@ export function provenanceAliasRewrite(fileName: string, read: () => string | un
 
 /** The disk read the shadow uses when nothing above it answered. */
 export function readSourceForRewrite(fileName: string): string | undefined {
-  try {
-    return readFileSync(fileName, "utf8");
-  } catch {
-    return undefined;
-  }
+  // Tracked: the rewrite DERIVES what tsgo is served from these bytes, so the
+  // disk state behind a rewritten source belongs in the input snapshot.
+  return trackedReadFile(fileName) ?? undefined;
 }

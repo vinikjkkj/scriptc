@@ -809,7 +809,7 @@ function profIncludeFiles(v: string): string[] {
   return out;
 }
 
-function profFlavor(): string {
+export function profFlavor(): string {
   const v = process.env.SCRIPTC_PROF_CFLAGS;
   if (v === undefined || v === "") return "";
   let h = 0x811c9dc5;
@@ -1592,7 +1592,7 @@ export async function compileLibArchive(opts: LibArchiveOptions): Promise<void> 
  * by the same pass. Cache trouble is never a build failure — every cache
  * error falls back to a real compile. */
 
-function cacheRootDir(): string | null {
+export function cacheRootDir(): string | null {
   if (process.env["SCRIPTC_NO_CACHE"] === "1") return null;
   const dir = process.env["SCRIPTC_CACHE_DIR"];
   return dir !== undefined && dir !== "" ? dir : null;

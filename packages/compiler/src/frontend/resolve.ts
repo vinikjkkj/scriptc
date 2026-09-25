@@ -14,37 +14,26 @@
  * implementations and requires identical answers. Change 5.9.3's options
  * and these tables are wrong — that is what the suite is for. */
 
-import { existsSync, readFileSync, readdirSync, realpathSync, statSync } from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { isNpmStaticPackage, npmStaticPackageOfPath, npmStaticTransformPkgJson } from "./npm-static.js";
 import { isProvenanceSourceFile, provenanceAliasTargets, provenanceEntryFor } from "./provenance-registry.js";
 import { tsgoPath } from "./shared.js";
+import { trackedDirectoryExists, trackedFileExists, trackedReadDirNames, trackedReadFile, trackedRealpath } from "./input-tracker.js";
 
 function isFile(path: string): boolean {
-  try {
-    return statSync(path).isFile();
-  } catch {
-    return false;
-  }
+  return trackedFileExists(path);
 }
 
 function isDirectory(path: string): boolean {
-  try {
-    return statSync(path).isDirectory();
-  } catch {
-    return false;
-  }
+  return trackedDirectoryExists(path);
 }
 
 /** Answers are slash-normalized on Windows (tsgoPath): resolver output is
  * compared against tsgo SourceFile names and path-keyed tables everywhere
  * downstream, and those hold slash-normalized names. */
 function realpathOr(path: string): string {
-  try {
-    return tsgoPath(realpathSync(path));
-  } catch {
-    return tsgoPath(path);
-  }
+  const target = trackedRealpath(path);
+  return tsgoPath(target ?? path);
 }
 
 interface PkgJson {
@@ -66,9 +55,10 @@ function pkgJsonOf(dir: string): PkgJson | null {
   if (cached === undefined) {
     const path = join(dir, "package.json");
     let parsed: PkgJson | null = null;
-    if (existsSync(path)) {
+    const text = trackedReadFile(path);
+    if (text !== null) {
       try {
-        parsed = JSON.parse(readFileSync(path, "utf8")) as PkgJson;
+        parsed = JSON.parse(text) as PkgJson;
       } catch {
         parsed = null;
       }
@@ -117,12 +107,8 @@ function expandWorkspacePattern(root: string, pattern: string): string[] {
     const next: string[] = [];
     for (const dir of dirs) {
       if (seg === "*") {
-        let entries: string[];
-        try {
-          entries = readdirSync(dir);
-        } catch {
-          continue;
-        }
+        const entries = trackedReadDirNames(dir);
+        if (entries === null) continue;
         for (const e of entries) {
           if (e === "node_modules" || e.startsWith(".")) continue;
           const child = join(dir, e);
