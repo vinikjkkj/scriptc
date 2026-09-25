@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { tapPhase } from "../phase-tap.js";
 import { createHash } from "node:crypto";
 import { createRequire } from "node:module";
 import { appendFile, chmod, copyFile, mkdir, mkdtemp, readdir, readFile, rename, rm, rmdir, stat, unlink, utimes, writeFile } from "node:fs/promises";
@@ -2369,6 +2370,7 @@ export async function compileC(opts: CcOptions): Promise<void> {
   const root = cacheRootDir();
   if (root === null) {
     // The exact historical command line, byte for byte.
+    tapPhase("cc.nocache", 0);
     await runClang(buildArgs((p) => p));
     return;
   }
@@ -2440,11 +2442,13 @@ export async function compileC(opts: CcOptions): Promise<void> {
     await rename(tmpOut, opts.outPath);
     const now = new Date();
     await utimes(cachedBin, now, now).catch(() => undefined); // LRU bump
+    tapPhase("cc.hit", 0);
     return; // hit: clang skipped entirely
   } catch {
     /* miss — build below, then publish */
   }
 
+  tapPhase("cc.miss", 0);
   // Miss: link the program's own TU against cached per-flavor runtime
   // objects. cflags reproduces exactly the option set every TU sees in the
   // single invocation (the clang driver applies all options to all inputs).

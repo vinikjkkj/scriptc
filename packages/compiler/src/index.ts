@@ -1,4 +1,5 @@
 import { mkdir, rm, writeFile } from "node:fs/promises";
+import { tapPhase, tapped } from "./phase-tap.js";
 import { basename, dirname, join, resolve } from "node:path";
 import { CcCompileError, compileC, compileLibArchive, resolveCc, targetPlatform } from "./backend/cc.js";
 import { emitModule, emitModuleProgram } from "./backend/emission/emitter.js";
@@ -700,7 +701,7 @@ export async function compile(entryPath: string, opts: CompileOptions): Promise<
     }
     ffi = loaded.profile;
   }
-  const fe = runFrontend(entryPath, opts.npmStatic);
+  const fe = tapped("fe.load", () => runFrontend(entryPath, opts.npmStatic));
   let lowered: LowerResult;
   let entryText: string;
   let sourceTexts: Map<string, string>;
@@ -717,12 +718,14 @@ export async function compile(entryPath: string, opts: CompileOptions): Promise<
     if (fe.preflight.length > 0) return fail(fe.preflight);
 
     try {
-      lowered = fe.lower({
-        dynamic: opts.dynamic ?? false,
-        bestEffort: opts.bestEffort ?? false,
-        targetPlatform: buildTargetPlatform(),
-        ...(ffi !== null ? { ffiImports: ffi.functions } : {}),
-      });
+      lowered = tapped("fe.lower", () =>
+        fe.lower({
+          dynamic: opts.dynamic ?? false,
+          bestEffort: opts.bestEffort ?? false,
+          targetPlatform: buildTargetPlatform(),
+          ...(ffi !== null ? { ffiImports: ffi.functions } : {}),
+        }),
+      );
     } catch (e) {
       // The last-resort panic fence: an upstream tsgo panic that crossed a
       // checker call no statement/collection fence wrapped still becomes a
@@ -734,7 +737,7 @@ export async function compile(entryPath: string, opts: CompileOptions): Promise<
     }
     if (lowered.module === null) return fail(lowered.diagnostics);
 
-    const validation = validateModule(lowered.module);
+    const validation = tapped("fe.validate", () => validateModule(lowered.module!));
     if (validation.length > 0) {
       return fail(validation.map((v) => iceDiag(v.message, v.loc)));
     }
@@ -785,7 +788,7 @@ export async function compile(entryPath: string, opts: CompileOptions): Promise<
   let llvmRefusal: string | undefined;
   if (opts.backend !== "c") {
     try {
-      const ll = emitLlvmModule(lowered.module!);
+      const ll = tapped("emit.llvm", () => emitLlvmModule(lowered.module!));
       cPath = join(opts.outDir, `${stem}.ll`);
       await writeFile(cPath, ll);
       backend = "llvm";
@@ -807,7 +810,7 @@ export async function compile(entryPath: string, opts: CompileOptions): Promise<
   let programHeader: string | undefined;
   const headerName = `${stem}.scrh`;
   if (backend === "c") {
-    const program = emitModuleProgram(lowered.module!, entryText, headerName);
+    const program = tapped("emit.c", () => emitModuleProgram(lowered.module!, entryText, headerName));
     await writeFile(cPath, program.units[0]!);
     if (program.header !== null) {
       programHeader = join(opts.outDir, headerName);
@@ -838,6 +841,7 @@ export async function compile(entryPath: string, opts: CompileOptions): Promise<
 
   await mkdir(dirname(opts.outPath), { recursive: true });
   try {
+    const ccT0 = performance.now();
     await compileC({
       cPath,
       ...(programUnits.length > 0 ? { programUnits } : {}),
@@ -993,6 +997,7 @@ export async function compile(entryPath: string, opts: CompileOptions): Promise<
           }
         : {}),
     });
+    tapPhase("cc", performance.now() - ccT0);
   } catch (err) {
     if (ffi !== null && err instanceof CcCompileError) {
       return {

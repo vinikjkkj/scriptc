@@ -32,9 +32,10 @@ import { promisify } from "node:util";
 import { afterAll, describe, expect, test } from "vitest";
 import ts5 from "typescript";
 import { compile } from "@scriptc/compiler";
-import { shardSelect, shardSuffix } from "./shard.js";
+import { corpusSlice, partSuffix, shardSuffix } from "./shard.js";
 import { oracleCrashed, reduceNativeReport, reduceNodeReport } from "./uncaught-report.js";
 import { EXE_SUFFIX } from "./exe.js";
+import { tapPhase } from "../../packages/compiler/src/phase-tap.js";
 
 const execFileAsync = promisify(execFile);
 const repoRoot = join(import.meta.dirname, "../..");
@@ -44,13 +45,17 @@ const cacheDir = join(repoRoot, "node_modules/.cache/scriptc-tests");
 // Same corpus, same SCRIPTC_TEST_SHARD slice as differential.test.ts (the
 // two files split identically, so a shard's compile cache serves both lanes).
 const ENTRY_EXTS = ["ts", "js", "mjs", "cjs"];
-const files = shardSelect(
-  ENTRY_EXTS.flatMap((ext) => [
-    ...globSync(join(corpusDir, `*.${ext}`)),
-    ...globSync(join(corpusDir, `*/main.${ext}`)),
-  ]).sort(),
-  (f) => f.slice(corpusDir.length + 1),
-);
+function corpusFiles(part: number, parts: number): string[] {
+  return corpusSlice(
+    ENTRY_EXTS.flatMap((ext) => [
+      ...globSync(join(corpusDir, `*.${ext}`)),
+      ...globSync(join(corpusDir, `*/main.${ext}`)),
+    ]).sort(),
+    (f) => f.slice(corpusDir.length + 1),
+    part,
+    parts,
+  );
+}
 const sanitize = process.env["SCRIPTC_SAN"] === "1";
 
 // The RC audit is a SEPARATE dial from ASan (cc.ts's optAuditArgs): on a
@@ -256,6 +261,16 @@ function programInputs(file: string): string[] {
 }
 
 async function build(file: string, backend: "c" | "llvm" | "default") {
+  const buildT0 = performance.now();
+  try {
+    return await build0(file, backend);
+  } finally {
+    tapPhase(`compile.total`, performance.now() - buildT0);
+    tapPhase(`build.${backend}`, performance.now() - buildT0);
+  }
+}
+
+async function build0(file: string, backend: "c" | "llvm" | "default") {
   const hash = createHash("sha256");
   for (const f of programInputs(file)) hash.update(f).update(readFileSync(f));
   // "llvm-c" (not the bare key differential.test.ts computes) keeps this
@@ -298,172 +313,188 @@ async function build(file: string, backend: "c" | "llvm" | "default") {
 // claims, and which IR kinds gate the rest (phase 2's queue).
 // SCRIPTC_LLVM_REFUSALS=1 additionally lists every refused program under
 // its kind — the burn-down view the phase reports work from.
-const claimed: string[] = [];
-const refused: string[] = [];
-const refusalKinds = new Map<string, number>();
-const refusalPrograms = new Map<string, string[]>();
 
-describe(`llvm differential corpus (${files.length} programs${sanitize ? ", sanitized" : ""}${shardSuffix()})`, () => {
-  test.for(files.map((f) => [f.slice(corpusDir.length + 1), f] as const))(
-    "%s",
-    async ([rel, file], ctx) => {
-      const llvmRes = await build(file, "llvm");
-      if (!llvmRes.ok) {
-        // Recorded FIRST, before any assertion: the tier ledger must
-        // account for every program even when the refusal itself is
-        // malformed (a non-SC3001 diagnostic fails the next line, and the
-        // accounting test below would otherwise silently lose that
-        // program from both columns).
-        refused.push(rel);
-        // Out of tier: the refusal must be LOUD and must be THE refusal —
-        // exactly one SC3001 naming the first unhandled construct. Any
-        // other diagnostic here means a corpus program stopped compiling
-        // at all, which the main differential suite forbids.
-        expect(llvmRes.diagnostics.map((d) => d.code)).toEqual(["SC3001"]);
-        const kind = /\(([^)]+)\)/.exec(llvmRes.diagnostics[0]!.message)?.[1] ?? "?";
-        refusalKinds.set(kind, (refusalKinds.get(kind) ?? 0) + 1);
-        refusalPrograms.set(kind, [...(refusalPrograms.get(kind) ?? []), rel]);
-        // The release default must land this same program on the C lane
-        // TRANSPARENTLY: one frontend pass, the emit retried through the
-        // C backend, the refusal recorded — never a failed build.
-        const defRes = await build(file, "default");
-        if (!defRes.ok) throw new Error(`the default lane failed to fall back on a refused program: ${rel}`);
-        expect(defRes.backend).toBe("c");
-        expect(defRes.llvmRefusal).toBe(kind);
-        expect(defRes.cPath.endsWith(".c")).toBe(true);
-        // A REFUSAL IS NOT A PASS. Everything above is a contract on the
-        // refusal — that it is loud, singular, and transparently rescued
-        // by the C fallback — and none of it executes the program: it is
-        // never run, never compared to Node, never compared to the C
-        // lane. Scoring it green made this lane's headline pass count
-        // read as if it were the C differential's, which it never was
-        // (the base tier refused 31 of 1188 programs, and both members of
-        // the "C fails, LLVM passes" set the debt report called a free
-        // list of C-backend bugs were programs the LLVM backend had
-        // refused to compile). SKIP rather than FAIL: the tier is
-        // auto-discovered and documented C-first, the release default
-        // genuinely lands these on the C backend — asserted four lines up
-        // — and the C differential scores them there for real. So a
-        // refusal is out-of-tier, not broken. The skip COUNT is the
-        // refusal count: read it beside the tier line, never folded into
-        // the pass count.
-        ctx.skip(`SC3001 refusal (${kind}) — outside the LLVM tier; the C fallback lane scores this program`);
-      }
-      claimed.push(rel);
-      expect(llvmRes.backend).toBe("llvm");
-      expect(llvmRes.llvmRefusal).toBeUndefined();
-      expect(llvmRes.cPath.endsWith(".ll")).toBe(true);
-
-      const cRes = await build(file, "c");
-      if (!cRes.ok) throw new Error(`C backend failed on a program the LLVM tier claims: ${rel}`);
-      expect(cRes.backend).toBe("c");
-      const [llvm, c, node] = await Promise.all([
-        runBinary(llvmRes.binaryPath, []),
-        runBinary(cRes.binaryPath, []),
-        runBinary("node", nodeOracleArgs(file)),
-      ]);
-
-      // stdout: byte parity across all three lanes.
-      if (!llvm.stdout.equals(c.stdout)) {
-        expect(llvm.stdout.toString("utf8")).toBe(c.stdout.toString("utf8"));
-        expect.unreachable("llvm-vs-c stdout differed at byte level but not after utf8 decode");
-      }
-      if (!llvm.stdout.equals(node.stdout)) {
-        expect(llvm.stdout.toString("utf8")).toBe(node.stdout.toString("utf8"));
-        expect.unreachable("llvm-vs-node stdout differed at byte level but not after utf8 decode");
-      }
-      // stderr: the exit-0 contract of the main differential suite.
-      const expectedExit = expectedExitCode(file);
-      const llvmErr = comparableStderr(llvm.stderr);
-      const cErr = comparableStderr(c.stderr);
-      // The oracle itself DIED on this host: an exit-0 corpus program
-      // whose Node run ends in a V8 crash report. The report FORMAT is
-      // the documented divergence this suite already exempts for
-      // `// @exit:` programs, and the exemption was keyed on the
-      // DECLARED exit code, so these landed inside the byte comparison
-      // and compared a stack trace against one line. Key it on the
-      // OBSERVED report instead and compare the REDUCTION: the program's
-      // own stderr before the report, byte-for-byte, and the error's
-      // `Name: message`, byte-for-byte. A binary that reports a
-      // different error, a different message, or none at all still
-      // fails.
-      const hostCrash = oracleCrashed(node.exitCode, expectedExit, node.stderr);
-      if (hostCrash) {
-        const want = reduceNodeReport(node.stderr)!;
-        // The two TIERS still compare byte-for-byte: nothing about the
-        // oracle's host licenses a difference between them.
-        if (!llvmErr.equals(cErr)) {
-          expect(llvmErr.toString("utf8")).toBe(cErr.toString("utf8"));
+/** The dual-backend differential over ONE PART of the corpus — see
+ * differential-suite.ts's note. The auto-discovery ledger below is
+ * per-part by construction: each part asserts its own claimed+refused
+ * against its own file list, and the printed tier line names the part. */
+export function defineLlvmDifferentialSuite(part = 1, parts = 1): void {
+  const files = corpusFiles(part, parts);
+  const claimed: string[] = [];
+  const refused: string[] = [];
+  const refusalKinds = new Map<string, number>();
+  const refusalPrograms = new Map<string, string[]>();
+  describe(`llvm differential corpus (${files.length} programs${sanitize ? ", sanitized" : ""}${shardSuffix()}${partSuffix(part, parts)})`, () => {
+    test.for(files.map((f) => [f.slice(corpusDir.length + 1), f] as const))(
+      "%s",
+      async ([rel, file], ctx) => {
+        const llvmRes = await build(file, "llvm");
+        if (!llvmRes.ok) {
+          // Recorded FIRST, before any assertion: the tier ledger must
+          // account for every program even when the refusal itself is
+          // malformed (a non-SC3001 diagnostic fails the next line, and the
+          // accounting test below would otherwise silently lose that
+          // program from both columns).
+          refused.push(rel);
+          // Out of tier: the refusal must be LOUD and must be THE refusal —
+          // exactly one SC3001 naming the first unhandled construct. Any
+          // other diagnostic here means a corpus program stopped compiling
+          // at all, which the main differential suite forbids.
+          expect(llvmRes.diagnostics.map((d) => d.code)).toEqual(["SC3001"]);
+          const kind = /\(([^)]+)\)/.exec(llvmRes.diagnostics[0]!.message)?.[1] ?? "?";
+          refusalKinds.set(kind, (refusalKinds.get(kind) ?? 0) + 1);
+          refusalPrograms.set(kind, [...(refusalPrograms.get(kind) ?? []), rel]);
+          // The release default must land this same program on the C lane
+          // TRANSPARENTLY: one frontend pass, the emit retried through the
+          // C backend, the refusal recorded — never a failed build.
+          const defRes = await build(file, "default");
+          if (!defRes.ok) throw new Error(`the default lane failed to fall back on a refused program: ${rel}`);
+          expect(defRes.backend).toBe("c");
+          expect(defRes.llvmRefusal).toBe(kind);
+          expect(defRes.cPath.endsWith(".c")).toBe(true);
+          // A REFUSAL IS NOT A PASS. Everything above is a contract on the
+          // refusal — that it is loud, singular, and transparently rescued
+          // by the C fallback — and none of it executes the program: it is
+          // never run, never compared to Node, never compared to the C
+          // lane. Scoring it green made this lane's headline pass count
+          // read as if it were the C differential's, which it never was
+          // (the base tier refused 31 of 1188 programs, and both members of
+          // the "C fails, LLVM passes" set the debt report called a free
+          // list of C-backend bugs were programs the LLVM backend had
+          // refused to compile). SKIP rather than FAIL: the tier is
+          // auto-discovered and documented C-first, the release default
+          // genuinely lands these on the C backend — asserted four lines up
+          // — and the C differential scores them there for real. So a
+          // refusal is out-of-tier, not broken. The skip COUNT is the
+          // refusal count: read it beside the tier line, never folded into
+          // the pass count.
+          ctx.skip(`SC3001 refusal (${kind}) — outside the LLVM tier; the C fallback lane scores this program`);
         }
-        const got = reduceNativeReport(llvmErr);
-        expect(got?.pre ?? llvmErr.toString("utf8")).toBe(want.pre);
-        expect(got?.line ?? "<no uncaught report>").toBe(want.line);
-      } else if (expectedExit === 0) {
-        if (!llvmErr.equals(cErr)) {
-          expect(llvmErr.toString("utf8")).toBe(cErr.toString("utf8"));
+        claimed.push(rel);
+        expect(llvmRes.backend).toBe("llvm");
+        expect(llvmRes.llvmRefusal).toBeUndefined();
+        expect(llvmRes.cPath.endsWith(".ll")).toBe(true);
+
+        const cRes = await build(file, "c");
+        if (!cRes.ok) throw new Error(`C backend failed on a program the LLVM tier claims: ${rel}`);
+        expect(cRes.backend).toBe("c");
+        const runT0 = performance.now();
+        const [llvm, c, node] = await Promise.all([
+          runBinary(llvmRes.binaryPath, []),
+          runBinary(cRes.binaryPath, []),
+          (async () => {
+            const t = performance.now();
+            try {
+              return await runBinary("node", nodeOracleArgs(file));
+            } finally {
+              tapPhase("oracle.spawn", performance.now() - t);
+            }
+          })(),
+        ]);
+        tapPhase("native.run", performance.now() - runT0);
+
+        // stdout: byte parity across all three lanes.
+        if (!llvm.stdout.equals(c.stdout)) {
+          expect(llvm.stdout.toString("utf8")).toBe(c.stdout.toString("utf8"));
+          expect.unreachable("llvm-vs-c stdout differed at byte level but not after utf8 decode");
         }
-        if (!llvmErr.equals(node.stderr)) {
-          expect(llvmErr.toString("utf8")).toBe(node.stderr.toString("utf8"));
+        if (!llvm.stdout.equals(node.stdout)) {
+          expect(llvm.stdout.toString("utf8")).toBe(node.stdout.toString("utf8"));
+          expect.unreachable("llvm-vs-node stdout differed at byte level but not after utf8 decode");
         }
-      }
-      if (hostCrash) {
-        expect(llvm.exitCode).toBe(node.exitCode);
-        expect(c.exitCode).toBe(node.exitCode);
-      } else {
-        expect(llvm.exitCode).toBe(expectedExit);
-        expect(c.exitCode).toBe(expectedExit);
-        expect(node.exitCode).toBe(expectedExit);
-      }
-    },
-  );
-
-  test("tier floor: the survey's six programs stay claimed", () => {
-    // Under a shard, only the floor programs THIS slice ran can be asserted
-    // (same key as the corpus split above); the shard union covers all six.
-    for (const name of shardSelect(TIER_FLOOR, (n) => n)) {
-      expect(claimed, `${name} regressed out of the LLVM tier`).toContain(name);
-    }
-  });
-
-  test("fixed tier regressions stay claimed", () => {
-    for (const name of shardSelect(TIER_REGRESSIONS, (n) => n)) {
-      expect(claimed, `${name} regressed out of the LLVM tier`).toContain(name);
-    }
-  });
-
-  // The ledger must be exhaustive, because the two numbers it separates are
-  // the two the reports keep merging. Every corpus program is either
-  // CLAIMED (compiled by the LLVM backend, executed, and scored against
-  // Node and the C lane) or REFUSED (skipped here, scored by the C
-  // differential). A program in neither column means a build threw before
-  // either was recorded, and the count printed below would understate the
-  // refusals rather than say so.
-  test("tier accounting: claimed + refused covers every program", () => {
-    expect(claimed.length + refused.length).toBe(files.length);
-    expect(claimed.filter((r) => refused.includes(r))).toEqual([]);
-  });
-
-  afterAll(() => {
-    const hist = [...refusalKinds].sort((a, b) => b[1] - a[1]);
-    // The refusal count is printed as its OWN number and never folded into
-    // a pass count: a refused program is SKIPPED by this suite (see the
-    // ctx.skip above), so vitest's own "skipped" tally is this same number
-    // and its "passed" tally is now programs that really ran. `malformed`
-    // counts refusals that were not the single loud SC3001 the contract
-    // requires — those FAIL, and they are refusals all the same.
-    const malformed = refused.length - [...refusalKinds.values()].reduce((a, b) => a + b, 0);
-    // eslint-disable-next-line no-console
-    console.info(
-      `llvm tier: ${claimed.length}/${files.length} corpus programs claimed, ` +
-        `${refused.length} REFUSED (skipped, NOT passed` +
-        `${malformed > 0 ? `; ${malformed} of them failed the loud-SC3001 contract` : ""}); ` +
-        `top refusals: ${hist.slice(0, 8).map(([k, n]) => `${k}×${n}`).join(", ")}`,
+        // stderr: the exit-0 contract of the main differential suite.
+        const expectedExit = expectedExitCode(file);
+        const llvmErr = comparableStderr(llvm.stderr);
+        const cErr = comparableStderr(c.stderr);
+        // The oracle itself DIED on this host: an exit-0 corpus program
+        // whose Node run ends in a V8 crash report. The report FORMAT is
+        // the documented divergence this suite already exempts for
+        // `// @exit:` programs, and the exemption was keyed on the
+        // DECLARED exit code, so these landed inside the byte comparison
+        // and compared a stack trace against one line. Key it on the
+        // OBSERVED report instead and compare the REDUCTION: the program's
+        // own stderr before the report, byte-for-byte, and the error's
+        // `Name: message`, byte-for-byte. A binary that reports a
+        // different error, a different message, or none at all still
+        // fails.
+        const hostCrash = oracleCrashed(node.exitCode, expectedExit, node.stderr);
+        if (hostCrash) {
+          const want = reduceNodeReport(node.stderr)!;
+          // The two TIERS still compare byte-for-byte: nothing about the
+          // oracle's host licenses a difference between them.
+          if (!llvmErr.equals(cErr)) {
+            expect(llvmErr.toString("utf8")).toBe(cErr.toString("utf8"));
+          }
+          const got = reduceNativeReport(llvmErr);
+          expect(got?.pre ?? llvmErr.toString("utf8")).toBe(want.pre);
+          expect(got?.line ?? "<no uncaught report>").toBe(want.line);
+        } else if (expectedExit === 0) {
+          if (!llvmErr.equals(cErr)) {
+            expect(llvmErr.toString("utf8")).toBe(cErr.toString("utf8"));
+          }
+          if (!llvmErr.equals(node.stderr)) {
+            expect(llvmErr.toString("utf8")).toBe(node.stderr.toString("utf8"));
+          }
+        }
+        if (hostCrash) {
+          expect(llvm.exitCode).toBe(node.exitCode);
+          expect(c.exitCode).toBe(node.exitCode);
+        } else {
+          expect(llvm.exitCode).toBe(expectedExit);
+          expect(c.exitCode).toBe(expectedExit);
+          expect(node.exitCode).toBe(expectedExit);
+        }
+      },
     );
-    if (process.env["SCRIPTC_LLVM_REFUSALS"] === "1") {
-      for (const [kind] of hist) {
-        // eslint-disable-next-line no-console
-        console.info(`  ${kind}: ${refusalPrograms.get(kind)!.join(" ")}`);
+
+    test("tier floor: the survey's six programs stay claimed", () => {
+      // Under a shard, only the floor programs THIS slice ran can be asserted
+      // (same key as the corpus split above); the shard union covers all six.
+      for (const name of corpusSlice(TIER_FLOOR, (n) => n, part, parts)) {
+        expect(claimed, `${name} regressed out of the LLVM tier`).toContain(name);
       }
-    }
+    });
+
+    test("fixed tier regressions stay claimed", () => {
+      for (const name of corpusSlice(TIER_REGRESSIONS, (n) => n, part, parts)) {
+        expect(claimed, `${name} regressed out of the LLVM tier`).toContain(name);
+      }
+    });
+
+    // The ledger must be exhaustive, because the two numbers it separates are
+    // the two the reports keep merging. Every corpus program is either
+    // CLAIMED (compiled by the LLVM backend, executed, and scored against
+    // Node and the C lane) or REFUSED (skipped here, scored by the C
+    // differential). A program in neither column means a build threw before
+    // either was recorded, and the count printed below would understate the
+    // refusals rather than say so.
+    test("tier accounting: claimed + refused covers every program", () => {
+      expect(claimed.length + refused.length).toBe(files.length);
+      expect(claimed.filter((r) => refused.includes(r))).toEqual([]);
+    });
+
+    afterAll(() => {
+      const hist = [...refusalKinds].sort((a, b) => b[1] - a[1]);
+      // The refusal count is printed as its OWN number and never folded into
+      // a pass count: a refused program is SKIPPED by this suite (see the
+      // ctx.skip above), so vitest's own "skipped" tally is this same number
+      // and its "passed" tally is now programs that really ran. `malformed`
+      // counts refusals that were not the single loud SC3001 the contract
+      // requires — those FAIL, and they are refusals all the same.
+      const malformed = refused.length - [...refusalKinds.values()].reduce((a, b) => a + b, 0);
+      // eslint-disable-next-line no-console
+      console.info(
+        `llvm tier${partSuffix(part, parts)}: ${claimed.length}/${files.length} corpus programs claimed, ` +
+          `${refused.length} REFUSED (skipped, NOT passed` +
+          `${malformed > 0 ? `; ${malformed} of them failed the loud-SC3001 contract` : ""}); ` +
+          `top refusals: ${hist.slice(0, 8).map(([k, n]) => `${k}×${n}`).join(", ")}`,
+      );
+      if (process.env["SCRIPTC_LLVM_REFUSALS"] === "1") {
+        for (const [kind] of hist) {
+          // eslint-disable-next-line no-console
+          console.info(`  ${kind}: ${refusalPrograms.get(kind)!.join(" ")}`);
+        }
+      }
+    });
   });
-});
+}

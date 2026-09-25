@@ -17,7 +17,8 @@ import { promisify } from "node:util";
 import { describe, expect, test } from "vitest";
 import ts5 from "typescript";
 import { compile } from "@scriptc/compiler";
-import { shardSelect, shardSuffix } from "./shard.js";
+import { corpusSlice, partSuffix, shardSuffix } from "./shard.js";
+import { tapPhase } from "../../packages/compiler/src/phase-tap.js";
 import { oracleCrashed, reduceNativeReport, reduceNodeReport } from "./uncaught-report.js";
 import { oracleIsTrustworthy as oracleTrustworthy } from "./oracle-trust.js";
 
@@ -34,13 +35,17 @@ const cacheDir = join(repoRoot, "node_modules/.cache/scriptc-tests");
 // the corpus — the file is this suite's wall-time monster, so vitest's
 // file-granular --shard alone cannot split it. Unset = everything.
 const ENTRY_EXTS = ["ts", "js", "mjs", "cjs"];
-const files = shardSelect(
-  ENTRY_EXTS.flatMap((ext) => [
-    ...globSync(join(corpusDir, `*.${ext}`)),
-    ...globSync(join(corpusDir, `*/main.${ext}`)),
-  ]).sort(),
-  (f) => f.slice(corpusDir.length + 1),
-);
+function corpusFiles(part: number, parts: number): string[] {
+  return corpusSlice(
+    ENTRY_EXTS.flatMap((ext) => [
+      ...globSync(join(corpusDir, `*.${ext}`)),
+      ...globSync(join(corpusDir, `*/main.${ext}`)),
+    ]).sort(),
+    (f) => f.slice(corpusDir.length + 1),
+    part,
+    parts,
+  );
+}
 const sanitize = process.env["SCRIPTC_SAN"] === "1";
 
 // The RC audit is a SEPARATE dial from ASan (cc.ts's optAuditArgs): on a
@@ -301,6 +306,7 @@ function oracleIsTrustworthy(res: { exitCode: number; stdout: Buffer; stderr: Bu
 }
 
 async function runNode(file: string): Promise<RunResult> {
+  const oracleT0 = performance.now();
   let cachePath: string | null = null;
   if (oracleDir !== null && !usesRealTime(programInputs(file))) {
     const h = createHash("sha256").update(await oracleKeyBase());
@@ -333,6 +339,7 @@ async function runNode(file: string): Promise<RunResult> {
         if (oracleIsTrustworthy(cached, file)) {
           const now = new Date();
           utimesSync(cachePath, now, now); // LRU bump for the shared sweep
+          tapPhase("oracle.hit", performance.now() - oracleT0);
           return cached;
         }
       }
@@ -343,7 +350,9 @@ async function runNode(file: string): Promise<RunResult> {
   // Node 24 strips types natively; the supported subset is erasable by
   // construction — except `// @transform-types` programs (namespaces),
   // which run under Node's transform mode.
+  const spawnT0 = performance.now();
   const res = await runBinary("node", nodeOracleArgs(file));
+  tapPhase("oracle.spawn", performance.now() - spawnT0);
   if (cachePath !== null && oracleIsTrustworthy(res, file)) {
     try {
       const tmp = `${cachePath}.${process.pid}.${Math.random().toString(36).slice(2)}`;
@@ -377,6 +386,7 @@ async function compileAndRun(file: string): Promise<RunResult> {
     .slice(0, 16);
   const outDir = join(cacheDir, key);
   mkdirSync(outDir, { recursive: true });
+  const compileT0 = performance.now();
   const result = await compile(file, {
     // Windows will not exec an extensionless file, and the driver writes
     // exactly the name it is given -- the CLI adds the suffix itself, so
@@ -390,72 +400,86 @@ async function compileAndRun(file: string): Promise<RunResult> {
     // llvm-differential.test.ts owns the LLVM lane over the same corpus.
     backend: "c",
   });
+  tapPhase("compile.total", performance.now() - compileT0);
   if (!result.ok) {
     throw new Error(
       "corpus program failed to compile:\n" +
         result.diagnostics.map((d) => `${d.code}: ${d.message}`).join("\n"),
     );
   }
-  return runBinary(result.binaryPath, []);
+  const runT0 = performance.now();
+  try {
+    return await runBinary(result.binaryPath, []);
+  } finally {
+    tapPhase("native.run", performance.now() - runT0);
+  }
 }
 
-describe(`differential corpus (${files.length} programs${sanitize ? ", sanitized" : ""}${shardSuffix()})`, () => {
-  // retry: absorbs ORACLE-side nondeterminism, not compiler bugs — a
-  // deterministic byte mismatch fails both attempts. The concrete driver:
-  // live-spawned Node itself can hang under heavy box load (1751's
-  // fs.watch stalled five gates on 2026-07-20 while the compiled binary
-  // answered in milliseconds every time).
-  test.for(files.map((f) => [f.slice(corpusDir.length + 1), f] as const))(
-    "%s",
-    { retry: 1 },
-    async ([, file]) => {
-      const [nodeRes, nativeRes] = await Promise.all([runNode(file), compileAndRun(file)]);
-      // Compare as bytes; decode only for the failure diff.
-      if (!nodeRes.stdout.equals(nativeRes.stdout)) {
-        expect(nativeRes.stdout.toString("utf8")).toBe(nodeRes.stdout.toString("utf8"));
-        expect.unreachable("stdout differed at byte level but not after utf8 decode");
-      }
-      // Both sides must agree with the declared expectation (default 0) —
-      // asserting node's code too keeps `// @exit:` directives honest.
-      const expectedExit = expectedExitCode(file);
-      // stderr is part of the contract for exit-0 programs (console.error/
-      // warn, process.stderr.write); nonzero-exit programs keep stdout-only
-      // — their stderr carries the uncaught report, whose format is a
-      // documented divergence.
-      // The oracle itself DIED on this host: an exit-0 corpus program
-      // whose Node run ends in a V8 crash report. The report FORMAT is
-      // the documented divergence this suite already exempts for
-      // `// @exit:` programs, and the exemption was keyed on the
-      // DECLARED exit code, so these landed inside the byte comparison
-      // and compared a stack trace against one line. Key it on the
-      // OBSERVED report instead and compare the REDUCTION: the program's
-      // own stderr before the report, byte-for-byte, and the error's
-      // `Name: message`, byte-for-byte. A binary that reports a
-      // different error, a different message, or none at all still
-      // fails.
-      const hostCrash = oracleCrashed(nodeRes.exitCode, expectedExit, nodeRes.stderr);
-      if (hostCrash) {
-        const want = reduceNodeReport(nodeRes.stderr)!;
-        const got = reduceNativeReport(comparableStderr(nativeRes.stderr));
-        expect(got?.pre ?? comparableStderr(nativeRes.stderr).toString("utf8")).toBe(want.pre);
-        expect(got?.line ?? "<no uncaught report>").toBe(want.line);
-      } else if (expectedExit === 0) {
-        const nativeErr = comparableStderr(nativeRes.stderr);
-        if (!nodeRes.stderr.equals(nativeErr)) {
-          expect(nativeErr.toString("utf8")).toBe(nodeRes.stderr.toString("utf8"));
-          expect.unreachable("stderr differed at byte level but not after utf8 decode");
+/** The corpus differential, declared over ONE PART of the corpus. Every
+ * part is its own entry file under tests/harness/corpus/ so vitest's
+ * file-granular pool can spread them over the workers; the parts partition
+ * the corpus exactly (shard.ts's partOf), so the set still runs every
+ * program exactly once. Defaults are the historical whole-corpus run. */
+export function defineDifferentialSuite(part = 1, parts = 1): void {
+  const files = corpusFiles(part, parts);
+  describe(`differential corpus (${files.length} programs${sanitize ? ", sanitized" : ""}${shardSuffix()}${partSuffix(part, parts)})`, () => {
+    // retry: absorbs ORACLE-side nondeterminism, not compiler bugs — a
+    // deterministic byte mismatch fails both attempts. The concrete driver:
+    // live-spawned Node itself can hang under heavy box load (1751's
+    // fs.watch stalled five gates on 2026-07-20 while the compiled binary
+    // answered in milliseconds every time).
+    test.for(files.map((f) => [f.slice(corpusDir.length + 1), f] as const))(
+      "%s",
+      { retry: 1 },
+      async ([, file]) => {
+        const [nodeRes, nativeRes] = await Promise.all([runNode(file), compileAndRun(file)]);
+        // Compare as bytes; decode only for the failure diff.
+        if (!nodeRes.stdout.equals(nativeRes.stdout)) {
+          expect(nativeRes.stdout.toString("utf8")).toBe(nodeRes.stdout.toString("utf8"));
+          expect.unreachable("stdout differed at byte level but not after utf8 decode");
         }
-      }
-      // The declared code keeps `// @exit:` directives honest — except
-      // where the oracle crashed on this host, which says nothing about
-      // the directive. There the contract that still means something is
-      // that the compiled binary agrees with the oracle.
-      if (hostCrash) {
-        expect(nativeRes.exitCode).toBe(nodeRes.exitCode);
-      } else {
-        expect(nodeRes.exitCode).toBe(expectedExit);
-        expect(nativeRes.exitCode).toBe(expectedExit);
-      }
-    },
-  );
-});
+        // Both sides must agree with the declared expectation (default 0) —
+        // asserting node's code too keeps `// @exit:` directives honest.
+        const expectedExit = expectedExitCode(file);
+        // stderr is part of the contract for exit-0 programs (console.error/
+        // warn, process.stderr.write); nonzero-exit programs keep stdout-only
+        // — their stderr carries the uncaught report, whose format is a
+        // documented divergence.
+        // The oracle itself DIED on this host: an exit-0 corpus program
+        // whose Node run ends in a V8 crash report. The report FORMAT is
+        // the documented divergence this suite already exempts for
+        // `// @exit:` programs, and the exemption was keyed on the
+        // DECLARED exit code, so these landed inside the byte comparison
+        // and compared a stack trace against one line. Key it on the
+        // OBSERVED report instead and compare the REDUCTION: the program's
+        // own stderr before the report, byte-for-byte, and the error's
+        // `Name: message`, byte-for-byte. A binary that reports a
+        // different error, a different message, or none at all still
+        // fails.
+        const hostCrash = oracleCrashed(nodeRes.exitCode, expectedExit, nodeRes.stderr);
+        if (hostCrash) {
+          const want = reduceNodeReport(nodeRes.stderr)!;
+          const got = reduceNativeReport(comparableStderr(nativeRes.stderr));
+          expect(got?.pre ?? comparableStderr(nativeRes.stderr).toString("utf8")).toBe(want.pre);
+          expect(got?.line ?? "<no uncaught report>").toBe(want.line);
+        } else if (expectedExit === 0) {
+          const nativeErr = comparableStderr(nativeRes.stderr);
+          if (!nodeRes.stderr.equals(nativeErr)) {
+            expect(nativeErr.toString("utf8")).toBe(nodeRes.stderr.toString("utf8"));
+            expect.unreachable("stderr differed at byte level but not after utf8 decode");
+          }
+        }
+        // The declared code keeps `// @exit:` directives honest — except
+        // where the oracle crashed on this host, which says nothing about
+        // the directive. There the contract that still means something is
+        // that the compiled binary agrees with the oracle.
+        if (hostCrash) {
+          expect(nativeRes.exitCode).toBe(nodeRes.exitCode);
+        } else {
+          expect(nodeRes.exitCode).toBe(expectedExit);
+          expect(nativeRes.exitCode).toBe(expectedExit);
+        }
+      },
+    );
+  });
+}

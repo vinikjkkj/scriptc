@@ -61,3 +61,43 @@ export function shardSelect<T>(
 export function shardSuffix(spec: ShardSpec | undefined = parseShardSpec()): string {
   return spec === undefined ? "" : `, shard ${spec.index}/${spec.count}`;
 }
+
+/** The part (1-based) a key belongs to among `parts` in-RUN slices.
+ *
+ * SALTED APART from shardOf on purpose. The CI shard hashes the same key,
+ * and a second modulus of the SAME hash is not independent of the first
+ * (h%12 decides h%3), so under `--shard=1/3` eight of twelve parts would
+ * come back EMPTY while the suite still reported success. Total on its
+ * domain like shardOf, so the union of the parts runs every case exactly
+ * once — shard.test.ts pins the property for both. */
+export function partOf(key: string, parts: number): number {
+  return (
+    (createHash("sha1").update("corpus-part\0").update(key).digest().readUInt32BE(0) % parts) + 1
+  );
+}
+
+/** One part of one CI shard of `items`.
+ *
+ * vitest's pool is file-granular and isolates a process per file, so a
+ * suite that walks the whole corpus inside ONE file is serial however many
+ * workers the pool has — and the two corpus suites hold most of the gate's
+ * tests. They are therefore declared as `parts` sibling entry files, each
+ * passing its own index here. `parts <= 1` is the historical single-file
+ * behavior, unchanged. */
+export function corpusSlice<T>(
+  items: readonly T[],
+  keyOf: (item: T) => string,
+  part: number,
+  parts: number,
+  spec: ShardSpec | undefined = parseShardSpec(),
+): T[] {
+  const selected = shardSelect(items, keyOf, spec);
+  if (parts <= 1) return selected;
+  return selected.filter((item) => partOf(keyOf(item), parts) === part);
+}
+
+/** Suffix for describe titles so PART membership is visible beside the CI
+ * shard's: ", part 2/8" under a split, "" for the whole corpus. */
+export function partSuffix(part: number, parts: number): string {
+  return parts > 1 ? `, part ${part}/${parts}` : "";
+}

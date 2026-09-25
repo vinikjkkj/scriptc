@@ -12,9 +12,36 @@ A fourth lane does the same on WINDOWS: `SCRIPTC_WIN=1 pnpm exec vitest run test
 
 A fifth lane covers LIBRARY MODE across targets: `SCRIPTC_CROSS=1 pnpm exec vitest run tests/harness/library-cross.test.ts` cross-builds every K-fixture library profile (both emissions) for `aarch64-linux-gnu.2.36`, `x86_64-linux-gnu.2.36`, `x86_64-windows-gnu`, and `x86_64-macos`, then asserts per archive ON THE HOST: K1 symbol exactness (nm reads ELF/COFF/Mach-O alike), the K8 ambient audit, and that each fixture's probe LINKS against the target's libc — plus, on win32, the documented embedder system libs (advapi32/iphlpapi/ws2_32, cc.ts's unconditional executable set). With `SCRIPTC_LINUX=1`/`SCRIPTC_WIN=1` additionally set, the K2 scalar probe also EXECUTES per linux triple in the docker container and on the Windows box; x86_64-macos is build-only by contract (the probe runs as a bonus when Rosetta is present). Needs zig on PATH; ~2min warm — which is why it is env-gated. `SCRIPTC_CROSS_FILTER=<regex>` narrows the fixture list. Never part of the commit gate.
 
+## Where the gate's time goes, and how it is split
+
+Measured on this tree (Windows, 6 physical cores / 12 logical, `zig cc`, warm caches): the full plain gate is **970 s at `SCRIPTC_TEST_WORKERS=6`** and **867 s at 12**. It was **1,367 s** at 12 workers before the corpus suites were split, and the split changed no test and no compile — the phase counters are identical across both runs (7,054 frontend loads, 6,394 binary-cache hits, 415 misses, 4,561 C emissions, 2,235 LLVM emissions).
+
+**Six is the recommendation on a six-core box, not twelve.** Twelve workers cost 83% more summed test time (9,935 s vs 5,420 s) to buy 12% of wall, and the extra oversubscription surfaced one of the suite's known load-sensitive interleave tests in each of two runs — different tests, both passing in isolation. That class is the same one the lock and the worker cap below exist for.
+
+The reason the split matters is structural, not a tuning knob: **vitest's pool is FILE-granular and isolates one process per file, and tests inside a file run sequentially.** Before the split, `differential.test.ts` (1,867 tests) and `llvm-differential.test.ts` (1,870) held 57.8% of the gate's 6,470 tests in two files, and `coverage.test.ts`'s whole-corpus sweep held another 764 s in ONE test. A 12-worker gate measured 1,365 s while its longest single file measured 1,359 s — **99.6% of the wall was one worker**, and no worker count could touch it.
+
+So the three corpus-wide suites live in `*-suite.ts` modules (not collected) and are declared once per PART by the generated entry files under `corpus/`:
+
+- `scripts/gen-corpus-parts.mjs [n]` regenerates them (default 8).
+- The parts partition the corpus by `shard.ts`'s `partOf`, so the set runs every program exactly once; `shard.test.ts` pins the partition property (including that it still partitions UNDER a CI `--shard`, which is why `partOf` is salted apart from `shardOf`), and `corpus-parts.test.ts` fails if the entry files on disk stop being exactly 1..n — a deleted part would otherwise retire an eighth of the corpus behind a green gate.
+- `vitest.config.ts`'s `CorpusFirstSequencer` schedules the parts first: the default sequencer falls back to FILE SIZE with no previous-run record, and a four-line entry file carrying 230 programs sorts last.
+
+Where the remaining time goes, summed over every test of a warm 6-worker run (the compiler's own `phase-tap.ts`, armed by `SCRIPTC_PHASE_LOG=<dir> pnpm test`, inert otherwise):
+
+| stage | share of the summed file wall |
+| --- | --- |
+| frontend (`ts.createProgram` + check + lower to IR) | 66.6% |
+| `zig cc` / clang (6,394 of 6,809 calls served from the binary cache) | 9.8% |
+| running the compiled binaries | 8.5% |
+| live Node oracle spawns | 6.4% |
+| vitest itself (transform + collect + prepare + setup) | 5.2% |
+| codegen (C and LLVM emission) | 1.0% |
+
+The frontend is the cost, and most of it is repetition: the gate runs a full frontend pass over each corpus program **at least four times** — once in the corpus differential, twice in the dual-backend differential (it builds the program through both backends), and once more in the coverage sweep's `analyze()` (flat entries only) — **7,344 frontend passes over 1,871 distinct programs**, on byte-identical input, in the same run. `compile()` alone accounts for 7,054 of them, counted rather than estimated; 5,601 of those are the corpus, three per program. The binary cache cannot help there by construction: it keys on the EMITTED TU, so the frontend and codegen have already run by the time the key exists.
+
 ## Workflow
 
-Iterate filtered, gate full: while developing, run just what you're touching (`pnpm exec vitest run tests/harness/differential.test.ts -t <name>` or a single test file); run the full lanes (`pnpm test`, then `SCRIPTC_SAN=1 pnpm test`) as the gate before committing.
+Iterate filtered, gate full: while developing, run just what you're touching (`pnpm exec vitest run tests/harness/corpus/differential-01.test.ts -t <name>` or a single test file); run the full lanes (`pnpm test`, then `SCRIPTC_SAN=1 pnpm test`) as the gate before committing. Between the two there is a SAMPLED tier that needs no new machinery: `SCRIPTC_TEST_SHARD=1/8 pnpm test` runs every non-corpus suite in full and one eighth of the corpus (~4 min warm here). It is a sample, not a gate — it can miss a corpus program, so it never replaces the full run before a commit.
 
 Full-suite runs (`vitest run` with no filters) take an advisory machine-wide lock (a pidfile in the OS temp dir) so concurrent full suites — typically parallel agents — queue instead of oversubscribing the CPU, which is a known flake source (vitest worker RPC timeouts, event-loop timing failures). The lock is per flavor (plain vs `SCRIPTC_SAN=1`): the two lanes read the same committed tree through separate cache directories, so a merge gate may deliberately run one of each concurrently — split the cores between them with `SCRIPTC_TEST_WORKERS` (e.g. 5 and 5) or the oversubscription flakes come back. Two runs of the SAME flavor still queue. Filtered and watch runs never wait. `SCRIPTC_NO_LOCK=1` opts out; stale locks from dead processes are stolen automatically. `SCRIPTC_TEST_WORKERS=<n>` caps the vitest worker pool (default: unchanged, all cores).
 
