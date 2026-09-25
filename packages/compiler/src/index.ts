@@ -35,7 +35,8 @@ import { isJsSourceFileName, isRelativeSpecifier } from "./frontend/shared.js";
 import { lowerToIr, type LowerOptions, type LowerResult } from "./frontend/lowering/lowerer.js";
 import type { CoverageInput, NpmStaticStatus } from "./coverage/report.js";
 import { loadFfiProfile, type FfiProfile } from "./ffi/profile.js";
-import { FrontendInputTracker, trackedRealpath } from "./frontend/input-tracker.js";
+import { createRequire } from "node:module";
+import { FrontendInputTracker, trackedReadFile, trackedRealpath } from "./frontend/input-tracker.js";
 import {
   compilerImplementationDir,
   compilerImplementationFingerprint,
@@ -912,6 +913,19 @@ function advisorySourceSubset(
 function recordResolutionAnchors(entryPath: string): void {
   trackedRealpath(entryPath);
   trackedRealpath(dirname(resolve(entryPath)));
+  // The typechecker's own version. tsgo is SPAWNED, not read, so nothing else
+  // puts it in the snapshot: measured, the only typescript-package paths
+  // recorded by a build are the 76 lib.*.d.ts files it reads. Those do change
+  // across most releases, which covers the usual case by accident — but a
+  // release that changes only the Go binary would leave every probe matching
+  // while the lowering it produced changed. Reading the manifest costs one
+  // file and removes the accident.
+  try {
+    trackedReadFile(createRequire(import.meta.url).resolve("typescript/package.json"));
+  } catch {
+    // A layout that does not expose the manifest is not a build failure; the
+    // lib files still carry most of the signal.
+  }
   const provenance = provenanceSources();
   if (provenance === null) return;
   for (const pkg of provenance.packages) {
