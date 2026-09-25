@@ -10,7 +10,9 @@
  * Opt out entirely with SCRIPTC_NO_LOCK=1. */
 import { readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { pruneScratchOnce } from "./prune-scratch.mjs";
 
 /* The lock is PER FLAVOR: the plain and sanitized lanes read the same
  * committed tree through separate binary/oracle cache directories, so one
@@ -93,6 +95,27 @@ export default async function setup() {
     }
   }
   if (!acquired) console.warn("[scriptc] full-suite lock wait exceeded 45 minutes — proceeding without it");
+
+  /* Bound the scratch tree, once, with the lock held and before any worker
+   * has started — the only moment in a run when nothing is writing to it.
+   * See prune-scratch.mjs: the CAS under SCRIPTC_CACHE_DIR has been
+   * size-capped since it landed and this tree never was, so it grew by
+   * ~12 GB per gate and kept it. Best-effort in every direction: a sweep
+   * that throws must not fail a gate, and nothing under the age floor is
+   * touched, so the other flavor's concurrent run is safe. */
+  try {
+    const root = join(dirname(fileURLToPath(import.meta.url)), "../../node_modules/.cache/scriptc-tests");
+    const swept = await pruneScratchOnce(root);
+    if (swept.freed > 0) {
+      console.log(
+        `[scriptc] scratch sweep: freed ${(swept.freed / 1024 ** 3).toFixed(1)} GB ` +
+          `from ${swept.evicted.length} stale program directories ` +
+          `(cap SCRIPTC_TEST_SCRATCH_MAX_MB)`,
+      );
+    }
+  } catch {
+    /* a sweep is never a gate failure */
+  }
 
   return () => {
     if (!acquired) return;
