@@ -85,13 +85,13 @@
  * lives under its key (requireHelperOriginOf follows the import and
  * re-export hops).
  */
-import { readFileSync, readdirSync, realpathSync } from "node:fs";
 import { builtinModules } from "node:module";
 import { basename, dirname, extname, join, resolve } from "node:path";
 import ts from "typescript5";
 import { cjsLexedExportsOf } from "./cjs-lexer.js";
 import { provenanceInstalledCounterpart } from "./provenance-registry.js";
 import { isRelativeSpecifier, nativePath, pathFileUrl, tsgoPath } from "./shared.js";
+import { trackedReadDirNames, trackedReadFile, trackedRealpath } from "./input-tracker.js";
 
 export type EmbeddedFormat = "esm" | "cjs" | "json";
 
@@ -441,31 +441,15 @@ interface Host {
 }
 
 const realHost: Host = {
-  readFile: (path) => {
-    try {
-      return readFileSync(path, "utf8");
-    } catch {
-      return null;
-    }
-  },
+  readFile: (path) => trackedReadFile(path),
   isFile: (path) => ts.sys.fileExists(path),
   isDirectory: (path) => ts.sys.directoryExists(path),
   realpath: (path) => {
     // Slash-normalized on Windows (tsgoPath): realpaths are the island's
     // module KEYS and are compared against tsgo program file names.
-    try {
-      return tsgoPath(realpathSync(path));
-    } catch {
-      return tsgoPath(path);
-    }
+    return tsgoPath(trackedRealpath(path) ?? path);
   },
-  readdir: (path) => {
-    try {
-      return readdirSync(path);
-    } catch {
-      return null;
-    }
-  },
+  readdir: (path) => trackedReadDirNames(path),
 };
 
 interface PkgJson {

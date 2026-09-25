@@ -28,6 +28,14 @@ import type { SourceFile } from "typescript/unstable/ast";
 import { CheckerFacade } from "./checker.js";
 import { enumKeyOf, ModuleKind, ModuleResolutionKind, ScriptTarget } from "./enums.js";
 import { tsgoPath } from "../shared.js";
+import {
+  frontendInputTrackingActive,
+  trackedAccessibleEntries,
+  trackedDirectoryExists,
+  trackedFileExists,
+  trackedReadFile,
+  trackedRealpath,
+} from "../input-tracker.js";
 
 /** The compiler options our createProgram accepts: TS7's CompilerOptions
  * shape (numeric enums for target/module/moduleResolution — the enums module
@@ -110,21 +118,56 @@ export class Ts7Host {
       fs: {
         // string => virtual (or shadowed) hit; null => shadowed out of
         // existence; undefined => real-FS fallthrough.
+        /* `undefined` means "fall through to tsgo's own server-side
+         * filesystem". That is the historical answer and it stays the answer
+         * whenever no FrontendInputTracker is running: a build with no cache
+         * configured pays not one extra round trip.
+         *
+         * When a tracker IS running the hooks must answer node-side instead.
+         * A server-side read is invisible to the tracker, and an input the
+         * fingerprint cannot see is an input the cache would happily serve a
+         * stale artifact for. tsgo resolves the whole transitive graph —
+         * @types/node, every node_modules candidate, every lib.d.ts — so
+         * falling through for even one operation would leave the snapshot
+         * silently incomplete rather than merely coarse. */
         readFile: (fileName) => {
           const virtual = virtualFiles.get(tsgoPath(fileName));
           if (virtual !== undefined) return virtual;
-          if (shadow === null) return undefined;
-          if (shadow.hideFile(fileName)) return null;
-          return shadow.readFile(fileName);
+          if (shadow !== null) {
+            if (shadow.hideFile(fileName)) return null;
+            const replacement = shadow.readFile(fileName);
+            if (replacement !== undefined) {
+              // The shadow SERVES derived bytes — an npm-static-transformed
+              // package.json, a provenance-alias-rewritten source — and it
+              // derived them from the disk through its own helpers. Record the
+              // disk bytes here regardless, so no amount of untracked reading
+              // inside a shadow helper can leave a served file outside the
+              // snapshot. The derivation itself is keyed separately: the
+              // provenance source set and the --npm-static selection are both
+              // in the explicit half of the cache key.
+              if (frontendInputTrackingActive()) trackedReadFile(fileName);
+              return replacement;
+            }
+          }
+          return frontendInputTrackingActive() ? trackedReadFile(fileName) : undefined;
         },
         fileExists: (fileName) => {
           if (virtualFiles.has(tsgoPath(fileName))) return true;
           if (shadow !== null && shadow.hideFile(fileName)) return false;
-          return undefined;
+          return frontendInputTrackingActive() ? trackedFileExists(fileName) : undefined;
         },
-        directoryExists: () => undefined,
-        realpath: (path) => (virtualFiles.has(tsgoPath(path)) ? path : undefined),
-        getAccessibleEntries: () => undefined,
+        directoryExists: (path) =>
+          frontendInputTrackingActive() ? trackedDirectoryExists(path) : undefined,
+        realpath: (path) =>
+          virtualFiles.has(tsgoPath(path))
+            ? path
+            : frontendInputTrackingActive()
+              ? (trackedRealpath(path) ?? path)
+              : undefined,
+        getAccessibleEntries: (path) =>
+          frontendInputTrackingActive()
+            ? (trackedAccessibleEntries(path) ?? { files: [], directories: [] })
+            : undefined,
       },
     });
   }
@@ -306,9 +349,11 @@ export function findConfigFile(
  * are the direct implementations. */
 export const sys = {
   fileExists(path: string): boolean {
+    if (frontendInputTrackingActive()) return trackedFileExists(path);
     return existsSync(path) && statSync(path).isFile();
   },
   readFile(path: string): string | undefined {
+    if (frontendInputTrackingActive()) return trackedReadFile(path) ?? undefined;
     try {
       return readFileSync(path, "utf8");
     } catch {
@@ -319,6 +364,7 @@ export const sys = {
     writeFileSync(path, data);
   },
   directoryExists(path: string): boolean {
+    if (frontendInputTrackingActive()) return trackedDirectoryExists(path);
     return existsSync(path) && statSync(path).isDirectory();
   },
   getCurrentDirectory(): string {

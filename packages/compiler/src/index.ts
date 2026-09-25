@@ -1,7 +1,7 @@
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { tapPhase, tapped } from "./phase-tap.js";
 import { basename, dirname, join, resolve } from "node:path";
-import { CcCompileError, compileC, compileLibArchive, resolveCc, targetPlatform } from "./backend/cc.js";
+import { cacheRootDir, CcCompileError, compileC, compileLibArchive, profFlavor, resolveCc, targetPlatform } from "./backend/cc.js";
 import { emitModule, emitModuleProgram } from "./backend/emission/emitter.js";
 import { emitFinalKeyReadWidths, emitFinalNarrowBridges, flushKeyReadCensus, flushNarrowBridgeCensus, keyReadCensusOnly } from "./frontend/lowering/keyread-census.js";
 import { emitLlvmModule, LlvmUnsupportedError } from "./backend/llvm/emitter.js";
@@ -23,7 +23,7 @@ import {
 import { validateSidecar } from "./library/sidecar-validate.js";
 import { entryFunctionExports, type EntryExportInfo } from "./frontend/lib-exports.js";
 import { entryContractFacts, type ContractFacts } from "./frontend/lib-contract.js";
-import { moduleLibAsyncSurface, moduleLibNondeterministicSurface, moduleEmbedsBuiltin, moduleEmbedsNetIsland, moduleEmbedsCompressedNpm, moduleUsesAbortSignal, moduleUsesAssert, moduleUsesChildStream, moduleUsesCopying, moduleUsesDc, moduleUsesDgram, moduleUsesDynAsync, moduleUsesDynInvoke, moduleUsesEmitter, moduleUsesFetch, moduleUsesFetchStatic, moduleUsesFetchDispatch, moduleUsesFileHandle, moduleUsesFsWatch, moduleUsesAbortHttp, moduleUsesHttpBody, moduleUsesHttpPipe, moduleUsesHttp2, moduleUsesHttpServer, moduleUsesInspect, moduleUsesNet, moduleUsesNodeTest, moduleUsesProcessEvents, moduleUsesQs, moduleUsesRegex, moduleUsesRequireVerdict, moduleUsesSearchParams, moduleUsesSqlite, moduleUsesSqliteValue, moduleUsesStream, moduleUsesUrl, moduleUsesSymbol, moduleUsesWeakMap, moduleUsesTls, moduleUsesTlsCa, moduleUsesWsGlobal, moduleUsesWsDispatch, moduleUsesWrtc, moduleUsesDate, moduleUsesBigInt,
+import { moduleLibAsyncSurface, moduleLibNondeterministicSurface, moduleEmbedsNetIsland, moduleEmbedsCompressedNpm, moduleUsesAbortSignal, moduleUsesAssert, moduleUsesChildStream, moduleUsesCopying, moduleUsesDc, moduleUsesDgram, moduleUsesDynAsync, moduleUsesDynInvoke, moduleUsesEmitter, moduleUsesFetch, moduleUsesFetchStatic, moduleUsesFetchDispatch, moduleUsesFileHandle, moduleUsesFsWatch, moduleUsesAbortHttp, moduleUsesHttpBody, moduleUsesHttpPipe, moduleUsesHttp2, moduleUsesHttpServer, moduleUsesInspect, moduleUsesNet, moduleUsesNodeTest, moduleUsesProcessEvents, moduleUsesQs, moduleUsesRegex, moduleUsesRequireVerdict, moduleUsesSearchParams, moduleUsesSqlite, moduleUsesSqliteValue, moduleUsesStream, moduleUsesUrl, moduleUsesSymbol, moduleUsesWeakMap, moduleUsesTls, moduleUsesTlsCa, moduleUsesWsGlobal, moduleUsesWsDispatch, moduleUsesWrtc, moduleUsesDate, moduleUsesBigInt,
   moduleUsesAsym, moduleUsesCipher, moduleUsesZlib, moduleUsesZlibStream, type IrLibSection, type IrModule, type IrRecordShape, type IrType, type SrcLoc } from "./ir/nodes.js";
 import { serializeModule } from "./ir/serialize.js";
 import { validateModule } from "./ir/validate.js";
@@ -35,6 +35,17 @@ import { isJsSourceFileName, isRelativeSpecifier } from "./frontend/shared.js";
 import { lowerToIr, type LowerOptions, type LowerResult } from "./frontend/lowering/lowerer.js";
 import type { CoverageInput, NpmStaticStatus } from "./coverage/report.js";
 import { loadFfiProfile, type FfiProfile } from "./ffi/profile.js";
+import { createRequire } from "node:module";
+import { FrontendInputTracker, trackedReadFile, trackedRealpath } from "./frontend/input-tracker.js";
+import {
+  compilerImplementationDir,
+  compilerImplementationFingerprint,
+  publishEarlyBuildCache,
+  readEarlyBuildCache,
+  scriptcEnvironmentFingerprint,
+  type EarlyBuildCacheOptions,
+  type EarlyBuildMetadata,
+} from "./frontend/early-cache.js";
 
 export const VERSION = "0.0.1";
 
@@ -692,7 +703,336 @@ export function analyze(entryPath: string, opts: AnalyzeOptions = {}): AnalyzeRe
 }
 
 /** The whole pipeline: load → preflight → lower → validate → emit C → clang. */
+/** Every native link/feature gate the program TU implies, derived from the
+ * lowered IR. ONE place, on purpose: the early build cache stores this
+ * record verbatim in its stamp, because a cache hit has skipped lowering and
+ * has no IrModule left to ask. A flag added here is cached automatically; a
+ * flag added straight into the compileC call would be invisible to the stamp
+ * and a hit would link the wrong runtime units.
+ *
+ * Boolean-valued only. `linkInputs`/`systemLibraries` come from the FFI
+ * profile, which the cache key already covers by path and bytes. */
+export type ProgramNativeFeatures = Record<string, boolean>;
+
+function programNativeFeatures(mod: IrModule): ProgramNativeFeatures {
+  return {
+    // The link switch for scr_regex.c + libregexp: detected on the IR, so
+    // regex-free programs keep the historical (pinned) command line.
+    regex: moduleUsesRegex(mod),
+    // Array copying methods and the typed-array bridges live in one
+    // optional TU, linked only when one of their IR intrinsics survives.
+    copying: moduleUsesCopying(mod),
+    // The link switch for scr_fetch.c (the native bridge over scr_net +
+    // scr_tls + scr_http's client parser + zlib — cc.ts implies those
+    // units into the link): embedded npm code that references fetch gets
+    // the bridge; everything else keeps its exact link line.
+    fetch: moduleUsesFetch(mod),
+    // The island's node:http/https client bridge: embedded graphs that
+    // import those builtins pull scr_net_island.c + the socket units.
+    netIsland: moduleEmbedsNetIsland(mod),
+    // The link switch for scr_zlib.c + libz: zlib.* libCalls on the IR,
+    // node:zlib in the embedded graph, or COMPRESSED embedded module text
+    // (emit-island.ts stores big npm sources as raw DEFLATE; the emitted
+    // main installs scr_zlib_inflate_exact on the same predicate).
+    bigint: moduleUsesBigInt(mod),
+    asym: moduleUsesAsym(mod),
+    cipher: moduleUsesCipher(mod),
+    zlib: moduleUsesZlib(mod) || moduleEmbedsCompressedNpm(mod),
+    // The link switch for scr_zlib_stream.c, the createUnzip bridge.
+    // Narrower than `zlib` above on purpose: it is the only gate that
+    // also pulls scr_stream.c, so a gunzipSync program keeps its exact
+    // link line.
+    zlibStream: moduleUsesZlibStream(mod),
+    // The link switch for scr_assert.c: assert.* libCalls on the IR (the
+    // regex switch also pulls it — scr_regex.c calls the assert helpers).
+    assert: moduleUsesAssert(mod),
+    // The link switch for scr_inspect.c: insp.* libCalls on the IR.
+    inspect: moduleUsesInspect(mod),
+    // The link switch for scr_dyn_invoke.c: dynInvoke nodes or
+    // dyn.defineProp(s) libCalls on the IR.
+    dynInvoke: moduleUsesDynInvoke(mod),
+    // The link switch for scr_dc.c: dc.* libCalls on the IR (the
+    // diagnostics_channel registry and pub/sub).
+    dc: moduleUsesDc(mod),
+    // The link switch for scr_async_dyn.c: the checked-dynamic async
+    // surfaces (cc.ts also pulls it under the dynInvoke/dc gates).
+    dynAsync: moduleUsesDynAsync(mod),
+    // The link switch for scr_events.c: process signal/exit listeners and
+    // the stdin event surface on the IR.
+    events: moduleUsesProcessEvents(mod),
+    // The link switch for scr_events_emitter.c: the node:events
+    // EventEmitter surface on the IR (emitter.* libCalls or the
+    // %EventEmitter class def).
+    emitter: moduleUsesEmitter(mod),
+    // The link switch for scr_symbol.c: sym.* libCalls or a symbol-kind
+    // type anywhere on the IR.
+    symbol: moduleUsesSymbol(mod),
+    weak: moduleUsesWeakMap(mod),
+    // The link switch for scr_require.c: the module.requireVerdict
+    // libCall, which only a RUN-TIME-specifier require emits.
+    requireVerdict: moduleUsesRequireVerdict(mod),
+    // The link switch for scr_url.c: url.* libCalls or a url-kind type
+    // on the IR. The unit used to be unconditional and cost every
+    // binary in the project four win32 pages it could not reach.
+    url: moduleUsesUrl(mod),
+    // The link switch for scr_url_params.c: sp.* libCalls, the
+    // url.searchParams getter, or a searchParams-kind type on the IR.
+    searchParams: moduleUsesSearchParams(mod),
+    // The link switch for scr_qs.c: the qs.* libCalls that live there
+    // (parse/stringify/unescape; escape rides the always-linked encoder).
+    qs: moduleUsesQs(mod),
+    // The link switch for scr_stream.c: the node:stream class surface on
+    // the IR (stream libCalls or the %Readable-family class defs).
+    stream: moduleUsesStream(mod),
+    // The link switch for scr_net.c: net.* (or http.* — http rides on
+    // net) libCalls on the IR.
+    net: moduleUsesNet(mod),
+    // Pulls scr_dyn_handle.c in for the child-stdio dyn ops: a
+    // childStream-typed slot anywhere on the IR.
+    childStream: moduleUsesChildStream(mod),
+    // The link switch for scr_http.c: http.* libCalls on the IR.
+    http: moduleUsesHttpServer(mod),
+    http2: moduleUsesHttp2(mod),
+    // The link switch for scr_dgram.c: dgram.* or dns.* libCalls on the IR.
+    dgram: moduleUsesDgram(mod),
+    // The link switch for scr_watch.c: fs.watch/watcher.* libCalls on the IR.
+    watch: moduleUsesFsWatch(mod),
+    fileHandle: moduleUsesFileHandle(mod),
+    // The link switch for scr_http_pipe.c: the http.clientPipeFrom
+    // libCall on the IR (a Readable piped into a ClientRequest).
+    httpPipe: moduleUsesHttpPipe(mod),
+    // The link switch for scr_http_body.c: the http.reqBodyStream
+    // libCall on the IR (an IncomingMessage in a Readable slot). It
+    // implies the two units it bridges, which cc.ts ORs in rather than
+    // trusting moduleUsesStream to have answered true beside it.
+    httpBody: moduleUsesHttpBody(mod),
+    // The link switch for scr_abort_http.c: the http.clientSignal libCall
+    // on the IR (an AbortSignal wired into a client request). It implies
+    // the two units it bridges, which cc.ts ORs in rather than trusting
+    // the two detectors to have answered true independently.
+    abortHttp: moduleUsesAbortHttp(mod),
+    // The link switch for scr_test.c: test.* libCalls on the IR.
+    nodeTest: moduleUsesNodeTest(mod),
+    // The link switch for scr_tls.c + the vendored mbedTLS archive:
+    // tls.* or https.* libCalls on the IR.
+    tls: moduleUsesTls(mod),
+    // The link switch for scr_tls_ca.c (the CA-store introspection unit
+    // — plain PEM bookkeeping, no mbedTLS): tlsca.* libCalls on the IR.
+    // cc.ts also compiles it under the tls gate (scr_tls.c consults the
+    // unit's default-set override for its trust anchors).
+    tlsCa: moduleUsesTlsCa(mod),
+    // The link switch for the WebSocket client family (scr_websocket.c
+    // + scr_ws_client.c + scr_ws_global.c): a wsCtor node on the IR,
+    // i.e. the program took globalThis.WebSocket as a value. Implies
+    // net AND tls in cc.ts -- the codec dials over scr_net, and wss://
+    // is most of what a WebSocket is for.
+    wsGlobal: moduleUsesWsGlobal(mod),
+    // The link switch for scr_ws_dispatch.c: a wsCtor whose init bag
+    // carries a dispatcher this compiler DELEGATES to. Apart from the
+    // wsGlobal gate on purpose -- the delegation drags the whole
+    // checked-dynamic object surface, and a WebSocket program with no
+    // dispatcher must not pay for it.
+    wsDispatch: moduleUsesWsDispatch(mod),
+    // The link switch for scr_fetch_dispatch.c, apart from fetchStatic
+    // for the same reason wsDispatch is apart from wsGlobal.
+    fetchDispatch: moduleUsesFetchDispatch(mod),
+    // The link switch for scr_abort.c: an abortSignal-typed slot
+    // anywhere on the IR. The unit was unconditional until the value
+    // surface made its size matter -- see cc.ts's CcOptions comment.
+    abortSignal: moduleUsesAbortSignal(mod),
+    // The link switch for scr_fetch_static.c and the whole
+    // net/http/tls/url/zlib stack under it: a static-fetch value
+    // anywhere on the IR. A program that never writes `fetch` links
+    // none of it, mbedTLS included.
+    fetchStatic: moduleUsesFetchStatic(mod),
+    // The gate that keeps 269,649 lines of vendored SQLite out of every
+    // binary that does not use it (see CcOptions.sqlite).
+    sqlite: moduleUsesSqlite(mod),
+    // ...and the narrower gate for the package's VALUE surface, which
+    // only a program reaching it through an untyped namespace mints.
+    sqliteValue: moduleUsesSqliteValue(mod),
+    // The link gate for the WebRTC handles: a declared shape emits
+    // release calls even though nothing constructs one.
+    wrtc: moduleUsesWrtc(mod),
+    // The same gate for the Date handle: a declared shape emits release
+    // calls even though nothing constructs one.
+    date: moduleUsesDate(mod),
+  };
+}
+
+/** Outputs a previous build of the same program may have left in outDir
+ * whose shape this build does not reproduce: the other backend's TU, a header
+ * a now-unsplit program does not need, and every part slot past the last one
+ * written. Run on BOTH paths — a cache hit restores a TU and must leave the
+ * directory in exactly the state a real build would. */
+async function sweepStaleOutputs(
+  outDir: string,
+  stem: string,
+  backend: "c" | "llvm",
+  partCount: number,
+  hasHeader: boolean,
+): Promise<void> {
+  for (let i = partCount + 1; i <= 32; i++) {
+    await rm(join(outDir, `${stem}.part${i}.c`), { force: true });
+  }
+  if (!hasHeader) await rm(join(outDir, `${stem}.scrh`), { force: true });
+  await rm(join(outDir, `${stem}${backend === "llvm" ? ".c" : ".ll"}`), { force: true });
+}
+
+/** Only the sources an advisory actually points at. sourceTexts holds the
+ * WHOLE input — 13 MB on the zapo-rest lane — and the renderer needs the
+ * handful of files the advisories name. */
+function advisorySourceSubset(
+  advisories: readonly ScrDiagnostic[],
+  sourceTexts: Map<string, string>,
+): Record<string, string> {
+  const subset: Record<string, string> = {};
+  for (const advisory of advisories) {
+    const text = sourceTexts.get(advisory.loc.file);
+    if (text !== undefined) subset[advisory.loc.file] = text;
+  }
+  return subset;
+}
+
+/** Report the frontend's input snapshot: the probe census under
+ * SCRIPTC_CACHE_DEBUG, the full JSON under SCRIPTC_INPUT_SNAPSHOT.
+ *
+ * Called the moment the frontend is done and BEFORE the census-only exit, so
+ * the probe count is obtainable from the frontend-only lane
+ * (SCRIPTC_KEYREAD_CENSUS_ONLY=1) without paying for codegen, clang and the
+ * link. That split matters operationally: a COUNT is deterministic and
+ * tolerates a loaded machine, while a CLOCK needs an empty one — and on a
+ * shared box a measurement that only works empty is a measurement that may
+ * never happen.
+ *
+ * Never a build failure: this is an instrument. */
+async function reportFrontendInputs(inputs: FrontendInputTracker | null): Promise<void> {
+  if (inputs === null) return;
+  const snapshot = inputs.snapshot();
+  if (process.env["SCRIPTC_CACHE_DEBUG"] === "1") {
+    const byOp = new Map<string, number>();
+    for (const probe of snapshot.probes) byOp.set(probe.op, (byOp.get(probe.op) ?? 0) + 1);
+    process.stderr.write(
+      `scriptc: frontend input probes ${snapshot.probes.length} stable=${snapshot.stable} ` +
+        [...byOp].sort().map(([op, n]) => `${op}=${n}`).join(" ") +
+        "\n",
+    );
+  }
+  const path = process.env["SCRIPTC_INPUT_SNAPSHOT"];
+  if (path !== undefined && path !== "") {
+    await writeFile(path, `${JSON.stringify(snapshot, null, 2)}\n`).catch(() => undefined);
+  }
+}
+
+/** Realpath the handful of paths that SELECT a dependency tree, so the input
+ * snapshot records what each one actually resolved to.
+ *
+ * Resolution only calls realpath where it needs a canonical module key — npm
+ * package directories, tsgo's lib files — so an entry reached through a
+ * junction or a workspace symlink produces no realpath probe of its own.
+ * Verified, not assumed: a build through a directory junction recorded eleven
+ * probes under the linked path and not one realpath among them.
+ *
+ * Content still invalidates the cache either way; what these probes add is the
+ * AUDIT. Both failures this project has written down were silent at exit 0 —
+ * a workspace symlink compiling an attested package's published source instead
+ * of the working tree, and an entry path selecting the other version of its
+ * dependency graph — and in both the problem was never the fix, it was that
+ * there was no signal. A snapshot that names the resolved target is the
+ * signal. The cost is a few realpath calls per build, not one per file. */
+function recordResolutionAnchors(entryPath: string): void {
+  trackedRealpath(entryPath);
+  trackedRealpath(dirname(resolve(entryPath)));
+  // The typechecker's own version. tsgo is SPAWNED, not read, so nothing else
+  // puts it in the snapshot: measured, the only typescript-package paths
+  // recorded by a build are the 76 lib.*.d.ts files it reads. Those do change
+  // across most releases, which covers the usual case by accident — but a
+  // release that changes only the Go binary would leave every probe matching
+  // while the lowering it produced changed. Reading the manifest costs one
+  // file and removes the accident.
+  try {
+    trackedReadFile(createRequire(import.meta.url).resolve("typescript/package.json"));
+  } catch {
+    // A layout that does not expose the manifest is not a build failure; the
+    // lib files still carry most of the signal.
+  }
+  const provenance = provenanceSources();
+  if (provenance === null) return;
+  for (const pkg of provenance.packages) {
+    trackedRealpath(pkg.dir);
+    if (pkg.installedDir !== undefined) trackedRealpath(pkg.installedDir);
+  }
+}
+
+/** Everything that is an input to this build and is NOT a file. See
+ * frontend/early-cache.ts for why the SCRIPTC_* env rule is a blanket. */
+async function earlyCacheOptionsFor(
+  entryPath: string,
+  opts: CompileOptions,
+): Promise<EarlyBuildCacheOptions> {
+  const compileOptions = JSON.stringify({
+    emitIr: opts.emitIr ?? false,
+    sanitize: opts.sanitize ?? false,
+    dynamic: opts.dynamic ?? false,
+    bestEffort: opts.bestEffort ?? false,
+    backend: opts.backend ?? null,
+    npmStatic:
+      opts.npmStatic === undefined
+        ? null
+        : opts.npmStatic === "auto"
+          ? "auto"
+          : [...opts.npmStatic].sort(),
+    ffiProfilePath: opts.ffiProfilePath === undefined ? null : resolve(opts.ffiProfilePath),
+  });
+  return {
+    entryPath,
+    outDir: opts.outDir,
+    outPath: opts.outPath,
+    compileOptions,
+    // The resolved provenance source set is compiler STATE, not a file the
+    // tracker can see: it decides which tree every attested package compiles
+    // from. It is plain JSON and fully determined before compile() is called,
+    // so it goes in the key verbatim. Upstream instead DISABLES their early
+    // cache whenever provenance is active — which would leave our headline
+    // lane exactly as slow as it is today.
+    provenance: JSON.stringify(provenanceSources()),
+    target: `${process.env["SCRIPTC_TARGET"] ?? "native"}:${buildTargetPlatform()}:${process.arch}`,
+    cc: process.env["SCRIPTC_CC"] ?? "",
+    nodeVersion: process.version,
+    implementation: await compilerImplementationFingerprint(),
+    environment: scriptcEnvironmentFingerprint(),
+    profFlavor: profFlavor(),
+    cwd: process.cwd(),
+  };
+}
+
 export async function compile(entryPath: string, opts: CompileOptions): Promise<CompileResult> {
+  // The census lanes stop after the frontend and report a failed compile with
+  // no artifact. They must neither read nor write an entry.
+  const root = keyReadCensusOnly() ? null : cacheRootDir();
+  // SCRIPTC_INPUT_SNAPSHOT turns the tracker on WITHOUT caching anything: the
+  // snapshot is a machine-readable record of every file this build read, every
+  // candidate it probed and missed, and every path it resolved through a
+  // symlink. That record is the signal whose absence has cost this project
+  // real time twice — a workspace-symlinked dependency compiling the published
+  // source instead of the working tree, and an entry path selecting the other
+  // version of its dependency graph, both at exit 0 with no diagnostic. It is
+  // deliberately independent of SCRIPTC_CACHE_DIR: auditing a build must not
+  // require opting into a cache.
+  const snapshotPath = process.env["SCRIPTC_INPUT_SNAPSHOT"];
+  if (root === null && snapshotPath === undefined) {
+    return compileTracked(entryPath, opts, null, null);
+  }
+  const tracker = new FrontendInputTracker();
+  return tracker.run(() => compileTracked(entryPath, opts, root, tracker));
+}
+
+async function compileTracked(
+  entryPath: string,
+  opts: CompileOptions,
+  cacheRoot: string | null,
+  inputs: FrontendInputTracker | null,
+): Promise<CompileResult> {
   let ffi: FfiProfile | null = null;
   if (opts.ffiProfilePath !== undefined) {
     const loaded = loadFfiProfile(opts.ffiProfilePath);
@@ -701,6 +1041,59 @@ export async function compile(entryPath: string, opts: CompileOptions): Promise<
     }
     ffi = loaded.profile;
   }
+
+  // The early cache is consulted HERE: before runFrontend, before tsgo, before
+  // lowering. That placement is the whole point — cc.ts's key needs the
+  // emitted TU's bytes, so it cannot exist until the work it would save has
+  // already been done.
+  if (inputs !== null) recordResolutionAnchors(entryPath);
+  const earlyOptions = cacheRoot === null ? null : await earlyCacheOptionsFor(entryPath, opts);
+  if (process.env["SCRIPTC_CACHE_DEBUG"] === "1") {
+    process.stderr.write(
+      `scriptc: compiler implementation ${compilerImplementationDir()}` +
+        (earlyOptions === null ? " (early cache off)" : ` impl=${earlyOptions.implementation.slice(0, 12)}`) +
+        "\n",
+    );
+  }
+  if (cacheRoot !== null && earlyOptions !== null) {
+    const hit = await readEarlyBuildCache(cacheRoot, earlyOptions);
+    if (hit !== null) {
+      const stem = basename(entryPath).replace(/\.(ts|js|mjs|cjs)$/, "");
+      await sweepStaleOutputs(
+        opts.outDir,
+        stem,
+        hit.meta.backend,
+        hit.cPathParts.length,
+        hit.cPathHeader !== undefined,
+      );
+      // Loud on purpose. This repo has already recorded a false finding from a
+      // cached artifact's mtime, and a silent hit is indistinguishable from a
+      // build that did the work.
+      process.stderr.write("scriptc: early cache hit (frontend and codegen skipped)\n");
+      return linkProgram(
+        entryPath,
+        opts,
+        ffi,
+        {
+          cPath: hit.cPath,
+          programUnits: hit.cPathParts,
+          programHeader: hit.cPathHeader,
+          irPath: hit.irPath,
+          backend: hit.meta.backend,
+          llvmRefusal: hit.meta.llvmRefusal ?? undefined,
+          features: hit.meta.features,
+          advisories: hit.meta.advisories,
+          advisorySourceTexts: hit.meta.advisorySourceTexts,
+          npmStatic: hit.meta.npmStatic,
+        },
+        // A hit has no frontend, so the only source text it can render is what
+        // the advisories named. An FFI LINK failure rendered on this path
+        // therefore loses its code frame; the message itself is unchanged.
+        new Map(Object.entries(hit.meta.advisorySourceTexts)),
+      );
+    }
+  }
+
   const fe = tapped("fe.load", () => runFrontend(entryPath, opts.npmStatic));
   let lowered: LowerResult;
   let entryText: string;
@@ -749,6 +1142,8 @@ export async function compile(entryPath: string, opts: CompileOptions): Promise<
   } finally {
     fe.dispose();
   }
+
+  await reportFrontendInputs(inputs);
 
   // SCRIPTC_KEYREAD_CENSUS_ONLY: the keyed-read destination census wants
   // the FRONTEND only. Stopping here — after lowering and validation,
@@ -823,22 +1218,80 @@ export async function compile(entryPath: string, opts: CompileOptions): Promise<
   // is not (an edit that shrank it, or a threshold change). Its parts would
   // survive in outDir and, worse, still be compiled if anything globbed
   // them. Sweep any part beyond the ones just written.
-  for (let i = programUnits.length + 1; i <= 32; i++) {
-    await rm(join(opts.outDir, `${stem}.part${i}.c`), { force: true });
-  }
-  if (programHeader === undefined) await rm(join(opts.outDir, headerName), { force: true });
   // Kept-TU honesty: outDir persists across builds (the CLI's .scriptc/),
   // so a lane change would leave the PREVIOUS lane's TU beside the fresh
   // one — remove the loser so the surviving TU is always the one the
-  // binary below was linked from.
-  await rm(join(opts.outDir, `${stem}${backend === "llvm" ? ".c" : ".ll"}`), { force: true });
+  // binary below was linked from. The same sweep runs on a cache hit, from
+  // the same helper, so the two paths cannot leave different directories.
+  await sweepStaleOutputs(opts.outDir, stem, backend, programUnits.length, programHeader !== undefined);
 
+  const features = programNativeFeatures(lowered.module!);
   let irPath: string | undefined;
   if (opts.emitIr) {
     irPath = join(opts.outDir, `${stem}.ir.json`);
     await writeFile(irPath, serializeModule(lowered.module));
   }
 
+  const plan: ProgramBuildPlan = {
+    cPath,
+    programUnits,
+    programHeader,
+    irPath,
+    backend,
+    llvmRefusal,
+    features,
+    advisories: lowered.advisories,
+    advisorySourceTexts: advisorySourceSubset(lowered.advisories, sourceTexts),
+    npmStatic: npmStaticStatuses,
+  };
+  if (cacheRoot !== null && earlyOptions !== null && inputs !== null) {
+    const meta: EarlyBuildMetadata = {
+      backend: plan.backend,
+      llvmRefusal: plan.llvmRefusal ?? null,
+      features: plan.features,
+      advisories: plan.advisories,
+      advisorySourceTexts: plan.advisorySourceTexts,
+      npmStatic: plan.npmStatic,
+    };
+    await publishEarlyBuildCache(cacheRoot, earlyOptions, {
+      cPath: plan.cPath,
+      cPathParts: plan.programUnits,
+      cPathHeader: plan.programHeader,
+      irPath: plan.irPath,
+      meta,
+      frontend: inputs.snapshot(),
+    });
+  }
+  return linkProgram(entryPath, opts, ffi, plan, sourceTexts);
+}
+
+/** Everything the native stage and the CompileResult need, and the exact set
+ * a cache hit must be able to reproduce without an IrModule. */
+interface ProgramBuildPlan {
+  cPath: string;
+  programUnits: string[];
+  programHeader: string | undefined;
+  irPath: string | undefined;
+  backend: "c" | "llvm";
+  llvmRefusal: string | undefined;
+  features: ProgramNativeFeatures;
+  advisories: ScrDiagnostic[];
+  advisorySourceTexts: Record<string, string>;
+  npmStatic: NpmStaticStatus[];
+}
+
+/** The native stage, shared by a real build and by a cache hit. compileC
+ * re-derives its OWN key from the restored TU's bytes, so the binary's
+ * identity chain stays entirely in cc.ts's hands — this cache never copies an
+ * executable. */
+async function linkProgram(
+  entryPath: string,
+  opts: CompileOptions,
+  ffi: FfiProfile | null,
+  plan: ProgramBuildPlan,
+  sourceTexts: Map<string, string>,
+): Promise<CompileResult> {
+  const { cPath, programUnits, programHeader, irPath, backend, llvmRefusal, features } = plan;
   await mkdir(dirname(opts.outPath), { recursive: true });
   try {
     const ccT0 = performance.now();
@@ -849,147 +1302,7 @@ export async function compile(entryPath: string, opts: CompileOptions): Promise<
       outPath: opts.outPath,
       sanitize: opts.sanitize ?? false,
       dynamic: opts.dynamic ?? false,
-      // The link switch for scr_regex.c + libregexp: detected on the IR, so
-      // regex-free programs keep the historical (pinned) command line.
-      regex: moduleUsesRegex(lowered.module),
-      // Array copying methods and the typed-array bridges live in one
-      // optional TU, linked only when one of their IR intrinsics survives.
-      copying: moduleUsesCopying(lowered.module),
-      // The link switch for scr_fetch.c (the native bridge over scr_net +
-      // scr_tls + scr_http's client parser + zlib — cc.ts implies those
-      // units into the link): embedded npm code that references fetch gets
-      // the bridge; everything else keeps its exact link line.
-      fetch: moduleUsesFetch(lowered.module),
-      // The island's node:http/https client bridge: embedded graphs that
-      // import those builtins pull scr_net_island.c + the socket units.
-      netIsland: moduleEmbedsNetIsland(lowered.module),
-      // The link switch for scr_zlib.c + libz: zlib.* libCalls on the IR,
-      // node:zlib in the embedded graph, or COMPRESSED embedded module text
-      // (emit-island.ts stores big npm sources as raw DEFLATE; the emitted
-      // main installs scr_zlib_inflate_exact on the same predicate).
-      bigint: moduleUsesBigInt(lowered.module),
-      asym: moduleUsesAsym(lowered.module),
-      cipher: moduleUsesCipher(lowered.module),
-      zlib: moduleUsesZlib(lowered.module) || moduleEmbedsCompressedNpm(lowered.module),
-      // The link switch for scr_zlib_stream.c, the createUnzip bridge.
-      // Narrower than `zlib` above on purpose: it is the only gate that
-      // also pulls scr_stream.c, so a gunzipSync program keeps its exact
-      // link line.
-      zlibStream: moduleUsesZlibStream(lowered.module),
-      // The link switch for scr_assert.c: assert.* libCalls on the IR (the
-      // regex switch also pulls it — scr_regex.c calls the assert helpers).
-      assert: moduleUsesAssert(lowered.module),
-      // The link switch for scr_inspect.c: insp.* libCalls on the IR.
-      inspect: moduleUsesInspect(lowered.module),
-      // The link switch for scr_dyn_invoke.c: dynInvoke nodes or
-      // dyn.defineProp(s) libCalls on the IR.
-      dynInvoke: moduleUsesDynInvoke(lowered.module),
-      // The link switch for scr_dc.c: dc.* libCalls on the IR (the
-      // diagnostics_channel registry and pub/sub).
-      dc: moduleUsesDc(lowered.module),
-      // The link switch for scr_async_dyn.c: the checked-dynamic async
-      // surfaces (cc.ts also pulls it under the dynInvoke/dc gates).
-      dynAsync: moduleUsesDynAsync(lowered.module),
-      // The link switch for scr_events.c: process signal/exit listeners and
-      // the stdin event surface on the IR.
-      events: moduleUsesProcessEvents(lowered.module),
-      // The link switch for scr_events_emitter.c: the node:events
-      // EventEmitter surface on the IR (emitter.* libCalls or the
-      // %EventEmitter class def).
-      emitter: moduleUsesEmitter(lowered.module),
-      // The link switch for scr_symbol.c: sym.* libCalls or a symbol-kind
-      // type anywhere on the IR.
-      symbol: moduleUsesSymbol(lowered.module),
-      weak: moduleUsesWeakMap(lowered.module),
-      // The link switch for scr_require.c: the module.requireVerdict
-      // libCall, which only a RUN-TIME-specifier require emits.
-      requireVerdict: moduleUsesRequireVerdict(lowered.module),
-      // The link switch for scr_url.c: url.* libCalls or a url-kind type
-      // on the IR. The unit used to be unconditional and cost every
-      // binary in the project four win32 pages it could not reach.
-      url: moduleUsesUrl(lowered.module),
-      // The link switch for scr_url_params.c: sp.* libCalls, the
-      // url.searchParams getter, or a searchParams-kind type on the IR.
-      searchParams: moduleUsesSearchParams(lowered.module),
-      // The link switch for scr_qs.c: the qs.* libCalls that live there
-      // (parse/stringify/unescape; escape rides the always-linked encoder).
-      qs: moduleUsesQs(lowered.module),
-      // The link switch for scr_stream.c: the node:stream class surface on
-      // the IR (stream libCalls or the %Readable-family class defs).
-      stream: moduleUsesStream(lowered.module),
-      // The link switch for scr_net.c: net.* (or http.* — http rides on
-      // net) libCalls on the IR.
-      net: moduleUsesNet(lowered.module),
-      // Pulls scr_dyn_handle.c in for the child-stdio dyn ops: a
-      // childStream-typed slot anywhere on the IR.
-      childStream: moduleUsesChildStream(lowered.module),
-      // The link switch for scr_http.c: http.* libCalls on the IR.
-      http: moduleUsesHttpServer(lowered.module),
-      http2: moduleUsesHttp2(lowered.module),
-      // The link switch for scr_dgram.c: dgram.* or dns.* libCalls on the IR.
-      dgram: moduleUsesDgram(lowered.module),
-      // The link switch for scr_watch.c: fs.watch/watcher.* libCalls on the IR.
-      watch: moduleUsesFsWatch(lowered.module),
-      fileHandle: moduleUsesFileHandle(lowered.module),
-      // The link switch for scr_http_pipe.c: the http.clientPipeFrom
-      // libCall on the IR (a Readable piped into a ClientRequest).
-      httpPipe: moduleUsesHttpPipe(lowered.module),
-      // The link switch for scr_http_body.c: the http.reqBodyStream
-      // libCall on the IR (an IncomingMessage in a Readable slot). It
-      // implies the two units it bridges, which cc.ts ORs in rather than
-      // trusting moduleUsesStream to have answered true beside it.
-      httpBody: moduleUsesHttpBody(lowered.module),
-      // The link switch for scr_abort_http.c: the http.clientSignal libCall
-      // on the IR (an AbortSignal wired into a client request). It implies
-      // the two units it bridges, which cc.ts ORs in rather than trusting
-      // the two detectors to have answered true independently.
-      abortHttp: moduleUsesAbortHttp(lowered.module),
-      // The link switch for scr_test.c: test.* libCalls on the IR.
-      nodeTest: moduleUsesNodeTest(lowered.module),
-      // The link switch for scr_tls.c + the vendored mbedTLS archive:
-      // tls.* or https.* libCalls on the IR.
-      tls: moduleUsesTls(lowered.module),
-      // The link switch for scr_tls_ca.c (the CA-store introspection unit
-      // — plain PEM bookkeeping, no mbedTLS): tlsca.* libCalls on the IR.
-      // cc.ts also compiles it under the tls gate (scr_tls.c consults the
-      // unit's default-set override for its trust anchors).
-      tlsCa: moduleUsesTlsCa(lowered.module),
-      // The link switch for the WebSocket client family (scr_websocket.c
-      // + scr_ws_client.c + scr_ws_global.c): a wsCtor node on the IR,
-      // i.e. the program took globalThis.WebSocket as a value. Implies
-      // net AND tls in cc.ts -- the codec dials over scr_net, and wss://
-      // is most of what a WebSocket is for.
-      wsGlobal: moduleUsesWsGlobal(lowered.module),
-      // The link switch for scr_ws_dispatch.c: a wsCtor whose init bag
-      // carries a dispatcher this compiler DELEGATES to. Apart from the
-      // wsGlobal gate on purpose -- the delegation drags the whole
-      // checked-dynamic object surface, and a WebSocket program with no
-      // dispatcher must not pay for it.
-      wsDispatch: moduleUsesWsDispatch(lowered.module),
-      // The link switch for scr_fetch_dispatch.c, apart from fetchStatic
-      // for the same reason wsDispatch is apart from wsGlobal.
-      fetchDispatch: moduleUsesFetchDispatch(lowered.module),
-      // The link switch for scr_abort.c: an abortSignal-typed slot
-      // anywhere on the IR. The unit was unconditional until the value
-      // surface made its size matter -- see cc.ts's CcOptions comment.
-      abortSignal: moduleUsesAbortSignal(lowered.module),
-      // The link switch for scr_fetch_static.c and the whole
-      // net/http/tls/url/zlib stack under it: a static-fetch value
-      // anywhere on the IR. A program that never writes `fetch` links
-      // none of it, mbedTLS included.
-      fetchStatic: moduleUsesFetchStatic(lowered.module),
-      // The gate that keeps 269,649 lines of vendored SQLite out of every
-      // binary that does not use it (see CcOptions.sqlite).
-      sqlite: moduleUsesSqlite(lowered.module),
-      // ...and the narrower gate for the package's VALUE surface, which
-      // only a program reaching it through an untyped namespace mints.
-      sqliteValue: moduleUsesSqliteValue(lowered.module),
-      // The link gate for the WebRTC handles: a declared shape emits
-      // release calls even though nothing constructs one.
-      wrtc: moduleUsesWrtc(lowered.module),
-      // The same gate for the Date handle: a declared shape emits release
-      // calls even though nothing constructs one.
-      date: moduleUsesDate(lowered.module),
+      ...features,
       ...(ffi !== null
         ? {
             linkInputs: ffi.libraries,
@@ -1021,8 +1334,8 @@ export async function compile(entryPath: string, opts: CompileOptions): Promise<
     backend,
     ...(irPath !== undefined ? { irPath } : {}),
     ...(llvmRefusal !== undefined ? { llvmRefusal } : {}),
-    ...(lowered.advisories.length > 0 ? { advisories: lowered.advisories, sourceTexts } : {}),
-    ...(npmStaticStatuses.length > 0 ? { npmStatic: npmStaticStatuses } : {}),
+    ...(plan.advisories.length > 0 ? { advisories: plan.advisories, sourceTexts } : {}),
+    ...(plan.npmStatic.length > 0 ? { npmStatic: plan.npmStatic } : {}),
   };
 }
 

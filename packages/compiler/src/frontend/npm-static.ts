@@ -54,7 +54,15 @@
  * the state, so a flagless compile after a flagged one sees a clean
  * slate. */
 
-import { existsSync, readFileSync, realpathSync } from "node:fs";
+import { trackedExists, trackedReadFile, trackedRealpath } from "./input-tracker.js";
+
+/** trackedReadFile with the throwing shape the call sites here already
+ * try/catch around, so the control flow at each one is unchanged. */
+function trackedReadFileOrThrow(path: string): string {
+  const text = trackedReadFile(path);
+  if (text === null) throw new Error(`cannot read ${path}`);
+  return text;
+}
 import { dirname } from "node:path";
 import { rewriteBundlerCjsExports } from "./npm-static-rewrite.js";
 import { npmPackageNameOf, registerWorkspacePackage, workspacePackageOfPath } from "./shared.js";
@@ -166,7 +174,9 @@ function registerWorkspaceRealpath(pkg: string, nmDir: string): void {
   if (realpathProbed.has(nmDir)) return;
   realpathProbed.add(nmDir);
   try {
-    const real = realpathSync(nmDir).split("\\").join("/");
+    const realRaw = trackedRealpath(nmDir);
+    if (realRaw === null) return;
+    const real = realRaw.split(String.fromCharCode(92)).join("/");
     if (real !== nmDir && !real.includes("/node_modules/")) registerWorkspacePackage(pkg, real);
   } catch {
     /* dangling symlink / missing dir — nothing to register */
@@ -323,7 +333,7 @@ function packageIsUntyped(path: string): boolean {
   if (hit !== undefined) return hit;
   let untyped = true;
   try {
-    const pkg = JSON.parse(readFileSync(`${pkgDir}/package.json`, "utf8")) as Record<string, unknown>;
+    const pkg = JSON.parse(trackedReadFileOrThrow(`${pkgDir}/package.json`)) as Record<string, unknown>;
     if (pkg["types"] !== undefined || pkg["typings"] !== undefined) untyped = false;
     if (untyped && typeof pkg["exports"] === "object" && pkg["exports"] !== null) {
       // a "types" condition anywhere inside exports is a claim too
@@ -332,13 +342,13 @@ function packageIsUntyped(path: string): boolean {
   } catch {
     /* no package.json — keep probing */
   }
-  if (untyped && existsSync(`${pkgDir}/index.d.ts`)) untyped = false;
+  if (untyped && trackedExists(`${pkgDir}/index.d.ts`)) untyped = false;
   if (untyped) {
     // the @types twin, hoisted anywhere up the realm chain
     const mangled = mangledTypesName(dirName);
     for (let dir = dirname(pkgDir); ; ) {
       const parent = dirname(dir);
-      if (existsSync(`${dir}/node_modules/@types/${mangled}/package.json`) || existsSync(`${dir}/@types/${mangled}/package.json`)) {
+      if (trackedExists(`${dir}/node_modules/@types/${mangled}/package.json`) || trackedExists(`${dir}/@types/${mangled}/package.json`)) {
         untyped = false;
         break;
       }
@@ -380,7 +390,7 @@ export function npmStaticFsShadow(): NpmStaticFsShadow | null {
         if (
           (path.endsWith(".js") || path.endsWith(".cjs")) &&
           isNodeModulesPathNorm(path) &&
-          !existsSync(path.replace(/\.(js|cjs)$/, ".d.ts")) && // a sibling .d.ts types this very file
+          !trackedExists(path.replace(/\.(js|cjs)$/, ".d.ts")) && // a sibling .d.ts types this very file
           packageIsUntyped(path)
         ) {
           return "module.exports = (() => { let u; return u; })();\n";
@@ -390,7 +400,7 @@ export function npmStaticFsShadow(): NpmStaticFsShadow | null {
       if (target.viaTypes) return undefined;
       if (path.endsWith("/package.json") || path.endsWith("\\package.json")) {
         try {
-          return npmStaticTransformPkgJsonText(readFileSync(path, "utf8"));
+          return npmStaticTransformPkgJsonText(trackedReadFileOrThrow(path));
         } catch {
           return undefined;
         }
@@ -410,7 +420,7 @@ export function npmStaticFsShadow(): NpmStaticFsShadow | null {
         let rewritten: string | null = null;
         let originalLines = 0;
         try {
-          const original = readFileSync(path, "utf8");
+          const original = trackedReadFileOrThrow(path);
           // The count a READER would get from the file on disk: a trailing
           // newline terminates the last line, it does not open a new one.
           // Measured on argo-codec's dist/cjs/index.js — 17 lines, and the
@@ -493,7 +503,7 @@ export function npmStaticIneligibleReason(
   if (jsEntry === null) return "no runtime JS entry resolves";
   let source: string;
   try {
-    source = readFileSync(jsEntry, "utf8");
+    source = trackedReadFileOrThrow(jsEntry);
   } catch {
     return `its runtime entry ${jsEntry} cannot be read`;
   }
