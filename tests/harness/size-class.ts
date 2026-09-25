@@ -1609,11 +1609,39 @@ export const SIZE_DRIFT_PAGE = 4_096;
  * — see the entry at the top of this group. */
 export const STATIC_CLASS_RECORDED = platform === "win32" ? 677_888 : null;
 
+/* 2026-09-26 - +4,608 on the REGEX class only, and the bytes are accounted
+ * for: non-owning intern entries (SCR_STRING_INTERN_WEAK, off by default).
+ *
+ * WHAT BOUGHT THEM, measured rather than inferred. Compiling scr_string.c
+ * ALONE at the two revisions, same flags, same target:
+ *
+ *     d36638ed6   scr_string.o   112,145 bytes
+ *     b4c29d19a   scr_string.o   115,416 bytes   +3,271
+ *
+ * That is the whole of it. scr_string.c is ALWAYS LINKED, so this is the
+ * benign one of the two causes this guard names - a TU that grew, not a new
+ * TU pulled in by a program that cannot reach it. The 3,271 bytes are
+ * scr_str_intern_forget (a new function: one FNV over the bytes, then a
+ * scan of the set), the cached scr_str_intern_weak accessor with its getenv
+ * and literal, and the guard at five call sites, three of which inline it.
+ * The linked image moves 4,608 rather than 3,271 because section alignment
+ * rounds it up - 1.13 of the 4,096-byte drift page, which is why the guard
+ * fired at all.
+ *
+ * WHY ONLY THE REGEX CLASS. The same 3,271 bytes land in both programs, but
+ * the static image absorbed them inside its page and the regex image did
+ * not; STATIC_CLASS_RECORDED's own check passed untouched in the same run.
+ * That is the two-classes-do-not-move-together property the sibling comment
+ * below already records, seen from the other side: this time the static
+ * figure is the one that should NOT move, and it does not.
+ *
+ * REGEX_CLASS_MAX is unaffected - 822,784 is still under its 826,368. */
+
 /** The regex program, same run, same tree. Deliberately NOT derived from
  * the static delta - and the 2026-08-24 entry is why: that change moved the
  * two classes by -7,680 and -6,656, so deriving either from the other would
  * have been 1,024 bytes wrong. */
-export const REGEX_CLASS_RECORDED = platform === "win32" ? 818_176 : null;
+export const REGEX_CLASS_RECORDED = platform === "win32" ? 822_784 : null;
 
 /** The complaint a recorded-figure check makes, or null when the size is
  * within one page of what was recorded. A string rather than a thrown

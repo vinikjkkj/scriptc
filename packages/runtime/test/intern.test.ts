@@ -92,6 +92,37 @@ test("content interning: OFF is a different program, not the same one", async ()
   expect(stderr).toContain("intern OFF");
 });
 
+test("weak entries keep the sharing and drop the hold", async () => {
+  // The non-owning table. It keeps I1 (live duplicates still share) and
+  // deliberately voids I2, I4 and I3's MECHANISM, so the C side runs a
+  // different arm -- see t_weak, which asserts what replaces them.
+  //
+  // The load-bearing one is W2: with owning entries scr_str_live_objects()
+  // exceeds scr_str_live_count() by the table's holdings, and that gap is
+  // the retention measured at 4.12 MiB of settled private working set on
+  // zapo-rest (A/A floor 1.21 MiB, arms disjoint). Weak entries close it.
+  const stderr = await run({ SCR_STRING_INTERN_WEAK: "1" });
+  expect(stderr).toContain("all intern tests passed");
+  expect(stderr).not.toContain("FAIL");
+  expect(stderr).toContain("intern WEAK");
+});
+
+test("weak entries survive the policy knobs that stress the table hardest", async () => {
+  // Direct-mapped and admission-off make the table evict as hard as it can,
+  // which is exactly when a stale weak entry would be left behind. Both must
+  // still come out clean; eviction under weak drops a borrowed pointer and
+  // can change no lifetime.
+  for (const env of [
+    { SCR_STRING_INTERN_WEAK: "1", SCR_STRING_INTERN_WAYS: "1" },
+    { SCR_STRING_INTERN_WEAK: "1", SCR_STRING_INTERN_ADMIT: "0" },
+    { SCR_STRING_INTERN_WEAK: "1", SCR_STRING_INTERN_WAYS: "1", SCR_STRING_INTERN_ADMIT: "0" },
+  ]) {
+    const stderr = await run(env);
+    expect(stderr, JSON.stringify(env)).toContain("all intern tests passed");
+    expect(stderr, JSON.stringify(env)).not.toContain("FAIL");
+  }
+});
+
 test("the direct-mapped control loses hot entries the shipping table keeps", async () => {
   // THE POSITIVE CONTROL. `WAYS=1 ADMIT=0` is the table this one replaced:
   // direct-mapped, evicting unconditionally. On the identical workload it

@@ -291,6 +291,36 @@ __attribute__((constructor)) static void scr_poolstat_reg_string(void) {
 #define SCR_STR_INTERN_MAXLEN 128
 #endif
 
+/* NON-OWNING (WEAK) TABLE ENTRIES. Off by default: this is a THIRD ARM in
+ * one image, selected at runtime, so the owning table, no table at all and
+ * the weak table are an A/B/C over the same bytes rather than a comparison
+ * across binaries -- the same discipline SCR_STRING_INTERN_WAYS=1 already
+ * follows for the direct-mapped control.
+ *
+ * WHY. The owning table does `s->rc++` on put, so every interned string is
+ * held for the life of its entry: the note above budgets that at "up to
+ * SCR_STR_INTERN_SLOTS strings the program has finished with", 3.5 MiB at
+ * exit on the bench. MEASURED on zapo-rest 2026-09-25, that hold is
+ * 4.12 MiB of settled private working set against a 1.21 MiB A/A floor,
+ * with the arms' ranges disjoint -- turning interning OFF entirely made
+ * settled memory BETTER, not worse, which is the opposite of what losing
+ * dedup predicts. The table is a retention source.
+ *
+ * A weak entry keeps the dedup and drops the hold: an entry is a borrowed
+ * pointer, a string evicts itself on death, and the table can therefore
+ * only ever name strings the program still references.
+ *
+ * WHAT IT TRADES. Dedup between CONCURRENTLY LIVE duplicates survives
+ * untouched -- that is the term behind the live-string high-water falling
+ * 34.51 -> 4.29 MiB. TEMPORAL reuse does not: content built, dropped and
+ * rebuilt later hits in the owning table and misses in this one, so some
+ * of the 4.27 million avoided allocations come back. Retention against
+ * allocation count is exactly the trade this arm exists to price, and on
+ * this machine retention is the objective. */
+#ifndef SCR_STR_INTERN_WEAK
+#define SCR_STR_INTERN_WEAK 0
+#endif
+
 static ScrStr *scr_str_itab[SCR_STR_INTERN_SLOTS];
 /* Non-NULL slots. Only so the drain below can be O(1) when nothing was ever
  * interned: a table-wide scan would otherwise fault in all 512 KiB of BSS
@@ -342,6 +372,17 @@ static int scr_str_intern_admit(void) {
   return cached;
 }
 
+/* Weak entries on/off. Cached like every other knob here, so the branch is
+ * a load and the shipping default is the historical table. */
+static int scr_str_intern_weak(void) {
+  static int cached = -1;
+  if (cached < 0) {
+    const char *env = getenv("SCR_STRING_INTERN_WEAK");
+    cached = env != NULL ? (strtol(env, NULL, 10) != 0) : (SCR_STR_INTERN_WEAK != 0);
+  }
+  return cached;
+}
+
 /* FNV-1a over the CONCATENATION of two spans, without forming it. */
 static unsigned scr_str_ihash(const char *x, size_t nx, const char *y, size_t ny) {
   unsigned long long h = 1469598103934665603ULL;
@@ -388,11 +429,12 @@ static ScrStr *scr_str_intern_get(const char *x, size_t nx, const char *y,
 static void scr_str_intern_put(unsigned base, ScrStr *s) {
   unsigned w = scr_str_intern_ways();
   unsigned i, victim = base;
+  int weak = scr_str_intern_weak();
   uint32_t best = UINT32_MAX;
   for (i = 0; i < w; i++) {
     ScrStr *e = scr_str_itab[base + i];
     if (e == NULL) {
-      s->rc++; /* the table's OWN reference; see the note on rc >= 1 above */
+      if (!weak) s->rc++; /* the table's OWN reference; see the note on rc >= 1 above */
       scr_str_itab[base + i] = s;
       scr_str_itab_used++;
       SCR_CS_BUMP(siput);
@@ -400,18 +442,54 @@ static void scr_str_intern_put(unsigned base, ScrStr *s) {
     }
     if (e->rc < best) { best = e->rc; victim = base + i; }
   }
-  if (best != 1 && scr_str_intern_admit()) {
+  /* THE ADMISSION RULE IS AN OWNING-TABLE RULE. Its job is to refuse an
+   * eviction that would FREE a string the program is still using -- with
+   * owning entries the victim's release can be the last one. A weak entry
+   * owns nothing, so eviction drops a borrowed pointer and cannot change
+   * any lifetime; refusing would only keep a colder entry. So under weak
+   * the least-referenced way is always taken, and `best` means program
+   * references rather than program-plus-table. The knob keeps its exact
+   * historical behaviour on the owning path, which is where the documented
+   * WAYS=1 ADMIT=0 positive control lives. */
+  if (!weak && best != 1 && scr_str_intern_admit()) {
     /* every way is still referenced by the program */
     SCR_CS_BUMP(sirefuse);
     return;
   }
   {
     ScrStr *e = scr_str_itab[victim];
-    s->rc++;
+    if (!weak) s->rc++;
     scr_str_itab[victim] = s;
     SCR_CS_BUMP(siput);
     SCR_CS_BUMP(sievict);
-    scr_str_release(e);
+    if (!weak) scr_str_release(e);
+  }
+}
+
+/* Remove `s` from the table if it is there. O(ways) after one FNV over the
+ * bytes, and the hash is the SAME function the put used: scr_str_ihash
+ * folds the two spans and then mixes the total length, so hashing the
+ * finished bytes as a single span lands in the set the concatenated halves
+ * landed in. That equality is what makes an O(1) eviction possible without
+ * a slot field in ScrStr, whose layout is pinned by runtime-layout.test.ts.
+ *
+ * The band test comes first because it is two compares and skips every
+ * string that could not be in the table at all, and `itab_used` skips the
+ * whole thing for a program that never interned. */
+static void scr_str_intern_forget(ScrStr *s) {
+  size_t n;
+  unsigned w, base, i;
+  if (scr_str_itab_used == 0) return;
+  n = (size_t)s->len;
+  if (n < SCR_STR_INTERN_MINLEN || n > SCR_STR_INTERN_MAXLEN) return;
+  w = scr_str_intern_ways();
+  base = scr_str_ihash(s->data, n, NULL, 0) & ~(w - 1u);
+  for (i = 0; i < w; i++) {
+    if (scr_str_itab[base + i] == s) {
+      scr_str_itab[base + i] = NULL;
+      scr_str_itab_used--;
+      return;
+    }
   }
 }
 
@@ -422,12 +500,19 @@ static void scr_str_intern_put(unsigned base, ScrStr *s) {
  * thing it meant before interning existed. */
 void scr_str_intern_drain(void) {
   size_t i;
+  int weak = scr_str_intern_weak();
   if (scr_str_itab_used == 0) return;
   for (i = 0; i < SCR_STR_INTERN_SLOTS; i++) {
     ScrStr *e = scr_str_itab[i];
     if (e == NULL) continue;
     scr_str_itab[i] = NULL;
-    scr_str_release(e);
+    /* A weak entry is a borrowed pointer: releasing it here would drop a
+     * reference the table never took, and the audit lane -- which is where
+     * this function matters -- would report the deficit as a leak in the
+     * PROGRAM. Under weak the drain is already a no-op for counting, since
+     * the table holds nothing; the slots are cleared anyway so the function
+     * means the same thing on both paths. */
+    if (!weak) scr_str_release(e);
   }
   scr_str_itab_used = 0;
 }
@@ -714,7 +799,19 @@ ScrStr *scr_str_regrow(ScrStr *s, size_t newcap) {
    * the caller's), so this fence is exactly the statement "the table can
    * never reach here", checked rather than reasoned. It is audit-lane only:
    * the shipping lane keeps the historical instruction stream, and the
-   * lane that would catch a violation is the lane that runs under ASan. */
+   * lane that would catch a violation is the lane that runs under ASan.
+   *
+   * THAT ARGUMENT IS VOID UNDER WEAK ENTRIES, and silently so: a weak entry
+   * holds no reference, so an interned string CAN arrive here at rc == 1
+   * and the fence would wave through exactly the case it was written to
+   * catch -- the realloc frees the block and the table keeps the address.
+   * No caller does this today (scr_jb_grow's buffer comes from
+   * scr_str_alloc_raw and is never interned), but "only caller" was already
+   * flagged above as a fact about today's tree, and weak entries are what
+   * make that fact load-bearing. The entry is therefore dropped before the
+   * realloc: one table probe on a path already doing a realloc, and the
+   * fence means what it says again on both paths. */
+  if (scr_str_intern_weak()) scr_str_intern_forget(s);
 #ifdef SCR_RC_AUDIT
   if (s->rc != 1) {
     scr_trap("scriptc: scr_str_regrow on a shared string\n");
@@ -758,6 +855,13 @@ ScrStr *scr_str_regrow(ScrStr *s, size_t newcap) {
 void scr_str_release(ScrStr *s) {
   if (!s || s->rc == SCR_STR_IMMORTAL) return; /* NULL: an uninitialized `let` */
   if (--s->rc == 0) {
+    /* A WEAK ENTRY MUST DIE WITH ITS STRING, AND IT MUST DIE HERE. Below
+     * this point the block can go to the pool, to the spare slot or to
+     * free(), and every one of those RECYCLES THE ADDRESS -- a stale entry
+     * would then name a live block holding different bytes, and the next
+     * lookup would memcmp against it and could hand the program a string
+     * it never built. Not a leak: a wrong answer. */
+    if (scr_str_intern_weak()) scr_str_intern_forget(s);
     scr_sidx_purge(s); /* the address may be recycled by the next malloc */
 #ifdef SCR_STRCEN_ON
     scr_strcen_died(s, (long long)s->len, (long long)s->cap);
@@ -806,6 +910,17 @@ ScrStr *scr_str_concat(ScrStr *a, ScrStr *b) {
    * result reaches the next concat as a sole-reference temp. Any string
    * with rc > 1 might be aliased and is copied, never mutated. */
   if (a->rc == 1 && a != b && a->cap >= newlen) {
+    /* THE WEAK TABLE AND THIS ARM ARE THE ONE DANGEROUS PAIR IN THIS FILE.
+     * With OWNING entries an interned string has rc >= 2, so this arm can
+     * never fire on a table member and the two features cannot interact.
+     * A weak entry holds no reference, so a table member reaches here at
+     * rc == 1 and is about to have its BYTES AND LENGTH REWRITTEN, leaving
+     * the table pointing at an entry filed under the hash of content it no
+     * longer has. That is not merely a cold entry: the eviction at death
+     * hashes the CURRENT bytes, looks in the wrong set, does not find it,
+     * and leaves a dangling pointer behind. So the entry goes before the
+     * mutation, while the old bytes are still there to hash. */
+    if (scr_str_intern_weak()) scr_str_intern_forget(a);
     memcpy(a->data + a->len, b->data, b->len);
     a->len = (uint32_t)newlen;
     a->data[newlen] = '\0';
