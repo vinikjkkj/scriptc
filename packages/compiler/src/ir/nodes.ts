@@ -8529,7 +8529,37 @@ export function canDynCheckTo(
   getUnion: (unionId: string) => IrUnionDef | undefined,
   seen: ReadonlySet<IrType> = new Set(),
 ): boolean {
-  if (isJsonSafeType(t, getRecord, getUnion)) return true;
+  /* ONE memo for the duration of THIS call, and never wider.
+   *
+   * nestedOk below asks isJsonSafeType about every node it visits, and
+   * isJsonSafeType is itself a full recursive walk of the record/union
+   * graph -- so the pair is quadratic in the size of the type graph, and
+   * generated protobuf types are where that bites. Counted on zapo-rest
+   * app182 (--provenance-sources): 18,320 canDynCheckTo calls made
+   * 5,591,101,070 nested isJsonSafeType calls over 444,399 distinct
+   * types -- about 24 distinct per call, a 12,581x repeat. The worst
+   * single call asked 169,890,601 times. With this memo the same build
+   * runs 444,970 of those walks instead of 5,591,101,070 (12,565x fewer,
+   * 99.992% hit rate) and the worst call drops from 169,890,601 to 995.
+   *
+   * PER CALL, NEVER GLOBAL. isJsonSafeAt answers FALSE for a shapeId the
+   * record table does not hold YET, and that table GROWS during lowering,
+   * so one type can legitimately answer false now and true later. A memo
+   * outliving the call would serve the stale false after the growth --
+   * a silent miscompile, not a slow build. A per-call memo cannot observe
+   * the change, because nothing is interned while the predicate walks.
+   *
+   * Keyed on IrType IDENTITY: two structurally equal but distinct objects
+   * simply miss, which costs a walk and can never answer wrong. */
+  const jsonSafeMemo = new Map<IrType, boolean>();
+  const jsonSafe = (x: IrType): boolean => {
+    const hit = jsonSafeMemo.get(x);
+    if (hit !== undefined) return hit;
+    const v = isJsonSafeType(x, getRecord, getUnion);
+    jsonSafeMemo.set(x, v);
+    return v;
+  };
+  if (jsonSafe(t)) return true;
   if (isDynBytes(t)) return true;
   // The OUT direction of the bigint box: a kind test and a retained
   // unwrap. Admitted in lockstep with canConvertToDyn above, and the
@@ -8594,7 +8624,7 @@ export function canDynCheckTo(
   if (DYN_HANDLE_KINDS.has(t.kind)) return true;
   if (t.kind === "union") {
     const def = getUnion(t.unionId);
-    if (!!def && def.arms.every((a) => a.kind === "undefinedT" || isJsonSafeType(a, getRecord, getUnion))) {
+    if (!!def && def.arms.every((a) => a.kind === "undefinedT" || jsonSafe(a))) {
       return true;
     }
   }
@@ -8610,7 +8640,7 @@ export function canDynCheckTo(
   // forever. A shape already on the stack answers TRUE, since the check
   // being built for it is the one that will validate it.
   const nestedOk = (x: IrType, stack: Set<IrType>): boolean => {
-    if (isJsonSafeType(x, getRecord, getUnion)) return true;
+    if (jsonSafe(x)) return true;
     if (isDynBytes(x)) return true;
     // A dyn ('unknown') LEAF: the target itself says "anything fits here",
     // so there is nothing to validate. Both walkers have said so since
