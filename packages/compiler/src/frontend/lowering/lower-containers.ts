@@ -4162,7 +4162,7 @@ function weakKeyArgIsIdentity(L: Lowerer, arg: ts.Expression, keyT: IrType): voi
     if (!isJsSourceFile(access.getSourceFile())) return;
     if (!L.isStdlibMember(access)) return;
     const recvT = L.typeOf(access.expression);
-    const arms: readonly ts.Type[] = recvT.isUnionType() ? recvT.getTypes() : [recvT];
+    const arms: readonly ts.Type[] = recvT.isUnionType() ? ts.constituentTypes(recvT) : [recvT];
     let word: string | null = null;
     for (const a of arms) {
       const sym = a.getSymbol();

@@ -2703,7 +2703,7 @@ export function lowerStmt(L: Lowerer, stmt: ts.Statement): IrStmt | IrStmt[] | n
   function checkerStringSource(L: Lowerer, e: ts.Expression): boolean {
     const stringLike = (t: ts.Type): boolean => {
       if ((t.flags & ts.TypeFlags.StringLike) !== 0) return true;
-      if (t.isUnionType()) return t.getTypes().every(stringLike);
+      if (t.isUnionType()) return ts.constituentTypes(t).every(stringLike);
       return false;
     };
     return stringLike(L.typeOf(e));

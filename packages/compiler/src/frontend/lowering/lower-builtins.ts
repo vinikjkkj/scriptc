@@ -2114,7 +2114,7 @@ function optionMember(p: ts.ObjectLiteralElementLike): { name: string; value: ts
         }
         // A runtime string whose TYPE pins every possible value to the
         // supported literals — the modes resolve at the call instead.
-        const arms: readonly ts.Type[] = t.isUnionType() ? t.getTypes() : [t];
+        const arms: readonly ts.Type[] = t.isUnionType() ? ts.constituentTypes(t) : [t];
         if (
           arms.length > 0 &&
           arms.every(
@@ -10755,7 +10755,7 @@ const NUMBER_CONSTANTS: Record<string, number | undefined> = {
         if (ts.isArrayLiteralExpression(bare) && bare.elements.length === 0) {
           const ctx = L.checker.getContextualType(call);
           const parts: readonly ts.Type[] =
-            ctx === undefined ? [] : ctx.isUnionType() ? ctx.getTypes() : [ctx];
+            ctx === undefined ? [] : ctx.isUnionType() ? ts.constituentTypes(ctx) : [ctx];
           const payloads = new Map<string, IrType>();
           for (const part of parts) {
             const m = L.mapTypeOf(part);
@@ -10822,7 +10822,7 @@ const NUMBER_CONSTANTS: Record<string, number | undefined> = {
         if (ts.isObjectLiteralExpression(bare) && !bare.properties.some((pr) => ts.isSpreadAssignment(pr))) {
           const ctxTs = L.checker.getContextualType(call);
           const parts: readonly ts.Type[] =
-            ctxTs === undefined ? [] : ctxTs.isUnionType() ? ctxTs.getTypes() : [ctxTs];
+            ctxTs === undefined ? [] : ctxTs.isUnionType() ? ts.constituentTypes(ctxTs) : [ctxTs];
           // Each constituent's PAYLOAD, as a checker type: a promise arm
           // contributes its type argument, a plain arm contributes itself
           // (the settle-or-value slot spells both and they name one type).

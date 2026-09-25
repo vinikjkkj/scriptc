@@ -2178,7 +2178,7 @@ export const BUILTIN_MODULE_FENCE_HINTS: Record<string, Record<string, string | 
    * `in` deliberately does NOT use this: `'unref' in null` throws. */
   export function stdlibHandleTypeOfAnswersObject(L: Lowerer, node: ts.Expression): boolean {
     const t = L.typeOf(node);
-    const arms: readonly ts.Type[] = t.isUnionType() ? t.getTypes() : [t];
+    const arms: readonly ts.Type[] = t.isUnionType() ? ts.constituentTypes(t) : [t];
     let sawHandle = false;
     for (const a of arms) {
       if (handleInterfaceOf(L, a) !== null) { sawHandle = true; continue; }
@@ -2645,7 +2645,7 @@ export const BUILTIN_MODULE_FENCE_HINTS: Record<string, Record<string, string | 
         if ((ap.flags & ts.SymbolFlags.Optional) !== 0) return true;
         const at = L.checker.getTypeOfSymbol(ap);
         return (at.flags & ts.TypeFlags.Undefined) !== 0 ||
-          (at.isUnionType() && at.getTypes().some((a) => (a.flags & ts.TypeFlags.Undefined) !== 0));
+          (at.isUnionType() && ts.constituentTypes(at).some((a) => (a.flags & ts.TypeFlags.Undefined) !== 0));
       })();
       if (assertedOptional && RUNTIME_IDENTITY_ABSENT.has(name)) {
         const st = L.mapTypeOf(L.typeOf(access));
@@ -2679,7 +2679,7 @@ export const BUILTIN_MODULE_FENCE_HINTS: Record<string, Record<string, string | 
     const gt = L.checker.getTypeOfSymbol(gp);
     const admitsUndefined = (t: ts.Type): boolean =>
       (t.flags & ts.TypeFlags.Undefined) !== 0 ||
-      (t.isUnionType() && t.getTypes().some((a) => (a.flags & ts.TypeFlags.Undefined) !== 0));
+      (t.isUnionType() && ts.constituentTypes(t).some((a) => (a.flags & ts.TypeFlags.Undefined) !== 0));
     if (!admitsUndefined(gt)) return why("declared-present");
     const t = L.mapTypeOf(L.typeOf(access));
     const loc = locOf(access);

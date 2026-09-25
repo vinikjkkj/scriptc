@@ -2015,7 +2015,7 @@ import { PoisonError, dynUndefinedExpr, newFnCtx, own } from "./lowerer.js";
     const pkg = L.npmPackageOfSymbol(type.getAliasSymbol() ?? type.getSymbol());
     if (pkg) return pkg;
     if (type.isUnionType()) {
-      for (const part of type.getTypes()) {
+      for (const part of ts.constituentTypes(type)) {
         const partPkg = L.npmPackageOf(part);
         if (partPkg) return partPkg;
       }

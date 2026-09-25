@@ -1875,9 +1875,8 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
   // and keeps its existing home.
   if (
     widened.isUnionType() &&
-    widened.getTypes().some((p) => p.flags & (ts.TypeFlags.Void | ts.TypeFlags.Undefined)) &&
-    widened
-      .getTypes()
+    ts.constituentTypes(widened).some((p) => p.flags & (ts.TypeFlags.Void | ts.TypeFlags.Undefined)) &&
+    ts.constituentTypes(widened)
       .every((p) => p.flags & (ts.TypeFlags.Void | ts.TypeFlags.Undefined | ts.TypeFlags.Never))
   ) {
     voidUnionMappings++;
@@ -1934,7 +1933,7 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
   // falls through to the general union branch below, whose per-part
   // recursion re-enters here with the pure enum parts.
   if (flags & ts.TypeFlags.EnumLike) {
-    const parts = widened.isUnionType() ? widened.getTypes() : [widened];
+    const parts = widened.isUnionType() ? ts.constituentTypes(widened) : [widened];
     if (parts.every((p) => p.flags & ts.TypeFlags.EnumLike)) {
       let hasNum = false;
       let hasStr = false;
@@ -2225,7 +2224,7 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
     // primitive part must be EMPTY, so a branded `string & { tag: 'x' }`
     // keeps whatever the rules below decide for it.
     {
-      const parts = widened.getTypes();
+      const parts = ts.constituentTypes(widened);
       const PRIM =
         ts.TypeFlags.StringLike | ts.TypeFlags.NumberLike |
         ts.TypeFlags.BooleanLike | ts.TypeFlags.BigIntLike;
@@ -2249,7 +2248,7 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
     ]);
     let handle: IrType | null = null;
     let refined = true;
-    for (const part of widened.getTypes()) {
+    for (const part of ts.constituentTypes(widened)) {
       const mapped = mapType(part, ctx);
       if (mapped && HANDLE_KINDS.has(mapped.kind)) {
         if (handle !== null && handle.kind !== mapped.kind) {
@@ -2291,7 +2290,7 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
     // it can never DISCARD a representable half. Members the discarded
     // parts contribute keep fencing at their own sites.
     {
-      const parts = widened.getTypes();
+      const parts = ts.constituentTypes(widened);
       const mappedParts = parts.map((p) => mapType(p, ctx));
       const wsParts = mappedParts.filter(
         (m) =>
@@ -2341,7 +2340,7 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
     // `any` is deliberately NOT admitted: it is a different question (an
     // unchecked hole, not a top type) and the dyn rules own it.
     {
-      const parts = widened.getTypes();
+      const parts = ts.constituentTypes(widened);
       const plainFn = (t: ts.Type): boolean =>
         checker.getCallSignatures(t).length === 1 &&
         checker.getConstructSignatures(t).length === 0 &&
@@ -2389,7 +2388,7 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
     // purpose: the empty-object refinement above still answers first, so a
     // branded `string & { tag }` keeps whatever the rules there decide.
     {
-      const parts = widened.getTypes();
+      const parts = ts.constituentTypes(widened);
       const PRIM2 =
         ts.TypeFlags.StringLike | ts.TypeFlags.NumberLike |
         ts.TypeFlags.BooleanLike | ts.TypeFlags.BigIntLike;
@@ -4544,7 +4543,7 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
       const intersectionUninhabited = (part: ts.Type): boolean => {
         if (!part.isIntersectionType()) return false;
         const pinned = new Map<string, string>();
-        for (const member of part.getTypes()) {
+        for (const member of ts.constituentTypes(part)) {
           for (const p of checker.getPropertiesOfType(member)) {
             if (p.flags & ts.SymbolFlags.Optional) continue;
             const v = unitValue(checker.getTypeOfSymbol(p));
@@ -4570,7 +4569,7 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
       // and 'nothing known' has to WEAKEN a sibling part's claim.
       const armObs: { part: ts.Type | null; arm: IrType; lits?: Record<string, string[]> }[] = [];
       const byKey = new Map<string, IrType>();
-      for (const part of widened.getTypes()) {
+      for (const part of ts.constituentTypes(widened)) {
         // An UNINHABITED arm contributes no runtime value — `T | never ≡ T`
         // — so elide it rather than fence (or, for a bare `never`, rather
         // than pollute the union with never's f64 placeholder slot).
@@ -4604,7 +4603,7 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
         if (mapped?.kind === "jsval") return JSVAL;
         if (!mapped) {
           // Before failing the whole union, let a LATER jsval part absorb.
-          for (const rest of widened.getTypes()) {
+          for (const rest of ts.constituentTypes(widened)) {
             if (mapType(rest, ctx)?.kind === "jsval") return JSVAL;
           }
           mapTrace(
@@ -4728,7 +4727,7 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
         // `Promise<void> | Promise<T>` refuses exactly as it did before.
         const payloadByKey = new Map<string, IrType>();
         let payloadSpliceable = true;
-        for (const part of widened.getTypes()) {
+        for (const part of ts.constituentTypes(widened)) {
           if (part.flags & ts.TypeFlags.Never || intersectionUninhabited(part)) continue;
           const awaited = checker.getAwaitedType(part);
           if (awaited !== undefined && (awaited.flags & ts.TypeFlags.Undefined) !== 0) {
@@ -5057,12 +5056,12 @@ function mapNarrowedTypeParam(type: ts.Type, ctx: TypeMapperCtx): IrType | null 
     if (c.flags & (ts.TypeFlags.Undefined | ts.TypeFlags.Void)) return (allowUndefined = true);
     if (c.flags & ts.TypeFlags.Null) return (allowNull = true);
     // A companion UNION (`T & ({} | null)`): each part is an allowance.
-    if (c.isUnionType()) return c.getTypes().every(visitCompanion);
+    if (c.isUnionType()) return ts.constituentTypes(c).every(visitCompanion);
     return false;
   };
   const visitPart = (part: ts.Type): boolean => {
     if (!part.isIntersectionType()) return false;
-    for (const p of part.getTypes()) {
+    for (const p of ts.constituentTypes(part)) {
       if (p.flags & ts.TypeFlags.TypeParameter) {
         if (tp && tp !== p) return false; // two different parameters: not this pattern
         tp = p;
@@ -5072,7 +5071,7 @@ function mapNarrowedTypeParam(type: ts.Type, ctx: TypeMapperCtx): IrType | null 
     }
     return true;
   };
-  const parts: readonly ts.Type[] = type.isUnionType() ? type.getTypes() : [type];
+  const parts: readonly ts.Type[] = type.isUnionType() ? ts.constituentTypes(type) : [type];
   if (!parts.every(visitPart) || !tp) return undefined;
   const bound = resolveTypeParam(tp);
   if (!bound) return null;
@@ -5132,7 +5131,7 @@ function mapBoundFilteringConditional(type: ts.Type, ctx: TypeMapperCtx): IrType
   const onFalse = branchKind(type.getFalseType());
   if (onTrue === null || onFalse === null) return null;
   const extendsT = type.getExtendsType();
-  const arms = bound === null ? learned! : bound.isUnionType() ? bound.getTypes() : [bound];
+  const arms = bound === null ? learned! : bound.isUnionType() ? ts.constituentTypes(bound) : [bound];
   // The filter must keep EVERY arm. A dropped arm would need this to
   // rebuild the union arm by arm, and a per-arm rebuild does not reproduce
   // the normalization mapType applies to a union as a whole (an
@@ -5182,7 +5181,7 @@ function mapBoundIndexedAccess(type: ts.Type, ctx: TypeMapperCtx): IrType | null
     // single read must name a single field.
     if (ctx.indexUnionOk !== true || !idxT.isUnionType()) return null;
     const arms: IrType[] = [];
-    for (const k of idxT.getTypes()) {
+    for (const k of ts.constituentTypes(idxT)) {
       const kn = k.isStringLiteralType() ? k.value : k.isNumberLiteralType() ? String(k.value) : null;
       if (kn === null) return null;
       const kprop = checker.getPropertyOfType(objT, kn);
@@ -5467,7 +5466,7 @@ export function genResultRecord(
  * a value). */
 export function isUnitOnlyTsType(t: ts.Type): boolean {
   const UNIT = ts.TypeFlags.Undefined | ts.TypeFlags.Void | ts.TypeFlags.Null;
-  const parts: readonly ts.Type[] = t.isUnionType() ? t.getTypes() : [t];
+  const parts: readonly ts.Type[] = t.isUnionType() ? ts.constituentTypes(t) : [t];
   return parts.every((p) => (p.flags & UNIT) !== 0);
 }
 
@@ -5526,7 +5525,7 @@ function mapHybridCallableIntersection(widened: ts.Type, ctx: TypeMapperCtx): Ir
   if (!widened.isIntersectionType()) return null;
   if (checker.getCallSignatures(widened).length !== 1) return null;
   let funcPart: ts.Type | null = null;
-  for (const part of widened.getTypes()) {
+  for (const part of ts.constituentTypes(widened)) {
     if (checker.getCallSignatures(part).length > 0) {
       if (funcPart) return null; // exactly one callable part
       funcPart = part;
@@ -5586,7 +5585,7 @@ function recordProvenanceOk(
   ctx?: TypeMapperCtx,
 ): boolean {
   if (t.isIntersectionType()) {
-    return t.getTypes().every(
+    return ts.constituentTypes(t).every(
       (part) => {
         const partSym = part.getSymbol();
         // Class parts normally keep their nominal identity and never
@@ -5827,7 +5826,7 @@ export function mapParametersAliasOverBoundKey(type: ts.Type, ctx: TypeMapperCtx
   const rawIdx = fnT.getIndexType();
   const idxT = (rawIdx.flags & ts.TypeFlags.TypeParameter) !== 0 ? resolveTypeParamTs(rawIdx) : rawIdx;
   if (idxT === null || idxT === undefined) return null;
-  const keys = idxT.isUnionType() ? idxT.getTypes() : [idxT];
+  const keys = idxT.isUnionType() ? ts.constituentTypes(idxT) : [idxT];
   // ONE crossing per DISTINCT handler, not per key. A wide event map
   // repeats a handful of handler shapes across dozens of names, and
   // walking per key is what floods the checker facade's synchronous
@@ -5943,7 +5942,7 @@ export function mapRestTupleUnion(type: ts.Type, ctx: TypeMapperCtx): IrType | n
   // element widened to the union of every position's type. The body keeps
   // indexing `args`; only the element type loses per-position precision.
   // Differing lengths keep the fence: no single arity is honest there.
-  const arms = type.isUnionType() ? type.getTypes() : [type];
+  const arms = type.isUnionType() ? ts.constituentTypes(type) : [type];
   const rows: IrType[][] = [];
   for (const arm of arms) {
     if (!checker.isTupleType(arm)) return null;
@@ -6349,7 +6348,7 @@ function isectWhy(t: ts.UnionOrIntersectionType, ctx: TypeMapperCtx): void {
   isectWhyBusy = true;
   try {
     const { checker } = ctx;
-    const parts = t.getTypes().map((p) => {
+    const parts = ts.constituentTypes(t).map((p) => {
       const sym = p.getSymbol();
       const decls = sym ? checker.declarationsOf(sym) : [];
       const kind =
@@ -6853,7 +6852,7 @@ function mapRecordTypeInner(widened: ts.Type, ctx: TypeMapperCtx): IrType | Reco
     const stringKey = (k: ts.Type): boolean =>
       (k.flags & ts.TypeFlags.String) !== 0 ||
       (k.isIntersectionType() &&
-        k.getTypes().every(
+        ts.constituentTypes(k).every(
           (p) =>
             (p.flags & ts.TypeFlags.String) !== 0 ||
             ((p.flags & ts.TypeFlags.Object) !== 0 &&
@@ -7580,7 +7579,7 @@ export function describeComponentBlocker(widened: ts.Type, ctx: TypeMapperCtx): 
   // arm kind with no union home. Unions have no symbol, so a null answer
   // falls through to the residual fence, never to a false lib claim.
   if (widened.isUnionType()) {
-    const parts = widened.getTypes();
+    const parts = ts.constituentTypes(widened);
     const UNIT = ts.TypeFlags.Undefined | ts.TypeFlags.Void | ts.TypeFlags.Null;
     const dataArms = parts.filter((p) => (p.flags & UNIT) === 0);
     // A union carrying an 'object'/'unknown'-flavored arm rides the
@@ -7706,7 +7705,7 @@ export function describeRecordMemberBlocker(widened: ts.Type, ctx: TypeMapperCtx
  * same IR type -- a literal row table. Anything heterogeneous keeps the
  * ordinary union treatment, where the arms carry their own shapes. */
 function uniformTupleUnionElem(t: ts.UnionType, ctx: TypeMapperCtx): IrType | null {
-  const parts = t.getTypes();
+  const parts = ts.constituentTypes(t);
   if (parts.length < 2) return null;
   const checker = ctx.checker;
   let elem: IrType | null = null;

@@ -3151,7 +3151,7 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
           const argIdent = c.arguments[0] as ts.Identifier;
           const sym = L.resolveValueSymbol(argIdent);
           const t = L.checker.getTypeAtLocation(argIdent);
-          const constituents = t.isUnionType() ? t.getTypes() : [];
+          const constituents = t.isUnionType() ? ts.constituentTypes(t) : [];
           const nonArray = constituents.filter((a) => !L.checker.isArrayType(a) && !L.checker.isTupleType(a));
           const mapped = L.mapTypeOf(t);
           const armCount =
@@ -3209,7 +3209,7 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
         ) {
           const argExpr = c.arguments[0]!;
           const t = L.checker.getTypeAtLocation(argExpr);
-          const constituents = t.isUnionType() ? t.getTypes() : [];
+          const constituents = t.isUnionType() ? ts.constituentTypes(t) : [];
           const arrays = constituents.filter(
             (a) => L.checker.isArrayType(a) || L.checker.isTupleType(a),
           );
@@ -3760,7 +3760,7 @@ function keyPresenceDefiniteOperand(L: Lowerer, e: ts.Expression): boolean {
     ts.TypeFlags.Unknown |
     ts.TypeFlags.Void |
     ts.TypeFlags.Never;
-  const parts = t.isUnionType() ? t.getTypes() : [t];
+  const parts = t.isUnionType() ? ts.constituentTypes(t) : [t];
   return parts.length > 0 && parts.every((p) => (p.flags & NO) === 0);
 }
 
@@ -5878,7 +5878,7 @@ function contextualAdmitsUnit(L: Lowerer, expr: ts.Expression, unit: IrType): bo
     ? ts.TypeFlags.Null
     : ts.TypeFlags.Undefined | ts.TypeFlags.Void;
   const openFlags = ts.TypeFlags.Any | ts.TypeFlags.Unknown;
-  const parts: readonly ts.Type[] = ctx.isUnionType() ? ctx.getTypes() : [ctx];
+  const parts: readonly ts.Type[] = ctx.isUnionType() ? ts.constituentTypes(ctx) : [ctx];
   return parts.some((p) => (p.flags & (unitFlags | openFlags)) !== 0);
 }
 
@@ -6503,7 +6503,7 @@ function nullishArmBridge(L: Lowerer, left: IrExpr): IrExpr | null {
     const bad = ts.TypeFlags.Any | ts.TypeFlags.Unknown | ts.TypeFlags.Null |
       ts.TypeFlags.Undefined | ts.TypeFlags.Void | ts.TypeFlags.Never;
     if ((t.flags & bad) !== 0) return false;
-    const parts = t.isUnionType() ? t.getTypes() : [t];
+    const parts = t.isUnionType() ? ts.constituentTypes(t) : [t];
     return !parts.some((p) => (p.flags & bad) !== 0);
   }
 
@@ -8095,7 +8095,7 @@ export function lowerOptionalChain(L: Lowerer, expr: ts.CallExpression | ts.Prop
     const t = L.typeOf(expr);
     if (!t.isUnionType()) return null;
     const out: string[] = [];
-    for (const arm of t.getTypes()) {
+    for (const arm of ts.constituentTypes(t)) {
       const s = arm.isStringLiteralType() ? arm.value : arm.isNumberLiteralType() ? String(arm.value) : null;
       if (s === null) return null;
       if (!out.includes(s)) out.push(s);
@@ -8142,7 +8142,7 @@ export function lowerOptionalChain(L: Lowerer, expr: ts.CallExpression | ts.Prop
     if (t.isNumberLiteralType()) return String(t.value);
     if (t.isUnionType()) {
       let out: string | null = null;
-      for (const arm of t.getTypes()) {
+      for (const arm of ts.constituentTypes(t)) {
         const s = arm.isStringLiteralType() ? arm.value : arm.isNumberLiteralType() ? String(arm.value) : null;
         if (s === null || (out !== null && s !== out)) return null;
         out = s;
@@ -9055,7 +9055,7 @@ function literalUnionArmOf(
    * types only into their own unit; otherwise the widened IR pair must be
    * equal or width-liftable. */
   const fitsOne = (litT: ts.Type, ftT: ts.Type): boolean => {
-    if (ftT.isUnionType()) return ftT.getTypes().some((a) => fits(litT, a));
+    if (ftT.isUnionType()) return ts.constituentTypes(ftT).some((a) => fits(litT, a));
     if (ftT.isStringLiteralType()) return litT.isStringLiteralType() && litT.value === ftT.value;
     if (ftT.isNumberLiteralType()) return litT.isNumberLiteralType() && litT.value === ftT.value;
     if (ftT.flags & ts.TypeFlags.BooleanLiteral) {
@@ -9117,11 +9117,11 @@ function literalUnionArmOf(
   function fits(litT: ts.Type, ftT: ts.Type): boolean {
     if (fitsOne(litT, ftT)) return true;
     if (!litT.isUnionType()) return false;
-    return litT.getTypes().every((a) => fitsOne(a, ftT));
+    return ts.constituentTypes(litT).every((a) => fitsOne(a, ftT));
   }
   const armShapeIds = new Set(recordArms.map((a) => a.shapeId));
   const candidates = new Set<string>();
-  for (const member of tsType.getTypes()) {
+  for (const member of ts.constituentTypes(tsType)) {
     const mMapped = L.mapTypeOf(member);
     if (mMapped?.kind !== "record" || !armShapeIds.has(mMapped.shapeId) || candidates.has(mMapped.shapeId)) continue;
     const shape = L.shapes.get(mMapped.shapeId);
@@ -10094,7 +10094,7 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
     // the RECORD the slot holds, not at a union whose promise arm no
     // return of an object literal can inhabit. Same answer, and now it is
     // this line rather than a missing mapping that gives it.
-    if (tsType.isUnionType() && tsType.getTypes().some((t) => t.getSymbol()?.name === "PromiseLike")) {
+    if (tsType.isUnionType() && ts.constituentTypes(tsType).some((t) => t.getSymbol()?.name === "PromiseLike")) {
       tsType = L.checker.getAwaitedType(tsType) ?? tsType;
     }
     let mapped = L.mapTypeOf(tsType);
@@ -10131,7 +10131,7 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
       if (ctxShape && !ctxShape.indexValue && !ctxShape.tuple) {
         const names = new Set(ctxShape.fields.map((f) => f.name));
         const ctxHasProp = (name: string): boolean => {
-          const members = tsType.isUnionType() ? tsType.getTypes() : [tsType];
+          const members = tsType.isUnionType() ? ts.constituentTypes(tsType) : [tsType];
           return members.some((m) => L.checker.getPropertyOfType(m, name) !== undefined);
         };
         const extraOf = (text: string): boolean => !names.has(text) && !ctxHasProp(text);
@@ -13140,7 +13140,7 @@ function rejectThisInObjectMethodIn(L: Lowerer, node: ts.Node, mayStop: boolean)
   ): IrExpr | null {
     if (shape.indexValue !== undefined || shape.tuple) return null;
     const keyT = L.typeOf(keyNode);
-    const parts = keyT.isUnionType() ? keyT.getTypes() : [keyT];
+    const parts = keyT.isUnionType() ? ts.constituentTypes(keyT) : [keyT];
     if (parts.length < 2) return null;
     const names: string[] = [];
     for (const p of parts) {
@@ -16806,7 +16806,7 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
     const direct = L.mapTypeOf(t);
     if (rooted(direct)) return direct;
     if (t.isIntersectionType()) {
-      for (const part of t.getTypes()) {
+      for (const part of ts.constituentTypes(t)) {
         const m = L.mapTypeOf(part);
         if (rooted(m)) return m;
       }
@@ -17028,7 +17028,7 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
       const arm = def.arms[tags[0]!]!;
       // The checker-side arm: the union part whose (widened) mapping IS
       // the proven IR arm — what typeOf answers inside the branch.
-      const parts = valT.isUnionType() ? valT.getTypes() : [valT];
+      const parts = valT.isUnionType() ? ts.constituentTypes(valT) : [valT];
       const tsArm = parts.find((p) => {
         const m = L.mapTypeOf(L.checker.getBaseTypeOfLiteralType(p));
         return m !== null && typeEquals(m, arm);
@@ -17558,7 +17558,7 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
    * Provenance, not the name: a user's own `class DataView` is a class
    * like any other and reaches none of this. */
   function couldBeDataView(L: Lowerer, t: ts.Type): boolean {
-    const parts = t.isUnionType() ? t.getTypes() : [t];
+    const parts = t.isUnionType() ? ts.constituentTypes(t) : [t];
     return parts.some((p: ts.Type) => {
       const sym = p.getSymbol() ?? p.getAliasSymbol();
       if (!sym || (sym.name !== "DataView" && sym.name !== "ArrayBufferView")) return false;
@@ -21794,7 +21794,7 @@ export function primitiveCtorClosure(
 function everyArmIsTuple(L: Lowerer, t: ts.Type): boolean {
   if (L.checker.isTupleType(t)) return true;
   if (!t.isUnionType()) return false;
-  const parts = t.getTypes();
+  const parts = ts.constituentTypes(t);
   return parts.length > 0 && parts.every((p) => L.checker.isTupleType(p));
 }
           // UNTAGGED, unlike every other fence this file builds (5327,

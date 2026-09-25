@@ -170,6 +170,23 @@ const PREFETCH_MAX_DEPTH = 512;
  * queried at all, in a batch or otherwise. */
 const PREFETCH_MAX_NODES = 100_000;
 
+/** The TypeScript 7 client identity-dedupes immutable types but does not
+ * memoize Type.getTypes(): every union/intersection inspection otherwise
+ * repeats getTypesOfType over the tsgo channel. An immutable type's
+ * constituent list cannot change, so keep that derived answer beside the
+ * adapter, shared by every caller regardless of which facade helper led to
+ * the type. Ported from upstream #190 (09f51311f). */
+const constituentTypesOf = new WeakMap<Type, readonly Type[]>();
+
+export function constituentTypes(type: Type): readonly Type[] {
+  let types = constituentTypesOf.get(type);
+  if (types === undefined) {
+    types = (type as Type & { getTypes(): readonly Type[] | undefined }).getTypes() ?? [];
+    constituentTypesOf.set(type, types);
+  }
+  return types;
+}
+
 /** Preorder sweep of the whole file, ITERATIVE (walkPreorder): the obvious
  * recursive forEachChild walk overflowed the stack HERE, in the prefetch
  * sweep, on the binderBinaryExpressionStress chains — before lowering could
@@ -621,6 +638,12 @@ export class CheckerFacade {
   }
 
   isArrayType(type: Type): boolean {
+    // Arrays are object types. The raw checker agrees that primitive,
+    // union/intersection and type-parameter types are not arrays (a
+    // narrowed array arm arrives as its own object type), so answer those
+    // locally instead of paying a round trip -- exactly as isTupleType
+    // directly below already does. Ported from upstream #190.
+    if (!(type.flags & TypeFlags.Object)) return false;
     let answer = this.arrayTypeAnswer.get(type);
     if (answer === undefined) {
       answer = this.raw.isArrayType(type);
@@ -694,7 +717,7 @@ export class CheckerFacade {
   private computeAwaitedType(type: Type, depth: number): Type | undefined {
     if (depth > 8) return undefined; // matches 5.9.3's unwrap depth fence
     if (type.isUnionType()) {
-      const arms = type.getTypes();
+      const arms = constituentTypes(type);
       const awaited = arms.map((arm) => this.computeAwaitedType(arm, depth + 1));
       if (awaited.some((arm) => arm === undefined)) return undefined;
       // No arm was a promise: awaiting the union is the union itself
@@ -715,12 +738,12 @@ export class CheckerFacade {
       // falls back to the input.
       const leaves = new Set<Type>();
       for (const a of distinct) {
-        if (a.isUnionType()) for (const l of a.getTypes()) leaves.add(l);
+        if (a.isUnionType()) for (const l of constituentTypes(a)) leaves.add(l);
         else leaves.add(a);
       }
       for (const cand of distinct) {
         if (!cand.isUnionType()) continue;
-        const own = cand.getTypes();
+        const own = constituentTypes(cand);
         if (own.length === leaves.size && own.every((l) => leaves.has(l))) return cand;
       }
       return undefined;
