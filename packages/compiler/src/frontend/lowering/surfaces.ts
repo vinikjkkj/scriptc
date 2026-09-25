@@ -1957,6 +1957,19 @@ export const BUILTIN_MODULE_FENCE_HINTS: Record<string, Record<string, string | 
    * type-space merge this test was written for still matches. */
   export function isStdlibSymbol(L: Lowerer, symbol: ts.Symbol | undefined): boolean {
     if (!symbol) return false;
+    // Memoized per Lowerer (the map is its field; see the comment there).
+    // The walk below reads only declarationsOf - itself memoized, and
+    // immutable for the snapshot - and isStdlibFile, which is a property of
+    // the program. Nothing it touches is written by the lowering, so the
+    // answer for a symbol cannot change once taken.
+    const memo = L.stdlibSymbolAnswer.get(symbol);
+    if (memo !== undefined) return memo;
+    const answer = computeIsStdlibSymbol(L, symbol);
+    L.stdlibSymbolAnswer.set(symbol, answer);
+    return answer;
+  }
+
+  function computeIsStdlibSymbol(L: Lowerer, symbol: ts.Symbol): boolean {
     // ONE isStdlibFile call per declaration, which is what the `.some`
     // this replaced cost: the kind test only runs for a declaration that
     // is already known not to be the library's. This sits on a hot path

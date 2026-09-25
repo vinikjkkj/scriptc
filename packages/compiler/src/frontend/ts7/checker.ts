@@ -170,18 +170,38 @@ const PREFETCH_MAX_DEPTH = 512;
  * queried at all, in a batch or otherwise. */
 const PREFETCH_MAX_NODES = 100_000;
 
-/** The TypeScript 7 client identity-dedupes immutable types but does not
- * memoize Type.getTypes(): every union/intersection inspection otherwise
- * repeats getTypesOfType over the tsgo channel. An immutable type's
- * constituent list cannot change, so keep that derived answer beside the
- * adapter, shared by every caller regardless of which facade helper led to
- * the type. Ported from upstream #190 (09f51311f). */
+/** The 7.0.2 client identity-dedupes immutable types but does NOT memoize
+ * constituentTypes(Type): its registry path for constituents is fetchTypes with no
+ * handle list, so the all-cached short-circuit can never fire and every
+ * inspection issues a getTypesOfType round trip. An immutable type's
+ * constituent list cannot change, so the derived answer belongs beside the
+ * adapter, shared by every caller regardless of which helper led to the type.
+ *
+ * Measured on zapo-rest's frontend: 723,237 inspections over 3,827 distinct
+ * types - 189.0 asks per type, and 705.2 MB of the 1,502.4 MB the frontend
+ * pulls over the tsgo channel, the single largest line item on either count.
+ *
+ * Ported from upstream #190 (09f51311f), including its `?? []`: the handful
+ * of call sites that do not guard with isUnionType()/isIntersectionType()
+ * first would throw a TypeError on a non-union today, so no reachable
+ * behaviour turns into an empty list. */
 const constituentTypesOf = new WeakMap<Type, readonly Type[]>();
 
 export function constituentTypes(type: Type): readonly Type[] {
   let types = constituentTypesOf.get(type);
   if (types === undefined) {
-    types = (type as Type & { getTypes(): readonly Type[] | undefined }).getTypes() ?? [];
+    const raw = (type as Type & { getTypes(): readonly Type[] | undefined }).getTypes();
+    // MEASUREMENT ONLY, and it is the evidence for the `?? []` above: every
+    // call site guards with isUnionType()/isIntersectionType() first or takes
+    // a ts.UnionType parameter, so a non-union should never reach here and
+    // the fallback should never fire. Counted rather than asserted, because
+    // a throw would turn a measurement into an outage. Fires at most once
+    // per distinct type (this is the memo-miss path).
+    if (raw === undefined) {
+      (globalThis as { __REDUND_NOTE__?: (op: string, key?: unknown) => void })
+        .__REDUND_NOTE__?.("constituentTypes.notAUnion", (type as unknown as { id?: number }).id);
+    }
+    types = raw ?? [];
     constituentTypesOf.set(type, types);
   }
   return types;
@@ -201,33 +221,55 @@ function collectNodes(sf: SourceFile): Node[] {
   return nodes;
 }
 
+/** THE ABSENT-ANSWER SENTINEL, and why the memos store it.
+ *
+ * `undefined` is a legitimate ANSWER for most of these queries - a node with
+ * no symbol, a call with no resolved signature, a signature with no type
+ * predicate - so a memo cannot also use it to mean "never asked". The
+ * spelling that stood here said exactly that, and paid for it: every read
+ * was `has(x) ? get(x) : miss`, which is two hash lookups on every HIT.
+ *
+ * The sixteen methods that wore it were called 47,275,994 times lowering
+ * zapo-rest's frontend - 33,259,973 of them getSymbolAtLocation alone, which
+ * is asked 115.3 times per distinct node - so the spelling cost 47 million
+ * avoidable lookups and bought nothing.
+ *
+ * Storing NONE in place of a genuine `undefined` makes ONE `get()` enough:
+ * `undefined` back from a map now means "never asked" and nothing else. The
+ * value types below are written so the compiler enforces it - `undefined` is
+ * not assignable to any of these maps, so a write site that forgets its
+ * `?? NONE` fails to build rather than silently reintroducing the ambiguity.
+ * Answers are unchanged; only the number of lookups is. */
+const NONE = Symbol("scriptc.checker.none");
+type None = typeof NONE;
+
 export class CheckerFacade {
-  /** Node-keyed memos. `undefined` results are represented by map presence
-   * (WeakMap.has), so misses and cached-undefined are distinguishable. */
-  private readonly typeAtLocation = new WeakMap<Node, Type | undefined>();
-  private readonly symbolAtLocation = new WeakMap<Node, Ts7Symbol | undefined>();
-  private readonly contextualType = new WeakMap<Node, Type | undefined>();
-  private readonly typeFromTypeNode = new WeakMap<Node, Type | undefined>();
-  private readonly shorthandValueSymbol = new WeakMap<Node, Ts7Symbol | undefined>();
-  private readonly resolvedSignature = new WeakMap<Node, Signature | undefined>();
-  private readonly signatureFromDeclaration = new WeakMap<Node, Signature | undefined>();
+  /** Node-keyed memos. An absent answer is stored as NONE (see above), so a
+   * `get()` returning undefined means the question was never asked. */
+  private readonly typeAtLocation = new WeakMap<Node, Type | None>();
+  private readonly symbolAtLocation = new WeakMap<Node, Ts7Symbol | None>();
+  private readonly contextualType = new WeakMap<Node, Type | None>();
+  private readonly typeFromTypeNode = new WeakMap<Node, Type | None>();
+  private readonly shorthandValueSymbol = new WeakMap<Node, Ts7Symbol | None>();
+  private readonly resolvedSignature = new WeakMap<Node, Signature | None>();
+  private readonly signatureFromDeclaration = new WeakMap<Node, Signature | None>();
   /** Symbol-keyed memos. */
-  private readonly typeOfSymbol = new WeakMap<Ts7Symbol, Type | undefined>();
+  private readonly typeOfSymbol = new WeakMap<Ts7Symbol, Type | None>();
   private readonly aliasedSymbol = new WeakMap<Ts7Symbol, Ts7Symbol>();
   private readonly declaredTypeOfSymbol = new WeakMap<Ts7Symbol, Type>();
   /** Type-keyed memos. */
   private readonly baseTypeOfLiteral = new WeakMap<Type, Type>();
-  private readonly nonNullableType = new WeakMap<Type, Type | undefined>();
+  private readonly nonNullableType = new WeakMap<Type, Type | None>();
   private readonly propertiesOfType = new WeakMap<Type, readonly Ts7Symbol[]>();
   private readonly indexInfosOfType = new WeakMap<Type, readonly IndexInfo[]>();
   private readonly typeArgumentsOf = new WeakMap<Type, readonly Type[]>();
   private readonly arrayTypeAnswer = new WeakMap<Type, boolean>();
   private readonly arrayLikeAnswer = new WeakMap<Type, boolean>();
   private readonly typeStringOf = new WeakMap<Type, string>();
-  private readonly awaitedTypeOf = new WeakMap<Type, Type | undefined>();
+  private readonly awaitedTypeOf = new WeakMap<Type, Type | None>();
   /** Signature-keyed memos. */
-  private readonly returnTypeOf = new WeakMap<Signature, Type | undefined>();
-  private readonly typePredicateOf = new WeakMap<Signature, TypePredicate | undefined>();
+  private readonly returnTypeOf = new WeakMap<Signature, Type | None>();
+  private readonly typePredicateOf = new WeakMap<Signature, TypePredicate | None>();
   /** Files whose nodes have been batch-prefetched, per query kind. */
   private readonly prefetchedTypes = new WeakSet<SourceFile>();
   private readonly prefetchedSymbols = new WeakSet<SourceFile>();
@@ -241,7 +283,15 @@ export class CheckerFacade {
      * does not shim; going around the facade forfeits memoization only. */
     readonly raw: Checker,
     private readonly options: { autoPrefetch?: boolean; project?: Project } = {},
-  ) {}
+  ) {
+    /* MEASUREMENT ONLY (block jsredund). The redundancy census needs a live
+     * ts7 client object to reach the prototypes it counts on; this is the one
+     * place that has one. No-op unless a --require preload installed the hook,
+     * which nothing in a normal build does. */
+    const install = (globalThis as { __REDUND_INSTALL__?: (raw: unknown, proto: unknown) => void })
+      .__REDUND_INSTALL__;
+    if (install) install(raw, CheckerFacade.prototype);
+  }
 
   /* ── the symbol-declaration surface (phase 3) ─────────────────────────
    * 7's Symbol carries declarations as NodeHandles (server references),
@@ -251,7 +301,7 @@ export class CheckerFacade {
    * stable, probe-verified) and memoizes per symbol. Requires the project
    * the symbols came from (options.project — Ts7Program supplies it). */
   private readonly declsOf = new WeakMap<Ts7Symbol, readonly Node[]>();
-  private readonly valueDeclOf = new WeakMap<Ts7Symbol, Node | undefined>();
+  private readonly valueDeclOf = new WeakMap<Ts7Symbol, Node | None>();
 
   private requireProject(): Project {
     const project = this.options.project;
@@ -289,21 +339,23 @@ export class CheckerFacade {
 
   /** 5.9.3's symbol.valueDeclaration. */
   valueDeclarationOf(symbol: Ts7Symbol): Node | undefined {
-    if (this.valueDeclOf.has(symbol)) return this.valueDeclOf.get(symbol);
+    const memo = this.valueDeclOf.get(symbol);
+    if (memo !== undefined) return memo === NONE ? undefined : memo;
     const decl = symbol.valueDeclaration?.resolve(this.requireProject());
-    this.valueDeclOf.set(symbol, decl);
+    this.valueDeclOf.set(symbol, decl ?? NONE);
     return decl;
   }
 
   /** 5.9.3's signature.getDeclaration() (undefined for synthesized
    * signatures — same contract as sig.declaration there). */
   signatureDeclaration(signature: Signature): Node | undefined {
-    if (this.sigDeclOf.has(signature)) return this.sigDeclOf.get(signature);
+    const memo = this.sigDeclOf.get(signature);
+    if (memo !== undefined) return memo === NONE ? undefined : memo;
     const decl = signature.declaration?.resolve(this.requireProject());
-    this.sigDeclOf.set(signature, decl);
+    this.sigDeclOf.set(signature, decl ?? NONE);
     return decl;
   }
-  private readonly sigDeclOf = new WeakMap<Signature, Node | undefined>();
+  private readonly sigDeclOf = new WeakMap<Signature, Node | None>();
 
   /** 5.9.3's type.getCallSignatures(). */
   getCallSignatures(type: Type): readonly Signature[] {
@@ -327,10 +379,28 @@ export class CheckerFacade {
   }
   private readonly ctorSigsOf = new WeakMap<Type, readonly Signature[]>();
 
-  /** 5.9.3's type.getProperty(name). */
+  /** 5.9.3's type.getProperty(name), memoized per (type, name).
+   *
+   * Two-key, which is why it went unmemoized while the one-key queries around
+   * it did not - but the pair is as immutable as either half. Measured on
+   * zapo-rest's frontend: 519,532 round trips over 27,850 distinct pairs
+   * (18.7x), 264.5 MB, the second-largest line item in the whole channel. A
+   * shadow audit let all 519,532 reach the server and compared each answer
+   * against the first one seen for its key: 491,682 repeats, zero
+   * disagreements. */
   getPropertyOfType(type: Type, name: string): Ts7Symbol | undefined {
-    return this.raw.getPropertyOfType(type, name);
+    let byName = this.propertyOfType.get(type);
+    if (byName === undefined) {
+      byName = new Map<string, Ts7Symbol | None>();
+      this.propertyOfType.set(type, byName);
+    }
+    const memo = byName.get(name);
+    if (memo !== undefined) return memo === NONE ? undefined : memo;
+    const symbol = this.raw.getPropertyOfType(type, name);
+    byName.set(name, symbol ?? NONE);
+    return symbol;
   }
+  private readonly propertyOfType = new WeakMap<Type, Map<string, Ts7Symbol | None>>();
 
   /** 5.9.3's checker.getConstraintOfTypeParameter(tp): the constraint of a
    * type parameter AS THE CHECKER HOLDS IT, or undefined when none was
@@ -353,7 +423,8 @@ export class CheckerFacade {
    * that must distinguish "unconstrained" from "constrained" still read
    * the declaration for THAT question and use this for the type. */
   constraintOfTypeParameter(type: Type): Type | undefined {
-    if (this.constraintOfTp.has(type)) return this.constraintOfTp.get(type);
+    const memo = this.constraintOfTp.get(type);
+    if (memo !== undefined) return memo === NONE ? undefined : memo;
     let constraint: Type | undefined;
     try {
       constraint = type.isTypeParameter() ? this.raw.getConstraintOfTypeParameter(type) : undefined;
@@ -364,10 +435,10 @@ export class CheckerFacade {
       // existed, so a panic costs the improvement and never the build.
       constraint = undefined;
     }
-    this.constraintOfTp.set(type, constraint);
+    this.constraintOfTp.set(type, constraint ?? NONE);
     return constraint;
   }
-  private readonly constraintOfTp = new WeakMap<Type, Type | undefined>();
+  private readonly constraintOfTp = new WeakMap<Type, Type | None>();
 
   /** The 5.9.3 checker never answered undefined from getTypeAtLocation-
    * family queries (errorType/anyType stood in); the 7 client loosens them
@@ -395,7 +466,7 @@ export class CheckerFacade {
     if (all.length > PREFETCH_MAX_NODES) return;
     const nodes = all.filter((n) => !this.typeAtLocation.has(n));
     const types = chunked(nodes, (chunk) => this.typesWithPanicFence(chunk));
-    nodes.forEach((n, i) => this.typeAtLocation.set(n, types[i]));
+    nodes.forEach((n, i) => this.typeAtLocation.set(n, types[i] ?? NONE));
   }
 
   /** withPanicFence over the type sweep (observed panic: GetTypeAtLocation
@@ -417,7 +488,7 @@ export class CheckerFacade {
     const symbols = chunked(nodes, (chunk) =>
       withPanicFence(chunk, (c) => this.raw.getSymbolAtLocation(c)),
     );
-    nodes.forEach((n, i) => this.symbolAtLocation.set(n, symbols[i]));
+    nodes.forEach((n, i) => this.symbolAtLocation.set(n, symbols[i] ?? NONE));
     // The walk's companion query: types of the symbols the file mentions.
     const distinct = [...new Set(symbols.filter((s): s is Ts7Symbol => s !== undefined))].filter(
       (s) => !this.typeOfSymbol.has(s),
@@ -425,7 +496,7 @@ export class CheckerFacade {
     const symbolTypes = chunked(distinct, (chunk) =>
       withPanicFence(chunk, (c) => this.raw.getTypeOfSymbol(c)),
     );
-    distinct.forEach((s, i) => this.typeOfSymbol.set(s, symbolTypes[i]));
+    distinct.forEach((s, i) => this.typeOfSymbol.set(s, symbolTypes[i] ?? NONE));
   }
 
   private autoPrefetch(node: Node, kind: "types" | "symbols"): void {
@@ -436,9 +507,11 @@ export class CheckerFacade {
   }
 
   getTypeAtLocation(node: Node): Type {
-    if (this.typeAtLocation.has(node)) return this.typeAtLocation.get(node) ?? this.anyType();
+    const memo = this.typeAtLocation.get(node);
+    if (memo !== undefined) return memo === NONE ? this.anyType() : memo;
     this.autoPrefetch(node, "types");
-    if (this.typeAtLocation.has(node)) return this.typeAtLocation.get(node) ?? this.anyType();
+    const swept = this.typeAtLocation.get(node);
+    if (swept !== undefined) return swept === NONE ? this.anyType() : swept;
     // The direct (memo-miss) path wears the SAME panic fence as the sweep,
     // for the reason getTypeOfSymbol's already did: a tsgo panic is a
     // thrown Error on the sync channel, and the sweep answers one with
@@ -447,24 +520,27 @@ export class CheckerFacade {
     // this path never saw one; a file the sweep SKIPS has no such
     // protection, so the two paths have to agree about what a panic means.
     const [type] = withPanicFence([node], (c) => this.raw.getTypeAtLocation(c) as (Type | undefined)[]);
-    this.typeAtLocation.set(node, type);
+    this.typeAtLocation.set(node, type ?? NONE);
     return type ?? this.anyType();
   }
 
   getSymbolAtLocation(node: Node): Ts7Symbol | undefined {
-    if (this.symbolAtLocation.has(node)) return this.symbolAtLocation.get(node);
+    const memo = this.symbolAtLocation.get(node);
+    if (memo !== undefined) return memo === NONE ? undefined : memo;
     this.autoPrefetch(node, "symbols");
-    if (this.symbolAtLocation.has(node)) return this.symbolAtLocation.get(node);
+    const swept = this.symbolAtLocation.get(node);
+    if (swept !== undefined) return swept === NONE ? undefined : swept;
     // Fenced for the reason above: the symbol sweep panics too (the
     // `import.defer(...)` callee it already names), and a skipped file's
     // queries all come down this path.
     const [symbol] = withPanicFence([node], (c) => this.raw.getSymbolAtLocation(c));
-    this.symbolAtLocation.set(node, symbol);
+    this.symbolAtLocation.set(node, symbol ?? NONE);
     return symbol;
   }
 
   getTypeOfSymbol(symbol: Ts7Symbol): Type {
-    if (this.typeOfSymbol.has(symbol)) return this.typeOfSymbol.get(symbol) ?? this.anyType();
+    const memo = this.typeOfSymbol.get(symbol);
+    if (memo !== undefined) return memo === NONE ? this.anyType() : memo;
     // The direct (memo-miss) path wears the same panic fence as the
     // prefetch sweep: symbols the sweep never saw (members resolved from
     // other files' d.ts) can hit the identical server panics (observed:
@@ -472,7 +548,7 @@ export class CheckerFacade {
     // engine graph), and the fence's answer is the sweep's — undefined,
     // presented as `any`.
     const [type] = withPanicFence([symbol], (c) => this.raw.getTypeOfSymbol(c));
-    this.typeOfSymbol.set(symbol, type);
+    this.typeOfSymbol.set(symbol, type ?? NONE);
     return type ?? this.anyType();
   }
 
@@ -495,59 +571,90 @@ export class CheckerFacade {
   }
 
   getContextualType(node: Node): Type | undefined {
-    if (this.contextualType.has(node)) return this.contextualType.get(node);
+    const memo = this.contextualType.get(node);
+    if (memo !== undefined) return memo === NONE ? undefined : memo;
     const type = this.raw.getContextualType(node as never);
-    this.contextualType.set(node, type);
+    this.contextualType.set(node, type ?? NONE);
     return type;
   }
 
   getTypeFromTypeNode(node: Node): Type {
-    if (this.typeFromTypeNode.has(node)) return this.typeFromTypeNode.get(node) ?? this.anyType();
+    const memo = this.typeFromTypeNode.get(node);
+    if (memo !== undefined) return memo === NONE ? this.anyType() : memo;
     const type = this.raw.getTypeFromTypeNode(node as never);
-    this.typeFromTypeNode.set(node, type);
+    this.typeFromTypeNode.set(node, type ?? NONE);
     return type ?? this.anyType();
   }
 
   getShorthandAssignmentValueSymbol(node: Node): Ts7Symbol | undefined {
-    if (this.shorthandValueSymbol.has(node)) return this.shorthandValueSymbol.get(node);
+    const memo = this.shorthandValueSymbol.get(node);
+    if (memo !== undefined) return memo === NONE ? undefined : memo;
     const symbol = this.raw.getShorthandAssignmentValueSymbol(node);
-    this.shorthandValueSymbol.set(node, symbol);
+    this.shorthandValueSymbol.set(node, symbol ?? NONE);
     return symbol;
   }
 
-  /** Assignability, straight through. Not memoized: the answer depends on a
-   * PAIR of types, and the only caller (the constraint-erased conditional
-   * in types.ts) asks it once per arm of one union, a handful of times per
-   * program. */
+  /** Assignability, memoized per (source, target) pair.
+   *
+   * THE COMMENT THAT STOOD HERE SAID THIS RAN "a handful of times per
+   * program". It was wrong by four orders of magnitude and nobody could have
+   * known without counting: on zapo-rest's frontend the one caller - the
+   * constraint-erased conditional in types.ts, zapo's
+   * `NonPromise<T> = T extends PromiseLike<unknown> ? never : T` - asks it
+   * 295,302 times over SEVEN distinct type pairs, one of which accounts for
+   * 42,186 of them. The caller is not at fault: it sits inside a mapType
+   * frame the memo there declines to store (the answer depends on the
+   * type-parameter binding), so the whole derivation repeats per
+   * instantiation and this query repeats with it.
+   *
+   * Assignability between two types of one immutable snapshot is a pure
+   * function of the pair - the same argument every memo above rests on. A
+   * shadow audit let all 295,302 calls reach the server and compared each
+   * answer against the first seen for its pair: 295,295 repeats, zero
+   * disagreements. Seven cache entries. */
   isTypeAssignableTo(source: Type, target: Type): boolean {
-    return this.raw.isTypeAssignableTo(source, target);
+    let byTarget = this.assignableTo.get(source);
+    if (byTarget === undefined) {
+      byTarget = new WeakMap<Type, boolean>();
+      this.assignableTo.set(source, byTarget);
+    }
+    const memo = byTarget.get(target);
+    if (memo !== undefined) return memo;
+    const answer = this.raw.isTypeAssignableTo(source, target);
+    byTarget.set(target, answer);
+    return answer;
   }
+  private readonly assignableTo = new WeakMap<Type, WeakMap<Type, boolean>>();
 
   getResolvedSignature(node: Node): Signature | undefined {
-    if (this.resolvedSignature.has(node)) return this.resolvedSignature.get(node);
+    const memo = this.resolvedSignature.get(node);
+    if (memo !== undefined) return memo === NONE ? undefined : memo;
     const signature = this.raw.getResolvedSignature(node);
-    this.resolvedSignature.set(node, signature);
+    this.resolvedSignature.set(node, signature ?? NONE);
     return signature;
   }
 
   getSignatureFromDeclaration(node: Node): Signature | undefined {
-    if (this.signatureFromDeclaration.has(node)) return this.signatureFromDeclaration.get(node);
+    const memo = this.signatureFromDeclaration.get(node);
+    if (memo !== undefined) return memo === NONE ? undefined : memo;
     const signature = this.raw.getSignatureFromDeclaration(node);
-    this.signatureFromDeclaration.set(node, signature);
+    this.signatureFromDeclaration.set(node, signature ?? NONE);
     return signature;
   }
 
   getReturnTypeOfSignature(signature: Signature): Type {
-    if (this.returnTypeOf.has(signature)) return this.returnTypeOf.get(signature) ?? this.anyType();
+    const memo = this.returnTypeOf.get(signature);
+    if (memo !== undefined) return memo === NONE ? this.anyType() : memo;
     const type = this.raw.getReturnTypeOfSignature(signature);
-    this.returnTypeOf.set(signature, type);
+    this.returnTypeOf.set(signature, type ?? NONE);
     return type ?? this.anyType();
   }
 
   getTypePredicateOfSignature(signature: Signature): TypePredicate | undefined {
-    if (this.typePredicateOf.has(signature)) return this.typePredicateOf.get(signature);
+    const memo = this.typePredicateOf.get(signature);
+    if (memo !== undefined) return memo === NONE ? undefined : memo;
     const predicate = this.raw.getTypePredicateOfSignature(signature);
-    this.typePredicateOf.set(signature, predicate);
+    this.typePredicateOf.set(signature, predicate ?? NONE);
     return predicate;
   }
 
@@ -592,17 +699,19 @@ export class CheckerFacade {
    * (access-expression queries answer const enums only — same as 5.9.3 —
    * so the lowering resolves the member symbol and asks its declaration). */
   getConstantValue(node: Node): string | number | undefined {
-    if (this.constantValueOf.has(node)) return this.constantValueOf.get(node);
+    const memo = this.constantValueOf.get(node);
+    if (memo !== undefined) return memo === NONE ? undefined : memo;
     const value = this.raw.getConstantValue(node);
-    this.constantValueOf.set(node, value);
+    this.constantValueOf.set(node, value ?? NONE);
     return value;
   }
-  private readonly constantValueOf = new WeakMap<Node, string | number | undefined>();
+  private readonly constantValueOf = new WeakMap<Node, string | number | None>();
 
   getNonNullableType(type: Type): Type {
-    if (this.nonNullableType.has(type)) return this.nonNullableType.get(type) ?? type;
+    const memo = this.nonNullableType.get(type);
+    if (memo !== undefined) return memo === NONE ? type : memo;
     const result = this.raw.getNonNullableType(type);
-    this.nonNullableType.set(type, result);
+    this.nonNullableType.set(type, result ?? NONE);
     return result ?? type;
   }
 
@@ -708,9 +817,10 @@ export class CheckerFacade {
    * site does exactly that) — a union like `T | PromiseLike<T>` collapses by
    * object identity to T, which is the pattern that call site exists for. */
   getAwaitedType(type: Type): Type | undefined {
-    if (this.awaitedTypeOf.has(type)) return this.awaitedTypeOf.get(type);
+    const memo = this.awaitedTypeOf.get(type);
+    if (memo !== undefined) return memo === NONE ? undefined : memo;
     const awaited = this.computeAwaitedType(type, 0);
-    this.awaitedTypeOf.set(type, awaited);
+    this.awaitedTypeOf.set(type, awaited ?? NONE);
     return awaited;
   }
 

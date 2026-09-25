@@ -1413,7 +1413,31 @@ let voidUnionMappings = 0;
  * type's rendering: a type parameter renders identically under every
  * instantiation, so a typeToString probe is blind to precisely this bug.
  * SCRIPTC_NO_MEMO bypasses the cache entirely, for A/B against it. */
-const mapTypeMemo = new WeakMap<ts.Type, { ctx: TypeMapperCtx; result: IrType | null }>();
+const mapTypeMemo = new WeakMap<ts.Type, Map<string, { ctx: TypeMapperCtx; result: IrType | null }>>();
+
+/** ONE SLOT PER MAPPING MODE, not one slot per type.
+ *
+ * memoUsableUnder already names the three mode flags as things that must
+ * agree before a stored answer may be reused, because they gate whole rules
+ * and can decline without moving a sensitivity counter. What the single-slot
+ * map did with that was throw the answer away: a frame under one mode
+ * OVERWROTE the entry a frame under another had just stored, and the next
+ * frame under the first mode found an entry it had to refuse.
+ *
+ * Measured on zapo-rest's frontend, that is 251,221 refused entries - hits
+ * the existing rule already considered legitimate and the storage shape
+ * could not keep. Keying the slot by the same three flags keeps them.
+ *
+ * THIS WIDENS NOTHING. memoUsableUnder still runs on every hit, so a wrong
+ * key can only cost a recomputation, never produce a reused answer the old
+ * predicate would have rejected. The sensitivity guard below - the one that
+ * decides whether an answer may be STORED at all, and the one whose two
+ * leaks are named above - is untouched. `undefined` and `false` get different
+ * characters because memoUsableUnder compares them with ===. */
+function memoModeKey(ctx: TypeMapperCtx): string {
+  const f = (v: boolean | undefined): string => (v === undefined ? "u" : v ? "t" : "f");
+  return f(ctx.dynamic) + f(ctx.indexUnionOk) + f(ctx.restTupleFromErasure);
+}
 
 /* ── SCRIPTC_SPEC_AUDIT ────────────────────────────────────────────────────
  * What a failed speculative attempt leaves behind, per attempt, on a real
@@ -1562,9 +1586,24 @@ function memoUsableUnder(entry: TypeMapperCtx, ctx: TypeMapperCtx): boolean {
   );
 }
 
+/* MEASUREMENT ONLY (block jsredund): the mapTypeMemo's own hit/miss split.
+ * A memo's VALUE is its hit rate and a memo's HEADROOM is how often a stored
+ * answer is present but declined; neither is visible from outside. Inert
+ * unless a --require preload installed the sink. */
+const redundNote = (globalThis as { __REDUND_NOTE__?: (op: string, key?: unknown) => void })
+  .__REDUND_NOTE__;
+
 export function mapType(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
   if (mapTypeDepth >= MAP_TYPE_MAX_DEPTH) return null;
-  const hit = process.env.SCRIPTC_NO_MEMO ? undefined : mapTypeMemo.get(type);
+  const slots = process.env.SCRIPTC_NO_MEMO ? undefined : mapTypeMemo.get(type);
+  const hit = slots?.get(memoModeKey(ctx));
+  if (redundNote) {
+    const tid = (type as unknown as { id?: number }).id;
+    redundNote("mapType.call", tid);
+    if (hit === undefined) redundNote("mapType.absent", tid);
+    else if (memoUsableUnder(hit.ctx, ctx)) redundNote("mapType.hit", tid);
+    else redundNote("mapType.declined", tid);
+  }
   // Same run, same registries, same mapping mode: see memoUsableUnder.
   if (hit !== undefined && memoUsableUnder(hit.ctx, ctx)) {
     if (process.env.SCRIPTC_MEMO_AUDIT) {
@@ -1596,12 +1635,24 @@ export function mapType(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
     // mapping that comes later. Successes still cache: they are the type's
     // answer either way.
     const speculativeRefusal = result === null && (ctx.restTupleFromErasure === true || ctx.speculative === true);
+    if (redundNote) {
+      const tid = (type as unknown as { id?: number }).id;
+      if (speculativeRefusal) redundNote("mapType.nostore.speculative", tid);
+      else if (contextResolutions !== sensitivityAtEntry) redundNote("mapType.nostore.contextRes", tid);
+      else if (memoSensitivity !== memoSensitivityAtEntry) redundNote("mapType.nostore.memoSens", tid);
+      else redundNote("mapType.stored", tid);
+    }
     if (
       !speculativeRefusal &&
       contextResolutions === sensitivityAtEntry &&
       memoSensitivity === memoSensitivityAtEntry
     ) {
-      mapTypeMemo.set(type, { ctx, result });
+      let bucket = mapTypeMemo.get(type);
+      if (bucket === undefined) {
+        bucket = new Map<string, { ctx: TypeMapperCtx; result: IrType | null }>();
+        mapTypeMemo.set(type, bucket);
+      }
+      bucket.set(memoModeKey(ctx), { ctx, result });
       specAuditRecordStore(type, result, ctx);
     }
     return result;
