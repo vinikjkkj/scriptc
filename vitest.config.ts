@@ -1,5 +1,6 @@
 import { fileURLToPath } from "node:url";
 import { defineConfig } from "vitest/config";
+import { BaseSequencer } from "vitest/node";
 
 // Compiled-binary + oracle caches for the test lanes (see cc.ts's cache block
 // and tests/harness/README.md). Workers inherit SCRIPTC_CACHE_DIR from here;
@@ -14,6 +15,26 @@ const cacheDir =
 // worker pool (the default — all cores — is unchanged when unset). Full-suite
 // runs additionally queue behind an advisory lock; see suite-lock.mjs.
 const workers = process.env["SCRIPTC_TEST_WORKERS"];
+
+/* The corpus parts go FIRST.
+ *
+ * vitest's default sequencer orders by the previous run's recorded
+ * duration, and falls back to FILE SIZE when it has no record — which is
+ * every fresh checkout and every CI job. The corpus entry files under
+ * tests/harness/corpus/ are four lines each and carry ~230 corpus programs
+ * apiece, so by size they sort dead last: the pool would finish the cheap
+ * files and then start its most expensive work with nothing left to
+ * overlap it, and the split would buy nothing on exactly the runs that
+ * need it most. Hoisting them is a stable partition of whatever order the
+ * base sequencer produced, so the rest keeps its (duration-aware) order. */
+class CorpusFirstSequencer extends BaseSequencer {
+  async sort(files: Parameters<BaseSequencer["sort"]>[0]) {
+    const sorted = await super.sort(files);
+    const corpus = (f: (typeof sorted)[number]): boolean =>
+      f.moduleId.replace(/\\/g, "/").includes("/tests/harness/corpus/");
+    return [...sorted.filter(corpus), ...sorted.filter((f) => !corpus(f))];
+  }
+}
 
 export default defineConfig({
   resolve: {
@@ -42,8 +63,9 @@ export default defineConfig({
       ? { maxWorkers: Number(workers), minWorkers: 1 }
       : {}),
     globalSetup: ["./tests/harness/suite-lock.mjs"],
+    sequence: { sequencer: CorpusFirstSequencer },
     // Gate-cost accounting, off unless asked: the collector installs the
-    // compiler’s phase tap and writes one JSONL row per test.
+    // compiler's phase tap and writes one JSONL row per test.
     ...(process.env["SCRIPTC_PHASE_LOG"] ? { setupFiles: ["./tests/harness/phase-collect.ts"] } : {}),
   },
 });
