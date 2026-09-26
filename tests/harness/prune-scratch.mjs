@@ -11,18 +11,28 @@
  *
  * The .pdb is NOT dead weight and must not be suppressed at the link line:
  * tests/perf/exe-profile.mjs and tests/perf/cpuphase symbolise offline from
- * exactly that file, beside exactly that binary. Bounding the tree by age
- * and size leaves them where the profiler expects them and still returns the
- * disk — which is the same trade cc.ts already made for the CAS.
+ * exactly that file, beside exactly that binary. Bounding the tree by
+ * liveness and size leaves them where the profiler expects them and still
+ * returns the disk — which is the same trade cc.ts already made for the CAS.
  *
  * The rules are pruneCacheOnce's, deliberately, because they were argued
  * once already:
  *   - a SIZE CAP, not a lifetime: under it, nothing is touched at all;
- *   - an AGE FLOOR of one hour, so nothing a live run (or the other
- *     flavor's concurrent run — the suite lock is per flavor by design)
- *     may still be holding can be taken out from under it;
+ *   - a LIVENESS FLOOR, so nothing a live run (or the other flavor's
+ *     concurrent run — the suite lock is per flavor by design) may still
+ *     be holding can be taken out from under it;
  *   - eviction stops at 75% of the cap, so a run is not re-sweeping on
  *     every invocation.
+ *
+ * That middle rule used to read "an AGE FLOOR of one hour", and the hour
+ * was a proxy for "in use" that is wrong in both directions — see
+ * run-registry.mjs, which now answers the question from process liveness
+ * instead. The consequence the proxy had in practice: a gate relaunched
+ * after a dead one (the common case) protected every byte the dead run had
+ * written and recovered NOTHING, which is how a tree measured at 11.46 GB
+ * stayed there across a relaunch while the new gate died with 2.26 GB free.
+ * When no run is alive there is now no floor at all, so a relaunch recovers
+ * the full overage immediately.
  *
  * Only CONTENT-KEY directories are evictable: a 16-hex-character name is
  * what compileAndRun/build() create per program, and it is where the whole
@@ -42,6 +52,7 @@
  */
 import { readdir, rm, stat } from "node:fs/promises";
 import { join } from "node:path";
+import { scratchFloor } from "./run-registry.mjs";
 
 const KEY_DIR = /^[0-9a-f]{16}$/;
 
@@ -72,8 +83,16 @@ async function measure(dir) {
  * Returns what it did, so a test can assert it both evicts AND spares —
  * a sweep that silently evicted nothing would make every guard pass for
  * the wrong reason.
+ *
+ * `opts.floor` overrides the liveness floor (see run-registry.mjs): a
+ * number protects everything newer, `null` protects nothing. Tests pass it
+ * so they can state a liveness situation directly instead of having to
+ * spawn a process to stand for one; production leaves it undefined and the
+ * registry answers. `opts.selfPid` is which run is "us" — the one run
+ * whose record must NOT hold the floor up, since at sweep time (globalSetup,
+ * before any worker starts) we are holding nothing.
  */
-export async function pruneScratchOnce(root, now = Date.now()) {
+export async function pruneScratchOnce(root, now = Date.now(), opts = {}) {
   const capBytes = Number(process.env["SCRIPTC_TEST_SCRATCH_MAX_MB"] ?? "4096") * 1024 * 1024;
   const result = { total: 0, freed: 0, evicted: [], spared: 0 };
   if (!Number.isFinite(capBytes) || capBytes <= 0) return result;
@@ -83,6 +102,10 @@ export async function pruneScratchOnce(root, now = Date.now()) {
 
   const dirs = [];
   for (const ent of entries) {
+    // The run registry (and anything else dot-prefixed) is bookkeeping, not
+    // scratch: it is not a candidate, and counting it as "spared" would
+    // report it as program data the sweep chose to keep.
+    if (ent.name.startsWith(".")) continue;
     const p = join(root, ent.name);
     if (ent.isDirectory()) {
       const m = await measure(p);
@@ -96,11 +119,15 @@ export async function pruneScratchOnce(root, now = Date.now()) {
   }
   if (result.total <= capBytes) return result;
 
-  const floor = now - 60 * 60 * 1000; // never evict what a live run may hold
+  /* Never evict what a live run may hold — asked of the process table, not
+   * of the clock. `null` means nothing is alive over this tree, and then
+   * nothing is protected: LRU order alone decides. */
+  const floor =
+    opts.floor !== undefined ? opts.floor : scratchFloor(root, now, opts.selfPid ?? process.pid);
   let total = result.total;
   for (const d of dirs.sort((a, b) => a.newest - b.newest)) {
     if (total <= capBytes * 0.75) break;
-    if (d.newest > floor) break; // sorted: everything after this is newer too
+    if (floor !== null && d.newest > floor) break; // sorted: the rest are newer too
     await rm(d.path, { recursive: true, force: true }).catch(() => undefined);
     total -= d.size;
     result.freed += d.size;

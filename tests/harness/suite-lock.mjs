@@ -13,6 +13,14 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { pruneScratchOnce } from "./prune-scratch.mjs";
+import { liveRuns, pidAlive, registerRun } from "./run-registry.mjs";
+
+/* The scratch tree this run will write into, and the tree whose registry
+ * says who else is writing into it. */
+const SCRATCH_ROOT = join(
+  dirname(fileURLToPath(import.meta.url)),
+  "../../node_modules/.cache/scriptc-tests",
+);
 
 /* The lock is PER FLAVOR: the plain and sanitized lanes read the same
  * committed tree through separate binary/oracle cache directories, so one
@@ -59,19 +67,17 @@ function holderPid() {
   }
 }
 
-function pidAlive(pid) {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 export default async function setup() {
-  if (process.env.SCRIPTC_NO_LOCK === "1" || !isFullSuiteRun()) return () => {};
+  /* Register BEFORE the early return, so that a filtered run — which never
+   * takes the lock and never sweeps — is still visible as live to whoever
+   * does sweep. The old age floor covered those runs incidentally by
+   * protecting everything recent; liveness only protects what it can see,
+   * so every run has to announce itself or it is not protected at all. */
+  const unregister = registerRun(SCRATCH_ROOT);
+
+  if (process.env.SCRIPTC_NO_LOCK === "1" || !isFullSuiteRun()) return unregister;
 
   const started = Date.now();
   let waitingSince = 0;
@@ -101,16 +107,25 @@ export default async function setup() {
    * See prune-scratch.mjs: the CAS under SCRIPTC_CACHE_DIR has been
    * size-capped since it landed and this tree never was, so it grew by
    * ~12 GB per gate and kept it. Best-effort in every direction: a sweep
-   * that throws must not fail a gate, and nothing under the age floor is
+   * that throws must not fail a gate, and nothing a LIVE run may hold is
    * touched, so the other flavor's concurrent run is safe. */
   try {
-    const root = join(dirname(fileURLToPath(import.meta.url)), "../../node_modules/.cache/scriptc-tests");
-    const swept = await pruneScratchOnce(root);
+    const peers = liveRuns(SCRATCH_ROOT) ?? [];
+    const swept = await pruneScratchOnce(SCRATCH_ROOT);
     if (swept.freed > 0) {
       console.log(
         `[scriptc] scratch sweep: freed ${(swept.freed / 1024 ** 3).toFixed(1)} GB ` +
           `from ${swept.evicted.length} stale program directories ` +
           `(cap SCRIPTC_TEST_SCRATCH_MAX_MB)`,
+      );
+    } else if (peers.length > 0) {
+      /* Say WHY nothing moved. A sweep that is holding back for a live
+       * peer and a sweep that had nothing to do are the same silence
+       * otherwise, and the first one is the one worth knowing about when
+       * the disk is filling. */
+      console.log(
+        `[scriptc] scratch sweep: nothing evicted — ${peers.length} live run(s) ` +
+          `(${peers.map((p) => `pid ${p.pid}/${p.flavor}`).join(", ")}) may still hold it`,
       );
     }
   } catch {
@@ -118,6 +133,7 @@ export default async function setup() {
   }
 
   return () => {
+    unregister();
     if (!acquired) return;
     try {
       if (holderPid() === process.pid) rmSync(LOCK_PATH, { force: true });
