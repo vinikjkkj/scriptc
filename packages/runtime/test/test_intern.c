@@ -312,6 +312,112 @@ static void t_walk(void) {
   scr_str_intern_drain();
 }
 
+/* ── the WEAK arm: SCR_STRING_INTERN_WEAK=1 ─────────────────────────────
+ * A non-owning table keeps I1 and DELIBERATELY VOIDS I2, I3's MECHANISM and
+ * I4, so those arms are not run here and this one asserts what replaces
+ * them. Stating that plainly matters: a reader who sees t_no_mutation
+ * skipped should find the substitute, not a gap.
+ *
+ *   W1  SHARING SURVIVES, AND THE TABLE HOLDS NOTHING. Two concurrently
+ *       live byte-equal results still share (I1). But the first result's
+ *       rc is 1, not 2 -- that single number IS the difference between the
+ *       two tables, and it is the whole point of the arm.
+ *
+ *   W2  NO RETENTION. With owning entries scr_str_live_objects() exceeds
+ *       scr_str_live_count() by exactly the table's holdings; that gap is
+ *       the 4.12 MiB of settled working set measured on zapo-rest. Weak
+ *       entries make the two numbers equal, which is the claim under test.
+ *
+ *   W3  A DEAD STRING LEAVES THE TABLE. Build, drop, rebuild: the rebuild
+ *       must be a NEW object, because the entry died with its string. A
+ *       `keep` is held across it so "a new pointer" is a statement about
+ *       the table and not about the allocator handing back the address.
+ *
+ *   W4  IN-PLACE MUTATION IS SAFE. I3 held because an interned string had
+ *       rc >= 2 and the in-place arm gates on rc == 1. Under weak entries
+ *       a table member DOES reach that arm at rc == 1 and IS rewritten, so
+ *       the entry must be dropped before the bytes change -- otherwise it
+ *       stays filed under the hash of content it no longer has, the
+ *       eviction at death looks in the wrong set, and the table keeps a
+ *       pointer to a freed block. The churn loop after the mutation is
+ *       what turns that stale pointer into a recycled block; without the
+ *       hook in scr_str_concat this arm crashes (verified by removing it:
+ *       2 of 3 runs, which is also why one green run would not have been
+ *       evidence). */
+static void t_weak(void) {
+  ScrStr *a, *b, *keep, *dead, *again, *s, *t, *u;
+  char before[64];
+  unsigned i;
+  scr_str_intern_drain();
+
+  /* W1 */
+  a = mk(24, 201);
+  CHECK(a->rc == 1); /* owning would be 2: the table took no reference */
+  b = mk(24, 201);
+  CHECK(b == a);     /* I1 still holds between live duplicates */
+  CHECK(a->rc == 2); /* both program references, neither the table's */
+  scr_str_release(b);
+  scr_str_release(a);
+
+  /* W2 -- the retention claim, asserted rather than argued */
+  CHECK(scr_str_live_objects() == scr_str_live_count());
+
+  /* W3 -- and it is asserted on OBJECT COUNT, not on pointer identity.
+   * "The rebuild has a new address" is a claim about the ALLOCATOR: the
+   * freed block goes to the spare slot and the next same-sized request
+   * gets the same address back, which is exactly how this assertion first
+   * failed. t_drain dodges that with a held `keep`; the cleaner statement
+   * is that the string really DIED -- with owning entries the release
+   * below leaves a live object behind, and here it must not. */
+  {
+    long o0 = scr_str_live_objects();
+    dead = mk(36, 203);
+    CHECK(scr_str_live_objects() == o0 + 1);
+    scr_str_release(dead);
+    CHECK(scr_str_live_objects() == o0); /* owning would hold it here */
+    /* and the content is still rebuildable, correctly */
+    again = mk(36, 203);
+    CHECK(again->len == 36);
+    scr_str_release(again);
+  }
+  keep = mk(40, 202);
+  scr_str_release(keep);
+
+  /* W4 */
+  scr_str_intern_drain();
+  s = mk(24, 204);
+  CHECK(s->rc == 1);   /* weak: eligible for the in-place arm */
+  CHECK(s->cap >= 25); /* and eligible on capacity, so the arm really fires */
+  memcpy(before, s->data, s->len + 1);
+  t = scr_str_new("!", 1);
+  u = scr_str_concat(s, t);
+  CHECK(u == s); /* it DID append in place -- the case I3 used to forbid */
+  CHECK(s->len == 25 && s->data[24] == '!');
+  scr_str_release(t);
+  /* Rebuild the pre-mutation content: must be a fresh, correct string. */
+  {
+    ScrStr *old = mk(24, 204);
+    CHECK(old != s);
+    CHECK(old->len == 24);
+    CHECK(memcmp(old->data, before, 24) == 0);
+    scr_str_release(old);
+  }
+  /* BOTH, and u == s: the in-place arm returns `a` at rc == 2 -- the
+   * caller's original reference plus the one it returns -- so releasing
+   * only the result leaks the binding's. t_no_mutation's control does the
+   * same pair for the same reason. */
+  scr_str_release(u);
+  scr_str_release(s);
+  /* Churn so any stale entry names a RECYCLED block rather than merely a
+   * freed one -- the difference between a latent bug and a crash. */
+  for (i = 0; i < 2000u; i++) {
+    ScrStr *c = mk(24 + (i % 40u), 900u + i);
+    scr_str_release(c);
+  }
+  scr_str_intern_drain();
+  CHECK(scr_str_live_count() == 0);
+}
+
 int main(int argc, char **argv) {
   int admitted = 0, survived = 0;
   const char *ways = getenv("SCR_STRING_INTERN_WAYS");
@@ -335,6 +441,28 @@ int main(int argc, char **argv) {
     CHECK(scr_str_live_count() == 0);
     fprintf(stderr, "intern OFF: ways=%s admit=%s\n", ways ? ways : "-",
             admit ? admit : "-");
+    fprintf(stderr, "%s\n", failures ? "FAILED" : "all intern tests passed");
+    return failures ? 1 : 0;
+  }
+
+  if (getenv("SCR_STRING_INTERN_WEAK") != NULL &&
+      strtol(getenv("SCR_STRING_INTERN_WEAK"), NULL, 10) != 0) {
+    /* I2, I4 and I3's MECHANISM are void by construction here; t_weak
+     * asserts what replaces them. t_band/t_gap/t_walk/t_bounded are
+     * table-policy claims that a weak table must still satisfy. */
+    /* t_gap and t_bounded are OWNING-TABLE claims, not general ones:
+     * t_gap asserts "still alive: the table holds it" and t_bounded
+     * asserts held > 0. Both say the table keeps strings the program has
+     * released, which is precisely the property weak entries remove, so
+     * running them here would assert the bug back. t_no_mutation (I3's
+     * rc >= 2 mechanism) and t_hot_survival (I4) are void for the same
+     * reason. t_weak carries their replacements. */
+    t_band();
+    t_weak();
+    t_walk();
+    CHECK(scr_str_live_count() == 0);
+    fprintf(stderr, "intern WEAK: ways=%s admit=%s\n", ways ? ways : "default",
+            admit ? admit : "default");
     fprintf(stderr, "%s\n", failures ? "FAILED" : "all intern tests passed");
     return failures ? 1 : 0;
   }
