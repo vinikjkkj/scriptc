@@ -16,6 +16,8 @@ import {
   publishEarlyBuildCache,
   readEarlyBuildCache,
   scriptcEnvironmentFingerprint,
+  cacheVerificationDivergences,
+  cacheVerifyEnabled,
   type EarlyBuildCacheOptions,
 } from "../src/frontend/early-cache.js";
 
@@ -360,5 +362,83 @@ describe("early build cache", () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+
+  /* Verify mode's comparison, mutant per field FOUND.
+   *
+   * Same reasoning as the key test above, one layer in: the thing this mode
+   * exists to catch is a field that silently stops being compared, so the
+   * mode must not itself compare a remembered list. A field added to
+   * EarlyBuildMetadata tomorrow gets a mutant here for free. */
+  it("verification diverges on every metadata field, enumerated from the object rather than listed", () => {
+    const meta = {
+      backend: "llvm" as const,
+      llvmRefusal: null,
+      features: { regex: true },
+      advisories: [],
+      advisorySourceTexts: {},
+      npmStatic: [],
+    };
+    const subject = () => ({ meta: { ...meta }, artifacts: new Map([["program.tu", new Uint8Array([1, 2, 3])]]) });
+
+    // Control: identical subjects must produce NO divergence. Without this a
+    // comparison that flagged everything would satisfy the loop below.
+    expect(cacheVerificationDivergences(subject(), subject())).toEqual([]);
+
+    const fields = Object.keys(meta);
+    expect(fields.length).toBeGreaterThan(0);
+    const unnoticed: string[] = [];
+    for (const field of fields) {
+      const fresh = subject();
+      (fresh.meta as unknown as Record<string, unknown>)[field] = "__mutant__";
+      const found = cacheVerificationDivergences(subject(), fresh);
+      if (!found.some((line) => line.startsWith(`meta.${field}:`))) unnoticed.push(field);
+    }
+    expect(unnoticed, `metadata fields a stale hit could change unnoticed: ${unnoticed.join(", ")}`).toEqual([]);
+  });
+
+  it("verification diverges on artifact bytes, and on an artifact present on only one side", () => {
+    const meta = {
+      backend: "llvm" as const,
+      llvmRefusal: null,
+      features: {},
+      advisories: [],
+      advisorySourceTexts: {},
+      npmStatic: [],
+    };
+    const cached = { meta, artifacts: new Map([["program.tu", new Uint8Array([1, 2, 3])]]) };
+
+    const differing = { meta, artifacts: new Map([["program.tu", new Uint8Array([1, 2, 4])]]) };
+    expect(cacheVerificationDivergences(cached, differing).join("\n")).toContain("artifact program.tu:");
+
+    // Equal length is not equality: a byte-for-byte walk must catch this.
+    const sameLength = { meta, artifacts: new Map([["program.tu", new Uint8Array([3, 2, 1])]]) };
+    expect(cacheVerificationDivergences(cached, sameLength)).toHaveLength(1);
+
+    const extra = {
+      meta,
+      artifacts: new Map([
+        ["program.tu", new Uint8Array([1, 2, 3])],
+        ["program.header", new Uint8Array([9])],
+      ]),
+    };
+    expect(cacheVerificationDivergences(cached, extra).join("\n")).toContain("program.header");
+    expect(cacheVerificationDivergences(extra, cached).join("\n")).toContain("program.header");
+  });
+
+  /* The flag that turns the mode on must NOT be in the key. SCRIPTC_* is
+   * folded by a blanket, so a verify flag inside it would change every key,
+   * force a cold miss, and leave no hit to verify -- the mode would report
+   * success having checked nothing. SCRIPTC_CACHE_DEBUG is the cautionary
+   * twin: it IS in the key, so it can never instrument a cached build. */
+  it("the verify flag is excluded from the key, and the debug flag is not", () => {
+    const base = { PATH: "x" } as NodeJS.ProcessEnv;
+    const withVerify = { ...base, SCRIPTC_CACHE_VERIFY: "1" };
+    expect(scriptcEnvironmentFingerprint(withVerify)).toBe(scriptcEnvironmentFingerprint(base));
+    expect(cacheVerifyEnabled(withVerify)).toBe(true);
+    expect(cacheVerifyEnabled(base)).toBe(false);
+
+    const withDebug = { ...base, SCRIPTC_CACHE_DEBUG: "1" };
+    expect(scriptcEnvironmentFingerprint(withDebug)).not.toBe(scriptcEnvironmentFingerprint(base));
   });
 });

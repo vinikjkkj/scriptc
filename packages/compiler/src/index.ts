@@ -1,4 +1,4 @@
-import { mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tapPhase, tapped } from "./phase-tap.js";
 import { basename, dirname, join, resolve } from "node:path";
 import { cacheRootDir, CcCompileError, compileC, compileLibArchive, profFlavor, resolveCc, targetPlatform } from "./backend/cc.js";
@@ -42,6 +42,9 @@ import {
   compilerImplementationFingerprint,
   publishEarlyBuildCache,
   readEarlyBuildCache,
+  cacheVerifyEnabled,
+  cacheVerificationDivergences,
+  type CacheVerificationSubject,
   scriptcEnvironmentFingerprint,
   type EarlyBuildCacheOptions,
   type EarlyBuildMetadata,
@@ -1055,9 +1058,23 @@ async function compileTracked(
         "\n",
     );
   }
+  // Non-null only in verify mode, and only after a hit: it carries the bytes
+  // the cache handed back, to be compared against what this build emits.
+  let pendingVerification: CacheVerificationSubject | null = null;
   if (cacheRoot !== null && earlyOptions !== null) {
     const hit = await readEarlyBuildCache(cacheRoot, earlyOptions);
-    if (hit !== null) {
+    if (hit !== null && cacheVerifyEnabled()) {
+      // Verify mode: keep the cached bytes, then fall through and build for
+      // real. The comparison happens at the publish site below. Reading the
+      // bytes HERE is not optional -- a hit installs the cached artifacts
+      // into outDir, and the build about to run overwrites them in place.
+      pendingVerification = await verificationSubjectFromPaths(hit.meta, {
+        "program.tu": hit.cPath,
+        "program.header": hit.cPathHeader,
+        "program.ir.json": hit.irPath,
+      }, hit.cPathParts);
+      process.stderr.write("scriptc: early cache hit -- VERIFY MODE, building anyway to compare\n");
+    } else if (hit !== null) {
       const stem = basename(entryPath).replace(/\.(ts|js|mjs|cjs)$/, "");
       await sweepStaleOutputs(
         opts.outDir,
@@ -1253,6 +1270,23 @@ async function compileTracked(
       advisorySourceTexts: plan.advisorySourceTexts,
       npmStatic: plan.npmStatic,
     };
+    if (pendingVerification !== null) {
+      // The build just ran with a hit already in hand. If they disagree, the
+      // cache handed back something this source no longer produces, and every
+      // downstream number taken from it was measured on the wrong artifact.
+      const fresh = await verificationSubjectFromPaths(
+        meta,
+        { "program.tu": plan.cPath, "program.header": plan.programHeader, "program.ir.json": plan.irPath },
+        plan.programUnits,
+      );
+      const divergences = cacheVerificationDivergences(pendingVerification, fresh);
+      if (divergences.length > 0) {
+        throw new Error(
+          `scriptc: STALE CACHE HIT for ${entryPath}\n  ` + divergences.join("\n  "),
+        );
+      }
+      process.stderr.write("scriptc: early cache verified (cached artifact matches a fresh build)\n");
+    }
     await publishEarlyBuildCache(cacheRoot, earlyOptions, {
       cPath: plan.cPath,
       cPathParts: plan.programUnits,
@@ -1263,6 +1297,27 @@ async function compileTracked(
     });
   }
   return linkProgram(entryPath, opts, ffi, plan, sourceTexts);
+}
+
+/** Read a verification subject off disk. `roles` maps an artifact's role name
+ * to its path (undefined where the build has no such artifact); `parts` are
+ * the numbered program units, which keep their positional names. */
+async function verificationSubjectFromPaths(
+  meta: EarlyBuildMetadata,
+  roles: Record<string, string | undefined>,
+  parts: string[],
+): Promise<CacheVerificationSubject> {
+  const artifacts = new Map<string, Uint8Array>();
+  for (const [name, path] of Object.entries(roles)) {
+    if (path === undefined) continue;
+    const bytes = await readFile(path).catch(() => null);
+    if (bytes !== null) artifacts.set(name, bytes);
+  }
+  for (const [index, path] of parts.entries()) {
+    const bytes = await readFile(path).catch(() => null);
+    if (bytes !== null) artifacts.set(`program.part${index}`, bytes);
+  }
+  return { meta, artifacts };
 }
 
 /** Everything the native stage and the CompileResult need, and the exact set

@@ -164,9 +164,19 @@ function digestBytes(bytes: Uint8Array): string {
 
 /* ── the explicit half of the key ────────────────────────────────────────── */
 
-/** Every SCRIPTC_* variable except the three that configure THIS cache and
+/** Every SCRIPTC_* variable except the four that configure THIS cache and
  * nothing else. A blanket rather than an allowlist: see the header comment. */
-const CACHE_ONLY_ENV = new Set(["SCRIPTC_CACHE_DIR", "SCRIPTC_NO_CACHE", "SCRIPTC_CACHE_MAX_MB"]);
+const CACHE_ONLY_ENV = new Set([
+  "SCRIPTC_CACHE_DIR",
+  "SCRIPTC_NO_CACHE",
+  "SCRIPTC_CACHE_MAX_MB",
+  // Verify mode MUST be excluded or it cannot observe the thing it checks:
+  // this fingerprint is a blanket over every other SCRIPTC_*, so a verify
+  // flag inside the key would change every key, force a cold miss, and leave
+  // no hit to verify. Same shape as SCRIPTC_CACHE_DEBUG, which is still IN
+  // the key and must never be used to instrument a cached build.
+  "SCRIPTC_CACHE_VERIFY",
+]);
 
 export function scriptcEnvironmentFingerprint(env: NodeJS.ProcessEnv = process.env): string {
   const hash = createHash("sha256").update("scriptc-env-v1\0");
@@ -446,4 +456,56 @@ export async function publishEarlyBuildCache(
   } finally {
     await rm(stage, { recursive: true, force: true }).catch(() => undefined);
   }
+}
+
+/* ── verify mode ─────────────────────────────────────────────────────────── */
+
+/** What a verification compares: the metadata a build produced, plus the
+ * bytes of every artifact it emitted, keyed by the artifact's role name. */
+export interface CacheVerificationSubject {
+  meta: EarlyBuildMetadata;
+  artifacts: Map<string, Uint8Array>;
+}
+
+/** Is verify mode on? SCRIPTC_CACHE_VERIFY is in CACHE_ONLY_ENV, so asking
+ * this question does not change the answer -- see the note there. */
+export function cacheVerifyEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  return env["SCRIPTC_CACHE_VERIFY"] === "1";
+}
+
+/** Every way a cached hit can disagree with the build that was run anyway.
+ *
+ * The metadata half walks the UNION of both objects' own keys rather than a
+ * list of fields to check. A list is written from what its author remembered,
+ * and a field added to EarlyBuildMetadata tomorrow would be compared by
+ * nobody -- which is the precise shape of bug this mode exists to catch, so
+ * it must not be the shape of the mode itself.
+ *
+ * Returns one human-readable line per divergence; empty means the cached
+ * artifact is exactly what building again produces. */
+export function cacheVerificationDivergences(
+  cached: CacheVerificationSubject,
+  fresh: CacheVerificationSubject,
+): string[] {
+  const out: string[] = [];
+
+  const names = [...new Set([...cached.artifacts.keys(), ...fresh.artifacts.keys()])].sort();
+  for (const name of names) {
+    const a = cached.artifacts.get(name);
+    const b = fresh.artifacts.get(name);
+    if (a === undefined) out.push(`artifact ${name}: absent from the cached entry, emitted by the build`);
+    else if (b === undefined) out.push(`artifact ${name}: present in the cached entry, not emitted by the build`);
+    else if (a.length !== b.length || !a.every((byte, i) => byte === b[i]))
+      out.push(`artifact ${name}: cached ${digestBytes(a).slice(0, 12)} != built ${digestBytes(b).slice(0, 12)}`);
+  }
+
+  const cachedMeta = cached.meta as unknown as Record<string, unknown>;
+  const freshMeta = fresh.meta as unknown as Record<string, unknown>;
+  for (const field of [...new Set([...Object.keys(cachedMeta), ...Object.keys(freshMeta)])].sort()) {
+    const a = JSON.stringify(cachedMeta[field]) ?? "undefined";
+    const b = JSON.stringify(freshMeta[field]) ?? "undefined";
+    if (a !== b) out.push(`meta.${field}: cached ${a} != built ${b}`);
+  }
+
+  return out;
 }
