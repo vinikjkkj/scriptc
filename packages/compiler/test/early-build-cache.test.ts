@@ -288,4 +288,77 @@ describe("early build cache", () => {
       rmSync(f.dir, { recursive: true, force: true });
     }
   });
+
+  /* The tests above each name ONE thing that must change the key, and the
+   * header calls them "deliberately chosen" -- chosen, that is, from what
+   * their author remembered. That shape cannot cover a field added tomorrow,
+   * and the field nobody remembers is exactly the one that silently stops
+   * participating.
+   *
+   * So this test names no fields. It enumerates them from the options object
+   * itself and demands a miss for each one it FINDS. Add a field to
+   * EarlyBuildCacheOptions and forget it in cacheKey(), and this goes red
+   * naming that field, with nobody having edited this test.
+   *
+   * Why a miss is the right probe rather than reading cacheKey() directly:
+   * an unfolded field leaves entryDir identical AND satisfies the
+   * `stamp.key !== cacheKey(options)` guard, so it surfaces as a HIT. The
+   * observable behaviour is the thing that matters anyway. */
+  it("every options field participates in the key, enumerated from the object rather than listed", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "scriptc-early-structural-"));
+    try {
+      const outDir = join(dir, "out");
+      mkdirSync(outDir, { recursive: true });
+      const tu = join(outDir, "prog.ll");
+      writeFileSync(tu, "; translation unit\n");
+      const root = join(dir, "cache");
+      const baseline: EarlyBuildCacheOptions = {
+        entryPath: join(dir, "prog.ts"),
+        outDir,
+        outPath: join(outDir, "prog.exe"),
+        compileOptions: "{}",
+        provenance: "null",
+        target: "test",
+        cc: "zigcc",
+        nodeVersion: process.version,
+        implementation: "impl",
+        environment: "env",
+        profFlavor: "",
+        cwd: dir,
+      };
+      await publishEarlyBuildCache(root, baseline, {
+        cPath: tu,
+        cPathParts: [],
+        cPathHeader: undefined,
+        irPath: undefined,
+        meta: {
+          backend: "llvm",
+          llvmRefusal: null,
+          features: {},
+          advisories: [],
+          advisorySourceTexts: {},
+          npmStatic: [],
+        },
+        frontend: { version: 1, probes: [], stable: true },
+      });
+
+      // Control. Without it, a fixture that missed on EVERYTHING -- a typo in
+      // `root`, say -- would satisfy every assertion below for the wrong
+      // reason, and this test would pass while proving nothing.
+      expect(await readEarlyBuildCache(root, baseline)).not.toBeNull();
+
+      const fields = Object.keys(baseline) as (keyof EarlyBuildCacheOptions)[];
+      // The enumeration itself must not be empty, or the loop is vacuous.
+      expect(fields.length).toBeGreaterThan(0);
+
+      const ignored: string[] = [];
+      for (const field of fields) {
+        const mutant: EarlyBuildCacheOptions = { ...baseline, [field]: `${baseline[field]}-mutant` };
+        if ((await readEarlyBuildCache(root, mutant)) !== null) ignored.push(field);
+      }
+      expect(ignored, `options fields that do not participate in the cache key: ${ignored.join(", ")}`).toEqual([]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });
