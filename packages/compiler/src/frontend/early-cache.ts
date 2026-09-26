@@ -319,11 +319,65 @@ async function installBytes(bytes: Uint8Array, destination: string): Promise<voi
   }
 }
 
+/* ── the counter ─────────────────────────────────────────────────────────
+ *
+ * A hit is logged per occurrence; a miss is logged not at all. That asymmetry
+ * makes the log a COUNT with no denominator, and a reader who sees "14 hits,
+ * 0 misses" will take the zero for a measurement rather than for the absence
+ * of an instrument. Reconstructing the denominator costs a walk of the cache
+ * directory and an argument about whether eviction moved it.
+ *
+ * So the program keeps the pair itself and derives its own rate. Deliberately
+ * NOT behind a SCRIPTC_* flag: every such variable except the four in
+ * CACHE_ONLY_ENV is folded into the key, so a flag that switched this on
+ * would change every key and measure a cache it had just emptied. Always on,
+ * two increments.
+ *
+ * Reported once per process, and ONLY once the process has consulted the
+ * cache more than once. A rate over a single consultation is not a rate --
+ * it restates the per-hit line that already prints -- and emitting it would
+ * append a line to every one-off CLI build, which is noise for every user of
+ * the tool. packages/cli/test/flush.test.ts is where that showed up: it
+ * asserts stderr ENDS with the diagnostic count, and an exit-time write lands
+ * after it.
+ *
+ * One process compiles many programs -- the corpus harness calls compile()
+ * in-process -- so the pair is per worker, which is the granularity worth
+ * reading. */
+let cacheConsultations = 0;
+let cacheHits = 0;
+let exitReportArmed = false;
+
+export function earlyCacheCounters(): { consultations: number; hits: number } {
+  return { consultations: cacheConsultations, hits: cacheHits };
+}
+
+/** Exported for tests: the counters are process-global, so a test that
+ * asserts on them must start from a known point. */
+export function resetEarlyCacheCounters(): void {
+  cacheConsultations = 0;
+  cacheHits = 0;
+}
+
+function armExitReport(): void {
+  if (exitReportArmed) return;
+  exitReportArmed = true;
+  process.on("exit", () => {
+    if (cacheConsultations < 2) return;
+    const rate = ((cacheHits / cacheConsultations) * 100).toFixed(1);
+    process.stderr.write(
+      `scriptc: early cache ${cacheHits}/${cacheConsultations} hits (${rate}%)\n`,
+    );
+  });
+}
+
 export async function readEarlyBuildCache(
   root: string | null,
   options: EarlyBuildCacheOptions,
 ): Promise<EarlyBuildCacheHit | null> {
   if (root === null) return null;
+  armExitReport();
+  cacheConsultations += 1;
   const directory = entryDir(root, options);
   try {
     const stamp = JSON.parse(await readFile(join(directory, "stamp.json"), "utf8")) as EarlyBuildStamp;
@@ -385,6 +439,7 @@ export async function readEarlyBuildCache(
         utimes(join(directory, name), now, now).catch(() => undefined),
       ),
     );
+    cacheHits += 1;
     return hit;
   } catch {
     return null;

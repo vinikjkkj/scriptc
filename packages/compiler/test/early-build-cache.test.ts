@@ -18,6 +18,8 @@ import {
   scriptcEnvironmentFingerprint,
   cacheVerificationDivergences,
   cacheVerifyEnabled,
+  earlyCacheCounters,
+  resetEarlyCacheCounters,
   type EarlyBuildCacheOptions,
 } from "../src/frontend/early-cache.js";
 
@@ -440,5 +442,69 @@ describe("early build cache", () => {
 
     const withDebug = { ...base, SCRIPTC_CACHE_DEBUG: "1" };
     expect(scriptcEnvironmentFingerprint(withDebug)).not.toBe(scriptcEnvironmentFingerprint(base));
+  });
+
+  /* The counter exists because the log is hit-only: a reader seeing
+   * "14 hits, 0 misses" takes the zero for a measurement rather than for a
+   * missing instrument, and recovering the denominator otherwise means
+   * walking the cache directory and arguing about whether eviction moved it.
+   *
+   * The third case is the one that would corrupt the rate: a build with no
+   * cache configured must not count as a consultation, or every uncached
+   * build in a process silently inflates the denominator. */
+  it("counts consultations and hits, and does not count a build with the cache off", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "scriptc-early-count-"));
+    try {
+      const outDir = join(dir, "out");
+      mkdirSync(outDir, { recursive: true });
+      const tu = join(outDir, "prog.ll");
+      writeFileSync(tu, "; translation unit\n");
+      const root = join(dir, "cache");
+      const options: EarlyBuildCacheOptions = {
+        entryPath: join(dir, "prog.ts"),
+        outDir,
+        outPath: join(outDir, "prog.exe"),
+        compileOptions: "{}",
+        provenance: "null",
+        target: "test",
+        cc: "zigcc",
+        nodeVersion: process.version,
+        implementation: "impl",
+        environment: "env",
+        profFlavor: "",
+        cwd: dir,
+      };
+      await publishEarlyBuildCache(root, options, {
+        cPath: tu,
+        cPathParts: [],
+        cPathHeader: undefined,
+        irPath: undefined,
+        meta: {
+          backend: "llvm",
+          llvmRefusal: null,
+          features: {},
+          advisories: [],
+          advisorySourceTexts: {},
+          npmStatic: [],
+        },
+        frontend: { version: 1, probes: [], stable: true },
+      });
+
+      resetEarlyCacheCounters();
+      expect(earlyCacheCounters()).toEqual({ consultations: 0, hits: 0 });
+
+      expect(await readEarlyBuildCache(root, options)).not.toBeNull();
+      expect(earlyCacheCounters()).toEqual({ consultations: 1, hits: 1 });
+
+      expect(await readEarlyBuildCache(root, { ...options, target: "other" })).toBeNull();
+      expect(earlyCacheCounters()).toEqual({ consultations: 2, hits: 1 });
+
+      // Cache off: neither half moves.
+      expect(await readEarlyBuildCache(null, options)).toBeNull();
+      expect(earlyCacheCounters()).toEqual({ consultations: 2, hits: 1 });
+    } finally {
+      resetEarlyCacheCounters();
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
