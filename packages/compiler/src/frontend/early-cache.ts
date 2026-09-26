@@ -61,6 +61,7 @@
 
 import { createHash } from "node:crypto";
 import { chmod, copyFile, mkdir, readFile, readdir, rename, rm, utimes, writeFile } from "node:fs/promises";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -347,6 +348,12 @@ async function installBytes(bytes: Uint8Array, destination: string): Promise<voi
 let cacheConsultations = 0;
 let cacheHits = 0;
 let exitReportArmed = false;
+/* Captured on the first consultation: the exit handler needs a root, and the
+ * root arrives per call. */
+let counterRoot: string | null = null;
+/* Distinguishes this process's file from one a RECYCLED pid left behind in an
+ * earlier run. A measurer sums the files written inside its own window. */
+let counterStartedAt = 0;
 
 export function earlyCacheCounters(): { consultations: number; hits: number } {
   return { consultations: cacheConsultations, hits: cacheHits };
@@ -357,6 +364,45 @@ export function earlyCacheCounters(): { consultations: number; hits: number } {
 export function resetEarlyCacheCounters(): void {
   cacheConsultations = 0;
   cacheHits = 0;
+  counterRoot = null;
+  counterStartedAt = 0;
+}
+
+/** Write this process's pair under the cache root, one file per process.
+ *
+ * A file rather than a harness hook, and a file rather than stderr alone,
+ * because stderr is the channel that is broken: vitest forwards writes made
+ * DURING a test and drops an exit handler's, so the pair was invisible in
+ * exactly the log it exists for. The filesystem is not on that path. It also
+ * keeps working outside vitest -- a manual build, a block script, some other
+ * CI -- where no afterAll or reporter exists to hang a hook on.
+ *
+ * Separately callable so it can be tested: an exit handler cannot be.
+ * Returns the path written, or null when there was nothing worth writing.
+ *
+ * MUST stay synchronous. An exit handler runs with no further turns of the
+ * loop, so an async write never lands -- the counter would be silently empty,
+ * which is the failure this whole item is about. */
+export function writeEarlyCacheCounterFile(root: string): string | null {
+  if (cacheConsultations < 2) return null;
+  try {
+    const directory = join(root, "counters");
+    mkdirSync(directory, { recursive: true });
+    const file = join(directory, `${process.pid}-${counterStartedAt}.json`);
+    writeFileSync(
+      file,
+      JSON.stringify({
+        pid: process.pid,
+        startedAt: new Date(counterStartedAt).toISOString(),
+        consultations: cacheConsultations,
+        hits: cacheHits,
+      }),
+    );
+    return file;
+  } catch {
+    // An exit handler that throws takes the process's exit code with it.
+    return null;
+  }
 }
 
 function armExitReport(): void {
@@ -365,19 +411,19 @@ function armExitReport(): void {
   process.on("exit", () => {
     if (cacheConsultations < 2) return;
     const rate = ((cacheHits / cacheConsultations) * 100).toFixed(1);
+    if (counterRoot !== null) writeEarlyCacheCounterFile(counterRoot);
     process.stderr.write(
       `scriptc: early cache ${cacheHits}/${cacheConsultations} hits (${rate}%)\n`,
     );
   });
 }
 
-export async function readEarlyBuildCache(
-  root: string | null,
+/** The read itself. Counting lives in the exported wrapper below so that it
+ * happens on EVERY return path, of which this function has many. */
+async function readEarlyBuildCacheUncounted(
+  root: string,
   options: EarlyBuildCacheOptions,
 ): Promise<EarlyBuildCacheHit | null> {
-  if (root === null) return null;
-  armExitReport();
-  cacheConsultations += 1;
   const directory = entryDir(root, options);
   try {
     const stamp = JSON.parse(await readFile(join(directory, "stamp.json"), "utf8")) as EarlyBuildStamp;
@@ -439,11 +485,39 @@ export async function readEarlyBuildCache(
         utimes(join(directory, name), now, now).catch(() => undefined),
       ),
     );
-    cacheHits += 1;
     return hit;
   } catch {
     return null;
   }
+}
+
+/** Consult the cache, and count the consultation.
+ *
+ * The counter file is written HERE, on every consultation, not from an exit
+ * handler. process.on("exit") DOES NOT FIRE in a vitest worker -- measured,
+ * not assumed: a probe registering one produced nothing across a passing run.
+ * That, and not any stderr routing, is why the first version of this counter
+ * was invisible in the gate. A number that only lands when a process exits
+ * cleanly is a number that does not land here.
+ *
+ * Cost is one small synchronous write against a compile of hundreds of
+ * milliseconds, and it survives SIGKILL, worker termination and crashes,
+ * which an exit handler does not. */
+export async function readEarlyBuildCache(
+  root: string | null,
+  options: EarlyBuildCacheOptions,
+): Promise<EarlyBuildCacheHit | null> {
+  if (root === null) return null;
+  armExitReport();
+  if (counterRoot === null) {
+    counterRoot = root;
+    counterStartedAt = Date.now();
+  }
+  cacheConsultations += 1;
+  const hit = await readEarlyBuildCacheUncounted(root, options);
+  if (hit !== null) cacheHits += 1;
+  writeEarlyCacheCounterFile(root);
+  return hit;
 }
 
 /* ── publish ─────────────────────────────────────────────────────────────── */

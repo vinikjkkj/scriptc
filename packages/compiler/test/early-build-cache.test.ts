@@ -8,7 +8,7 @@
  * source files" cache would get wrong. */
 
 import { describe, expect, it } from "vitest";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { compile } from "../src/index.js";
@@ -20,6 +20,7 @@ import {
   cacheVerifyEnabled,
   earlyCacheCounters,
   resetEarlyCacheCounters,
+  writeEarlyCacheCounterFile,
   type EarlyBuildCacheOptions,
 } from "../src/frontend/early-cache.js";
 
@@ -502,6 +503,80 @@ describe("early build cache", () => {
       // Cache off: neither half moves.
       expect(await readEarlyBuildCache(null, options)).toBeNull();
       expect(earlyCacheCounters()).toEqual({ consultations: 2, hits: 1 });
+    } finally {
+      resetEarlyCacheCounters();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  /* The pair has to reach whoever is measuring, and stderr does not: vitest
+   * forwards writes made DURING a test and drops an exit handler's, so the
+   * number was invisible in exactly the log it exists for. A file under the
+   * cache root is not on that path, and it keeps working outside vitest
+   * where no afterAll or reporter exists to hang a hook on.
+   *
+   * The writer is a separate function precisely so it can be tested; an exit
+   * handler cannot be. It must also stay synchronous -- an exit handler gets
+   * no further turns of the loop, so an async write would never land and the
+   * counter would be silently empty. */
+  it("writes the pair to a per-process file, and writes nothing below two consultations", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "scriptc-early-file-"));
+    try {
+      const outDir = join(dir, "out");
+      mkdirSync(outDir, { recursive: true });
+      const tu = join(outDir, "prog.ll");
+      writeFileSync(tu, "; translation unit\n");
+      const root = join(dir, "cache");
+      const options: EarlyBuildCacheOptions = {
+        entryPath: join(dir, "prog.ts"),
+        outDir,
+        outPath: join(outDir, "prog.exe"),
+        compileOptions: "{}",
+        provenance: "null",
+        target: "test",
+        cc: "zigcc",
+        nodeVersion: process.version,
+        implementation: "impl",
+        environment: "env",
+        profFlavor: "",
+        cwd: dir,
+      };
+      await publishEarlyBuildCache(root, options, {
+        cPath: tu,
+        cPathParts: [],
+        cPathHeader: undefined,
+        irPath: undefined,
+        meta: {
+          backend: "llvm",
+          llvmRefusal: null,
+          features: {},
+          advisories: [],
+          advisorySourceTexts: {},
+          npmStatic: [],
+        },
+        frontend: { version: 1, probes: [], stable: true },
+      });
+
+      resetEarlyCacheCounters();
+
+      // One consultation is not a rate: nothing is written.
+      await readEarlyBuildCache(root, options);
+      expect(writeEarlyCacheCounterFile(root)).toBeNull();
+      expect(existsSync(join(root, "counters"))).toBe(false);
+
+      // Two: a file appears, naming this process.
+      await readEarlyBuildCache(root, { ...options, target: "other" });
+      const written = writeEarlyCacheCounterFile(root);
+      expect(written).not.toBeNull();
+      const files = readdirSync(join(root, "counters"));
+      expect(files).toHaveLength(1);
+      expect(files[0]).toContain(String(process.pid));
+      const recorded = JSON.parse(readFileSync(written!, "utf8")) as {
+        pid: number;
+        consultations: number;
+        hits: number;
+      };
+      expect(recorded).toMatchObject({ pid: process.pid, consultations: 2, hits: 1 });
     } finally {
       resetEarlyCacheCounters();
       rmSync(dir, { recursive: true, force: true });
