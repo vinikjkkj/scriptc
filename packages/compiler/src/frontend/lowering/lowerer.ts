@@ -528,6 +528,52 @@ function widthCensus(kind: string, fromId: string, toId: string, dropped: string
   }
 }
 
+/* MEASUREMENT ONLY (block/sepcomp): per-source-file lowering attribution.
+ *
+ * The frontend's cost has never been attributed to the FILE whose body was
+ * lowering. phase-tap.ts answers `fe.lower` as one number, which is enough
+ * to say the frontend is the build and not enough to say whose code it is
+ * spending the time on - and that is exactly the question any per-module
+ * reuse scheme has to answer before it is worth building.
+ *
+ * SCRIPTC_LOWER_PROFILE=<path> appends one JSON object per lowerToIr call.
+ * Keys are prefixed by WHICH loop paid, because the two passes lower the
+ * same bodies from different places and a single per-file bucket would sum
+ * them into a number that is neither:
+ *
+ *   %discovery / %emit-run   the two passes' totals
+ *   D:<file>                 discovery, that file's init plus the instance
+ *                            drain its init queued
+ *   Q:<file>                 discovery, one body from the reachability
+ *                            worklist, attributed by the IrFunction's own loc
+ *   B:<file>                 emit, that file's function and class bodies
+ *   I:<file>                 emit, that file's init body
+ *   G:<file>                 emit, one generic instance, by its loc
+ *   %ovf-*                   the OVERFLOW GRANT's saturation: how much of
+ *                            the set the discovery pass had already found
+ *                            before the emit pass interned anything
+ *
+ * Off by default - lowerProfileOn() is one env read - and nothing in the
+ * compiler ever reads the output back. It never fails a build. */
+const lowerProfile = new Map<string, number>();
+export function lowerProfileOn(): boolean {
+  const v = process.env["SCRIPTC_LOWER_PROFILE"];
+  return v !== undefined && v !== "";
+}
+export function lowerProfileNote(file: string, ms: number): void {
+  if (!lowerProfileOn()) return;
+  lowerProfile.set(file, (lowerProfile.get(file) ?? 0) + ms);
+}
+export function lowerProfileFlush(): void {
+  if (!lowerProfileOn()) return;
+  try {
+    appendFileSync(
+      process.env["SCRIPTC_LOWER_PROFILE"]!,
+      JSON.stringify(Object.fromEntries([...lowerProfile].sort((a, b) => b[1] - a[1]))) + "\n",
+    );
+  } catch { /* never fails a build */ }
+}
+
 export function lowerToIr(
   program: ts.Program,
   entry: ts.SourceFile,
@@ -602,7 +648,11 @@ export function lowerToIr(
         ffiImports,
         ffiBindingSymbols: ffiValidation.symbolsByName,
       });
+  const __t0 = performance.now();
   const reachable = discovery.discover(options.libRoots);
+  lowerProfileNote("%discovery", performance.now() - __t0);
+  const __ovfAfterDiscovery = new Set(overflowShapeKeys);
+  const __ovfDeniedAfterDiscovery = new Set(overflowShapeKeysDenied);
   const emit = new Lowerer(program, entry, moduleOrder, dynamic, {
     reachable,
     targetPlatform,
@@ -613,7 +663,15 @@ export function lowerToIr(
   });
   for (const d of dynamicCycleDiags) emit.pushDiag(d);
   for (const d of ffiValidation.diagnostics) emit.pushDiag(d);
+  const __t1 = performance.now();
   const result = emit.run();
+  lowerProfileNote("%emit-run", performance.now() - __t1);
+  lowerProfileNote("%ovf-after-discovery", __ovfAfterDiscovery.size);
+  lowerProfileNote("%ovf-after-emit", overflowShapeKeys.size);
+  lowerProfileNote("%ovf-new-in-emit", [...overflowShapeKeys].filter((k) => !__ovfAfterDiscovery.has(k)).length);
+  lowerProfileNote("%ovfDenied-after-discovery", __ovfDeniedAfterDiscovery.size);
+  lowerProfileNote("%ovfDenied-new-in-emit", [...overflowShapeKeysDenied].filter((k) => !__ovfDeniedAfterDiscovery.has(k)).length);
+  lowerProfileFlush();
   // The expando member partition must be exhaustive (lower-expando.ts):
   // every registered slot is either bound to its dyn-box accessor pair or
   // counted under a named skip. Checked here, so the corpus lane IS the
@@ -2523,6 +2581,7 @@ export class Lowerer {
 
     const functions: IrFunction[] = [];
     for (const fp of parts) {
+      const __fpT = performance.now();
       for (const decl of fp.fnDecls) {
         // Overload signatures / ambient declarations are type-world (no
         // body to lower — and they share the implementation's symbol, so
@@ -2548,6 +2607,7 @@ export class Lowerer {
         if (info) functions.push(...this.lowerClassMembers(info));
         else if (this.countsSkips()) this.stats.functionsSkipped++;
       }
+      lowerProfileNote("B:" + fp.sf.fileName, performance.now() - __fpT);
     }
 
     // Each file's top-level statements form its run-once init function.
@@ -2559,7 +2619,9 @@ export class Lowerer {
     // are reachable by definition, already counted by the emit pass.
     if (!this.remainder) {
       for (const fp of parts) {
+        const __ftT = performance.now();
         functions.push(this.lowerFileInit(fp.sf, fp.topStmts, this.initNameOf.get(fp.sf)!));
+        lowerProfileNote("I:" + fp.sf.fileName, performance.now() - __ftT);
       }
       functions.push(this.buildMain());
     }
@@ -2597,8 +2659,11 @@ export class Lowerer {
           // generic method's this/super fence, a fenced parameter
           // default): the diagnostic is recorded — the instance skips
           // like a signature-blocked function (lowerFunction's rule).
+          const __giT = performance.now();
           try {
-            functions.push(this.lowerGenericInstance(info, inst));
+            const __gf = this.lowerGenericInstance(info, inst);
+            lowerProfileNote("G:" + (__gf?.loc?.file ?? "%unknown"), performance.now() - __giT);
+            functions.push(__gf);
           } catch (e) {
             if (!(e instanceof PoisonError)) throw e;
           }
@@ -3364,8 +3429,10 @@ export class Lowerer {
     };
 
     parts.forEach((fp) => {
+      const __dfT = performance.now();
       this.noteDynBoxEdges(this.lowerFileInit(fp.sf, fp.topStmts, this.initNameOf.get(fp.sf)!));
       drainInstances();
+      lowerProfileNote("D:" + fp.sf.fileName, performance.now() - __dfT);
     });
     // LIBRARY mode's extra reachability roots (LowerOptions.libRoots): the
     // profile-mapped exports are called from outside the graph, so they
@@ -3377,8 +3444,11 @@ export class Lowerer {
       // constructor/method parameter default lowered by declareParams):
       // discovery only needs the edges the body fired before poisoning —
       // the emit pass re-records the diagnostic and skips the member.
+      const __qT = performance.now();
       try {
-        this.noteDynBoxEdges(units.get(queue.shift()!)!());
+        const __fn = units.get(queue.shift()!)!();
+        lowerProfileNote("Q:" + (__fn?.loc?.file ?? "%unknown"), performance.now() - __qT);
+        this.noteDynBoxEdges(__fn);
       } catch (e) {
         if (!(e instanceof PoisonError)) throw e;
       }
