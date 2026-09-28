@@ -7974,6 +7974,28 @@ export class Lowerer {
         | { absentDyn: true }
         | { keyRead: IrType; lift: WidthLift };
       const plan = new Map<string, FieldLift>();
+      // The keyed read's type is LOOP-INVARIANT -- indexReadType's only
+      // input is `from.indexValue` -- but it was computed once per MISSING
+      // target field, so a record with k of them interned the same arm list
+      // k times. Every intern past the first pays
+      // JSON.stringify(arms.map(typeKey)) to be handed back an id the table
+      // already holds. Measured over the 170 index-signature corpus
+      // programs: 755 calls, 574 of them (76.0%) repeats inside one plan.
+      //
+      // FIRST-USE, not hoisted, and the difference is the whole safety
+      // argument. Interning MINTS `u${unions.length}` on a miss, and union
+      // ids reach emitted symbol names through unitInstanceRef -- so the id
+      // a union gets depends on WHEN it is first interned. Computing this
+      // before the loop would intern ahead of any union widthLiftPlan mints
+      // for an EARLIER field and renumber everything downstream. Deferred to
+      // first use, the intern happens at exactly the field it happens at
+      // today, and every later use is the lookup it always was.
+      //
+      // Stable for the duration of the loop: the only writer of
+      // `shape.indexValue` is ShapeRegistry.finalizeRecursive, and nothing
+      // this loop reaches finalizes a shape -- widthLiftPlan, dynOutPlan and
+      // narrowOutPlan read the registries and intern UNIONS only.
+      let keyReadT: IrType | undefined;
       for (const tf of to.fields) {
         const ff = from.fields.find((f) => f.name === tf.name);
         if (!ff) {
@@ -8014,7 +8036,7 @@ export class Lowerer {
             const optionalFlavored =
               tf.type.kind === "dyn" ||
               (tf.type.kind === "union" && this.armTag(tf.type.unionId, UNDEFINED_T) >= 0);
-            const readT = this.indexReadType(from.indexValue);
+            const readT = (keyReadT ??= this.indexReadType(from.indexValue));
             // The read's own type is what lifts into the field — unless the
             // signature's value type is 'unknown'. Then the read is a DYN,
             // and the conversion that puts a dyn into a typed slot is not a
