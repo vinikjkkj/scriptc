@@ -15,12 +15,30 @@
 import { createReadStream } from 'node:fs'
 import { createInterface } from 'node:readline'
 
-const canon = (s) => s
-  .replace(/"r\d+"/g, '"r#"')
-  .replace(/"u\d+"/g, '"u#"')
-  .replace(/%fn\d+/g, '%fn#')
-  .replace(/%([A-Za-z][A-Za-z0-9.]*)\.\d+/g, '%$1.#')
-  .replace(/%(\d+)\b/g, '%#')
+/* Positional ids are folded to their RANK OF FIRST APPEARANCE inside this
+ * one function, not to a bare '#'. Folding them all to one token would
+ * accept a function that mentions one id twice against one that mentions
+ * two different ids -- a forgetful match, not a renaming. Ranking keeps
+ * every within-function relationship between ids while removing the offset
+ * whole-program interning order gives them. Cross-FUNCTION consistency is
+ * still not proved by this: an implementation has to carry ONE substitution
+ * for a whole fragment, and this test does not stand in for that. */
+const canon = (s) => {
+  const rank = new Map()
+  const counts = new Map()
+  const of = (fam, tok) => {
+    const k = fam + '\u0001' + tok
+    let r = rank.get(k)
+    if (r === undefined) { r = counts.get(fam) ?? 0; counts.set(fam, r + 1); rank.set(k, r) }
+    return r
+  }
+  return s
+    .replace(/"r\d+"/g, (m) => '"r~' + of('r', m) + '"')
+    .replace(/"u\d+"/g, (m) => '"u~' + of('u', m) + '"')
+    .replace(/%fn\d+\b/g, (m) => '%fn~' + of('fn', m))
+    .replace(/%([A-Za-z][A-Za-z0-9.]*)\.\d+\b/g, (m, fam) => '%' + fam + '.~' + of(fam, m))
+    .replace(/%(\d+)\b/g, (m) => '%~' + of('inst', m))
+}
 
 const stripLocs = (n) => {
   if (n === null || typeof n !== 'object') return n
