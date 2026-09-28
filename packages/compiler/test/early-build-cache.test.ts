@@ -8,7 +8,7 @@
  * source files" cache would get wrong. */
 
 import { describe, expect, it } from "vitest";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { compile } from "../src/index.js";
@@ -16,6 +16,11 @@ import {
   publishEarlyBuildCache,
   readEarlyBuildCache,
   scriptcEnvironmentFingerprint,
+  cacheVerificationDivergences,
+  cacheVerifyEnabled,
+  earlyCacheCounters,
+  resetEarlyCacheCounters,
+  writeEarlyCacheCounterFile,
   type EarlyBuildCacheOptions,
 } from "../src/frontend/early-cache.js";
 
@@ -286,6 +291,295 @@ describe("early build cache", () => {
     } finally {
       if (previous !== undefined) process.env["SCRIPTC_CACHE_DIR"] = previous;
       rmSync(f.dir, { recursive: true, force: true });
+    }
+  });
+
+  /* The tests above each name ONE thing that must change the key, and the
+   * header calls them "deliberately chosen" -- chosen, that is, from what
+   * their author remembered. That shape cannot cover a field added tomorrow,
+   * and the field nobody remembers is exactly the one that silently stops
+   * participating.
+   *
+   * So this test names no fields. It enumerates them from the options object
+   * itself and demands a miss for each one it FINDS. Add a field to
+   * EarlyBuildCacheOptions and forget it in cacheKey(), and this goes red
+   * naming that field, with nobody having edited this test.
+   *
+   * Why a miss is the right probe rather than reading cacheKey() directly:
+   * an unfolded field leaves entryDir identical AND satisfies the
+   * `stamp.key !== cacheKey(options)` guard, so it surfaces as a HIT. The
+   * observable behaviour is the thing that matters anyway. */
+  it("every options field participates in the key, enumerated from the object rather than listed", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "scriptc-early-structural-"));
+    try {
+      const outDir = join(dir, "out");
+      mkdirSync(outDir, { recursive: true });
+      const tu = join(outDir, "prog.ll");
+      writeFileSync(tu, "; translation unit\n");
+      const root = join(dir, "cache");
+      const baseline: EarlyBuildCacheOptions = {
+        entryPath: join(dir, "prog.ts"),
+        outDir,
+        outPath: join(outDir, "prog.exe"),
+        compileOptions: "{}",
+        provenance: "null",
+        target: "test",
+        cc: "zigcc",
+        nodeVersion: process.version,
+        implementation: "impl",
+        environment: "env",
+        profFlavor: "",
+        cwd: dir,
+      };
+      await publishEarlyBuildCache(root, baseline, {
+        cPath: tu,
+        cPathParts: [],
+        cPathHeader: undefined,
+        irPath: undefined,
+        meta: {
+          backend: "llvm",
+          llvmRefusal: null,
+          features: {},
+          advisories: [],
+          advisorySourceTexts: {},
+          npmStatic: [],
+        },
+        frontend: { version: 1, probes: [], stable: true },
+      });
+
+      // Control. Without it, a fixture that missed on EVERYTHING -- a typo in
+      // `root`, say -- would satisfy every assertion below for the wrong
+      // reason, and this test would pass while proving nothing.
+      expect(await readEarlyBuildCache(root, baseline)).not.toBeNull();
+
+      const fields = Object.keys(baseline) as (keyof EarlyBuildCacheOptions)[];
+      // The enumeration itself must not be empty, or the loop is vacuous.
+      expect(fields.length).toBeGreaterThan(0);
+
+      const ignored: string[] = [];
+      for (const field of fields) {
+        const mutant: EarlyBuildCacheOptions = { ...baseline, [field]: `${baseline[field]}-mutant` };
+        if ((await readEarlyBuildCache(root, mutant)) !== null) ignored.push(field);
+      }
+      expect(ignored, `options fields that do not participate in the cache key: ${ignored.join(", ")}`).toEqual([]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  /* Verify mode's comparison, mutant per field FOUND.
+   *
+   * Same reasoning as the key test above, one layer in: the thing this mode
+   * exists to catch is a field that silently stops being compared, so the
+   * mode must not itself compare a remembered list. A field added to
+   * EarlyBuildMetadata tomorrow gets a mutant here for free. */
+  it("verification diverges on every metadata field, enumerated from the object rather than listed", () => {
+    const meta = {
+      backend: "llvm" as const,
+      llvmRefusal: null,
+      features: { regex: true },
+      advisories: [],
+      advisorySourceTexts: {},
+      npmStatic: [],
+    };
+    const subject = () => ({ meta: { ...meta }, artifacts: new Map([["program.tu", new Uint8Array([1, 2, 3])]]) });
+
+    // Control: identical subjects must produce NO divergence. Without this a
+    // comparison that flagged everything would satisfy the loop below.
+    expect(cacheVerificationDivergences(subject(), subject())).toEqual([]);
+
+    const fields = Object.keys(meta);
+    expect(fields.length).toBeGreaterThan(0);
+    const unnoticed: string[] = [];
+    for (const field of fields) {
+      const fresh = subject();
+      (fresh.meta as unknown as Record<string, unknown>)[field] = "__mutant__";
+      const found = cacheVerificationDivergences(subject(), fresh);
+      if (!found.some((line) => line.startsWith(`meta.${field}:`))) unnoticed.push(field);
+    }
+    expect(unnoticed, `metadata fields a stale hit could change unnoticed: ${unnoticed.join(", ")}`).toEqual([]);
+  });
+
+  it("verification diverges on artifact bytes, and on an artifact present on only one side", () => {
+    const meta = {
+      backend: "llvm" as const,
+      llvmRefusal: null,
+      features: {},
+      advisories: [],
+      advisorySourceTexts: {},
+      npmStatic: [],
+    };
+    const cached = { meta, artifacts: new Map([["program.tu", new Uint8Array([1, 2, 3])]]) };
+
+    const differing = { meta, artifacts: new Map([["program.tu", new Uint8Array([1, 2, 4])]]) };
+    expect(cacheVerificationDivergences(cached, differing).join("\n")).toContain("artifact program.tu:");
+
+    // Equal length is not equality: a byte-for-byte walk must catch this.
+    const sameLength = { meta, artifacts: new Map([["program.tu", new Uint8Array([3, 2, 1])]]) };
+    expect(cacheVerificationDivergences(cached, sameLength)).toHaveLength(1);
+
+    const extra = {
+      meta,
+      artifacts: new Map([
+        ["program.tu", new Uint8Array([1, 2, 3])],
+        ["program.header", new Uint8Array([9])],
+      ]),
+    };
+    expect(cacheVerificationDivergences(cached, extra).join("\n")).toContain("program.header");
+    expect(cacheVerificationDivergences(extra, cached).join("\n")).toContain("program.header");
+  });
+
+  /* The flag that turns the mode on must NOT be in the key. SCRIPTC_* is
+   * folded by a blanket, so a verify flag inside it would change every key,
+   * force a cold miss, and leave no hit to verify -- the mode would report
+   * success having checked nothing. SCRIPTC_CACHE_DEBUG is the cautionary
+   * twin: it IS in the key, so it can never instrument a cached build. */
+  it("the verify flag is excluded from the key, and the debug flag is not", () => {
+    const base = { PATH: "x" } as NodeJS.ProcessEnv;
+    const withVerify = { ...base, SCRIPTC_CACHE_VERIFY: "1" };
+    expect(scriptcEnvironmentFingerprint(withVerify)).toBe(scriptcEnvironmentFingerprint(base));
+    expect(cacheVerifyEnabled(withVerify)).toBe(true);
+    expect(cacheVerifyEnabled(base)).toBe(false);
+
+    const withDebug = { ...base, SCRIPTC_CACHE_DEBUG: "1" };
+    expect(scriptcEnvironmentFingerprint(withDebug)).not.toBe(scriptcEnvironmentFingerprint(base));
+  });
+
+  /* The counter exists because the log is hit-only: a reader seeing
+   * "14 hits, 0 misses" takes the zero for a measurement rather than for a
+   * missing instrument, and recovering the denominator otherwise means
+   * walking the cache directory and arguing about whether eviction moved it.
+   *
+   * The third case is the one that would corrupt the rate: a build with no
+   * cache configured must not count as a consultation, or every uncached
+   * build in a process silently inflates the denominator. */
+  it("counts consultations and hits, and does not count a build with the cache off", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "scriptc-early-count-"));
+    try {
+      const outDir = join(dir, "out");
+      mkdirSync(outDir, { recursive: true });
+      const tu = join(outDir, "prog.ll");
+      writeFileSync(tu, "; translation unit\n");
+      const root = join(dir, "cache");
+      const options: EarlyBuildCacheOptions = {
+        entryPath: join(dir, "prog.ts"),
+        outDir,
+        outPath: join(outDir, "prog.exe"),
+        compileOptions: "{}",
+        provenance: "null",
+        target: "test",
+        cc: "zigcc",
+        nodeVersion: process.version,
+        implementation: "impl",
+        environment: "env",
+        profFlavor: "",
+        cwd: dir,
+      };
+      await publishEarlyBuildCache(root, options, {
+        cPath: tu,
+        cPathParts: [],
+        cPathHeader: undefined,
+        irPath: undefined,
+        meta: {
+          backend: "llvm",
+          llvmRefusal: null,
+          features: {},
+          advisories: [],
+          advisorySourceTexts: {},
+          npmStatic: [],
+        },
+        frontend: { version: 1, probes: [], stable: true },
+      });
+
+      resetEarlyCacheCounters();
+      expect(earlyCacheCounters()).toEqual({ consultations: 0, hits: 0 });
+
+      expect(await readEarlyBuildCache(root, options)).not.toBeNull();
+      expect(earlyCacheCounters()).toEqual({ consultations: 1, hits: 1 });
+
+      expect(await readEarlyBuildCache(root, { ...options, target: "other" })).toBeNull();
+      expect(earlyCacheCounters()).toEqual({ consultations: 2, hits: 1 });
+
+      // Cache off: neither half moves.
+      expect(await readEarlyBuildCache(null, options)).toBeNull();
+      expect(earlyCacheCounters()).toEqual({ consultations: 2, hits: 1 });
+    } finally {
+      resetEarlyCacheCounters();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  /* The pair has to reach whoever is measuring, and stderr does not: vitest
+   * forwards writes made DURING a test and drops an exit handler's, so the
+   * number was invisible in exactly the log it exists for. A file under the
+   * cache root is not on that path, and it keeps working outside vitest
+   * where no afterAll or reporter exists to hang a hook on.
+   *
+   * The writer is a separate function precisely so it can be tested; an exit
+   * handler cannot be. It must also stay synchronous -- an exit handler gets
+   * no further turns of the loop, so an async write would never land and the
+   * counter would be silently empty. */
+  it("writes the pair to a per-process file, and writes nothing below two consultations", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "scriptc-early-file-"));
+    try {
+      const outDir = join(dir, "out");
+      mkdirSync(outDir, { recursive: true });
+      const tu = join(outDir, "prog.ll");
+      writeFileSync(tu, "; translation unit\n");
+      const root = join(dir, "cache");
+      const options: EarlyBuildCacheOptions = {
+        entryPath: join(dir, "prog.ts"),
+        outDir,
+        outPath: join(outDir, "prog.exe"),
+        compileOptions: "{}",
+        provenance: "null",
+        target: "test",
+        cc: "zigcc",
+        nodeVersion: process.version,
+        implementation: "impl",
+        environment: "env",
+        profFlavor: "",
+        cwd: dir,
+      };
+      await publishEarlyBuildCache(root, options, {
+        cPath: tu,
+        cPathParts: [],
+        cPathHeader: undefined,
+        irPath: undefined,
+        meta: {
+          backend: "llvm",
+          llvmRefusal: null,
+          features: {},
+          advisories: [],
+          advisorySourceTexts: {},
+          npmStatic: [],
+        },
+        frontend: { version: 1, probes: [], stable: true },
+      });
+
+      resetEarlyCacheCounters();
+
+      // One consultation is not a rate: nothing is written.
+      await readEarlyBuildCache(root, options);
+      expect(writeEarlyCacheCounterFile(root)).toBeNull();
+      expect(existsSync(join(root, "counters"))).toBe(false);
+
+      // Two: a file appears, naming this process.
+      await readEarlyBuildCache(root, { ...options, target: "other" });
+      const written = writeEarlyCacheCounterFile(root);
+      expect(written).not.toBeNull();
+      const files = readdirSync(join(root, "counters"));
+      expect(files).toHaveLength(1);
+      expect(files[0]).toContain(String(process.pid));
+      const recorded = JSON.parse(readFileSync(written!, "utf8")) as {
+        pid: number;
+        consultations: number;
+        hits: number;
+      };
+      expect(recorded).toMatchObject({ pid: process.pid, consultations: 2, hits: 1 });
+    } finally {
+      resetEarlyCacheCounters();
+      rmSync(dir, { recursive: true, force: true });
     }
   });
 });

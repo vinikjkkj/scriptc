@@ -45,6 +45,42 @@ export type FrontendInputProbe =
   | { op: "entries-error"; path: string }
   | { op: "realpath"; path: string; target: string | null };
 
+/** The op taxonomy as a value, not only as a type.
+ *
+ * A discriminated union is erased at runtime, and both consumers below are
+ * switches, so before this existed NOTHING could enumerate the ops: a test
+ * had to list them by hand, and a list is written from what its author
+ * remembered. Worse, neither consumer forces the issue at compile time --
+ * validFrontendInputSnapshot ends in `default: return false` and the matcher
+ * falls out of its switch returning undefined -- so a seventh op would be
+ * rejected SILENTLY, turning the cache off for every program that emits one
+ * while nothing anywhere went red.
+ *
+ * The assertion under the array is what makes iterating it equivalent to
+ * iterating the union: add a member to either and the other stops
+ * compiling, naming the op that is missing. */
+export const FRONTEND_PROBE_OPS = [
+  "file",
+  "read-error",
+  "kind",
+  "entries",
+  "entries-error",
+  "realpath",
+] as const;
+
+export type FrontendProbeOp = (typeof FRONTEND_PROBE_OPS)[number];
+
+type ProbeOpsAreExactlyTheUnion = [
+  FrontendInputProbe["op"] extends FrontendProbeOp
+    ? true
+    : ["op in the union but missing from FRONTEND_PROBE_OPS", Exclude<FrontendInputProbe["op"], FrontendProbeOp>],
+  FrontendProbeOp extends FrontendInputProbe["op"]
+    ? true
+    : ["op in FRONTEND_PROBE_OPS but missing from the union", Exclude<FrontendProbeOp, FrontendInputProbe["op"]>],
+];
+const probeOpsAreExactlyTheUnion: ProbeOpsAreExactlyTheUnion = [true, true];
+void probeOpsAreExactlyTheUnion;
+
 export interface FrontendInputSnapshot {
   version: 1;
   probes: FrontendInputProbe[];

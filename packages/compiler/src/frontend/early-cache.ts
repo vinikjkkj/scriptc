@@ -61,6 +61,7 @@
 
 import { createHash } from "node:crypto";
 import { chmod, copyFile, mkdir, readFile, readdir, rename, rm, utimes, writeFile } from "node:fs/promises";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -164,9 +165,19 @@ function digestBytes(bytes: Uint8Array): string {
 
 /* ── the explicit half of the key ────────────────────────────────────────── */
 
-/** Every SCRIPTC_* variable except the three that configure THIS cache and
+/** Every SCRIPTC_* variable except the four that configure THIS cache and
  * nothing else. A blanket rather than an allowlist: see the header comment. */
-const CACHE_ONLY_ENV = new Set(["SCRIPTC_CACHE_DIR", "SCRIPTC_NO_CACHE", "SCRIPTC_CACHE_MAX_MB"]);
+const CACHE_ONLY_ENV = new Set([
+  "SCRIPTC_CACHE_DIR",
+  "SCRIPTC_NO_CACHE",
+  "SCRIPTC_CACHE_MAX_MB",
+  // Verify mode MUST be excluded or it cannot observe the thing it checks:
+  // this fingerprint is a blanket over every other SCRIPTC_*, so a verify
+  // flag inside the key would change every key, force a cold miss, and leave
+  // no hit to verify. Same shape as SCRIPTC_CACHE_DEBUG, which is still IN
+  // the key and must never be used to instrument a cached build.
+  "SCRIPTC_CACHE_VERIFY",
+]);
 
 export function scriptcEnvironmentFingerprint(env: NodeJS.ProcessEnv = process.env): string {
   const hash = createHash("sha256").update("scriptc-env-v1\0");
@@ -309,11 +320,110 @@ async function installBytes(bytes: Uint8Array, destination: string): Promise<voi
   }
 }
 
-export async function readEarlyBuildCache(
-  root: string | null,
+/* ── the counter ─────────────────────────────────────────────────────────
+ *
+ * A hit is logged per occurrence; a miss is logged not at all. That asymmetry
+ * makes the log a COUNT with no denominator, and a reader who sees "14 hits,
+ * 0 misses" will take the zero for a measurement rather than for the absence
+ * of an instrument. Reconstructing the denominator costs a walk of the cache
+ * directory and an argument about whether eviction moved it.
+ *
+ * So the program keeps the pair itself and derives its own rate. Deliberately
+ * NOT behind a SCRIPTC_* flag: every such variable except the four in
+ * CACHE_ONLY_ENV is folded into the key, so a flag that switched this on
+ * would change every key and measure a cache it had just emptied. Always on,
+ * two increments.
+ *
+ * Reported once per process, and ONLY once the process has consulted the
+ * cache more than once. A rate over a single consultation is not a rate --
+ * it restates the per-hit line that already prints -- and emitting it would
+ * append a line to every one-off CLI build, which is noise for every user of
+ * the tool. packages/cli/test/flush.test.ts is where that showed up: it
+ * asserts stderr ENDS with the diagnostic count, and an exit-time write lands
+ * after it.
+ *
+ * One process compiles many programs -- the corpus harness calls compile()
+ * in-process -- so the pair is per worker, which is the granularity worth
+ * reading. */
+let cacheConsultations = 0;
+let cacheHits = 0;
+let exitReportArmed = false;
+/* Captured on the first consultation: the exit handler needs a root, and the
+ * root arrives per call. */
+let counterRoot: string | null = null;
+/* Distinguishes this process's file from one a RECYCLED pid left behind in an
+ * earlier run. A measurer sums the files written inside its own window. */
+let counterStartedAt = 0;
+
+export function earlyCacheCounters(): { consultations: number; hits: number } {
+  return { consultations: cacheConsultations, hits: cacheHits };
+}
+
+/** Exported for tests: the counters are process-global, so a test that
+ * asserts on them must start from a known point. */
+export function resetEarlyCacheCounters(): void {
+  cacheConsultations = 0;
+  cacheHits = 0;
+  counterRoot = null;
+  counterStartedAt = 0;
+}
+
+/** Write this process's pair under the cache root, one file per process.
+ *
+ * A file rather than a harness hook, and a file rather than stderr alone,
+ * because stderr is the channel that is broken: vitest forwards writes made
+ * DURING a test and drops an exit handler's, so the pair was invisible in
+ * exactly the log it exists for. The filesystem is not on that path. It also
+ * keeps working outside vitest -- a manual build, a block script, some other
+ * CI -- where no afterAll or reporter exists to hang a hook on.
+ *
+ * Separately callable so it can be tested: an exit handler cannot be.
+ * Returns the path written, or null when there was nothing worth writing.
+ *
+ * MUST stay synchronous. An exit handler runs with no further turns of the
+ * loop, so an async write never lands -- the counter would be silently empty,
+ * which is the failure this whole item is about. */
+export function writeEarlyCacheCounterFile(root: string): string | null {
+  if (cacheConsultations < 2) return null;
+  try {
+    const directory = join(root, "counters");
+    mkdirSync(directory, { recursive: true });
+    const file = join(directory, `${process.pid}-${counterStartedAt}.json`);
+    writeFileSync(
+      file,
+      JSON.stringify({
+        pid: process.pid,
+        startedAt: new Date(counterStartedAt).toISOString(),
+        consultations: cacheConsultations,
+        hits: cacheHits,
+      }),
+    );
+    return file;
+  } catch {
+    // An exit handler that throws takes the process's exit code with it.
+    return null;
+  }
+}
+
+function armExitReport(): void {
+  if (exitReportArmed) return;
+  exitReportArmed = true;
+  process.on("exit", () => {
+    if (cacheConsultations < 2) return;
+    const rate = ((cacheHits / cacheConsultations) * 100).toFixed(1);
+    if (counterRoot !== null) writeEarlyCacheCounterFile(counterRoot);
+    process.stderr.write(
+      `scriptc: early cache ${cacheHits}/${cacheConsultations} hits (${rate}%)\n`,
+    );
+  });
+}
+
+/** The read itself. Counting lives in the exported wrapper below so that it
+ * happens on EVERY return path, of which this function has many. */
+async function readEarlyBuildCacheUncounted(
+  root: string,
   options: EarlyBuildCacheOptions,
 ): Promise<EarlyBuildCacheHit | null> {
-  if (root === null) return null;
   const directory = entryDir(root, options);
   try {
     const stamp = JSON.parse(await readFile(join(directory, "stamp.json"), "utf8")) as EarlyBuildStamp;
@@ -381,6 +491,35 @@ export async function readEarlyBuildCache(
   }
 }
 
+/** Consult the cache, and count the consultation.
+ *
+ * The counter file is written HERE, on every consultation, not from an exit
+ * handler. process.on("exit") DOES NOT FIRE in a vitest worker -- measured,
+ * not assumed: a probe registering one produced nothing across a passing run.
+ * That, and not any stderr routing, is why the first version of this counter
+ * was invisible in the gate. A number that only lands when a process exits
+ * cleanly is a number that does not land here.
+ *
+ * Cost is one small synchronous write against a compile of hundreds of
+ * milliseconds, and it survives SIGKILL, worker termination and crashes,
+ * which an exit handler does not. */
+export async function readEarlyBuildCache(
+  root: string | null,
+  options: EarlyBuildCacheOptions,
+): Promise<EarlyBuildCacheHit | null> {
+  if (root === null) return null;
+  armExitReport();
+  if (counterRoot === null) {
+    counterRoot = root;
+    counterStartedAt = Date.now();
+  }
+  cacheConsultations += 1;
+  const hit = await readEarlyBuildCacheUncounted(root, options);
+  if (hit !== null) cacheHits += 1;
+  writeEarlyCacheCounterFile(root);
+  return hit;
+}
+
 /* ── publish ─────────────────────────────────────────────────────────────── */
 
 export async function publishEarlyBuildCache(
@@ -446,4 +585,56 @@ export async function publishEarlyBuildCache(
   } finally {
     await rm(stage, { recursive: true, force: true }).catch(() => undefined);
   }
+}
+
+/* ── verify mode ─────────────────────────────────────────────────────────── */
+
+/** What a verification compares: the metadata a build produced, plus the
+ * bytes of every artifact it emitted, keyed by the artifact's role name. */
+export interface CacheVerificationSubject {
+  meta: EarlyBuildMetadata;
+  artifacts: Map<string, Uint8Array>;
+}
+
+/** Is verify mode on? SCRIPTC_CACHE_VERIFY is in CACHE_ONLY_ENV, so asking
+ * this question does not change the answer -- see the note there. */
+export function cacheVerifyEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  return env["SCRIPTC_CACHE_VERIFY"] === "1";
+}
+
+/** Every way a cached hit can disagree with the build that was run anyway.
+ *
+ * The metadata half walks the UNION of both objects' own keys rather than a
+ * list of fields to check. A list is written from what its author remembered,
+ * and a field added to EarlyBuildMetadata tomorrow would be compared by
+ * nobody -- which is the precise shape of bug this mode exists to catch, so
+ * it must not be the shape of the mode itself.
+ *
+ * Returns one human-readable line per divergence; empty means the cached
+ * artifact is exactly what building again produces. */
+export function cacheVerificationDivergences(
+  cached: CacheVerificationSubject,
+  fresh: CacheVerificationSubject,
+): string[] {
+  const out: string[] = [];
+
+  const names = [...new Set([...cached.artifacts.keys(), ...fresh.artifacts.keys()])].sort();
+  for (const name of names) {
+    const a = cached.artifacts.get(name);
+    const b = fresh.artifacts.get(name);
+    if (a === undefined) out.push(`artifact ${name}: absent from the cached entry, emitted by the build`);
+    else if (b === undefined) out.push(`artifact ${name}: present in the cached entry, not emitted by the build`);
+    else if (a.length !== b.length || !a.every((byte, i) => byte === b[i]))
+      out.push(`artifact ${name}: cached ${digestBytes(a).slice(0, 12)} != built ${digestBytes(b).slice(0, 12)}`);
+  }
+
+  const cachedMeta = cached.meta as unknown as Record<string, unknown>;
+  const freshMeta = fresh.meta as unknown as Record<string, unknown>;
+  for (const field of [...new Set([...Object.keys(cachedMeta), ...Object.keys(freshMeta)])].sort()) {
+    const a = JSON.stringify(cachedMeta[field]) ?? "undefined";
+    const b = JSON.stringify(freshMeta[field]) ?? "undefined";
+    if (a !== b) out.push(`meta.${field}: cached ${a} != built ${b}`);
+  }
+
+  return out;
 }
