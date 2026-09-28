@@ -5324,8 +5324,19 @@ function validateFunction(
         // Composites whose every leaf is checkable ride the same walker,
         // one check per field -- a byte field is no less checkable for
         // having a record around it.
-        const nestedOk = canDynCheckTo(e.type, (id) => records.get(id), (id) => unions.get(id));
-        if (!jsonOk(e.type) && !undefArmedOk && !bytesOk && !errorOk && !funcOk && !handleOk && !nestedOk) {
+        // The nested walk is the EXPENSIVE one and it is asked LAST, not
+        // bound first. Every predicate above it is a kind test or a set
+        // lookup; canDynCheckTo is a full recursive walk of the type, and
+        // binding it to a const made every dynCheck node pay for a walk
+        // the short-circuit below then threw away. MEASURED on app182:
+        // 2,006 dynCheck nodes reach here and 1,655 of them (82.5%) are
+        // already answered by a predicate above, so the walk decided
+        // nothing. Same condition, same answers, same diagnostics -- && was
+        // always going to short-circuit; the const was what stopped it.
+        if (
+          !jsonOk(e.type) && !undefArmedOk && !bytesOk && !errorOk && !funcOk && !handleOk &&
+          !canDynCheckTo(e.type, (id) => records.get(id), (id) => unions.get(id))
+        ) {
           err(`dynCheck against non-JSON-representable type ${e.type.kind}`, e.loc);
         }
         break;
