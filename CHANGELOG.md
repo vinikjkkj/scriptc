@@ -4,7 +4,33 @@ All notable changes to scriptc will be documented in this file.
 
 ## Unreleased
 
+### Fixes
+
+- **`surface-manifest.json` is restamped with the version it ships under.** RELEASING.md step 2 requires `node scripts/sync-versions.mjs` and `pnpm manifest` after a bump; 0.1.1 and 0.1.2 both bumped the package versions by hand and skipped the restamp, so the committed manifest kept declaring `compilerVersion` 0.1.0 and `tests/harness/surface-manifest.test.ts` was red from 0.1.1 onward. Only the stamp was stale: the 411 entries and the coverage prose regenerate byte-identically, so the published manifests describe the right surface under the wrong version number.
+
 <!-- release:start -->
+
+## 0.1.2
+
+### Fixes
+
+- **Import order between two attested checkouts no longer decides which version of a shared dependency is compiled.** Under `--provenance-sources`, each checkout's `tsconfig` `paths` aliases were merged into a single flat table per program, so two checkouts declaring the same specifier collided and the winner depended on which import the compiler reached first. On 0.1.1, swapping two import lines moved 347 of 350 modules of the zapo-rest driver into a different zapo-js checkout — at exit 0, with no diagnostic in either direction. Aliases are now scoped to the checkout that declared them, so a program that imports the same dependency from two attested sources compiles each against its own.
+
+### Changes
+
+- All three packages move together. `@scriptc-fork/compiler` pins `@scriptc-fork/runtime` exactly and `@scriptc-fork/scriptc` pins the compiler exactly, so publishing one alone strands consumers on the previous graph.
+
+<!-- release:end -->
+
+## 0.1.1
+
+### Fixes
+
+- **The published runtime no longer ships `vendor/.cache`.** The directory is in `.gitignore` and therefore in no commit, but `"files": ["vendor"]` pulled it into the npm tarball anyway — 328 of 796 published files and 20 of the 23 MB of `vendor`, carrying prebuilt `libmbedtls.a` and `libqjs.a` for two targets, 59 `.o` objects, and MSBuild `.vcxproj`/`.tlog` leftovers including two `-prof*` flavours that were artefacts of a performance session rather than release material. Two problems, not one: the package contained bytes present in no commit, so "the published artifact matches HEAD" was false for the runtime even with a clean working tree; and a consumer whose build hit the same cache key — same target, `x86_64-windows-gnu` — could link a library compiled on a developer's machine instead of building its own. A `!vendor/.cache` entry removes it: 12.4 MB to 7 MB, 796 files to 468, with quickjs-ng and all 456 `.c`/`.h` sources preserved, so nothing the compiler needs is lost.
+
+### Changes
+
+- All three packages bump together, for the same pinning reason recorded under 0.1.2.
 
 ## 0.1.0
 
@@ -15,8 +41,6 @@ First release of this fork under its own name.
 - **The three packages are published as `@scriptc-fork/runtime`, `@scriptc-fork/compiler` and `@scriptc-fork/scriptc`**, from `vinikjkkj/scriptc`, and no longer as upstream's `@scriptc/runtime`, `@scriptc/compiler` and `scriptc`. The installed command is still `scriptc`. Inside the packages the workspace dependencies are kept as aliases (`"@scriptc/runtime": "npm:@scriptc-fork/runtime@0.1.0"`), so a consumer's tree still contains `node_modules/@scriptc/compiler` and every import specifier resolves as before. See RELEASING.md.
 - The version line moves to `0.1.0` to keep upstream's `0.0.x` line free and unambiguous. It carries the compiler work merged onto `main` since upstream `0.0.21`, which was developed without changelog entries; the commit history between the fork point and this release is the record.
 - New at the repository root: `COMPILING-ZAPO.md`, a guide to compiling a zapo application with this compiler.
-
-<!-- release:end -->
 
 ## 0.0.21
 
