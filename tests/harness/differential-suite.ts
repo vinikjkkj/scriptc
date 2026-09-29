@@ -21,6 +21,7 @@ import { corpusSlice, partSuffix, shardSuffix } from "./shard.js";
 import { tapPhase } from "../../packages/compiler/src/phase-tap.js";
 import { oracleCrashed, reduceNativeReport, reduceNodeReport } from "./uncaught-report.js";
 import { oracleIsTrustworthy as oracleTrustworthy } from "./oracle-trust.js";
+import { holdScratch } from "./scratch-lease.mjs";
 
 const execFileAsync = promisify(execFile);
 const repoRoot = join(import.meta.dirname, "../..");
@@ -384,8 +385,11 @@ async function compileAndRun(file: string): Promise<RunResult> {
     .update(dynamic ? "dyn" : "")
     .digest("hex")
     .slice(0, 16);
-  const outDir = join(cacheDir, key);
-  mkdirSync(outDir, { recursive: true });
+  // holdScratch, not mkdirSync: it publishes a LEASE saying this run is
+  // using the directory, which the per-test hook releases when the test
+  // ends. That release is what lets the sweep reclaim this run's own
+  // finished scratch WHILE IT IS STILL RUNNING -- see scratch-lease.mjs.
+  const outDir = holdScratch(cacheDir, key);
   const compileT0 = performance.now();
   const result = await compile(file, {
     // Windows will not exec an extensionless file, and the driver writes

@@ -2,11 +2,12 @@
  *
  * A sweep that quietly evicted nothing would make every one of these pass
  * for the wrong reason, so each case asserts what it KEPT as well as what
- * it took: the cap is a real bound (over it, old key directories go), the
+ * it took: the cap is a real bound (over it, old directories go), the
  * liveness floor is a real floor (what a live run may hold survives even
  * when the tree is far over cap — that is what makes a concurrent
- * other-flavor run safe), and only content-key directories are eligible at
- * all (a suite's named fixture directory is never a candidate).
+ * other-flavor run safe), a RELEASED LEASE overrides that floor (which is
+ * the whole of the in-run bound — without it a gate reclaims nothing until
+ * it ends), and the CAS is never a candidate at all.
  *
  * The floor is stated directly here via `opts.floor` rather than by
  * spawning processes to stand for live runs: this file is about what the
@@ -23,6 +24,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { pruneScratchOnce } from "./prune-scratch.mjs";
 import { registerRun } from "./run-registry.mjs";
+import { holdScratch, releaseScratch } from "./scratch-lease.mjs";
 
 /** The pid of a child that has already exited — a real dead run. */
 function deadPid(): number {
@@ -129,21 +131,118 @@ describe("pruneScratchOnce", () => {
     expect(r.spared).toBe(0); // and is not reported as kept program data
   });
 
-  test("only content-key directories are candidates", async () => {
+  test("a NAME-prefixed program directory is a candidate too", async () => {
+    /* It was not, and 542 of them held 2.63 GB that nothing could ever
+     * evict: `server-<key>`, `npm-<key>`, `fetch-<key>` are per-program
+     * directories that merely spell their key with a prefix, and the
+     * 16-hex rule read them as fixtures a suite might be holding a path to
+     * across its whole file. Liveness and the lease answer that question
+     * directly now, for named and hex-named directories alike. */
     process.env["SCRIPTC_TEST_SCRATCH_MAX_MB"] = "1";
     keyDir("eeeeeeeeeeeeeeee", 8, 9 * HOUR);
-    // A suite's named fixture directory, same age, same size.
-    const named = join(root, "cli-flush");
-    mkdirSync(named, { recursive: true });
-    const file = join(named, "blob.bin");
-    writeFileSync(file, Buffer.alloc(8 * MB));
-    const when = new Date(now - 9 * HOUR);
-    utimesSync(file, when, when);
+    keyDir("fetch-0123456789abcdef", 8, 9 * HOUR);
 
     const r = await pruneScratchOnce(root, now);
-    expect(r.evicted).toEqual(["eeeeeeeeeeeeeeee"]); // the key dir went
-    expect(existsSync(named)).toBe(true); // the named one did not
+    expect([...r.evicted].sort()).toEqual(["eeeeeeeeeeeeeeee", "fetch-0123456789abcdef"]);
+    expect(existsSync(join(root, "fetch-0123456789abcdef"))).toBe(false);
+    expect(r.freed).toBe(16 * MB);
+  });
+
+  test("the CAS is never a candidate, and is not counted against the cap", async () => {
+    /* SCRIPTC_CACHE_DIR defaults to `cas` INSIDE this tree, it IS a build
+     * input — the binary cache this tree's cheap-eviction argument rests
+     * on — and it carries its own size cap. Counting it toward this cap
+     * would also make the cap unreachable whenever the CAS alone exceeded
+     * it, which is how a widened rule quietly becomes an unconditional
+     * purge of everything else. */
+    process.env["SCRIPTC_TEST_SCRATCH_MAX_MB"] = "16";
+    keyDir("cas", 64, 9 * HOUR); // far over the cap on its own
+    keyDir("aaaaaaaaaaaaaaaa", 8, 9 * HOUR);
+
+    const r = await pruneScratchOnce(root, now, { floor: null });
+    expect(r.total).toBe(8 * MB); // the CAS's 64 MB is not in the total
+    expect(r.evicted).toEqual([]); // so the tree is under cap and nothing moves
+    expect(existsSync(join(root, "cas"))).toBe(true);
     expect(r.spared).toBe(1);
+  });
+
+  /* THE IN-RUN BOUND. Everything above is about a tree between runs. These
+   * are about the tree DURING one: every directory is newer than the live
+   * run's own start, so the floor protects all of it by construction and a
+   * full gate reclaimed nothing until it ended — which is why `pnpm test`
+   * had to be driven in chunks on this host. A released lease is the finer
+   * fact that breaks that tie. */
+  test("a released lease is evicted even though the live run's floor protects it", async () => {
+    process.env["SCRIPTC_TEST_SCRATCH_MAX_MB"] = "1";
+    const floor = now - 5 * 60 * 1000; // the run started five minutes ago
+    keyDir("8888888888888888", 8, 60 * 1000); // written BY that run
+    releaseScratch(root, "8888888888888888"); // and its test has ended
+
+    const r = await pruneScratchOnce(root, now, { floor });
+    expect(r.evicted).toEqual(["8888888888888888"]);
+    expect(existsSync(join(root, "8888888888888888"))).toBe(false);
+    expect(r.freed).toBe(8 * MB);
+  });
+
+  test("a directory the run is STILL USING survives the same sweep", async () => {
+    /* The other direction, and the one that shows up as a flaky gate
+     * rather than as a full disk: a held lease says a test is inside that
+     * directory right now.
+     *
+     * The companion eviction here is a PRE-FLOOR directory, not a released
+     * one, on purpose: it proves the sweep actually ran and took what it
+     * was allowed to — without which this would pass for the wrong reason
+     * — while staying independent of the lease rule, so that breaking the
+     * in-run bound is caught by the test above and by nothing else. */
+    process.env["SCRIPTC_TEST_SCRATCH_MAX_MB"] = "1";
+    const floor = now - 5 * 60 * 1000;
+    const inUse = holdScratch(root, "9999999999999999");
+    writeFileSync(join(inUse, "program.exe"), Buffer.alloc(8 * MB));
+    keyDir("aaaaaaaaaaaaaaab", 8, 90 * 60 * 1000); // predates the run
+
+    const r = await pruneScratchOnce(root, now, { floor });
+    expect(r.evicted).toEqual(["aaaaaaaaaaaaaaab"]); // the sweep did run
+    expect(existsSync(inUse)).toBe(true); // and left the held one alone
+    expect(existsSync(join(inUse, "program.exe"))).toBe(true);
+  });
+
+  test("a protected directory does not end the scan: released ones behind it still go", async () => {
+    /* Eviction order is LRU, and in a live gate released and protected
+     * directories are interleaved in it — a test finishing at minute 40
+     * releases a directory older than one a test started at minute 50 is
+     * still writing. Stopping at the first protected directory, which is
+     * what the floor rule alone allows (everything after it is newer, so
+     * everything after it is protected too), would therefore reclaim
+     * almost nothing in a run while looking exactly like a working
+     * sweep. */
+    process.env["SCRIPTC_TEST_SCRATCH_MAX_MB"] = "1";
+    const floor = now - 30 * 60 * 1000;
+    // Held, and written 20 minutes in: a test is inside it right now.
+    const inUse = holdScratch(root, "cccccccccccccccc");
+    const exe = join(inUse, "program.exe");
+    writeFileSync(exe, Buffer.alloc(8 * MB));
+    const when = new Date(now - 20 * 60 * 1000);
+    utimesSync(exe, when, when);
+    keyDir("dddddddddddddddd", 8, 10 * 60 * 1000); // newer, but finished
+    releaseScratch(root, "dddddddddddddddd");
+
+    const r = await pruneScratchOnce(root, now, { floor });
+    expect(r.evicted).toEqual(["dddddddddddddddd"]);
+    expect(existsSync(exe)).toBe(true);
+  });
+
+  test("an UNLEASED directory of this run is spared: silence is not permission", async () => {
+    /* An uninstrumented suite creates its scratch without a lease. The
+     * safe reading of silence is that the directory is in use, so it is
+     * bounded by the floor alone — an uninstrumented suite under-reclaims
+     * rather than losing a directory out from under itself. */
+    process.env["SCRIPTC_TEST_SCRATCH_MAX_MB"] = "1";
+    const floor = now - 5 * 60 * 1000;
+    keyDir("bbbbbbbbbbbbbbbc", 8, 60 * 1000); // no lease at all
+
+    const r = await pruneScratchOnce(root, now, { floor });
+    expect(r.evicted).toEqual([]);
+    expect(existsSync(join(root, "bbbbbbbbbbbbbbbc"))).toBe(true);
   });
 
   /* The two cases above state a floor directly. These two go through the
