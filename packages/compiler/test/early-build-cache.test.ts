@@ -12,12 +12,14 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { compile } from "../src/index.js";
+import { FRAGMENT_VERSION, type LoweringFragment } from "../src/frontend/lowering/fragment.js";
 import {
   publishEarlyBuildCache,
   readEarlyBuildCache,
   scriptcEnvironmentFingerprint,
   cacheVerificationDivergences,
   cacheVerifyEnabled,
+  type CacheVerificationSubject,
   earlyCacheCounters,
   resetEarlyCacheCounters,
   writeEarlyCacheCounterFile,
@@ -398,6 +400,104 @@ describe("early build cache", () => {
       if (!found.some((line) => line.startsWith(`meta.${field}:`))) unnoticed.push(field);
     }
     expect(unnoticed, `metadata fields a stale hit could change unnoticed: ${unnoticed.join(", ")}`).toEqual([]);
+  });
+
+
+  /* Verify mode's FRAGMENT comparison, mutant PER FIELD found.
+   *
+   * Per field and not per fragment, deliberately. A whole-record mutant is
+   * caught by any coarse check and proves nothing about granularity, and
+   * granularity is the entire reason this mode exists: the failure worth
+   * catching is one stale field inside an otherwise-correct fragment -- a
+   * witness list that lost an entry, a mint whose ordinal moved -- not a
+   * fragment that is obviously the wrong object.
+   *
+   * The witness is walked as its own level for the same reason the metadata
+   * test walks EarlyBuildMetadata: the witness is where a field gets ADDED,
+   * and a new witness field that nothing compares is exactly the bug this
+   * mode is for. Add one tomorrow and it gets a mutant here for free. */
+  it("verification diverges on every fragment field and every witness field, enumerated rather than listed", () => {
+    const fragment = (): LoweringFragment => ({
+      version: FRAGMENT_VERSION,
+      module: "/p/lib.ts",
+      functions: [],
+      globals: [],
+      mints: [{ kind: "record" as const, structure: '[["a","f64"]]', ordinal: 0, loop: "body" as const }],
+      edges: [{ from: "%lib.f", to: "%lib.g" }],
+      witness: {
+        shapesRead: ['[["b","string"]]'],
+        helpersReused: [{ internKey: "obj.keys:[[\"b\",\"string\"]]", sites: 2 }],
+        reachableSubset: ["%lib.f"],
+        moduleGraph: [{ specifier: "./dep", resolved: "/p/dep.ts" }],
+        overflowGranted: ["k-granted"],
+        overflowDenied: ["k-denied"],
+        overflowUnanswered: ["k-neither"],
+      },
+      probes: [{ op: "file" as const, path: "/p/lib.ts", digest: "d" }],
+    });
+    const meta = {
+      backend: "llvm" as const,
+      llvmRefusal: null,
+      features: {},
+      advisories: [],
+      advisorySourceTexts: {},
+      npmStatic: [],
+    };
+    const subject = (): CacheVerificationSubject => ({
+      meta: { ...meta },
+      artifacts: new Map([["program.tu", new Uint8Array([1, 2, 3])]]),
+      fragments: new Map([["/p/lib.ts", fragment()]]),
+    });
+
+    // Control: identical subjects must produce NO divergence. Without it, a
+    // comparison that flagged everything would satisfy every loop below.
+    expect(cacheVerificationDivergences(subject(), subject())).toEqual([]);
+
+    // Every TOP-LEVEL fragment field, enumerated from the object.
+    const topFields = Object.keys(fragment()).filter((f) => f !== "witness");
+    expect(topFields.length).toBeGreaterThan(0);
+    const unnoticedTop: string[] = [];
+    for (const field of topFields) {
+      const fresh = subject();
+      (fresh.fragments!.get("/p/lib.ts") as unknown as Record<string, unknown>)[field] = "__mutant__";
+      const found = cacheVerificationDivergences(subject(), fresh);
+      if (!found.some((line) => line.startsWith(`fragment /p/lib.ts.${field}:`))) unnoticedTop.push(field);
+    }
+    expect(unnoticedTop, `fragment fields a stale hit could change unnoticed: ${unnoticedTop.join(", ")}`).toEqual([]);
+
+    // Every WITNESS field, likewise.
+    const witnessFields = Object.keys(fragment().witness);
+    expect(witnessFields.length).toBeGreaterThan(0);
+    const unnoticedWitness: string[] = [];
+    for (const field of witnessFields) {
+      const fresh = subject();
+      const w = (fresh.fragments!.get("/p/lib.ts") as unknown as Record<string, unknown>)["witness"] as Record<string, unknown>;
+      w[field] = "__mutant__";
+      const found = cacheVerificationDivergences(subject(), fresh);
+      if (!found.some((line) => line.startsWith(`fragment /p/lib.ts.witness.${field}:`))) unnoticedWitness.push(field);
+    }
+    expect(unnoticedWitness, `witness fields a stale hit could change unnoticed: ${unnoticedWitness.join(", ")}`).toEqual([]);
+
+    // A mutant that is a SUBTLE edit rather than a type change, because
+    // "__mutant__" would be caught by a comparison that only checked types.
+    // One dropped entry from one witness list is the realistic stale-hit
+    // shape: the fragment is otherwise entirely correct.
+    const dropped = subject();
+    dropped.fragments!.get("/p/lib.ts")!.witness.overflowDenied = [];
+    expect(
+      cacheVerificationDivergences(subject(), dropped)
+        .some((line) => line.startsWith("fragment /p/lib.ts.witness.overflowDenied:")),
+      "dropping the only negative overflow answer must be caught: a fragment recording just what it found is the defect this witness exists for",
+    ).toBe(true);
+
+    // ...and a fragment present on only one side, which is a different
+    // failure from a field that moved and must read differently in the log.
+    const noFragments = subject();
+    noFragments.fragments = new Map();
+    expect(
+      cacheVerificationDivergences(subject(), noFragments)
+        .some((line) => line.includes("not produced by the build")),
+    ).toBe(true);
   });
 
   it("verification diverges on artifact bytes, and on an artifact present on only one side", () => {
