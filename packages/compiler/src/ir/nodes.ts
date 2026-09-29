@@ -8639,9 +8639,67 @@ export function canDynCheckTo(
   // `seen` guards the walk: a self-referential shape would recurse
   // forever. A shape already on the stack answers TRUE, since the check
   // being built for it is the one that will validate it.
-  const nestedOk = (x: IrType, stack: Set<IrType>): boolean => {
-    if (jsonSafe(x)) return true;
-    if (isDynBytes(x)) return true;
+  /* ONE memo for nestedOk's OWN answers, for the duration of THIS call.
+   *
+   * The jsonSafe memo above made each nested question cheap; it did not stop
+   * the questions being asked. nestedOk has no memo of its own, so a type
+   * graph that is a DAG is walked as if it were a TREE: every path to a
+   * shared subtree re-walks it, and the count is multiplicative in the
+   * sharing. Measured on zapo-rest app182 (--provenance-sources) that is the
+   * dominant cost of the whole frontend -- 18,320 canDynCheckTo calls
+   * visited 5,591,101,070 nodes standing on only ~24 DISTINCT types per
+   * call, so 99.99% of the visits re-derived an answer already derived.
+   *
+   * WHY IT IS SOUND, AND WHY THE ASSUMPTION BOOKKEEPING IS NOT OPTIONAL.
+   * The recursion is COINDUCTIVE: a type already on the walk stack answers
+   * TRUE (the check being built for it is the one that will validate it).
+   * That answer is an ASSUMPTION about an ancestor, so a result derived
+   * under it is NOT a property of the type alone -- it is the answer FOR
+   * THAT PATH. Caching one would serve a path-conditional true to a
+   * different path. Concretely, with `A = { f: B, g: promise }` and
+   * `B = { f: A }`: asked from A, B answers true (A is on the stack); asked
+   * on its own, B answers false (A is expanded, and its promise field
+   * refuses). Two different answers for one type, both correct where they
+   * were produced.
+   *
+   * So the memo records an entry ONLY when the computation demonstrably
+   * consulted nothing above the node: `minAssumed` carries the SHALLOWEST
+   * stack depth any descendant read, and an entry is written only when that
+   * depth is the node's own or deeper -- i.e. every cycle the subtree closed
+   * was contained inside it. Such a result is the same in every context,
+   * because the computation never looked at the context.
+   *
+   * That this leaves the ANSWER unchanged, not merely sound: the recursion
+   * is a conjunction of subgoals whose disjuncts are all context-free, so a
+   * successful derivation is a coinductive proof and every type appearing in
+   * one is itself derivable standing alone -- which is exactly the value the
+   * memo holds. A cached value can therefore never be the one that turns a
+   * true root false, and since a cached value is never MORE permissive than
+   * the path-conditional one it replaces, no false root can turn true.
+   *
+   * PER CALL, NEVER GLOBAL -- the same reason the jsonSafe memo above is:
+   * getRecord answers undefined for a shapeId the table does not hold YET,
+   * and the table grows during lowering. Nothing is interned while the
+   * predicate walks, so a per-call memo cannot observe the growth. */
+  const nestedMemo = new Map<IrType, boolean>();
+  /* The walk stack as type -> the DEPTH it was pushed at, so a coinductive
+   * hit can say how far ABOVE the current node it reached. `seen` (empty
+   * from every call site today) seeds at -1: an assumption from outside this
+   * walk is shallower than anything in it, so nothing under it is cached. */
+  const stack = new Map<IrType, number>();
+  let depth = 0;
+  let minAssumed = Number.POSITIVE_INFINITY;
+  const nestedOk = (x: IrType): boolean => {
+    const hit = nestedMemo.get(x);
+    if (hit !== undefined) return hit;
+    if (jsonSafe(x)) {
+      nestedMemo.set(x, true);
+      return true;
+    }
+    if (isDynBytes(x)) {
+      nestedMemo.set(x, true);
+      return true;
+    }
     // A dyn ('unknown') LEAF: the target itself says "anything fits here",
     // so there is nothing to validate. Both walkers have said so since
     // they were written — dynMatch's record case skips dyn fields
@@ -8649,12 +8707,18 @@ export function canDynCheckTo(
     // case retains the subtree (a MISSING key becoming the undefined dyn
     // value, JS's own missing-property read). Only the predicate had no
     // case for it.
-    if (x.kind === "dyn") return true;
+    if (x.kind === "dyn") {
+      nestedMemo.set(x, true);
+      return true;
+    }
     // A BIGINT leaf — the union arm that `bigint | boolean | number |
     // string` (BigInt's own parameter type) is made of, and a record
     // field carrying one. dynMatch tests the kind and dynCheck unwraps
     // it, so a leaf is exactly as emittable as the bare type.
-    if (x.kind === "bigint") return true;
+    if (x.kind === "bigint") {
+      nestedMemo.set(x, true);
+      return true;
+    }
     // A CLASS INSTANCE leaf — the record field or union arm a widened
     // value carries one container down (a media union's `Readable` arm
     // inside a message record). It is admitted here for the same reason
@@ -8692,7 +8756,11 @@ export function canDynCheckTo(
     // %TypeError or %ReferenceError leaf is as exact as the root's
     // (dynErrorClassKind states why, %DOMException included).
     // canBoxClassIntoDyn remains the answer for every other class.
-    if (x.kind === "object") return isDynErrorClass(x.className) || canBoxClassIntoDyn(x.className);
+    if (x.kind === "object") {
+      const okObj = isDynErrorClass(x.className) || canBoxClassIntoDyn(x.className);
+      nestedMemo.set(x, okObj);
+      return okObj;
+    }
     // A MAP or SET leaf — the record field a widened value carries one
     // container down, which is the ONLY shape zapo needs: the
     // `ReadonlyMap` inside `getCollectionState`'s returned record and
@@ -8702,8 +8770,18 @@ export function canDynCheckTo(
     // key-checked retained unwrap, both added with the kind. Refusing it
     // here while canConvertToDyn admits it would let the value IN and
     // strand it — the method-bundle lesson, one container down.
-    if (x.kind === "map" || x.kind === "set") return true;
-    if (stack.has(x)) return true;
+    if (x.kind === "map" || x.kind === "set") {
+      nestedMemo.set(x, true);
+      return true;
+    }
+    /* The coinductive hit. It is the ONE answer that is not a property of
+     * the type alone, so it is never memoised, and it publishes how far up
+     * it reached so no ancestor between here and there is memoised either. */
+    const at = stack.get(x);
+    if (at !== undefined) {
+      if (at < minAssumed) minAssumed = at;
+      return true;
+    }
     /* PUSH/POP, not COPY. This was `const deeper = new Set(stack).add(x)`,
      * which allocated and filled a fresh Set at EVERY node of the walk — so
      * a walk of N nodes at depth d cost O(N*d) set inserts before it looked
@@ -8712,14 +8790,23 @@ export function canDynCheckTo(
      * this is the same predicate; it just stops rebuilding the path at every
      * step. Measured on zapo's protobuf shapes, this arrow was the single
      * largest self-time frame in the whole frontend. */
-    stack.add(x);
-    const ok = nestedBody(x, stack);
+    const myDepth = depth++;
+    stack.set(x, myDepth);
+    const outerAssumed = minAssumed;
+    minAssumed = Number.POSITIVE_INFINITY;
+    const ok = nestedBody(x);
+    const innerAssumed = minAssumed;
     stack.delete(x);
+    depth--;
+    // Self-contained: nothing this subtree read lives above it, so the
+    // answer is context-free and may be served to any other path.
+    if (innerAssumed >= myDepth) nestedMemo.set(x, ok);
+    minAssumed = innerAssumed < outerAssumed ? innerAssumed : outerAssumed;
     return ok;
   };
   /* The kind dispatch of nestedOk, split out so the push above has exactly
    * one matching pop no matter which arm answers. */
-  const nestedBody = (x: IrType, stack: Set<IrType>): boolean => {
+  const nestedBody = (x: IrType): boolean => {
     // A FUNCTION leaf — a callable record field, which is how every
     // protobuf message type reaches here (the Long's `toNumber`). The
     // checked-dynamic tree's function box carries the interned typeKey it
@@ -8729,7 +8816,7 @@ export function canDynCheckTo(
     // they can still exact-unwrap, and the matcher is the exact-unwrap
     // test either way.
     if (x.kind === "func") return true;
-    if (x.kind === "array") return nestedOk(x.elem, stack);
+    if (x.kind === "array") return nestedOk(x.elem);
     if (x.kind === "record") {
       const shape = getRecord(x.shapeId);
       if (!shape || shape.tuple) return false;
@@ -8748,8 +8835,8 @@ export function canDynCheckTo(
       // RESERVED internal marker into a user's TypeError path.
       if (shapeHasAccessorSlots(shape)) return false;
       return (
-        shape.fields.every((f) => nestedOk(f.type, stack)) &&
-        (shape.indexValue === undefined || nestedOk(shape.indexValue, stack))
+        shape.fields.every((f) => nestedOk(f.type)) &&
+        (shape.indexValue === undefined || nestedOk(shape.indexValue))
       );
     }
     if (x.kind === "union") {
@@ -8760,12 +8847,13 @@ export function canDynCheckTo(
       // the func matcher compares the boxed signature: two arms that
       // matched the same function value would have to have the same
       // typeKey, and a union cannot hold the same type twice.
-      return !!def && def.arms.every((a) => a.kind === "undefinedT" || nestedOk(a, stack));
+      return !!def && def.arms.every((a) => a.kind === "undefinedT" || nestedOk(a));
     }
     return false;
   };
-  if ((t.kind === "array" || t.kind === "record" || t.kind === "union") && nestedOk(t, new Set(seen))) {
-    return true;
+  if (t.kind === "array" || t.kind === "record" || t.kind === "union") {
+    for (const s of seen) stack.set(s, -1);
+    if (nestedOk(t)) return true;
   }
   return false;
 }
