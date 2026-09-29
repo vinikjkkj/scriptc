@@ -64,8 +64,15 @@ export default defineConfig({
       : {}),
     globalSetup: ["./tests/harness/suite-lock.mjs"],
     sequence: { sequencer: CorpusFirstSequencer },
+    // scratch-hooks is ALWAYS on: it is the in-run half of the scratch
+    // bound (globalSetup's sweep can only reclaim between runs), and a
+    // filtered run that cannot reclaim is how the tree fills while the
+    // bound looks like it is working.
     // Gate-cost accounting, off unless asked: the collector installs the
     // compiler's phase tap and writes one JSONL row per test.
-    ...(process.env["SCRIPTC_PHASE_LOG"] ? { setupFiles: ["./tests/harness/phase-collect.ts"] } : {}),
+    setupFiles: [
+      "./tests/harness/scratch-hooks.ts",
+      ...(process.env["SCRIPTC_PHASE_LOG"] ? ["./tests/harness/phase-collect.ts"] : []),
+    ],
   },
 });

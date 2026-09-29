@@ -36,6 +36,7 @@ import { corpusSlice, partSuffix, shardSuffix } from "./shard.js";
 import { oracleCrashed, reduceNativeReport, reduceNodeReport } from "./uncaught-report.js";
 import { EXE_SUFFIX } from "./exe.js";
 import { tapPhase } from "../../packages/compiler/src/phase-tap.js";
+import { holdScratch } from "./scratch-lease.mjs";
 
 const execFileAsync = promisify(execFile);
 const repoRoot = join(import.meta.dirname, "../..");
@@ -284,8 +285,11 @@ async function build0(file: string, backend: "c" | "llvm" | "default") {
     .update(backend === "llvm" ? "llvm" : backend === "c" ? "llvm-c" : "llvm-def")
     .digest("hex")
     .slice(0, 16);
-  const outDir = join(cacheDir, key);
-  mkdirSync(outDir, { recursive: true });
+  // holdScratch, not mkdirSync: the LEASE it publishes is what lets the
+  // sweep reclaim this run's own finished scratch mid-run. This lane
+  // takes up to three directories per program (llvm, c, default), and
+  // the per-test hook releases all of them together when the test ends.
+  const outDir = holdScratch(cacheDir, key);
   // The binary BASENAME must be unique per lane (and per flavor): fs-corpus
   // programs derive their scratch paths from tail(process.argv[1]) — the
   // basename — so two concurrently running native binaries that share a

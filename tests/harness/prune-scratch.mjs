@@ -34,12 +34,34 @@
  * When no run is alive there is now no floor at all, so a relaunch recovers
  * the full overage immediately.
  *
- * Only CONTENT-KEY directories are evictable: a 16-hex-character name is
- * what compileAndRun/build() create per program, and it is where the whole
- * 12 GB lives. Everything else under the root (a suite's named fixture
- * directory, the dec-oracle-*.mjs files, cli-flush) is left alone — those
- * are small, and a named directory is the kind of thing a suite may be
- * holding a path to across its whole file.
+ * WHAT THE FLOOR CANNOT DO, AND WHAT THE LEASE ADDS. The floor bounds the
+ * tree BETWEEN runs and is silent WITHIN one, because a run's own
+ * directories are all newer than its own start: during a full gate the only
+ * live pid is the gate itself, the floor correctly spares everything, and
+ * the tree runs to 16 GB with nothing able to reclaim it. `pnpm test` had
+ * to be run in chunks on this host for exactly that reason. So a second,
+ * finer fact is recorded — scratch-lease.mjs — saying which directories the
+ * run has FINISHED with, and a released lease is evictable whatever the
+ * floor says. The argument for that is a test's completion, not an mtime:
+ * see scratch-lease.mjs's head. A directory with NO lease is never
+ * in-run-evictable, so an uninstrumented suite under-reclaims rather than
+ * loses a directory it is using.
+ *
+ * WHAT IS A CANDIDATE. Everything under the root except the CAS and the
+ * sweep's own bookkeeping. The rule used to be a 16-hex name — what
+ * compileAndRun/build() create per program — on the grounds that a named
+ * directory "is the kind of thing a suite may be holding a path to across
+ * its whole file", and that the rest were small. Neither half survived
+ * measurement: 542 name-prefixed directories (`server-<key>`, `npm-<key>`,
+ * `fetch-<key>` and friends — per-program directories that merely spell
+ * their key with a prefix) held 2.63 GB, 38% of the tree, and could never
+ * be evicted by anything. And "a suite may be holding a path" is the
+ * question liveness and the lease now answer directly, for named and
+ * hex-named directories alike. The one directory that stays out is `cas`:
+ * SCRIPTC_CACHE_DIR's default location is inside this tree, it IS a build
+ * input, and it has its own size-capped sweep. It is excluded from the
+ * total as well as from eviction — counting a separately-bounded cache
+ * against this cap would make the cap unreachable.
  *
  * Eviction is CHEAP here in a way it is not for the CAS, which is why the
  * default cap is tight: the executable in a program directory is a COPY of
@@ -50,11 +72,13 @@
  *
  * Every error is swallowed: a sweep is never allowed to fail a gate.
  */
-import { readdir, rm, stat } from "node:fs/promises";
+import { readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { scratchFloor } from "./run-registry.mjs";
+import { leaseReleased, readLease, sweepRemove } from "./scratch-lease.mjs";
 
-const KEY_DIR = /^[0-9a-f]{16}$/;
+/** The CAS: a build input with its own cap, and not this sweep's business. */
+export const CAS_DIR = "cas";
 
 /** Bytes under `dir`, and its newest mtime. Both in one walk. */
 async function measure(dir) {
@@ -101,17 +125,38 @@ export async function pruneScratchOnce(root, now = Date.now(), opts = {}) {
   if (entries === null) return result; // no scratch tree yet: nothing to do
 
   const dirs = [];
+  /* The scan is mostly sync work -- one small JSON read per released
+   * directory -- and on a full gate's tree that is several thousand of
+   * them inside a worker's afterEach. Hand the event loop back
+   * periodically or vitest's worker RPC times out while every test
+   * passes; see sweepRemove's note. */
+  let scanned = 0;
   for (const ent of entries) {
-    // The run registry (and anything else dot-prefixed) is bookkeeping, not
-    // scratch: it is not a candidate, and counting it as "spared" would
-    // report it as program data the sweep chose to keep.
+    if (++scanned % 200 === 0) await new Promise((r) => setImmediate(r));
+    // The run registry, the lease sidecar, and anything else dot-prefixed
+    // is bookkeeping, not scratch: not a candidate, and counting it as
+    // "spared" would report it as program data the sweep chose to keep.
     if (ent.name.startsWith(".")) continue;
     const p = join(root, ent.name);
     if (ent.isDirectory()) {
-      const m = await measure(p);
+      // The CAS is out of scope in both directions — see the head note.
+      if (ent.name === CAS_DIR) {
+        result.spared++;
+        continue;
+      }
+      const lease = readLease(root, ent.name);
+      const released = leaseReleased(lease);
+      /* A released lease cached what it measured at release time, and
+       * nothing has written to the directory since — that is what released
+       * means. Re-walking every program directory on every sweep is the
+       * cost that would otherwise make an in-run sweep too expensive to
+       * run often enough to matter. */
+      const m =
+        released && typeof lease.bytes === "number" && typeof lease.newest === "number"
+          ? { size: lease.bytes, newest: lease.newest }
+          : await measure(p);
       result.total += m.size;
-      if (KEY_DIR.test(ent.name)) dirs.push({ name: ent.name, path: p, ...m });
-      else result.spared++;
+      dirs.push({ name: ent.name, path: p, released, ...m });
     } else {
       const s = await stat(p).catch(() => null);
       if (s !== null) result.total += s.size;
@@ -127,11 +172,21 @@ export async function pruneScratchOnce(root, now = Date.now(), opts = {}) {
   let total = result.total;
   for (const d of dirs.sort((a, b) => a.newest - b.newest)) {
     if (total <= capBytes * 0.75) break;
-    if (floor !== null && d.newest > floor) break; // sorted: the rest are newer too
-    await rm(d.path, { recursive: true, force: true }).catch(() => undefined);
+    /* Two independent licences to evict, and the second is what makes an
+     * IN-RUN sweep possible at all:
+     *   - the directory predates every live run, so no live run can be
+     *     holding it (run-registry.mjs's argument); or
+     *   - the test that took it has released it, whatever its mtime
+     *     (scratch-lease.mjs's argument).
+     * Not a `break` on the floor test any more: released leases are
+     * interleaved with protected directories in mtime order, so passing
+     * over one must not end the scan. */
+    if (!d.released && floor !== null && d.newest > floor) continue;
+    if (!(await sweepRemove(root, d.name))) continue; // re-taken under the lock
     total -= d.size;
     result.freed += d.size;
     result.evicted.push(d.name);
   }
   return result;
 }
+
