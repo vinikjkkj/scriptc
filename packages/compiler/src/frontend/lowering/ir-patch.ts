@@ -392,9 +392,15 @@ export function registerEnumRefill(impl: string, fn: EnumRefillImpl): void {
   ENUM_REFILLS.set(impl, fn);
 }
 
-/** Run one refill. The ONLY dispatch. */
-export function applyEnumRefill(L: unknown, r: EnumRefill): void {
-  notePatch("enumRefill." + r.impl + (r.diag === undefined ? ".replay" : ".fill"));
+/** Run one refill. The ONLY dispatch.
+ *
+ * `why` separates the two callers in the census, and the distinction is the
+ * one that matters: "fill" is the body a helper is born with, "rebuild" is
+ * reconcileKeyOrders giving it a re-picked key order. A census that folded
+ * them would report the descriptor as exercised while the REBUILD path --
+ * the only reason the descriptor exists -- had never run. */
+export function applyEnumRefill(L: unknown, r: EnumRefill, why: "fill" | "rebuild"): void {
+  notePatch("enumRefill." + r.impl + "." + why);
   const fn = ENUM_REFILLS.get(r.impl);
   if (fn === undefined) {
     throw new Error(

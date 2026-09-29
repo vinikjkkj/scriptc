@@ -4611,7 +4611,7 @@ export class Lowerer {
     // The baked consumers rebuild NOW — before moduleArtifacts collects the
     // shapes a body names and before armOwnMasks installs into it.
     for (const shapeId of rewritten) {
-      for (const refill of this.enumOrderBakes.get(shapeId)?.refills ?? []) applyEnumRefill(this, refill);
+      for (const refill of this.enumOrderBakes.get(shapeId)?.refills ?? []) applyEnumRefill(this, refill, "rebuild");
     }
     this.keyOrderReconciled = true;
     // Every cached answer was computed against the OLD order. The loc-keyed

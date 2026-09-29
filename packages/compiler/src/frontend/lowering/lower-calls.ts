@@ -9940,7 +9940,7 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
         valueT: null,
         tupleT: null,
       };
-      applyEnumRefill(L, refill);
+      applyEnumRefill(L, refill, "fill");
       L.noteEnumOrderBake(argIr.shapeId, refill);
       L.arrHofHelpers.set(key, helper);
       L.liftedFns.push({
@@ -11493,7 +11493,7 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
         tupleT,
         diag: { node: call, member },
       };
-      applyEnumRefill(L, refill);
+      applyEnumRefill(L, refill, "fill");
       L.noteEnumOrderBake(argIr.shapeId, refill);
       L.arrHofHelpers.set(key, helper);
       L.liftedFns.push({
