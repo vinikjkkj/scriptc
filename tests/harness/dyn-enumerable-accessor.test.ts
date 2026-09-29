@@ -56,6 +56,7 @@ import { join } from "node:path";
 import { describe, expect, test } from "vitest";
 import { compile } from "@scriptc/compiler";
 import { exeName } from "./exe.js";
+import { holdScratch } from "./scratch-lease.mjs";
 
 const repoRoot = join(import.meta.dirname, "../..");
 const cacheDir = join(repoRoot, "node_modules/.cache/scriptc-tests");
@@ -86,8 +87,11 @@ async function runCompiled(name: string, source: string, backend: "c" | "llvm"):
     .update(sanitize ? "san" : "plain")
     .digest("hex")
     .slice(0, 16);
-  const outDir = join(cacheDir, `dyn-enum-acc-${key}`);
-  mkdirSync(outDir, { recursive: true });
+  // holdScratch, not mkdirSync: the LEASE it publishes is what lets the sweep
+  // reclaim this run's own finished scratch mid-run. Released by the
+  // per-test hook -- safe here because this directory is created, built
+  // into and read inside one helper call, within one test.
+  const outDir = holdScratch(cacheDir, `dyn-enum-acc-${key}`);
   const file = join(outDir, `${name}.js`);
   writeFileSync(file, source, "utf8");
   const result = await compile(file, {

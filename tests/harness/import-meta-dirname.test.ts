@@ -28,6 +28,7 @@ import { basename, dirname, join, sep } from "node:path";
 import { describe, expect, test } from "vitest";
 import { compile } from "@scriptc/compiler";
 import { exeName } from "./exe.js";
+import { holdScratch } from "./scratch-lease.mjs";
 
 const repoRoot = join(import.meta.dirname, "../..");
 const cacheDir = join(repoRoot, "node_modules/.cache/scriptc-tests");
@@ -48,8 +49,11 @@ async function buildOne(
   const key = createHash("sha256")
     .update(c.body).update(backend).update(sanitize ? "san" : "plain")
     .digest("hex").slice(0, 16);
-  const outDir = join(cacheDir, `import-meta-dirname-${c.name}-${key}`);
-  mkdirSync(outDir, { recursive: true });
+  // holdScratch, not mkdirSync: the LEASE it publishes is what lets the sweep
+  // reclaim this run's own finished scratch mid-run. Released by the
+  // per-test hook -- safe here because this directory is created, built
+  // into and read inside one helper call, within one test.
+  const outDir = holdScratch(cacheDir, `import-meta-dirname-${c.name}-${key}`);
   const file = join(outDir, `${c.name}.${c.ext}`);
   writeFileSync(file, c.body, "utf8");
   const result = await compile(file, {

@@ -18,12 +18,13 @@
  */
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { describe, expect, test } from "vitest";
 import { compile } from "@scriptc/compiler";
 import { exeName } from "./exe.js";
+import { holdScratch } from "./scratch-lease.mjs";
 
 const execFileAsync = promisify(execFile);
 const repoRoot = join(import.meta.dirname, "../..");
@@ -46,8 +47,11 @@ async function compileAndRun(name: string, source: string, ext: "ts" | "cjs" = "
     .update(dynamic ? "dyn" : "")
     .digest("hex")
     .slice(0, 16);
-  const outDir = join(cacheDir, `dyncheck-${key}`);
-  mkdirSync(outDir, { recursive: true });
+  // holdScratch, not mkdirSync: the LEASE it publishes is what lets the sweep
+  // reclaim this run's own finished scratch mid-run. Released by the
+  // per-test hook -- safe here because this directory is created, built
+  // into and read inside one helper call, within one test.
+  const outDir = holdScratch(cacheDir, `dyncheck-${key}`);
   const file = join(outDir, `${name}.${ext}`);
   writeFileSync(file, source);
   // Pinned: the exact TypeError text and path rendering of failed checked
@@ -85,8 +89,11 @@ async function compileAndRunWide(name: string, source: string): Promise<RunResul
     .update("kindgate-wide")
     .digest("hex")
     .slice(0, 16);
-  const outDir = join(cacheDir, `dyncheck-${key}`);
-  mkdirSync(outDir, { recursive: true });
+  // holdScratch, not mkdirSync: the LEASE it publishes is what lets the sweep
+  // reclaim this run's own finished scratch mid-run. Released by the
+  // per-test hook -- safe here because this directory is created, built
+  // into and read inside one helper call, within one test.
+  const outDir = holdScratch(cacheDir, `dyncheck-${key}`);
   const file = join(outDir, `${name}.ts`);
   writeFileSync(file, source);
   const had = process.env["SCRIPTC_KINDGATE_WIDE"];

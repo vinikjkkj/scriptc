@@ -45,6 +45,7 @@ import { promisify } from "node:util";
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
 import ts5 from "typescript";
 import { compile } from "@scriptc/compiler";
+import { holdScratch } from "./scratch-lease.mjs";
 
 const execFileAsync = promisify(execFile);
 const enabled = process.env["SCRIPTC_WIN"] === "1";
@@ -337,8 +338,11 @@ async function crossCompile(file: string): Promise<string> {
   const hash = createHash("sha256");
   for (const f of programInputs(file)) hash.update(f).update(readFileSync(f));
   const key = hash.update("windows\0").update(target).digest("hex").slice(0, 16);
-  const outDir = join(cacheDir, key);
-  mkdirSync(outDir, { recursive: true });
+  // holdScratch, not mkdirSync: the LEASE it publishes is what lets the sweep
+  // reclaim this run's own finished scratch mid-run. Released by the
+  // per-test hook -- safe here because this directory is created, built
+  // into and read inside one helper call, within one test.
+  const outDir = holdScratch(cacheDir, key);
   const outPath = join(outDir, `${laneName(file)}.exe`);
   // Pinned "c" here and at every compile below: the Windows lane is a
   // C-reference suite — the cross-compile story is the C backend's.
@@ -477,8 +481,11 @@ async function shipFixture(c: { name: string; entry: string }): Promise<void> {
   const hash = createHash("sha256");
   for (const f of programInputs(c.entry)) hash.update(f).update(readFileSync(f));
   const key = hash.update("windows\0").update(target).digest("hex").slice(0, 16);
-  const outDir = join(cacheDir, key);
-  mkdirSync(outDir, { recursive: true });
+  // holdScratch, not mkdirSync: the LEASE it publishes is what lets the sweep
+  // reclaim this run's own finished scratch mid-run. Released by the
+  // per-test hook -- safe here because this directory is created, built
+  // into and read inside one helper call, within one test.
+  const outDir = holdScratch(cacheDir, key);
   const result = await compile(c.entry, { outPath: join(outDir, `${c.name}.exe`), outDir, backend: "c" });
   if (!result.ok) {
     throw new Error(
@@ -729,8 +736,11 @@ describe.skipIf(!enabled)(`windows differential (${target})`, () => {
       ];
       for (const f of inputs) hash.update(f).update(readFileSync(f));
       const key = hash.update("windows-fetch\0").update(target).digest("hex").slice(0, 16);
-      const outDir = join(cacheDir, key);
-      mkdirSync(outDir, { recursive: true });
+      // holdScratch, not mkdirSync: the LEASE it publishes is what lets the sweep
+      // reclaim this run's own finished scratch mid-run. Released by the
+      // per-test hook -- safe here because this directory is created, built
+      // into and read inside one helper call, within one test.
+      const outDir = holdScratch(cacheDir, key);
       const result = await compile(c.entry, { outPath: join(outDir, `${c.name}.exe`), outDir, dynamic: true, backend: "c" });
       if (!result.ok) {
         throw new Error(

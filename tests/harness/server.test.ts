@@ -22,12 +22,13 @@
  * http2 lanes inherit (the design note atop scr_net.c has the story). */
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, globSync, mkdirSync, readFileSync } from "node:fs";
+import { existsSync, globSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, test } from "vitest";
 import { compile } from "@scriptc/compiler";
 import { shardSelect, shardSuffix } from "./shard.js";
 import { exeName } from "./exe.js";
+import { holdScratch } from "./scratch-lease.mjs";
 
 const repoRoot = join(import.meta.dirname, "../..");
 const fixturesRoot = join(repoRoot, "tests/fixtures/server");
@@ -95,8 +96,11 @@ async function build(entry: string): Promise<string> {
   const hash = createHash("sha256");
   hash.update(entry).update(readFileSync(entry));
   const key = hash.update(sanitize ? "san" : "plain").digest("hex").slice(0, 16);
-  const outDir = join(cacheDir, `server-${key}`);
-  mkdirSync(outDir, { recursive: true });
+  // holdScratch, not mkdirSync: the LEASE it publishes is what lets the sweep
+  // reclaim this run's own finished scratch mid-run. Released by the
+  // per-test hook -- safe here because this directory is created, built
+  // into and read inside one helper call, within one test.
+  const outDir = holdScratch(cacheDir, `server-${key}`);
   const result = await compile(entry, {
     outPath: join(outDir, exeName("program")),
     outDir,

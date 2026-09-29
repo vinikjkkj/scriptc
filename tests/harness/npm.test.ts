@@ -15,7 +15,7 @@
  */
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
-import { globSync, mkdirSync, readFileSync, realpathSync } from "node:fs";
+import { globSync, readFileSync, realpathSync } from "node:fs";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { describe, expect, test } from "vitest";
@@ -23,6 +23,7 @@ import { compile } from "@scriptc/compiler";
 import { npmCases } from "./npm-cases.js";
 import { shardSelect, shardSuffix } from "./shard.js";
 import { exeName } from "./exe.js";
+import { holdScratch } from "./scratch-lease.mjs";
 
 const execFileAsync = promisify(execFile);
 const repoRoot = join(import.meta.dirname, "../..");
@@ -68,8 +69,11 @@ async function build(entry: string): Promise<string> {
   ];
   for (const f of inputs) hash.update(f).update(readFileSync(f));
   const key = hash.update(sanitize ? "san" : "plain").digest("hex").slice(0, 16);
-  const outDir = join(cacheDir, `npm-${key}`);
-  mkdirSync(outDir, { recursive: true });
+  // holdScratch, not mkdirSync: the LEASE it publishes is what lets the sweep
+  // reclaim this run's own finished scratch mid-run. Released by the
+  // per-test hook -- safe here because this directory is created, built
+  // into and read inside one helper call, within one test.
+  const outDir = holdScratch(cacheDir, `npm-${key}`);
   // Deliberately NO backend pin: this suite rides the release default.
   // Every --dynamic npm embedding is outside the LLVM tier today
   // (npmEmbedding), so these builds exercise the transparent C fallback
