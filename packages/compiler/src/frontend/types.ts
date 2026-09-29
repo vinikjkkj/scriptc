@@ -1,3 +1,4 @@
+import { appendFileSync } from "node:fs";
 import * as ts from "./ts7/adapter.js";
 import type { IrBuiltinRendering, IrRecordShape, IrType, IrUnionDef } from "../ir/nodes.js";
 import { BYTES_ELEM_NAMES, ABORTCONTROLLER_T, ABORTSIGNAL_T, BIGINT, HEADERS_T, REQUEST_T, REQUESTINIT_T, RESPONSE_T, arrayOf, BOOL, bytesOf, canConvertToDyn, CHILD_T, DYN, F64, funcOf, isRefCounted, isSupportedIndexValue, isSupportedMapKey, isSupportedMapValue, isSupportedSetElem, isSupportedWeakKey, isUnitType, JSVAL, mapOf, weakMapOf, NULL_T, PROCSTREAM_T, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, setOf, STRING, SYMBOL_T, typeEquals, typeKey, UNDEFINED_T, unionFuncSetArmsOk, VOID } from "../ir/nodes.js";
@@ -91,6 +92,149 @@ export function overflowShapeKey(fields: readonly { name: string; type: IrType }
  * speculative attempt's mark was minted BY that attempt. */
 function idIndex(id: string): number {
   return Number(id.slice(1));
+}
+
+/* MINT ORDER — which PHASE of lowering minted each positional id.
+ *
+ * The question it answers is whether a per-module lowering cache can replay
+ * the numbering a from-scratch build produces, or whether it has to re-mint
+ * into a canonical order and accept that every program's emitted TU is
+ * renamed relative to today.
+ *
+ * The emit pass walks file parts in moduleOrder, so ids minted while a
+ * file's bodies lower ought to form a CONTIGUOUS run per module and replay
+ * exactly. The phases after the file loop -- the monomorphization fixpoint,
+ * class expressions, lifted functions -- drain queues that interleave across
+ * modules, and ids minted there cannot be attributed to one module at all.
+ * The size of that tail is the whole answer.
+ *
+ * SCRIPTC_MINT_ORDER=<path> appends one line per lowerToIr. Off by default,
+ * nothing reads it back, and a flush cannot fail a build -- the stance the
+ * lowering profile already sets. Note for anyone measuring with a cache
+ * directory set: this is a SCRIPTC_* variable, so it is inside the early
+ * cache key (early-cache.ts CACHE_ONLY_ENV is a blanket with four
+ * exemptions), and an instrumented build therefore cannot be served by an
+ * uninstrumented entry.
+ */
+let mintPhase = "?";
+const mintLog: { id: string; phase: string; key: string }[] = [];
+
+/* THE FRAGMENT'S PHASE INVARIANT, asserted rather than documented.
+ *
+ * A per-module lowering fragment can replay today's positional-id numbering
+ * only because the emit pass mints in a shape a fragment can reproduce:
+ *
+ *   1. COLLECTION first, as ONE whole-program phase. Its ids belong to NO
+ *      MODULE. They are REPRODUCED on every build -- collection runs
+ *      whether or not anything was cached -- and must never be replayed out
+ *      of a fragment. A fragment that owned them would be wrong the first
+ *      time somebody added a module, and wrong SILENTLY.
+ *   2. Then the file loops, in moduleOrder, each (loop, file) phase entered
+ *      exactly ONCE, so its mints form one unbroken run.
+ *   3. Then the tail, as a pure SUFFIX.
+ *
+ * Measured on zapo-rest/app182: 3,210 collection ids, 2,283 across 198
+ * files in 201 contiguous (loop, file) runs, and a 105-id tail beginning at
+ * index 5,493 of 5,598. That is not a property of that program -- the emit
+ * pass is `for (const fp of parts)` twice over moduleOrder -- but it is a
+ * property a future change can break, and breaking it DOES NOT FAIL. It
+ * renumbers, and a renumbered fragment emits a valid program that is not
+ * the program.
+ *
+ * So it is checked on every build, not only under the measurement flag: one
+ * Set lookup per phase change. It throws, because the alternative is
+ * shipping the wrong binary quietly.
+ */
+const STAGE: Record<string, number> = { discovery: 0, collect: 1, main: 2 };
+function stageOf(phase: string): number {
+  if (phase.startsWith("body:") || phase.startsWith("init:")) return 2;
+  if (phase.startsWith("tail:")) return 3;
+  return STAGE[phase] ?? 0;
+}
+let mintStage = 0;
+const mintPhasesSeen = new Set<string>();
+export function setMintPhase(phase: string): void {
+  const stage = stageOf(phase);
+  // A pass beginning resets the invariant: lowerToIr runs discovery, emit
+  // and (under coverage) remainder, each a fresh registry numbering from r0.
+  if (stage <= 1) {
+    mintStage = stage;
+    mintPhasesSeen.clear();
+    mintPhase = phase;
+    return;
+  }
+  if (stage < mintStage) {
+    throw new Error(
+      `compiler bug: lowering minted ids in phase '${phase}' after reaching stage ${mintStage}. ` +
+        `The emit pass must mint collection, then the file loops, then the tail, in that order -- ` +
+        `a per-module cache replays the numbering on that assumption (frontend/types.ts)`,
+    );
+  }
+  if (stage === 2 && mintPhasesSeen.has(phase)) {
+    throw new Error(
+      `compiler bug: lowering re-entered mint phase '${phase}'. Each (loop, file) phase must be ` +
+        `entered exactly once so its minted ids form one unbroken run; a split run cannot be ` +
+        `replayed from a per-module fragment and would renumber every id after it ` +
+        `(frontend/types.ts)`,
+    );
+  }
+  mintStage = stage;
+  mintPhasesSeen.add(phase);
+  mintPhase = phase;
+}
+/** Drop what an earlier pass minted.
+ *
+ * lowerToIr runs TWO full lowerings over two Lowerers, each with its own
+ * ShapeRegistry, and each numbering from r0. Concatenating them would make
+ * the sequence restart mid-log and every contiguity answer meaningless. The
+ * emit pass calls this as it starts, so the log always holds exactly the
+ * pass whose ids reach the emitted TU. (With coverage on, the remainder
+ * pass runs after emit and would clear it again -- it emits no module, so
+ * there is nothing to measure there.) */
+export function resetMintLog(): void {
+  mintLog.length = 0;
+}
+/* POSITIVE CONTROL for the phase buckets, kept rather than deleted.
+ *
+ * The tail measurement reported `tail:lifted 0` and `tail:passes 0`, and a
+ * zero that comes out of an instrument is the shape that has already fooled
+ * this investigation once (the "3 extra switches" that were the analyser
+ * folding two loops onto one file name). A bucket reads zero identically
+ * whether nothing minted in that phase or the phase marker was never
+ * active there -- and the second reading would make "the cross-module
+ * passes are numbering-neutral" a claim about my instrument.
+ *
+ * SCRIPTC_MINT_CONTROL=1 mints one throwaway shape at each phase whose
+ * count is being trusted at zero. If the buckets move to 1, the zeros are
+ * measured. If they stay at zero, the marker is not live there and the
+ * conclusion drawn from them is void.
+ *
+ * It perturbs the program it is enabled on, by design -- a control that did
+ * not would not be controlling anything. Never set it on a build whose
+ * output matters.
+ */
+let mintControlSeq = 0;
+export function mintPhaseControl(shapes: ShapeRegistry): void {
+  if (process.env["SCRIPTC_MINT_CONTROL"] !== "1") return;
+  // A field name unique per call, so the structural key is always fresh and
+  // the intern always MINTS rather than answering from byKey.
+  shapes.intern([{ name: `%mintcontrol.${mintControlSeq++}`, type: F64 }]);
+}
+
+export function noteMint(id: string, key: string): void {
+  if (process.env["SCRIPTC_MINT_ORDER"] === undefined) return;
+  // The STRUCTURAL key, not just the number: comparing two builds' tails by
+  // id says only that they renumbered, while comparing them by what was
+  // minted says whether the drain ORDER moved.
+  mintLog.push({ id, phase: mintPhase, key });
+}
+export function flushMintOrder(program: string): void {
+  const path = process.env["SCRIPTC_MINT_ORDER"];
+  if (path === undefined || path === "") return;
+  try {
+    appendFileSync(path, JSON.stringify({ program, mints: mintLog }) + String.fromCharCode(10));
+  } catch { /* never fails a build */ }
+  mintLog.length = 0;
 }
 
 /** The frontend's record-shape interner. Records are monomorphic structural
@@ -203,6 +347,7 @@ export class ShapeRegistry {
     let id = this.recIds.get(t);
     if (id === undefined) {
       id = `r${this.shapes.length}`;
+      noteMint(id, "%rec");
       const shape: IrRecordShape = { id, fields: [] };
       this.byId.set(id, shape);
       this.shapes.push(shape);
@@ -391,6 +536,7 @@ export class ShapeRegistry {
     }
     if (id === undefined) {
       id = `r${this.shapes.length}`;
+      noteMint(id, key);
       const shape: IrRecordShape = {
         id,
         fields,
@@ -452,6 +598,7 @@ export class UnionRegistry {
     let id = this.recIds.get(t);
     if (id === undefined) {
       id = `u${this.unions.length}`;
+      noteMint(id, "%rec");
       const def: IrUnionDef = { id, arms: [] };
       this.byId.set(id, def);
       this.unions.push(def);
@@ -669,6 +816,7 @@ export class UnionRegistry {
     let id = this.byKey.get(key);
     if (id === undefined) {
       id = `u${this.unions.length}`;
+      noteMint(id, key);
       const def: IrUnionDef = { id, arms };
       this.byKey.set(key, id);
       this.byId.set(id, def);

@@ -16,6 +16,7 @@ import { appendFileSync } from "node:fs";
 import { fenceLocationText } from "../../diagnostics/diagnostic.js";
 import { isRelativeSpecifier } from "../shared.js";
 import { applyEnumRefill, applyNullProto, applyOwnKey, applySlotFilled, flushPatchCensus } from "./ir-patch.js";
+import { flushMintOrder, mintPhaseControl, resetMintLog, setMintPhase } from "../types.js";
 import type { EnumRefill, NullProtoPatch, OwnKeyPatch, SlotFilledPatch } from "./ir-patch.js";
 import * as ts from "../ts7/adapter.js";
 import type { ScrDiagnostic } from "../../diagnostics/diagnostic.js";
@@ -679,6 +680,7 @@ export function lowerToIr(
   // they replaced only for the kinds some program fired; a kind that fires
   // nowhere is untested by it and looks exactly as green (ir-patch.ts).
   flushPatchCensus(entry.fileName);
+  flushMintOrder(entry.fileName);
   // The expando member partition must be exhaustive (lower-expando.ts):
   // every registered slot is either bound to its dyn-box accessor pair or
   // counted under a named skip. Checked here, so the corpus lane IS the
@@ -2584,6 +2586,8 @@ export class Lowerer {
     // work at all: a body is a module's, a whole-program type resolution
     // is nobody's.
     const __colT = performance.now();
+    if (!this.remainder) resetMintLog();
+    setMintPhase("collect");
     const parts = this.splitFiles();
     this.collectProgram(parts);
     // Decorated classes analyze AFTER the whole collection pass: a
@@ -2597,6 +2601,7 @@ export class Lowerer {
     const functions: IrFunction[] = [];
     for (const fp of parts) {
       const __fpT = performance.now();
+      setMintPhase("body:" + fp.sf.fileName);
       for (const decl of fp.fnDecls) {
         // Overload signatures / ambient declarations are type-world (no
         // body to lower — and they share the implementation's symbol, so
@@ -2635,9 +2640,11 @@ export class Lowerer {
     if (!this.remainder) {
       for (const fp of parts) {
         const __ftT = performance.now();
+        setMintPhase("init:" + fp.sf.fileName);
         functions.push(this.lowerFileInit(fp.sf, fp.topStmts, this.initNameOf.get(fp.sf)!));
         lowerProfileNote("I:" + fp.sf.fileName, performance.now() - __ftT);
       }
+      setMintPhase("main");
       functions.push(this.buildMain());
     }
     // Class EXPRESSIONS collected while the inits lowered: their members
@@ -2652,6 +2659,11 @@ export class Lowerer {
     // its own entry; polymorphic recursion is cut off by
     // MAX_GENERIC_INSTANCES.
     {
+      // THE TAIL. Everything below drains queues that interleave across
+      // modules, so an id minted here belongs to no single module and a
+      // per-module fragment cannot replay its number (frontend/types.ts,
+      // noteMint).
+      setMintPhase("tail:queues");
       let ec = 0;
       let gc = 0;
       let gi = 0;
@@ -2699,6 +2711,8 @@ export class Lowerer {
     // Lambdas lifted while lowering any of the above (plus synthetic
     // array-HOF loop functions, which ride the same list), and the
     // implicit-any instances lowered eagerly at their first call sites.
+    setMintPhase("tail:lifted");
+    mintPhaseControl(this.shapes);
     functions.push(...this.liftedFns);
     functions.push(...this.implicitFns);
 
@@ -2709,6 +2723,8 @@ export class Lowerer {
     // ...and the order the shapes ENUMERATE in is re-picked first, where
     // the program's own constructions prove one: a refusal is the answer
     // only for a disagreement that survives that.
+    setMintPhase("tail:passes");
+    mintPhaseControl(this.shapes);
     this.reconcileKeyOrders(functions);
     // SHAPE UNIFICATION - width pairs the layout can afford to merge become
     // ONE shape, and the copy between them the identity (shape-unify.ts).
@@ -3311,6 +3327,7 @@ export class Lowerer {
    * body; both fire edges through the same hooks and are not units
    * themselves. */
   discover(extraRoots?: readonly string[]): Set<string> {
+    setMintPhase("discovery");
     const __colT = performance.now();
     const parts = this.splitFiles();
     this.collectProgram(parts);
