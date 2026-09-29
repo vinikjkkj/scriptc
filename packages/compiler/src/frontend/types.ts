@@ -73,6 +73,22 @@ export const overflowShapeKeys = new Set<string>();
  * in the old words). */
 export const overflowShapeKeysDenied = new Set<string>();
 
+/** Every shape key the grant was CONSULTED about, whatever it answered.
+ *
+ * The third state, and the one a cache cannot do without. The grant answers
+ * GRANTED, DENIED, or neither, and a lowering fragment that recorded only the
+ * first two would replay happily into a build where a key that was previously
+ * NEITHER has since become denied -- and the shape would carry an overflow
+ * the program must not have.
+ *
+ * It is the same rule input-tracker.ts applies to failed probes: a cache that
+ * records only what it FOUND is wrong, because the absence of an answer is
+ * part of the answer. Recording only the positives is exactly how a stale
+ * fragment looks correct.
+ *
+ * Cleared per compilation beside the other two (lowerToIr). */
+export const overflowShapeKeysAsked = new Set<string>();
+
 /** JS's array-index key test — the same one objectIterOverIndexShape
  * applies to declared field names. */
 export function isArrayIndexKey(name: string): boolean {
@@ -295,6 +311,10 @@ export class ShapeRegistry {
     if (indexValue !== undefined || tuple) return indexValue;
     if (fields.length === 0) return indexValue;
     const key = overflowShapeKey(fields);
+    // Recorded BEFORE any answer is returned, so the "asked and answered
+    // neither" case is captured too -- the early returns below would
+    // otherwise record only the keys that got a positive answer.
+    overflowShapeKeysAsked.add(key);
     if (overflowShapeKeysDenied.has(key)) return indexValue;
     if (process.env["SCRIPTC_OVERFLOW_ALL"]) return DYN;
     return overflowShapeKeys.has(key) ? DYN : indexValue;

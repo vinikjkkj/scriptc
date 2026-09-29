@@ -97,6 +97,7 @@ import { settleOrValueArms,
   mapType,
   overflowShapeKey,
   overflowShapeKeys,
+  overflowShapeKeysAsked,
   overflowShapeKeysDenied,
   isArrayIndexKey,
   ShapeRegistry,
@@ -590,6 +591,7 @@ export function lowerToIr(
   // (a compiler process compiles many).
   overflowShapeKeys.clear();
   overflowShapeKeysDenied.clear();
+  overflowShapeKeysAsked.clear();
   const targetPlatform = options.targetPlatform ?? process.platform;
   const bestEffort = options.bestEffort ?? false;
   const startupCrash = options.startupCrash ?? null;
