@@ -43,6 +43,26 @@
  * is the one signal a served build cannot fake.
  *
  *
+ * WHAT THIS IS WORTH, AND AGAINST WHICH TREE. C -- the non-entry attributed
+ * lowering a fragment can reach -- was measured at 250.3 s on zapo-rest/app182,
+ * arm A 229184b35 against arm B 147496b5a, both in one session with the same
+ * tap. Arm B is now IN main (merged as 4e3990201), so 250.3 s is the C of the
+ * tree this file sits in, not of some earlier one.
+ *
+ * C IS A PROPERTY OF ONE COMPOSITION. Measurements compose, and each changes
+ * the measured value of the others: walkfuse's memo took 88% of its saving out
+ * of the ENTRY, which is the part a fragment cannot reach, so the two are
+ * complementary rather than substitutes. If another perf change lands, C is
+ * RE-MEASURED, not scaled -- tests/perf/libcache/attrib-decide.mjs is the
+ * reader, and it needs both arms in one window.
+ *
+ * And C is a CEILING on what a fragment could reach, not a promise: every
+ * module that hits a refusal below is not cacheable. The census is what turns
+ * the ceiling into a delivered number, and until it has run on a real build,
+ * "the fragment works" and "the fragment delivers the 250 s" are different
+ * claims with only the first one argued.
+ *
+ *
  * FAIL CLOSED. A cache can be wrong two ways and only one is tolerable:
  * missing a hit is COST, serving a wrong hit is CORRUPTION. Every refusal
  * below therefore becomes a MISS — the fragment is unusable, the module
