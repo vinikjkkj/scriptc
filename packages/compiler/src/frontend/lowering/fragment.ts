@@ -56,10 +56,22 @@
  *    it ships with the serializer rather than after it, because the failure
  *    it catches arrives months later in somebody else's commit.
  *
- * 2. NO POSITIONAL ID IS STORED AS A LITERAL. r3541 names a shape only
- *    inside the build that minted it. Fragments store structural identity
- *    instead, fully EXPANDED so nothing below the top level carries a
- *    number either — the distinction that made this block's first tail
+ * 2. NO POSITIONAL ID IS STORED AS AN IDENTITY -- but ids DO appear as
+ *    local references, and the difference is the whole of how replay works.
+ *    The stored bodies are the module's real IR, so they are full of
+ *    `r3541`. What makes that safe is that every such id is resolvable from
+ *    the fragment's own DICTIONARY: `mints` for what this module minted,
+ *    `witness.readEntities` for what it referenced and another module
+ *    minted. Assembly walks the bodies and rewrites each id to whatever the
+ *    new build calls the same STRUCTURE.
+ *
+ *    An id that is in neither list is unresolvable, and rewriting would
+ *    either leave it pointing at an unrelated shape or drop it -- both
+ *    silent. fragmentUnresolvableIds is the guard, and it checks the
+ *    PRODUCT (which ids actually occur in the bodies) rather than trusting
+ *    that the producer remembered to record them.
+ *
+ *    The structures themselves carry no number at any depth — the distinction that made this block's first tail
  *    comparison report a confident wrong answer, because ShapeRegistry.keyOf
  *    spells a nested type as "record:r3541" and is therefore structural
  *    only one level deep.
@@ -88,6 +100,15 @@ export const FRAGMENT_VERSION = 1;
  * builds agree on this string exactly when they minted the same entity,
  * whatever number each of them gave it. */
 export interface SymbolicMint {
+  /** THE ID THIS BUILD USED, as a local reference only.
+   *
+   * Not an identity claim -- `structure` is the identity. This is the
+   * dictionary entry that lets assembly rewrite `r3541` where it occurs in
+   * the stored bodies. Without it a fragment cannot be replayed at all: the
+   * bodies name ids and nothing maps them to what they mean. That omission
+   * survived the first draft of this file and was found by writing the
+   * control for the replay, not by writing the replay. */
+  localId: string;
   /** Which counter this came from. */
   kind: "record" | "union";
   /** The id-free structural expansion. Never an rN or uN. */
@@ -127,8 +148,18 @@ export interface HelperReuse {
  * probes: the absence of an answer is part of the answer, and a later build
  * that would now answer differently has to miss. */
 export interface FragmentWitness {
-  /** Shapes this module READ from the registry without minting them. */
-  shapesRead: string[];
+  /** Entities this module REFERENCED that another module minted.
+   *
+   * Shapes AND unions: the first draft recorded only shapes, which left
+   * every union a body names unresolvable at assembly. Each carries its
+   * local id for the same reason a mint does -- it is a dictionary entry,
+   * not an identity.
+   *
+   * Reading is also a whole-program FACT, not a fact about this module: the
+   * entity existed because somebody else minted it. If that module is gone,
+   * or no longer mints it, this fragment's bodies reference a shape the
+   * registry does not hold. */
+  readEntities: { localId: string; kind: "record" | "union"; structure: string }[];
   /** Helpers reused rather than minted (see HelperReuse). */
   helpersReused: HelperReuse[];
   /** The reachable-set members this module's bodies were gated on. The
@@ -208,17 +239,45 @@ export function fragmentKey(input: {
   // their order is part of the identity.
   for (const p of input.fragment.probes) put("probe", JSON.stringify(p));
   const w = input.fragment.witness;
-  // EVERY witness field, including empty ones: an omitted empty list and a
-  // field that did not exist hash identically otherwise, which is exactly how
-  // a newly added witness field silently stops being part of the key.
-  for (const s of w.shapesRead) put("shape-read", s);
-  for (const h of w.helpersReused) put("helper-reused", h.internKey + ":" + String(h.sites));
-  for (const r of w.reachableSubset) put("reachable", r);
-  for (const m of w.moduleGraph) put("module-graph", m.specifier + " -> " + (m.resolved ?? "(unresolved)"));
-  for (const g of w.overflowGranted) put("ovf-granted", g);
-  for (const d of w.overflowDenied) put("ovf-denied", d);
-  for (const u of w.overflowUnanswered) put("ovf-unanswered", u);
+  // EVERY WITNESS FIELD, AND EVERY FIELD OF EVERY ENTRY, by walking the
+  // object rather than spelling it.
+  //
+  // This used to hand-spell the composite entries -- `h.internKey + ":" +
+  // h.sites`, `m.specifier + " -> " + m.resolved`. A field added to
+  // HelperReuse or to a moduleGraph entry would then have been invisible to
+  // the KEY while cacheVerificationDivergences, which stringifies the whole
+  // array, still caught it. That is backwards: the key decides whether a
+  // fragment is reused at all, and the verifier only runs afterwards on
+  // builds that opted into it. The looser check must never be the one that
+  // gates reuse.
+  //
+  // It is the day's rule applied to itself: GUARD THE PROPERTY OF THE
+  // OUTPUT, NOT THE COMPLETENESS OF THE INPUT. A list of fields is a claim
+  // about what exists today; canonicalJson is true as long as the value is.
+  for (const field of Object.keys(w).sort()) {
+    put("witness." + field, canonicalJson((w as unknown as Record<string, unknown>)[field]));
+  }
   return hash.digest("hex");
+}
+
+/** JSON with object keys sorted at every depth.
+ *
+ * Plain JSON.stringify preserves INSERTION order, so two builds that
+ * populated the same witness entry in a different order would hash
+ * differently and miss forever -- a cache that never hits is only a slow
+ * bug, but it is still a bug, and it would look like the fragment never
+ * matching rather than like a serializer defect. Arrays keep their order:
+ * for a witness, order is content. */
+export function canonicalJson(value: unknown): string {
+  if (value === null || typeof value !== "object") return JSON.stringify(value) ?? "null";
+  if (Array.isArray(value)) return "[" + value.map(canonicalJson).join(",") + "]";
+  const o = value as Record<string, unknown>;
+  const parts: string[] = [];
+  for (const k of Object.keys(o).sort()) {
+    if (o[k] === undefined) continue; // absent and explicitly-undefined hash alike
+    parts.push(JSON.stringify(k) + ":" + canonicalJson(o[k]));
+  }
+  return "{" + parts.join(",") + "}";
 }
 
 /** RULE 1, ASSERTED: a fragment owns no collection id.
@@ -250,6 +309,46 @@ export function assertFragmentOwnsNoCollectionIds(
       "entity twice and renumbers everything after it, in a program that still validates. " +
       "First: " + shown.join(" | "),
   );
+}
+
+/** RULE 2's real guard: every positional id the BODIES actually use must be
+ * resolvable from the fragment's own dictionary.
+ *
+ * GUARD THE PROPERTY OF THE OUTPUT, NOT THE COMPLETENESS OF THE INPUT. A
+ * producer that forgot to record an entity leaves an id in the bodies with
+ * no dictionary entry; assembly would then rewrite it to nothing, or leave
+ * it pointing at whatever the new build happens to call r3541. Both are
+ * silent, and both ship. Checking which ids OCCUR is true whatever the
+ * producer remembered -- including for entity kinds added later, which is
+ * how the same discipline caught four unhandled type kinds in
+ * structural-form.ts.
+ *
+ * Scanning the serialized bodies rather than walking IrExpr on purpose: a
+ * walk enumerates node kinds, and this file's whole thesis is that
+ * enumerations of the input go stale. A regex over the JSON sees every id
+ * regardless of which node carried it.
+ *
+ * Returns the unresolvable ids, in first-seen order. Empty means replayable. */
+export function fragmentUnresolvableIds(
+  fragment: Pick<LoweringFragment, "functions" | "globals" | "mints" | "witness">,
+): string[] {
+  const known = new Set<string>();
+  for (const m of fragment.mints) known.add(m.localId);
+  for (const r of fragment.witness.readEntities) known.add(r.localId);
+  const serialized = JSON.stringify({ f: fragment.functions, g: fragment.globals });
+  const out: string[] = [];
+  const seen = new Set<string>();
+  // Ids appear as the VALUE of shapeId/unionId properties. Matching the
+  // property name as well as the value keeps a user string that merely looks
+  // like "r12" from being reported as a dangling shape.
+  const re = /"(?:shapeId|unionId)":"([ru][0-9]+)"/g;
+  for (let m = re.exec(serialized); m !== null; m = re.exec(serialized)) {
+    const id = m[1]!;
+    if (known.has(id) || seen.has(id)) continue;
+    seen.add(id);
+    out.push(id);
+  }
+  return out;
 }
 
 /** Structural validation on READ, before a fragment is trusted.
