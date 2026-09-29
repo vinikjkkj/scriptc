@@ -20,6 +20,44 @@
  * no trace in the IR precisely because nothing happened, so types.ts records
  * it at the consultation (overflowShapeKeysAsked). An absence has to be
  * captured where it occurs; everything else is read off what was produced.
+ *
+ *
+ * THE BLIND SPOT HAS A NAME, and the overflow grant is one instance of it:
+ *
+ *   A CONSULTATION WHOSE NEGATIVE OR ABSENT ANSWER CHANGES BEHAVIOUR LEAVES
+ *   NO TRACE IN THE PRODUCT, BY CONSTRUCTION.
+ *
+ * The product records what HAPPENED; this class is defined by nothing having
+ * happened. A key consulted without effect, a registry that answers "no" and
+ * diverts, an option read that turns a pass off — none of them can be
+ * derived, so all of them must be ENUMERATED, and enumeration is the failure
+ * mode that goes silent. There is no elegant way out.
+ *
+ * Two consequences, both load-bearing:
+ *
+ * 1. SCRIPTC_CACHE_VERIFY is the only defence against this class, which
+ *    raises what it has to be: not a flag somebody sets when they already
+ *    suspect something, but a thing that runs over the WHOLE CORPUS
+ *    REGULARLY. The case it must catch is the negative consultation nobody
+ *    remembered to witness six months from now, and nobody will be looking
+ *    on that build.
+ *
+ * 2. Candidates are findable statically even though completeness is not.
+ *    instr/blindspot-scan.mjs lists every consultation of a module-level
+ *    registry in the frontend: 25 sites over 21 registries, of which eight
+ *    are constant tables (DYN_DISPATCH_METHODS and friends — part of the
+ *    compiler dist, already in the key), three are this block's own
+ *    instruments, six are memos whose negative answer only means "compute
+ *    it", two are the overflow grant (witnessed, all three answers), and
+ *    TWO ARE NOT YET WITNESSED: `rewrittenPaths` and `offenders`, both in
+ *    npm-static.ts. Whole-program rewrite state, not a memo. Read those
+ *    before a fragment is trusted on an --npm-static build.
+ *
+ * The scan is a narrowing, never a proof: it finds the shape it was told to
+ * look for. Its first cut looked for a NEGATIVE test (`!x.has(`) and found
+ * zero — with the overflow grant in range, spelled as a positive early
+ * return and a ternary. The negative answer is never a syntactic form; it is
+ * the other branch of whatever form the author chose.
  */
 
 import { assertNoIdLeak, structuralForm, type ShapeLookup, type UnionLookup } from "./structural-form.js";
