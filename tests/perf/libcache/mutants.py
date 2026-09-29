@@ -69,6 +69,11 @@ MUTANTS = [
      "    if (definedHere.has(name)) continue;", ""),
     ("unrecognised phase dropped", "build",
      "      unknown.set(rec.phase, (unknown.get(rec.phase) ?? 0) + 1);", ""),
+    ("npm-static build not refused", "frag",
+     "  if (build.npmStatic === undefined) return [];",
+     "  if (true) return [];"),
+    ("every build refused as npm-static", "frag",
+     "  if (build.npmStatic === undefined) return [];", ""),
 ]
 
 

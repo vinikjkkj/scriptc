@@ -453,6 +453,7 @@ export const FRAGMENT_REFUSAL_CODES = [
   "positional-id",
   "form-collision",
   "ordinal-collision",
+  "npm-static",
 ] as const;
 export type FragmentRefusalCode = (typeof FRAGMENT_REFUSAL_CODES)[number];
 
@@ -465,6 +466,7 @@ const CODES_COVER_UNION: Record<FragmentRefusalCode, true> = {
   "positional-id": true,
   "form-collision": true,
   "ordinal-collision": true,
+  "npm-static": true,
 };
 void CODES_COVER_UNION;
 
@@ -560,6 +562,43 @@ export function censusReport(census: FragmentCensus): string {
   lines.push("  note: a module refused for several reasons counts under each, " +
     "so the per-code numbers sum to at least the refused total.");
   return lines.join(String.fromCharCode(10));
+}
+
+/** Refusals that are a property of the BUILD rather than of any fragment.
+ *
+ * --npm-static is the whole list, and it is FAIL CLOSED rather than
+ * witnessed on purpose. The lane keeps whole-program rewrite state --
+ * `rewrittenPaths` and `offenders` in npm-static.ts, the two candidates the
+ * blind-spot scan left unwitnessed -- and whole-program state is exactly
+ * what a PER-MODULE fragment structurally cannot represent. Witnessing it
+ * would be expensive and probably the wrong design; refusing it is one line,
+ * and the census counts how many builds paid for it. If that number ever
+ * hurts, it is the argument for doing the expensive thing.
+ *
+ * The cost was checked rather than assumed: `--npm-static` does not appear
+ * anywhere under tests/perf/zapo-rest or in any block build script, and
+ * CompileOptions.npmStatic is optional with no default and is set only from
+ * the CLI flag -- there is no implicit path that turns it on. The control
+ * for that search was `--provenance-sources`, which the same search finds in
+ * the same paths. So this refuses a configuration the primary target does
+ * not exercise, which is the cheapest possible way to close a whole class.
+ *
+ * Returned as FragmentRefusal so the census counts it in the same table as
+ * every other refusal. It fires once PER MODULE on such a build, which is
+ * correct: every module is refused, and the census should say so rather
+ * than recording one build-level event nobody can compare to a module
+ * count. */
+export function buildRefusesFragments(build: {
+  npmStatic?: readonly string[] | "auto";
+}): FragmentRefusal[] {
+  if (build.npmStatic === undefined) return [];
+  if (Array.isArray(build.npmStatic) && build.npmStatic.length === 0) return [];
+  return [{
+    code: "npm-static",
+    message:
+      "--npm-static keeps whole-program rewrite state (npm-static.ts rewrittenPaths, offenders) " +
+      "that a per-module fragment cannot represent, so fragments are not used on this build",
+  }];
 }
 
 /** Structural validation on READ, before a fragment is trusted.

@@ -24,6 +24,7 @@ import {
   canonicalJson,
   fragmentKey,
   FRAGMENT_REFUSAL_CODES,
+  buildRefusesFragments,
   censusRecord,
   censusReport,
   fragmentFormCollisions,
@@ -307,6 +308,27 @@ describe("lowering fragment", () => {
     }
     expect(codes(fragmentUnusableReasons(stale))).toContain("version");
     expect(codes(fragmentUnusableReasons(collided))).toContain("form-collision");
+  });
+
+  /* FAIL CLOSED at the BUILD level. --npm-static keeps whole-program rewrite
+   * state, which is the thing a per-module fragment structurally cannot
+   * represent, so the build is refused rather than witnessed. One line, and
+   * the census counts what it cost. */
+  it("refuses fragments on an --npm-static build, and only then", () => {
+    expect(buildRefusesFragments({ npmStatic: "auto" }).map((r) => r.code)).toEqual(["npm-static"]);
+    expect(buildRefusesFragments({ npmStatic: ["lodash"] }).map((r) => r.code)).toEqual(["npm-static"]);
+
+    // CONTROLS. Without them a function that always refused would satisfy
+    // the two lines above, and every build would silently stop caching.
+    expect(buildRefusesFragments({})).toEqual([]);
+    expect(buildRefusesFragments({ npmStatic: undefined })).toEqual([]);
+    // An empty list is the flag not given, not the flag given emptily: the
+    // CLI filters blanks out before it reaches CompileOptions.
+    expect(buildRefusesFragments({ npmStatic: [] })).toEqual([]);
+
+    // The code is in the closed set, so the census gets a bucket for it
+    // rather than folding it into a total nobody can decompose.
+    expect([...FRAGMENT_REFUSAL_CODES]).toContain("npm-static");
   });
 
   /* RULE 2, checked on read rather than trusted. */
