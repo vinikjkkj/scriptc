@@ -23,7 +23,11 @@ import {
   assertFragmentOwnsNoCollectionIds,
   canonicalJson,
   fragmentKey,
+  FRAGMENT_REFUSAL_CODES,
+  censusRecord,
+  censusReport,
   fragmentFormCollisions,
+  newFragmentCensus,
   fragmentUnresolvableIds,
   fragmentUnusableReasons,
   type LoweringFragment,
@@ -55,6 +59,8 @@ function fragment(): LoweringFragment {
 
 const KEY_INPUT = { environmentFingerprint: "env-1", implementationFingerprint: "impl-1" };
 const key = (f: LoweringFragment): string => fragmentKey({ ...KEY_INPUT, fragment: f });
+const msgs = (rs: { message: string }[]): string => rs.map((r) => r.message).join(" ");
+const codes = (rs: { code: string }[]): string[] => rs.map((r) => r.code);
 
 describe("lowering fragment", () => {
   /* RULE 1. Collection mints 57.3% of the positional ids on the measured
@@ -212,7 +218,7 @@ describe("lowering fragment", () => {
     expect(found).toHaveLength(1);
     expect(found[0]!.localIds.sort()).toEqual(["r0", "r1"]);
     expect(found[0]!.opaque).toBe(false);
-    expect(fragmentUnusableReasons(collided).join(" "))
+    expect(msgs(fragmentUnusableReasons(collided)))
       .toMatch(/a structural form is shared by 2 distinct entities/);
 
     // A collision ACROSS the two dictionaries -- one minted here, one read
@@ -233,8 +239,74 @@ describe("lowering fragment", () => {
     const op = fragmentFormCollisions(opaque);
     expect(op).toHaveLength(1);
     expect(op[0]!.opaque).toBe(true);
-    expect(fragmentUnusableReasons(opaque).join(" "))
+    expect(msgs(fragmentUnusableReasons(opaque)))
       .toMatch(/an OPAQUE structural form is shared by 2 distinct entities/);
+  });
+
+  /* THE CENSUS. C = 250.3 s assumes the library modules are cacheable; every
+   * module that hits a refusal is not. A refusal nobody counts is
+   * indistinguishable from a refusal that never happens, which is how a cache
+   * reports working while delivering a fraction of what it was costed at. */
+  it("counts every refusal by code, with every code present even at zero", () => {
+    const c = newFragmentCensus();
+
+    // A zero must be a MEASURED zero, not an absent key. That distinction is
+    // what this block already retracted a finding over.
+    for (const code of FRAGMENT_REFUSAL_CODES) {
+      expect(c.refusedByCode[code], `code ${code} missing from a fresh census`).toBe(0);
+    }
+    expect(Object.keys(c.refusedByCode).sort()).toEqual([...FRAGMENT_REFUSAL_CODES].sort());
+
+    censusRecord(c, "/p/ok.ts", []);
+    censusRecord(c, "/p/collide.ts", [{ code: "form-collision", message: "x" }], [{ opaque: true }]);
+    censusRecord(c, "/p/stale.ts", [{ code: "version", message: "y" }]);
+    // One module, TWO reasons: it must count under each, so the per-code
+    // numbers sum to at least the refused total rather than partitioning it.
+    censusRecord(c, "/p/both.ts", [
+      { code: "positional-id", message: "a" },
+      { code: "ordinal-collision", message: "b" },
+    ]);
+
+    expect(c.attempted).toBe(4);
+    expect(c.cacheable).toBe(1);
+    expect(c.refusedByCode["form-collision"]).toBe(1);
+    expect(c.refusedByCode.version).toBe(1);
+    expect(c.refusedByCode["positional-id"]).toBe(1);
+    expect(c.refusedByCode["ordinal-collision"]).toBe(1);
+    expect(c.opaqueCollisions).toBe(1);
+    expect(c.refusedModules).toEqual(["/p/collide.ts", "/p/stale.ts", "/p/both.ts"]);
+
+    const report = censusReport(c);
+    expect(report).toContain("modules attempted   4");
+    expect(report).toContain("cacheable           1  25.0%");
+    // Every code appears in the report even at zero, or a reader cannot tell
+    // "never happened" from "not in this build's vocabulary".
+    for (const code of FRAGMENT_REFUSAL_CODES) expect(report).toContain(code);
+
+    // CONTROL: an all-cacheable census must not report refusals, or the
+    // assertions above pass for a counter that always increments.
+    const clean = newFragmentCensus();
+    censusRecord(clean, "/p/a.ts", []);
+    censusRecord(clean, "/p/b.ts", []);
+    expect(clean.cacheable).toBe(2);
+    expect(clean.refusedModules).toEqual([]);
+    expect(censusReport(clean)).toContain("refused             0  0.0%");
+    // ...and an EMPTY census must say n/a rather than dividing by zero.
+    expect(censusReport(newFragmentCensus())).toContain("n/a");
+  });
+
+  it("gives every refusal a code drawn from the closed set", () => {
+    const stale = fragment();
+    stale.version = FRAGMENT_VERSION + 1;
+    const collided = fragment();
+    collided.mints.push({ ...collided.mints[0]!, localId: "r1", ordinal: 2 });
+    for (const f of [stale, collided]) {
+      for (const code of codes(fragmentUnusableReasons(f))) {
+        expect([...FRAGMENT_REFUSAL_CODES], `unclassified refusal code ${code}`).toContain(code);
+      }
+    }
+    expect(codes(fragmentUnusableReasons(stale))).toContain("version");
+    expect(codes(fragmentUnusableReasons(collided))).toContain("form-collision");
   });
 
   /* RULE 2, checked on read rather than trusted. */
@@ -243,11 +315,11 @@ describe("lowering fragment", () => {
 
     const literal = fragment();
     literal.mints[0]!.structure = "r3541";
-    expect(fragmentUnusableReasons(literal).join(" ")).toMatch(/stores the positional id r3541/);
+    expect(msgs(fragmentUnusableReasons(literal))).toMatch(/stores the positional id r3541/);
 
     const collide = fragment();
     collide.mints[1] = { ...collide.mints[1]!, ordinal: 0, loop: "body" };
-    expect(fragmentUnusableReasons(collide).join(" ")).toMatch(/share ordinal body:0/);
+    expect(msgs(fragmentUnusableReasons(collide))).toMatch(/share ordinal body:0/);
 
     // The same ordinal in the OTHER loop is not a collision: the two file
     // loops do not overlap (last body mint 2226, first init 2227), so body:0
@@ -258,6 +330,6 @@ describe("lowering fragment", () => {
 
     const stale = fragment();
     stale.version = FRAGMENT_VERSION + 1;
-    expect(fragmentUnusableReasons(stale).join(" ")).toMatch(/is not /);
+    expect(msgs(fragmentUnusableReasons(stale))).toMatch(/is not /);
   });
 });

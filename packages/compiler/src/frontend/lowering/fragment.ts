@@ -43,6 +43,22 @@
  * is the one signal a served build cannot fake.
  *
  *
+ * FAIL CLOSED. A cache can be wrong two ways and only one is tolerable:
+ * missing a hit is COST, serving a wrong hit is CORRUPTION. Every refusal
+ * below therefore becomes a MISS — the fragment is unusable, the module
+ * re-lowers, nothing incorrect ships. No future decision about fragments
+ * should land on the other side of that line, and fragmentFormCollisions is
+ * the precedent: it refuses a case the compiler DELIBERATELY creates rather
+ * than widening the identity to accommodate it.
+ *
+ * AND EVERY REFUSAL IS COUNTED, not merely taken. A refusal nobody counts is
+ * indistinguishable from a refusal that never happens, which is how a cache
+ * reports working while delivering a fraction of what it was costed at. The
+ * refusal codes are a closed union bound to a runtime array in BOTH
+ * directions, so a new one gets its own census bucket and cannot hide inside
+ * an "other" total.
+ *
+ *
  * THREE RULES, each asserted somewhere rather than only stated.
  *
  * 1. A FRAGMENT OWNS NO COLLECTION ID. Collection runs before any body, as
@@ -405,23 +421,144 @@ export function fragmentFormCollisions(
   return out;
 }
 
+/** Every way a fragment can be refused, as a closed set WITH a runtime
+ * enumeration.
+ *
+ * A census that classified refusals by parsing their MESSAGES would go stale
+ * the first time somebody reworded one, and a new refusal would land in
+ * whatever bucket the parser defaulted to. The codes are the classification;
+ * the messages are for humans. */
+export const FRAGMENT_REFUSAL_CODES = [
+  "version",
+  "positional-id",
+  "form-collision",
+  "ordinal-collision",
+] as const;
+export type FragmentRefusalCode = (typeof FRAGMENT_REFUSAL_CODES)[number];
+
+/* Bound in BOTH directions: the Record forces the array to cover every union
+ * member, and the union type forces every array entry to be a member. Either
+ * alone lets the two drift, and a drifted enumeration is the silent-default
+ * failure this file keeps finding. */
+const CODES_COVER_UNION: Record<FragmentRefusalCode, true> = {
+  version: true,
+  "positional-id": true,
+  "form-collision": true,
+  "ordinal-collision": true,
+};
+void CODES_COVER_UNION;
+
+export interface FragmentRefusal {
+  code: FragmentRefusalCode;
+  message: string;
+}
+
+/* THE FRAGMENT CENSUS — how much of C the cache actually delivers.
+ *
+ * C = 250.3 s is the work a per-module fragment COULD reach, and it assumes
+ * the library modules are cacheable. Every module that hits a refusal is not.
+ * If structurally identical recursive declarations are common in this graph
+ * -- and proto, bson and mongodb are exactly the kind of code that generates
+ * them -- a slice of C evaporates, and nothing would say so.
+ *
+ * So refusals are COUNTED, not merely taken. This is the same lesson the rest
+ * of this file keeps learning, applied before it hurts: a refusal nobody
+ * counts is indistinguishable from a refusal that never happens, and the
+ * difference between "the fragment works" and "the fragment delivers the
+ * 250 s" is exactly this table.
+ *
+ * Counted BY CODE, never by parsing a message, and the codes are a closed
+ * union bound to a runtime array -- so a refusal added later gets its own
+ * bucket automatically instead of vanishing into an "other" total. That is
+ * the failure this file has now hit six times in one form or another.
+ */
+export interface FragmentCensus {
+  /** Modules a fragment was attempted for. */
+  attempted: number;
+  /** ...of which usable. */
+  cacheable: number;
+  /** ...of which refused, by code. Every code always present, so a zero is
+   * a MEASURED zero and not an absent key -- the distinction that cost this
+   * block a retraction. */
+  refusedByCode: Record<FragmentRefusalCode, number>;
+  /** Collisions that were between OPAQUE forms, counted separately because
+   * they are the likeliest cause and the cheapest to act on. */
+  opaqueCollisions: number;
+  /** The modules refused, so a high fraction can be investigated rather than
+   * merely reported. Capped: a census is not a log. */
+  refusedModules: string[];
+}
+
+const CENSUS_MODULE_CAP = 50;
+
+export function newFragmentCensus(): FragmentCensus {
+  const refusedByCode = {} as Record<FragmentRefusalCode, number>;
+  for (const code of FRAGMENT_REFUSAL_CODES) refusedByCode[code] = 0;
+  return { attempted: 0, cacheable: 0, refusedByCode, opaqueCollisions: 0, refusedModules: [] };
+}
+
+/** Record one module's outcome. The ONLY way the census moves, so a call site
+ * that forgets to record is a module missing from `attempted` rather than a
+ * silent mis-attribution. */
+export function censusRecord(
+  census: FragmentCensus,
+  module: string,
+  refusals: readonly FragmentRefusal[],
+  collisions: readonly { opaque: boolean }[] = [],
+): void {
+  census.attempted++;
+  if (refusals.length === 0) {
+    census.cacheable++;
+    return;
+  }
+  // A module refused for several reasons counts under EACH, so the buckets
+  // sum to at least the refused count rather than exactly it. Stated because
+  // a reader who assumes they partition will mis-add them.
+  for (const r of refusals) census.refusedByCode[r.code]++;
+  for (const c of collisions) if (c.opaque) census.opaqueCollisions++;
+  if (census.refusedModules.length < CENSUS_MODULE_CAP) census.refusedModules.push(module);
+}
+
+/** The census as the line a run reports. Deliberately one line per number
+ * with the DENOMINATOR beside it: a refusal count without an attempted count
+ * cannot be read. */
+export function censusReport(census: FragmentCensus): string {
+  const refusedTotal = census.attempted - census.cacheable;
+  const pct = (n: number): string =>
+    census.attempted === 0 ? "n/a" : ((100 * n) / census.attempted).toFixed(1) + "%";
+  const lines = [
+    "fragment census",
+    "  modules attempted   " + String(census.attempted),
+    "  cacheable           " + String(census.cacheable) + "  " + pct(census.cacheable),
+    "  refused             " + String(refusedTotal) + "  " + pct(refusedTotal),
+  ];
+  for (const code of FRAGMENT_REFUSAL_CODES) {
+    lines.push("    " + code.padEnd(18) + String(census.refusedByCode[code]));
+  }
+  lines.push("  opaque collisions   " + String(census.opaqueCollisions) +
+    "  (subset of form-collision; the likeliest cause)");
+  lines.push("  note: a module refused for several reasons counts under each, " +
+    "so the per-code numbers sum to at least the refused total.");
+  return lines.join(String.fromCharCode(10));
+}
+
 /** Structural validation on READ, before a fragment is trusted.
  *
  * Returns the reasons it cannot be used; empty means usable. A reason is
- * never a build failure — an unusable fragment is a miss — but it must never
- * be a silent one either, so each is a sentence a log can carry. */
-export function fragmentUnusableReasons(fragment: LoweringFragment): string[] {
-  const out: string[] = [];
+ * never a build failure — an unusable fragment is a MISS, see FAIL CLOSED
+ * — but it must never be a silent one either, so each carries a CODE for the
+ * census and a sentence a log can carry. */
+export function fragmentUnusableReasons(fragment: LoweringFragment): FragmentRefusal[] {
+  const out: FragmentRefusal[] = [];
   if (fragment.version !== FRAGMENT_VERSION) {
-    out.push("fragment version " + String(fragment.version) + " is not " + String(FRAGMENT_VERSION));
+    out.push({ code: "version", message: "fragment version " + String(fragment.version) + " is not " + String(FRAGMENT_VERSION) });
   }
   // RULE 2, checked rather than trusted: a stored positional id is a number
   // that means nothing outside the build that wrote it.
   const positional = /^[ru][0-9]+$/;
   for (const mint of fragment.mints) {
     if (positional.test(mint.structure)) {
-      out.push("mint " + String(mint.ordinal) + " stores the positional id " + mint.structure +
-        " instead of a structure");
+      out.push({ code: "positional-id", message: "mint " + String(mint.ordinal) + " stores the positional id " + mint.structure + " instead of a structure" });
       break;
     }
   }
@@ -429,18 +566,21 @@ export function fragmentUnusableReasons(fragment: LoweringFragment): string[] {
   // sharing one form would be mapped onto one id at assembly. Reported here
   // so the module simply re-lowers.
   for (const c of fragmentFormCollisions(fragment)) {
-    out.push(
-      (c.opaque ? "an OPAQUE structural form " : "a structural form ") +
+    out.push({
+      code: "form-collision",
+      message:
+        (c.opaque ? "an OPAQUE structural form " : "a structural form ") +
         "is shared by " + String(c.localIds.length) + " distinct entities (" +
         c.localIds.join(", ") + "), so assembly would map them onto one id: " +
-        (c.structure.length > 80 ? c.structure.slice(0, 80) + "..." : c.structure));
+        (c.structure.length > 80 ? c.structure.slice(0, 80) + "..." : c.structure),
+    });
     break;
   }
   const seen = new Set<string>();
   for (const mint of fragment.mints) {
     const slot = mint.loop + ":" + String(mint.ordinal);
     if (seen.has(slot)) {
-      out.push("two mints share ordinal " + slot + ", so the replay order is ambiguous");
+      out.push({ code: "ordinal-collision", message: "two mints share ordinal " + slot + ", so the replay order is ambiguous" });
       break;
     }
     seen.add(slot);
