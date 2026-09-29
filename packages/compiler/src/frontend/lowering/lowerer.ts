@@ -2703,6 +2703,11 @@ export class Lowerer {
     // is the input to the key-order obligation; before every consumer of the
     // shape table below, SC6004 included - the advisory has to fall silent
     // at exactly the sites this closed.
+    // Shape unification rewrites shape.fields and shape.indexValue in place
+    // — the one mutation canDynCheckToMemo's soundness argument does not
+    // cover — so the memo is retired here, before the rewrites begin.
+    this.cdctMemo.clear();
+    this.cdctMemoRetired = true;
     this.unifyOutcome = unifyWidthShapes(this, functions);
     this.armKeyRiskFnReturns(functions);
     this.reportKeyEnumerationRisks();
@@ -7974,6 +7979,28 @@ export class Lowerer {
         | { absentDyn: true }
         | { keyRead: IrType; lift: WidthLift };
       const plan = new Map<string, FieldLift>();
+      // The keyed read's type is LOOP-INVARIANT -- indexReadType's only
+      // input is `from.indexValue` -- but it was computed once per MISSING
+      // target field, so a record with k of them interned the same arm list
+      // k times. Every intern past the first pays
+      // JSON.stringify(arms.map(typeKey)) to be handed back an id the table
+      // already holds. Measured over the 170 index-signature corpus
+      // programs: 755 calls, 574 of them (76.0%) repeats inside one plan.
+      //
+      // FIRST-USE, not hoisted, and the difference is the whole safety
+      // argument. Interning MINTS `u${unions.length}` on a miss, and union
+      // ids reach emitted symbol names through unitInstanceRef -- so the id
+      // a union gets depends on WHEN it is first interned. Computing this
+      // before the loop would intern ahead of any union widthLiftPlan mints
+      // for an EARLIER field and renumber everything downstream. Deferred to
+      // first use, the intern happens at exactly the field it happens at
+      // today, and every later use is the lookup it always was.
+      //
+      // Stable for the duration of the loop: the only writer of
+      // `shape.indexValue` is ShapeRegistry.finalizeRecursive, and nothing
+      // this loop reaches finalizes a shape -- widthLiftPlan, dynOutPlan and
+      // narrowOutPlan read the registries and intern UNIONS only.
+      let keyReadT: IrType | undefined;
       for (const tf of to.fields) {
         const ff = from.fields.find((f) => f.name === tf.name);
         if (!ff) {
@@ -8014,7 +8041,7 @@ export class Lowerer {
             const optionalFlavored =
               tf.type.kind === "dyn" ||
               (tf.type.kind === "union" && this.armTag(tf.type.unionId, UNDEFINED_T) >= 0);
-            const readT = this.indexReadType(from.indexValue);
+            const readT = (keyReadT ??= this.indexReadType(from.indexValue));
             // The read's own type is what lifts into the field — unless the
             // signature's value type is 'unknown'. Then the read is a DYN,
             // and the conversion that puts a dyn into a typed slot is not a
@@ -8138,7 +8165,84 @@ export class Lowerer {
    * where the alternative is worse. Null for anything else. */
   dynOutPlan(src: IrType, dst: IrType): WidthLift | null {
     if (src.kind !== "dyn" || dst.kind === "dyn") return null;
-    return canDynCheckTo(dst, (id) => this.shapes.get(id), (id) => this.unions.get(id)) ? { how: "dynOut" } : null;
+    return this.canDynCheckToMemo(dst) ? { how: "dynOut" } : null;
+  }
+
+  /** canDynCheckTo's answers for the duration of the BODY WALK.
+   *
+   * canDynCheckTo rebuilds a per-call isJsonSafeType memo every time by
+   * design, so each call is a fresh recursive walk of the type graph. On
+   * zapo-rest app182 this site asks it 13,490 times for 555 distinct
+   * destination types -- a 95.9% repeat -- and those 13,490 calls are 79.9%
+   * of every canDynCheckTo in the build and 80.5% of every isJsonSafeType
+   * walk under it.
+   *
+   * WHY THIS IS SOUND, when the per-call memo inside canDynCheckTo
+   * deliberately is not (ir/nodes.ts: "PER CALL, NEVER GLOBAL"):
+   *
+   * canDynCheckTo's only mutable inputs are the shape and union registries,
+   * reached solely through the two accessors below. Everything else it
+   * consults -- RUNTIME_ERROR_CLASSES, DYN_BYTES_KINDS, DYN_HANDLE_KINDS --
+   * is a module-level constant never written anywhere in the compiler.
+   *
+   * ABSENCE MEANS FALSE at every site that can consult those registries
+   * (isJsonSafeAt's record and union cases, nestedOk's record and union
+   * cases all answer false for an id the table does not hold). So the
+   * hazard that keeps the inner memo per-call -- a shapeId the table does
+   * not hold YET, answered false now and true after the table grows -- can
+   * only ever move an answer FALSE to TRUE. Caching only the TRUE answers
+   * therefore cannot serve that staleness: the stale direction is never in
+   * the cache.
+   *
+   * Three registry transitions exist during the body walk, and with
+   * true-only caching two of them are harmless:
+   *   - a new shape or union interned: turns an absent id present, which by
+   *     the paragraph above can only raise an answer;
+   *   - a speculative ROLLBACK: never removes an id (ShapeRegistry.rollback
+   *     deliberately does not truncate -- its comment carries the five-line
+   *     repro for why truncating aliases ids), and its undo can only put a
+   *     finalized placeholder back to 'fields: []', which is vacuously true
+   *     at every site above, so again it can only raise;
+   *   - finalizeRecursive filling a PENDING placeholder: 'fields: []'
+   *     (vacuously true) becomes a real field list, which CAN lower an
+   *     answer. This is the one lowering transition, and it is the reason
+   *     an answer whose walk touched a pending shape or union is not cached.
+   *
+   * The one boundary none of that covers is unifyWidthShapes, the only
+   * writer of shape.fields and shape.indexValue outside types.ts: it
+   * rewrites shapes in place, in either direction. It runs once, after the
+   * whole body walk, so the memo is simply retired there rather than
+   * versioned. Nothing is lost by retiring it: measured over the corpus and
+   * zapo-rest, every one of these calls happens during the body walk and
+   * none after unification.
+   *
+   * Validated rather than trusted: an arm that kept the memo AND ran the
+   * real walk on every call, comparing the two, reported 0 disagreements
+   * over 13,490 calls on zapo-rest app182 and 426 on the corpus. */
+  private readonly cdctMemo = new Map<IrType, boolean>();
+  private cdctMemoRetired = false;
+  private canDynCheckToMemo(dst: IrType): boolean {
+    if (!this.cdctMemoRetired) {
+      const hit = this.cdctMemo.get(dst);
+      if (hit !== undefined) return hit;
+    }
+    // Set when the walk consults a placeholder no frame has finalized: a
+    // pending shape has no fields and a pending union has no arms, so both
+    // answer TRUE vacuously and can become FALSE once filled.
+    let pending = false;
+    const getRecord = (id: string): IrRecordShape | undefined => {
+      const s = this.shapes.get(id);
+      if (s !== undefined && this.shapes.isPending(id)) pending = true;
+      return s;
+    };
+    const getUnion = (id: string): IrUnionDef | undefined => {
+      const d = this.unions.get(id);
+      if (d !== undefined && this.unions.isPending(id)) pending = true;
+      return d;
+    };
+    const answer = canDynCheckTo(dst, getRecord, getUnion);
+    if (answer && !pending && !this.cdctMemoRetired) this.cdctMemo.set(dst, answer);
+    return answer;
   }
 
   /** The CHECKED ARM extraction as a width-plan step, dynOutPlan's twin one
