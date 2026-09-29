@@ -30,11 +30,12 @@
  */
 import { execFileSync } from "node:child_process"
 import { createHash } from "node:crypto"
-import { mkdirSync, writeFileSync } from "node:fs"
+import { writeFileSync } from "node:fs";
 import { join } from "node:path"
 import { describe, expect, test } from "vitest"
 import { compile } from "@scriptc/compiler"
 import { exeName } from "./exe.js"
+import { holdScratch } from "./scratch-lease.mjs";
 
 const repoRoot = join(import.meta.dirname, "../..")
 const cacheDir = join(repoRoot, "node_modules/.cache/scriptc-tests")
@@ -64,8 +65,11 @@ console.log("nullable " + (nullable === null ? -1 : nullable.calls))
 async function runCompiled(backend: "c" | "llvm"): Promise<string> {
   const key = createHash("sha256").update(SOURCE).update(backend)
     .update(sanitize ? "san" : "plain").digest("hex").slice(0, 16)
-  const outDir = join(cacheDir, `record-width-alias-${key}`)
-  mkdirSync(outDir, { recursive: true })
+  // holdScratch, not mkdirSync: the LEASE it publishes is what lets the sweep
+  // reclaim this run's own finished scratch mid-run. Released by the
+  // per-test hook -- safe here because this directory is created, built
+  // into and read inside one helper call, within one test.
+  const outDir = holdScratch(cacheDir, `record-width-alias-${key}`)
   const file = join(outDir, "alias.ts")
   writeFileSync(file, SOURCE, "utf8")
   const result = await compile(file, {

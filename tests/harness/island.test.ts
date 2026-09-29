@@ -20,12 +20,13 @@
  */
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { readFileSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { promisify } from "node:util";
 import { describe, expect, test } from "vitest";
 import { compile } from "@scriptc/compiler";
 import { exeName } from "./exe.js";
+import { holdScratch } from "./scratch-lease.mjs";
 import {
   ENGINE_CLASS_MIN,
   STATIC_CLASS_MAX,
@@ -64,8 +65,11 @@ async function build(
     .update(dynamic ? "dyn" : "")
     .digest("hex")
     .slice(0, 16);
-  const outDir = join(cacheDir, `island-${key}`);
-  mkdirSync(outDir, { recursive: true });
+  // holdScratch, not mkdirSync: the LEASE it publishes is what lets the sweep
+  // reclaim this run's own finished scratch mid-run. Released by the
+  // per-test hook -- safe here because this directory is created, built
+  // into and read inside one helper call, within one test.
+  const outDir = holdScratch(cacheDir, `island-${key}`);
   const file = join(outDir, `${name}.ts`);
   writeFileSync(file, source);
   const result = await compile(file, {

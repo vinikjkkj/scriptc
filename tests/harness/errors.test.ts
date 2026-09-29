@@ -19,6 +19,7 @@ import { promisify } from "node:util";
 import { describe, expect, test } from "vitest";
 import { compile } from "@scriptc/compiler";
 import { exeName } from "./exe.js";
+import { holdScratch } from "./scratch-lease.mjs";
 
 const execFileAsync = promisify(execFile);
 const repoRoot = join(import.meta.dirname, "../..");
@@ -52,11 +53,14 @@ async function compileAndRun(
   // under it, where the resolver classifies sibling modules as npm files
   // (correctly — for real packages) and the relative import stops
   // resolving into the program.
-  const outDir =
-    Object.keys(extraFiles).length > 0
-      ? join(tmpdir(), `scriptc-errors-${key}`)
-      : join(cacheDir, `errors-${key}`);
-  mkdirSync(outDir, { recursive: true });
+  // Only the scratch-tree branch takes a lease: the OS-temp branch is not
+  // under the swept root at all. holdScratch creates the directory itself,
+  // so the mkdirSync below is the temp branch's alone.
+  const inTmp = Object.keys(extraFiles).length > 0;
+  const outDir = inTmp
+    ? join(tmpdir(), `scriptc-errors-${key}`)
+    : holdScratch(cacheDir, `errors-${key}`);
+  if (inTmp) mkdirSync(outDir, { recursive: true });
   const file = join(outDir, `${name}.${ext}`);
   writeFileSync(file, source);
   for (const [extraName, text] of Object.entries(extraFiles)) {

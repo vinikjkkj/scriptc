@@ -45,6 +45,7 @@ import { compile } from "@scriptc/compiler";
 import { npmCases } from "./npm-cases.js";
 import { normalizeNodeTestOutput } from "./node-test-normalize.js";
 import { eventLoopCases, type StdinScript } from "./event-loop-cases.js";
+import { holdScratch } from "./scratch-lease.mjs";
 
 const execFileAsync = promisify(execFile);
 const enabled = process.env["SCRIPTC_LINUX"] === "1";
@@ -257,8 +258,11 @@ async function crossCompileAndRun(file: string): Promise<RunResult> {
   const hash = createHash("sha256");
   for (const f of programInputs(file)) hash.update(f).update(readFileSync(f));
   const key = hash.update("linux\0").update(target).digest("hex").slice(0, 16);
-  const outDir = join(cacheDir, key);
-  mkdirSync(outDir, { recursive: true });
+  // holdScratch, not mkdirSync: the LEASE it publishes is what lets the sweep
+  // reclaim this run's own finished scratch mid-run. Released by the
+  // per-test hook -- safe here because this directory is created, built
+  // into and read inside one helper call, within one test.
+  const outDir = holdScratch(cacheDir, key);
   // Pinned "c" here and at every compile below: the Linux lane is a
   // C-reference suite (the cross-compile story is the C backend's; the
   // LLVM lane's Linux coverage runs in llvm-differential on the sandbox).
@@ -347,8 +351,11 @@ async function crossCompileFixture(entry: string): Promise<string> {
   const hash = createHash("sha256");
   for (const f of programInputs(entry)) hash.update(f).update(readFileSync(f));
   const key = hash.update("linux\0").update(target).digest("hex").slice(0, 16);
-  const outDir = join(cacheDir, key);
-  mkdirSync(outDir, { recursive: true });
+  // holdScratch, not mkdirSync: the LEASE it publishes is what lets the sweep
+  // reclaim this run's own finished scratch mid-run. Released by the
+  // per-test hook -- safe here because this directory is created, built
+  // into and read inside one helper call, within one test.
+  const outDir = holdScratch(cacheDir, key);
   const result = await compile(entry, { outPath: join(outDir, "program"), outDir, backend: "c" });
   if (!result.ok) {
     throw new Error(
@@ -475,8 +482,11 @@ async function crossCompileNpmCase(entry: string): Promise<string> {
   ];
   for (const f of inputs) hash.update(f).update(readFileSync(f));
   const key = hash.update("linux\0").update(target).digest("hex").slice(0, 16);
-  const outDir = join(cacheDir, key);
-  mkdirSync(outDir, { recursive: true });
+  // holdScratch, not mkdirSync: the LEASE it publishes is what lets the sweep
+  // reclaim this run's own finished scratch mid-run. Released by the
+  // per-test hook -- safe here because this directory is created, built
+  // into and read inside one helper call, within one test.
+  const outDir = holdScratch(cacheDir, key);
   const result = await compile(entry, { outPath: join(outDir, "program"), outDir, dynamic: true, backend: "c" });
   if (!result.ok) {
     throw new Error(
@@ -498,8 +508,11 @@ async function crossCompileFetchFixture(entry: string): Promise<string> {
   ];
   for (const f of inputs) hash.update(f).update(readFileSync(f));
   const key = hash.update("linux\0").update(target).digest("hex").slice(0, 16);
-  const outDir = join(cacheDir, key);
-  mkdirSync(outDir, { recursive: true });
+  // holdScratch, not mkdirSync: the LEASE it publishes is what lets the sweep
+  // reclaim this run's own finished scratch mid-run. Released by the
+  // per-test hook -- safe here because this directory is created, built
+  // into and read inside one helper call, within one test.
+  const outDir = holdScratch(cacheDir, key);
   const result = await compile(entry, { outPath: join(outDir, "program"), outDir, dynamic: true, backend: "c" });
   if (!result.ok) {
     throw new Error(

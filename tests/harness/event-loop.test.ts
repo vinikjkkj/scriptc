@@ -8,12 +8,13 @@
  * the corpus. */
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdirSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, test } from "vitest";
 import { compile } from "@scriptc/compiler";
 import { eventLoopCases, type StdinScript } from "./event-loop-cases.js";
 import { exeName } from "./exe.js";
+import { holdScratch } from "./scratch-lease.mjs";
 
 const repoRoot = join(import.meta.dirname, "../..");
 const fixtureDir = join(repoRoot, "tests/fixtures/event-loop");
@@ -54,8 +55,11 @@ async function compileFixture(name: string): Promise<string> {
     .update(sanitize ? "san" : "plain")
     .digest("hex")
     .slice(0, 16);
-  const outDir = join(cacheDir, key);
-  mkdirSync(outDir, { recursive: true });
+  // holdScratch, not mkdirSync: the LEASE it publishes is what lets the sweep
+  // reclaim this run's own finished scratch mid-run. Released by the
+  // per-test hook -- safe here because this directory is created, built
+  // into and read inside one helper call, within one test.
+  const outDir = holdScratch(cacheDir, key);
   const result = await compile(file, {
     outPath: join(outDir, exeName("program")),
     outDir,

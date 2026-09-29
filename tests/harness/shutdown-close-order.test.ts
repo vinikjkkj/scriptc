@@ -32,11 +32,12 @@
  * creeping back under them. */
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, test } from "vitest";
 import { compile } from "@scriptc/compiler";
 import { exeName } from "./exe.js";
+import { holdScratch } from "./scratch-lease.mjs";
 
 const repoRoot = join(import.meta.dirname, "../..");
 const fixturesRoot = join(repoRoot, "tests/fixtures/server/cases");
@@ -111,11 +112,32 @@ function runLane(cmd: string, args: string[], driver: string | null): Promise<La
 async function build(entry: string): Promise<string> {
   const hash = createHash("sha256");
   hash.update(entry).update(readFileSync(entry));
-  const key = hash.update("plain").digest("hex").slice(0, 16);
-  const outDir = join(cacheDir, `server-${key}`);
-  mkdirSync(outDir, { recursive: true });
+  /* The suite name is IN THE KEY, and it has to be. server.test.ts builds
+   * the same fixtures from the same absolute paths, and its key is
+   * `entry + bytes + (sanitize ? "san" : "plain")` -- which in the default
+   * flavor is byte-for-byte this one. Two vitest workers therefore shared
+   * one `server-<key>` directory: each compile() relinked `program.exe`
+   * while the other lane might be executing it, and both spawned a binary
+   * of the SAME BASENAME, so fs fixtures deriving their scratch path from
+   * tail(process.argv[1]) collided as well. That is the failure
+   * llvm-differential-suite.ts already names and keys around after CI run
+   * 29965245855. server.test.ts globs every fixture under
+   * tests/fixtures/server/cases (79 of them) and this file names 12, so
+   * ALL TWELVE of this file's cases collided. It showed up as
+   * net-close-order-drain failing with valid-but-reordered output --
+   * "14/15 runs matched Node", alternating which suite lost the race --
+   * which read as a load flake and was not: given the interleaving it is
+   * deterministic. (upgrade-read-fairness fails the same way under load
+   * and is NOT this: it is only in server.test.ts's glob, so it never had
+   * a second writer.)
+   *
+   * The basename is disjoint for the second half of that reason -- a
+   * unique key alone still leaves two `program.exe` processes racing over
+   * a scratch path derived from the name. */
+  const key = hash.update("plain").update("shutdown-close-order").digest("hex").slice(0, 16);
+  const outDir = holdScratch(cacheDir, `shutdown-${key}`);
   const result = await compile(entry, {
-    outPath: join(outDir, exeName("program")),
+    outPath: join(outDir, exeName("shutdown-program")),
     outDir,
     sanitize: false,
     // Pinned to the C lane for the same reason server.test.ts pins it: a

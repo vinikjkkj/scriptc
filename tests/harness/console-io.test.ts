@@ -9,11 +9,12 @@
  * probes with the same ASan + refcount-audit instrumentation as the corpus. */
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdirSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, test } from "vitest";
 import { compile } from "@scriptc/compiler";
 import { exeName } from "./exe.js";
+import { holdScratch } from "./scratch-lease.mjs";
 
 const repoRoot = join(import.meta.dirname, "../..");
 const fixtureDir = join(repoRoot, "tests/fixtures/console-io");
@@ -35,8 +36,11 @@ async function build(name: string): Promise<{ binary: string; sourceFile: string
     .update(sanitize ? "san" : "plain")
     .digest("hex")
     .slice(0, 16);
-  const outDir = join(cacheDir, `console-io-${key}`);
-  mkdirSync(outDir, { recursive: true });
+  // holdScratch, not mkdirSync: the LEASE it publishes is what lets the sweep
+  // reclaim this run's own finished scratch mid-run. Released by the
+  // per-test hook -- safe here because this directory is created, built
+  // into and read inside one helper call, within one test.
+  const outDir = holdScratch(cacheDir, `console-io-${key}`);
   const result = await compile(sourceFile, {
     outPath: join(outDir, exeName(name)),
     outDir,
