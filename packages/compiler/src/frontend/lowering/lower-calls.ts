@@ -4,6 +4,8 @@
  * generic instantiation (bounded by MAX_GENERIC_INSTANCES). */
 import * as ts from "../ts7/adapter.js";
 import { fenceLocationText } from "../../diagnostics/diagnostic.js";
+import { applyEnumRefill, registerEnumRefill } from "./ir-patch.js";
+import type { EnumRefill } from "./ir-patch.js";
 import type { Lowerer } from "./lowerer.js";
 import { lowerGenMethodCall } from "./lower-generators.js";
 import { lowerStreamAsyncIteratorCall } from "./lower-stream.js";
@@ -9919,64 +9921,27 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
       const ref: IrExpr = { kind: "varRef", localId: "r.0", type: argIr, loc };
       const outRef: IrExpr = { kind: "varRef", localId: "out.0", type: resultT, loc };
       const body: IrStmt[] = [];
-      // THE BODY IS FILLED THROUGH A THUNK so reconcileKeyOrders can fill
-      // it AGAIN over a re-picked declaredOrder. It runs once here (nothing
-      // downstream may see an empty helper) and at most once more, before
-      // moduleArtifacts and armOwnMasks — the guards this registers are
-      // dropped by owner first, because a refill moves every statement.
-      const fill = (): void => {
-      L.dropOwnKeyGuards(helper!);
-      body.length = 0;
-      body.push({ kind: "varDecl", localId: "out.0", init: { kind: "arrayLit", elems: [], type: resultT, loc }, loc });
-      const order = shape.declaredOrder ?? shape.fields.map((f) => f.name);
-      for (const name of order) {
-        const f = shape.fields.find((x) => x.name === name)!;
-        const pushStmt: IrStmt = {
-          kind: "exprStmt",
-          expr: {
-            kind: "arrIntrinsic",
-            method: "push",
-            receiver: outRef,
-            args: [{ kind: "strLit", value: f.name, type: STRING, loc }],
-            type: F64,
-            loc,
-          },
-          loc,
-        };
-        // Undefined-armed fields: the push is guarded by a tag test (the
-        // key exists exactly when the arm is not undefined).
-        const utag = f.type.kind === "union" ? L.armTag(f.type.unionId, UNDEFINED_T) : -1;
-        const at = body.length;
-        body.push(
-          utag >= 0 && f.type.kind === "union"
-            ? {
-                kind: "if",
-                cond: {
-                  kind: "unionIsTag",
-                  unionId: f.type.unionId,
-                  tag: utag,
-                  negated: true,
-                  value: { kind: "recordGet", obj: ref, shapeId: argIr.shapeId, field: f.name, type: f.type, loc },
-                  type: BOOL,
-                  loc,
-                },
-                then: [pushStmt],
-                else_: null,
-                loc,
-              }
-            : pushStmt,
-        );
-        // A shape MATERIALISED out of a dynamic value answers its own keys
-        // from the crossing's mask instead — installed after the whole
-        // walk, so an unarmed shape keeps the tag test above verbatim.
-        L.noteOwnKeyGuard(argIr.shapeId, f.name, ref, loc, (present) => {
-          body[at] = { kind: "if", cond: present, then: [pushStmt], else_: null, loc };
-        }, helper!);
-      }
-      body.push({ kind: "return", value: outRef, loc });
+      // THE BODY IS FILLED THROUGH A REFILL DESCRIPTOR so reconcileKeyOrders
+      // can fill it AGAIN over a re-picked declaredOrder — and so can a
+      // replayed lowering fragment, which a closure could not carry. It runs
+      // once here (nothing downstream may see an empty helper) and at most
+      // once more, before moduleArtifacts and armOwnMasks — the guards it
+      // registers are dropped by owner first, because a refill moves every
+      // statement. The body itself is refillObjKeysHelper, below.
+      const refill: EnumRefill = {
+        impl: "obj.keys",
+        helper,
+        shapeId: argIr.shapeId,
+        body,
+        recvRef: ref,
+        outRef,
+        resultT,
+        loc,
+        valueT: null,
+        tupleT: null,
       };
-      fill();
-      L.noteEnumOrderBake(argIr.shapeId, fill);
+      applyEnumRefill(L, refill);
+      L.noteEnumOrderBake(argIr.shapeId, refill);
       L.arrHofHelpers.set(key, helper);
       L.liftedFns.push({
         name: helper,
@@ -10188,9 +10153,7 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
       // the crossing's mask — the same question Object.keys asks, so the
       // two still share the guard (Object.keys lists a key exactly when
       // hasOwn says it is own).
-      L.noteOwnKeyGuard(shapeId, f.name, rRef, loc, (present) => {
-        ret.value = present;
-      });
+      L.noteOwnKeyGuard(shapeId, f.name, rRef, loc, { kind: "returnValue", stmt: ret });
     }
     body.push({ kind: "return", value: { kind: "boolLit", value: false, type: BOOL, loc }, loc });
     L.liftedFns.push({
@@ -10248,9 +10211,8 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
       // keys, so the target's key list is the one JS's Object.assign
       // produces. Skipping leaves the target's slot as it was — which for
       // a fresh `{}` target is the undefined arm, i.e. absent.
-      L.noteOwnKeyGuard(srcShapeId, f.name, sRef, loc, (present) => {
-        body[at] = { kind: "if", cond: present, then: [set], else_: null, loc };
-      });
+      L.noteOwnKeyGuard(srcShapeId, f.name, sRef, loc,
+        { kind: "guardStmt", slot: { holder: body, at }, inner: set, outer: null, loc });
     }
     body.push({ kind: "return", value: tRef, loc });
     L.liftedFns.push({
@@ -11515,144 +11477,24 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
       const ref: IrExpr = { kind: "varRef", localId: "r.0", type: recT, loc };
       const body: IrStmt[] = [];
       const outRef: IrExpr = { kind: "varRef", localId: "out.0", type: resultT, loc };
-      // Refillable over a re-picked order — Object.keys's thunk, verbatim
-      // (values and entries must not drift from the key list).
-      const fill = (): void => {
-      L.dropOwnKeyGuards(helper!);
-      body.length = 0;
-      body.push({ kind: "varDecl", localId: "out.0", init: { kind: "arrayLit", elems: [], type: resultT, loc }, loc });
-      const order = shape.declaredOrder ?? shape.fields.map((f) => f.name);
-      for (const name of order) {
-        const f = shape.fields.find((x) => x.name === name)!;
-        const raw: IrExpr = { kind: "recordGet", obj: ref, shapeId: argIr.shapeId, field: f.name, type: f.type, loc };
-        // The pushed element per member; null when the field's value
-        // cannot flow into the result element type.
-        const elemOf = (value: IrExpr, vt: IrType): IrExpr | null => {
-          if (!valueT) return null;
-          if (typeEquals(vt, valueT)) return value;
-          if (valueT.kind === "union" && vt.kind !== "union") {
-            const tag = L.armTag(valueT.unionId, vt);
-            if (tag >= 0) {
-              return { kind: "unionWrap", unionId: valueT.unionId, tag, value, type: valueT, loc };
-            }
-          }
-          return null;
-        };
-        // Undefined-armed fields: the push is guarded by a tag test, and
-        // the pushed value is the narrowed non-undefined arm.
-        let guardUndefTag: number | null = null;
-        let value: IrExpr = raw;
-        let vt: IrType = f.type;
-        if (f.type.kind === "union") {
-          const undefTag = L.armTag(f.type.unionId, UNDEFINED_T);
-          if (undefTag >= 0) {
-            guardUndefTag = undefTag;
-            const arms = L.unions.get(f.type.unionId)?.arms ?? [];
-            const others = arms.filter((a) => a.kind !== "undefinedT");
-            if (typeEquals(f.type, valueT ?? f.type)) {
-              // The field union IS the result union (single-field shapes):
-              // push the raw box — but then the undefined skip must NOT
-              // narrow. Handled below via vt === valueT.
-              value = raw;
-              vt = f.type;
-            } else if (others.length === 1) {
-              vt = others[0]!;
-              // A UNIT other arm (`null | undefined` fields — the mixed-
-              // defaults spread idiom; undefined was filtered above, so
-              // the unit is null): units carry no payload, so the guarded
-              // push writes the unit LITERAL — unionNarrow to a unit arm
-              // (and unionWrap of a narrowed unit) is malformed IR; the
-              // literal is the one legal unit spelling.
-              value = isUnitType(vt)
-                ? { kind: "unitLit", unit: "null", type: vt, loc }
-                : { kind: "unionNarrow", unionId: f.type.unionId, tag: L.armTag(f.type.unionId, vt), value: raw, type: vt, loc };
-            } else {
-              L.unsupported(
-                "SC1090",
-                call,
-                `Object.${member} over '${L.fmt(argIr)}' (field '${f.name}' is a multi-arm union that ` +
-                  "cannot re-tag into the result element type — read the fields directly)",
-              );
-            }
-          } else if (!typeEquals(f.type, valueT ?? f.type)) {
-            L.unsupported(
-              "SC1090",
-              call,
-              `Object.${member} over '${L.fmt(argIr)}' (field '${f.name}' is a union that cannot ` +
-                "re-tag into the result element type — read the fields directly)",
-            );
-          }
-        }
-        const coerced = elemOf(value, vt);
-        if (!coerced) {
-          L.unsupported(
-            "SC1090",
-            call,
-            `Object.${member} over '${L.fmt(argIr)}' (field '${f.name}' of type '${L.fmt(f.type)}' ` +
-              `cannot flow into the '${L.fmt(valueT!)}' result element — read the fields directly)`,
-          );
-        }
-        const pushed: IrExpr =
-          objMember === "values"
-            ? coerced
-            : {
-                kind: "recordLit",
-                fields: [
-                  { name: "0", value: { kind: "strLit", value: f.name, type: STRING, loc } },
-                  { name: "1", value: coerced },
-                ],
-                type: tupleT!,
-                loc,
-              };
-        const pushStmt: IrStmt = {
-          kind: "exprStmt",
-          expr: { kind: "arrIntrinsic", method: "push", receiver: outRef, args: [pushed], type: F64, loc },
-          loc,
-        };
-        const at = body.length;
-        body.push(
-          guardUndefTag !== null && f.type.kind === "union"
-            ? {
-                kind: "if",
-                cond: { kind: "unionIsTag", unionId: f.type.unionId, tag: guardUndefTag, negated: true, value: raw, type: BOOL, loc },
-                then: [pushStmt],
-                else_: null,
-                loc,
-              }
-            : pushStmt,
-        );
-        // Object.keys's row: an ARMED shape answers from the crossing's
-        // mask, so values/entries stay in step with the key list.
-        //
-        // A CONJUNCTION here, not a replacement, and the reason is the
-        // pushed VALUE rather than the key: an undefined-armed field is
-        // pushed NARROWED to its non-undefined arm, so admitting a key the
-        // mask calls own while the slot still holds the undefined arm
-        // (`{a: undefined}` crossing in) would narrow an undefined arm and
-        // read the wrong payload. The tag test stays outermost and the own
-        // test nests inside it — which loses exactly the `{a: undefined}`
-        // case that values/entries already lose today, and gains every
-        // inherited-member case.
-        const guardTag = guardUndefTag;
-        const guardType = f.type;
-        L.noteOwnKeyGuard(argIr.shapeId, f.name, ref, loc, (present) => {
-          const inner: IrStmt = { kind: "if", cond: present, then: [pushStmt], else_: null, loc };
-          body[at] =
-            guardTag !== null && guardType.kind === "union"
-              ? {
-                  kind: "if",
-                  cond: { kind: "unionIsTag", unionId: guardType.unionId, tag: guardTag, negated: true, value: raw, type: BOOL, loc },
-                  then: [inner],
-                  else_: null,
-                  loc,
-                }
-              : inner;
-        }, helper!);
-      }
-      body.push({ kind: "return", value: outRef, loc });
+      // Refillable over a re-picked order — Object.keys's descriptor,
+      // verbatim (values and entries must not drift from the key list).
+      // The body is refillObjValuesHelper, at the foot of this file.
+      const refill: EnumRefill = {
+        impl: objMember === "entries" ? "obj.entries" : "obj.values",
+        helper,
+        shapeId: argIr.shapeId,
+        body,
+        recvRef: ref,
+        outRef,
+        resultT,
+        loc,
+        valueT,
+        tupleT,
+        diag: { node: call, member },
       };
-      fill();
-      L.noteEnumOrderBake(argIr.shapeId, fill);
+      applyEnumRefill(L, refill);
+      L.noteEnumOrderBake(argIr.shapeId, refill);
       L.arrHofHelpers.set(key, helper);
       L.liftedFns.push({
         name: helper,
@@ -13660,3 +13502,246 @@ function freezeReadOnlyCallArg(L: Lowerer, arg: ts.Identifier): boolean {
   ts.forEachChild(calleeDecl.body, visit);
   return readsOnly;
 }
+
+/* ENUMERATION-ORDER REFILLS — the interned Object.keys / values / entries
+ * helper bodies, rebuilt over a re-picked declaredOrder.
+ *
+ * These live beside the constructions they mirror, and they ARE those
+ * constructions: each helper's body is filled by calling the refill once at
+ * intern time, so there is no second spelling of the body that could drift
+ * from the one a rebuild produces. reconcileKeyOrders calls the same
+ * function again if it re-picks the shape's order, and so does a replayed
+ * lowering fragment — both through applyEnumRefill's table, never directly.
+ *
+ * Every input is IR data or a registry lookup. That is the property that
+ * lets a serialized fragment carry a DESCRIPTOR instead of a closure:
+ * nothing reachable here touches a `ts.Node`, so nothing here needs the
+ * ts.Program that lowered the module to still exist. The one exception is
+ * `r.diag`, which is first-fill-only and provably unreachable on a refill —
+ * see EnumRefill's own comment.
+ */
+
+/** The shape a refill names, or a compiler bug. A descriptor outlives the
+ * fill that built it, so the registry lookup is the one thing that can have
+ * gone missing, and a refill that silently did nothing would leave the
+ * helper enumerating a stale order while JSON.stringify follows the new one
+ * — the exact disagreement reconcileKeyOrders refuses to create. */
+function refillShape(L: Lowerer, r: EnumRefill) {
+  const shape = L.shapes.get(r.shapeId);
+  if (!shape) {
+    throw new Error(
+      `compiler bug: enumeration refill '${r.impl}' for helper ${r.helper} names shape ` +
+        `${r.shapeId}, which the shape registry does not hold`,
+    );
+  }
+  return shape;
+}
+
+/** `%obj.keys.N` — one guarded push of each field NAME, in declaredOrder. */
+function refillObjKeysHelper(Lu: unknown, r: EnumRefill): void {
+  const L = Lu as Lowerer;
+  const shape = refillShape(L, r);
+  const { body, recvRef: ref, outRef, resultT, loc } = r;
+  L.dropOwnKeyGuards(r.helper);
+  body.length = 0;
+  body.push({ kind: "varDecl", localId: "out.0", init: { kind: "arrayLit", elems: [], type: resultT, loc }, loc });
+  const order = shape.declaredOrder ?? shape.fields.map((f) => f.name);
+  for (const name of order) {
+    const f = shape.fields.find((x) => x.name === name)!;
+    const pushStmt: IrStmt = {
+      kind: "exprStmt",
+      expr: {
+        kind: "arrIntrinsic",
+        method: "push",
+        receiver: outRef,
+        args: [{ kind: "strLit", value: f.name, type: STRING, loc }],
+        type: F64,
+        loc,
+      },
+      loc,
+    };
+    // Undefined-armed fields: the push is guarded by a tag test (the key
+    // exists exactly when the arm is not undefined).
+    const utag = f.type.kind === "union" ? L.armTag(f.type.unionId, UNDEFINED_T) : -1;
+    const at = body.length;
+    body.push(
+      utag >= 0 && f.type.kind === "union"
+        ? {
+            kind: "if",
+            cond: {
+              kind: "unionIsTag",
+              unionId: f.type.unionId,
+              tag: utag,
+              negated: true,
+              value: { kind: "recordGet", obj: ref, shapeId: r.shapeId, field: f.name, type: f.type, loc },
+              type: BOOL,
+              loc,
+            },
+            then: [pushStmt],
+            else_: null,
+            loc,
+          }
+        : pushStmt,
+    );
+    // A shape MATERIALISED out of a dynamic value answers its own keys from
+    // the crossing's mask instead — installed after the whole walk, so an
+    // unarmed shape keeps the tag test above verbatim.
+    L.noteOwnKeyGuard(r.shapeId, f.name, ref, loc,
+      { kind: "guardStmt", slot: { holder: body, at }, inner: pushStmt, outer: null, loc },
+      r.helper);
+  }
+  body.push({ kind: "return", value: outRef, loc });
+}
+
+/** `%obj.values.N` / `%obj.entries.N` — Object.keys's body with the VALUE
+ * pushed (narrowed out of its undefined arm) or the [key, value] tuple. */
+function refillObjValuesHelper(Lu: unknown, r: EnumRefill): void {
+  const L = Lu as Lowerer;
+  const shape = refillShape(L, r);
+  const { body, recvRef: ref, outRef, resultT, valueT, tupleT, loc } = r;
+  const objMember = r.impl === "obj.entries" ? "entries" : "values";
+  const argIr: IrType & { kind: "record" } = { kind: "record", shapeId: r.shapeId };
+  // See EnumRefill.diag: a refill provably never reaches these arms, so a
+  // refill that does is a compiler bug and stops the build.
+  // Explicitly typed so TS treats the call as never-returning and
+  // narrows after it, exactly as it does for L.unsupported itself.
+  const refuse: (why: string) => never = (why) => {
+    if (r.diag === undefined) {
+      throw new Error(
+        `compiler bug: enumeration refill '${r.impl}' for helper ${r.helper} reached a refusal ` +
+          `('${why}') that its FIRST fill did not — a re-picked key order changed a per-field ` +
+          `type decision, which it cannot do`,
+      );
+    }
+    return L.unsupported("SC1090", r.diag.node as ts.Node, why);
+  };
+  L.dropOwnKeyGuards(r.helper);
+  body.length = 0;
+  body.push({ kind: "varDecl", localId: "out.0", init: { kind: "arrayLit", elems: [], type: resultT, loc }, loc });
+  const member = r.diag?.member ?? objMember;
+  const order = shape.declaredOrder ?? shape.fields.map((f) => f.name);
+  for (const name of order) {
+    const f = shape.fields.find((x) => x.name === name)!;
+    const raw: IrExpr = { kind: "recordGet", obj: ref, shapeId: r.shapeId, field: f.name, type: f.type, loc };
+    // The pushed element per member; null when the field's value cannot
+    // flow into the result element type.
+    const elemOf = (value: IrExpr, vt: IrType): IrExpr | null => {
+      if (!valueT) return null;
+      if (typeEquals(vt, valueT)) return value;
+      if (valueT.kind === "union" && vt.kind !== "union") {
+        const tag = L.armTag(valueT.unionId, vt);
+        if (tag >= 0) {
+          return { kind: "unionWrap", unionId: valueT.unionId, tag, value, type: valueT, loc };
+        }
+      }
+      return null;
+    };
+    // Undefined-armed fields: the push is guarded by a tag test, and the
+    // pushed value is the narrowed non-undefined arm.
+    let guardUndefTag: number | null = null;
+    let value: IrExpr = raw;
+    let vt: IrType = f.type;
+    if (f.type.kind === "union") {
+      const undefTag = L.armTag(f.type.unionId, UNDEFINED_T);
+      if (undefTag >= 0) {
+        guardUndefTag = undefTag;
+        const arms = L.unions.get(f.type.unionId)?.arms ?? [];
+        const others = arms.filter((a) => a.kind !== "undefinedT");
+        if (typeEquals(f.type, valueT ?? f.type)) {
+          // The field union IS the result union (single-field shapes): push
+          // the raw box — but then the undefined skip must NOT narrow.
+          // Handled below via vt === valueT.
+          value = raw;
+          vt = f.type;
+        } else if (others.length === 1) {
+          vt = others[0]!;
+          // A UNIT other arm (`null | undefined` fields — the mixed-defaults
+          // spread idiom; undefined was filtered above, so the unit is
+          // null): units carry no payload, so the guarded push writes the
+          // unit LITERAL — unionNarrow to a unit arm (and unionWrap of a
+          // narrowed unit) is malformed IR; the literal is the one legal
+          // unit spelling.
+          value = isUnitType(vt)
+            ? { kind: "unitLit", unit: "null", type: vt, loc }
+            : { kind: "unionNarrow", unionId: f.type.unionId, tag: L.armTag(f.type.unionId, vt), value: raw, type: vt, loc };
+        } else {
+          refuse(
+            `Object.${member} over '${L.fmt(argIr)}' (field '${f.name}' is a multi-arm union that ` +
+              "cannot re-tag into the result element type — read the fields directly)",
+          );
+        }
+      } else if (!typeEquals(f.type, valueT ?? f.type)) {
+        refuse(
+          `Object.${member} over '${L.fmt(argIr)}' (field '${f.name}' is a union that cannot ` +
+            "re-tag into the result element type — read the fields directly)",
+        );
+      }
+    }
+    const coerced = elemOf(value, vt);
+    if (!coerced) {
+      refuse(
+        `Object.${member} over '${L.fmt(argIr)}' (field '${f.name}' of type '${L.fmt(f.type)}' ` +
+          `cannot flow into the '${L.fmt(valueT!)}' result element — read the fields directly)`,
+      );
+    }
+    const pushed: IrExpr =
+      objMember === "values"
+        ? coerced
+        : {
+            kind: "recordLit",
+            fields: [
+              { name: "0", value: { kind: "strLit", value: f.name, type: STRING, loc } },
+              { name: "1", value: coerced },
+            ],
+            type: tupleT!,
+            loc,
+          };
+    const pushStmt: IrStmt = {
+      kind: "exprStmt",
+      expr: { kind: "arrIntrinsic", method: "push", receiver: outRef, args: [pushed], type: F64, loc },
+      loc,
+    };
+    const at = body.length;
+    body.push(
+      guardUndefTag !== null && f.type.kind === "union"
+        ? {
+            kind: "if",
+            cond: { kind: "unionIsTag", unionId: f.type.unionId, tag: guardUndefTag, negated: true, value: raw, type: BOOL, loc },
+            then: [pushStmt],
+            else_: null,
+            loc,
+          }
+        : pushStmt,
+    );
+    // Object.keys's row: an ARMED shape answers from the crossing's mask, so
+    // values/entries stay in step with the key list.
+    //
+    // A CONJUNCTION here, not a replacement, and the reason is the pushed
+    // VALUE rather than the key: an undefined-armed field is pushed NARROWED
+    // to its non-undefined arm, so admitting a key the mask calls own while
+    // the slot still holds the undefined arm (`{a: undefined}` crossing in)
+    // would narrow an undefined arm and read the wrong payload. The tag test
+    // stays outermost and the own test nests inside it — which loses exactly
+    // the `{a: undefined}` case that values/entries already lose today, and
+    // gains every inherited-member case.
+    const guardTag = guardUndefTag;
+    const guardType = f.type;
+    L.noteOwnKeyGuard(r.shapeId, f.name, ref, loc,
+      {
+        kind: "guardStmt",
+        slot: { holder: body, at },
+        inner: pushStmt,
+        outer:
+          guardTag !== null && guardType.kind === "union"
+            ? { unionId: guardType.unionId, tag: guardTag, value: raw }
+            : null,
+        loc,
+      },
+      r.helper);
+  }
+  body.push({ kind: "return", value: outRef, loc });
+}
+
+registerEnumRefill("obj.keys", refillObjKeysHelper);
+registerEnumRefill("obj.values", refillObjValuesHelper);
+registerEnumRefill("obj.entries", refillObjValuesHelper);

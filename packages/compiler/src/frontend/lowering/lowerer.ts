@@ -15,6 +15,8 @@
 import { appendFileSync } from "node:fs";
 import { fenceLocationText } from "../../diagnostics/diagnostic.js";
 import { isRelativeSpecifier } from "../shared.js";
+import { applyEnumRefill, applyNullProto, applyOwnKey, applySlotFilled, flushPatchCensus } from "./ir-patch.js";
+import type { EnumRefill, NullProtoPatch, OwnKeyPatch, SlotFilledPatch } from "./ir-patch.js";
 import * as ts from "../ts7/adapter.js";
 import type { ScrDiagnostic } from "../../diagnostics/diagnostic.js";
 import {
@@ -672,6 +674,11 @@ export function lowerToIr(
   lowerProfileNote("%ovfDenied-after-discovery", __ovfDeniedAfterDiscovery.size);
   lowerProfileNote("%ovfDenied-new-in-emit", [...overflowShapeKeysDenied].filter((k) => !__ovfDeniedAfterDiscovery.has(k)).length);
   lowerProfileFlush();
+  // Which deferred IR rewrites this program actually PERFORMED. A byte
+  // identity run proves the data-described rewrites equal the closures
+  // they replaced only for the kinds some program fired; a kind that fires
+  // nowhere is untested by it and looks exactly as green (ir-patch.ts).
+  flushPatchCensus(entry.fileName);
   // The expando member partition must be exhaustive (lower-expando.ts):
   // every registered slot is either bound to its dyn-box accessor pair or
   // counted under a named skip. Checked here, so the corpus lane IS the
@@ -2570,6 +2577,13 @@ export class Lowerer {
   }
 
   run(): LowerResult {
+    // COLLECTION, tapped as one bucket. The per-file buckets below cover
+    // the bodies; collection covers everything before the first body, and
+    // it is where the type layer answers most of its queries. Separating
+    // the two is what says whether a per-module IR cache can reach the
+    // work at all: a body is a module's, a whole-program type resolution
+    // is nobody's.
+    const __colT = performance.now();
     const parts = this.splitFiles();
     this.collectProgram(parts);
     // Decorated classes analyze AFTER the whole collection pass: a
@@ -2578,6 +2592,7 @@ export class Lowerer {
     // (valueGlobalId) settled before any body lowers.
     for (const info of this.classes.values()) analyzeClassDecoration(this, info);
     this.prepareModuleInits(parts);
+    lowerProfileNote(this.remainder ? "%remainder-collect" : "%emit-collect", performance.now() - __colT);
 
     const functions: IrFunction[] = [];
     for (const fp of parts) {
@@ -2878,7 +2893,11 @@ export class Lowerer {
     field: string;
     obj: IrExpr;
     loc: SrcLoc;
-    install: (present: IrExpr) => void;
+    /** WHERE the re-spelling goes, as DATA rather than as a closure: a
+     * serialized lowering fragment cannot carry a closure, and a guard
+     * that silently lost its patch is an own-key question answered with
+     * the wrong constant (ir-patch.ts). */
+    patch: OwnKeyPatch;
     /** The interned helper whose body this guard writes into, when it has
      * one. reconcileKeyOrders REBUILDS such a body, which moves every
      * statement in it — the guards a rebuild replaces are dropped by owner
@@ -2915,11 +2934,11 @@ export class Lowerer {
    * five members…})` compared EQUAL where Node throws. A silent PASS on
    * an assertion that must fail is the one trade this project does not
    * make. */
-  readonly nullProtoRenderings: { shapeId: string; revise: () => void }[] = [];
+  readonly nullProtoRenderings: { shapeId: string; patch: NullProtoPatch }[] = [];
 
   /** Register one such helper (see nullProtoRenderings). */
-  noteNullProtoRendering(shapeId: string, revise: () => void): void {
-    this.nullProtoRenderings.push({ shapeId, revise });
+  noteNullProtoRendering(shapeId: string, patch: NullProtoPatch): void {
+    this.nullProtoRenderings.push({ shapeId, patch });
   }
 
   /** Every `in` over a REQUIRED field that answered the static `true`,
@@ -2933,11 +2952,11 @@ export class Lowerer {
    * the site registers here and armOwnMasks installs `recordSlotFilled`
    * only for the shapes a completion actually targeted. Every other
    * program keeps the literal `true` it had: same IR, same bytes. */
-  readonly slotFilledGuards: { shapeId: string; field: string; install: () => void }[] = [];
+  readonly slotFilledGuards: { shapeId: string; field: string; patch: SlotFilledPatch }[] = [];
 
   /** Register one `in` guard (see slotFilledGuards). */
-  noteSlotFilledGuard(shapeId: string, field: string, install: () => void): void {
-    this.slotFilledGuards.push({ shapeId, field, install });
+  noteSlotFilledGuard(shapeId: string, field: string, patch: SlotFilledPatch): void {
+    this.slotFilledGuards.push({ shapeId, field, patch });
   }
 
   /** Sites that copy EVERY declared field of a record into a fresh literal
@@ -2972,10 +2991,10 @@ export class Lowerer {
     field: string,
     obj: IrExpr,
     loc: SrcLoc,
-    install: (present: IrExpr) => void,
+    patch: OwnKeyPatch,
     owner?: string,
   ): void {
-    this.ownKeyGuards.push({ shapeId, field, obj, loc, install, ...(owner ? { owner } : {}) });
+    this.ownKeyGuards.push({ shapeId, field, obj, loc, patch, ...(owner ? { owner } : {}) });
   }
 
   /** Forget the guards one interned helper registered, before it registers
@@ -3004,12 +3023,12 @@ export class Lowerer {
    * Object.keys and JSON.stringify disagree, which is a new defect, not a
    * partial fix. Either every consumer of a shape's order moves with it or
    * the shape does not move. */
-  readonly enumOrderBakes = new Map<string, { rebuilds: (() => void)[]; blocked: boolean }>();
-  noteEnumOrderBake(shapeId: string, rebuild: (() => void) | null): void {
+  readonly enumOrderBakes = new Map<string, { refills: EnumRefill[]; blocked: boolean }>();
+  noteEnumOrderBake(shapeId: string, refill: EnumRefill | null): void {
     let e = this.enumOrderBakes.get(shapeId);
-    if (!e) this.enumOrderBakes.set(shapeId, (e = { rebuilds: [], blocked: false }));
-    if (rebuild === null) e.blocked = true;
-    else e.rebuilds.push(rebuild);
+    if (!e) this.enumOrderBakes.set(shapeId, (e = { refills: [], blocked: false }));
+    if (refill === null) e.blocked = true;
+    else e.refills.push(refill);
   }
 
   /** Arm the hidden OWN-KEY MASK (IrRecordShape.ownmask) on every record
@@ -3140,7 +3159,7 @@ export class Lowerer {
     // really did carry every declared field.
     for (const g of this.slotFilledGuards) {
       if (!this.requiredAbsentTargets.has(g.shapeId)) continue;
-      g.install();
+      applySlotFilled(g.patch, g.shapeId, g.field);
     }
     // ...and the whole-shape LITERAL copies, which have no such spelling
     // and are refused instead (completedSpreadSites).
@@ -3175,14 +3194,14 @@ export class Lowerer {
     // own-key set on one a crossing did.
     // ...and the inspect prefixes that cannot be a per-SHAPE constant in a
     // module that crosses into their own shape (see nullProtoRenderings).
-    for (const n of this.nullProtoRenderings) if (armed.has(n.shapeId)) n.revise();
+    for (const n of this.nullProtoRenderings) if (armed.has(n.shapeId)) applyNullProto(n.patch, n.shapeId);
     for (const g of this.ownKeyGuards) {
       if (!armed.has(g.shapeId)) continue;
       // An INTERNAL SLOT is not a key, so its guard keeps the tag test —
       // ownMaskKeyBit's rule, asked here in the frontend's spelling.
       const gShape = byId.get(g.shapeId);
       if (gShape && internalSlotFields(gShape).includes(g.field)) continue;
-      g.install({
+      applyOwnKey(g.patch, {
         kind: "recordKeyPresent",
         obj: g.obj,
         shapeId: g.shapeId,
@@ -3292,6 +3311,7 @@ export class Lowerer {
    * body; both fire edges through the same hooks and are not units
    * themselves. */
   discover(extraRoots?: readonly string[]): Set<string> {
+    const __colT = performance.now();
     const parts = this.splitFiles();
     this.collectProgram(parts);
     // Decorated classes analyze post-collection here too: the %init seeds
@@ -3299,6 +3319,7 @@ export class Lowerer {
     // thunks) the emit pass must see.
     for (const info of this.classes.values()) analyzeClassDecoration(this, info);
     this.prepareModuleInits(parts);
+    lowerProfileNote("%discovery-collect", performance.now() - __colT);
 
     // Every lowerable body, by emitted-function name. The names double as
     // the reachable-set keys the emit pass gates on — deterministic across
@@ -4579,7 +4600,7 @@ export class Lowerer {
     // The baked consumers rebuild NOW — before moduleArtifacts collects the
     // shapes a body names and before armOwnMasks installs into it.
     for (const shapeId of rewritten) {
-      for (const rebuild of this.enumOrderBakes.get(shapeId)?.rebuilds ?? []) rebuild();
+      for (const refill of this.enumOrderBakes.get(shapeId)?.refills ?? []) applyEnumRefill(this, refill);
     }
     this.keyOrderReconciled = true;
     // Every cached answer was computed against the OLD order. The loc-keyed

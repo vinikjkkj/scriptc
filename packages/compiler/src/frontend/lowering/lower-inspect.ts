@@ -34,6 +34,7 @@
  * record/class property order follows declaration order (SEMANTICS.md
  * 36's existing stance). */
 import * as ts from "../ts7/adapter.js";
+import type { NullProtoPatch } from "./ir-patch.js";
 import type { Lowerer } from "./lowerer.js";
 import { isJsSourceFile } from "../program.js";
 import { BOOL, DYN, F64, internalSlotFields, IrExpr, IrStmt, IrType, RUNTIME_ERROR_CLASSES, STRING, SrcLoc, UNDEFINED_T, shapeHasAccessorSlots, typeKey } from "../../ir/nodes.js";
@@ -634,17 +635,11 @@ function inspectHelper(L: Lowerer, t: IrType, loc: SrcLoc): string {
         // members it materialised.
         const completable = ft.kind !== "dyn" && !(ft.kind === "union" && L.armTag(ft.unionId, UNDEFINED_T) >= 0);
         if (completable) {
-          const holder = st as unknown as Record<string, unknown>;
-          const inner = { ...st } as IrStmt;
-          L.noteSlotFilledGuard(t.shapeId, fname, () => {
-            for (const k of Object.keys(holder)) delete holder[k];
-            Object.assign(holder, {
-              kind: "if",
-              cond: { kind: "recordSlotFilled", obj: v(), shapeId: t.shapeId, field: fname, type: BOOL, loc },
-              then: [inner],
-              else_: null,
-              loc,
-            });
+          L.noteSlotFilledGuard(t.shapeId, fname, {
+            kind: "guardStmtInPlace",
+            slot: { node: st as unknown as Record<string, unknown> },
+            obj: v(),
+            loc,
           });
         }
         body.push(st);
@@ -688,26 +683,28 @@ function inspectHelper(L: Lowerer, t: IrType, loc: SrcLoc): string {
       // ctorName is exempt (see below), and a shape no crossing arms is
       // never revised, so nothing here changes an unarmed program's IR.
       if (!shape.builtin?.ctorName) {
+        const perInstanceNodes: NullProtoPatch["nodes"] = [];
+        // In PLACE: the literal is already embedded in an emitted
+        // statement (depthGate holds one, insp.end's arg list the other),
+        // and the registration exists precisely because there is no handle
+        // to the container. StrLit's own comment names this. Each node
+        // carries its OWN receiver expression — the two must not come to
+        // share one object, because the passes below this rewrite types in
+        // place and would rewrite a shared node once per occurrence.
         const perInstance = (node: StrLit, whenNull: string, plain: string): void => {
-          const tern: IrExpr = {
-            kind: "ternary",
-            cond: { kind: "recordNullProto", obj: v(), shapeId: t.shapeId, type: BOOL, loc },
-            then: str(whenNull, loc),
-            else_: str(plain, loc),
-            type: STRING,
-            loc,
-          };
-          // In PLACE: the literal is already embedded in an emitted
-          // statement (depthGate holds one, insp.end's arg list the
-          // other), and the registration exists precisely because there is
-          // no handle to the container. StrLit's own comment names this.
-          const holder = node as unknown as Record<string, unknown>;
-          for (const k of Object.keys(holder)) delete holder[k];
-          Object.assign(holder, tern);
+          perInstanceNodes.push({
+            slot: { node: node as unknown as Record<string, unknown> },
+            obj: v(),
+            whenNull,
+            plain,
+          });
         };
-        L.noteNullProtoRendering(t.shapeId, () => {
-          perInstance(openBrace, "[Object: null prototype] {", "{");
-          perInstance(depthLit, "[Object: null prototype]", "[Object]");
+        perInstance(openBrace, "[Object: null prototype] {", "{");
+        perInstance(depthLit, "[Object: null prototype]", "[Object]");
+        L.noteNullProtoRendering(t.shapeId, {
+          kind: "perInstancePrefix",
+          loc,
+          nodes: perInstanceNodes,
         });
       }
       break;
