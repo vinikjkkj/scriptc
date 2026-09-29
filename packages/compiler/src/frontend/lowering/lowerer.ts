@@ -3478,7 +3478,18 @@ export class Lowerer {
       } catch (e) {
         if (!(e instanceof PoisonError)) throw e;
       }
+      // THE GENERIC-INSTANCE DRAIN, which the Q: tap above does not cover:
+      // its bucket closes before this line. The emit pass taps its own
+      // drain per instance (G:), so leaving this one untapped made the two
+      // passes look structurally different when only the instruments were
+      // — 373.9 s of a 443.9 s discovery pass fell outside every bucket on
+      // zapo-rest/app182, and that gap is the whole question of whether a
+      // per-module cache can reach the work. One bucket, not per-file:
+      // drainInstances() lowers whatever the queue holds and does not
+      // report whose body each instance came from.
+      const __drT = performance.now();
       drainInstances();
+      lowerProfileNote("%discovery-drain", performance.now() - __drT);
     }
     return reachable;
   }
