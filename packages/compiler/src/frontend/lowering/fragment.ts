@@ -84,6 +84,7 @@
  */
 
 import { createHash } from "node:crypto";
+import { structuralFormIsOpaque } from "./structural-form.js";
 import type { FrontendInputProbe } from "../input-tracker.js";
 import type { IrFunction, IrGlobal } from "../../ir/nodes.js";
 
@@ -351,6 +352,59 @@ export function fragmentUnresolvableIds(
   return out;
 }
 
+/** THE MIRROR OF assertNoIdLeak, and the other half of the same pair.
+ *
+ * assertNoIdLeak proves no id got INTO a structural form. This proves no two
+ * distinct entities came OUT of one. Both failures are fatal and they fail
+ * in opposite directions: a leaked id makes two builds of the same source
+ * miss forever, which is slow; a collision makes the dictionary map two
+ * different entities onto ONE id at assembly, which puts a value of one
+ * shape into another shape's slot with no diagnostic and no build failure.
+ * An incomplete form is exactly as fatal as a leaky one.
+ *
+ * THIS IS NOT HYPOTHETICAL, and the known case is in the registry's own
+ * words: "two INDEPENDENT structurally identical recursive declarations
+ * intern as distinct shapes, so values of one fence at the other slots with
+ * the ordinary shape-mismatch diagnostic" (ShapeRegistry.recIds). Per
+ * declaration identity is deliberate -- tsc admits the assignment and the
+ * exact-shape stance reports it -- so two ids that are structurally equal
+ * are a thing this compiler MEANS. structuralForm cannot see the difference,
+ * because the difference is the declaration site and not the structure.
+ *
+ * So a fragment containing such a pair is UNUSABLE, not wrong: it is a miss,
+ * the module re-lowers, and nothing ships incorrectly. Widening the form to
+ * carry a declaration discriminator would be the way to cache those modules
+ * too, and it is deliberately not done here -- a discriminator is a second
+ * identity, and a second identity is a second thing to get wrong.
+ *
+ * OPAQUE forms count, and count harder. A form that reached an unresolved
+ * placeholder is less discriminating by construction, so two of them
+ * colliding is the likeliest way this fires; they are reported separately so
+ * the reason is legible rather than inferred.
+ *
+ * The shape of this check is the tail comparator one place forward: there it
+ * printed DISTINCT EXPANDED KEYS beside the entity count -- 105 of 105 --
+ * precisely so a key collision could not fake agreement. Here it is
+ * distinct(forms) == count(entities), and a mismatch refuses. */
+export function fragmentFormCollisions(
+  fragment: Pick<LoweringFragment, "mints" | "witness">,
+): { structure: string; localIds: string[]; opaque: boolean }[] {
+  const byForm = new Map<string, string[]>();
+  const add = (localId: string, structure: string): void => {
+    const got = byForm.get(structure);
+    if (got === undefined) byForm.set(structure, [localId]);
+    else if (!got.includes(localId)) got.push(localId);
+  };
+  for (const m of fragment.mints) add(m.localId, m.structure);
+  for (const r of fragment.witness.readEntities) add(r.localId, r.structure);
+  const out: { structure: string; localIds: string[]; opaque: boolean }[] = [];
+  for (const [structure, localIds] of byForm) {
+    if (localIds.length < 2) continue;
+    out.push({ structure, localIds, opaque: structuralFormIsOpaque(structure) });
+  }
+  return out;
+}
+
 /** Structural validation on READ, before a fragment is trusted.
  *
  * Returns the reasons it cannot be used; empty means usable. A reason is
@@ -370,6 +424,17 @@ export function fragmentUnusableReasons(fragment: LoweringFragment): string[] {
         " instead of a structure");
       break;
     }
+  }
+  // A COLLISION makes a fragment unusable rather than wrong: two entities
+  // sharing one form would be mapped onto one id at assembly. Reported here
+  // so the module simply re-lowers.
+  for (const c of fragmentFormCollisions(fragment)) {
+    out.push(
+      (c.opaque ? "an OPAQUE structural form " : "a structural form ") +
+        "is shared by " + String(c.localIds.length) + " distinct entities (" +
+        c.localIds.join(", ") + "), so assembly would map them onto one id: " +
+        (c.structure.length > 80 ? c.structure.slice(0, 80) + "..." : c.structure));
+    break;
   }
   const seen = new Set<string>();
   for (const mint of fragment.mints) {

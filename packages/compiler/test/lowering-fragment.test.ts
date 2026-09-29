@@ -23,6 +23,7 @@ import {
   assertFragmentOwnsNoCollectionIds,
   canonicalJson,
   fragmentKey,
+  fragmentFormCollisions,
   fragmentUnresolvableIds,
   fragmentUnusableReasons,
   type LoweringFragment,
@@ -181,6 +182,59 @@ describe("lowering fragment", () => {
     expect(back).toEqual(f);
     expect(key(back)).toBe(key(f));
     expect(fragmentUnusableReasons(back)).toEqual([]);
+  });
+
+  /* THE MIRROR GUARD. assertNoIdLeak proves no id got INTO a form; this
+   * proves no two distinct entities came OUT of one. A collision maps two
+   * entities onto ONE id at assembly, putting a value of one shape into
+   * another shape's slot with no diagnostic and no build failure.
+   *
+   * The forced pair below is the REAL case, not an invented one: the
+   * registry keeps per-declaration identity, so "two INDEPENDENT
+   * structurally identical recursive declarations intern as distinct
+   * shapes". structuralForm cannot tell them apart, because what separates
+   * them is the declaration site rather than the structure. */
+  it("refuses a fragment where two distinct entities share one structural form", () => {
+    // NEGATIVE CONTROL FIRST: a sound fragment has no collisions, or every
+    // assertion below passes for the wrong reason.
+    expect(fragmentFormCollisions(fragment())).toEqual([]);
+    expect(fragmentUnusableReasons(fragment())).toEqual([]);
+
+    const collided = fragment();
+    collided.mints.push({
+      localId: "r1",
+      kind: "record",
+      structure: collided.mints[0]!.structure, // the two-recursive-declarations case
+      ordinal: 2,
+      loop: "body",
+    });
+    const found = fragmentFormCollisions(collided);
+    expect(found).toHaveLength(1);
+    expect(found[0]!.localIds.sort()).toEqual(["r0", "r1"]);
+    expect(found[0]!.opaque).toBe(false);
+    expect(fragmentUnusableReasons(collided).join(" "))
+      .toMatch(/a structural form is shared by 2 distinct entities/);
+
+    // A collision ACROSS the two dictionaries -- one minted here, one read
+    // from elsewhere -- is the same fatal shape and must be caught too.
+    const across = fragment();
+    across.witness.readEntities.push({
+      localId: "r8",
+      kind: "record",
+      structure: across.mints[0]!.structure,
+    });
+    expect(fragmentFormCollisions(across)).toHaveLength(1);
+
+    // An OPAQUE form colliding is the likeliest way this fires, and it is
+    // reported as opaque so the reason is legible rather than inferred.
+    const opaque = fragment();
+    opaque.mints[0]!.structure = 'record{"x":"%unresolved"}';
+    opaque.mints[1]!.structure = 'record{"x":"%unresolved"}';
+    const op = fragmentFormCollisions(opaque);
+    expect(op).toHaveLength(1);
+    expect(op[0]!.opaque).toBe(true);
+    expect(fragmentUnusableReasons(opaque).join(" "))
+      .toMatch(/an OPAQUE structural form is shared by 2 distinct entities/);
   });
 
   /* RULE 2, checked on read rather than trusted. */
