@@ -17,6 +17,7 @@ import { fenceLocationText } from "../../diagnostics/diagnostic.js";
 import { isRelativeSpecifier } from "../shared.js";
 import { applyEnumRefill, applyNullProto, applyOwnKey, applySlotFilled, flushPatchCensus } from "./ir-patch.js";
 import { flushMintOrder, mintPhaseControl, resetMintLog, setMintPhase } from "../types.js";
+import { flushFragmentCensus } from "./fragment-census.js";
 import type { EnumRefill, NullProtoPatch, OwnKeyPatch, SlotFilledPatch } from "./ir-patch.js";
 import * as ts from "../ts7/adapter.js";
 import type { ScrDiagnostic } from "../../diagnostics/diagnostic.js";
@@ -682,6 +683,34 @@ export function lowerToIr(
   // they replaced only for the kinds some program fired; a kind that fires
   // nowhere is untested by it and looks exactly as green (ir-patch.ts).
   flushPatchCensus(entry.fileName);
+  // BEFORE flushMintOrder, which CLEARS the log. The census reads it.
+  //
+  // How much of C a per-module fragment actually delivers: C = 250.3 s is a
+  // ceiling over the work a fragment COULD reach, and every module that hits
+  // a refusal is not cacheable. Nothing has measured that fraction, so "the
+  // fragment works" and "the fragment delivers the 250 s" are still
+  // different claims (fragment-census.ts).
+  if (result.module !== null) {
+    flushFragmentCensus({
+      functions: result.module.functions,
+      // IrModule.globals is OPTIONAL. Defaulting to [] here is safe only
+      // because the census never asks how MANY globals a module has --
+      // it asks which module each one belongs to, and an absent list has
+      // no members to misplace. A consumer that counted them would need
+      // to distinguish absent from empty.
+      globals: result.module.globals ?? [],
+      shapes: emit.shapes,
+      unions: emit.unions,
+      // IrGlobal has no loc, so a global's module survives only in its id
+      // (`%g.<tag>...`). Inverting fileTag is what reads it back.
+      moduleOfTag: new Map([...emit.fileTag].map(([sf, tag]) => [tag, sf.fileName])),
+      // npmStatic is NOT passed: LowerOptions does not carry it, and
+      // threading a field through the lowering for an env-gated census is
+      // not worth it. The census says so in its own output rather than
+      // reporting zero build-level refusals it never evaluated.
+      program: entry.fileName,
+    });
+  }
   flushMintOrder(entry.fileName);
   // The expando member partition must be exhaustive (lower-expando.ts):
   // every registered slot is either bound to its dyn-box accessor pair or

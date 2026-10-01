@@ -244,6 +244,27 @@ export function noteMint(id: string, key: string): void {
   // minted says whether the drain ORDER moved.
   mintLog.push({ id, phase: mintPhase, key });
 }
+/** The emit pass's mint log, for the fragment producer.
+ *
+ * Returned as a copy: the log is cleared per pass, and a consumer holding the
+ * live array would see it emptied under itself by the next lowering in the
+ * same process. */
+export function mintLogSnapshot(): { id: string; phase: string; key: string }[] {
+  return mintLog.map((m) => ({ ...m }));
+}
+
+/** True when the mint log is being kept at all.
+ *
+ * noteMint is gated on SCRIPTC_MINT_ORDER, so without it the log is EMPTY
+ * rather than partial — and an empty log would make the fragment census
+ * report every module as having minted nothing, which is a measured-looking
+ * zero from an instrument that was never on. The producer asks this and
+ * refuses to report rather than reporting zeros. */
+export function mintLogActive(): boolean {
+  const v = process.env["SCRIPTC_MINT_ORDER"];
+  return v !== undefined && v !== "";
+}
+
 export function flushMintOrder(program: string): void {
   const path = process.env["SCRIPTC_MINT_ORDER"];
   if (path === undefined || path === "") return;
