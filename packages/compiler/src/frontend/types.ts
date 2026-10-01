@@ -697,6 +697,48 @@ export class UnionRegistry {
  * intact. */
 const FORMAT_BUDGET = 4000;
 
+/** Renders `items` left to right and STOPS once what it has already built
+ * reaches FORMAT_BUDGET characters.
+ *
+ * The budget above bounded the OUTPUT and not the work: formatIrTypeInner
+ * expanded every field of every record, joined them, and only then sliced to
+ * 4000. The 19.5 MB spelling its comment describes was still CONSTRUCTED --
+ * only its printing was fixed. On generated protobuf shapes that is the
+ * single largest term in the frontend.
+ *
+ * OUTPUT-IDENTICAL, which is the whole point. Each level renders
+ * `prefix + items.join(sep) + suffix` and the wrapper keeps the first
+ * FORMAT_BUDGET characters of it. Once the accumulation has reached that
+ * mark, every later item lies entirely beyond it and is discarded, so not
+ * rendering it cannot change the kept prefix. A spelling that would have
+ * fitted never reaches the mark and is unaffected.
+ *
+ * Stated by the property rather than the case it was found in: a budget that
+ * bounds output must bound the work that produces the output. */
+function budgetedMap<T>(items: readonly T[], render: (x: T) => string): string[] {
+  const out: string[] = [];
+  let len = 0;
+  for (const it of items) {
+    const s = render(it);
+    out.push(s);
+    len += s.length + 2; // "; "
+    if (len >= FORMAT_BUDGET) break;
+  }
+  return out;
+}
+
+function budgetedJoin<T>(items: readonly T[], render: (x: T) => string, sep: string): string {
+  const out: string[] = [];
+  let len = 0;
+  for (const it of items) {
+    const s = render(it);
+    out.push(s);
+    len += s.length + sep.length;
+    if (len >= FORMAT_BUDGET) break;
+  }
+  return out.join(sep);
+}
+
 export function formatIrType(t: IrType, shapes: ShapeRegistry, unions: UnionRegistry, seen: Set<string> = new Set()): string {
   const s = formatIrTypeInner(t, shapes, unions, seen);
   return s.length > FORMAT_BUDGET ? s.slice(0, FORMAT_BUDGET) + "…" : s;
@@ -744,13 +786,14 @@ function formatIrTypeInner(t: IrType, shapes: ShapeRegistry, unions: UnionRegist
       // type — the packed array is one argument, not a positional list — so
       // a refusal between the two printed both sides identically and named
       // nothing the reader could act on.
-      return `(${t.params
-        .map((p, i) =>
+      return `(${budgetedJoin(
+        t.params.map((p, i) => ({ p, i })),
+        ({ p, i }) =>
           t.restIn === true && i === t.params.length - 1
             ? `...${formatIrType(p, shapes, unions, seen)}`
             : formatIrType(p, shapes, unions, seen),
-        )
-        .join(", ")}) => ${formatIrType(t.ret, shapes, unions, seen)}`;
+        ", ",
+      )}) => ${formatIrType(t.ret, shapes, unions, seen)}`;
     case "object":
       // Runtime-provided error classes carry '%'-prefixed IR names
       // ("%Error") so user classes can never collide; diagnostics show the
@@ -767,9 +810,9 @@ function formatIrTypeInner(t: IrType, shapes: ShapeRegistry, unions: UnionRegist
       try {
         if (shape.tuple) {
           const byIndex = [...shape.fields].sort((a, b) => Number(a.name) - Number(b.name));
-          return `[${byIndex.map((f) => formatIrType(f.type, shapes, unions, seen)).join(", ")}]`;
+          return `[${budgetedJoin(byIndex, (f) => formatIrType(f.type, shapes, unions, seen), ", ")}]`;
         }
-        const members = shape.fields.map((f) => {
+        const members = budgetedMap(shape.fields, (f) => {
           // Accessor slots print in TS's accessor spelling, not the
           // reserved '%'-field encoding.
           const slot = accessorSlotProp(f.name);
@@ -780,7 +823,9 @@ function formatIrTypeInner(t: IrType, shapes: ShapeRegistry, unions: UnionRegist
           }
           return `${f.name}: ${formatIrType(f.type, shapes, unions, seen)}`;
         });
-        if (shape.indexValue) {
+        // Appended after the members, so once they have already filled the
+        // budget this one lies beyond the kept prefix too.
+        if (shape.indexValue && members.join("; ").length < FORMAT_BUDGET) {
           members.push(`[key: string]: ${formatIrType(shape.indexValue, shapes, unions, seen)}`);
         }
         if (members.length === 0) return "{}";
@@ -795,7 +840,7 @@ function formatIrTypeInner(t: IrType, shapes: ShapeRegistry, unions: UnionRegist
       if (seen.has(t.unionId)) return "..."; // the recursive knot
       seen.add(t.unionId);
       try {
-        return def.arms.map((a) => formatIrType(a, shapes, unions, seen)).join(" | ");
+        return budgetedJoin(def.arms, (a) => formatIrType(a, shapes, unions, seen), " | ");
       } finally {
         seen.delete(t.unionId);
       }
