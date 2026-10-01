@@ -100,6 +100,35 @@ if (unmatched.length > 0) {
   console.log('counted in C but in neither cacheable nor refused. C_reachable is a LOWER bound.')
   for (const f of unmatched.slice(0, 5)) console.log('    ' + f)
 }
+
+/* MUTUAL COVERAGE: are these two files even from the same build?
+ *
+ * The attribution and the census are written by the SAME lowerToIr call when
+ * both env vars are set -- and by two different builds when they are not.
+ * Joining across builds is silent: the numbers are individually true, the
+ * table is nonsense, and nothing looks wrong. This is the pair the
+ * coordinator named as a condition (the census must run on the main of the
+ * moment, with both arms re-measured in one session), and a condition that
+ * nothing checks is a hope.
+ *
+ * The one-directional warning above covers attributed-without-census. This
+ * covers the reverse, which is the direction that actually indicates a
+ * MISMATCHED PAIR: a census row for a module the attribution never saw means
+ * the two builds lowered different module sets. */
+const censusOnly = [...outcomes.keys()].filter((m) => !attributed.has(m) && !entryPattern.test(m))
+const overlap = outcomes.size - censusOnly.length
+if (censusOnly.length > 0) {
+  console.log('')
+  console.log(`MISMATCH: ${censusOnly.length} of ${outcomes.size} census rows name a module the`)
+  console.log('attribution never saw. These two files are probably from DIFFERENT builds, and a')
+  console.log('cross-build join is silent: both numbers are true and the table is nonsense.')
+  for (const m of censusOnly.slice(0, 5)) console.log('    ' + m)
+  if (overlap * 2 < outcomes.size) {
+    console.log('')
+    console.log('Fewer than half the census rows match. REFUSING to print a verdict from this pair.')
+    process.exit(2)
+  }
+}
 if (refusedHeavy.length > 0) {
   console.log('')
   console.log('most expensive REFUSED modules (where the loss actually is):')
