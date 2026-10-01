@@ -22,6 +22,45 @@ const [logDir, wallsTsv, entryRe] = process.argv.slice(2)
 // from cost is the defect this argument exists to remove.
 if (!entryRe) { console.error('usage: attrib-decide.mjs <logDir> <walls.tsv> <entryRegex>'); process.exit(2) }
 const entryPattern = new RegExp(entryRe)
+/* THE THRESHOLD, RESTATED BEFORE THE NUMBER EXISTS AND NOT AFTER.
+ *
+ * The original bar was 120 s of wall saved on an edited-entry rebuild,
+ * committed before any data, with 12.8% (= 120/936) as its load-robust
+ * restatement. The tie-break said: if T exceeds the 936 s reference by more
+ * than 10%, the ratio governs.
+ *
+ * THAT TIE-BREAK WAS SCOPED TO LOAD INFLATION AND DOES NOT COVER A GENUINE
+ * SPEEDUP. Two quiet-box measurements now put the frontend lane at ~355-365 s
+ * (354.23 s and 363.11 s, two sessions, two blocks, agreeing within 2.5%).
+ * T is far BELOW the reference, so by the letter of the old rule the ABSOLUTE
+ * governs and the bar becomes 33% of T. The two forms disagree by 2.6x:
+ *
+ *     at T = 936 s    absolute 120 s = 12.8% of T    ratio 12.8% = 120 s
+ *     at T = 360 s    absolute 120 s = 33.3% of T    ratio 12.8% =  46 s
+ *
+ * Applying a rule outside the regime it was written for is the error family
+ * this block has hit all day, so the rule is replaced rather than stretched.
+ *
+ * THE RATIO GOVERNS, AT 12.8% OF T, FOR ANY T.
+ *
+ * The 120 s absolute was never the criterion; it was the criterion's value at
+ * one T. What the threshold is really asking is whether the iteration loop
+ * FEELS different, and that is a proportion: 16 min -> 14 min is marginal,
+ * 6 min -> 4.3 min is not, and both are "2 minutes".
+ *
+ * THIS WEAKENS THE BAR IN ABSOLUTE TERMS -- 46 s where it used to be 120 s --
+ * and that is stated plainly because choosing the more permissive form after
+ * seeing which way the number went would be the whole sin. It is declared
+ * here, with no C measured against it yet, and it is the coordinator's to
+ * veto.
+ *
+ * AND THE STRUCTURAL POINT THE NUMBERS KEEP MAKING: every perf win makes this
+ * cache LESS worth building. Its payoff is a fraction of a shrinking total
+ * while its risk -- a permanent surface whose failure mode is a silently
+ * wrong binary -- is fixed. The fragment's case was strongest at 15.6 min. It
+ * is weaker at 6. If the trap-message formatting fix lands it is weaker
+ * again, because that work sits INSIDE the library lowering a fragment
+ * caches. */
 const REFERENCE_T = 936
 const THRESHOLD_RATIO = 120 / REFERENCE_T
 
@@ -122,11 +161,16 @@ if (A.length && B.length) {
   const TA = mean(A.map((r) => r.T)), TB = mean(B.map((r) => r.T))
   console.log(`\nratio  C_B/C_A = ${(CB / CA).toFixed(3)}    T_B/T_A = ${(TB / TA).toFixed(3)}    (X, the frontend-lane factor, is 1/(T_B/T_A) = ${(TA / TB).toFixed(2)})`)
   const ratio = CB / TB
+  // The ratio governs for ANY T now, not only an inflated one: see the
+  // header. `inflated` is kept only to report how far T moved from the
+  // reference, because a reader comparing this run to an earlier one needs
+  // to know the denominator changed.
   const inflated = TB > REFERENCE_T * 1.1
   console.log(`\nDECISION on arm B (the compiler that will ship):`)
   console.log(`  C = ${CB.toFixed(1)}s   threshold as declared = 120s absolute  -> ${CB >= 120 ? 'PASS' : 'FAIL'}`)
   console.log(`  C/T = ${(100 * ratio).toFixed(1)}%   threshold = ${(100 * THRESHOLD_RATIO).toFixed(1)}%  -> ${ratio >= THRESHOLD_RATIO ? 'PASS' : 'FAIL'}`)
-  console.log(`  T = ${TB.toFixed(1)}s vs the ${REFERENCE_T}s reference -> ${inflated ? 'MATERIALLY INFLATED: the RATIO is the rule' : 'comparable: both forms agree or the absolute governs'}`)
-  const verdict = inflated ? ratio >= THRESHOLD_RATIO : (CB >= 120)
+  console.log(`  T = ${TB.toFixed(1)}s vs the ${REFERENCE_T}s reference (${(100 * TB / REFERENCE_T).toFixed(0)}% of it)`)
+  console.log(`  RULE: the ratio governs for any T. The 120s absolute was its value at T=936 and is reported above for continuity only.`)
+  const verdict = ratio >= THRESHOLD_RATIO
   console.log(`\nVERDICT  ${verdict ? 'BUILD the fragment' : 'DO NOT build the fragment'}`)
 }
