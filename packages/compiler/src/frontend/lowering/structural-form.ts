@@ -33,6 +33,7 @@
  * this one is read by a cache.
  */
 
+import { createHash } from "node:crypto";
 import type { IrRecordShape, IrType, IrUnionDef } from "../../ir/nodes.js";
 
 /** Minimal lookups, so this is testable without constructing a registry. */
@@ -83,36 +84,87 @@ export const structuralIdentityFields = {
 
 const J = JSON.stringify;
 
+/* THE DAG MUST NOT BE WALKED AS A TREE, and the first version of this file
+ * walked it as a tree.
+ *
+ * A shape referenced from N places expands N times, and zapo's protobuf
+ * unions are deep DAGs: computing the forms for one build exhausted a 4 GB
+ * heap and aborted the compiler. That is the SAME defect walkfuse fixed in
+ * canDynCheckTo -- "a DAG stops being walked as a tree" -- and the same
+ * unbounded expansion the type-formatting fix bounded at 37.67 GB of string.
+ * Three independent instances on one program.
+ *
+ * THE MEMO IS NOT UNCONDITIONAL, and the reason is the one the dyncheck
+ * memo-scope fence exists for. `%back(k)` is PATH-DEPENDENT: it counts depth
+ * from the current position, so the same shape reached by two different
+ * paths inside a cycle gets two different forms. Caching that by id alone
+ * would hand one path's answer to another -- a wrong identity, silently.
+ *
+ * So only PATH-INDEPENDENT results are cached: a form containing no %back
+ * did not depend on where the walk entered, and is the same from anywhere.
+ * Forms inside a cycle are recomputed. That collapses the DAG for the
+ * overwhelming majority while staying sound for the part that cannot be.
+ *
+ * AND LONG FORMS ARE HASHED rather than kept. Identity is preserved -- the
+ * digest of a form is as unique as the form -- while memory is bounded, so a
+ * pathological type cannot cost more than a digest. The threshold is
+ * generous: it exists to stop a 4000-character protobuf union from being
+ * held thousands of times, not to compress ordinary shapes. */
+const MAX_FORM_CHARS = 4096;
+
+/** The DAG cache, OWNED BY THE CALLER and never module-level.
+ *
+ * It is keyed by shape/union id, and an id means nothing outside the
+ * registry that minted it. A module-level cache therefore serves one
+ * program's form for another program's id -- which is not a hypothetical:
+ * as a module-level Map it made one test's `r0` answer another's, with
+ * different registries, and the tests went red for exactly the right
+ * reason. In a compiler process that builds two programs it would have been
+ * the same bug with no test watching.
+ *
+ * So the lifetime is the caller's to state. Pass one per census; pass none
+ * and nothing is cached, which is correct and merely slower. */
+export type StructuralFormCache = Map<string, string>;
+export function newStructuralFormCache(): StructuralFormCache {
+  return new Map();
+}
+
+function bounded(form: string): string {
+  if (form.length <= MAX_FORM_CHARS) return form;
+  return "%digest:" + createHash("sha256").update(form).digest("hex");
+}
+
 /** The canonical id-free form of one type. */
 export function structuralForm(
   type: IrType,
   shapes: ShapeLookup,
   unions: UnionLookup,
   path: readonly string[] = [],
+  cache?: StructuralFormCache,
 ): string {
   switch (type.kind) {
     case "record":
-      return structuralFormOfShape(type.shapeId, shapes, unions, path);
+      return structuralFormOfShape(type.shapeId, shapes, unions, path, cache);
     case "union":
-      return structuralFormOfUnion(type.unionId, shapes, unions, path);
+      return structuralFormOfUnion(type.unionId, shapes, unions, path, cache);
     case "array":
-      return `array<${structuralForm(type.elem, shapes, unions, path)}>`;
+      return `array<${structuralForm(type.elem, shapes, unions, path, cache)}>`;
     case "map":
-      return `map<${structuralForm(type.key, shapes, unions, path)},${structuralForm(type.value, shapes, unions, path)}>`;
+      return `map<${structuralForm(type.key, shapes, unions, path, cache)},${structuralForm(type.value, shapes, unions, path, cache)}>`;
     case "set":
-      return `set<${structuralForm(type.elem, shapes, unions, path)}>`;
+      return `set<${structuralForm(type.elem, shapes, unions, path, cache)}>`;
     case "promise":
-      return `promise<${structuralForm(type.inner, shapes, unions, path)}>`;
+      return `promise<${structuralForm(type.inner, shapes, unions, path, cache)}>`;
     case "weakmap":
-      return `weakmap<${structuralForm(type.key, shapes, unions, path)},${structuralForm(type.value, shapes, unions, path)}>`;
+      return `weakmap<${structuralForm(type.key, shapes, unions, path, cache)},${structuralForm(type.value, shapes, unions, path, cache)}>`;
     case "generator":
     case "asyncGenerator":
-      return `${type.kind}<${structuralForm(type.yieldT, shapes, unions, path)},` +
-        `${structuralForm(type.retT, shapes, unions, path)},${structuralForm(type.nextT, shapes, unions, path)}>`;
+      return `${type.kind}<${structuralForm(type.yieldT, shapes, unions, path, cache)},` +
+        `${structuralForm(type.retT, shapes, unions, path, cache)},${structuralForm(type.nextT, shapes, unions, path, cache)}>`;
     case "func": {
-      const params = type.params.map((t) => structuralForm(t, shapes, unions, path)).join(",");
+      const params = type.params.map((t) => structuralForm(t, shapes, unions, path, cache)).join(",");
       const tail = J({ rest: type.rest, restAbi: type.restAbi });
-      return `func(${params})->${structuralForm(type.ret, shapes, unions, path)}${tail}`;
+      return `func(${params})->${structuralForm(type.ret, shapes, unions, path, cache)}${tail}`;
     }
     default:
       // Every other kind is a LEAF whose spelling carries no id: the
@@ -160,9 +212,12 @@ function structuralFormOfShape(
   shapes: ShapeLookup,
   unions: UnionLookup,
   path: readonly string[],
+  cache: StructuralFormCache | undefined,
 ): string {
   const at = path.indexOf(shapeId);
   if (at >= 0) return `%back(${path.length - at})`;
+  const memo = cache?.get(shapeId);
+  if (memo !== undefined) return memo;
   const shape = shapes.get(shapeId);
   // A shape the registry does not hold is a PLACEHOLDER the walk reached
   // before finalizeRecursive filled it. It is opaque by construction, and
@@ -172,19 +227,24 @@ function structuralFormOfShape(
   const next = [...path, shapeId];
   const parts: string[] = [];
   for (const f of shape.fields) {
-    parts.push(`${J(f.name)}:${structuralForm(f.type, shapes, unions, next)}`);
+    parts.push(`${J(f.name)}:${structuralForm(f.type, shapes, unions, next, cache)}`);
   }
   let out = `record{${parts.join(",")}}`;
   if (shape.tuple === true) out += "|tuple";
   if (shape.indexValue !== undefined) {
-    out += `|index<${structuralForm(shape.indexValue, shapes, unions, next)}>`;
+    out += `|index<${structuralForm(shape.indexValue, shapes, unions, next, cache)}>`;
   }
   if (shape.declaredOrder !== undefined) out += `|order${J(shape.declaredOrder)}`;
   if (shape.tostr === true) out += "|tostr";
   if (shape.builtin !== undefined) out += `|builtin${J(shape.builtin)}`;
   // ownmask / reqabsent / srcproto are NOT here, deliberately: see the
   // header and SHAPE_FIELD_ROLE.
-  return out;
+  const result = bounded(out);
+  // CACHE ONLY WHAT IS PATH-INDEPENDENT. A form carrying %back depended on
+  // where the walk entered; handing it to another path would be a wrong
+  // identity, silently -- the hazard the dyncheck memo-scope fence names.
+  if (cache !== undefined && !result.includes("%back(")) cache.set(shapeId, result);
+  return result;
 }
 
 function structuralFormOfUnion(
@@ -192,16 +252,21 @@ function structuralFormOfUnion(
   shapes: ShapeLookup,
   unions: UnionLookup,
   path: readonly string[],
+  cache: StructuralFormCache | undefined,
 ): string {
   const at = path.indexOf(unionId);
   if (at >= 0) return `%back(${path.length - at})`;
+  const memo = cache?.get(unionId);
+  if (memo !== undefined) return memo;
   const def = unions.get(unionId);
   if (def === undefined) return "%unresolved";
   const next = [...path, unionId];
-  const arms = def.arms.map((a) => structuralForm(a, shapes, unions, next));
+  const arms = def.arms.map((a) => structuralForm(a, shapes, unions, next, cache));
   let out = `union[${arms.join(",")}]`;
   if (def.armLits !== undefined) out += `|lits${J(def.armLits)}`;
-  return out;
+  const result = bounded(out);
+  if (cache !== undefined && !result.includes("%back(")) cache.set(unionId, result);
+  return result;
 }
 
 /** True when a structural form reached a placeholder the registry could not

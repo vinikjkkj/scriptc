@@ -19,8 +19,26 @@
  */
 import { readFileSync } from 'node:fs'
 
+/* THE ENTRY IS NAMED, NEVER INFERRED FROM COST.
+ *
+ * This file inferred it from the heaviest attributed bucket -- the defect
+ * already found and fixed in attrib-decide.mjs, and left unfixed HERE
+ * because the correction was filed under the tool it was found in rather
+ * than under the property it protects.
+ *
+ * It then failed the same way, twice over. walkfuse made the entry cheaper
+ * than a library; the type-formatting fix made it nearly free (3.2 s). So
+ * the heaviest file became spec/proto/index.js at 105.4 s, and C came out
+ * 136.3 s where it is 238.6 s -- wrong by 43%, in the direction that makes
+ * the cache look WORSE. Required argument now, and an unmatched pattern
+ * raises rather than defaulting. */
 const f = process.argv[2]
-if (!f) { console.error('usage: node collect-split.mjs <lower-profile.jsonl>'); process.exit(2) }
+const entryRe = process.argv[3]
+if (!f || !entryRe) {
+  console.error('usage: node collect-split.mjs <lower-profile.jsonl> <entryRegex>')
+  process.exit(2)
+}
+const entryPattern = new RegExp(entryRe)
 const recs = readFileSync(f, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l))
 const s = (x) => (x / 1000).toFixed(1) + 's'
 const pct = (a, b) => (100 * a / b).toFixed(1) + '%'
@@ -54,7 +72,13 @@ for (const o of recs) {
     byFile.set(m[2], cur)
   }
   const ranked = [...byFile].sort((a, b) => (b[1].d + b[1].e) - (a[1].d + a[1].e))
-  const [entryName, entryT] = ranked[0] ?? ['(none)', { d: 0, e: 0 }]
+  const named = [...byFile].filter(([f]) => entryPattern.test(f))
+  if (named.length === 0) {
+    throw new Error(`no attributed file matches ${entryPattern}. C is attributed-minus-entry, so an ` +
+      `unmatched entry would silently make C the whole attributed total.`)
+  }
+  const entryName = named.map(([f]) => f).join(' + ')
+  const entryT = named.reduce((a, [, t]) => ({ d: a.d + t.d, e: a.e + t.e }), { d: 0, e: 0 })
   const attributed = dAttr + eAttr
   const collection = dCol + eCol
   const total = disc + em

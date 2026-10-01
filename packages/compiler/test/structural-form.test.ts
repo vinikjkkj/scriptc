@@ -10,6 +10,7 @@ import { describe, expect, it } from "vitest";
 import {
   assertNoIdLeak,
   structuralForm,
+  newStructuralFormCache,
   structuralFormIsOpaque,
   structuralIdentityFields,
   type ShapeLookup,
@@ -96,6 +97,74 @@ describe("structural form", () => {
       { id: "r9", fields: [{ name: "next", type: rec("r9") }, { name: "v", type: F64 }] },
     ]);
     expect(structuralForm(rec("r9"), s2, u2)).toBe(form);
+  });
+
+  /* THE MEMO MUST NOT HAND ONE PATH'S ANSWER TO ANOTHER.
+   *
+   * Walking the DAG as a tree exhausted a 4 GB heap on zapo and aborted the
+   * compiler, so forms are memoised by id. But `%back(k)` is PATH-DEPENDENT:
+   * it counts depth from where the walk entered, so a shape inside a cycle
+   * has different forms down different paths. Caching that by id alone is
+   * the exact hazard the dyncheck memo-scope fence names -- an answer
+   * derived under one context served under another, silently.
+   *
+   * So only forms with no %back are cached. These assertions pin both
+   * halves: the acyclic one is stable across entry points (so the memo is
+   * doing its job), and the cyclic one is correct from each entry (so the
+   * memo is not poisoning it). */
+  it("memoises path-independent forms and recomputes path-dependent ones", () => {
+    // A -> B -> C, and D -> C. C is shared: the DAG case the memo exists for.
+    const [s, u] = lookups([
+      { id: "rC", fields: [{ name: "c", type: F64 }] },
+      { id: "rB", fields: [{ name: "b", type: rec("rC") }] },
+      { id: "rA", fields: [{ name: "a", type: rec("rB") }, { name: "a2", type: rec("rC") }] },
+      { id: "rD", fields: [{ name: "d", type: rec("rC") }] },
+    ]);
+    const cache = newStructuralFormCache();
+    const viaA = structuralForm(rec("rA"), s, u, [], cache);
+    const viaD = structuralForm(rec("rD"), s, u, [], cache);
+    const cAlone = structuralForm(rec("rC"), s, u, [], cache);
+    // C's form is the same wherever it is reached from, which is what makes
+    // caching it sound.
+    expect(viaA).toContain(cAlone);
+    expect(viaD).toContain(cAlone);
+
+    // CYCLE: X -> Y -> X. Entering at X and at Y must give DIFFERENT forms,
+    // and a memo that cached either would corrupt the other.
+    const [cs, cu] = lookups([
+      { id: "rX", fields: [{ name: "y", type: rec("rY") }] },
+      { id: "rY", fields: [{ name: "x", type: rec("rX") }] },
+    ]);
+    const cyc = newStructuralFormCache();
+    const fromX = structuralForm(rec("rX"), cs, cu, [], cyc);
+    const fromY = structuralForm(rec("rY"), cs, cu, [], cyc);
+    expect(fromX).not.toBe(fromY);
+    // ...and asking again, with the memo warm, must give the SAME answers:
+    // if a path-dependent form had been cached, one of these would flip.
+    expect(structuralForm(rec("rX"), cs, cu, [], cyc)).toBe(fromX);
+    expect(structuralForm(rec("rY"), cs, cu, [], cyc)).toBe(fromY);
+  });
+
+  /* A form past the budget is replaced by its digest. Identity survives --
+   * a digest is as unique as what it digests -- while a pathological type
+   * cannot cost more than a hash. */
+  it("digests a form past the budget, and keeps distinct types distinct", () => {
+    const wide = (n: number, t: IrType): IrRecordShape => ({
+      id: "r0",
+      fields: Array.from({ length: n }, (_, i) => ({ name: "f" + String(i).padStart(40, "x"), type: t })),
+    });
+    const [s1, u1] = lookups([wide(200, F64)]);
+    const [s2, u2] = lookups([wide(200, STRING)]);
+    const a = structuralForm(rec("r0"), s1, u1);
+    const b = structuralForm(rec("r0"), s2, u2);
+    expect(a.startsWith("%digest:")).toBe(true);
+    expect(b.startsWith("%digest:")).toBe(true);
+    expect(a).not.toBe(b);
+
+    // CONTROL: an ordinary shape is NOT digested, or the budget would be
+    // erasing the structure every comparison depends on.
+    const [s3, u3] = lookups([{ id: "r0", fields: [{ name: "a", type: F64 }] }]);
+    expect(structuralForm(rec("r0"), s3, u3).startsWith("%digest:")).toBe(false);
   });
 
   it("marks an unresolvable placeholder opaque instead of comparing it as equal", () => {

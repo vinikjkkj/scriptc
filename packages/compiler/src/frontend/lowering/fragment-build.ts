@@ -60,7 +60,7 @@
  * the other branch of whatever form the author chose.
  */
 
-import { assertNoIdLeak, structuralForm, type ShapeLookup, type UnionLookup } from "./structural-form.js";
+import { assertNoIdLeak, structuralForm, type ShapeLookup, type StructuralFormCache, type UnionLookup } from "./structural-form.js";
 import type { HelperReuse, SymbolicMint } from "./fragment.js";
 
 /** One entry of the mint log types.ts keeps, and the record the producer
@@ -104,6 +104,7 @@ export function partitionMints(
   log: readonly MintRecord[],
   shapes: ShapeLookup,
   unions: UnionLookup,
+  cache?: StructuralFormCache,
 ): MintPartition {
   const byModule = new Map<string, SymbolicMint[]>();
   const collection = new Set<string>();
@@ -114,7 +115,7 @@ export function partitionMints(
   for (const rec of log) {
     const kind = idKind(rec.id);
     const form = assertNoIdLeak(
-      structuralForm(idType(rec.id), shapes, unions),
+      structuralForm(idType(rec.id), shapes, unions, [], cache),
       `${kind} ${rec.id} minted in phase ${rec.phase}`,
     );
     if (rec.phase === "collect") {
@@ -186,6 +187,7 @@ export function deriveReadEntities(
   minted: ReadonlySet<string>,
   shapes: ShapeLookup,
   unions: UnionLookup,
+  cache?: StructuralFormCache,
 ): { localId: string; kind: "record" | "union"; structure: string }[] {
   const out: { localId: string; kind: "record" | "union"; structure: string }[] = [];
   for (const id of [...referenced].sort()) {
@@ -195,7 +197,7 @@ export function deriveReadEntities(
       localId: id,
       kind,
       structure: assertNoIdLeak(
-        structuralForm(idType(id), shapes, unions),
+        structuralForm(idType(id), shapes, unions, [], cache),
         `${kind} ${id} read by a module`,
       ),
     });

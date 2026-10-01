@@ -43,6 +43,7 @@ import {
   FRAGMENT_VERSION,
 } from "./fragment.js";
 import { deriveReadEntities, partitionMints, referencedIds } from "./fragment-build.js";
+import { newStructuralFormCache } from "./structural-form.js";
 import type { ShapeLookup, UnionLookup } from "./structural-form.js";
 
 /** What the census needs from a finished lowering. Passed in rather than
@@ -91,7 +92,17 @@ export interface CensusResult {
   unplacedFunctions: string[];
 }
 
-const TAG_RE = /^%g\.([^%]*)/;
+/* The file tag's REAL format, read from where it is minted rather than
+ * guessed: lowerer.ts assigns `%m<i>.` to every module in moduleOrder and
+ * the EMPTY STRING to the entry.
+ *
+ * The first version matched /^%g\.([^%]*)/ -- everything up to the first
+ * '%'. On `%g.%m12.exports` that captures "" and resolves to the ENTRY's
+ * tag, so every module global was attributed to the entry; on `%g.default`
+ * it captures "default" and resolves to nothing, so every ENTRY global was
+ * reported unplaced. Exactly backwards, and the only reason it surfaced is
+ * that 1,014 unplaced globals was too many to pass over. */
+const TAG_RE = /^%g\.(%m[0-9]+\.)?/;
 
 /** Which module a global belongs to, from its id, or null.
  *
@@ -105,12 +116,19 @@ export function moduleOfGlobal(
 ): string | null {
   const m = TAG_RE.exec(id);
   if (m === null) return null;
-  return moduleOfTag.get(m[1]!) ?? null;
+  // Group 1 is absent for an entry global, and the entry's tag IS the empty
+  // string -- so the two spellings have to be collapsed deliberately rather
+  // than by `?? null`, which would make an entry global look unattributable.
+  return moduleOfTag.get(m[1] ?? "") ?? null;
 }
 
 /** Run the refusal checks per module and build the census. */
 export function collectCensus(input: CensusInput): CensusResult {
-  const partition = partitionMints(mintLogSnapshot(), input.shapes, input.unions);
+  // ONE cache for this census and no longer. It is keyed by shape id, and
+  // an id means nothing outside the registry that minted it -- a cache that
+  // outlived the census would serve this program's forms to the next one.
+  const cache = newStructuralFormCache();
+  const partition = partitionMints(mintLogSnapshot(), input.shapes, input.unions, cache);
 
   const fnsByModule = new Map<string, IrFunction[]>();
   const unplacedFunctions: string[] = [];
@@ -163,7 +181,7 @@ export function collectCensus(input: CensusInput): CensusResult {
       mints,
       edges: [],
       witness: {
-        readEntities: deriveReadEntities(referenced, minted, input.shapes, input.unions),
+        readEntities: deriveReadEntities(referenced, minted, input.shapes, input.unions, cache),
         // Empty, deliberately: no refusal code reads these, so the census is
         // exact for the classes it counts. See the header.
         helpersReused: [],
