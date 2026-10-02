@@ -1975,6 +1975,7 @@ static unsigned long long scr_loop_turns = 0;
 static unsigned long long scr_pool_clamp_elig = 0;
 static unsigned long long scr_pool_clamp_applied = 0;
 static unsigned long long scr_pool_subcap = 0; /* decay pushed due BELOW the poll cap */
+static unsigned long long scr_pool_cap50 = 0;  /* turns taking the COARSE (50 ms) cap */
 /* THE HONEST ONE. `applied` counts the clamp modifying `due`, and it is
  * recorded BEFORE the socket and child caps below can lower `due` again -- so
  * with a live socket it reads large and means nothing, which is worse than
@@ -2014,6 +2015,7 @@ unsigned long long scr_pool_stat(int which) {
     case 4: return scr_pool_clamp_survived;
     case 5: return scr_fence_violations;
     case 6: return scr_stack_pool_decayed;
+    case 9: return scr_pool_cap50;
 #ifdef _WIN32
     case 7: return scr_stack_poisoned;
     case 8: return scr_stack_poison_unlocatable;
@@ -2330,6 +2332,8 @@ static void scr_fiber_pool_decay(double now) {
     fputs(scr_utoa((size_t)scr_pool_clamp_applied, nb), stderr);
     fputs(" subcap=", stderr);
     fputs(scr_utoa((size_t)scr_pool_subcap, nb), stderr);
+    fputs(" cap50=", stderr);
+    fputs(scr_utoa((size_t)scr_pool_cap50, nb), stderr);
     fputs(" clampSurvived=", stderr);
     fputs(scr_utoa((size_t)scr_pool_clamp_survived, nb), stderr);
     fputc('\n', stderr);
@@ -3248,6 +3252,41 @@ static void scr_resume_fiber(ScrFiber *f) {
  * the wake pipe and fd 0 directly. */
 #define SCR_SIGNAL_POLL_MS 50.0
 
+/* THE CAP THE SLEEP ARMS BELOW WILL ACTUALLY IMPOSE on this turn, given what
+ * is pending. 0 means nothing caps.
+ *
+ * ONE function with TWO callers, and that is the whole point. The floor that
+ * stops the decay shortening the poll, and the counter that detects it
+ * shortening the poll anyway, used to be two separate constants -- and they
+ * disagreed. The floor took SCR_CHILD_POLL_MS (1 ms) while two paths cap at
+ * SCR_SIGNAL_POLL_MS (50 ms), so the decay could shorten a 50 ms sleep to 1 ms
+ * and the counter, testing against that same wrong 1 ms, recorded nothing.
+ *
+ * A detector that shares its subject's mistake reads zero for exactly the
+ * reason the defect exists, and a zero like that is worse than no counter: it
+ * was read as a satisfied control. Both callers now move together, or neither
+ * does, whatever path is added next.
+ *
+ * Mirrors the arms below exactly:
+ *   io      : else-if, so kids wins; otherwise the coarse signal cap
+ *   non-io  : three caps applied in SEQUENCE, so the TIGHTEST wins
+ *   kids    : its own arm, child cap */
+static double scr_loop_poll_cap_ms(bool io, bool kids, bool net, bool dgram,
+                                   bool watch, bool evw) {
+  if (io) {
+    if (kids) return SCR_CHILD_POLL_MS;
+    if (evw || net || dgram || watch) return SCR_SIGNAL_POLL_MS;
+    return 0.0;
+  }
+  if (evw || net || dgram || watch) {
+    if (net || dgram || watch || kids) return SCR_CHILD_POLL_MS;
+    return SCR_SIGNAL_POLL_MS; /* evw alone */
+  }
+  if (kids) return SCR_CHILD_POLL_MS;
+  return 0.0;
+}
+
+
 /* The loop's idle sleep.
  *
  * On win32 this is NOT nanosleep, and the reason is measured. mingw-w64's
@@ -3698,7 +3737,27 @@ bool scr_loop_run(ScrPromise *top_level) {
        *
        * The decay does not need sub-millisecond precision. It needs to fire
        * within its window, not within a fraction of the poll granularity. */
-      double wake_floor = (io || net || dgram || watch || kids || evw) ? SCR_CHILD_POLL_MS : 0.0;
+      /* The cap the arms below WILL impose, computed once per turn and used
+       * by both the floor and the sub-cap counter. cap50 counts the turns
+       * that take the COARSE cap -- it exists to tell "the 50 ms path never
+       * happened" apart from "it happened and the floor covered it", which a
+       * subcap of zero cannot distinguish on its own. */
+      double poll_cap = scr_loop_poll_cap_ms(io, kids, net, dgram, watch, evw);
+      if (poll_cap == SCR_SIGNAL_POLL_MS) scr_pool_cap50++;
+      /* THE FLOOR IS THE CAP. It used to be SCR_CHILD_POLL_MS for every
+       * pending predicate, which is right for the socket and child arms and
+       * wrong for the two that cap at SCR_SIGNAL_POLL_MS: there the arm
+       * intends a 50 ms sleep and the floor only promised 1 ms, so the decay
+       * could still shorten the poll 50x -- the same shortening, at 1/50th
+       * the magnitude, that the clamp was disabled for.
+       *
+       * MEASURED on the dynamic probe, which is the build that can reach it
+       * (`io` is registered only by the island, scr_island.c:556, so a fully
+       * static program never takes that arm): with the old 1 ms floor the
+       * shipping default produced cap50=8 subcap=2 -- two turns shortened
+       * below the cap WITH the floor on, which the old counter reported as
+       * zero because it tested against the same wrong constant. */
+      double wake_floor = poll_cap;
       /* SCR_FIBER_POOL_DECAY_CLAMP=1 restores the UNFLOORED pre-fix wake, so
        * the arm that reintroduces the pairing hazard stays reachable for an
        * A/B on one binary. Default 0 is the floored wake. */
@@ -3717,7 +3776,14 @@ bool scr_loop_run(ScrPromise *top_level) {
          * arms will impose is an extra sub-cap turn, and extra drain passes
          * reorder a socket emit past a short timer. Must be 0 with the floor
          * on; the unfloored arm is what makes it non-zero. */
-        if (wake_floor > 0.0 && due < now + SCR_CHILD_POLL_MS) scr_pool_subcap++;
+        /* AGAINST THE REAL CAP for this turn's predicates, not a constant.
+         * The floor above still takes SCR_CHILD_POLL_MS, so on the two paths
+         * that cap at SCR_SIGNAL_POLL_MS this now counts what it previously
+         * could not see -- which is the point of fixing the detector before
+         * the defect rather than after. */
+        {
+          if (poll_cap > 0.0 && due < now + poll_cap) scr_pool_subcap++;
+        }
       }
     }
     /* Likewise the heap trim: a turn that sleeps past its window is a
