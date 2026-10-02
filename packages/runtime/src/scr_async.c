@@ -1654,6 +1654,28 @@ static ScrStack *scr_stack_acquire(void) {
 
 static void scr_stack_release(ScrStack *s) {
   if (s == NULL) return;
+  /* THE PRECONDITION ON scr_fiber_destroy, CHECKED RATHER THAN ASSERTED.
+   *
+   * That comment argues releasing a parked stack is legal because "a
+   * finished fiber has switched away and can never be current". That is a
+   * reachability claim owned by no code: true when written, and silently
+   * voidable by any later change that makes a live fiber reach here. This
+   * project has already combined two individually safe changes into a
+   * use-after-free with exactly such a fence staying quiet.
+   *
+   * WHAT A SILENT RUN PROVES, AND WHAT IT DOES NOT. This tests NOT CURRENT.
+   * Safe release requires NOT REFERENCED, which is strictly stronger: a
+   * pending callback, a timer, or a registered await resume can hold this
+   * ScrStack without being the running fiber. Do not read silence here as
+   * "the release is safe" -- read it as "the written claim still holds".
+   *
+   * Verified both ways when added: inverted, it fires once per release
+   * (200/200 on a 200-fiber probe); as written it is silent across a
+   * history sync with SCR_FIBER_POOL_DECAY_MS=1000 active, 130 decay
+   * windows and 4,313 stacks deleted. */
+  if (scr_current != NULL && scr_current->st == s) {
+    fputs("[fencefail] scr_stack_release on the CURRENT fiber stack\n", stderr);
+  }
   SCR_FST_RELEASE();
   if (scr_stack_pool_n < scr_stack_pool_max()) {
     s->next = scr_stack_pool;
