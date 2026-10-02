@@ -1918,6 +1918,7 @@ static unsigned long long scr_stack_pool_decayed = 0;
 static unsigned long long scr_loop_turns = 0;
 static unsigned long long scr_pool_clamp_elig = 0;
 static unsigned long long scr_pool_clamp_applied = 0;
+static unsigned long long scr_pool_subcap = 0; /* decay pushed due BELOW the poll cap */
 /* THE HONEST ONE. `applied` counts the clamp modifying `due`, and it is
  * recorded BEFORE the socket and child caps below can lower `due` again -- so
  * with a live socket it reads large and means nothing, which is worse than
@@ -2220,6 +2221,8 @@ static void scr_fiber_pool_decay(double now) {
 #endif
     fputs(" clampApplied=", stderr);
     fputs(scr_utoa((size_t)scr_pool_clamp_applied, nb), stderr);
+    fputs(" subcap=", stderr);
+    fputs(scr_utoa((size_t)scr_pool_subcap, nb), stderr);
     fputs(" clampSurvived=", stderr);
     fputs(scr_utoa((size_t)scr_pool_clamp_survived, nb), stderr);
     fputc('\n', stderr);
@@ -3535,6 +3538,9 @@ bool scr_loop_run(ScrPromise *top_level) {
      *   fallback.
      * - timers only: plain nanosleep to the deadline. */
     double now = scr_now_ms();
+    /* Hoisted above the decay-due block: the floor that block applies has to
+     * know every predicate that will later cap the sleep. */
+    bool evw = scr_events_watching_fn != NULL && scr_events_watching_fn();
     /* The loop has no runnable work at this point and is about to block:
      * the one place a fiber-stack trim can never race a switch. */
     scr_loop_turns++;
@@ -3549,15 +3555,44 @@ bool scr_loop_run(ScrPromise *top_level) {
     double pool_clamp_due = -1.0; /* the value the clamp set, if it fired */
     {
       double pool_due = scr_stack_pool_decay_due(now);
-      if (pool_due >= 0 && pool_due < due) {
-        /* Counted BEFORE the knob is consulted, so both arms record the
-         * same eligibility and only `applied` differs between them. */
+      /* THE DECAY WAKES THE LOOP, BUT NEVER SHORTENS THE POLL.
+       *
+       * The old clamp set `due = pool_due` outright, which near a window is
+       * BELOW the ~1 ms cap the I/O arms impose -- extra sub-millisecond
+       * turns, extra drain passes, and socket emits reordered against short
+       * timers. That reordering is what broke pairing (1e41c351e), so the
+       * clamp was defaulted off -- and with it off a process with no pending
+       * I/O has no natural wakeup to ride and sleeps through windows.
+       *
+       * Both properties at once: floor the decay deadline at the cap that
+       * WILL be applied below. With I/O pending the cap already wakes the
+       * loop far more often than a 5 s window needs, so the decay asks for
+       * nothing and cannot reorder anything. With no I/O pending there is no
+       * cap, the floor is zero, and the decay deadline governs -- which is
+       * the case the clamp existed for and the case its removal lost.
+       *
+       * The decay does not need sub-millisecond precision. It needs to fire
+       * within its window, not within a fraction of the poll granularity. */
+      double wake_floor = (io || net || dgram || watch || kids || evw) ? SCR_CHILD_POLL_MS : 0.0;
+      /* SCR_FIBER_POOL_DECAY_CLAMP=1 restores the UNFLOORED pre-fix wake, so
+       * the arm that reintroduces the pairing hazard stays reachable for an
+       * A/B on one binary. Default 0 is the floored wake. */
+      double pool_wake = scr_stack_pool_decay_clamp()
+                             ? pool_due
+                             : (pool_due > now + wake_floor ? pool_due : now + wake_floor);
+      if (pool_due >= 0 && pool_wake < due) {
+        /* `elig` records that the decay WANTED this turn shortened; `applied`
+         * that it got it. With the floor on and I/O pending the two diverge,
+         * which is the fix working rather than the decay being idle. */
         scr_pool_clamp_elig++;
-        if (scr_stack_pool_decay_clamp()) {
-          due = pool_due;
-          pool_clamp_due = pool_due;
-          scr_pool_clamp_applied++;
-        }
+        due = pool_wake;
+        pool_clamp_due = pool_wake;
+        scr_pool_clamp_applied++;
+        /* THE HAZARD, counted directly: a sleep shorter than the cap the I/O
+         * arms will impose is an extra sub-cap turn, and extra drain passes
+         * reorder a socket emit past a short timer. Must be 0 with the floor
+         * on; the unfloored arm is what makes it non-zero. */
+        if (wake_floor > 0.0 && due < now + SCR_CHILD_POLL_MS) scr_pool_subcap++;
       }
     }
     /* Likewise the heap trim: a turn that sleeps past its window is a
@@ -3575,7 +3610,6 @@ bool scr_loop_run(ScrPromise *top_level) {
     /* Pending immediates are always-ready work: no sleep — run due timers
      * (Node's timers phase precedes check), then the check phase below. */
     if (scr_pending_immediates > 0) due = now;
-    bool evw = scr_events_watching_fn != NULL && scr_events_watching_fn();
     if (io) {
       if (kids && due > now + SCR_CHILD_POLL_MS) due = now + SCR_CHILD_POLL_MS;
       /* Signals/stdin/net can't wake curl's fd wait (and its poll retries
