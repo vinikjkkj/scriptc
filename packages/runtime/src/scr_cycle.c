@@ -476,18 +476,42 @@ struct ScrCycChunk {
  * `used` is 1 so that nothing can ever mistake it for a chunk that has
  * emptied; nothing decrements it, because a block's chunk is computed from
  * the block and no block lives here. */
-static ScrCycChunk scr_cyc_ar_empty = {NULL, NULL, NULL, NULL,
-                                       NULL, NULL, 1u,   0u,
-                                       0u,   0u,
-                                       /* gone: no page of a non-chunk is
-                                        * returned, and nothing may read it
-                                        * as a pointer. */
-                                       0u
+/* DESIGNATED, and that is the point rather than a style preference. This was
+ * a positional list, and `vm` was inserted between `avail` and `gone` above.
+ * A positional initialiser does not move with the struct: the trailing `0u`
+ * slid onto `vm`, `gone` took the first `NULL` of the census pair, and
+ * `uint16_t gone = (void *)0` is what the compiler finally objected to.
+ *
+ * It objected in ONE configuration. With SCR_PAGECEN_ON absent there is no
+ * trailing pair, the list simply runs out early, and C zero-fills the rest --
+ * so the build is green, the corpus is green, and only the page-census arm
+ * ever sees it. A field inserted mid-struct behind a positional initialiser
+ * is silent everywhere but one path.
+ *
+ * Designators do not slide. The next field inserted here changes nothing
+ * below, and anything omitted is still zero-initialised by the same rule
+ * that hid the defect. */
+static ScrCycChunk scr_cyc_ar_empty = {
+    .next = NULL,
+    .prevp = NULL,
+    .raw = NULL,
+    .freelist = NULL,
+    .bump = NULL,
+    .lim = NULL,
+    .used = 1u, /* see the note above: never mistakable for an emptied chunk */
+    .stride = 0u,
+    .blk = 0u,
+    .avail = 0u,
+    /* not a slot in a reservation: these bytes were never taken from one, so
+     * nothing may decommit inside them. */
+    .vm = 0u,
+    /* gone: no page of a non-chunk is returned, and nothing may read it as a
+     * pointer. */
+    .gone = 0u,
 #ifdef SCR_PAGECEN_ON
-                                       /* never on the census's all-chunk
-                                        * list: it is not a chunk. */
-                                       ,
-                                       NULL, NULL
+    /* never on the census's all-chunk list: it is not a chunk. */
+    .all_next = NULL,
+    .all_prevp = NULL,
 #endif
 };
 
