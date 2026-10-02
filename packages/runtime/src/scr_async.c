@@ -121,9 +121,86 @@ void __sanitizer_finish_switch_fiber(void *fake_stack_save, const void **bottom_
  * change and it is not this one.
  *
  * Left alone under SCR_ASAN_FIBERS: that arm wants 8 MiB actually
- * committed so ASan can poison the whole stack. */
+ * committed so ASan can poison the whole stack.
+ *
+ * 2026-10-02: the default moved 16 KiB -> 4 KiB, and the "unmeasured" above is
+ * now measured. A VirtualQuery walk of peak private commit
+ * (docs/estado-vmwalk.md) found the kernel charges 28,672 B per fiber, not
+ * 16,384: the requested commit PLUS a 12,288 B PAGE_GUARD region that is a
+ * Windows constant, additive, and independent of what is requested. Dropping
+ * the request to 4 KiB takes the per-stack charge to 16,384 B and the peak of
+ * a 19,200-message history sync from 715.0 to 486.8 MiB, -31.9%.
+ *
+ * WHAT IT COSTS: a fiber that touches more than one page now takes a guard
+ * fault and grows. Resident pages per stack on that workload: 89.8% touch
+ * exactly one page, 9.8% two, 0.16% more than two. So about one fiber in ten
+ * takes one extra fault, and ~2,000 faults inside a 14-second decode is 0.14%
+ * even at a generous 10 us each -- below what wall or CPU can resolve here,
+ * and invisible in the page-fault counter (-1.1% against a baseline whose own
+ * runs differ by 2.2%).
+ *
+ * SCOPE: these fibers are shallow. A workload with deeper async bodies has a
+ * larger tail and could invert the trade; SCR_FIBER_COMMIT is read from the
+ * environment for exactly that case. */
 #ifndef SCR_FIBER_COMMIT
-#define SCR_FIBER_COMMIT (16 * 1024)
+#define SCR_FIBER_COMMIT (4 * 1024)
+#endif
+
+/* The RESERVE passed to CreateFiberEx. 0 means "the executable's own
+ * SizeOfStackReserve", which is what this file passed until 2026-10-02.
+ *
+ * IT IS A LATENT DEFECT BEFORE IT IS A SAVING, and that is the reason to
+ * change it. cc.ts pins -Wl,--stack,8388608 only inside the engineArchive
+ * block, so a statically lowered program pins nothing and inherits whatever
+ * lld defaults to -- 16 MiB today, and in that file's own words "nobody's
+ * contract". A future lld default would change every static program's fiber
+ * stacks in silence, with no commit in this repository, and the symptom would
+ * be a stack overflow traced to a toolchain bump. Naming the reserve here
+ * makes fibers immune to that whatever the PE says.
+ *
+ * 1 MiB IS DEPTH PARITY WITH NODE, and that is the reason for the value.
+ * Measured max synchronous recursion depth inside an async body:
+ *
+ *     node v22     9,520 frames     node v25   9,642 frames
+ *     scriptc      10,547 frames    at this reserve -- 1.10x node
+ *
+ * The inherited PE default (16 MiB) allowed 174,219 frames, 18x node. A program
+ * that works at 16 MiB and breaks at 1 MiB is a program that recurses past the
+ * point where node would already have thrown: it only worked BECAUSE of the
+ * divergence. The 16 MiB protected no correct program. The deepest fiber stack
+ * measured on the real history-sync workload was 86,016 B, 12.2x under this
+ * ceiling.
+ *
+ * Naming the value also closes a latent defect independent of the size: cc.ts
+ * pins a stack only inside the engineArchive block, so a statically lowered
+ * program inherited whatever lld defaulted to -- "nobody's contract" in that
+ * file's own words -- and a toolchain bump would have changed every fiber stack
+ * in silence.
+ *
+ * WHAT IS STILL DIVERGENT IS THE BEHAVIOUR AT THE CEILING, NOT ITS DEPTH:
+ *
+ *     node      throws a catchable RangeError; the process continues
+ *     scriptc   dies with 0xC00000FD STATUS_STACK_OVERFLOW, uncaught
+ *
+ * That holds at EVERY reserve -- 1 MiB, 16 MiB and 64 MiB alike -- because
+ * there is no stack-overflow handler in this runtime at all: no __try, no
+ * vectored handler, no SetUnhandledExceptionFilter. With the depth now at
+ * parity, this is the ONLY thing left between the fiber stacks and node's
+ * contract, and it is a handler's job, not a constant's.
+ *
+ * WHY IT IS NOW NAMEABLE. A walk of the address space at peak private commit
+ * (docs/estado-vmwalk.md) found one page-table page charged per live fiber --
+ * about 4 KiB each, 98 MiB at 24,246 fibers -- because a 4 KiB page-table page
+ * maps 2 MiB of address space and a 16 MiB reserve puts every stack alone in
+ * its own span. Measured, 2,000 fibers: a 16 MiB reserve costs 4,325 B/fiber,
+ * 1 MiB costs 2,181, 256 KiB costs 645, 64 KiB costs 262.
+ *
+ * It is a per-FIBER reserve and deliberately not the PE's. Lowering the PE's
+ * SizeOfStackReserve at link would shrink the MAIN thread's stack too, and that
+ * is a semantic change; this is not. The reserve still caps how deep one async
+ * body may recurse, so it is a knob with a real ceiling and not a free one. */
+#ifndef SCR_FIBER_RESERVE
+#define SCR_FIBER_RESERVE (1024 * 1024)
 #endif
 
 /* ── promises ─────────────────────────────────────────────────────────── */
@@ -1597,6 +1674,37 @@ static size_t scr_stack_pool_max(void) {
   return cached;
 }
 
+/* SCR_FIBER_COMMIT and SCR_FIBER_RESERVE as runtime knobs, same shape as
+ * scr_stack_pool_max above. Both are read once; both default to the compile
+ * time value, so an unset environment reproduces today exactly. */
+static size_t scr_stack_commit(void) {
+  static bool once = false;
+  static size_t cached = SCR_FIBER_COMMIT;
+  if (!once) {
+    const char *env = getenv("SCR_FIBER_COMMIT");
+    if (env != NULL) {
+      long v = strtol(env, NULL, 10);
+      if (v > 0) cached = (size_t)v;
+    }
+    once = true;
+  }
+  return cached;
+}
+
+static size_t scr_stack_reserve(void) {
+  static bool once = false;
+  static size_t cached = SCR_FIBER_RESERVE;
+  if (!once) {
+    const char *env = getenv("SCR_FIBER_RESERVE");
+    if (env != NULL) {
+      long v = strtol(env, NULL, 10);
+      if (v >= 0) cached = (size_t)v;
+    }
+    once = true;
+  }
+  return cached;
+}
+
 static void scr_stack_free(ScrStack *s) {
   SCR_FST_FREED_ONE();
 #ifdef _WIN32
@@ -1637,7 +1745,7 @@ static ScrStack *scr_stack_acquire(void) {
 #ifdef SCR_ASAN_FIBERS
       CreateFiber(SCR_FIBER_STACK, scr_trampoline, NULL);
 #else
-      CreateFiberEx(SCR_FIBER_COMMIT, 0, 0, scr_trampoline, NULL);
+      CreateFiberEx(scr_stack_commit(), scr_stack_reserve(), 0, scr_trampoline, NULL);
 #endif
   if (s->ctx == NULL) scr_oom();
 #else
