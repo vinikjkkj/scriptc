@@ -9449,9 +9449,8 @@ const DV_SETTERS: Record<string, { method: IrBytesIntrinsicMethod; le: boolean }
         // (the slot was never written, and READING it is the trap, so the
         // guard is what keeps `Object.assign(t, bag)` from throwing where
         // Node copies the one key the value has).
-        L.noteOwnKeyGuard(plan.fromId, ff.name, sRef, loc, (present) => {
-          body[at] = { kind: "if", cond: present, then: [write], else_: null, loc };
-        });
+        L.noteOwnKeyGuard(plan.fromId, ff.name, sRef, loc,
+          { kind: "guardStmt", slot: { holder: body, at }, inner: write, outer: null, loc });
       }
       // The source overflow by SLOT (recordOvfSlots): key and value come
       // out of one entry, so no key is looked back up. Object.assign(x, x)

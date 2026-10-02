@@ -70,6 +70,7 @@ import {
   type FrontendInputExclusions,
   type FrontendInputSnapshot,
 } from "./input-tracker.js";
+import type { LoweringFragment } from "./lowering/fragment.js";
 import type { ScrDiagnostic } from "../diagnostics/diagnostic.js";
 import type { NpmStaticStatus } from "../coverage/report.js";
 
@@ -589,11 +590,22 @@ export async function publishEarlyBuildCache(
 
 /* ── verify mode ─────────────────────────────────────────────────────────── */
 
-/** What a verification compares: the metadata a build produced, plus the
- * bytes of every artifact it emitted, keyed by the artifact's role name. */
+/** What a verification compares: the metadata a build produced, the bytes of
+ * every artifact it emitted keyed by the artifact's role name, and the
+ * per-module lowering fragments it stored.
+ *
+ * Fragments are compared FIELD BY FIELD rather than whole. A whole-record
+ * comparison is caught by any coarse check and proves nothing about
+ * granularity, while the thing this mode exists to catch is one stale field
+ * inside an otherwise-correct fragment -- a witness list that lost an entry,
+ * a mint whose ordinal moved. The planted-mutant test mutates every field
+ * individually, including every field of the witness, and requires each one
+ * to be named in the output. */
 export interface CacheVerificationSubject {
   meta: EarlyBuildMetadata;
   artifacts: Map<string, Uint8Array>;
+  /** Keyed by module. Absent on a subject from a build that stored none. */
+  fragments?: Map<string, LoweringFragment>;
 }
 
 /** Is verify mode on? SCRIPTC_CACHE_VERIFY is in CACHE_ONLY_ENV, so asking
@@ -636,5 +648,54 @@ export function cacheVerificationDivergences(
     if (a !== b) out.push(`meta.${field}: cached ${a} != built ${b}`);
   }
 
+  out.push(...fragmentDivergences(cached.fragments, fresh.fragments));
   return out;
+}
+
+/** The fragment half, PER FIELD and one level into the witness.
+ *
+ * Per field rather than per fragment because a whole-record comparison is
+ * caught by any coarse check and says nothing about granularity, while the
+ * failure worth catching is one stale field inside an otherwise-correct
+ * fragment. Into the witness because the witness is where a field gets
+ * ADDED: a new one that nothing compares is precisely the bug this mode
+ * exists to prevent, so the walk takes the union of both sides' own keys at
+ * both levels rather than a list somebody remembered to update. */
+function fragmentDivergences(
+  cached: ReadonlyMap<string, LoweringFragment> | undefined,
+  fresh: ReadonlyMap<string, LoweringFragment> | undefined,
+): string[] {
+  const out: string[] = [];
+  const a = cached ?? new Map<string, LoweringFragment>();
+  const b = fresh ?? new Map<string, LoweringFragment>();
+  for (const module of [...new Set([...a.keys(), ...b.keys()])].sort()) {
+    const x = a.get(module);
+    const y = b.get(module);
+    if (x === undefined) { out.push(`fragment ${module}: absent from the cached entry, produced by the build`); continue; }
+    if (y === undefined) { out.push(`fragment ${module}: present in the cached entry, not produced by the build`); continue; }
+    const xr = x as unknown as Record<string, unknown>;
+    const yr = y as unknown as Record<string, unknown>;
+    for (const field of [...new Set([...Object.keys(xr), ...Object.keys(yr)])].sort()) {
+      if (field === "witness") continue; // walked below, one field at a time
+      const l = JSON.stringify(xr[field]) ?? "undefined";
+      const r = JSON.stringify(yr[field]) ?? "undefined";
+      if (l !== r) out.push(`fragment ${module}.${field}: cached ${abbreviate(l)} != built ${abbreviate(r)}`);
+    }
+    const xw = (xr["witness"] ?? {}) as Record<string, unknown>;
+    const yw = (yr["witness"] ?? {}) as Record<string, unknown>;
+    for (const field of [...new Set([...Object.keys(xw), ...Object.keys(yw)])].sort()) {
+      const l = JSON.stringify(xw[field]) ?? "undefined";
+      const r = JSON.stringify(yw[field]) ?? "undefined";
+      if (l !== r) out.push(`fragment ${module}.witness.${field}: cached ${abbreviate(l)} != built ${abbreviate(r)}`);
+    }
+  }
+  return out;
+}
+
+/** A divergence line has to be readable in a log; a fragment field can be a
+ * whole function list. The FIELD NAME is the load-bearing part -- it is what
+ * the planted-mutant test asserts on -- so truncating the value is safe and
+ * truncating the name would not be. */
+function abbreviate(value: string): string {
+  return value.length <= 120 ? value : `${value.slice(0, 120)}... (${value.length} chars)`;
 }

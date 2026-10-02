@@ -15,6 +15,10 @@
 import { appendFileSync } from "node:fs";
 import { fenceLocationText } from "../../diagnostics/diagnostic.js";
 import { isRelativeSpecifier } from "../shared.js";
+import { applyEnumRefill, applyNullProto, applyOwnKey, applySlotFilled, flushPatchCensus } from "./ir-patch.js";
+import { flushMintOrder, mintPhaseControl, resetMintLog, setMintPhase } from "../types.js";
+import { flushFragmentCensus } from "./fragment-census.js";
+import type { EnumRefill, NullProtoPatch, OwnKeyPatch, SlotFilledPatch } from "./ir-patch.js";
 import * as ts from "../ts7/adapter.js";
 import type { ScrDiagnostic } from "../../diagnostics/diagnostic.js";
 import {
@@ -94,6 +98,7 @@ import { settleOrValueArms,
   mapType,
   overflowShapeKey,
   overflowShapeKeys,
+  overflowShapeKeysAsked,
   overflowShapeKeysDenied,
   isArrayIndexKey,
   ShapeRegistry,
@@ -587,6 +592,7 @@ export function lowerToIr(
   // (a compiler process compiles many).
   overflowShapeKeys.clear();
   overflowShapeKeysDenied.clear();
+  overflowShapeKeysAsked.clear();
   const targetPlatform = options.targetPlatform ?? process.platform;
   const bestEffort = options.bestEffort ?? false;
   const startupCrash = options.startupCrash ?? null;
@@ -672,6 +678,40 @@ export function lowerToIr(
   lowerProfileNote("%ovfDenied-after-discovery", __ovfDeniedAfterDiscovery.size);
   lowerProfileNote("%ovfDenied-new-in-emit", [...overflowShapeKeysDenied].filter((k) => !__ovfDeniedAfterDiscovery.has(k)).length);
   lowerProfileFlush();
+  // Which deferred IR rewrites this program actually PERFORMED. A byte
+  // identity run proves the data-described rewrites equal the closures
+  // they replaced only for the kinds some program fired; a kind that fires
+  // nowhere is untested by it and looks exactly as green (ir-patch.ts).
+  flushPatchCensus(entry.fileName);
+  // BEFORE flushMintOrder, which CLEARS the log. The census reads it.
+  //
+  // How much of C a per-module fragment actually delivers: C = 250.3 s is a
+  // ceiling over the work a fragment COULD reach, and every module that hits
+  // a refusal is not cacheable. Nothing has measured that fraction, so "the
+  // fragment works" and "the fragment delivers the 250 s" are still
+  // different claims (fragment-census.ts).
+  if (result.module !== null) {
+    flushFragmentCensus({
+      functions: result.module.functions,
+      // IrModule.globals is OPTIONAL. Defaulting to [] here is safe only
+      // because the census never asks how MANY globals a module has --
+      // it asks which module each one belongs to, and an absent list has
+      // no members to misplace. A consumer that counted them would need
+      // to distinguish absent from empty.
+      globals: result.module.globals ?? [],
+      shapes: emit.shapes,
+      unions: emit.unions,
+      // IrGlobal has no loc, so a global's module survives only in its id
+      // (`%g.<tag>...`). Inverting fileTag is what reads it back.
+      moduleOfTag: new Map([...emit.fileTag].map(([sf, tag]) => [tag, sf.fileName])),
+      // npmStatic is NOT passed: LowerOptions does not carry it, and
+      // threading a field through the lowering for an env-gated census is
+      // not worth it. The census says so in its own output rather than
+      // reporting zero build-level refusals it never evaluated.
+      program: entry.fileName,
+    });
+  }
+  flushMintOrder(entry.fileName);
   // The expando member partition must be exhaustive (lower-expando.ts):
   // every registered slot is either bound to its dyn-box accessor pair or
   // counted under a named skip. Checked here, so the corpus lane IS the
@@ -2570,6 +2610,15 @@ export class Lowerer {
   }
 
   run(): LowerResult {
+    // COLLECTION, tapped as one bucket. The per-file buckets below cover
+    // the bodies; collection covers everything before the first body, and
+    // it is where the type layer answers most of its queries. Separating
+    // the two is what says whether a per-module IR cache can reach the
+    // work at all: a body is a module's, a whole-program type resolution
+    // is nobody's.
+    const __colT = performance.now();
+    if (!this.remainder) resetMintLog();
+    setMintPhase("collect");
     const parts = this.splitFiles();
     this.collectProgram(parts);
     // Decorated classes analyze AFTER the whole collection pass: a
@@ -2578,10 +2627,12 @@ export class Lowerer {
     // (valueGlobalId) settled before any body lowers.
     for (const info of this.classes.values()) analyzeClassDecoration(this, info);
     this.prepareModuleInits(parts);
+    lowerProfileNote(this.remainder ? "%remainder-collect" : "%emit-collect", performance.now() - __colT);
 
     const functions: IrFunction[] = [];
     for (const fp of parts) {
       const __fpT = performance.now();
+      setMintPhase("body:" + fp.sf.fileName);
       for (const decl of fp.fnDecls) {
         // Overload signatures / ambient declarations are type-world (no
         // body to lower — and they share the implementation's symbol, so
@@ -2620,9 +2671,11 @@ export class Lowerer {
     if (!this.remainder) {
       for (const fp of parts) {
         const __ftT = performance.now();
+        setMintPhase("init:" + fp.sf.fileName);
         functions.push(this.lowerFileInit(fp.sf, fp.topStmts, this.initNameOf.get(fp.sf)!));
         lowerProfileNote("I:" + fp.sf.fileName, performance.now() - __ftT);
       }
+      setMintPhase("main");
       functions.push(this.buildMain());
     }
     // Class EXPRESSIONS collected while the inits lowered: their members
@@ -2637,6 +2690,11 @@ export class Lowerer {
     // its own entry; polymorphic recursion is cut off by
     // MAX_GENERIC_INSTANCES.
     {
+      // THE TAIL. Everything below drains queues that interleave across
+      // modules, so an id minted here belongs to no single module and a
+      // per-module fragment cannot replay its number (frontend/types.ts,
+      // noteMint).
+      setMintPhase("tail:queues");
       let ec = 0;
       let gc = 0;
       let gi = 0;
@@ -2684,6 +2742,8 @@ export class Lowerer {
     // Lambdas lifted while lowering any of the above (plus synthetic
     // array-HOF loop functions, which ride the same list), and the
     // implicit-any instances lowered eagerly at their first call sites.
+    setMintPhase("tail:lifted");
+    mintPhaseControl(this.shapes);
     functions.push(...this.liftedFns);
     functions.push(...this.implicitFns);
 
@@ -2694,6 +2754,8 @@ export class Lowerer {
     // ...and the order the shapes ENUMERATE in is re-picked first, where
     // the program's own constructions prove one: a refusal is the answer
     // only for a disagreement that survives that.
+    setMintPhase("tail:passes");
+    mintPhaseControl(this.shapes);
     this.reconcileKeyOrders(functions);
     // SHAPE UNIFICATION - width pairs the layout can afford to merge become
     // ONE shape, and the copy between them the identity (shape-unify.ts).
@@ -2878,7 +2940,11 @@ export class Lowerer {
     field: string;
     obj: IrExpr;
     loc: SrcLoc;
-    install: (present: IrExpr) => void;
+    /** WHERE the re-spelling goes, as DATA rather than as a closure: a
+     * serialized lowering fragment cannot carry a closure, and a guard
+     * that silently lost its patch is an own-key question answered with
+     * the wrong constant (ir-patch.ts). */
+    patch: OwnKeyPatch;
     /** The interned helper whose body this guard writes into, when it has
      * one. reconcileKeyOrders REBUILDS such a body, which moves every
      * statement in it — the guards a rebuild replaces are dropped by owner
@@ -2915,11 +2981,11 @@ export class Lowerer {
    * five members…})` compared EQUAL where Node throws. A silent PASS on
    * an assertion that must fail is the one trade this project does not
    * make. */
-  readonly nullProtoRenderings: { shapeId: string; revise: () => void }[] = [];
+  readonly nullProtoRenderings: { shapeId: string; patch: NullProtoPatch }[] = [];
 
   /** Register one such helper (see nullProtoRenderings). */
-  noteNullProtoRendering(shapeId: string, revise: () => void): void {
-    this.nullProtoRenderings.push({ shapeId, revise });
+  noteNullProtoRendering(shapeId: string, patch: NullProtoPatch): void {
+    this.nullProtoRenderings.push({ shapeId, patch });
   }
 
   /** Every `in` over a REQUIRED field that answered the static `true`,
@@ -2933,11 +2999,11 @@ export class Lowerer {
    * the site registers here and armOwnMasks installs `recordSlotFilled`
    * only for the shapes a completion actually targeted. Every other
    * program keeps the literal `true` it had: same IR, same bytes. */
-  readonly slotFilledGuards: { shapeId: string; field: string; install: () => void }[] = [];
+  readonly slotFilledGuards: { shapeId: string; field: string; patch: SlotFilledPatch }[] = [];
 
   /** Register one `in` guard (see slotFilledGuards). */
-  noteSlotFilledGuard(shapeId: string, field: string, install: () => void): void {
-    this.slotFilledGuards.push({ shapeId, field, install });
+  noteSlotFilledGuard(shapeId: string, field: string, patch: SlotFilledPatch): void {
+    this.slotFilledGuards.push({ shapeId, field, patch });
   }
 
   /** Sites that copy EVERY declared field of a record into a fresh literal
@@ -2972,10 +3038,10 @@ export class Lowerer {
     field: string,
     obj: IrExpr,
     loc: SrcLoc,
-    install: (present: IrExpr) => void,
+    patch: OwnKeyPatch,
     owner?: string,
   ): void {
-    this.ownKeyGuards.push({ shapeId, field, obj, loc, install, ...(owner ? { owner } : {}) });
+    this.ownKeyGuards.push({ shapeId, field, obj, loc, patch, ...(owner ? { owner } : {}) });
   }
 
   /** Forget the guards one interned helper registered, before it registers
@@ -3004,12 +3070,12 @@ export class Lowerer {
    * Object.keys and JSON.stringify disagree, which is a new defect, not a
    * partial fix. Either every consumer of a shape's order moves with it or
    * the shape does not move. */
-  readonly enumOrderBakes = new Map<string, { rebuilds: (() => void)[]; blocked: boolean }>();
-  noteEnumOrderBake(shapeId: string, rebuild: (() => void) | null): void {
+  readonly enumOrderBakes = new Map<string, { refills: EnumRefill[]; blocked: boolean }>();
+  noteEnumOrderBake(shapeId: string, refill: EnumRefill | null): void {
     let e = this.enumOrderBakes.get(shapeId);
-    if (!e) this.enumOrderBakes.set(shapeId, (e = { rebuilds: [], blocked: false }));
-    if (rebuild === null) e.blocked = true;
-    else e.rebuilds.push(rebuild);
+    if (!e) this.enumOrderBakes.set(shapeId, (e = { refills: [], blocked: false }));
+    if (refill === null) e.blocked = true;
+    else e.refills.push(refill);
   }
 
   /** Arm the hidden OWN-KEY MASK (IrRecordShape.ownmask) on every record
@@ -3140,7 +3206,7 @@ export class Lowerer {
     // really did carry every declared field.
     for (const g of this.slotFilledGuards) {
       if (!this.requiredAbsentTargets.has(g.shapeId)) continue;
-      g.install();
+      applySlotFilled(g.patch, g.shapeId, g.field);
     }
     // ...and the whole-shape LITERAL copies, which have no such spelling
     // and are refused instead (completedSpreadSites).
@@ -3175,14 +3241,14 @@ export class Lowerer {
     // own-key set on one a crossing did.
     // ...and the inspect prefixes that cannot be a per-SHAPE constant in a
     // module that crosses into their own shape (see nullProtoRenderings).
-    for (const n of this.nullProtoRenderings) if (armed.has(n.shapeId)) n.revise();
+    for (const n of this.nullProtoRenderings) if (armed.has(n.shapeId)) applyNullProto(n.patch, n.shapeId);
     for (const g of this.ownKeyGuards) {
       if (!armed.has(g.shapeId)) continue;
       // An INTERNAL SLOT is not a key, so its guard keeps the tag test —
       // ownMaskKeyBit's rule, asked here in the frontend's spelling.
       const gShape = byId.get(g.shapeId);
       if (gShape && internalSlotFields(gShape).includes(g.field)) continue;
-      g.install({
+      applyOwnKey(g.patch, {
         kind: "recordKeyPresent",
         obj: g.obj,
         shapeId: g.shapeId,
@@ -3292,6 +3358,8 @@ export class Lowerer {
    * body; both fire edges through the same hooks and are not units
    * themselves. */
   discover(extraRoots?: readonly string[]): Set<string> {
+    setMintPhase("discovery");
+    const __colT = performance.now();
     const parts = this.splitFiles();
     this.collectProgram(parts);
     // Decorated classes analyze post-collection here too: the %init seeds
@@ -3299,6 +3367,7 @@ export class Lowerer {
     // thunks) the emit pass must see.
     for (const info of this.classes.values()) analyzeClassDecoration(this, info);
     this.prepareModuleInits(parts);
+    lowerProfileNote("%discovery-collect", performance.now() - __colT);
 
     // Every lowerable body, by emitted-function name. The names double as
     // the reachable-set keys the emit pass gates on — deterministic across
@@ -3457,7 +3526,18 @@ export class Lowerer {
       } catch (e) {
         if (!(e instanceof PoisonError)) throw e;
       }
+      // THE GENERIC-INSTANCE DRAIN, which the Q: tap above does not cover:
+      // its bucket closes before this line. The emit pass taps its own
+      // drain per instance (G:), so leaving this one untapped made the two
+      // passes look structurally different when only the instruments were
+      // — 373.9 s of a 443.9 s discovery pass fell outside every bucket on
+      // zapo-rest/app182, and that gap is the whole question of whether a
+      // per-module cache can reach the work. One bucket, not per-file:
+      // drainInstances() lowers whatever the queue holds and does not
+      // report whose body each instance came from.
+      const __drT = performance.now();
       drainInstances();
+      lowerProfileNote("%discovery-drain", performance.now() - __drT);
     }
     return reachable;
   }
@@ -4579,7 +4659,7 @@ export class Lowerer {
     // The baked consumers rebuild NOW — before moduleArtifacts collects the
     // shapes a body names and before armOwnMasks installs into it.
     for (const shapeId of rewritten) {
-      for (const rebuild of this.enumOrderBakes.get(shapeId)?.rebuilds ?? []) rebuild();
+      for (const refill of this.enumOrderBakes.get(shapeId)?.refills ?? []) applyEnumRefill(this, refill, "rebuild");
     }
     this.keyOrderReconciled = true;
     // Every cached answer was computed against the OLD order. The loc-keyed

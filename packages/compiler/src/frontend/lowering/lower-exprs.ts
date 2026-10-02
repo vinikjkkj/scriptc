@@ -11660,24 +11660,14 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
             const tUnion = targetType;
             if (tUndef >= 0) {
               const mine = value;
-              L.noteOwnKeyGuard(srcType.shapeId, f.name, obj, locOf(prop), (present) => {
-                const entry = fields[slot];
-                if (!entry || entry.name !== f.name || entry.value !== mine) return;
-                entry.value = {
-                  kind: "ternary",
-                  cond: present,
-                  then: mine,
-                  else_: {
-                    kind: "unionWrap",
-                    unionId: tUnion.unionId,
-                    tag: tUndef,
-                    value: { kind: "unitLit", unit: "undefined", type: UNDEFINED_T, loc: locOf(prop) },
-                    type: tUnion,
-                    loc: locOf(prop),
-                  },
-                  type: tUnion,
-                  loc: locOf(prop),
-                };
+              L.noteOwnKeyGuard(srcType.shapeId, f.name, obj, locOf(prop), {
+                kind: "literalField",
+                fields,
+                slot,
+                field: f.name,
+                expect: mine,
+                undefArm: { tag: tUndef, unionType: tUnion },
+                loc: locOf(prop),
               });
             }
           }
@@ -19119,13 +19109,10 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
       if (recv.kind === "varRef" || recv.kind === "recordGet" || recv.kind === "fieldGet" || pureRecvNode) {
         const node: IrExpr = { kind: "boolLit", value: true, type: BOOL, loc };
         const shapeId = recv.type.shapeId;
-        L.noteSlotFilledGuard(shapeId, key, () => {
-          const n = node as unknown as Record<string, unknown>;
-          delete n["value"];
-          n["kind"] = "recordSlotFilled";
-          n["obj"] = recv;
-          n["shapeId"] = shapeId;
-          n["field"] = key;
+        L.noteSlotFilledGuard(shapeId, key, {
+          kind: "boolToSlotFilled",
+          slot: { node: node as unknown as Record<string, unknown> },
+          obj: recv,
         });
         return node;
       }
