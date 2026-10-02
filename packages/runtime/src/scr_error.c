@@ -495,3 +495,23 @@ void scr_throw_error_named(ScrStr *name, ScrStr *message) {
   scr_throw_obj(e, &scr_error_retain_v, &scr_error_release_v,
                  scr_error_traced ? &scr_error_trace : NULL);
 }
+
+/* The stack-depth guard's cold arm (SCR_STACK_CHECK, scr_runtime.h). The
+ * emitted prologue branches here when the frame has come within
+ * SCR_STACK_MARGIN of the running stack's reservation floor.
+ *
+ * Node's message verbatim, thrown as a catchable RangeError down the ordinary
+ * scr_throw_error_msg path every one of this runtime's other throws uses -- so
+ * a typed catch sees it, `e.name` reads "RangeError" out of the kind table
+ * above at no cost, and the exception cell is already per-fiber, which is why
+ * there is no unwinding machinery here to build.
+ *
+ * Marked noinline so the caller keeps a load, a compare and a never-taken
+ * forward branch, with the throw entirely out of line. */
+#if defined(__GNUC__) || defined(__clang__)
+__attribute__((noinline))
+#endif
+void scr_stack_exhausted(void) {
+  scr_throw_error_msg(SCR_ERR_RANGE, "Maximum call stack size exceeded",
+                      sizeof("Maximum call stack size exceeded") - 1);
+}

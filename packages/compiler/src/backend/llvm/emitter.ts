@@ -77,7 +77,7 @@ import type {
 import { ABSENT_KEY_TRAP_CODE, OWNMASK_COMPLETED, OWNMASK_VALID, UNION_ARM_JS_OBJECT_KINDS, irFunctionJsName, settleOrValuePromiseTag, canBoxClassIntoDyn, CLASS_PROPS_FIELD, canMarshalFuncIntoIsland, CAUGHT, DYN, dynCopyIsObservable, F64, islandCallbackRet, islandPromisePayloadTag, isRefCounted, nullProtoRule, OWNMASK_SRC_NULL_PROTO, ownMaskKeyBit, isUnitType, MAY_THROW_LIB_FNS, moduleEmbedsBuiltin, moduleEmbedsNetIsland, moduleUsesAbortSignal, moduleUsesChildStream, moduleUsesDgram, moduleUsesFetch, moduleUsesFetchStatic, moduleUsesFetchDispatch, moduleUsesFsWatch, moduleUsesHttp2, moduleUsesHttpServer, moduleUsesNet, moduleUsesProcessEvents, moduleUsesRegex, moduleUsesStream, moduleUsesWsGlobal, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, STRING, typeEquals, typeKey, VOID } from "../../ir/nodes.js";
 import { dynClassDisplayName } from "../dyn-members.js";
 import { computeMayThrow } from "../emission/may-throw.js";
-import { seqScopedLocals } from "../emission/emit-stmts.js";
+import { seqScopedLocals, stackCheckPolicy, stackMarginBytes } from "../emission/emit-stmts.js";
 import { mangleAgenSettleThunk, mangleArgPack, mangleAsyncSpawn, mangleClassNew, mangleClassObj, mangleClassRetain, mangleClassStruct, mangleFnClosure, mangleFunction, mangleGenDrop, mangleGenResThunk, mangleGenSpawn, mangleGlobal, mangleLocal, mangleRecordNew, mangleRecordStruct, mangleResolveThunk, mangleTrampoline, mangleVtStruct, mangleWrapper } from "../mangle.js";
 import { BlockBuilder } from "./blocks.js";
 import { isStableReceiverOperand, writesLocal } from "../../ir/analysis.js";
@@ -4205,6 +4205,50 @@ class LlEmitter {
       if (isRefCounted(p.type)) fnScope.push({ slot, type: p.type });
     }
     this.scopes.push(fnScope);
+    // The stack-depth guard. SAME policy function and SAME invariant as the C
+    // backend, over the SAME computeMayThrow set (this file imports the very
+    // analysis emit-stmts.ts uses), so the two lanes cannot cover different
+    // functions: a program whose RangeError is catchable under one backend and
+    // fatal under the other would be a divergence BETWEEN lanes, which is a
+    // worse class of defect than the crash being fixed.
+    //
+    // Emitted here, after the function scope owns its refcounted params, so
+    // the bail-out unwind releases them.
+    if (stackCheckPolicy(this.mayThrow, fn)) {
+      if (!this.mayThrow.has(fn.name)) {
+        throw new Error(
+          `llvm emitter bug: stack-depth prologue requested for '${fn.name}', which is NOT in the ` +
+            `may-throw set. Its call sites carry no pending-exception check, so the RangeError ` +
+            `would be swallowed and its error return read as a real value.`,
+        );
+      }
+      const flr = B.tmp();
+      const sp0 = B.tmp();
+      const spi = B.tmp();
+      const lim = B.tmp();
+      const low = B.tmp();
+      // addrspace(256) IS the GS segment on x86-64, so this lowers to the same
+      // `movq %gs:0x1478, reg` the C lane's inline asm emits -- no inline asm
+      // in a backend that has none anywhere else. 0x1478 is the TEB's
+      // DeallocationStack: the reservation floor, constant for the life of the
+      // stack and swapped by Win32 on every fiber switch. NOT StackLimit
+      // (GS:0x10), which the OS moves down WITH the stack and which therefore
+      // never compares low.
+      B.line(`${flr} = load i64, ptr addrspace(256) inttoptr (i64 5240 to ptr addrspace(256)) ; TEB DeallocationStack`);
+      this.declare(`declare ptr @llvm.stacksave.p0()`);
+      B.line(`${sp0} = call ptr @llvm.stacksave.p0()`);
+      B.line(`${spi} = ptrtoint ptr ${sp0} to i64`);
+      B.line(`${lim} = sub i64 ${spi}, ${stackMarginBytes()} ; SCR_STACK_MARGIN, read from scr_runtime.h`);
+      B.line(`${low} = icmp ult i64 ${lim}, ${flr}`);
+      const llo = B.newLabel("stk.lo");
+      const lok = B.newLabel("stk.ok");
+      B.condBr(low, llo, lok);
+      B.startBlock(llo);
+      this.declare(`declare void @scr_stack_exhausted()`);
+      B.line(`call void @scr_stack_exhausted()`);
+      this.emitUnwind();
+      B.startBlock(lok);
+    }
     this.emitStmts(fn.body);
     // Implicit exit of a void function: release the function scope unless
     // the body already terminated its final block (return, or a throw
