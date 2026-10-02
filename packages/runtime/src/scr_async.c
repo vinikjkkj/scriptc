@@ -635,6 +635,53 @@ typedef struct ScrStack {
  * plausible bytes.
  *
  * SCR_FIBER_POOL_POISON=1 arms it. Default 0. */
+
+/* COMPILE-TIME GATE FOR THIS TU'S DIAGNOSTIC REPORTS, and the number below is
+ * why it exists rather than a preference.
+ *
+ * MEASURED, this branch against its merge base, by reading the PE section
+ * table of the static hello-world rather than trusting the test's complaint:
+ *
+ *     main   681,472      branch   714,752      +33,280
+ *     .text  +28,160   .rdata +4,608   .pdata +512   = +33,280 exactly
+ *
+ * It is not the added code. This TU's diagnostics are deliberately fputs plus
+ * a hand-rolled decimal (see scr_utoa) precisely so the always-linked runtime
+ * pulls in no printf -- and main honours that: its only fprintf pair lives
+ * behind `#ifdef SCR_LOOP_WHY`, off by default, so a default binary links no
+ * formatting machinery at all. The two fprintf calls this branch added to
+ * scr_fiber_pool_teardown were guarded only by a runtime getenv, so they are
+ * ALWAYS LINKED, and they drag the whole formatting path in with them. The
+ * note at the per-window stat line already prices one %zu at this same
+ * 33,280 bytes; these two were the ones still doing it.
+ *
+ * So the counters READ in every build and their REPORTS do not ship, which is
+ * the arrangement SCR_CYC_PAGERETURN_STAT already uses in scr_cycle.c for the
+ * same reason, in that file's words: a shipping binary should not carry a
+ * diagnosis "for a line nobody will ever ask it to print". Build with
+ * -DSCR_ASYNC_STAT=1 and every env knob below behaves as before.
+ *
+ * WHAT DOES NOT GO BEHIND THIS GATE, deliberately:
+ *   - every counter increment: a comparison and an add, no string
+ *   - scr_pool_stat(), so the counters keep a reader with external linkage
+ *     in a default build. Without one they would be write-only statics that
+ *     a compiler may legally delete, and the symptom would be a counter
+ *     reading zero in a shipping binary -- the same silent-zero class this
+ *     file has already been bitten by.
+ *   - scr_stack_pool_decay_clamp(), the arm that restores the pre-fix
+ *     unfloored wake. It is the reachable danger arm and it is worth more in
+ *     a year than it costs now. It reads its own env and depends on no
+ *     counter, so the gate cannot reach it.
+ *   - the fence in scr_stack_release: the CHECK and its counter stay in every
+ *     build; only the message goes behind the gate. See that site. */
+#ifndef SCR_ASYNC_STAT
+#define SCR_ASYNC_STAT 0
+#endif
+
+/* Fence violations: see scr_stack_release. Counted in EVERY build so the
+ * check there has an observable effect and cannot be optimised away. */
+static unsigned long long scr_fence_violations = 0;
+
 #ifdef _WIN32
 static unsigned long long scr_stack_poisoned = 0;
 static unsigned long long scr_stack_poison_unlocatable = 0;
@@ -690,6 +737,14 @@ static void scr_stack_note_region(ScrStack *s) {
  * so, because it means the range is still readable and a clean production run
  * would have meant nothing. */
 static void scr_stack_poison_selftest(ScrStack *s) {
+#if !SCR_ASYNC_STAT
+  /* The selftest is a diagnostic in both halves: it deliberately FAULTS to
+   * prove the poisoning is real, and its two messages are the whole output.
+   * A default build carries neither. The arm it validates
+   * (SCR_FIBER_POOL_POISON) is itself off by default, so nothing a shipping
+   * binary does is left unchecked by gating this. */
+  (void)s;
+#else
   static bool done = false;
   const char *e;
   if (done) return;
@@ -708,6 +763,7 @@ static void scr_stack_poison_selftest(ScrStack *s) {
         " is still accessible and POISONING IS INERT. A clean run with this"
         " arm proves nothing.\n", stderr);
   fflush(stderr);
+#endif /* SCR_ASYNC_STAT */
 }
 #endif
 
@@ -1933,6 +1989,42 @@ static unsigned long long scr_pool_subcap = 0; /* decay pushed due BELOW the pol
  * and was overridden. */
 static unsigned long long scr_pool_clamp_survived = 0;
 
+/* THE COUNTERS' READER, AND IT SHIPS IN EVERY BUILD. Ten loads, no string,
+ * no formatting -- the same bargain scr_cyc_pr_stat() strikes in scr_cycle.c,
+ * in that file's words "how a harness reads the counters without parsing
+ * text".
+ *
+ * IT IS NOT A CONVENIENCE. Every counter above is `static`, and once their
+ * reports went behind SCR_ASYNC_STAT their only reader went with them: a
+ * static that is incremented and never read is dead code a compiler may
+ * legally delete, and the symptom would be a counter reading zero in a
+ * shipping binary while the source still shows it being incremented. That is
+ * the silent-zero shape this tree has been bitten by repeatedly, and it is
+ * exactly what gating the reports would otherwise have created. External
+ * linkage is deliberate: a reader the optimiser cannot prove nobody calls.
+ *
+ * Indices are positional and append-only; nothing persists them, but the
+ * fence at 5 is cited by name in scr_stack_release. */
+unsigned long long scr_pool_stat(int which) {
+  switch (which) {
+    case 0: return scr_loop_turns;
+    case 1: return scr_pool_clamp_elig;
+    case 2: return scr_pool_clamp_applied;
+    case 3: return scr_pool_subcap;
+    case 4: return scr_pool_clamp_survived;
+    case 5: return scr_fence_violations;
+    case 6: return scr_stack_pool_decayed;
+#ifdef _WIN32
+    case 7: return scr_stack_poisoned;
+    case 8: return scr_stack_poison_unlocatable;
+#else
+    case 7:
+    case 8: return 0;
+#endif
+    default: return 0;
+  }
+}
+
 static bool scr_stack_pool_decay_clamp(void) {
   static bool once = false;
   static bool cached = SCR_FIBER_POOL_DECAY_CLAMP != 0;
@@ -2086,7 +2178,16 @@ static void scr_stack_release(ScrStack *s) {
    * history sync with SCR_FIBER_POOL_DECAY_MS=1000 active, 130 decay
    * windows and 4,313 stacks deleted. */
   if (scr_current != NULL && scr_current->st == s) {
+    /* THE CHECK AND THE COUNT STAY IN EVERY BUILD; only the message is
+     * gated. A check whose only effect is a message that does not ship is a
+     * check the optimiser is free to delete -- and the source would still
+     * LOOK like it guarded something, which is worse than removing the fence
+     * on purpose. The increment is the observable effect that keeps it, and
+     * scr_pool_stat(5) is how a harness reads it without parsing text. */
+    scr_fence_violations++;
+#if SCR_ASYNC_STAT
     fputs("[fencefail] scr_stack_release on the CURRENT fiber stack\n", stderr);
+#endif
   }
   SCR_FST_RELEASE();
   if (scr_stack_pool_n < scr_stack_pool_max()) {
@@ -2099,15 +2200,20 @@ static void scr_stack_release(ScrStack *s) {
   scr_stack_free(s);
 }
 
+/* Gated with its only caller: the window line it arms is the sole call site,
+ * so a default build would carry an unused static and -Wunused-function. */
+#if SCR_ASYNC_STAT
 static bool scr_stack_pool_stat(void) {
   static bool once = false;
   static bool cached = false;
   if (!once) { cached = getenv("SCR_FIBER_POOL_STAT") != NULL; once = true; }
   return cached;
 }
+#endif /* SCR_ASYNC_STAT */
 
 /* Unsigned to decimal into a caller buffer of at least 24 bytes. Exists so
- * the stat line below needs no printf; see the note at its call site. */
+ * the stat line below needs no printf; see the note at its call site.
+ * NOT gated: scr_heap_trim_line still calls it in every build. */
 static const char *scr_utoa(size_t v, char *buf) {
   char *p = buf + 23;
   *p = ' ';
@@ -2191,6 +2297,7 @@ static void scr_fiber_pool_decay(double now) {
    * negative control — SCR_FIBER_POOL_DECAY_MS=0, which must print no
    * lines at all — is distinguishable from a live decay that has already
    * drained the pool, which prints `freed=0 idle=0`. */
+#if SCR_ASYNC_STAT
   if (scr_stack_pool_stat()) {
     /* fputs and a hand-rolled decimal, NOT fprintf. This TU's diagnostics
      * are all fputs/fwrite, so a single %zu here was the only printf in
@@ -2227,6 +2334,13 @@ static void scr_fiber_pool_decay(double now) {
     fputs(scr_utoa((size_t)scr_pool_clamp_survived, nb), stderr);
     fputc('\n', stderr);
   }
+#else
+  /* `freed` is counted above and only ever READ by the gated line, so a
+   * default build must say so or -Wunused-but-set-variable fires. The count
+   * itself stays: scr_stack_pool_decayed carries the same total and IS
+   * readable through scr_pool_stat() in every build. */
+  (void)freed;
+#endif /* SCR_ASYNC_STAT */
   scr_stack_pool_lo = scr_stack_pool_n;
 }
 
@@ -2246,7 +2360,17 @@ static void scr_fiber_pool_teardown(void) {
   /* SCR_LOOP_WAKE_STAT=1 prints the clamp accounting at loop teardown.
    * ALWAYS prints when armed, all-zero lines included: a clamp that never
    * fired and an instrument that never ran produce the same silence, and
-   * this file has already made that exact mistake once. */
+   * this file has already made that exact mistake once.
+   *
+   * THESE TWO fprintf CALLS WERE THE +33,280 BYTES. Guarded only by the
+   * getenv below, they were always linked, and they were the sole reason a
+   * default binary pulled in printf formatting at all -- main's only other
+   * fprintf pair sits behind `#ifdef SCR_LOOP_WHY` and never ships. Measured
+   * by PE section, not inferred: .text +28,160, .rdata +4,608, .pdata +512.
+   * They stay written with fprintf rather than being hand-rolled, because
+   * behind a compile-time gate the formatting cost is paid only by a build
+   * that asked for it, and %llu over six values is far clearer there. */
+#if SCR_ASYNC_STAT
   if (getenv("SCR_LOOP_WAKE_STAT") != NULL) {
     fprintf(stderr,
             "[loopwake] turns=%llu clampEligible=%llu clampApplied=%llu"
@@ -2270,6 +2394,7 @@ static void scr_fiber_pool_teardown(void) {
             " all. Not evidence either way.\n", stderr);
     }
   }
+#endif /* SCR_ASYNC_STAT */
 }
 
 /* -- returning free heap pages to the OS at the idle seam -------------

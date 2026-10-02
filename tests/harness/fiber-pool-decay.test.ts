@@ -95,15 +95,35 @@ describe("the fiber-stack pool decays back to its idle floor", () => {
 
   beforeAll(async () => {
     mkdirSync(dir, { recursive: true });
-    const result = await compile(src, {
-      outPath: join(dir, exeName("burst")),
-      outDir: dir,
-      sanitize,
-    });
-    if (!result.ok) {
-      throw new Error(result.diagnostics.map((d) => `${d.code}: ${d.message}`).join("\n"));
+    /* THIS SUITE READS THE `[fiberpool] window` LINE, so it has to build the
+     * binary that prints it. Those reports now sit behind SCR_ASYNC_STAT:
+     * ungated, the two fprintf calls beside them were the only printf in the
+     * always-linked runtime and cost every shipping binary 30,208 bytes --
+     * measured by PE section, not inferred. See the gate's note in
+     * scr_async.c.
+     *
+     * Arming it here is what keeps this suite honest rather than vacuous: the
+     * negative control below asserts that decay off prints NO windows, and an
+     * unarmed build would satisfy that by printing nothing ever. Same
+     * mechanism and the same reason cycle-arena.test.ts arms SCR_PAGECEN_ON.
+     * SCRIPTC_PROF_CFLAGS is read by cc.ts and lands in the build-cache key,
+     * so this armed binary never shares a cache entry with an ordinary one. */
+    const prev = process.env["SCRIPTC_PROF_CFLAGS"];
+    process.env["SCRIPTC_PROF_CFLAGS"] = "-DSCR_ASYNC_STAT=1";
+    try {
+      const result = await compile(src, {
+        outPath: join(dir, exeName("burst")),
+        outDir: dir,
+        sanitize,
+      });
+      if (!result.ok) {
+        throw new Error(result.diagnostics.map((d) => `${d.code}: ${d.message}`).join("\n"));
+      }
+      bin = result.binaryPath;
+    } finally {
+      if (prev === undefined) delete process.env["SCRIPTC_PROF_CFLAGS"];
+      else process.env["SCRIPTC_PROF_CFLAGS"] = prev;
     }
-    bin = result.binaryPath;
   }, 300_000);
 
   test("decay off prints no windows at all (the negative control)", async () => {
