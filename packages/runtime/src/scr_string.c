@@ -130,6 +130,12 @@ static ScrSidx *scr_sidx(const ScrStr *s) {
 #ifndef SCR_CS_BUMP
 #define SCR_CS_BUMP(which) ((void)0)
 #endif
+#ifndef SCR_CS_MAX
+/* The high-water form. Nothing at all in an unarmed build, like its two
+ * neighbours: this TU carries no trace of the census unless the header is
+ * force-included. */
+#define SCR_CS_MAX(which, n) ((void)(n))
+#endif
 #ifndef SCR_CS_ARM
 #define SCR_CS_ARM() ((void)0)
 #endif
@@ -916,16 +922,29 @@ int scr_str_idle_drain(int *drained_out) {
    * block the search does not place belongs to no chunk of ours: the
    * malloc-fallback case a391411df named, counted and left alone. */
   for (h = scr_str_ar_chunks; h != NULL; h = h->next) h->freeseen = 0;
-  for (c = 0; c <= (size_t)SCR_POOL_CLASSES; c++) {
-    void *b = scr_str_ar_free[c];
-    while (b != NULL) {
-      ScrStrChunk *o = scr_str_ar_chunk_of(b);
-      void *next;
-      if (o != NULL) { o->freeseen++; SCR_CS_BUMP(sarchunkgive); }
-      else SCR_CS_BUMP(sarchunkforeign);
-      __builtin_memcpy(&next, b, sizeof next);
-      b = next;
+  {
+    /* HIGH-WATER, NOT A RUNNING TOTAL, and the difference is the whole
+     * usefulness of these two. The tally re-walks the same free lists every
+     * window, so incrementing per block would count one block once per window
+     * and the figure would grow with uptime rather than with anything real --
+     * a number nobody could compare against 'taken'. The peak of one window's
+     * attribution is a magnitude that means something, and it is still
+     * non-zero exactly when the accounting ran, which is the three-way
+     * diagnosis a391411df defined these for. */
+    unsigned long long tallied = 0, foreign = 0;
+    for (c = 0; c <= (size_t)SCR_POOL_CLASSES; c++) {
+      void *b = scr_str_ar_free[c];
+      while (b != NULL) {
+        ScrStrChunk *o = scr_str_ar_chunk_of(b);
+        void *next;
+        if (o != NULL) { o->freeseen++; tallied++; }
+        else foreign++;
+        __builtin_memcpy(&next, b, sizeof next);
+        b = next;
+      }
     }
+    SCR_CS_MAX(sarchunkgive, tallied);
+    SCR_CS_MAX(sarchunkforeign, foreign);
   }
   /* purge, THEN free -- see the note above */
   for (c = 0; c <= (size_t)SCR_POOL_CLASSES; c++) {
