@@ -1428,6 +1428,77 @@ async function registryRoute(method: string, path: string, p: Bag): Promise<unkn
     return { id: id, rows: rowsFor(id) };
   }
 
+  if (path === "/sessions/cycleburst") {
+    /* FORCES a cycle-collector pass, which is the only thing that reaches the
+     * arena's page-return sweep.
+     *
+     * WHY A BURST OF GARBAGE AND NOT A DIRECT CALL. scr_cyc_pr_sweep() is
+     * static in scr_cycle.c and there is no binding that reaches it from here.
+     * But the sweep hangs off the END of a collector pass (scr_cycle.c), and
+     * the collector is triggered from scr_cyc_on_release when buffered roots
+     * cross a threshold -- so making and dropping cyclic objects is a
+     * SUPPORTED way to make the pass happen, using nothing but the language.
+     *
+     * MEASURED: with a 30 s idle and with a 300 s idle the sweep count was 43
+     * both times, and deterministic across replicates. Idle does not sweep,
+     * because idle is the absence of the thing that triggers the reclaimer.
+     * This route supplies that thing on demand, so the question "what would an
+     * idle trigger return" can be answered BEFORE any trigger is built.
+     *
+     * IT IS ITS OWN POSITIVE CONTROL. If the [pgret] sweep count does not rise
+     * above the no-burst figure, this route did not trigger a pass and any
+     * memory delta measured around it means nothing -- so the counter must be
+     * read, not assumed.
+     *
+     * Inert: it fires on nothing and allocates nothing until called, which is
+     * what lets both arms be the SAME binary with calling it as the only knob. */
+    const n = num(p, "n") !== undefined ? reqNum(p, "n") : 50000;
+    let sum = 0;
+    for (let i = 0; i < n; i++) {
+      const node: { self: unknown; pad: number } = { self: null, pad: i };
+      node.self = node; /* the self-reference is what makes it the collector's problem */
+      sum += node.pad;
+    }
+    return {
+      burst: n,
+      sum: sum,
+      note: "read [pgret] sweeps: if it did not rise, no pass ran and no delta around this call is meaningful",
+    };
+  }
+
+  if (path === "/sessions/shrink") {
+    /* PRAGMA shrink_memory -> sqlite3_db_release_memory(), which frees every
+     * UNPINNED page of this connection's page cache back to the C allocator.
+     * It works whether or not the engine was built with
+     * SQLITE_ENABLE_MEMORY_MANAGEMENT (that flag gates sqlite3_release_memory,
+     * the OTHER one, which is a no-op returning 0 in our build) -- so this is
+     * the only route by which the idle page cache can be handed back without
+     * lowering the ceiling it refills to.
+     *
+     * WHY A ROUTE AND NOT A SMALLER cache_size. The two answer different
+     * questions. ZAPO_SQLITE_CACHE_KB caps the cache for the whole run and
+     * trades steady-state I/O for bytes; this gives the bytes back at idle and
+     * keeps the ceiling for when work resumes. Measuring the second needs the
+     * SAME binary in both arms, with calling this route as the only knob --
+     * which is why it ships inert rather than firing on a timer.
+     *
+     * It reports only what it can honestly know: the engine is built with
+     * SQLITE_DEFAULT_MEMSTATUS=0, so sqlite3_memory_used() is unavailable and
+     * this cannot report bytes freed. The byte question belongs to the
+     * allocation census (how many left sqlite3.c) and to an out-of-process
+     * walker (whether the OS got them back); neither is visible from here. */
+    const c = db();
+    const t0 = Date.now();
+    c.exec("PRAGMA shrink_memory");
+    return {
+      pragma: "shrink_memory",
+      ms: Date.now() - t0,
+      cacheKb: CACHE_KB,
+      driver: c.driver,
+      note: "bytes freed is NOT reported: SQLITE_DEFAULT_MEMSTATUS=0. Use the census and the VM walker.",
+    };
+  }
+
   if (path === "/sessions/connection") {
     /* ARMED PROOF that one connection serves every session.
      *
