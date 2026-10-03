@@ -1428,6 +1428,44 @@ async function registryRoute(method: string, path: string, p: Bag): Promise<unkn
     return { id: id, rows: rowsFor(id) };
   }
 
+  if (path === "/sessions/cycleburst") {
+    /* FORCES a cycle-collector pass, which is the only thing that reaches the
+     * arena's page-return sweep.
+     *
+     * WHY A BURST OF GARBAGE AND NOT A DIRECT CALL. scr_cyc_pr_sweep() is
+     * static in scr_cycle.c and there is no binding that reaches it from here.
+     * But the sweep hangs off the END of a collector pass (scr_cycle.c), and
+     * the collector is triggered from scr_cyc_on_release when buffered roots
+     * cross a threshold -- so making and dropping cyclic objects is a
+     * SUPPORTED way to make the pass happen, using nothing but the language.
+     *
+     * MEASURED: with a 30 s idle and with a 300 s idle the sweep count was 43
+     * both times, and deterministic across replicates. Idle does not sweep,
+     * because idle is the absence of the thing that triggers the reclaimer.
+     * This route supplies that thing on demand, so the question "what would an
+     * idle trigger return" can be answered BEFORE any trigger is built.
+     *
+     * IT IS ITS OWN POSITIVE CONTROL. If the [pgret] sweep count does not rise
+     * above the no-burst figure, this route did not trigger a pass and any
+     * memory delta measured around it means nothing -- so the counter must be
+     * read, not assumed.
+     *
+     * Inert: it fires on nothing and allocates nothing until called, which is
+     * what lets both arms be the SAME binary with calling it as the only knob. */
+    const n = num(p, "n") !== undefined ? reqNum(p, "n") : 50000;
+    let sum = 0;
+    for (let i = 0; i < n; i++) {
+      const node: { self: unknown; pad: number } = { self: null, pad: i };
+      node.self = node; /* the self-reference is what makes it the collector's problem */
+      sum += node.pad;
+    }
+    return {
+      burst: n,
+      sum: sum,
+      note: "read [pgret] sweeps: if it did not rise, no pass ran and no delta around this call is meaningful",
+    };
+  }
+
   if (path === "/sessions/shrink") {
     /* PRAGMA shrink_memory -> sqlite3_db_release_memory(), which frees every
      * UNPINNED page of this connection's page cache back to the C allocator.
