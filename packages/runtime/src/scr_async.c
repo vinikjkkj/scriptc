@@ -2487,6 +2487,21 @@ static void scr_fiber_pool_teardown(void) {
  * scr_heap_trim already use, and it reuses the 'now' they were handed, so it
  * costs no clock read, no timer and no thread.
  *
+ * BUT THE SEAM IS NOT IDLENESS, and conflating the two was this feature's
+ * first shape and its defect. "No runnable work this turn" is reached between
+ * any two requests, so on a server answering ten requests a second the seam is
+ * reached ten times a second. A window measured HERE would fire under full
+ * load, throw away a hot cache, and charge the next request the refill --
+ * repeatedly. The break-even that justifies the feature assumes the window
+ * only opens when nothing is being asked for.
+ *
+ * So the loop supplies the OPPORTUNITY and scr_sqlite.c supplies the
+ * JUDGEMENT: it stamps a per-connection last-use time on the path that
+ * already executes statements, and the hook releases only connections
+ * untouched for the whole window. That also makes idleness per connection
+ * rather than per process, so a service holding ten databases returns the
+ * cache of the nine sitting still and keeps the one in use.
+ *
  * IT DOES NOT SHORTEN THE SLEEP, and that is a decision rather than an
  * inheritance from the neighbour above. scr_heap_trim_due caps 'due' so its
  * window cannot be slept past; the identical clamp shape on the fiber pool
@@ -2513,14 +2528,15 @@ static void scr_fiber_pool_teardown(void) {
 /* Set by scr_sqlite.c on the first open, and NULL in every binary that holds
  * no SQLite handle -- which is why the dependency points that way: this unit
  * is always linked and that one is gated on the program using SQLite. */
-static int (*scr_sqlite_idle_release_fn)(void) = NULL;
-void scr_loop_set_sqlite_idle_release(int (*fn)(void)) {
+static int (*scr_sqlite_idle_release_fn)(double, double, int *) = NULL;
+void scr_loop_set_sqlite_idle_release(int (*fn)(double, double, int *)) {
   scr_sqlite_idle_release_fn = fn;
 }
 
 static double scr_sqlite_idle_next_ms = 0;
 static unsigned long long scr_sqlite_idle_windows = 0;
 static unsigned long long scr_sqlite_idle_conns = 0;
+static unsigned long long scr_sqlite_idle_inuse = 0;
 
 static size_t scr_sqlite_idle_ms(void) {
   static size_t cached = SCR_SQLITE_IDLE_RELEASE_MS;
@@ -2538,7 +2554,7 @@ static size_t scr_sqlite_idle_ms(void) {
 
 static void scr_sqlite_idle_release(double now) {
   size_t win = scr_sqlite_idle_ms();
-  int n;
+  int n, inuse;
   if (win == 0) return;                           /* the default: one compare */
   if (scr_sqlite_idle_release_fn == NULL) return; /* no SQLite in this binary */
   if (scr_sqlite_idle_next_ms == 0) {
@@ -2547,14 +2563,21 @@ static void scr_sqlite_idle_release(double now) {
   }
   if (now < scr_sqlite_idle_next_ms) return;
   scr_sqlite_idle_next_ms = now + (double)win;
-  n = scr_sqlite_idle_release_fn();
+  inuse = 0;
+  n = scr_sqlite_idle_release_fn(now, (double)win, &inuse);
   scr_sqlite_idle_windows++;
   scr_sqlite_idle_conns += (unsigned long long)n;
+  scr_sqlite_idle_inuse += (unsigned long long)inuse;
   if (getenv("SCR_SQLITE_IDLE_STAT") != NULL) {
-    /* Printed even when n is 0: a window that found no open connection and a
-     * feature that never ran must not read the same. */
-    fprintf(stderr, "[sqlidle] window=%llu connections=%d totalConnections=%llu\n",
-            scr_sqlite_idle_windows, n, scr_sqlite_idle_conns);
+    /* THREE outcomes, not two, and the middle one is the load-bearing one.
+     * released=0 inUse=0 means the window found no open connection at all;
+     * released=0 inUse=N means it saw N and declined them because they had
+     * been used inside the window -- which is the only evidence that the
+     * execution-path stamp is being read. If inUse never appears under load,
+     * the stamp is not working and the release is firing on hot caches. */
+    fprintf(stderr, "[sqlidle] window=%llu released=%d inUse=%d totalReleased=%llu totalInUse=%llu\n",
+            scr_sqlite_idle_windows, n, inuse, scr_sqlite_idle_conns,
+            scr_sqlite_idle_inuse);
   }
 }
 

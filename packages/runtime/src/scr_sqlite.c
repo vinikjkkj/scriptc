@@ -103,6 +103,7 @@ typedef struct ScrSqliteDb {
   size_t rc;
   struct ScrSqliteDb *lnext; /* the live-connection list; see scr_sqlite_live */
   struct ScrSqliteDb **lprev;
+  double last_use_ms; /* stamped by scr_sqlite_require_open; see the release */
   sqlite3 *h;
   ScrStr *name;   /* the filename EXACTLY as the program spelled it */
   bool open;
@@ -403,14 +404,22 @@ static void scr_sqlite_live_unlink(ScrSqliteDb *d) {
  * So the loop can never observe a statement in progress, and a release can
  * never pull a page out from under one. SQLite would also protect pinned
  * pages, but this does not have to rely on that. */
-int scr_sqlite_idle_release_all(void) {
+int scr_sqlite_idle_release_all(double now, double win_ms, int *inuse) {
   ScrSqliteDb *d;
-  int n = 0;
+  int n = 0, busy = 0;
   for (d = scr_sqlite_live; d != NULL; d = d->lnext) {
     if (!d->open || d->h == NULL) continue;
+    /* PER CONNECTION, which is strictly better than a process-wide window: a
+     * service holding ten databases hands back the cache of the nine sitting
+     * still and keeps the one being queried. A connection used within the
+     * window is skipped and counted, because a window that SAW a connection
+     * and declined it has to be distinguishable from a window that found
+     * none -- that count is the only evidence the stamp is being read. */
+    if (now - d->last_use_ms < win_ms) { busy++; continue; }
     sqlite3_db_release_memory(d->h);
     n++;
   }
+  if (inuse != NULL) *inuse = busy;
   return n;
 }
 
@@ -532,6 +541,9 @@ ScrSqliteDb *scr_sqlite_open(const ScrStr *path, bool readonly, bool must_exist,
   db->name = scr_str_retain((ScrStr *)path);
   db->open = true;
   db->readonly = readonly;
+  /* Opening is using: without this a connection calloc'd to 0 would read as
+   * idle since the epoch and be released on the very first window. */
+  db->last_use_ms = scr_now_ms();
   scr_sqlite_live_link(db);
   /* Installed from here rather than from the loop: scr_async.c is linked into
    * every binary and this unit is gated on the program holding a SQLite
@@ -544,6 +556,17 @@ ScrSqliteDb *scr_sqlite_open(const ScrStr *path, bool readonly, bool must_exist,
 
 /* REQUIRE_DATABASE_OPEN. Answers false with the throw pending. */
 static bool scr_sqlite_require_open(ScrSqliteDb *db) {
+  /* THE IDLENESS STAMP, and this is the only place it is written.
+   *
+   * Every path that touches the engine passes here first -- prepare, run,
+   * get, all, pluck and exec -- so one store here is a complete record of
+   * when this connection was last used, in a path that already does far more
+   * than a store. The loop cannot know this: its seam is reached on every
+   * turn with no RUNNABLE work, which between two requests of a busy server
+   * is every turn, so a window measured there would fire under full load and
+   * throw away a hot cache. Idleness is a property of the CONNECTION, and
+   * this is where the connection learns it. */
+  db->last_use_ms = scr_now_ms();
   if (db->open) return true;
   scr_sqlite_throw_type("The database connection is not open");
   return false;
