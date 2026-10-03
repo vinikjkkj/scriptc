@@ -2579,17 +2579,49 @@ static void scr_sqlite_idle_release(double now) {
   scr_sqlite_idle_windows++;
   scr_sqlite_idle_conns += (unsigned long long)n;
   scr_sqlite_idle_inuse += (unsigned long long)inuse;
+#if SCR_ASYNC_STAT
+  /* BEHIND THE SAME COMPILE-TIME GATE AS EVERY OTHER DIAGNOSTIC IN THIS TU,
+   * and for the reason the gate was created. Converting this line from
+   * fprintf to fputs recovered 27,136 of 28,672 bytes, but the labels and the
+   * fputs calls still cost a static hello-world .text +1,024 and .rdata +512
+   * -- and the compact class has 512 bytes of headroom over its recorded
+   * figure, so "small" is still too big. Gated, a default binary pays nothing
+   * for a line it never prints, which is the same bargain SCR_ASYNC_STAT
+   * already struck for the loop's other reports. Build with
+   * -DSCR_ASYNC_STAT=1 and SCR_SQLITE_IDLE_STAT behaves as documented. */
   if (getenv("SCR_SQLITE_IDLE_STAT") != NULL) {
     /* THREE outcomes, not two, and the middle one is the load-bearing one.
      * released=0 inUse=0 means the window found no open connection at all;
      * released=0 inUse=N means it saw N and declined them because they had
      * been used inside the window -- which is the only evidence that the
      * execution-path stamp is being read. If inUse never appears under load,
-     * the stamp is not working and the release is firing on hot caches. */
-    fprintf(stderr, "[sqlidle] window=%llu released=%d inUse=%d totalReleased=%llu totalInUse=%llu\n",
-            scr_sqlite_idle_windows, n, inuse, scr_sqlite_idle_conns,
-            scr_sqlite_idle_inuse);
+     * the stamp is not working and the release is firing on hot caches.
+     *
+     * fputs AND scr_utoa, NOT fprintf, and this line cost 28,672 bytes
+     * before it was written that way. A single printf in the always-linked
+     * runtime drags in libc's whole formatting path: measured on a static
+     * hello-world, .text +25,088, .rdata +3,072, .pdata +512, for a line no
+     * default build ever prints. This TU already learned that once -- see
+     * the identical note at the fiber pool's stat line, which priced two
+     * fprintf calls at 33,280 bytes -- and the lesson is a property of the
+     * FILE, not of that call site: anything always linked that formats pays
+     * it. */
+    char nb[24];
+    fputs("[sqlidle] window=", stderr);
+    fputs(scr_utoa((size_t)scr_sqlite_idle_windows, nb), stderr);
+    fputs("released=", stderr);
+    fputs(scr_utoa((size_t)(n < 0 ? 0 : n), nb), stderr);
+    fputs("inUse=", stderr);
+    fputs(scr_utoa((size_t)(inuse < 0 ? 0 : inuse), nb), stderr);
+    fputs("totalReleased=", stderr);
+    fputs(scr_utoa((size_t)scr_sqlite_idle_conns, nb), stderr);
+    fputs("totalInUse=", stderr);
+    fputs(scr_utoa((size_t)scr_sqlite_idle_inuse, nb), stderr);
+    fputs("\n", stderr);
   }
+#else
+  (void)inuse;
+#endif /* SCR_ASYNC_STAT */
 }
 
 static double scr_heap_trim_next_ms = 0;
