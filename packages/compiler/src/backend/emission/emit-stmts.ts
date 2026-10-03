@@ -10,6 +10,9 @@ import { boxAccess, cDecl, cStringLiteral, elemAccess, vAdapters } from "./emit-
 import { OVERFLOW_MEMBER, OWNMASK_MEMBER } from "./emit-shapes.js";
 import { emitStableReceiver } from "./emit-exprs.js";
 import { writesLocal } from "../../ir/analysis.js";
+import { createRequire } from "node:module";
+import { join, dirname } from "node:path";
+import { readFileSync } from "node:fs";
 
 
 
@@ -96,6 +99,134 @@ import { writesLocal } from "../../ir/analysis.js";
     return out;
   }
 
+/* The stack-depth guard, and the ONE case it is elided in.
+ *
+ * Every emitted function opens with SCR_STACK_CHECK() so a runaway recursion
+ * throws Node's catchable RangeError instead of reaching the guard page and
+ * dying with 0xC00000FD. The test is universal rather than classified by the
+ * call graph: a static graph cannot close over indirect, virtual or callback
+ * calls, and under-approximating recursion costs CORRECTNESS here rather than
+ * precision, so the universal form is the only one sound by construction.
+ *
+ * The single elision is NOT a recursion classifier. It asks a LOCAL question
+ * about the body just lowered -- "can this emit a call instruction at all?" --
+ * which needs no graph, no fixpoint and no propagation. A body with no call
+ * reaches nobody, so it cannot reach ITSELF, and its own frame is bounded by
+ * the largest frame the codegen emits (4096 B measured over 22,008 frames,
+ * corroborated by zero __chkstk calls) which is under SCR_STACK_MARGIN. So
+ * entering it from an already-checked caller is safe by arithmetic.
+ *
+ * DEFAULT-DENY, because the real question is whether the ASSEMBLY has a call
+ * and this runs on the IR: the whitelist is tiny, every node kind outside it
+ * demands the check, and so does any value that is not f64/bool/void -- which
+ * is what keeps out the things a backend turns into a call later (bigint
+ * helpers, struct copies, string ops) and the refcounted locals whose scope
+ * cleanup emits release calls. The walk is STRUCTURAL rather than per-kind on
+ * purpose: an unrecognised nested node fails closed instead of being missed. */
+const STACK_FREE_STMTS = new Set(["block", "return", "assign", "varDecl", "if", "exprStmt", "break", "continue", "while", "doWhile", "for"]);
+const STACK_FREE_EXPRS = new Set(["numLit", "boolLit", "varRef", "bin", "unary", "logical", "ternary"]);
+const STACK_FREE_TYPES = new Set(["f64", "bool", "void"]);
+
+function stackScalarOnly(t: unknown): boolean {
+  const k = (t as { kind?: string } | null | undefined)?.kind;
+  return typeof k === "string" && STACK_FREE_TYPES.has(k);
+}
+
+export function stackCheckElidable(fn: IrFunction): boolean {
+  if (fn.generator) return false;
+  if ((fn.captures ?? []).length > 0) return false;
+  if (!stackScalarOnly(fn.returnType)) return false;
+  for (const l of fn.locals) if (l.boxed || !stackScalarOnly(l.type)) return false;
+  let ok = true;
+  const visit = (n: unknown): void => {
+    if (!ok || n === null || typeof n !== "object") return;
+    if (Array.isArray(n)) { for (const x of n) visit(x); return; }
+    const o = n as Record<string, unknown>;
+    const k = o["kind"];
+    if (typeof k === "string" && !STACK_FREE_STMTS.has(k) && !STACK_FREE_EXPRS.has(k) && !STACK_FREE_TYPES.has(k)) { ok = false; return; }
+    if (o["type"] !== undefined && typeof o["type"] === "object" && !stackScalarOnly(o["type"])) { ok = false; return; }
+    for (const key of Object.keys(o)) { if (key === "loc") continue; visit(o[key]); }
+  };
+  visit(fn.body);
+  return ok;
+}
+
+/** WHERE the stack-depth prologue goes. This is the POLICY, deliberately
+ * separate from the safety ASSERTION in emitFunction: edit this and the
+ * assertion refuses any coverage that breaks propagation.
+ *
+ * Only functions the may-throw analysis ALREADY marks as throwing get the
+ * prologue. Their call sites already carry `if (scr_exc_pending())`, so the
+ * RangeError propagates by the runtime's ordinary contract and no call site
+ * anywhere pays anything new.
+ *
+ * The alternative -- the prologue in EVERY function -- was measured and
+ * rejected: it needs every function marked may-throw, which puts a pending
+ * check on every call site in the program for a condition that occurs zero
+ * times in a normal run, and invalidates every analysis that relies on "this
+ * function cannot throw".
+ *
+ * The gap this leaves is a recursion cycle made ENTIRELY of non-throwing
+ * functions (pure arithmetic). That case keeps today's behaviour -- it
+ * crashes -- and is never a silent wrong answer, which is the property that
+ * made partial coverage the better trade. */
+export function stackCheckPolicy(mayThrow: Set<string>, fn: IrFunction): boolean {
+  if (stackCheckElidable(fn)) return false;
+  return mayThrow.has(fn.name);
+}
+
+
+/** The stack margin, READ FROM THE HEADER rather than duplicated here.
+ *
+ * The C lane expands SCR_STACK_MARGIN from scr_runtime.h through the
+ * preprocessor. The LLVM lane has no preprocessor and would otherwise need
+ * its own copy of the number -- two sources of truth for a SAFETY constant,
+ * and a silent divergence between the backends the first time either is
+ * edited. Parsing the macro keeps one definition for both lanes.
+ *
+ * A header that stops defining it FAILS THE BUILD rather than falling back to
+ * a default: this number is what stands between a deep recursion and a
+ * 0xC00000FD, and it was measured (the throw path alone needs 18 KiB), not
+ * chosen. Guessing it quietly is the failure mode worth refusing. */
+let stackMarginKibCache: number | null = null;
+function stackMarginKib(): number {
+  if (stackMarginKibCache !== null) return stackMarginKibCache;
+  const req = createRequire(import.meta.url);
+  const hdr = join(dirname(req.resolve("@scriptc/runtime/package.json")), "src", "scr_runtime.h");
+  const m = /#define\s+SCR_STACK_MARGIN_KIB\s+(\d+)/.exec(readFileSync(hdr, "utf8"));
+  if (m === null) {
+    throw new Error(
+      `cannot read SCR_STACK_MARGIN_KIB from ${hdr} -- the LLVM backend has no preprocessor and ` +
+        `must not guess a safety constant. Either restore the macro or teach both lanes the new ` +
+        `spelling.`,
+    );
+  }
+  stackMarginKibCache = Number(m[1]);
+  return stackMarginKibCache;
+}
+
+export function stackMarginBytes(): number {
+  return stackMarginKib() * 1024;
+}
+
+/** The symbol whose NAME carries the margin, so the two lanes' independently
+ * resolved headers are compared BY VALUE at link time instead of trusted.
+ *
+ * The runtime defines exactly one of these, named from its own
+ * SCR_STACK_MARGIN_KIB (scr_stack_margin.c). This lane references the name built
+ * from the value IT parsed, so a lane that resolved a different copy of
+ * scr_runtime.h fails the LINK -- loudly, on every build of every program --
+ * instead of passing every static check and shipping a guard that fires at
+ * the wrong depth. The C lane gets the same check for free, from a pin in
+ * the header itself.
+ *
+ * SCOPE: this closes the RESOLUTION vector only. It does NOT make the C and
+ * LLVM instruction sequences equivalent -- that remains supported by the
+ * acceptance measurement (depth 149482 on C against 149495 on LLVM) and by
+ * no assertion. */
+export function stackMarginSymbol(): string {
+  return `scr_stack_margin_is_${stackMarginKib()}kib`;
+}
 export function emitFunction(E: CEmitter, fn: IrFunction): void {
     E.tempCounter = 0;
     E.frames = [];
@@ -113,6 +244,7 @@ export function emitFunction(E: CEmitter, fn: IrFunction): void {
 
     E.line(`${E.signature(fn)} {${E.srcComment(fn.loc)}`);
     E.indent++;
+
 
     // The pending-return slot: a `return` crossing a finally computes its
     // value FIRST (before the finally runs — snapshotting it here is what
@@ -156,6 +288,39 @@ export function emitFunction(E: CEmitter, fn: IrFunction): void {
       }
     }
     E.scopes.push(fnScope);
+    // The stack-depth guard. Emitted HERE -- after the function scope owns
+    // its refcounted params -- so the bail-out unwind RELEASES them. Emitting
+    // it before that point leaks every refcounted param on the throw path,
+    // which the RC audit would catch; found by porting this to the LLVM lane.
+    const wantStackCheck = stackCheckPolicy(E.mayThrow, fn);
+    // THE SAFETY INVARIANT, asserted rather than commented. A prologue that
+    // throws into a function whose CALL SITES carry no pending check does not
+    // crash -- it is worse: the error return is read as a value. Measured on
+    // the universal version, which returned 258039 and exited 0 where node
+    // throws a RangeError. Re-derived here independently of the policy above,
+    // so widening coverage without widening propagation fails the BUILD
+    // rather than shipping a silent wrong answer.
+    if (wantStackCheck && !E.mayThrow.has(fn.name)) {
+      throw new Error(
+        `emitter bug: stack-depth prologue requested for '${fn.name}', which is NOT in the ` +
+          `may-throw set. Its call sites carry no pending-exception check, so the RangeError ` +
+          `would be swallowed and its error return read as a real value. Either leave the ` +
+          `prologue out of this function or make it may-throw (which costs a pending check at ` +
+          `every call site in the program).`,
+      );
+    }
+    if (wantStackCheck) {
+      // The cold arm carries the function's OWN unwind: a throw here sets the
+      // exception cell and returns, so the prologue must bail out exactly as
+      // the emitter's contract does after any throwing call. Nothing is live
+      // yet at function entry, so the unwind is a bare return.
+      E.line(`if (SCR_STACK_LOW()) {`);
+      E.indent++;
+      E.line(`scr_stack_exhausted();`);
+      E.emitUnwind();
+      E.indent--;
+      E.line(`}`);
+    }
     E.emitStmts(fn.body);
     // Implicit exit of a void function: release function-scope refcounted
     // locals (unless the body already ended in an explicit return or a

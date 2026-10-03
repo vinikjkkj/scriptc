@@ -1011,6 +1011,126 @@ bool scr_error_is(const void *obj);
 void scr_throw_error(int kind, ScrStr *message);
 void scr_throw_error_msg(int kind, const char *message, size_t len);
 void scr_throw_error_named(ScrStr *name, ScrStr *message);
+
+/* -- The stack-depth guard (the emitted function prologue's test) ----------
+ *
+ * Every emitted function opens with the SCR_STACK_LOW() test: it compares the frame
+ * against the CURRENT stack's reservation floor and throws the catchable
+ * RangeError Node throws when the floor is near.
+ *
+ * The floor is the TEB's DeallocationStack (x64: GS:[0x1478]), NOT StackLimit
+ * (GS:[0x10]). StackLimit is the lowest COMMITTED byte and the OS moves it
+ * DOWN as the stack grows -- measured 1 KiB to 14 KiB below sp at EVERY depth,
+ * so `sp < StackLimit` is never true and a check against it never fires at
+ * all. DeallocationStack is the reservation's base, constant for the life of
+ * the stack (measured identical from depth 0 to depth 16000).
+ *
+ * Reading the TEB rather than caching a stack_top -- quickjs-ng's approach,
+ * vendored in this tree -- is what makes this correct under FIBERS: Win32
+ * swaps the TEB's stack fields on SwitchToFiber, so the floor is always the
+ * running stack's own, while a cached top belongs to whichever stack recorded
+ * it. Measured: a 1 MiB CreateFiberEx fiber reports its own floor and the
+ * main thread's 16 MiB floor is restored on the way back.
+ *
+ * SCR_STACK_MARGIN is DERIVED, and the dominant term is not the one the
+ * first derivation used. It must cover everything consumed between a check
+ * passing and the RangeError being delivered:
+ *
+ *   18 KiB  the THROW PATH itself -- bisected: 17 KiB dies 0xC00000FD inside
+ *           scr_throw_error_msg, 18 KiB delivers a catchable RangeError.
+ *           This term was MISSING from the first derivation, which set 16 KiB
+ *           off the frame distribution alone and still crashed.
+ *    4 KiB  the checked function's own frame at its worst: MAX 4096 B over
+ *           the 22,008 frames of a shipping zapo-rest binary (p50 40 B,
+ *           p90 184 B, p99 504 B, p99.9 1464 B), corroborated independently
+ *           by zero __chkstk calls in that binary -- the compiler emits a
+ *           probe above one page and emitted none.
+ *    4 KiB  one uninstrumented runtime helper frame under it, same bound.
+ *   ------
+ *   26 KiB  rounded up to 32 KiB, which is 3.1% of a 1 MiB fiber reserve.
+ *
+ * The constant is SPLIT so the KiB count can be token-pasted into a symbol
+ * name (below). The integer is also what the LLVM backend parses: a plain
+ * decimal match is robust where the previous one, which spelled out the
+ * whole (32u * 1024u) expression, broke on any reformatting of this line. */
+#define SCR_STACK_MARGIN_KIB 32
+#define SCR_STACK_MARGIN (SCR_STACK_MARGIN_KIB * 1024u)
+
+/* -- The two lanes must AGREE on the margin, enforced at LINK time -------
+ *
+ * The C lane expands SCR_STACK_MARGIN through the preprocessor, out of
+ * whatever scr_runtime.h its include path delivered. The LLVM lane has no
+ * preprocessor: it parses SCR_STACK_MARGIN_KIB out of the header it
+ * resolves through require.resolve of @scriptc/runtime at EMIT time. Those
+ * are two independent resolutions of the same header, and if they ever land
+ * on different copies the lanes carry DIFFERENT margins while every static
+ * check still passes -- the entry path selecting the dependency tree, a
+ * class that has bitten this project before.
+ *
+ * Comparing PATHS would be a proxy that fails both ways: two identical
+ * copies at different paths alarm for nothing, and one path read at two
+ * different moments (the header edited between the emit and the C compile)
+ * passes. So the VALUE is what gets compared, by carrying it in a SYMBOL
+ * NAME. The runtime defines exactly one symbol, named from its OWN value;
+ * every emitted module references the name built from the value THAT LANE
+ * baked. Agreement resolves silently; disagreement fails the LINK, naming
+ * the symbol nobody defined -- on every build of every program in both
+ * lanes, so divergent margins mean the binary DOES NOT EXIST rather than
+ * existing wrong. The cost is one pointer in rodata that is never read.
+ *
+ * The literal extern below is deliberate and MUST track the number: the
+ * ABI guard (llvm-runtime-abi.test.ts) collects header symbols by literal
+ * regex, so a token-pasted name is invisible to it. Changing the margin
+ * without updating that line fails the C compile here (the macro expands to
+ * an undeclared identifier) and fails that test loudly -- a second,
+ * independent tripwire, already in the gate.
+ *
+ * SCOPE: this closes the RESOLUTION vector only. It does NOT make the C and
+ * LLVM instruction sequences equivalent -- that remains supported by the
+ * acceptance measurement (depth 149482 on C against 149495 on LLVM) and by
+ * no assertion. */
+#define SCR_STACK_MARGIN_SYM_(n) scr_stack_margin_is_##n##kib
+#define SCR_STACK_MARGIN_SYM__(n) SCR_STACK_MARGIN_SYM_(n)
+#define SCR_STACK_MARGIN_SYM SCR_STACK_MARGIN_SYM__(SCR_STACK_MARGIN_KIB)
+extern const char scr_stack_margin_is_32kib[];
+#if defined(__GNUC__) || defined(__clang__)
+/* Forces the symbol to resolve at link from every TU that includes this
+ * header -- which is every emitted C unit, so the C lane needs no emitter
+ * support at all. `used` keeps it through -O2 and silences the unused
+ * warning. */
+__attribute__((used)) static const char *const scr_stack_margin_pin =
+    SCR_STACK_MARGIN_SYM;
+#endif
+
+/* Cold and never inlined: throws the RangeError. Separate so the prologue's
+ * hot path stays a load, a compare and a never-taken forward branch. */
+void scr_stack_exhausted(void);
+
+#if defined(_WIN32) && defined(__x86_64__) && (defined(__GNUC__) || defined(__clang__))
+static inline unsigned long long scr_stack_floor(void) {
+  unsigned long long f;
+  __asm__ volatile("movq %%gs:0x1478, %0" : "=r"(f));
+  return f;
+}
+static inline unsigned long long scr_stack_sp(void) {
+  unsigned long long s;
+  __asm__ volatile("movq %%rsp, %0" : "=r"(s));
+  return s;
+}
+/* The PREDICATE, not the whole check: the emitter puts scr_stack_exhausted()
+ * and the function's own unwind in the cold arm, so the hot path stays a
+ * stack read, a floor load, a compare and a never-taken forward branch. A
+ * self-contained macro could not do that -- a throw in this runtime SETS the
+ * exception cell and RETURNS, so a prologue that merely called the thrower
+ * would fall straight into the body and recurse again. (Measured: it did,
+ * and the program still died 0xC00000FD with the check in place.) */
+#define SCR_STACK_LOW()                                                        \
+  (scr_stack_sp() - (unsigned long long)SCR_STACK_MARGIN < scr_stack_floor())
+#else
+/* Every other target keeps the historic behaviour until its floor has been
+ * MEASURED: no check rather than a check that cannot fire. */
+#define SCR_STACK_LOW() (0)
+#endif
 /* A read of a declare-d const nothing defines: throws Node's catchable
  * ReferenceError "<name> is not defined". Borrows name; always throws. */
 void scr_undef_global_read(ScrStr *name);

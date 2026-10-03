@@ -158,13 +158,29 @@ async function parseHeader(): Promise<{ protos: Map<string, CProto>; dataSyms: S
 }
 
 /** Strip comments and preprocessor lines -- the shape every scan below
- * wants. */
+ * wants.
+ *
+ * A DIRECTIVE IS NOT ALWAYS ONE LINE, and reading it as one made this guard
+ * blind in a way that cannot be seen from its output. A `#define` continued
+ * with a trailing backslash had only its FIRST line removed; the body was
+ * left behind as an orphan expression with no `;`, `{` or `}` in it. The
+ * boundary heuristic in parseOneHeader then walked back PAST it to find the
+ * previous declaration boundary, so the next prototype in the file got that
+ * whole orphan as its "return type", failed the identifier-shape test, and
+ * was dropped from `protos` -- after which the backend's perfectly valid
+ * declare for it reads as "no runtime header has a prototype".
+ *
+ * That is a FALSE RED, which is the benign direction, but the same mechanism
+ * can hand a prototype a return type it never had. Measured when this was
+ * written: scr_runtime.h holds two multi-line directives, exactly one
+ * prototype (scr_undef_global_read) was invisible, and following the
+ * continuations recovers it and loses none -- 2,141 prototypes to 2,142. */
 async function headerSource(headerPath: string): Promise<string> {
   const raw = await readFile(headerPath, "utf8");
   return raw
     .replace(/\/\*[\s\S]*?\*\//g, " ")
     .replace(/\/\/[^\n]*/g, " ")
-    .replace(/^[ \t]*#[^\n]*$/gm, " ");
+    .replace(/^[ \t]*#(?:[^\n]*\\\r?\n)*[^\n]*$/gm, " ");
 }
 
 /** Every enum and function-pointer typedef across the WHOLE header set.
