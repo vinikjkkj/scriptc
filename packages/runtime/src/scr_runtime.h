@@ -6991,6 +6991,19 @@ void scr_loop_set_island_deadline(double (*fn)(void));
  * many connections it released and writes how many it skipped as still in
  * use. */
 void scr_loop_set_sqlite_idle_release(int (*fn)(double, double, int *));
+
+/* CALLED BY scr_async.c, not registered by scr_string.c, and that direction is
+ * the opposite of the SQLite hook beside it on purpose. A setter would make
+ * scr_string.c reference the async unit, and "the async unit is always linked"
+ * holds for a whole program but NOT for a library: the per-library fragment
+ * archives scr_string.o without scr_async.o, so every library build failed at
+ * link -- 60 tests across four shards, all one cause. scr_async.c already
+ * calls scr_str_new/_retain/_release, so it already cannot link without the
+ * string unit and this reference is free.
+ *
+ * Answers chunks freed, or -1 when the window saw a string allocation and the
+ * drain declined, and writes blocks moved out of the pool. */
+int scr_str_idle_drain(int *drained_out);
 long scr_abandoned_fiber_count(void);
 /* True while executing on an async fiber (vs the main stack) — the island
  * sizes its engine stack budget per stack (see scr_island.c). */
