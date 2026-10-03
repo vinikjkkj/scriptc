@@ -2638,6 +2638,85 @@ static void scr_sqlite_idle_release(double now) {
 #endif /* SCR_ASYNC_STAT */
 }
 
+/* -- pouring the string pool back so a chunk can empty ------------------
+ *
+ * The string arena carves forward and never frees a chunk. The reason is not
+ * placement: its free list was measured receiving ZERO blocks across a full
+ * history sync, because scr_str_release offers every dead block to a pool
+ * which always accepts. The pool is small -- 614,880 B high-water, 3.67% of
+ * its bound -- but it owns the ROUTE, so no chunk ever learns it emptied.
+ *
+ * At this seam the pool is poured back into the arena and chunks that reach
+ * zero are swept. Same tenant shape as the SQLite release beside it, same
+ * rule: it does NOT shorten 'due'. A drain has no deadline to miss, and that
+ * clamp shape is what reordered socket reads against timers and broke
+ * pairing. Off by default; SCR_STR_IDLE_DRAIN_MS=0 costs one integer compare.
+ *
+ * The idleness test lives in scr_string.c, as a monotonic op counter rather
+ * than a timestamp: a clock read on the allocation path would cost more than
+ * the drain saves, and "no string allocation in the whole window" is a
+ * stronger statement than "the last one was a while ago". */
+#ifndef SCR_STR_IDLE_DRAIN_MS
+#define SCR_STR_IDLE_DRAIN_MS 0
+#endif
+
+static int (*scr_str_idle_drain_fn)(int *) = NULL;
+void scr_loop_set_str_idle_drain(int (*fn)(int *)) { scr_str_idle_drain_fn = fn; }
+
+static double scr_str_idle_next_ms = 0;
+#if SCR_ASYNC_STAT
+static unsigned long long scr_str_idle_windows = 0;
+static unsigned long long scr_str_idle_freed = 0;
+static unsigned long long scr_str_idle_skipped = 0;
+#endif
+
+static size_t scr_str_idle_ms(void) {
+  static size_t cached = SCR_STR_IDLE_DRAIN_MS;
+  static int looked = 0;
+  if (!looked) {
+    const char *env = getenv("SCR_STR_IDLE_DRAIN_MS");
+    looked = 1;
+    if (env != NULL) { long v = strtol(env, NULL, 10); cached = v > 0 ? (size_t)v : 0; }
+  }
+  return cached;
+}
+
+static void scr_str_idle_drain_tick(double now) {
+  size_t win = scr_str_idle_ms();
+  int drained = 0, freed;
+  if (win == 0) return;
+  if (scr_str_idle_drain_fn == NULL) return;
+  if (scr_str_idle_next_ms == 0) { scr_str_idle_next_ms = now + (double)win; return; }
+  if (now < scr_str_idle_next_ms) return;
+  scr_str_idle_next_ms = now + (double)win;
+  freed = scr_str_idle_drain_fn(&drained);
+#if SCR_ASYNC_STAT
+  scr_str_idle_windows++;
+  if (freed < 0) scr_str_idle_skipped++;
+  else scr_str_idle_freed += (unsigned long long)freed;
+  if (getenv("SCR_STR_IDLE_STAT") != NULL) {
+    char nb[24];
+    fputs("[stridle] window=", stderr);
+    fputs(scr_utoa((size_t)scr_str_idle_windows, nb), stderr);
+    if (freed < 0) {
+      fputs(" SKIPPED (allocation inside the window)", stderr);
+    } else {
+      fputs(" drained=", stderr);
+      fputs(scr_utoa((size_t)drained, nb), stderr);
+      fputs(" chunksFreed=", stderr);
+      fputs(scr_utoa((size_t)freed, nb), stderr);
+    }
+    fputs(" totalFreed=", stderr);
+    fputs(scr_utoa((size_t)scr_str_idle_freed, nb), stderr);
+    fputs(" totalSkipped=", stderr);
+    fputs(scr_utoa((size_t)scr_str_idle_skipped, nb), stderr);
+    fputs("\n", stderr);
+  }
+#else
+  (void)drained; (void)freed;
+#endif
+}
+
 static double scr_heap_trim_next_ms = 0;
 /* Windows this trim actually ran, so the stat line can say "ran and found
  * nothing" rather than leaving the reader to guess. Static, deliberately:
@@ -3893,6 +3972,8 @@ bool scr_loop_run(ScrPromise *top_level) {
      * one never caps 'due' -- see its comment: a cache release has no
      * deadline to miss, and that clamp shape is what broke pairing. */
     scr_sqlite_idle_release(now);
+    /* And the string pool, same seam, same no-clamp rule. */
+    scr_str_idle_drain_tick(now);
     double due = scr_ntimers > 0 ? scr_timers[0].deadline_ms : now + SCR_IO_POLL_MS;
     /* A pool with entries left to free caps the sleep at its next window;
      * an empty one does not (see scr_stack_pool_decay_due). */

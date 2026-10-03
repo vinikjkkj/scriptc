@@ -641,10 +641,124 @@ static size_t scr_str_slack(void) {
  * and for the same reason, so that lane carries no instruction of it. */
 #ifndef SCR_RC_AUDIT
 
+/* ---- per-chunk accounting, so a chunk can learn that it emptied ---------
+ *
+ * The arena could not free a chunk even in principle: scr_str_ar_take called
+ * malloc and stored the pointer only in scr_str_ar_cur/_lim, both overwritten
+ * by the next chunk, so the address malloc returned did not survive anywhere
+ * in the process. tests/perf/cycstat has carried charged/freed/foreign
+ * counters for this since a391411df, declared deliberately before any
+ * implementation existed; this is the implementation they were shaped for.
+ *
+ * THE CHUNK IS DERIVED FROM THE BLOCK BY A MASK, NOT A SEARCH, which is the
+ * whole reason the chunks are now 64 KiB-ALIGNED rather than plain malloc.
+ * A sorted registry with a binary search was the alternative and it costs
+ * ~7 compares on a path that runs once per string; an aligned chunk costs an
+ * AND. The header lives at the chunk base, so the carve region starts after
+ * it and no block can ever alias the header.
+ *
+ * FOREIGN BLOCKS ARE REAL AND MUST NOT BE CHARGED. scr_str_ar_give is also
+ * the sink for blocks the malloc fallback produced, which were never carved
+ * from any chunk; a393's note names this as one of the two hazards, because a
+ * 'live' count decremented for one of them would free a chunk that is still
+ * handing blocks out. The magic plus a range test is what separates them, and
+ * the ones that fail it are counted rather than silently dropped. */
+#define SCR_STR_CHUNK_MAGIC 0x5343525f53545243ull /* "SCR_STRC" */
+
+typedef struct ScrStrChunk {
+  unsigned long long magic;
+  struct ScrStrChunk *next;
+  struct ScrStrChunk **prevp;
+  unsigned long freeseen; /* scratch: blocks of this chunk found on the free
+                           * lists during one drain. Equal to carved means
+                           * every block it ever handed out is back. */
+  unsigned long carved;   /* blocks ever carved from it */
+} ScrStrChunk;
+
 /* One list per SCR_POOL_GRAIN class. Index r / SCR_POOL_GRAIN, 1..CLASSES. */
 static void *scr_str_ar_free[SCR_POOL_CLASSES + 1];
 static unsigned char *scr_str_ar_cur;
 static unsigned char *scr_str_ar_lim;
+static ScrStrChunk *scr_str_ar_chunks;  /* every live chunk, for the sweep */
+static ScrStrChunk *scr_str_ar_curchunk; /* the one scr_str_ar_cur carves from */
+
+/* The block's chunk, or NULL when it belongs to none.
+ *
+ * A MASK WOULD HAVE TO DEREFERENCE WHAT IT FINDS, and that is why this is a
+ * search. Rounding an arbitrary pointer down to 64 KiB and reading a magic
+ * there is only safe if the result is mapped, and the blocks that reach here
+ * include malloc-fallback blocks this arena never owned: nothing says the
+ * address below one of those is readable. "Safe in practice on this heap" is
+ * not good enough for a path whose failure mode is a wild read. The index
+ * holds only addresses this file allocated, so a miss costs a comparison and
+ * never a fault.
+ *
+ * The cost is paid where it does not matter: see the note on the drain, which
+ * is the only caller. */
+static ScrStrChunk **scr_str_ar_index; /* sorted ascending by address */
+static size_t scr_str_ar_nindex, scr_str_ar_capindex;
+
+static ScrStrChunk *scr_str_ar_chunk_of(const void *b) {
+  size_t lo = 0, hi = scr_str_ar_nindex;
+  const unsigned char *p = (const unsigned char *)b;
+  while (lo < hi) {
+    size_t mid = lo + (hi - lo) / 2u;
+    const unsigned char *base = (const unsigned char *)(const void *)scr_str_ar_index[mid];
+    if (p < base) { hi = mid; continue; }
+    if (p >= base + SCR_STR_ARENA_CHUNK) { lo = mid + 1u; continue; }
+    /* Inside a chunk this file allocated. The header zone is not a block. */
+    if (p < base + sizeof(ScrStrChunk)) return NULL;
+    return scr_str_ar_index[mid];
+  }
+  return NULL;
+}
+
+static int scr_str_ar_index_add(ScrStrChunk *h) {
+  size_t i;
+  if (scr_str_ar_nindex == scr_str_ar_capindex) {
+    size_t cap = scr_str_ar_capindex ? scr_str_ar_capindex * 2u : 32u;
+    ScrStrChunk **n = (ScrStrChunk **)realloc(scr_str_ar_index, cap * sizeof *n);
+    if (n == NULL) return 0;
+    scr_str_ar_index = n;
+    scr_str_ar_capindex = cap;
+  }
+  for (i = scr_str_ar_nindex; i > 0 && scr_str_ar_index[i - 1u] > h; i--) {
+    scr_str_ar_index[i] = scr_str_ar_index[i - 1u];
+  }
+  scr_str_ar_index[i] = h;
+  scr_str_ar_nindex++;
+  return 1;
+}
+
+static void scr_str_ar_index_del(ScrStrChunk *h) {
+  size_t i;
+  for (i = 0; i < scr_str_ar_nindex; i++) {
+    if (scr_str_ar_index[i] != h) continue;
+    for (; i + 1u < scr_str_ar_nindex; i++) scr_str_ar_index[i] = scr_str_ar_index[i + 1u];
+    scr_str_ar_nindex--;
+    return;
+  }
+}
+
+/* 64 KiB-aligned, because scr_str_ar_chunk_of masks. The two platform calls
+ * differ in how they are released, so the release mirrors the branch. */
+static void *scr_str_chunk_alloc(void) {
+#ifdef _WIN32
+  return _aligned_malloc(SCR_STR_ARENA_CHUNK, SCR_STR_ARENA_CHUNK);
+#else
+  void *p = NULL;
+  if (posix_memalign(&p, SCR_STR_ARENA_CHUNK, SCR_STR_ARENA_CHUNK) != 0) return NULL;
+  return p;
+#endif
+}
+
+static void scr_str_chunk_free(void *p) {
+#ifdef _WIN32
+  _aligned_free(p);
+#else
+  free(p);
+#endif
+}
 
 
 static int scr_str_arena_on(void) {
@@ -668,33 +782,182 @@ static int scr_str_arena_on(void) {
  * never handed to free(), which is safe (it is reused from the free list
  * forever) and is the only shape in which the cap predicate can be wrong
  * about where a block came from. */
+int scr_str_idle_drain(int *drained_out);
+
+/* THE IDLENESS TEST, and it is a counter rather than a clock on purpose.
+ *
+ * The seam this drain hangs off is reached on every loop turn with no
+ * runnable work, which between two requests of a busy server is every turn.
+ * Draining there under load would pour the pool back into the arena and throw
+ * away a 98.5% hit rate for nothing -- the same confusion of "the loop is
+ * between jobs" with "the process is idle" that the SQLite tenant had to be
+ * corrected for.
+ *
+ * A timestamp would mean calling scr_now_ms() from scr_str_ar_take, which
+ * runs millions of times per session; that is a clock read on the hottest
+ * allocation path in the runtime. A monotonic op counter costs one increment
+ * of a static, and comparing it across a window answers a STRONGER question
+ * than a timestamp does: not "was the last use recent" but "was there any
+ * string allocation at all in the whole window". */
+static unsigned long long scr_str_ar_ops;
+
 static void *scr_str_ar_take(size_t r) {
   size_t c = r / SCR_POOL_GRAIN;
+  scr_str_ar_ops++;
   void *b = scr_str_ar_free[c];
   SCR_CS_ARM();
   if (b != NULL) {
+    /* NOTHING IS CHARGED HERE, deliberately. An earlier shape incremented a
+     * per-chunk live count on every take and decremented on every give, which
+     * put a chunk lookup on the allocation path -- and after a drain the pool
+     * is empty, so EVERY allocation would have paid it. Emptiness is instead
+     * derived once, at the drain, by counting how many of a chunk's carved
+     * blocks are sitting on the free lists. Same answer, and the search moves
+     * from the hot path to the idle one. */
     __builtin_memcpy(&scr_str_ar_free[c], b, sizeof(void *));
     SCR_CS_BUMP(sarhit);
     return b;
   }
   if ((size_t)(scr_str_ar_lim - scr_str_ar_cur) < r) {
-    unsigned char *k = (unsigned char *)malloc(SCR_STR_ARENA_CHUNK);
+    unsigned char *k = (unsigned char *)scr_str_chunk_alloc();
+    ScrStrChunk *h;
     if (k == NULL) return NULL;
-    scr_str_ar_cur = k;
+    h = (ScrStrChunk *)(void *)k;
+    h->magic = SCR_STR_CHUNK_MAGIC;
+    h->freeseen = 0;
+    h->carved = 0;
+    if (!scr_str_ar_index_add(h)) { scr_str_chunk_free(k); return NULL; }
+    h->next = scr_str_ar_chunks;
+    h->prevp = &scr_str_ar_chunks;
+    if (h->next != NULL) h->next->prevp = &h->next;
+    scr_str_ar_chunks = h;
+    scr_str_ar_curchunk = h;
+    /* Installed on the first chunk, so a program that never makes a heap
+     * string carries no hook. scr_async.c is always linked and this unit's
+     * arena is not always reached. */
+    scr_loop_set_str_idle_drain(scr_str_idle_drain);
+    scr_str_ar_cur = k + sizeof(ScrStrChunk);
     scr_str_ar_lim = k + SCR_STR_ARENA_CHUNK;
     SCR_CS_BUMP(sarchunk);
   }
   b = scr_str_ar_cur;
   scr_str_ar_cur += r;
+  if (scr_str_ar_curchunk != NULL) scr_str_ar_curchunk->carved++;
   SCR_CS_BUMP(sarcarve);
   return b;
 }
 
 static void scr_str_ar_give(void *b, size_t r) {
   size_t c = r / SCR_POOL_GRAIN;
+  /* No lookup here either: a give is just a push, and which chunk the block
+   * belongs to is answered at the drain where the search is free. */
   __builtin_memcpy(b, &scr_str_ar_free[c], sizeof(void *));
   scr_str_ar_free[c] = b;
   SCR_CS_BUMP(sargive);
+}
+
+/* ---- the idle drain -----------------------------------------------------
+ *
+ * Per-chunk accounting alone frees nothing, because nothing ever reaches the
+ * arena to be charged: scr_str_release offers every dead block to
+ * scr_str_blocks first and the pool always accepts, so scr_str_ar_give was
+ * measured at ZERO gives across a full history sync. The pool is not holding
+ * much -- its byte high-water is 614,880 B, 3.67% of its bound -- but it is
+ * holding the ROUTE. Blocks cycle pool-to-pool forever and no chunk can learn
+ * that it emptied.
+ *
+ * So at the idle seam the pool is poured back into the arena. That is what
+ * turns "this block is dead" into "this chunk is dead", and it is the only
+ * step that was missing: a391411df built the counters, the accounting above
+ * builds the charge, and this builds the arrival.
+ *
+ * THE SWEEP IS NOT OPTIONAL AND IT IS WHY THE FREE LISTS ARE PURGED FIRST. A
+ * chunk at live==0 still has all of its blocks sitting on the per-class free
+ * lists, which are GLOBAL rather than chunk-local -- the one structural
+ * difference from the cycle arena, whose list lives inside the chunk and dies
+ * with it. Freeing the chunk without unlinking them would leave the lists
+ * pointing into returned memory, which is a use-after-free that would surface
+ * as a corrupted string much later. One pass over the lists before any free.
+ *
+ * Answers chunks freed; writes blocks moved out of the pool. */
+int scr_str_idle_drain(int *drained_out) {
+  static unsigned long long seen = 0;
+  int freed = 0, drained = 0;
+  size_t c;
+  ScrStrChunk *h, *nx;
+  if (scr_str_ar_ops != seen) {
+    /* Allocation happened inside this window: not idle, and a drain here
+     * would cost the pool's hit rate to recover nothing yet. -1 so the stat
+     * can tell this apart from "ran and freed nothing", which is the
+     * distinction that made the other tenants' zeros readable. */
+    seen = scr_str_ar_ops;
+    return -1;
+  }
+  for (c = 0; c < (size_t)SCR_POOL_CLASSES; c++) {
+    size_t r = (c + 1u) * SCR_POOL_GRAIN;
+    void *b = scr_str_blocks.head[c];
+    while (b != NULL) {
+      void *next;
+      __builtin_memcpy(&next, b, sizeof next);
+      scr_str_blocks.head[c] = next;
+#if SCR_POOL_BUDGET
+      scr_str_blocks.bytes -= r;
+#else
+      scr_str_blocks.n[c]--;
+#endif
+      scr_str_ar_give(b, r);
+      drained++;
+      b = next;
+    }
+  }
+  /* TALLY: how many of each chunk's carved blocks are on the free lists.
+   * This is where the chunk lookup happens, once per free block, at idle --
+   * the reason neither the allocation nor the release path carries one. A
+   * block the search does not place belongs to no chunk of ours: the
+   * malloc-fallback case a391411df named, counted and left alone. */
+  for (h = scr_str_ar_chunks; h != NULL; h = h->next) h->freeseen = 0;
+  for (c = 0; c <= (size_t)SCR_POOL_CLASSES; c++) {
+    void *b = scr_str_ar_free[c];
+    while (b != NULL) {
+      ScrStrChunk *o = scr_str_ar_chunk_of(b);
+      void *next;
+      if (o != NULL) { o->freeseen++; SCR_CS_BUMP(sarchunkgive); }
+      else SCR_CS_BUMP(sarchunkforeign);
+      __builtin_memcpy(&next, b, sizeof next);
+      b = next;
+    }
+  }
+  /* purge, THEN free -- see the note above */
+  for (c = 0; c <= (size_t)SCR_POOL_CLASSES; c++) {
+    void **link = &scr_str_ar_free[c];
+    while (*link != NULL) {
+      void *b = *link, *next;
+      ScrStrChunk *o = scr_str_ar_chunk_of(b);
+      __builtin_memcpy(&next, b, sizeof next);
+      if (o != NULL && o->freeseen == o->carved) *link = next; /* chunk is going */
+      else link = (void **)b;                                  /* keep: link is its first word */
+    }
+  }
+  for (h = scr_str_ar_chunks; h != NULL; h = nx) {
+    nx = h->next;
+    if (h->freeseen != h->carved) continue;
+    if (h == scr_str_ar_curchunk) {
+      /* cur/lim point into it; a NULL pair reads as "no room" and the next
+       * carve takes a fresh chunk. */
+      scr_str_ar_cur = NULL;
+      scr_str_ar_lim = NULL;
+      scr_str_ar_curchunk = NULL;
+    }
+    *h->prevp = h->next;
+    if (h->next != NULL) h->next->prevp = h->prevp;
+    scr_str_ar_index_del(h);
+    h->magic = 0;
+    scr_str_chunk_free(h);
+    freed++;
+    SCR_CS_BUMP(sarchunkfree);
+  }
+  if (drained_out != NULL) *drained_out = drained;
+  return freed;
 }
 
 #endif /* !SCR_RC_AUDIT */

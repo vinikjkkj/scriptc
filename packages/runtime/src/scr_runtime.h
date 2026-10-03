@@ -6991,6 +6991,13 @@ void scr_loop_set_island_deadline(double (*fn)(void));
  * many connections it released and writes how many it skipped as still in
  * use. */
 void scr_loop_set_sqlite_idle_release(int (*fn)(double, double, int *));
+
+/* Installed by scr_string.c on its first arena chunk, for the same reason the
+ * SQLite hook points this way: the async unit is always linked and the string
+ * arena is not always reached. Answers chunks freed, or -1 when the window saw
+ * a string allocation and the drain declined, and writes blocks moved out of
+ * the pool. */
+void scr_loop_set_str_idle_drain(int (*fn)(int *));
 long scr_abandoned_fiber_count(void);
 /* True while executing on an async fiber (vs the main stack) — the island
  * sizes its engine stack budget per stack (see scr_island.c). */
