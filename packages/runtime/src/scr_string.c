@@ -992,6 +992,29 @@ int scr_str_idle_drain(int *drained_out) {
 
 #endif /* !SCR_RC_AUDIT */
 
+#ifdef SCR_RC_AUDIT
+/* THE SYMBOL MUST EXIST IN BOTH ARMS, and this stub is the whole reason the
+ * audit lane gets one. scr_async.c calls scr_str_idle_drain unconditionally,
+ * and it is linked beside this unit in every arm -- it already calls
+ * scr_str_new/_retain/_release, so it can never be linked without us. But the
+ * arena above is compiled out under SCR_RC_AUDIT, and the definition went with
+ * it, so the audit flavor linked scr_async.o against nothing:
+ *
+ *     lld-link: error: undefined symbol: scr_str_idle_drain
+ *     >>> referenced by scr_async.c:2693 (scr_str_idle_drain_tick)
+ *
+ * which is the mirror of the failure that moved this edge here in the first
+ * place. An edge is only satisfiable if the providing unit provides it in
+ * EVERY configuration it compiles in; a guard on one arm is a hole.
+ *
+ * -1 is the established "declined, nothing moved" answer, so the stat line in
+ * this lane reads the same shape as a window that saw an allocation. */
+int scr_str_idle_drain(int *drained_out) {
+  if (drained_out != NULL) *drained_out = 0;
+  return -1;
+}
+#endif /* SCR_RC_AUDIT */
+
 static ScrStr *scr_str_alloc(size_t len, size_t cap) {
   /* The one fence every heap string passes through. len <= cap at every call
    * site, but checking both costs one predictable branch and makes the
