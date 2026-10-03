@@ -123,6 +123,15 @@ export async function ccCompile(args: readonly string[]): Promise<void> {
     argv = argv.flatMap((a) => (a === "-lz" ? z : [a]));
   }
 
+  /* The margin pin (scr_runtime.h) is referenced by every TU that includes
+   * the header, and on win32 that is EVERY test, because the shim below is
+   * appended unconditionally. Its one definition lives in a dependency-free
+   * TU precisely so this append costs nothing -- see scr_stack_margin.c.
+   * Without it the four tests that do not happen to link scr_error.c fail
+   * at lld with "undefined symbol: scr_stack_margin_is_32kib". */
+  const margin = join(srcDir, "scr_stack_margin.c");
+  if (!argv.some((a) => a.endsWith("scr_stack_margin.c"))) argv.push(margin);
+
   if (process.platform === "win32") {
     const shim = join(srcDir, "scr_win.c");
     if (!argv.some((a) => a.endsWith("scr_win.c"))) argv.push(shim);

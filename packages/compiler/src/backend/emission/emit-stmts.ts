@@ -213,7 +213,7 @@ export function stackMarginBytes(): number {
  * resolved headers are compared BY VALUE at link time instead of trusted.
  *
  * The runtime defines exactly one of these, named from its own
- * SCR_STACK_MARGIN_KIB (scr_error.c). This lane references the name built
+ * SCR_STACK_MARGIN_KIB (scr_stack_margin.c). This lane references the name built
  * from the value IT parsed, so a lane that resolved a different copy of
  * scr_runtime.h fails the LINK -- loudly, on every build of every program --
  * instead of passing every static check and shipping a guard that fires at
