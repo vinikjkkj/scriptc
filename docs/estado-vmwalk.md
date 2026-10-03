@@ -652,3 +652,70 @@ two tables in §5 and §6, `series.ps1` the rotated A B B A of §4. The sole cha
 against the committed rig is one hunk in a local copy of `memrig.mts`:
 `spawn(exe, [])` becomes `spawn(exe, JSON.parse(MEMRIG_ARGV))`, so the same rig
 can drive `node` as the child for §4.
+
+---
+
+## Record correction, 2026-10-03 — `e53b807c5`'s headline is a diagonal
+
+`e53b807c5` states the fiber-pool decay as `SETTLED private commit 250.67 ->
+37.78 MiB, -212.89`. **Its "off" arm was never run on the decay branch.** The
+figures 250.67, 102.87 and 58.02, and the "within-arm spread 2.52 and 0.83"
+derived from 251.93 / 249.41, are verbatim from `G:\blocks\walkfuse\HANDOFF-POOL.md`,
+the cap-4096 pair of a different experiment.
+
+The configuration matched — cap 4096 with decay off was the shipped default
+then. The **tree** did not. That arm was measured on `b6a763983`; the decay
+branch is based on `53cdae32b`, **27 commits and 4 merges later**, and
+`7439947b3` (a suspended fiber priced at 18 KiB instead of 32) is an ancestor
+of `53cdae32b` and not of `b6a763983`. Confirmed with
+`git merge-base --is-ancestor` in both directions.
+
+So `-212.89` is the diagonal of a 2x2 — both changes on against both off —
+reported as one change alone.
+
+### The 2x2, actually run
+
+One binary, all three knobs read from the environment, n=6 per cell, 24 runs in
+six permuted blocks so no cell owns the early or late half. `settledPriv`, MiB:
+
+```
+                    decay off        decay on        decay alone
+fiber at 32 KiB     C1 198.09        C2  37.65        -160.44
+fiber at 18 KiB     C3 151.26        C4  36.28        -114.98
+price alone          -46.83           -1.37
+```
+
+Within-cell spreads 3.17 / 2.61 / 3.87 / 0.65.
+
+```
+diagonal C1 -> C4        -161.81
+sum of the isolated      -207.27
+interaction I            + 45.46      (median-based +46.79)
+```
+
+`I` is 11.7x the largest within-cell spread, so it is real: **the two terms
+overlap by 45.46 MiB and must not be added.** In the configuration that ships
+(fiber at 18 KiB) the decay alone is **-114.98 MiB**, not -212.89.
+
+### What the other columns say
+
+- `settledWS` — C1 103.54, C2 52.06, C3 103.02, C4 50.96. `I = -0.57` against a
+  largest spread of 3.99: **not an interaction.** Additive, and the resident
+  saving is entirely the decay's.
+- `peakPriv` / `peakWS` — **the design does not separate the effect from the
+  draw.** The high mode hit C3 twice and C4 never, while C1/C2 sit in a separate
+  tight population near 715.8 MiB priv (spread <= 1.34). Mean-based `I` is
+  -29.19 / -9.46; drop those two draws and it is +0.20 / +1.41. No peak
+  interaction is reportable at this n.
+- What peak **does** say robustly: the fiber price is the whole peak effect and
+  it is the same at both decay settings — **-271.87** (decay off) and **-271.68**
+  (decay on), agreeing to 0.19 MiB.
+
+### The general rule this cost
+
+An arm must be run on the tree under test. When a prior artifact's arm is
+reused, state the base commit of **both** arms — if they differ, it is not a
+control, it is a diagonal. And two results are addable only when they name the
+same column: `7439947b3` measured mode-classified **peak**, `e53b807c5`
+measured **settled**, so no sum of the two was ever meaningful even before the
+confound.
