@@ -248,7 +248,7 @@ const platform = process.platform;
 
 /** A default-built hello-world: no regex, no engine. */
 export const STATIC_CLASS_MAX =
-  platform === "linux" ? 405_824 : platform === "win32" ? 685_056 : 374_824;
+  platform === "linux" ? 405_824 : platform === "win32" ? 689_152 : 374_824;
 
 /** A program that uses regex: libregexp + libunicode, never the engine. */
 export const REGEX_CLASS_MAX =
@@ -1645,7 +1645,41 @@ export const SIZE_DRIFT_PAGE = 4_096;
  * the remaining 3,072 rather than leaving it out, for the reason the entry
  * above gives: an unbanked explained growth hands the next block a head start
  * inside the drift page. */
-export const STATIC_CLASS_RECORDED = platform === "win32" ? 684_544 : null;
+/* 2026-10-03 - STATIC moves 684,544 -> 685,056, and MAX one page above it.
+ * The two move for DIFFERENT reasons and the commit keeps them apart.
+ *
+ * RECORDED moves because 512 bytes of real, always-linked code entered, and
+ * they are named: the SQLite idle-release tenant in scr_async.c. It is one
+ * file-alignment unit of .text and nothing else -- .rdata, .pdata and every
+ * other section are byte-identical to the merge base, which is what says this
+ * is the tenant's own logic and not a formatting path or a layout shift.
+ *
+ * It is NOT the growth that first tripped this guard. That was 28,672 bytes,
+ * and the section table named it on sight: .text +25,088, .rdata +3,072,
+ * .pdata +512, from a single fprintf dragging libc's formatting path into the
+ * always-linked runtime. 91dbe6b85 had already priced two of those in this
+ * same file at 30,208 bytes. Converting the line to fputs plus scr_utoa
+ * recovered 27,136 and gating the block behind SCR_ASYNC_STAT a further
+ * 1,024; this 512 is what honestly remains, and it cannot be made smaller,
+ * only made zero -- any always-linked code at all costs one alignment unit.
+ *
+ * MAX moves for the reason the regex class's entry above gives, applied to
+ * the sibling that was left out. It sat at 685,056 against a recorded 684,544
+ * -- 512 bytes, one alignment unit, so under toBeLessThan a tolerance of
+ * effectively zero, and the first byte anyone added was going to fail it
+ * whatever that byte was. One page restores the margin the design intended.
+ * The DISTANCE property the ceiling protects is untouched: island linkage is
+ * a ~620 KB jump above this class, so one page cannot let it hide.
+ *
+ * MEASURED by building the same hello-world at four revisions with only
+ * packages/runtime/src swapped, into ONE output path because the binary
+ * embeds its -o-derived PDB name:
+ *
+ *     5367ce8f4   684,544   merge base
+ *     45be81090   713,216   +28,672, all of it in one commit (the fprintf)
+ *     a9ee25126   685,056   after the recovery -- .text +512, nothing else
+ */
+export const STATIC_CLASS_RECORDED = platform === "win32" ? 685_056 : null;
 
 /* 2026-09-26 - +4,608 on the REGEX class only, and the bytes are accounted
  * for: non-owning intern entries (SCR_STRING_INTERN_WEAK, off by default).

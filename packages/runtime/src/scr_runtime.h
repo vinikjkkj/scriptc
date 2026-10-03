@@ -6978,6 +6978,19 @@ void scr_loop_set_island_rejections(bool (*fn)(bool print),
  * readiness, without keeping the loop alive by itself (Node's unref'd
  * timer). One registrant, set at engine boot; static builds never set it. */
 void scr_loop_set_island_deadline(double (*fn)(void));
+
+/* Installed by scr_sqlite.c the first time a database is opened, so the
+ * always-linked async unit never names a symbol from the GATED sqlite unit --
+ * an edge that would be an undefined symbol in every binary holding no SQLite
+ * handle. Same shape as the island deadline above.
+ *
+ * The hook is handed the loop's clock and the window, and judges idleness PER
+ * CONNECTION from a stamp written on the execution path -- the loop's seam is
+ * reached on every turn with no runnable work, which under load is every turn
+ * between two requests, so the loop cannot tell idle from busy. It answers how
+ * many connections it released and writes how many it skipped as still in
+ * use. */
+void scr_loop_set_sqlite_idle_release(int (*fn)(double, double, int *));
 long scr_abandoned_fiber_count(void);
 /* True while executing on an async fiber (vs the main stack) — the island
  * sizes its engine stack budget per stack (see scr_island.c). */

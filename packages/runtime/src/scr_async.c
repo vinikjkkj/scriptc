@@ -2462,6 +2462,182 @@ static void scr_fiber_pool_teardown(void) {
 #define SCR_HEAP_TRIM_MS 0
 #endif
 
+/* -- handing SQLite's idle page cache back at the same seam -----------
+ *
+ * The compiled binary's settled floor is dominated by SQLite's page cache.
+ * Measured on a paired history sync: 12.68 MB of a ~44 MiB floor sat at
+ * sqlite3.c's allocator, and a release returned 11.73 MiB by the allocation
+ * census and 12.66 MiB of private commit by an out-of-process VM walk, net of
+ * a control arm that showed the idle process shedding 2.1-3.0 MiB on its own.
+ * That is the user's standing complaint -- a compiled service that never
+ * gives memory back after a peak -- and it is the largest single term on the
+ * idle floor.
+ *
+ * WHY NOT SIMPLY LOWER THE CEILING. SQLITE_DEFAULT_CACHE_SIZE=-16000 is set
+ * in backend/cc.ts to match better-sqlite3's own build, read from the
+ * installed package's deps/defines.gypi. Lowering it reaches the same floor
+ * but taxes EVERY query, and once the working set exceeds the cache the two
+ * stop being substitutes: on a 129.6 MB database, four runs per arm, the
+ * lowered ceiling cost +6.65 ms per request (+74.1%, ranges non-overlapping)
+ * while a release cost +8.18 ms ONCE and nothing after (its steady-state
+ * range overlaps the control's). Break-even is 1.23 requests per idle window.
+ *
+ * THIS SEAM, not a timer: scr_loop_run has already decided it has no runnable
+ * work and is about to block. It is the seam scr_fiber_pool_decay and
+ * scr_heap_trim already use, and it reuses the 'now' they were handed, so it
+ * costs no clock read, no timer and no thread.
+ *
+ * BUT THE SEAM IS NOT IDLENESS, and conflating the two was this feature's
+ * first shape and its defect. "No runnable work this turn" is reached between
+ * any two requests, so on a server answering ten requests a second the seam is
+ * reached ten times a second. A window measured HERE would fire under full
+ * load, throw away a hot cache, and charge the next request the refill --
+ * repeatedly. The break-even that justifies the feature assumes the window
+ * only opens when nothing is being asked for.
+ *
+ * So the loop supplies the OPPORTUNITY and scr_sqlite.c supplies the
+ * JUDGEMENT: it stamps a per-connection last-use time on the path that
+ * already executes statements, and the hook releases only connections
+ * untouched for the whole window. That also makes idleness per connection
+ * rather than per process, so a service holding ten databases returns the
+ * cache of the nine sitting still and keeps the one in use. Measured with two
+ * handles on one file: in 26 windows one was kept and the other released in
+ * the SAME sweep, and the two populations do not overlap the window -- kept
+ * connections had been idle 6-737 ms, released ones 1012-70035 ms.
+ *
+ * THE WINDOW VERSUS THE REQUEST CADENCE IS A DESIGNED TRADE, not an open
+ * question. A service whose requests are further apart than the window is
+ * idle by this definition for a whole window, so it SHOULD release; the next
+ * request then pays the refill, measured at +8.18 ms once, which the
+ * break-even of 1.23 requests per idle window already covers. Choosing the
+ * window is choosing how long a lull must be before the cache is worth giving
+ * up, and that is the operator's call, not the runtime's.
+ *
+ * IT DOES NOT SHORTEN THE SLEEP, and that is a decision rather than an
+ * inheritance from the neighbour above. scr_heap_trim_due caps 'due' so its
+ * window cannot be slept past; the identical clamp shape on the fiber pool
+ * shortened the I/O poll deadline, reordered socket reads against timers, and
+ * produced a service that could not pair. A cache release has no deadline to
+ * miss -- nothing waits on it and nothing is wrong if it is late -- so when
+ * the window passes while the loop sleeps it simply runs on the next turn.
+ * There is deliberately no scr_sqlite_idle_due().
+ *
+ * DEFAULT OFF, following SCR_HEAP_TRIM_MS. The case here is much stronger
+ * than that one's 1.5% of retained bytes, but a new runtime default does not
+ * ship with a feature's debut; it ships afterwards, with use behind it.
+ * SCR_SQLITE_IDLE_RELEASE_MS=0 is the default and the negative control, and
+ * the seam then costs one integer compare.
+ *
+ * SCR_SQLITE_IDLE_STAT=1 prints one line per window INCLUDING windows that
+ * released nothing, so "ran and found no open connection" stays
+ * distinguishable from "never ran" -- the property that made the fiber pool's
+ * and the page return's zeros readable rather than ambiguous. */
+#ifndef SCR_SQLITE_IDLE_RELEASE_MS
+#define SCR_SQLITE_IDLE_RELEASE_MS 0
+#endif
+
+/* Set by scr_sqlite.c on the first open, and NULL in every binary that holds
+ * no SQLite handle -- which is why the dependency points that way: this unit
+ * is always linked and that one is gated on the program using SQLite. */
+static int (*scr_sqlite_idle_release_fn)(double, double, int *) = NULL;
+void scr_loop_set_sqlite_idle_release(int (*fn)(double, double, int *)) {
+  scr_sqlite_idle_release_fn = fn;
+}
+
+static double scr_sqlite_idle_next_ms = 0;
+#if SCR_ASYNC_STAT
+/* INSIDE THE GATE WITH THEIR ONLY READER, and that pairing is the point.
+ * Gating the stat line left these three incremented and never read, and a
+ * static that is written and never read is dead code a compiler may legally
+ * delete -- SILENTLY. The symptom is a counter reading zero in a shipping
+ * binary while the source plainly shows it incrementing, which this project
+ * has already had happen to six of them at once. The two honest shapes are an
+ * always-built reader or no always-built writer; this takes the second,
+ * because reproducing anything these count already requires
+ * -DSCR_ASYNC_STAT=1, so an accessor outside the gate would have nothing to
+ * report. */
+static unsigned long long scr_sqlite_idle_windows = 0;
+static unsigned long long scr_sqlite_idle_conns = 0;
+static unsigned long long scr_sqlite_idle_inuse = 0;
+#endif /* SCR_ASYNC_STAT */
+
+static size_t scr_sqlite_idle_ms(void) {
+  static size_t cached = SCR_SQLITE_IDLE_RELEASE_MS;
+  static int looked = 0;
+  if (!looked) {
+    const char *env = getenv("SCR_SQLITE_IDLE_RELEASE_MS");
+    looked = 1;
+    if (env != NULL) {
+      long v = strtol(env, NULL, 10);
+      cached = v > 0 ? (size_t)v : 0;
+    }
+  }
+  return cached;
+}
+
+static void scr_sqlite_idle_release(double now) {
+  size_t win = scr_sqlite_idle_ms();
+  int n, inuse;
+  if (win == 0) return;                           /* the default: one compare */
+  if (scr_sqlite_idle_release_fn == NULL) return; /* no SQLite in this binary */
+  if (scr_sqlite_idle_next_ms == 0) {
+    scr_sqlite_idle_next_ms = now + (double)win;
+    return;
+  }
+  if (now < scr_sqlite_idle_next_ms) return;
+  scr_sqlite_idle_next_ms = now + (double)win;
+  inuse = 0;
+  n = scr_sqlite_idle_release_fn(now, (double)win, &inuse);
+#if SCR_ASYNC_STAT
+  scr_sqlite_idle_windows++;
+  scr_sqlite_idle_conns += (unsigned long long)n;
+  scr_sqlite_idle_inuse += (unsigned long long)inuse;
+  /* BEHIND THE SAME COMPILE-TIME GATE AS EVERY OTHER DIAGNOSTIC IN THIS TU,
+   * and for the reason the gate was created. Converting this line from
+   * fprintf to fputs recovered 27,136 of 28,672 bytes, but the labels and the
+   * fputs calls still cost a static hello-world .text +1,024 and .rdata +512
+   * -- and the compact class has 512 bytes of headroom over its recorded
+   * figure, so "small" is still too big. Gated, a default binary pays nothing
+   * for a line it never prints, which is the same bargain SCR_ASYNC_STAT
+   * already struck for the loop's other reports. Build with
+   * -DSCR_ASYNC_STAT=1 and SCR_SQLITE_IDLE_STAT behaves as documented. */
+  if (getenv("SCR_SQLITE_IDLE_STAT") != NULL) {
+    /* THREE outcomes, not two, and the middle one is the load-bearing one.
+     * released=0 inUse=0 means the window found no open connection at all;
+     * released=0 inUse=N means it saw N and declined them because they had
+     * been used inside the window -- which is the only evidence that the
+     * execution-path stamp is being read. If inUse never appears under load,
+     * the stamp is not working and the release is firing on hot caches.
+     *
+     * fputs AND scr_utoa, NOT fprintf, and this line cost 28,672 bytes
+     * before it was written that way. A single printf in the always-linked
+     * runtime drags in libc's whole formatting path: measured on a static
+     * hello-world, .text +25,088, .rdata +3,072, .pdata +512, for a line no
+     * default build ever prints. This TU already learned that once -- see
+     * the identical note at the fiber pool's stat line, which priced two
+     * fprintf calls at 33,280 bytes -- and the lesson is a property of the
+     * FILE, not of that call site: anything always linked that formats pays
+     * it. */
+    char nb[24];
+    fputs("[sqlidle] window=", stderr);
+    fputs(scr_utoa((size_t)scr_sqlite_idle_windows, nb), stderr);
+    fputs(" released=", stderr);
+    fputs(scr_utoa((size_t)(n < 0 ? 0 : n), nb), stderr);
+    fputs(" inUse=", stderr);
+    fputs(scr_utoa((size_t)(inuse < 0 ? 0 : inuse), nb), stderr);
+    fputs(" totalReleased=", stderr);
+    fputs(scr_utoa((size_t)scr_sqlite_idle_conns, nb), stderr);
+    fputs(" totalInUse=", stderr);
+    fputs(scr_utoa((size_t)scr_sqlite_idle_inuse, nb), stderr);
+    fputs("\n", stderr);
+  }
+#else
+  /* The release still RAN; only its bookkeeping is gated out. */
+  (void)n;
+  (void)inuse;
+#endif /* SCR_ASYNC_STAT */
+}
+
 static double scr_heap_trim_next_ms = 0;
 /* Windows this trim actually ran, so the stat line can say "ran and found
  * nothing" rather than leaving the reader to guess. Static, deliberately:
@@ -3713,6 +3889,10 @@ bool scr_loop_run(ScrPromise *top_level) {
      * block, so a heap-wide walk cannot land between two allocations
      * of one turn. Off unless SCR_HEAP_TRIM_MS says otherwise. */
     scr_heap_trim(now);
+    /* And SQLite's page cache, at the same seam. Unlike the two above, this
+     * one never caps 'due' -- see its comment: a cache release has no
+     * deadline to miss, and that clamp shape is what broke pairing. */
+    scr_sqlite_idle_release(now);
     double due = scr_ntimers > 0 ? scr_timers[0].deadline_ms : now + SCR_IO_POLL_MS;
     /* A pool with entries left to free caps the sleep at its next window;
      * an empty one does not (see scr_stack_pool_decay_due). */

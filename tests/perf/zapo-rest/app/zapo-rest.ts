@@ -330,6 +330,15 @@ function openControl(): Promise<WaSqliteConnection> {
   });
 }
 
+/* A SECOND, SEPARATELY CACHED CONNECTION, held open for the multi-connection
+ * arm of the idle-release measurement. openControl's option set differs by one
+ * KiB of cache_size, which is a different key in openSqliteConnection's
+ * process-wide cache, so this is a genuinely separate sqlite3 handle on the
+ * same file -- the same discriminator /sessions/connection already relies on.
+ * Opened only when the route below is called, and never closed, which is the
+ * point: it must sit idle while the primary connection is hammered. */
+let secondConn: WaSqliteConnection | null = null;
+
 let conn: WaSqliteConnection | null = null;
 let storeReady = false;
 let storeError: string | null = null;
@@ -1426,6 +1435,33 @@ async function registryRoute(method: string, path: string, p: Bag): Promise<unkn
     const id = reqStr(p, "id");
     if (!idOk(id)) throw new Error(`invalid session id '${id}'; expected ${ID_SPELLING}`);
     return { id: id, rows: rowsFor(id) };
+  }
+
+  if (path === "/sessions/second") {
+    /* Opens and WARMS a second connection, then leaves it alone.
+     *
+     * The idle release claims to be per connection: a service holding several
+     * databases should hand back the cache of the ones sitting still and keep
+     * the cache of the one being queried. An aggregate window count cannot
+     * show that -- it says one release and one skip happened, not which handle
+     * was which -- so the runtime names each database in its stat line and
+     * this route supplies the second name to see.
+     *
+     * Warming matters: a connection with an empty page cache would be
+     * released with nothing to give back, and the arm would pass while
+     * measuring nothing. */
+    if (secondConn === null) secondConn = await openControl();
+    let warmed = 0;
+    for (const t of SESSION_TABLES) {
+      if (!tableExists(secondConn, t)) continue;
+      const one = secondConn.get<{ n: number }>(`SELECT COUNT(*) AS n FROM "${t}"`, []);
+      warmed += one === null ? 0 : one.n;
+    }
+    return {
+      second: true,
+      warmedRows: warmed,
+      note: "a second sqlite handle on the same file, warmed and then left idle",
+    };
   }
 
   if (path === "/sessions/cycleburst") {

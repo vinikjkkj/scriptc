@@ -89,6 +89,7 @@
 #include "sqlite3.h"
 
 #include <stdint.h>
+#include <stdio.h> /* the per-connection stat line */
 #include <stdlib.h>
 #include <string.h>
 
@@ -101,6 +102,9 @@
  */
 typedef struct ScrSqliteDb {
   size_t rc;
+  struct ScrSqliteDb *lnext; /* the live-connection list; see scr_sqlite_live */
+  struct ScrSqliteDb **lprev;
+  double last_use_ms; /* stamped by scr_sqlite_require_open; see the release */
   sqlite3 *h;
   ScrStr *name;   /* the filename EXACTLY as the program spelled it */
   bool open;
@@ -348,6 +352,101 @@ static void scr_sqlite_throw_range(const char *m) {
 
 /* ── lifetimes ────────────────────────────────────────────────────────*/
 
+/* ---- the live-connection registry -------------------------------------
+ *
+ * THE RUNTIME HAD NO LIST OF OPEN CONNECTIONS, and the idle release needs
+ * one: sqlite3_db_release_memory takes a handle, so something has to know
+ * every handle. scr_sqlite_close's comment one screen down explains why no
+ * list was needed before -- sqlite3_close_v2 defers the real close until the
+ * last statement is finalized, so a statement outliving its database is safe
+ * without better-sqlite3's statement registry. That reasoning is about
+ * TEARDOWN; it says nothing about enumeration, which is new here.
+ *
+ * Intrusive and O(1) both ways, so an open costs two stores and a close
+ * costs two. A pointer-to-previous-link rather than a back pointer, the same
+ * shape scr_cycle.c's chunk lists use, so unlinking needs no head special
+ * case. */
+static ScrSqliteDb *scr_sqlite_live = NULL;
+
+static void scr_sqlite_live_link(ScrSqliteDb *d) {
+  d->lnext = scr_sqlite_live;
+  d->lprev = &scr_sqlite_live;
+  if (d->lnext != NULL) d->lnext->lprev = &d->lnext;
+  scr_sqlite_live = d;
+}
+
+static void scr_sqlite_live_unlink(ScrSqliteDb *d) {
+  if (d->lprev == NULL) return; /* never linked, or already unlinked */
+  *d->lprev = d->lnext;
+  if (d->lnext != NULL) d->lnext->lprev = d->lprev;
+  d->lnext = NULL;
+  d->lprev = NULL;
+}
+
+/* Hands every open connection's UNPINNED page cache back to the allocator.
+ * Answers how many connections were asked, so the loop's stat line can say
+ * "ran and found nothing to do" rather than being silent -- the distinction
+ * that made the fiber pool's and the page-return's diagnostics trustworthy.
+ *
+ * WHY THIS IS SAFE TO CALL FROM THE EVENT LOOP, proved from this file rather
+ * than from SQLite's documentation:
+ *
+ *   - No fiber can be parked inside a statement. This translation unit
+ *     contains no reference to a fiber, an await, a promise or the loop at
+ *     all; every sqlite3_step sits in straight-line C inside one call.
+ *   - No user code can run inside a step: there is no create_function,
+ *     create_collation, create_module, set_authorizer, progress_handler,
+ *     update_hook or commit_hook anywhere here, SQLITE_OMIT_PROGRESS_CALLBACK
+ *     is compiled in, and function/aggregate/table are refused by name.
+ *   - No statement survives a call mid-iteration: every step site resets on
+ *     every path including the error paths, and 'iterate' is refused by name,
+ *     so there is no cursor to leave open across a loop turn.
+ *
+ * So the loop can never observe a statement in progress, and a release can
+ * never pull a page out from under one. SQLite would also protect pinned
+ * pages, but this does not have to rely on that. */
+/* Per-connection stat, cached. An AGGREGATE count cannot prove a
+ * per-connection claim: "released=1 inUse=1" says one of each happened in one
+ * window but not which handle was which, and the whole design claim is that
+ * the idle database gives its cache back WHILE the busy one keeps it. So when
+ * the stat is on, each decision names its database. */
+static int scr_sqlite_idle_stat(void) {
+  static int cached = -1;
+  if (cached < 0) cached = getenv("SCR_SQLITE_IDLE_STAT") != NULL;
+  return cached;
+}
+
+int scr_sqlite_idle_release_all(double now, double win_ms, int *inuse) {
+  ScrSqliteDb *d;
+  int n = 0, busy = 0;
+  int stat = scr_sqlite_idle_stat();
+  for (d = scr_sqlite_live; d != NULL; d = d->lnext) {
+    if (!d->open || d->h == NULL) continue;
+    /* PER CONNECTION, which is strictly better than a process-wide window: a
+     * service holding ten databases hands back the cache of the nine sitting
+     * still and keeps the one being queried. A connection used within the
+     * window is skipped and counted, because a window that SAW a connection
+     * and declined it has to be distinguishable from a window that found
+     * none -- that count is the only evidence the stamp is being read. */
+    if (now - d->last_use_ms < win_ms) {
+      busy++;
+      if (stat) {
+        fprintf(stderr, "[sqlidle] db=%.*s idleMs=%.0f IN-USE, kept\n",
+                (int)d->name->len, d->name->data, now - d->last_use_ms);
+      }
+      continue;
+    }
+    sqlite3_db_release_memory(d->h);
+    n++;
+    if (stat) {
+      fprintf(stderr, "[sqlidle] db=%.*s idleMs=%.0f RELEASED\n",
+              (int)d->name->len, d->name->data, now - d->last_use_ms);
+    }
+  }
+  if (inuse != NULL) *inuse = busy;
+  return n;
+}
+
 ScrSqliteDb *scr_sqlite_db_retain(ScrSqliteDb *d) {
   if (d != NULL) d->rc++;
   return d;
@@ -355,6 +454,7 @@ ScrSqliteDb *scr_sqlite_db_retain(ScrSqliteDb *d) {
 
 void scr_sqlite_db_release(ScrSqliteDb *d) {
   if (d == NULL || --d->rc != 0) return;
+  scr_sqlite_live_unlink(d);
   if (d->h != NULL) sqlite3_close_v2(d->h);
   scr_str_release(d->name);
   free(d);
@@ -465,12 +565,32 @@ ScrSqliteDb *scr_sqlite_open(const ScrStr *path, bool readonly, bool must_exist,
   db->name = scr_str_retain((ScrStr *)path);
   db->open = true;
   db->readonly = readonly;
+  /* Opening is using: without this a connection calloc'd to 0 would read as
+   * idle since the epoch and be released on the very first window. */
+  db->last_use_ms = scr_now_ms();
+  scr_sqlite_live_link(db);
+  /* Installed from here rather than from the loop: scr_async.c is linked into
+   * every binary and this unit is gated on the program holding a SQLite
+   * handle, so the dependency has to point this way or a hello-world fails to
+   * link. The setter is idempotent. */
+  scr_loop_set_sqlite_idle_release(scr_sqlite_idle_release_all);
   db->memory = sqlite3_db_filename(h, "main") == NULL || sqlite3_db_filename(h, "main")[0] == '\0';
   return db;
 }
 
 /* REQUIRE_DATABASE_OPEN. Answers false with the throw pending. */
 static bool scr_sqlite_require_open(ScrSqliteDb *db) {
+  /* THE IDLENESS STAMP, and this is the only place it is written.
+   *
+   * Every path that touches the engine passes here first -- prepare, run,
+   * get, all, pluck and exec -- so one store here is a complete record of
+   * when this connection was last used, in a path that already does far more
+   * than a store. The loop cannot know this: its seam is reached on every
+   * turn with no RUNNABLE work, which between two requests of a busy server
+   * is every turn, so a window measured there would fire under full load and
+   * throw away a hot cache. Idleness is a property of the CONNECTION, and
+   * this is where the connection learns it. */
+  db->last_use_ms = scr_now_ms();
   if (db->open) return true;
   scr_sqlite_throw_type("The database connection is not open");
   return false;
