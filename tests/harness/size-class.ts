@@ -252,7 +252,7 @@ export const STATIC_CLASS_MAX =
 
 /** A program that uses regex: libregexp + libunicode, never the engine. */
 export const REGEX_CLASS_MAX =
-  platform === "linux" ? 559_848 : platform === "win32" ? 826_368 : 526_848;
+  platform === "linux" ? 559_848 : platform === "win32" ? 830_464 : 526_848;
 
 /* ── the ARMED half of the guard ───────────────────────────────────────
  *
@@ -1675,11 +1675,53 @@ export const STATIC_CLASS_RECORDED = platform === "win32" ? 684_544 : null;
  *
  * REGEX_CLASS_MAX is unaffected - 822,784 is still under its 826,368. */
 
+/* 2026-10-03 - RECORDED 822,784 -> 826,368 and MAX 826,368 -> 830,464, and
+ * the two moves have different reasons.
+ *
+ * The guard failed as "expected 826368 to be less than 826368": the regex
+ * program had reached MAX exactly, and toBeLessThan fails on equal. That is
+ * the sharp edge the entry above already names.
+ *
+ * ATTRIBUTION, measured by building the same program at four revisions into
+ * the SAME output path -- a per-arm path changes the embedded PDB name and
+ * therefore the size -- reverting one commit at a time off this branch's tip:
+ *
+ *     825,856  main (e53b807c5)
+ *        +512  1656267b2, the stack-overflow check in the prologues
+ *          +0  3410464b4, the link-time margin pin
+ *          +0  6cdbc38fa, the margin symbol's own TU
+ *     826,368  total, equal to the ceiling it had to be under
+ *
+ * The branch is exactly main plus those commits, so the 825,856 arm IS main:
+ * 3,072 of the 3,584 this figure had fallen behind by were ALREADY SHIPPED
+ * on main before any of this work, and only 512 belong to the branch that
+ * tripped the guard. The pin and the leaf TU weigh nothing, which is what
+ * the one-pointer-per-TU prediction said and what the measurement confirms:
+ * eight bytes vanish inside the page the image is already padded to. The
+ * reverted arm rebuilt for real (13.9s against a 508ms cache hit) and
+ * returned the same number, so the zero is a measurement and not a cache.
+ *
+ * WHY RECORD. RECORDED states what SHIPS. Left at 822,784 it sits 3,584
+ * behind reality on bytes that are not this branch's, so the next byte
+ * anyone adds makes the guard complain about a debt they did not incur.
+ * Recording acknowledges the state; it does not forgive growth -- the 512
+ * is named above and stays named.
+ *
+ * WHY MAX MOVES ONE PAGE. The tolerance exists to absorb variation, and
+ * under toBeLessThan a tolerance exactly reached is a tolerance of zero.
+ * 830,464 gives back the 4,096 the design intended. The DISTANCE property
+ * the ceiling actually protects is untouched: regex linkage is a ~110 KB
+ * jump over the static class and the engine a ~620 KB one, so one page of
+ * headroom cannot let either hide.
+ *
+ * The 512 is capacity that ships, and capacity that ships pays for itself:
+ * it buys a catchable RangeError in both lanes where the process used to
+ * die 0xC00000FD -- which is where node throws. */
 /** The regex program, same run, same tree. Deliberately NOT derived from
  * the static delta - and the 2026-08-24 entry is why: that change moved the
  * two classes by -7,680 and -6,656, so deriving either from the other would
  * have been 1,024 bytes wrong. */
-export const REGEX_CLASS_RECORDED = platform === "win32" ? 822_784 : null;
+export const REGEX_CLASS_RECORDED = platform === "win32" ? 826_368 : null;
 
 /** The complaint a recorded-figure check makes, or null when the size is
  * within one page of what was recorded. A string rather than a thrown
