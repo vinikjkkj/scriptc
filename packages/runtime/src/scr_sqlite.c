@@ -101,6 +101,8 @@
  */
 typedef struct ScrSqliteDb {
   size_t rc;
+  struct ScrSqliteDb *lnext; /* the live-connection list; see scr_sqlite_live */
+  struct ScrSqliteDb **lprev;
   sqlite3 *h;
   ScrStr *name;   /* the filename EXACTLY as the program spelled it */
   bool open;
@@ -348,6 +350,70 @@ static void scr_sqlite_throw_range(const char *m) {
 
 /* ── lifetimes ────────────────────────────────────────────────────────*/
 
+/* ---- the live-connection registry -------------------------------------
+ *
+ * THE RUNTIME HAD NO LIST OF OPEN CONNECTIONS, and the idle release needs
+ * one: sqlite3_db_release_memory takes a handle, so something has to know
+ * every handle. scr_sqlite_close's comment one screen down explains why no
+ * list was needed before -- sqlite3_close_v2 defers the real close until the
+ * last statement is finalized, so a statement outliving its database is safe
+ * without better-sqlite3's statement registry. That reasoning is about
+ * TEARDOWN; it says nothing about enumeration, which is new here.
+ *
+ * Intrusive and O(1) both ways, so an open costs two stores and a close
+ * costs two. A pointer-to-previous-link rather than a back pointer, the same
+ * shape scr_cycle.c's chunk lists use, so unlinking needs no head special
+ * case. */
+static ScrSqliteDb *scr_sqlite_live = NULL;
+
+static void scr_sqlite_live_link(ScrSqliteDb *d) {
+  d->lnext = scr_sqlite_live;
+  d->lprev = &scr_sqlite_live;
+  if (d->lnext != NULL) d->lnext->lprev = &d->lnext;
+  scr_sqlite_live = d;
+}
+
+static void scr_sqlite_live_unlink(ScrSqliteDb *d) {
+  if (d->lprev == NULL) return; /* never linked, or already unlinked */
+  *d->lprev = d->lnext;
+  if (d->lnext != NULL) d->lnext->lprev = d->lprev;
+  d->lnext = NULL;
+  d->lprev = NULL;
+}
+
+/* Hands every open connection's UNPINNED page cache back to the allocator.
+ * Answers how many connections were asked, so the loop's stat line can say
+ * "ran and found nothing to do" rather than being silent -- the distinction
+ * that made the fiber pool's and the page-return's diagnostics trustworthy.
+ *
+ * WHY THIS IS SAFE TO CALL FROM THE EVENT LOOP, proved from this file rather
+ * than from SQLite's documentation:
+ *
+ *   - No fiber can be parked inside a statement. This translation unit
+ *     contains no reference to a fiber, an await, a promise or the loop at
+ *     all; every sqlite3_step sits in straight-line C inside one call.
+ *   - No user code can run inside a step: there is no create_function,
+ *     create_collation, create_module, set_authorizer, progress_handler,
+ *     update_hook or commit_hook anywhere here, SQLITE_OMIT_PROGRESS_CALLBACK
+ *     is compiled in, and function/aggregate/table are refused by name.
+ *   - No statement survives a call mid-iteration: every step site resets on
+ *     every path including the error paths, and 'iterate' is refused by name,
+ *     so there is no cursor to leave open across a loop turn.
+ *
+ * So the loop can never observe a statement in progress, and a release can
+ * never pull a page out from under one. SQLite would also protect pinned
+ * pages, but this does not have to rely on that. */
+int scr_sqlite_idle_release_all(void) {
+  ScrSqliteDb *d;
+  int n = 0;
+  for (d = scr_sqlite_live; d != NULL; d = d->lnext) {
+    if (!d->open || d->h == NULL) continue;
+    sqlite3_db_release_memory(d->h);
+    n++;
+  }
+  return n;
+}
+
 ScrSqliteDb *scr_sqlite_db_retain(ScrSqliteDb *d) {
   if (d != NULL) d->rc++;
   return d;
@@ -355,6 +421,7 @@ ScrSqliteDb *scr_sqlite_db_retain(ScrSqliteDb *d) {
 
 void scr_sqlite_db_release(ScrSqliteDb *d) {
   if (d == NULL || --d->rc != 0) return;
+  scr_sqlite_live_unlink(d);
   if (d->h != NULL) sqlite3_close_v2(d->h);
   scr_str_release(d->name);
   free(d);
@@ -465,6 +532,12 @@ ScrSqliteDb *scr_sqlite_open(const ScrStr *path, bool readonly, bool must_exist,
   db->name = scr_str_retain((ScrStr *)path);
   db->open = true;
   db->readonly = readonly;
+  scr_sqlite_live_link(db);
+  /* Installed from here rather than from the loop: scr_async.c is linked into
+   * every binary and this unit is gated on the program holding a SQLite
+   * handle, so the dependency has to point this way or a hello-world fails to
+   * link. The setter is idempotent. */
+  scr_loop_set_sqlite_idle_release(scr_sqlite_idle_release_all);
   db->memory = sqlite3_db_filename(h, "main") == NULL || sqlite3_db_filename(h, "main")[0] == '\0';
   return db;
 }
