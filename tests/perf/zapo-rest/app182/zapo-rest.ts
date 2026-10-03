@@ -1428,6 +1428,39 @@ async function registryRoute(method: string, path: string, p: Bag): Promise<unkn
     return { id: id, rows: rowsFor(id) };
   }
 
+  if (path === "/sessions/shrink") {
+    /* PRAGMA shrink_memory -> sqlite3_db_release_memory(), which frees every
+     * UNPINNED page of this connection's page cache back to the C allocator.
+     * It works whether or not the engine was built with
+     * SQLITE_ENABLE_MEMORY_MANAGEMENT (that flag gates sqlite3_release_memory,
+     * the OTHER one, which is a no-op returning 0 in our build) -- so this is
+     * the only route by which the idle page cache can be handed back without
+     * lowering the ceiling it refills to.
+     *
+     * WHY A ROUTE AND NOT A SMALLER cache_size. The two answer different
+     * questions. ZAPO_SQLITE_CACHE_KB caps the cache for the whole run and
+     * trades steady-state I/O for bytes; this gives the bytes back at idle and
+     * keeps the ceiling for when work resumes. Measuring the second needs the
+     * SAME binary in both arms, with calling this route as the only knob --
+     * which is why it ships inert rather than firing on a timer.
+     *
+     * It reports only what it can honestly know: the engine is built with
+     * SQLITE_DEFAULT_MEMSTATUS=0, so sqlite3_memory_used() is unavailable and
+     * this cannot report bytes freed. The byte question belongs to the
+     * allocation census (how many left sqlite3.c) and to an out-of-process
+     * walker (whether the OS got them back); neither is visible from here. */
+    const c = db();
+    const t0 = Date.now();
+    c.exec("PRAGMA shrink_memory");
+    return {
+      pragma: "shrink_memory",
+      ms: Date.now() - t0,
+      cacheKb: CACHE_KB,
+      driver: c.driver,
+      note: "bytes freed is NOT reported: SQLITE_DEFAULT_MEMSTATUS=0. Use the census and the VM walker.",
+    };
+  }
+
   if (path === "/sessions/connection") {
     /* ARMED PROOF that one connection serves every session.
      *
