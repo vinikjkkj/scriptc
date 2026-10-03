@@ -719,3 +719,162 @@ control, it is a diagonal. And two results are addable only when they name the
 same column: `7439947b3` measured mode-classified **peak**, `e53b807c5`
 measured **settled**, so no sum of the two was ever meaningful even before the
 confound.
+
+---
+
+## The idle-floor front, 2026-10-03 — CLOSED. Outside SQLite there is no recoverable memory in the allocator.
+
+The question was where a settled compiled `zapo-rest` keeps its private commit,
+and whether any of it can be handed back. It is now decomposed to the end. The
+answer is that the allocator is not the place: every arena either already
+returns what it can or is held by placement, and the four size-class pools
+together hold **718.2 KiB**.
+
+```
+                        held at rest     ceiling if perfect     delivered
+cycle arena             115 chunks         7.19 MiB            n/a (placement)
+string arena             57 chunks         3.56 MiB            0 bytes, measured
+four size-class pools      718.2 KiB        718.2 KiB          n/a (it is churn)
+SQLite page cache       -- addressed by 45be81090 / 8a507dfc1, off by default --
+```
+
+### The cycle arena is placement, and the survivors are four kinds
+
+`tests/perf/cycensus`, audit OK (planted arm recovered, no table overflow, rows
+sum to totals). Live at rest **4,782,144 B** over 204 rows:
+
+```
+scr_dyn_gcfree       3,106,368   64.96%   48,537 objects
+scr_closure_gcfree     628,016   13.13%
+scr_box_gcfree         530,112   11.09%
+scr_union_gcfree       452,224    9.46%
+                     ---------
+top four               98.63%     the other 200 rows hold 65,424 B,
+                                  185 of them with fewer than 10 objects
+```
+
+So the survivors **do** concentrate, and a `trace`-keyed arena would be a
+four-way split rather than sixteen. It is still not worth building: the arena
+holds 115 chunks at exit, `115 x 64 KiB = 7,536,640 B`, and that is the whole
+of what a perfect per-kind split could ever return. The arena already frees
+1,761 of 1,876 chunks — 93.9% — without one.
+
+### The string arena: the route opened, and it returned nothing
+
+`63be4f59b` made a chunk able to learn it emptied and poured the pool back at
+the idle seam. Both halves work and neither buys anything.
+
+```
+sargive        0  ->  18,332      the route, which was measured at ZERO before
+charged                17,826     blocks attributed to a chunk in one window
+foreign                     0
+chunksFreed                 0     in every one of 270 windows that ran
+```
+
+`sargive` cross-checks exactly against the independent sum of per-window
+`drained=`. The external VM walk — outside the process, depending on nothing
+that was instrumented — reads `CLASS PRIVATE committed 53.35 MiB` before the
+45 s idle dwell and **53.35 MiB** after it.
+
+It is not bad luck, it is arithmetic: 57 chunks is **3.56 MiB** total, ~1,477
+blocks are carved per chunk, and the best single window had 21.2% of all carved
+blocks free at once. A chunk needs all ~1,477 simultaneously.
+
+The drain therefore **ships off and is not a feature.** It stays in the tree
+because the accounting around it is what makes "this is placement" re-checkable
+against a future workload, and that claim is workload-dependent. The argument
+against turning it on is not its cost — with the knob off it is one integer
+compare at a seam that is not the hot path — it is that the drain is a **second
+writer to `scr_str_ar_free[]`**, which the allocation path reads unguarded, and
+its safety rests on "the seam is idle": a precondition `scr_async.c` owns and
+`scr_string.c` cannot see. Zero bytes is not worth that.
+
+### The four pools hold 718.2 KiB, and the cycle pool holds nothing at all
+
+`tests/perf/poolstat`, arm 1024 reading back as arithmetic, `cfgSeen=1`,
+`lost=0`, report complete.
+
+```
+pool          takes          hit%     held at exit    bytesMax
+cyc         456,029            --            0            0
+jsonkey  12,405,121         99.84%      66,912       67,800
+dynext    1,778,849         99.93%       4,512        6,624
+str     293,176,373         99.96%     664,048      709,352
+                                       -------
+                                       735,472 B = 718.2 KiB
+```
+
+**The cycle pool never receives a block**: `scr_cyc_free` routes every carved
+block to its chunk and only non-carved blocks reach `scr_pool_give`. Its 456,029
+missed takes are the calloc fallback, and that integer is identical to cycstat's
+`callocfallback=456029` measured in a **different binary** an hour earlier.
+
+The remainder is churn, not hoarding — 99.84 / 99.93 / 99.96% hit rates, with
+`str` serving 207.9 million takes out of the pool. Six classes hold 93% of the
+718 KiB, the largest being the 40-byte class of `str` at 288,200 B.
+
+### `SCR_POOL_BUDGET` stays at 16 MiB
+
+The counterfactual curve shows zero in-range gives rejected at 16 MiB, 4 MiB
+**and** 1 MiB, with a cliff below. It is tempting to read that as "the bound is
+23x too big". Three reasons not to:
+
+1. **The knee is not where the grid says.** The probe bounds are 4x-spaced
+   (`16M, 4M, 1M, 256K, ...`), so the threshold is located only to *between
+   256 KiB and 1 MiB*. It is the high-water of `str` itself, **692.7 KiB** —
+   which puts 1 MiB at **1.48x** headroom, not the 4x the grid suggests.
+   Choosing 1 MiB would be reading the sampling grid as a measurement.
+2. **The counterfactual is a shadow, not a simulation.** `would_reject` is
+   computed over the *active* policy's retention trajectory, as its header says.
+   A bound that would have changed that trajectory is priced approximately, so
+   the curve is indicative near the shipped value and progressively less
+   trustworthy as it tightens — exactly where a new value would be chosen.
+3. **The bound exists for the workload we did not measure.** `scr_runtime.h`
+   states that a pool cannot exceed the program's own past live peak in the
+   `<= SCR_POOL_MAX` classes, and that what the budget guards is cross-phase
+   fragmentation. Sizing it from one workload's high-water picks a number from
+   precisely the case the bound is not for.
+
+And tightening is **not behaviourally neutral**: `scr_pool_stat.h` records that
+a pool small enough to refuse gives pushes the overflow onto the free list of
+the string arena, where a 16 MiB pool never does. That is the route `63be4f59b`
+instrumented, so any budget change moves `sargive` and the chunk-emptiness
+arithmetic of the front this section closes, and would require re-measuring it.
+
+Against all of that the upside is zero bytes today: 765.4 KiB of observed
+high-water across four pools is **1.2%** of the 64 MiB theoretical worst case.
+The bound never binds, so moving it is risk without return.
+
+### Two retractions, and the single shape behind both
+
+Both wrong numbers came from **reading a balance as a state**, and both were
+produced inside this block.
+
+**123.8 MiB "on the size-class free lists", retracted.** The `poolPhys` of the
+census is an event balance: `pooled=1` on free covers *both* the arena give and
+the size-class give, while `pooled=1` on alloc covers *only* `scr_cyc_ar_pop`.
+So every successful `scr_pool_take` adds a permanent `+phys`, and a chunk freed
+to the OS carries the bytes of its blocks out with no decrement. It could only
+grow. Caught by a comparison that was free and that already sat in the same
+message: the census claimed **128.40 MiB** held while the external walk read
+**53.35 MiB** of private commit and the kernel **63.43 MiB**, on the same
+process at the same instant.
+
+> **An internal counter larger than the external total of the process is
+> impossible, and checking that requires knowing what neither number measures.**
+
+**13.77 MiB of "real residual", retracted.** Having diagnosed the drift, I
+subtracted one component of it — `1,761 freed chunks x 64 KiB = 110.06 MiB` —
+and read the remainder as occupancy, noting approvingly that it fell under the
+16 MiB budget. It was an artefact of an artefact. Caught by running the
+instrument that has occupancy semantics: the pool it was supposedly in holds
+**0 bytes**, and the four pools together hold 718.2 KiB. The share of the
+53.35 MiB floor is **1.31%**, not the 26% the 13.77 figure implied.
+
+The rule worth keeping is not a bigger sanity check after the fact. It is a
+property to demand of an instrument before trusting it: **its counters must
+move only on the events that change the thing being measured.** `poolstat` got
+the right answer because `+r` on an accepted give and `-r` on a hit are the only
+two things that can alter a pool, and it hooks exactly those. The pool columns
+of the census never had that property, and no amount of care in reading them
+would have supplied it.
