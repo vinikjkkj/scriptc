@@ -2621,13 +2621,13 @@ static void scr_sqlite_idle_release(double now) {
     char nb[24];
     fputs("[sqlidle] window=", stderr);
     fputs(scr_utoa((size_t)scr_sqlite_idle_windows, nb), stderr);
-    fputs("released=", stderr);
+    fputs(" released=", stderr);
     fputs(scr_utoa((size_t)(n < 0 ? 0 : n), nb), stderr);
-    fputs("inUse=", stderr);
+    fputs(" inUse=", stderr);
     fputs(scr_utoa((size_t)(inuse < 0 ? 0 : inuse), nb), stderr);
-    fputs("totalReleased=", stderr);
+    fputs(" totalReleased=", stderr);
     fputs(scr_utoa((size_t)scr_sqlite_idle_conns, nb), stderr);
-    fputs("totalInUse=", stderr);
+    fputs(" totalInUse=", stderr);
     fputs(scr_utoa((size_t)scr_sqlite_idle_inuse, nb), stderr);
     fputs("\n", stderr);
   }
