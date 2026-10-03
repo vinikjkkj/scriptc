@@ -2545,9 +2545,21 @@ void scr_loop_set_sqlite_idle_release(int (*fn)(double, double, int *)) {
 }
 
 static double scr_sqlite_idle_next_ms = 0;
+#if SCR_ASYNC_STAT
+/* INSIDE THE GATE WITH THEIR ONLY READER, and that pairing is the point.
+ * Gating the stat line left these three incremented and never read, and a
+ * static that is written and never read is dead code a compiler may legally
+ * delete -- SILENTLY. The symptom is a counter reading zero in a shipping
+ * binary while the source plainly shows it incrementing, which this project
+ * has already had happen to six of them at once. The two honest shapes are an
+ * always-built reader or no always-built writer; this takes the second,
+ * because reproducing anything these count already requires
+ * -DSCR_ASYNC_STAT=1, so an accessor outside the gate would have nothing to
+ * report. */
 static unsigned long long scr_sqlite_idle_windows = 0;
 static unsigned long long scr_sqlite_idle_conns = 0;
 static unsigned long long scr_sqlite_idle_inuse = 0;
+#endif /* SCR_ASYNC_STAT */
 
 static size_t scr_sqlite_idle_ms(void) {
   static size_t cached = SCR_SQLITE_IDLE_RELEASE_MS;
@@ -2576,10 +2588,10 @@ static void scr_sqlite_idle_release(double now) {
   scr_sqlite_idle_next_ms = now + (double)win;
   inuse = 0;
   n = scr_sqlite_idle_release_fn(now, (double)win, &inuse);
+#if SCR_ASYNC_STAT
   scr_sqlite_idle_windows++;
   scr_sqlite_idle_conns += (unsigned long long)n;
   scr_sqlite_idle_inuse += (unsigned long long)inuse;
-#if SCR_ASYNC_STAT
   /* BEHIND THE SAME COMPILE-TIME GATE AS EVERY OTHER DIAGNOSTIC IN THIS TU,
    * and for the reason the gate was created. Converting this line from
    * fprintf to fputs recovered 27,136 of 28,672 bytes, but the labels and the
@@ -2620,6 +2632,8 @@ static void scr_sqlite_idle_release(double now) {
     fputs("\n", stderr);
   }
 #else
+  /* The release still RAN; only its bookkeeping is gated out. */
+  (void)n;
   (void)inuse;
 #endif /* SCR_ASYNC_STAT */
 }
