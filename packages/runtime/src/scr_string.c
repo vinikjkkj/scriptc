@@ -838,10 +838,21 @@ static void *scr_str_ar_take(size_t r) {
     if (h->next != NULL) h->next->prevp = &h->next;
     scr_str_ar_chunks = h;
     scr_str_ar_curchunk = h;
-    /* Installed on the first chunk, so a program that never makes a heap
-     * string carries no hook. scr_async.c is always linked and this unit's
-     * arena is not always reached. */
-    scr_loop_set_str_idle_drain(scr_str_idle_drain);
+    /* NO HOOK IS INSTALLED HERE, and the reason is a link fact rather than a
+     * runtime one. The first shape registered scr_str_idle_drain through
+     * scr_loop_set_str_idle_drain, on the premise that "scr_async.c is always
+     * linked". That is true of a whole program and FALSE of a library: the
+     * per-library fragment archives this TU without scr_async.c, so every
+     * library build failed at link with `undefined symbol:
+     * scr_loop_set_str_idle_drain` — 60 tests across four shards, all one
+     * cause. The dependency now runs the other way, which costs nothing
+     * because scr_async.c already calls scr_str_new, scr_str_retain and
+     * scr_str_release and so already cannot link without this unit.
+     *
+     * The property the hook was protecting is kept by the knob, not by the
+     * pointer: scr_str_idle_drain_tick returns on `win == 0` BEFORE it would
+     * call, so a default binary still pays exactly one integer compare per
+     * seam whether or not a chunk was ever carved. */
     scr_str_ar_cur = k + sizeof(ScrStrChunk);
     scr_str_ar_lim = k + SCR_STR_ARENA_CHUNK;
     SCR_CS_BUMP(sarchunk);

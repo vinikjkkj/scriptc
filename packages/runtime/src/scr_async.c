@@ -2660,8 +2660,8 @@ static void scr_sqlite_idle_release(double now) {
 #define SCR_STR_IDLE_DRAIN_MS 0
 #endif
 
-static int (*scr_str_idle_drain_fn)(int *) = NULL;
-void scr_loop_set_str_idle_drain(int (*fn)(int *)) { scr_str_idle_drain_fn = fn; }
+/* No function pointer and no setter: scr_str_idle_drain is called directly.
+ * See scr_runtime.h's note on the declaration for why. */
 
 static double scr_str_idle_next_ms = 0;
 #if SCR_ASYNC_STAT
@@ -2685,11 +2685,12 @@ static void scr_str_idle_drain_tick(double now) {
   size_t win = scr_str_idle_ms();
   int drained = 0, freed;
   if (win == 0) return;
-  if (scr_str_idle_drain_fn == NULL) return;
+  /* `win == 0` above is what keeps a default binary free, so no NULL hook
+   * check is needed here: the drain is never entered when the knob is off. */
   if (scr_str_idle_next_ms == 0) { scr_str_idle_next_ms = now + (double)win; return; }
   if (now < scr_str_idle_next_ms) return;
   scr_str_idle_next_ms = now + (double)win;
-  freed = scr_str_idle_drain_fn(&drained);
+  freed = scr_str_idle_drain(&drained);
 #if SCR_ASYNC_STAT
   scr_str_idle_windows++;
   if (freed < 0) scr_str_idle_skipped++;
