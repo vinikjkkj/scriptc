@@ -89,6 +89,7 @@
 #include "sqlite3.h"
 
 #include <stdint.h>
+#include <stdio.h> /* the per-connection stat line */
 #include <stdlib.h>
 #include <string.h>
 
@@ -404,9 +405,21 @@ static void scr_sqlite_live_unlink(ScrSqliteDb *d) {
  * So the loop can never observe a statement in progress, and a release can
  * never pull a page out from under one. SQLite would also protect pinned
  * pages, but this does not have to rely on that. */
+/* Per-connection stat, cached. An AGGREGATE count cannot prove a
+ * per-connection claim: "released=1 inUse=1" says one of each happened in one
+ * window but not which handle was which, and the whole design claim is that
+ * the idle database gives its cache back WHILE the busy one keeps it. So when
+ * the stat is on, each decision names its database. */
+static int scr_sqlite_idle_stat(void) {
+  static int cached = -1;
+  if (cached < 0) cached = getenv("SCR_SQLITE_IDLE_STAT") != NULL;
+  return cached;
+}
+
 int scr_sqlite_idle_release_all(double now, double win_ms, int *inuse) {
   ScrSqliteDb *d;
   int n = 0, busy = 0;
+  int stat = scr_sqlite_idle_stat();
   for (d = scr_sqlite_live; d != NULL; d = d->lnext) {
     if (!d->open || d->h == NULL) continue;
     /* PER CONNECTION, which is strictly better than a process-wide window: a
@@ -415,9 +428,20 @@ int scr_sqlite_idle_release_all(double now, double win_ms, int *inuse) {
      * window is skipped and counted, because a window that SAW a connection
      * and declined it has to be distinguishable from a window that found
      * none -- that count is the only evidence the stamp is being read. */
-    if (now - d->last_use_ms < win_ms) { busy++; continue; }
+    if (now - d->last_use_ms < win_ms) {
+      busy++;
+      if (stat) {
+        fprintf(stderr, "[sqlidle] db=%.*s idleMs=%.0f IN-USE, kept\n",
+                (int)d->name->len, d->name->data, now - d->last_use_ms);
+      }
+      continue;
+    }
     sqlite3_db_release_memory(d->h);
     n++;
+    if (stat) {
+      fprintf(stderr, "[sqlidle] db=%.*s idleMs=%.0f RELEASED\n",
+              (int)d->name->len, d->name->data, now - d->last_use_ms);
+    }
   }
   if (inuse != NULL) *inuse = busy;
   return n;

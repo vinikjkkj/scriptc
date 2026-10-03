@@ -511,6 +511,13 @@ resolves, and keeps answering the old value.
 
 ## Unnumbered: observed, documented nowhere
 
+This section holds TWO kinds of entry and they are not the same thing. Most
+are archaeological: behaviour that already diverged, found by reading, whose
+number was lost with the original document. The rest are NEW -- divergences
+this project introduced deliberately and chose to record here rather than
+claim a number. Each entry says which it is, because a reader who cannot tell
+them apart will read a decision we made as a fact we discovered.
+
 ### An error has no `stack` property
 
 No error object in this runtime carries a `stack` property: the string "stack"
@@ -528,6 +535,40 @@ document was rebuilt from.
 
     packages/runtime/src/scr_exception.c:350
     packages/runtime/src/scr_error.c:23
+
+### An idle event loop may hand SQLite's page cache back (CONDITIONAL, OFF by default)
+
+KIND: NEW. Introduced 2026-10-03, not archaeological.
+
+Node running better-sqlite3 never releases page cache on an idle event loop;
+nothing in that stack does. This runtime can: when a connection has gone
+untouched for a configured window, the loop calls sqlite3_db_release_memory on
+it at the seam where it has no runnable work.
+
+IT IS A MEMORY DIVERGENCE, NOT A BEHAVIOURAL ONE, and that is why it is
+recorded rather than numbered. sqlite3_db_release_memory frees only UNPINNED
+pages. It changes no query result, no error, no row order, no value, and no
+pragma readback; a program cannot observe it except through process memory --
+which is the axis it exists to move. Measured on a 129.6 MB database, the
+settled floor falls 17.3 MiB with no sustained cost: a request every 100 ms
+against a 1000 ms window gives a median 0.33 ms FASTER than the control, p10,
+p90 and max overlapping or lower, because connections used inside the window
+are skipped rather than released.
+
+IT IS CONDITIONAL, and this is the part that makes the entry honest. The
+feature ships OFF. SCR_SQLITE_IDLE_RELEASE_MS=0 is the default, the seam then
+costs one integer compare, and NO BINARY DIVERGES FROM NODE UNLESS SOMEONE
+SETS THAT VARIABLE. A conditional divergence is a more precise statement than
+a number would be, which is the other reason not to assign one.
+
+NO number is assigned, for the reason the entry above gives and which applies
+unchanged here: numbering is the registry owner's call, this document is a
+reconstruction, and inventing a number would corrupt the sequence it was
+rebuilt from. The decision not to assign one was taken deliberately, not
+deferred.
+
+    packages/runtime/src/scr_async.c  (the seam tenant, and why it does not clamp)
+    packages/runtime/src/scr_sqlite.c (the per-connection last-use stamp)
 
 ---
 
