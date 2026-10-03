@@ -515,3 +515,11 @@ void scr_stack_exhausted(void) {
   scr_throw_error_msg(SCR_ERR_RANGE, "Maximum call stack size exceeded",
                       sizeof("Maximum call stack size exceeded") - 1);
 }
+
+/* The link-time margin agreement (scr_runtime.h). THE definition, named
+ * from this runtime's own SCR_STACK_MARGIN_KIB. Every emitted module
+ * references the name built from the value ITS lane baked, so a lane that
+ * read a different copy of the header fails the link instead of shipping a
+ * binary whose guard fires at the wrong depth. Never read -- only the NAME
+ * carries information. */
+const char SCR_STACK_MARGIN_SYM[1] = { 0 };

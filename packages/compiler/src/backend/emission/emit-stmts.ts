@@ -188,20 +188,44 @@ export function stackCheckPolicy(mayThrow: Set<string>, fn: IrFunction): boolean
  * a default: this number is what stands between a deep recursion and a
  * 0xC00000FD, and it was measured (the throw path alone needs 18 KiB), not
  * chosen. Guessing it quietly is the failure mode worth refusing. */
-let stackMarginCache: number | null = null;
-export function stackMarginBytes(): number {
-  if (stackMarginCache !== null) return stackMarginCache;
+let stackMarginKibCache: number | null = null;
+function stackMarginKib(): number {
+  if (stackMarginKibCache !== null) return stackMarginKibCache;
   const req = createRequire(import.meta.url);
   const hdr = join(dirname(req.resolve("@scriptc/runtime/package.json")), "src", "scr_runtime.h");
-  const m = /#define\s+SCR_STACK_MARGIN\s+\((\d+)u\s*\*\s*1024u\)/.exec(readFileSync(hdr, "utf8"));
+  const m = /#define\s+SCR_STACK_MARGIN_KIB\s+(\d+)/.exec(readFileSync(hdr, "utf8"));
   if (m === null) {
     throw new Error(
-      `cannot read SCR_STACK_MARGIN from ${hdr} -- the LLVM backend has no preprocessor and must ` +
-        `not guess a safety constant. Either restore the macro or teach both lanes the new spelling.`,
+      `cannot read SCR_STACK_MARGIN_KIB from ${hdr} -- the LLVM backend has no preprocessor and ` +
+        `must not guess a safety constant. Either restore the macro or teach both lanes the new ` +
+        `spelling.`,
     );
   }
-  stackMarginCache = Number(m[1]) * 1024;
-  return stackMarginCache;
+  stackMarginKibCache = Number(m[1]);
+  return stackMarginKibCache;
+}
+
+export function stackMarginBytes(): number {
+  return stackMarginKib() * 1024;
+}
+
+/** The symbol whose NAME carries the margin, so the two lanes' independently
+ * resolved headers are compared BY VALUE at link time instead of trusted.
+ *
+ * The runtime defines exactly one of these, named from its own
+ * SCR_STACK_MARGIN_KIB (scr_error.c). This lane references the name built
+ * from the value IT parsed, so a lane that resolved a different copy of
+ * scr_runtime.h fails the LINK -- loudly, on every build of every program --
+ * instead of passing every static check and shipping a guard that fires at
+ * the wrong depth. The C lane gets the same check for free, from a pin in
+ * the header itself.
+ *
+ * SCOPE: this closes the RESOLUTION vector only. It does NOT make the C and
+ * LLVM instruction sequences equivalent -- that remains supported by the
+ * acceptance measurement (depth 149482 on C against 149495 on LLVM) and by
+ * no assertion. */
+export function stackMarginSymbol(): string {
+  return `scr_stack_margin_is_${stackMarginKib()}kib`;
 }
 export function emitFunction(E: CEmitter, fn: IrFunction): void {
     E.tempCounter = 0;
