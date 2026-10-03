@@ -577,7 +577,195 @@ typedef struct ScrStack {
   ScrCtx ctx;
   char *mem;             /* POSIX only; Windows fibers own their stack */
   struct ScrStack *next; /* free-list link; meaningful only while pooled */
+  /* The stack's own address range, learned by the fiber itself on first
+   * entry (see scr_stack_note_region). Only the POISON arm reads it; it is
+   * recorded unconditionally because the recording is two VirtualQuery
+   * calls on a path that runs once per stack, and a field that is only
+   * populated when a diagnostic is armed cannot be checked by the
+   * diagnostic that needs it. NULL means the stack was never entered --
+   * PRISTINE -- and cannot be located, which the arm counts rather than
+   * silently skips. */
+  void *res_base;
+  size_t res_size;
 } ScrStack;
+
+/* -- THE POISONING ARM: make a reclaimed stack FAULT instead of go quiet --
+ *
+ * Three mechanisms for the reported pairing fault have been proposed and all
+ * three are refuted: a use-after-free on a pooled stack (ScrStack is confined
+ * to this translation unit and no native binding can hold one), the decay
+ * shortening the I/O poll (the socket cap overrides it whenever `net` is
+ * pending), and DeleteFiber running library destructors (the binary imports
+ * no Fls* at all, and FLS callbacks are the only thing DeleteFiber runs).
+ *
+ * Reading has now been wrong about the mechanism three times, so this stops
+ * arguing and makes the failure point at itself.
+ *
+ * WHAT IT DOES. Instead of DeleteFiber, decommit the stack's reservation and
+ * LEAVE IT RESERVED. Every byte of physical memory and commit goes back --
+ * the whole reclaim the decay exists for -- but the address range stays owned
+ * and untouchable, so any access to a reclaimed stack is an access violation
+ * at the exact offending instruction instead of a silent read of whatever now
+ * occupies that address.
+ *
+ * DELIBERATELY NOT DeleteFiber: that RELEASES the reservation and hands the
+ * addresses back for reuse, which is precisely the condition being ruled out.
+ * The cost is that the FIBER object itself leaks, and it is NOT negligible:
+ * MEASURED at 1,689 bytes per reclaimed stack (settled private WS 18.77 MiB
+ * with this armed against 4.26 without, over 9,001 poisoned stacks). A FIBER
+ * holds a full x64 CONTEXT, so that figure is structural rather than
+ * surprising.
+ *
+ * SO THIS ARM DOES NOT DELIVER THE DECAY'S MEMORY WIN. The stack pages come
+ * back -- that is what MEM_DECOMMIT does -- but the per-fiber object does
+ * not, so a run with this armed retains MORE than an unpoisoned one, not
+ * less. Anyone reading RSS during a poisoned run must not mistake that for
+ * the fault being investigated. It is the price of keeping the address
+ * range owned, and it is why this is a diagnostic and never a default.
+ *
+ * IT TESTS THE ARGUMENT RATHER THAN RESTATING IT. The confinement argument
+ * says nothing can hold such a pointer. A clean run with this armed confirms
+ * that by experiment and retires the whole class; a fault hands over an
+ * address, a faulting instruction and a stack instead of a deduction.
+ *
+ * It also covers the one avenue reading could not reach: address reuse
+ * exposing a latent dangling pointer anywhere ABOVE the runtime, which is
+ * benign while the pool holds the pages and live once they go back. A
+ * poisoned range faults on first touch where a released one returns
+ * plausible bytes.
+ *
+ * SCR_FIBER_POOL_POISON=1 arms it. Default 0. */
+
+/* COMPILE-TIME GATE FOR THIS TU'S DIAGNOSTIC REPORTS, and the number below is
+ * why it exists rather than a preference.
+ *
+ * MEASURED, this branch against its merge base, by reading the PE section
+ * table of the static hello-world rather than trusting the test's complaint:
+ *
+ *     main   681,472      branch   714,752      +33,280
+ *     .text  +28,160   .rdata +4,608   .pdata +512   = +33,280 exactly
+ *
+ * It is not the added code. This TU's diagnostics are deliberately fputs plus
+ * a hand-rolled decimal (see scr_utoa) precisely so the always-linked runtime
+ * pulls in no printf -- and main honours that: its only fprintf pair lives
+ * behind `#ifdef SCR_LOOP_WHY`, off by default, so a default binary links no
+ * formatting machinery at all. The two fprintf calls this branch added to
+ * scr_fiber_pool_teardown were guarded only by a runtime getenv, so they are
+ * ALWAYS LINKED, and they drag the whole formatting path in with them. The
+ * note at the per-window stat line already prices one %zu at this same
+ * 33,280 bytes; these two were the ones still doing it.
+ *
+ * So the counters READ in every build and their REPORTS do not ship, which is
+ * the arrangement SCR_CYC_PAGERETURN_STAT already uses in scr_cycle.c for the
+ * same reason, in that file's words: a shipping binary should not carry a
+ * diagnosis "for a line nobody will ever ask it to print". Build with
+ * -DSCR_ASYNC_STAT=1 and every env knob below behaves as before.
+ *
+ * WHAT DOES NOT GO BEHIND THIS GATE, deliberately:
+ *   - every counter increment: a comparison and an add, no string
+ *   - scr_pool_stat(), so the counters keep a reader with external linkage
+ *     in a default build. Without one they would be write-only statics that
+ *     a compiler may legally delete, and the symptom would be a counter
+ *     reading zero in a shipping binary -- the same silent-zero class this
+ *     file has already been bitten by.
+ *   - scr_stack_pool_decay_clamp(), the arm that restores the pre-fix
+ *     unfloored wake. It is the reachable danger arm and it is worth more in
+ *     a year than it costs now. It reads its own env and depends on no
+ *     counter, so the gate cannot reach it.
+ *   - the fence in scr_stack_release: the CHECK and its counter stay in every
+ *     build; only the message goes behind the gate. See that site. */
+#ifndef SCR_ASYNC_STAT
+#define SCR_ASYNC_STAT 0
+#endif
+
+/* Fence violations: see scr_stack_release. Counted in EVERY build so the
+ * check there has an observable effect and cannot be optimised away. */
+static unsigned long long scr_fence_violations = 0;
+
+#ifdef _WIN32
+static unsigned long long scr_stack_poisoned = 0;
+static unsigned long long scr_stack_poison_unlocatable = 0;
+
+static bool scr_stack_poison_on(void) {
+  static bool once = false;
+  static bool cached = false;
+  if (!once) {
+    const char *e = getenv("SCR_FIBER_POOL_POISON");
+    cached = e != NULL && strtol(e, NULL, 10) != 0;
+    once = true;
+  }
+  return cached;
+}
+
+/* Learn the running fiber's own stack reservation. Called FROM the fiber, on
+ * its own stack, so a VirtualQuery of a local lands inside it and
+ * AllocationBase is the base of the whole reservation CreateFiberEx made.
+ * The region walk sums the pieces the stack has been split into (guard,
+ * committed, uncommitted) -- they share an AllocationBase, which is the
+ * termination condition. Documented API only; no TEB offsets. */
+static void scr_stack_note_region(ScrStack *s) {
+  MEMORY_BASIC_INFORMATION mbi;
+  volatile char probe = 0;
+  unsigned char *p;
+  void *base;
+  size_t total = 0;
+  (void)probe;
+  if (VirtualQuery((LPCVOID)&probe, &mbi, sizeof mbi) == 0) return;
+  base = mbi.AllocationBase;
+  if (base == NULL) return;
+  for (p = (unsigned char *)base;;) {
+    MEMORY_BASIC_INFORMATION m;
+    if (VirtualQuery((LPCVOID)p, &m, sizeof m) == 0) break;
+    if (m.AllocationBase != base) break;
+    total += (size_t)m.RegionSize;
+    p += m.RegionSize;
+  }
+  if (total == 0) return;
+  s->res_base = base;
+  s->res_size = total;
+}
+
+/* THE POSITIVE CONTROL, and the arm is worth nothing without it. A poisoning
+ * pass that silently poisons nothing produces a clean run indistinguishable
+ * from one that proves the stacks are untouched -- the same "found none vs
+ * there are none" confusion this file has already made twice.
+ *
+ * SCR_FIBER_POOL_POISON_SELFTEST=1 touches the FIRST poisoned range on
+ * purpose. An access violation there is a PASS: it proves the poisoning is
+ * real and that a stray access to a reclaimed stack really does fault at the
+ * offending instruction. Reaching the line after the read is a FAIL and says
+ * so, because it means the range is still readable and a clean production run
+ * would have meant nothing. */
+static void scr_stack_poison_selftest(ScrStack *s) {
+#if !SCR_ASYNC_STAT
+  /* The selftest is a diagnostic in both halves: it deliberately FAULTS to
+   * prove the poisoning is real, and its two messages are the whole output.
+   * A default build carries neither. The arm it validates
+   * (SCR_FIBER_POOL_POISON) is itself off by default, so nothing a shipping
+   * binary does is left unchecked by gating this. */
+  (void)s;
+#else
+  static bool done = false;
+  const char *e;
+  if (done) return;
+  e = getenv("SCR_FIBER_POOL_POISON_SELFTEST");
+  if (e == NULL || strtol(e, NULL, 10) == 0) return;
+  done = true;
+  fputs("[fiberpoison] SELFTEST: reading a just-poisoned stack on purpose."
+        " AN ACCESS VIOLATION HERE IS A PASS.\n", stderr);
+  fflush(stderr);
+  {
+    volatile unsigned char *q = (volatile unsigned char *)s->res_base;
+    unsigned char v = q[4096 < s->res_size ? 4096 : 0];
+    (void)v;
+  }
+  fputs("[fiberpoison] SELFTEST FAILED: that read did NOT fault, so the range"
+        " is still accessible and POISONING IS INERT. A clean run with this"
+        " arm proves nothing.\n", stderr);
+  fflush(stderr);
+#endif /* SCR_ASYNC_STAT */
+}
+#endif
 
 struct ScrFiber {
   ScrStack *st;      /* the context we run on; NULL on the stackless
@@ -1462,6 +1650,11 @@ static void scr_trampoline(void) {
    * value carried across the switch. The one thing that does survive is
    * `st`, which is the pooled object itself. */
   ScrStack *st = scr_current->st;
+#ifdef _WIN32
+  /* Recorded from ON the stack, which is the only place it can be learned
+   * without undocumented TEB offsets. Once is enough; re-entry is a no-op. */
+  if (st->res_base == NULL) scr_stack_note_region(st);
+#endif
   for (;;) {
     ScrFiber *self = scr_current;
     self->entry(self, self->argpack);
@@ -1625,7 +1818,8 @@ static void scr_trampoline(void) {
  * 20s, still descending. Near-identical reclaim, no burst cost, so 5000
  * is the default: a one-second lull is not idleness for a server. */
 #ifndef SCR_FIBER_POOL_DECAY_MS
-/* OFF by default until the pairing fault below is understood.
+/* ON by default, 5000 ms. It was off; the pairing fault below is why, and it
+ * is now understood and fixed one knob over.
  *
  * A user's compiled WhatsApp service reached `[auth] paired` and was then
  * dropped by the server with `stream:error device removed`, reproducibly,
@@ -1636,13 +1830,78 @@ static void scr_trampoline(void) {
  * between the QR and the pairing code, then 9, then 10 before
  * pair-success). Same binary, same custom pairing code, same store.
  *
- * Until it is known WHY -- and in particular whether DeleteFiber on a
- * pooled stack is sound when something still holds it -- the default is
- * off. The feature is real and measured (30.8 -> 8.8 MiB idle RSS on a
- * fan-out workload, page faults unchanged when the window exceeds the
- * traffic's gaps) and stays available opt-in. It is not worth a service
- * that cannot pair. */
-#define SCR_FIBER_POOL_DECAY_MS 0
+ * THAT QUESTION NOW HAS AN ANSWER AND IT IS NOT DeleteFiber.
+ *
+ * SCR_FIBER_POOL_POISON decommits a reclaimed stack and leaves its range
+ * RESERVED, so any access to one becomes an access violation at the
+ * offending instruction instead of a silent read of whatever took the
+ * address. Run against the real service WHILE THE FAULT OCCURRED: 44 stacks
+ * poisoned and untouchable at the moment of the anomaly, 137 by the end,
+ * unlocatable=0 throughout, and NOT ONE access violation. The same binary's
+ * self-test proves a poisoned read kills the process, so that silence is a
+ * measurement rather than an absence of evidence. The two windows spanning
+ * the failure are freed=0 with decayedTotal frozen, so nothing was freed
+ * while the connection died either.
+ *
+ * SCOPE, because it decides what the result is worth: this refutes reads of
+ * decay-FREED stacks. It does not refute reads of pooled-and-reused ones,
+ * which are live memory and are not poisoned. But those recycle identically
+ * with the decay OFF, and the decay-off arm pairs every time -- so the
+ * decay-specific class is exactly what was on trial, and it is gone.
+ *
+ * WHAT BREAKS PAIRING IS THE POLL CLAMP, NOT THE FREEING. The decay used to
+ * cap the loop's sleep so a window could not be slept through, and that
+ * shortens the I/O poll deadline, which reorders socket reads against timers
+ * and microtasks. With SCR_FIBER_POOL_DECAY_CLAMP=0 and the decay otherwise
+ * unchanged, the same binary paired and stayed live -- auth_credentials=1,
+ * 811 prekeys, 355 mailbox messages, no device-removed, no cleared
+ * credentials -- while the decay did heavy work throughout: 1,429 stacks
+ * freed, 1,111 of them in a single window, from a pool that peaked at 2,531.
+ * clampApplied=0 confirms the knob reached the binary, measured rather than
+ * inferred.
+ *
+ * EVIDENCE STRENGTH, PLAINLY: the failing side has TWO runs, the passing
+ * side has ONE. The result is clean and binary, and it is n=1 on the success
+ * arm.
+ *
+ * ONE THING THAT LOOKED LIKE THE SIGNATURE AND IS NOT: `received socket
+ * payload before noise session init` appears in the SUCCESSFUL run too. It
+ * is a benign reconnect artefact. It was the most visibly anomalous line in
+ * the first failing log and a hypothesis was built around it; recorded here
+ * so the next reader does not build another one.
+ *
+ * WHAT TURNING IT ON IS WORTH, on the shipped binary, three arms rotated with
+ * one environment variable between them:
+ *
+ *   working set held   64.04 -> 16.62 MiB   returned 47.42 MiB   -74.0%
+ *   private commit     +157.34 -> +18.6     returned 138.7       -88.2%
+ *
+ * The two ON arms agree (17.00 / 16.25) with the OFF arm between them in
+ * position, so that is not a position effect.
+ *
+ * AND WHAT IS LEFT IS NOT WASTE. Measured against a MATCHED floor -- same
+ * binary, same session, LIVEMSGS=0 arms that held -0.86 and -0.13 MiB, so a
+ * run with no burst returns to its own floor -- the remaining 13.86 MiB of
+ * held working set sits against 12.98 MiB of held LIVE heap objects. Those
+ * agree to 0.88 MiB, inside the burst arms' own 4.02 MiB spread. What remains
+ * is data the program was asked to keep.
+ *
+ * The free heap does stay large: +31.54 MiB held, of which at most ~0.9 MiB
+ * can be resident. It costs COMMIT, not working set -- which is why the
+ * user-visible number improves by 74% while a loaded box can still feel the
+ * commit charge.
+ *
+ * SAFE BECAUSE THE CLAMP IS OFF, not because the freeing was ever unsafe.
+ * SCR_FIBER_POOL_POISON refuted the decay-freed-stack class by experiment on
+ * real infrastructure with the fault occurring: 44 stacks poisoned and
+ * untouchable at the anomaly, 137 by the end, and not one access violation in
+ * a binary whose self-test proves a poisoned read kills the process. The
+ * clamp -- which shortened the I/O poll deadline -- is what broke pairing, and
+ * it defaults to 0 below.
+ *
+ * EVIDENCE STRENGTH, PLAINLY: the failing side has TWO runs, the passing side
+ * has ONE. */
+#define SCR_FIBER_POOL_DECAY_MS 5000
 #endif
 
 static ScrStack *scr_stack_pool = NULL;
@@ -1659,6 +1918,125 @@ static double scr_stack_pool_next_ms = 0;
  * always-linked runtime cannot be dead-stripped, and this file is measured
  * to the page by tests/harness/island.test.ts. */
 static unsigned long long scr_stack_pool_decayed = 0;
+
+/* -- THE POLL CLAMP, AND WHY IT IS NOW A KNOB ------------------------
+ *
+ * scr_stack_pool_decay_due caps the loop's sleep so a decay window cannot
+ * be slept through. That fixed a real defect -- a trim that never RAN read
+ * exactly like a trim that did not work -- but it has a consequence nobody
+ * costed: AN IDLE-TIME HOUSEKEEPING TASK SHORTENS THE I/O POLL DEADLINE.
+ * With a timer pending further out than the window, the loop stops sleeping
+ * to its natural deadline and wakes on the window instead, which reorders
+ * socket reads against timers and microtasks.
+ *
+ * It bites only when the natural deadline EXCEEDS the window. With no
+ * timers the floor is SCR_IO_POLL_MS = 1000 ms, shorter than any sane
+ * window, so the clamp never fires and an idle process is unaffected. A
+ * handshake holding a 10 s keepalive is the opposite case, and that is the
+ * shape the pairing fault was reported on.
+ *
+ * THE DECAY DOES NOT NEED THE CLAMP TO FUNCTION. scr_fiber_pool_decay is
+ * called unconditionally at the top of the sleep seam, before and
+ * independent of the `due` computation, so it runs on whatever wakeups the
+ * loop already has. Removing the clamp costs the decay its PROMPTNESS, not
+ * its function: a window still elapses and still runs on the next natural
+ * wakeup, so the pool drains slightly later and still drains.
+ *
+ * DEFAULT 0: THE CLAMP IS OFF, AND THAT IS THE PAIRING FIX. This was built
+ * and committed on a hygiene argument -- an idle-time housekeeping task has
+ * no business shortening the I/O poll deadline -- and explicitly NOT as the
+ * fix, because the socket cap below overrides the clamp whenever `net` is
+ * pending and that appeared to make it inert on a live connection. The
+ * measurement disagreed with the reasoning: with the decay on and only this
+ * knob changed, the service that had failed to pair twice paired and stayed
+ * live. See the block above SCR_FIBER_POOL_DECAY_MS for the evidence and for
+ * its n=1 caveat.
+ *
+ * ONE MACRO IS CORRECT HERE, and that is worth stating because the sibling
+ * case is not. SCR_CYC_ARENA_VM in scr_cycle.c gates `#if` over the code
+ * itself, so setting it to 0 COMPILES THE FEATURE OUT rather than defaulting
+ * it off, and it needs a separate _DEFAULT macro. This one guards nothing:
+ * the clamp site is a runtime `if (scr_stack_pool_decay_clamp())`, so the
+ * macro is only the fallback when the environment is silent, and flipping it
+ * changes behaviour without removing anything. Verified before the flip.
+ *
+ * SCR_FIBER_POOL_DECAY_CLAMP=1 restores the old behaviour. Env knob, not a
+ * build flag, so both arms stay one binary and any comparison carries no
+ * code-layout confound. */
+#ifndef SCR_FIBER_POOL_DECAY_CLAMP
+#define SCR_FIBER_POOL_DECAY_CLAMP 0
+#endif
+
+/* Loop-wakeup accounting for the clamp A/B. `eligible` is counted the same
+ * way in BOTH arms -- it records that the clamp WOULD have shortened this
+ * sleep -- so the two arms are comparable rather than each measuring only
+ * its own behaviour. `applied` counts the times it actually did. */
+static unsigned long long scr_loop_turns = 0;
+static unsigned long long scr_pool_clamp_elig = 0;
+static unsigned long long scr_pool_clamp_applied = 0;
+static unsigned long long scr_pool_subcap = 0; /* decay pushed due BELOW the poll cap */
+static unsigned long long scr_pool_cap50 = 0;  /* turns taking the COARSE (50 ms) cap */
+/* THE HONEST ONE. `applied` counts the clamp modifying `due`, and it is
+ * recorded BEFORE the socket and child caps below can lower `due` again -- so
+ * with a live socket it reads large and means nothing, which is worse than
+ * absent because it looks like data. `survived` counts only the turns where
+ * the clamp's value was still the final `due` when the loop actually slept,
+ * which is the only form in which the clamp can have changed anything.
+ *
+ * It is also the direct measurement of the one hypothesis still standing: the
+ * socket gap at a connection restart, where `net` is momentarily false, the
+ * 1 ms cap does not apply, and the clamp is live again. Those turns are
+ * exactly what this counts, and `applied - survived` is how often it fired
+ * and was overridden. */
+static unsigned long long scr_pool_clamp_survived = 0;
+
+/* THE COUNTERS' READER, AND IT SHIPS IN EVERY BUILD. Ten loads, no string,
+ * no formatting -- the same bargain scr_cyc_pr_stat() strikes in scr_cycle.c,
+ * in that file's words "how a harness reads the counters without parsing
+ * text".
+ *
+ * IT IS NOT A CONVENIENCE. Every counter above is `static`, and once their
+ * reports went behind SCR_ASYNC_STAT their only reader went with them: a
+ * static that is incremented and never read is dead code a compiler may
+ * legally delete, and the symptom would be a counter reading zero in a
+ * shipping binary while the source still shows it being incremented. That is
+ * the silent-zero shape this tree has been bitten by repeatedly, and it is
+ * exactly what gating the reports would otherwise have created. External
+ * linkage is deliberate: a reader the optimiser cannot prove nobody calls.
+ *
+ * Indices are positional and append-only; nothing persists them, but the
+ * fence at 5 is cited by name in scr_stack_release. */
+unsigned long long scr_pool_stat(int which) {
+  switch (which) {
+    case 0: return scr_loop_turns;
+    case 1: return scr_pool_clamp_elig;
+    case 2: return scr_pool_clamp_applied;
+    case 3: return scr_pool_subcap;
+    case 4: return scr_pool_clamp_survived;
+    case 5: return scr_fence_violations;
+    case 6: return scr_stack_pool_decayed;
+    case 9: return scr_pool_cap50;
+#ifdef _WIN32
+    case 7: return scr_stack_poisoned;
+    case 8: return scr_stack_poison_unlocatable;
+#else
+    case 7:
+    case 8: return 0;
+#endif
+    default: return 0;
+  }
+}
+
+static bool scr_stack_pool_decay_clamp(void) {
+  static bool once = false;
+  static bool cached = SCR_FIBER_POOL_DECAY_CLAMP != 0;
+  if (!once) {
+    const char *env = getenv("SCR_FIBER_POOL_DECAY_CLAMP");
+    if (env != NULL) cached = strtol(env, NULL, 10) != 0;
+    once = true;
+  }
+  return cached;
+}
 
 static size_t scr_stack_pool_max(void) {
   static bool once = false;
@@ -1708,7 +2086,27 @@ static size_t scr_stack_reserve(void) {
 static void scr_stack_free(ScrStack *s) {
   SCR_FST_FREED_ONE();
 #ifdef _WIN32
-  DeleteFiber(s->ctx);
+  if (scr_stack_poison_on()) {
+    if (s->res_base != NULL) {
+      /* Physical memory and commit go back; the range stays RESERVED and
+       * PAGE_NOACCESS, so a later touch faults here rather than reading
+       * whatever took the address. No DeleteFiber: that would release the
+       * reservation and reopen it for reuse. The FIBER object leaks, which
+       * is why this arm is not a shipping default. */
+      VirtualFree(s->res_base, s->res_size, MEM_DECOMMIT);
+      scr_stack_poisoned++;
+      scr_stack_poison_selftest(s);
+    } else {
+      /* PRISTINE: created and never entered, so it never learned its own
+       * address and cannot be poisoned. COUNTED, not skipped in silence --
+       * an arm that quietly poisons nothing reports a clean run that means
+       * nothing at all. */
+      scr_stack_poison_unlocatable++;
+      DeleteFiber(s->ctx);
+    }
+  } else {
+    DeleteFiber(s->ctx);
+  }
 #else
   free(s->mem);
 #endif
@@ -1782,7 +2180,16 @@ static void scr_stack_release(ScrStack *s) {
    * history sync with SCR_FIBER_POOL_DECAY_MS=1000 active, 130 decay
    * windows and 4,313 stacks deleted. */
   if (scr_current != NULL && scr_current->st == s) {
+    /* THE CHECK AND THE COUNT STAY IN EVERY BUILD; only the message is
+     * gated. A check whose only effect is a message that does not ship is a
+     * check the optimiser is free to delete -- and the source would still
+     * LOOK like it guarded something, which is worse than removing the fence
+     * on purpose. The increment is the observable effect that keeps it, and
+     * scr_pool_stat(5) is how a harness reads it without parsing text. */
+    scr_fence_violations++;
+#if SCR_ASYNC_STAT
     fputs("[fencefail] scr_stack_release on the CURRENT fiber stack\n", stderr);
+#endif
   }
   SCR_FST_RELEASE();
   if (scr_stack_pool_n < scr_stack_pool_max()) {
@@ -1795,15 +2202,20 @@ static void scr_stack_release(ScrStack *s) {
   scr_stack_free(s);
 }
 
+/* Gated with its only caller: the window line it arms is the sole call site,
+ * so a default build would carry an unused static and -Wunused-function. */
+#if SCR_ASYNC_STAT
 static bool scr_stack_pool_stat(void) {
   static bool once = false;
   static bool cached = false;
   if (!once) { cached = getenv("SCR_FIBER_POOL_STAT") != NULL; once = true; }
   return cached;
 }
+#endif /* SCR_ASYNC_STAT */
 
 /* Unsigned to decimal into a caller buffer of at least 24 bytes. Exists so
- * the stat line below needs no printf; see the note at its call site. */
+ * the stat line below needs no printf; see the note at its call site.
+ * NOT gated: scr_heap_trim_line still calls it in every build. */
 static const char *scr_utoa(size_t v, char *buf) {
   char *p = buf + 23;
   *p = ' ';
@@ -1887,6 +2299,7 @@ static void scr_fiber_pool_decay(double now) {
    * negative control — SCR_FIBER_POOL_DECAY_MS=0, which must print no
    * lines at all — is distinguishable from a live decay that has already
    * drained the pool, which prints `freed=0 idle=0`. */
+#if SCR_ASYNC_STAT
   if (scr_stack_pool_stat()) {
     /* fputs and a hand-rolled decimal, NOT fprintf. This TU's diagnostics
      * are all fputs/fwrite, so a single %zu here was the only printf in
@@ -1902,8 +2315,36 @@ static void scr_fiber_pool_decay(double now) {
     fputs(scr_utoa(lo, nb), stderr);
     fputs(" decayedTotal=", stderr);
     fputs(scr_utoa((size_t)scr_stack_pool_decayed, nb), stderr);
+    /* THE POISON AND CLAMP COUNTERS RIDE THIS LINE, and that is not
+     * tidiness. The teardown report is UNREACHABLE in the binary these
+     * counters exist for: zapo-rest ends through process.exit, which
+     * lowers to _Exit and skips loop teardown, so a run there prints no
+     * counters at all -- verified, not assumed. This line prints once
+     * per window and was observed reaching stderr from a real
+     * zapo-rest run, so it is the only place the numbers survive. */
+#ifdef _WIN32
+    fputs(" poisoned=", stderr);
+    fputs(scr_utoa((size_t)scr_stack_poisoned, nb), stderr);
+    fputs(" unlocatable=", stderr);
+    fputs(scr_utoa((size_t)scr_stack_poison_unlocatable, nb), stderr);
+#endif
+    fputs(" clampApplied=", stderr);
+    fputs(scr_utoa((size_t)scr_pool_clamp_applied, nb), stderr);
+    fputs(" subcap=", stderr);
+    fputs(scr_utoa((size_t)scr_pool_subcap, nb), stderr);
+    fputs(" cap50=", stderr);
+    fputs(scr_utoa((size_t)scr_pool_cap50, nb), stderr);
+    fputs(" clampSurvived=", stderr);
+    fputs(scr_utoa((size_t)scr_pool_clamp_survived, nb), stderr);
     fputc('\n', stderr);
   }
+#else
+  /* `freed` is counted above and only ever READ by the gated line, so a
+   * default build must say so or -Wunused-but-set-variable fires. The count
+   * itself stays: scr_stack_pool_decayed carries the same total and IS
+   * readable through scr_pool_stat() in every build. */
+  (void)freed;
+#endif /* SCR_ASYNC_STAT */
   scr_stack_pool_lo = scr_stack_pool_n;
 }
 
@@ -1920,6 +2361,44 @@ static void scr_fiber_pool_teardown(void) {
   SCR_FST_POOLED(0);
   scr_stack_pool_lo = (size_t)-1;
   scr_stack_pool_next_ms = 0;
+  /* SCR_LOOP_WAKE_STAT=1 prints the clamp accounting at loop teardown.
+   * ALWAYS prints when armed, all-zero lines included: a clamp that never
+   * fired and an instrument that never ran produce the same silence, and
+   * this file has already made that exact mistake once.
+   *
+   * THESE TWO fprintf CALLS WERE THE +33,280 BYTES. Guarded only by the
+   * getenv below, they were always linked, and they were the sole reason a
+   * default binary pulled in printf formatting at all -- main's only other
+   * fprintf pair sits behind `#ifdef SCR_LOOP_WHY` and never ships. Measured
+   * by PE section, not inferred: .text +28,160, .rdata +4,608, .pdata +512.
+   * They stay written with fprintf rather than being hand-rolled, because
+   * behind a compile-time gate the formatting cost is paid only by a build
+   * that asked for it, and %llu over six values is far clearer there. */
+#if SCR_ASYNC_STAT
+  if (getenv("SCR_LOOP_WAKE_STAT") != NULL) {
+    fprintf(stderr,
+            "[loopwake] turns=%llu clampEligible=%llu clampApplied=%llu"
+            " clampSurvived=%llu decayedTotal=%llu clamp=%d\n",
+            scr_loop_turns, scr_pool_clamp_elig, scr_pool_clamp_applied,
+            scr_pool_clamp_survived, scr_stack_pool_decayed,
+            scr_stack_pool_decay_clamp() ? 1 : 0);
+#ifdef _WIN32
+    fprintf(stderr, "[fiberpoison] poisoned=%llu unlocatable=%llu armed=%d",
+            scr_stack_poisoned, scr_stack_poison_unlocatable,
+            scr_stack_poison_on() ? 1 : 0);
+    fputs(scr_stack_poison_on() && scr_stack_poisoned == 0
+              ? " -- ARMED BUT POISONED NOTHING: no stack was ever reclaimed,"
+                " so this run does not test the claim at all.\n"
+              : "\n",
+          stderr);
+#endif
+    if (scr_pool_clamp_elig == 0) {
+      fputs("[loopwake] CLAMP NEVER ELIGIBLE - no sleep was ever longer than"
+            " the decay window, so this run does not exercise the clamp at"
+            " all. Not evidence either way.\n", stderr);
+    }
+  }
+#endif /* SCR_ASYNC_STAT */
 }
 
 /* -- returning free heap pages to the OS at the idle seam -------------
@@ -2773,6 +3252,41 @@ static void scr_resume_fiber(ScrFiber *f) {
  * the wake pipe and fd 0 directly. */
 #define SCR_SIGNAL_POLL_MS 50.0
 
+/* THE CAP THE SLEEP ARMS BELOW WILL ACTUALLY IMPOSE on this turn, given what
+ * is pending. 0 means nothing caps.
+ *
+ * ONE function with TWO callers, and that is the whole point. The floor that
+ * stops the decay shortening the poll, and the counter that detects it
+ * shortening the poll anyway, used to be two separate constants -- and they
+ * disagreed. The floor took SCR_CHILD_POLL_MS (1 ms) while two paths cap at
+ * SCR_SIGNAL_POLL_MS (50 ms), so the decay could shorten a 50 ms sleep to 1 ms
+ * and the counter, testing against that same wrong 1 ms, recorded nothing.
+ *
+ * A detector that shares its subject's mistake reads zero for exactly the
+ * reason the defect exists, and a zero like that is worse than no counter: it
+ * was read as a satisfied control. Both callers now move together, or neither
+ * does, whatever path is added next.
+ *
+ * Mirrors the arms below exactly:
+ *   io      : else-if, so kids wins; otherwise the coarse signal cap
+ *   non-io  : three caps applied in SEQUENCE, so the TIGHTEST wins
+ *   kids    : its own arm, child cap */
+static double scr_loop_poll_cap_ms(bool io, bool kids, bool net, bool dgram,
+                                   bool watch, bool evw) {
+  if (io) {
+    if (kids) return SCR_CHILD_POLL_MS;
+    if (evw || net || dgram || watch) return SCR_SIGNAL_POLL_MS;
+    return 0.0;
+  }
+  if (evw || net || dgram || watch) {
+    if (net || dgram || watch || kids) return SCR_CHILD_POLL_MS;
+    return SCR_SIGNAL_POLL_MS; /* evw alone */
+  }
+  if (kids) return SCR_CHILD_POLL_MS;
+  return 0.0;
+}
+
+
 /* The loop's idle sleep.
  *
  * On win32 this is NOT nanosleep, and the reason is measured. mingw-w64's
@@ -3188,8 +3702,12 @@ bool scr_loop_run(ScrPromise *top_level) {
      *   fallback.
      * - timers only: plain nanosleep to the deadline. */
     double now = scr_now_ms();
+    /* Hoisted above the decay-due block: the floor that block applies has to
+     * know every predicate that will later cap the sleep. */
+    bool evw = scr_events_watching_fn != NULL && scr_events_watching_fn();
     /* The loop has no runnable work at this point and is about to block:
      * the one place a fiber-stack trim can never race a switch. */
+    scr_loop_turns++;
     scr_fiber_pool_decay(now);
     /* And the same seam for the heap itself: the loop is about to
      * block, so a heap-wide walk cannot land between two allocations
@@ -3198,9 +3716,75 @@ bool scr_loop_run(ScrPromise *top_level) {
     double due = scr_ntimers > 0 ? scr_timers[0].deadline_ms : now + SCR_IO_POLL_MS;
     /* A pool with entries left to free caps the sleep at its next window;
      * an empty one does not (see scr_stack_pool_decay_due). */
+    double pool_clamp_due = -1.0; /* the value the clamp set, if it fired */
     {
       double pool_due = scr_stack_pool_decay_due(now);
-      if (pool_due >= 0 && pool_due < due) due = pool_due;
+      /* THE DECAY WAKES THE LOOP, BUT NEVER SHORTENS THE POLL.
+       *
+       * The old clamp set `due = pool_due` outright, which near a window is
+       * BELOW the ~1 ms cap the I/O arms impose -- extra sub-millisecond
+       * turns, extra drain passes, and socket emits reordered against short
+       * timers. That reordering is what broke pairing (1e41c351e), so the
+       * clamp was defaulted off -- and with it off a process with no pending
+       * I/O has no natural wakeup to ride and sleeps through windows.
+       *
+       * Both properties at once: floor the decay deadline at the cap that
+       * WILL be applied below. With I/O pending the cap already wakes the
+       * loop far more often than a 5 s window needs, so the decay asks for
+       * nothing and cannot reorder anything. With no I/O pending there is no
+       * cap, the floor is zero, and the decay deadline governs -- which is
+       * the case the clamp existed for and the case its removal lost.
+       *
+       * The decay does not need sub-millisecond precision. It needs to fire
+       * within its window, not within a fraction of the poll granularity. */
+      /* The cap the arms below WILL impose, computed once per turn and used
+       * by both the floor and the sub-cap counter. cap50 counts the turns
+       * that take the COARSE cap -- it exists to tell "the 50 ms path never
+       * happened" apart from "it happened and the floor covered it", which a
+       * subcap of zero cannot distinguish on its own. */
+      double poll_cap = scr_loop_poll_cap_ms(io, kids, net, dgram, watch, evw);
+      if (poll_cap == SCR_SIGNAL_POLL_MS) scr_pool_cap50++;
+      /* THE FLOOR IS THE CAP. It used to be SCR_CHILD_POLL_MS for every
+       * pending predicate, which is right for the socket and child arms and
+       * wrong for the two that cap at SCR_SIGNAL_POLL_MS: there the arm
+       * intends a 50 ms sleep and the floor only promised 1 ms, so the decay
+       * could still shorten the poll 50x -- the same shortening, at 1/50th
+       * the magnitude, that the clamp was disabled for.
+       *
+       * MEASURED on the dynamic probe, which is the build that can reach it
+       * (`io` is registered only by the island, scr_island.c:556, so a fully
+       * static program never takes that arm): with the old 1 ms floor the
+       * shipping default produced cap50=8 subcap=2 -- two turns shortened
+       * below the cap WITH the floor on, which the old counter reported as
+       * zero because it tested against the same wrong constant. */
+      double wake_floor = poll_cap;
+      /* SCR_FIBER_POOL_DECAY_CLAMP=1 restores the UNFLOORED pre-fix wake, so
+       * the arm that reintroduces the pairing hazard stays reachable for an
+       * A/B on one binary. Default 0 is the floored wake. */
+      double pool_wake = scr_stack_pool_decay_clamp()
+                             ? pool_due
+                             : (pool_due > now + wake_floor ? pool_due : now + wake_floor);
+      if (pool_due >= 0 && pool_wake < due) {
+        /* `elig` records that the decay WANTED this turn shortened; `applied`
+         * that it got it. With the floor on and I/O pending the two diverge,
+         * which is the fix working rather than the decay being idle. */
+        scr_pool_clamp_elig++;
+        due = pool_wake;
+        pool_clamp_due = pool_wake;
+        scr_pool_clamp_applied++;
+        /* THE HAZARD, counted directly: a sleep shorter than the cap the I/O
+         * arms will impose is an extra sub-cap turn, and extra drain passes
+         * reorder a socket emit past a short timer. Must be 0 with the floor
+         * on; the unfloored arm is what makes it non-zero. */
+        /* AGAINST THE REAL CAP for this turn's predicates, not a constant.
+         * The floor above still takes SCR_CHILD_POLL_MS, so on the two paths
+         * that cap at SCR_SIGNAL_POLL_MS this now counts what it previously
+         * could not see -- which is the point of fixing the detector before
+         * the defect rather than after. */
+        {
+          if (poll_cap > 0.0 && due < now + poll_cap) scr_pool_subcap++;
+        }
+      }
     }
     /* Likewise the heap trim: a turn that sleeps past its window is a
      * window that never ran (see scr_heap_trim_due). */
@@ -3217,7 +3801,6 @@ bool scr_loop_run(ScrPromise *top_level) {
     /* Pending immediates are always-ready work: no sleep — run due timers
      * (Node's timers phase precedes check), then the check phase below. */
     if (scr_pending_immediates > 0) due = now;
-    bool evw = scr_events_watching_fn != NULL && scr_events_watching_fn();
     if (io) {
       if (kids && due > now + SCR_CHILD_POLL_MS) due = now + SCR_CHILD_POLL_MS;
       /* Signals/stdin/net can't wake curl's fd wait (and its poll retries
@@ -3339,6 +3922,14 @@ bool scr_loop_run(ScrPromise *top_level) {
         now = due;
       }
     }
+    /* DID THE CLAMP ACTUALLY DECIDE THE SLEEP? Every later cap only ever
+     * LOWERS `due`, so the clamp survived iff `due` is still the exact value
+     * it set. Checked HERE because this is the single point at which `due` is
+     * final for the turn: the io, events/net and children branches each apply
+     * their own caps inside themselves, and the immediates check zeroes it
+     * earlier. Exact double comparison is correct rather than sloppy -- a
+     * surviving value is the same double copied through, never recomputed. */
+    if (pool_clamp_due >= 0 && due == pool_clamp_due) scr_pool_clamp_survived++;
     while (scr_ntimers > 0 && scr_timers[0].deadline_ms <= now) {
       ScrTimer t = scr_timer_pop();
       /* Timer callbacks are plain sync closures, run on the main stack.

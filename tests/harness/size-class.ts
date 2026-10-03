@@ -1607,7 +1607,45 @@ export const SIZE_DRIFT_PAGE = 4_096;
  * is the exact failure this guard exists to prevent. Its sibling
  * REGEX_CLASS_RECORDED is deliberately NOT moved, for the opposite reason
  * — see the entry at the top of this group. */
-export const STATIC_CLASS_RECORDED = platform === "win32" ? 677_888 : null;
+/* 2026-10-02 - STATIC moves 677,888 -> 684,544, and the two terms are split
+ * because only one of them belongs to the branch that moved it.
+ *
+ * MEASURED BY READING THE PE SECTION TABLE of the static hello-world at each
+ * revision, not from this guard's own complaint:
+ *
+ *     merge base 53cdae32b    681,472     +3,584 before this branch existed
+ *     this branch             684,544     +3,072 on top of that
+ *
+ * THE 3,584 IS MAIN'S OWN DRIFT against the figure recorded here. Checking a
+ * branch against the recorded number rather than against a BUILT merge base
+ * charges that drift to whoever notices it last - this branch was initially
+ * blamed for 36,864 on exactly that mistake, and 3,584 of it was never its
+ * doing. Build the base and subtract; the guard cannot do it for you.
+ *
+ * THE 3,072 IS THIS BRANCH: the cycle arena's chunks come off an owned
+ * reservation (SCR_CYC_ARENA_VM - compiled in, runtime default off). 2,560 of
+ * it is the reservation code itself, isolated with -DSCR_CYC_ARENA_VM=0 on
+ * this same tree; the rest is section alignment. That is shipped capability
+ * with the mechanism proved, which is the kind of growth that belongs in the
+ * figure.
+ *
+ * WHAT IS DELIBERATELY NOT IN IT, and why this is +3,072 rather than +33,280:
+ * the same branch's scr_async.c diagnostics were worth 30,208 bytes, because
+ * two fprintf calls guarded by nothing but a getenv were the only printf in
+ * the always-linked runtime and dragged the whole formatting path into every
+ * binary. They now sit behind SCR_ASYNC_STAT. Verified in both directions on
+ * this tree, which is also the control proving the gate is what moved it:
+ *
+ *     gate off (default)             684,544
+ *     gate on  -DSCR_ASYNC_STAT=1    714,752
+ *
+ * A growth nobody explains is how this pair stopped meaning anything. This
+ * one is explained - and 30,208 of the 33,280 turned out to be a diagnosis
+ * no default build ever prints, which is not growth worth banking. Anchoring
+ * the remaining 3,072 rather than leaving it out, for the reason the entry
+ * above gives: an unbanked explained growth hands the next block a head start
+ * inside the drift page. */
+export const STATIC_CLASS_RECORDED = platform === "win32" ? 684_544 : null;
 
 /* 2026-09-26 - +4,608 on the REGEX class only, and the bytes are accounted
  * for: non-owning intern entries (SCR_STRING_INTERN_WEAK, off by default).
