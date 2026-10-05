@@ -3,6 +3,7 @@ import { tapPhase, tapped } from "./phase-tap.js";
 import { basename, dirname, join, resolve } from "node:path";
 import { cacheRootDir, CcCompileError, compileC, compileLibArchive, profFlavor, resolveCc, targetPlatform } from "./backend/cc.js";
 import { emitModule, emitModuleProgram } from "./backend/emission/emitter.js";
+import { coroPlans } from "./backend/emission/emit-coro.js";
 import { emitFinalKeyReadWidths, emitFinalNarrowBridges, flushKeyReadCensus, flushNarrowBridgeCensus, keyReadCensusOnly } from "./frontend/lowering/keyread-census.js";
 import { emitLlvmModule, LlvmUnsupportedError } from "./backend/llvm/emitter.js";
 import { checkerPanicDiag, ffiNativeBuildDiag, libAsyncExportDiag, libAsyncSurfaceDiag, libExportUnresolvedDiag, libGenericExportDiag, libIntBoundaryDiag, libNpmIneligibleDiag, libSidecarDiag, libUnmappableSignatureDiag, iceDiag, isCheckerPanic, LIB_INBOUND_BYTES_TRAP_CODE, LIB_RUNTIME_TRAP_CODES, type ScrDiagnostic } from "./diagnostics/diagnostic.js";
@@ -777,6 +778,9 @@ function programNativeFeatures(mod: IrModule): ProgramNativeFeatures {
     // The link switch for scr_url.c: url.* libCalls or a url-kind type
     // on the IR. The unit used to be unconditional and cost every
     // binary in the project four win32 pages it could not reach.
+    // Same call the emitter makes, so the link line cannot disagree with
+    // the emitted TU; empty whenever SCRIPTC_STACKLESS is not 1.
+    coro: coroPlans(mod.functions).size > 0,
     url: moduleUsesUrl(mod),
     // The link switch for scr_url_params.c: sp.* libCalls, the
     // url.searchParams getter, or a searchParams-kind type on the IR.

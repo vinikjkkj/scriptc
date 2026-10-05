@@ -10,6 +10,7 @@ import { boxAccess, cDecl, cStringLiteral, elemAccess, vAdapters } from "./emit-
 import { OVERFLOW_MEMBER, OWNMASK_MEMBER } from "./emit-shapes.js";
 import { emitStableReceiver } from "./emit-exprs.js";
 import { writesLocal } from "../../ir/analysis.js";
+import { coroPrologue, coroDispatch, coroFinish, coroField } from "./emit-coro.js";
 import { createRequire } from "node:module";
 import { join, dirname } from "node:path";
 import { readFileSync } from "node:fs";
@@ -238,12 +239,21 @@ export function emitFunction(E: CEmitter, fn: IrFunction): void {
     E.currentGenerator = fn.generator ?? null;
     E.labelCounter = 0;
     E.currentLocals = new Map(fn.locals.map((l) => [l.id, l]));
+    E.currentFn = fn;
+    E.currentCoro = E.coroPlansByFn.get(fn.name) ?? null;
+    E.coroPointIndex = 0;
+    const coro = E.currentCoro;
     E.captureIds = new Set((fn.captures ?? []).map((c) => c.localId));
     E.seqScoped = seqScopedLocals(fn);
     E.seqScopeAt.clear();
 
-    E.line(`${E.signature(fn)} {${E.srcComment(fn.loc)}`);
-    E.indent++;
+    if (coro !== null) {
+      for (const l of coroPrologue(E, fn, coro)) E.line(l);
+      E.indent++;
+    } else {
+      E.line(`${E.signature(fn)} {${E.srcComment(fn.loc)}`);
+      E.indent++;
+    }
 
 
     // The pending-return slot: a `return` crossing a finally computes its
@@ -264,12 +274,24 @@ export function emitFunction(E: CEmitter, fn: IrFunction): void {
 
     const paramIds = new Set(fn.params.map((p) => p.localId));
     for (const local of fn.locals) {
-      if (paramIds.has(local.id) || E.captureIds.has(local.id)) continue;
+      // A resume function has no C parameters: every param is a local the
+      // dispatch reloads from the frame below.
+      if ((coro === null && paramIds.has(local.id)) || E.captureIds.has(local.id)) continue;
       if (local.boxed) {
         E.line(`ScrBox *${mangleLocal(local.id)} = NULL; /* ${local.name} (boxed) */`);
       } else {
         const init = isRefCounted(local.type) ? " = NULL" : "";
         E.line(`${cDecl(local.type, mangleLocal(local.id))}${init}; /* ${local.name} */`);
+      }
+    }
+
+    if (coro !== null) {
+      // The declarations above dominate every label, so the dispatch can
+      // jump into the body. This is only legal because IrFunction.locals is
+      // scope-flat and emitted at the top.
+      for (const l of coroDispatch(coro)) E.line(l);
+      for (const p of fn.params) {
+        E.line(`${mangleLocal(p.localId)} = sc_f->${coroField(p.localId)};`);
       }
     }
 
@@ -329,6 +351,15 @@ export function emitFunction(E: CEmitter, fn: IrFunction): void {
     const endedWithReturn = last === "return" || last === "throw" || last === "rethrow" || last === "runtimeFence";
     if (fn.returnType.kind === "void" && !endedWithReturn) {
       E.releaseFrame(E.scopes[0]!);
+    }
+    if (coro !== null && !endedWithReturn) {
+      // A resume function that falls off the end has neither suspended,
+      // finished, nor thrown, and the runtime asserts on exactly that. The
+      // fiber trampoline fulfils the promise for an implicit void exit; a
+      // coroutine has to do it here, because the body IS the trampoline.
+      // Unreachable when the body really did end in a return on every path,
+      // and harmless there.
+      for (const l of coroFinish(E, E.currentReturnType, null, fn.captures !== undefined)) E.line(l);
     }
     E.scopes.pop();
 
@@ -884,10 +915,22 @@ export function emitStmt(E: CEmitter, s: IrStmt): void {
           // Everything down to function depth releases; the moved result is
           // exempt (already struck from its frame).
           E.releaseForJump(0, 0);
-          E.line(`return ${v.name};${E.srcComment(s.loc)}`);
+          if (E.currentCoro !== null) {
+            // A coroutine does not return a value to a caller — there is no
+            // caller on the stack after the first resume. It FULFILLS the
+            // promise the frame owns, which is what the fiber trampoline
+            // does at the end of the body.
+            for (const l of coroFinish(E, E.currentReturnType, v.name, E.currentFn?.captures !== undefined)) E.line(l);
+          } else {
+            E.line(`return ${v.name};${E.srcComment(s.loc)}`);
+          }
         } else {
           E.releaseForJump(0, 0);
-          E.line(`return;${E.srcComment(s.loc)}`);
+          if (E.currentCoro !== null) {
+            for (const l of coroFinish(E, E.currentReturnType, null, E.currentFn?.captures !== undefined)) E.line(l);
+          } else {
+            E.line(`return;${E.srcComment(s.loc)}`);
+          }
         }
         break;
       }

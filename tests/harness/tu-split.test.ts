@@ -137,3 +137,52 @@ describe("a program emitted as several translation units", () => {
     }, 240_000);
   }
 });
+
+/* THE STACKLESS LANE ACROSS A SPLIT.
+ *
+ * Measured on a real zapo-rest build with SCRIPTC_STACKLESS=1, the emitted C
+ * did not compile at all:
+ *
+ *     zapo-rest.part4.c:7:3: error: use of undeclared identifier
+ *                                   'sc_cf__x25_promise_all_tuple_247'
+ *
+ * All 533 frame structs landed in the main TU and all 533 resume functions
+ * in part1..part6, with nothing in the header to bridge them. Every
+ * single-TU probe passed, because nothing was split -- which is exactly the
+ * blind spot this FILE exists to cover, and the stackless lane had no entry
+ * in it. The knob is set HERE rather than read from the environment, so the
+ * guard holds on the ordinary knob-absent gate too: a lane nobody runs by
+ * default is a lane that rots. */
+describe("the stackless lane across a translation-unit split", () => {
+  const SRC = "tests/corpus/1020-async-basics.ts";
+  test("a frame struct reaches the unit that defines its resume function", async () => {
+    const previous = process.env["SCRIPTC_STACKLESS"];
+    process.env["SCRIPTC_STACKLESS"] = "1";
+    try {
+      const whole = await build(SRC, "stackless-whole", null);
+      // The arming check: without a conversion this test proves nothing, and
+      // it would keep passing if the knob ever stopped reaching the emitter.
+      expect(
+        readFileSync(whole.cPath, "utf8"),
+        "the knob must actually convert something, or this guard is inert",
+      ).toMatch(/\}\s*sc_cf_/);
+
+      // Splitting is where it broke; building at all is most of the assertion.
+      const split = await build(SRC, "stackless-split", 4);
+      expect(split.header).toBeDefined();
+      const hdr = readFileSync(split.header!, "utf8");
+      const main = readFileSync(split.cPath, "utf8");
+      // The struct belongs to the header -- the one file every part includes.
+      expect(hdr, "the frame struct must be in the shared header").toMatch(/\}\s*sc_cf_/);
+      // And NOT also in unit 0: `typedef struct {...}` is an anonymous struct,
+      // so a second spelling of it in the same unit is a different type.
+      expect(main, "unit 0 must not respell the frame struct").not.toMatch(/\}\s*sc_cf_/);
+
+      // Same answer divided as whole: the split must not change behaviour.
+      expect(run(split.binary)).toEqual(run(whole.binary));
+    } finally {
+      if (previous === undefined) delete process.env["SCRIPTC_STACKLESS"];
+      else process.env["SCRIPTC_STACKLESS"] = previous;
+    }
+  });
+});

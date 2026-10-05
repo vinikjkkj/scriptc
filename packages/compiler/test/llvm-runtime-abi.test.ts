@@ -43,7 +43,7 @@ const runtimeSrcDir = join(repoRoot, "packages/runtime/src");
  * correct `declare`s in ws.ts reported as "no prototype" purely because
  * the parser could not see the header they agree with. The guard test
  * below fails if the emitter ever grows a third include. */
-const HEADER_FILES = ["scr_runtime.h", "scr_ws_global.h", "scr_ws_dispatch.h"];
+const HEADER_FILES = ["scr_runtime.h", "scr_ws_global.h", "scr_ws_dispatch.h", "scr_coro.h"];
 const llvmSrcDir = join(import.meta.dirname, "../src/backend/llvm");
 const corpusDir = join(repoRoot, "tests/corpus");
 

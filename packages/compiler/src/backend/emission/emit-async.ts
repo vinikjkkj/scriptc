@@ -16,6 +16,10 @@ import { IrFunction, IrType, isRefCounted, isUnitType, typeEquals, typeKey } fro
       // must not get the eager spawn wrapper (nothing may run before the
       // first .next()). emitGenScaffolding below owns it.
       if (!fn.async || fn.generator !== undefined) continue;
+      // The D1 slice emits this function's frame, resume and spawn wrapper
+      // itself. Emitting the fiber scaffolding too would define
+      // mangleAsyncSpawn twice.
+      if (E.coroPlansByFn.has(fn.name)) continue;
       const pack = mangleArgPack(fn.name);
       const lifted = fn.captures !== undefined;
       const fields: string[] = [];
