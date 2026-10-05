@@ -111,16 +111,30 @@ export function emitCoroFrames(E: CEmitter, out: string[], plans: Map<string, St
     for (const t of E.coroTempSpills.get(fn.name) ?? []) {
       fields.push(`${cDecl(t.type, "sc_tmp_" + t.name)}; /* owned across a park */`);
     }
-    // The forward declaration goes in `out` beside the struct, not through
-    // E.decl: the spawn wrapper below takes the resume function's ADDRESS,
-    // so the declaration has to precede it in the same emitted section.
-    out.push(
+    // BOTH of these go where PROTOTYPES go, which is the shared header when
+    // the program splits and `out` when it does not -- so a single TU keeps
+    // the historical bytes in the historical position.
+    //
+    // The previous note here said the declaration must sit in `out` because
+    // the spawn wrapper takes the resume function's ADDRESS and so needs it
+    // to precede the wrapper in the same section. That is true of the
+    // FORWARD DECLARATION and false of the frame STRUCT, which has no
+    // ordering constraint against the wrapper at all -- and applying it to
+    // the struct is why a split program did not compile: all 533 structs
+    // landed in the main TU while all 533 resume functions landed in
+    // part1..part6, with nothing in the header to bridge them. A single-TU
+    // probe cannot see this, because nothing is split.
+    const proto = E.protoOut(out);
+    proto.push(
       ``,
       `typedef struct {`,
       ...fields.map((f) => `  ${f}`),
       `} ${frame};`,
-      `static void ${mangleCoroResume(fn.name)}(ScrCoroBase *sc_b);`,
     );
+    // E.link is "static " in one TU and "" when split -- and when it splits,
+    // the DEFINITION loses its `static` with every other body (stripStatic),
+    // so a `static` declaration here would contradict it.
+    proto.push(`${E.link}void ${mangleCoroResume(fn.name)}(ScrCoroBase *sc_b);`);
   }
 }
 
