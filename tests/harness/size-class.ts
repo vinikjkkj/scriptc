@@ -23,6 +23,12 @@
  *           of the container format, not runtime growth, and it cannot
  *           hide an engine-sized jump any more than the other two can.
  *
+ * SUPERSEDED 2026-10-05 - READ THE 2026-10-05 ENTRY BELOW BEFORE THIS ONE.
+ * The claim this paragraph makes was true when it was written and is FALSE
+ * now: the anchors have since been re-recorded in the CROSS lane, and a
+ * reader who trusts this paragraph measures host-native and sees a phantom
+ * 8 KB regression. That happened on 2026-10-05.
+ *
  * WHICH WIN32 BUILD THE RECORDED PAIR BELONGS TO, measured 2026-08-31.
  * The prose above names `zig cc -target x86_64-windows-gnu`, but the
  * RECORDED figures track the HOST-NATIVE zigcc build (SCRIPTC_TARGET
@@ -1762,6 +1768,58 @@ export const REGEX_CLASS_RECORDED = platform === "win32" ? 826_368 : null;
  * error so the caller supplies the assertion — and so this function is
  * itself testable, which is what "armed" means: size-class-armed.test.ts
  * plants a page and requires a complaint back. */
+/* 2026-10-05 - THE ANCHORS ARE IN THE CROSS LANE, AND THE 2026-08-31
+ * PARAGRAPH AT THE TOP OF THIS FILE SAYS THEY ARE NOT.
+ *
+ * Nothing recorded here moved. What moved is the claim about WHICH
+ * configuration the numbers belong to, which had gone stale and cost an
+ * afternoon: a block measured the static anchor at 693,248 against the
+ * recorded 685,056, read "+8,192, 2.00 of one page", and opened a
+ * regression hunt on a merge that had not grown a byte.
+ *
+ * Measured at 266b827a5 ITSELF - the commit whose message records 685,056 -
+ * in its own worktree, three configurations, one host, one tree, the
+ * toolchain as the only variable:
+ *
+ *                                      size-plain    vs recorded    size-regex
+ *   SCRIPTC_TARGET=x86_64-windows-gnu    685,056         +0           826,880
+ *   unset (host-native), zig 0.16.0      691,712      +6,656          833,536
+ *   unset (host-native), zig 0.15.2      678,400      -6,656          820,224
+ *
+ * The cross cell is BYTE-EXACT on the static anchor and +512 on the regex
+ * one. That is the identification: the recorded pair is the cross lane.
+ * The 2026-08-31 paragraph above says host-native, and it was right then -
+ * the anchors have been re-recorded since and the paragraph was not.
+ *
+ * The two host-native cells also answer the other question that hunt asked:
+ * zig 0.15.2 and 0.16.0 differ by 13,312 bytes on the same tree, so "which
+ * zig" is a second axis this pair is sensitive to and the recorded figure
+ * carries an answer to it too. The chocolatey 0.15.2 is FIRST on this
+ * host's default PATH, which is how a lane gets chosen by accident.
+ *
+ * NOT THE OUTPUT PATH, which was the other hypothesis and is refuted:
+ * varying the output DIRECTORY by 120 characters and the output BASENAME by
+ * 36 moved the binary zero bytes in every arm. The PE embeds only the pdb
+ * BASENAME, and even that does not change the size. The per-arm-path
+ * caution recorded elsewhere in this file is about something else; it does
+ * not apply to these two programs, whose basenames the suite fixes.
+ *
+ * REAL DRIFT SINCE THE RECORDING, same lane, same worktree, commit as the
+ * only variable: 266b827a5 685,056 -> main 31b5e9c9a 687,104, so +2,048 on
+ * both anchors for everything merged in between. Half a drift page, equal on
+ * two unrelated programs, which is what always-linked drift looks like.
+ * NOTHING IS RE-RECORDED HERE: the figures are green in their own lane and
+ * moving them would just break that lane to flatter another one.
+ *
+ * recordedSizeComplaint now prints the lane it ran in beside the lane the
+ * anchors were recorded in, so the next reader gets this in the failure
+ * instead of in an afternoon. */
+
+/** The build configuration the RECORDED anchors were last taken in. Measured,
+ * not assumed - see the 2026-10-05 entry above. */
+export const RECORDED_LANE =
+  "SCRIPTC_TARGET=x86_64-windows-gnu with SCRIPTC_CC=zigcc on zig 0.16.0";
+
 export function recordedSizeComplaint(
   what: string,
   actual: number,
@@ -1779,7 +1837,14 @@ export function recordedSizeComplaint(
     `grew, or a new one that a program which cannot reach it now links — and WRITE IT IN ` +
     `tests/harness/size-class.ts beside the other calibrations, then record the new figure. ` +
     `A ${dir === "GREW" ? "growth" : "shrink"} nobody explains is how this pair stopped meaning ` +
-    `anything before.`
+    `anything before.\n` +
+    // THE LANE, in the complaint itself. The recorded anchors belong to ONE
+    // build configuration and read red in every other one, which has now cost
+    // two blocks an A/B apiece to rediscover from scratch. Saying it here turns
+    // that into one line of the failure. See RECORDED_LANE above.
+    `LANE: this number was produced with SCRIPTC_TARGET=${process.env["SCRIPTC_TARGET"] ?? "(unset, host-native)"} ` +
+    `and SCRIPTC_CC=${process.env["SCRIPTC_CC"] ?? "(unset, clang)"}. The recorded figures were taken in ` +
+    `${RECORDED_LANE}. A mismatch here is the FIRST thing to rule out — it is not a code change.`
   );
 }
 
