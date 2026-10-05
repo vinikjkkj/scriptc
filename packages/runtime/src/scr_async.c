@@ -3423,6 +3423,77 @@ void scr_queue_microtask_raw(void (*fn)(void *), void *arg,
   scr_ready_push(f);
 }
 
+/* ââ stackless coroutine support ââââââââââââââââââââââââââââââ
+ * ScrPromise is opaque outside this file, so scr_coro.c cannot reach its
+ * state or its waiter list. These are the only primitives it needs, and
+ * they are deliberately thin: the policy lives in scr_coro.c, this is just
+ * the window onto the struct.
+ *
+ * scr_coro_promise_park is the load-bearing one. It attaches a RAW ENVELOPE
+ * to the promise's existing `waiters` list, so the wake rides the push site
+ * that is already there:
+ *
+ *     for (i) scr_ready_push(p->waiters[i]);   // scr_promise_settle_wake
+ *
+ * That matters for two reasons. It adds no second push site, so "exactly one
+ * scr_ready_push per await" stays checkable by counting the four that exist.
+ * And it pushes for BOTH settlement kinds -- the `cbs` list does not: its
+ * dispatch calls `adapt` only on the fulfilled arm and runs synchronously
+ * inside the settle, so a resume hung there would skip a turn and would
+ * never fire on a rejection. waiters is the mechanism await already uses;
+ * a coroutine is just an awaiter that is not a fiber. */
+
+/** True once the promise has settled either way. */
+bool scr_coro_promise_settled(const ScrPromise *p) {
+  return p->state != SCR_PROM_PENDING;
+}
+
+/** True for a rejected settlement (only meaningful once settled). */
+bool scr_coro_promise_rejected(const ScrPromise *p) {
+  return p->state == SCR_PROM_REJECTED;
+}
+
+/** Park a raw continuation on a PENDING promise: when `p` settles, the
+ * existing waiter wake pushes this envelope exactly once and
+ * scr_resume_fiber runs `fn(arg)` on the main stack.
+ *
+ * Returns false and attaches nothing when `p` is already settled -- the
+ * caller owes the one-turn hop itself, which is the other arm of
+ * scr_await_settled's `if`. */
+bool scr_coro_promise_park(ScrPromise *p, void (*fn)(void *), void *arg,
+                           void (*arg_release)(void *)) {
+  if (p->state != SCR_PROM_PENDING) return false;
+  ScrFiber *f = calloc(1, sizeof *f);
+  if (!f) scr_oom();
+  /* st/gen/promise stay NULL: this is an envelope, not a fiber, and
+   * scr_resume_fiber's micro_raw arm frees it before calling out. */
+  f->micro_raw = fn;
+  f->micro_arg = arg;
+  f->micro_arg_release = arg_release;
+  if (p->nwaiters == p->waiters_cap) {
+    p->waiters_cap = p->waiters_cap ? p->waiters_cap * 2 : 4;
+    p->waiters = realloc(p->waiters, p->waiters_cap * sizeof *p->waiters);
+    if (!p->waiters) scr_oom();
+  }
+  p->waiters[p->nwaiters++] = f;
+  return true;
+}
+
+/** Mark a settlement observed (the unhandled-rejection ledger). */
+void scr_coro_promise_observe(ScrPromise *p) { scr_prom_observe(p); }
+
+/** Copy a rejected promise's reason into the ACTIVE exception cell, the
+ * same call the fiber await path makes. */
+void scr_coro_promise_rethrow(ScrPromise *p) { scr_promise_rethrow(p); }
+
+/* Settled payload readers. No parking, no observation -- the caller has
+ * already established that the promise is settled and fulfilled. */
+double scr_coro_promise_f64(const ScrPromise *p) { return p->f64; }
+bool   scr_coro_promise_bool(const ScrPromise *p) { return p->b; }
+void  *scr_coro_promise_ref(const ScrPromise *p) {
+  return p->payload ? p->retain_fn(p->payload) : NULL;
+}
+
 /* The checked-dynamic argument form (JS files — common.mustCall wrappers
  * and the suite's invalid-input probes): a non-function throws Node's
  * ERR_INVALID_ARG_TYPE synchronously; a function value is called with
