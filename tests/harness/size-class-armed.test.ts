@@ -19,7 +19,9 @@ import {
   SIZE_DRIFT_PAGE,
   STATIC_CLASS_MAX,
   STATIC_CLASS_RECORDED,
+  TEXT_DRIFT_TOLERANCE,
   recordedSizeComplaint,
+  recordedTextComplaint,
 } from "./size-class.js";
 
 const R = 637_952; // a stand-in recorded figure, so these tests do not move
@@ -96,5 +98,65 @@ describe("the recorded-size guard is armed", () => {
     const distance = (REGEX_CLASS_RECORDED as number) - (STATIC_CLASS_RECORDED as number);
     expect(distance).toBeGreaterThan(100_000);
     expect(distance).toBeLessThan(200_000);
+  });
+});
+
+/* ── the SECTION anchor, armed the same way ───────────────────────────
+ *
+ * The file-size anchor cannot see a sub-granule change at all, which is the
+ * whole reason this one exists; these cases pin the sensitivity that claim
+ * rests on, using the deltas actually MEASURED from planted code in
+ * scr_console.c (see the section-anchor entry in size-class.ts):
+ *
+ *     N=4  plant -> +144 of .text, +512 of file
+ *     N=20 plant -> +384 of .text, +512 of file
+ *
+ * Both report the SAME file delta. Only the second may fire here. If the
+ * tolerance is ever widened past 384 these tests go red, which is the point:
+ * widening it silently is how the file anchor's blind spot got there. */
+const T = 543_702; // stand-in recorded .text, so these do not move on re-record
+
+describe("the section-size guard is armed", () => {
+  test("an exact match is silent", () => {
+    expect(recordedTextComplaint("x", T, T)).toBeNull();
+  });
+
+  test("the measured 144-byte plant is tolerated, and that is the honest limit", () => {
+    expect(recordedTextComplaint("x", T + 144, T)).toBeNull();
+  });
+
+  test("the measured 384-byte plant COMPLAINS, where file size reported +512 and passed", () => {
+    const c = recordedTextComplaint("x", T + 384, T);
+    expect(c).not.toBeNull();
+    expect(c).toContain("GREW by 384 bytes");
+    // The exact DELTA, not a granule -- that is the whole claim. Asserting
+    // the string "512" is absent was wrong: the message mentions the
+    // 512-byte boundary in its own explanation. What must not appear is a
+    // delta rounded to one.
+    expect(c).not.toContain("GREW by 512 bytes");
+  });
+
+  test("it is two-sided, like the file anchor", () => {
+    expect(recordedTextComplaint("x", T - TEXT_DRIFT_TOLERANCE, T)).not.toBeNull();
+    expect(recordedTextComplaint("x", T - TEXT_DRIFT_TOLERANCE, T)).toContain("SHRANK");
+  });
+
+  test("the tolerance boundary is exact", () => {
+    expect(recordedTextComplaint("x", T + TEXT_DRIFT_TOLERANCE - 1, T)).toBeNull();
+    expect(recordedTextComplaint("x", T + TEXT_DRIFT_TOLERANCE, T)).not.toBeNull();
+  });
+
+  test("it names the lane, because these figures are lane-bound", () => {
+    expect(recordedTextComplaint("x", T + 1000, T)).toContain("LANE");
+  });
+
+  test("a null recording is silent, so an unweighed platform invents nothing", () => {
+    expect(recordedTextComplaint("x", 1, null)).toBeNull();
+    expect(recordedTextComplaint("x", 999_999_999, null)).toBeNull();
+  });
+
+  test("the tolerance is NOT one page -- a page would reproduce the blind spot", () => {
+    expect(TEXT_DRIFT_TOLERANCE).toBeLessThan(SIZE_DRIFT_PAGE);
+    expect(TEXT_DRIFT_TOLERANCE).toBeLessThanOrEqual(384);
   });
 });

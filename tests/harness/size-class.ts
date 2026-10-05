@@ -250,6 +250,8 @@
  * links clean and takes the static class to 625,664, and scr_random_fill.c
  * on top of that to 624,640.
  */
+import { readFileSync } from "node:fs";
+
 const platform = process.platform;
 
 /** A default-built hello-world: no regex, no engine. */
@@ -1852,3 +1854,129 @@ export function recordedSizeComplaint(
  * A floor rather than a ceiling — the assertion is that the engine IS
  * there, which is true by a wide margin on every container format. */
 export const ENGINE_CLASS_MIN = 500_000;
+
+/* ── the SECTION anchor, added 2026-10-05 ──────────────────────────────
+ *
+ * WHY A SECOND MEASURE AT ALL. Everything above anchors on FILE size, and a
+ * PE's file size is quantised to the 512-byte file-alignment granule. That is
+ * not only a blind spot below one granule -- it MISREPORTS at one. Measured
+ * on this tree, two entries above are wrong about their own bytes:
+ *
+ *   266b827a5's entry says the SQLite idle-release tenant was "512 bytes of
+ *   real always-linked code ... one file-alignment unit of .text and nothing
+ *   else". The .text growth was 304 bytes; the granule rounded it up.
+ *
+ *   c07c4cd38 (the tick poison) reads as -512 of file. Its .text moved -128.
+ *   The file figure overstates it by 4x.
+ *
+ * Neither number was dishonest; the instrument could not resolve them.
+ *
+ * WHAT THIS DOES NOT BUY, SAID PLAINLY. Section size does NOT drift less than
+ * file size, so it does not license a tighter tolerance by being quieter.
+ * Measured across the 13 commits from the recording to main, same lane, one
+ * output path, commit the only variable:
+ *
+ *     5367ce8f4  file 684,544   .text 541,974
+ *     266b827a5  file 685,056   .text 542,278    (the RECORDING)
+ *     040d22982  file 685,056   .text 542,278
+ *     ac5d7a232  file 687,104   .text 543,830
+ *     31b5e9c9a  file 687,104   .text 543,830
+ *     c07c4cd38  file 686,592   .text 543,702
+ *     c4259352d  file 686,592   .text 543,702
+ *     e03bdf0aa  file 686,592   .text 543,702    (main)
+ *
+ * Total drift +1,536 file against +1,424 .text -- the same magnitude. The
+ * gain is RESOLUTION, not quiet.
+ *
+ * THE TOLERANCE IS CHOSEN FROM THAT TABLE, NOT INHERITED. Per-merge .text
+ * steps above are 0, 0, 0, 0, +304, -128, +1,552. The largest INCIDENTAL step
+ * (layout, no new code) is 128; the smallest REAL always-linked code step is
+ * 304. 256 sits in that gap: it tolerates incidental movement and fires on
+ * code. It is deliberately NOT one page -- a page here would reproduce
+ * exactly the blindness this anchor exists to remove.
+ *
+ * WHAT IT CATCHES, AND WHAT IT STILL DOES NOT. Controls planted in an
+ * always-linked TU (scr_console.c), referenced from a live path behind a
+ * volatile global so neither the compiler nor --gc-sections could strip them:
+ *
+ *     plant     file        d file      .text       d .text
+ *     clean     686,592         -       543,702         -
+ *     N=4       687,104      +512       543,846      +144
+ *     N=20      687,104      +512       544,086      +384
+ *     N=60      687,616     +1024       544,758     +1056
+ *
+ * N=4 and N=20 produce the SAME +512 of file size for a 144-byte and a
+ * 384-byte change: the file anchor cannot tell them apart, and both sit far
+ * under its one-page tolerance, so both pass it silently. The 384-byte one
+ * fires this anchor. The 144-byte one still does not, and that is the honest
+ * limit -- below 256 bytes nothing here complains.
+ *
+ * LANE. These figures are as lane-bound as the file ones; see RECORDED_LANE.
+ * Taken at e03bdf0aa with SCRIPTC_TARGET=x86_64-windows-gnu, SCRIPTC_CC=zigcc,
+ * zig 0.16.0. The static FILE figure reproduced 685,056 at 266b827a5 and
+ * 687,104 at 31b5e9c9a in this same lab, which is two independent
+ * confirmations that the lane was right before any .text number was read out
+ * of it. */
+
+/** The .text VirtualSize of a PE, which unlike the file size is exact rather
+ * than rounded to the 512-byte file-alignment granule. VirtualSize, not
+ * SizeOfRawData: the raw size is itself aligned and carries the same blind
+ * spot the file size does. */
+export function peTextVirtualSize(binaryPath: string): number {
+  const d = readFileSync(binaryPath);
+  const pe = d.readUInt32LE(0x3c);
+  if (d.toString("latin1", pe, pe + 2) !== "PE") {
+    throw new Error(`${binaryPath}: not a PE image (no PE signature at e_lfanew)`);
+  }
+  const nsec = d.readUInt16LE(pe + 6);
+  const optsz = d.readUInt16LE(pe + 20);
+  const tbl = pe + 24 + optsz;
+  for (let i = 0; i < nsec; i++) {
+    const off = tbl + 40 * i;
+    // Section names are NUL-padded to 8 bytes, not space-padded.
+    const name = d.toString("latin1", off, off + 8).split("\u0000")[0];
+    if (name === ".text") return d.readUInt32LE(off + 8);
+  }
+  throw new Error(`${binaryPath}: no .text section`);
+}
+
+/** Tolerance for the section anchor. 256, derived above: above the largest
+ * incidental step measured (128) and below the smallest real always-linked
+ * code step measured (304). Deliberately not SIZE_DRIFT_PAGE. */
+export const TEXT_DRIFT_TOLERANCE = 256;
+
+/** .text VirtualSize of the canonical static hello-world, measured at
+ * e03bdf0aa in RECORDED_LANE. win32 only, for the reason the file figures are
+ * win32 only: a platform nobody weighed gets no invented number. */
+export const STATIC_CLASS_TEXT_RECORDED = platform === "win32" ? 543_702 : null;
+
+/** .text VirtualSize of the canonical regex program, same commit, same lane.
+ * Recorded separately rather than derived: the two classes do not move
+ * together, which is why the file figures are separate too. */
+export const REGEX_CLASS_TEXT_RECORDED = platform === "win32" ? 630_150 : null;
+
+/** The section-anchor complaint, or null when within tolerance. Same shape as
+ * recordedSizeComplaint -- a string, so the caller owns the assertion and this
+ * stays testable, which is what "armed" means. */
+export function recordedTextComplaint(
+  what: string,
+  actual: number,
+  recorded: number | null,
+  tolerance: number = TEXT_DRIFT_TOLERANCE,
+): string | null {
+  if (recorded === null) return null;
+  const delta = actual - recorded;
+  if (Math.abs(delta) < tolerance) return null;
+  const dir = delta > 0 ? "GREW" : "SHRANK";
+  return (
+    `${what} .text ${dir} by ${Math.abs(delta)} bytes: ${actual} against the recorded ${recorded} ` +
+    `(tolerance ${tolerance} bytes, chosen from measured drift -- see the section-anchor entry in ` +
+    `tests/harness/size-class.ts).\n` +
+    `This is the EXACT delta, not a granule: file size would have reported it rounded to a ` +
+    `512-byte boundary, or not at all. Find what the bytes bought and WRITE IT IN that file ` +
+    `beside the other calibrations, then record the new figure.\n` +
+    `LANE: produced with SCRIPTC_TARGET=${process.env["SCRIPTC_TARGET"] ?? "(unset, host-native)"} ` +
+    `and SCRIPTC_CC=${process.env["SCRIPTC_CC"] ?? "(unset, clang)"}; recorded in ${RECORDED_LANE}. ` +
+    `A mismatch here is the FIRST thing to rule out.`
+  );
+}
