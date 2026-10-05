@@ -96,6 +96,32 @@ ScrPromise *scr_coro_spawn(ScrCoroBase *base) {
  * This is the ONE place the "exactly one scr_ready_push per await"
  * invariant is broken on purpose, and only when the knob is set. Breaking
  * it is what the knob is for: it proves the turn net can still go red. */
+/* WHAT THIS COSTS A SHIPPED BINARY, AND WHY IT STAYS UNCONDITIONAL.
+ *
+ * Measured, not estimated, zig 0.16.0 / x86_64-windows-gnu / -O2, by building
+ * one binary twice with only SCR_CORO_POISON_BLIND between them:
+ *
+ *     scr_coro.o                30,802 -> 30,304      498 B
+ *     linked .text virtual size 547,718 -> 547,670     48 B
+ *     .text raw size            547,840 -> 547,840      0 B
+ *     total file size           691,712 -> 691,712      0 B
+ *
+ * The honest number is 48 BYTES of .text -- the branch plus this thunk. The
+ * 498 B object delta is unreferenced function bodies, relocations and symbol
+ * entries that the linker drops. The file size does not move at all because
+ * 48 B fits inside the 512-byte PE alignment slack already there, which is
+ * also why "the two exes are byte-identical in size" is NOT evidence that a
+ * change is free: at this granularity anything under 512 B is invisible, and
+ * reading that as zero is how a cost gets missed.
+ *
+ * KEPT UNCONDITIONAL, deliberately. scr_tick_poison() in scr_async.c is
+ * already unconditional and already ships, so the fiber lane is poisonable in
+ * a shipping binary. Gating this half behind a build flag would leave the
+ * fiber lane poisonable and the stackless lane not -- which is exactly the
+ * asymmetry that let a poisoned run move every fiber turn count and leave
+ * every stackless one untouched, with the table green. 48 bytes against a
+ * 547,718-byte .text is 0.009%, and it buys the only thing that makes the
+ * turn net able to see the lane it was written for. */
 static void scr_coro_poison_hop(void *base_as_void) {
   scr_queue_microtask_raw(&scr_coro_resume_entry, base_as_void, NULL);
 }
