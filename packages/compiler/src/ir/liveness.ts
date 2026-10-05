@@ -621,14 +621,14 @@ export interface StacklessPlan {
  * call sites only ever see the spawn wrapper's `ScrPromise *`.
  *
  * The exclusions beyond D1 are scope, not difficulty: generators need the
- * second machine, module initialisers carry the evaluation-promise cache,
- * and a lifted body threads a closure environment through its arg pack.
- * Each is a later slice. */
+ * second machine and module initialisers carry the evaluation-promise
+ * cache. A LIFTED body is in: its closure environment is one frame field,
+ * and the capture bindings re-derive from it on every resume because the
+ * prologue that reads `sc_env->caps[i]` runs before the state dispatch. */
 export function stacklessPlan(fn: IrFunction): StacklessPlan | null {
   if (fn.async !== true) return null;
   if (fn.generator !== undefined) return null;
   if (fn.asyncCacheGlobal !== undefined || fn.asyncCycleCacheGlobal !== undefined) return null;
-  if (fn.captures !== undefined) return null;
   // A boxed PARAM arrives under a raw name and is moved into a fresh box by
   // the prologue; in a resume function both the raw name and the box would
   // have to be frame state. Out of scope for the first slice. A boxed LOCAL

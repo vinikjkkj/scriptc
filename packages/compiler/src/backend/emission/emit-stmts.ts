@@ -359,7 +359,7 @@ export function emitFunction(E: CEmitter, fn: IrFunction): void {
       // coroutine has to do it here, because the body IS the trampoline.
       // Unreachable when the body really did end in a return on every path,
       // and harmless there.
-      for (const l of coroFinish(E, E.currentReturnType, null)) E.line(l);
+      for (const l of coroFinish(E, E.currentReturnType, null, fn.captures !== undefined)) E.line(l);
     }
     E.scopes.pop();
 
@@ -920,14 +920,14 @@ export function emitStmt(E: CEmitter, s: IrStmt): void {
             // caller on the stack after the first resume. It FULFILLS the
             // promise the frame owns, which is what the fiber trampoline
             // does at the end of the body.
-            for (const l of coroFinish(E, E.currentReturnType, v.name)) E.line(l);
+            for (const l of coroFinish(E, E.currentReturnType, v.name, E.currentFn?.captures !== undefined)) E.line(l);
           } else {
             E.line(`return ${v.name};${E.srcComment(s.loc)}`);
           }
         } else {
           E.releaseForJump(0, 0);
           if (E.currentCoro !== null) {
-            for (const l of coroFinish(E, E.currentReturnType, null)) E.line(l);
+            for (const l of coroFinish(E, E.currentReturnType, null, E.currentFn?.captures !== undefined)) E.line(l);
           } else {
             E.line(`return;${E.srcComment(s.loc)}`);
           }

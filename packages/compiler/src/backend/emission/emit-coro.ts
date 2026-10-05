@@ -79,6 +79,10 @@ export function coroPlans(fns: readonly IrFunction[]): Map<string, StacklessPlan
 export function coroFrameLocals(fn: IrFunction, plan: StacklessPlan): string[] {
   const ids = new Set<string>(plan.frameLocals);
   for (const p of fn.params) ids.add(p.localId);
+  // Capture boxes come back from `sc_env->caps[i]` on every resume, so they
+  // must NOT also get frame slots — two sources for one binding is how a
+  // shared box silently stops being shared.
+  for (const c of fn.captures ?? []) ids.delete(c.localId);
   // Deterministic order: declaration order, so the struct layout is stable
   // across runs and two builds of the same source produce the same bytes.
   return fn.locals.filter((l) => ids.has(l.id)).map((l) => l.id);
@@ -91,6 +95,10 @@ export function emitCoroFrames(E: CEmitter, out: string[], plans: Map<string, St
     if (plan === undefined) continue;
     const frame = mangleCoroFrame(fn.name);
     const fields: string[] = ["ScrCoroBase base;"];
+    // A lifted body's closure environment: ONE field, and the capture
+    // bindings are re-derived from it before the dispatch rather than
+    // spilled, so no capture needs a frame slot of its own.
+    if (fn.captures !== undefined) fields.push("ScrClosure *sc_env; /* lifted */");
     const byId = new Map(fn.locals.map((l) => [l.id, l]));
     for (const id of coroFrameLocals(fn, plan)) {
       const l = byId.get(id)!;
@@ -128,13 +136,18 @@ export function emitCoroSpawns(E: CEmitter, out: string[], plans: Map<string, St
     // raw name and the body's prologue builds the box.
     const pname = (p: { localId: string }): string =>
       boxedIds.has(p.localId) ? mangleRawParam(p.localId) : mangleLocal(p.localId);
-    const params = fn.params.map((p) => cDecl(p.type, pname(p)));
+    const lifted = fn.captures !== undefined;
+    const params = [
+      ...(lifted ? ["ScrClosure *sc_env"] : []),
+      ...fn.params.map((p) => cDecl(p.type, pname(p))),
+    ];
     const sig = `ScrPromise *${mangleAsyncSpawn(fn.name)}(${params.join(", ") || "void"})`;
     E.decl(`${sig};`);
     appendLines(out, [
       ``,
       `${E.link}${sig} {`,
       `  ${frame} *sc_f = (${frame} *)scr_coro_alloc(sizeof *sc_f, &${mangleCoroResume(fn.name)}, /*has_exc=*/false);`,
+      ...(lifted ? [`  sc_f->sc_env = scr_closure_retain(sc_env);`] : []),
       ...fn.params.map((p) => `  sc_f->${coroField(p.localId)} = ${pname(p)};`),
       // INV-2: the body runs synchronously up to its first suspension, so a
       // function that never awaits has already settled by the time this
@@ -153,6 +166,9 @@ export function coroPrologue(E: CEmitter, fn: IrFunction, plan: StacklessPlan): 
   return [
     `static void ${mangleCoroResume(fn.name)}(ScrCoroBase *sc_b) {`,
     `  ${frame} *sc_f = (${frame} *)sc_b;`,
+    // Before the dispatch on purpose: the capture prologue below reads it,
+    // and every resume has to see the same environment.
+    ...(fn.captures !== undefined ? [`  ScrClosure *sc_env = sc_f->sc_env;`] : []),
   ].concat(
     // The switch is emitted AFTER the local declarations (the caller splices
     // it in), because C requires the declarations to dominate the labels.
@@ -254,18 +270,27 @@ export function emitCoroAwait(
 
 /** The completion path: what `return` and the top-level unwind emit instead
  * of a C return. */
-export function coroFinish(E: CEmitter, retType: IrType, valueExpr: string | null): string[] {
+export function coroFinish(
+  E: CEmitter,
+  retType: IrType,
+  valueExpr: string | null,
+  lifted = false,
+): string[] {
+  // The frame holds +1 on the closure (the fiber trampoline releases it
+  // after the body for the same reason); every completion path drops it.
+  const env = lifted ? [`scr_closure_release(sc_f->sc_env);`] : [];
   if (valueExpr === null || retType.kind === "void") {
-    return [`scr_coro_finish_void(sc_b);`, `return;`];
+    return [...env, `scr_coro_finish_void(sc_b);`, `return;`];
   }
   switch (retType.kind) {
     case "f64":
-      return [`scr_coro_finish_f64(sc_b, ${valueExpr});`, `return;`];
+      return [...env, `scr_coro_finish_f64(sc_b, ${valueExpr});`, `return;`];
     case "bool":
-      return [`scr_coro_finish_f64(sc_b, ${valueExpr} ? 1 : 0);`, `return;`];
+      return [...env, `scr_coro_finish_f64(sc_b, ${valueExpr} ? 1 : 0);`, `return;`];
     default: {
       const v = vAdapters(retType);
       return [
+        ...env,
         `scr_coro_finish_ref(sc_b, (void *)${valueExpr}, ${v.retain}, ${v.release}, ${E.traceArgC(retType)});`,
         `return;`,
       ];
@@ -274,8 +299,12 @@ export function coroFinish(E: CEmitter, retType: IrType, valueExpr: string | nul
 }
 
 /** The unwind path: a pending exception becomes the promise's rejection. */
-export function coroUnwind(): string[] {
-  return [`scr_coro_finish_throw(sc_b);`, `return;`];
+export function coroUnwind(lifted = false): string[] {
+  return [
+    ...(lifted ? [`scr_closure_release(sc_f->sc_env);`] : []),
+    `scr_coro_finish_throw(sc_b);`,
+    `return;`,
+  ];
 }
 
 export { isRefCounted };

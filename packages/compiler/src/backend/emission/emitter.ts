@@ -2500,7 +2500,7 @@ export class CEmitter {
     if (this.currentCoro !== null) {
       // The frame owns the promise: an escaping exception settles it as a
       // rejection rather than unwinding past a caller that no longer exists.
-      for (const l of coroUnwind()) this.line(l);
+      for (const l of coroUnwind(this.currentFn?.captures !== undefined)) this.line(l);
       return;
     }
     const t = this.currentReturnType;
