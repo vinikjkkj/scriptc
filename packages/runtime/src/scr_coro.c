@@ -18,8 +18,14 @@
  */
 #include "scr_coro.h"
 
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+static void scr_coro_oom(void) {
+  fputs("scriptc: out of memory allocating a coroutine frame\n", stderr);
+  abort();
+}
 
 ScrExcCell *scr_coro_exc(ScrCoroBase *base) {
   if (base == NULL || (base->flags & SCR_CORO_HAS_EXC) == 0) return NULL;
@@ -55,9 +61,36 @@ void scr_coro_release(ScrCoroBase *base) {
   free(base);
 }
 
+/* ── spawn ───────────────────────────────────────── */
+
+void *scr_coro_alloc(size_t size, ScrCoroResume resume, bool has_exc) {
+  /* calloc, not malloc: generated code assigns only the fields it uses, and
+   * a frame's unassigned pointer slots must be NULL for the death path to be
+   * able to release them unconditionally. */
+  ScrCoroBase *base = (ScrCoroBase *)calloc(1, size);
+  if (base == NULL) scr_coro_oom();
+  scr_coro_init(base, resume, scr_promise_new(), has_exc);
+  return base;
+}
+
+ScrPromise *scr_coro_spawn(ScrCoroBase *base) {
+  /* Retained BEFORE the body runs. A body that completes (or throws) without
+   * ever suspending drops the frame's last reference inside resume_entry and
+   * frees it, taking its promise reference with it -- scr_async_spawn retains
+   * for exactly this reason before it may destroy the fiber. */
+  ScrPromise *p = scr_promise_retain(base->promise);
+  scr_coro_resume_entry(base);
+  return p;
+}
+
 /* ── suspension ───────────────────────────────────────────────────────── */
 
 ScrCoroParkKind scr_coro_park(ScrCoroBase *base, ScrPromise *p) {
+  /* Set BEFORE either arm: scr_coro_resume_entry reads this after the body
+   * returns to tell a park from a fall-out-of-the-body, and the two need
+   * opposite handling. */
+  base->flags |= SCR_CORO_SUSPENDED;
+
   /* The suspension owns a reference: between here and the resume, the only
    * things naming this frame are the ready queue or a promise waiter list,
    * and neither of them is a strong edge on its own. */
@@ -110,9 +143,33 @@ void scr_coro_resume_entry(void *base_as_void) {
   ScrExcCell *mine = scr_coro_exc(base);
   ScrExcCell *prev_cell = (mine != NULL) ? scr_exc_swap_cell(mine) : NULL;
 
+  base->flags &= ~(uint32_t)SCR_CORO_SUSPENDED;
   base->flags |= SCR_CORO_RUNNING;
   base->resume(base);
   base->flags &= ~(uint32_t)SCR_CORO_RUNNING;
+
+  /* The body returned without parking and without finishing: an exception
+   * escaped it. The fiber path turns this into a REJECTION inside
+   * scr_fiber_finish, and JS requires the same -- an async function that
+   * throws before its first await returns a rejected promise, it does not
+   * throw at its caller. A LEAN frame borrows the ambient cell, so without
+   * this the throw would propagate into whoever resumed us: the spawner on
+   * the synchronous prefix, or the loop on a later turn.
+   *
+   * Checked while the frame's own cell is STILL INSTALLED, because
+   * scr_promise_reject_pending reads the ACTIVE cell. */
+  if ((base->flags & (SCR_CORO_DONE | SCR_CORO_SUSPENDED)) == 0u) {
+    if (scr_exc_pending()) {
+      scr_coro_finish_throw(base);
+    } else {
+      /* Neither parked, nor finished, nor threw. The resume function broke
+       * its contract; staying quiet here would settle nothing and leak the
+       * frame, so it is loud. */
+      fputs("scriptc: internal error: a coroutine resume returned without "
+            "suspending, finishing, or throwing\n", stderr);
+      abort();
+    }
+  }
 
   /* INV-5, out. Restores whatever was active before, which is main's cell on
    * a loop resume and some other frame's when a coroutine resumes inline. */

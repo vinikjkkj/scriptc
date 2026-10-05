@@ -194,6 +194,71 @@ static void verdict(const char *what, double *a, double *b, int n) {
   }
 }
 
+/* ---- 4. does a FRAME POOL earn its complexity? -----------------------
+ * The fiber pool (cap 4096) exists because CreateFiberEx costs ~20 us. A
+ * stackless frame is a calloc of ~104 bytes, and the question is whether
+ * pooling that is a saving or just complexity. This measures the CEILING of
+ * what a pool could buy: the allocator round-trip against a free-list
+ * round-trip, nothing else in between. If the gap is small next to the
+ * measured create+run+destroy cost, a pool cannot pay for itself.
+ *
+ * Note that creating a frame today is TWO allocations -- the frame and its
+ * ScrPromise -- so a frame pool removes at most one of them. */
+typedef struct PoolNode { struct PoolNode *next; } PoolNode;
+static PoolNode *g_pool = NULL;
+static long g_pool_depth = 0;
+
+static void *pool_get(size_t sz) {
+  if (g_pool != NULL) {
+    PoolNode *n = g_pool;
+    g_pool = n->next;
+    g_pool_depth--;
+    memset(n, 0, sz);           /* a frame must arrive zeroed, like calloc */
+    return n;
+  }
+  void *m = calloc(1, sz);
+  if (!m) abort();
+  return m;
+}
+static void pool_put(void *p, long cap) {
+  if (g_pool_depth >= cap) { free(p); return; }
+  PoolNode *n = (PoolNode *)p;
+  n->next = g_pool;
+  g_pool = n;
+  g_pool_depth++;
+}
+
+/* A volatile sink: without it LLVM removes the whole loop. It knows
+ * calloc/free semantics and a block that is written but never read is dead,
+ * so the first version of this measured 0.0 ns -- which is the number an
+ * elided loop always gives, and is not a fast allocator. */
+static volatile unsigned long g_sink;
+
+/* Sized at 104 bytes: the 40-byte ScrCoroBase plus the 64-byte live payload
+ * the IR liveness pass measured for resolveDisallowedListEntries, i.e. a
+ * REAL frame rather than this bench's smaller loop frame. */
+#define FRAME_BYTES 104
+
+static void measure_alloc(long N, double out[REPS], int pooled) {
+  const size_t sz = FRAME_BYTES;
+  for (int r = 0; r < REPS; r++) {
+    unsigned long acc = 0;
+    double t0 = scr_now_ms();
+    for (long i = 0; i < N; i++) {
+      unsigned char *m = (unsigned char *)(pooled ? pool_get(sz) : calloc(1, sz));
+      if (!m) abort();
+      m[0] = (unsigned char)i;
+      m[sz - 1] = (unsigned char)(i >> 8);
+      acc += (unsigned long)m[0] + (unsigned long)m[sz - 1];
+      if (pooled) pool_put(m, 4096); else free(m);
+    }
+    out[r] = (scr_now_ms() - t0) * 1e6 / (double)N;
+    g_sink += acc;
+  }
+  while (g_pool != NULL) { PoolNode *n = g_pool; g_pool = n->next; free(n); }
+  g_pool_depth = 0;
+}
+
 int main(int argc, char **argv) {
   long K = (argc > 1) ? strtol(argv[1], NULL, 10) : 2000;
   long Mlo = 2, Mhi = 50;
@@ -233,6 +298,24 @@ int main(int argc, char **argv) {
   measure_create(ARM_FIBER, K, fib);
   measure_create(ARM_CORO, K, cor);
   verdict("create+run+destroy", fib, cor, REPS);
+  printf("\n");
+
+  printf("4. FRAME ALLOCATION: is a frame pool worth building?"
+         " (frame = %d bytes)\n", FRAME_BYTES);
+  {
+    double raw[REPS], pooled[REPS];
+    measure_alloc(200000, raw, 0);
+    measure_alloc(200000, pooled, 1);
+    double R[REPS], P[REPS];
+    memcpy(R, raw, sizeof R); memcpy(P, pooled, sizeof P);
+    double mr = median(R, REPS), mp = median(P, REPS);
+    printf("  %-26s %-10s median %9.1f ns   [min %9.1f  max %9.1f]\n",
+           "calloc+free round trip", "malloc", mr, R[0], R[REPS - 1]);
+    printf("  %-26s %-10s median %9.1f ns   [min %9.1f  max %9.1f]\n",
+           "", "free-list", mp, P[0], P[REPS - 1]);
+    printf("  %-26s a frame pool could save at most %.1f ns of the"
+           " create cost measured in 3.\n", "", mr - mp);
+  }
   printf("\n");
 
   printf("note: with the pool ON every fiber spawn above is a pool HIT.\n"

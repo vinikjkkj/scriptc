@@ -73,6 +73,12 @@ enum {
   SCR_CORO_HAS_EXC = 1u << 1,
   /** Currently executing: a resume while this is set is a re-entrancy bug. */
   SCR_CORO_RUNNING = 1u << 2,
+  /** The last resume returned because it PARKED, not because it finished.
+   * scr_coro_park sets it; scr_coro_resume_entry clears it before each
+   * re-entry and reads it afterwards to tell "suspended" from "fell out of
+   * the body", which are the two ways a resume function can return and which
+   * need opposite handling. */
+  SCR_CORO_SUSPENDED = 1u << 3,
 };
 
 /* The LEAN frame: 40 bytes on x86_64, and it is what D1-D3 suspension
@@ -137,6 +143,38 @@ typedef enum {
    * promise's waiter list and its settle will push exactly once. */
   SCR_CORO_PARK_PENDING = 1,
 } ScrCoroParkKind;
+
+/* ---- spawn: what a generated spawn wrapper calls ----------------------
+ * The emitted shape mirrors emit-async.ts's fiber path one for one, so the
+ * CALL SITE cannot tell the two apart:
+ *
+ *     ScrPromise *scr_async_f(double a, ScrStr *b) {     // same signature
+ *       Frame_f *f = scr_coro_alloc(sizeof *f, &resume_f, false);
+ *       f->a = a; f->b = b;                              // the argpack fields
+ *       return scr_coro_spawn(&f->base);
+ *     }
+ *
+ * That identity is what makes the hybrid work: a stackless function can call
+ * a fiber one and vice versa, because both answer a ScrPromise * and neither
+ * caller knows which it got. */
+
+/** Allocate and initialise a frame of `size` bytes (must be at least
+ * sizeof(ScrCoroBase), with ScrCoroBase as its FIRST member). The block is
+ * zeroed, so generated code only assigns the fields it actually uses. Mints
+ * the promise the frame will settle. Returns the frame. */
+void *scr_coro_alloc(size_t size, ScrCoroResume resume, bool has_exc);
+
+/** Start a frame and hand back its promise.
+ *
+ * INV-2: the body runs SYNCHRONOUSLY on the CALLER's stack up to its first
+ * suspension, exactly as scr_async_spawn switches into the fiber before
+ * returning. An async function that completes without awaiting has already
+ * settled its promise by the time this returns, and one that throws before
+ * its first await has already REJECTED it -- JS never lets that throw escape
+ * to the caller.
+ *
+ * The returned reference is the caller's to release. */
+ScrPromise *scr_coro_spawn(ScrCoroBase *base);
 
 /** Suspend `base` on `p`.
  *

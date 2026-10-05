@@ -120,6 +120,12 @@ typedef struct {
   const double *add; size_t nadd;
   const double *rem; size_t nrem;
   bool allowed;
+  /* -1 = never. Otherwise the push index at which the body throws WITHOUT
+   * settling anything -- the realistic shape, because scriptc propagates a
+   * throw by leaving it pending and returning, not by unwinding. The fiber
+   * trampoline turns that into a rejection via its scr_exc_pending() guard;
+   * the stackless path must do the same in scr_coro_resume_entry. */
+  long throw_at;
 } Args;
 
 /* ═══════════════════════ ARM A -- fibers, as emitted today ═══════════════
@@ -153,6 +159,10 @@ static void armA_trampoline(ScrFiber *sc_self, void *sc_ap0) {
       acc += action * 10000.0 + target;
       n++;
       logev("push", target);
+      if (a.throw_at >= 0 && n == a.throw_at) {
+        scr_throw_str(scr_str_new("boom", 4));
+        return; /* pending; the guard below is skipped and the fiber rejects */
+      }
     }
   }
   if (n == 0) {
@@ -188,6 +198,7 @@ typedef struct {
   const double *add; size_t nadd;
   const double *rem; size_t nrem;
   bool allowed;
+  long throw_at;
   /* live across suspensions */
   double acc;
   long   n;
@@ -250,6 +261,10 @@ S_after_2:
       f->acc += f->action * 10000.0 + target;
       f->n++;
       logev("push", target);
+      if (f->throw_at >= 0 && f->n == f->throw_at) {
+        scr_throw_str(scr_str_new("boom", 4));
+        return; /* no finish call: scr_coro_resume_entry owes the rejection */
+      }
     }
   }
 
@@ -261,28 +276,41 @@ S_after_2:
   scr_coro_finish_f64(&f->base, f->acc);
 }
 
+/* Exactly the shape a generated spawn wrapper has: allocate, fill the
+ * argpack fields, spawn. Same signature and same return type as the fiber
+ * wrapper above, which is what makes the two interchangeable at a call site. */
 static ScrPromise *armB_spawn(Args a) {
-  FrameResolve *f = (FrameResolve *)calloc(1, sizeof *f);
-  if (!f) abort();
-  scr_coro_init(&f->base, &armB_resume, scr_promise_new(), /*has_exc=*/false);
+  FrameResolve *f = (FrameResolve *)scr_coro_alloc(sizeof *f, &armB_resume,
+                                                   /*has_exc=*/false);
   f->add = a.add; f->nadd = a.nadd;
   f->rem = a.rem; f->nrem = a.nrem;
   f->allowed = a.allowed;
-  /* The promise must be retained BEFORE the body starts: a body that runs to
-   * completion synchronously drops the frame's last reference and frees it,
-   * exactly as scr_async_spawn retains before it may destroy the fiber. */
-  ScrPromise *ret = scr_promise_retain(f->base.promise);
-  /* JS: an async function body runs synchronously up to its first await. */
-  scr_coro_resume_entry(f);
-  return ret;
+  f->throw_at = a.throw_at;
+  return scr_coro_spawn(&f->base);
 }
 
 /* ── the comparison ───────────────────────────────────────────────────── */
 
 typedef ScrPromise *(*SpawnFn)(Args);
 
+/* Drain whatever the previous arm left queued.
+ *
+ * scr_loop_run BREAKS IMMEDIATELY when the top-level promise rejects, so a
+ * throwing arm exits with settles and beacons still on the ready queue. That
+ * residue would be drained by the NEXT arm and counted as its turns -- which
+ * is exactly what happened: case D's fiber arm read 20 turns against the
+ * stackless arm's 6, and every one of the extra turns belonged to case C.
+ * A comparison has to start from a quiescent scheduler or it measures the
+ * previous test. */
+static void quiesce(void) {
+  g_prog_done = true; /* the beacon stops re-enqueueing, so this terminates */
+  g_top = NULL;
+  (void)scr_loop_run(NULL);
+}
+
 static int run_arm(const char *name, SpawnFn spawn, Args a,
                    char out[LOG_MAX][64], int *nout, double *result) {
+  quiesce();
   log_reset();
   ScrPromise *p = spawn(a);
   g_top = p;
@@ -294,6 +322,11 @@ static int run_arm(const char *name, SpawnFn spawn, Args a,
   *result = scr_coro_promise_settled(p) && !scr_coro_promise_rejected(p)
                 ? scr_coro_promise_f64(p)
                 : -1.0;
+  /* The rejecting cases are rejections this test never consumes. Marking
+   * them handled keeps the unhandled-rejection ledger out of the comparison:
+   * it is real work, and work that ran in one arm and not the other would be
+   * a difference the turn count would report as a design difference. */
+  scr_promise_mark_handled(p);
   scr_promise_release(p);
   memcpy(out, g_log, sizeof g_log);
   *nout = g_nlog;
@@ -348,19 +381,27 @@ int main(void) {
 
 
   /* Both suspensions on every iteration: 3 jids x 2 awaits. */
-  Args both = { ADD, 2, REM, 1, true };
+  Args both = { ADD, 2, REM, 1, true, -1 };
   bad += compare("A. two suspensions per iteration", both);
 
   /* The ternary's false arm: only suspension 1 runs. The state machine must
    * skip state 2 entirely and still agree turn for turn. */
-  Args one = { ADD, 2, REM, 1, false };
+  Args one = { ADD, 2, REM, 1, false, -1 };
   bad += compare("B. conditional suspension skipped", one);
 
   /* Empty inner loops: the body suspends ZERO times and the function throws.
    * A frame analysis that cannot produce "no suspensions happened" cannot be
    * trusted when it reports that some did. */
-  Args none = { NULL, 0, NULL, 0, true };
+  Args none = { NULL, 0, NULL, 0, true, -1 };
   bad += compare("C. zero suspensions, throws", none);
+
+  /* A throw that escapes the body MID-RUN, after a suspension has already
+   * happened. Nothing here calls a finish function: the fiber relies on the
+   * trampoline's scr_exc_pending() guard and the stackless frame on
+   * scr_coro_resume_entry. If the stackless side got that wrong the throw
+   * would propagate into the event loop instead of rejecting the promise. */
+  Args boom = { ADD, 2, REM, 1, true, 2 };
+  bad += compare("D. throw escapes mid-body", boom);
 
   printf("\n%s\n", bad == 0 ? "corostate: ALL ARMS AGREE"
                             : "corostate: MISMATCHES FOUND");
