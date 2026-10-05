@@ -2218,7 +2218,7 @@ static bool scr_stack_pool_stat(void) {
  * NOT gated: scr_heap_trim_line still calls it in every build. */
 static const char *scr_utoa(size_t v, char *buf) {
   char *p = buf + 23;
-  *p = ' ';
+  *p = '\0';
   do { *--p = (char)('0' + (v % 10u)); v /= 10u; } while (v != 0);
   return p;
 }
