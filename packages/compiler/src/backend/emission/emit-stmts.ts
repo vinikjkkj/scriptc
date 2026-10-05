@@ -352,6 +352,15 @@ export function emitFunction(E: CEmitter, fn: IrFunction): void {
     if (fn.returnType.kind === "void" && !endedWithReturn) {
       E.releaseFrame(E.scopes[0]!);
     }
+    if (coro !== null && !endedWithReturn) {
+      // A resume function that falls off the end has neither suspended,
+      // finished, nor thrown, and the runtime asserts on exactly that. The
+      // fiber trampoline fulfils the promise for an implicit void exit; a
+      // coroutine has to do it here, because the body IS the trampoline.
+      // Unreachable when the body really did end in a return on every path,
+      // and harmless there.
+      for (const l of coroFinish(E, E.currentReturnType, null)) E.line(l);
+    }
     E.scopes.pop();
 
     E.indent--;

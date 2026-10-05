@@ -8133,7 +8133,7 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
           // invariant is countable by grepping the emitted TU.
           const pr0 = E.emitExpr(e.value);
           const idx = E.coroPointIndex++;
-          const nm = emitCoroAwait(E, E.currentFn!, E.currentCoro, idx, pr0.name, e.type);
+          const nm = emitCoroAwait(E, E.currentFn!, E.currentCoro, idx, pr0, e.type);
           E.emitPendingCheck();
           return { name: nm, type: e.type };
         }

@@ -459,6 +459,17 @@ export class CEmitter {
   /** How many suspension points this function has emitted so far — the
    * state number the next park stores. */
   coroPointIndex = 0;
+  /** Per function, the emitter TEMPS a park had to put in the frame.
+   *
+   * A temp is a C local in the resume function, and a park RETURNS to the
+   * scheduler, so any temp the RC frames still OWN at that moment is dead
+   * by the time the label is reached — its ordinary scope release would
+   * then release a dangling pointer. These values have no IrLocal, so the
+   * liveness pass cannot name them; they are discovered here, during
+   * emission, and the frame struct is emitted afterwards (bodies are
+   * emitted into `lines` before the preamble is assembled), which is what
+   * makes recording them late workable. */
+  coroTempSpills = new Map<string, Temp[]>();
   captureIds = new Set<string>();
   /** Hidden locals whose ENTIRE live range is one seqExpr: released when
    * that seqExpr's value has been produced, not at block exit. See

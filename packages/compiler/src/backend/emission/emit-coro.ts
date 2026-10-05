@@ -41,7 +41,7 @@
  * locals declared at their `varDecl` instead, every jump would be a jump
  * past an initialiser into a scope the label cannot see, and the whole
  * transformation would need the body restructured first. */
-import { appendLines, type CEmitter } from "./emitter.js";
+import { appendLines, type CEmitter, type Temp } from "./emitter.js";
 import { mangleCoroFrame, mangleCoroResume, mangleAsyncSpawn, mangleLocal, mangleRawParam } from "../mangle.js";
 import { cDecl, cType, vAdapters } from "./emit-types.js";
 import { type IrFunction, type IrType, isRefCounted } from "../../ir/nodes.js";
@@ -100,6 +100,9 @@ export function emitCoroFrames(E: CEmitter, out: string[], plans: Map<string, St
       fields.push(`${t}; /* ${l.name} */`);
     }
     fields.push("ScrPromise *sc_awaited; /* the operand being awaited */");
+    for (const t of E.coroTempSpills.get(fn.name) ?? []) {
+      fields.push(`${cDecl(t.type, "sc_tmp_" + t.name)}; /* owned across a park */`);
+    }
     // The forward declaration goes in `out` beside the struct, not through
     // E.decl: the spawn wrapper below takes the resume function's ADDRESS,
     // so the declaration has to precede it in the same emitted section.
@@ -198,15 +201,37 @@ export function emitCoroAwait(
   fn: IrFunction,
   plan: StacklessPlan,
   index: number,
-  promiseTemp: string,
+  promiseTemp: Temp,
   resultType: IrType,
 ): string {
+  // THE OPERAND PROMISE MOVES INTO THE FRAME, and that is not a nicety.
+  // `promiseTemp` is a C local in the resume function. The park RETURNS to
+  // the scheduler, so by the time the label is reached that local is dead
+  // and its value indeterminate — the emitter's ordinary scope release would
+  // then release a garbage pointer. Striking it from the RC frame and
+  // handing its +1 to `sc_awaited` makes the frame the single owner across
+  // the suspension, released once at the take below. (Found by segfault: the
+  // first version left the temp in the frame and it was released twice, once
+  // through a dangling local.)
+  E.moveTemp(promiseTemp);
+  // Every OTHER temp the RC frames still own has the same dangling-local
+  // problem, so it goes in the frame too. Recorded for the struct, which is
+  // emitted after the bodies.
+  const owned: Temp[] = [];
+  for (const fr of E.frames) for (const t of fr) owned.push(t);
+  if (owned.length > 0) {
+    const seen = E.coroTempSpills.get(fn.name) ?? [];
+    for (const t of owned) if (!seen.some((x) => x.name === t.name)) seen.push(t);
+    E.coroTempSpills.set(fn.name, seen);
+  }
+  for (const t of owned) E.line(`sc_f->sc_tmp_${t.name} = ${t.name};`);
   for (const line of coroSpill(fn, plan)) E.line(line);
-  E.line(`sc_f->sc_awaited = ${promiseTemp};`);
+  E.line(`sc_f->sc_awaited = ${promiseTemp.name};`);
   E.line(`sc_b->state = ${index + 1};`);
   E.line(`scr_coro_park(sc_b, sc_f->sc_awaited);`);
   E.line(`return; /* to the scheduler — one ready_push charged */`);
   E.line(`${coroLabel(index)}:;`);
+  for (const t of owned) E.line(`${t.name} = sc_f->sc_tmp_${t.name};`);
   for (const line of coroReload(fn, plan)) E.line(line);
   const take =
     resultType.kind === "void"
