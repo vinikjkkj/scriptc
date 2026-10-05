@@ -344,7 +344,15 @@ function backStmt(
       // bodies read is live here.
       const live = new Set<string>();
       for (const f of ctx.finallys) for (const id of f) live.add(id);
-      recordPoints(ctx, [s.value], live, [], [], false, "return");
+      // D2a: `return await f()` is a ROOT position, and the cheapest
+      // suspension point there is. The live set above is the proof -- nothing
+      // after a return is reachable, so outside a try/finally it is EMPTY and
+      // the frame carries nothing across the park. It sat outside D1 as scope,
+      // not difficulty, and the census says it is the single largest blocker
+      // in zapo-rest: 497 points, against 96 for every loop in the program.
+      // A return INSIDE a try still has tryDepth > 0 and stays blocked, which
+      // is the half that waits for the try slice.
+      recordPoints(ctx, [s.value], live, [], [], true, "return");
       if (s.value !== null) readsOf(s.value, live);
       return live;
     }
