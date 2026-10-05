@@ -40,7 +40,7 @@ fi
 # The always-linked runtime set (cc.ts RUNTIME_SOURCES) plus scr_coro.c, plus
 # the win32 trio cc.ts links unconditionally on this target.
 "$ZIG" cc -target x86_64-windows-gnu -O1 -g0 -I"$S" \
-  -DWIN32_LEAN_AND_MEAN -D_WIN32_WINNT=0x0601 $POISON \
+  -DWIN32_LEAN_AND_MEAN -D_WIN32_WINNT=0x0601 -DSCR_CORO_LANE $POISON \
   "$REPO/tests/perf/corostate/corostate.c" \
   "$S/scr_coro.c" \
   "$S/scr_number.c" "$S/scr_string.c" "$S/scr_array.c" "$S/scr_bytes.c" \

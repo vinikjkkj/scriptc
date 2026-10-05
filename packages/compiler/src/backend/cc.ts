@@ -1523,6 +1523,16 @@ export async function compileLibArchive(opts: LibArchiveOptions): Promise<void> 
     "-fno-strict-aliasing", // the emitted object model type-puns — see compileC's buildArgs
     "-Wno-deprecated-declarations",
     "-DSCR_LIB",
+    // Same rule as compileC, same derivation: defined exactly when
+    // scr_coro.c is in the link. The library path links it UNCONDITIONALLY
+    // (LIB_RUNTIME_SOURCES carries both it and scr_async.c), so this is
+    // unconditional too -- gating it on a coro flag the library path never
+    // sets would leave scr_coro.c referencing a ScrPromise window that was
+    // compiled out, i.e. undefined symbols at archive time.
+    ...(LIB_RUNTIME_SOURCES_ORDERED(opts.url || opts.searchParams || false)
+      .includes("scr_coro.c")
+      ? ["-DSCR_CORO_LANE"]
+      : []),
     "-I", rtDir,
     ...(regex ? ["-I", vendorEngineDir()] : []),
     ...(opts.zlib ? ["-I", vendorZlibDir()] : []),
@@ -1936,6 +1946,7 @@ async function reclaimDeadObjectKeys(
 export async function compileC(opts: CcOptions): Promise<void> {
   const rtDir = runtimeSrcDir();
   const dynamic = opts.dynamic ?? false;
+  const coro = opts.coro ?? false;
   const regex = opts.regex ?? false;
   // fetch's implementation switch: the default is the NATIVE bridge
   // (scr_fetch.c over scr_net + scr_tls + scr_http's client parser +
@@ -2091,7 +2102,16 @@ export async function compileC(opts: CcOptions): Promise<void> {
     "-fno-strict-aliasing",
     "-Wno-deprecated-declarations", // ucontext fibers (scr_async.c)
     "-I", rtDir,
-    ...coreRuntimeSources(url, opts.coro ?? false).map((f) => rt(join(rtDir, f))),
+    // SCR_CORO_LANE is DERIVED FROM THE SOURCE LIST, not from a second read
+    // of opts.coro. scr_async.c carries the coro-support block (the ScrPromise
+    // window scr_coro.c needs) and that block is always-linked code: ungated,
+    // it cost every knob-off binary 400 bytes of .text, which the file-size
+    // anchor could not resolve and the new .text anchor caught. The rule it
+    // encodes is "defined exactly when scr_coro.c is in this link", and taking
+    // it off the list itself means the two cannot disagree even if the gate
+    // moves later. Two sources for one fact is what made the four faces.
+    ...(coreRuntimeSources(url, coro).includes("scr_coro.c") ? ["-DSCR_CORO_LANE"] : []),
+    ...coreRuntimeSources(url, coro).map((f) => rt(join(rtDir, f))),
     ...(opts.copying ? [rt(join(rtDir, "scr_copying.c"))] : []),
     // win32 targets compile the libc-shim TU (stpcpy, arc4random_buf,
     // gmtime_r, strcasestr — the _WIN32 block in scr_runtime.h declares
@@ -2501,6 +2521,11 @@ export async function compileC(opts: CcOptions): Promise<void> {
     "-Wno-deprecated-declarations",
     ...includeArgs,
     ...(dynamic ? ["-DSCR_DYNAMIC"] : []),
+    // Off the REAL command line, like the -I above and for the same reason the
+    // comment there gives: a restated copy drifts invisibly. rtInputs is what
+    // buildArgs actually emitted, so if scr_coro.c is in this link the define
+    // is in these cflags, and the cached object flavour matches the binary.
+    ...(rtInputs.some((f) => basename(f) === "scr_coro.c") ? ["-DSCR_CORO_LANE"] : []),
   ];
 
   let objects: Map<string, string> | null = null;

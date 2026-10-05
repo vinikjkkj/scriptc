@@ -3423,6 +3423,17 @@ void scr_queue_microtask_raw(void (*fn)(void *), void *arg,
   scr_ready_push(f);
 }
 
+#ifdef SCR_CORO_LANE
+/* GATED ON THE LINK, not on a knob. cc.ts defines SCR_CORO_LANE exactly when
+ * scr_coro.c is in this link -- derived from the source list itself, so the
+ * two cannot disagree -- and scr_coro.c is the only consumer of everything
+ * below.
+ *
+ * Ungated this is ALWAYS-LINKED code, because scr_async.c ships in every
+ * binary whether or not the stackless lane does. It cost a knob-off
+ * hello-world 400 bytes of .text, measured +400 on two unrelated programs --
+ * the always-linked signature. The file-size anchor saw +512 and passed it;
+ * the .text anchor caught it. */
 /* ââ stackless coroutine support ââââââââââââââââââââââââââââââ
  * ScrPromise is opaque outside this file, so scr_coro.c cannot reach its
  * state or its waiter list. These are the only primitives it needs, and
@@ -3510,6 +3521,7 @@ bool   scr_coro_promise_bool(const ScrPromise *p) { return p->b; }
 void  *scr_coro_promise_ref(const ScrPromise *p) {
   return p->payload ? p->retain_fn(p->payload) : NULL;
 }
+#endif /* SCR_CORO_LANE */
 
 /* The checked-dynamic argument form (JS files — common.mustCall wrappers
  * and the suite's invalid-input probes): a non-function throws Node's
