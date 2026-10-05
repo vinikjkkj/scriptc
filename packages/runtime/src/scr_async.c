@@ -3443,6 +3443,23 @@ void scr_queue_microtask_raw(void (*fn)(void *), void *arg,
  * never fire on a rejection. waiters is the mechanism await already uses;
  * a coroutine is just an awaiter that is not a fiber. */
 
+/** SCR_TICK_POISON, for the stackless lane.
+ *
+ * An ACCESSOR over scr_tick_poison's cached static, deliberately not a
+ * second getenv: two independent reads of one variable can disagree (a
+ * setenv between them, a differently-spelled default) and then the poison
+ * lies on one lane while telling the truth on the other -- which is the
+ * exact failure this net exists to prevent.
+ *
+ * The poison was written to catch "the exact mistake a stackless
+ * re-lowering of async/await is most likely to make", and until this
+ * existed it could not reach that lowering at all: scr_tick_poison is
+ * static here and scr_coro.c never consulted it, so a poisoned run left
+ * every stackless turn count unmoved and the table stayed green. A green
+ * table from a net that cannot see the lane it guards is necessary, not
+ * sufficient. */
+bool scr_coro_tick_poison(void) { return scr_tick_poison(); }
+
 /** True once the promise has settled either way. */
 bool scr_coro_promise_settled(const ScrPromise *p) {
   return p->state != SCR_PROM_PENDING;

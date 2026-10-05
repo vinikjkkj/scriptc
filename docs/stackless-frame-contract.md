@@ -90,6 +90,15 @@ can be rolled out per function.
    `scr_ready_push` per await: one now if the operand is already settled, zero
    now and one at settle if it is pending. Emitted code must not queue
    anything itself.
+8. **`SCR_TICK_POISON` reaches this lane.** The HOP arm consults
+   `scr_coro_tick_poison()` (an accessor over `scr_async.c`'s cached static,
+   not a second `getenv`) and adds one deliberate extra turn when set. That is
+   the one place the one-push invariant is broken, and only under the knob.
+   Until it existed the poison could not move a stackless turn count at all,
+   so the turn table stayed green no matter what the lowering did.
+   `run-poison.sh` asserts both that the poison moves this lane and that it
+   moves it by the same amount as the fiber lane; `--blind` reproduces the
+   regression and must go red.
 
 ---
 
@@ -154,17 +163,34 @@ Measured on zapo-rest: D1–D3 is 95.1% of 2,260 suspension points.
 
 ## 4. Frame sizing
 
-A frame is `sizeof(ScrCoroBase)` + the live set at the widest suspension
-point. From the IR liveness pass over zapo-rest, per function: p50 32 B,
-p90 56 B, max 208 B of payload. The worked example in `tests/perf/corostate`
-(`resolveDisallowedListEntries`, two nested loops and a conditional second
-suspension) is 64 B of payload, so 104 B with the base.
+**The IR liveness numbers are a LOWER BOUND, not a value.** A frame is
+
+    sizeof(ScrCoroBase) + live IR locals + live EMITTER TEMPORARIES
+
+and the third term is not derivable from the IR, because those values have no
+`IrLocal` for liveness to name. They are discovered during emission, from the
+RC frame (`E.frames`) at the moment of the park.
+
+This is not a rounding error. `scr_coro_park` RETURNS to the scheduler, so
+every C local in the resume function is dead at the resume label -- and every
+temporary the emitter's RC frame still OWNS at that park has the same problem.
+`await Promise.race([a, b])` is the worked case: both input promises stay owned
+across the await, and a scope release running over them after the resume walks
+dangling pointers. Moving the awaited promise into the frame fixes one of
+them; the rest need the same treatment.
+
+So: **size frames from the emission, not from the liveness pass.** The numbers
+below are what liveness could see, and the real frames are larger by however
+many owned temporaries are live at each park.
+
+From the IR liveness pass over zapo-rest, per function: p50 32 B, p90 56 B,
+max 208 B of payload -- lower bounds. The worked example in
+`tests/perf/corostate` (`resolveDisallowedListEntries`) is 64 B of payload by
+liveness, so at least 104 B with the base.
 
 Both loop forms put their iteration state in the frame: a `forOf` lowers to an
 array pointer plus an index, and both are live across every suspension in the
-body. The liveness measurement counts them, so a frame sized from it is right.
-
----
+body. The liveness measurement does count those.
 
 ## 5. No frame pool, and the number that says so
 

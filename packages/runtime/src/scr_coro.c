@@ -85,6 +85,21 @@ ScrPromise *scr_coro_spawn(ScrCoroBase *base) {
 
 /* ── suspension ───────────────────────────────────────────────────────── */
 
+/* SCR_TICK_POISON's extra turn, for a frame.
+ *
+ * scr_await_settled pays it by calling scr_await_yield() a SECOND time. A
+ * frame cannot yield twice -- a second queue of the resume would run the
+ * body twice -- so it is re-queued once through this thunk and the body
+ * runs at the end of the second turn. Same observable, one extra microtask
+ * turn before the continuation.
+ *
+ * This is the ONE place the "exactly one scr_ready_push per await"
+ * invariant is broken on purpose, and only when the knob is set. Breaking
+ * it is what the knob is for: it proves the turn net can still go red. */
+static void scr_coro_poison_hop(void *base_as_void) {
+  scr_queue_microtask_raw(&scr_coro_resume_entry, base_as_void, NULL);
+}
+
 ScrCoroParkKind scr_coro_park(ScrCoroBase *base, ScrPromise *p) {
   /* Set BEFORE either arm: scr_coro_resume_entry reads this after the body
    * returns to tell a park from a fall-out-of-the-body, and the two need
@@ -120,7 +135,20 @@ ScrCoroParkKind scr_coro_park(ScrCoroBase *base, ScrPromise *p) {
   scr_coro_resume_entry(base);
   return SCR_CORO_PARK_HOP;
 #else
+#ifdef SCR_CORO_POISON_BLIND
+  /* The REGRESSION, reproducible on demand: ignore the poison, exactly as
+   * this file did before it consulted scr_coro_tick_poison at all. With
+   * this set, run-poison.sh must FAIL -- that is what makes its green
+   * meaningful rather than merely absent of complaint. */
   scr_queue_microtask_raw(&scr_coro_resume_entry, base, NULL);
+#else
+  if (scr_coro_tick_poison()) {
+    /* the deliberate +1 turn; see scr_coro_poison_hop */
+    scr_queue_microtask_raw(&scr_coro_poison_hop, base, NULL);
+  } else {
+    scr_queue_microtask_raw(&scr_coro_resume_entry, base, NULL);
+  }
+#endif
   return SCR_CORO_PARK_HOP;
 #endif
 }

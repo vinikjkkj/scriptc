@@ -221,6 +221,9 @@ bool   scr_coro_promise_park(ScrPromise *p, void (*fn)(void *), void *arg,
                              void (*arg_release)(void *));
 void   scr_coro_promise_observe(ScrPromise *p);
 void   scr_coro_promise_rethrow(ScrPromise *p);
+/** SCR_TICK_POISON's predicate, read through scr_async.c's own cached
+ * static rather than a second getenv. See scr_coro_park's HOP arm. */
+bool   scr_coro_tick_poison(void);
 double scr_coro_promise_f64(const ScrPromise *p);
 bool   scr_coro_promise_bool(const ScrPromise *p);
 void  *scr_coro_promise_ref(const ScrPromise *p);
