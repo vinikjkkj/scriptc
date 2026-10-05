@@ -196,6 +196,8 @@ void scr_coro_resume_entry(void *base_as_void);
  * these on the completion path. */
 void scr_coro_finish_void(ScrCoroBase *base);
 void scr_coro_finish_f64(ScrCoroBase *base, double v);
+/* A bool result: its own promise field and payload_kind, never f64. */
+void scr_coro_finish_bool(ScrCoroBase *base, bool v);
 void scr_coro_finish_ref(ScrCoroBase *base, void *v, void *(*retain)(void *),
                          void (*release)(void *), ScrTraceFn trace);
 /** Completion by rejection, taking the pending exception out of the ACTIVE

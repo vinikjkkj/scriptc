@@ -300,7 +300,12 @@ export function coroFinish(
     case "f64":
       return [...env, `scr_coro_finish_f64(sc_b, ${valueExpr});`, `return;`];
     case "bool":
-      return [...env, `scr_coro_finish_f64(sc_b, ${valueExpr} ? 1 : 0);`, `return;`];
+      // NOT finish_f64. ScrPromise keeps `f64` and `b` as separate members
+      // with distinct payload kinds, and every awaiter -- stackless and fiber
+      // -- reads `b`. Fulfilling through f64 left `b` zero, so an `await` of
+      // a bool-returning coroutine answered false whatever it returned: a
+      // wrong ANSWER, not a crash, which is why a green corpus never saw it.
+      return [...env, `scr_coro_finish_bool(sc_b, ${valueExpr});`, `return;`];
     default: {
       const v = vAdapters(retType);
       return [
