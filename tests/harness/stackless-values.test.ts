@@ -90,16 +90,30 @@ const sanitize = process.env["SCRIPTC_SAN"] === "1";
  * dispatches have SIX arms each (void/f64/bool/string/dyn/ref) and the
  * stackless ones have FOUR (void/f64/bool/ref), so string and dyn are the two
  * places where the lanes can only be shown equal by running them. */
-const WRAPPERS: ReadonlyArray<{ name: string; take: string; finish: string }> = [
-  { name: "wf", take: "f64", finish: "f64" },
-  { name: "wb", take: "bool", finish: "bool" },
-  { name: "ws", take: "ref", finish: "ref" }, // string: fiber uses await_str/fulfill_str
-  { name: "wa", take: "ref", finish: "ref" },
-  { name: "wu", take: "ref", finish: "ref" },
-  { name: "wd", take: "ref", finish: "ref" }, // dyn: fiber uses scr_await_dyn
-  { name: "wtv", take: "void", finish: "ref" },
-  { name: "wv", take: "f64", finish: "void" },
-  { name: "wr", take: "f64", finish: "f64" }, // rejects: finishes through _throw
+const WRAPPERS: ReadonlyArray<{ name: string; take: string; finish: string; converted: boolean }> = [
+  { name: "wf", take: "f64", finish: "f64", converted: true },
+  { name: "wb", take: "bool", finish: "bool", converted: true },
+  { name: "ws", take: "ref", finish: "ref", converted: true }, // string: fiber uses await_str/fulfill_str
+  { name: "wa", take: "ref", finish: "ref", converted: true },
+  { name: "wu", take: "ref", finish: "ref", converted: true },
+  { name: "wd", take: "ref", finish: "ref", converted: true }, // dyn: fiber uses scr_await_dyn
+  { name: "wtv", take: "void", finish: "ref", converted: true },
+  { name: "wv", take: "f64", finish: "void", converted: true },
+  { name: "wr", take: "f64", finish: "f64", converted: true }, // rejects: finishes through _throw
+  // THE TRY HALF, written BEFORE its lowering and deliberately not converted.
+  // Censused over the user's own program (zapo-rest app182, the IR the shipped
+  // binary was built from): of the 211 functions a finally-free `try` slice
+  // buys, 211 catch the rejection in the same try and 9 site the suspension in
+  // the CATCH body. Two shapes, and these are them.
+  //
+  // The third shape -- a rejection CROSSING the try uncaught -- is absent on
+  // purpose. All 46 of its instances in that program are try/finally with no
+  // catch, so it cannot arrive before `finally` does, and `finally` needs the
+  // frame's own exception cell. A wrapper for a shape the slice does not
+  // convert would fail the arming check below, which is the control doing its
+  // job: it refuses coverage the lane does not have.
+  { name: "wtc", take: "f64", finish: "ref", converted: false },
+  { name: "wcs", take: "ref", finish: "ref", converted: false },
 ];
 
 const SOURCE = `
@@ -113,6 +127,7 @@ async function pu(n: number): Promise<number | null> { return n > 0 ? n : null; 
 async function pv(): Promise<void> { }
 async function pd(n: number): Promise<any> { return n > 0 ? "d" + n : null; }
 async function prej(): Promise<number> { throw new Error("boom"); }
+async function pmaybe(bad: boolean): Promise<number> { if (bad) throw new Error("bad"); return 7; }
 
 // The subjects. Each is a CONVERTED coroutine: one root-level await in a
 // varDecl or an expression statement, nothing nested, no loop and no try.
@@ -125,6 +140,27 @@ async function wd(n: number): Promise<any> { const x = await pd(n); return x; }
 async function wtv(): Promise<string> { await pv(); return "void-take"; }
 async function wv(n: number): Promise<void> { const x = await pf(n); console.log("vfin  ", x); }
 async function wr(): Promise<number> { const x = await prej(); return x; }
+
+// The try half. Fiber on BOTH arms until the slice lands, which is what the
+// scope ledger asserts -- so the day they convert, this file goes red and
+// names the coverage that has to be switched on.
+async function wtc(bad: boolean): Promise<string> {
+  try {
+    const x = await pmaybe(bad);
+    return "ok:" + x;
+  } catch (e) {
+    return "caught:" + (e as Error).message;
+  }
+}
+async function wcs(bad: boolean): Promise<string> {
+  try {
+    if (bad) throw new Error("sync");
+    return "no-throw";
+  } catch (e) {
+    const y = await ps("recovered");
+    return y;
+  }
+}
 
 async function main(): Promise<void> {
   const f = await wf(41);
@@ -151,6 +187,10 @@ async function main(): Promise<void> {
   } catch (e) {
     console.log("rej   ", (e as Error).message, e instanceof Error);
   }
+  const tc1 = await wtc(false); const tc2 = await wtc(true);
+  console.log("try   ", tc1, tc2);
+  const cs1 = await wcs(false); const cs2 = await wcs(true);
+  console.log("catch ", cs1, cs2);
   console.log("done");
 }
 void main();
@@ -201,15 +241,31 @@ describe("the stackless lane answers what the fiber lane answers", () => {
     // two arms MORE equal, so the output comparison below cannot report it.
     // Each wrapper must be a converted coroutine in the stackless arm, and the
     // take/finish arm it exercises must be present in the emitted C.
-    const missing = WRAPPERS.filter((w) => !new RegExp(`sc_cr_${w.name}\\b`).test(on.cSource));
-    expect(missing.map((w) => w.name), "wrappers that are NOT converted -- these kinds are unguarded")
+    const converted = WRAPPERS.filter((w) => w.converted);
+    // No regex, and that is deliberate: the word-boundary escape this used to
+    // carry lost a backslash on its way through a heredoc and became the
+    // BACKSPACE character, so the control matched nothing and reported all nine
+    // wrappers missing. The emitted spelling needs no escape at all.
+    const onLane = (w: { name: string }): boolean => on.cSource.includes(`sc_cr_${w.name}(`);
+    expect(converted.filter((w) => !onLane(w)).map((w) => w.name),
+      "wrappers that are NOT converted -- these kinds are unguarded").toEqual([]);
+    for (const arm of new Set(converted.map((w) => `scr_coro_take_${w.take}`))) {
+      expect(on.cSource, `${arm} is never emitted -- the kind it carries is unguarded`).toContain(arm);
+    }
+    for (const arm of new Set(converted.map((w) => `scr_coro_finish_${w.finish}`))) {
+      expect(on.cSource, `${arm} is never emitted -- the kind it carries is unguarded`).toContain(arm);
+    }
+
+    // THE SCOPE LEDGER, and it is the same control pointed the other way. A
+    // shape joining the lane with no value coverage is how D1 shipped a wrong
+    // answer; these wrappers are written and RUNNING but not yet convertible,
+    // so the file records which shapes are deliberately off-lane instead of
+    // leaving the gap unnamed. When the try lowering lands this fails BY NAME
+    // and the fix is to flip that wrapper's `converted` to true -- which is
+    // the same edit that switches its real value coverage on.
+    expect(WRAPPERS.filter((w) => !w.converted && onLane(w)).map((w) => w.name),
+      "these shapes now CONVERT -- flip `converted: true` so their coverage counts")
       .toEqual([]);
-    for (const arm of new Set(WRAPPERS.map((w) => `scr_coro_take_${w.take}`))) {
-      expect(on.cSource, `${arm} is never emitted -- the kind it carries is unguarded`).toContain(arm);
-    }
-    for (const arm of new Set(WRAPPERS.map((w) => `scr_coro_finish_${w.finish}`))) {
-      expect(on.cSource, `${arm} is never emitted -- the kind it carries is unguarded`).toContain(arm);
-    }
     expect(on.cSource, "the rejection completion is never emitted").toContain("scr_coro_finish_throw");
 
     const run = (exe: string): string => execFileSync(exe, [], { encoding: "utf8" });
