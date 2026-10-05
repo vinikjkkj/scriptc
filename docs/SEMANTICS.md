@@ -570,6 +570,56 @@ deferred.
     packages/runtime/src/scr_async.c  (the seam tenant, and why it does not clamp)
     packages/runtime/src/scr_sqlite.c (the per-connection last-use stamp)
 
+### `Promise.race` settles INLINE on an already-settled entry — one turn early
+
+KIND: archaeological. The behaviour already diverged; it was found by
+measuring, not by reading, on 2026-10-05.
+
+`scr_promise_race_add` settles the result promise SYNCHRONOUSLY when the entry
+it is handed is already settled — first add wins, inside the construction of
+the race itself. Node subscribes to every entry with `.then`, so even an
+already-settled entry delivers through a promise reaction job and the result
+settles one microtask turn later.
+
+Measured against Node v25.9.0 with a microtask ruler, both backends:
+
+    await Promise.race([settled, settled])     Node 2 turns     scriptc 1
+
+The VALUE is identical, the settlement ORDER among the entries is identical,
+and losing entries keep their own settlements on both sides. Only the turn the
+result lands on differs, which is observable exactly where a second,
+independent job chain is running alongside — and nowhere else.
+
+`Promise.all` has the same mechanism with the same measured number
+(`scr_promise_all`: an already-settled entry runs `scr_promise_all_settle`
+inline, and an all-settled input list fulfils the result before the function
+returns). `await Promise.all([settled, settled])` is Node 2 turns against
+scriptc 1. `tests/corpus/1438-promise-all.ts` describes the inline settle in
+its header as a feature of the lowering; nothing recorded it as a divergence.
+It is folded into this entry rather than given its own because it is one
+mechanism in two surfaces, and splitting it is the registry owner's call too.
+
+The third member of this family — `return p` from an async function, which
+lowers as `return await p` and so costs one turn where Node's resolve-with-a-
+thenable costs two — is already numbered: divergence 358 names the
+`Promise.try` face of it.
+
+THESE THREE ARE PINNED AS THEY ARE, not as a fault awaiting repair.
+`tests/harness/microtask-turns.test.ts` asserts the scriptc number for each
+with Node's beside it. Changing any of them moves observable order and is
+separate work with its own differential: the stackless async re-lowering this
+was measured for must not carry an ordering change in the same diff, or no
+later failure can be attributed to either.
+
+NO number is assigned, for the reason the two entries above give and which
+applies unchanged here: numbering is the registry owner's call, this document
+is a reconstruction, and inventing a number would corrupt the sequence it was
+rebuilt from.
+
+    packages/runtime/src/scr_async.c  (scr_promise_race_add, scr_promise_all)
+    packages/compiler/src/frontend/lowering/lowerer.ts (asyncReturnFlatten)
+    tests/harness/microtask-turns.test.ts (the pinned table)
+
 ---
 
 ## Numbers cited in the tree that are NOT registry entries

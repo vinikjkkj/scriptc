@@ -3045,9 +3045,45 @@ static void scr_promise_rethrow(ScrPromise *p) {
   }
 }
 
+/* THE ORACLE SELF-TEST: SCR_TICK_POISON adds ONE microtask turn to every
+ * already-settled await, which is the pre-ES2019 await cost -- the exact
+ * mistake a stackless re-lowering of async/await is most likely to make.
+ *
+ * It exists because the differential corpus CANNOT be trusted to catch a
+ * one-turn scheduling change on its own. Measured 2026-10-05 over the 313
+ * corpus programs that touch a promise or a timer: with this knob set, 10 of
+ * them change their bytes and 276 do not. A uniform one-turn shift is only
+ * observable where TWO independent job chains interleave, and almost no
+ * corpus program has two -- 1428-settled-await-order.ts, which the comment
+ * on scr_await_yield below names as the pin for this very hop, passes
+ * POISONED.
+ *
+ * tests/harness/microtask-turns.test.ts is the net that does catch it, and
+ * it asserts BOTH directions: the clean table matches Node turn for turn,
+ * and the poisoned table differs from it. If the poison ever stops going
+ * red, the net has died without saying so.
+ *
+ * Deliberately NOT on the scr_await_hop path (await of a non-thenable), so
+ * that test's primary clock stays immune to it and reads true turn counts;
+ * its secondary clock, built out of .then, does ride this path on purpose.
+ *
+ * Off unless the variable is set to something other than empty or 0, so a
+ * shipped binary is behaviourally identical and pays one cached load. */
+static bool scr_tick_poison(void) {
+  static int on = -1;
+  if (on < 0) {
+    const char *e = getenv("SCR_TICK_POISON");
+    on = (e != NULL && e[0] != 0 && e[0] != '0') ? 1 : 0;
+  }
+  return on != 0;
+}
+
 /* Await result extraction. Rejection re-throws into the awaiter. */
 static bool scr_await_settled(ScrPromise *p) {
-  if (p->state != SCR_PROM_PENDING) scr_await_yield();
+  if (p->state != SCR_PROM_PENDING) {
+    scr_await_yield();
+    if (scr_tick_poison()) scr_await_yield();
+  }
   while (p->state == SCR_PROM_PENDING) scr_await_park(p);
   scr_prom_observe(p);
   if (p->state == SCR_PROM_REJECTED) {
