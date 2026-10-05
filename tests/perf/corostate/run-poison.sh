@@ -46,7 +46,7 @@ fi
 # verdict about code that is no longer there.
 rm -f "$EXE"
 "$ZIG" cc -target x86_64-windows-gnu -O1 -g0 -I"$S" \
-  -DWIN32_LEAN_AND_MEAN -D_WIN32_WINNT=0x0601 $BLIND \
+  -DWIN32_LEAN_AND_MEAN -D_WIN32_WINNT=0x0601 -DSCR_CORO_LANE $BLIND \
   "$REPO/tests/perf/corostate/corostate.c" "$S/scr_coro.c" \
   "$S/scr_number.c" "$S/scr_string.c" "$S/scr_array.c" "$S/scr_bytes.c" \
   "$S/scr_bytes_io.c" "$S/scr_map.c" "$S/scr_closure.c" "$S/scr_object.c" \

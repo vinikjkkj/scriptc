@@ -232,6 +232,48 @@ simultaneously, so the pool is drained and every spawn is a real
 
 ---
 
+## 6b. OPEN DEFECT: the frame struct does not survive a TU split
+
+Measured on a real `zapo-rest` build with `SCRIPTC_STACKLESS=1`, `--backend c`:
+the emitted C **does not compile**.
+
+    zapo-rest.part4.c:7:3: error: use of undeclared identifier
+                                  'sc_cf__x25_promise_all_tuple_247'
+
+Mechanism, and it is not an edge case:
+
+| | where it lands |
+|---|---|
+| frame structs `sc_cf_*` | **533**, all in the main TU `zapo-rest.c` |
+| shared header `zapo-rest.scrh` | **0** |
+| resume functions `sc_cr_*` | **533**, all in `part1..part6,part14` |
+
+So *every* converted function has its frame type in one translation unit and
+its resume function in another, with nothing in the header to bridge them.
+A program that splits cannot build at all with the knob on; the single-TU
+probes pass because nothing is split.
+
+The cause is visible in `emit-coro.ts`'s own note: the declaration goes into
+`out` rather than through `E.decl` because "the spawn wrapper below takes the
+resume function's ADDRESS, so the declaration has to precede it in the same
+emitted section." That reasoning is right about the resume function's FORWARD
+DECLARATION and wrong about the frame STRUCT: the struct has no ordering
+constraint against the spawn wrapper and belongs in the shared header, which
+is the only thing every split TU includes.
+
+What the conversion would have been, had it linked (counted from the emitted
+C, guard: a function has a trampoline or a resume, never both):
+
+| | OFF | ON |
+|---|---|---|
+| suspendable functions | 1,489 | 1,489 |
+| became state machines | 0 | **533** |
+| still fibers | 1,489 | 956 |
+| suspension points on frames | 0 | **753** |
+| suspension points on fibers | 2,270 | 1,517 |
+| function coverage | 0% | **35.8%** |
+| suspension-point coverage | 0% | **33.2%** |
+
 ## 7. Not covered yet
 
 - **Generators and async generators.** `ScrGen` is a separate handle with its

@@ -81,6 +81,42 @@
 #   7. It does not run the neighbours out of disk. Below the floor it aborts,
 #      before the first shard and between every pair.
 #
+#  THE ONE RERUNNABLE SIGNATURE, and the two limits that keep it honest.
+#
+#  A red shard is a wrong answer until proven otherwise, and this gate does not
+#  rerun to chase green. Exactly one signature is environmental rather than a
+#  verdict:
+#
+#      CcCompileError  with ZERO `error:` lines anywhere in the shard log.
+#
+#  WHY IT IS SAFE TO RERUN. A real codegen defect ALWAYS prints a compiler
+#  error - that is what "generated C should always compile" means when it
+#  fails. So this signature cannot hide one: the moment a genuine defect
+#  appears, `error:` appears with it and the signature no longer matches. It is
+#  narrow by construction, not by promise.
+#
+#  WHAT IT COVERS, all of them environment and all seen on this host: zig
+#  exiting nonzero with no diagnostic, another process holding the TU open, and
+#  disk pressure. None of the three is a statement about the tree.
+#
+#  OBSERVED 2026-10-05 on 3701-array-literal-element-release-scope.ts, shard
+#  2/6. The summary line names a differential test and reads like a behavioural
+#  red; the program never ran. Isolated, it compiled and matched node BYTE FOR
+#  BYTE on both the branch and its merge-base, and the same case passed on
+#  retest in this gate's own lane. Read the DETAIL, not the test name.
+#
+#   LIMIT 1 - ONE RERUN, NOT A LOOP. The same signature twice in a row on the
+#   same revision is no longer transient: it is an environment problem to
+#   diagnose, most likely disk or concurrency. Stop and look; do not spin.
+#
+#   LIMIT 2 - THE RERUN IS LOGGED AS A RERUN, naming the signature that
+#   justified it. A gate that reruns in silence produces a 6/6 nobody can audit
+#   afterwards, which costs more than the red it hid.
+#
+#  AND THE WHOLE GATE RERUNS, never the one red shard. The contract is six
+#  greens in ONE run; patching a single shard's result into a previous run's
+#  five weakens precisely the thing that makes the verdict worth having.
+#
 #  -DryRun runs the whole preamble, the controls, the lane assertions and the
 #  expected-file glob, then puts TWO cheap test files through the exact
 #  Start-Process / log / JSON / verdict plumbing the shards use. It is a dress

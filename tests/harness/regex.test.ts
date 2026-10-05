@@ -27,9 +27,13 @@ import { holdScratch } from "./scratch-lease.mjs";
 import {
   REGEX_CLASS_MAX,
   REGEX_CLASS_RECORDED,
+  REGEX_CLASS_TEXT_RECORDED,
   STATIC_CLASS_MAX,
   STATIC_CLASS_RECORDED,
+  STATIC_CLASS_TEXT_RECORDED,
+  peTextVirtualSize,
   recordedSizeComplaint,
+  recordedTextComplaint,
 } from "./size-class.js";
 
 const execFileAsync = promisify(execFile);
@@ -184,6 +188,20 @@ console.log(/${"(a)".repeat(300)}/.test("a"));
     // move together — scr_url.c's gate moved this one 512 bytes further
     // than the static one, and an earlier change moved it twice as far.
     expect(recordedSizeComplaint("the regex-free program", plainSize, STATIC_CLASS_RECORDED)).toBeNull();
+    expect(
+      recordedTextComplaint(
+        "the regex-free program",
+        peTextVirtualSize(plainBuild.binaryPath),
+        STATIC_CLASS_TEXT_RECORDED,
+      ),
+    ).toBeNull();
+    expect(
+      recordedTextComplaint(
+        "the regex program",
+        peTextVirtualSize(regexBuild.binaryPath),
+        REGEX_CLASS_TEXT_RECORDED,
+      ),
+    ).toBeNull();
     expect(recordedSizeComplaint("the regex program", regexSize, REGEX_CLASS_RECORDED)).toBeNull();
     expect(plainSize).toBeLessThan(STATIC_CLASS_MAX);
     expect(regexSize).toBeLessThan(REGEX_CLASS_MAX);

@@ -31,7 +31,10 @@ import {
   ENGINE_CLASS_MIN,
   STATIC_CLASS_MAX,
   STATIC_CLASS_RECORDED,
+  STATIC_CLASS_TEXT_RECORDED,
+  peTextVirtualSize,
   recordedSizeComplaint,
+  recordedTextComplaint,
 } from "./size-class.js";
 
 const execFileAsync = promisify(execFile);
@@ -401,6 +404,18 @@ console.log(greet("world"), 6 * 7);
     // scr_cycle.c with the checks in the other order produced exactly that.
     expect(
       recordedSizeComplaint("the static hello-world", staticSize, STATIC_CLASS_RECORDED),
+    ).toBeNull();
+    // The SECTION anchor, second: file size is quantised to 512 bytes and
+    // cannot resolve a sub-granule change at all -- measured, a 144-byte and
+    // a 384-byte addition both report as +512. This one reports the exact
+    // delta. It goes after the file check because the file check is the one
+    // that protects the CLASS; this protects the drift.
+    expect(
+      recordedTextComplaint(
+        "the static hello-world",
+        peTextVirtualSize(stat.binaryPath),
+        STATIC_CLASS_TEXT_RECORDED,
+      ),
     ).toBeNull();
     // The coarse half: the class ceiling protects the DISTANCE between
     // classes (a library-sized or engine-sized jump), which a recorded
