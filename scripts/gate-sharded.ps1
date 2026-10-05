@@ -1,0 +1,419 @@
+# ============================================================================
+#  gate-sharded.ps1 - the six-shard merge gate.
+#
+#  THE LOGIC LIVES HERE; the host paths do not. Deploy a wrapper that sets the
+#  environment below and invokes this file, and point the scheduled task at the
+#  wrapper:
+#
+#      # <blocks>\<gate-name>\gate.ps1
+#      $env:BLOCKS_ROOT     = "<blocks>"
+#      $env:GATE_NAME       = "<gate-name>"
+#      $env:SCRIPTC_REPO    = "<repo>"
+#      $env:SCRIPTC_ZIG     = "<tools>\zig"
+#      $env:SCRIPTC_NODE25  = "<home>\AppData\Local\nvm\v25.9.0"
+#      $env:SCRIPTC_GIT_USR = "<git>\usr\bin"
+#      & "$env:SCRIPTC_REPO\scripts\gate-sharded.ps1" @args
+#      exit $LASTEXITCODE
+#
+#  WHY THE SPLIT. The previous gate and its sibling were both kept outside git
+#  and both were lost in one disk cleanup on 2026-10-05, along with the
+#  directory they had been preserved into. A copy outside version control is
+#  not a backup, it is a second thing to lose. What is host-specific is eight
+#  lines; what is expensive is everything below, and it is in here now.
+#
+#  (The gate reads its own script out of the repository it gates. That is an
+#  instrument inside its own subject: a revision that breaks this file breaks
+#  the gate rather than failing it. The wrapper can copy this file out first if
+#  that ever matters; today it does not, because the gate is run by hand or by
+#  a timer against a tree someone already intends to merge.)
+#
+#  RECONSTRUCTED 2026-10-05 from the specification of the lost original. Every
+#  rule below is here because it was paid for once.
+#
+#  WHAT THIS FILE REFUSES TO DO, and why each refusal is load-bearing:
+#
+#   1. It does not start before it says so. GATE5-START is written to a FIXED
+#      path as the first executable statement after the configuration is
+#      resolved, before Set-Location, before any env, before any dot-source.
+#      Without it, "the task never fired" and "the task fired and died in the
+#      preamble" produce the same evidence: nothing.
+#
+#   2. It does not trust its own verdict function. Five controls run BEFORE any
+#      compiling: planted failures must read RED (sensitivity) and clean logs
+#      must read GREEN (specificity). The specificity controls are not
+#      decorative - Select-String is case-insensitive by default and this suite
+#      has PASSING test names reading "a failed check is CATCHABLE", "a reached
+#      class-instance for-in fails the build" and "0xC0000142
+#      STATUS_DLL_INIT_FAILED". A whole-log grep for "fail" calls a green gate
+#      red, which is how a gate stops being believed.
+#
+#      PROVED, not asserted: a clone of this file whose Get-ShardVerdict always
+#      answers GREEN fails 3 of the 5 controls and aborts with rc=2 before
+#      compiling a line. A comparator that cannot be wrong proves nothing when
+#      it is right.
+#
+#   3. It does not read the whole log. Only the vitest SUMMARY lines decide,
+#      ANSI stripped, matched CASE-SENSITIVELY.
+#
+#   4. It does not ask vitest which files a shard owns. `vitest list --shard`
+#      IGNORES the flag and answers the full list for every shard, so a
+#      partition check built on it is green by construction and proves nothing.
+#      MEASURED 2026-10-05, not remembered: --shard=1/6, 2/6 and 5/6 each
+#      answered 213 files - the same 213 `list --filesOnly` answers with no
+#      shard at all, and the same 213 the glob below produces, which is what
+#      makes the partition check meaningful rather than merely present.
+#
+#   5. It does not inherit its build lane. SCRIPTC_TARGET and the zig install
+#      are pinned and then ASSERTED. On 2026-10-05 a block measured the static
+#      size anchor host-native, read +8,192 against a figure recorded in the
+#      CROSS lane, and opened a regression hunt on a merge that had not grown a
+#      byte. The two zig installs on that host differ by 13,312 bytes on the
+#      same tree, and the older one is FIRST on the default PATH, so a lane gets
+#      chosen by accident unless it is chosen on purpose. lab/env.sh pins the
+#      same lane; tests/harness/size-class.ts records the measurement.
+#
+#   6. It does not purge node_modules/.cache/scriptc-tests between shards. The
+#      previous version did, which made every shard recompile from scratch for
+#      nothing: vitest's globalSetup already runs pruneScratchOnce once per
+#      invocation - once per shard - and the sledgehammer destroyed the very
+#      tree that LRU administers. SCRIPTC_TEST_SCRATCH_MAX_MB bounds it instead.
+#
+#   7. It does not run the neighbours out of disk. Below the floor it aborts,
+#      before the first shard and between every pair.
+#
+#  -DryRun runs the whole preamble, the controls, the lane assertions and the
+#  expected-file glob, then puts TWO cheap test files through the exact
+#  Start-Process / log / JSON / verdict plumbing the shards use. It is a dress
+#  rehearsal in about twenty seconds; the scheduled task passes no arguments and
+#  so always takes the real path.
+# ============================================================================
+param([switch]$DryRun)
+
+# ---------------------------------------------------------------------------
+# (1) THE SENTINEL. First executable statement.
+# ---------------------------------------------------------------------------
+# CONFIGURATION, in the form lab/env.sh established: every host path arrives
+# through the environment and the fallback is a PLACEHOLDER that cannot work.
+# A placeholder left in place is refused BY NAME below, so a misdeployment says
+# which variable it wants instead of building against nothing.
+#
+# Resolving these is the ONE thing that precedes the sentinel, and it has to be:
+# an unconfigured gate does not know where its log goes, so it cannot leave one.
+# Everything that can fail after this point leaves a GATE5-START behind, which
+# is the whole distinction the sentinel exists to draw.
+$BlocksRoot = if ($env:BLOCKS_ROOT)     { $env:BLOCKS_ROOT }     else { "<blocks>" }
+$GateName   = if ($env:GATE_NAME)       { $env:GATE_NAME }       else { "<gate-name>" }
+$Repo       = if ($env:SCRIPTC_REPO)    { $env:SCRIPTC_REPO }    else { "<repo>" }
+$ZigDir     = if ($env:SCRIPTC_ZIG)     { $env:SCRIPTC_ZIG }     else { "<tools>\zig" }
+$NodeDir    = if ($env:SCRIPTC_NODE25)  { $env:SCRIPTC_NODE25 }  else { "<home>\AppData\Local\nvm\v25.9.0" }
+$GitUsrBin  = if ($env:SCRIPTC_GIT_USR) { $env:SCRIPTC_GIT_USR } else { "<git>\usr\bin" }
+$ZigWant    = if ($env:SCRIPTC_ZIG_VERSION)  { $env:SCRIPTC_ZIG_VERSION }  else { "0.16.0" }
+$NodeWant   = if ($env:SCRIPTC_NODE_VERSION) { $env:SCRIPTC_NODE_VERSION } else { "v25.9.0" }
+
+$unset = @()
+foreach ($pair in @(@("BLOCKS_ROOT", $BlocksRoot), @("GATE_NAME", $GateName), @("SCRIPTC_REPO", $Repo),
+                    @("SCRIPTC_ZIG", $ZigDir), @("SCRIPTC_NODE25", $NodeDir), @("SCRIPTC_GIT_USR", $GitUsrBin))) {
+  if ($pair[1] -like "*<*") { $unset += $pair[0] }
+}
+if ($unset.Count -gt 0) {
+  [Console]::Error.WriteLine("gate-sharded.ps1: unconfigured, set: " + ($unset -join ", "))
+  [Console]::Error.WriteLine("gate-sharded.ps1: deploy a wrapper that sets them and invokes this file - see the header")
+  exit 2
+}
+
+$GateRoot = Join-Path $BlocksRoot $GateName
+$LastLog  = Join-Path $GateRoot "gate-last.log"
+$RunId    = Get-Date -Format "yyyyMMdd-HHmmss"
+try { New-Item -ItemType Directory -Force -Path $GateRoot | Out-Null } catch { }
+Set-Content -LiteralPath $LastLog -Encoding utf8 -Value (
+  "{0} GATE5-START runId={1} pid={2} dryRun={3} script={4}" -f
+  (Get-Date -Format "yyyy-MM-dd HH:mm:ss"), $RunId, $PID, [bool]$DryRun, $PSCommandPath)
+
+$ErrorActionPreference = "Stop"
+$LogDir      = Join-Path $GateRoot "logs\$RunId"
+$Shards      = 6
+$DiskFloorGB = 10
+$ExitRc      = 1
+$Started     = Get-Date
+
+New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
+$MainLog = Join-Path $LogDir "gate5.log"
+
+# Logging must never touch the PIPELINE. Invoke-Judged both logs and returns a
+# value, so a Write-Output here prepends every log line to that return value:
+# `$r = Invoke-Judged ...` captures them, and RUN-START, RUN-WARN and FAILLINE
+# vanish from stdout. They still reach both log files, which is why the
+# 2026-10-05 run lost nothing - but PowerShell member enumeration is what makes
+# the rest work ($r.Green resolves through the array in BOTH the true and the
+# false branch, measured), and the verdict of a gate must not rest on that.
+# Console.Out writes past the pipeline entirely.
+function Say([string]$m) {
+  $line = "{0} {1}" -f (Get-Date -Format "HH:mm:ss"), $m
+  Add-Content -LiteralPath $MainLog -Value $line
+  Add-Content -LiteralPath $LastLog -Value $line
+  [Console]::Out.WriteLine($line)
+}
+
+function FreeGB { [math]::Round((Get-PSDrive -Name G).Free / 1GB, 2) }
+
+# ---------------------------------------------------------------------------
+# (3) THE VERDICT. Summary lines only, ANSI stripped, CASE-SENSITIVE.
+#
+# A run is GREEN iff: the process exited 0, it printed BOTH summary lines,
+# neither names a failure, and vitest reported no Errors block. A log that
+# stops before the summary is RED - that is the truncated-log shape, and a run
+# that never summarised has not passed, it has disappeared.
+# ---------------------------------------------------------------------------
+function Get-ShardVerdict {
+  param([string[]]$Lines, [int]$Rc)
+
+  $clean = @($Lines | ForEach-Object { $_ -replace "\x1b\[[0-9;?]*[ -/]*[@-~]", "" })
+
+  $tf = @($clean | Where-Object { $_ -cmatch '^\s*Test Files\s{2,}\S' })
+  $tt = @($clean | Where-Object { $_ -cmatch '^\s*Tests\s{2,}\S' })
+  $er = @($clean | Where-Object { $_ -cmatch '^\s*Errors\s{2,}\S' })
+  $nf = @($clean | Where-Object { $_ -cmatch 'No test files found' })
+
+  if ($nf.Count -gt 0) { return @{ Green = $false; Why = "vitest found no test files" } }
+  if ($tf.Count -eq 0) { return @{ Green = $false; Why = "no 'Test Files' summary line - the run never summarised" } }
+  if ($tt.Count -eq 0) { return @{ Green = $false; Why = "no 'Tests' summary line - the run never summarised" } }
+
+  # CASE-SENSITIVE on purpose. vitest writes "failed" in the summary; the
+  # passing test NAMES above it write "failed", "failure", "fails" and
+  # "FAILED", and none of those are in these two lines.
+  $bad = @(($tf + $tt) | Where-Object { $_ -cmatch 'failed' })
+  if ($bad.Count -gt 0) { return @{ Green = $false; Why = "summary names a failure: " + ($bad -join " / ") } }
+  if ($er.Count -gt 0)  { return @{ Green = $false; Why = "vitest reported errors: " + ($er -join " / ") } }
+  if ($Rc -ne 0)        { return @{ Green = $false; Why = "exit code $Rc with a clean summary" } }
+
+  return @{ Green = $true; Why = ($tf[-1].Trim() + " ; " + $tt[-1].Trim()) }
+}
+
+# ---------------------------------------------------------------------------
+# One judged vitest invocation: hidden, PID recorded BEFORE the wait, verdict
+# from the summary lines, file list from the JSON report. The shards and the
+# dry-run probe share it so the rehearsal exercises the real plumbing.
+# ---------------------------------------------------------------------------
+function Invoke-Judged {
+  param([string]$Tag, [string[]]$ExtraArgs)
+
+  $out  = Join-Path $LogDir "$Tag.log"
+  $err  = Join-Path $LogDir "$Tag.err"
+  $json = Join-Path $LogDir "$Tag.json"
+  $argv = @("node_modules\vitest\vitest.mjs", "run") + $ExtraArgs +
+          @("--reporter=default", "--reporter=json", "--outputFile.json=$json")
+
+  $t0 = Get-Date
+  $p  = Start-Process -FilePath "node" -ArgumentList $argv -WorkingDirectory $Repo `
+        -WindowStyle Hidden -RedirectStandardOutput $out -RedirectStandardError $err -PassThru
+  $null = $p.Handle   # cache the handle, or ExitCode reads back empty
+  Say ("RUN-START tag={0} pid={1} args={2}" -f $Tag, $p.Id, ($ExtraArgs -join " "))
+  $p.WaitForExit()
+  $rc  = $p.ExitCode
+  $min = [math]::Round(((Get-Date) - $t0).TotalMinutes, 2)
+
+  $lines = @()
+  if (Test-Path $out) { $lines += Get-Content -LiteralPath $out }
+  if (Test-Path $err) { $lines += Get-Content -LiteralPath $err }
+  $v = Get-ShardVerdict -Lines $lines -Rc $rc
+
+  $ran = @()
+  if (Test-Path $json) {
+    try {
+      $rep = Get-Content -LiteralPath $json -Raw | ConvertFrom-Json
+      foreach ($tr in $rep.testResults) { $ran += ($tr.name -replace '\\', '/') }
+    } catch { Say ("RUN-WARN tag={0} json-unreadable: {1}" -f $Tag, $_.Exception.Message) }
+  } else {
+    Say ("RUN-WARN tag={0} no json report written" -f $Tag)
+  }
+
+  if (-not $v.Green) {
+    foreach ($l in @($lines | Where-Object { $_ -cmatch '^\s*(FAIL|\u00d7)\s' } | Select-Object -First 25)) {
+      Say ("FAILLINE tag={0} {1}" -f $Tag, $l.Trim())
+    }
+  }
+  return @{ Green = $v.Green; Why = $v.Why; Rc = $rc; Min = $min; Ran = $ran }
+}
+
+$Green = 0
+$Red   = 0
+$RanAll = @{}
+$PartitionOk = $false
+
+try {
+  # -------------------------------------------------------------------------
+  # (2) THE CONTROLS. Before any compiling, because a gate whose comparator is
+  #     wrong is worse than no gate: it reports confidently.
+  # -------------------------------------------------------------------------
+  $cleanLog = @(
+    " RUN  v3.2.7 G:/scriptc",
+    "",
+    " + tests/harness/dyncheck.test.ts (120 tests) 9s",
+    "   + a failed check is CATCHABLE and execution recovers  12ms",
+    "   + tuple failure-path RC stress: partial tuples release on unwind  9ms",
+    " + tests/harness/oracle-trust.test.ts (6 tests) 20ms",
+    "   + 0xC0000142 STATUS_DLL_INIT_FAILED - Windows would not start node  1ms",
+    " + tests/harness/deadstrip.test.ts (9 tests) 30s",
+    "   + a reached class-instance for-in fails the build  2s",
+    "   + without --best-effort the same program fails on the construct, not an ICE  2s",
+    "",
+    " Test Files  3 passed (3)",
+    "      Tests  135 passed (135)",
+    "   Start at  09:00:00",
+    "   Duration  41.00s"
+  )
+  $failLog = @($cleanLog | ForEach-Object {
+    ($_ -replace '^ Test Files  3 passed \(3\)$', ' Test Files  1 failed | 2 passed (3)') `
+       -replace '^      Tests  135 passed \(135\)$', '      Tests  1 failed | 134 passed (135)'
+  })
+  $truncLog = @($cleanLog | Where-Object { $_ -cnotmatch '^\s*(Test Files|Tests)\s{2,}' })
+  $esc = [char]27
+  $ansiLog = @($cleanLog | ForEach-Object {
+    if ($_ -cmatch '^\s*(Test Files|Tests)\s{2,}') { "$esc[32m$_$esc[39m" } else { $_ }
+  })
+
+  $controls = @(
+    @{ N = "specificity: a clean log whose PASSING test names say failed/FAILED/fails"; V = (Get-ShardVerdict -Lines $cleanLog -Rc 0); Want = $true },
+    @{ N = "specificity: the same log with ANSI colour on the summary";                 V = (Get-ShardVerdict -Lines $ansiLog  -Rc 0); Want = $true },
+    @{ N = "sensitivity: one planted failure in the summary";                           V = (Get-ShardVerdict -Lines $failLog  -Rc 1); Want = $false },
+    @{ N = "sensitivity: a log truncated before the summary";                           V = (Get-ShardVerdict -Lines $truncLog -Rc 0); Want = $false },
+    @{ N = "sensitivity: a clean summary with a nonzero exit code";                     V = (Get-ShardVerdict -Lines $cleanLog -Rc 1); Want = $false }
+  )
+  $controlFail = 0
+  foreach ($c in $controls) {
+    $ok = ($c.V.Green -eq $c.Want)
+    if (-not $ok) { $controlFail++ }
+    Say ("CONTROL {0} want={1} got={2} :: {3}" -f $(if ($ok) { "PASS" } else { "FAIL" }), $c.Want, $c.V.Green, $c.N)
+  }
+  if ($controlFail -gt 0) { Say "GATE5-ABORT reason=verdict-controls-failed count=$controlFail"; $ExitRc = 2; return }
+
+  # -------------------------------------------------------------------------
+  # (5) THE LANE. Pinned, then asserted. Never inherited.
+  # -------------------------------------------------------------------------
+  $env:PATH = "$ZigDir;$NodeDir;$GitUsrBin;$env:PATH"
+
+  $env:TMP    = Join-Path $GateRoot "tmp"
+  $env:TEMP   = $env:TMP
+  $env:TMPDIR = $env:TMP
+
+  $env:SCRIPTC_CACHE_DIR        = Join-Path $GateRoot "cache"
+  $env:ZIG_LOCAL_CACHE_DIR      = Join-Path $GateRoot "zig\local"
+  $env:ZIG_GLOBAL_CACHE_DIR     = Join-Path $GateRoot "zig\global"
+  $env:SCRIPTC_PROVENANCE_CACHE = Join-Path $GateRoot "prov"
+  foreach ($d in @($env:TMP, $env:SCRIPTC_CACHE_DIR, $env:ZIG_LOCAL_CACHE_DIR, $env:ZIG_GLOBAL_CACHE_DIR, $env:SCRIPTC_PROVENANCE_CACHE)) {
+    New-Item -ItemType Directory -Force -Path $d | Out-Null
+  }
+
+  $env:SCRIPTC_TARGET  = "x86_64-windows-gnu"
+  $env:SCRIPTC_CC      = "zigcc"
+  $env:SCRIPTC_TEST_CC = "zig cc"
+  $env:SCRIPTC_TEST_WORKERS = "3"
+  # (6) The pruner's budget. NOT a purge - see the header.
+  $env:SCRIPTC_TEST_SCRATCH_MAX_MB = "8192"
+  # SCRIPTC_TEST_SHARD is deliberately NOT set. It partitions CASES inside a
+  # file; combined with --shard, which partitions FILES, a case in file-set N
+  # but case-set M would never run at all. --shard alone is a total partition.
+  $env:SCRIPTC_TEST_SHARD = $null
+  $env:SCR_TICK_POISON    = $null
+  $env:SCRIPTC_SAN        = $null
+
+  Set-Location $Repo
+
+  $zigPath = (Get-Command zig -ErrorAction SilentlyContinue).Source
+  $zigVer  = (& zig version)
+  $nodeVer = (& node --version)
+  $head    = (& git rev-parse HEAD).Trim()
+  $headSub = (& git log -1 --format="%s").Trim()
+  $dirty   = @(& git status --porcelain)
+
+  Say ("ENV node={0} zig={1} zigPath={2} SCRIPTC_TARGET={3} SCRIPTC_CC={4} SCRIPTC_TEST_CC={5} workers={6}" -f $nodeVer, $zigVer, $zigPath, $env:SCRIPTC_TARGET, $env:SCRIPTC_CC, $env:SCRIPTC_TEST_CC, $env:SCRIPTC_TEST_WORKERS)
+  Say ("ENV tmp={0} cache={1} ziglocal={2} prov={3} scratchMaxMB={4}" -f $env:TMP, $env:SCRIPTC_CACHE_DIR, $env:ZIG_LOCAL_CACHE_DIR, $env:SCRIPTC_PROVENANCE_CACHE, $env:SCRIPTC_TEST_SCRATCH_MAX_MB)
+  Say ("TREE head={0} subject={1}" -f $head, $headSub)
+  foreach ($d in $dirty) { Say ("TREE dirty: {0}" -f $d) }
+  # Untracked test files are collected by vitest and belong to whoever left
+  # them there. Named so a failure from one is attributable at a glance.
+  foreach ($d in $dirty) {
+    if ($d -match '^\?\?\s+(.*\.test\.ts)$') { Say ("TREE untracked-test: {0} (collected by vitest, not from a commit)" -f $Matches[1]) }
+  }
+
+  # The lane assertions. A wrong zig is 13,312 bytes of phantom regression and
+  # a wrong target is 8,192; neither may be discovered afterwards.
+  if ($zigPath -notlike "$ZigDir*") { Say "GATE5-ABORT reason=wrong-zig-on-path got=$zigPath want=$ZigDir"; $ExitRc = 2; return }
+  if ($zigVer -ne $ZigWant)         { Say "GATE5-ABORT reason=wrong-zig-version got=$zigVer want=$ZigWant";  $ExitRc = 2; return }
+  if ($nodeVer -ne $NodeWant)       { Say "GATE5-ABORT reason=wrong-node got=$nodeVer want=$NodeWant";       $ExitRc = 2; return }
+
+  # -------------------------------------------------------------------------
+  # (7) THE DISK FLOOR.
+  # -------------------------------------------------------------------------
+  if ((FreeGB) -lt $DiskFloorGB) { Say ("GATE5-ABORT reason=disk-floor free={0}GB floor={1}GB" -f (FreeGB), $DiskFloorGB); $ExitRc = 2; return }
+  Say ("DISK free={0}GB floor={1}GB" -f (FreeGB), $DiskFloorGB)
+
+  # -------------------------------------------------------------------------
+  # (4) THE EXPECTED FILE SET, from vitest.config.ts's include globs directly:
+  #     tests/harness/**, packages/*/src/**, packages/*/test/**. Not from
+  #     `vitest list --shard`, which ignores the flag.
+  # -------------------------------------------------------------------------
+  $expected = New-Object System.Collections.Generic.HashSet[string]
+  $roots = @((Join-Path $Repo "tests\harness"))
+  foreach ($p in (Get-ChildItem -Path (Join-Path $Repo "packages") -Directory -ErrorAction SilentlyContinue)) {
+    $roots += (Join-Path $p.FullName "src")
+    $roots += (Join-Path $p.FullName "test")
+  }
+  foreach ($r in $roots) {
+    if (-not (Test-Path $r)) { continue }
+    foreach ($f in (Get-ChildItem -Path $r -Recurse -File -Filter "*.test.ts" -ErrorAction SilentlyContinue)) {
+      if ($f.FullName -like "*\node_modules\*") { continue }
+      [void]$expected.Add(($f.FullName -replace '\\', '/'))
+    }
+  }
+  $expected | Sort-Object | Set-Content -LiteralPath (Join-Path $LogDir "expected-files.txt")
+  Say ("PARTITION expected-files={0}" -f $expected.Count)
+  if ($expected.Count -eq 0) { Say "GATE5-ABORT reason=no-test-files-globbed"; $ExitRc = 2; return }
+
+  # -------------------------------------------------------------------------
+  # THE DRESS REHEARSAL, or THE SHARDS.
+  # -------------------------------------------------------------------------
+  if ($DryRun) {
+    $r = Invoke-Judged -Tag "dryrun" -ExtraArgs @("tests/harness/size-class-armed.test.ts", "tests/harness/shard.test.ts")
+    Say ("DRYRUN-RESULT rc={0} min={1} files={2} verdict={3} :: {4}" -f $r.Rc, $r.Min, $r.Ran.Count, $(if ($r.Green) { "GREEN" } else { "RED" }), $r.Why)
+    $ok = ($r.Green -and $r.Ran.Count -eq 2)
+    Say ("GATE5-TOTAL mode=dryrun verdict={0}" -f $(if ($ok) { "GREEN" } else { "RED" }))
+    $ExitRc = if ($ok) { 0 } else { 1 }
+    return
+  }
+
+  for ($n = 1; $n -le $Shards; $n++) {
+    if ((FreeGB) -lt $DiskFloorGB) { Say ("GATE5-ABORT reason=disk-floor-midrun shard={0} free={1}GB" -f $n, (FreeGB)); $ExitRc = 2; return }
+    $r = Invoke-Judged -Tag "shard-$n" -ExtraArgs @("--shard=$n/$Shards")
+    foreach ($f in $r.Ran) {
+      if ($RanAll.ContainsKey($f)) { $RanAll[$f] += ",$n" } else { $RanAll[$f] = "$n" }
+    }
+    if ($r.Green) { $Green++ } else { $Red++ }
+    Say ("SHARD-RESULT n={0}/{1} rc={2} min={3} files={4} verdict={5} :: {6}" -f $n, $Shards, $r.Rc, $r.Min, $r.Ran.Count, $(if ($r.Green) { "GREEN" } else { "RED" }), $r.Why)
+  }
+
+  # -------------------------------------------------------------------------
+  # THE PARTITION, from what actually ran.
+  # -------------------------------------------------------------------------
+  $missing = @($expected | Where-Object { -not $RanAll.ContainsKey($_) })
+  $extra   = @($RanAll.Keys | Where-Object { -not $expected.Contains($_) })
+  $dupes   = @($RanAll.Keys | Where-Object { $RanAll[$_] -match ',' })
+  foreach ($m in ($missing | Select-Object -First 20)) { Say ("PARTITION-MISSING {0}" -f $m) }
+  foreach ($e in ($extra   | Select-Object -First 20)) { Say ("PARTITION-EXTRA   {0}" -f $e) }
+  foreach ($d in ($dupes   | Select-Object -First 20)) { Say ("PARTITION-DUPE    {0} shards={1}" -f $d, $RanAll[$d]) }
+  $PartitionOk = ($missing.Count -eq 0 -and $extra.Count -eq 0 -and $dupes.Count -eq 0)
+  Say ("PARTITION-RESULT expected={0} ran={1} missing={2} extra={3} dupes={4} verdict={5}" -f $expected.Count, $RanAll.Count, $missing.Count, $extra.Count, $dupes.Count, $(if ($PartitionOk) { "OK" } else { "FAIL" }))
+
+  $verdict = ($Green -eq $Shards -and $Red -eq 0 -and $PartitionOk)
+  $ExitRc = if ($verdict) { 0 } else { 1 }
+  Say ("GATE5-TOTAL shards={0} green={1} red={2} partition={3} minutes={4} free={5}GB head={6} verdict={7}" -f $Shards, $Green, $Red, $(if ($PartitionOk) { "OK" } else { "FAIL" }), [math]::Round(((Get-Date) - $Started).TotalMinutes, 2), (FreeGB), $head, $(if ($verdict) { "GREEN" } else { "RED" }))
+}
+catch {
+  Say ("GATE5-ABORT reason=exception message={0}" -f $_.Exception.Message)
+  Say ("GATE5-ABORT at={0}" -f ($_.ScriptStackTrace -replace "`r?`n", " | "))
+  $ExitRc = 3
+}
+finally {
+  Say ("GATE-EXIT rc={0} runId={1} logs={2}" -f $ExitRc, $RunId, $LogDir)
+  exit $ExitRc
+}
