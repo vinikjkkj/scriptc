@@ -273,3 +273,14 @@ export function mangleStreamCbThunk(n: number): string {
 export function mangleStreamDoneFn(n: number): string {
   return `sc_sdone_${n}`;
 }
+
+/** Stackless coroutine machinery: the frame struct, its resume function.
+ * The spawn wrapper keeps mangleAsyncSpawn's name — call sites are
+ * representation-blind by design, so a function moving between the fiber
+ * and the state-machine lowering must not rename the symbol they call. */
+export function mangleCoroFrame(fnName: string): string {
+  return `sc_cf_${sanitize(fnName)}`;
+}
+export function mangleCoroResume(fnName: string): string {
+  return `sc_cr_${sanitize(fnName)}`;
+}

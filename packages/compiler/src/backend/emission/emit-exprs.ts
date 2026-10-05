@@ -9,6 +9,7 @@ import { mangleClassNew, mangleClassRetain, mangleClassStruct, mangleField, mang
 import { OVERFLOW_MEMBER, OWNMASK_MEMBER, SRCPROTO_MEMBER, TOSTR_MEMBER, nullProtoCondC, ownPresentCondC } from "./emit-shapes.js";
 import { dynDestrCheckHelper, dynIterNHelper, dynKeyGetHelper } from "./emit-walkers.js";
 import { genResultThunkFor } from "./emit-async.js";
+import { emitCoroAwait } from "./emit-coro.js";
 import { isStableReceiverOperand } from "../../ir/analysis.js";
 import { wsGlobalCtorFor } from "./emit-ws.js";
 
@@ -8125,6 +8126,17 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
         return E.newTemp(e.type, call);
       }
       case "awaitExpr": {
+        if (E.currentCoro !== null) {
+          // STACKLESS: spill the frame, park, return to the scheduler, and
+          // resume at a label. ONE scr_coro_park per await, which is one
+          // scr_ready_push per await on exactly one of its two arms -- the
+          // invariant is countable by grepping the emitted TU.
+          const pr0 = E.emitExpr(e.value);
+          const idx = E.coroPointIndex++;
+          const nm = emitCoroAwait(E, E.currentFn!, E.currentCoro, idx, pr0.name, e.type);
+          E.emitPendingCheck();
+          return { name: nm, type: e.type };
+        }
         // Parks the fiber until the promise settles; rejected promises
         // re-throw here (hence the pending check). Promise temp borrowed;
         // refcounted results arrive +1 and join the frame pre-check so an

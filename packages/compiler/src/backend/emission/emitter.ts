@@ -52,6 +52,7 @@ import { cType, releaseCallC, cStringLiteral, cDecl } from "./emit-types.js";
 import { computeMayThrow } from "./may-throw.js";
 import { dynDesc, unionTruthyHelper, unionEqHelper, unionToStrHelper, unionJoinHelper, jsonWriteHelper, jsonIndentHelper, dynMatchHelper, dynCheckHelper, dynArmHelper, dynFuncBoxHelper, dynToStrHelper, caughtToDynHelper, toDynHelper, dynClassDesc, recordKeyGetHelper, recordKeySetHelper, recordWideHelper } from "./emit-walkers.js";
 import { VtSlot, ClassMeta, emitStructDefs, vtEntriesFor, vtSlotParams, emitVtableDecls, emitVtableInstances, emitVtAdapterDefs, emitHierarchyClassHelpers, emitClassObjs, emitCtorThunkDefs, errorVtStampLines, emitterVtStampLines, streamVtStampLines, traceAdapterC, traceArgC, boxNewC, arrNewC } from "./emit-shapes.js";
+import { coroPlans, emitCoroFrames, emitCoroSpawns, coroFinish, coroUnwind } from "./emit-coro.js";
 import { agenSettleThunkFor, emitAsyncScaffolding, childDataThunkFor, childExitThunkFor, childExitThunkFor2, closeBindThunkFor, connectSockThunkFor, closeOverrideWrapFor, dgramMsgThunkFor, dnsLookupThunkFor, netLookupAnswerThunkFor, emitterInvokeThunkFor, streamCbThunkFor, streamDataThunkFor, promiseAdoptAdapterFor, raceAdapterFor, resolveThunkFor, sniAnswerThunkFor } from "./emit-async.js";
 import { emitNpmEmbedding, islandAdapter, islandTypedAdapter } from "./emit-island.js";
 import { emitFunction, emitBlock, emitStmts, emitStmt, emitTryCatch, emitSwitch, mergeBrace, emitBranchInto, emitCondition } from "./emit-stmts.js";
@@ -447,6 +448,17 @@ export class CEmitter {
    * each local arrived through the closure environment (env captures are
    * borrowed — never declared, never released here). */
   currentLocals = new Map<string, IrLocal>();
+  /** Functions this module lowers to stackless state machines (D1 slice).
+   * Empty unless SCRIPTC_STACKLESS=1 — the lowering ships BUILT but OFF. */
+  coroPlansByFn = new Map<string, import("../../ir/liveness.js").StacklessPlan>();
+  /** The plan for the function being emitted, or null for a fiber body. */
+  currentCoro: import("../../ir/liveness.js").StacklessPlan | null = null;
+  /** The function being emitted. The coroutine await site needs its locals
+   * list to know what to spill. */
+  currentFn: IrFunction | null = null;
+  /** How many suspension points this function has emitted so far — the
+   * state number the next park stores. */
+  coroPointIndex = 0;
   captureIds = new Set<string>();
   /** Hidden locals whose ENTIRE live range is one seqExpr: released when
    * that seqExpr's value has been produced, not at block exit. See
@@ -1233,6 +1245,10 @@ export class CEmitter {
 
   emitProgram(): EmittedProgram {
     const body: string[] = [];
+    // Decided once, before any body: emit-async.ts must skip exactly the
+    // functions emitted here, or the module gets two spawn wrappers with the
+    // same name (or none).
+    this.coroPlansByFn = coroPlans(this.mod.functions);
     // Function bodies are emitted first (into this.lines) so the literal
     // table is complete; the file is then assembled around them.
     for (const fn of this.mod.functions) {
@@ -1278,6 +1294,7 @@ export class CEmitter {
     const out: string[] = [
       banner,
       `#include "scr_runtime.h"`,
+      `#include "scr_coro.h"`,
       // The WebSocket global's API-object glue: its own header, because
       // the synthesized ctor/dispatch thunks name ScrWsGlobal and the
       // SCR_WSG_* event codes. Only when the program took the global:
@@ -1440,7 +1457,9 @@ export class CEmitter {
     // Wrappers + interned closures for declared functions used as values.
     // Placed after the forward declarations (they call sc_f_*) and before
     // the bodies (which reference &sc_fc_*).
+    emitCoroFrames(this, out, this.coroPlansByFn);
     this.emitAsyncScaffolding(out);
+    emitCoroSpawns(this, out, this.coroPlansByFn);
     for (const name of this.fnValues) {
       const fn = this.fnByName.get(name)!;
       const params = ["ScrClosure *sc_env", ...fn.params.map((p) => cDecl(p.type, mangleLocal(p.localId)))];
@@ -2467,6 +2486,12 @@ export class CEmitter {
       return;
     }
     this.releaseForJump(0, 0);
+    if (this.currentCoro !== null) {
+      // The frame owns the promise: an escaping exception settles it as a
+      // rejection rather than unwinding past a caller that no longer exists.
+      for (const l of coroUnwind()) this.line(l);
+      return;
+    }
     const t = this.currentReturnType;
     if (t.kind === "void") this.line(`return;`);
     else if (t.kind === "f64") this.line(`return 0;`);

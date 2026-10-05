@@ -10,7 +10,7 @@ import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
 
-const RUNTIME_SOURCES = ["scr_number.c", "scr_string.c", "scr_array.c", "scr_bytes.c", "scr_bytes_io.c", "scr_map.c", "scr_closure.c", "scr_object.c", "scr_union.c", "scr_exception.c", "scr_error.c", "scr_console.c", "scr_lib.c", "scr_path.c", "scr_json.c", "scr_async.c", "scr_child.c", "scr_cycle.c", "scr_random_fill.c", "scr_stack_margin.c"];
+const RUNTIME_SOURCES = ["scr_number.c", "scr_string.c", "scr_array.c", "scr_bytes.c", "scr_bytes_io.c", "scr_map.c", "scr_closure.c", "scr_object.c", "scr_union.c", "scr_exception.c", "scr_error.c", "scr_console.c", "scr_lib.c", "scr_path.c", "scr_json.c", "scr_async.c", "scr_coro.c", "scr_child.c", "scr_cycle.c", "scr_random_fill.c", "scr_stack_margin.c"];
 
 /* ---------------------- the runtime link-closure check ---------------------
  * The selection above and the gated arms in compileC/compileLibArchive are a
@@ -1418,7 +1418,7 @@ function coreRuntimeSources(url: boolean): string[] {
 
 const LIB_RUNTIME_SOURCES = [
   ...RUNTIME_SOURCES.filter(
-    (f) => f !== "scr_async.c" && f !== "scr_child.c" && f !== "scr_random_fill.c",
+    (f) => f !== "scr_async.c" && f !== "scr_coro.c" && f !== "scr_child.c" && f !== "scr_random_fill.c",
   ),
   "scr_library.c",
 ];
