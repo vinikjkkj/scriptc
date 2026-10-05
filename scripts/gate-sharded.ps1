@@ -342,6 +342,27 @@ try {
   if ($zigVer -ne $ZigWant)         { Say "GATE5-ABORT reason=wrong-zig-version got=$zigVer want=$ZigWant";  $ExitRc = 2; return }
   if ($nodeVer -ne $NodeWant)       { Say "GATE5-ABORT reason=wrong-node got=$nodeVer want=$NodeWant";       $ExitRc = 2; return }
 
+  # The PROVISIONING assertions, for the same reason as the lane ones: a gate
+  # that spends 50 minutes to report what a Test-Path answers in a second is
+  # not reporting a defect, it is reporting itself.
+  #
+  # Almost every test imports compiler SOURCE through vitest's aliases, so an
+  # unbuilt worktree looks completely green -- except for the handful that
+  # spawn the CLI as a CHILD PROCESS through the package entry, which
+  # resolves @scriptc/compiler to its dist. With dist absent the child dies
+  # in node's module resolver and prints ~1.3KB of stack trace, and
+  # packages/cli/test/flush.test.ts reads that as "the >64KB render was
+  # TRUNCATED" -- a loud, plausible, and entirely false diagnostic about the
+  # thing it exists to watch. Measured on an unprovisioned worktree: 5 of 5
+  # runs failed, constant byte count; 3 of 3 passed after building dist, with
+  # no source change. This aborts instead of building, because a gate that
+  # repairs its own subject cannot tell you the subject was broken.
+  $cliLink  = Join-Path $Repo "packages\cli\node_modules\@scriptc\compiler"
+  $distMain = Join-Path $Repo "packages\compiler\dist\index.js"
+  if (-not (Test-Path $cliLink))  { Say ("GATE5-ABORT reason=missing-workspace-link path={0} fix=pnpm-install" -f $cliLink);           $ExitRc = 2; return }
+  if (-not (Test-Path $distMain)) { Say ("GATE5-ABORT reason=missing-compiler-dist path={0} fix=build-packages/compiler" -f $distMain); $ExitRc = 2; return }
+  Say "PROVISION cli-link=ok compiler-dist=ok"
+
   # -------------------------------------------------------------------------
   # (7) THE DISK FLOOR.
   # -------------------------------------------------------------------------
