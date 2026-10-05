@@ -1305,7 +1305,12 @@ export class CEmitter {
     const out: string[] = [
       banner,
       `#include "scr_runtime.h"`,
-      `#include "scr_coro.h"`,
+      // Only when the module actually emitted a coroutine: an unconditional
+      // include put scr_coro.h in every TU, which the ABI guard catches
+      // (HEADER_FILES must cover every header the emitted TU includes) and
+      // which made a static hello-world grow. Same predicate as the link
+      // switch in cc.ts, decided at line ~1262 above.
+      ...(this.coroPlansByFn.size > 0 ? [`#include "scr_coro.h"`] : []),
       // The WebSocket global's API-object glue: its own header, because
       // the synthesized ctor/dispatch thunks name ScrWsGlobal and the
       // SCR_WSG_* event codes. Only when the program took the global:

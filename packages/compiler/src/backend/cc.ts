@@ -227,6 +227,13 @@ export interface CcOptions {
    * implemented in scr_copying.c (index.ts detects them on the IR).
    * Off keeps that optional TU out of unrelated binaries. */
   copying?: boolean;
+  /** The link switch for scr_coro.c (the stackless async lane): the module
+   * emitted at least one coroutine. Computed with coroPlans() -- the SAME
+   * call the emitter makes -- because a link line that disagrees with the
+   * emitted TU is either an undefined symbol or 4,608 dead bytes in every
+   * binary that never suspends. Off whenever SCRIPTC_STACKLESS is not 1,
+   * since coroPlans() returns empty there. */
+  coro?: boolean;
   /** The embedded npm graph references fetch (index.ts detects it on the
    * IR): compiles the NATIVE fetch bridge (scr_fetch.c over scr_net +
    * scr_tls + scr_http's client parser + zlib — the socket units join
@@ -1407,9 +1414,16 @@ async function ensureTlsArchive(sanitize: boolean, driver: CcDriver): Promise<st
  * above already holds itself to ("no currently-linking binary changes by a
  * byte"). Only programs that shed the unit change, and they change by
  * -16,384. */
-function coreRuntimeSources(url: boolean): string[] {
+function coreRuntimeSources(url: boolean, coro: boolean): string[] {
   const out: string[] = [];
   for (const f of RUNTIME_SOURCES) {
+    // The stackless lane's unit, gated on the same predicate the EMITTER
+    // uses (coroPlans().size > 0), so the link line and the emitted TU can
+    // never disagree about whether the lane exists. Kept in its historical
+    // slot per the rule above: a program that still links it is unchanged
+    // by a byte; only programs that shed it move, and a static hello-world
+    // sheds 4,608.
+    if (f === "scr_coro.c" && !coro) continue;
     out.push(f);
     if (url && f === "scr_path.c") out.push("scr_url.c");
   }
@@ -2077,7 +2091,7 @@ export async function compileC(opts: CcOptions): Promise<void> {
     "-fno-strict-aliasing",
     "-Wno-deprecated-declarations", // ucontext fibers (scr_async.c)
     "-I", rtDir,
-    ...coreRuntimeSources(url).map((f) => rt(join(rtDir, f))),
+    ...coreRuntimeSources(url, opts.coro ?? false).map((f) => rt(join(rtDir, f))),
     ...(opts.copying ? [rt(join(rtDir, "scr_copying.c"))] : []),
     // win32 targets compile the libc-shim TU (stpcpy, arc4random_buf,
     // gmtime_r, strcasestr — the _WIN32 block in scr_runtime.h declares
