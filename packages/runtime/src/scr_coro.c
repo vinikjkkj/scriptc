@@ -167,7 +167,15 @@ void scr_coro_resume_entry(void *base_as_void) {
    * borrows the ambient cell -- it can never be suspended with an exception
    * pending, so there is nothing of its own to preserve across the gap. */
   ScrAlsCtx **prev_als = scr_als_active;
+#ifndef SCR_CORO_ALS_BLIND
   scr_als_active = &base->als;
+#else
+  /* The REGRESSION, reproducible on demand: do NOT install the frame's own
+   * AsyncLocalStorage context, so a resumed body reads whatever is ambient on
+   * the loop's stack. scr_switch did this swap for free on every fiber
+   * switch; a state machine does not, and nothing else in the runtime would
+   * notice it missing. coromixed's ALS arm must go red with this set. */
+#endif
   ScrExcCell *mine = scr_coro_exc(base);
   ScrExcCell *prev_cell = (mine != NULL) ? scr_exc_swap_cell(mine) : NULL;
 
