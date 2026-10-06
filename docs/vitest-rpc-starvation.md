@@ -1,23 +1,32 @@
 # A vitest shard can go red with zero test failures
 
 `[vitest-worker]: Timeout calling "onTaskUpdate"`, no failing test, the run
-dead. Three occurrences on 2026-10-06, all under 12 workers -- but **two
-EVENTS, not three**, and the difference matters to every count below:
+dead.
 
-| # | run | shard | file |
-|---|---|---|---|
-| 1 | knobon-measure | 6/6 | `npm-static.test.ts` |
-| 2 | knobon-measure | 6/6 | `coverage-corpus-02.test.ts` |
-| 3 | gatefour | 3/6 | none -- unhandled, no test failed |
+**THE OCCURRENCE TABLE BELOW WAS WRONG AND IS CORRECTED.** An earlier
+revision recorded three occurrences, two of them on `knobon-measure` shard
+**6/6** (`npm-static.test.ts`, `coverage-corpus-02.test.ts`). Those two are a
+**different signature**: `Error: SyncRpcChannel: timed out connecting to
+named pipe`, and they are ordinary failing tests (`Test Files 2 failed | 34
+passed`), not an unhandled error. The `onTaskUpdate` timeout in that run was
+on **shard 3**. A census over every preserved gate log settles it -- see S6,
+which is the source for every count in this file from here on.
 
-1 and 2 are the **same shard of the same run**: one event that struck two
-files, not two independent observations. 3 is a different shard of a
-different run with no test file at all.
+| # | run | tree | shard | what failed |
+|---|---|---|---|---|
+| 1 | `knobon-measure/logs/20261006-154415` | `ea491bac283dfe86` | **3/6** | unhandled error, 1 test also failed |
+| 2 | `gatefour/logs/20261006-173655` | `188d879f51b0962f` | **3/6** | unhandled error, no test failed |
+| 3 | `gatefour/logs/20261006-183921` | `2474424c07609be3` | **3/6** | unhandled error, no test failed |
+| 4 | `gatefour/logs/20261006-192443` | `9f637ca4e2b519db` | **3/6** | unhandled error, no test failed |
+
+**Four occurrences, four runs, four distinct trees, and every one is shard
+3.** They are independent observations, not one event seen four times.
 
 This file records the MECHANISM, read out of the installed `vitest@3.2.7`
-rather than recalled. It deliberately does not name a cause, and S3 says why
-in the strongest terms available: **the mechanism fits both candidate causes
-equally well and discriminates between neither.**
+rather than recalled. S1 and S2 are unchanged and still hold. S3 named two
+candidate causes and said the mechanism selects neither; **one of those two
+is now refuted and a third has joined and been refuted as well** -- read S6
+before citing S3 or S3b.
 
 ## 1. The worker did not hang. The main thread did.
 
@@ -76,6 +85,13 @@ down as if it were read. The number matters less than its nature -- it is a
 
 Read this before citing anything above.
 
+**SUPERSEDED IN PART BY S6.** This section says two runs timed out; it
+was four. It names two candidate causes and says both conditions were
+present in every timeout; the co-load one is refuted outright (S6.3) and
+the quiet-machine "tiebreaker" below is now known to have run on a day
+that was quiet in gate terms throughout. The reasoning about mechanism
+versus cause is unchanged and is why the section stays.
+
 Main-thread starvation is the mechanism. **What starves it is not
 established.** There are at least two candidates:
 
@@ -122,17 +138,24 @@ conditions, which is the only variable it was built to control.
 
 ## 3b. The ledger
 
+SUPERSEDED IN PART BY S6. Kept because the reasoning about *how* a hypothesis
+dies is still the standard, but every denominator here was re-derived from
+the census and three rows changed.
+
 | hypothesis | status | why |
 |---|---|---|
-| per-shard work | **refuted by ordering** | shard 4 carried 29 descendants and passed; the two that failed carried 21 and 23 |
-| our co-load | **raised, not established** | 2-in-2 with, 0-in-4 without; the clean arm is P = 0.579 under the null |
-| worker count | **tested, not significant, CONFOUNDED** | 2/6 at 12 workers against 0/10 at 3, p = 0.165 -- and the 3-worker runs are the overnight ones, so worker count is confounded with time of day |
+| per-shard work | **refuted by ordering** | shard 4 carried 29 descendants and passed; the ones that failed carried 21 and 23 |
+| our co-load (another GATE on the box) | **REFUTED by measurement** | pre-registered overlap test over 109 shard intervals: the A/A pair and all 8 full 12-worker runs score 0.0% foreign-rig overlap. S6.3 |
+| worker count | **re-derived, significant, STILL CONFOUNDED** | 4 of 8 at 12 workers against 0 of 10 at 3, over runs that actually ran six shards; p = C(8,4)/C(18,4) = 0.023. But see S6.2: within the 12-worker group the four runs before ~15:00 are green and the four after are red, so worker count alone cannot carry it |
+| the in-run scratch sweeper | **REFUTED by ordering** | S6.4 |
+| anything resident in the tree | **REFUTED by the A/A pair** | S6.1 |
 
-**One refuted, two live** -- and the third is live by *non-significance and
-confounding*, not by absence of contrast. The difference decides what to do
-next: "never tested" asks for a new experiment, while "tested, p = 0.165,
-confounded" asks to **de-confound** -- a 3-worker arm at peak, or a 12-worker
-arm overnight.
+The old row read "2/6 at 12 workers against 0/10 at 3, p = 0.165". That p was
+computed over a run list that no longer matches the corrected occurrence
+table, and the denominator moved as well: five `armrig` 12:55 "runs" are
+dry-run-only gates that never started a shard and must not sit in a
+per-shard contingency. **A p whose numerator and denominator both moved has
+to be re-derived, not carried.** The new one is above.
 
 ### What the clean arm does and does not say about workers
 
@@ -172,22 +195,155 @@ cause first.
 
 ## 5. NOT DETERMINED
 
-- Which of the two candidate causes it is (S3). The experiment decides it.
+- **What starves the main thread.** S3's two candidates are both gone: our
+  co-load is refuted (S6.3) and worker count, though now significant, cannot
+  by itself explain four green runs and four red ones at the SAME 12 workers
+  (S6.2). Nothing currently on the list explains the A/A pair.
 - birpc's default RPC timeout, in milliseconds.
-- ~~Whether the three occurrences share a shard or a test file.~~
-  **ANSWERED, and it cuts both ways.** They do not share: 1 and 2 are one
-  event on shard 6/6 of `knobon-measure`, 3 is shard 3/6 of `gatefour` with
-  no test file. So "shared shard" is **not** available as a discriminator --
-  there is no sharing BETWEEN runs. Worker count remains the only condition
-  stated across both events.
+- ~~Whether the three occurrences share a shard or a test file. ANSWERED,
+  and it cuts both ways. They do not share...~~
+  **THAT ANSWER WAS BACKWARDS AND IS WITHDRAWN.** It rested on placing two
+  occurrences on shard 6/6, which the preserved logs do not support -- those
+  two are `SyncRpcChannel: timed out connecting to named pipe`, a different
+  signature (see the header). Over **109 distinct shard-runs in seven rigs
+  the `onTaskUpdate` signature appears 4 times and all 4 are shard 3**: 4 of
+  18 shard-3 runs red against 0 of 91 non-shard-3 runs red. **Shared shard IS
+  available as a discriminator, and it is the strongest ordering anyone has
+  found.** What it is NOT is a property of shard 3 across the day --
+  `d2-valguard-gate` ran 12 shard-3s green, all of them before the break in
+  S6.2.
 
-  **AND THE p DOES NOT MOVE. Do not recompute it.** The correction changes
-  the prose and nothing else, because the statistic was never computed over
-  occurrences: it counts **runs that timed out** -- 2 of 6 against 0 of 10,
-  the two being `knobon-measure` and `gatefour`. Occurrences 1 and 2 were
-  ALREADY one run in that count. Reading "three became two" as a change to
-  the numerator and recomputing would produce a new p that disagrees with
-  the old one with nobody having made a mistake, which is a worse outcome
-  than either number alone.
-- Whether any of the 93 synchronous spawns are on the hot path of the shards
-  that timed out. The count is a harness-wide figure, not a per-shard one.
+  The withdrawn note also said "the p does not move, do not recompute it."
+  That instruction was right for the correction it was written about and
+  wrong for this one: there the numerator was already collapsed, here the
+  occurrence list, the run list and the per-shard denominator all changed
+  together. S3b carries the re-derivation.
+- Whether any of the 93 synchronous spawns are on the hot path of shard 3.
+  The count is a harness-wide figure, not a per-shard one.
+- **Non-gate co-load.** S6.3 closes concurrent GATE load only. Work that
+  writes no log under `G:\blocks` -- a block compiling, benching, the dev
+  server, the user's own session -- leaves no retroactive record at all, so
+  this variant cannot be settled from logs in either direction.
+
+## 6. THE CENSUS, AND WHAT IT KILLS
+
+Source for every count above: a sweep of every preserved gate log under
+`G:\blocks` -- seven rigs, **109 distinct shard-runs** (the raw sweep lists
+110; `slice-tmp` holds a byte copy of one `knobon-measure` shard-run and is
+deduped), of which 18 are full six-shard runs. Two derived tables are kept
+beside the logs:
+`G:\blocks\sweep-vs-timeout-census.csv` (per shard-run: timeout, sweeps, GB
+freed, directories removed) and `G:\blocks\runs-workers-census.csv` (per
+run: worker count, verdict, which shard timed out).
+
+### 6.1 An A/A pair with opposite verdicts
+
+`armrig/logs/20261006-145308` (14:53) and
+`knobon-measure/logs/20261006-154415` (15:44) ran head `721496bc2e8`,
+treehash `ea491bac283dfe86` -- **the same tree, therefore the same six-way
+partition** -- at the same 12 workers. The shard-3 file lists were compared
+and match. armrig: GREEN 6/6. knobon-measure: RED, shard-3 `onTaskUpdate`.
+Fifty minutes apart, and the two windows do not even touch (armrig ends
+15:39, knobon starts 15:44).
+
+**Nothing resident in the tree can explain this**, which retires
+composition, per-shard content, sync-spawn density, corpus concentration and
+per-shard work in one stroke -- and the sweeper with them (6.4). This pair
+is the discriminator any future hypothesis has to pass; aggregate statistics
+over the eight runs are context.
+
+### 6.2 The break is temporal, and it is not disk
+
+Eight full 12-worker six-shard runs on 2026-10-06:
+
+| time | rig | verdict | free at end |
+|---|---|---|---|
+| 12:13 | d2-valguard-gate | GREEN 6/6 | 45.94 GB |
+| 13:10 | d2-valguard-gate | GREEN 6/6 | 41.09 GB |
+| 13:57 | boxparam | GREEN 6/6 | 23.40 GB |
+| 14:53 | armrig | GREEN 6/6 | 33.34 GB |
+| 15:44 | knobon-measure | **RED shard-3** | 23.70 GB |
+| 17:36 | gatefour | **RED shard-3** | 19.15 GB |
+| 18:39 | gatefour | **RED shard-3** | 15.28 GB |
+| 19:24 | gatefour | **RED shard-3** | 12.04 GB |
+
+Four green, then four red, with a clean break around 15:00.
+
+**Free disk is NOT the variable, and an earlier reading of this table that
+called it monotonic was wrong.** The series is not monotonic (33.34 follows
+23.40), and the boundary pair inverts: **23.40 GB is GREEN and 23.70 GB is
+RED**. A green run with less free disk than a red one refutes disk as a
+threshold. Do not pursue it.
+
+### 6.3 Concurrent gate load: refuted, pre-registered
+
+Predictions fixed in writing before any number was computed:
+
+- **P1** the A/A pair must separate, RED above GREEN by more than 1.5x on
+  foreign-overlap fraction, else refuted;
+- **P2** no GREEN run's fraction may exceed the minimum RED run's, else
+  refuted.
+
+Shard intervals run from `RUN-START tag=shard-N` to `SHARD-RESULT n=N/6` --
+**both** markers, because `DISK-TROUGH` exists only in the newer gate and a
+first attempt using it silently dropped every older run and returned a
+uniform zero. Three controls: per-rig interval counts (109 of 110 parsed,
+every rig non-zero); a synthetic overlapping pair that must score 500 s and
+a disjoint pair that must score 0; and a sweep for any real overlap
+anywhere, which found 2 shard-runs with foreign overlap, the largest 88 s at
+36.1%. **The overlap function can report non-zero on this data, so the zeros
+below are real and not a wrong pattern.**
+
+Result: **P1 and P2 both refuted.** Both members of the A/A pair and all
+eight full 12-worker runs score **0.0% foreign-rig overlap, peak 0 foreign
+rigs.** No new cut was tried afterwards.
+
+The raw concurrency column, interpretable whatever the hypothesis does: the
+box ran **one rig per clock hour for almost the whole day**, two rigs in only
+four hours (03:00, 13:00, 14:00, 15:00). Concurrency does not rise at the
+break -- it **falls**. Three of the four red runs had no other rig active at
+any point. The sign is backwards, not merely absent.
+
+This closes concurrent GATE load. It says nothing about co-load that writes
+no log (S5, last bullet), including S3's original "concurrent
+whole-repository scanning", which was never a gate.
+
+### 6.4 The in-run scratch sweeper: refuted by ordering
+
+`tests/harness/scratch-hooks.ts` sweeps the scratch tree inside a worker's
+`afterEach`, and `sweepRemove`'s own note names this very signature as what
+its async rewrite fixed -- so "a multi-GB rmdir burst starves the worker"
+was a live and well-motivated reading. The census anti-orders it:
+
+- a red shard that removed **zero** directories (`gatefour/20261006-192443`);
+- in the same run as a red, a GREEN shard that removed **9,964 directories /
+  19.26 GB** against the red shard's 1,472 / 4.05 GB -- 6.8x more sweeping on
+  the green side;
+- the largest single burst anywhere, **2,706 directories**, is green; the
+  largest on any red shard is 1,014;
+- 23 green shard-runs removed more directories than the worst red.
+
+Two direct arms over the same 37 files at 12 workers on tree `b3a265368`
+agree: sweep OFF (`SCRIPTC_NO_SCRATCH_SWEEP=1`, 0 removals) and sweep forced
+after every test (`SCRIPTC_TEST_SCRATCH_MAX_MB=512`,
+`SCRIPTC_TEST_SCRATCH_CHECK_MB=0`, 4,018 removals / 11.90 GB) produce
+`gapMaxMs` of 2,263 and 2,245 -- the same to within 0.8% -- and neither
+reproduces the timeout. Both arms are weak on their own because neither
+reproduced the signature at all; the refutation is the census.
+
+### 6.5 A defect found on the way, unrelated to the timeout
+
+`prune-scratch.mjs`'s `measure()` starts `newest = 0` and raises it only from
+**file** mtimes, never stat-ing the directory. An **empty** program directory
+therefore reports `newest: 0`, which both sorts it first in the eviction
+order and defeats the liveness floor (`d.newest > floor` is `0 > floor`).
+With no lease it goes straight to `sweepRemove`, so a directory a live
+compile is about to write into can be deleted under it -- observed once as
+`zig cc: error: unable to open output directory ... FileNotFound`.
+
+`prune-scratch.test.ts` states exactly the violated property ("an UNLEASED
+directory of this run is spared: silence is not permission") and passes,
+because every directory in that file is built by `keyDir`, which
+unconditionally writes a `program.exe`. **The one input shape that breaks
+the stated property is not constructible through the helper.** 20 test files
+create scratch program directories without calling `holdScratch`.
