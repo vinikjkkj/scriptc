@@ -137,6 +137,13 @@ generator family and nothing else. That is the whole content of the gap:
 **D4 is the difference between 93.9% and 99.8%**, and everything else is
 tail.
 
+**Superseded as a scope statement, 2026-10-06: generators are now IN scope**
+and the target is 100%. The 9 above is confirmed and enumerated in
+`stackless-generators.md` S8, which also prices the family on both
+populations -- it is 0 functions on app182 and the LARGEST solo blocker on
+the corpus, 47. The ceilings in the table stay valid as ceilings under the
+policy of the day they were measured; they are no longer the target.
+
 Reachable means *no out-of-scope blocker at all*, not *at least one blocker
 in scope*. The distinction is not pedantry: a function blocked by both
 `loop` and `finally` is NOT reachable by closing loops, and counting it as
