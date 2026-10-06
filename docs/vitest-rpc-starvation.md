@@ -1,7 +1,7 @@
 # A vitest shard can go red with zero test failures
 
 `[vitest-worker]: Timeout calling "onTaskUpdate"`, no failing test, the run
-dead. Three occurrences on 2026-10-05, all under 12 workers -- but **two
+dead. Three occurrences on 2026-10-06, all under 12 workers -- but **two
 EVENTS, not three**, and the difference matters to every count below:
 
 | # | run | shard | file |
@@ -93,7 +93,7 @@ Writing this down is the point of the section: "mechanism found" reads as
 exactly the error this project pays for most often.
 
 **The tiebreaker was the free experiment**: shards 4-6 under 12 workers on a
-verifiably quiet machine. It ran on 2026-10-05 and came back **3 of 3
+verifiably quiet machine. It ran on 2026-10-06 and came back **3 of 3
 green**.
 
 ### The clean arm is encouraging and UNDERPOWERED. Do not read it as settled.
