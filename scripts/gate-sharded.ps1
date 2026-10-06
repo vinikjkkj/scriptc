@@ -203,6 +203,19 @@ $MainLog = Join-Path $LogDir "gate5.log"
 # porcelain status including untracked paths. It does NOT cover the CONTENT of
 # untracked files -- only their presence -- which is a known and stated gap,
 # not an oversight.
+# WHICH tree, as opposed to WHETHER it moved. The content hash proves the
+# tree did not change under the run; it cannot say which directory produced
+# it, because two clean worktrees at the same commit hash identically -- and
+# that is correct behaviour, not a defect. On 2026-10-06 a wrapper edit meant
+# to repoint SCRIPTC_REPO silently did not match, and only a dry run printing
+# the path revealed that the gate was still reading the old worktree. A
+# comment in the wrapper states intent; the log has to carry the witness.
+function RepoRealPath {
+  $t = [System.IO.Directory]::ResolveLinkTarget($Repo, $true)
+  if ($t) { return $t.FullName }
+  return [System.IO.Path]::GetFullPath($Repo)
+}
+
 function WorkTreeHash {
   $acc = (& git rev-parse HEAD) + "~" + (((& git diff HEAD) -join "~")) + "~" + (((& git status --porcelain -uall) -join "~"))
   $sha = [System.Security.Cryptography.SHA256]::Create()
@@ -393,7 +406,7 @@ try {
   Say ("ENV tmp={0} cache={1} ziglocal={2} prov={3} scratchMaxMB={4}" -f $env:TMP, $env:SCRIPTC_CACHE_DIR, $env:ZIG_LOCAL_CACHE_DIR, $env:SCRIPTC_PROVENANCE_CACHE, $env:SCRIPTC_TEST_SCRATCH_MAX_MB)
   Say ("TREE head={0} subject={1}" -f $head, $headSub)
   $TreeHash0 = WorkTreeHash
-  Say ("TREEHASH baseline={0}" -f $TreeHash0)
+  Say ("TREEHASH baseline={0} repo={1}" -f $TreeHash0, (RepoRealPath))
   # A gate that starts on a dirty tree is measuring somebody's work in
   # progress. Refused outright in a real run; a dry run may be dirty.
   if (-not $DryRun -and $dirty.Count -gt 0) {
@@ -485,7 +498,7 @@ try {
       $ExitRc = 2
       return
     }
-    Say ("TREEHASH shard={0} {1}" -f $n, $hNow)
+    Say ("TREEHASH shard={0} {1} repo={2}" -f $n, $hNow, (RepoRealPath))
     $r = Invoke-Judged -Tag "shard-$n" -ExtraArgs @("--shard=$n/$Shards")
     foreach ($f in $r.Ran) {
       if ($RanAll.ContainsKey($f)) { $RanAll[$f] += ",$n" } else { $RanAll[$f] = "$n" }
