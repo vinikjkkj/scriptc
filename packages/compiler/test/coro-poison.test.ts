@@ -14,7 +14,10 @@
  * measurement that already produced a real red. They run with the queued
  * probe when the machine frees.
  */
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { afterEach, expect, test } from "vitest";
+import { compile } from "@scriptc/compiler";
 import { BOOL, F64, STRING, VOID, type IrFunction, type IrType } from "../src/ir/nodes.js";
 import {
   POISON_ENV,
@@ -161,26 +164,78 @@ test("the poison is in the cache key when set and absent from it when unset", ()
 
 /* -- needs the machine: written, not executed -------------------------- */
 
-test.skip("NOT EXECUTED (needs two builds): knob-absent C is byte-identical with the poison set and unset", () => {
-  // The embarkation criterion. A debugging tool is exactly what would break
+/* -- the build pair: containment, and the line that makes it mean something */
+
+const PROG = [
+  'async function pb(v: boolean): Promise<boolean> { return v; }',
+  'async function wb(v: boolean): Promise<boolean> { const x = await pb(v); return x; }',
+  'async function main(): Promise<void> { console.log("b", await wb(true), await wb(false)); }',
+  'main();',
+].join(String.fromCharCode(10)) + String.fromCharCode(10);
+
+/** One arm. The output directory is keyed by BOTH the knob and the poison:
+ * two arms sharing a directory would share one binary and every comparison
+ * below would pass by being the same program twice. */
+async function buildArm(knob: boolean, poison: string | undefined): Promise<string> {
+  const prevKnob = process.env["SCRIPTC_STACKLESS"];
+  const prevP = process.env[POISON_ENV];
+  if (knob) process.env["SCRIPTC_STACKLESS"] = "1";
+  else delete process.env["SCRIPTC_STACKLESS"];
+  arm(poison);
+  try {
+    // ONE directory and ONE source path for every arm. A per-arm directory
+    // bakes its own path into the emitted C -- the generated-from header and
+    // every srcComment -- so two arms would differ by 26 lines of path and
+    // nothing else, which is how the first version of this test failed.
+    // Same lesson as zapobench: vary the output NAME, never the app path.
+    //
+    // Sharing a directory is safe BECAUSE the poison is in the cache key: a
+    // false hit would return identical C, and the knob-ON test below asserts
+    // the C DIFFERS, so the pair catches a cache that ignored the flag.
+    const outDir = join(import.meta.dirname, "../../..", "node_modules/.cache/scriptc-tests", "coro-poison-arms");
+    mkdirSync(outDir, { recursive: true });
+    const file = join(outDir, "prog.ts");
+    writeFileSync(file, PROG);
+    const exe = "prog-" + (knob ? "on" : "off") + "-" + (poison ?? "clean") + ".exe";
+    const r = await compile(file, { outPath: join(outDir, exe), outDir, backend: "c", keepC: true });
+    if (!r.ok) throw new Error(r.diagnostics.map((d: { code: string; message: string }) => d.code + ": " + d.message).join("; "));
+    return readFileSync(join(outDir, "prog.c"), "utf8");
+  } finally {
+    if (prevKnob === undefined) delete process.env["SCRIPTC_STACKLESS"];
+    else process.env["SCRIPTC_STACKLESS"] = prevKnob;
+    if (prevP === undefined) delete process.env[POISON_ENV];
+    else process.env[POISON_ENV] = prevP;
+  }
+}
+
+test("knob-absent C is byte-identical with the poison set and unset", { timeout: 120_000 }, async () => {
+  // THE EMBARKATION CRITERION. A debugging tool is exactly what would break
   // it without anyone noticing, so it is asserted rather than argued.
-  //
-  //   build P with SCRIPTC_STACKLESS unset and SCRIPTC_CORO_VALUE_POISON unset
-  //   build P with SCRIPTC_STACKLESS unset and SCRIPTC_CORO_VALUE_POISON=finish-arm
-  //   expect(cA).toEqual(cB)
-  //
-  // PAIRED with the must-change line below, because this assertion alone is
-  // green when the poison does nothing at all -- including when it was never
-  // wired up.
+  const clean = await buildArm(false, undefined);
+  const poisoned = await buildArm(false, "finish-arm");
+  expect(poisoned, "the poison reached knob-ABSENT output -- embarkation criterion broken").toEqual(clean);
+  // and the arming check: knob-absent emits no coroutine at all, so the
+  // equality above is not green merely because nothing was emitted either way
+  expect(clean).not.toMatch(/scr_coro_finish_/);
 });
 
-test.skip("NOT EXECUTED (needs two builds): knob-ON C DIFFERS with the poison set, and assertPoisonEngaged passes", () => {
-  //   build P with SCRIPTC_STACKLESS=1 and the poison unset   -> cOn
-  //   build P with SCRIPTC_STACKLESS=1 and the poison set     -> cPoisoned
-  //   expect(cPoisoned).not.toEqual(cOn)
-  //   assertPoisonEngaged()            // refuses at zero, by name
-  //
-  // This is what makes the test above mean something.
+test("knob-ON C DIFFERS with the poison set, and the poison reports engaged", { timeout: 120_000 }, async () => {
+  // The must-change line. Without it the test above is green when the poison
+  // does nothing at all -- including when it was never wired up.
+  const on = await buildArm(true, undefined);
+  expect(on, "the knob did not reach the emitter").toMatch(/scr_coro_finish_bool/);
+
+  arm("finish-arm");
+  const poisoned = await buildArm(true, "finish-arm");
+  expect(poisoned).not.toEqual(on);
+  // the substitution is the historical defect exactly: bool fulfilled through f64
+  expect(poisoned).not.toMatch(/scr_coro_finish_bool/);
+  expect(poisoned).toMatch(/scr_coro_finish_f64/);
+  // LIVENESS: a count, refusing at zero by name. "The build succeeded" is
+  // not evidence the poison ran.
+  expect(poisonSites()).toBeGreaterThan(0);
+  expect(() => assertPoisonEngaged()).not.toThrow();
+  expect(poisonReport()).toMatch(/^POISON-SITES  poison=finish-arm  sites=[1-9]/);
 });
 
 test.skip("NOT EXECUTED (needs four arms): the poisoned guard reddens exactly its expected shape set", () => {
