@@ -173,7 +173,9 @@ $LogDir      = Join-Path $GateRoot "logs\$RunId"
 # (it returns before the loop). A high count makes each shard a handful of
 # files, so a real second boundary arrives in minutes. Unset everywhere that
 # matters; a merge verdict is still six.
-$Shards      = if ($env:GATE_SHARDS) { [int]$env:GATE_SHARDS } else { 6 }
+$Shards        = if ($env:GATE_SHARDS) { [int]$env:GATE_SHARDS } else { 6 }
+$ShardContract = 6
+$OffContract   = ($Shards -ne $ShardContract)
 $DiskFloorGB = 10
 $ExitRc      = 1
 $Started     = Get-Date
@@ -216,6 +218,24 @@ $MainLog = Join-Path $LogDir "gate5.log"
 # to repoint SCRIPTC_REPO silently did not match, and only a dry run printing
 # the path revealed that the gate was still reading the old worktree. A
 # comment in the wrapper states intent; the log has to carry the witness.
+# A RUN OFF THE CONTRACT MAY NOT PRINT A MERGEABLE VERDICT.
+#
+# Making $Shards overridable opened the same hole the `head=` line was: a
+# word that looks like it says what was measured and does not. Six shards of
+# 36 files and sixty of four both end in GREEN, and nothing in the text
+# separates them. The partition cannot help -- expected=214 ran=214 is
+# equally true either way, since every file still runs exactly once. Only the
+# count distinguishes them, so only the count can be the guard.
+#
+# Structural rather than documented: off the contract the word GREEN is never
+# produced at all. Both verdict sites go through this one function, so the
+# cheap dry-run path exercises the same code the real path uses.
+function VerdictWord([bool]$green) {
+  if ($OffContract) { return "NOT-MERGEABLE" }
+  if ($green) { return "GREEN" }
+  return "RED"
+}
+
 function RepoRealPath {
   # Normalise FIRST: ResolveLinkTarget throws on a path it considers
   # malformed (a trailing "/." is enough), and a witness that can abort the
@@ -421,6 +441,9 @@ try {
   Say ("TREE head={0} subject={1}" -f $head, $headSub)
   $TreeHash0 = WorkTreeHash
   Say ("TREEHASH baseline={0} repo={1}" -f $TreeHash0, (RepoRealPath))
+  if ($OffContract) {
+    Say ("GATE5-OFF-CONTRACT shards={0} contract={1} -- rig exercise, NOT a merge gate" -f $Shards, $ShardContract)
+  }
   # A gate that starts on a dirty tree is measuring somebody's work in
   # progress. Refused outright in a real run; a dry run may be dirty.
   if (-not $DryRun -and $dirty.Count -gt 0) {
@@ -498,8 +521,10 @@ try {
     $r = Invoke-Judged -Tag "dryrun" -ExtraArgs @("tests/harness/size-class-armed.test.ts", "tests/harness/shard.test.ts")
     Say ("DRYRUN-RESULT rc={0} min={1} files={2} verdict={3} :: {4}" -f $r.Rc, $r.Min, $r.Ran.Count, $(if ($r.Green) { "GREEN" } else { "RED" }), $r.Why)
     $ok = ($r.Green -and $r.Ran.Count -eq 2)
-    Say ("GATE5-TOTAL mode=dryrun verdict={0}" -f $(if ($ok) { "GREEN" } else { "RED" }))
-    $ExitRc = if ($ok) { 0 } else { 1 }
+    Say ("GATE5-TOTAL mode=dryrun shards={0}/{1} verdict={2}" -f $Shards, $ShardContract, (VerdictWord $ok))
+    # Off the contract the exit code must not read as success either: a
+    # caller that checks rc and not the text would otherwise count this.
+    $ExitRc = if ($OffContract) { 2 } elseif ($ok) { 0 } else { 1 }
     return
   }
 
@@ -541,7 +566,13 @@ try {
     $ExitRc = 2
     return
   }
-  Say ("GATE5-TOTAL shards={0} green={1} red={2} partition={3} minutes={4} free={5}GB head={6} treehash={7} verdict={8}" -f $Shards, $Green, $Red, $(if ($PartitionOk) { "OK" } else { "FAIL" }), [math]::Round(((Get-Date) - $Started).TotalMinutes, 2), (FreeGB), $head, $hEnd, $(if ($verdict) { "GREEN" } else { "RED" }))
+  Say ("GATE5-TOTAL shards={0}/{1} green={2} red={3} partition={4} minutes={5} free={6}GB head={7} treehash={8} verdict={9}" -f $Shards, $ShardContract, $Green, $Red, $(if ($PartitionOk) { "OK" } else { "FAIL" }), [math]::Round(((Get-Date) - $Started).TotalMinutes, 2), (FreeGB), $head, $hEnd, (VerdictWord $verdict))
+  if ($OffContract) {
+    Say ("GATE5-NOT-MERGEABLE reason=shard-count-overridden shards={0} contract={1}" -f $Shards, $ShardContract)
+    Say ("GATE5-NOT-MERGEABLE detail: GATE_SHARDS was set, so this is a rig exercise and not a merge gate however green the shards were. Nothing here may be counted as a gate.")
+    $ExitRc = 2
+    return
+  }
 }
 catch {
   Say ("GATE5-ABORT reason=exception message={0}" -f $_.Exception.Message)
