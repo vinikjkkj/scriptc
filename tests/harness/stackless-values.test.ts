@@ -292,6 +292,15 @@ async function buildArm(knob: boolean): Promise<Arm> {
 }
 
 describe("the stackless lane answers what the fiber lane answers", () => {
+  /* A SILENT GREEN IS THE DANGEROUS KIND, so the suite says this one out
+   * loud. The cross-lane fiber-call scan inside the test below cannot fail
+   * on THIS program: no hop-bearing body is admissible here under any
+   * poison I could apply (three tried, cache cleared each time), so its
+   * green is not evidence about this program. It stays because it is a
+   * fence for future ones, and it is to be armed during the nesting
+   * remeasurement, where an admitted body can genuinely hold a hop. */
+  test.todo("ARM the cross-lane fiber-call scan -- it has no failing case in this program");
+
   test("every await result kind survives the state machine", async () => {
     const [on, off] = [await buildArm(true), await buildArm(false)];
 
@@ -363,7 +372,7 @@ describe("the stackless lane answers what the fiber lane answers", () => {
         const fiber = [...new Set(body.match(/scr_await_[a-z0-9_]+/g) ?? [])];
         if (fiber.length > 0) offenders.push(`${m[1]}: ${fiber.join(", ")}`);
       }
-      expect(offenders, "fiber-only calls inside a stackless body -- these abort at runtime, and the coverage number is void")
+      expect(offenders, "NOT-ARMED ASSERTION (see the todo below): fiber-only calls inside a stackless body -- these abort at runtime, and the coverage number is void")
         .toEqual([]);
     }
 
