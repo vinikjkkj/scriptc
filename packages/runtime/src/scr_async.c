@@ -4807,7 +4807,23 @@ void scr_gen_release(ScrGen *g) {
   scr_gen_slot_reset(&g->in);
   scr_gen_slot_reset(&g->ret);
   scr_exc_cell_drop(&g->fail); /* a native settlement nobody received */
-  if (g->fiber != NULL) {
+  if (g->backing == SCR_GEN_BACKED_FRAME) {
+    if (g->frame != NULL) {
+      if (g->state == SCR_GEN_UNSTARTED) {
+        /* Never ran: nothing inside it is live. */
+        if (g->drop_args != NULL) g->drop_args(g->frame);
+        free(g->frame);
+      }
+      /* SUSPENDED: deliberately ABANDONED, exactly as the fibre lane
+       * abandons a suspended stack. Unwinding would run user finally
+       * blocks Node's GC never runs, and freeing the frame would drop
+       * its live locals' references without releasing them. The frame
+       * leaks, by the same decision and for the same reason the fibre
+       * does -- and it is precisely the accounting gap the
+       * abandoned-frame counter on the knob-on lane exists to measure. */
+      g->frame = NULL;
+    }
+  } else if (g->fiber != NULL) {
     if (g->state == SCR_GEN_UNSTARTED) {
       /* Never ran: nothing on the stack owns anything — clean teardown.
        * The packed arguments (+1 each) drop through the emitted helper. */
@@ -5408,7 +5424,7 @@ void *scr_gen_coro_alloc(size_t size, ScrCoroResume resume, bool has_exc) {
   return mem;
 }
 
-ScrGen *scr_gen_of_coro(ScrCoroBase *base) {
+ScrGen *scr_gen_of_coro(ScrCoroBase *base, void (*drop)(void *)) {
   ScrGen *g = calloc(1, sizeof *g);
   if (g == NULL) {
     fputs("scriptc: out of memory allocating a generator handle\n", stderr);
@@ -5418,6 +5434,12 @@ ScrGen *scr_gen_of_coro(ScrCoroBase *base) {
   g->fiber = NULL;
   g->backing = SCR_GEN_BACKED_FRAME;
   g->frame = base;
+  /* The SAME field the fibre path uses, on a different argument: an
+   * UNSTARTED generator must still release the +1 its parameters arrived
+   * with, and the body never runs to do it. The fibre path hands
+   * drop_args the argpack; here it is the frame, because the frame IS
+   * the argpack. */
+  g->drop_args = drop;
   g->state = SCR_GEN_UNSTARTED;
   return g;
 }
@@ -5511,7 +5533,13 @@ void scr_gen_resume(ScrGen *g) {
      * OUT is NONE (the completing resume took it). */
     return;
   default:
-    scr_gen_switch_in(g);
+    if (g->backing == SCR_GEN_BACKED_FRAME) {
+#ifdef SCR_CORO_LANE
+      scr_gen_coro_step(g, SCR_GEN_INJECT_NONE);
+#endif
+    } else {
+      scr_gen_switch_in(g);
+    }
   }
 }
 
@@ -5526,8 +5554,16 @@ void scr_gen_resume_return(ScrGen *g) {
     scr_gen_ret_to_out(g);
     return;
   case SCR_GEN_UNSTARTED:
-    /* The body never runs: tear the fiber down cleanly (drop the packed
+    /* The body never runs: tear the backing down cleanly (drop the
      * arguments) and complete with the parked value. */
+    if (g->backing == SCR_GEN_BACKED_FRAME) {
+      if (g->drop_args != NULL) g->drop_args(g->frame);
+      free(g->frame);
+      g->frame = NULL;
+      g->state = SCR_GEN_DONE;
+      scr_gen_ret_to_out(g);
+      return;
+    }
     if (g->drop_args != NULL) g->drop_args(g->fiber->argpack);
     else free(g->fiber->argpack);
     scr_fiber_destroy(g->fiber);
@@ -5539,6 +5575,15 @@ void scr_gen_resume_return(ScrGen *g) {
   default:
     /* Suspended at a yield: inject the sentinel (an earlier .return whose
      * unwind a finally-yield parked leaves it already set) and resume. */
+    if (g->backing == SCR_GEN_BACKED_FRAME) {
+#ifdef SCR_CORO_LANE
+      /* The sentinel goes in INSIDE the INV-5 window, not here: a fat
+       * frame installs its own cell, so writing it now would land it in
+       * the CONSUMER's and the body would never see it. */
+      scr_gen_coro_step(g, SCR_GEN_INJECT_RET);
+#endif
+      return;
+    }
     if (g->fiber->exc.kind == SCR_EXC_NONE) g->fiber->exc.kind = SCR_EXC_GENRET;
     scr_gen_switch_in(g);
   }
@@ -5559,6 +5604,13 @@ void scr_gen_resume_throw(ScrGen *g) {
   case SCR_GEN_UNSTARTED:
     /* The body never runs; the generator becomes done and the payload
      * stays pending in the caller (probed Node behavior). */
+    if (g->backing == SCR_GEN_BACKED_FRAME) {
+      if (g->drop_args != NULL) g->drop_args(g->frame);
+      free(g->frame);
+      g->frame = NULL;
+      g->state = SCR_GEN_DONE;
+      return;
+    }
     if (g->drop_args != NULL) g->drop_args(g->fiber->argpack);
     else free(g->fiber->argpack);
     scr_fiber_destroy(g->fiber);
@@ -5570,6 +5622,15 @@ void scr_gen_resume_throw(ScrGen *g) {
     /* Move the caller's pending payload into the fiber's cell (an
      * earlier sentinel parked by a finally-yield is replaced — the
      * injected throw wins, like a throw inside that finally). */
+    if (g->backing == SCR_GEN_BACKED_FRAME) {
+#ifdef SCR_CORO_LANE
+      /* The payload is already pending in the ACTIVE cell, where a lean
+       * frame's body reads it; a fat frame's own cell is installed by
+       * state_in, so the step moves it across inside the window. */
+      scr_gen_coro_step(g, SCR_GEN_INJECT_THROW);
+#endif
+      return;
+    }
     ScrExcCell *mine = scr_exc_current_cell();
     ScrExcCell *dst = &g->fiber->exc;
     dst->kind = mine->kind;

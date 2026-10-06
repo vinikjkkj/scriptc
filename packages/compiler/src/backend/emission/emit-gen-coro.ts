@@ -53,10 +53,11 @@
 import type { IrFunction, IrType } from "../../ir/nodes.js";
 import type { StacklessPlan } from "../../ir/liveness.js";
 import type { CEmitter, Temp } from "./emitter.js";
-import { boxAccess, cDecl, cType, vAdapters } from "./emit-types.js";
+import { boxAccess, cDecl, cType, releaseCallC, vAdapters } from "./emit-types.js";
 import {
   mangleCoroFrame,
   mangleCoroResume,
+  mangleGenDrop,
   mangleGenSpawn,
   mangleLocal,
   mangleRawParam,
@@ -209,6 +210,29 @@ export function emitGenCoroSpawn(
     ...(lifted ? ["ScrClosure *sc_env"] : []),
     ...fn.params.map((q) => cDecl(q.type, pname(q))),
   ];
+  /* THE ARGUMENT DROP, for a generator that is released or returned before
+   * its body ever runs. It releases what the frame holds and does NOT free
+   * the frame: scr_gen_release and scr_gen_resume_return own that, and
+   * splitting it the other way would give two owners of one allocation.
+   *
+   * A boxed param's slot holds the ScrBox the spawn built, so the box is
+   * what gets released -- the raw value never reached the frame. */
+  const dropLines: string[] = [
+    ``,
+    `${E.link}void ${mangleGenDrop(fn.name)}(void *sc_fp) {`,
+    `  ${frame} *sc_f = (${frame} *)sc_fp;`,
+    ...(lifted ? [`  scr_closure_release(sc_f->sc_env);`] : []),
+    ...fn.params.flatMap((q) => {
+      const f = coroField(q.localId);
+      if (boxedIds.has(q.localId)) return [`  scr_box_release(sc_f->${f});`];
+      return isRefCounted(q.type) ? [`  ${releaseCallC(q.type, `sc_f->${f}`)};`] : [];
+    }),
+    `  (void)sc_f;`,
+    `}`,
+  ];
+  for (const l of dropLines) out.push(l);
+  E.decl(`${E.link}void ${mangleGenDrop(fn.name)}(void *sc_fp);`);
+
   const sig = `ScrGen *${mangleGenSpawn(fn.name)}(${params.join(", ") || "void"})`;
   E.decl(`${sig};`);
   const lines: string[] = [
@@ -230,7 +254,7 @@ export function emitGenCoroSpawn(
         `  scr_box_set_${boxAccess(q.type)}(sc_f->${f}, ${pname(q)}); /* moves the +1 in */`,
       ];
     }),
-    `  ScrGen *sc_g = scr_gen_of_coro(&sc_f->base);`,
+    `  ScrGen *sc_g = scr_gen_of_coro(&sc_f->base, &${mangleGenDrop(fn.name)});`,
     `  sc_f->sc_gen = sc_g;`,
     `  return sc_g; /* NOTHING has run: the body starts at the first .next() */`,
     `}`,

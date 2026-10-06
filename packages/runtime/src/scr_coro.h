@@ -339,7 +339,13 @@ void *scr_gen_coro_alloc(size_t size, ScrCoroResume resume, bool has_exc);
  * FIBER, so scr_gen_resume and its two siblings branch on the handle and
  * every slot accessor stays indifferent. The handle takes ownership of the
  * frame. */
-ScrGen *scr_gen_of_coro(ScrCoroBase *base);
+/* `drop` releases the arguments the frame holds, WITHOUT freeing the frame
+ * -- the caller does that. It is needed because an UNSTARTED generator can
+ * be released or .return()ed before the body ever runs, and the +1 its
+ * parameters arrived with has to go somewhere. The fibre path has the same
+ * hook for the same reason; the only difference is that it is handed an
+ * argpack and this is handed the frame, because the frame IS the argpack. */
+ScrGen *scr_gen_of_coro(ScrCoroBase *base, void (*drop)(void *));
 
 /** Park a yielded value in the handle's OUT slot and return to the
  * consumer: the state machine's counterpart of scr_gen_yield_f64 and
