@@ -447,6 +447,100 @@ describe("the stackless lane answers what the fiber lane answers", () => {
         .toEqual([]);
     }
 
+    /* NO TEMP MAY BE LOST ACROSS A PARK, read out of the artifact.
+     *
+     * A resume function RETURNS to the scheduler, so every C local in it
+     * dies and the resume goto jumps over the declarations. A temp
+     * established before a label and read after it without a reload is
+     * therefore indeterminate -- and the failure is a plausible number, not
+     * a crash: this lane answered NaN for 8004, 4 for 8004 and 2 for 8.
+     *
+     * THIS READS THE C RATHER THAN THE EMITTER, and that is the whole point.
+     * The emitter mints temps at about 45 sites, only three of which are the
+     * new*Temp methods that the spill registration went into. A check
+     * written against a list of those sites would be the same hand-kept copy
+     * that a list of non-lowerable POSITIONS would have been -- and that
+     * list, built from three probed spellings, would have admitted new.args
+     * in silence. Every sc_t/sc_i in a converted body is covered here,
+     * whatever minted it.
+     *
+     * ARMED, and here is how to reproduce it: drop the frames.length
+     * registration in newTemp back to `if (isRefCounted(type))`. Nine of the
+     * bodies in this program go red by name -- wna, wnv, wnn, wns, wnb, wnx
+     * and three more whose literal operands only survive because the C
+     * compiler rematerialises a constant.
+     *
+     * KNOWN APPROXIMATION, stated rather than hidden: a write is taken to
+     * re-establish a temp on every path. That is the direction that can MISS
+     * a hazard, so this is a net under the value guards above and not a
+     * replacement for them. */
+    {
+      const nl = String.fromCharCode(10);
+      const LABEL = /^\s*sc_S[0-9]+:/;
+      const DECL = /^\s*(?:const\s+)?[A-Za-z_][A-Za-z0-9_]*(?:\s*\*)*\s+\*?(sc_[ti][0-9]+)\s*(?:=|;)/;
+      const WRITE = /^\s*\*?(sc_[ti][0-9]+)\s*=[^=]/;
+      const NAME = /sc_[ti][0-9]+/g;
+      const lost: string[] = [];
+      for (const b of on.cSource.split(/^(?=[A-Za-z ]*void sc_cr_)/m)) {
+        const m = /^[A-Za-z ]*void (sc_cr_[A-Za-z0-9_]+)\(ScrCoroBase/.exec(b);
+        if (!m) continue;
+        const end = b.indexOf(nl + "}" + nl);
+        const lines = (end > 0 ? b.slice(0, end) : b).split(nl);
+        if (!lines.some((l) => LABEL.test(l))) continue;
+        const valid = new Map<string, boolean>();
+        // A resume label lands INSIDE one arm, so the sibling arm is not
+        // reachable from it. Without this the nullish shapes report a hazard
+        // that cannot happen -- measured: they answered correctly on all
+        // three lanes while being flagged.
+        const opened: Array<[Map<string, boolean>, Map<string, boolean> | null]> = [];
+        const reads = (text: string, self: string | null): void => {
+          for (const t of text.match(NAME) ?? []) {
+            if (t !== self && valid.get(t) === false) {
+              lost.push(`${m[1]}: ${t}`);
+              valid.set(t, true); // report each temp once per body
+            }
+          }
+        };
+        for (const raw of lines) {
+          const l = raw.trim();
+          if (/^}\s*else\s*{/.test(l) && opened.length > 0) {
+            const top = opened[opened.length - 1]!;
+            opened[opened.length - 1] = [top[0], new Map(valid)];
+            valid.clear();
+            for (const [k, v] of top[0]) valid.set(k, v);
+            continue;
+          }
+          if (l.endsWith("{")) { opened.push([new Map(valid), null]); continue; }
+          if (l.startsWith("}") && opened.length > 0) {
+            const [, thenExit] = opened.pop()!;
+            if (thenExit) for (const [k, v] of thenExit) if (!v) valid.set(k, false);
+            continue;
+          }
+          if (LABEL.test(raw)) {
+            for (const [k, v] of valid) if (v) valid.set(k, false);
+            continue;
+          }
+          const d = DECL.exec(raw);
+          if (d) {
+            const eq = raw.indexOf("=");
+            if (eq >= 0) reads(raw.slice(eq + 1), d[1]!);
+            valid.set(d[1]!, true);
+            continue;
+          }
+          const w = WRITE.exec(raw);
+          if (w) {
+            reads(raw.slice(raw.indexOf("=") + 1), w[1]!);
+            valid.set(w[1]!, true);
+            continue;
+          }
+          reads(raw, null);
+        }
+      }
+      expect([...new Set(lost)],
+        "temps established before a resume label and read after it -- the park loses these, and the answer is a plausible wrong number")
+        .toEqual([]);
+    }
+
     const run = (exe: string): string => execFileSync(exe, [], { encoding: "utf8" });
     const fiber = run(off.exe);
     // The reference arm has to be sane before it can referee: a fiber lane
