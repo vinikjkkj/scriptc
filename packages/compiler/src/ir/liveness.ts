@@ -117,35 +117,29 @@ function readsOf(node: unknown, out: Set<string>): void {
 
 interface FoundSuspension {
   node: Record<string, unknown>;
-  /** Nested for LIVE-SET purposes: the conservative widening still applies. */
+  /** Nested for LIVE-SET purposes, and that is now the ONLY thing nesting
+   * decides. The live set keeps its conservative widening: over-spilling
+   * costs frame bytes, under-spilling is a use-after-free, and this file has
+   * already paid for that twice.
+   *
+   * THERE WAS A SECOND FIELD HERE, `blocked`, which kept a nested suspension
+   * off the lane entirely. The hazard it guarded was never the POSITION. A
+   * suspension nested in a larger expression left the already-evaluated
+   * operands in C locals, and a park returns to the scheduler, so those
+   * locals died -- but only the ones nothing spilled. emitCoroAwait spills
+   * the emitter's RC frames, and newTemp joined a temp to its frame only
+   * when it was refcounted, so a `double` was lost and a `ScrStr *` was not.
+   * That is why `j2n(n1(8), await pf(3))` answered NaN while
+   * `j2s(s1("S"), await pf(3))` answered correctly, and why
+   * `j2n(await pf(3), n1(8))` -- the same position, await first -- was right
+   * all along.
+   *
+   * newTemp registers every temp now, so nothing is left for the position to
+   * protect against and the field is GONE rather than always-false. What
+   * replaces it is not a list: stackless-values reads the emitted C of every
+   * converted body and fails on any temp established before a resume label
+   * and read after it without a reload. */
   nested: boolean;
-  /** Nested for BLOCKING purposes: whether it is kept out of the slice.
-   *
-   * ALWAYS FALSE NOW, and the field stays because the distinction it names
-   * is still real -- the live set keeps its conservative widening while
-   * blocking no longer applies. Blocking decides whether the lane may lower
-   * the point at all; the live set decides how much the frame carries
-   * across it. Over-spilling costs frame bytes; under-spilling is a
-   * use-after-free, and this file has already paid for that twice, so
-   * `nested` keeps the expensive answer.
-   *
-   * WHY BLOCKING LIFTED. The hazard it guarded was never the POSITION. A
-   * suspension nested in a larger expression left the operands already
-   * evaluated sitting in C locals, and a park returns to the scheduler, so
-   * those locals died -- but only the ones nothing spilled. emitCoroAwait
-   * spills the emitter's RC frames, and newTemp put a temp in a frame only
-   * when it was refcounted, so a `double` or a `bool` was lost and a
-   * `ScrStr *` was not. That is why `j2n(n1(8), await pf(3))` answered NaN
-   * while `j2s(s1("S"), await pf(3))` answered correctly, and why
-   * `j2n(await pf(3), n1(8))` -- the same position, await first -- was
-   * right all along.
-   *
-   * newTemp now registers every temp, so there is nothing left for the
-   * position to protect against. The guard that this is true is not a list:
-   * tests/harness read the emitted C of every converted body and fail on
-   * any temp established before a resume label and read after it without a
-   * reload. */
-  blocked: boolean;
 }
 
 /** Every suspension node inside this expression tree, with whether it sits
@@ -238,12 +232,7 @@ function suspensionsOf(root: IrExpr | null): FoundSuspension[] {
     const rec = n as Record<string, unknown>;
     const kind = rec["kind"];
     const isSusp = typeof kind === "string" && SUSPENSION_KINDS.has(kind);
-    // `blocked` is gone, not merely always-false: a blockDepth nobody reads
-    // is the dead half of a rule, and the next reader would have to work out
-    // whether it still means anything. The ternary-arm carve-out it carried
-    // is gone with it -- it was one position exempted from a rule that no
-    // longer exists.
-    if (isSusp) out.push({ node: rec, nested: depth > 0, blocked: false });
+    if (isSusp) out.push({ node: rec, nested: depth > 0 });
     // A node with exactly ONE operand is transparent to nesting: see
     // operandCount. Belt and braces on a fence this file does not own -- the
     // classification and the count come from the same call, so they cannot
@@ -389,14 +378,12 @@ function recordPoints(
         live: s.nested ? union(base, enclosingReads) : new Set(base),
         nestedInExpression: s.nested,
         straightLine:
-          !s.blocked &&
           ctx.loopDepth === 0 &&
           ctx.finallyDepth === 0 &&
           ctx.switchDepth === 0 &&
           ctx.rootOk &&
           s.node["kind"] === "awaitExpr",
         blockers: [
-          ...(s.blocked ? ["nested"] : []),
           ...(ctx.loopDepth > 0 ? ["loop"] : []),
           ...(ctx.finallyDepth > 0 ? ["finally"] : []),
           ...(ctx.switchDepth > 0 ? ["switch"] : []),
