@@ -2,6 +2,7 @@
  * expression lands in a fresh C temp, with RC ownership tracked on the
  * emitter's frames (see the discipline comment in emitter core). */
 import { fiberOnly, type Fenced } from "../../ir/suspends.js";
+import { poisonYieldArm } from "./gen-poison.js";
 import type { CEmitter, Temp } from "./emitter.js";
 import { rcSitesRequested, rcSiteLabel } from "./emitter.js";
 import { ABSENT_KEY_TRAP_CODE, arrayOf, BOOL, BYTES_U8, bytesOf, ownMaskKeyBit, OWNMASK_COMPLETED, OWNMASK_VALID, canMarshalFuncIntoIsland, CHILDSTREAM_T, DYN, dynCopyIsObservable, F64, IrExpr, IrRecordShape, IrType, irFunctionJsName, islandPromisePayloadTag, isRefCounted, isUnitType, MAY_THROW_LIB_FNS, RUNTIME_ERROR_CLASSES, settleOrValuePromiseTag, STRING, typeEquals, typeKey } from "../../ir/nodes.js";
@@ -7977,10 +7978,18 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
         const Y = e.async === true
           ? { f64: "scr_agen_yield_f64", bool: "scr_agen_yield_bool", ref: "scr_agen_yield_ref" }
           : { f64: "scr_gen_yield_f64", bool: "scr_gen_yield_bool", ref: "scr_gen_yield_ref" };
+        // THE VALUE GUARD. The scalar arm is chosen through gen-poison so a
+        // wrong-arm defect can be INJECTED on demand: a parity test that has
+        // never been watched failing cannot distinguish agreement from
+        // blindness. Unpoisoned this returns exactly Y.f64 / Y.bool, so the
+        // emitted C is byte-identical with the knob absent. `ref` is never
+        // swapped -- its call takes a release adapter, so a swap would fail
+        // at the C compiler instead of at the value.
+        const scalarArm = poisonYieldArm(yt.kind, Y);
         if (yt.kind === "f64") {
-          E.line(`${Y.f64}(${v.name});${E.srcComment(e.loc)}`);
+          E.line(`${scalarArm}(${v.name});${E.srcComment(e.loc)}`);
         } else if (yt.kind === "bool") {
-          E.line(`${Y.bool}(${v.name});${E.srcComment(e.loc)}`);
+          E.line(`${scalarArm}(${v.name});${E.srcComment(e.loc)}`);
         } else {
           E.moveTemp(v); // the OUT slot takes ownership
           E.line(`${Y.ref}(${v.name}, ${vAdapters(yt).release});${E.srcComment(e.loc)}`);
