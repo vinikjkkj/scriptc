@@ -277,6 +277,67 @@ So D4's machinery is genuinely reusable for generators -- and it unblocks
 work, not for the count. It is also why D4 priced on app182 contains no
 generator content whatsoever: **0 of 78**.
 
+## 10b. `yield*` is COMPOSITION, and it does not move the 24
+
+The open question was whether `yield*` is a fourth mechanism, in which case the
+24 would be wrong. It is not, and this is settled by reading the desugar rather
+than by counting carriers.
+
+`lowerYieldStarStatement` (`lower-generators.ts:670`) builds exactly this:
+
+```
+{ const %dele = <e>;
+  let %dres = %dele.next();
+  while (!%dres.done) { %dres = %dele.next(<yield %dres.value>); } }
+```
+
+IR nodes produced: **`genResume` twice** (the priming resume and the loop
+resume) and **`yieldExpr` once**, nested in the loop resume's argument. All
+three are cases already inventoried in S12. **No new IR node kind, no new
+emission case, no new runtime primitive.** If sync generators lower stackless,
+`yield*` lowers with them by composition.
+
+**And it cannot be in the 24, structurally.** The desugar puts both the
+`yieldExpr` and the loop `genResume` inside a `while`, so every point it
+creates carries the `loop` blocker on top of `kind=`. The owning function's
+cause set is therefore `{gen, loop}` at minimum, and the 24 is a **solo**
+count. A `yield*` carrier can never be solo on `gen`. It sits in the
+`gen` INTERSECT `loop` region and needs D2 as well.
+
+So the honest statement moves from *"`yield*` can move the 24"* to **"`yield*`
+does not move the 24"**. What its count can change is the size of the
+intersection, which is a different column.
+
+Three refusals narrow it further, all `SC1071`:
+
+| refusal | site | consequence |
+|---|---|---|
+| `yield*` inside an **async** generator has no lowering | `:679` | `yield*` is sync-only; it cannot touch the 18 |
+| `yield*` in **value** position | `lowerYield`, `:59` | statement position only, one call site (`lower-stmts.ts:6643`) |
+| a delegate that is not of type `generator` | `:687` | no delegation over arbitrary iterables |
+
+`yield*` therefore lives entirely inside the sync-generator piece -- the one
+with no promise, no ready queue and no hop.
+
+### It does NOT cross the iterator-close finally
+
+This was the suspicion worth checking, because closing a delegate is exactly
+where a close protocol would live. It is **refuted**: unlike
+`lowerForOfGenerator` (`:424`) and `lowerForAwaitAsyncGenerator` (`:649`),
+which both synthesise `try { loop } finally { close }`, this desugar emits a
+bare `block` holding a `while` and **no `tryCatch` at all**.
+
+That is deliberate and documented as a numbered divergence at `:666`: *"Consumer
+`.return()`/`.throw()` while suspended here unwinds the OUTER generator without
+forwarding to the delegate."* scriptc does not close the delegate.
+
+So `yield*` does **not** link to S10 or S12, and it does **not** change the
+order. One decision falls out of it, and it is pre-existing rather than
+created by this front: **when generators go stackless, is that divergence
+preserved exactly, or fixed while the lowering is being rebuilt?** A rewritten
+unwind path could change its character silently, which is the failure mode
+worth naming now rather than discovering by diff.
+
 ## 11. MECHANICAL vs DECISION
 
 **MECHANICAL -- a pair exists, it is translation (5):**
@@ -334,7 +395,7 @@ the C side landing first is the cheaper order.
   `AsyncGeneratorYield` tick count exactly. That is the hop front's question.
 - Whether any of the 24 sync-generator gains survive **emission**. Everything
   here is admissible.
-- `yield*` (`lowerYieldStarStatement`, `lower-generators.ts:670`) and the
-  native-sink path (`g->sink`, `scr_agen_sink_schedule`) were read but not
-  sized.
+- The native-sink path (`g->sink`, `scr_agen_sink_schedule`) was read but not
+  sized. `yield*` WAS sized by reading -- see S10b; only its count is
+  outstanding, and the count cannot change the conclusion.
 - The corpus is 244 dumps, not the whole corpus.
