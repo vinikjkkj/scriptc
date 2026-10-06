@@ -52,7 +52,7 @@
  * boundary rows are the only thing that would fail.
  */
 import { spawn } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
@@ -411,14 +411,84 @@ describe("the collector, measured rather than argued", () => {
           outPath: join(cdir, exeName("program")),
           outDir: cdir,
           backend: "c",
+          /* keepC IS A NO-OP TODAY, AND IS KEPT ANYWAY. CompileOptions has
+           * no such field and nothing in packages/compiler/src reads it. The
+           * emitted C really is on disk afterwards, but only because compile()
+           * NEVER deletes the program TU -- `--no-keep-c` is a CLI-level
+           * concern. The retention is a DEFAULT, not a guarantee this call
+           * requested. Kept for consistency with the two siblings that
+           * spell it identically (stackless-values.test.ts:384,
+           * stackless-rc-balance.test.ts:154); dropping it from this one
+           * alone would make three tests that do the same thing look
+           * different for no reason. The existence check below is what turns
+           * the false belief into a named failure instead of a bare ENOENT. */
+          keepC: true,
         });
         expect(cbuilt.ok, "the abandoned-fiber control must compile").toBe(true);
         const control = await run(cbuilt.binaryPath!, [], cdir);
+
+        /* THE CONTROL IS KNOB-AWARE, AND THE REASON MATTERS MORE THAN THE FIX.
+         *
+         * What this control buys: the audited row above asserts an EMPTY
+         * stderr, and the audit silences itself when a fiber never resumes --
+         * `if (scr_abandoned_fibers > 0)` in scr_console.c prints "skipped"
+         * and returns BEFORE auditing anything. So a clean stderr could be a
+         * did-not-run, and this control exists to show the skip path is live,
+         * which is what makes the silence above mean "ran and found nothing".
+         *
+         * WITH THE KNOB ON THAT PATH IS UNREACHABLE BY CONSTRUCTION. `f`
+         * becomes a state machine, there is no fiber to abandon,
+         * scr_abandoned_fibers can never exceed zero, and the audit cannot
+         * skip. Demanding the skip message is demanding evidence of a branch
+         * the lane has deleted: it cannot pass at ANY revision, and that is
+         * not a defect in the lane.
+         *
+         * The guarantee is the same on both lanes and reached differently,
+         * which is what the two arms say:
+         *   fiber lane -- the skip is OBSERVED, so silence is meaningful.
+         *   stackless  -- the skip is IMPOSSIBLE, so silence is meaningful
+         *                 for a stronger reason: no branch could produce it.
+         *
+         * CONVERGENCE: this split disappears if the runtime ever gains an
+         * abandoned-COROUTINE counter feeding the same skip. Both arms would
+         * observe again and this collapses back to one assertion. Until then
+         * the asymmetry is correct, not a gap.
+         *
+         * Derived from the ARTIFACT, not the environment: the control's own
+         * emitted C says whether `f` converted. Reading SCRIPTC_STACKLESS here
+         * would assert what we asked for instead of what we got. */
+        /* ASSERT THE RETENTION RATHER THAN ASSUMING IT. This read is the
+         * only thing standing between the knob-aware branch below and a
+         * bare ENOENT, and what keeps the file there is the DEFAULT
+         * described above -- not the keepC we passed, which nothing reads.
+         * If this check ever fails, the default changed: compile() started
+         * deleting the program TU. The fix then is to find the real
+         * retention switch and pass it in all three tests, NOT to delete
+         * this read -- and the same break would hit stackless-values and
+         * stackless-rc-balance, which read the emitted C the same way. */
+        const controlCPath = join(cdir, "main.c");
         expect(
-          control.stderr,
-          "the control must show the audit SKIPPING — if it is silent too, the row above " +
-            "proves nothing",
-        ).toContain("never resumed");
+          existsSync(controlCPath),
+          `the emitted C (${controlCPath}) must still be on disk -- compile() retains the ` +
+            "program TU by DEFAULT and the keepC above is a no-op, so a miss here means the " +
+            "default changed, not that this test wants the file deleted",
+        ).toBe(true);
+        const controlC = readFileSync(controlCPath, "utf8");
+        const fIsCoroutine = controlC.includes("sc_cr_f(");
+        if (!fIsCoroutine) {
+          expect(
+            control.stderr,
+            "the fiber lane must show the audit SKIPPING -- if it is silent too, the " +
+              "audited row above proves nothing",
+          ).toContain("never resumed");
+        } else {
+          expect(
+            control.stderr,
+            "on the stackless lane there is no fiber to abandon, so the audit must NOT " +
+              "report a skip -- if it does, something still created a fiber and the " +
+              "reasoning behind the audited row above no longer holds",
+          ).not.toContain("never resumed");
+        }
       } finally {
         if (prev === undefined) delete process.env["SCRIPTC_RC_AUDIT"];
         else process.env["SCRIPTC_RC_AUDIT"] = prev;
