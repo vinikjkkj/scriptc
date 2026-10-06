@@ -79,6 +79,31 @@ export function coroPlans(fns: readonly IrFunction[]): Map<string, StacklessPlan
 export function coroFrameLocals(fn: IrFunction, plan: StacklessPlan): string[] {
   const ids = new Set<string>(plan.frameLocals);
   for (const p of fn.params) ids.add(p.localId);
+  /* EVERY LOCAL THE RELEASE PATH WILL TOUCH, not only the ones a park has to
+   * carry forward.
+   *
+   * `plan.frameLocals` is liveness's LIVE SET, and live means "will be read
+   * again". The RC discipline asks a different question -- "does this still
+   * own a reference" -- and the two disagree exactly where a local is never
+   * read after the suspension but still has to be released at function end.
+   * A resume RE-ENTERS the function, so its C locals run their `= NULL`
+   * declarations again before the dispatch goto; an unspilled owned local is
+   * therefore NULL by the time the release runs, the release is a no-op, and
+   * the whole graph it owned leaks.
+   *
+   * Measured on six lines: `const o = new Holder(...); const s = o.name;
+   * await p(1); console.log(s.length)` leaked 1 object, 2 strings and 1
+   * array, because `s` is read after the park and `o` is not -- so `s` was
+   * spilled and `o` was not. Reading `o.name` AFTER the park instead made it
+   * live, put it in the frame, and the leak vanished; that is the control
+   * this rule has to explain, and it does.
+   *
+   * It is the MIRROR of the temp spill one layer down: there a
+   * non-refcounted temp never entered the frame, here a refcounted local
+   * that liveness called dead never entered it. Both are "the frame must
+   * hold what something later touches", and both ask the TYPE rather than
+   * keeping a list. */
+  for (const l of fn.locals) if (l.boxed === true || isRefCounted(l.type)) ids.add(l.id);
   // Capture boxes come back from `sc_env->caps[i]` on every resume, so they
   // must NOT also get frame slots — two sources for one binding is how a
   // shared box silently stops being shared.
