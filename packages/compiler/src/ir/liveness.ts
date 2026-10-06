@@ -123,6 +123,46 @@ interface FoundSuspension {
 
 /** Every suspension node inside this expression tree, with whether it sits
  * nested under another expression rather than at the root. */
+/** How many sub-expressions this node evaluates.
+ *
+ * THE SOLE-OPERAND FENCE, AND WHY IT IS COMPUTED RATHER THAN LISTED. The
+ * nesting conservatism above exists for exactly one reason, and the comment
+ * at recordPoints states it: operands evaluated BEFORE the suspension are
+ * already materialised and ones AFTER are still to come, and the IR carries
+ * no evaluation-order contract a generic walk could read. Where the await is
+ * the node's ONLY operand there is no before and no after -- the wrapper just
+ * consumes the resumed value -- so there is nothing for the conservatism to
+ * protect and the nesting is purely positional.
+ *
+ * That is a PRECONDITION ABOUT THE SHAPE OF THE IR, and this file does not
+ * own it: another pass could give a node that is unary today a second operand
+ * tomorrow. A hardcoded list of "unary kinds" would keep saying yes after
+ * that change, liveness would stop spilling something that had begun to need
+ * it, and the failure is a use-after-free -- the same class as the two
+ * under-approximations already paid for here. So the count is RE-DERIVED from
+ * the node on every visit instead of remembered. A node that grows a second
+ * operand stops being transparent the moment it does, with no edit here and
+ * no way to forget.
+ *
+ * Measured over zapo-rest before it was written: the sole-operand group is
+ * 207 of the 302 nested points, across 88 functions, and `dynFrom.value`
+ * alone is 131 of them -- 117 in one file, route handlers declared `any`
+ * whose `return await f()` is already in the slice and blocked only by the
+ * dyn conversion sitting on the result. */
+function operandCount(rec: Record<string, unknown>): number {
+  let n = 0;
+  for (const k in rec) {
+    if (k === "loc" || k === "type") continue;
+    const v = rec[k];
+    if (Array.isArray(v)) {
+      for (const x of v) if (x !== null && typeof x === "object" && "kind" in (x as object)) n++;
+    } else if (v !== null && typeof v === "object" && "kind" in (v as object)) {
+      n++;
+    }
+  }
+  return n;
+}
+
 function suspensionsOf(root: IrExpr | null): FoundSuspension[] {
   const out: FoundSuspension[] = [];
   if (root === null) return out;
@@ -139,9 +179,18 @@ function suspensionsOf(root: IrExpr | null): FoundSuspension[] {
     const kind = rec["kind"];
     const isSusp = typeof kind === "string" && SUSPENSION_KINDS.has(kind);
     if (isSusp) out.push({ node: rec, nested: depth > 0 });
+    // A node with exactly ONE operand is transparent to nesting: see
+    // operandCount. Belt and braces on a fence this file does not own -- the
+    // classification and the count come from the same call, so they cannot
+    // drift, and anything that reintroduces a remembered list trips here.
+    const operands = operandCount(rec);
+    const transparent = !isSusp && operands === 1;
+    if (transparent && operands !== 1) {
+      throw new Error(`liveness: sole-operand fence voided for ${String(kind)} (${operands} operands)`);
+    }
     for (const k in rec) {
       if (k === "loc" || k === "type") continue;
-      walk(rec[k], isSusp ? depth : depth + 1);
+      walk(rec[k], isSusp || transparent ? depth : depth + 1);
     }
   };
   walk(root, 0);
