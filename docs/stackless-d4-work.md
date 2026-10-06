@@ -46,7 +46,11 @@ finally-blocked functions; liveness-derived, ceiling/floor):
 | shape | points | functions | what it needs |
 |---|---|---|---|
 | (1) suspension **inside** a finally body | **8** | **6** | fat frame **and** a distinct state per emitted copy |
-| (2) suspension in a try/catch **guarded by** a finally | **98** | **71** have only this | fat frame; the body is emitted once |
+| (2) suspension in a try/catch **guarded by** a finally | **97** | **71** have only this | fat frame; the body is emitted once |
+
+The 97 is emitted by the compiler, not derived: `pt:finally:guarded` from
+the fence split. An earlier hand-walk of `tryBody` and `catchBody` subtrees
+said **98** and double-counted one node under nesting. **98 is retracted.**
 
 The runtime half of the fat frame is already built: `scr_coro_resume_entry`
 installs the frame's own cell with `scr_exc_swap_cell(mine)` and restores the
@@ -61,7 +65,7 @@ previous one on the way out (`scr_coro.c`, around the resume call).
 | (c) | stash spill | per try-with-finally **region** -- `ScrCaught *sc_fexc_N = scr_exc_take()` is emitted on the finally's exception-path copy, so it exists per region and not only where a catch binding does | also not an `IrLocal` |
 | (d) | per-copy state | shape (1) only | the finally body is emitted **three times** (normal, exception, pending-return), so one IR point becomes three emitted sites |
 
-## 3. The internal ladder -- two predicates, and the spread is the finding
+## 3. The internal ladder, and the rung the probe found before it
 
 Over the **strict** solo set: `finally` is the only blocker, counting both
 point-level blockers **and** function-level gates. That set is **56
@@ -87,20 +91,76 @@ compete:
   stash those spans lie inside the finally body, i.e. shape (1). Rung (a) is
   then **51**.
 
-The emission code argues for P2: every local is re-initialised before the
-dispatch on each resume, so a slot that no park crosses is harmless. But
-that is a code-reading, and reading the runtime pointed the wrong way twice
-in one session. **Rung (a) is therefore recorded as between 2 and 51
-functions, unresolved.**
+**MEASURED 2026-10-06, and the result dissolves the question rather than
+answering it.** The probe was run: `2432-generic-member-fields-async`
+compiled with the finally fence lifted and the knob on.
 
-The probe that settles it, designed and not yet run: compile
-`tests/corpus/2432-generic-member-fields-async.ts` with the finally fence
-lifted and read the emitted C for whether `sc_pret` is spilled into the
-frame. Subject chosen because it is user-written (section 6), shape (2), and
-return-crossing, so it actually exercises the slot.
-`tests/corpus/1022-async-exceptions.ts` is the control: same shape, no
-return, so no slot should appear at all. Either outcome is informative, which
-is the property five controls lacked earlier in the same session.
+### (a0) -- a rung prior to everything
+
+**The function does not compile.**
+
+```
+error: void function 'sc_cr__x25_Client_withCancel_x25_0' should not return a value
+error: void function 'sc_cr__x25_Client_withCancel_x25_1' should not return a value
+```
+
+`emit-stmts.ts:1178` emits, unconditionally,
+
+```
+E.line(retT.kind === "void" ? `return;` : `return sc_pret;`);
+```
+
+-- a **raw `return` inside a `void` resume function**. The finally's
+pending-return dispatch is the one return path the coroutine lowering never
+converted. The evidence that this is a localised oversight rather than a
+design hole sits in the same emitted file: the ordinary `return` handler
+*does* branch on `E.currentCoro` (`emit-stmts.ts:928`, `:939`), and the throw
+path *does* use `scr_coro_finish_throw(sc_b)` -- eleven lines below the bad
+return.
+
+**It is one line, not a family**, counted by property rather than by
+neighbourhood of `:1178`. Ten sites in the C emitter emit a `return`
+statement: six in `emit-coro.ts` are coro-only by construction; two
+(`emit-stmts.ts:935`, `:942`) are the else-arms of the branches above; one
+(`emitter.ts:2549`, in `emitUnwind`) is guarded at `:2542` and routes to
+`coroUnwind`; and **one -- `:1178` -- is unguarded.** Unlike `fn:boxedParam`
+and `pt:loop`, which each turned out to have *more* structure than their
+single label suggested, this one has less.
+
+The ladder therefore gains a rung **before** (a): route the pending-return
+dispatch through `coroFinish`. Until it exists, no finally-bearing function
+compiles under the knob, whatever the spill answer is.
+
+### The 2-versus-51 spread is RETRACTED, by dissolution
+
+Not "the answer turned out to be the other one" -- **the question was
+ill-posed.** It assumed the only thing between a shape-(2) function and
+admission was whether its slots need spilling, and the probe shows a prior,
+structural piece the ladder did not contain.
+
+On the spill question itself, P2's premise **held** in the function measured:
+
+```
+L890  ScrStr *sc_pret = NULL;          /* pending return (through finally) */
+L898  sc_S0:;
+L925  scr_coro_park(sc_b, sc_f->sc_awaited);    <- the park
+L927  sc_S1:;
+L938  sc_pret = sc_t7;                          <- write, AFTER the park
+L985  return sc_pret;                           <- read
+```
+
+The park precedes the write, the write-to-read span crosses no park, and
+`sc_pret` is correctly absent from the frame. The control,
+`1022-async-exceptions` -- same shape, no return crossing a finally --
+compiled clean (rc=0) with zero `sc_pret` and zero raw returns, so the pair
+discriminates in both directions.
+
+**SCOPE, bare: one program, two functions.** The park-before-write ordering
+is one measured instance of what this section argued structurally, not proof
+that it holds for every shape-(2) function.
+
+**(b) remains OPEN for shape (1)**, where a park inside the finally body
+would cross the write-to-read span: 5 functions on app182, unmeasured.
 
 ## 4. The intersection of (b) and (c)
 
@@ -208,8 +268,14 @@ against 3 joint; corpus: 18 against 24), and the corpus cannot settle it.
 
 227 IR dumps already cover **226 of the 257** suspendable corpus entries. An
 `--emit-ir` sweep of the remaining **31** costs ~0.1 GB and 3-4 minutes
-single-threaded -- affordable, and nearly worthless: it cannot move the
-D4-reachable corpus population materially above **n = 4**.
+single-threaded -- affordable, and nearly worthless. **MEASURED 2026-10-06:**
+the sweep was run. 16 of the 31 produced dumps (5 do not build standalone;
+10 of the names were sub-module filenames rather than entries, an error in
+the list, not in the corpus). Adding them moved the all-finally-blocked
+count from 78 to 81 and the D4-reachable count **not at all** -- solo stays
+at exactly **4**, with every sub-figure identical (shape (1) 1,
+return-crossing 3, catch-binding 0). Exhaustion is now measured rather than
+inferred.
 
 Every `scriptc-tests` build cache was checked across four worktrees (6,166 /
 3,254 / 1,764 / 6,158 directories) and holds **zero** `.ir.json`: the caches
@@ -267,6 +333,16 @@ session and existed in no file at all.
   no claim in either direction.
 - **The solo set is 56, not 64.** RETRACTED.
 - **`loop` solo is 24, not 29.** RETRACTED.
+- **The rung-(a) spread of 2 to 51 is RETRACTED, by DISSOLUTION** -- the
+  question was ill-posed, not answered the other way. It assumed the only
+  thing between a shape-(2) function and admission was whether its slots
+  need spilling; the probe found a prior rung, (a0), where the finally's
+  pending-return dispatch emits a raw `return` inside a void resume
+  function. See section 3.
+- **Shape (2) is 97 points, not 98.** RETRACTED. The 98 came from a
+  hand-walk that double-counted one node under nesting; the fence split
+  made the compiler emit the column instead, which is the whole reason it
+  was built.
 - **Common cause of all three: a "solo" filter that read only POINT-level
   blockers and missed FUNCTION-level gates** (`fn:generator`,
   `fn:boxedParam`, a module-init cache). It is the same blindness that hid
@@ -277,8 +353,13 @@ session and existed in no file at all.
 
 ## 11. Not measured
 
-- **Which slot predicate holds** -- the 2-versus-51 spread on rung (a). The
-  probe in section 3 is designed and authorised, not run.
+- **Whether (b) is owed for shape (1)** -- a park inside the finally body
+  would cross the `sc_pret` write-to-read span. 5 functions on app182,
+  unmeasured. The shape-(2) half is now measured (section 3) and the
+  answer there is no.
+- **Whether the park-before-write ordering generalises.** One program, two
+  functions. It is one measured instance of a structural argument, not
+  proof.
 - Whether the 31-program `--emit-ir` sweep moves n above 4 at all.
 - Whether shape (2) is a viable slice without shape (1): the fence is one
   flag today, and splitting it means distinguishing the two `finallyDepth`
