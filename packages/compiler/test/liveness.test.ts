@@ -12,7 +12,7 @@
  * `varRef` standing in for a call keeps each case down to the shape under
  * test. */
 import { expect, test } from "vitest";
-import { F64, type IrExpr, type IrFunction, type IrType } from "../src/ir/nodes.js";
+import { F64, type IrExpr, type IrFunction, type IrStmt, type IrType } from "../src/ir/nodes.js";
 import { suspensionLiveness } from "../src/ir/liveness.js";
 
 const loc = { file: "t.ts", start: 0, end: 0 };
@@ -182,4 +182,71 @@ test("functions with no suspension point report null", () => {
     body: [{ kind: "return", value: vr("a.0"), loc }],
   });
   expect(suspensionLiveness(f)).toBeNull();
+});
+
+/* ── the fence split: one `no` under two names ──────────────────────────
+ *
+ * `finallyDepth` is raised in two places. `straightLine` still reads the
+ * umbrella, so admission cannot move -- that is structural, not measured --
+ * and these assert that the two refinements name the right halves.
+ *
+ * MEASURED on tests/perf/zapo-rest/app182 when the split was written:
+ * old label 105 points = body 8 + guarded 97, overlap 0, zero points with
+ * one label and not the other, admitted set identical at 1,099 functions by
+ * IDENTITY and not by size, and zero point verdicts changed. */
+
+const tcf = (tryBody: IrStmt[], finallyBody: IrStmt[]): IrStmt =>
+  ({ kind: "tryCatch", tryBody, catchBody: null, catchLocalId: null, finallyBody, loc }) as IrStmt;
+
+test("the finally fence names its two halves, and the naming is an iff", () => {
+  // try { await a; } finally { await a; }
+  const f = fn({
+    locals: [local("a.0")],
+    body: [tcf(
+      [{ kind: "exprStmt", expr: aw(vr("a.0")), loc }],
+      [{ kind: "exprStmt", expr: aw(vr("a.0")), loc }],
+    )],
+  });
+  const r = suspensionLiveness(f);
+  expect(r).not.toBeNull();
+  expect(r!.points).toHaveLength(2);
+
+  // PARTITION, as an iff. Asserted this way rather than as a sum because the
+  // two are NOT mutually exclusive in general -- see the nested test below.
+  for (const p of r!.points) {
+    const umbrella = p.blockers.includes("finally");
+    const half = p.blockers.includes("finally:body") || p.blockers.includes("finally:guarded");
+    expect(umbrella, `blockers ${p.blockers.join(",")} carry a half without the umbrella`).toBe(half);
+  }
+
+  // The halves land on the right points.
+  const body = r!.points.filter((p) => p.blockers.includes("finally:body"));
+  const guarded = r!.points.filter((p) => p.blockers.includes("finally:guarded"));
+  expect(body, "the await INSIDE the finally body").toHaveLength(1);
+  expect(guarded, "the await in the try body guarded by a finally").toHaveLength(1);
+
+  // ADMISSION NEUTRALITY, structurally: straightLine reads the umbrella, so
+  // every point carrying any of the three labels is still refused.
+  for (const p of r!.points) expect(p.straightLine).toBe(false);
+});
+
+test("the two halves are not mutually exclusive: a finally nested inside a guarded try", () => {
+  // try { try { } finally { await a; } } finally { }
+  // The inner finally's await is INSIDE a finally body and simultaneously
+  // GUARDED by the outer one. A sum of the two labels therefore over-counts
+  // such a point, which is why the partition above is asserted as an iff.
+  // app182 happens to have zero nested finallys, so the sum held there --
+  // that is a property of that program, not of the labels.
+  const f = fn({
+    locals: [local("a.0")],
+    body: [tcf([tcf([], [{ kind: "exprStmt", expr: aw(vr("a.0")), loc }])], [])],
+  });
+  const r = suspensionLiveness(f);
+  expect(r).not.toBeNull();
+  expect(r!.points).toHaveLength(1);
+  const p = r!.points[0]!;
+  expect(p.blockers).toContain("finally:body");
+  expect(p.blockers).toContain("finally:guarded");
+  expect(p.blockers).toContain("finally");
+  expect(p.straightLine).toBe(false);
 });
