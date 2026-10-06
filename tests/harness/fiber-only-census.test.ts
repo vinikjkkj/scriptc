@@ -163,6 +163,48 @@ void scr_planted_parks_too(void) { scr_planted_inner(); }
       .toEqual(["scr_planted_inner", "scr_planted_parks_too"]);
   });
 
+  test("a switch INTO a fiber is not a park, and the census must not say it is", () => {
+    // THE NEGATIVE CONTROL, and it exists because the positive one is not
+    // enough. Seeding on `scr_switch` alone pulled in scr_loop_run and
+    // scr_async_spawn -- the scheduler itself -- and reported 34 symbols.
+    // That was caught because 34 looked absurd, and implausibility is a
+    // WEAKER net than a control: a plausible over-approximation would have
+    // passed. So the discrimination gets tested directly.
+    //
+    // scr_switch runs in both directions. `(&self->st->ctx, self->return_to,
+    // NULL)` is the current fiber yielding out -- its caller parks.
+    // `(&here, &f->st->ctx, f)` is the scheduler entering a fiber -- the
+    // caller keeps running. Only the first may be in the set.
+    const planted = `
+void scr_planted_yields_out(void) { scr_switch(&self->st->ctx, self->return_to, NULL); }
+void scr_planted_switches_in(void) { scr_switch(&here, &f->st->ctx, f); }
+void scr_planted_calls_the_scheduler(void) { scr_planted_switches_in(); }
+`;
+    const parks = parkingSymbols([...sources, planted]);
+    expect(parks.has("scr_planted_yields_out"),
+      "a yield-out must be seen as parking -- the census is under-approximating").toBe(true);
+    expect(parks.has("scr_planted_switches_in"),
+      "a switch INTO a fiber is not a park; counting it is what produced 34 false symbols").toBe(false);
+    expect(parks.has("scr_planted_calls_the_scheduler"),
+      "calling the scheduler is not parking either").toBe(false);
+  });
+
+  test("a symbol mentioned only in a comment is not a call", () => {
+    // The other implausibility catch, converted. Counting a mention inside a
+    // comment reported scr_coro_park -- the STACKLESS park -- as a parking
+    // function, because its own comment documents the fiber path it
+    // replaced. Caught because it was absurd; tested here so it need not be.
+    const planted = `
+/* This comment mentions scr_switch(&self->st->ctx, self->return_to, NULL); on purpose. */
+void scr_planted_only_comments(void) { return; }
+`;
+    const parks = parkingSymbols([...sources, planted]);
+    expect(parks.has("scr_planted_only_comments"),
+      "a symbol named only inside a comment was counted as a call").toBe(false);
+    expect(parks.has("scr_coro_park"),
+      "scr_coro_park is the STACKLESS park and must never be classed as a fiber park").toBe(false);
+  });
+
   test("every parking symbol the emitter emits is accounted for", () => {
     const parks = parkingSymbols(sources);
     expect(parks.size, "no parking symbols found at all -- the property is not being computed")
