@@ -3,7 +3,7 @@ import { tapPhase, tapped } from "./phase-tap.js";
 import { basename, dirname, join, resolve } from "node:path";
 import { cacheRootDir, CcCompileError, compileC, compileLibArchive, profFlavor, resolveCc, targetPlatform } from "./backend/cc.js";
 import { emitModule, emitModuleProgram } from "./backend/emission/emitter.js";
-import { coroPlans } from "./backend/emission/emit-coro.js";
+import { coroPlans } from "./ir/coro-plans.js";
 import { emitFinalKeyReadWidths, emitFinalNarrowBridges, flushKeyReadCensus, flushNarrowBridgeCensus, keyReadCensusOnly } from "./frontend/lowering/keyread-census.js";
 import { emitLlvmModule, LlvmUnsupportedError } from "./backend/llvm/emitter.js";
 import { checkerPanicDiag, ffiNativeBuildDiag, libAsyncExportDiag, libAsyncSurfaceDiag, libExportUnresolvedDiag, libGenericExportDiag, libIntBoundaryDiag, libNpmIneligibleDiag, libSidecarDiag, libUnmappableSignatureDiag, iceDiag, isCheckerPanic, LIB_INBOUND_BYTES_TRAP_CODE, LIB_RUNTIME_TRAP_CODES, type ScrDiagnostic } from "./diagnostics/diagnostic.js";
