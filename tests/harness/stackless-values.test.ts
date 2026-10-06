@@ -100,7 +100,9 @@ const WRAPPERS: ReadonlyArray<{ name: string; take: string; finish: string; conv
   { name: "wtv", take: "void", finish: "ref", converted: true },
   { name: "wv", take: "f64", finish: "void", converted: true },
   { name: "wr", take: "f64", finish: "f64", converted: true }, // rejects: finishes through _throw
-  // THE TRY HALF, written BEFORE its lowering and deliberately not converted.
+  // THE TRY HALF, now lowered. These two were written before the slice with
+  // `converted: false`, and the ledger went red naming both the moment the
+  // liveness change landed -- which is the handover this file was built for.
   // Censused over the user's own program (zapo-rest app182, the IR the shipped
   // binary was built from): of the 211 functions a finally-free `try` slice
   // buys, 211 catch the rejection in the same try and 9 site the suspension in
@@ -112,8 +114,8 @@ const WRAPPERS: ReadonlyArray<{ name: string; take: string; finish: string; conv
   // frame's own exception cell. A wrapper for a shape the slice does not
   // convert would fail the arming check below, which is the control doing its
   // job: it refuses coverage the lane does not have.
-  { name: "wtc", take: "f64", finish: "ref", converted: false },
-  { name: "wcs", take: "ref", finish: "ref", converted: false },
+  { name: "wtc", take: "f64", finish: "ref", converted: true },
+  { name: "wcs", take: "ref", finish: "ref", converted: true },
 ];
 
 const SOURCE = `
@@ -141,9 +143,9 @@ async function wtv(): Promise<string> { await pv(); return "void-take"; }
 async function wv(n: number): Promise<void> { const x = await pf(n); console.log("vfin  ", x); }
 async function wr(): Promise<number> { const x = await prej(); return x; }
 
-// The try half. Fiber on BOTH arms until the slice lands, which is what the
-// scope ledger asserts -- so the day they convert, this file goes red and
-// names the coverage that has to be switched on.
+// The try half: converted coroutines whose suspension sits under a try.
+// wtc resumes inside the try body and its rejection is caught by that same
+// try; wcs sites the await in the CATCH body.
 async function wtc(bad: boolean): Promise<string> {
   try {
     const x = await pmaybe(bad);

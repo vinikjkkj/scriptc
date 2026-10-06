@@ -163,6 +163,30 @@ interface Ctx {
    * frame, a try needs its handler region re-established on resume. */
   loopDepth: number;
   tryDepth: number;
+  /** FINALLY IS NOT TRY, and it gets its own counter so the census can name
+   * the reason instead of hiding it under another label.
+   *
+   * try/catch is cheap here because the lowering has no setjmp: the handler
+   * is a C label in the same function and the unwind is an ordinary jump on
+   * a pending check, so a resume label inside a try body is reachable and
+   * costs the frame nothing. `finally` is not: it runs on the normal path,
+   * the exception path AND the pending-return path, so a suspension that it
+   * can span needs the frame to carry its own exception cell -- which is the
+   * difference between the thin frame and the fat one, and the whole reason
+   * this lane is smaller than a fiber.
+   *
+   * Raised for TWO situations, because both need that cell and neither is
+   * bought without it: a point sited INSIDE a finally body, and a point in a
+   * try/catch body whose try HAS a finally (unwinding from it crosses the
+   * finally with the exception still pending).
+   *
+   * It was ALSO a hole. This body used to be walked before tryDepth was
+   * raised, so a suspension in a finally carried no blocker at all and
+   * stacklessPlan accepted it -- on the lane that already shipped. Occupancy
+   * was zero (0 of 652 accepted functions in zapo-rest, 0 of 392 across 227
+   * corpus programs), so nothing reached it; a capacity is not an occupancy,
+   * and this closes the capacity. */
+  finallyDepth: number;
   /** A `switch` is not a loop, but a resume label inside a case body puts
    * the state machine's re-entry inside the switch block. Legal C, but out
    * of the first slice's scope. */
@@ -248,14 +272,14 @@ function recordPoints(
         straightLine:
           !s.nested &&
           ctx.loopDepth === 0 &&
-          ctx.tryDepth === 0 &&
+          ctx.finallyDepth === 0 &&
           ctx.switchDepth === 0 &&
           ctx.rootOk &&
           s.node["kind"] === "awaitExpr",
         blockers: [
           ...(s.nested ? ["nested"] : []),
           ...(ctx.loopDepth > 0 ? ["loop"] : []),
-          ...(ctx.tryDepth > 0 ? ["try"] : []),
+          ...(ctx.finallyDepth > 0 ? ["finally"] : []),
           ...(ctx.switchDepth > 0 ? ["switch"] : []),
           ...(ctx.rootOk ? [] : ["rootOk:" + ctx.stmtKind]),
           ...(s.node["kind"] === "awaitExpr" ? [] : ["kind=" + String(s.node["kind"])]),
@@ -350,8 +374,12 @@ function backStmt(
       // the frame carries nothing across the park. It sat outside D1 as scope,
       // not difficulty, and the census says it is the single largest blocker
       // in zapo-rest: 497 points, against 96 for every loop in the program.
-      // A return INSIDE a try still has tryDepth > 0 and stays blocked, which
-      // is the half that waits for the try slice.
+      // A return INSIDE a plain try is now in the slice too -- 180 of the 211
+      // functions the try half buys have one, so it is the dominant shape and
+      // not an edge. Inside a try WITH a finally it stays blocked, and the
+      // live set above is why that is not arbitrary: ctx.finallys makes the
+      // crossed finally's reads live at the return, so the frame would have
+      // to carry them across a park it has no exception cell for.
       recordPoints(ctx, [s.value], live, [], [], true, "return");
       if (s.value !== null) readsOf(s.value, live);
       return live;
@@ -534,10 +562,25 @@ function backStmt(
       // The finally body itself is walked with the OUTER finally stack: a
       // jump out of a finally is refused by the frontend (SC1090), so it
       // only ever completes normally or by throwing.
-      const afterFinally =
-        s.finallyBody === null ? new Set(liveOut) : backStmts(ctx, s.finallyBody, liveOut, loops);
+      // The finally body is walked under finallyDepth, not outside it: a
+      // suspension sited there needs the frame's own exception cell exactly
+      // like one the finally can span.
+      let afterFinally: Set<string>;
+      if (s.finallyBody === null) {
+        afterFinally = new Set(liveOut);
+      } else {
+        ctx.finallyDepth++;
+        try {
+          afterFinally = backStmts(ctx, s.finallyBody, liveOut, loops);
+        } finally {
+          ctx.finallyDepth--;
+        }
+      }
       if (s.finallyBody !== null) ctx.finallys.push(afterFinally);
       ctx.tryDepth++;
+      // A try that HAS a finally also blocks its try/catch bodies: unwinding
+      // out of them runs the finally with the exception still pending.
+      if (s.finallyBody !== null) ctx.finallyDepth++;
       try {
         const catchLive =
           s.catchBody === null ? new Set<string>() : backStmts(ctx, s.catchBody, afterFinally, loops);
@@ -548,6 +591,7 @@ function backStmt(
         return union(tryLive, catchLive);
       } finally {
         ctx.tryDepth--;
+        if (s.finallyBody !== null) ctx.finallyDepth--;
         if (s.finallyBody !== null) ctx.finallys.pop();
       }
     }
@@ -615,6 +659,7 @@ export function suspensionLiveness(fn: IrFunction): FnLiveness | null {
     forOfDepth: 0,
     loopDepth: 0,
     tryDepth: 0,
+    finallyDepth: 0,
     switchDepth: 0,
     rootOk: false,
     stmtKind: "?",
