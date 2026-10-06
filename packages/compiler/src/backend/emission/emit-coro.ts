@@ -46,6 +46,7 @@ import { mangleCoroFrame, mangleCoroResume, mangleAsyncSpawn, mangleLocal, mangl
 import { boxAccess, cDecl, cType, vAdapters } from "./emit-types.js";
 import { type IrFunction, type IrType, isRefCounted } from "../../ir/nodes.js";
 import { stacklessPlan, type StacklessPlan } from "../../ir/liveness.js";
+import { poisonFinishArm, poisonSpillOrder, poisonTakeArm } from "./coro-poison.js";
 
 /** The frame's field name for a local. Deliberately not mangleLocal's name:
  * the frame field and the C local coexist in the resume function, and a
@@ -264,7 +265,13 @@ export function coroReload(fn: IrFunction, plan: StacklessPlan): string[] {
 
 /** The spill of the frame's locals, emitted immediately before a park. */
 export function coroSpill(fn: IrFunction, plan: StacklessPlan): string[] {
-  return coroFrameLocals(fn, plan).map((id) => `sc_f->${coroField(id)} = ${mangleLocal(id)};`);
+  const ids = coroFrameLocals(fn, plan);
+  // The value poison's park-spill arm permutes the TARGETS while the
+  // sources stay, so two same-typed locals land in each other's slots:
+  // a real value of the right type in the wrong field. Identity unless
+  // SCRIPTC_CORO_VALUE_POISON=park-spill. See coro-poison.ts.
+  const targets = poisonSpillOrder(fn, ids);
+  return ids.map((id, i) => `sc_f->${coroField(targets[i]!)} = ${mangleLocal(id)};`);
 }
 
 /** The await site: spill, park, return to the scheduler, and on re-entry
@@ -311,7 +318,7 @@ export function emitCoroAwait(
   E.line(`${coroLabel(index)}:;`);
   for (const t of owned) E.line(`${t.name} = sc_f->sc_tmp_${t.name};`);
   for (const line of coroReload(fn, plan)) E.line(line);
-  const take =
+  const take0 =
     resultType.kind === "void"
       ? null
       : resultType.kind === "f64"
@@ -319,6 +326,8 @@ export function emitCoroAwait(
         : resultType.kind === "bool"
           ? "scr_coro_take_bool"
           : "scr_coro_take_ref";
+  // Identity unless SCRIPTC_CORO_VALUE_POISON=take-arm.
+  const take = take0 === null ? null : poisonTakeArm(resultType, take0);
   if (take === null) {
     E.line(`scr_coro_take_void(sc_b, sc_f->sc_awaited);`);
     E.line(`scr_promise_release(sc_f->sc_awaited); sc_f->sc_awaited = NULL;`);
@@ -353,7 +362,10 @@ export function coroFinish(
       // -- reads `b`. Fulfilling through f64 left `b` zero, so an `await` of
       // a bool-returning coroutine answered false whatever it returned: a
       // wrong ANSWER, not a crash, which is why a green corpus never saw it.
-      return [...env, `scr_coro_finish_bool(sc_b, ${valueExpr});`, `return;`];
+      // Identity unless SCRIPTC_CORO_VALUE_POISON=finish-arm, which
+      // reinstates exactly the defect the comment above describes: the
+      // bool converts to double, the call compiles, `b` stays zero.
+      return [...env, `${poisonFinishArm(retType, "scr_coro_finish_bool")}(sc_b, ${valueExpr});`, `return;`];
     default: {
       const v = vAdapters(retType);
       return [
