@@ -23,13 +23,15 @@
  * cannot be inferred from a passing run, which is why it is a test and not
  * a comment.
  *
- * TODAY PART 1 IS VACUOUS AND PART 2 SAYS SO. stacklessPlan refuses every
- * generator -- fn.async !== true at liveness.ts:842 catches the synchronous
- * ones before the generator gate at :844 ever runs -- so EXPECTED_CONVERSIONS
- * is 0 and both lanes emit the same fiber lowering. That is not a reason to
- * wait: part 3 is live NOW, because the poison perturbs the fiber lowering
- * that both lanes currently share, so the comparison is proved able to see a
- * wrong arm before there is a second lane to compare.
+ * PART 1 WAS VACUOUS UNTIL THIS SLICE AND PART 2 SAID SO IN A NUMBER.
+ * stacklessPlan used to refuse every generator -- fn.async !== true caught
+ * the synchronous ones before the generator gate ever ran -- so
+ * EXPECTED_CONVERSIONS was 0 and both lanes emitted the same fiber
+ * lowering. The admission gates are now open and the number is 1, so the
+ * comparison is between two different lowerings for the first time. Part 3
+ * was live even before that, because the poison perturbs the fibre lowering
+ * both lanes shared -- which is how the guard was proved able to see a wrong
+ * arm before there was a second lane to compare.
  *
  * WHEN THE SYNCHRONOUS SLICE LANDS: raise EXPECTED_CONVERSIONS to the number
  * of generator resume functions the knob-on build emits. Do not delete the
@@ -62,9 +64,24 @@ import {
 const execFileAsync = promisify(execFile);
 const sanitize = process.env["SCRIPTC_SAN"] === "1";
 
-/** Generator resume functions in the knob-on build, today. Raise this when
- * the synchronous-generator slice lands; see the header. */
-const EXPECTED_CONVERSIONS = 0;
+/** Generator resume functions the knob-on build must emit, per program.
+ *
+ * DERIVED, NOT YET MEASURED. Each program below defines exactly one
+ * synchronous generator and no async function, and a converted generator
+ * emits exactly one resume function, so the count is 1. The top-level
+ * for-of is ordinary synchronous code and converts nothing.
+ *
+ * It was 0 until the admission gates opened in this same slice, and a 0
+ * here now would mean NOTHING CONVERTED -- which is the first signal to
+ * read, not the last. If the first real run disagrees with 1, the number
+ * moves and the commit says which way and why; it is a prediction from
+ * reading the emitter, and predictions from reading have been wrong twice
+ * in this slice already.
+ *
+ * Do not relax it into an inequality. An exact count is what turns "some
+ * generators converted" into "these did", and a range would hide one that
+ * stopped converting. */
+const EXPECTED_CONVERSIONS = 1;
 
 /** One program per arm of the yield channel. Each prints every value it
  * yields, so a wrong arm changes stdout rather than merely the C. */

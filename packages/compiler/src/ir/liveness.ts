@@ -30,7 +30,12 @@
  * descended into: lambdas are lifted, so they cannot name this frame's
  * locals except through `captures`, which IS read here. */
 import type { IrExpr, IrFunction, IrStmt, SrcLoc } from "./nodes.js";
-import { SUSPENDING_NODE_KINDS, SUSPENDING_LIB_CALLS, STACKLESS_LOWERABLE_LIB_CALLS } from "./suspends.js";
+import {
+  SUSPENDING_NODE_KINDS,
+  SUSPENDING_LIB_CALLS,
+  STACKLESS_LOWERABLE_LIB_CALLS,
+  STACKLESS_LOWERABLE_NODE_KINDS,
+} from "./suspends.js";
 
 /** One suspension point and what a frame would have to hold across it. */
 export interface SuspensionPoint {
@@ -403,7 +408,7 @@ function recordPoints(
           ctx.finallyDepth === 0 &&
           ctx.switchDepth === 0 &&
           ctx.rootOk &&
-          s.node["kind"] === "awaitExpr",
+          STACKLESS_LOWERABLE_NODE_KINDS.has(String(s.node["kind"])),
         blockers: [
           ...(ctx.loopDepth > 0 ? ["loop"] : []),
           ...(ctx.finallyDepth > 0 ? ["finally"] : []),
@@ -411,7 +416,9 @@ function recordPoints(
           ...(ctx.guardedByFinally > 0 ? ["finally:guarded"] : []),
           ...(ctx.switchDepth > 0 ? ["switch"] : []),
           ...(ctx.rootOk ? [] : ["rootOk:" + ctx.stmtKind]),
-          ...(s.node["kind"] === "awaitExpr" ? [] : ["kind=" + String(s.node["kind"])]),
+          ...(STACKLESS_LOWERABLE_NODE_KINDS.has(String(s.node["kind"]))
+            ? []
+            : ["kind=" + String(s.node["kind"])]),
         ],
         enclosingForOf: ctx.forOfDepth,
       });
@@ -872,9 +879,25 @@ function hasFiberOnlySuspender(fn: IrFunction): boolean {
 }
 
 export function stacklessPlan(fn: IrFunction): StacklessPlan | null {
-  if (fn.async !== true) return null;
+  /* A SYNCHRONOUS GENERATOR IS IN, and the two gates it used to die at
+   * were not saying what they appeared to say.
+   *
+   * `fn.async !== true` caught it FIRST, one line above the generator
+   * gate -- so the comment about generators needing "the second machine"
+   * explained a line that never fired for a synchronous one. Measured on
+   * the 244-dump corpus: 24 of the 47 functions blocked only by a
+   * generator cause are synchronous, so more than half the cost of this
+   * exclusion was charged to a gate with no stated reason at all.
+   *
+   * An ASYNC generator stays out, and not for the stated reason either:
+   * its yield calls scr_await_hop inside scr_agen_yield_settle, and the
+   * hop is the one suspender this lane declares it cannot lower --
+   * STACKLESS_LOWERABLE_LIB_CALLS is the empty set. Those 18 belong to
+   * the hop front, not to this one. */
+  const syncGenerator = fn.generator !== undefined && fn.async !== true;
+  if (fn.async !== true && !syncGenerator) return null;
   if (hasFiberOnlySuspender(fn)) return null;
-  if (fn.generator !== undefined) return null;
+  if (fn.generator !== undefined && fn.async === true) return null;
   if (fn.asyncCacheGlobal !== undefined || fn.asyncCycleCacheGlobal !== undefined) return null;
   // A boxed PARAM used to be refused here. The stated reason -- "both the raw
   // name and the box would have to be frame state" -- was not the mechanism.

@@ -122,6 +122,24 @@ export function emitCoroFrames(E: CEmitter, out: string[], plans: Map<string, St
       const t = l.boxed === true ? "ScrBox *" + coroField(id) : cDecl(l.type, coroField(id));
       fields.push(`${t}; /* ${l.name} */`);
     }
+    // A GENERATOR frame carries its own handle. The yield and finish arms
+    // reach the OUT slot through it, and the slot lives on the handle
+    // because the native sink in scr_stream.c reads it from C with no
+    // knowledge of frames.
+    //
+    // ONE FIELD, AND ONLY ON GENERATORS. The alternative is a back-pointer
+    // on ScrCoroBase, which is 8 bytes on EVERY frame -- including the 95%
+    // that are ordinary awaits and will never be a generator -- to serve the
+    // few that are. Same reasoning that keeps the exception cell out of the
+    // lean frame: pay the cost where it is owed.
+    if (fn.generator !== undefined) {
+      fields.push("ScrGen *sc_gen; /* the handle this frame is behind */");
+    }
+    // sc_awaited is emitted for a generator too, though a SYNCHRONOUS one
+    // never parks on a promise. Conditioning it on the plan carrying an
+    // awaitExpr point would save 8 bytes and introduce a way for the await
+    // path to find the field missing; 8 bytes on a shape that barely exists
+    // is not worth a branch that can be wrong. Deliberate, not overlooked.
     fields.push("ScrPromise *sc_awaited; /* the operand being awaited */");
     for (const t of E.coroTempSpills.get(fn.name) ?? []) {
       fields.push(`${cDecl(t.type, "sc_tmp_" + t.name)}; /* owned across a park */`);
