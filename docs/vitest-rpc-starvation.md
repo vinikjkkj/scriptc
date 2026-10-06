@@ -119,9 +119,16 @@ cause first.
   **ANSWERED, and it cuts both ways.** They do not share: 1 and 2 are one
   event on shard 6/6 of `knobon-measure`, 3 is shard 3/6 of `gatefour` with
   no test file. So "shared shard" is **not** available as a discriminator --
-  there is no sharing BETWEEN runs -- and the real numerator falls from
-  three occurrences to **two events**, which worsens an already
-  non-significant p (0.165 on the three-occurrence count). Worker count
-  remains the only condition stated across both events.
+  there is no sharing BETWEEN runs. Worker count remains the only condition
+  stated across both events.
+
+  **AND THE p DOES NOT MOVE. Do not recompute it.** The correction changes
+  the prose and nothing else, because the statistic was never computed over
+  occurrences: it counts **runs that timed out** -- 2 of 6 against 0 of 10,
+  the two being `knobon-measure` and `gatefour`. Occurrences 1 and 2 were
+  ALREADY one run in that count. Reading "three became two" as a change to
+  the numerator and recomputing would produce a new p that disagrees with
+  the old one with nobody having made a mistake, which is a worse outcome
+  than either number alone.
 - Whether any of the 93 synchronous spawns are on the hot path of the shards
   that timed out. The count is a harness-wide figure, not a per-shard one.
