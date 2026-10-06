@@ -621,10 +621,34 @@ describe("the reference-count audit", () => {
       });
       expect(cbuilt.ok).toBe(true);
       const cr = await run(cbuilt.binaryPath!, [], cdir, 60_000);
-      expect(
-        cr.stderr,
-        "the abandoned-fiber control did not report a skip — the audit above may not have run either",
-      ).toMatch(/RC audit skipped: 1 fiber\(s\) never resumed/);
+      /* LANE-CONDITIONED, AND BOTH ARMS ASSERT A LINE THAT EXISTS.
+       *
+       * The control abandons a suspension on purpose, so the audit must not
+       * silently audit it -- but WHAT it says differs by lane, and asserting
+       * the fiber wording unconditionally is how this test failed with the
+       * knob on: converted functions create no fiber, so no fiber is
+       * abandoned and the skip notice never prints.
+       *
+       * The knob-on arm does NOT assert the absence of a failure. It asserts
+       * the coroutine line the runtime now emits, with its COUNT -- one
+       * abandoned frame, because `never` is called once. An arm asserting
+       * absence would pass on a binary that printed nothing at all, which is
+       * the vacuous green this file already demonstrates the cost of.
+       *
+       * Both arms are real. An `if` with an empty branch is the same vacuous
+       * green wearing a conditional. */
+      const controlC = readFileSync(join(cdir, "main.c"), "utf8");
+      if (!controlC.includes("sc_cr_never(")) {
+        expect(
+          cr.stderr,
+          "the abandoned-fiber control did not report a skip — the audit above may not have run either",
+        ).toMatch(/RC audit skipped: 1 fiber\(s\) never resumed/);
+      } else {
+        expect(
+          cr.stderr,
+          "the stackless lane abandons a COROUTINE, not a fiber: the audit must report it by name and by count",
+        ).toMatch(/scriptc RC audit: 1 coroutine\(s\) abandoned/);
+      }
 
       // THE ABANDONED DISPATCHER, and it needs its own program because the
       // fixture above cannot carry it: a fetch whose promise is never
