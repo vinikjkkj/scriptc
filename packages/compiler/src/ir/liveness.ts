@@ -118,7 +118,20 @@ function readsOf(node: unknown, out: Set<string>): void {
 
 interface FoundSuspension {
   node: Record<string, unknown>;
+  /** Nested for LIVE-SET purposes: the conservative widening still applies. */
   nested: boolean;
+  /** Nested for BLOCKING purposes: whether it is kept out of the slice.
+   *
+   * THE TWO ARE NOT THE SAME QUESTION, and splitting them is what lets a
+   * ternary arm join without loosening anything. Blocking decides whether
+   * the lane may lower the point at all; the live set decides how much the
+   * frame carries across it. A ternary arm is safe to LOWER -- its arms are
+   * alternatives, so nothing from the sibling arm is ever in flight, and the
+   * resume label lands inside an ordinary if/else branch -- but it keeps the
+   * widened live set anyway. Over-spilling costs frame bytes; under-spilling
+   * is a use-after-free, and this file has already paid for that twice. When
+   * the two directions are not symmetric, take the expensive one. */
+  blocked: boolean;
 }
 
 /** Every suspension node inside this expression tree, with whether it sits
@@ -149,16 +162,49 @@ interface FoundSuspension {
  * alone is 131 of them -- 117 in one file, route handlers declared `any`
  * whose `return await f()` is already in the slice and blocked only by the
  * dyn conversion sitting on the result. */
+/** Operands reachable through `v` WITHOUT passing through another node.
+ *
+ * SEEING THROUGH AN ENTRY. Some nodes hold their children in plain entry
+ * objects that carry no `kind` of their own -- a recordLit's `fields` are
+ * {name, value} pairs. A count that only looks for `kind` one level down
+ * reads such a node as ZERO operands, and zero is not one, so the node never
+ * becomes transparent. Nothing breaks; the node is simply INVISIBLE to the
+ * rule rather than rejected by it, and invisibility leaves no red to find.
+ *
+ * SWEPT, not guessed, over both populations: exactly four shapes in the IR
+ * count zero for this reason. `recordLit.fields` is the one with occupancy
+ * (16 suspensions in zapo-rest, 12 across 7 corpus files) and is what this
+ * buys. `switch.cases` holds suspensions too but is rejected LOUDLY by
+ * switchDepth, so seeing through it changes nothing. `dynObjLit.fields` and
+ * `mapNew.seed` have the property with measured ZERO occupancy in both
+ * populations and are recorded as capacity, not occupancy.
+ *
+ * Counting stops AT a node rather than descending into it: a kinded child is
+ * one operand whatever it contains. So `{ v: await f() }` counts 1 and is
+ * transparent, while `{ a: g(), b: await f() }` counts 2 and is not -- which
+ * is the same before/after argument the sole-operand fence already makes,
+ * now able to see the shape it was blind to. */
+function countOperands(v: unknown, depth = 0): number {
+  if (depth > 4 || v === null || typeof v !== "object") return 0;
+  if (Array.isArray(v)) {
+    let n = 0;
+    for (const x of v) n += countOperands(x, depth + 1);
+    return n;
+  }
+  if ("kind" in (v as object)) return 1; // a node is ONE operand; do not descend
+  let n = 0;
+  for (const k in v as Record<string, unknown>) {
+    if (k === "loc" || k === "type") continue;
+    n += countOperands((v as Record<string, unknown>)[k], depth + 1);
+  }
+  return n;
+}
+
 function operandCount(rec: Record<string, unknown>): number {
   let n = 0;
   for (const k in rec) {
     if (k === "loc" || k === "type") continue;
-    const v = rec[k];
-    if (Array.isArray(v)) {
-      for (const x of v) if (x !== null && typeof x === "object" && "kind" in (x as object)) n++;
-    } else if (v !== null && typeof v === "object" && "kind" in (v as object)) {
-      n++;
-    }
+    n += countOperands(rec[k]);
   }
   return n;
 }
@@ -167,18 +213,18 @@ function suspensionsOf(root: IrExpr | null): FoundSuspension[] {
   const out: FoundSuspension[] = [];
   if (root === null) return out;
   const seen = new Set<object>();
-  const walk = (n: unknown, depth: number): void => {
+  const walk = (n: unknown, depth: number, blockDepth: number): void => {
     if (n === null || typeof n !== "object") return;
     if (seen.has(n)) return;
     seen.add(n);
     if (Array.isArray(n)) {
-      for (const x of n) walk(x, depth);
+      for (const x of n) walk(x, depth, blockDepth);
       return;
     }
     const rec = n as Record<string, unknown>;
     const kind = rec["kind"];
     const isSusp = typeof kind === "string" && SUSPENSION_KINDS.has(kind);
-    if (isSusp) out.push({ node: rec, nested: depth > 0 });
+    if (isSusp) out.push({ node: rec, nested: depth > 0, blocked: blockDepth > 0 });
     // A node with exactly ONE operand is transparent to nesting: see
     // operandCount. Belt and braces on a fence this file does not own -- the
     // classification and the count come from the same call, so they cannot
@@ -190,10 +236,18 @@ function suspensionsOf(root: IrExpr | null): FoundSuspension[] {
     }
     for (const k in rec) {
       if (k === "loc" || k === "type") continue;
-      walk(rec[k], isSusp || transparent ? depth : depth + 1);
+      // A TERNARY ARM does not block. The arms are alternatives: whichever
+      // one holds the suspension is the only one that ever runs, so there is
+      // no sibling operand in flight, and the resume label lands inside an
+      // ordinary if/else branch the state machine can jump into. `cond` is
+      // NOT included -- a suspension there has both arms still ahead of it,
+      // which is a different question and a different slice.
+      const ternaryArm = kind === "ternary" && (k === "then" || k === "else_");
+      const free = isSusp || transparent;
+      walk(rec[k], free ? depth : depth + 1, free || ternaryArm ? blockDepth : blockDepth + 1);
     }
   };
-  walk(root, 0);
+  walk(root, 0, 0);
   return out;
 }
 
@@ -319,14 +373,14 @@ function recordPoints(
         live: s.nested ? union(base, enclosingReads) : new Set(base),
         nestedInExpression: s.nested,
         straightLine:
-          !s.nested &&
+          !s.blocked &&
           ctx.loopDepth === 0 &&
           ctx.finallyDepth === 0 &&
           ctx.switchDepth === 0 &&
           ctx.rootOk &&
           s.node["kind"] === "awaitExpr",
         blockers: [
-          ...(s.nested ? ["nested"] : []),
+          ...(s.blocked ? ["nested"] : []),
           ...(ctx.loopDepth > 0 ? ["loop"] : []),
           ...(ctx.finallyDepth > 0 ? ["finally"] : []),
           ...(ctx.switchDepth > 0 ? ["switch"] : []),

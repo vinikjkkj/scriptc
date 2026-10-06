@@ -133,7 +133,23 @@ const WRAPPERS: ReadonlyArray<{ name: string; take: string; finish: string; conv
   // The ledger caught it on the first run. It stays as a ledger entry so the
   // shape is named rather than silently absent, and it goes red the day a
   // record literal does start converting.
-  { name: "wrl", take: "f64", finish: "ref", converted: false },
+  { name: "wrl", take: "f64", finish: "ref", converted: true },
+  // The multi-field twin, and it must STAY off the lane: two fields are two
+  // operands, so the before/after hazard is real and the literal is rightly
+  // still nested. Measured: of 17 suspension-holding record literals in
+  // zapo-rest exactly ONE has a single field; the rest carry 2, 3, 5, 6, 19
+  // and 23. It is here as a negative entry so the boundary between the two
+  // is guarded, not just the side that converts.
+  { name: "wrm", take: "f64", finish: "ref", converted: false },
+  // TERNARY ARMS. The specific defect here is not "no value came back" but
+  // THE WRONG ARM with a plausible value: a ternary that resumes into the
+  // opposite branch returns the right type, the right width, and the wrong
+  // answer -- invisible to a turn count, a structure check, and to any guard
+  // that only proves a number arrived. So the two arms carry values that are
+  // distinguishable FROM EACH OTHER, not merely from garbage.
+  { name: "wtt", take: "f64", finish: "f64", converted: true },
+  { name: "wte", take: "f64", finish: "f64", converted: true },
+  { name: "wtb", take: "f64", finish: "f64", converted: true },
 ];
 
 const SOURCE = `
@@ -176,6 +192,12 @@ function wrap1(v: number): string { return "w" + v; }
 async function wdr(n: number): Promise<any> { return await pf(n); }
 async function wca(n: number): Promise<string> { return wrap1(await pf(n)); }
 async function wrl(n: number): Promise<{ v: number }> { return { v: await pf(n) }; }
+async function wrm(n: number): Promise<{ a: string; b: number; c: boolean; d: string }> {
+  return { a: "A", b: await pf(n), c: true, d: "D" };
+}
+async function wtt(pick: boolean): Promise<number> { return pick ? await pf(100) : 7; }
+async function wte(pick: boolean): Promise<number> { return pick ? 7 : await pf(200); }
+async function wtb(pick: boolean): Promise<number> { return pick ? await pf(300) : await pf(400); }
 async function wcs(bad: boolean): Promise<string> {
   try {
     if (bad) throw new Error("sync");
@@ -217,6 +239,19 @@ async function main(): Promise<void> {
   console.log("catch ", cs1, cs2);
   const dr = await wdr(10); const ca = await wca(20); const rl = await wrl(30);
   console.log("sole  ", dr, ca, rl.v, typeof dr);
+  // Structured payloads are compared FIELD BY FIELD, not by "a record came
+  // back". A record crossing a suspension can return with a field missing,
+  // a field holding its neighbour's value, or the fields in the wrong order,
+  // and every one of those survives a turn count and a structure check --
+  // which is exactly how the bool that was always false got through.
+  const m = await wrm(50);
+  console.log("rec   ", m.a, "|", m.b, "|", m.c, "|", m.d, "|", typeof m.a, typeof m.b, typeof m.c);
+  // Each arm is exercised and printed separately: a swap shows as 401/301
+  // rather than as a missing line, and 7 pins the non-awaiting arm.
+  console.log("tern  ", await wtt(true), await wtt(false), "|", await wte(true), await wte(false));
+  console.log("tern2 ", await wtb(true), await wtb(false));
+  const r1 = await wrl(60);
+  console.log("rec1  ", r1.v, "|", typeof r1.v);
   console.log("done");
 }
 void main();
