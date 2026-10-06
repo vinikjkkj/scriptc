@@ -443,7 +443,10 @@ independently and nobody has put them side by side.
    record builders, indifferent to how the body suspends.
 5. The LLVM twin of each, by the port's own rules.
 
-**DECISION -- someone chooses (5, plus a sixth recorded in S10b):**
+**DECISION -- someone chooses (5, plus a sixth recorded in S10b).**
+**RESOLVED in `stackless-generators-decisions.md`: two of these five
+dissolve on inspection and three remain, each with a recommendation.**
+
 
 1. **Does a stackless generator keep `ScrGen` as its handle?** One discriminated
    handle costs a branch per resume but keeps **one** consumer emission; two
