@@ -120,6 +120,37 @@ heaviest, so per-shard WORK does not order the failures either.
 What the arm does do is hold worker count FIXED at 12 across both
 conditions, which is the only variable it was built to control.
 
+## 3b. The ledger, and a variable that has never been varied
+
+Stated as a ledger because the tempting summary -- "neither worker count nor
+per-shard load orders the failures" -- is right about one of them and wrong
+about the other, in a way that is easy to miss because the conclusion is
+agreeable.
+
+| hypothesis | status | why |
+|---|---|---|
+| per-shard work | **refuted by ordering** | shard 4 carried 29 descendants and passed; the two that failed carried 21 and 23 |
+| co-load (scans, builds elsewhere) | raised, not established | the clean arm, P = 0.579 under the null |
+| **worker count** | **NEITHER. It has never been varied** | every observation we have, failing and clean alike, is at **12** |
+
+The third row is the one worth the section. Worker count cannot be refuted
+by ordering, because ordering needs contrast and there is none: the three
+timeouts were at 12 workers and the clean arm was **also at 12 workers**.
+What the clean arm varied was the co-load, with worker count held fixed --
+that was its design and its value.
+
+So "worker count does not order the failures" is true only WITHIN the
+12-worker population, which is the whole population. A variable with no
+contrast cannot be ordered against anything, and reading its silence as
+exoneration is the error this section exists to block. Two hypotheses are
+live and one is refuted; it is not two refuted.
+
+**NOT DETERMINED, and cheap to answer**: what worker count the 10 runs that
+did NOT time out were using. If they were also at 12, the variable is
+genuinely unvaried across every observation and no arm has ever tested it.
+If they were lower, a contrast already exists in data we hold and nobody has
+read it that way.
+
 ## 4. A harness property that holds regardless
 
 `tests/harness` contains **93 synchronous child-process calls across 35
