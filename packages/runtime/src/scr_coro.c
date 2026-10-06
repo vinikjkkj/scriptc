@@ -256,6 +256,19 @@ void scr_coro_finish_f64(ScrCoroBase *base, double v) {
   scr_promise_fulfill_f64(base->promise, v);
 }
 
+/* A BOOL RESULT HAS ITS OWN FIELD, and routing it through finish_f64 was a
+ * silent wrong answer rather than a crash. ScrPromise carries `f64` and `b`
+ * as SEPARATE members (not a union) and a distinct payload_kind; the awaiting
+ * side -- stackless scr_coro_take_bool AND fiber scr_await_bool alike -- reads
+ * `p->b`. A coroutine that fulfilled through f64 left `b` at zero, so every
+ * `await` of a bool-returning coroutine answered false whatever it returned.
+ * Measured on zapo-rest: 62 such coroutines in the shipped build, and the
+ * Noise handshake refused every certificate because its verifier is one. */
+void scr_coro_finish_bool(ScrCoroBase *base, bool v) {
+  base->flags |= SCR_CORO_DONE;
+  scr_promise_fulfill_bool(base->promise, v);
+}
+
 void scr_coro_finish_ref(ScrCoroBase *base, void *v, void *(*retain)(void *),
                          void (*release)(void *), ScrTraceFn trace) {
   base->flags |= SCR_CORO_DONE;

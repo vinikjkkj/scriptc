@@ -51,6 +51,11 @@ export interface SuspensionPoint {
    * of its points is D1: the hybrid is per FUNCTION, not per site, because
    * a frame that is half state machine and half stack is neither. */
   straightLine: boolean;
+  /** WHY this point is not straight-line, empty when it is. Scoping a later
+   * slice needs the REASON, not the verdict: a function blocked by a loop
+   * AND by a nested point is not bought by closing loops, and counting
+   * verdicts cannot tell those apart. */
+  blockers: string[];
   /** How many `forOf` loops enclose this point. A `forOf` names ONLY its
    * binding — its iterable reference and cursor are backend-internal and
    * are not IrLocals, so they cannot appear in `live` however correct the
@@ -166,6 +171,10 @@ interface Ctx {
    * (`exprStmt`, `varDecl`); false everywhere else, so a suspension in any
    * other statement position is never D1 however shallow it looks. */
   rootOk: boolean;
+  /** The statement kind that owns the point being recorded -- set per
+   * CALL, not per statement: `if` walks its branches before recording its
+   * condition, so a per-statement field would name the last nested one. */
+  stmtKind: string;
   /** Loop bodies are walked repeatedly to reach a fixpoint. Only the final
    * walk may record, or a two-await loop reports a point per iteration. */
   recording: boolean;
@@ -207,8 +216,10 @@ function recordPoints(
   defs: readonly string[],
   boxedUse: readonly string[] = [],
   rootOk = false,
+  stmtKind = "?",
 ): void {
   ctx.rootOk = rootOk;
+  ctx.stmtKind = stmtKind;
   if (!ctx.recording) return;
   const base = new Set(liveAfter);
   for (const d of defs) if (!ctx.boxed.has(d)) base.delete(d);
@@ -241,6 +252,14 @@ function recordPoints(
           ctx.switchDepth === 0 &&
           ctx.rootOk &&
           s.node["kind"] === "awaitExpr",
+        blockers: [
+          ...(s.nested ? ["nested"] : []),
+          ...(ctx.loopDepth > 0 ? ["loop"] : []),
+          ...(ctx.tryDepth > 0 ? ["try"] : []),
+          ...(ctx.switchDepth > 0 ? ["switch"] : []),
+          ...(ctx.rootOk ? [] : ["rootOk:" + ctx.stmtKind]),
+          ...(s.node["kind"] === "awaitExpr" ? [] : ["kind=" + String(s.node["kind"])]),
+        ],
         enclosingForOf: ctx.forOfDepth,
       });
     }
@@ -280,14 +299,14 @@ function backStmt(
 ): Set<string> {
   switch (s.kind) {
     case "varDecl": {
-      recordPoints(ctx, [s.init], liveOut, [s.localId], [], true);
+      recordPoints(ctx, [s.init], liveOut, [s.localId], [], true, "varDecl");
       const live = new Set(liveOut);
       if (!ctx.boxed.has(s.localId)) live.delete(s.localId);
       if (s.init !== null) readsOf(s.init, live);
       return live;
     }
     case "assign": {
-      recordPoints(ctx, [s.value], liveOut, [s.localId], [s.localId]);
+      recordPoints(ctx, [s.value], liveOut, [s.localId], [s.localId], false, "assign");
       const live = new Set(liveOut);
       if (ctx.boxed.has(s.localId)) {
         // Writing a BOXED local is a USE of the box pointer, not a kill:
@@ -306,7 +325,7 @@ function backStmt(
       return live;
     }
     case "exprStmt": {
-      recordPoints(ctx, [s.expr], liveOut, [], [], true);
+      recordPoints(ctx, [s.expr], liveOut, [], [], true, "exprStmt");
       const live = new Set(liveOut);
       readsOf(s.expr, live);
       return live;
@@ -314,7 +333,7 @@ function backStmt(
     case "throw": {
       // A throw terminates this path, but an enclosing catch may resume, so
       // liveOut is kept rather than discarded (CONSERVATIVE).
-      recordPoints(ctx, [s.value], liveOut, []);
+      recordPoints(ctx, [s.value], liveOut, [], [], false, "throw");
       const live = new Set(liveOut);
       readsOf(s.value, live);
       return live;
@@ -325,7 +344,15 @@ function backStmt(
       // bodies read is live here.
       const live = new Set<string>();
       for (const f of ctx.finallys) for (const id of f) live.add(id);
-      recordPoints(ctx, [s.value], live, []);
+      // D2a: `return await f()` is a ROOT position, and the cheapest
+      // suspension point there is. The live set above is the proof -- nothing
+      // after a return is reachable, so outside a try/finally it is EMPTY and
+      // the frame carries nothing across the park. It sat outside D1 as scope,
+      // not difficulty, and the census says it is the single largest blocker
+      // in zapo-rest: 497 points, against 96 for every loop in the program.
+      // A return INSIDE a try still has tryDepth > 0 and stays blocked, which
+      // is the half that waits for the try slice.
+      recordPoints(ctx, [s.value], live, [], [], true, "return");
       if (s.value !== null) readsOf(s.value, live);
       return live;
     }
@@ -336,7 +363,7 @@ function backStmt(
       const elseLive =
         s.else_ === null ? new Set(liveOut) : backStmts(ctx, s.else_, liveOut, loops);
       const live = union(thenLive, elseLive);
-      recordPoints(ctx, [s.cond], live, []);
+      recordPoints(ctx, [s.cond], live, [], [], false, "if");
       readsOf(s.cond, live);
       return live;
     }
@@ -365,7 +392,7 @@ function backStmt(
         continueLive: new Set(live),
       };
       const headerLive = new Set(live);
-      recordPoints(ctx, [s.cond], headerLive, []);
+      recordPoints(ctx, [s.cond], headerLive, [], [], false, "doWhile");
       readsOf(s.cond, headerLive);
       ctx.loopDepth++;
       backStmts(ctx, s.body, headerLive, [...loops, frame]);
@@ -398,7 +425,7 @@ function backStmt(
       };
       const headerLive = new Set(live);
       if (s.cond !== null) {
-        recordPoints(ctx, [s.cond], headerLive, []);
+        recordPoints(ctx, [s.cond], headerLive, [], [], false, "for");
         readsOf(s.cond, headerLive);
       }
       const afterUpdate =
@@ -446,7 +473,7 @@ function backStmt(
       // not live ACROSS the iterable's own evaluation.
       const out = new Set(live);
       if (!ctx.boxed.has(s.localId)) out.delete(s.localId);
-      recordPoints(ctx, [s.iterable], out, [s.localId]);
+      recordPoints(ctx, [s.iterable], out, [s.localId], [], false, "forOf");
       readsOf(s.iterable, out);
       return out;
     }
@@ -478,10 +505,10 @@ function backStmt(
       ctx.switchDepth++;
       for (const c of s.cases) {
         backStmts(ctx, c.body, new Set(live), [...loops, frame]);
-        if (c.test !== null) recordPoints(ctx, [c.test], live, []);
+        if (c.test !== null) recordPoints(ctx, [c.test], live, [], [], false, "switch");
       }
       ctx.switchDepth--;
-      recordPoints(ctx, [s.disc], live, []);
+      recordPoints(ctx, [s.disc], live, [], [], false, "switch");
       const out = new Set(live);
       for (const c of s.cases) if (c.test !== null) readsOf(c.test, out);
       readsOf(s.disc, out);
@@ -526,7 +553,7 @@ function backStmt(
     }
     case "arraySet":
     case "bytesSet": {
-      recordPoints(ctx, [s.arr, s.index, s.value], liveOut, []);
+      recordPoints(ctx, [s.arr, s.index, s.value], liveOut, [], [], false, "bytesSet");
       const live = new Set(liveOut);
       readsOf(s.arr, live);
       readsOf(s.index, live);
@@ -534,7 +561,7 @@ function backStmt(
       return live;
     }
     case "arrayClear": {
-      recordPoints(ctx, [s.arr, s.index], liveOut, []);
+      recordPoints(ctx, [s.arr, s.index], liveOut, [], [], false, "arrayClear");
       const live = new Set(liveOut);
       readsOf(s.arr, live);
       readsOf(s.index, live);
@@ -542,14 +569,14 @@ function backStmt(
     }
     case "fieldSet":
     case "recordSet": {
-      recordPoints(ctx, [s.obj, s.value], liveOut, []);
+      recordPoints(ctx, [s.obj, s.value], liveOut, [], [], false, "recordSet");
       const live = new Set(liveOut);
       readsOf(s.obj, live);
       readsOf(s.value, live);
       return live;
     }
     case "recordKeySet": {
-      recordPoints(ctx, [s.obj, s.key, s.value], liveOut, []);
+      recordPoints(ctx, [s.obj, s.key, s.value], liveOut, [], [], false, "recordKeySet");
       const live = new Set(liveOut);
       readsOf(s.obj, live);
       readsOf(s.key, live);
@@ -557,7 +584,7 @@ function backStmt(
       return live;
     }
     case "recordKeyDelete": {
-      recordPoints(ctx, [s.obj, s.key], liveOut, []);
+      recordPoints(ctx, [s.obj, s.key], liveOut, [], [], false, "recordKeyDelete");
       const live = new Set(liveOut);
       readsOf(s.obj, live);
       readsOf(s.key, live);
@@ -590,6 +617,7 @@ export function suspensionLiveness(fn: IrFunction): FnLiveness | null {
     tryDepth: 0,
     switchDepth: 0,
     rootOk: false,
+    stmtKind: "?",
   };
   backStmts(ctx, fn.body, new Set<string>(), []);
   if (ctx.points.length === 0) return null;
