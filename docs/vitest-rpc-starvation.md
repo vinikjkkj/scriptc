@@ -120,36 +120,39 @@ heaviest, so per-shard WORK does not order the failures either.
 What the arm does do is hold worker count FIXED at 12 across both
 conditions, which is the only variable it was built to control.
 
-## 3b. The ledger, and a variable that has never been varied
-
-Stated as a ledger because the tempting summary -- "neither worker count nor
-per-shard load orders the failures" -- is right about one of them and wrong
-about the other, in a way that is easy to miss because the conclusion is
-agreeable.
+## 3b. The ledger
 
 | hypothesis | status | why |
 |---|---|---|
 | per-shard work | **refuted by ordering** | shard 4 carried 29 descendants and passed; the two that failed carried 21 and 23 |
-| co-load (scans, builds elsewhere) | raised, not established | the clean arm, P = 0.579 under the null |
-| **worker count** | **NEITHER. It has never been varied** | every observation we have, failing and clean alike, is at **12** |
+| our co-load | **raised, not established** | 2-in-2 with, 0-in-4 without; the clean arm is P = 0.579 under the null |
+| worker count | **tested, not significant, CONFOUNDED** | 2/6 at 12 workers against 0/10 at 3, p = 0.165 -- and the 3-worker runs are the overnight ones, so worker count is confounded with time of day |
 
-The third row is the one worth the section. Worker count cannot be refuted
-by ordering, because ordering needs contrast and there is none: the three
-timeouts were at 12 workers and the clean arm was **also at 12 workers**.
-What the clean arm varied was the co-load, with worker count held fixed --
-that was its design and its value.
+**One refuted, two live** -- and the third is live by *non-significance and
+confounding*, not by absence of contrast. The difference decides what to do
+next: "never tested" asks for a new experiment, while "tested, p = 0.165,
+confounded" asks to **de-confound** -- a 3-worker arm at peak, or a 12-worker
+arm overnight.
 
-So "worker count does not order the failures" is true only WITHIN the
-12-worker population, which is the whole population. A variable with no
-contrast cannot be ordered against anything, and reading its silence as
-exoneration is the error this section exists to block. Two hypotheses are
-live and one is refuted; it is not two refuted.
+### What the clean arm does and does not say about workers
 
-**NOT DETERMINED, and cheap to answer**: what worker count the 10 runs that
-did NOT time out were using. If they were also at 12, the variable is
-genuinely unvaried across every observation and no arm has ever tested it.
-If they were lower, a contrast already exists in data we hold and nobody has
-read it that way.
+The clean arm held worker count **fixed at 12** across both of its
+conditions. That was its design and its value: it varied the co-load alone.
+So it refutes nothing about worker count, and a green arm must not be read
+as exonerating it.
+
+That statement is about the ARM. It does not generalise to the day's data,
+where the contrast plainly exists -- and an earlier revision of this section
+made exactly that leap, claiming worker count "has never been varied". It
+has: 12 against 3, which is the contingency the p was computed from.
+
+**The tell was already in this file.** S5 states the denominators as "2 of 6
+against 0 of 10". A contingency with two levels IS a varied variable, and a
+p cannot exist without one. The claim was contradicted three sections above
+where it was written, by a sentence the same author had put there. A right
+fact about one population (the arm) carried into a question about another
+(the day) -- and the check that would have caught it was reading the rest of
+the document.
 
 ## 4. A harness property that holds regardless
 
