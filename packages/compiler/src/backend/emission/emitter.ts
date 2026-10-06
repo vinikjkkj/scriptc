@@ -2358,10 +2358,40 @@ export class CEmitter {
     return ` /* ${this.mod.sourceFile}:${lo + 1} */`;
   }
 
+  /** EVERY temp joins its frame, refcounted or not, and the reason is the
+   * coroutine lowering rather than ownership.
+   *
+   * `emitCoroAwait` spills the frames across a park because the resume
+   * function RETURNS to the scheduler: every C local in it dies, and the
+   * resume `goto` jumps over the declaration, so a temp written before the
+   * park and read after it comes back indeterminate. The frames were the
+   * only register of live temps, and they held refcounted ones only -- so a
+   * `double` or a `bool` evaluated before a nested suspension was silently
+   * lost. Measured, with the knob on and nesting admitted:
+   * `j2n(n1(8), await pf(3))` answered NaN for 8004, `new Pair(n1(8), await
+   * pf(3))` answered 4, and `n1(8) * 1000 + await pf(3)` answered NaN --
+   * right type, right magnitude, wrong answer, which no turn count or
+   * structure check can see.
+   *
+   * It is registered HERE, at the one place that mints a temp and knows its
+   * type, rather than enumerated per construct. The alternative on the table
+   * was a list of non-lowerable POSITIONS; it would have had to name 16 IR
+   * kinds that share the batching shape plus `bin`, which has no `args` at
+   * all, and the three that had actually been probed would have admitted
+   * `new.args` in silence.
+   *
+   * OWNERSHIP IS UNCHANGED, and that is what makes this safe: `releaseFrame`
+   * asks `isRefCounted` before writing a release, so a non-refcounted entry
+   * is spill bookkeeping and nothing else. `moveTemp` already returns early
+   * for them, so they simply stay listed until the frame pops.
+   *
+   * The push is conditional on a frame EXISTING because a non-refcounted
+   * temp could previously be minted outside one; a park cannot happen there,
+   * and the emitted-C guard in the coro tests covers the claim. */
   newTemp(type: IrType, init: string): Temp {
     const name = `sc_t${this.tempCounter++}`;
     this.line(`${cDecl(type, name)} = ${init};`);
-    if (isRefCounted(type)) this.currentFrame().push({ name, type });
+    if (this.frames.length > 0) this.currentFrame().push({ name, type });
     return { name, type };
   }
 
@@ -2375,7 +2405,9 @@ export class CEmitter {
   newImmortalTemp(type: IrType, init: string): Temp {
     const name = `sc_t${this.tempCounter++}`;
     this.line(`${cDecl(type, name)} = ${init};`);
-    if (isRefCounted(type)) this.currentFrame().push({ name, type, immortal: true });
+    // Registered on the same terms as newTemp, so the two cannot drift.
+    // `releaseFrame` skips an immortal before it ever asks about refcounting.
+    if (this.frames.length > 0) this.currentFrame().push({ name, type, immortal: true });
     return { name, type };
   }
 
@@ -2461,6 +2493,11 @@ export class CEmitter {
       // temp stays in the frame for moveTemp and the rest of the ownership
       // discipline.
       if (t.immortal) continue;
+      // A NON-REFCOUNTED entry is in the frame only so a park can spill it
+      // (see newTemp); it owns nothing and there is no release to write.
+      // Asking the type rather than carrying a flag keeps this answer and
+      // newTemp's from being two copies that can drift.
+      if (!t.boxed && !isRefCounted(t.type)) continue;
       if (t.boxed) this.line(`scr_box_release(${t.name});`);
       else this.releaseValue(t.name, t.type);
     }

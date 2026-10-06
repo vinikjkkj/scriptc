@@ -255,19 +255,44 @@ describe(`shutdown close order (${REPEATS} runs per case)`, () => {
       }
       const matched = buckets.get(want) ?? 0;
       const missed = runs - matched;
+      const others = [...buckets.entries()].filter(([k]) => k !== want);
+
+      /* ALWAYS, green or red. A bound nobody can read is an alarm, not an
+       * instrument: under the old code a green run said only "missed <= 8",
+       * which cannot tell a rate of 0 from a rate of 8/90 -- the difference
+       * between "the defect is gone" and "one run from red". The gate keeps
+       * each shard's stdout verbatim in <tag>.log, so this is the series,
+       * and it is the only way a future fix to the OPEN defect above can be
+       * told apart from a lucky run.
+       *
+       * A raw stdout write and NOT console.log, on purpose: vitest's default
+       * reporter prefixes intercepted console output with ANSI reset bytes
+       * ON THE SAME LINE, so `^SHUTDOWN-RATE` would never match in the very
+       * log this exists for (measured, not assumed). The leading newline
+       * keeps the marker at column 0 whatever precedes it.
+       *
+       * fault= rides along because an ARMING run produces real-looking
+       * numbers from an injected population, and a series that cannot tell
+       * those apart is worse than no series. EVERY case emits, not just the
+       * rate-bounded ones: a future entry in RATE_BOUNDED is then
+       * instrumented by existing, not by someone remembering to add it. */
+      process.stdout.write(
+        `\nSHUTDOWN-RATE case=${name} missed=${missed} runs=${runs} ` +
+          `budget=${budget} others=${others.length} fault=${FAULT_RATE}\n`,
+      );
+
       if (missed > budget) {
         // The failure message carries the RATE and every distinct wrong
         // answer, because "it failed once" is the least useful thing a
         // rate defect can tell you.
-        const others = [...buckets.entries()]
-          .filter(([k]) => k !== want)
+        const detail = others
           .map(([k, n]) => `  ${n}/${runs} ${k}`)
           .join("\n");
         const how = budget > 0
           ? `${missed}/${runs} runs diverged, budget ${budget} (a RATE BOUND, not perfection -- see the header)`
           : `${matched}/${runs} runs matched Node`;
         expect.unreachable(
-          `${name}: ${how}.\nNode:\n  ${want}\nothers:\n${others}`,
+          `${name}: ${how}.\nNode:\n  ${want}\nothers:\n${detail}`,
         );
       }
       expect(missed).toBeLessThanOrEqual(budget);
