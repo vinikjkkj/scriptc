@@ -133,9 +133,46 @@ export const STACKLESS_LOWERABLE_LIB_CALLS: ReadonlySet<string> = new Set<Suspen
  * it forces the emission site to name a REGISTERED suspender, so a new
  * fiber-only call cannot reach the output without appearing in the list above
  * that liveness reads. */
-export function fiberOnly(_which: SuspendingLibCall, c: string): string {
-  return c;
+export function fiberOnly(_which: SuspendingLibCall, c: string): FencedC {
+  return c as FencedC;
 }
+
+/* THE FENCE WAS OPT-IN, AND THAT IS HOW THE SECOND ONE GOT THROUGH.
+ *
+ * `fiberOnly` binds the sites that CALL it. Nothing compelled an emission
+ * site to call it, so `async.awaitDyn` was written nine lines below
+ * `async.hop` -- same nature, same file, same switch -- emitting
+ * scr_await_dyn_value raw, and liveness never saw it. A fiber await landed
+ * in a body with no fiber and the process fail-fasted with
+ * STATUS_STACK_BUFFER_OVERRUN. Registering that one closed the instance; it
+ * did not close the CLASS, because the next person to add a
+ * fiber-only primitive still has nothing stopping them.
+ *
+ * So the obligation moves into the TYPE. A C fragment that spells
+ * `scr_await_` is rejected by the emission entry point unless it carries the
+ * brand, and the only thing that mints the brand is `fiberOnly`, which
+ * demands the name of a REGISTERED suspender. A new fiber-only primitive
+ * written by someone who never read any of this does not compile.
+ *
+ * It keys on the `scr_await_` spelling, which is a NAMING CONVENTION and
+ * therefore the honest limit of this fence: a suspending primitive lowered
+ * under some other name escapes it. That gap is covered by the separate
+ * runtime-symbol census (enumeration by PROPERTY, not by name); the two are
+ * complementary and neither subsumes the other. */
+declare const FENCED: unique symbol;
+
+/** A C fragment that has been through the fiber-only fence. */
+export type FencedC = string & { readonly [FENCED]: true };
+
+/** The emission entry point's parameter type. A raw fragment spelling a
+ * fiber-only primitive resolves to the error object below, which no string
+ * is assignable to, so the call site fails to compile with the reason in
+ * the message. A `FencedC` is `string & brand`, which is not assignable to
+ * a template literal type, so it falls through untouched. */
+export type Fenced<S extends string> =
+  S extends `${string}scr_await_${string}`
+    ? { readonly __fiberOnlyPrimitiveMustGoThrough_fiberOnly_see_ir_suspends_ts: never }
+    : S;
 
 const _used: readonly unknown[] = [
   null as unknown as _NodeKindsCovered,

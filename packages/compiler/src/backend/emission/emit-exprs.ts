@@ -1,7 +1,7 @@
 /* Expression C emission: the whole IrExpr dispatch (emitExpr) — every IR
  * expression lands in a fresh C temp, with RC ownership tracked on the
  * emitter's frames (see the discipline comment in emitter core). */
-import { fiberOnly } from "../../ir/suspends.js";
+import { fiberOnly, type Fenced } from "../../ir/suspends.js";
 import type { CEmitter, Temp } from "./emitter.js";
 import { rcSitesRequested, rcSiteLabel } from "./emitter.js";
 import { ABSENT_KEY_TRAP_CODE, arrayOf, BOOL, BYTES_U8, bytesOf, ownMaskKeyBit, OWNMASK_COMPLETED, OWNMASK_VALID, canMarshalFuncIntoIsland, CHILDSTREAM_T, DYN, dynCopyIsObservable, F64, IrExpr, IrRecordShape, IrType, irFunctionJsName, islandPromisePayloadTag, isRefCounted, isUnitType, MAY_THROW_LIB_FNS, RUNTIME_ERROR_CLASSES, settleOrValuePromiseTag, STRING, typeEquals, typeKey } from "../../ir/nodes.js";
@@ -3270,13 +3270,17 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
         // a result temp joins its frame so an unwind releases it.
         const args = e.args.map((a) => E.emitExpr(a));
         const arg = (i: number) => args[i]!.name;
-        const finish = (call: string): Temp => {
+        // Fenced<S>: a raw fragment spelling scr_await_ does not compile here.
+        // See ir/suspends.ts -- fiberOnly was opt-in, and that is how the
+        // second fiber-only primitive reached an admitted coroutine body.
+        const finish = <S extends string>(call: Fenced<S>): Temp => {
+          const c = call as unknown as string;
           if (e.type.kind === "void") {
-            E.line(`${call};${E.srcComment(e.loc)}`);
+            E.line(`${c};${E.srcComment(e.loc)}`);
             if (MAY_THROW_LIB_FNS.has(e.fn)) E.emitPendingCheck();
             return { name: "", type: e.type };
           }
-          const t = E.newTemp(e.type, call);
+          const t = E.newTemp(e.type, c);
           if (MAY_THROW_LIB_FNS.has(e.fn)) E.emitPendingCheck();
           return t;
         };
