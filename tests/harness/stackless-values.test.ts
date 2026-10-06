@@ -157,6 +157,12 @@ const WRAPPERS: ReadonlyArray<{ name: string; take: string; finish: string; conv
   { name: "wnf", take: "f64", finish: "f64", converted: true }, // await FIRST
   { name: "wnr", take: "f64", finish: "ref", converted: true }, // refcounted sibling
   { name: "wnm", take: "f64", finish: "f64", converted: true }, // sibling AFTER
+  // A NEGATIVE entry, and the one that arms the cross-lane scan. An awaited
+  // DYNAMIC keyed call is a fiber-only await with no stackless counterpart,
+  // so the function stays on the fiber lane. Un-register "async.awaitDyn"
+  // from suspends.ts and this flips: the ledger names wdk, and the
+  // fiber-only scan names `sc_cr_wdk: scr_await_dyn_value`.
+  { name: "wdk", take: "ref", finish: "f64", converted: false },
   // TERNARY ARMS. The specific defect here is not "no value came back" but
   // THE WRONG ARM with a plausible value: a ternary that resumes into the
   // opposite branch returns the right type, the right width, and the wrong
@@ -268,6 +274,29 @@ async function wnx(n: number): Promise<number> { return nbuf[n1(1) + await pf(n)
 async function wnf(n: number): Promise<number> { return j2n(await pf(n), n1(8)); }
 async function wnr(n: number): Promise<string> { return j2s(s1("S"), await pf(n)); }
 async function wnm(n: number): Promise<number> { return j2n(await pf(n), n1(8) * 2); }
+// THE DYN KEYED CALL, and it is here to give the cross-lane scan below
+// something to find. That scan has always had the right shape -- no
+// scr_await_* inside a converted body -- and NO OCCUPANCY for this one,
+// because no program in this file made a dynamic call. The gap shipped a
+// crash: async.awaitDyn lowers to scr_await_dyn_value, a fiber-only await,
+// was registered nowhere, so liveness admitted the function and the emitter
+// wrote a fiber await into a body with no fiber. Not a diagnostic -- 0xC0000409
+// STATUS_STACK_BUFFER_OVERRUN, after however much output had already flushed.
+// It must stay OFF the lane, and the ledger entry below says so.
+async function wdk(n: number): Promise<string> {
+  const src = { f: pf };
+  const u: unknown = src;
+  // @ts-ignore -- a keyed call straight off the dyn value is the point
+  await u["f"](n);
+  // The SECOND await is not decoration. A dyn await lowers to a libCall, not
+  // an awaitExpr, so liveness sees NO suspension point in a function that
+  // holds only one -- suspensionLiveness returns null and the function is
+  // never admitted. The crash needs a body that IS admitted, which takes a
+  // co-resident ordinary await. Drop this line and the row stops testing
+  // anything, quietly.
+  const x = await pf(n);
+  return "dk" + x;
+}
 async function wcs(bad: boolean): Promise<string> {
   try {
     if (bad) throw new Error("sync");
@@ -322,6 +351,7 @@ async function main(): Promise<void> {
   console.log("tern2 ", await wtb(true), await wtb(false));
   const r1 = await wrl(60);
   console.log("rec1  ", r1.v, "|", typeof r1.v);
+  console.log("dynkey", await wdk(5));
   // THE NESTED SHAPES. Printed one per line with distinguishable
   // magnitudes, because the break they guard is a plausible number.
   console.log("ncall ", await wna(3), "|", await wnv(3), "|", await wnn(3));

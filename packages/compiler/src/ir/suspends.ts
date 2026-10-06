@@ -60,10 +60,63 @@ type _NodeKindsCovered = AssertNever<
 /* These are not node kinds and that is exactly why they were missed. A
  * libCall looks like any other call in the IR; only the runtime entry point
  * it lowers to knows that it yields. */
-export type SuspendingLibCall = "async.hop";
+export type SuspendingLibCall =
+  | "async.hop"
+  /* THE SECOND INSTANCE OF EXACTLY WHAT THIS FILE WAS BUILT FOR, found
+   * 2026-10-06. `async.awaitDyn` lowers to scr_await_dyn_value, a fiber-only
+   * await, and it sat NINE LINES BELOW the `async.hop` case that goes through
+   * `fiberOnly` -- same nature, its own comment even says "the hop rides the
+   * loop" -- while being registered nowhere. liveness could not see it, so it
+   * admitted functions holding one and the emitter wrote a fiber await into a
+   * body that has no fiber.
+   *
+   * Not "await outside an async function" like the hop was:
+   * STATUS_STACK_BUFFER_OVERRUN, the process fail-fasting after whatever it
+   * had already flushed. Measured on corpus program 4611 -- six lines and
+   * exit 0 knob-absent, one line and 0xC0000409 knob-on, deterministic 10/10
+   * -- then narrowed by cutting down to `await u["clear"]()`, a keyed dynamic
+   * call with NO arguments. Not the function-typed parameter, not the promise
+   * arm, not that method or that object: any awaited dynamic dispatch.
+   *
+   * TWO CARRIERS IN THE CORPUS, not one. A sweep of 227 dumps found
+   * `4611-dyn-func-generator-param-callable` and
+   * `4631-readonly-map-in-a-record-through-unknown`, and BOTH were observed
+   * crashing 0xC0000409 at f30d0d146 with the knob on, each carrying
+   * `scr_await_dyn_value` inside `sc_cr_main`. The fence covers both because
+   * it lives in the shared analysis, but the defect record has to name both
+   * or the latent size reads as half what it was.
+   *
+   * The carriers that were REFUSED were refused by an accident rather than
+   * by the fence: they hold an `awaitDyn` and nothing else, so `points === 0`,
+   * `suspensionLiveness` returns null, and `stacklessPlan` bails before the
+   * fence is ever consulted. Add one ordinary `await` to any of them and it
+   * is admitted with a fiber park inside a coroutine frame. One is named
+   * `destroyIfSupported`, the same name as the single occurrence in the
+   * user's app182 -- so this is ONE LIBRARY IDIOM surfacing in three places,
+   * not three independent findings.
+   *
+   * WHICH MEANS THE REACH COST OF REGISTERING THIS CANNOT BE MEASURED
+   * THROUGH LIVENESS. It reads 0 functions and 0 points, but only because
+   * the blindness that caused the bug also hides its cost. The honest
+   * measurement is the other arm: un-registering `async.hop` moves +15
+   * functions and +28 points, reproducing the "fifteen functions" this
+   * header already attributes to the hop defect.
+   *
+   * A SUBTLETY worth keeping, because it decides whether a test of this is
+   * real: a dyn await is a libCall, not an awaitExpr, so a function whose
+   * ONLY suspension is one has no suspension POINT -- suspensionLiveness
+   * returns null and it is never admitted. The crash needs a body made
+   * admissible by a co-resident ordinary await. A reproducer without one
+   * tests nothing and looks fine.
+   *
+   * Registered rather than lowered because the stackless lane has no
+   * counterpart for the hop it performs, exactly as with `async.hop`: a
+   * function holding one stays on the fiber lane. */
+  | "async.awaitDyn";
 
 export const SUSPENDING_LIB_CALLS = [
   "async.hop",
+  "async.awaitDyn",
 ] as const satisfies readonly SuspendingLibCall[];
 
 type _LibCallsCovered = AssertNever<

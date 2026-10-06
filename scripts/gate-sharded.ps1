@@ -175,7 +175,19 @@ $LogDir      = Join-Path $GateRoot "logs\$RunId"
 # matters; a merge verdict is still six.
 $Shards        = if ($env:GATE_SHARDS) { [int]$env:GATE_SHARDS } else { 6 }
 $ShardContract = 6
-$OffContract   = ($Shards -ne $ShardContract)
+# Twelve is the contract, by the user's standing rule. It gets the same
+# treatment as the shard count for the same reason: a configuration that can
+# change in silence produces a green that looks like the green that counts.
+# The override exists so 3-vs-12 can be A/B'd, and like GATE_SHARDS it takes
+# the run OFF CONTRACT -- a timing experiment must not be able to print a
+# mergeable verdict.
+#
+# The pin lives HERE and not in the wrapper on purpose: the script sets
+# SCRIPTC_TEST_WORKERS itself, so a wrapper value is silently overwritten and
+# would only mislead (the wrapper says so in a comment).
+$Workers        = if ($env:GATE_WORKERS) { [int]$env:GATE_WORKERS } else { 12 }
+$WorkerContract = 12
+$OffContract   = ($Shards -ne $ShardContract) -or ($Workers -ne $WorkerContract)
 $DiskFloorGB = 10
 $ExitRc      = 1
 $Started     = Get-Date
@@ -311,13 +323,30 @@ function Invoke-Judged {
   $err  = Join-Path $LogDir "$Tag.err"
   $json = Join-Path $LogDir "$Tag.json"
   $argv = @("node_modules\vitest\vitest.mjs", "run") + $ExtraArgs +
-          @("--reporter=default", "--reporter=json", "--outputFile.json=$json")
+          @("--max-workers=$Workers", "--min-workers=1",
+            "--reporter=default", "--reporter=json", "--outputFile.json=$json")
 
   $t0 = Get-Date
   $p  = Start-Process -FilePath "node" -ArgumentList $argv -WorkingDirectory $Repo `
         -WindowStyle Hidden -RedirectStandardOutput $out -RedirectStandardError $err -PassThru
   $null = $p.Handle   # cache the handle, or ExitCode reads back empty
   Say ("RUN-START tag={0} pid={1} args={2}" -f $Tag, $p.Id, ($ExtraArgs -join " "))
+  # OBSERVE the pool rather than trust the setting. Counting node processes
+  # on the box is useless -- the user's dev environment runs a dozen -- so
+  # this counts DESCENDANTS of the vitest pid. Logged, NOT a refusal: the
+  # pool ramps, one sample has no calibrated tolerance, and a gate that
+  # aborts on a noisy sample is worse than one that reports it.
+  try {
+    Start-Sleep -Seconds 45
+    if (-not $p.HasExited) {
+      $seen = @(); $q = New-Object System.Collections.Queue; $q.Enqueue($p.Id)
+      while ($q.Count -gt 0) {
+        $cur = $q.Dequeue(); $seen += $cur
+        foreach ($k in (Get-CimInstance Win32_Process -Filter "ParentProcessId=$cur" -ErrorAction SilentlyContinue)) { $q.Enqueue($k.ProcessId) }
+      }
+      Say ("WORKERS-OBSERVED tag={0} pinned={1} descendants={2} (observation, not a refusal)" -f $Tag, $Workers, (@($seen).Count - 1))
+    }
+  } catch { Say ("WORKERS-OBSERVED tag={0} sample-failed: {1}" -f $Tag, $_.Exception.Message) }
   $p.WaitForExit()
   $rc  = $p.ExitCode
   $min = [math]::Round(((Get-Date) - $t0).TotalMinutes, 2)
@@ -417,7 +446,7 @@ try {
   $env:SCRIPTC_TARGET  = "x86_64-windows-gnu"
   $env:SCRIPTC_CC      = "zigcc"
   $env:SCRIPTC_TEST_CC = "zig cc"
-  $env:SCRIPTC_TEST_WORKERS = "3"
+  $env:SCRIPTC_TEST_WORKERS = "$Workers"
   # (6) The pruner's budget. NOT a purge - see the header.
   $env:SCRIPTC_TEST_SCRATCH_MAX_MB = "8192"
   # SCRIPTC_TEST_SHARD is deliberately NOT set. It partitions CASES inside a
@@ -442,7 +471,7 @@ try {
   $TreeHash0 = WorkTreeHash
   Say ("TREEHASH baseline={0} repo={1}" -f $TreeHash0, (RepoRealPath))
   if ($OffContract) {
-    Say ("GATE5-OFF-CONTRACT shards={0} contract={1} -- rig exercise, NOT a merge gate" -f $Shards, $ShardContract)
+    Say ("GATE5-OFF-CONTRACT shards={0}/{1} workers={2}/{3} -- rig exercise, NOT a merge gate" -f $Shards, $ShardContract, $Workers, $WorkerContract)
   }
   # A gate that starts on a dirty tree is measuring somebody's work in
   # progress. Refused outright in a real run; a dry run may be dirty.
@@ -566,9 +595,9 @@ try {
     $ExitRc = 2
     return
   }
-  Say ("GATE5-TOTAL shards={0}/{1} green={2} red={3} partition={4} minutes={5} free={6}GB head={7} treehash={8} verdict={9}" -f $Shards, $ShardContract, $Green, $Red, $(if ($PartitionOk) { "OK" } else { "FAIL" }), [math]::Round(((Get-Date) - $Started).TotalMinutes, 2), (FreeGB), $head, $hEnd, (VerdictWord $verdict))
+  Say ("GATE5-TOTAL shards={0}/{1} workers={2}/{3} green={4} red={5} partition={6} minutes={7} free={8}GB head={9} treehash={10} verdict={11}" -f $Shards, $ShardContract, $Workers, $WorkerContract, $Green, $Red, $(if ($PartitionOk) { "OK" } else { "FAIL" }), [math]::Round(((Get-Date) - $Started).TotalMinutes, 2), (FreeGB), $head, $hEnd, (VerdictWord $verdict))
   if ($OffContract) {
-    Say ("GATE5-NOT-MERGEABLE reason=shard-count-overridden shards={0} contract={1}" -f $Shards, $ShardContract)
+    Say ("GATE5-NOT-MERGEABLE reason=off-contract shards={0}/{1} workers={2}/{3}" -f $Shards, $ShardContract, $Workers, $WorkerContract)
     Say ("GATE5-NOT-MERGEABLE detail: GATE_SHARDS was set, so this is a rig exercise and not a merge gate however green the shards were. Nothing here may be counted as a gate.")
     $ExitRc = 2
     return

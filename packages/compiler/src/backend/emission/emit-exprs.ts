@@ -6448,7 +6448,10 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             return finish(`scr_promise_adapt_put(${arg(0)}, ${arg(1)}, ${arg(2)})`);
           case "async.awaitDyn":
             E.usesTimers = true; // the hop rides the loop
-            return finish(`scr_await_dyn_value(${arg(0)})`);
+            // Through fiberOnly for the same reason async.hop is: a
+            // fiber-only await emitted raw reached admitted coroutine
+            // bodies, where it fail-fasts with STATUS_STACK_BUFFER_OVERRUN.
+            return finish(fiberOnly("async.awaitDyn", `scr_await_dyn_value(${arg(0)})`));
           case "als.new":
             return finish(`scr_als_new()`);
           case "als.get":
