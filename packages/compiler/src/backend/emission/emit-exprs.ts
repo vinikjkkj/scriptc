@@ -1,7 +1,7 @@
 /* Expression C emission: the whole IrExpr dispatch (emitExpr) — every IR
  * expression lands in a fresh C temp, with RC ownership tracked on the
  * emitter's frames (see the discipline comment in emitter core). */
-import { fiberOnly } from "../../ir/suspends.js";
+import { fiberOnly, type Fenced } from "../../ir/suspends.js";
 import type { CEmitter, Temp } from "./emitter.js";
 import { rcSitesRequested, rcSiteLabel } from "./emitter.js";
 import { ABSENT_KEY_TRAP_CODE, arrayOf, BOOL, BYTES_U8, bytesOf, ownMaskKeyBit, OWNMASK_COMPLETED, OWNMASK_VALID, canMarshalFuncIntoIsland, CHILDSTREAM_T, DYN, dynCopyIsObservable, F64, IrExpr, IrRecordShape, IrType, irFunctionJsName, islandPromisePayloadTag, isRefCounted, isUnitType, MAY_THROW_LIB_FNS, RUNTIME_ERROR_CLASSES, settleOrValuePromiseTag, STRING, typeEquals, typeKey } from "../../ir/nodes.js";
@@ -3270,13 +3270,17 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
         // a result temp joins its frame so an unwind releases it.
         const args = e.args.map((a) => E.emitExpr(a));
         const arg = (i: number) => args[i]!.name;
-        const finish = (call: string): Temp => {
+        // Fenced<S>: a raw fragment spelling scr_await_ does not compile here.
+        // See ir/suspends.ts -- fiberOnly was opt-in, and that is how the
+        // second fiber-only primitive reached an admitted coroutine body.
+        const finish = <S extends string>(call: Fenced<S>): Temp => {
+          const c = call as unknown as string;
           if (e.type.kind === "void") {
-            E.line(`${call};${E.srcComment(e.loc)}`);
+            E.line(`${c};${E.srcComment(e.loc)}`);
             if (MAY_THROW_LIB_FNS.has(e.fn)) E.emitPendingCheck();
             return { name: "", type: e.type };
           }
-          const t = E.newTemp(e.type, call);
+          const t = E.newTemp(e.type, c);
           if (MAY_THROW_LIB_FNS.has(e.fn)) E.emitPendingCheck();
           return t;
         };
@@ -4968,12 +4972,12 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             // promise (+1) is the await's operand.
             const cb = args[4]!;
             E.moveTemp(cb);
-            return finish(`scr_test_sub(${arg(0)}, ${arg(1)}, ${arg(2)}, ${arg(3)}, ${cb.name}, ${arg(5)}, ${arg(6)})`);
+            return finish(fiberOnly("test.sub", `scr_test_sub(${arg(0)}, ${arg(1)}, ${arg(2)}, ${arg(3)}, ${cb.name}, ${arg(5)}, ${arg(6)})`));
           }
           case "test.subEmpty":
             // Fn-less subtest: the settled promise is discarded here (the
             // lowering types it void — nothing consumes it).
-            E.line(`scr_promise_release(scr_test_sub(${arg(0)}, ${arg(1)}, ${arg(2)}, ${arg(3)}, NULL, 0, ${arg(4)}));${E.srcComment(e.loc)}`);
+            E.line(`scr_promise_release(${fiberOnly("test.subEmpty", `scr_test_sub(${arg(0)}, ${arg(1)}, ${arg(2)}, ${arg(3)}, NULL, 0, ${arg(4)})`)});${E.srcComment(e.loc)}`);
             return { name: "", type: e.type };
           case "test.ctxSkip":
             E.line(`scr_test_ctx_skip(${arg(0)}, ${arg(1)});${E.srcComment(e.loc)}`);
@@ -8140,6 +8144,34 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
           // scr_ready_push per await on exactly one of its two arms -- the
           // invariant is countable by grepping the emitted TU.
           const pr0 = E.emitExpr(e.value);
+          // BOUNDED against the dispatch. coroDispatch emits
+          // `case 1..plan.points.length` plus `default: abort()`, and this
+          // index is what writes sc_b->state. Nothing tied the two together:
+          // if a suspension node is emitted TWICE, the second park writes a
+          // state with no case and the resume takes the abort(). Trusting two
+          // counters to stay in step is a parallel assertion about the system
+          // rather than one derived from it, which is the error shape this
+          // front has paid for repeatedly.
+          //
+          // LATENT TODAY WITH A NAMED ARMING CONDITION: a sweep of the
+          // corpus found 16 nodes emitted more than once, in six functions,
+          // and ZERO of them are admitted -- all media-upload and retry
+          // paths. A park-vs-case scan over all 990 converted bodies of the
+          // user's program found no mismatch, which is the right answer to
+          // that question and NOT evidence the mechanism is absent. Any one
+          // of those six becoming admissible arms the abort().
+          //
+          // Any port that reuses coroPointIndex inherits this; the LLVM plan
+          // already carries the note.
+          if (E.coroPointIndex >= E.currentCoro.points.length) {
+            throw new Error(
+              `emitter bug: coroutine state index ${E.coroPointIndex} is past the ` +
+                `dispatch, which emits case 1..${E.currentCoro.points.length} for ` +
+                `${E.currentFn!.name}. A suspension node was emitted more than ` +
+                `once: the extra park would write a state with no case and the ` +
+                `resume would take default: abort().`,
+            );
+          }
           const idx = E.coroPointIndex++;
           const nm = emitCoroAwait(E, E.currentFn!, E.currentCoro, idx, pr0, e.type);
           E.emitPendingCheck();

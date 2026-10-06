@@ -112,11 +112,32 @@ export type SuspendingLibCall =
    * Registered rather than lowered because the stackless lane has no
    * counterpart for the hop it performs, exactly as with `async.hop`: a
    * function holding one stays on the fiber lane. */
-  | "async.awaitDyn";
+  | "async.awaitDyn"
+  /* THE THIRD, AND THE ONE THE NAME-BASED FENCE COULD NEVER HAVE CAUGHT.
+   * A node:test subtest runs INLINE ON THE RUNNER FIBER, so when the
+   * subtest body awaits, scr_test_sub parks its caller -- and nothing
+   * about the spelling says so. `Fenced<S>` keys on `scr_await_`, which is
+   * a naming convention; this one walks straight past it.
+   *
+   * Found by the parking census in tests/harness/fiber-only-census.test.ts,
+   * which derives "parks" from the runtime -- a function reaching a
+   * scr_switch whose destination is return_to -- instead of from a name.
+   * That census was built to prove it COULD find a second unregistered
+   * site; it found a real one.
+   *
+   * Measured: a parent test whose subtest awaits exits 0xC0000409 with the
+   * knob on and prints nothing, against 12 correct lines and exit 0 with
+   * it off, with scr_test_sub sitting inside sc_cr__x25_fn0. A SYNCHRONOUS
+   * subtest does not crash, which is why the existing fixtures missed it:
+   * the park only happens when the subtest body itself suspends. */
+  | "test.sub"
+  | "test.subEmpty";
 
 export const SUSPENDING_LIB_CALLS = [
   "async.hop",
   "async.awaitDyn",
+  "test.sub",
+  "test.subEmpty",
 ] as const satisfies readonly SuspendingLibCall[];
 
 type _LibCallsCovered = AssertNever<
@@ -133,9 +154,46 @@ export const STACKLESS_LOWERABLE_LIB_CALLS: ReadonlySet<string> = new Set<Suspen
  * it forces the emission site to name a REGISTERED suspender, so a new
  * fiber-only call cannot reach the output without appearing in the list above
  * that liveness reads. */
-export function fiberOnly(_which: SuspendingLibCall, c: string): string {
-  return c;
+export function fiberOnly(_which: SuspendingLibCall, c: string): FencedC {
+  return c as FencedC;
 }
+
+/* THE FENCE WAS OPT-IN, AND THAT IS HOW THE SECOND ONE GOT THROUGH.
+ *
+ * `fiberOnly` binds the sites that CALL it. Nothing compelled an emission
+ * site to call it, so `async.awaitDyn` was written nine lines below
+ * `async.hop` -- same nature, same file, same switch -- emitting
+ * scr_await_dyn_value raw, and liveness never saw it. A fiber await landed
+ * in a body with no fiber and the process fail-fasted with
+ * STATUS_STACK_BUFFER_OVERRUN. Registering that one closed the instance; it
+ * did not close the CLASS, because the next person to add a
+ * fiber-only primitive still has nothing stopping them.
+ *
+ * So the obligation moves into the TYPE. A C fragment that spells
+ * `scr_await_` is rejected by the emission entry point unless it carries the
+ * brand, and the only thing that mints the brand is `fiberOnly`, which
+ * demands the name of a REGISTERED suspender. A new fiber-only primitive
+ * written by someone who never read any of this does not compile.
+ *
+ * It keys on the `scr_await_` spelling, which is a NAMING CONVENTION and
+ * therefore the honest limit of this fence: a suspending primitive lowered
+ * under some other name escapes it. That gap is covered by the separate
+ * runtime-symbol census (enumeration by PROPERTY, not by name); the two are
+ * complementary and neither subsumes the other. */
+declare const FENCED: unique symbol;
+
+/** A C fragment that has been through the fiber-only fence. */
+export type FencedC = string & { readonly [FENCED]: true };
+
+/** The emission entry point's parameter type. A raw fragment spelling a
+ * fiber-only primitive resolves to the error object below, which no string
+ * is assignable to, so the call site fails to compile with the reason in
+ * the message. A `FencedC` is `string & brand`, which is not assignable to
+ * a template literal type, so it falls through untouched. */
+export type Fenced<S extends string> =
+  S extends `${string}scr_await_${string}`
+    ? { readonly __fiberOnlyPrimitiveMustGoThrough_fiberOnly_see_ir_suspends_ts: never }
+    : S;
 
 const _used: readonly unknown[] = [
   null as unknown as _NodeKindsCovered,
