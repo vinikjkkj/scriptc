@@ -14,6 +14,26 @@
 static long scr_abandoned_fibers = 0;
 void scr_note_abandoned_fibers(long n) { scr_abandoned_fibers = n; }
 
+#ifdef SCR_RC_AUDIT
+/* LIVE COROUTINE FRAMES, owned here for the same reason the fiber flag is:
+ * a binary may link the console without the stackless runtime. scr_coro.c
+ * pushes; nothing pulls, so there is no cross-unit reference to resolve.
+ *
+ * Audit builds only. A shipping binary compiles byte-for-byte as before.
+ *
+ * WHY THIS EXISTS. A coroutine parked on a promise nothing settles is never
+ * resumed, and every release of its owned frame slots sits AFTER the resume
+ * label, so the frame and what it owns are still held at exit. That is the
+ * same deliberate abandonment the fiber lane already exempts (see the note
+ * on scr_rc_audit_at_exit) -- but the fiber lane does not exempt it in
+ * SILENCE, it prints a skip notice. This is the stackless half of that
+ * symmetry: the audit keeps looking, keeps measuring, and says what it
+ * found on a line of its own. */
+static long scr_coros_live = 0;
+void scr_note_coro_alloc(void) { scr_coros_live++; }
+void scr_note_coro_free(void) { scr_coros_live--; }
+#endif
+
 #ifndef SCR_LIB
 #ifdef SCR_RC_AUDIT
 extern long scr_str_live_count(void);     /* scr_string.c */
@@ -30,6 +50,17 @@ extern long scr_jsval_live_count(void); /* scr_island.c */
 #endif
 
 static void scr_rc_audit_at_exit(void) {
+  /* COROUTINES, reported and NOT exempted. The noun is the whole claim: this
+   * counts FRAMES, never the values inside them -- the runtime is handed a
+   * frame's size, never its owned-slot count, so a value total cannot be
+   * honestly produced here. It is named `coroutine(s)` rather than carrying a
+   * caveat beside it, because a caveat is the first thing deleted and a noun
+   * is not. When the emitter can report slots, this line GAINS a term; it
+   * does not have a wrong meaning corrected. */
+  if (scr_coros_live > 0) {
+    fprintf(stderr, "scriptc RC audit: %ld coroutine(s) abandoned\n",
+            scr_coros_live);
+  }
   /* Fibers suspended forever at loop exhaustion (awaits nobody resolves —
    * Node exits 0 there too) still hold their stacks and owned values by
    * design; a strict audit would only report that deliberate abandonment. */

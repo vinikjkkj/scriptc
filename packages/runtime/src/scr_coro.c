@@ -58,6 +58,9 @@ void scr_coro_release(ScrCoroBase *base) {
   if (base == NULL || --base->rc != 0) return;
   if (base->promise != NULL) scr_promise_release(base->promise);
   scr_als_ctx_release(base->als);
+#ifdef SCR_RC_AUDIT
+  scr_note_coro_free();
+#endif
   free(base);
 }
 
@@ -69,6 +72,9 @@ void *scr_coro_alloc(size_t size, ScrCoroResume resume, bool has_exc) {
    * able to release them unconditionally. */
   ScrCoroBase *base = (ScrCoroBase *)calloc(1, size);
   if (base == NULL) scr_coro_oom();
+#ifdef SCR_RC_AUDIT
+  scr_note_coro_alloc();
+#endif
   scr_coro_init(base, resume, scr_promise_new(), has_exc);
   return base;
 }

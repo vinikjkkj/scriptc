@@ -7013,6 +7013,11 @@ bool scr_on_fiber(void);
  * (a host callback may spawn a fiber that re-enters the engine). */
 void *scr_fiber_self(void);
 void scr_note_abandoned_fibers(long n); /* scr_console.c owns the flag */
+#ifdef SCR_RC_AUDIT
+/* Live coroutine frames. scr_console.c owns the counter; scr_coro.c pushes. */
+void scr_note_coro_alloc(void);
+void scr_note_coro_free(void);
+#endif
 
 /* new Promise(executor): kind 0 f64, 1 bool, 2 str, 3 void; ref-kind
  * resolve thunks are emitted (they know the concrete RC helpers) over
