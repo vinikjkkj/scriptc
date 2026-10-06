@@ -3,6 +3,7 @@
  * emitter's frames (see the discipline comment in emitter core). */
 import { fiberOnly, type Fenced } from "../../ir/suspends.js";
 import { poisonYieldArm } from "./gen-poison.js";
+import { emitCoroYield } from "./emit-gen-coro.js";
 import type { CEmitter, Temp } from "./emitter.js";
 import { rcSitesRequested, rcSiteLabel } from "./emitter.js";
 import { ABSENT_KEY_TRAP_CODE, arrayOf, BOOL, BYTES_U8, bytesOf, ownMaskKeyBit, OWNMASK_COMPLETED, OWNMASK_VALID, canMarshalFuncIntoIsland, CHILDSTREAM_T, DYN, dynCopyIsObservable, F64, IrExpr, IrRecordShape, IrType, irFunctionJsName, islandPromisePayloadTag, isRefCounted, isUnitType, MAY_THROW_LIB_FNS, RUNTIME_ERROR_CLASSES, settleOrValuePromiseTag, STRING, typeEquals, typeKey } from "../../ir/nodes.js";
@@ -7966,6 +7967,31 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
         if (e.value === null) throw new Error("emitter bug: yieldExpr with no operand (frontend fills undefined)");
         const v = E.emitExpr(e.value);
         const yt = e.value.type;
+        if (E.currentCoro !== null) {
+          // STACKLESS: spill, hand the value to the OUT slot, and RETURN to
+          // the consumer. No park and no ready push -- a synchronous yield
+          // costs no microtask turn in JS, so charging one would put a turn
+          // where the oracle has none.
+          //
+          // BOUNDED AGAINST THE DISPATCH, by the same counter and the same
+          // check as the await arm, because both suspension kinds share ONE
+          // state dispatch. A yield emitted twice would write a state with
+          // no case and the resume would take default: abort(). Deriving the
+          // bound from the plan rather than trusting two counters to stay in
+          // step is the error shape this front has already paid for.
+          if (E.coroPointIndex >= E.currentCoro.points.length) {
+            throw new Error(
+              `emitter bug: coroutine state index ${E.coroPointIndex} is past the ` +
+                `dispatch, which emits case 1..${E.currentCoro.points.length} for ` +
+                `${E.currentFn!.name}. A yield node was emitted more than once: ` +
+                `the extra suspension would write a state with no case.`,
+            );
+          }
+          const yIdx = E.coroPointIndex++;
+          const sent = emitCoroYield(E, E.currentFn!, E.currentCoro, yIdx, v, yt, e.type);
+          E.emitPendingCheck();
+          return { name: sent, type: e.type };
+        }
         // The ASYNC form additionally takes JS's AsyncGeneratorYield
         // microtask hop and SETTLES the in-flight request promise before
         // suspending. Selected from the node, never from the enclosing

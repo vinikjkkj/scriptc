@@ -346,10 +346,17 @@ ScrGen *scr_gen_of_coro(ScrCoroBase *base);
  * friends.
  *
  * "Return to the consumer" is literal and is the whole difference from an
- * await: the generated code sets SCR_CORO_YIELDED and RETURNS from its
- * resume function. There is no scr_switch, no ready push and no microtask
- * turn -- a synchronous yield consumes none, and charging one here would
- * put a turn where JS has none.
+ * await: the generated code simply RETURNS from its resume function. There
+ * is no scr_switch, no ready push and no microtask turn -- a synchronous
+ * yield consumes none, and charging one here would put a turn where JS has
+ * none.
+ *
+ * THESE SET SCR_CORO_YIELDED THEMSELVES, and that is a placement decision
+ * rather than a convenience: the flag is what the consumer reads to tell a
+ * yield from a completion, there are three arms and every yield site in
+ * every converted generator would otherwise have to remember it, and a
+ * forgotten one does not crash -- it reports a yield as a completion and
+ * truncates the sequence. One place, structurally.
  *
  * The OUT slot stays on the handle rather than moving into the frame
  * because the native sink reads it directly from C (scr_gen_take_out_ref),
