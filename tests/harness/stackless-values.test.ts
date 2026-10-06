@@ -134,13 +134,29 @@ const WRAPPERS: ReadonlyArray<{ name: string; take: string; finish: string; conv
   // shape is named rather than silently absent, and it goes red the day a
   // record literal does start converting.
   { name: "wrl", take: "f64", finish: "ref", converted: true },
-  // The multi-field twin, and it must STAY off the lane: two fields are two
-  // operands, so the before/after hazard is real and the literal is rightly
-  // still nested. Measured: of 17 suspension-holding record literals in
-  // zapo-rest exactly ONE has a single field; the rest carry 2, 3, 5, 6, 19
-  // and 23. It is here as a negative entry so the boundary between the two
-  // is guarded, not just the side that converts.
-  { name: "wrm", take: "f64", finish: "ref", converted: false },
+  // The multi-field twin. It was a NEGATIVE entry while nesting blocked --
+  // "two fields are two operands, so the before/after hazard is real" -- and
+  // the hazard turned out not to be the operand count at all: a record
+  // literal consumes each field into the record before emitting the next, so
+  // nothing of it is ever in flight. It converts now, and the ledger named it
+  // the moment it did, which is the handover this file was built for.
+  { name: "wrm", take: "f64", finish: "ref", converted: true },
+  // THE NESTED SHAPES, one per emitter family. Each was measurably WRONG
+  // before temps were spilled -- NaN, 4, 4, 2, NaN and a hard abort -- and
+  // each carries its own magnitude so one shape's break cannot hide in
+  // another's line.
+  { name: "wna", take: "f64", finish: "f64", converted: true }, // call.args
+  { name: "wnv", take: "f64", finish: "f64", converted: true }, // callValue.args
+  { name: "wnn", take: "f64", finish: "f64", converted: true }, // new.args
+  { name: "wns", take: "ref", finish: "f64", converted: true }, // strIntrinsic.args
+  { name: "wnb", take: "f64", finish: "f64", converted: true }, // bin.right
+  { name: "wnx", take: "f64", finish: "f64", converted: true }, // bin inside an index
+  // The controls: same positions, no unspilled sibling. These were right
+  // before the fix and must stay right, because they are what shows the rule
+  // is the temp and not the position.
+  { name: "wnf", take: "f64", finish: "f64", converted: true }, // await FIRST
+  { name: "wnr", take: "f64", finish: "ref", converted: true }, // refcounted sibling
+  { name: "wnm", take: "f64", finish: "f64", converted: true }, // sibling AFTER
   // TERNARY ARMS. The specific defect here is not "no value came back" but
   // THE WRONG ARM with a plausible value: a ternary that resumes into the
   // opposite branch returns the right type, the right width, and the wrong
@@ -195,6 +211,34 @@ async function wtc(bad: boolean): Promise<string> {
   }
 }
 function wrap1(v: number): string { return "w" + v; }
+
+/* THE NESTED SHAPES, and what makes them a different question from the
+ * sole-operand ones above. A suspension nested in a larger expression leaves
+ * the operands already evaluated sitting in C locals. The park RETURNS to the
+ * scheduler, so those locals die and the resume goto jumps over their
+ * declarations -- and emitCoroAwait only spilled what was in an RC frame,
+ * which newTemp joined only for REFCOUNTED temps. A double sibling was
+ * therefore lost and a ScrStr* sibling was not.
+ *
+ * Every helper below exists to force a REAL TEMP rather than a C constant:
+ * n1(8) is a call, 8 folds to an immediate and would pass either way
+ * (measured -- the literal twin answered 8004 while the computed one
+ * answered NaN, from the same build).
+ *
+ * Magnitudes are distinguishable PER SHAPE on purpose. The failure mode here
+ * is a plausible wrong number, not a crash: with the spill reverted these
+ * answered NaN, 4, 4, 2, NaN and a hard abort respectively, so a single
+ * shared magnitude would have let one shape's break hide inside another's. */
+function n1(v: number): number { return v; }
+function s1(v: string): string { return v; }
+function j2n(a: number, b: number): number { return a * 1000 + b; }
+function j2s(a: string, b: number): string { return a + ":" + b; }
+class NPair {
+  a: number;
+  b: number;
+  constructor(a: number, b: number) { this.a = a; this.b = b; }
+}
+const nbuf: number[] = [10, 20, 30, 40, 50];
 async function wdr(n: number): Promise<any> { return await pf(n); }
 async function wca(n: number): Promise<string> { return wrap1(await pf(n)); }
 async function wrl(n: number): Promise<{ v: number }> { return { v: await pf(n) }; }
@@ -204,6 +248,26 @@ async function wrm(n: number): Promise<{ a: string; b: number; c: boolean; d: st
 async function wtt(pick: boolean): Promise<number> { return pick ? await pf(100) : 7; }
 async function wte(pick: boolean): Promise<number> { return pick ? 7 : await pf(200); }
 async function wtb(pick: boolean): Promise<number> { return pick ? await pf(300) : await pf(400); }
+// One per EMITTER FAMILY, not one per spelling. call/callValue/new/
+// strIntrinsic all batch their args into C locals and then consume them;
+// bin holds its left operand across the right and has no args at all, so
+// no argument-position rule would ever have covered it.
+async function wna(n: number): Promise<number> { return j2n(n1(8), await pf(n)); }
+async function wnv(n: number): Promise<number> {
+  const g: (a: number, b: number) => number = j2n;
+  return g(n1(8), await pf(n));
+}
+async function wnn(n: number): Promise<number> { const p = new NPair(n1(8), await pf(n)); return p.a * 1000 + p.b; }
+async function wns(n: number): Promise<number> { return s1("ab").padStart(n1(8), await ps("-" + n)).length; }
+async function wnb(n: number): Promise<number> { return n1(8) * 1000 + await pf(n); }
+async function wnx(n: number): Promise<number> { return nbuf[n1(1) + await pf(n)]!; }
+// The three that were ALWAYS right and must stay right -- they are what
+// proves the rule is about the unspilled temp and not about the position.
+// wnf is the same call.args position with the await FIRST; wnr the same
+// position with a refcounted sibling; wnm a sibling evaluated AFTER.
+async function wnf(n: number): Promise<number> { return j2n(await pf(n), n1(8)); }
+async function wnr(n: number): Promise<string> { return j2s(s1("S"), await pf(n)); }
+async function wnm(n: number): Promise<number> { return j2n(await pf(n), n1(8) * 2); }
 async function wcs(bad: boolean): Promise<string> {
   try {
     if (bad) throw new Error("sync");
@@ -258,6 +322,11 @@ async function main(): Promise<void> {
   console.log("tern2 ", await wtb(true), await wtb(false));
   const r1 = await wrl(60);
   console.log("rec1  ", r1.v, "|", typeof r1.v);
+  // THE NESTED SHAPES. Printed one per line with distinguishable
+  // magnitudes, because the break they guard is a plausible number.
+  console.log("ncall ", await wna(3), "|", await wnv(3), "|", await wnn(3));
+  console.log("nmisc ", await wns(3), "|", await wnb(3), "|", await wnx(0));
+  console.log("nok   ", await wnf(3), "|", await wnr(3), "|", await wnm(3));
   console.log("done");
 }
 void main();

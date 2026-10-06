@@ -121,15 +121,30 @@ interface FoundSuspension {
   nested: boolean;
   /** Nested for BLOCKING purposes: whether it is kept out of the slice.
    *
-   * THE TWO ARE NOT THE SAME QUESTION, and splitting them is what lets a
-   * ternary arm join without loosening anything. Blocking decides whether
-   * the lane may lower the point at all; the live set decides how much the
-   * frame carries across it. A ternary arm is safe to LOWER -- its arms are
-   * alternatives, so nothing from the sibling arm is ever in flight, and the
-   * resume label lands inside an ordinary if/else branch -- but it keeps the
-   * widened live set anyway. Over-spilling costs frame bytes; under-spilling
-   * is a use-after-free, and this file has already paid for that twice. When
-   * the two directions are not symmetric, take the expensive one. */
+   * ALWAYS FALSE NOW, and the field stays because the distinction it names
+   * is still real -- the live set keeps its conservative widening while
+   * blocking no longer applies. Blocking decides whether the lane may lower
+   * the point at all; the live set decides how much the frame carries
+   * across it. Over-spilling costs frame bytes; under-spilling is a
+   * use-after-free, and this file has already paid for that twice, so
+   * `nested` keeps the expensive answer.
+   *
+   * WHY BLOCKING LIFTED. The hazard it guarded was never the POSITION. A
+   * suspension nested in a larger expression left the operands already
+   * evaluated sitting in C locals, and a park returns to the scheduler, so
+   * those locals died -- but only the ones nothing spilled. emitCoroAwait
+   * spills the emitter's RC frames, and newTemp put a temp in a frame only
+   * when it was refcounted, so a `double` or a `bool` was lost and a
+   * `ScrStr *` was not. That is why `j2n(n1(8), await pf(3))` answered NaN
+   * while `j2s(s1("S"), await pf(3))` answered correctly, and why
+   * `j2n(await pf(3), n1(8))` -- the same position, await first -- was
+   * right all along.
+   *
+   * newTemp now registers every temp, so there is nothing left for the
+   * position to protect against. The guard that this is true is not a list:
+   * tests/harness read the emitted C of every converted body and fail on
+   * any temp established before a resume label and read after it without a
+   * reload. */
   blocked: boolean;
 }
 
@@ -212,18 +227,23 @@ function suspensionsOf(root: IrExpr | null): FoundSuspension[] {
   const out: FoundSuspension[] = [];
   if (root === null) return out;
   const seen = new Set<object>();
-  const walk = (n: unknown, depth: number, blockDepth: number): void => {
+  const walk = (n: unknown, depth: number): void => {
     if (n === null || typeof n !== "object") return;
     if (seen.has(n)) return;
     seen.add(n);
     if (Array.isArray(n)) {
-      for (const x of n) walk(x, depth, blockDepth);
+      for (const x of n) walk(x, depth);
       return;
     }
     const rec = n as Record<string, unknown>;
     const kind = rec["kind"];
     const isSusp = typeof kind === "string" && SUSPENSION_KINDS.has(kind);
-    if (isSusp) out.push({ node: rec, nested: depth > 0, blocked: blockDepth > 0 });
+    // `blocked` is gone, not merely always-false: a blockDepth nobody reads
+    // is the dead half of a rule, and the next reader would have to work out
+    // whether it still means anything. The ternary-arm carve-out it carried
+    // is gone with it -- it was one position exempted from a rule that no
+    // longer exists.
+    if (isSusp) out.push({ node: rec, nested: depth > 0, blocked: false });
     // A node with exactly ONE operand is transparent to nesting: see
     // operandCount. Belt and braces on a fence this file does not own -- the
     // classification and the count come from the same call, so they cannot
@@ -235,18 +255,15 @@ function suspensionsOf(root: IrExpr | null): FoundSuspension[] {
     }
     for (const k in rec) {
       if (k === "loc" || k === "type") continue;
-      // A TERNARY ARM does not block. The arms are alternatives: whichever
-      // one holds the suspension is the only one that ever runs, so there is
-      // no sibling operand in flight, and the resume label lands inside an
-      // ordinary if/else branch the state machine can jump into. `cond` is
-      // NOT included -- a suspension there has both arms still ahead of it,
-      // which is a different question and a different slice.
-      const ternaryArm = kind === "ternary" && (k === "then" || k === "else_");
+      // `depth` still tracks nesting for the LIVE SET, which keeps its
+      // conservative widening. A sole-operand wrapper stays transparent for
+      // the same reason it always was: the await is the node's only operand,
+      // so there is no before and no after to widen for.
       const free = isSusp || transparent;
-      walk(rec[k], free ? depth : depth + 1, free || ternaryArm ? blockDepth : blockDepth + 1);
+      walk(rec[k], free ? depth : depth + 1);
     }
   };
-  walk(root, 0, 0);
+  walk(root, 0);
   return out;
 }
 
