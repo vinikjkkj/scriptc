@@ -204,7 +204,41 @@ describe("the shared abort helpers", () => {
     const { c, ll } = await compileBoth();
     const g = readGuards(c);
     const llOom = (ll.match(/call void @sc_oom\(\)/g) ?? []).length;
-    expect(llOom, "C OOM guard sites != LLVM @sc_oom call sites").toBe(g.oomSites.length);
+
+    /* THE TWO LANES AGREE MINUS ONE PER CONVERTED COROUTINE, AND THIS IS
+     * SCAFFOLDING WITH A CONVERGENCE CONDITION, NOT AN INVARIANT.
+     *
+     * Plain equality was true only while nothing converted. With
+     * SCRIPTC_STACKLESS=1 the C lane turns an async function into a state
+     * machine: the fiber trampoline's malloc guard disappears and
+     * scr_coro_alloc plants none in the TU, so C LOSES one OOM site per
+     * converted function while LLVM -- which has no stackless lowering at
+     * all -- keeps every one. Measured on this very program: LLVM 14
+     * throughout, C 14 knob-off, 13 with one function converted, 12 with
+     * two.
+     *
+     * Demanding 14 == 12 would be forcing the C lane to lie so it matches a
+     * backend that does not participate in the change. The emitter is
+     * right; the assertion was what stopped being true.
+     *
+     * THE COUNT IS DERIVED, not passed in and not hardcoded: it is the
+     * number of resume functions in the emitted C. Knob-off that is zero
+     * and this reduces to the original equality, so one assertion covers
+     * both lanes and neither can drift from the other.
+     *
+     * CONVERGENCE: this delta returns to ZERO when the LLVM backend grows
+     * the stackless lowering, because then both lanes convert and both lose
+     * the same guards. Delete the subtraction then -- do not "fix" the
+     * number. Until then a non-zero delta here is correct behaviour, and
+     * anyone reading it as an invariant of the two backends has read a
+     * scaffold as a wall. */
+    const converted = (c.match(/void sc_cr_[A-Za-z0-9_]+\(ScrCoroBase \*sc_b\)\s*\{/g) ?? []).length;
+    expect(
+      llOom - g.oomSites.length,
+      `LLVM @sc_oom (${llOom}) minus C OOM guard sites (${g.oomSites.length}) must equal the ` +
+        `number of converted coroutines (${converted}): C loses one guard per state machine, ` +
+        `LLVM has no stackless lowering and loses none. Knob-off this is 0 on both sides.`,
+    ).toBe(converted);
     // The tag defaults are NOT expected to match one for one: the LLVM lane
     // routes a few more paths through @sc_bad_tag than C spells as a switch
     // default (measured: +2 on every program that has any). What must hold is
