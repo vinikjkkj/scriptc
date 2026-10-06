@@ -1,6 +1,7 @@
 /* Expression C emission: the whole IrExpr dispatch (emitExpr) — every IR
  * expression lands in a fresh C temp, with RC ownership tracked on the
  * emitter's frames (see the discipline comment in emitter core). */
+import { fiberOnly } from "../../ir/suspends.js";
 import type { CEmitter, Temp } from "./emitter.js";
 import { rcSitesRequested, rcSiteLabel } from "./emitter.js";
 import { ABSENT_KEY_TRAP_CODE, arrayOf, BOOL, BYTES_U8, bytesOf, ownMaskKeyBit, OWNMASK_COMPLETED, OWNMASK_VALID, canMarshalFuncIntoIsland, CHILDSTREAM_T, DYN, dynCopyIsObservable, F64, IrExpr, IrRecordShape, IrType, irFunctionJsName, islandPromisePayloadTag, isRefCounted, isUnitType, MAY_THROW_LIB_FNS, RUNTIME_ERROR_CLASSES, settleOrValuePromiseTag, STRING, typeEquals, typeKey } from "../../ir/nodes.js";
@@ -6434,7 +6435,11 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             return finish(`scr_assert_expects_err_dyn(${arg(0)}, ${arg(1)}, ${arg(2)}, ${arg(3)})`);
           case "async.hop":
             E.usesTimers = true;
-            return finish(`scr_await_hop()`);
+            // Through fiberOnly: a fiber-only primitive may only be emitted
+            // by naming the REGISTERED suspender it belongs to, so it cannot
+            // reach the output without liveness being able to see it. This is
+            // the half of the binding that lives where the knowledge is.
+            return finish(fiberOnly("async.hop", `scr_await_hop()`));
           case "promise.adaptHas":
             return finish(`scr_promise_adapt_has(${arg(0)}, ${arg(1)})`);
           case "promise.adaptGet":

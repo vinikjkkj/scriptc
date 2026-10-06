@@ -30,6 +30,7 @@
  * descended into: lambdas are lifted, so they cannot name this frame's
  * locals except through `captures`, which IS read here. */
 import type { IrExpr, IrFunction, IrStmt, SrcLoc } from "./nodes.js";
+import { SUSPENDING_NODE_KINDS, SUSPENDING_LIB_CALLS, STACKLESS_LOWERABLE_LIB_CALLS } from "./suspends.js";
 
 /** One suspension point and what a frame would have to hold across it. */
 export interface SuspensionPoint {
@@ -75,13 +76,11 @@ export interface FnLiveness {
   maxEnclosingForOf: number;
 }
 
-const SUSPENSION_KINDS: ReadonlySet<string> = new Set([
-  "awaitExpr",
-  "awaitUnionExpr",
-  "yieldExpr",
-  "genResume",
-  "agenResume",
-]);
+/* Read from the one authoritative enumeration rather than restated here.
+ * The previous local copy omitted `async.hop`, which suspends but is a
+ * libCall rather than a node kind, and that omission admitted fifteen
+ * functions to a lane that cannot lower them. See ir/suspends.ts. */
+const SUSPENSION_KINDS: ReadonlySet<string> = new Set<string>(SUSPENDING_NODE_KINDS);
 
 /* ── generic collectors ──────────────────────────────────────────────── */
 
@@ -801,8 +800,43 @@ export interface StacklessPlan {
  * cache. A LIFTED body is in: its closure environment is one frame field,
  * and the capture bindings re-derive from it on every resume because the
  * prologue that reads `sc_env->caps[i]` runs before the state dispatch. */
+/** Does this body hold a suspender the stackless lane cannot lower?
+ *
+ * Node-kind suspensions are judged per point by `straightLine`. libCall
+ * suspenders are not points at all -- they are ordinary-looking calls -- so
+ * they are checked here, against the same authoritative list the emitter is
+ * bound to. Without this a function containing `async.hop` is admitted on
+ * the evidence of the points it DOES have, and then emits a fiber call into
+ * a frame that has no fiber. */
+function hasFiberOnlySuspender(fn: IrFunction): boolean {
+  let found = false;
+  const walk = (v: unknown): void => {
+    if (found || v === null || typeof v !== "object") return;
+    if (Array.isArray(v)) {
+      for (const x of v) walk(x);
+      return;
+    }
+    const rec = v as Record<string, unknown>;
+    if (rec["kind"] === "libCall" && typeof rec["fn"] === "string") {
+      const fnName = rec["fn"];
+      if ((SUSPENDING_LIB_CALLS as readonly string[]).includes(fnName)
+          && !STACKLESS_LOWERABLE_LIB_CALLS.has(fnName)) {
+        found = true;
+        return;
+      }
+    }
+    for (const k in rec) {
+      if (k === "loc" || k === "type") continue;
+      walk(rec[k]);
+    }
+  };
+  walk(fn.body);
+  return found;
+}
+
 export function stacklessPlan(fn: IrFunction): StacklessPlan | null {
   if (fn.async !== true) return null;
+  if (hasFiberOnlySuspender(fn)) return null;
   if (fn.generator !== undefined) return null;
   if (fn.asyncCacheGlobal !== undefined || fn.asyncCycleCacheGlobal !== undefined) return null;
   // A boxed PARAM arrives under a raw name and is moved into a fresh box by
