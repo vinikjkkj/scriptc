@@ -211,9 +211,17 @@ $MainLog = Join-Path $LogDir "gate5.log"
 # the path revealed that the gate was still reading the old worktree. A
 # comment in the wrapper states intent; the log has to carry the witness.
 function RepoRealPath {
-  $t = [System.IO.Directory]::ResolveLinkTarget($Repo, $true)
-  if ($t) { return $t.FullName }
-  return [System.IO.Path]::GetFullPath($Repo)
+  # Normalise FIRST: ResolveLinkTarget throws on a path it considers
+  # malformed (a trailing "/." is enough), and a witness that can abort the
+  # run it is witnessing is worse than no witness. Never throws; the worst
+  # case is the normalised path without link resolution.
+  $full = $Repo
+  try { $full = [System.IO.Path]::GetFullPath($Repo) } catch {}
+  try {
+    $t = [System.IO.Directory]::ResolveLinkTarget($full, $true)
+    if ($t) { return $t.FullName }
+  } catch {}
+  return $full
 }
 
 function WorkTreeHash {
