@@ -157,7 +157,10 @@ and that is exactly D4 (a suspension reachable from a `finally`, or from a
 the pending exception across the suspension. Passing `true` for a D1 function
 is merely 56 bytes wasted.
 
-Measured on zapo-rest: D1–D3 is 95.1% of 2,260 suspension points.
+Measured on `tests/perf/zapo-rest/app182`: **D1–D3 is 2,148 of the 2,260
+suspension points (95.1%)**. Lane: none — the census classes and the point
+count both come from the IR liveness pass, which both backends consume
+unchanged, so this share is lane-independent.
 
 ---
 
@@ -204,8 +207,9 @@ is a `calloc`. Measured (`run-bench.sh`, 104-byte frame):
 
 So a frame pool's **ceiling** is ~46 ns per frame. Across a full 24,246-frame
 peak that is ~1.1 ms, against the ~504 ms that replacing `CreateFiberEx` with
-`calloc` already saves. The pool would buy 0.2% of what the transform itself
-wins, in exchange for a cap, a decay policy, and the retention and poisoning
+`calloc` already saves — both from the section 6 bench below, C lane, and both
+therefore inheriting its arms and its host. The pool would buy **~1.1 ms of
+~504 ms, i.e. 0.2%** of what the transform itself wins, in exchange for a cap, a decay policy, and the retention and poisoning
 problems the fiber pool needed several commits to settle.
 
 **Decision: no frame pool.** Revisit only if a profile shows frame allocation
@@ -214,6 +218,13 @@ above a few percent of run time; the number to beat is 46 ns.
 ---
 
 ## 6. Speed, for context
+
+**Lane: C.** These are `tests/perf/corostate/corobench.c` numbers — the C
+lowering's fiber and stackless paths measured against each other in one
+process. **The LLVM lane is UNMEASURED here** and has no stackless lowering
+at all as of this revision, so no ratio below may be quoted as a property of
+the transform in general; each is a property of the C lane. Arms are the
+table's own columns.
 
 `run-bench.sh`, zig 0.16.0 from `G:\tools\zig`, target `x86_64-windows-gnu`,
 `-O2`, K=2000, 11 reps, both arms in one process. Absolute ns, ranges across
@@ -230,12 +241,28 @@ The last row is the one that matters at the zapo peak: 24,246 fibers are live
 simultaneously, so the pool is drained and every spawn is a real
 `CreateFiberEx` with a 1 MiB reserve.
 
+**On `24,246` against `9,004`.** Commit `fe60c3267` reports `live fiber
+stacks 9,004 -> 3` for the same program. The two are **possibly distinct
+populations, not reconciled**: this figure is described here as fibers live
+simultaneously at the peak, while `fe60c3267`'s is a live-fiber-stack count
+on a different build and a different arm (its row sits beside the
+100%-conversion ceiling, not the real load). Neither was re-measured to
+settle it, so do not treat either as the peak fiber count without naming the
+build and the arm it came from.
+
 ---
 
-## 6b. OPEN DEFECT: the frame struct does not survive a TU split
+## 6b. CLOSED DEFECT: the frame struct did not survive a TU split
 
-Measured on a real `zapo-rest` build with `SCRIPTC_STACKLESS=1`, `--backend c`:
-the emitted C **does not compile**.
+**Fixed in `850c92290` ("the frame struct belongs in the shared header, not
+unit 0"), an ancestor of this document's revision: `emit-coro.ts` now routes
+both the struct and the resume declaration through `E.protoOut(out)`, which
+is the shared header when the program splits and `out` when it does not.**
+The diagnosis is kept because the mechanism is instructive and because the
+conversion counts below were first taken from this non-linking build.
+
+As measured BEFORE the fix, on a real `zapo-rest` build with
+`SCRIPTC_STACKLESS=1`, `--backend c`: the emitted C **did not compile**.
 
     zapo-rest.part4.c:7:3: error: use of undeclared identifier
                                   'sc_cf__x25_promise_all_tuple_247'
@@ -261,8 +288,11 @@ DECLARATION and wrong about the frame STRUCT: the struct has no ordering
 constraint against the spawn wrapper and belongs in the shared header, which
 is the only thing every split TU includes.
 
-What the conversion would have been, had it linked (counted from the emitted
-C, guard: a function has a trampoline or a resume, never both):
+The conversion this build produced — counted from the emitted C (lane: C;
+arms are the OFF and ON columns; guard: a function has a trampoline or a
+resume, never both). First taken from the non-linking build above, and the
+same figures were then reported from a build that compiles and runs with the
+knob on in `fe60c3267`, so these are counts rather than a projection:
 
 | | OFF | ON |
 |---|---|---|
@@ -271,8 +301,27 @@ C, guard: a function has a trampoline or a resume, never both):
 | still fibers | 1,489 | 956 |
 | suspension points on frames | 0 | **753** |
 | suspension points on fibers | 2,270 | 1,517 |
-| function coverage | 0% | **35.8%** |
-| suspension-point coverage | 0% | **33.2%** |
+| function coverage | 0 of 1,489 (0%) | **533 of 1,489 (35.8%)** |
+| suspension-point coverage | 0 of 2,270 (0%) | **753 of 2,270 (33.2%)** |
+
+**The `2,270` denominator in the last row is DEFECTIVE: `33.2%` is not a
+share of any defined population.** `2,270` is the count of emitted
+`scr_await_*` call sites matching `(f64|bool|str|ref|void|dyn)` — the 2,325
+emitted sites minus `hop` (54) and minus `dyn_value` (1) — which mixes
+emitted call sites with IR suspension points and drops two suspending
+libCalls for no stated reason. It is also **inflated by a defect**: 16
+suspending nodes are emitted twice (6 functions, all outside the admitted
+set), so 2,270 = 2,254 attributable emissions + 16. The correct denominator
+is **2,260** IR suspension points (lane-independent), **2,254** await-kind
+points (`awaitExpr` 2,223 + `awaitUnionExpr` 31), or **2,325** emitted await
+call sites (C lane) — whichever question is being asked. Against 2,254 the
+same numerator reads 33.4%. See `stackless-llvm-port.md` section 9, which
+supersedes this row and the identical figure in `fe60c3267`.
+
+These figures are also **stale as a statement of today's conversion**: the
+nesting admission and the owned-local frame rule both landed afterwards, and
+section 8 below reports **990 frame structs emitted** on the same program,
+i.e. 990 of 1,489 suspendable functions (66.5%) rather than 533.
 
 ## 7. Not covered yet
 
