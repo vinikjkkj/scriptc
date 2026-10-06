@@ -332,11 +332,32 @@ That is deliberate and documented as a numbered divergence at `:666`: *"Consumer
 forwarding to the delegate."* scriptc does not close the delegate.
 
 So `yield*` does **not** link to S10 or S12, and it does **not** change the
-order. One decision falls out of it, and it is pre-existing rather than
-created by this front: **when generators go stackless, is that divergence
-preserved exactly, or fixed while the lowering is being rebuilt?** A rewritten
-unwind path could change its character silently, which is the failure mode
-worth naming now rather than discovering by diff.
+order.
+
+### DECISION 6, OPEN: preserve the divergence, or fix it?
+
+One decision falls out, and it is **pre-existing rather than created by this
+front**: when generators go stackless, is the `:666` divergence preserved
+exactly, or fixed while the lowering is being rebuilt?
+
+It belongs in S11's decision list as a sixth item. It is recorded here because
+this is where the evidence for it is.
+
+**Recorded position (the coordinator's, not a ruling): preserve exactly, and
+in its own slice if it is to change.** The argument is that changing observable
+behaviour in the middle of a lowering change destroys the only thing that makes
+such a slice verifiable -- byte identity between the two lanes. A slice that
+both moves the mechanism and moves the answer cannot tell you which one broke.
+
+It is logged as **OPEN**, not decided, and it is owed to whoever builds the
+slice rather than to whoever found it.
+
+What makes it dangerous is not difficulty but silence: a rewritten unwind path
+could change the divergence's character **without failing anything**, because
+nothing today asserts the current behaviour. There is no test that says "a
+consumer `.return()` while suspended in a `yield*` unwinds the OUTER generator
+and does not forward". Naming it now is cheaper than finding it by diff, and
+this is exactly the class nobody looks for precisely because it breaks nothing.
 
 ## 11. MECHANICAL vs DECISION
 
@@ -352,7 +373,7 @@ worth naming now rather than discovering by diff.
    record builders, indifferent to how the body suspends.
 5. The LLVM twin of each, by the port's own rules.
 
-**DECISION -- someone chooses (5):**
+**DECISION -- someone chooses (5, plus a sixth recorded in S10b):**
 
 1. **Does a stackless generator keep `ScrGen` as its handle?** One discriminated
    handle costs a branch per resume but keeps **one** consumer emission; two
