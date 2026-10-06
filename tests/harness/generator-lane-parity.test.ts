@@ -334,6 +334,9 @@ interface Built {
   readonly stderr: string;
   /** 0 on a clean exit; the exit code, or a signal name, otherwise. */
   readonly code: number | string;
+  /** Emitted C translation units. Zero means the C lane never ran, which is
+   * a different fact from "nothing converted" and must not share its 0. */
+  readonly units: number;
   readonly conversions: number;
   readonly sites: number;
 }
@@ -341,18 +344,39 @@ interface Built {
 /** Count coroutine resume functions in the EMITTED C, not in the IR and not
  * from the environment variable. Reading the knob would assert what was
  * asked for rather than what was obtained, which is the distinction this
- * whole file is built on. */
-function conversionsIn(outDir: string): number {
-  let n = 0;
+ * whole file is built on.
+ *
+ * IT RETURNS THE UNIT COUNT TOO, and that is the fix for how this file
+ * wasted its first run. The conversion count was a bare number, and it read
+ * 0 for "no generator converted" AND for "there is no C here to read" --
+ * which is what actually happened: the builds below did not pin the
+ * backend, the default is LLVM, and the whole run compared the LLVM lane
+ * against itself while every arm printed the right answer and exited 0.
+ * Nine greens would have been reported as the slice working.
+ *
+ * A zero is only a measurement once something was measured. So the arms
+ * assert that units are greater than zero BEFORE they look at resumes, and
+ * the message says which of the two zeroes it is. */
+interface CScan {
+  /** Emitted C translation units (and the shared header) found in outDir. */
+  readonly units: number;
+  /** Coroutine resume functions defined across them. */
+  readonly resumes: number;
+}
+
+function scanEmittedC(outDir: string): CScan {
+  let units = 0;
+  let resumes = 0;
   for (const f of readdirSync(outDir)) {
     if (!f.endsWith(".c") && !f.endsWith(".scrh")) continue;
+    units++;
     const text = readFileSync(join(outDir, f), "utf8");
     for (const m of text.matchAll(/\bsc_cr_[A-Za-z0-9_]+\s*\(ScrCoroBase/g)) {
       void m;
-      n++;
+      resumes++;
     }
   }
-  return n;
+  return { units, resumes };
 }
 
 /** A one-line account of a build+run, for an assertion message.
@@ -365,6 +389,7 @@ function say(label: string, b: Built): string {
   if (!b.ok) return label + ": BUILD FAILED [" + b.diag + "]";
   return (
     label + ": exit=" + String(b.code) +
+    " cUnits=" + String(b.units) +
     " conversions=" + String(b.conversions) +
     " stdout=" + JSON.stringify(b.stdout) +
     " stderr=" + JSON.stringify(b.stderr.slice(0, 600))
@@ -397,7 +422,7 @@ async function build(
     else process.env[k] = v;
   }
   const dead = (diag: string): Built => ({
-    ok: false, diag, stdout: "", stderr: "", code: -1, conversions: -1, sites: 0,
+    ok: false, diag, stdout: "", stderr: "", code: -1, units: -1, conversions: -1, sites: 0,
   });
   try {
     let result: Awaited<ReturnType<typeof compile>>;
@@ -406,6 +431,22 @@ async function build(
         outPath: join(dir, exeName(stem)),
         outDir: dir,
         sanitize,
+        /* THE C LANE, PINNED, and the first run of this file is why.
+         *
+         * The CLI default backend is LLVM, and the stackless lowering is
+         * consulted in zero of that lane's ten files -- index.ts gates it
+         * on backend === "c". Without these two options both lanes compiled
+         * through LLVM, so the knob changed nothing, the programs printed
+         * the right answers, every binary exited 0, and the comparison
+         * reported agreement between a lane and itself.
+         *
+         * keepC as well as backend: the count below reads the emitted C off
+         * the disk, and a swept TU is indistinguishable from a TU with no
+         * coroutine in it. stackless-values.test.ts -- the one guard on this
+         * front that had actually been run before today -- passes both, and
+         * copying a working rig beats rediscovering why it has two flags. */
+        backend: "c",
+        keepC: true,
       });
     } catch (e) {
       /* A C-compiler refusal arrives as a thrown CcCompileError, not as a
@@ -415,11 +456,13 @@ async function build(
     if (!result.ok) return dead(JSON.stringify(result.diagnostics ?? []).slice(0, 600));
     /* Refuses BY NAME if a poison was requested and injected nothing. */
     assertGenPoisonEngaged();
-    const conversions = conversionsIn(dir);
+    const scan = scanEmittedC(dir);
+    const conversions = scan.resumes;
+    const units = scan.units;
     const sites = genPoisonSites();
     try {
       const r = await execFileAsync(result.binaryPath, [], { encoding: "utf8", timeout: 120_000 });
-      return { ok: true, diag: "", stdout: r.stdout, stderr: r.stderr, code: 0, conversions, sites };
+      return { ok: true, diag: "", stdout: r.stdout, stderr: r.stderr, code: 0, units, conversions, sites };
     } catch (e) {
       const x = e as { stdout?: string; stderr?: string; code?: number; signal?: string };
       return {
@@ -428,6 +471,7 @@ async function build(
         stdout: x.stdout ?? "",
         stderr: x.stderr ?? "",
         code: x.signal ?? x.code ?? -1,
+        units,
         conversions,
         sites,
       };
@@ -461,6 +505,13 @@ describe("generator channel: the two lanes agree on every value", () => {
         expect(on.ok, say("on", on)).toBe(true);
         expect(off.code, say("off", off)).toBe(0);
         expect(on.code, say("on", on)).toBe(0);
+
+        /* THE LANE, before anything derived from it. A zero conversion
+         * count means "no generator converted" only once a C unit was read;
+         * with no unit at all it means the C lane never ran, and that is the
+         * reading this file shipped its first run on. */
+        expect(off.units, "no emitted C on the OFF lane -- " + say("off", off)).toBeGreaterThan(0);
+        expect(on.units, "no emitted C on the ON lane -- " + say("on", on)).toBeGreaterThan(0);
 
         /* PART 1: the comparison. */
         expect(on.stdout, say("on", on) + " | " + say("off", off)).toBe(off.stdout);
@@ -510,6 +561,13 @@ describe("generator lifecycle: the two lanes agree where parts 1-2 never looked"
           expect(on.stderr, "the FRAME lane leaks here: " + say("on", on)).not.toContain(AUDIT_FAILED);
         }
 
+        /* THE LANE, before anything derived from it. A zero conversion
+         * count means "no generator converted" only once a C unit was read;
+         * with no unit at all it means the C lane never ran, and that is the
+         * reading this file shipped its first run on. */
+        expect(off.units, "no emitted C on the OFF lane -- " + say("off", off)).toBeGreaterThan(0);
+        expect(on.units, "no emitted C on the ON lane -- " + say("on", on)).toBeGreaterThan(0);
+
         expect(on.stdout, say("on", on) + " | " + say("off", off)).toBe(off.stdout);
         expect(off.conversions, say("off", off)).toBe(0);
         expect(on.conversions, say("on", on)).toBe(EXPECTED_CONVERSIONS);
@@ -535,6 +593,7 @@ describe("the comparison can see a wrong arm", () => {
         });
         expect(off.ok, say("off", off)).toBe(true);
         expect(bad.ok, say("bad", bad)).toBe(true);
+        expect(bad.units, "no emitted C to poison -- " + say("bad", bad)).toBeGreaterThan(0);
         /* And the injection is accounted for, not assumed: a control that
          * differs for some other reason would otherwise read as proof. */
         expect(bad.sites).toBeGreaterThan(0);
