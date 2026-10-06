@@ -1,8 +1,18 @@
 # A vitest shard can go red with zero test failures
 
 `[vitest-worker]: Timeout calling "onTaskUpdate"`, no failing test, the run
-dead. Seen three times on 2026-10-05, all under 12 workers, most recently on
-shard 3 of the gate over `530e0d0e6`.
+dead. Three occurrences on 2026-10-05, all under 12 workers -- but **two
+EVENTS, not three**, and the difference matters to every count below:
+
+| # | run | shard | file |
+|---|---|---|---|
+| 1 | knobon-measure | 6/6 | `npm-static.test.ts` |
+| 2 | knobon-measure | 6/6 | `coverage-corpus-02.test.ts` |
+| 3 | gatefour | 3/6 | none -- unhandled, no test failed |
+
+1 and 2 are the **same shard of the same run**: one event that struck two
+files, not two independent observations. 3 is a different shard of a
+different run with no test file at all.
 
 This file records the MECHANISM, read out of the installed `vitest@3.2.7`
 rather than recalled. It deliberately does not name a cause, and S3 says why
@@ -105,7 +115,13 @@ cause first.
 
 - Which of the two candidate causes it is (S3). The experiment decides it.
 - birpc's default RPC timeout, in milliseconds.
-- Whether the three occurrences share a shard, a test file, or only a
-  worker count. Only the worker count has been stated across all three.
+- ~~Whether the three occurrences share a shard or a test file.~~
+  **ANSWERED, and it cuts both ways.** They do not share: 1 and 2 are one
+  event on shard 6/6 of `knobon-measure`, 3 is shard 3/6 of `gatefour` with
+  no test file. So "shared shard" is **not** available as a discriminator --
+  there is no sharing BETWEEN runs -- and the real numerator falls from
+  three occurrences to **two events**, which worsens an already
+  non-significant p (0.165 on the three-occurrence count). Worker count
+  remains the only condition stated across both events.
 - Whether any of the 93 synchronous spawns are on the hot path of the shards
   that timed out. The count is a harness-wide figure, not a per-shard one.
