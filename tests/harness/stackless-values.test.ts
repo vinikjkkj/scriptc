@@ -116,6 +116,24 @@ const WRAPPERS: ReadonlyArray<{ name: string; take: string; finish: string; conv
   // job: it refuses coverage the lane does not have.
   { name: "wtc", take: "f64", finish: "ref", converted: true },
   { name: "wcs", take: "ref", finish: "ref", converted: true },
+  // THE SOLE-OPERAND SHAPES. The await is the ONLY operand of the expression
+  // wrapping it, so nesting is positional and the frame carries nothing extra.
+  // These three are the measured dominant idioms over zapo-rest, not invented
+  // ones: wdr is `return await f()` in a handler declared `any` (a dyn
+  // conversion on the result -- 131 points, 117 of them in one file), wca is a
+  // one-argument call (33 points), wrl a one-field record literal (14).
+  { name: "wdr", take: "f64", finish: "ref", converted: true },
+  { name: "wca", take: "f64", finish: "ref", converted: true },
+  // wrl is here as a NEGATIVE entry, and it corrected a mistake in my own
+  // measurement. A one-field record literal looks sole-operand to the eye and
+  // my arity scan credited 14 points to it, but the scan read the wrong node:
+  // a recordLit holds `fields` as entries that carry no `kind`, so the
+  // literal itself counts ZERO operands, never becomes transparent, and the
+  // await stays nested. The scan had measured the ENTRY, which does have one.
+  // The ledger caught it on the first run. It stays as a ledger entry so the
+  // shape is named rather than silently absent, and it goes red the day a
+  // record literal does start converting.
+  { name: "wrl", take: "f64", finish: "ref", converted: false },
 ];
 
 const SOURCE = `
@@ -154,6 +172,10 @@ async function wtc(bad: boolean): Promise<string> {
     return "caught:" + (e as Error).message;
   }
 }
+function wrap1(v: number): string { return "w" + v; }
+async function wdr(n: number): Promise<any> { return await pf(n); }
+async function wca(n: number): Promise<string> { return wrap1(await pf(n)); }
+async function wrl(n: number): Promise<{ v: number }> { return { v: await pf(n) }; }
 async function wcs(bad: boolean): Promise<string> {
   try {
     if (bad) throw new Error("sync");
@@ -193,6 +215,8 @@ async function main(): Promise<void> {
   console.log("try   ", tc1, tc2);
   const cs1 = await wcs(false); const cs2 = await wcs(true);
   console.log("catch ", cs1, cs2);
+  const dr = await wdr(10); const ca = await wca(20); const rl = await wrl(30);
+  console.log("sole  ", dr, ca, rl.v, typeof dr);
   console.log("done");
 }
 void main();

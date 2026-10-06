@@ -183,6 +183,33 @@ $MainLog = Join-Path $LogDir "gate5.log"
 # the rest work ($r.Green resolves through the array in BOTH the true and the
 # false branch, measured), and the verdict of a gate must not rest on that.
 # Console.Out writes past the pipeline entirely.
+# ---------------------------------------------------------------------------
+# THE WORKING-TREE HASH, and why HEAD was never enough.
+# ---------------------------------------------------------------------------
+# On 2026-10-06 this gate reported head=f457649d7 verdict=GREEN for all six
+# shards while shards 4, 5 and 6 read a tree that had been edited under them:
+# liveness.ts changed 11 seconds after shard 4 started, a harness test 13
+# seconds after shard 5 started. Nothing went red. Nothing could: an
+# UNCOMMITTED EDIT NEVER MOVES HEAD, so the pointer the gate printed stayed
+# correct the whole time while the content it measured was a tree that has
+# never existed as a commit. vitest aliases SOURCE, not dist, so the edits
+# were live immediately.
+#
+# A verdict that cannot distinguish the tree it measured from the tree it
+# claims to have measured is not a verdict. So the gate now hashes CONTENT at
+# every shard boundary and refuses to continue if it moved.
+#
+# The hash covers HEAD, the full diff of every tracked modification, and the
+# porcelain status including untracked paths. It does NOT cover the CONTENT of
+# untracked files -- only their presence -- which is a known and stated gap,
+# not an oversight.
+function WorkTreeHash {
+  $acc = (& git rev-parse HEAD) + "~" + (((& git diff HEAD) -join "~")) + "~" + (((& git status --porcelain -uall) -join "~"))
+  $sha = [System.Security.Cryptography.SHA256]::Create()
+  $raw = $sha.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($acc))
+  return ([System.BitConverter]::ToString($raw)).Replace("-", "").Substring(0, 16).ToLower()
+}
+
 function Say([string]$m) {
   $line = "{0} {1}" -f (Get-Date -Format "HH:mm:ss"), $m
   Add-Content -LiteralPath $MainLog -Value $line
@@ -365,6 +392,16 @@ try {
   Say ("ENV node={0} zig={1} zigPath={2} SCRIPTC_TARGET={3} SCRIPTC_CC={4} SCRIPTC_TEST_CC={5} workers={6}" -f $nodeVer, $zigVer, $zigPath, $env:SCRIPTC_TARGET, $env:SCRIPTC_CC, $env:SCRIPTC_TEST_CC, $env:SCRIPTC_TEST_WORKERS)
   Say ("ENV tmp={0} cache={1} ziglocal={2} prov={3} scratchMaxMB={4}" -f $env:TMP, $env:SCRIPTC_CACHE_DIR, $env:ZIG_LOCAL_CACHE_DIR, $env:SCRIPTC_PROVENANCE_CACHE, $env:SCRIPTC_TEST_SCRATCH_MAX_MB)
   Say ("TREE head={0} subject={1}" -f $head, $headSub)
+  $TreeHash0 = WorkTreeHash
+  Say ("TREEHASH baseline={0}" -f $TreeHash0)
+  # A gate that starts on a dirty tree is measuring somebody's work in
+  # progress. Refused outright in a real run; a dry run may be dirty.
+  if (-not $DryRun -and $dirty.Count -gt 0) {
+    Say ("GATE5-ABORT reason=dirty-worktree-at-start entries={0}" -f $dirty.Count)
+    Say ("GATE5-ABORT detail: commit, stash or use an exclusive worktree. A verdict over uncommitted edits names a commit it did not measure.")
+    $ExitRc = 2
+    return
+  }
   foreach ($d in $dirty) { Say ("TREE dirty: {0}" -f $d) }
   # Untracked test files are collected by vitest and belong to whoever left
   # them there. Named so a failure from one is attributable at a glance.
@@ -441,6 +478,14 @@ try {
 
   for ($n = 1; $n -le $Shards; $n++) {
     if ((FreeGB) -lt $DiskFloorGB) { Say ("GATE5-ABORT reason=disk-floor-midrun shard={0} free={1}GB" -f $n, (FreeGB)); $ExitRc = 2; return }
+    $hNow = WorkTreeHash
+    if ($hNow -ne $TreeHash0) {
+      Say ("GATE5-ABORT reason=worktree-moved-midrun shard={0} baseline={1} now={2}" -f $n, $TreeHash0, $hNow)
+      Say ("GATE5-ABORT detail: the working tree changed while the gate was running. vitest aliases SOURCE, so the shards before and after this point measured DIFFERENT trees and neither side's verdict stands. Re-run the WHOLE gate on a clean, exclusive worktree.")
+      $ExitRc = 2
+      return
+    }
+    Say ("TREEHASH shard={0} {1}" -f $n, $hNow)
     $r = Invoke-Judged -Tag "shard-$n" -ExtraArgs @("--shard=$n/$Shards")
     foreach ($f in $r.Ran) {
       if ($RanAll.ContainsKey($f)) { $RanAll[$f] += ",$n" } else { $RanAll[$f] = "$n" }
@@ -463,7 +508,13 @@ try {
 
   $verdict = ($Green -eq $Shards -and $Red -eq 0 -and $PartitionOk)
   $ExitRc = if ($verdict) { 0 } else { 1 }
-  Say ("GATE5-TOTAL shards={0} green={1} red={2} partition={3} minutes={4} free={5}GB head={6} verdict={7}" -f $Shards, $Green, $Red, $(if ($PartitionOk) { "OK" } else { "FAIL" }), [math]::Round(((Get-Date) - $Started).TotalMinutes, 2), (FreeGB), $head, $(if ($verdict) { "GREEN" } else { "RED" }))
+  $hEnd = WorkTreeHash
+  if ($hEnd -ne $TreeHash0) {
+    Say ("GATE5-ABORT reason=worktree-moved-before-verdict baseline={0} now={1}" -f $TreeHash0, $hEnd)
+    $ExitRc = 2
+    return
+  }
+  Say ("GATE5-TOTAL shards={0} green={1} red={2} partition={3} minutes={4} free={5}GB head={6} treehash={7} verdict={8}" -f $Shards, $Green, $Red, $(if ($PartitionOk) { "OK" } else { "FAIL" }), [math]::Round(((Get-Date) - $Started).TotalMinutes, 2), (FreeGB), $head, $hEnd, $(if ($verdict) { "GREEN" } else { "RED" }))
 }
 catch {
   Say ("GATE5-ABORT reason=exception message={0}" -f $_.Exception.Message)
