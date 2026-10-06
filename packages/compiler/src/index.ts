@@ -718,7 +718,7 @@ export function analyze(entryPath: string, opts: AnalyzeOptions = {}): AnalyzeRe
  * profile, which the cache key already covers by path and bytes. */
 export type ProgramNativeFeatures = Record<string, boolean>;
 
-function programNativeFeatures(mod: IrModule): ProgramNativeFeatures {
+function programNativeFeatures(mod: IrModule, backend: "c" | "llvm"): ProgramNativeFeatures {
   return {
     // The link switch for scr_regex.c + libregexp: detected on the IR, so
     // regex-free programs keep the historical (pinned) command line.
@@ -778,9 +778,16 @@ function programNativeFeatures(mod: IrModule): ProgramNativeFeatures {
     // The link switch for scr_url.c: url.* libCalls or a url-kind type
     // on the IR. The unit used to be unconditional and cost every
     // binary in the project four win32 pages it could not reach.
-    // Same call the emitter makes, so the link line cannot disagree with
-    // the emitted TU; empty whenever SCRIPTC_STACKLESS is not 1.
-    coro: coroPlans(mod.functions).size > 0,
+    // The link switch for scr_coro.c. `coroPlans` is the same call the C
+    // emitter makes and is empty whenever SCRIPTC_STACKLESS is not 1 -- but
+    // it reads only the IR, which is BACKEND-INDEPENDENT, while the only
+    // emitter that lowers a coroutine is the C one. Without the lane gate an
+    // LLVM build with the knob on linked scr_coro.c into a .ll that calls
+    // nothing in it: 4,608 dead bytes and a cache-key flip for no change in
+    // behaviour -- precisely the "link line disagrees with the emitted TU"
+    // failure cc.ts names at coreRuntimeSources. Drop the gate when the LLVM
+    // backend grows the stackless lowering, not before.
+    coro: backend === "c" && coroPlans(mod.functions).size > 0,
     url: moduleUsesUrl(mod),
     // The link switch for scr_url_params.c: sp.* libCalls, the
     // url.searchParams getter, or a searchParams-kind type on the IR.
@@ -1246,7 +1253,7 @@ async function compileTracked(
   // the same helper, so the two paths cannot leave different directories.
   await sweepStaleOutputs(opts.outDir, stem, backend, programUnits.length, programHeader !== undefined);
 
-  const features = programNativeFeatures(lowered.module!);
+  const features = programNativeFeatures(lowered.module!, backend);
   let irPath: string | undefined;
   if (opts.emitIr) {
     irPath = join(opts.outDir, `${stem}.ir.json`);
