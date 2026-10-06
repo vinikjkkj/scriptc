@@ -189,6 +189,39 @@ non-zero **in the same run** before that green means anything.
 the LLVM lane -- that lane consults the admitted set in zero of its ten
 files and is gated on `backend === "c"`.
 
+### 6.1 CORRECTION, registered before the first build ran
+
+Everything in section 6 above was written when the only parity programs
+were the three value arms, and **those three could not have gone red
+against most of this slice**. A second consumer audit found four more
+defects, and three of them -- the NULL promise rejection at the fourth
+completion path, the fibre-anchored `.next(v)` read, and the stranded
+AsyncLocalStorage context -- live on the **exceptional** and **teardown**
+paths. A program that consumes a generator to exhaustion with no
+`.throw()`, no `.return()`, no escaping exception and no ALS passes all
+three while every one of them is present. The fourth, a frame-field name
+collision, needs two locals that differ only by `$` against `_`.
+
+So the sentence "parity: expected to pass" was true and nearly worthless.
+**A passing parity is a WEAKER signal than section 6 assumed**, and it was
+weaker in a way the section could not see: not noise, not sample size, but
+a whole class of behaviour absent from every program under comparison.
+
+The guard now carries six LIFECYCLE arms -- `genret`, `genthrow`,
+`bodythrow`, `nextval`, `als`, `collide` -- each naming, in the file, the
+revert that reddens it. The als arm builds under `SCRIPTC_RC_AUDIT=1`
+because a stranded context has no stdout; it is the only arm that does,
+and the reason is recorded beside it.
+
+**`EXPECTED_CONVERSIONS` = 1 still holds for every program**, the six new
+ones included: each defines exactly one synchronous generator, and
+top-level code -- the `for`-of, the `try`/`catch`, the ALS callback --
+converts nothing. The three readings below are unchanged.
+
+This correction is registered **before** the first build, not after it,
+because the value of a result depends on what the instrument could have
+said, and that has to be on paper before the result arrives.
+
 ### Three conditions to stop and report rather than fix
 
 1. A **link** error naming `scr_coro_state_in` or `scr_coro_state_out` -- a
