@@ -265,16 +265,55 @@ void  *scr_coro_promise_ref(const ScrPromise *p);
  *     calls scr_await_hop -- which is why async generators are blocked
  *     behind the hop and these are not.
  *
- * THE ONE STRUCTURAL QUESTION THIS HEADER DOES NOT ANSWER, stated rather
- * than buried: INV-5 is bracketed by scr_coro_resume_entry, which is the
- * READY-QUEUE entry and settles a promise on completion. A generator is
- * re-entered by its CONSUMER instead, synchronously, and must not settle
- * anything. Decision 3 forbids a second INV-5 implementation, so either
- * that bracket is factored out of scr_coro_resume_entry -- which edits
- * scr_coro.c, a file another branch holds -- or the generator path calls
- * it and the promise handling is made conditional, which edits the same
- * file. Both routes land there. It is NOT resolved here, and no code below
- * assumes either one. */
+ * THE INV-5 QUESTION, DECIDED BY THE COORDINATOR ON FAILURE MODE -- not
+ * read out of the code, and recorded that way so nobody mistakes a judgement
+ * call for a finding.
+ *
+ * scr_coro_resume_entry brackets INV-5 and is the READY-QUEUE entry: it
+ * settles a promise on fall-out and releases the suspension's reference. A
+ * generator is re-entered by its CONSUMER, synchronously, settles nothing,
+ * and holds no suspension reference. Two routes existed:
+ *
+ *   FACTOR THE BRACKET OUT -- one shared implementation, two callers. A
+ *     wrong factoring breaks BOTH paths loudly and immediately, on the
+ *     first test.
+ *   CONDITION INSIDE IT -- an `if` in a function that then means two
+ *     things. Wrong toward the generator, it settles a promise that does
+ *     not exist; wrong toward async, the promise is never settled and the
+ *     program HANGS -- low and far from the cause.
+ *
+ * Factoring was chosen, and the consistency argument is what settles it:
+ * scr_gen_coro_alloc is kept separate from scr_coro_alloc precisely so the
+ * one place that CREATES frames is never ambiguous about whether there is a
+ * promise to answer. Conditioning inside resume_entry would do to the one
+ * place that RESUMES frames exactly what was refused for the one place that
+ * creates them.
+ *
+ * AND THE BOUNDARY IS NOT WHERE EITHER OF US ASSUMED, which is why this was
+ * read before it was written. The promise handling is NOT part of INV-5 and
+ * never was -- it is ordinary completion semantics that merely has an
+ * ORDERING CONSTRAINT against it, because scr_coro_finish_throw reads the
+ * ACTIVE cell and so must run while the frame's cell is still installed.
+ * INV-5 itself is only the install/restore pair:
+ *
+ *     save scr_als_active, install &base->als
+ *     save the active cell, install scr_coro_exc(base)   [fat frames only]
+ *     ... the caller's body and its own outcome handling ...
+ *     restore the cell, restore scr_als_active
+ *
+ * So the factoring is clean at THAT line, not at "bracket versus rest": the
+ * shared part is the two halves of the install/restore pair, and each caller
+ * keeps its own outcome handling inside the window. The async path's
+ * fall-out-to-rejection and its trailing scr_coro_release stay exactly where
+ * they are, unchanged, so the edit to scr_coro.c is a pure EXTRACTION with
+ * no behaviour change -- provable the same way the coroPlans relocation was.
+ *
+ * One consequence worth stating since it is the reason a shared outcome
+ * check would NOT have worked: a generator that yields sets SCR_CORO_YIELDED
+ * and is neither DONE nor SUSPENDED, which is precisely the case
+ * resume_entry aborts on. Had the bracket been factored WITH the outcome
+ * check, that abort would have had to learn about generators; factored at
+ * the install/restore line, resume_entry needs no change at all. */
 
 /** The last resume returned because it YIELDED: a value is in the handle's
  * OUT slot and the consumer should read it. The third member of the
