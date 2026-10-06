@@ -8144,6 +8144,34 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
           // scr_ready_push per await on exactly one of its two arms -- the
           // invariant is countable by grepping the emitted TU.
           const pr0 = E.emitExpr(e.value);
+          // BOUNDED against the dispatch. coroDispatch emits
+          // `case 1..plan.points.length` plus `default: abort()`, and this
+          // index is what writes sc_b->state. Nothing tied the two together:
+          // if a suspension node is emitted TWICE, the second park writes a
+          // state with no case and the resume takes the abort(). Trusting two
+          // counters to stay in step is a parallel assertion about the system
+          // rather than one derived from it, which is the error shape this
+          // front has paid for repeatedly.
+          //
+          // LATENT TODAY WITH A NAMED ARMING CONDITION: a sweep of the
+          // corpus found 16 nodes emitted more than once, in six functions,
+          // and ZERO of them are admitted -- all media-upload and retry
+          // paths. A park-vs-case scan over all 990 converted bodies of the
+          // user's program found no mismatch, which is the right answer to
+          // that question and NOT evidence the mechanism is absent. Any one
+          // of those six becoming admissible arms the abort().
+          //
+          // Any port that reuses coroPointIndex inherits this; the LLVM plan
+          // already carries the note.
+          if (E.coroPointIndex >= E.currentCoro.points.length) {
+            throw new Error(
+              `emitter bug: coroutine state index ${E.coroPointIndex} is past the ` +
+                `dispatch, which emits case 1..${E.currentCoro.points.length} for ` +
+                `${E.currentFn!.name}. A suspension node was emitted more than ` +
+                `once: the extra park would write a state with no case and the ` +
+                `resume would take default: abort().`,
+            );
+          }
           const idx = E.coroPointIndex++;
           const nm = emitCoroAwait(E, E.currentFn!, E.currentCoro, idx, pr0, e.type);
           E.emitPendingCheck();
