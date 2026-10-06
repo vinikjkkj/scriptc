@@ -53,8 +53,15 @@
 import type { IrFunction, IrType } from "../../ir/nodes.js";
 import type { StacklessPlan } from "../../ir/liveness.js";
 import type { CEmitter, Temp } from "./emitter.js";
-import { cType, vAdapters } from "./emit-types.js";
-import { coroLabel, coroReload, coroSpill, isRefCounted } from "./emit-coro.js";
+import { boxAccess, cDecl, cType, vAdapters } from "./emit-types.js";
+import {
+  mangleCoroFrame,
+  mangleCoroResume,
+  mangleGenSpawn,
+  mangleLocal,
+  mangleRawParam,
+} from "../mangle.js";
+import { coroField, coroLabel, coroReload, coroSpill, isRefCounted } from "./emit-coro.js";
 import { poisonYieldArm } from "./gen-poison.js";
 
 /** The runtime entry point for each arm of the yield channel. Spelled in
@@ -164,4 +171,70 @@ export function genCoroFinish(retType: IrType, valueName: string): string[] {
         `return;`,
       ];
   }
+}
+
+/** The spawn wrapper for a CONVERTED synchronous generator.
+ *
+ * Replaces all three pieces the fibre path emits -- the argument pack, the
+ * trampoline and the never-started teardown -- with one function, because a
+ * frame IS the argument pack: the parameters go straight into frame fields
+ * that the state machine reloads on every resume, so there is nothing to
+ * malloc and nothing to drop separately. The handle owns the frame.
+ *
+ * IT DOES NOT RUN THE BODY, and that is the one place this must NOT mirror
+ * the async spawn. scr_coro_spawn exists to satisfy INV-2: an async
+ * function runs synchronously up to its first suspension, so a function
+ * that never awaits has already settled when the spawn returns. A generator
+ * is the opposite and JS is explicit about it -- calling a generator
+ * function runs NOTHING; the body starts at the first .next(). Calling
+ * scr_coro_spawn here would execute the body one resume early and the
+ * divergence would be invisible in any test whose generator has no side
+ * effect before its first yield.
+ *
+ * The frame's own handle pointer is stored after the wrap, because the
+ * yield and finish arms reach the OUT slot through it (see the header note
+ * on why they take the handle rather than the frame). */
+export function emitGenCoroSpawn(
+  E: CEmitter,
+  out: string[],
+  fn: IrFunction,
+  plan: StacklessPlan,
+): void {
+  const frame = mangleCoroFrame(fn.name);
+  const boxedIds = new Set(fn.locals.filter((l) => l.boxed === true).map((l) => l.id));
+  const pname = (q: { localId: string }): string =>
+    boxedIds.has(q.localId) ? mangleRawParam(q.localId) : mangleLocal(q.localId);
+  const lifted = fn.captures !== undefined;
+  const params = [
+    ...(lifted ? ["ScrClosure *sc_env"] : []),
+    ...fn.params.map((q) => cDecl(q.type, pname(q))),
+  ];
+  const sig = `ScrGen *${mangleGenSpawn(fn.name)}(${params.join(", ") || "void"})`;
+  E.decl(`${sig};`);
+  const lines: string[] = [
+    ``,
+    `${E.link}${sig} {`,
+    /* has_exc mirrors emitCoroSpawns rather than deciding independently: one
+     * place decides fat versus lean, and a second opinion here is exactly
+     * the copy-beside-the-source shape this front keeps paying for. */
+    `  ${frame} *sc_f = (${frame} *)scr_gen_coro_alloc(sizeof *sc_f, &${mangleCoroResume(fn.name)}, /*has_exc=*/false);`,
+    ...(lifted ? [`  sc_f->sc_env = scr_closure_retain(sc_env);`] : []),
+    ...fn.params.flatMap((q) => {
+      const f = coroField(q.localId);
+      if (!boxedIds.has(q.localId)) return [`  sc_f->${f} = ${pname(q)};`];
+      /* Built here for the same reason the async spawn builds it here: the
+       * slot is already ScrBox *, the body cannot redeclare a frame local,
+       * and "constructed exactly once" becomes structural. */
+      return [
+        `  sc_f->${f} = ${E.boxNewC(q.type)}; /* ${q.name} (boxed param) */`,
+        `  scr_box_set_${boxAccess(q.type)}(sc_f->${f}, ${pname(q)}); /* moves the +1 in */`,
+      ];
+    }),
+    `  ScrGen *sc_g = scr_gen_of_coro(&sc_f->base);`,
+    `  sc_f->sc_gen = sc_g;`,
+    `  return sc_g; /* NOTHING has run: the body starts at the first .next() */`,
+    `}`,
+  ];
+  void plan;
+  for (const l of lines) out.push(l);
 }
