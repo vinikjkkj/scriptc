@@ -5401,8 +5401,7 @@ void *scr_gen_coro_alloc(size_t size, ScrCoroResume resume, bool has_exc) {
    * two lifecycles -- decision 3. */
   void *mem = calloc(1, size);
   if (mem == NULL) {
-    fputs("scriptc: out of memory allocating a generator frame
-", stderr);
+    fputs("scriptc: out of memory allocating a generator frame\n", stderr);
     abort();
   }
   scr_coro_init((ScrCoroBase *)mem, resume, NULL, has_exc);
@@ -5412,8 +5411,7 @@ void *scr_gen_coro_alloc(size_t size, ScrCoroResume resume, bool has_exc) {
 ScrGen *scr_gen_of_coro(ScrCoroBase *base) {
   ScrGen *g = calloc(1, sizeof *g);
   if (g == NULL) {
-    fputs("scriptc: out of memory allocating a generator handle
-", stderr);
+    fputs("scriptc: out of memory allocating a generator handle\n", stderr);
     abort();
   }
   g->rc = 1;
