@@ -167,7 +167,13 @@ Set-Content -LiteralPath $LastLog -Encoding utf8 -Value (
 
 $ErrorActionPreference = "Stop"
 $LogDir      = Join-Path $GateRoot "logs\$RunId"
-$Shards      = 6
+# Six is the contract. The override exists so the MID-RUN tree-hash abort can
+# be armed without paying a full run: that branch lives at the top of the
+# shard loop and needs two real boundaries to fire, which -DryRun cannot give
+# (it returns before the loop). A high count makes each shard a handful of
+# files, so a real second boundary arrives in minutes. Unset everywhere that
+# matters; a merge verdict is still six.
+$Shards      = if ($env:GATE_SHARDS) { [int]$env:GATE_SHARDS } else { 6 }
 $DiskFloorGB = 10
 $ExitRc      = 1
 $Started     = Get-Date
