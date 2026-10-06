@@ -45,7 +45,9 @@ import { appendLines, type CEmitter, type Temp } from "./emitter.js";
 import { mangleCoroFrame, mangleCoroResume, mangleAsyncSpawn, mangleLocal, mangleRawParam } from "../mangle.js";
 import { boxAccess, cDecl, cType, vAdapters } from "./emit-types.js";
 import { type IrFunction, type IrType, isRefCounted } from "../../ir/nodes.js";
-import { stacklessPlan, type StacklessPlan } from "../../ir/liveness.js";
+// `coroPlans` moved to ir/coro-plans.ts: it is backend-agnostic policy and
+// only looked C-specific because it lived here. The TYPE is still needed.
+import { type StacklessPlan } from "../../ir/liveness.js";
 import { poisonFinishArm, poisonSpillOrder, poisonTakeArm } from "./coro-poison.js";
 
 /** The frame's field name for a local. Deliberately not mangleLocal's name:
@@ -60,19 +62,6 @@ export function coroLabel(i: number): string {
   return `sc_S${i + 1}`;
 }
 
-/** Which functions this slice lowers, keyed by IR name. Computed once per
- * module: the emitters below and emit-async.ts's fiber path both consult it,
- * and a function appearing in neither or both would emit a duplicate symbol
- * or none at all. */
-export function coroPlans(fns: readonly IrFunction[]): Map<string, StacklessPlan> {
-  const out = new Map<string, StacklessPlan>();
-  if (process.env["SCRIPTC_STACKLESS"] !== "1") return out;
-  for (const fn of fns) {
-    const plan = stacklessPlan(fn);
-    if (plan !== null) out.set(fn.name, plan);
-  }
-  return out;
-}
 
 /** The locals the frame carries: everything live across a suspension, plus
  * every parameter (the resume function has no parameters of its own, so a
