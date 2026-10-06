@@ -147,6 +147,76 @@ reported the pre-boxed-param 990) and used the wrong reachability test. The
 figures above come from one that asks the real predicate for every verdict
 and aborts if its own blocker attribution disagrees.
 
+## 1b. The parity inventory, by property
+
+Section 2 lists what each construct's counterpart looks like. This section
+answers a different question -- for each thing the C coro lowering *depends
+on*, does the LLVM backend already have it? -- and it answers in three
+states, because two of them are not the same:
+
+- **used by LLVM** -- the backend already calls it.
+- **shared, unused** -- it exists in code both backends can reach
+  (`backend/mangle.ts`, `ir/`), and the LLVM backend simply does not call it
+  yet. Free to adopt.
+- **absent** -- no counterpart anywhere.
+
+| dependency | verdict | where |
+|---|---|---|
+| `appendLines` / `appendAll` | used by LLVM | `llvm/emitter.ts` |
+| the emitter class (`CEmitter` <-> the LLVM emitter) | used by LLVM | `llvm/emitter.ts` |
+| `Temp` <-> `LlValue` | used by LLVM | `llvm/emitter.ts` |
+| `cDecl` / `cType` <-> `llType` | used by LLVM | `llvm/classes.ts` |
+| `vAdapters` / `rcAdapters` | used by LLVM | `llvm/dyn.ts` |
+| **`boxAccess`** | **used by LLVM** | `llvm/shapes.ts:455`, twin of `emission/emit-types.ts:692` |
+| `isRefCounted` | used by LLVM | `llvm/classes.ts` |
+| `mangleAsyncSpawn` | used by LLVM | `llvm/emitter.ts` |
+| `mangleCoroFrame`, `mangleCoroResume` | shared, unused | `backend/mangle.ts` |
+| `stacklessPlan`, `suspensionLiveness` | shared, unused | `ir/liveness.ts` |
+| `SUSPENDING_LIB_CALLS`, `fiberOnly` | shared, unused | `ir/suspends.ts` |
+| `coroPlans`, frame-struct emit, park site, finish/unwind | **C-side, needs a twin** | `backend/emission/emit-coro.ts` |
+
+**Controlled:** a fabricated dependency name returns *absent*, so the
+inventory can report a miss. Without that it would not be evidence when it
+reports a hit.
+
+**`boxAccess` existing in both lanes was the decisive evidence for the
+boxed-param slice** -- it is why the eleven IR type kinds collapse to three
+box-access flavours on either backend, and it is recorded here because that
+kind of already-shared helper is the reason the distance is smaller than the
+size of the LLVM emitter suggests.
+
+### The runtime types are the real gap
+
+| type | LLVM type declarations | in the runtime headers |
+|---|---|---|
+| `ScrCoroBase` | **0** | yes |
+| `ScrCoroExc` | **0** | yes |
+| `ScrExcCell` | **0** | yes |
+| `ScrClosure` | 1 | yes |
+| `ScrBox` | 1 | yes |
+
+`ScrClosure` and `ScrBox` each have a declared LLVM type, so the mechanism
+for declaring a runtime struct to the LLVM lane exists and is in use. The
+three the coroutine frame needs have none. See section 5 for why they must
+arrive with `_Static_assert` entries rather than after them.
+
+### The door
+
+```
+index.ts:790    coro: backend === "c" && coroPlans(mod.functions).size > 0,
+```
+
+That conjunct is the whole reason this front is C-only. It was added
+deliberately -- without it, an LLVM build with the knob on linked
+`scr_coro.c` into a `.ll` that calls nothing in it -- so it is correct today
+and is the single line to delete when the lowering lands. It says where the
+port begins, not where it ends.
+
+**The conclusion that sizes the port: nothing is absent.** Every dependency
+is either already used by the LLVM lane or sitting in shared code it does not
+yet call. The genuinely new work is four emission functions and three type
+declarations.
+
 ## 2. Construct-by-construct
 
 `emit-coro.ts` (C lane) is 354 lines, **189 non-comment lines**, 13 exports,
