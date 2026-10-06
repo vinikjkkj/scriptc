@@ -58,8 +58,8 @@ admissible set cannot differ by backend.
 
 | column | value | denominator |
 |---|---|---|
-| admissible functions | **990** | 1,304 functions that contain at least one suspension point (75.9%) |
-| admissible suspension points | **1,555** | 2,260 suspension points in the module (68.8%) |
+| admissible functions | **1,099** | 1,304 functions that contain at least one suspension point (84.3%) |
+| admissible suspension points | **1,728** | 2,260 suspension points in the module (76.5%) |
 
 `1,304` is *functions with at least one suspension point*, not *suspendable
 functions*: 1,489 functions are suspendable (1,487 async + 2 async
@@ -67,14 +67,19 @@ generators) and 185 of those contain no await at all.
 
 ### Two ladders that must never share a column
 
-- **admissible (IR, lane-independent)** — 990/1,304 functions, 1,555/2,260
-  points, above.
+- **admissible (IR, lane-independent)** — 1,099/1,304 functions, 1,728/2,260
+  points, above. (Was 990/1,555 until the boxed-param lowering landed in
+  `05980b03c`, which admitted 109 functions and 173 points for no new frame
+  bytes.)
 - **emitted conversion (C lane)** — a different column. `stackless-frame-contract.md`
   section 6 reports 533 of 1,489 suspendable functions and 753 of 2,270
   emitted await sites; **that table predates the split-TU fix and the
   nesting admission** and is stale. Section 8 of the same file reports
   **990 frame structs emitted (C lane, knob ON)**, i.e. 990 of 1,489
-  suspendable functions.
+  suspendable functions. NOTE this 990 is the EMITTED count and is a
+  different population from the admissible 1,099 above; it was measured
+  before the boxed-param lowering and has not been re-measured, so it is
+  stale low rather than equal to anything here.
 
 ### The headline memory figures, and what each one is allowed to support
 
@@ -110,6 +115,38 @@ persisted in the same turn that produces it, with lane, arms, column,
 denominator, host regime and build -- or it is hearsay the next time it is
 cited, however real it was when taken.
 
+### The ceiling, and why it is one item rather than a list
+
+With the boxed-param lowering in, the remaining ladder is flat: the next
+blockers in scope are `loop` (29 functions admitted by closing it alone),
+`rootOk:assign` (25) and `awaitUnionExpr` (25). The largest single item left
+is the one excluded by judgement rather than by cost -- `finally`, i.e. D4.
+
+| | functions | points |
+|---|---|---|
+| **admitted today** | 1,099 of 1,304 (84.3%) | 1,728 of 2,260 (76.5%) |
+| blocked out of scope | 79 (6.1%) | 183 (8.1%) |
+| reachable in scope | 126 (9.7%) | 349 (15.4%) |
+| **ceiling, current policy** | **1,225 (93.9%)** | **2,077 (91.9%)** |
+| **ceiling if D4 lands** | **1,301 (99.8%)** | **2,251 (99.6%)** |
+
+Out-of-scope set for the first row pair: `pt:finally` (the D4 fat frame),
+`fn:generator`, `pt:kind=yieldExpr`, `pt:kind=agenResume`. **Move `finally`
+in scope and out-of-scope collapses to 3 functions and 9 points** -- the
+generator family and nothing else. That is the whole content of the gap:
+**D4 is the difference between 93.9% and 99.8%**, and everything else is
+tail.
+
+Reachable means *no out-of-scope blocker at all*, not *at least one blocker
+in scope*. The distinction is not pedantry: a function blocked by both
+`loop` and `finally` is NOT reachable by closing loops, and counting it as
+reachable is how an earlier version of this measurement reported a ceiling
+of 95.7% / 94.8%. **That pair is retracted** -- it came from a script that
+both mirrored `stacklessPlan`'s gate list instead of calling it (so it still
+reported the pre-boxed-param 990) and used the wrong reachability test. The
+figures above come from one that asks the real predicate for every verdict
+and aborts if its own blocker attribution disagrees.
+
 ## 2. Construct-by-construct
 
 `emit-coro.ts` (C lane) is 354 lines, **189 non-comment lines**, 13 exports,
@@ -140,26 +177,28 @@ dominates it**.
 
 | column | value | denominator |
 |---|---|---|
-| admissible points **not** nested in an expression | **1,509** | 1,555 admissible points (97.0%) |
-| admissible points nested in an expression | 46 | 1,555 admissible points (3.0%) |
-| admissible functions with **zero** nested points | **953** | 990 admissible functions (96.3%) |
-| admissible functions with at least one nested point | 37 | 990 admissible functions (3.7%) |
+| admissible points **not** nested in an expression | **1,676** | 1,728 admissible points (97.0%) |
+| admissible points nested in an expression | 52 | 1,728 admissible points (3.0%) |
+| admissible functions with **zero** nested points | **1,058** | 1,099 admissible functions (96.3%) |
+| admissible functions with at least one nested point | 41 | 1,099 admissible functions (3.7%) |
 
 A statement-root await materialises no operand temp across the park, so for
-1,509 of the 1,555 admissible points **the crossing SSA set is empty by
-construction**.
+1,676 of the 1,728 admissible points **the crossing SSA set is empty by
+construction**. The two shares survived the boxed-param admission unchanged
+at 97.0% and 96.3%, which says those 109 functions have the same nesting
+profile as the rest rather than being a special population.
 
 **LLVM-lane source counts**, for scale: `BlockBuilder.tmp()` has **1,480**
 call sites and returns a bare untyped string, so there is no single typed
-mint point to hook — but it is a problem for **37 of 990** admissible
+mint point to hook — but it is a problem for **41 of 1,099** admissible
 functions, not for the port.
 
 ## 4. Options, costed in sites touched
 
 | | mechanism | sites | reach | cost and risk |
 |---|---|---|---|---|
-| **C′** | refuse `nestedInExpression` in slice 1 | **0** | 953 of 990 admissible functions; 1,509 of 1,555 admissible points | the flag is already computed by the fence. Introduces an asymmetry — see below |
-| **A** | spill at the `emitExpr` choke point: `llvm/emitter.ts:5303`, **one** `private emitExpr(e: IrExpr): LlValue` returning an already-typed `{name, type, slot?}` | **1** | all 990 admissible functions, all 1,555 admissible points | pays alloca + store + load on every expression result inside admissible functions: frame and code bloat, unmeasured. Gateable to coroutine bodies so nothing else moves |
+| **C′** | refuse `nestedInExpression` in slice 1 | **0** | 1,058 of 1,099 admissible functions; 1,676 of 1,728 admissible points | the flag is already computed by the fence. Introduces an asymmetry — see below |
+| **A** | spill at the `emitExpr` choke point: `llvm/emitter.ts:5303`, **one** `private emitExpr(e: IrExpr): LlValue` returning an already-typed `{name, type, slot?}` | **1** | all 1,099 admissible functions, all 1,728 admissible points | pays alloca + store + load on every expression result inside admissible functions: frame and code bloat, unmeasured. Gateable to coroutine bodies so nothing else moves |
 | **B** | drop the `isRefCounted` filter in `own()` | 1 line | partial | **barred — see section 6** |
 | **D** | give `BlockBuilder.tmp()` a type and a registry | **1,480** | all | dominated by A; most sites are GEPs and loads that cannot cross a park |
 | **C** | derive the crossing set from the liveness pass that already runs | — | — | **not possible as posed.** Temps carry no `IrLocal` id, so liveness cannot name them — the same reason `SuspensionPoint.enclosingForOf` exists ("backend-internal and are not IrLocals, so they cannot appear in `live`"). Would need a new IR concept |
@@ -170,12 +209,12 @@ functions, not for the port.
 `newTemp` has 312 call sites and registers **every** temp, refcounted or
 not.
 
-**Sequencing: C′ for slice 1, then A for the remaining 37 functions.**
+**Sequencing: C′ for slice 1, then A for the remaining 41 functions.**
 
 ### The C′ asymmetry is explicit and carries its own removal condition
 
 C′ makes the admission fence backend-aware, which cuts against the property
-that currently gives the LLVM lane its 990 for free: one analysis, two
+that currently gives the LLVM lane its 1,099 for free: one analysis, two
 lanes. It must therefore not be a silent parameter. Write it the way the
 scaffolding assertions are written — the asymmetry stated, and the
 condition for deleting it stated beside it:
