@@ -92,8 +92,33 @@ Writing this down is the point of the section: "mechanism found" reads as
 "cause established" to anyone skimming, and the distance between those two is
 exactly the error this project pays for most often.
 
-**The tiebreaker is still the free experiment**: shards 4-6 under 12 workers
-on a verifiably quiet machine. One arm, no extra cost.
+**The tiebreaker was the free experiment**: shards 4-6 under 12 workers on a
+verifiably quiet machine. It ran on 2026-10-05 and came back **3 of 3
+green**.
+
+### The clean arm is encouraging and UNDERPOWERED. Do not read it as settled.
+
+Three shards, zero timeouts. Against the failing condition's own observed
+rate that is **not** a discriminating result:
+
+| assumed per-shard rate | P(0 red in 3 shards) |
+|---|---|
+| 1/6 -- shard 3 of 6, this run | **0.579** |
+| 2/12 -- both red runs, 6 shards each | **0.579** |
+
+So a clean arm this size is **more likely than not** even if quiet changes
+nothing. Reaching P < 0.05 at a 1/6 rate needs **17 clean shards**, not 3.
+The arm raises the plausibility of the co-load hypothesis; it does not
+establish it, and "the experiment came back green" must not be cited as
+though it did.
+
+A second, smaller negative result from the same run points the other way
+from the obvious reading: **shard 4 carried 29 descendants against the 21
+and 23 of the two that failed.** The shards that timed out were not the
+heaviest, so per-shard WORK does not order the failures either.
+
+What the arm does do is hold worker count FIXED at 12 across both
+conditions, which is the only variable it was built to control.
 
 ## 4. A harness property that holds regardless
 
