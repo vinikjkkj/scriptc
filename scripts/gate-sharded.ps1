@@ -161,12 +161,32 @@ $GateRoot = Join-Path $BlocksRoot $GateName
 $LastLog  = Join-Path $GateRoot "gate-last.log"
 $RunId    = Get-Date -Format "yyyyMMdd-HHmmss"
 try { New-Item -ItemType Directory -Force -Path $GateRoot | Out-Null } catch { }
-Set-Content -LiteralPath $LastLog -Encoding utf8 -Value (
-  "{0} GATE5-START runId={1} pid={2} dryRun={3} script={4}" -f
-  (Get-Date -Format "yyyy-MM-dd HH:mm:ss"), $RunId, $PID, [bool]$DryRun, $PSCommandPath)
+# THE SENTINEL GOES TO THE PER-RUN PATH FIRST, AND APPENDS TO THE SHARED ONE.
+#
+# It used to be Set-Content -- an EXCLUSIVE write -- to one fixed path. Any
+# reader holding that file made the write fail, and it failed on two
+# consecutive runs because a `tail -f` was watching it. The damage is worse
+# than a missing line: while it fails, gate-last.log still shows an OLDER
+# RUN, so a file that is supposed to say "a run started" instead describes a
+# different run entirely. A waiter polling it fired within seconds on a
+# stale GATE-EXIT and nearly reported the previous gate's verdict as this
+# candidate's. That is the same family as head= not seeing uncommitted
+# edits: a witness that lies about what it witnessed.
+#
+# So the authority is the per-runId file, which no one else can hold because
+# its name did not exist until now, and the shared file is a convenience
+# APPENDED to -- a reader can no longer disarm it, and a failure to write it
+# can no longer take the sentinel with it.
+$LogDir   = Join-Path $GateRoot "logs\$RunId"
+try { New-Item -ItemType Directory -Force -Path $LogDir | Out-Null } catch { }
+$StartLine = "{0} GATE5-START runId={1} pid={2} dryRun={3} script={4}" -f
+  (Get-Date -Format "yyyy-MM-dd HH:mm:ss"), $RunId, $PID, [bool]$DryRun, $PSCommandPath
+Set-Content -LiteralPath (Join-Path $LogDir "gate5.log") -Encoding utf8 -Value $StartLine
+try { Add-Content -LiteralPath $LastLog -Encoding utf8 -Value $StartLine } catch {
+  [Console]::Out.WriteLine("GATE5-WARN shared gate-last.log is held by another process; the per-run log is authoritative")
+}
 
 $ErrorActionPreference = "Stop"
-$LogDir      = Join-Path $GateRoot "logs\$RunId"
 # Six is the contract. The override exists so the MID-RUN tree-hash abort can
 # be armed without paying a full run: that branch lives at the top of the
 # shard loop and needs two real boundaries to fire, which -DryRun cannot give
@@ -190,6 +210,7 @@ $WorkerContract = 12
 $OffContract   = ($Shards -ne $ShardContract) -or ($Workers -ne $WorkerContract)
 $DiskFloorGB = 10
 $ExitRc      = 1
+$DiskFloorBreached = $false
 $Started     = Get-Date
 
 New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
@@ -272,7 +293,9 @@ function WorkTreeHash {
 function Say([string]$m) {
   $line = "{0} {1}" -f (Get-Date -Format "HH:mm:ss"), $m
   Add-Content -LiteralPath $MainLog -Value $line
-  Add-Content -LiteralPath $LastLog -Value $line
+  # The shared file is a convenience, never the authority: a reader holding
+  # it must not be able to stop the run or truncate the real log.
+  try { Add-Content -LiteralPath $LastLog -Value $line } catch { }
   [Console]::Out.WriteLine($line)
 }
 
@@ -331,23 +354,49 @@ function Invoke-Judged {
         -WindowStyle Hidden -RedirectStandardOutput $out -RedirectStandardError $err -PassThru
   $null = $p.Handle   # cache the handle, or ExitCode reads back empty
   Say ("RUN-START tag={0} pid={1} args={2}" -f $Tag, $p.Id, ($ExtraArgs -join " "))
-  # OBSERVE the pool rather than trust the setting. Counting node processes
-  # on the box is useless -- the user's dev environment runs a dozen -- so
-  # this counts DESCENDANTS of the vitest pid. Logged, NOT a refusal: the
-  # pool ramps, one sample has no calibrated tolerance, and a gate that
-  # aborts on a noisy sample is worse than one that reports it.
-  try {
-    Start-Sleep -Seconds 45
-    if (-not $p.HasExited) {
-      $seen = @(); $q = New-Object System.Collections.Queue; $q.Enqueue($p.Id)
-      while ($q.Count -gt 0) {
-        $cur = $q.Dequeue(); $seen += $cur
-        foreach ($k in (Get-CimInstance Win32_Process -Filter "ParentProcessId=$cur" -ErrorAction SilentlyContinue)) { $q.Enqueue($k.ProcessId) }
-      }
-      Say ("WORKERS-OBSERVED tag={0} pinned={1} descendants={2} (observation, not a refusal)" -f $Tag, $Workers, (@($seen).Count - 1))
+  # ---- THE DISK FLOOR, CONTINUOUS, TRACKING THE TROUGH --------------------
+  #
+  # It used to be checked only at the TOP of the shard loop, which means it
+  # did not exist for the duration of a shard: during the knob-on pass free
+  # space fell at ~0.7 GB/min with 0/6 closed, so the next boundary check was
+  # twenty minutes away and the floor could not have fired before the disk
+  # went through 15 and 10. A floor evaluated once per iteration is absent
+  # for that iteration.
+  #
+  # IT TRACKS THE MINIMUM, NOT A RATE. Free space is a SAWTOOTH -- the
+  # scratch pruner gives space back between shards -- so a two-point rate
+  # measures whichever segment it happened to catch: 14.5 GB/h fitted across
+  # a burst, against ~4 GB/h net over a longer window, on the same run. The
+  # quantity that can actually breach a floor is the trough reached inside
+  # the shard, so that is what is sampled and reported.
+  $trough = FreeGB
+  $sampled = $false
+  while (-not $p.HasExited) {
+    Start-Sleep -Seconds 10
+    $f = FreeGB
+    if ($f -lt $trough) { $trough = $f }
+    if ($f -lt $DiskFloorGB) {
+      Say ("GATE5-ABORT reason=disk-floor-continuous tag={0} free={1}GB floor={2}GB trough={3}GB" -f $Tag, $f, $DiskFloorGB, $trough)
+      Say ("GATE5-ABORT detail: the floor is now checked DURING the shard, not only at its boundary. The run is stopped with the subject still on disk rather than after it fills.")
+      try { Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue } catch { }
+      $script:DiskFloorBreached = $true
+      break
     }
-  } catch { Say ("WORKERS-OBSERVED tag={0} sample-failed: {1}" -f $Tag, $_.Exception.Message) }
+    # The pool observation rides the same loop: one sample, once settled.
+    if (-not $sampled -and ((Get-Date) - $t0).TotalSeconds -ge 45) {
+      $sampled = $true
+      try {
+        $seen = @(); $q = New-Object System.Collections.Queue; $q.Enqueue($p.Id)
+        while ($q.Count -gt 0) {
+          $cur = $q.Dequeue(); $seen += $cur
+          foreach ($k in (Get-CimInstance Win32_Process -Filter "ParentProcessId=$cur" -ErrorAction SilentlyContinue)) { $q.Enqueue($k.ProcessId) }
+        }
+        Say ("WORKERS-OBSERVED tag={0} pinned={1} descendants={2} (observation, not a refusal)" -f $Tag, $Workers, (@($seen).Count - 1))
+      } catch { Say ("WORKERS-OBSERVED tag={0} sample-failed: {1}" -f $Tag, $_.Exception.Message) }
+    }
+  }
   $p.WaitForExit()
+  Say ("DISK-TROUGH tag={0} trough={1}GB floor={2}GB" -f $Tag, $trough, $DiskFloorGB)
   $rc  = $p.ExitCode
   $min = [math]::Round(((Get-Date) - $t0).TotalMinutes, 2)
 
@@ -548,6 +597,10 @@ try {
   # -------------------------------------------------------------------------
   if ($DryRun) {
     $r = Invoke-Judged -Tag "dryrun" -ExtraArgs @("tests/harness/size-class-armed.test.ts", "tests/harness/shard.test.ts")
+    # An aborted run may not print GREEN anywhere, not just in the shard
+    # loop. Arming the continuous floor caught exactly that: the abort fired,
+    # the child was killed, and this path still reported verdict=GREEN rc=0.
+    if ($DiskFloorBreached) { Say ("GATE5-ABORT reason=disk-floor-continuous mode=dryrun"); $ExitRc = 2; return }
     Say ("DRYRUN-RESULT rc={0} min={1} files={2} verdict={3} :: {4}" -f $r.Rc, $r.Min, $r.Ran.Count, $(if ($r.Green) { "GREEN" } else { "RED" }), $r.Why)
     $ok = ($r.Green -and $r.Ran.Count -eq 2)
     Say ("GATE5-TOTAL mode=dryrun shards={0}/{1} verdict={2}" -f $Shards, $ShardContract, (VerdictWord $ok))
@@ -571,6 +624,7 @@ try {
     foreach ($f in $r.Ran) {
       if ($RanAll.ContainsKey($f)) { $RanAll[$f] += ",$n" } else { $RanAll[$f] = "$n" }
     }
+    if ($DiskFloorBreached) { Say ("GATE5-ABORT reason=disk-floor-continuous-midshard shard={0}" -f $n); $ExitRc = 2; return }
     if ($r.Green) { $Green++ } else { $Red++ }
     Say ("SHARD-RESULT n={0}/{1} rc={2} min={3} files={4} verdict={5} :: {6}" -f $n, $Shards, $r.Rc, $r.Min, $r.Ran.Count, $(if ($r.Green) { "GREEN" } else { "RED" }), $r.Why)
   }
