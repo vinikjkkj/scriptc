@@ -284,3 +284,47 @@ C, guard: a function has a trampoline or a resume, never both):
 - **The island.** An embedded-JS call chain lives on the fiber's C stack and
   cannot be moved into a struct; those functions keep fibers. zapo-rest links
   no island, so this does not affect it.
+
+## 8. Frame cost of the non-refcounted spill (2026-10-06)
+
+`emitCoroAwait` spills the emitter's RC frames across a park, and `newTemp`
+joined a temp to its frame only when it was refcounted. A `double` or a
+`bool` evaluated before a nested suspension was therefore in no frame, was
+never spilled, and came back indeterminate — the resume `goto` jumps over its
+declaration and the resume function has already returned to the scheduler.
+`newTemp` now registers every temp; `releaseFrame` asks `isRefCounted` before
+writing a release, so ownership is unchanged.
+
+THESE ARE STATIC BYTES PER FRAME STRUCT TYPE, SUMMED OVER THE DISTINCT
+COROUTINE TYPES IN THE PROGRAM. They are **not** runtime occupancy: what a
+run actually holds depends on which coroutines are instantiated and how many
+are live at once, and that was not measured. Do not read +1.6% as a memory
+number taken under load.
+
+Measured on the real load (`tests/perf/zapo-rest/app182`), knob ON, exact
+`sizeof` from the C compiler rather than a layout model — a probe including
+the emitted `.scrh` and printing `sizeof` for each `sc_cf_*`:
+
+| | frames | total | mean | median | p90 | max |
+|---|---|---|---|---|---|---|
+| main `76ebc7ce4` | 962 | 80,016 B | 83.2 B | 72 B | 104 B | 3,856 B |
+| + spill | 962 | 81,304 B | 84.5 B | 72 B | 104 B | 3,976 B |
+| + spill + nesting | 990 | 84,528 B | 85.4 B | 72 B | 104 B | 3,976 B |
+
+- The spill alone costs **+1,288 B, +1.6%**, and only **109 of 962 frames
+  (11.3%)** grow at all — mean +11.8 B, worst +120 B (`sc_cf_route`). The
+  median and p90 frame do not move.
+- The arithmetic closes: the spill adds exactly 161 non-refcounted fields
+  (117 `double`, 44 `bool`) and 161 × 8 = 1,288. The two arms were told apart
+  by that content, not by trusting the checkout.
+- Nesting adds **nothing** to the frames main already had; the further
+  +3,224 B is entirely the 28 newly admitted functions (mean 115.1 B).
+
+**120 of the 990 admitted bodies (12.1%) hold at least one non-refcounted
+temp across a park, 183 of them in all.** That is the population the
+alternative proposal — a fence listing non-lowerable argument POSITIONS —
+would have had to cover, and it was costed at 6 functions / 16 points from a
+predicate that turned out to be the wrong dimension. The clearest single
+refutation is `bin`: `n1(8) * 1000 + await pf(3)` answered NaN, and the same
+expression inside an index aborted outright, in a node that has no `args` at
+all, so no argument-position rule would ever have reached it.
