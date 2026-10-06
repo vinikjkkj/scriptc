@@ -19,6 +19,7 @@
  */
 #define _XOPEN_SOURCE 700
 #include "scr_runtime.h"
+#include "scr_coro.h"
 
 #include <errno.h>
 #include <fcntl.h>
@@ -4695,9 +4696,22 @@ static void scr_gen_slot_reset(ScrGenSlot *s) {
   s->release_fn = NULL;
 }
 
+/* WHAT BACKS THIS GENERATOR. Stored, never inferred from `fiber` being
+ * NULL -- `fiber` is ALSO NULL on a torn-down fibre generator, so a test on
+ * the pointer would read a finished fibre as a frame. The codebase already
+ * names this shape: SCR_CORO_HAS_EXC is stored for exactly the same reason.
+ *
+ * 21 of the 31 ScrGen entry points never read this, because they touch only
+ * the slots and the state below. That is what made one discriminated handle
+ * cheaper than two handle types, and it is why this field is the whole cost
+ * of decision 1 on the handle side. */
+typedef enum { SCR_GEN_BACKED_FIBER = 0, SCR_GEN_BACKED_FRAME = 1 } ScrGenBacking;
+
 struct ScrGen {
   size_t rc;
   ScrFiber *fiber; /* NULL once torn down (done, or unstarted release) */
+  ScrGenBacking backing;
+  ScrCoroBase *frame; /* non-NULL iff backing == SCR_GEN_BACKED_FRAME */
   int state;
   ScrGenSlot out; /* yielded value / completion value */
   ScrGenSlot in;  /* the .next(v) argument */
@@ -5364,6 +5378,128 @@ static void scr_gen_switch_in(ScrGen *g) {
   }
   scr_gen_release(g);
 }
+
+
+#ifdef SCR_CORO_LANE
+/* ── SYNCHRONOUS GENERATORS BACKED BY A FRAME ─────────────────────────
+ *
+ * GUARDED, and the guard is not decoration. scr_coro.c leaves the link
+ * whenever the module emitted no coroutine (cc.ts drops it on the same
+ * predicate the emitter uses), so an UNGUARDED call to scr_coro_state_in
+ * from this always-linked unit would be an undefined symbol in every
+ * binary that never suspends. SCR_CORO_LANE is the macro cc.ts already
+ * derives FROM THE SOURCE LIST rather than from a second read of the knob,
+ * so the guard and the link line cannot disagree.
+ *
+ * Everything below is the frame half of the four entry points that branch.
+ * The other 21 ScrGen entry points are untouched because they read only
+ * the slots and the state, which live on the handle for both backings. */
+
+void *scr_gen_coro_alloc(size_t size, ScrCoroResume resume, bool has_exc) {
+  /* Deliberately not scr_coro_alloc: that one mints the promise the frame
+   * will settle, and a synchronous generator settles nothing. One base,
+   * two lifecycles -- decision 3. */
+  void *mem = calloc(1, size);
+  if (mem == NULL) {
+    fputs("scriptc: out of memory allocating a generator frame
+", stderr);
+    abort();
+  }
+  scr_coro_init((ScrCoroBase *)mem, resume, NULL, has_exc);
+  return mem;
+}
+
+ScrGen *scr_gen_of_coro(ScrCoroBase *base) {
+  ScrGen *g = calloc(1, sizeof *g);
+  if (g == NULL) {
+    fputs("scriptc: out of memory allocating a generator handle
+", stderr);
+    abort();
+  }
+  g->rc = 1;
+  g->fiber = NULL;
+  g->backing = SCR_GEN_BACKED_FRAME;
+  g->frame = base;
+  g->state = SCR_GEN_UNSTARTED;
+  return g;
+}
+
+/* The yield arms. Each parks the value in OUT and marks the frame YIELDED;
+ * the generated code then simply returns. The flag is set HERE and not by
+ * the emitted body because a forgotten one does not crash -- it reports a
+ * yield as a completion and silently truncates the sequence. */
+void scr_gen_coro_yield_f64(ScrGen *g, double v) {
+  scr_gen_slot_f64(&g->out, v);
+  g->frame->flags |= SCR_CORO_YIELDED;
+}
+void scr_gen_coro_yield_bool(ScrGen *g, bool v) {
+  scr_gen_slot_bool(&g->out, v);
+  g->frame->flags |= SCR_CORO_YIELDED;
+}
+void scr_gen_coro_yield_ref(ScrGen *g, void *v, void (*release)(void *)) {
+  scr_gen_slot_ref(&g->out, v, release);
+  g->frame->flags |= SCR_CORO_YIELDED;
+}
+
+void scr_gen_coro_finish_void(ScrGen *g) { g->frame->flags |= SCR_CORO_DONE; }
+void scr_gen_coro_finish_f64(ScrGen *g, double v) {
+  scr_gen_slot_f64(&g->out, v);
+  g->frame->flags |= SCR_CORO_DONE;
+}
+void scr_gen_coro_finish_bool(ScrGen *g, bool v) {
+  scr_gen_slot_bool(&g->out, v);
+  g->frame->flags |= SCR_CORO_DONE;
+}
+void scr_gen_coro_finish_ref(ScrGen *g, void *v, void (*release)(void *)) {
+  scr_gen_slot_ref(&g->out, v, release);
+  g->frame->flags |= SCR_CORO_DONE;
+}
+
+/* What to put in the ACTIVE cell before the body runs. It has to happen
+ * INSIDE the INV-5 window: a fat frame installs its own cell, so a sentinel
+ * written before scr_coro_state_in would land in the consumer's cell and
+ * the body would never see it. The fibre path has the same ordering and
+ * gets it from scr_switch for free. */
+typedef enum { SCR_GEN_INJECT_NONE = 0, SCR_GEN_INJECT_RET, SCR_GEN_INJECT_THROW } ScrGenInject;
+
+/* One consumer-driven step of a frame-backed generator. The counterpart of
+ * scr_gen_switch_in, and deliberately NOT scr_coro_resume_entry: that one
+ * is the ready-queue entry, settles a promise on fall-out and releases the
+ * suspension's reference, and this path has no promise and no suspension
+ * reference. What the two share is INV-5, and they share it as code. */
+static void scr_gen_coro_step(ScrGen *g, ScrGenInject inject) {
+  ScrCoroBase *base = g->frame;
+  ScrCoroTaskState st;
+  scr_gen_retain(g);
+  g->state = SCR_GEN_RUNNING;
+  scr_coro_state_in(base, &st);
+  if (inject == SCR_GEN_INJECT_RET) scr_exc_current_cell()->kind = SCR_EXC_GENRET;
+  base->flags &= ~(uint32_t)SCR_CORO_YIELDED;
+  base->flags |= SCR_CORO_RUNNING;
+  base->resume(base);
+  base->flags &= ~(uint32_t)SCR_CORO_RUNNING;
+  /* THREE OUTCOMES, read from the stored flags and never inferred:
+   *   YIELDED -- a value is in OUT, the generator stays suspended;
+   *   DONE    -- the body completed, OUT holds the return value;
+   *   neither -- an exception escaped. The fibre path moves it into the
+   *              resumer's cell; for a LEAN frame the active cell already
+   *              IS the resumer's, so only a fat frame has anything to
+   *              move, and state_out below does the restoring. */
+  if ((base->flags & SCR_CORO_YIELDED) != 0u) {
+    g->state = SCR_GEN_SUSPENDED;
+  } else {
+    g->state = SCR_GEN_DONE;
+    if (st.mine != NULL && st.mine->kind != SCR_EXC_NONE) {
+      scr_exc_cell_move(&g->fail, st.mine);
+    }
+  }
+  scr_coro_state_out(&st);
+  if (g->state == SCR_GEN_DONE && g->fail.kind != SCR_EXC_NONE) {
+    scr_exc_cell_move(scr_exc_current_cell(), &g->fail);
+  }
+  scr_gen_release(g);
+}
+#endif /* SCR_CORO_LANE */
 
 void scr_gen_resume(ScrGen *g) {
   switch (g->state) {

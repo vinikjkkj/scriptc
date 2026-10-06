@@ -40,6 +40,13 @@
  * same functions, so a change to the spill set cannot apply to one
  * suspension kind and not the other.
  *
+ * THE FRAME CARRIES ITS HANDLE. Emitted generator frames gain an `sc_gen`
+ * field, which the yield and finish arms read. The alternative -- a
+ * back-pointer on ScrCoroBase -- would put 8 bytes on EVERY frame,
+ * including the 95% that are ordinary awaits, to serve the few that are
+ * generators. That field is emitted by emitCoroFrames in emit-coro.ts,
+ * which is one of the files this slice already had to touch.
+ *
  * NOT EXECUTED. Written while a gate was in flight; nothing here has been
  * compiled or run, and the runtime entry points it names are declarations
  * without definitions. */
@@ -104,9 +111,9 @@ export function emitCoroYield(
    * so a swap would fail at the C compiler rather than at the value. */
   if (valueType.kind === "f64" || valueType.kind === "bool") {
     const arm = poisonYieldArm(valueType.kind, YIELD_ARMS);
-    E.line(`${arm}(sc_b, ${valueTemp.name});`);
+    E.line(`${arm}(sc_f->sc_gen, ${valueTemp.name});`);
   } else {
-    E.line(`${YIELD_ARMS.ref}(sc_b, ${valueTemp.name}, ${vAdapters(valueType).release});`);
+    E.line(`${YIELD_ARMS.ref}(sc_f->sc_gen, ${valueTemp.name}, ${vAdapters(valueType).release});`);
   }
 
   /* No park, no push. The runtime entry above marks the frame YIELDED --
@@ -146,14 +153,14 @@ export function emitCoroYield(
 export function genCoroFinish(retType: IrType, valueName: string): string[] {
   switch (retType.kind) {
     case "void":
-      return [`scr_gen_coro_finish_void(sc_b);`, `return;`];
+      return [`scr_gen_coro_finish_void(sc_f->sc_gen);`, `return;`];
     case "f64":
-      return [`scr_gen_coro_finish_f64(sc_b, ${valueName});`, `return;`];
+      return [`scr_gen_coro_finish_f64(sc_f->sc_gen, ${valueName});`, `return;`];
     case "bool":
-      return [`scr_gen_coro_finish_bool(sc_b, ${valueName});`, `return;`];
+      return [`scr_gen_coro_finish_bool(sc_f->sc_gen, ${valueName});`, `return;`];
     default:
       return [
-        `scr_gen_coro_finish_ref(sc_b, ${valueName}, ${vAdapters(retType).release});`,
+        `scr_gen_coro_finish_ref(sc_f->sc_gen, ${valueName}, ${vAdapters(retType).release});`,
         `return;`,
       ];
   }

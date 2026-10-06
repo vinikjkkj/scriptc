@@ -362,17 +362,46 @@ ScrGen *scr_gen_of_coro(ScrCoroBase *base);
  * because the native sink reads it directly from C (scr_gen_take_out_ref),
  * knowing nothing about frames. That is decision 1 deciding decision 3's
  * old question: the value's owner follows the handle. */
-void scr_gen_coro_yield_f64(ScrCoroBase *base, double v);
-void scr_gen_coro_yield_bool(ScrCoroBase *base, bool v);
-void scr_gen_coro_yield_ref(ScrCoroBase *base, void *v, void (*release)(void *));
+/* THEY TAKE THE HANDLE, NOT THE FRAME, and that is a size decision. Going
+ * the other way would need a back-pointer from ScrCoroBase to its ScrGen,
+ * which is 8 bytes on EVERY frame -- including the 95% that are ordinary
+ * awaits and will never be a generator -- to serve the few that are. The
+ * emitted generator frame carries `sc_gen` instead, so the cost lands only
+ * on the shape that uses it. Same reasoning that kept the exception cell
+ * out of the lean frame. */
+void scr_gen_coro_yield_f64(ScrGen *g, double v);
+void scr_gen_coro_yield_bool(ScrGen *g, bool v);
+void scr_gen_coro_yield_ref(ScrGen *g, void *v, void (*release)(void *));
 
 /** Completion. Marks the frame done and moves the body's return value into
  * OUT, which is where a consumer resume reads a done-value from. No
  * promise is settled, which is the half of the lifecycle decision 3 keeps
  * separate. */
-void scr_gen_coro_finish_void(ScrCoroBase *base);
-void scr_gen_coro_finish_f64(ScrCoroBase *base, double v);
-void scr_gen_coro_finish_bool(ScrCoroBase *base, bool v);
-void scr_gen_coro_finish_ref(ScrCoroBase *base, void *v, void (*release)(void *));
+void scr_gen_coro_finish_void(ScrGen *g);
+void scr_gen_coro_finish_f64(ScrGen *g, double v);
+void scr_gen_coro_finish_bool(ScrGen *g, bool v);
+void scr_gen_coro_finish_ref(ScrGen *g, void *v, void (*release)(void *));
+
+/* ---- the INV-5 bracket, shared by two resumers -----------------------
+ *
+ * Extracted rather than conditioned; see the decision recorded above. The
+ * pair below is ALL of INV-5: install the frame's AsyncLocalStorage context
+ * and, for a fat frame, its exception cell; restore both afterwards. The
+ * promise handling in scr_coro_resume_entry is NOT part of it and does not
+ * move -- it merely has to run inside the window, because
+ * scr_coro_finish_throw reads the ACTIVE cell.
+ *
+ * Two callers: scr_coro_resume_entry (the ready queue, which settles a
+ * promise on fall-out) and the generator consumer path in scr_async.c
+ * (which settles nothing and holds no suspension reference). Each keeps its
+ * own outcome handling inside the window. */
+typedef struct {
+  ScrAlsCtx  **prev_als;
+  ScrExcCell  *prev_cell;
+  ScrExcCell  *mine; /* the frame's own cell, or NULL for a lean frame */
+} ScrCoroTaskState;
+
+void scr_coro_state_in(ScrCoroBase *base, ScrCoroTaskState *st);
+void scr_coro_state_out(ScrCoroTaskState *st);
 
 #endif /* SCR_CORO_H */
