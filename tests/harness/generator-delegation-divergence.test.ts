@@ -33,6 +33,23 @@
  * corpus scores against Node, and this program is DEFINED by not matching
  * Node. A corpus fixture would be permanently red.
  *
+ * MEASURED, both arms, 2026-10-06. The scriptc expectations below were
+ * originally DERIVED from reading the desugar and the runtime, with the node
+ * side measured. Both arms have now been run:
+ *
+ *     control  scriptc  1 / true                 node  1 / true
+ *     subject  scriptc  1 / 2 / true / 99 / FALSE node  1 / 2 / true / 99 / TRUE
+ *
+ * The reading predicted every value exactly. Host: node v25.9.0, zig 0.15.2,
+ * SCRIPTC_TARGET=x86_64-windows-gnu, knob absent (the fiber lane).
+ *
+ * And the assertions were shown able to FAIL: replacing each expected array
+ * with a sentinel reddened both tests and printed the arrays above as the
+ * received values. A pinning test that has never been seen to fail is not
+ * evidence, and the scriptc output differing from node's on exactly one line
+ * is also what proves the binary ran at all rather than the node arm being
+ * compared with itself.
+ *
  * WHAT IS SPECIFICALLY NOT ASSERTED. Only the `.return()` arm is pinned.
  * The `.throw()` arm of the same sentence is left alone deliberately rather
  * than forgotten: a `.throw()` into an outer generator suspended in a
