@@ -5461,6 +5461,22 @@ ScrGen *scr_gen_of_coro(ScrCoroBase *base, void (*drop)(void *)) {
   g->fiber = NULL;
   g->backing = SCR_GEN_BACKED_FRAME;
   g->frame = base;
+  /* THE ALLOCATION NOTE, which the fibre twin makes and this did not.
+   *
+   * scr_gen_new calls scr_obj_alloc_note() and scr_gen_release calls
+   * scr_obj_free_note() for BOTH backings -- so every frame-backed
+   * generator decremented a counter it had never incremented, and the RC
+   * audit printed "-1 object(s) live at exit" and exited 99. A NEGATIVE
+   * count, which is not a leak and does not read like one: the next person
+   * to see it would have gone looking for an over-release.
+   *
+   * Audit-only in its effect -- a shipping build compiles both notes to
+   * nothing -- but it poisons the audit lane for every program containing a
+   * converted generator, which is the lane that proves the OTHER teardown
+   * defects are fixed. Found by the parity guard's als arm on its first
+   * real run, one fix after the leak that arm was written for: a gap
+   * found contains another, for the third time in this slice. */
+  scr_obj_alloc_note();
   /* The SAME field the fibre path uses, on a different argument: an
    * UNSTARTED generator must still release the +1 its parameters arrived
    * with, and the body never runs to do it. The fibre path hands

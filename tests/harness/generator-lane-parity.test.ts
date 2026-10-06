@@ -364,6 +364,29 @@ interface CScan {
   readonly resumes: number;
 }
 
+/* DEFINITIONS ONLY -- the trailing brace is required and is not cosmetic.
+ *
+ * A resume function is emitted TWICE per converted generator: a forward
+ * declaration into the prototype block (emit-coro.ts, so a split program's
+ * header can bridge it) and the definition itself. Measured, after this
+ * file's second run reported 2 against an expectation of 1 and the artefact
+ * showed one generator, one resume function, two mentions:
+ *
+ *     static void sc_cr_nums(ScrCoroBase *sc_b);
+ *     static void sc_cr_nums(ScrCoroBase *sc_b) {
+ *
+ * EXPECTED_CONVERSIONS = 1 was right and the counter was wrong, which is
+ * the opposite of what a bare "2 != 1" suggests -- section 6 reads a count
+ * above 1 as "I misread what one program emits", and the misreading was in
+ * the instrument. coro-symbol-collect.ts had already hit this and says so
+ * in its own comment; this file was written without that line.
+ *
+ * Spelled with [(] rather than an escape, the way that file spells it: an
+ * escape crossing a second parse layer has been eaten eight times on this
+ * front, and removing the surface beats getting it right once. */
+const RESUME_DEF =
+  /void[ ]+sc_cr_[A-Za-z0-9_]+[(]ScrCoroBase[ ]*[*][ ]*[A-Za-z0-9_]+[)][ ]*[{]/g;
+
 function scanEmittedC(outDir: string): CScan {
   let units = 0;
   let resumes = 0;
@@ -371,7 +394,8 @@ function scanEmittedC(outDir: string): CScan {
     if (!f.endsWith(".c") && !f.endsWith(".scrh")) continue;
     units++;
     const text = readFileSync(join(outDir, f), "utf8");
-    for (const m of text.matchAll(/\bsc_cr_[A-Za-z0-9_]+\s*\(ScrCoroBase/g)) {
+    RESUME_DEF.lastIndex = 0;
+    for (const m of text.matchAll(RESUME_DEF)) {
       void m;
       resumes++;
     }
