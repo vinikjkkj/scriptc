@@ -158,16 +158,26 @@ export function emitCoroYield(
  * the lifecycle separate, and this is the finish half of that. The return
  * value goes to OUT, which is where a consumer resume reads a done-value
  * from. */
-export function genCoroFinish(retType: IrType, valueName: string): string[] {
+export function genCoroFinish(
+  retType: IrType,
+  valueName: string | null,
+  lifted: boolean,
+): string[] {
+  /* The closure environment is released HERE, as coroFinish does, because
+   * completion is the one path that always runs exactly once. The frame
+   * itself is freed by scr_gen_release when the handle drops. */
+  const env = lifted ? [`scr_closure_release(sc_f->sc_env);`] : [];
+  if (valueName === null) return [...env, `scr_gen_coro_finish_void(sc_f->sc_gen);`, `return;`];
   switch (retType.kind) {
     case "void":
-      return [`scr_gen_coro_finish_void(sc_f->sc_gen);`, `return;`];
+      return [...env, `scr_gen_coro_finish_void(sc_f->sc_gen);`, `return;`];
     case "f64":
-      return [`scr_gen_coro_finish_f64(sc_f->sc_gen, ${valueName});`, `return;`];
+      return [...env, `scr_gen_coro_finish_f64(sc_f->sc_gen, ${valueName});`, `return;`];
     case "bool":
-      return [`scr_gen_coro_finish_bool(sc_f->sc_gen, ${valueName});`, `return;`];
+      return [...env, `scr_gen_coro_finish_bool(sc_f->sc_gen, ${valueName});`, `return;`];
     default:
       return [
+        ...env,
         `scr_gen_coro_finish_ref(sc_f->sc_gen, ${valueName}, ${vAdapters(retType).release});`,
         `return;`,
       ];

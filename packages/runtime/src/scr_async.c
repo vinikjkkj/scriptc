@@ -4813,6 +4813,15 @@ void scr_gen_release(ScrGen *g) {
         /* Never ran: nothing inside it is live. */
         if (g->drop_args != NULL) g->drop_args(g->frame);
         free(g->frame);
+      } else if (g->state == SCR_GEN_DONE) {
+        /* RAN TO COMPLETION: the body released its own locals on the way
+         * out and the finish released the closure environment, so nothing
+         * inside is live and the frame is ordinary memory. Freeing it is
+         * the COMMON path -- a generator that is simply consumed to
+         * exhaustion ends here -- and leaving it in the abandoned arm
+         * below would leak every frame of every completed generator
+         * without a crash or a diagnostic. */
+        free(g->frame);
       }
       /* SUSPENDED: deliberately ABANDONED, exactly as the fibre lane
        * abandons a suspended stack. Unwinding would run user finally

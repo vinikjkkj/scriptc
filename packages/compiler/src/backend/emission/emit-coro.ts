@@ -176,6 +176,13 @@ export function emitCoroSpawns(E: CEmitter, out: string[], plans: Map<string, St
   for (const fn of E.mod.functions) {
     const plan = plans.get(fn.name);
     if (plan === undefined) continue;
+    // A GENERATOR's spawn is emitted by emitGenCoroSpawn instead, and this
+    // skip is load-bearing rather than tidy: generators entered `plans` in
+    // the same slice that opened admission, so without it BOTH wrappers are
+    // emitted -- one returning ScrPromise * and one returning ScrGen * -- and
+    // the promise one calls scr_coro_spawn, which RUNS THE BODY. Calling a
+    // generator function must run nothing.
+    if (fn.generator !== undefined) continue;
     const frame = mangleCoroFrame(fn.name);
     const boxedIds = new Set(fn.locals.filter((l) => l.boxed === true).map((l) => l.id));
     // A boxed param arrives raw and is boxed by the body, exactly as the
