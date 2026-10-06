@@ -388,6 +388,31 @@ void scr_gen_coro_finish_f64(ScrGen *g, double v);
 void scr_gen_coro_finish_bool(ScrGen *g, bool v);
 void scr_gen_coro_finish_ref(ScrGen *g, void *v, void (*release)(void *));
 
+/** The UNWIND completion: an exception, or a .return() sentinel, escaped
+ * the body. The frame lane's counterpart of scr_coro_finish_throw -- and
+ * deliberately NOT that function, which rejects base->promise, NULL on a
+ * generator frame because scr_gen_coro_alloc mints none.
+ *
+ * It also does what the fibre trampoline's epilogue does at this same
+ * state: a GENRET unwind consumes the sentinel and promotes the parked
+ * .return value into OUT. A real exception is left pending in the active
+ * cell, where the consumer-side resume finds it. Both halves live here so
+ * that an emitted site cannot carry one and not the other. */
+void scr_gen_coro_finish_throw(ScrGen *g);
+
+/** The resumed .next(v) argument, out of the handle's IN slot.
+ *
+ * The fibre lane's scr_gen_take_in_* take NO argument: they find the
+ * generator through scr_gen_self(), the RUNNING FIBRE's back-pointer. A
+ * frame-backed generator has no fibre and runs on its consumer's stack, so
+ * those abort on the main stack and read ANOTHER generator's slot when the
+ * consumer is itself a fibre-backed generator body. The slot lives on the
+ * handle for both backings; only the anchor differs, and the emitted frame
+ * carries `sc_gen` for exactly this. */
+double scr_gen_coro_take_in_f64(ScrGen *g);
+bool scr_gen_coro_take_in_bool(ScrGen *g);
+void *scr_gen_coro_take_in_ref(ScrGen *g);
+
 /* ---- the INV-5 bracket, shared by two resumers -----------------------
  *
  * Extracted rather than conditioned; see the decision recorded above. The

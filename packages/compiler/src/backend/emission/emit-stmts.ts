@@ -319,12 +319,17 @@ export function emitFunction(E: CEmitter, fn: IrFunction): void {
       if (local.boxed) {
         const box = mangleLocal(p.localId);
         if (coro !== null) {
-          // STACKLESS: emitCoroSpawns built the box and the dispatch above has
+          // STACKLESS: the SPAWN built the box and the dispatch above has
           // already reloaded it from the frame. Constructing it again here
           // would redeclare the local the resume function declares at its top,
           // and would rebuild the box on the entry path only -- so the scope
           // still OWNS it (one release at function end, as on the fiber path),
           // but nothing is emitted for it.
+          //
+          // "the spawn" and not emitCoroSpawns by name: a converted GENERATOR
+          // is spawned by emitGenCoroSpawn, which builds the box the same way
+          // and for the same reasons. Naming one of the two is how a reader
+          // concludes the other case is unhandled.
           fnScope.push({ name: box, type: p.type, boxed: true });
         } else {
           E.line(`ScrBox *${box} = ${E.boxNewC(p.type)}; /* ${p.name} (boxed param) */`);

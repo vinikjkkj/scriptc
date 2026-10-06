@@ -42,7 +42,7 @@
  * past an initialiser into a scope the label cannot see, and the whole
  * transformation would need the body restructured first. */
 import { appendLines, type CEmitter, type Temp } from "./emitter.js";
-import { mangleCoroFrame, mangleCoroResume, mangleAsyncSpawn, mangleLocal, mangleRawParam } from "../mangle.js";
+import { mangleCoroField, mangleCoroFrame, mangleCoroResume, mangleAsyncSpawn, mangleLocal, mangleRawParam } from "../mangle.js";
 import { boxAccess, cDecl, cType, vAdapters } from "./emit-types.js";
 import { type IrFunction, type IrType, isRefCounted } from "../../ir/nodes.js";
 // `coroPlans` moved to ir/coro-plans.ts: it is backend-agnostic policy and
@@ -50,11 +50,11 @@ import { type IrFunction, type IrType, isRefCounted } from "../../ir/nodes.js";
 import { type StacklessPlan } from "../../ir/liveness.js";
 import { poisonFinishArm, poisonSpillOrder, poisonTakeArm } from "./coro-poison.js";
 
-/** The frame's field name for a local. Deliberately not mangleLocal's name:
- * the frame field and the C local coexist in the resume function, and a
- * spill that read `x = x` would be a no-op nobody would notice. */
+/** The frame's field name for a local. The naming lives in mangle.ts beside
+ * every other mangler, and WHY it has to use mangleLocal's sanitiser rather
+ * than a weaker one of its own is recorded there. */
 export function coroField(localId: string): string {
-  return `sc_v_${localId.replace(/[^A-Za-z0-9_]/g, "_")}`;
+  return mangleCoroField(localId);
 }
 
 /** The state machine's label for suspension point `i` (0-based). */

@@ -135,18 +135,33 @@ export function emitCoroYield(
   for (const line of coroReload(fn, plan)) E.line(line);
 
   /* The resumed value is the consumer's .next(v) argument, taken out of the
-   * IN slot. These are the SAME runtime entry points the fiber lane uses:
-   * the slot lives on the handle, not in the frame, so neither the lowering
-   * nor the native sink has to care which kind of generator produced it. */
+   * IN slot THROUGH THE HANDLE.
+   *
+   * NOT scr_gen_take_in_*, which is what this emitted first and is the fifth
+   * branching runtime entry point a count of four missed. Those three take
+   * NO argument: they reach the generator through scr_gen_self(), which
+   * reads `scr_current->gen` -- the running FIBRE's back-pointer. A
+   * frame-backed generator has no fibre and runs on whoever resumed it, so
+   * scr_current is the consumer's fibre or NULL: on the main stack that
+   * aborts with "yield outside a generator", and inside another
+   * fibre-backed generator's body it silently reads THAT generator's IN
+   * slot and the wrong value is a plausible one.
+   *
+   * The slot itself does live on the handle for both backings -- the earlier
+   * note here was right about the slot and wrong about the ANCHOR. `sc_gen`
+   * is the frame lane's anchor and it is already in scope. */
   switch (resultType.kind) {
     case "void":
       return "";
     case "f64":
-      return E.newTemp(resultType, `scr_gen_take_in_f64()`).name;
+      return E.newTemp(resultType, `scr_gen_coro_take_in_f64(sc_f->sc_gen)`).name;
     case "bool":
-      return E.newTemp(resultType, `scr_gen_take_in_bool()`).name;
+      return E.newTemp(resultType, `scr_gen_coro_take_in_bool(sc_f->sc_gen)`).name;
     default:
-      return E.newTemp(resultType, `(${cType(resultType).trim()})scr_gen_take_in_ref()`).name;
+      return E.newTemp(
+        resultType,
+        `(${cType(resultType).trim()})scr_gen_coro_take_in_ref(sc_f->sc_gen)`,
+      ).name;
   }
 }
 
@@ -182,6 +197,33 @@ export function genCoroFinish(
         `return;`,
       ];
   }
+}
+
+/** The unwind path for a converted synchronous generator: what an escaping
+ * exception emits instead of a C return.
+ *
+ * THE FOURTH COMPLETION PATH, and it survived the pass that routed the other
+ * three away from coroFinish because it is reached from CEmitter.emitUnwind
+ * in another file and was not in the count. coroUnwind emits
+ * scr_coro_finish_throw, which rejects `base->promise` -- NULL on a
+ * generator frame by decision 3 -- so every `.throw()`, every `.return()`
+ * into a started generator and every exception escaping a converted body
+ * dereferenced NULL. It is the COMMON exceptional path, not a corner.
+ *
+ * It also carries the half the fibre trampoline's epilogue does at exactly
+ * this state: a GENRET unwind consumes the sentinel and promotes the parked
+ * .return value into OUT. Without it a `.return(v)` on a started generator
+ * leaves the sentinel pending in the CONSUMER's cell and answers with no
+ * value. Both halves are inside scr_gen_coro_finish_throw, so an emitted
+ * site cannot carry one and not the other. */
+export function genCoroUnwind(lifted: boolean): string[] {
+  /* The closure environment drops here for the same reason genCoroFinish
+   * drops it: between them they cover every way the body stops running. */
+  return [
+    ...(lifted ? [`scr_closure_release(sc_f->sc_env);`] : []),
+    `scr_gen_coro_finish_throw(sc_f->sc_gen);`,
+    `return;`,
+  ];
 }
 
 /** The spawn wrapper for a CONVERTED synchronous generator.
