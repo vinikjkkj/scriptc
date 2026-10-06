@@ -233,31 +233,98 @@ What must be true before it goes, in order:
 | `coroPlans` moves or is cross-imported | **DECISION**, low stakes |
 | SSA values across a park | **DECISION**, four costed options, section 5 |
 
-**Nothing is absent.** The new work is four emission functions and one to
-three type declarations, against an emitter that already has every mechanism
-each one needs. On that evidence this is a **slice-sized port with one real
-open decision** -- which spill strategy -- rather than a project.
+**Nothing is absent.** The new work is four emission functions and one type
+declaration, against an emitter that already has every mechanism each one
+needs.
 
-That conclusion is **conditional on section 5's unknown**. If a
-statement-root await turns out to leave live SSA values in this emitter's
-order, option C-prime stops being free and the port acquires option A's cost
-up front. That is the single question whose answer could change the verdict
-in this table.
+### The item count, corrected
+
+An earlier reading of this file reported **"24 items: 11 mechanical, 10
+decisions, 3 not determined."** Those were counts of the label WORDS in the
+prose, not of items. **RETRACTED.** The tables are the inventory:
+
+| | items |
+|---|---|
+| MECHANICAL rows above | **6** |
+| DECISION rows above | **4** |
+| not determined (section 8) | **6** |
+| total | **16** |
+
+### Of the 4 decisions, 1 is not a decision
+
+`coroPlans` lives in `backend/emission/emit-coro.ts` but its body reads only
+an `IrFunction[]`, one environment variable and `stacklessPlan`. **It has no
+C-specific dependency of any kind**, and its consumers are `index.ts` and
+`cc.ts`, both backend-agnostic. So it is not a choice between two valid
+homes -- it is **misplaced**, and moving it to `ir/` is a relocation rather
+than a decision. Reading removed it from the list the same way reading
+removed two of the three type declarations.
+
+The fat frame's size was decided: **the runtime exports it**, because a
+hand-written number whose only consumer is a `sizeof` cannot fail loudly --
+wrong means a short frame and corruption far from the cause.
+
+**That leaves two**, and only one is genuinely open:
+
+**Pin the offsets -- FORCED, not open.** `%ScrCoroBase.state` (24) and
+`.flags` (28) are the only fields emitted code addresses, so the pin is two
+entries in `RUNTIME_FIELD_OFFSETS`. Unpinned fails LOW and FAR: a wrong
+offset resumes the frame at the wrong label, silently. There is no competing
+option whose failure is nearer the cause, so the criterion settles it.
+
+**The SSA spill strategy -- the one real decision. RECOMMENDED: option A.**
+
+Not on effort, and not on performance. C-prime and A both fail HIGH -- a
+missed spill is a non-dominating use the verifier rejects at build time. What
+separates them is a failure mode C-prime has and A does not: **C-prime
+requires making the admission fence backend-aware, and its own removal
+condition is "when option A lands."** It is strictly a prelude to A. Taking
+it means building an asymmetry against the one-analysis-two-lanes property,
+then building A, then remembering to delete the asymmetry -- and an
+asymmetry nobody remembers to remove is how the per-lane `converted` flag
+would have died, loosened under noise pressure with nobody deciding to kill
+it. A is one site, adds no asymmetry, and needs no later cleanup.
+
+### Chaining, which shrinks the port further
+
+- The fat-frame decision **closed** section 8's `%ScrExcCell` layout item: no
+  hand-declared cell, so nothing to match byte-for-byte.
+- **Choosing A closes section 8's first item** -- whether a statement-root
+  await leaves live SSA values stops mattering when everything spills. The
+  one build that mattered leaves the critical path by a decision rather than
+  by being run.
+- C-prime, by contrast, **opens** an item that was not on the list: the fence
+  asymmetry and its removal. A decision that adds work to the inventory is
+  worse than its site count suggests -- which is how `(a0)` was found.
 
 ## 8. Not determined by reading
 
-- Whether a statement-root await leaves zero live SSA values in this
-  emitter's emission order (section 5). The one build that matters.
-- The effect of ~990 generated aggregate types on `.ll` size, `llc` time and
-  link time (section 1).
-- Whether the resume function needs anything beyond the existing `FN_ATTRS` /
-  `attributes #0 = { sanitize_address }` applied to the trampoline.
-- Whether the LLVM lane's `scopes` / `frames` unwind machinery emits the
-  right releases when a body returns at a park rather than at its end. The C
-  lane needed `coroUnwind` and `releaseForJump` care here; the LLVM
-  equivalent was not traced.
-- Whether LLVM's struct layout of a hand-declared `%ScrExcCell` matches C's
-  byte-for-byte. Only relevant under section 4's option 1, and only for a
-  size.
-- Everything about scale and timing. This file reads source; it measures
-  nothing that requires running the compiler.
+**Three of the six are resolved by reading, and one is moot.** What is left
+needs the compiler run, and both remaining items are closed by the SAME
+build -- which choosing A removes from the path.
+
+- **RESOLVED (moot).** Whether a hand-declared `%ScrExcCell` matches C's
+  layout byte-for-byte. The runtime exports the size; there is no hand
+  declaration.
+- **RESOLVED by reading.** Whether the resume function needs anything beyond
+  `FN_ATTRS`. It does not: `FN_ATTRS` is applied at all 38 `define internal`
+  sites, including the trampoline, which is the exact precedent -- an
+  internal definition called by address from the runtime.
+- **RESOLVED by reading, and bounded rather than guessed.** The effect of
+  ~990 generated aggregate types. The LLVM lane **already** generates one
+  per async function -- about 1,487 on app182 -- and that `.ll` links today
+  at 229,342,779 bytes with rc=0. So the coro frames are a ~66% increment on
+  a per-function type population already paid for, not an open risk. The
+  precise cost still needs measuring; the risk does not.
+- **RESOLVED by reading, for the DESIGN half.** Where the unwind's coro
+  branch goes: `llvm/emitter.ts:3462` has `emitUnwind`, mirroring the C
+  lane's at `emission/emitter.ts:2542` where the `currentCoro` branch lives.
+  Whether it emits the right releases is a correctness question the value
+  guard answers, not a design hole.
+- **STILL NEEDS A BUILD.** Whether a statement-root await leaves zero live
+  SSA values in this emitter's emission order. Closed by choosing A rather
+  than by running it. The same build also resolves the `.ll` spelling of a
+  converted body, which `stackless-value-guard.md` section 7 lists -- one
+  build, two unknowns.
+- **STILL NEEDS A BUILD.** Precise scale and timing. Bounded above by the
+  argpack population; unmeasured.
