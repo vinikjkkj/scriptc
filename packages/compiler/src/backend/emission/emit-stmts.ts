@@ -302,9 +302,19 @@ export function emitFunction(E: CEmitter, fn: IrFunction): void {
       const local = E.currentLocals.get(p.localId)!;
       if (local.boxed) {
         const box = mangleLocal(p.localId);
-        E.line(`ScrBox *${box} = ${E.boxNewC(p.type)}; /* ${p.name} (boxed param) */`);
-        E.line(`scr_box_set_${boxAccess(p.type)}(${box}, ${mangleRawParam(p.localId)});`);
-        fnScope.push({ name: box, type: p.type, boxed: true });
+        if (coro !== null) {
+          // STACKLESS: emitCoroSpawns built the box and the dispatch above has
+          // already reloaded it from the frame. Constructing it again here
+          // would redeclare the local the resume function declares at its top,
+          // and would rebuild the box on the entry path only -- so the scope
+          // still OWNS it (one release at function end, as on the fiber path),
+          // but nothing is emitted for it.
+          fnScope.push({ name: box, type: p.type, boxed: true });
+        } else {
+          E.line(`ScrBox *${box} = ${E.boxNewC(p.type)}; /* ${p.name} (boxed param) */`);
+          E.line(`scr_box_set_${boxAccess(p.type)}(${box}, ${mangleRawParam(p.localId)});`);
+          fnScope.push({ name: box, type: p.type, boxed: true });
+        }
       } else if (isRefCounted(p.type)) {
         fnScope.push({ name: mangleLocal(p.localId), type: p.type });
       }

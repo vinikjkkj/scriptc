@@ -43,7 +43,7 @@
  * transformation would need the body restructured first. */
 import { appendLines, type CEmitter, type Temp } from "./emitter.js";
 import { mangleCoroFrame, mangleCoroResume, mangleAsyncSpawn, mangleLocal, mangleRawParam } from "../mangle.js";
-import { cDecl, cType, vAdapters } from "./emit-types.js";
+import { boxAccess, cDecl, cType, vAdapters } from "./emit-types.js";
 import { type IrFunction, type IrType, isRefCounted } from "../../ir/nodes.js";
 import { stacklessPlan, type StacklessPlan } from "../../ir/liveness.js";
 
@@ -187,7 +187,30 @@ export function emitCoroSpawns(E: CEmitter, out: string[], plans: Map<string, St
       `${E.link}${sig} {`,
       `  ${frame} *sc_f = (${frame} *)scr_coro_alloc(sizeof *sc_f, &${mangleCoroResume(fn.name)}, /*has_exc=*/false);`,
       ...(lifted ? [`  sc_f->sc_env = scr_closure_retain(sc_env);`] : []),
-      ...fn.params.map((p) => `  sc_f->${coroField(p.localId)} = ${pname(p)};`),
+      ...fn.params.flatMap((p) => {
+        const f = coroField(p.localId);
+        if (!boxedIds.has(p.localId)) return [`  sc_f->${f} = ${pname(p)};`];
+        // THE BOX IS BUILT HERE, and that is the whole fix for a boxed param.
+        //
+        // It used to be built by the body prologue, which cannot work in a
+        // resume function for two independent reasons, both hard: the body
+        // declares every local at the TOP (params included, for a coroutine),
+        // so the prologue's `ScrBox *x = ...` was a REDECLARATION; and this
+        // frame slot is typed `ScrBox *` by emitCoroFrames, so storing the raw
+        // value here put a double or a bool into a pointer slot for the f64
+        // and bool params. One slot, two different things at two times.
+        //
+        // Building it in the spawn wrapper fixes both and costs NOTHING: the
+        // slot was already `ScrBox *`, so no field is added. It also makes
+        // "constructed exactly once" STRUCTURAL rather than a thing to get
+        // right -- the spawn wrapper runs once, on the caller's stack, before
+        // any suspension exists; the dispatch's param reload then restores the
+        // box pointer on every resume like any other frame local.
+        return [
+          `  sc_f->${f} = ${E.boxNewC(p.type)}; /* ${p.name} (boxed param) */`,
+          `  scr_box_set_${boxAccess(p.type)}(sc_f->${f}, ${pname(p)}); /* moves the +1 in */`,
+        ];
+      }),
       // INV-2: the body runs synchronously up to its first suspension, so a
       // function that never awaits has already settled by the time this
       // returns — same observable timing as scr_async_spawn's fiber switch.

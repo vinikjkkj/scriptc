@@ -843,12 +843,18 @@ export function stacklessPlan(fn: IrFunction): StacklessPlan | null {
   if (hasFiberOnlySuspender(fn)) return null;
   if (fn.generator !== undefined) return null;
   if (fn.asyncCacheGlobal !== undefined || fn.asyncCycleCacheGlobal !== undefined) return null;
-  // A boxed PARAM arrives under a raw name and is moved into a fresh box by
-  // the prologue; in a resume function both the raw name and the box would
-  // have to be frame state. Out of scope for the first slice. A boxed LOCAL
-  // is fine — its box pointer spills like any other pointer.
-  const paramIds = new Set(fn.params.map((p) => p.localId));
-  if (fn.locals.some((l) => l.boxed === true && paramIds.has(l.id))) return null;
+  // A boxed PARAM used to be refused here. The stated reason -- "both the raw
+  // name and the box would have to be frame state" -- was not the mechanism.
+  // The frame slot for a boxed local is ALREADY `ScrBox *`; the raw value only
+  // had to live anywhere at all because the BODY built the box. Building it in
+  // the spawn wrapper instead (emitCoroSpawns) removes the raw value from the
+  // frame entirely, costs no field, and makes "built exactly once" structural.
+  // Measured on zapo-rest/app182 before the change: 133 carriers, 109 of them
+  // blocked by nothing else -- the largest single blocker on the ladder, and
+  // the one absent from it for as long as the ladder listed only POINT-level
+  // blockers. A boxed LOCAL was always fine; only the entry path differed,
+  // which is why 62 of the 133 carriers already held boxed non-param locals
+  // that converted correctly.
   const r = suspensionLiveness(fn);
   if (r === null) return null;
   if (!r.points.every((p) => p.straightLine)) return null;
