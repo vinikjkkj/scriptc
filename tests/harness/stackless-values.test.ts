@@ -124,6 +124,14 @@ const WRAPPERS: ReadonlyArray<{ name: string; take: string; finish: string; conv
   // one-argument call (33 points), wrl a one-field record literal (14).
   { name: "wdr", take: "f64", finish: "ref", converted: true },
   { name: "wca", take: "f64", finish: "ref", converted: true },
+  // The boxed-param shapes. Before the spawn-wrapper boxing landed these were
+  // refused outright (fn:boxedParam was the largest blocker on the ladder:
+  // 133 carriers, 109 of them blocked by nothing else), so marking them
+  // converted here is what makes the arming check below fail loudly if that
+  // lowering ever regresses.
+  { name: "wbf", take: "f64", finish: "f64", converted: true },
+  { name: "wbb", take: "bool", finish: "bool", converted: true },
+  { name: "wbs", take: "ref", finish: "ref", converted: true },
   // wrl is here as a NEGATIVE entry, and it corrected a mistake in my own
   // measurement. A one-field record literal looks sole-operand to the eye and
   // my arity scan credited 14 points to it, but the scan read the wrong node:
@@ -247,6 +255,23 @@ class NPair {
 const nbuf: number[] = [10, 20, 30, 40, 50];
 async function wdr(n: number): Promise<any> { return await pf(n); }
 async function wca(n: number): Promise<string> { return wrap1(await pf(n)); }
+
+// THE BOXED-PARAM SHAPES, one per box-access flavour (f64 / bool / ref).
+// A param captured by a closure lives in a ScrBox rather than a C local, and
+// on the stackless lane that box is built by the SPAWN WRAPPER, not by the
+// body prologue -- the body cannot build it, because the resume function
+// declares every local at its top (so the prologue's declaration would be a
+// redeclaration) and the frame slot is typed ScrBox * (so storing the raw
+// value would put a double or a bool in a pointer slot).
+//
+// Each reads the captured value AFTER the park. That is the whole point: if
+// the box were mis-built, or its frame slot clobbered across the suspension,
+// these return a PLAUSIBLE WRONG VALUE rather than crashing -- the class that
+// has cost this front the most. A structural scan cannot see it; only running
+// both arms and comparing the answer can.
+async function wbf(v: number): Promise<number> { const g = () => v; const x = await pf(v); return g() + x; }
+async function wbb(v: boolean): Promise<boolean> { const g = () => v; const x = await pb(v); return g() === x; }
+async function wbs(v: string): Promise<string> { const g = () => v; const x = await ps(v); return g() + ":" + x; }
 async function wrl(n: number): Promise<{ v: number }> { return { v: await pf(n) }; }
 async function wrm(n: number): Promise<{ a: string; b: number; c: boolean; d: string }> {
   return { a: "A", b: await pf(n), c: true, d: "D" };
@@ -357,6 +382,8 @@ async function main(): Promise<void> {
   console.log("ncall ", await wna(3), "|", await wnv(3), "|", await wnn(3));
   console.log("nmisc ", await wns(3), "|", await wnb(3), "|", await wnx(0));
   console.log("nok   ", await wnf(3), "|", await wnr(3), "|", await wnm(3));
+  const bf = await wbf(11); const bb = await wbb(true); const bs = await wbs("q");
+  console.log("boxp  ", bf, bb, bs, bs.length);
   console.log("done");
 }
 void main();
