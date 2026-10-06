@@ -4972,12 +4972,12 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             // promise (+1) is the await's operand.
             const cb = args[4]!;
             E.moveTemp(cb);
-            return finish(`scr_test_sub(${arg(0)}, ${arg(1)}, ${arg(2)}, ${arg(3)}, ${cb.name}, ${arg(5)}, ${arg(6)})`);
+            return finish(fiberOnly("test.sub", `scr_test_sub(${arg(0)}, ${arg(1)}, ${arg(2)}, ${arg(3)}, ${cb.name}, ${arg(5)}, ${arg(6)})`));
           }
           case "test.subEmpty":
             // Fn-less subtest: the settled promise is discarded here (the
             // lowering types it void — nothing consumes it).
-            E.line(`scr_promise_release(scr_test_sub(${arg(0)}, ${arg(1)}, ${arg(2)}, ${arg(3)}, NULL, 0, ${arg(4)}));${E.srcComment(e.loc)}`);
+            E.line(`scr_promise_release(${fiberOnly("test.subEmpty", `scr_test_sub(${arg(0)}, ${arg(1)}, ${arg(2)}, ${arg(3)}, NULL, 0, ${arg(4)})`)});${E.srcComment(e.loc)}`);
             return { name: "", type: e.type };
           case "test.ctxSkip":
             E.line(`scr_test_ctx_skip(${arg(0)}, ${arg(1)});${E.srcComment(e.loc)}`);

@@ -112,11 +112,32 @@ export type SuspendingLibCall =
    * Registered rather than lowered because the stackless lane has no
    * counterpart for the hop it performs, exactly as with `async.hop`: a
    * function holding one stays on the fiber lane. */
-  | "async.awaitDyn";
+  | "async.awaitDyn"
+  /* THE THIRD, AND THE ONE THE NAME-BASED FENCE COULD NEVER HAVE CAUGHT.
+   * A node:test subtest runs INLINE ON THE RUNNER FIBER, so when the
+   * subtest body awaits, scr_test_sub parks its caller -- and nothing
+   * about the spelling says so. `Fenced<S>` keys on `scr_await_`, which is
+   * a naming convention; this one walks straight past it.
+   *
+   * Found by the parking census in tests/harness/fiber-only-census.test.ts,
+   * which derives "parks" from the runtime -- a function reaching a
+   * scr_switch whose destination is return_to -- instead of from a name.
+   * That census was built to prove it COULD find a second unregistered
+   * site; it found a real one.
+   *
+   * Measured: a parent test whose subtest awaits exits 0xC0000409 with the
+   * knob on and prints nothing, against 12 correct lines and exit 0 with
+   * it off, with scr_test_sub sitting inside sc_cr__x25_fn0. A SYNCHRONOUS
+   * subtest does not crash, which is why the existing fixtures missed it:
+   * the park only happens when the subtest body itself suspends. */
+  | "test.sub"
+  | "test.subEmpty";
 
 export const SUSPENDING_LIB_CALLS = [
   "async.hop",
   "async.awaitDyn",
+  "test.sub",
+  "test.subEmpty",
 ] as const satisfies readonly SuspendingLibCall[];
 
 type _LibCallsCovered = AssertNever<
