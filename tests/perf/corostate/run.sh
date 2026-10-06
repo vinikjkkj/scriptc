@@ -28,6 +28,13 @@ export TEMP="$TMP"
 export TMPDIR="$TMP"
 export ZIG_GLOBAL_CACHE_DIR='G:\blocks\stackless-rt\zig-cache\global'
 export ZIG_LOCAL_CACHE_DIR='G:\blocks\stackless-rt\zig-cache\local'
+# The rig's scratch directories are EXPORTED above but were never created, so
+# a host where they do not exist fails the build instead of running the check.
+# They vanished for real on 2026-10-06 when the stackless-rt block was purged
+# after its merge, and every corostate script broke at once. Derived from the
+# same strings the exports use, so a path cannot drift between the two.
+mkdir -p "$(printf '%s' "$TMP" | tr '\\' /)"          "$(printf '%s' "$ZIG_LOCAL_CACHE_DIR" | tr '\\' /)"          "$(printf '%s' "$ZIG_GLOBAL_CACHE_DIR" | tr '\\' /)"
+
 mkdir -p "$OUT"
 
 POISON=""
