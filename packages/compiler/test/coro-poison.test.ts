@@ -219,7 +219,7 @@ test("knob-absent C is byte-identical with the poison set and unset", { timeout:
   expect(clean).not.toMatch(/scr_coro_finish_/);
 });
 
-test("knob-ON C DIFFERS with the poison set, and the poison reports engaged", { timeout: 120_000 }, async () => {
+test("knob-ON C DIFFERS with the poison set, and the ARTIFACT accounts for every site", { timeout: 120_000 }, async () => {
   // The must-change line. Without it the test above is green when the poison
   // does nothing at all -- including when it was never wired up.
   const on = await buildArm(true, undefined);
@@ -231,11 +231,38 @@ test("knob-ON C DIFFERS with the poison set, and the poison reports engaged", { 
   // the substitution is the historical defect exactly: bool fulfilled through f64
   expect(poisoned).not.toMatch(/scr_coro_finish_bool/);
   expect(poisoned).toMatch(/scr_coro_finish_f64/);
-  // LIVENESS: a count, refusing at zero by name. "The build succeeded" is
-  // not evidence the poison ran.
-  expect(poisonSites()).toBeGreaterThan(0);
-  expect(() => assertPoisonEngaged()).not.toThrow();
-  expect(poisonReport()).toMatch(/^POISON-SITES  poison=finish-arm  sites=[1-9]/);
+  // LIVENESS, DERIVED FROM THE ARTIFACT AND NOT FROM A COUNTER.
+  //
+  // This read poisonSites(), a process-global counter that only increments
+  // while emission RUNS. The pipeline is content-addressed: a cache hit
+  // returns the poisoned C without re-emitting, so the counter reads zero
+  // while the artifact in hand is correct in every respect -- a false RED.
+  // Same shape as the -included census header the cache key could not see:
+  // THE BUILD CACHE CANNOT SEE THE INSTRUMENT. A counter is the wrong
+  // instrument for a cached pipeline however today's defect resolves, so
+  // this changes regardless of that answer.
+  //
+  // Turning the cache off here is NOT the fix: it would measure a pipeline
+  // that is not the one that ships.
+  //
+  // The count is differenced out of the TWO ARTIFACTS instead. Every bool
+  // finish in the clean arm must appear as an f64 finish in the poisoned
+  // one, exactly once each. It refuses at zero by construction -- a program
+  // with no bool finish proves nothing and fails on the first line -- and it
+  // is strictly stronger than a counter: a poison that ALSO moved an f64
+  // site satisfies "> 0" and fails this.
+  //
+  // assertPoisonEngaged and poisonReport keep their own tests above, where
+  // the calls are in-process and no cache can stand between the act and the
+  // count. They are build-time guards; they are not this test's evidence.
+  const occurrences = (c: string, re: RegExp): number => (c.match(re) ?? []).length;
+  const boolSites = occurrences(on, /scr_coro_finish_bool\(/g);
+  expect(boolSites, "nothing to poison: the clean arm emitted no bool finish").toBeGreaterThan(0);
+  expect(occurrences(poisoned, /scr_coro_finish_bool\(/g)).toBe(0);
+  expect(
+    occurrences(poisoned, /scr_coro_finish_f64\(/g) - occurrences(on, /scr_coro_finish_f64\(/g),
+    "every bool finish must become exactly one f64 finish, and no other site may move",
+  ).toBe(boolSites);
 });
 
 test.skip("NOT EXECUTED (needs four arms): the poisoned guard reddens exactly its expected shape set", () => {
