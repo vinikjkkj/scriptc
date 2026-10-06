@@ -359,6 +359,76 @@ consumer `.return()` while suspended in a `yield*` unwinds the OUTER generator
 and does not forward". Naming it now is cheaper than finding it by diff, and
 this is exactly the class nobody looks for precisely because it breaks nothing.
 
+## 10c. The native sink is not an emission item at all
+
+The last unsized item in S13. Asked the same way `yield*` was asked -- new
+mechanism, or composition of the three cases? -- the honest answer is
+**neither**, and that is what removes it.
+
+`packages/compiler/src` contains **zero** occurrences of `ScrAgenSink`,
+`scr_agen_next_native`, `scr_agen_return_native`, `scr_agen_throw_native` or
+`scr_agen_sink_detach`. Nothing is emitted for this path. It is ~120 lines of
+`scr_async.c` reached from **5 call sites in `scr_stream.c`** (plus a detach
+in teardown), and it is what `Readable.from(asyncGenerator)` runs on.
+
+It is not composition either: it does not go through `yieldExpr`, `genResume`
+or `agenResume`. It bypasses the emitted settle thunk entirely, and the
+contract says why (`scr_runtime.h:7163`): *"The record is a per-shape C struct
+only the emitted settle thunk can build, so a runtime consumer could never
+read one -- but it does not need to: OUT already holds the yielded value and
+`scr_gen_done()` already says whether it was the last."*
+
+So it leaves the emission list, like `yield*` did, but for the opposite
+reason: `yield*` is made of pieces already counted, and this is made of no
+emitted pieces at all. **No count is needed** -- there are no carriers in the
+admissibility sense -- so this does not wait for a sweep either.
+
+It does not leave empty-handed, though. It leaves two constraints.
+
+### It is a THIRD consumer of `ScrGen`, and it is written in C
+
+The contract header calls it *"a second consumer shape for the SAME handle"*.
+Counting the emitted ones, there are three:
+
+| consumer | driven by | lives in |
+|---|---|---|
+| promise | `agenResume` -> `scr_agen_next`/`_return`/`_throw` | emitted code |
+| synchronous | `genResume` -> `scr_gen_resume`/`_return`/`_throw` | emitted code |
+| **native sink** | `scr_agen_next_native` and friends | **`scr_stream.c`, 5 sites** |
+
+This bears directly on **S11 decision 1** (one discriminated handle, or two
+handle types). The cost of two handles was stated there as doubling the
+consumer emission and reintroducing the drift `ir/suspends.ts` prevents. The
+native sink adds a cost from a different direction: a **C file outside the
+compiler** would have to discriminate too, and `scr_stream.c` knows nothing
+about lowering and has no reason to learn. That is independent support for the
+discriminated handle, not a restatement of the earlier argument.
+
+### The hop asymmetry is observable and must be preserved
+
+`scr_agen_yield_settle` calls `scr_await_hop()`; `scr_agen_finish_gen`
+deliberately does **not**, and says so (`scr_async.c:4996`): *"No await hop,
+deliberately: JS's AsyncGeneratorCompleteStep resolves the request WITHOUT
+awaiting on the completion path (only a `yield` awaits its operand), so a
+completion reaches the consumer one turn sooner than a yield does."*
+
+A yield hops; a completion does not. That is a **turn-count-visible**
+distinction with a named JS justification, and any stackless rebuild of the
+async-generator path has to reproduce it exactly. It sharpens S13's tick-count
+item from "can the hop be reproduced" to "can the hop be reproduced **on the
+yield path only**".
+
+### One cross-front note, offered as a lead and not a conclusion
+
+The native path has an explicit teardown protocol -- `scr_agen_sink_detach`,
+after which *"a settlement arriving after that is dropped"* -- for a consumer
+that goes away while a request is in flight. That is the same shape as the
+abandoned-frame accounting gap found behind the `fetch-dispatcher` red on the
+knob-on lane, where the fiber lane exempts abandoned frames by design and the
+stackless lane has no analogue. Whether the detach protocol is a usable model
+there is **not determined**; it is recorded because the two were found
+independently and nobody has put them side by side.
+
 ## 11. MECHANICAL vs DECISION
 
 **MECHANICAL -- a pair exists, it is translation (5):**
@@ -416,7 +486,10 @@ the C side landing first is the cheaper order.
   `AsyncGeneratorYield` tick count exactly. That is the hop front's question.
 - Whether any of the 24 sync-generator gains survive **emission**. Everything
   here is admissible.
-- The native-sink path (`g->sink`, `scr_agen_sink_schedule`) was read but not
-  sized. `yield*` WAS sized by reading -- see S10b; only its count is
-  outstanding, and the count cannot change the conclusion.
+- Both previously-unsized items are now sized BY READING and neither needs a
+  sweep: `yield*` is composition (S10b) and the native sink emits nothing
+  (S10c). `yield*`'s carrier count is still outstanding but cannot change its
+  conclusion; the native sink has no carrier count to take.
+- Whether `scr_agen_sink_detach` is a usable model for the abandoned-frame
+  accounting gap on the knob-on lane (S10c).
 - The corpus is 244 dumps, not the whole corpus.
