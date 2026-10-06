@@ -163,6 +163,12 @@ async function pu(n: number): Promise<number | null> { return n > 0 ? n : null; 
 async function pv(): Promise<void> { }
 async function pd(n: number): Promise<any> { return n > 0 ? "d" + n : null; }
 async function prej(): Promise<number> { throw new Error("boom"); }
+// A promise-or-absent union. Awaiting one emits the microtask HOP on its
+// non-promise arm -- scr_await_hop, a fiber-only primitive with no stackless
+// counterpart -- which is the construct that was invisible to liveness and
+// crashed fifteen admitted bodies. It must stay OFF the lane, and the
+// cross-lane scan below is armed against exactly this shape.
+function mix(flag: boolean): Promise<number> | number { return flag ? pf(1) : 5; }
 async function pmaybe(bad: boolean): Promise<number> { if (bad) throw new Error("bad"); return 7; }
 
 // The subjects. Each is a CONVERTED coroutine: one root-level await in a
@@ -328,6 +334,38 @@ describe("the stackless lane answers what the fiber lane answers", () => {
       "these shapes now CONVERT -- flip `converted: true` so their coverage counts")
       .toEqual([]);
     expect(on.cSource, "the rejection completion is never emitted").toContain("scr_coro_finish_throw");
+
+    // NO FIBER CALL MAY APPEAR IN AN ADMITTED BODY, checked in the artifact.
+    //
+    // This was a diagnostic on 2026-10-06 and is a permanent criterion now.
+    // A function admitted to the stackless lane has NO FIBER; a fiber-only
+    // primitive reaching its body aborts at runtime with "await outside an
+    // async function". It happened: `async.hop` suspends but was absent from
+    // liveness's list, so fifteen bodies were admitted while still emitting
+    // scr_await_hop. One occurrence invalidates the whole coverage number,
+    // because the lane is then lowering something it cannot lower.
+    //
+    // Reading the emitted C is the only check that catches this WITHOUT
+    // running the binary and without the specific function being exercised.
+    {
+      const bodies = on.cSource.split(/^(?=[A-Za-z ]*void sc_cr_)/m);
+      const offenders: string[] = [];
+      for (const b of bodies) {
+        const m = /^[A-Za-z ]*void (sc_cr_[A-Za-z0-9_]+)\(ScrCoroBase/.exec(b);
+        if (!m) continue;
+        // No escape sequences here on purpose: this file has had a
+        // backslash eaten by a heredoc five times today, and an escape
+        // that degrades silently inside a regex or a string is the exact
+        // failure this test exists to prevent elsewhere.
+        const nl = String.fromCharCode(10);
+        const end = b.indexOf(nl + "}" + nl);
+        const body = end > 0 ? b.slice(0, end) : b;
+        const fiber = [...new Set(body.match(/scr_await_[a-z0-9_]+/g) ?? [])];
+        if (fiber.length > 0) offenders.push(`${m[1]}: ${fiber.join(", ")}`);
+      }
+      expect(offenders, "fiber-only calls inside a stackless body -- these abort at runtime, and the coverage number is void")
+        .toEqual([]);
+    }
 
     const run = (exe: string): string => execFileSync(exe, [], { encoding: "utf8" });
     const fiber = run(off.exe);
