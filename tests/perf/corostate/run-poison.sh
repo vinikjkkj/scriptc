@@ -34,6 +34,13 @@ export TEMP="$TMP"
 export TMPDIR="$TMP"
 export ZIG_GLOBAL_CACHE_DIR='G:\blocks\stackless-rt\zig-cache\global'
 export ZIG_LOCAL_CACHE_DIR='G:\blocks\stackless-rt\zig-cache\local'
+# The rig's scratch directories are EXPORTED above but were never created, so
+# a host where they do not exist fails the build instead of running the check.
+# They vanished for real on 2026-10-06 when the stackless-rt block was purged
+# after its merge, and every corostate script broke at once. Derived from the
+# same strings the exports use, so a path cannot drift between the two.
+mkdir -p "$(printf '%s' "$TMP" | tr '\\' /)"          "$(printf '%s' "$ZIG_LOCAL_CACHE_DIR" | tr '\\' /)"          "$(printf '%s' "$ZIG_GLOBAL_CACHE_DIR" | tr '\\' /)"
+
 mkdir -p "$OUT"
 
 BLIND=""
@@ -54,8 +61,18 @@ rm -f "$EXE"
   "$S/scr_lib.c" "$S/scr_path.c" "$S/scr_json.c" "$S/scr_async.c" \
   "$S/scr_child.c" "$S/scr_cycle.c" "$S/scr_random_fill.c" \
   "$S/scr_stack_margin.c" "$S/scr_win.c" \
-  -ladvapi32 -liphlpapi -lws2_32 -o "$EXE" 2>/dev/null
-[ -x "$EXE" ] || { echo "build failed, refusing to report a verdict" >&2; exit 2; }
+  -ladvapi32 -liphlpapi -lws2_32 -o "$EXE" 2>"$OUT/build.err" || true
+# `|| true` and a kept log, because the guard below could not previously be
+# REACHED: under `set -eu` a failing compiler killed the script on the spot,
+# so the one message that says "refusing to report a verdict" never printed
+# and the run produced no output at all -- a net that could not report its
+# own failure, which is the exact thing this file exists to prevent
+# elsewhere. 2>/dev/null threw away the reason on top of that.
+[ -x "$EXE" ] || {
+  echo "build failed, refusing to report a verdict" >&2
+  sed -n '1,25p' "$OUT/build.err" >&2
+  exit 2
+}
 
 turns() { # $1 = arm name; one turn count per case, in order
   "$EXE" 2>/dev/null | awk -v arm="$1" '$1==arm {
