@@ -295,6 +295,27 @@ interface Ctx {
    * corpus programs), so nothing reached it; a capacity is not an occupancy,
    * and this closes the capacity. */
   finallyDepth: number;
+  /* THE SAME `no`, UNDER TWO NAMES.
+   *
+   * `finallyDepth` is raised in two places for two different reasons, and
+   * one label for both is why "a suspension guarded by a finally" had to be
+   * counted by hand instead of read off the IR:
+   *
+   *   inFinallyBody    -- the suspension sits INSIDE the finally body. It
+   *                       needs the frame's own exception cell AND its own
+   *                       state per emitted copy, because the finally body
+   *                       is emitted three times (normal, exception,
+   *                       pending-return).
+   *   guardedByFinally -- the suspension sits in the try or catch body of a
+   *                       try that HAS a finally. Unwinding out of it runs
+   *                       the finally with the exception still pending, so
+   *                       it needs the cell; the body is emitted once.
+   *
+   * Both still block, exactly as before. `finallyDepth` is kept as the
+   * umbrella so nothing downstream has to change, and the two refinements
+   * are additive. Their partition is asserted in liveness.test.ts. */
+  inFinallyBody: number;
+  guardedByFinally: number;
   /** A `switch` is not a loop, but a resume label inside a case body puts
    * the state machine's re-entry inside the switch block. Legal C, but out
    * of the first slice's scope. */
@@ -386,6 +407,8 @@ function recordPoints(
         blockers: [
           ...(ctx.loopDepth > 0 ? ["loop"] : []),
           ...(ctx.finallyDepth > 0 ? ["finally"] : []),
+          ...(ctx.inFinallyBody > 0 ? ["finally:body"] : []),
+          ...(ctx.guardedByFinally > 0 ? ["finally:guarded"] : []),
           ...(ctx.switchDepth > 0 ? ["switch"] : []),
           ...(ctx.rootOk ? [] : ["rootOk:" + ctx.stmtKind]),
           ...(s.node["kind"] === "awaitExpr" ? [] : ["kind=" + String(s.node["kind"])]),
@@ -676,17 +699,22 @@ function backStmt(
         afterFinally = new Set(liveOut);
       } else {
         ctx.finallyDepth++;
+        ctx.inFinallyBody++;
         try {
           afterFinally = backStmts(ctx, s.finallyBody, liveOut, loops);
         } finally {
           ctx.finallyDepth--;
+          ctx.inFinallyBody--;
         }
       }
       if (s.finallyBody !== null) ctx.finallys.push(afterFinally);
       ctx.tryDepth++;
       // A try that HAS a finally also blocks its try/catch bodies: unwinding
       // out of them runs the finally with the exception still pending.
-      if (s.finallyBody !== null) ctx.finallyDepth++;
+      if (s.finallyBody !== null) {
+        ctx.finallyDepth++;
+        ctx.guardedByFinally++;
+      }
       try {
         const catchLive =
           s.catchBody === null ? new Set<string>() : backStmts(ctx, s.catchBody, afterFinally, loops);
@@ -697,7 +725,10 @@ function backStmt(
         return union(tryLive, catchLive);
       } finally {
         ctx.tryDepth--;
-        if (s.finallyBody !== null) ctx.finallyDepth--;
+        if (s.finallyBody !== null) {
+          ctx.finallyDepth--;
+          ctx.guardedByFinally--;
+        }
         if (s.finallyBody !== null) ctx.finallys.pop();
       }
     }
@@ -766,6 +797,8 @@ export function suspensionLiveness(fn: IrFunction): FnLiveness | null {
     loopDepth: 0,
     tryDepth: 0,
     finallyDepth: 0,
+    inFinallyBody: 0,
+    guardedByFinally: 0,
     switchDepth: 0,
     rootOk: false,
     stmtKind: "?",
