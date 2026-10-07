@@ -678,9 +678,25 @@ stands at p = 0.057.*
 `20261006-234534`, all of them on shard 3, every one with zero failing
 assertions. A later run adds to this line and to no other. The rate arms
 behind the p are 2 of 4 under plain invocation against 11 of 11 under the
-gate's; quoting an occurrence count without **J = 0.9474** between the
-shard-3 file sets overstates what "a different tree" buys (section 7 has
-that Jaccard note).
+gate's.
+
+**WHAT THE J DOES AND DOES NOT BOUND, corrected by a later result from the
+block that owns this front.** The J = 0.9474 between shard-3 file sets
+(section 7) was recorded as a caution: the reproductions sat on nearly
+identical content, so "a different tree" bought little, and tree content
+as a NECESSARY condition stood UNMEASURED because it had never been
+varied. It has now been varied. **The shard-3 set reproduces with half its
+files replaced by inert files from shard 5, provided the count and the
+load are held at 37.** Reported to me rather than measured by me, and
+recorded here as theirs.
+
+So the cause is **not** the 37 files, and **not** "any 37 files" -- it is a
+subset that only expresses itself under sufficient concurrent work.
+Nothing in this document should be written to imply the whole set is
+necessary. The caution the J supported is weaker than it looked: content
+can differ by half and the signature still arrives, so a high J no longer
+limits what a differing tree would have shown. The canonical form above is
+unaffected -- it never claimed a cause.
 
 This is also why the earlier 0-of-2 green arm deserved the caution it got.
 Two clean draws against a defect of unknown rate is not evidence of
