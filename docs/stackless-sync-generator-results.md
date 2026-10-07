@@ -324,6 +324,19 @@ the story:
 criterion is not broken in production; the breach is confined to this
 branch.
 
+### D1 WAS GUARDED CORRECTLY, WHICH MAKES THIS A REGRESSION
+
+The elimination above carries a second result, and it is the severe
+reading. `scr_async.c` gained **+102 lines on main** since the recording
+commit, it is linked into every binary, and the hello-world is **exactly**
+on its recorded figure. Those 102 lines cost **zero** `.text`.
+
+That is direct proof that the D1 slice guarded its additions properly. So
+the seven unguarded sites in this slice are not a new hazard nobody had
+met and not a standard nobody had set -- they are a **regression against
+this front's own immediate predecessor**, which had already met it. The
+pattern was there to copy and was not copied.
+
 ### Finding eleven arrived unasked
 
 The ten in section 0.1 were found by reading or by a test written to look
@@ -340,6 +353,49 @@ A third anchor is still unmeasured. `regex.test.ts` checks the regex
 program's own figure AFTER the one that failed, and vitest stops a test at
 its first failed expect -- so it has never been evaluated. A fix verified
 only against the hello-world could leave it broken and read as green.
+
+### REGISTERED BEFORE IT RUNS: the bisect of the +32
+
+Last item of the window, after the fix, the verification, the parity run
+and the gate are committed. The slice is the deliverable; this is a
+different question. It is cheap -- `textanchor.mts` already takes any tree
+-- and it answers the only non-negotiable rule on this front: whether the
+shipping criterion is **already violated on main**.
+
+**The target is the NUMBER, not the verdict.** The regex program's `.text`
+is recorded at every step across `e03bdf0aa..main`, not "moved / did not
+move". A 32-byte step can be two steps of 16, and then the answer is two
+causes and not one.
+
+**The lane is pinned at every step**: `x86_64-windows-gnu`, `SCRIPTC_CC=zigcc`,
+zig **0.16.0** with `G:/tools/zig` ahead of chocolatey's 0.15.2 on PATH.
+The two differ by about 20 KB, so one step run on the wrong zig invents a
+step three orders of magnitude too large and would be believed.
+
+**The rig is controlled before any step is trusted.** A bisect worktree
+needs `node_modules`, and a shared or linked one is how a measurement ends
+up compiling the WRONG tree: pnpm's workspace links are absolute, so
+`@scriptc/compiler` can resolve back into the donor tree while the
+checkout being measured sits unused. `textanchor.mts` sidesteps that by
+importing the compiler through an explicit file path, but the transitive
+resolution of the runtime sources is not proven to. So the first
+measurement is the bisect worktree **at main's tip**, which must reproduce
+630,182 exactly. If it does not, the rig is wrong and no step from it
+means anything.
+
+**What would surprise me, declared now:**
+
+- **The step lands on a commit of THIS front.** Then a knob-absent
+  lowering change moved an emitted program, the same shipping-criterion
+  breach in miniature is already on main, and it stops being a
+  documentation item and becomes the user's decision.
+- **The step lands outside this front.** Unsurprising: someone else's
+  debt, and it needs only to stay written down.
+- **There is no single step.** Then the +32 accumulated, which means the
+  tolerance has been absorbing small changes for a while and the
+  interesting number is how many, not which.
+- **The number does not reproduce at main's tip.** Then the rig is the
+  finding and the bisect is void until it is fixed.
 
 ### The MACHINE column, raw
 
