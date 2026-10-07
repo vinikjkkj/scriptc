@@ -1191,3 +1191,62 @@ reported 25, and shard 1 moves 984 -> 986. +2 equals +2.
 Confirmed from `shard-1.json` rather than from log formatting: both cases
 appear by full name with status `passed`. The earlier phrasing was the
 defect -- it conflated assertions with cases -- and not the test.
+
+## 18. What the `ffaa01b0a` gate is evidence for, and what it is not
+
+**It is valid for what it measured.** On `ffaa01b0a`, treehash
+`e5b76ad846b8167f`, partition 221/221: the seven-site fix, both size
+anchors, five green shards, and the first-ever evaluation of the `REGEX`
+anchor. Nothing in section 17 is weakened by anything below.
+
+**It is not a merge gate.** `main` moved **ten commits** after that run,
+and one of them changes `packages/compiler/src/backend/cc.ts` by +141 --
+the detector for vendor objects built by a different toolchain, which is
+the durable half of the finding in section 15. A gate measures the tree it
+ran on. That tree is no longer the tree that would land, so citing this run
+for the merge question would be answering a question it was not asked.
+
+These two statements have to be kept apart on purpose. A gate that is
+genuinely valid is exactly the kind of evidence that gets quoted for the
+wrong question later, and "five of six green" is quotable.
+
+### 18.1 The tree that would actually land
+
+`main` is merged in. Verified by content, not by the merge summary:
+
+| check | result |
+|---|---|
+| `main` is an ancestor of HEAD | yes |
+| `scr_async.c` blob vs the measured bytes | `dfe31c7a9ab63a18`, identical |
+| the permanent lane-guard test | present |
+| `REGEX_CLASS_TEXT_RECORDED` | `630_182` |
+| worktree dirty | 0 |
+
+**The partition stays at 221**, and that is re-derived rather than carried
+over: expanding the three `include` globs from `vitest.config.ts` against
+the merged tree yields 221 files. None of main's ten commits adds a test
+file -- `packages/compiler/test/obj-cache-integrity.test.ts` is **modified,
+not new**, and was already line 37 of the previous run's
+`expected-files.txt`. (That path counts because the globs include
+`packages/*/test/**/*.test.ts`, which contributes 55 of the 221; assuming
+only `tests/harness/**` counts would have given the wrong answer here.)
+
+### 18.2 The dist is now stale, by construction
+
+`HEAD:packages/compiler/src` is `07cbac63c` against a stamp of
+`be5cfc056`, because `cc.ts` moved. The gate preflight will report
+`dist-provenance=STALE` and abort with `dist-provenance-not-current`.
+
+**That is the check working, not failing.** The CLI-spawning tests resolve
+the compiler to `dist`, so without this the run would measure a compiler it
+could not name and report green about code it never executed. `dist-build
+.ps1` reruns before the next gate, and the gate is deliberately not allowed
+to repair its own subject.
+
+### 18.3 Why the merge is still blocked, and by what
+
+Not by quality. The contract requires six green shards; this run has five
+and a red shard 3 that is the known `onTaskUpdate` signature with zero
+failing assertions. Extending the relaunch rule to cover that signature is
+a change to the contract, and that is the user's decision, pending with
+them. The slice is blocked by a process question, not by a defect in it.
