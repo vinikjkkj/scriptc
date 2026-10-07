@@ -142,14 +142,62 @@ SUPERSEDED IN PART BY S6. Kept because the reasoning about *how* a hypothesis
 dies is still the standard, but every denominator here was re-derived from
 the census and three rows changed.
 
-| hypothesis | status | why |
-|---|---|---|
-| per-shard work | **refuted by ordering** | shard 4 carried 29 descendants and passed; the ones that failed carried 21 and 23 |
-| our co-load (another GATE on the box) | **REFUTED by measurement** | pre-registered overlap test over 109 shard intervals: the A/A pair and all 8 full 12-worker runs score 0.0% foreign-rig overlap. S6.3 |
-| worker count | **re-derived, significant, STILL CONFOUNDED** | 4 of 8 at 12 workers against 0 of 10 at 3, over runs that actually ran six shards; p = C(8,4)/C(18,4) = 0.023. But see S6.2: within the 12-worker group the four runs before ~15:00 are green and the four after are red, so worker count alone cannot carry it |
-| the in-run scratch sweeper | **REFUTED by ordering** | S6.4 |
-| tree content as SUFFICIENT | **REFUTED by the A/A pair** | S6.1 |
-| tree content as NECESSARY | **UNTESTED -- never varied** | S6.6: 34 files common to shard 3 of all six reproductions, worst pairwise J = 0.8718. An earlier row claimed composition was varied; it was not |
+Every row now names its REFERENCE ARM and that arm's DENOMINATOR, because
+two conclusions were found resting on arms of 0/2 whose 95% upper bound is
+77.6% -- a bound that excludes nothing. A third state is therefore required:
+a row whose reference was never established is **UNMEASURED**, which is not
+the same as refuted and not the same as confirmed.
+
+| hypothesis | status | reference arm | denominator |
+|---|---|---|---|
+| per-shard work | **REFUTED by ordering** | descendant counts, direct census | 8 twelve-worker shard-runs: green 24/25/26/27 against red 23/24/25/27, fully interleaved. No green arm involved |
+| our co-load (another GATE on the box) | **REFUTED by measurement** | foreign-rig wall overlap, with instrument controls | 109 shard intervals; A/A pair and all 8 full runs at 0.0%; function proven able to report non-zero (2 of 109 real, synthetic 500s/0s) |
+| the in-run scratch sweeper | **REFUTED by ordering** | census anti-ordering, direct counts | 110 shard-runs: a red shard that removed 0 directories, a green shard in the same run that removed 9,964. **The two supporting ARMS are struck** -- nosweep37/maxsweep37 were 0/2 draws from a process now measured at ~50%, and contribute nothing. The census carries this row alone |
+| position as SEQUENCE in the gate | **REFUTED** | R0a, a positive reproduction | shard 3 alone, no preceding shards: RED 2/2 under the gate invocation and RED under the plain one (A0). Does not depend on any green arm |
+| position as vitest SHARD INDEX | **REFUTED** | R3, a positive reproduction | shard 3's 37 files passed as explicit paths, no `--shard` flag, no index: RED 2/2. Does not depend on any green arm |
+| worker count | **contrast significant, one leg UNMEASURED, CONFOUNDED** | the 3-worker arm | 4/8 at 12 workers against **0/10** at 3, p = 0.023. But 0/10 bounds the 3-worker rate only at **25.9%**, so "3 workers is safe" is not established; and the 3-worker runs are the overnight ones |
+| tree content as SUFFICIENT | **DOWNGRADED to UNMEASURED** | the A/A pair, armrig GREEN shard 3 | **n = 1 against n = 1.** Under a process now measured as intermittent (50% plain, ~100% gate), one green beside one red is p = 0.5 and carries no information. See the note below |
+| tree content as NECESSARY | **UNMEASURED -- never varied** | the 34-file core | 34 files common to shard 3 of all reproductions, worst pairwise J = 0.8718 |
+| shard 5 does not reproduce (R0b) | **UNMEASURED** | R0b green arm | **0/2**, 95% upper bound 77.6%. The content result rests on this and it is the same defect that voided the plain arm |
+| plain invocation does not reproduce | **REFUTED -- it does** | the plain arm, re-measured | was 0/2; A0 re-ran the identical invocation and it came back RED. Now **2/4** |
+
+### The A/A pair is the boundary of the temporal break, not independent evidence
+
+This correction matters more than the row. The A/A pair was called "the
+discriminator any future hypothesis has to pass", and its force came from an
+unstated assumption: that the phenomenon is DETERMINISTIC, so that one green
+and one red on the same tree must mean something outside the tree changed.
+The phenomenon is not deterministic. It is intermittent: 2 of 4 under the
+plain invocation, and 4 green of 10 among twelve-worker shard-3 gate runs.
+(An earlier draft of this paragraph said "14 of 20", which conflated the
+twelve-worker population with ten three-worker runs that are all green and
+all pre-break -- a different population, and exactly the denominator error
+this section exists to catch.) A single green 50 minutes before a single red
+is what an intermittent process produces by chance, at p = 0.5.
+
+What survives is the TEMPORAL BREAK of which the pair is merely the
+boundary. Taken over the natural unit -- the ten twelve-worker shard-3 runs,
+in time order: green green green green, then RED RED RED RED RED RED -- the
+probability that all six reds fall in the last six positions is
+1/C(10,6) = **0.0048**. That is the real evidence, it rests on 10 runs
+rather than 2, and the A/A pair adds nothing to it because it IS two of
+those ten, adjacent across the break. Citing both as separate support
+double-counts one observation.
+
+### Why a Fisher p from a tiny arm misleads, stated once
+
+A 0/2 arm against an 11/11 arm yields p = 1/C(13,2) = **0.013**, which looks
+decisive. But if that arm's true rate is 50%, the chance of observing 0/2 is
+**25%** -- one experiment in four produces that "significant" table by luck.
+Fisher conditions on the margins, so the p is driven by the size of the
+OTHER arm, not by the precision of the small one. Tonight this is not a
+hypothetical: the plain arm sat at 0/2 with exactly that p, and two more
+runs took it to 2/4.
+
+**Design rule adopted from it: an arm must be large enough that ONE flipped
+observation does not change the conclusion.** At n=2 a single red takes an
+arm from 0/2 to 1/3 and the conclusion collapses; at n=5 it goes to 1/6 and
+survives. Robustness under one flip, not significance, is the bar.
 
 The old row read "2/6 at 12 workers against 0/10 at 3, p = 0.165". That p was
 computed over a run list that no longer matches the corrected occurrence
@@ -412,3 +460,76 @@ because every directory in that file is built by `keyDir`, which
 unconditionally writes a `program.exe`. **The one input shape that breaks
 the stated property is not constructible through the helper.** 20 test files
 create scratch program directories without calling `holdScratch`.
+
+## 7. What remains, with the power computed before the machine is asked
+
+### 7.1 Position is already answered; "content vs position" is no longer the question
+
+Two rows of the ledger settle it, and both are POSITIVE reproductions, so
+neither depends on a green arm that might be a draw:
+
+- **Sequence position** is out: shard 3 alone, with no preceding shards,
+  reproduces (R0a, RED 2/2 under the gate; A0 RED under the plain one).
+- **Shard index** is out: shard 3's 37 files passed as explicit paths, with
+  no `--shard` flag at all, reproduce (R3, RED 2/2).
+
+So what is left is the file set itself, and the open question is narrower
+and better than the one we were asking: **which file or files inside the 37**.
+
+### 7.2 Bisection, and why it is immune to the defect that bit us twice
+
+The asymmetry is that an arm which does NOT reproduce needs many runs to
+mean anything, while one that DOES needs few. Bisection is the design that
+only ever leans on the powered direction:
+
+1. The current set must first reproduce **2/2**. That is the invariant.
+2. Split it in half. Run half A twice. If A reproduces, descend into A --
+   and the 0/2 on half B is never load-bearing, so its weak bound costs
+   nothing.
+3. Only if A fails twice is B run. If B reproduces, descend into B.
+4. If NEITHER half reproduces, re-verify the parent at 2/2. If the parent
+   still reproduces, the cause needs files from both halves: declare an
+   interaction and stop bisecting. Registered in advance so it cannot be
+   explained away as a bad run.
+
+Cost: 37 -> 19 -> 10 -> 5 -> 3 -> 2 -> 1 is about six levels, 2-4 runs each,
+and runs shrink as the set does. Roughly **18 runs, ~30 minutes**. Use the
+GATE invocation, where the rate is ~100% (11/11); the plain one is ~50% and
+would double the runs for nothing.
+
+### 7.3 A0 for R0b, the other unestablished arm
+
+Shard 5 at 0/2 is the same defect that voided the plain arm. Three more runs
+takes it to 0/5, whose upper bound is 45.1% -- below the 54.9% LOWER bound
+on shard 3's rate, so the two no longer overlap. ~6 minutes. By the design
+rule above, 0/5 also survives one flipped observation (1/6) where 0/2 does
+not (1/3).
+
+### 7.4 The rate claim: cheap to significance, expensive to a number
+
+Plain 2/4 against gate 11/11 is p = 0.057 today. If the gate holds and the
+plain rate stays near half:
+
+| plain runs | reds | p |
+|---|---|---|
+| 5 | 2 | 0.018 |
+| 6 | 3 | 0.029 |
+| 8 | 4 | 0.018 |
+| 10 | 5 | 0.012 |
+
+So **four more plain runs (~20 min)** lands it comfortably under 0.05 with
+room for an unlucky draw. But pinning the RATE -- distinguishing a true 50%
+from a true 80% -- needs **39 runs per arm, 78 runs, 3.9 to 6.5 hours**.
+Significance is cheap; the number is not. Unless the rate itself becomes the
+target, this should be declared open rather than pursued.
+
+### 7.5 Repointing the instrument requires an anchor run
+
+The gate variants under `G:\blocks` dot-source the disk copy of the sampler,
+not `scripts/`. Repointing them is correct but must happen BETWEEN
+experiments, never inside one, and must be paired with an anchor: re-run a
+cell whose answer is already known -- R0a, RED 2/2 -- with the repointed
+instrument and confirm both the verdict and a comparable MACHINE column.
+Two runs, ~5 minutes. Swapping instruments without an anchor is changing the
+ruler mid-series, and nothing measured after it is comparable to anything
+measured before.
