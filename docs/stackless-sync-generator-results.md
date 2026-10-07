@@ -442,3 +442,165 @@ machine, so the column indexes something about a particular run rather than
 the shard identity, and a single run of it separates nothing. Two runs is
 the smallest number that could have shown this, and it took the second one
 being on a different tree.
+## 12. Three tools that could not fail, and two numbers that were wrong
+
+The fix for section 11 was written, queued, and not applied. Auditing the
+queued tooling before firing it found three defects in it, all of the same
+family -- **green by construction** -- plus two wrong figures that had been
+repeated into briefings. None of this came from something failing.
+
+### 12.1 The patcher's completeness check was blind where it mattered most
+
+`p16` wraps the seven frame-lane sites and then asserts that no
+`SCR_GEN_BACKED_FRAME` branch remains outside `#ifdef SCR_CORO_LANE`. Its
+tracker decremented its nesting depth only on an `#endif` whose **text**
+named the lane. `scr_async.c` has bare `#endif`s -- the first at line 5478
+-- so the depth never returned to zero and every line after it read as
+guarded. **Five of the seven sites are after that line.**
+
+Run against the **unpatched** file, where the correct count of exposed
+lines is **11**, it reported **3**, and one of those three was a comment.
+It could not have caught the partial fix it was written to catch.
+
+Compounding it: `--dry` returned **before** that assert. So "9 of 9 anchors
+dry-checked" was true and told you nothing about the check that blocks.
+
+### 12.2 The permanent test went red on a correct fix
+
+`p17` adds the cause as a permanent test beside the size anchor that
+detected it. Its tracker is a real preprocessor nesting tracker and is
+correct. But it tested the **raw line** for the marker, and
+`scr_async.c:4714` is
+
+```c
+  ScrCoroBase *frame; /* non-NULL iff backing == SCR_GEN_BACKED_FRAME */
+```
+
+-- a field of `struct ScrGen` that must stay **unconditional**, so both
+builds share one struct layout. It is the same argument the test already
+made for exempting the enum, and the field costs zero `.text`. Only its
+trailing comment names the marker.
+
+So after a **perfect** fix the test would still have failed, on a line that
+must not change. A test that fails after the repair it demanded is a test
+that gets deleted.
+
+Its four controls all passed throughout, because all four were written from
+the shapes the fix was about and all four were comment-free. **A control
+set drawn only from the cases you already have in mind is a control set
+that agrees with you.**
+
+### 12.3 Two trackers, one meaning
+
+The deeper defect is not that `p16`'s tracker was wrong; it is that there
+were **two** trackers for one notion of "guarded", free to disagree -- and
+they did, 3 against 12 on the same file. `p16` now calls `p17`'s.
+
+### 12.4 What the fixes are, and the proof that they bite
+
+Both scanners strip block and line comments before testing for the marker,
+and strip **first**, which also subsumes the old whole-line-comment skip
+and is strictly more sensitive than it was: a line opening with a comment
+and then carrying code was previously skipped outright, marker and all.
+
+`p16` now asserts **both directions on the real file on every run**,
+`--dry` included: 11 exposed before the patch, 0 after. Asserting only the
+0 is what green-by-construction looks like.
+
+| scanner | unpatched file | patched file |
+|---|---|---|
+| old `lane_map` | 3 of 11 | 0 |
+| blind scanner (control) | 0 | 0 |
+| shared tracker, comment-stripped | **11** | **0** |
+
+Both wrong scanners are now **refused** by the sensitivity assert, checked
+by substituting each one in: the old `lane_map`, and a scanner returning
+nothing for everything, are rejected on the real file before any write
+happens.
+
+`p17` gains two controls the four lacked: a marker inside a trailing
+comment on an unconditional field (must be **ignored**), and real code
+after a leading comment (must still be **seen**). The second was written
+because the first, alone, is passed by a scanner that simply skips any line
+containing a comment -- and it caught exactly that in the first draft of
+this fix.
+
+All eight -- six controls plus the real file both ways -- were run as the
+**actual JavaScript** extracted from the test, not a transliteration.
+
+### 12.5 CORRECTED: the added-line split
+
+A split of "269 lines inside the lane `#ifdef`, 24 outside" was quoted
+forward from this front. **It does not reproduce, and it never summed:**
+269 + 24 is 293, and the branch adds 343 lines to `scr_async.c`. Measured
+over the three-dot diff against main:
+
+| | lines |
+|---|---|
+| added to `scr_async.c` | **343** |
+| inside `#ifdef SCR_CORO_LANE` | **245** |
+| outside | **98** |
+
+and the 98 decompose -- which is the part that matters, because it is what
+isolates the cost:
+
+| outside the lane | lines | costs `.text`? |
+|---|---|---|
+| comment | 47 | no |
+| blank | 4 | no |
+| preprocessor | 3 | no |
+| code | 44 | 3 no, 41 yes |
+
+The three free code lines are the `ScrGenBacking` enum and the `backing`
+and `frame` fields: declarations, one struct layout in both builds, no
+emitted instructions. **The `.text`-bearing figure is 41 of 343**, and they
+are precisely the seven sites.
+
+### 12.6 CORRECTED: the ancestry claim, and why the conclusion survived
+
+Section 11 states main is clean because `8888b8842` is not an ancestor of
+main. **That is correct and is re-verified here** -- as is the same for
+`da841c0ed`. What was wrong was a stronger claim repeated alongside it,
+that main was an ancestor of this branch. It was not: the merge-base was
+`597286d1d` and main carried **8** commits this branch did not.
+
+The measurement survived, but **not for the reason given**. It survived
+because none of those 8 touches `packages/compiler/src` or
+`packages/runtime/src`, so the targets measured against main -- 543,702 and
+630,182 -- were unmoved. A right conclusion resting on a wrong premise is
+the thing this front exists to catch, and it was load-bearing here: the
+gate that matters is the one on what will actually land.
+
+Main is now merged in, so the relation holds as stated rather than by
+accident.
+
+### 12.7 The merge retired an apparatus, and exposed a live defect
+
+main now carries the machine sampler as committed code
+(`scripts/machine-sampler.ps1` plus the four calls in
+`scripts/gate-sharded.ps1`). The slice's gate wrapper had been snapshotting
+an **uncommitted** copy of the whole gate and proving by `Compare-Object`
+that the snapshot was this branch's gate plus exactly four sampler lines.
+That apparatus is deleted rather than repaired: the gate is now the
+committed file, and the wrapper's dirty-worktree check already pins it.
+
+Taking main exposed one thing the merge did not fix. The committed gate
+still dot-sourced an **absolute path into the blocks root** for the
+sampler, so it read a file outside the tree it judges -- one another block
+edits while runs are in flight -- and the two had **already diverged**,
+5,825 bytes committed against 4,625 on disk. The executable content
+happened to match; the exposure did not depend on that. It now resolves
+through `$PSScriptRoot`.
+
+### 12.8 The size anchor is no longer its own target
+
+`textanchor.mts` had 630,150 compiled into it, so it printed `NOT EXACT`
+for a regex program that was exactly right -- the post-fix target is main's
+**630,182**, and the 32 bytes between the two are the drift section 11
+deliberately preserves. Embedding 630,182 instead would have erased that
+drift from the one instrument still able to see it. Neither number belongs
+in the tool; the caller now passes both, and equality is exact:
+
+```
+node textanchor.mts <repo-root> 543702 630182
+```

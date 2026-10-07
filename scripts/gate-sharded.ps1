@@ -299,7 +299,15 @@ function Say([string]$m) {
   [Console]::Out.WriteLine($line)
 }
 
-. "G:/blocks/machine-sampler.ps1"   # MACHINE column: free RAM / CPU / disk extrema
+# MACHINE column: free RAM / CPU / disk extrema. $PSScriptRoot, not an
+# absolute path into the blocks root. The sampler was committed to THIS
+# directory (scripts/machine-sampler.ps1) by the same change that added
+# these calls, and this line still named the uncommitted copy it was
+# developed from -- so the gate read a file outside the tree it was
+# judging, and the two had already diverged. Another block edits that
+# copy while runs are in flight, and an interpreter re-reads a script by
+# byte offset, so an edit mid-flight truncates a command in a live run.
+. (Join-Path $PSScriptRoot "machine-sampler.ps1")
 function FreeGB { [math]::Round((Get-PSDrive -Name G).Free / 1GB, 2) }
 
 # ---------------------------------------------------------------------------
