@@ -142,14 +142,62 @@ SUPERSEDED IN PART BY S6. Kept because the reasoning about *how* a hypothesis
 dies is still the standard, but every denominator here was re-derived from
 the census and three rows changed.
 
-| hypothesis | status | why |
-|---|---|---|
-| per-shard work | **refuted by ordering** | shard 4 carried 29 descendants and passed; the ones that failed carried 21 and 23 |
-| our co-load (another GATE on the box) | **REFUTED by measurement** | pre-registered overlap test over 109 shard intervals: the A/A pair and all 8 full 12-worker runs score 0.0% foreign-rig overlap. S6.3 |
-| worker count | **re-derived, significant, STILL CONFOUNDED** | 4 of 8 at 12 workers against 0 of 10 at 3, over runs that actually ran six shards; p = C(8,4)/C(18,4) = 0.023. But see S6.2: within the 12-worker group the four runs before ~15:00 are green and the four after are red, so worker count alone cannot carry it |
-| the in-run scratch sweeper | **REFUTED by ordering** | S6.4 |
-| tree content as SUFFICIENT | **REFUTED by the A/A pair** | S6.1 |
-| tree content as NECESSARY | **UNTESTED -- never varied** | S6.6: 34 files common to shard 3 of all six reproductions, worst pairwise J = 0.8718. An earlier row claimed composition was varied; it was not |
+Every row now names its REFERENCE ARM and that arm's DENOMINATOR, because
+two conclusions were found resting on arms of 0/2 whose 95% upper bound is
+77.6% -- a bound that excludes nothing. A third state is therefore required:
+a row whose reference was never established is **UNMEASURED**, which is not
+the same as refuted and not the same as confirmed.
+
+| hypothesis | status | reference arm | denominator |
+|---|---|---|---|
+| per-shard work | **REFUTED by ordering** | descendant counts, direct census | 8 twelve-worker shard-runs: green 24/25/26/27 against red 23/24/25/27, fully interleaved. No green arm involved |
+| our co-load (another GATE on the box) | **REFUTED by measurement** | foreign-rig wall overlap, with instrument controls | 109 shard intervals; A/A pair and all 8 full runs at 0.0%; function proven able to report non-zero (2 of 109 real, synthetic 500s/0s) |
+| the in-run scratch sweeper | **REFUTED by ordering** | census anti-ordering, direct counts | 110 shard-runs: a red shard that removed 0 directories, a green shard in the same run that removed 9,964. **The two supporting ARMS are struck** -- nosweep37/maxsweep37 were 0/2 draws from a process now measured at ~50%, and contribute nothing. The census carries this row alone |
+| position as SEQUENCE in the gate | **REFUTED** | R0a, a positive reproduction | shard 3 alone, no preceding shards: RED 2/2 under the gate invocation and RED under the plain one (A0). Does not depend on any green arm |
+| position as vitest SHARD INDEX | **REFUTED** | R3, a positive reproduction | shard 3's 37 files passed as explicit paths, no `--shard` flag, no index: RED 2/2. Does not depend on any green arm |
+| worker count | **contrast significant, one leg UNMEASURED, CONFOUNDED** | the 3-worker arm | 4/8 at 12 workers against **0/10** at 3, p = 0.023. But 0/10 bounds the 3-worker rate only at **25.9%**, so "3 workers is safe" is not established; and the 3-worker runs are the overnight ones |
+| tree content as SUFFICIENT | **DOWNGRADED to UNMEASURED** | the A/A pair, armrig GREEN shard 3 | **n = 1 against n = 1.** Under a process now measured as intermittent (50% plain, ~100% gate), one green beside one red is p = 0.5 and carries no information. See the note below |
+| tree content as NECESSARY | **UNMEASURED -- never varied** | the 34-file core | 34 files common to shard 3 of all reproductions, worst pairwise J = 0.8718 |
+| shard 5 does not reproduce (R0b) | **UNMEASURED** | R0b green arm | **0/2**, 95% upper bound 77.6%. The content result rests on this and it is the same defect that voided the plain arm |
+| plain invocation does not reproduce | **REFUTED -- it does** | the plain arm, re-measured | was 0/2; A0 re-ran the identical invocation and it came back RED. Now **2/4** |
+
+### The A/A pair is the boundary of the temporal break, not independent evidence
+
+This correction matters more than the row. The A/A pair was called "the
+discriminator any future hypothesis has to pass", and its force came from an
+unstated assumption: that the phenomenon is DETERMINISTIC, so that one green
+and one red on the same tree must mean something outside the tree changed.
+The phenomenon is not deterministic. It is intermittent: 2 of 4 under the
+plain invocation, and 4 green of 10 among twelve-worker shard-3 gate runs.
+(An earlier draft of this paragraph said "14 of 20", which conflated the
+twelve-worker population with ten three-worker runs that are all green and
+all pre-break -- a different population, and exactly the denominator error
+this section exists to catch.) A single green 50 minutes before a single red
+is what an intermittent process produces by chance, at p = 0.5.
+
+What survives is the TEMPORAL BREAK of which the pair is merely the
+boundary. Taken over the natural unit -- the ten twelve-worker shard-3 runs,
+in time order: green green green green, then RED RED RED RED RED RED -- the
+probability that all six reds fall in the last six positions is
+1/C(10,6) = **0.0048**. That is the real evidence, it rests on 10 runs
+rather than 2, and the A/A pair adds nothing to it because it IS two of
+those ten, adjacent across the break. Citing both as separate support
+double-counts one observation.
+
+### Why a Fisher p from a tiny arm misleads, stated once
+
+A 0/2 arm against an 11/11 arm yields p = 1/C(13,2) = **0.013**, which looks
+decisive. But if that arm's true rate is 50%, the chance of observing 0/2 is
+**25%** -- one experiment in four produces that "significant" table by luck.
+Fisher conditions on the margins, so the p is driven by the size of the
+OTHER arm, not by the precision of the small one. Tonight this is not a
+hypothetical: the plain arm sat at 0/2 with exactly that p, and two more
+runs took it to 2/4.
+
+**Design rule adopted from it: an arm must be large enough that ONE flipped
+observation does not change the conclusion.** At n=2 a single red takes an
+arm from 0/2 to 1/3 and the conclusion collapses; at n=5 it goes to 1/6 and
+survives. Robustness under one flip, not significance, is the bar.
 
 The old row read "2/6 at 12 workers against 0/10 at 3, p = 0.165". That p was
 computed over a run list that no longer matches the corrected occurrence
@@ -389,6 +437,48 @@ Source predicts, lists confirm: the displaced file
 (`array-absent-slot-accounting.test.ts`) is exactly where the cascade says
 it must be -- shard 4 of the slice run, and in no other shard.
 
+### The slice gate's two size-class reds: attributed to the slice, not the cache
+
+Recorded because it was briefly moved to "unattributed" here and that is no
+longer the right status.
+
+Those two reds are `.text GREW by 512 bytes: 544214 against the recorded
+543702 (tolerance 256)` -- the same delta on the same baseline in both
+shards. They were first attributed to the slice without checking whether a
+stale vendor object could produce them, which was an unverified attribution
+and was retracted. Three independent routes then closed it, and all three
+are measurements rather than arguments:
+
+1. **Paired under a constant cache.** The quarantined vendor directory holds
+   32 files and none written after 14:21; the before/after measurements are
+   23:29 and 23:30 and the quarantine is 23:41. `find -newermt 23:00`
+   returns nothing, with a positive control at `12:00` returning all 32. The
+   -512 on both programs is therefore a direct paired comparison.
+2. **The only candidate confounder cannot move that figure.** The
+   hello-world was measured under BOTH cache states with the fix applied --
+   stale objects from 12:04, and a rebuilt-from-absent cache -- and gave
+   **543,702 both times**. It links neither library, so no vendor cache
+   state can move it. Measured, not argued.
+3. **Intervention in both directions.** Reverting one site leaves the test
+   permanently red naming line 5780; fixing all seven brings both programs
+   to exact equality, 543,702 and 630,182. And the two numbers were
+   separated: the 512 came from source, the 144 was the cache, isolated and
+   quarantined.
+
+The premise of the retraction is itself refuted: nothing in that directory
+has an mtime between 21:00 and 23:00, so the 21:50 gate **consumed** those
+objects and wrote none. Both of its reds were the regex-free program --
+shard 1 through the island anchor directly, shard 5 failing the `STATIC`
+assertion, which precedes `REGEX` and so fails first. Both are the
+cache-invariant figure.
+
+**The retraction was still the right instinct.** Nobody had checked, and
+"probably cannot" is not a measurement. The check cost four minutes and
+produced a better control than existed before it -- route 2 above was not
+in anyone's argument until the retraction forced someone to look. A
+practice that occasionally retracts a correct attribution is cheaper than
+one that never checks.
+
 A normalisation note worth keeping, because it nearly produced a finding:
 the first pass read J = 0.0000 against the `knobon` run, because that run
 lived in `slice-wt` and the normaliser only knew `gate-wt` and `llvm-wt`.
@@ -412,3 +502,286 @@ because every directory in that file is built by `keyDir`, which
 unconditionally writes a `program.exe`. **The one input shape that breaks
 the stated property is not constructible through the helper.** 20 test files
 create scratch program directories without calling `holdScratch`.
+
+## 7. What remains, with the power computed before the machine is asked
+
+### 7.1 Position is already answered; "content vs position" is no longer the question
+
+Two rows of the ledger settle it, and both are POSITIVE reproductions, so
+neither depends on a green arm that might be a draw:
+
+- **Sequence position** is out: shard 3 alone, with no preceding shards,
+  reproduces (R0a, RED 2/2 under the gate; A0 RED under the plain one).
+- **Shard index** is out: shard 3's 37 files passed as explicit paths, with
+  no `--shard` flag at all, reproduce (R3, RED 2/2).
+
+So what is left is the file set itself, and the open question is narrower
+and better than the one we were asking: **which file or files inside the 37**.
+
+### 7.2 Bisection, and why it is immune to the defect that bit us twice
+
+The asymmetry is that an arm which does NOT reproduce needs many runs to
+mean anything, while one that DOES needs few. Bisection is the design that
+only ever leans on the powered direction:
+
+1. The current set must first reproduce **2/2**. That is the invariant.
+2. Split it in half. Run half A twice. If A reproduces, descend into A --
+   and the 0/2 on half B is never load-bearing, so its weak bound costs
+   nothing.
+3. Only if A fails twice is B run. If B reproduces, descend into B.
+4. If NEITHER half reproduces, re-verify the parent at 2/2. If the parent
+   still reproduces, the cause needs files from both halves: declare an
+   interaction and stop bisecting. Registered in advance so it cannot be
+   explained away as a bad run.
+
+Cost: 37 -> 19 -> 10 -> 5 -> 3 -> 2 -> 1 is about six levels, 2-4 runs each,
+and runs shrink as the set does. Roughly **18 runs, ~30 minutes**. Use the
+GATE invocation, where the rate is ~100% (11/11); the plain one is ~50% and
+would double the runs for nothing.
+
+### 7.3 A0 for R0b, the other unestablished arm
+
+Shard 5 at 0/2 is the same defect that voided the plain arm. Three more runs
+takes it to 0/5, whose upper bound is 45.1% -- below the 54.9% LOWER bound
+on shard 3's rate, so the two no longer overlap. ~6 minutes. By the design
+rule above, 0/5 also survives one flipped observation (1/6) where 0/2 does
+not (1/3).
+
+### 7.4 The rate claim: cheap to significance, expensive to a number
+
+Plain 2/4 against gate 11/11 is p = 0.057 today. If the gate holds and the
+plain rate stays near half:
+
+| plain runs | reds | p |
+|---|---|---|
+| 5 | 2 | 0.018 |
+| 6 | 3 | 0.029 |
+| 8 | 4 | 0.018 |
+| 10 | 5 | 0.012 |
+
+So **four more plain runs (~20 min)** lands it comfortably under 0.05 with
+room for an unlucky draw. But pinning the RATE -- distinguishing a true 50%
+from a true 80% -- needs **39 runs per arm, 78 runs, 3.9 to 6.5 hours**.
+
+**DECISION: the rate is DECLARED OPEN.** Not unknown by neglect, and not
+pending: a decision, with its price attached so nobody reopens it without
+seeing the bill. The target of this investigation is the CAUSE, and the
+rate is not on the path to it -- knowing whether the plain invocation fails
+at 50% or 80% does not name a file, a line, or a mechanism. Four runs buy
+significance on the CONTRAST (plain differs from gate), which is all any
+downstream argument needs; 78 runs buy a number that no downstream argument
+uses.
+
+Reopen it only if the rate itself becomes the target -- for instance if a
+fix is proposed whose claim is "this lowers the rate", which cannot be
+evaluated against a rate nobody measured. In that case the 78 runs are the
+entry price and must be budgeted before the fix is attempted, not after it
+looks good.
+
+### 7.5 Repointing the instrument requires an anchor run
+
+The gate variants under `G:\blocks` dot-source the disk copy of the sampler,
+not `scripts/`. Repointing them is correct but must happen BETWEEN
+experiments, never inside one, and must be paired with an anchor: re-run a
+cell whose answer is already known -- R0a, RED 2/2 -- with the repointed
+instrument and confirm both the verdict and a comparable MACHINE column.
+Two runs, ~5 minutes. Swapping instruments without an anchor is changing the
+ruler mid-series, and nothing measured after it is comparable to anything
+measured before.
+
+## 8. How the instruments failed, and why they nearly all failed the same way
+
+Nine times in one day an instrument on this front returned something that
+looked like a result and was not. They are collected here because the
+pattern across them is sharper than any one of them.
+
+| # | instrument | what it reported | why it was wrong | how it was caught |
+|---|---|---|---|---|
+| 1 | shard-interval extractor | uniform **0.0%** foreign-rig overlap | keyed on `DISK-TROUGH`, which exists only in the newer gate, so every older run's intervals were dropped | per-rig coverage control: one rig parsed 0, and only 49 of 110 shard-runs appeared |
+| 2 | path normaliser for Jaccard | **J = 0.0000** against one run | that run lived in `slice-wt`, a repo root the normaliser did not know | a complete disjunction sitting beside 0.95 is not credible |
+| 3 | file-set comparison | **"IDENTICAL"** | both extractions had failed; two empty sets compare equal | printing the set sizes (0 and 0) |
+| 4 | `CurrentDiskQueueLength` | **0** under 768 MB of writes | an instantaneous gauge sampled at 10 s is a lottery; it read non-zero on 2 of 12 samples even at 1.3 GB/s | positive control that forced real I/O |
+| 5 | `scriptc: early cache hit` count | **5** cold and **5** warm | it counts five specific compilations, not cache temperature | positive control across a known-cold and two known-warm runs |
+| 6 | `rg ... ; echo "(ascii clean)"` | **clean** | the echo was unconditional; `rg` had in fact flagged a backspace byte on line 71 | reading `rg`'s own output instead of the echo |
+| 7 | `grep -P ... && echo DIRTY \|\| echo CLEAN` | **clean** | `grep -P` failed on the locale; `\|\|` fired on the ERROR, not on a non-match | rebuilt with a positive control that plants a byte and must flag it |
+| 8 | `rg -q` on a path that did not exist | **clean** | same shape as 7: failure read as absence | checking the file existed before reporting on it |
+| 9 | content grep over prose | phrase **absent** | present, but split across a line break | re-matched with newlines collapsed |
+
+### They fail toward the null, and that inverts where scrutiny belongs
+
+Eight of the nine reported **"clean", "zero", "identical", "no difference"**.
+Only #9 failed the other way, toward a false alarm. That is not luck: the
+failure modes available to a search or a check are *didn't-find* shaped --
+wrong pattern, wrong field, missing file, dead counter, unrun command. There
+is no symmetric mechanism that invents a match.
+
+The consequence runs against the usual instinct. A positive result is
+self-validating: the pattern matched, so the pattern works. **A null result
+is the one that needs proving, because the commonest explanation for it is
+that the instrument never looked.** On this front the null was also usually
+the convenient answer -- no overlap, no difference, no dirty bytes -- which
+is exactly when nobody rechecks.
+
+### The four rules that would have caught all nine
+
+1. **Positive-control every zero on real data.** Before believing "not
+   found", point the same pattern at something known to contain it. This
+   caught #1, #2, #4 and #5.
+2. **Prove a column can MOVE, both directions.** A counter that always reads
+   the same is indistinguishable from a stable machine. #4 and #5 were dead
+   and readable, which is the worst combination.
+3. **Assert the input is non-empty before comparing.** A comparison of
+   nothing is not a match (#3).
+4. **Never let `||` carry a verdict.** `cmd || echo CLEAN` reports clean when
+   `cmd` FAILS, not only when it finds nothing -- exit 1 and exit 2 are
+   different facts and branching merges them. Either separate them, or do
+   not branch: require a positive assertion that the check ran and passed
+   (#6, #7, #8).
+
+And for prose rather than code, match with newlines collapsed or on a short
+distinctive token, because wrapping breaks a phrase grep (#9).
+
+### Instances 10 and 11, produced while verifying the commit above
+
+The section you have just read was merged, and its own post-merge
+verification produced two more instances of what it describes. They are
+recorded because they settle a question the section leaves open: whether
+knowing the pattern is enough to avoid it.
+
+Checking that rule 4 had landed, two greps in a row reported it missing:
+
+- the first searched `never let` against a document containing `Never let`
+  -- a case mismatch;
+- the second searched `never let .\{0,4\}carry a verdict`, and the real gap
+  is `` `||` `` plus a space, five characters. One too many.
+
+The second printed the words **GENUINELY ABSENT**, which is a confident
+assertion manufactured by a pattern that was too narrow. The text was there
+the whole time, three lines below where the same command had successfully
+matched three other markers.
+
+Both were caught by the section's own rule 1 -- point the matcher at
+something known to contain the thing -- applied as a literal substring
+search with a must-be-0 and a must-be-1 control beside it.
+
+**The lesson is not "be more careful with patterns".** It is that the author
+of this taxonomy, within minutes of writing it, produced two more entries
+for it while deliberately looking for exactly this failure. Intention does
+not protect anyone here. Only a mechanical positive control does, and it has
+to be attached to the check itself rather than kept in mind.
+
+### Instance 12: the right pattern aimed at the wrong object
+
+The eleven above are variations on one theme -- the instrument did not
+look, or could not move. The twelfth is different in kind, and it bounds
+the rules rather than illustrating them.
+
+Asking whether another block's commit had landed on main, a grep for a
+distinctive phrase from it returned **0**, read as "still stranded", and
+contradicted a blob comparison that said the opposite. The phrase was in
+the **commit message**. The file never contained it. The pattern was
+correct and was pointed at the wrong object.
+
+**A must-match control would not have caught this.** Run against the same
+file it would also have returned 0, *correctly*, and would have certified
+the wrong conclusion with a clean attestation. A control in the same
+invocation proves the instrument WORKS. It does not prove the instrument is
+AIMED at the right thing, and nothing inside a single check can.
+
+What caught it was a **second, independent instrument disagreeing**: the
+blob hash was identical on both sides while the text search said absent.
+
+#### The conclusion, not a footnote
+
+**For "did this change land?", compare content identity, never text.**
+`git rev-parse <ref>:<path>` on both sides, or `git diff A B -- <path>`
+returning empty. A phrase search answers a different question than the one
+being asked and can be confidently wrong about this one.
+
+#### Ancestry and presence are different questions
+
+The same family, and it was reported wrongly to the coordinator before
+being corrected. A branch can be **unmerged by ancestry and identical by
+content**, and that is not "stranded":
+
+- `git branch --merged` / `git rev-list main..branch` answer **is this
+  commit reachable from main?**
+- They do not answer **is this change present in main?**
+
+Here one commit sat outside main's ancestry while the single file it
+touched was byte-identical on main -- re-landed by its owner through
+another route. Nothing was lost; the branch was a stale pointer. "Not
+merged" was true and "stranded" was false, and only the content comparison
+could tell them apart.
+
+#### And one administrative instance of the same shape
+
+A report in this session stated that "four branches await authorization",
+then listed one and said two others were already in. Four, one and two do
+not reconcile. Reading the refs gave the fact: of eight branches, **seven
+were merged and zero awaited anything**, the single unmerged one holding
+only another block's already-landed commit. The count was produced from
+memory and gave comfort; the refs gave the answer. Counting is not doing,
+and a remembered tally is not a measurement -- this front has paid for that
+shape before.
+
+### Instance 13: a basename comparison that dropped the distinguishing directory
+
+Checking which shard held the size-asserting tests, a script mapped paths
+with `.pop()` and reported `regex.test.ts` in **two** shards at once. That
+contradicts `partition=OK` with zero dupes, which the same run had printed.
+
+There are two files: `packages/runtime/test/regex.test.ts` and
+`tests/harness/regex.test.ts`. `.pop()` removed exactly the directory that
+tells them apart.
+
+It belongs with instance 12 rather than with the first eleven: the data was
+right and the *projection* of it was lossy. And it was caught the same way
+12 was -- not by a control on the check, but by **a second fact
+disagreeing**, here the gate's own partition verdict. A control on the
+basename comparison would have passed, because the comparison did exactly
+what it was told.
+
+The same shape recurred once more within the hour: a status check for
+uncommitted work printed `0` for both trees because a `cd` in an earlier
+command had persisted and both halves of the check ran in the same
+worktree. The work was intact; the instrument was pointed at one tree twice.
+Fixed by passing `git -C <path>` explicitly rather than relying on the
+working directory, which is the general remedy for this family: **name the
+object in the command instead of inheriting it from context.**
+
+### The root form: no instrument at all
+
+The thirteen above are instruments that looked and reported wrongly. There
+is a case underneath them where **no instrument ran**, and it is the one
+that scales furthest, because its error is shared by everyone who reads the
+same sentence.
+
+Auditing `vendor/.cache`, two independent investigations both reported
+FIVE cached units. Neither counted. Both read a source comment --
+`cc.ts:774`, "The five cached vendored units (the engine archive, lre,
+zlib, SQLite, mbedTLS)" -- and inherited its number as the denominator of
+an audit. There are six; `ensureCurlStub` is not in the list.
+
+A comment that claims to enumerate a population is prose, not code. Nothing
+checks it, nothing fails when a sixth member is added, and once it is a
+denominator its error is the audit's error. That is worse than having no
+count, because it supplies confidence with the wrong number.
+
+**A count you did not derive is not yours to trust.** Derive the population
+from something the toolchain verifies -- call sites, directories on disk,
+the type every member implements -- and use the prose as a lead. See
+`docs/vendor-cache-key.md` for the worked case.
+
+This is the same defect as the reference-arm sweep in S3b, one level up.
+There, conclusions rested on arms whose denominators nobody had stated;
+here, an audit rested on a denominator somebody else had stated wrongly.
+Both are answered by the same question: **where did this number come from,
+and what would have made it different?**
+
+The question is the method. The criterion is harder, and it is what makes
+the method survive a tired reader: **a number without an answer to the
+second half is not a measurement.** That is a predicate, and a predicate is
+something a doc line, a table cell or a commit can FAIL -- where the
+question alone depends on somebody remembering to ask it, which is the
+exact dependency that failed thirteen times above.

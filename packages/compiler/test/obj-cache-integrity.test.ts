@@ -26,7 +26,8 @@ import { mkdir, mkdtemp, readdir, rm, stat, utimes, writeFile } from "node:fs/pr
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, test } from "vitest";
-import { pruneCacheOnce, runtimeFingerprint, runtimeSrcDir } from "../src/backend/cc.js";
+import type { CcDriver } from "../src/backend/cc.js";
+import { checkToolchain, pruneCacheOnce, runtimeFingerprint, runtimeSrcDir, stampToolchain, toolchainId } from "../src/backend/cc.js";
 
 const temps: string[] = [];
 async function tmp(prefix: string): Promise<string> {
@@ -37,6 +38,20 @@ async function tmp(prefix: string): Promise<string> {
 afterAll(async () => {
   for (const d of temps) await rm(d, { recursive: true, force: true });
 });
+
+/** Collect what the detector writes to stderr. It reports through
+ * process.stderr.write like the rest of cc.ts, so the test has to take the
+ * same channel rather than a logger seam that production does not use. */
+function capture(into: string[]): () => void {
+  const original = process.stderr.write.bind(process.stderr);
+  process.stderr.write = ((chunk: unknown): boolean => {
+    into.push(String(chunk));
+    return true;
+  }) as typeof process.stderr.write;
+  return () => {
+    process.stderr.write = original;
+  };
+}
 
 /** A miniature @scriptc/runtime package: `src` beside `vendor`, the shape
  * runtimeFingerprint walks. */
@@ -297,6 +312,108 @@ describe("the LRU sweep spares what a live build is linking", () => {
     for (const key of keys) {
       const s = await stat(join(root, "obj", key));
       if (s.isDirectory()) expect(await count(join(root, "obj", key))).toBe(20);
+    }
+  });
+});
+
+/* 3. SILENT, and the one this file was missing: an object built by a
+ * DIFFERENT TOOLCHAIN under a live key.
+ *
+ * vendor/.cache keys the driver as at most one bit -- argv is exactly
+ * ["clang"] or it is not -- and three of the six cached units (libqjs.a,
+ * libmbedtls.a, curl-stub) carry no driver component at all. The two zig
+ * installs on this host both spell "-zigcc" and share a directory, so one
+ * builds an object and the other links it. Observed in the wild as
+ * libregexp.o and libunicode.o eleven hours apart under an identical key.
+ *
+ * Neither existing guard reaches it: asserting a compiler version protects
+ * what a run COMPILES, not what a cache already HOLDS, and vendor/.cache is
+ * gitignored so git status, the dirty-worktree guard and treehash are all
+ * blind to it.
+ *
+ * Widening the key is the fix and it invalidates every cache everywhere at
+ * once, so the DETECTOR lands first: a .toolchain stamp written beside the
+ * objects and compared on a hit. These tests pin its three outcomes, and the
+ * third is the one that matters -- a cache from before the stamp existed
+ * must read UNKNOWN and never MATCH, because treating absence as agreement
+ * would certify every stale object already on the box.
+ */
+describe("vendor cache toolchain stamp", () => {
+  const driverA: CcDriver = { argv: ["node", "--version"], target: null, targetArgs: [], linkArgs: [] };
+  const driverB: CcDriver = { argv: ["node", "-e", ""], target: null, targetArgs: [], linkArgs: [] };
+
+  test("a stamp identifies the toolchain, and two different drivers do not share one", async () => {
+    const a = await toolchainId(driverA);
+    const b = await toolchainId(driverB);
+    expect(a.length).toBeGreaterThan(12);
+    expect(a).not.toBe(b);
+    // Memoised: the same driver must return the identical string, not merely
+    // an equal one recomputed by spawning the compiler again per link.
+    expect(await toolchainId(driverA)).toBe(a);
+  });
+
+  test("stamp then check: the matching toolchain is silent", async () => {
+    const dir = await tmp("scr-tc-match-");
+    await stampToolchain(dir, driverA);
+    const said: string[] = [];
+    const restore = capture(said);
+    try {
+      await checkToolchain(dir, driverA, "lre");
+    } finally {
+      restore();
+    }
+    expect(said).toEqual([]);
+  });
+
+  test("a DIFFERENT toolchain under the same key is reported", async () => {
+    const dir = await tmp("scr-tc-mismatch-");
+    await stampToolchain(dir, driverA);
+    const said: string[] = [];
+    const restore = capture(said);
+    try {
+      await checkToolchain(dir, driverB, "lre");
+    } finally {
+      restore();
+    }
+    expect(said.join("")).toContain("VENDOR-CACHE-MISMATCH");
+    expect(said.join("")).toContain("unit=lre");
+  });
+
+  test("ABSENCE reads UNKNOWN, never MATCH", async () => {
+    // A cache directory populated before the stamp existed. If this ever
+    // passes silently, the detector is certifying every stale object on the
+    // machine -- which is strictly worse than not having it.
+    const dir = await tmp("scr-tc-nostamp-");
+    await writeFile(join(dir, "libregexp.o"), "not really an object");
+    const said: string[] = [];
+    const restore = capture(said);
+    try {
+      await checkToolchain(dir, driverA, "qjs");
+    } finally {
+      restore();
+    }
+    expect(said.join("")).toContain("VENDOR-CACHE-UNKNOWN");
+    expect(said.join("")).not.toContain("VENDOR-CACHE-MISMATCH");
+  });
+
+  test("strict mode refuses a mismatch but still tolerates an unstamped cache", async () => {
+    const dir = await tmp("scr-tc-strict-");
+    await stampToolchain(dir, driverA);
+    const prev = process.env["SCRIPTC_VENDOR_CACHE_STRICT"];
+    process.env["SCRIPTC_VENDOR_CACHE_STRICT"] = "1";
+    const said: string[] = [];
+    const restore = capture(said);
+    try {
+      await expect(checkToolchain(dir, driverB, "lre")).rejects.toThrow(/different toolchain/);
+      // An unstamped directory is not evidence of a wrong toolchain, so even
+      // strict mode must not fail on it -- otherwise turning strict on would
+      // break every build until every cache is repopulated.
+      const bare = await tmp("scr-tc-strict-bare-");
+      await expect(checkToolchain(bare, driverA, "lre")).resolves.toBeUndefined();
+    } finally {
+      restore();
+      if (prev === undefined) delete process.env["SCRIPTC_VENDOR_CACHE_STRICT"];
+      else process.env["SCRIPTC_VENDOR_CACHE_STRICT"] = prev;
     }
   });
 });
