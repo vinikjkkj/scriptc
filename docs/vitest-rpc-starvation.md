@@ -627,3 +627,58 @@ of this taxonomy, within minutes of writing it, produced two more entries
 for it while deliberately looking for exactly this failure. Intention does
 not protect anyone here. Only a mechanical positive control does, and it has
 to be attached to the check itself rather than kept in mind.
+
+### Instance 12: the right pattern aimed at the wrong object
+
+The eleven above are variations on one theme -- the instrument did not
+look, or could not move. The twelfth is different in kind, and it bounds
+the rules rather than illustrating them.
+
+Asking whether another block's commit had landed on main, a grep for a
+distinctive phrase from it returned **0**, read as "still stranded", and
+contradicted a blob comparison that said the opposite. The phrase was in
+the **commit message**. The file never contained it. The pattern was
+correct and was pointed at the wrong object.
+
+**A must-match control would not have caught this.** Run against the same
+file it would also have returned 0, *correctly*, and would have certified
+the wrong conclusion with a clean attestation. A control in the same
+invocation proves the instrument WORKS. It does not prove the instrument is
+AIMED at the right thing, and nothing inside a single check can.
+
+What caught it was a **second, independent instrument disagreeing**: the
+blob hash was identical on both sides while the text search said absent.
+
+#### The conclusion, not a footnote
+
+**For "did this change land?", compare content identity, never text.**
+`git rev-parse <ref>:<path>` on both sides, or `git diff A B -- <path>`
+returning empty. A phrase search answers a different question than the one
+being asked and can be confidently wrong about this one.
+
+#### Ancestry and presence are different questions
+
+The same family, and it was reported wrongly to the coordinator before
+being corrected. A branch can be **unmerged by ancestry and identical by
+content**, and that is not "stranded":
+
+- `git branch --merged` / `git rev-list main..branch` answer **is this
+  commit reachable from main?**
+- They do not answer **is this change present in main?**
+
+Here one commit sat outside main's ancestry while the single file it
+touched was byte-identical on main -- re-landed by its owner through
+another route. Nothing was lost; the branch was a stale pointer. "Not
+merged" was true and "stranded" was false, and only the content comparison
+could tell them apart.
+
+#### And one administrative instance of the same shape
+
+A report in this session stated that "four branches await authorization",
+then listed one and said two others were already in. Four, one and two do
+not reconcile. Reading the refs gave the fact: of eight branches, **seven
+were merged and zero awaited anything**, the single unmerged one holding
+only another block's already-landed commit. The count was produced from
+memory and gave comfort; the refs gave the answer. Counting is not doing,
+and a remembered tally is not a measurement -- this front has paid for that
+shape before.
