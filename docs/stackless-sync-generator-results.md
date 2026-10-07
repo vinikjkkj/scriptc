@@ -634,12 +634,12 @@ node textanchor.mts <repo-root> 543702 630182
 ### 12.9 CORRECTED: shard 3's attribution holds, its explanation does not
 
 The `onTaskUpdate` timeout signature is **not about this slice**, and that
-is now better supported than when it was first set aside: **eleven**
-reproductions, **all** on shard 3, across more than 110 shard-runs, on
+is now better supported than when it was first set aside: every
+reproduction so far is on shard 3, across more than 110 shard-runs, on
 trees that do not contain this slice, every one of them with **zero failing
-assertions**. Separate it in any report, and do not relaunch it -- the
-relaunch rule covers `CcCompileError` with zero `error:` lines, and this is
-not that.
+assertions**. The running count is below, in one place. Separate it in
+any report, and do not relaunch it -- the relaunch rule covers
+`CcCompileError` with zero `error:` lines, and this is not that.
 
 **What collapsed is the explanation, not the attribution**, and the two
 must not be swapped for one another.
@@ -662,9 +662,25 @@ under plain invocation against 11 of 11 under the gate's, Fisher
 with its own evidence, not the conjunction redressed, and nothing in this
 document should state it more strongly than that.
 
-The standing form, verbatim, is: *known signature, eleven reproductions,
-all on shard 3, cause open; invocation is not necessary, and a rate
-difference stands at p = 0.057.*
+**THE CANONICAL STANDING FORM LIVES HERE AND NOWHERE ELSE.** It read
+"eleven" here and "twelve" 486 lines further down, both labelled
+*verbatim*, so a reader going top to bottom met the stale one first. A
+wrong number carrying the authority of a canonical form is worse than a
+wrong number. The repair is structural, not arithmetic: **the occurrence
+count is not part of the form**, because it is the only part that ages.
+Section 17.3 now points here instead of restating the sentence.
+
+The standing form, verbatim, is: *known signature, every reproduction on
+shard 3, cause open; invocation is not necessary, and a rate difference
+stands at p = 0.057.*
+
+**The running count, recorded once:** **twelve** reproductions as of run
+`20261006-234534`, all of them on shard 3, every one with zero failing
+assertions. A later run adds to this line and to no other. The rate arms
+behind the p are 2 of 4 under plain invocation against 11 of 11 under the
+gate's; quoting an occurrence count without **J = 0.9474** between the
+shard-3 file sets overstates what "a different tree" buys (section 7 has
+that Jaccard note).
 
 This is also why the earlier 0-of-2 green arm deserved the caution it got.
 Two clean draws against a defect of unknown rate is not evidence of
@@ -691,11 +707,18 @@ first reading mistook for guarded -- turns it red naming **line 5780**,
 while its controls stay green. That is sensitivity on the subject, not only
 on synthetic input.
 
-Knob-on parity is unchanged by the fix: 12 of 12, including all six
-lifecycle arms (`genret`, `genthrow`, `bodythrow`, `nextval`, `als`,
-`collide`) and the two poison controls that prove the comparison can see a
-wrong arm. `EXPECTED_CONVERSIONS = 1` is asserted on the knob-on arm, so a
-green here cannot mean the wrap silently disabled the lane -- 0 would fail.
+Knob-on parity is unchanged by the fix: 12 of 12. **CORRECTED -- the
+earlier enumeration here named eight of the twelve and read as if that
+were all of them.** The twelve are: **3** channel arms (`f64`, `bool`,
+`ref`), **6** lifecycle arms (`genret`, `genthrow`, `bodythrow`,
+`nextval`, `als`, `collide`), **2** poison controls that prove the
+comparison can see a wrong arm (the two `scalar` arms), and **1** record
+that the `ref` arm is deliberately NOT poisonable. 3 + 6 + 2 + 1 = 12,
+and the sum is written out so the next reader checks the closure instead
+of trusting a part.
+
+`EXPECTED_CONVERSIONS = 1` is asserted on the knob-on arm, so a green here
+cannot mean the wrap silently disabled the lane -- 0 would fail.
 
 ### 13.2 The +144 was a stale vendor object cache, not code
 
@@ -1138,19 +1161,21 @@ errors:      Errors  1 error`
       Vitest caught 1 unhandled error during the test run.
 ```
 
-**Zero failing assertions.** This is the known signature, now at **twelve**
-reproductions, all of them on shard 3, across trees that do not contain
-this slice. Not relaunched: the relaunch rule covers `CcCompileError` with
-zero `error:` lines and this is not that.
+**Zero failing assertions.** This is the known signature, and **this run
+contributes one occurrence** -- a fact about this run, which is why it is
+stated here rather than a total, which is not. The running count and the
+canonical standing form are in **section 12.9**, which is the only place
+either is declared. Not relaunched: the relaunch rule covers
+`CcCompileError` with zero `error:` lines and this is not that.
 
 Its explanation, not its attribution, is open. The gate-invocation
 hypothesis is **refuted** -- plain unaltered invocation reproduced it. What
 may remain is a difference in rate, 2 of 4 under plain invocation against
 11 of 11 under the gate's, Fisher **p = 0.057**: suggestive, not
 established, and a different claim that must not be reported as the old
-conjunction in new words. The standing form is: *known signature, twelve
-reproductions, all on shard 3, cause open; invocation is not necessary, and
-a rate difference stands at p = 0.057.*
+conjunction in new words. The standing form is **not restated here**: see
+section 12.9. Repeating it in two places is what let the two copies drift
+apart.
 
 A red shard 3 with zero failing assertions says nothing about this slice.
 One with failing assertions would.
@@ -1217,19 +1242,69 @@ wrong question later, and "five of six green" is quotable.
 | check | result |
 |---|---|
 | `main` is an ancestor of HEAD | yes |
+| `origin/main` is an ancestor of HEAD | yes |
 | `scr_async.c` blob vs the measured bytes | `dfe31c7a9ab63a18`, identical |
 | the permanent lane-guard test | present |
 | `REGEX_CLASS_TEXT_RECORDED` | `630_182` |
 | worktree dirty | 0 |
+
+**TWO COUNTS, EACH WITH ITS OWN NAME.** `origin/main..HEAD` = **73**.
+`main..HEAD` = **56**. The difference is not a discrepancy: local `main`
+is **17 commits ahead of `origin/main`** and unpushed, so 17 of the 73 are
+main's own drift and the slice's own commits are 56. "73 commits" is true
+about the range and misleading about the slice, and only the labelled form
+should be quoted.
+
+One consequence is load-bearing for the merge question rather than for the
+gate: **`origin/main` does not contain `scripts/machine-sampler.ps1` at
+all.** It was added by `298bb7cc7`, which is inside those 17. The sampler
+and the gate's four calls to it reach this branch through local `main`, so
+"the branch has taken main, which carries the sampler" is true of the
+local ref and false of the remote one. Landing this slice on `origin/main`
+would carry those 17 commits -- the sampler, its gate calls, and the
+`cc.ts` vendor-object detector -- with it. That is a fact about the merge,
+which is the user's decision, not a defect in the slice.
 
 **The partition stays at 221**, and that is re-derived rather than carried
 over: expanding the three `include` globs from `vitest.config.ts` against
 the merged tree yields 221 files. None of main's ten commits adds a test
 file -- `packages/compiler/test/obj-cache-integrity.test.ts` is **modified,
 not new**, and was already line 37 of the previous run's
-`expected-files.txt`. (That path counts because the globs include
-`packages/*/test/**/*.test.ts`, which contributes 55 of the 221; assuming
-only `tests/harness/**` counts would have given the wrong answer here.)
+`expected-files.txt`.
+
+**The decomposition, with the sum visible.** An earlier version of this
+paragraph said the third glob "contributes 55 of the 221". **That is
+wrong: it contributes 80.** 55 is `packages/compiler/test` alone, one
+package inside that glob.
+
+| `include` glob | files |
+|---|---|
+| `tests/harness/**/*.test.ts` | 138 |
+| `packages/*/src/**/*.test.ts` | 3 |
+| `packages/*/test/**/*.test.ts` | **80** (cli 2, compiler 55, runtime 23) |
+| **sum** | **138 + 3 + 80 = 221** |
+
+The three sets are disjoint, so the sum closes exactly on the measured
+union of 221 -- and that closure is the point of printing it. The
+arithmetic already excluded 55 before anyone looked at a file: a reader
+re-deriving as `138 + 3 + 55 = 196` concludes the partition moved by 25
+files and goes hunting a drift that never happened. **A decomposition
+quoted without its sum is an invitation to that hunt.** The original
+warning this sentence carried was right in direction -- assuming only
+`tests/harness/**` counts gives the wrong answer -- and wrong in its
+number, which is the more durable kind of error, because the direction
+reads as the point and the number rides in unchecked.
+
+**LATENT, NAMED NOW RATHER THAN FOUND IN A RED RUN.** The gate's expected
+set (`scripts/gate-sharded.ps1`, the `$roots` loop) skips `node_modules`
+and nothing else. vitest's default `exclude` additionally drops
+`**/dist/**`. Today the two agree, because no `*.test.ts` lies under any
+`dist/` and the measured union is 221 either way -- so this is a risk, not
+a defect, and 221 is not in doubt. But a future `*.test.ts` under
+`packages/*/src/dist` or `packages/*/test/dist` would be **expected by the
+gate and never run by vitest**, surfacing as `PARTITION-MISSING` that
+belongs to the glob and not to the run. Written down it costs this
+paragraph; discovered mid-gate it costs a hunt through a red partition.
 
 ### 18.2 The dist is now stale, by construction
 
