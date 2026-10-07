@@ -182,8 +182,9 @@ backslash at all: **remove the surface, do not get it right once.**
 
 ## 6. Still owed, named rather than omitted
 
-- The six-shard merge gate has not run. The rig is ready and refuses on a
-  stale `dist` before spending thirty minutes.
+- The six-shard merge gate HAS now run; section 7 has the result. It is
+  RED, on one defect of the slice's own and one infrastructure fault that
+  says nothing about it.
 - **`dist` in this worktree is now rebuilt and stamped.** `tsc` clean in
   60.4s, 120 files, and the worktree dirty count was 0 before and 0 after --
   `dist/` is gitignored (`.gitignore:16`, 0 files tracked), checked before
@@ -225,3 +226,110 @@ backslash at all: **remove the surface, do not get it right once.**
 - `generator-delegation-divergence.test.ts` is pinned to LLVM and says in
   its own header that it cannot see this lowering and will stay green
   regardless.
+
+## 7. The first gate, and the eleventh finding
+
+Six shards, 44.84 minutes, `green=3 red=3`, `verdict=RED`. Partition
+complete: `expected=221 ran=221 missing=0 extra=0 dupes=0`. The tree hash at
+the end equalled the baseline, so nothing moved under the run.
+
+### Three reds, two causes, and only one of them is the slice
+
+| shard | verdict | tests |
+|---|---|---|
+| 1 | RED | 1 failed, 982 passed, 1 skipped (984) |
+| 2 | GREEN | 1717 passed, 2 skipped (1719) |
+| 3 | RED | 733 passed, 10 skipped (743) -- **zero failed** |
+| 4 | GREEN | 1752 passed, 2 skipped (1754) |
+| 5 | RED | 1 failed, 763 passed, 36 skipped (800) |
+| 6 | GREEN | 732 passed, 4 skipped (736) |
+
+**Shard 3 says nothing about the slice.** Its `Why` is
+`vitest reported errors: Errors 1 error`, and the error is
+
+    Error: [vitest-worker]: Timeout calling "onTaskUpdate"
+
+with **0 failed assertions out of 743**. Sixth occurrence of the signature
+on this front, and the first on a different tree and branch -- pinned to
+shard 3 both times, which a merely random timing fault would not be. Not
+relaunched: the signature is not in the relaunch rule.
+
+**Shards 1 and 5 are one defect seen twice.** `island.test.ts` and
+`regex.test.ts` each build the same hello-world and each compare its `.text`
+to the same recorded figure; both reported `.text GREW`. Two independent
+detectors agreeing is a consistency check, not two problems.
+
+### The breach is SHARED, and the anchor was not stale
+
+With the knob absent the slice is supposed to be invisible. It was not: the
+frame-lane branches in `scr_async.c` are emitted into every binary, because
+only the CALL was guarded and never the branch test. Measured on main in the
+recorded lane:
+
+| program | main | recorded | delta |
+|---|---|---|---|
+| hello-world | 543,702 | 543,702 | **0, exact** |
+| regex | 630,182 | 630,150 | +32, pre-existing |
+
+So the failing anchor is exact on main and the branch owns all of that
+growth. The regex figure carries 32 bytes of older drift that passes on
+tolerance -- which is why the post-fix target there is main's 630,182 and
+not the recorded 630,150. Repairing someone else's 32 bytes under cover of
+this fix would be the same confusion as hiding my own residue inside the
+tolerance, pointed the other way.
+
+Two commits produced it, and naming both matters because neither alone is
+the story:
+
+- `8888b8842`, before my turn, added the `backing` branches in
+  `scr_gen_release`, `scr_gen_resume_return` and `scr_gen_resume_throw`;
+- `da841c0ed`, mine, added `scr_gen_coro_frame_free` on top.
+
+**main is clean.** `8888b8842` is not an ancestor of main, so the shipping
+criterion is not broken in production; the breach is confined to this
+branch.
+
+### Finding eleven arrived unasked
+
+The ten in section 0.1 were found by reading or by a test written to look
+for them. This one fired on its own, from a detector nobody consulted: a
+size anchor whose only job is to notice bytes. It also caught a wrong fix
+on the way. The first reading of the file counted three unguarded sites and
+judged the rest handled -- but three of them had the guard INSIDE the `if`,
+protecting the call while the branch test still emitted. A fix on that
+reading would have returned `.text` to NEAR the baseline and the 256-byte
+tolerance would have absorbed the rest: **the test that prompted the fix
+would have passed it.** Seven sites, and none of them guarded the branch.
+
+A third anchor is still unmeasured. `regex.test.ts` checks the regex
+program's own figure AFTER the one that failed, and vitest stops a test at
+its first failed expect -- so it has never been evaluated. A fix verified
+only against the hello-world could leave it broken and read as green.
+
+### The MACHINE column, raw
+
+One line per shard, in shard order, against the reference run's column on a
+different tree. No interpretation is offered here beyond the one the pair
+already forces.
+
+| shard | this run minFreeRamMB | reference minFreeRamMB |
+|---|---|---|
+| 1 | 2690 | 469 |
+| 2 | 4077 | 1964 |
+| 3 | 3657 | 2323 |
+| 4 | 2913 | 2414 |
+| 5 | 3503 | 3343 |
+| 6 | 4017 | 3504 |
+
+This run, in full: shard 1 `pct=6.6 cpu=100 disk%=125 MBps=77 n=54`; 2
+`pct=10 cpu=100 disk%=1257 MBps=98 n=56`; 3 `pct=9 cpu=100 disk%=129
+MBps=50 n=55`; 4 `pct=7.1 cpu=100 disk%=194 MBps=55 n=45`; 5 `pct=8.6
+cpu=100 disk%=105 MBps=78 n=18`; 6 `pct=9.8 cpu=100 disk%=423 MBps=117
+n=17`. Total RAM 40,831 MB, zero sampler failures.
+
+**The reference column rises monotonically and this one does not.** That is
+the whole result of the pair so far: monotonicity is not a property of the
+machine, so the column indexes something about a particular run rather than
+the shard identity, and a single run of it separates nothing. Two runs is
+the smallest number that could have shown this, and it took the second one
+being on a different tree.
