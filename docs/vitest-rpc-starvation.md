@@ -148,7 +148,8 @@ the census and three rows changed.
 | our co-load (another GATE on the box) | **REFUTED by measurement** | pre-registered overlap test over 109 shard intervals: the A/A pair and all 8 full 12-worker runs score 0.0% foreign-rig overlap. S6.3 |
 | worker count | **re-derived, significant, STILL CONFOUNDED** | 4 of 8 at 12 workers against 0 of 10 at 3, over runs that actually ran six shards; p = C(8,4)/C(18,4) = 0.023. But see S6.2: within the 12-worker group the four runs before ~15:00 are green and the four after are red, so worker count alone cannot carry it |
 | the in-run scratch sweeper | **REFUTED by ordering** | S6.4 |
-| anything resident in the tree | **REFUTED by the A/A pair** | S6.1 |
+| tree content as SUFFICIENT | **REFUTED by the A/A pair** | S6.1 |
+| tree content as NECESSARY | **UNTESTED -- never varied** | S6.6: 34 files common to shard 3 of all six reproductions, worst pairwise J = 0.8718. An earlier row claimed composition was varied; it was not |
 
 The old row read "2/6 at 12 workers against 0/10 at 3, p = 0.165". That p was
 computed over a run list that no longer matches the corrected occurrence
@@ -330,6 +331,45 @@ after every test (`SCRIPTC_TEST_SCRATCH_MAX_MB=512`,
 `gapMaxMs` of 2,263 and 2,245 -- the same to within 0.8% -- and neither
 reproduces the timeout. Both arms are weak on their own because neither
 reproduced the signature at all; the refutation is the census.
+
+### 6.6 The partition was never varied, and that breaks a ledger row
+
+S3b and the dead-hypothesis list both carry a row saying composition was
+varied across reproductions and the failure survived it. Measured, that is
+false, and the word doing the work was an unquantified "changed".
+
+Jaccard over the gate's own `shard-N.json` -- the same source
+`PARTITION-RESULT` reads -- across shard 3 of all six `onTaskUpdate`
+reproductions, with paths normalised repo-agnostically:
+
+- **34 files appear in shard 3 of every single reproduction.**
+- Union across all six: 41. Worst pairwise J: **0.8718** (2 removed, 3 added).
+- Between the two most recent runs, on different repos and different
+  branches, J = **0.9474** -- one file swapped. Their shard 1 and shard 2
+  are J = **1.0000**, identical membership.
+
+So composition moved by at most 5 files out of 41 while a 34-file core
+stayed constant. **Composition has never been meaningfully varied.**
+
+The consequence has to be stated in two halves, because they point
+differently:
+
+- Tree content is NOT SUFFICIENT. The A/A pair (6.1) settles that: identical
+  tree, identical partition, opposite verdicts. That row stands.
+- Tree content as a NECESSARY condition is UNTESTED. Six reproductions, one
+  file set. Nothing on record varies it, so nothing on record can refute it.
+
+Position and content remain perfectly confounded, and no run so far
+separates them. The cheap separation is to make one shard the sole
+invocation -- which holds sequence position fixed at "first and only" and
+varies only which files run.
+
+A normalisation note worth keeping, because it nearly produced a finding:
+the first pass read J = 0.0000 against the `knobon` run, because that run
+lived in `slice-wt` and the normaliser only knew `gate-wt` and `llvm-wt`.
+A complete disjunction sitting beside 0.95 is not credible, which is the
+only reason it was caught. A wrong pattern and a real zero are the same
+number.
 
 ### 6.5 A defect found on the way, unrelated to the timeout
 
