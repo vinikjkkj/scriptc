@@ -1248,12 +1248,15 @@ wrong question later, and "five of six green" is quotable.
 | `REGEX_CLASS_TEXT_RECORDED` | `630_182` |
 | worktree dirty | 0 |
 
-**TWO COUNTS, EACH WITH ITS OWN NAME.** `origin/main..HEAD` = **73**.
-`main..HEAD` = **56**. The difference is not a discrepancy: local `main`
-is **17 commits ahead of `origin/main`** and unpushed, so 17 of the 73 are
-main's own drift and the slice's own commits are 56. "73 commits" is true
-about the range and misleading about the slice, and only the labelled form
-should be quoted.
+**TWO COUNTS, EACH WITH ITS OWN NAME, AS OF `a6ba4c985`** -- the last
+commit before this correction, named because a bare commit count ages the
+moment anyone commits, including the commit that writes it down. At that
+ref: `origin/main..HEAD` = **73**, `main..HEAD` = **56**. The difference
+is not a discrepancy: local `main` is **17 commits ahead of `origin/main`**
+and unpushed, so 17 of the 73 are main's own drift and the slice's own
+commits are 56. "73 commits" is true about the range and misleading about
+the slice, and only the labelled form should be quoted. The 17 is the
+durable figure here; the other two move with every commit.
 
 One consequence is load-bearing for the merge question rather than for the
 gate: **`origin/main` does not contain `scripts/machine-sampler.ps1` at
