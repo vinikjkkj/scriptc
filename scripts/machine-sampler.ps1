@@ -20,6 +20,26 @@
 #
 # Measured per tick on this host: OS 137 ms, CPU 281 ms, disk 275 ms.
 #
+# COMMITTING GATE INSTRUMENTATION: A TRAP, recorded because it nearly fired.
+# To instrument the gate without dirtying the tree under measurement, run a
+# MODIFIED COPY of scripts/gate-sharded.ps1 from outside the worktree --
+# $Repo comes from the environment, so the copy drives the clean checkout and
+# its treehash is unchanged. The gate's own dirty-worktree guard would
+# otherwise abort the run.
+#
+# The trap is at COMMIT time. The gated worktree may sit on a commit whose
+# gate-sharded.ps1 is NOT the one on main: here b3a265368 carried an
+# uncommitted rhythm-reporter block that main lacked. Copying the modified
+# variant wholesale onto main would have landed that block too -- another
+# branch's unmerged work, under a message that does not mention it, in a
+# file nobody re-reads. Apply the instrumentation HUNK to main's version
+# instead, and assert the diff is exactly the lines you added: `git diff
+# --numstat` plus a grep proving the foreign block is absent.
+#
+# Two provenance checks before committing, so what lands is what measured:
+# the variant's mtime must predate the run's launch, and a Compare-Object
+# against the pristine script must still show only your added lines.
+#
 # WHY NOT CurrentDiskQueueLength. It was the first choice and its positive
 # control FAILED: through 768 MB of writes it never left 0, and under a
 # second probe at 1.3 GB/s it read non-zero on 2 samples out of 12. It is an
