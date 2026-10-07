@@ -690,13 +690,23 @@ files replaced by inert files from shard 5, provided the count and the
 load are held at 37.** Reported to me rather than measured by me, and
 recorded here as theirs.
 
-So the cause is **not** the 37 files, and **not** "any 37 files" -- it is a
-subset that only expresses itself under sufficient concurrent work.
+**Localised further, same block, later still: the cause lives in 19 of
+the 37 files**, and still needs accompanying load. The other 18, padded to
+the parent's size with filler demonstrated inert, come back **green 2/2**.
+So it is not the set, not the count, and no longer "some subset" either --
+it is an identified subset, and the search space has halved.
+
 Nothing in this document should be written to imply the whole set is
 necessary. The caution the J supported is weaker than it looked: content
 can differ by half and the signature still arrives, so a high J no longer
 limits what a differing tree would have shown. The canonical form above is
 unaffected -- it never claimed a cause.
+
+**And duration orders nothing, not even within one family.** Two runs of
+**2.09 minutes each** -- same file count, same rig, same tree -- came back
+one red and one green. Anyone tempted to read a shard's wall time or the
+`MACHINE` column as explaining a verdict has a clean counterexample.
+Report that column raw and uninterpreted.
 
 This is also why the earlier 0-of-2 green arm deserved the caution it got.
 Two clean draws against a defect of unknown rate is not evidence of
@@ -1362,10 +1372,27 @@ falls between the two sweeps: the scratch pruner does not own it, and the
 CAS cap does not reach it. Nobody is at fault, which is the shape of a
 process leak rather than of a mess.
 
-**The number, and it is one sample.** `syncgen-gate\tmp` held **6.43 GB**
-accumulated across exactly **two** full six-shard runs -- the 21:50 cold
-one and the 23:45 warm one -- so **~3.2 GB per six-shard run, n = 2 runs
-in 1 rig.**
+**The number, and the unit it is per.** `syncgen-gate	mp` held **6.43
+GB** accumulated across exactly **two** full six-shard runs -- the 21:50
+cold one and the 23:45 warm one -- so **~3.2 GB per SIX-SHARD GATE, n = 2
+runs in 1 rig.**
+
+**THE RATE DEPENDS ON THE KIND OF RUN, and two true figures contradicted
+each other until each named its population.** A sibling rig reports ~0.45
+GB per run, and `gatefour/tmp` back at 874 MB after four mixed runs gives
+~0.22 GB each. Those rigs are dominated by **short single-shard runs**;
+mine held two **full six-shard gates**. Neither figure is wrong and
+neither generalises:
+
+| unit | leak |
+|---|---|
+| one six-shard merge gate | **~3.2 GB** |
+| one subset / single-shard run | **~0.2-0.45 GB** |
+
+A budget has to name which kind of run it is counting. This is the
+slice's own predicate surfacing in the disk ledger: two measurements
+disagreed only because neither carried its denominator, and reconciling
+them needed no new measurement at all -- only the unit each was per.
 
 **RETRACTED: an earlier report of this said ~0.45 GB/run.** That figure is
 wrong by about sevenfold and I cannot reconstruct how it was produced,
