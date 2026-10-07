@@ -131,21 +131,76 @@ Three times in one session, and it is the recurring shape of this front:
 - the gate's own provisioning line prints `compiler-dist=ok` for a
   three-day-old `dist`, because it checks presence where freshness is owed.
 
+- the dist-provenance guard compared a formatted timestamp against a field
+  that `ConvertFrom-Json` had already re-parsed into a `DateTime`, so a
+  DateTime met a String and it reported UNKNOWN on a dist that had not moved
+  at all -- a guard firing on its own subject being unchanged;
+- and the assertion guarding that fix was over-broad, flagging the
+  normaliser's own legitimate use of the field it was policing. It refused
+  before writing, so the file was never touched.
+
 In each case the instrument's answer was about the instrument. The defence
-that worked every time was the same: **make a zero say which zero it is.**
+that worked every time was the same: **make a zero say which zero it is**,
+and make the check name which branch it took.
+
+The last two were caught by RUNNING the rig, not by reading it, which is the
+same lesson as run 1 arriving at a smaller scale.
+
+And a fifth, while writing this very section: a shell heredoc ate one
+backslash, Python read the surviving two-character escape as a control
+character, and a **0x08 byte landed in this document**. The encoding check
+passed, because 0x08 is ASCII and that edit had been checked for encoding
+and not for control bytes. The standing rule says to sweep control bytes,
+non-ascii and the line-ending delta *every time, not by intuition about
+which files are dangerous* -- and the intuition is precisely what skipped
+it. Then the guard caught the same trap a second time, in the sentence
+written to describe it.
+
+The fix was not better escaping. The path was rewritten to contain no
+backslash at all: **remove the surface, do not get it right once.**
 
 ## 6. Still owed, named rather than omitted
 
 - The six-shard merge gate has not run. The rig is ready and refuses on a
   stale `dist` before spending thirty minutes.
-- `dist` is stale in every worktree surveyed -- this one by the whole
-  generator lowering, `main`'s by the entire stackless front. The CLI
-  resolves `dist`; vitest aliases source. Nothing automates the rebuild and
-  no check tests its freshness.
-- The dist preflight has been shown able to **refuse** (5 of 5 symbols
-  absent, with the probe mechanism positive-controlled on a symbol that is
-  present). Its green direction is unproven until a rebuild exists to prove
-  it against.
+- **`dist` in this worktree is now rebuilt and stamped.** `tsc` clean in
+  60.4s, 120 files, and the worktree dirty count was 0 before and 0 after --
+  `dist/` is gitignored (`.gitignore:16`, 0 files tracked), checked before
+  building rather than discovered after.
+- **The dist preflight is now proven in both directions**, which is the
+  thing that was previously claimed only in one:
+
+  | probe | before the rebuild | after |
+  |---|---|---|
+  | `syncGenerator` in `ir/liveness.js` | absent | present |
+  | `emitGenCoroSpawn` in `emit-gen-coro.js` | no file | present |
+  | `genCoroUnwind` in `emit-gen-coro.js` | no file | present |
+  | `mangleCoroField` in `backend/mangle.js` | absent | present |
+  | `poisonYieldArm` in `gen-poison.js` | no file | present |
+  | **verdict** | **REFUSE (5 of 5)** | **PASS (0 of 5)** |
+
+  The provenance check behind it was exercised on all three of its branches
+  -- CURRENT on the real tree, STALE against a drifted source hash, UNKNOWN
+  against a moved dist -- so no branch of it is untested.
+- The gate log now carries what `PROVISION compiler-dist=ok` never did:
+
+      PREFLIGHT dist-provenance=CURRENT
+        srcTree=be5cfc0569edcd8ea8b1cd500383eef111009401
+        commit=02ee5b42aaa26284078e4625ecc608e90c627ed3
+        builtAt=2026-10-07T00:22:55.9341547Z files=120 node=v22.18.0
+
+  The identity is the **source tree object**, not a commit and not an mtime:
+  a commit moves for reasons that never touch the compiler, and an mtime is
+  an LRU bump.
+- `main`'s `dist` is still from 2026-10-03 and still predates the entire
+  stackless front. That one is a process question -- who rebuilds, when,
+  with what guarantee -- and is not this slice's to answer.
+- The `gate-sharded.ps1` change that turns its `Test-Path` into a content
+  check is **written and not applied** -- `gate-dist-freshness.READY.py`
+  under the blocks root --
+  because another block is executing a copy of that script right now and
+  editing a running script has already corrupted one run on this front. Its
+  anchor was dry-checked against the live file: 1 occurrence, file untouched.
 - `generator-delegation-divergence.test.ts` is pinned to LLVM and says in
   its own header that it cannot see this lowering and will stay green
   regardless.
