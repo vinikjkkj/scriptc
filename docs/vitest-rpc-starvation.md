@@ -437,6 +437,48 @@ Source predicts, lists confirm: the displaced file
 (`array-absent-slot-accounting.test.ts`) is exactly where the cascade says
 it must be -- shard 4 of the slice run, and in no other shard.
 
+### The slice gate's two size-class reds: attributed to the slice, not the cache
+
+Recorded because it was briefly moved to "unattributed" here and that is no
+longer the right status.
+
+Those two reds are `.text GREW by 512 bytes: 544214 against the recorded
+543702 (tolerance 256)` -- the same delta on the same baseline in both
+shards. They were first attributed to the slice without checking whether a
+stale vendor object could produce them, which was an unverified attribution
+and was retracted. Three independent routes then closed it, and all three
+are measurements rather than arguments:
+
+1. **Paired under a constant cache.** The quarantined vendor directory holds
+   32 files and none written after 14:21; the before/after measurements are
+   23:29 and 23:30 and the quarantine is 23:41. `find -newermt 23:00`
+   returns nothing, with a positive control at `12:00` returning all 32. The
+   -512 on both programs is therefore a direct paired comparison.
+2. **The only candidate confounder cannot move that figure.** The
+   hello-world was measured under BOTH cache states with the fix applied --
+   stale objects from 12:04, and a rebuilt-from-absent cache -- and gave
+   **543,702 both times**. It links neither library, so no vendor cache
+   state can move it. Measured, not argued.
+3. **Intervention in both directions.** Reverting one site leaves the test
+   permanently red naming line 5780; fixing all seven brings both programs
+   to exact equality, 543,702 and 630,182. And the two numbers were
+   separated: the 512 came from source, the 144 was the cache, isolated and
+   quarantined.
+
+The premise of the retraction is itself refuted: nothing in that directory
+has an mtime between 21:00 and 23:00, so the 21:50 gate **consumed** those
+objects and wrote none. Both of its reds were the regex-free program --
+shard 1 through the island anchor directly, shard 5 failing the `STATIC`
+assertion, which precedes `REGEX` and so fails first. Both are the
+cache-invariant figure.
+
+**The retraction was still the right instinct.** Nobody had checked, and
+"probably cannot" is not a measurement. The check cost four minutes and
+produced a better control than existed before it -- route 2 above was not
+in anyone's argument until the retraction forced someone to look. A
+practice that occasionally retracts a correct attribution is cheaper than
+one that never checks.
+
 A normalisation note worth keeping, because it nearly produced a finding:
 the first pass read J = 0.0000 against the `knobon` run, because that run
 lived in `slice-wt` and the normaliser only knew `gate-wt` and `llvm-wt`.
@@ -682,3 +724,28 @@ only another block's already-landed commit. The count was produced from
 memory and gave comfort; the refs gave the answer. Counting is not doing,
 and a remembered tally is not a measurement -- this front has paid for that
 shape before.
+
+### Instance 13: a basename comparison that dropped the distinguishing directory
+
+Checking which shard held the size-asserting tests, a script mapped paths
+with `.pop()` and reported `regex.test.ts` in **two** shards at once. That
+contradicts `partition=OK` with zero dupes, which the same run had printed.
+
+There are two files: `packages/runtime/test/regex.test.ts` and
+`tests/harness/regex.test.ts`. `.pop()` removed exactly the directory that
+tells them apart.
+
+It belongs with instance 12 rather than with the first eleven: the data was
+right and the *projection* of it was lossy. And it was caught the same way
+12 was -- not by a control on the check, but by **a second fact
+disagreeing**, here the gate's own partition verdict. A control on the
+basename comparison would have passed, because the comparison did exactly
+what it was told.
+
+The same shape recurred once more within the hour: a status check for
+uncommitted work printed `0` for both trees because a `cd` in an earlier
+command had persisted and both halves of the check ran in the same
+worktree. The work was intact; the instrument was pointed at one tree twice.
+Fixed by passing `git -C <path>` explicitly rather than relying on the
+working directory, which is the general remedy for this family: **name the
+object in the command instead of inheriting it from context.**

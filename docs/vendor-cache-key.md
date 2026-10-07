@@ -29,6 +29,16 @@ a `.debug$S` section and the stale one carrying neither.
 | zlib objects (:1085) | `ZLIB_VERSION` | yes | **1 bit** | yes | yes |
 | sqlite object (:1207) | `SQLITE_VERSION` | yes | **1 bit** | yes | yes |
 | mbedTLS archive `libmbedtls.a` (:1337) | `MBEDTLS_VERSION` | yes | **none** | yes | yes |
+| curl stub `libcurl.so` (:1272) | **none** | n/a | **none** | yes | no |
+
+**There are SIX cached units, not five**, and the source's own enumeration
+at cc.ts:774 says five. The sixth, `ensureCurlStub`, keys on
+`curl-stub-${target}` and nothing else -- no source identity, no driver. Its
+consequence is milder by construction (the stub's bodies never ship; it
+exists to satisfy references and record a DT_NEEDED), but the key cannot
+tell two toolchains apart either. A comment that enumerates the units is
+how both the original report and the first draft of this document missed
+it.
 
 The "1 bit" is literally:
 
@@ -36,10 +46,14 @@ The "1 bit" is literally:
 (driver.argv.length === 1 && driver.argv[0] === "clang" ? "" : "-zigcc")
 ```
 
-**Two of the five units carry no driver component at all.** That is wider
-than the report that prompted this: the unit caught in the act (lre) is one
-of the three that at least has the bit. `libqjs.a` and `libmbedtls.a` have
-nothing.
+**Three of the six units carry no driver component at all**, and the
+severity runs the opposite way from where attention landed. The unit caught
+in the act, `lre`, is one of the three BEST-keyed: its key names the driver
+and it still failed to separate zig 0.15.2 from 0.16.0. So this is the
+GENERAL FORM, not a peculiarity of libregexp. The units with no token at all
+are `libqjs.a` -- the island engine -- and `libmbedtls.a`, the TLS stack.
+Neither is small, and a bit that cannot separate two zigs certainly cannot
+separate them when it is absent.
 
 Both of those take a host path that forces `clang` when `driver.target` is
 null -- but on this host `SCRIPTC_TARGET` is always set, so every build
