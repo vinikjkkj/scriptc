@@ -21,9 +21,22 @@ arms and measured nothing.
 | 3 | C | 7 of 7 files green, `conversions=1` |
 | 4 | C | green again, with section 6's last unasserted condition asserted |
 
-## 0.1 Ten defects, and where they came from
+## 0.1 Where the defects came from, which is the part that does not age
 
-The slice has produced **ten** defects. Three were found while writing it.
+**THE TOTAL IS NOT STATED HERE, and the number that used to be is
+withdrawn rather than updated.** This section read *"the slice has
+produced ten defects"* while section 7, 332 lines below it, is headed
+*"Finding eleven arrived unasked"* -- the same stale-first collision
+that section 12.9 was restructured to stop, recurring in a different
+place. I did not re-derive the total, so I am not writing one: a count
+you did not derive is not yours to trust, and a wrong one in the
+document's opening carries more authority than a wrong one anywhere
+else. The lower bound the document establishes about itself is
+**eleven**, from section 7's heading, plus 12.9 and 12.10.
+
+What this section actually argues does not need the total, and that is
+why the number was dispensable. Three defects were found while writing
+the slice.
 **The last five came from directed audits -- enumerating what a sibling
 maintains and checking it line by line -- and not one of them from anything
 failing.** The sixth-to-last came from a test, on the first run where that
