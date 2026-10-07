@@ -587,10 +587,36 @@ committed file, and the wrapper's dirty-worktree check already pins it.
 Taking main exposed one thing the merge did not fix. The committed gate
 still dot-sourced an **absolute path into the blocks root** for the
 sampler, so it read a file outside the tree it judges -- one another block
-edits while runs are in flight -- and the two had **already diverged**,
-5,825 bytes committed against 4,625 on disk. The executable content
-happened to match; the exposure did not depend on that. It now resolves
-through `$PSScriptRoot`.
+edits while runs are in flight.
+
+**No measurement derived from it, and the structure is still wrong.** The
+divergence I measured -- 5,825 bytes committed against 4,625 on disk -- is
+**comment only**, confirmed by the block that owns the file: 20 lines of
+note added to the worktree copy on its way into the tree and never written
+back to the blocks-root file. The executable content is identical, so no
+run on either side read different code. That is worth stating plainly
+rather than leaving the byte difference to imply a corrupted result.
+
+What remains is the shape, and the shape is the defect: **a gate that
+judges a tree cannot read a file outside it.** The content matching was
+luck held in place by one block's discipline, not a property of the
+arrangement -- a single edit to the blocks-root copy, by anyone, at any
+time, would have changed what the gate executed without changing the tree
+it reported on. The fix resolves the dot-source through `$PSScriptRoot`.
+
+It is **this branch's only**. main is at `e7a85c7d6` and line 302 there
+still reads the absolute path; the repair travels with this branch's merge
+and not before it.
+
+**The two gates are the same instrument, and a later reader must not
+conclude otherwise.** The other block deliberately did **not** repoint its
+own variants at `scripts/`, and it is right not to: swapping the
+instrument midway up a ladder makes the new rungs incomparable to the old
+ones, which is a worse loss than an ugly path. So for as long as both are
+in flight, this slice's gate resolves the sampler through `$PSScriptRoot`
+and that block's variants resolve it through the absolute path, and **both
+load byte-identical executable code**. Different resolution, one
+instrument. Runs from the two are comparable on this axis.
 
 ### 12.8 The size anchor is no longer its own target
 
