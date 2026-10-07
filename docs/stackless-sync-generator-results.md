@@ -21,6 +21,27 @@ arms and measured nothing.
 | 3 | C | 7 of 7 files green, `conversions=1` |
 | 4 | C | green again, with section 6's last unasserted condition asserted |
 
+## 0.1 Ten defects, and where they came from
+
+The slice has produced **ten** defects. Three were found while writing it.
+**The last five came from directed audits -- enumerating what a sibling
+maintains and checking it line by line -- and not one of them from anything
+failing.** The sixth-to-last came from a test, on the first run where that
+test could see the lane at all.
+
+That ratio is the strongest argument this slice makes for the method, and it
+is an argument against the instinct it replaced. Every one of those five was
+present while the slice was "complete as written", every gate was green, and
+nothing was going to fail that would have pointed at them: a stranded
+AsyncLocalStorage context, a negative object count, a census that could not
+see a generator frame, a sentinel written over a cell that might hold a
+payload, an enum member silently doing nothing. Four of the five are
+invisible outside an audit build; the fifth cannot fire until a fence in
+another file moves.
+
+The cost of the method is an hour of reading. The cost of the alternative is
+that those five ship.
+
 ## 1. Section 6's predictions, scored
 
 **`EXPECTED_CONVERSIONS = 1`: CONFIRMED on the artefact.** One generator, one
