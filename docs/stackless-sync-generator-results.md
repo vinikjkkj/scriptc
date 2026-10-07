@@ -778,3 +778,387 @@ So the first step is no longer the first commit. It is to measure
 
 Either way it is one measurement, and it is the one that decides whether
 the other ninety-seven are worth taking.
+
+## 14. The +32 bisection, answered by its own step zero
+
+The walk registered in section 11 was never run, because the cheaper first
+step from section 13.3 settled it.
+
+`e03bdf0aa` -- the commit the baselines were recorded at -- was checked out
+into a fresh worktree with **no** `vendor/.cache`, and measured in
+RECORDED_LANE with the knob absent:
+
+| program | recorded at `e03bdf0aa` | measured at `e03bdf0aa` today | |
+|---|---|---|---|
+| hello-world | 543,702 | **543,702** | reproduces |
+| regex | 630,150 | **630,182** | **does not reproduce, +32** |
+
+**The recorded regex figure does not reproduce at its own commit.** The
+hello-world's does, exactly -- which is what makes the result readable
+rather than a broken rig: the same tree, the same lane, the same run, one
+figure exact and the other 32 bytes out.
+
+So the +32 is **not a code step**. Both ends of the window measure 630,182
+today:
+
+| tree | regex `.text` |
+|---|---|
+| `e03bdf0aa` (the recording commit) | 630,182 |
+| `main` | 630,182 |
+| this branch, after the fix | 630,182 |
+
+There is nothing between them to find. The 97-commit walk is **cancelled**,
+and not for want of evidence -- it is cancelled because the quantity it was
+chartered to attribute does not exist as a difference between commits. A
+step zero that kills its own bisection is a step zero doing its job; that
+is the whole reason it was registered before the walk rather than after it.
+
+### What the +32 actually is
+
+The regex program links `libregexp` and `libunicode`; the hello-world does
+not. That is exactly the asymmetry section 13.2 measured, where an
+eleven-hour-old `vendor/.cache` moved the regex program by 144 bytes and
+the hello-world by zero, under an unchanged cache key. The recording
+session at `e03bdf0aa` will have had its own vendor objects, and the only
+figure that moved is the only figure those objects can move.
+
+This is a claim about a mechanism of the right shape and the right
+selectivity, demonstrated on the same two libraries earlier today. It is
+not a reconstruction of that session, which is gone. Stated at its true
+strength: **the +32 is an artifact of the recording environment, of the
+class demonstrated in 13.2, and is not a change in the source.**
+
+### 14.1 The baseline is re-recorded, and why the ban on doing so fell
+
+Section 11 declined to re-record `REGEX_CLASS_TEXT_RECORDED`, on the
+grounds that re-recording "would erase the drift and make 630,150
+unverifiable forever."
+
+**That reasoning was correct, and it has expired.** It was correct because
+the +32 was *unattributed*: re-recording an unexplained number buries the
+only evidence that something unexplained happened, and the figure would
+have been gone before anyone could ask what it meant. The ban protected an
+open question.
+
+The question is now closed, by measurement at the recording commit itself.
+What lifted the ban is **the arrival of attribution, not a change in
+convenience** -- and the distinction matters enough to write down, because
+"we looked again and decided it was fine" is what this failure mode sounds
+like from outside. Nothing became more convenient. A measurement was taken
+that could have come out the other way: had `e03bdf0aa` reproduced 630,150,
+the +32 would have been a real code step, the 97-commit walk would have
+been necessary, and the ban would have stood untouched.
+
+So the constant moves to **630,182**, in a commit of its own, separate from
+the gate and from the slice's fix. A calibration must not move inside a
+commit about something else -- that part of the earlier reasoning stands
+and is honoured by the separation.
+
+Leaving it would have cost something concrete and permanent: the anchor's
+budget is 256 bytes, and 32 of them were being spent on an artifact, so the
+test that exists to catch a real regression had **12.5% less room than its
+own comment claimed**, for a reason nothing in the file recorded.
+
+## 15. The two-zig trap has a third face, and it lives in a cache
+
+The trap already recorded on this front is that two zigs are installed --
+Chocolatey **0.15.2** at `C:/ProgramData/chocolatey/bin/zig.exe`, on PATH,
+and the tree's **0.16.0** at `G:/tools/zig` -- and that they build the size
+class about 20 KB apart. The standing defence is to pin the lane and assert
+`zig version` before measuring. Every measurement in sections 13 and 14
+does exactly that and the assert passed every time.
+
+**It is not sufficient.** Pinning the compiler pins what gets compiled
+*now*; it says nothing about objects already sitting in a cache. The two
+vendor objects from section 13.2, under an identical cache key:
+
+| | stale (12:04) | fresh (23:35, zig 0.16.0 asserted) |
+|---|---|---|
+| `libregexp.o` | 39,578 B | 39,776 B |
+| producer string | **none** | `clang version 21.1.0` |
+| `.debug$S` section | **absent** | present |
+
+They are not the same build. The fresh one is zig 0.16.0's clang; the
+stale one carries no producer at all, so it cannot be pinned to a version
+by this evidence -- what it demonstrably is, is **a different toolchain
+than the one the run asserted**, linked into a binary whose lane line said
+`zig=0.16.0`.
+
+That is the third face, and it is the worst of the three, because the first
+two are visible and this one is not:
+
+1. running the wrong zig -- caught by asserting `zig version`;
+2. two trees disagreeing -- caught by naming the tree;
+3. **a cache serving objects built by the other one** -- caught by
+   nothing. The lane assert passes, the version is right, the log is
+   honest, and the bytes are from the other compiler.
+
+`vendor/.cache` matches `.cache*/` in `.gitignore`. It is untracked, so it
+survives `git status`, the gate's dirty-worktree guard, and the treehash;
+it is per-worktree, so one block's worktree can hold it for hours while
+another's does not; and a fresh checkout has none, which is why the two
+trees disagreed at all and the only reason this was ever seen.
+
+**The rule this earns:** a size measurement must name the state of the
+vendor object cache, and a measurement intended as a baseline must be taken
+with that cache **absent**. The three worktrees used in sections 13 and 14
+each started with none, which is what makes 543,702 and 630,182 reproduce
+across all three. The two numbers that did not reproduce -- the branch's
+630,326 and the recorded 630,150 -- are both from trees that had one.
+
+A durable fix belongs in the cache key: it names the source hash, the
+variant, the driver and the target, and it must also name the compiler
+identity. That is a change to the build, outside this slice, and it is
+written here rather than done here.
+
+### 15.1 The provisional procedure, until the cache key is fixed
+
+The durable fix is the compiler identity in the cache key. That is a build
+change outside this slice and is deliberately not made here. Until it
+lands, this is the rule that would have saved most of a session:
+
+**When a size number moves and no combination of source changes reproduces
+it, stop bisecting source and byte-diff the build trees -- gitignored
+caches first.**
+
+The order matters, and it is the opposite of the instinct. The instinct is
+to narrow within the source: swap the compiler, swap each runtime file,
+swap pairs. All of that was done here, all of it came back clean, and
+every clean result was *evidence the search was in the wrong space* that
+was read instead as "not that one either." Five arms reading identical is
+not five exclusions; it is a signal the variable is not in the set.
+
+The concrete steps, as run in section 13.2:
+
+1. Reproduce the number in a **fresh worktree** of the same commit. If it
+   does not reproduce, the difference is environmental and no amount of
+   source bisection will find it.
+2. Byte-diff the two trees whole -- including ignored files. `git status`,
+   the dirty-worktree guard and the treehash are all blind to anything
+   matching `.gitignore`, so the diff has to be done against the
+   filesystem, not against git.
+3. Suspect the files whose **selectivity matches the symptom** first. The
+   residual appeared on the regex program and not the hello-world, and the
+   objects that differed were exactly the two libraries only the regex
+   program links. Selectivity is the cheapest discriminator available and
+   it pointed straight at the cause once anyone looked.
+4. Before trusting any arm of such a search, **positive-control the rig**:
+   make a change that must move the number and confirm it does. Here the
+   branch's unfixed `scr_async.c` moved both programs by exactly +512,
+   which is the only reason the five identical arms could be believed at
+   all rather than suspected of being a broken copy step.
+
+And a standing requirement that follows from it: **a measurement intended
+as a baseline must be taken with the vendor object cache absent**, and must
+say so. The three worktrees in sections 13 and 14 each started with none,
+which is why 543,702 and 630,182 reproduce across all three. Both numbers
+that failed to reproduce -- the branch's 630,326 and the recorded 630,150
+-- came from trees that had one.
+
+## 16. Provenance of the before/after pair, and what the cache could not have caused
+
+A fair challenge: the +512 is a paired measurement, and the vendor cache
+was quarantined *between* the fix and the final figure. If the two halves
+of the pair straddled a cache change, the 512 would rest on an argument
+rather than on a comparison. It does not, and the evidence is in the
+quarantined directory itself.
+
+### 16.1 Both halves of the pair used byte-identical vendor objects
+
+The directory moved aside at 23:41 contains **32 files, and not one was
+written after 14:21**:
+
+| | time |
+|---|---|
+| newest object in the quarantined cache | 2026-10-06 **14:21** |
+| BEFORE measured, 544,214 / 630,838 | 23:29 |
+| AFTER measured, 543,702 / 630,326 | 23:30 |
+| cache quarantined | 23:41 |
+
+Had either measurement written a vendor object, that object's mtime would
+fall in the measurement window. None does: `find -newermt "23:00"` returns
+nothing, against a positive control at `12:00` that returns all 32. So the
+objects present at 23:29 are the same bytes as the objects present at
+23:30, and the hello-world's 544,214 -> 543,702 and the regex program's
+630,838 -> 630,326 are **direct paired comparisons under an unchanged
+cache**. Both move by exactly 512. No inference is carried.
+
+### 16.2 The hello-world figure is invariant to the cache, and that is measured
+
+Independently of the pair, the hello-world was measured under **both**
+cache states with the fix in place:
+
+| cache state | hello-world `.text` |
+|---|---|
+| stale objects from 12:04 | 543,702 |
+| no cache, rebuilt fresh | 543,702 |
+
+Identical. The hello-world does not link `libregexp` or `libunicode`, and
+nothing else in the cache moves it. So **no vendor-cache state can produce
+a delta on the hello-world** -- this is a control, not an argument from
+plausibility.
+
+### 16.3 The 21:50 gate did not write that cache, and its two reds stand
+
+The premise behind retracting the 21:50 attribution was that the cache had
+been written during that run. It was not: nothing in the directory has an
+mtime between 21:00 and 23:00. That gate **consumed** 12:04-14:21 objects;
+it created none.
+
+And both of its reds were the **regex-free** program -- shard 1's island
+anchor directly, and shard 5's `regex.test.ts` failure at the `STATIC`
+assertion, which precedes the `REGEX` one in that test and therefore fails
+first. Both are the figure 16.2 shows is cache-invariant.
+
+So the reds are not unattributed. They were the seven sites, by three
+independent routes: a paired measurement under a constant cache, a control
+showing the only candidate confounder cannot move that figure, and
+intervention in both directions -- reverting one site turns the permanent
+test red naming line 5780, and fixing all seven brings both programs to
+exact equality.
+
+The retraction was still the right instinct. Nobody had checked whether
+the cache could produce that delta, and "it probably can't" is not a
+measurement. The check took four minutes and the answer is that it cannot.
+
+### 16.4 The lre unit is one of the BETTER-keyed ones
+
+The cache key defect is not specific to the unit that caused this. Across
+the five vendor units built for this lane:
+
+| unit | driver in key |
+|---|---|
+| `3c8f3d689539-lre-plain-zigcc-...` | `zigcc` |
+| `sqlite-3.53.4-plain-zigcc-...` | `zigcc` |
+| `zlib-1.3.1-plain-zigcc-...` | `zigcc` |
+| `3c8f3d689539-plain-...` (libqjs) | **none** |
+| `mbedtls-3.6.7-plain-...` | **none** |
+
+**Two of five record no driver at all.** The other three record `zigcc`,
+which *classifies* the driver without *identifying* it: both zigs on this
+host -- Chocolatey 0.15.2 and the tree's 0.16.0 -- spell that same token.
+
+The unit that actually served objects from another toolchain, `lre`, is one
+of the three **better**-keyed ones. Its key named the driver and still
+could not tell the two zigs apart. The two unkeyed units are strictly worse
+and neither is small: `libqjs.a` is the island engine, `libmbedtls.a` is
+TLS. Nothing here is a property of libregexp; it is the general shape, and
+this was the mildest instance of it.
+
+## 17. The merge gate, knob absent
+
+Run `20261006-234534` on `ffaa01b0a`, treehash `e5b76ad846b8167f`, six
+shards, 34.46 minutes, `PARTITION-RESULT expected=221 ran=221 missing=0
+extra=0 dupes=0 verdict=OK`. Preflight: `dist-provenance=CURRENT`,
+`worktree-dirty-files=0`, `rig=committed`, `machine-column=present`.
+
+### 17.1 The five shards of the slice
+
+| shard | verdict | Tests |
+|---|---|---|
+| 1 | GREEN | `985 passed \| 1 skipped (986)` |
+| 2 | GREEN | `1717 passed \| 2 skipped (1719)` |
+| 4 | GREEN | `1752 passed \| 2 skipped (1754)` |
+| 5 | GREEN | `764 passed \| 36 skipped (800)` |
+| 6 | GREEN | `732 passed \| 4 skipped (736)` |
+
+Shards 1 and 5 were the two RED shards of the 21:50 run; both are now
+green, and shards 2, 4 and 6 are unchanged from it test-for-test.
+
+### 17.2 Shard 5, and the REGEX anchor inside it
+
+Shard 5 deserves separating from its own shard. The test that flipped:
+
+```
+  regex (scriptc-only behavior) > regex-free programs never reference the
+  regex runtime; regex use stays in its size class
+```
+
+`regex.test.ts` asserts the `STATIC` anchor before the `REGEX` one, and
+vitest stops a test at its first failed `expect`. `STATIC` was the failing
+assertion, so the `REGEX` line was never reached in any previous run: its
+state was unknown, not assumed-good. **This run is the first evaluation of
+`REGEX_CLASS_TEXT_RECORDED` in the project's history**, and it passed.
+
+That matters because until now the fix was validated asymmetrically: the
+hello-world by **intervention** -- revert one of the seven sites and the
+permanent test reddens on line 5780, fix all seven and it reaches exact
+equality -- and the regex program only by a direct measurement outside the
+gate. Shard 5 is where the two meet.
+
+**But the gate corroborates; it does not reproduce.** It never prints the
+measured value on success. Passing `recordedTextComplaint` against the
+recorded 630,150 with `TEXT_DRIFT_TOLERANCE = 256` bounds the figure to
+**[629,895, 630,405]** and says nothing finer. The direct measurement pins
+it at **630,182**, inside that window. Those are two different strengths of
+claim, and merging them is exactly how 32 bytes of drift live forever --
+which is literally what happened until today.
+
+It is also the strongest argument for the re-record. With the constant at
+630,182 this assertion becomes an **exact-equality** check instead of a
+tolerance test that happens to pass.
+
+### 17.3 Shard 3, separated
+
+`SHARD-RESULT n=3/6 rc=1 min=6.76 files=37 verdict=RED :: vitest reported
+errors:      Errors  1 error`
+
+```
+      Tests  733 passed | 10 skipped (743)
+      Error: [vitest-worker]: Timeout calling "onTaskUpdate"
+      Vitest caught 1 unhandled error during the test run.
+```
+
+**Zero failing assertions.** This is the known signature, now at **twelve**
+reproductions, all of them on shard 3, across trees that do not contain
+this slice. Not relaunched: the relaunch rule covers `CcCompileError` with
+zero `error:` lines and this is not that.
+
+Its explanation, not its attribution, is open. The gate-invocation
+hypothesis is **refuted** -- plain unaltered invocation reproduced it. What
+may remain is a difference in rate, 2 of 4 under plain invocation against
+11 of 11 under the gate's, Fisher **p = 0.057**: suggestive, not
+established, and a different claim that must not be reported as the old
+conjunction in new words. The standing form is: *known signature, twelve
+reproductions, all on shard 3, cause open; invocation is not necessary, and
+a rate difference stands at p = 0.057.*
+
+A red shard 3 with zero failing assertions says nothing about this slice.
+One with failing assertions would.
+
+### 17.4 The MACHINE sequence, raw
+
+Six lines, in order, uninterpreted. `maxDiskPct` exceeds 100 on this host
+because it is pending requests times 100; it is not a percentage occupied.
+
+```
+shard-1 minFreeRamMB=1931 minFreeRamPct=4.7 maxCpuPct=100 maxDiskPct=1210 maxDiskMBps=142 totalRamMB=40831 samples=38 failures=0
+shard-2 minFreeRamMB=2798 minFreeRamPct=6.9 maxCpuPct=100 maxDiskPct=802  maxDiskMBps=93  totalRamMB=40831 samples=44 failures=0
+shard-3 minFreeRamMB=2608 minFreeRamPct=6.4 maxCpuPct=100 maxDiskPct=577  maxDiskMBps=65  totalRamMB=40831 samples=37 failures=0
+shard-4 minFreeRamMB=2104 minFreeRamPct=5.2 maxCpuPct=100 maxDiskPct=595  maxDiskMBps=82  totalRamMB=40831 samples=37 failures=0
+shard-5 minFreeRamMB=2486 minFreeRamPct=6.1 maxCpuPct=100 maxDiskPct=166  maxDiskMBps=22  totalRamMB=40831 samples=16 failures=0
+shard-6 minFreeRamMB=2876 minFreeRamPct=7   maxCpuPct=100 maxDiskPct=300  maxDiskMBps=93  totalRamMB=40831 samples=15 failures=0
+```
+
+Disk troughed 27.37 -> 25.3 GB across the run against a 10 GB floor.
+
+### 17.5 The test count, reconciled
+
+Shard 1 went from `(984)` to `(986)`. The permanent test was described as
+"the test plus four controls", which would read as +5, and the two numbers
+do not meet. The count, not the explanation:
+
+`p17` added **two `test()` cases**. Vitest counts cases, not assertions,
+and the controls are assertions inside one of them:
+
+| case | `expect()` calls |
+|---|---|
+| `CONTROL: the scanner sees an unguarded branch, and does not see a guarded one` | **6** -- bare branch seen; guarded branch not seen; bare `#endif` still closes; `#else` arm is the non-lane build; marker in a trailing comment is prose; stripping a comment must not strip the code beside it |
+| `scr_async.c emits no frame-lane code outside #ifdef SCR_CORO_LANE` | 1 |
+
+Two cases, seven assertions. `island.test.ts` reports `(27 tests)` where it
+reported 25, and shard 1 moves 984 -> 986. +2 equals +2.
+
+Confirmed from `shard-1.json` rather than from log formatting: both cases
+appear by full name with status `passed`. The earlier phrasing was the
+defect -- it conflated assertions with cases -- and not the test.
