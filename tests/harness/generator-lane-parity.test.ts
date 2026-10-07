@@ -618,6 +618,23 @@ describe("the comparison can see a wrong arm", () => {
         expect(off.ok, say("off", off)).toBe(true);
         expect(bad.ok, say("bad", bad)).toBe(true);
         expect(bad.units, "no emitted C to poison -- " + say("bad", bad)).toBeGreaterThan(0);
+        /* THE CONDITION SECTION 6 SET ON THIS CONTROL, and it was still
+         * missing after the lane was pinned.
+         *
+         * The poison control passed for the whole life of this file while
+         * generators did NOT convert, because the hook it swaps sits on a
+         * path both lanes shared -- so a green here could mean "the guard
+         * sees a wrong arm in the FIBRE lowering", which is not the claim.
+         * Section 6 wrote the requirement down: the conversion count must
+         * be non-zero IN THE SAME RUN before this green means anything.
+         * Asserting it, rather than relying on the sibling arms to have
+         * asserted it in a different test, is the difference between a
+         * condition met and a condition remembered. */
+        expect(
+          bad.conversions,
+          "the poison build converted nothing, so a differing stdout is " +
+            "evidence about the FIBRE lowering -- " + say("bad", bad),
+        ).toBe(EXPECTED_CONVERSIONS);
         /* And the injection is accounted for, not assumed: a control that
          * differs for some other reason would otherwise read as proof. */
         expect(bad.sites).toBeGreaterThan(0);
