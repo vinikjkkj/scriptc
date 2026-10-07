@@ -1344,3 +1344,53 @@ and a red shard 3 that is the known `onTaskUpdate` signature with zero
 failing assertions. Extending the relaunch rule to cover that signature is
 a change to the contract, and that is the user's decision, pending with
 them. The slice is blocked by a process question, not by a defect in it.
+
+### 18.4 NAMED ITEM: the gate's TMP is swept by nothing, and it leaks
+
+**The mechanism, which is structural rather than untidy.** Three trees
+grow under a gate rig, and exactly one of them has no keeper:
+
+| tree | bound |
+|---|---|
+| `node_modules/.cache/scriptc-tests` | `pruneScratchOnce`, cap `SCRIPTC_TEST_SCRATCH_MAX_MB` (8192 here) |
+| `$GateRoot\cache` (the CAS) | its own size-capped LRU, and **explicitly excluded** from the scratch sweep |
+| `$GateRoot\tmp` | **nothing** |
+
+`$GateRoot\tmp` is `TMP`/`TEMP`/`TMPDIR` for every compile the run spawns,
+so it fills with `scr-*` and `payload-*` directories and keeps them. It
+falls between the two sweeps: the scratch pruner does not own it, and the
+CAS cap does not reach it. Nobody is at fault, which is the shape of a
+process leak rather than of a mess.
+
+**The number, and it is one sample.** `syncgen-gate\tmp` held **6.43 GB**
+accumulated across exactly **two** full six-shard runs -- the 21:50 cold
+one and the 23:45 warm one -- so **~3.2 GB per six-shard run, n = 2 runs
+in 1 rig.**
+
+**RETRACTED: an earlier report of this said ~0.45 GB/run.** That figure is
+wrong by about sevenfold and I cannot reconstruct how it was produced,
+which is the worst kind: it was quoted in a readiness report and would
+have been banked into a disk budget. 6.43 / 2 is the derivation; the
+earlier figure has none.
+
+**What the sample cannot say, and why that is partly my doing.** The cold
+and warm runs are averaged together and cannot be split, because I purged
+the directory before bucketing its 752 entries by mtime -- the two runs
+were cleanly separated in time (22:00-22:35 and 23:45-00:20) and the
+split was there to be taken. **Measure, then purge.** There is no second
+clean sample either: `armrig`, `boxparam`, `knobon-measure` and
+`d2-valguard-gate` retain no `tmp` at all, and `gatefour`'s 830 MB over
+four full runs is post-purge residue, not a cumulative total, because that
+rig was purged mid-session.
+
+**Why it is the dominant long-run term even though it hides inside a
+smaller net.** A warm run's measured net drawdown is 2.68 GB while its TMP
+grows by more than that, because the scratch sweep gives ~2 GB back inside
+the same run. But scratch is capped and oscillates around its floor, and
+the CAS plateaus; TMP is the only term that ratchets. So the per-run net
+drawdown and the TMP leak converge, and over N runs the rig's disk cost is
+essentially N times the leak.
+
+**The fix is a separate decision and is not this window's.** Recorded here
+so it is a named item with a derivation rather than folklore about gates
+being hungry.
