@@ -1034,9 +1034,33 @@ the five vendor units built for this lane:
 | `3c8f3d689539-plain-...` (libqjs) | **none** |
 | `mbedtls-3.6.7-plain-...` | **none** |
 
-**Two of five record no driver at all.** The other three record `zigcc`,
-which *classifies* the driver without *identifying* it: both zigs on this
-host -- Chocolatey 0.15.2 and the tree's 0.16.0 -- spell that same token.
+**Two of the five built here record no driver at all.** The other three
+record `zigcc`, which *classifies* the driver without *identifying* it:
+both zigs on this host -- Chocolatey 0.15.2 and the tree's 0.16.0 -- spell
+that same token.
+
+CORRECTION, derived after the above: there are **six** cached vendored
+units, not five. The sixth is the curl stub at `cc.ts:1272`, which keys on
+`curl-stub-${target}` and nothing else -- no source identity, no flavour,
+no driver. It does not appear in the table because it is a Linux stub and
+is not built for this Windows lane, which is exactly why counting from a
+Windows cache directory undercounts it. **Three of the six carry no driver
+component at all.**
+
+The source's own enumeration is wrong in the same two ways. `cc.ts:774`
+reads "the five cached vendored units (the engine archive, lre, zlib,
+SQLite, mbedTLS)" and says they key on `plain|asan` "plus the driver and
+target". It omits the curl stub, and the "plus the driver" is false for two
+of the five it does list: the observed directory names
+`3c8f3d689539-plain-x86_64-windows-gnu` and
+`mbedtls-3.6.7-plain-x86_64-windows-gnu` carry no driver token. A comment
+that enumerates is a count, and this one was not re-derived when the sixth
+unit arrived.
+
+Another block reached six independently and by a different route. Two
+derivations agreeing is worth more here than either, because the number I
+first published came from counting directories in a cache -- a population
+that can only contain what this lane happens to build.
 
 The unit that actually served objects from another toolchain, `lre`, is one
 of the three **better**-keyed ones. Its key named the driver and still
