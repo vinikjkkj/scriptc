@@ -127,13 +127,36 @@ function writeProgram(stem: string, src: string): { dir: string; entry: string }
   return { dir, entry };
 }
 
-/** Build with scriptc and run the binary. */
+/** Build with scriptc and run the binary.
+ *
+ * THE LANE IS PINNED, AND IT IS PINNED TO LLVM ON PURPOSE. This file's
+ * claim is scriptc against NODE on the semantics of a .return() through a
+ * yield* delegation, and LLVM is the backend that ships -- so it is the
+ * right lane for this claim, and inheriting the default would merely have
+ * been the right answer by accident.
+ *
+ * AND THIS TEST CANNOT SEE THE STACKLESS LOWERING. It will stay green
+ * whatever that lowering does, because the stackless plan map is consulted
+ * in zero of the LLVM backend's ten files and index.ts gates it on
+ * backend === "c". Saying so here is not a caveat, it is the point: the
+ * sibling parity guard spent a whole run reporting nine greens from
+ * programs that had compiled through this very lane, and the only reason
+ * that was caught is that two instruments counted what they had actually
+ * built. A test that cannot fail for a reason must name the reason, or the
+ * next reader counts it as coverage -- the same discipline as the
+ * async-generator guard at emitter.ts, which says in its own comment that
+ * it cannot fire today.
+ *
+ * If this file is ever wanted as a check on the STACKLESS lowering, that is
+ * a different test: backend "c", the knob set per build, and a conversion
+ * count asserted in the same run. */
 async function scriptcOutput(stem: string, src: string): Promise<string> {
   const { dir, entry } = writeProgram(stem, src);
   const result = await compile(entry, {
     outPath: join(dir, exeName(stem)),
     outDir: dir,
     sanitize,
+    backend: "llvm",
   });
   expect(result.ok, !result.ok ? JSON.stringify(result.diagnostics, null, 2) : "").toBe(true);
   if (!result.ok) return "";
