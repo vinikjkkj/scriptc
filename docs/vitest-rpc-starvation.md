@@ -749,3 +749,32 @@ worktree. The work was intact; the instrument was pointed at one tree twice.
 Fixed by passing `git -C <path>` explicitly rather than relying on the
 working directory, which is the general remedy for this family: **name the
 object in the command instead of inheriting it from context.**
+
+### The root form: no instrument at all
+
+The thirteen above are instruments that looked and reported wrongly. There
+is a case underneath them where **no instrument ran**, and it is the one
+that scales furthest, because its error is shared by everyone who reads the
+same sentence.
+
+Auditing `vendor/.cache`, two independent investigations both reported
+FIVE cached units. Neither counted. Both read a source comment --
+`cc.ts:774`, "The five cached vendored units (the engine archive, lre,
+zlib, SQLite, mbedTLS)" -- and inherited its number as the denominator of
+an audit. There are six; `ensureCurlStub` is not in the list.
+
+A comment that claims to enumerate a population is prose, not code. Nothing
+checks it, nothing fails when a sixth member is added, and once it is a
+denominator its error is the audit's error. That is worse than having no
+count, because it supplies confidence with the wrong number.
+
+**A count you did not derive is not yours to trust.** Derive the population
+from something the toolchain verifies -- call sites, directories on disk,
+the type every member implements -- and use the prose as a lead. See
+`docs/vendor-cache-key.md` for the worked case.
+
+This is the same defect as the reference-arm sweep in S3b, one level up.
+There, conclusions rested on arms whose denominators nobody had stated;
+here, an audit rested on a denominator somebody else had stated wrongly.
+Both are answered by the same question: **where did this number come from,
+and what would have made it different?**

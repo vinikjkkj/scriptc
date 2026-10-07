@@ -40,6 +40,30 @@ tell two toolchains apart either. A comment that enumerates the units is
 how both the original report and the first draft of this document missed
 it.
 
+### The rule that follows: a count you did not derive is not yours to trust
+
+Two independent investigations audited this cache and both reported FIVE
+units. Neither counted. Both read `cc.ts:774` -- "The five cached vendored
+units (the engine archive, lre, zlib, SQLite, mbedTLS)" -- and inherited
+its number as a denominator.
+
+A comment that claims to enumerate a population is **prose, not code**.
+Nothing checks it, nothing fails when a sixth member is added, and the
+moment it becomes the denominator of an audit its error becomes the audit's
+error -- silently, and identically for everyone who reads it. That is worse
+than an uncounted population, because it supplies confidence along with the
+wrong number.
+
+Derive the population from something the toolchain verifies: the call
+sites, the directories on disk, the type every member implements. Here any
+of three would have disagreed with the comment -- grepping for
+`rename(.*cacheDir)` finds seven populate sites across six functions; the
+cache directories on disk include a `curl-stub-*` the comment never
+mentions; and reading the functions in order reaches `ensureCurlStub`
+between SQLite and mbedTLS.
+
+Use the prose as a lead. Never as the source.
+
 The "1 bit" is literally:
 
 ```ts
