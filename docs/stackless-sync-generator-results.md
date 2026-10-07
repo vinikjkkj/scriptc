@@ -721,7 +721,29 @@ appearances of it are to be read as carrying this caveat.
 Suspending is not refuting. The rate hypothesis may survive re-derivation
 and may come back stronger; it is the number that is withdrawn, not the
 idea. Noting also that a p recomputed from arms chosen after seeing the
-result would not mean what the first one was meant to mean.
+result would not mean what the first one was meant to mean -- that caveat
+is what keeps the repair from becoming p-hacking, and it stays written.
+
+**THE RULE THIS COST, stated so the next count does not repeat it.** The
+defect in the twelve was never corrected. It **moved**. Naming the
+population fixed the total and left every value derived from that total
+still carrying the old scope, with none of the warning that had just been
+attached to its parent -- which is precisely why the p survived the
+previous correction untouched and had to be caught separately, by
+arithmetic that happened to collide. So: **when a count is corrected for a
+missing population, sweep every value derived from it in the same pass.**
+A derivative inherits the scope and does not inherit the caveat. A
+denominator is the favourite hiding place, because a corrected total looks
+like a closed matter and nobody re-reads the ratios underneath it.
+
+**And the suspension has a price already quoted.** The open item built on
+this p was costed to the user as 78 runs and up to 6.5 hours, to separate
+a 50% rate from a real 80%. Those arms come from the same unnamed
+population, so the estimate is suspended with the number: not shown to be
+wrong, shown to be an estimate for distinguishing two figures whose
+denominator nobody had declared. It is recorded here rather than left
+standing in a readiness report, which is where the retracted 0.45 GB/run
+figure did its damage.
 
 **THE CANONICAL STANDING FORM LIVES HERE AND NOWHERE ELSE.** It read
 "eleven" here and "twelve" 486 lines further down, both labelled
@@ -865,6 +887,49 @@ confirmation that would have read as "the text was never there". It was
 caught only because the positive control was required to come back
 **1**, not merely to differ. The run that stands is the one with no shell
 between the source and the interpreter.
+
+### 12.11 KNOWING THE RULE DID NOT STOP IT: an all-clear on the failure branch
+
+The rule *"never put the all-clear on the failure branch"* is written into
+this slice's own operating brief. It was broken in this slice, in the
+session that quotes it, by the agent that had been reciting it all day.
+That is the reason to record the event: not as carelessness, but as
+evidence that **a rule held in attention is not a guard, and only a
+mechanical check is.**
+
+**What happened, in three compounding parts.** A commit was made with
+`git commit -F <path>` where the path had not been verified to exist;
+`2>/dev/null` was appended, which swallowed git's complaint; and the
+confirmation `echo` was chained with an unconditional `;` rather than
+`&&`, so it printed its message no matter what the command in front of it
+did. The path resolved to a **stale message file from two days earlier**.
+The commit landed titled *"test(coro): the two try shapes, and a ledger
+that refuses to claim them"* -- an accurate description of an entirely
+different change -- while the terminal printed a line asserting the
+opposite of what had just occurred.
+
+**Each part alone is survivable; the three compose into a silent wrong
+answer**, which is the shape this document keeps finding. The unverified
+path creates the error. The redirect hides it. The unconditional echo
+replaces it with a reassurance. Nothing in the output distinguishes that
+run from a correct one, and the defect is in `git log`, not in the working
+tree, so neither the post-write byte checks nor the diff would ever have
+pointed at it.
+
+**Repair, and why it was an amend.** The message was amended and the
+content was not touched: an unpushed tip whose message describes a
+different change is a defect rather than a cosmetic preference, and the
+usual rule against amending exists to protect history that someone else
+may have read. The replacement message file has a unique, dated name, the
+amend is now guarded by a `-s` test on the message file that aborts before
+`git commit` runs, and the subject is grepped afterwards for a word it
+must contain. Three guards, because the failure had three parts.
+
+**The general form.** Every piece of this was known in advance and written
+down. What was missing was the one thing that does not depend on being
+remembered at the moment of use. **Convert the rules you recite into
+checks that fail loudly**, or they protect exactly the cases you were
+already going to get right.
 
 ## 13. The fix, and the +144 that was never in the source
 
