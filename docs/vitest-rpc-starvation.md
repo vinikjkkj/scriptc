@@ -520,8 +520,21 @@ plain rate stays near half:
 So **four more plain runs (~20 min)** lands it comfortably under 0.05 with
 room for an unlucky draw. But pinning the RATE -- distinguishing a true 50%
 from a true 80% -- needs **39 runs per arm, 78 runs, 3.9 to 6.5 hours**.
-Significance is cheap; the number is not. Unless the rate itself becomes the
-target, this should be declared open rather than pursued.
+
+**DECISION: the rate is DECLARED OPEN.** Not unknown by neglect, and not
+pending: a decision, with its price attached so nobody reopens it without
+seeing the bill. The target of this investigation is the CAUSE, and the
+rate is not on the path to it -- knowing whether the plain invocation fails
+at 50% or 80% does not name a file, a line, or a mechanism. Four runs buy
+significance on the CONTRAST (plain differs from gate), which is all any
+downstream argument needs; 78 runs buy a number that no downstream argument
+uses.
+
+Reopen it only if the rate itself becomes the target -- for instance if a
+fix is proposed whose claim is "this lowers the rate", which cannot be
+evaluated against a rate nobody measured. In that case the 78 runs are the
+entry price and must be budgeted before the fix is attempted, not after it
+looks good.
 
 ### 7.5 Repointing the instrument requires an anchor run
 
