@@ -2,7 +2,7 @@ import { execFile } from "node:child_process";
 import { tapPhase } from "../phase-tap.js";
 import { createHash } from "node:crypto";
 import { createRequire } from "node:module";
-import { appendFile, chmod, copyFile, mkdir, mkdtemp, readdir, readFile, rename, rm, rmdir, stat, unlink, utimes, writeFile } from "node:fs/promises";
+import { appendFile, chmod, copyFile, mkdir, mkdtemp, readdir, readFile, realpath, rename, rm, rmdir, stat, unlink, utimes, writeFile } from "node:fs/promises";
 import { readFileSync } from "node:fs";
 import { availableParallelism, tmpdir } from "node:os";
 import { basename, dirname, join, sep } from "node:path";
@@ -653,6 +653,115 @@ async function fileExists(path: string): Promise<boolean> {
   );
 }
 
+/* ---------------------------------------------------------------------------
+ * VENDOR CACHE TOOLCHAIN STAMP -- a DETECTOR, deliberately not a cache key.
+ *
+ * vendor/.cache keys the DRIVER as at most one bit:
+ *   (driver.argv.length === 1 && driver.argv[0] === "clang") ? "" : "-zigcc"
+ * and three of the six cached units (libqjs.a, libmbedtls.a, curl-stub) carry
+ * no driver component at all. A bit CLASSIFIES; it does not IDENTIFY. The two
+ * zig installs on this host both spell "-zigcc" and share a directory, so an
+ * object built by one is silently handed to the other -- observed as
+ * libregexp.o/libunicode.o built eleven hours apart under an identical key,
+ * the fresh one carrying a clang version banner and a .debug$S section and
+ * the stale one carrying neither.
+ *
+ * Two guards do not cover this. Asserting the zig version protects what a run
+ * COMPILES, not what a cache already holds; and vendor/.cache is gitignored,
+ * so git status, the gate's dirty-worktree guard and treehash are all blind
+ * to it. A run can be clean tree, pinned lane, treehash checked, and still
+ * link a foreign object.
+ *
+ * WHY A DETECTOR AND NOT THE FIX. Widening the key is the fix, and it
+ * invalidates every entry in every worktree at once, mid-series, for
+ * everyone. This changes NO key: it writes a stamp beside the objects and
+ * compares it on a hit. Nobody's cache is invalidated, no window is needed,
+ * and it computes exactly the identity the key fix will need.
+ *
+ * ABSENCE READS UNKNOWN, NEVER MATCH. Caches populated before this existed
+ * have no stamp. Treating a missing stamp as agreement would certify every
+ * stale object already on the box -- "n/a is not 0", in the one place it
+ * would do the most damage.
+ *
+ * Never throws: a detector that can fail a build is a worse defect than the
+ * one it detects. SCRIPTC_VENDOR_CACHE_STRICT=1 upgrades a MISMATCH to an
+ * error for a run that wants to refuse rather than report.
+ */
+const TOOLCHAIN_STAMP = ".toolchain";
+const toolchainIds = new Map<string, string>();
+const toolchainReported = new Set<string>();
+
+/** realpath + full argv + the compiler's own version line. The version line
+ * is the load-bearing part: it carries the embedded clang version, which is
+ * the quantity that actually moved codegen. One spawn per driver per
+ * process, memoised. */
+export async function toolchainId(driver: CcDriver): Promise<string> {
+  const memoKey = driver.argv.join(" ");
+  const memo = toolchainIds.get(memoKey);
+  if (memo !== undefined) return memo;
+  const exe = driver.argv[0] ?? "";
+  let where = exe;
+  try {
+    where = await realpath(exe);
+  } catch {
+    /* a bare name resolved through PATH: keep it as spelled */
+  }
+  let version = "unavailable";
+  try {
+    const r = await execFileAsync(exe, [...driver.argv.slice(1), "--version"]);
+    const text = r.stdout.length > 0 ? r.stdout : r.stderr;
+    const line = text.split("\n")[0];
+    if (line !== undefined && line.trim().length > 0) version = line.trim();
+  } catch {
+    /* no version flag: the hash still separates path and argv */
+  }
+  const id =
+    createHash("sha256").update([where, ...driver.argv.slice(1), version].join(" ")).digest("hex").slice(0, 12) +
+    " " + version;
+  toolchainIds.set(memoKey, id);
+  return id;
+}
+
+/** Stamp a STAGING directory before its atomic rename, so the stamp lands
+ * with the objects or not at all. */
+export async function stampToolchain(stageDir: string, driver: CcDriver): Promise<void> {
+  try {
+    await writeFile(join(stageDir, TOOLCHAIN_STAMP), (await toolchainId(driver)) + "\n");
+  } catch {
+    /* never fail a build for a detector */
+  }
+}
+
+/** Compare on a cache HIT. Deduplicated per process: loud once, not once per
+ * compile, because a gate links thousands of programs. */
+export async function checkToolchain(cacheDir: string, driver: CcDriver, unit: string): Promise<void> {
+  const strict = process.env["SCRIPTC_VENDOR_CACHE_STRICT"] === "1";
+  let built: string | null = null;
+  let now = "unavailable";
+  try {
+    try {
+      built = (await readFile(join(cacheDir, TOOLCHAIN_STAMP), "utf8")).trim();
+    } catch {
+      built = null;
+    }
+    now = await toolchainId(driver);
+  } catch {
+    return;
+  }
+  if (built === now) return;
+  const kind = built === null ? "VENDOR-CACHE-UNKNOWN" : "VENDOR-CACHE-MISMATCH";
+  const line =
+    "scriptc: " + kind + " unit=" + unit + " dir=" + basename(cacheDir) +
+    " built=" + (built ?? "<no-stamp>") + " now=" + now + "\n";
+  if (!toolchainReported.has(line)) {
+    toolchainReported.add(line);
+    process.stderr.write(line);
+  }
+  if (built !== null && strict) {
+    throw new Error("vendor cache built by a different toolchain: " + unit + " in " + cacheDir);
+  }
+}
+
 /** -DSCR_RC_AUDIT is a SEPARATE dial from -fsanitize=address, and the two
  * were only ever spelled together because the sanitized lane wanted both.
  * The define costs a live counter per refcounted kind plus an atexit
@@ -881,7 +990,10 @@ async function ensureEngineArchive(sanitize: boolean, driver: CcDriver): Promise
   const cacheRoot = join(vendor, "..", ".cache");
   const cacheDir = join(cacheRoot, `${QJS_COMMIT.slice(0, 12)}-${flavor}`);
   const archive = join(cacheDir, "libqjs.a");
-  if (await fileExists(archive)) return archive;
+  if (await fileExists(archive)) {
+    await checkToolchain(cacheDir, driver, "qjs");
+    return archive;
+  }
   if (driver.target !== null) return buildEngineArchiveCross(sanitize, driver, cacheRoot, cacheDir);
 
   await mkdir(cacheRoot, { recursive: true });
@@ -920,6 +1032,7 @@ async function ensureEngineArchive(sanitize: boolean, driver: CcDriver): Promise
     // build won the race, and the winner's archive is just as good.
     await mkdir(stageDir);
     await copyFile(join(buildDir, "libqjs.a"), join(stageDir, "libqjs.a"));
+    await stampToolchain(stageDir, driver);
     await rename(stageDir, cacheDir).catch(() => undefined);
   } finally {
     await rm(buildDir, { recursive: true, force: true });
@@ -982,6 +1095,7 @@ async function buildEngineArchiveCross(sanitize: boolean, driver: CcDriver, cach
     const stageDir = `${buildDir}.stage`;
     await mkdir(stageDir);
     await copyFile(join(buildDir, "libqjs.a"), join(stageDir, "libqjs.a"));
+    await stampToolchain(stageDir, driver);
     await rename(stageDir, cacheDir).catch(async () => {
       await rm(stageDir, { recursive: true, force: true });
     });
@@ -1022,7 +1136,10 @@ async function ensureLreObjects(sanitize: boolean, driver: CcDriver): Promise<st
   const cacheRoot = join(vendor, "..", ".cache");
   const cacheDir = join(cacheRoot, `${QJS_COMMIT.slice(0, 12)}-lre-${flavor}`);
   const objects = LRE_SOURCES.map((f) => join(cacheDir, f.replace(/\.c$/, ".o")));
-  if ((await Promise.all(objects.map(fileExists))).every(Boolean)) return objects;
+  if ((await Promise.all(objects.map(fileExists))).every(Boolean)) {
+    await checkToolchain(cacheDir, driver, "lre");
+    return objects;
+  }
 
   await mkdir(cacheRoot, { recursive: true });
   const buildDir = await mkdtemp(join(cacheRoot, `build-lre-${flavor}-`));
@@ -1054,6 +1171,7 @@ async function ensureLreObjects(sanitize: boolean, driver: CcDriver): Promise<st
     }
     // Atomic publish: rename fails if a concurrent build won the race, and
     // the winner's objects are just as good.
+    await stampToolchain(buildDir, driver);
     await rename(buildDir, cacheDir).catch(() => undefined);
   } finally {
     await rm(buildDir, { recursive: true, force: true });
@@ -1090,7 +1208,10 @@ async function ensureZlibObjects(sanitize: boolean, driver: CcDriver): Promise<s
   const cacheRoot = join(vendor, "..", ".cache");
   const cacheDir = join(cacheRoot, `zlib-${ZLIB_VERSION}-${flavor}`);
   const objects = ZLIB_SOURCES.map((f) => join(cacheDir, f.replace(/\.c$/, ".o")));
-  if ((await Promise.all(objects.map(fileExists))).every(Boolean)) return objects;
+  if ((await Promise.all(objects.map(fileExists))).every(Boolean)) {
+    await checkToolchain(cacheDir, driver, "zlib");
+    return objects;
+  }
 
   await mkdir(cacheRoot, { recursive: true });
   const buildDir = await mkdtemp(join(cacheRoot, `build-zlib-${flavor}-`));
@@ -1120,6 +1241,7 @@ async function ensureZlibObjects(sanitize: boolean, driver: CcDriver): Promise<s
     }
     // Atomic publish: rename fails if a concurrent build won the race, and
     // the winner's objects are just as good.
+    await stampToolchain(buildDir, driver);
     await rename(buildDir, cacheDir).catch(() => undefined);
   } finally {
     await rm(buildDir, { recursive: true, force: true });
@@ -1212,7 +1334,10 @@ async function ensureSqliteObjects(sanitize: boolean, driver: CcDriver): Promise
   const cacheRoot = join(vendor, "..", ".cache");
   const cacheDir = join(cacheRoot, `sqlite-${SQLITE_VERSION}-${flavor}`);
   const objects = [join(cacheDir, "sqlite3.o")];
-  if ((await Promise.all(objects.map(fileExists))).every(Boolean)) return objects;
+  if ((await Promise.all(objects.map(fileExists))).every(Boolean)) {
+    await checkToolchain(cacheDir, driver, "sqlite");
+    return objects;
+  }
 
   await mkdir(cacheRoot, { recursive: true });
   const buildDir = await mkdtemp(join(cacheRoot, `build-sqlite-${flavor}-`));
@@ -1232,6 +1357,7 @@ async function ensureSqliteObjects(sanitize: boolean, driver: CcDriver): Promise
       ],
       { cwd: buildDir },
     );
+    await stampToolchain(buildDir, driver);
     await rename(buildDir, cacheDir).catch(() => undefined);
   } finally {
     await rm(buildDir, { recursive: true, force: true });
@@ -1271,7 +1397,10 @@ async function ensureCurlStub(driver: CcDriver): Promise<string> {
   const cacheRoot = join(vendorCurlDir(), "..", ".cache");
   const cacheDir = join(cacheRoot, `curl-stub-${driver.target}`);
   const lib = join(cacheDir, "libcurl.so");
-  if (await fileExists(lib)) return cacheDir;
+  if (await fileExists(lib)) {
+    await checkToolchain(cacheDir, driver, "curl-stub");
+    return cacheDir;
+  }
 
   await mkdir(cacheRoot, { recursive: true });
   const buildDir = await mkdtemp(join(cacheRoot, `build-curl-stub-`));
@@ -1291,6 +1420,7 @@ async function ensureCurlStub(driver: CcDriver): Promise<string> {
     const stageDir = `${buildDir}.stage`;
     await mkdir(stageDir);
     await copyFile(join(buildDir, "libcurl.so"), join(stageDir, "libcurl.so"));
+    await stampToolchain(stageDir, driver);
     await rename(stageDir, cacheDir).catch(async () => {
       await rm(stageDir, { recursive: true, force: true });
     });
@@ -1335,7 +1465,10 @@ async function ensureTlsArchive(sanitize: boolean, driver: CcDriver): Promise<st
   const cacheRoot = join(vendor, "..", ".cache");
   const cacheDir = join(cacheRoot, `mbedtls-${MBEDTLS_VERSION}-${flavor}`);
   const archive = join(cacheDir, "libmbedtls.a");
-  if (await fileExists(archive)) return archive;
+  if (await fileExists(archive)) {
+    await checkToolchain(cacheDir, driver, "mbedtls");
+    return archive;
+  }
 
   await mkdir(cacheRoot, { recursive: true });
   const buildDir = await mkdtemp(join(cacheRoot, `build-mbedtls-${flavor}-`));
@@ -1366,6 +1499,7 @@ async function ensureTlsArchive(sanitize: boolean, driver: CcDriver): Promise<st
     const stageDir = `${buildDir}.stage`;
     await mkdir(stageDir);
     await copyFile(join(buildDir, "libmbedtls.a"), join(stageDir, "libmbedtls.a"));
+    await stampToolchain(stageDir, driver);
     await rename(stageDir, cacheDir).catch(async () => {
       await rm(stageDir, { recursive: true, force: true });
     });
