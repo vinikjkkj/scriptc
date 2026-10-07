@@ -546,3 +546,55 @@ instrument and confirm both the verdict and a comparable MACHINE column.
 Two runs, ~5 minutes. Swapping instruments without an anchor is changing the
 ruler mid-series, and nothing measured after it is comparable to anything
 measured before.
+
+## 8. How the instruments failed, and why they nearly all failed the same way
+
+Nine times in one day an instrument on this front returned something that
+looked like a result and was not. They are collected here because the
+pattern across them is sharper than any one of them.
+
+| # | instrument | what it reported | why it was wrong | how it was caught |
+|---|---|---|---|---|
+| 1 | shard-interval extractor | uniform **0.0%** foreign-rig overlap | keyed on `DISK-TROUGH`, which exists only in the newer gate, so every older run's intervals were dropped | per-rig coverage control: one rig parsed 0, and only 49 of 110 shard-runs appeared |
+| 2 | path normaliser for Jaccard | **J = 0.0000** against one run | that run lived in `slice-wt`, a repo root the normaliser did not know | a complete disjunction sitting beside 0.95 is not credible |
+| 3 | file-set comparison | **"IDENTICAL"** | both extractions had failed; two empty sets compare equal | printing the set sizes (0 and 0) |
+| 4 | `CurrentDiskQueueLength` | **0** under 768 MB of writes | an instantaneous gauge sampled at 10 s is a lottery; it read non-zero on 2 of 12 samples even at 1.3 GB/s | positive control that forced real I/O |
+| 5 | `scriptc: early cache hit` count | **5** cold and **5** warm | it counts five specific compilations, not cache temperature | positive control across a known-cold and two known-warm runs |
+| 6 | `rg ... ; echo "(ascii clean)"` | **clean** | the echo was unconditional; `rg` had in fact flagged a backspace byte on line 71 | reading `rg`'s own output instead of the echo |
+| 7 | `grep -P ... && echo DIRTY \|\| echo CLEAN` | **clean** | `grep -P` failed on the locale; `\|\|` fired on the ERROR, not on a non-match | rebuilt with a positive control that plants a byte and must flag it |
+| 8 | `rg -q` on a path that did not exist | **clean** | same shape as 7: failure read as absence | checking the file existed before reporting on it |
+| 9 | content grep over prose | phrase **absent** | present, but split across a line break | re-matched with newlines collapsed |
+
+### They fail toward the null, and that inverts where scrutiny belongs
+
+Eight of the nine reported **"clean", "zero", "identical", "no difference"**.
+Only #9 failed the other way, toward a false alarm. That is not luck: the
+failure modes available to a search or a check are *didn't-find* shaped --
+wrong pattern, wrong field, missing file, dead counter, unrun command. There
+is no symmetric mechanism that invents a match.
+
+The consequence runs against the usual instinct. A positive result is
+self-validating: the pattern matched, so the pattern works. **A null result
+is the one that needs proving, because the commonest explanation for it is
+that the instrument never looked.** On this front the null was also usually
+the convenient answer -- no overlap, no difference, no dirty bytes -- which
+is exactly when nobody rechecks.
+
+### The four rules that would have caught all nine
+
+1. **Positive-control every zero on real data.** Before believing "not
+   found", point the same pattern at something known to contain it. This
+   caught #1, #2, #4 and #5.
+2. **Prove a column can MOVE, both directions.** A counter that always reads
+   the same is indistinguishable from a stable machine. #4 and #5 were dead
+   and readable, which is the worst combination.
+3. **Assert the input is non-empty before comparing.** A comparison of
+   nothing is not a match (#3).
+4. **Never let `||` carry a verdict.** `cmd || echo CLEAN` reports clean when
+   `cmd` FAILS, not only when it finds nothing -- exit 1 and exit 2 are
+   different facts and branching merges them. Either separate them, or do
+   not branch: require a positive assertion that the check ran and passed
+   (#6, #7, #8).
+
+And for prose rather than code, match with newlines collapsed or on a short
+distinctive token, because wrapping breaks a phrase grep (#9).
