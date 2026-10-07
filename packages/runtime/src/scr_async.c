@@ -4792,6 +4792,7 @@ ScrGen *scr_gen_retain(ScrGen *g) {
   return g;
 }
 
+#ifdef SCR_CORO_LANE
 /* A frame-backed generator's frame teardown. Deliberately not a plain
  * free(): scr_coro_init RETAINED the spawner's AsyncLocalStorage context
  * into base->als (Node's init-time capture), and on the async lane
@@ -4815,6 +4816,7 @@ static void scr_gen_coro_frame_free(ScrCoroBase *base) {
 #endif
   free(base);
 }
+#endif /* SCR_CORO_LANE */
 
 void scr_gen_release(ScrGen *g) {
   if (!g || --g->rc != 0) return;
@@ -4831,6 +4833,7 @@ void scr_gen_release(ScrGen *g) {
   scr_gen_slot_reset(&g->in);
   scr_gen_slot_reset(&g->ret);
   scr_exc_cell_drop(&g->fail); /* a native settlement nobody received */
+#ifdef SCR_CORO_LANE
   if (g->backing == SCR_GEN_BACKED_FRAME) {
     if (g->frame != NULL) {
       if (g->state == SCR_GEN_UNSTARTED) {
@@ -4862,7 +4865,9 @@ void scr_gen_release(ScrGen *g) {
        * the gap was a missing +1, not a missing -1. */
       g->frame = NULL;
     }
-  } else if (g->fiber != NULL) {
+  } else
+#endif /* SCR_CORO_LANE */
+  if (g->fiber != NULL) {
     if (g->state == SCR_GEN_UNSTARTED) {
       /* Never ran: nothing on the stack owns anything — clean teardown.
        * The packed arguments (+1 each) drop through the emitted helper. */
@@ -5678,11 +5683,12 @@ void scr_gen_resume(ScrGen *g) {
      * OUT is NONE (the completing resume took it). */
     return;
   default:
-    if (g->backing == SCR_GEN_BACKED_FRAME) {
 #ifdef SCR_CORO_LANE
+    if (g->backing == SCR_GEN_BACKED_FRAME) {
       scr_gen_coro_step(g, SCR_GEN_INJECT_NONE);
+    } else
 #endif
-    } else {
+    {
       scr_gen_switch_in(g);
     }
   }
@@ -5701,6 +5707,7 @@ void scr_gen_resume_return(ScrGen *g) {
   case SCR_GEN_UNSTARTED:
     /* The body never runs: tear the backing down cleanly (drop the
      * arguments) and complete with the parked value. */
+#ifdef SCR_CORO_LANE
     if (g->backing == SCR_GEN_BACKED_FRAME) {
       if (g->drop_args != NULL) g->drop_args(g->frame);
       scr_gen_coro_frame_free(g->frame);
@@ -5709,6 +5716,7 @@ void scr_gen_resume_return(ScrGen *g) {
       scr_gen_ret_to_out(g);
       return;
     }
+#endif
     if (g->drop_args != NULL) g->drop_args(g->fiber->argpack);
     else free(g->fiber->argpack);
     scr_fiber_destroy(g->fiber);
@@ -5720,15 +5728,15 @@ void scr_gen_resume_return(ScrGen *g) {
   default:
     /* Suspended at a yield: inject the sentinel (an earlier .return whose
      * unwind a finally-yield parked leaves it already set) and resume. */
-    if (g->backing == SCR_GEN_BACKED_FRAME) {
 #ifdef SCR_CORO_LANE
+    if (g->backing == SCR_GEN_BACKED_FRAME) {
       /* The sentinel goes in INSIDE the INV-5 window, not here: a fat
        * frame installs its own cell, so writing it now would land it in
        * the CONSUMER's and the body would never see it. */
       scr_gen_coro_step(g, SCR_GEN_INJECT_RET);
-#endif
       return;
     }
+#endif
     if (g->fiber->exc.kind == SCR_EXC_NONE) g->fiber->exc.kind = SCR_EXC_GENRET;
     scr_gen_switch_in(g);
   }
@@ -5749,6 +5757,7 @@ void scr_gen_resume_throw(ScrGen *g) {
   case SCR_GEN_UNSTARTED:
     /* The body never runs; the generator becomes done and the payload
      * stays pending in the caller (probed Node behavior). */
+#ifdef SCR_CORO_LANE
     if (g->backing == SCR_GEN_BACKED_FRAME) {
       if (g->drop_args != NULL) g->drop_args(g->frame);
       scr_gen_coro_frame_free(g->frame);
@@ -5756,6 +5765,7 @@ void scr_gen_resume_throw(ScrGen *g) {
       g->state = SCR_GEN_DONE;
       return;
     }
+#endif
     if (g->drop_args != NULL) g->drop_args(g->fiber->argpack);
     else free(g->fiber->argpack);
     scr_fiber_destroy(g->fiber);
@@ -5767,15 +5777,15 @@ void scr_gen_resume_throw(ScrGen *g) {
     /* Move the caller's pending payload into the fiber's cell (an
      * earlier sentinel parked by a finally-yield is replaced — the
      * injected throw wins, like a throw inside that finally). */
-    if (g->backing == SCR_GEN_BACKED_FRAME) {
 #ifdef SCR_CORO_LANE
+    if (g->backing == SCR_GEN_BACKED_FRAME) {
       /* The payload is already pending in the ACTIVE cell, where a lean
        * frame's body reads it; a fat frame's own cell is installed by
        * state_in, so the step moves it across inside the window. */
       scr_gen_coro_step(g, SCR_GEN_INJECT_THROW);
-#endif
       return;
     }
+#endif
     ScrExcCell *mine = scr_exc_current_cell();
     ScrExcCell *dst = &g->fiber->exc;
     dst->kind = mine->kind;

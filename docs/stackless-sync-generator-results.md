@@ -630,3 +630,151 @@ in the tool; the caller now passes both, and equality is exact:
 ```
 node textanchor.mts <repo-root> 543702 630182
 ```
+
+### 12.9 CORRECTED: shard 3's attribution holds, its explanation does not
+
+The `onTaskUpdate` timeout signature is **not about this slice**, and that
+is now better supported than when it was first set aside: **eleven**
+reproductions, **all** on shard 3, across more than 110 shard-runs, on
+trees that do not contain this slice, every one of them with **zero failing
+assertions**. Separate it in any report, and do not relaunch it -- the
+relaunch rule covers `CcCompileError` with zero `error:` lines, and this is
+not that.
+
+**What collapsed is the explanation, not the attribution**, and the two
+must not be swapped for one another.
+
+It was previously described as specific to the gate's invocation, and then
+as a conjunction of content and invocation, neither sufficient alone. That
+rested on the plain-invocation arm reading green. It does not: the
+controlling block took that arm from 0 of 2 -- which excludes nothing -- and
+the **first** additional run reproduced the signature under plain,
+unaltered invocation with a warm cache, `onTaskUpdate=1`, zero failing
+assertions. It stopped there, as pre-registered, and did not spend the
+remaining two.
+
+So **invocation is refuted as necessary.** The conjunction claim is dead,
+and must not reappear in other words.
+
+What may survive is weaker and different: a difference in **rate**, 2 of 4
+under plain invocation against 11 of 11 under the gate's, Fisher
+**p = 0.057**. Suggestive, not established. It is a separate hypothesis
+with its own evidence, not the conjunction redressed, and nothing in this
+document should state it more strongly than that.
+
+The standing form, verbatim, is: *known signature, eleven reproductions,
+all on shard 3, cause open; invocation is not necessary, and a rate
+difference stands at p = 0.057.*
+
+This is also why the earlier 0-of-2 green arm deserved the caution it got.
+Two clean draws against a defect of unknown rate is not evidence of
+absence, and the run that refuted it was the third.
+
+## 13. The fix, and the +144 that was never in the source
+
+### 13.1 The seven sites close the breach exactly
+
+Measured in RECORDED_LANE (`SCRIPTC_TARGET=x86_64-windows-gnu`,
+`SCRIPTC_CC=zigcc`, zig 0.16.0), knob **absent**, against main's figures:
+
+| program | main | branch, before | branch, after | target met |
+|---|---|---|---|---|
+| hello-world | 543,702 | 544,214 (+512) | **543,702** | exact |
+| regex | 630,182 | 630,838 (+656) | **630,182** | exact |
+
+The seven sites cost **512 bytes in both programs**. The shipping criterion
+holds on both, by exact equality and not by tolerance.
+
+The permanent test fires on the real file: reverting one of the seven --
+`throw default`, put back to `#ifdef`-inside-the-`if`, the exact shape the
+first reading mistook for guarded -- turns it red naming **line 5780**,
+while its controls stay green. That is sensitivity on the subject, not only
+on synthetic input.
+
+Knob-on parity is unchanged by the fix: 12 of 12, including all six
+lifecycle arms (`genret`, `genthrow`, `bodythrow`, `nextval`, `als`,
+`collide`) and the two poison controls that prove the comparison can see a
+wrong arm. `EXPECTED_CONVERSIONS = 1` is asserted on the knob-on arm, so a
+green here cannot mean the wrap silently disabled the lane -- 0 would fail.
+
+### 13.2 The +144 was a stale vendor object cache, not code
+
+Between those two columns sat a false lead worth recording, because the
+wrong conclusion was one measurement away and it would have been a
+plausible one.
+
+After the fix the hello-world was exact but the regex program read
+**630,326**, +144 over main. The obvious reading -- a second breach of the
+same class, in code only the regex program links -- is wrong. What killed
+it was that the +144 **did not follow the source**:
+
+| tree | regex `.text` |
+|---|---|
+| main, untouched | 630,182 |
+| main runtime + **branch compiler** | 630,182 |
+| main + each of the 5 changed runtime files, **alone** | 630,182 (5 of 5) |
+| main + **all five** changed runtime files | 630,182 |
+| **the branch worktree itself** | **630,326** |
+
+Same compiler source, same runtime source, two different numbers. So it was
+never in `packages/compiler/src` or `packages/runtime/src`.
+
+A byte-level comparison of the two runtime trees found it:
+
+```
+packages/runtime/vendor/.cache/3c8f3d689539-lre-plain-zigcc-x86_64-windows-gnu/
+    libregexp.o    llvm-wt 39,578 B @ 12:04     fresh 39,776 B @ 23:35
+    libunicode.o   llvm-wt 70,046 B @ 12:04     fresh 70,098 B @ 23:35
+```
+
+Exactly the two libraries the regex program links and the hello-world does
+not, which is why the residual appeared on one program and not the other.
+The branch worktree was linking objects built eleven hours earlier under
+conditions that no longer hold. Moving that directory aside and rebuilding
+produced **630,182, exact**.
+
+Three things make this worth more than its own fix:
+
+**The cache key does not capture what built the object.** Both trees name
+the directory `3c8f3d689539-lre-plain-zigcc-x86_64-windows-gnu` -- a source
+hash, the variant, the driver, the target -- and the contents still differ.
+Whatever changed between 12:04 and now is outside the key. On a host with
+**two zigs** that differ by ~20 KB on the size class, an object cache keyed
+without the compiler identity is a standing hazard, not a one-off.
+
+**It is invisible to every check we run.** `vendor/.cache` matches
+`.cache*/` in `.gitignore`, so it is untracked: `git status` is clean, the
+gate's dirty-worktree guard passes, the treehash is unchanged, and a fresh
+worktree simply has none. Nothing in the gate can see it.
+
+**It lands inside the thing it measures.** A size anchor exists to detect
+bytes that appear without a source change; a stale object cache produces
+bytes without a source change. The instrument and the defect have the same
+signature, so the anchor reports a code regression and names no file.
+
+### 13.3 What this does to the registered +32 bisection
+
+The bisection registered in section 11 walks `e03bdf0aa..main` for a step
+that explains the regex program's **+32** against its recorded 630,150. Its
+step zero -- the rig must reproduce main's 630,182 exactly -- **passes**:
+measured here at 630,182 on a clean worktree.
+
+But section 13.2 supplies a candidate the walk cannot find, because it is
+not in any commit. The recorded 630,150 was taken at `e03bdf0aa` in
+whatever worktree existed then, with whatever vendor objects it held. If
+those differed from a freshly built set the way today's did, the +32 is a
+property of the **recording environment**, not of any change between the
+two commits -- and 97 commits would be walked for a step that does not
+exist.
+
+So the first step is no longer the first commit. It is to measure
+`e03bdf0aa` itself, on a clean worktree with **no** vendor cache:
+
+- it reads **630,150** -> the recorded figure is reproducible, the +32 is a
+  real code step, and the walk is sound as registered;
+- it reads **630,182** -> the +32 never was a code step; both commits agree
+  today and the recorded figure carries a stale-cache artifact. The walk is
+  cancelled and the baseline comment gets the explanation instead.
+
+Either way it is one measurement, and it is the one that decides whether
+the other ninety-seven are worth taking.
