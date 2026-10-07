@@ -598,3 +598,32 @@ is exactly when nobody rechecks.
 
 And for prose rather than code, match with newlines collapsed or on a short
 distinctive token, because wrapping breaks a phrase grep (#9).
+
+### Instances 10 and 11, produced while verifying the commit above
+
+The section you have just read was merged, and its own post-merge
+verification produced two more instances of what it describes. They are
+recorded because they settle a question the section leaves open: whether
+knowing the pattern is enough to avoid it.
+
+Checking that rule 4 had landed, two greps in a row reported it missing:
+
+- the first searched `never let` against a document containing `Never let`
+  -- a case mismatch;
+- the second searched `never let .\{0,4\}carry a verdict`, and the real gap
+  is `` `||` `` plus a space, five characters. One too many.
+
+The second printed the words **GENUINELY ABSENT**, which is a confident
+assertion manufactured by a pattern that was too narrow. The text was there
+the whole time, three lines below where the same command had successfully
+matched three other markers.
+
+Both were caught by the section's own rule 1 -- point the matcher at
+something known to contain the thing -- applied as a literal substring
+search with a must-be-0 and a must-be-1 control beside it.
+
+**The lesson is not "be more careful with patterns".** It is that the author
+of this taxonomy, within minutes of writing it, produced two more entries
+for it while deliberately looking for exactly this failure. Intention does
+not protect anyone here. Only a mechanical positive control does, and it has
+to be attached to the check itself rather than kept in mind.
