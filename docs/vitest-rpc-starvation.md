@@ -778,3 +778,10 @@ There, conclusions rested on arms whose denominators nobody had stated;
 here, an audit rested on a denominator somebody else had stated wrongly.
 Both are answered by the same question: **where did this number come from,
 and what would have made it different?**
+
+The question is the method. The criterion is harder, and it is what makes
+the method survive a tired reader: **a number without an answer to the
+second half is not a measurement.** That is a predicate, and a predicate is
+something a doc line, a table cell or a commit can FAIL -- where the
+question alone depends on somebody remembering to ask it, which is the
+exact dependency that failed thirteen times above.
