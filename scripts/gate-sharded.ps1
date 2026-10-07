@@ -299,6 +299,7 @@ function Say([string]$m) {
   [Console]::Out.WriteLine($line)
 }
 
+. "G:/blocks/machine-sampler.ps1"   # MACHINE column: free RAM / CPU / disk extrema
 function FreeGB { [math]::Round((Get-PSDrive -Name G).Free / 1GB, 2) }
 
 # ---------------------------------------------------------------------------
@@ -371,8 +372,10 @@ function Invoke-Judged {
   # the shard, so that is what is sampled and reported.
   $trough = FreeGB
   $sampled = $false
+  $mach = Initialize-MachineSampler     # warms the CIM session BEFORE the loop
   while (-not $p.HasExited) {
     Start-Sleep -Seconds 10
+    $mach = Add-MachineSample -Acc $mach
     $f = FreeGB
     if ($f -lt $trough) { $trough = $f }
     if ($f -lt $DiskFloorGB) {
@@ -397,6 +400,7 @@ function Invoke-Judged {
   }
   $p.WaitForExit()
   Say ("DISK-TROUGH tag={0} trough={1}GB floor={2}GB" -f $Tag, $trough, $DiskFloorGB)
+  Say (Format-MachineSample -Acc $mach -Tag $Tag)
   $rc  = $p.ExitCode
   $min = [math]::Round(((Get-Date) - $t0).TotalMinutes, 2)
 
