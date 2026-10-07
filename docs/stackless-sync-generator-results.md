@@ -249,10 +249,28 @@ the end equalled the baseline, so nothing moved under the run.
 
     Error: [vitest-worker]: Timeout calling "onTaskUpdate"
 
-with **0 failed assertions out of 743**. Sixth occurrence of the signature
-on this front, and the first on a different tree and branch -- pinned to
-shard 3 both times, which a merely random timing fault would not be. Not
-relaunched: the signature is not in the relaunch rule.
+with **0 failed assertions out of 743**. Not relaunched: the signature is
+not in the relaunch rule.
+
+**A CORRECTION TO WHAT THIS RUN ADDS.** I first wrote that this was the
+sixth occurrence and the first "on a different tree and branch", implying
+the shard-3 content differed and the signature followed the position. That
+overstates it. vitest partitions by SHA-1 of the relative path and
+`ceil(220/6) = ceil(221/6) = 37`, so shard 3's window is `[74,111)` in BOTH
+runs and only the contents slide: **J = 0.9474** against the reference
+run's shard 3, with J = 1.0000 on shards 1 and 2 and the single displaced
+file landing in shard 4 here. So this is the same signature over a set
+**94.7% identical** -- consistent with everything, and NOT the
+content-independence my phrasing suggested. "Different tree" buys almost
+nothing here, and quoting the occurrence without the J overstates it.
+
+What DOES separate the causes is another block's experiment, and it is the
+first positive structure this front has on the signature rather than a
+refutation: shard 3's 37 files invoked BY THE GATE with no preceding shard
+go red 2 of 2 in about 2.2 minutes; shard 5's 37 under the same conditions
+go green 2 of 2; and shard 3's same 37 by plain invocation outside the gate
+go green 2 of 2. **Neither the content nor the invocation is sufficient
+alone; both are necessary.**
 
 **Shards 1 and 5 are one defect seen twice.** `island.test.ts` and
 `regex.test.ts` each build the same hello-world and each compare its `.text`
