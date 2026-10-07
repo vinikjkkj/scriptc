@@ -660,7 +660,16 @@ halves are now contradicted by the record:
 
 * **"every reproduction on shard 3"** -- run `20261007-011626` reproduced
   the signature on **shard 4** as well as shard 3, one occurrence each,
-  zero in the other four. Section 19.2 records that measurement.
+  zero in the other four. Section 19.2 records that measurement. **The
+  universal is dead; the asymmetry is not, and the difference is the
+  whole point.** Re-derived by the block that owns this front, by `runId`
+  and by signature across every tree rather than one: **21 reproductions
+  in 136 shard-runs, 20 on shard-3-derived sets against 1 on shard 4**,
+  and restricted to complete six-shard gates, **8 of 22 on shard 3
+  against 1 of 22 on shard 4**. "Always shard 3" was the wrong shape for
+  a true thing. What is gone is the use of the shard number as a
+  dismissal predicate; what remains is a strong prior that now carries a
+  denominator.
 * **"on trees that do not contain this slice"** -- of the three
   reproductions in this rig's own logs, run `20261006-215026` was on
   `f8e7f16ae`, run `20261006-234534` on `ffaa01b0a` and run
@@ -668,10 +677,16 @@ halves are now contradicted by the record:
   branch. The clause was false when it was written and I did not check it;
   it is corrected here rather than quietly dropped.
 
-I audited the three occurrences whose logs live in `syncgen-gate\logs`,
-which is all this rig can see. The rest of the running count comes from
-other blocks' records and I did **not** re-derive it. That is stated so
-the audited and the inherited parts of the number are not read as one.
+**EVERY COUNT HERE CARRIES ITS POPULATION, because the one that did not
+is how this section went wrong twice.** The inherited "twelve" turns out
+to be reconstructible only as *gate-wt alone, shard 3 alone, as of about
+00:43* -- three restrictions, none of them written beside the number, so
+it read as a count over everything. A figure whose scope is recoverable
+only by forensics is not a measurement; it is a number that acquired a
+story afterwards. My own audit covers *this rig's logs alone*: four
+occurrences across four runs in `syncgen-gate\logs`, three on shard 3 and one
+on shard 4. Beyond that population I did **not** re-derive anything and
+do not own the figures.
 
 **What collapsed is the explanation, not the attribution**, and the two
 must not be swapped for one another.
@@ -688,11 +703,25 @@ remaining two.
 So **invocation is refuted as necessary.** The conjunction claim is dead,
 and must not reappear in other words.
 
-What may survive is weaker and different: a difference in **rate**, 2 of 4
-under plain invocation against 11 of 11 under the gate's, Fisher
-**p = 0.057**. Suggestive, not established. It is a separate hypothesis
-with its own evidence, not the conjunction redressed, and nothing in this
-document should state it more strongly than that.
+What may survive is weaker and different: a difference in **rate**. The
+figure carried here was 2 of 4 under plain invocation against 11 of 11
+under the gate's, Fisher **p = 0.057** -- suggestive, not established, a
+separate hypothesis rather than the conjunction redressed.
+
+**THAT p IS SUSPENDED, and the reason is arithmetic rather than
+judgement.** The re-derivation that produced the 21 also gives **8 of 22
+complete six-shard gates** reproducing on shard 3. An 11-of-11 arm cannot
+be drawn from a population where complete gates reproduce 8 times in 22,
+so the gate arm was counted over some narrower set that was never named
+-- the identical defect as the twelve, located in a denominator instead
+of a total. Until both arms are re-derived with their populations written
+beside them, **this document does not quote p = 0.057**, and earlier
+appearances of it are to be read as carrying this caveat.
+
+Suspending is not refuting. The rate hypothesis may survive re-derivation
+and may come back stronger; it is the number that is withdrawn, not the
+idea. Noting also that a p recomputed from arms chosen after seeing the
+result would not mean what the first one was meant to mean.
 
 **THE CANONICAL STANDING FORM LIVES HERE AND NOWHERE ELSE.** It read
 "eleven" here and "twelve" 486 lines further down, both labelled
@@ -704,22 +733,37 @@ Section 17.3 now points here instead of restating the sentence.
 
 The standing form, verbatim, is: *known signature, zero failing
 assertions in every occurrence, cause open; invocation is not necessary,
-the shard is not exclusively 3, and a rate difference stands at
-p = 0.057.*
+shard 3 is strongly but not exclusively favoured, and a rate difference
+is hypothesised with its arms under re-derivation.*
 
-The shard clause is now part of the form in the negative, because a form
-that said "shard 3" was read as a predicate and used to dismiss a red.
-It cannot be used that way any more. What still dismisses a red is the
-zero, and only the zero.
+The shard clause sits in the form in both directions deliberately. A form
+that said "shard 3" flat was read as a predicate and used to dismiss a
+red, and that is no longer available. A form that said only "not
+exclusively 3" would throw away a real 20-to-1 asymmetry and invite the
+opposite error. **What still dismisses a red is the zero, and only the
+zero.** No count lives in the form: the count is the part that ages.
 
-**The running count, recorded once:** **fourteen** occurrences as of run
-`20261007-011626`, every one with zero failing assertions. A later run
-adds to this line and to no other. The breakdown by shard, which is the
-part that just changed: **thirteen on shard 3, one on shard 4**, the
-shard-4 one arriving in `20261007-011626`. The rate arms behind the p are
-2 of 4 under plain invocation against 11 of 11 under the gate's; this run
-does not move them, because its two occurrences came from one gate
-invocation that was already the gate's arm.
+**The `p = 0.057` has come OUT of the form and is SUSPENDED, not
+refuted.** It is quoted below with its reason.
+
+**The running count, recorded once, each figure beside its population.**
+A later run adds to this line and to no other.
+
+| population | occurrences | shard 3 | shard 4 | denominator |
+|---|---|---|---|---|
+| all trees, by `runId` and signature (sibling block, re-derived) | **21** | 20 | 1 | 136 shard-runs |
+| complete six-shard gates only (same re-derivation) | 9 | **8 of 22** | **1 of 22** | 22 gates |
+| this rig's logs alone (audited by me) | 4 | 3 | 1 | 4 runs |
+
+**The 21 supersedes the "fourteen" this line used to carry, and the
+"twelve" before that.** Neither of those was wrong arithmetic. Both were
+right counts over a population they did not name -- *gate-wt, shard 3, as
+of 00:43* for the twelve, and that same inheritance plus my two for the
+fourteen. A scope that has to be reconstructed is a scope that was
+hidden, whatever the intent. The 21 is recorded as the sibling block's,
+re-derived across every tree; I did not reproduce it, and the row says
+so. Zero failing assertions in every one of the 21 holds, and that is the
+only clause the attribution rests on.
 
 **WHAT THE J DOES AND DOES NOT BOUND, corrected by a later result from the
 block that owns this front.** The J = 0.9474 between shard-3 file sets
@@ -736,6 +780,20 @@ the 37 files**, and still needs accompanying load. The other 18, padded to
 the parent's size with filler demonstrated inert, come back **green 2/2**.
 So it is not the set, not the count, and no longer "some subset" either --
 it is an identified subset, and the search space has halved.
+
+**THIS LOCALISATION IS THE CLAIM RESTING ON A WEAK ARM, and naming which
+claim that is matters more than the claim itself.** The instinct after the
+shard-4 occurrence is to doubt the shard asymmetry. That instinct is
+wrong: the asymmetry re-derives at 20 to 1 across every tree, and 8 of 22
+against 1 of 22 within complete gates. The fragile claim is this one.
+**Green 2/2** is two clean draws against a defect whose per-gate rate, by
+that same re-derivation, is about 8 in 22. Two draws at that rate come
+back clean a little under half the time by chance alone, so "the other 18
+are inert" is close to uninformative as stated -- a null with its power
+uncomputed, which is the shape this slice has been caught by before. The
+owning block is remeasuring the L1-A arm at **n = 6 per arm**. Until that
+lands, the 19-of-37 split is a working hypothesis and not a result, and
+nothing here should lean on it.
 
 Nothing in this document should be written to imply the whole set is
 necessary. The caution the J supported is weaker than it looked: content
@@ -1292,12 +1350,16 @@ either is declared. Not relaunched: the relaunch rule covers
 
 Its explanation, not its attribution, is open. The gate-invocation
 hypothesis is **refuted** -- plain unaltered invocation reproduced it. What
-may remain is a difference in rate, 2 of 4 under plain invocation against
-11 of 11 under the gate's, Fisher **p = 0.057**: suggestive, not
-established, and a different claim that must not be reported as the old
-conjunction in new words. The standing form is **not restated here**: see
-section 12.9. Repeating it in two places is what let the two copies drift
-apart.
+may remain is a difference in **rate**, which is a different claim and
+must not be reported as the old conjunction in new words.
+
+**The arms and the p are deliberately absent from this paragraph.** They
+used to be quoted here, and section 12.9 has since suspended them: the
+gate arm cannot be reconciled with 8 of 22 complete gates reproducing, so
+the denominator was never named. This paragraph said "the standing form
+is not restated here" and then restated the number standing next to it,
+which is the same drift in a narrower place -- a pointer that exempts the
+prose beside it is not a pointer. See section 12.9 for both.
 
 A red shard 3 with zero failing assertions says nothing about this slice.
 One with failing assertions would.
@@ -1528,10 +1590,27 @@ being hungry.
 
 ## 19. The merge gate of `20261007-011626`
 
-Run `20261007-011626` on head `ba15b077834ee6041e5789d913ac53dcb9ba61cb`,
+Run `20261007-011626` against the worktree `G:\blocks\llvm-wt` on branch
+`coro/sync-generators`, head `ba15b077834ee6041e5789d913ac53dcb9ba61cb`,
 *"docs(stackless): the leak rate is per KIND of run, and shard 3 narrows
 to 19 of 37"*. Six shards, **34.02 minutes**, verdict **RED**: four green,
 two red. `GATE-EXIT rc=1`.
+
+**THE TREE IS NAMED BECAUSE IT KEPT BEING NAMED WRONG.** Reports of this
+run, mine included, referred to it by the rig directory. They are not the
+same thing, and three paths get swapped for one another:
+
+| path | what it is |
+|---|---|
+| `G:\blocks\llvm-wt` | **the tree this gate measured**, branch `coro/sync-generators` |
+| `G:\blocks\syncgen-gate` | **not a tree at all** -- no `.git`, no source; `logs`, `tmp`, `cache`, `prov`, `zig`, `rig` |
+| `G:\blocks\slice-wt` | a different worktree, branch `d15-knobon`, the 216-program corpus |
+| `G:\blocks\gate-wt` | a different worktree again |
+
+Verified on disk rather than inferred: `G:\blocks\syncgen-gate` holds no `.git` entry,
+and all seven `TREEHASH` lines in this run's own log carry
+`repo=G:\blocks\llvm-wt`. The rig lends a run its `runId` and its
+`TMP`. It never lends it a tree.
 
 **The tree was the same tree in all six shards.** `TREEHASH baseline=
 d02d24996d2100d2`, and the per-shard `TREEHASH` line printed
@@ -1601,12 +1680,20 @@ individually; the two matching files are the positive control that the
 pattern and the reader both work, so the four zeros are absence and not a
 dead instrument.
 
-**This is the first occurrence on any shard other than 3.** Until this run
-the record was twelve reproductions, all on shard 3, which was a direct
-count and not an inference. It is no longer true. What that *means* is not
-stated here and is not stated anywhere yet -- one occurrence is one
-occurrence. The standing form and the running count live in **section
-12.9** and nowhere else; 12.9 has been corrected for this.
+**This is the first occurrence recorded on any shard other than 3.**
+Until this run the standing record was twelve reproductions, all on shard
+3. That was described to me as a direct count, and it was -- over a
+population nobody wrote down. Re-derived since: *gate-wt alone, shard 3
+alone, as of about 00:43*. So this run did not overturn a complete
+census; it added the first shard-4 occurrence to a record that had never
+covered the other trees. Across all trees the standing figures are 21
+reproductions in 136 shard-runs, 20 to 1 by shard.
+
+What that *means* is not stated here and is not stated anywhere yet. One
+occurrence is one occurrence, and against a 20-to-1 prior it is exactly
+the observation that is easiest to over-read in either direction. The
+standing form and the running count live in **section 12.9** and nowhere
+else; 12.9 has been corrected for this.
 
 **Zero failing assertions in all six shards**, from the JSON reporter
 rather than from log formatting -- `numFailedTests` and
