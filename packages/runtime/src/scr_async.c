@@ -5593,7 +5593,52 @@ static void scr_gen_coro_step(ScrGen *g, ScrGenInject inject) {
   scr_gen_retain(g);
   g->state = SCR_GEN_RUNNING;
   scr_coro_state_in(base, &st);
-  if (inject == SCR_GEN_INJECT_RET) scr_exc_current_cell()->kind = SCR_EXC_GENRET;
+  /* THE SENTINEL GOES IN ONLY OVER AN EMPTY CELL, which is what all three
+   * fibre twins do and this did not:
+   *
+   *     if (g->fiber->exc.kind == SCR_EXC_NONE) g->fiber->exc.kind = ...
+   *
+   * Unguarded, a cell that already held a payload would have its kind
+   * overwritten with the sentinel -- the payload neither released nor
+   * delivered, so a lost exception and a leak in one statement.
+   *
+   * IT CANNOT HAPPEN TODAY, and the reason is a fence somewhere else: the
+   * cell can only be dirty here if an earlier unwind parked mid-flight,
+   * which needs a `finally` that yields, and `finally` is a point-level
+   * admission blocker so no converted generator has one. That is exactly
+   * the shape this front keeps paying for -- a fence argument held in
+   * another file, which the next widening voids without visiting this
+   * line. The guard costs one comparison and removes the dependence. */
+  if (inject == SCR_GEN_INJECT_RET) {
+    ScrExcCell *sc_cell = scr_exc_current_cell();
+    if (sc_cell->kind == SCR_EXC_NONE) sc_cell->kind = SCR_EXC_GENRET;
+  }
+  /* SCR_GEN_INJECT_THROW IS LEAN-ONLY, AND SAYS SO RATHER THAN LOOKING
+   * HANDLED. The fibre twin moves the payload across explicitly:
+   *
+   *     scr_exc_cell_move(&g->fiber->exc, mine);
+   *
+   * This lane does nothing, and is right for a LEAN frame: it borrows the
+   * ambient cell, so the payload the consumer parked is already the one the
+   * body reads. A FAT frame is the opposite -- scr_coro_state_in swapped
+   * the active cell to the frame's own, so the payload would sit in
+   * st.prev_cell where the body never looks and the .throw() would vanish
+   * with no diagnostic.
+   *
+   * Lean is guaranteed by emitGenCoroSpawn passing has_exc=false, in
+   * another file, in one place. An enum member that silently does nothing
+   * because of a constant elsewhere is how a new member gets default-
+   * handled into a wrong answer, so the precondition is asserted here
+   * instead of assumed. The four-line fix is a cell move from st.prev_cell
+   * into st.mine; it is deliberately NOT written, because code for a
+   * configuration that cannot exist cannot be tested and would be trusted
+   * anyway. */
+  if (inject == SCR_GEN_INJECT_THROW && st.mine != NULL) {
+    fputs("scriptc: internal error: .throw() into a FAT generator frame is "
+          "not lowered -- the payload is in the resumer's cell and the body "
+          "reads the frame's\n", stderr);
+    abort();
+  }
   base->flags &= ~(uint32_t)SCR_CORO_YIELDED;
   base->flags |= SCR_CORO_RUNNING;
   base->resume(base);
