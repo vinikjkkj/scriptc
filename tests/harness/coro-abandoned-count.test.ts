@@ -150,6 +150,94 @@ describe("the abandoned-coroutine line", () => {
   }, 300_000);
 });
 
+/* THE GENERATOR HALF OF THE SAME LINE, and it was invisible.
+ *
+ * Everything above is about an ASYNC frame. A frame-backed GENERATOR
+ * abandons a suspension by exactly the same deliberate decision -- unwinding
+ * would run user finally blocks Node's GC never runs -- but scr_gen_coro_alloc
+ * did not call scr_note_coro_alloc(), so the counter could not see a
+ * generator frame at all.
+ *
+ * THE THREE LANES WERE NOT SYMMETRIC, which is the finding:
+ *
+ *   async frame        "N coroutine(s) abandoned"
+ *   fibre generator    "RC audit skipped: N fiber(s) never resumed"
+ *                      (and that one even suppresses the leak check)
+ *   frame generator    nothing at all -- while the leak check still ran, so
+ *                      its deliberately retained values surfaced as RC AUDIT
+ *                      FAILED with no line anywhere naming the cause
+ *
+ * Silence plus an unexplained failure is worse than either alone, and the
+ * comment in scr_gen_release asserted the opposite in so many words.
+ *
+ * Found by a DIRECTED audit of scr_gen_of_coro and its frame allocator
+ * against their sibling constructors, run because two omissions had already
+ * been found at that one site (the AsyncLocalStorage release, then the
+ * object allocation note). Two is not a coincidence; it is a site that
+ * inherits nothing from its siblings. The third was the reasonable bet. */
+
+/* N converted generators, each STARTED and then dropped while suspended.
+ * Started matters: an UNSTARTED handle is torn down cleanly on release and
+ * is correctly silent, so a program that never calls .next() would pass
+ * this test with the defect present. */
+function abandonGenSrc(n: number): string {
+  const out: string[] = [];
+  out.push("function* g(): Generator<number, number, undefined> {");
+  out.push("  yield 1");
+  out.push("  yield 2");
+  out.push("  return 0");
+  out.push("}");
+  for (let i = 0; i < n; i++) {
+    out.push("const a" + i + " = g()");
+    out.push("a" + i + ".next()");
+  }
+  out.push("console.log('done')");
+  return out.join(NL) + NL;
+}
+
+/* The silent direction: the SAME generator, consumed to exhaustion. Its
+ * frame is freed on release, the two notes balance, and nothing is
+ * reported. */
+const GEN_DRAINED_SRC = [
+  "function* g(): Generator<number, number, undefined> {",
+  "  yield 1",
+  "  yield 2",
+  "  return 0",
+  "}",
+  "for (const v of g()) console.log(v)",
+  "console.log('done')",
+].join(NL) + NL;
+
+describe("the abandoned-coroutine line sees GENERATOR frames too", () => {
+  test("PROOF 1: the count is EXACT, at two different values", async () => {
+    for (const n of [1, 3]) {
+      const { stderr } = await buildAndRun("genexact" + n, abandonGenSrc(n), { knob: true, audit: true });
+      const m = COUNT_RE.exec(stderr);
+      expect(m, "no coroutine line for " + n + " abandoned generator(s); stderr was: " + stderr).not.toBeNull();
+      /* The number, not its presence -- and two values, because one
+       * generator per program is exactly the shape a hardcoded 1 would
+       * satisfy. The 3-generator program also proves the count is per
+       * FRAME and not per converted function: all three frames come from
+       * one generator function. */
+      expect(Number(m![1]), "line must report " + n).toBe(n);
+    }
+  }, 300_000);
+
+  test("PROOF 2 (the silent direction): a drained generator is not abandoned", async () => {
+    const { stdout, stderr } = await buildAndRun("gendrained", GEN_DRAINED_SRC, { knob: true, audit: true });
+    expect(stdout.trimEnd().endsWith("done")).toBe(true);
+    expect(stderr, "a generator consumed to exhaustion must not be reported as abandoned").not.toMatch(COUNT_RE);
+  }, 300_000);
+
+  test("PROOF 3: knob ABSENT prints no coroutine line, even when abandoning", async () => {
+    /* Knob off, so the generators lower to fibers and no coroutine frame
+     * exists. The fibre lane's own skip notice may appear -- that is its
+     * business; what must be absent is OUR line. */
+    const { stderr } = await buildAndRun("genknoboff", abandonGenSrc(3), { knob: false, audit: true });
+    expect(stderr, "the coroutine line must not appear on the fiber lane").not.toMatch(COUNT_RE);
+  }, 300_000);
+});
+
 /* STILL OWED, and named rather than silently omitted: byte-identity of
  * stdout, stderr and the emitted C for a knob-absent build against the
  * PARENT commit. That is a cross-commit comparison and needs a second

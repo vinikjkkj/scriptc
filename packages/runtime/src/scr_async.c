@@ -4807,6 +4807,12 @@ ScrGen *scr_gen_retain(ScrGen *g) {
  * frame is abandoned whole, exactly as the fibre lane abandons a stack. */
 static void scr_gen_coro_frame_free(ScrCoroBase *base) {
   scr_als_ctx_release(base->als);
+#ifdef SCR_RC_AUDIT
+  /* The other half of the census. Paired with scr_gen_coro_alloc's note,
+   * so a frame that is freed is silent and only an ABANDONED one is
+   * counted -- which is the whole point of the line. */
+  scr_note_coro_free();
+#endif
   free(base);
 }
 
@@ -4847,7 +4853,13 @@ void scr_gen_release(ScrGen *g) {
        * its live locals' references without releasing them. The frame
        * leaks, by the same decision and for the same reason the fibre
        * does -- and it is precisely the accounting gap the
-       * abandoned-frame counter on the knob-on lane exists to measure. */
+       * abandoned-frame counter on the knob-on lane exists to measure.
+       *
+       * THAT LAST CLAUSE WAS FALSE UNTIL scr_gen_coro_alloc STARTED
+       * NOTING THE FRAME. The counter could not see a generator frame at
+       * all, so this arm abandoned in silence while the sentence above
+       * said it was measured. Fixed at the allocation, not here, because
+       * the gap was a missing +1, not a missing -1. */
       g->frame = NULL;
     }
   } else if (g->fiber != NULL) {
@@ -5447,6 +5459,23 @@ void *scr_gen_coro_alloc(size_t size, ScrCoroResume resume, bool has_exc) {
     fputs("scriptc: out of memory allocating a generator frame\n", stderr);
     abort();
   }
+#ifdef SCR_RC_AUDIT
+  /* THE FRAME CENSUS, which scr_coro_alloc makes and this did not.
+   *
+   * Not copied for symmetry: without it the abandoned-coroutine line
+   * CANNOT SEE a generator frame, and the comment in scr_gen_release that
+   * calls the suspended arm "precisely the accounting gap the
+   * abandoned-frame counter exists to measure" was false as written.
+   *
+   * The three lanes that deliberately abandon a suspension were not
+   * symmetric. An async frame prints "N coroutine(s) abandoned"; a fibre
+   * generator prints "RC audit skipped: N fiber(s) never resumed" and even
+   * suppresses the leak check. A frame-backed generator printed NOTHING --
+   * and the leak check still ran, so its deliberately retained values came
+   * out as RC AUDIT FAILED with no line anywhere naming the cause. Silence
+   * plus an unexplained failure is worse than either alone. */
+  scr_note_coro_alloc();
+#endif
   scr_coro_init((ScrCoroBase *)mem, resume, NULL, has_exc);
   return mem;
 }
