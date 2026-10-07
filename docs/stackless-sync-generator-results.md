@@ -633,13 +633,32 @@ node textanchor.mts <repo-root> 543702 630182
 
 ### 12.9 CORRECTED: shard 3's attribution holds, its explanation does not
 
-The `onTaskUpdate` timeout signature is **not about this slice**, and that
-is now better supported than when it was first set aside: every
-reproduction so far is on shard 3, across more than 110 shard-runs, on
-trees that do not contain this slice, every one of them with **zero failing
-assertions**. The running count is below, in one place. Separate it in
-any report, and do not relaunch it -- the relaunch rule covers
-`CcCompileError` with zero `error:` lines, and this is not that.
+The `onTaskUpdate` timeout signature is **not about this slice**. What
+supports that is one property and only one: **every reproduction, without
+exception, carries zero failing assertions.** The running count is below,
+in one place. Separate it in any report, and do not relaunch it -- the
+relaunch rule covers `CcCompileError` with zero `error:` lines, and this
+is not that.
+
+**TWO CLAUSES THAT USED TO SIT HERE ARE FALSE, and they were doing work.**
+The sentence read *"every reproduction so far is on shard 3, across more
+than 110 shard-runs, on trees that do not contain this slice"*. Both
+halves are now contradicted by the record:
+
+* **"every reproduction on shard 3"** -- run `20261007-011626` reproduced
+  the signature on **shard 4** as well as shard 3, one occurrence each,
+  zero in the other four. Section 19.2 records that measurement.
+* **"on trees that do not contain this slice"** -- of the three
+  reproductions in this rig's own logs, run `20261006-215026` was on
+  `f8e7f16ae`, run `20261006-234534` on `ffaa01b0a` and run
+  `20261007-011626` on `ba15b0778`. All three are commits of this slice's
+  branch. The clause was false when it was written and I did not check it;
+  it is corrected here rather than quietly dropped.
+
+I audited the three occurrences whose logs live in `syncgen-gate\logs`,
+which is all this rig can see. The rest of the running count comes from
+other blocks' records and I did **not** re-derive it. That is stated so
+the audited and the inherited parts of the number are not read as one.
 
 **What collapsed is the explanation, not the attribution**, and the two
 must not be swapped for one another.
@@ -670,15 +689,24 @@ wrong number. The repair is structural, not arithmetic: **the occurrence
 count is not part of the form**, because it is the only part that ages.
 Section 17.3 now points here instead of restating the sentence.
 
-The standing form, verbatim, is: *known signature, every reproduction on
-shard 3, cause open; invocation is not necessary, and a rate difference
-stands at p = 0.057.*
+The standing form, verbatim, is: *known signature, zero failing
+assertions in every occurrence, cause open; invocation is not necessary,
+the shard is not exclusively 3, and a rate difference stands at
+p = 0.057.*
 
-**The running count, recorded once:** **twelve** reproductions as of run
-`20261006-234534`, all of them on shard 3, every one with zero failing
-assertions. A later run adds to this line and to no other. The rate arms
-behind the p are 2 of 4 under plain invocation against 11 of 11 under the
-gate's.
+The shard clause is now part of the form in the negative, because a form
+that said "shard 3" was read as a predicate and used to dismiss a red.
+It cannot be used that way any more. What still dismisses a red is the
+zero, and only the zero.
+
+**The running count, recorded once:** **fourteen** occurrences as of run
+`20261007-011626`, every one with zero failing assertions. A later run
+adds to this line and to no other. The breakdown by shard, which is the
+part that just changed: **thirteen on shard 3, one on shard 4**, the
+shard-4 one arriving in `20261007-011626`. The rate arms behind the p are
+2 of 4 under plain invocation against 11 of 11 under the gate's; this run
+does not move them, because its two occurrences came from one gate
+invocation that was already the gate's arm.
 
 **WHAT THE J DOES AND DOES NOT BOUND, corrected by a later result from the
 block that owns this front.** The J = 0.9474 between shard-3 file sets
@@ -711,6 +739,61 @@ Report that column raw and uninterpreted.
 This is also why the earlier 0-of-2 green arm deserved the caution it got.
 Two clean draws against a defect of unknown rate is not evidence of
 absence, and the run that refuted it was the third.
+
+### 12.10 DIAGNOSED: the zero that was not a zero, and the byte it planted
+
+A patch script of mine returned **0 matches** against a document that
+visibly contained the text, and the response at the time was to switch
+method and carry on. That is the silencing move: a zero from a pattern you
+wrote yourself is a hole in the instrument until it has a cause.
+
+**The cause, reproduced.** `fix6.py` built its needle in a non-raw Python
+triple-quoted literal containing `syncgen-gate` + backslash + `tmp`.
+Python turned those two characters into a single TAB before the search
+ever began, so the needle was `syncgen-gate<TAB>mp` while the document
+held `syncgen-gate<BACKSLASH>tmp`. The document was never wrong. The
+needle was mangled one parse layer below the place anyone was looking.
+
+Proved in both directions against `efbffa3f2`'s version of this file, with
+the input asserted non-empty in the same invocation:
+
+| assertion | result |
+|---|---|
+| input length > 0, and contains `6.43 GB` | true |
+| the needle `fix6.py` actually built contains a TAB | true |
+| that needle matches the document | **0** -- the observed zero |
+| the same needle with the backslash intact matches | **1** -- positive control |
+| document holds `syncgen-gate<BACKSLASH>tmp` | 1 |
+| document TAB count before `fix6.py` | **0** |
+
+**And the escape did not stop at the needle.** The *replacement* half of
+the same hunk carried the same unescaped sequence, so when the edit was
+finally applied by another route the TAB rode into the text. Commit
+`ba15b0778` -- the HEAD the merge gate then measured -- shipped exactly
+one TAB in this file, inside `syncgen-gate<TAB>mp` at section 18.4, where
+a reader sees `6.43 GB` attributed to a path that does not exist. It is
+repaired in the same change that records this.
+
+**Why every guard missed it.** The post-write control-byte scan treats TAB
+as benign, alongside LF and CR, which is correct for source and wrong for
+this file: this document contains exactly zero TABs by convention, so one
+is a defect. A scan whose allowed set is chosen globally cannot see a
+local invariant. The non-ascii check and the line-ending delta were both
+clean and correct -- the byte is ASCII and no line ending moved.
+
+**The lesson is narrower than "escape carefully".** The first script's
+diagnosis was available for the asking and was not asked for; the
+structural repair that followed -- no backslash in a literal,
+`os.path.join`, `tarfile` instead of a shell -- protects the *next*
+script and explains nothing about the one that failed. A fix applied
+forward is not an answer to a question asked backward. Worse, in the
+course of writing this section the same class struck again: the first
+reproduction attempt ran through a shell heredoc, which ate one backslash
+from the *corrected* needle too, and both arms came back 0 -- a false
+confirmation that would have read as "the text was never there". It was
+caught only because the positive control was required to come back
+**1**, not merely to differ. The run that stands is the one with no shell
+between the source and the interpreter.
 
 ## 13. The fix, and the +144 that was never in the source
 
@@ -1372,7 +1455,7 @@ falls between the two sweeps: the scratch pruner does not own it, and the
 CAS cap does not reach it. Nobody is at fault, which is the shape of a
 process leak rather than of a mess.
 
-**The number, and the unit it is per.** `syncgen-gate	mp` held **6.43
+**The number, and the unit it is per.** `syncgen-gate\tmp` held **6.43
 GB** accumulated across exactly **two** full six-shard runs -- the 21:50
 cold one and the 23:45 warm one -- so **~3.2 GB per SIX-SHARD GATE, n = 2
 runs in 1 rig.**
@@ -1410,6 +1493,14 @@ clean sample either: `armrig`, `boxparam`, `knobon-measure` and
 four full runs is post-purge residue, not a cumulative total, because that
 rig was purged mid-session.
 
+**SUPERSEDED AS AN ESTIMATE, by measuring before purging this time.** The
+~3.2 GB above is 6.43 / 2, an average over a cold and a warm run that
+could not be separated. Run `20261007-011626` started with an empty `tmp`
+and was measured before anything touched it, so one warm six-shard gate
+now has a **direct** figure rather than an averaged one. It is in section
+19.4, recorded once, and this paragraph is left standing because the
+derivation it describes is still the derivation of the 6.43 figure.
+
 **Why it is the dominant long-run term even though it hides inside a
 smaller net.** A warm run's measured net drawdown is 2.68 GB while its TMP
 grows by more than that, because the scratch sweep gives ~2 GB back inside
@@ -1421,3 +1512,193 @@ essentially N times the leak.
 **The fix is a separate decision and is not this window's.** Recorded here
 so it is a named item with a derivation rather than folklore about gates
 being hungry.
+
+## 19. The merge gate of `20261007-011626`
+
+Run `20261007-011626` on head `ba15b077834ee6041e5789d913ac53dcb9ba61cb`,
+*"docs(stackless): the leak rate is per KIND of run, and shard 3 narrows
+to 19 of 37"*. Six shards, **34.02 minutes**, verdict **RED**: four green,
+two red. `GATE-EXIT rc=1`.
+
+**The tree was the same tree in all six shards.** `TREEHASH baseline=
+d02d24996d2100d2`, and the per-shard `TREEHASH` line printed
+`d02d24996d2100d2` before every one of the six. A gate log's `head=` is
+not the tree; the per-shard hash is, and here it did not move.
+
+**The reporter could have come out red.** Five harness controls ran before
+the first shard and all five passed in the direction that proves it:
+two specificity controls, where a clean log whose passing test *names*
+contain `failed`/`FAILED`/`fails` must still read PASS, once plain and
+once with ANSI colour on the summary; and three sensitivity controls --
+one planted failure in the summary, a log truncated before the summary,
+and a clean summary with a nonzero exit code -- each of which must read
+FAIL. The verdicts below are not green by construction.
+
+**Lane, declared.** `node=v25.9.0`, `zig=0.16.0` from
+`G:\tools\zig\zig.exe` -- the 0.16.x lane, not the Chocolatey 0.15.2 on
+`PATH` -- `SCRIPTC_TARGET=x86_64-windows-gnu`, `SCRIPTC_CC=zigcc`,
+`SCRIPTC_TEST_CC=zig cc`, `workers=12`, `TMP=G:\blocks\syncgen-gate\tmp`.
+
+```
+PARTITION-RESULT expected=221 ran=221 missing=0 extra=0 dupes=0 verdict=OK
+```
+
+### 19.1 The four green shards
+
+`Tests` verbatim from `SHARD-RESULT`:
+
+| shard | verdict | min | files | Tests |
+|---|---|---|---|---|
+| 1 | GREEN | 6.96 | 37 | `Test Files  36 passed \| 1 skipped (37) ; Tests  985 passed \| 1 skipped (986)` |
+| 2 | GREEN | 7.15 | 37 | `Test Files  37 passed (37) ; Tests  1717 passed \| 2 skipped (1719)` |
+| 5 | GREEN | 2.97 | 37 | `Test Files  34 passed \| 3 skipped (37) ; Tests  769 passed \| 36 skipped (805)` |
+| 6 | GREEN | 2.81 | 36 | `Test Files  36 passed (36) ; Tests  732 passed \| 4 skipped (736)` |
+
+### 19.2 The two red shards, and the fact that is new
+
+Both reds carry the same `SHARD-RESULT` tail and the same `Why`. The
+`Tests` figures for these two come from the **JSON reporter**, not from
+the log, because a run that ends in an unhandled error prints no `Tests`
+summary line.
+
+| shard | verdict | min | files | Tests (JSON) | failing assertions |
+|---|---|---|---|---|---|
+| 3 | RED | 7.3 | 37 | `733 passed \| 10 skipped (743)` | **0** |
+| 4 | RED | 6.78 | 37 | `1752 passed \| 2 skipped (1754)` | **0** |
+
+`SHARD-RESULT`, verbatim, both identical past the shard number and timing:
+
+```
+SHARD-RESULT n=3/6 rc=1 min=7.3 files=37 verdict=RED :: vitest reported errors:      Errors  1 error
+SHARD-RESULT n=4/6 rc=1 min=6.78 files=37 verdict=RED :: vitest reported errors:      Errors  1 error
+```
+
+`Why`, verbatim, one occurrence in `shard-3.err` and one in `shard-4.err`:
+
+```
+Error: [vitest-worker]: Timeout calling "onTaskUpdate"
+Vitest caught 1 unhandled error during the test run.
+```
+
+**THE MEASURED FACT, THIS RUN, UNINTERPRETED.** The `onTaskUpdate`
+signature appears **once in `shard-3.err` and once in `shard-4.err`**, and
+**zero times** in `shard-1.err`, `shard-2.err`, `shard-5.err` and
+`shard-6.err`. Counted with `rg -c` over each of the six files
+individually; the two matching files are the positive control that the
+pattern and the reader both work, so the four zeros are absence and not a
+dead instrument.
+
+**This is the first occurrence on any shard other than 3.** Until this run
+the record was twelve reproductions, all on shard 3, which was a direct
+count and not an inference. It is no longer true. What that *means* is not
+stated here and is not stated anywhere yet -- one occurrence is one
+occurrence. The standing form and the running count live in **section
+12.9** and nowhere else; 12.9 has been corrected for this.
+
+**Zero failing assertions in all six shards**, from the JSON reporter
+rather than from log formatting -- `numFailedTests` and
+`numFailedTestSuites` are both 0 in every one:
+
+| shard | failed | passed | pending | total |
+|---|---|---|---|---|
+| 1 | 0 | 985 | 1 | 986 |
+| 2 | 0 | 1717 | 2 | 1719 |
+| 3 | 0 | 733 | 10 | 743 |
+| 4 | 0 | 1752 | 2 | 1754 |
+| 5 | 0 | 769 | 36 | 805 |
+| 6 | 0 | 732 | 4 | 736 |
+
+**Not relaunched.** The relaunch rule covers `CcCompileError` with zero
+`error:` lines. This signature is not in it, and quietly extending a rule
+to cover the failure in front of you is how a rule stops being one.
+
+### 19.3 The MACHINE sequence, raw
+
+Six lines, in order, uninterpreted. `maxDiskPct` exceeds 100 on this host
+because it is pending requests times 100; it is not a percentage occupied.
+Duration and this column order nothing -- section 12.9 has the
+counterexample of two 2.09-minute runs, one red and one green.
+
+```
+shard-1 minFreeRamMB=2843 minFreeRamPct=7   maxCpuPct=100 maxDiskPct=1547 maxDiskMBps=804 totalRamMB=40831 samples=38 failures=0
+shard-2 minFreeRamMB=3536 minFreeRamPct=8.7 maxCpuPct=100 maxDiskPct=561  maxDiskMBps=71  totalRamMB=40831 samples=39 failures=0
+shard-3 minFreeRamMB=3729 minFreeRamPct=9.1 maxCpuPct=100 maxDiskPct=999  maxDiskMBps=203 totalRamMB=40831 samples=40 failures=0
+shard-4 minFreeRamMB=3613 minFreeRamPct=8.8 maxCpuPct=100 maxDiskPct=653  maxDiskMBps=53  totalRamMB=40831 samples=37 failures=0
+shard-5 minFreeRamMB=4229 minFreeRamPct=10.4 maxCpuPct=100 maxDiskPct=821 maxDiskMBps=33  totalRamMB=40831 samples=16 failures=0
+shard-6 minFreeRamMB=4255 minFreeRamPct=10.4 maxCpuPct=100 maxDiskPct=733 maxDiskMBps=40  totalRamMB=40831 samples=15 failures=0
+```
+
+Disk ran `free=39GB` at start to `free=35.5GB` at `GATE5-TOTAL`, against a
+10 GB floor, troughing 37.28 -> 35.25 GB across the six shards.
+
+### 19.4 The TMP leak, measured directly instead of averaged
+
+Section 18.4's ~3.2 GB per six-shard gate is `6.43 / 2`: an average over a
+cold and a warm run that had already been purged together. This run was
+captured **before** any cleanup, which is the whole point of running the
+capture first.
+
+**One warm six-shard gate leaves 3.53 GB in `tmp`, across 380 top-level
+entries.** Bucketed by mtime into runs, the directory yields exactly
+**one** bucket, `01:17 .. 01:49`, which brackets the run's own
+`01:16:26 .. 01:50:27`.
+
+**The denominator is proved, not assumed.** `tmp` could have held residue
+from an earlier run and inflated the figure. It did not: of the 380
+entries, the earliest **creation** time is `01:16:35` and the latest
+`01:49:09`, and **zero** were created before the gate's `01:16:26` start.
+So every byte counted belongs to this run. Reading mtime alone would not
+have settled it -- a directory's mtime moves when its contents change, so
+an old entry touched by a new run looks new.
+
+| figure | value | how |
+|---|---|---|
+| one warm six-shard gate | **3.53 GB**, 380 entries | direct, this run, pre-purge |
+| one six-shard gate (18.4) | ~3.2 GB | `6.43 / 2`, averaged over cold + warm |
+| one subset / single-shard run | ~0.2-0.45 GB | sibling rigs, short runs |
+
+The direct figure and the average agree to about 10%, and the direct one
+is for a **warm** run specifically. Neither replaces the other: 18.4's
+number is per *either* kind, this one is per warm six-shard gate, and the
+earlier unit confusion in that section is exactly what happens when a
+figure travels without its denominator.
+
+Free space on `G:` immediately after capture: **35.98 GB**.
+
+### 19.5 VENDOR-CACHE, scored against its registered prediction
+
+The prediction was `<= 10` distinct `VENDOR-CACHE-UNKNOWN` lines and **0**
+`VENDOR-CACHE-MISMATCH`, with no failure. Measured across every `.log` and
+`.err` in the run directory: **10 distinct UNKNOWN**, **0 MISMATCH**. Held
+exactly at the bound.
+
+The ten are six units over two targets -- `curl-stub`, `lre`, `mbedtls`,
+`qjs`, `sqlite`, `zlib` across `x86_64-windows-gnu` and
+`aarch64-linux-gnu.2.36` -- every one reading `built=<no-stamp>` against
+`now=401f4d1e088e clang version 21.1.0`. `<no-stamp>` is the pre-key
+cache, not a mismatch: the objects predate the compiler-identity field, so
+the detector says UNKNOWN rather than guessing. That is section 15's
+third face of the two-zig trap behaving as designed.
+
+### 19.6 The instrument this section rests on, and what it did not have
+
+Every number in 19.4 and 19.5 comes from `postrun-capture.py`. **It
+shipped with no self-tests at all** -- it was handed over as having four
+passing, and `rg` over the file returns no assertion, no test function and
+no selftest entry point. The figures above were produced by an unexercised
+instrument and only then tested.
+
+Four were written afterwards and all pass, twelve assertions in total. The
+one that mattered is the second: the live `tmp` produced exactly **one**
+bucket, so the gap-splitting branch -- the only reason `tmp_buckets`
+exists rather than a one-line sum -- was never reached by the real data
+and would have been green forever. It is now driven by a synthetic
+directory with a deliberate 70-minute gap, which splits into two buckets
+of three, oldest first, and collapses back to one when `gap_s` is raised.
+The fourth covers the direction instruments fail toward: an empty log
+directory must report zero, so a zero from the real one means *no
+MISMATCH lines* and not *no files read*.
+
+This does not retract anything in 19.4 or 19.5. It records that the
+testing came after the measuring, which is the wrong order, and that the
+branch most likely to be wrong was the one the live data could not touch.
