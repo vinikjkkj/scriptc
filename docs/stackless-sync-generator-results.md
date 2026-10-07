@@ -278,6 +278,41 @@ not the recorded 630,150. Repairing someone else's 32 bytes under cover of
 this fix would be the same confusion as hiding my own residue inside the
 tolerance, pointed the other way.
 
+### KNOWN DRIFT, UNATTRIBUTED: the regex program is +32 and stays that way
+
+Recorded here because a tolerated delta that nobody writes down is exactly
+how a tolerance becomes a hiding place. Measured 2026-10-06 on main, in the
+recorded lane: the regex program's `.text` is **630,182** against the
+recorded **630,150** -- **+32 bytes**, passing only because 32 is under the
+256-byte tolerance. **Nobody has attributed it.**
+
+**The recorded figure is deliberately NOT being updated to 630,182.**
+Re-recording would erase the drift and make 630,150 unverifiable forever.
+The baseline stays; the +32 stays visible here. The next person to touch
+this either explains it or at least does not add their own on top of an
+undocumented one and keep passing.
+
+WHY ONE PROGRAM AND NOT THE OTHER, since both compile the same runtime --
+a short answer, and the evidence rules more out than it rules in. They do
+NOT compile the same runtime: the regex program additionally links
+`scr_regex.c`, libregexp and libunicode, and **none of those changed** in
+the window. Of the shared runtime, only `scr_async.c` moved on main since
+the recording commit (+102 lines) -- and the hello-world, which links it,
+is EXACTLY on its recorded figure, so those 102 lines cost zero `.text` and
+cannot be the source of the regex delta either.
+
+That leaves the compiler side, which did move on main in the same window
+(`cc.ts`, `emit-exprs.ts`, `emit-stmts.ts`, `emitter.ts`, `mangle.ts`). The
+regex program's source exercises far more of the emitter than a three-token
+hello-world -- a regex literal, a unicode property escape, `replace`,
+`test` -- so a lowering change can move it while leaving the hello-world
+byte-identical. **That is a plausible mechanism, not a measured one.** It
+is also uncomfortable, because several of those files belong to this very
+front: if a knob-absent lowering change moved the regex program by 32
+bytes, that is the same shipping-criterion breach in miniature, already on
+main. The test is a bisect of the regex program's `.text` across
+`e03bdf0aa..main`, and it has not been run.
+
 Two commits produced it, and naming both matters because neither alone is
 the story:
 
