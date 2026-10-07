@@ -364,6 +364,31 @@ separates them. The cheap separation is to make one shard the sole
 invocation -- which holds sequence position fixed at "first and only" and
 varies only which files run.
 
+**The partition function, read from source, says the same thing by
+construction.** `vitest@3.2.7` shards in `coverage.DfSpMS-b.js:3456`: it
+hashes each spec's REPO-RELATIVE path with SHA-1, sorts by that hash, and
+slices `[ceil(n/count)*(i-1), ceil(n/count)*i)`. Three consequences:
+
+- Ordering is by hash of the relative path, so the same relative path lands
+  at the same rank in any repo -- which is why two different worktrees
+  produce identical shard 1 and shard 2.
+- `ceil(220/6)` and `ceil(221/6)` are both 37, so the slice WINDOW for
+  shard 3 is indices [74, 111) in both runs. Only the contents shift.
+- Adding one file to the corpus shifts everything past its insertion point
+  by exactly one. The magnitude of membership change is bounded by the
+  number of files added, NOT by the ordering scheme.
+
+That last point is the one that matters: the corpus differed by one file
+(`expected=221` against `expected=220`), so no partition function -- hash,
+name, or insertion order -- could have moved shard 3 by more than about one
+file. The question "did the partition move enough to separate content from
+position?" was answerable before any list was compared, and the answer was
+no either way.
+
+Source predicts, lists confirm: the displaced file
+(`array-absent-slot-accounting.test.ts`) is exactly where the cascade says
+it must be -- shard 4 of the slice run, and in no other shard.
+
 A normalisation note worth keeping, because it nearly produced a finding:
 the first pass read J = 0.0000 against the `knobon` run, because that run
 lived in `slice-wt` and the normaliser only knew `gate-wt` and `llvm-wt`.
