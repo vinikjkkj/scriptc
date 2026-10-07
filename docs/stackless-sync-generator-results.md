@@ -1094,9 +1094,14 @@ it at **630,182**, inside that window. Those are two different strengths of
 claim, and merging them is exactly how 32 bytes of drift live forever --
 which is literally what happened until today.
 
-It is also the strongest argument for the re-record. With the constant at
-630,182 this assertion becomes an **exact-equality** check instead of a
-tolerance test that happens to pass.
+It is also the strongest argument for the re-record -- stated carefully,
+because the tempting phrasing is wrong. With the constant at 630,182 the
+assertion does **not** become an exact-equality check: it is still
+`recordedTextComplaint` against a 256-byte tolerance. What changes is that
+the measured figure now sits at delta **0** instead of delta **32**, so the
+test has its whole 256-byte budget available to catch a real regression
+rather than 224. Calling it exact equality would be a new claim of the same
+kind this section is about, so it is not made.
 
 ### 17.3 Shard 3, separated
 
