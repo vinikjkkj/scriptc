@@ -153,6 +153,32 @@ emitted. **It trades a count for a pair of inclusions -- a permanent reduction
 in verification strength -- for 0.5% of points.** That trade is why the front
 stopped here rather than taking it.
 
+## AMENDMENT: D4 was taken, and the trade was made with its eyes open
+
+The section above records the front stopping at 99.3% / 98.3% because D4's
+price -- the point-count equality replaced by two inclusions -- was judged too
+high for 0.5% of points. **That decision was revisited and reversed by the
+user, with the cost restated and accepted, and D4 has landed.** The reversal
+is recorded here rather than by editing the paragraph above, because what the
+front believed at the time is part of the record.
+
+**1,301 of 1,304 functions (99.8%) and 2,272 of 2,281 points (99.6%).** What
+remains is 3 functions / 9 points, all generator-family, out of scope by
+decision. The point-blocker vocabulary is now EMPTY.
+
+**What was sold, in one line:** two inclusions cannot tell three copies of a
+plan point from four. Multiplicity left the compiler's own assertion and moved
+into a harness guard that MEASURES the copy count rather than assuming three.
+
+**And the slice paid for itself before it landed.** Admitting shape (1) put a
+park between `sc_pret`'s snapshot and its read for the first time, and the
+pending-return path answered 0 where the fiber lane answered 1 -- a wrong
+answer, on a path every previous slice had left unreachable. `4f6d55ef3` had
+flagged exactly this: it answered the question for one shape and said in as
+many words that another shape "gets re-derived rather than inheriting this".
+It was re-derived, by a guard that drove all three completion paths, and
+`sc_pret` is now a frame field.
+
 ## Method findings worth keeping
 
 - **A coverage number over a corpus is a statement about that corpus.** It

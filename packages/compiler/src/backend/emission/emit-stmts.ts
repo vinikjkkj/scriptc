@@ -242,6 +242,8 @@ export function emitFunction(E: CEmitter, fn: IrFunction): void {
     E.currentFn = fn;
     E.currentCoro = E.coroPlansByFn.get(fn.name) ?? null;
     E.coroPointIndex = 0;
+    E.coroStates = [];
+    E.coroPretType = null;
     const coro = E.currentCoro;
     E.captureIds = new Set((fn.captures ?? []).map((c) => c.localId));
     E.seqScoped = seqScopedLocals(fn);
@@ -264,6 +266,17 @@ export function emitFunction(E: CEmitter, fn: IrFunction): void {
     if (fn.returnType.kind !== "void" && returnCrossesFinally(fn.body)) {
       const init = isRefCounted(fn.returnType) ? "NULL" : "0";
       E.line(`${cDecl(fn.returnType, "sc_pret")} = ${init}; /* pending return (through finally) */`);
+      if (coro !== null) {
+        // D4: the slot now has to SURVIVE A PARK. A suspension inside a
+        // finally body sits between the snapshot and the read, so the C local
+        // above is dead by the time the pending-return copy resumes -- the
+        // function returned 0 and both lanes disagreed by exactly that. The
+        // local stays (every write and read below names it unqualified) and
+        // is spilled and reloaded around every park, like any other frame
+        // state the liveness pass cannot name.
+        E.coroPretType = fn.returnType;
+        E.coroPretByFn.set(fn.name, fn.returnType);
+      }
     }
 
     // Captured bindings come in through the environment — borrowed for the
@@ -285,11 +298,20 @@ export function emitFunction(E: CEmitter, fn: IrFunction): void {
       }
     }
 
+    // WHERE THE DISPATCH WILL GO. It cannot be written yet: it emits one
+    // `case` per EMITTED state, and how many states the body emits is not
+    // known until the body has been emitted. So the slot is remembered and
+    // the switch is spliced in below, after the walk -- "emit the body into a
+    // buffer and prepend the prologue" with `E.lines` serving as the buffer
+    // it already is.
+    let dispatchAt = -1;
+    let dispatchIndent = 0;
     if (coro !== null) {
       // The declarations above dominate every label, so the dispatch can
       // jump into the body. This is only legal because IrFunction.locals is
       // scope-flat and emitted at the top.
-      for (const l of coroDispatch(coro)) E.line(l);
+      dispatchAt = E.lines.length;
+      dispatchIndent = E.indent;
       for (const p of fn.params) {
         E.line(`${mangleLocal(p.localId)} = sc_f->${coroField(p.localId)};`);
       }
@@ -373,30 +395,64 @@ export function emitFunction(E: CEmitter, fn: IrFunction): void {
     }
     E.scopes.pop();
 
-    // THE CLOSING HALF OF THE DISPATCH INVARIANT, and it is deliberately not
-    // a shared constant.
+    // THE EQUALITY IS GONE, AND WHAT REPLACES IT IS TWO INCLUSIONS.
     //
-    // The dispatch emits `case 1..plan.points.length`, and the await sites
-    // draw from `coroPointIndex`. The bound check at the await catches
-    // OVER-emission -- an index past the dispatch -- and nothing caught
-    // UNDER-emission: a state with a case and no label is silent, and so is
-    // a plan entry nothing ever consumed.
+    // Until D4 one plan point produced exactly one emitted state, so a single
+    // equality -- cursor === points.length -- pinned emission to plan in both
+    // directions with no literal in between. A `finally` body is emitted once
+    // per completion path, so a point inside one legitimately becomes several
+    // states and that equality CANNOT hold.
     //
-    // Binding the two sides with a constant would tie DECLARED INTENT to
-    // DECLARED INTENT: change the emitter to emit a body a different number
-    // of times, update the constant, and the analysis is right only because
-    // someone remembered. This asserts what the emitter DID instead. Over
-    // and under together pin the emission to the plan with no literal in
-    // between, which is one thing to forget rather than two.
-    if (coro !== null && E.coroPointIndex !== coro.points.length) {
-      throw new Error(
-        `emitter bug: ${fn.name} consumed ${E.coroPointIndex} coroutine states but its ` +
-          `plan has ${coro.points.length} suspension points. The dispatch emits ` +
-          `case 1..${coro.points.length}, so the two must agree exactly: fewer means a ` +
-          `case whose label is never emitted, more is caught at the await site. If a ` +
-          `body is emitted more than once (a finally runs three copies), the PLAN has ` +
-          `to carry one entry per emitted copy -- see docs/stackless-llvm-port.md 10b.`,
+    // WHAT WAS SOLD, stated here because a reader six months from now should
+    // find it at the check and not in a side document: the pair below cannot
+    // distinguish three copies of a point from four. Multiplicity is no
+    // longer pinned by this invariant. That is a permanent reduction in
+    // verification strength, it was accepted deliberately with the cost
+    // known, and the multiplicity guard in the harness is what buys it back.
+    //
+    // WHY BOTH, and why neither alone: I1 alone admits states the analysis
+    // never planned; I2 alone admits a plan point nothing ever emitted -- a
+    // case with no label, which is the silent under-emission the equality's
+    // closing half was added to catch. Half the guard at the whole price.
+    //
+    // AND WHY THIS IS NOT THE EMITTER CHECKING ITSELF, which is the trap that
+    // sank the earlier design: both inclusions are evaluated against
+    // `coro.points`, which the ANALYSIS produces and which knows nothing
+    // about how many times a body is emitted. The emitter supplies only
+    // `E.coroStates`. Neither side of either inclusion is a number the
+    // emitter made up and then verified.
+    if (coro !== null) {
+      // I2, ARTIFACT -> ANALYSIS: every allocated state is sited at a plan
+      // point. (coroDrawState's bound check already refuses to draw past the
+      // plan; this re-states the property over the finished table rather than
+      // trusting that one site got it right every time.)
+      for (let st = 0; st < E.coroStates.length; st++) {
+        const pt = E.coroStates[st]!;
+        if (pt < 0 || pt >= coro.points.length) {
+          throw new Error(
+            `emitter bug: ${fn.name} state ${st} claims plan point ${pt}, but the ` +
+              `plan holds ${coro.points.length} point(s). A state was allocated for ` +
+              `a suspension the analysis never planned.`,
+          );
+        }
+      }
+      // I1, ANALYSIS -> ARTIFACT: every plan point was emitted at least once.
+      const served = new Set(E.coroStates);
+      for (let pt = 0; pt < coro.points.length; pt++) {
+        if (!served.has(pt)) {
+          throw new Error(
+            `emitter bug: ${fn.name} planned ${coro.points.length} suspension ` +
+              `point(s) but emitted no state for point ${pt} (${coro.points[pt]!.kind} ` +
+              `at ${coro.points[pt]!.loc.file}:${coro.points[pt]!.loc.start}). The ` +
+              `dispatch would carry a case whose label is never emitted.`,
+          );
+        }
+      }
+      // NOW the dispatch can be written, because the state count exists.
+      const dispatch = coroDispatch(E.coroStates.length).map(
+        (l) => "  ".repeat(dispatchIndent) + l,
       );
+      E.lines.splice(dispatchAt, 0, ...dispatch);
     }
 
     E.indent--;
@@ -1185,6 +1241,19 @@ export function emitStmt(E: CEmitter, s: IrStmt): void {
     if (hasFinally) {
       if (afterTryLabelUsed) E.line(`${afterTryLabel}:;`);
       E.line(`/* finally (normal path) */`);
+      // THE PLAN CURSOR, ACROSS A BODY EMITTED MORE THAN ONCE.
+      //
+      // Every copy of this body walks the SAME IR nodes and therefore the
+      // same plan points -- one point, several emitted states. The cursor is
+      // the ANALYSIS's position, so it is rewound to this body's first point
+      // before each further copy; the STATE table is not rewound, because
+      // each copy genuinely needs its own state and its own resume label (the
+      // copies are reached from different predecessors and cannot share one).
+      //
+      // This is the whole mechanism by which one point becomes N states, and
+      // it is why the closing check had to become two inclusions: after this,
+      // cursor and state count are different quantities on purpose.
+      const finPlanStart = E.coroPointIndex;
       E.emitBlock(s.finallyBody!);
       const needEnd = excHandler.used || retEntry!.used;
       if (needEnd) E.line(`goto ${endLabel};`);
@@ -1203,6 +1272,7 @@ export function emitStmt(E: CEmitter, s: IrStmt): void {
         E.line(`${finExcLabel}:; /* finally (exception path — stashed) */`);
         E.line(`ScrCaught *${stash} = scr_exc_take();`);
         E.scopes.push([{ name: stash, type: CAUGHT }]);
+        E.coroPointIndex = finPlanStart; // second copy, same plan points
         E.emitBlock(s.finallyBody!);
         E.scopes.pop(); // normal completion keeps the stash for the re-raise
         E.line(`scr_rethrow(${stash});`);
@@ -1222,6 +1292,7 @@ export function emitStmt(E: CEmitter, s: IrStmt): void {
         const retT = E.currentReturnType;
         const own = isRefCounted(retT);
         if (own) E.scopes.push([{ name: "sc_pret", type: retT }]);
+        E.coroPointIndex = finPlanStart; // third copy, same plan points
         E.emitBlock(s.finallyBody!);
         if (own) E.scopes.pop();
         const outer = E.finallyStack[E.finallyStack.length - 1];

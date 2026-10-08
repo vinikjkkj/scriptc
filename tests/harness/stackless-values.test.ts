@@ -352,12 +352,15 @@ const WRAPPERS: ReadonlyArray<{ name: string; take: string; finish: string; conv
   { name: "wfy2", take: "f64", finish: "ref", converted: true },
   { name: "wfy3", take: "ref", finish: "ref", converted: true },
   { name: "wfy4", take: "f64", finish: "f64", converted: true },
-  // AND THE NEGATIVE: shape (1), a suspension INSIDE the finally body. The
-  // emitter writes that body THREE times, so one IR node becomes three
-  // emitted sites -- the mechanism behind the six double-emitting functions
-  // (docs/stackless-llvm-port.md 10b). Out of scope here, and this row fails
-  // the day it stops being.
-  { name: "wfy6", take: "f64", finish: "f64", converted: false },
+  // SHAPE (1), a suspension INSIDE the finally body -- and this row DID fail
+  // the day it stopped being out of scope, which is what it was written for.
+  // D4 admitted it: the emitter writes that body once per completion path, so
+  // one IR node becomes up to three emitted sites, each with its own state.
+  // The one-state-per-point equality could not survive that and became two
+  // inclusions; see emit-stmts.ts and tests/harness/stackless-finally-body
+  // .test.ts, which guards the three paths and the multiplicity this file
+  // only has to notice.
+  { name: "wfy6", take: "f64", finish: "f64", converted: true },
   // THE FOUR STATEMENT POSITIONS, as one slice because they are DISJOINT: no
   // remaining function in the measured program carries two of them, so their
   // reach is additive exactly. Grouped by COST, not by nature -- `if`,
@@ -1143,8 +1146,11 @@ describe("the stackless lane answers what the fiber lane answers", () => {
       "pret   4",
       // Shape (2). wfy1 pf(3)=4 -> "t4". wfy2 answers 7 clean and catches
       // "bad" otherwise. wfy3 awaits in the CATCH body. wfy4 returns THROUGH
-      // the finally with the park between snapshot and read. wfy6 stays on
-      // fibers. fobs tallies the finallys that ran: 1 + 10 + 10 + 100 + 1000.
+      // the finally with the park between snapshot and read. wfy6 awaits
+      // INSIDE the finally body and converts as of D4 -- which is what put a
+      // park between sc_pret's snapshot and its read for the first time, and
+      // sent the slot into the coroutine frame.
+      // fobs tallies the finallys that ran: 1 + 10 + 10 + 100 + 1000.
       "fin    t4 | ok7 c:bad | c!! | 4 | 5 | 1121",
       // The four statement positions. wif picks a branch on an awaited bool.
       // wrs/wbs store pf(3)=4 and pf(4)=5 through a container evaluated

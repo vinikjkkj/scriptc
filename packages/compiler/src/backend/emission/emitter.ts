@@ -456,9 +456,50 @@ export class CEmitter {
   /** The function being emitted. The coroutine await site needs its locals
    * list to know what to spill. */
   currentFn: IrFunction | null = null;
-  /** How many suspension points this function has emitted so far — the
-   * state number the next park stores. */
+  /** The PLAN cursor: how far through `currentCoro.points` the walk has got.
+   * It is reset to the start of a `finally` body's point range before each
+   * re-emission of that body, because every copy walks the SAME IR nodes and
+   * therefore the same plan points. */
   coroPointIndex = 0;
+  /** THE STATE TABLE: one entry per EMITTED suspension site, holding the
+   * index of the PLAN POINT that site came from.
+   *
+   * Until D4 these were the same number, because one plan point produced
+   * exactly one emitted site, and a single equality
+   * (`coroPointIndex === points.length`) pinned emission to plan in both
+   * directions. A `finally` body is emitted once per completion path, so a
+   * point inside one becomes several sites and the equality cannot hold.
+   *
+   * The two are separated here rather than the equality weakened in place:
+   * `coroPointIndex` stays the ANALYSIS's cursor, `coroStates.length` is the
+   * ARTIFACT's state count, and each entry says which point its state serves.
+   * That is what lets the two inclusions in emitFunction be checked against
+   * `plan.points` — which the analysis produces — instead of against another
+   * number the emitter made up. */
+  coroStates: number[] = [];
+  /** THE PENDING-RETURN SLOT, when it has to survive a park.
+   *
+   * `sc_pret` holds the value of a `return` that is crossing a `finally`:
+   * the value is snapshotted BEFORE the finally body runs, which is what
+   * makes a finally's mutation of the returned local invisible, Node-exact.
+   *
+   * It was an ordinary C local until D4, and correctly so: through shape (2)
+   * the park always PRECEDED the write, so nothing could be read back across
+   * a suspension. Shape (1) puts an `await` INSIDE the finally body -- which
+   * is after the write and before the read -- so the local is dead by the
+   * time the pending-return copy resumes and the function returned 0.
+   *
+   * FOUND BY THE GUARD, not by reasoning: tests/harness/stackless-finally-
+   * body.test.ts drove the pending-return path and the two lanes disagreed,
+   * 1 against 0. The emitted C shows it exactly -- `double sc_pret = 0;` as a
+   * local, the write, then `scr_coro_park` inside the `sc_finret_` copy, then
+   * `scr_coro_finish_f64(sc_b, sc_pret)` after it.
+   *
+   * Set while the body is emitted; read when the frame struct is assembled,
+   * which happens afterwards. Null for a function that needs no slot. */
+  coroPretType: IrType | null = null;
+  /** Per function, the pending-return slot's type, for the frame struct. */
+  readonly coroPretByFn = new Map<string, IrType>();
   /** Per function, the emitter TEMPS a park had to put in the frame.
    *
    * A temp is a C local in the resume function, and a park RETURNS to the
@@ -2345,6 +2386,36 @@ export class CEmitter {
 
   line(text: string): void {
     this.lines.push("  ".repeat(this.indent) + text);
+  }
+
+  /** Allocate ONE emitted coroutine state for the plan point the walk is
+   * standing on, and return its STATE index (what the label and
+   * `sc_b->state` are numbered by).
+   *
+   * The three suspension emitters (await, union, hop) all draw through here
+   * so that the plan cursor and the state table can never advance
+   * independently -- drawing one without the other is exactly the desync the
+   * closing assertion was added to catch, and a single draw site means there
+   * is one place to get it right rather than three.
+   *
+   * THE BOUND CHECK STAYS, and still means what it meant: the cursor may not
+   * run past the plan. What it no longer implies is that one point yields one
+   * state; that is now the business of the two inclusions at the end of the
+   * body, which is where multiplicity is judged. */
+  coroDrawState(fnName: string, pointCount: number): number {
+    if (this.coroPointIndex >= pointCount) {
+      throw new Error(
+        `emitter bug: coroutine plan cursor ${this.coroPointIndex} is past the ` +
+          `plan, which holds ${pointCount} suspension point(s) for ${fnName}. ` +
+          `A suspension node was walked more times than the plan accounts for. ` +
+          `If this is a body emitted more than once (a finally runs up to three ` +
+          `copies), the cursor must be RESET to that body's first point before ` +
+          `each copy -- see emitTryFinally -- not allowed to run on.`,
+      );
+    }
+    const planIndex = this.coroPointIndex++;
+    this.coroStates.push(planIndex);
+    return this.coroStates.length - 1;
   }
 
   srcComment(loc: SrcLoc): string {

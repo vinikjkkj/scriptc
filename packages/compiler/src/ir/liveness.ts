@@ -427,8 +427,16 @@ function recordPoints(
         // nothing to take on the far side. What it still owes is the
         // position: inside a loop, a finally or a switch it is blocked for
         // exactly the reasons an await is.
+        // D4: `finallyBodyDepth` is GONE from admission. A suspension inside a
+        // finally body converts, which is the last point blocker retiring.
+        // The body is emitted once per completion path, so one plan point
+        // becomes several emitted states -- see emit-stmts.ts, where the
+        // cursor is rewound per copy and the state table is not, and where
+        // the old one-state-per-point EQUALITY became two inclusions.
+        //
+        // It survives as a frame-SIZE and diagnostic input the way
+        // `enclosingForOf` did when it stopped being an admission input.
         straightLine:
-          ctx.finallyBodyDepth === 0 &&
           ctx.rootOk &&
           (s.pointKind === "awaitExpr" ||
             s.pointKind === "awaitUnionExpr" ||
@@ -475,7 +483,12 @@ function recordPoints(
           //
           // `enclosingForOf` survives as a frame-SIZE input. It is no
           // longer an admission input.
-          ...(ctx.finallyBodyDepth > 0 ? ["finally:body"] : []),
+          // D4 retired `finally:body`, which was the LAST point blocker. The
+          // point-blocker vocabulary is now EMPTY: what remains are rootOk
+          // carve-outs and unlowerable kinds, both of which are about the
+          // point itself rather than its position. A census row asking for a
+          // position blocker therefore reads 0 LEGITIMATELY from here on --
+          // that is R1 in PREDICTION-d4.txt and not a counter that broke.
           ...(ctx.rootOk ? [] : ["rootOk:" + ctx.stmtKind]),
           ...(s.pointKind === "awaitExpr" ||
           s.pointKind === "awaitUnionExpr" ||

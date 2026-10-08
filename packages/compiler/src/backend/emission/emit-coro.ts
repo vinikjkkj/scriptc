@@ -167,6 +167,14 @@ export function emitCoroFrames(E: CEmitter, out: string[], plans: Map<string, St
     // spilled, so no capture needs a frame slot of its own.
     if (fn.captures !== undefined) fields.push("ScrClosure *sc_env; /* lifted */");
     const byId = new Map(fn.locals.map((l) => [l.id, l]));
+    // THE PENDING-RETURN SLOT, when a park can sit between its write and its
+    // read. See CEmitter.coroPretType: through shape (2) the park always
+    // preceded the write so a C local sufficed; a suspension INSIDE a finally
+    // body falls between them.
+    const pret = E.coroPretByFn.get(fn.name);
+    if (pret !== undefined) {
+      fields.push(`${cDecl(pret, "sc_pret")}; /* pending return, across a park */`);
+    }
     for (const id of coroFrameLocals(fn, plan)) {
       const l = byId.get(id)!;
       // A boxed local is a ScrBox* in the body; the frame carries the same
@@ -282,11 +290,11 @@ export function coroPrologue(E: CEmitter, fn: IrFunction, plan: StacklessPlan): 
 }
 
 /** The dispatch switch, emitted after the local declarations. */
-export function coroDispatch(plan: StacklessPlan): string[] {
+export function coroDispatch(stateCount: number): string[] {
   return [
     `switch (sc_b->state) {`,
     `  case 0: goto sc_S0;`,
-    ...plan.points.map((_p, i) => `  case ${i + 1}: goto ${coroLabel(i)};`),
+    ...Array.from({ length: stateCount }, (_v, i) => `  case ${i + 1}: goto ${coroLabel(i)};`),
     `  default: abort();`,
     `}`,
     `sc_S0:;`,
@@ -295,18 +303,22 @@ export function coroDispatch(plan: StacklessPlan): string[] {
 
 /** The reload of the frame's locals into their C names, emitted right after
  * a resume label and at the entry label. */
-export function coroReload(fn: IrFunction, plan: StacklessPlan): string[] {
+export function coroReload(E: CEmitter, fn: IrFunction, plan: StacklessPlan): string[] {
   const byId = new Map(fn.locals.map((l) => [l.id, l]));
-  return coroFrameLocals(fn, plan).map((id) => {
+  const out = coroFrameLocals(fn, plan).map((id) => {
     const l = byId.get(id)!;
     const name = l.boxed === true ? mangleLocal(id) : mangleLocal(id);
     return `${name} = sc_f->${coroField(id)};`;
   });
+  if (E.coroPretType !== null) out.push(`sc_pret = sc_f->sc_pret;`);
+  return out;
 }
 
 /** The spill of the frame's locals, emitted immediately before a park. */
-export function coroSpill(fn: IrFunction, plan: StacklessPlan): string[] {
-  return coroFrameLocals(fn, plan).map((id) => `sc_f->${coroField(id)} = ${mangleLocal(id)};`);
+export function coroSpill(E: CEmitter, fn: IrFunction, plan: StacklessPlan): string[] {
+  const out = coroFrameLocals(fn, plan).map((id) => `sc_f->${coroField(id)} = ${mangleLocal(id)};`);
+  if (E.coroPretType !== null) out.push(`sc_f->sc_pret = sc_pret;`);
+  return out;
 }
 
 /** The await site: spill, park, return to the scheduler, and on re-entry
@@ -345,14 +357,14 @@ export function emitCoroAwait(
     E.coroTempSpills.set(fn.name, seen);
   }
   for (const t of owned) E.line(`sc_f->sc_tmp_${t.name} = ${t.name};`);
-  for (const line of coroSpill(fn, plan)) E.line(line);
+  for (const line of coroSpill(E, fn, plan)) E.line(line);
   E.line(`sc_f->sc_awaited = ${promiseTemp.name};`);
   E.line(`sc_b->state = ${index + 1};`);
   E.line(`scr_coro_park(sc_b, sc_f->sc_awaited);`);
   E.line(`return; /* to the scheduler — one ready_push charged */`);
   E.line(`${coroLabel(index)}:;`);
   for (const t of owned) E.line(`${t.name} = sc_f->sc_tmp_${t.name};`);
-  for (const line of coroReload(fn, plan)) E.line(line);
+  for (const line of coroReload(E, fn, plan)) E.line(line);
   const take =
     resultType.kind === "void"
       ? null
@@ -423,7 +435,7 @@ export function emitCoroUnionSuspend(
   const owned = coroOwnedTemps(E, fn);
   const spill = (): void => {
     for (const t of owned) E.line(`sc_f->sc_tmp_${t.name} = ${t.name};`);
-    for (const line of coroSpill(fn, plan)) E.line(line);
+    for (const line of coroSpill(E, fn, plan)) E.line(line);
   };
   E.line(`if (${unionName}->tag == ${promiseTag}) {`);
   E.indent++;
@@ -444,7 +456,7 @@ export function emitCoroUnionSuspend(
   E.line(`}`);
   E.line(`${coroLabel(index)}:;`);
   for (const t of owned) E.line(`${t.name} = sc_f->sc_tmp_${t.name};`);
-  for (const line of coroReload(fn, plan)) E.line(line);
+  for (const line of coroReload(E, fn, plan)) E.line(line);
 }
 
 /** The bare microtask hop at a lowerable suspending libCall.
@@ -469,13 +481,13 @@ export function emitCoroHop(E: CEmitter, fn: IrFunction, plan: StacklessPlan, in
     E.coroTempSpills.set(fn.name, seen);
   }
   for (const t of owned) E.line(`sc_f->sc_tmp_${t.name} = ${t.name};`);
-  for (const line of coroSpill(fn, plan)) E.line(line);
+  for (const line of coroSpill(E, fn, plan)) E.line(line);
   E.line(`sc_b->state = ${index + 1};`);
   E.line(`scr_coro_hop(sc_b);`);
   E.line(`return; /* to the scheduler -- one ready_push charged */`);
   E.line(`${coroLabel(index)}:;`);
   for (const t of owned) E.line(`${t.name} = sc_f->sc_tmp_${t.name};`);
-  for (const line of coroReload(fn, plan)) E.line(line);
+  for (const line of coroReload(E, fn, plan)) E.line(line);
 }
 
 /** The completion path: what `return` and the top-level unwind emit instead

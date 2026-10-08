@@ -6445,16 +6445,12 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
               // label. Same bound check, same reason -- a point emitted twice
               // writes a state the dispatch has no case for, and the resume
               // takes default: abort().
-              if (E.coroPointIndex >= E.currentCoro.points.length) {
-                throw new Error(
-                  `emitter bug: coroutine state index ${E.coroPointIndex} is past the ` +
-                    `dispatch, which emits case 1..${E.currentCoro.points.length} for ` +
-                    `${E.currentFn!.name}. A suspension node was emitted more than ` +
-                    `once: the extra park would write a state with no case and the ` +
-                    `resume would take default: abort().`,
-                );
-              }
-              emitCoroHop(E, E.currentFn!, E.currentCoro, E.coroPointIndex++);
+              emitCoroHop(
+                E,
+                E.currentFn!,
+                E.currentCoro,
+                E.coroDrawState(E.currentFn!.name, E.currentCoro.points.length),
+              );
               // No pending check: a hop carries no operand, so there is no
               // rejection for it to re-throw. The fiber arm emits none either.
               return finish(`((void)0)`);
@@ -8183,16 +8179,7 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
           //
           // Any port that reuses coroPointIndex inherits this; the LLVM plan
           // already carries the note.
-          if (E.coroPointIndex >= E.currentCoro.points.length) {
-            throw new Error(
-              `emitter bug: coroutine state index ${E.coroPointIndex} is past the ` +
-                `dispatch, which emits case 1..${E.currentCoro.points.length} for ` +
-                `${E.currentFn!.name}. A suspension node was emitted more than ` +
-                `once: the extra park would write a state with no case and the ` +
-                `resume would take default: abort().`,
-            );
-          }
-          const idx = E.coroPointIndex++;
+          const idx = E.coroDrawState(E.currentFn!.name, E.currentCoro.points.length);
           const nm = emitCoroAwait(E, E.currentFn!, E.currentCoro, idx, pr0, e.type);
           E.emitPendingCheck();
           return { name: nm, type: e.type };
@@ -8257,16 +8244,7 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
           // loudly), and drawing it zero times would collide two points on one
           // state, which nothing would catch, so the pair is emitted by a
           // single call that cannot do either.
-          if (E.coroPointIndex >= E.currentCoro.points.length) {
-            throw new Error(
-              `emitter bug: coroutine state index ${E.coroPointIndex} is past the ` +
-                `dispatch, which emits case 1..${E.currentCoro.points.length} for ` +
-                `${E.currentFn!.name}. A suspension node was emitted more than ` +
-                `once: the extra park would write a state with no case and the ` +
-                `resume would take default: abort().`,
-            );
-          }
-          const idx = E.coroPointIndex++;
+          const idx = E.coroDrawState(E.currentFn!.name, E.currentCoro.points.length);
           if (e.type.kind === "void") {
             emitCoroUnionSuspend(E, E.currentFn!, E.currentCoro, idx, u.name, e.promiseTag, peek);
             // The promise is BORROWED from the union, so the take is followed
