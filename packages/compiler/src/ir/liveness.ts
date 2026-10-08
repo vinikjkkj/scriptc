@@ -427,7 +427,7 @@ function recordPoints(
         // position: inside a loop, a finally or a switch it is blocked for
         // exactly the reasons an await is.
         straightLine:
-          ctx.loopDepth === 0 &&
+          ctx.forOfDepth === 0 &&
           ctx.finallyDepth === 0 &&
           ctx.switchDepth === 0 &&
           ctx.rootOk &&
@@ -435,7 +435,21 @@ function recordPoints(
             s.pointKind === "awaitUnionExpr" ||
             s.pointKind.startsWith("libCall:")),
         blockers: [
-          ...(ctx.loopDepth > 0 ? ["loop"] : []),
+          // D2e: a PLAIN loop is in. The dispatch goto jumps into the loop
+          // body, which is the same "jump into a block" the `try` slice
+          // already relies on, and a plain loop's carried state is ordinary
+          // IrLocals the frame already holds.
+          //
+          // A `forOf` is NOT, and the reason is structural rather than
+          // effort: its iterable reference and its cursor are
+          // backend-internal and are not IrLocals at all, so `live` cannot
+          // name them however correct the dataflow is (see
+          // SuspensionPoint.enclosingForOf, which exists to say exactly
+          // this). A frame that cannot carry the cursor cannot resume the
+          // iteration. So the blocker narrows from "any loop" to "a forOf",
+          // and is RENAMED with it: a census row reading `loop` would now
+          // mean something different from what it meant yesterday.
+          ...(ctx.forOfDepth > 0 ? ["forOf"] : []),
           ...(ctx.finallyDepth > 0 ? ["finally"] : []),
           ...(ctx.switchDepth > 0 ? ["switch"] : []),
           ...(ctx.rootOk ? [] : ["rootOk:" + ctx.stmtKind]),

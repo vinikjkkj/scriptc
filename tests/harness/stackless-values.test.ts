@@ -266,6 +266,31 @@ const WRAPPERS: ReadonlyArray<{ name: string; take: string; finish: string; conv
   { name: "wav", take: "void", finish: "ref", converted: true }, // awaitUnion, VOID result
   { name: "waun", take: "ref", finish: "ref", converted: true }, // awaitUnion, f64 arm
   { name: "waus", take: "ref", finish: "ref", converted: true }, // awaitUnion, string arm
+  // THE LOOP SHAPES. The dispatch goto jumps INTO the loop body, which is the
+  // same "jump into a block" the try slice relies on, and a plain loop's
+  // carried state is ordinary IrLocals the frame already holds. Each row
+  // exists for a distinct way that could be false:
+  //   wln  a NON-refcounted loop-carried accumulator -- covered by liveness
+  //        alone, not by the "every owned local" rule
+  //   wls  a refcounted one, through emitStrAccum, inside a loop
+  //   wlf  `for`, whose update clause runs after the resume
+  //   wld  `do/while`, whose condition is at the BOTTOM
+  //   wlc  `continue` taken AFTER a resume
+  //   wlb  `break` taken AFTER a resume
+  //   wlnest  an inner loop whose counter must not survive the outer pass
+  { name: "wln", take: "f64", finish: "f64", converted: true },
+  { name: "wls", take: "ref", finish: "ref", converted: true },
+  { name: "wlf", take: "f64", finish: "f64", converted: true },
+  { name: "wld", take: "f64", finish: "f64", converted: true },
+  { name: "wlc", take: "f64", finish: "f64", converted: true },
+  { name: "wlb", take: "f64", finish: "f64", converted: true },
+  { name: "wlnest", take: "f64", finish: "f64", converted: true },
+  // A NEGATIVE entry, and the one that can go wrong in silence. A forOf names
+  // only its binding: its iterable reference and its cursor are
+  // backend-internal and are NOT IrLocals, so `live` cannot name them and the
+  // frame cannot carry them. It must STAY on the fiber lane, and this row
+  // fails the moment it stops doing so.
+  { name: "wlfo", take: "f64", finish: "f64", converted: false },
 ];
 
 const SOURCE = `
@@ -516,6 +541,51 @@ function mixsu(flag: boolean): Promise<string> | undefined { return flag ? ps("q
 async function waun(flag: boolean): Promise<string> { const x = await mixn(flag); return x === undefined ? "none" : "n" + x; }
 async function waus(flag: boolean): Promise<string> { const x = await mixsu(flag); return x === undefined ? "none" : x + "/" + x.length; }
 
+/* THE LOOP SHAPES. Magnitudes are chosen so the plausible failures are
+ * distinguishable from the answer AND from each other: a body that runs once
+ * answers the first term, an accumulator the frame drops answers the last,
+ * and a counter that resets does not terminate. */
+async function wln(): Promise<number> {
+  let s = 0; let i = 0;
+  while (i < 3) { s += await pf(i); i++; }
+  return s;
+}
+async function wls(): Promise<string> {
+  let s = ""; let i = 0;
+  while (i < 3) { s = s + await ps(String(i)); i++; }
+  return s + "/" + s.length;
+}
+async function wlf(): Promise<number> {
+  let s = 0;
+  for (let i = 0; i < 3; i++) { s += await pf(i * 10); }
+  return s;
+}
+async function wld(): Promise<number> {
+  let s = 0; let i = 0;
+  do { s += await pf(i); i++; } while (i < 2);
+  return s;
+}
+async function wlc(): Promise<number> {
+  let s = 0; let i = 0;
+  while (i < 4) { const v = await pf(i); i++; if (v % 2 === 0) { continue; } s += v; }
+  return s;
+}
+async function wlb(): Promise<number> {
+  let s = 0; let i = 0;
+  while (i < 10) { const v = await pf(i); i++; if (v >= 3) { break; } s += v; }
+  return s;
+}
+async function wlnest(): Promise<number> {
+  let s = 0; let i = 0;
+  while (i < 2) { let j = 0; while (j < 2) { s += await pf(i * 10 + j); j++; } i++; }
+  return s;
+}
+async function wlfo(): Promise<number> {
+  let s = 0;
+  for (const x of [1, 2]) { s += await pf(x); }
+  return s;
+}
+
 async function main(): Promise<void> {
   const f = await wf(41);
   console.log("f64   ", f);
@@ -579,6 +649,8 @@ async function main(): Promise<void> {
   console.log("hopord", horder.join(" "));
   console.log("aunion", await wau(true), await wau(false), "|", await was(true), await was(false), "|", await wav(true), await wav(false));
   console.log("aunion2", await waun(true), await waun(false), "|", await waus(true), await waus(false));
+  console.log("loop  ", await wln(), "|", await wls(), "|", await wlf(), "|", await wld());
+  console.log("loop2 ", await wlc(), "|", await wlb(), "|", await wlnest(), "|", await wlfo());
   console.log("done");
 }
 void main();
@@ -839,6 +911,12 @@ describe("the stackless lane answers what the fiber lane answers", () => {
       // The value-result awaitUnion, both arms. waun: pf(1)=2 -> "n2" on the
       // park arm, undefined -> "none" on the hop arm. waus: "q!" is 2 chars.
       "aunion2 n2 none | q!/2 none",
+      // The loop rows. wln 1+2+3=6. wls "0!1!2!" is 6 chars. wlf
+      // pf(0)+pf(10)+pf(20) = 1+11+21 = 33. wld runs twice: 1+2 = 3.
+      // wlc keeps the odd results only: 1+3 = 4. wlb stops at 3: 1+2 = 3.
+      // wlnest 1+2+11+12 = 26. wlfo stays on fibers and must still answer 5.
+      "loop   6 | 0!1!2!/6 | 33 | 3",
+      "loop2  4 | 3 | 26 | 5",
     ];
     for (const line of ASSIGN_LINES) {
       expect(fiber, `the reference arm must already answer: ${line}`).toContain(line);

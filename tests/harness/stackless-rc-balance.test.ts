@@ -285,6 +285,59 @@ const CASES: ReadonlyArray<{ name: string; why: string; src: string }> = [
       "",
     ].join("\n"),
   },
+  /* LOOPS. The axis a loop adds is MULTIPLICITY: a leak that costs one object
+   * on a straight-line body costs one PER ITERATION here, and a release that
+   * runs once where it should run N times is invisible to any value guard --
+   * the answers are identical. The rows below allocate inside the body and
+   * carry a reference across the park, which are the two shapes that differ
+   * from everything above. */
+  {
+    name: "loop-per-iteration",
+    why: "a fresh refcounted object allocated INSIDE the body, dropped each pass, across a park",
+    src: [
+      "async function main(): Promise<void> {",
+      "  let n = 0",
+      "  let i = 0",
+      "  while (i < 3) {",
+      '    const o = new Holder("x" + String(i) + String(Date.now() % 3))',
+      "    const v = await p(i)",
+      "    n = n + o.items.length + v",
+      "    i++",
+      "  }",
+      "  console.log(n)",
+      "}",
+      "void main()",
+      "",
+    ].join("\n"),
+  },
+  {
+    name: "loop-carried-ref",
+    why: "a refcounted accumulator REASSIGNED every pass across a park -- the old value must be released each time, not once",
+    src: [
+      "async function main(): Promise<void> {",
+      '  let s = "a"',
+      "  let i = 0",
+      "  while (i < 3) { s = s + await ps(i); i++ }",
+      "  console.log(s.length)",
+      "}",
+      "void main()",
+      "",
+    ].join("\n"),
+  },
+  {
+    name: "loop-scalar",
+    why: "THE CONTROL: nothing refcounted crosses the park, so no release path runs and it must stay green",
+    src: [
+      "async function main(): Promise<void> {",
+      "  let n = 0",
+      "  let i = 0",
+      "  while (i < 3) { n = n + await p(i); i++ }",
+      "  console.log(n)",
+      "}",
+      "void main()",
+      "",
+    ].join("\n"),
+  },
   {
     name: "field-after-park",
     why: "THE CONTROL: reading the field after the park makes the object live, so it was in the frame all along and never leaked",
