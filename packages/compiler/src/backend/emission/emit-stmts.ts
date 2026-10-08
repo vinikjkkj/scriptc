@@ -1205,7 +1205,35 @@ export function emitStmt(E: CEmitter, s: IrStmt): void {
           E.line(`goto ${outer.label};`);
         } else {
           E.releaseForJump(0, 0);
-          E.line(retT.kind === "void" ? `return;` : `return sc_pret;`);
+          if (E.currentCoro !== null) {
+            // THE LAST RETURN PATH THE COROUTINE LOWERING NEVER CONVERTED,
+            // and it is a defect in what already ships rather than a piece of
+            // any future slice. A resume function is VOID; this emitted
+            // `return sc_pret;` into it, so a function with a `return` inside
+            // a try-with-finally produced C that does not compile -- and that
+            // needs no `finally` ADMISSION at all, only a suspension
+            // somewhere straight-line, which is D1. Reproduced on a clean
+            // base checkout with a ten-line program.
+            //
+            // It survived every slice because the measured program contains
+            // no function of that shape: occupancy zero, capacity live. A
+            // coverage number over a corpus is a statement about that corpus;
+            // it cannot tell "this lowering is correct" from "no input
+            // exercised this lowering".
+            //
+            // Same treatment as the ordinary return above: a coroutine has no
+            // caller on the stack after its first resume, so it FULFILLS its
+            // promise instead of returning. Guarded on the lane, so the
+            // knob-absent emission keeps `return sc_pret;` byte-for-byte.
+            for (const l of coroFinish(
+              E,
+              retT,
+              retT.kind === "void" ? null : "sc_pret",
+              E.currentFn?.captures !== undefined,
+            )) E.line(l);
+          } else {
+            E.line(retT.kind === "void" ? `return;` : `return sc_pret;`);
+          }
         }
       }
       if (needEnd) E.line(`${endLabel}:;`);

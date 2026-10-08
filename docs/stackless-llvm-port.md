@@ -459,6 +459,64 @@ C, independently equal to the `withPoints` count from a separate liveness
 census; and a fabricated mangled symbol was absent. The name mangling was
 derived from `mangle.ts` rather than assumed.
 
+## 10b. The double emission is the three-copy `finally`, measured
+
+A `finally` body is emitted **three times** -- normal path, exception path,
+pending-return path -- so a suspension sited INSIDE one becomes three emitted
+sites for one IR node. The excess for a function is therefore exactly
+`2 x (its in-finally suspension points)`.
+
+Tested as a PREDICTION with no free parameter: count in-finally points from
+the IR, predict the excess, compare against the per-function excess section
+10 recorded from the C.
+
+| function | in-finally pts | predicted excess | recorded excess |
+|---|---|---|---|
+| `%m173.readFileHead` | 1 | 2 | 2 |
+| `%m173.performPlaintextMediaUpload` | 1 | 2 | 2 |
+| `%m198.buildMediaMessage` | 1 | 2 | 2 |
+| `%m198.uploadMediaStream` | 2 | **4** | **4** |
+| `%%m252.WaRetryCoordinator.handleIncomingRetryReceipt` | 1 | 2 | 2 |
+| `%m268.uploadHqFromStream` | 2 | **4** | **4** |
+| | **8** | **16** | **16** |
+
+**The two inputs are independent.** The three-copy claim comes from the
+emitter (`emit-stmts.ts` emits `/* finally (normal path) */`, `sc_finexc_N:;`
+and `sc_finret_N:;`); the recorded excess came from a join of the IR against
+the emitted C taken before any of this work.
+
+**CONFIRMED BY DIRECT READING, for the 2-point case where a factor error
+would show.** The agreement above would be arithmetic rather than empirical
+if the recorded side were itself computed from in-finally points, so
+`%m198.uploadMediaStream` was read straight out of the knob-absent C:
+
+    try body (before the first copy)          4 awaits
+    /* finally (normal path) */               2
+    sc_finexc_0:;  (exception path)           2
+    sc_finret_0:;  (pending-return path)      2
+                                             --
+                                             10   from 6 IR points
+
+The function range was checked to contain exactly one definition, and the
+three copies are identified by the emitter's OWN markers rather than by
+source locations -- which matters, because see below.
+
+**SOURCE LOCATIONS ON PROVENANCE-MODULE FUNCTIONS ARE MISATTRIBUTED, and it
+cost the first attempt at this evidence.** `sc_f__x25_m198_uploadMediaStream`
+carries `/* .../app182/zapo-rest.ts:873 */`, and line 873 of that file is
+inside `hexToBytes`; the function really lives in
+`zapo-js/dist/client/messaging/messages.js`. Grouping the emitted awaits by
+their source comment appeared to show two nodes at 3x each -- the right
+answer from an untrustworthy identity. Do not use these locs to identify a
+node in an emitted-C join.
+
+**CONSEQUENCE FOR THE STACKLESS LANE.** The six are exactly the shape-(1)
+population -- a suspension inside a `finally` body -- and being shape (1) is
+what makes a function double-emit. So a slice admitting shape (2) only does
+not admit any of them and the `coroPointIndex` bound check stays dormant,
+predictably. The check fires when shape (1) is admitted, and it will fire
+hard: three parks for one state, 8 points, 24 sites.
+
 ## 11. Not measured
 
 - **Re-derivation of the real-load peak working set at the CURRENT C-lane
@@ -469,10 +527,9 @@ derived from `mangle.ts` rather than assumed.
 - The frame cost of option A, in bytes per admissible frame.
 - Whether the two `fix(stack)` LLVM-lane commits of 2026-10-02 changed tier
   membership.
-- The **mechanism** of the double emission in section 10. Per-TU
-  duplication of a `static` helper was tested and **refuted**: awaits are
-  concentrated in parts 1–6 and 14 rather than forming a per-TU baseline,
-  and the shared header holds none.
+- ~~The **mechanism** of the double emission in section 10.~~ **SOLVED, see
+  section 10b.** Per-TU duplication of a `static` helper was tested and
+  refuted; the answer is the three-copy `finally` emission.
 - Whether any of the 6 functions in section 10 is reachable at runtime.
 - A complete linked `app182` artifact (rc = 0). The lane was read off the
   emitted `.ll`; the link was interrupted during the zig phase. The zig

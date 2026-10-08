@@ -312,6 +312,22 @@ const WRAPPERS: ReadonlyArray<{ name: string; take: string; finish: string; conv
   { name: "wfo3", take: "f64", finish: "f64", converted: true },
   { name: "wfo4", take: "f64", finish: "f64", converted: true },
   { name: "wfo5", take: "f64", finish: "f64", converted: true },
+  // THE PENDING-RETURN ROW, and it guards a defect that was ALREADY SHIPPED
+  // rather than a shape this slice admits. Its only await is OUTSIDE the try,
+  // so it is a plain D1 function and has been converted since the first
+  // merged slice -- but its `return` crosses a finally, and the pending-return
+  // dispatch emitted `return sc_pret;` into a VOID resume function. On a clean
+  // base checkout this program does not compile at all.
+  //
+  // It survived six slices, every gate and every measurement because the
+  // measured program contains no function of this shape: occupancy zero,
+  // capacity live. It is here so the shape has an occupant.
+  //
+  // The value is the second half: a `return` crossing a finally SNAPSHOTS its
+  // value before the finally runs, so the mutation must be invisible and this
+  // must answer 4. A lost snapshot answers 999 -- a plausible number that no
+  // structure check or turn count can see.
+  { name: "wfy5", take: "f64", finish: "f64", converted: true },
   // THE FOUR STATEMENT POSITIONS, as one slice because they are DISJOINT: no
   // remaining function in the measured program carries two of them, so their
   // reach is additive exactly. Grouped by COST, not by nature -- `if`,
@@ -665,6 +681,14 @@ async function wfo5(): Promise<number> {
   return fs[0]() * 10 + fs[1]();
 }
 
+// The pending-return shape: the await is OUTSIDE the try, so this is D1 and
+// has always been converted; the 'return' crosses a finally, which is what
+// emitted a value-return into a void resume function.
+async function wfy5(n: number): Promise<number> {
+  let v = await pf(n);
+  try { return v; } finally { v = 999; }
+}
+
 
 /* THE FOUR STATEMENT POSITIONS. Each magnitude distinguishes the plausible
  * wrong answer: wif taking the other branch, wrs storing through a container
@@ -781,6 +805,7 @@ async function main(): Promise<void> {
   console.log("loop  ", await wln(), "|", await wls(), "|", await wlf(), "|", await wld());
   console.log("loop2 ", await wlc(), "|", await wlb(), "|", await wlnest(), "|", await wlfo());
   console.log("forof ", await wfo1(), "|", await wfo2(), "|", await wfo3(), "|", await wfo4(), "|", await wfo5());
+  console.log("pret  ", await wfy5(3));
   console.log("four  ", await wif(1), await wif(-1), "|", await wrs(3), "|", await wby(4));
   console.log("four2 ", await wsw(1), await wsw(2), await wsw(3), "|", await wsd(0), await wsd(1), await wsd(5), "|", await wst(1), await wst(9), "|", await wsu(1), await wsu(9));
   console.log("done");
@@ -1053,6 +1078,9 @@ describe("the stackless lane answers what the fiber lane answers", () => {
       // wfo3 pf(10)+pf(20)+pf(20)+pf(40) = 11+21+21+41 = 94. wfo4 keeps the
       // odd results: 3+5 = 8. wfo5 captures x per iteration: (1+2)*10 + (2+3).
       "forof  9 | a!b!/4 | 94 | 8 | 35",
+      // The pending return: pf(3)=4 is snapshotted BEFORE the finally writes
+      // 999, so 4 is the only correct answer and 999 is the failure.
+      "pret   4",
       // The four statement positions. wif picks a branch on an awaited bool.
       // wrs/wbs store pf(3)=4 and pf(4)=5 through a container evaluated
       // BEFORE the park. wsw resumes inside a case body holding a refcounted
