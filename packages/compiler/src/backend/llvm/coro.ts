@@ -33,6 +33,11 @@
 import type { IrFunction, IrLocal, IrStmt, IrType } from "../../ir/nodes.js";
 import { isRefCounted } from "../../ir/nodes.js";
 import type { StacklessPlan } from "../../ir/liveness.js";
+import {
+  libCallPointKind,
+  STACKLESS_LOWERABLE_LIB_CALL_LIST,
+  type SuspensionPointKind,
+} from "../../ir/suspends.js";
 import { mangleCoroField, mangleCoroFrame, mangleCoroResume } from "../mangle.js";
 
 /** A function the STRUCTURAL predicate admitted and the EMISSION then refused.
@@ -113,31 +118,49 @@ export function coroNeedsExcCell(fn: IrFunction): boolean {
   return found;
 }
 
-/** True when some `awaitExpr` sits inside a `finallyBody`, at any depth.
+/** True when some SUSPENSION sits inside a `finallyBody`, at any depth.
  *
- * THE ONE SHAPE S1 REFUSES THAT THE REST OF THE PREDICATE WOULD ADMIT, and the
- * reason is an alloca slot rather than a temp. A `return` crossing a finally
- * snapshots its value into `%pretSlot` (emitter.ts's return case) and reads it
- * back after the finally copies have run. That slot is `alloca` memory of the
- * RESUME CALL, and every resume is a fresh call -- so a park BETWEEN the write
- * and the read reads garbage, silently, with the verifier happy because the
- * slot is dominance-legal. The C lane met this and moved the slot into the
- * frame (`sc_pret`); doing the same here is the cross-park ALLOCA mechanism,
- * which is a later slice.
+ * THE ONE SHAPE THE REST OF THE PREDICATE WOULD ADMIT, and the reason is an
+ * alloca slot rather than a temp. A `return` crossing a finally snapshots its
+ * value into `%pretSlot` (emitter.ts's return case) and reads it back after the
+ * finally copies have run. That slot is `alloca` memory of the RESUME CALL, and
+ * every resume is a fresh call -- so a suspension BETWEEN the write and the
+ * read reads garbage, silently, with the verifier happy because the slot is
+ * dominance-legal. The C lane met this and moved the slot into the frame
+ * (`sc_pret`); doing the same here is the cross-park ALLOCA mechanism, which is
+ * a separate slice.
  *
- * A park in a try or catch body is fine and stays admitted: the snapshot
- * happens after the resume on every path, so nothing crosses. Only a park
- * INSIDE the finally body inverts that order. */
-export function awaitInsideFinally(fn: IrFunction): boolean {
+ * A suspension in a try or catch body is fine and stays admitted: the snapshot
+ * happens after the resume on every path, so nothing crosses. Only one INSIDE
+ * the finally body inverts that order.
+ *
+ * THE HOP COUNTS, AND IT DID NOT USED TO. This read `awaitExpr ||
+ * awaitUnionExpr` while the hop was unlowerable, which made it correct by
+ * accident: a function carrying one was refused by KIND before this was ever
+ * consulted. Admitting the hop voids that argument -- "a hop is a park", and
+ * `%pretSlot` cannot tell them apart, because what breaks the slot is the
+ * RETURN TO THE SCHEDULER and both do that. Widening the predicate without
+ * widening this would have opened a silent wrong answer in the one position
+ * whose defect no invariant on this lane can see. The precondition that made
+ * the narrow spelling safe was owned somewhere else, and it was retired by the
+ * same edit that needed it. */
+export function suspensionInsideFinally(fn: IrFunction): boolean {
   let found = false;
-  const hasAwait = (v: unknown): boolean => {
+  const hasSuspension = (v: unknown): boolean => {
     if (v === null || typeof v !== "object") return false;
-    if (Array.isArray(v)) return v.some(hasAwait);
+    if (Array.isArray(v)) return v.some(hasSuspension);
     const rec = v as Record<string, unknown>;
     if (rec["kind"] === "awaitExpr" || rec["kind"] === "awaitUnionExpr") return true;
+    // The hop is not a node kind -- it is an ordinary-looking libCall -- which
+    // is exactly why a walk keyed on node kinds could not see it. Asked against
+    // the authoritative list in ir/suspends.ts rather than a remembered name.
+    if (rec["kind"] === "libCall" && typeof rec["fn"] === "string"
+        && LLVM_LOWERABLE_LIB_CALLS.has(rec["fn"])) {
+      return true;
+    }
     for (const k in rec) {
       if (k === "loc" || k === "type") continue;
-      if (hasAwait(rec[k])) return true;
+      if (hasSuspension(rec[k])) return true;
     }
     return false;
   };
@@ -148,7 +171,7 @@ export function awaitInsideFinally(fn: IrFunction): boolean {
       return;
     }
     const rec = v as Record<string, unknown>;
-    if (rec["kind"] === "tryCatch" && rec["finallyBody"] != null && hasAwait(rec["finallyBody"])) {
+    if (rec["kind"] === "tryCatch" && rec["finallyBody"] != null && hasSuspension(rec["finallyBody"])) {
       found = true;
       return;
     }
@@ -268,6 +291,130 @@ export function coroFrameSizeOf(fnName: string): string {
 
 export { mangleCoroFrame, mangleCoroResume, mangleCoroField };
 
+/** Fails to compile unless T is `never`. The reverse half of the binding
+ * below. Spelled here rather than imported because it is a one-line type
+ * helper, not a fact: ir/suspends.ts keeps its own for the same purpose, and
+ * two copies of a helper do not drift the way two copies of a LIST do. */
+type AssertNever<T extends never> = T;
+
+/** THE POINT KINDS THIS BACKEND LOWERS, and the ones it does not -- CLASSIFIED,
+ * not filtered.
+ *
+ * BOUND IN BOTH DIRECTIONS, and that is the whole reason there are two lists
+ * instead of one set and an `else`. Each is `satisfies readonly
+ * SuspensionPointKind[]` (nothing in a list that is not a real point kind) and
+ * together they are passed through `AssertNever` against the union (nothing in
+ * the union that is in neither list). So registering a new suspension point
+ * kind in ir/suspends.ts FAILS TO COMPILE HERE until someone says which side it
+ * is on. The alternative -- a lowerable set and everything else refused -- makes
+ * a new kind default to "refused" in silence, which is the exact failure
+ * suspends.ts's own header was written against: a union member that compiles
+ * clean and is rejected by every consumer without anyone deciding it.
+ *
+ * WHY EACH ABSENTEE IS ABSENT. These are reasons, and a reason that stops being
+ * true is a slice:
+ *
+ *   awaitUnionExpr -- ONE point, TWO ways in: the promise arm parks and the
+ *     unit arm hops, sharing one state and one resume label. The block shape is
+ *     not the blocker; the UNION TEMP is. It is a refcounted `ScrUnion *`, so
+ *     `own()` records it, and it is still owned when the suspension is reached
+ *     AND read again after the resume -- measured in the fiber lowering of
+ *     `wav`, where `%t6` is released on both far-side paths. It cannot ride
+ *     `sc_awaited` either, because that field is the arm DISCRIMINATOR (the hop
+ *     arm stores NULL there). So this kind is blocked on the cross-park owned
+ *     temp mechanism -- the `sc_tmp_` frame fields the C lane lays out -- and
+ *     not on anything in this file.
+ *
+ *   yieldExpr -- a generator. emitAsyncScaffolding does not own one.
+ *   genResume / agenResume -- the CONSUMER side, refused on the C lane too. */
+export const LLVM_LOWERABLE_POINT_KIND_LIST = [
+  "awaitExpr",
+  // Spelled through libCallPointKind so the `libCall:` prefix has one author.
+  libCallPointKind("async.hop"),
+] as const satisfies readonly SuspensionPointKind[];
+
+export const LLVM_UNLOWERABLE_POINT_KIND_LIST = [
+  "awaitUnionExpr",
+  "yieldExpr",
+  "genResume",
+  "agenResume",
+] as const satisfies readonly SuspensionPointKind[];
+
+type _Lowerable = (typeof LLVM_LOWERABLE_POINT_KIND_LIST)[number];
+type _Unlowerable = (typeof LLVM_UNLOWERABLE_POINT_KIND_LIST)[number];
+/** Every point kind is on exactly one side: nothing unclassified ... */
+type _PointKindsClassified = AssertNever<Exclude<SuspensionPointKind, _Lowerable | _Unlowerable>>;
+/** ... and nothing on both, which `satisfies` alone cannot catch. */
+type _PointKindsDisjoint = AssertNever<Extract<_Lowerable, _Unlowerable>>;
+
+const LLVM_LOWERABLE_POINT_KINDS: ReadonlySet<string> = new Set<SuspensionPointKind>(
+  LLVM_LOWERABLE_POINT_KIND_LIST,
+);
+
+/** The point kinds the `nestedInExpression` PRE-FILTER does not apply to,
+ * because the property that flag stands in for cannot hold of them.
+ *
+ * WHAT THE FLAG MEANS, and it is a different question from what this backend
+ * asks of it. liveness sets `nested` when a suspension sits at depth inside a
+ * larger expression, and uses it to WIDEN THE LIVE SET conservatively. This
+ * backend borrowed it as a cheap proxy for "a temporary is already materialised
+ * and owned when the suspension is reached" -- and coro.ts's own header already
+ * records that the proxy is "close but NOT sufficient". It is also NOT
+ * NECESSARY, which is what this set is about.
+ *
+ * WHY THE BARE HOP IS EXEMPT, and the reason is a property of the construct
+ * rather than of this program. liveness.ts states it in its own words: "a bare
+ * hop carries no operand at all, so there is no promise to own across the park
+ * and nothing to take on the far side." A point with NO OPERANDS cannot have
+ * operands materialised before it. Its `nested` flag is nevertheless TRUE for
+ * every hop in every program, unconditionally, because the frontend desugars
+ * `await <non-promise>` into a `seqExpr` holding a hidden-local `varDecl`, the
+ * `async.hop` libCall and a read of that local (lower-exprs.ts). The hop is
+ * therefore at depth inside the scaffolding THE DESUGAR ITSELF BUILT -- the
+ * flag is reporting the shape of the lowering, not a materialised temporary.
+ *
+ * MEASURED, not reasoned: the whole hop bucket (whn, whs, wha, whu, whv and
+ * hopsteps) refused as `nested-in-expression` the moment the point count
+ * opened, while their fiber lowerings show every owned temp released BEFORE
+ * `scr_await_hop` and the hidden `%awaited` living in an IrLocal alloca that
+ * the frame already carries. Zero temps owned at the hop, six refusals.
+ *
+ * WHY DROPPING THE PRE-FILTER HERE IS SAFE, which is the part that matters:
+ * what it was standing in for is measured EXACTLY, one layer down, by the
+ * emitter's own `owned > 0` check at the hop, and anything it still misses is
+ * caught by blocks.ts's cross-park temp invariant. BOTH are recoverable --
+ * emitFunction catches CoroRefusedError and CrossParkTempError alike, restores
+ * the declare snapshot and re-emits the body on the fiber lane -- so the worst
+ * outcome of being wrong here is a function that keeps the lowering it already
+ * had. That is a loss of coverage and nothing else; the two lowerings are
+ * interchangeable at the call site.
+ *
+ * AND WHY IT IS NOT JUST "ADJUSTING UNTIL THE LIST LOOKS RIGHT". It is keyed on
+ * the KIND, not on names, and on a property (`no operands`) that is true of the
+ * construct everywhere rather than true of these six wrappers. An `awaitExpr`
+ * stays filtered: it HAS an operand, the promise, and a nested one really does
+ * sit in a temporary. The nested-await bucket is untouched by this and remains
+ * the cross-park temp slice's subject. */
+const POINT_KINDS_WITHOUT_AN_OPERAND: ReadonlySet<string> = new Set<SuspensionPointKind>([
+  libCallPointKind("async.hop"),
+]);
+
+/** The suspending libCalls this backend lowers, DERIVED from the list above by
+ * asking which of the stackless-lowerable ones has a point kind on the admitted
+ * side. Not a second list: `suspensionInsideFinally` walks raw IR, where a hop
+ * is a `libCall` node with an `fn` string and no point kind attached, so it
+ * needs the question in that vocabulary -- and deriving it means admitting a
+ * new libCall point kind cannot leave this walk blind to it. */
+const LLVM_LOWERABLE_LIB_CALLS: ReadonlySet<string> = new Set(
+  STACKLESS_LOWERABLE_LIB_CALL_LIST.filter((f) => LLVM_LOWERABLE_POINT_KINDS.has(libCallPointKind(f))),
+);
+
+const _pointKindBindingUsed: readonly unknown[] = [
+  null as unknown as _PointKindsClassified,
+  null as unknown as _PointKindsDisjoint,
+];
+void _pointKindBindingUsed;
+
 /** THE ADMISSION PREDICATE -- which planned functions THIS backend lowers.
  *
  * It is deliberately NARROWER than `coroPlans`, and the gap is the whole shape
@@ -276,44 +423,46 @@ export { mangleCoroFrame, mangleCoroResume, mangleCoroField };
  * everything downstream -- the declare set, the link switch, the test ledger --
  * has to key on what was LOWERED rather than on what was planned.
  *
- * THE THREE CONDITIONS, each with the mechanism it keeps out:
+ * THE CONDITIONS, each with the mechanism it keeps out:
  *
- *   1. EXACTLY ONE suspension point. A second point needs a second state, a
- *      second resume block and a second spill site; none of that is hard, but
- *      a multi-point body is also where a local's live range first spans two
- *      parks, and that is worth its own slice with its own value coverage.
+ *   1. AT LEAST ONE suspension point. The count is otherwise FREE: a second
+ *      point is a second state, a second resume block and a second spill site,
+ *      and the dispatch has been built from `plan.points.length` since S1. What
+ *      a multi-point body costs is carried by conditions 2 and 3, which is why
+ *      they are quantified over every point rather than asked of the first.
  *
- *   2. THE POINT IS AN `awaitExpr`. Not a hop (`libCall:async.hop` draws a
- *      state from the same counter and emits scr_coro_hop, which this slice
- *      declares nothing for and therefore must not reach), and not a
- *      `yieldExpr` (a generator, which emitAsyncScaffolding does not own).
+ *   2. EVERY POINT IS A KIND THIS BACKEND LOWERS -- see the classified lists
+ *      below. `awaitExpr` and the bare microtask hop (`libCall:async.hop`) are
+ *      in; `awaitUnionExpr` is not, and the reason is stated where it is
+ *      classified rather than here.
  *
- *   3. IT IS NOT NESTED IN A LARGER EXPRESSION. `nestedInExpression` is the
+ *   3. NO POINT IS NESTED IN A LARGER EXPRESSION. `nestedInExpression` is the
  *      analysis's own flag for "operands evaluated BEFORE this point are
  *      already materialised in temporaries the frame must also hold". Those
  *      temporaries are `%tN` SSA values on this lane, and an SSA value cannot
  *      be reloaded under its own name -- carrying one across a park is the
- *      cross-park temp mechanism, which is a later slice. blocks.ts's invariant
- *      fails the build if one ever slips through, so this condition is the
- *      thing that keeps the build green rather than the thing that keeps it
- *      correct.
+ *      cross-park temp mechanism, which is a separate slice. blocks.ts's
+ *      invariant fails the build if one ever slips through, so this condition
+ *      is the thing that keeps the build green rather than the thing that keeps
+ *      it correct.
  *
- *   4. NO PARK INSIDE A `finally` BODY -- see awaitInsideFinally: that is the
- *      cross-park ALLOCA mechanism (`%pretSlot`), which no invariant on this
- *      lane can see.
+ *   4. NO SUSPENSION INSIDE A `finally` BODY -- see suspensionInsideFinally:
+ *      that is the cross-park ALLOCA mechanism (`%pretSlot`), which no
+ *      invariant on this lane can see.
+ *
+ * ONE SOURCE FOR THE VERDICT. This function is `coroRefusalReason(...) === null`
+ * and nothing else. They were two parallel condition lists reading the same
+ * fields in the same order, which is the shape that drifts: the census would
+ * have gone on reporting the OLD reason for a function the predicate now
+ * admits, and a census that disagrees with the predicate mis-orders every
+ * slice that reads it. Opening the point count is exactly the edit that would
+ * have desynchronised them.
  *
  * WHAT THIS IS NOT: a list of function names. The membership is recomputed from
  * the plan on every build, so a liveness change that admits a new shape shows
  * up here as coverage rather than as a list that quietly went stale. */
 export function llvmCoroLowers(fn: IrFunction, plan: StacklessPlan): boolean {
-  if (fn.generator !== undefined) return false;
-  if (fn.async !== true) return false;
-  if (plan.points.length !== 1) return false;
-  const pt = plan.points[0]!;
-  if (pt.kind !== "awaitExpr") return false;
-  if (pt.nestedInExpression) return false;
-  if (awaitInsideFinally(fn)) return false;
-  return true;
+  return coroRefusalReason(fn, plan) === null;
 }
 
 /** The subset of a module's stackless plans that the LLVM backend lowers. */
@@ -336,14 +485,95 @@ export function llvmCoroPlans(
 export function coroRefusalReason(fn: IrFunction, plan: StacklessPlan): string | null {
   if (fn.generator !== undefined) return "generator";
   if (fn.async !== true) return "not-async";
-  if (plan.points.length !== 1) return `points=${plan.points.length}`;
-  const pt = plan.points[0]!;
-  if (pt.kind !== "awaitExpr") return `kind=${pt.kind}`;
-  if (pt.nestedInExpression) return "nested-in-expression";
-  if (awaitInsideFinally(fn)) return "park-inside-finally";
+  // A plan with no point has no state and no dispatch to build. It cannot
+  // arrive today -- `suspensionLiveness` returns null when it finds none, so
+  // `stacklessPlan` bails before building one -- and the guard costs nothing
+  // next to a dispatch whose `switch` would carry only the entry arm.
+  if (plan.points.length === 0) return "points=0";
+  // QUANTIFIED OVER EVERY POINT, and that is the whole hazard of opening the
+  // count. Both tests below used to read `plan.points[0]` because there was
+  // only ever one of them; leaving them that way while admitting a second
+  // point would admit a function on the strength of its FIRST point and lower
+  // its second one wrong -- a silent widening, which on this host is a silent
+  // wrong answer.
+  for (const pt of plan.points) {
+    if (!LLVM_LOWERABLE_POINT_KINDS.has(pt.kind)) return `kind=${pt.kind}`;
+  }
+  for (const pt of plan.points) {
+    if (pt.nestedInExpression && !POINT_KINDS_WITHOUT_AN_OPERAND.has(pt.kind)) {
+      return "nested-in-expression";
+    }
+  }
+  if (suspensionInsideFinally(fn)) return "suspension-inside-finally";
   return null;
 }
 
 /** A statement body walk shared by the refusal checks above. Kept here rather
  * than imported from the C emitter so this module depends on the IR only. */
 export type { IrStmt };
+
+/** The suspension CALL SITES in a rendered resume body, counted out of the text
+ * the function actually emitted.
+ *
+ * READ BACK OUT OF THE `.ll`, NOT TALLIED BESIDE THE EMISSION, and that is the
+ * whole value of it. A counter incremented next to the `B.line` that emits the
+ * call is a copy kept beside the thing it copies: it agrees with the emission
+ * by construction and can only ever report that the emitter did what the
+ * emitter did. Reading the rendered body is an independent measurement of what
+ * came out, so a site emitted twice, or a state drawn with no site emitted at
+ * all, moves one side and not the other. */
+export function coroSuspensionSites(body: string): { parks: number; hops: number } {
+  return {
+    parks: (body.match(/call i32 @scr_coro_park\(/g) ?? []).length,
+    hops: (body.match(/call void @scr_coro_hop\(/g) ?? []).length,
+  };
+}
+
+/** THE SECOND COUNTABLE INVARIANT:
+ *
+ *     parkCalls + hopCalls === statesDrawn + unionPoints
+ *
+ * WHY THE FIRST ONE IS NOT ENOUGH. D5 in emitFunction asserts `boundaries ===
+ * statesDrawn === plan.points.length`, and all three of those are counted at
+ * the POINT: one draw, one boundary, one state. None of them can see whether a
+ * suspension CALL was emitted at all. A point that drew its state, took its
+ * boundary and emitted no `scr_coro_park`/`scr_coro_hop` is a function that
+ * never returns to the scheduler and never suspends -- a wrong TURN COUNT with
+ * every value still correct, which is invisible to a value comparison and, on
+ * this host, invisible to everything else as well.
+ *
+ * WHY `unionPoints` IS IN THE FORMULA WHILE IT IS ALWAYS ZERO TODAY. An
+ * `awaitUnionExpr` is ONE point and ONE state that emits TWO suspension calls
+ * -- a park on the promise arm and a hop on the unit arm, sharing one resume
+ * label. Measured in the C lane's own output for `wav`, `waun` and `waus`: one
+ * park, one hop, ONE label, ONE dispatch case. So the spelling "parks + hops
+ * equals the state count", which is TRUE for the bare hop and is stated that
+ * way in emit-coro.ts, is FALSE for the union by exactly one per union point.
+ * The universal spelling is the one emitCoroUnionSuspend's own header gives:
+ * one STATE per point, one resume LABEL per state.
+ *
+ * The term is carried from the day the hop lands, with the backend passing
+ * zero, so that when the union arrives the arithmetic is already right and
+ * nobody meets a failing assertion and reaches for the loosening. That is the
+ * failure mode a countable invariant has: the pressure at the moment it first
+ * goes red is to widen it until it passes, which destroys it exactly as
+ * thoroughly as never having written it. */
+export function coroCheckSuspensionSites(
+  fnName: string,
+  body: string,
+  statesDrawn: number,
+  unionPoints: number,
+): void {
+  const { parks, hops } = coroSuspensionSites(body);
+  const expected = statesDrawn + unionPoints;
+  if (parks + hops !== expected) {
+    throw new Error(
+      `llvm emitter bug: ${fnName} emitted ${parks} park(s) and ${hops} hop(s) -- ${parks + hops} ` +
+        `suspension call(s) -- but drew ${statesDrawn} state(s) with ${unionPoints} two-armed ` +
+        `point(s), which requires ${expected}. Too few means a point drew a state and a resume ` +
+        `label but never returns to the scheduler: every value stays correct and the TURN COUNT ` +
+        `is wrong, which no value comparison can report. Too many means a point was emitted ` +
+        `twice and the second write lands on a state the dispatch routes elsewhere.`,
+    );
+  }
+}

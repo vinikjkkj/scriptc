@@ -99,6 +99,7 @@ import {
   coroLabel,
   coroFrameSizeOf,
   coroRefusalReason,
+  coroCheckSuspensionSites,
   llvmCoroPlans,
   type CoroFrameLayout,
 } from "./coro.js";
@@ -3939,6 +3940,59 @@ class LlEmitter {
     return out;
   }
 
+  /** The bare microtask hop at a lowerable suspending libCall.
+   *
+   * emitCoroAwait WITHOUT THE OPERAND: no promise to move into the frame, no
+   * `sc_awaited`, and nothing to take on the far side. Everything else is the
+   * same park shape and MUST stay the same -- the owned-temp check, the frame
+   * spill, the state write, the return to the scheduler, the resume block, the
+   * boundary and the reload. "A hop is a park: the C locals of the resume
+   * function are just as dead across it as they are across an await, and the
+   * first version of emitCoroAwait learned that by segfault" (emit-coro.ts).
+   * That sentence is about C locals; on this lane the same fact is that a `%tN`
+   * minted before the hop does not dominate a use after it, and the boundary
+   * below is what makes blocks.ts able to say so.
+   *
+   * NO PENDING CHECK. A hop carries no operand, so there is no rejection for it
+   * to re-throw. The fiber arm emits none either, and the C stackless arm says
+   * so in as many words.
+   *
+   * ONE scr_coro_hop PER POINT, which is the half of the countable invariant
+   * the hop contributes. It is NOT the whole invariant -- see
+   * coroCheckSuspensionSites, and the comment at the D5 assertion for why
+   * "parks + hops" is the wrong universal spelling. */
+  private emitCoroHop(fn: IrFunction): void {
+    const B = this.B;
+    const plan = this.currentCoro!;
+    const index = this.coroStatesDrawn;
+    if (index >= plan.points.length) {
+      throw new Error(
+        `llvm emitter bug: ${fn.name} drew suspension state ${index} but the plan holds ` +
+          `${plan.points.length} point(s). A suspension node was walked more times than the ` +
+          `plan accounts for; the hop would write a state the dispatch has no case for.`,
+      );
+    }
+    this.coroStatesDrawn++;
+    // Same refusal as the park, and for the same reason: this slice lays out no
+    // sc_tmp_ frame fields, so an owned temp cannot survive the return to the
+    // scheduler. A hop holds no operand of its own, so unlike the park there is
+    // nothing to move out of the frame first -- anything owned here belongs to
+    // an enclosing expression and the function goes back to the fiber lane.
+    const owned = this.frames.reduce((n, f) => n + f.length, 0);
+    if (owned > 0) throw new CoroRefusedError(fn.name, `owned-temp-at-hop=${owned}`);
+    this.emitCoroSpill();
+    const ps = this.coroStateField();
+    B.line(`store i32 ${index + 1}, ptr ${ps}`);
+    this.declare(`declare void @scr_coro_hop(ptr)`);
+    B.line(`call void @scr_coro_hop(ptr %sc_b)`);
+    B.terminate("ret void ; to the scheduler -- one ready_push charged");
+
+    // -- the far side ------------------------------------------------------
+    B.startBlock(coroLabel(index));
+    B.parkBoundary();
+    this.emitCoroReload();
+  }
+
   /** The completion path: what `return` and the implicit void exit emit
    * instead of a `ret`.
    *
@@ -5034,11 +5088,25 @@ class LlEmitter {
        * to LOOSEN it until it passes, which destroys it exactly as thoroughly
        * as forgetting the boundary would.
        *
-       * WHEN HOPS ARRIVE this stays correct without an edit, because
-       * parkBoundary() is what counts and a hop takes one: the C lane's
-       * emit-coro.ts states that `parks + hops` is what must equal the case
-       * count, and `boundaries()` is that sum by construction rather than by a
-       * second rule that has to be kept in step.
+       * HOPS HAVE ARRIVED and this did stay correct without an edit -- but NOT
+       * for the reason this comment used to give. It said `boundaries()` is
+       * "parks + hops by construction", citing emit-coro.ts's statement that
+       * `parks + hops` must equal the case count. That spelling is true of the
+       * bare hop and FALSE one construct over: an `awaitUnionExpr` is ONE point
+       * and ONE state emitting TWO suspension calls, measured as 1 park + 1 hop
+       * under a single resume label in the C lane's own output for wav, waun
+       * and waus. emitCoroUnionSuspend's own header says so and supersedes the
+       * line that was quoted here.
+       *
+       * What actually makes this assertion right is narrower and survives the
+       * union: ONE STATE PER POINT, ONE RESUME LABEL PER STATE, and
+       * parkBoundary() is taken once per LABEL -- at the resume block, never at
+       * the suspension call. A two-armed point must therefore take ONE
+       * boundary, not one per arm, or this fails 2-against-1 and the repair
+       * pressure is to loosen it.
+       *
+       * The call-site count is a SEPARATE invariant, because this one cannot
+       * see it: see coroCheckSuspensionSites below.
        *
        * AND IT IS NOT THE EMITTER CHECKING ITSELF on the third term:
        * `coro.points.length` comes from the ANALYSIS, which knows nothing
@@ -5060,6 +5128,15 @@ class LlEmitter {
         );
       }
       const body = B.render();
+      /* THE SECOND COUNTABLE INVARIANT, over what was EMITTED rather than what
+       * was intended. D5 above counts at the point -- draw, boundary, state --
+       * and all three can be right while no suspension call was emitted at all,
+       * which is a coroutine that never returns to the scheduler: every value
+       * correct, the turn count wrong, and nothing downstream able to say so.
+       * `unionPoints` is 0 because this backend lowers no two-armed point yet;
+       * it is passed rather than assumed so the arithmetic is already right
+       * when one does. */
+      coroCheckSuspensionSites(fn.name, body, this.coroStatesDrawn, 0);
       this.currentCoro = null;
       this.currentCoroLayout = null;
       // NO PARAMETERS, and a `void` return: the resume signature is
@@ -13541,6 +13618,29 @@ class LlEmitter {
     const B = this.B;
     // Loop liveness first (one table for generic and special shapes).
     if (USES_TIMERS_LIB_FNS.has(e.fn)) this.usesTimers = true;
+    /* THE STACKLESS HOP, and it goes here rather than beside the name table.
+     *
+     * `async.hop` reaches the generic lowering through LIB_FN_RUNTIME_NAMES
+     * ("async.hop" -> "scr_await_hop"), which is a FIBER primitive: reaching it
+     * from a body that has no fiber aborts at runtime with "await outside an
+     * async function", which is precisely what shipped once on the C lane and
+     * crashed fifteen admitted bodies. So the branch has to be in front of the
+     * table, not inside it.
+     *
+     * THE CONDITION IS `currentCoro`, NOT THE KNOB. A knob-absent build has an
+     * empty `coroPlans`, so `currentCoro` is null in every function and this
+     * takes its existing path with nothing changed -- which is what the
+     * byte-identity criterion rests on. The hazard of a conditional inserted
+     * into a shared path is never the new branch; it is the else, and the else
+     * here is the untouched fall-through below.
+     *
+     * The loop-liveness line above runs for BOTH lanes deliberately: the hop
+     * still needs the event loop alive, and the C lane sets `usesTimers` on its
+     * stackless arm for the same reason. */
+    if (e.fn === "async.hop" && this.currentCoro !== null) {
+      this.emitCoroHop(this.fnByName.get(this.currentFnName)!);
+      return { name: "", type: e.type };
+    }
     // The handful with non-generic shapes first.
     if (e.fn === "error.argTypeThrow") {
       // Always throws with the runtime-rendered Received tail (the

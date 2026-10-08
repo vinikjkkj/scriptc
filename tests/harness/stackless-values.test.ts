@@ -932,7 +932,9 @@ function resumeBodies(artifact: string, lane: Lane): Map<string, string> {
   return out;
 }
 
-/* THE LLVM LANE'S FLOOR -- the wrappers its emitter lowers today.
+/* THE LLVM LANE'S FLOOR -- the wrappers its emitter lowers today (40 of the 80
+ * planned, 32 of them from the dispatch slice and 8 from the multi-state and
+ * hop one).
  *
  * THIS IS A FLOOR, NOT A PREDICATE, and the difference is the whole reason it
  * is safe to write names here. The predicate lives in
@@ -969,6 +971,18 @@ const LLVM_FLOOR: ReadonlySet<string> = new Set([
   "wlc", "wlb",
   "wfy5", "wfy1", "wfy2", "wfy3", "wfy4",
   "wif", "wsd", "wsu",
+  // THE MULTI-STATE DISPATCH. More than one suspension point is a second
+  // state, a second resume block and a second spill site. `who` parks twice in
+  // sequence; `wsw` parks in two different case bodies of one switch, which is
+  // also where a resume label first lands inside a statement the dispatch jumps
+  // into.
+  "who", "wsw",
+  // THE BARE MICROTASK HOP (`async.hop`). `hopsteps` is the multi-state one and
+  // is what the `hopord` turn row measures: two hops, and the 1:1 interleaving
+  // holds only if each costs exactly one turn. The other five are one hop each,
+  // one per operand kind, and each carries its hidden `%awaited` local across
+  // the suspension.
+  "hopsteps", "whn", "whs", "wha", "whu", "whv",
 ]);
 
 /* THE OTHER HALF OF THE PARTITION -- the shapes the LLVM lane does NOT lower,
@@ -1007,27 +1021,37 @@ const NOT_LOWERED_BY_REASON: ReadonlyArray<readonly [string, readonly string[]]>
   // largest group by a factor of five.
   ["nested-in-expression", [
     "wrm", "wtt", "wte",
+    // These three carried `a second suspension point` until the point count
+    // opened. The count was never their only blocker -- it was just the one the
+    // predicate reached first. `wtb` parks in both arms of a ternary and `wau`
+    // and `was` are the `Promise<T> | T` DESUGAR, which is also a ternary (an
+    // awaitExpr in one arm, an async.hop in the other). An await in a ternary
+    // arm is nested, which `wtt` and `wte` -- the same shape with one await --
+    // have always said. wau/was additionally own a union temp across the park.
+    "wtb", "wau", "was",
     "wna", "wnv", "wnn", "wns", "wnb", "wnx", "wnf", "wnr", "wnm",
     "wgc", "wgc2", "wgp",
     "wln", "wls", "wlf", "wld", "wlnest", "wlfo",
     "wfo1", "wfo2", "wfo3",
     "wfy6",
   ]],
-  // More than one suspension point: a second state, a second resume block and
-  // a second spill site -- and the first place a local's live range spans two
-  // parks.
-  ["a second suspension point", ["wtb", "who", "hopsteps", "wau", "was", "wsw"]],
   // A temp was still OWNED when the park was reached. The structural predicate
   // admits these -- `nestedInExpression` reports false for a one-field record
   // literal that is nevertheless holding the record -- and the emitter refuses
   // them on sight. Needs the sc_tmp_ frame fields the C lane lays out.
   ["a temp owned across the park", ["wrl", "wrs", "wby", "wfo4", "wfo5", "wga"]],
-  // The microtask hop (`async.hop`). It draws a state from the same counter an
-  // await does and emits scr_coro_hop, which this lane declares nothing for --
-  // and must not, because a declare with no call site claims coverage.
-  ["async.hop", ["whn", "whs", "wha", "whu", "whv"]],
   // `await` of a promise-or-absent union: ONE point with TWO ways to reach it,
   // sharing a single resume label and discriminated by sc_awaited.
+  //
+  // THE BLOCKER IS NOT THE BLOCK SHAPE, and the group name says the kind rather
+  // than the cause because the predicate refuses it by kind. The cause is the
+  // UNION TEMP: it is a refcounted `ScrUnion *`, so it is owned when the
+  // suspension is reached AND read again after the resume, and it cannot ride
+  // `sc_awaited` because that field is the arm discriminator (the hop arm
+  // stores NULL there). So these three are blocked on the same cross-park owned
+  // temp mechanism as the group above, and they fall out the day it lands --
+  // deliberately, with their own prediction and their own guards, rather than
+  // as emission written ahead of time behind a refusal that no data reaches.
   ["awaitUnion", ["wav", "waun", "waus"]],
   // Caught by the emitter's cross-park invariant rather than by the predicate:
   // an awaited case TEST computes the switch discriminant before the park and
@@ -1084,15 +1108,14 @@ async function buildArm(knob: boolean, backend: Lane): Promise<Arm> {
  * emitter had a stackless lowering to check. The LLVM lane grew one at S1, so
  * the lane is a parameter now.
  *
- * THE LLVM LANE IS EXPECTED TO BE RED, and that is this file's job rather than
- * a defect in it. S1 lowers P -- nine wrappers -- out of the seventy-nine the
- * ledger carries. The alternative was to narrow the ledger per lane until the
- * work passed it, which is the "green by construction" move: a criterion
- * trimmed to fit. Instead the gap is a NAMED failure, in its own test, so that
- * partial coverage can never be read as whole coverage and the next slice has
- * its worklist printed for it. The three tests are split for the same reason:
- * vitest stops a test at its first failed expectation, so folding them into
- * one would let the ledger's red hide whether the nine actually work. */
+ * THE LLVM LANE COVERS A STRICT SUBSET, and the gap is ASSERTED rather than
+ * tolerated: the partition test below fails if a shape leaves the floor AND if
+ * one joins it without someone moving the line. The alternative was to narrow
+ * the ledger per lane until the work passed it, which is the "green by
+ * construction" move: a criterion trimmed to fit. The three tests are split so
+ * that one failing cannot hide the others -- vitest stops a test at its first
+ * failed expectation, so folding them into one would let the partition's red
+ * hide whether the lowered shapes actually work. */
 describe.each(["c", "llvm"] as const)("the stackless lane answers what the fiber lane answers (%s)", (lane) => {
 
   // Built once per lane and shared by the three tests below: each arm is a
@@ -1133,9 +1156,14 @@ describe.each(["c", "llvm"] as const)("the stackless lane answers what the fiber
       `wrappers this lane (${lane}) must convert and does not -- these kinds are unguarded`).toEqual([]);
     // The take/finish arms are CALL-SITE driven, so the set asserted here is
     // the set the expected wrappers actually exercise. Asserting an arm no
-    // expected wrapper uses would claim coverage the lane does not have --
-    // which on the LLVM lane is exactly the four arms P never reaches
-    // (take_bool, finish_bool, finish_void, and hop).
+    // expected wrapper uses would claim coverage the lane does not have.
+    //
+    // THE `take` COLUMN DESCRIBES THE FIBER ARM, and for a hop wrapper that is
+    // not what this lane emits: a bare hop carries no operand, so it takes
+    // NOTHING on the far side. whn/whs/wha/whu/whv therefore exercise no take
+    // arm at all here. The assertions below still hold, because every arm they
+    // name is reached by some other floor wrapper -- which is the point: the
+    // set is derived from the expected wrappers, so it cannot outrun them.
     for (const arm of new Set(converted.map((w) => `scr_coro_take_${w.take}`))) {
       expect(on.artifact, `${arm} is never emitted -- the kind it carries is unguarded`).toContain(arm);
     }
@@ -1144,6 +1172,16 @@ describe.each(["c", "llvm"] as const)("the stackless lane answers what the fiber
     }
 
     expect(on.artifact, "the rejection completion is never emitted").toContain("scr_coro_finish_throw");
+
+    // THE HOP, asserted on BOTH lanes. It is the one suspension primitive that
+    // is NOT reached through the take/finish dispatches above, so nothing else
+    // in this test would notice it going missing -- and a hop that stopped
+    // being emitted does not make the program wrong, it makes it answer every
+    // value correctly in the wrong NUMBER OF TURNS. That failure is visible
+    // only in the `hopord` row below, and only because two coroutines are
+    // stepped through it 1:1. This is the cheap structural half of that guard.
+    expect(on.artifact, "the microtask hop is never emitted -- the hop shapes are unguarded")
+      .toContain("scr_coro_hop");
 
     // NO FIBER CALL MAY APPEAR IN AN ADMITTED BODY, checked in the artifact.
     //

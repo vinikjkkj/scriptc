@@ -188,8 +188,15 @@ type _PointKindsCovered = AssertNever<
   Exclude<SuspensionPointKind, (typeof SUSPENSION_POINT_KINDS)[number]>
 >;
 
-/** The point kind a lowerable libCall contributes. One spelling, one place. */
-export function libCallPointKind(fn: StacklessLowerableLibCall): SuspensionPointKind {
+/** The point kind a lowerable libCall contributes. One spelling, one place.
+ *
+ * GENERIC ON PURPOSE, so the result is the LITERAL point kind rather than the
+ * whole union. A consumer classifying point kinds against a `const` list needs
+ * `libCallPointKind("async.hop")` to be `"libCall:async.hop"`; declaring the
+ * return as `SuspensionPointKind` widened it to every member and silently made
+ * such a classification vacuous -- an exhaustiveness binding that can never
+ * fail, which is the shape this file exists to prevent. */
+export function libCallPointKind<F extends StacklessLowerableLibCall>(fn: F): `libCall:${F}` {
   return `libCall:${fn}`;
 }
 
