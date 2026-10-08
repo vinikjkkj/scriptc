@@ -10,7 +10,7 @@ import { mangleClassNew, mangleClassRetain, mangleClassStruct, mangleField, mang
 import { OVERFLOW_MEMBER, OWNMASK_MEMBER, SRCPROTO_MEMBER, TOSTR_MEMBER, nullProtoCondC, ownPresentCondC } from "./emit-shapes.js";
 import { dynDestrCheckHelper, dynIterNHelper, dynKeyGetHelper } from "./emit-walkers.js";
 import { genResultThunkFor } from "./emit-async.js";
-import { emitCoroAwait, emitCoroHop } from "./emit-coro.js";
+import { emitCoroAwait, emitCoroHop, emitCoroUnionSuspend } from "./emit-coro.js";
 import { isStableReceiverOperand } from "../../ir/analysis.js";
 import { wsGlobalCtorFor } from "./emit-ws.js";
 
@@ -8248,6 +8248,89 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
         const inner = promiseArm.inner;
         const u = E.emitExpr(e.value);
         const peek = `(ScrPromise *)scr_union_peek(${u.name})`;
+        if (E.currentCoro !== null) {
+          // STACKLESS: ONE point, ONE state, TWO ways in. emitCoroUnionSuspend
+          // emits both arms and the single shared resume label; the resume
+          // tells them apart by sc_awaited, which the park arm sets and the
+          // hop arm nulls. The index is drawn ONCE for the pair -- drawing it
+          // twice runs past the dispatch (the bound check below catches that
+          // loudly), and drawing it zero times would collide two points on one
+          // state, which nothing would catch, so the pair is emitted by a
+          // single call that cannot do either.
+          if (E.coroPointIndex >= E.currentCoro.points.length) {
+            throw new Error(
+              `emitter bug: coroutine state index ${E.coroPointIndex} is past the ` +
+                `dispatch, which emits case 1..${E.currentCoro.points.length} for ` +
+                `${E.currentFn!.name}. A suspension node was emitted more than ` +
+                `once: the extra park would write a state with no case and the ` +
+                `resume would take default: abort().`,
+            );
+          }
+          const idx = E.coroPointIndex++;
+          if (e.type.kind === "void") {
+            emitCoroUnionSuspend(E, E.currentFn!, E.currentCoro, idx, u.name, e.promiseTag, peek);
+            // The promise is BORROWED from the union, so the take is followed
+            // by no release -- the union still owns it and the union temp is
+            // itself in the frame.
+            E.line(`if (sc_f->sc_awaited) scr_coro_take_void(sc_b, sc_f->sc_awaited);`);
+            E.line(`sc_f->sc_awaited = NULL;`);
+            E.emitPendingCheck();
+            return { name: "", type: e.type };
+          }
+          if (e.type.kind !== "union") {
+            throw new Error("emitter bug: awaitUnion result is neither void nor a union");
+          }
+          const rd = E.unionsById.get(e.type.unionId);
+          if (!rd) throw new Error("emitter bug: awaitUnion result union unknown");
+          const rTag = (arm: (typeof rd.arms)[number]): number => {
+            const t = rd.arms.findIndex((a) => typeEquals(a, arm));
+            if (t < 0) throw new Error("emitter bug: awaitUnion result arm missing");
+            return t;
+          };
+          const iTag = rTag(inner);
+          const nm = `sc_t${E.tempCounter++}`;
+          E.line(`${cDecl(e.type, nm)} = NULL;${E.srcComment(e.loc)}`);
+          E.currentFrame().push({ name: nm, type: e.type });
+          emitCoroUnionSuspend(E, E.currentFn!, E.currentCoro, idx, u.name, e.promiseTag, peek);
+          E.line(`if (sc_f->sc_awaited) {`);
+          E.indent++;
+          let cw: string;
+          switch (inner.kind) {
+            case "f64":
+              cw = `scr_union_new_f64(${iTag}, scr_coro_take_f64(sc_b, sc_f->sc_awaited))`;
+              break;
+            case "bool":
+              cw = `scr_union_new_bool(${iTag}, scr_coro_take_bool(sc_b, sc_f->sc_awaited))`;
+              break;
+            case "string":
+              cw = `scr_union_new_ref(${iTag}, scr_coro_take_ref(sc_b, sc_f->sc_awaited), scr_str_retain_v, scr_str_release_v, NULL)`;
+              break;
+            default: {
+              const va = vAdapters(inner);
+              cw = `scr_union_new_ref(${iTag}, scr_coro_take_ref(sc_b, sc_f->sc_awaited), ${va.retain}, ${va.release}, ${E.traceArgC(inner)})`;
+            }
+          }
+          E.line(`${nm} = ${cw};`);
+          E.line(`sc_f->sc_awaited = NULL;`);
+          E.indent--;
+          E.line(`} else {`);
+          E.indent++;
+          const uTags = def.arms.flatMap((a, i) => (isUnitType(a) ? [i] : []));
+          if (uTags.length === 1) {
+            E.line(`${nm} = ${E.unitInstanceRef(e.type.unionId, rTag(def.arms[uTags[0]!]!))};`);
+          } else {
+            E.line(`switch (${u.name}->tag) {`);
+            for (const t of uTags) {
+              E.line(`case ${t}: ${nm} = ${E.unitInstanceRef(e.type.unionId, rTag(def.arms[t]!))}; break;`);
+            }
+            E.line(`default: break;`);
+            E.line(`}`);
+          }
+          E.indent--;
+          E.line(`}`);
+          E.emitPendingCheck();
+          return { name: nm, type: e.type };
+        }
         if (e.type.kind === "void") {
           E.line(
             `if (${u.name}->tag == ${e.promiseTag}) scr_await_void(${peek}); else scr_await_hop();${E.srcComment(e.loc)}`,

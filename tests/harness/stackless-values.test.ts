@@ -232,6 +232,40 @@ const WRAPPERS: ReadonlyArray<{ name: string; take: string; finish: string; conv
   // revert control, which named five of six. `hopsteps` is the function
   // whose three hops the 1:1 interleaving actually measures.
   { name: "hopsteps", take: "void", finish: "void", converted: true },
+  // THE awaitUnion SHAPES. `await u` on a promise-or-absent union suspends on
+  // BOTH arms: the promise arm parks, the unit arm takes the bare hop. It is
+  // ONE point sharing ONE state and ONE resume label, and the resume tells the
+  // arms apart by sc_awaited.
+  //
+  // `mix` has been declared in this program since the slice before last and
+  // was never awaited, so this shape had NO value coverage at all -- the
+  // ledger listed it as the thing that must stay off the lane, and nothing
+  // checked what it answered. Each row drives BOTH arms with values that
+  // differ from each other, because the failure here is the WRONG ARM with a
+  // plausible answer.
+  //
+  // WHICH OF THESE IS ACTUALLY THE awaitUnion NODE, because the first version
+  // of this block got it wrong and the rows still went green. `Promise<T> | T`
+  // is the SETTLE-OR-VALUE contract and the frontend DESUGARS it into a
+  // ternary holding an ordinary awaitExpr and an async.hop -- two points, two
+  // states, already converted by the hop slice. Only `Promise<T> | <unit>`
+  // reaches `awaitUnionExpr` (lower-exprs.ts:2039). So wau/was guard the
+  // desugar (worth having, and not what they claimed) and the three `*u` rows
+  // below are the ones that reach the two-armed lowering.
+  //
+  // Verified by reading the emitted C rather than by the ledger: sc_cr_wav
+  // holds `if (tag == 0) { ... scr_coro_park ... } else { ... scr_coro_hop
+  // ... } sc_S1:;` -- one state, one shared label -- while sc_cr_was holds
+  // three states and a retained promise.
+  { name: "wau", take: "ref", finish: "f64", converted: true }, // DESUGAR, Promise<T>|T
+  { name: "was", take: "ref", finish: "ref", converted: true }, // DESUGAR, Promise<T>|T
+  // The real awaitUnion rows. app182 contains ZERO value-result awaitUnions
+  // (all 31 of its points are the void shape), so waun/waus are coverage by
+  // CAPACITY: the measured program could not have refuted the value path and
+  // neither could a green corpus.
+  { name: "wav", take: "void", finish: "ref", converted: true }, // awaitUnion, VOID result
+  { name: "waun", take: "ref", finish: "ref", converted: true }, // awaitUnion, f64 arm
+  { name: "waus", take: "ref", finish: "ref", converted: true }, // awaitUnion, string arm
 ];
 
 const SOURCE = `
@@ -465,6 +499,23 @@ async function who(): Promise<void> {
   await a; await b;
 }
 
+/* THE awaitUnion SHAPES, both arms of each. The promise arm parks on the
+ * operand and the unit arm hops, and which one runs is a runtime fact, so a
+ * lowering that resumed into the wrong arm would answer the right TYPE with
+ * the wrong value -- invisible to a turn count and to a structure check. */
+function mixs(flag: boolean): Promise<string> | string { return flag ? ps("p") : "u"; }
+function mixv(flag: boolean): Promise<void> | undefined { return flag ? pv() : undefined; }
+async function wau(flag: boolean): Promise<number> { const x = await mix(flag); return x * 10; }
+async function was(flag: boolean): Promise<string> { const x = await mixs(flag); return x + "/" + x.length; }
+async function wav(flag: boolean): Promise<string> { await mixv(flag); return flag ? "pv" : "unit"; }
+// Promise<T> | undefined with T non-void: the VALUE-result awaitUnion, which
+// takes the scr_union_new_* path on the park arm and the unit-instance path on
+// the hop arm. Neither arm exists in app182.
+function mixn(flag: boolean): Promise<number> | undefined { return flag ? pf(1) : undefined; }
+function mixsu(flag: boolean): Promise<string> | undefined { return flag ? ps("q") : undefined; }
+async function waun(flag: boolean): Promise<string> { const x = await mixn(flag); return x === undefined ? "none" : "n" + x; }
+async function waus(flag: boolean): Promise<string> { const x = await mixsu(flag); return x === undefined ? "none" : x + "/" + x.length; }
+
 async function main(): Promise<void> {
   const f = await wf(41);
   console.log("f64   ", f);
@@ -526,6 +577,8 @@ async function main(): Promise<void> {
   console.log("hop2  ", await whu(), "|", await whv());
   await who();
   console.log("hopord", horder.join(" "));
+  console.log("aunion", await wau(true), await wau(false), "|", await was(true), await was(false), "|", await wav(true), await wav(false));
+  console.log("aunion2", await waun(true), await waun(false), "|", await waus(true), await waus(false));
   console.log("done");
 }
 void main();
@@ -779,6 +832,13 @@ describe("the stackless lane answers what the fiber lane answers", () => {
       "hop    307 | hk/2 | 4,5",
       "hop2   true | void-hop",
       "hopord a1 b1 a2 b2 a3 b3",
+      // awaitUnion, both arms of all three shapes. wau: pf(1)=2 -> 20 on the
+      // promise arm, 5 -> 50 on the unit arm. was: "p!" is 2 chars, "u" is 1.
+      // wav pins the void shape, whose unit arm returns no value at all.
+      "aunion 20 50 | p!/2 u/1 | pv unit",
+      // The value-result awaitUnion, both arms. waun: pf(1)=2 -> "n2" on the
+      // park arm, undefined -> "none" on the hop arm. waus: "q!" is 2 chars.
+      "aunion2 n2 none | q!/2 none",
     ];
     for (const line of ASSIGN_LINES) {
       expect(fiber, `the reference arm must already answer: ${line}`).toContain(line);

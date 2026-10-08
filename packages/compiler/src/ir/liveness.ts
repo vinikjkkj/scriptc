@@ -413,6 +413,13 @@ function recordPoints(
         loc: loc ?? { file: "", start: 0, end: 0 },
         live: s.nested ? union(base, enclosingReads) : new Set(base),
         nestedInExpression: s.nested,
+        // D2d: an `awaitUnionExpr` is straight-line too, now that BOTH of its
+        // arms have a stackless lowering -- the promise arm parks and the unit
+        // arm takes the bare hop that cb3724ec6 built. It stays ONE point: the
+        // two arms share a state and a resume label, and the resume tells them
+        // apart by `sc_awaited`. See emitCoroUnionSuspend, which also records
+        // why the countable invariant stops being "one park per point".
+        //
         // D2c: a lowerable libCall point is straight-line on the same terms
         // as an `awaitExpr`. It is not a weaker case -- a bare hop carries no
         // operand at all, so there is no promise to own across the park and
@@ -424,13 +431,17 @@ function recordPoints(
           ctx.finallyDepth === 0 &&
           ctx.switchDepth === 0 &&
           ctx.rootOk &&
-          (s.pointKind === "awaitExpr" || s.pointKind.startsWith("libCall:")),
+          (s.pointKind === "awaitExpr" ||
+            s.pointKind === "awaitUnionExpr" ||
+            s.pointKind.startsWith("libCall:")),
         blockers: [
           ...(ctx.loopDepth > 0 ? ["loop"] : []),
           ...(ctx.finallyDepth > 0 ? ["finally"] : []),
           ...(ctx.switchDepth > 0 ? ["switch"] : []),
           ...(ctx.rootOk ? [] : ["rootOk:" + ctx.stmtKind]),
-          ...(s.pointKind === "awaitExpr" || s.pointKind.startsWith("libCall:")
+          ...(s.pointKind === "awaitExpr" ||
+          s.pointKind === "awaitUnionExpr" ||
+          s.pointKind.startsWith("libCall:")
             ? []
             : ["kind=" + s.pointKind]),
         ],

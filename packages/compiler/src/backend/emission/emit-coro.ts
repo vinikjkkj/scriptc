@@ -330,6 +330,81 @@ export function emitCoroAwait(
   return t.name;
 }
 
+/** The owned RC temps at a suspension, registered for the frame struct.
+ * Factored out because THREE suspension shapes now need the same set and a
+ * fourth would too: a park, a bare hop, and the two-armed union suspension
+ * below, whose two arms must spill the SAME temps or the resume reloads
+ * whichever arm ran last. */
+function coroOwnedTemps(E: CEmitter, fn: IrFunction): Temp[] {
+  const owned: Temp[] = [];
+  for (const fr of E.frames) for (const t of fr) owned.push(t);
+  if (owned.length > 0) {
+    const seen = E.coroTempSpills.get(fn.name) ?? [];
+    for (const t of owned) if (!seen.some((x) => x.name === t.name)) seen.push(t);
+    E.coroTempSpills.set(fn.name, seen);
+  }
+  return owned;
+}
+
+/** A two-armed suspension: ONE point, ONE state, ONE resume label, and two
+ * different ways of getting there.
+ *
+ * `await u` on a promise-or-absent union suspends on BOTH arms -- the promise
+ * arm parks on the operand, the unit arm takes a bare microtask hop -- and
+ * which one runs is not known until runtime. Giving them two states would be
+ * wrong twice over: the dispatch would need a case for a label that cannot be
+ * reached from the other arm, and `coroPointIndex` counts POINTS, of which
+ * this is one.
+ *
+ * THE COUNTABLE INVARIANT CHANGES SHAPE HERE, and it is the first time it
+ * has. It was "one scr_coro_park per point", countable by grepping the TU.
+ * It is now "one STATE per point, one resume LABEL per state" -- two
+ * suspension calls can share a label. Anything counting park calls alone
+ * reads this slice as emitting too many; the counter asserts distinct labels
+ * instead.
+ *
+ * THE RESUME TELLS THE ARMS APART BY `sc_awaited`, which already exists in
+ * every frame: the park arm stores the operand there and the hop arm stores
+ * NULL. The caller branches on it to decide what to take. The promise is
+ * BORROWED from the union (scr_union_peek does not retain, and the union temp
+ * is itself in the frame), so the caller must not release it -- which is why
+ * the take is the caller's and not this function's. */
+export function emitCoroUnionSuspend(
+  E: CEmitter,
+  fn: IrFunction,
+  plan: StacklessPlan,
+  index: number,
+  unionName: string,
+  promiseTag: number,
+  peek: string,
+): void {
+  const owned = coroOwnedTemps(E, fn);
+  const spill = (): void => {
+    for (const t of owned) E.line(`sc_f->sc_tmp_${t.name} = ${t.name};`);
+    for (const line of coroSpill(fn, plan)) E.line(line);
+  };
+  E.line(`if (${unionName}->tag == ${promiseTag}) {`);
+  E.indent++;
+  spill();
+  E.line(`sc_f->sc_awaited = ${peek}; /* BORROWED from the union, never released here */`);
+  E.line(`sc_b->state = ${index + 1};`);
+  E.line(`scr_coro_park(sc_b, sc_f->sc_awaited);`);
+  E.line(`return; /* to the scheduler -- one ready_push charged */`);
+  E.indent--;
+  E.line(`} else {`);
+  E.indent++;
+  spill();
+  E.line(`sc_f->sc_awaited = NULL; /* the discriminator the resume reads */`);
+  E.line(`sc_b->state = ${index + 1};`);
+  E.line(`scr_coro_hop(sc_b);`);
+  E.line(`return; /* to the scheduler -- one ready_push charged */`);
+  E.indent--;
+  E.line(`}`);
+  E.line(`${coroLabel(index)}:;`);
+  for (const t of owned) E.line(`${t.name} = sc_f->sc_tmp_${t.name};`);
+  for (const line of coroReload(fn, plan)) E.line(line);
+}
+
 /** The bare microtask hop at a lowerable suspending libCall.
  *
  * emitCoroAwait without the operand: no promise to move into the frame, no

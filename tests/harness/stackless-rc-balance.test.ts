@@ -60,6 +60,7 @@ const HEAD = [
   "}",
   "async function p(n: number): Promise<number> { return n + 1 }",
   'async function ps(n: number): Promise<string> { return "v" + String(n) }',
+  "function mixu(flag: boolean): Promise<string> | undefined { return flag ? ps(1) : undefined }",
   "",
 ].join("\n");
 
@@ -146,7 +147,7 @@ const CASES: ReadonlyArray<{ name: string; why: string; src: string }> = [
       "async function main(): Promise<void> {",
       '  let s = new Holder("x" + String(Date.now() % 3)).name',
       "  s = await ps(1)",
-      "  console.log(s.length)",
+      "  console.log(s === undefined ? 0 : s.length)",
       "}",
       "void main()",
       "",
@@ -172,7 +173,7 @@ const CASES: ReadonlyArray<{ name: string; why: string; src: string }> = [
       "async function main(): Promise<void> {",
       '  let s = "a" + String(Date.now() % 3)',
       "  s += await ps(1)",
-      "  console.log(s.length)",
+      "  console.log(s === undefined ? 0 : s.length)",
       "}",
       "void main()",
       "",
@@ -219,7 +220,7 @@ const CASES: ReadonlyArray<{ name: string; why: string; src: string }> = [
     src: [
       "async function main(): Promise<void> {",
       '  const s = await ("h" + String(Date.now() % 3))',
-      "  console.log(s.length)",
+      "  console.log(s === undefined ? 0 : s.length)",
       "}",
       "void main()",
       "",
@@ -244,6 +245,41 @@ const CASES: ReadonlyArray<{ name: string; why: string; src: string }> = [
       "async function main(): Promise<void> {",
       "  const n = await (Date.now() % 3)",
       "  console.log(n >= 0 ? 1 : 0)",
+      "}",
+      "void main()",
+      "",
+    ].join("\n"),
+  },
+  /* THE TWO-ARMED SUSPENSION. `await u` on a promise-or-absent union parks on
+   * one arm and hops on the other, and the RC question it raises exists on
+   * NEITHER of the one-armed shapes: the parked promise is BORROWED from the
+   * union rather than moved into the frame, so the resume must NOT release it
+   * the way an ordinary await does. One release too many here is a double
+   * free of a promise the union still points at, and the value guards cannot
+   * see it -- they read the settled value, which is correct either way.
+   *
+   * Both arms get a row, because only one of them runs per execution and the
+   * arms have different ownership: the promise arm takes a +1 out of the
+   * promise, the unit arm takes nothing at all. */
+  {
+    name: "union-await-promise-arm",
+    why: "the PROMISE arm of a Promise<T>|undefined await -- the operand is BORROWED from the union and must not be released by the resume",
+    src: [
+      "async function main(): Promise<void> {",
+      "  const s = await mixu(Date.now() % 3 >= 0)",
+      "  console.log(s === undefined ? 0 : s.length)",
+      "}",
+      "void main()",
+      "",
+    ].join("\n"),
+  },
+  {
+    name: "union-await-unit-arm",
+    why: "the UNIT arm of the same await -- hops instead of parking and takes no reference at all",
+    src: [
+      "async function main(): Promise<void> {",
+      "  const s = await mixu(Date.now() % 3 > 99)",
+      "  console.log(s === undefined ? 0 : s.length)",
       "}",
       "void main()",
       "",
