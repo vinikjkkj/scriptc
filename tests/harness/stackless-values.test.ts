@@ -290,7 +290,28 @@ const WRAPPERS: ReadonlyArray<{ name: string; take: string; finish: string; conv
   // backend-internal and are NOT IrLocals, so `live` cannot name them and the
   // frame cannot carry them. It must STAY on the fiber lane, and this row
   // fails the moment it stops doing so.
-  { name: "wlfo", take: "f64", finish: "f64", converted: false },
+  // wlfo WAS the negative row for the forOf exclusion. The cursor hoist buys
+  // it, so it flips here -- which is the handover this ledger exists for: the
+  // row that said "this must stay off the lane" is the row that names the day
+  // it stops needing to.
+  { name: "wlfo", take: "f64", finish: "f64", converted: true },
+  // THE forOf SHAPES. The gap was never the iterable -- that comes from
+  // emitExpr, so it is a newTemp, and newTemp pushes into the RC frame which
+  // a park spills whole. It was the CURSOR, declared straight into the C
+  // for-init and registered nowhere. Each row below is a distinct way the
+  // hoist could still be wrong:
+  //   wfo1  the cursor itself: a wrong reload re-runs or skips iterations
+  //   wfo2  a refcounted ELEMENT bound per iteration, across the park
+  //   wfo3  NESTED forOf -- two cursors, and the inner must not clobber the
+  //         outer when the inner resumes
+  //   wfo4  `continue` taken after a resume, so the increment still runs
+  //   wfo5  a CAPTURED loop variable: a fresh box per iteration, which the
+  //         resume must not re-mint or share
+  { name: "wfo1", take: "f64", finish: "f64", converted: true },
+  { name: "wfo2", take: "ref", finish: "ref", converted: true },
+  { name: "wfo3", take: "f64", finish: "f64", converted: true },
+  { name: "wfo4", take: "f64", finish: "f64", converted: true },
+  { name: "wfo5", take: "f64", finish: "f64", converted: true },
   // THE FOUR STATEMENT POSITIONS, as one slice because they are DISJOINT: no
   // remaining function in the measured program carries two of them, so their
   // reach is additive exactly. Grouped by COST, not by nature -- `if`,
@@ -614,6 +635,37 @@ async function wlfo(): Promise<number> {
   return s;
 }
 
+/* THE forOf SHAPES. Magnitudes separate the plausible failures: a cursor that
+ * reloads as 0 never terminates, one that reloads past the end answers the
+ * first term, and a shared inner/outer cursor answers a number neither loop
+ * would produce alone. */
+async function wfo1(): Promise<number> {
+  let s = 0;
+  for (const x of [1, 2, 3]) { s += await pf(x); }
+  return s;
+}
+async function wfo2(): Promise<string> {
+  let s = "";
+  for (const x of ["a", "b"]) { s = s + await ps(x); }
+  return s + "/" + s.length;
+}
+async function wfo3(): Promise<number> {
+  let s = 0;
+  for (const i of [1, 2]) { for (const j of [10, 20]) { s += await pf(i * j); } }
+  return s;
+}
+async function wfo4(): Promise<number> {
+  let s = 0;
+  for (const x of [1, 2, 3, 4]) { const v = await pf(x); if (v % 2 === 0) { continue; } s += v; }
+  return s;
+}
+async function wfo5(): Promise<number> {
+  const fs: (() => number)[] = [];
+  for (const x of [1, 2]) { const v = await pf(x); fs.push((): number => x + v); }
+  return fs[0]() * 10 + fs[1]();
+}
+
+
 /* THE FOUR STATEMENT POSITIONS. Each magnitude distinguishes the plausible
  * wrong answer: wif taking the other branch, wrs storing through a container
  * the park lost, wsw resuming with its case-scoped local reset to NULL. */
@@ -728,6 +780,7 @@ async function main(): Promise<void> {
   console.log("aunion2", await waun(true), await waun(false), "|", await waus(true), await waus(false));
   console.log("loop  ", await wln(), "|", await wls(), "|", await wlf(), "|", await wld());
   console.log("loop2 ", await wlc(), "|", await wlb(), "|", await wlnest(), "|", await wlfo());
+  console.log("forof ", await wfo1(), "|", await wfo2(), "|", await wfo3(), "|", await wfo4(), "|", await wfo5());
   console.log("four  ", await wif(1), await wif(-1), "|", await wrs(3), "|", await wby(4));
   console.log("four2 ", await wsw(1), await wsw(2), await wsw(3), "|", await wsd(0), await wsd(1), await wsd(5), "|", await wst(1), await wst(9), "|", await wsu(1), await wsu(9));
   console.log("done");
@@ -996,6 +1049,10 @@ describe("the stackless lane answers what the fiber lane answers", () => {
       // wlnest 1+2+11+12 = 26. wlfo stays on fibers and must still answer 5.
       "loop   6 | 0!1!2!/6 | 33 | 3",
       "loop2  4 | 3 | 26 | 5",
+      // forOf. wfo1 pf(1)+pf(2)+pf(3) = 2+3+4 = 9. wfo2 "a!b!" is 4 chars.
+      // wfo3 pf(10)+pf(20)+pf(20)+pf(40) = 11+21+21+41 = 94. wfo4 keeps the
+      // odd results: 3+5 = 8. wfo5 captures x per iteration: (1+2)*10 + (2+3).
+      "forof  9 | a!b!/4 | 94 | 8 | 35",
       // The four statement positions. wif picks a branch on an awaited bool.
       // wrs/wbs store pf(3)=4 and pf(4)=5 through a container evaluated
       // BEFORE the park. wsw resumes inside a case body holding a refcounted

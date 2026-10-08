@@ -379,6 +379,52 @@ const CASES: ReadonlyArray<{ name: string; why: string; src: string }> = [
       "",
     ].join("\n"),
   },
+  /* forOf. The axis here is the PER-ITERATION BINDING: the loop variable is a
+   * fresh const each pass, holding (for a ref element) an owned +1 that is
+   * released at the end of that iteration. A park sits between the two, so a
+   * resume that reloads the wrong cursor releases the wrong element -- and
+   * the captured form mints a fresh BOX per iteration, which a resume must
+   * neither re-mint nor share backwards. Neither is visible to a value guard
+   * that only checks the sum. */
+  {
+    name: "forof-ref-element",
+    why: "a refcounted ELEMENT bound per iteration, with the park between the bind and the release",
+    src: [
+      "async function main(): Promise<void> {",
+      "  let n = 0",
+      '  for (const s of ["a" + String(Date.now() % 3), "b"]) { n = n + s.length + await p(1) }',
+      "  console.log(n)",
+      "}",
+      "void main()",
+      "",
+    ].join("\n"),
+  },
+  {
+    name: "forof-captured-binding",
+    why: "a CAPTURED loop variable: a fresh box per iteration, across a park, with the closures outliving the loop",
+    src: [
+      "async function main(): Promise<void> {",
+      "  const fs: (() => number)[] = []",
+      "  for (const x of [1, 2]) { const v = await p(x); fs.push((): number => x + v) }",
+      "  console.log(fs[0]() + fs[1]())",
+      "}",
+      "void main()",
+      "",
+    ].join("\n"),
+  },
+  {
+    name: "forof-scalar",
+    why: "THE CONTROL: scalar elements put nothing refcounted on the per-iteration path, so it must stay green",
+    src: [
+      "async function main(): Promise<void> {",
+      "  let n = 0",
+      "  for (const x of [1, 2]) { n = n + await p(x) }",
+      "  console.log(n)",
+      "}",
+      "void main()",
+      "",
+    ].join("\n"),
+  },
   {
     name: "field-after-park",
     why: "THE CONTROL: reading the field after the park makes the object live, so it was in the frame all along and never leaked",

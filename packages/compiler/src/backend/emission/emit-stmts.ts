@@ -5,7 +5,7 @@
 import type { CEmitter, ScopeEntry } from "./emitter.js";
 import type { IrFunction, IrLocal } from "../../ir/nodes.js";
 import { mangleField, mangleGlobal, mangleLocal, mangleRawParam } from "../mangle.js";
-import { BOOL, CAUGHT, IrExpr, IrStmt, RUNTIME_ERROR_CLASSES, isRefCounted, ownMaskKeyBit } from "../../ir/nodes.js";
+import { BOOL, CAUGHT, F64, IrExpr, IrStmt, RUNTIME_ERROR_CLASSES, isRefCounted, ownMaskKeyBit } from "../../ir/nodes.js";
 import { boxAccess, cDecl, cStringLiteral, elemAccess, vAdapters } from "./emit-types.js";
 import { OVERFLOW_MEMBER, OWNMASK_MEMBER } from "./emit-shapes.js";
 import { emitStableReceiver } from "./emit-exprs.js";
@@ -774,10 +774,40 @@ export function emitStmt(E: CEmitter, s: IrStmt): void {
         if (s.iterable.type.kind !== "array") throw new Error("emitter bug: forOf over non-array");
         const elem = s.iterable.type.elem;
         const arr = E.emitExpr(s.iterable);
-        const idx = `sc_t${E.tempCounter++}`;
-        E.line(
-          `for (double ${idx} = 0; ${idx} < scr_arr_len(${arr.name}); ${idx} += 1) {${E.srcComment(s.loc)}`,
-        );
+        // THE CURSOR IS A REGISTERED TEMP, not a raw for-init declaration, and
+        // that one move is the whole of what kept a forOf off the stackless
+        // lane. The ITERABLE was never the problem: it comes from emitExpr, so
+        // it is a newTemp, and newTemp pushes into the RC frame, and a park
+        // spills all of E.frames -- it has been carried across suspensions all
+        // along. The cursor was declared straight into the C for-init and so
+        // was registered nowhere, which is why liveness had to refuse the
+        // whole loop: not because the frame could not hold a cursor, but
+        // because nothing ever asked it to.
+        //
+        // Hoisting it out of the init is also what makes the resume correct.
+        // The dispatch goto lands INSIDE the body, past the init either way;
+        // with the cursor hoisted, the reload restores the iteration it was
+        // on, and the condition and increment at the bottom then run against
+        // the restored value.
+        // ...and the hoist is CONDITIONAL, because the shipping criterion is
+        // that a knob-absent binary is byte-identical. The first version
+        // hoisted unconditionally and changed the FIBER lane's emission too:
+        // six of sixteen emitted files differed with the knob absent, every
+        // difference being this loop header. A fiber keeps its cursor on its
+        // own C stack across a park and needs no frame slot, so it keeps the
+        // in-init declaration exactly as before.
+        let idx: string;
+        if (E.currentCoro !== null) {
+          idx = E.newTemp(F64, "0").name;
+          E.line(
+            `for (; ${idx} < scr_arr_len(${arr.name}); ${idx} += 1) {${E.srcComment(s.loc)}`,
+          );
+        } else {
+          idx = `sc_t${E.tempCounter++}`;
+          E.line(
+            `for (double ${idx} = 0; ${idx} < scr_arr_len(${arr.name}); ${idx} += 1) {${E.srcComment(s.loc)}`,
+          );
+        }
         E.indent++;
         // A real C for-loop makes plain `continue` correct (the update
         // still runs); a LABELED forOf allocates a continue label placed at

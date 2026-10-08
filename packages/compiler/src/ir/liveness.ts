@@ -428,7 +428,6 @@ function recordPoints(
         // position: inside a loop, a finally or a switch it is blocked for
         // exactly the reasons an await is.
         straightLine:
-          ctx.forOfDepth === 0 &&
           ctx.finallyDepth === 0 &&
           ctx.rootOk &&
           (s.pointKind === "awaitExpr" ||
@@ -462,16 +461,20 @@ function recordPoints(
           // already relies on, and a plain loop's carried state is ordinary
           // IrLocals the frame already holds.
           //
-          // A `forOf` is NOT, and the reason is structural rather than
-          // effort: its iterable reference and its cursor are
-          // backend-internal and are not IrLocals at all, so `live` cannot
-          // name them however correct the dataflow is (see
-          // SuspensionPoint.enclosingForOf, which exists to say exactly
-          // this). A frame that cannot carry the cursor cannot resume the
-          // iteration. So the blocker narrows from "any loop" to "a forOf",
-          // and is RENAMED with it: a census row reading `loop` would now
-          // mean something different from what it meant yesterday.
-          ...(ctx.forOfDepth > 0 ? ["forOf"] : []),
+          // A `forOf` IS TOO, as of the cursor hoist, and the correction is
+          // worth keeping because the premise was right while the conclusion
+          // drawn from it was not. "Its iterable and its cursor are
+          // backend-internal and are not IrLocals, so `live` cannot name
+          // them" is TRUE -- and it does not follow that the FRAME cannot
+          // hold them. newTemp pushes EVERY temp into the RC frame and a
+          // park spills all of E.frames, independently of the live set, so
+          // the iterable was being carried across suspensions all along.
+          // Only the cursor was missing, and only because it was declared
+          // straight into the C for-init and so registered nowhere. One
+          // hoist, not a mechanism.
+          //
+          // `enclosingForOf` survives as a frame-SIZE input. It is no
+          // longer an admission input.
           ...(ctx.finallyDepth > 0 ? ["finally"] : []),
           ...(ctx.rootOk ? [] : ["rootOk:" + ctx.stmtKind]),
           ...(s.pointKind === "awaitExpr" ||
