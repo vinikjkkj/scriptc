@@ -65,6 +65,11 @@ function probeSource(
   return [
     `#include <stddef.h>`,
     `#include "scr_runtime.h"`,
+    // ScrCoroBase/ScrCoroExc live in their OWN header, which scr_runtime.h
+    // does not pull in. Without this the stackless lane rows below name
+    // structs the probe cannot see, and the TU fails to compile for a reason
+    // that has nothing to do with a wrong offset.
+    `#include "scr_coro.h"`,
     ``,
     `_Static_assert(sizeof(void *) * 8 == ${LAYOUT_POINTER_BITS},`,
     cMessage([

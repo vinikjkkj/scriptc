@@ -78,8 +78,33 @@ import { ABSENT_KEY_TRAP_CODE, OWNMASK_COMPLETED, OWNMASK_VALID, UNION_ARM_JS_OB
 import { dynClassDisplayName } from "../dyn-members.js";
 import { computeMayThrow } from "../emission/may-throw.js";
 import { seqScopedLocals, stackCheckPolicy, stackMarginBytes, stackMarginSymbol } from "../emission/emit-stmts.js";
+// The stackless lane's admission, read from the ONE place that owns it.
+// Importing coroPlans rather than re-deriving the predicate is the point:
+// index.ts gates the scr_coro.c LINK on this exact call, so a second
+// spelling here is how the link line and the emitted TU come to disagree.
+//
+// THE ADDRESS IS ir/coro-plans.ts, NOT emission/emit-coro.ts. S0 imported it
+// from the C emitter, where it used to live; coro-plans.ts's own header
+// records the relocation and the reason (it is backend-agnostic policy), and
+// emit-coro.ts does not re-export it. That import threw at MODULE LINK time --
+// "does not provide an export named 'coroPlans'" -- so the whole LLVM emitter
+// failed to load, knob or no knob, on every build. Nothing caught it because
+// S0 ran neither tsc nor a test that imports this file.
+import { coroPlans } from "../../ir/coro-plans.js";
+import type { StacklessPlan } from "../../ir/liveness.js";
+import {
+  CoroRefusedError,
+  CORO_STATE_FIELD,
+  coroFrameLayout,
+  coroLabel,
+  coroFrameSizeOf,
+  coroRefusalReason,
+  llvmCoroPlans,
+  type CoroFrameLayout,
+} from "./coro.js";
+import { mangleCoroFrame, mangleCoroResume } from "../mangle.js";
 import { mangleAgenSettleThunk, mangleArgPack, mangleAsyncSpawn, mangleClassNew, mangleClassObj, mangleClassRetain, mangleClassStruct, mangleFnClosure, mangleFunction, mangleGenDrop, mangleGenResThunk, mangleGenSpawn, mangleGlobal, mangleLocal, mangleRecordNew, mangleRecordStruct, mangleResolveThunk, mangleTrampoline, mangleVtStruct, mangleWrapper } from "../mangle.js";
-import { BlockBuilder } from "./blocks.js";
+import { BlockBuilder, CrossParkTempError } from "./blocks.js";
 import { isStableReceiverOperand, writesLocal } from "../../ir/analysis.js";
 import { SCR_BYTES_LEN_OFFSET } from "./runtime-layout.js";
 import {
@@ -161,9 +186,40 @@ interface LlScopeEntry {
   boxed?: boolean;
 }
 
-export function emitLlvmModule(mod: IrModule): string {
+/** What the emitter reports back about an emission, beyond the text.
+ *
+ * ONE FIELD TODAY, AND IT IS A NEW INTERFACE RATHER THAN A LINE INSIDE THE
+ * EMITTER, which is why it is named here instead of being folded into a
+ * return string. `coroLowered` is how many coroutines THIS BACKEND actually
+ * lowered, and the driver's scr_coro.c link switch keys on it.
+ *
+ * WHY THE DRIVER CANNOT COMPUTE IT. index.ts already evaluates
+ * `coroPlans(mod.functions).size > 0` -- but that reads only the IR, which is
+ * BACKEND-INDEPENDENT, while lowering is not. The C emitter lowers every
+ * function the plan admits, so for the C lane plan membership and lowering are
+ * the same set and the existing expression is exactly right. The LLVM emitter
+ * lowers a STRICT SUBSET (coro.ts's llvmCoroLowers), so a function can be in
+ * the plan and refused here -- and keying the link line on the plan would link
+ * scr_coro.c into a .ll that calls nothing in it: 4,608 dead bytes and a
+ * cache-key flip for no change in behaviour, which is the "link line disagrees
+ * with the emitted TU" failure cc.ts names at coreRuntimeSources by name.
+ *
+ * IT SIMPLIFIES ITSELF AWAY. When the LLVM lane lowers everything the plan
+ * admits, the two expressions converge and this channel becomes redundant. It
+ * is the consequence of a deliberately narrow slice, not gratuitous
+ * complexity, and whoever reads the count later should know that. */
+export interface LlvmEmitStats {
+  /** The number of functions this emission lowered to a stackless state
+   * machine. Zero whenever SCRIPTC_STACKLESS is not 1. */
+  coroLowered: number;
+}
+
+export function emitLlvmModule(mod: IrModule, stats?: LlvmEmitStats): string {
   resetSrcSiteCache();
-  return new LlEmitter(mod).emit();
+  const e = new LlEmitter(mod);
+  const out = e.emit();
+  if (stats !== undefined) stats.coroLowered = e.coroLoweredCount();
+  return out;
 }
 
 /** `out.push(...arr)` spreads the array into ARGUMENTS, and V8 caps a call
@@ -1405,6 +1461,61 @@ class LlEmitter {
    * the same predicate, so the stamps always have their globals. */
   private readonly streamIntervals: { vt: string; pre: number; post: number; lib: string }[] = [];
 
+  /* ── the stackless lane ────────────────────────────────────────────────
+   *
+   * `coroLoweredByFn` is the plan INTERSECTED WITH what this backend can
+   * lower (coro.ts's llvmCoroLowers), computed once in the constructor
+   * because emitFunction, emitAsyncScaffolding and the type-body gate all
+   * have to agree about it -- a function that is a coroutine for one of them
+   * and a fiber for another emits either a duplicate symbol or none at all.
+   * Empty whenever SCRIPTC_STACKLESS is not 1, so a knob-absent build walks
+   * exactly the branches it always walked. */
+  private readonly coroLoweredByFn = new Map<string, StacklessPlan>();
+  /** The plan for the function being emitted, or null for a fiber body. */
+  private currentCoro: StacklessPlan | null = null;
+  /** Its frame layout: the ONE source for every GEP index into the frame. */
+  private currentCoroLayout: CoroFrameLayout | null = null;
+  /** States drawn by the body being emitted -- the artifact side of D5. */
+  private coroStatesDrawn = 0;
+  /** Functions the structural predicate admitted and the emission refused,
+   * with the reason. Reported by the census so the gap between the two layers
+   * is visible rather than inferred. */
+  private readonly coroRefusedAtEmission = new Map<string, string>();
+
+  /** The full plan, kept only to print the census. */
+  private coroCensusPlans = new Map<string, StacklessPlan>();
+
+  /** How many coroutines this emission lowered. The driver's link switch for
+   * scr_coro.c reads this, and nothing else may recompute it. */
+  coroLoweredCount(): number {
+    return this.coroLoweredByFn.size;
+  }
+
+  /** One line per PLANNED function: lowered, or the reason it was not.
+   *
+   * Printed AFTER emission, never before, because the structural predicate is
+   * only half the answer -- the rest is decided while emitting, and a census
+   * taken up front would report shapes as lowered that the emitter then
+   * refused. That is the same mistake one layer up: a count derived from the
+   * plan instead of from what was emitted. */
+  private coroCensus(): string {
+    const rows: string[] = [];
+    for (const fn of this.mod.functions) {
+      const plan = this.coroCensusPlans.get(fn.name);
+      if (plan === undefined) continue;
+      if (this.coroLoweredByFn.has(fn.name)) {
+        rows.push(`LOWER \t${fn.name}\t`);
+        continue;
+      }
+      const late = this.coroRefusedAtEmission.get(fn.name);
+      rows.push(`refuse\t${fn.name}\t${late ?? coroRefusalReason(fn, plan) ?? "?"}`);
+    }
+    return (
+      `llvm coro census: ${this.coroLoweredByFn.size} lowered of ${this.coroCensusPlans.size} planned\n` +
+      rows.join("\n")
+    );
+  }
+
   // ── per-function state (reset in emitFunction) ─────────────────────────
   private B = new BlockBuilder();
   private frames: LlValue[][] = [];
@@ -1471,6 +1582,28 @@ class LlEmitter {
 
   constructor(private readonly mod: IrModule) {
     for (const fn of mod.functions) this.fnByName.set(fn.name, fn);
+    // The stackless admission, computed ONCE. `coroPlans` is the backend-
+    // agnostic policy (ir/coro-plans.ts, which reads the knob); llvmCoroPlans
+    // narrows it to the shapes this emitter lowers. A census of what the
+    // narrowing costs is available on demand rather than by reading the
+    // predicate: SCRIPTC_LLVM_CORO_CENSUS=1 prints one line per planned
+    // function with the reason it was or was not taken, so "what would
+    // widening condition N buy" is answered by running the compiler.
+    //
+    // PAIR IT WITH SCRIPTC_NO_CACHE=1. The census is printed by the EMITTER,
+    // and an early cache hit skips the frontend and codegen entirely -- so a
+    // warm build prints nothing at all, which reads exactly like "no function
+    // was planned". The instrument lands inside the system it measures: the
+    // census variable is in the cache key, so the FIRST run with it set misses
+    // and reports, and every run after that is served the previous answer and
+    // reports silence. Measured, not feared.
+    {
+      const plans = coroPlans(mod.functions);
+      for (const [name, plan] of llvmCoroPlans(mod.functions, plans)) {
+        this.coroLoweredByFn.set(name, plan);
+      }
+      this.coroCensusPlans = plans;
+    }
     for (const entry of mod.ffiImports ?? []) this.ffiByName.set(entry.name, entry);
     const mt = computeMayThrow(mod);
     this.mayThrow = mt.fns;
@@ -1601,6 +1734,9 @@ class LlEmitter {
       // written, linked or cached. Fail exactly as the build would have.
       throw this.census.firstRefusal ?? new LlvmUnsupportedError("censusDownstreamOnly");
     }
+    if (this.coroCensusPlans.size > 0 && process.env["SCRIPTC_LLVM_CORO_CENSUS"] === "1") {
+      process.stderr.write(this.coroCensus() + "\n");
+    }
     const shapes = emitRecordShapes(this, this.mod);
     const classShapes = emitClassShapes(this, this.mod, this.classMeta);
     const classObjDefs = emitClassObjDefs(this, this.classMeta, this.classObjs, this.fnByName, (t) => this.llType(t));
@@ -1719,6 +1855,20 @@ class LlEmitter {
     // gets null and every line below is gated on it, which is why its
     // emitted module is unchanged to the byte.
     const npm = emitNpmEmbeddingLl(this, this.mod);
+    // Does this module lower any coroutine ON THIS BACKEND? Empty whenever
+    // SCRIPTC_STACKLESS is not 1, so a knob-absent build adds not one byte of
+    // .ll -- which is the embarking criterion, and the reason these type
+    // bodies are gated rather than joining the unconditional list below.
+    //
+    // THE PREDICATE IS `coroLoweredByFn`, NOT `coroPlans`, and the difference
+    // is the whole asymmetry between the lanes. coroPlans reads only the IR
+    // and is backend-independent; this emitter lowers a strict subset of it.
+    // Gating the frame-header types on the PLAN would emit %ScrCoroBase into a
+    // module that never names it -- dead type bodies for a lowering that did
+    // not happen -- which is the same "the artifact disagrees with what was
+    // emitted" failure the link switch has to avoid one layer down. Both now
+    // key on the same number, and it is the number this emitter produced.
+    const coroLowered = this.coroLoweredByFn.size > 0;
     // Embedded npm code can leave island promise chains pending when
     // %main returns (a package function's async work) — the loop's io
     // hook drains the engine's job queue at quiescence, so npm-importing
@@ -1981,6 +2131,29 @@ class LlEmitter {
       // The dynCheck error-path spine { parent, key, index } — the emitted
       // builders stack-allocate one per recursion level (dyn.ts).
       `%ScrDynPath = type { ptr, ptr, i64 }`,
+      // THE STACKLESS FRAME HEADER. Gated: see `coroLowered` above.
+      //
+      // Every field is pinned by runtime-layout.ts (8 rows) and proved against
+      // the real toolchain by runtime-layout.test.ts. That matters more here
+      // than for the bodies above: the frame allocation is
+      // `scr_coro_alloc(sizeof *frame, ...)`, computed on this side with the
+      // `ptrtoint (getelementptr %T, ptr null, i32 1)` idiom, so a body that is
+      // too short under-allocates EVERY frame -- and nothing catches it: the
+      // linker takes a GEP on faith and this host runs no IR verifier at all
+      // (`zig cc` passes -disable-llvm-verifier).
+      //
+      // ScrExcCell is declared as opaque bytes on purpose. The lowering never
+      // reaches INTO it -- scr_coro_exc() is the only legal way to the cell, as
+      // scr_coro.h says -- so declaring its 56 bytes as an array pins the SIZE
+      // (which ScrCoroExc`s layout needs) without copying a field list that
+      // would then be a second, unchecked source for it.
+      ...(coroLowered
+        ? [
+            `%ScrCoroBase = type { ptr, ptr, ptr, i32, i32, i64 }`,
+            `%ScrExcCell = type { [56 x i8] }`,
+            `%ScrCoroExc = type { %ScrCoroBase, %ScrExcCell }`,
+          ]
+        : []),
       ...(npm !== null ? npm.typeDefs : []),
     ];
     appendAll(out, shapes.typeDefs);
@@ -2685,6 +2858,97 @@ class LlEmitter {
     return out;
   }
 
+  /** A stackless function's scaffolding: the frame STRUCT and the spawn
+   * wrapper call sites enter through.
+   *
+   * WHAT THE CALL SITE SEES: nothing. The wrapper keeps the fiber wrapper's
+   * name (mangleAsyncSpawn), its signature and its `ptr` (ScrPromise *) return,
+   * so a stackless function can call a fiber one and vice versa and neither
+   * knows which it got. That identity is the whole hybrid, and it is why the
+   * choice can be per FUNCTION -- and why a narrow predicate is safe to ship:
+   * the functions this slice refuses keep their fiber lowering and keep
+   * working.
+   *
+   * INV-2, preserved from the C lane: scr_coro_spawn RUNS THE BODY
+   * synchronously up to its first suspension, so a function that never
+   * suspends has already settled by the time this returns -- the same
+   * observable timing as scr_async_spawn's fiber switch. */
+  private emitCoroScaffolding(fn: IrFunction, plan: StacklessPlan): string[] {
+    const layout = coroFrameLayout(fn, plan, new Map(fn.locals.map((l) => [l.id, l])), (t) =>
+      this.llType(t),
+    );
+    const frame = mangleCoroFrame(fn.name);
+    const out: string[] = [layout.typeBody];
+    this.declare(`declare ptr @scr_coro_alloc(i64, ptr, i1 zeroext)`);
+    this.declare(`declare ptr @scr_coro_spawn(ptr)`);
+    const lifted = fn.captures !== undefined;
+    const params = [
+      ...(lifted ? ["ptr %a_env"] : []),
+      ...fn.params.map((p) => `${this.llType(p.type)} %a_${mangleLocal(p.localId)}`),
+    ];
+    const sp: string[] = [
+      `define internal ptr @${mangleAsyncSpawn(fn.name)}(${params.join(", ")}) ${FN_ATTRS} { ; stackless spawn ${fn.name}`,
+      `entry:`,
+      // The frame pointer IS the base pointer: ScrCoroBase (or ScrCoroExc,
+      // which embeds it first) is member 0, so &f->base == f and every
+      // scr_coro_* call takes the same value. scr_coro.h states the property
+      // for the C cast; it is the same property.
+      `  %f = call ptr @scr_coro_alloc(i64 ${coroFrameSizeOf(fn.name)}, ptr @${mangleCoroResume(fn.name)}, i1 zeroext ${layout.fat ? "true" : "false"})`,
+    ];
+    if (lifted) {
+      // The frame holds +1 on the closure; every completion path drops it,
+      // exactly as the fiber trampoline releases it after the body.
+      this.declare(`declare ptr @scr_closure_retain_v(ptr)`);
+      sp.push(
+        `  %envown = call ptr @scr_closure_retain_v(ptr %a_env)`,
+        `  %penv = getelementptr inbounds %${frame}, ptr %f, i64 0, i32 1`,
+        `  store ptr %envown, ptr %penv`,
+      );
+    }
+    for (const p of fn.params) {
+      const fld = layout.fields.get(p.localId);
+      if (fld === undefined) continue;
+      const local = this.currentLocalOf(fn, p.localId);
+      if (local?.boxed === true) {
+        // THE BOX IS BUILT HERE, as on the C lane, and for two reasons that
+        // are both hard. The resume function declares every local at the top,
+        // so building it in the body prologue would be a redeclaration; and
+        // this frame slot is typed `ptr` by the layout, so storing the RAW
+        // value here would put a double or an i1 into a pointer slot. Building
+        // it in the spawn wrapper also makes "constructed exactly once"
+        // STRUCTURAL rather than a thing to get right: the wrapper runs once,
+        // on the caller's stack, before any suspension exists.
+        sp.push(
+          `  %box_${mangleLocal(p.localId)} = ${boxNewCall(this, p.type)} ; ${p.name} (boxed param)`,
+        );
+        this.boxSetInto(`%box_${mangleLocal(p.localId)}`, p.type, `%a_${mangleLocal(p.localId)}`, sp);
+        sp.push(
+          `  %p_${fld.index} = getelementptr inbounds %${frame}, ptr %f, i64 0, i32 ${fld.index}`,
+          `  store ptr %box_${mangleLocal(p.localId)}, ptr %p_${fld.index}`,
+        );
+        continue;
+      }
+      sp.push(
+        `  %p_${fld.index} = getelementptr inbounds %${frame}, ptr %f, i64 0, i32 ${fld.index} ; ${p.name}`,
+        `  store ${fld.llType} %a_${mangleLocal(p.localId)}, ptr %p_${fld.index}`,
+      );
+    }
+    sp.push(
+      `  %pr = call ptr @scr_coro_spawn(ptr %f)`,
+      `  ret ptr %pr`,
+      `}`,
+      ``,
+    );
+    appendAll(out, sp);
+    return out;
+  }
+
+  /** `fn.locals` lookup that does not disturb `currentLocals` — the
+   * scaffolding runs outside any function emission. */
+  private currentLocalOf(fn: IrFunction, id: string): IrLocal | undefined {
+    return fn.locals.find((l) => l.id === id);
+  }
+
   /** Per-async-function machinery — emit-async.ts's scaffolding, .ll
    * flavored: an argument-pack struct type, a fiber trampoline (unpacks,
    * frees the pack, runs the ordinary compiled body, settles the
@@ -2699,6 +2963,19 @@ class LlEmitter {
       // An async GENERATOR sets both flags and is not an async function:
       // emitGenScaffolding owns it (and refuses it).
       if (fn.generator !== undefined) continue;
+      // THE FORK, and it is here because this is the single place where the
+      // two lowerings are mutually exclusive. A stackless function gets a
+      // FRAME TYPE and a coro spawn wrapper; it must NOT also get the arg-pack
+      // type and the fiber trampoline, because the trampoline calls
+      // @<fn> with the ordinary signature -- which emitFunction no longer
+      // emits for it -- and the two spawn wrappers would be two definitions of
+      // one symbol. The C lane makes the same cut in emit-async.ts:22 by
+      // skipping any fn in coroPlansByFn.
+      const coro = this.coroLoweredByFn.get(fn.name);
+      if (coro !== undefined) {
+        appendAll(out, this.emitCoroScaffolding(fn, coro));
+        continue;
+      }
       const pack = mangleArgPack(fn.name);
       const lifted = fn.captures !== undefined;
       const fieldTys = [...(lifted ? ["ptr"] : []), ...fn.params.map((p) => this.llType(p.type))];
@@ -3453,6 +3730,278 @@ class LlEmitter {
       last === "throw" || last === "rethrow" || last === "runtimeFence";
   }
 
+  /* ── the stackless lowering ──────────────────────────────────────────── */
+
+  /** A GEP to frame field `index`, in the current resume body. */
+  private coroField(index: number, note: string): string {
+    const p = this.B.tmp();
+    const frame = mangleCoroFrame(this.currentFnName);
+    this.B.line(`${p} = getelementptr inbounds %${frame}, ptr %sc_b, i64 0, i32 ${index} ; ${note}`);
+    return p;
+  }
+
+  /** A GEP to `base->state`.
+   *
+   * THROUGH `%ScrCoroBase`, NOT THROUGH THE FRAME TYPE, and the distinction is
+   * load-bearing rather than stylistic. `state` is field 3 OF THE BASE, which
+   * is field 0 of the frame -- so `getelementptr %sc_cf_<fn>, ..., i32 3` names
+   * the frame's fourth member, which is some local of some type, or nothing at
+   * all on a frame with fewer members. The second spelling is what this emitter
+   * wrote first, and it was caught by the ASSEMBLER (invalid getelementptr
+   * indices) only because the frame happened to be short; on a longer frame it
+   * would have parsed clean and written the state word into a local's slot.
+   *
+   * The base pointer and the frame pointer are the same address -- ScrCoroBase
+   * (or ScrCoroExc, which embeds it first) is member 0 -- so the same `%sc_b`
+   * serves both GEPs. */
+  private coroStateField(): string {
+    const p = this.B.tmp();
+    this.B.line(
+      `${p} = getelementptr inbounds %ScrCoroBase, ptr %sc_b, i64 0, i32 ${CORO_STATE_FIELD} ; base.state`,
+    );
+    return p;
+  }
+
+  /** `sc_env` for a lifted resume body: the closure the spawn wrapper stored,
+   * read back from the frame on every resume. */
+  private coroEnvReload(): string {
+    const p = this.coroField(1, "sc_env");
+    const v = this.B.tmp();
+    this.B.line(`${v} = load ptr, ptr ${p}`);
+    return v;
+  }
+
+  /** The dispatch: load `base->state` and switch into the entry block or a
+   * resume label.
+   *
+   * THE CASES CANNOT BE WRITTEN YET -- how many states the body emits is not
+   * known until the body has been emitted -- so the terminator is deferred.
+   * The C lane solves this by remembering a line index and splicing the switch
+   * in after the walk; here the entry block simply stays unterminated while the
+   * body is emitted and is terminated at the end, which is cheaper and needs no
+   * buffer. `startBlock` moves the cursor; the entry block object is kept so
+   * its terminator can be written last. */
+  private emitCoroDispatch(fn: IrFunction, plan: StacklessPlan): void {
+    const B = this.B;
+    const st = this.coroStateField();
+    const v = B.tmp();
+    B.line(`${v} = load i32, ptr ${st}`);
+    // The cases are known from the PLAN, not from the walk: this slice draws
+    // exactly one state per point, and emitFunction's D5 assertion fails the
+    // build if the body ever disagrees. A later slice that emits a point more
+    // than once (a finally body runs up to three copies) must move this to the
+    // deferred-splice shape the C lane uses.
+    const dflt = "sc_dispatch_bad";
+    const arms: [number, string][] = [[0, "sc_S0"]];
+    for (let i = 0; i < plan.points.length; i++) arms.push([i + 1, coroLabel(i)]);
+    B.switchTerm(v, dflt, arms);
+    B.startBlock(dflt);
+    // A state with no case is a frame that resumed into a number nothing
+    // emitted. The C lane calls abort() here for the same reason: there is no
+    // correct value to continue with, and continuing would read a frame field
+    // belonging to another state.
+    this.declare(`declare void @abort() noreturn`);
+    B.line(`call void @abort()`);
+    B.terminate("unreachable");
+    B.startBlock("sc_S0");
+    this.emitCoroReload();
+  }
+
+  /** Spill every frame local: load the alloca, store it to its frame field.
+   * Emitted immediately before a park. */
+  private emitCoroSpill(): void {
+    const layout = this.currentCoroLayout!;
+    const B = this.B;
+    for (const id of layout.localIds) {
+      const fld = layout.fields.get(id)!;
+      const v = B.tmp();
+      B.line(`${v} = load ${fld.llType}, ptr %${mangleLocal(id)} ; spill ${fld.comment}`);
+      const p = this.coroField(fld.index, fld.comment);
+      B.line(`store ${fld.llType} ${v}, ptr ${p}`);
+    }
+  }
+
+  /** Reload every frame local into its alloca. Emitted at the entry label and
+   * immediately after every resume label.
+   *
+   * NOTE THE DIRECTION OF THE ASYMMETRY WITH C. The C lane reloads into the
+   * SAME C NAME, which is what let it leave the 29 mangleLocal call sites
+   * alone. Here the slot IS the name: every read of the local was already a
+   * `load` from this alloca, so a store into it is the whole reload and no
+   * consumer changes either. The C design's central bet is cheaper on this
+   * lane than it was on that one. */
+  private emitCoroReload(): void {
+    const layout = this.currentCoroLayout!;
+    const B = this.B;
+    for (const id of layout.localIds) {
+      const fld = layout.fields.get(id)!;
+      const p = this.coroField(fld.index, fld.comment);
+      const v = B.tmp();
+      B.line(`${v} = load ${fld.llType}, ptr ${p}`);
+      B.line(`store ${fld.llType} ${v}, ptr %${mangleLocal(id)} ; reload ${fld.comment}`);
+    }
+  }
+
+  /** The await site: spill, park, return to the scheduler, and on re-entry
+   * reload and take the settled value.
+   *
+   * EXACTLY ONE scr_coro_park PER AWAIT, and scr_coro_park charges exactly one
+   * scr_ready_push on exactly one of its two arms -- so the invariant is
+   * countable by grepping the emitted TU, on this lane as on the C one.
+   *
+   * THE OPERAND PROMISE MOVES INTO THE FRAME, and that is not a nicety. `pr` is
+   * an SSA value in the block the park terminates; after the resume label it is
+   * not merely dead but undominated. Striking it from the RC frame and handing
+   * its +1 to `sc_awaited` makes the frame the single owner across the
+   * suspension, released once at the take below. The C lane found this by
+   * segfault -- its first version left the temp in the frame and released it
+   * twice, once through a dangling local. */
+  private emitCoroAwait(fn: IrFunction, pr: LlValue, resultType: IrType): LlValue {
+    const B = this.B;
+    const layout = this.currentCoroLayout!;
+    const plan = this.currentCoro!;
+    const index = this.coroStatesDrawn;
+    if (index >= plan.points.length) {
+      throw new Error(
+        `llvm emitter bug: ${fn.name} drew suspension state ${index} but the plan holds ` +
+          `${plan.points.length} point(s). A suspension node was walked more times than the ` +
+          `plan accounts for; the park would write a state the dispatch has no case for.`,
+      );
+    }
+    this.coroStatesDrawn++;
+    // The frame takes the promise's +1: struck from the RC frame here so no
+    // scope exit and no unwind releases it, and released once at the take.
+    this.moveTemp(pr);
+    // EVERY OTHER OWNED TEMP WOULD HAVE THE SAME PROBLEM, which is why the
+    // admission predicate refuses any point nested in a larger expression. If
+    // one ever reaches here the frames are non-empty and the lowering would be
+    // wrong in a way nothing downstream can see, so it is a build failure and
+    // not a silent spill into a slot this slice does not lay out.
+    // EVERY OTHER OWNED TEMP WOULD HAVE THE SAME PROBLEM. This slice lays out
+    // no sc_tmp_ frame fields, so an owned temp cannot be carried across the
+    // suspension at all -- and it is only HERE that the emitter knows whether
+    // one is held. The structural predicate cannot: `nestedInExpression` says
+    // no for a one-field record literal that is nevertheless holding the
+    // record. So the function goes back to the fiber lane, which is a loss of
+    // coverage and nothing else -- the two lowerings are interchangeable at
+    // the call site, which is the whole hybrid.
+    const owned = this.frames.reduce((n, f) => n + f.length, 0);
+    if (owned > 0) throw new CoroRefusedError(fn.name, `owned-temp-at-park=${owned}`);
+    this.emitCoroSpill();
+    const pa = this.coroField(layout.awaitedIndex, "sc_awaited");
+    B.line(`store ptr ${pr.name}, ptr ${pa}`);
+    const ps = this.coroStateField();
+    B.line(`store i32 ${index + 1}, ptr ${ps}`);
+    // scr_coro_park returns ScrCoroParkKind -- an `int`-width C enum, so i32
+    // here. The C lowering calls it as a statement and discards the value; the
+    // declare must still spell the return type correctly or the call ABI is
+    // wrong on the callee side.
+    this.declare(`declare i32 @scr_coro_park(ptr, ptr)`);
+    const pk = B.tmp();
+    B.line(`${pk} = call i32 @scr_coro_park(ptr %sc_b, ptr ${pr.name})`);
+    B.terminate("ret void ; to the scheduler -- one ready_push charged");
+
+    // ── the far side ──────────────────────────────────────────────────────
+    B.startBlock(coroLabel(index));
+    // EVERY TEMP MINTED SO FAR IS NOW DEAD. Taking the boundary is what arms
+    // the cross-park invariant; a park that forgot it would leave the rule
+    // inert and reading green forever, which is why emitFunction asserts the
+    // boundary count against the state count rather than trusting this line.
+    B.parkBoundary();
+    this.emitCoroReload();
+    const pa2 = this.coroField(layout.awaitedIndex, "sc_awaited");
+    const aw = B.tmp();
+    B.line(`${aw} = load ptr, ptr ${pa2}`);
+    let out: LlValue;
+    if (resultType.kind === "void") {
+      this.declare(`declare void @scr_coro_take_void(ptr, ptr)`);
+      B.line(`call void @scr_coro_take_void(ptr %sc_b, ptr ${aw})`);
+      out = { name: "", type: resultType };
+    } else if (resultType.kind === "f64") {
+      this.declare(`declare double @scr_coro_take_f64(ptr, ptr)`);
+      const t = B.tmp();
+      B.line(`${t} = call double @scr_coro_take_f64(ptr %sc_b, ptr ${aw})`);
+      out = this.own({ name: t, type: resultType });
+    } else if (resultType.kind === "bool") {
+      this.declare(`declare zeroext i1 @scr_coro_take_bool(ptr, ptr)`);
+      const t = B.tmp();
+      B.line(`${t} = call zeroext i1 @scr_coro_take_bool(ptr %sc_b, ptr ${aw})`);
+      out = this.own({ name: t, type: resultType });
+    } else {
+      this.declare(`declare ptr @scr_coro_take_ref(ptr, ptr)`);
+      const t = B.tmp();
+      B.line(`${t} = call ptr @scr_coro_take_ref(ptr %sc_b, ptr ${aw})`);
+      out = this.own({ name: t, type: resultType });
+    }
+    this.declare(`declare void @scr_promise_release(ptr)`);
+    B.line(`call void @scr_promise_release(ptr ${aw})`);
+    B.line(`store ptr null, ptr ${pa2}`);
+    return out;
+  }
+
+  /** The completion path: what `return` and the implicit void exit emit
+   * instead of a `ret`.
+   *
+   * A coroutine does not return a value to a caller -- there is no caller on
+   * the stack after the first resume. It FULFILS the promise the frame owns,
+   * which is what the fiber trampoline does at the end of the body. */
+  private emitCoroFinish(fn: IrFunction, v: LlValue | null): void {
+    const B = this.B;
+    const retType = this.currentReturnType;
+    if (fn.captures !== undefined) {
+      // The frame holds +1 on the closure (the fiber trampoline releases it
+      // after the body for the same reason); every completion path drops it.
+      this.declare(`declare void @scr_closure_release(ptr)`);
+      const env = this.coroEnvReload();
+      B.line(`call void @scr_closure_release(ptr ${env})`);
+    }
+    if (v === null || retType.kind === "void") {
+      this.declare(`declare void @scr_coro_finish_void(ptr)`);
+      B.line(`call void @scr_coro_finish_void(ptr %sc_b)`);
+      B.terminate("ret void");
+      return;
+    }
+    switch (retType.kind) {
+      case "f64":
+        this.declare(`declare void @scr_coro_finish_f64(ptr, double)`);
+        B.line(`call void @scr_coro_finish_f64(ptr %sc_b, double ${v.name})`);
+        break;
+      case "bool":
+        // NOT finish_f64. ScrPromise keeps `f64` and `b` as separate members
+        // with distinct payload kinds, and every awaiter -- stackless and
+        // fiber -- reads `b`. Fulfilling a bool through f64 left `b` zero, so
+        // an `await` of a bool-returning coroutine answered false whatever it
+        // returned: a wrong ANSWER, not a crash, which is why a green corpus
+        // never saw it and why this file's test compares values.
+        this.declare(`declare void @scr_coro_finish_bool(ptr, i1 zeroext)`);
+        B.line(`call void @scr_coro_finish_bool(ptr %sc_b, i1 ${v.name})`);
+        break;
+      default: {
+        const rc = vAdapters(this, retType);
+        this.declare(`declare void @scr_coro_finish_ref(ptr, ptr, ptr, ptr, ptr)`);
+        B.line(
+          `call void @scr_coro_finish_ref(ptr %sc_b, ptr ${v.name}, ptr ${rc.retain}, ptr ${rc.release}, ptr ${traceArg(this, retType)})`,
+        );
+        break;
+      }
+    }
+    B.terminate("ret void");
+  }
+
+  /** The unwind path: a pending exception becomes the promise's rejection
+   * instead of unwinding past a caller that no longer exists. */
+  private emitCoroUnwind(fn: IrFunction): void {
+    const B = this.B;
+    if (fn.captures !== undefined) {
+      this.declare(`declare void @scr_closure_release(ptr)`);
+      const env = this.coroEnvReload();
+      B.line(`call void @scr_closure_release(ptr ${env})`);
+    }
+    this.declare(`declare void @scr_coro_finish_throw(ptr)`);
+    B.line(`call void @scr_coro_finish_throw(ptr %sc_b)`);
+    B.terminate("ret void");
+  }
+
   /** THE unwind path at a point where an exception is pending: release
    * everything between here and the innermost try handler — or the whole
    * function — and branch to the handler / return a dummy value (never
@@ -3468,6 +4017,17 @@ class LlEmitter {
       return;
     }
     this.releaseForJump(0, 0);
+    if (this.currentCoro !== null) {
+      // THE FOURTH COMPLETION PATH. The frame owns the promise, so an escaping
+      // exception settles it as a REJECTION rather than returning a dummy to a
+      // caller that is no longer on the stack. The other three completion
+      // paths are routed in the `return` case and at the implicit void exit;
+      // this one lives here because the unwind has its own entry point, and on
+      // the C lane it was the one that got missed for exactly that reason --
+      // the count that drove the fix was a count of RETURN paths.
+      this.emitCoroUnwind(this.fnByName.get(this.currentFnName)!);
+      return;
+    }
     const t = this.currentReturnType;
     if (t.kind === "void") this.B.terminate("ret void");
     else if (t.kind === "f64") this.B.terminate(`ret double ${f64Lit(0)}`);
@@ -4057,6 +4617,27 @@ class LlEmitter {
     }
   }
 
+  /** boxSet, writing into a plain line array instead of the block builder.
+   *
+   * The stackless spawn wrapper is assembled as text before any BlockBuilder
+   * exists for it -- it is not a lowered body, it is three stores and a call --
+   * so the box construction for a boxed param needs the same dispatch without
+   * the builder. Same three arms, same declares; a second spelling of the
+   * DISPATCH would be the thing worth avoiding, and there isn't one. */
+  private boxSetInto(box: string, t: IrType, value: string, out: string[]): void {
+    const acc = boxAccess(t);
+    if (acc === "f64") {
+      this.declare(`declare void @scr_box_set_f64(ptr, double)`);
+      out.push(`  call void @scr_box_set_f64(ptr ${box}, double ${value})`);
+    } else if (acc === "bool") {
+      this.declare(`declare void @scr_box_set_bool(ptr, i1 zeroext)`);
+      out.push(`  call void @scr_box_set_bool(ptr ${box}, i1 ${value})`);
+    } else {
+      this.declare(`declare void @scr_box_set_ref(ptr, ptr)`);
+      out.push(`  call void @scr_box_set_ref(ptr ${box}, ptr ${value})`);
+    }
+  }
+
   private retainBox(box: string): string {
     this.needsRetainBox = true;
     const t = this.B.tmp();
@@ -4155,7 +4736,87 @@ class LlEmitter {
     return mangleFunction(fnName);
   }
 
+  /** THE TRIAL, and the reason it needs one.
+   *
+   * A function the structural predicate admits can still be refused once the
+   * emitter sees what it is holding at the park (CoroRefusedError). By then a
+   * resume body has been partly emitted -- and emission ACCUMULATES: every
+   * `declare` the trial registered is in `this.decls`, which is a module-level
+   * set that the assembly prints verbatim.
+   *
+   * SO THE DECLARES ARE SNAPSHOTTED AND RESTORED. Without that, a refused
+   * trial leaves `declare void @scr_coro_finish_f64` and friends in a module
+   * that calls none of them -- undefined-but-unreferenced symbols asserting
+   * coverage this backend does not have, which is precisely the discipline
+   * that keeps the declare set honest: declares are CALL-SITE driven, and a
+   * declare with no call site is a claim.
+   *
+   * NOTHING ELSE NEEDS RESTORING, and that is a property worth stating rather
+   * than assuming. The other accumulators are content-addressed and
+   * idempotent -- interned literals and cstrs memoise by text, fnValues and
+   * classObjs by name -- and the fiber re-emission walks the SAME expressions,
+   * so it re-registers exactly what the trial did. The per-function state (the
+   * block builder, frames, scopes, the state counter) is rebuilt from scratch
+   * at the top of emitFunctionBody, so the second pass starts clean.
+   *
+   * COST: one re-emission of a body the predicate thought it could lower, and
+   * only for those. Zero on a knob-absent build, where the candidate set is
+   * empty. */
   private emitFunction(fn: IrFunction): string {
+    if (this.coroLoweredByFn.has(fn.name)) {
+      const snapshot = new Set(this.decls);
+      try {
+        return this.emitFunctionBody(fn);
+      } catch (err) {
+        // TWO REFUSAL SIGNALS, ONE HANDLER, and they are genuinely the same
+        // event seen from two places.
+        //
+        //   CoroRefusedError  -- the emitter noticed it was holding an owned
+        //     temp when it reached the park, before emitting anything wrong.
+        //   CrossParkTempError -- blocks.ts's invariant caught a `%tN` minted
+        //     before the park being READ after it. That is a real dominance
+        //     violation, and on this host nothing downstream would ever report
+        //     it: `zig cc` passes -disable-llvm-verifier, so the module is
+        //     never verified and at -O2 the optimiser exploits the undefined
+        //     value. MEASURED on the corpus rather than imagined -- a switch
+        //     whose case TEST is awaited computes the discriminant before the
+        //     park and compares it after.
+        //
+        // BOTH MEAN "this shape is outside the slice", and the response to
+        // that is to keep the function on the FIBER lane, which is correct and
+        // costs only coverage: the two lowerings are interchangeable at the
+        // call site by construction. A hard build failure would be the wrong
+        // trade -- it would make the admission predicate's precision a
+        // correctness requirement instead of a coverage one, and the predicate
+        // is a heuristic over the IR while this is the ground truth.
+        //
+        // THE DETECTOR IS STILL LOAD-BEARING, and that is the distinction
+        // worth keeping. It is not advisory: nothing it catches is ever
+        // emitted. "It fires" is proved against known-bad input by
+        // tests/harness/cross-park-armed.test.ts, which drives BlockBuilder
+        // directly with no compiler and no toolchain -- because an assertion
+        // that exists to prove something else ran needs a companion proving it
+        // still WORKS, and a detector that quietly stopped matching anything
+        // would leave every run of the suite agreeing with it.
+        if (!(err instanceof CoroRefusedError) && !(err instanceof CrossParkTempError)) throw err;
+        this.decls.clear();
+        for (const d of snapshot) this.decls.add(d);
+        // The count the LINK SWITCH reads must reflect what was actually
+        // lowered, so the refusal has to be recorded here and not merely
+        // survived. Removing the entry also tells emitAsyncScaffolding (which
+        // runs after every body) to emit the fiber trampoline and arg pack for
+        // this function instead of a frame and a coro spawn.
+        this.coroLoweredByFn.delete(fn.name);
+        this.coroRefusedAtEmission.set(
+          fn.name,
+          err instanceof CoroRefusedError ? err.reason : "cross-park-temp",
+        );
+      }
+    }
+    return this.emitFunctionBody(fn);
+  }
+
+  private emitFunctionBody(fn: IrFunction): string {
     this.currentFnName = fn.name;
     const B = new BlockBuilder();
     this.B = B;
@@ -4172,6 +4833,21 @@ class LlEmitter {
     this.currentReturnType = fn.returnType;
     this.currentGenerator = fn.generator ?? null;
     this.logArgSlots = 0;
+    // THE STACKLESS FORK. `coro` non-null means this body is emitted as a
+    // resume function over a heap frame instead of a function on a fiber
+    // stack. Everything below is the ordinary path when it is null, which is
+    // every function on a knob-absent build.
+    const coro = this.coroLoweredByFn.get(fn.name) ?? null;
+    this.currentCoro = coro;
+    this.currentCoroLayout = null;
+    this.coroStatesDrawn = 0;
+    if (coro !== null) {
+      this.currentCoroLayout = coroFrameLayout(fn, coro, this.currentLocals, (t) => this.llType(t));
+      // Arms the cross-park temp invariant for this body only. Nothing arms it
+      // on a fiber body, so a knob-absent build pays one null check per
+      // emitted line and nothing else.
+      B.enterCoro(fn.name);
+    }
 
     const paramIds = new Set(fn.params.map((p) => p.localId));
     for (const local of fn.locals) {
@@ -4186,22 +4862,59 @@ class LlEmitter {
       B.entryAllocas.push(`%${mangleLocal(local.id)} = alloca ${slotTy} ; ${local.name}`);
       // Refcounted/boxed locals start NULL (the C prologue's `= NULL`):
       // scope-exit releases run whether or not an assign ever did.
-      if (paramIds.has(local.id) || this.captureIds.has(local.id)) continue;
+      //
+      // THESE STORES RUN ON EVERY RESUME, and that is not a bug -- it is the
+      // reason coroFrameLocals carries every refcounted local whether or not
+      // liveness called it live. They sit in the entry block, which the
+      // dispatch below passes through on the way to any resume label, so a
+      // local that was NOT spilled comes back NULL and its end-of-function
+      // release is a no-op over the graph it owned. The C lane has the
+      // identical geometry (declarations with `= NULL` above the switch) and
+      // paid for it in a measured leak before the rule was added.
+      //
+      // A PARAM IS A LOCAL IN A RESUME BODY. The resume function has no
+      // parameters of its own, so a param is reached only through the frame
+      // and must be nulled and reloaded like any other frame state --
+      // `paramIds.has` may not skip it here. The C lane spells the same
+      // carve-out as `coro === null && paramIds.has(local.id)`.
+      if ((coro === null && paramIds.has(local.id)) || this.captureIds.has(local.id)) continue;
       if (local.boxed || isRefCounted(local.type)) {
         B.line(`store ptr null, ptr %${mangleLocal(local.id)}`);
       }
     }
     // Captured bindings come in through the environment — borrowed for the
     // whole call (the closure owns them): bound here, never released here.
+    //
+    // BOUND BEFORE THE DISPATCH, on purpose: the capture boxes come back from
+    // `sc_env->caps[i]` identically on every resume, so they are re-derived
+    // rather than spilled -- which is also why coroFrameLocals REMOVES them
+    // from the frame. Two sources for one binding is how a shared box silently
+    // stops being shared.
+    // ONLY WHEN LIFTED. The first version called coroEnvReload for every
+    // coroutine, which emitted a GEP+load of frame field 1 into a body with no
+    // captures to bind -- dead code reading whatever local happens to sit
+    // there, typed as a closure pointer. Harmless because nothing consumed it,
+    // which is exactly why it survived a byte-identical output comparison: a
+    // dead read of a live field is invisible to every value check in the
+    // suite.
+    const envPtr =
+      coro === null ? "%sc_env" : fn.captures !== undefined ? this.coroEnvReload() : "%sc_env";
     (fn.captures ?? []).forEach((c, i) => {
       const p = B.tmp();
       const box = B.tmp();
       const base = B.tmp();
-      B.line(`${base} = getelementptr inbounds %ScrClosure, ptr %sc_env, i64 1 ; caps`);
+      B.line(`${base} = getelementptr inbounds %ScrClosure, ptr ${envPtr}, i64 1 ; caps`);
       B.line(`${p} = getelementptr inbounds ptr, ptr ${base}, i64 ${i} ; caps[${i}]`);
       B.line(`${box} = load ptr, ptr ${p}`);
       B.line(`store ptr ${box}, ptr %${mangleLocal(c.localId)} ; captured ${c.name}`);
     });
+    // THE DISPATCH. Everything above is in the entry block and therefore
+    // dominates every resume block; everything below is inside sc_S0. On the C
+    // lane this placement needed an argument -- the jump must not cross a
+    // declaration, which holds only because IrFunction.locals is scope-flat.
+    // Here there is nothing to cross: the allocas are spliced into the head of
+    // the entry block at render time and LLVM has no lexical scopes.
+    if (coro !== null) this.emitCoroDispatch(fn, coro);
     // Params spill into their slots; the function scope owns refcounted
     // params (callees own their params — callers passed +1). Boxed params
     // allocate the shared binding and move the raw value in.
@@ -4209,6 +4922,16 @@ class LlEmitter {
     for (const p of fn.params) {
       const local = this.currentLocals.get(p.localId)!;
       const slot = `%${mangleLocal(p.localId)}`;
+      if (coro !== null) {
+        // STACKLESS: the dispatch above already reloaded this param from the
+        // frame, and for a BOXED param the SPAWN built the box. Constructing
+        // it again here would rebuild it on the entry path only -- so the
+        // scope still OWNS it (one release at function end, as on the fiber
+        // path), but nothing is emitted for it.
+        if (local.boxed) fnScope.push({ slot, type: p.type, boxed: true });
+        else if (isRefCounted(p.type)) fnScope.push({ slot, type: p.type });
+        continue;
+      }
       if (local.boxed) {
         const box = B.tmp();
         B.line(`${box} = ${boxNewCall(this, p.type)} ; ${p.name} (boxed param)`);
@@ -4271,12 +4994,78 @@ class LlEmitter {
     // whose unwind released everything down to depth 0).
     if (fn.returnType.kind === "void" && !B.isTerminated()) {
       this.releaseScope(this.scopes[0]!);
-      B.terminate("ret void");
+      if (coro !== null) this.emitCoroFinish(fn, null);
+      else B.terminate("ret void");
+    }
+    if (coro !== null && !B.isTerminated()) {
+      // A resume function that falls off the end has neither suspended,
+      // finished, nor thrown, and the runtime asserts on exactly that. The
+      // fiber trampoline settles the promise for an implicit exit; a coroutine
+      // has to do it here, because the body IS the trampoline. Unreachable
+      // when the body really did end in a return on every path, and harmless
+      // there.
+      this.releaseForJump(0, 0);
+      this.emitCoroFinish(fn, null);
     }
     this.scopes.pop();
 
     if (this.logArgSlots > 0) {
       B.entryAllocas.push(`%logargs = alloca [${this.logArgSlots} x %ScrLogArg]`);
+    }
+    if (coro !== null) {
+      /* D5 -- THE COUNTABLE INVARIANT, asserted in the code rather than
+       * believed.
+       *
+       *     boundaries taken === states drawn === plan points
+       *
+       * TWO FAILURES, NOT ONE, and the pair is the point. A park that drew a
+       * state without calling parkBoundary() leaves the cross-park temp
+       * invariant SILENTLY INERT: it would read green forever, which is a
+       * counter reading zero mechanically. A boundary taken with no state
+       * drawn means the dispatch carries no case for a label the body emitted,
+       * and the resume takes the `default` abort. The equality fails on either.
+       *
+       * THE FORM IS `boundaries === statesDrawn`, anchored to what the code
+       * does and not to a name. The dispatch emits `case 0` for the ENTRY plus
+       * one case per drawn state, so the resume states are 1..statesDrawn and
+       * the entry is state 0, OUTSIDE the count. Anyone reading "states" as
+       * including the entry would write `statesDrawn + 1` and the guard would
+       * fail on its first correct run -- at which point the repair pressure is
+       * to LOOSEN it until it passes, which destroys it exactly as thoroughly
+       * as forgetting the boundary would.
+       *
+       * WHEN HOPS ARRIVE this stays correct without an edit, because
+       * parkBoundary() is what counts and a hop takes one: the C lane's
+       * emit-coro.ts states that `parks + hops` is what must equal the case
+       * count, and `boundaries()` is that sum by construction rather than by a
+       * second rule that has to be kept in step.
+       *
+       * AND IT IS NOT THE EMITTER CHECKING ITSELF on the third term:
+       * `coro.points.length` comes from the ANALYSIS, which knows nothing
+       * about how many times a body is emitted. */
+      const bounds = B.boundaries();
+      if (bounds !== this.coroStatesDrawn) {
+        throw new Error(
+          `llvm emitter bug: ${fn.name} took ${bounds} suspension boundary/ies but drew ` +
+            `${this.coroStatesDrawn} state(s). A park that draws a state without calling ` +
+            `parkBoundary() leaves the cross-park temp invariant inert; a boundary with no ` +
+            `state leaves the dispatch without a case for a label the body emitted.`,
+        );
+      }
+      if (this.coroStatesDrawn !== coro.points.length) {
+        throw new Error(
+          `llvm emitter bug: ${fn.name} drew ${this.coroStatesDrawn} state(s) but the plan ` +
+            `holds ${coro.points.length} suspension point(s). The dispatch and the body ` +
+            `disagree about how many ways this function can resume.`,
+        );
+      }
+      const body = B.render();
+      this.currentCoro = null;
+      this.currentCoroLayout = null;
+      // NO PARAMETERS, and a `void` return: the resume signature is
+      // ScrCoroResume, which scr_coro_alloc was handed a pointer to. Every
+      // argument arrives through the frame.
+      return `define internal void @${mangleCoroResume(fn.name)}(ptr %sc_b) ${FN_ATTRS} { ; stackless ${fn.name}\n${body}\n}`;
     }
     const params = fn.params.map((p) => `${this.llType(p.type)} %p_${mangleLocal(p.localId)}`);
     // Lifted functions receive their closure first (the callValue ABI).
@@ -4934,7 +5723,14 @@ class LlEmitter {
         } else {
           this.releaseForJump(0, 0);
         }
-        if (v === null) B.terminate("ret void");
+        if (this.currentCoro !== null) {
+          // A coroutine FULFILS the promise the frame owns. Reached after
+          // every crossed finally has run and after the function-level
+          // releases, at exactly the point the fiber lowering would have
+          // emitted its `ret` -- so the finally machinery above, the pending
+          // return slot included, is untouched by the stackless lane.
+          this.emitCoroFinish(this.fnByName.get(this.currentFnName)!, v);
+        } else if (v === null) B.terminate("ret void");
         else B.terminate(`ret ${this.llType(s.value!.type)} ${v.name}`);
         break;
       }
@@ -7512,6 +8308,16 @@ class LlEmitter {
         return out;
       }
       case "awaitExpr": {
+        if (this.currentCoro !== null) {
+          // STACKLESS: spill the frame, park, return to the scheduler, and
+          // resume at a label. ONE scr_coro_park per await, which is one
+          // scr_ready_push per await on exactly one of its two arms -- the
+          // invariant is countable by grepping the emitted TU.
+          const pr0 = this.emitExpr(e.value);
+          const out0 = this.emitCoroAwait(this.fnByName.get(this.currentFnName)!, pr0, e.type);
+          this.emitPendingCheck();
+          return out0;
+        }
         // Parks the fiber until the promise settles; rejected promises
         // re-throw here (hence the pending check). Promise temp borrowed;
         // refcounted results arrive +1 and join the frame pre-check so an

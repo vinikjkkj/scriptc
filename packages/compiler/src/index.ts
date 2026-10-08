@@ -5,7 +5,7 @@ import { cacheRootDir, CcCompileError, compileC, compileLibArchive, profFlavor, 
 import { emitModule, emitModuleProgram } from "./backend/emission/emitter.js";
 import { coroPlans } from "./ir/coro-plans.js";
 import { emitFinalKeyReadWidths, emitFinalNarrowBridges, flushKeyReadCensus, flushNarrowBridgeCensus, keyReadCensusOnly } from "./frontend/lowering/keyread-census.js";
-import { emitLlvmModule, LlvmUnsupportedError } from "./backend/llvm/emitter.js";
+import { emitLlvmModule, LlvmUnsupportedError, type LlvmEmitStats } from "./backend/llvm/emitter.js";
 import { checkerPanicDiag, ffiNativeBuildDiag, libAsyncExportDiag, libAsyncSurfaceDiag, libExportUnresolvedDiag, libGenericExportDiag, libIntBoundaryDiag, libNpmIneligibleDiag, libSidecarDiag, libUnmappableSignatureDiag, iceDiag, isCheckerPanic, LIB_INBOUND_BYTES_TRAP_CODE, LIB_RUNTIME_TRAP_CODES, type ScrDiagnostic } from "./diagnostics/diagnostic.js";
 import { checkLibraryIntegerSlots, classSeed, hasIntSlots, numberCarrierKind, type FnIntSlots, type IntSlotConfig } from "./library/int-infer.js";
 import { loadLibraryProfile, profileRemediation, profileTeaching, type LibraryProfile } from "./library/profile.js";
@@ -718,7 +718,16 @@ export function analyze(entryPath: string, opts: AnalyzeOptions = {}): AnalyzeRe
  * profile, which the cache key already covers by path and bytes. */
 export type ProgramNativeFeatures = Record<string, boolean>;
 
-function programNativeFeatures(mod: IrModule, backend: "c" | "llvm"): ProgramNativeFeatures {
+/** `coroLowered` is how many coroutines the EMITTER lowered for this build --
+ * zero on the C lane, which does not need it, and the LLVM emitter's own count
+ * otherwise. It is a parameter rather than something recomputed here because
+ * the only honest source for it is the emitter: see the scr_coro.c switch
+ * below. */
+function programNativeFeatures(
+  mod: IrModule,
+  backend: "c" | "llvm",
+  coroLowered: number,
+): ProgramNativeFeatures {
   return {
     // The link switch for scr_regex.c + libregexp: detected on the IR, so
     // regex-free programs keep the historical (pinned) command line.
@@ -778,16 +787,38 @@ function programNativeFeatures(mod: IrModule, backend: "c" | "llvm"): ProgramNat
     // The link switch for scr_url.c: url.* libCalls or a url-kind type
     // on the IR. The unit used to be unconditional and cost every
     // binary in the project four win32 pages it could not reach.
-    // The link switch for scr_coro.c. `coroPlans` is the same call the C
-    // emitter makes and is empty whenever SCRIPTC_STACKLESS is not 1 -- but
-    // it reads only the IR, which is BACKEND-INDEPENDENT, while the only
-    // emitter that lowers a coroutine is the C one. Without the lane gate an
-    // LLVM build with the knob on linked scr_coro.c into a .ll that calls
-    // nothing in it: 4,608 dead bytes and a cache-key flip for no change in
-    // behaviour -- precisely the "link line disagrees with the emitted TU"
-    // failure cc.ts names at coreRuntimeSources. Drop the gate when the LLVM
-    // backend grows the stackless lowering, not before.
-    coro: backend === "c" && coroPlans(mod.functions).size > 0,
+    // The link switch for scr_coro.c, and it is ASYMMETRIC between the lanes
+    // on purpose.
+    //
+    // THE C LANE keys on `coroPlans`, which is the same call the C emitter
+    // makes and is empty whenever SCRIPTC_STACKLESS is not 1. That is exactly
+    // right there, because the C emitter lowers EVERY function the plan
+    // admits: plan membership and lowering are the same set.
+    //
+    // THE LLVM LANE CANNOT. Its emitter lowers a strict subset of the plan
+    // (backend/llvm/coro.ts's admission predicate), so a function can be in
+    // the plan and refused -- and `coroPlans` is backend-INDEPENDENT, so it
+    // cannot tell. Keying this on the plan would link scr_coro.c into a .ll
+    // that calls nothing in it: 4,608 dead bytes and a cache-key flip for no
+    // change in behaviour, which is precisely the "link line disagrees with
+    // the emitted TU" failure cc.ts names at coreRuntimeSources. Keying it on
+    // a backend NAME would re-open the same hole the day a third lane
+    // appears. So it keys on a COUNT THE EMITTER PRODUCED, threaded back
+    // through LlvmEmitStats above -- the link line and the emitted TU cannot
+    // disagree because one is derived from the other.
+    //
+    // NOTE IT LANDS WITH THE EMITTER WORK AND HAS NO SAFE STANDALONE
+    // POSITION: lifting it before the lowering exists is the dead-bytes
+    // failure, lifting it after is unresolved externals for every scr_coro_*
+    // the .ll now calls. Both are loud; neither is a lowering bug, and both
+    // look like one.
+    //
+    // IT SIMPLIFIES ITSELF AWAY. When the LLVM lane lowers everything the
+    // plan admits, the two expressions converge and the count can go.
+    coro:
+      backend === "c"
+        ? coroPlans(mod.functions).size > 0
+        : coroLowered > 0,
     url: moduleUsesUrl(mod),
     // The link switch for scr_url_params.c: sp.* libCalls, the
     // url.searchParams getter, or a searchParams-kind type on the IR.
@@ -1209,9 +1240,16 @@ async function compileTracked(
   let cPath = join(opts.outDir, `${stem}.c`);
   let backend: "c" | "llvm" = "c";
   let llvmRefusal: string | undefined;
+  // THE RETURN CHANNEL for the scr_coro.c link switch. The LLVM emitter
+  // reports how many coroutines it ACTUALLY lowered, which the driver cannot
+  // recompute: `coroPlans` reads only the IR and is backend-independent, while
+  // the LLVM emitter lowers a strict subset of the plan. Stays zero on the C
+  // lane, which never fills it -- and must, because the C expression below is
+  // already exactly right for that lane.
+  const llStats: LlvmEmitStats = { coroLowered: 0 };
   if (opts.backend !== "c") {
     try {
-      const ll = tapped("emit.llvm", () => emitLlvmModule(lowered.module!));
+      const ll = tapped("emit.llvm", () => emitLlvmModule(lowered.module!, llStats));
       cPath = join(opts.outDir, `${stem}.ll`);
       await writeFile(cPath, ll);
       backend = "llvm";
@@ -1253,7 +1291,7 @@ async function compileTracked(
   // the same helper, so the two paths cannot leave different directories.
   await sweepStaleOutputs(opts.outDir, stem, backend, programUnits.length, programHeader !== undefined);
 
-  const features = programNativeFeatures(lowered.module!, backend);
+  const features = programNativeFeatures(lowered.module!, backend, llStats.coroLowered);
   let irPath: string | undefined;
   if (opts.emitIr) {
     irPath = join(opts.outDir, `${stem}.ir.json`);
@@ -1986,6 +2024,11 @@ export async function compileLibrary(opts: CompileLibraryOptions): Promise<Compi
   let cPath: string;
   if (profile.emission === "llvm") {
     try {
+      // The LIBRARY path links scr_coro.c UNCONDITIONALLY (cc.ts's
+      // LIB_RUNTIME_SOURCES), because gating it would leave scr_coro.c
+      // referencing a ScrPromise window compiled out -- undefined symbols at
+      // archive time. So there is no link switch to feed here and no stats
+      // object to thread; the omission is deliberate and not an oversight.
       const ll = emitLlvmModule(mod);
       cPath = join(opts.outDir, `${stem}.lib.ll`);
       await writeFile(cPath, ll);

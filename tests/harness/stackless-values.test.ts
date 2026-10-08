@@ -73,7 +73,7 @@ import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { describe, expect, test } from "vitest";
+import { beforeAll, describe, expect, test } from "vitest";
 import { compile } from "@scriptc/compiler";
 import { exeName } from "./exe.js";
 
@@ -878,76 +878,272 @@ void main();
 
 interface Arm {
   exe: string;
-  cSource: string;
+  /** The emitted program TU, re-read from disk. `.c` on the C lane and `.ll`
+   * on the LLVM one -- NOT interchangeable, and not a cosmetic difference:
+   * index.ts actively REMOVES the other backend's artifact after a build
+   * (pruneStaleArtifacts rm's stem + (backend === "llvm" ? ".c" : ".ll")), so
+   * an LLVM build leaves no prog.c on disk at all. Reading the wrong name here
+   * throws ENOENT, and a suite red about a missing FILE looks exactly like a
+   * suite red about a missing LOWERING while measuring the prune policy
+   * instead. The name follows the lane for that reason. */
+  artifact: string;
 }
 
-async function buildArm(knob: boolean): Promise<Arm> {
+/* THE RESUME FUNCTION'S SPELLING IS THE SAME TOKEN ON BOTH LANES, which is
+ * what lets one ledger referee two backends. mangleCoroResume is
+ * backend-neutral (mangle.ts), so the C lane emits
+ *     static void sc_cr_ws(ScrCoroBase *sc_b) {
+ * and the LLVM lane
+ *     define internal void @sc_cr_ws(ptr %sc_b)
+ * and "sc_cr_ws(" is a substring of both. No regex, and that is deliberate:
+ * the word-boundary escape this file used to carry lost a backslash on its
+ * way through a heredoc and became the BACKSPACE character, so the control
+ * matched nothing and reported every wrapper missing. */
+const resumeName = (name: string): string => `sc_cr_${name}(`;
+
+/** Every resume function in an artifact, keyed by its mangled name, as the
+ * text between its opening line and its closing brace.
+ *
+ * TWO SPELLINGS, ONE SHAPE. The C lane opens a resume with
+ *     static void sc_cr_ws(ScrCoroBase *sc_b) {
+ * and closes it with a brace in column 0; the LLVM lane opens with
+ *     define internal void @sc_cr_ws(ptr %sc_b) ... {
+ * and closes the same way. The scans below are about what a body CONTAINS,
+ * not about how it is punctuated, so they take their bodies from here and
+ * stay lane-neutral.
+ *
+ * Returning a MAP rather than an array is deliberate: a scan that reports an
+ * offender has to name it, and a splitter that loses the name turns a precise
+ * failure into a count. */
+function resumeBodies(artifact: string, lane: Lane): Map<string, string> {
+  const nl = String.fromCharCode(10);
+  const out = new Map<string, string>();
+  const open = lane === "llvm"
+    ? /^define [^@\n]*@(sc_cr_[A-Za-z0-9_]+)\(/
+    : /^[A-Za-z ]*void (sc_cr_[A-Za-z0-9_]+)\(ScrCoroBase/;
+  const lines = artifact.split(nl);
+  for (let i = 0; i < lines.length; i++) {
+    const m = open.exec(lines[i]!);
+    if (!m) continue;
+    let j = i + 1;
+    while (j < lines.length && lines[j] !== "}") j++;
+    out.set(m[1]!, lines.slice(i, j).join(nl));
+  }
+  return out;
+}
+
+/* THE LLVM LANE'S FLOOR -- the wrappers its emitter lowers today.
+ *
+ * THIS IS A FLOOR, NOT A PREDICATE, and the difference is the whole reason it
+ * is safe to write names here. The predicate lives in
+ * backend/llvm/coro.ts (llvmCoroLowers) and is recomputed from the plan on
+ * every build; this list is a MEASUREMENT of what that predicate admitted on
+ * this program, pinned so that a wrapper silently dropping off the lane fails
+ * BY NAME instead of making the two arms more equal. Run any build with
+ * SCRIPTC_LLVM_CORO_CENSUS=1 to print the predicate's verdict, with a reason,
+ * for every planned function -- that is how this list was produced and how it
+ * should be re-derived rather than edited by hand.
+ *
+ * WHY IT IS NOT THE "P" THE SLICE WAS SCOPED AGAINST, because the gap is a
+ * real finding and not a drift. P was defined as "exactly one suspension
+ * point, it is a park, not a hop, and no unnamed temp is owned across it", and
+ * its membership was computed by reading the knob-ON prog.c and counting
+ * `sc_tmp_` fields in each frame. That count is a C-EMITTER ARTIFACT: the C
+ * emitter pushes EVERY temp into its RC frame, refcounted or not, so a dead
+ * scalar argument gets a frame slot. `await pf(v)` with a `number` argument
+ * therefore shows a `double sc_tmp_sc_t0` and falls out of P, while
+ * `await ps(v)` with a `string` argument shows none -- the string temp's +1 is
+ * MOVED into the call and leaves the frame. The spill is spurious in the first
+ * case: the C reload at the resume label writes a local nothing reads again.
+ *
+ * On this lane there is no such spill to be spurious. `B.tmp()` enters no
+ * frame, and the scalar argument's `%t` is simply not referenced after the
+ * park -- so the shapes P excluded for carrying a dead C temp are lowerable
+ * here, and the measured set is wider than P rather than different from it.
+ * The narrow reading would have cost coverage to match a number derived from
+ * the other backend's bookkeeping. */
+const LLVM_FLOOR: ReadonlySet<string> = new Set([
+  "wf", "wb", "ws", "wa", "wu", "wd", "wtv", "wv", "wr",
+  "wtc", "wdr", "wca", "wbf", "wbb", "wbs", "wcs",
+  "wgn", "wgf", "wgb", "wgs", "wgr", "wgx",
+  "wlc", "wlb",
+  "wfy5", "wfy1", "wfy2", "wfy3", "wfy4",
+  "wif", "wsd", "wsu",
+]);
+
+/* THE OTHER HALF OF THE PARTITION -- the shapes the LLVM lane does NOT lower,
+ * grouped by the reason its emitter gave, and WRITTEN OUT rather than derived.
+ *
+ * WHY IT IS A LITERAL LIST AND NOT A COMPUTATION. The obvious shortcut is
+ * "everything converted that is not in the floor", or worse, "whatever the
+ * emitter refused". Either one lets the emitter feed BOTH sides of the
+ * comparison, and a test whose expectation is produced by its subject is green
+ * for ever -- it cannot answer the one question it exists for, which is whether
+ * the partition MOVED. Spelled out, a shape that starts or stops converting
+ * fails by name and someone has to move the line on purpose.
+ *
+ * WHY GROUPED BY CAUSE instead of one flat set. A bucket forces a new entry to
+ * be CLASSIFIED, so the list stays a worklist rather than a quarantine: each
+ * group names the mechanism a later slice has to build, and the biggest group
+ * is the next slice's subject. The reasons are the emitter's own words --
+ * build anything with SCRIPTC_LLVM_CORO_CENSUS=1 AND SCRIPTC_NO_CACHE=1 to
+ * print one line per planned function with its verdict, which is how this list
+ * was produced and how it should be re-derived rather than hand-edited.
+ *
+ * BOTH VARIABLES, and the second is not optional. The census is printed by the
+ * emitter, and an early cache hit skips codegen, so a warm build prints
+ * nothing -- indistinguishable from "nothing was planned". The census variable
+ * is itself in the cache key, so the first run with it set reports and every
+ * run after is served the previous answer in silence.
+ *
+ * THESE ARE NOT PERMANENT. Every name here is a shape the C lane already
+ * converts, so each group is work that exists rather than a limit that was
+ * discovered. */
+const NOT_LOWERED_BY_REASON: ReadonlyArray<readonly [string, readonly string[]]> = [
+  // The await is nested inside a larger expression, so operands evaluated
+  // BEFORE it are already materialised in temporaries the frame would have to
+  // carry. On this lane those are SSA `%tN` values, which cannot be reloaded
+  // under their own name -- the cross-park temp mechanism, and the single
+  // largest group by a factor of five.
+  ["nested-in-expression", [
+    "wrm", "wtt", "wte",
+    "wna", "wnv", "wnn", "wns", "wnb", "wnx", "wnf", "wnr", "wnm",
+    "wgc", "wgc2", "wgp",
+    "wln", "wls", "wlf", "wld", "wlnest", "wlfo",
+    "wfo1", "wfo2", "wfo3",
+    "wfy6",
+  ]],
+  // More than one suspension point: a second state, a second resume block and
+  // a second spill site -- and the first place a local's live range spans two
+  // parks.
+  ["a second suspension point", ["wtb", "who", "hopsteps", "wau", "was", "wsw"]],
+  // A temp was still OWNED when the park was reached. The structural predicate
+  // admits these -- `nestedInExpression` reports false for a one-field record
+  // literal that is nevertheless holding the record -- and the emitter refuses
+  // them on sight. Needs the sc_tmp_ frame fields the C lane lays out.
+  ["a temp owned across the park", ["wrl", "wrs", "wby", "wfo4", "wfo5", "wga"]],
+  // The microtask hop (`async.hop`). It draws a state from the same counter an
+  // await does and emits scr_coro_hop, which this lane declares nothing for --
+  // and must not, because a declare with no call site claims coverage.
+  ["async.hop", ["whn", "whs", "wha", "whu", "whv"]],
+  // `await` of a promise-or-absent union: ONE point with TWO ways to reach it,
+  // sharing a single resume label and discriminated by sc_awaited.
+  ["awaitUnion", ["wav", "waun", "waus"]],
+  // Caught by the emitter's cross-park invariant rather than by the predicate:
+  // an awaited case TEST computes the switch discriminant before the park and
+  // compares it after. A real dominance violation, and on this host nothing
+  // downstream would ever have reported it.
+  ["a temp live across the park, caught by the invariant", ["wst"]],
+];
+
+const LLVM_NOT_LOWERED: ReadonlySet<string> = new Set(
+  NOT_LOWERED_BY_REASON.flatMap(([, names]) => names),
+);
+
+type Lane = "c" | "llvm";
+
+/** Which wrappers THIS lane is expected to have converted. The C emitter
+ * lowers every function the plan admits, so its expectation is the ledger
+ * itself; the LLVM emitter lowers a strict subset, so its expectation is the
+ * floor above -- and the gap between that floor and the ledger is reported by
+ * name rather than trimmed away. See the ledger test below. */
+const expectedOnLane = (lane: Lane, w: { name: string; converted: boolean }): boolean =>
+  w.converted && (lane === "c" || LLVM_FLOOR.has(w.name));
+
+async function buildArm(knob: boolean, backend: Lane): Promise<Arm> {
   const previous = process.env["SCRIPTC_STACKLESS"];
   if (knob) process.env["SCRIPTC_STACKLESS"] = "1";
   else delete process.env["SCRIPTC_STACKLESS"];
   try {
     // The knob is part of the KEY. It is not part of the compiler's own cache
     // key, so two arms sharing an output directory would share one binary and
-    // the comparison would pass by being the same program twice.
+    // the comparison would pass by being the same program twice. The BACKEND
+    // joins the key for exactly the same reason: both lanes write their
+    // artifact and their exe to the same two names.
     const key = createHash("sha256").update(SOURCE).update(knob ? "on" : "off")
-      .update(sanitize ? "san" : "plain").digest("hex").slice(0, 16);
+      .update(sanitize ? "san" : "plain").update(backend).digest("hex").slice(0, 16);
     const outDir = join(cacheDir, `stackless-values-${key}`);
     const file = join(outDir, "prog.ts");
     mkdirSync(outDir, { recursive: true });
     writeFileSync(file, SOURCE);
-    const r = await compile(file, { outPath: join(outDir, exeName("prog")), outDir, sanitize, backend: "c", keepC: true });
+    // keepC IS A NO-OP TODAY and is kept anyway: nothing under packages/ reads
+    // the option (request-init.test.ts:414 got here first and wrote it down).
+    // What actually keeps the artifact on disk is the prune deleting only the
+    // OTHER backend's file. The read below must not be taken to rest on keepC.
+    const r = await compile(file, { outPath: join(outDir, exeName("prog")), outDir, sanitize, backend, keepC: true });
     if (!r.ok) throw new Error(r.diagnostics.map((d: any) => `${d.code}: ${d.message}`).join("\n"));
-    return { exe: r.binaryPath, cSource: readFileSync(join(outDir, "prog.c"), "utf8") };
+    return { exe: r.binaryPath, artifact: readFileSync(join(outDir, backend === "llvm" ? "prog.ll" : "prog.c"), "utf8") };
   } finally {
     if (previous === undefined) delete process.env["SCRIPTC_STACKLESS"];
     else process.env["SCRIPTC_STACKLESS"] = previous;
   }
 }
 
-describe("the stackless lane answers what the fiber lane answers", () => {
+/* RUN ON BOTH BACKENDS. The pin this file carried (`backend: "c"`, twice) was
+ * never a statement that the check is C-specific -- it was that only the C
+ * emitter had a stackless lowering to check. The LLVM lane grew one at S1, so
+ * the lane is a parameter now.
+ *
+ * THE LLVM LANE IS EXPECTED TO BE RED, and that is this file's job rather than
+ * a defect in it. S1 lowers P -- nine wrappers -- out of the seventy-nine the
+ * ledger carries. The alternative was to narrow the ledger per lane until the
+ * work passed it, which is the "green by construction" move: a criterion
+ * trimmed to fit. Instead the gap is a NAMED failure, in its own test, so that
+ * partial coverage can never be read as whole coverage and the next slice has
+ * its worklist printed for it. The three tests are split for the same reason:
+ * vitest stops a test at its first failed expectation, so folding them into
+ * one would let the ledger's red hide whether the nine actually work. */
+describe.each(["c", "llvm"] as const)("the stackless lane answers what the fiber lane answers (%s)", (lane) => {
+
+  // Built once per lane and shared by the three tests below: each arm is a
+  // full compile of a 480-line program, and building them per test would pay
+  // for six.
+  let on!: Arm, off!: Arm;
+  beforeAll(async () => {
+    [on, off] = [await buildArm(true, lane), await buildArm(false, lane)];
+  }, 600_000);
 
   test("every await result kind survives the state machine", async () => {
-    const [on, off] = [await buildArm(true), await buildArm(false)];
 
     // THE ARMING CHECK, and it is about the C rather than the path: the two
     // arms get different output directories by construction (the knob is in
     // the cache key), so comparing binary PATHS proves nothing and cannot
     // fail. What has to be true is that the knob reached the emitter.
-    expect(off.cSource, "the fiber arm must contain no coroutine lowering")
+    expect(off.artifact, "the fiber arm must contain no coroutine lowering")
       .not.toMatch(/scr_coro_(take|finish)_/);
-    expect(on.cSource, "the knob did not reach the emitter")
+    expect(on.artifact, "the knob did not reach the emitter")
       .toMatch(/scr_coro_finish_/);
 
     // THE PER-KIND CONTROL. A kind silently dropping off the lane makes the
     // two arms MORE equal, so the output comparison below cannot report it.
-    // Each wrapper must be a converted coroutine in the stackless arm, and the
-    // take/finish arm it exercises must be present in the emitted C.
-    const converted = WRAPPERS.filter((w) => w.converted);
+    // Each wrapper this LANE is expected to convert must be a converted
+    // coroutine in the stackless arm, and the take/finish arm it exercises
+    // must be present in the emitted TU.
+    //
+    // `expectedOnLane` is the ledger for C and the ledger INTERSECTED WITH P
+    // for LLVM. The seventy the intersection removes are not dropped: they are
+    // the subject of the ledger test below, which fails naming every one.
+    const converted = WRAPPERS.filter((w) => expectedOnLane(lane, w));
     // No regex, and that is deliberate: the word-boundary escape this used to
     // carry lost a backslash on its way through a heredoc and became the
     // BACKSPACE character, so the control matched nothing and reported all nine
     // wrappers missing. The emitted spelling needs no escape at all.
-    const onLane = (w: { name: string }): boolean => on.cSource.includes(`sc_cr_${w.name}(`);
+    const onLane = (w: { name: string }): boolean => on.artifact.includes(resumeName(w.name));
     expect(converted.filter((w) => !onLane(w)).map((w) => w.name),
-      "wrappers that are NOT converted -- these kinds are unguarded").toEqual([]);
+      `wrappers this lane (${lane}) must convert and does not -- these kinds are unguarded`).toEqual([]);
+    // The take/finish arms are CALL-SITE driven, so the set asserted here is
+    // the set the expected wrappers actually exercise. Asserting an arm no
+    // expected wrapper uses would claim coverage the lane does not have --
+    // which on the LLVM lane is exactly the four arms P never reaches
+    // (take_bool, finish_bool, finish_void, and hop).
     for (const arm of new Set(converted.map((w) => `scr_coro_take_${w.take}`))) {
-      expect(on.cSource, `${arm} is never emitted -- the kind it carries is unguarded`).toContain(arm);
+      expect(on.artifact, `${arm} is never emitted -- the kind it carries is unguarded`).toContain(arm);
     }
     for (const arm of new Set(converted.map((w) => `scr_coro_finish_${w.finish}`))) {
-      expect(on.cSource, `${arm} is never emitted -- the kind it carries is unguarded`).toContain(arm);
+      expect(on.artifact, `${arm} is never emitted -- the kind it carries is unguarded`).toContain(arm);
     }
 
-    // THE SCOPE LEDGER, and it is the same control pointed the other way. A
-    // shape joining the lane with no value coverage is how D1 shipped a wrong
-    // answer; these wrappers are written and RUNNING but not yet convertible,
-    // so the file records which shapes are deliberately off-lane instead of
-    // leaving the gap unnamed. When the try lowering lands this fails BY NAME
-    // and the fix is to flip that wrapper's `converted` to true -- which is
-    // the same edit that switches its real value coverage on.
-    expect(WRAPPERS.filter((w) => !w.converted && onLane(w)).map((w) => w.name),
-      "these shapes now CONVERT -- flip `converted: true` so their coverage counts")
-      .toEqual([]);
-    expect(on.cSource, "the rejection completion is never emitted").toContain("scr_coro_finish_throw");
+    expect(on.artifact, "the rejection completion is never emitted").toContain("scr_coro_finish_throw");
 
     // NO FIBER CALL MAY APPEAR IN AN ADMITTED BODY, checked in the artifact.
     //
@@ -972,20 +1168,10 @@ describe("the stackless lane answers what the fiber lane answers", () => {
     // the derived admission existing before the broken state could be built
     // deliberately.
     {
-      const bodies = on.cSource.split(/^(?=[A-Za-z ]*void sc_cr_)/m);
       const offenders: string[] = [];
-      for (const b of bodies) {
-        const m = /^[A-Za-z ]*void (sc_cr_[A-Za-z0-9_]+)\(ScrCoroBase/.exec(b);
-        if (!m) continue;
-        // No escape sequences here on purpose: this file has had a
-        // backslash eaten by a heredoc five times today, and an escape
-        // that degrades silently inside a regex or a string is the exact
-        // failure this test exists to prevent elsewhere.
-        const nl = String.fromCharCode(10);
-        const end = b.indexOf(nl + "}" + nl);
-        const body = end > 0 ? b.slice(0, end) : b;
+      for (const [name, body] of resumeBodies(on.artifact, lane)) {
         const fiber = [...new Set(body.match(/scr_await_[a-z0-9_]+/g) ?? [])];
-        if (fiber.length > 0) offenders.push(`${m[1]}: ${fiber.join(", ")}`);
+        if (fiber.length > 0) offenders.push(`${name}: ${fiber.join(", ")}`);
       }
       expect(offenders, "fiber-only calls inside a stackless body -- these abort at runtime, and the coverage number is void")
         .toEqual([]);
@@ -1018,14 +1204,26 @@ describe("the stackless lane answers what the fiber lane answers", () => {
      * re-establish a temp on every path. That is the direction that can MISS
      * a hazard, so this is a net under the value guards above and not a
      * replacement for them. */
-    {
+    // THE LANE GATE ON THIS SCAN, and it is a declared limit rather than an
+    // omission. Everything below parses C: `sc_t4 = ...` declarations, brace
+    // nesting, `} else {`, and `sc_S1:;` labels. The LLVM lane has none of
+    // those spellings -- its temps are SSA `%tN` registers, which cannot even
+    // be redefined, so the same defect takes a different form there (a use not
+    // dominated by its definition) and needs a different detector. That
+    // detector exists and is not this one: the emitter-side cross-park temp
+    // invariant in backend/llvm/blocks.ts fails the BUILD, so an LLVM artifact
+    // reaching this file has already passed it. Running this C parser over a
+    // .ll would match nothing and report a clean sweep -- a counter reading
+    // zero mechanically, which is the failure this whole file exists to
+    // prevent. Skipped loudly, in one place, with the replacement named.
+    if (lane === "c") {
       const nl = String.fromCharCode(10);
       const LABEL = /^\s*sc_S[0-9]+:/;
       const DECL = /^\s*(?:const\s+)?[A-Za-z_][A-Za-z0-9_]*(?:\s*\*)*\s+\*?(sc_[ti][0-9]+)\s*(?:=|;)/;
       const WRITE = /^\s*\*?(sc_[ti][0-9]+)\s*=[^=]/;
       const NAME = /sc_[ti][0-9]+/g;
       const lost: string[] = [];
-      for (const b of on.cSource.split(/^(?=[A-Za-z ]*void sc_cr_)/m)) {
+      for (const b of on.artifact.split(/^(?=[A-Za-z ]*void sc_cr_)/m)) {
         const m = /^[A-Za-z ]*void (sc_cr_[A-Za-z0-9_]+)\(ScrCoroBase/.exec(b);
         if (!m) continue;
         const end = b.indexOf(nl + "}" + nl);
@@ -1084,7 +1282,84 @@ describe("the stackless lane answers what the fiber lane answers", () => {
         "temps established before a resume label and read after it -- the park loses these, and the answer is a plausible wrong number")
         .toEqual([]);
     }
+  }, 600_000);
 
+  /* THE PARTITION -- which shapes this lane converts and which it does not,
+   * asserted in BOTH directions and GREEN.
+   *
+   * WHY A PARTITION AND NOT A STANDING RED. The first version of this test
+   * failed on purpose, listing the shapes the LLVM lane does not cover, so
+   * that partial coverage could not be read as whole coverage. It did that
+   * badly. A permanent red trains every reader to ignore red, and it bills
+   * that cost to people who had nothing to do with this slice -- and it is the
+   * WEAKER assertion besides, because a red "these 46 are missing" only ever
+   * catches one direction, and catches it by being noise.
+   *
+   * Asserting the partition is strictly stronger. It fails when one of the
+   * lowered shapes STOPS converting -- a real regression, which the output
+   * comparison cannot see because a dropped conversion makes the two arms MORE
+   * equal, not less -- and it fails when one of the not-lowered shapes STARTS
+   * converting without someone moving the line deliberately. The second
+   * direction is the one a red could never have: a shape joining the lane with
+   * no value coverage is exactly how this lowering shipped a wrong answer
+   * once, and a test that was already failing would have absorbed it in
+   * silence.
+   *
+   * THE EXHAUSTIVENESS CHECK IS WHAT KEEPS THE TWO LISTS HONEST. Both sides
+   * are literal, so nothing stops them drifting apart from the ledger except
+   * requiring that together they cover it exactly, with no overlap. That makes
+   * a NEW wrapper fail here until it is classified, rather than defaulting
+   * into whichever side happens to be derived.
+   *
+   * WHAT IS NOT ASSERTED, said plainly: the REASON attached to each group.
+   * Nothing here can check it -- only the emitter knows why it refused, and
+   * asking it would be asking the subject to grade itself. The reasons are
+   * documentation, re-derived with SCRIPTC_LLVM_CORO_CENSUS=1, and the
+   * grouping exists so the list reads as a worklist rather than a quarantine. */
+  test("the partition: exactly these shapes convert on this lane, and exactly those do not", () => {
+    const onLane = (name: string): boolean => on.artifact.includes(resumeName(name));
+    const ledger = WRAPPERS.filter((w) => w.converted).map((w) => w.name);
+    // The C emitter lowers every function the plan admits, so its partition is
+    // the whole ledger against nothing; only the LLVM lane has two sides.
+    const lowered = lane === "c" ? new Set(ledger) : LLVM_FLOOR;
+    const notLowered = lane === "c" ? new Set<string>() : LLVM_NOT_LOWERED;
+
+    // (0) The two sides must TILE the ledger: no name in both, none in
+    // neither. Without this a wrapper could be dropped from both lists and
+    // every assertion below would still pass.
+    expect([...lowered].filter((n) => notLowered.has(n)),
+      "these names are on BOTH sides of the partition").toEqual([]);
+    expect(ledger.filter((n) => !lowered.has(n) && !notLowered.has(n)),
+      "converted wrappers classified on NEITHER side -- a new shape needs a side chosen for it")
+      .toEqual([]);
+    expect([...lowered, ...notLowered].filter((n) => !ledger.includes(n)),
+      "names in the partition that the ledger does not carry as converted").toEqual([]);
+
+    // (1) Everything this lane claims to lower, it lowers.
+    expect([...lowered].filter((n) => !onLane(n)).sort(),
+      `shapes this lane (${lane}) is recorded as lowering and does NOT -- a regression, and the ` +
+        `output comparison cannot report it: a dropped conversion makes the two arms MORE equal`)
+      .toEqual([]);
+
+    // (2) Everything it does not claim, it does not lower. This is the
+    // direction a standing red could never assert.
+    expect([...notLowered].filter((n) => onLane(n)).sort(),
+      `shapes this lane (${lane}) now lowers that the partition records as NOT lowered. If a ` +
+        `slice widened the admission, move these out of NOT_LOWERED_BY_REASON and into ` +
+        `LLVM_FLOOR -- deliberately, in the same commit -- so their value coverage starts ` +
+        `counting. Run with SCRIPTC_LLVM_CORO_CENSUS=1 for the emitter's own verdict`)
+      .toEqual([]);
+
+    // (3) The ledger's own direction, unchanged and still load-bearing on both
+    // lanes: a shape the ledger calls NOT converted must not be on either
+    // lane. When a slice converts one, the fix is to flip its `converted` to
+    // true -- the same edit that switches its real value coverage on.
+    expect(WRAPPERS.filter((w) => !w.converted && onLane(w.name)).map((w) => w.name),
+      "these shapes now CONVERT -- flip `converted: true` so their coverage counts")
+      .toEqual([]);
+  });
+
+  test("the stackless lane answers what the fiber lane answers", () => {
     const run = (exe: string): string => execFileSync(exe, [], { encoding: "utf8" });
     const fiber = run(off.exe);
     // The reference arm has to be sane before it can referee: a fiber lane
@@ -1167,5 +1442,5 @@ describe("the stackless lane answers what the fiber lane answers", () => {
     for (const line of ASSIGN_LINES) {
       expect(run(on.exe), `the stackless lane answers the wrong value: ${line}`).toContain(line);
     }
-  });
+  }, 600_000);
 });

@@ -60,10 +60,40 @@ export const SCR_BYTES_DATA_OFFSET = 24;
 export const SCR_STR_LEN_OFFSET = 4;
 export const SCR_STR_DATA_OFFSET = 12;
 
+/** ScrCoroBase { ScrCoroResume resume; ScrPromise *promise; ScrAlsCtx *als;
+ *  uint32_t state; uint32_t flags; size_t rc; } -- 40 bytes on LP64
+ *  (scr_coro.h). The stackless lowering addresses exactly ONE of these by
+ *  GEP -- `state`, which the dispatch loads and every park stores -- but the
+ *  emitter must declare the WHOLE body as %ScrCoroBase, because
+ *  scr_coro_alloc(sizeof *frame, ...) is computed on the .ll side with the
+ *  `ptrtoint (getelementptr %T, ptr null, i32 1)` idiom. A body that is too
+ *  short therefore UNDER-ALLOCATES every coroutine frame, silently: nothing
+ *  on this lane type-checks the .ll against scr_coro.h, and section 7 of the
+ *  LLVM port scope measured that the IR verifier is not run here at all.
+ *
+ *  LIMIT OF THIS TABLE, stated where it bites: RuntimeFieldOffset expresses
+ *  offsetof and NOT sizeof, so the rows below pin every field position and
+ *  pin NOTHING about trailing padding. For ScrCoroBase the two happen to
+ *  coincide (rc is the last member, at 32, and 8-byte alignment makes 40 the
+ *  only possible size), but that is an argument, not an assertion, and it
+ *  does NOT carry to ScrCoroExc -- whose size depends on ScrExcCell, which
+ *  this table cannot reach. Until the generator grows a size assertion, the
+ *  frame-size claim rests on the standalone _Static_assert TU recorded in
+ *  the port scope, not on this file. */
+export const SCR_CORO_BASE_STATE_OFFSET = 24;
+
 /** Every entry the layout test proves against the real toolchain. */
 export const RUNTIME_FIELD_OFFSETS: readonly RuntimeFieldOffset[] = [
   { struct: "ScrBytes", field: "len", offset: SCR_BYTES_LEN_OFFSET },
   { struct: "ScrBytes", field: "data", offset: SCR_BYTES_DATA_OFFSET },
   { struct: "ScrStr", field: "len", offset: SCR_STR_LEN_OFFSET },
   { struct: "ScrStr", field: "data", offset: SCR_STR_DATA_OFFSET },
+  { struct: "ScrCoroBase", field: "resume", offset: 0 },
+  { struct: "ScrCoroBase", field: "promise", offset: 8 },
+  { struct: "ScrCoroBase", field: "als", offset: 16 },
+  { struct: "ScrCoroBase", field: "state", offset: SCR_CORO_BASE_STATE_OFFSET },
+  { struct: "ScrCoroBase", field: "flags", offset: 28 },
+  { struct: "ScrCoroBase", field: "rc", offset: 32 },
+  { struct: "ScrCoroExc", field: "base", offset: 0 },
+  { struct: "ScrCoroExc", field: "exc", offset: 40 },
 ];
