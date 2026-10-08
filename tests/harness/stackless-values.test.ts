@@ -180,6 +180,32 @@ const WRAPPERS: ReadonlyArray<{ name: string; take: string; finish: string; conv
   { name: "wtt", take: "f64", finish: "f64", converted: true },
   { name: "wte", take: "f64", finish: "f64", converted: true },
   { name: "wtb", take: "f64", finish: "f64", converted: true },
+  // THE `assign` SHAPES -- `x = await ...` as a STATEMENT ROOT. They went in
+  // as NEGATIVE entries while the rootOk carve-out stood, and the ledger named
+  // all ten the moment it was lifted, which is the handover this file exists
+  // for. They are grouped BY EMITTER ROUTE, because
+  // emit-stmts.ts:505 has three and only one of them is the plain store:
+  //   (A) the module-global arm (:510-517) -- target is a C static, and the
+  //       OLD value is released AFTER the await returns.
+  //   (B) emitStrAccum (:520 -> :1364) -- the ONLY assign shape that READS
+  //       the target after the park: it emits the right operand first and
+  //       then reads the accumulator. Liveness KILLS the target as a def
+  //       (recordPoints deletes every `defs` entry that is not boxed), so
+  //       what keeps it correct is coroFrameLocals adding every REFCOUNTED
+  //       local independently of liveness. That is a load-bearing coupling
+  //       between two rules written for different reasons, and it is why
+  //       this route gets its own guards instead of riding on the plain one.
+  //   (C) the plain local store (:519-), boxed and not.
+  { name: "wga", take: "ref", finish: "ref", converted: true }, // A: global, refcounted
+  { name: "wgn", take: "f64", finish: "f64", converted: true }, // A: global, scalar
+  { name: "wgc", take: "ref", finish: "ref", converted: true }, // B: s += await
+  { name: "wgc2", take: "ref", finish: "ref", converted: true }, // B: right ALSO reads s
+  { name: "wgf", take: "f64", finish: "f64", converted: true }, // C: f64
+  { name: "wgb", take: "bool", finish: "bool", converted: true }, // C: bool
+  { name: "wgs", take: "ref", finish: "ref", converted: true }, // C: string
+  { name: "wgr", take: "ref", finish: "ref", converted: true }, // C: ref
+  { name: "wgx", take: "f64", finish: "f64", converted: true }, // C: BOXED target
+  { name: "wgp", take: "f64", finish: "f64", converted: true }, // C: compound assign, await in bin.right
 ];
 
 const SOURCE = `
@@ -332,6 +358,53 @@ async function wcs(bad: boolean): Promise<string> {
   }
 }
 
+/* THE 'assign' ROUTES. Every magnitude below is distinguishable from every
+ * other on its line, because the break these guard is a PLAUSIBLE value --
+ * a stale reload answers the pre-park string, not garbage. */
+
+// (A) module globals. gs is refcounted so the old-value release runs; gn is
+// not, so the two arms are told apart by content and not only by name.
+let gs = "g0";
+let gn = 100;
+async function wga(n: number): Promise<string> { gs = await ps("a" + n); return gs + "/" + gs.length; }
+async function wgn(n: number): Promise<number> { gn = await pf(n); return gn * 2; }
+
+// (B) emitStrAccum. The accumulator is read AFTER the park.
+async function wgc(v: string): Promise<string> { let s = "A"; s += await ps(v); return s; }
+// ...and here the RIGHT operand reads the accumulator too, so a stale reload
+// shows up as the two halves of one string disagreeing with each other
+// rather than as a missing line.
+async function wgc2(v: string): Promise<string> { let s = "B"; s += (await ps(v)) + s; return s; }
+
+// (C) the plain local store, one per payload kind, plus the boxed target.
+async function wgf(n: number): Promise<number> { let x = 7; x = await pf(n); return x; }
+async function wgb(v: boolean): Promise<boolean> { let x = false; x = await pb(v); return x; }
+async function wgs(v: string): Promise<string> { let x = "z"; x = await ps(v); return x + "/" + x.length; }
+async function wgr(n: number): Promise<number[]> { let x: number[] = [9]; x = await pa(n); return x; }
+// A closure captures x, so x is BOXED and the store goes through the box --
+// the 'boxedUse' arm of recordPoints. c() reads it after the resume, so a
+// box that stopped being shared answers 1 where the store wrote n+1.
+async function wgx(n: number): Promise<number> { let x = 1; const c = (): number => x; x = await pf(n); return x * 1000 + c(); }
+// THE FOURTH LOCAL ROUTE IS A NAMED GAP, not an oversight. The store arm is
+// three branches, not two: a FORWARD-captured scalar is boxed AND tdz, and
+// its write MINTS the one-element cell (:526) instead of writing through an
+// existing one (:535). NO GUARD EXISTS FOR IT and the reason is measured
+// rather than assumed:
+//   - it cannot be written. 'const c = () => t; let t: number; t = await f()'
+//     is refused by the frontend outright -- SC1090, "a binding form with no
+//     lowering". A forward-captured CONST reaches :526, but its write is a
+//     varDecl, so it never enters this statement arm at all.
+//   - it does not occur. Over zapo-rest/app182's IR, of 40 'assign'
+//     statements whose value contains a suspension (34 functions), route C1
+//     takes 0 -- against A 3, B 0, C2 1, C3 36.
+// So the route is open in the emitter and closed to every input anyone can
+// currently produce. Recorded here so it is a known hole rather than a
+// silent one, and so the day a binding form reaches it the gap has a name.
+// Compound assign on a NUMBER: the target is read into a temp BEFORE the park
+// and the sum is formed after it, so this is the bin.right family arriving
+// through the assign statement rather than through a varDecl.
+async function wgp(n: number): Promise<number> { let x = 5; x += await pf(n); return x; }
+
 async function main(): Promise<void> {
   const f = await wf(41);
   console.log("f64   ", f);
@@ -384,6 +457,11 @@ async function main(): Promise<void> {
   console.log("nok   ", await wnf(3), "|", await wnr(3), "|", await wnm(3));
   const bf = await wbf(11); const bb = await wbb(true); const bs = await wbs("q");
   console.log("boxp  ", bf, bb, bs, bs.length);
+  // THE 'assign' ROUTES, one line per emitter route.
+  console.log("asg-g ", await wga(5), "|", await wgn(20), "|", gs, gn);
+  console.log("asg-c ", await wgc("k"), "|", await wgc2("k"));
+  console.log("asg-l ", await wgf(3), "|", await wgb(true), "|", await wgs("y"), "|", (await wgr(4)).join(","));
+  console.log("asg-x ", await wgx(3), "|", await wgp(3));
   console.log("done");
 }
 void main();
@@ -605,6 +683,39 @@ describe("the stackless lane answers what the fiber lane answers", () => {
     expect(fiber, "the fiber arm is the reference and must be sane").toContain("bool   true false");
     expect(fiber, "the fiber arm must reach the rejection, not swallow it").toMatch(/rej\s+boom true/);
     expect(fiber, "the fiber arm must run to completion").toContain("done");
+    // THE assign ROUTES, asserted as ABSOLUTE VALUES on BOTH arms.
+    //
+    // "the two arms agree" is not a control here. One mechanism can break
+    // both: coroFrameLocals, the rule that actually keeps route (B) correct,
+    // is shared with nothing lane-specific, and a frontend change that
+    // reordered emitStrAccum would move the fiber arm too. So each line is
+    // pinned to the value the language requires, computed by hand from the
+    // producers above, and checked on the reference arm BEFORE the arms are
+    // compared to each other.
+    //
+    //   wga(5)  gs = await ps("a5") = "a5!"            -> "a5!/3"
+    //   wgn(20) gn = await pf(20)  = 21                -> 42
+    //   wgc     "A" += ps("k")="k!"                    -> "Ak!"
+    //   wgc2    "B" += ps("k") + s   (s read BOTH sides of the park) -> "Bk!B"
+    //   wgf(3)  x starts 7, becomes pf(3)=4            -> 4   (a dead store answers 7)
+    //   wgs     x starts "z", becomes "y!"             -> "y!/2"
+    //   wgr(4)  x starts [9], becomes [4,5]            -> "4,5"
+    //   wgx(3)  x boxed, store through the box, closure reads it back
+    //           -> 4*1000 + 4 = 4004  (an unshared box answers 4001)
+    //   wgp(3)  x starts 5, += pf(3)=4                  -> 9   (a lost left
+    //           operand answers 4, a stale one answers 5)
+    const ASSIGN_LINES = [
+      "asg-g  a5!/3 | 42 | a5! 21",
+      "asg-c  Ak! | Bk!B",
+      "asg-l  4 | true | y!/2 | 4,5",
+      "asg-x  4004 | 9",
+    ];
+    for (const line of ASSIGN_LINES) {
+      expect(fiber, `the reference arm must already answer: ${line}`).toContain(line);
+    }
     expect(run(on.exe), "the stackless lane disagrees with fibers").toEqual(fiber);
+    for (const line of ASSIGN_LINES) {
+      expect(run(on.exe), `the stackless lane answers the wrong value: ${line}`).toContain(line);
+    }
   });
 });

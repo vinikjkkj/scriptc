@@ -436,7 +436,29 @@ function backStmt(
       return live;
     }
     case "assign": {
-      recordPoints(ctx, [s.value], liveOut, [s.localId], [s.localId], false, "assign");
+      // D2b: `x = await f()` is a ROOT position. It sat outside the slice as
+      // SCOPE, not difficulty -- the same way `return await` did -- and the
+      // liveness this call site hands over was already complete for it. The
+      // `defs` kill is correct (the overwritten value is dead), and the
+      // `boxedUse` entry beside it already keeps a boxed target's box pointer
+      // live across a suspension sitting in the value.
+      //
+      // What the POSITION owes is that the target survive the park, and five
+      // emitter routes write it (emit-stmts.ts:505): the module global (:510),
+      // emitStrAccum (:520), the TDZ box (:526), the ordinary box (:535) and
+      // the plain store (:538). Exactly ONE of them reads the target AFTER the
+      // park -- emitStrAccum, which emits the right operand first and then
+      // reads the accumulator back -- and what keeps that one correct is not
+      // this liveness: `coroFrameLocals` puts every REFCOUNTED local in the
+      // frame regardless of the live set, and an accumulator is a string. Two
+      // rules written for different reasons hold it up between them, so it is
+      // guarded by VALUE and not by this argument -- stackless-values.test.ts,
+      // wgc and wgc2.
+      //
+      // Measured on zapo-rest/app182 at bb781e94c: 40 `assign` statements
+      // whose value suspends, in 34 functions, 25 of which are blocked by
+      // nothing else. Route split A 3 / B 0 / C1 0 / C2 1 / C3 36.
+      recordPoints(ctx, [s.value], liveOut, [s.localId], [s.localId], true, "assign");
       const live = new Set(liveOut);
       if (ctx.boxed.has(s.localId)) {
         // Writing a BOXED local is a USE of the box pointer, not a kill:

@@ -59,6 +59,7 @@ const HEAD = [
   '  constructor(n: string) { this.name = n; this.items = [n, n + "2"] }',
   "}",
   "async function p(n: number): Promise<number> { return n + 1 }",
+  'async function ps(n: number): Promise<string> { return "v" + String(n) }',
   "",
 ].join("\n");
 
@@ -115,6 +116,90 @@ const CASES: ReadonlyArray<{ name: string; why: string; src: string }> = [
       "  const sig = c.signal",
       "  const n = await p(1)",
       "  console.log((sig.aborted ? 1 : 0) + n)",
+      "}",
+      "void main()",
+      "",
+    ].join("\n"),
+  },
+  /* THE assign ROUTES. A different question from the four rows above, and
+   * here because lifting the rootOk carve-out for "assign" put a RELEASE
+   * PATH inside a coroutine for the first time.
+   *
+   * Those rows all leak by FAILING to release. An assign can be wrong the
+   * other way too: each of its five emitter routes overwrites a binding
+   * that already held a reference, so each must release the OLD value
+   * EXACTLY ONCE, on the far side of a park, after the resume has re-run
+   * the C locals' "= NULL" declarations. One release too few is a leak and
+   * one too many is a double free, and the value guards in
+   * stackless-values.test.ts see NEITHER -- they read the new value, which
+   * is correct under both failures.
+   *
+   * Route by route: C3 releases the local (emit-stmts.ts:538), A releases a
+   * module static (:516), C2 releases through the box (:535), and B is the
+   * odd one -- emitStrAccum MOVES the accumulator's own reference into the
+   * concat (:1376-1378) instead of releasing it, so a release there would
+   * BE the double free. */
+  {
+    name: "assign-overwrite-local",
+    why: "route C3: a refcounted local overwritten across a park -- the old value is released after the resume",
+    src: [
+      "async function main(): Promise<void> {",
+      '  let s = new Holder("x" + String(Date.now() % 3)).name',
+      "  s = await ps(1)",
+      "  console.log(s.length)",
+      "}",
+      "void main()",
+      "",
+    ].join("\n"),
+  },
+  {
+    name: "assign-global",
+    why: "route A: the target is a C static, not a frame field, and its old value is released on the far side of the park",
+    src: [
+      'let g = "g" + String(Date.now() % 3)',
+      "async function main(): Promise<void> {",
+      "  g = await ps(1)",
+      "  console.log(g.length)",
+      "}",
+      "void main()",
+      "",
+    ].join("\n"),
+  },
+  {
+    name: "assign-accumulator",
+    why: "route B: emitStrAccum MOVES the accumulator in rather than releasing it, and reads the target back AFTER the park",
+    src: [
+      "async function main(): Promise<void> {",
+      '  let s = "a" + String(Date.now() % 3)',
+      "  s += await ps(1)",
+      "  console.log(s.length)",
+      "}",
+      "void main()",
+      "",
+    ].join("\n"),
+  },
+  {
+    name: "assign-boxed",
+    why: "route C2: the store goes through the box, so scr_box_set_ref owns the release of the old value",
+    src: [
+      "async function main(): Promise<void> {",
+      '  let s = "a" + String(Date.now() % 3)',
+      "  const c = (): number => s.length",
+      "  s = await ps(1)",
+      "  console.log(s.length + c())",
+      "}",
+      "void main()",
+      "",
+    ].join("\n"),
+  },
+  {
+    name: "assign-scalar",
+    why: "THE CONTROL: a non-refcounted target runs no release at all, so it stays green and shows the axis is the release and not the assign",
+    src: [
+      "async function main(): Promise<void> {",
+      "  let n = 0",
+      "  n = await p(1)",
+      "  console.log(n)",
       "}",
       "void main()",
       "",
