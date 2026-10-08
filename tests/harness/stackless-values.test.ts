@@ -983,6 +983,17 @@ const LLVM_FLOOR: ReadonlySet<string> = new Set([
   // one per operand kind, and each carries its hidden `%awaited` local across
   // the suspension.
   "hopsteps", "whn", "whs", "wha", "whu", "whv",
+  // + the cross-park temp slice. The frame now carries the SSA values that
+  // outlive a suspension, so a shape is no longer refused for having evaluated
+  // something before its await. The groups these came from were LABELS on one
+  // mechanism: a value that will be read after a block that `ret`s. See the
+  // deleted condition 3 in coro.ts.
+  "wrm", "wtt", "wte", "wtb",
+  "wna", "wnv", "wnn", "wns", "wnb", "wnx", "wnf", "wnr", "wnm",
+  "wgc", "wgc2", "wgp",
+  "wln", "wls", "wlf", "wld", "wlnest",
+  "wrl", "wrs", "wby", "wga",
+  "wst",
 ]);
 
 /* THE OTHER HALF OF THE PARTITION -- the shapes the LLVM lane does NOT lower,
@@ -1014,32 +1025,33 @@ const LLVM_FLOOR: ReadonlySet<string> = new Set([
  * converts, so each group is work that exists rather than a limit that was
  * discovered. */
 const NOT_LOWERED_BY_REASON: ReadonlyArray<readonly [string, readonly string[]]> = [
-  // The await is nested inside a larger expression, so operands evaluated
-  // BEFORE it are already materialised in temporaries the frame would have to
-  // carry. On this lane those are SSA `%tN` values, which cannot be reloaded
-  // under their own name -- the cross-park temp mechanism, and the single
-  // largest group by a factor of five.
-  ["nested-in-expression", [
-    "wrm", "wtt", "wte",
-    // These three carried `a second suspension point` until the point count
-    // opened. The count was never their only blocker -- it was just the one the
-    // predicate reached first. `wtb` parks in both arms of a ternary and `wau`
-    // and `was` are the `Promise<T> | T` DESUGAR, which is also a ternary (an
-    // awaitExpr in one arm, an async.hop in the other). An await in a ternary
-    // arm is nested, which `wtt` and `wte` -- the same shape with one await --
-    // have always said. wau/was additionally own a union temp across the park.
-    "wtb", "wau", "was",
-    "wna", "wnv", "wnn", "wns", "wnb", "wnx", "wnf", "wnr", "wnm",
-    "wgc", "wgc2", "wgp",
-    "wln", "wls", "wlf", "wld", "wlnest", "wlfo",
-    "wfo1", "wfo2", "wfo3",
-    "wfy6",
-  ]],
-  // A temp was still OWNED when the park was reached. The structural predicate
-  // admits these -- `nestedInExpression` reports false for a one-field record
-  // literal that is nevertheless holding the record -- and the emitter refuses
-  // them on sight. Needs the sc_tmp_ frame fields the C lane lays out.
-  ["a temp owned across the park", ["wrl", "wrs", "wby", "wfo4", "wfo5", "wga"]],
+  // The forOf cursor is an `alloca` slot, not a value. emitStmt's forOf case
+  // allocates it in the ENTRY block and stores 0 into it in `sc_S0` -- which a
+  // resume jumps straight past, because the dispatch terminates the entry
+  // block. So the latch loads a cursor the resume never initialised: machine
+  // stack memory of a FRESH call, read as an iteration index.
+  //
+  // THIS GROUP IS THE SECOND BLOCKER, AND IT IS WHY IT HAS ITS OWN BUCKET.
+  // Every name here was filed under `nested-in-expression`, which was TRUE of
+  // all six and was not what bound them: removing that constraint left the
+  // cursor. The defect is dominance-LEGAL, so no SSA rule and no verifier can
+  // see it -- and this host runs no verifier at all -- which is why it is
+  // caught by a separate slot rule in blocks.ts that REFUSES rather than
+  // repairs. Carrying a cursor means moving the slot into the frame, a
+  // different mechanism from the temp spill and a later slice.
+  ["the forOf cursor is an alloca slot", ["wfo1", "wfo2", "wfo3", "wfo4", "wfo5", "wlfo"]],
+  // The suspension sits inside a `finally` BODY. A `return` crossing a finally
+  // snapshots its value into `%pretSlot` and reads it back after the finally
+  // copies run; a suspension between the write and the read reads a slot
+  // belonging to a previous call. Same mechanism as the group above -- a
+  // cross-park alloca -- but refused STRUCTURALLY (coro.ts's
+  // suspensionInsideFinally) because the IR can see it without emitting.
+  //
+  // LISTED SEPARATELY FROM THE CURSOR because the two are fixed by different
+  // work: the cursor needs the loop's index in the frame, this needs the
+  // pending-return slot there. It was filed under `nested-in-expression` too,
+  // and that label was true of it as well -- it was simply tested first.
+  ["a suspension inside a finally body", ["wfy6"]],
   // `await` of a promise-or-absent union: ONE point with TWO ways to reach it,
   // sharing a single resume label and discriminated by sc_awaited.
   //
@@ -1052,12 +1064,69 @@ const NOT_LOWERED_BY_REASON: ReadonlyArray<readonly [string, readonly string[]]>
   // temp mechanism as the group above, and they fall out the day it lands --
   // deliberately, with their own prediction and their own guards, rather than
   // as emission written ahead of time behind a refusal that no data reaches.
+  // A temp that would have to survive a SECOND suspension. The reload after
+  // one suspension is an SSA value defined in that suspension's resume block;
+  // re-spilling it at the next asks that definition to dominate a site the
+  // dispatch can also enter directly, and a loop makes emission order and
+  // dominance disagree. MEASURED as a hard toolchain error, not reasoned:
+  // `zig cc` rejected the module with "Instruction does not dominate all
+  // uses". Carrying a value across several suspensions needs it in memory
+  // every path can see -- an alloca reloaded at each resume label, the shape
+  // IR locals already use -- which is a different mechanism and a later slice.
+  ["a temp crossing a second suspension", ["wau", "was"]],
   ["awaitUnion", ["wav", "waun", "waus"]],
-  // Caught by the emitter's cross-park invariant rather than by the predicate:
-  // an awaited case TEST computes the switch discriminant before the park and
-  // compares it after. A real dominance violation, and on this host nothing
-  // downstream would ever have reported it.
-  ["a temp live across the park, caught by the invariant", ["wst"]],
+];
+
+/* NON-WRAPPER COROUTINES -- THE BACK DOOR THE LEDGER CANNOT SEE.
+ *
+ * Everything above is keyed on WRAPPERS, which is the ledger of shapes this
+ * file was written to exercise. The program contains async functions that are
+ * not wrappers -- the producers the wrappers await, and `main` itself -- and a
+ * partition built from the ledger is blind to all of them. They can start
+ * lowering, stop lowering, or change shape, and nothing here would say so.
+ *
+ * THIS IS NOT HYPOTHETICAL AND IT WAS NOT CAUGHT BY A TEST. The cross-park
+ * temp slice lowered `pu` as a side effect of deleting the nesting condition.
+ * It surfaced only as an inconsistency between two aggregates -- "69 lowered"
+ * against "68 wrappers" -- in a report. An aggregate is not a guard: it has no
+ * failing direction, and the next reader sees one number.
+ *
+ * SO THE ARTIFACT IS THE AUTHORITY HERE, not the ledger. The assertion below
+ * reads EVERY `sc_cr_*` the emitter produced and requires the set to equal
+ * LLVM_FLOOR plus exactly these names. A function entering or leaving the lane
+ * fails by name whichever side of the ledger it is on.
+ *
+ * Re-derive with SCRIPTC_LLVM_CORO_CENSUS=1 AND SCRIPTC_NO_CACHE=1. */
+const LLVM_FLOOR_NON_WRAPPERS: ReadonlyArray<readonly [string, string]> = [
+  // EMPTY, AND KEPT RATHER THAN DELETED. `pu` was here for one build: deleting
+  // the nesting condition lowered it, and the only trace was two aggregates
+  // disagreeing in a report. It then refused itself out again when the
+  // second-suspension limit landed. The table stays because the hole it closes
+  // is structural, not about `pu`: the partition is keyed on the ledger, so a
+  // non-wrapper can enter the lane without any assertion noticing. The closed
+  // set below is what notices.
+];
+
+/* NON-WRAPPERS THIS LANE DOES NOT LOWER, and why -- same back door, other side.
+ *
+ * `main` matters more than it looks. It has been refused at three successive
+ * bases for three DIFFERENT reasons -- `points=100` at c03fcd699,
+ * `nested-in-expression` at af6419f8f, and the pass cap now -- which is the
+ * census showing only the first blocker, three times over. "No regression"
+ * here is a claim about two measurements and was checked as one: the base
+ * artifact at af6419f8f contains no `sc_cr_main`, and neither does this one.
+ *
+ * THE CAP IS WRITTEN DOWN HERE BECAUSE A NUMBER THAT REFUSES IN SILENCE IS
+ * EXACTLY WHAT SOMEONE RAISES FROM 12 TO 16 ON A QUIET AFTERNOON. With `main`
+ * named on this side, raising CORO_SPILL_PASS_CAP MOVES A TEST: the closed-set
+ * assertion below starts seeing `sc_cr_main` and fails until someone decides,
+ * deliberately, that the emission cost of a body with that many cross-park
+ * temps is worth paying. The real fix is not a bigger number -- it is
+ * collecting every violation in ONE probe pass instead of one per pass -- and
+ * that is a slice, not a constant. */
+const LLVM_NOT_LOWERED_NON_WRAPPERS: ReadonlyArray<readonly [string, string]> = [
+  ["main", "cross-park-temp-passes>CORO_SPILL_PASS_CAP (12): one pass discovers one temp"],
+  ["pu", "temp-crosses-two-suspensions: the ternary's value outlives both points"],
 ];
 
 const LLVM_NOT_LOWERED: ReadonlySet<string> = new Set(
@@ -1387,6 +1456,42 @@ describe.each(["c", "llvm"] as const)("the stackless lane answers what the fiber
         `LLVM_FLOOR -- deliberately, in the same commit -- so their value coverage starts ` +
         `counting. Run with SCRIPTC_LLVM_CORO_CENSUS=1 for the emitter's own verdict`)
       .toEqual([]);
+
+
+    // (4) THE CLOSED SET, over the ARTIFACT rather than over the ledger.
+    //
+    // Assertions (1) and (2) are both keyed on names the ledger carries, so
+    // between them they say nothing about a coroutine that is not a wrapper.
+    // `pu` walked through that gap: it began lowering when the nesting
+    // condition was deleted, and the only trace was two aggregates
+    // disagreeing in a report.
+    //
+    // This reads every resume function the emitter actually emitted and
+    // requires the set to be EXACTLY the floor plus the named non-wrappers.
+    // Both directions fail by name, and nothing can enter the lane uncounted
+    // -- including a function the ledger has never heard of.
+    if (lane === "llvm") {
+      const emitted = new Set(
+        [...on.artifact.matchAll(/^define [^@]*@sc_cr_([A-Za-z0-9_$.]+)\(/gm)].map((m) => m[1]!),
+      );
+      const claimed = new Set([...lowered, ...LLVM_FLOOR_NON_WRAPPERS.map(([n]) => n)]);
+      expect([...emitted].filter((n) => !claimed.has(n)).sort(),
+        `the emitter lowered coroutines NOTHING in this file claims. If they are wrappers, the ` +
+          `partition above missed them; if they are not, add them to LLVM_FLOOR_NON_WRAPPERS ` +
+          `with the reason their value is covered -- an aggregate count is not a guard`)
+        .toEqual([]);
+      expect([...claimed].filter((n) => !emitted.has(n)).sort(),
+        `claimed as lowered and absent from the artifact -- a dropped conversion, which the ` +
+          `output comparison cannot report because it makes the two arms MORE equal`)
+        .toEqual([]);
+      // And the other side of the back door: a non-wrapper recorded as NOT
+      // lowered must not appear. This is what makes raising
+      // CORO_SPILL_PASS_CAP move a test rather than silently buy coverage.
+      expect(LLVM_NOT_LOWERED_NON_WRAPPERS.map(([n]) => n).filter((n) => emitted.has(n)),
+        `a non-wrapper recorded as NOT lowered is now lowered. If the pass cap was raised, that ` +
+          `is a deliberate purchase and this list is where it gets declared`)
+        .toEqual([]);
+    }
 
     // (3) The ledger's own direction, unchanged and still load-bearing on both
     // lanes: a shape the ledger calls NOT converted must not be on either

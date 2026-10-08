@@ -31,7 +31,7 @@ import { describe, expect, test } from "vitest";
 // The SOURCE module, by relative path -- the convention the other
 // internals-facing harness tests use (dyn-dispatch-accounting, cc.ts). There
 // is no package subpath export for backend internals, and there should not be.
-import { BlockBuilder, CrossParkTempError } from "../../packages/compiler/src/backend/llvm/blocks.js";
+import { BlockBuilder, CrossParkSlotError, CrossParkTempError } from "../../packages/compiler/src/backend/llvm/blocks.js";
 
 /** The shape every case below is a variation on: mint a temp, suspend, and
  * then do something with the temp on the far side. `park` is what the await
@@ -103,17 +103,21 @@ describe("the cross-park temp detector is armed", () => {
     expect(() => B.line(`call void @use(double ${t})`)).not.toThrow();
   });
 
-  test("DECLARED NON-COVERAGE, demonstrated: an alloca SLOT is not caught", () => {
-    // This is a REAL defect of the same family -- `%sN` is machine-stack
-    // memory of the resume CALL, so a slot written before a park and read
-    // after it reads garbage -- and the rule is blind to it BY CONSTRUCTION:
-    // slots are `%s`, not `%t`, and they are dominance-LEGAL besides, so even
-    // a working verifier would pass them.
+  test("a REGISTERED alloca slot read across a park is caught, and named", () => {
+    // THIS TEST USED TO ASSERT THE OPPOSITE, and the inversion is the point of
+    // the slice that changed it. It read "DECLARED NON-COVERAGE, demonstrated:
+    // an alloca SLOT is not caught", and it was right: `%sN` is machine-stack
+    // memory of the resume CALL, dominance-LEGAL, so neither the `%t` rule nor
+    // a working verifier would ever report it.
     //
-    // Demonstrated rather than asserted in a comment, because "what this does
-    // not cover" is the half of a detector that rots unnoticed. A reader who
-    // sees the planted violation above go red must not conclude the emission
-    // is verified; it means ONE rule holds.
+    // It stopped being acceptable when the cross-park TEMP mechanism landed.
+    // Admitting the shapes that carry a value across a park admits the forOf
+    // loops, whose cursor is exactly this: a slot initialised in `sc_S0`, which
+    // a resume jumps past, and re-read by the latch. The temp rule would have
+    // reported the iterable and said nothing about the cursor -- so opening the
+    // named blocker would have left a SILENT wrong answer behind it, in six
+    // corpus wrappers. The rule below refuses instead of repairing: carrying a
+    // slot means moving it into the frame, which is a different mechanism.
     const B = new BlockBuilder();
     B.enterCoro("f");
     const s = B.slot();
@@ -122,7 +126,60 @@ describe("the cross-park temp detector is armed", () => {
     B.terminate("ret void");
     B.startBlock("sc_S1");
     B.parkBoundary();
+    let err: unknown = null;
+    try {
+      B.line(`%r = load double, ptr ${s}`);
+    } catch (e) {
+      err = e;
+    }
+    expect(err, "a slot read across a park must not pass silently").toBeInstanceOf(
+      CrossParkSlotError,
+    );
+    const m = (err as Error).message;
+    expect(m).toContain(s);
+    expect(m).toContain("f");
+    expect(m).toContain("sc_S1");
+  });
+
+  test("a slot RE-WRITTEN after the park is fine -- the rule is about the value, not the name", () => {
+    // Without this the slot rule could be trivially red and still look armed,
+    // and it would refuse two correct corpus shapes. A ternary whose NON-await
+    // arm wrote the join slot before the park is not broken: that arm never
+    // parks, and the awaiting arm writes the slot after its own resume. The
+    // rule is "read with no write in this generation", not "mentioned on both
+    // sides" -- the cheaper spelling refuses `pick ? 7 : await p()`.
+    const B = new BlockBuilder();
+    B.enterCoro("f");
+    const s = B.slot();
+    B.entryAllocas.push(`${s} = alloca double`);
+    B.line(`store double 1.0, ptr ${s}`);
+    B.terminate("ret void");
+    B.startBlock("sc_S1");
+    B.parkBoundary();
+    B.line(`store double 2.0, ptr ${s}`);
     expect(() => B.line(`%r = load double, ptr ${s}`)).not.toThrow();
+  });
+
+  test("DECLARED NON-COVERAGE, demonstrated: an UNREGISTERED alloca is still not caught", () => {
+    // The slot rule is bounded to the allocas this emitter REGISTERS as
+    // resume-call-private -- everything `slot()` mints, plus the log-argument
+    // array. An alloca pushed straight into `entryAllocas` under a name of its
+    // own is outside the registry and is not seen.
+    //
+    // Demonstrated rather than asserted in a comment, because "what this does
+    // not cover" is the half of a detector that rots unnoticed -- and because
+    // the general classification of every alloca site in the backend is a
+    // DIFFERENT, wider decision that this slice deliberately did not take. A
+    // reader who sees the two planted violations above go red must not
+    // conclude the emission is verified; it means two rules hold.
+    const B = new BlockBuilder();
+    B.enterCoro("f");
+    B.entryAllocas.push(`%adhoc = alloca double`);
+    B.line(`store double 1.0, ptr %adhoc`);
+    B.terminate("ret void");
+    B.startBlock("sc_S1");
+    B.parkBoundary();
+    expect(() => B.line(`%r = load double, ptr %adhoc`)).not.toThrow();
   });
 
   test("KNOB ABSENT -- a builder that never entered a coro is inert", () => {

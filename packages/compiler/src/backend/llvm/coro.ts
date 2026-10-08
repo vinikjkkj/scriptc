@@ -240,6 +240,18 @@ export interface CoroFrameLayout {
   fat: boolean;
   /** The ordered local ids the spill and the reload walk. */
   localIds: string[];
+  /** `%tN` -> the field carrying it across a park, in discovery order. The C
+   * lane's `sc_tmp_` fields by another name. */
+  tempFields: Map<string, CoroFrameField>;
+}
+
+/** A temp the emission discovered must survive a park, with the type its
+ * defining instruction gave it. Discovered by re-emitting the body (see
+ * emitFunction's fixpoint), so it is an INPUT to the layout of the next pass
+ * rather than something the analysis could have supplied. */
+export interface CoroTempSpill {
+  name: string;
+  llType: string;
 }
 
 export function coroFrameLayout(
@@ -247,6 +259,7 @@ export function coroFrameLayout(
   plan: StacklessPlan,
   localsById: Map<string, IrLocal>,
   llType: (t: IrType) => string,
+  tempSpills: readonly CoroTempSpill[] = [],
 ): CoroFrameLayout {
   const fat = coroNeedsExcCell(fn);
   const members: string[] = [fat ? "%ScrCoroExc" : "%ScrCoroBase"];
@@ -270,12 +283,25 @@ export function coroFrameLayout(
   const awaitedIndex = members.length;
   members.push("ptr");
   comments.push("sc_awaited");
+  // THE TEMP FIELDS GO LAST, AFTER sc_awaited, and that is deliberate: the set
+  // is discovered by re-emitting, so it GROWS between passes, and appending
+  // keeps every index the earlier members already had. A temp field inserted
+  // in the middle would renumber `sc_awaited` on the second pass -- the same
+  // GEP index addressing a different member, which on this host is a load of
+  // the wrong field of a plausible type rather than any kind of error.
+  const tempFields = new Map<string, CoroFrameField>();
+  for (const t of tempSpills) {
+    tempFields.set(t.name, { index: members.length, llType: t.llType, comment: `sc_tmp_${t.name.slice(1)}` });
+    members.push(t.llType);
+    comments.push(`sc_tmp_${t.name.slice(1)}`);
+  }
   return {
     typeBody: `%${mangleCoroFrame(fn.name)} = type { ${members.join(", ")} } ; ${comments.join(", ")}`,
     fields,
     awaitedIndex,
     fat,
     localIds,
+    tempFields,
   };
 }
 
@@ -523,19 +549,35 @@ export function assertBareSuspendingLibCalls(fn: IrFunction): void {
  *      in; `awaitUnionExpr` is not, and the reason is stated where it is
  *      classified rather than here.
  *
- *   3. NO POINT IS NESTED IN A LARGER EXPRESSION. `nestedInExpression` is the
- *      analysis's own flag for "operands evaluated BEFORE this point are
- *      already materialised in temporaries the frame must also hold". Those
- *      temporaries are `%tN` SSA values on this lane, and an SSA value cannot
- *      be reloaded under its own name -- carrying one across a park is the
- *      cross-park temp mechanism, which is a separate slice. blocks.ts's
- *      invariant fails the build if one ever slips through, so this condition
- *      is the thing that keeps the build green rather than the thing that keeps
- *      it correct.
+ *   3. [DELETED, and the deletion is the cross-park temp slice.] This condition
+ *      used to read "no point is nested in a larger expression", keeping out
+ *      the shapes whose earlier operands are already materialised in `%tN`
+ *      temporaries when the suspension is reached. Those are now SPILLED into
+ *      the frame and reloaded into fresh names, which is what the condition
+ *      existed to postpone.
+ *
+ *      IT IS RECORDED AS DELETED RATHER THAN REMOVED SILENTLY because the
+ *      analysis flag it read, `nestedInExpression`, still exists and still
+ *      means what it meant; what changed is that this backend no longer needs
+ *      to care. A reader who finds the flag and wonders why nothing here
+ *      consults it should find the answer at the condition's own number.
+ *
+ *      ITS EXEMPTION DIED WITH IT; THE FENCE UNDER THE EXEMPTION DID NOT.
+ *      `POINT_KINDS_WITHOUT_AN_OPERAND` existed to wave the bare hop past this
+ *      filter, and with the filter gone there is nothing to wave past. But the
+ *      PROPERTY it asserted is still relied on one layer down -- emitCoroHop
+ *      lowers `scr_coro_hop(sc_b)` and has nowhere to put an operand, so a hop
+ *      that acquired one would have it computed and silently DROPPED. That is a
+ *      different defect from the one the spill fixes, and it survives this
+ *      deletion. So the fence is re-keyed to the kinds themselves rather than
+ *      deleted along with the exemption that first motivated it.
  *
  *   4. NO SUSPENSION INSIDE A `finally` BODY -- see suspensionInsideFinally:
- *      that is the cross-park ALLOCA mechanism (`%pretSlot`), which no
- *      invariant on this lane can see.
+ *      that is the cross-park ALLOCA mechanism (`%pretSlot`), which the SSA
+ *      rule cannot see. It stays a STRUCTURAL refusal even though blocks.ts now
+ *      carries a slot rule, because the structural one is cheap and exact for
+ *      this shape, and a refusal taken before emission leaves no trial to
+ *      unwind.
  *
  * ONE SOURCE FOR THE VERDICT. This function is `coroRefusalReason(...) === null`
  * and nothing else. They were two parallel condition lists reading the same
@@ -551,6 +593,45 @@ export function assertBareSuspendingLibCalls(fn: IrFunction): void {
 export function llvmCoroLowers(fn: IrFunction, plan: StacklessPlan): boolean {
   return coroRefusalReason(fn, plan) === null;
 }
+
+/** The name a cross-suspension spill gives one of its own values.
+ *
+ * DERIVED FROM (ROLE, SUSPENSION INDEX, ORIGIN) AND FROM NOTHING ELSE, which
+ * is the whole point: the spill is emitted a variable number of times as the
+ * discovery passes find more temps, so any name drawn from a COUNTER would
+ * shift every later name whenever the set grew.
+ *
+ * WHY THAT IS NOT A STYLE CHOICE. The fixpoint addresses temps BY NAME across
+ * passes, and its termination argument was "everything the mechanism emits is
+ * emitted at or after the suspension, so pre-suspension numbering is stable".
+ * That argument held exactly as long as there was ONE suspension. With several,
+ * a spill inserted at suspension 0 sits BEFORE the code that mints the temps of
+ * suspension 1, so growing the set at 0 renumbers everything after it and the
+ * set starts naming values it was not built from. Measured, not reasoned: on
+ * `main` (100 suspension points) the determinism assertion in emitCoroTempSpill
+ * fired on the first build after the multi-state dispatch landed.
+ *
+ * `role` is "s" for the spill pointer, "r" for the reload pointer and "" for
+ * the reloaded value. Collision-safe by construction: `%cx` appears nowhere
+ * else in backend/llvm, and the origin is already a unique `%tN`. */
+export function crossName(role: "s" | "r" | "", index: number, origin: string): string {
+  return `%cx${role}${index}_${origin.slice(1)}`;
+}
+
+/** How many times a body may be re-emitted to discover its cross-park temps
+ * before the function is refused.
+ *
+ * THE BOUND IS NOT THE TERMINATION ARGUMENT. The loop terminates because the
+ * set is monotone over a body's pre-park temps (emitFunction says why); this
+ * cap is what holds if that argument is ever voided by a change in another
+ * file -- a re-numbering of temps, say, or a spill that mints a temp before
+ * the park. Twelve is far above the largest set measured on the corpus (4) and
+ * far below anything a human would wait for.
+ *
+ * A function that hits it is refused and keeps its fiber lowering, which is
+ * the same outcome as every other refusal: lost coverage, never a wrong
+ * answer. */
+export const CORO_SPILL_PASS_CAP = 12;
 
 /** The subset of a module's stackless plans that the LLVM backend lowers. */
 export function llvmCoroPlans(
@@ -586,15 +667,23 @@ export function coroRefusalReason(fn: IrFunction, plan: StacklessPlan): string |
   for (const pt of plan.points) {
     if (!LLVM_LOWERABLE_POINT_KINDS.has(pt.kind)) return `kind=${pt.kind}`;
   }
-  let exempted = false;
-  for (const pt of plan.points) {
-    if (!pt.nestedInExpression) continue;
-    if (!POINT_KINDS_WITHOUT_AN_OPERAND.has(pt.kind)) return "nested-in-expression";
-    exempted = true;
+  // THE NESTING PRE-FILTER IS GONE (condition 3). What stood here refused any
+  // point whose operands were already materialised when the suspension was
+  // reached; they are spilled now.
+  //
+  // THE FENCE IS RE-KEYED, NOT INHERITED. It used to run only when the filter
+  // EXEMPTED a point, because the exemption was what rested on "a bare hop
+  // carries no operand". With the filter deleted the exemption no longer
+  // exists -- but emitCoroHop still has nowhere to put an operand, so the
+  // property is now relied on by the EMITTER rather than by the filter. It is
+  // therefore asked of every function carrying a kind this backend lowers as
+  // bare, which is where the reliance actually is. Keeping the old `exempted`
+  // key would have left the fence attached to a condition that no longer runs:
+  // a counter reading zero mechanically, and this file has already paid for
+  // one of those.
+  if (plan.points.some((pt) => POINT_KINDS_WITHOUT_AN_OPERAND.has(pt.kind))) {
+    assertBareSuspendingLibCalls(fn);
   }
-  // THE EXEMPTION'S PRECONDITION IS OWNED BY ANOTHER FILE, SO IT IS ASSERTED
-  // RATHER THAN ASSUMED -- and only on the path that actually uses it.
-  if (exempted) assertBareSuspendingLibCalls(fn);
   if (suspensionInsideFinally(fn)) return "suspension-inside-finally";
   return null;
 }

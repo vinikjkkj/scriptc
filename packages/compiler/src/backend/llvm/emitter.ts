@@ -94,7 +94,9 @@ import { coroPlans } from "../../ir/coro-plans.js";
 import type { StacklessPlan } from "../../ir/liveness.js";
 import {
   CoroRefusedError,
+  CORO_SPILL_PASS_CAP,
   CORO_STATE_FIELD,
+  crossName,
   coroFrameLayout,
   coroLabel,
   coroFrameSizeOf,
@@ -102,10 +104,11 @@ import {
   coroCheckSuspensionSites,
   llvmCoroPlans,
   type CoroFrameLayout,
+  type CoroTempSpill,
 } from "./coro.js";
 import { mangleCoroFrame, mangleCoroResume } from "../mangle.js";
 import { mangleAgenSettleThunk, mangleArgPack, mangleAsyncSpawn, mangleClassNew, mangleClassObj, mangleClassRetain, mangleClassStruct, mangleFnClosure, mangleFunction, mangleGenDrop, mangleGenResThunk, mangleGenSpawn, mangleGlobal, mangleLocal, mangleRecordNew, mangleRecordStruct, mangleResolveThunk, mangleTrampoline, mangleVtStruct, mangleWrapper } from "../mangle.js";
-import { BlockBuilder, CrossParkTempError } from "./blocks.js";
+import { BlockBuilder, CrossParkSlotError, CrossParkTempError } from "./blocks.js";
 import { isStableReceiverOperand, writesLocal } from "../../ir/analysis.js";
 import { SCR_BYTES_LEN_OFFSET } from "./runtime-layout.js";
 import {
@@ -1476,6 +1479,13 @@ class LlEmitter {
   private currentCoro: StacklessPlan | null = null;
   /** Its frame layout: the ONE source for every GEP index into the frame. */
   private currentCoroLayout: CoroFrameLayout | null = null;
+  /** The cross-park temps the PREVIOUS emission pass of this body discovered,
+   * in discovery order. Empty on the first pass of every function. */
+  private currentCoroTempSpills: readonly CoroTempSpill[] = [];
+  /** The frame layout each lowered body actually emitted against. The frame
+   * STRUCT and the `sizeof` handed to scr_coro_alloc are printed from this, so
+   * the scaffolding cannot disagree with the GEPs the body wrote. */
+  private readonly coroLayoutByFn = new Map<string, CoroFrameLayout>();
   /** States drawn by the body being emitted -- the artifact side of D5. */
   private coroStatesDrawn = 0;
   /** Functions the structural predicate admitted and the emission refused,
@@ -2875,9 +2885,30 @@ class LlEmitter {
    * suspends has already settled by the time this returns -- the same
    * observable timing as scr_async_spawn's fiber switch. */
   private emitCoroScaffolding(fn: IrFunction, plan: StacklessPlan): string[] {
-    const layout = coroFrameLayout(fn, plan, new Map(fn.locals.map((l) => [l.id, l])), (t) =>
-      this.llType(t),
-    );
+    /* THE LAYOUT IS THE BODY'S, NOT A SECOND COMPUTATION OF IT.
+     *
+     * This used to recompute `coroFrameLayout` from the IR, which was exactly
+     * right while the frame was a function of the IR alone. It stopped being
+     * one when cross-park temps joined it: that set is DISCOVERED by emitting
+     * the body, so a recomputation here cannot see it and produces a SHORTER
+     * struct than the body's GEPs address. The struct body printed here is the
+     * type `scr_coro_alloc` is handed a `sizeof` of, so the disagreement would
+     * under-allocate every frame of this function and let the body write past
+     * it -- with no diagnostic anywhere, on a host that runs no verifier.
+     *
+     * CoroFrameLayout's own doc comment states the rule this restores: one
+     * source for the indices, consulted by the type emission, the spawn
+     * wrapper, the spill and the reload. Two sources for one fact is what
+     * makes the faces. */
+    const layout = this.coroLayoutByFn.get(fn.name);
+    if (layout === undefined) {
+      throw new Error(
+        `llvm emitter bug: ${fn.name} is being given coro scaffolding but no frame layout ` +
+          `was recorded for it. The layout is produced by the body emission; scaffolding ` +
+          `running without one means the two are no longer ordered as they must be.`,
+      );
+    }
+    void plan;
     const frame = mangleCoroFrame(fn.name);
     const out: string[] = [layout.typeBody];
     this.declare(`declare ptr @scr_coro_alloc(i64, ptr, i1 zeroext)`);
@@ -3734,6 +3765,19 @@ class LlEmitter {
   /* ── the stackless lowering ──────────────────────────────────────────── */
 
   /** A GEP to frame field `index`, in the current resume body. */
+  /** A GEP to a frame field, into a CALLER-SUPPLIED name.
+   *
+   * THE NAME MATTERS, not just the pointer. The cross-park spill is emitted a
+   * variable number of times -- the set grows as passes discover it -- so if
+   * its GEPs drew from `tmp()` they would advance the ordinary temp counter by
+   * a different amount on every pass, renumbering every `%tN` minted after the
+   * first suspension. See emitCoroTempSpill for what that cost. */
+  private coroFieldInto(name: string, index: number, note: string): string {
+    const frame = mangleCoroFrame(this.currentFnName);
+    this.B.line(`${name} = getelementptr inbounds %${frame}, ptr %sc_b, i64 0, i32 ${index} ; ${note}`);
+    return name;
+  }
+
   private coroField(index: number, note: string): string {
     const p = this.B.tmp();
     const frame = mangleCoroFrame(this.currentFnName);
@@ -3822,6 +3866,109 @@ class LlEmitter {
     }
   }
 
+  /** Spill every cross-park TEMP into its frame field, immediately before the
+   * park. The set is `currentCoroTempSpills`, discovered by the previous
+   * emission pass.
+   *
+   * THE ASSERTIONS HERE ARE THE FIXPOINT'S CORRECTNESS CONDITION, not defensive
+   * noise. The set was built from a DIFFERENT run of this same walk, and it
+   * addresses values by a name that a counter hands out in emission order. If
+   * re-emission ever renumbered a pre-park temp, `%t7` on this pass would be a
+   * different value from the `%t7` the set was built from, and the spill would
+   * carry the wrong one -- silently, with the right type. So both facts the set
+   * depends on are checked against this pass: the temp was minted (and before
+   * the park), and its type is still what it was. */
+  private emitCoroTempSpill(index: number): void {
+    const layout = this.currentCoroLayout!;
+    const B = this.B;
+    for (const t of this.currentCoroTempSpills) {
+      const fld = layout.tempFields.get(t.name)!;
+      // NOT YET MINTED AT THIS SUSPENSION -- so it cannot be live across it.
+      //
+      // THE SET IS FUNCTION-WIDE, LIVENESS IS PER-SUSPENSION, and conflating
+      // the two is what the determinism assertion caught on `main` (100
+      // points) the first time this ran after the multi-state dispatch landed.
+      // A temp discovered crossing suspension 50 does not exist at suspension
+      // 0, and spilling it there reads a name nothing has defined. `genOfTemp`
+      // is exactly the question "was this minted before the suspension being
+      // emitted", because the generation counter advances once per boundary.
+      //
+      // THIS IS A SKIP, NOT A SILENCING: the set member still has to be minted
+      // SOMEWHERE in the body, and emitFunctionBody asserts that over the
+      // whole walk once it is finished. Dropping the check here without that
+      // one would have turned a real non-determinism into a quiet no-op.
+      const g = B.genOfTemp(t.name);
+      if (g === undefined) continue;
+      /* A TEMP THAT WOULD HAVE TO SURVIVE A SECOND SUSPENSION IS REFUSED, and
+       * this is a REAL limit rather than caution -- it was measured as a hard
+       * toolchain error, not reasoned about.
+       *
+       * The reload after suspension k is an SSA value defined in k's resume
+       * block. Spilling it again at suspension k+1 asks that definition to
+       * dominate the spill -- and it does not, because the spill site is also
+       * reachable from a LATER resume label, which the dispatch enters
+       * directly. Emission ORDER is not dominance, and a loop makes the two
+       * disagree. zig cc rejected exactly this:
+       *
+       *     Instruction does not dominate all uses!
+       *       %cx0_t24 = load ptr, ptr %cxr0_t24
+       *       store ptr %cx0_t24, ptr %cxs1_t24
+       *
+       * Carrying a value across SEVERAL suspensions needs it in memory that
+       * every path can see -- an alloca reloaded at every resume label, the
+       * shape IR locals already use -- not a chain of SSA reloads. That is a
+       * different mechanism and a later slice. Refusing costs coverage and
+       * nothing else. */
+      if (B.isCarried(t.name)) {
+        throw new CoroRefusedError(this.currentFnName, `temp-crosses-two-suspensions=${t.name}`);
+      }
+      const ty = B.typeOfTemp(t.name);
+      if (ty !== t.llType) {
+        throw new Error(
+          `llvm emitter bug: ${this.currentFnName} recorded ${t.name} as ${t.llType} when it ` +
+            `discovered the spill, and this pass minted it as ${ty ?? "an untyped form"}. The ` +
+            `frame field is laid out from the recorded type, so continuing would store a ` +
+            `value through a field of another type.`,
+        );
+      }
+      const p = this.coroFieldInto(crossName("s", index, t.name), fld.index, fld.comment);
+      // SPELLED WITH THE ORIGIN NAME, rewritten by the rename on the way out.
+      // After an earlier suspension the live spelling is that suspension's
+      // reload; `line()` applies the current rename before anything else sees
+      // the text, so this always stores the value that is live HERE.
+      B.line(`store ${fld.llType} ${t.name}, ptr ${p}`);
+    }
+  }
+
+  /** Reload every cross-park temp into a FRESH name, immediately after the
+   * resume label, and tell the builder to spell it the new way from here on.
+   *
+   * THIS IS THE WHOLE DIFFERENCE FROM THE C LANE. C's reload redefines the
+   * name -- `x = sc_f->sc_tmp_x;` -- so a temp comes back under its own
+   * spelling and every consumer is untouched for free. An SSA `%tN` cannot be
+   * redefined, so the value comes back as `%tM` and the consumers have to be
+   * told. `renameTemp` does that textually, at append time, which reaches
+   * every holder because every use arrives as text. */
+  private emitCoroTempReload(index: number): void {
+    const layout = this.currentCoroLayout!;
+    const B = this.B;
+    for (const t of this.currentCoroTempSpills) {
+      // The same filter the spill used, and it must be the same one: a temp
+      // not yet minted at this suspension was not stored, so there is nothing
+      // to load back and the rename must not be installed either.
+      if (B.genOfTemp(t.name) === undefined) continue;
+      const fld = layout.tempFields.get(t.name)!;
+      const p = this.coroFieldInto(crossName("r", index, t.name), fld.index, fld.comment);
+      const fresh = crossName("", index, t.name);
+      B.line(`${fresh} = load ${fld.llType}, ptr ${p} ; reload ${fld.comment}`);
+      // KEYED ON THE ORIGIN, overwritten at each suspension rather than
+      // chained. The emitter never changes its own spelling of a value -- the
+      // LlValue still says `%t42` -- so one entry per origin, updated here, is
+      // what makes every later reference resolve to the CURRENT reload.
+      B.renameTemp(t.name, fresh);
+    }
+  }
+
   /** Reload every frame local into its alloca. Emitted at the entry label and
    * immediately after every resume label.
    *
@@ -3873,21 +4020,19 @@ class LlEmitter {
     // The frame takes the promise's +1: struck from the RC frame here so no
     // scope exit and no unwind releases it, and released once at the take.
     this.moveTemp(pr);
-    // EVERY OTHER OWNED TEMP WOULD HAVE THE SAME PROBLEM, which is why the
-    // admission predicate refuses any point nested in a larger expression. If
-    // one ever reaches here the frames are non-empty and the lowering would be
-    // wrong in a way nothing downstream can see, so it is a build failure and
-    // not a silent spill into a slot this slice does not lay out.
-    // EVERY OTHER OWNED TEMP WOULD HAVE THE SAME PROBLEM. This slice lays out
-    // no sc_tmp_ frame fields, so an owned temp cannot be carried across the
-    // suspension at all -- and it is only HERE that the emitter knows whether
-    // one is held. The structural predicate cannot: `nestedInExpression` says
-    // no for a one-field record literal that is nevertheless holding the
-    // record. So the function goes back to the fiber lane, which is a loss of
-    // coverage and nothing else -- the two lowerings are interchangeable at
-    // the call site, which is the whole hybrid.
-    const owned = this.frames.reduce((n, f) => n + f.length, 0);
-    if (owned > 0) throw new CoroRefusedError(fn.name, `owned-temp-at-park=${owned}`);
+    // EVERY OTHER TEMP THAT OUTLIVES THE PARK GOES INTO THE FRAME TOO, and the
+    // set is the one the previous emission pass discovered -- see
+    // emitFunction's fixpoint for why it cannot be computed here.
+    //
+    // THE OWNED ONES ARE NOT A SEPARATE CASE, and that is worth stating because
+    // this file used to refuse them with their own error. A refcounted temp
+    // still held at the park and a plain `double` computed before it are the
+    // SAME defect with two labels: a value that will be read after a block
+    // that `ret`s. Both are carried here, and the refcount needs no special
+    // handling -- the +1 does not move, only the name it is spelled with,
+    // because the scope-exit release is emitted through `line()` and is
+    // therefore rewritten by the same rename as every other use.
+    this.emitCoroTempSpill(index);
     this.emitCoroSpill();
     const pa = this.coroField(layout.awaitedIndex, "sc_awaited");
     B.line(`store ptr ${pr.name}, ptr ${pa}`);
@@ -3909,6 +4054,7 @@ class LlEmitter {
     // inert and reading green forever, which is why emitFunction asserts the
     // boundary count against the state count rather than trusting this line.
     B.parkBoundary();
+    this.emitCoroTempReload(index);
     this.emitCoroReload();
     const pa2 = this.coroField(layout.awaitedIndex, "sc_awaited");
     const aw = B.tmp();
@@ -3973,13 +4119,21 @@ class LlEmitter {
       );
     }
     this.coroStatesDrawn++;
-    // Same refusal as the park, and for the same reason: this slice lays out no
-    // sc_tmp_ frame fields, so an owned temp cannot survive the return to the
-    // scheduler. A hop holds no operand of its own, so unlike the park there is
-    // nothing to move out of the frame first -- anything owned here belongs to
-    // an enclosing expression and the function goes back to the fiber lane.
-    const owned = this.frames.reduce((n, f) => n + f.length, 0);
-    if (owned > 0) throw new CoroRefusedError(fn.name, `owned-temp-at-hop=${owned}`);
+    // THE SAME CARRY AS THE PARK, and it has to be the same or the hop is a
+    // hole the shape of the other suspension form. A hop takes a boundary
+    // exactly as a park does, so every temp minted before it is just as dead on
+    // the far side -- and blocks.ts's rule fires on it identically. What used
+    // to stand here was the park's old `owned > 0` refusal; it is gone for the
+    // same reason that one is, and anything an enclosing expression still holds
+    // is spilled rather than sent back to the fiber lane.
+    //
+    // NOTHING IS MOVED OUT OF THE FRAME FIRST, unlike the park: a bare hop
+    // holds no operand of its own, so there is no promise to hand to
+    // `sc_awaited`. That asymmetry is a PRECONDITION rather than an
+    // observation, and it is fenced in coro.ts -- see the re-keyed
+    // assertBareSuspendingLibCalls, which fails the build if a hop ever
+    // acquires one.
+    this.emitCoroTempSpill(index);
     this.emitCoroSpill();
     const ps = this.coroStateField();
     B.line(`store i32 ${index + 1}, ptr ${ps}`);
@@ -3990,6 +4144,7 @@ class LlEmitter {
     // -- the far side ------------------------------------------------------
     B.startBlock(coroLabel(index));
     B.parkBoundary();
+    this.emitCoroTempReload(index);
     this.emitCoroReload();
   }
 
@@ -4819,9 +4974,44 @@ class LlEmitter {
   private emitFunction(fn: IrFunction): string {
     if (this.coroLoweredByFn.has(fn.name)) {
       const snapshot = new Set(this.decls);
-      try {
-        return this.emitFunctionBody(fn);
-      } catch (err) {
+      const spills: CoroTempSpill[] = [];
+      for (let pass = 0; ; pass++) {
+        this.currentCoroTempSpills = spills;
+        try {
+          return this.emitFunctionBody(fn);
+        } catch (err) {
+        /* THE FIXPOINT. A CrossParkTempError names a temp that must survive the
+         * park; add it to the spill set and emit the body again. Repeat until
+         * the body emits clean, the temp is not spillable, or the cap is hit.
+         *
+         * WHY IT TERMINATES, and the argument is the reason a loop here is
+         * acceptable at all: the offending temp is BY DEFINITION minted before
+         * the park, every instruction the spill and reload add is emitted AT or
+         * AFTER the park, and `tempCounter` advances in emission order -- so the
+         * numbering of PRE-PARK temps is identical on every pass. The set is
+         * therefore monotone over a fixed finite domain (this body's pre-park
+         * temps) and gains at least one member per pass. Measured on the corpus:
+         * the largest cross-park set is 4 and the median is 2.
+         *
+         * AND THE CAP IS NOT THE ARGUMENT, it is the thing that holds when the
+         * argument does not. A loop whose termination rests on a property of
+         * another file needs a stop that rests on nothing. Past the cap the
+         * function goes back to the fiber lane like any other refusal.
+         *
+         * The determinism the argument assumes is ASSERTED, not trusted:
+         * emitCoroTempSpill re-checks every set member's generation and type
+         * against the pass actually running. */
+        if (
+          err instanceof CrossParkTempError &&
+          err.llType !== null &&
+          pass < CORO_SPILL_PASS_CAP &&
+          !spills.some((s) => s.name === err.temp)
+        ) {
+          spills.push({ name: err.temp, llType: err.llType });
+          this.decls.clear();
+          for (const d of snapshot) this.decls.add(d);
+          continue;
+        }
         // TWO REFUSAL SIGNALS, ONE HANDLER, and they are genuinely the same
         // event seen from two places.
         //
@@ -4852,7 +5042,13 @@ class LlEmitter {
         // that exists to prove something else ran needs a companion proving it
         // still WORKS, and a detector that quietly stopped matching anything
         // would leave every run of the suite agreeing with it.
-        if (!(err instanceof CoroRefusedError) && !(err instanceof CrossParkTempError)) throw err;
+        if (
+          !(err instanceof CoroRefusedError) &&
+          !(err instanceof CrossParkTempError) &&
+          !(err instanceof CrossParkSlotError)
+        ) {
+          throw err;
+        }
         this.decls.clear();
         for (const d of snapshot) this.decls.add(d);
         // The count the LINK SWITCH reads must reflect what was actually
@@ -4861,11 +5057,27 @@ class LlEmitter {
         // runs after every body) to emit the fiber trampoline and arg pack for
         // this function instead of a frame and a coro spawn.
         this.coroLoweredByFn.delete(fn.name);
+        // THE REASON IS THE WORKLIST, so each refusal says which mechanism is
+        // missing rather than which rule happened to fire. A temp with no
+        // derivable type and a temp this pass gave up on are not the same
+        // thing as a cross-park SLOT, and a census that called them all
+        // "cross-park-temp" would send the next slice after the wrong one.
         this.coroRefusedAtEmission.set(
           fn.name,
-          err instanceof CoroRefusedError ? err.reason : "cross-park-temp",
+          err instanceof CoroRefusedError
+            ? err.reason
+            : err instanceof CrossParkSlotError
+              ? `cross-park-slot=${err.slot}`
+              : err.llType === null
+                ? `untyped-cross-park-temp=${err.temp}`
+                : `cross-park-temp-passes>${CORO_SPILL_PASS_CAP}`,
         );
+          break;
+        }
       }
+      // The fiber re-emission below must not inherit a spill set: it builds no
+      // frame to spill into.
+      this.currentCoroTempSpills = [];
     }
     return this.emitFunctionBody(fn);
   }
@@ -4896,11 +5108,23 @@ class LlEmitter {
     this.currentCoroLayout = null;
     this.coroStatesDrawn = 0;
     if (coro !== null) {
-      this.currentCoroLayout = coroFrameLayout(fn, coro, this.currentLocals, (t) => this.llType(t));
+      this.currentCoroLayout = coroFrameLayout(
+        fn,
+        coro,
+        this.currentLocals,
+        (t) => this.llType(t),
+        this.currentCoroTempSpills,
+      );
       // Arms the cross-park temp invariant for this body only. Nothing arms it
       // on a fiber body, so a knob-absent build pays one null check per
       // emitted line and nothing else.
       B.enterCoro(fn.name);
+      // The log-argument array is the one resume-call-private slot that is not
+      // minted by `slot()`: it is pushed into entryAllocas AFTER the body has
+      // been walked, by which time every line has already been checked. It is
+      // registered here, before the walk, so the slot rule can see it at all.
+      // Nothing is emitted for it when the body logs nothing.
+      B.privateSlot("%logargs");
     }
 
     const paramIds = new Set(fn.params.map((p) => p.localId));
@@ -5111,6 +5335,31 @@ class LlEmitter {
        * AND IT IS NOT THE EMITTER CHECKING ITSELF on the third term:
        * `coro.points.length` comes from the ANALYSIS, which knows nothing
        * about how many times a body is emitted. */
+      /* G4 -- THE FIXPOINT'S CORRECTNESS CONDITION, asserted over the whole
+       * walk because it can no longer be asserted at each suspension.
+       *
+       * The set is addressed BY NAME across passes, and a name is only an
+       * identity if re-emission mints the same values in the same order. The
+       * per-suspension check used to carry this, and it cannot any more: a
+       * temp legitimately does not exist yet at an earlier suspension, so
+       * "not minted" stopped being evidence of anything THERE. It is still
+       * evidence HERE -- a set member the whole body never minted is a name
+       * the previous pass produced and this one did not, which is precisely
+       * the non-determinism that would make the spill carry the wrong value.
+       *
+       * It is not a formality: it fired for real. `main` carries 100
+       * suspension points, and the first build after the multi-state dispatch
+       * landed reported `%t2462` against a spill emitted at a suspension it is
+       * minted long after. */
+      for (const t of this.currentCoroTempSpills) {
+        if (B.genOfTemp(t.name) !== undefined) continue;
+        throw new Error(
+          `llvm emitter bug: ${fn.name}'s spill set names ${t.name}, which this emission ` +
+            `never minted anywhere in the body. The set was discovered by a previous pass ` +
+            `over the same body, so re-emission is not deterministic and the set is ` +
+            `addressing values it was not built from.`,
+        );
+      }
       const bounds = B.boundaries();
       if (bounds !== this.coroStatesDrawn) {
         throw new Error(
@@ -5137,6 +5386,10 @@ class LlEmitter {
        * it is passed rather than assumed so the arithmetic is already right
        * when one does. */
       coroCheckSuspensionSites(fn.name, body, this.coroStatesDrawn, 0);
+      // Recorded only now, after the body emitted CLEAN. A pass that threw
+      // left no define and must leave no layout either, or a later refusal
+      // would print a struct for a function that went back to the fiber lane.
+      this.coroLayoutByFn.set(fn.name, this.currentCoroLayout!);
       this.currentCoro = null;
       this.currentCoroLayout = null;
       // NO PARAMETERS, and a `void` return: the resume signature is
