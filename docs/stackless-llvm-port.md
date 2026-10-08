@@ -480,6 +480,28 @@ the IR, predict the excess, compare against the per-function excess section
 | `%m268.uploadHqFromStream` | 2 | **4** | **4** |
 | | **8** | **16** | **16** |
 
+**SCOPE CAVEAT, and it is this file's own later measurement that imposes it.
+The formula presupposes THREE copies, and the copy count is 1-3.** The
+exception copy is emitted only `if (excHandler.used)` and the pending-return
+copy only `if (retEntry!.used)` (`emit-stmts.ts`), and both flags are set by
+the emitter WHILE EMITTING, when something actually jumps to those labels.
+Measured over app182's knob-absent C: **89 try-with-finally regions, 87
+exception copies, 64 pending-return copies** -- if the count were always
+three, both of the latter would read 89. One region emits the normal copy
+alone.
+
+So `excess = 2 x in-finally points` is NOT a law. It held 6 of 6 because all
+six of these functions happen to have all three copies -- verified
+per-function, normal=1 exc=1 pret=1 for every one of them. **The number is
+right and its scope is narrower than the formula's shape suggests:** read it
+as "excess = (copies - 1) x in-finally points", with copies measured, and
+only then does it generalise. A reader reusing the 2x form on a region with
+two copies would be wrong by the difference.
+
+This is recorded because the same shape -- a correct measurement carried
+outside the population where its premise held -- is the recurring error on
+this front, and here it was caught before anyone reused the formula.
+
 **The two inputs are independent.** The three-copy claim comes from the
 emitter (`emit-stmts.ts` emits `/* finally (normal path) */`, `sc_finexc_N:;`
 and `sc_finret_N:;`); the recorded excess came from a join of the IR against

@@ -373,6 +373,32 @@ export function emitFunction(E: CEmitter, fn: IrFunction): void {
     }
     E.scopes.pop();
 
+    // THE CLOSING HALF OF THE DISPATCH INVARIANT, and it is deliberately not
+    // a shared constant.
+    //
+    // The dispatch emits `case 1..plan.points.length`, and the await sites
+    // draw from `coroPointIndex`. The bound check at the await catches
+    // OVER-emission -- an index past the dispatch -- and nothing caught
+    // UNDER-emission: a state with a case and no label is silent, and so is
+    // a plan entry nothing ever consumed.
+    //
+    // Binding the two sides with a constant would tie DECLARED INTENT to
+    // DECLARED INTENT: change the emitter to emit a body a different number
+    // of times, update the constant, and the analysis is right only because
+    // someone remembered. This asserts what the emitter DID instead. Over
+    // and under together pin the emission to the plan with no literal in
+    // between, which is one thing to forget rather than two.
+    if (coro !== null && E.coroPointIndex !== coro.points.length) {
+      throw new Error(
+        `emitter bug: ${fn.name} consumed ${E.coroPointIndex} coroutine states but its ` +
+          `plan has ${coro.points.length} suspension points. The dispatch emits ` +
+          `case 1..${coro.points.length}, so the two must agree exactly: fewer means a ` +
+          `case whose label is never emitted, more is caught at the await site. If a ` +
+          `body is emitted more than once (a finally runs three copies), the PLAN has ` +
+          `to carry one entry per emitted copy -- see docs/stackless-llvm-port.md 10b.`,
+      );
+    }
+
     E.indent--;
     E.line(`}`);
     E.line(``);
