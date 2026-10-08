@@ -425,6 +425,57 @@ const CASES: ReadonlyArray<{ name: string; why: string; src: string }> = [
       "",
     ].join("\n"),
   },
+  /* SHAPE (2): a point in a try/catch GUARDED by a finally. The axis these
+   * add is the UNWIND path. A park inside a try that owns a finally can
+   * resume with an exception pending -- the frame now carries its own
+   * ScrExcCell for exactly that -- so the question is whether a reference
+   * taken BEFORE the park is still released when the resume unwinds through
+   * the finally instead of falling out normally. A value guard sees the
+   * thrown message either way; it cannot see the reference left behind on
+   * the path that threw. */
+  {
+    name: "finally-guarded-normal",
+    why: "a refcounted local taken before a park inside a try that owns a finally, falling out NORMALLY",
+    src: [
+      "async function main(): Promise<void> {",
+      '  const o = new Holder("x" + String(Date.now() % 3))',
+      "  try { const n = await p(1); console.log(o.items.length + n) } finally { console.log(0) }",
+      "}",
+      "void main()",
+      "",
+    ].join("\n"),
+  },
+  {
+    name: "finally-guarded-throw",
+    why: "the same, but the resume UNWINDS through the finally -- the path no value guard can see",
+    src: [
+      "async function main(): Promise<void> {",
+      '  const o = new Holder("y" + String(Date.now() % 3))',
+      "  try {",
+      "    const n = await p(1)",
+      "    if (n > 0) { throw new Error(\"u\") }",
+      "    console.log(o.items.length)",
+      "  } catch (e) {",
+      "    console.log(o.name.length)",
+      "  } finally {",
+      "    console.log(0)",
+      "  }",
+      "}",
+      "void main()",
+      "",
+    ].join("\n"),
+  },
+  {
+    name: "finally-guarded-scalar",
+    why: "THE CONTROL: nothing refcounted crosses the park, so no release path runs on either exit and it must stay green",
+    src: [
+      "async function main(): Promise<void> {",
+      "  try { const n = await p(1); console.log(n) } finally { console.log(0) }",
+      "}",
+      "void main()",
+      "",
+    ].join("\n"),
+  },
   {
     name: "field-after-park",
     why: "THE CONTROL: reading the field after the park makes the object live, so it was in the frame all along and never leaked",

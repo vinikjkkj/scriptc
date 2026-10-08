@@ -113,13 +113,55 @@ export function coroFrameLocals(fn: IrFunction, plan: StacklessPlan): string[] {
   return fn.locals.filter((l) => ids.has(l.id)).map((l) => l.id);
 }
 
+/** Does this frame need its own exception cell?
+ *
+ * TRUE when the body holds a try that OWNS a finally. A point inside such a
+ * try can resume with an exception pending, and the cell a lean frame borrows
+ * belongs to whoever is on the main stack at that moment, not to this frame.
+ *
+ * Deliberately a SHAPE question about the whole function rather than a
+ * per-point one: a frame is ONE allocation and cannot be fat for some of its
+ * states. Over-approximating costs 56 bytes on a frame that already owes most
+ * of them, and under-approximating is a wrong cell.
+ *
+ * WHICH LANE THIS IS INVISIBLE TO: the knob-absent one, entirely. Every
+ * caller is inside the coro frame builder, which only runs for a function in
+ * coroPlans, and coroPlans returns empty without the knob. */
+export function coroNeedsExcCell(fn: IrFunction): boolean {
+  let found = false;
+  const walk = (v: unknown): void => {
+    if (found || v === null || typeof v !== "object") return;
+    if (Array.isArray(v)) {
+      for (const x of v) walk(x);
+      return;
+    }
+    const rec = v as Record<string, unknown>;
+    if (rec["kind"] === "tryCatch" && rec["finallyBody"] !== null && rec["finallyBody"] !== undefined) {
+      found = true;
+      return;
+    }
+    for (const k in rec) {
+      if (k === "loc" || k === "type") continue;
+      walk(rec[k]);
+    }
+  };
+  walk(fn.body);
+  return found;
+}
+
 /** The frame struct and the resume function's forward declaration. */
 export function emitCoroFrames(E: CEmitter, out: string[], plans: Map<string, StacklessPlan>): void {
   for (const fn of E.mod.functions) {
     const plan = plans.get(fn.name);
     if (plan === undefined) continue;
     const frame = mangleCoroFrame(fn.name);
-    const fields: string[] = ["ScrCoroBase base;"];
+    // ScrCoroExc embeds ScrCoroBase as its FIRST member, so every existing
+    // `(sc_cf_X *)sc_b` cast stays address-identical and every scr_coro_*
+    // call keeps working unchanged. The discriminant is STORED
+    // (SCR_CORO_HAS_EXC, set by scr_coro_alloc from the flag below), never
+    // inferred from a pointer -- scr_coro.h says why in as many words.
+    const fat = coroNeedsExcCell(fn);
+    const fields: string[] = [fat ? "ScrCoroExc base;" : "ScrCoroBase base;"];
     // A lifted body's closure environment: ONE field, and the capture
     // bindings are re-derived from it before the dispatch rather than
     // spilled, so no capture needs a frame slot of its own.
@@ -185,7 +227,7 @@ export function emitCoroSpawns(E: CEmitter, out: string[], plans: Map<string, St
     appendLines(out, [
       ``,
       `${E.link}${sig} {`,
-      `  ${frame} *sc_f = (${frame} *)scr_coro_alloc(sizeof *sc_f, &${mangleCoroResume(fn.name)}, /*has_exc=*/false);`,
+      `  ${frame} *sc_f = (${frame} *)scr_coro_alloc(sizeof *sc_f, &${mangleCoroResume(fn.name)}, /*has_exc=*/${coroNeedsExcCell(fn) ? "true" : "false"});`,
       ...(lifted ? [`  sc_f->sc_env = scr_closure_retain(sc_env);`] : []),
       ...fn.params.flatMap((p) => {
         const f = coroField(p.localId);

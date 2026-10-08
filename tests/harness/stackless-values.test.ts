@@ -328,6 +328,36 @@ const WRAPPERS: ReadonlyArray<{ name: string; take: string; finish: string; conv
   // must answer 4. A lost snapshot answers 999 -- a plausible number that no
   // structure check or turn count can see.
   { name: "wfy5", take: "f64", finish: "f64", converted: true },
+  // THE SHAPE-(2) ROWS: a point in a try/catch GUARDED by a finally. These
+  // resume with an exception possibly pending, which is what the fat frame
+  // answers, and they are the population this slice admits.
+  //
+  // wfy4 is the (b) row. It was written expecting the OPPOSITE geometry from
+  // wfy5 -- await inside the try, so the park would fall between the sc_pret
+  // write and its read -- and the emitted C REFUTES that, which is why the
+  // comment says so instead of the prediction.
+  //
+  // sc_cr_wfy4 emits: park, resume label, THEN `sc_pret = ...`, then the jump
+  // to the pending-return copy, then the read. The park PRECEDES the write,
+  // and it does so by construction rather than by luck: sc_pret is written at
+  // the return site, which is after the awaited value has been taken, and it
+  // is read after the finally runs -- and a shape-(2) finally body holds no
+  // park. The only way to interleave one is to put the suspension INSIDE the
+  // finally body, which is shape (1) and is not in this slice.
+  //
+  // So (b) is not owed by this population at all. The risk is ABSENT by
+  // construction, which is a different claim from "guarded", and the
+  // difference is why this paragraph exists.
+  { name: "wfy1", take: "f64", finish: "ref", converted: true },
+  { name: "wfy2", take: "f64", finish: "ref", converted: true },
+  { name: "wfy3", take: "ref", finish: "ref", converted: true },
+  { name: "wfy4", take: "f64", finish: "f64", converted: true },
+  // AND THE NEGATIVE: shape (1), a suspension INSIDE the finally body. The
+  // emitter writes that body THREE times, so one IR node becomes three
+  // emitted sites -- the mechanism behind the six double-emitting functions
+  // (docs/stackless-llvm-port.md 10b). Out of scope here, and this row fails
+  // the day it stops being.
+  { name: "wfy6", take: "f64", finish: "f64", converted: false },
   // THE FOUR STATEMENT POSITIONS, as one slice because they are DISJOINT: no
   // remaining function in the measured program carries two of them, so their
   // reach is additive exactly. Grouped by COST, not by nature -- `if`,
@@ -689,6 +719,35 @@ async function wfy5(n: number): Promise<number> {
   try { return v; } finally { v = 999; }
 }
 
+/* THE SHAPE-(2) SHAPES. fobs makes the finally side effect observable, so a
+ * finally that is skipped or run twice shows as a number rather than as
+ * nothing. */
+let fobs = 0;
+async function wfy1(n: number): Promise<string> {
+  try { const x = await pf(n); return "t" + x; } finally { fobs = fobs + 1; }
+}
+async function wfy2(bad: boolean): Promise<string> {
+  try { const x = await pmaybe(bad); return "ok" + x; }
+  catch (e) { return "c:" + (e as Error).message; }
+  finally { fobs = fobs + 10; }
+}
+async function wfy3(bad: boolean): Promise<string> {
+  try { if (bad) { throw new Error("b"); } return "nothrow"; }
+  catch (e) { const y = await ps("c"); return y + "!"; }
+  finally { fobs = fobs + 100; }
+}
+// THE (b) ROW. The await is INSIDE the try, so the park sits between the
+// sc_pret snapshot and the read of it -- the geometry wfy5 does not have.
+async function wfy4(n: number): Promise<number> {
+  try { return await pf(n); } finally { fobs = fobs + 1000; }
+}
+// SHAPE (1): the suspension is INSIDE the finally body. Must stay on fibers.
+async function wfy6(n: number): Promise<number> {
+  let s = 0;
+  try { s = 1; } finally { s = s + await pf(n); }
+  return s;
+}
+
 
 /* THE FOUR STATEMENT POSITIONS. Each magnitude distinguishes the plausible
  * wrong answer: wif taking the other branch, wrs storing through a container
@@ -806,6 +865,7 @@ async function main(): Promise<void> {
   console.log("loop2 ", await wlc(), "|", await wlb(), "|", await wlnest(), "|", await wlfo());
   console.log("forof ", await wfo1(), "|", await wfo2(), "|", await wfo3(), "|", await wfo4(), "|", await wfo5());
   console.log("pret  ", await wfy5(3));
+  console.log("fin   ", await wfy1(3), "|", await wfy2(false), await wfy2(true), "|", await wfy3(true), "|", await wfy4(3), "|", await wfy6(3), "|", fobs);
   console.log("four  ", await wif(1), await wif(-1), "|", await wrs(3), "|", await wby(4));
   console.log("four2 ", await wsw(1), await wsw(2), await wsw(3), "|", await wsd(0), await wsd(1), await wsd(5), "|", await wst(1), await wst(9), "|", await wsu(1), await wsu(9));
   console.log("done");
@@ -1081,6 +1141,11 @@ describe("the stackless lane answers what the fiber lane answers", () => {
       // The pending return: pf(3)=4 is snapshotted BEFORE the finally writes
       // 999, so 4 is the only correct answer and 999 is the failure.
       "pret   4",
+      // Shape (2). wfy1 pf(3)=4 -> "t4". wfy2 answers 7 clean and catches
+      // "bad" otherwise. wfy3 awaits in the CATCH body. wfy4 returns THROUGH
+      // the finally with the park between snapshot and read. wfy6 stays on
+      // fibers. fobs tallies the finallys that ran: 1 + 10 + 10 + 100 + 1000.
+      "fin    t4 | ok7 c:bad | c!! | 4 | 5 | 1121",
       // The four statement positions. wif picks a branch on an awaited bool.
       // wrs/wbs store pf(3)=4 and pf(4)=5 through a container evaluated
       // BEFORE the park. wsw resumes inside a case body holding a refcounted

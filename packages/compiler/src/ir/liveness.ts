@@ -332,7 +332,7 @@ interface Ctx {
    * was zero (0 of 652 accepted functions in zapo-rest, 0 of 392 across 227
    * corpus programs), so nothing reached it; a capacity is not an occupancy,
    * and this closes the capacity. */
-  finallyDepth: number;
+  finallyBodyDepth: number;
   /** A `switch` is not a loop, but a resume label inside a case body puts
    * the state machine's re-entry inside the switch block. Legal C, but out
    * of the first slice's scope. */
@@ -428,7 +428,7 @@ function recordPoints(
         // position: inside a loop, a finally or a switch it is blocked for
         // exactly the reasons an await is.
         straightLine:
-          ctx.finallyDepth === 0 &&
+          ctx.finallyBodyDepth === 0 &&
           ctx.rootOk &&
           (s.pointKind === "awaitExpr" ||
             s.pointKind === "awaitUnionExpr" ||
@@ -475,7 +475,7 @@ function recordPoints(
           //
           // `enclosingForOf` survives as a frame-SIZE input. It is no
           // longer an admission input.
-          ...(ctx.finallyDepth > 0 ? ["finally"] : []),
+          ...(ctx.finallyBodyDepth > 0 ? ["finally:body"] : []),
           ...(ctx.rootOk ? [] : ["rootOk:" + ctx.stmtKind]),
           ...(s.pointKind === "awaitExpr" ||
           s.pointKind === "awaitUnionExpr" ||
@@ -781,25 +781,35 @@ function backStmt(
       // The finally body itself is walked with the OUTER finally stack: a
       // jump out of a finally is refused by the frontend (SC1090), so it
       // only ever completes normally or by throwing.
-      // The finally body is walked under finallyDepth, not outside it: a
-      // suspension sited there needs the frame's own exception cell exactly
-      // like one the finally can span.
+      // The finally body is walked under finallyBodyDepth, not outside it.
+      //
+      // THIS IS NOW THE ONLY SITE THAT RAISES IT. The counter used to be
+      // raised here AND around the try/catch bodies of a try that owns a
+      // finally, and one label covered both -- which made the two shapes
+      // indistinguishable and the pieces that serve them unbuyable
+      // separately. A point in a GUARDED try/catch resumes with an exception
+      // possibly pending, which the fat frame answers; a point INSIDE the
+      // body additionally lands in a block the emitter writes THREE times
+      // (normal, exception, pending-return), so one IR node becomes three
+      // emitted sites. Only the second is still refused.
+      //
+      // The guarded site is DELETED rather than kept as a second counter.
+      // There is no second condition for a later widening to forget.
       let afterFinally: Set<string>;
       if (s.finallyBody === null) {
         afterFinally = new Set(liveOut);
       } else {
-        ctx.finallyDepth++;
+        ctx.finallyBodyDepth++;
         try {
           afterFinally = backStmts(ctx, s.finallyBody, liveOut, loops);
         } finally {
-          ctx.finallyDepth--;
+          ctx.finallyBodyDepth--;
         }
       }
       if (s.finallyBody !== null) ctx.finallys.push(afterFinally);
       ctx.tryDepth++;
       // A try that HAS a finally also blocks its try/catch bodies: unwinding
       // out of them runs the finally with the exception still pending.
-      if (s.finallyBody !== null) ctx.finallyDepth++;
       try {
         const catchLive =
           s.catchBody === null ? new Set<string>() : backStmts(ctx, s.catchBody, afterFinally, loops);
@@ -810,7 +820,6 @@ function backStmt(
         return union(tryLive, catchLive);
       } finally {
         ctx.tryDepth--;
-        if (s.finallyBody !== null) ctx.finallyDepth--;
         if (s.finallyBody !== null) ctx.finallys.pop();
       }
     }
@@ -878,7 +887,7 @@ export function suspensionLiveness(fn: IrFunction): FnLiveness | null {
     forOfDepth: 0,
     loopDepth: 0,
     tryDepth: 0,
-    finallyDepth: 0,
+    finallyBodyDepth: 0,
     rootOk: false,
     stmtKind: "?",
   };
