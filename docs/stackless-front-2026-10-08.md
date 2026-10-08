@@ -179,6 +179,72 @@ many words that another shape "gets re-derived rather than inheriting this".
 It was re-derived, by a guard that drove all three completion paths, and
 `sc_pret` is now a frame field.
 
+## THE MEASURED RETURN ON D4's SALE
+
+D4 replaced the one-state-per-point **equality** with two **inclusions**, and
+the amendment above records the price honestly: the pair cannot tell three
+copies of a plan point from four, so multiplicity stopped being pinned by the
+compiler's own assertion. **That trade was argued against inside this front** --
+the position was that a permanent reduction in verification strength to buy
+0.5% of points is a bad bargain -- and the user decided the other way with the
+cost stated. This section records what the sale actually returned, because the
+argument had evidence on only one side until it did.
+
+**The return arrived the same day, on a defect that did not exist when the
+trade was made.** Merging `coro/sync-generators` admitted `yieldExpr`. Its
+emission arm in `emit-exprs.ts` still carried the pre-D4 shape:
+
+    const yIdx = E.coroPointIndex++;
+
+It advanced the plan cursor and recorded **no state**. D4 had separated those
+two quantities -- the cursor is the analysis's position, the dispatch is sized
+from the state table -- so a yield served its own plan point with nothing.
+
+**Inclusion I1 caught it at BUILD time, naming the function and the point:**
+
+    emitter bug: nums planned 3 suspension point(s) but emitted no state for
+    point 0 (yieldExpr at ...). The dispatch would carry a case whose label is
+    never emitted.
+
+Confirmed by reverting the fix and reading that message back, rather than
+inferred from the code.
+
+**THE OLD EQUALITY WOULD HAVE PASSED, and that is the whole point.** This was
+checked rather than assumed, because the first draft of this section claimed
+the opposite. The equality compared `coroPointIndex` against `points.length`,
+and the broken yield arm advanced `coroPointIndex` exactly once per point --
+`coroDrawState` advances the very same cursor. The two shapes differ only in
+whether a state is recorded:
+
+    reverted:  const yIdx = E.coroPointIndex++;   cursor +1, state table +0
+    fixed:     E.coroDrawState(...)               cursor +1, state table +1
+
+So the cursor reaches `points.length` either way, the equality reads equal,
+and the build goes green with a dispatch that has no case for the yield's
+label. **The check that was sold is blind to this defect; the pair that
+replaced it is not.** I1 asks a different question -- "is every plan point
+*served by a state*?" -- and that question is the one with an answer here.
+
+**And the honesty owed in the other direction:** the defect is an interaction
+*D4 itself created*. D4 moved the dispatch's sizing from the plan to the state
+table, and the yield arm was not updated because yields could not be admitted
+at the time. So D4 introduced the hazard and shipped the check that caught it
+-- at build time, with a function name and a source location, in a lane its
+author never touched.
+
+**And without either check the failure was silent and worse:** the dispatch is
+sized from the state table, so it would have carried no case for the yield's
+label, and a resume into that state would have taken `default: abort()` **at
+runtime** -- in a generator, on the lane the merge had just opened.
+
+**So the ledger on that trade, both sides:** the sale really did cost what it
+was said to cost, and the multiplicity guard in
+`tests/harness/stackless-finally-body.test.ts` is what covers the gap. It also
+bought a build-time diagnosis, with a name and a location, of a defect
+introduced by a *different* front three commits later. That is not an argument
+that the price was low. It is the evidence that was missing when the price was
+being argued.
+
 ## Method findings worth keeping
 
 - **A coverage number over a corpus is a statement about that corpus.** It
