@@ -436,12 +436,25 @@ function recordPoints(
         //
         // It survives as a frame-SIZE and diagnostic input the way
         // `enclosingForOf` did when it stopped being an admission input.
-        // A `yieldExpr` is admitted alongside the await kinds. It is kept in
-        // main's `pointKind` spelling rather than reverting the predicate to
-        // the branch's `STACKLESS_LOWERABLE_NODE_KINDS.has(node.kind)` form:
-        // a yield's pointKind IS its node kind, so the two agree on this
-        // point, and keeping one spelling keeps the libCall arm -- which the
-        // set form cannot express -- from being quietly dropped.
+        // A `yieldExpr` is admitted alongside the await kinds, spelled through
+        // `pointKind` rather than through a set of NODE KINDS: a yield's
+        // pointKind IS its node kind, so the two agree here, and the one
+        // spelling keeps the libCall arm -- which a node-kind set cannot
+        // express at all -- from being quietly dropped.
+        //
+        // THIS IS THE ONLY PLACE THE ANSWER LIVES. ir/suspends.ts used to carry
+        // a `STACKLESS_LOWERABLE_NODE_KINDS` set saying the same thing; it had
+        // no consumer, and its doc comment went on asserting that
+        // `awaitUnionExpr` could not be lowered long after the line below
+        // admitted it. Deleted there, with the reason recorded in its place.
+        //
+        // WHAT IS ABSENT FROM THE LIST BELOW AND WHY, because an absence is a
+        // decision and reads like an oversight. `genResume` / `agenResume` are
+        // the CONSUMER side: neither actually suspends its caller
+        // (scr_agen_next arms a promise and returns; scr_gen_resume switches in
+        // and comes back before returning), so they are refused by a
+        // classification rather than by a mechanism, and lifting them is a
+        // separate slice that carries the scr_current question with it.
         //
         // SYNCHRONOUS generators only. The async form is refused at the
         // FUNCTION level below, because its yield calls scr_await_hop inside

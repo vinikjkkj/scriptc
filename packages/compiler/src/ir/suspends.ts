@@ -145,9 +145,21 @@ type _LibCallsCovered = AssertNever<
 >;
 
 /** Which suspenders the STACKLESS lane can lower. A suspender absent here is
- * fiber-only, and a function containing one must not be admitted. Today the
- * state machine has no counterpart for the microtask hop, so `async.hop`
- * keeps its function on the fiber lane. */
+ * fiber-only, and a function containing one must not be admitted.
+ *
+ * `async.hop` IS LOWERABLE, and this comment used to say the opposite. It read
+ * "the state machine has no counterpart for the microtask hop, so `async.hop`
+ * keeps its function on the fiber lane" -- true when it was written, and left
+ * standing when the hop joined the list directly beneath it. Two readers in a
+ * row took the prose over the declaration and retired the hop to a later slice
+ * on its authority; the second one only caught it by opening the list.
+ *
+ * The rule this file already states is "the list is the authority, the prose
+ * beside it is not". The rule it did not state, and the one that actually
+ * costs: A COMMENT THAT NAMES TODAY'S LIMIT BECOMES A LIE THE DAY THE LIMIT
+ * MOVES, and nothing fails when it does. So a limit written here must name the
+ * MECHANISM that imposes it, which stops being true visibly, rather than the
+ * state of the list, which the list already reports. */
 export const STACKLESS_LOWERABLE_LIB_CALL_LIST = [
   "async.hop",
 ] as const satisfies readonly SuspendingLibCall[];
@@ -200,31 +212,27 @@ export function libCallPointKind<F extends StacklessLowerableLibCall>(fn: F): `l
   return `libCall:${fn}`;
 }
 
-/** Which suspending NODE KINDS the stackless lane can lower. The twin of
- * the set above, and it exists for the same reason: a suspender the lane
- * cannot lower must keep its function on the fiber lane, and the list of
- * which is which belongs in ONE place that both the analysis and the
- * emitter read.
+/* STACKLESS_LOWERABLE_NODE_KINDS WAS HERE, AND IT WAS DEAD -- no consumer
+ * anywhere under packages/ or tests/. Its only remaining mention was a comment
+ * in liveness.ts explaining why the predicate was NOT reverted to its form.
  *
- * WHAT IS ABSENT AND WHY, because an absence here is a decision and reads
- * like an oversight:
+ * WHY ITS DEATH IS WORTH A PARAGRAPH RATHER THAN A SILENT DELETE. Its doc
+ * comment stated, as a live decision, that `awaitUnionExpr` cannot be lowered
+ * "because its unit arm takes a microtask hop and the stackless lane has no
+ * counterpart for the hop". Both halves are now false: the lane lowers the hop,
+ * and liveness admits awaitUnionExpr as straight-line. So the file carried a
+ * confident, specific, WRONG answer to a question a reader would come here to
+ * ask -- and the rule that usually rescues such a reader, "read the declaration
+ * and not the prose", rescues nobody when THE DECLARATION IS UNREACHABLE. There
+ * was nothing downstream to check the comment against.
  *
- *   genResume / agenResume -- the CONSUMER side. Neither actually suspends
- *     its caller (scr_agen_next arms a promise and returns; scr_gen_resume
- *     switches in and comes back before returning), so they are refused by
- *     a classification rather than by a mechanism. Lifting them is a
- *     separate slice and carries the scr_current question with it.
- *   awaitUnionExpr -- its unit arm takes a microtask hop, and the stackless
- *     lane has no counterpart for the hop. Same reason async.hop is absent
- *     from the libCall set.
+ * That is the failure mode this file's own header was written against, arriving
+ * in the file that named it: a copy kept beside the thing it copies, surviving
+ * because nothing reads it. A dead export is strictly worse than a live one --
+ * it cannot drift INTO a defect, so nothing ever forces anyone to look at it.
  *
- * yieldExpr is HERE only because a SYNCHRONOUS yield is lowerable: it takes
- * no hop. The async form calls scr_await_hop inside scr_agen_yield_settle,
- * which is why async generators stay on the fiber lane -- and they are
- * refused at the FUNCTION level, in stacklessPlan, rather than by this set,
- * because the node kind alone cannot tell the two flavours apart. */
-export const STACKLESS_LOWERABLE_NODE_KINDS: ReadonlySet<string> =
-  new Set<SuspendingNodeKind>(["awaitExpr", "yieldExpr"]);
+ * The live decision is `straightLine` in ir/liveness.ts, which is where the
+ * surviving reasoning now lives, next to the predicate that acts on it. */
 
 /** Emit a fiber-only runtime primitive. The first argument is not decoration:
  * it forces the emission site to name a REGISTERED suspender, so a new
