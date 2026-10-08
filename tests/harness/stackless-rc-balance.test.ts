@@ -205,6 +205,50 @@ const CASES: ReadonlyArray<{ name: string; why: string; src: string }> = [
       "",
     ].join("\n"),
   },
+  /* THE HOP. `await <non-promise>` lowers to a hidden `%awaited` local, an
+   * async.hop, and a read of that local on the far side (lower-exprs.ts:2120).
+   * When the operand is refcounted that hidden local owns a reference ACROSS
+   * the park and is on the release path at function end -- the same shape the
+   * four rows above were written for, reached through a point that is not an
+   * IR node kind. It is worth its own rows because the hop is the first point
+   * whose frame membership nobody chose by hand: `%awaited` is an ordinary
+   * IrLocal, so coroFrameLocals carries it only because it is refcounted. */
+  {
+    name: "hop-string",
+    why: "a hidden %awaited local holding a string across a bare hop",
+    src: [
+      "async function main(): Promise<void> {",
+      '  const s = await ("h" + String(Date.now() % 3))',
+      "  console.log(s.length)",
+      "}",
+      "void main()",
+      "",
+    ].join("\n"),
+  },
+  {
+    name: "hop-array",
+    why: "the same through an array operand -- the leak would be the whole graph, not one string",
+    src: [
+      "async function main(): Promise<void> {",
+      '  const a = await [new Holder("x" + String(Date.now() % 3)).name]',
+      "  console.log(a.length)",
+      "}",
+      "void main()",
+      "",
+    ].join("\n"),
+  },
+  {
+    name: "hop-scalar",
+    why: "THE CONTROL: an f64 operand puts nothing refcounted across the hop, so it stays green",
+    src: [
+      "async function main(): Promise<void> {",
+      "  const n = await (Date.now() % 3)",
+      "  console.log(n >= 0 ? 1 : 0)",
+      "}",
+      "void main()",
+      "",
+    ].join("\n"),
+  },
   {
     name: "field-after-park",
     why: "THE CONTROL: reading the field after the park makes the object live, so it was in the frame all along and never leaked",

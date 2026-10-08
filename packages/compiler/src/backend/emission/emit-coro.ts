@@ -330,6 +330,37 @@ export function emitCoroAwait(
   return t.name;
 }
 
+/** The bare microtask hop at a lowerable suspending libCall.
+ *
+ * emitCoroAwait without the operand: no promise to move into the frame, no
+ * `sc_awaited`, and nothing to take on the far side. Everything else is the
+ * same park shape and MUST stay the same -- the owned-temp spill, the frame
+ * spill, the state write, the return to the scheduler, the label, and both
+ * reloads. A hop is a park: the C locals of the resume function are just as
+ * dead across it as they are across an await, and the first version of
+ * emitCoroAwait learned that by segfault.
+ *
+ * ONE scr_coro_hop per libCall point, so `parks + hops` is what must equal
+ * the dispatch's case count -- the countable invariant now has two spellings
+ * and `stackless-values` asserts their SUM rather than one of them. */
+export function emitCoroHop(E: CEmitter, fn: IrFunction, plan: StacklessPlan, index: number): void {
+  const owned: Temp[] = [];
+  for (const fr of E.frames) for (const t of fr) owned.push(t);
+  if (owned.length > 0) {
+    const seen = E.coroTempSpills.get(fn.name) ?? [];
+    for (const t of owned) if (!seen.some((x) => x.name === t.name)) seen.push(t);
+    E.coroTempSpills.set(fn.name, seen);
+  }
+  for (const t of owned) E.line(`sc_f->sc_tmp_${t.name} = ${t.name};`);
+  for (const line of coroSpill(fn, plan)) E.line(line);
+  E.line(`sc_b->state = ${index + 1};`);
+  E.line(`scr_coro_hop(sc_b);`);
+  E.line(`return; /* to the scheduler -- one ready_push charged */`);
+  E.line(`${coroLabel(index)}:;`);
+  for (const t of owned) E.line(`${t.name} = sc_f->sc_tmp_${t.name};`);
+  for (const line of coroReload(fn, plan)) E.line(line);
+}
+
 /** The completion path: what `return` and the top-level unwind emit instead
  * of a C return. */
 export function coroFinish(

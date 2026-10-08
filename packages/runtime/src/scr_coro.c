@@ -179,6 +179,31 @@ ScrCoroParkKind scr_coro_park(ScrCoroBase *base, ScrPromise *p) {
 #endif
 }
 
+/* The bare microtask hop: one turn, no operand.
+ *
+ * This is scr_coro_park's ARM 2 with the promise taken out -- same retain,
+ * same single scr_queue_microtask_raw, same "caller returns to the scheduler
+ * immediately" contract -- and it is the stackless twin of scr_await_yield
+ * the way park's arm 2 is the twin of scr_await_settled's hop.
+ *
+ * IT DELIBERATELY DOES NOT CONSULT scr_coro_tick_poison, and that asymmetry
+ * with park is the point rather than an omission. The poison models the
+ * pre-ES2019 extra turn on an AWAIT OF A SETTLED PROMISE: scr_await_settled
+ * has the poison arm and scr_await_yield -- the fiber hop -- does not. A
+ * stackless hop that poisoned would charge a turn its own reference lane
+ * never charges, so the two lanes would disagree by one turn under
+ * SCR_TICK_POISON and the oracle self-test would be measuring the
+ * instrument. The lane this must match is the fiber hop, not the fiber
+ * await.
+ *
+ * ONE scr_ready_push is charged per call, unconditionally -- there is no
+ * second arm, because there is no operand that could already be settled. */
+void scr_coro_hop(ScrCoroBase *base) {
+  base->flags |= SCR_CORO_SUSPENDED;
+  scr_coro_retain(base);
+  scr_queue_microtask_raw(&scr_coro_resume_entry, base, NULL);
+}
+
 /* ── resumption (INV-5 lives here) ────────────────────────────────────── */
 
 void scr_coro_resume_entry(void *base_as_void) {

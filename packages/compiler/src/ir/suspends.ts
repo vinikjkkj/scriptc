@@ -148,7 +148,50 @@ type _LibCallsCovered = AssertNever<
  * fiber-only, and a function containing one must not be admitted. Today the
  * state machine has no counterpart for the microtask hop, so `async.hop`
  * keeps its function on the fiber lane. */
-export const STACKLESS_LOWERABLE_LIB_CALLS: ReadonlySet<string> = new Set<SuspendingLibCall>([]);
+export const STACKLESS_LOWERABLE_LIB_CALL_LIST = [
+  "async.hop",
+] as const satisfies readonly SuspendingLibCall[];
+
+/** The lowerable ones, as a type, so the POINT KIND below is derived from
+ * this list rather than restated beside it. */
+export type StacklessLowerableLibCall = (typeof STACKLESS_LOWERABLE_LIB_CALL_LIST)[number];
+
+export const STACKLESS_LOWERABLE_LIB_CALLS: ReadonlySet<string> =
+  new Set<SuspendingLibCall>(STACKLESS_LOWERABLE_LIB_CALL_LIST);
+
+/* ── what a SUSPENSION POINT may be ──────────────────────────────────
+ *
+ * A point is not the same set as a NODE KIND, and the difference is the
+ * whole reason the hop was invisible to liveness for as long as it was: a
+ * lowerable suspending libCall has node kind "libCall", so a walk keyed on
+ * SUSPENDING_NODE_KINDS cannot see it, and a point it cannot see gets no
+ * state index, no live set and no dispatch case.
+ *
+ * BOUND IN BOTH DIRECTIONS ON PURPOSE. The type is DERIVED from the
+ * lowerable list, so registering a new lowerable libCall without giving it a
+ * point kind fails `_PointKindsCovered`; and the array is `satisfies` the
+ * type, so a kind with nothing behind it fails there. A union with no
+ * runtime enumeration is how a new member compiles clean and is
+ * default-rejected by every consumer in silence. */
+export type SuspensionPointKind = SuspendingNodeKind | `libCall:${StacklessLowerableLibCall}`;
+
+export const SUSPENSION_POINT_KINDS = [
+  "awaitExpr",
+  "awaitUnionExpr",
+  "yieldExpr",
+  "genResume",
+  "agenResume",
+  "libCall:async.hop",
+] as const satisfies readonly SuspensionPointKind[];
+
+type _PointKindsCovered = AssertNever<
+  Exclude<SuspensionPointKind, (typeof SUSPENSION_POINT_KINDS)[number]>
+>;
+
+/** The point kind a lowerable libCall contributes. One spelling, one place. */
+export function libCallPointKind(fn: StacklessLowerableLibCall): SuspensionPointKind {
+  return `libCall:${fn}`;
+}
 
 /** Emit a fiber-only runtime primitive. The first argument is not decoration:
  * it forces the emission site to name a REGISTERED suspender, so a new
@@ -198,5 +241,6 @@ export type Fenced<S extends string> =
 const _used: readonly unknown[] = [
   null as unknown as _NodeKindsCovered,
   null as unknown as _LibCallsCovered,
+  null as unknown as _PointKindsCovered,
 ];
 void _used;

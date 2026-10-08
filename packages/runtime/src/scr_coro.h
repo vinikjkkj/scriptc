@@ -187,6 +187,13 @@ ScrPromise *scr_coro_spawn(ScrCoroBase *base);
  * The caller MUST return to the scheduler immediately after this returns. */
 ScrCoroParkKind scr_coro_park(ScrCoroBase *base, ScrPromise *p);
 
+/** The bare microtask hop: suspend for exactly one turn with no operand.
+ * park's arm 2 without the promise, and the stackless twin of the FIBER hop
+ * (scr_await_yield), which is why it takes no tick poison -- see the note on
+ * the definition. Charges exactly one scr_ready_push, unconditionally. The
+ * caller MUST return to the scheduler immediately after this returns. */
+void scr_coro_hop(ScrCoroBase *base);
+
 /** Re-enter the frame: restores ALS and the exception cell (INV-5), clears
  * the suspension's reference, and calls `resume`. This is what the ready
  * queue runs; generated code never calls it. */

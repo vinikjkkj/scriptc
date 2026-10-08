@@ -30,12 +30,23 @@
  * descended into: lambdas are lifted, so they cannot name this frame's
  * locals except through `captures`, which IS read here. */
 import type { IrExpr, IrFunction, IrStmt, SrcLoc } from "./nodes.js";
-import { SUSPENDING_NODE_KINDS, SUSPENDING_LIB_CALLS, STACKLESS_LOWERABLE_LIB_CALLS } from "./suspends.js";
+import {
+  SUSPENDING_NODE_KINDS,
+  SUSPENDING_LIB_CALLS,
+  STACKLESS_LOWERABLE_LIB_CALLS,
+  libCallPointKind,
+  type StacklessLowerableLibCall,
+  type SuspensionPointKind,
+} from "./suspends.js";
 
 /** One suspension point and what a frame would have to hold across it. */
 export interface SuspensionPoint {
   /** The IR node kind that suspends. */
-  kind: "awaitExpr" | "awaitUnionExpr" | "yieldExpr" | "genResume" | "agenResume";
+  /** What suspends here. NOT the IR node kind: a lowerable suspending
+   * libCall has node kind `"libCall"` and contributes `libCall:<fn>`. The
+   * union is derived from the lowerable list in suspends.ts and bound to a
+   * runtime enumeration in both directions. */
+  kind: SuspensionPointKind;
   loc: SrcLoc;
   /** `IrLocal.id`s live ACROSS this point: read after it resumes, or held
    * by a box a closure still references. Excludes the locals this very
@@ -140,6 +151,12 @@ interface FoundSuspension {
    * converted body and fails on any temp established before a resume label
    * and read after it without a reload. */
   nested: boolean;
+  /** The POINT kind, resolved here rather than re-derived by the caller.
+   * For a node-kind suspension it is the node's own `kind`; for a lowerable
+   * suspending libCall the node kind is the useless `"libCall"`, so the
+   * point kind names the CALL. One resolution site, so the two cannot
+   * drift. */
+  pointKind: SuspensionPointKind;
 }
 
 /** Every suspension node inside this expression tree, with whether it sits
@@ -231,8 +248,27 @@ function suspensionsOf(root: IrExpr | null): FoundSuspension[] {
     }
     const rec = n as Record<string, unknown>;
     const kind = rec["kind"];
-    const isSusp = typeof kind === "string" && SUSPENSION_KINDS.has(kind);
-    if (isSusp) out.push({ node: rec, nested: depth > 0 });
+    const nodeSusp = typeof kind === "string" && SUSPENSION_KINDS.has(kind);
+    // A LOWERABLE suspending libCall is a point too, and nothing but this
+    // line makes it one. Its node kind is "libCall", so the SUSPENSION_KINDS
+    // test above cannot see it -- which is exactly why `async.hop` had no
+    // state index, no live set and no dispatch case for as long as it was
+    // judged only by `hasFiberOnlySuspender`. A FIBER-ONLY libCall is still
+    // not a point: it keeps its whole function off the lane instead.
+    const libSusp =
+      kind === "libCall" &&
+      typeof rec["fn"] === "string" &&
+      STACKLESS_LOWERABLE_LIB_CALLS.has(rec["fn"]);
+    const isSusp = nodeSusp || libSusp;
+    if (isSusp) {
+      out.push({
+        node: rec,
+        nested: depth > 0,
+        pointKind: libSusp
+          ? libCallPointKind(rec["fn"] as StacklessLowerableLibCall)
+          : (kind as SuspensionPointKind),
+      });
+    }
     // A node with exactly ONE operand is transparent to nesting: see
     // operandCount. Belt and braces on a fence this file does not own -- the
     // classification and the count come from the same call, so they cannot
@@ -373,22 +409,30 @@ function recordPoints(
     for (const s of susps) {
       const loc = s.node["loc"] as SrcLoc | undefined;
       ctx.points.push({
-        kind: s.node["kind"] as SuspensionPoint["kind"],
+        kind: s.pointKind,
         loc: loc ?? { file: "", start: 0, end: 0 },
         live: s.nested ? union(base, enclosingReads) : new Set(base),
         nestedInExpression: s.nested,
+        // D2c: a lowerable libCall point is straight-line on the same terms
+        // as an `awaitExpr`. It is not a weaker case -- a bare hop carries no
+        // operand at all, so there is no promise to own across the park and
+        // nothing to take on the far side. What it still owes is the
+        // position: inside a loop, a finally or a switch it is blocked for
+        // exactly the reasons an await is.
         straightLine:
           ctx.loopDepth === 0 &&
           ctx.finallyDepth === 0 &&
           ctx.switchDepth === 0 &&
           ctx.rootOk &&
-          s.node["kind"] === "awaitExpr",
+          (s.pointKind === "awaitExpr" || s.pointKind.startsWith("libCall:")),
         blockers: [
           ...(ctx.loopDepth > 0 ? ["loop"] : []),
           ...(ctx.finallyDepth > 0 ? ["finally"] : []),
           ...(ctx.switchDepth > 0 ? ["switch"] : []),
           ...(ctx.rootOk ? [] : ["rootOk:" + ctx.stmtKind]),
-          ...(s.node["kind"] === "awaitExpr" ? [] : ["kind=" + String(s.node["kind"])]),
+          ...(s.pointKind === "awaitExpr" || s.pointKind.startsWith("libCall:")
+            ? []
+            : ["kind=" + s.pointKind]),
         ],
         enclosingForOf: ctx.forOfDepth,
       });

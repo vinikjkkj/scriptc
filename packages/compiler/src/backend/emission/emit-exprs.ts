@@ -10,7 +10,7 @@ import { mangleClassNew, mangleClassRetain, mangleClassStruct, mangleField, mang
 import { OVERFLOW_MEMBER, OWNMASK_MEMBER, SRCPROTO_MEMBER, TOSTR_MEMBER, nullProtoCondC, ownPresentCondC } from "./emit-shapes.js";
 import { dynDestrCheckHelper, dynIterNHelper, dynKeyGetHelper } from "./emit-walkers.js";
 import { genResultThunkFor } from "./emit-async.js";
-import { emitCoroAwait } from "./emit-coro.js";
+import { emitCoroAwait, emitCoroHop } from "./emit-coro.js";
 import { isStableReceiverOperand } from "../../ir/analysis.js";
 import { wsGlobalCtorFor } from "./emit-ws.js";
 
@@ -6439,6 +6439,26 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             return finish(`scr_assert_expects_err_dyn(${arg(0)}, ${arg(1)}, ${arg(2)}, ${arg(3)})`);
           case "async.hop":
             E.usesTimers = true;
+            if (E.currentCoro !== null) {
+              // STACKLESS: the hop is a POINT now, so it draws a state index
+              // from the same counter an await does and resumes at its own
+              // label. Same bound check, same reason -- a point emitted twice
+              // writes a state the dispatch has no case for, and the resume
+              // takes default: abort().
+              if (E.coroPointIndex >= E.currentCoro.points.length) {
+                throw new Error(
+                  `emitter bug: coroutine state index ${E.coroPointIndex} is past the ` +
+                    `dispatch, which emits case 1..${E.currentCoro.points.length} for ` +
+                    `${E.currentFn!.name}. A suspension node was emitted more than ` +
+                    `once: the extra park would write a state with no case and the ` +
+                    `resume would take default: abort().`,
+                );
+              }
+              emitCoroHop(E, E.currentFn!, E.currentCoro, E.coroPointIndex++);
+              // No pending check: a hop carries no operand, so there is no
+              // rejection for it to re-throw. The fiber arm emits none either.
+              return finish(`((void)0)`);
+            }
             // Through fiberOnly: a fiber-only primitive may only be emitted
             // by naming the REGISTERED suspender it belongs to, so it cannot
             // reach the output without liveness being able to see it. This is

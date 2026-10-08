@@ -206,6 +206,32 @@ const WRAPPERS: ReadonlyArray<{ name: string; take: string; finish: string; conv
   { name: "wgr", take: "ref", finish: "ref", converted: true }, // C: ref
   { name: "wgx", take: "f64", finish: "f64", converted: true }, // C: BOXED target
   { name: "wgp", take: "f64", finish: "f64", converted: true }, // C: compound assign, await in bin.right
+  // THE HOP SHAPES -- `await <non-promise>`, which lowers to a hidden local,
+  // an `async.hop` libCall and a read of that local. They went in as NEGATIVE
+  // entries and the ledger named all six the moment the hop became a
+  // lowerable suspension point.
+  //
+  // The hop is the first POINT that is not an IR node kind: its node kind is
+  // "libCall", so for as long as liveness keyed on SUSPENDING_NODE_KINDS it
+  // could not be seen, could not draw a state index, and kept its whole
+  // function on the fiber lane via hasFiberOnlySuspender.
+  //
+  // What each one is here to prove: the hidden `%awaited` local is written
+  // BEFORE the hop and read AFTER it, so every row fails loudly if the frame
+  // does not carry it across the park. The refcounted rows additionally put
+  // that local on the release path.
+  { name: "whn", take: "f64", finish: "f64", converted: true }, // f64 operand
+  { name: "whs", take: "ref", finish: "ref", converted: true }, // string: refcounted across the hop
+  { name: "wha", take: "ref", finish: "ref", converted: true }, // array: refcounted across the hop
+  { name: "whu", take: "ref", finish: "bool", converted: true }, // bare unit (await null)
+  { name: "whv", take: "void", finish: "ref", converted: true }, // void operand
+  { name: "who", take: "ref", finish: "void", converted: true }, // the ordering DRIVER -- ordinary awaits, no hop
+  // THE ROW THAT ARMS THE TURN GUARD. `who` drives the interleaving but
+  // holds no hop at all, so it converts with or without this slice and
+  // would have stayed green if hops stopped converting -- caught by the
+  // revert control, which named five of six. `hopsteps` is the function
+  // whose three hops the 1:1 interleaving actually measures.
+  { name: "hopsteps", take: "void", finish: "void", converted: true },
 ];
 
 const SOURCE = `
@@ -405,6 +431,40 @@ async function wgx(n: number): Promise<number> { let x = 1; const c = (): number
 // through the assign statement rather than through a varDecl.
 async function wgp(n: number): Promise<number> { let x = 5; x += await pf(n); return x; }
 
+/* THE HOP. 'await <non-promise>' takes exactly ONE microtask turn and yields
+ * the operand itself (lower-exprs.ts:2120): a hidden local, an async.hop, and
+ * a read of that local on the far side. Each row below carries a magnitude
+ * that a lost reload cannot imitate. */
+function vv(): void { }
+async function whn(n: number): Promise<number> { const x = await (n * 100); return x + 7; }
+async function whs(v: string): Promise<string> { const x = await ("h" + v); return x + "/" + x.length; }
+async function wha(n: number): Promise<number[]> { const x = await [n, n + 1]; return x; }
+async function whu(): Promise<boolean> { const x = await null; return x === null; }
+async function whv(): Promise<string> { await vv(); return "void-hop"; }
+
+/* THE TURN COUNT, which no value above can see. A hop that costs ZERO turns
+ * answers every value correctly and still reorders the program; a hop that
+ * costs TWO does the same the other way. Two coroutines stepping through
+ * three hops each interleave 1:1 if and only if each hop is exactly one
+ * turn, so the expected string is hand-computable and both wrong answers are
+ * distinguishable from it AND from each other:
+ *   one turn  -> a1 b1 a2 b2 a3 b3     (the answer)
+ *   zero      -> a1 a2 a3 b1 b2 b3
+ *   two       -> a1 b1 ... with a gap, which is neither of the above.
+ * The two lanes compute this through genuinely different code -- the fiber
+ * hop is scr_await_yield, the stackless one is scr_coro_hop -- so comparing
+ * them IS a control here, and the absolute string is pinned besides. */
+const horder: string[] = [];
+async function hopsteps(tag: string): Promise<void> {
+  horder.push(tag + "1"); await 0;
+  horder.push(tag + "2"); await 0;
+  horder.push(tag + "3");
+}
+async function who(): Promise<void> {
+  const a = hopsteps("a"); const b = hopsteps("b");
+  await a; await b;
+}
+
 async function main(): Promise<void> {
   const f = await wf(41);
   console.log("f64   ", f);
@@ -462,6 +522,10 @@ async function main(): Promise<void> {
   console.log("asg-c ", await wgc("k"), "|", await wgc2("k"));
   console.log("asg-l ", await wgf(3), "|", await wgb(true), "|", await wgs("y"), "|", (await wgr(4)).join(","));
   console.log("asg-x ", await wgx(3), "|", await wgp(3));
+  console.log("hop   ", await whn(3), "|", await whs("k"), "|", (await wha(4)).join(","));
+  console.log("hop2  ", await whu(), "|", await whv());
+  await who();
+  console.log("hopord", horder.join(" "));
   console.log("done");
 }
 void main();
@@ -709,6 +773,12 @@ describe("the stackless lane answers what the fiber lane answers", () => {
       "asg-c  Ak! | Bk!B",
       "asg-l  4 | true | y!/2 | 4,5",
       "asg-x  4004 | 9",
+      // The hop rows. whn: 3*100 + 7. whs: "hk" is 2 chars. wha: the awaited
+      // array survives the park. whu: `await null` answers null, not
+      // undefined. who: 1:1 interleaving is one turn per hop, exactly.
+      "hop    307 | hk/2 | 4,5",
+      "hop2   true | void-hop",
+      "hopord a1 b1 a2 b2 a3 b3",
     ];
     for (const line of ASSIGN_LINES) {
       expect(fiber, `the reference arm must already answer: ${line}`).toContain(line);
