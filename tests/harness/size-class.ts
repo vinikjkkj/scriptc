@@ -1952,8 +1952,49 @@ export const STATIC_CLASS_TEXT_RECORDED = platform === "win32" ? 543_702 : null;
 
 /** .text VirtualSize of the canonical regex program, same commit, same lane.
  * Recorded separately rather than derived: the two classes do not move
- * together, which is why the file figures are separate too. */
-export const REGEX_CLASS_TEXT_RECORDED = platform === "win32" ? 630_150 : null;
+ * together, which is why the file figures are separate too.
+ *
+ * RE-RECORDED 2026-10-06: 630,150 -> 630,182. The previous figure did not
+ * reproduce at the commit it names. Measured at e03bdf0aa in a fresh
+ * worktree with NO packages/runtime/vendor/.cache, in RECORDED_LANE with
+ * the knob absent, the regex program is 630,182 while the hello-world is
+ * 543,702 -- exact. Same tree, same lane, same run: one figure reproduces
+ * and the other is 32 bytes out.
+ *
+ * WHAT THE 32 BYTES WERE. Not a code change. e03bdf0aa, main and the
+ * sync-generator branch all measure 630,182 today, so there is no step in
+ * the history to attribute them to. The regex program links libregexp and
+ * libunicode and the hello-world links neither, and a stale vendor object
+ * cache for exactly those two libraries was measured the same day moving
+ * this program by 144 bytes and the hello-world by zero -- under an
+ * UNCHANGED cache key, because the key names the source hash, variant,
+ * driver and target but not the compiler that built the object. The
+ * recording session had its own vendor objects. That is a mechanism of the
+ * right shape and the right selectivity, not a reconstruction of a session
+ * that is gone.
+ *
+ * WHY RE-RECORDING IS RIGHT HERE AND WAS WRONG BEFORE. It was refused
+ * earlier on the grounds that it would erase an unexplained number before
+ * anyone could ask what it meant, and that was correct while the 32 bytes
+ * were UNATTRIBUTED. The measurement above attributed them, and it could
+ * have come out the other way: had e03bdf0aa reproduced 630,150, the gap
+ * would have been a real code step and this constant would not have moved.
+ * The ban lifted because attribution arrived, not because it got
+ * inconvenient.
+ *
+ * AND WHY IT HAD TO MOVE. The anchor's budget is TEXT_DRIFT_TOLERANCE, 256
+ * bytes. Holding a figure 32 bytes off left the test 12.5% less room to
+ * catch a real regression than its own comment claimed, for a reason
+ * nothing in this file recorded.
+ *
+ * TAKING A FIGURE HERE: build in RECORDED_LANE with the vendor object
+ * cache ABSENT, or you may be measuring another toolchain's objects. The
+ * lane assert on `zig version` does not protect you -- it pins what you
+ * compile now, not what a cache already holds, and vendor/.cache is
+ * gitignored so git status, the dirty-worktree guard and the treehash are
+ * all blind to it. See docs/stackless-sync-generator-results.md 13.2-15.1.
+ */
+export const REGEX_CLASS_TEXT_RECORDED = platform === "win32" ? 630_182 : null;
 
 /** The section-anchor complaint, or null when within tolerance. Same shape as
  * recordedSizeComplaint -- a string, so the caller owns the assertion and this

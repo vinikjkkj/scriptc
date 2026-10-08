@@ -3,7 +3,7 @@
  * branch/condition helpers they share with expression emission. All frame,
  * scope, and temp state lives on CEmitter; these functions drive it. */
 import type { CEmitter, ScopeEntry } from "./emitter.js";
-import type { IrFunction, IrLocal } from "../../ir/nodes.js";
+import type { IrFunction, IrLocal, IrType } from "../../ir/nodes.js";
 import { mangleField, mangleGlobal, mangleLocal, mangleRawParam } from "../mangle.js";
 import { BOOL, CAUGHT, F64, IrExpr, IrStmt, RUNTIME_ERROR_CLASSES, isRefCounted, ownMaskKeyBit } from "../../ir/nodes.js";
 import { boxAccess, cDecl, cStringLiteral, elemAccess, vAdapters } from "./emit-types.js";
@@ -11,6 +11,22 @@ import { OVERFLOW_MEMBER, OWNMASK_MEMBER } from "./emit-shapes.js";
 import { emitStableReceiver } from "./emit-exprs.js";
 import { writesLocal } from "../../ir/analysis.js";
 import { coroPrologue, coroDispatch, coroFinish, coroField } from "./emit-coro.js";
+import { genCoroFinish } from "./emit-gen-coro.js";
+/* A converted GENERATOR completes WITHOUT settling a promise -- it owns
+ * none; scr_coro_finish_* would fulfil a NULL one. Dispatching in a single
+ * helper rather than at each of the three return paths is what keeps them
+ * from drifting: a fourth return path added later gets the right one by
+ * calling this, and a call to coroFinish is then visibly the odd one. */
+function finishLines(
+  E: CEmitter,
+  retType: IrType,
+  valueName: string | null,
+  lifted: boolean,
+): string[] {
+  return E.currentFn?.generator !== undefined
+    ? genCoroFinish(retType, valueName, lifted)
+    : coroFinish(E, retType, valueName, lifted);
+}
 import { createRequire } from "node:module";
 import { join, dirname } from "node:path";
 import { readFileSync } from "node:fs";
@@ -325,12 +341,17 @@ export function emitFunction(E: CEmitter, fn: IrFunction): void {
       if (local.boxed) {
         const box = mangleLocal(p.localId);
         if (coro !== null) {
-          // STACKLESS: emitCoroSpawns built the box and the dispatch above has
+          // STACKLESS: the SPAWN built the box and the dispatch above has
           // already reloaded it from the frame. Constructing it again here
           // would redeclare the local the resume function declares at its top,
           // and would rebuild the box on the entry path only -- so the scope
           // still OWNS it (one release at function end, as on the fiber path),
           // but nothing is emitted for it.
+          //
+          // "the spawn" and not emitCoroSpawns by name: a converted GENERATOR
+          // is spawned by emitGenCoroSpawn, which builds the box the same way
+          // and for the same reasons. Naming one of the two is how a reader
+          // concludes the other case is unhandled.
           fnScope.push({ name: box, type: p.type, boxed: true });
         } else {
           E.line(`ScrBox *${box} = ${E.boxNewC(p.type)}; /* ${p.name} (boxed param) */`);
@@ -391,7 +412,7 @@ export function emitFunction(E: CEmitter, fn: IrFunction): void {
       // coroutine has to do it here, because the body IS the trampoline.
       // Unreachable when the body really did end in a return on every path,
       // and harmless there.
-      for (const l of coroFinish(E, E.currentReturnType, null, fn.captures !== undefined)) E.line(l);
+      for (const l of finishLines(E, E.currentReturnType, null, fn.captures !== undefined)) E.line(l);
     }
     E.scopes.pop();
 
@@ -1042,14 +1063,14 @@ export function emitStmt(E: CEmitter, s: IrStmt): void {
             // caller on the stack after the first resume. It FULFILLS the
             // promise the frame owns, which is what the fiber trampoline
             // does at the end of the body.
-            for (const l of coroFinish(E, E.currentReturnType, v.name, E.currentFn?.captures !== undefined)) E.line(l);
+            for (const l of finishLines(E, E.currentReturnType, v.name, E.currentFn?.captures !== undefined)) E.line(l);
           } else {
             E.line(`return ${v.name};${E.srcComment(s.loc)}`);
           }
         } else {
           E.releaseForJump(0, 0);
           if (E.currentCoro !== null) {
-            for (const l of coroFinish(E, E.currentReturnType, null, E.currentFn?.captures !== undefined)) E.line(l);
+            for (const l of finishLines(E, E.currentReturnType, null, E.currentFn?.captures !== undefined)) E.line(l);
           } else {
             E.line(`return;${E.srcComment(s.loc)}`);
           }

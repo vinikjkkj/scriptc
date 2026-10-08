@@ -436,10 +436,23 @@ function recordPoints(
         //
         // It survives as a frame-SIZE and diagnostic input the way
         // `enclosingForOf` did when it stopped being an admission input.
+        // A `yieldExpr` is admitted alongside the await kinds. It is kept in
+        // main's `pointKind` spelling rather than reverting the predicate to
+        // the branch's `STACKLESS_LOWERABLE_NODE_KINDS.has(node.kind)` form:
+        // a yield's pointKind IS its node kind, so the two agree on this
+        // point, and keeping one spelling keeps the libCall arm -- which the
+        // set form cannot express -- from being quietly dropped.
+        //
+        // SYNCHRONOUS generators only. The async form is refused at the
+        // FUNCTION level below, because its yield calls scr_await_hop inside
+        // scr_agen_yield_settle and the hop is the one suspender this lane
+        // declares it cannot lower. The node kind alone cannot tell the two
+        // flavours apart, which is why the refusal is not expressed here.
         straightLine:
           ctx.rootOk &&
           (s.pointKind === "awaitExpr" ||
             s.pointKind === "awaitUnionExpr" ||
+            s.pointKind === "yieldExpr" ||
             s.pointKind.startsWith("libCall:")),
         blockers: [
           // D2f: the last four statement positions join, as ONE slice because
@@ -492,6 +505,7 @@ function recordPoints(
           ...(ctx.rootOk ? [] : ["rootOk:" + ctx.stmtKind]),
           ...(s.pointKind === "awaitExpr" ||
           s.pointKind === "awaitUnionExpr" ||
+          s.pointKind === "yieldExpr" ||
           s.pointKind.startsWith("libCall:")
             ? []
             : ["kind=" + s.pointKind]),
@@ -973,9 +987,31 @@ function hasFiberOnlySuspender(fn: IrFunction): boolean {
 }
 
 export function stacklessPlan(fn: IrFunction): StacklessPlan | null {
-  if (fn.async !== true) return null;
+  /* A SYNCHRONOUS GENERATOR IS IN, and the two gates it used to die at were
+   * not saying what they appeared to say.
+   *
+   * `fn.async !== true` caught it FIRST, one line above the generator gate --
+   * so the comment about generators needing "the second machine" explained a
+   * line that never fired for a synchronous one. Measured on the 244-dump
+   * corpus when this was written: 24 of the 47 functions blocked only by a
+   * generator cause are synchronous, so more than half the cost of the
+   * exclusion was charged to a gate with no stated reason at all.
+   *
+   * An ASYNC generator stays out, and not for the stated reason either: its
+   * yield calls scr_await_hop inside scr_agen_yield_settle, and the hop is
+   * the one suspender this lane declares it cannot lower. Those belong to the
+   * hop front, not to this one.
+   *
+   * REACH ON THIS RIG'S POPULATION IS ZERO, stated so nobody reads app182's
+   * unchanged coverage as evidence either way: all three of app182's
+   * remaining generator-family functions are ASYNC (two yieldExpr, one
+   * agenResume), so this gate admits none of them. The clause is measurably
+   * inapplicable here, not unmeasured, and its adjudicator is the generator
+   * lane parity rather than a coverage delta. */
+  const syncGenerator = fn.generator !== undefined && fn.async !== true;
+  if (fn.async !== true && !syncGenerator) return null;
   if (hasFiberOnlySuspender(fn)) return null;
-  if (fn.generator !== undefined) return null;
+  if (fn.generator !== undefined && fn.async === true) return null;
   if (fn.asyncCacheGlobal !== undefined || fn.asyncCycleCacheGlobal !== undefined) return null;
   // A boxed PARAM used to be refused here. The stated reason -- "both the raw
   // name and the box would have to be frame state" -- was not the mechanism.

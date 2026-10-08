@@ -58,6 +58,9 @@ void scr_coro_release(ScrCoroBase *base) {
   if (base == NULL || --base->rc != 0) return;
   if (base->promise != NULL) scr_promise_release(base->promise);
   scr_als_ctx_release(base->als);
+#ifdef SCR_RC_AUDIT
+  scr_note_coro_free();
+#endif
   free(base);
 }
 
@@ -69,6 +72,9 @@ void *scr_coro_alloc(size_t size, ScrCoroResume resume, bool has_exc) {
    * able to release them unconditionally. */
   ScrCoroBase *base = (ScrCoroBase *)calloc(1, size);
   if (base == NULL) scr_coro_oom();
+#ifdef SCR_RC_AUDIT
+  scr_note_coro_alloc();
+#endif
   scr_coro_init(base, resume, scr_promise_new(), has_exc);
   return base;
 }
@@ -206,6 +212,50 @@ void scr_coro_hop(ScrCoroBase *base) {
 
 /* ── resumption (INV-5 lives here) ────────────────────────────────────── */
 
+/* INV-5, EXTRACTED. These two are ALL of the invariant: install the frame
+ * context, restore it. They were inline in scr_coro_resume_entry until a
+ * second resumer appeared -- the consumer-driven path for a synchronous
+ * generator, which settles no promise and holds no suspension reference.
+ *
+ * THE CUT IS HERE AND NOT AROUND THE WHOLE BODY, and that distinction was
+ * read rather than assumed. The promise handling below LOOKS like part of
+ * the invariant because scr_coro_finish_throw runs between install and
+ * restore, but that is an ORDERING constraint, not membership: finish_throw
+ * reads the ACTIVE cell. Cutting around the outcome check instead would
+ * have forced it to learn about generators -- a yielding frame is neither
+ * DONE nor SUSPENDED, which is exactly the case it aborts on -- and the
+ * extraction would not have been pure. Cut here, resume_entry is unchanged
+ * in behaviour and every line of it still runs in the same order.
+ *
+ * Factoring rather than conditioning was decided on failure mode: a wrong
+ * factoring breaks BOTH resumers loudly on the first test, while an `if`
+ * inside resume_entry fails low and far -- settling a promise that does not
+ * exist, or never settling one and hanging. */
+void scr_coro_state_in(ScrCoroBase *base, ScrCoroTaskState *st) {
+  st->prev_als = scr_als_active;
+#ifndef SCR_CORO_ALS_BLIND
+  scr_als_active = &base->als;
+#else
+  /* The REGRESSION, reproducible on demand: do NOT install the frame's own
+   * AsyncLocalStorage context, so a resumed body reads whatever is ambient on
+   * the loop's stack. scr_switch did this swap for free on every fiber
+   * switch; a state machine does not, and nothing else in the runtime would
+   * notice it missing. coromixed's ALS arm must go red with this set.
+   *
+   * It moved HERE with the invariant, and that matters: the knob now covers
+   * BOTH resumers at once, so a generator resume that forgot ALS would be
+   * caught by the same arm rather than needing a second one. */
+  (void)base;
+#endif
+  st->mine = scr_coro_exc(base);
+  st->prev_cell = (st->mine != NULL) ? scr_exc_swap_cell(st->mine) : NULL;
+}
+
+void scr_coro_state_out(ScrCoroTaskState *st) {
+  if (st->mine != NULL) (void)scr_exc_swap_cell(st->prev_cell);
+  scr_als_active = st->prev_als;
+}
+
 void scr_coro_resume_entry(void *base_as_void) {
   ScrCoroBase *base = (ScrCoroBase *)base_as_void;
 
@@ -217,18 +267,8 @@ void scr_coro_resume_entry(void *base_as_void) {
    * Exception cell: only a fat frame owns one. A lean frame deliberately
    * borrows the ambient cell -- it can never be suspended with an exception
    * pending, so there is nothing of its own to preserve across the gap. */
-  ScrAlsCtx **prev_als = scr_als_active;
-#ifndef SCR_CORO_ALS_BLIND
-  scr_als_active = &base->als;
-#else
-  /* The REGRESSION, reproducible on demand: do NOT install the frame's own
-   * AsyncLocalStorage context, so a resumed body reads whatever is ambient on
-   * the loop's stack. scr_switch did this swap for free on every fiber
-   * switch; a state machine does not, and nothing else in the runtime would
-   * notice it missing. coromixed's ALS arm must go red with this set. */
-#endif
-  ScrExcCell *mine = scr_coro_exc(base);
-  ScrExcCell *prev_cell = (mine != NULL) ? scr_exc_swap_cell(mine) : NULL;
+  ScrCoroTaskState st;
+  scr_coro_state_in(base, &st);
 
   base->flags &= ~(uint32_t)SCR_CORO_SUSPENDED;
   base->flags |= SCR_CORO_RUNNING;
@@ -260,8 +300,7 @@ void scr_coro_resume_entry(void *base_as_void) {
 
   /* INV-5, out. Restores whatever was active before, which is main's cell on
    * a loop resume and some other frame's when a coroutine resumes inline. */
-  if (mine != NULL) (void)scr_exc_swap_cell(prev_cell);
-  scr_als_active = prev_als;
+  scr_coro_state_out(&st);
 
   /* The suspension's reference. A frame that finished drops to its last
    * reference here and is freed; one that parked again was retained by the

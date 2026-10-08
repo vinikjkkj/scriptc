@@ -52,7 +52,9 @@ import { cType, releaseCallC, cStringLiteral, cDecl } from "./emit-types.js";
 import { computeMayThrow } from "./may-throw.js";
 import { dynDesc, unionTruthyHelper, unionEqHelper, unionToStrHelper, unionJoinHelper, jsonWriteHelper, jsonIndentHelper, dynMatchHelper, dynCheckHelper, dynArmHelper, dynFuncBoxHelper, dynToStrHelper, caughtToDynHelper, toDynHelper, dynClassDesc, recordKeyGetHelper, recordKeySetHelper, recordWideHelper } from "./emit-walkers.js";
 import { VtSlot, ClassMeta, emitStructDefs, vtEntriesFor, vtSlotParams, emitVtableDecls, emitVtableInstances, emitVtAdapterDefs, emitHierarchyClassHelpers, emitClassObjs, emitCtorThunkDefs, errorVtStampLines, emitterVtStampLines, streamVtStampLines, traceAdapterC, traceArgC, boxNewC, arrNewC } from "./emit-shapes.js";
-import { coroPlans, emitCoroFrames, emitCoroSpawns, coroFinish, coroUnwind } from "./emit-coro.js";
+import { emitCoroFrames, emitCoroSpawns, coroFinish, coroUnwind } from "./emit-coro.js";
+import { coroPlans } from "../../ir/coro-plans.js";
+import { genCoroUnwind } from "./emit-gen-coro.js";
 import { agenSettleThunkFor, emitAsyncScaffolding, childDataThunkFor, childExitThunkFor, childExitThunkFor2, closeBindThunkFor, connectSockThunkFor, closeOverrideWrapFor, dgramMsgThunkFor, dnsLookupThunkFor, netLookupAnswerThunkFor, emitterInvokeThunkFor, streamCbThunkFor, streamDataThunkFor, promiseAdoptAdapterFor, raceAdapterFor, resolveThunkFor, sniAnswerThunkFor } from "./emit-async.js";
 import { emitNpmEmbedding, islandAdapter, islandTypedAdapter } from "./emit-island.js";
 import { emitFunction, emitBlock, emitStmts, emitStmt, emitTryCatch, emitSwitch, mergeBrace, emitBranchInto, emitCondition } from "./emit-stmts.js";
@@ -1301,6 +1303,36 @@ export class CEmitter {
     // functions emitted here, or the module gets two spawn wrappers with the
     // same name (or none).
     this.coroPlansByFn = coroPlans(this.mod.functions);
+    /* NO ASYNC GENERATOR MAY BE IN THE MAP, checked here rather than trusted
+     * from liveness.ts -- because the line that holds it there is
+     * `fn.generator !== undefined && fn.async === true`, which is precisely
+     * the line the hop front deletes to admit them.
+     *
+     * Every consumer downstream of this map that discriminates a generator
+     * does it on `fn.generator !== undefined`, and that is TRUE for an async
+     * one. A property test is only immune if the property SPLITS the set the
+     * way the body needs, and this one splits a three-way world (not a
+     * generator / sync generator / async generator) two ways. So the yield
+     * arm would emit the synchronous lowering -- no hop, no settle thunk --
+     * genCoroFinish would complete a handle with a request promise in
+     * flight, and emitGenScaffolding's own `!fn.async` guard would hand the
+     * function to the fibre scaffolding while the frame, the resume function
+     * and the frame spawn were emitted around it. One test here turns all of
+     * that into a named error at the moment the gate opens.
+     *
+     * IT CANNOT FIRE TODAY and says so: this is a guard for the next
+     * widening, not a control. Nothing about it being green is evidence. */
+    for (const name of this.coroPlansByFn.keys()) {
+      const planned = this.fnByName.get(name);
+      if (planned !== undefined && planned.generator !== undefined && planned.async === true) {
+        throw new Error(
+          `emitter bug: async generator ${name} entered the stackless plan map. ` +
+            `This lowering is written for SYNCHRONOUS generators only -- no ` +
+            `microtask hop, no settle thunk, no request promise. Admitting ` +
+            `async generators means writing that lowering, not deleting this check.`,
+        );
+      }
+    }
     // Function bodies are emitted first (into this.lines) so the literal
     // table is complete; the file is then assembled around them.
     for (const fn of this.mod.functions) {
@@ -2611,9 +2643,21 @@ export class CEmitter {
     }
     this.releaseForJump(0, 0);
     if (this.currentCoro !== null) {
-      // The frame owns the promise: an escaping exception settles it as a
-      // rejection rather than unwinding past a caller that no longer exists.
-      for (const l of coroUnwind(this.currentFn?.captures !== undefined)) this.line(l);
+      // THE FOURTH COMPLETION PATH, dispatched on the PROPERTY exactly as
+      // finishLines in emit-stmts.ts dispatches the other three. A converted
+      // GENERATOR owns no promise -- decision 3 leaves base->promise NULL --
+      // and coroUnwind's scr_coro_finish_throw rejects it. The three RETURN
+      // paths were routed away from coroFinish and this one was not, because
+      // it lives in a different file and the count that drove that fix was a
+      // count of return paths.
+      //
+      // For an async body: the frame owns the promise, and an escaping
+      // exception settles it as a rejection rather than unwinding past a
+      // caller that no longer exists.
+      const lifted = this.currentFn?.captures !== undefined;
+      const lines =
+        this.currentFn?.generator !== undefined ? genCoroUnwind(lifted) : coroUnwind(lifted);
+      for (const l of lines) this.line(l);
       return;
     }
     const t = this.currentReturnType;

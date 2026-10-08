@@ -19,6 +19,7 @@
  */
 #define _XOPEN_SOURCE 700
 #include "scr_runtime.h"
+#include "scr_coro.h"
 
 #include <errno.h>
 #include <fcntl.h>
@@ -4695,9 +4696,22 @@ static void scr_gen_slot_reset(ScrGenSlot *s) {
   s->release_fn = NULL;
 }
 
+/* WHAT BACKS THIS GENERATOR. Stored, never inferred from `fiber` being
+ * NULL -- `fiber` is ALSO NULL on a torn-down fibre generator, so a test on
+ * the pointer would read a finished fibre as a frame. The codebase already
+ * names this shape: SCR_CORO_HAS_EXC is stored for exactly the same reason.
+ *
+ * 21 of the 31 ScrGen entry points never read this, because they touch only
+ * the slots and the state below. That is what made one discriminated handle
+ * cheaper than two handle types, and it is why this field is the whole cost
+ * of decision 1 on the handle side. */
+typedef enum { SCR_GEN_BACKED_FIBER = 0, SCR_GEN_BACKED_FRAME = 1 } ScrGenBacking;
+
 struct ScrGen {
   size_t rc;
   ScrFiber *fiber; /* NULL once torn down (done, or unstarted release) */
+  ScrGenBacking backing;
+  ScrCoroBase *frame; /* non-NULL iff backing == SCR_GEN_BACKED_FRAME */
   int state;
   ScrGenSlot out; /* yielded value / completion value */
   ScrGenSlot in;  /* the .next(v) argument */
@@ -4778,6 +4792,32 @@ ScrGen *scr_gen_retain(ScrGen *g) {
   return g;
 }
 
+#ifdef SCR_CORO_LANE
+/* A frame-backed generator's frame teardown. Deliberately not a plain
+ * free(): scr_coro_init RETAINED the spawner's AsyncLocalStorage context
+ * into base->als (Node's init-time capture), and on the async lane
+ * scr_coro_release is what drops it. This lane never goes through
+ * scr_coro_release -- it holds no suspension reference and settles no
+ * promise -- so the drop has to happen at every site that frees a frame,
+ * and all of them called free() directly. One context and every dyn value
+ * in it leaked per generator, with no crash and no diagnostic, and ZERO in
+ * any program that never uses AsyncLocalStorage because the retain is
+ * NULL-safe: a leak that a corpus cannot show you.
+ *
+ * The SUSPENDED arm of scr_gen_release does not call this, on purpose: that
+ * frame is abandoned whole, exactly as the fibre lane abandons a stack. */
+static void scr_gen_coro_frame_free(ScrCoroBase *base) {
+  scr_als_ctx_release(base->als);
+#ifdef SCR_RC_AUDIT
+  /* The other half of the census. Paired with scr_gen_coro_alloc's note,
+   * so a frame that is freed is silent and only an ABANDONED one is
+   * counted -- which is the whole point of the line. */
+  scr_note_coro_free();
+#endif
+  free(base);
+}
+#endif /* SCR_CORO_LANE */
+
 void scr_gen_release(ScrGen *g) {
   if (!g || --g->rc != 0) return;
   /* g->pending is NOT released here, and that is an INVARIANT rather than
@@ -4793,6 +4833,40 @@ void scr_gen_release(ScrGen *g) {
   scr_gen_slot_reset(&g->in);
   scr_gen_slot_reset(&g->ret);
   scr_exc_cell_drop(&g->fail); /* a native settlement nobody received */
+#ifdef SCR_CORO_LANE
+  if (g->backing == SCR_GEN_BACKED_FRAME) {
+    if (g->frame != NULL) {
+      if (g->state == SCR_GEN_UNSTARTED) {
+        /* Never ran: nothing inside it is live. */
+        if (g->drop_args != NULL) g->drop_args(g->frame);
+        scr_gen_coro_frame_free(g->frame);
+      } else if (g->state == SCR_GEN_DONE) {
+        /* RAN TO COMPLETION: the body released its own locals on the way
+         * out and the finish released the closure environment, so nothing
+         * inside is live and the frame is ordinary memory. Freeing it is
+         * the COMMON path -- a generator that is simply consumed to
+         * exhaustion ends here -- and leaving it in the abandoned arm
+         * below would leak every frame of every completed generator
+         * without a crash or a diagnostic. */
+        scr_gen_coro_frame_free(g->frame);
+      }
+      /* SUSPENDED: deliberately ABANDONED, exactly as the fibre lane
+       * abandons a suspended stack. Unwinding would run user finally
+       * blocks Node's GC never runs, and freeing the frame would drop
+       * its live locals' references without releasing them. The frame
+       * leaks, by the same decision and for the same reason the fibre
+       * does -- and it is precisely the accounting gap the
+       * abandoned-frame counter on the knob-on lane exists to measure.
+       *
+       * THAT LAST CLAUSE WAS FALSE UNTIL scr_gen_coro_alloc STARTED
+       * NOTING THE FRAME. The counter could not see a generator frame at
+       * all, so this arm abandoned in silence while the sentence above
+       * said it was measured. Fixed at the allocation, not here, because
+       * the gap was a missing +1, not a missing -1. */
+      g->frame = NULL;
+    }
+  } else
+#endif /* SCR_CORO_LANE */
   if (g->fiber != NULL) {
     if (g->state == SCR_GEN_UNSTARTED) {
       /* Never ran: nothing on the stack owns anything — clean teardown.
@@ -5365,6 +5439,238 @@ static void scr_gen_switch_in(ScrGen *g) {
   scr_gen_release(g);
 }
 
+
+#ifdef SCR_CORO_LANE
+/* ── SYNCHRONOUS GENERATORS BACKED BY A FRAME ─────────────────────────
+ *
+ * GUARDED, and the guard is not decoration. scr_coro.c leaves the link
+ * whenever the module emitted no coroutine (cc.ts drops it on the same
+ * predicate the emitter uses), so an UNGUARDED call to scr_coro_state_in
+ * from this always-linked unit would be an undefined symbol in every
+ * binary that never suspends. SCR_CORO_LANE is the macro cc.ts already
+ * derives FROM THE SOURCE LIST rather than from a second read of the knob,
+ * so the guard and the link line cannot disagree.
+ *
+ * Everything below is the frame half of the four entry points that branch.
+ * The other 21 ScrGen entry points are untouched because they read only
+ * the slots and the state, which live on the handle for both backings. */
+
+void *scr_gen_coro_alloc(size_t size, ScrCoroResume resume, bool has_exc) {
+  /* Deliberately not scr_coro_alloc: that one mints the promise the frame
+   * will settle, and a synchronous generator settles nothing. One base,
+   * two lifecycles -- decision 3. */
+  void *mem = calloc(1, size);
+  if (mem == NULL) {
+    fputs("scriptc: out of memory allocating a generator frame\n", stderr);
+    abort();
+  }
+#ifdef SCR_RC_AUDIT
+  /* THE FRAME CENSUS, which scr_coro_alloc makes and this did not.
+   *
+   * Not copied for symmetry: without it the abandoned-coroutine line
+   * CANNOT SEE a generator frame, and the comment in scr_gen_release that
+   * calls the suspended arm "precisely the accounting gap the
+   * abandoned-frame counter exists to measure" was false as written.
+   *
+   * The three lanes that deliberately abandon a suspension were not
+   * symmetric. An async frame prints "N coroutine(s) abandoned"; a fibre
+   * generator prints "RC audit skipped: N fiber(s) never resumed" and even
+   * suppresses the leak check. A frame-backed generator printed NOTHING --
+   * and the leak check still ran, so its deliberately retained values came
+   * out as RC AUDIT FAILED with no line anywhere naming the cause. Silence
+   * plus an unexplained failure is worse than either alone. */
+  scr_note_coro_alloc();
+#endif
+  scr_coro_init((ScrCoroBase *)mem, resume, NULL, has_exc);
+  return mem;
+}
+
+ScrGen *scr_gen_of_coro(ScrCoroBase *base, void (*drop)(void *)) {
+  ScrGen *g = calloc(1, sizeof *g);
+  if (g == NULL) {
+    fputs("scriptc: out of memory allocating a generator handle\n", stderr);
+    abort();
+  }
+  g->rc = 1;
+  g->fiber = NULL;
+  g->backing = SCR_GEN_BACKED_FRAME;
+  g->frame = base;
+  /* THE ALLOCATION NOTE, which the fibre twin makes and this did not.
+   *
+   * scr_gen_new calls scr_obj_alloc_note() and scr_gen_release calls
+   * scr_obj_free_note() for BOTH backings -- so every frame-backed
+   * generator decremented a counter it had never incremented, and the RC
+   * audit printed "-1 object(s) live at exit" and exited 99. A NEGATIVE
+   * count, which is not a leak and does not read like one: the next person
+   * to see it would have gone looking for an over-release.
+   *
+   * Audit-only in its effect -- a shipping build compiles both notes to
+   * nothing -- but it poisons the audit lane for every program containing a
+   * converted generator, which is the lane that proves the OTHER teardown
+   * defects are fixed. Found by the parity guard's als arm on its first
+   * real run, one fix after the leak that arm was written for: a gap
+   * found contains another, for the third time in this slice. */
+  scr_obj_alloc_note();
+  /* The SAME field the fibre path uses, on a different argument: an
+   * UNSTARTED generator must still release the +1 its parameters arrived
+   * with, and the body never runs to do it. The fibre path hands
+   * drop_args the argpack; here it is the frame, because the frame IS
+   * the argpack. */
+  g->drop_args = drop;
+  g->state = SCR_GEN_UNSTARTED;
+  return g;
+}
+
+/* The yield arms. Each parks the value in OUT and marks the frame YIELDED;
+ * the generated code then simply returns. The flag is set HERE and not by
+ * the emitted body because a forgotten one does not crash -- it reports a
+ * yield as a completion and silently truncates the sequence. */
+void scr_gen_coro_yield_f64(ScrGen *g, double v) {
+  scr_gen_slot_f64(&g->out, v);
+  g->frame->flags |= SCR_CORO_YIELDED;
+}
+void scr_gen_coro_yield_bool(ScrGen *g, bool v) {
+  scr_gen_slot_bool(&g->out, v);
+  g->frame->flags |= SCR_CORO_YIELDED;
+}
+void scr_gen_coro_yield_ref(ScrGen *g, void *v, void (*release)(void *)) {
+  scr_gen_slot_ref(&g->out, v, release);
+  g->frame->flags |= SCR_CORO_YIELDED;
+}
+
+void scr_gen_coro_finish_void(ScrGen *g) { g->frame->flags |= SCR_CORO_DONE; }
+void scr_gen_coro_finish_f64(ScrGen *g, double v) {
+  scr_gen_slot_f64(&g->out, v);
+  g->frame->flags |= SCR_CORO_DONE;
+}
+void scr_gen_coro_finish_bool(ScrGen *g, bool v) {
+  scr_gen_slot_bool(&g->out, v);
+  g->frame->flags |= SCR_CORO_DONE;
+}
+void scr_gen_coro_finish_ref(ScrGen *g, void *v, void (*release)(void *)) {
+  scr_gen_slot_ref(&g->out, v, release);
+  g->frame->flags |= SCR_CORO_DONE;
+}
+
+/* The unwind completion. Contract in scr_coro.h.
+ *
+ * NO PROMISE IS SETTLED, and that is the whole reason this exists: the
+ * emitted unwind used to call scr_coro_finish_throw, which rejects
+ * base->promise -- NULL on every generator frame -- on the single most
+ * ordinary exceptional path a generator has.
+ *
+ * The GENRET half is the fibre trampoline's epilogue
+ *     if (scr_exc_genret_pending()) { scr_exc_clear(); scr_gen_ret_to_out(g); }
+ * at the one point the frame lane reaches the same state. A REAL exception
+ * is left pending in the active cell: scr_gen_coro_step then sees a body
+ * that neither yielded nor finished, marks the handle DONE, and the
+ * consumer-side resume rethrows it. */
+void scr_gen_coro_finish_throw(ScrGen *g) {
+  if (scr_exc_genret_pending()) {
+    scr_exc_clear();
+    scr_gen_ret_to_out(g);
+  }
+  g->frame->flags |= SCR_CORO_DONE;
+}
+
+/* The IN slot THROUGH THE HANDLE -- see scr_coro.h for why the fibre twins
+ * cannot serve this lane. Same three slot takers underneath, so a .next(v)
+ * value behaves identically whichever backing produced the generator. */
+double scr_gen_coro_take_in_f64(ScrGen *g) { return scr_gen_slot_take_f64(&g->in); }
+bool scr_gen_coro_take_in_bool(ScrGen *g) { return scr_gen_slot_take_bool(&g->in); }
+void *scr_gen_coro_take_in_ref(ScrGen *g) { return scr_gen_slot_take_ref(&g->in); }
+
+/* What to put in the ACTIVE cell before the body runs. It has to happen
+ * INSIDE the INV-5 window: a fat frame installs its own cell, so a sentinel
+ * written before scr_coro_state_in would land in the consumer's cell and
+ * the body would never see it. The fibre path has the same ordering and
+ * gets it from scr_switch for free. */
+typedef enum { SCR_GEN_INJECT_NONE = 0, SCR_GEN_INJECT_RET, SCR_GEN_INJECT_THROW } ScrGenInject;
+
+/* One consumer-driven step of a frame-backed generator. The counterpart of
+ * scr_gen_switch_in, and deliberately NOT scr_coro_resume_entry: that one
+ * is the ready-queue entry, settles a promise on fall-out and releases the
+ * suspension's reference, and this path has no promise and no suspension
+ * reference. What the two share is INV-5, and they share it as code. */
+static void scr_gen_coro_step(ScrGen *g, ScrGenInject inject) {
+  ScrCoroBase *base = g->frame;
+  ScrCoroTaskState st;
+  scr_gen_retain(g);
+  g->state = SCR_GEN_RUNNING;
+  scr_coro_state_in(base, &st);
+  /* THE SENTINEL GOES IN ONLY OVER AN EMPTY CELL, which is what all three
+   * fibre twins do and this did not:
+   *
+   *     if (g->fiber->exc.kind == SCR_EXC_NONE) g->fiber->exc.kind = ...
+   *
+   * Unguarded, a cell that already held a payload would have its kind
+   * overwritten with the sentinel -- the payload neither released nor
+   * delivered, so a lost exception and a leak in one statement.
+   *
+   * IT CANNOT HAPPEN TODAY, and the reason is a fence somewhere else: the
+   * cell can only be dirty here if an earlier unwind parked mid-flight,
+   * which needs a `finally` that yields, and `finally` is a point-level
+   * admission blocker so no converted generator has one. That is exactly
+   * the shape this front keeps paying for -- a fence argument held in
+   * another file, which the next widening voids without visiting this
+   * line. The guard costs one comparison and removes the dependence. */
+  if (inject == SCR_GEN_INJECT_RET) {
+    ScrExcCell *sc_cell = scr_exc_current_cell();
+    if (sc_cell->kind == SCR_EXC_NONE) sc_cell->kind = SCR_EXC_GENRET;
+  }
+  /* SCR_GEN_INJECT_THROW IS LEAN-ONLY, AND SAYS SO RATHER THAN LOOKING
+   * HANDLED. The fibre twin moves the payload across explicitly:
+   *
+   *     scr_exc_cell_move(&g->fiber->exc, mine);
+   *
+   * This lane does nothing, and is right for a LEAN frame: it borrows the
+   * ambient cell, so the payload the consumer parked is already the one the
+   * body reads. A FAT frame is the opposite -- scr_coro_state_in swapped
+   * the active cell to the frame's own, so the payload would sit in
+   * st.prev_cell where the body never looks and the .throw() would vanish
+   * with no diagnostic.
+   *
+   * Lean is guaranteed by emitGenCoroSpawn passing has_exc=false, in
+   * another file, in one place. An enum member that silently does nothing
+   * because of a constant elsewhere is how a new member gets default-
+   * handled into a wrong answer, so the precondition is asserted here
+   * instead of assumed. The four-line fix is a cell move from st.prev_cell
+   * into st.mine; it is deliberately NOT written, because code for a
+   * configuration that cannot exist cannot be tested and would be trusted
+   * anyway. */
+  if (inject == SCR_GEN_INJECT_THROW && st.mine != NULL) {
+    fputs("scriptc: internal error: .throw() into a FAT generator frame is "
+          "not lowered -- the payload is in the resumer's cell and the body "
+          "reads the frame's\n", stderr);
+    abort();
+  }
+  base->flags &= ~(uint32_t)SCR_CORO_YIELDED;
+  base->flags |= SCR_CORO_RUNNING;
+  base->resume(base);
+  base->flags &= ~(uint32_t)SCR_CORO_RUNNING;
+  /* THREE OUTCOMES, read from the stored flags and never inferred:
+   *   YIELDED -- a value is in OUT, the generator stays suspended;
+   *   DONE    -- the body completed, OUT holds the return value;
+   *   neither -- an exception escaped. The fibre path moves it into the
+   *              resumer's cell; for a LEAN frame the active cell already
+   *              IS the resumer's, so only a fat frame has anything to
+   *              move, and state_out below does the restoring. */
+  if ((base->flags & SCR_CORO_YIELDED) != 0u) {
+    g->state = SCR_GEN_SUSPENDED;
+  } else {
+    g->state = SCR_GEN_DONE;
+    if (st.mine != NULL && st.mine->kind != SCR_EXC_NONE) {
+      scr_exc_cell_move(&g->fail, st.mine);
+    }
+  }
+  scr_coro_state_out(&st);
+  if (g->state == SCR_GEN_DONE && g->fail.kind != SCR_EXC_NONE) {
+    scr_exc_cell_move(scr_exc_current_cell(), &g->fail);
+  }
+  scr_gen_release(g);
+}
+#endif /* SCR_CORO_LANE */
+
 void scr_gen_resume(ScrGen *g) {
   switch (g->state) {
   case SCR_GEN_RUNNING: {
@@ -5377,7 +5683,14 @@ void scr_gen_resume(ScrGen *g) {
      * OUT is NONE (the completing resume took it). */
     return;
   default:
-    scr_gen_switch_in(g);
+#ifdef SCR_CORO_LANE
+    if (g->backing == SCR_GEN_BACKED_FRAME) {
+      scr_gen_coro_step(g, SCR_GEN_INJECT_NONE);
+    } else
+#endif
+    {
+      scr_gen_switch_in(g);
+    }
   }
 }
 
@@ -5392,8 +5705,18 @@ void scr_gen_resume_return(ScrGen *g) {
     scr_gen_ret_to_out(g);
     return;
   case SCR_GEN_UNSTARTED:
-    /* The body never runs: tear the fiber down cleanly (drop the packed
+    /* The body never runs: tear the backing down cleanly (drop the
      * arguments) and complete with the parked value. */
+#ifdef SCR_CORO_LANE
+    if (g->backing == SCR_GEN_BACKED_FRAME) {
+      if (g->drop_args != NULL) g->drop_args(g->frame);
+      scr_gen_coro_frame_free(g->frame);
+      g->frame = NULL;
+      g->state = SCR_GEN_DONE;
+      scr_gen_ret_to_out(g);
+      return;
+    }
+#endif
     if (g->drop_args != NULL) g->drop_args(g->fiber->argpack);
     else free(g->fiber->argpack);
     scr_fiber_destroy(g->fiber);
@@ -5405,6 +5728,15 @@ void scr_gen_resume_return(ScrGen *g) {
   default:
     /* Suspended at a yield: inject the sentinel (an earlier .return whose
      * unwind a finally-yield parked leaves it already set) and resume. */
+#ifdef SCR_CORO_LANE
+    if (g->backing == SCR_GEN_BACKED_FRAME) {
+      /* The sentinel goes in INSIDE the INV-5 window, not here: a fat
+       * frame installs its own cell, so writing it now would land it in
+       * the CONSUMER's and the body would never see it. */
+      scr_gen_coro_step(g, SCR_GEN_INJECT_RET);
+      return;
+    }
+#endif
     if (g->fiber->exc.kind == SCR_EXC_NONE) g->fiber->exc.kind = SCR_EXC_GENRET;
     scr_gen_switch_in(g);
   }
@@ -5425,6 +5757,15 @@ void scr_gen_resume_throw(ScrGen *g) {
   case SCR_GEN_UNSTARTED:
     /* The body never runs; the generator becomes done and the payload
      * stays pending in the caller (probed Node behavior). */
+#ifdef SCR_CORO_LANE
+    if (g->backing == SCR_GEN_BACKED_FRAME) {
+      if (g->drop_args != NULL) g->drop_args(g->frame);
+      scr_gen_coro_frame_free(g->frame);
+      g->frame = NULL;
+      g->state = SCR_GEN_DONE;
+      return;
+    }
+#endif
     if (g->drop_args != NULL) g->drop_args(g->fiber->argpack);
     else free(g->fiber->argpack);
     scr_fiber_destroy(g->fiber);
@@ -5436,6 +5777,15 @@ void scr_gen_resume_throw(ScrGen *g) {
     /* Move the caller's pending payload into the fiber's cell (an
      * earlier sentinel parked by a finally-yield is replaced — the
      * injected throw wins, like a throw inside that finally). */
+#ifdef SCR_CORO_LANE
+    if (g->backing == SCR_GEN_BACKED_FRAME) {
+      /* The payload is already pending in the ACTIVE cell, where a lean
+       * frame's body reads it; a fat frame's own cell is installed by
+       * state_in, so the step moves it across inside the window. */
+      scr_gen_coro_step(g, SCR_GEN_INJECT_THROW);
+      return;
+    }
+#endif
     ScrExcCell *mine = scr_exc_current_cell();
     ScrExcCell *dst = &g->fiber->exc;
     dst->kind = mine->kind;

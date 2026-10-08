@@ -284,3 +284,21 @@ export function mangleCoroFrame(fnName: string): string {
 export function mangleCoroResume(fnName: string): string {
   return `sc_cr_${sanitize(fnName)}`;
 }
+
+/** A coroutine frame's field for one of the function's own locals.
+ *
+ * SAME sanitiser as mangleLocal, and that is load-bearing rather than tidy.
+ * This lived in emit-coro.ts collapsing every non-alphanumeric to `_`, while
+ * mangleLocal maps one to `_x<hex>_` -- so two locals named `a$b` and `a_b`
+ * (both legal JS, both ordinary in bundled code) keep DISTINCT C names and
+ * would have shared ONE frame field: a duplicate struct member, with the
+ * spill of each landing in the other's slot. Local ids are `<name>.<n>` and
+ * `.` is the only character the two agreed on, which is why the gap stayed
+ * invisible while admission was narrow.
+ *
+ * Deliberately not mangleLocal's name: the frame field and the C local
+ * coexist in the resume function, and a spill that read `x = x` would be a
+ * no-op nobody would notice. */
+export function mangleCoroField(localId: string): string {
+  return `sc_v_${sanitize(localId)}`;
+}

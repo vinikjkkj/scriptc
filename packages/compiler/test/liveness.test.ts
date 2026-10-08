@@ -12,7 +12,7 @@
  * `varRef` standing in for a call keeps each case down to the shape under
  * test. */
 import { expect, test } from "vitest";
-import { F64, type IrExpr, type IrFunction, type IrType } from "../src/ir/nodes.js";
+import { F64, type IrExpr, type IrFunction, type IrStmt, type IrType } from "../src/ir/nodes.js";
 import { suspensionLiveness } from "../src/ir/liveness.js";
 
 const loc = { file: "t.ts", start: 0, end: 0 };
@@ -182,4 +182,88 @@ test("functions with no suspension point report null", () => {
     body: [{ kind: "return", value: vr("a.0"), loc }],
   });
   expect(suspensionLiveness(f)).toBeNull();
+});
+
+/* ── the finally fence: ADMITTED, and this file's premise changed sides ──
+ *
+ * WHAT THIS SECTION USED TO ASSERT, and why it is rewritten rather than
+ * renamed. It named two halves of one blocking fence -- `finally:body` for a
+ * suspension inside a finally body, `finally:guarded` for one in a try that
+ * has a finally -- under an umbrella label `finally`, and closed with
+ * "ADMISSION NEUTRALITY, structurally: straightLine reads the umbrella, so
+ * every point carrying any of the three labels is still refused."
+ *
+ * That was true of the tree it was written on, and it is FALSE HERE, BY
+ * INTENT. Both halves have since been admitted on main, in two separate
+ * slices, each gated and published:
+ *
+ *   shape (2), a suspension in a try GUARDED by a finally   +70 fns / +144 pts
+ *   shape (1), a suspension INSIDE the finally body          +6 fns /  +30 pts
+ *
+ * So all three labels are gone -- not respelled, retired with the refusal
+ * they named -- and the points they used to mark are now `straightLine`.
+ * The old assertions would fail, and they SHOULD: a guard asserting that
+ * admission cannot move, against a lowering built to move it, is measuring
+ * the wrong decade.
+ *
+ * WHAT IS WORTH ASSERTING NOW is the other direction, and it is the direction
+ * that can still go red: that these two shapes really are admitted, and that
+ * the point-blocker vocabulary is EMPTY for them. If a future change
+ * re-introduces a position blocker for either, this says so by name. */
+
+const tcf = (tryBody: IrStmt[], finallyBody: IrStmt[]): IrStmt =>
+  ({ kind: "tryCatch", tryBody, catchBody: null, catchLocalId: null, finallyBody, loc }) as IrStmt;
+
+/** Every blocker label the finally fence ever emitted. None may come back
+ * without this file being revisited on purpose. */
+const RETIRED_FINALLY_LABELS = ["finally", "finally:body", "finally:guarded"] as const;
+
+test("both finally shapes are ADMITTED, and the fence labels are retired", () => {
+  // try { await a; } finally { await a; }
+  // One point guarded by a finally, one INSIDE the finally body.
+  const f = fn({
+    locals: [local("a.0")],
+    body: [tcf(
+      [{ kind: "exprStmt", expr: aw(vr("a.0")), loc }],
+      [{ kind: "exprStmt", expr: aw(vr("a.0")), loc }],
+    )],
+  });
+  const r = suspensionLiveness(f);
+  expect(r).not.toBeNull();
+  expect(r!.points).toHaveLength(2);
+
+  for (const p of r!.points) {
+    for (const label of RETIRED_FINALLY_LABELS) {
+      expect(p.blockers, `the retired label ${label} is back on a finally point`)
+        .not.toContain(label);
+    }
+    // THE POSITIVE HALF, and it is what makes this test able to fail for the
+    // right reason: these points are not merely unlabelled, they are ADMITTED.
+    // A change that dropped the labels while leaving the points refused would
+    // pass the loop above and fail here.
+    expect(p.straightLine, `blockers ${p.blockers.join(",") || "(none)"}`).toBe(true);
+  }
+});
+
+test("a finally nested inside a guarded try is admitted too", () => {
+  // try { try { } finally { await a; } } finally { }
+  // The inner finally's await is INSIDE a finally body and simultaneously
+  // GUARDED by the outer one -- the case that made the old labels overlap and
+  // forced the partition to be asserted as an iff rather than a sum. Both
+  // positions being admitted, the overlap has nothing left to be about, and
+  // what remains to check is that the compound position did not keep a
+  // refusal the simple ones lost.
+  const f = fn({
+    locals: [local("a.0")],
+    body: [tcf([tcf([], [{ kind: "exprStmt", expr: aw(vr("a.0")), loc }])], [])],
+  });
+  const r = suspensionLiveness(f);
+  expect(r).not.toBeNull();
+  expect(r!.points).toHaveLength(1);
+  const p = r!.points[0]!;
+  for (const label of RETIRED_FINALLY_LABELS) {
+    expect(p.blockers, `the retired label ${label} is back on a nested finally point`)
+      .not.toContain(label);
+  }
+  expect(p.straightLine, `blockers ${p.blockers.join(",") || "(none)"}`).toBe(true);
 });

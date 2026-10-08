@@ -237,4 +237,209 @@ double scr_coro_promise_f64(const ScrPromise *p);
 bool   scr_coro_promise_bool(const ScrPromise *p);
 void  *scr_coro_promise_ref(const ScrPromise *p);
 
+
+/* ---- SYNCHRONOUS GENERATORS ON A FRAME -------------------------------
+ *
+ * The three decisions this surface implements, each recorded with the
+ * failure mode that chose it (docs/stackless-generators-decisions.md):
+ *
+ *   1. ONE DISCRIMINATED `ScrGen`, never two handle types. 21 of the 31
+ *      ScrGen entry points touch only the handle's own slots and never the
+ *      fiber, so two types would duplicate 21 indifferent functions to
+ *      serve 10 that are not -- and `scr_stream.c`, a C file outside the
+ *      compiler, is a third consumer that would have to discriminate too.
+ *      The discriminant is STORED on the handle, never inferred, for the
+ *      reason SCR_CORO_HAS_EXC already gives.
+ *
+ *   2. THE OUTCOME IS A STORED FLAG, not a return value. A resume returns
+ *      void and always did; `ScrCoroParkKind` is push ACCOUNTING, not
+ *      control flow. "Yielded" therefore joins SCR_CORO_SUSPENDED and
+ *      SCR_CORO_DONE as SCR_CORO_YIELDED, below.
+ *
+ *   3. ONE BASE, `promise` LEFT NULL. A synchronous generator needs five of
+ *      ScrCoroBase's six fields -- `als` included, because scr_switch
+ *      repoints ALS on every switch and a state machine does not -- so a
+ *      second base would save 8 bytes of 40 and cost a SECOND
+ *      implementation of INV-5, the invariant that already ships a named
+ *      regression knob (SCR_CORO_ALS_BLIND). The base is shared; the spawn
+ *      and the finish are not, because a synchronous generator settles no
+ *      promise.
+ *
+ * WHAT IS DIFFERENT FROM AN ASYNC FRAME, in one line each:
+ *   - no promise: the consumer gets values, not a settlement;
+ *   - no ready queue: a yield returns to the CONSUMER, not to the loop;
+ *   - no hop: scr_gen_yield_switch takes none, and only the ASYNC yield
+ *     calls scr_await_hop -- which is why async generators are blocked
+ *     behind the hop and these are not.
+ *
+ * THE INV-5 QUESTION, DECIDED BY THE COORDINATOR ON FAILURE MODE -- not
+ * read out of the code, and recorded that way so nobody mistakes a judgement
+ * call for a finding.
+ *
+ * scr_coro_resume_entry brackets INV-5 and is the READY-QUEUE entry: it
+ * settles a promise on fall-out and releases the suspension's reference. A
+ * generator is re-entered by its CONSUMER, synchronously, settles nothing,
+ * and holds no suspension reference. Two routes existed:
+ *
+ *   FACTOR THE BRACKET OUT -- one shared implementation, two callers. A
+ *     wrong factoring breaks BOTH paths loudly and immediately, on the
+ *     first test.
+ *   CONDITION INSIDE IT -- an `if` in a function that then means two
+ *     things. Wrong toward the generator, it settles a promise that does
+ *     not exist; wrong toward async, the promise is never settled and the
+ *     program HANGS -- low and far from the cause.
+ *
+ * Factoring was chosen, and the consistency argument is what settles it:
+ * scr_gen_coro_alloc is kept separate from scr_coro_alloc precisely so the
+ * one place that CREATES frames is never ambiguous about whether there is a
+ * promise to answer. Conditioning inside resume_entry would do to the one
+ * place that RESUMES frames exactly what was refused for the one place that
+ * creates them.
+ *
+ * AND THE BOUNDARY IS NOT WHERE EITHER OF US ASSUMED, which is why this was
+ * read before it was written. The promise handling is NOT part of INV-5 and
+ * never was -- it is ordinary completion semantics that merely has an
+ * ORDERING CONSTRAINT against it, because scr_coro_finish_throw reads the
+ * ACTIVE cell and so must run while the frame's cell is still installed.
+ * INV-5 itself is only the install/restore pair:
+ *
+ *     save scr_als_active, install &base->als
+ *     save the active cell, install scr_coro_exc(base)   [fat frames only]
+ *     ... the caller's body and its own outcome handling ...
+ *     restore the cell, restore scr_als_active
+ *
+ * So the factoring is clean at THAT line, not at "bracket versus rest": the
+ * shared part is the two halves of the install/restore pair, and each caller
+ * keeps its own outcome handling inside the window. The async path's
+ * fall-out-to-rejection and its trailing scr_coro_release stay exactly where
+ * they are, unchanged, so the edit to scr_coro.c is a pure EXTRACTION with
+ * no behaviour change -- provable the same way the coroPlans relocation was.
+ *
+ * One consequence worth stating since it is the reason a shared outcome
+ * check would NOT have worked: a generator that yields sets SCR_CORO_YIELDED
+ * and is neither DONE nor SUSPENDED, which is precisely the case
+ * resume_entry aborts on. Had the bracket been factored WITH the outcome
+ * check, that abort would have had to learn about generators; factored at
+ * the install/restore line, resume_entry needs no change at all. */
+
+/** The last resume returned because it YIELDED: a value is in the handle's
+ * OUT slot and the consumer should read it. The third member of the
+ * outcome union, and stored for the same reason as the other two -- a
+ * variant discriminated by convention is a shape this codebase has already
+ * been bitten by. Cleared by the generator resume path before each
+ * re-entry, exactly as SCR_CORO_SUSPENDED is. */
+enum { SCR_CORO_YIELDED = 1u << 4 };
+
+/** Allocate a frame for a SYNCHRONOUS generator: the shared ScrCoroBase,
+ * zeroed, with `promise` left NULL and no promise minted.
+ *
+ * Deliberately not scr_coro_alloc with a NULL argument. That function's
+ * contract is that it mints the promise the frame will settle, and a
+ * generator settles nothing; widening it to mean "or not" would make the
+ * one place that creates frames ambiguous about whether the program has a
+ * promise to answer. Two entry points, one base. */
+void *scr_gen_coro_alloc(size_t size, ScrCoroResume resume, bool has_exc);
+
+/** Wrap a frame in the handle the consumer already knows.
+ *
+ * Returns an ScrGen whose stored discriminant says FRAME rather than
+ * FIBER, so scr_gen_resume and its two siblings branch on the handle and
+ * every slot accessor stays indifferent. The handle takes ownership of the
+ * frame. */
+/* `drop` releases the arguments the frame holds, WITHOUT freeing the frame
+ * -- the caller does that. It is needed because an UNSTARTED generator can
+ * be released or .return()ed before the body ever runs, and the +1 its
+ * parameters arrived with has to go somewhere. The fibre path has the same
+ * hook for the same reason; the only difference is that it is handed an
+ * argpack and this is handed the frame, because the frame IS the argpack. */
+ScrGen *scr_gen_of_coro(ScrCoroBase *base, void (*drop)(void *));
+
+/** Park a yielded value in the handle's OUT slot and return to the
+ * consumer: the state machine's counterpart of scr_gen_yield_f64 and
+ * friends.
+ *
+ * "Return to the consumer" is literal and is the whole difference from an
+ * await: the generated code simply RETURNS from its resume function. There
+ * is no scr_switch, no ready push and no microtask turn -- a synchronous
+ * yield consumes none, and charging one here would put a turn where JS has
+ * none.
+ *
+ * THESE SET SCR_CORO_YIELDED THEMSELVES, and that is a placement decision
+ * rather than a convenience: the flag is what the consumer reads to tell a
+ * yield from a completion, there are three arms and every yield site in
+ * every converted generator would otherwise have to remember it, and a
+ * forgotten one does not crash -- it reports a yield as a completion and
+ * truncates the sequence. One place, structurally.
+ *
+ * The OUT slot stays on the handle rather than moving into the frame
+ * because the native sink reads it directly from C (scr_gen_take_out_ref),
+ * knowing nothing about frames. That is decision 1 deciding decision 3's
+ * old question: the value's owner follows the handle. */
+/* THEY TAKE THE HANDLE, NOT THE FRAME, and that is a size decision. Going
+ * the other way would need a back-pointer from ScrCoroBase to its ScrGen,
+ * which is 8 bytes on EVERY frame -- including the 95% that are ordinary
+ * awaits and will never be a generator -- to serve the few that are. The
+ * emitted generator frame carries `sc_gen` instead, so the cost lands only
+ * on the shape that uses it. Same reasoning that kept the exception cell
+ * out of the lean frame. */
+void scr_gen_coro_yield_f64(ScrGen *g, double v);
+void scr_gen_coro_yield_bool(ScrGen *g, bool v);
+void scr_gen_coro_yield_ref(ScrGen *g, void *v, void (*release)(void *));
+
+/** Completion. Marks the frame done and moves the body's return value into
+ * OUT, which is where a consumer resume reads a done-value from. No
+ * promise is settled, which is the half of the lifecycle decision 3 keeps
+ * separate. */
+void scr_gen_coro_finish_void(ScrGen *g);
+void scr_gen_coro_finish_f64(ScrGen *g, double v);
+void scr_gen_coro_finish_bool(ScrGen *g, bool v);
+void scr_gen_coro_finish_ref(ScrGen *g, void *v, void (*release)(void *));
+
+/** The UNWIND completion: an exception, or a .return() sentinel, escaped
+ * the body. The frame lane's counterpart of scr_coro_finish_throw -- and
+ * deliberately NOT that function, which rejects base->promise, NULL on a
+ * generator frame because scr_gen_coro_alloc mints none.
+ *
+ * It also does what the fibre trampoline's epilogue does at this same
+ * state: a GENRET unwind consumes the sentinel and promotes the parked
+ * .return value into OUT. A real exception is left pending in the active
+ * cell, where the consumer-side resume finds it. Both halves live here so
+ * that an emitted site cannot carry one and not the other. */
+void scr_gen_coro_finish_throw(ScrGen *g);
+
+/** The resumed .next(v) argument, out of the handle's IN slot.
+ *
+ * The fibre lane's scr_gen_take_in_* take NO argument: they find the
+ * generator through scr_gen_self(), the RUNNING FIBRE's back-pointer. A
+ * frame-backed generator has no fibre and runs on its consumer's stack, so
+ * those abort on the main stack and read ANOTHER generator's slot when the
+ * consumer is itself a fibre-backed generator body. The slot lives on the
+ * handle for both backings; only the anchor differs, and the emitted frame
+ * carries `sc_gen` for exactly this. */
+double scr_gen_coro_take_in_f64(ScrGen *g);
+bool scr_gen_coro_take_in_bool(ScrGen *g);
+void *scr_gen_coro_take_in_ref(ScrGen *g);
+
+/* ---- the INV-5 bracket, shared by two resumers -----------------------
+ *
+ * Extracted rather than conditioned; see the decision recorded above. The
+ * pair below is ALL of INV-5: install the frame's AsyncLocalStorage context
+ * and, for a fat frame, its exception cell; restore both afterwards. The
+ * promise handling in scr_coro_resume_entry is NOT part of it and does not
+ * move -- it merely has to run inside the window, because
+ * scr_coro_finish_throw reads the ACTIVE cell.
+ *
+ * Two callers: scr_coro_resume_entry (the ready queue, which settles a
+ * promise on fall-out) and the generator consumer path in scr_async.c
+ * (which settles nothing and holds no suspension reference). Each keeps its
+ * own outcome handling inside the window. */
+typedef struct {
+  ScrAlsCtx  **prev_als;
+  ScrExcCell  *prev_cell;
+  ScrExcCell  *mine; /* the frame's own cell, or NULL for a lean frame */
+} ScrCoroTaskState;
+
+void scr_coro_state_in(ScrCoroBase *base, ScrCoroTaskState *st);
+void scr_coro_state_out(ScrCoroTaskState *st);
+
 #endif /* SCR_CORO_H */

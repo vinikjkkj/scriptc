@@ -299,7 +299,15 @@ function Say([string]$m) {
   [Console]::Out.WriteLine($line)
 }
 
-. "G:/blocks/machine-sampler.ps1"   # MACHINE column: free RAM / CPU / disk extrema
+# MACHINE column: free RAM / CPU / disk extrema. $PSScriptRoot, not an
+# absolute path into the blocks root. The sampler was committed to THIS
+# directory (scripts/machine-sampler.ps1) by the same change that added
+# these calls, and this line still named the uncommitted copy it was
+# developed from -- so the gate read a file outside the tree it was
+# judging, and the two had already diverged. Another block edits that
+# copy while runs are in flight, and an interpreter re-reads a script by
+# byte offset, so an edit mid-flight truncates a command in a live run.
+. (Join-Path $PSScriptRoot "machine-sampler.ps1")
 function FreeGB { [math]::Round((Get-PSDrive -Name G).Free / 1GB, 2) }
 
 # ---------------------------------------------------------------------------
@@ -346,9 +354,16 @@ function Invoke-Judged {
   $out  = Join-Path $LogDir "$Tag.log"
   $err  = Join-Path $LogDir "$Tag.err"
   $json = Join-Path $LogDir "$Tag.json"
+  # The rhythm instrument, ABSENT unless SCRIPTC_RPC_RHYTHM names a directory.
+  # It must go on the COMMAND LINE rather than in vitest.config.ts: the
+  # --reporter flags below are CLI, and CLI reporters override config ones
+  # entirely, so a conditional in the config would be silently ignored here.
+  $rhythm = if ($env:SCRIPTC_RPC_RHYTHM) {
+    @("--reporter=./tests/harness/rpc-rhythm-reporter.ts")
+  } else { @() }
   $argv = @("node_modules\vitest\vitest.mjs", "run") + $ExtraArgs +
           @("--max-workers=$Workers", "--min-workers=1",
-            "--reporter=default", "--reporter=json", "--outputFile.json=$json")
+            "--reporter=default", "--reporter=json", "--outputFile.json=$json") + $rhythm
 
   $t0 = Get-Date
   $p  = Start-Process -FilePath "node" -ArgumentList $argv -WorkingDirectory $Repo `

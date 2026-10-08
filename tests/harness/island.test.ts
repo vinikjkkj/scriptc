@@ -687,3 +687,184 @@ main();
     expect(r.stderr).toBe("");
   });
 });
+
+/* THE CAUSE, NAMED -- beside the size anchor, which is only the DETECTOR.
+ *
+ * The anchor above caught a real breach of the shipping criterion: with
+ * SCRIPTC_STACKLESS unset the static hello-world's .text grew, because the
+ * frame-backed generator branches in scr_async.c were emitted into builds
+ * that can never reach them. A SCR_GEN_BACKED_FRAME handle is minted only
+ * by scr_gen_of_coro, which lives inside #ifdef SCR_CORO_LANE, so with the
+ * lane off every one of those branches is dead code that still costs a
+ * test and a jump.
+ *
+ * WHY A SECOND TEST WHEN THE ANCHOR ALREADY FIRED. The anchor reports a
+ * number and a direction; it cannot say which bytes or why, and it is
+ * win32-only, needs a full build, and can be silenced by re-recording. This
+ * one names the LINE, runs in milliseconds on every platform, and cannot be
+ * satisfied by moving a baseline. The anchor says something grew; this says
+ * what, and the next widening that reintroduces the pattern fails here
+ * first.
+ *
+ * It was written because the anchor nearly got a WRONG fix past it: the
+ * first reading of the file counted three unguarded sites and concluded the
+ * rest were handled, when in fact three of them had the #ifdef INSIDE the
+ * `if` -- guarding the call while the branch test still emitted. A fix on
+ * that reading would have returned .text to NEAR the baseline, and the
+ * 256-byte tolerance would have absorbed the remainder. The test that
+ * prompted the fix would have passed it.
+ */
+function laneUnguardedLines(text: string): string[] {
+  /* A real preprocessor nesting tracker, not a keyword heuristic. An #endif
+   * closing a lane block does not have to carry a trailing comment naming
+   * it -- several here do not -- so matching on the text of the #endif
+   * silently loses the nesting and reports guarded code as exposed. The
+   * #else arm flips the level: code there is in the NON-lane build and must
+   * still be flagged. */
+  const out: string[] = [];
+  const stack: { lane: boolean; positive: boolean }[] = [];
+  const lines = text.split(String.fromCharCode(10));
+  for (let i = 0; i < lines.length; i++) {
+    const raw = lines[i]!;
+    const s = raw.trim();
+    if (/^#\s*if/.test(s)) {
+      stack.push({ lane: s.includes("SCR_CORO_LANE"), positive: true });
+      continue;
+    }
+    if (/^#\s*endif/.test(s)) {
+      stack.pop();
+      continue;
+    }
+    if (/^#\s*el(se|if)/.test(s)) {
+      const top = stack[stack.length - 1];
+      if (top) top.positive = !top.positive;
+      continue;
+    }
+    // A CONTINUATION line of a block comment, " * ...". Line-based scanning
+    // cannot see the opening slash-star from here, so this one stays a
+    // textual rule; everything else below is decided by stripping.
+    if (s.startsWith("*")) continue;
+    // PROSE IS NOT CODE -- and a whole-line comment is not the only kind of
+    // prose, which is the assumption that broke this test. struct ScrGen's
+    // frame field carries a TRAILING comment naming the discriminant:
+    //   ScrCoroBase *frame; /* non-NULL iff backing == SCR_GEN_BACKED_FRAME */
+    // That field must stay unconditional -- one struct layout in both builds,
+    // the same reason the enum below is exempt -- and it costs no .text. The
+    // first version tested the raw line, reported that field as exposed, and
+    // so went RED on a CORRECT fix. A test that fails after the repair it
+    // demanded is a test that gets deleted.
+    //
+    // Stripping first also SUBSUMES the old whole-line tests, and is strictly
+    // more sensitive than they were: a line that opens with a comment and
+    // then carries code -- slash-star note star-slash if (...) -- was skipped
+    // outright before, marker and all.
+    const code = s
+      .replace(/\/\*.*?\*\//g, "")
+      .replace(/\/\/.*$/, "")
+      .replace(/\/\*.*$/, "")
+      .trim();
+    if (code === "") continue;
+    // The enum that DEFINES the discriminant is the one thing that must stay
+    // unconditional: the field exists in both builds so the struct has one
+    // layout, and a typedef costs no .text.
+    if (code.includes("typedef enum") && code.includes("SCR_GEN_BACKED_FRAME")) continue;
+    const marks =
+      code.includes("SCR_GEN_BACKED_FRAME") || code.includes("scr_gen_coro_");
+    if (!marks) continue;
+    const inLane = stack.some((f) => f.lane && f.positive);
+    if (!inLane) out.push(String(i + 1) + ": " + s);
+  }
+  return out;
+}
+
+describe("the frame lane is absent from a knob-absent build", () => {
+  const NL = String.fromCharCode(10);
+
+  test("CONTROL: the scanner sees an unguarded branch, and does not see a guarded one", () => {
+    /* Sensitivity and specificity, on synthetic input, so the proof is
+     * permanent and repeatable instead of a one-time experiment someone has
+     * to remember was done. Same shape as the gate's own five controls. */
+    const exposed = [
+      "void f(ScrGen *g) {",
+      "  if (g->backing == SCR_GEN_BACKED_FRAME) { scr_gen_coro_step(g); }",
+      "}",
+    ].join(NL);
+    expect(laneUnguardedLines(exposed).length, "a bare branch must be seen").toBe(1);
+
+    const guarded = [
+      "void f(ScrGen *g) {",
+      "#ifdef SCR_CORO_LANE",
+      "  if (g->backing == SCR_GEN_BACKED_FRAME) { scr_gen_coro_step(g); }",
+      "#endif",
+      "}",
+    ].join(NL);
+    expect(laneUnguardedLines(guarded), "a guarded branch must NOT be seen").toEqual([]);
+
+    /* The two the first reading got wrong, pinned as controls of their own.
+     * An #endif without a trailing comment still closes the block, and the
+     * #else arm is the NON-lane build and is therefore exposed. */
+    const bareEndif = [
+      "#ifdef SCR_CORO_LANE",
+      "  if (g->backing == SCR_GEN_BACKED_FRAME) { return; }",
+      "#endif",
+      "  int after = 0;",
+      "  if (g->backing == SCR_GEN_BACKED_FRAME) { return; }",
+    ].join(NL);
+    expect(laneUnguardedLines(bareEndif).length, "a bare #endif must still close").toBe(1);
+
+    const elseArm = [
+      "#ifdef SCR_CORO_LANE",
+      "  int a = 0;",
+      "#else",
+      "  if (g->backing == SCR_GEN_BACKED_FRAME) { return; }",
+      "#endif",
+    ].join(NL);
+    expect(laneUnguardedLines(elseArm).length, "the #else arm is the non-lane build").toBe(1);
+
+    /* THE ONE THAT ACTUALLY BROKE IT, and which none of the four above
+     * covers: the marker inside a TRAILING comment, on a line of code that
+     * must stay unconditional. The four controls were all written from the
+     * shapes the fix was about, so they were all comment-free, and the
+     * scanner passed every one of them while being wrong about the real
+     * file. A control set drawn only from the cases you have in mind is a
+     * control set that agrees with you. */
+    const inComment = [
+      "struct ScrGen {",
+      "  ScrGenBacking backing;",
+      "  ScrCoroBase *frame; /* non-NULL iff backing == SCR_GEN_BACKED_FRAME */",
+      "  int state;",
+      "};",
+    ].join(NL);
+    expect(
+      laneUnguardedLines(inComment),
+      "a marker inside a trailing comment is prose, and the field it annotates " +
+        "must stay unconditional so both builds share one struct layout",
+    ).toEqual([]);
+
+    /* And the strip must not blind it: the same line with real code after the
+     * comment is still exposed. Specificity for the fix itself, because a
+     * strip that eats the line would make every case above pass too. */
+    const codeAfterComment = [
+      "void f(ScrGen *g) {",
+      "  /* a note */ if (g->backing == SCR_GEN_BACKED_FRAME) { return; }",
+      "}",
+    ].join(NL);
+    expect(
+      laneUnguardedLines(codeAfterComment).length,
+      "stripping a comment must not strip the code beside it",
+    ).toBe(1);
+  });
+
+  test("scr_async.c emits no frame-lane code outside #ifdef SCR_CORO_LANE", () => {
+    const src = readFileSync(join(repoRoot, "packages/runtime/src/scr_async.c"), "utf8");
+    const stray = laneUnguardedLines(src);
+    expect(
+      stray,
+      "these lines are compiled into EVERY binary, including one that can " +
+        "never mint a frame-backed generator. They cost .text in a " +
+        "knob-absent build, which breaks the shipping criterion. Guard them " +
+        "with #ifdef SCR_CORO_LANE -- around the branch, not around its " +
+        "body:" + NL + stray.join(NL),
+    ).toEqual([]);
+  });
+});

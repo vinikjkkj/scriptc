@@ -2,6 +2,7 @@
  * scaffolding, plus the interned resolve/child-exit thunks that adapt typed
  * payloads onto the runtime's promise and child-process machinery. */
 import { appendLines, type CEmitter } from "./emitter.js";
+import { emitGenCoroSpawn } from "./emit-gen-coro.js";
 import { mangleAgenSettleThunk, mangleArgPack, mangleAsyncSpawn, mangleChildDataThunk, mangleChildExitThunk, mangleCloseBindThunk, mangleCloseOverrideWrap, mangleConnectSockThunk, mangleDgramMsgThunk, mangleDnsLookupThunk, mangleField, mangleFunction, mangleGenDrop, mangleGenResThunk, mangleGenSpawn, mangleGlobal, mangleLocal, mangleRaceThunk, mangleRawParam, mangleNetLookupAnswerThunk, mangleEmitterInvokeThunk, mangleStreamCbThunk, mangleStreamDoneFn, mangleRecordNew, mangleRecordRelease, mangleRecordStruct, mangleResolveThunk, mangleSniAnswerThunk, mangleTrampoline } from "../mangle.js";
 import { cDecl, cType, releaseCallC, retainCallC, vAdapters } from "./emit-types.js";
 import { IrFunction, IrType, isRefCounted, isUnitType, typeEquals, typeKey } from "../../ir/nodes.js";
@@ -171,6 +172,25 @@ function agenResultTypeOf(fn: IrFunction): IrType & { kind: "record" } {
   function emitGenScaffolding(E: CEmitter, out: string[]): void {
     for (const fn of E.mod.functions) {
       if (!fn.generator) continue;
+      // STACKLESS: a CONVERTED SYNCHRONOUS generator is backed by a frame,
+      // so none of the scaffolding below exists for it -- no argument pack,
+      // no fibre trampoline, no never-started teardown. The frame IS the
+      // pack.
+      //
+      // THE `!fn.async` IS NOT REDUNDANT, and leaving it out was the same
+      // defect this slice already paid for once. Testing only membership in
+      // the plan map branches on a SET THAT GROWS: the moment the hop front
+      // admits async generators, an async one arrives here and is handed to
+      // emitGenCoroSpawn, which emits the synchronous spawn -- no promise,
+      // no settle thunk, nothing that an async consumer needs. Testing the
+      // PROPERTY instead means a member that could not previously exist
+      // falls through to the scaffolding written for it, and whoever opens
+      // that gate gets a visible gap rather than a silent wrong lowering.
+      const genPlan = !fn.async ? E.coroPlansByFn.get(fn.name) : undefined;
+      if (genPlan !== undefined) {
+        emitGenCoroSpawn(E, out, fn, genPlan);
+        continue;
+      }
       const isAsyncGen = fn.async === true;
       const pack = mangleArgPack(fn.name);
       const lifted = fn.captures !== undefined;

@@ -193,6 +193,32 @@ export function libCallPointKind(fn: StacklessLowerableLibCall): SuspensionPoint
   return `libCall:${fn}`;
 }
 
+/** Which suspending NODE KINDS the stackless lane can lower. The twin of
+ * the set above, and it exists for the same reason: a suspender the lane
+ * cannot lower must keep its function on the fiber lane, and the list of
+ * which is which belongs in ONE place that both the analysis and the
+ * emitter read.
+ *
+ * WHAT IS ABSENT AND WHY, because an absence here is a decision and reads
+ * like an oversight:
+ *
+ *   genResume / agenResume -- the CONSUMER side. Neither actually suspends
+ *     its caller (scr_agen_next arms a promise and returns; scr_gen_resume
+ *     switches in and comes back before returning), so they are refused by
+ *     a classification rather than by a mechanism. Lifting them is a
+ *     separate slice and carries the scr_current question with it.
+ *   awaitUnionExpr -- its unit arm takes a microtask hop, and the stackless
+ *     lane has no counterpart for the hop. Same reason async.hop is absent
+ *     from the libCall set.
+ *
+ * yieldExpr is HERE only because a SYNCHRONOUS yield is lowerable: it takes
+ * no hop. The async form calls scr_await_hop inside scr_agen_yield_settle,
+ * which is why async generators stay on the fiber lane -- and they are
+ * refused at the FUNCTION level, in stacklessPlan, rather than by this set,
+ * because the node kind alone cannot tell the two flavours apart. */
+export const STACKLESS_LOWERABLE_NODE_KINDS: ReadonlySet<string> =
+  new Set<SuspendingNodeKind>(["awaitExpr", "yieldExpr"]);
+
 /** Emit a fiber-only runtime primitive. The first argument is not decoration:
  * it forces the emission site to name a REGISTERED suspender, so a new
  * fiber-only call cannot reach the output without appearing in the list above

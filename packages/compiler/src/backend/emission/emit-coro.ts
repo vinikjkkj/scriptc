@@ -42,16 +42,19 @@
  * past an initialiser into a scope the label cannot see, and the whole
  * transformation would need the body restructured first. */
 import { appendLines, type CEmitter, type Temp } from "./emitter.js";
-import { mangleCoroFrame, mangleCoroResume, mangleAsyncSpawn, mangleLocal, mangleRawParam } from "../mangle.js";
+import { mangleCoroField, mangleCoroFrame, mangleCoroResume, mangleAsyncSpawn, mangleLocal, mangleRawParam } from "../mangle.js";
 import { boxAccess, cDecl, cType, vAdapters } from "./emit-types.js";
 import { type IrFunction, type IrType, isRefCounted } from "../../ir/nodes.js";
-import { stacklessPlan, type StacklessPlan } from "../../ir/liveness.js";
+// `coroPlans` moved to ir/coro-plans.ts: it is backend-agnostic policy and
+// only looked C-specific because it lived here. The TYPE is still needed.
+import { type StacklessPlan } from "../../ir/liveness.js";
+import { poisonFinishArm, poisonSpillOrder, poisonTakeArm } from "./coro-poison.js";
 
-/** The frame's field name for a local. Deliberately not mangleLocal's name:
- * the frame field and the C local coexist in the resume function, and a
- * spill that read `x = x` would be a no-op nobody would notice. */
+/** The frame's field name for a local. The naming lives in mangle.ts beside
+ * every other mangler, and WHY it has to use mangleLocal's sanitiser rather
+ * than a weaker one of its own is recorded there. */
 export function coroField(localId: string): string {
-  return `sc_v_${localId.replace(/[^A-Za-z0-9_]/g, "_")}`;
+  return mangleCoroField(localId);
 }
 
 /** The state machine's label for suspension point `i` (0-based). */
@@ -59,19 +62,6 @@ export function coroLabel(i: number): string {
   return `sc_S${i + 1}`;
 }
 
-/** Which functions this slice lowers, keyed by IR name. Computed once per
- * module: the emitters below and emit-async.ts's fiber path both consult it,
- * and a function appearing in neither or both would emit a duplicate symbol
- * or none at all. */
-export function coroPlans(fns: readonly IrFunction[]): Map<string, StacklessPlan> {
-  const out = new Map<string, StacklessPlan>();
-  if (process.env["SCRIPTC_STACKLESS"] !== "1") return out;
-  for (const fn of fns) {
-    const plan = stacklessPlan(fn);
-    if (plan !== null) out.set(fn.name, plan);
-  }
-  return out;
-}
 
 /** The locals the frame carries: everything live across a suspension, plus
  * every parameter (the resume function has no parameters of its own, so a
@@ -182,6 +172,24 @@ export function emitCoroFrames(E: CEmitter, out: string[], plans: Map<string, St
       const t = l.boxed === true ? "ScrBox *" + coroField(id) : cDecl(l.type, coroField(id));
       fields.push(`${t}; /* ${l.name} */`);
     }
+    // A GENERATOR frame carries its own handle. The yield and finish arms
+    // reach the OUT slot through it, and the slot lives on the handle
+    // because the native sink in scr_stream.c reads it from C with no
+    // knowledge of frames.
+    //
+    // ONE FIELD, AND ONLY ON GENERATORS. The alternative is a back-pointer
+    // on ScrCoroBase, which is 8 bytes on EVERY frame -- including the 95%
+    // that are ordinary awaits and will never be a generator -- to serve the
+    // few that are. Same reasoning that keeps the exception cell out of the
+    // lean frame: pay the cost where it is owed.
+    if (fn.generator !== undefined) {
+      fields.push("ScrGen *sc_gen; /* the handle this frame is behind */");
+    }
+    // sc_awaited is emitted for a generator too, though a SYNCHRONOUS one
+    // never parks on a promise. Conditioning it on the plan carrying an
+    // awaitExpr point would save 8 bytes and introduce a way for the await
+    // path to find the field missing; 8 bytes on a shape that barely exists
+    // is not worth a branch that can be wrong. Deliberate, not overlooked.
     fields.push("ScrPromise *sc_awaited; /* the operand being awaited */");
     for (const t of E.coroTempSpills.get(fn.name) ?? []) {
       fields.push(`${cDecl(t.type, "sc_tmp_" + t.name)}; /* owned across a park */`);
@@ -218,6 +226,13 @@ export function emitCoroSpawns(E: CEmitter, out: string[], plans: Map<string, St
   for (const fn of E.mod.functions) {
     const plan = plans.get(fn.name);
     if (plan === undefined) continue;
+    // A GENERATOR's spawn is emitted by emitGenCoroSpawn instead, and this
+    // skip is load-bearing rather than tidy: generators entered `plans` in
+    // the same slice that opened admission, so without it BOTH wrappers are
+    // emitted -- one returning ScrPromise * and one returning ScrGen * -- and
+    // the promise one calls scr_coro_spawn, which RUNS THE BODY. Calling a
+    // generator function must run nothing.
+    if (fn.generator !== undefined) continue;
     const frame = mangleCoroFrame(fn.name);
     const boxedIds = new Set(fn.locals.filter((l) => l.boxed === true).map((l) => l.id));
     // A boxed param arrives raw and is boxed by the body, exactly as the
@@ -316,7 +331,20 @@ export function coroReload(E: CEmitter, fn: IrFunction, plan: StacklessPlan): st
 
 /** The spill of the frame's locals, emitted immediately before a park. */
 export function coroSpill(E: CEmitter, fn: IrFunction, plan: StacklessPlan): string[] {
-  const out = coroFrameLocals(fn, plan).map((id) => `sc_f->${coroField(id)} = ${mangleLocal(id)};`);
+  const ids = coroFrameLocals(fn, plan);
+  // The value poison's park-spill arm permutes the TARGETS while the
+  // sources stay, so two same-typed locals land in each other's slots:
+  // a real value of the right type in the wrong field. Identity unless
+  // SCRIPTC_CORO_VALUE_POISON=park-spill. See coro-poison.ts.
+  const targets = poisonSpillOrder(fn, ids);
+  const out = ids.map((id, i) => `sc_f->${coroField(targets[i]!)} = ${mangleLocal(id)};`);
+  // THE PENDING-RETURN SLOT IS NOT PART OF THE PERMUTATION, and that is not
+  // an oversight. The poison permutes frame slots among the FRAME LOCALS to
+  // plant a right-typed value in a wrong field; `sc_pret` is not one of them
+  // -- it is a single slot with no sibling to be confused with, so permuting
+  // it could only mean dropping it. It is appended after the permuted set so
+  // the poison arm keeps testing exactly what it was written to test, and the
+  // pending return keeps surviving the park either way.
   if (E.coroPretType !== null) out.push(`sc_f->sc_pret = sc_pret;`);
   return out;
 }
@@ -365,7 +393,7 @@ export function emitCoroAwait(
   E.line(`${coroLabel(index)}:;`);
   for (const t of owned) E.line(`${t.name} = sc_f->sc_tmp_${t.name};`);
   for (const line of coroReload(E, fn, plan)) E.line(line);
-  const take =
+  const take0 =
     resultType.kind === "void"
       ? null
       : resultType.kind === "f64"
@@ -373,6 +401,8 @@ export function emitCoroAwait(
         : resultType.kind === "bool"
           ? "scr_coro_take_bool"
           : "scr_coro_take_ref";
+  // Identity unless SCRIPTC_CORO_VALUE_POISON=take-arm.
+  const take = take0 === null ? null : poisonTakeArm(resultType, take0);
   if (take === null) {
     E.line(`scr_coro_take_void(sc_b, sc_f->sc_awaited);`);
     E.line(`scr_promise_release(sc_f->sc_awaited); sc_f->sc_awaited = NULL;`);
@@ -513,7 +543,10 @@ export function coroFinish(
       // -- reads `b`. Fulfilling through f64 left `b` zero, so an `await` of
       // a bool-returning coroutine answered false whatever it returned: a
       // wrong ANSWER, not a crash, which is why a green corpus never saw it.
-      return [...env, `scr_coro_finish_bool(sc_b, ${valueExpr});`, `return;`];
+      // Identity unless SCRIPTC_CORO_VALUE_POISON=finish-arm, which
+      // reinstates exactly the defect the comment above describes: the
+      // bool converts to double, the call compiles, `b` stays zero.
+      return [...env, `${poisonFinishArm(retType, "scr_coro_finish_bool")}(sc_b, ${valueExpr});`, `return;`];
     default: {
       const v = vAdapters(retType);
       return [
