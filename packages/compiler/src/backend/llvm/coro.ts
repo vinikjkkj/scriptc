@@ -415,6 +415,93 @@ const _pointKindBindingUsed: readonly unknown[] = [
 ];
 void _pointKindBindingUsed;
 
+
+/** A suspending libCall this backend exempted from the nesting pre-filter has
+ * turned out to carry an operand. See assertBareSuspendingLibCalls. */
+export class HopOperandFenceError extends Error {
+  constructor(readonly fnName: string, readonly sites: readonly string[]) {
+    super(
+      `llvm coro: ${fnName} holds a suspending libCall WITH OPERANDS (${sites.join(", ")}), ` +
+        `but this backend exempts that point kind from the nested-in-expression pre-filter ` +
+        `precisely because it carries none. The exemption's precondition no longer holds, so ` +
+        `the pre-filter is now admitting a point whose operands may be materialised in SSA ` +
+        `temporaries across the suspension. Either give the operand-bearing form its own ` +
+        `point kind, or remove the kind from POINT_KINDS_WITHOUT_AN_OPERAND and let the ` +
+        `pre-filter refuse it.`,
+    );
+    this.name = "HopOperandFenceError";
+  }
+}
+
+/** Every suspending libCall in this body that carries operands, as
+ * `fn(argCount)` strings. Empty is the expected answer.
+ *
+ * PURE AND EXPORTED so its own guard can feed it a one-operand hop and require
+ * a complaint back -- a fence with no way to fire is a comment. */
+export function operandBearingSuspendingLibCalls(fn: IrFunction): string[] {
+  const out: string[] = [];
+  const walk = (v: unknown): void => {
+    if (v === null || typeof v !== "object") return;
+    if (Array.isArray(v)) {
+      for (const x of v) walk(x);
+      return;
+    }
+    const rec = v as Record<string, unknown>;
+    if (rec["kind"] === "libCall" && typeof rec["fn"] === "string"
+        && LLVM_LOWERABLE_LIB_CALLS.has(rec["fn"])) {
+      const args = rec["args"];
+      if (Array.isArray(args) && args.length > 0) out.push(`${rec["fn"]}(${args.length})`);
+    }
+    for (const k in rec) {
+      if (k === "loc" || k === "type") continue;
+      walk(rec[k]);
+    }
+  };
+  walk(fn.body);
+  return out;
+}
+
+/** THE FENCE UNDER THE HOP EXEMPTION, and it exists because this slice just
+ * fixed a defect of exactly this shape one function away.
+ *
+ * `awaitInsideFinally` tested for `awaitExpr || awaitUnionExpr` and was correct
+ * ONLY because the hop was refused by KIND before it was ever consulted. When
+ * the hop became lowerable, the precondition that made the narrow spelling safe
+ * was retired BY THE SAME EDIT THAT NEEDED IT, and nothing failed. It had to be
+ * read for.
+ *
+ * POINT_KINDS_WITHOUT_AN_OPERAND has the identical structure. It rests on a
+ * property liveness.ts states about itself in PROSE -- "a bare hop carries no
+ * operand at all, so there is no promise to own across the park and nothing to
+ * take on the far side" -- which is true today and is owned by the FRONTEND's
+ * desugar, not by this file. Give the hop an operand in some future lowering
+ * and this backend silently starts exempting a point whose operands really are
+ * materialised in `%tN` temporaries across the suspension. No build failure, no
+ * test, a wrong answer on a host that verifies no IR.
+ *
+ * So the precondition is CHECKED where it is RELIED ON, and it fails the BUILD
+ * rather than refusing quietly: a CoroRefusedError here would drop the function
+ * to the fiber lane and read as a coverage dip, which is the wrong signal
+ * entirely. This throws out through llvmCoroPlans, which sits outside
+ * emitFunction's trial catch, so nothing downgrades it.
+ *
+ * WHAT SITS IN FRONT OF IT, learned by trying to make it fire and failing the
+ * first time. Giving the hop an operand ONLY in the desugar does not reach here
+ * at all: `LIB_FN_SIGS` declares `async.hop` as `{ argTypes: [], result: VOID }`
+ * and validateModule rejects the call as SC9001 before any backend runs. So the
+ * realistic defect is the TWO-STEP one -- a lowering that adds the operand and
+ * updates the signature together, which is what anyone actually making that
+ * change would do -- and that is the shape this fence catches. Proved by
+ * planting both halves: `HopOperandFenceError: llvm coro: h holds a suspending
+ * libCall WITH OPERANDS (async.hop(1))`. Worth writing down because the first,
+ * unfaithful plant came back SC9001 and looked like the fence working when it
+ * was a different check entirely -- a control that passes for the wrong reason
+ * reads exactly like one that passes. */
+export function assertBareSuspendingLibCalls(fn: IrFunction): void {
+  const sites = operandBearingSuspendingLibCalls(fn);
+  if (sites.length > 0) throw new HopOperandFenceError(fn.name, sites);
+}
+
 /** THE ADMISSION PREDICATE -- which planned functions THIS backend lowers.
  *
  * It is deliberately NARROWER than `coroPlans`, and the gap is the whole shape
@@ -499,11 +586,15 @@ export function coroRefusalReason(fn: IrFunction, plan: StacklessPlan): string |
   for (const pt of plan.points) {
     if (!LLVM_LOWERABLE_POINT_KINDS.has(pt.kind)) return `kind=${pt.kind}`;
   }
+  let exempted = false;
   for (const pt of plan.points) {
-    if (pt.nestedInExpression && !POINT_KINDS_WITHOUT_AN_OPERAND.has(pt.kind)) {
-      return "nested-in-expression";
-    }
+    if (!pt.nestedInExpression) continue;
+    if (!POINT_KINDS_WITHOUT_AN_OPERAND.has(pt.kind)) return "nested-in-expression";
+    exempted = true;
   }
+  // THE EXEMPTION'S PRECONDITION IS OWNED BY ANOTHER FILE, SO IT IS ASSERTED
+  // RATHER THAN ASSUMED -- and only on the path that actually uses it.
+  if (exempted) assertBareSuspendingLibCalls(fn);
   if (suspensionInsideFinally(fn)) return "suspension-inside-finally";
   return null;
 }
