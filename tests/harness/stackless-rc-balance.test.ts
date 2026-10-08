@@ -338,6 +338,47 @@ const CASES: ReadonlyArray<{ name: string; why: string; src: string }> = [
       "",
     ].join("\n"),
   },
+  /* THE FOUR STATEMENT POSITIONS. The one that needed its own RC row is
+   * `switch`: emitSwitch NULL-RESETS refcounted case-scoped locals at the TOP
+   * of the statement (emit-stmts.ts:1219) and a resume re-enters BELOW that
+   * reset. If the frame did not carry such a local the reload would be
+   * skipped and the local would hold whatever the C declaration left -- and
+   * if the reset DID somehow run after the park, the reference would be
+   * dropped without a release, which is a leak no value guard can see
+   * because the string that comes back is still the right string. */
+  {
+    name: "switch-case-local",
+    why: "a refcounted local declared at the TOP LEVEL of a case body (no braces -- braces make it a nested block the reset skips), across a park",
+    src: [
+      "async function main(): Promise<void> {",
+      "  const k = Date.now() % 3 >= 0 ? 1 : 2",
+      "  switch (k) {",
+      "    case 1:",
+      "      const s = await ps(1)",
+      "      console.log(s.length)",
+      "      break",
+      "    default:",
+      "      console.log(0)",
+      "      break",
+      "  }",
+      "}",
+      "void main()",
+      "",
+    ].join("\n"),
+  },
+  {
+    name: "recordset-overwrite",
+    why: "a refcounted record FIELD overwritten across a park -- the old value is released after the resume, through a container evaluated before it",
+    src: [
+      "async function main(): Promise<void> {",
+      '  const r = { v: "a" + String(Date.now() % 3) }',
+      "  r.v = await ps(1)",
+      "  console.log(r.v.length)",
+      "}",
+      "void main()",
+      "",
+    ].join("\n"),
+  },
   {
     name: "field-after-park",
     why: "THE CONTROL: reading the field after the park makes the object live, so it was in the frame all along and never leaked",

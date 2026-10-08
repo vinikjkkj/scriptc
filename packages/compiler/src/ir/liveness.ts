@@ -199,8 +199,10 @@ interface FoundSuspension {
  * SWEPT, not guessed, over both populations: exactly four shapes in the IR
  * count zero for this reason. `recordLit.fields` is the one with occupancy
  * (16 suspensions in zapo-rest, 12 across 7 corpus files) and is what this
- * buys. `switch.cases` holds suspensions too but is rejected LOUDLY by
- * switchDepth, so seeing through it changes nothing. `dynObjLit.fields` and
+ * buys. `switch.cases` holds suspensions too; it USED to be rejected loudly
+ * by a switchDepth counter, which is gone now that a switch case body is in
+ * the slice, so seeing through it still changes nothing but for the opposite
+ * reason -- those points are admitted on their own terms. `dynObjLit.fields` and
  * `mapNew.seed` have the property with measured ZERO occupancy in both
  * populations and are recorded as capacity, not occupancy.
  *
@@ -334,7 +336,6 @@ interface Ctx {
   /** A `switch` is not a loop, but a resume label inside a case body puts
    * the state machine's re-entry inside the switch block. Legal C, but out
    * of the first slice's scope. */
-  switchDepth: number;
   /** Set by the statement cases where the await may be the expression ROOT
    * (`exprStmt`, `varDecl`); false everywhere else, so a suspension in any
    * other statement position is never D1 however shallow it looks. */
@@ -429,13 +430,34 @@ function recordPoints(
         straightLine:
           ctx.forOfDepth === 0 &&
           ctx.finallyDepth === 0 &&
-          ctx.switchDepth === 0 &&
           ctx.rootOk &&
           (s.pointKind === "awaitExpr" ||
             s.pointKind === "awaitUnionExpr" ||
             s.pointKind.startsWith("libCall:")),
         blockers: [
-          // D2e: a PLAIN loop is in. The dispatch goto jumps into the loop
+          // D2f: the last four statement positions join, as ONE slice because
+        // they are DISJOINT -- no remaining function in the measured program
+        // carries two of them, so their reach is additive exactly rather than
+        // estimated. They are grouped by COST, not by nature:
+        //
+        //   `if`, `recordSet`, `bytesSet` are rootOk carve-outs, the same
+        //   question `assign` was: a per-statement flag reading false where
+        //   the lowering already evaluates the operand before it uses the
+        //   result.
+        //
+        //   `switch` is NOT a rootOk -- it was a DEPTH blocker, like `loop`.
+        //   It is free for the same reason `try` was: emitSwitch does not
+        //   emit a C `switch` at all. It lowers to `sc_swcase_N_i` labels and
+        //   `goto`s (emit-stmts.ts:1205), so a resume label inside a case
+        //   body is an ordinary label in the function and there is no
+        //   jump-into-a-switch question to answer.
+        //
+        //   The case-scoped NULL resets at the top of the statement
+        //   (emit-stmts.ts:1219) are JUMPED OVER by a resume, which is the
+        //   safe direction -- the frame's reload stands. Guarded by value and
+        //   by RC rather than by this paragraph.
+        //
+        // D2e: a PLAIN loop is in. The dispatch goto jumps into the loop
           // body, which is the same "jump into a block" the `try` slice
           // already relies on, and a plain loop's carried state is ordinary
           // IrLocals the frame already holds.
@@ -451,7 +473,6 @@ function recordPoints(
           // mean something different from what it meant yesterday.
           ...(ctx.forOfDepth > 0 ? ["forOf"] : []),
           ...(ctx.finallyDepth > 0 ? ["finally"] : []),
-          ...(ctx.switchDepth > 0 ? ["switch"] : []),
           ...(ctx.rootOk ? [] : ["rootOk:" + ctx.stmtKind]),
           ...(s.pointKind === "awaitExpr" ||
           s.pointKind === "awaitUnionExpr" ||
@@ -588,7 +609,7 @@ function backStmt(
       const elseLive =
         s.else_ === null ? new Set(liveOut) : backStmts(ctx, s.else_, liveOut, loops);
       const live = union(thenLive, elseLive);
-      recordPoints(ctx, [s.cond], live, [], [], false, "if");
+      recordPoints(ctx, [s.cond], live, [], [], true, "if");
       readsOf(s.cond, live);
       return live;
     }
@@ -727,13 +748,11 @@ function backStmt(
         breakLive: new Set(liveOut),
         continueLive: new Set(live),
       };
-      ctx.switchDepth++;
       for (const c of s.cases) {
         backStmts(ctx, c.body, new Set(live), [...loops, frame]);
-        if (c.test !== null) recordPoints(ctx, [c.test], live, [], [], false, "switch");
+        if (c.test !== null) recordPoints(ctx, [c.test], live, [], [], true, "switch");
       }
-      ctx.switchDepth--;
-      recordPoints(ctx, [s.disc], live, [], [], false, "switch");
+      recordPoints(ctx, [s.disc], live, [], [], true, "switch");
       const out = new Set(live);
       for (const c of s.cases) if (c.test !== null) readsOf(c.test, out);
       readsOf(s.disc, out);
@@ -794,7 +813,7 @@ function backStmt(
     }
     case "arraySet":
     case "bytesSet": {
-      recordPoints(ctx, [s.arr, s.index, s.value], liveOut, [], [], false, "bytesSet");
+      recordPoints(ctx, [s.arr, s.index, s.value], liveOut, [], [], true, "bytesSet");
       const live = new Set(liveOut);
       readsOf(s.arr, live);
       readsOf(s.index, live);
@@ -810,7 +829,7 @@ function backStmt(
     }
     case "fieldSet":
     case "recordSet": {
-      recordPoints(ctx, [s.obj, s.value], liveOut, [], [], false, "recordSet");
+      recordPoints(ctx, [s.obj, s.value], liveOut, [], [], true, "recordSet");
       const live = new Set(liveOut);
       readsOf(s.obj, live);
       readsOf(s.value, live);
@@ -857,7 +876,6 @@ export function suspensionLiveness(fn: IrFunction): FnLiveness | null {
     loopDepth: 0,
     tryDepth: 0,
     finallyDepth: 0,
-    switchDepth: 0,
     rootOk: false,
     stmtKind: "?",
   };

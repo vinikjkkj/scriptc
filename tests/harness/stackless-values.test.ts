@@ -291,6 +291,34 @@ const WRAPPERS: ReadonlyArray<{ name: string; take: string; finish: string; conv
   // frame cannot carry them. It must STAY on the fiber lane, and this row
   // fails the moment it stops doing so.
   { name: "wlfo", take: "f64", finish: "f64", converted: false },
+  // THE FOUR STATEMENT POSITIONS, as one slice because they are DISJOINT: no
+  // remaining function in the measured program carries two of them, so their
+  // reach is additive exactly. Grouped by COST, not by nature -- `if`,
+  // `recordSet` and `bytesSet` are rootOk carve-outs like `assign` was, while
+  // `switch` was a DEPTH blocker like `loop`.
+  //
+  // wsw is the sharp one. emitSwitch NULL-resets refcounted case-scoped
+  // locals at the TOP of the statement and a resume re-enters BELOW that
+  // reset, so the row exists to show the frame reload stands rather than
+  // being clobbered. It carries a refcounted local for exactly that reason.
+  //
+  // wsd and wst are CAPACITY: the measured program has zero awaits in a
+  // switch discriminant or a case test, so neither it nor a green corpus
+  // could refute those two.
+  { name: "wif", take: "bool", finish: "ref", converted: true },
+  { name: "wrs", take: "f64", finish: "f64", converted: true },
+  { name: "wby", take: "f64", finish: "f64", converted: true },
+  { name: "wsw", take: "ref", finish: "ref", converted: true },
+  { name: "wsd", take: "f64", finish: "ref", converted: true },
+  { name: "wst", take: "f64", finish: "ref", converted: true },
+  // AND THE ROW THAT ACTUALLY REACHES THE NULL-RESET. wsw above declares its
+  // local inside BRACES, which makes it a nested block -- and emitSwitch
+  // resets only locals declared at the TOP LEVEL of a case body, because
+  // "nested blocks manage their own scopes". Measured in the emitted C: the
+  // whole guard program contained ZERO `case-scoped` resets, so the risk this
+  // slice named as its sharpest was not being exercised by the guard written
+  // for it. wsu drops the braces and is the row that reaches it.
+  { name: "wsu", take: "ref", finish: "ref", converted: true },
 ];
 
 const SOURCE = `
@@ -586,6 +614,55 @@ async function wlfo(): Promise<number> {
   return s;
 }
 
+/* THE FOUR STATEMENT POSITIONS. Each magnitude distinguishes the plausible
+ * wrong answer: wif taking the other branch, wrs storing through a container
+ * the park lost, wsw resuming with its case-scoped local reset to NULL. */
+async function wif(n: number): Promise<string> {
+  if (await pb(n > 0)) { return "yes"; }
+  return "no";
+}
+async function wrs(n: number): Promise<number> {
+  const r = { v: 0 };
+  r.v = await pf(n);
+  return r.v;
+}
+async function wby(n: number): Promise<number> {
+  const a = new Uint8Array(2);
+  a[0] = await pf(n);
+  return a[0];
+}
+async function wsw(n: number): Promise<string> {
+  switch (n) {
+    case 1: { const s = await ps("a"); return s + "/1"; }
+    case 2: { const s = await ps("b"); return s + "/2"; }
+    default: return "d";
+  }
+}
+async function wsd(n: number): Promise<string> {
+  switch (await pf(n)) {
+    case 1: return "one";
+    case 2: return "two";
+    default: return "other";
+  }
+}
+async function wst(n: number): Promise<string> {
+  switch (n) {
+    case await pf(0): return "t1";
+    default: return "td";
+  }
+}
+// No braces: the local is declared at the TOP LEVEL of the case body, which
+// is the only shape emitSwitch NULL-resets at the top of the statement.
+async function wsu(n: number): Promise<string> {
+  switch (n) {
+    case 1:
+      const s = await ps("u");
+      return s + "/1";
+    default:
+      return "du";
+  }
+}
+
 async function main(): Promise<void> {
   const f = await wf(41);
   console.log("f64   ", f);
@@ -651,6 +728,8 @@ async function main(): Promise<void> {
   console.log("aunion2", await waun(true), await waun(false), "|", await waus(true), await waus(false));
   console.log("loop  ", await wln(), "|", await wls(), "|", await wlf(), "|", await wld());
   console.log("loop2 ", await wlc(), "|", await wlb(), "|", await wlnest(), "|", await wlfo());
+  console.log("four  ", await wif(1), await wif(-1), "|", await wrs(3), "|", await wby(4));
+  console.log("four2 ", await wsw(1), await wsw(2), await wsw(3), "|", await wsd(0), await wsd(1), await wsd(5), "|", await wst(1), await wst(9), "|", await wsu(1), await wsu(9));
   console.log("done");
 }
 void main();
@@ -917,6 +996,13 @@ describe("the stackless lane answers what the fiber lane answers", () => {
       // wlnest 1+2+11+12 = 26. wlfo stays on fibers and must still answer 5.
       "loop   6 | 0!1!2!/6 | 33 | 3",
       "loop2  4 | 3 | 26 | 5",
+      // The four statement positions. wif picks a branch on an awaited bool.
+      // wrs/wbs store pf(3)=4 and pf(4)=5 through a container evaluated
+      // BEFORE the park. wsw resumes inside a case body holding a refcounted
+      // local the statement NULL-reset above it. wsd awaits the
+      // discriminant, wst awaits a case test.
+      "four   yes no | 4 | 5",
+      "four2  a!/1 b!/2 d | one two other | t1 td | u!/1 du",
     ];
     for (const line of ASSIGN_LINES) {
       expect(fiber, `the reference arm must already answer: ${line}`).toContain(line);
