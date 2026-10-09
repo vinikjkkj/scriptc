@@ -103,7 +103,6 @@ import {
   crossSlotName,
   coroFrameLayout,
   coroLabel,
-  coroPointKey,
   coroFrameSizeOf,
   coroRefusalReason,
   coroCheckSuspensionSites,
@@ -1524,11 +1523,57 @@ class LlEmitter {
    * checked against `plan.points`, which the ANALYSIS produces, instead of
    * against another number this emitter made up. */
   private coroStates: number[] = [];
-  /** The plan's points, indexed by the source position of the node that
-   * suspends. Built once per coroutine body in emitFunctionBody; empty for a
-   * fiber body. See coroPointKey for why the key is a POSITION and not a
-   * cursor. */
-  private coroPointByKey = new Map<string, number>();
+  /** THE KEY A STATE IS SITED BY: THE IR NODE ITSELF, and nothing else.
+   *
+   * A plan point is identified by the OBJECT that suspends, and that is forced
+   * rather than chosen. Two weaker keys were tried and both are refuted by a
+   * build:
+   *
+   * A CURSOR IS WRONG, because emission order is not plan order. The C lane
+   * keeps a plan cursor and rewinds it before each copy of a `finally` body,
+   * which works there because every copy is emitted AT the region, in plan
+   * order, behind a goto. This lane emits the copy a `return` needs INLINE at
+   * the return site -- reached before the walk has got anywhere near the
+   * finally -- so a cursor hands the finally's suspension whichever point the
+   * walk happens to be standing on. Measured on a probe carrying a suspension
+   * on both sides of the return.
+   *
+   * (kind, POSITION) IS WRONG TOO, and that one shipped. It reads as an
+   * identity and is not one: a position is a property of the SOURCE, and the
+   * lowering synthesizes nodes the source does not contain, all of which have
+   * to be stamped with some caller's `loc`. `pu` -- `async function pu(n) {
+   * return n > 0 ? n : null; }` -- plans an `awaitExpr` AND a
+   * `libCall:async.hop` at one range, which is why the kind went into the key;
+   * that patched the instance and left the class open. The class then arrived:
+   * `.then(cb)` with `cb` returning `Promise<T>` lowers to a `%fnN_then`
+   * adapter that awaits the receiver and awaits the handler's result, BOTH
+   * stamped with the `.then` call's `loc` and both `awaitExpr`. The kind does
+   * not separate them because they have the same kind. The emitter threw
+   * `plans suspension points 0 and 1, both awaitExpr`, and the user's app182
+   * -- the whole shipping load -- stopped there with no `.ll` emitted at all.
+   *
+   * SO THE KEY IS THE THING THAT IS UNIQUE BY CONSTRUCTION. Two distinct nodes
+   * are two distinct objects however they were spelled, wherever they were
+   * synthesized, and whatever position they were given. There is no next
+   * instance of this class to find: a collision would require one object to be
+   * planned twice, which is an analysis bug and is still checked for.
+   *
+   * WHAT MAKES IT A KEY AT ALL is that the analysis and the emitter read the
+   * SAME object graph. `coroPlans` runs in LlEmitter's constructor over the
+   * `mod.functions` the emitter then emits, and nothing between them clones the
+   * IR. `emitBlock(s.finallyBody!)` re-walks the same node array once per
+   * completion path, so the copies seat on ONE point and the multiplicity lives
+   * where it already did -- in the state table.
+   *
+   * `loc` AND `kind` SURVIVE, demoted from finding a point to READING one:
+   * error text, censuses, and the kind cross-check at the draw site. That check
+   * is what the old key gave away for free and is now explicit -- seating a
+   * `park` on a point the analysis called a hop is a real disagreement, and it
+   * must not become invisible just because the node matched.
+   *
+   * Built once per coroutine body in emitFunctionBody; empty for a fiber
+   * body. */
+  private coroPointByNode = new Map<object, number>();
   /** The deferred dispatch's switch value and out-of-range label, carried from
    * emitCoroDispatch -- which cannot know the case count yet -- to the end of
    * the body. */
@@ -4181,27 +4226,51 @@ class LlEmitter {
    *
    * `site` names which draw point reached here, so a crash says whether it was
    * a park, a hop or a union arm. */
-  private coroDrawState(fn: IrFunction, kind: string, loc: SrcLoc, site: string): number {
+  private coroDrawState(fn: IrFunction, node: object, kind: string, loc: SrcLoc, site: string): number {
     const plan = this.currentCoro!;
-    const pt = this.coroPointByKey.get(coroPointKey(kind, loc));
+    const pt = this.coroPointByNode.get(node);
     if (pt === undefined) {
       throw new Error(
         `llvm emitter bug: ${fn.name} emitted a ${site} (${kind}) at ` +
           `${loc.file}:${loc.start}-${loc.end}, which the plan does not hold. The plan carries ` +
-          `${plan.points.length} suspension point(s) and none of that kind at that position, so ` +
+          `${plan.points.length} suspension point(s) and this node is not one of them, so ` +
           `this site would take a state with no point behind it: the frame was laid out without ` +
           `its live set and the dispatch would route its label nowhere. The emitter and the ` +
           `analysis disagree about what suspends.`,
+      );
+    }
+    // THE KIND CROSS-CHECK, WHICH THE OLD KEY GAVE AWAY FOR FREE. Seating by
+    // node says the emitter and the analysis are standing on the same object;
+    // it does not say they agree about what that object DOES. A park drawn
+    // against a point the analysis planned as a hop would lay out a frame for
+    // one suspender and emit the other, and nothing downstream reads the kind
+    // again. The old key could not express that disagreement -- a mismatched
+    // kind simply missed the table and raised "the plan does not hold", which
+    // is a different sentence for a different defect. This keeps both.
+    const planned = plan.points[pt]!;
+    if (planned.kind !== kind) {
+      throw new Error(
+        `llvm emitter bug: ${fn.name} emitted a ${site} (${kind}) at ` +
+          `${loc.file}:${loc.start}-${loc.end} against plan point ${pt}, which the analysis ` +
+          `planned as ${planned.kind}. The node is the same object on both sides, so this is ` +
+          `not a lookup miss: the emitter and the analysis disagree about what it DOES, and the ` +
+          `frame was laid out for the other one.`,
       );
     }
     this.coroStates.push(pt);
     return this.coroStates.length - 1;
   }
 
-  private emitCoroAwait(fn: IrFunction, loc: SrcLoc, pr: LlValue, resultType: IrType): LlValue {
+  private emitCoroAwait(
+    fn: IrFunction,
+    node: object,
+    loc: SrcLoc,
+    pr: LlValue,
+    resultType: IrType,
+  ): LlValue {
     const B = this.B;
     const layout = this.currentCoroLayout!;
-    const index = this.coroDrawState(fn, "awaitExpr", loc, "park");
+    const index = this.coroDrawState(fn, node, "awaitExpr", loc, "park");
     // The frame takes the promise's +1: struck from the RC frame here so no
     // scope exit and no unwind releases it, and released once at the take.
     this.moveTemp(pr);
@@ -4294,9 +4363,9 @@ class LlEmitter {
    * the hop contributes. It is NOT the whole invariant -- see
    * coroCheckSuspensionSites, and the comment at the D5 assertion for why
    * "parks + hops" is the wrong universal spelling. */
-  private emitCoroHop(fn: IrFunction, loc: SrcLoc): void {
+  private emitCoroHop(fn: IrFunction, node: object, loc: SrcLoc): void {
     const B = this.B;
-    const index = this.coroDrawState(fn, libCallPointKind("async.hop"), loc, "hop");
+    const index = this.coroDrawState(fn, node, libCallPointKind("async.hop"), loc, "hop");
     // THE SAME CARRY AS THE PARK, and it has to be the same or the hop is a
     // hole the shape of the other suspension form. A hop takes a boundary
     // exactly as a park does, so every temp minted before it is just as dead on
@@ -4370,6 +4439,7 @@ class LlEmitter {
    * the current generation and the join reads it there. */
   private emitCoroUnionAwait(
     resType: IrType,
+    node: object,
     loc: SrcLoc,
     def: IrUnionDef,
     inner: IrType,
@@ -4420,7 +4490,7 @@ class LlEmitter {
     // it twice would give the arms two labels and leave the join reachable from
     // only one of them; drawing it zero times would collide two points on one
     // state, which nothing downstream would catch.
-    const index = this.coroDrawState(fn, "awaitUnionExpr", loc, "union suspension");
+    const index = this.coroDrawState(fn, node, "awaitUnionExpr", loc, "union suspension");
 
     // HOISTED -- see the header. One index, two sites, one spill.
     this.emitCoroTempSpill(index);
@@ -5666,35 +5736,40 @@ class LlEmitter {
     this.currentCoro = coro;
     this.currentCoroLayout = null;
     this.coroStates = [];
-    this.coroPointByKey.clear();
+    this.coroPointByNode.clear();
     if (coro !== null) {
-      // THE ANALYSIS'S TABLE, INDEXED BY KIND AND POSITION, built before the
-      // walk so every draw site can seat itself. A DUPLICATE IS FAILED RATHER
-      // THAN SERVED: `SuspensionPoint.loc` carries a zero fallback for a node
-      // the frontend gave no position, and two of one kind would collide into
-      // one key -- one point would then be served twice and the other never,
-      // which inclusion I2 below would report as a missing point with no hint
-      // as to why.
+      // THE ANALYSIS'S TABLE, INDEXED BY THE NODE THAT SUSPENDS, built before
+      // the walk so every draw site can seat itself.
       //
-      // IT HAS ALREADY FIRED, which is why the kind is in the key. `pu`
-      // (`async function pu(n) { return n > 0 ? n : null; }`) plans an
-      // `awaitExpr` AND a `libCall:async.hop` at one source range, both
-      // synthesized from the return it desugars from. A position-only key
-      // collided them and this threw; the survey that had said positions were
-      // unique asked with the kind included, so the instrument had measured a
-      // different key from the one the code used.
+      // IT USED TO BE INDEXED BY (KIND, POSITION) AND THAT WAS NOT AN
+      // IDENTITY. A position is a property of the SOURCE, and the lowering
+      // synthesizes nodes the source does not contain -- each one stamped with
+      // some caller's loc because there is no other to give it. Two instances,
+      // one patched and one shipped: `pu` planned an `awaitExpr` and a
+      // `libCall:async.hop` at one range (patched by putting the kind in the
+      // key, which closed the instance and left the class open), and then
+      // `.then(cb)` with `cb` returning `Promise<T>` planned TWO `awaitExpr`
+      // at the `.then` call's own range -- same kind, so the kind could not
+      // separate them. That one threw here and stopped the user's app182 on
+      // its first occurrence with no `.ll` emitted at all. See coroDrawState.
+      //
+      // A DUPLICATE IS STILL FAILED RATHER THAN SERVED, and the check is no
+      // longer about spelling: two distinct nodes are two distinct objects, so
+      // the only way to collide now is for ONE object to be planned twice,
+      // which is an analysis bug. Serving it would hand one point two states
+      // and leave the other with none, which inclusion I2 below would report
+      // as a missing point with no hint as to why.
       coro.points.forEach((pt, i) => {
-        const key = coroPointKey(pt.kind, pt.loc);
-        const prev = this.coroPointByKey.get(key);
+        const prev = this.coroPointByNode.get(pt.node);
         if (prev !== undefined) {
           throw new Error(
-            `llvm emitter bug: ${fn.name} plans suspension points ${prev} and ${i}, both ` +
-              `${pt.kind} at ${pt.loc.file}:${pt.loc.start}-${pt.loc.end}. A state is seated at ` +
-              `its point BY kind and position, so the two cannot be told apart and one of them ` +
-              `would take both states.`,
+            `llvm emitter bug: ${fn.name} plans suspension points ${prev} and ${i} on the SAME ` +
+              `IR node (${pt.kind} at ${pt.loc.file}:${pt.loc.start}-${pt.loc.end}). A state is ` +
+              `seated at its point by node identity, so one object planned twice would take ` +
+              `both states. The analysis walked a node twice.`,
           );
         }
-        this.coroPointByKey.set(key, i);
+        this.coroPointByNode.set(pt.node, i);
       });
       this.currentCoroLayout = coroFrameLayout(
         fn,
@@ -9404,7 +9479,13 @@ class LlEmitter {
           // scr_ready_push per await on exactly one of its two arms -- the
           // invariant is countable by grepping the emitted TU.
           const pr0 = this.emitExpr(e.value);
-          const out0 = this.emitCoroAwait(this.fnByName.get(this.currentFnName)!, e.loc, pr0, e.type);
+          const out0 = this.emitCoroAwait(
+            this.fnByName.get(this.currentFnName)!,
+            e,
+            e.loc,
+            pr0,
+            e.type,
+          );
           this.emitPendingCheck();
           return out0;
         }
@@ -9460,7 +9541,7 @@ class LlEmitter {
           // and share a resume label, told apart on the far side by
           // `sc_awaited`. The pending check runs after the join, as it does on
           // the fiber arm below and in emit-exprs.ts's stackless shape.
-          const out0 = this.emitCoroUnionAwait(e.type, e.loc, def, inner, u, isP);
+          const out0 = this.emitCoroUnionAwait(e.type, e, e.loc, def, inner, u, isP);
           this.emitPendingCheck();
           return out0;
         }
@@ -14660,7 +14741,7 @@ class LlEmitter {
      * still needs the event loop alive, and the C lane sets `usesTimers` on its
      * stackless arm for the same reason. */
     if (e.fn === "async.hop" && this.currentCoro !== null) {
-      this.emitCoroHop(this.fnByName.get(this.currentFnName)!, e.loc);
+      this.emitCoroHop(this.fnByName.get(this.currentFnName)!, e, e.loc);
       return { name: "", type: e.type };
     }
     // The handful with non-generic shapes first.
