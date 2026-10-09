@@ -1034,10 +1034,10 @@ const NOT_LOWERED_BY_REASON: ReadonlyArray<readonly [string, readonly string[]]>
   // THIS GROUP IS THE SECOND BLOCKER, AND IT IS WHY IT HAS ITS OWN BUCKET.
   // Every name here was filed under `nested-in-expression`, which was TRUE of
   // all six and was not what bound them: removing that constraint left the
-  // cursor. The defect is dominance-LEGAL, so no SSA rule and no verifier can
-  // see it -- and this host runs no verifier at all -- which is why it is
-  // caught by a separate slot rule in blocks.ts that REFUSES rather than
-  // repairs. Carrying a cursor means moving the slot into the frame, a
+  // cursor. The defect is dominance-LEGAL, so no SSA rule can see it and
+  // neither can the toolchain -- `zig cc` DOES verify the .ll it parses, but
+  // for dominance, which this is not -- which is why it is caught by a
+  // separate slot rule in blocks.ts that REFUSES rather than repairs. Carrying a cursor means moving the slot into the frame, a
   // different mechanism from the temp spill and a later slice.
   ["the forOf cursor is an alloca slot", ["wfo1", "wfo2", "wfo3", "wfo4", "wfo5", "wlfo"]],
   // The suspension sits inside a `finally` BODY. A `return` crossing a finally

@@ -130,19 +130,37 @@ export class BlockBuilder {
    * WHY IT HAS TO BE AN ASSERTION AND NOT A TEST. A park terminates its block
    * with `ret void`, and the resume block that follows is reachable ONLY from
    * the entry dispatch — so an SSA value defined before the park does not
-   * dominate a use after it, and the module is malformed. On a host with a
-   * working toolchain `llvm-as` would say so. This host's does not: `zig cc`
-   * passes `-disable-llvm-verifier` to cc1, which was MEASURED rather than
-   * assumed — a probe with a deliberate verifier-only defect compiled to exit
-   * 0 with no diagnostic, while a PARSER error in the same harness correctly
-   * exited 1. So the module is never verified, the defect is never reported,
-   * and at -O2 the optimiser EXPLOITS the undefined value: it folded the two
-   * blocks of the probe together and tail-called with whatever was in %rax.
-   * Silent wrong answer, exit 0, both at -O0 and -O2.
+   * dominate a use after it, and the module is malformed.
    *
-   * There is therefore no external oracle for this class on this host, and the
-   * emitter is the only place that knows both facts at the moment they matter.
-   * It fails the BUILD, which is the strongest thing available.
+   * THIS PARAGRAPH USED TO SAY THERE WAS NO EXTERNAL ORACLE FOR THAT ON THIS
+   * HOST. THAT WAS WRONG, and it is corrected here rather than softened,
+   * because a rule whose justification rests on a false premise is a bug until
+   * someone shows it is not. `-disable-llvm-verifier` turns off the verifier
+   * pass in the OPTIMISATION pipeline; it does not turn off the check `zig cc`
+   * runs when it PARSES `.ll` text. Measured on this tree's own artifact, both
+   * directions: the unmodified prog.ll compiles to exit 0, and the same file
+   * with one arm of an `awaitUnion` reading a `%tN` the OTHER arm defines exits
+   * 1 with `invalid LLVM IR input: Instruction does not dominate all uses!`.
+   * So there IS an external oracle for exactly this class.
+   *
+   * THE RULE SURVIVES THE CORRECTION, FOR A DIFFERENT AND NARROWER REASON, and
+   * the difference is worth stating because it changes what the rule is FOR.
+   * It is no longer "the only thing that can see this". It is the thing that
+   * sees it FIRST, and the distinction is the whole value: a shape the
+   * admission predicate wrongly admitted would otherwise reach `zig cc` and
+   * fail the BUILD, when the correct outcome is for it to keep its fiber
+   * lowering and cost only coverage. emitFunction says this in its own words
+   * at the catch. The downstream oracle is a backstop that turns a miss into a
+   * loud failure instead of a silent one — which is better than this comment
+   * used to claim, not worse.
+   *
+   * AND THE LIMIT TRAVELS WITH THE CORRECTION, because half of it is worse
+   * than the old premise: the verifier sees DOMINANCE. It is blind to
+   * everything dominance-legal. Measured on the same artifact: narrowing
+   * %ScrCoroBase's last field from i64 to i32 — every GEP index still in
+   * range, every type still legal, every frame under-allocated — compiles to
+   * exit 0 with no diagnostic. That is the class the slot rule above exists
+   * for, and nothing outside this file can report it.
    *
    * COLLISION-SAFE BY ENUMERATION, re-verified rather than inherited: every
    * hand-written `%t`-prefixed name in backend/llvm is `%t` followed by a
@@ -174,7 +192,9 @@ export class BlockBuilder {
    * slots this emitter registers as resume-call-private; it is a refusal, not
    * a repair, and it is bounded to that registry rather than to every alloca
    * in the backend. A reader who sees these assertions pass must not conclude
-   * "the emission is verified"; it means two rules hold. */
+   * "the emission is verified"; it means two rules hold — plus, downstream,
+   * whatever `zig cc`'s parse-time check catches, which is dominance and not
+   * this. */
   private readonly tmpGen = new Map<string, number>();
   private gen = 0;
   private coroFn: string | null = null;
@@ -313,7 +333,8 @@ export class BlockBuilder {
           `and is read in block '${this.cur.label}' at generation ${this.gen}. That slot ` +
           `is an alloca of the RESUME CALL, and every resume is a fresh call -- so the ` +
           `read sees stack memory the write never touched. It is dominance-legal, so no ` +
-          `verifier and no SSA rule can see it; this host runs no verifier at all. ` +
+          `SSA rule can see it and neither can the toolchain: zig cc DOES verify the .ll ` +
+          `it parses, but for dominance, which this is not. ` +
           `Carrying it means moving the slot into the coroutine frame, which is a ` +
           `different mechanism from the temp spill and a later slice.\n` +
           `  offending line: ${s}`,

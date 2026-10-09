@@ -7,21 +7,37 @@
  * reachable only from the entry dispatch, so such a value does not dominate
  * its use and the module is malformed.
  *
- * On a normal host `llvm-as` would say so. On THIS one nothing does. `zig cc`
- * passes `-disable-llvm-verifier` to cc1, which was measured rather than
- * assumed: a probe carrying a deliberate verifier-only defect compiled to
- * exit 0 with no diagnostic, while a PARSER error in the same harness
- * correctly exited 1. So the module is never verified; at -O0 the defect
- * reads a spill slot never written on that path, and at -O2 the optimiser
- * EXPLOITS the undefined value -- it folded the probe's two blocks together
- * and tail-called with whatever happened to be in %rax. Exit 0 both times.
+ * THIS FILE USED TO SAY NOTHING ELSE ON THIS HOST WOULD CATCH IT. THAT WAS
+ * WRONG, and the correction is kept here rather than dropped because it is the
+ * paragraph that says why the file exists. `-disable-llvm-verifier` turns off
+ * the verifier pass in the OPTIMISATION pipeline, not the check `zig cc` runs
+ * when it PARSES `.ll`. Measured on a real emitted artifact, both directions:
+ * unmodified it exits 0; with one arm of a two-armed suspension reading a
+ * `%tN` the other arm defines it exits 1 with `invalid LLVM IR input:
+ * Instruction does not dominate all uses!`.
  *
- * The emitter is therefore the only thing standing between that class and the
- * binary. Which makes "the emitter asserts it" and "the assertion still
- * detects anything" two INDEPENDENT claims, and covering only the first is the
- * most convincing way to cover nothing: the build is green, the lowering runs,
- * and the detector underneath may have stopped matching years ago. Two
- * failures, not one -- forgetting to arm, and arming a detector that rotted.
+ * WHY THE EARLIER PROBE SAID OTHERWISE, because the discrepancy is the lesson.
+ * It carried "a deliberate verifier-only defect" and did exit 0 -- but that
+ * defect was dominance-LEGAL, and so is everything else the parse-time check
+ * waves through. "The verifier is off" was generalised from one probe whose
+ * defect was outside the only class the check actually covers.
+ *
+ * SO WHAT IS THIS FILE FOR, under the true premise? The emitter is not the
+ * only thing standing between that class and the binary -- it is the thing
+ * standing between that class and a FAILED BUILD. A shape the admission
+ * predicate wrongly admits should keep its fiber lowering and cost coverage;
+ * reaching `zig cc` and failing is the wrong outcome, not a safe one. That
+ * makes "the emitter asserts it" and "the assertion still detects anything"
+ * two INDEPENDENT claims, and covering only the first is the most convincing
+ * way to cover nothing: the build is green, the lowering runs, and the
+ * detector underneath may have stopped matching years ago. Two failures, not
+ * one -- forgetting to arm, and arming a detector that rotted.
+ *
+ * AND THE SLOT HALF OF THIS FILE HAS NO BACKSTOP AT ALL. The dominance-legal
+ * class -- a resume-call-private alloca read after a park -- is invisible to
+ * the parse-time check by construction. Measured the same way: narrowing a
+ * frame struct's last field from i64 to i32 under-allocates every frame and
+ * compiles to exit 0 with no diagnostic.
  *
  * So: plant a violation and require a complaint back. These are pure-function
  * tests over BlockBuilder -- no compiler, no linker, no toolchain -- so they

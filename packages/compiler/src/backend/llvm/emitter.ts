@@ -2149,9 +2149,14 @@ class LlEmitter {
       // than for the bodies above: the frame allocation is
       // `scr_coro_alloc(sizeof *frame, ...)`, computed on this side with the
       // `ptrtoint (getelementptr %T, ptr null, i32 1)` idiom, so a body that is
-      // too short under-allocates EVERY frame -- and nothing catches it: the
-      // linker takes a GEP on faith and this host runs no IR verifier at all
-      // (`zig cc` passes -disable-llvm-verifier).
+      // too short under-allocates EVERY frame -- and nothing catches it.
+      //
+      // NOT BECAUSE THE HOST RUNS NO VERIFIER: it does, at parse, and it
+      // rejects a dominance violation with exit 1 (coro.ts's header carries
+      // the measurement). It is because a SHORT STRUCT is well-formed IR.
+      // Measured on this tree's artifact: %ScrCoroBase with its last field
+      // narrowed i64 -> i32 compiles clean and under-allocates every frame.
+      // The oracle sees dominance; this class is dominance-legal.
       //
       // ScrExcCell is declared as opaque bytes on purpose. The lowering never
       // reaches INTO it -- scr_coro_exc() is the only legal way to the cell, as
@@ -2894,7 +2899,9 @@ class LlEmitter {
      * struct than the body's GEPs address. The struct body printed here is the
      * type `scr_coro_alloc` is handed a `sizeof` of, so the disagreement would
      * under-allocate every frame of this function and let the body write past
-     * it -- with no diagnostic anywhere, on a host that runs no verifier.
+     * it -- with no diagnostic anywhere. Not because the toolchain skips
+     * verification (it does verify what it parses) but because a SHORT STRUCT
+     * is well-formed IR: the check sees dominance, and this is not that.
      *
      * CoroFrameLayout's own doc comment states the rule this restores: one
      * source for the indices, consulted by the type emission, the spawn
@@ -5019,12 +5026,15 @@ class LlEmitter {
         //     temp when it reached the park, before emitting anything wrong.
         //   CrossParkTempError -- blocks.ts's invariant caught a `%tN` minted
         //     before the park being READ after it. That is a real dominance
-        //     violation, and on this host nothing downstream would ever report
-        //     it: `zig cc` passes -disable-llvm-verifier, so the module is
-        //     never verified and at -O2 the optimiser exploits the undefined
-        //     value. MEASURED on the corpus rather than imagined -- a switch
-        //     whose case TEST is awaited computes the discriminant before the
-        //     park and compares it after.
+        //     violation. MEASURED on the corpus rather than imagined -- a
+        //     switch whose case TEST is awaited computes the discriminant
+        //     before the park and compares it after.
+        //
+        //     THIS USED TO SAY NOTHING DOWNSTREAM WOULD EVER REPORT IT. That
+        //     was wrong: `zig cc` verifies `.ll` at PARSE and rejects exactly
+        //     this with exit 1 (blocks.ts's rule carries the measurement and
+        //     both directions of it). The correction STRENGTHENS the choice
+        //     made below rather than weakening it -- see the next paragraph.
         //
         // BOTH MEAN "this shape is outside the slice", and the response to
         // that is to keep the function on the FIBER lane, which is correct and
@@ -5033,6 +5043,13 @@ class LlEmitter {
         // trade -- it would make the admission predicate's precision a
         // correctness requirement instead of a coverage one, and the predicate
         // is a heuristic over the IR while this is the ground truth.
+        //
+        // THAT ARGUMENT IS NOW THE ONLY ONE HOLDING THIS UP, and it holds it up
+        // better. With the downstream oracle real, catching the temp HERE is
+        // what keeps a mis-admitted shape from becoming a failed BUILD; the
+        // oracle is the backstop for whatever this misses, not the thing this
+        // substitutes for. What has no backstop is the dominance-LEGAL class --
+        // CrossParkSlotError -- which is why that one is listed beside this.
         //
         // THE DETECTOR IS STILL LOAD-BEARING, and that is the distinction
         // worth keeping. It is not advisory: nothing it catches is ever

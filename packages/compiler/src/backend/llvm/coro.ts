@@ -5,10 +5,26 @@
  * spill/reload discipline and the four completion paths are the C lane's,
  * symbol for symbol. The runtime is not ported (scr_coro.c is linked by both
  * lanes), so a frame this file lays out wrong is not a compile error -- it is
- * scr_coro_alloc under-allocating, silently, on a host whose toolchain runs no
- * IR verifier at all (`zig cc` passes -disable-llvm-verifier). Every field
- * position here is pinned by runtime-layout.ts and proved against the real
- * header by runtime-layout.test.ts.
+ * scr_coro_alloc under-allocating, silently.
+ *
+ * THE REASON IS NOT "THIS HOST RUNS NO IR VERIFIER". It does. That premise was
+ * stated here and in three other places, and it is corrected rather than
+ * quietly dropped because it was load-bearing in blocks.ts, where the
+ * correction changes what a rule is FOR. `-disable-llvm-verifier` turns off the
+ * verifier pass in the OPTIMISATION pipeline, not the check `zig cc` runs when
+ * it PARSES `.ll` text: measured on this tree's own artifact, a dominance
+ * violation exits 1 with "Instruction does not dominate all uses!" while the
+ * unmodified file exits 0.
+ *
+ * THE CONCLUSION SURVIVES ANYWAY, BY A DIFFERENT MECHANISM, and both halves of
+ * the sentence have to travel together because either alone misleads. The
+ * oracle sees DOMINANCE; a frame struct that is too short is well-formed IR in
+ * every respect it checks. Measured on the same artifact: narrowing
+ * %ScrCoroBase's last field from i64 to i32 -- every GEP index still in range,
+ * every type still legal -- compiles to exit 0 with no diagnostic and
+ * under-allocates every frame. So there is still no external oracle for THIS
+ * class, and every field position here is pinned by runtime-layout.ts and
+ * proved against the real header by runtime-layout.test.ts.
  *
  * WHAT IS CHEAPER HERE THAN IN C, because it changes what the slice has to
  * build. The C dispatch is a `switch`/`goto` into the middle of a function
