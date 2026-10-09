@@ -48,6 +48,36 @@ export interface SuspensionPoint {
    * runtime enumeration in both directions. */
   kind: SuspensionPointKind;
   loc: SrcLoc;
+  /** THE IR NODE THAT SUSPENDS -- this point's IDENTITY, and the only thing
+   * about a point that is unique by construction.
+   *
+   * IT IS HERE BECAUSE (kind, position) IS NOT AN IDENTITY and a build said
+   * so. `.then(cb)` where `cb` returns `Promise<T>` lowers to a synthesized
+   * `%fnN_then` adapter that awaits the receiver AND awaits the handler's
+   * result, and lower-calls.ts stamps BOTH awaits with the `.then` call's own
+   * `loc` -- there is no other position to give a node the source does not
+   * contain. Two `awaitExpr` at one range: the LLVM emitter's point table
+   * collided them and threw, and the whole of the user's app182 stopped at the
+   * first one. The analysis had the two apart all along; the walk already
+   * holds the node (`FoundSuspension.node`) and this field had merely been
+   * dropped on the way out.
+   *
+   * THE WALK AND THE EMITTER SEE THE SAME OBJECTS, which is what makes this a
+   * key at all: `coroPlans` is computed in LlEmitter's constructor over the
+   * very `mod.functions` it goes on to emit, and nothing between clones the
+   * IR. A `finally` body emitted once per completion path re-walks the SAME
+   * node array, so every copy seats on one point -- the multiplicity the state
+   * table carries, unchanged.
+   *
+   * A SYNTHESIZED NODE IS STILL FINE. What this field needs is not that a node
+   * came from source but that the analysis and the emitter reach the same
+   * object, and a lifted adapter's body is built once and then read twice.
+   *
+   * NOT SERIALIZED. No consumer of `SuspensionPoint` stringifies one, and an
+   * IR node is cyclic through its types -- a reader adding a JSON dump of a
+   * plan must project the fields it wants rather than hand this one to
+   * `JSON.stringify`. */
+  node: object;
   /** `IrLocal.id`s live ACROSS this point: read after it resumes, or held
    * by a box a closure still references. Excludes the locals this very
    * statement defines — they do not exist yet when it suspends. */
@@ -412,6 +442,11 @@ function recordPoints(
       ctx.points.push({
         kind: s.pointKind,
         loc: loc ?? { file: "", start: 0, end: 0 },
+        // The identity. `loc` stays, and is now for READING a point (errors,
+        // censuses) rather than for finding one -- which is why the zero
+        // fallback beside it stopped being a hazard: two nodes the frontend
+        // gave no position are still two nodes.
+        node: s.node,
         live: s.nested ? union(base, enclosingReads) : new Set(base),
         nestedInExpression: s.nested,
         // D2d: an `awaitUnionExpr` is straight-line too, now that BOTH of its

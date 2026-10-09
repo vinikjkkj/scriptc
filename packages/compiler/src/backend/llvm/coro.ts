@@ -46,7 +46,7 @@
  * resume block is reachable only from the dispatch. blocks.ts carries the
  * invariant that fails the BUILD on exactly that, and the admission below keeps
  * out the shapes that would trip it rather than lowering them wrong. */
-import type { IrFunction, IrLocal, IrStmt, IrType, SrcLoc } from "../../ir/nodes.js";
+import type { IrFunction, IrLocal, IrStmt, IrType } from "../../ir/nodes.js";
 import { isRefCounted } from "../../ir/nodes.js";
 import type { StacklessPlan } from "../../ir/liveness.js";
 import {
@@ -88,40 +88,6 @@ export class CoroRefusedError extends Error {
  * either lane reads the same way. */
 export function coroLabel(i: number): string {
   return `sc_S${i + 1}`;
-}
-
-/** THE KEY A STATE IS SITED BY: what suspends, and where in the source it is.
- *
- * A plan point is identified here by ITS POSITION and not by how far a cursor
- * has walked, and that is forced by this lane's `finally` geometry rather than
- * chosen for elegance. The C lane keeps a plan cursor and rewinds it before
- * each copy of a finally body, which works because every copy is emitted AT
- * the region, in plan order, behind a goto. This lane emits the copy a
- * `return` needs INLINE at the return site -- reached before the walk has got
- * anywhere near the finally -- so emission order is not plan order, and a
- * cursor hands the finally's suspension whichever point the walk happens to be
- * standing on. Measured on a probe carrying a suspension on both sides of the
- * return.
- *
- * THE KIND IS IN THE KEY BECAUSE A POSITION IS NOT AN IDENTITY, and that is
- * measured rather than defensive. `pu` -- `async function pu(n) { return n > 0
- * ? n : null; }` -- plans TWO points at one source range: an `awaitExpr` and a
- * `libCall:async.hop`, both synthesized at the return it desugars from. A
- * position-only key collided them, and the build said so. The first survey
- * that said positions were unique had asked with the kind included: the
- * instrument measured a different key from the one the code would use, which
- * is the whole reason the duplicate check below exists rather than a comment
- * asserting uniqueness.
- *
- * UNIQUENESS IS STILL A PROPERTY OF THE INPUT, SO IT IS STILL CHECKED.
- * `SuspensionPoint.loc` carries a zero fallback for a node the frontend gave
- * no position, and two of the same kind would collide into one key.
- * emitFunctionBody builds the map and fails the build on a duplicate rather
- * than silently serving one point twice. Measured over (kind, position) across
- * the 81 planned functions of the value fixture and the eight of the finally
- * probe: no duplicate and no zero position. */
-export function coroPointKey(kind: string, loc: SrcLoc): string {
-  return `${kind}\u0000${loc.file}\u0000${loc.start}\u0000${loc.end}`;
 }
 
 /** `state` is field 3 of `%ScrCoroBase = type { ptr, ptr, ptr, i32, i32, i64 }`
