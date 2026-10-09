@@ -80,7 +80,29 @@ import { leaseReleased, readLease, sweepRemove } from "./scratch-lease.mjs";
 /** The CAS: a build input with its own cap, and not this sweep's business. */
 export const CAS_DIR = "cas";
 
-/** Bytes under `dir`, and its newest mtime. Both in one walk. */
+/** Bytes under `dir`, and its newest mtime. Both in one walk.
+ *
+ * A DIRECTORY WITH NO FILE UNDER IT IS DATED BY ITSELF, and that fallback is
+ * load-bearing rather than tidy. `newest` starts at 0 -- the EPOCH -- and only
+ * file mtimes raise it, so a directory holding no file anywhere beneath it
+ * reports as the oldest thing in the tree: it sorts FIRST in the eviction
+ * order below AND fails every `newest > floor` test, which is the floor's
+ * entire mechanism for sparing what a live run may hold. The two failures
+ * compound -- such a directory is not merely evictable, it is the first
+ * candidate taken.
+ *
+ * THE WINDOW IS NOT THEORETICAL. A suite that calls mkdirSync on its outDir
+ * and then starts a compile owns an empty directory for as long as that
+ * compile takes to write its first byte. Measured 2026-10-09, shard 6 of a
+ * merge gate: an in-run sweep in another worker deleted
+ * `microtask-turns-<key>` while the c-backend test was inside compile(), and
+ * it surfaced as ENOENT on the emitted turns.c -- a red that names a
+ * behavioural test and is not one.
+ *
+ * ONLY THE NO-FILE CASE FALLS BACK, deliberately. Folding the directory's own
+ * mtime into `newest` unconditionally would re-date every program directory
+ * to whenever its last entry was added, which is not when its contents were
+ * written and would destroy the LRU order the cap test pins. */
 async function measure(dir) {
   let size = 0;
   let newest = 0;
@@ -98,6 +120,13 @@ async function measure(dir) {
         newest = Math.max(newest, s.mtimeMs);
       }
     }
+  }
+  // No file anywhere beneath: the walk has no evidence of age, and 0 is not
+  // "unknown", it is the epoch. Date the directory by itself so the floor can
+  // see how recent it really is.
+  if (newest === 0) {
+    const s = await stat(dir).catch(() => null);
+    if (s !== null) newest = s.mtimeMs;
   }
   return { size, newest };
 }

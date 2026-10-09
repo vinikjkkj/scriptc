@@ -245,6 +245,36 @@ describe("pruneScratchOnce", () => {
     expect(existsSync(join(root, "bbbbbbbbbbbbbbbc"))).toBe(true);
   });
 
+  test("an unleased directory is spared BEFORE its first byte lands", async () => {
+    /* THE SIBLING OF THE CASE ABOVE, AND THE ONE IT COULD NOT CATCH. That
+     * test writes a file and then asserts the directory survives, so it only
+     * ever exercised directories the walk can DATE. `measure` starts
+     * `newest` at 0 and raises it from FILE mtimes alone, so a directory with
+     * no file under it yet reports as the EPOCH -- it sorts FIRST in the
+     * eviction order AND fails `newest > floor`, which is the floor's whole
+     * mechanism for sparing live work. Both failures at once, so such a
+     * directory is not merely evictable: it is the first thing taken.
+     *
+     * THE WINDOW IS REAL. A suite that calls mkdirSync on its outDir and then
+     * starts a compile owns an empty directory until that compile writes its
+     * first byte. Measured 2026-10-09, shard 6 of a merge gate: an in-run
+     * sweep in another worker deleted `microtask-turns-<key>` while the
+     * c-backend test was inside compile(), and it surfaced as ENOENT on the
+     * emitted turns.c -- a red that names a behavioural test and is not one.
+     *
+     * The companion eviction is a genuinely old directory, so this cannot
+     * pass by the sweep doing nothing. */
+    process.env["SCRIPTC_TEST_SCRATCH_MAX_MB"] = "1";
+    const floor = now - 5 * 60 * 1000;
+    // Exactly what mkdirSync(outDir, { recursive: true }) leaves behind.
+    mkdirSync(join(root, "microtask-turns-0123456789abcdef", "c"), { recursive: true });
+    keyDir("aaaaaaaaaaaaaaac", 8, 9 * HOUR); // genuinely old: puts the tree over cap
+
+    const r = await pruneScratchOnce(root, now, { floor });
+    expect(r.evicted).toEqual(["aaaaaaaaaaaaaaac"]); // the sweep did run
+    expect(existsSync(join(root, "microtask-turns-0123456789abcdef", "c"))).toBe(true);
+  });
+
   /* The two cases above state a floor directly. These two go through the
    * registry instead, because the defect being fixed lived exactly in the
    * join: a sweep that honors its floor correctly still recovers nothing
