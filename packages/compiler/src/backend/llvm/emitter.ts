@@ -93,6 +93,7 @@ import { seqScopedLocals, stackCheckPolicy, stackMarginBytes, stackMarginSymbol 
 import { coroPlans } from "../../ir/coro-plans.js";
 import { libCallPointKind } from "../../ir/suspends.js";
 import type { StacklessPlan } from "../../ir/liveness.js";
+import { slotCarryLiveness, withoutSlotCarry } from "./slot-liveness.js";
 import {
   CoroRefusedError,
   CORO_SPILL_PASS_CAP,
@@ -1504,6 +1505,14 @@ class LlEmitter {
    * promotion is what makes a temp into a slot, and the slot carry that
    * already existed is what gets it across the park. */
   private currentCoroTempPromotes: readonly CoroTempSpill[] = [];
+  /** Which STATES each carried slot is actually LIVE across -- or null for
+   * "every state", which is what every base before this one did.
+   *
+   * NULL IS THE SAFE VALUE AND IT IS THE DEFAULT. It is non-null only during
+   * the single re-emission narrowSlotCarry runs, over an answer computed from
+   * the very body that pass reproduces. Every probe pass, every fixpoint pass
+   * and every fiber body sees null and carries everything. */
+  private currentCoroSlotLive: Map<string, Set<number>> | null = null;
   /** The frame layout each lowered body actually emitted against. The frame
    * STRUCT and the `sizeof` handed to scr_coro_alloc are printed from this, so
    * the scaffolding cannot disagree with the GEPs the body wrote. */
@@ -4085,6 +4094,22 @@ class LlEmitter {
     }
   }
 
+  /** Must THIS slot be carried across THIS suspension?
+   *
+   * THE DEFAULT ANSWER IS YES AND THAT IS DELIBERATE. `currentCoroSlotLive`
+   * is null on every pass but one, and a slot missing from a non-null answer
+   * is read as live rather than dead, so every route that is not the narrowed
+   * re-emission carries the whole set exactly as before. Dropping a carry a
+   * body needs is silent corruption with no oracle on this host (an entry
+   * alloca dominates every use of it, so the IR check sees nothing); keeping
+   * one it does not need costs six lines. The asymmetry decides the default. */
+  private slotCarriedAt(slot: string, index: number): boolean {
+    const live = this.currentCoroSlotLive;
+    if (live === null) return true;
+    const at = live.get(slot);
+    return at === undefined || at.has(index);
+  }
+
   /** Spill every carried SLOT into its frame field, immediately before a park.
    *
    * THE SLOT KEEPS ITS NAME ON BOTH SIDES, and that is the whole difference
@@ -4098,6 +4123,7 @@ class LlEmitter {
     const layout = this.currentCoroLayout!;
     const B = this.B;
     for (const s of this.currentCoroSlotSpills) {
+      if (!this.slotCarriedAt(s.name, index)) continue;
       const fld = layout.slotFields.get(s.name)!;
       // NOT `tmp()`, and slotCarryName says what that cost. Two names per
       // slot per suspension, both derived from (role, index, slot), so a
@@ -4126,6 +4152,7 @@ class LlEmitter {
     const layout = this.currentCoroLayout!;
     const B = this.B;
     for (const s of this.currentCoroSlotSpills) {
+      if (!this.slotCarriedAt(s.name, index)) continue;
       const fld = layout.slotFields.get(s.name)!;
       const f = this.coroFieldInto(slotCarryName("rp", index, s.name), fld.index, fld.comment);
       const v = slotCarryName("rv", index, s.name);
@@ -5413,6 +5440,79 @@ class LlEmitter {
       slotSpills.push({ name: crossSlotName(t.name), llType: t.llType });
     }
   }
+  /** THE SECOND EMISSION, which spends a slot only where it is live.
+   *
+   * WHY THE ANALYSIS CANNOT RUN DURING THE FIRST ONE. The question is
+   * "starting at resume label k, is this slot read before it is written", and
+   * the answer depends on blocks this emitter has not appended yet -- and, for
+   * a loop, on an edge back to a block it appended BEFORE the park. There is
+   * no CFG to interrogate until the body is rendered. So the body is rendered
+   * once with the full carry, read, and rendered again with the carry narrowed.
+   *
+   * WHY THE ANSWER IS STILL VALID FOR THE SECOND RENDERING, which is the whole
+   * safety argument and is worth stating as a property rather than a hope. The
+   * carry emits nothing but straight-line `load`, `getelementptr` and `store`:
+   * no label, no terminator, no `phi`. Removing some of those lines therefore
+   * leaves the CFG -- blocks, edges, back edges -- IDENTICAL, which is the
+   * graph the liveness was computed over. It also mints no `%tN`
+   * (slotCarryName exists for that reason), so not one other name moves, and
+   * it does not touch the frame LAYOUT: slotFields keeps every index, so a
+   * narrowed body GEPs exactly the members the full one did.
+   *
+   * AND THAT PROPERTY IS CHECKED RATHER THAN ASSERTED. The two renderings must
+   * be identical once every carry line is struck from both. A difference
+   * anywhere else means the body did not reproduce, and then the CFG the
+   * answer was computed over is not the CFG that shipped -- which is the one
+   * way this transform can be silently wrong. It is a hard failure, not a
+   * fallback, because a body that does not reproduce is a defect somewhere
+   * else that this happens to be standing next to.
+   *
+   * IT DECLINES RATHER THAN GUESSES, everywhere else. No slots, no states, an
+   * unreadable body, nothing to remove, or a re-emission that throws: return
+   * the full carry, which is known good because it was just rendered. The cost
+   * of declining is bytes; the cost of guessing is a slot that reads the entry
+   * block's re-initialisation on a path where the body expected its own value.
+   *
+   * COST: one extra rendering of a body already rendered, and only for a coro
+   * body that carries at least one slot. Zero on a knob-absent build, where
+   * the candidate set is empty. */
+  private narrowSlotCarry(fn: IrFunction, full: string, slots: readonly CoroSlotSpill[]): string {
+    if (slots.length === 0) return full;
+    const states = this.coroStates.length;
+    const names = slots.map((s) => s.name);
+    const live = slotCarryLiveness(full, names, states);
+    if (live === null) return full;
+    let kept = 0;
+    for (const n of names) kept += live.get(n)!.size;
+    if (kept === names.length * states) return full;
+    const snapshot = new Set(this.decls);
+    this.currentCoroSlotLive = live;
+    let narrowed: string;
+    try {
+      narrowed = this.emitFunctionBody(fn);
+    } catch {
+      // The full body is already rendered and already correct. Keep it, and
+      // put back exactly what the failed pass may have registered.
+      this.decls.clear();
+      for (const d of snapshot) this.decls.add(d);
+      this.currentCoro = null;
+      this.currentCoroLayout = null;
+      return full;
+    } finally {
+      this.currentCoroSlotLive = null;
+    }
+    if (withoutSlotCarry(narrowed) !== withoutSlotCarry(full)) {
+      throw new Error(
+        `llvm emitter bug: ${fn.name} did not reproduce under the slot-carry filter. The two ` +
+          `renderings differ somewhere OTHER than the carry, so the control-flow graph the ` +
+          `liveness was computed over is not the one that would ship, and a slot may be dropped ` +
+          `at a suspension it is live across -- which this host cannot report, because an entry ` +
+          `alloca dominates every use of it.`,
+      );
+    }
+    return narrowed;
+  }
+
   /** THE TRIAL, and the reason it needs one.
    *
    * A function the structural predicate admits can still be refused once the
@@ -5457,7 +5557,11 @@ class LlEmitter {
         this.currentCoroSlotSpills = slotSpills;
         this.currentCoroTempPromotes = promotes;
         try {
-          return this.emitFunctionBody(fn);
+          // THE NARROWING IS NOT PART OF THE FIXPOINT and must not be: it runs
+          // on a body that already emitted CLEAN, with the discovered sets
+          // final. Running it inside the discovery loop would re-run it for
+          // every violation found.
+          return this.narrowSlotCarry(fn, this.emitFunctionBody(fn), slotSpills);
         } catch (err) {
         /* THE FIXPOINT. A CrossParkTempError names a temp that must survive the
          * park; add it to the spill set and emit the body again. Repeat until
