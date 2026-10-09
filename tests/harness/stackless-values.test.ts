@@ -994,6 +994,19 @@ const LLVM_FLOOR: ReadonlySet<string> = new Set([
   "wln", "wls", "wlf", "wld", "wlnest",
   "wrl", "wrs", "wby", "wga",
   "wst",
+  // + the awaitUnion slice. ONE point, ONE state, ONE resume label, TWO
+  // suspension calls -- the park arm and the hop arm share the label and are
+  // told apart on the far side by `sc_awaited`. These three were blocked on
+  // the cross-park temp mechanism, not on the block shape: the operand is a
+  // refcounted `ScrUnion *` read again after the resume, and it cannot ride
+  // `sc_awaited` because that field is the arm discriminator.
+  //
+  // THEIR VALUE COVERAGE IS THE `aunion`/`aunion2` ROWS, which drive BOTH arms
+  // of all three with per-arm-distinct answers. That is what makes this move a
+  // purchase rather than a reclassification: resuming into the wrong arm
+  // answers the right TYPE with the wrong value, which no turn count and no
+  // structure check can report.
+  "wav", "waun", "waus",
 ]);
 
 /* THE OTHER HALF OF THE PARTITION -- the shapes the LLVM lane does NOT lower,
@@ -1052,18 +1065,6 @@ const NOT_LOWERED_BY_REASON: ReadonlyArray<readonly [string, readonly string[]]>
   // pending-return slot there. It was filed under `nested-in-expression` too,
   // and that label was true of it as well -- it was simply tested first.
   ["a suspension inside a finally body", ["wfy6"]],
-  // `await` of a promise-or-absent union: ONE point with TWO ways to reach it,
-  // sharing a single resume label and discriminated by sc_awaited.
-  //
-  // THE BLOCKER IS NOT THE BLOCK SHAPE, and the group name says the kind rather
-  // than the cause because the predicate refuses it by kind. The cause is the
-  // UNION TEMP: it is a refcounted `ScrUnion *`, so it is owned when the
-  // suspension is reached AND read again after the resume, and it cannot ride
-  // `sc_awaited` because that field is the arm discriminator (the hop arm
-  // stores NULL there). So these three are blocked on the same cross-park owned
-  // temp mechanism as the group above, and they fall out the day it lands --
-  // deliberately, with their own prediction and their own guards, rather than
-  // as emission written ahead of time behind a refusal that no data reaches.
   // A temp that would have to survive a SECOND suspension. The reload after
   // one suspension is an SSA value defined in that suspension's resume block;
   // re-spilling it at the next asks that definition to dominate a site the
@@ -1074,7 +1075,6 @@ const NOT_LOWERED_BY_REASON: ReadonlyArray<readonly [string, readonly string[]]>
   // every path can see -- an alloca reloaded at each resume label, the shape
   // IR locals already use -- which is a different mechanism and a later slice.
   ["a temp crossing a second suspension", ["wau", "was"]],
-  ["awaitUnion", ["wav", "waun", "waus"]],
 ];
 
 /* NON-WRAPPER COROUTINES -- THE BACK DOOR THE LEDGER CANNOT SEE.

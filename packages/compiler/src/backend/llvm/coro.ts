@@ -356,16 +356,17 @@ type AssertNever<T extends never> = T;
  * WHY EACH ABSENTEE IS ABSENT. These are reasons, and a reason that stops being
  * true is a slice:
  *
- *   awaitUnionExpr -- ONE point, TWO ways in: the promise arm parks and the
- *     unit arm hops, sharing one state and one resume label. The block shape is
- *     not the blocker; the UNION TEMP is. It is a refcounted `ScrUnion *`, so
- *     `own()` records it, and it is still owned when the suspension is reached
- *     AND read again after the resume -- measured in the fiber lowering of
- *     `wav`, where `%t6` is released on both far-side paths. It cannot ride
- *     `sc_awaited` either, because that field is the arm DISCRIMINATOR (the hop
- *     arm stores NULL there). So this kind is blocked on the cross-park owned
- *     temp mechanism -- the `sc_tmp_` frame fields the C lane lays out -- and
- *     not on anything in this file.
+ *   [awaitUnionExpr HAS MOVED to the lowerable list, and the reason it was
+ *     here is recorded because it is how the absentee list is meant to work.
+ *     It said: the block shape is not the blocker, the UNION TEMP is -- a
+ *     refcounted `ScrUnion *` that `own()` records, still owned when the
+ *     suspension is reached and read again after the resume, and unable to ride
+ *     `sc_awaited` because that field is the arm DISCRIMINATOR. That was true,
+ *     and the cross-park temp mechanism retired it. Re-derived on THIS base
+ *     rather than carried: the set is ONE temp (`%t6`, the union) in all three
+ *     of wav/waun/waus, not the 2 and 3 the C lane reports -- those were
+ *     `sc_tmp_` counts, and the C emitter frames every temp, refcounted or not.
+ *     A number from another lane is a different population, not a smaller one.]
  *
  *   yieldExpr -- a generator. emitAsyncScaffolding does not own one.
  *   genResume / agenResume -- the CONSUMER side, refused on the C lane too. */
@@ -373,10 +374,14 @@ export const LLVM_LOWERABLE_POINT_KIND_LIST = [
   "awaitExpr",
   // Spelled through libCallPointKind so the `libCall:` prefix has one author.
   libCallPointKind("async.hop"),
+  // ONE point, ONE state, ONE resume label, TWO suspension calls. Being on
+  // this list is not the whole admission for it: a result union with more than
+  // one unit arm is still refused, at emission, with its own census reason --
+  // see emitCoroUnionAwait.
+  "awaitUnionExpr",
 ] as const satisfies readonly SuspensionPointKind[];
 
 export const LLVM_UNLOWERABLE_POINT_KIND_LIST = [
-  "awaitUnionExpr",
   "yieldExpr",
   "genResume",
   "agenResume",

@@ -4155,6 +4155,201 @@ class LlEmitter {
     this.emitCoroReload();
   }
 
+  /** A TWO-ARMED SUSPENSION: ONE point, ONE state, ONE resume label, and two
+   * different ways of getting there.
+   *
+   * `await u` on a promise-or-absent union suspends on BOTH arms -- the promise
+   * arm parks on the operand, the unit arm takes a bare microtask hop -- and
+   * which one runs is not known until runtime. emit-coro.ts's header says why
+   * they share a state rather than taking two, and `coroPointIndex` counts
+   * POINTS, of which this is one.
+   *
+   * THE SPILL IS HOISTED ABOVE THE BRANCH, AND THAT IS THE WHOLE DIFFERENCE
+   * FROM THE C LANE. emitCoroUnionSuspend spills inside each arm, which is
+   * correct there and impossible here. `crossName` derives a spill pointer's
+   * name from (role, SUSPENSION INDEX, origin) and from nothing else -- that is
+   * deliberate, because a name drawn from a counter would shift every later
+   * name whenever the set grew. A two-armed point is ONE index with TWO
+   * suspension sites, so spilling per arm mints
+   *
+   *     %cxs0_t6 = getelementptr ...
+   *
+   * TWICE in one function. In C that is two assignments to one field and
+   * nothing notices; in SSA it is a duplicate definition, and `zig cc` rejects
+   * the module at parse. Hoisting is not merely a way around that: it is what
+   * emitCoroUnionSuspend's own header already demands, because "the two arms
+   * must spill the SAME temps or the resume reloads whichever arm ran last".
+   * Emitting it once above the branch makes that true by construction rather
+   * than by two call sites agreeing.
+   *
+   * THE BOUNDARY IS TAKEN ONCE, AT THE LABEL. D5 asserts boundaries ===
+   * statesDrawn, and a boundary per arm fails it 2-against-1 -- at which point
+   * the pressure is to loosen the assertion, which destroys it as thoroughly as
+   * never having written it. One state, one label, one boundary.
+   *
+   * THE RESUME TELLS THE ARMS APART BY `sc_awaited`, which every frame already
+   * has: the park arm stores the operand there and the hop arm stores NULL.
+   * The promise is BORROWED from the union (unionPeek does not retain, and the
+   * union temp is itself spilled into the frame), so nothing releases it here.
+   *
+   * EVERYTHING THAT BUILDS THE RESULT IS AFTER THE RESUME LABEL, which is what
+   * keeps the result slot off the cross-park slot rule: both arms write it in
+   * the current generation and the join reads it there. */
+  private emitCoroUnionAwait(
+    resType: IrType,
+    def: IrUnionDef,
+    inner: IrType,
+    u: LlValue,
+    isP: string,
+  ): LlValue {
+    const B = this.B;
+    const fn = this.fnByName.get(this.currentFnName)!;
+    const layout = this.currentCoroLayout!;
+    const plan = this.currentCoro!;
+
+    /* RESOLVED BEFORE ANYTHING IS EMITTED, so a refusal leaves no half-written
+     * suspension behind and no state drawn for it. */
+    let innerTag = -1;
+    let unitResTag = -1;
+    if (resType.kind !== "void") {
+      if (resType.kind !== "union") {
+        throw new Error("llvm emitter bug: awaitUnion result is neither void nor a union");
+      }
+      const resDef = this.unionsById.get(resType.unionId);
+      if (!resDef) throw new Error("llvm emitter bug: awaitUnion result union unknown");
+      const resTagOf = (arm: IrType): number => {
+        const t = resDef.arms.findIndex((a) => typeEquals(a, arm));
+        if (t < 0) throw new Error("llvm emitter bug: awaitUnion result arm missing");
+        return t;
+      };
+      innerTag = resTagOf(inner);
+      const unitTags = def.arms.flatMap((a, i) => (isUnitType(a) ? [i] : []));
+      /* SEVERAL UNIT ARMS IS A REFUSAL, NOT A SWITCH, and the reason is the one
+       * that kept this whole shape out of the backend until the mechanism
+       * arrived. `Promise<T> | undefined | null` is expressible and reaches
+       * here, but no program in the corpus or the value fixture has one, so a
+       * tag dispatch written for it would be code that real data never
+       * executes -- green for ever, and no guard of it could ever fail. The
+       * fiber lane carries such a switch and it is untested there too.
+       *
+       * A refusal costs coverage and can never be a wrong answer, which is the
+       * safe side of exactly this trade. It gets its OWN census reason rather
+       * than borrowing one, because the census is the next slice's worklist and
+       * a doubled label is how a census starts lying. */
+      if (unitTags.length !== 1) {
+        throw new CoroRefusedError(this.currentFnName, `awaitUnion-unit-arms=${unitTags.length}`);
+      }
+      unitResTag = resTagOf(def.arms[unitTags[0]!]!);
+    }
+
+    // ONE STATE FOR THE PAIR. Drawing it twice runs past the dispatch (the
+    // bound check below says so loudly); drawing it zero times would collide
+    // two points on one state, which nothing would catch.
+    const index = this.coroStatesDrawn;
+    if (index >= plan.points.length) {
+      throw new Error(
+        `llvm emitter bug: ${fn.name} drew suspension state ${index} but the plan holds ` +
+          `${plan.points.length} point(s). A suspension node was walked more times than the ` +
+          `plan accounts for; the suspension would write a state the dispatch has no case for.`,
+      );
+    }
+    this.coroStatesDrawn++;
+
+    // HOISTED -- see the header. One index, two sites, one spill.
+    this.emitCoroTempSpill(index);
+    this.emitCoroSpill();
+    const ps = this.coroStateField();
+    B.line(`store i32 ${index + 1}, ptr ${ps}`);
+
+    const lp = B.newLabel("au.p");
+    const lh = B.newLabel("au.h");
+    B.condBr(isP, lp, lh);
+
+    // ── the promise arm: park on the operand ──────────────────────────────
+    B.startBlock(lp);
+    const peek = this.unionPeek(u.name);
+    const pa = this.coroField(layout.awaitedIndex, "sc_awaited");
+    B.line(`store ptr ${peek}, ptr ${pa} ; BORROWED from the union, never released here`);
+    this.declare(`declare i32 @scr_coro_park(ptr, ptr)`);
+    const pk = B.tmp();
+    B.line(`${pk} = call i32 @scr_coro_park(ptr %sc_b, ptr ${peek})`);
+    B.terminate("ret void ; to the scheduler -- one ready_push charged");
+
+    // ── the unit arm: a bare microtask hop ────────────────────────────────
+    B.startBlock(lh);
+    const pah = this.coroField(layout.awaitedIndex, "sc_awaited");
+    B.line(`store ptr null, ptr ${pah} ; the discriminator the resume reads`);
+    this.declare(`declare void @scr_coro_hop(ptr)`);
+    B.line(`call void @scr_coro_hop(ptr %sc_b)`);
+    B.terminate("ret void ; to the scheduler -- one ready_push charged");
+
+    // ── the far side: ONE label, ONE boundary, shared by both arms ────────
+    B.startBlock(coroLabel(index));
+    B.parkBoundary();
+    this.emitCoroTempReload(index);
+    this.emitCoroReload();
+    const pa2 = this.coroField(layout.awaitedIndex, "sc_awaited");
+    const aw = B.tmp();
+    B.line(`${aw} = load ptr, ptr ${pa2}`);
+    const took = B.tmp();
+    B.line(`${took} = icmp ne ptr ${aw}, null`);
+
+    if (resType.kind === "void") {
+      const lt = B.newLabel("au.t");
+      const lj = B.newLabel("au.j");
+      B.condBr(took, lt, lj);
+      B.startBlock(lt);
+      this.declare(`declare void @scr_coro_take_void(ptr, ptr)`);
+      B.line(`call void @scr_coro_take_void(ptr %sc_b, ptr ${aw})`);
+      B.br(lj);
+      B.startBlock(lj);
+      B.line(`store ptr null, ptr ${pa2}`);
+      return { name: "", type: resType };
+    }
+
+    // The result union is built entirely HERE, after the resume: the slot is
+    // written on both paths in this generation and read in the same one.
+    const slot = B.slot();
+    B.entryAllocas.push(`${slot} = alloca ptr`);
+    const lt = B.newLabel("au.t");
+    const lu = B.newLabel("au.u");
+    const lj = B.newLabel("au.j");
+    B.condBr(took, lt, lu);
+
+    B.startBlock(lt);
+    let awaited: LlValue;
+    if (inner.kind === "f64") {
+      this.declare(`declare double @scr_coro_take_f64(ptr, ptr)`);
+      const x = B.tmp();
+      B.line(`${x} = call double @scr_coro_take_f64(ptr %sc_b, ptr ${aw})`);
+      awaited = { name: x, type: inner };
+    } else if (inner.kind === "bool") {
+      this.declare(`declare zeroext i1 @scr_coro_take_bool(ptr, ptr)`);
+      const x = B.tmp();
+      B.line(`${x} = call zeroext i1 @scr_coro_take_bool(ptr %sc_b, ptr ${aw})`);
+      awaited = { name: x, type: inner };
+    } else {
+      this.declare(`declare ptr @scr_coro_take_ref(ptr, ptr)`);
+      const x = B.tmp();
+      B.line(`${x} = call ptr @scr_coro_take_ref(ptr %sc_b, ptr ${aw})`);
+      awaited = { name: x, type: inner };
+    }
+    // The take's +1 passes straight into the union box, exactly as the fiber
+    // arm passes scr_await_*'s -- unionNewOwned consumes it.
+    B.line(`store ptr ${this.unionNewOwned(innerTag, awaited)}, ptr ${slot}`);
+    B.br(lj);
+
+    B.startBlock(lu);
+    B.line(`store ptr ${this.unitInstanceRef(resType.unionId, unitResTag)}, ptr ${slot}`);
+    B.br(lj);
+
+    B.startBlock(lj);
+    B.line(`store ptr null, ptr ${pa2}`);
+    const t = B.tmp();
+    B.line(`${t} = load ptr, ptr ${slot}`);
+    return this.own({ name: t, type: resType });
+  }
+
   /** The completion path: what `return` and the implicit void exit emit
    * instead of a `ret`.
    *
@@ -5399,10 +5594,18 @@ class LlEmitter {
        * and all three can be right while no suspension call was emitted at all,
        * which is a coroutine that never returns to the scheduler: every value
        * correct, the turn count wrong, and nothing downstream able to say so.
-       * `unionPoints` is 0 because this backend lowers no two-armed point yet;
-       * it is passed rather than assumed so the arithmetic is already right
-       * when one does. */
-      coroCheckSuspensionSites(fn.name, body, this.coroStatesDrawn, 0);
+       *
+       * `unionPoints` IS NO LONGER ZERO, and where it comes from is the whole
+       * point of it. It is counted off `coro.points` -- the ANALYSIS -- and not
+       * off anything this emitter tallied while emitting. A counter incremented
+       * beside the two-armed emission would agree with that emission by
+       * construction and could only report that the emitter did what the
+       * emitter did; `parks + hops` is read back out of the RENDERED text on
+       * the other side of the equation, so the two sides have independent
+       * provenance. This is the same rule D5 above follows for
+       * `coro.points.length`. */
+      const unionPoints = coro.points.filter((p) => p.kind === "awaitUnionExpr").length;
+      coroCheckSuspensionSites(fn.name, body, this.coroStatesDrawn, unionPoints);
       // Recorded only now, after the body emitted CLEAN. A pass that threw
       // left no define and must leave no layout either, or a later refusal
       // would print a struct for a function that went back to the fiber lane.
@@ -8712,6 +8915,15 @@ class LlEmitter {
         const tag = this.unionTag(u.name);
         const isP = B.tmp();
         B.line(`${isP} = icmp eq i32 ${tag}, ${e.promiseTag}`);
+        if (this.currentCoro !== null) {
+          // STACKLESS: ONE point, ONE state, TWO ways in -- both arms suspend
+          // and share a resume label, told apart on the far side by
+          // `sc_awaited`. The pending check runs after the join, as it does on
+          // the fiber arm below and in emit-exprs.ts's stackless shape.
+          const out0 = this.emitCoroUnionAwait(e.type, def, inner, u, isP);
+          this.emitPendingCheck();
+          return out0;
+        }
         this.declare(`declare void @scr_await_hop()`);
         if (e.type.kind === "void") {
           const lp = B.newLabel("au.p");
