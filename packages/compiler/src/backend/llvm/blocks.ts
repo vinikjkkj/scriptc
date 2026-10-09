@@ -54,6 +54,11 @@ export class CrossParkSlotError extends Error {
   constructor(
     message: string,
     readonly slot: string,
+    /** The slot's declared LLVM type, or null when the alloca text was not a
+     * form `allocaTypeOf` could read. Null is the difference between "carry
+     * it in the frame" and "refuse the function", exactly as CrossParkTempError's
+     * llType is: a frame field cannot be laid out for an unknown type. */
+    readonly llType: string | null = null,
   ) {
     super(message);
     this.name = "CrossParkSlotError";
@@ -194,7 +199,43 @@ export class BlockBuilder {
    * in the backend. A reader who sees these assertions pass must not conclude
    * "the emission is verified"; it means two rules hold — plus, downstream,
    * whatever `zig cc`'s parse-time check catches, which is dominance and not
-   * this. */
+   * this.
+   *
+   * AND BOTH RULES ARE ORDERED BY EMISSION, NOT BY THE CFG. A reference is
+   * judged against the generation it was APPENDED in, so both are blind, BY
+   * CONSTRUCTION, to a BACK EDGE: a loop's condition and body head are appended
+   * before the park and re-entered after it, and neither scan can see that.
+   *
+   * THIS IS NOT THEORETICAL AND IT IS NOT CURRENTLY A HOLE, and the difference
+   * matters to whoever reads this next. A forOf used to be REFUSED here, which
+   * looked like the rule covering the loop -- but the refusal came from the
+   * STEP block's load, which happens to be appended after the park. The
+   * condition's load of the same cursor, and every use of the iterable, were
+   * appended before it and passed. The rule was right about that loop BY
+   * ACCIDENT, through a neighbouring line.
+   *
+   * WHAT REPLACES THE ACCIDENT, now that forOf lowers. Two things, and the
+   * second is the one not to "fix":
+   *   1. The lowering DEMANDS its loop state be carried instead of waiting to
+   *      be told -- emitStmt's forOf case throws for the cursor and the
+   *      iterable when the body parked, because a loop re-entering its own head
+   *      is something the lowering knows and this scan cannot learn.
+   *   2. Anything still left in an SSA temp across a back edge becomes a REAL
+   *      dominance violation, and this host verifies the IR it is handed at
+   *      PARSE. It fails the build, loudly, naming the value. That is measured,
+   *      not hoped for: the first build of the forOf slice carried only the
+   *      cursor and zig cc rejected it with fourteen "Instruction does not
+   *      dominate all uses".
+   * So the noise IS the guard for that half. Anyone tempted to quiet it --
+   * by relaxing what gets carried, or by routing a value around the verifier --
+   * is removing the only thing standing where the accident used to stand.
+   *
+   * THE SLOT HALF IS GUARDED ELSEWHERE, deliberately. A slot the emitter
+   * carries in the frame leaves the registry above (frameBackedSlot), so this
+   * file stops speaking about it; what checks that its reload is really emitted
+   * at every resume label is the cross-park slot oracle in
+   * tests/harness/cross-park-slot-oracle.ts, which reads the emitted module's
+   * CFG and therefore sees back edges. Re-seated, not dropped. */
   private readonly tmpGen = new Map<string, number>();
   private gen = 0;
   private coroFn: string | null = null;
@@ -221,6 +262,20 @@ export class BlockBuilder {
    * frame, and the generation of the last write to each. See
    * CrossParkSlotError for why this registry is deliberately narrow. */
   private readonly privateSlots = new Map<string, number>();
+  /** Slots the emitter has decided to carry in the coroutine FRAME. They are
+   * no longer resume-call-private, so they leave the registry above rather
+   * than being exempted inside the rule.
+   *
+   * THIS IS A RE-SEATING, NOT A LOOSENING, and the distinction is the whole
+   * reason it is spelled this way. The guarantee the slot rule gave does not
+   * disappear when a slot moves here: it moves to the reload the frame emits
+   * at every resume label. What CHECKS that reload is no longer this file --
+   * it is the cross-park slot oracle in tests/harness/stackless-values.test.ts,
+   * which reads the emitted module's CFG and asks whether any load of a slot
+   * is reachable from a resume label with only the entry block's
+   * re-initialisation reaching it. A slot removed from here with no frame
+   * reload emitted is exactly what that oracle reports. */
+  private readonly frameBacked = new Set<string>();
 
   constructor() {
     this.cur = { label: "entry", lines: [], term: null };
@@ -339,6 +394,7 @@ export class BlockBuilder {
           `different mechanism from the temp spill and a later slice.\n` +
           `  offending line: ${s}`,
         slot,
+        this.allocaTypeOf(slot),
       );
     }
   }
@@ -378,12 +434,42 @@ export class BlockBuilder {
    * `entryAllocas` after the body has already been walked. */
   privateSlot(name: string): void {
     if (this.coroFn === null) return;
+    if (this.frameBacked.has(name)) return;
     // CREATION COUNTS AS A WRITE IN ITS OWN GENERATION. A slot read in the
     // generation it was created in, with no store between, is an
     // uninitialised read -- a defect that predates this rule and is not the
     // one it exists to find -- so it is admitted rather than reported here,
     // and the rule stays about the park.
     if (!this.privateSlots.has(name)) this.privateSlots.set(name, this.gen);
+  }
+
+  /** Carry this slot in the frame: it leaves the resume-call-private registry
+   * and the slot rule stops speaking about it. Called by emitFunction for the
+   * set its previous emission pass discovered. */
+  frameBackedSlot(name: string): void {
+    this.frameBacked.add(name);
+    this.privateSlots.delete(name);
+  }
+
+  /** The LLVM type a slot was declared with, read back out of the entry
+   * allocas rather than recorded beside them.
+   *
+   * READ BACK, NOT TALLIED: the declaration is pushed as TEXT by the ~96 call
+   * sites that build entryAllocas, none of which passes through line(), so a
+   * parallel map would be a second source for a fact the text already carries.
+   * A type this cannot parse yields null and REFUSES the function -- the same
+   * failure mode llResultType has, so an omission costs coverage and never a
+   * wrong field type. */
+  allocaTypeOf(slot: string): string | null {
+    for (const l of this.entryAllocas) {
+      const eq = l.indexOf(" = alloca ");
+      if (eq < 0 || l.slice(0, eq) !== slot) continue;
+      const rest = l.slice(eq + " = alloca ".length);
+      const semi = rest.indexOf(";");
+      const ty = (semi < 0 ? rest : rest.slice(0, semi)).trim();
+      return ty === "" ? null : ty;
+    }
+    return null;
   }
 
   newLabel(hint: string): string {

@@ -259,6 +259,10 @@ export interface CoroFrameLayout {
   /** `%tN` -> the field carrying it across a park, in discovery order. The C
    * lane's `sc_tmp_` fields by another name. */
   tempFields: Map<string, CoroFrameField>;
+  /** `%sN` -> the field carrying the SLOT across a park. Unlike tempFields
+   * these need no rename on the far side: the reload stores back through the
+   * same alloca, so every use keeps its spelling. */
+  slotFields: Map<string, CoroFrameField>;
 }
 
 /** A temp the emission discovered must survive a park, with the type its
@@ -270,12 +274,29 @@ export interface CoroTempSpill {
   llType: string;
 }
 
+/** A SLOT the emission discovered must survive a park -- the alloca class,
+ * which no SSA rule can see (blocks.ts's CrossParkSlotError says why).
+ *
+ * WHY IT IS A SEPARATE KIND FROM CoroTempSpill even though both end in a
+ * frame field. A temp is an SSA VALUE: carrying it means spilling the value
+ * and reloading it into a FRESH name, so every later use has to be renamed.
+ * A slot is MEMORY: carrying it means storing through the same alloca on the
+ * far side, and not one use changes. That is also why a slot can cross SEVERAL
+ * suspensions while a temp cannot -- the reload writes memory every path can
+ * see, which is exactly the mechanism emitCoroTempSpill's refusal names as
+ * the one it does not have. */
+export interface CoroSlotSpill {
+  name: string;
+  llType: string;
+}
+
 export function coroFrameLayout(
   fn: IrFunction,
   plan: StacklessPlan,
   localsById: Map<string, IrLocal>,
   llType: (t: IrType) => string,
   tempSpills: readonly CoroTempSpill[] = [],
+  slotSpills: readonly CoroSlotSpill[] = [],
 ): CoroFrameLayout {
   const fat = coroNeedsExcCell(fn);
   const members: string[] = [fat ? "%ScrCoroExc" : "%ScrCoroBase"];
@@ -311,6 +332,17 @@ export function coroFrameLayout(
     members.push(t.llType);
     comments.push(`sc_tmp_${t.name.slice(1)}`);
   }
+  // THE SLOT FIELDS GO LAST, for the same reason the temp fields go after
+  // sc_awaited: the set is discovered by re-emitting and therefore GROWS
+  // between passes, and appending is what keeps every index an earlier member
+  // already had. Slots are appended after temps rather than before so that a
+  // pass which discovers a new TEMP does not renumber the slot fields.
+  const slotFields = new Map<string, CoroFrameField>();
+  for (const s of slotSpills) {
+    slotFields.set(s.name, { index: members.length, llType: s.llType, comment: `sc_slot_${s.name.slice(1)}` });
+    members.push(s.llType);
+    comments.push(`sc_slot_${s.name.slice(1)}`);
+  }
   return {
     typeBody: `%${mangleCoroFrame(fn.name)} = type { ${members.join(", ")} } ; ${comments.join(", ")}`,
     fields,
@@ -318,6 +350,7 @@ export function coroFrameLayout(
     fat,
     localIds,
     tempFields,
+    slotFields,
   };
 }
 

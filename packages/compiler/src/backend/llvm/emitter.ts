@@ -104,6 +104,7 @@ import {
   coroCheckSuspensionSites,
   llvmCoroPlans,
   type CoroFrameLayout,
+  type CoroSlotSpill,
   type CoroTempSpill,
 } from "./coro.js";
 import { mangleCoroFrame, mangleCoroResume } from "../mangle.js";
@@ -1482,6 +1483,10 @@ class LlEmitter {
   /** The cross-park temps the PREVIOUS emission pass of this body discovered,
    * in discovery order. Empty on the first pass of every function. */
   private currentCoroTempSpills: readonly CoroTempSpill[] = [];
+  /** The SLOTS this body must carry in its frame, discovered by the previous
+   * emission pass exactly as the temp set is. Empty on a knob-absent build.
+   */
+  private currentCoroSlotSpills: readonly CoroSlotSpill[] = [];
   /** The frame layout each lowered body actually emitted against. The frame
    * STRUCT and the `sizeof` handed to scr_coro_alloc are printed from this, so
    * the scaffolding cannot disagree with the GEPs the body wrote. */
@@ -3997,6 +4002,50 @@ class LlEmitter {
     }
   }
 
+  /** Spill every carried SLOT into its frame field, immediately before a park.
+   *
+   * THE SLOT KEEPS ITS NAME ON BOTH SIDES, and that is the whole difference
+   * from the temp spill. A temp comes back as a fresh SSA name and every use
+   * has to be rewritten; a slot is memory, so storing back through the same
+   * alloca leaves every `load ... ptr %sN` in the body spelled exactly as it
+   * was. That is also why a slot may cross SEVERAL suspensions where a temp
+   * may not: the far side writes memory that every path can see, which is the
+   * mechanism emitCoroTempSpill's refusal says it does not have. */
+  private emitCoroSlotSpill(): void {
+    const layout = this.currentCoroLayout!;
+    const B = this.B;
+    for (const s of this.currentCoroSlotSpills) {
+      const fld = layout.slotFields.get(s.name)!;
+      const v = B.tmp();
+      B.line(`${v} = load ${fld.llType}, ptr ${s.name} ; spill ${fld.comment}`);
+      const f = this.coroField(fld.index, fld.comment);
+      B.line(`store ${fld.llType} ${v}, ptr ${f}`);
+    }
+  }
+
+  /** Reload every carried slot from its frame field, immediately after a
+   * RESUME label.
+   *
+   * NOT AT sc_S0, and that is deliberate twice over. Semantically the first
+   * call has no carried value: the body stores into the slot before it reads
+   * it, which is the same property `privateSlot` already relies on. And
+   * mechanically, sc_S0 sits BEFORE every park, so emitting there would mint
+   * temps in generation 0 -- and the set GROWS between passes, so a pass that
+   * discovered one more slot would renumber every pre-park temp and void the
+   * fixpoint's termination argument. Everything this pair emits is emitted at
+   * or after a suspension, which is the condition that argument needs. */
+  private emitCoroSlotReload(): void {
+    const layout = this.currentCoroLayout!;
+    const B = this.B;
+    for (const s of this.currentCoroSlotSpills) {
+      const fld = layout.slotFields.get(s.name)!;
+      const f = this.coroField(fld.index, fld.comment);
+      const v = B.tmp();
+      B.line(`${v} = load ${fld.llType}, ptr ${f}`);
+      B.line(`store ${fld.llType} ${v}, ptr ${s.name} ; reload ${fld.comment}`);
+    }
+  }
+
   /** The await site: spill, park, return to the scheduler, and on re-entry
    * reload and take the settled value.
    *
@@ -4041,6 +4090,7 @@ class LlEmitter {
     // therefore rewritten by the same rename as every other use.
     this.emitCoroTempSpill(index);
     this.emitCoroSpill();
+    this.emitCoroSlotSpill();
     const pa = this.coroField(layout.awaitedIndex, "sc_awaited");
     B.line(`store ptr ${pr.name}, ptr ${pa}`);
     const ps = this.coroStateField();
@@ -4063,6 +4113,7 @@ class LlEmitter {
     B.parkBoundary();
     this.emitCoroTempReload(index);
     this.emitCoroReload();
+    this.emitCoroSlotReload();
     const pa2 = this.coroField(layout.awaitedIndex, "sc_awaited");
     const aw = B.tmp();
     B.line(`${aw} = load ptr, ptr ${pa2}`);
@@ -4142,6 +4193,7 @@ class LlEmitter {
     // acquires one.
     this.emitCoroTempSpill(index);
     this.emitCoroSpill();
+    this.emitCoroSlotSpill();
     const ps = this.coroStateField();
     B.line(`store i32 ${index + 1}, ptr ${ps}`);
     this.declare(`declare void @scr_coro_hop(ptr)`);
@@ -4153,6 +4205,7 @@ class LlEmitter {
     B.parkBoundary();
     this.emitCoroTempReload(index);
     this.emitCoroReload();
+    this.emitCoroSlotReload();
   }
 
   /** A TWO-ARMED SUSPENSION: ONE point, ONE state, ONE resume label, and two
@@ -5177,8 +5230,10 @@ class LlEmitter {
     if (this.coroLoweredByFn.has(fn.name)) {
       const snapshot = new Set(this.decls);
       const spills: CoroTempSpill[] = [];
+      const slotSpills: CoroSlotSpill[] = [];
       for (let pass = 0; ; pass++) {
         this.currentCoroTempSpills = spills;
+        this.currentCoroSlotSpills = slotSpills;
         try {
           return this.emitFunctionBody(fn);
         } catch (err) {
@@ -5210,6 +5265,32 @@ class LlEmitter {
           !spills.some((s) => s.name === err.temp)
         ) {
           spills.push({ name: err.temp, llType: err.llType });
+          this.decls.clear();
+          for (const d of snapshot) this.decls.add(d);
+          continue;
+        }
+        /* THE SLOT ARM OF THE SAME FIXPOINT. A CrossParkSlotError names a
+         * slot whose MEMORY must survive the park; add it to the slot set and
+         * emit again. It is the alloca class, so the repair is a frame field
+         * and a reload through the same alloca rather than a rename -- see
+         * emitCoroSlotSpill.
+         *
+         * THE SAME TERMINATION ARGUMENT AS THE TEMP ARM, and it needs the same
+         * condition: everything the slot mechanism emits is emitted at or
+         * after a suspension (emitCoroSlotReload says why it is not emitted at
+         * sc_S0), so pre-park numbering is identical on every pass and the set
+         * is monotone over this body's registered slots.
+         *
+         * A SLOT WITH NO DERIVABLE TYPE IS STILL REFUSED. allocaTypeOf reads
+         * the declaration text; a form it cannot parse yields null, and a frame
+         * field cannot be laid out for an unknown type. */
+        if (
+          err instanceof CrossParkSlotError &&
+          err.llType !== null &&
+          pass < CORO_SPILL_PASS_CAP &&
+          !slotSpills.some((s) => s.name === err.slot)
+        ) {
+          slotSpills.push({ name: err.slot, llType: err.llType });
           this.decls.clear();
           for (const d of snapshot) this.decls.add(d);
           continue;
@@ -5279,7 +5360,9 @@ class LlEmitter {
           err instanceof CoroRefusedError
             ? err.reason
             : err instanceof CrossParkSlotError
-              ? `cross-park-slot=${err.slot}`
+              ? err.llType === null
+                ? `untyped-cross-park-slot=${err.slot}`
+                : `cross-park-slot-passes>${CORO_SPILL_PASS_CAP}`
               : err.llType === null
                 ? `untyped-cross-park-temp=${err.temp}`
                 : `cross-park-temp-passes>${CORO_SPILL_PASS_CAP}`,
@@ -5290,6 +5373,7 @@ class LlEmitter {
       // The fiber re-emission below must not inherit a spill set: it builds no
       // frame to spill into.
       this.currentCoroTempSpills = [];
+      this.currentCoroSlotSpills = [];
     }
     return this.emitFunctionBody(fn);
   }
@@ -5326,6 +5410,7 @@ class LlEmitter {
         this.currentLocals,
         (t) => this.llType(t),
         this.currentCoroTempSpills,
+        this.currentCoroSlotSpills,
       );
       // Arms the cross-park temp invariant for this body only. Nothing arms it
       // on a fiber body, so a knob-absent build pays one null check per
@@ -5337,6 +5422,12 @@ class LlEmitter {
       // registered here, before the walk, so the slot rule can see it at all.
       // Nothing is emitted for it when the body logs nothing.
       B.privateSlot("%logargs");
+      // THE CARRIED SLOTS LEAVE THE REGISTRY, they are not exempted inside the
+      // rule. See BlockBuilder.frameBackedSlot for why that distinction is the
+      // whole safety argument: the guarantee moves to the reload emitted at
+      // every resume label, and what checks THAT is the cross-park slot oracle
+      // over the emitted CFG, not this file.
+      for (const s of this.currentCoroSlotSpills) B.frameBackedSlot(s.name);
     }
 
     const paramIds = new Set(fn.params.map((p) => p.localId));
@@ -6123,6 +6214,44 @@ class LlEmitter {
         if (s.iterable.type.kind !== "array") throw new LlvmUnsupportedError(`forOf:${s.iterable.type.kind}`, s.loc);
         const elem = s.iterable.type.elem;
         const arr = this.emitExpr(s.iterable);
+        /* THE ITERABLE GOES THROUGH A SLOT ON THE STACKLESS LANE, and nowhere
+         * else. `arr` is an SSA temp defined BEFORE the loop; the condition
+         * and the body read it, and once the body parks those two blocks
+         * become reachable from the resume label through the BACK EDGE -- so
+         * the definition stops dominating the uses and the module is
+         * malformed. Neither emission-order rule can see it: both scan at
+         * append time, and those uses were appended before the park.
+         *
+         * THE TEMP SPILL CANNOT CARRY IT. A loop parks once per iteration, and
+         * emitCoroTempSpill refuses a temp that must survive a second
+         * suspension because its reload is an SSA value that does not dominate
+         * the next spill. Its own comment names the fix: memory every path can
+         * see. That is this slot, carried by the slot mechanism.
+         *
+         * GATED ON THE CORO LANE so the knob-absent emission is untouched: with
+         * SCRIPTC_STACKLESS absent `currentCoro` is null, `arrRef` is `arr.name`,
+         * and not one byte of the `.ll` moves. */
+        let arrSlot: string | null = null;
+        if (this.currentCoro !== null) {
+          arrSlot = B.slot();
+          B.entryAllocas.push(`${arrSlot} = alloca ptr ; forOf iterable`);
+          B.line(`store ptr ${arr.name}, ptr ${arrSlot}`);
+          // THE SLOT TAKES THE OWNERSHIP TOO, and that is not tidiness. Left on
+          // the RC frame, the scope-exit release would read `arr` -- an SSA temp
+          // defined before the loop -- from the loop EXIT block, which the park
+          // makes reachable from the resume label. The temp spill then carries it
+          // and its reload, defined in the resume block, does not dominate the
+          // exit block either. Releasing THROUGH the slot removes the temp's last
+          // use and the whole chain with it.
+          this.moveTemp(arr);
+          this.ownSlot(arrSlot, s.iterable.type);
+        }
+        const arrRef = (): string => {
+          if (arrSlot === null) return arr.name;
+          const t = B.tmp();
+          B.line(`${t} = load ptr, ptr ${arrSlot}`);
+          return t;
+        };
         const idxSlot = B.slot();
         B.entryAllocas.push(`${idxSlot} = alloca double`);
         B.line(`store double ${f64Lit(0)}, ptr ${idxSlot}`);
@@ -6137,7 +6266,7 @@ class LlEmitter {
         const inBounds = B.tmp();
         this.declare(`declare double @scr_arr_len(ptr)`);
         B.line(`${i} = load double, ptr ${idxSlot}`);
-        B.line(`${len} = call double @scr_arr_len(ptr ${arr.name})`);
+        B.line(`${len} = call double @scr_arr_len(ptr ${arrRef()})`);
         B.line(`${inBounds} = fcmp olt double ${i}, ${len}`);
         B.condBr(inBounds, lb, le);
         B.startBlock(lb);
@@ -6153,6 +6282,7 @@ class LlEmitter {
         // here, holds the (for ref elements: owned +1) current element, and
         // releases it at the end of each iteration.
         this.scopes.push([]);
+        const parksBefore = B.boundaries();
         const localInfo = this.currentLocals.get(s.localId);
         const slot = `%${mangleLocal(s.localId)}`;
         const acc = elemAccess(elem);
@@ -6161,7 +6291,7 @@ class LlEmitter {
           `declare ${acc === "bool" ? "zeroext i1" : accTy} @scr_arr_get_${acc}(ptr, double)`,
         );
         const cur = B.tmp();
-        B.line(`${cur} = call ${accTy} @scr_arr_get_${acc}(ptr ${arr.name}, double ${i})`);
+        B.line(`${cur} = call ${accTy} @scr_arr_get_${acc}(ptr ${arrRef()}, double ${i})`);
         if (localInfo?.boxed) {
           // Captured loop variable: a fresh box per iteration, matching the
           // fresh const binding. The box takes ownership of a ref element's
@@ -6176,6 +6306,35 @@ class LlEmitter {
           if (isRefCounted(elem)) this.scopes[this.scopes.length - 1]!.push({ slot, type: elem });
         }
         this.emitStmts(s.body);
+        /* IF THE BODY PARKED, THIS LOOP'S STATE MUST LIVE IN THE FRAME -- and
+         * this has to be DEMANDED here rather than waited for.
+         *
+         * The slot rule discovers a cross-park slot when a READ is appended in a
+         * later generation than the last write. Both of this loop's slots are
+         * read in the CONDITION and the BODY HEAD, which are appended BEFORE the
+         * park -- so by emission order they look clean, and by control flow they
+         * are not: the back edge makes both blocks reachable from the resume
+         * label. That is the emission-order blind spot named beside the rules in
+         * blocks.ts, and it is why this is a question the LOWERING answers from
+         * what it knows (a loop re-enters its own head) instead of a question the
+         * scan can answer.
+         *
+         * It routes through the same fixpoint as every other discovery: throw,
+         * get added to the slot set, re-emit. One slot per pass, well inside the
+         * cap. */
+        if (this.currentCoro !== null && B.boundaries() > parksBefore) {
+          for (const sl of arrSlot === null ? [idxSlot] : [arrSlot, idxSlot]) {
+            if (this.currentCoroSlotSpills.some((x) => x.name === sl)) continue;
+            throw new CrossParkSlotError(
+              `llvm emitter bug: ${this.currentFnName} parks inside a forOf whose ` +
+                `loop state ${sl} is machine-stack memory of the resume call. The ` +
+                `cursor and the iterable are both re-entered through the loop's ` +
+                `back edge, which no append-time scan can see.`,
+              sl,
+              B.allocaTypeOf(sl),
+            );
+          }
+        }
         const endedWithJump = this.endsWithJump(s.body);
         const scope = this.scopes.pop()!;
         if (!endedWithJump) this.releaseScope(scope);

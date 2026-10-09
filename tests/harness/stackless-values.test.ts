@@ -76,6 +76,7 @@ import { join } from "node:path";
 import { beforeAll, describe, expect, test } from "vitest";
 import { compile } from "@scriptc/compiler";
 import { exeName } from "./exe.js";
+import { auditModule } from "./cross-park-slot-oracle.js";
 
 const repoRoot = join(import.meta.dirname, "../..");
 const cacheDir = join(repoRoot, "node_modules/.cache/scriptc-tests");
@@ -295,11 +296,17 @@ const WRAPPERS: ReadonlyArray<{ name: string; take: string; finish: string; conv
   // row that said "this must stay off the lane" is the row that names the day
   // it stops needing to.
   { name: "wlfo", take: "f64", finish: "f64", converted: true },
-  // THE forOf SHAPES. The gap was never the iterable -- that comes from
-  // emitExpr, so it is a newTemp, and newTemp pushes into the RC frame which
-  // a park spills whole. It was the CURSOR, declared straight into the C
-  // for-init and registered nowhere. Each row below is a distinct way the
-  // hoist could still be wrong:
+  // THE forOf SHAPES. "The gap was never the iterable" STOOD HERE AND WAS
+  // FALSE ON THIS LANE -- the C reading was carried onto a backend where it
+  // does not hold, so it is corrected rather than deleted. On the C lane the
+  // iterable is a local the RC frame spills whole. Here `emitExpr` hands back
+  // an SSA `%tN`, and the RC frame carries its OWNERSHIP, not its DEFINITION:
+  // once the body parks, the loop condition and body head become reachable
+  // from the resume label through the back edge and that definition no longer
+  // dominates them. Measured, not reasoned -- the first build of this slice
+  // carried only the cursor and zig cc rejected it with 14 "Instruction does
+  // not dominate all uses". Both the cursor AND the iterable are carried now.
+  // Each row below is a distinct way the carry could still be wrong:
   //   wfo1  the cursor itself: a wrong reload re-runs or skips iterations
   //   wfo2  a refcounted ELEMENT bound per iteration, across the park
   //   wfo3  NESTED forOf -- two cursors, and the inner must not clobber the
@@ -969,6 +976,12 @@ const LLVM_FLOOR: ReadonlySet<string> = new Set([
   "wtc", "wdr", "wca", "wbf", "wbb", "wbs", "wcs",
   "wgn", "wgf", "wgb", "wgs", "wgr", "wgx",
   "wlc", "wlb",
+  // THE forOf SHAPES. Their cursor AND their iterable now live in the frame:
+  // both are loop state re-entered through the back edge, which no append-time
+  // scan can see, so the lowering DEMANDS they be carried instead of waiting to
+  // be told. Moved out of NOT_LOWERED_BY_REASON in the same commit that bought
+  // them, which is what that table's own instruction asks for.
+  "wlfo", "wfo1", "wfo2", "wfo3", "wfo4", "wfo5",
   "wfy5", "wfy1", "wfy2", "wfy3", "wfy4",
   "wif", "wsd", "wsu",
   // THE MULTI-STATE DISPATCH. More than one suspension point is a second
@@ -1038,21 +1051,6 @@ const LLVM_FLOOR: ReadonlySet<string> = new Set([
  * converts, so each group is work that exists rather than a limit that was
  * discovered. */
 const NOT_LOWERED_BY_REASON: ReadonlyArray<readonly [string, readonly string[]]> = [
-  // The forOf cursor is an `alloca` slot, not a value. emitStmt's forOf case
-  // allocates it in the ENTRY block and stores 0 into it in `sc_S0` -- which a
-  // resume jumps straight past, because the dispatch terminates the entry
-  // block. So the latch loads a cursor the resume never initialised: machine
-  // stack memory of a FRESH call, read as an iteration index.
-  //
-  // THIS GROUP IS THE SECOND BLOCKER, AND IT IS WHY IT HAS ITS OWN BUCKET.
-  // Every name here was filed under `nested-in-expression`, which was TRUE of
-  // all six and was not what bound them: removing that constraint left the
-  // cursor. The defect is dominance-LEGAL, so no SSA rule can see it and
-  // neither can the toolchain -- `zig cc` DOES verify the .ll it parses, but
-  // for dominance, which this is not -- which is why it is caught by a
-  // separate slot rule in blocks.ts that REFUSES rather than repairs. Carrying a cursor means moving the slot into the frame, a
-  // different mechanism from the temp spill and a later slice.
-  ["the forOf cursor is an alloca slot", ["wfo1", "wfo2", "wfo3", "wfo4", "wfo5", "wlfo"]],
   // The suspension sits inside a `finally` BODY. A `return` crossing a finally
   // snapshots its value into `%pretSlot` and reads it back after the finally
   // copies run; a suspension between the write and the read reads a slot
@@ -1586,4 +1584,48 @@ describe.each(["c", "llvm"] as const)("the stackless lane answers what the fiber
       expect(run(on.exe), `the stackless lane answers the wrong value: ${line}`).toContain(line);
     }
   }, 600_000);
+
+  /* THE CROSS-PARK SLOT ORACLE, over the artifact the arms above already built.
+   *
+   * WHY IT IS HERE AND NOT A LANE OF ITS OWN. It costs a CFG walk of a module
+   * this describe has in memory -- no build, no link, no program -- and it adds
+   * no test FILE, so the suite partition is unchanged. A standalone lane over
+   * the corpus would buy partition churn and a new flakiness surface for every
+   * block, and nothing measured justifies that yet.
+   *
+   * WHAT IT ADDS OVER THE VALUE COMPARISON ABOVE, which is the honest question
+   * to ask of a second guard. Measured on three planted defects:
+   *   - a dropped frame local on a scalar read after the park: the value
+   *     comparison catches it too, by disagreeing.
+   *   - a dropped frame local that is RETAINED after the park: caught too, by
+   *     crashing.
+   *   - a resume-path reload dropped for a local whose only post-resume reads
+   *     are NULL-safe releases: the program exits 0 and prints BYTE-IDENTICAL
+   *     output to the fiber arm, every test in this file passes, and only this
+   *     oracle reports it. That third one is why it ships.
+   * It also LOCATES: it names the function and the slot, where the comparison
+   * can only say the lanes disagree.
+   *
+   * ONLY THE LLVM LANE. The C lane's resume body is a C function whose locals
+   * are declarations, not allocas, and this reads LLVM text. */
+  if (lane === "llvm") {
+    test("no slot is read across a park that did not re-write it", () => {
+      const audit = auditModule(on.artifact);
+
+      // THE POPULATION IS ASSERTED FIRST, because a zero population is not a
+      // pass. An admission change that stopped lowering these bodies would
+      // leave nothing to examine and every expectation below would hold
+      // vacuously -- the exact shape this file was built to refuse.
+      expect(audit.suspending, "nothing suspending to examine").toBeGreaterThan(0);
+      expect(audit.allocasExamined, "no slots to examine").toBeGreaterThan(0);
+
+      // THE CONTROL. This host verifies the IR it is handed at parse, so an
+      // artifact that compiled is dominance clean and this must read empty. It
+      // is not the product: it proves the CFG reader that produces the result
+      // below is reading the right graph.
+      expect(audit.ssa, "the CFG reader disagrees with a verifier that accepted this module").toEqual([]);
+
+      expect(audit.slots, "a slot is carried across a park without being carried").toEqual([]);
+    }, 600_000);
+  }
 });
