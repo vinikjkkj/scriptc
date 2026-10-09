@@ -13,6 +13,27 @@
 /** A `%tN` minted before a park and read after it. See BlockBuilder's
  * cross-park invariant below for why this is a hard build failure and not a
  * diagnostic. */
+import { crossLoadName, crossSlotName } from "./coro.js";
+
+/** An origin's name with the sigil stripped, FOR USE IN A COMMENT ONLY.
+ *
+ * A `%tN` AFTER A SEMICOLON IS STILL A REFERENCE TO EVERY TEXT SCAN IN THIS
+ * TREE, and that is measured rather than guessed: the promotion first spelled
+ * its comments `; promoted %t24`, and the cross-park slot oracle -- which reads
+ * the emitted module's CFG and is the one check that sees back edges --
+ * reported eighteen dominance violations across `pu`, `wau` and `was`. Every
+ * one of them was a comment. `zig cc` accepted the same module, because to the
+ * assembler a comment is a comment; the two disagreeing is exactly the shape
+ * that assertion exists to report, so the oracle was right to fire and the
+ * spelling is what had to change.
+ *
+ * The same trap is already written down one rule up (noteLine: a text scan that
+ * counts the `alloca` DECLARATION as a use reports five correct coroutines as
+ * broken). This is the second instance, so it is a helper rather than a habit. */
+function bare(origin: string): string {
+  return origin.slice(1);
+}
+
 export class CrossParkTempError extends Error {
   constructor(
     message: string,
@@ -50,6 +71,20 @@ export class CrossParkTempError extends Error {
  * classification can be CHECKED AGAINST rather than having to re-derive: any
  * push site that classifies as resume-call-private must already be reaching
  * this registry, and one that is not is either frame-backed or an omission. */
+/** A promoted cross-park temp reached a `phi` as an incoming value.
+ *
+ * A REFUSAL, NOT A REPAIR, and separate from the two rules above because it is
+ * a limit of the PROMOTION mechanism rather than of the body. emitFunction
+ * catches it and puts the function back on the fiber lane. No body on the
+ * corpus is known to reach it; it is written down so that the one that does is
+ * refused rather than emitted. */
+export class PromotedTempInPhiError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "PromotedTempInPhiError";
+  }
+}
+
 export class CrossParkSlotError extends Error {
   constructor(
     message: string,
@@ -258,6 +293,25 @@ export class BlockBuilder {
    * pre-park uses keep the pre-park name because they were appended before the
    * rename existed, which is exactly the behaviour wanted and costs no pass. */
   private readonly rename = new Map<string, string>();
+  /** Cross-park temps PROMOTED to an alloca: origin `%tN` -> the slot it lives
+   * in and the type it was minted with.
+   *
+   * THE SECOND CROSSING IS WHY THIS EXISTS, and it is a different mechanism
+   * from `rename` rather than a bigger version of it. `rename` carries a value
+   * as an SSA reload, which has exactly one definition and therefore survives
+   * exactly one suspension: at the next one the spill would reference a
+   * definition that does not dominate it. A promoted temp is MEMORY, so every
+   * path sees it and the number of crossings stops mattering -- the same
+   * reason `frameBacked` slots may cross several suspensions while a renamed
+   * temp may not. The two are mutually exclusive by construction: emitFunction's
+   * fixpoint moves a temp OUT of the spill set when it promotes it, so no
+   * origin is ever in both maps. */
+  private readonly promoted = new Map<string, { slot: string; llType: string }>();
+  /** Per-origin use ordinal, the only input to a promoted load's name besides
+   * the origin. A counter is safe HERE where it is not safe for temps: it
+   * counts uses of ONE origin, and promoting another origin neither adds nor
+   * removes a line that mentions this one. */
+  private readonly promotedUses = new Map<string, number>();
   /** Alloca slots whose storage belongs to the RESUME CALL rather than to the
    * frame, and the generation of the last write to each. See
    * CrossParkSlotError for why this registry is deliberately narrow. */
@@ -416,6 +470,81 @@ export class BlockBuilder {
     return this.rename.has(origin);
   }
 
+  /** Carry this temp in an ALLOCA instead of as an SSA reload: the defining
+   * line stores into the slot, and every later use loads out of it.
+   *
+   * CALLED BEFORE THE WALK, by emitFunctionBody, for the set a previous pass
+   * discovered -- the same shape `frameBackedSlot` is called in. The alloca is
+   * pushed into `entryAllocas`, so it is spliced into the head of block 0 and
+   * dominates every use by construction.
+   *
+   * AND IT IS DELIBERATELY NOT REGISTERED AS A RESUME-CALL-PRIVATE SLOT. The
+   * slot rule exists to catch memory of the resume CALL being read across a
+   * park; this slot is about to be handed to the FRAME carry (emitFunction
+   * pushes it into the slot-spill set in the same step), so it is frame-backed
+   * from the moment it exists and the rule has nothing to say about it. */
+  promoteTemp(origin: string, llType: string): string {
+    const slot = crossSlotName(origin);
+    this.promoted.set(origin, { slot, llType });
+    this.entryAllocas.push(`${slot} = alloca ${llType} ; promoted ${bare(origin)}`);
+    return slot;
+  }
+
+  /** Rewrite one line's references to promoted temps into loads, appending the
+   * loads to `pre` in the order they must be emitted.
+   *
+   * THE DEFINING LINE KEEPS ITS OWN NAME on the left: the value still has to be
+   * computed before it can be stored, and `line()` emits the store after it.
+   * Only the right-hand side is rewritten, which matters for a defining line
+   * that also USES another promoted temp.
+   *
+   * A `phi` IS REFUSED RATHER THAN REWRITTEN. A load placed before a phi is
+   * invalid IR (phis lead their block) and a load placed in the predecessor is
+   * a block this builder does not know. No body on this lane is known to reach
+   * it -- every phi in the backend joins values minted in the two arms it joins,
+   * which by definition do not cross a park -- so this is a guard over a case
+   * that should not arise, written as a refusal because the alternative is
+   * emitting a module the assembler rejects. */
+  private applyPromotion(s: string, pre: string[]): string {
+    if (this.promoted.size === 0) return s;
+    const def = /^(%t[0-9]+) = /.exec(s);
+    const lhs = def !== null && this.promoted.has(def[1]!) ? def[0]! : "";
+    const body = s.slice(lhs.length);
+    const seen = new Map<string, string>();
+    const out = body.replace(/%t[0-9]+/g, (m) => {
+      const p = this.promoted.get(m);
+      if (p === undefined) return m;
+      const already = seen.get(m);
+      if (already !== undefined) return already;
+      if (/ = phi /.test(s)) {
+        throw new PromotedTempInPhiError(
+          `llvm emitter bug: ${this.coroFn ?? "?"} uses the promoted temp ${m} as a phi ` +
+            `incoming value. The load that materialises it cannot go before the phi (phis ` +
+            `lead their block) and this builder does not know the predecessor to put it in.` +
+            `\n  offending line: ${s}`,
+        );
+      }
+      const k = this.promotedUses.get(m) ?? 0;
+      this.promotedUses.set(m, k + 1);
+      const name = crossLoadName(m, k);
+      seen.set(m, name);
+      pre.push(`${name} = load ${p.llType}, ptr ${p.slot} ; promoted ${bare(m)}`);
+      return name;
+    });
+    return lhs + out;
+  }
+
+  /** The store that seats a promoted temp in its slot, or null when this line
+   * does not define one. Emitted immediately AFTER the defining line. */
+  private promotionStore(s: string): string | null {
+    if (this.promoted.size === 0) return null;
+    const def = /^(%t[0-9]+) = /.exec(s);
+    if (def === null) return null;
+    const p = this.promoted.get(def[1]!);
+    if (p === undefined) return null;
+    return `store ${p.llType} ${def[1]!}, ptr ${p.slot} ; seat promoted ${bare(def[1]!)}`;
+  }
+
   /** The LLVM result type recorded for a temp, or undefined when its defining
    * form is not one `llResultType` covers. */
   typeOfTemp(name: string): string | undefined {
@@ -487,10 +616,30 @@ export class BlockBuilder {
     // already replaced is not a violation -- it is the ordinary case this
     // slice exists to produce -- so it must be rewritten before the rule sees
     // it. Checking first would report every successfully spilled temp.
-    const t = this.applyRename(s);
+    //
+    // PROMOTION IS THE SAME ARGUMENT ONE STEP FURTHER. A use of a PROMOTED temp
+    // becomes a load, and that load is dominated by the entry alloca on every
+    // path -- so the line the rules should judge is the rewritten one, not the
+    // one the caller handed in. The order between the two rewrites cannot
+    // matter (an origin is never in both maps) and is fixed anyway so that
+    // there is one answer to read.
+    const t0 = this.applyRename(s);
+    const pre: string[] = [];
+    const t = this.applyPromotion(t0, pre);
+    for (const l of pre) this.cur.lines.push(`  ${l}`);
     this.noteLine(t);
     this.checkCrossPark(t);
     this.cur.lines.push(`  ${t}`);
+    // The seating store reads `%tN` in the generation it was minted in, so it
+    // passes both rules; it is run through them anyway rather than pushed raw,
+    // because a line this file appends is not more trustworthy than one it is
+    // handed.
+    const seat = this.promotionStore(t);
+    if (seat !== null) {
+      this.noteLine(seat);
+      this.checkCrossPark(seat);
+      this.cur.lines.push(`  ${seat}`);
+    }
   }
 
   tmp(): string {
@@ -516,7 +665,13 @@ export class BlockBuilder {
 
   terminate(s: string): void {
     if (this.cur.term !== null) return;
-    const t = this.applyRename(s);
+    const t0 = this.applyRename(s);
+    const pre: string[] = [];
+    const t = this.applyPromotion(t0, pre);
+    // A terminator cannot define a temp, so there is no seating store here --
+    // but it CAN use one (`br i1 %t7`), and the loads it needs belong in this
+    // block's body, ahead of the terminator.
+    for (const l of pre) this.cur.lines.push(`  ${l}`);
     this.noteLine(t);
     this.checkCrossPark(t);
     this.cur.term = `  ${t}`;

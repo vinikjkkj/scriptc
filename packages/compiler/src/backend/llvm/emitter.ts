@@ -97,7 +97,9 @@ import {
   suspensionInsideFinally,
   CORO_SPILL_PASS_CAP,
   CORO_STATE_FIELD,
+  CrossParkTempPromoteError,
   crossName,
+  crossSlotName,
   coroFrameLayout,
   coroLabel,
   coroFrameSizeOf,
@@ -110,7 +112,12 @@ import {
 } from "./coro.js";
 import { mangleCoroFrame, mangleCoroResume } from "../mangle.js";
 import { mangleAgenSettleThunk, mangleArgPack, mangleAsyncSpawn, mangleClassNew, mangleClassObj, mangleClassRetain, mangleClassStruct, mangleFnClosure, mangleFunction, mangleGenDrop, mangleGenResThunk, mangleGenSpawn, mangleGlobal, mangleLocal, mangleRecordNew, mangleRecordStruct, mangleResolveThunk, mangleTrampoline, mangleVtStruct, mangleWrapper } from "../mangle.js";
-import { BlockBuilder, CrossParkSlotError, CrossParkTempError } from "./blocks.js";
+import {
+  BlockBuilder,
+  CrossParkSlotError,
+  CrossParkTempError,
+  PromotedTempInPhiError,
+} from "./blocks.js";
 import { isStableReceiverOperand, writesLocal } from "../../ir/analysis.js";
 import { SCR_BYTES_LEN_OFFSET } from "./runtime-layout.js";
 import {
@@ -1488,6 +1495,12 @@ class LlEmitter {
    * emission pass exactly as the temp set is. Empty on a knob-absent build.
    */
   private currentCoroSlotSpills: readonly CoroSlotSpill[] = [];
+  /** Cross-park temps this body carries in an ALLOCA instead of as an SSA
+   * reload, discovered by a previous pass hitting a SECOND suspension with one
+   * of them live. Each has a companion entry in `currentCoroSlotSpills` -- the
+   * promotion is what makes a temp into a slot, and the slot carry that
+   * already existed is what gets it across the park. */
+  private currentCoroTempPromotes: readonly CoroTempSpill[] = [];
   /** The frame layout each lowered body actually emitted against. The frame
    * STRUCT and the `sizeof` handed to scr_coro_alloc are printed from this, so
    * the scaffolding cannot disagree with the GEPs the body wrote. */
@@ -3933,7 +3946,21 @@ class LlEmitter {
        * different mechanism and a later slice. Refusing costs coverage and
        * nothing else. */
       if (B.isCarried(t.name)) {
-        throw new CoroRefusedError(this.currentFnName, `temp-crosses-two-suspensions=${t.name}`);
+        // NO LONGER A REFUSAL, AND THE PARAGRAPH ABOVE IS WHY IT IS NOT. It
+        // names the repair in as many words -- "an alloca reloaded at every
+        // resume label, the shape IR locals already use" -- and that mechanism
+        // now exists twice over: `BlockBuilder.promoteTemp` puts the value in
+        // an alloca, and the SLOT carry that landed with the cross-park slot
+        // slice moves that alloca through the frame. So this throws a signal
+        // the fixpoint consumes rather than a verdict it records: emitFunction
+        // promotes the temp and emits the body again.
+        //
+        // THE DOMINANCE ARGUMENT IS NOT WEAKENED, IT IS ANSWERED. What the
+        // toolchain rejected was an SSA reload being re-spilled, and nothing
+        // here re-spills one: after promotion the origin has no reload at all,
+        // every use is a load from memory the entry block allocates, and the
+        // cross-suspension value lives in the frame between parks.
+        throw new CrossParkTempPromoteError(t.name, t.llType);
       }
       const ty = B.typeOfTemp(t.name);
       if (ty !== t.llType) {
@@ -5253,9 +5280,11 @@ class LlEmitter {
       const snapshot = new Set(this.decls);
       const spills: CoroTempSpill[] = [];
       const slotSpills: CoroSlotSpill[] = [];
+      const promotes: CoroTempSpill[] = [];
       for (let pass = 0; ; pass++) {
         this.currentCoroTempSpills = spills;
         this.currentCoroSlotSpills = slotSpills;
+        this.currentCoroTempPromotes = promotes;
         try {
           return this.emitFunctionBody(fn);
         } catch (err) {
@@ -5287,6 +5316,40 @@ class LlEmitter {
           !spills.some((s) => s.name === err.temp)
         ) {
           spills.push({ name: err.temp, llType: err.llType });
+          this.decls.clear();
+          for (const d of snapshot) this.decls.add(d);
+          continue;
+        }
+        /* THE PROMOTION ARM. A temp that is live at a SECOND suspension cannot
+         * be carried as an SSA reload at all (emitCoroTempSpill says why the
+         * toolchain rejects it), so it stops being an SSA carry and becomes a
+         * slot: an alloca written at its definition and read at every use.
+         *
+         * TWO SETS MOVE IN ONE STEP, and they have to. The origin LEAVES the
+         * spill set -- the SSA mechanism must not also run for it, or the body
+         * would carry one value by two routes -- and its alloca JOINS the slot
+         * set, which is what lays out a frame field and emits the spill and
+         * reload at every suspension. Nothing else in the backend changes: the
+         * slot carry is the mechanism that already crosses several
+         * suspensions.
+         *
+         * TERMINATION IS THE SAME ARGUMENT AS THE OTHER TWO ARMS, with one
+         * clause added. Everything the promotion emits is derived from (origin,
+         * use ordinal) rather than from `tempCounter`, so pre-park numbering is
+         * identical on every pass exactly as `crossName` guarantees for the SSA
+         * carry -- the seating store and the per-use loads mint no `%tN` at
+         * all. And an origin can move from `spills` to `promotes` AT MOST ONCE,
+         * because the guard below tests the destination set, so the pair is
+         * still monotone and still gains a member every pass. */
+        if (
+          err instanceof CrossParkTempPromoteError &&
+          pass < CORO_SPILL_PASS_CAP &&
+          !promotes.some((t) => t.name === err.temp)
+        ) {
+          promotes.push({ name: err.temp, llType: err.llType });
+          slotSpills.push({ name: crossSlotName(err.temp), llType: err.llType });
+          const i = spills.findIndex((s) => s.name === err.temp);
+          if (i >= 0) spills.splice(i, 1);
           this.decls.clear();
           for (const d of snapshot) this.decls.add(d);
           continue;
@@ -5360,7 +5423,9 @@ class LlEmitter {
         if (
           !(err instanceof CoroRefusedError) &&
           !(err instanceof CrossParkTempError) &&
-          !(err instanceof CrossParkSlotError)
+          !(err instanceof CrossParkSlotError) &&
+          !(err instanceof CrossParkTempPromoteError) &&
+          !(err instanceof PromotedTempInPhiError)
         ) {
           throw err;
         }
@@ -5381,13 +5446,17 @@ class LlEmitter {
           fn.name,
           err instanceof CoroRefusedError
             ? err.reason
-            : err instanceof CrossParkSlotError
-              ? err.llType === null
-                ? `untyped-cross-park-slot=${err.slot}`
-                : `cross-park-slot-passes>${CORO_SPILL_PASS_CAP}`
-              : err.llType === null
-                ? `untyped-cross-park-temp=${err.temp}`
-                : `cross-park-temp-passes>${CORO_SPILL_PASS_CAP}`,
+            : err instanceof PromotedTempInPhiError
+              ? "promoted-temp-in-phi"
+              : err instanceof CrossParkTempPromoteError
+                ? `cross-park-temp-promote-passes>${CORO_SPILL_PASS_CAP}`
+                : err instanceof CrossParkSlotError
+                  ? err.llType === null
+                    ? `untyped-cross-park-slot=${err.slot}`
+                    : `cross-park-slot-passes>${CORO_SPILL_PASS_CAP}`
+                  : err.llType === null
+                    ? `untyped-cross-park-temp=${err.temp}`
+                    : `cross-park-temp-passes>${CORO_SPILL_PASS_CAP}`,
         );
           break;
         }
@@ -5396,6 +5465,7 @@ class LlEmitter {
       // frame to spill into.
       this.currentCoroTempSpills = [];
       this.currentCoroSlotSpills = [];
+      this.currentCoroTempPromotes = [];
     }
     return this.emitFunctionBody(fn);
   }
@@ -5450,6 +5520,12 @@ class LlEmitter {
       // every resume label, and what checks THAT is the cross-park slot oracle
       // over the emitted CFG, not this file.
       for (const s of this.currentCoroSlotSpills) B.frameBackedSlot(s.name);
+      // THE PROMOTED TEMPS, ARMED BEFORE THE WALK for the same reason the line
+      // above is: the alloca has to exist before the first line that stores
+      // into it is appended. The companion slot entry is already in the set
+      // just handed to frameBackedSlot, so the frame field, the spill and the
+      // reload are all in place by the time the body is emitted.
+      for (const t of this.currentCoroTempPromotes) B.promoteTemp(t.name, t.llType);
     }
 
     const paramIds = new Set(fn.params.map((p) => p.localId));
@@ -5680,6 +5756,22 @@ class LlEmitter {
         if (B.genOfTemp(t.name) !== undefined) continue;
         throw new Error(
           `llvm emitter bug: ${fn.name}'s spill set names ${t.name}, which this emission ` +
+            `never minted anywhere in the body. The set was discovered by a previous pass ` +
+            `over the same body, so re-emission is not deterministic and the set is ` +
+            `addressing values it was not built from.`,
+        );
+      }
+      /* G4b -- THE SAME CONDITION OVER THE PROMOTE SET, and it needs saying
+       * separately because the promoted origins are exactly the ones the check
+       * above can no longer see: emitFunction REMOVES a promoted temp from the
+       * spill set, so without this the determinism condition would quietly stop
+       * covering the values that moved. A promoted origin is still minted by
+       * `tmp()` on every pass -- the defining line is unchanged, only its uses
+       * are rewritten -- so `genOfTemp` is the same evidence here as there. */
+      for (const t of this.currentCoroTempPromotes) {
+        if (B.genOfTemp(t.name) !== undefined) continue;
+        throw new Error(
+          `llvm emitter bug: ${fn.name}'s promote set names ${t.name}, which this emission ` +
             `never minted anywhere in the body. The set was discovered by a previous pass ` +
             `over the same body, so re-emission is not deterministic and the set is ` +
             `addressing values it was not built from.`,

@@ -667,6 +667,33 @@ export function llvmCoroLowers(fn: IrFunction, plan: StacklessPlan): boolean {
   return coroRefusalReason(fn, plan) === null;
 }
 
+/** A cross-park temp is live at a SECOND suspension: carry it in an alloca
+ * instead of as an SSA reload.
+ *
+ * A SIGNAL, NOT A VERDICT, and that is the whole difference from the
+ * CoroRefusedError this replaced. It is thrown by emitCoroTempSpill and caught
+ * by emitFunction's fixpoint, which promotes the named temp and emits the body
+ * again -- the same loop shape CrossParkTempError and CrossParkSlotError
+ * already drive. It reaches the refusal handler only when the pass cap is hit,
+ * and then it means what every other refusal means: the function keeps its
+ * fiber lowering.
+ *
+ * THE TYPE IS NEVER NULL HERE, unlike the two discovery errors. It comes from
+ * a CoroTempSpill the previous pass already recorded, and a temp with no
+ * derivable type was refused before it could ever get into that set. */
+export class CrossParkTempPromoteError extends Error {
+  constructor(
+    readonly temp: string,
+    readonly llType: string,
+  ) {
+    super(
+      `${temp} is live at a second suspension and must be carried in an alloca ` +
+        `rather than as an SSA reload`,
+    );
+    this.name = "CrossParkTempPromoteError";
+  }
+}
+
 /** The name a cross-suspension spill gives one of its own values.
  *
  * DERIVED FROM (ROLE, SUSPENSION INDEX, ORIGIN) AND FROM NOTHING ELSE, which
@@ -689,6 +716,44 @@ export function llvmCoroLowers(fn: IrFunction, plan: StacklessPlan): boolean {
  * else in backend/llvm, and the origin is already a unique `%tN`. */
 export function crossName(role: "s" | "r" | "", index: number, origin: string): string {
   return `%cx${role}${index}_${origin.slice(1)}`;
+}
+
+/** The alloca a PROMOTED cross-park temp lives in, inside each resume call.
+ *
+ * WHY A TEMP IS EVER PROMOTED. The SSA carry (spill to the frame, reload into
+ * a fresh name after the resume label, rename every later use) works for ONE
+ * crossing and cannot work for two: the reload is defined in suspension k's
+ * resume block, and re-spilling it at suspension k+1 asks that definition to
+ * dominate a site the dispatch also enters directly. `zig cc` rejected exactly
+ * that with "Instruction does not dominate all uses". Promotion answers it the
+ * way IR locals already do -- the value goes to MEMORY every path can see --
+ * and then the frame round-trip is the SLOT mechanism that already exists,
+ * unchanged: this alloca is handed to `currentCoroSlotSpills` and spilled and
+ * reloaded by emitCoroSlotSpill/emitCoroSlotReload like any carried slot.
+ *
+ * DERIVED FROM THE ORIGIN AND NOTHING ELSE, for the reason crossName gives:
+ * a name drawn from a counter would shift whenever the promote set grew, and
+ * the fixpoint addresses values across passes BY NAME. */
+export function crossSlotName(origin: string): string {
+  return `%cxa_${origin.slice(1)}`;
+}
+
+/** The name of the `load` that materialises a promoted temp at ONE use site.
+ *
+ * ONE LOAD PER USE, not one per block, and the choice is about dominance
+ * rather than economy. A load hoisted to the first use of a generation does
+ * not dominate a use on a sibling arm of a branch, and the back edge of a loop
+ * makes emission order disagree with the CFG -- which is the very disagreement
+ * that refused these functions in the first place. A load immediately before
+ * its own use is dominated by construction, on every path, with no CFG
+ * analysis in this backend to get wrong. LLVM's own mem2reg collapses the
+ * repeats; a wrong answer would not collapse back.
+ *
+ * `k` is the use ORDINAL for this origin, which is stable across passes:
+ * promoting some OTHER temp rewrites that temp's occurrences and adds its
+ * loads, and neither adds nor removes a line mentioning this one. */
+export function crossLoadName(origin: string, k: number): string {
+  return `%cxl${k}_${origin.slice(1)}`;
 }
 
 /** How many times a body may be re-emitted to discover its cross-park temps

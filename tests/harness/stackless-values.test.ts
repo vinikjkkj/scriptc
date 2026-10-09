@@ -1053,6 +1053,21 @@ const LLVM_FLOOR: ReadonlySet<string> = new Set([
   // answers the right TYPE with the wrong value, which no turn count and no
   // structure check can report.
   "wav", "waun", "waus",
+  // + the PROMOTED cross-park temp. A temp live at a SECOND suspension cannot
+  // be carried as an SSA reload at all -- the reload is defined in one resume
+  // block and re-spilling it at the next asks that definition to dominate a
+  // site the dispatch also enters directly -- so these two were refused on a
+  // real toolchain error rather than on caution. They are carried in an
+  // ALLOCA now: stored where the value is computed, loaded at every use, and
+  // moved through the frame by the cross-park SLOT mechanism that already
+  // existed. Nothing about the SSA carry changed, which is why the other
+  // seventy-six artifacts are untouched.
+  //
+  // WHAT THEY EXERCISE, counted rather than assumed: each holds ONE temp
+  // across TWO suspensions -- the awaitUnion's park arm and the following
+  // microtask hop. That is the whole of what this lane exercises today; see
+  // the group below for the shape that would exercise three and what stops it.
+  "wau", "was",
 ]);
 
 /* THE OTHER HALF OF THE PARTITION -- the shapes the LLVM lane does NOT lower,
@@ -1112,16 +1127,22 @@ const NOT_LOWERED_BY_REASON: ReadonlyArray<readonly [string, readonly string[]]>
   // two inclusions); here the dispatch, `plan.points.length` and D5 all still
   // read the node count, so it is a slice and not a constant.
   ["a finally body emitted on more than one completion path", ["wfy7"]],
-  // A temp that would have to survive a SECOND suspension. The reload after
-  // one suspension is an SSA value defined in that suspension's resume block;
-  // re-spilling it at the next asks that definition to dominate a site the
-  // dispatch can also enter directly, and a loop makes emission order and
-  // dominance disagree. MEASURED as a hard toolchain error, not reasoned:
-  // `zig cc` rejected the module with "Instruction does not dominate all
-  // uses". Carrying a value across several suspensions needs it in memory
-  // every path can see -- an alloca reloaded at each resume label, the shape
-  // IR locals already use -- which is a different mechanism and a later slice.
-  ["a temp crossing a second suspension", ["wau", "was"]],
+  // A TEMP CROSSING A SECOND SUSPENSION USED TO BE A GROUP HERE, and it is
+  // gone rather than emptied: the mechanism it was waiting for -- an alloca
+  // written at the definition and read at every use, carried through the frame
+  // by the slot mechanism -- exists, and `wau` and `was` are in the floor.
+  //
+  // WHAT IS STILL OPEN IS A DIFFERENT THING WEARING THE SAME WORDS, and it is
+  // recorded on the non-wrapper side below rather than invented as a group
+  // here, because no WRAPPER is an example of it. The discovery loop finds ONE
+  // violation per emission pass, so a body with more than CORO_SPILL_PASS_CAP
+  // of them runs out of passes before it runs out of temps. That is what
+  // `main` hits now, and it is what refuses a three-await concatenation --
+  // measured on a probe, not reasoned: a body spelling
+  //   return "h" + n + "|" + (await ps("a")) + "|" + (await ps("b")) + ...
+  // is refused `cross-park-temp-passes>12` and never reaches the promotion at
+  // all. So the promotion is exercised at TWO crossings here and at no more,
+  // and the shape that would exercise three is blocked one mechanism earlier.
 ];
 
 /* NON-WRAPPER COROUTINES -- THE BACK DOOR THE LEDGER CANNOT SEE.
@@ -1145,13 +1166,18 @@ const NOT_LOWERED_BY_REASON: ReadonlyArray<readonly [string, readonly string[]]>
  *
  * Re-derive with SCRIPTC_LLVM_CORO_CENSUS=1 AND SCRIPTC_NO_CACHE=1. */
 const LLVM_FLOOR_NON_WRAPPERS: ReadonlyArray<readonly [string, string]> = [
-  // EMPTY, AND KEPT RATHER THAN DELETED. `pu` was here for one build: deleting
-  // the nesting condition lowered it, and the only trace was two aggregates
-  // disagreeing in a report. It then refused itself out again when the
-  // second-suspension limit landed. The table stays because the hole it closes
-  // is structural, not about `pu`: the partition is keyed on the ledger, so a
-  // non-wrapper can enter the lane without any assertion noticing. The closed
-  // set below is what notices.
+  // `pu` IS BACK, AND THE TABLE IS WHY ANYONE CAN TELL. It lowered once before
+  // -- deleting the nesting condition bought it, and the only trace was two
+  // aggregates disagreeing in a report -- then refused itself out again when
+  // the second-suspension limit landed. It is here a third time because the
+  // promotion closed that limit. The movement is visible this time, in a
+  // table, instead of being inferred from a number.
+  //
+  // ITS VALUE IS COVERED, which is what this column is for: `pu` is the
+  // producer behind the `union` row (`2 null`), awaited by `wu` on both arms,
+  // so a lowering that answered the wrong value fails the output comparison
+  // rather than passing as a count.
+  ["pu", "the Promise<T|null> producer; its value is the `union` row, both arms"],
 ];
 
 /* NON-WRAPPERS THIS LANE DOES NOT LOWER, and why -- same back door, other side.
@@ -1172,15 +1198,22 @@ const LLVM_FLOOR_NON_WRAPPERS: ReadonlyArray<readonly [string, string]> = [
  * collecting every violation in ONE probe pass instead of one per pass -- and
  * that is a slice, not a constant. */
 const LLVM_NOT_LOWERED_NON_WRAPPERS: ReadonlyArray<readonly [string, string]> = [
-  // RE-DERIVED, NOT CARRIED. This row said `cross-park-temp-passes>CORO_SPILL
-  // _PASS_CAP (12)` and the emitter has not said that since the cross-park
-  // slot slice landed: at af0db43e5 and here the census prints
-  // `temp-crosses-two-suspensions=%t2462`. That is the fourth distinct reason
-  // `main` has been refused for, which is the census showing only its FIRST
-  // blocker -- the assertion below checks that it is absent, never why, so
-  // the stale text sat beside a green test.
-  ["main", "temp-crosses-two-suspensions=%t2462: the census's first blocker, re-read here"],
-  ["pu", "temp-crosses-two-suspensions: the ternary's value outlives both points"],
+  // RE-DERIVED AGAIN, AND THE OSCILLATION IS THE POINT. This row has now said
+  // `points=100`, `nested-in-expression`, `cross-park-temp-passes>12`,
+  // `temp-crosses-two-suspensions=%t2462`, and -- re-read at this base with
+  // SCRIPTC_LLVM_CORO_CENSUS=1 -- `cross-park-temp-passes>12` once more. It is
+  // the same body each time: the census reports only its FIRST blocker, so
+  // closing one does not move `main`, it renames why `main` is stuck. The
+  // assertion below checks that `main` is ABSENT and never why, which is
+  // exactly how four stale spellings sat beside a green test.
+  //
+  // WHAT THE CAP ACTUALLY IS, since the reason is back to naming it. It is not
+  // a limit on how many temps a body may carry; it is a limit on how many
+  // EMISSION PASSES the discovery loop gets, and the loop finds ONE violation
+  // per pass. `main` has far more than twelve. The fix is to collect every
+  // violation in one probe pass -- a slice, not a constant -- and raising the
+  // number instead would move this test, which is what it is here for.
+  ["main", "cross-park-temp-passes>12: one violation found per pass, and main has many more"],
 ];
 
 const LLVM_NOT_LOWERED: ReadonlySet<string> = new Set(
