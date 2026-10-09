@@ -1132,17 +1132,26 @@ const NOT_LOWERED_BY_REASON: ReadonlyArray<readonly [string, readonly string[]]>
   // written at the definition and read at every use, carried through the frame
   // by the slot mechanism -- exists, and `wau` and `was` are in the floor.
   //
-  // WHAT IS STILL OPEN IS A DIFFERENT THING WEARING THE SAME WORDS, and it is
-  // recorded on the non-wrapper side below rather than invented as a group
-  // here, because no WRAPPER is an example of it. The discovery loop finds ONE
-  // violation per emission pass, so a body with more than CORO_SPILL_PASS_CAP
-  // of them runs out of passes before it runs out of temps. That is what
-  // `main` hits now, and it is what refuses a three-await concatenation --
-  // measured on a probe, not reasoned: a body spelling
+  // THE PASS-CAP GROUP THAT STOOD HERE IS GONE TOO, and what closed it was
+  // not a bigger number. The text it replaced said a body with more than
+  // CORO_SPILL_PASS_CAP violations "runs out of passes before it runs out of
+  // temps", and offered a three-await concatenation as the measured example:
   //   return "h" + n + "|" + (await ps("a")) + "|" + (await ps("b")) + ...
-  // is refused `cross-park-temp-passes>12` and never reaches the promotion at
-  // all. So the promotion is exercised at TWO crossings here and at no more,
-  // and the shape that would exercise three is blocked one mechanism earlier.
+  // That shape is now LOWERED, checked in both directions -- refused
+  // `cross-park-temp-passes>12` against 79e6902d0 and answering `h7|a!|b!|c!`
+  // against this base. So the promotion is exercised at three crossings as
+  // well as two, and nothing is blocked one mechanism earlier any more.
+  //
+  // THE CAP WAS NOT THE LIMIT IT NAMED. The loop found one violation per pass
+  // because the rules THROW, but the reason it could not finish `main` was
+  // that the SLOT carry drew its names from `tmp()`: four per carried slot
+  // per suspension, which renumbered every temp minted after the first one.
+  // Each promotion moved the violating temp by exactly 84 and the loop
+  // re-found the SAME value under a new name. Four hundred passes produced
+  // four hundred names for one temp, all at generation 24 in block
+  // `exc.k108`. slotCarryName makes the carry mint nothing, and a two-pass
+  // probe then collects the whole set at once -- coro.ts and emitter.ts
+  // carry the argument.
 ];
 
 /* NON-WRAPPER COROUTINES -- THE BACK DOOR THE LEDGER CANNOT SEE.
@@ -1178,43 +1187,57 @@ const LLVM_FLOOR_NON_WRAPPERS: ReadonlyArray<readonly [string, string]> = [
   // so a lowering that answered the wrong value fails the output comparison
   // rather than passing as a count.
   ["pu", "the Promise<T|null> producer; its value is the `union` row, both arms"],
+  // `main` IS THE PROGRAM, which is what makes its value column the widest
+  // one in this file rather than the thinnest. Every line the comparison
+  // below reads is printed BY this function -- 38 of them, 866 bytes -- so a
+  // lowering that dropped a statement, took a wrong arm or lost a value
+  // fails the output comparison against the fiber arm rather than passing as
+  // a count. Measured: all four legs (base/candidate x knob on/off) print the
+  // same 866 bytes.
+  //
+  // IT IS ALSO THE FIRST NON-WRAPPER HERE THAT IS NOT A PRODUCER, and the
+  // first body on this lane with 102 suspensions. It took 55 cross-park temps
+  // and 54 promotions to lower, which is why the two mechanisms it needed --
+  // a slot carry that renumbers nothing, and a probe that collects the whole
+  // set in one emission -- are written up where they live and only named
+  // here. Its row moved from LLVM_NOT_LOWERED_NON_WRAPPERS, where it had sat
+  // under five different first-blockers.
+  ["main", "the program itself; its value is all 38 printed lines, against the fiber arm"],
 ];
 
-/* NON-WRAPPERS THIS LANE DOES NOT LOWER, and why -- same back door, other side.
+/* NON-WRAPPERS THIS LANE DOES NOT LOWER, and why -- same back door, other
+ * side. EMPTY AT THIS BASE, and emptied rather than deleted.
  *
- * `main` matters more than it looks. It has been refused at three successive
- * bases for three DIFFERENT reasons -- `points=100` at c03fcd699,
- * `nested-in-expression` at af6419f8f, and the pass cap now -- which is the
- * census showing only the first blocker, three times over. "No regression"
- * here is a claim about two measurements and was checked as one: the base
- * artifact at af6419f8f contains no `sc_cr_main`, and neither does this one.
+ * `main` WAS ITS ONLY EVER OCCUPANT and it was refused at five successive
+ * bases for five DIFFERENT first blockers -- `points=100` at c03fcd699,
+ * `nested-in-expression` at af6419f8f, `cross-park-temp-passes>12`,
+ * `temp-crosses-two-suspensions=%t2462`, and `cross-park-temp-passes>12`
+ * once more at 79e6902d0. That is the census showing only the FIRST blocker,
+ * five times over, against one unchanged body. The assertion below checks a
+ * name is ABSENT and never why, which is exactly how four stale spellings sat
+ * beside a green test. `main` is now in LLVM_FLOOR_NON_WRAPPERS.
  *
- * THE CAP IS WRITTEN DOWN HERE BECAUSE A NUMBER THAT REFUSES IN SILENCE IS
- * EXACTLY WHAT SOMEONE RAISES FROM 12 TO 16 ON A QUIET AFTERNOON. With `main`
- * named on this side, raising CORO_SPILL_PASS_CAP MOVES A TEST: the closed-set
- * assertion below starts seeing `sc_cr_main` and fails until someone decides,
- * deliberately, that the emission cost of a body with that many cross-park
- * temps is worth paying. The real fix is not a bigger number -- it is
- * collecting every violation in ONE probe pass instead of one per pass -- and
- * that is a slice, not a constant. */
-const LLVM_NOT_LOWERED_NON_WRAPPERS: ReadonlyArray<readonly [string, string]> = [
-  // RE-DERIVED AGAIN, AND THE OSCILLATION IS THE POINT. This row has now said
-  // `points=100`, `nested-in-expression`, `cross-park-temp-passes>12`,
-  // `temp-crosses-two-suspensions=%t2462`, and -- re-read at this base with
-  // SCRIPTC_LLVM_CORO_CENSUS=1 -- `cross-park-temp-passes>12` once more. It is
-  // the same body each time: the census reports only its FIRST blocker, so
-  // closing one does not move `main`, it renames why `main` is stuck. The
-  // assertion below checks that `main` is ABSENT and never why, which is
-  // exactly how four stale spellings sat beside a green test.
-  //
-  // WHAT THE CAP ACTUALLY IS, since the reason is back to naming it. It is not
-  // a limit on how many temps a body may carry; it is a limit on how many
-  // EMISSION PASSES the discovery loop gets, and the loop finds ONE violation
-  // per pass. `main` has far more than twelve. The fix is to collect every
-  // violation in one probe pass -- a slice, not a constant -- and raising the
-  // number instead would move this test, which is what it is here for.
-  ["main", "cross-park-temp-passes>12: one violation found per pass, and main has many more"],
-];
+ * WHAT THE PASS CAP TURNED OUT TO BE, since this list carried its warning for
+ * three bases. The warning said raising CORO_SPILL_PASS_CAP from 12 would
+ * silently buy coverage, so naming `main` here would MOVE A TEST when someone
+ * did. The mechanism was right and the diagnosis under it was not: raising it
+ * to 400 bought nothing at all. The loop was not running out of passes, it
+ * was re-finding ONE violation under 400 different names, because the slot
+ * carry drew four `tmp()` names per slot per suspension and renumbered the
+ * body under it. Every pass reported generation 24, defining generation 21
+ * and block `exc.k108`; only the `%tN` moved, by exactly 84 = 4 * 21.
+ *
+ * SO THE CAP IS NOW A BACKSTOP AND NOT A GATE, which is what it always said
+ * it was (coro.ts: "THE BOUND IS NOT THE TERMINATION ARGUMENT"). The probe
+ * hands the fixpoint everything in one go, so a body that reaches 12 passes
+ * is one the probe DECLINED -- a refusal, an unreadable type, or a violation
+ * the second probe pass newly saw. Raising the number would not help it.
+ *
+ * A NEW ROW HERE still means what it always did: a non-wrapper coroutine this
+ * lane does not lower, named so the artifact assertion below can hold it to
+ * ABSENCE, with the reason re-derived (SCRIPTC_LLVM_CORO_CENSUS=1 AND
+ * SCRIPTC_NO_CACHE=1) rather than copied. */
+const LLVM_NOT_LOWERED_NON_WRAPPERS: ReadonlyArray<readonly [string, string]> = [];
 
 const LLVM_NOT_LOWERED: ReadonlySet<string> = new Set(
   NOT_LOWERED_BY_REASON.flatMap(([, names]) => names),
@@ -1572,8 +1595,17 @@ describe.each(["c", "llvm"] as const)("the stackless lane answers what the fiber
           `output comparison cannot report because it makes the two arms MORE equal`)
         .toEqual([]);
       // And the other side of the back door: a non-wrapper recorded as NOT
-      // lowered must not appear. This is what makes raising
-      // CORO_SPILL_PASS_CAP move a test rather than silently buy coverage.
+      // lowered must not appear.
+      //
+      // THE LIST IS EMPTY AT THIS BASE, so this expectation cannot fail here
+      // -- which is worth saying rather than leaving for a reader to notice.
+      // It is not green by construction for ever: it is the only thing that
+      // holds a named non-wrapper to ABSENCE, and it earned that when it held
+      // `main` through five different first blockers. Its older job was to
+      // make raising CORO_SPILL_PASS_CAP move a test; that purchase turned out
+      // not to exist (raising the cap to 400 bought nothing -- see the list's
+      // own header), so what this guards now is a non-wrapper quietly
+      // ENTERING the lane, which assertion (4) above also catches by name.
       expect(LLVM_NOT_LOWERED_NON_WRAPPERS.map(([n]) => n).filter((n) => emitted.has(n)),
         `a non-wrapper recorded as NOT lowered is now lowered. If the pass cap was raised, that ` +
           `is a deliberate purchase and this list is where it gets declared`)
