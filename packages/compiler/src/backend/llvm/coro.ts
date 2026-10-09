@@ -136,15 +136,31 @@ export function coroNeedsExcCell(fn: IrFunction): boolean {
 
 /** True when some SUSPENSION sits inside a `finallyBody`, at any depth.
  *
- * THE ONE SHAPE THE REST OF THE PREDICATE WOULD ADMIT, and the reason is an
- * alloca slot rather than a temp. A `return` crossing a finally snapshots its
- * value into `%pretSlot` (emitter.ts's return case) and reads it back after the
- * finally copies have run. That slot is `alloca` memory of the RESUME CALL, and
- * every resume is a fresh call -- so a suspension BETWEEN the write and the
- * read reads garbage, silently, with the verifier happy because the slot is
- * dominance-legal. The C lane met this and moved the slot into the frame
- * (`sc_pret`); doing the same here is the cross-park ALLOCA mechanism, which is
- * a separate slice.
+ * A CLASSIFIER NOW, NOT A REFUSAL, and the demotion is the finding rather than
+ * a tidy-up. This used to be condition 4: no function holding a suspension
+ * inside a finally body was lowered at all. The hazard it named is real -- a
+ * `return` crossing a finally snapshots its value into `%pretSlot`
+ * (emitter.ts's return case) and reads it back after the finally copies have
+ * run; that slot is `alloca` memory of the RESUME CALL, so a suspension
+ * between the write and the read reads garbage, silently, with the verifier
+ * happy because the slot is dominance-legal.
+ *
+ * BUT THE WALK WAS WIDER THAN THE HAZARD. A finally body with no `return`
+ * crossing it mints no slot at all. Measured: `wfy6` is exactly that shape,
+ * lowers correctly, and was the only wrapper this condition ever refused -- so
+ * the ledger row filed under the condition was not an example of it, and no
+ * test could report the gap.
+ *
+ * WHAT ACTUALLY BREAKS is a finally body the emitter writes MORE THAN ONCE:
+ * one copy per completion path, each drawing its own state out of a plan that
+ * allotted the IR node one. That is counted at emission (coroStateOverflow),
+ * and this walk is what tells that refusal apart from the emitter bug the same
+ * overflow is for every other function.
+ *
+ * AND `%pretSlot` KEEPS ITS OWN GUARD either way: it comes from `B.slot()`, so
+ * blocks.ts's cross-park SLOT rule sees any read after a park that did not
+ * re-write it, and either carries it in the frame or refuses. The narrowing
+ * does not rest on the copy count being the only hazard.
  *
  * A suspension in a try or catch body is fine and stays admitted: the snapshot
  * happens after the resume on every path, so nothing crosses. Only one INSIDE
@@ -626,12 +642,15 @@ export function assertBareSuspendingLibCalls(fn: IrFunction): void {
  *      deletion. So the fence is re-keyed to the kinds themselves rather than
  *      deleted along with the exemption that first motivated it.
  *
- *   4. NO SUSPENSION INSIDE A `finally` BODY -- see suspensionInsideFinally:
- *      that is the cross-park ALLOCA mechanism (`%pretSlot`), which the SSA
- *      rule cannot see. It stays a STRUCTURAL refusal even though blocks.ts now
- *      carries a slot rule, because the structural one is cheap and exact for
- *      this shape, and a refusal taken before emission leaves no trial to
- *      unwind.
+ *   4. [MOVED TO EMISSION, and narrowed by the move.] This condition used to
+ *      read "no suspension inside a `finally` BODY", on the strength of the
+ *      cross-park ALLOCA (`%pretSlot`) that the SSA rule cannot see. It was
+ *      WIDER THAN THE HAZARD. What breaks is a finally body the emitter
+ *      copies once per completion path, each copy drawing a state the plan
+ *      allotted once; a finally body with a single copy lowers correctly, and
+ *      `%pretSlot` has its own general detector in blocks.ts either way.
+ *      The verdict is now taken where the copies are COUNTED -- see the
+ *      comment at the condition's own position below.
  *
  * ONE SOURCE FOR THE VERDICT. This function is `coroRefusalReason(...) === null`
  * and nothing else. They were two parallel condition lists reading the same
@@ -738,7 +757,40 @@ export function coroRefusalReason(fn: IrFunction, plan: StacklessPlan): string |
   if (plan.points.some((pt) => POINT_KINDS_WITHOUT_AN_OPERAND.has(pt.kind))) {
     assertBareSuspendingLibCalls(fn);
   }
-  if (suspensionInsideFinally(fn)) return "suspension-inside-finally";
+  // CONDITION 4 NO LONGER REFUSES HERE, and what replaced it is a
+  // MEASUREMENT instead of a prediction. The blanket structural refusal was
+  // wider than the hazard it was named for: it keeps out every suspension
+  // inside a finally body, while what actually breaks is a finally body the
+  // emitter writes MORE THAN ONCE -- one copy per completion path, each
+  // drawing its own state out of a plan that allotted one.
+  //
+  // MEASURED, and the distinction is not academic: `wfy6`
+  // (`try { s = 1; } finally { s = s + await pf(n); }`) has no `return`
+  // crossing the finally and a try body that cannot throw, so the emitter
+  // writes its finally ONCE, draws one state, and lowers correctly. The
+  // wrapper this condition was filed under could not exercise the condition.
+  // A probe that does -- a refcounted `return` crossing a suspending finally
+  // -- was built and DOES fail, with exactly the overflow described above.
+  //
+  // SO THE VERDICT MOVED TO WHERE THE COPIES ARE COUNTED. emitCoroAwait,
+  // emitCoroHop and the awaitUnion site all bound the state they draw
+  // against the plan, and emitFunctionBody re-checks the total; a function
+  // holding a suspension inside a finally body that trips any of them is
+  // refused as `finally-body-copied-past-its-state` and keeps its fiber
+  // lowering. That is a count of what was EMITTED, so it cannot drift from
+  // the emitter the way a second structural walk over the same IR would.
+  //
+  // `suspensionInsideFinally` IS STILL EXPORTED AND STILL USED -- as the
+  // CLASSIFIER for that overflow, not as a refusal. The overflow guards are
+  // emitter-bug assertions for every other function and must stay loud; this
+  // walk is what tells the two events apart.
+  //
+  // THE %pretSlot HAZARD IS NOT LEFT UNGUARDED BY THE MOVE. It has its own,
+  // general detector: `%pretSlot` is minted through `B.slot()`, so it is a
+  // registered resume-call-private slot and blocks.ts's cross-park SLOT rule
+  // sees a read after a park that did not re-write it. That rule either
+  // carries the slot in the frame or refuses the function. Two independent
+  // guards, and neither rests on the other being right.
   return null;
 }
 

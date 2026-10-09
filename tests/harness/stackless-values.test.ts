@@ -368,6 +368,10 @@ const WRAPPERS: ReadonlyArray<{ name: string; take: string; finish: string; conv
   // .test.ts, which guards the three paths and the multiplicity this file
   // only has to notice.
   { name: "wfy6", take: "f64", finish: "f64", converted: true },
+  // The multi-copy half of shape (1); see its definition in SOURCE. It is on
+  // the C lane's ledger and OFF the LLVM floor, which is the partition
+  // working as written rather than an exception to it.
+  { name: "wfy7", take: "f64", finish: "ref", converted: true },
   // THE FOUR STATEMENT POSITIONS, as one slice because they are DISJOINT: no
   // remaining function in the measured program carries two of them, so their
   // reach is additive exactly. Grouped by COST, not by nature -- `if`,
@@ -757,6 +761,28 @@ async function wfy6(n: number): Promise<number> {
   try { s = 1; } finally { s = s + await pf(n); }
   return s;
 }
+// THE OTHER HALF OF SHAPE (1), and it exists because the refusal wfy6 used
+// to occupy had NO occupant once wfy6 stopped occupying it.
+//
+// NO BACKTICK IN HERE, and that is not style: this comment lives inside the
+// SOURCE template literal, so one would close the string and the file would
+// not parse. (It did not, once.)
+// wfy6 has no "return" crossing its finally and a try body that cannot
+// throw, so the emitter writes that finally body ONCE. This one returns
+// THROUGH the finally, so the body is written again at the return site --
+// and each copy draws its own state out of a plan that allotted the IR node
+// one. That is what the LLVM lane refuses now, by COUNTING the copies at
+// emission rather than by refusing every suspending finally up front.
+//
+// THE RETURNED VALUE IS REFCOUNTED ON PURPOSE: that is the geometry that
+// mints the %pretSlot snapshot, so if the copy limit is ever lifted this row
+// is already
+// standing in the position where the slot must come from the frame. The C
+// lane converts it today and answers "w3", which is what makes this a
+// coverage row rather than a quarantine entry.
+async function wfy7(n: number): Promise<string> {
+  try { return "w" + n; } finally { fobs = fobs + await pf(n); }
+}
 
 
 /* THE FOUR STATEMENT POSITIONS. Each magnitude distinguishes the plausible
@@ -875,7 +901,7 @@ async function main(): Promise<void> {
   console.log("loop2 ", await wlc(), "|", await wlb(), "|", await wlnest(), "|", await wlfo());
   console.log("forof ", await wfo1(), "|", await wfo2(), "|", await wfo3(), "|", await wfo4(), "|", await wfo5());
   console.log("pret  ", await wfy5(3));
-  console.log("fin   ", await wfy1(3), "|", await wfy2(false), await wfy2(true), "|", await wfy3(true), "|", await wfy4(3), "|", await wfy6(3), "|", fobs);
+  console.log("fin   ", await wfy1(3), "|", await wfy2(false), await wfy2(true), "|", await wfy3(true), "|", await wfy4(3), "|", await wfy6(3), "|", await wfy7(3), "|", fobs);
   console.log("four  ", await wif(1), await wif(-1), "|", await wrs(3), "|", await wby(4));
   console.log("four2 ", await wsw(1), await wsw(2), await wsw(3), "|", await wsd(0), await wsd(1), await wsd(5), "|", await wst(1), await wst(9), "|", await wsu(1), await wsu(9));
   console.log("done");
@@ -983,6 +1009,13 @@ const LLVM_FLOOR: ReadonlySet<string> = new Set([
   // them, which is what that table's own instruction asks for.
   "wlfo", "wfo1", "wfo2", "wfo3", "wfo4", "wfo5",
   "wfy5", "wfy1", "wfy2", "wfy3", "wfy4",
+  // + shape (1) with a SINGLE finally copy. The blanket structural refusal
+  // this moved out of was wider than its own hazard: it named `%pretSlot`,
+  // and `wfy6` mints none -- it has no `return` crossing the finally, so the
+  // emitter writes that body once, draws one state, and the two lanes agree
+  // on the value. The wrapper filed under the condition could not exercise
+  // it. `wfy7` is the row that does, and it stays refused.
+  "wfy6",
   "wif", "wsd", "wsu",
   // THE MULTI-STATE DISPATCH. More than one suspension point is a second
   // state, a second resume block and a second spill site. `who` parks twice in
@@ -1051,18 +1084,34 @@ const LLVM_FLOOR: ReadonlySet<string> = new Set([
  * converts, so each group is work that exists rather than a limit that was
  * discovered. */
 const NOT_LOWERED_BY_REASON: ReadonlyArray<readonly [string, readonly string[]]> = [
-  // The suspension sits inside a `finally` BODY. A `return` crossing a finally
-  // snapshots its value into `%pretSlot` and reads it back after the finally
-  // copies run; a suspension between the write and the read reads a slot
-  // belonging to a previous call. Same mechanism as the group above -- a
-  // cross-park alloca -- but refused STRUCTURALLY (coro.ts's
-  // suspensionInsideFinally) because the IR can see it without emitting.
+  // A `finally` BODY THE EMITTER WRITES MORE THAN ONCE. The body is copied
+  // once per completion path -- the fallthrough, the exception path, and one
+  // per `return` crossing the region -- so one IR suspension node becomes
+  // several emitted park sites, each drawing a state out of a plan that
+  // allotted the node ONE. The emitter counts them and refuses;
+  // `finally-body-copied-past-its-state` is the reason it gives.
   //
-  // LISTED SEPARATELY FROM THE CURSOR because the two are fixed by different
-  // work: the cursor needs the loop's index in the frame, this needs the
-  // pending-return slot there. It was filed under `nested-in-expression` too,
-  // and that label was true of it as well -- it was simply tested first.
-  ["a suspension inside a finally body", ["wfy6"]],
+  // THIS REPLACED A WIDER CONDITION, and the width was the finding. What
+  // stood here refused every suspension inside a finally body, on the
+  // strength of the `%pretSlot` snapshot a `return` crossing one leaves
+  // behind. But the wrapper filed under it -- `wfy6` -- has no such return:
+  // it mints no slot, its body is copied once, and it lowers correctly. The
+  // condition was refusing a shape its own stated hazard did not reach, and
+  // the ledger could not say so because the row under it was not an example
+  // of it. `wfy7` is, which is why it was written.
+  //
+  // THE SLOT IS NOT LEFT UNGUARDED BY THE NARROWING. `%pretSlot` comes from
+  // `B.slot()`, so it is a registered resume-call-private slot and blocks.ts's
+  // cross-park SLOT rule sees any read after a park that did not re-write it
+  // -- carrying it in the frame or refusing the function. The structural walk
+  // is still exported and still used, as the CLASSIFIER that tells this
+  // refusal apart from the emitter bug the same overflow would otherwise be.
+  //
+  // WHAT IT WOULD TAKE TO CLOSE: a state per emitted SITE instead of per IR
+  // node. The C lane already did it (the one-state-per-point equality became
+  // two inclusions); here the dispatch, `plan.points.length` and D5 all still
+  // read the node count, so it is a slice and not a constant.
+  ["a finally body emitted on more than one completion path", ["wfy7"]],
   // A temp that would have to survive a SECOND suspension. The reload after
   // one suspension is an SSA value defined in that suspension's resume block;
   // re-spilling it at the next asks that definition to dominate a site the
@@ -1123,7 +1172,14 @@ const LLVM_FLOOR_NON_WRAPPERS: ReadonlyArray<readonly [string, string]> = [
  * collecting every violation in ONE probe pass instead of one per pass -- and
  * that is a slice, not a constant. */
 const LLVM_NOT_LOWERED_NON_WRAPPERS: ReadonlyArray<readonly [string, string]> = [
-  ["main", "cross-park-temp-passes>CORO_SPILL_PASS_CAP (12): one pass discovers one temp"],
+  // RE-DERIVED, NOT CARRIED. This row said `cross-park-temp-passes>CORO_SPILL
+  // _PASS_CAP (12)` and the emitter has not said that since the cross-park
+  // slot slice landed: at af0db43e5 and here the census prints
+  // `temp-crosses-two-suspensions=%t2462`. That is the fourth distinct reason
+  // `main` has been refused for, which is the census showing only its FIRST
+  // blocker -- the assertion below checks that it is absent, never why, so
+  // the stale text sat beside a green test.
+  ["main", "temp-crosses-two-suspensions=%t2462: the census's first blocker, re-read here"],
   ["pu", "temp-crosses-two-suspensions: the ternary's value outlives both points"],
 ];
 
@@ -1565,9 +1621,14 @@ describe.each(["c", "llvm"] as const)("the stackless lane answers what the fiber
       // the finally with the park between snapshot and read. wfy6 awaits
       // INSIDE the finally body and converts as of D4 -- which is what put a
       // park between sc_pret's snapshot and its read for the first time, and
-      // sent the slot into the coroutine frame.
-      // fobs tallies the finallys that ran: 1 + 10 + 10 + 100 + 1000.
-      "fin    t4 | ok7 c:bad | c!! | 4 | 5 | 1121",
+      // sent the slot into the coroutine frame. wfy7 does the same AND
+      // returns through it, so its finally is copied and only the C lane
+      // converts it -- the value below is therefore the FIBER answer on the
+      // LLVM lane and the STACKLESS one on the C lane, which is exactly the
+      // claim the partition test makes about it.
+      // fobs tallies the finallys that ran: 1 + 10 + 10 + 100 + 1000, plus
+      // wfy7's pf(3)=4.
+      "fin    t4 | ok7 c:bad | c!! | 4 | 5 | w3 | 1125",
       // The four statement positions. wif picks a branch on an awaited bool.
       // wrs/wbs store pf(3)=4 and pf(4)=5 through a container evaluated
       // BEFORE the park. wsw resumes inside a case body holding a refcounted

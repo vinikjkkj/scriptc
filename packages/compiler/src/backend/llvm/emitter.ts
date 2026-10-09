@@ -94,6 +94,7 @@ import { coroPlans } from "../../ir/coro-plans.js";
 import type { StacklessPlan } from "../../ir/liveness.js";
 import {
   CoroRefusedError,
+  suspensionInsideFinally,
   CORO_SPILL_PASS_CAP,
   CORO_STATE_FIELD,
   crossName,
@@ -4060,18 +4061,51 @@ class LlEmitter {
    * suspension, released once at the take below. The C lane found this by
    * segfault -- its first version left the temp in the frame and released it
    * twice, once through a dangling local. */
+  /** This site would write a state the dispatch has no case for.
+   *
+   * TWO DIFFERENT EVENTS WEAR THIS SYMPTOM, and only one of them is a bug.
+   *
+   *   A FINALLY BODY WRITTEN MORE THAN ONCE. The emitter copies a `finally`
+   *     body once per completion path -- the fallthrough, the exception path,
+   *     and one per `return` crossing the region -- so a suspension inside one
+   *     becomes several emitted park sites out of a plan that allotted it ONE
+   *     state. That is a shape outside the slice, not a defect: the response is
+   *     the fiber lane, which costs coverage and nothing else. It is the reason
+   *     coro.ts's condition 4 no longer refuses structurally -- the blanket walk
+   *     kept out single-copy bodies, which lower correctly.
+   *
+   *   ANYTHING ELSE. A suspension node walked more times than the plan
+   *     accounts for, with no finally body to explain it, is the emitter and
+   *     the analysis disagreeing about the body. That stays a hard build
+   *     failure, loudly, because nothing downstream can see it.
+   *
+   * THE CLASSIFIER IS THE WALK THAT USED TO BE THE REFUSAL, which is what
+   * keeps this from being a blanket downgrade of a real assertion: every
+   * function with no suspension inside a finally body still gets the bug.
+   *
+   * `site` names which of the three draw points reached here, so a census row
+   * and a crash both say whether it was a park, a hop or a union arm. */
+  private coroStateOverflow(fn: IrFunction, index: number, site: string): never {
+    const plan = this.currentCoro!;
+    if (suspensionInsideFinally(fn)) {
+      throw new CoroRefusedError(
+        fn.name,
+        `finally-body-copied-past-its-state=${index + 1}>${plan.points.length}`,
+      );
+    }
+    throw new Error(
+      `llvm emitter bug: ${fn.name} drew suspension state ${index} but the plan holds ` +
+        `${plan.points.length} point(s). A suspension node was walked more times than the ` +
+        `plan accounts for; the ${site} would write a state the dispatch has no case for.`,
+    );
+  }
+
   private emitCoroAwait(fn: IrFunction, pr: LlValue, resultType: IrType): LlValue {
     const B = this.B;
     const layout = this.currentCoroLayout!;
     const plan = this.currentCoro!;
     const index = this.coroStatesDrawn;
-    if (index >= plan.points.length) {
-      throw new Error(
-        `llvm emitter bug: ${fn.name} drew suspension state ${index} but the plan holds ` +
-          `${plan.points.length} point(s). A suspension node was walked more times than the ` +
-          `plan accounts for; the park would write a state the dispatch has no case for.`,
-      );
-    }
+    if (index >= plan.points.length) this.coroStateOverflow(fn, index, "park");
     this.coroStatesDrawn++;
     // The frame takes the promise's +1: struck from the RC frame here so no
     // scope exit and no unwind releases it, and released once at the take.
@@ -4169,13 +4203,7 @@ class LlEmitter {
     const B = this.B;
     const plan = this.currentCoro!;
     const index = this.coroStatesDrawn;
-    if (index >= plan.points.length) {
-      throw new Error(
-        `llvm emitter bug: ${fn.name} drew suspension state ${index} but the plan holds ` +
-          `${plan.points.length} point(s). A suspension node was walked more times than the ` +
-          `plan accounts for; the hop would write a state the dispatch has no case for.`,
-      );
-    }
+    if (index >= plan.points.length) this.coroStateOverflow(fn, index, "hop");
     this.coroStatesDrawn++;
     // THE SAME CARRY AS THE PARK, and it has to be the same or the hop is a
     // hole the shape of the other suspension form. A hop takes a boundary
@@ -4299,13 +4327,7 @@ class LlEmitter {
     // bound check below says so loudly); drawing it zero times would collide
     // two points on one state, which nothing would catch.
     const index = this.coroStatesDrawn;
-    if (index >= plan.points.length) {
-      throw new Error(
-        `llvm emitter bug: ${fn.name} drew suspension state ${index} but the plan holds ` +
-          `${plan.points.length} point(s). A suspension node was walked more times than the ` +
-          `plan accounts for; the suspension would write a state the dispatch has no case for.`,
-      );
-    }
+    if (index >= plan.points.length) this.coroStateOverflow(fn, index, "suspension");
     this.coroStatesDrawn++;
 
     // HOISTED -- see the header. One index, two sites, one spill.
@@ -5673,6 +5695,19 @@ class LlEmitter {
         );
       }
       if (this.coroStatesDrawn !== coro.points.length) {
+        // THE UNDER DIRECTION TOO, and it is the same event. A finally body is
+        // copied once per completion path, so a path the emitter does not reach
+        // leaves a planned point with no state exactly as an extra path leaves a
+        // state with no point. The per-site guards above catch only the over
+        // direction; this is where the under one lands, and it must classify the
+        // same way or a shape would crash the build here after being refused
+        // cleanly one line up.
+        if (suspensionInsideFinally(fn)) {
+          throw new CoroRefusedError(
+            fn.name,
+            `finally-body-copied-past-its-state=${this.coroStatesDrawn}!=${coro.points.length}`,
+          );
+        }
         throw new Error(
           `llvm emitter bug: ${fn.name} drew ${this.coroStatesDrawn} state(s) but the plan ` +
             `holds ${coro.points.length} suspension point(s). The dispatch and the body ` +
