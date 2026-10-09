@@ -91,10 +91,10 @@ import { seqScopedLocals, stackCheckPolicy, stackMarginBytes, stackMarginSymbol 
 // failed to load, knob or no knob, on every build. Nothing caught it because
 // S0 ran neither tsc nor a test that imports this file.
 import { coroPlans } from "../../ir/coro-plans.js";
+import { libCallPointKind } from "../../ir/suspends.js";
 import type { StacklessPlan } from "../../ir/liveness.js";
 import {
   CoroRefusedError,
-  suspensionInsideFinally,
   CORO_SPILL_PASS_CAP,
   CORO_STATE_FIELD,
   CrossParkTempPromoteError,
@@ -103,6 +103,7 @@ import {
   crossSlotName,
   coroFrameLayout,
   coroLabel,
+  coroPointKey,
   coroFrameSizeOf,
   coroRefusalReason,
   coroCheckSuspensionSites,
@@ -1508,7 +1509,31 @@ class LlEmitter {
    * the scaffolding cannot disagree with the GEPs the body wrote. */
   private readonly coroLayoutByFn = new Map<string, CoroFrameLayout>();
   /** States drawn by the body being emitted -- the artifact side of D5. */
-  private coroStatesDrawn = 0;
+  /** THE STATE TABLE: one entry per EMITTED suspension site, holding the index
+   * of the PLAN POINT that site came from.
+   *
+   * These used to be ONE NUMBER, and a single equality -- states === points --
+   * pinned emission to plan in both directions. A `finally` body is emitted
+   * once per completion path (the fallthrough, the exception path, and one per
+   * `return` crossing the region), so a point inside one becomes several sites
+   * and that equality cannot hold. The two quantities are separated here
+   * rather than the equality weakened in place: `coroStates.length` is the
+   * ARTIFACT's state count -- what the dispatch, the resume labels and
+   * `sc_b->state` are numbered by -- and each entry says which point its state
+   * serves. That is what lets the two inclusions in emitFunctionBody be
+   * checked against `plan.points`, which the ANALYSIS produces, instead of
+   * against another number this emitter made up. */
+  private coroStates: number[] = [];
+  /** The plan's points, indexed by the source position of the node that
+   * suspends. Built once per coroutine body in emitFunctionBody; empty for a
+   * fiber body. See coroPointKey for why the key is a POSITION and not a
+   * cursor. */
+  private coroPointByKey = new Map<string, number>();
+  /** The deferred dispatch's switch value and out-of-range label, carried from
+   * emitCoroDispatch -- which cannot know the case count yet -- to the end of
+   * the body. */
+  private coroDispatchValue = "";
+  private coroDispatchDefault = "";
   /** Functions the structural predicate admitted and the emission refused,
    * with the reason. Reported by the census so the gap between the two layers
    * is visible rather than inferred. */
@@ -3856,27 +3881,28 @@ class LlEmitter {
   /** The dispatch: load `base->state` and switch into the entry block or a
    * resume label.
    *
-   * THE CASES CANNOT BE WRITTEN YET -- how many states the body emits is not
-   * known until the body has been emitted -- so the terminator is deferred.
-   * The C lane solves this by remembering a line index and splicing the switch
-   * in after the walk; here the entry block simply stays unterminated while the
-   * body is emitted and is terminated at the end, which is cheaper and needs no
-   * buffer. `startBlock` moves the cursor; the entry block object is kept so
-   * its terminator can be written last. */
+   * THE CASES CANNOT BE WRITTEN YET, and this is the slice that made that
+   * true. How many states the body emits is not known until the body HAS been
+   * emitted: a `finally` body is written once per completion path, so one plan
+   * point becomes several states and several resume labels. The arms used to
+   * be read off `plan.points.length` here, which was correct only while the
+   * two counts were the same number.
+   *
+   * The C lane remembers a line index and splices the switch into its buffer
+   * after the walk; here the entry block object is kept and its terminator
+   * written last -- the same trick with no indices to invalidate.
+   * `finishDispatch` in emitFunctionBody closes it, and `render()` refuses to
+   * print a resume body whose dispatch is still open, so forgetting is a build
+   * failure rather than a program that never resumes. */
   private emitCoroDispatch(fn: IrFunction, plan: StacklessPlan): void {
     const B = this.B;
     const st = this.coroStateField();
     const v = B.tmp();
     B.line(`${v} = load i32, ptr ${st}`);
-    // The cases are known from the PLAN, not from the walk: this slice draws
-    // exactly one state per point, and emitFunction's D5 assertion fails the
-    // build if the body ever disagrees. A later slice that emits a point more
-    // than once (a finally body runs up to three copies) must move this to the
-    // deferred-splice shape the C lane uses.
     const dflt = "sc_dispatch_bad";
-    const arms: [number, string][] = [[0, "sc_S0"]];
-    for (let i = 0; i < plan.points.length; i++) arms.push([i + 1, coroLabel(i)]);
-    B.switchTerm(v, dflt, arms);
+    this.coroDispatchValue = v;
+    this.coroDispatchDefault = dflt;
+    B.deferDispatch();
     B.startBlock(dflt);
     // A state with no case is a frame that resumed into a number nothing
     // emitted. The C lane calls abort() here for the same reason: there is no
@@ -3886,6 +3912,15 @@ class LlEmitter {
     B.line(`call void @abort()`);
     B.terminate("unreachable");
     B.startBlock("sc_S0");
+    // A plan with no point reaches neither this file nor coroRefusalReason
+    // (`points=0` refuses one layer up), so the dispatch always carries at
+    // least the entry arm plus one resume arm. Asserted rather than assumed:
+    // a switch with only arm 0 is a resume function that can never resume, and
+    // it would still verify, link and run -- answering correctly on its first
+    // turn and hanging on every one after.
+    if (plan.points.length === 0) {
+      throw new Error(`llvm emitter bug: ${fn.name} is lowered stackless with no suspension point`);
+    }
     this.emitCoroReload();
   }
 
@@ -4113,52 +4148,60 @@ class LlEmitter {
    * suspension, released once at the take below. The C lane found this by
    * segfault -- its first version left the temp in the frame and released it
    * twice, once through a dangling local. */
-  /** This site would write a state the dispatch has no case for.
+  /** Allocate ONE emitted coroutine state for the suspension being emitted and
+   * return its STATE index -- what the resume label, the spill names and
+   * `sc_b->state` are all numbered by.
    *
-   * TWO DIFFERENT EVENTS WEAR THIS SYMPTOM, and only one of them is a bug.
+   * ONE STATE PER EMITTED SITE, NOT PER PLAN POINT, AND THAT IS THE SLICE.
+   * The emitter writes a `finally` body once per completion path -- the
+   * fallthrough, the exception path, and one per `return` crossing the region
+   * -- so one IR suspension node is emitted several times. Each copy genuinely
+   * needs its own state and its own resume label: the copies are reached from
+   * different predecessors and cannot share one. What used to stand here
+   * counted the copies against a plan that allotted the node ONE state and
+   * refused the function (`finally-body-copied-past-its-state`), which cost
+   * coverage for a multiplicity the dispatch can simply carry.
    *
-   *   A FINALLY BODY WRITTEN MORE THAN ONCE. The emitter copies a `finally`
-   *     body once per completion path -- the fallthrough, the exception path,
-   *     and one per `return` crossing the region -- so a suspension inside one
-   *     becomes several emitted park sites out of a plan that allotted it ONE
-   *     state. That is a shape outside the slice, not a defect: the response is
-   *     the fiber lane, which costs coverage and nothing else. It is the reason
-   *     coro.ts's condition 4 no longer refuses structurally -- the blanket walk
-   *     kept out single-copy bodies, which lower correctly.
+   * THE THREE DRAW POINTS ALL COME THROUGH HERE -- park, hop and the two-armed
+   * union -- so the state table and the resume labels can never advance
+   * independently. One draw site is one place to get it right rather than
+   * three.
    *
-   *   ANYTHING ELSE. A suspension node walked more times than the plan
-   *     accounts for, with no finally body to explain it, is the emitter and
-   *     the analysis disagreeing about the body. That stays a hard build
-   *     failure, loudly, because nothing downstream can see it.
+   * THE SITE IS SEATED FROM THE ANALYSIS'S OWN TABLE, by the kind and position
+   * the analysis recorded for the node; nothing here re-derives which nodes
+   * suspend, so there is no second structural walk to drift from the first. A
+   * node the plan does not hold is a hard emitter bug and not a refusal: it is
+   * the emitter and the analysis disagreeing about the body, which the fiber
+   * lane would not fix and nothing downstream could report.
    *
-   * THE CLASSIFIER IS THE WALK THAT USED TO BE THE REFUSAL, which is what
-   * keeps this from being a blanket downgrade of a real assertion: every
-   * function with no suspension inside a finally body still gets the bug.
+   * `kind` IS THE ANALYSIS'S VOCABULARY, NOT THE NODE'S. A lowerable
+   * suspending libCall is planned as `libCall:<fn>` and not as `libCall`, so
+   * the hop site derives its key through `libCallPointKind` -- the same call
+   * the plan was built with -- rather than spelling a remembered string.
    *
-   * `site` names which of the three draw points reached here, so a census row
-   * and a crash both say whether it was a park, a hop or a union arm. */
-  private coroStateOverflow(fn: IrFunction, index: number, site: string): never {
+   * `site` names which draw point reached here, so a crash says whether it was
+   * a park, a hop or a union arm. */
+  private coroDrawState(fn: IrFunction, kind: string, loc: SrcLoc, site: string): number {
     const plan = this.currentCoro!;
-    if (suspensionInsideFinally(fn)) {
-      throw new CoroRefusedError(
-        fn.name,
-        `finally-body-copied-past-its-state=${index + 1}>${plan.points.length}`,
+    const pt = this.coroPointByKey.get(coroPointKey(kind, loc));
+    if (pt === undefined) {
+      throw new Error(
+        `llvm emitter bug: ${fn.name} emitted a ${site} (${kind}) at ` +
+          `${loc.file}:${loc.start}-${loc.end}, which the plan does not hold. The plan carries ` +
+          `${plan.points.length} suspension point(s) and none of that kind at that position, so ` +
+          `this site would take a state with no point behind it: the frame was laid out without ` +
+          `its live set and the dispatch would route its label nowhere. The emitter and the ` +
+          `analysis disagree about what suspends.`,
       );
     }
-    throw new Error(
-      `llvm emitter bug: ${fn.name} drew suspension state ${index} but the plan holds ` +
-        `${plan.points.length} point(s). A suspension node was walked more times than the ` +
-        `plan accounts for; the ${site} would write a state the dispatch has no case for.`,
-    );
+    this.coroStates.push(pt);
+    return this.coroStates.length - 1;
   }
 
-  private emitCoroAwait(fn: IrFunction, pr: LlValue, resultType: IrType): LlValue {
+  private emitCoroAwait(fn: IrFunction, loc: SrcLoc, pr: LlValue, resultType: IrType): LlValue {
     const B = this.B;
     const layout = this.currentCoroLayout!;
-    const plan = this.currentCoro!;
-    const index = this.coroStatesDrawn;
-    if (index >= plan.points.length) this.coroStateOverflow(fn, index, "park");
-    this.coroStatesDrawn++;
+    const index = this.coroDrawState(fn, "awaitExpr", loc, "park");
     // The frame takes the promise's +1: struck from the RC frame here so no
     // scope exit and no unwind releases it, and released once at the take.
     this.moveTemp(pr);
@@ -4251,12 +4294,9 @@ class LlEmitter {
    * the hop contributes. It is NOT the whole invariant -- see
    * coroCheckSuspensionSites, and the comment at the D5 assertion for why
    * "parks + hops" is the wrong universal spelling. */
-  private emitCoroHop(fn: IrFunction): void {
+  private emitCoroHop(fn: IrFunction, loc: SrcLoc): void {
     const B = this.B;
-    const plan = this.currentCoro!;
-    const index = this.coroStatesDrawn;
-    if (index >= plan.points.length) this.coroStateOverflow(fn, index, "hop");
-    this.coroStatesDrawn++;
+    const index = this.coroDrawState(fn, libCallPointKind("async.hop"), loc, "hop");
     // THE SAME CARRY AS THE PARK, and it has to be the same or the hop is a
     // hole the shape of the other suspension form. A hop takes a boundary
     // exactly as a park does, so every temp minted before it is just as dead on
@@ -4330,6 +4370,7 @@ class LlEmitter {
    * the current generation and the join reads it there. */
   private emitCoroUnionAwait(
     resType: IrType,
+    loc: SrcLoc,
     def: IrUnionDef,
     inner: IrType,
     u: LlValue,
@@ -4338,7 +4379,6 @@ class LlEmitter {
     const B = this.B;
     const fn = this.fnByName.get(this.currentFnName)!;
     const layout = this.currentCoroLayout!;
-    const plan = this.currentCoro!;
 
     /* RESOLVED BEFORE ANYTHING IS EMITTED, so a refusal leaves no half-written
      * suspension behind and no state drawn for it. */
@@ -4375,12 +4415,12 @@ class LlEmitter {
       unitResTag = resTagOf(def.arms[unitTags[0]!]!);
     }
 
-    // ONE STATE FOR THE PAIR. Drawing it twice runs past the dispatch (the
-    // bound check below says so loudly); drawing it zero times would collide
-    // two points on one state, which nothing would catch.
-    const index = this.coroStatesDrawn;
-    if (index >= plan.points.length) this.coroStateOverflow(fn, index, "suspension");
-    this.coroStatesDrawn++;
+    // ONE STATE FOR THE PAIR, drawn ONCE: the two arms share it, share the
+    // resume label, and are told apart on the far side by `sc_awaited`. Drawing
+    // it twice would give the arms two labels and leave the join reachable from
+    // only one of them; drawing it zero times would collide two points on one
+    // state, which nothing downstream would catch.
+    const index = this.coroDrawState(fn, "awaitUnionExpr", loc, "union suspension");
 
     // HOISTED -- see the header. One index, two sites, one spill.
     this.emitCoroTempSpill(index);
@@ -5625,8 +5665,37 @@ class LlEmitter {
     const coro = this.coroLoweredByFn.get(fn.name) ?? null;
     this.currentCoro = coro;
     this.currentCoroLayout = null;
-    this.coroStatesDrawn = 0;
+    this.coroStates = [];
+    this.coroPointByKey.clear();
     if (coro !== null) {
+      // THE ANALYSIS'S TABLE, INDEXED BY KIND AND POSITION, built before the
+      // walk so every draw site can seat itself. A DUPLICATE IS FAILED RATHER
+      // THAN SERVED: `SuspensionPoint.loc` carries a zero fallback for a node
+      // the frontend gave no position, and two of one kind would collide into
+      // one key -- one point would then be served twice and the other never,
+      // which inclusion I2 below would report as a missing point with no hint
+      // as to why.
+      //
+      // IT HAS ALREADY FIRED, which is why the kind is in the key. `pu`
+      // (`async function pu(n) { return n > 0 ? n : null; }`) plans an
+      // `awaitExpr` AND a `libCall:async.hop` at one source range, both
+      // synthesized from the return it desugars from. A position-only key
+      // collided them and this threw; the survey that had said positions were
+      // unique asked with the kind included, so the instrument had measured a
+      // different key from the one the code used.
+      coro.points.forEach((pt, i) => {
+        const key = coroPointKey(pt.kind, pt.loc);
+        const prev = this.coroPointByKey.get(key);
+        if (prev !== undefined) {
+          throw new Error(
+            `llvm emitter bug: ${fn.name} plans suspension points ${prev} and ${i}, both ` +
+              `${pt.kind} at ${pt.loc.file}:${pt.loc.start}-${pt.loc.end}. A state is seated at ` +
+              `its point BY kind and position, so the two cannot be told apart and one of them ` +
+              `would take both states.`,
+          );
+        }
+        this.coroPointByKey.set(key, i);
+      });
       this.currentCoroLayout = coroFrameLayout(
         fn,
         coro,
@@ -5913,33 +5982,72 @@ class LlEmitter {
         );
       }
       const bounds = B.boundaries();
-      if (bounds !== this.coroStatesDrawn) {
+      if (bounds !== this.coroStates.length) {
         throw new Error(
           `llvm emitter bug: ${fn.name} took ${bounds} suspension boundary/ies but drew ` +
-            `${this.coroStatesDrawn} state(s). A park that draws a state without calling ` +
+            `${this.coroStates.length} state(s). A park that draws a state without calling ` +
             `parkBoundary() leaves the cross-park temp invariant inert; a boundary with no ` +
             `state leaves the dispatch without a case for a label the body emitted.`,
         );
       }
-      if (this.coroStatesDrawn !== coro.points.length) {
-        // THE UNDER DIRECTION TOO, and it is the same event. A finally body is
-        // copied once per completion path, so a path the emitter does not reach
-        // leaves a planned point with no state exactly as an extra path leaves a
-        // state with no point. The per-site guards above catch only the over
-        // direction; this is where the under one lands, and it must classify the
-        // same way or a shape would crash the build here after being refused
-        // cleanly one line up.
-        if (suspensionInsideFinally(fn)) {
-          throw new CoroRefusedError(
-            fn.name,
-            `finally-body-copied-past-its-state=${this.coroStatesDrawn}!=${coro.points.length}`,
+      /* D5, WHICH IS NOW TWO INCLUSIONS INSTEAD OF AN EQUALITY.
+       *
+       * It used to read `statesDrawn === coro.points.length`: one point, one
+       * state, pinned in both directions. A `finally` body is emitted once per
+       * completion path, so a point inside one yields several states and that
+       * equality CANNOT hold.
+       *
+       * WHAT WAS SOLD, stated here and not in a side document: the pair below
+       * cannot distinguish three copies of a point from four. MULTIPLICITY IS
+       * NO LONGER PINNED by this invariant. That is a permanent reduction in
+       * verification strength, taken deliberately with the cost known; what
+       * buys it back is the countable site invariant immediately below, which
+       * reads the suspension CALLS back out of the rendered text, and the
+       * harness's own value and turn comparison over the finally wrappers.
+       *
+       * WHY BOTH, and why neither alone: I2 alone admits a plan point nothing
+       * ever emitted -- a frame laid out for a suspension the body does not
+       * contain, and on a `finally` body that is exactly a completion path the
+       * emitter failed to write. I1 alone admits a state sited at no point.
+       *
+       * AND WHY THIS IS NOT THE EMITTER CHECKING ITSELF: both are evaluated
+       * against `coro.points`, which the ANALYSIS produces and which knows
+       * nothing about how many times a body is emitted. The emitter supplies
+       * only `coroStates`. Neither side of either inclusion is a number this
+       * file made up and then verified. */
+      // I1, ARTIFACT -> ANALYSIS: every allocated state is sited at a plan
+      // point. coroDrawState can only seat a state at a point it found in the
+      // map, so this re-states the property over the FINISHED table rather
+      // than trusting that one site got it right on every copy.
+      for (let st = 0; st < this.coroStates.length; st++) {
+        const pt = this.coroStates[st]!;
+        if (pt < 0 || pt >= coro.points.length) {
+          throw new Error(
+            `llvm emitter bug: ${fn.name} state ${st} claims plan point ${pt}, but the plan ` +
+              `holds ${coro.points.length} point(s). A state was allocated for a suspension the ` +
+              `analysis never planned.`,
           );
         }
-        throw new Error(
-          `llvm emitter bug: ${fn.name} drew ${this.coroStatesDrawn} state(s) but the plan ` +
-            `holds ${coro.points.length} suspension point(s). The dispatch and the body ` +
-            `disagree about how many ways this function can resume.`,
-        );
+      }
+      // I2, ANALYSIS -> ARTIFACT: every plan point was emitted at least once.
+      const served = new Set(this.coroStates);
+      for (let pt = 0; pt < coro.points.length; pt++) {
+        if (!served.has(pt)) {
+          throw new Error(
+            `llvm emitter bug: ${fn.name} planned ${coro.points.length} suspension point(s) but ` +
+              `emitted no state for point ${pt} (${coro.points[pt]!.kind} at ` +
+              `${coro.points[pt]!.loc.file}:${coro.points[pt]!.loc.start}). The frame carries that ` +
+              `point's live set and the body never suspends there.`,
+          );
+        }
+      }
+      // NOW the dispatch can be closed, because the state count exists. One
+      // case per EMITTED state -- not per plan point, which is the number this
+      // slice stopped the two from sharing.
+      {
+        const arms: [number, string][] = [[0, "sc_S0"]];
+        for (let i = 0; i < this.coroStates.length; i++) arms.push([i + 1, coroLabel(i)]);
+        B.finishDispatch(this.coroDispatchValue, this.coroDispatchDefault, arms);
       }
       const body = B.render();
       /* THE SECOND COUNTABLE INVARIANT, over what was EMITTED rather than what
@@ -5949,16 +6057,27 @@ class LlEmitter {
        * correct, the turn count wrong, and nothing downstream able to say so.
        *
        * `unionPoints` IS NO LONGER ZERO, and where it comes from is the whole
-       * point of it. It is counted off `coro.points` -- the ANALYSIS -- and not
-       * off anything this emitter tallied while emitting. A counter incremented
-       * beside the two-armed emission would agree with that emission by
-       * construction and could only report that the emitter did what the
-       * emitter did; `parks + hops` is read back out of the RENDERED text on
-       * the other side of the equation, so the two sides have independent
-       * provenance. This is the same rule D5 above follows for
-       * `coro.points.length`. */
-      const unionPoints = coro.points.filter((p) => p.kind === "awaitUnionExpr").length;
-      coroCheckSuspensionSites(fn.name, body, this.coroStatesDrawn, unionPoints);
+       * point of it. The KIND is read off `coro.points` -- the ANALYSIS -- and
+       * not off anything this emitter tallied while emitting. A counter
+       * incremented beside the two-armed emission would agree with that
+       * emission by construction and could only report that the emitter did
+       * what the emitter did; `parks + hops` is read back out of the RENDERED
+       * text on the other side of the equation, so the two sides have
+       * independent provenance.
+       *
+       * IT IS COUNTED PER STATE AND NOT PER POINT, which is the half this
+       * slice had to move. A two-armed point inside a `finally` body is
+       * emitted once per completion path, and EVERY copy emits both arms -- a
+       * park and a hop -- against its own state. Counting the KINDS in the
+       * plan would say "one union" for a point emitted three times and the
+       * arithmetic would come out two calls short, with the fix on offer being
+       * to loosen the invariant. Mapping each state through `coro.states ->
+       * coro.points` keeps the kind's provenance in the analysis while the
+       * MULTIPLICITY comes from the table the artifact built. */
+      const unionPoints = this.coroStates.filter(
+        (pt) => coro.points[pt]!.kind === "awaitUnionExpr",
+      ).length;
+      coroCheckSuspensionSites(fn.name, body, this.coroStates.length, unionPoints);
       // Recorded only now, after the body emitted CLEAN. A pass that threw
       // left no define and must leave no layout either, or a later refusal
       // would print a struct for a function that went back to the fiber lane.
@@ -9285,7 +9404,7 @@ class LlEmitter {
           // scr_ready_push per await on exactly one of its two arms -- the
           // invariant is countable by grepping the emitted TU.
           const pr0 = this.emitExpr(e.value);
-          const out0 = this.emitCoroAwait(this.fnByName.get(this.currentFnName)!, pr0, e.type);
+          const out0 = this.emitCoroAwait(this.fnByName.get(this.currentFnName)!, e.loc, pr0, e.type);
           this.emitPendingCheck();
           return out0;
         }
@@ -9341,7 +9460,7 @@ class LlEmitter {
           // and share a resume label, told apart on the far side by
           // `sc_awaited`. The pending check runs after the join, as it does on
           // the fiber arm below and in emit-exprs.ts's stackless shape.
-          const out0 = this.emitCoroUnionAwait(e.type, def, inner, u, isP);
+          const out0 = this.emitCoroUnionAwait(e.type, e.loc, def, inner, u, isP);
           this.emitPendingCheck();
           return out0;
         }
@@ -14541,7 +14660,7 @@ class LlEmitter {
      * still needs the event loop alive, and the C lane sets `usesTimers` on its
      * stackless arm for the same reason. */
     if (e.fn === "async.hop" && this.currentCoro !== null) {
-      this.emitCoroHop(this.fnByName.get(this.currentFnName)!);
+      this.emitCoroHop(this.fnByName.get(this.currentFnName)!, e.loc);
       return { name: "", type: e.type };
     }
     // The handful with non-generic shapes first.

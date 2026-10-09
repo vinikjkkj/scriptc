@@ -362,6 +362,14 @@ export class BlockBuilder {
    * re-initialisation reaching it. A slot removed from here with no frame
    * reload emitted is exactly what that oracle reports. */
   private readonly frameBacked = new Set<string>();
+  /** THE ENTRY BLOCK, HELD OPEN UNTIL THE BODY HAS BEEN EMITTED.
+   *
+   * How many states a resume body emits is not known until the walk is over:
+   * a `finally` body is written once per completion path, so one plan point
+   * becomes several states and several resume labels. The dispatch switch
+   * therefore cannot be written where it stands. Null outside a coroutine
+   * body and between `finishDispatch` and the next `deferDispatch`. */
+  private dispatchBlock: { label: string; lines: string[]; term: string | null } | null = null;
 
   constructor() {
     this.cur = { label: "entry", lines: [], term: null };
@@ -744,7 +752,80 @@ export class BlockBuilder {
     this.terminate(`switch i32 ${value}, label %${dflt} [ ${cases} ]`);
   }
 
+  /** HOLD THE CURRENT BLOCK OPEN: its terminator is written by
+   * `finishDispatch` once the body has been walked. The cursor moves on
+   * immediately -- `startBlock` is the next call -- so nothing else is
+   * appended here; the block object is kept so its terminator can be filled
+   * in last.
+   *
+   * The C lane remembers a LINE INDEX and splices the switch into the buffer
+   * afterwards. Keeping the block is the same trick one level up: there are no
+   * indices to invalidate when a later block is appended. */
+  deferDispatch(): void {
+    if (this.cur.term !== null) {
+      throw new Error(
+        "llvm emitter bug: deferDispatch on a block that is already terminated -- the dispatch " +
+          "would be written into a block the body cannot fall out of.",
+      );
+    }
+    if (this.dispatchBlock !== null) {
+      throw new Error("llvm emitter bug: a dispatch is already deferred for this body");
+    }
+    this.dispatchBlock = this.cur;
+  }
+
+  /** Write the deferred dispatch terminator. `arms` is [state, label] in case
+   * order; `dflt` is the label an out-of-range state takes.
+   *
+   * NO RENAME, NO PROMOTION AND NO CROSS-PARK CHECK, AND THAT IS ASSERTED
+   * RATHER THAN ASSUMED. All three rewrites are generation-sensitive, and by
+   * the time this runs the generation has advanced once per suspension --
+   * so running them here would judge this terminator in a generation it was
+   * not written in, and `applyPromotion` would push its loads into whatever
+   * block the cursor happens to be sitting on. What makes skipping them sound
+   * is a property of the dispatch and not of this method: its only value is
+   * loaded in the entry block and consumed by this terminator, BEFORE any
+   * boundary, and the arms carry labels and integers and no values at all.
+   * Each half of that is checked below, so a later change that moves the state
+   * load after a park fails here instead of silently emitting a stale name. */
+  finishDispatch(value: string, dflt: string, arms: ReadonlyArray<[number, string]>): void {
+    const b = this.dispatchBlock;
+    if (b === null) {
+      throw new Error("llvm emitter bug: finishDispatch with no deferred dispatch block");
+    }
+    if (b.term !== null) {
+      throw new Error("llvm emitter bug: the deferred dispatch block was terminated behind its back");
+    }
+    const gen = this.genOfTemp(value);
+    if (gen !== 0) {
+      throw new Error(
+        `llvm emitter bug: the dispatch reads ${value}, minted in generation ${gen ?? "none"}. ` +
+          `The dispatch value must be loaded in the entry block, before any suspension boundary: ` +
+          `a value from a later generation is one this terminator would name under a spelling the ` +
+          `rename map has already replaced.`,
+      );
+    }
+    const pre: string[] = [];
+    if (this.applyRename(value) !== value || this.applyPromotion(value, pre) !== value || pre.length !== 0) {
+      throw new Error(
+        `llvm emitter bug: the dispatch value ${value} is carried across a suspension (renamed or ` +
+          `promoted). Nothing may carry it: it is loaded and switched on in the entry block.`,
+      );
+    }
+    const cases = arms.map(([v, l]) => `i32 ${v}, label %${l}`).join(" ");
+    b.term = `  switch i32 ${value}, label %${dflt} [ ${cases} ]`;
+    this.dispatchBlock = null;
+  }
+
   render(): string {
+    // A body rendered with its dispatch still open would print `unreachable`
+    // where the switch belongs: every resume label unreachable, the entry path
+    // the only one left, and a program that answers correctly on its first
+    // turn and never resumes. Nothing downstream can see that -- the module
+    // verifies, it links, and it deadlocks.
+    if (this.dispatchBlock !== null) {
+      throw new Error("llvm emitter bug: rendered a resume body whose dispatch was never finished");
+    }
     return this.blocks
       .map((b, i) => {
         const lines = i === 0 ? [...this.entryAllocas.map((l) => `  ${l}`), ...b.lines] : b.lines;

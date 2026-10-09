@@ -46,7 +46,7 @@
  * resume block is reachable only from the dispatch. blocks.ts carries the
  * invariant that fails the BUILD on exactly that, and the admission below keeps
  * out the shapes that would trip it rather than lowering them wrong. */
-import type { IrFunction, IrLocal, IrStmt, IrType } from "../../ir/nodes.js";
+import type { IrFunction, IrLocal, IrStmt, IrType, SrcLoc } from "../../ir/nodes.js";
 import { isRefCounted } from "../../ir/nodes.js";
 import type { StacklessPlan } from "../../ir/liveness.js";
 import {
@@ -88,6 +88,40 @@ export class CoroRefusedError extends Error {
  * either lane reads the same way. */
 export function coroLabel(i: number): string {
   return `sc_S${i + 1}`;
+}
+
+/** THE KEY A STATE IS SITED BY: what suspends, and where in the source it is.
+ *
+ * A plan point is identified here by ITS POSITION and not by how far a cursor
+ * has walked, and that is forced by this lane's `finally` geometry rather than
+ * chosen for elegance. The C lane keeps a plan cursor and rewinds it before
+ * each copy of a finally body, which works because every copy is emitted AT
+ * the region, in plan order, behind a goto. This lane emits the copy a
+ * `return` needs INLINE at the return site -- reached before the walk has got
+ * anywhere near the finally -- so emission order is not plan order, and a
+ * cursor hands the finally's suspension whichever point the walk happens to be
+ * standing on. Measured on a probe carrying a suspension on both sides of the
+ * return.
+ *
+ * THE KIND IS IN THE KEY BECAUSE A POSITION IS NOT AN IDENTITY, and that is
+ * measured rather than defensive. `pu` -- `async function pu(n) { return n > 0
+ * ? n : null; }` -- plans TWO points at one source range: an `awaitExpr` and a
+ * `libCall:async.hop`, both synthesized at the return it desugars from. A
+ * position-only key collided them, and the build said so. The first survey
+ * that said positions were unique had asked with the kind included: the
+ * instrument measured a different key from the one the code would use, which
+ * is the whole reason the duplicate check below exists rather than a comment
+ * asserting uniqueness.
+ *
+ * UNIQUENESS IS STILL A PROPERTY OF THE INPUT, SO IT IS STILL CHECKED.
+ * `SuspensionPoint.loc` carries a zero fallback for a node the frontend gave
+ * no position, and two of the same kind would collide into one key.
+ * emitFunctionBody builds the map and fails the build on a duplicate rather
+ * than silently serving one point twice. Measured over (kind, position) across
+ * the 81 planned functions of the value fixture and the eight of the finally
+ * probe: no duplicate and no zero position. */
+export function coroPointKey(kind: string, loc: SrcLoc): string {
+  return `${kind}\u0000${loc.file}\u0000${loc.start}\u0000${loc.end}`;
 }
 
 /** `state` is field 3 of `%ScrCoroBase = type { ptr, ptr, ptr, i32, i32, i64 }`
@@ -134,87 +168,32 @@ export function coroNeedsExcCell(fn: IrFunction): boolean {
   return found;
 }
 
-/** True when some SUSPENSION sits inside a `finallyBody`, at any depth.
+/* `suspensionInsideFinally` STOOD HERE AND IS GONE, deleted rather than left
+ * exported with no reader.
  *
- * A CLASSIFIER NOW, NOT A REFUSAL, and the demotion is the finding rather than
- * a tidy-up. This used to be condition 4: no function holding a suspension
- * inside a finally body was lowered at all. The hazard it named is real -- a
- * `return` crossing a finally snapshots its value into `%pretSlot`
- * (emitter.ts's return case) and reads it back after the finally copies have
- * run; that slot is `alloca` memory of the RESUME CALL, so a suspension
- * between the write and the read reads garbage, silently, with the verifier
- * happy because the slot is dominance-legal.
+ * ITS LAST JOB WAS TO CLASSIFY AN OVERFLOW THAT CAN NO LONGER HAPPEN. It began
+ * as condition 4 -- no function holding a suspension inside a `finally` body
+ * was lowered at all -- was demoted to the classifier that told a
+ * `finally-body-copied-past-its-state` refusal apart from the emitter bug the
+ * same overflow is for every other function, and is now unemployed: states are
+ * drawn PER EMITTED SITE, so a body written once per completion path takes one
+ * state per copy and nothing overflows. See emitter.ts's coroDrawState.
  *
- * BUT THE WALK WAS WIDER THAN THE HAZARD. A finally body with no `return`
- * crossing it mints no slot at all. Measured: `wfy6` is exactly that shape,
- * lowers correctly, and was the only wrapper this condition ever refused -- so
- * the ledger row filed under the condition was not an example of it, and no
- * test could report the gap.
+ * IT IS DELETED AND NOT KEPT FOR LATER because an exported structural walk no
+ * caller reads is a counter reading zero mechanically, and this file has
+ * already paid for one of those. Re-deriving it is twenty lines; carrying it
+ * dead costs a reader on every pass and reads as a live guard.
  *
- * WHAT ACTUALLY BREAKS is a finally body the emitter writes MORE THAN ONCE:
- * one copy per completion path, each drawing its own state out of a plan that
- * allotted the IR node one. That is counted at emission (coroStateOverflow),
- * and this walk is what tells that refusal apart from the emitter bug the same
- * overflow is for every other function.
- *
- * AND `%pretSlot` KEEPS ITS OWN GUARD either way: it comes from `B.slot()`, so
- * blocks.ts's cross-park SLOT rule sees any read after a park that did not
- * re-write it, and either carries it in the frame or refuses. The narrowing
- * does not rest on the copy count being the only hazard.
- *
- * A suspension in a try or catch body is fine and stays admitted: the snapshot
- * happens after the resume on every path, so nothing crosses. Only one INSIDE
- * the finally body inverts that order.
- *
- * THE HOP COUNTS, AND IT DID NOT USED TO. This read `awaitExpr ||
- * awaitUnionExpr` while the hop was unlowerable, which made it correct by
- * accident: a function carrying one was refused by KIND before this was ever
- * consulted. Admitting the hop voids that argument -- "a hop is a park", and
- * `%pretSlot` cannot tell them apart, because what breaks the slot is the
- * RETURN TO THE SCHEDULER and both do that. Widening the predicate without
- * widening this would have opened a silent wrong answer in the one position
- * whose defect no invariant on this lane can see. The precondition that made
- * the narrow spelling safe was owned somewhere else, and it was retired by the
- * same edit that needed it. */
-export function suspensionInsideFinally(fn: IrFunction): boolean {
-  let found = false;
-  const hasSuspension = (v: unknown): boolean => {
-    if (v === null || typeof v !== "object") return false;
-    if (Array.isArray(v)) return v.some(hasSuspension);
-    const rec = v as Record<string, unknown>;
-    if (rec["kind"] === "awaitExpr" || rec["kind"] === "awaitUnionExpr") return true;
-    // The hop is not a node kind -- it is an ordinary-looking libCall -- which
-    // is exactly why a walk keyed on node kinds could not see it. Asked against
-    // the authoritative list in ir/suspends.ts rather than a remembered name.
-    if (rec["kind"] === "libCall" && typeof rec["fn"] === "string"
-        && LLVM_LOWERABLE_LIB_CALLS.has(rec["fn"])) {
-      return true;
-    }
-    for (const k in rec) {
-      if (k === "loc" || k === "type") continue;
-      if (hasSuspension(rec[k])) return true;
-    }
-    return false;
-  };
-  const walk = (v: unknown): void => {
-    if (found || v === null || typeof v !== "object") return;
-    if (Array.isArray(v)) {
-      for (const x of v) walk(x);
-      return;
-    }
-    const rec = v as Record<string, unknown>;
-    if (rec["kind"] === "tryCatch" && rec["finallyBody"] != null && hasSuspension(rec["finallyBody"])) {
-      found = true;
-      return;
-    }
-    for (const k in rec) {
-      if (k === "loc" || k === "type") continue;
-      walk(rec[k]);
-    }
-  };
-  walk(fn.body);
-  return found;
-}
+ * THE HAZARD IT NAMED IS STILL GUARDED, by the mechanism that always actually
+ * held it: `%pretSlot` comes from `B.slot()`, so it is a registered
+ * resume-call-private slot and blocks.ts's cross-park SLOT rule sees a read
+ * after a park that did not re-write it -- carrying it in the frame or
+ * refusing the function. That is no longer an argument on paper: `wfy7`
+ * returns a refcounted value THROUGH a suspending finally, lowers, and its
+ * artifact carries `%s12 = alloca ptr ; pending return (through finally)`
+ * through the coroutine frame. */
+
+/** The locals the frame carries:}
 
 /** The locals the frame carries: everything live across a suspension, plus
  * every parameter (the resume function has no parameters of its own, so a param
@@ -497,10 +476,14 @@ const POINT_KINDS_WITHOUT_AN_OPERAND: ReadonlySet<string> = new Set<SuspensionPo
 
 /** The suspending libCalls this backend lowers, DERIVED from the list above by
  * asking which of the stackless-lowerable ones has a point kind on the admitted
- * side. Not a second list: `suspensionInsideFinally` walks raw IR, where a hop
- * is a `libCall` node with an `fn` string and no point kind attached, so it
+ * side. Not a second list: `assertBareSuspendingLibCalls` walks raw IR, where a
+ * hop is a `libCall` node with an `fn` string and no point kind attached, so it
  * needs the question in that vocabulary -- and deriving it means admitting a
- * new libCall point kind cannot leave this walk blind to it. */
+ * new libCall point kind cannot leave that walk blind to it.
+ *
+ * IT HAD TWO READERS AND HAS ONE. `suspensionInsideFinally` was the other; it
+ * was deleted when states stopped being drawn per plan point. The derivation
+ * is kept for the reader that remains, and for the same reason. */
 const LLVM_LOWERABLE_LIB_CALLS: ReadonlySet<string> = new Set(
   STACKLESS_LOWERABLE_LIB_CALL_LIST.filter((f) => LLVM_LOWERABLE_POINT_KINDS.has(libCallPointKind(f))),
 );
@@ -853,40 +836,39 @@ export function coroRefusalReason(fn: IrFunction, plan: StacklessPlan): string |
   if (plan.points.some((pt) => POINT_KINDS_WITHOUT_AN_OPERAND.has(pt.kind))) {
     assertBareSuspendingLibCalls(fn);
   }
-  // CONDITION 4 NO LONGER REFUSES HERE, and what replaced it is a
-  // MEASUREMENT instead of a prediction. The blanket structural refusal was
-  // wider than the hazard it was named for: it keeps out every suspension
-  // inside a finally body, while what actually breaks is a finally body the
-  // emitter writes MORE THAN ONCE -- one copy per completion path, each
-  // drawing its own state out of a plan that allotted one.
+  // CONDITION 4 IS GONE IN BOTH OF ITS FORMS, and the second removal is the
+  // one this comment is for.
   //
-  // MEASURED, and the distinction is not academic: `wfy6`
-  // (`try { s = 1; } finally { s = s + await pf(n); }`) has no `return`
-  // crossing the finally and a try body that cannot throw, so the emitter
-  // writes its finally ONCE, draws one state, and lowers correctly. The
-  // wrapper this condition was filed under could not exercise the condition.
-  // A probe that does -- a refcounted `return` crossing a suspending finally
-  // -- was built and DOES fail, with exactly the overflow described above.
+  // IT WAS A BLANKET STRUCTURAL REFUSAL FIRST: no suspension anywhere inside a
+  // `finally` body. That was wider than the hazard it named. The hazard is a
+  // `return` crossing the region, which snapshots its value into `%pretSlot`
+  // -- and `wfy6` (`try { s = 1; } finally { s = s + await pf(n); }`) has no
+  // such return, mints no slot, is written ONCE, and lowers correctly. The
+  // only wrapper filed under the condition was not an example of it, so no
+  // test could report the gap.
   //
-  // SO THE VERDICT MOVED TO WHERE THE COPIES ARE COUNTED. emitCoroAwait,
-  // emitCoroHop and the awaitUnion site all bound the state they draw
-  // against the plan, and emitFunctionBody re-checks the total; a function
-  // holding a suspension inside a finally body that trips any of them is
-  // refused as `finally-body-copied-past-its-state` and keeps its fiber
-  // lowering. That is a count of what was EMITTED, so it cannot drift from
-  // the emitter the way a second structural walk over the same IR would.
+  // IT WAS THEN A COUNT AT EMISSION: the three draw sites bounded the state
+  // they drew against `plan.points.length` and refused
+  // `finally-body-copied-past-its-state` when a body written more than once
+  // ran past it. That was honest about WHERE the copies are -- in the emitter,
+  // not in the IR -- but it still refused a multiplicity the dispatch can
+  // simply carry. `wfy7` (`try { return "w" + n; } finally { fobs = fobs +
+  // await pf(n); }`) is the row that was written to exercise it, and it is the
+  // row that bought the removal.
   //
-  // `suspensionInsideFinally` IS STILL EXPORTED AND STILL USED -- as the
-  // CLASSIFIER for that overflow, not as a refusal. The overflow guards are
-  // emitter-bug assertions for every other function and must stay loud; this
-  // walk is what tells the two events apart.
+  // WHAT REPLACED IT IS A STATE PER EMITTED SITE. A `finally` body copied on
+  // three completion paths takes three states, three resume labels and three
+  // dispatch cases; the one-state-per-point EQUALITY became the two inclusions
+  // at the end of emitFunctionBody, exactly as it did on the C lane. Nothing
+  // structural about `finally` is asked here any more, which is why the walk
+  // that used to ask it is deleted above rather than kept.
   //
-  // THE %pretSlot HAZARD IS NOT LEFT UNGUARDED BY THE MOVE. It has its own,
-  // general detector: `%pretSlot` is minted through `B.slot()`, so it is a
-  // registered resume-call-private slot and blocks.ts's cross-park SLOT rule
-  // sees a read after a park that did not re-write it. That rule either
-  // carries the slot in the frame or refuses the function. Two independent
-  // guards, and neither rests on the other being right.
+  // THE %pretSlot HAZARD IS NOT LEFT UNGUARDED BY EITHER REMOVAL, and it is no
+  // longer an argument on paper. `%pretSlot` is minted through `B.slot()`, so
+  // it is a registered resume-call-private slot and blocks.ts's cross-park
+  // SLOT rule sees a read after a park that did not re-write it -- carrying it
+  // in the frame or refusing the function. `wfy7` is that geometry and its
+  // artifact carries the slot through the frame.
   return null;
 }
 

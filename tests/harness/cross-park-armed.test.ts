@@ -223,6 +223,11 @@ describe("the cross-park temp detector is armed", () => {
   });
 
   test("the switch terminator spells a dispatch the assembler accepts", () => {
+    // THE EAGER SPELLING, which no resume body uses any more -- the emitter
+    // defers its dispatch (see the three tests below). It is still the one
+    // place the switch TEXT is pinned, and the deferred path is asserted to
+    // produce the same text, so this stays rather than becoming a spelling
+    // test for a method production stopped calling.
     const B = new BlockBuilder();
     B.switchTerm("%st", "sc_dispatch_bad", [
       [0, "sc_S0"],
@@ -233,5 +238,80 @@ describe("the cross-park temp detector is armed", () => {
     expect(B.render()).toContain(
       "switch i32 %st, label %sc_dispatch_bad [ i32 0, label %sc_S0 i32 1, label %sc_S1 ]",
     );
+  });
+
+  /* THE DEFERRED DISPATCH -- what a resume body actually emits.
+   *
+   * The entry block is held open while the body is walked, because how many
+   * states the body emits is not known until it HAS been walked: a `finally`
+   * body is written once per completion path, so one plan point becomes
+   * several states and several resume labels. These three drive BlockBuilder
+   * directly, with no compiler and no toolchain, for the same reason the rest
+   * of this file does -- a mechanism that exists to catch something else needs
+   * a companion proving it still works. */
+  test("the DEFERRED dispatch lands in the ENTRY block with the same spelling", () => {
+    const B = new BlockBuilder();
+    B.enterCoro("f");
+    const st = B.tmp();
+    B.line(`${st} = load i32, ptr %sc_b`);
+    B.deferDispatch();
+    B.startBlock("sc_dispatch_bad");
+    B.terminate("unreachable");
+    B.startBlock("sc_S0");
+    B.terminate("ret void");
+    // TWO resume labels, which is the case the eager form could not serve:
+    // the arm count is known only here, after the body.
+    B.startBlock("sc_S1");
+    B.parkBoundary();
+    B.terminate("ret void");
+    B.startBlock("sc_S2");
+    B.parkBoundary();
+    B.terminate("ret void");
+    B.finishDispatch(st, "sc_dispatch_bad", [
+      [0, "sc_S0"],
+      [1, "sc_S1"],
+      [2, "sc_S2"],
+    ]);
+    const out = B.render();
+    expect(out).toContain(
+      `switch i32 ${st}, label %sc_dispatch_bad [ i32 0, label %sc_S0 i32 1, label %sc_S1 i32 2, label %sc_S2 ]`,
+    );
+    // IN THE ENTRY BLOCK, not appended at the end: the terminator has to close
+    // the block the state was loaded in, or the resume labels are unreachable.
+    const entry = out.slice(0, out.indexOf("sc_dispatch_bad:"));
+    expect(entry).toContain("switch i32 ");
+  });
+
+  test("a resume body whose dispatch was never finished does not render", () => {
+    // The failure this forbids is silent downstream: the entry block would
+    // print `unreachable` where the switch belongs, every resume label would
+    // be unreachable, and the module would still verify, link and run --
+    // answering correctly on its first turn and never resuming.
+    const B = new BlockBuilder();
+    B.enterCoro("f");
+    const st = B.tmp();
+    B.line(`${st} = load i32, ptr %sc_b`);
+    B.deferDispatch();
+    B.startBlock("sc_S0");
+    B.terminate("ret void");
+    expect(() => B.render()).toThrow(/dispatch was never finished/);
+  });
+
+  test("the dispatch value may not be minted after a boundary", () => {
+    // finishDispatch runs after the walk, when the rename and promotion maps
+    // have moved on, so it applies none of them -- and that is sound only
+    // because the value it switches on is loaded in the entry block, in
+    // generation 0. This is the check that keeps it sound.
+    const B = new BlockBuilder();
+    B.enterCoro("f");
+    const early = B.tmp();
+    B.line(`${early} = load i32, ptr %sc_b`);
+    B.deferDispatch();
+    B.startBlock("sc_S1");
+    B.parkBoundary();
+    const late = B.tmp();
+    B.line(`${late} = load i32, ptr %sc_b`);
+    expect(() => B.finishDispatch(late, "sc_dispatch_bad", [[0, "sc_S0"]]))
+      .toThrow(/generation 1/);
   });
 });

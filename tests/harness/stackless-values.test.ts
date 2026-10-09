@@ -368,9 +368,11 @@ const WRAPPERS: ReadonlyArray<{ name: string; take: string; finish: string; conv
   // .test.ts, which guards the three paths and the multiplicity this file
   // only has to notice.
   { name: "wfy6", take: "f64", finish: "f64", converted: true },
-  // The multi-copy half of shape (1); see its definition in SOURCE. It is on
-  // the C lane's ledger and OFF the LLVM floor, which is the partition
-  // working as written rather than an exception to it.
+  // The multi-copy half of shape (1); see its definition in SOURCE. It was the
+  // last wrapper on the C lane's ledger and OFF the LLVM floor, and it is on
+  // both now: the LLVM lane draws a state per EMITTED site, so the two copies
+  // of its finally body take a state each instead of overflowing a plan that
+  // allotted the IR node one.
   { name: "wfy7", take: "f64", finish: "ref", converted: true },
   // THE FOUR STATEMENT POSITIONS, as one slice because they are DISJOINT: no
   // remaining function in the measured program carries two of them, so their
@@ -1009,13 +1011,23 @@ const LLVM_FLOOR: ReadonlySet<string> = new Set([
   // them, which is what that table's own instruction asks for.
   "wlfo", "wfo1", "wfo2", "wfo3", "wfo4", "wfo5",
   "wfy5", "wfy1", "wfy2", "wfy3", "wfy4",
-  // + shape (1) with a SINGLE finally copy. The blanket structural refusal
-  // this moved out of was wider than its own hazard: it named `%pretSlot`,
-  // and `wfy6` mints none -- it has no `return` crossing the finally, so the
-  // emitter writes that body once, draws one state, and the two lanes agree
-  // on the value. The wrapper filed under the condition could not exercise
-  // it. `wfy7` is the row that does, and it stays refused.
-  "wfy6",
+  // + SHAPE (1), BOTH HALVES, and they arrived one slice apart for reasons
+  // worth keeping side by side.
+  //
+  // `wfy6` has no `return` crossing its finally and a try body that cannot
+  // throw, so the emitter writes that body ONCE. It came in when the blanket
+  // structural refusal was deleted -- the refusal named `%pretSlot` and `wfy6`
+  // mints none, so the wrapper filed under the condition could not exercise
+  // it.
+  //
+  // `wfy7` returns a refcounted value THROUGH its finally, so the body is
+  // written again at the return site: one IR suspension node, two emitted park
+  // sites. It came in when the emitter stopped allotting states per PLAN POINT
+  // and started allotting one per EMITTED SITE -- the one-state-per-point
+  // equality became the two inclusions the C lane already carries. Its
+  // artifact shows the mechanism directly: two resume labels and two dispatch
+  // cases for a plan holding one point, with `%pretSlot` riding the frame.
+  "wfy6", "wfy7",
   "wif", "wsd", "wsu",
   // THE MULTI-STATE DISPATCH. More than one suspension point is a second
   // state, a second resume block and a second spill site. `who` parks twice in
@@ -1065,8 +1077,12 @@ const LLVM_FLOOR: ReadonlySet<string> = new Set([
   //
   // WHAT THEY EXERCISE, counted rather than assumed: each holds ONE temp
   // across TWO suspensions -- the awaitUnion's park arm and the following
-  // microtask hop. That is the whole of what this lane exercises today; see
-  // the group below for the shape that would exercise three and what stops it.
+  // microtask hop. That is the whole of what this lane exercises today. This
+  // used to point at a group below for the shape exercising THREE and what
+  // stopped it; that group is gone and the list below is empty, so the
+  // unexercised depth is now recorded here and nowhere else -- no wrapper in
+  // this ledger carries a temp across three suspensions, and nothing refuses
+  // one either. It is uncovered, not blocked.
   "wau", "was",
 ]);
 
@@ -1084,7 +1100,10 @@ const LLVM_FLOOR: ReadonlySet<string> = new Set([
  * WHY GROUPED BY CAUSE instead of one flat set. A bucket forces a new entry to
  * be CLASSIFIED, so the list stays a worklist rather than a quarantine: each
  * group names the mechanism a later slice has to build, and the biggest group
- * is the next slice's subject. The reasons are the emitter's own words --
+ * is the next slice's subject. It currently holds NO group, so there is no
+ * next subject here -- that is the list doing its job, not the list being
+ * obsolete, and the paragraph below says what keeps it honest while empty.
+ * The reasons are the emitter's own words --
  * build anything with SCRIPTC_LLVM_CORO_CENSUS=1 AND SCRIPTC_NO_CACHE=1 to
  * print one line per planned function with its verdict, which is how this list
  * was produced and how it should be re-derived rather than hand-edited.
@@ -1095,38 +1114,40 @@ const LLVM_FLOOR: ReadonlySet<string> = new Set([
  * is itself in the cache key, so the first run with it set reports and every
  * run after is served the previous answer in silence.
  *
- * THESE ARE NOT PERMANENT. Every name here is a shape the C lane already
- * converts, so each group is work that exists rather than a limit that was
- * discovered. */
+ * NOTHING HERE WAS EVER PERMANENT, and the list emptying is the proof. Every
+ * name that passed through it was a shape the C lane already converted, so
+ * each group was work that existed rather than a limit that had been
+ * discovered -- and every one of them has now been done. A name arriving here
+ * again is a regression or a newly admitted shape, never a verdict. */
 const NOT_LOWERED_BY_REASON: ReadonlyArray<readonly [string, readonly string[]]> = [
-  // A `finally` BODY THE EMITTER WRITES MORE THAN ONCE. The body is copied
-  // once per completion path -- the fallthrough, the exception path, and one
-  // per `return` crossing the region -- so one IR suspension node becomes
-  // several emitted park sites, each drawing a state out of a plan that
-  // allotted the node ONE. The emitter counts them and refuses;
-  // `finally-body-copied-past-its-state` is the reason it gives.
+  // THIS LIST IS EMPTY, AND THAT IS A STATE AND NOT A DELETION. Every wrapper
+  // the C lane converts, the LLVM lane converts too; the gap between the two
+  // ledgers is closed. The list stays because it is half of the partition the
+  // test below checks -- a wrapper that stops converting has to be put here by
+  // name, deliberately, rather than quietly dropping off the floor, and
+  // assertion (0) fails until it is classified on one side or the other.
   //
-  // THIS REPLACED A WIDER CONDITION, and the width was the finding. What
-  // stood here refused every suspension inside a finally body, on the
-  // strength of the `%pretSlot` snapshot a `return` crossing one leaves
-  // behind. But the wrapper filed under it -- `wfy6` -- has no such return:
-  // it mints no slot, its body is copied once, and it lowers correctly. The
-  // condition was refusing a shape its own stated hazard did not reach, and
-  // the ledger could not say so because the row under it was not an example
-  // of it. `wfy7` is, which is why it was written.
+  // A `finally` BODY THE EMITTER WRITES MORE THAN ONCE was the last group,
+  // holding `wfy7`. The body is copied once per completion path -- the
+  // fallthrough, the exception path, and one per `return` crossing the region
+  // -- so one IR suspension node became several emitted park sites, each
+  // drawing a state out of a plan that allotted the node ONE, and the emitter
+  // counted them and refused.
   //
-  // THE SLOT IS NOT LEFT UNGUARDED BY THE NARROWING. `%pretSlot` comes from
-  // `B.slot()`, so it is a registered resume-call-private slot and blocks.ts's
-  // cross-park SLOT rule sees any read after a park that did not re-write it
-  // -- carrying it in the frame or refusing the function. The structural walk
-  // is still exported and still used, as the CLASSIFIER that tells this
-  // refusal apart from the emitter bug the same overflow would otherwise be.
+  // WHAT CLOSED IT is what this table said it would take: a state per emitted
+  // SITE instead of per IR node. The dispatch is written after the body
+  // instead of before it, `plan.points.length` stopped being the state count,
+  // and D5's equality became the two inclusions the C lane already carried.
+  // `wfy7` is in LLVM_FLOOR above.
   //
-  // WHAT IT WOULD TAKE TO CLOSE: a state per emitted SITE instead of per IR
-  // node. The C lane already did it (the one-state-per-point equality became
-  // two inclusions); here the dispatch, `plan.points.length` and D5 all still
-  // read the node count, so it is a slice and not a constant.
-  ["a finally body emitted on more than one completion path", ["wfy7"]],
+  // THE GROUP BEFORE IT was wider still -- every suspension inside a finally
+  // body, refused on the strength of the `%pretSlot` snapshot a `return`
+  // crossing one leaves behind. `wfy6` has no such return, mints no slot, and
+  // lowered correctly: a condition refusing a shape its own stated hazard did
+  // not reach, with a ledger row under it that was not an example of it.
+  // `wfy7` was written to BE the example, which is how the second removal got
+  // a subject that could fail.
+  //
   // A TEMP CROSSING A SECOND SUSPENSION USED TO BE A GROUP HERE, and it is
   // gone rather than emptied: the mechanism it was waiting for -- an alloca
   // written at the definition and read at every use, carried through the frame
@@ -1687,10 +1708,10 @@ describe.each(["c", "llvm"] as const)("the stackless lane answers what the fiber
       // INSIDE the finally body and converts as of D4 -- which is what put a
       // park between sc_pret's snapshot and its read for the first time, and
       // sent the slot into the coroutine frame. wfy7 does the same AND
-      // returns through it, so its finally is copied and only the C lane
-      // converts it -- the value below is therefore the FIBER answer on the
-      // LLVM lane and the STACKLESS one on the C lane, which is exactly the
-      // claim the partition test makes about it.
+      // returns through it, so its finally body is EMITTED TWICE and the two
+      // copies take a state each; `w3` is now the STACKLESS answer on both
+      // lanes, and a lowering that resumed into the wrong copy would answer
+      // with the finally's own arithmetic instead of the snapshot.
       // fobs tallies the finallys that ran: 1 + 10 + 10 + 100 + 1000, plus
       // wfy7's pf(3)=4.
       "fin    t4 | ok7 c:bad | c!! | 4 | 5 | w3 | 1125",
