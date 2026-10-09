@@ -179,8 +179,12 @@ const PROG = [
 async function buildArm(knob: boolean, poison: string | undefined): Promise<string> {
   const prevKnob = process.env["SCRIPTC_STACKLESS"];
   const prevP = process.env[POISON_ENV];
+  /* THE FIBER ARM IS SPELLED `0`, NOT ABSENT. The lane ships ON as of
+   * 2026-10-09 (ir/coro-plans.ts), so `delete` here would set BOTH arms to
+   * stackless and this file would compare a lane with itself and report
+   * agreement. Do not "simplify" it back to a delete. */
   if (knob) process.env["SCRIPTC_STACKLESS"] = "1";
-  else delete process.env["SCRIPTC_STACKLESS"];
+  else process.env["SCRIPTC_STACKLESS"] = "0";
   arm(poison);
   try {
     // ONE directory and ONE source path for every arm. A per-arm directory
@@ -208,7 +212,7 @@ async function buildArm(knob: boolean, poison: string | undefined): Promise<stri
   }
 }
 
-test("knob-absent C is byte-identical with the poison set and unset", { timeout: 120_000 }, async () => {
+test("opt-out C is byte-identical with the poison set and unset", { timeout: 120_000 }, async () => {
   // THE EMBARKATION CRITERION. A debugging tool is exactly what would break
   // it without anyone noticing, so it is asserted rather than argued.
   const clean = await buildArm(false, undefined);

@@ -19,7 +19,7 @@
  * WHY MULTIPLICITY IS MEASURED AND NOT ASSERTED AGAINST 3. Section 10b of
  * docs/stackless-llvm-port.md once carried `excess = 2 x in-finally points`,
  * which presupposes three copies. Its own later measurement refuted the
- * premise as a general law: over app182's knob-absent C there are 89
+ * premise as a general law: over app182's fiber-lane C there are 89
  * try-with-finally regions but only 87 exception copies and 64 pending-return
  * copies, because each of those two is emitted only when something actually
  * jumps to its label (`excHandler.used`, `retEntry.used` -- flags the emitter
@@ -142,8 +142,12 @@ interface Arm {
 
 async function buildArm(knob: boolean): Promise<Arm> {
   const previous = process.env["SCRIPTC_STACKLESS"];
+  /* THE FIBER ARM IS SPELLED `0`, NOT ABSENT. The lane ships ON as of
+   * 2026-10-09 (ir/coro-plans.ts), so `delete` here would set BOTH arms to
+   * stackless and this file would compare a lane with itself and report
+   * agreement. Do not "simplify" it back to a delete. */
   if (knob) process.env["SCRIPTC_STACKLESS"] = "1";
-  else delete process.env["SCRIPTC_STACKLESS"];
+  else process.env["SCRIPTC_STACKLESS"] = "0";
   try {
     // The knob is part of the KEY: it is not part of the compiler's own cache
     // key, so two arms sharing an output directory would share one binary and
@@ -307,8 +311,12 @@ void main();
 `;
     const build = async (knob: boolean): Promise<string> => {
       const previous = process.env["SCRIPTC_STACKLESS"];
+      /* THE FIBER ARM IS SPELLED `0`, NOT ABSENT. The lane ships ON as of
+   * 2026-10-09 (ir/coro-plans.ts), so `delete` here would set BOTH arms to
+   * stackless and this file would compare a lane with itself and report
+   * agreement. Do not "simplify" it back to a delete. */
       if (knob) process.env["SCRIPTC_STACKLESS"] = "1";
-      else delete process.env["SCRIPTC_STACKLESS"];
+      else process.env["SCRIPTC_STACKLESS"] = "0";
       try {
         const key = createHash("sha256").update(TURNS).update(knob ? "on" : "off")
           .update(sanitize ? "san" : "plain").digest("hex").slice(0, 16);

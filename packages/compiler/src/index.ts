@@ -791,7 +791,8 @@ function programNativeFeatures(
     // on purpose.
     //
     // THE C LANE keys on `coroPlans`, which is the same call the C emitter
-    // makes and is empty whenever SCRIPTC_STACKLESS is not 1. That is exactly
+    // makes and is empty only under the opt-out SCRIPTC_STACKLESS=0. That is
+    // exactly
     // right there, because the C emitter lowers EVERY function the plan
     // admits: plan membership and lowering are the same set.
     //

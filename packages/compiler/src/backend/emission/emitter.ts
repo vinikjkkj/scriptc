@@ -451,7 +451,8 @@ export class CEmitter {
    * borrowed — never declared, never released here). */
   currentLocals = new Map<string, IrLocal>();
   /** Functions this module lowers to stackless state machines (D1 slice).
-   * Empty unless SCRIPTC_STACKLESS=1 — the lowering ships BUILT but OFF. */
+   * Empty only under the opt-out SCRIPTC_STACKLESS=0 — the lowering
+   * ships ON. */
   coroPlansByFn = new Map<string, import("../../ir/liveness.js").StacklessPlan>();
   /** The plan for the function being emitted, or null for a fiber body. */
   currentCoro: import("../../ir/liveness.js").StacklessPlan | null = null;

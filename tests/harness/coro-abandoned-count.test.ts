@@ -18,11 +18,19 @@
  *      NOT appear when there is none. A detector that cannot stay silent is
  *      not a detector.
  *
- *   3. KNOB-ABSENT CONTAINMENT, MEASURED. This is a runtime change and the
+ *   3. OPT-OUT CONTAINMENT, MEASURED. This is a runtime change and the
  *      runtime is compiled into everything. The argument "with the knob off
  *      the count is zero, so nothing changes" is the shape of argument that
- *      failed twice in one day, so it is not offered: the shipping binary is
- *      scanned for the literal, and a knob-absent run is executed.
+ *      failed twice in one day, so it is not offered: the binary is scanned
+ *      for the literal, and an opt-out run is executed.
+ *
+ *      ITS SCOPE NARROWED ON 2026-10-09 AND SAYING SO IS THE POINT. While
+ *      the lane shipped off, "knob absent" was the SHIPPING binary and this
+ *      proof covered it. The lane ships ON now, so what proof 3 covers is
+ *      the OPT-OUT binary -- the shipping binary DOES print the coroutine
+ *      line, and that is correct. This is a genuine loss of coverage, not a
+ *      rename that costs nothing; the containment claim it used to make
+ *      about the shipped artifact is simply no longer a claim anyone makes.
  *
  * Source strings are built by joining on String.fromCharCode(10) rather than
  * written with escapes. Eight times today an escape crossing a second parse
@@ -82,8 +90,12 @@ async function buildAndRun(
   const dir = stage(name, src);
   const prevKnob = process.env["SCRIPTC_STACKLESS"];
   const prevAudit = process.env["SCRIPTC_RC_AUDIT"];
+  /* THE FIBER ARM IS SPELLED `0`, NOT ABSENT. The lane ships ON as of
+   * 2026-10-09 (ir/coro-plans.ts), so `delete` here would set BOTH arms to
+   * stackless and this file would compare a lane with itself and report
+   * agreement. Do not "simplify" it back to a delete. */
   if (opts.knob) process.env["SCRIPTC_STACKLESS"] = "1";
-  else delete process.env["SCRIPTC_STACKLESS"];
+  else process.env["SCRIPTC_STACKLESS"] = "0";
   if (opts.audit) process.env["SCRIPTC_RC_AUDIT"] = "1";
   else delete process.env["SCRIPTC_RC_AUDIT"];
   try {
@@ -129,7 +141,7 @@ describe("the abandoned-coroutine line", () => {
     expect(stderr, "a completed coroutine must not be reported as abandoned").not.toMatch(COUNT_RE);
   }, 300_000);
 
-  test("PROOF 3a: knob ABSENT prints no coroutine line, even when abandoning", async () => {
+  test("PROOF 3a: SCRIPTC_STACKLESS=0 prints no coroutine line, even when abandoning", async () => {
     /* Knob off, so the awaits lower to fibers and no coroutine frame exists.
      * The fiber lane's own skip notice may appear -- that is its business and
      * is unchanged by this commit; what must be absent is OUR line. */
@@ -229,7 +241,7 @@ describe("the abandoned-coroutine line sees GENERATOR frames too", () => {
     expect(stderr, "a generator consumed to exhaustion must not be reported as abandoned").not.toMatch(COUNT_RE);
   }, 300_000);
 
-  test("PROOF 3: knob ABSENT prints no coroutine line, even when abandoning", async () => {
+  test("PROOF 3: SCRIPTC_STACKLESS=0 prints no coroutine line, even when abandoning", async () => {
     /* Knob off, so the generators lower to fibers and no coroutine frame
      * exists. The fibre lane's own skip notice may appear -- that is its
      * business; what must be absent is OUR line. */
@@ -239,7 +251,7 @@ describe("the abandoned-coroutine line sees GENERATOR frames too", () => {
 });
 
 /* STILL OWED, and named rather than silently omitted: byte-identity of
- * stdout, stderr and the emitted C for a knob-absent build against the
+ * stdout, stderr and the emitted C for an opt-out build against the
  * PARENT commit. That is a cross-commit comparison and needs a second
  * worktree at the parent; it cannot be expressed inside one tree, and the
  * two tests above bound the claim without establishing it. */

@@ -117,8 +117,12 @@ $env:TMP = "$probe\t"; $env:TEMP = "$probe\t"
 $res = @{}
 foreach ($arm in @("off", "on")) {
   Remove-Item -LiteralPath "$probe\p.c" -Force -ErrorAction SilentlyContinue
+  # THE FIBER ARM IS "0", NOT ABSENT. The lane ships ON since 2026-10-09, so
+  # removing the variable selects STACKLESS and this probe would compare the
+  # lane with itself -- off and on would both report the same sc_cr_ count
+  # and the preflight would conclude the knob does not work.
   if ($arm -eq "on") { $env:SCRIPTC_STACKLESS = "1" }
-  else { Remove-Item Env:SCRIPTC_STACKLESS -ErrorAction SilentlyContinue }
+  else { $env:SCRIPTC_STACKLESS = "0" }
   & $nodeExe "$Repo\packages\cli\dist\main.js" build "$probe\p.ts" --backend c -o "$probe\x.exe" --keep-c *> $null
   if (Test-Path "$probe\p.c") {
     $txt = Get-Content -LiteralPath "$probe\p.c" -Raw

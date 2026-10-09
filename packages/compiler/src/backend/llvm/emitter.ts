@@ -226,7 +226,9 @@ interface LlScopeEntry {
  * complexity, and whoever reads the count later should know that. */
 export interface LlvmEmitStats {
   /** The number of functions this emission lowered to a stackless state
-   * machine. Zero whenever SCRIPTC_STACKLESS is not 1. */
+   * machine. Zero only under the opt-out SCRIPTC_STACKLESS=0; the lane
+   * ships ON, so a default build lowers every function the plan admits AND
+   * this backend accepts. */
   coroLowered: number;
 }
 
@@ -1484,8 +1486,9 @@ class LlEmitter {
    * because emitFunction, emitAsyncScaffolding and the type-body gate all
    * have to agree about it -- a function that is a coroutine for one of them
    * and a fiber for another emits either a duplicate symbol or none at all.
-   * Empty whenever SCRIPTC_STACKLESS is not 1, so a knob-absent build walks
-   * exactly the branches it always walked. */
+   * Empty only under the opt-out SCRIPTC_STACKLESS=0, which is now the ONLY
+   * build that walks exactly the branches this emitter always walked. The
+   * default build walks the coroutine branches. */
   private readonly coroLoweredByFn = new Map<string, StacklessPlan>();
   /** The plan for the function being emitted, or null for a fiber body. */
   private currentCoro: StacklessPlan | null = null;
@@ -1975,10 +1978,13 @@ class LlEmitter {
     // gets null and every line below is gated on it, which is why its
     // emitted module is unchanged to the byte.
     const npm = emitNpmEmbeddingLl(this, this.mod);
-    // Does this module lower any coroutine ON THIS BACKEND? Empty whenever
-    // SCRIPTC_STACKLESS is not 1, so a knob-absent build adds not one byte of
-    // .ll -- which is the embarking criterion, and the reason these type
-    // bodies are gated rather than joining the unconditional list below.
+    // Does this module lower any coroutine ON THIS BACKEND? Empty only under
+    // the opt-out SCRIPTC_STACKLESS=0, so an OPT-OUT build adds not one byte
+    // of .ll. That byte-identity was the embarking criterion while the lane
+    // shipped off; the lane ships ON now, so it is the criterion on the
+    // OPT-OUT build instead -- which is still the reason these type bodies
+    // are gated rather than joining the unconditional list below, because a
+    // module that converts nothing must not name %ScrCoroBase either.
     //
     // THE PREDICATE IS `coroLoweredByFn`, NOT `coroPlans`, and the difference
     // is the whole asymmetry between the lanes. coroPlans reads only the IR
@@ -6788,9 +6794,10 @@ class LlEmitter {
          * the next spill. Its own comment names the fix: memory every path can
          * see. That is this slot, carried by the slot mechanism.
          *
-         * GATED ON THE CORO LANE so the knob-absent emission is untouched: with
-         * SCRIPTC_STACKLESS absent `currentCoro` is null, `arrRef` is `arr.name`,
-         * and not one byte of the `.ll` moves. */
+         * GATED ON THE CORO LANE so the non-coroutine emission is untouched:
+         * wherever `currentCoro` is null -- any function the lane does not
+         * lower, and every function under the opt-out SCRIPTC_STACKLESS=0 --
+         * `arrRef` is `arr.name` and not one byte of the `.ll` moves. */
         let arrSlot: string | null = null;
         if (this.currentCoro !== null) {
           arrSlot = B.slot();

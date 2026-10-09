@@ -9,7 +9,9 @@
  *
  * Nothing caught it, and the reason is worth stating: the turns ruler counts
  * MICROTASK TURNS, run-poison.sh counts turns, the TU-split guard checks
- * STRUCTURE. The corpus runs with the knob absent. Not one check compared a
+ * STRUCTURE. The corpus ran with the knob absent, which at the time meant
+ * the FIBER lane (the default inverted on 2026-10-09; absent is the
+ * stackless lane now). Not one check compared a
  * VALUE the lane produced -- a lane with no value coverage can be green and
  * wrong at the same time, which is exactly what happened.
  *
@@ -67,8 +69,10 @@
  * moment loud instead of silent.
  *
  * This compares the two lanes' OUTPUT on one program built both ways, with the
- * knob as the only difference. It sets the knob itself rather than reading it,
- * so it guards the lane on the ordinary knob-absent gate. */
+ * knob as the only difference. It sets BOTH arms explicitly rather than
+ * reading either from the environment, so it guards both lanes whatever the
+ * gate's ambient default happens to be -- which is why the 2026-10-09 flip
+ * cost this file an arm rename and nothing else. */
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -1276,8 +1280,12 @@ const expectedOnLane = (lane: Lane, w: { name: string; converted: boolean }): bo
 
 async function buildArm(knob: boolean, backend: Lane): Promise<Arm> {
   const previous = process.env["SCRIPTC_STACKLESS"];
+  /* THE FIBER ARM IS SPELLED `0`, NOT ABSENT. The lane ships ON as of
+   * 2026-10-09 (ir/coro-plans.ts), so `delete` here would set BOTH arms to
+   * stackless and this file would compare a lane with itself and report
+   * agreement. Do not "simplify" it back to a delete. */
   if (knob) process.env["SCRIPTC_STACKLESS"] = "1";
-  else delete process.env["SCRIPTC_STACKLESS"];
+  else process.env["SCRIPTC_STACKLESS"] = "0";
   try {
     // The knob is part of the KEY. It is not part of the compiler's own cache
     // key, so two arms sharing an output directory would share one binary and

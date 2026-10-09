@@ -39,7 +39,9 @@
  *
  * Gated on the knob by CONSTRUCTION, not by discipline: every call site is
  * inside the coroutine emission path, which runs only where coroPlans is
- * non-empty. With SCRIPTC_STACKLESS absent nothing consults this module.
+ * non-empty. Under the opt-out SCRIPTC_STACKLESS=0 nothing consults this
+ * module. A DEFAULT build does: the lane ships ON, so the containment that
+ * matters is the POISON_ENV flag below, not the lane knob.
  *
  * THE CACHE KEY IS ALREADY CORRECT IN BOTH DIRECTIONS, and the name is why.
  * `scriptcEnvironmentFingerprint` (frontend/early-cache.ts) is a BLANKET over

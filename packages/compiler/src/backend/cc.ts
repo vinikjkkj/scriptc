@@ -231,8 +231,9 @@ export interface CcOptions {
    * emitted at least one coroutine. Computed with coroPlans() -- the SAME
    * call the emitter makes -- because a link line that disagrees with the
    * emitted TU is either an undefined symbol or 4,608 dead bytes in every
-   * binary that never suspends. Off whenever SCRIPTC_STACKLESS is not 1,
-   * since coroPlans() returns empty there. */
+   * binary that never suspends. Off only under the opt-out
+   * SCRIPTC_STACKLESS=0, where coroPlans() returns empty; the lane ships ON,
+   * so this is ON for every module that emits a coroutine at all. */
   coro?: boolean;
   /** The embedded npm graph references fetch (index.ts detects it on the
    * IR): compiles the NATIVE fetch bridge (scr_fetch.c over scr_net +

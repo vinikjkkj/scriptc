@@ -237,10 +237,12 @@ export class BlockBuilder {
    * numeral is minted only by tmp() below — so the scan cannot match a name it
    * does not own.
    *
-   * COST WHEN THE KNOB IS ABSENT: nothing is armed. `enterCoro` is called only
-   * for a function the LLVM backend is actually lowering, and `coroPlans` is
-   * empty without SCRIPTC_STACKLESS=1, so `coroFn` stays null, the generation
-   * map is never written and the scan returns on its first line.
+   * COST UNDER THE OPT-OUT (SCRIPTC_STACKLESS=0): nothing is armed.
+   * `enterCoro` is called only for a function the LLVM backend is actually
+   * lowering, and `coroPlans` is empty there, so `coroFn` stays null, the
+   * generation map is never written and the scan returns on its first line.
+   * A DEFAULT build is NOT that build: the lane ships ON, so this scan is
+   * armed for every function this backend lowers.
    *
    * THE RULE IS NO LONGER ONLY A DIAGNOSTIC. A temp it names is now SPILLED
    * into the coroutine frame and reloaded into a fresh name after the resume
