@@ -85,6 +85,34 @@ export class PromotedTempInPhiError extends Error {
   }
 }
 
+/** EVERY VIOLATION OF ONE BODY, GATHERED IN ONE EMISSION INSTEAD OF ONE PER
+ * EMISSION -- the probe emitFunction runs before it repairs anything.
+ *
+ * WHY A COLLECTOR AND NOT A BIGGER CAP. The discovery loop finds exactly one
+ * violation per pass because the rules below THROW, and a throw ends the
+ * emission. A body with 55 of them therefore needs 109 passes, and the cap
+ * that stops the loop at 12 refused it. Raising the number buys the same
+ * coverage at 109 re-emissions of the body; collecting buys it at three.
+ *
+ * NOTHING IS REPAIRED WHILE COLLECTING, which is what makes the set complete
+ * rather than merely longer. The repairs only ever REMOVE violations -- a
+ * spilled temp is read under its reload name, a promoted one under a load,
+ * and a frame-backed slot leaves the registry -- so a pass with no repair
+ * installed sees a superset of what any later pass can see.
+ *
+ * AND IT IS ONLY SOUND BECAUSE THE REPAIRS MINT NO `%tN`. The set addresses
+ * values by a name a counter hands out in emission order; if installing the
+ * set renumbered the body, every name in it would address a different value
+ * on the pass that uses it. crossName, crossSlotName, crossLoadName and
+ * slotCarryName all derive their names from the origin and the suspension
+ * index for exactly that reason. */
+export interface CoroViolations {
+  /** `%tN` -> its LLVM result type, or null when `llResultType` could not
+   * read the defining form. A null is a REFUSAL upstream, not a spill. */
+  readonly temps: Map<string, string | null>;
+  /** A resume-call-private slot -> its declared type, same null rule. */
+  readonly slots: Map<string, string | null>;
+}
 export class CrossParkSlotError extends Error {
   constructor(
     message: string,
@@ -292,6 +320,10 @@ export class BlockBuilder {
    * at all). Cheap, because blocks already appended are not revisited: the
    * pre-park uses keep the pre-park name because they were appended before the
    * rename existed, which is exactly the behaviour wanted and costs no pass. */
+  /** Non-null while this body is being emitted as a PROBE: the two rules
+   * below record into it and let emission continue, instead of throwing at
+   * the first violation. See CoroViolations. */
+  private collect: CoroViolations | null = null;
   private readonly rename = new Map<string, string>();
   /** Cross-park temps PROMOTED to an alloca: origin `%tN` -> the slot it lives
    * in and the type it was minted with.
@@ -342,6 +374,13 @@ export class BlockBuilder {
     this.coroFn = fnName;
   }
 
+  /** Emit this body as a PROBE: gather every cross-park violation into `v`
+   * rather than throwing at the first. The module this pass produces is
+   * unrepaired and must be discarded -- emitFunction does. */
+  collectInto(v: CoroViolations): void {
+    this.collect = v;
+  }
+
   /** One suspension boundary has been emitted: every temp minted so far is
    * now dead, because the block that follows is reachable only from the
    * dispatch.
@@ -373,6 +412,10 @@ export class BlockBuilder {
     for (const m of s.match(/%t[0-9]+/g) ?? []) {
       const g = this.tmpGen.get(m);
       if (g === undefined || g >= this.gen) continue;
+      if (this.collect !== null) {
+        this.collect.temps.set(m, this.tmpType.get(m) ?? null);
+        continue;
+      }
       throw new CrossParkTempError(
         `llvm emitter bug: ${this.coroFn} references ${m} after a park. ` +
           `${m} was minted before suspension point ${g} and is read in block ` +
@@ -436,6 +479,10 @@ export class BlockBuilder {
       }
       const lastWrite = this.privateSlots.get(slot)!;
       if (lastWrite >= this.gen) continue;
+      if (this.collect !== null) {
+        this.collect.slots.set(slot, this.allocaTypeOf(slot));
+        continue;
+      }
       throw new CrossParkSlotError(
         `llvm emitter bug: ${this.coroFn} reads ${slot} after a park that did not ` +
           `re-write it. ${slot} was last written in suspension generation ${lastWrite} ` +

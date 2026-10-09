@@ -98,6 +98,7 @@ import {
   CORO_SPILL_PASS_CAP,
   CORO_STATE_FIELD,
   CrossParkTempPromoteError,
+  slotCarryName,
   crossName,
   crossSlotName,
   coroFrameLayout,
@@ -116,6 +117,7 @@ import {
   BlockBuilder,
   CrossParkSlotError,
   CrossParkTempError,
+  type CoroViolations,
   PromotedTempInPhiError,
 } from "./blocks.js";
 import { isStableReceiverOperand, writesLocal } from "../../ir/analysis.js";
@@ -1608,6 +1610,15 @@ class LlEmitter {
    * byte — every census branch below tests this field first. */
   private readonly census: LlvmCensus | null = llvmCensusEnabled() ? new LlvmCensus() : null;
   /** IR name of the function being emitted — census attribution only. */
+  /** Non-null while a PROBE pass is running: the block builder records every
+   * cross-park temp and slot into it instead of throwing at the first one,
+   * and emitCoroTempSpill records a promotion into the array below instead
+   * of throwing. Both are null on every pass that actually emits.
+   *
+   * ZERO COST ON A KNOB-ABSENT BUILD, like the rest of this fork: the
+   * candidate set is empty there, so no probe ever runs. */
+  private currentCoroCollect: CoroViolations | null = null;
+  private currentCoroCollectPromotes: CoroTempSpill[] | null = null;
   private currentFnName = "";
 
   constructor(private readonly mod: IrModule) {
@@ -3960,6 +3971,15 @@ class LlEmitter {
         // here re-spills one: after promotion the origin has no reload at all,
         // every use is a load from memory the entry block allocates, and the
         // cross-suspension value lives in the frame between parks.
+        // WHILE COLLECTING, THIS IS A NOTE AND NOT A VERDICT. `main` needs 54
+        // promotions and would otherwise pay a pass for each, one per throw;
+        // recording them all in one emission costs one.
+        if (this.currentCoroCollectPromotes !== null) {
+          if (!this.currentCoroCollectPromotes.some((q) => q.name === t.name)) {
+            this.currentCoroCollectPromotes.push({ name: t.name, llType: t.llType });
+          }
+          continue;
+        }
         throw new CrossParkTempPromoteError(t.name, t.llType);
       }
       const ty = B.typeOfTemp(t.name);
@@ -4039,14 +4059,19 @@ class LlEmitter {
    * was. That is also why a slot may cross SEVERAL suspensions where a temp
    * may not: the far side writes memory that every path can see, which is the
    * mechanism emitCoroTempSpill's refusal says it does not have. */
-  private emitCoroSlotSpill(): void {
+  private emitCoroSlotSpill(index: number): void {
     const layout = this.currentCoroLayout!;
     const B = this.B;
     for (const s of this.currentCoroSlotSpills) {
       const fld = layout.slotFields.get(s.name)!;
-      const v = B.tmp();
+      // NOT `tmp()`, and slotCarryName says what that cost. Two names per
+      // slot per suspension, both derived from (role, index, slot), so a
+      // pass that discovers one more slot adds instructions without moving
+      // a single `%tN` -- which is the condition emitFunction's fixpoint
+      // needs and did not have.
+      const v = slotCarryName("sv", index, s.name);
       B.line(`${v} = load ${fld.llType}, ptr ${s.name} ; spill ${fld.comment}`);
-      const f = this.coroField(fld.index, fld.comment);
+      const f = this.coroFieldInto(slotCarryName("sp", index, s.name), fld.index, fld.comment);
       B.line(`store ${fld.llType} ${v}, ptr ${f}`);
     }
   }
@@ -4062,13 +4087,13 @@ class LlEmitter {
    * discovered one more slot would renumber every pre-park temp and void the
    * fixpoint's termination argument. Everything this pair emits is emitted at
    * or after a suspension, which is the condition that argument needs. */
-  private emitCoroSlotReload(): void {
+  private emitCoroSlotReload(index: number): void {
     const layout = this.currentCoroLayout!;
     const B = this.B;
     for (const s of this.currentCoroSlotSpills) {
       const fld = layout.slotFields.get(s.name)!;
-      const f = this.coroField(fld.index, fld.comment);
-      const v = B.tmp();
+      const f = this.coroFieldInto(slotCarryName("rp", index, s.name), fld.index, fld.comment);
+      const v = slotCarryName("rv", index, s.name);
       B.line(`${v} = load ${fld.llType}, ptr ${f}`);
       B.line(`store ${fld.llType} ${v}, ptr ${s.name} ; reload ${fld.comment}`);
     }
@@ -4151,7 +4176,7 @@ class LlEmitter {
     // therefore rewritten by the same rename as every other use.
     this.emitCoroTempSpill(index);
     this.emitCoroSpill();
-    this.emitCoroSlotSpill();
+    this.emitCoroSlotSpill(index);
     const pa = this.coroField(layout.awaitedIndex, "sc_awaited");
     B.line(`store ptr ${pr.name}, ptr ${pa}`);
     const ps = this.coroStateField();
@@ -4174,7 +4199,7 @@ class LlEmitter {
     B.parkBoundary();
     this.emitCoroTempReload(index);
     this.emitCoroReload();
-    this.emitCoroSlotReload();
+    this.emitCoroSlotReload(index);
     const pa2 = this.coroField(layout.awaitedIndex, "sc_awaited");
     const aw = B.tmp();
     B.line(`${aw} = load ptr, ptr ${pa2}`);
@@ -4248,7 +4273,7 @@ class LlEmitter {
     // acquires one.
     this.emitCoroTempSpill(index);
     this.emitCoroSpill();
-    this.emitCoroSlotSpill();
+    this.emitCoroSlotSpill(index);
     const ps = this.coroStateField();
     B.line(`store i32 ${index + 1}, ptr ${ps}`);
     this.declare(`declare void @scr_coro_hop(ptr)`);
@@ -4260,7 +4285,7 @@ class LlEmitter {
     B.parkBoundary();
     this.emitCoroTempReload(index);
     this.emitCoroReload();
-    this.emitCoroSlotReload();
+    this.emitCoroSlotReload(index);
   }
 
   /** A TWO-ARMED SUSPENSION: ONE point, ONE state, ONE resume label, and two
@@ -5249,6 +5274,105 @@ class LlEmitter {
     return mangleFunction(fnName);
   }
 
+  /** EVERY VIOLATION OF ONE BODY IN TWO EMISSIONS instead of one per
+   * emission -- what the discovery loop below costs without it.
+   *
+   * THE LOOP FINDS ONE VIOLATION PER PASS BECAUSE THE RULES THROW, and a
+   * throw ends the emission. `main` has 55 cross-park temps, 54 of which
+   * must be promoted, so it needed 109 passes and was refused at a cap of
+   * 12 -- recorded for three bases as "main has more than twelve", which was
+   * a reading of the cap rather than a measurement of the body.
+   *
+   * PASS ONE REPAIRS NOTHING, so every violation the body has is visible at
+   * once; the repairs only ever REMOVE violations (a spilled temp is read
+   * under its reload name, a promoted one under a load, a carried slot
+   * leaves the private registry), so an unrepaired pass sees a superset of
+   * what any repaired one can.
+   *
+   * PASS TWO INSTALLS THEM AND ASKS WHICH MUST BE PROMOTED, because that is
+   * a property of the SPILL and not of the body: emitCoroTempSpill promotes a
+   * temp when a second suspension would re-spill its reload, and with no
+   * spill installed there is nothing to re-spill. Recording instead of
+   * throwing turns 54 passes into one.
+   *
+   * IT DECLINES RATHER THAN GUESSES. Any throw, and any violation whose type
+   * could not be read, abandons the probe and leaves the sets empty -- the
+   * loop then reproduces the older behaviour exactly, refusal reason
+   * included. Seeding a set that is wrong is the one outcome worth more than
+   * the passes it saves.
+   *
+   * AND IT RESTS ON THE REPAIRS MINTING NO `%tN`. The sets address values by
+   * a name `tmp()` hands out in emission order, so a repair that renumbered
+   * the body would make every name in them address a different value on the
+   * pass that used them. That is why crossName, crossSlotName, crossLoadName
+   * and slotCarryName all derive from the origin and the suspension index --
+   * and the last of those is new here, because the slot carry drew four
+   * `tmp()` names per slot per suspension and was the reason `main` could
+   * not be closed by passes at all. */
+  private probeCoroViolations(
+    fn: IrFunction,
+    snapshot: ReadonlySet<string>,
+    spills: CoroTempSpill[],
+    slotSpills: CoroSlotSpill[],
+    promotes: CoroTempSpill[],
+  ): void {
+    const v: CoroViolations = { temps: new Map(), slots: new Map() };
+    const restore = (): void => {
+      this.decls.clear();
+      for (const d of snapshot) this.decls.add(d);
+    };
+    const probe = (seedT: CoroTempSpill[], seedS: CoroSlotSpill[], found: CoroTempSpill[] | null): boolean => {
+      this.currentCoroTempSpills = seedT;
+      this.currentCoroSlotSpills = seedS;
+      this.currentCoroTempPromotes = [];
+      this.currentCoroCollect = v;
+      this.currentCoroCollectPromotes = found;
+      try {
+        this.emitFunctionBody(fn);
+        return true;
+      } catch {
+        return false;
+      } finally {
+        this.currentCoroCollect = null;
+        this.currentCoroCollectPromotes = null;
+        this.currentCoroTempSpills = [];
+        this.currentCoroSlotSpills = [];
+        this.currentCoroTempPromotes = [];
+        restore();
+      }
+    };
+    const typed = (): boolean => {
+      for (const t of v.temps.values()) if (t === null) return false;
+      for (const t of v.slots.values()) if (t === null) return false;
+      return true;
+    };
+    const seeds = (): [CoroTempSpill[], CoroSlotSpill[]] => [
+      [...v.temps].map(([name, llType]) => ({ name, llType: llType as string })),
+      [...v.slots].map(([name, llType]) => ({ name, llType: llType as string })),
+    ];
+    if (!probe([], [], null)) return;
+    if (!typed()) return;
+    if (v.temps.size === 0 && v.slots.size === 0) return;
+    const [seedT, seedS] = seeds();
+    const found: CoroTempSpill[] = [];
+    if (!probe(seedT, seedS, found)) return;
+    // A SECOND PASS THAT SAW A NEW VIOLATION means the superset argument
+    // above is wrong for this body. Decline rather than seed half a set: the
+    // loop below discovers it from nothing, slowly and correctly.
+    if (v.temps.size !== seedT.length || v.slots.size !== seedS.length) return;
+    if (!typed()) return;
+    // THE TWO SETS MOVE TOGETHER exactly as the loop's promotion arm moves
+    // them: a promoted origin LEAVES the spill set (the SSA mechanism must
+    // not also run for it) and its alloca JOINS the slot set.
+    for (const t of seedT) {
+      if (!found.some((q) => q.name === t.name)) spills.push(t);
+    }
+    slotSpills.push(...seedS);
+    for (const t of found) {
+      promotes.push(t);
+      slotSpills.push({ name: crossSlotName(t.name), llType: t.llType });
+    }
+  }
   /** THE TRIAL, and the reason it needs one.
    *
    * A function the structural predicate admits can still be refused once the
@@ -5272,15 +5396,22 @@ class LlEmitter {
    * block builder, frames, scopes, the state counter) is rebuilt from scratch
    * at the top of emitFunctionBody, so the second pass starts clean.
    *
-   * COST: one re-emission of a body the predicate thought it could lower, and
-   * only for those. Zero on a knob-absent build, where the candidate set is
-   * empty. */
+   * COST: three re-emissions of a body the predicate thought it could lower
+   * -- two probe passes and the one that emits -- and only for those. Zero on
+   * a knob-absent build, where the candidate set is empty. */
   private emitFunction(fn: IrFunction): string {
     if (this.coroLoweredByFn.has(fn.name)) {
       const snapshot = new Set(this.decls);
       const spills: CoroTempSpill[] = [];
       const slotSpills: CoroSlotSpill[] = [];
       const promotes: CoroTempSpill[] = [];
+      // THE PROBE SEEDS THE FIXPOINT BELOW, it does not replace it. Two
+      // discovery emissions hand over everything they saw; the loop then
+      // runs exactly as it always did, and the cap still stops it. A body the
+      // probe declines (see probeCoroViolations) reaches the loop with empty
+      // sets and is discovered one violation at a time, which is the
+      // behaviour every base before this one had.
+      this.probeCoroViolations(fn, snapshot, spills, slotSpills, promotes);
       for (let pass = 0; ; pass++) {
         this.currentCoroTempSpills = spills;
         this.currentCoroSlotSpills = slotSpills;
@@ -5508,6 +5639,10 @@ class LlEmitter {
       // on a fiber body, so a knob-absent build pays one null check per
       // emitted line and nothing else.
       B.enterCoro(fn.name);
+      // THE PROBE ARMS THE RULES TO RECORD RATHER THAN THROW. See
+      // CoroViolations in blocks.ts; this is non-null for exactly the two
+      // discovery passes emitFunction runs before it emits for real.
+      if (this.currentCoroCollect !== null) B.collectInto(this.currentCoroCollect);
       // The log-argument array is the one resume-call-private slot that is not
       // minted by `slot()`: it is pushed into entryAllocas AFTER the body has
       // been walked, by which time every line has already been checked. It is

@@ -756,6 +756,37 @@ export function crossLoadName(origin: string, k: number): string {
   return `%cxl${k}_${origin.slice(1)}`;
 }
 
+/** The name of one instruction the SLOT carry emits at ONE suspension.
+
+ * DERIVED FROM (role, SUSPENSION INDEX, SLOT) AND NOTHING ELSE, for the
+ * reason crossName gives one rule up -- and this is the second instance of
+ * that rule, not a restatement of it. coroFieldInto's header already says
+ * what a counter-drawn name costs: "the cross-park spill is emitted a
+ * variable number of times -- the set grows as passes discover it -- so if
+ * its GEPs drew from `tmp()` they would advance the ordinary temp counter by
+ * a different amount on every pass, renumbering every `%tN` minted after the
+ * first suspension." The TEMP carry obeyed that; the SLOT carry did not, and
+ * drew four `tmp()` names per carried slot per suspension.
+ *
+ * THAT WAS MEASURED, NOT INFERRED. emitCoroSlotReload's header argued the
+ * fixpoint was safe because "everything this pair emits is emitted at or
+ * after a suspension". That condition is sufficient for a body with ONE
+ * suspension and false for a body with many: instructions added at suspension
+ * 3 renumber every temp minted before suspension 21. On `main` -- 102
+ * suspensions -- the violating temp sat at generation 21 behind 21 carried
+ * suspensions, so each promotion shifted it by exactly 4*21 = 84 and the
+ * fixpoint re-discovered the SAME `store double %tN, ptr %tM` in block
+ * `exc.k108` under a new name, for ever. Four hundred passes found four
+ * hundred names for one value. The cap was reported as "main has more than
+ * twelve cross-park temps"; it had one the loop could not address twice. */
+export function slotCarryName(
+  role: "sv" | "sp" | "rp" | "rv",
+  index: number,
+  slot: string,
+): string {
+  return `%cxslot_${role}${index}_${slot.slice(1)}`;
+}
+
 /** How many times a body may be re-emitted to discover its cross-park temps
  * before the function is refused.
  *
