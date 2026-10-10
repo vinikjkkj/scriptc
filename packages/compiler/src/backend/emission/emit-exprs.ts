@@ -510,6 +510,24 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
         const r = E.emitExpr(e.receiver);
         const bind = `sc_t${E.tempCounter++}`;
         E.line(`${cDecl(narrowed, bind)} = ${isRefCounted(narrowed) ? "NULL" : "0"};`);
+        /* REGISTERED, AND INERT -- the reason is not the one this site was
+         * first given. `narrowed` is NOT always refcounted: `number | null`
+         * narrows to f64 and `boolean | null` to bool, so `n?.toFixed(x)` and
+         * `b?.toString()` both bind a bare scalar here.
+         *
+         * What keeps the spill rule from mattering is that the bind has
+         * exactly ONE reader -- the chain's `chainRecv` (this file's
+         * `case "chainRecv"`), which mints its own temp through `newTemp` and
+         * is therefore registered and spilled itself. That read is the
+         * LEFTMOST evaluation in the chain body, so the bind is already dead
+         * when any park inside the body happens.
+         *
+         * MEASURED 2026-10-10 on `maybe(4)?.toFixed(await pf(0))`: removing
+         * this line leaves the answer `4.0` on both lanes, and the only TU
+         * difference is one `double sc_tmp_sc_t3` frame field stored at the
+         * park, reloaded after it, and never read. Keep the line -- it is the
+         * rule, uniformly applied -- but do not expect a test to arm it, and
+         * do not read 7472's two `optchain` lines as cover for it. */
         E.registerTemp({ name: bind, type: narrowed });
         const test = unitTags.map((t) => `${r.name}->tag == ${t}`).join(" || ");
         const extract = subUnion

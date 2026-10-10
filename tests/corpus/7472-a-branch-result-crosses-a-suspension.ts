@@ -1,7 +1,7 @@
 // A BRANCH RESULT IS A SLOT, and on the stackless lane a slot that is live
 // across a suspension has to live in the coroutine frame.
 //
-// `ternary`, `logical`, `nullish`, `orDefault`, `unionDisc` and
+// `ternary`, `logical`, `nullish`, `orDefault`, `optChain`, `unionDisc` and
 // `unionKeyGet` do not mint their result through the emitter's `newTemp`:
 // the slot is DECLARED before the arms and WRITTEN inside them, so there is
 // no initializer to mint it from. All of them registered the slot in the
@@ -40,6 +40,33 @@ function shape(n: number): Shape {
   return n === 0 ? { kind: 5 } : { kind: 6, extra: "x" };
 }
 
+// THE LAST TWO OF THE NINE SITES, and they are not the same question.
+//
+// `unionKeyGet` answers at the JOIN of its arms' answers, and a join of ONE
+// is that type itself (lower-exprs.ts: `joinArms.length === 1 ? joinArms[0]`)
+// -- so two record arms that both declare `n: number` make the result a bare
+// `double`, and `unionkeyget` below is the line that catches it. MEASURED:
+// with the registration removed at that site it prints `unionkeyget NaN`.
+//
+// `optChain`'s BIND is the other one, and it is here for the SHAPE, not as a
+// guard -- see the note at emit-exprs.ts's optChain site. The bind is the
+// narrowed receiver payload, which IS a bare `double` here, but its only
+// reader is `chainRecv`, which mints its own (registered, spilled) temp and
+// is the leftmost evaluation in the chain body -- so the bind is dead before
+// any park the body contains. These two lines stay green with that site's
+// registration removed, and saying so is the point: a reader who counts them
+// as cover for the spill rule is counting a line that cannot go red.
+type KeyedA = { readonly kind: string; readonly n: number; readonly ea: string };
+type KeyedB = { readonly kind: string; readonly n: number; readonly eb: boolean };
+
+function keyed(n: number): KeyedA | KeyedB {
+  return n === 0 ? { kind: "a", n: 11, ea: "x" } : { kind: "b", n: 22, eb: true };
+}
+
+function flagged(n: number): boolean | null {
+  return n > 0 ? n < 100 : null;
+}
+
 async function pf(n: number): Promise<number> {
   return n + 1;
 }
@@ -66,6 +93,13 @@ async function main(): Promise<void> {
   const s = shape(0);
   console.log("uniondisc", joinN(s.kind, await pf(3)));
 
+  // ARMING: this one DOES go red when emit-exprs.ts's unionKeyGet site stops
+  // registering its result -- `NaN`, read off an uninitialised frame slot.
+  console.log("unionkeyget", joinN(keyed(0)["n"], await pf(3)));
+  // SHAPE ONLY, not arming: an await inside an optional-chain body, over a
+  // bind that is a bare `double` and a bare `bool`. See the note above.
+  console.log("optchain", maybe(4)?.toFixed(await pf(0)));
+  console.log("optchainb", flagged(2)?.toString(), await pf(3));
   // The PromiseLike pair, both arms, in one argument list.
   const a = settleOrValue(0);
   const b = settleOrValue(1);
