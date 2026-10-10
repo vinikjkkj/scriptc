@@ -205,40 +205,80 @@ describe("the shared abort helpers", () => {
     const g = readGuards(c);
     const llOom = (ll.match(/call void @sc_oom\(\)/g) ?? []).length;
 
-    /* THE TWO LANES AGREE MINUS ONE PER CONVERTED COROUTINE, AND THIS IS
-     * SCAFFOLDING WITH A CONVERGENCE CONDITION, NOT AN INVARIANT.
+    /* EACH LANE LOSES ONE OOM SITE PER FUNCTION *IT* CONVERTS, SO THE TWO
+     * GUARD COUNTS PLUS THE TWO CONVERSION COUNTS ARE THE SAME NUMBER.
      *
-     * Plain equality was true only while nothing converted. With
-     * SCRIPTC_STACKLESS=1 the C lane turns an async function into a state
-     * machine: the fiber trampoline's malloc guard disappears and
-     * scr_coro_alloc plants none in the TU, so C LOSES one OOM site per
-     * converted function while LLVM -- which has no stackless lowering at
-     * all -- keeps every one. Measured on this very program: LLVM 14
-     * throughout, C 14 knob-off, 13 with one function converted, 12 with
-     * two.
+     * Plain equality was true only while nothing converted. A converted
+     * function becomes a state machine: the fiber trampoline's malloc guard
+     * disappears and scr_coro_alloc plants none in the TU, so the lane that
+     * converts it is one guard shorter. That much has not changed.
      *
-     * Demanding 14 == 12 would be forcing the C lane to lie so it matches a
-     * backend that does not participate in the change. The emitter is
-     * right; the assertion was what stopped being true.
+     * WHAT CHANGED, AND WHY THE OLD SUBTRACTION STOPPED BEING TRUE. This
+     * assertion used to subtract the C lane's conversion count alone, on the
+     * premise that `LLVM has no stackless lowering and loses none`. The LLVM
+     * backend now HAS one -- and lowers a STRICT SUBSET of the shared plan
+     * (llvm/emitter.ts: coroPlans is the backend-agnostic policy,
+     * llvmCoroPlans narrows it, and a refusal at emission removes the entry
+     * again). A generator is a NAMED refusal reason there, not an oversight:
+     * on this very program `SCRIPTC_LLVM_CORO_CENSUS=1 SCRIPTC_NO_CACHE=1`
+     * prints `2 lowered of 3 planned` with `refuse walk generator`, while
+     * the C lane converts all three.
      *
-     * THE COUNT IS DERIVED, not passed in and not hardcoded: it is the
-     * number of resume functions in the emitted C. Knob-off that is zero
-     * and this reduces to the original equality, so one assertion covers
-     * both lanes and neither can drift from the other.
+     * MEASURED, at three points, on this program and on a variant of it:
+     *   knob-off          C oom 14, LL oom 14, converted 0 / 0
+     *   knob-on           C oom 11, LL oom 12, converted 3 / 2
+     *   knob-on, +1 gen   C oom 11, LL oom 13, converted 4 / 2
+     * The third is a variant built to move BOTH sides at once (a second
+     * synchronous generator, which C converts and LLVM refuses); two points
+     * cannot separate this relation from the one it replaces, and that one
+     * fits the first two just as well.
      *
-     * CONVERGENCE: this delta returns to ZERO when the LLVM backend grows
-     * the stackless lowering, because then both lanes convert and both lose
-     * the same guards. Delete the subtraction then -- do not "fix" the
-     * number. Until then a non-zero delta here is correct behaviour, and
-     * anyone reading it as an invariant of the two backends has read a
-     * scaffold as a wall. */
-    const converted = (c.match(/void sc_cr_[A-Za-z0-9_]+\(ScrCoroBase \*sc_b\)\s*\{/g) ?? []).length;
+     * BOTH COUNTS ARE DERIVED FROM THE ARTIFACT each lane produced, neither
+     * is passed in and neither is hardcoded -- so no number here is one the
+     * test made up and then verified.
+     *
+     * AND THIS FORM NEEDS NO FUTURE EDIT, which is the point of writing it
+     * as a sum rather than as a correction. The note this replaces said to
+     * delete the subtraction once LLVM grew the lowering. It has grown one,
+     * and the right answer was not deletion: convergence is PARTIAL and may
+     * stay that way. When the two lanes do converge the two conversion
+     * counts become equal on their own and this reduces to the original
+     * plain equality with nothing to remove. A non-zero gap between the
+     * counts is a report about which shapes each lane lowers, and belongs to
+     * the census -- not to this assertion. */
+    const cConverted = (c.match(/void sc_cr_[A-Za-z0-9_]+\(ScrCoroBase \*sc_b\)\s*\{/g) ?? []).length;
+    const llConverted = (ll.match(/^define[^\n]*@sc_cr_[A-Za-z0-9_]+\(/gm) ?? []).length;
     expect(
-      llOom - g.oomSites.length,
-      `LLVM @sc_oom (${llOom}) minus C OOM guard sites (${g.oomSites.length}) must equal the ` +
-        `number of converted coroutines (${converted}): C loses one guard per state machine, ` +
-        `LLVM has no stackless lowering and loses none. Knob-off this is 0 on both sides.`,
-    ).toBe(converted);
+      g.oomSites.length + cConverted,
+      `C OOM guard sites (${g.oomSites.length}) plus C conversions (${cConverted}) must equal ` +
+        `LLVM @sc_oom (${llOom}) plus LLVM conversions (${llConverted}): each lane loses exactly ` +
+        `one guard per function IT converts, and the lanes lower different subsets of the same ` +
+        `plan (LLVM refuses generators). Knob-off both conversion counts are 0 and this is the ` +
+        `plain equality.`,
+    ).toBe(llOom + llConverted);
+    // THE ARMING, because the equality above is satisfied by 0 + 0 == 0 + 0.
+    // A program that converted nothing -- the knob lost on the way to one of
+    // the backends, a refusal widened until it swallowed the whole plan --
+    // would pass it while guarding nothing, and the conversion counts are
+    // exactly what makes that case invisible.
+    //
+    // BOTH ARMS ARE ASSERTED, not one asserted and one skipped. Under the
+    // opt-out the right expectation is not "no expectation": it is that
+    // NEITHER lane converted, which is the claim that makes the equality
+    // above reduce to the plain one. This file does not pin the knob itself
+    // -- compileBoth is shared by all five tests and reads the ambient
+    // setting -- so a whole-gate run under SCRIPTC_STACKLESS=0 lands here
+    // legitimately and must be guarded, not excused.
+    expect(llOom, "the LLVM lane emitted no OOM call at all").toBeGreaterThan(0);
+    if (process.env["SCRIPTC_STACKLESS"] === "0") {
+      expect([cConverted, llConverted], "the opt-out must convert nothing on either lane")
+        .toEqual([0, 0]);
+    } else {
+      // This program has an async function, a generator and an async entry;
+      // the C lane lowers all three.
+      expect(cConverted, "the C lane converted nothing -- the knob did not reach this emitter")
+        .toBeGreaterThan(0);
+    }
     // The tag defaults are NOT expected to match one for one: the LLVM lane
     // routes a few more paths through @sc_bad_tag than C spells as a switch
     // default (measured: +2 on every program that has any). What must hold is
