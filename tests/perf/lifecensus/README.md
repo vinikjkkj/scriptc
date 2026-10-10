@@ -267,3 +267,190 @@ rows on the pair (pinner count, pinner byte sum); 171 of 197 kind slots and
 310 of 349 site slots collide on that pair and are **left unlabelled rather
 than guessed at**, which is why the routing tables carry `slotNNNN` rows. The
 simulation itself never needs the name: it runs on the blocks.
+
+## phase — is the startup cohort separable as a POLICY?  No.
+
+`segregate.mjs` scored KIND and SITE and both lost to MIXING. The section
+above reads a **startup cohort** off the pinners' ages and says a boot arena
+"would select it with no predictor at all". `phase.mjs` tests that policy.
+The answer is **no**, and the reason is the opposite of the one worth fearing.
+
+**THE READING ABOVE IS CENSORED, AND THAT IS THE FIRST THING TO FIX.**
+`n=73,113 p10=36,276,093 …` is a distribution over **survivors** — given that
+an object is alive, where was it born. A policy needs the other conditional:
+**given a birth window, what fraction of it is alive.** A window that
+allocates a million objects and keeps 65,000 would strand a boot arena exactly
+the way the type key strands the mixed one, and nothing above distinguishes
+the two cases.
+
+**THE DENOMINATOR IS FREE, WHICH IS WHY THIS NEEDED NO SECOND RUN.**
+`scr_life_seq` is bumped once per cycle allocation and the `birth` stamped on
+a block *is* that ordinal, so the number of objects born in `[a,b]` is exactly
+`b-a+1`. The census's own accounting proves the clock is dense and
+`phase.mjs` refuses on it: **`deaths + live == seq`**, `36,295,139 + 73,136 =
+36,368,275`, exact. Every number below is a re-reading of the `pc1`,
+`pc2` and `pr0` block dumps already on disk — no rebuild, no new run, no
+RSS figure, nothing a loaded host can move.
+
+### 1. The survival rate of the startup window — 98%, not a censored illusion
+
+```
+window (lo,hi]        born    survived   SURVIVAL%
+(0,100]                100           5      5.000%
+(100,1000]             900         848     94.222%
+(1000,5000]           4000        3902     97.550%
+(5000,10000]          5000        4903     98.060%
+(10000,20000]        10000        9862     98.620%
+(20000,30000]        10000        9854     98.540%
+(30000,40000]        10000        9869     98.690%
+(40000,50000]        10000        9839     98.390%
+(50000,60000]        10000        7574     75.740%
+(60000,70000]        10000        6659     66.590%
+(70000,80000]        10000         708      7.080%
+(80000,90000]        10000         135      1.350%
+(90000,100000]       10000        2394     23.940%
+(100000,120000]      20000        3843     19.215%
+(120000,150000]      30000         551      1.837%
+(150000,200000]      50000        1988      3.976%
+(200000,500000]     300000           0      0.000%
+(500000,1000000]    500000           0      0.000%
+(1000000,10000000]  9e6            139      0.002%
+(10000000,end]      26.4e6          40      0.000%
+```
+
+**Of everything the program allocates between ordinals 1,000 and 50,000,
+98.2% is still alive at exit.** The cohort is not an artifact of censoring:
+it is nearly pure. Every rate here is a **floor** — the 23 survivors that pin
+no held chunk are in each denominator and in no numerator.
+
+### 2. There IS a boundary, and it is a cliff, not a percentile
+
+Survival sits at 98% through ordinal 55,000, falls through 53%/61%/72% in the
+next three 5,000-wide buckets, and is **under 10% from 70,000 on**. After
+ordinal 200,000 — 0.55% of the run — the whole remaining **36,168,275
+allocations retain 179 objects**, 4.95e-4%. Past 10,000,000 it is 40.
+The last survivor is born at ordinal 36,368,268, eight allocations from the
+end.
+
+Chunks are temporally coherent to match: the span of birth ordinals *inside
+one chunk* is `p50=2,123` and `p70=6,345` of a 36.4-million-allocation run.
+A chunk is, in practice, already a phase.
+
+### 3. And the policy still loses, at every cut where its own bound is tight
+
+`phase.mjs` runs `segregate.mjs`'s frame unchanged, so the rows compare
+directly. `chunksB` packs B perfectly per class (a **lower** bound, as there);
+`noRecyc` is the other end — the window with no slot ever reused. The gap
+between them is governed by the window's purity, which is the point.
+
+```
+cut N      B surv  purity%  chunksB  noRecyc  freed  Aleft  curA  total  vsHELD
+   10000     9658    96.58       16       16      7    104    13    133     +19
+   30000    29374    97.91       35       36     25     86    13    134     +20
+   50000    49082    98.16       55       55     45     66    13    134     +20
+   70000    63315    90.45       73       77     65     46    13    132     +18
+   92182    65802    71.38       75       93     72     39    13    127     +13
+  120000    70395    58.66       80      112     80     31    13    124     +10
+  200000    72934    36.47       83      167     95     16    13    112      -2
+ 1000000    72934     7.29       83      700     95     16    13    112      -2
+10000000    73073     0.73       83     6704     99     12    13    108      -6
+ ORACLE     73113       —        83        —    111      0    13     96     -18
+```
+
+**Against the ceiling of 18 chunks = 1.13 MiB = 1.5% of the run's 74.08 MiB
+settled privateCommit.** No row beats the oracle; `phase.mjs` refuses if one
+does.
+
+Read the two halves of that table against each other and the answer is one
+sentence. **Where the cohort is pure the policy costs chunks, and where the
+policy shows a saving the cohort is not pure.** At `N=50,000` the window is
+98.2% survivors, so `chunksB` and `noRecyc` agree at **55** — the figure is
+real, not optimistic — and the boot arena must carve 55 chunks to empty
+**45**. Net +20 against what is held today. The only rows with a minus sign
+are at `N>=200,000`, where the window is **64% garbage**, `chunksB=83` is a
+fantasy its own upper bound puts at 167, and the honest reading of `-2` is
+"between -2 and +72".
+
+The blocker is `Aleft`, not recall. At `N=200,000` the key has **99.76%
+recall** and still saves 2 chunks, because 16 chunks are kept by **179
+objects born in the steady state** — 13,664 bytes holding 1.00 MiB of chunk.
+Twelve chunks are kept by **40 objects** born after ordinal 10,000,000. No
+birth-time key reaches them; they *are* the late phase.
+
+### The controls
+
+* **`deaths + live == seq`**, exact, or the file refuses: the dense clock is
+  the denominator of everything above.
+* **The null arm.** `smoke.ts` returns normally, the runtime tears its globals
+  down, the block dump is empty — `phase.mjs` prints `NULL ARM` by name rather
+  than a table of zeros.
+* **The positive arm, whose answer is arithmetic.** `smoke-exit.ts` keeps one
+  object per 500 and leaves through `_Exit`. `phase.mjs` reads its survival
+  rate as **0.200% in every single bucket**, finds no knee, reports a
+  per-chunk birth span of 800,598 of 801,601 — total mixing — and shows the
+  phase key freeing 1 chunk at every startup cut. An instrument that reported
+  a cohort there would be reading noise; this one reports the construction.
+* **A permutation null for `freed`.** Routing 99.8% of survivors frees most
+  chunks whatever the key is, so `freed` alone proves nothing. Holding `|B|`
+  fixed and choosing B uniformly at random, 200 trials:
+
+  ```
+  cut N        |B|   freed(phase)   freed(random, mean)   freed(random, max)
+     50000   49082             45                  7.44                   11
+     92182   65802             72                 13.88                   19
+    200000   72934             95                 41.58                   50
+  ```
+
+  The phase key is doing real work. It is not enough.
+* **Three runs, and the cohort is bit-identical across them.** `pc1`, `pc2`
+  and `pr0` give the same B at every cut below 200,000 — 9,658 / 29,374 /
+  49,082 / 63,315 / 65,802 / 70,395 / 72,934 — to the object. The verdict row
+  is `-2 / -4 / -4` chunks: read it as a draw of **2..4 chunks of the 18**.
+
+### What this does NOT measure, and it is the one assumption in the file
+
+The block dump holds **survivors**. It cannot say how many chunks a boot
+arena would carve to serve the window's **churn**, so `noRecyc` charges the
+window's dead the run's mean physical size and splits them across classes in
+the survivors' own byte proportions. **That split is an assumption** — the
+census carries no per-class birth-windowed byte count, and taking one needs a
+re-instrumented run. It does not reach the answer: the cuts that decide it
+(`N<=70,000`) are 90-98% pure, where `chunksB` and `noRecyc` differ by 0 to 4
+chunks and the assumption has almost nothing to weigh.
+
+### A correction to the reading above
+
+**The three armed runs are not replicates.** `pc1` ran 36,368,275 cycle
+allocations; `pc2` and `pr0` ran **47,032,105 and 47,032,280** — 29% more —
+and both controls (`ctl1`, `ctl2`) match `pc1`, not them (`listgive` 36.23M
+against 46.90M). The visible difference in the client log is the sqlite
+store's `write-behind pressure` line, 3,960 times on `pc1` against 7,728 on
+`pr0`: **the allocation stream of app182 is load-dependent and varies by 29%
+between runs on this host.** The `+1,804 blocks` instrument footprint above
+is unaffected — it rests on `pc1` against `ctl1`/`ctl2`, which are the same
+stream — but the sentence "the live set is bit-exact within a binary across
+runs" is true of the **live set** and not of the **stream**, and the two runs
+it cites differ by a third of the program. That the settled live set survives
+a 29% longer stream unchanged is a stronger result than the one claimed, and
+it is the reason the cohort replicates here.
+
+### The verdict
+
+The startup cohort is **real, pure and sharply bounded** — every adjective
+the reading above gives it — and it is **not separable as a policy**. A boot
+arena cannot pack the early survivors into fewer chunks than the chunks their
+departure empties, because the chunks they leave behind are pinned by later
+survivors anyway.
+
+The oracle's own 18 decomposes, measured per class rather than reasoned at:
+111 chunks pack to 83, of which **18 is the twelve sparse classes** (30 chunks
+to 12) and **10 is the 64-byte class** (81 to 71); the split then gives 10 back
+because three empty chunks become thirteen current ones. A birth-time key buys
+that packing only for the part of each class born inside its window, and at
+every window pure enough for the packing to be real it empties fewer chunks
+than it carves.
+
+**That closes the last open key on this front.** Type loses to mixing, site
+is a strict refinement of type, phase loses to `Aleft`, and the per-object
+oracle that bounds all three is 1.5% of a heap that is 10.9% of peak private
+commit (`docs/estado-vmwalk.md:67`). There is no allocator key left to test.
