@@ -771,11 +771,24 @@ export function llvmCoroPlans(
 export function coroRefusalReason(fn: IrFunction, plan: StacklessPlan): string | null {
   if (fn.generator !== undefined) return "generator";
   if (fn.async !== true) return "not-async";
-  // A plan with no point has no state and no dispatch to build. It cannot
-  // arrive today -- `suspensionLiveness` returns null when it finds none, so
-  // `stacklessPlan` bails before building one -- and the guard costs nothing
-  // next to a dispatch whose `switch` would carry only the entry arm.
-  if (plan.points.length === 0) return "points=0";
+  // A PLAN WITH NO POINT IS ADMITTED, and the paragraph that used to stand
+  // here refused it on an argument that has since been retired by its own
+  // premise. It said such a plan "cannot arrive today -- suspensionLiveness
+  // returns null when it finds none, so stacklessPlan bails before building
+  // one". stacklessPlan no longer bails: a null from suspensionLiveness means
+  // exactly "no suspension point", which is a VERDICT and now yields the
+  // empty plan. So the condition this guard described has become the largest
+  // row of the frontier (184 functions on zapo-rest/app182), and refusing it
+  // here would leave the SHIPPING lane spawning a fiber for every one of them
+  // while the C lane converted them -- the two lanes disagreeing about which
+  // functions touch fiber machinery at all.
+  //
+  // WHAT THE DISPATCH BECOMES. `switch` on the state with only the entry arm
+  // plus the default abort. That is not a degenerate case to be afraid of:
+  // state 0 is the only state such a frame can ever hold, because nothing in
+  // the body can write another one. emitter.ts asserts the plan agrees with
+  // the IR rather than assuming it, which is the check the old guard was
+  // really standing in for.
   // QUANTIFIED OVER EVERY POINT, and that is the whole hazard of opening the
   // count. Both tests below used to read `plan.points[0]` because there was
   // only ever one of them; leaving them that way while admitting a second
