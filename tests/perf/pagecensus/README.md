@@ -5,6 +5,13 @@ to the allocator only when the chunk is **completely empty**, so a single
 surviving object keeps all 64 KiB. A chunk is 16 pages and a survivor occupies
 one of them. Two files here ask whether the difference can be given back.
 
+**Read that sentence as being about the CHUNK, not about resident memory.**
+Since `14dc170c5` the per-page return below this line is compiled in and ON by
+default (`scr_cycle.c:596-598`), so the whole free pages inside a chunk one
+survivor keeps are already handed to the OS; what the survivor still pins is
+the chunk's 64 KiB of address space and commit charge. The measured
+demonstration, on one binary through the env knob, is in the `app182` section.
+
 | file | question |
 |---|---|
 | `scr_page_census.h` | **how much is there** — the whole free pages inside chunks the arena still holds, and how they are distributed across chunks |
@@ -100,6 +107,83 @@ figures above.* **What carries across arms is the SHAPE of the bound, not its
 value:** *the ceiling is chunks-held minus one unreturnable header page per
 chunk, and it is always a fraction of the settled set rather than of the heap.
 Recompute it from a cycstat reading on `app182/` before quoting a ceiling.)*
+
+### The `app182` ceiling, measured 2026-10-10
+
+Recomputed on the dial set above, `b6f4a2a47`, zig 0.16.0,
+`x86_64-windows-gnu`, LLVM lane, sqlite store, through
+`../zapo-rest/harness/memrig.mts`. The run names its own column:
+**`SETTLED 74.08 MiB privateCommit / 83.59 MiB workingSet`**, peak
+92.52 / 101.88.
+
+```
+cycstat   arena chunks=611 freed=497 held=114 peakheld=276 carved=471696
+pagecen   chunks=114  cur=24 part=32 full=58 nolive=3   held=7.12 MiB
+          slots carved=97501 free=5053 live=73113 livebytes=4701520
+          occupancy 0.6293
+          CEILING aligned freepages=564 = 2.20 MiB of 7.12 MiB held (30.9%)
+          histogram freepages/chunk: 0:68 1:2 2:1 3:2 6:1 7:1 10:2 11:2
+                                     12:1 13:8 14:7 15:19
+```
+
+So the bound on `app182`: 114 chunks is **7.13 MiB**, less one unreturnable
+header page per chunk (114 pages, 0.45 MiB), leaves **6.68 MiB — 8.0% of the
+settled working set**; and of that the census finds **2.20 MiB actually free**.
+The trade curve is flat to `T=11`, so a policy that only touched chunks with
+at least 11 free pages would still recover 2.04 MiB of the 2.20.
+
+**Chunks held is a draw and the ceiling is nearly not.** Four runs across two
+binaries of this tree (the second differing only by whether `../lifecensus`
+was `-include`d) gave 113, 114, 114 and 115 chunks held, and free-page
+ceilings of 2.20, 2.20, 2.24 and 2.32 MiB. Quote the ceiling as **2.2-2.3 MiB
+on this dial set and this host**, not as a single figure.
+
+**PAGE RETURN IS ALREADY COMPILED IN AND ON BY DEFAULT** —
+`scr_cycle.c:596-598` sets `SCR_CYC_PAGERETURN` to 1 and `scr_cyc_pr_on()`
+falls back to it — so the figures above are taken on an arm that is *already
+returning pages*, and the chunk-is-returned-only-when-empty rule
+(`scr_cycle.c:544-548`, `:1666`) costs working set only for the pages a live
+block sits on. Measured here on ONE binary with the env knob, which is the
+comparison that carries no layout confound:
+
+```
+                        slots carved   free list   live   carved-free-live
+SCR_CYCLE_PAGERETURN=1        97,501       5,053  73,113            19,335
+SCR_CYCLE_PAGERETURN=0        96,205      23,092  73,113                 0
+```
+
+Those 19,335 slots are the blocks `scr_cyc_pr_sweep_chunk` unthreaded before
+discarding their pages; with the knob off, every free block is on a list and
+the three columns close exactly. **Live blocks and live bytes are identical in
+both arms** (73,113 / 4,701,520), so the arm changes what is returned and not
+what is retained. What a lone survivor still pins on the default arm is 64 KiB
+of *address space and commit charge*, not 64 KiB of working set:
+`SCR_CYC_ARENA_VM_DEFAULT` is 0 (`scr_cycle.c:411-413`), so the verb is
+`DiscardVirtualMemory` and only `MEM_DECOMMIT` returns commit — see the probe
+table below.
+
+### Who is keeping the other 4.92 MiB — `../lifecensus`
+
+The census above says how much of a held chunk is free. It cannot say who is
+keeping the chunk, and therefore cannot adjudicate the obvious next move,
+which is to **segregate the arena by lifetime**. `../lifecensus` is that
+measurement: every allocation's birth, kind and allocation site, every death's
+lifetime on the allocation clock, and — per chunk this walk still holds — the
+blocks actually in it. Read its README for the reading; the three results that
+bear on this route:
+
+* **The pinning population is not lonely survivors.** 93 of 114 chunks hold
+  16 or more live blocks; **6 to 8 hold exactly one** (0.38-0.50 MiB over two
+  runs of one binary), and 16 hold eight or fewer (1.00 MiB).
+* **Type predicts survival superbly and segregation still loses.**
+  `scr_dyn_gcfree` survives at 85.3% against four kinds under 3%, and carries
+  66.1% of the survivor bytes for 0.16% of the allocation stream — but routing
+  it out empties **9 of the 111 non-empty chunks** while its own arena needs
+  54, a net **+55 chunks**. A *perfect* predictor lands at 96 chunks against
+  114: a ceiling of **18 chunks = 1.13 MiB**, 1.5% of settled privateCommit.
+* **The survivors are a startup cohort, not a type.** 90% of everything alive
+  at exit was allocated inside the first 92,182 of 36,368,275 cycle
+  allocations.
 
 ## The probe
 
