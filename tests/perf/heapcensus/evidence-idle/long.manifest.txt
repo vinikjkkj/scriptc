@@ -1,0 +1,10 @@
+tag          long
+position     1 of 4
+exe          /g/blocks/h2-out182-prof/zapo-rest-182.exe
+exe-bytes    33360896
+knobs        CHUNKS=8 CONVS=400 MSGS=6 TEXTLEN=300 ROUNDS=1 IDLE_S=60 SETTLE_MS=45000 PRESYNC_MS=20000 SCR_SQLITE_IDLE_RELEASE_MS=600000 SCR_SQLITE_IDLE_STAT=1
+started      2026-10-10T22:49:45Z
+free-G-GB    33G
+ended        2026-10-10T22:52:13Z
+rc           0
+free-G-GB    33G

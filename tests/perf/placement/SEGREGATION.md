@@ -283,6 +283,17 @@ free side in one process**, and the one line that would have refuted it was two
 lines below the table it quoted, in the same file. *Check the site's own size
 histogram before accepting any attribution drawn from population deltas.*
 
+> ***CONFIRMED 2026-10-10 — the SQLite term is returnable on demand; see
+> `heapcensus/IDLE-RELEASE.md` §1.*** SQLite is named just above as one of
+> the things *"left on the heap after all four"*, and that is right at the
+> shipped default. But it is not a fifth relocation problem: its 12,906,128 B
+> at rest go to **zero** when `SCR_SQLITE_IDLE_RELEASE_MS` is armed — no phase
+> boundary, no copy-out, no reservation. It belongs with this section's
+> *"the ones that matter need not land anywhere on the heap"* result rather
+> than with the residue, by a different mechanism: the page cache hands the
+> pages back itself. The one exception is a single 87,368-byte bulk slab per
+> cache held by one pinned page (`IDLE-RELEASE.md` §2).
+
 ## 4. Cross-check with `memcensus` — a registered negative
 
 **Nothing in the sync allocates 1,344 bytes.** From this branch's own

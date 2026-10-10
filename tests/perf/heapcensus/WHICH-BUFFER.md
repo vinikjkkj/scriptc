@@ -265,6 +265,18 @@ the cap.
 living inside the two bulk blocks (`87,368 = 4,368·20 + 8`, `nInitPage = 20`,
 `sqlite3.c:57980-58014`) = **2,832**, against `nMaxPage` 3,871 per cache.
 
+> ***ANSWERED 2026-10-10 — see `IDLE-RELEASE.md` §1.*** The pages are **not
+> pinned at rest.** Arming `SCR_SQLITE_IDLE_RELEASE_MS` drives this row from
+> 2,792 to **zero**, on the same workload and the same binary — the census row
+> stops existing, and `rg -c '^HCSIZE 4376 '` reads **1/1/0/0** across
+> `long`/`off`/`on`/`half-on`. The verdict above therefore stands as a
+> measurement of the **default**, not of the runtime's reach: *"nothing is
+> ever returned"* is true at `SCR_SQLITE_IDLE_RELEASE_MS=0`, which is what
+> ships, and false the moment the knob is set. What does **not** come back is
+> one 87,368-byte bulk slab per cache, held by a single pinned page —
+> `IDLE-RELEASE.md` §2, *"all-or-nothing: 19 of 20 pages unpinned returns
+> ZERO bytes."*
+
 ## 3. The instrument map that made the stacks readable
 
 `pdb-symbols.mjs`'s header states the PDB *"carries publics AND per-module
