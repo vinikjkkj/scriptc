@@ -361,27 +361,73 @@ are reproducible only with that rig, and that is a known gap.*
 
 ### 6a.3 The real application (`tests/perf/zapo-rest/app182`)
 
-Two binaries of the SAME program at `554d2fb65`, differing only in the lane
+Two binaries of the SAME program, differing only in the lane
 (`SCRIPTC_STACKLESS=0` vs the knob absent). Both are LLVM-lane builds (`.ll`,
-no `.c`); 59 of 59 assertions pass on each arm and the transcripts are
-byte-identical outside timestamp, pid and 2 ms. Instrument:
+no `.c`); every assertion passes on each arm (61 of 61 at `167fc0f8e`, 59 of
+59 at `554d2fb65` -- the harness has grown two) and the transcripts are
+byte-identical outside timestamp, pid, port and the exe path. Instrument:
 `PeakPagefileUsage` / `PeakWorkingSetSize` -- **kernel high-water marks read
 out of process, not a sampled series** (a downsampled series cannot measure a
 peak). Route `/s/alpha/store/threads?limit=20`, ABBA arm order, saturation
-cell n=6.
+cell n=6 (`554d2fb65`) and n=12 (`167fc0f8e`).
 
-| | fiber | stackless | ratio |
-|---|---|---|---|
-| peak private commit at saturation (62.9 concurrent chains) | 22.07 MiB | 13.92 MiB | **1.585x** (-37%) |
-| private working set (plateau) | 14.82 MiB | 11.04 MiB | 1.342x |
-| **marginal private commit per concurrent request** | 163.6 KiB | 41.8 KiB | **3.91x** |
-| throughput at saturation | 8,629 rps | 8,933 rps | **+3.5%** |
-| p50 at saturation | 6.995 ms | 6.701 ms | -4.4% |
+**The table below is the re-measurement at `167fc0f8e`. The numbers first
+recorded here, at `554d2fb65`, are kept beside it, because between the two
+heads 194 of the stackless arm's 196 remaining `scr_async_spawn` sites left
+the artifact and it is the fact that NOTHING MOVED that is the finding.**
 
-The marginal row is a least-squares slope over C=0..64, the region where
-achieved in-flight tracks offered 1:1 (R2 = 0.995 fiber, 0.996 stackless);
-socket-corrected it is 4.01x. Worst within-cell spread in peak commit is
-1.39%, against a 58.5% effect -- 42x the noise.
+| | fiber | stackless | ratio | (same row at `554d2fb65`) |
+|---|---|---|---|---|
+| peak private commit at saturation (62.9 concurrent chains) | 22.14 MiB | 13.91 MiB | **1.591x** (-37%) | 22.07 / 13.92 = 1.585x |
+| peak working set at saturation | 30.28 MiB | 26.49 MiB | 1.143x | 30.21 / 26.58 = 1.136x |
+| private working set (plateau) | 14.91 MiB | 11.03 MiB | 1.351x | 14.82 / 11.04 = 1.342x |
+| **marginal private commit per concurrent request** | 165.2 KiB | 42.0 KiB | **3.93x** | 163.6 / 41.8 = 3.91x |
+| throughput at saturation | not re-measurable, see below | | | 8,629 -> 8,933 rps = +3.5% |
+| p50 at saturation | not re-measurable, see below | | | 6.995 -> 6.701 ms = -4.4% |
+
+Every memory row reproduces to within 1.0% of the figure measured at
+`554d2fb65`, on both arms. The marginal row is a least-squares slope over
+C=0..64, the region where achieved in-flight tracks offered 1:1 (R2 = 0.994
+fiber, 0.998 stackless); socket-corrected it is 4.05x. Worst within-cell
+spread in peak commit is 2.07%, against a 59.1% effect -- 29x the noise.
+
+#### The re-measurement, and why it was owed
+
+`554d2fb65` measured a stackless arm whose emitted `.ll` still carried **196**
+`scr_async_spawn` call sites. At `167fc0f8e` that artifact carries **2** (the
+compile-time census reads `1485 lowered of 1485 planned`, against the
+`1,292 of 1,301` that 6a.4 describes). 194 sites -- the 184 of the
+zero-suspension-point row and the nine cross-park readers among them -- left
+the lane between the two heads.
+
+**They bought nothing on this program.** Peak private commit on the stackless
+arm went 13.92 -> 13.91 MiB (-0.04%) and the marginal went 41.8 -> 42.0 KiB
+(+0.52%), both inside the within-cell spread. Neither column moved: not the
+peak, not the slope.
+
+That is not a null result about the lane; it is a positive result about where
+the lane's cost lives. **A coroutine with no suspension point never parks**,
+so on the fiber arm its stack is acquired and released inside one turn and is
+never resident alongside another. It cannot appear in a high-water mark taken
+over 62.9 concurrently parked chains. The 8.2 MiB that separates the arms at
+saturation is paid by frames that are parked AT THE SAME TIME, and those were
+already converted when the first table was measured. Converting the rest was
+completeness and correctness work -- it closed the refusal set to zero -- and
+it is correctly scored at zero MiB here.
+
+**The fiber arm is the control, and it held**: 22.07 -> 22.14 MiB (+0.32%) and
+163.6 -> 165.2 KiB/req (+0.96%), across a compiler that changed under it. A
+fiber arm that had moved would have condemned the rig, not the lane.
+
+**Throughput was NOT re-measured, and the +3.5% above stands only as the
+`554d2fb65` figure.** The re-measurement ran on a box carrying 26-31 processes
+over 300 MB against that run's 7, and rps is the row that notices: within the
+single n=12 saturation cell the FIBER arm alone returned 3,702 to 6,632 rps, a
+1.79x spread, while its peak commit stayed inside 21.97-22.24 MiB (1.2%). Two
+sweeps of the same two binaries on the same afternoon put the lane's
+throughput edge at +0.9% and at +11.6%. Memory was measurable on that box;
+throughput was not. **That is the general shape: a kernel high-water mark over
+a fixed workload is robust to a loaded host, and a rate is not.**
 
 **Four things bound those numbers, and they matter as much as the numbers.**
 
@@ -392,11 +438,15 @@ socket-corrected it is 4.01x. Worst within-cell spread in peak commit is
    numerator AND the denominator. Different denominators, so the ladder
    number is not even an upper bound on this one by a safe argument.
 2. **The ratio is not a constant of the lane, and it is not monotone in
-   payload size.** Marginal KiB per request, C=0 vs C=64, n=2 per cell:
-   404 **2.28x**, `/health` **1.92x**, threads-20 **3.96x**, threads-200
-   **1.88x**. (threads-20 reads 3.96x here and 3.91x in the table above
-   because this is a two-point slope and that one is least squares over seven
-   cells; same data, different estimator.) The prediction that a LIGHTER
+   payload size.** Marginal KiB per request, C=0 vs C=64, n=2 per cell, at
+   `167fc0f8e` with the `554d2fb65` reading in brackets:
+   404 **1.95x** (2.28x), `/health` **1.67x** (1.92x), threads-20 **3.70x**
+   (3.96x), threads-200 **1.89x** (1.88x). The ORDER is reproduced exactly,
+   and the peak-commit column reproduces to within 0.6% on all four routes.
+   (The marginal column here is a two-point slope at n=2 and is the noisiest
+   estimator in this section; the table above is least squares over seven
+   cells -- same data, different estimator, 3.70x against 3.93x on the same
+   route.) The prediction that a LIGHTER
    request would show a HIGHER ratio was REFUTED. The model that fits all
    four rows has two terms -- `F(lane, call depth) + H(per-request heap)`.
    `F` is lane-dependent: a fiber commits real stack pages down to the
@@ -410,8 +460,10 @@ socket-corrected it is 4.01x. Worst within-cell spread in peak commit is
    comparison fair. No zapo-rest route parks a chain, so for THIS program the
    per-chain saving multiplies by **<= 63, never by 384,000**. The C=64 ->
    C=512 cells add 448 sockets and zero chains, which isolates the socket
-   cost: +1,586 B/socket fiber, +1,402 B/socket stackless, lane-independent
-   as it must be.
+   cost: +1,586 B/socket fiber and +1,402 B/socket stackless at `554d2fb65`,
+   +1,190 and +1,516 at `167fc0f8e`. The two runs bracket each other rather
+   than agreeing, so this control establishes that the socket cost is
+   lane-independent to about +/-15%, not to three digits.
 4. **The +3.5% is a FLOOR on the throughput gain, not a ceiling.** The load
    generator shared the same 6-core box, so both arms were compressed by
    contention.
@@ -422,6 +474,12 @@ construction), `/connect` chains (needs the network), and startup latency
 (lazy migration dominates).
 
 ### 6a.4 Reach on the real load
+
+**SUPERSEDED at `167fc0f8e`: the census now reads `1485 lowered of 1485
+planned`, with `scr_async_spawn` 1,487 -> 2 call sites in the emitted `.ll`.
+The refusal set on app182 is EMPTY.** What follows is the account at the
+revision this section was written for, kept because 6a.3's first table was
+measured against it.
 
 **1,292 of 1,301 planned coroutines lower** on app182, triangulated three
 ways and cross-checked exactly against `scr_async_spawn` 1,488 -> 196
