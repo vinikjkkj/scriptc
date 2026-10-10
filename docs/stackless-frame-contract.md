@@ -517,10 +517,17 @@ not to look.
   promise minted, `scr_gen_of_coro` wraps it in an `ScrGen` whose stored
   discriminant says FRAME rather than FIBER, and `scr_coro_yield_*` returns
   to the consumer without a ready push. An **async** generator still stays
-  out, and `ir/liveness.ts` records that the stated reason was the wrong one:
-  its `yield` calls `scr_await_hop` inside `scr_agen_yield_settle`, and the
-  hop is the one suspender this lane declares it cannot lower — so it
-  belongs to the hop front, not to this one. **Reach of the sync-generator
+  out, and **the reason printed here until 2026-10-10 was itself the wrong
+  one**: it said the `yield` calls `scr_await_hop` inside
+  `scr_agen_yield_settle` and "the hop is the one suspender this lane
+  declares it cannot lower". `async.hop` is lowerable on both backends
+  (`ir/suspends.ts`), and that hop is not an IR node, so no suspender
+  analysis ever saw it. The real reason is that **this contract has no async
+  half**: `scr_gen_of_coro` takes no settle thunk, the `scr_agen_*` consumer
+  entries have no `SCR_GEN_BACKED_FRAME` branch, `scr_gen_coro_step` answers
+  YIELDED/DONE/threw with no arm for a body parked on an `await`, and the
+  frame yield arms settle no request promise. Enumerated with lines at the
+  gate in `ir/liveness.ts`. **Reach of the sync-generator
   clause on app182 is ZERO and that is measured, not unknown:** all three of
   its remaining generator-family functions are async, so the adjudicator is
   generator-lane parity, never an app182 coverage delta.
