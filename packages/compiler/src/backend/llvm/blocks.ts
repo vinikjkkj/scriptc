@@ -658,6 +658,199 @@ export class BlockBuilder {
     }
   }
 
+  /** THE OTHER HALF OF THE SAME QUESTION, and the half the prune above does
+   * not answer. Returns the first carried origin whose reload cannot cover one
+   * of its own uses, or null when every carry is sound.
+   *
+   * REACHABILITY IS NOT DOMINANCE, and a flag has THREE fates rather than two.
+   * `pruneUnreachableCrossPark` asks "can the dispatch reach this use", which
+   * decides whether the ORIGINAL name is still live there. That splits the
+   * flags into reachable (carry it) and unreachable (exempt it) and leaves a
+   * third case unnamed: a use the dispatch CAN reach and the entry arm can
+   * reach TOO. Then neither name works. The reload is defined in the resume
+   * block, so it does not dominate the path that never parked; the origin is
+   * defined before the park, so it does not dominate the path that did. The
+   * carry rewrites the use into the reload and the module stops verifying.
+   *
+   * MEASURED, NOT IMAGINED. `args.iv ?? (await f())` is exactly this shape:
+   * the `??` branches into an arm that parks and an arm that does not, and
+   * they JOIN. The retain taken for `args` is released in the join block,
+   * which `nul.v<n>` reaches from before the park and `sc_S1` reaches from
+   * after it. zig cc rejected it in seven of app182's functions:
+   *
+   *     Instruction does not dominate all uses!
+   *       %cx0_t114 = load ptr, ptr %cxr0_t114, align 8
+   *       call void @sc_rrelease_r134(ptr %cx0_t114)
+   *
+   * THE PREDICATE IS "CAN THE ENTRY ARM REACH THIS BLOCK WITHOUT PASSING A
+   * RESUME LABEL", which is the contrapositive of what the carry needs and is
+   * one walk rather than a dominator tree. Resume blocks are barriers because
+   * the dispatch enters them directly: a path through one has reloaded, a path
+   * that avoids one has not. Any use the walk reaches is a use the reload
+   * cannot have defined, whatever the emission ordinal said.
+   *
+   * IT NAMES A REPAIR RATHER THAN A REFUSAL. The caller throws
+   * CrossParkTempPromoteError, so the origin stops being an SSA reload and
+   * becomes an alloca the entry block allocates -- memory every path can see,
+   * which is the same answer the second-suspension case already takes and
+   * dominates by construction. Refusing would also be sound and would cost the
+   * function its LLVM lowering; promoting costs a frame slot.
+   *
+   * IT DECLINES ON A SHAPE IT CANNOT READ, exactly as the prune does: a
+   * duplicate label or an edge to a block that is not in the list means this
+   * walk is not looking at the CFG it thinks it is, and a wrong answer here
+   * would promote -- or fail to promote -- on a reading of nothing. */
+  carryDominanceOffender(): string | null {
+    if (this.rename.size === 0) return null;
+    const n = this.blocks.length;
+    const byLabel = new Map<string, number>();
+    for (let i = 0; i < n; i++) {
+      const l = this.blocks[i]!.label;
+      if (byLabel.has(l)) return null;
+      byLabel.set(l, i);
+    }
+    const succ: number[][] = [];
+    for (let i = 0; i < n; i++) {
+      const out: number[] = [];
+      // A null terminator renders as `unreachable` (see render): a dead end.
+      const t = this.blocks[i]!.term;
+      if (t !== null) {
+        for (const m of t.matchAll(/label %([A-Za-z0-9_.$]+)/g)) {
+          const j = byLabel.get(m[1]!);
+          if (j === undefined) return null;
+          if (!out.includes(j)) out.push(j);
+        }
+      }
+      succ.push(out);
+    }
+    // REVERSE POSTORDER FROM BLOCK 0, which is the entry block the dispatch
+    // switch closes -- so every resume label is a SUCCESSOR of the root rather
+    // than a root of its own, and a block only one of them reaches is
+    // dominated by it. That is the property the carry needs and the reason
+    // this walks from the entry instead of seeding the resume labels.
+    const order: number[] = [];
+    const opened = new Uint8Array(n);
+    const stack: { b: number; k: number }[] = [{ b: 0, k: 0 }];
+    opened[0] = 1;
+    while (stack.length > 0) {
+      const top = stack[stack.length - 1]!;
+      const s = succ[top.b]!;
+      if (top.k < s.length) {
+        const j = s[top.k++]!;
+        if (opened[j] === 0) {
+          opened[j] = 1;
+          stack.push({ b: j, k: 0 });
+        }
+      } else {
+        order.push(top.b);
+        stack.pop();
+      }
+    }
+    order.reverse();
+    const rpo = new Int32Array(n).fill(-1);
+    for (let k = 0; k < order.length; k++) rpo[order[k]!] = k;
+    const preds: number[][] = [];
+    for (let i = 0; i < n; i++) preds.push([]);
+    for (let i = 0; i < n; i++) {
+      if (rpo[i]! < 0) continue;
+      for (const j of succ[i]!) preds[j]!.push(i);
+    }
+    // THE CLASSIC ITERATIVE DOMINATORS (Cooper, Harvey, Kennedy). Over a
+    // reverse postorder it converges in a couple of sweeps on a reducible
+    // graph, and the bodies here are reducible: the emitter's only back edges
+    // are loop latches.
+    const idom = new Int32Array(n).fill(-1);
+    idom[0] = 0;
+    const meet = (a: number, b: number): number => {
+      let x = a;
+      let y = b;
+      while (x !== y) {
+        while (rpo[x]! > rpo[y]!) x = idom[x]!;
+        while (rpo[y]! > rpo[x]!) y = idom[y]!;
+      }
+      return x;
+    };
+    for (let spin = true; spin; ) {
+      spin = false;
+      for (const b of order) {
+        if (b === 0) continue;
+        let ni = -1;
+        for (const p of preds[b]!) {
+          if (idom[p] === -1) continue;
+          ni = ni === -1 ? p : meet(p, ni);
+        }
+        if (ni !== -1 && idom[b] !== ni) {
+          idom[b] = ni;
+          spin = true;
+        }
+      }
+    }
+    const dominates = (d: number, u: number): boolean => {
+      for (let x = u; ; x = idom[x]!) {
+        if (x === d) return true;
+        if (x === 0 || idom[x] === -1 || idom[x] === x) return false;
+      }
+    };
+    /* THE USES ARE COLLECTED IN ONE PASS OVER THE BODY, not one pass per
+     * carried origin. `main` carries dozens of them and renders tens of
+     * thousands of lines, and this runs on every pass of the fixpoint.
+     *
+     * AND THE TOKEN SHAPE IS ASSERTED RATHER THAN ASSUMED. The scan finds
+     * candidate occurrences with a pattern, which is a detector that would
+     * read ZERO -- silently, and on every body -- if `crossName` ever spelled
+     * a reload differently. So every name this is about to look for is checked
+     * against the pattern first, and a mismatch is an emitter bug and not a
+     * clean body. */
+    const freshOf = new Map<string, string>();
+    for (const [origin, fresh] of this.rename) {
+      if (!/^%cx[0-9]+_t[0-9]+$/.test(fresh)) {
+        throw new Error(
+          `llvm emitter bug: the cross-park reload ${fresh} (for ${bare(origin)}) is not ` +
+            `spelled the way carryDominanceOffender scans for. The carry's dominance check ` +
+            `would silently find no uses and pass every body. Update the scan with crossName.`,
+        );
+      }
+      freshOf.set(fresh, origin);
+    }
+    const defAt = new Map<string, number>();
+    const usedAt = new Map<string, number[]>();
+    const scan = (s: string, i: number, defining: boolean): void => {
+      for (const m of s.matchAll(/%cx[0-9]+_t[0-9]+/g)) {
+        const f = m[0];
+        if (!freshOf.has(f)) continue;
+        // The reload's own defining line, which is a definition and not a use.
+        if (defining && s.trimStart().startsWith(`${f} =`)) {
+          if (!defAt.has(f)) defAt.set(f, i);
+          continue;
+        }
+        const u = usedAt.get(f);
+        if (u === undefined) usedAt.set(f, [i]);
+        else if (!u.includes(i)) u.push(i);
+      }
+    };
+    for (let i = 0; i < n; i++) {
+      // AN UNREACHABLE BLOCK CANNOT EXECUTE, so a use in one is not a defect
+      // -- and it has no idom, so asking would answer on nothing.
+      if (rpo[i]! < 0) continue;
+      const b = this.blocks[i]!;
+      for (const s of b.lines) scan(s, i, true);
+      if (b.term !== null) scan(b.term, i, false);
+    }
+    for (const [origin, fresh] of this.rename) {
+      const d = defAt.get(fresh);
+      // No reload in any reachable block: nothing was carried on a live path.
+      if (d === undefined) continue;
+      for (const u of usedAt.get(fresh) ?? []) {
+        // SAME BLOCK IS DOMINATED, and that is not a special case being waved
+        // through: the reload is the first thing the resume block emits, so a
+        // use beside it is textually after it.
+        if (u === d) continue;
+        if (!dominates(d, u)) return origin;
+      }
+    }
+    return null;
+  }
+
   /** Is this origin already being carried, i.e. was it reloaded at an EARLIER
    * suspension? See emitCoroTempSpill for why that is a refusal. */
   isCarried(origin: string): boolean {

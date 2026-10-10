@@ -7038,6 +7038,18 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/3494-nullish-await-default-on-a-member.ts": {
+   "order": [
+    "<repo>/tests/corpus/3494-nullish-await-default-on-a-member.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/3495-await-join-past-an-earlier-resume.ts": {
+   "order": [
+    "<repo>/tests/corpus/3495-await-join-past-an-earlier-resume.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/3501-union-arm-through-a-symbolic-generic.ts": {
    "order": [
     "<repo>/tests/corpus/3501-union-arm-through-a-symbolic-generic.ts"

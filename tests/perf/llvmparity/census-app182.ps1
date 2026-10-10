@@ -23,13 +23,16 @@ param(
   # This is what settles "is zapo-js 1.8.2 on the LLVM tier" -- a census
   # run deliberately yields nothing linkable, so it can never answer it.
   [switch]$NoCensus,
-  [string]$OutRoot = "<blocks>\llvmparity"
+  # Empty means "take it from SCRIPTC_BLOCKS_ROOT", filled in below once
+  # env.ps1 has run and checked that the variable is set.
+  [string]$OutRoot = ""
 )
 
 $ErrorActionPreference = "Continue"
 $repo = Split-Path -Parent (Split-Path -Parent (Split-Path -Parent $PSScriptRoot))
 Set-Location $repo
 . "$PSScriptRoot\env.ps1"
+if (-not $OutRoot) { $OutRoot = "$($env:SCRIPTC_BLOCKS_ROOT)\llvmparity" }
 
 if ($NoCensus) { Remove-Item Env:\SCRIPTC_LLVM_CENSUS -ErrorAction SilentlyContinue }
 else { $env:SCRIPTC_LLVM_CENSUS = "1" }

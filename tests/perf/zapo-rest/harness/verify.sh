@@ -32,7 +32,17 @@ export ZAPO_SESSION=verify
 # counts move underneath the restart diff for reasons that have nothing to do
 # with persistence. Set ZAPO_AUTOCONNECT=1 to watch real connect attempts.
 export ZAPO_AUTOCONNECT=${ZAPO_AUTOCONNECT:-0}
-export USERPROFILE="${HOME_ROOT:-<home>}"
+# A DEFAULT THAT CANNOT EXIST IS NOT A DEFAULT. This read `${HOME_ROOT:-<home>}`,
+# and `<` and `>` are illegal in Windows filenames -- so when HOME_ROOT was unset
+# this exported a USERPROFILE no path could resolve, and scr_os_homedir traps on
+# it rather than falling back. Fail here, where the message can say what to set.
+: "${HOME_ROOT:=${USERPROFILE:-}}"
+if [ -z "$HOME_ROOT" ]; then
+  echo "verify.sh: set HOME_ROOT (or USERPROFILE) to the user profile directory --" >&2
+  echo "           scr_os_homedir traps without it, and 8 corpus failures once were this." >&2
+  exit 2
+fi
+export USERPROFILE="$HOME_ROOT"
 
 H="-H x-api-key:$TOKEN"
 B="http://127.0.0.1:$PORT"
