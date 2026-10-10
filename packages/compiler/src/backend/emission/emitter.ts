@@ -2499,6 +2499,35 @@ export class CEmitter {
     return { name, type };
   }
 
+  /** Register an ALREADY-DECLARED result temp in its frame, on exactly
+   * newTemp's terms -- see the note above it for why EVERY temp joins a
+   * frame, refcounted or not.
+   *
+   * newTemp cannot serve the BRANCHING results (`ternary`, `logical`,
+   * `nullish`, `orDefault`, `optChain`, `unionDisc`, `unionKeyGet`): their
+   * slot is declared BEFORE the arms and written INSIDE them, so there is
+   * no initializer to mint it from. All nine sites registered the slot
+   * only `if (isRefCounted(...))` -- ownership bookkeeping, which is what
+   * the frames used to be for -- and so a `double` or a `bool` branch
+   * result was invisible to emitCoroAwait's spill. Measured on the
+   * stackless C lane, knob on: `console.log("r", f() ? 7 : 9, await p(8))`
+   * answered `r 3.56684903562e-312 8`, `f() && g()` answered false, and
+   * `s.kind` over a shared-field union answered 6.95e-310 -- the slot is a
+   * C local in the resume function, the park RETURNS to the scheduler, and
+   * the resume `goto` jumps over its declaration. 7470 is the corpus
+   * program that caught it (`awaited 0 8` for `awaited 7 8`): `await` of a
+   * `T | PromiseLike<T>` lowers to a ternary, so TWO of them in one
+   * argument list put the first ternary's result across the second's park.
+   *
+   * OWNERSHIP IS UNCHANGED: releaseFrame skips a non-refcounted entry and
+   * moveTemp returns early for one, so this is spill bookkeeping only. The
+   * frame-exists guard is newTemp's, and refcounted keeps the historical
+   * loud failure -- currentFrame throws when there is no frame to own it. */
+  registerTemp(t: Temp): void {
+    if (!isRefCounted(t.type) && this.frames.length === 0) return;
+    this.currentFrame().push({ name: t.name, type: t.type });
+  }
+
   /** newTemp for a value that IS an interned immortal static (see
    * `Temp.immortal`): the initializer is the address itself rather than a
    * retain of it, and the frame entry is marked so `releaseFrame` writes no
