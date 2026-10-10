@@ -1,0 +1,4 @@
+[fiberstat] out=0 outHi=11 pool=11 poolHi=11 fresh=11 freed=0 via=_Exit susp=0 suspHi=11 entries=1 overflow=0
+[parktable] base=00007FF6EF130000
+entry	kind	spawns	parkIn	parkLive	parkHi	yieldIn	yieldLive	yieldHi
+00007FF6EF713D90	async	16	16	0	11	0	0	0
