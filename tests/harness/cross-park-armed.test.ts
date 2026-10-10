@@ -221,6 +221,92 @@ describe("the cross-park temp detector is armed", () => {
     expect([...v.exempt]).not.toContain(t);
   });
 
+  /* THE THIRD FATE OF A FLAG, and the one neither test above covers.
+   *
+   * The pair above splits every flagged use in two: the dispatch can reach it
+   * (carry it) or it cannot (exempt it). That split is EXHAUSTIVE over the
+   * question it asks and silently incomplete over the one that matters,
+   * because "reachable from the dispatch" and "dominated by the reload" are
+   * not the same predicate. A use in the JOIN of the two arms is reachable
+   * from the dispatch -- through the resume label -- AND reachable from the
+   * entry arm, which never passed the resume label at all. The prune keeps it,
+   * the reload is installed in `sc_S1`, and the join reads a value that is not
+   * defined on one of its two predecessors.
+   *
+   * MEASURED, AND IT IS WHY THIS PAIR EXISTS. `args.iv ?? (await f())` emits
+   * exactly this when the left of the `??` is a MEMBER ACCESS: the receiver is
+   * retained before the branch and RELEASED in the join, so the join holds a
+   * use the resume block cannot cover. That is the difference from
+   * tests/corpus/3492-nullish-retag-await-default.ts, whose `??` lefts are all
+   * bare locals -- no retain, no release, no use in the join -- which is why
+   * the prune alone was enough for it and was not enough for app182. zig cc
+   * rejected seven of that program's functions with
+   * "Instruction does not dominate all uses!" on the shipping default.
+   *
+   * BOTH DIRECTIONS, for the same reason the prune pair has both: a check that
+   * answered "offender" for every carried temp would make the first test pass
+   * and refuse the whole lane, so the second requires a sound carry to come
+   * back clean. */
+  /** The shape both tests below vary: an entry dispatch, a value minted on the
+   * entry arm, a two-armed suspension where only ONE arm parks, and a join. */
+  function joinBuilder(useInJoin: boolean): { B: BlockBuilder; t: string; fresh: string } {
+    const B = new BlockBuilder();
+    B.enterCoro("f");
+    B.terminate("switch i32 %st, label %bad [ i32 0, label %sc_S0 i32 1, label %sc_S1 ]");
+    B.startBlock("bad");
+    B.terminate("unreachable");
+    B.startBlock("sc_S0");
+    const t = B.tmp();
+    B.line(`${t} = call ptr @mk()`);
+    B.condBr("%c", "nul.u", "nul.v");
+    // The parking arm: spill and return to the scheduler.
+    B.startBlock("nul.u");
+    B.line(`store ptr ${t}, ptr %cxs0`);
+    B.terminate("ret void");
+    // The resume label, and the reload the carry installs in it.
+    B.startBlock("sc_S1");
+    B.parkBoundary();
+    const fresh = "%cx0_t0";
+    B.line(`${fresh} = load ptr, ptr %cxr0`);
+    B.renameTemp(t, fresh);
+    if (!useInJoin) B.line(`call void @release(ptr ${t})`);
+    B.br("nul.j");
+    // The NON-parking arm, which reaches the join without passing sc_S1.
+    B.startBlock("nul.v");
+    B.br("nul.j");
+    B.startBlock("nul.j");
+    // `line()` applies the rename before anything else sees the text, so this
+    // arrives in the join spelled as the reload -- which is the defect.
+    if (useInJoin) B.line(`call void @release(ptr ${t})`);
+    B.terminate("ret void");
+    return { B, t, fresh };
+  }
+
+  test("a carry whose reload cannot cover the JOIN is reported, and names the origin", () => {
+    const { B, t, fresh } = joinBuilder(true);
+    // The premise: the use really did arrive spelled as the reload. Without
+    // this the test could pass on a body where the rename never applied.
+    expect(B.render(), "the join must hold the RELOAD's name, not the origin's").toContain(
+      `call void @release(ptr ${fresh})`,
+    );
+    expect(
+      B.carryDominanceOffender(),
+      "nul.v reaches nul.j without passing sc_S1, so the reload does not define it",
+    ).toBe(t);
+  });
+
+  test("a carry used ONLY past the resume label comes back clean", () => {
+    // Identical except for WHERE the use sits. If the check were keyed on
+    // anything but entry-arm reachability this would be reported too, and
+    // reporting it costs every sound carry a needless frame slot -- or, when
+    // the type cannot be read, the function's whole lowering.
+    const { B } = joinBuilder(false);
+    expect(
+      B.carryDominanceOffender(),
+      "a use inside the resume region is exactly what the carry is for",
+    ).toBeNull();
+  });
+
   test("an EXEMPT origin is no longer flagged at all", () => {
     // What the fixpoint installs on the pass that counts. Without this the
     // second probe pass would re-raise every pruned flag and the emitter would
