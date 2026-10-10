@@ -536,7 +536,7 @@ document was rebuilt from.
     packages/runtime/src/scr_exception.c:350
     packages/runtime/src/scr_error.c:23
 
-### An idle event loop may hand SQLite's page cache back (CONDITIONAL, OFF by default)
+### An idle event loop hands SQLite's page cache back (ON by default)
 
 KIND: NEW. Introduced 2026-10-03, not archaeological.
 
@@ -555,11 +555,25 @@ against a 1000 ms window gives a median 0.33 ms FASTER than the control, p10,
 p90 and max overlapping or lower, because connections used inside the window
 are skipped rather than released.
 
-IT IS CONDITIONAL, and this is the part that makes the entry honest. The
-feature ships OFF. SCR_SQLITE_IDLE_RELEASE_MS=0 is the default, the seam then
-costs one integer compare, and NO BINARY DIVERGES FROM NODE UNLESS SOMEONE
-SETS THAT VARIABLE. A conditional divergence is a more precise statement than
-a number would be, which is the other reason not to assign one.
+IT WAS CONDITIONAL UNTIL 2026-10-10 AND IS NOT ANY MORE, and saying so
+plainly is what keeps the entry honest. The feature now ships ON, at the
+1000 ms window every measurement above was taken at. The sentence this
+replaces read: the feature ships OFF, SCR_SQLITE_IDLE_RELEASE_MS=0 is the
+default, and NO BINARY DIVERGES FROM NODE UNLESS SOMEONE SETS THAT VARIABLE.
+**That sentence has inverted.** Every binary holding a SQLite handle now
+diverges from Node on process memory unless someone sets the variable to 0.
+
+The divergence is still only on the memory axis -- sqlite3_db_release_memory
+frees unpinned pages and changes no query result, no error, no row order, no
+value and no pragma readback -- so what changed is its REACH, not its kind. It
+is recorded here rather than numbered for the reason below, unchanged.
+
+SCR_SQLITE_IDLE_RELEASE_MS=0 remains the negative control and restores the old
+behaviour exactly: the env read clamps any value <= 0 to 0 and the seam costs
+one integer compare again. The rationale the code carried for shipping OFF was
+that a new runtime default does not arrive with a feature's debut but
+afterwards, with use behind it; the debut was 2026-10-03 and gated 6/6, so
+this is that condition being met rather than being overruled.
 
 NO number is assigned, for the reason the entry above gives and which applies
 unchanged here: numbering is the registry owner's call, this document is a
