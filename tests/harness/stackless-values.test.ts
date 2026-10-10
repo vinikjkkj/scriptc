@@ -17,8 +17,13 @@
  *
  * WHY THE FIRST VERSION OF THIS FILE WAS ALSO BLIND, which is the same lesson
  * one level up. It listed one async function per result kind and compared the
- * program's output -- but a function with NO await is not a suspension point,
- * and `stacklessPlan` returns null for it; an await NESTED in a call argument
+ * program's output -- but a function with NO await was not a suspension point,
+ * and `stacklessPlan` returned null for it (NO LONGER TRUE as of the
+ * zero-point row: such a function converts now and gets a dispatch carrying
+ * only the entry arm -- tests/harness/stackless-nosuspend.test.ts owns it.
+ * The sentence is kept in the past tense because it is the account of a
+ * mistake made when it WAS true, and that account is what this paragraph is
+ * for); an await NESTED in a call argument
  * (`console.log("x", await f())`) is not straight-line, and one non-D1 point
  * disqualifies the WHOLE function. So of the nine lines it printed, exactly
  * ONE came from a converted coroutine. Measured in its own emitted C: the
@@ -409,8 +414,12 @@ const WRAPPERS: ReadonlyArray<{ name: string; take: string; finish: string; conv
 ];
 
 const SOURCE = `
-// Producers. None of these has an await, so none is a coroutine on either
-// lane -- they exist only to settle a promise of each payload kind.
+// Producers. They exist only to settle a promise of each payload kind.
+// EIGHT OF THE NINE HAVE NO AWAIT, and that used to mean none of them was a
+// coroutine on either lane. It does not any more: a body with no suspension
+// point at all converts now, so eight of these are zero-point coroutines and
+// are named in LLVM_FLOOR_NON_WRAPPERS. The ninth, pu, always suspended --
+// returning a union makes its value a promise this function awaits.
 async function pf(v: number): Promise<number> { return v + 1; }
 async function pb(v: boolean): Promise<boolean> { return v; }
 async function ps(v: string): Promise<string> { return v + "!"; }
@@ -1228,6 +1237,43 @@ const LLVM_FLOOR_NON_WRAPPERS: ReadonlyArray<readonly [string, string]> = [
   // here. Its row moved from LLVM_NOT_LOWERED_NON_WRAPPERS, where it had sat
   // under five different first-blockers.
   ["main", "the program itself; its value is all 38 printed lines, against the fiber arm"],
+  // THE EIGHT PRODUCERS, and they entered this lane TOGETHER because one
+  // condition opened: an async body with NO SUSPENSION POINT AT ALL now
+  // converts. They are the functions the wrappers await, so they were always
+  // in this program; what changed is that each is a coroutine with a dispatch
+  // carrying only the entry arm.
+  //
+  // WHY THEY ARE NON-WRAPPERS AND NOT A PARTITION MISS, decided per function
+  // in the ARTIFACT rather than by reading this file: each one's resume
+  // dispatch has exactly ONE case (state 0), no `%awaited` local and no call
+  // to scr_coro_park. A wrapper has at least two cases and parks -- `wf` has
+  // 2, `main` has 102. They cannot be wrappers: a wrapper is defined by a
+  // root-level await, and these contain no await at all.
+  //
+  // pu IS NOT ONE OF THEM, which is the control that this group is a real
+  // category and not "every p* name". It sits above because it has always
+  // suspended: its dispatch carries THREE cases and it parks. Returning
+  // `number | null` makes the return value a union the function must await --
+  // measured in its body as scr_union_new_f64 -> scr_promise_retain_v ->
+  // scr_coro_park -> scr_coro_take_ref. `pd` returns `any` and does NOT get
+  // that treatment; the union return is what buys the points, and that is
+  // recorded as measured rather than extended into a rule.
+  //
+  // THEIR VALUE COVERAGE IS PER ROW, which is what this column is for. Each
+  // is awaited by a wrapper whose result the output comparison prints and
+  // diffs against the fiber arm, so a zero-point lowering that answered the
+  // wrong value, settled the wrong payload field or failed to settle at all
+  // fails that comparison by row rather than passing as a count. The rows are
+  // named individually below; an aggregate "the producers are covered" would
+  // be exactly the guard this list exists to refuse.
+  ["pf", "the number producer, awaited by wf and wv; its value is the `f64` row (42) and the `vfin` row (8)"],
+  ["pb", "the bool producer, awaited by wb/wbb/wgb; its value is the `bool` row (true false)"],
+  ["ps", "the string producer, awaited by ws/wbs; its value is the `str` row (x! 2)"],
+  ["pa", "the array producer, awaited by wa/wgr; its value is the `ref` row (5,6 2)"],
+  ["pd", "the dyn producer, awaited by wd; its value is the `dyn` row (d3 null string object)"],
+  ["pv", "the void producer, awaited by wtv; its COMPLETION is the `tvoid` row (void-take) -- a lowering that never settles hangs that row rather than changing it"],
+  ["prej", "the REJECTING producer, awaited by wr; its rejection is the `rej` row (boom true), which is the only row that exercises scr_coro_finish_throw on a body with no suspension point"],
+  ["pmaybe", "the conditionally-throwing producer, awaited by wtc/wcs; BOTH its arms are the `try` row (ok:7 caught:bad)"],
 ];
 
 /* NON-WRAPPERS THIS LANE DOES NOT LOWER, and why -- same back door, other
