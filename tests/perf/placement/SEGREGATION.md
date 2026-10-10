@@ -71,12 +71,12 @@ The relocatable thing is not an object but a **side buffer with exactly one
 owner and one access path**. Such a buffer can be moved because only one
 pointer names it. The runtime has exactly four:
 
-| buffer | owner | movable? | status |
-|---|---|---|---|
-| `ScrArr::data` | the `ScrArr` | yes | **done** — reservation-backed above 8 KiB |
-| `ScrDyn::obj.entries` | the `ScrDyn` | yes | not done — this is the `3 × 2ⁿ` ladder |
-| `scr_map` tables | the map | yes | not done |
-| `ScrBytes::data` | the `ScrBytes` | **no** | views alias it with an interior pointer |
+| buffer | owner | movable? | **segregable?** | status |
+|---|---|---|---|---|
+| `ScrArr::data` | the `ScrArr` | yes | yes | **done** — reservation-backed above 8 KiB |
+| `ScrDyn::obj.entries` | the `ScrDyn` | yes | yes | not done — this is the `3 × 2ⁿ` ladder |
+| `scr_map` tables | the map | yes | yes | not done |
+| `ScrBytes::data` | the `ScrBytes` | **no** — views alias it with an interior pointer | **YES** — see §3a | not done — **this is the 56.02% class** |
 
 For these, **no phase boundary and no copy-out are needed**: give the buffer
 its own reservation and it is off the CRT heap for its whole life and returns
@@ -87,6 +87,72 @@ contiguous — the heap never sees it, so it never fragments from it.
 together" is: the ones that matter need not land anywhere on the heap.** The
 mechanism is per-buffer, incremental, needs no oracle, no designation, no
 fiber tree, and no relocation of anything user code can hold.
+
+### 3a. CORRECTED 2026-10-10 — "movable" and "segregable" are different questions
+
+**The table above originally read `movable? no` for `ScrBytes::data` and that
+excluded it from this section's fix. The exclusion does not follow, and it kept
+the largest single line in the heap off the queue.**
+
+Moving a buffer requires that exactly one pointer names it — views carry an
+interior pointer, so `ScrBytes::data` is genuinely not movable. **Allocating it
+somewhere other than the CRT heap requires only that the runtime own its alloc
+and its free**, and it does, at exactly one site each:
+
+```
+scr_bytes.c:52    b->data = calloc(len ? len : 1, elem_size)   <- the only alloc
+scr_bytes.c:192   free(b->data)                                 <- the only free
+```
+
+`scr_bytes_release` is explicit about why there is no second free path: a
+**view** releases its `backing` and never touches `data` (`:190-192`); only the
+owner frees. So the one-owner property holds for ALLOCATION even where it fails
+for RELOCATION, and a buffer that never moves keeps every interior pointer
+valid by construction.
+
+This matters because `heapcensus/HOLEMAP.md:§4` named this population: the
+1,344-byte hole class is a freed `ScrBytes` payload, **56.02% of CRT free bytes**
+(20.45 MiB of 36.51 MiB, `settled-census/evidence-llvm182/main`).
+
+#### The decisive variable is the RETURN UNIT, not the slab
+
+The cycle arena returns a 64 KiB chunk only when the chunk is entirely empty, so
+one survivor holds 64 KiB. That is a **design choice, not a law**, and over this
+population it decides the whole result. With the measured live fraction — 4,097
+live against 19,863 present, **20.63%**, same run — and assuming independent
+placement:
+
+| return unit | slots | P(empty) | units | empty | returned |
+|---|---:|---:|---:|---:|---:|
+| **4 KiB page** | 3 | **0.500** | 6,621 | 3,311 | **12.93 MiB** |
+| 8 KiB | 6 | 0.250 | 3,311 | 828 | 6.47 MiB |
+| 16 KiB | 12 | 0.0625 | 1,656 | 104 | 1.62 MiB |
+| **64 KiB chunk** | 48 | **1.5e-05** | 414 | 0.006 | **0.00 MiB** |
+
+It falls 4x per doubling of the unit. Inheriting the arena's 64 KiB framing
+returns **zero**; a 4 KiB page returns **63.6% of the 20.33 MiB of dead bytes
+assuming no correlation whatsoever between birth and death**. For 64 KiB to pay
+at all the live fraction would have to fall to **1.43%** against the 20.63%
+measured. `VirtualAlloc` reserves on a 64 KiB granularity but **commits by
+page**, and `MEM_DECOMMIT` is per page.
+
+`scr_array.c:200-202` rejects small buffers on granularity grounds, and that is
+right for a **reservation per buffer**: at 1,328 bytes the address-space waste
+would be 48x. **A slot packed into a shared reservation is a different design
+and that objection does not reach it.**
+
+> **REGISTERED, before measuring.** Per-4-KiB-page occupancy over the band
+> [1296, 1352] returns **12.93 MiB**, correlation aside. **REFUTED if the
+> measured occupancy returns less than 4 MiB** — which would mean the live
+> blocks are clustered by page, and the answer is allocation ORDER rather than
+> return granularity. The census artifact cannot settle it: `n1.heapcen.txt` is
+> a histogram of (size, count, bytes) and carries no block address.
+
+**The half of this most likely to be wrong is not the ceiling — it is
+hysteresis.** A page that empties and refills thrashes `MEM_DECOMMIT`/recommit,
+and the independence that yields 50% is exactly the condition that makes a page
+oscillate about empty. That cost would appear as THROUGHPUT, which the
+occupancy measurement above cannot see.
 
 What is left on the heap after all four: `ScrStr` payloads (the object *is*
 the buffer — a flexible array member, so it cannot move without moving the
@@ -129,7 +195,10 @@ two investigations should converge on.
    same one-owner argument. 241,519 reallocs and 20.24 MiB per sync, and it is
    the `3 × 2ⁿ` ladder whose residue share is 0.1% — so this is a throughput
    change like the array one, priced honestly as such, not a retention fix.
-2. **Nothing else until the 1,344 has a name.** If it turns out to be an
+2. ~~**Nothing else until the 1,344 has a name.**~~ **SATISFIED 2026-10-10 by
+   `heapcensus/HOLEMAP.md`: it is a freed `ScrBytes` payload. The conditional
+   below resolves to *no* — the owner is not an `ScrStr`. The successor item is
+   §3a, which is now the largest named line in the heap.** Original text: If it turns out to be an
    `ScrStr` payload, the fix is in the string allocator's uncovered band
    (244–511, `cap + 13`), which is a different change from any of the above
    and would be the first one aimed at the residue rather than the stream.
