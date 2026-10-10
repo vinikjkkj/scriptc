@@ -24,13 +24,16 @@
 #                      This is the regression gate for a shared-path change
 #                      like the union-truthiness set.
 
-param([string]$LogDir = "<blocks>\llvmparity\gate")
+# THE DEFAULT COMES FROM THE ENVIRONMENT. env.ps1 carries the paragraph on
+# why a literal placeholder here was unrunnable rather than unportable.
+param([string]$LogDir = "")
 
 $repo = Split-Path -Parent (Split-Path -Parent (Split-Path -Parent $PSScriptRoot))
 Set-Location $repo
 . "$PSScriptRoot\env.ps1"
 Remove-Item Env:\SCRIPTC_LLVM_CENSUS -ErrorAction SilentlyContinue
-$env:PATH = "<home>\AppData\Local\nvm\v25.9.0;" + $env:PATH
+if (-not $LogDir) { $LogDir = "$($env:SCRIPTC_BLOCKS_ROOT)\llvmparity\gate" }
+$env:PATH = "$home_\AppData\Local\nvm\v25.9.0;" + $env:PATH
 
 if (-not (Test-Path $LogDir)) { New-Item -ItemType Directory -Force $LogDir | Out-Null }
 Write-Output ("gate oracle node = " + (& node --version))
