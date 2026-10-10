@@ -1,7 +1,7 @@
 # The 1,344 has a name — and it was never a coalescence question
 
-> **Gate.** `tests/perf/placement/SEGREGATION.md:134` ends with *"Nothing else
-> until the 1,344 has a name."* This file names it, sizes it against the free
+> **Gate.** `tests/perf/placement/SEGREGATION.md` §5 ends with *"Nothing
+> else until the 1,344 has a name."* This file names it, sizes it against the free
 > side it belongs to, and retires the mechanism two documents had registered
 > for it.
 
@@ -12,8 +12,9 @@ thing it measures.
 
 ## 1. The registered claim, and what actually happens
 
-`SEGREGATION.md:117` and `settled-census/reconcile.mjs:496-511` both register
-the same thing:
+`SEGREGATION.md` §4's REGISTERED block — *"The 15,766 sync-created 1,344-byte
+holes were not allocated at 1,344 bytes"* — and
+`settled-census/reconcile.mjs:496-511` both register the same thing:
 
 > There is no 1,344-byte request anywhere in the run — the 8-byte-bucket
 > allocation-side table shows 1320:6, 1328:16, **1344: absent**, 1352:10.
@@ -144,8 +145,9 @@ on 1.8.2. Naming the producer needs the allocation-side exact table on
 
 ### Why the old cross-check missed it
 
-The "near buckets are identical in both arms" table in `SEGREGATION.md:98-106`
-is from arm `app/` **1.6.2**, which that file's own header banner marks as
+The "near buckets are identical in both arms" table in `SEGREGATION.md` §4 —
+the one whose `1344` row reads *"absent"* in both columns — is from arm `app/`
+**1.6.2**, which that file's own header banner marks as
 retired. On 1.6.2 the entire band [1296,1352] holds **60** allocations:
 
 ```
@@ -196,8 +198,8 @@ the `HCFREE` sum, which is the figure commit `178ca19f0` quotes).
   grounds that one may be the coalesced remains of the other. Inside the LFH
   that cannot happen, so the classes above can be ranked and summed.
 * **The string-allocator band fix (244–511, `cap + 13`) is not this.** The
-  owner is a bytes payload, not an `ScrStr`. `SEGREGATION.md:133`'s conditional
-  next step resolves to *no*.
+  owner is a bytes payload, not an `ScrStr`. `SEGREGATION.md` §5's conditional
+  *"If it turns out to be an `ScrStr` payload"* resolves to *no*.
 
 ## 7. Reproduce
 

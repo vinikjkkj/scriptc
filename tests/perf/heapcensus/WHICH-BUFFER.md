@@ -180,6 +180,18 @@ is the next question and is not answered here.** `PRAGMA shrink_memory` is on
 the store's allowed list and `app182/zapo-rest.ts:1530` already exposes it; a
 census taken after calling it would settle whether this is pinning or policy.
 
+> ***ANSWERED 2026-10-10 — see `IDLE-RELEASE.md` §1.*** The pages are **not
+> pinned at rest.** Arming `SCR_SQLITE_IDLE_RELEASE_MS` drives this row from
+> 2,792 to **zero**, on the same workload and the same binary — the census row
+> stops existing, and `rg -c '^HCSIZE 4376 '` reads **1/1/0/0** across
+> `long`/`off`/`on`/`half-on`. The verdict above therefore stands as a
+> measurement of the **default**, not of the runtime's reach: *"nothing is
+> ever returned"* is true at `SCR_SQLITE_IDLE_RELEASE_MS=0`, which is what
+> ships, and false the moment the knob is set. What does **not** come back is
+> one 87,368-byte bulk slab per cache, held by a single pinned page —
+> `IDLE-RELEASE.md` §2, *"all-or-nothing: 19 of 20 pages unpinned returns
+> ZERO bytes."*
+
 ## 3. The instrument map that made the stacks readable
 
 `pdb-symbols.mjs`'s header states the PDB *"carries publics AND per-module
