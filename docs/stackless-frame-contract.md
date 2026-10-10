@@ -585,10 +585,30 @@ the same gate run that differential caught it as a node disagreement.
 `CEmitter.registerTemp` is newTemp's rule for an already-declared slot and
 all nine sites now use it. 7472-a-branch-result-crosses-a-suspension pins
 one line per family that can carry a SCALAR result. `optChain`'s bind and
-`unionKeyGet`'s result stay UNTESTED and are named here rather than implied:
-both are refcounted in every spelling anyone has constructed -- a narrowed
-receiver payload is a record/object/array, a keyed read answers at a
-join-typed union -- so no program can tell the two versions apart there.
+`unionKeyGet`'s result were recorded here as untestable because "both are
+refcounted in every spelling anyone has constructed". **THAT REASON IS WRONG
+IN BOTH HALVES (2026-10-10, measured by a marker emitted at each site and read
+back out of the C).**
+
+`unionKeyGet` answers at the JOIN of its arms' answers, and a join of ONE is
+that type itself (`lowerUnionKeyedRead`: `joinArms.length === 1 ?
+joinArms[0]!`). Two record arms that both declare `n: number`, read as
+`u["n"]`, answer a bare `double`. It is now covered: 7472's `unionkeyget`
+line prints `unionkeyget NaN` with that site's registration removed, and
+`unionkeyget 11004` with it.
+
+`optChain`'s bind is non-refcounted just as easily -- `number | null` narrows
+to `f64`, `boolean | null` to `bool`, through `n?.toFixed(...)` and
+`b?.toString()`. What makes THAT site inert is a different property, and it
+is the one worth writing down: the bind's only reader is `chainRecv`, which
+mints its own (registered, therefore spilled) temp, and that read is the
+LEFTMOST evaluation in the chain body -- so the bind is dead before any park
+the body can contain. MEASURED on `maybe(4)?.toFixed(await pf(0))`: with the
+registration removed the program still answers `4.0`, and the only change in
+the TU is one `double sc_tmp_sc_t3` frame field that is stored at the park,
+reloaded after it, and never read. The registration is correct and inert;
+7472's two `optchain` lines exercise the SHAPE and cannot go red for this
+rule, which is said in the file so the next reader does not count them.
 
 THE BYTE COST OF THIS SECOND HALF IS NOW MEASURED (2026-10-10, section 8b).
 It is **10 fields across 8 of the 990 frames that already existed, 80 B** --

@@ -6,11 +6,15 @@
  *   scriptc string. Node's engine (V8) words some messages differently, so
  *   message content is asserted here against OUR bridge, never against Node
  *   (island VALUE results stay differential — tests/corpus/1100..).
- * - Stack-overflow containment on fibers: async bodies run on ucontext
- *   fibers (256KB; 1MB under ASan — frames inflate); the island re-anchors
- *   the engine's stack check on every entry. Unbounded recursion in an
- *   island eval must surface as a catchable RangeError — a crash here
- *   means the re-anchor regressed.
+ * - Stack-overflow containment on fibers: on the OPT-OUT lane
+ *   (SCRIPTC_STACKLESS=0) async bodies run on ucontext fibers (256KB; 1MB
+ *   under ASan — frames inflate) and the island re-anchors the engine's
+ *   stack check on every entry. Unbounded recursion in an island eval must
+ *   surface as a catchable RangeError — a crash here means the re-anchor
+ *   regressed. The lane ships STACKLESS since 2026-10-09, so the two tests
+ *   that cover this run on BOTH lanes and prove which one they got from the
+ *   emitted C (`expectLane`); inheriting the default tested the state
+ *   machine under a name that said fiber.
  * - The static/dynamic fence: --dynamic must not change emitted C, and a
  *   static binary must stay in its size class (the ~620KB engine must never
  *   leak into default builds).
@@ -47,6 +51,7 @@ interface RunResult {
   stdout: string;
   stderr: string;
   exitCode: number;
+  cSource: string;
 }
 
 interface BuildResult {
@@ -58,14 +63,19 @@ interface BuildResult {
 async function build(
   name: string,
   source: string,
-  opts: { dynamic?: boolean; sanitize?: boolean } = {},
+  opts: { dynamic?: boolean; sanitize?: boolean; stackless?: "0" | "1" } = {},
 ): Promise<BuildResult> {
   const dynamic = opts.dynamic ?? true;
   const san = opts.sanitize ?? sanitize;
+  /* THE LANE IS PART OF THE KEY. The stackless knob is NOT in the compiler's
+   * own cache key, so two lanes sharing an output directory share one binary
+   * and every comparison between them passes by being the same program
+   * twice. `undefined` keeps the shipping default and its own key. */
   const key = createHash("sha256")
     .update(source)
     .update(san ? "san" : "plain")
     .update(dynamic ? "dyn" : "")
+    .update(`lane=${opts.stackless ?? "default"}`)
     .digest("hex")
     .slice(0, 16);
   // holdScratch, not mkdirSync: the LEASE it publishes is what lets the sweep
@@ -75,16 +85,27 @@ async function build(
   const outDir = holdScratch(cacheDir, `island-${key}`);
   const file = join(outDir, `${name}.ts`);
   writeFileSync(file, source);
-  const result = await compile(file, {
-    outPath: join(outDir, exeName(name)),
-    outDir,
-    sanitize: san,
-    dynamic,
-    // Pinned: the static/dynamic fence and the size classes below are
-    // assertions ON the emitted C and the C-lane binary — this suite
-    // measures the C backend's artifact by design.
-    backend: "c",
-  });
+  const previousLane = process.env["SCRIPTC_STACKLESS"];
+  if (opts.stackless !== undefined) process.env["SCRIPTC_STACKLESS"] = opts.stackless;
+  const result = await (async () => {
+    try {
+      return await compile(file, {
+        outPath: join(outDir, exeName(name)),
+        outDir,
+        sanitize: san,
+        dynamic,
+        // Pinned: the static/dynamic fence and the size classes below are
+        // assertions ON the emitted C and the C-lane binary — this suite
+        // measures the C backend's artifact by design.
+        backend: "c",
+      });
+    } finally {
+      if (opts.stackless === undefined) {
+        /* nothing was set */
+      } else if (previousLane === undefined) delete process.env["SCRIPTC_STACKLESS"];
+      else process.env["SCRIPTC_STACKLESS"] = previousLane;
+    }
+  })();
   if (!result.ok) {
     throw new Error(
       "island program failed to compile:\n" +
@@ -106,17 +127,46 @@ const stripAsanFiberWarning = (s: string): string =>
 async function compileAndRun(
   name: string,
   source: string,
-  opts: { dynamic?: boolean } = {},
+  opts: { dynamic?: boolean; stackless?: "0" | "1" } = {},
 ): Promise<RunResult> {
-  const { binaryPath } = await build(name, source, opts);
+  const { binaryPath, cPath } = await build(name, source, opts);
+  const cSource = readFileSync(cPath, "utf8");
   try {
     const { stdout, stderr } = await execFileAsync(binaryPath, [], { encoding: "utf8" });
-    return { stdout, stderr: stripAsanFiberWarning(stderr), exitCode: 0 };
+    return { stdout, stderr: stripAsanFiberWarning(stderr), exitCode: 0, cSource };
   } catch (err) {
     const e = err as { code?: unknown; stdout?: string; stderr?: string };
     if (typeof e.code !== "number") throw err;
-    return { stdout: e.stdout ?? "", stderr: stripAsanFiberWarning(e.stderr ?? ""), exitCode: e.code };
+    return { stdout: e.stdout ?? "", stderr: stripAsanFiberWarning(e.stderr ?? ""), exitCode: e.code, cSource };
   }
+}
+
+/* THE TWO LANES, AND THE ARM IS READ OFF THE ARTIFACT.
+ *
+ * An async body runs on a ucontext fiber only when it did NOT convert to a
+ * state machine. The lane ships ON (ir/coro-plans.ts, 2026-10-09), so a test
+ * that says "on a fiber" and names no lane has been testing the stackless
+ * path since that morning -- MEASURED here: with the knob absent `deep` and
+ * `calc` both emit `sc_cr_<name>(`, and with it "0" neither does.
+ *
+ * Each lane asserts the SAME behaviour, and each proves which lane it got
+ * from the emitted C rather than from the environment it asked for: reading
+ * the env back would assert the request, not the result. */
+const LANES: ReadonlyArray<{ lane: "fiber" | "stackless"; knob: "0" | "1" }> = [
+  { lane: "fiber", knob: "0" },
+  { lane: "stackless", knob: "1" },
+];
+
+/** The arming check for a lane-pinned island test: did `fn` convert? */
+function expectLane(cSource: string, fn: string, lane: "fiber" | "stackless"): void {
+  const converted = cSource.includes(`sc_cr_${fn}(`);
+  expect(
+    converted,
+    lane === "fiber"
+      ? "the fiber arm compiled " + fn + " into a state machine -- there is no fiber here, " +
+        "so this test is measuring the other lane and the re-anchor it exists for is uncovered"
+      : "the stackless arm did NOT convert " + fn + " -- the knob did not reach the emitter",
+  ).toBe(lane === "stackless");
 }
 
 describe(`island engine (scriptc-only${sanitize ? ", sanitized" : ""})`, () => {
@@ -215,12 +265,19 @@ console.log(ok);
     expect(r.stdout).toBe("caught\n");
   });
 
-  test("deep island recursion on a fiber is a catchable RangeError, not a crash", async () => {
-    // Async bodies run on fixed-size ucontext fibers; without the
-    // per-entry JS_UpdateStackTop re-anchor this SIGBUSes instead of
-    // throwing.
+  test.each(LANES)(
+    "deep island recursion is a catchable RangeError, not a crash ($lane lane)",
+    async ({ lane, knob }) => {
+    // On the FIBER lane the async body runs on a fixed-size ucontext fiber
+    // (256KB; 1MB under ASan) and without the per-entry JS_UpdateStackTop
+    // re-anchor this SIGBUSes instead of throwing -- that re-anchor is what
+    // this test exists for, and it is reachable on this lane only. On the
+    // STACKLESS lane the body is a state machine on the ordinary stack, so
+    // the containment comes from the engine's own limit. The behaviour must
+    // be identical; asserting it on both is what keeps them from drifting
+    // while only one of them is exercised.
     const r = await compileAndRun(
-      "fiber-overflow",
+      `fiber-overflow-${lane}`,
       `async function deep(): Promise<string> {
   try {
     return __island_eval("function r(n) { return r(n + 1); } r(0)");
@@ -235,7 +292,9 @@ async function main(): Promise<void> {
 }
 main();
 `,
+      { stackless: knob },
     );
+    expectLane(r.cSource, "deep", lane);
     expect(r.exitCode).toBe(0);
     expect(r.stdout).toBe(
       "caught overflow on fiber\nengine still usable\ncaught overflow on fiber\n",
@@ -532,9 +591,11 @@ console.log("unreachable", direct);
     expect(r.stderr).toContain("TypeError: expected string, got undefined");
   });
 
-  test("island-backed calls re-anchor the engine on fibers (Math after await)", async () => {
+  test.each(LANES)(
+    "island-backed calls re-anchor the engine after an await ($lane lane)",
+    async ({ lane, knob }) => {
     const r = await compileAndRun(
-      "math-on-fiber",
+      `math-on-fiber-${lane}`,
       `async function calc(n: number): Promise<number> {
   await new Promise<void>((resolve) => resolve());
   return Math.sqrt(n) + Math.floor(1.9);
@@ -545,7 +606,9 @@ async function main(): Promise<void> {
 }
 main();
 `,
+      { stackless: knob },
     );
+    expectLane(r.cSource, "calc", lane);
     expect(r.exitCode).toBe(0);
     expect(r.stdout).toBe("13\n2.5\n");
     expect(r.stderr).toBe("");

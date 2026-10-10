@@ -135,11 +135,22 @@ function writeProgram(stem: string, src: string): { dir: string; entry: string }
  * right lane for this claim, and inheriting the default would merely have
  * been the right answer by accident.
  *
- * AND THIS TEST CANNOT SEE THE STACKLESS LOWERING. It will stay green
- * whatever that lowering does, because the stackless plan map is consulted
- * in zero of the LLVM backend's ten files and index.ts gates it on
- * backend === "c". Saying so here is not a caveat, it is the point: the
- * sibling parity guard spent a whole run reporting nine greens from
+ * AND THIS TEST CANNOT SEE THE STACKLESS LOWERING -- BUT NOT FOR THE REASON
+ * THAT USED TO BE WRITTEN HERE. The sentence was "the stackless plan map is
+ * consulted in zero of the LLVM backend's ten files and index.ts gates it on
+ * backend === 'c'". Both halves died with the LLVM port: backend/llvm's
+ * emitter.ts, coro.ts and blocks.ts all read the plan now, and index.ts's
+ * `backend === "c"` is one arm of a ternary, not a gate on the lowering.
+ *
+ * What is still true is NARROWER and measured rather than structural: these
+ * two programs are not ADMITTED. MEASURED 2026-10-10 on the SUBJECT, both
+ * arms, reading the emitted .ll -- knob absent and SCRIPTC_STACKLESS=0 agree
+ * that neither `inner` nor `outer` converts, and no `sc_S1` dispatch label
+ * appears at all. A `yield*` delegation has no plan today. That is a fact
+ * about the admission predicate, so it can change under this file without
+ * anything here moving; the structural reason could not. Saying so is not a
+ * caveat, it is the point: the sibling parity guard spent a whole run
+ * reporting nine greens from
  * programs that had compiled through this very lane, and the only reason
  * that was caught is that two instruments counted what they had actually
  * built. A test that cannot fail for a reason must name the reason, or the

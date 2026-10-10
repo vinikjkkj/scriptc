@@ -26,6 +26,7 @@
  *   node fiber-dep-census.mjs --selftest
  */
 import { readFileSync, readdirSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { join } from "node:path";
 
 const NL = String.fromCharCode(10);
@@ -158,22 +159,37 @@ function selftest() {
   /* KNOWN POSITIVES -- the block that caught two real defects. These are
    * sites independently established as fiber-dependent; the census must
    * find every one, and must NOT flag the two tolerant filters. */
-  const repo = process.argv[3] ?? "G:/blocks/slice-wt";
+  /* The default was a hardcoded `G:/blocks/slice-wt`, a worktree that no
+   * longer exists: the self-test then read an empty key set, found nothing,
+   * and reported BROKEN for the one reason that is not a defect. Derive it
+   * from this file's own location instead -- four levels up from
+   * tests/perf/llvmparity/. */
+  const repo = process.argv[3] ?? fileURLToPath(new URL("../../..", import.meta.url));
   const keys = fiberObservables(repo);
   const sites = census(repo, keys);
   const found = new Map(sites.map((s) => [s.file, s]));
+  /* PINNED BY TEXT, NOT BY LINE. These were [file, lineNumber] pairs and both
+   * numbered ones went stale the moment somebody inserted a line above them --
+   * fetch-dispatcher moved 627->645 and fiber-pool-decay 64->82, and the
+   * self-test printed BROKEN for two files it had found correctly. A
+   * self-test that cannot tell `the instrument regressed` from `the file
+   * moved` raises a false alarm on every unrelated edit, and the next reader
+   * learns to ignore it. The fragment is what the census actually has to
+   * match, so it is also the sharper pin. */
   const must = [
-    ["tests/harness/fetch-dispatcher.test.ts", 627],
+    ["tests/harness/fetch-dispatcher.test.ts", "RC audit skipped: 1 fiber(s) never resumed"],
     ["tests/harness/request-init.test.ts", null],
-    ["tests/harness/fiber-pool-decay.test.ts", 64],
+    ["tests/harness/fiber-pool-decay.test.ts", "[fiberpool] window freed="],
   ];
   const mustNot = ["tests/harness/differential-suite.ts", "tests/harness/llvm-differential-suite.ts"];
   console.log("");
-  for (const [f, ln] of must) {
+  for (const [f, frag] of must) {
     const s = found.get(f);
-    const ok = s && (ln === null || s.dep.some((d) => d.line === ln));
-    if (ok) { pass++; console.log("  PASS  KNOWN POSITIVE found: " + f + (ln ? ":" + ln : "")); }
-    else { fail++; console.log("  FAIL  KNOWN POSITIVE MISSED: " + f + (ln ? ":" + ln : "")); }
+    const hit = frag === null ? null : s && s.dep.find((d) => norm(d.text).includes(frag));
+    const ok = Boolean(s) && (frag === null || Boolean(hit));
+    const where = frag === null ? "" : " <" + frag + ">" + (hit ? " at :" + hit.line : "");
+    if (ok) { pass++; console.log("  PASS  KNOWN POSITIVE found: " + f + where); }
+    else { fail++; console.log("  FAIL  KNOWN POSITIVE MISSED: " + f + where); }
   }
   for (const f of mustNot) {
     if (!found.has(f)) { pass++; console.log("  PASS  KNOWN NEGATIVE not flagged: " + f); }
