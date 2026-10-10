@@ -5,7 +5,9 @@ codegen side can be built without asking the runtime side anything.
 
 Runtime: `packages/runtime/src/scr_coro.{h,c}`, plus a support block in
 `scr_async.c` (search `stackless coroutine support`).
-Proof it behaves like a fiber: `tests/perf/corostate/` (`run.sh`).
+Proof the RUNTIME behaves like a fiber: `tests/perf/corostate/` (`run.sh`).
+That rig links `scr_coro.c` directly and never invokes the compiler, so it
+says nothing about either lowering — see section 6.
 
 ---
 
@@ -160,7 +162,18 @@ is merely 56 bytes wasted.
 Measured on `tests/perf/zapo-rest/app182`: **D1–D3 is 2,148 of the 2,260
 suspension points (95.1%)**. Lane: none — the census classes and the point
 count both come from the IR liveness pass, which both backends consume
-unchanged, so this share is lane-independent.
+unchanged, so this share is lane-independent. *That figure was taken on an
+earlier build and is NOT re-derived below; the point population can move with
+the admission.*
+
+**The fat frame is now allocated on the real load, and on 2026-10-06 it was
+not.** Counted from the emitted `.scrh` (lane: C; same artifact as section
+8b): at `90004bd0f`, **76 of 1,301 frames (5.8%) open with `ScrCoroExc`** and
+1,225 with `ScrCoroBase`. At `4e93997eb` the same program emitted 990 frames
+and **zero** fat ones — so "the fat frame exists and is sized" described the
+header, not the output. **The denominators are not the same question:** 95.1%
+above is a share of suspension POINTS, 5.8% here is a share of FUNCTIONS, and
+neither converts into the other without the per-function point counts.
 
 ---
 
@@ -187,9 +200,37 @@ below are what liveness could see, and the real frames are larger by however
 many owned temporaries are live at each park.
 
 From the IR liveness pass over zapo-rest, per function: p50 32 B, p90 56 B,
-max 208 B of payload -- lower bounds. The worked example in
-`tests/perf/corostate` (`resolveDisallowedListEntries`) is 64 B of payload by
-liveness, so at least 104 B with the base.
+max 208 B of payload -- lower bounds, **and from an earlier build than this
+revision**. The worked example in `tests/perf/corostate`
+(`resolveDisallowedListEntries`) is 64 B of payload by liveness, so at least
+104 B with the base.
+
+**HOW FAR BELOW: measured, 2026-10-10, on `90004bd0f`.** Read off the emitted
+header section 8b measures (lane: C; the 1,301 ADMITTED frames; payload =
+`sizeof` - 40). The left column is the liveness term as a PROXY -- the
+`sc_v_*` fields, which are exactly what `coroFrameLocals` put in the frame --
+not a re-run of the liveness pass:
+
+| | liveness term (`sc_v_*` fields) | MEASURED payload |
+|---|---|---|
+| p50 | 24 B | **48 B** |
+| p90 | 72 B | **128 B** |
+| max | 456 B | **4,216 B** |
+
+Field counts are converted at 8 B each, which is exact for 1,210 of the 1,301
+frames; the remainder carry the 96-byte fat base.
+
+**Do NOT read this against the `32 / 56 / 208` above cell by cell.** That row
+is over the admitted population of an earlier build; this one is over 1,301
+functions. A p50 that FELL (32 -> 24 B) is the admission reaching many more
+small functions, not frames getting leaner. The only cross-row statement that
+survives different populations is the max, and it is the one that matters:
+the liveness bound this section published as **208 B** is **456 B** today,
+and the real payload behind it is **4,216 B**.
+
+**The worst frame is the argument in one line.** `sc_cf_route` is 4,256 B and
+holds **43 IR locals against 484 emitter temporaries** -- the liveness pass
+can see **8%** of that frame.
 
 Both loop forms put their iteration state in the frame: a `forOf` lowers to an
 array pointer plus an index, and both are live across every suspension in the
@@ -206,11 +247,21 @@ is a `calloc`. Measured (`run-bench.sh`, 104-byte frame):
 | free-list get/put | 3.9 |
 
 So a frame pool's **ceiling** is ~46 ns per frame. Across a full 24,246-frame
-peak that is ~1.1 ms, against the ~504 ms that replacing `CreateFiberEx` with
-`calloc` already saves — both from the section 6 bench below, C lane, and both
-therefore inheriting its arms and its host. The pool would buy **~1.1 ms of
-~504 ms, i.e. 0.2%** of what the transform itself wins, in exchange for a cap, a decay policy, and the retention and poisoning
+peak that is ~1.1 ms, against the **435-501 ms** that replacing
+`CreateFiberEx` with `calloc` already saves — both from the section 6 bench
+below, and both therefore inheriting its arms, its host, and the fact that it
+is a RUNTIME bench rather than a compiler-lane one. The pool would buy
+**~1.1 ms of 435-501 ms, i.e. 0.2-0.3%** of what the transform itself wins,
+in exchange for a cap, a decay policy, and the retention and poisoning
 problems the fiber pool needed several commits to settle.
+
+*This paragraph read `~504 ms` and `0.2%` until 2026-10-10. `504` is
+20.8 us x 24,246, i.e. the TOP of the fiber range times the peak with the
+stackless side never subtracted — a cost, not a saving, and outside what the
+table's own ranges support. The saving is
+(18.1 us - 144 ns) x 24,246 = 435 ms at one end and
+(20.8 us - 134 ns) x 24,246 = 501 ms at the other. The conclusion is
+unchanged, which is exactly why it went four days unchecked.*
 
 **Decision: no frame pool.** Revisit only if a profile shows frame allocation
 above a few percent of run time; the number to beat is 46 ns.
@@ -219,12 +270,22 @@ above a few percent of run time; the number to beat is 46 ns.
 
 ## 6. Speed, for context
 
-**Lane: C.** These are `tests/perf/corostate/corobench.c` numbers — the C
-lowering's fiber and stackless paths measured against each other in one
-process. **The LLVM lane is UNMEASURED here** and has no stackless lowering
-at all as of this revision, so no ratio below may be quoted as a property of
-the transform in general; each is a property of the C lane. Arms are the
-table's own columns.
+**Lane: NEITHER. These are RUNTIME numbers.** `tests/perf/corostate/*` never
+go through the compiler: `run-bench.sh` hands `corobench.c` and
+`packages/runtime/src/scr_coro.c` straight to `zig cc`, and the "stackless"
+arm is the hand-written `FrameLoop` state machine inside that file, not
+emitted code. What the table compares is `scr_switch` against
+`scr_coro_park` in one `scr_coro.c` — the same object file BOTH lanes link.
+So no row below is a property of the C lowering, of the LLVM lowering, or of
+the transform in general. Arms are the table's own columns.
+
+**The label this paragraph replaced — "Lane: C … the LLVM lane is UNMEASURED
+here" — was wrong twice, and the correction is recorded rather than quietly
+applied because the table was quoted under that label for days.** (1) There
+is no compiler lane in this bench for "C" to name. (2) The LLVM lane now has
+a stackless lowering and it is the **SHIPPING DEFAULT** —
+`ir/coro-plans.ts` tests `SCRIPTC_STACKLESS === "0"`, so an ABSENT knob is
+ON — and that lane has been measured twice. Section 6a.
 
 `run-bench.sh`, zig 0.16.0 from `G:\tools\zig`, target `x86_64-windows-gnu`,
 `-O2`, K=2000, 11 reps, both arms in one process. Absolute ns, ranges across
@@ -249,6 +310,125 @@ on a different build and a different arm (its row sits beside the
 100%-conversion ceiling, not the real load). Neither was re-measured to
 settle it, so do not treat either as the peak fiber count without naming the
 build and the arm it came from.
+
+---
+
+## 6a. The compiled lanes, measured
+
+Section 6 measures the runtime. This section measures what the COMPILER
+emits. Every row names its program, its arms, its denominator and its
+instrument, because the single most expensive mistake on this front has been
+a right measurement carried past its scope.
+
+### 6a.1 Microbench, LLVM lane -- the first compiler-lane speed numbers
+
+Four arms -- fiber and stackless, each on the C lane and the LLVM lane --
+quiet window, programs COMPILED by scriptc (unlike section 6). Reference arm:
+fiber on the LLVM lane; the table's ratio is within that lane.
+
+| | ratio, fiber -> stackless |
+|---|---|
+| hop | 2.17x |
+| waiter | 2.50x |
+| hopserial | 2.33x |
+| hopconc, 50k live tasks | 5.64x |
+| marginal bytes per live task | 6,064.9 -> 585.3 B (**10.36x**, R2=0.99999) |
+
+**No ratio between the two COMPILER lanes is quotable: their speed ranges
+OVERLAP.** The LLVM lane is not faster than the C lane here; it is
+indistinguishable from it, with smaller frames, because it spills fewer
+temporaries -- `hopTask` is 88 B on the C lane and 64 B on the LLVM lane.
+
+*Scope: like 6a.2, the bench program lives in the measuring rig and not in
+this repo.*
+
+### 6a.2 The synthetic ladder (`fanoutladder.ts`), LLVM lane
+
+A real compiled program, 3 async frames per chain, membership checked BEFORE
+the measurement: 4 of 4 functions and 7 of 7 suspension points converted.
+
+- marginal private commit **64.81 -> 6.21 KiB per chain (10.43x)**
+- totals at 384,000 chains **24,307 -> 2,332 MiB (10.42x)**
+- allocation burst **1.52x** (3k chains) and **1.83x** (24k)
+- correctness to 384,000 chains on BOTH arms -- concurrency does not break
+- under an identical **1024 MiB** ceiling, fiber breaks in (16,000, 16,400]
+  and stackless in (168,000, 170,000] => **10.4x more concurrency**.
+  Predictions 16,152 and 168,398 were made BEFORE the run; both landed inside
+  their brackets.
+
+*Scope: the program lives in the measuring rig, not in this repo. The numbers
+are reproducible only with that rig, and that is a known gap.*
+
+### 6a.3 The real application (`tests/perf/zapo-rest/app182`)
+
+Two binaries of the SAME program at `554d2fb65`, differing only in the lane
+(`SCRIPTC_STACKLESS=0` vs the knob absent). Both are LLVM-lane builds (`.ll`,
+no `.c`); 59 of 59 assertions pass on each arm and the transcripts are
+byte-identical outside timestamp, pid and 2 ms. Instrument:
+`PeakPagefileUsage` / `PeakWorkingSetSize` -- **kernel high-water marks read
+out of process, not a sampled series** (a downsampled series cannot measure a
+peak). Route `/s/alpha/store/threads?limit=20`, ABBA arm order, saturation
+cell n=6.
+
+| | fiber | stackless | ratio |
+|---|---|---|---|
+| peak private commit at saturation (62.9 concurrent chains) | 22.07 MiB | 13.92 MiB | **1.585x** (-37%) |
+| private working set (plateau) | 14.82 MiB | 11.04 MiB | 1.342x |
+| **marginal private commit per concurrent request** | 163.6 KiB | 41.8 KiB | **3.91x** |
+| throughput at saturation | 8,629 rps | 8,933 rps | **+3.5%** |
+| p50 at saturation | 6.995 ms | 6.701 ms | -4.4% |
+
+The marginal row is a least-squares slope over C=0..64, the region where
+achieved in-flight tracks offered 1:1 (R2 = 0.995 fiber, 0.996 stackless);
+socket-corrected it is 4.01x. Worst within-cell spread in peak commit is
+1.39%, against a 58.5% effect -- 42x the noise.
+
+**Four things bound those numbers, and they matter as much as the numbers.**
+
+1. **The 10.4x of 6a.2 does NOT transfer, not even as a marginal slope.**
+   That figure is per CHAIN on a ladder whose chains carry almost no heap.
+   This one is per CONCURRENT REQUEST, where lane-independent heap -- the
+   parsed bag, the rows, the JSON string, the response buffer -- sits in the
+   numerator AND the denominator. Different denominators, so the ladder
+   number is not even an upper bound on this one by a safe argument.
+2. **The ratio is not a constant of the lane, and it is not monotone in
+   payload size.** Marginal KiB per request, C=0 vs C=64, n=2 per cell:
+   404 **2.28x**, `/health` **1.92x**, threads-20 **3.96x**, threads-200
+   **1.88x**. (threads-20 reads 3.96x here and 3.91x in the table above
+   because this is a two-point slope and that one is least squares over seven
+   cells; same data, different estimator.) The prediction that a LIGHTER
+   request would show a HIGHER ratio was REFUTED. The model that fits all
+   four rows has two terms -- `F(lane, call depth) + H(per-request heap)`.
+   `F` is lane-dependent: a fiber commits real stack pages down to the
+   deepest frame the chain reaches, while the stackless arm spills only the
+   slots live across each suspension. `H` is lane-independent and dilutes the
+   ratio from both ends. **The lane pays most on a request that goes DEEP and
+   returns LITTLE.**
+3. **`scr_net_dispatch` drains `SCRP_BATCH = 64` events per turn**, so
+   achieved in-flight pins at **62.9** from an offered 64 all the way to
+   2048 -- identically on both arms, which is exactly what makes the
+   comparison fair. No zapo-rest route parks a chain, so for THIS program the
+   per-chain saving multiplies by **<= 63, never by 384,000**. The C=64 ->
+   C=512 cells add 448 sockets and zero chains, which isolates the socket
+   cost: +1,586 B/socket fiber, +1,402 B/socket stackless, lane-independent
+   as it must be.
+4. **The +3.5% is a FLOOR on the throughput gain, not a ceiling.** The load
+   generator shared the same 6-core box, so both arms were compressed by
+   contention.
+
+Not measured, and said rather than implied: WebSocket subscribers (the ack
+window is O(1) by design), scaling in N sessions (that measures client/store
+construction), `/connect` chains (needs the network), and startup latency
+(lazy migration dominates).
+
+### 6a.4 Reach on the real load
+
+**1,292 of 1,301 planned coroutines lower** on app182, triangulated three
+ways and cross-checked exactly against `scr_async_spawn` 1,488 -> 196
+(1,488 - 1,292 = 196). The 9 refusals fall back to the fiber lane correctly.
+This section recorded a reach of ZERO on real load before the then-adapter
+ICE was fixed; the census has not moved since (predicted 1,297, measured
+1,292, identical refusal set).
 
 ---
 
@@ -318,18 +498,55 @@ call sites (C lane) — whichever question is being asked. Against 2,254 the
 same numerator reads 33.4%. See `stackless-llvm-port.md` section 9, which
 supersedes this row and the identical figure in `fe60c3267`.
 
-These figures are also **stale as a statement of today's conversion**: the
-nesting admission and the owned-local frame rule both landed afterwards, and
-section 8 below reports **990 frame structs emitted** on the same program,
-i.e. 990 of 1,489 suspendable functions (66.5%) rather than 533.
+These figures are also **stale as a statement of today's conversion**. The
+denominator held: section 8b counts **1,301 resume functions and 188
+trampolines on the same program, disjoint, 1,301 + 188 = 1,489** — the same
+suspendable-function population this table used. The numerator has moved
+three times: **533 (35.8%)** here, **990 (66.5%)** at 2026-10-06, and
+**1,301 of 1,489 (87.4%)** at `90004bd0f`.
 
 ## 7. Not covered yet
 
-- **Generators and async generators.** `ScrGen` is a separate handle with its
-  own resume protocol; nothing here touches it.
-- **A `drop` hook** for abandoned-frame payload release (3.5).
-- **D4 lowering.** The fat frame exists and is sized, but no test drives a
-  suspension inside a `finally`.
+Two bullets here were true when written and are **no longer true**; they are
+corrected in place rather than deleted, because each was cited as a reason
+not to look.
+
+- ~~**Generators and async generators.** `ScrGen` is a separate handle with
+  its own resume protocol; nothing here touches it.~~ **A SYNCHRONOUS
+  generator is now lowered.** `scr_gen_coro_alloc` allocates a frame with no
+  promise minted, `scr_gen_of_coro` wraps it in an `ScrGen` whose stored
+  discriminant says FRAME rather than FIBER, and `scr_coro_yield_*` returns
+  to the consumer without a ready push. An **async** generator still stays
+  out, and `ir/liveness.ts` records that the stated reason was the wrong one:
+  its `yield` calls `scr_await_hop` inside `scr_agen_yield_settle`, and the
+  hop is the one suspender this lane declares it cannot lower — so it
+  belongs to the hop front, not to this one. **Reach of the sync-generator
+  clause on app182 is ZERO and that is measured, not unknown:** all three of
+  its remaining generator-family functions are async, so the adjudicator is
+  generator-lane parity, never an app182 coverage delta.
+- **A `drop` hook** for abandoned-frame payload release (3.5) — still open
+  **in `ScrCoroBase`**, which is where 3.5 needs it. A `drop` does now exist
+  one level up for generators (`scr_gen_of_coro(base, drop)`), for the
+  different reason that an UNSTARTED generator can be released before its
+  body ever runs; it is a handle parameter, not a frame field, and it costs
+  the 40-byte base nothing.
+- ~~**D4 lowering.** The fat frame exists and is sized, but no test drives a
+  suspension inside a `finally`.~~ **Two files drive exactly that now.**
+  `tests/harness/stackless-finally-body.test.ts` is shape (1), an `await`
+  sited inside a `finally` body, and it carries the cost of that admission:
+  a finally body is emitted once per completion path, so one plan point
+  becomes up to three emitted states and the one-state-per-point equality
+  the compiler used to assert became two inclusions plus a MEASURED
+  multiplicity. `tests/harness/stackless-finally-stash.test.ts` guards the
+  in-flight exception the body runs on top of (`sc_fexc_N`), which was
+  emitted as a C automatic the resume `goto` jumped over. **The driver, not
+  the construct, is the discriminator there:** an async resume re-enters
+  along one fixed call path and tends to find the dead stack slot still
+  holding the right pointer, so the await-only test stayed green over the
+  whole life of that defect; a generator is resumed by the consumer from
+  arbitrary depth and the fault is deterministic. And the fat frame is no
+  longer only "sized": **76 of app182's 1,301 emitted frames are
+  `ScrCoroExc`**, against zero on 2026-10-06 (section 3.6).
 - **The island.** An embedded-JS call chain lives on the fiber's C stack and
   cannot be moved into a struct; those functions keep fibers. zapo-rest links
   no island, so this does not affect it.
@@ -373,10 +590,13 @@ both are refcounted in every spelling anyone has constructed -- a narrowed
 receiver payload is a record/object/array, a keyed read answers at a
 join-typed union -- so no program can tell the two versions apart there.
 
-THE BYTE COST OF THIS SECOND HALF WAS NOT MEASURED. The table below is the
-2026-10-06 spill and nothing was re-run against it; a branch result crossing
-a park adds a frame field on the same terms as any other temp, and how many
-frames gain one over app182 is an open number.
+THE BYTE COST OF THIS SECOND HALF IS NOW MEASURED (2026-10-10, section 8b).
+It is **10 fields across 8 of the 990 frames that already existed, 80 B** --
+all of them `double` or `bool`, which is the class exactly. Attribution is by
+field TYPE and the emitter's own `/* owned across a park */` comment, not by
+bisect, so read it as "the branch-result class accounts for at most 0.5% of
+the fields this program's frames gained since 2026-10-06", not as an isolated
+arm.
 
 THESE ARE STATIC BYTES PER FRAME STRUCT TYPE, SUMMED OVER THE DISTINCT
 COROUTINE TYPES IN THE PROGRAM. They are **not** runtime occupancy: what a
@@ -384,15 +604,30 @@ run actually holds depends on which coroutines are instantiated and how many
 are live at once, and that was not measured. Do not read +1.6% as a memory
 number taken under load.
 
+**Lane: C, by construction.** The instrument reads `} sc_cf_<name>;` out of
+the emitted shared header and asks a C compiler for `sizeof` on each. The
+LLVM lane emits no such struct — it computes its own frame layout (see
+`backend/llvm/coro.ts`) — so this table cannot describe the SHIPPING
+binary's frames, which are LLVM-lane frames. The one function measured on
+both lanes, `hopTask`, is 88 B on the C lane and 64 B on the LLVM lane
+(section 6a.1), so these are plausibly an over-estimate of the LLVM frames
+for the same program; that is one data point, not a law.
+
 Measured on the real load (`tests/perf/zapo-rest/app182`), knob ON, exact
 `sizeof` from the C compiler rather than a layout model — a probe including
 the emitted `.scrh` and printing `sizeof` for each `sc_cf_*`:
 
 | | frames | total | mean | median | p90 | max |
 |---|---|---|---|---|---|---|
-| main `76ebc7ce4` | 962 | 80,016 B | 83.2 B | 72 B | 104 B | 3,856 B |
-| + spill | 962 | 81,304 B | 84.5 B | 72 B | 104 B | 3,976 B |
-| + spill + nesting | 990 | 84,528 B | 85.4 B | 72 B | 104 B | 3,976 B |
+| main `76ebc7ce4` (2026-10-06) | 962 | 80,016 B | 83.2 B | 72 B | 104 B | 3,856 B |
+| + spill (2026-10-06) | 962 | 81,304 B | 84.5 B | 72 B | 104 B | 3,976 B |
+| + spill + nesting `4e93997eb` (2026-10-06) | 990 | 84,528 B | 85.4 B | 72 B | **112 B** | 3,976 B |
+| **re-measured `90004bd0f` (2026-10-10)** | **1,301** | **142,800 B** | **109.8 B** | **88 B** | **168 B** | **4,256 B** |
+
+*The p90 of the third row read `104 B` from 2026-10-06 until 2026-10-10. It
+is 112 B under every percentile convention; recomputed from that run's own
+archived `sizes.txt`, which was never discarded. A transcription error, not a
+measurement one — the other five cells of that row reproduce exactly.*
 
 - The spill alone costs **+1,288 B, +1.6%**, and only **109 of 962 frames
   (11.3%)** grow at all — mean +11.8 B, worst +120 B (`sc_cf_route`). The
@@ -404,10 +639,92 @@ the emitted `.scrh` and printing `sizeof` for each `sc_cf_*`:
   +3,224 B is entirely the 28 newly admitted functions (mean 115.1 B).
 
 **120 of the 990 admitted bodies (12.1%) hold at least one non-refcounted
-temp across a park, 183 of them in all.** That is the population the
+temp across a park, 183 of them in all** — as of 2026-10-06. **Re-measured on
+2026-10-10 at `90004bd0f`: 214 of 1,301 (16.4%), 372 temps** (247 `double`,
+125 `bool`). The 2026-10-06 figure was reproduced exactly, from that run's
+archived header, by the script that produced the new one; a re-measurement
+whose instrument cannot reproduce the value it is replacing is not a
+re-measurement. That is the population the
 alternative proposal — a fence listing non-lowerable argument POSITIONS —
 would have had to cover, and it was costed at 6 functions / 16 points from a
 predicate that turned out to be the wrong dimension. The clearest single
 refutation is `bin`: `n1(8) * 1000 + await pf(3)` answered NaN, and the same
 expression inside an index aborted outright, in a node that has no `args` at
 all, so no argument-position rule would ever have reached it.
+
+## 8b. Re-measured 2026-10-10, and the section's thesis inverted
+
+The table in section 8 was taken on `4e93997eb` (2026-10-06). It is re-run
+here on `90004bd0f` with the same instrument, the same entry and the same
+arm (knob ON, `--backend c`), and the program itself is unchanged:
+`git diff 4e93997eb..90004bd0f -- tests/perf/zapo-rest/app182` is empty, so
+the app is the fixed workload and the compiler is the only variable.
+
+**SCOPE FIRST, because this is a WINDOW and not a change.** 189 commits sit
+between the two arms, 59 of them touching `packages/compiler/src` and 38
+touching the emitter or the IR. The movement below belongs to the window.
+**No part of it is attributed to any individual commit, because no
+per-commit arm was built.**
+
+| | 2026-10-06 `4e93997eb` | 2026-10-10 `90004bd0f` | delta |
+|---|---|---|---|
+| frame structs | 990 | 1,301 | +311 |
+| total static bytes | 84,528 B | 142,800 B | **+58,272 B (+68.9%)** |
+| mean | 85.4 B | 109.8 B | +24.4 B |
+| median | 72 B | 88 B | **+16 B** |
+| p90 | 112 B | 168 B | **+56 B** |
+| max (`sc_cf_route`) | 3,976 B | 4,256 B | +280 B |
+
+Where the +58,272 B comes from:
+
+- **311 newly converted functions: +43,424 B (74.5% of the rise)**, mean
+  139.6 B each.
+- **708 of the 990 frames that already existed grew: +14,848 B (25.5%)**,
+  mean +21.0 B. **None shrank.**
+- Those 708 frames gained **1,864 fields, of which 1,854 (99.5%) are IR
+  LOCALS (`sc_v_*`) and 10 (0.5%) are emitter temporaries (`sc_tmp_*`)**.
+  Five fields were removed (`%spread`/`%uspread`/`%param` locals).
+- The 311 new frames carry 3,665 fields: 50.6% IR locals, 27.5% emitter
+  temporaries, 8.5% base, 8.5% the awaited promise, **2.1% the `finally`
+  stash `sc_fexc_*` (77 of them, every one in a newly admitted body and none
+  in the 990)**, 1.4% `sc_pret`, 1.4% a lifted closure env.
+
+**So this section's question is no longer the section's answer.** Section 8
+was written to cost the non-refcounted spill, and that cost was small and
+narrow: +1.6%, 11.3% of frames touched, median and p90 unmoved. Measured over
+the same 990 frames today, the emitter-temporary term is **0.5% of the fields
+they gained**. The term that moved the table is **IR locals crossing
+suspensions in functions the admission has widened to reach** — and the
+median frame moved for the first time (72 -> 88 B) while the p90 grew by half
+again (112 -> 168 B). A reader coming to section 8 for "what do frames cost"
+should read this block, not that one.
+
+**Conversion, counted from the same emission** (guard: a function has a
+trampoline or a resume, never both — verified, the two name sets intersect in
+**zero**):
+
+| | count |
+|---|---|
+| frame structs `sc_cf_*` in the shared header | 1,301 |
+| resume functions `sc_cr_*` | 1,301 |
+| trampolines `sc_tr_*` (still fibers) | 188 |
+| suspendable functions (1,301 + 188) | 1,489 |
+| **C-lane function coverage** | **1,301 of 1,489 (87.4%)** |
+
+Two controls, both of which could have come out red:
+
+1. **The TU-split defect of section 6b stays closed.** 0 of the 1,301 frame
+   structs are in a translation unit; all 1,301 are in `zapo-rest.scrh`, and
+   the knob-ON C build LINKS (`ok: true`, 6.7 min, exe 33,214,464 B).
+2. **1,301 is exactly the LLVM lane's PLANNED count** (section 6a.4: 1,292
+   lowered of 1,301 planned). `coroPlans` is backend-agnostic, so both lanes
+   receive the same plan set; the LLVM lane refuses 9 at its emitter tier and
+   the C lane refuses none. The agreement is a consistency check on one
+   shared source, not two independent measurements of the same thing.
+
+*Instrument: `/g/blocks/w1-framesize.sh`, the same method as the script that
+produced the 2026-10-06 table, with the runtime-source path taken from the
+measuring worktree instead of a since-purged one. It reproduces the
+2026-10-06 row's frame count, total, mean, median and max exactly from that
+run's archived `sizes.txt` -- and disagrees with its published p90, which is
+how the 104/112 transcription error in section 8 was found.*
