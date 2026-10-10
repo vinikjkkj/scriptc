@@ -69,6 +69,24 @@ an allocator change, a region design, or a placement fix would act — is 10.9%.
 
 ### The per-fiber price is 32 KiB, not 16
 
+> **SUPERSEDED BY THIS DOCUMENT'S OWN SECTIONS 7-8, and tagged 2026-10-10
+> because the stale half is the half that gets quoted.** The section below reads
+> `SCR_FIBER_COMMIT` = 16 KiB. **The code says 4096** today
+> (`packages/runtime/src/scr_async.c:147`) -- commit `be758dfa6`, 2026-10-02,
+> shipped both levers. So the 32 KiB per-fiber price and the 855.41 MiB budget
+> above it are the **pre-fix baseline**, kept as the motivation that produced
+> the fix, NOT as the current state.
+>
+> **Current, from the `both` row that ships:** peak privateCommit
+> **538.51 MiB** high mode and **445.56 MiB** low mode, against 855.86 and
+> 714.94 baseline -- **-37.1% and -37.7%**; bytes/stack 28,673 -> **16,830**;
+> page tables 98.50 -> **48.68 MiB**. Fiber infrastructure is still the
+> dominant term, but at roughly **83%** of a much smaller peak rather than
+> 89.0% of 855.
+>
+> Anyone sizing a heap or allocator change against this document must divide by
+> the shipped peak, not by 855.41.
+
 `packages/runtime/src/scr_async.c:1640` passes `CreateFiberEx(SCR_FIBER_COMMIT, 0, ...)`
 with `SCR_FIBER_COMMIT` = 16 KiB. What the kernel charges per stack:
 
