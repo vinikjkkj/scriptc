@@ -90,6 +90,25 @@ produced one row.
 
 ## 4. The owner
 
+> ***CORRECTED 2026-10-10 — see `WHICH-BUFFER.md`, and the correction is in
+> THIS FILE's own evidence.*** The section below names the 1,344 class a freed
+> `scr_bytes.c:52` payload, from the site table in
+> `settled-census/evidence-trace1344/prof.txt`. **Two lines below that table in
+> the same file is the site's SIZE HISTOGRAM, and its octave for 1,024–2,047
+> bytes reads `3`** — three payloads in the whole run, against 15,766 holes and
+> 4,097 live blocks. A run on 10-10 carrying the allocation side and the free
+> side in ONE process (which was a compile *error* until `21facf366`)
+> reproduces that `3` exactly, puts **60** allocations in the whole
+> [1296, 1352] band, and resolves **all 60** to SQLite's own
+> `dbMallocRawFinish`. The lockstep cohort this section reads was real and is
+> **gone** on main — 1,328 is 4,097 then and **1** now, 40 and 24 are back at
+> their no-sync levels — but `scr_bytes.c:52` was never its owner, and the
+> 19,091 it is read against is a different run from the 15,766 anyway. The
+> reasoning below is kept and marked rather than deleted, for the same reason
+> §1 keeps the comment that caused it.
+
+
+
 Three busy populations move in lockstep between the no-sync control and the
 sync arm (`evidence-llvm182/{nosync,main}/n1.heapcen.txt`):
 

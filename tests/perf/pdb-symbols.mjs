@@ -19,6 +19,23 @@
  *      named, with code sizes. On the runtime bench: 5,171 publics and
  *      1,868 procedure records, `sc_f__x25_fn2` among them.
  *
+ * ***CORRECTED 2026-10-10 -- point 2 IS NOT TRUE ON THE LLVM LANE, and the
+ * way it fails is the dangerous way.*** That bench was a .c TU compiled by
+ * zig cc. When the program is emitted as a .ll, the IR carries no debug
+ * metadata, so there are no S_LPROC32 records to write and the module has no
+ * debug stream at all -- llvm-pdbutil answers "Module stream not present".
+ * Measured on app182: ONE of the emitted program's 27,281 `define`s, `main`,
+ * reaches Publics. `loadSymbols` then has nothing to resolve those frames
+ * against and returns the nearest preceding EXPORTED symbol instead, which
+ * comes from a different object: an emitted frame reads
+ * `sqlite3_sourceid+504774 (INEXACT)`. A wrong name with a right name's
+ * shape, and a size-banded stack census reads it as its answer.
+ * `tests/perf/obj-symbols.mjs` is the fix: the OBJECTS zig cached still have
+ * their full COFF symbol tables, and it checks each map against the publics
+ * that do fall inside its range rather than trusting it. Use it for any
+ * frame inside the emitted program or inside a mostly-`static` vendor
+ * archive (sqlite3.o: 277 of 2,363 functions are exported).
+ *
  * The reader is WSL's `llvm-pdbutil`. See the WSL note in the report for
  * the exact bootstrap and what it costs to reproduce; nothing is installed
  * on Windows and nothing is written to C:.
