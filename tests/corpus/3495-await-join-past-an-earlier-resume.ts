@@ -29,14 +29,24 @@ async function step(n: number): Promise<number> {
     return n;
 }
 
-// Two awaits, then a value, then a ternary that parks on ONE arm, then a use
-// of that value in the join.
+function mk(): Box {
+    return { tag: "T", seen: 5 };
+}
+
+// Two awaits, then a TEMP held across a ternary that parks on one arm only.
+//
+// THE JOIN MUST HOLD A TEMP AND NOT A LOCAL, and that is measured rather than
+// assumed. A local lives in an alloca the entry block allocates, so it is
+// carried by the SLOT mechanism and dominates everything by construction; the
+// first version of this function used one and built clean on the parent, which
+// would have made it a passenger rather than a test. `mk().tag` retains the
+// record for the member read and releases it AFTER the join, which is the only
+// arrangement that puts a cross-park SSA value there -- and it is what app182's
+// `prepareDecryptFailureRetry` does with the record its ternary joins.
 async function ternary(cond: boolean): Promise<string> {
-    const a = await step(1);
-    const b = await step(2);
-    const box: Box = { tag: "T", seen: a + b };
-    const v = cond ? await step(3) : 0;
-    return `${box.tag}:${box.seen}:${v}`;
+    await step(1);
+    await step(2);
+    return `${mk().tag}${cond ? await step(3) : 0}`;
 }
 
 // The same depth with a `??` rather than a ternary, so the two lowerings are
