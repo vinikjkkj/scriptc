@@ -210,7 +210,7 @@ housekeeping.
 since 2026-09-09 across 400 commits, so **something else closed it** and which
 commit did is not yet known.
 
-#### What replaced it as the largest line, and it is a defect
+#### What replaced it as the largest line — and it is NOT a defect
 
 The busy 4,376 row: **2,792 buffers, 12,906,128 B = 12.31 MiB, 40.4% of all busy
 CRT-heap bytes** — the largest busy row, ahead of the 64 KiB arena chunks at
@@ -224,18 +224,41 @@ sqlite3MemMalloc ← pcache1Alloc ← pcache1FetchStage2 ← getPageNormal
 Size is arithmetic: `szPage 4096 + szExtra 216 + ROUND8(sizeof(PgHdr1)) 56
 = 4368`, plus 8 for SQLite's own prefix.
 
-**Decided at rest, which is the rule this project pays for:** never freed
-(`PROFEXACT 4376 = 2792` and `HCSIZE 4376 = 2792` in a run that freed 10.26 M of
-10.47 M allocations — monotonic); survives 45 s settle plus 60 s idle;
-**`PRAGMA cache_size` does not bound it** (`ZAPO_SQLITE_CACHE_KB=0`, SQLite's
-compiled-in 474-page cap instead of 3,799, moved it 2,792 → **2,791**); and it is
-**sized by the database** (400 convs: db 2,751 pages → 2,792 buffers; 200 convs:
-1,370 → 1,423). The cache holds every page of the database and ~1.5% more.
+**What survives:** the population is monotonic (`PROFEXACT 4376 = 2792` and
+`HCSIZE 4376 = 2792` in a run that freed 10.26 M of 10.47 M allocations), it
+survives 45 s settle plus 60 s idle, and it is **sized by the database**
+(400 convs: db 2,751 pages → 2,792 buffers; 200 convs: 1,370 → 1,423). The
+cache holds every page of the database and ~1.5% more.
 
-Every stack ends in `allocateBtreePage`, a page the **write** path creates, so
-`pcache1FetchStage2` never recycled one. **Why those pages stay unrecyclable is
-the open question**, and `PRAGMA shrink_memory` is already on the store's allowed
-list and already exposed at `app182/zapo-rest.ts:1530`.
+> **RETRACTED hours after it was written, same day — and the retraction is the
+> second one this section has carried.** I wrote that `PRAGMA cache_size` does
+> not bound it and that why the pages stay unrecyclable was the open question.
+> **Both are wrong, and `heapcensus/WHICH-BUFFER.md:§2a` carries the evidence.**
+>
+> * The `ZAPO_SQLITE_CACHE_KB=0` arm was an **A/A**: `cc.ts:1291` compiles in
+>   `-DSQLITE_DEFAULT_CACHE_SIZE=-16000`, and `zapo-rest.ts:282-284` passes a
+>   pragma only when `CACHE_KB > 0`, so "no pragma" lands on the same -16000
+>   rather than on stock SQLite's -2000. 2,792 → 2,791 is one block of A/A
+>   noise. Corroborated in the same three census files: the bulk row
+>   `HCSIZE 87368 2 174752` is byte-identical across all three arms.
+> * The cap was never below the population anyway — 3,871 pages by the correct
+>   denominator (4,232, not 4,312), or 3,799 by the wrong one. **2,792 is below
+>   both.**
+> * The pages are **not pinned**. `bPurgeable = !memDb` and this is a file
+>   database; `pcache1Unpin` (`sqlite3.c:58761`) frees outright only above the
+>   cap, so under it every unpinned page lands on the LRU. **Zero pinned pages
+>   are needed to explain the whole population.**
+> * And nothing is unrecyclable: the release shipped **2026-10-03** in merge
+>   `040d22982` and reaches all of it — `pcache1Shrink` (`sqlite3.c:58522`)
+>   forces `nMaxPage = 0` and drains the entire LRU, then frees the bulk blocks.
+>   `SCR_SQLITE_IDLE_RELEASE_MS` was simply **absent from that run** and
+>   defaults to 0 (`scr_async.c:2536`).
+>
+> **So this measurement is that feature's negative control, not a defect** —
+> a correctly sized page cache holding an 11.0 MiB database under a 15.6 MiB
+> ceiling, with the return knob at its default. `OCCUPIED IS NOT A DEFECT` is a
+> rule of this front and I broke it on the largest row in the heap, twice in one
+> day, by sizing my own reasoning with someone else's unverified number.
 
 #### The lesson that outlives both numbers
 

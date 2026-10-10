@@ -150,12 +150,15 @@ Four measurements, each of which could have come out the other way:
    population is monotonic.
 2. **It survives at rest.** The census is taken 45 s of settle plus 60 s of
    idle after the last write.
-3. **`PRAGMA cache_size` does not bound it.** `app182/zapo-rest.ts:259` sets
+3. ~~**`PRAGMA cache_size` does not bound it.**~~ **RETRACTED 2026-10-10 — that
+   arm was an A/A, and both of its cap figures were wrong. See §2a.** The arm
+   was armed and recorded (`ARM ZAPO_SQLITE_CACHE_KB=0` in
+   `nocache.phases.csv`), and it moved the row **2,792 → 2,791**; what it did
+   not do is change the cap. Original text: `app182/zapo-rest.ts:259` sets
    `ZAPO_SQLITE_CACHE_KB` to 16000 by default — `cache_size = -16000`, a cap
-   of `16000·1024/4312 = 3,799` pages. Setting it to **0**, which leaves
-   SQLite's compiled-in `-2000` (a cap of **474** pages), moved the row from
-   **2,792 to 2,791.** One block. Arm armed and recorded
-   (`ARM ZAPO_SQLITE_CACHE_KB=0` in `nocache.phases.csv`).
+   of `16000·1024/4312 = 3,799` pages; setting it to **0**, which leaves
+   SQLite's compiled-in `-2000` (a cap of **474** pages), moved the row by one
+   block.
 4. **It is sized by the database, not by the cache setting.**
 
    | arm | `CONVS` | db bytes | db pages | 4,376 live | allocated | live − pages |
@@ -169,16 +172,98 @@ Four measurements, each of which could have come out the other way:
 
 So the verdict is not "a large busy row, therefore a problem" — it is: **the
 process holds the entire SQLite database in RAM, the population grows one
-buffer per database page, nothing is ever returned, and the knob that is
-supposed to cap it does not.** At 12,906,128 B it is **40.4% of all busy CRT
-heap bytes** (31,919,616) and the single largest busy row in the settled heap.
+buffer per database page**, and at 12,906,128 B it is **40.4% of all busy CRT
+heap bytes** (31,919,616), the single largest busy row in the settled heap.
+
+> **RETRACTED 2026-10-10, and this is the line that gets quoted, so it is
+> marked here rather than only at §2a.** The original sentence continued
+> *"nothing is ever returned, and the knob that is supposed to cap it does
+> not."* Both halves are false. The cap was never reached (§2a), and the
+> return mechanism exists, shipped 2026-10-03 in merge `040d22982`, and was
+> simply **off by default in this run** — `SCR_SQLITE_IDLE_RELEASE_MS`
+> appears in no arm record and defaults to 0 (`scr_async.c:2536`). This
+> measurement is that feature's **negative control**, not a defect.
 
 Every stack ends in `allocateBtreePage` — a page the write path **creates** —
-so `pcache1FetchStage2` reached `pcache1Alloc` rather than recycling, which it
-only does when nothing in the cache is unpinned. **Why these pages stay pinned
-is the next question and is not answered here.** `PRAGMA shrink_memory` is on
-the store's allowed list and `app182/zapo-rest.ts:1530` already exposes it; a
-census taken after calling it would settle whether this is pinning or policy.
+so `pcache1FetchStage2` reached `pcache1Alloc` rather than recycling.
+
+> **The sentence that followed was a correct `file:line` with an inverted
+> description of what the code does**, which is the trap this project names
+> explicitly. It read: *recycling "only [happens] when nothing in the cache is
+> unpinned"*, and concluded *"why these pages stay pinned is the next
+> question."* `pcache1FetchStage2`'s step 4 (`sqlite3.c:58584-58589`) is a
+> **conjunction**: it recycles only when the cache is purgeable **AND** the LRU
+> tail is not the anchor **AND** (`nPage+1 >= nMax` or under memory pressure).
+> With `nPage+1 < nMax` the recycle is skipped **because the cache is under its
+> cap** — the unpinned test is never consulted. **Allocating is the normal
+> path for a cache that has not filled**, and it implies nothing about pinning.
+
+### Which the page cache is, read from source
+
+`bPurgeable = !memDb` (`sqlite3.c:64707`) and this is a file database, so the
+cache **is** purgeable. `pcache1Unpin` (`sqlite3.c:58761-58790`) frees outright
+only when `reuseUnlikely || nPurgeable > nMaxPage`; otherwise the page goes on
+the LRU and `nRecyclable++`. With 2,832 pcache1 pages against a per-cache
+`nMaxPage` of 3,871 (§2a), that branch never fires: **the LRU explains the
+whole population with ZERO pinned pages.**
+
+`pcache1Free` (`sqlite3.c:58064-58092`) retains only inside the
+`SQLITE_CONFIG_PAGECACHE` pool, and `sqlite3_config` is called **nowhere** in
+this runtime (`rg -c sqlite3_config packages/runtime/src/*.c` → 0, positive
+control: 3 hits for `sqlite3_open|sqlite3_db_release_memory` in the same file).
+So a freed page goes straight to `sqlite3_free` and to the CRT — SQLite is not
+hoarding it either.
+
+And the shipped release reaches all of it: `sqlite3_db_release_memory`
+(`:188268`) → `sqlite3PagerShrink` (`:63238`) → `sqlite3PcacheShrink`
+(`:57636`) → `pcache1Shrink` (`:58522`), which forces `nMaxPage = 0` and lets
+`pcache1EnforceMaxPage` (`:58304`) **drain the entire LRU**, then frees the
+bulk blocks at `:58322`. `SEMANTICS.md`'s *"frees only UNPINNED pages"* is
+exactly right and is not a limitation here, because almost nothing is pinned.
+
+### 2a. RETRACTION — the cap arithmetic, and why the `nocache` arm was an A/A
+
+**(a) Both arms ran at the same `cache_size`.**
+`packages/compiler/src/backend/cc.ts:1291` compiles in
+`-DSQLITE_DEFAULT_CACHE_SIZE=-16000`, and `app182/zapo-rest.ts:282-284` passes
+a `cache_size` pragma **only when `CACHE_KB > 0`**; with `ZAPO_SQLITE_CACHE_KB=0`
+it passes **no pragma at all**, so the connection takes the compiled-in default
+— which is `-16000`, not stock SQLite's `-2000`. The two arms were therefore
+identical in the variable under test, and **2,792 → 2,791 is an A/A delta of
+one block.** Corroboration in the same three files: the bulk row
+`HCSIZE 87368 2 174752` is **byte-identical in all three arms** while the 4,376
+band moves 2,792 / 2,791 / 1,423 — the only arm that moved the population is
+the one that changed the workload.
+
+The comment at `zapo-rest.ts:252-257` is what led here: it says the store does
+not default `cache_size`, so the database would run on SQLite's compiled-in
+2 MiB page cache. **That is true of better-sqlite3 and stock SQLite and false
+of this runtime**, because `cc.ts` overrides the compiled-in value.
+
+**(b) Even nominally, the cap was never below the population.**
+`numberOfCachePages` (`sqlite3.c:57021-57036`) divides by `szPage + szExtra`
+taken at the **PCache** level, not pcache1's:
+
+| term | value | source |
+|---|---:|---|
+| `szPage` | 4096 | `SQLITE_DEFAULT_PAGE_SIZE`; 11,268,096 / 4096 = 2,751.0 |
+| pager `nExtra` = `PCache.szExtra` = `sizeof(MemPage)` | 136 | `sqlite3.c:72458-72489`, `ROUND8` at `:64705` |
+| `ROUND8(sizeof(PgHdr))` | 80 | `sqlite3.c:18206-18229` |
+| `pcache1.szExtra` = 136 + 80 | 216 | `sqlite3.c:57104` |
+| `ROUND8(sizeof(PgHdr1))` | 56 | `sqlite3.c:57800-57811` |
+| `szAlloc` = 4096 + 216 + 56 | 4368 | `sqlite3.c:58472` |
+| CRT block, +8 | **4376** | matches the measured band exactly |
+
+So the denominator is **4,232**, not the 4,312 used above: the cap is
+`16,384,000 / 4,232 = ` **3,871** pages, and stock `-2000` would have been
+**483**, not 474. **It does not matter which figure you take: 2,792 < 3,799 <
+3,871.** The ceiling was above the population in every arm, so no arm tested
+the cap.
+
+**The pcache1 page count, both halves from the same run** (h2 `main`,
+`21facf366`): 2,792 individual blocks (`main.heapcen.txt:274`) plus 40 pages
+living inside the two bulk blocks (`87,368 = 4,368·20 + 8`, `nInitPage = 20`,
+`sqlite3.c:57980-58014`) = **2,832**, against `nMaxPage` 3,871 per cache.
 
 ## 3. The instrument map that made the stacks readable
 
