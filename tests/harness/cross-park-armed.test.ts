@@ -47,7 +47,12 @@ import { describe, expect, test } from "vitest";
 // The SOURCE module, by relative path -- the convention the other
 // internals-facing harness tests use (dyn-dispatch-accounting, cc.ts). There
 // is no package subpath export for backend internals, and there should not be.
-import { BlockBuilder, CrossParkSlotError, CrossParkTempError } from "../../packages/compiler/src/backend/llvm/blocks.js";
+import {
+  BlockBuilder,
+  CrossParkSlotError,
+  CrossParkTempError,
+  type CoroViolations,
+} from "../../packages/compiler/src/backend/llvm/blocks.js";
 
 /** The shape every case below is a variation on: mint a temp, suspend, and
  * then do something with the temp on the far side. `park` is what the await
@@ -108,6 +113,127 @@ describe("the cross-park temp detector is armed", () => {
     const t1 = B.tmp();
     B.line(`${t1} = load double, ptr %frameslot`);
     expect(() => B.line(`call void @use(double ${t1})`)).not.toThrow();
+  });
+
+  /* ── THE RULE'S FALSE POSITIVES, and the CFG that decides them ────────
+   *
+   * The two tests below are the pair. The rule is ORDERED BY EMISSION: it asks
+   * whether a line was appended after the generation counter passed the temp's
+   * minting generation. The question it stands in for is whether the use can
+   * execute on a resume call that did not also execute the definition -- a
+   * REACHABILITY question. The two disagree whenever a block is appended after
+   * a resume label and branched into from before it, which is what `a ?? (await
+   * b)` emits for its non-nullish arm.
+   *
+   * AND THE DISAGREEMENT IS NOT FREE. The repair for a flagged temp RENAMES
+   * every later-appended use into the resume block's reload, so a flag on a
+   * use the definition already dominated replaces it with one the reload does
+   * not -- and the module stops verifying. That is not a thought experiment:
+   * tests/corpus/3492-nullish-retag-await-default.ts failed to build with four
+   * "Instruction does not dominate all uses!" until the prune landed.
+   *
+   * BOTH DIRECTIONS OR NEITHER. A prune that dropped everything would make the
+   * first test pass and be catastrophic, so the second plants a REAL crossing
+   * in the same shape and requires it to survive. */
+  function collector(): CoroViolations {
+    return { temps: new Map(), slots: new Map(), exempt: new Set() };
+  }
+
+  test("a SIBLING ARM the dispatch cannot reach is pruned, not carried", () => {
+    const B = new BlockBuilder();
+    B.enterCoro("f");
+    const v = collector();
+    B.collectInto(v);
+    const t = B.tmp();
+    B.line(`${t} = call ptr @mk()`);
+    // The pre-park test: one arm parks, the other does not.
+    B.condBr("%c", "nul.u", "nul.v");
+    B.startBlock("nul.u");
+    B.terminate("ret void");
+    // The resume label. Everything appended from here is a LATER generation.
+    B.startBlock("sc_S1");
+    B.parkBoundary();
+    B.br("nul.j");
+    // ...including `nul.v`, whose ONLY predecessor is the pre-park block.
+    B.startBlock("nul.v");
+    B.line(`call void @use(ptr ${t})`);
+    B.br("nul.j");
+    B.startBlock("nul.j");
+    B.terminate("ret void");
+
+    // The ordinal rule flagged it, which is the thing being corrected.
+    expect([...v.temps.keys()], "the ordinal rule must flag it -- that is the premise").toContain(t);
+    B.pruneUnreachableCrossPark(v);
+    expect([...v.temps.keys()], "the CFG says the dispatch cannot reach nul.v").not.toContain(t);
+    expect([...v.exempt]).toContain(t);
+  });
+
+  test("a REAL crossing in the SAME shape survives the prune", () => {
+    // Identical to the test above except for WHERE the use sits: inside the
+    // block the dispatch enters. If the prune were keyed on anything but
+    // reachability this would be dropped too, and dropping it is silent
+    // corruption rather than a loud one.
+    const B = new BlockBuilder();
+    B.enterCoro("f");
+    const v = collector();
+    B.collectInto(v);
+    const t = B.tmp();
+    B.line(`${t} = call ptr @mk()`);
+    B.condBr("%c", "nul.u", "nul.v");
+    B.startBlock("nul.u");
+    B.terminate("ret void");
+    B.startBlock("sc_S1");
+    B.parkBoundary();
+    B.line(`call void @use(ptr ${t})`);
+    B.br("nul.j");
+    B.startBlock("nul.v");
+    B.br("nul.j");
+    B.startBlock("nul.j");
+    B.terminate("ret void");
+
+    expect([...v.temps.keys()]).toContain(t);
+    B.pruneUnreachableCrossPark(v);
+    expect([...v.temps.keys()], "a use IN the resume block is a real crossing").toContain(t);
+    expect([...v.exempt]).not.toContain(t);
+  });
+
+  test("a use reachable from the resume label only THROUGH another block survives", () => {
+    // The prune walks successors to a fixpoint rather than looking at the
+    // resume block alone, so a crossing two edges away is still a crossing.
+    const B = new BlockBuilder();
+    B.enterCoro("f");
+    const v = collector();
+    B.collectInto(v);
+    const t = B.tmp();
+    B.line(`${t} = call ptr @mk()`);
+    B.terminate("ret void");
+    B.startBlock("sc_S1");
+    B.parkBoundary();
+    B.br("k0");
+    B.startBlock("k0");
+    B.br("k1");
+    B.startBlock("k1");
+    B.line(`call void @use(ptr ${t})`);
+    B.terminate("ret void");
+
+    B.pruneUnreachableCrossPark(v);
+    expect([...v.temps.keys()], "two edges from the resume label is still reachable").toContain(t);
+    expect([...v.exempt]).not.toContain(t);
+  });
+
+  test("an EXEMPT origin is no longer flagged at all", () => {
+    // What the fixpoint installs on the pass that counts. Without this the
+    // second probe pass would re-raise every pruned flag and the emitter would
+    // read the re-raise as a new violation.
+    const B = new BlockBuilder();
+    B.enterCoro("f");
+    const t = B.tmp();
+    B.line(`${t} = call ptr @mk()`);
+    B.exemptCrossPark(t);
+    B.terminate("ret void");
+    B.startBlock("sc_S1");
+    B.parkBoundary();
+    expect(() => B.line(`call void @use(ptr ${t})`)).not.toThrow();
   });
 
   test("a temp minted BEFORE the park and read BEFORE it is fine", () => {
