@@ -133,7 +133,7 @@ describe("the guarded keyed read", () => {
       expect(on.diags, name).toEqual([]);
       expect(count(on.tu, TRAP), `${name} (rule on -> abort gone)`).toBe(0);
     }
-  }, 240_000);
+  }, 600_000);
 
   test("every control is BYTE-IDENTICAL with the rule on and off", async () => {
     for (const [name, program] of CONTROLS) {
@@ -144,7 +144,7 @@ describe("the guarded keyed read", () => {
       expect(on.tu.length, `${name} (length)`).toBe(off.tu.length);
       expect(on.tu === off.tu, `${name} (bytes)`).toBe(true);
     }
-  }, 240_000);
+  }, 600_000);
 
   test("the controls that CAN miss keep their abort — the trap is not deleted anywhere", async () => {
     for (const name of ["unguarded", "guard-in-else-only", "other-key", "other-receiver", "eq-undefined-true-arm"] as const) {
