@@ -551,7 +551,7 @@ not to look.
   cannot be moved into a struct; those functions keep fibers. zapo-rest links
   no island, so this does not affect it.
 
-## 8. Frame cost of the non-refcounted spill (2026-10-06)
+## 8. Frame cost of the non-refcounted spill (2026-10-06; its table is re-measured in 8b)
 
 `emitCoroAwait` spills the emitter's RC frames across a park, and `newTemp`
 joined a temp to its frame only when it was refcounted. A `double` or a
