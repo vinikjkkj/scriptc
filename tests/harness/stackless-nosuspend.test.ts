@@ -221,7 +221,8 @@ describe.each(["c", "llvm"] as const)("an async function with no suspender conve
     /* THE HALF THAT FAILS ON THE PARENT. Before the three sites opened
      * (ir/liveness.ts's empty plan, llvm/coro.ts's points=0 refusal and the
      * llvm emitter's zero-point assert) every name below was a trampoline on
-     * both arms and this list came back holding all seven. */
+     * both arms, and the red check on b919a675a has this list coming back
+     * holding all six, on both lanes. */
     expect(
       NOSUSPEND.filter((n) => !on.artifact.includes(resumeName(n))),
       "these never-suspending async functions still pay for a fiber",
