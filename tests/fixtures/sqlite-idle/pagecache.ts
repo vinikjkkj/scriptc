@@ -15,6 +15,29 @@
  * read rather than assumed, which is exactly what 8a507dfc1 found the
  * first shape of this feature could not show.
  *
+ * THE SILENT TAIL MUST BE CHUNKED, AND THIS IS NOT A STYLE CHOICE. The
+ * release seam is reached from ONE place (scr_async.c:4129) and only on a
+ * turn where the loop has no runnable work and is ABOUT TO BLOCK, and the
+ * FIRST such turn merely arms the deadline and returns (scr_async.c:2601).
+ * Unlike the heap trim, this seam deliberately never shortens the loop's
+ * sleep -- scr_async.c:2524 says so outright, "there is deliberately no
+ * scr_sqlite_idle_due()" -- so a window CAN be slept straight through. One
+ * long `await sleep(2500)` is a single timer with no poll predicates, so the
+ * loop takes a plain nanosleep for the whole tail (scr_async.c:4337), the
+ * timer then resumes main, main closes the database, and the loop breaks on
+ * liveness (scr_async.c:4092) WITHOUT ever reaching the seam a second time.
+ * Net: exactly one blocking turn, consumed by the arming, and ZERO
+ * decisions.
+ *
+ * MEASURED, both directions, on this fixture's own binary rather than
+ * argued: with the single long sleep the default arm printed 0 decision
+ * lines, and SO DID A ONE-MILLISECOND WINDOW -- which is what rules out
+ * "the window was too long for the tail" and names the missing turn as the
+ * cause. The same binary with a touching tail printed 4 lines, so the stat
+ * path and the wiring were never in doubt. Chunking the tail is what makes
+ * the arm depend on a COUNT of turns instead of on a latency, and a count
+ * is the quantity that survives load here.
+ *
  * Read by tests/harness/sqlite-idle-release.test.ts. The program prints
  * only its own completion, so a failing assertion there is always about
  * the release and never about this file's output.
@@ -24,6 +47,7 @@ import Database from "better-sqlite3";
 const ROWS = Number(process.env["SQLIDLE_ROWS"] !== undefined ? process.env["SQLIDLE_ROWS"] : "4000");
 const TAIL_MS = Number(process.env["SQLIDLE_TAIL_MS"] !== undefined ? process.env["SQLIDLE_TAIL_MS"] : "2500");
 const TOUCH_MS = Number(process.env["SQLIDLE_TOUCH_MS"] !== undefined ? process.env["SQLIDLE_TOUCH_MS"] : "0");
+const STEP_MS = Number(process.env["SQLIDLE_STEP_MS"] !== undefined ? process.env["SQLIDLE_STEP_MS"] : "100");
 
 function sleep(ms: number): Promise<void> {
   return new Promise<void>((resolve) => {
@@ -66,7 +90,18 @@ async function main(): Promise<void> {
       touches++;
     }
   } else {
-    await sleep(TAIL_MS);
+    /* CHUNKED, AND NOT ONE `await sleep(TAIL_MS)` -- see THE SILENT TAIL
+     * MUST BE CHUNKED at the top of this file. The step counts NOMINALLY,
+     * so the iteration count is fixed (TAIL_MS/STEP_MS) no matter how long
+     * each sleep really takes: under load the turns arrive later, never
+     * fewer. The tail stays silent -- sleep() touches no connection, so
+     * the idle time still grows monotonically across the whole tail. */
+    let waited = 0;
+    while (waited < TAIL_MS) {
+      const step = Math.min(STEP_MS, TAIL_MS - waited);
+      await sleep(step);
+      waited += step;
+    }
   }
 
   console.log("pagecache " + String(got.n) + " " + String(touches));

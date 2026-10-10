@@ -25,9 +25,12 @@
  *   opted out (SCR_SQLITE_IDLE_RELEASE_MS=0) -- the negative control, and
  *     the pre-2026-10-10 default. The seam must print NOTHING.
  *   DEFAULT (the variable is not set at all) -- must release. This is the
- *     arm that tests the flip itself: before the flip it read exactly the
- *     same as the opted-out arm, so it is a check that could have come
- *     out red, which is the property this project demands of a control.
+ *     arm that tests the flip itself, and it is a check that HAS come out
+ *     red: with the silent tail written as one long sleep it printed
+ *     nothing, exactly like the opted-out arm, because the seam never got a
+ *     second blocking turn. The fixture chunks the tail for that reason and
+ *     its header carries the mechanism. Both directions were observed on
+ *     one binary before this file was trusted.
  *   in use -- a connection queried inside the window must be DECLINED and
  *     say so. `released=0 inUse=0` and `released=0 inUse=N` are different
  *     readings, and only the second proves the last-use stamp is read
@@ -96,6 +99,7 @@ describe("the idle seam releases SQLite's page cache, by default, and says which
         SCR_SQLITE_IDLE_STAT: "1",
         SQLIDLE_ROWS: "4000",
         SQLIDLE_TAIL_MS: "2500",
+        SQLIDLE_STEP_MS: "100",
         SQLIDLE_TOUCH_MS: "0",
         ...fixture,
         ...env,
@@ -117,7 +121,15 @@ describe("the idle seam releases SQLite's page cache, by default, and says which
     bin = result.binaryPath;
   }, 300_000);
 
-  test("opted out prints no decisions at all (the negative control)", async () => {
+  /* GREEN BY CONSTRUCTION, FOR TWO INDEPENDENT REASONS, and this arm does
+   * not discriminate between them. win==0 returns before the seam can do
+   * anything (scr_async.c:2599) -- that is the opt-out working. But a tail
+   * that produced no blocking turn would print nothing EITHER, which is how
+   * this file first shipped: the arm below read exactly the same as this one
+   * AFTER the flip, not only before it. It is kept because a non-empty
+   * stderr here would be a real defect, not because an empty one proves the
+   * opt-out. The arm that carries the flip is the next one. */
+  test("opted out prints no decisions at all", async () => {
     const { stdout, stderr } = await runArm("off", { SCR_SQLITE_IDLE_RELEASE_MS: "0" });
     expect(stdout).toBe("pagecache 4000 0\ndone\n");
     expect(parseDecisions(stderr)).toEqual([]);
@@ -140,14 +152,23 @@ describe("the idle seam releases SQLite's page cache, by default, and says which
         SCR_SQLITE_IDLE_STAT: "1",
         SQLIDLE_ROWS: "4000",
         SQLIDLE_TAIL_MS: "2500",
+        SQLIDLE_STEP_MS: "100",
         SQLIDLE_TOUCH_MS: "0",
       },
     });
     expect(stdout.replace(/\r\n/g, "\n")).toBe("pagecache 4000 0\ndone\n");
     const decisions = parseDecisions(stderr);
-    /* A 2500 ms silent tail over the 1000 ms default: the first window
-     * only arms the deadline, so two fire. One is enough to pin the flip;
-     * asserting two would be asserting the scheduler. */
+    /* A 2500 ms silent tail CHUNKED at 100 ms over the 1000 ms default.
+     * The chunk is what makes this arm work at all: the seam only runs on a
+     * turn where the loop is about to block, and the first such turn merely
+     * arms the deadline, so ONE long sleep yields exactly one blocking turn
+     * and zero decisions -- measured, see the fixture header. At 100 ms the
+     * tail is 25 blocking turns, the deadline falls due on the tenth, and
+     * what the arm depends on is that COUNT, not a latency: under load the
+     * turns arrive later and the count is unchanged. The chunk must stay
+     * below the window, and the tail at least one chunk above it.
+     * One decision is enough to pin the flip; asserting two would be
+     * asserting the scheduler. */
     expect(decisions.length).toBeGreaterThanOrEqual(1);
     expect(decisions.every((d) => d.released)).toBe(true);
     /* Nothing was released early: an untouched connection in a 1000 ms
@@ -170,7 +191,16 @@ describe("the idle seam releases SQLite's page cache, by default, and says which
     const kept = decisions.filter((d) => !d.released);
     expect(kept.length).toBeGreaterThanOrEqual(1);
     /* And a kept connection is kept for the stated reason: it was touched
-     * inside the window it was judged against. */
-    for (const d of kept) expect(d.idleMs).toBeLessThan(400);
+     * inside the window it was judged against.
+     *
+     * toBeLessThanOrEqual, NOT toBeLessThan, and the boundary is the whole
+     * reason. The branch admits idleMs < 400.0 (scr_sqlite.c:431) but the
+     * line prints it through %.0f, which ROUNDS -- so a true 399.6 arrives
+     * here as "400" and a strict < would fail on a decision the runtime took
+     * correctly. Observed idle is 0 ms (the seam runs in the same turn as
+     * the touch), so this boundary is practically unreachable; it is spelled
+     * faithfully anyway, because the assertion should fail when the STAMP is
+     * broken and never because of a printf. */
+    for (const d of kept) expect(d.idleMs).toBeLessThanOrEqual(400);
   }, 240_000);
 });
