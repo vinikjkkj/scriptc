@@ -3,9 +3,57 @@
  * THE QUESTION. The user reads private working set. At settle that is 84.59
  * MiB = heap busy 33.62 + heap free 36.51 + **14.46 MiB that is not heap at
  * all** — thread stacks, TLS, writable/copy-on-write image pages, and
- * whatever is left. Nobody has split it. It is 20% of the 72.12 MiB of
+ * whatever is left. Nobody has split it. It is 20% of the 71.29 MiB of
  * retention the user actually sees, and it is the last open row in the
  * ledger.
+ *
+ * WHICH RETENTION, AND WHY NOT 72.12. This line used to read "20% of the
+ * 72.12 MiB". The 20% was already right; the denominator printed beside it
+ * was not. This header's own terms are one single run: 33.62 + 36.51 +
+ * 14.46 = 84.59, the settled private WS of the `privws` arm in
+ * tests/perf/settled-census/plateau.mjs (385 samples), whose idle private
+ * WS is 13.30 -- so the retention these terms sit inside is 84.59 - 13.30 =
+ * 71.29 MiB, and 14.46 / 71.29 = 20.3%.
+ *
+ * **72.12 is derived in no file in this tree.** It had six occurrences in
+ * three files -- this header, tests/perf/boxanat/README.md (2) and
+ * tests/perf/placement/RESULTS.md (3) -- every one a quotation and none a
+ * derivation. A seventh apparent hit, in packages/runtime/test/
+ * number-cases.txt, is the substring "72.12" inside the float
+ * 6672.1270088768115 and is not a site; it is recorded here because a
+ * careless `rg 72.12` counts it and reports four files. Those six are the
+ * counts BEFORE this correction; the string now occurs more often than that,
+ * because marking it in all three files cites it. A future `rg 72.12` should
+ * find only retraction notes -- if it finds a live claim, that claim is new.
+ * Three
+ * figures for "retention" ARE derived, and they are not three drifted
+ * copies of one number -- two of them are one quantity measured on two
+ * runs, and the third is a different quantity:
+ *
+ *   71.29 MiB  settled privateWS - idle privateWS, plateau.mjs `privws`
+ *              run (84.59 - 13.30). THE ONE THIS HEADER'S TERMS BELONG TO.
+ *   69.45 MB   the SAME quantity on the shipping binary, zapo-rest-184.exe
+ *              (82.29 - 12.83), in
+ *              tests/perf/zapo-rest/deliver/README-184.md under "The
+ *              plateau, shipping arm". Its MB is stated to be 1,048,576 B,
+ *              so it is directly comparable to the MiB above.
+ *   72.40 MiB  a DIFFERENT QUANTITY -- retention in TOTAL working set
+ *              (104.48 - 32.08). plateau.mjs names it the wrong column
+ *              explicitly, because total WS counts the file-backed image
+ *              and the user's column does not.
+ *
+ * So: quote the one whose run you are in, and name the run beside it. Do
+ * not average them, do not treat 72.40 as a variant of the other two, and
+ * do not reintroduce 72.12.
+ *
+ * One caveat on 71.29 itself: plateau.mjs flags its own 13.30 idle as "NOT
+ * A FLOOR: sampled 15 s after login, still falling", and notes the
+ * shipping arm spans 12-24 MiB idle across 12 runs. So 71.29 is an upper
+ * bound on retention even within its own run, and the 20.3% above is
+ * correspondingly a lower bound on the non-heap share.
+ *
+ * Nothing else in this header was audited for the same defect; terms not
+ * named in this note are not thereby sourced, only unexamined.
  *
  * WHY THIS IS NOT A CLASSIFIER, AND THAT IS THE WHOLE DESIGN.
  * `tests/perf/memmap` answers this shape by walking every committed region

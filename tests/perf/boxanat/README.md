@@ -819,8 +819,10 @@ arena's list is *working* (83% returned); the string arena's is *unreachable*.
 ## RETRACTED: the pool budget is not an unexamined term — it was measured when it shipped
 
 I proposed `SCR_POOL_BUDGET` as *"the largest unexamined term on the board"*:
-16 MiB per pool across four pools, **up to 64 MiB**, against 72.12 MB of
-retention. **That is wrong, and it was knowable from this tree before I said
+16 MiB per pool across four pools, **up to 64 MiB**, against the settled
+private-WS retention (see the denominator note below — this paragraph used to
+name "72.12 MB", which is derived nowhere). **That is wrong, and it was
+knowable from this tree before I said
 it.**
 
 `7bd0e4ce3 perf(runtime): the size-class pools' byte budget ships on, because
@@ -843,7 +845,21 @@ TOTAL          135,325    21,391  15.81%                 0
   peak WS by **+48 KiB of 27,906 KiB (+0.172%)**, inside a **+0.316%** A/A
   floor.
 
-**616.7 KiB is 0.83% of the 72.12 MB the user sees.** The whole sweep range —
+**616.7 KiB is 0.84% of the 71.29 MiB the user sees**, or 0.87% against the
+shipping binary's 69.45 MB — it was written as **0.83% of "72.12 MB"**, and
+**72.12 is derived in no file in this tree.** The two derived figures for that
+quantity are 71.29 MiB (`../settled-census/plateau.mjs`'s `privws` run,
+84.59 − 13.30) and 69.45 MB (the shipping `zapo-rest-184.exe`, 82.29 − 12.83,
+in `../zapo-rest/deliver/README-184.md` under *"The plateau, shipping arm"*);
+a third figure, 72.40 MiB, is retention in **total** working set and so a
+different quantity, which `plateau.mjs` labels the wrong column. **Both
+percentages are reported because neither denominator is this section's arm:**
+this file states at *"The settled-memory figures this objective started from
+are `app/`"* that its settled-memory lineage is 1.6.2, and both derived
+retention figures are 1.8.2 — so this ratio crosses an arm boundary whichever
+one is used, exactly as this file warns about elsewhere. It is an
+order-of-magnitude statement, and the conclusion holds on all three
+denominators: **well under 1%.** The whole sweep range —
 16 MiB down to depth-64 — is **~575 KiB**, and going back costs **21,391
 `free()` calls and 11,976 pool misses** in a 46-second session. The trade was
 measured in both directions and settled.
