@@ -1,0 +1,670 @@
+PROF-KIND alloc
+PROF 28 1792 0 0 0 1b5e9b0 0 G:\blocks\h2-wt\packages\runtime\src\scr_url.c:70
+PROF 0 0 1098 0 0 1b6db12 0 G:\blocks\h2-wt\packages\runtime\src\scr_bigint.c:538
+PROF 8 16 0 0 0 1b85fb9 0 G:\blocks\h2-wt\packages\runtime\src\scr_stream.c:3227
+PROF 0 0 16 0 0 1b7cdc4 0 G:\blocks\h2-wt\packages\runtime\src\scr_events_emitter.c:201
+PROF 0 0 4 0 0 1b8c3c6 0 G:\blocks\h2-wt\packages\runtime\src\scr_http.c:252
+PROF 0 0 60806 0 0 1b685b2 0 G:\blocks\h2-wt\packages\runtime\src\scr_cycle.c:1959
+PROF 8 128 0 0 0 1b85f82 0 G:\blocks\h2-wt\packages\runtime\src\scr_stream.c:3226
+PROF 9 380253 0 0 0 1b5bee5 0 G:\blocks\h2-wt\packages\runtime\src\scr_lib.c:3989
+PROF 2 192 0 0 0 1b8f9d2 0 G:\blocks\h2-wt\packages\runtime\src\scr_ws_client.c:240
+PROF 4 320 0 0 0 1b5dd60 0 G:\blocks\h2-wt\packages\runtime\src\scr_url.c:522
+PROF 0 0 2 0 0 1b8fb1b 0 G:\blocks\h2-wt\packages\runtime\src\scr_ws_client.c:296
+PROF 4 256 0 0 0 1b71fba 0 G:\blocks\h2-wt\packages\runtime\src\scr_asym.c:72
+PROF 0 0 15985 0 0 1b78828 0 G:\blocks\h2-wt\packages\runtime\src\scr_inspect.c:73
+PROF 6 240 0 0 0 1b57c05 0 G:\blocks\h2-wt\packages\runtime\src\scr_error.c:170
+PROF 0 0 1697 0 0 1b6b670 0 G:\blocks\h2-wt\packages\runtime\src\scr_regex.c:366
+PROF 0 0 2 0 0 1b8dc66 0 G:\blocks\h2-wt\packages\runtime\src\scr_http.c:1768
+PROF 1 256 0 0 0 1b7793b 0 G:\blocks\h2-wt\packages\runtime\src\scr_inspect.c:257
+PROF 19976 1279808 0 0 0 1b787f2 0 G:\blocks\h2-wt\packages\runtime\src\scr_inspect.c:49
+PROF 10 5120 0 0 0 1b54b0f 0 G:\blocks\h2-wt\packages\runtime\src\scr_map.c:311
+PROF 0 0 89 0 0 1b74eec 0 G:\blocks\h2-wt\packages\runtime\src\scr_cipher_value.c:121
+PROF 0 0 24 0 0 1b5ea14 0 G:\blocks\h2-wt\packages\runtime\src\scr_url.c:93
+PROF 28 896 0 0 0 1b5a8ab 0 G:\blocks\h2-wt\packages\runtime\src\scr_lib.c:3926
+PROF 1 64 0 0 0 1b6c58c 0 G:\blocks\h2-wt\packages\runtime\src\scr_regex.c:101
+PROF 16 2432 0 0 0 1b648e0 0 G:\blocks\h2-wt\packages\runtime\src\scr_async.c:2957
+PROF 0 0 1 0 0 1b8ecba 0 G:\blocks\h2-wt\packages\runtime\src\scr_websocket.c:376
+PROF 0 0 3 0 0 1b5760d 0 G:\blocks\h2-wt\packages\runtime\src\scr_error.c:411
+PROF 60829 43756648 0 0 0 1b69276 0 G:\blocks\h2-wt\packages\runtime\src\scr_cycle.c:1727
+PROF 0 0 1 0 0 1b6df20 0 G:\blocks\h2-wt\packages\runtime\src\scr_sqlite.c:547
+PROF 4 352 0 0 0 1b8da67 0 G:\blocks\h2-wt\packages\runtime\src\scr_http.c:2059
+PROF 3987 255168 0 0 0 1b77972 0 G:\blocks\h2-wt\packages\runtime\src\scr_inspect.c:276
+PROF 39 1248 0 0 0 1b7d9de 0 G:\blocks\h2-wt\packages\runtime\src\scr_events_emitter.c:339
+PROF 89 41600 0 0 0 1b50901 0 G:\blocks\h2-wt\packages\runtime\src\scr_array.c:906
+PROF 8 64 0 0 0 1b85e38 0 G:\blocks\h2-wt\packages\runtime\src\scr_stream.c:1697
+PROF 104 2496 0 0 0 1b6479c 0 G:\blocks\h2-wt\packages\runtime\src\scr_async.c:1158
+PROF 2 1536 0 0 0 1b63033 0 G:\blocks\h2-wt\packages\runtime\src\scr_json.c:2002
+PROF 1098 22652 0 0 0 1b6da70 0 G:\blocks\h2-wt\packages\runtime\src\scr_bigint.c:528
+PROF 0 0 6520 0 0 1b6c73d 0 G:\blocks\h2-wt\packages\runtime\src\scr_regex.c:612
+PROF 2 128 0 0 0 1b8c59a 0 G:\blocks\h2-wt\packages\runtime\src\scr_http.c:793
+PROF 1238 39616 0 0 0 1b5faf8 0 G:\blocks\h2-wt\packages\runtime\src\scr_json.c:143
+PROF 8217 574390 0 0 0 1b6c5f5 0 G:\blocks\h2-wt\packages\runtime\src\scr_regex.c:239
+PROF 0 0 24 0 0 1b658fd 0 G:\blocks\h2-wt\packages\runtime\src\scr_async.c:2951
+PROF 0 0 9299 0 0 1b6cd30 0 G:\blocks\h2-wt\packages\runtime\src\scr_bigint.c:66
+PROF 90 5418 0 0 0 1b6b57c 0 G:\blocks\h2-wt\packages\runtime\src\scr_regex.c:74
+PROF 0 0 1 0 0 1b8ecf3 0 G:\blocks\h2-wt\packages\runtime\src\scr_websocket.c:377
+PROF 1 128 0 0 0 1b8d94b 0 G:\blocks\h2-wt\packages\runtime\src\scr_http.c:1210
+PROF 1 152 0 0 0 1b6492c 0 G:\blocks\h2-wt\packages\runtime\src\scr_async.c:3409
+PROF 22441 2872448 0 0 0 1b648aa 0 G:\blocks\h2-wt\packages\runtime\src\scr_async.c:1512
+PROF 4 116 0 0 0 1b5dc3a 0 G:\blocks\h2-wt\packages\runtime\src\scr_url.c:352
+PROF 0 0 22441 0 0 1b646b5 0 G:\blocks\h2-wt\packages\runtime\src\scr_async.c:477
+PROF 89 105376 0 0 0 1b74e99 0 G:\blocks\h2-wt\packages\runtime\src\scr_cipher_value.c:90
+PROF 0 0 19 0 0 1b5a80f 0 G:\blocks\h2-wt\packages\runtime\src\scr_lib.c:3858
+PROF 0 0 28 0 0 1b5a947 0 G:\blocks\h2-wt\packages\runtime\src\scr_lib.c:3947
+PROF 8 2048 0 0 0 1b64ae0 0 G:\blocks\h2-wt\packages\runtime\src\scr_async.c:4768
+PROF 8 228480 0 0 0 1b638f0 0 G:\blocks\h2-wt\packages\runtime\src\scr_json.c:1208
+PROF 2 768 0 0 0 1b4e7a8 0 G:\blocks\h2-wt\packages\runtime\src\scr_string.c:726
+PROF 0 0 5 0 0 1b8a1d1 0 G:\blocks\h2-wt\packages\runtime\src\scr_net.c:349
+PROF 0 0 3 0 0 1b8a2d0 0 G:\blocks\h2-wt\packages\runtime\src\scr_net.c:741
+PROF 0 0 1124126 0 0 1b4fbaa 0 G:\blocks\h2-wt\packages\runtime\src\scr_array.c:549
+PROF 5966508 384744502816 0 0 0 1b4e771 0 G:\blocks\h2-wt\packages\runtime\src\scr_string.c:1036
+PROF 10 523776 0 0 0 1b685e8 0 G:\blocks\h2-wt\packages\runtime\src\scr_cycle.c:2108
+PROF 16 8320 0 0 0 1b86eab 0 G:\blocks\h2-wt\packages\runtime\src\scr_stream.c:1873
+PROF 2 20 0 0 0 1b8f999 0 G:\blocks\h2-wt\packages\runtime\src\scr_ws_client.c:213
+PROF 0 0 1 0 0 1b63068 0 G:\blocks\h2-wt\packages\runtime\src\scr_json.c:2010
+PROF 1079760 21925440 0 0 0 1b5c12d 0 G:\blocks\h2-wt\packages\runtime\src\scr_lib.c:4279
+PROF 0 0 16 0 0 1b867c8 0 G:\blocks\h2-wt\packages\runtime\src\scr_stream.c:367
+PROF 2 144 0 0 0 1b90818 0 G:\blocks\h2-wt\packages\runtime\src\scr_ws_global.c:384
+PROF 4 256 0 0 0 1b5e87e 0 G:\blocks\h2-wt\packages\runtime\src\scr_url.c:181
+PROF 0 0 3987 0 0 1b77a19 0 G:\blocks\h2-wt\packages\runtime\src\scr_inspect.c:541
+PROF 0 0 20 0 0 1b6b548 0 G:\blocks\h2-wt\packages\runtime\src\scr_regex.c:71
+PROF 11 191 0 0 0 1b5985a 0 G:\blocks\h2-wt\packages\runtime\src\scr_lib.c:279
+PROF 0 0 26317 0 0 1b51275 0 G:\blocks\h2-wt\packages\runtime\src\scr_bytes.c:192
+PROF 0 0 2 0 0 1b8b4b7 0 G:\blocks\h2-wt\packages\runtime\src\scr_net.c:375
+PROF 0 0 13176 0 0 1b5071c 0 G:\blocks\h2-wt\packages\runtime\src\scr_array.c:430
+PROF 4883 270218 0 0 0 1b522ec 0 G:\blocks\h2-wt\packages\runtime\src\scr_bytes.c:732
+PROF 0 0 16 0 0 1b87570 0 G:\blocks\h2-wt\packages\runtime\src\scr_stream.c:2721
+PROF 3 192 0 0 0 1b56ac8 0 G:\blocks\h2-wt\packages\runtime\src\scr_exception.c:83
+PROF 0 0 504 0 0 1b69331 0 G:\blocks\h2-wt\packages\runtime\src\scr_cycle.c:1589
+PROF 28 1568 0 0 0 1b5a877 0 G:\blocks\h2-wt\packages\runtime\src\scr_lib.c:3915
+PROF 44 1760 0 0 0 1b6f9e8 0 G:\blocks\h2-wt\packages\runtime\src\scr_sqlite.c:681
+PROF 38 1216 0 0 0 1b64874 0 G:\blocks\h2-wt\packages\runtime\src\scr_async.c:1499
+PROF 0 0 2 0 0 1b8c4ca 0 G:\blocks\h2-wt\packages\runtime\src\scr_http.c:653
+PROF 0 0 4 0 0 1b8c35e 0 G:\blocks\h2-wt\packages\runtime\src\scr_http.c:250
+PROF 0 0 1 0 0 1b8ed2c 0 G:\blocks\h2-wt\packages\runtime\src\scr_websocket.c:378
+PROF 8018 103200 0 0 0 1b54cbf 0 G:\blocks\h2-wt\packages\runtime\src\scr_map.c:475
+PROF 0 0 1423 0 0 1b5fd47 0 G:\blocks\h2-wt\packages\runtime\src\scr_json.c:907
+PROF 0 0 2 0 0 1b71423 0 G:\blocks\h2-wt\packages\runtime\src\scr_asym.c:57
+PROF 0 0 137 0 0 1b5ade9 0 G:/blocks/h2-wt/tests/perf/heapcensus/scr_heap_census.h:432
+PROF 1 24 0 0 0 1b5ab50 0 G:/blocks/h2-wt/tests/perf/heapcensus/scr_heap_census.h:283
+PROF 8 768 0 0 0 1b7c1a8 0 G:\blocks\h2-wt\packages\runtime\src\scr_zlib_stream.c:250
+PROF 6 129024 0 0 0 1b69416 0 G:\blocks\h2-wt\packages\runtime\src\scr_cycle.c:2193
+PROF 7 1536 0 0 0 1b7fc76 0 G:\blocks\h2-wt\packages\runtime\src\scr_weak.c:187
+PROF 6830 1038160 0 0 0 1b54018 0 G:\blocks\h2-wt\packages\runtime\src\scr_map.c:554
+PROF 12 480 0 0 0 1b6587e 0 G:\blocks\h2-wt\packages\runtime\src\scr_async.c:2133
+PROF 2 1496 0 0 0 1b60065 0 G:\blocks\h2-wt\packages\runtime\src\scr_json.c:1757
+PROF 5 360 0 0 0 1b7f2a8 0 G:\blocks\h2-wt\packages\runtime\src\scr_weak.c:146
+PROF 1 192 0 0 0 1b63109 0 G:\blocks\h2-wt\packages\runtime\src\scr_json.c:3116
+PROF 0 0 2 0 0 1b8dd3a 0 G:\blocks\h2-wt\packages\runtime\src\scr_http.c:2053
+PROF 0 0 19 0 0 1b5a843 0 G:\blocks\h2-wt\packages\runtime\src\scr_lib.c:3859
+PROF 0 0 8 0 0 1b8675c 0 G:\blocks\h2-wt\packages\runtime\src\scr_stream.c:361
+PROF 16 256 0 0 0 1b873d4 0 G:\blocks\h2-wt\packages\runtime\src\scr_stream.c:2683
+PROF 7 97536 0 0 0 1b65849 0 G:\blocks\h2-wt\packages\runtime\src\scr_async.c:909
+PROF 0 0 198168 0 0 1b65ae2 0 G:\blocks\h2-wt\packages\runtime\src\scr_async.c:3584
+PROF 10 320 0 0 0 1b54b42 0 G:\blocks\h2-wt\packages\runtime\src\scr_map.c:314
+PROF 20040 314016 0 0 0 1b6313e 0 G:\blocks\h2-wt\packages\runtime\src\scr_json.c:94
+PROF 0 0 64 0 0 1b6527b 0 G:\blocks\h2-wt\packages\runtime\src\scr_async.c:497
+PROF 9302 484552 0 0 0 1b6d491 0 G:\blocks\h2-wt\packages\runtime\src\scr_bigint.c:39
+PROF 2 432 0 0 0 1b8dc9b 0 G:\blocks\h2-wt\packages\runtime\src\scr_http.c:1774
+PROF 41 1968 0 0 0 1b8de43 0 G:\blocks\h2-wt\packages\runtime\src\scr_http.c:1521
+PROF 1 768 0 0 0 1b898a7 0 G:\blocks\h2-wt\packages\runtime\src\scr_loop_wsapoll.c:104
+PROF 1 38 0 0 0 1b6de89 0 G:\blocks\h2-wt\packages\runtime\src\scr_sqlite.c:529
+PROF 0 0 7822 0 0 1b540b1 0 G:\blocks\h2-wt\packages\runtime\src\scr_map.c:589
+PROF 0 0 6751 0 0 1b540e4 0 G:\blocks\h2-wt\packages\runtime\src\scr_map.c:594
+PROF 150 96316024 0 0 0 1b4e1c0 0 G:\blocks\h2-wt\packages\runtime\src\scr_string.c:1162
+PROF 55348 8412896 0 0 0 1b64962 0 G:\blocks\h2-wt\packages\runtime\src\scr_async.c:3419
+PROF 8 448 0 0 0 1b85e9e 0 G:\blocks\h2-wt\packages\runtime\src\scr_stream.c:2837
+PROF 0 0 36 0 0 1b4fcf0 0 G:\blocks\h2-wt\packages\runtime\src\scr_array.c:1043
+PROF 6 3936 0 0 0 1b8b2db 0 G:\blocks\h2-wt\packages\runtime\src\scr_net.c:917
+PROF 8189 1316096 0 0 0 1b54b75 0 G:\blocks\h2-wt\packages\runtime\src\scr_map.c:259
+PROF 0 0 446 0 0 1b6e035 0 G:\blocks\h2-wt\packages\runtime\src\scr_sqlite.c:1219
+PROF 1 96 0 0 0 1b8c669 0 G:\blocks\h2-wt\packages\runtime\src\scr_http.c:2087
+PROF 0 0 4 0 0 1b57bd0 0 G:\blocks\h2-wt\packages\runtime\src\scr_error.c:101
+PROF 0 0 173 0 0 1b7dc92 0 G:\blocks\h2-wt\packages\runtime\src\scr_events_emitter.c:628
+PROF 0 0 1098 0 0 1b6db7e 0 G:\blocks\h2-wt\packages\runtime\src\scr_bigint.c:540
+PROF 0 0 28 0 0 1b5a8df 0 G:\blocks\h2-wt\packages\runtime\src\scr_lib.c:3944
+PROF 0 0 16 0 0 1b868b9 0 G:\blocks\h2-wt\packages\runtime\src\scr_stream.c:1156
+PROF 0 0 3 0 0 1b7fcaa 0 G:\blocks\h2-wt\packages\runtime\src\scr_weak.c:200
+PROF 0 0 8 0 0 1b8b44f 0 G:\blocks\h2-wt\packages\runtime\src\scr_net.c:1229
+PROF 1 128 0 0 0 1b609f2 0 G:\blocks\h2-wt\packages\runtime\src\scr_json.c:4081
+PROF 0 0 3283 0 0 1b71456 0 G:\blocks\h2-wt\packages\runtime\src\scr_asym.c:60
+PROF 37 608 0 0 0 1b7da1c 0 G:\blocks\h2-wt\packages\runtime\src\scr_events_emitter.c:348
+PROF 0 0 1 0 0 1b913b5 0 G:\blocks\h2-wt\packages\runtime\src\scr_ws_global.c:545
+PROF 0 0 11 0 0 1b598a5 0 G:\blocks\h2-wt\packages\runtime\src\scr_lib.c:285
+PROF 137 700481 0 0 0 1b5abef 0 G:/blocks/h2-wt/tests/perf/heapcensus/scr_heap_census.h:293
+PROF 1 56 0 0 0 1b6df56 0 G:\blocks\h2-wt\packages\runtime\src\scr_sqlite.c:555
+PROF 11 330240 0 0 0 1b8f803 0 G:\blocks\h2-wt\packages\runtime\src\scr_websocket.c:338
+PROF 0 0 12 0 0 1b8a16b 0 G:\blocks\h2-wt\packages\runtime\src\scr_net.c:300
+PROF 0 0 8 0 0 1b87609 0 G:\blocks\h2-wt\packages\runtime\src\scr_stream.c:2795
+PROF 0 0 2 0 0 1b8a26a 0 G:\blocks\h2-wt\packages\runtime\src\scr_net.c:732
+PROF 0 0 7822 0 0 1b5407e 0 G:\blocks\h2-wt\packages\runtime\src\scr_map.c:588
+PROF 78 532864 0 0 0 1b5beb1 0 G:\blocks\h2-wt\packages\runtime\src\scr_lib.c:3805
+PROF 0 0 8 0 0 1b875d2 0 G:\blocks\h2-wt\packages\runtime\src\scr_stream.c:2792
+PROF 0 0 2 0 0 1b8c532 0 G:\blocks\h2-wt\packages\runtime\src\scr_http.c:665
+PROF 0 0 270 0 0 1b5fd13 0 G:\blocks\h2-wt\packages\runtime\src\scr_json.c:906
+PROF 0 0 20 0 0 1b53335 0 G:\blocks\h2-wt\packages\runtime\src\scr_bytes_io.c:901
+PROF 16 1024 0 0 0 1b86882 0 G:\blocks\h2-wt\packages\runtime\src\scr_stream.c:1211
+PROF 4 128 0 0 0 1b71fed 0 G:\blocks\h2-wt\packages\runtime\src\scr_asym.c:81
+PROF 1 32 0 0 0 1b88ec8 0 G:\blocks\h2-wt\packages\runtime\src\scr_loop_wsapoll.c:116
+PROF 0 0 44 0 0 1b8f7ca 0 G:\blocks\h2-wt\packages\runtime\src\scr_websocket.c:396
+PROF 20 861 0 0 0 1b532fd 0 G:\blocks\h2-wt\packages\runtime\src\scr_bytes_io.c:887
+PROF 0 0 18651 0 0 1b37f3d 0 G:\blocks\h2-wt\packages\runtime\vendor\sqlite\sqlite3.c:28062
+PROF 0 0 5966494 0 0 1b4e1f7 0 G:\blocks\h2-wt\packages\runtime\src\scr_string.c:1211
+PROF 140 6720 0 0 0 1b7d956 0 G:\blocks\h2-wt\packages\runtime\src\scr_events_emitter.c:144
+PROF 173 1472 0 0 0 1b7dc54 0 G:\blocks\h2-wt\packages\runtime\src\scr_events_emitter.c:587
+PROF 0 0 8 0 0 1b7cc16 0 G:\blocks\h2-wt\packages\runtime\src\scr_zlib_stream.c:99
+PROF 0 0 4 0 0 1b5e94a 0 G:\blocks\h2-wt\packages\runtime\src\scr_url.c:243
+PROF 0 0 615 0 0 1b62fcb 0 G:\blocks\h2-wt\packages\runtime\src\scr_json.c:737
+PROF 19 760 0 0 0 1b5a7db 0 G:\blocks\h2-wt\packages\runtime\src\scr_lib.c:3838
+PROF 0 0 108825 0 0 1b512aa 0 G:\blocks\h2-wt\packages\runtime\src\scr_bytes.c:197
+PROF 0 0 2 0 0 1b8c496 0 G:\blocks\h2-wt\packages\runtime\src\scr_http.c:652
+PROF 0 0 7 0 0 1b63925 0 G:\blocks\h2-wt\packages\runtime\src\scr_json.c:1215
+PROF 1098 22652 0 0 0 1b6daa6 0 G:\blocks\h2-wt\packages\runtime\src\scr_bigint.c:529
+PROF 104 4160 0 0 0 1b8740b 0 G:\blocks\h2-wt\packages\runtime\src\scr_stream.c:475
+PROF 1 32768 0 0 0 1b54e15 0 G:\blocks\h2-wt\packages\runtime\src\scr_closure.c:521
+PROF 41 486 0 0 0 1b8de0e 0 G:\blocks\h2-wt\packages\runtime\src\scr_http.c:1518
+PROF 0 0 12 0 0 1b65942 0 G:\blocks\h2-wt\packages\runtime\src\scr_async.c:2114
+PROF 15 720 0 0 0 1b8a138 0 G:\blocks\h2-wt\packages\runtime\src\scr_net.c:289
+PROF 0 0 4 0 0 1b8c392 0 G:\blocks\h2-wt\packages\runtime\src\scr_http.c:251
+PROF 0 0 104 0 0 1b7cd86 0 G:\blocks\h2-wt\packages\runtime\src\scr_events_emitter.c:198
+PROF 0 0 1235028 0 0 1b4fbdf 0 G:\blocks\h2-wt\packages\runtime\src\scr_array.c:553
+PROF 16 319360 0 0 0 1b49f26 0 G:\blocks\h2-wt\packages\runtime\vendor\zlib\zutil.c:288
+PROF 3 73 0 0 0 1b575c0 0 G:\blocks\h2-wt\packages\runtime\src\scr_error.c:404
+PROF 0 0 3 0 0 1b56b18 0 G:\blocks\h2-wt\packages\runtime\src\scr_exception.c:118
+PROF 26025 1700256 0 0 0 1b63171 0 G:\blocks\h2-wt\packages\runtime\src\scr_json.c:1636
+PROF 18 432 0 0 0 1b7d900 0 G:\blocks\h2-wt\packages\runtime\src\scr_events_emitter.c:126
+PROF 44 84480 0 0 0 1b8f791 0 G:\blocks\h2-wt\packages\runtime\src\scr_websocket.c:392
+PROF 48 8192 0 0 0 1b876b5 0 G:\blocks\h2-wt\packages\runtime\src\scr_stream.c:565
+PROF 0 0 166631 0 0 1b65e88 0 G:\blocks\h2-wt\packages\runtime\src\scr_coro.c:64
+PROF 0 0 1697 0 0 1b6b6a5 0 G:\blocks\h2-wt\packages\runtime\src\scr_regex.c:367
+PROF 0 0 16 0 0 1b49f5f 0 G:\blocks\h2-wt\packages\runtime\vendor\zlib\zutil.c:294
+PROF 0 0 8 0 0 1b86618 0 G:\blocks\h2-wt\packages\runtime\src\scr_stream.c:326
+PROF 0 0 16 0 0 1b865e2 0 G:\blocks\h2-wt\packages\runtime\src\scr_stream.c:322
+PROF 1098 22652 0 0 0 1b6dadc 0 G:\blocks\h2-wt\packages\runtime\src\scr_bigint.c:530
+PROF 0 0 41 0 0 1b8dee2 0 G:\blocks\h2-wt\packages\runtime\src\scr_http.c:1529
+PROF 1 232 0 0 0 1b8b1f5 0 G:\blocks\h2-wt\packages\runtime\src\scr_net.c:1486
+PROF 0 0 1079760 0 0 1b5c161 0 G:\blocks\h2-wt\packages\runtime\src\scr_lib.c:4314
+PROF 0 0 104 0 0 1b87441 0 G:\blocks\h2-wt\packages\runtime\src\scr_stream.c:4451
+PROF 446 11207 0 0 0 1b6dfdb 0 G:\blocks\h2-wt\packages\runtime\src\scr_sqlite.c:1197
+PROF 0 0 104 0 0 1b64a57 0 G:\blocks\h2-wt\packages\runtime\src\scr_async.c:3924
+PROF 0 0 4 0 0 1b5dd2d 0 G:\blocks\h2-wt\packages\runtime\src\scr_url.c:520
+PROF 0 0 4 0 0 1b5e97d 0 G:\blocks\h2-wt\packages\runtime\src\scr_url.c:244
+PROF 26522 1060880 0 0 0 1b51c99 0 G:\blocks\h2-wt\packages\runtime\src\scr_bytes.c:43
+PROF 0 0 283 0 0 1b54ba8 0 G:\blocks\h2-wt\packages\runtime\src\scr_map.c:262
+PROF 0 0 28 0 0 1b5a913 0 G:\blocks\h2-wt\packages\runtime\src\scr_lib.c:3946
+PROF 0 0 101196 0 0 1b64680 0 G:\blocks\h2-wt\packages\runtime\src\scr_async.c:472
+PROF 8 1216 0 0 0 1b64b16 0 G:\blocks\h2-wt\packages\runtime\src\scr_async.c:4775
+PROF 0 0 38 0 0 1b65246 0 G:\blocks\h2-wt\packages\runtime\src\scr_async.c:298
+PROF 19 456 0 0 0 1b8a19e 0 G:\blocks\h2-wt\packages\runtime\src\scr_net.c:315
+PROF 0 0 2 0 0 1b8d841 0 G:\blocks\h2-wt\packages\runtime\src\scr_http.c:891
+PROF 10 523776 0 0 0 1b6944c 0 G:\blocks\h2-wt\packages\runtime\src\scr_cycle.c:2292
+PROF 3441 137640 0 0 0 1b514fb 0 G:\blocks\h2-wt\packages\runtime\src\scr_bytes.c:593
+PROF 5 3158016 0 0 0 1b8b3df 0 G:\blocks\h2-wt\packages\runtime\src\scr_net.c:1102
+PROF 32 1024 0 0 0 1b659c8 0 G:\blocks\h2-wt\packages\runtime\src\scr_async.c:3003
+PROF 142820 21708640 0 0 0 1b64998 0 G:\blocks\h2-wt\packages\runtime\src\scr_async.c:3495
+PROF 0 0 2 0 0 1b8dcd0 0 G:\blocks\h2-wt\packages\runtime\src\scr_http.c:1815
+PROF 1 32 0 0 0 1b7e8ad 0 G:\blocks\h2-wt\packages\runtime\src\scr_symbol.c:45
+PROF 2 1024 0 0 0 1b8d875 0 G:\blocks\h2-wt\packages\runtime\src\scr_http.c:811
+PROF 0 0 3 0 0 1b6e0d0 0 G:\blocks\h2-wt\packages\runtime\src\scr_sqlite.c:1246
+PROF 1 1096 0 0 0 1b5abb3 0 G:/blocks/h2-wt/tests/perf/heapcensus/scr_heap_census.h:289
+PROF 8217 131472 0 0 0 1b6c62a 0 G:\blocks\h2-wt\packages\runtime\src\scr_regex.c:333
+PROF 1474 378616 0 0 0 1b37f7c 0 G:\blocks\h2-wt\packages\runtime\vendor\sqlite\sqlite3.c:28108
+PROF 0 0 6520 0 0 1b6c772 0 G:\blocks\h2-wt\packages\runtime\src\scr_regex.c:613
+PROF 0 0 4883 0 0 1b52325 0 G:\blocks\h2-wt\packages\runtime\src\scr_bytes.c:796
+PROF 0 0 102 0 0 1b62fff 0 G:\blocks\h2-wt\packages\runtime\src\scr_json.c:738
+PROF 0 0 2 0 0 1b8fb54 0 G:\blocks\h2-wt\packages\runtime\src\scr_ws_client.c:299
+PROF 0 0 2 0 0 1b8dd05 0 G:\blocks\h2-wt\packages\runtime\src\scr_http.c:2052
+PROF 26522 92198091 0 0 0 1b51ccd 0 G:\blocks\h2-wt\packages\runtime\src\scr_bytes.c:52
+PROF 1315111 210709344 0 0 0 1b50751 0 G:\blocks\h2-wt\packages\runtime\src\scr_array.c:444
+PROF 0 0 33952 0 0 1b50793 0 G:\blocks\h2-wt\packages\runtime\src\scr_array.c:485
+PROF 0 0 9 0 0 1b5bf19 0 G:\blocks\h2-wt\packages\runtime\src\scr_lib.c:3997
+PROF 22616 73055343 0 0 0 1b37ed8 0 G:\blocks\h2-wt\packages\runtime\vendor\sqlite\sqlite3.c:28035
+PROF 1 384 0 0 0 1b64808 0 G:\blocks\h2-wt\packages\runtime\src\scr_async.c:1229
+PROF 0 0 1 0 0 1b65b18 0 G:\blocks\h2-wt\packages\runtime\src\scr_async.c:3595
+PROF 3260 146700 0 0 0 1b52501 0 G:\blocks\h2-wt\packages\runtime\src\scr_bytes.c:1019
+PROF 79099 3163960 0 0 0 1b51455 0 G:\blocks\h2-wt\packages\runtime\src\scr_bytes.c:529
+PROF 0 0 1 0 0 1b90616 0 G:\blocks\h2-wt\packages\runtime\src\scr_ws_client.c:403
+PROF 2 1070 0 0 0 1b8fae2 0 G:\blocks\h2-wt\packages\runtime\src\scr_ws_client.c:290
+PROF 10 130944 0 0 0 1b65a85 0 G:\blocks\h2-wt\packages\runtime\src\scr_async.c:862
+PROF 26034 1666176 0 0 0 1b4fb75 0 G:\blocks\h2-wt\packages\runtime\src\scr_array.c:499
+PROF 18840 578760 0 0 0 1b5ff4f 0 G:\blocks\h2-wt\packages\runtime\src\scr_json.c:1406
+PROF 2 128 0 0 0 1b8c566 0 G:\blocks\h2-wt\packages\runtime\src\scr_http.c:792
+PROF 0 0 4 0 0 1b5dc08 0 G:\blocks\h2-wt\packages\runtime\src\scr_url.c:52
+PROF 1 64 0 0 0 1b5fcdf 0 G:\blocks\h2-wt\packages\runtime\src\scr_json.c:434
+PROF 8018 1651200 0 0 0 1b54c8c 0 G:\blocks\h2-wt\packages\runtime\src\scr_map.c:468
+PROF 0 0 3974 0 0 1b77a6d 0 G:\blocks\h2-wt\packages\runtime\src\scr_inspect.c:628
+PROF 41 1968 0 0 0 1b8de78 0 G:\blocks\h2-wt\packages\runtime\src\scr_http.c:1522
+PROF 0 0 7822 0 0 1b5404b 0 G:\blocks\h2-wt\packages\runtime\src\scr_map.c:587
+PROF 0 0 16 0 0 1b87539 0 G:\blocks\h2-wt\packages\runtime\src\scr_stream.c:2720
+PROF 0 0 3260 0 0 1b52537 0 G:\blocks\h2-wt\packages\runtime\src\scr_bytes.c:1034
+PROF 4 1216 0 0 0 1b8dbe1 0 G:\blocks\h2-wt\packages\runtime\src\scr_http.c:1635
+PROF 41 1968 0 0 0 1b8dead 0 G:\blocks\h2-wt\packages\runtime\src\scr_http.c:1523
+PROF 617 40435712 0 0 0 1b692bc 0 G:\blocks\h2-wt\packages\runtime\src\scr_cycle.c:1546
+PROF 0 0 1 0 0 1b5ae61 0 G:/blocks/h2-wt/tests/perf/heapcensus/scr_heap_census.h:435
+PROF 2 304 0 0 0 1b8ec81 0 G:\blocks\h2-wt\packages\runtime\src\scr_websocket.c:359
+PROF 3284 210176 0 0 0 1b713d8 0 G:\blocks\h2-wt\packages\runtime\src\scr_asym.c:34
+PROF 4 32768 0 0 0 1b8da9c 0 G:\blocks\h2-wt\packages\runtime\src\scr_http.c:1992
+PROF 0 0 8 0 0 1b86726 0 G:\blocks\h2-wt\packages\runtime\src\scr_stream.c:360
+PROF 64 1536 0 0 0 1b646ea 0 G:\blocks\h2-wt\packages\runtime\src\scr_async.c:533
+PROF 0 0 8 0 0 1b64b82 0 G:\blocks\h2-wt\packages\runtime\src\scr_async.c:4889
+PROF 0 0 1 0 0 1b5ae25 0 G:/blocks/h2-wt/tests/perf/heapcensus/scr_heap_census.h:433
+PROF 0 0 1098 0 0 1b6db48 0 G:\blocks\h2-wt\packages\runtime\src\scr_bigint.c:539
+PROF 104508 3344256 0 0 0 1b649ce 0 G:\blocks\h2-wt\packages\runtime\src\scr_async.c:3504
+PROF 16 256 0 0 0 1b8739d 0 G:\blocks\h2-wt\packages\runtime\src\scr_stream.c:2682
+PROF 0 0 4 0 0 1b8c42e 0 G:\blocks\h2-wt\packages\runtime\src\scr_http.c:277
+PROF 0 0 3332 0 0 1b651dc 0 G:\blocks\h2-wt\packages\runtime\src\scr_async.c:343
+PROF 36 2304 0 0 0 1b4fc7e 0 G:\blocks\h2-wt\packages\runtime\src\scr_array.c:1006
+PROF 0 0 3 0 0 1b6dde2 0 G:\blocks\h2-wt\packages\runtime\src\scr_sqlite.c:476
+PROF 3 75 0 0 0 1b6e06c 0 G:\blocks\h2-wt\packages\runtime\src\scr_sqlite.c:1237
+PROF 166631 13148568 0 0 0 1b65ebb 0 G:\blocks\h2-wt\packages\runtime\src\scr_coro.c:73
+PROF 8 128 0 0 0 1b85ed5 0 G:\blocks\h2-wt\packages\runtime\src\scr_stream.c:2841
+PROF 1209279 77393856 0 0 0 1b4fb40 0 G:\blocks\h2-wt\packages\runtime\src\scr_array.c:453
+PROF-TOTAL rows=260 count=10473885 bytes=385473807331 freed=10258628 lost=0 cycles=503950586292 framesLost=0 resyncs=0
+PROF-SIZEHIST ARMED buckets=40 exactGranule=8 exactMax=8192
+PROFHIST 1b5e9b0 6:28 G:\blocks\h2-wt\packages\runtime\src\scr_url.c:70
+PROFHIST 1b85fb9 1:8 G:\blocks\h2-wt\packages\runtime\src\scr_stream.c:3227
+PROFHIST 1b85f82 4:8 G:\blocks\h2-wt\packages\runtime\src\scr_stream.c:3226
+PROFHIST 1b5bee5 9:1 15:8 G:\blocks\h2-wt\packages\runtime\src\scr_lib.c:3989
+PROFHIST 1b8f9d2 6:2 G:\blocks\h2-wt\packages\runtime\src\scr_ws_client.c:240
+PROFHIST 1b5dd60 6:4 G:\blocks\h2-wt\packages\runtime\src\scr_url.c:522
+PROFHIST 1b71fba 6:4 G:\blocks\h2-wt\packages\runtime\src\scr_asym.c:72
+PROFHIST 1b57c05 5:6 G:\blocks\h2-wt\packages\runtime\src\scr_error.c:170
+PROFHIST 1b7793b 8:1 G:\blocks\h2-wt\packages\runtime\src\scr_inspect.c:257
+PROFHIST 1b787f2 6:19959 7:15 8:2 G:\blocks\h2-wt\packages\runtime\src\scr_inspect.c:49
+PROFHIST 1b54b0f 9:10 G:\blocks\h2-wt\packages\runtime\src\scr_map.c:311
+PROFHIST 1b5a8ab 5:28 G:\blocks\h2-wt\packages\runtime\src\scr_lib.c:3926
+PROFHIST 1b6c58c 6:1 G:\blocks\h2-wt\packages\runtime\src\scr_regex.c:101
+PROFHIST 1b648e0 7:16 G:\blocks\h2-wt\packages\runtime\src\scr_async.c:2957
+PROFHIST 1b69276 8:19 9:60809 14:1 G:\blocks\h2-wt\packages\runtime\src\scr_cycle.c:1727
+PROFHIST 1b8da67 6:4 G:\blocks\h2-wt\packages\runtime\src\scr_http.c:2059
+PROFHIST 1b77972 6:3987 G:\blocks\h2-wt\packages\runtime\src\scr_inspect.c:276
+PROFHIST 1b7d9de 5:39 G:\blocks\h2-wt\packages\runtime\src\scr_events_emitter.c:339
+PROFHIST 1b50901 7:23 8:23 9:22 10:21 G:\blocks\h2-wt\packages\runtime\src\scr_array.c:906
+PROFHIST 1b85e38 3:8 G:\blocks\h2-wt\packages\runtime\src\scr_stream.c:1697
+PROFHIST 1b6479c 4:104 G:\blocks\h2-wt\packages\runtime\src\scr_async.c:1158
+PROFHIST 1b63033 9:1 10:1 G:\blocks\h2-wt\packages\runtime\src\scr_json.c:2002
+PROFHIST 1b6da70 3:347 4:510 5:241 G:\blocks\h2-wt\packages\runtime\src\scr_bigint.c:528
+PROFHIST 1b8c59a 6:2 G:\blocks\h2-wt\packages\runtime\src\scr_http.c:793
+PROFHIST 1b5faf8 5:1238 G:\blocks\h2-wt\packages\runtime\src\scr_json.c:143
+PROFHIST 1b6c5f5 1:9 2:12 3:1665 4:11 6:6520 G:\blocks\h2-wt\packages\runtime\src\scr_regex.c:239
+PROFHIST 1b6b57c 1:10 2:14 3:25 4:20 5:10 8:11 G:\blocks\h2-wt\packages\runtime\src\scr_regex.c:74
+PROFHIST 1b8d94b 7:1 G:\blocks\h2-wt\packages\runtime\src\scr_http.c:1210
+PROFHIST 1b6492c 7:1 G:\blocks\h2-wt\packages\runtime\src\scr_async.c:3409
+PROFHIST 1b648aa 7:22441 G:\blocks\h2-wt\packages\runtime\src\scr_async.c:1512
+PROFHIST 1b5dc3a 4:4 G:\blocks\h2-wt\packages\runtime\src\scr_url.c:352
+PROFHIST 1b74e99 10:89 G:\blocks\h2-wt\packages\runtime\src\scr_cipher_value.c:90
+PROFHIST 1b64ae0 8:8 G:\blocks\h2-wt\packages\runtime\src\scr_async.c:4768
+PROFHIST 1b638f0 9:1 10:1 11:1 12:1 13:1 14:1 15:1 16:1 G:\blocks\h2-wt\packages\runtime\src\scr_json.c:1208
+PROFHIST 1b4e7a8 8:1 9:1 G:\blocks\h2-wt\packages\runtime\src\scr_string.c:726
+PROFHIST 1b4e771 8:96002 9:1651 10:10 12:7 13:3 16:5868835 G:\blocks\h2-wt\packages\runtime\src\scr_string.c:1036
+PROFHIST 1b685e8 9:1 10:1 11:1 12:1 13:1 14:1 15:1 16:1 17:1 18:1 G:\blocks\h2-wt\packages\runtime\src\scr_cycle.c:2108
+PROFHIST 1b86eab 9:16 G:\blocks\h2-wt\packages\runtime\src\scr_stream.c:1873
+PROFHIST 1b8f999 3:2 G:\blocks\h2-wt\packages\runtime\src\scr_ws_client.c:213
+PROFHIST 1b5c12d 2:241360 4:838400 G:\blocks\h2-wt\packages\runtime\src\scr_lib.c:4279
+PROFHIST 1b90818 6:2 G:\blocks\h2-wt\packages\runtime\src\scr_ws_global.c:384
+PROFHIST 1b5e87e 6:4 G:\blocks\h2-wt\packages\runtime\src\scr_url.c:181
+PROFHIST 1b5985a 1:4 2:2 3:1 4:2 5:1 6:1 G:\blocks\h2-wt\packages\runtime\src\scr_lib.c:279
+PROFHIST 1b522ec 2:61 3:1599 4:13 5:3 6:3207 G:\blocks\h2-wt\packages\runtime\src\scr_bytes.c:732
+PROFHIST 1b56ac8 6:3 G:\blocks\h2-wt\packages\runtime\src\scr_exception.c:83
+PROFHIST 1b5a877 5:28 G:\blocks\h2-wt\packages\runtime\src\scr_lib.c:3915
+PROFHIST 1b6f9e8 5:44 G:\blocks\h2-wt\packages\runtime\src\scr_sqlite.c:681
+PROFHIST 1b64874 5:38 G:\blocks\h2-wt\packages\runtime\src\scr_async.c:1499
+PROFHIST 1b54cbf 3:7906 4:27 5:15 6:20 7:17 8:15 9:6 10:6 11:3 12:2 13:1 G:\blocks\h2-wt\packages\runtime\src\scr_map.c:475
+PROFHIST 1b5ab50 4:1 G:/blocks/h2-wt/tests/perf/heapcensus/scr_heap_census.h:283
+PROFHIST 1b7c1a8 6:8 G:\blocks\h2-wt\packages\runtime\src\scr_zlib_stream.c:250
+PROFHIST 1b69416 11:1 12:1 13:1 14:1 15:1 16:1 G:\blocks\h2-wt\packages\runtime\src\scr_cycle.c:2193
+PROFHIST 1b7fc76 7:4 8:2 9:1 G:\blocks\h2-wt\packages\runtime\src\scr_weak.c:187
+PROFHIST 1b54018 7:6830 G:\blocks\h2-wt\packages\runtime\src\scr_map.c:554
+PROFHIST 1b6587e 5:12 G:\blocks\h2-wt\packages\runtime\src\scr_async.c:2133
+PROFHIST 1b60065 9:2 G:\blocks\h2-wt\packages\runtime\src\scr_json.c:1757
+PROFHIST 1b7f2a8 6:5 G:\blocks\h2-wt\packages\runtime\src\scr_weak.c:146
+PROFHIST 1b63109 7:1 G:\blocks\h2-wt\packages\runtime\src\scr_json.c:3116
+PROFHIST 1b873d4 4:16 G:\blocks\h2-wt\packages\runtime\src\scr_stream.c:2683
+PROFHIST 1b65849 9:1 10:1 11:1 12:1 13:1 14:1 15:1 G:\blocks\h2-wt\packages\runtime\src\scr_async.c:909
+PROFHIST 1b54b42 5:10 G:\blocks\h2-wt\packages\runtime\src\scr_map.c:314
+PROFHIST 1b6313e 3:6806 4:11866 5:1363 6:5 G:\blocks\h2-wt\packages\runtime\src\scr_json.c:94
+PROFHIST 1b6d491 5:7043 6:2259 G:\blocks\h2-wt\packages\runtime\src\scr_bigint.c:39
+PROFHIST 1b8dc9b 7:2 G:\blocks\h2-wt\packages\runtime\src\scr_http.c:1774
+PROFHIST 1b8de43 3:4 4:8 5:16 6:13 G:\blocks\h2-wt\packages\runtime\src\scr_http.c:1521
+PROFHIST 1b898a7 9:1 G:\blocks\h2-wt\packages\runtime\src\scr_loop_wsapoll.c:104
+PROFHIST 1b6de89 5:1 G:\blocks\h2-wt\packages\runtime\src\scr_sqlite.c:529
+PROFHIST 1b4e1c0 10:1 11:1 12:1 13:1 14:1 15:1 16:1 17:32 18:32 19:32 20:31 21:16 G:\blocks\h2-wt\packages\runtime\src\scr_string.c:1162
+PROFHIST 1b64962 7:55348 G:\blocks\h2-wt\packages\runtime\src\scr_async.c:3419
+PROFHIST 1b85e9e 5:8 G:\blocks\h2-wt\packages\runtime\src\scr_stream.c:2837
+PROFHIST 1b8b2db 9:6 G:\blocks\h2-wt\packages\runtime\src\scr_net.c:917
+PROFHIST 1b54b75 6:7914 7:31 8:23 9:64 10:17 11:110 12:6 13:15 14:3 15:2 16:4 G:\blocks\h2-wt\packages\runtime\src\scr_map.c:259
+PROFHIST 1b8c669 6:1 G:\blocks\h2-wt\packages\runtime\src\scr_http.c:2087
+PROFHIST 1b609f2 7:1 G:\blocks\h2-wt\packages\runtime\src\scr_json.c:4081
+PROFHIST 1b7da1c 4:36 5:1 G:\blocks\h2-wt\packages\runtime\src\scr_events_emitter.c:348
+PROFHIST 1b5abef 12:137 G:/blocks/h2-wt/tests/perf/heapcensus/scr_heap_census.h:293
+PROFHIST 1b6df56 5:1 G:\blocks\h2-wt\packages\runtime\src\scr_sqlite.c:555
+PROFHIST 1b8f803 8:2 9:4 15:2 16:2 17:1 G:\blocks\h2-wt\packages\runtime\src\scr_websocket.c:338
+PROFHIST 1b5beb1 6:46 7:16 8:4 9:3 10:1 16:8 G:\blocks\h2-wt\packages\runtime\src\scr_lib.c:3805
+PROFHIST 1b86882 6:16 G:\blocks\h2-wt\packages\runtime\src\scr_stream.c:1211
+PROFHIST 1b71fed 5:4 G:\blocks\h2-wt\packages\runtime\src\scr_asym.c:81
+PROFHIST 1b88ec8 5:1 G:\blocks\h2-wt\packages\runtime\src\scr_loop_wsapoll.c:116
+PROFHIST 1b532fd 5:20 G:\blocks\h2-wt\packages\runtime\src\scr_bytes_io.c:887
+PROFHIST 1b7d956 5:140 G:\blocks\h2-wt\packages\runtime\src\scr_events_emitter.c:144
+PROFHIST 1b7dc54 3:163 4:10 G:\blocks\h2-wt\packages\runtime\src\scr_events_emitter.c:587
+PROFHIST 1b5a7db 5:19 G:\blocks\h2-wt\packages\runtime\src\scr_lib.c:3838
+PROFHIST 1b6daa6 3:347 4:510 5:241 G:\blocks\h2-wt\packages\runtime\src\scr_bigint.c:529
+PROFHIST 1b8740b 5:104 G:\blocks\h2-wt\packages\runtime\src\scr_stream.c:475
+PROFHIST 1b54e15 15:1 G:\blocks\h2-wt\packages\runtime\src\scr_closure.c:521
+PROFHIST 1b8de0e 2:12 3:23 4:6 G:\blocks\h2-wt\packages\runtime\src\scr_http.c:1518
+PROFHIST 1b8a138 5:15 G:\blocks\h2-wt\packages\runtime\src\scr_net.c:289
+PROFHIST 1b49f26 12:8 15:8 G:\blocks\h2-wt\packages\runtime\vendor\zlib\zutil.c:288
+PROFHIST 1b575c0 4:3 G:\blocks\h2-wt\packages\runtime\src\scr_error.c:404
+PROFHIST 1b63171 4:10770 5:7505 6:6608 7:715 8:287 9:82 10:39 11:15 12:3 13:1 G:\blocks\h2-wt\packages\runtime\src\scr_json.c:1636
+PROFHIST 1b7d900 4:18 G:\blocks\h2-wt\packages\runtime\src\scr_events_emitter.c:126
+PROFHIST 1b8f791 4:2 5:36 6:1 7:2 8:1 15:2 G:\blocks\h2-wt\packages\runtime\src\scr_websocket.c:392
+PROFHIST 1b876b5 5:16 6:8 7:8 8:8 9:8 G:\blocks\h2-wt\packages\runtime\src\scr_stream.c:565
+PROFHIST 1b6dadc 3:347 4:510 5:241 G:\blocks\h2-wt\packages\runtime\src\scr_bigint.c:530
+PROFHIST 1b8b1f5 7:1 G:\blocks\h2-wt\packages\runtime\src\scr_net.c:1486
+PROFHIST 1b6dfdb 2:426 6:3 7:12 8:1 10:4 G:\blocks\h2-wt\packages\runtime\src\scr_sqlite.c:1197
+PROFHIST 1b51c99 5:26522 G:\blocks\h2-wt\packages\runtime\src\scr_bytes.c:43
+PROFHIST 1b64b16 7:8 G:\blocks\h2-wt\packages\runtime\src\scr_async.c:4775
+PROFHIST 1b8a19e 4:19 G:\blocks\h2-wt\packages\runtime\src\scr_net.c:315
+PROFHIST 1b6944c 9:1 10:1 11:1 12:1 13:1 14:1 15:1 16:1 17:1 18:1 G:\blocks\h2-wt\packages\runtime\src\scr_cycle.c:2292
+PROFHIST 1b514fb 5:3441 G:\blocks\h2-wt\packages\runtime\src\scr_bytes.c:593
+PROFHIST 1b8b3df 12:3 20:1 21:1 G:\blocks\h2-wt\packages\runtime\src\scr_net.c:1102
+PROFHIST 1b659c8 5:32 G:\blocks\h2-wt\packages\runtime\src\scr_async.c:3003
+PROFHIST 1b64998 7:142820 G:\blocks\h2-wt\packages\runtime\src\scr_async.c:3495
+PROFHIST 1b7e8ad 5:1 G:\blocks\h2-wt\packages\runtime\src\scr_symbol.c:45
+PROFHIST 1b8d875 9:2 G:\blocks\h2-wt\packages\runtime\src\scr_http.c:811
+PROFHIST 1b5abb3 10:1 G:/blocks/h2-wt/tests/perf/heapcensus/scr_heap_census.h:289
+PROFHIST 1b6c62a 4:8217 G:\blocks\h2-wt\packages\runtime\src\scr_regex.c:333
+PROFHIST 1b37f7c 5:283 6:374 7:378 8:246 9:161 10:23 11:5 12:2 13:2 G:\blocks\h2-wt\packages\runtime\vendor\sqlite\sqlite3.c:28108
+PROFHIST 1b51ccd 0:141 1:4856 2:53 3:3275 4:3318 5:13198 6:76 7:153 8:53 9:13 10:3 11:2 12:8 13:775 14:460 15:40 16:10 19:48 20:40 G:\blocks\h2-wt\packages\runtime\src\scr_bytes.c:52
+PROFHIST 1b50751 5:309003 6:882216 7:25786 8:21975 9:21104 10:20303 11:18746 12:15978 G:\blocks\h2-wt\packages\runtime\src\scr_array.c:444
+PROFHIST 1b37ed8 3:956 4:2151 5:2403 6:2535 7:1072 8:362 9:293 10:225 11:38 12:12453 13:48 14:18 15:18 16:44 G:\blocks\h2-wt\packages\runtime\vendor\sqlite\sqlite3.c:28035
+PROFHIST 1b64808 8:1 G:\blocks\h2-wt\packages\runtime\src\scr_async.c:1229
+PROFHIST 1b52501 5:3260 G:\blocks\h2-wt\packages\runtime\src\scr_bytes.c:1019
+PROFHIST 1b51455 5:79099 G:\blocks\h2-wt\packages\runtime\src\scr_bytes.c:529
+PROFHIST 1b8fae2 9:2 G:\blocks\h2-wt\packages\runtime\src\scr_ws_client.c:290
+PROFHIST 1b65a85 7:1 8:1 9:1 10:1 11:1 12:1 13:1 14:1 15:1 16:1 G:\blocks\h2-wt\packages\runtime\src\scr_async.c:862
+PROFHIST 1b4fb75 6:26034 G:\blocks\h2-wt\packages\runtime\src\scr_array.c:499
+PROFHIST 1b5ff4f 3:7207 4:4287 5:3641 6:3636 7:27 8:16 9:5 10:5 11:5 12:5 13:5 14:1 G:\blocks\h2-wt\packages\runtime\src\scr_json.c:1406
+PROFHIST 1b8c566 6:2 G:\blocks\h2-wt\packages\runtime\src\scr_http.c:792
+PROFHIST 1b5fcdf 6:1 G:\blocks\h2-wt\packages\runtime\src\scr_json.c:434
+PROFHIST 1b54c8c 7:7906 8:27 9:15 10:20 11:17 12:15 13:6 14:6 15:3 16:2 17:1 G:\blocks\h2-wt\packages\runtime\src\scr_map.c:468
+PROFHIST 1b8de78 3:4 4:8 5:16 6:13 G:\blocks\h2-wt\packages\runtime\src\scr_http.c:1522
+PROFHIST 1b8dbe1 8:4 G:\blocks\h2-wt\packages\runtime\src\scr_http.c:1635
+PROFHIST 1b8dead 3:4 4:8 5:16 6:13 G:\blocks\h2-wt\packages\runtime\src\scr_http.c:1523
+PROFHIST 1b692bc 16:617 G:\blocks\h2-wt\packages\runtime\src\scr_cycle.c:1546
+PROFHIST 1b8ec81 7:2 G:\blocks\h2-wt\packages\runtime\src\scr_websocket.c:359
+PROFHIST 1b713d8 6:3284 G:\blocks\h2-wt\packages\runtime\src\scr_asym.c:34
+PROFHIST 1b8da9c 13:4 G:\blocks\h2-wt\packages\runtime\src\scr_http.c:1992
+PROFHIST 1b646ea 4:64 G:\blocks\h2-wt\packages\runtime\src\scr_async.c:533
+PROFHIST 1b649ce 5:104508 G:\blocks\h2-wt\packages\runtime\src\scr_async.c:3504
+PROFHIST 1b8739d 4:16 G:\blocks\h2-wt\packages\runtime\src\scr_stream.c:2682
+PROFHIST 1b4fc7e 6:36 G:\blocks\h2-wt\packages\runtime\src\scr_array.c:1006
+PROFHIST 1b6e06c 4:3 G:\blocks\h2-wt\packages\runtime\src\scr_sqlite.c:1237
+PROFHIST 1b65ebb 5:22469 6:140230 7:3911 8:19 12:2 G:\blocks\h2-wt\packages\runtime\src\scr_coro.c:73
+PROFHIST 1b85ed5 4:8 G:\blocks\h2-wt\packages\runtime\src\scr_stream.c:2841
+PROFHIST 1b4fb40 6:1209279 G:\blocks\h2-wt\packages\runtime\src\scr_array.c:453
+PROFEXACT 0 246968
+PROFEXACT 8 30689
+PROFEXACT 16 24018
+PROFEXACT 24 856936
+PROFEXACT 32 431510
+PROFEXACT 40 118333
+PROFEXACT 48 13034
+PROFEXACT 56 23503
+PROFEXACT 64 2183069
+PROFEXACT 72 5495
+PROFEXACT 80 75440
+PROFEXACT 88 46338
+PROFEXACT 96 7407
+PROFEXACT 104 352
+PROFEXACT 112 84
+PROFEXACT 120 179
+PROFEXACT 128 56883
+PROFEXACT 136 41
+PROFEXACT 144 562
+PROFEXACT 152 205192
+PROFEXACT 160 13
+PROFEXACT 168 26
+PROFEXACT 176 3663
+PROFEXACT 184 39
+PROFEXACT 192 719
+PROFEXACT 200 75
+PROFEXACT 208 12
+PROFEXACT 216 24
+PROFEXACT 224 76
+PROFEXACT 232 80
+PROFEXACT 240 28
+PROFEXACT 248 116
+PROFEXACT 256 22162
+PROFEXACT 264 5
+PROFEXACT 272 19319
+PROFEXACT 280 10
+PROFEXACT 288 19229
+PROFEXACT 296 21
+PROFEXACT 304 19217
+PROFEXACT 312 185
+PROFEXACT 320 19221
+PROFEXACT 328 19204
+PROFEXACT 336 13
+PROFEXACT 344 34
+PROFEXACT 352 33
+PROFEXACT 360 5
+PROFEXACT 368 25
+PROFEXACT 376 3
+PROFEXACT 384 304
+PROFEXACT 392 20
+PROFEXACT 400 9
+PROFEXACT 408 1
+PROFEXACT 416 20
+PROFEXACT 432 1
+PROFEXACT 440 18
+PROFEXACT 448 1
+PROFEXACT 456 1
+PROFEXACT 464 18
+PROFEXACT 472 3
+PROFEXACT 480 1
+PROFEXACT 488 25
+PROFEXACT 496 2
+PROFEXACT 504 4
+PROFEXACT 512 21269
+PROFEXACT 520 45
+PROFEXACT 528 9
+PROFEXACT 536 17
+PROFEXACT 544 6
+PROFEXACT 560 3217
+PROFEXACT 568 22
+PROFEXACT 576 1
+PROFEXACT 584 18
+PROFEXACT 592 1
+PROFEXACT 600 2
+PROFEXACT 608 17
+PROFEXACT 616 1
+PROFEXACT 624 5
+PROFEXACT 632 38418
+PROFEXACT 656 22
+PROFEXACT 672 3
+PROFEXACT 680 19
+PROFEXACT 688 8
+PROFEXACT 704 13
+PROFEXACT 712 19
+PROFEXACT 736 1
+PROFEXACT 768 85
+PROFEXACT 776 5
+PROFEXACT 792 1
+PROFEXACT 808 2
+PROFEXACT 824 3
+PROFEXACT 840 3
+PROFEXACT 848 2
+PROFEXACT 856 2
+PROFEXACT 872 1
+PROFEXACT 896 1
+PROFEXACT 904 1651
+PROFEXACT 920 19209
+PROFEXACT 960 2
+PROFEXACT 984 3
+PROFEXACT 992 1
+PROFEXACT 1016 184
+PROFEXACT 1024 20379
+PROFEXACT 1040 4
+PROFEXACT 1064 1
+PROFEXACT 1072 1
+PROFEXACT 1088 1
+PROFEXACT 1096 68
+PROFEXACT 1128 10
+PROFEXACT 1184 89
+PROFEXACT 1232 8
+PROFEXACT 1240 1
+PROFEXACT 1248 10
+PROFEXACT 1256 1
+PROFEXACT 1264 8
+PROFEXACT 1272 3
+PROFEXACT 1288 8
+PROFEXACT 1296 2
+PROFEXACT 1304 23
+PROFEXACT 1312 1
+PROFEXACT 1320 6
+PROFEXACT 1328 16
+PROFEXACT 1352 12
+PROFEXACT 1408 34
+PROFEXACT 1472 1
+PROFEXACT 1504 10
+PROFEXACT 1536 40
+PROFEXACT 1552 2
+PROFEXACT 1560 2
+PROFEXACT 1600 1
+PROFEXACT 1648 1
+PROFEXACT 1712 3
+PROFEXACT 1768 1
+PROFEXACT 1784 1
+PROFEXACT 1792 1
+PROFEXACT 1800 1
+PROFEXACT 1984 2
+PROFEXACT 2008 2
+PROFEXACT 2016 2
+PROFEXACT 2024 18
+PROFEXACT 2048 18887
+PROFEXACT 2056 19
+PROFEXACT 2064 2
+PROFEXACT 2088 1
+PROFEXACT 2296 2
+PROFEXACT 2408 2
+PROFEXACT 2416 1
+PROFEXACT 2464 1
+PROFEXACT 2504 2
+PROFEXACT 2536 1
+PROFEXACT 2576 1
+PROFEXACT 2752 1
+PROFEXACT 2808 2
+PROFEXACT 2928 1
+PROFEXACT 3008 1
+PROFEXACT 3072 16
+PROFEXACT 3136 1
+PROFEXACT 3560 1
+PROFEXACT 3584 1
+PROFEXACT 4040 1
+PROFEXACT 4048 1
+PROFEXACT 4056 1
+PROFEXACT 4064 1
+PROFEXACT 4080 1
+PROFEXACT 4096 16017
+PROFEXACT 4104 4861
+PROFEXACT 4112 19
+PROFEXACT 4120 2
+PROFEXACT 4136 1
+PROFEXACT 4336 1
+PROFEXACT 4344 2
+PROFEXACT 4376 2791
+PROFEXACT 4424 1
+PROFEXACT 4504 2
+PROFEXACT 4808 2
+PROFEXACT 4944 1
+PROFEXACT 5024 1
+PROFEXACT 5112 137
+PROFEXACT 5184 1
+PROFEXACT 5264 1
+PROFEXACT 5464 1
+PROFEXACT 5504 2
+PROFEXACT 5552 1
+PROFEXACT 5600 4
+PROFEXACT 5704 1
+PROFEXACT 5744 2
+PROFEXACT 5784 2
+PROFEXACT 5864 1
+PROFEXACT 5904 1
+PROFEXACT 5944 2
+PROFEXACT 6024 1
+PROFEXACT 6144 5
+PROFEXACT 6184 2
+PROFEXACT 6224 2
+PROFEXACT 6264 88
+PROFEXACT 6304 27
+PROFEXACT 6344 32
+PROFEXACT 6384 2
+PROFEXACT 6424 86
+PROFEXACT 6464 56
+PROFEXACT 6504 151
+PROFEXACT 6544 140
+PROFEXACT 6584 39
+PROFEXACT 6624 150
+PROFEXACT 6664 183
+PROFEXACT 6672 1
+PROFEXACT 6704 156
+PROFEXACT 6728 1
+PROFEXACT 6744 309
+PROFEXACT 6784 406
+PROFEXACT 6824 490
+PROFEXACT 6864 6
+PROFEXACT 6904 23
+PROFEXACT 6944 4
+PROFEXACT 6984 5
+PROFEXACT 7024 15
+PROFEXACT 7064 11
+PROFEXACT 7096 8
+PROFEXACT 7104 22
+PROFEXACT 7144 13
+PROFEXACT 7152 8
+PROFEXACT 7168 1
+PROFEXACT 7184 24
+PROFEXACT 7224 98
+PROFEXACT 7264 80
+PROFEXACT 7304 87
+PROFEXACT 7344 13
+PROFEXACT 7384 17
+PROFEXACT 7424 68
+PROFEXACT 7464 31
+PROFEXACT 7504 52
+PROFEXACT 7544 34
+PROFEXACT 7584 91
+PROFEXACT 7624 57
+PROFEXACT 7664 48
+PROFEXACT 7704 91
+PROFEXACT 7744 75
+PROFEXACT 7784 106
+PROFEXACT 7800 2
+PROFEXACT 7824 105
+PROFEXACT 7848 1
+PROFEXACT 7864 123
+PROFEXACT 7904 174
+PROFEXACT 7944 213
+PROFEXACT 7984 398
+PROFEXACT 8024 180
+PROFEXACT 8064 134
+PROFEXACT 8104 30
+PROFEXACT 8144 3
+PROFEXACT 8184 1
+PROF-SIZEHIST-TOTAL rows=141 noted=10473885 over8k=5871221
+PROF-STACKS ARMED depth=10 slots=131072
+PROFSTACK 10 43760 1f7fc 1f5cd ac046 2840b ac811 25cda 23835 2bf92 2bb76 4222b
+PROFSTACK 6 7999 1f7fc 1f5cd ac046 20045 2f9c9 35c2b 12088 1930d9 195c38 57850f
+PROFSTACK 463 2026088 1f7fc 1f5cd ac046 2840b ac811 25cda 23835 2bf92 2bb76 431ea
+PROFSTACK 6 7926 1f7fc 1f5cd ac046 20045 fbf6 fe19 f99a 22aaf 17bd1 54ab3
+PROFSTACK 14 61264 1f7fc 1f5cd ac046 2840b ac811 25cda 23835 2bf92 2bb76 3b883
+PROFSTACK 2 2617 1f7fc 1f5cd ac046 20045 2f9c9 37d10 12088 1930d9 195c38 57850f
+PROFSTACK 12 15708 1f7fc 1f5cd ac046 20045 2f9c9 39127 12088 1930d9 195c38 57850f
+PROFSTACK 6 7854 1f7fc 1f5cd ac046 20045 2f9c9 39127 12088 12cd6 3e570 36a82
+PROFSTACK 88 385088 1f7fc 1f5cd ac046 2840b ac811 25cda 23835 2bf92 2bb76 3cb44
+PROFSTACK 2 2616 1f7fc 1f5cd ac046 20045 2f9c9 3037a 14e18 a582b a454b 3175e
+PROFSTACK 1 1296 1f7fc ac134 20019 2fae2 2f99b 2fde0 2fbb0 a04c2 3175e 12088
+PROFSTACK 1 1309 1f7fc 1f5cd ac046 20045 55543 52a9d 1a1f1 71745 54aff 51da2
+PROFSTACK 24 32088 1f7fc 1f5cd ac046 20045 17f5c 53dd9 513e2 1a1f1 47044 18d82
+PROFSTACK 2216 9697216 1f7fc 1f5cd ac046 2840b ac811 25cda 23835 2bf92 2bb76 4213e
+PROF-STACKS-TOTAL rows=14 count=2851 bytes=12292829 lost=0 tablefull=0 skipped=10471034 site="" sizeband=1296..1352 sizeband2=4376..4376

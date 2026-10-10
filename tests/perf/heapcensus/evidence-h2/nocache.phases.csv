@@ -1,0 +1,47 @@
+ms,phase
+0,ARM ZAPO_SQLITE_CACHE_KB=0
+0,ARM CHUNKS=8
+0,ARM CONVS=400
+0,ARM MSGS=6
+0,ARM TEXTLEN=300
+0,ARM ROUNDS=1
+0,ARM IDLE_S=60
+1791666234188,client-spawn
+1791666234293,client-registered-login
+1791666234299,pair-success-sent
+1791666234316,login-pipeline
+1791666234337,client-registered-login
+1791666234417,ws-attached
+1791666234434,prekeys-uploaded
+1791666234579,prekeys-uploaded
+1791666254452,PRESYNC-BASELINE
+1791666254453,ROUND-1-START
+1791666254507,chunk-sent-1
+1791666254573,chunk-sent-2
+1791666254612,chunk-sent-3
+1791666254650,chunk-sent-4
+1791666254686,chunk-sent-5
+1791666254715,chunk-sent-6
+1791666254752,chunk-sent-7
+1791666254776,chunk-sent-8
+1791666254777,all-chunks-sent-r1
+1791666255456,chunk-decoded-1
+1791666263303,chunk-decoded-2
+1791666263307,chunk-decoded-3
+1791666263308,chunk-decoded-4
+1791666263308,chunk-decoded-5
+1791666263309,chunk-decoded-6
+1791666263309,chunk-decoded-7
+1791666264255,chunk-decoded-8
+1791666264869,SYNC-DONE-r1
+1791666309880,SETTLED-r1
+1791666339885,IDLE-30s
+1791666369893,IDLE-60s
+1791666369894,END
+1791666373913,wslate-frames=30 events=29 gaps=0 gapSpan=none
+1791666373924,events-captured 200 n=8
+1791666373924,ws-frames=27 events=26 gaps=0 lastSeq=29 hello=yes
+1791666373924,ws-hello retention=n/a buffered=3 window=64
+1791666373931,ws-closed code=1005 frames=27
+1791666373932,shutdown-requested 200 {"ok":true,"result":{"stopping":true,"code":0,"afterMs":250}}
+1791666374199,clean-exit code=0
