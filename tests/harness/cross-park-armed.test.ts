@@ -269,7 +269,16 @@ describe("the cross-park temp detector is armed", () => {
     const fresh = "%cx0_t0";
     B.line(`${fresh} = load ptr, ptr %cxr0`);
     B.renameTemp(t, fresh);
-    if (!useInJoin) B.line(`call void @release(ptr ${t})`);
+    if (!useInJoin) {
+      // A use IN the resume block, which the same-block rule covers...
+      B.line(`call void @release(ptr ${t})`);
+      // ...and one a block FURTHER ON, which only real dominance covers.
+      // Without this second use the clean direction would pass on the
+      // shortcut alone and say nothing about the dominator walk.
+      B.br("k0");
+      B.startBlock("k0");
+      B.line(`call void @trace(ptr ${t})`);
+    }
     B.br("nul.j");
     // The NON-parking arm, which reaches the join without passing sc_S1.
     B.startBlock("nul.v");
