@@ -1762,6 +1762,27 @@ static void scr_trampoline(void) {
 #ifndef SCR_FST_FREED_ONE
 #define SCR_FST_FREED_ONE() ((void)0)
 #endif
+/* E2's park-attribution hooks, same contract: absent header -> no
+ * instruction. `out` above cannot answer "how many frames of ONE entry are
+ * suspended at once" -- it mixes scr_gen_new's population in with
+ * scr_async_spawn's, and it counts an eagerly-completed spawn that never
+ * suspended at all. These five carry the entry pointer, which both spawn
+ * paths already store on the fiber, to the suspension itself. */
+#ifndef SCR_FST_SPAWN
+#define SCR_FST_SPAWN(e, k) ((void)0)
+#endif
+#ifndef SCR_FST_PARK_IN
+#define SCR_FST_PARK_IN(e) ((void)0)
+#endif
+#ifndef SCR_FST_PARK_OUT
+#define SCR_FST_PARK_OUT(e) ((void)0)
+#endif
+#ifndef SCR_FST_YIELD_IN
+#define SCR_FST_YIELD_IN(e) ((void)0)
+#endif
+#ifndef SCR_FST_YIELD_OUT
+#define SCR_FST_YIELD_OUT(e) ((void)0)
+#endif
 
 /* ── THE CAP BOUNDS THE IDLE SET; NOTHING BOUNDED HOW LONG IT IS HELD ──
  *
@@ -2959,6 +2980,7 @@ ScrPromise *scr_async_spawn(void (*entry)(ScrFiber *, void *), void *argpack) {
   f->promise = scr_promise_new();
   f->entry = entry;
   f->argpack = argpack;
+  SCR_FST_SPAWN(entry, 0);
   /* AsyncLocalStorage: the child runs in the SPAWNER's context (Node's
    * init-time capture); snapshots are immutable, so a retain suffices. */
   f->als = scr_als_ctx_retain(*scr_als_active);
@@ -3004,7 +3026,9 @@ static void scr_await_park(ScrPromise *p) {
     if (!p->waiters) scr_oom();
   }
   p->waiters[p->nwaiters++] = self;
+  SCR_FST_PARK_IN(self->entry);
   scr_switch(&self->st->ctx, self->return_to, NULL);
+  SCR_FST_PARK_OUT(self->entry);
   /* Resumed by the loop: return_to must now point at the loop's context. */
 }
 
@@ -3020,7 +3044,9 @@ static void scr_await_yield(void) {
     abort();
   }
   scr_ready_push(self);
+  SCR_FST_YIELD_IN(self->entry);
   scr_switch(&self->st->ctx, self->return_to, NULL);
+  SCR_FST_YIELD_OUT(self->entry);
 }
 
 /* The emitted promise-or-absent await's unit arm (`await u` where u holds
@@ -4776,6 +4802,7 @@ ScrGen *scr_gen_new(void (*entry)(ScrFiber *, void *), void *argpack,
   if (!f) scr_oom();
   f->gen = g;
   f->entry = entry;
+  SCR_FST_SPAWN(entry, 1);
   f->argpack = argpack; /* owned by the fiber start; drop_args if never started */
   /* AsyncLocalStorage: generator bodies run in their CREATOR's context
    * (the spawn-inheritance stance; resumes swap it active like any
