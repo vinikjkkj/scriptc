@@ -243,6 +243,16 @@ describe("the cross-park temp detector is armed", () => {
    * rejected seven of that program's functions with
    * "Instruction does not dominate all uses!" on the shipping default.
    *
+   * THE ENTRY ARM IS ONLY THE EASY HALF, and saying so here is the point.
+   * These two drive the shape where the non-parking arm runs on the entry
+   * call, because that is the smallest one that reproduces. The carry fails
+   * the same way when the join is reached from an EARLIER RESUME LABEL -- a
+   * `?:` after two awaits, which is what `prepareDecryptFailureRetry` is --
+   * and a check seeded at `sc_S0` answers "clean" there while the module
+   * still does not verify. That is not hypothetical: it is what the first
+   * version of this check did, and app182 is what caught it. The predicate
+   * is DOMINANCE, and tests/corpus/3495 drives the deeper half end to end.
+   *
    * BOTH DIRECTIONS, for the same reason the prune pair has both: a check that
    * answered "offender" for every carried temp would make the first test pass
    * and refuse the whole lane, so the second requires a sound carry to come
