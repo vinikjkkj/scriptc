@@ -554,7 +554,10 @@ The three `off` arms are an A/A/A triple with a **0.14 MiB spread (0.18%)**,
 which is the within-mode floor. Against it:
 
 > **settled private WS 79.98 → 77.92 MiB, −2.06 MiB (−2.6%)**, about 15× the
-> within-mode spread. Against the 72.12 MiB of retention the user sees, 2.8%.
+> within-mode spread. ~~Against the 72.12 MiB of retention the user sees,
+> 2.8%.~~ **That second sentence is withdrawn**: it is the restatement this
+> file's ARM BANNER names as wrong to report, and its denominator 72.12 MiB
+> is derived nowhere in this tree (see `../nonheap/scr_nonheap.h`).
 
 **This is not the delivery measurement.** It has no shared A/A floor, it was
 taken while the box was not reserved, and it is three arms with one excluded.
@@ -669,10 +672,22 @@ outlier, which is precisely the shape that fails `modestat`'s 3×-clearer-gap
 requirement and gets reported as unimodal. Repetition 6 is excluded whole
 (both arms), leaving five paired repetitions.
 
+> **RETIRED TABLE — 1.6.2 (`app/`).** Every row below is the superseded
+> measurement described in the banner above, and the `settled privateWS` row
+> carries all four of the forms that banner names as wrong to report:
+> −2.05 MiB, −2.56%, 3.4× the floor, and the 2.8%-of-72.12 restatement that
+> used to close this file. It is kept for the record of how the retirement
+> was decided, not as a result. The live figures are −1.52%, −1.27 MB,
+> p=0.018, 2.0× the floor, in `../zapo-rest/deliver/README-184.md` under
+> **"2. What this build changes"**. The two rows that do survive the arm
+> change are named in the banner above (the commit DRAW and the zero CPU
+> cost); the other rows of this table are **not** thereby current, only
+> unaudited.
+
 | metric | base | fixed | Δ | Δ% | floor% | ×floor | verdict |
 |---|---:|---:|---:|---:|---:|---:|---|
-| **settled privateWS** | 80.02 | 77.97 | **−2.05 MiB** | **−2.56%** | 0.75 | **3.4×** | **CLEARS** |
-| **peak WS** | 211.07 | 210.28 | −0.79 MiB | −0.38% | 0.12 | 3.1× | **CLEARS** |
+| **settled privateWS** — RETIRED | 80.02 | 77.97 | **−2.05 MiB** | **−2.56%** | 0.75 | **3.4×** | ~~CLEARS~~ |
+| **peak WS** — RETIRED | 211.07 | 210.28 | −0.79 MiB | −0.38% | 0.12 | 3.1× | ~~CLEARS~~ |
 | settled privateCommit | 196.05 | 195.79 | −0.26 MiB | −0.13% | 0.28 | 0.5× | **DRAW** |
 | cpuToSettled | 10784.38 ms | 10784.40 ms | **+0.02 ms** | **0.00%** | 3.79 | 0.0× | **DRAW** |
 
@@ -694,5 +709,24 @@ at 3.79% and this does not approach it. The hot path is untouched by
 construction: the sweep runs at the end of a collector pass and the revival
 only on a refill that would otherwise have taken a fresh chunk.
 
-Against the **72.12 MiB** of retention the user actually sees, −2.05 MiB is
-**2.8%**.
+> ### WITHDRAWN — this file's own banner forbids the sentence that stood here
+>
+> The last line of this file used to read, verbatim:
+>
+> > *"Against the **72.12 MiB** of retention the user actually sees, −2.05
+> > MiB is **2.8%**."*
+>
+> The ARM BANNER above enumerates the forbidden restatements of this result
+> and lists that one among them by name — `"2.8% of the 72.12 MiB the user
+> sees"`. So the file emitted, as its closing claim, the exact string it
+> had already ruled out. It is withdrawn here rather than deleted, so that
+> a reader who met the sentence elsewhere can find out what happened to it.
+>
+> Both halves of it were unsound, for different reasons. The numerator
+> −2.05 MiB is the retired 1.6.2 measurement. The denominator 72.12 MiB is
+> **derived in no file in this tree**; see the note on it in
+> `../nonheap/scr_nonheap.h`.
+>
+> The same sentence still stands earlier in this file, inside the "not the
+> delivery measurement" section, and is marked there. Sections not named in
+> this note are **not** thereby current, only unaudited.
