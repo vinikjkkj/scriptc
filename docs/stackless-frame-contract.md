@@ -344,6 +344,40 @@ declaration and the resume function has already returned to the scheduler.
 `newTemp` now registers every temp; `releaseFrame` asks `isRefCounted` before
 writing a release, so ownership is unchanged.
 
+**AND `newTemp` IS NOT EVERY TEMP (2026-10-10).** Seven expression kinds mint
+their result WITHOUT it, because there is nothing to mint it from: a
+`ternary`, `logical`, `nullish`, `orDefault`, `optChain`, `unionDisc` or
+`unionKeyGet` slot is DECLARED before the arms and WRITTEN inside them. All
+nine sites in `emit-exprs.ts` registered the slot `if (isRefCounted(...))`,
+and the paragraph above is why that guard was wrong: the frames are the
+spill register, not only the ownership register. So the same defect survived
+this section by four days, one level up -- `f() ? 7 : 9` beside an await
+answered 3.56684903562e-312, `f() && g()` answered false for a true, and a
+shared-field `s.kind` answered 6.95216043700965e-310.
+
+The spelling that caught it is the one nobody would look for. `await` of a
+`T | PromiseLike<T>` lowers to a TERNARY, so TWO of them in one argument
+list put the first one's result across the second one's park:
+7470-promiselike-is-a-promise-slot answered `awaited 0 8` for `awaited 7 8`,
+and `0` was an uninitialized stack read -- the next run answered
+2.54639494916e-313, which is why the differential's `retry: 1` neither
+absorbed it nor stabilised it. The LLVM lane was right throughout; only the
+C lane was wrong, so llvm-differential caught it as a lane disagreement in
+the same gate run that differential caught it as a node disagreement.
+
+`CEmitter.registerTemp` is newTemp's rule for an already-declared slot and
+all nine sites now use it. 7472-a-branch-result-crosses-a-suspension pins
+one line per family that can carry a SCALAR result. `optChain`'s bind and
+`unionKeyGet`'s result stay UNTESTED and are named here rather than implied:
+both are refcounted in every spelling anyone has constructed -- a narrowed
+receiver payload is a record/object/array, a keyed read answers at a
+join-typed union -- so no program can tell the two versions apart there.
+
+THE BYTE COST OF THIS SECOND HALF WAS NOT MEASURED. The table below is the
+2026-10-06 spill and nothing was re-run against it; a branch result crossing
+a park adds a frame field on the same terms as any other temp, and how many
+frames gain one over app182 is an open number.
+
 THESE ARE STATIC BYTES PER FRAME STRUCT TYPE, SUMMED OVER THE DISTINCT
 COROUTINE TYPES IN THE PROGRAM. They are **not** runtime occupancy: what a
 run actually holds depends on which coroutines are instantiated and how many
