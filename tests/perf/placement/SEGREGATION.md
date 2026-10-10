@@ -168,7 +168,22 @@ occupancy measurement above cannot see.
 
 What is left on the heap after all four: `ScrStr` payloads (the object *is*
 the buffer — a flexible array member, so it cannot move without moving the
-object), `ScrDyn` nodes, the 1,254,966 `ScrArr` headers at 64 B, and SQLite.
+object), `ScrDyn` nodes, `ScrArr` headers at 64 B, and SQLite.
+
+> **CORRECTED 2026-10-10 — the header count here was a FLOW number in a
+> sentence about RETENTION.** It read "the **1,254,966** `ScrArr` headers at
+> 64 B", which at 64 B each would be **80.3 MB** and the largest term in the
+> heap by a wide margin. It is a whole-run allocation count, not a live
+> population, and the census refutes it arithmetically:
+> `heapcensus/evidence-h2/main.heapcen.txt` reports the **entire** CRT heap
+> holding **50,463 busy blocks**, so 1.25 M live 64-byte blocks is impossible by
+> a factor of 25. The busy 64-byte row in that run is **3,423 blocks =
+> 273,856 B = 0.27 MiB**, and not all of those need be `ScrArr` headers.
+>
+> This project's own rule names the class: **the allocation burst is FLOW, not
+> RETENTION.** A flow count inside a list of what stays resident reads as a
+> retention term, and this one survived long enough to be the last remaining
+> candidate for "the next memory lever" — which it is not.
 
 ### 3b. RETRACTION 2026-10-10 — the 1,344 is SQLite, and the cohort is gone
 
