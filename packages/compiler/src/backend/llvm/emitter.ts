@@ -5545,6 +5545,21 @@ class LlEmitter {
     exempts: string[],
   ): void {
     const v: CoroViolations = { temps: new Map(), slots: new Map(), exempt: new Set() };
+    let probeErr: unknown = null;
+    const nulls = (): string => {
+      const t = [...v.temps].filter(([, ty]) => ty === null).map(([n]) => n);
+      const s = [...v.slots].filter(([, ty]) => ty === null).map(([n]) => n);
+      const defs = t.map((n) => `${n} = ${this.B.tmpUntypedDef.get(n) ?? "?"}`);
+      return `nullT=[${t.join(",")}] nullS=[${s.join(",")}] defs=[${defs.join(" || ")}]`;
+    };
+    const decline = (why: string): void => {
+      if (process.env["SCRIPTC_LLVM_CORO_DIAG"] !== "1") return;
+      const e = probeErr as Error | null;
+      process.stderr.write(
+        `probe decline\t${fn.name}\t${why}\ttemps=${v.temps.size}\tslots=${v.slots.size}` +
+          `\texempt=${v.exempt.size}\t${nulls()}\terr=${e === null ? "-" : e.name + ":" + String((e as { temp?: string; slot?: string }).temp ?? (e as { slot?: string }).slot ?? "")}\n`,
+      );
+    };
     const restore = (): void => {
       this.restoreTrialDecls(snapshot);
     };
@@ -5562,7 +5577,8 @@ class LlEmitter {
       try {
         this.emitFunctionBody(fn);
         return true;
-      } catch {
+      } catch (e) {
+        probeErr = e;
         return false;
       } finally {
         this.currentCoroTempExempts = [];
@@ -5583,17 +5599,19 @@ class LlEmitter {
       [...v.temps].map(([name, llType]) => ({ name, llType: llType as string })),
       [...v.slots].map(([name, llType]) => ({ name, llType: llType as string })),
     ];
-    if (!probe([], [], null)) return;
-    if (!typed()) return;
-    if (v.temps.size === 0 && v.slots.size === 0 && v.exempt.size === 0) return;
+    if (!probe([], [], null)) return decline("pass1-threw");
+    if (!typed()) return decline("pass1-untyped");
+    if (v.temps.size === 0 && v.slots.size === 0 && v.exempt.size === 0) return decline("pass1-empty");
     const [seedT, seedS] = seeds();
     const found: CoroTempSpill[] = [];
-    if (!probe(seedT, seedS, found)) return;
+    if (!probe(seedT, seedS, found)) return decline("pass2-threw");
     // A SECOND PASS THAT SAW A NEW VIOLATION means the superset argument
     // above is wrong for this body. Decline rather than seed half a set: the
     // loop below discovers it from nothing, slowly and correctly.
-    if (v.temps.size !== seedT.length || v.slots.size !== seedS.length) return;
-    if (!typed()) return;
+    if (v.temps.size !== seedT.length || v.slots.size !== seedS.length) {
+      return decline(`pass2-grew t:${seedT.length}->${v.temps.size} s:${seedS.length}->${v.slots.size}`);
+    }
+    if (!typed()) return decline("pass2-untyped");
     exempts.push(...v.exempt);
     // THE TWO SETS MOVE TOGETHER exactly as the loop's promotion arm moves
     // them: a promoted origin LEAVES the spill set (the SSA mechanism must
@@ -5728,6 +5746,7 @@ class LlEmitter {
       // sets and is discovered one violation at a time, which is the
       // behaviour every base before this one had.
       this.probeCoroViolations(fn, snapshot, spills, slotSpills, promotes, exempts);
+      const diagSeed = `probe:t=${spills.length},s=${slotSpills.length},p=${promotes.length},x=${exempts.length}`;
       for (let pass = 0; ; pass++) {
         this.currentCoroTempSpills = spills;
         this.currentCoroSlotSpills = slotSpills;
@@ -5879,6 +5898,27 @@ class LlEmitter {
           throw err;
         }
         this.restoreTrialDecls(snapshot);
+        if (process.env["SCRIPTC_LLVM_CORO_DIAG"] === "1") {
+          const nm =
+            err instanceof CrossParkTempError || err instanceof CrossParkTempPromoteError
+              ? err.temp
+              : err instanceof CrossParkSlotError
+                ? err.slot
+                : "-";
+          const dup =
+            err instanceof CrossParkTempPromoteError
+              ? promotes.some((t) => t.name === err.temp)
+              : err instanceof CrossParkSlotError
+                ? slotSpills.some((s) => s.name === err.slot)
+                : err instanceof CrossParkTempError
+                  ? spills.some((s) => s.name === err.temp)
+                  : false;
+          process.stderr.write(
+            `coro diag\t${fn.name}\t${(err as Error).name}\tpass=${pass}\tcap=${CORO_SPILL_PASS_CAP}` +
+              `\tname=${nm}\tdup=${dup}\t${diagSeed}` +
+              `\tnow:t=${spills.length},s=${slotSpills.length},p=${promotes.length},x=${exempts.length}\n`,
+          );
+        }
         // The count the LINK SWITCH reads must reflect what was actually
         // lowered, so the refusal has to be recorded here and not merely
         // survived. Removing the entry also tells emitAsyncScaffolding (which
@@ -7034,12 +7074,30 @@ class LlEmitter {
          * what it knows (a loop re-enters its own head) instead of a question the
          * scan can answer.
          *
-         * It routes through the same fixpoint as every other discovery: throw,
-         * get added to the slot set, re-emit. One slot per pass, well inside the
-         * cap. */
+         * IT ROUTES THROUGH THE SAME FIXPOINT AS EVERY OTHER DISCOVERY, AND
+         * THEREFORE THROUGH THE SAME COLLECTOR. The second half of that used to
+         * be missing, and the omission was not free: this was the one cross-park
+         * rule in the backend with no `collect` arm, so a body that parks inside
+         * a for-of made probeCoroViolations' FIRST pass throw. The probe
+         * declines on any throw, so such a body reached the discovery loop with
+         * EMPTY seeds and was found one violation per pass -- and four of
+         * app182's nine LLVM refusals were bodies that then ran out at pass 12
+         * with their slot sets still growing (six to eight members each). The
+         * paragraph this replaces ended "one slot per pass, well inside the
+         * cap"; measured on app182, it was not inside the cap at all.
+         *
+         * RECORDING INSTEAD OF THROWING IS SOUND FOR THE REASON EVERY OTHER
+         * COLLECT ARM IS: nothing is repaired while collecting, so the set this
+         * pass sees is a superset of what any repaired pass can see, and the
+         * seeded-slot skip directly above means a slot the probe already handed
+         * over never raises again. */
         if (this.currentCoro !== null && B.boundaries() > parksBefore) {
           for (const sl of arrSlot === null ? [idxSlot] : [arrSlot, idxSlot]) {
             if (this.currentCoroSlotSpills.some((x) => x.name === sl)) continue;
+            if (this.currentCoroCollect !== null) {
+              this.currentCoroCollect.slots.set(sl, B.allocaTypeOf(sl));
+              continue;
+            }
             throw new CrossParkSlotError(
               `llvm emitter bug: ${this.currentFnName} parks inside a forOf whose ` +
                 `loop state ${sl} is machine-stack memory of the resume call. The ` +

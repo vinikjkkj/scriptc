@@ -341,6 +341,89 @@ describe("the cross-park temp detector is armed", () => {
     expect(() => B.line(`call void @use(ptr ${t})`)).not.toThrow();
   });
 
+  /* ââ THE TYPE THE ERROR CARRIES, which is not the same claim as the flag ââ
+   *
+   * `llType` is the difference between SPILLING a flagged temp and REFUSING
+   * the whole function: emitFunction's fixpoint spills only when the type is
+   * readable and puts the body back on the fiber lane when it is null. So a
+   * detector that fires correctly and reports `null` is not a near miss -- it
+   * costs the same coverage as not lowering the shape at all, and it does it
+   * silently, because the census reason it writes (`untyped-cross-park-temp`)
+   * reads like a property of the BODY rather than of the reader.
+   *
+   * MEASURED, ON app182: the indirect-call case below was five of that
+   * program's nine LLVM refusals. `llResultType` anchored its call clause on a
+   * literal ` @`, so `%t174 = call ptr %t173(ptr %t167, ptr %t171)` -- an
+   * ordinary closure or virtual dispatch -- answered null with `ptr` written
+   * in the same column a direct call puts it in.
+   *
+   * BOTH DIRECTIONS. The third case keeps a form the table genuinely does not
+   * cover, so "the reader answers" cannot be bought by making it answer
+   * always; the second keeps the direct spelling, so widening the callee class
+   * cannot quietly stop reading the common case. */
+  test("the type of a DIRECT call is read, and the callee is not mistaken for it", () => {
+    const { B, t } = builderAtResume();
+    let err: unknown = null;
+    try {
+      B.line(`call void @use(ptr ${t})`);
+    } catch (e) {
+      err = e;
+    }
+    expect(err).toBeInstanceOf(CrossParkTempError);
+    expect((err as CrossParkTempError).llType).toBe("double");
+  });
+
+  test("the type of an INDIRECT call is read -- `call ptr %tN(...)` is spillable", () => {
+    const B = new BlockBuilder();
+    B.enterCoro("app.handleMessage");
+    const fnp = B.tmp();
+    B.line(`${fnp} = load ptr, ptr %vtslot`);
+    const t = B.tmp();
+    // The exact form app182's WaComms.onDecodedFrame mints: a call through a
+    // function-pointer temp, whose result type is spelled where every other
+    // call spells it.
+    B.line(`${t} = call ptr ${fnp}(ptr %self, ptr %arg)`);
+    B.terminate("ret void");
+    B.startBlock("sc_S1");
+    B.parkBoundary();
+    let err: unknown = null;
+    try {
+      B.line(`call void @use(ptr ${t})`);
+    } catch (e) {
+      err = e;
+    }
+    expect(err, "the indirect call's result still crosses the park").toBeInstanceOf(
+      CrossParkTempError,
+    );
+    expect(
+      (err as CrossParkTempError).llType,
+      "a null here refuses the function; the type is `ptr` and it is in the text",
+    ).toBe("ptr");
+  });
+
+  test("DECLARED NON-COVERAGE, demonstrated: a form the table omits still reads null", () => {
+    // `extractvalue` is deliberately absent from llResultType -- nothing in
+    // this backend mints a crossing temp with one. The case is kept so that
+    // "the reader answers" can never be satisfied by a reader that answers
+    // unconditionally: a change that made this one non-null would be inventing
+    // coverage for a form no call site produces.
+    const B = new BlockBuilder();
+    B.enterCoro("f");
+    const t = B.tmp();
+    B.line(`${t} = extractvalue { ptr, i64 } %agg, 0`);
+    B.terminate("ret void");
+    B.startBlock("sc_S1");
+    B.parkBoundary();
+    let err: unknown = null;
+    try {
+      B.line(`call void @use(ptr ${t})`);
+    } catch (e) {
+      err = e;
+    }
+    expect(err).toBeInstanceOf(CrossParkTempError);
+    expect((err as CrossParkTempError).llType).toBeNull();
+  });
+
   test("a temp minted BEFORE the park and read BEFORE it is fine", () => {
     // The rule is about crossing the boundary, not about the temp's age.
     const B = new BlockBuilder();

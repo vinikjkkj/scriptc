@@ -140,6 +140,10 @@ export class CrossParkSlotError extends Error {
   }
 }
 
+/** Read ONCE: the diagnostic maps below must not cost a `process.env` lookup
+ * per emitted line. */
+const CORO_DIAG = process.env["SCRIPTC_LLVM_CORO_DIAG"] === "1";
+
 /** The LLVM result type of an instruction, or null when the form is not one
  * this function covers.
  *
@@ -159,12 +163,23 @@ export class CrossParkSlotError extends Error {
  * declare set stops being call-site driven. */
 export function llResultType(rhs: string): string | null {
   const s = rhs.trim();
-  // `call [ret-attrs] <ty> @fn(...)`. The attribute list is the one this
+  // `call [ret-attrs] <ty> <callee>(...)`. The attribute list is the one this
   // emitter actually spells; an UNKNOWN attribute falls through to null rather
   // than being skipped, because skipping it would take the attribute for the
   // type and lay out a frame field named `zeroext`.
+  //
+  // THE CALLEE IS `@fn` OR `%tN`, and the second spelling is why this clause
+  // changed. Anchoring on ` @` alone read every INDIRECT call as untyped --
+  // `%t174 = call ptr %t173(ptr %t167, ptr %t171)` is a closure or a virtual
+  // dispatch, its result type is spelled `ptr` in the same position as any
+  // direct call's, and llResultType answered null for it. A null is not a
+  // spill, it is a REFUSAL of the whole function (emitFunction's
+  // `err.llType !== null` arm), so this one missing character put five of
+  // app182's nine LLVM refusals on the fiber lane with their type in plain
+  // sight. The type class still excludes `@` and `%` so a callee can never be
+  // mistaken for one.
   const call =
-    /^(?:tail |musttail |notail )?call (?:(?:zeroext|signext|noundef|inreg|fast|nnan|ninf|nsz|arcp|contract|reassoc|afn) )*([^ @]+) @/.exec(
+    /^(?:tail |musttail |notail )?call (?:(?:zeroext|signext|noundef|inreg|fast|nnan|ninf|nsz|arcp|contract|reassoc|afn) )*([^ @%]+) [@%]/.exec(
       s,
     );
   if (call !== null) return call[1] === "void" ? null : call[1]!;
@@ -320,6 +335,11 @@ export class BlockBuilder {
   /** `%tN` -> its LLVM result type, recorded from the defining line. Only
    * populated while a coroutine body is being emitted. */
   private readonly tmpType = new Map<string, string>();
+  /** DIAGNOSTIC ONLY: the defining right-hand side of a `%tN` whose result
+   * type llResultType could not read. Populated only under
+   * SCRIPTC_LLVM_CORO_DIAG, so a shipping build pays nothing for it -- the
+   * instrument must not sit inside the body it measures. */
+  readonly tmpUntypedDef = new Map<string, string>();
   /** `%told` -> `%tnew`, installed by the reload after a resume label and
    * applied to every line appended AFTERWARDS.
    *
@@ -499,6 +519,7 @@ export class BlockBuilder {
     if (def !== null) {
       const ty = llResultType(def[2]!);
       if (ty !== null) this.tmpType.set(def[1]!, ty);
+      else if (CORO_DIAG) this.tmpUntypedDef.set(def[1]!, def[2]!);
     }
     if (this.privateSlots.size === 0) return;
     for (const slot of this.privateSlots.keys()) {
