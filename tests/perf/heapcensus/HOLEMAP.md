@@ -129,8 +129,12 @@ scr_bytes.c:43   n=19091   bytes=763640      avg=40.0     <- malloc(sizeof(ScrBy
 scr_bytes.c:52   n=19091   bytes=20892983    avg=1094.4   <- calloc(len, elem)  THE PAYLOAD
 ```
 
-> **The 1,344-byte holes are freed `ScrBytes` payloads** — `scr_bytes.c:52`,
-> one per `Buffer`/typed array, requesting 1,328 bytes (band 1296–1352).
+> **RETRACTED — read the banner at the head of this section.** This verdict is
+> what gets quoted; the qualification sits 40 lines above it and does not travel
+> with it. It travelled into a landed commit on 2026-10-10 and had to be
+> retracted there too (`placement/SEGREGATION.md:§3b`). Original text:
+> ~~**The 1,344-byte holes are freed `ScrBytes` payloads** — `scr_bytes.c:52`,
+> one per `Buffer`/typed array, requesting 1,328 bytes (band 1296–1352).~~
 
 This is `PREDICTIONS.md:137`'s own registered prediction, and it comes out
 **HIT**: *"Free or busy blocks whose size fits none of the three ladders are
