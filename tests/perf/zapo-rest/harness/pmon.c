@@ -17,10 +17,28 @@
  *   pageFaults     PageFaultCount
  *   cpuMs          kernel + user CPU, milliseconds, one decimal
  *   privateWS      resident PRIVATE pages only, -1 if it could not be read
+ *   peakWorkingSet PeakWorkingSetSize  — kernel HIGH-WATER resident
+ *   peakPagefile   PeakPagefileUsage   — kernel HIGH-WATER commit charge
  *
- * THE SIXTH COLUMN IS APPENDED, NEVER INSERTED. memrig-report.mjs and this
- * project's other readers take these positionally, so putting privateWS in
- * its logical place beside workingSet would silently shift privateCommit
+ * WHY THE TWO PEAK COLUMNS EXIST. Every other column here is INSTANTANEOUS,
+ * so a peak can only be recovered by sampling often enough to land on it --
+ * and this rig has already shown that does not work: a downsampled series
+ * spanned 75 MB across 12 phases and only 2 samples hit the truth, and peak
+ * RSS here is bimodal BY POSITION in a sampled series (the first run peaked
+ * 28.7 MiB higher in 5 of 6 cases). The kernel already maintains both
+ * high-water marks continuously in the SAME PROCESS_MEMORY_COUNTERS_EX this
+ * loop already fills, so the peak costs nothing to read and cannot be missed
+ * between samples. Use these for "how much did it ever need"; use the
+ * instantaneous columns for the SHAPE of a phase.
+ *
+ * THEY ARE MONOTONIC AND PER-PROCESS LIFETIME. There is no API to reset
+ * them, so measuring a second workload level in the same process reports the
+ * first level's peak -- a ladder must use a FRESH PROCESS PER RUNG.
+ *
+ * THE SIXTH, SEVENTH AND EIGHTH COLUMNS ARE APPENDED, NEVER INSERTED.
+ * memrig-report.mjs and this project's other readers take these
+ * positionally, so putting privateWS in its logical place beside
+ * workingSet would silently shift privateCommit
  * and every figure derived from it. Same discipline as HCFREE and
  * DYNCEN-BOX: new data gets a new column at the end.
  *
@@ -151,7 +169,7 @@ int main(int argc, char **argv)
         CloseHandle(h);
         return 4;
     }
-    fprintf(f, "ms,workingSet,privateCommit,pageFaults,cpuMs,privateWS\n");
+    fprintf(f, "ms,workingSet,privateCommit,pageFaults,cpuMs,privateWS,peakWorkingSet,peakPagefile\n");
     fflush(f);
 
     for (;;) {
@@ -174,13 +192,15 @@ int main(int argc, char **argv)
         if (GetExitCodeProcess(h, &code) && code != STILL_ACTIVE)
             break;
 
-        fprintf(f, "%lld,%llu,%llu,%lu,%.1f,%lld\n",
+        fprintf(f, "%lld,%llu,%llu,%lu,%.1f,%lld,%llu,%llu\n",
                 now_ms(),
                 (unsigned long long)pmc.WorkingSetSize,
                 (unsigned long long)pmc.PrivateUsage,
                 (unsigned long)pmc.PageFaultCount,
                 cpu_ms,
-                (long long)(hpriv ? (long long)private_ws(hpriv) : -1));
+                (long long)(hpriv ? (long long)private_ws(hpriv) : -1),
+                (unsigned long long)pmc.PeakWorkingSetSize,
+                (unsigned long long)pmc.PeakPagefileUsage);
         fflush(f);
         Sleep(interval);
     }
