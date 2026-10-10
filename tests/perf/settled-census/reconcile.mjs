@@ -491,15 +491,39 @@ ok(cs.strChunks * 65536 < 0.06 * ws.settled,
 
 /* RESIDUE SHAPE, NOT ALLOCATION ORIGIN.
  *
+ * ***CORRECTED 2026-10-10 -- see tests/perf/heapcensus/HOLEMAP.md. The
+ * coalescence reading below is REFUTED by measurement and is kept only
+ * because the paragraphs after it are still right for the backend.***
+ *
+ *   The NT heap does NOT coalesce inside the LFH (<= 16 KiB), which is
+ *   68.51% of the free bytes in this run and every hole the sizes below
+ *   classify. tests/perf/heapcensus/holemap.c frees 3 of every 4 ADJACENT
+ *   blocks and gets 30,173 separate holes, none merged; freeing all of
+ *   them annihilates the population (85 blocks left) instead of merging
+ *   it into mid-sized holes. The same probe DOES see a merge below the
+ *   LFH activation threshold, so this is a reading and not a blindness.
+ *
+ *   And the two tables are not comparable row for row. HeapWalk reports
+ *   cbData for a BUSY block as the REQUEST and for a FREE block as the
+ *   BLOCK's data extent -- 16 bytes apart on the same block, plus the
+ *   tail padding to the bucket. Every request in [1296,1352] leaves a
+ *   1,344-byte hole. So "1344 ABSENT on the allocation side" is exactly
+ *   what a real population at 1,328 looks like, and the 1,328 busy row
+ *   this file calls unattributable (4,097 blocks) is the SAME class.
+ *
  * The sizes below classify HOLES. The NT heap coalesces a freed block with
  * adjacent free neighbours, so a hole of size X may be several smaller dead
  * blocks merged, and the merge stops where a live block sits. A hole is
  * then the SPACING BETWEEN SURVIVORS rather than a size anything asked for.
+ * ^^ TRUE ONLY ABOVE 16 KiB -- 95 of the 81,414 holes here.
  *
  * Not hypothetical here. An exact 8-byte-bucket table over the ALLOCATION
  * side finds buckets 1320, 1328 and 1352 populated and 1344 ABSENT,
  * identically in a sync run and in a control. Nothing requests 1,344 bytes,
  * so 15,766 holes of it cannot be an allocation site.
+ * ^^ REFUTED. The arm those buckets came from is zapo-js 1.6.2, retired;
+ *    its whole [1296,1352] band holds 60 allocations. The producer is
+ *    scr_bytes_alloc's payload calloc (scr_bytes.c:52), at 1,328 B.
  *
  * CONSEQUENCE, stated because a table of shares implies they are disjoint
  * and they are NOT: a hole counted at 1,344 may be the coalesced remains of
@@ -507,10 +531,15 @@ ok(cs.strChunks * 65536 < 0.06 * ws.settled,
  * figure is therefore a LOWER BOUND on that ladder's share of the residue,
  * the 1,344 figure is not a separate mechanism, and the two must not be
  * summed or ranked against one another.
+ * ^^ WITHDRAWN for every class <= 16 KiB: inside the LFH a hole is one
+ *    dead request and nothing else, so those shares ARE disjoint.
  *
  * WHAT THIS CENSUS CANNOT DO: tell a coalesced hole from a virgin one.
  * PROCESS_HEAP_ENTRY carries no provenance for a free block -- HeapWalk
  * says where it is and how big, and nothing about what it was.
+ * ^^ Still true per block. But the SIZE now carries provenance: holemap.c
+ *    maps hole size -> request band, and below 16 KiB there is nothing
+ *    else a hole can be.
  *
  * WHAT IT CAN DO, and what settles it: move the survivors and watch. Payload
  * fixed, only history-sync CONCURRENCY varied (CHUNK_GAP_MS): busy stays

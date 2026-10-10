@@ -328,7 +328,23 @@ SCR_HC_FN void scr_hc_report(void) {
         if (heaps[k] == crt) {
           size_t lo = (size_t)(uintptr_t)e.lpData;
           size_t hi = lo + (size_t)e.cbData;
-          /* cbData, NOT cbData + cbOverhead. The size table has to be
+          /* cbData, NOT cbData + cbOverhead.
+           *
+           * ***CORRECTED 2026-10-10 -- see heapcensus/HOLEMAP.md. The
+           * sentence below is why the 1,344 went unnamed for a month, so
+           * it is kept and marked rather than deleted. HeapWalk reports
+           * cbData for a BUSY block as the REQUEST but for a FREE block
+           * as the BLOCK's data extent: once free, no request remains to
+           * report. The two tables are therefore 16 bytes apart ON THE
+           * SAME BLOCK, plus the tail padding to the bucket -- measured,
+           * every request in [1296,1352] leaves a 1,344-byte hole. So an
+           * HCFREE row is NOT comparable with a request, and reading it
+           * as one is what filed a 1,328 busy population and a 1,344 free
+           * population as two separate mysteries. The ladder argument
+           * below is still the right reason to exclude cbOverhead; it is
+           * the word "comparable" that was wrong.***
+           *
+           * The size table has to be
            * comparable with a REQUEST an allocation site made -- the
            * predicted ladders (cap*8, cap*24, and scr_str_alloc's
            * 8*ceil((cap+13)/8)) are all request sizes -- and folding the
