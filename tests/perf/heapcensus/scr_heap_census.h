@@ -465,6 +465,19 @@ __attribute__((constructor)) SCR_HC_FN void scr_hc_install(void) {
 #if defined(_Exit) && defined(SCR_CYCEN_ON)
 #undef _Exit
 #define _Exit(c) (scr_hc_report(), scr_cycen_report(), _Exit(c))
+/* prof chains here for the same reason cycensus does, and it was NOT
+ * chainable before: scr_prof.h defines `_Exit` unconditionally with no
+ * hook of its own, so census-arms.sh's documented order
+ * "prof -> heapcensus" was a compile ERROR rather than a composition --
+ * the #else below fired. The free-side table and the allocation-side
+ * table could therefore only be taken in TWO RUNS, which is exactly how
+ * a 19,091-call site table from one run came to be read against a
+ * 15,766-hole population from another (heapcensus/HOLEMAP.md ss.4).
+ * The census runs FIRST so prof's own fopen does not land in the heap
+ * it is walking. */
+#elif defined(_Exit) && defined(SCR_PROF_H)
+#undef _Exit
+#define _Exit(c) (scr_hc_report(), scr_prof_report(), _Exit(c))
 #elif !defined(_Exit)
 #define _Exit(c) (scr_hc_report(), _Exit(c))
 #else

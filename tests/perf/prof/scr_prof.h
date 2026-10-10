@@ -642,6 +642,21 @@ SCR_PROF_NI SCR_PROF_FN void scr_prof_note_size(ScrProfRow *r, size_t n) {
 #ifndef SCR_PROF_STACK_SIZE_MAX
 #define SCR_PROF_STACK_SIZE_MAX ((size_t)-1)
 #endif
+/* A SECOND, DISJOINT BAND, because the question that needs it has two
+ * populations and one run. A free-side census found a 1,344-byte hole
+ * class and a 4,376-byte busy class in the SAME heap walk; taking their
+ * stacks in two runs is how the previous attribution came to join a
+ * numerator and a denominator that were never measured together. One
+ * contiguous [1296,4376] would admit the 4,096 and 4,104 rows, which are
+ * the two hottest sizes in the program and would saturate the stack
+ * table on their own. Defaults are an EMPTY band (MIN2 > MAX2), so this
+ * is inert unless asked for, and the report echoes both bands. */
+#ifndef SCR_PROF_STACK_SIZE_MIN2
+#define SCR_PROF_STACK_SIZE_MIN2 1u
+#endif
+#ifndef SCR_PROF_STACK_SIZE_MAX2
+#define SCR_PROF_STACK_SIZE_MAX2 0u
+#endif
 typedef struct {
   void *fr[SCR_PROF_STACK_DEPTH];
   long long count;
@@ -686,7 +701,8 @@ SCR_PROF_NI SCR_PROF_FN void scr_prof_note_stack(ScrProfRow *row, size_t n) {
   void *fr[SCR_PROF_STACK_DEPTH];
   unsigned got = 0, i;
   unsigned h = 2166136261u;
-  if (n < (size_t)SCR_PROF_STACK_SIZE_MIN || n > (size_t)SCR_PROF_STACK_SIZE_MAX) {
+  if ((n < (size_t)SCR_PROF_STACK_SIZE_MIN || n > (size_t)SCR_PROF_STACK_SIZE_MAX) &&
+      (n < (size_t)SCR_PROF_STACK_SIZE_MIN2 || n > (size_t)SCR_PROF_STACK_SIZE_MAX2)) {
     scr_prof_stacks_skipped++;
     return;
   }
@@ -877,11 +893,13 @@ SCR_PROF_FN void scr_prof_write(FILE *f) {
     }
     fprintf(f, "PROF-STACKS-TOTAL rows=%lld count=%lld bytes=%lld lost=%lld"
                " tablefull=%lld skipped=%lld site=\"%s\""
-               " sizeband=%llu..%llu\n",
+               " sizeband=%llu..%llu sizeband2=%llu..%llu\n",
             srows, scount, sbytes, scr_prof_stacks_lost, scr_prof_stacks_full,
             scr_prof_stacks_skipped, SCR_PROF_STACK_SITE,
             (unsigned long long)SCR_PROF_STACK_SIZE_MIN,
-            (unsigned long long)SCR_PROF_STACK_SIZE_MAX);
+            (unsigned long long)SCR_PROF_STACK_SIZE_MAX,
+            (unsigned long long)SCR_PROF_STACK_SIZE_MIN2,
+            (unsigned long long)SCR_PROF_STACK_SIZE_MAX2);
     if (scr_prof_stacks_full != 0) {
       fprintf(f, "PROF-STACKS TABLE FULL - %lld allocations found no free"
                  " slot. Every row above is whatever ran FIRST, not a sample"
