@@ -112,6 +112,18 @@ export interface CoroViolations {
   readonly temps: Map<string, string | null>;
   /** A resume-call-private slot -> its declared type, same null rule. */
   readonly slots: Map<string, string | null>;
+  /** THE FALSE POSITIVES OF THE ORDINAL RULE, proved false against the
+   * finished CFG rather than argued about.
+   *
+   * `checkCrossPark` judges a use by the generation the line was APPENDED in.
+   * That is a property of the emitter's own walk, not of the body: a block
+   * appended after a park can be reachable ONLY from before it, and then the
+   * temp it reads never crosses anything. The repair for a flagged temp is a
+   * rename of every later-appended use into the resume block's reload -- so
+   * flagging such a use does not merely cost bytes, it REWRITES a use the
+   * definition dominated into one the reload does not, and the module stops
+   * verifying. See pruneUnreachableCrossPark. */
+  readonly exempt: Set<string>;
 }
 export class CrossParkSlotError extends Error {
   constructor(
@@ -340,6 +352,14 @@ export class BlockBuilder {
    * temp may not. The two are mutually exclusive by construction: emitFunction's
    * fixpoint moves a temp OUT of the spill set when it promotes it, so no
    * origin is ever in both maps. */
+  /** Every use the ORDINAL rule flagged, with the block it sits in. Recorded
+   * while collecting, because the CFG that decides whether a flag is real does
+   * not exist until the body has been walked to its end. */
+  private readonly crossParkFlags: { temp: string; block: string }[] = [];
+  /** Origins a previous pass proved the dispatch cannot reach any flagged use
+   * of. The ordinal rule stops speaking about them, exactly as the slot rule
+   * stops speaking about a frame-backed slot. */
+  private readonly exemptTemps = new Set<string>();
   private readonly promoted = new Map<string, { slot: string; llType: string }>();
   /** Per-origin use ordinal, the only input to a promoted load's name besides
    * the origin. A counter is safe HERE where it is not safe for temps: it
@@ -422,8 +442,15 @@ export class BlockBuilder {
     for (const m of s.match(/%t[0-9]+/g) ?? []) {
       const g = this.tmpGen.get(m);
       if (g === undefined || g >= this.gen) continue;
+      // PROVED NOT TO CROSS, by a previous pass reading the finished CFG. The
+      // exemption is installed before the walk and is never granted by this
+      // rule itself: it is an INPUT, the same shape promoteTemp and
+      // frameBackedSlot are, so the ordinal rule stays the only thing this
+      // function decides.
+      if (this.exemptTemps.has(m)) continue;
       if (this.collect !== null) {
         this.collect.temps.set(m, this.tmpType.get(m) ?? null);
+        this.crossParkFlags.push({ temp: m, block: this.cur.label });
         continue;
       }
       throw new CrossParkTempError(
@@ -519,6 +546,116 @@ export class BlockBuilder {
    * appended from now on spells it the new way. */
   renameTemp(old: string, fresh: string): void {
     this.rename.set(old, fresh);
+  }
+
+  /** This origin's flagged uses were all proved unreachable from the dispatch
+   * on a previous pass: stop flagging it. Called BEFORE the walk by
+   * emitFunctionBody, for the set probeCoroViolations discovered. */
+  exemptCrossPark(name: string): void {
+    this.exemptTemps.add(name);
+  }
+
+  /** MOVE EVERY FLAG WHOSE USES THE DISPATCH CANNOT REACH OUT OF `v.temps`
+   * AND INTO `v.exempt`. Called once the body is fully walked and the dispatch
+   * is closed, which is the first moment the CFG exists.
+   *
+   * WHAT THE ORDINAL RULE IS ACTUALLY DECIDING, and why a list of shapes to
+   * special-case would be the wrong repair. `checkCrossPark` asks "was this
+   * line appended after the generation counter passed the temp's minting
+   * generation". The question it is STANDING IN FOR is "can this use execute
+   * on a resume call that did not also execute the definition" -- a
+   * reachability question over the emitted CFG. The two agree on straight-line
+   * code and disagree in both directions:
+   *
+   *   a BACK EDGE is a use appended BEFORE the park and reachable from it --
+   *     a false NEGATIVE, documented at the head of this file, left to the
+   *     lowerings that demand their own carry and to the verifier;
+   *   a SIBLING ARM is a use appended AFTER the park and reachable only from
+   *     BEFORE it -- a false POSITIVE, and this is the half that was missing.
+   *     `pre ?? (await f())` emits the non-nullish arm after the resume label
+   *     and branches into it from the pre-park test.
+   *
+   * AND THE FALSE POSITIVE IS NOT THE CHEAP DIRECTION. The head of this file
+   * says over-carrying "is only bytes"; that is true of a SLOT, which is
+   * memory every path can see, and false of a TEMP. A flagged temp is carried
+   * by RENAMING every later-appended use into the resume block's reload, so
+   * flagging a use the definition already dominated replaces it with one the
+   * reload does not -- and `zig cc` rejects the module. Measured, not argued:
+   * tests/corpus/3492-nullish-retag-await-default.ts failed to build with four
+   * "Instruction does not dominate all uses!" naming the reload %cx0_t11,
+   * whose uses sit in `nul.v3`, a block whose only predecessor is the pre-park
+   * block that defines the origin.
+   *
+   * IT NARROWS AND NEVER WIDENS. A temp is dropped only when NO flagged use
+   * is reachable from a resume label; the back-edge half is untouched, so no
+   * body starts carrying something it did not carry before. And the direction
+   * it does move is the one this host can check: an under-carried TEMP is a
+   * dominance violation, which `zig cc` verifies at parse -- unlike an
+   * under-carried SLOT, which is silent. That asymmetry is the reverse of the
+   * slot rule's, and it is why the default differs.
+   *
+   * IT DECLINES RATHER THAN GUESSES, like every other reader of this CFG: a
+   * duplicate label, a successor that is not a block of this body, or a flag
+   * in a block that does not exist leaves `v` untouched and every flag
+   * standing.
+   *
+   * WHAT IT DOES NOT COVER, and this belongs here rather than in a report. The
+   * unit of the decision is the ORIGIN, not the use: a temp with one use the
+   * dispatch can reach and another it cannot stays carried, and `renameTemp`
+   * then rewrites BOTH -- so the unreachable one becomes a non-dominating use
+   * exactly as before. Fixing that means making the RENAME reachability-aware,
+   * not the flag, and the rename is applied at append time when the CFG does
+   * not yet exist. No corpus program is in that shape today: with this prune
+   * in, every one of the 255 async corpus programs builds on the LLVM lane and
+   * 254 of them emit byte-identical IR to the base. The hazard is loud if it
+   * ever arrives -- it is a dominance violation, which this host verifies --
+   * so what is owed is a reading of this paragraph, not a watch. */
+  pruneUnreachableCrossPark(v: CoroViolations): void {
+    if (this.crossParkFlags.length === 0) return;
+    const byLabel = new Map<string, number>();
+    for (let i = 0; i < this.blocks.length; i++) {
+      const l = this.blocks[i]!.label;
+      if (byLabel.has(l)) return;
+      byLabel.set(l, i);
+    }
+    // THE SEEDS ARE THE RESUME LABELS, and sc_S0 is not one of them: it is the
+    // entry arm, taken on the call that RUNS the definition. coroLabel() mints
+    // `sc_S<k+1>`; this matches that spelling rather than taking a state
+    // count, so a body that drew more states than it planned points still
+    // seeds every one of them.
+    const work: number[] = [];
+    const seen = new Uint8Array(this.blocks.length);
+    for (const [label, i] of byLabel) {
+      if (!/^sc_S[0-9]+$/.test(label) || label === "sc_S0") continue;
+      seen[i] = 1;
+      work.push(i);
+    }
+    if (work.length === 0) return;
+    while (work.length > 0) {
+      const b = this.blocks[work.pop()!]!;
+      // A null terminator renders as `unreachable` (see render): a dead end,
+      // not an unreadable shape.
+      if (b.term === null) continue;
+      for (const m of b.term.matchAll(/label %([A-Za-z0-9_.$]+)/g)) {
+        const j = byLabel.get(m[1]!);
+        if (j === undefined) return;
+        if (seen[j] === 1) continue;
+        seen[j] = 1;
+        work.push(j);
+      }
+    }
+    const live = new Map<string, boolean>();
+    for (const f of this.crossParkFlags) {
+      const i = byLabel.get(f.block);
+      if (i === undefined) return;
+      if (seen[i] === 1) live.set(f.temp, true);
+      else if (!live.has(f.temp)) live.set(f.temp, false);
+    }
+    for (const [temp, reachable] of live) {
+      if (reachable) continue;
+      v.temps.delete(temp);
+      v.exempt.add(temp);
+    }
   }
 
   /** Is this origin already being carried, i.e. was it reloaded at an EARLIER

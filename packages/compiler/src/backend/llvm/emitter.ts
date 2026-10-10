@@ -1700,6 +1700,9 @@ class LlEmitter {
    * ZERO COST ON A KNOB-ABSENT BUILD, like the rest of this fork: the
    * candidate set is empty there, so no probe ever runs. */
   private currentCoroCollect: CoroViolations | null = null;
+  /** Origins the probe proved the dispatch cannot reach a use of. Handed to
+   * the builder before the walk, like currentCoroTempPromotes. */
+  private currentCoroTempExempts: readonly string[] = [];
   private currentCoroCollectPromotes: CoroTempSpill[] | null = null;
   private currentFnName = "";
 
@@ -5508,8 +5511,9 @@ class LlEmitter {
     spills: CoroTempSpill[],
     slotSpills: CoroSlotSpill[],
     promotes: CoroTempSpill[],
+    exempts: string[],
   ): void {
-    const v: CoroViolations = { temps: new Map(), slots: new Map() };
+    const v: CoroViolations = { temps: new Map(), slots: new Map(), exempt: new Set() };
     const restore = (): void => {
       this.restoreTrialDecls(snapshot);
     };
@@ -5519,12 +5523,18 @@ class LlEmitter {
       this.currentCoroTempPromotes = [];
       this.currentCoroCollect = v;
       this.currentCoroCollectPromotes = found;
+      // EVERY PASS INSTALLS WHAT THE EARLIER ONES PROVED, which is what makes
+      // the two probes agree. Pass one prunes a flag; pass two must not raise
+      // it again, or the size check below would read the re-raise as a new
+      // violation and decline a body that was in fact decided.
+      this.currentCoroTempExempts = [...v.exempt];
       try {
         this.emitFunctionBody(fn);
         return true;
       } catch {
         return false;
       } finally {
+        this.currentCoroTempExempts = [];
         this.currentCoroCollect = null;
         this.currentCoroCollectPromotes = null;
         this.currentCoroTempSpills = [];
@@ -5544,7 +5554,7 @@ class LlEmitter {
     ];
     if (!probe([], [], null)) return;
     if (!typed()) return;
-    if (v.temps.size === 0 && v.slots.size === 0) return;
+    if (v.temps.size === 0 && v.slots.size === 0 && v.exempt.size === 0) return;
     const [seedT, seedS] = seeds();
     const found: CoroTempSpill[] = [];
     if (!probe(seedT, seedS, found)) return;
@@ -5553,6 +5563,7 @@ class LlEmitter {
     // loop below discovers it from nothing, slowly and correctly.
     if (v.temps.size !== seedT.length || v.slots.size !== seedS.length) return;
     if (!typed()) return;
+    exempts.push(...v.exempt);
     // THE TWO SETS MOVE TOGETHER exactly as the loop's promotion arm moves
     // them: a promoted origin LEAVES the spill set (the SSA mechanism must
     // not also run for it) and its alloca JOINS the slot set.
@@ -5670,17 +5681,27 @@ class LlEmitter {
       const spills: CoroTempSpill[] = [];
       const slotSpills: CoroSlotSpill[] = [];
       const promotes: CoroTempSpill[] = [];
+      /* THE FOURTH SET, and it is the only one that REMOVES work rather than
+       * adding it. The other three name repairs; this names flags the ordinal
+       * rule raised that the finished CFG proved false, so the rule must not
+       * raise them again. It is discovered by the probe and by nothing else:
+       * a body the probe declines reaches the loop with it empty and behaves
+       * exactly as every base before this one did -- including failing to
+       * build the shape it exists for, which is the honest cost of the
+       * decline and not a silence. */
+      const exempts: string[] = [];
       // THE PROBE SEEDS THE FIXPOINT BELOW, it does not replace it. Two
       // discovery emissions hand over everything they saw; the loop then
       // runs exactly as it always did, and the cap still stops it. A body the
       // probe declines (see probeCoroViolations) reaches the loop with empty
       // sets and is discovered one violation at a time, which is the
       // behaviour every base before this one had.
-      this.probeCoroViolations(fn, snapshot, spills, slotSpills, promotes);
+      this.probeCoroViolations(fn, snapshot, spills, slotSpills, promotes, exempts);
       for (let pass = 0; ; pass++) {
         this.currentCoroTempSpills = spills;
         this.currentCoroSlotSpills = slotSpills;
         this.currentCoroTempPromotes = promotes;
+        this.currentCoroTempExempts = exempts;
         try {
           // THE NARROWING IS NOT PART OF THE FIXPOINT and must not be: it runs
           // on a body that already emitted CLEAN, with the discovered sets
@@ -5862,6 +5883,7 @@ class LlEmitter {
       this.currentCoroTempSpills = [];
       this.currentCoroSlotSpills = [];
       this.currentCoroTempPromotes = [];
+      this.currentCoroTempExempts = [];
     }
     return this.emitFunctionBody(fn);
   }
@@ -5960,6 +5982,10 @@ class LlEmitter {
       // just handed to frameBackedSlot, so the frame field, the spill and the
       // reload are all in place by the time the body is emitted.
       for (const t of this.currentCoroTempPromotes) B.promoteTemp(t.name, t.llType);
+      // AND THE EXEMPTIONS, before the walk for the same reason: the ordinal
+      // rule runs on the first line appended, so an exemption installed later
+      // would arrive after the flag it exists to suppress.
+      for (const name of this.currentCoroTempExempts) B.exemptCrossPark(name);
     }
 
     const paramIds = new Set(fn.params.map((p) => p.localId));
@@ -6279,6 +6305,12 @@ class LlEmitter {
         for (let i = 0; i < this.coroStates.length; i++) arms.push([i + 1, coroLabel(i)]);
         B.finishDispatch(this.coroDispatchValue, this.coroDispatchDefault, arms);
       }
+      // THE FIRST MOMENT THE CFG EXISTS, and therefore the first moment the
+      // ordinal rule's flags can be checked against it. Only on a probe pass:
+      // the emission that counts runs with the answer already installed, and
+      // re-deciding it there would make the body depend on a reading taken
+      // while it was being written. See BlockBuilder.pruneUnreachableCrossPark.
+      if (this.currentCoroCollect !== null) B.pruneUnreachableCrossPark(this.currentCoroCollect);
       const body = B.render();
       /* THE SECOND COUNTABLE INVARIANT, over what was EMITTED rather than what
        * was intended. D5 above counts at the point -- draw, boundary, state --
