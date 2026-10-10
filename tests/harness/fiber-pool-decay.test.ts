@@ -27,6 +27,24 @@
  *   the pool must have FILLED first        -- the positive control. If the
  *     burst never loaded the pool, "the pool drained" is true for the
  *     wrong reason, and this suite has shipped that mistake before.
+ *
+ * AND THE BURST HAS TO BE ON THE FIBER LANE, which is now a thing to ASK FOR
+ * rather than a thing that happens. The stackless lowering ships ON, and a
+ * stackless async function creates no fiber at all -- so the burst loads
+ * nothing, `scr_fiber_pool` stays empty, and BOTH controls above read zero.
+ * The positive one says so loudly (`Math.max()` over an empty array is
+ * -Infinity, and -Infinity >= 4096 is false); the NEGATIVE one goes green by
+ * construction, because "the trim printed nothing" is satisfied by a pool
+ * that was never filled just as well as by a trim that never ran. One of the
+ * two controls this file is built on would have kept passing while measuring
+ * nothing.
+ *
+ * THE POOL IS NOT GONE, so this is a lane to pin and not a suite to delete:
+ * `SCRIPTC_STACKLESS=0` is the shipped opt-out and the fiber lowering behind
+ * it is the code under test here. The knob is set around the COMPILE (below),
+ * because that is where the lane is chosen; the run-time arms still differ
+ * only in SCR_FIBER_POOL_DECAY_MS, so "both arms run the SAME BINARY" above
+ * stays true.
  */
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -110,6 +128,13 @@ describe("the fiber-stack pool decays back to its idle floor", () => {
      * so this armed binary never shares a cache entry with an ordinary one. */
     const prev = process.env["SCRIPTC_PROF_CFLAGS"];
     process.env["SCRIPTC_PROF_CFLAGS"] = "-DSCR_ASYNC_STAT=1";
+    /* THE LANE, PINNED AT THE COMPILE. See the header: without this the burst
+     * is stackless, no fiber is ever created, and the file's two controls
+     * read the same zero for opposite reasons. Restored in the `finally` with
+     * the cflags, and absent is not the same as "0" -- the opt-out is a value
+     * the compiler reads, so the previous state has to come back exactly. */
+    const prevKnob = process.env["SCRIPTC_STACKLESS"];
+    process.env["SCRIPTC_STACKLESS"] = "0";
     try {
       const result = await compile(src, {
         outPath: join(dir, exeName("burst")),
@@ -123,12 +148,21 @@ describe("the fiber-stack pool decays back to its idle floor", () => {
     } finally {
       if (prev === undefined) delete process.env["SCRIPTC_PROF_CFLAGS"];
       else process.env["SCRIPTC_PROF_CFLAGS"] = prev;
+      if (prevKnob === undefined) delete process.env["SCRIPTC_STACKLESS"];
+      else process.env["SCRIPTC_STACKLESS"] = prevKnob;
     }
   }, 300_000);
 
   test("decay off prints no windows at all (the negative control)", async () => {
     const { stdout, windows } = await runArm(bin, 0);
     expect(stdout).toBe("burst 200\ndone\n");
+    /* A NEGATIVE CONTROL IS ONLY WORTH ITS PREMISE, and this one's premise is
+     * that the pool COULD have printed. The sibling test below is what
+     * establishes it -- the same binary, the same burst, decay on, and a
+     * high-water mark at or above the cap. Read the two together: this says
+     * the trim is silent when it is off, that one says it is not silent when
+     * it is on, and neither sentence means anything alone. The lane pin in
+     * beforeAll is what keeps the pair from both reading zero. */
     expect(windows).toEqual([]);
   }, 180_000);
 

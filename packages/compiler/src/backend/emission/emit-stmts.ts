@@ -260,6 +260,7 @@ export function emitFunction(E: CEmitter, fn: IrFunction): void {
     E.coroPointIndex = 0;
     E.coroStates = [];
     E.coroPretType = null;
+    E.coroFinExcIds = [];
     const coro = E.currentCoro;
     E.captureIds = new Set((fn.captures ?? []).map((c) => c.localId));
     E.seqScoped = seqScopedLocals(fn);
@@ -470,10 +471,23 @@ export function emitFunction(E: CEmitter, fn: IrFunction): void {
         }
       }
       // NOW the dispatch can be written, because the state count exists.
+      // The hoisted finally stashes go ABOVE the dispatch: C requires a
+      // declaration to dominate every label the switch can jump to. Which
+      // ids exist is only known now, after the walk -- the same reason the
+      // dispatch itself could not be written at `dispatchAt`, and the same
+      // cure, so both are spliced in together.
+      const decls = E.coroFinExcIds.map(
+        (i) =>
+          "  ".repeat(dispatchIndent) +
+          `ScrCaught *sc_fexc_${i} = NULL; /* finally stash (across a park) */`,
+      );
+      if (E.coroFinExcIds.length > 0) {
+        E.coroFinExcByFn.set(fn.name, [...E.coroFinExcIds]);
+      }
       const dispatch = coroDispatch(E.coroStates.length).map(
         (l) => "  ".repeat(dispatchIndent) + l,
       );
-      E.lines.splice(dispatchAt, 0, ...dispatch);
+      E.lines.splice(dispatchAt, 0, ...decls, ...dispatch);
     }
 
     E.indent--;
@@ -1291,7 +1305,18 @@ export function emitStmt(E: CEmitter, s: IrStmt): void {
         // and keeps propagating.
         const stash = `sc_fexc_${id}`;
         E.line(`${finExcLabel}:; /* finally (exception path — stashed) */`);
-        E.line(`ScrCaught *${stash} = scr_exc_take();`);
+        if (E.currentCoro !== null) {
+          // STACKLESS: the declaration is HOISTED to the top of the resume
+          // function (emitFunction splices it in above the dispatch) because
+          // a suspension inside the finally body below parks between this
+          // take and the re-raise -- and the dispatch's `goto` back in would
+          // jump over an initialiser emitted here. Only the take stays.
+          // See CEmitter.coroFinExcIds.
+          E.coroFinExcIds.push(id);
+          E.line(`${stash} = scr_exc_take();`);
+        } else {
+          E.line(`ScrCaught *${stash} = scr_exc_take();`);
+        }
         E.scopes.push([{ name: stash, type: CAUGHT }]);
         E.coroPointIndex = finPlanStart; // second copy, same plan points
         E.emitBlock(s.finallyBody!);

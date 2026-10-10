@@ -451,7 +451,8 @@ export class CEmitter {
    * borrowed — never declared, never released here). */
   currentLocals = new Map<string, IrLocal>();
   /** Functions this module lowers to stackless state machines (D1 slice).
-   * Empty unless SCRIPTC_STACKLESS=1 — the lowering ships BUILT but OFF. */
+   * Empty only under the opt-out SCRIPTC_STACKLESS=0 — the lowering
+   * ships ON. */
   coroPlansByFn = new Map<string, import("../../ir/liveness.js").StacklessPlan>();
   /** The plan for the function being emitted, or null for a fiber body. */
   currentCoro: import("../../ir/liveness.js").StacklessPlan | null = null;
@@ -502,6 +503,31 @@ export class CEmitter {
   coroPretType: IrType | null = null;
   /** Per function, the pending-return slot's type, for the frame struct. */
   readonly coroPretByFn = new Map<string, IrType>();
+  /** THE FINALLY STASH, when it has to survive a park.
+   *
+   * `sc_fexc_N` holds the in-flight exception a `finally` body runs on top
+   * of: taken out of the pending cell at the exception-path label so the
+   * body's own may-throw calls answer for themselves, re-raised after. It
+   * was an ordinary C local, declared AT that label -- and a `yield` or
+   * `await` inside the finally body parks between the take and the
+   * re-raise, so the dispatch's `goto` into the body jumps straight over
+   * the initialiser and `scr_rethrow` reads an indeterminate pointer
+   * (rc=139, empty stderr, no diagnostic).
+   *
+   * Same defect and same cure as `sc_pret` above: the declaration is
+   * hoisted to the top of the resume function (where it dominates every
+   * label) and the slot is spilled and reloaded around every park. The
+   * name stays unqualified, so nothing about how a scope entry is spelled
+   * changes.
+   *
+   * Accumulated while the body is emitted. Monotone and never popped,
+   * which is what makes it correct without a pre-walk: a park INSIDE the
+   * region of stash i is always emitted after i was pushed, and no read of
+   * a stash can be reached from a park outside its region without passing
+   * through the take that assigns it. */
+  coroFinExcIds: number[] = [];
+  /** Per function, the finally-stash ids needing a frame slot. */
+  readonly coroFinExcByFn = new Map<string, number[]>();
   /** Per function, the emitter TEMPS a park had to put in the frame.
    *
    * A temp is a C local in the resume function, and a park RETURNS to the
@@ -2496,6 +2522,35 @@ export class CEmitter {
     this.line(`${cDecl(type, name)} = ${init};`);
     if (this.frames.length > 0) this.currentFrame().push({ name, type });
     return { name, type };
+  }
+
+  /** Register an ALREADY-DECLARED result temp in its frame, on exactly
+   * newTemp's terms -- see the note above it for why EVERY temp joins a
+   * frame, refcounted or not.
+   *
+   * newTemp cannot serve the BRANCHING results (`ternary`, `logical`,
+   * `nullish`, `orDefault`, `optChain`, `unionDisc`, `unionKeyGet`): their
+   * slot is declared BEFORE the arms and written INSIDE them, so there is
+   * no initializer to mint it from. All nine sites registered the slot
+   * only `if (isRefCounted(...))` -- ownership bookkeeping, which is what
+   * the frames used to be for -- and so a `double` or a `bool` branch
+   * result was invisible to emitCoroAwait's spill. Measured on the
+   * stackless C lane, knob on: `console.log("r", f() ? 7 : 9, await p(8))`
+   * answered `r 3.56684903562e-312 8`, `f() && g()` answered false, and
+   * `s.kind` over a shared-field union answered 6.95e-310 -- the slot is a
+   * C local in the resume function, the park RETURNS to the scheduler, and
+   * the resume `goto` jumps over its declaration. 7470 is the corpus
+   * program that caught it (`awaited 0 8` for `awaited 7 8`): `await` of a
+   * `T | PromiseLike<T>` lowers to a ternary, so TWO of them in one
+   * argument list put the first ternary's result across the second's park.
+   *
+   * OWNERSHIP IS UNCHANGED: releaseFrame skips a non-refcounted entry and
+   * moveTemp returns early for one, so this is spill bookkeeping only. The
+   * frame-exists guard is newTemp's, and refcounted keeps the historical
+   * loud failure -- currentFrame throws when there is no frame to own it. */
+  registerTemp(t: Temp): void {
+    if (!isRefCounted(t.type) && this.frames.length === 0) return;
+    this.currentFrame().push({ name: t.name, type: t.type });
   }
 
   /** newTemp for a value that IS an interned immortal static (see

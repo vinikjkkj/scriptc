@@ -226,7 +226,9 @@ interface LlScopeEntry {
  * complexity, and whoever reads the count later should know that. */
 export interface LlvmEmitStats {
   /** The number of functions this emission lowered to a stackless state
-   * machine. Zero whenever SCRIPTC_STACKLESS is not 1. */
+   * machine. Zero only under the opt-out SCRIPTC_STACKLESS=0; the lane
+   * ships ON, so a default build lowers every function the plan admits AND
+   * this backend accepts. */
   coroLowered: number;
 }
 
@@ -1484,8 +1486,9 @@ class LlEmitter {
    * because emitFunction, emitAsyncScaffolding and the type-body gate all
    * have to agree about it -- a function that is a coroutine for one of them
    * and a fiber for another emits either a duplicate symbol or none at all.
-   * Empty whenever SCRIPTC_STACKLESS is not 1, so a knob-absent build walks
-   * exactly the branches it always walked. */
+   * Empty only under the opt-out SCRIPTC_STACKLESS=0, which is now the ONLY
+   * build that walks exactly the branches this emitter always walked. The
+   * default build walks the coroutine branches. */
   private readonly coroLoweredByFn = new Map<string, StacklessPlan>();
   /** The plan for the function being emitted, or null for a fiber body. */
   private currentCoro: StacklessPlan | null = null;
@@ -1697,6 +1700,9 @@ class LlEmitter {
    * ZERO COST ON A KNOB-ABSENT BUILD, like the rest of this fork: the
    * candidate set is empty there, so no probe ever runs. */
   private currentCoroCollect: CoroViolations | null = null;
+  /** Origins the probe proved the dispatch cannot reach a use of. Handed to
+   * the builder before the walk, like currentCoroTempPromotes. */
+  private currentCoroTempExempts: readonly string[] = [];
   private currentCoroCollectPromotes: CoroTempSpill[] | null = null;
   private currentFnName = "";
 
@@ -1975,10 +1981,13 @@ class LlEmitter {
     // gets null and every line below is gated on it, which is why its
     // emitted module is unchanged to the byte.
     const npm = emitNpmEmbeddingLl(this, this.mod);
-    // Does this module lower any coroutine ON THIS BACKEND? Empty whenever
-    // SCRIPTC_STACKLESS is not 1, so a knob-absent build adds not one byte of
-    // .ll -- which is the embarking criterion, and the reason these type
-    // bodies are gated rather than joining the unconditional list below.
+    // Does this module lower any coroutine ON THIS BACKEND? Empty only under
+    // the opt-out SCRIPTC_STACKLESS=0, so an OPT-OUT build adds not one byte
+    // of .ll. That byte-identity was the embarking criterion while the lane
+    // shipped off; the lane ships ON now, so it is the criterion on the
+    // OPT-OUT build instead -- which is still the reason these type bodies
+    // are gated rather than joining the unconditional list below, because a
+    // module that converts nothing must not name %ScrCoroBase either.
     //
     // THE PREDICATE IS `coroLoweredByFn`, NOT `coroPlans`, and the difference
     // is the whole asymmetry between the lanes. coroPlans reads only the IR
@@ -3632,6 +3641,42 @@ class LlEmitter {
     this.decls.add(decl);
   }
 
+  /** THE TRIAL'S DECLARE RESTORE -- it puts the snapshot BACK, and it
+   * never takes anything away. The difference is the whole bug.
+   *
+   * A trial that is about to re-emit used to CLEAR `this.decls` and refill
+   * it from the snapshot, so a refused pass could not leave a declare
+   * behind. That rests on the claim that the re-emission re-registers
+   * whatever the trial registered -- and for a memoised emitter it is
+   * false. `dynCheckHelper` (backend/llvm/dyn.ts) pushes the helper's
+   * body into `this.defs` and records the name in `this.dynBuilders`, and
+   * only then walks the body -- which is the one path that declares. On
+   * the next pass the memo HITS and returns the name before the walk, so
+   * the `call` stays in a def that is still in the module while its
+   * `declare` has just been deleted. `zig cc` then rejects the module with
+   * `use of undefined value '@scr_dyn_check_fail'`.
+   *
+   * NOT A LIST OF SYMBOLS. Every accumulator that survives the rollback
+   * and registers a declare only on a cache MISS has the same shape --
+   * dynCheckHelper, dynArmHelper, jsonWriteHelper and the ws/shape
+   * writers all do -- so the fix is at the one place that drops, not at
+   * each place that registers. Measured on the failing module: 88
+   * declares were dropped by rollbacks, 84 were re-registered by the
+   * re-emission, and the 4 that were not are exactly the memoised ones.
+   *
+   * WHAT IT COSTS is a declare with no call site when a trial is refused
+   * -- an extern that nothing references, which LLVM drops and the linker
+   * never sees. That is the honest trade: an unreferenced declare is a
+   * tidiness claim, an undeclared call is a module that does not build.
+   *
+   * The body reads as a no-op because it IS one today: declares only ever
+   * accumulate, so `decls` is always a superset of `snapshot`. It is
+   * written as a restore anyway so the call sites keep saying what they
+   * mean, and so a future narrowing of `decls` stays correct here. */
+  private restoreTrialDecls(snapshot: ReadonlySet<string>): void {
+    for (const d of snapshot) this.decls.add(d);
+  }
+
   needOom(): void {
     this.needsOom = true;
   }
@@ -4522,6 +4567,19 @@ class LlEmitter {
     // HOISTED -- see the header. One index, two sites, one spill.
     this.emitCoroTempSpill(index);
     this.emitCoroSpill();
+    // THE SLOT CARRY IS HOISTED FOR THE SAME REASON AND WAS MISSING HERE.
+    // The header's "everything that builds the RESULT is after the resume
+    // label" argument covers the result slot and nothing else: a slot opened
+    // BEFORE this point -- an optional chain's receiver bind is the shape that
+    // found this -- is read by the scope release after the resume, and an
+    // entry alloca dominates that read, so no SSA rule and no `zig cc` parse
+    // can see it. The slot also left blocks.ts's resume-call-private registry
+    // the moment the frame claimed it (frameBackedSlot), so the cross-park
+    // SLOT rule is silent by design and the reload is what was supposed to
+    // hold the guarantee. Without these two calls the frame carried the field
+    // and nothing ever wrote it: measured as a release of indeterminate stack
+    // memory, then a wild free-list head, on 3553.
+    this.emitCoroSlotSpill(index);
     const ps = this.coroStateField();
     B.line(`store i32 ${index + 1}, ptr ${ps}`);
 
@@ -4552,6 +4610,7 @@ class LlEmitter {
     B.parkBoundary();
     this.emitCoroTempReload(index);
     this.emitCoroReload();
+    this.emitCoroSlotReload(index);
     const pa2 = this.coroField(layout.awaitedIndex, "sc_awaited");
     const aw = B.tmp();
     B.line(`${aw} = load ptr, ptr ${pa2}`);
@@ -5452,11 +5511,11 @@ class LlEmitter {
     spills: CoroTempSpill[],
     slotSpills: CoroSlotSpill[],
     promotes: CoroTempSpill[],
+    exempts: string[],
   ): void {
-    const v: CoroViolations = { temps: new Map(), slots: new Map() };
+    const v: CoroViolations = { temps: new Map(), slots: new Map(), exempt: new Set() };
     const restore = (): void => {
-      this.decls.clear();
-      for (const d of snapshot) this.decls.add(d);
+      this.restoreTrialDecls(snapshot);
     };
     const probe = (seedT: CoroTempSpill[], seedS: CoroSlotSpill[], found: CoroTempSpill[] | null): boolean => {
       this.currentCoroTempSpills = seedT;
@@ -5464,12 +5523,18 @@ class LlEmitter {
       this.currentCoroTempPromotes = [];
       this.currentCoroCollect = v;
       this.currentCoroCollectPromotes = found;
+      // EVERY PASS INSTALLS WHAT THE EARLIER ONES PROVED, which is what makes
+      // the two probes agree. Pass one prunes a flag; pass two must not raise
+      // it again, or the size check below would read the re-raise as a new
+      // violation and decline a body that was in fact decided.
+      this.currentCoroTempExempts = [...v.exempt];
       try {
         this.emitFunctionBody(fn);
         return true;
       } catch {
         return false;
       } finally {
+        this.currentCoroTempExempts = [];
         this.currentCoroCollect = null;
         this.currentCoroCollectPromotes = null;
         this.currentCoroTempSpills = [];
@@ -5489,7 +5554,7 @@ class LlEmitter {
     ];
     if (!probe([], [], null)) return;
     if (!typed()) return;
-    if (v.temps.size === 0 && v.slots.size === 0) return;
+    if (v.temps.size === 0 && v.slots.size === 0 && v.exempt.size === 0) return;
     const [seedT, seedS] = seeds();
     const found: CoroTempSpill[] = [];
     if (!probe(seedT, seedS, found)) return;
@@ -5498,6 +5563,7 @@ class LlEmitter {
     // loop below discovers it from nothing, slowly and correctly.
     if (v.temps.size !== seedT.length || v.slots.size !== seedS.length) return;
     if (!typed()) return;
+    exempts.push(...v.exempt);
     // THE TWO SETS MOVE TOGETHER exactly as the loop's promotion arm moves
     // them: a promoted origin LEAVES the spill set (the SSA mechanism must
     // not also run for it) and its alloca JOINS the slot set.
@@ -5563,8 +5629,7 @@ class LlEmitter {
     } catch {
       // The full body is already rendered and already correct. Keep it, and
       // put back exactly what the failed pass may have registered.
-      this.decls.clear();
-      for (const d of snapshot) this.decls.add(d);
+      this.restoreTrialDecls(snapshot);
       this.currentCoro = null;
       this.currentCoroLayout = null;
       return full;
@@ -5591,20 +5656,21 @@ class LlEmitter {
    * `declare` the trial registered is in `this.decls`, which is a module-level
    * set that the assembly prints verbatim.
    *
-   * SO THE DECLARES ARE SNAPSHOTTED AND RESTORED. Without that, a refused
-   * trial leaves `declare void @scr_coro_finish_f64` and friends in a module
-   * that calls none of them -- undefined-but-unreferenced symbols asserting
-   * coverage this backend does not have, which is precisely the discipline
-   * that keeps the declare set honest: declares are CALL-SITE driven, and a
-   * declare with no call site is a claim.
+   * SO THE DECLARES ARE SNAPSHOTTED AND PUT BACK -- but they are never
+   * REMOVED, and restoreTrialDecls carries the argument. The rollback used
+   * to clear the set first so a refused trial could not leave a declare
+   * with no call site; that deleted declares the module still needed,
+   * because the accumulators are NOT all replayed on the second pass.
    *
-   * NOTHING ELSE NEEDS RESTORING, and that is a property worth stating rather
-   * than assuming. The other accumulators are content-addressed and
-   * idempotent -- interned literals and cstrs memoise by text, fnValues and
-   * classObjs by name -- and the fiber re-emission walks the SAME expressions,
-   * so it re-registers exactly what the trial did. The per-function state (the
-   * block builder, frames, scopes, the state counter) is rebuilt from scratch
-   * at the top of emitFunctionBody, so the second pass starts clean.
+   * THE REPLAY IS PARTIAL, and that is the property to state rather than
+   * assume. Interned literals and cstrs memoise by text and fnValues and
+   * classObjs by name, so re-walking the same expressions re-registers
+   * what they need. The HELPER emitters do not: dynCheckHelper and its
+   * kin commit the helper body to `this.defs`, record the name, and then
+   * walk -- so a second pass hits the memo, returns early, and never
+   * reaches the `declare`. The per-function state (the block builder,
+   * frames, scopes, the state counter) is rebuilt from scratch at the top
+   * of emitFunctionBody, so the second pass does start clean.
    *
    * COST: three re-emissions of a body the predicate thought it could lower
    * -- two probe passes and the one that emits -- and only for those. Zero on
@@ -5615,17 +5681,27 @@ class LlEmitter {
       const spills: CoroTempSpill[] = [];
       const slotSpills: CoroSlotSpill[] = [];
       const promotes: CoroTempSpill[] = [];
+      /* THE FOURTH SET, and it is the only one that REMOVES work rather than
+       * adding it. The other three name repairs; this names flags the ordinal
+       * rule raised that the finished CFG proved false, so the rule must not
+       * raise them again. It is discovered by the probe and by nothing else:
+       * a body the probe declines reaches the loop with it empty and behaves
+       * exactly as every base before this one did -- including failing to
+       * build the shape it exists for, which is the honest cost of the
+       * decline and not a silence. */
+      const exempts: string[] = [];
       // THE PROBE SEEDS THE FIXPOINT BELOW, it does not replace it. Two
       // discovery emissions hand over everything they saw; the loop then
       // runs exactly as it always did, and the cap still stops it. A body the
       // probe declines (see probeCoroViolations) reaches the loop with empty
       // sets and is discovered one violation at a time, which is the
       // behaviour every base before this one had.
-      this.probeCoroViolations(fn, snapshot, spills, slotSpills, promotes);
+      this.probeCoroViolations(fn, snapshot, spills, slotSpills, promotes, exempts);
       for (let pass = 0; ; pass++) {
         this.currentCoroTempSpills = spills;
         this.currentCoroSlotSpills = slotSpills;
         this.currentCoroTempPromotes = promotes;
+        this.currentCoroTempExempts = exempts;
         try {
           // THE NARROWING IS NOT PART OF THE FIXPOINT and must not be: it runs
           // on a body that already emitted CLEAN, with the discovered sets
@@ -5661,8 +5737,7 @@ class LlEmitter {
           !spills.some((s) => s.name === err.temp)
         ) {
           spills.push({ name: err.temp, llType: err.llType });
-          this.decls.clear();
-          for (const d of snapshot) this.decls.add(d);
+          this.restoreTrialDecls(snapshot);
           continue;
         }
         /* THE PROMOTION ARM. A temp that is live at a SECOND suspension cannot
@@ -5695,8 +5770,7 @@ class LlEmitter {
           slotSpills.push({ name: crossSlotName(err.temp), llType: err.llType });
           const i = spills.findIndex((s) => s.name === err.temp);
           if (i >= 0) spills.splice(i, 1);
-          this.decls.clear();
-          for (const d of snapshot) this.decls.add(d);
+          this.restoreTrialDecls(snapshot);
           continue;
         }
         /* THE SLOT ARM OF THE SAME FIXPOINT. A CrossParkSlotError names a
@@ -5721,8 +5795,7 @@ class LlEmitter {
           !slotSpills.some((s) => s.name === err.slot)
         ) {
           slotSpills.push({ name: err.slot, llType: err.llType });
-          this.decls.clear();
-          for (const d of snapshot) this.decls.add(d);
+          this.restoreTrialDecls(snapshot);
           continue;
         }
         // TWO REFUSAL SIGNALS, ONE HANDLER, and they are genuinely the same
@@ -5774,8 +5847,7 @@ class LlEmitter {
         ) {
           throw err;
         }
-        this.decls.clear();
-        for (const d of snapshot) this.decls.add(d);
+        this.restoreTrialDecls(snapshot);
         // The count the LINK SWITCH reads must reflect what was actually
         // lowered, so the refusal has to be recorded here and not merely
         // survived. Removing the entry also tells emitAsyncScaffolding (which
@@ -5811,6 +5883,7 @@ class LlEmitter {
       this.currentCoroTempSpills = [];
       this.currentCoroSlotSpills = [];
       this.currentCoroTempPromotes = [];
+      this.currentCoroTempExempts = [];
     }
     return this.emitFunctionBody(fn);
   }
@@ -5909,6 +5982,10 @@ class LlEmitter {
       // just handed to frameBackedSlot, so the frame field, the spill and the
       // reload are all in place by the time the body is emitted.
       for (const t of this.currentCoroTempPromotes) B.promoteTemp(t.name, t.llType);
+      // AND THE EXEMPTIONS, before the walk for the same reason: the ordinal
+      // rule runs on the first line appended, so an exemption installed later
+      // would arrive after the flag it exists to suppress.
+      for (const name of this.currentCoroTempExempts) B.exemptCrossPark(name);
     }
 
     const paramIds = new Set(fn.params.map((p) => p.localId));
@@ -6228,6 +6305,12 @@ class LlEmitter {
         for (let i = 0; i < this.coroStates.length; i++) arms.push([i + 1, coroLabel(i)]);
         B.finishDispatch(this.coroDispatchValue, this.coroDispatchDefault, arms);
       }
+      // THE FIRST MOMENT THE CFG EXISTS, and therefore the first moment the
+      // ordinal rule's flags can be checked against it. Only on a probe pass:
+      // the emission that counts runs with the answer already installed, and
+      // re-deciding it there would make the body depend on a reading taken
+      // while it was being written. See BlockBuilder.pruneUnreachableCrossPark.
+      if (this.currentCoroCollect !== null) B.pruneUnreachableCrossPark(this.currentCoroCollect);
       const body = B.render();
       /* THE SECOND COUNTABLE INVARIANT, over what was EMITTED rather than what
        * was intended. D5 above counts at the point -- draw, boundary, state --
@@ -6788,9 +6871,10 @@ class LlEmitter {
          * the next spill. Its own comment names the fix: memory every path can
          * see. That is this slot, carried by the slot mechanism.
          *
-         * GATED ON THE CORO LANE so the knob-absent emission is untouched: with
-         * SCRIPTC_STACKLESS absent `currentCoro` is null, `arrRef` is `arr.name`,
-         * and not one byte of the `.ll` moves. */
+         * GATED ON THE CORO LANE so the non-coroutine emission is untouched:
+         * wherever `currentCoro` is null -- any function the lane does not
+         * lower, and every function under the opt-out SCRIPTC_STACKLESS=0 --
+         * `arrRef` is `arr.name` and not one byte of the `.ll` moves. */
         let arrSlot: string | null = null;
         if (this.currentCoro !== null) {
           arrSlot = B.slot();

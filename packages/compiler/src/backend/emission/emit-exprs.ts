@@ -389,7 +389,7 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
         E.emitBranchInto(name, e.right);
         E.indent--;
         E.line(`}`);
-        if (isRefCounted(e.type)) E.currentFrame().push({ name, type: e.type });
+        E.registerTemp({ name, type: e.type });
         return { name, type: e.type };
       }
       case "ternary": {
@@ -409,7 +409,7 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
         E.line(`} else {`);
         emitArm(e.else_);
         E.line(`}`);
-        if (isRefCounted(e.type)) E.currentFrame().push({ name, type: e.type });
+        E.registerTemp({ name, type: e.type });
         return { name, type: e.type };
       }
       case "optChain": {
@@ -510,7 +510,7 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
         const r = E.emitExpr(e.receiver);
         const bind = `sc_t${E.tempCounter++}`;
         E.line(`${cDecl(narrowed, bind)} = ${isRefCounted(narrowed) ? "NULL" : "0"};`);
-        if (isRefCounted(narrowed)) E.currentFrame().push({ name: bind, type: narrowed });
+        E.registerTemp({ name: bind, type: narrowed });
         const test = unitTags.map((t) => `${r.name}->tag == ${t}`).join(" || ");
         const extract = subUnion
           ? retainCallC(narrowed, r.name)
@@ -624,7 +624,7 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
         E.emitBranchInto(name, e.right);
         E.indent--;
         E.line(`}`);
-        if (isRefCounted(e.type)) E.currentFrame().push({ name, type: e.type });
+        E.registerTemp({ name, type: e.type });
         return { name, type: e.type };
       }
       case "nullish": {
@@ -652,7 +652,7 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
           E.line(`${name} = ${l.name};`);
           E.indent--;
           E.line(`}`);
-          if (isRefCounted(e.type)) E.currentFrame().push({ name, type: e.type });
+          E.registerTemp({ name, type: e.type });
           return { name, type: e.type };
         }
         if (e.left.type.kind === "dyn") {
@@ -673,7 +673,7 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
           E.line(`${name} = ${l.name};`);
           E.indent--;
           E.line(`}`);
-          if (isRefCounted(e.type)) E.currentFrame().push({ name, type: e.type });
+          E.registerTemp({ name, type: e.type });
           return { name, type: e.type };
         }
         if (e.left.type.kind !== "union") throw new Error("emitter bug: nullish left is not a union");
@@ -749,7 +749,7 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
         }
         E.indent--;
         E.line(`}`);
-        if (isRefCounted(e.type)) E.currentFrame().push({ name, type: e.type });
+        E.registerTemp({ name, type: e.type });
         return { name, type: e.type };
       }
       case "strConcat": {
@@ -2777,7 +2777,7 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
         E.line(`default: ${E.badTagAbortC()};`);
         E.indent--;
         E.line(`}`);
-        if (isRefCounted(e.type)) E.currentFrame().push({ name, type: e.type });
+        E.registerTemp({ name, type: e.type });
         return { name, type: e.type };
       }
       case "unionKeyGet": {
@@ -2873,7 +2873,7 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
         E.line(`default: ${E.badTagAbortC()};`);
         E.indent--;
         E.line(`}`);
-        if (isRefCounted(e.type)) E.currentFrame().push({ name, type: e.type });
+        E.registerTemp({ name, type: e.type });
         return { name, type: e.type };
       }
       case "unionIsTag": {

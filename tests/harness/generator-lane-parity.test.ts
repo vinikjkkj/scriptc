@@ -508,7 +508,12 @@ async function build(
   }
 }
 
-const OFF = { SCRIPTC_STACKLESS: undefined, SCRIPTC_GEN_VALUE_POISON: undefined };
+/* THE FIBER ARM IS SPELLED `0`, NOT undefined. The lane ships ON as of
+ * 2026-10-09 (ir/coro-plans.ts), and build() applies `undefined` as a
+ * DELETE -- which would now select stackless on both arms and make every
+ * comparison below a lane against itself. SCRIPTC_GEN_VALUE_POISON stays
+ * undefined: that knob did not flip, and absent is still its off. */
+const OFF = { SCRIPTC_STACKLESS: "0", SCRIPTC_GEN_VALUE_POISON: undefined };
 const ON = { SCRIPTC_STACKLESS: "1", SCRIPTC_GEN_VALUE_POISON: undefined };
 const OFF_AUDIT = { ...OFF, SCRIPTC_RC_AUDIT: "1" };
 const ON_AUDIT = { ...ON, SCRIPTC_RC_AUDIT: "1" };
@@ -521,7 +526,7 @@ const AUDIT_FAILED = "scriptc RC AUDIT FAILED";
 describe("generator channel: the two lanes agree on every value", () => {
   for (const arm of ARMS) {
     test(
-      arm.name + " yields are identical knob-absent and knob-on",
+      arm.name + " yields are identical knob-off and knob-on",
       async () => {
         const off = await build(arm.name + "-off", arm.src, OFF);
         const on = await build(arm.name + "-on", arm.src, ON);

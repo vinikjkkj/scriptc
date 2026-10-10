@@ -151,8 +151,11 @@ describe("a program emitted as several translation units", () => {
  * single-TU probe passed, because nothing was split -- which is exactly the
  * blind spot this FILE exists to cover, and the stackless lane had no entry
  * in it. The knob is set HERE rather than read from the environment, so the
- * guard holds on the ordinary knob-absent gate too: a lane nobody runs by
- * default is a lane that rots. */
+ * guard holds whatever the gate's ambient default is. It was written when a
+ * lane nobody ran by default was a lane that rots; since 2026-10-09 the
+ * stackless lane IS the default, so this pin now serves the opposite
+ * purpose -- it keeps the assertion meaning the same thing if the default
+ * ever moves again. */
 describe("the stackless lane across a translation-unit split", () => {
   const SRC = "tests/corpus/1020-async-basics.ts";
   test("a frame struct reaches the unit that defines its resume function", async () => {

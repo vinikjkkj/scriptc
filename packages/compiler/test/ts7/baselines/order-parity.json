@@ -10176,6 +10176,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/7472-a-branch-result-crosses-a-suspension.ts": {
+   "order": [
+    "<repo>/tests/corpus/7472-a-branch-result-crosses-a-suspension.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/7480-a-boundary-copy-recovers-as-its-origin.ts": {
    "order": [
     "<repo>/tests/corpus/7480-a-boundary-copy-recovers-as-its-origin.ts"
