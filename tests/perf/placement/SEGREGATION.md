@@ -76,7 +76,7 @@ pointer names it. The runtime has exactly four:
 | `ScrArr::data` | the `ScrArr` | yes | yes | **done** — reservation-backed above 8 KiB |
 | `ScrDyn::obj.entries` | the `ScrDyn` | yes | yes | not done — this is the `3 × 2ⁿ` ladder |
 | `scr_map` tables | the map | yes | yes | not done |
-| `ScrBytes::data` | the `ScrBytes` | **no** — views alias it with an interior pointer | **YES** — see §3a | not done — **this is the 56.02% class** |
+| `ScrBytes::data` | the `ScrBytes` | **no** — views alias it with an interior pointer | **YES** — see §3a | not done — size unknown; it is **NOT** the 1,344 class (§3b) |
 
 For these, **no phase boundary and no copy-out are needed**: give the buffer
 its own reservation and it is off the CRT heap for its whole life and returns
@@ -89,6 +89,15 @@ mechanism is per-buffer, incremental, needs no oracle, no designation, no
 fiber tree, and no relocation of anything user code can hold.
 
 ### 3a. CORRECTED 2026-10-10 — "movable" and "segregable" are different questions
+
+> **PART OF THIS SECTION WAS RETRACTED HOURS AFTER IT WAS WRITTEN. See §3b.**
+> The reasoning below — that segregating a buffer needs only alloc/free
+> ownership, not single-pointer ownership — **stands, and is verified against
+> the code.** Every figure attached to it does **not**: the 1,344 population is
+> not an `ScrBytes` payload and no longer exists. The sizing, the granularity
+> table and the registered prediction are void as written. They are kept
+> because the arithmetic shape (4x per doubling of the return unit) is reusable
+> and because deleting a retracted claim hides how it was reached.
 
 **The table above originally read `movable? no` for `ScrBytes::data` and that
 excluded it from this section's fix. The exclusion does not follow, and it kept
@@ -110,9 +119,11 @@ owner frees. So the one-owner property holds for ALLOCATION even where it fails
 for RELOCATION, and a buffer that never moves keeps every interior pointer
 valid by construction.
 
-This matters because `heapcensus/HOLEMAP.md:§4` named this population: the
-1,344-byte hole class is a freed `ScrBytes` payload, **56.02% of CRT free bytes**
-(20.45 MiB of 36.51 MiB, `settled-census/evidence-llvm182/main`).
+~~This matters because `heapcensus/HOLEMAP.md:§4` named this population: the
+1,344-byte hole class is a freed `ScrBytes` payload, **56.02% of CRT free
+bytes**.~~ **RETRACTED — see §3b. The owner is SQLite, and `ScrBytes::data`'s
+own retained size is unmeasured.** The argument above is therefore a correct
+argument about a buffer whose size nobody has established.
 
 #### The decisive variable is the RETURN UNIT, not the slab
 
@@ -141,9 +152,10 @@ right for a **reservation per buffer**: at 1,328 bytes the address-space waste
 would be 48x. **A slot packed into a shared reservation is a different design
 and that objection does not reach it.**
 
-> **REGISTERED, before measuring.** Per-4-KiB-page occupancy over the band
-> [1296, 1352] returns **12.93 MiB**, correlation aside. **REFUTED if the
-> measured occupancy returns less than 4 MiB** — which would mean the live
+> **VOID — the population it predicts over is misattributed and gone (§3b).**
+> Original text: **REGISTERED, before measuring.** Per-4-KiB-page occupancy over
+> the band [1296, 1352] returns **12.93 MiB**, correlation aside. **REFUTED if
+> the measured occupancy returns less than 4 MiB** — which would mean the live
 > blocks are clustered by page, and the answer is allocation ORDER rather than
 > return granularity. The census artifact cannot settle it: `n1.heapcen.txt` is
 > a histogram of (size, count, bytes) and carries no block address.
@@ -157,6 +169,81 @@ occupancy measurement above cannot see.
 What is left on the heap after all four: `ScrStr` payloads (the object *is*
 the buffer — a flexible array member, so it cannot move without moving the
 object), `ScrDyn` nodes, the 1,254,966 `ScrArr` headers at 64 B, and SQLite.
+
+### 3b. RETRACTION 2026-10-10 — the 1,344 is SQLite, and the cohort is gone
+
+`heapcensus/HOLEMAP.md:§4` attributed the 1,344-byte hole class to
+`scr_bytes.c:52` from a lockstep argument: three busy populations move together
+between the no-sync and sync arms (1,328 +4,021; 40 +4,038; 24 +4,033), and
+`sizeof(ScrBytes)` is 40. **The lockstep is real and the attribution does not
+follow, and the refutation is inside the evidence file HOLEMAP itself cites.**
+
+`settled-census/evidence-trace1344/prof.txt:367` is that site's own octave
+histogram:
+
+```
+PROFHIST 19d7672 0:73 1:3235 2:11 3:1615 4:1674 5:11549 6:38 7:145 8:41
+                 9:5 10:3 11:2 12:12 13:386 14:260 15:8 16:10 18:16 19:8
+                 <repo>/packages/runtime/src/scr_bytes.c:52
+```
+
+**Octave 10 is 1,024–2,047 bytes and it reads `3`.** Three payloads in the whole
+run against 15,766 holes. Reproduced independently a month later: 3 of 26,513
+calls. The site's mode is 32–63 B (13,195 of 26,513), not 1,328.
+
+**The real owner, measured on the allocation side.** All 60 allocations in
+[1296, 1352] resolve to SQLite — 59 `sqlite3MemMalloc ← dbMallocRawFinish`, one
+via `MemRealloc`; where a program frame survives it is
+`sqlite3_step ← scr_sqlite_exec ← sv_db_exec`, the TS `db.exec`.
+
+**Why nobody could have seen this before.** `prof` and `heapcensus` had never
+run in one process: `scr_prof.h` defines `_Exit` unconditionally and heapcensus
+only branches for `SCR_CYCEN_ON`, so composing them was a `#error`, not a
+composition. The allocation side and the free side were never measurable
+together. That is the mechanism of a month-old wrong attribution, not
+housekeeping.
+
+**And the cohort no longer exists.** Busy 1,328: 76 nosync / 4,097 sync on
+09-10 → **1** now. The two lockstep rows are back at their no-sync levels
+(40 B: 3,700/7,738 → 3,686; 24 B: 6,488/10,521 → 6,435). The free side went
+36.51 MiB in 81,414 holes → **12.50 MiB in 12,903**. `scr_bytes.c` is untouched
+since 2026-09-09 across 400 commits, so **something else closed it** and which
+commit did is not yet known.
+
+#### What replaced it as the largest line, and it is a defect
+
+The busy 4,376 row: **2,792 buffers, 12,906,128 B = 12.31 MiB, 40.4% of all busy
+CRT-heap bytes** — the largest busy row, ahead of the 64 KiB arena chunks at
+10.57 MiB in the same file. One path, 100% of them:
+
+```
+sqlite3MemMalloc ← pcache1Alloc ← pcache1FetchStage2 ← getPageNormal
+  ← btreeGetPage ← btreeGetUnusedPage ← allocateBtreePage ← balance
+```
+
+Size is arithmetic: `szPage 4096 + szExtra 216 + ROUND8(sizeof(PgHdr1)) 56
+= 4368`, plus 8 for SQLite's own prefix.
+
+**Decided at rest, which is the rule this project pays for:** never freed
+(`PROFEXACT 4376 = 2792` and `HCSIZE 4376 = 2792` in a run that freed 10.26 M of
+10.47 M allocations — monotonic); survives 45 s settle plus 60 s idle;
+**`PRAGMA cache_size` does not bound it** (`ZAPO_SQLITE_CACHE_KB=0`, SQLite's
+compiled-in 474-page cap instead of 3,799, moved it 2,792 → **2,791**); and it is
+**sized by the database** (400 convs: db 2,751 pages → 2,792 buffers; 200 convs:
+1,370 → 1,423). The cache holds every page of the database and ~1.5% more.
+
+Every stack ends in `allocateBtreePage`, a page the **write** path creates, so
+`pcache1FetchStage2` never recycled one. **Why those pages stay unrecyclable is
+the open question**, and `PRAGMA shrink_memory` is already on the store's allowed
+list and already exposed at `app182/zapo-rest.ts:1530`.
+
+#### The lesson that outlives both numbers
+
+The retracted claim was not sloppy: it had a measured lockstep, a matching
+`sizeof`, and a named site. **What it never had was the allocation side and the
+free side in one process**, and the one line that would have refuted it was two
+lines below the table it quoted, in the same file. *Check the site's own size
+histogram before accepting any attribution drawn from population deltas.*
 
 ## 4. Cross-check with `memcensus` — a registered negative
 
