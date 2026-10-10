@@ -193,11 +193,11 @@ const WRAPPERS: ReadonlyArray<{ name: string; take: string; finish: string; conv
   // THE `assign` SHAPES -- `x = await ...` as a STATEMENT ROOT. They went in
   // as NEGATIVE entries while the rootOk carve-out stood, and the ledger named
   // all ten the moment it was lifted, which is the handover this file exists
-  // for. They are grouped BY EMITTER ROUTE, because
-  // emit-stmts.ts:505 has three and only one of them is the plain store:
-  //   (A) the module-global arm (:510-517) -- target is a C static, and the
+  // for. They are grouped BY EMITTER ROUTE, because the `assign` case in
+  // emit-stmts.ts:622 has three and only one of them is the plain store:
+  //   (A) the module-global arm (:624-634) -- target is a C static, and the
   //       OLD value is released AFTER the await returns.
-  //   (B) emitStrAccum (:520 -> :1364) -- the ONLY assign shape that READS
+  //   (B) emitStrAccum (:637 -> :1565) -- the ONLY assign shape that READS
   //       the target after the park: it emits the right operand first and
   //       then reads the accumulator. Liveness KILLS the target as a def
   //       (recordPoints deletes every `defs` entry that is not boxed), so
@@ -205,7 +205,12 @@ const WRAPPERS: ReadonlyArray<{ name: string; take: string; finish: string; conv
   //       local independently of liveness. That is a load-bearing coupling
   //       between two rules written for different reasons, and it is why
   //       this route gets its own guards instead of riding on the plain one.
-  //   (C) the plain local store (:519-), boxed and not.
+  //   (C) the plain local store (:638-), boxed and not.
+  // Those four numbers were :505/:510-517/:520 -> :1364/:519 until this
+  // commit: emit-stmts.ts had drifted ~117 lines under them, so :505 pointed
+  // at `case "while":` and :510-517 at the tryCatch children arm. They were
+  // found by the same wrapped-prose sweep that caught the floor header above,
+  // and re-read from the file rather than adjusted by the offset.
   { name: "wga", take: "ref", finish: "ref", converted: true }, // A: global, refcounted
   { name: "wgn", take: "f64", finish: "f64", converted: true }, // A: global, scalar
   { name: "wgc", take: "ref", finish: "ref", converted: true }, // B: s += await
@@ -418,7 +423,7 @@ const SOURCE = `
 // EIGHT OF THE NINE HAVE NO AWAIT, and that used to mean none of them was a
 // coroutine on either lane. It does not any more: a body with no suspension
 // point at all converts now, so eight of these are zero-point coroutines and
-// are named in LLVM_FLOOR_NON_WRAPPERS. The ninth, pu, always suspended --
+// are named in FLOOR_NON_WRAPPERS. The ninth, pu, always suspended --
 // returning a union makes its value a promise this function awaits.
 async function pf(v: number): Promise<number> { return v + 1; }
 async function pb(v: boolean): Promise<boolean> { return v; }
@@ -966,9 +971,25 @@ const resumeName = (name: string): string => `sc_cr_${name}(`;
 function resumeBodies(artifact: string, lane: Lane): Map<string, string> {
   const nl = String.fromCharCode(10);
   const out = new Map<string, string>();
+  // THE C ARM ENDS AT `) {` BECAUSE A PROTOTYPE IS NOT A BODY. emit-coro.ts:226
+  // writes a forward declaration for every resume it will define, and the
+  // older spelling (`...\(ScrCoroBase/`, no terminator) matched BOTH: measured
+  // on the knob-ON C artifact at this base, 89 declarations on lines 500-1536
+  // and 89 definitions on lines 2154-7215 -- the same 89 names, twice. A
+  // declaration taken as an opening line gives a "body" of everything up to
+  // the next column-0 `}`: the frame typedefs and spawn wrappers, hundreds of
+  // lines of the wrong function. It never showed because every declaration
+  // precedes every definition and `out.set` overwrote it. That is an ORDERING
+  // ACCIDENT, not a property -- move the prototype block after the bodies and
+  // every scan below silently reads the wrong text.
+  //
+  // `(?:[A-Za-z]+ )*` rather than `[A-Za-z ]*` so the linkage keyword is a
+  // WORD and not any run of letters and spaces: E.link is "static " in one TU
+  // and "" when the emitter splits, and stripStatic takes the `static` off the
+  // definition too (emit-coro.ts:222-226), so both spellings have to parse.
   const open = lane === "llvm"
     ? /^define [^@\n]*@(sc_cr_[A-Za-z0-9_]+)\(/
-    : /^[A-Za-z ]*void (sc_cr_[A-Za-z0-9_]+)\(ScrCoroBase/;
+    : /^(?:[A-Za-z]+ )*void (sc_cr_[A-Za-z0-9_]+)\(ScrCoroBase \*[A-Za-z0-9_]+\) \{$/;
   const lines = artifact.split(nl);
   for (let i = 0; i < lines.length; i++) {
     const m = open.exec(lines[i]!);
@@ -980,9 +1001,62 @@ function resumeBodies(artifact: string, lane: Lane): Map<string, string> {
   return out;
 }
 
-/* THE LLVM LANE'S FLOOR -- the wrappers its emitter lowers today (40 of the 80
- * planned, 32 of them from the dispatch slice and 8 from the multi-state and
- * hop one).
+/** EVERY COROUTINE THE EMITTER ACTUALLY PRODUCED, by mangled suffix, per lane.
+ *
+ * This is the input to the closed set below, and it is read from the ARTIFACT
+ * rather than from any list in this file -- which is the whole point: a
+ * function can enter the lane without the ledger, the floor or the
+ * non-wrapper table ever hearing about it, and `pu` did exactly that.
+ *
+ * ONE MANGLER, TWO PUNCTUATIONS. mangleCoroResume (mangle.ts:284) is shared by
+ * both backends, so the SUFFIX is identical on the two lanes and only the line
+ * around it differs:
+ *     static void sc_cr_ws(ScrCoroBase *sc_b) {        <- emit-coro.ts:300
+ *     define internal void @sc_cr_ws(ptr %sc_b) ... {  <- llvm/emitter.ts:6423
+ * Measured at this base on the knob-ON arms of this program: 89 names on the C
+ * lane and 89 on the LLVM lane, and the two sets are EQUAL, name for name.
+ *
+ * THE C ARM MUST MATCH THE DEFINITION. Every resume also gets a forward
+ * declaration (emit-coro.ts:226) that differs only in its terminator, so a
+ * pattern stopping at `(ScrCoroBase` matches each name twice. The SET would
+ * come out the same today -- the 89 declarations and the 89 definitions are
+ * the same 89 names -- which is exactly why it has to be said rather than left
+ * to come out right: a TU that declares a resume it does not define is one of
+ * the shapes this assertion exists to catch, and a pattern keyed on the
+ * declaration would report it emitted.
+ *
+ * WHAT THE CHARACTER CLASSES CAN AND CANNOT SEE, since the two differ.
+ * `sanitize` (mangle.ts:14-18) maps every character outside [A-Za-z0-9_] to
+ * `_xHH_`, and `.` to `_`, BEFORE the prefix goes on -- so neither `$` nor `.`
+ * can reach either artifact, and `sc_cr__x25_fn0` (suspends.ts:130) is what a
+ * `%` in a source name looks like downstream. The LLVM arm's wider class is
+ * slack rather than coverage, and the C arm's narrower one is not a
+ * restriction. NOT EXERCISED BY THIS PROGRAM: all 89 names here are already
+ * [A-Za-z0-9_], so nothing in this file would notice if the sanitiser changed.
+ *
+ * NOT EXERCISED EITHER: the split-TU spelling. This program emits one TU, so
+ * every C definition read here carries `static`. */
+function emittedCoroutines(artifact: string, lane: Lane): ReadonlySet<string> {
+  const open = lane === "llvm"
+    ? /^define [^@\n]*@sc_cr_([A-Za-z0-9_$.]+)\(/gm
+    : /^(?:[A-Za-z]+ )*void sc_cr_([A-Za-z0-9_]+)\(ScrCoroBase \*[A-Za-z0-9_]+\) \{$/gm;
+  return new Set([...artifact.matchAll(open)].map((m) => m[1]!));
+}
+
+/* THE LLVM LANE'S FLOOR -- the wrappers its emitter lowers today: ALL 79 the
+ * ledger carries as converted, out of 80 entries (`wdk` is the one the ledger
+ * records as not converted, and it is absent from both artifacts).
+ *
+ * SO THE FLOOR IS NO LONGER A FRACTION, which is the whole meaning of the
+ * number now. The sentence here used to read "40 of the 80 planned, 32 of
+ * them from the dispatch slice and 8 from the multi-state and hop one" -- a
+ * provenance breakdown of a floor that was less than half the ledger. It
+ * survived every slice that moved the number because the claim is WRAPPED
+ * across two comment lines and a single-line grep for "of the 80 planned"
+ * reads zero. The per-group provenance that clause carried is in the list
+ * body below, beside the names it bought; what the aggregate says now is that
+ * the LLVM gap is CLOSED, and the thing to watch is this list falling BELOW
+ * the ledger rather than climbing towards it.
  *
  * THIS IS A FLOOR, NOT A PREDICATE, and the difference is the whole reason it
  * is safe to write names here. The predicate lives in
@@ -1196,6 +1270,32 @@ const NOT_LOWERED_BY_REASON: ReadonlyArray<readonly [string, readonly string[]]>
  * partition built from the ledger is blind to all of them. They can start
  * lowering, stop lowering, or change shape, and nothing here would say so.
  *
+ * ONE LIST FOR BOTH LANES, AND THAT IS A MEASUREMENT RATHER THAN AN ASSUMPTION.
+ * This table was written as LLVM_FLOOR_NON_WRAPPERS when only that lane had a
+ * closed set. Giving the C lane one meant deciding whether it needed a table
+ * of its own, and the artifacts answered: at this base the two knob-ON arms of
+ * this program emit THE SAME 89 coroutines, name for name -- 79 converted
+ * wrappers and exactly these 10. Re-derived here, not carried: both sets come
+ * out of `emittedCoroutines` above, and `pf pb ps pa pd pv prej pmaybe pu main`
+ * is their difference against the ledger on EITHER lane. The reason the two
+ * agree is structural and worth naming: `mangleCoroResume` is shared, and
+ * NOT_LOWERED_BY_REASON is empty, so LLVM_FLOOR is the whole converted ledger
+ * and the C lane's `new Set(ledger)` is the same set spelled differently.
+ *
+ * A SECOND, PARALLEL LIST WOULD HAVE BEEN WORSE THAN NONE. Two literal tables
+ * holding the same ten rows drift, and the drift reads as coverage on
+ * whichever lane was not edited -- which is the failure mode this whole file
+ * is built against. So the rows are shared, and the DIVERGENCE is what gets
+ * written down when it happens: if one lane starts emitting a non-wrapper the
+ * other does not, assertion (4) fails on that lane by name, and the fix is to
+ * give the row a lane column here -- deliberately, in the same commit -- not
+ * to widen the list until both lanes pass.
+ *
+ * THE VALUE COLUMN IS LANE-NEUTRAL ALREADY, which is what makes the sharing
+ * honest rather than convenient. Every reason below names an OUTPUT ROW, and
+ * the output comparison runs once per lane (`describe.each` below), so each
+ * row's claim is checked on C and on LLVM separately.
+ *
  * THIS IS NOT HYPOTHETICAL AND IT WAS NOT CAUGHT BY A TEST. The cross-park
  * temp slice lowered `pu` as a side effect of deleting the nesting condition.
  * It surfaced only as an inconsistency between two aggregates -- "69 lowered"
@@ -1203,12 +1303,30 @@ const NOT_LOWERED_BY_REASON: ReadonlyArray<readonly [string, readonly string[]]>
  * failing direction, and the next reader sees one number.
  *
  * SO THE ARTIFACT IS THE AUTHORITY HERE, not the ledger. The assertion below
- * reads EVERY `sc_cr_*` the emitter produced and requires the set to equal
- * LLVM_FLOOR plus exactly these names. A function entering or leaving the lane
- * fails by name whichever side of the ledger it is on.
+ * reads EVERY `sc_cr_*` the emitter produced and requires the set to equal the
+ * lane's lowered set plus exactly these names. A function entering or leaving
+ * the lane fails by name whichever side of the ledger it is on.
  *
- * Re-derive with SCRIPTC_LLVM_CORO_CENSUS=1 AND SCRIPTC_NO_CACHE=1. */
-const LLVM_FLOOR_NON_WRAPPERS: ReadonlyArray<readonly [string, string]> = [
+ * Re-derive with SCRIPTC_LLVM_CORO_CENSUS=1 AND SCRIPTC_NO_CACHE=1 for the
+ * LLVM lane's own verdict. The C lane has no census, so its rows were
+ * re-derived from the knob-ON `prog.c` directly, per function, by reading each
+ * resume body between its `static void sc_cr_<name>(ScrCoroBase *sc_b) {` and
+ * its closing brace. What that reading found, and what each row below rests
+ * on:
+ *
+ *   pf 1 case  0 park  finish_f        pb 1 case  0 park  finish_bool
+ *   ps 1 case  0 park  finish_ref      pa 1 case  0 park  finish_ref
+ *   pd 1 case  0 park  finish_ref      pv 1 case  0 park  finish_void
+ *   prej 1 case 0 park finish_throw    pmaybe 1 case 0 park finish_f+throw
+ *   pu  3 cases 1 park finish_ref+throw
+ *   main 102 cases 101 parks finish_void+throw
+ *
+ * -- the SAME partition the LLVM census reported: eight zero-point producers
+ * with a dispatch carrying only the entry arm and no `scr_coro_park` at all,
+ * `pu` suspending, and `main` the one body with a hundred-odd states. The two
+ * backends were asked independently and gave the same answer, which is the
+ * strongest form this column can take. */
+const FLOOR_NON_WRAPPERS: ReadonlyArray<readonly [string, string]> = [
   // `pu` IS BACK, AND THE TABLE IS WHY ANYONE CAN TELL. It lowered once before
   // -- deleting the nesting condition bought it, and the only trace was two
   // aggregates disagreeing in a report -- then refused itself out again when
@@ -1286,7 +1404,7 @@ const LLVM_FLOOR_NON_WRAPPERS: ReadonlyArray<readonly [string, string]> = [
  * once more at 79e6902d0. That is the census showing only the FIRST blocker,
  * five times over, against one unchanged body. The assertion below checks a
  * name is ABSENT and never why, which is exactly how four stale spellings sat
- * beside a green test. `main` is now in LLVM_FLOOR_NON_WRAPPERS.
+ * beside a green test. `main` is now in FLOOR_NON_WRAPPERS.
  *
  * WHAT THE PASS CAP TURNED OUT TO BE, since this list carried its warning for
  * three bases. The warning said raising CORO_SPILL_PASS_CAP from 12 would
@@ -1318,9 +1436,17 @@ type Lane = "c" | "llvm";
 
 /** Which wrappers THIS lane is expected to have converted. The C emitter
  * lowers every function the plan admits, so its expectation is the ledger
- * itself; the LLVM emitter lowers a strict subset, so its expectation is the
- * floor above -- and the gap between that floor and the ledger is reported by
- * name rather than trimmed away. See the ledger test below. */
+ * itself; the LLVM emitter's is the floor above, and the gap between that
+ * floor and the ledger is reported by name rather than trimmed away. See the
+ * ledger test below.
+ *
+ * THE GAP IS ZERO AT THIS BASE, and the sentence that stood here said "the
+ * LLVM emitter lowers a strict subset", which is no longer a fact about the
+ * tree: NOT_LOWERED_BY_REASON is empty, so LLVM_FLOOR holds all 79 converted
+ * wrappers and the two lanes' expectations are the SAME SET. The two
+ * expressions are kept apart anyway -- they are different claims that happen
+ * to agree, and collapsing them would delete the only place a divergence
+ * could be recorded. */
 const expectedOnLane = (lane: Lane, w: { name: string; converted: boolean }): boolean =>
   w.converted && (lane === "c" || LLVM_FLOOR.has(w.name));
 
@@ -1362,14 +1488,16 @@ async function buildArm(knob: boolean, backend: Lane): Promise<Arm> {
  * emitter had a stackless lowering to check. The LLVM lane grew one at S1, so
  * the lane is a parameter now.
  *
- * THE LLVM LANE COVERS A STRICT SUBSET, and the gap is ASSERTED rather than
- * tolerated: the partition test below fails if a shape leaves the floor AND if
- * one joins it without someone moving the line. The alternative was to narrow
- * the ledger per lane until the work passed it, which is the "green by
- * construction" move: a criterion trimmed to fit. The three tests are split so
- * that one failing cannot hide the others -- vitest stops a test at its first
- * failed expectation, so folding them into one would let the partition's red
- * hide whether the lowered shapes actually work. */
+ * THE GAP BETWEEN THE LANES IS ASSERTED rather than tolerated: the partition
+ * test below fails if a shape leaves the floor AND if one joins it without
+ * someone moving the line. The alternative was to narrow the ledger per lane
+ * until the work passed it, which is the "green by construction" move: a
+ * criterion trimmed to fit. (The gap is currently ZERO -- the two lanes emit
+ * the same 89 coroutines, measured, see FLOOR_NON_WRAPPERS -- which is a state
+ * of the tree and not a reason to stop checking per lane.) The three tests are
+ * split so that one failing cannot hide the others -- vitest stops a test at
+ * its first failed expectation, so folding them into one would let the
+ * partition's red hide whether the lowered shapes actually work. */
 describe.each(["c", "llvm"] as const)("the stackless lane answers what the fiber lane answers (%s)", (lane) => {
 
   // Built once per lane and shared by the three tests below: each arm is a
@@ -1643,7 +1771,8 @@ describe.each(["c", "llvm"] as const)("the stackless lane answers what the fiber
       .toEqual([]);
 
 
-    // (4) THE CLOSED SET, over the ARTIFACT rather than over the ledger.
+    // (4) THE CLOSED SET, over the ARTIFACT rather than over the ledger, ON
+    // BOTH LANES.
     //
     // Assertions (1) and (2) are both keyed on names the ledger carries, so
     // between them they say nothing about a coroutine that is not a wrapper.
@@ -1652,23 +1781,43 @@ describe.each(["c", "llvm"] as const)("the stackless lane answers what the fiber
     // disagreeing in a report.
     //
     // This reads every resume function the emitter actually emitted and
-    // requires the set to be EXACTLY the floor plus the named non-wrappers.
-    // Both directions fail by name, and nothing can enter the lane uncounted
-    // -- including a function the ledger has never heard of.
-    if (lane === "llvm") {
-      const emitted = new Set(
-        [...on.artifact.matchAll(/^define [^@]*@sc_cr_([A-Za-z0-9_$.]+)\(/gm)].map((m) => m[1]!),
-      );
-      const claimed = new Set([...lowered, ...LLVM_FLOOR_NON_WRAPPERS.map(([n]) => n)]);
+    // requires the set to be EXACTLY what this lane claims: its lowered set
+    // plus the named non-wrappers. Both directions fail by name, and nothing
+    // can enter the lane uncounted -- including a function the ledger has
+    // never heard of.
+    //
+    // IT USED TO RUN ON THE LLVM LANE ONLY, and the C lane's exemption was
+    // never argued -- it was where the check happened to be written. The C
+    // lane is the one with the WIDER admission (`lowered` is the whole ledger
+    // here, LLVM_FLOOR on the other lane), so it is the lane a stray
+    // conversion is more likely to land on, and it was the unguarded one.
+    // Nothing about the check is lane-specific except the artifact's
+    // punctuation, which `emittedCoroutines` owns.
+    //
+    // THE C ARM IS NOT GREEN BY CONSTRUCTION, which is the thing to check
+    // before believing it. `emittedCoroutines(on.artifact, "c")` returns 89
+    // names at this base, not zero: if its pattern stopped matching, the
+    // first expectation below would pass vacuously but the second would fail
+    // naming all 89. The two directions cover each other's degenerate case.
+    {
+      const emitted = emittedCoroutines(on.artifact, lane);
+      const claimed = new Set([...lowered, ...FLOOR_NON_WRAPPERS.map(([n]) => n)]);
       expect([...emitted].filter((n) => !claimed.has(n)).sort(),
-        `the emitter lowered coroutines NOTHING in this file claims. If they are wrappers, the ` +
-          `partition above missed them; if they are not, add them to LLVM_FLOOR_NON_WRAPPERS ` +
-          `with the reason their value is covered -- an aggregate count is not a guard`)
+        `the ${lane} emitter lowered coroutines NOTHING in this file claims. If they are ` +
+          `wrappers, the partition above missed them; if they are not, add them to ` +
+          `FLOOR_NON_WRAPPERS with the reason their value is covered -- an aggregate count is ` +
+          `not a guard. A row there is a claim about an OUTPUT ROW this program prints, so it ` +
+          `has to be read off the artifact and the program, not inferred from the name`)
         .toEqual([]);
       expect([...claimed].filter((n) => !emitted.has(n)).sort(),
-        `claimed as lowered and absent from the artifact -- a dropped conversion, which the ` +
-          `output comparison cannot report because it makes the two arms MORE equal`)
+        `claimed as lowered on the ${lane} lane and absent from the artifact -- a dropped ` +
+          `conversion, which the output comparison cannot report because it makes the two arms ` +
+          `MORE equal. If the emitter split the TU, the definition may be in another file and ` +
+          `this reads it as dropped; check that before editing a list`)
         .toEqual([]);
+    }
+    if (lane === "llvm") {
+      const emitted = emittedCoroutines(on.artifact, lane);
       // And the other side of the back door: a non-wrapper recorded as NOT
       // lowered must not appear.
       //
