@@ -503,6 +503,31 @@ export class CEmitter {
   coroPretType: IrType | null = null;
   /** Per function, the pending-return slot's type, for the frame struct. */
   readonly coroPretByFn = new Map<string, IrType>();
+  /** THE FINALLY STASH, when it has to survive a park.
+   *
+   * `sc_fexc_N` holds the in-flight exception a `finally` body runs on top
+   * of: taken out of the pending cell at the exception-path label so the
+   * body's own may-throw calls answer for themselves, re-raised after. It
+   * was an ordinary C local, declared AT that label -- and a `yield` or
+   * `await` inside the finally body parks between the take and the
+   * re-raise, so the dispatch's `goto` into the body jumps straight over
+   * the initialiser and `scr_rethrow` reads an indeterminate pointer
+   * (rc=139, empty stderr, no diagnostic).
+   *
+   * Same defect and same cure as `sc_pret` above: the declaration is
+   * hoisted to the top of the resume function (where it dominates every
+   * label) and the slot is spilled and reloaded around every park. The
+   * name stays unqualified, so nothing about how a scope entry is spelled
+   * changes.
+   *
+   * Accumulated while the body is emitted. Monotone and never popped,
+   * which is what makes it correct without a pre-walk: a park INSIDE the
+   * region of stash i is always emitted after i was pushed, and no read of
+   * a stash can be reached from a park outside its region without passing
+   * through the take that assigns it. */
+  coroFinExcIds: number[] = [];
+  /** Per function, the finally-stash ids needing a frame slot. */
+  readonly coroFinExcByFn = new Map<string, number[]>();
   /** Per function, the emitter TEMPS a park had to put in the frame.
    *
    * A temp is a C local in the resume function, and a park RETURNS to the

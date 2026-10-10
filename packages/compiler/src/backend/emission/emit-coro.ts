@@ -165,6 +165,12 @@ export function emitCoroFrames(E: CEmitter, out: string[], plans: Map<string, St
     if (pret !== undefined) {
       fields.push(`${cDecl(pret, "sc_pret")}; /* pending return, across a park */`);
     }
+    // THE FINALLY STASHES, for the same reason: a `yield`/`await` inside a
+    // finally body sits between the take and the re-raise. See
+    // CEmitter.coroFinExcIds.
+    for (const i of E.coroFinExcByFn.get(fn.name) ?? []) {
+      fields.push(`ScrCaught *sc_fexc_${i}; /* finally stash, across a park */`);
+    }
     for (const id of coroFrameLocals(fn, plan)) {
       const l = byId.get(id)!;
       // A boxed local is a ScrBox* in the body; the frame carries the same
@@ -326,6 +332,7 @@ export function coroReload(E: CEmitter, fn: IrFunction, plan: StacklessPlan): st
     return `${name} = sc_f->${coroField(id)};`;
   });
   if (E.coroPretType !== null) out.push(`sc_pret = sc_f->sc_pret;`);
+  for (const i of E.coroFinExcIds) out.push(`sc_fexc_${i} = sc_f->sc_fexc_${i};`);
   return out;
 }
 
@@ -346,6 +353,10 @@ export function coroSpill(E: CEmitter, fn: IrFunction, plan: StacklessPlan): str
   // the poison arm keeps testing exactly what it was written to test, and the
   // pending return keeps surviving the park either way.
   if (E.coroPretType !== null) out.push(`sc_f->sc_pret = sc_pret;`);
+  // The stashes are appended after the permuted set for the same reason
+  // `sc_pret` is: each is a single slot with no sibling to be confused
+  // with, so permuting one could only mean dropping it.
+  for (const i of E.coroFinExcIds) out.push(`sc_f->sc_fexc_${i} = sc_fexc_${i};`);
   return out;
 }
 
