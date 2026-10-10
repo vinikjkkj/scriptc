@@ -269,8 +269,17 @@ void  *scr_coro_promise_ref(const ScrPromise *p);
  *   - no promise: the consumer gets values, not a settlement;
  *   - no ready queue: a yield returns to the CONSUMER, not to the loop;
  *   - no hop: scr_gen_yield_switch takes none, and only the ASYNC yield
- *     calls scr_await_hop -- which is why async generators are blocked
- *     behind the hop and these are not.
+ *     calls scr_await_hop -- one microtask turn this surface does not
+ *     charge, which is one of the four reasons an async generator is NOT
+ *     on this surface. The other three are that scr_gen_of_coro below
+ *     takes no settle thunk (so scr_gen_is_async reads false for every
+ *     frame-backed handle), that scr_agen_next/_return/_throw and their
+ *     _native twins have no SCR_GEN_BACKED_FRAME branch and would
+ *     dereference a NULL g->fiber, and that scr_gen_coro_step answers
+ *     YIELDED/DONE/threw with no arm for a body PARKED ON AN AWAIT. The
+ *     gate and the measurements are in ir/liveness.ts; it was once said
+ *     here that async generators were "blocked behind the hop", and that
+ *     was never the mechanism.
  *
  * THE INV-5 QUESTION, DECIDED BY THE COORDINATOR ON FAILURE MODE -- not
  * read out of the code, and recorded that way so nobody mistakes a judgement

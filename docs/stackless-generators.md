@@ -67,7 +67,7 @@ machine is attached to a line that cannot see them.
 This is the third instance of the same shape and the sharpest: the previous
 two were a reason that was wrong, this one is a reason that was never offered.
 
-## 3. THE 18 ASYNC ONES ARE BLOCKED BY THE HOP, NOT BY THE SECOND MACHINE
+## 3. [RETRACTED] THE 18 ASYNC ONES ARE BLOCKED BY THE HOP, NOT BY THE SECOND MACHINE
 
 `packages/runtime/src/scr_async.c:5289`:
 
@@ -77,6 +77,33 @@ static void scr_agen_yield_settle(void) {
   scr_await_hop();
   ...
 ```
+
+> **RETRACTED 2026-10-10 — THIS SECTION'S HEADLINE IS WRONG, AND IT WAS
+> WRONG WHEN IT WAS WRITTEN.** It is kept in place rather than deleted
+> because it was cited, by this file and by four comments in the tree, as
+> the reason not to look. The two defects:
+>
+> 1. **`STACKLESS_LOWERABLE_LIB_CALLS` is no longer empty.**
+>    `STACKLESS_LOWERABLE_LIB_CALL_LIST` in `ir/suspends.ts` is
+>    `["async.hop"]`, the hop lowers on both backends, and the comment
+>    beside the list records the same correction. There is no "hop front"
+>    left for anything to be downstream of.
+> 2. **The hop in `scr_agen_yield_settle` is not an IR node**, so no
+>    suspender analysis could ever have seen it. `async.hop` libCalls are
+>    minted only by the AWAIT desugar (`lower-exprs.ts`); the yield
+>    lowering mints none. `hasFiberOnlySuspender` (`ir/liveness.ts`) walks
+>    IR, so it could not have caught an async generator even while the hop
+>    was fiber-only. The function-level gate was **never redundant** with
+>    it, which is the opposite of what this section implies.
+>
+> The real mechanism is that the frame-backed generator protocol has no
+> async half: `scr_gen_of_coro` takes no settle thunk, the `scr_agen_*`
+> consumer entries have no `SCR_GEN_BACKED_FRAME` branch, `scr_gen_coro_step`
+> answers three outcomes where an async body needs four (it has no PARKED
+> arm), and the stackless yield arms settle no request promise and take no
+> hop. Each is enumerated with its `scr_async.c` line at the gate itself,
+> `ir/liveness.ts`. The 18 are **not** downstream of a hop front; they are
+> downstream of writing that runtime protocol.
 
 `scr_await_hop` is what `async.hop` lowers to (`emit-exprs.ts:6446`, through
 `fiberOnly`). It is a **registered fiber-only suspender**, and
@@ -246,7 +273,7 @@ The 47 split **42 producer / 5 consumer-only / 0 both**; the producers split
 | piece | corpus | mechanism | depends on |
 |---|---|---|---|
 | sync generators | 24 | `scr_gen_yield_switch` only: no promise, no ready queue, no hop | nothing |
-| async generators | 18 | the yield settles a request promise **and takes the hop** | the hop front |
+| async generators | 18 | the yield settles a request promise **and takes the hop** | **CORRECTED 2026-10-10:** not the hop front -- an async half of the frame-backed protocol (settle thunk, consumer frame branch, a PARKED outcome in `scr_gen_coro_step`, settling yield arms). See the retraction box in section 3. |
 | consumers | 5 | no caller suspension; a classification plus the `scr_current` question | nothing |
 
 A stackless **sync** generator is structurally *simpler* than the `await`
@@ -486,7 +513,8 @@ the C side landing first is the cheaper order.
 - Frame size for a generator, and whether a yield point needs the fat
   (`ScrCoroExc`) frame. Not derivable from the ladder.
 - Whether a stackless async generator can reproduce node's
-  `AsyncGeneratorYield` tick count exactly. That is the hop front's question.
+  `AsyncGeneratorYield` tick count exactly. There is no hop front: that is
+  the fourth item of the async-half list in section 3's retraction box.
 - Whether any of the 24 sync-generator gains survive **emission**. Everything
   here is admissible.
 - Both previously-unsized items are now sized BY READING and neither needs a

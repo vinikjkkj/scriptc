@@ -492,10 +492,24 @@ function recordPoints(
         // separate slice that carries the scr_current question with it.
         //
         // SYNCHRONOUS generators only. The async form is refused at the
-        // FUNCTION level below, because its yield calls scr_await_hop inside
+        // FUNCTION level below. The node kind alone cannot tell the two
+        // flavours apart, which is why the refusal is not expressed here --
+        // and the refusal CANNOT be expressed here for a second reason: an
+        // `async function*` need not contain a `yield` at all, so there are
+        // async generators with no `yieldExpr` point anywhere in them. A
+        // point-level test is structurally unable to see them.
+        //
+        // WHAT THE REASON USED TO SAY, because it was wrong in a way worth
+        // keeping: "its yield calls scr_await_hop inside
         // scr_agen_yield_settle and the hop is the one suspender this lane
-        // declares it cannot lower. The node kind alone cannot tell the two
-        // flavours apart, which is why the refusal is not expressed here.
+        // declares it cannot lower". `async.hop` is on
+        // STACKLESS_LOWERABLE_LIB_CALL_LIST (ir/suspends.ts) and lowers on
+        // both backends. And the hop in question was never an IR node: an
+        // `async.hop` libCall is minted only by the AWAIT desugar
+        // (lower-exprs.ts), never by the yield lowering, so
+        // hasFiberOnlySuspender could not have seen it even while the hop
+        // was fiber-only. The sentence named a mechanism that was in the
+        // runtime, not in the IR the gate reads.
         straightLine:
           ctx.rootOk &&
           (s.pointKind === "awaitExpr" ||
@@ -1045,10 +1059,73 @@ export function stacklessPlan(fn: IrFunction): StacklessPlan | null {
    * generator cause are synchronous, so more than half the cost of the
    * exclusion was charged to a gate with no stated reason at all.
    *
-   * An ASYNC generator stays out, and not for the stated reason either: its
-   * yield calls scr_await_hop inside scr_agen_yield_settle, and the hop is
-   * the one suspender this lane declares it cannot lower. Those belong to the
-   * hop front, not to this one.
+   * An ASYNC generator stays out, and the reason stated here until
+   * 2026-10-10 was DEAD. It read: "its yield calls scr_await_hop inside
+   * scr_agen_yield_settle, and the hop is the one suspender this lane
+   * declares it cannot lower. Those belong to the hop front, not to this
+   * one." Both halves are false, and the second was false even when it was
+   * written:
+   *
+   *   - `async.hop` is on STACKLESS_LOWERABLE_LIB_CALL_LIST (ir/suspends.ts)
+   *     and lowers on both backends. There is no hop front left to defer to.
+   *   - The hop inside `scr_agen_yield_settle` was never an IR node. An
+   *     `async.hop` libCall is minted only by the AWAIT desugar
+   *     (frontend/lowering/lower-exprs.ts); the yield lowering mints none.
+   *     So `hasFiberOnlySuspender` below could not have seen it even while
+   *     the hop WAS fiber-only, and this gate was never redundant with it.
+   *
+   * THE REAL MECHANISM IS THAT THE FRAME-BACKED GENERATOR PROTOCOL HAS NO
+   * ASYNC HALF. Four pieces are missing, each in the runtime and none of
+   * them a label (`packages/runtime/src/scr_async.c`, read 2026-10-10):
+   *
+   *   1. NO SETTLE THUNK ON A FRAME-BACKED HANDLE. `scr_gen_of_coro(base,
+   *      drop)` (:5488, declared scr_coro.h:355) takes no `settle`, so
+   *      `g->settle` stays NULL -- and `scr_gen_is_async` IS "settle is
+   *      non-NULL" (:1601). A converted async generator would be classified
+   *      SYNCHRONOUS by the runtime's own discriminator.
+   *   2. NO CONSUMER DRIVER. `scr_gen_resume` / `_return` / `_throw` each
+   *      branch on `backing == SCR_GEN_BACKED_FRAME` (:5687, :5711, :5732, :5761, :5781).
+   *      `scr_agen_next` (:5283), `scr_agen_return` (:5290),
+   *      `scr_agen_throw` (:5316) and the three `_native` variants
+   *      (:5215, :5227, :5253) have NO such branch: all reach
+   *      `scr_agen_switch_in` (:5114), whose first statement is
+   *      `ScrFiber *f = g->fiber` and whose fourth writes `f->return_to`.
+   *      `g->fiber` is NULL on every frame-backed handle (:5495). A null
+   *      store, not a diagnostic.
+   *   3. THE STEP ANSWERS THREE OUTCOMES AND AN ASYNC GENERATOR NEEDS FOUR.
+   *      `scr_gen_coro_step` (:5595) reads the flags after `base->resume`
+   *      and branches YIELDED / else-DONE (:5658). An async body can PARK ON
+   *      AN AWAIT between yields and return with neither flag set -- which
+   *      that code reads as "completed, no exception" and would report
+   *      `{done:true}` while the body is still parked. The fiber twin has
+   *      the fourth arm explicitly (:5134..5139). A synchronous generator cannot
+   *      await, which is why the three arms are correct for the shape that
+   *      ships and wrong for this one.
+   *   4. THE YIELD ARMS SETTLE NOTHING AND TAKE NO HOP. `scr_gen_coro_yield_*`
+   *      (:5528..5538) write OUT and set SCR_CORO_YIELDED. The async
+   *      semantics live in `scr_agen_yield_settle` (:5363): `scr_await_hop()`
+   *      and then `g->settle(g, p)` on the in-flight request promise, or
+   *      `scr_agen_sink_schedule` for a native consumer. The HOP IS NOT
+   *      DECORATION -- it is one microtask turn that JS's AsyncGeneratorYield
+   *      takes and that the synchronous yield deliberately does not charge
+   *      (emit-gen-coro.ts's header), so a stackless async yield would be a
+   *      TICK divergence against node, observable in output ORDER.
+   *
+   * WHY THE GATE IS AT FUNCTION LEVEL AND CANNOT MOVE TO THE POINT LEVEL.
+   * An `async function*` need not contain a `yield`. Measured 2026-10-10 on
+   * `async function* empty() { await Promise.resolve(); return; }`: the plan
+   * built for it holds `points=[awaitExpr]` and no `yieldExpr` at all, while
+   * the yielding twin holds `[yieldExpr,awaitExpr]`. A point-kind list is
+   * structurally unable to see the first one.
+   *
+   * THE ENFORCEMENT IS NOT THIS LINE. Both backends refuse independently of
+   * it: the C emitter throws a named error if an async generator reaches the
+   * plan map (backend/emission/emitter.ts), and the LLVM backend refuses
+   * every generator at `coroRefusalReason` (backend/llvm/coro.ts). Measured
+   * by deleting THIS line and building: the C lane threw that error for both
+   * shapes above, and the LLVM census printed `refuse <fn> generator`. So the
+   * line is policy; it is not the only thing standing between an async
+   * generator and a wrong answer.
    *
    * REACH ON THIS RIG'S POPULATION IS ZERO, stated so nobody reads app182's
    * unchanged coverage as evidence either way: all three of app182's

@@ -29,8 +29,16 @@
  * where the oracle has none, and the tick comparison would go red against
  * node for a reason that has nothing to do with the state machine. The
  * ASYNC yield does take a hop (scr_agen_yield_settle calls scr_await_hop),
- * which is exactly why async generators are blocked behind the hop and
- * these are not.
+ * and that turn is one of the FOUR things an async generator would need
+ * that this file does not emit -- not a reason to wait on a "hop front".
+ * `async.hop` is lowerable on both backends (ir/suspends.ts), and the hop
+ * in scr_agen_yield_settle is not an IR node at all, so no suspender
+ * analysis ever saw it. The real list, with the reason it is refused at
+ * FUNCTION level rather than per point, is in ir/liveness.ts at the gate
+ * itself; the short form is that a frame-backed handle has no settle thunk,
+ * the scr_agen_* consumer entry points have no frame branch, the step
+ * answers three outcomes where an async body needs four, and these yield
+ * arms settle no request promise.
  *
  * THE SPILL IS IDENTICAL AND MUST STAY THAT WAY. Every C local live across
  * the suspension is dead after the return, for the same reason the await
