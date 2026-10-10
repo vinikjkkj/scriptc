@@ -3638,6 +3638,42 @@ class LlEmitter {
     this.decls.add(decl);
   }
 
+  /** THE TRIAL'S DECLARE RESTORE -- it puts the snapshot BACK, and it
+   * never takes anything away. The difference is the whole bug.
+   *
+   * A trial that is about to re-emit used to CLEAR `this.decls` and refill
+   * it from the snapshot, so a refused pass could not leave a declare
+   * behind. That rests on the claim that the re-emission re-registers
+   * whatever the trial registered -- and for a memoised emitter it is
+   * false. `dynCheckHelper` (backend/llvm/dyn.ts) pushes the helper's
+   * body into `this.defs` and records the name in `this.dynBuilders`, and
+   * only then walks the body -- which is the one path that declares. On
+   * the next pass the memo HITS and returns the name before the walk, so
+   * the `call` stays in a def that is still in the module while its
+   * `declare` has just been deleted. `zig cc` then rejects the module with
+   * `use of undefined value '@scr_dyn_check_fail'`.
+   *
+   * NOT A LIST OF SYMBOLS. Every accumulator that survives the rollback
+   * and registers a declare only on a cache MISS has the same shape --
+   * dynCheckHelper, dynArmHelper, jsonWriteHelper and the ws/shape
+   * writers all do -- so the fix is at the one place that drops, not at
+   * each place that registers. Measured on the failing module: 88
+   * declares were dropped by rollbacks, 84 were re-registered by the
+   * re-emission, and the 4 that were not are exactly the memoised ones.
+   *
+   * WHAT IT COSTS is a declare with no call site when a trial is refused
+   * -- an extern that nothing references, which LLVM drops and the linker
+   * never sees. That is the honest trade: an unreferenced declare is a
+   * tidiness claim, an undeclared call is a module that does not build.
+   *
+   * The body reads as a no-op because it IS one today: declares only ever
+   * accumulate, so `decls` is always a superset of `snapshot`. It is
+   * written as a restore anyway so the call sites keep saying what they
+   * mean, and so a future narrowing of `decls` stays correct here. */
+  private restoreTrialDecls(snapshot: ReadonlySet<string>): void {
+    for (const d of snapshot) this.decls.add(d);
+  }
+
   needOom(): void {
     this.needsOom = true;
   }
@@ -5461,8 +5497,7 @@ class LlEmitter {
   ): void {
     const v: CoroViolations = { temps: new Map(), slots: new Map() };
     const restore = (): void => {
-      this.decls.clear();
-      for (const d of snapshot) this.decls.add(d);
+      this.restoreTrialDecls(snapshot);
     };
     const probe = (seedT: CoroTempSpill[], seedS: CoroSlotSpill[], found: CoroTempSpill[] | null): boolean => {
       this.currentCoroTempSpills = seedT;
@@ -5569,8 +5604,7 @@ class LlEmitter {
     } catch {
       // The full body is already rendered and already correct. Keep it, and
       // put back exactly what the failed pass may have registered.
-      this.decls.clear();
-      for (const d of snapshot) this.decls.add(d);
+      this.restoreTrialDecls(snapshot);
       this.currentCoro = null;
       this.currentCoroLayout = null;
       return full;
@@ -5597,20 +5631,21 @@ class LlEmitter {
    * `declare` the trial registered is in `this.decls`, which is a module-level
    * set that the assembly prints verbatim.
    *
-   * SO THE DECLARES ARE SNAPSHOTTED AND RESTORED. Without that, a refused
-   * trial leaves `declare void @scr_coro_finish_f64` and friends in a module
-   * that calls none of them -- undefined-but-unreferenced symbols asserting
-   * coverage this backend does not have, which is precisely the discipline
-   * that keeps the declare set honest: declares are CALL-SITE driven, and a
-   * declare with no call site is a claim.
+   * SO THE DECLARES ARE SNAPSHOTTED AND PUT BACK -- but they are never
+   * REMOVED, and restoreTrialDecls carries the argument. The rollback used
+   * to clear the set first so a refused trial could not leave a declare
+   * with no call site; that deleted declares the module still needed,
+   * because the accumulators are NOT all replayed on the second pass.
    *
-   * NOTHING ELSE NEEDS RESTORING, and that is a property worth stating rather
-   * than assuming. The other accumulators are content-addressed and
-   * idempotent -- interned literals and cstrs memoise by text, fnValues and
-   * classObjs by name -- and the fiber re-emission walks the SAME expressions,
-   * so it re-registers exactly what the trial did. The per-function state (the
-   * block builder, frames, scopes, the state counter) is rebuilt from scratch
-   * at the top of emitFunctionBody, so the second pass starts clean.
+   * THE REPLAY IS PARTIAL, and that is the property to state rather than
+   * assume. Interned literals and cstrs memoise by text and fnValues and
+   * classObjs by name, so re-walking the same expressions re-registers
+   * what they need. The HELPER emitters do not: dynCheckHelper and its
+   * kin commit the helper body to `this.defs`, record the name, and then
+   * walk -- so a second pass hits the memo, returns early, and never
+   * reaches the `declare`. The per-function state (the block builder,
+   * frames, scopes, the state counter) is rebuilt from scratch at the top
+   * of emitFunctionBody, so the second pass does start clean.
    *
    * COST: three re-emissions of a body the predicate thought it could lower
    * -- two probe passes and the one that emits -- and only for those. Zero on
@@ -5667,8 +5702,7 @@ class LlEmitter {
           !spills.some((s) => s.name === err.temp)
         ) {
           spills.push({ name: err.temp, llType: err.llType });
-          this.decls.clear();
-          for (const d of snapshot) this.decls.add(d);
+          this.restoreTrialDecls(snapshot);
           continue;
         }
         /* THE PROMOTION ARM. A temp that is live at a SECOND suspension cannot
@@ -5701,8 +5735,7 @@ class LlEmitter {
           slotSpills.push({ name: crossSlotName(err.temp), llType: err.llType });
           const i = spills.findIndex((s) => s.name === err.temp);
           if (i >= 0) spills.splice(i, 1);
-          this.decls.clear();
-          for (const d of snapshot) this.decls.add(d);
+          this.restoreTrialDecls(snapshot);
           continue;
         }
         /* THE SLOT ARM OF THE SAME FIXPOINT. A CrossParkSlotError names a
@@ -5727,8 +5760,7 @@ class LlEmitter {
           !slotSpills.some((s) => s.name === err.slot)
         ) {
           slotSpills.push({ name: err.slot, llType: err.llType });
-          this.decls.clear();
-          for (const d of snapshot) this.decls.add(d);
+          this.restoreTrialDecls(snapshot);
           continue;
         }
         // TWO REFUSAL SIGNALS, ONE HANDLER, and they are genuinely the same
@@ -5780,8 +5812,7 @@ class LlEmitter {
         ) {
           throw err;
         }
-        this.decls.clear();
-        for (const d of snapshot) this.decls.add(d);
+        this.restoreTrialDecls(snapshot);
         // The count the LINK SWITCH reads must reflect what was actually
         // lowered, so the refusal has to be recorded here and not merely
         // survived. Removing the entry also tells emitAsyncScaffolding (which
