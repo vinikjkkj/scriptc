@@ -92,7 +92,7 @@ import { seqScopedLocals, stackCheckPolicy, stackMarginBytes, stackMarginSymbol 
 // S0 ran neither tsc nor a test that imports this file.
 import { coroPlans } from "../../ir/coro-plans.js";
 import { libCallPointKind } from "../../ir/suspends.js";
-import type { StacklessPlan } from "../../ir/liveness.js";
+import { suspensionLiveness, type StacklessPlan } from "../../ir/liveness.js";
 import { slotCarryLiveness, withoutSlotCarry } from "./slot-liveness.js";
 import {
   CoroRefusedError,
@@ -4011,14 +4011,45 @@ class LlEmitter {
     B.line(`call void @abort()`);
     B.terminate("unreachable");
     B.startBlock("sc_S0");
-    // A plan with no point reaches neither this file nor coroRefusalReason
-    // (`points=0` refuses one layer up), so the dispatch always carries at
-    // least the entry arm plus one resume arm. Asserted rather than assumed:
-    // a switch with only arm 0 is a resume function that can never resume, and
-    // it would still verify, link and run -- answering correctly on its first
-    // turn and hanging on every one after.
+    // A PLAN WITH NO POINT NOW ARRIVES, and that is a legitimate shape: an
+    // async function whose body never suspends converts, and its dispatch
+    // correctly carries only the entry arm. The check below is NOT the old
+    // one weakened -- it is the defect the old one was standing in for, asked
+    // directly.
+    //
+    // THE TWO CASES THIS SEPARATES. A zero-point plan is either (1) a body
+    // that genuinely holds no suspension point, which is fine, or (2) a body
+    // that holds some and whose plan LOST them, which is the real bug: a
+    // switch with only arm 0 over a body that parks is a resume function that
+    // can never resume -- it verifies, links and runs, answers correctly on
+    // its first turn and hangs on every one after. The old text named exactly
+    // that failure, and its guard could not tell the two apart because it only
+    // ever had to reject both.
+    //
+    // THE DISCRIMINATOR IS THE IR ITSELF, re-asked rather than remembered.
+    // `suspensionLiveness` is the same analysis the plan was built from and is
+    // pure over the IR, so disagreement between it and the plan IS case (2) by
+    // construction. Spelled against the IR's own count rather than as a zero
+    // test, which also catches a plan that lost SOME of its points -- a
+    // strictly larger defect class than the line it replaces, and one nothing
+    // checked before.
+    //
+    // RUN ONLY ON THE ZERO-POINT PATH, deliberately. This is a second full
+    // liveness walk over the function, and paying it for all 1,485 lowered
+    // functions of a program like app182 -- whose entry alone carries 484
+    // emitter temps -- would buy a compile-time regression for a case that
+    // cannot arise on the other path (a non-empty plan already proves points
+    // were found). The guard is placed where the ambiguity is.
     if (plan.points.length === 0) {
-      throw new Error(`llvm emitter bug: ${fn.name} is lowered stackless with no suspension point`);
+      const fromIr = suspensionLiveness(fn);
+      if (fromIr !== null) {
+        throw new Error(
+          `llvm emitter bug: ${fn.name} is lowered stackless with an EMPTY plan, but its IR ` +
+            `holds ${fromIr.points.length} suspension point(s). The plan lost them between ` +
+            `stacklessPlan and here: the dispatch would carry only the entry arm, so every ` +
+            `resume after the first park would fall into sc_dispatch_bad.`,
+        );
+      }
     }
     this.emitCoroReload();
   }

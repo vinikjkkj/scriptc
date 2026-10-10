@@ -1074,7 +1074,43 @@ export function stacklessPlan(fn: IrFunction): StacklessPlan | null {
   // which is why 62 of the 133 carriers already held boxed non-param locals
   // that converted correctly.
   const r = suspensionLiveness(fn);
-  if (r === null) return null;
+  // A BODY WITH NO SUSPENSION POINT AT ALL CONVERTS, and it is the largest
+  // row of the coverage frontier rather than a corner: 184 of the 188
+  // functions app182 still spawned on a fiber are `async` methods with a
+  // synchronous body, implementing an async interface (65 of them lifted
+  // closures). Nothing excluded them -- there was simply nothing to lower,
+  // and `suspensionLiveness` says so by returning null.
+  //
+  // THE NULL HERE MEANS EXACTLY ONE THING, which is why it can be read as a
+  // verdict rather than an absence. `suspensionLiveness` has a single
+  // `return null`, taken when `ctx.points.length === 0`; every other way a
+  // body can be unlowerable is a LATER gate in this function or an earlier
+  // one above. So reaching this line with null is "this async function never
+  // suspends", not "the analysis gave up".
+  //
+  // WHAT IT BUYS, and it is the fiber rather than the frame. These functions
+  // were paying `scr_async_spawn` in full -- a ScrFiber calloc, an argpack
+  // malloc/free, `scr_stack_acquire()`, TWO `scr_switch` context switches and
+  // the current-fiber/exception-cell/ALS restores on the way back -- to run a
+  // body that cannot suspend. The empty plan drops all of it for a
+  // `scr_coro_alloc` + `scr_coro_spawn`, which calls the resume function
+  // straight through on the caller's stack.
+  //
+  // THE FRAME IS NOT EMPTY, and saying so is the correction to the obvious
+  // reading. `coroFrameLocals` carries every parameter unconditionally (the
+  // resume function has no parameters of its own) plus every refcounted or
+  // boxed local, so a zero-POINT plan still gets a frame -- it is the
+  // argpack this lowering replaces, not an added cost.
+  //
+  // INV-2 IS UNCHANGED AND IS WHY THE TIMING MATCHES. `scr_coro_spawn` runs
+  // the body synchronously and a body with no suspension runs to completion,
+  // so the promise is settled by the time the spawn wrapper returns --
+  // exactly when the fiber switch settled it. A throw is turned into a
+  // REJECTION by scr_coro_resume_entry, which checks the ambient cell while
+  // the frame's context is still installed, so an async function that throws
+  // before its first await still returns a rejected promise instead of
+  // throwing at its caller.
+  if (r === null) return { fnName: fn.name, points: [], frameLocals: new Set<string>() };
   if (!r.points.every((p) => p.straightLine)) return null;
   return { fnName: fn.name, points: r.points, frameLocals: r.frameLocals };
 }
