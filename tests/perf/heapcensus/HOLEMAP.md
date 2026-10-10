@@ -1,6 +1,7 @@
 # The 1,344 has a name — and it was never a coalescence question
 
-> **Gate.** `tests/perf/placement/SEGREGATION.md:134` ends with *"Nothing else
+> **Gate.** `tests/perf/placement/SEGREGATION.md:308` (§5 item 2, "Nothing else until the
+> 1,344 has a name") ends with *"Nothing else
 > until the 1,344 has a name."* This file names it, sizes it against the free
 > side it belongs to, and retires the mechanism two documents had registered
 > for it.
@@ -12,7 +13,8 @@ thing it measures.
 
 ## 1. The registered claim, and what actually happens
 
-`SEGREGATION.md:117` and `settled-census/reconcile.mjs:496-511` both register
+`SEGREGATION.md:291` (§4's `REGISTERED` block) and
+`settled-census/reconcile.mjs:496-511` both register
 the same thing:
 
 > There is no 1,344-byte request anywhere in the run — the 8-byte-bucket
@@ -148,7 +150,7 @@ on 1.8.2. Naming the producer needs the allocation-side exact table on
 
 ### Why the old cross-check missed it
 
-The "near buckets are identical in both arms" table in `SEGREGATION.md:98-106`
+The "near buckets are identical in both arms" table in `SEGREGATION.md:288` (§4, "the near buckets are identical in both arms")
 is from arm `app/` **1.6.2**, which that file's own header banner marks as
 retired. On 1.6.2 the entire band [1296,1352] holds **60** allocations:
 
@@ -200,8 +202,32 @@ the `HCFREE` sum, which is the figure commit `178ca19f0` quotes).
   grounds that one may be the coalesced remains of the other. Inside the LFH
   that cannot happen, so the classes above can be ranked and summed.
 * **The string-allocator band fix (244–511, `cap + 13`) is not this.** The
-  owner is a bytes payload, not an `ScrStr`. `SEGREGATION.md:133`'s conditional
+  owner is a bytes payload, not an `ScrStr`. `SEGREGATION.md:322`'s conditional (§5 item 2's original text, "the fix is in
+the string allocator's uncovered band")
   next step resolves to *no*.
+
+## 6a. Why every pointer in this file into `SEGREGATION.md` was wrong
+
+**All four were off by ~180 lines on 2026-10-10, and none of them was wrong when
+written.** `SEGREGATION.md` gained §3a and §3b that day — a correction and then a
+retraction of the correction — and **a retraction LENGTHENS its target**, so every
+inbound line pointer slid. Each of the four landed on plausible neighbouring
+prose rather than failing, which is the property that makes this silent.
+
+> **So a pointer carries its SECTION and its sentence from now on, not only a
+> line.** A line number is invalidated by any edit above it; a section heading
+> plus a quoted phrase survives the edit and is greppable. The repair that
+> breaks the index is a bigger class here than the claim that was wrong: this
+> corpus holds 346 revocation markers across 62 of 107 files, 119 forwarding
+> pointers, 30 of them inside already-corrected sections.
+
+**And the repair of these four pointers broke a fifth time, in the same
+operation.** Marking §5 item 2 as answered lengthened `SEGREGATION.md` by ten
+lines, which moved the string-allocator conditional from 312 to 322 — so the
+pointer being corrected was invalidated *by its own correction*, between writing
+the new number and verifying it. Caught by re-reading all four targets after the
+edit rather than before. **Verify a pointer AFTER the edit that fixes it, in the
+post-edit file.**
 
 ## 7. Reproduce
 

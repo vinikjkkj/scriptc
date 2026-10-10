@@ -305,10 +305,20 @@ two investigations should converge on.
    same one-owner argument. 241,519 reallocs and 20.24 MiB per sync, and it is
    the `3 × 2ⁿ` ladder whose residue share is 0.1% — so this is a throughput
    change like the array one, priced honestly as such, not a retention fix.
-2. ~~**Nothing else until the 1,344 has a name.**~~ **SATISFIED 2026-10-10 by
-   `heapcensus/HOLEMAP.md`: it is a freed `ScrBytes` payload. The conditional
-   below resolves to *no* — the owner is not an `ScrStr`. The successor item is
-   §3a, which is now the largest named line in the heap.** Original text: If it turns out to be an
+2. ~~**Nothing else until the 1,344 has a name.**~~ **ANSWERED 2026-10-10, but
+   NOT by the answer first written here.** This item was marked SATISFIED at
+   18:20 on the strength of `heapcensus/HOLEMAP.md` naming a freed `ScrBytes`
+   payload, and **that naming was retracted hours later in §3b of this same
+   file**: the owner is SQLite, and the population no longer exists. So the
+   gate is closed — the 1,344 *does* have a name — and **the successor this
+   item pointed at (§3a) is void as written, by §3a's own banner.** There is no
+   successor item from this line; the live question moved to whether the
+   release that ships in `040d22982` is enabled, which is not an allocator
+   change at all.
+
+   *The stale half above is left visible on purpose: this is the third instance
+   today of a REPAIR emitting a fresh unverified assertion — the retraction in
+   §3b never came back to the queue entry that cited it.* Original text: If it turns out to be an
    `ScrStr` payload, the fix is in the string allocator's uncovered band
    (244–511, `cap + 13`), which is a different change from any of the above
    and would be the first one aimed at the residue rather than the stream.
