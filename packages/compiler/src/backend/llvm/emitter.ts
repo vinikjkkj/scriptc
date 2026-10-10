@@ -4564,6 +4564,19 @@ class LlEmitter {
     // HOISTED -- see the header. One index, two sites, one spill.
     this.emitCoroTempSpill(index);
     this.emitCoroSpill();
+    // THE SLOT CARRY IS HOISTED FOR THE SAME REASON AND WAS MISSING HERE.
+    // The header's "everything that builds the RESULT is after the resume
+    // label" argument covers the result slot and nothing else: a slot opened
+    // BEFORE this point -- an optional chain's receiver bind is the shape that
+    // found this -- is read by the scope release after the resume, and an
+    // entry alloca dominates that read, so no SSA rule and no `zig cc` parse
+    // can see it. The slot also left blocks.ts's resume-call-private registry
+    // the moment the frame claimed it (frameBackedSlot), so the cross-park
+    // SLOT rule is silent by design and the reload is what was supposed to
+    // hold the guarantee. Without these two calls the frame carried the field
+    // and nothing ever wrote it: measured as a release of indeterminate stack
+    // memory, then a wild free-list head, on 3553.
+    this.emitCoroSlotSpill(index);
     const ps = this.coroStateField();
     B.line(`store i32 ${index + 1}, ptr ${ps}`);
 
@@ -4594,6 +4607,7 @@ class LlEmitter {
     B.parkBoundary();
     this.emitCoroTempReload(index);
     this.emitCoroReload();
+    this.emitCoroSlotReload(index);
     const pa2 = this.coroField(layout.awaitedIndex, "sc_awaited");
     const aw = B.tmp();
     B.line(`${aw} = load ptr, ptr ${pa2}`);
