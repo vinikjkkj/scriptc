@@ -1371,6 +1371,59 @@ static void scr_pc_arm(void) {
 #define SCR_PC_UNLINK(c) ((void)0)
 #endif
 
+/* -- the lifetime census hook --------------------------------------------
+ * tests/perf/lifecensus asks whether an object's KIND or its ALLOCATION SITE
+ * predicts how long it lives, and whether the survivors in the chunks the
+ * arena still holds are dense enough to fill chunks of their own.  It rides
+ * the page census's all-chunk list rather than keeping a second one: one
+ * list, two independent walks of it that have to agree.  Nothing at all
+ * unless scr_life_census.h was force-included with -DSCR_LIFECEN_ON.
+ *
+ * NOTHING HERE CHANGES THE ARENA'S GEOMETRY.  No field is added to
+ * ScrCycHdr, no stride moves, no chunk is carved differently; the three
+ * hooks are a counter bump, a hash insert and a hash delete.
+ *
+ * IT IS STILL NOT FREE, AND THE CONTROL SAYS SO.  Two binaries of this tree,
+ * one with the header and one without, two runs each on the zapo history
+ * sync: the settled live set is bit-exact within a binary and differs
+ * between them by 1,804 blocks / 115,456 bytes, +2.5%.  See
+ * tests/perf/lifecensus/README.md -- the figure is stated there rather than
+ * assumed away. */
+#ifdef SCR_LIFECEN_ON
+#if !defined(SCR_PAGECEN_ON)
+#error "SCR_LIFECEN_ON needs SCR_PAGECEN_ON: the chunk walk rides its list"
+#endif
+static void scr_cyc_ar_lifecensus(const char *when) {
+  ScrCycChunk *c;
+  scr_life_reset_walk();
+  for (c = scr_cyc_ar_all; c != NULL; c = c->all_next) {
+    int role = scr_cyc_ar_cur[c->blk] == c ? 0 : (c->avail ? 1 : 2);
+    scr_life_note_chunk(c, c->lim, SCR_CYC_ARENA_GRAN, c->stride, c->bump,
+                        c->used, c->freelist, role, c->gone, SCR_CYC_PAGE);
+  }
+  scr_life_arena_held = (unsigned long)(scr_cyc_ar_held / SCR_CYC_ARENA_CHUNK);
+  scr_life_report(when);
+}
+#define SCR_LIFE_NOTE_ALLOC(h, phys, fn)                          \
+  scr_life_note_alloc((const void *)(h), (phys), (const void *)(fn), \
+                      scr_life_ra)
+#define SCR_LIFE_NOTE_FREE(obj) \
+  scr_life_note_free((const void *)scr_cyc_hdr(obj))
+#define SCR_LIFE_SITE() (scr_life_ra = __builtin_return_address(0))
+#define SCR_LIFE_ARM()                          \
+  do {                                          \
+    if (scr_life_walk_fn == NULL) {             \
+      scr_life_walk_fn = scr_cyc_ar_lifecensus; \
+      scr_life_install();                       \
+    }                                           \
+  } while (0)
+#else
+#define SCR_LIFE_NOTE_ALLOC(h, phys, fn) ((void)0)
+#define SCR_LIFE_NOTE_FREE(obj) ((void)0)
+#define SCR_LIFE_SITE() ((void)0)
+#define SCR_LIFE_ARM() ((void)0)
+#endif
+
 static size_t scr_cyc_ar_budget(void) {
 #ifdef SCR_RC_AUDIT
   return 0;
@@ -1666,6 +1719,7 @@ static __attribute__((noinline)) void *scr_cyc_alloc_miss(size_t size,
    * here rather than in scr_cyc_ar_new so the SCR_CYCLE_ARENA=0 arm still
    * arms and can print its NO CHUNKS refusal. */
   SCR_PC_ARM();
+  SCR_LIFE_ARM();
   if (blk != 0 && scr_cyc_arena_on()) h = scr_cyc_ar_refill(phys, blk);
   if (h == NULL) h = (ScrCycHdr *)scr_pool_take(&scr_cyc_blocks, phys);
   if (h == NULL) {
@@ -1680,6 +1734,7 @@ static __attribute__((noinline)) void *scr_cyc_alloc_miss(size_t size,
   h->buf_index = 0;
   scr_cyc_live++; /* the pacing denominator; see below */
   SCR_CYCEN_NOTE_ALLOC(h, phys, size, free_fn, 0);
+  SCR_LIFE_NOTE_ALLOC(h, phys, free_fn);
   /* calloc's contract, kept, and only over the payload; see the note in
    * scr_cyc_alloc for why the header is stamped rather than zeroed. */
   return memset((unsigned char *)h + sizeof(ScrCycHdr), 0,
@@ -1780,6 +1835,7 @@ static __attribute__((noinline)) void *scr_cyc_alloc_miss(size_t size,
  * Zeroed allocation with a cycle header in front; returns the OBJECT
  * pointer (header at scr_cyc_hdr). Aborts on OOM. */
 void *scr_cyc_alloc(size_t size, ScrTraceFn trace, ScrCycFreeFn free_fn) {
+  SCR_LIFE_SITE();
   size_t phys = scr_pool_bytes(sizeof(ScrCycHdr) + size);
   ScrCycHdr *h = scr_cyc_ar_pop(phys);
   if (h == NULL) return scr_cyc_alloc_miss(size, trace, free_fn);
@@ -1815,6 +1871,7 @@ void *scr_cyc_alloc(size_t size, ScrTraceFn trace, ScrCycFreeFn free_fn) {
 #endif
   scr_cyc_live++;
   SCR_CYCEN_NOTE_ALLOC(h, phys, size, free_fn, 1);
+  SCR_LIFE_NOTE_ALLOC(h, phys, free_fn);
 #if SCR_CYC_ZERO_WHOLE
   return h + 1;
 #else
@@ -1850,6 +1907,7 @@ void scr_cyc_weak_mark(void *key) {
  * offered to the pool and then to free(), exactly as before. */
 void scr_cyc_free(void *obj) {
   scr_cyc_live--;
+  SCR_LIFE_NOTE_FREE(obj);
   ScrCycHdr *h = scr_cyc_hdr(obj);
   /* THE WEAKMAP DEATH HOOK, AND IT IS FIRST ON PURPOSE — before the arena
    * give-back, before the pool give-back, before free(). All three hand
