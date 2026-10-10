@@ -6311,6 +6311,46 @@ class LlEmitter {
       // re-deciding it there would make the body depend on a reading taken
       // while it was being written. See BlockBuilder.pruneUnreachableCrossPark.
       if (this.currentCoroCollect !== null) B.pruneUnreachableCrossPark(this.currentCoroCollect);
+      /* AND THE SAME MOMENT ANSWERS THE OTHER HALF: is every carry this body
+       * installed one its reload can actually cover? The prune above decides
+       * which flags are REAL; this decides whether the repair for a real one
+       * was legal, which is a different question and was never asked.
+       *
+       * ONLY ON THE EMISSION THAT COUNTS, and that is the mirror image of the
+       * prune's guard rather than an oversight. A probe runs with the carry
+       * sets EMPTY or half-installed, so its renames are not the ones the
+       * final body will hold and an offender read there would name a carry
+       * that is about to change. The emission that counts runs with the sets
+       * final, so its renames are exactly the ones being shipped.
+       *
+       * IT THROWS THE PROMOTION SIGNAL, so the fixpoint above repairs it the
+       * way it already repairs a second crossing: the origin leaves the spill
+       * set, becomes an alloca the entry block allocates, and the slot carry
+       * moves it through the frame. That costs a frame slot and keeps the
+       * function on this lane.
+       *
+       * A TYPE IT CANNOT READ IS A REFUSAL, NOT A GUESS. `CrossParkTempError`
+       * with a null type is the shape the fixpoint already declines to repair,
+       * so the function falls back to the fiber lane -- which is the right
+       * answer when the alternative is laying out a frame field for a type
+       * nothing derived. */
+      if (this.currentCoroCollect === null) {
+        const offender = B.carryDominanceOffender();
+        if (offender !== null) {
+          const ty = B.typeOfTemp(offender) ?? null;
+          if (ty === null) {
+            throw new CrossParkTempError(
+              `llvm emitter bug: ${this.currentFnName} carries ${offender} across a park, but ` +
+                `its reload does not reach every use -- the join of a suspending and a ` +
+                `non-suspending arm is reachable without passing the resume label. The repair ` +
+                `is to promote it into an alloca, and that needs a type this pass could not read.`,
+              offender,
+              null,
+            );
+          }
+          throw new CrossParkTempPromoteError(offender, ty);
+        }
+      }
       const body = B.render();
       /* THE SECOND COUNTABLE INVARIANT, over what was EMITTED rather than what
        * was intended. D5 above counts at the point -- draw, boundary, state --
