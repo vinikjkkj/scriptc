@@ -586,9 +586,38 @@ back with a five-column CSV and no `privateWS`. Now guarded.
 > from `f8812f6c9`), both arms the same executable with `SCR_CYCLE_PAGERETURN`
 > between them, rotated, 19 comparable after the high-peak mode is excluded:
 >
-> > **settled privateWS −1.52%, 83.57 → 82.30 MiB (−1.27 MB), p=0.018,
-> > 2.0x the 0.75% floor.** cpuToSettled is a DRAW. See
-> > `../zapo-rest/README.md`, which carries it in full.
+> > **settled privateWS −1.52% (−1.27 MB), p=0.018, 2.0x the 0.75%
+> > floor.** cpuToSettled is a DRAW. Carried in full in
+> > `../zapo-rest/deliver/README-184.md`, section **"2. What this build
+> > changes"**, which states *"Cycle-arena page return: −1.27 MB of settled
+> > private working set"*, *"−1.52% of the settled plateau, and 1.8% of the
+> > 69.45 MB of retention"* and *"p = 0.018, so it separates from zero; and
+> > 2.0× our 0.75% floor"*.
+> >
+> > **The pointer this line used to carry — `../zapo-rest/README.md` — was
+> > dead.** That file contains none of `1.52`, `83.57`, `82.30`, `0.018`,
+> > `1.27` or `cc2fd4ca6`; the same scan of it reads 8 for
+> > `privateWS|settled` and 3 for `arena`, so the pointer was wrong and not
+> > the scan. What that file does carry, at its `:454-456`, is the **retired
+> > 1.6.2** 163.39 → 104.50 headline — the opposite of the live figure.
+> >
+> > **And the absolute pair `83.57 → 82.30 MiB` is derived nowhere in this
+> > tree.** Before this correction it appeared in exactly three places —
+> > this section, `../zapo-rest/harness/delivery-ab-knob.sh` in its header
+> > comment, and `../mapshrink/README.md` under *"It is below the floor"* —
+> > all three quoting it and none deriving it. **After this correction it
+> > survives in the tree only inside those three retraction notes**, so a
+> > future `rg 83.57` that returns three hits is finding this repair, not a
+> > live claim. Line numbers are deliberately not given: the edits that
+> > wrote these notes moved them.
+> > `README-184.md` records the shipping plateau as a single arm, **82.29 MB
+> > settled over 12.83 MB idle** on `zapo-rest-184.exe`, not a base/treated
+> > pair. **So quote the effect, never the pair.** Two further things are
+> > recorded here rather than resolved: this section names the A/B binary
+> > `zapo-rest-182.exe` while `README-184.md` names `zapo-rest-184.exe` for
+> > a 24-run/19-comparable design with identical statistics, and that `184`
+> > is a local build number — `README-184.md` is zapo-js **1.8.2** at its
+> > `:3` and `:60`, and no zapo-js 1.8.4 exists anywhere in the tree.
 >
 > So reporting −2.05 MiB — or its −2.56%, or its 3.4x floor clearance, or
 > "2.8% of the 72.12 MiB the user sees" — as the result is wrong.

@@ -150,12 +150,28 @@ shrank, no failures and no skips. That is outcome 1 above.
 
 **And the route is closed anyway, for two reasons that outrank the state.**
 
-**It is below the floor.** 299,840 bytes is 0.286 MiB. Against the 1.8.2
-shipping A/B's settled private WS base of 83.57 MiB that is **0.342%**, and
+**It is below the floor.** 299,840 bytes is 0.286 MiB. Against the sourced
+1.8.2 settled private-WS plateau — **82.29 MB** on `zapo-rest-184.exe`, in
+`../zapo-rest/deliver/README-184.md` under *"The plateau, shipping arm"*,
+where MB is stated to mean 1,048,576 bytes — that is **0.347%**, and
 the within-mode floor is **0.75% = 657,221 bytes**. The effect is **0.46x the
 floor** -- less than half the smallest thing the rig can resolve -- so a
 12-repetition A/B would return DRAW by construction. It was not run, and
 that decision is the reading, not an omission.
+
+> **The denominator changed and the verdict did not.** This paragraph
+> previously read *"the 1.8.2 shipping A/B's settled private WS base of 83.57
+> MiB ... **0.342%**"*. That 83.57 is **derived in no file in this tree** — it
+> appeared, before this correction, in exactly three places — here,
+> `../placement/RESULTS.md` inside its **"SUPERSEDED — this is not the
+> delivery result"** banner, and the header comment of
+> `../zapo-rest/harness/delivery-ab-knob.sh` — each quoting it and none
+> deriving it. It now survives only inside those three retraction notes.
+> Re-denominating on the sourced plateau moves 0.342% to 0.347%
+> and leaves the floor ratio at 0.46x, so **"below the floor" stands on the
+> sourced number and did not depend on the unsourced one.** Nothing else in
+> this file was audited for the same defect; sections not named here are
+> **not** thereby current, only unexamined.
 
 **And the timing is the stronger finding.** All 2,712 report lines are
 IDENTICAL: every shrink had completed before the first report at turn 25,

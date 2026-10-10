@@ -8,8 +8,15 @@
 # zapo version: build from app182/, never app/. The -2.05 MiB in
 # ../../placement/RESULTS.md was taken through this script on the retired
 # 1.6.2 arm and is superseded; do not treat it as this tool known-good
-# output. The live figure is the 1.8.2 A/B in ../README.md -- settled
-# privateWS -1.52%, 83.57 -> 82.30 MiB, p=0.018 over 19 comparable runs.
+# output. The live figure is the 1.8.2 A/B written up in
+# ../deliver/README-184.md, section "2. What this build changes": settled
+# privateWS -1.52%, -1.27 MB, p=0.018, 2.0x the 0.75% floor, over 19
+# comparable runs of 24. It is NOT in ../README.md -- that pointer was dead,
+# and the figure that file does carry is the retired 1.6.2 163.39 -> 104.50
+# headline. The absolute pair 83.57 -> 82.30 MiB this comment used to quote
+# is derived in no file in the tree; README-184.md gives the shipping plateau
+# as one arm, 82.29 MB settled over 12.83 MB idle. Quote the effect, not the
+# pair.
 #
 # The rotation, the workload plumbing and the modestat call are COPIED
 # VERBATIM from delivery-ab.sh and must stay that way: position within a
