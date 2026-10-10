@@ -1,6 +1,31 @@
 # Extending the value guard to the LLVM lane
 
-**Status: specification, not implementation. Nothing here has been built.**
+**Status: PARTLY BUILT. Corrected 2026-10-10 — the header said "specification,
+not implementation. Nothing here has been built", and §5 had been built,
+shipped, and gated for some time.**
+
+> **What is built, verified against source rather than recalled:**
+> §5's poisons are implemented in `packages/compiler/src/backend/emission/coro-poison.ts`,
+> which names *this file, §5* as its `SPEC:` at `:17`, and are guarded by
+> `packages/compiler/test/coro-poison.test.ts`, which names §5 at `:1` and §5.1
+> at `:276`. **Shipping source and a gated test both cite this document as a
+> live specification while its header declared it unbuilt.**
+>
+> **And the LLVM claim below is false.** §"The LLVM lane has none of this" says
+> the guard builds two arms, both `backend: "c"`.
+> `tests/harness/stackless-values.test.ts:1501` is
+> `describe.each(["c", "llvm"] as const)` — **the guard runs on BOTH lanes** —
+> `:1435` declares `type Lane = "c" | "llvm"`, and
+> `LLVM_NOT_LOWERED_NON_WRAPPERS` at `:1429` is **empty**, with `:1355`
+> recording a row that MOVED OUT of it.
+>
+> **Why no marker was ever owed, and that is the point.** Nothing here was
+> wrong when written. The gap was closed by **success** — someone built it —
+> and a correction is only ever written when someone was wrong. A document
+> whose premise is retired by progress emits no retraction, carries no banner,
+> and reads as live indefinitely. **Sections not named above are NOT thereby
+> current: they are unaudited.** Re-read each against source before planning
+> from it.
 
 Sibling to `stackless-llvm-design.md` (how the lowering would be built) and
 `stackless-frame-contract.md` (what the runtime provides). A sibling rather

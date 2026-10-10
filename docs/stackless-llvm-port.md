@@ -19,6 +19,25 @@ denominator is not a number; percentages never appear bare.
 
 ## 0. Why this is owed
 
+> **§0's PREMISE IS VOID. Corrected 2026-10-10.** The scan below was correct
+> when taken and was positive-controlled, which is exactly why it went
+> unmarked: **it was retired by the port happening, not by anyone being
+> wrong.**
+>
+> | §0 claims | source says, re-read 2026-10-10 |
+> |---|---|
+> | "the **nine** files under `backend/llvm/`" | **12** files |
+> | `coroPlans` 0 occurrences | **13** |
+> | `scr_coro` 0 | **66** |
+> | `ScrCoroBase` 0 | **26** |
+> | `STACKLESS` 0 | **15** |
+> | (no coro file) | `backend/llvm/coro.ts`, **922 lines** |
+>
+> `SCRIPTC_STACKLESS` is no longer C-emitter-only. **Sections below are NOT
+> thereby current** — they are unaudited, and §10b is already known to have
+> carried a refuted premise (`tests/harness/stackless-finally-body.test.ts:20-22`
+> records its own later measurement refuting it). Re-read against source.
+
 `SCRIPTC_STACKLESS` exists only in the C emitter. The nine files under
 `packages/compiler/src/backend/llvm/` contain **0 occurrences** of
 `coroPlans`, `STACKLESS`, `stackless`, `scr_coro`, `ScrCoroBase`,
