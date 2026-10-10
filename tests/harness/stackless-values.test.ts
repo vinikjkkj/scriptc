@@ -17,8 +17,13 @@
  *
  * WHY THE FIRST VERSION OF THIS FILE WAS ALSO BLIND, which is the same lesson
  * one level up. It listed one async function per result kind and compared the
- * program's output -- but a function with NO await is not a suspension point,
- * and `stacklessPlan` returns null for it; an await NESTED in a call argument
+ * program's output -- but a function with NO await was not a suspension point,
+ * and `stacklessPlan` returned null for it (NO LONGER TRUE as of the
+ * zero-point row: such a function converts now and gets a dispatch carrying
+ * only the entry arm -- tests/harness/stackless-nosuspend.test.ts owns it.
+ * The sentence is kept in the past tense because it is the account of a
+ * mistake made when it WAS true, and that account is what this paragraph is
+ * for); an await NESTED in a call argument
  * (`console.log("x", await f())`) is not straight-line, and one non-D1 point
  * disqualifies the WHOLE function. So of the nine lines it printed, exactly
  * ONE came from a converted coroutine. Measured in its own emitted C: the
