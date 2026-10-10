@@ -448,6 +448,40 @@ Also not present in this build:
   phone, settled = 45 s after the last chunk decoded then 60 s idle, read
   through the `/shutdown` route:
 
+  > **ARM: `app/`, zapo-js 1.6.2 — RETIRED. Nothing in this bullet may be
+  > quoted as a current zapo number.** The 163.39 → 104.50 MiB, the −58.9 MiB
+  > settled, the −36%, and the 105.14 MiB the heap census itemised were all
+  > measured on `app/`. `../placement/README.md` records why they cannot be
+  > adjusted but only re-measured: 1.6.2 downloads and inflates a history blob
+  > whole while 1.8.2 streams proto fields, so these are different programs
+  > with different sync architectures, not stale readings of one program. Its
+  > wording is *"Those figures are retired with the arm"*.
+  >
+  > **This file carried no arm label and no retraction marker of any kind** —
+  > zero occurrences of `1.6.2`, `1.8.2`, `app182`, `app/` or `zapo-js@`,
+  > against 2 for `SCR_CYCLE_ARENA_BUDGET` in the same scan, so the absence
+  > was real and not a broken scan. That matters more here than elsewhere:
+  > this is the user-facing document, the one most likely to be quoted
+  > outward, and it was the only settled-memory document in the tree with no
+  > arm on its headline.
+  >
+  > **The rule that retires these figures did not reach this file, which is
+  > how they survived here.** `../placement/README.md` scopes itself — *"Nothing
+  > in **this file** may be quoted as a current zapo number unless it names
+  > 1.8.2"* — and `../placement/RESULTS.md` and `../placement/PREDICTIONS.md`
+  > each carry their own self-scoped banner. The convention is one banner per
+  > document and this document had none, so what happened here was a missing
+  > label rather than a violated rule.
+  >
+  > **The current 1.8.2 figures live elsewhere and are much smaller.**
+  > `deliver/README-184.md` gives, under *"The plateau, shipping arm"*, 82.29
+  > MB settled over 12.83 MB idle on `zapo-rest-184.exe`; and under *"2. What
+  > this build changes"*, a delivery effect of −1.27 MB, −1.52%, p=0.018.
+  > **Do not read the −36% below as a current number.**
+  >
+  > Only the settled-memory figures in this bullet were audited. Everything
+  > else in this file is **not** thereby current, only unexamined.
+
   | | before | now |
   |---|---|---|
   | settled working set | 163.39 MiB | **104.50 MiB** |
@@ -476,7 +510,8 @@ Also not present in this build:
   past the cap is a `calloc`'d block carrying the allocator's own ~24 bytes
   of per-block overhead and fragmenting the very heap the arena exists to
   keep dense — 616,314 such fallbacks on the budgeted arm against 41,628 on
-  the unbudgeted one. Settled working set, matched peak modes:
+  the unbudgeted one. Settled working set, matched peak modes — **this second
+  table is `app/` (1.6.2) and retired too, and it names no executable**:
 
   | | no budget | `SCR_CYCLE_ARENA_BUDGET=16777216` |
   |---|---|---|
