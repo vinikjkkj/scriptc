@@ -571,7 +571,7 @@ describe.skipIf(!enabled)(`linux differential (${target})`, () => {
           // Programs whose IR needs a cross-gated feature (tls/zlib/... —
           // see cc.ts) SKIP with the gate's reason: they are follow-up
           // scope, not Linux failures. Everything else is a real failure.
-          if (err instanceof Error && err.message.includes("not supported under a cross target")) {
+          if (err instanceof Error && err.message.includes("not supported for this cross target")) {
             ctx.skip(err.message.split("\n").find((l) => l.includes("not supported")) ?? err.message);
           }
           throw err;
@@ -608,7 +608,7 @@ describe.skipIf(!enabled)(`linux differential (${target})`, () => {
           } catch (err) {
             // A case needing a still-gated feature skips with the gate's
             // reason (nothing in these fixture sets does today).
-            if (err instanceof Error && err.message.includes("not supported under a cross target")) {
+            if (err instanceof Error && err.message.includes("not supported for this cross target")) {
               ctx.skip(err.message.split("\n").find((l) => l.includes("not supported")) ?? err.message);
             }
             throw err;

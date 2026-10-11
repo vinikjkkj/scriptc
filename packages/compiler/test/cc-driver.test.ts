@@ -242,7 +242,7 @@ describe.skipIf(!ZIG)("zig cc builds (zig on PATH)", () => {
       expect([...magic4]).toEqual([0x4d, 0x5a]);
       process.env["SCRIPTC_FETCH_CURL"] = "1";
       try {
-        await expect(compileC({ cPath, outPath, dynamic: true, fetch: true })).rejects.toThrow(/fetch.*not supported under a cross target/s);
+        await expect(compileC({ cPath, outPath, dynamic: true, fetch: true })).rejects.toThrow(/fetch.*not supported for this cross target/s);
       } finally {
         delete process.env["SCRIPTC_FETCH_CURL"];
       }
