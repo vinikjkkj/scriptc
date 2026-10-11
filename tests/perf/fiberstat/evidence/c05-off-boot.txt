@@ -1,0 +1,20 @@
+[fiberstat] out=0 outHi=37 pool=37 poolHi=37 fresh=37 freed=0 via=_Exit susp=0 suspHi=36 entries=17 overflow=0
+[parktable] base=00007FF694380000
+entry	kind	spawns	parkIn	parkLive	parkHi	yieldIn	yieldLive	yieldHi
+00007FF694B26DA0	async	1	1	0	1	0	0	0
+00007FF694A49D60	async	4	4	0	4	0	0	0
+00007FF694B39DF0	async	4	4	0	4	0	0	0
+00007FF694B27570	async	4	0	0	0	4	0	4
+00007FF6949689B0	async	4	4	0	4	0	0	0
+00007FF694A49420	async	4	4	0	4	0	0	0
+00007FF694B27CB0	async	2	0	0	0	2	0	1
+00007FF694966150	async	4	4	0	4	0	0	0
+00007FF694B39C60	async	4	4	0	4	0	0	0
+00007FF694B26F80	async	1	1	0	1	0	0	0
+00007FF694A48710	async	5	1	0	1	4	0	4
+00007FF694A47B50	async	1	0	0	0	1	0	1
+00007FF694A6DF40	async	2	0	0	0	0	0	0
+00007FF694A48790	async	4	0	0	0	0	0	0
+00007FF694B27EB0	async	1	1	0	1	0	0	0
+00007FF694B27AB0	async	4	4	0	4	0	0	0
+00007FF694B276E0	async	4	8	0	4	0	0	0

@@ -476,8 +476,17 @@ construction), `/connect` chains (needs the network), and startup latency
 ### 6a.4 Reach on the real load
 
 **SUPERSEDED at `167fc0f8e`: the census now reads `1485 lowered of 1485
-planned`, with `scr_async_spawn` 1,487 -> 2 call sites in the emitted `.ll`.
-The refusal set on app182 is EMPTY.** What follows is the account at the
+planned`, with `scr_async_spawn` 1,487 -> 2 call sites in the emitted `.ll`.**
+
+**AND THE "EMPTY REFUSAL SET" THAT USED TO BE WRITTEN HERE WAS WRONG, in a
+way worth keeping because the instrument is still in use.** `1485 of 1485
+planned` is a lowered-against-PLANNED ratio, and it is structurally blind to
+a function refused BEFORE planning: such a function is in neither column. The
+same paragraph records the two surviving `scr_async_spawn` sites, so the
+document contradicted itself in two sentences. The artifact, not the census,
+is the only honest reach measure -- and the two it names are
+`ProtoStreamReader.ensure` and `destroyIfSupported`, both refused at the
+admission gate for `agenResume`'s sake (6a.5). What follows is the account at the
 revision this section was written for, kept because 6a.3's first table was
 measured against it.
 
@@ -487,6 +496,112 @@ ways and cross-checked exactly against `scr_async_spawn` 1,488 -> 196
 This section recorded a reach of ZERO on real load before the then-adapter
 ICE was fixed; the census has not moved since (predicted 1,297, measured
 1,292, identical refusal set).
+
+---
+
+### 6a.5 The two fiber entries that are left, counted where it matters
+
+6a.3's benefit table is scored on `/s/alpha/store/threads?limit=20`. 6a.4
+says what is still on a fiber. **This section answers the question that sits
+between them and that neither could: how many frames of those entries are
+SUSPENDED AT THE SAME INSTANT while that table is being measured?** That
+number, not the conversion count, is what a remaining conversion could buy --
+B1's null is exactly the lesson that a spawn which completes inside one turn
+costs nothing.
+
+Instrument: the per-entry park table in `tests/perf/fiberstat/scr_fiber_stat.h`,
+keyed on the fiber ENTRY POINTER and counting `scr_await_park` (an await on an
+UNSETTLED promise) and `scr_await_yield` (the one-turn microtask hop a settled
+await takes) separately, each with an exact high-water. Read out through the
+`_Exit` interposer on app182's `/shutdown` route, because `process.exit`
+lowers to `_Exit` and an atexit-only report is silently never written. The
+table has no reset, so a phase is a SEPARATE CELL and the per-phase answer is
+a subtraction. Both arms built at `6bc2848a9` with the header `-include`d
+through `SCRIPTC_PROF_CFLAGS`. The instrument reaches the runtime C TUs only,
+and that was checked rather than assumed: the stackless arm's emitted
+`.ll` differs from B1's UNINSTRUMENTED build of the same program by 42
+bytes, every one of them inside a worktree or provenance-cache PATH STRING.
+The program being measured is the one B1 measured.
+Raw tables: `tests/perf/fiberstat/evidence/`.
+
+| cell | arm | what ran | fibers created | suspended high-water | entries in the table |
+|---|---|---|---|---|---|
+| boot | stackless | server up, no requests | **0** | **0** | **0** |
+| threads-20, C=64 | stackless | 90,234 requests, 62.9 in flight | **0** | **0** | **0** |
+| `/health`, C=64 | stackless | 266,228 requests, 62.7 in flight | **0** | **0** | **0** |
+| session create+remove | stackless | one session destroyed | 11 | 11 | 1 |
+| boot | fiber | server up, no requests | 37 | 36 | 17 |
+| threads-20, C=64 | fiber | 74,535 requests, 62.9 in flight | **315** | **315** | 19 |
+| session create+remove | fiber | one session destroyed | 40 | 39 | 64 (+36 over the table) |
+
+**`ProtoStreamReader.ensure` is parked ZERO times, on every route, and it is
+not merely unparked -- it is never SPAWNED.** On the stackless arm the
+artifact holds exactly two `scr_async_spawn` entries, and across four cells
+only ONE of them ever appears. Under load the table is empty and
+`CreateFiberEx` is called zero times: the whole stackless server runs the
+62.9-concurrent-chain cell that produced the 1.591x / 3.93x table **without
+creating a single fiber stack**.
+
+**Why it cannot be otherwise, read from the source rather than inferred from
+the zero.** `ensure` is reached only through `streamProtoFields`
+(`zapo-js/src/util/proto-stream.ts:235`), whose only two callers are
+`history-sync.ts:304` and `group-history.ts:92`; both are driven by an inbound
+DECRYPTED WhatsApp message (`WaClient.ts:348` for the
+`HISTORY_SYNC_NOTIFICATION` protocol type, `WaClient.ts:443` for the group
+bundle). The rig sets `ZAPO_AUTOCONNECT=0` and there is no WhatsApp socket, so
+the path is unreachable on every route -- **not just on the measured one**.
+
+**This is a SCOPE finding about the benefit table, not a defect.** The hot
+path the bench measures and the hot path the application has are different
+things, and 6a.3's numbers are silent about the second. They remain correct
+for what they measure.
+
+**`ensure` could not dominate a per-request number even with a live socket.**
+Each `ensure` call is `await`ed sequentially by one driver loop over one
+`ProtoStreamReader`, so **at most one `ensure` frame is parked per concurrent
+protobuf stream**; streams are created one per history-sync notification, not
+one per request. Its concurrency tracks inbound history-sync blobs and can
+never enter a per-CONCURRENT-REQUEST marginal slope.
+
+**`destroyIfSupported` is parked 11 at once, and only on teardown.** Zero on
+both load routes; on one `/sessions/remove` it is spawned 16 times, parks 16
+times, and reaches a high-water of **11** -- which is exactly
+`destroyPersistentStores`' `Promise.allSettled` of 11 (`createStore.ts:587`),
+the larger of its two batches, the other being `teardownCaches`' 5
+(`createStore.ts:525`). `yieldIn` is 0: every one of those awaits was on a
+genuinely unsettled promise. Reproduced identically in two independent cells.
+
+**The positive controls, because a gauge that can only read zero passes every
+workload.** Three, and all three could have come out the other way:
+
+1. `tests/perf/fiberstat/parkprobe.ts` holds exactly 7 frames of an
+   `ensure`-shaped method parked at once and the table reads `parkHi 7`. The
+   SAME loop body awaiting a plain promise-returning method instead of an
+   async iterator is emitted `stackless spawn %PlainReader.ensure`, carries no
+   `scr_async_spawn`, and never appears in the table at all -- which is the
+   mechanism of the whole row in one artifact.
+2. The fiber arm, on the SAME route at the SAME 62.9 in-flight, reads 315
+   suspended frames with four distinct entries at `parkHi 63` each. The
+   counter is not blind to this workload; the stackless arm has nothing for it
+   to count.
+3. The stackless arm's own teardown cell reads 11 in the same binary that
+   reads 0 under load.
+
+**What this costs the conversion front.** Lifting `agenResume` --
+`LLVM_UNLOWERABLE_POINT_KIND_LIST` in `backend/llvm/coro.ts:378`, with the
+`scr_current` question `ir/liveness.ts:487` names -- is the only thing between
+`ensure` and the lane, and `ensure`'s emitted body
+(`scr_gen_in_ref` / `scr_agen_next` / `scr_await_ref`) confirms it is the
+consumer-side resume and nothing else. **On app182 it is worth 0 MiB**, for
+the same structural reason the 194 sites were: the frames are not there to
+save. It remains correctness work, and the number to beat it against is a
+program that actually runs a history sync.
+
+**Stated, because the instrument has one.** `parkLive` can only drift UP (a
+fiber torn down while parked never runs its `_OUT`), so every figure is an
+upper bound and a zero is a hard zero. The table holds 64 entries; the FIBER
+arm's teardown cell overflowed it by 36, so that row's entry count is a floor.
+The stackless arm never exceeded 1.
 
 ---
 
