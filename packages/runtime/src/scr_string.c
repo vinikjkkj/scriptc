@@ -656,19 +656,32 @@ static size_t scr_str_slack(void) {
  * counters for this since a391411df, declared deliberately before any
  * implementation existed; this is the implementation they were shaped for.
  *
- * THE CHUNK IS DERIVED FROM THE BLOCK BY A MASK, NOT A SEARCH, which is the
- * whole reason the chunks are now 64 KiB-ALIGNED rather than plain malloc.
- * A sorted registry with a binary search was the alternative and it costs
- * ~7 compares on a path that runs once per string; an aligned chunk costs an
- * AND. The header lives at the chunk base, so the carve region starts after
- * it and no block can ever alias the header.
+ * THE CHUNK IS DERIVED FROM THE BLOCK BY A SEARCH. The sentence that stood
+ * here said the opposite -- it claimed a MASK over 64 KiB-aligned chunks and
+ * named that as the whole reason the chunks were aligned -- and the code
+ * never did it: scr_str_ar_chunk_of has been a binary search over a sorted
+ * registry since it was written, for the reason its own note gives. The
+ * alignment was therefore paying for a mechanism that does not exist, and
+ * the chunks are plain malloc as of this change; see scr_str_chunk_alloc.
+ * The search costs ~7 compares and it runs once per FREE BLOCK AT THE DRAIN,
+ * not once per string -- the note on scr_str_ar_take is why neither the
+ * allocation nor the release path carries a lookup at all. The header lives
+ * at the chunk base, so the carve region starts after it and no block can
+ * ever alias the header.
  *
  * FOREIGN BLOCKS ARE REAL AND MUST NOT BE CHARGED. scr_str_ar_give is also
  * the sink for blocks the malloc fallback produced, which were never carved
  * from any chunk; a393's note names this as one of the two hazards, because a
  * 'live' count decremented for one of them would free a chunk that is still
- * handing blocks out. The magic plus a range test is what separates them, and
- * the ones that fail it are counted rather than silently dropped. */
+ * handing blocks out. THE INDEX IS WHAT SEPARATES THEM: scr_str_ar_chunk_of
+ * answers NULL for any address no chunk of ours covers, and the misses are
+ * counted (sarchunkforeign) rather than silently dropped. The magic below is
+ * NOT that test and never was. It is written at birth, cleared at death and
+ * READ NOWHERE IN THE TREE -- which is why nothing observed the alignment it
+ * was designed to validate going away. It is kept as a dead-chunk marker for
+ * a debugger and for the census reader sketched in
+ * tests/perf/heapcensus/OWNER-131079.md; if that stops being worth a word,
+ * delete the field rather than invent a reader for it. */
 #define SCR_STR_CHUNK_MAGIC 0x5343525f53545243ull /* "SCR_STRC" */
 
 typedef struct ScrStrChunk {
@@ -680,6 +693,35 @@ typedef struct ScrStrChunk {
                            * every block it ever handed out is back. */
   unsigned long carved;   /* blocks ever carved from it */
 } ScrStrChunk;
+
+/* WHAT CARRIES BLOCK ALIGNMENT NOW THAT THE CHUNK IS NOT ALIGNED, and why
+ * only one half of it is assertable.
+ *
+ * Blocks are handed out at k + sizeof(ScrStrChunk) + n*r with r a multiple of
+ * SCR_POOL_GRAIN, so a block's alignment is the header's, and the header's is
+ * malloc's. Both halves hold by LANGUAGE rule rather than by local care:
+ * malloc must return storage aligned for every fundamental type, which is
+ * >= 8 on every target this builds for; and sizeof(ScrStrChunk) is a multiple
+ * of 8 because the struct holds list pointers, which force _Alignof 8, which
+ * forces the size to a whole number of them. Neither is a fact about this
+ * heap that could quietly change.
+ *
+ * SO THE OBVIOUS ASSERTION IS NOT WRITTEN HERE, DELIBERATELY. A
+ * _Static_assert on sizeof(ScrStrChunk) % SCR_POOL_GRAIN was tried and it is
+ * GREEN BY CONSTRUCTION: adding a trailing char to this struct takes it from
+ * 32 bytes to 40 and the assertion does not fire, because the padding the
+ * pointers already demand absorbs the skew. It can only fire for a struct
+ * with no 8-byte-aligned member at all, which this one cannot become while
+ * the sweep walks h->next and h->prevp. An assertion that cannot fail under
+ * any edit a reader could make is not a guard; it is a comment that looks
+ * like one, and it would be believed. The next one IS a guard.
+ *
+ * SCR_STR_ARENA_CHUNK is #ifndef-guarded, so a -D can set it to anything, and
+ * a chunk limit that is not a whole number of grains would leave the last
+ * carve of every chunk straddling the limit. That one is reachable and it is
+ * checked: -DSCR_STR_ARENA_CHUNK=65535 fails this build. */
+_Static_assert(SCR_STR_ARENA_CHUNK % SCR_POOL_GRAIN == 0,
+               "the chunk limit must be a whole number of carve grains");
 
 /* One list per SCR_POOL_GRAIN class. Index r / SCR_POOL_GRAIN, 1..CLASSES. */
 static void *scr_str_ar_free[SCR_POOL_CLASSES + 1];
@@ -746,25 +788,38 @@ static void scr_str_ar_index_del(ScrStrChunk *h) {
   }
 }
 
-/* 64 KiB-aligned, because scr_str_ar_chunk_of masks. The two platform calls
- * differ in how they are released, so the release mirrors the branch. */
-static void *scr_str_chunk_alloc(void) {
-#ifdef _WIN32
-  return _aligned_malloc(SCR_STR_ARENA_CHUNK, SCR_STR_ARENA_CHUNK);
-#else
-  void *p = NULL;
-  if (posix_memalign(&p, SCR_STR_ARENA_CHUNK, SCR_STR_ARENA_CHUNK) != 0) return NULL;
-  return p;
-#endif
-}
+/* PLAIN malloc, AND THE ALIGNMENT IT NO LONGER ASKS FOR IS THE POINT.
+ *
+ * These chunks were 64 KiB-ALIGNED, on both arms, for the masking design the
+ * accounting note above used to claim. That design was replaced before it
+ * ever ran and the alignment was left behind: scr_str_ar_chunk_of searches,
+ * and h->magic -- the other half of it -- is written and cleared and read
+ * nowhere. Nothing consumed the property.
+ *
+ * IT WAS NOT FREE. _aligned_malloc(s, a) forwards to malloc of
+ * s + (a - 1) + sizeof(void *), so a 64 KiB chunk cost a 65,543-byte
+ * request. Forty-six live chunks were 6,030,160 B of CRT heap with HALF of
+ * it padding that held nothing; tests/perf/heapcensus/OWNER-131079.md
+ * decomposes that row to the byte. Dropping the alignment releases
+ * 3,014,768 B, 15.94% of that arm's busy heap, for a property no reader had.
+ *
+ * ONE ARM, NOT TWO, and that is a safety property and not tidiness. An
+ * aligned block must be released by its own partner -- _aligned_free
+ * recovers the original pointer from ((void **) p)[-1] -- so the old shape
+ * could be made wrong by editing either branch alone, and a chunk returned
+ * through the wrong one frees a wild pointer. With no branch there is
+ * nothing left to keep in step. The POSIX arm went with it: posix_memalign
+ * wasted little, but leaving it would have left this file still asserting an
+ * alignment the Windows arm had stopped providing, and a half-held invariant
+ * is how a dead design gets rebuilt.
+ *
+ * WHAT THE CARVE NEEDS IS EIGHT, NOT 65,536, and it is the C standard that
+ * holds it -- malloc's alignment guarantee and the alignment this struct's
+ * own list pointers force. The note beside ScrStrChunk gives both halves and
+ * says why neither can usefully be asserted. */
+static void *scr_str_chunk_alloc(void) { return malloc(SCR_STR_ARENA_CHUNK); }
 
-static void scr_str_chunk_free(void *p) {
-#ifdef _WIN32
-  _aligned_free(p);
-#else
-  free(p);
-#endif
-}
+static void scr_str_chunk_free(void *p) { free(p); }
 
 
 static int scr_str_arena_on(void) {
