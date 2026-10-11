@@ -5755,6 +5755,30 @@ export function isUnitOnlyTsType(t: ts.Type): boolean {
   return parts.every((p) => (p.flags & UNIT) !== 0);
 }
 
+/** The question isUnitOnlyTsType is standing in for, asked of the spelling
+ * the CHECKER hands out INSIDE a generic body. `Awaited<T>` and a bare `T`
+ * carry no Void FLAG however the instantiation binds them -- the checker
+ * keeps both symbolic while T is open -- so the flag test reads false for a
+ * parameter bound at `void`, and a value position fences on a slot whose
+ * only inhabitant is `undefined`. This asks the live BINDING instead, which
+ * is the same answer mapType already computed for the slot: reaching here
+ * at all means the IR mapping resolved to void, and it resolved through
+ * this very resolver.
+ *
+ * Tried only where the flag test said no, so it can turn a refusal into the
+ * unit-only substitution and can never change one. Inert outside a generic
+ * instantiation (no resolver, nothing to resolve) and inert for every
+ * concrete spelling: the two arms self-gate on a TypeParameter and on
+ * mapGenericAwaitedAlias's own shape test (the STANDARD LIBRARY's
+ * single-argument `Awaited` over a bound parameter). */
+export function isUnitOnlyBoundTsType(t: ts.Type, ctx: TypeMapperCtx): boolean {
+  if (!ctx.resolveTypeParam) return false;
+  if ((t.flags & ts.TypeFlags.TypeParameter) !== 0) {
+    return ctx.resolveTypeParam(t)?.kind === "void";
+  }
+  return mapGenericAwaitedAlias(t, ctx)?.kind === "void";
+}
+
 /** IR-level `t | undefined`, canonicalized and fenced exactly like the
  * ts-union branch of mapType (typeKey-sorted arms, deduplicated; map/
  * regex/dyn/void arms unrepresentable; a func arm IS representable — the
