@@ -1,14 +1,43 @@
-import { readFileSync, writeFileSync } from 'node:fs'
-const DIR = 'G:/blocks/v1-run'
+/* stats.mjs -- the whole analysis of evidence-variance, re-runnable FROM THIS
+ * DIRECTORY with no arguments:   node stats.mjs
+ *
+ * DIR defaults to this script's own directory, which holds the six committed
+ * <tag>.heapcen.txt. The 38 KB-per-run <tag>.prof.txt are NOT committed, so
+ * the arena chunk counts fall back to the committed chunkrows.txt, which
+ * carries the identical PROF lines. Point DIR at a live memrig output root to
+ * re-run against fresh runs:
+ *   node stats.mjs /g/blocks/v1-run
+ *
+ * EVERY ANCHOR BELOW TOLERATES A TRAILING CR. The .heapcen.txt files are
+ * CRLF -- the instrumented binary writes them through a Windows text-mode
+ * FILE -- and a bare $ silently matches nothing against them. That is not
+ * hypothetical: it ate the PROF extraction while building chunkrows.txt.
+ *
+ * census-arms.sh:132 is a committed recipe that cannot run. This one was
+ * executed from the committed tree, with no arguments, before being
+ * committed, and its output diffed byte-for-byte against RESULTS.txt. */
+import { readFileSync, writeFileSync, existsSync } from 'node:fs'
+import { dirname, resolve, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
+const HERE = dirname(fileURLToPath(import.meta.url))
+const DIR = process.argv[2] ? resolve(process.argv[2]) : HERE
+const CR = join(HERE, 'chunkrows.txt')
+const CHUNKROWS = existsSync(CR) ? readFileSync(CR, 'latin1') : ''
 const ORDER = [['a1','A',1],['b1','B',2],['b2','B',3],['a2','A',4],['a3','A',5],['b3','B',6]]
 const rows = []
 for (const [tag, arm, pos] of ORDER) {
-  const t = readFileSync(`${DIR}/${tag}.heapcen.txt`, 'latin1')
-  const m = t.match(/^\[heapcen\] heap 0 \S+ CRT busy=(\d+) busyBlocks=(\d+) free=(\d+) freeBlocks=(\d+) uncommitted=(\d+) regions=(\d+)$/m)
+  const t = readFileSync(join(DIR, tag + '.heapcen.txt'), 'latin1')
+  const m = t.match(/^\[heapcen\] heap 0 \S+ CRT busy=(\d+) busyBlocks=(\d+) free=(\d+) freeBlocks=(\d+) uncommitted=(\d+) regions=(\d+)\r?$/m)
   const tot = t.match(/^\[heapcen\] HCTOTAL distinctSizes=\d+ blocks=(\d+) bytes=(\d+) lost=(\d+)/m)
-  const p = readFileSync(`${DIR}/${tag}.prof.txt`, 'latin1')
-  const pm = p.match(/^PROF (\d+) (\d+) (\d+) (\d+) (\d+) \S+ \d+ .*scr_string\.c:820$/m)
-  const hc = t.match(/^HCSIZE 131079 (\d+) (\d+)$/m)
+  const profPath = join(DIR, tag + '.prof.txt')
+  const p = existsSync(profPath)
+    ? readFileSync(profPath, 'latin1')
+    : CHUNKROWS.split(/\r?\n/)
+        .filter(l => l.trim().startsWith(tag + '  PROF '))
+        .map(l => l.trim().slice(tag.length + 2))
+        .join('\n')
+  const pm = p.match(/^PROF (\d+) (\d+) (\d+) (\d+) (\d+) \S+ \d+ .*scr_string\.c:820\r?$/m)
+  const hc = t.match(/^HCSIZE 131079 (\d+) (\d+)\r?$/m)
   rows.push({ tag, arm, pos, busy:+m[1], busyBlk:+m[2], free:+m[3], freeBlk:+m[4], unc:+m[5], reg:+m[6],
     committed:+m[1]+ +m[3], addrspace:+m[1]+ +m[3]+ +m[5],
     hcBlocks:+tot[1], hcBytes:+tot[2], hcLost:+tot[3],
@@ -211,4 +240,4 @@ say(`  The committed record raised this headline from 15.940% to 16.226% on the`
 say(`  strength of sb's 47 chunks. At 46 -- the modal count, 6 of 8 -- it reads`)
 say(`  ~15.94% again. The raise rests on a single draw of a quantity that moves.`)
 
-writeFileSync('G:/blocks/v1-results.lf', L.join('\n')+'\n')
+if (process.env.V1_WRITE) writeFileSync(process.env.V1_WRITE, L.join('\n') + '\n')

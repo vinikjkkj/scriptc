@@ -296,6 +296,24 @@ are in `RESULTS.txt`.
 
 ---
 
+## 8b. The analysis recipe runs from the tree
+
+`stats.mjs` reproduces every number in `RESULTS.txt` when run from this
+directory **with no arguments**, against the six committed `*.heapcen.txt` and
+`chunkrows.txt`. Verified by running it and diffing: identical. It also takes a
+live memrig output root as `argv[2]` and gives byte-identical output there.
+
+This is deliberate. `census-arms.sh:132` is a committed recipe that dies before
+a line of memrig runs, and this front has repeatedly criticised recipes nobody
+executed. The check cost one command.
+
+One trap it is armed against, because it was hit while building
+`chunkrows.txt`: the `*.heapcen.txt` and `*.prof.txt` are **CRLF**, so a
+regex anchored with a bare `$` matches nothing in them and returns a clean,
+silent empty result. Every anchor in `stats.mjs` is `\r?$`.
+
+---
+
 ## 9. Landing
 
 Branch `perf/heapcen-committed-variance` from `ff33bac69`, worktree
