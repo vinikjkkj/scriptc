@@ -1,0 +1,25 @@
+ARM            prof+heapcensus (post-fix, arm mb -- STACKLESS, bands on the MEGABYTE PAIR)
+head           86613275dd25db6da6473bb4bdc67645958ca5f0
+branch         main
+dirty          1
+worktree       /g/scriptc   (node_modules is a REAL directory, not a symlink)
+zig            0.16.0 at /g/tools/zig/zig
+tar            /c/Program Files/Git/usr/bin/tar
+node           v22.18.0 at /c/nvm4w/nodejs/node
+target         x86_64-windows-gnu
+KNOB           SCRIPTC_STACKLESS=<ABSENT -- the point of this arm>
+guard          tests/perf/stackless-knob-guard.mjs 6/6 PASS, see mb-run/guard.txt
+cli-dist-sha   33d1e9e49e5c4111
+PROF_CFLAGS    -include G:/scriptc/tests/perf/prof/scr_prof.h -DSCR_PROF_ALLOC -DSCR_PROF_SIZEHIST -DSCR_PROF_STACKS -DSCR_PROF_STACK_SIZE_MIN=934576 -DSCR_PROF_STACK_SIZE_MAX=934576 -DSCR_PROF_STACK_SIZE_MIN2=1048576 -DSCR_PROF_STACK_SIZE_MAX2=1048576 -include G:/scriptc/tests/perf/heapcensus/scr_heap_census.h
+SCRIPTC_NO_CACHE 1
+START          2026-10-11T10:25:07Z
+free-before-GB 35G
+END            2026-10-11T10:34:02Z
+BUILD-EXIT     0
+elapsed-s      535
+free-after-GB  35G
+EXE            33355264
+EMITTED        zapo-rest.ll=242844729
+EMITTED-LL-N   1
+EMITTED-C-N    0
+EARLY-CACHE    0

@@ -1,0 +1,188 @@
+MEGABYTE PAIR -- SITE ATTRIBUTION BY EXACT SIZE BAND
+========================================================================
+
+ONE build, TWO runs, stackless lane, knob ABSENT. The only change against
+evidence-postfix/sb-build.sh is the two stack bands:
+
+  ARM            prof+heapcensus (post-fix, arm mb -- STACKLESS, bands on the MEGABYTE PAIR)
+  head           86613275dd25db6da6473bb4bdc67645958ca5f0
+  KNOB           SCRIPTC_STACKLESS=<ABSENT -- the point of this arm>
+  PROF_CFLAGS    -include G:/scriptc/tests/perf/prof/scr_prof.h -DSCR_PROF_ALLOC -DSCR_PROF_SIZEHIST -DSCR_PROF_STACKS -DSCR_PROF_STACK_SIZE_MIN=934576 -DSCR_PROF_STACK_SIZE_MAX=934576 -DSCR_PROF_STACK_SIZE_MIN2=1048576 -DSCR_PROF_STACK_SIZE_MAX2=1048576 -include G:/scriptc/tests/perf/heapcensus/scr_heap_census.h
+  SCRIPTC_NO_CACHE 1
+  EARLY-CACHE    0
+  BUILD-EXIT     0
+  elapsed-s      535
+  EXE            33355264
+  EMITTED        zapo-rest.ll=242844729
+  EMITTED-LL-N   1
+  EMITTED-C-N    0
+  cli-dist-sha   33d1e9e49e5c4111
+
+LANE, confirmed in the artifact and not assumed:
+  tests/perf/stackless-knob-guard.mjs against the live CLI dist: STACKLESS KNOB GUARD: OK (6/6 checks ran)
+  rg -c scr_fiber on the emitted zapo-rest.ll  = 3 lines
+  reference (MEM-STATE 2026-10-11 s.8): stackless 3 / fibre 1,488, ratio
+  496x, stackless .ll 242,844,7xx B -- this .ll is 242,844,729 B.
+  A REAL module does NOT read zero on this lane; the discriminator is the
+  ratio. "Must be 0" holds only for the guard ten-line probe, and it is
+  0 there.
+
+--- 1. THE BAND FIRED, AND IT FIRED IDENTICALLY TWICE -----------------
+
+The band hook covers calloc. scr_prof.h:1005-1018 defines scr_prof_calloc
+and :1061 macro-replaces calloc with it; the body calls
+SCR_PROF_NOTE_STACK(r, a * b) -- the PRODUCT, which is the request size and
+therefore the census class exactly (scr_heap_census.h:317 notes cbData).
+Had it wrapped malloc only, this band would have read zero and that zero
+would have been "not instrumented", not "no such site". It does not.
+
+  m1: PROF-STACKS-TOTAL rows=4 count=25 bytes=24390400 lost=0 tablefull=0 skipped=10537535 site="" sizeband=934576..934576 sizeband2=1048576..1048576
+  m2: PROF-STACKS-TOTAL rows=4 count=25 bytes=24390400 lost=0 tablefull=0 skipped=10473911 site="" sizeband=934576..934576 sizeband2=1048576..1048576
+
+  Per captured stack. bytes/count is an exact integer equal to a band edge
+  in every row, so each row is a PURE class and no mixture is averaged:
+
+   run  allocs      bytes       size  frame0    frame1
+   m1       8    8388608    1048576    113bc2    10d678
+   m1       8    7476608     934576    113bc2    10d678
+   m1       8    7476608     934576    113bc2    10d678
+   m1       1    1048576    1048576    214402    20c1d9
+   m2       8    8388608    1048576    113bc2    10d678
+   m2       8    7476608     934576    113bc2    10d678
+   m2       8    7476608     934576    113bc2    10d678
+   m2       1    1048576    1048576    214402    20c1d9
+
+  Rows byte-identical across the two runs -- count, bytes AND all ten
+  frame RVAs: 3 of 4 / 4. The row that differs is the SINGLETON
+  (1 x 1,048,576), whose walk reaches two frames further in m2; its count,
+  its size and its first two frames are the same.
+
+  class 934,576: 16 allocations in 2 distinct stacks (8 + 8)
+  class 1,048,576: 9 allocations in 2 distinct stacks (1 + 8)
+
+  8 is CHUNKS=8. Each of the three 8-allocation stacks fires exactly once
+  per history-sync chunk. That is the burst the peak decomposition read as
+  "6 or 7 concurrent": 8 are produced and one retires early (86613275d s.5).
+
+--- 2. THE REGISTERED SET, FROM THIS RUN ------------------------------
+
+PROFHIST octave 19 = [2^19, 2^20), which holds 934,576; octave 20 =
+[2^20, 2^21), which holds 1,048,576. Every site allocating there in m1:
+
+    oct19  count=  32  G:\scriptc\packages\runtime\src\scr_string.c:1217
+    oct20  count=  31  G:\scriptc\packages\runtime\src\scr_string.c:1217
+    oct20  count=   1  G:\scriptc\packages\runtime\src\scr_net.c:1102
+    oct19  count=   1  G:\scriptc\packages\runtime\src\scr_cycle.c:2292
+    oct19  count=  48  G:\scriptc\packages\runtime\src\scr_bytes.c:52
+    oct20  count=  40  G:\scriptc\packages\runtime\src\scr_bytes.c:52
+
+Four sites, two of them singletons. The two real candidates are the two the
+previous slice narrowed to, and the band now separates them BY STACK rather
+than by arithmetic:
+
+  scr_string.c:1217 (scr_str_regrow, realloc). Its octave ladder in this
+  run is 10:1 11:1 12:1 13:1 14:1 15:1 16:1 17:32 18:32 19:32 20:31 21:16 --
+  a textbook doubling. 86613275d predicted from the source that its
+  requests have the form 2^k+16 and so can never BE 1,048,576. That is
+  CONFIRMED HERE BY A ROUTE ARITHMETIC COULD NOT GIVE: it has 31
+  allocations in octave 20 and the 1,048,576 band captured nine, none of
+  them from its TU. Were those 31 at 1,048,576 the band would hold them.
+
+  scr_bytes.c:52 SURVIVES -- and is now named rather than left standing.
+
+--- 3. THE SITE, NAMED BY SYMBOL ---------------------------------------
+
+Frames are image-relative RVAs (scr_prof.h:871). Resolved by
+tests/perf/obj-symbols.mjs against the COFF objects, never the PDB, which
+on the LLVM lane resolves names WRONGLY rather than absently. The map is
+refused unless every public inside its range agrees; the scr_bytes map
+checked 59 publics and 59 agreed. Captured output: mb.symbols.txt; recipe:
+mb-symbolize.mjs.
+
+  113bc2 = scr_prof_note_stack+98   (scr_bytes.c own static copy)
+  10d678 = scr_bytes_alloc+488      <-- THE RETURN ADDRESS OF THE calloc
+
+scr_bytes_alloc is scr_bytes.c:42-59 and holds exactly one allocation of
+payload size, at LINE 52:
+
+    b->data = calloc(len ? len : 1, scr_bytes_elem_size(elem));
+
+scr_prof_calloc is static and inlined into it, which is why frame1 is
+scr_bytes_alloc itself and not the interposer. 24 of the 25 band
+allocations carry this exact pair at depth 0 and 1.
+
+  >>> 934,576 and 1,048,576 ARE packages/runtime/src/scr_bytes.c:52,
+  >>> the Buffer / typed-array payload calloc inside scr_bytes_alloc.
+
+--- 4. WHICH PATH -- which is what a file:line does not say ------------
+
+  A  8 x   934,576  scr_bytes_alloc <- [runtime TU, unmapped] <- .. <- main
+  B  8 x 1,048,576  scr_bytes_alloc <- ProtoStreamReader_ensure+2024
+  C  8 x   934,576  scr_bytes_alloc <- scr_bytes_copy+27 <- .. <- main
+  D  1 x 1,048,576  .. <- wsSendText <- wsOffer <- wsCatchUp <- wsAttach
+
+B is the decisive one: sc_tr__x25__x25_m41_ProtoStreamReader_ensure is the
+protobuf stream reader growing its read buffer, and it reaches
+scr_bytes_alloc DIRECTLY -- one 1 MiB Buffer per chunk. C is
+scr_bytes_copy (scr_bytes.c:79, scr_bytes_alloc(src->elem, src->len)) --
+a COPY of a 934,576-byte payload. A and C share their inner suffix
+(2035a9 202f5b 16e1a2 1a30bc9), so the 934,576 pair is ONE producer reached
+two ways, not two independent buffers: a payload produced once and copied
+once, at the SAME length.
+
+That settles "one object with two allocations vs two independent buffers
+per chunk" (86613275d s.7) in the FIRST direction, for 934,576 only.
+D is a DIFFERENT site -- its frames 0 and 1 fall outside scr_bytes.obj --
+on the websocket send path, and it is 1 allocation, not 8.
+
+WHY 6-7 LIVE BLOCKS AT THE PEAK: 8 chunks decode concurrently and each
+holds a 1 MiB reader buffer plus a 934,576-byte payload plus its copy. The
+count is the chunk fan-out, not a cap, and the burst drains as chunks
+retire -- which is why all of these classes have NO LINE AT ALL in the
+shutdown census.
+
+--- 5. THE BRIEFING PREDICTIONS, SCORED -------------------------------
+
+  "the pair comes out of scr_bytes.c:52"                    UPHELD
+
+  "934,576 = 2^4 x 58,411 with 58,411 prime, so it is a payload LENGTH
+   (data) and not a size derived from a cap"                UPHELD. Stack C
+   is a copy of an existing buffer and stack A its producer; neither is a
+   container growth. The one growth-shaped site in the band, B, carries the
+   OTHER class -- the round 2^20, which is the cap-shaped number. The
+   briefing had the right property on the right number.
+
+  "the stack should show a media/protobuf decode path, not a container
+   growth"                                                  UPHELD FOR B
+   (ProtoStreamReader.ensure). For A and C the deciding frames land in a
+   runtime TU this slice did not map, so the path above scr_bytes_copy is
+   NOT NAMED. Recorded as unfinished, not as agreement.
+
+  THE HALF THE BRIEFING CALLED MOST LIKELY WRONG -- "the band may not even
+  capture scr_bytes.c:52, because it is calloc and not malloc" -- is
+  REFUTED, and refuted BEFORE the build rather than by it: scr_prof.h:1005
+  defines scr_prof_calloc, :1061 macro-replaces calloc, and the body passes
+  the product to the stack note. The ten minutes of reading said GO.
+
+--- 6. CONTROLS -------------------------------------------------------
+
+POSITIVE CONTROL: not needed, and that is a statement about the result and
+not a skipped step. The band did not read zero -- it read 25 allocations
+and 24,390,400 bytes in BOTH runs. The previous build sizeband2=4376..4376
+captured 2,780 allocations of exactly 4,376 B, so the mechanism was known
+live; this run shows it live on two new sizes.
+
+EXACTNESS: bytes/count is an integer equal to a band edge in every row. A
+row mixing sizes would show a fractional mean. None does.
+
+NEGATIVE: tablefull=0 and lost=0 in both runs, so no row is a sample of
+whatever ran first, and no admitted allocation failed to key to a stack.
+
+WHAT THIS DOES NOT SHOW. skipped= is about 10.5 million: the band is a
+FILTER and these 25 stacks are not a census of the program. The claim is
+about the two named classes only.
+
+FLUX vs RETENTION. PROF counts the whole run, so 25 allocations over a run
+is a FLOW. That they are simultaneously LIVE at the peak is the separate
+HCPKSIZE evidence of 272390bd2, not something this band measures.
+

@@ -1,0 +1,17 @@
+
+STACKLESS KNOB GUARD
+  cli entry : G:\scriptc\packages\cli\dist\main.js
+  probe     : 10-line two-suspension async program
+
+  arm           ll bytes   scr_fiber   sha256-16
+  knob-absent     16545           0   3047805213e69e6c
+  knob-zero       12417           4   ee94b46325c7c865
+
+  [PASS] the two arms produced DIFFERENT artifacts -- absent sha=3047805213e69e6c  zero sha=ee94b46325c7c865
+  [PASS] knob ABSENT emits the STACKLESS lane (zero scr_fiber refs) -- scr_fiber refs=0
+  [PASS] knob=0 emits the FIBRE lane (one or more scr_fiber refs) -- scr_fiber refs=4
+  [PASS] the opt-out moves the artifact in the DOCUMENTED direction -- fibre refs off=4 > absent=0
+  [PASS] knob-absent arm emitted a non-empty TU -- 16545 bytes
+  [PASS] knob-zero arm emitted a non-empty TU -- 12417 bytes
+
+STACKLESS KNOB GUARD: OK (6/6 checks ran)

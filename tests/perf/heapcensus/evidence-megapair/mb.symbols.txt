@@ -1,0 +1,40 @@
+prog: USABLE  module=G:\blocks\mb-zig-local\o\0fbf49cb6e2aa35f19c1d2bcc31e769f\zapo-rest.obj | .text rva=0x242bc0..0x1a356ee size=25111342 | object .text sections=1 (size match 1) | function symbols=18895 | publics inside range=1 | publics AGREEING=1
+scr_bytes: USABLE  module=G:\blocks\mb-zig-local\o\74170598a6a22c21a1f6f4fd4b05097b\scr_bytes.obj | .text rva=0x10c680..0x114879 size=33273 | object .text sections=1 (size match 1) | function symbols=80 | publics inside range=59 | publics AGREEING=59
+
+A 8x934576 (m1:661)
+       1fee16  <unmapped>+0
+       1fe85e  <unmapped>+0
+       2035a9  <unmapped>+0
+       202f5b  <unmapped>+0
+       16e1a2  <unmapped>+0
+      1a30bc9  main+1001
+      1a35a4d  <unmapped>+0
+      1a35abc  <unmapped>+0
+
+B 8x1048576 (m1:662)
+       65a5e8  sc_tr__x25__x25_m41_ProtoStreamReader_ensure+2024
+       173390  <unmapped>+0
+    310923110  <unmapped>+0
+    3136ccaa9  <unmapped>+0
+
+C 8x934576 (m1:663)
+       10d6cb  scr_bytes_copy+27
+       14c4d3  <unmapped>+0
+       201f76  <unmapped>+0
+       1fe8e8  <unmapped>+0
+       2035a9  <unmapped>+0
+       202f5b  <unmapped>+0
+       16e1a2  <unmapped>+0
+      1a30bc9  main+1001
+
+D 1x1048576 (m1:660)
+       214402  <unmapped>+0
+       20c1d9  <unmapped>+0
+       214f0e  <unmapped>+0
+       21081e  <unmapped>+0
+       9fff9b  sc_f_wsSendText+267
+       a00fee  sc_f_wsOffer+2126
+       a0167c  sc_f_wsCatchUp+1564
+       a03198  sc_f_wsAttach+6024
+      1a0c48b  sc_f__x25_fn4458+91
+       221871  <unmapped>+0
