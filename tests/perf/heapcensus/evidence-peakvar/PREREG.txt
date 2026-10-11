@@ -1,0 +1,103 @@
+V3 PREREG -- registered BEFORE run 1 existed, and before either build finished
+==============================================================================
+written 2026-10-11, while the two builds were still in the frontend. Nothing
+in this file was edited after the first .heapcen.txt appeared.
+
+THE QUESTION
+  The settled heap has now been measured 3 v 3 twice (a0e2c9fa3, be8d74ddb)
+  and the lane effect there is NOT SEPARABLE at n=3. The PEAK has never been
+  measured with variance at all. Two figures in the record rest on n=1 or on
+  one pair:
+    * docs/estado-vmwalk.md / 7a277a8fa: the stackless peak is 94.33% CRT heap
+      of PrivateUsage, the fiber peak 17.89%, and the lane is worth -21.117 MiB
+      at the peak.
+    * tests/perf/heapcensus/PEAK-OCCUPANT.md / 2ee638a85: the peak heap is
+      81.90% busy against 46.19% at shutdown.
+  This slice gives the PEAK three runs per arm.
+
+THE TWO ARMS -- ONE DIFFERENCE
+  SL  STACKLESS   SCRIPTC_STACKLESS absent (the shipping default since 8f4100d7a)
+  FB  FIBER       SCRIPTC_STACKLESS=0
+  Same tree (be8d74ddb), same compiler dist (33d1e9e49e5c4111), same
+  SCRIPTC_PROF_CFLAGS including -DSCR_HEAPCEN_PEAK, same -o shape, same ten
+  run knobs. The build script is ONE file taking the arm letter; the env var
+  is the only branch in it. Built fresh: NO binary on this host carried
+  HCPKSIZE under G:\blocks\*out182*\ (verified by rg -ac against all eleven,
+  with HCSIZE reading 158/159 on three of them as the positive control that
+  the grep is alive).
+
+  CORRECTION TO THE BRIEF, FOUND BEFORE THE BUILD. The brief says no binary on
+  this host carries the peak trigger. Under the *out182* glob that is true.
+  Outside it, /g/blocks/fr2-out/pk/zapo-rest-182.exe DOES: rg -ac HCPKSIZE
+  reads 159. It is NOT used as an arm here -- it is a different tree
+  (5fa7a24f8), it also carries -DSCR_CYCSTAT_ON, and reusing it would make
+  the arms differ by three things. It is used only as prior evidence on
+  coverage, below.
+
+THE ORDER, DECLARED NOW AND NOT CHANGED
+  pos 1  SL      pos 4  SL
+  pos 2  FB      pos 5  SL
+  pos 3  FB      pos 6  FB
+  WHY ALTERNATED AND NOT BLOCKED: peak is bimodal by POSITION on this rig --
+  the first run of a session peaks ~28.7 MiB above the rest in 5 of 6 recorded
+  cases. A blocked order confounds the lane with that. Mean position is 3.33
+  for SL and 3.67 for FB.
+  AND THE LEAVE-ONE-OUT IS PROMISED NOW: position 1 is dropped and the whole
+  table re-run, REPORTED WHETHER OR NOT IT HELPS.
+
+THE FLOOR THAT APPLIES TO EVERY "YES" THIS SLICE CAN PRODUCE
+  At 3 v 3 there are C(6,3) = 20 arm assignments, so the smallest attainable
+  two-sided permutation p is 2/20 = 0.10. NO effect, however large, reaches
+  p < 0.05 at this n without leaning on normality. Every YES reported is
+  parametric and will say so. The Welch df collapses toward 2 with unequal
+  variances and the two-sided 95% bar there is 4.303, not the 2.776 of df=4;
+  the df used is printed per row.
+
+WHAT IS READ FIRST, BEFORE ANY COMPARISON
+  HCPKCOVER = snapPrivate / kernelPeakPagefile. A snapshot with low coverage
+  is a reading of a trough near the peak, not of the peak. vmcensus's
+  committed standard is 99.85-99.96%. The two committed peak runs that exist
+  (evidence-peak abba1A, abba4A, both STACKLESS, step 512 KB) read 99.547%
+  and 99.579% -- already BELOW that standard. Coverage for all six runs is
+  reported before any delta. A run outside the stated bar does not enter the
+  statistics and is named with its reason.
+
+MY PREDICTIONS, REGISTERED NOW
+  P1  The peak CRT-busy lane delta IS SEPARABLE at n=3 (|t| > t_crit at the
+      Welch df), unlike the settled one. Mechanism: at the peak the fiber arm
+      is holding ~20,000 parked stacks, a structural difference, not an
+      allocator fluctuation.
+  P2  The peak heap fraction (HCPKTOTAL bytes / snapPrivate) reproduces HIGH
+      on the stackless arm -- order 90% -- and well below that on fiber.
+  P3  Coverage is above 99% on all six.
+
+  >>> THE HALF MOST LIKELY TO BE WRONG IS P3, AND IT CONTAMINATES P1 AND P2.
+  The snapshot is taken by a POLLING thread (5 ms interval, 1 MiB step by
+  default). If coverage varies between runs -- and worse, if it varies
+  DIFFERENTLY between lanes, because the two programs climb at different
+  rates -- then the arms are not the same instant and the comparison is not
+  peak against peak. In that case the result of this slice is "the instrument
+  does not give two comparable arms at this n", and that is a legitimate
+  result I want to have. The two committed runs already read 99.55/99.58
+  rather than 99.9, which is weak prior evidence AGAINST P3 as worded.
+  A SECOND NAMED RISK: position bimodality, handled by alternating and by the
+  promised leave-one-out, and no conclusion will be drawn from run 1 vs run 2.
+
+WHAT THIS SLICE WILL NOT DO
+  * It will not re-measure the settled lane delta to n=7. Quantified by
+    be8d74ddb at ~33 min; not absorbed.
+  * It will not touch packages/runtime/src. If it needed to, the slice stops
+    and says so: that needs a gate.
+  * It will not merge or push.
+
+IDENTITY CHECKS OWED BEFORE RUN 1
+  1. node tests/perf/stackless-knob-guard.mjs against the dist that built both
+     arms. A dist that does not read the knob makes this a fiber-vs-fiber
+     comparison that REPORTS AGREEMENT.
+  2. rg -c scr_fiber on both .ll. Reference: stackless ~3, fiber ~1488, ratio
+     ~496x. BOTH READ NON-ZERO and that is the control working -- stackless
+     conversion is per function, so a real module keeps a declare and two
+     calls. The discriminator is the RATIO, not the zero; "must be 0" belongs
+     only to the ten-line probe inside the guard.
+  3. The PROF row for scr_string.c:820 carries the binary's own site id and
+     must partition cleanly by arm, independently of the manifest.

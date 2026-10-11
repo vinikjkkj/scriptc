@@ -1,0 +1,282 @@
+=== V3 RESULTS -- THE PEAK, FIBER vs STACKLESS, 3 runs each, alternated ===
+tree      /g/blocks/v3-wt @ be8d74ddb, branch perf/heapcen-peak-variance
+SL = STACKLESS  /g/blocks/v3-out182-SL/zapo-rest-182.exe  (knob ABSENT at build)
+FB = FIBER      /g/blocks/v3-out182-FB/zapo-rest-182.exe  (SCRIPTC_STACKLESS=0)
+BOTH BUILT FOR THIS SLICE from one script taking the arm letter; the env var
+is the only branch in it. No binary under the G:\blocks\*out182* glob carried
+HCPKSIZE before these two.
+knobs     CHUNKS=8 CONVS=400 MSGS=6 TEXTLEN=300 ROUNDS=1 IDLE_S=60 SETTLE_MS=45000
+          PRESYNC_MS=20000 SCR_SQLITE_IDLE_RELEASE_MS=1000 SCR_SQLITE_IDLE_STAT=1
+peak      DEFAULT trigger: 5 ms poll, 1024 KB step, no SCR_HEAPCEN_PEAK_* set.
+order     SL FB FB SL SL FB, declared in PREREG.txt before run 1 existed.
+
+=== >>> 1. COVERAGE FIRST. THIS GATES EVERYTHING BELOW. <<< ===
+  HCPKCOVER prints the snapshot's own PrivateUsage against the kernel's
+  PeakPagefileUsage. A snapshot with low coverage is a reading of a TROUGH
+  NEAR the peak, not of the peak. vmcensus's committed standard is
+  99.85-99.96%. The two committed peak runs that exist (evidence-peak
+  abba1A/abba4A, both STACKLESS, 512 KB step) read 99.547% and 99.579%.
+
+pos tag arm lane        snapPrivate   kernelPeak    polledHigh   coverage   walks  polls  stepB
+  1 p1  SL  STACKLESS     99692544    100233216     100220928    99.461%      31   9044  1048576
+  2 p2  FB  FIBER        508194816    508899328     508608512    99.862%     134   9175  1048576
+  3 p3  FB  FIBER        508424192    508784640     508461056    99.929%     125   9175  1048576
+  4 p4  SL  STACKLESS    108261376    108290048     108281856    99.974%      35   9109  1048576
+  5 p5  SL  STACKLESS     99340288    100192256     100179968    99.150%      31   9043  1048576
+  6 p6  FB  FIBER        599945216    600772608     600756224    99.862%     156   9242  1048576
+
+  SL coverage mean 99.528%  sd 0.4160 pp   range 0.8239 pp
+  FB coverage mean 99.884%  sd 0.0388 pp   range 0.0676 pp
+  DOES COVERAGE DIFFER BY LANE?  delta (SL-FB) = -0.3564 pp, |t| = 1.48,
+  Welch df = 2.03, t_crit = 4.303  =>  no -- comparable relative instants
+  THIS IS THE QUESTION THE PREREG NAMED AS MOST LIKELY TO BREAK THE SLICE.
+  If coverage differs by lane, the arms are not the same instant and nothing
+  below is a peak-against-peak comparison.
+
+  THE PRE-REGISTERED BAR WAS "above 99% on all six". Runs below it: NONE
+  Runs entering the statistics: 6 of 6.
+  AND A SECOND READING THE BAR DOES NOT COVER: the gap between polledHigh and
+  kernelPeak is the part of the climb the POLLER never saw; the gap between
+  snapPrivate and polledHigh is what the 1 MiB STEP skipped.
+  tag   kernelPeak-polledHigh   polledHigh-snapPrivate   (both in bytes)
+  p1                    12288                   528384
+  p2                   290816                   413696
+  p3                   323584                    36864
+  p4                     8192                    20480
+  p5                    12288                   839680
+  p6                    16384                   811008
+
+=== 2. CONTROLS (a control that cannot fail is not a control) ===
+  p1  HCTOTAL==heap-0 busy, blocks match, settled lost==0, peak lost==0 : OK
+  p2  HCTOTAL==heap-0 busy, blocks match, settled lost==0, peak lost==0 : OK
+  p3  HCTOTAL==heap-0 busy, blocks match, settled lost==0, peak lost==0 : OK
+  p4  HCTOTAL==heap-0 busy, blocks match, settled lost==0, peak lost==0 : OK
+  p5  HCTOTAL==heap-0 busy, blocks match, settled lost==0, peak lost==0 : OK
+  p6  HCTOTAL==heap-0 busy, blocks match, settled lost==0, peak lost==0 : OK
+
+  LANE IDENTITY -- read off the .ll before run 1, see IDENTITY.txt:
+  BOTH ARMS READ NON-ZERO scr_fiber and THAT IS THE CONTROL WORKING. Stackless
+  conversion is per-function, so a real module keeps a declare and two calls
+  on the stackless lane. The discriminator is the RATIO, not the zero; the
+  "must be 0" criterion belongs only to the ten-line probe in
+  tests/perf/stackless-knob-guard.mjs, which passed 6/6 against the dist that
+  built both arms.
+
+  SITE-ID CONTROL, per run, independent of the manifest:
+    p1 SL  site 1bae567
+    p2 FB  site 1b0b567
+    p3 FB  site 1b0b567
+    p4 SL  site 1bae567
+    p5 SL  site 1bae567
+    p6 FB  site 1b0b567
+    arm SL: 1bae567   arm FB: 1b0b567   partitions cleanly: YES
+
+  AND A NULL THAT PROVES NOTHING IN THIS SLICE, SAID OUT LOUD. Both arms are
+  post-repair, so neither could make HCSIZE 131079 read non-zero; its absence
+  here discriminates nothing. Its positive arm lives in evidence-variance
+  arm A (46, 46, 46). Read it there, not here.
+
+=== 3. EVERY RUN, in the declared SL FB FB SL SL FB order ===
+pos tag arm       pkCrtBusy  pkCrtBlocks     pkAllBusy    pkAllFree  pkAllUnc   pk busy%  settled busy  settled busy%  pk/settled
+  1 p1  SL       48281280        80462      48300672      7483632  16547840    86.585%      15913168        41.436%       3.034
+  2 p2  FB       79182560       164861      79201952      3591040   5566464    95.663%      15867008        35.265%       4.990
+  3 p3  FB       78773632       158535      78793024      4075440   5476352    95.082%      15915296        33.734%       4.950
+  4 p4  SL       52558208        78414      52577600     11395952   9035776    82.186%      16269072        41.227%       3.231
+  5 p5  SL       48498880        87054      48518272      6928768    274432    87.504%      15894496        47.374%       3.051
+  6 p6  FB       91949168       189948      91968560      4491760   9330688    95.343%      16289872        34.758%       5.645
+
+=== >>> 4. EACH ARM'S SPREAD, BEFORE ANY t. <<< ===
+column            FB range      FB sd      SL range      SL sd    FB sd / SL sd
+pkCrtBusy           13175536    7491643      4276928    2408928              3.1
+pkCrtBlocks            31413      16614         8640       4515              3.7
+pkAllBusy           13175536    7491643      4276928    2408928              3.1
+pkAllFree             900720     450789      4467184    2434812              0.2
+pkAllUnc             3854336    2199750     16273408    8144692              0.3
+pkAllCommitted      13667328    7869139      8526512    4828370              1.6
+snapPrivate         91750400   52906027      8921088    5051976             10.5
+kernelPeak          91987968   53076201      8097792    4663483             11.4
+busy                  422864     231464       374576     211078              1.1
+committed            2184192    1181429      5911024    3152011              0.4
+
+=== 5. ALL SIX RUNS. Welch t, CRITICAL VALUE TAKEN AT THE WELCH df ===
+column           FB mean     FB sd      SL mean     SL sd       delta SL-FB     |t|    df   t_crit          95% CI on the delta   sig?
+pkCrtBusy          83301787   7491643     49779456   2408928        -33522331     7.38   2.41   4.303        [-53072611, -13972050]   YES
+pkCrtBlocks          171115     16614        81977      4515           -89138     8.97   2.29   4.303             [-131910, -46366]   YES
+pkAllBusy          83321179   7491643     49798848   2408928        -33522331     7.38   2.41   4.303        [-53072611, -13972050]   YES
+pkAllFree           4052747    450789      8602784   2434812          4550037     3.18   2.14   4.303          [-1601657, 10701732]    no
+pkAllUnc            6791168   2199750      8619349   8144692          1828181     0.38   2.29   4.303         [-19130994, 22787357]    no
+pkAllCommitted     87373925   7869139     58401632   4828370        -28972293     5.44   3.32   3.182        [-45933329, -12011258]   YES
+snapPrivate       538854741  52906027    102431403   5051976       -436423339    14.22   2.04   4.303      [-568457680, -304388997]   YES
+kernelPeak        539485525  53076201    102905173   4663483       -436580352    14.19   2.03   4.303      [-568947590, -304213114]   YES
+busy               16024059    231464     16025579    211078             1520     0.01   3.97   3.182             [-573972, 577012]    no
+committed          46346432   1181429     37139376   3152011         -9207056     4.74   2.55   4.303          [-17569704, -844408]   YES
+  SIGN CONVENTION: delta = SL - FB = STACKLESS minus FIBER, the direction the
+  record's -21.117 MiB peak sentence reports.
+  The Welch df collapses toward 2 when the variances are unequal, and the
+  two-sided 95% bar there is 4.303, NOT the 2.776 of df=4.
+
+  >>> AND THE PERMUTATION FLOOR APPLIES TO EVERY "YES" IN THAT TABLE. <<<
+  At 3 v 3 there are C(6,3) = 20 arm assignments, so the smallest attainable
+  TWO-SIDED permutation p is 2/20 = 0.10. No effect, however large, reaches
+  p < 0.05 at this n without leaning on normality. EVERY YES ABOVE IS
+  PARAMETRIC.
+
+=== 6. LEAVE-ONE-OUT: position 1 (p1) dropped, as PREREG.txt promised ===
+column           FB mean     FB sd      SL mean     SL sd       delta SL-FB     |t|    df   t_crit          95% CI on the delta   sig?
+pkCrtBusy          83301787   7491643     50528544   2870378        -32773243     6.86   2.71   4.303        [-53332296, -12214189]   YES
+pkCrtBlocks          171115     16614        82734      6109           -88381     8.40   2.67   4.303             [-133648, -43113]   YES
+pkAllBusy          83321179   7491643     50547936   2870378        -32773243     6.86   2.71   4.303        [-53332296, -12214189]   YES
+pkAllFree           4052747    450789      9162360   3158776          5109613     2.27   1.03  12.706         [-23462421, 33681647]    no
+pkAllUnc            6791168   2199750      4655104   6195206         -2136064     0.47   1.17  12.706         [-60088873, 55816745]    no
+pkAllCommitted     87373925   7869139     59710296   6029154        -27663629     4.44   2.77   4.303          [-54472552, -854707]   YES
+snapPrivate       538854741  52906027    103800832   6308162       -435053909    14.09   2.08   4.303      [-567884415, -302223404]   YES
+kernelPeak        539485525  53076201    104241152   5726004       -435244373    14.08   2.07   4.303      [-568249629, -302239118]   YES
+busy               16024059    231464     16081784    264865            57725     0.25   2.02   4.303            [-932295, 1047745]    no
+committed          46346432   1181429     36506888   4179725         -9839544     3.24   1.11  12.706         [-48379397, 28700309]    no
+  Promised before run 1 and reported whether or not it helps. Peak is bimodal
+  by POSITION on this rig -- the first run peaks ~28.7 MiB above the rest in
+  5 of 6 recorded cases -- and dropping position 1 leaves arm SL with n=2, so
+  the df falls and the bar rises.
+
+=== 6b. THE -21.117 MiB SENTENCE, PLACED AGAINST THE RIGHT COLUMN ===
+  THE CLAIM, located by rg and quoted: pagecensus/evidence-fr2/DECOMP.txt,
+  block "WHAT THE LANE REMOVED", row CRT HEAP:
+      79.828 MiB fiber   58.711 MiB stackless   -21.117 MiB
+  That row is CRT heap COMMITTED at the PEAK. The column that answers it
+  here is pkAllCommitted = HCPKHEAPS busy + free, not pkCrtBusy. The
+  non-CRT heaps contribute ~30 KB, so the all-heaps aggregate is within
+  0.03% of the CRT-only figure; the peak walk does not print per-heap free,
+  so a CRT-only peak committed cannot be formed from this instrument.
+
+  recorded fiber     79.828 MiB    measured here 83.326 MiB (sd 7.505)
+  recorded stackless 58.711 MiB    measured here 55.696 MiB (sd 4.605)
+  recorded delta    -21.117 MiB    measured here -27.630 MiB
+  |t| = 5.44, Welch df = 3.32, t_crit = 3.182 => SEPARABLE
+  95% CI [-43.805, -11.455] MiB; contains 0: NO; contains -21.117: YES
+  DIFFERENT TREE, DIFFERENT BINARY, DIFFERENT SESSION, AND BOTH ARM MEANS
+  LAND WITHIN A FEW MiB OF THE RECORDED PAIR. This is the first lane figure
+  in this front to survive a variance estimate.
+
+=== 7. THE PEAK HEAP FRACTION, the 94.33% / 17.89% pair under audit ===
+  DENOMINATOR, NAMED: snapPrivate, this run, at the snapshot instant.
+  NUMERATOR: HCPKTOTAL bytes, the CRT heap's BUSY bytes in THIS INSTRUMENTED
+  BINARY at that same instant. It is NOT the uninstrumented subject's peak,
+  and WHICH-BUFFER.md s.5 forbids quoting a commit or RSS figure from an
+  instrumented binary -- that prohibition is kept.
+  tag arm   CRT busy at peak    snapPrivate    heap fraction
+  p1  SL           48281280       99692544          48.430%
+  p2  FB           79182560      508194816          15.581%
+  p3  FB           78773632      508424192          15.494%
+  p4  SL           52558208      108261376          48.548%
+  p5  SL           48498880       99340288          48.821%
+  p6  FB           91949168      599945216          15.326%
+
+  STACKLESS mean 48.600%  sd 0.201 pp   (record claims 94.33%)
+  FIBER     mean 15.467%  sd 0.130 pp   (record claims 17.89%)
+  delta SL-FB = 33.133 pp, |t| = 240.41, df = 3.42, t_crit = 3.182 => SEPARABLE
+
+  >>> THESE TWO PERCENTAGES ARE NOT COMPARABLE TO 94.33% / 17.89%, AND THE
+  REASON IS THE DENOMINATOR, NOT THE LANE. <<<
+  The NUMERATOR reproduces: the record puts the stackless peak CRT heap at
+  53.438 MiB and this slice measures 47.473 MiB busy.
+  The DENOMINATOR does not. The record's 94.33% implies a PrivateUsage of
+  about 56.6 MiB; this binary peaks at 97.7 MiB on the same lane and the same
+  load. The instrument declared 786,432 B of .data and one 64 KiB stack; the
+  measured gap is about 41 MiB, two orders of magnitude more, and the PROF
+  tables (-DSCR_PROF_ALLOC -DSCR_PROF_SIZEHIST -DSCR_PROF_STACKS) are
+  carried here and were NOT carried by the vmcensus run that produced
+  94.33%. SO: this slice does NOT refute 94.33%. A heap-over-PrivateUsage
+  FRACTION taken from an instrumented binary is not comparable to one taken
+  from a lighter one, and WHICH-BUFFER.md s.5 already forbids quoting a
+  commit figure from an instrumented binary. What this slice DOES establish
+  is the ORDERING and the GAP: stackless holds a far larger share of its own
+  address space in the CRT heap than fiber does, by 33.1 pp, and that is
+  separable. The absolute 94.33% is UNTOUCHED, neither confirmed nor refuted.
+
+=== 8. 81.90% BUSY AT PEAK vs 46.19% AT SHUTDOWN (PEAK-OCCUPANT.md) ===
+  DENOMINATOR, NAMED: busy+free of the SAME walk -- all heaps at the peak,
+  CRT heap 0 at shutdown. Each is instant-consistent within its own walk
+  (one HeapWalk under one HeapLock, scr_heap_census.h:298).
+  tag arm   busy% at peak   busy% at shutdown      swing
+  p1  SL         86.585%             41.436%      45.15 pp
+  p2  FB         95.663%             35.265%      60.40 pp
+  p3  FB         95.082%             33.734%      61.35 pp
+  p4  SL         82.186%             41.227%      40.96 pp
+  p5  SL         87.504%             47.374%      40.13 pp
+  p6  FB         95.343%             34.758%      60.59 pp
+
+  STACKLESS: peak busy 85.425% (sd 2.842 pp), shutdown 43.345% (sd 3.490 pp)
+  FIBER    : peak busy 95.363% (sd 0.291 pp), shutdown 34.586% (sd 0.780 pp)
+  THE PEAK-vs-SHUTDOWN SWING IS A WITHIN-RUN PAIRED CONTRAST -- same process,
+  same binary, two instants -- so it does NOT pay the between-run variance
+  that the lane delta pays. That is why it can be strong here while the lane
+  delta is not.
+
+=== 9. THE LARGEST OCCUPANT AT THE PEAK, per run ===
+  tag arm   top size   top blocks     top bytes   share of CRT busy | 65536-row blocks/bytes
+  p1  SL       65536          305      19994080            41.412% |    305   19994080
+  p2  FB        1328        20203      27476064            34.700% |    314   20584304
+  p3  FB        1328        20203      27476064            34.880% |    315   20650048
+  p4  SL       65536          326      21370880            40.661% |    326   21370880
+  p5  SL       65536          306      20059744            41.361% |    306   20059744
+  p6  FB        1328        24242      32969104            35.856% |    356   23337504
+
+=== 9b. THE 1,328 CLASS AT THE PEAK -- A LANE POPULATION, NOT A BUFFER ===
+  Read off HCPKSIZE 1328 and HCSIZE 1328 in the six runs:
+  tag arm   1328 blocks AT PEAK   1328 blocks AT SHUTDOWN   4376 blocks AT PEAK
+  p1  SL                   13                         1                  1570
+  p2  FB                20203                        14                  1157
+  p3  FB                20203                        14                  1197
+  p4  SL                   15                         1                  1845
+  p5  SL                   13                         1                  1470
+  p6  FB                24242                        14                  1293
+
+  STACKLESS at peak: 13, 15, 13      FIBER at peak: 20203, 20203, 24242
+  ratio of means = 1577x. At SHUTDOWN the class is single digits to
+  low tens on BOTH lanes, so the fiber population is entirely released
+  before the settled census runs -- which is exactly why no settled census
+  in this repository could ever have seen it.
+
+  WHAT IT IS. The PROF flags on both arms declare this band as the STACK
+  band by name (-DSCR_PROF_STACK_SIZE_MIN=1296 -DSCR_PROF_STACK_SIZE_MAX=1352),
+  and the count tracks the parked-coroutine population: ~20,200 on two fiber
+  runs and ~24,200 on the third, against 13-15 on every stackless run.
+
+  >>> AND IT PUTS A QUESTION TO WHICH-BUFFER.md s.1, WHICH IS TITLED
+  "it is not a buffer, it is SQLite". <<< That section reads the 1,328 class
+  at REST (it quotes HCSIZE 1328 live at rest = 1) and on ONE lane. At rest
+  this slice agrees with it exactly -- 1 to 14 blocks. At the PEAK on the
+  FIBER lane the same class carries 20,203-24,242 blocks, and that
+  population is a lane property that disappears when the lane changes. This
+  does NOT refute s.1: a class can hold SQLite blocks at rest and fiber
+  stacks at the peak, and s.1 never claimed otherwise about the peak. It
+  does mean the sentence "1,328 is SQLite's" is scoped to the settled
+  instant and must not be carried to the peak. NOT PURSUED FURTHER HERE --
+  naming it is the whole of the claim; attributing it by site id is a
+  separate slice and this one did not do it.
+  The 4,376 class ("the whole database", WHICH-BUFFER s.2) runs the OTHER
+  way at the peak: stackless 1570, 1845, 1470 against fiber 1157, 1197, 1293. Named, not explained.
+
+=== 10. POWER, n=3 per arm, on the headline peak column ===
+  pkCrtBusy: pooled sd = 5564514 B;  se of the difference = 4543407 B;  t_crit(df=2.41) = 4.303
+  power to detect a TRUE peak CRT-busy shift of  33522331 B (31.97 MiB)  =  99.9%
+  power to detect a TRUE peak CRT-busy shift of   1048576 B (1.00 MiB)  =  0.0%
+  power to detect a TRUE peak CRT-busy shift of   5242880 B (5.00 MiB)  =  0.1%
+  power to detect a TRUE peak CRT-busy shift of  10485760 B (10.00 MiB)  =  2.3%
+  power to detect a TRUE peak CRT-busy shift of  22142779 B (21.12 MiB)  =  71.6%
+  MINIMUM DETECTABLE EFFECT at 80% power = 23375829 B = 22.29 MiB
+  runs per arm to bring the MDE to the MEASURED delta 33522331 B: n = 3 per arm (MDE 16438047 B)
+
+=== 11. THE PRE-REGISTERED PREDICTIONS, SCORED ===
+  P1 "the peak CRT-busy lane delta IS separable at n=3"
+     measured -33522331 B (-31.969 MiB), |t| = 7.38 vs t_crit 4.303 => CONFIRMED (parametric; the permutation floor is still p=0.10)
+     95% CI [-53072611, -13972050] B; contains 0: NO; contains the recorded -22142779 B: YES
+     AND IT SURVIVES THE LEAVE-ONE-OUT: with p1 dropped, |t| = 6.86 vs 4.303 => still separable
+  P2 "the stackless peak heap fraction reproduces high (order 90%), fiber well below"
+     WRONG AS WORDED, and NOT because the lane moved. stackless 48.600%,
+     fiber 15.467%. The ORDERING and the 33.1 pp gap are separable at
+     |t| = 240; the ABSOLUTE 94.33% is not reproducible from an instrumented
+     binary because the denominator carries the instrument (section 7). I
+     predicted a number whose denominator I had not checked.
+  P3 "coverage above 99% on all six"  -- the half named as most likely wrong
+     HELD; lane difference in coverage is NOT separable (|t| 1.48 vs 4.303).

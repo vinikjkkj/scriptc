@@ -1,0 +1,12 @@
+p1  PROF 46 3014656 0 0 0 1bae567 0 G:\scriptc\packages\runtime\src\scr_string.c:820
+p1  PROFHIST 1bae567 16:46 G:\scriptc\packages\runtime\src\scr_string.c:820
+p2  PROF 46 3014656 0 0 0 1b0b567 0 G:\scriptc\packages\runtime\src\scr_string.c:820
+p2  PROFHIST 1b0b567 16:46 G:\scriptc\packages\runtime\src\scr_string.c:820
+p3  PROF 46 3014656 0 0 0 1b0b567 0 G:\scriptc\packages\runtime\src\scr_string.c:820
+p3  PROFHIST 1b0b567 16:46 G:\scriptc\packages\runtime\src\scr_string.c:820
+p4  PROF 47 3080192 0 0 0 1bae567 0 G:\scriptc\packages\runtime\src\scr_string.c:820
+p4  PROFHIST 1bae567 16:47 G:\scriptc\packages\runtime\src\scr_string.c:820
+p5  PROF 46 3014656 0 0 0 1bae567 0 G:\scriptc\packages\runtime\src\scr_string.c:820
+p5  PROFHIST 1bae567 16:46 G:\scriptc\packages\runtime\src\scr_string.c:820
+p6  PROF 47 3080192 0 0 0 1b0b567 0 G:\scriptc\packages\runtime\src\scr_string.c:820
+p6  PROFHIST 1b0b567 16:47 G:\scriptc\packages\runtime\src\scr_string.c:820

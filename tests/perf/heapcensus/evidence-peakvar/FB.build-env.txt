@@ -1,0 +1,29 @@
+ARM            FB (FIBER)
+KNOB           SCRIPTC_STACKLESS=0
+head           be8d74ddb3dc2703694fcc4ca41185d8a0f19f80
+branch         main
+dirty          M pnpm-lock.yaml;
+hdr-tree       be8d74ddb3dc2703694fcc4ca41185d8a0f19f80
+hdr-sha        f1a3b12c9a0bd505
+prof-sha       55f5b22d397e3513
+rt-src-sha     6a19e80ea8f4558d720b78ddb3faf4c9cb3ce78a
+cli-dist-sha   33d1e9e49e5c4111
+zig            0.16.0 at /g/tools/zig/zig
+node           v22.18.0 at /c/nvm4w/nodejs/node
+target         x86_64-windows-gnu
+PROF_CFLAGS    -include G:/scriptc/tests/perf/prof/scr_prof.h -DSCR_PROF_ALLOC -DSCR_PROF_SIZEHIST -DSCR_PROF_STACKS -DSCR_PROF_STACK_SIZE_MIN=1296 -DSCR_PROF_STACK_SIZE_MAX=1352 -DSCR_PROF_STACK_SIZE_MIN2=4376 -DSCR_PROF_STACK_SIZE_MAX2=4376 -include G:/blocks/v3-wt/tests/perf/heapcensus/scr_heap_census.h -DSCR_HEAPCEN_PEAK
+SCRIPTC_NO_CACHE 1
+TMP            G:\blocks\v3-tmp-FB
+START          2026-10-11T09:20:36Z
+free-before-GB 37G
+END            2026-10-11T09:31:10Z
+BUILD-EXIT     0
+elapsed-s      634
+free-after-GB  36G
+EXE            33199616
+EMITTED-LL     zapo-rest.ll=229342782
+EMITTED-LL-N   1
+EMITTED-C-N    0
+EARLY-CACHE    0
+head-after     be8d74ddb3dc2703694fcc4ca41185d8a0f19f80
+rt-src-after   6a19e80ea8f4558d720b78ddb3faf4c9cb3ce78a

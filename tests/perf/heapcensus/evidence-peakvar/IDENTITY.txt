@@ -1,0 +1,38 @@
+V3 IDENTITY -- the lane, certified by artifact, BEFORE run 1
+============================================================
+
+1. THE COMPILER READS THE KNOB AT ALL.
+   node tests/perf/stackless-knob-guard.mjs against the dist that built
+   BOTH arms (G:\scriptc\packages\cli\dist\main.js, sha256-16
+   33d1e9e49e5c4111):  OK, 6/6 checks ran.
+     knob-absent  ll 16551 B  scr_fiber refs 0  sha 7f40cb021bfc1595
+     knob-zero    ll 12423 B  scr_fiber refs 4  sha b9d08a77b7ad4b95
+   A dist that does not read SCRIPTC_STACKLESS makes this slice a
+   fiber-against-fiber comparison that REPORTS AGREEMENT. That defect has
+   happened here before; this is the artifact that rules it out.
+
+2. THE TWO ARMS ARE ON DIFFERENT LANES, read off the emitted IR.
+   SL  /g/blocks/v3-out182-SL/zapo-rest.ll  242844788 B   rg -c scr_fiber = 3
+   FB  /g/blocks/v3-out182-FB/zapo-rest.ll  229342782 B   rg -c scr_fiber = 1488
+   ratio 496x.
+
+   >>> BOTH READ NON-ZERO, AND THAT IS THE CONTROL WORKING. <<<
+   Stackless conversion is PER FUNCTION, so a real module keeps a declare
+   and two calls on the stackless lane:
+     declare ptr @scr_fiber_promise(ptr)
+       %pr = call ptr @scr_fiber_promise(ptr %self)
+       %pr = call ptr @scr_fiber_promise(ptr %self)
+   The discriminator is the RATIO, not the zero. The 'must be 0' criterion
+   belongs only to the ten-line probe inside the guard, where there is one
+   function and nothing else to keep a reference alive.
+
+3. THE SIZES MATCH THE RECORDED REFERENCE BAND, independently.
+   recorded: stackless 242,844,7xx, fiber 229,342,7xx.
+   measured: stackless 242844788, fiber 229342782.
+   These are DIFFERENT BUILDS from a different tree than the recorded pair
+   (be8d74ddb vs 5fa7a24f8 / ff33bac69), so this is agreement across trees,
+   not a tautology.
+
+4. THE PER-RUN IDENTITY, independent of the manifest, is the PROF site id
+   the binary carries for scr_string.c:820. It is reported per run in
+   RESULTS.txt and must partition cleanly by arm.
