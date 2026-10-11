@@ -19,8 +19,11 @@ set it selects is dense enough to fill chunks of its own.
 
 **A SURVIVOR IS NOT A PINNER.** What keeps 64 KiB is the object that is
 *alone* in a chunk. `../cycensus` reports survivors by kind and cannot say
-which chunk any of them is in; `docs/estado-vmwalk.md:745-759` reads four
-kinds off it and concludes a `trace`-keyed arena would be a four-way split.
+which chunk any of them is in; `docs/estado-vmwalk.md`, §"The idle-floor
+front, 2026-10-03" (its `held at rest / ceiling if perfect / delivered` block
+and the subsection "The cycle arena is placement, and the survivors are four
+kinds"), reads four kinds off it and concludes a `trace`-keyed arena would be a
+four-way split.
 That is a by-type census over all survivors, and it answers a different
 question from the one a split has to pass. This header reports, per chunk
 still held, the blocks actually in it.
@@ -143,9 +146,14 @@ arena, at exit      114 chunks = 7.13 MiB of chunk address space
 ```
 
 `cycstat` on the same run: `arena chunks=611 freed=497 held=114 peakheld=276`.
-`docs/estado-vmwalk.md:735` recorded **115 chunks / 7.19 MiB** for the same
-question on an uninstrumented binary, and `:747` recorded **48,537**
-`scr_dyn_gcfree` objects live at rest. This census, with the instrument in,
+`docs/estado-vmwalk.md`, §"The idle-floor front, 2026-10-03", recorded
+**115 chunks / 7.19 MiB** for the same question on an uninstrumented binary
+(the `cycle arena  115 chunks  7.19 MiB` row), and the same section's
+`scr_dyn_gcfree  3,106,368  64.96%  48,537 objects` row recorded **48,537**
+objects live at rest. *(Those two were cited as `:735` and `:747` until
+2026-10-10; both line numbers had already drifted — to 753 and 765 — because
+edits above them lengthened the file. Pointers here carry section and quoted
+phrase for that reason.)* This census, with the instrument in,
 reads 114 chunks and **48,537** `scr_dyn_gcfree` pinners. The agreement is
 the external control on the instrument's footprint.
 
@@ -454,3 +462,40 @@ than it carves.
 is a strict refinement of type, phase loses to `Aleft`, and the per-object
 oracle that bounds all three is 1.5% of a heap that is 10.9% of peak private
 commit (`docs/estado-vmwalk.md:67`). There is no allocator key left to test.
+
+> **The last clause of that sentence is wrong twice. The conclusion survives
+> anyway, but on a different leg. Tagged 2026-10-10; the sentence is kept
+> verbatim because it is what was quoted onward.**
+>
+> **(1) The denominator is pre-fix.** The 10.9% is the heap's share of an
+> **855.41 MiB** peak measured before commit `be758dfa6` (2026-10-02) shipped
+> `SCR_FIBER_COMMIT` 16 KiB -> 4096 and `SCR_FIBER_RESERVE` 0 -> 1 MiB. The
+> citation here was written at 17:02 that day and the superseding note in
+> `estado-vmwalk` landed at 19:31, so this was never punctured by it — and
+> nobody came back. The shipped peak is **538.51 MiB** (`estado-vmwalk` §7,
+> "What the two levers are worth, MEASURED on the real workload", the `both`
+> row of the high-mode table). **The levers moved the fiber-stack and
+> page-table terms and did not touch the heap, so the heap's SHARE grew while
+> its BYTES did not:** §3's measured 93.13 MiB PRIVATE class against 538.51 is
+> **17.3%**, and §7's residual — 538.51 minus ~389.1 MiB of stacks (16,830
+> B/stack x 24,241-24,246) minus 48.68 MiB of page tables minus §3's 0.87 MiB
+> IMAGE/MAPPED — is 99.9 MiB, **18.5%**. §7 reports no PRIVATE-class walk, so
+> **17.3-18.5% is a bracket, not a measurement.** Do not quote a point value.
+>
+> **(2) The 1.5% was never a fraction of a heap.** This file's own figure is
+> "1.13 MiB = 1.5% of the run's 74.08 MiB settled privateCommit" (under "And it
+> still does not pay, because the survivors are MIXED", and again under "3. And
+> the policy still loses, at every cut where its own bound is tight") — the
+> WHOLE process at rest, a different instant and a different run from
+> `estado-vmwalk`'s peak. Chaining 1.5% through 10.9% as though both
+> denominators named the same heap was never valid, before the levers or after.
+>
+> **Why "no allocator key left to test" still holds.** What bounds the keys is
+> the oracle's ABSOLUTE ceiling of **1.13 MiB / 18 chunks**, and no lever in
+> `estado-vmwalk` touches the cycle arena, so that ceiling is unchanged. As a
+> share of peak it went 1.13/855.41 = 0.13% -> 1.13/538.51 = **0.21%** — it got
+> relatively larger and is still far from worth a key. **What is weakened is
+> only the amplifier.** "The heap is a small part of the peak" is no longer
+> true at ~18%, so the verdict must now rest on the 1.13 MiB ceiling alone —
+> which is where it always actually rested. A reader who wants to reopen the
+> heap has a better reason than before; they still have no better KEY.

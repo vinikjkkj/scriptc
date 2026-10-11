@@ -93,6 +93,22 @@ exactly two regions each. Per fiber, 16 MiB of address space reserved, 28,672
 bytes committed (12,288 guard + 16,384 usable), and a median of **one touched
 page**. Resident per base: p50 4,096, p90 12,288, max 73,728.
 
+> **The per-fiber geometry in that paragraph is PRE-FIX. Tagged 2026-10-10.**
+> Commit `be758dfa6` (2026-10-02) shipped `SCR_FIBER_COMMIT` 16 KiB -> 4096 and
+> `SCR_FIBER_RESERVE` 0 (inherited 16 MiB) -> 1 MiB, so a fiber today reserves
+> **1 MiB** and commits **16,384 bytes** (12,288 guard + 4,096 usable), not
+> 16 MiB / 28,672. See `docs/estado-vmwalk.md` §5, §6 and §7. The resident and
+> count figures above are unaffected — the levers moved committed bytes, not
+> residency and not fiber count — and the RSS table above this paragraph is
+> likewise unaffected, since §7 of `estado-vmwalk` measures peak working set as
+> **unchanged** by both levers. **Only the two per-fiber byte figures in this
+> paragraph are stale.**
+>
+> *"Exactly two regions each" is still true, and it is what converts the
+> `SCR_MM_MAXREG` caveat above into a fiber count: 32,768 regions / 2 =
+> **~16,384 concurrent fiber stacks** before this header starts dropping
+> regions in silence. The runs on this page used 8,019.*
+
 So the stack term is driven by fiber COUNT, not by per-fiber waste; at this
 concurrency 8,019 x 4 KiB is about 31 MiB that no per-stack change can
 reclaim. HEAP at ~112 MiB is 58% of peak and is the dominant term.

@@ -9,6 +9,12 @@ knobs would move without touching the allocator, placement, or zapo.
 Base `e54bf853f`. The subject is an **uninstrumented** `tests/perf/zapo-rest/app182`
 binary — the shipped lane, no census header anywhere in it.
 
+**The 855 MiB in the title is the PRE-FIX peak**, and so is all of §3. Commit
+`be758dfa6` (2026-10-02) shipped the two levers this file argues for, and the
+shipped peak is **538.51 MiB** — §7, "What the two levers are worth, MEASURED on
+the real workload", the `both` row of the high-mode table. The title is left as
+written because it is what the file was named; §3 carries the full marker.
+
 ---
 
 ## 1. The column, and why it is that column
@@ -52,6 +58,25 @@ suspects.
 
 ## 3. The budget at the peak
 
+> **PRE-FIX BASELINE — THE WHOLE OF THIS SECTION, TABLE AND PROSE. Tagged
+> 2026-10-10.** Commit `be758dfa6` (2026-10-02) shipped two levers:
+> `SCR_FIBER_COMMIT` 16 KiB -> 4096, and `SCR_FIBER_RESERVE` 0 (which inherited
+> the PE's 16 MiB) -> 1 MiB. Every figure in this section — 855.41 MiB, the
+> 663.00 MiB STACK term, the 89.0%, the 10.9%, and the per-fiber table under
+> the subheading "The per-fiber price is 32 KiB, not 16" — describes the binary
+> BEFORE those levers. **The shipped peak is 538.51 MiB**, from the `both` row
+> of the high-mode table in §7, "What the two levers are worth, MEASURED on the
+> real workload". The detail is in the note beginning "SUPERSEDED BY THIS
+> DOCUMENT'S OWN SECTIONS 7-8", further down this same section.
+>
+> **Why a second marker.** That note sits under a subheading about another
+> subject and several paragraphs below the sentence most often quoted out of
+> here, so a reader who opened §3 for the table met no mark at all — and at
+> least one did.
+>
+> **Sections of this file not named here are NOT thereby current. They are
+> merely unaudited.**
+
 One run (`e5`), every line from the same walk, kernel `PrivateUsage` = 855.41 MiB:
 
 | term | MiB | share | note |
@@ -67,6 +92,15 @@ One run (`e5`), every line from the same walk, kernel `PrivateUsage` = 855.41 Mi
 **Fiber-stack infrastructure is 89.0% of peak private commit.** The heap — where
 an allocator change, a region design, or a placement fix would act — is 10.9%.
 
+> **^ THAT SENTENCE IS PRE-FIX, AND IT IS THE ONE THAT GETS QUOTED.** It is
+> kept verbatim as the evidence of how it read; it is not the current state.
+> Post-`be758dfa6` the same arithmetic over §7's `both` high-mode row puts
+> fiber-stack infrastructure at **81.3%** of a 538.51 MiB peak, and the heap at
+> **17.3-18.5%** — a bracket, not a measurement, because §7 does not re-walk the
+> PRIVATE class (the arithmetic is in the note under "The per-fiber price is
+> 32 KiB, not 16"). **The heap's BYTES did not move; only the denominator did.**
+> Anyone quoting 89.0% or 10.9% is quoting the baseline.
+
 ### The per-fiber price is 32 KiB, not 16
 
 > **SUPERSEDED BY THIS DOCUMENT'S OWN SECTIONS 7-8, and tagged 2026-10-10
@@ -81,8 +115,25 @@ an allocator change, a region design, or a placement fix would act — is 10.9%.
 > **538.51 MiB** high mode and **445.56 MiB** low mode, against 855.86 and
 > 714.94 baseline -- **-37.1% and -37.7%**; bytes/stack 28,673 -> **16,830**;
 > page tables 98.50 -> **48.68 MiB**. Fiber infrastructure is still the
-> dominant term, but at roughly **83%** of a much smaller peak rather than
-> 89.0% of 855.
+> dominant term, but at **81.3%** of a much smaller peak rather than 89.0% of
+> 855.
+>
+> *(This note first read "roughly 83%". Corrected to 81.3% on 2026-10-10 by
+> arithmetic over §7's own high-mode lines, shown here so it can be re-checked:
+> the high-mode stack count is 24,241-24,246 across the runs this file reports
+> — §3's walk says 24,246, §7's unset-arm control prints `STACKHIST 28,672 x
+> 24,241` — and §7 gives the `both` row 16,830 B/stack and 48.68 MiB of page
+> tables. 24,241 x 16,830 = 389.08 MiB; + 48.68 = 437.76; / 538.51 = **81.29%**.
+> At 24,246 stacks it is 81.31%. So 81.3% across the whole range of the stack
+> count, and 83% overstated it by ~1.7 points. The same arithmetic reproduces
+> the baseline figure as a control: 24,246 x 28,672 = 662.98 MiB, + 98.41 =
+> 761.39, / 855.41 = **89.01%**, which is the 89.0% above.)*
+>
+> *The residual the same arithmetic leaves — 538.51 - 389.08 - 48.68 - 0.87
+> (§3's IMAGE/MAPPED) = 99.9 MiB — is heap plus whatever §7 did not itemise, so
+> the post-fix heap is between §3's measured 93.13 MiB (17.3% of 538.51) and
+> that 99.9 MiB residual (18.5%). It is a BRACKET: §7 reports no PRIVATE-class
+> walk, and the two figures come from different runs.*
 >
 > Anyone sizing a heap or allocator change against this document must divide by
 > the shipped peak, not by 855.41.
