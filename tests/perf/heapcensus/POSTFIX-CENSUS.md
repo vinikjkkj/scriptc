@@ -399,3 +399,74 @@ this slice.
 3. **A window built from "up to six" is not a bound.** P2b's failure cost
    nothing because the row's structure could be checked directly, but a
    tolerance with no derivation is a coin flip dressed as an assertion.
+
+---
+
+## AMENDMENT 2026-10-11 — the chunk COUNT was measured once, and it moves
+
+> Added, not substituted. The banner above this one stands as written; this
+> one is appended beneath it because the repair is where the documentation
+> fails, and rewriting a standing tarja hides which claim moved.
+>
+> Evidence: `evidence-variance/` — six runs, three per arm, alternated
+> `ABBAAB`, on the two binaries this file's own manifests name. Nothing was
+> rebuilt.
+>
+> **1. The title and §5 are corrected on the COUNT, not on the per-chunk
+> delta.** This file's title reads *"3,080,192 B over 47 chunks"* and §5 says
+> *"At the **measured** 47 live chunks"*. Three fresh runs of `sb`'s own
+> binary read **46** chunks each, as does `evidence-idle/on` and as do all
+> three of this slice's PRE runs. The record now stands at **46 in six of
+> eight observations, 47 in two — both of them the 2026-10-11 post-fix
+> pair.** The per-chunk 65,536 B is exact arithmetic and is NOT disturbed;
+> it is the multiplier that is a draw.
+>
+> **2. §5 "How much of this is knowable" is refuted on its central
+> sentence.** It reads:
+>
+> > *"The point estimate is exact; its last ±752 B is not, and cannot be made
+> > so by re-running."*
+>
+> Re-running is exactly what moved it, and it moved by a whole 64 KiB chunk —
+> **65,536 B, or 87x the ±752 B band that section registers.** The ±752 B
+> granule uncertainty is real and remains; it is simply not the dominant term,
+> and the sentence's "cannot be made so by re-running" has the direction
+> backwards.
+>
+> **3. §5's share figures follow the count.** The *"15.940% … 18.963% …
+> 15.944% … agree to 0.004 percentage points"* paragraph, and the raise of the
+> headline from 15.940% to 16.226% recorded for `sb`, all rest on 47. At the
+> modal 46, in this slice's own runs with their denominators named, route B
+> reads **15.940%** (`3,014,656 / 18,912,757`, mean heap-0 busy of three PRE
+> runs) and route A reads **15.945%** (`3,014,656 / 18,906,971`). The pre-`sb`
+> figure was right and the raise is not supported.
+>
+> **3b. And the sentence this slice most directly refutes is in the
+> `RESOLVED, 2026-10-11` banner, not in §5.** It reads:
+>
+> > *"**The effect reproduced to the byte on the other lane.** 47 chunks,
+> > 3,080,192 B, zero frees, `HCSIZE 131079` absent — identical in `sa` and
+> > `sb`, two independently built binaries on two lanes. The 2.938 MiB is not
+> > a draw."*
+>
+> Three of the four clauses hold and are re-confirmed above. **"The 2.938 MiB
+> is not a draw" does not.** `sa` and `sb` were built from the same source on
+> the same day and ran within hours of each other; agreement between them
+> bounds build-to-build and lane-to-lane variation, which is what that
+> sentence was entitled to claim, and **not** run-to-run variation, which it
+> actually claimed. Three consecutive runs of `sb`'s binary give 46 every
+> time. The 2.938 MiB figure is a draw of a 2.875 MiB ± one-chunk quantity.
+>
+> **4. `sb` is an outlier against its own binary** on more than the count:
+> `z = +13.5` on busy and `z = +150` on busyBlocks against three fresh runs.
+> Not diagnosed here. A reader should not treat `sb` as the POST arm's centre.
+>
+> **5. Not corrected, and newly supported:** the lane identification, the
+> binary identity proof in §1, the `HCSIZE 131079` present/absent signature,
+> the zero-frees result (`freed = 0` in all three new runs), and the exact
+> 65,536 B per-chunk arithmetic. All reproduced.
+>
+> **Sections of this file not named above are not thereby in force — they are
+> merely unaudited by this slice.** `evidence-variance/VARIANCE.md` §5 carries
+> the full table and §7 lists what else in the surrounding record it
+> contradicts.

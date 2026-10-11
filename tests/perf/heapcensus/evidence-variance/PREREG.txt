@@ -1,0 +1,111 @@
+=== V1 PRE-REGISTRATION -- written BEFORE any run of this slice ===
+
+tree        /g/blocks/v1-wt @ ff33bac69   (branch perf/heapcen-committed-variance)
+written     2026-10-11, before the first run started and before any
+            heapcen line of this slice existed.
+
+THE QUESTION
+    evidence-idle/on (PRE-fix) and evidence-postfix/sb (POST-fix) are the
+    SAME lane (STACKLESS) and the SAME knobs. Subtracting them gives
+
+                        busy          free    committed(b+f)  uncommitted  freeBlk
+      idle/on   PRE   18907440    17493520      36400960      29888512     14968
+      sb        POST  15902592    22828832      38731424      27570176     13644
+      delta            -3004848    +5335312      +2330464     -2318336     -1324
+
+    Those two rows are ONE PAIR taken on two different days. The front has
+    never estimated the run-to-run variance of this measurement at fixed
+    knobs on a fixed lane, because no two committed arms share knobs on a
+    lane. This slice runs each binary three times, alternated, to bound it.
+
+THE BRIEFER'S PREDICTION, quoted, registered here before measurement
+    "o `busy` cai ~3,0 MiB de forma reprodutivel, e o **commitado fica
+     plano ou sobe** -- a liberacao e para a free-list."
+
+    Decomposed into the two falsifiable halves this slice scores:
+      P1  busy(PRE) - busy(POST) = ~3.0 MB, reproducible: the 3 x 3
+          difference of means is ~3.0e6 B and the per-arm spread is small
+          against it.
+      P2  committed (busy + free) of the POST arm is FLAT OR HIGHER than
+          the PRE arm: delta_committed >= 0 within this slice's noise.
+
+THIS SLICE'S OWN PREDICTION, where it differs, and WHY
+    P1  AGREE, and strongly. The mechanism is deterministic, not
+        statistical: see MECHANISM below. Predicted ~3.08e6 B.
+
+    P2  DISAGREE ON THE MECHANISM, AGNOSTIC ON THE SIGN.
+        The briefer's stated mechanism -- "the bytes left busy and entered
+        the CRT free list" -- cannot be what happened, and the reason is
+        in the source, not in the numbers. See MECHANISM. The predicted
+        bytes are never REQUESTED in the POST binary; nothing is freed.
+        A reduction in request size does not put bytes on a free list.
+        Therefore the +5,335,312 B on the free column and the -2,318,336 B
+        on uncommitted are NOT the repair's bytes arriving somewhere; they
+        are whatever the NT heap's segment layout did on those two days.
+        This slice predicts: the committed delta is dominated by
+        between-run variance, and |delta_committed| will not be separable
+        from zero at n=3 per arm. Specifically, predicted |t| < 2 on the
+        committed column, while P1's busy column separates cleanly.
+
+    P3  (a consequence, registered so it can fail) the free column and the
+        uncommitted column will each show a per-arm standard deviation of
+        the same order as the 2.33 MB committed delta the briefer is
+        asking about -- i.e. >= ~1 MB -- while the busy column's per-arm
+        standard deviation will be a small fraction of 3.0 MB.
+
+MECHANISM, established before measuring, from the source on main
+    packages/runtime/src/scr_string.c:820
+        POST: static void *scr_str_chunk_alloc(void) {
+                return malloc(SCR_STR_ARENA_CHUNK); }       /* 65,536 */
+        PRE : return _aligned_malloc(64<<10, 64<<10);
+              which mingw forwards to malloc(size + align-1 + sizeof(void*))
+              = 65536 + 65535 + 8 = 131,079.
+        That is the HCSIZE 131079 row, and it is the signature the two
+        binaries are identified by.
+
+    packages/runtime/src/scr_string.c:822 / :1040
+        scr_str_chunk_free IS reachable. scr_str_idle_drain frees a chunk
+        at :1040, gated on h->freeseen == h->carved -- every block carved
+        from that chunk must be sitting on a free list at the same idle
+        window. Both committed arms recorded ZERO chunk frees.
+
+    THE CONSEQUENCE THAT DECIDES P2'S MECHANISM: in the POST binary the
+    missing 3.08 MB is never allocated. It is not freed, so it cannot be
+    on the CRT free list. The free list is therefore NOT the destination
+    of those bytes, and the +5.3 MB seen on the free column has a
+    different owner.
+
+THE INSTRUMENT, named before measuring
+    tests/perf/heapcensus/scr_heap_census.h:298  scr_hc_walk
+    busy, busyBlocks, free, freeBlocks, uncommitted and regions are all
+    accumulated in ONE HeapWalk pass over ONE heap and printed together at
+    scr_heap_census.h:380. They share an instant by construction, so the
+    briefer's subtraction is not comparing two moments.
+    It fires at _Exit, via the macro chain at scr_heap_census.h:797-822.
+    The loop walks EVERY process heap (GetProcessHeaps); the per-heap
+    lines are separate and the "heap 0 ... CRT" line is heap 0 alone.
+    The HCSIZE / HCFREE tables are gated on heaps[k] == crt, so the size
+    histograms are CRT-only while the ALLHEAPS line is the sum of all.
+    This slice reads the heap-0 CRT line only, matching sb.compare.txt.
+
+THE ORDER, declared before the first run
+    A B B A A B, where A = PRE (h2-out182-prof) and B = POST
+    (sb-out182-prof).
+    WHY: the peak-RSS bimodality on this host is a POSITION effect, with
+    the first run of a sequence the outlier. A pure ABABAB would put every
+    A before its paired B and hand position 1 to A every time. ABBAAB is
+    the ABBA counterbalance truncated to six: it never runs the same arm
+    three times, and it splits the positions {1,4,5} for A against
+    {2,3,6} for B -- mean position 3.33 vs 3.67, the closest an odd count
+    per arm allows. Position 1 cannot be shared at n=3; it is assigned to
+    A, and A's run-1 value will be reported separately so a reader can see
+    whether dropping it changes any sign.
+
+WHAT WOULD FALSIFY WHAT
+    P1 fails if the busy difference of means is not ~3.0e6 B, or if either
+       arm's busy spread is comparable to it.
+    P2 (briefer's) is confirmed if committed is flat-or-up AND separable.
+    P2 (this slice's) is confirmed if committed is NOT separable from zero.
+    Both P2s fail together if committed comes out clearly NEGATIVE and
+    separable -- that would mean the repair did return memory to the OS,
+    and the 2,330,464 B of the committed pair had the wrong sign.

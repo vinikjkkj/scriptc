@@ -1,0 +1,16 @@
+tag          a2
+arm          A
+exe          /g/blocks/h2-out182-prof/zapo-rest-182.exe
+exe-bytes    33360896
+ll-bytes     242844741
+knobs        CHUNKS=8 CONVS=400 MSGS=6 TEXTLEN=300 ROUNDS=1 IDLE_S=60 SETTLE_MS=45000 PRESYNC_MS=20000 SCR_SQLITE_IDLE_RELEASE_MS=1000 SCR_SQLITE_IDLE_STAT=1
+node         v22.18.0 at /c/nvm4w/nodejs/node
+launch-dir   /g/blocks/m3-zaposrc
+SCR_STRING_ARENA  <unset>
+SCRIPTC_STACKLESS <unset>
+started      2026-10-11T08:16:22Z
+free-G-GB    37G
+loader       file:///g:/scriptc/node_modules/tsx/dist/loader.mjs
+ended        2026-10-11T08:18:41Z
+rc           0
+free-G-GB    37G

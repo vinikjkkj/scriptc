@@ -1,0 +1,175 @@
+=== V1 RESULTS -- PRE vs POST string-arena repair, 3 runs each, alternated ===
+tree        /g/blocks/v1-wt @ ff33bac69, branch perf/heapcen-committed-variance
+A = PRE  /g/blocks/h2-out182-prof/zapo-rest-182.exe   (the exe evidence-idle/on.manifest.txt names)
+B = POST /g/blocks/sb-out182-prof/zapo-rest-182.exe   (the exe evidence-postfix/sb.manifest.txt names)
+knobs     CHUNKS=8 CONVS=400 MSGS=6 TEXTLEN=300 ROUNDS=1 IDLE_S=60 SETTLE_MS=45000
+          PRESYNC_MS=20000 SCR_SQLITE_IDLE_RELEASE_MS=1000 SCR_SQLITE_IDLE_STAT=1
+          -- term for term the knobs of BOTH committed manifests.
+recipe    /g/blocks/v1-run.sh + /g/blocks/v1-rig.sh, derived from
+          evidence-postfix/sb-run.sh and sb-rig.sh. Nothing was built.
+order     A B B A A B, declared in PREREG.txt before run 1 existed.
+
+=== PARSE CONTROLS (a parse that cannot fail cannot be trusted) ===
+  a1  HCTOTAL bytes == heap-0 busy, blocks == busyBlocks, lost == 0 : OK
+  b1  HCTOTAL bytes == heap-0 busy, blocks == busyBlocks, lost == 0 : OK
+  b2  HCTOTAL bytes == heap-0 busy, blocks == busyBlocks, lost == 0 : OK
+  a2  HCTOTAL bytes == heap-0 busy, blocks == busyBlocks, lost == 0 : OK
+  a3  HCTOTAL bytes == heap-0 busy, blocks == busyBlocks, lost == 0 : OK
+  b3  HCTOTAL bytes == heap-0 busy, blocks == busyBlocks, lost == 0 : OK
+
+  POSITIVE CONTROL for the arm-A chunk count. The PRE binary carries NO
+  profiled chunk site: evidence-postfix/sa.c1.txt shows body scr_prof_malloc
+  = 0 for the pre-fix scr_str_chunk_alloc, and strings(1) on the PRE exe
+  finds no "scr_string.c:820". So an ABSENT PROF line on arm A proves
+  nothing at all, and a zero there would be a dead counter, not a finding.
+  Arm A is read instead off the HCSIZE 131079 row -- the _aligned_malloc
+  request 65536 + 65535 + 8 -- which reads NON-ZERO in all three A runs:
+    a1 A  HCSIZE-131079 blocks = 46   PROF :820 chunks = (site absent in this binary -- expected)
+    b1 B  HCSIZE-131079 blocks =  0   PROF :820 chunks = 46
+    b2 B  HCSIZE-131079 blocks =  0   PROF :820 chunks = 46
+    a2 A  HCSIZE-131079 blocks = 46   PROF :820 chunks = (site absent in this binary -- expected)
+    a3 A  HCSIZE-131079 blocks = 46   PROF :820 chunks = (site absent in this binary -- expected)
+    b3 B  HCSIZE-131079 blocks =  0   PROF :820 chunks = 46
+  And the mirror control holds: HCSIZE 131079 is ABSENT in all three B
+  runs (0, 0, 0), which is the repair, seen directly.
+
+=== EVERY RUN, in the declared ABBAAB order ===
+pos tag arm        busy  busyBlk        free  freeBlk   committed  uncommitted  busy+free+unc  reg  chunks   chunkB  freed
+  1 a1  A    18925120    47674    19636240    15184    38561360     27414528       65975888    9       -        -      -
+  2 b1  B    15893104    47629    16438624    15060    32331728     33689600       66021328    9      46  3014656      0
+  3 b2  B    15891584    47625    19479120    14730    35370704     30605312       65976016    9      46  3014656      0
+  4 a2  A    18906928    47626    19860720    14578    38767648     27484160       66251808    9       -        -      -
+  5 a3  A    18906224    47624    19528752    16341    38434976     27574272       66009248    9       -        -      -
+  6 b3  B    15892256    47626    20242672    15598    36134928     29880320       66015248    9      46  3014656      0
+
+=== ALL SIX RUNS. Welch t, with the CRITICAL VALUE TAKEN AT THE WELCH df ===
+column        A mean      A sd      B mean      B sd        delta B-A     |t|    df   t_crit        95% CI on the delta    sig?
+busy          18912757     10712    15892315       762        -3020443   487.15   2.02   4.303         [-3047123, -2993763]   YES
+free          19675237    169385    18720139   2012395         -955099     0.82   2.03   4.303          [-5972248, 4062051]    no
+committed     38587995    167928    34612453   2011788        -3975541     3.41   2.03   4.303          [-8990884, 1039802]    no
+unc           27490987     80091    31391744   2022748         3900757     3.34   2.01   4.303          [-1128371, 8929885]    no
+addrspace     66078981    150599    66004197     24594          -74784     0.85   2.11   4.303            [-453879, 304311]    no
+busyBlk          47641        28       47627         2             -15     0.89   2.02   4.303                    [-85, 56]    no
+freeBlk          15368       896       15129       438            -238     0.41   2.91   4.303                [-2716, 2239]    no
+  NOTE ON THE CRITICAL VALUE. The variances are wildly unequal (arm B
+  carries ~12x arm A's sd on free/committed/uncommitted), so the Welch df
+  collapses to ~2 and the right two-sided 95% bar is 4.303, NOT the 2.776
+  of df=4. Reading this table at df=4 flips the committed verdict.
+
+=== LEAVE-ONE-OUT: position 1 (a1) dropped, as the pre-registration promised ===
+column        A mean      A sd      B mean      B sd        delta B-A     |t|    df   t_crit        95% CI on the delta    sig?
+busy          18906576       498    15892315       762        -3014261  5351.15   2.96   4.303         [-3016685, -3011837]   YES
+free          19694736    234737    18720139   2012395         -974597     0.83   2.08   4.303          [-6024828, 4075633]    no
+committed     38601312    235235    34612453   2011788        -3988859     3.40   2.08   4.303          [-9037810, 1060093]    no
+unc           27529216     63719    31391744   2022748         3862528     3.30   2.01   4.303          [-1166401, 8891457]    no
+addrspace     66130528    171516    66004197     24594         -126331     1.03   1.03  12.706          [-1677840, 1425179]    no
+busyBlk          47625         1       47627         2               2     1.07   2.92   4.303                      [-5, 8]    no
+freeBlk          15460      1247       15129       438            -330     0.36   1.17  12.706              [-11983, 11322]    no
+
+=== WITHIN-ARM SPREAD, against the 2,330,464 B committed delta the brief asked about ===
+  arm A  busy       range =    18896 B   sd =    10712 B
+  arm A  free       range =   331968 B   sd =   169385 B
+  arm A  committed  range =   332672 B   sd =   167928 B
+  arm A  unc        range =   159744 B   sd =    80091 B
+  arm A  addrspace  range =   275920 B   sd =   150599 B
+  arm B  busy       range =     1520 B   sd =      762 B
+  arm B  free       range =  3804048 B   sd =  2012395 B
+  arm B  committed  range =  3803200 B   sd =  2011788 B
+  arm B  unc        range =  3809280 B   sd =  2022748 B
+  arm B  addrspace  range =    45312 B   sd =    24594 B
+
+  THE ONE-LINE ANSWER TO THE BRIEF. Arm B's own committed range, across
+  three back-to-back runs of ONE binary at fixed knobs, is 3803200 B.
+  The brief's cross-day pair reports a committed delta of 2,330,464 B as a
+  finding. The noise on a single arm is LARGER than the effect being read.
+
+=== THE BRIEFS TWO COMMITTED ROWS, PLACED AGAINST THIS SLICE ===
+  busy       on =    18907440  z vs this A =   -0.50   |  sb =    15902592  z vs this B =   13.49
+  busyBlk    on =       47624  z vs this A =   -0.61   |  sb =       47940  z vs this B =  150.52
+  freeBlk    on =       14968  z vs this A =   -0.45   |  sb =       13644  z vs this B =   -3.39
+  free       on =    17493520  z vs this A =  -12.88   |  sb =    22828832  z vs this B =    2.04
+  committed  on =    36400960  z vs this A =  -13.02   |  sb =    38731424  z vs this B =    2.05
+  unc        on =    29888512  z vs this A =   29.94   |  sb =    27570176  z vs this B =   -1.89
+  addrspace  on =    66289472  z vs this A =    1.40   |  sb =    66301600  z vs this B =   12.09
+
+  the brief's committed delta (one cross-day pair) = 2330464 B = +2.223 MiB
+  this slice's committed delta (3 v 3)             = -3975541 B = -3.791 MiB
+  |t| = 3.41, Welch df = 2.03, t_crit = 4.303  =>  NOT SEPARABLE FROM ZERO
+  95% CI = [-8990884, 1039802] B
+     contains 0 ?                      YES
+     contains the brief's +2330464 ?  NO
+  THE POINT ESTIMATE HAS THE OPPOSITE SIGN TO THE BRIEF'S PAIR, and neither
+  sign is supported: the interval spans both.
+
+=== POWER OF THE COMMITTED NULL, n=3 per arm ===
+  pooled sd = 1427496 B;  se of the difference = 1165546 B;  t_crit(df=2.03) = 4.303
+  power to detect a TRUE committed shift of  2330464 B  =  1.1%
+  power to detect a TRUE committed shift of  3014656 B  =  4.3%
+  power to detect a TRUE committed shift of  3080192 B  =  4.8%
+  power to detect a TRUE committed shift of  5000000 B  =  49.5%
+  power to detect a TRUE committed shift of  8000000 B  =  99.5%
+  MINIMUM DETECTABLE EFFECT at 80% power = 5996733 B = 5.72 MiB
+  runs per arm needed to bring the MDE down to the brief's 2,330,464 B,
+  holding this slice's pooled sd (equal-variance t, df = 2(n-1)):
+    n = 10 per arm  (MDE 2309716 B)
+  At 2.33 min per run (measured: this slice's six manifests) that is
+  2 x 10 x 2.33 = 46.6 min of wall clock to put the brief's 2.33 MB on or
+  off the table. This slice spent 14.0 min and can only exclude > 5.72 MiB.
+
+=== WHERE THE RELEASED BYTES WENT: the conservation identity, measured ===
+  delta busy        = -3020443 B   (|t| = 487.1, t_crit 4.303)
+  delta free        = -955099 B   (|t| = 0.82, t_crit 4.303)
+  delta uncommitted = 3900757 B   (|t| = 3.34, t_crit 4.303)
+  delta busy+free+uncommitted = -74784 B  (|t| = 0.85, t_crit 4.303) => NOT SEPARABLE FROM ZERO
+  arithmetic check: -3020443 + -955099 + 3900757 = -74784, and the addrspace column reports -74784
+
+  READ THIS COLUMN AND NOT THE OTHERS. Heap 0 holds the SAME total extent
+  in both arms -- busy + free + uncommitted differs by 74,784 B out of
+  66.0 MB and is not separable from zero. The 3.02 MB the repair takes out
+  of busy therefore does not leave heap 0 at all; it is redistributed
+  between free and uncommitted, and WHICH of the two it lands in is the
+  noisy quantity (arm B sd ~2.0 MB on each, perfectly anti-correlated).
+  That is the mechanism behind the brief's 2.33 MB, and it is why no
+  single pair can read it.
+
+  THE ANTI-CORRELATION, shown rather than asserted. free + uncommitted,
+  per run, in the order they ran:
+    a1 A  free    19636240 + unc    27414528 = 47050768
+    b1 B  free    16438624 + unc    33689600 = 50128224
+    b2 B  free    19479120 + unc    30605312 = 50084432
+    a2 A  free    19860720 + unc    27484160 = 47344880
+    a3 A  free    19528752 + unc    27574272 = 47103024
+    b3 B  free    20242672 + unc    29880320 = 50122992
+
+  AND THE CORRELATION MUST BE TAKEN WITHIN AN ARM, NOT ACROSS BOTH. Over
+  all six runs free+uncommitted differs between the arms BY CONSTRUCTION --
+  busy differs by 3.02 MB and the three columns sum to a near-constant --
+  so a pooled r measures the repair, not the jitter. Per arm:
+    arm A:  free range   331968 B   uncommitted range   159744 B   SUM range   294112 B
+    arm B:  free range  3804048 B   uncommitted range  3809280 B   SUM range    43792 B
+    (n=3 per arm, so a Pearson r on three points is not quoted; the range
+     of the SUM against the range of the PART is the statement that survives.)
+  Arm B is the clean case: free swings 3,804,048 B across three runs of one
+  binary and uncommitted absorbs it, leaving the sum inside 43,792 B. Arm A
+  compensates only partly -- its sum still moves 294,112 B -- so the
+  near-perfect offset is a property of arm B here, not a law.
+
+=== THE ARENA ITSELF: a correction to the record falls out ===
+  arm B chunk count, three runs: 46, 46, 46   (chunk frees: 0, 0, 0)
+  arm A chunk count via HCSIZE 131079, three runs: 46, 46, 46
+  committed evidence-idle/on    HCSIZE 131079 blocks = 46
+  committed evidence-postfix/sa PROF :820 chunks     = 47  (FIBER lane)
+  committed evidence-postfix/sb PROF :820 chunks     = 47  (STACKLESS lane)
+  => 46 in 6 of 8 observations; 47 in 2 of 8, both of them the 2026-10-11
+     post-fix pair. The chunk population is NOT a constant; it varies by
+     one 64 KiB chunk run to run on a fixed binary and fixed knobs.
+  realized release at 46 chunks = 46 x 65536 = 3014656 B
+  measured busy delta, all six    = 3020443 B  (residual vs 46x65536: 5787 B)
+  measured busy delta, a1 dropped = 3014261 B  (residual vs 46x65536: -395 B)
+  ROUTE B share, this slice: 3014656 / 18912757 = 15.940%
+     [denominator = mean heap-0 busy of this slice's THREE PRE runs]
+  ROUTE A share, this slice: 3014656 / 18906971 = 15.945%
+     [denominator = mean heap-0 busy of this slice's THREE POST runs + the release]
+  The committed record raised this headline from 15.940% to 16.226% on the
+  strength of sb's 47 chunks. At 46 -- the modal count, 6 of 8 -- it reads
+  ~15.94% again. The raise rests on a single draw of a quantity that moves.
