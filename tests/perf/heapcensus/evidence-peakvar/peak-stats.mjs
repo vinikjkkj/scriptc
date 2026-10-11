@@ -380,3 +380,35 @@ say('  P3 "coverage above 99% on all six"  -- the half named as most likely wron
 say(`     ${bad.length === 0 ? 'HELD' : 'FAILED on ' + bad.map(r => r.tag).join(', ')}; lane difference in coverage ${wcov.t > wcov.tc ? 'IS' : 'is NOT'} separable (|t| ${wcov.t.toFixed(2)} vs ${wcov.tc.toFixed(3)}).`)
 
 if (process.env.V3_WRITE) writeFileSync(process.env.V3_WRITE, L.join('\n') + '\n')
+
+/* RETRACTED COLUMN, 2026-10-11 -- `busy + free` IS NOT COMMITTED MEMORY
+ *
+ * THE LINES THIS BAND ANSWERS, at :66 and :69:
+ *
+ *     pkAllCommitted: +ph[2] + +ph[4],
+ *     committed: +m[1] + +m[3],
+ *
+ * and the two ratios built on them at :82-:83, `pkBusyFrac` and
+ * `stBusyFrac`, whose denominators are therefore ADDRESS SPACE while their
+ * numerators are bytes. The 81.90% / 46.19% pair this script prints is not
+ * an occupancy of paid memory.
+ *
+ * `busy + free` is heap ADDRESS SPACE, not committed memory. The NT heap
+ * decommits pages inside a free run without emitting a
+ * PROCESS_HEAP_UNCOMMITTED_RANGE, so HeapWalk keeps reporting the whole block
+ * and the `free` column mixes committed pages with pages already returned to
+ * the OS. Demonstrated with a negative control (an arm that frees nothing
+ * reads 100% MEM_COMMIT; three arms that free read 74.6% / 93.7% / 92.7%
+ * MEM_RESERVE), and contradicted arithmetically in one run: an outside walk
+ * resolves 21.312 MiB of private non-stack commit while this process's own
+ * HeapWalk reports busy+free = 37.245 MiB.
+ *
+ * `busy` is unaffected -- it is live data. `uncommitted` is unaffected -- it
+ * is reserved and not paid. The SUM is still a valid CEILING. Only its
+ * reading as COMMIT is retracted.
+ *
+ * Full argument, negative control and inventory:
+ * tests/perf/heapcensus/COMMITTED-FREE-RETRACTION.md
+ *
+ * This band audits ONE figure. EVERYTHING ELSE IN THIS FILE IS UNAUDITED BY
+ * IT -- not thereby in force. */

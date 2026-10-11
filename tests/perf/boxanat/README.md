@@ -1191,3 +1191,52 @@ heap.
 The 92,992 B shapes are the app-state mutation records
 (`schema, operation, source, collection, version, timestamp, _raw, starAction,
 contactAction, muteAction, …`, 88–90 members).
+
+---
+
+> ## RETRACTED COLUMN, 2026-10-11 -- `busy + free` IS NOT COMMITTED MEMORY
+>
+> **The lines this band answers.** In section *"The chunk is the retention
+> story, not the node"*:
+>
+> > "40.65 MiB live, not of the 72.84 MiB committed-but-free. Chunk pinning by"
+>
+> and in the table in the same section:
+>
+> > "| **settled committed-free** | **bounded at ~10 MiB by measurement**; not
+> > the plateau |"
+>
+> **The 72.84 MiB is `HeapWalk`'s `free` column** (it originates at
+> `heapcensus/scr_heap_census.h:177`) and is therefore a CEILING on
+> free-and-committed, not a commit figure: the NT heap has already decommitted
+> an unreported share of those pages.
+>
+> **The ~10 MiB BOUND SURVIVES, a fortiori.** A bound on committed-free can only
+> be made easier to meet by discovering that part of the free column was never
+> committed. The row's verdict — *"not the plateau"* — is strengthened, not
+> weakened. **What dies is the 72.84 MiB quoted as memory the process pays**,
+> and any argument that reasons from its size rather than from the live side.
+>
+>   THE REFUTATION, by section and quoted sentence.
+>   tests/perf/heapcensus/COMMITTED-FREE-RETRACTION.md, section
+>   "1. The mechanism, demonstrated and not inferred":
+>
+>       "The NT heap decommits pages inside a free run without splitting that
+>        run into a `PROCESS_HEAP_UNCOMMITTED_RANGE`, so `HeapWalk` keeps
+>        reporting the whole block."
+>
+>   with a NEGATIVE CONTROL in the same table -- the arm that frees nothing
+>   reads free >= 64 KiB as 0.961 MiB, 100% MEM_COMMIT, 0.000 MEM_RESERVE --
+>   and section "2. The arithmetic contention, same run, no second variable":
+>
+>       "the process's own HeapWalk in that run: busy 15.594 + free 21.651 =
+>        37.245 / EXCESS 15.933 MiB that cannot be committed anywhere"
+>
+>   WHAT SURVIVES, AND IT IS MOST OF IT. The numbers above are still exactly
+>   what HeapWalk reported, and `busy + free` is still a valid CEILING. `busy`
+>   is unaffected -- it is live data. `uncommitted` is unaffected -- it is
+>   reserved and not paid. IT IS THE SUM THAT BROKE, and only as a statement
+>   about COMMIT. Nothing here is deleted and no physics is withdrawn.
+>
+>   SCOPE OF THIS BAND. It audits ONE figure. EVERY SECTION OF THIS FILE THAT
+>   IT DOES NOT NAME IS UNAUDITED BY IT -- it is NOT thereby in force.

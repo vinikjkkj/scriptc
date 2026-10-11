@@ -198,3 +198,38 @@ ok((ownCycPages + ownStr) < M.crtFree,
 if (ran < 6) { console.log(NL + 'REFUSED: only ' + ran + ' checks ran'); process.exit(2) }
 console.log(NL + (fails ? 'PLATEAU FAILED (' + fails + ')' : 'PLATEAU OK'))
 process.exit(fails ? 1 : 0)
+
+/* RETRACTED COLUMN, 2026-10-11 -- `busy + free` IS NOT COMMITTED MEMORY
+ *
+ * THE LINES THIS BAND ANSWERS, at :86 and :101:
+ *
+ *     crtFree:      36.51 * MiB,
+ *     ['CRT heap committed-FREE', M.crtFree,
+ *
+ * THIS IS THE SHARPEST CASE IN THE FRONT, because the row is SUMMED into
+ * an itemisation of what the settled process holds. An unreported share of
+ * those 36.51 MiB was already returned to the OS, so the itemisation's
+ * total overstates what is paid and the `fragmentation` line at :163
+ * overstates the recoverable part. The assertion at :125 (`payload <
+ * M.crtFree`) compares a payload against a CEILING and can pass on a
+ * margin that does not exist.
+ *
+ * `busy + free` is heap ADDRESS SPACE, not committed memory. The NT heap
+ * decommits pages inside a free run without emitting a
+ * PROCESS_HEAP_UNCOMMITTED_RANGE, so HeapWalk keeps reporting the whole block
+ * and the `free` column mixes committed pages with pages already returned to
+ * the OS. Demonstrated with a negative control (an arm that frees nothing
+ * reads 100% MEM_COMMIT; three arms that free read 74.6% / 93.7% / 92.7%
+ * MEM_RESERVE), and contradicted arithmetically in one run: an outside walk
+ * resolves 21.312 MiB of private non-stack commit while this process's own
+ * HeapWalk reports busy+free = 37.245 MiB.
+ *
+ * `busy` is unaffected -- it is live data. `uncommitted` is unaffected -- it
+ * is reserved and not paid. The SUM is still a valid CEILING. Only its
+ * reading as COMMIT is retracted.
+ *
+ * Full argument, negative control and inventory:
+ * tests/perf/heapcensus/COMMITTED-FREE-RETRACTION.md
+ *
+ * This band audits ONE figure. EVERYTHING ELSE IN THIS FILE IS UNAUDITED BY
+ * IT -- not thereby in force. */

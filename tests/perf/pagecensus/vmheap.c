@@ -149,3 +149,46 @@ int main(int argc, char **argv) {
          (busy + freeb) ? 100.0 * busy / (double)(busy + freeb) : 0.0, priv / 1048576.0);
   return finished ? 0 : 6;
 }
+
+/* RETRACTED COLUMN, 2026-10-11 -- `busy + free` IS NOT COMMITTED MEMORY
+ *
+ * THE LINES THIS BAND ANSWERS, at :7 in the WHY block and at :142:
+ *
+ *     "a heap that is 95% live objects and a heap that is 95%
+ *      committed-but-free are different problems"
+ *     fprintf(f, "TOTAL %.3f MiB   busyShare=%.2f%%\n",
+ *             (busy + freeb) / 1048576.0, ...);
+ *
+ * THIS CHANGES THE VERDICT ON THE ROUTE, NOT JUST THE OUTPUT. This file is
+ * kept as the record of a route that was tried and failed, and its RESULT
+ * block blames SPEED -- Heap32Next at 4.6 ms/block, a budget stop, a
+ * perturbed subject. A reader concludes the route would answer if only it
+ * were fast enough. IT WOULD NOT. ToolHelp enumerates BLOCKS; the question
+ * is about PAGES, and a free block's pages may already be decommitted with
+ * no block-level signal. A arbitrarily fast ToolHelp walk would still
+ * report busyShare over a denominator that is address space.
+ *
+ * THE CONTROL ARM IS STILL SOUND, and it is sound for a reason worth
+ * keeping: vmtgt holds 60 MiB of live malloc and frees nothing, which is
+ * exactly the negative-control state in which the free column IS 100%
+ * committed. busyShare 95.35% against vmtgt is correct.
+ *
+ * `busy + free` is heap ADDRESS SPACE, not committed memory. The NT heap
+ * decommits pages inside a free run without emitting a
+ * PROCESS_HEAP_UNCOMMITTED_RANGE, so HeapWalk keeps reporting the whole block
+ * and the `free` column mixes committed pages with pages already returned to
+ * the OS. Demonstrated with a negative control (an arm that frees nothing
+ * reads 100% MEM_COMMIT; three arms that free read 74.6% / 93.7% / 92.7%
+ * MEM_RESERVE), and contradicted arithmetically in one run: an outside walk
+ * resolves 21.312 MiB of private non-stack commit while this process's own
+ * HeapWalk reports busy+free = 37.245 MiB.
+ *
+ * `busy` is unaffected -- it is live data. `uncommitted` is unaffected -- it
+ * is reserved and not paid. The SUM is still a valid CEILING. Only its
+ * reading as COMMIT is retracted.
+ *
+ * Full argument, negative control and inventory:
+ * tests/perf/heapcensus/COMMITTED-FREE-RETRACTION.md
+ *
+ * This band audits ONE figure. EVERYTHING ELSE IN THIS FILE IS UNAUDITED BY
+ * IT -- not thereby in force. */
