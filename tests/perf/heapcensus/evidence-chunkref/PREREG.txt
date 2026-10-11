@@ -1,0 +1,97 @@
+PREREG -- DOES THE for-await CHUNK SHARE MOVE THE PEAK?
+Written 2026-10-11, BEFORE run q1 existed.  Nothing below is edited after.
+
+THE CHANGE UNDER TEST
+  16d91996f, packages/runtime/src/scr_stream.c, the one take path that owns
+  its buffer:
+      before:  d = scr_dyn_new_buffer_copy(cb);  scr_bytes_release(cb);
+      after :  if (fresh && cb->rc==1 && cb->backing==NULL &&
+                   cb->flavor==SCR_BF_BUFFER) d = scr_dyn_new_bytes_ref(cb);
+               else                           d = scr_dyn_new_buffer_copy(cb);
+               scr_bytes_release(cb);
+
+THE TWO ARMS, AND WHY ONLY ONE BINARY IS BUILT HERE
+  POS = 16d91996f.  Built for this slice into /g/blocks/f2-out182-POS by
+        /g/blocks/f2-build.sh, whose PROF string is v3-build.sh:24 BYTE FOR
+        BYTE (diff'd before launch, reported IDENTICAL).
+  PRE = 7c7897307.  NOT rebuilt.  /g/blocks/v3-out182-SL/zapo-rest-182.exe
+        already is that binary and is reused READ-ONLY.  The grounds, each
+        checked before run q1:
+          rt-src-sha recorded in its build-env  6a19e80ea8f4558d720b78ddb3faf4c9cb3ce78a
+          git rev-parse 7c7897307:packages/runtime/src
+                                                6a19e80ea8f4558d720b78ddb3faf4c9cb3ce78a   SAME
+          git rev-parse 16d91996f:packages/runtime/src
+                                                7c16666601d98462ea9d229ba2cf65dfa34e681c   DIFFERENT
+          git diff --stat 7c7897307 16d91996f ->  1 file changed, scr_stream.c only
+          cli-dist-sha  33d1e9e49e5c4111 recorded == 33d1e9e49e5c4111 now
+          prof-sha      55f5b22d397e3513 recorded == 55f5b22d397e3513 now
+          hdr-sha       f1a3b12c9a0bd505 recorded == f1a3b12c9a0bd505 now
+          zig 0.16.0, node v22.18.0, target x86_64-windows-gnu, knob ABSENT
+        THE ONE DEVIATION, SAID HERE AND NOT LATER: the PRE binary was linked
+        at 2026-10-11T09:31Z and POS at ~12:17Z.  Same tree, same compiler,
+        same flags, different wall clock.  Build nondeterminism is not
+        excluded by construction; it is argued from pinned inputs.
+
+ORDER, DECLARED NOW
+  q1 PRE   q2 POS   q3 POS   q4 PRE   q5 PRE   q6 POS
+  Sequential, one process at a time, /g/blocks/f2-six.sh.
+  LEAVE-ONE-OUT ON POSITION 1 (q1 dropped) IS PROMISED HERE AND WILL BE
+  REPORTED WHETHER IT HELPS OR HURTS.  Peak is bimodal by POSITION on this
+  rig (first run peaks ~28.7 MiB above the rest in 5 of 6 recorded cases),
+  and q1 is a PRE run, so dropping it moves the delta AGAINST the patch
+  showing a saving.  That is the honest direction for this LOO.
+
+KNOBS, term for term with evidence-peakvar
+  CHUNKS=8 CONVS=400 MSGS=6 TEXTLEN=300 ROUNDS=1 IDLE_S=60 SETTLE_MS=45000
+  PRESYNC_MS=20000 SCR_SQLITE_IDLE_RELEASE_MS=1000 SCR_SQLITE_IDLE_STAT=1
+  Peak trigger DEFAULT: 5 ms poll, 1024 KB step, no SCR_HEAPCEN_PEAK_* set.
+
+COVERAGE GATE, PRE-REGISTERED
+  HCPKCOVER = snapPrivate / kernelPeakPagefile >= 99.0% on a run, or that run
+  does not enter the statistics and is named with its number.  The committed
+  standard in evidence-peakvar is 99.15-99.97%.
+
+THE PREDICTIONS
+
+P1  THE HEADLINE, AND I EXPECT IT TO BE ZERO.
+    The live population of the 934,576 class at the peak is UNCHANGED by the
+    patch.  Before: copy(chunk) then release(chunk) -- the original dies one
+    instruction later, so ONE buffer per chunk survives.  After: ref(chunk) --
+    the SAME buffer survives, still ONE per chunk.  The patch removes
+    TURNOVER (one alloc + one free + one 934 KB memcpy per chunk), not
+    RESIDENT BYTES.
+    PREDICTED: HCPKSIZE 934576 reads 6-7 on BOTH arms, and the peak delta on
+    pkCrtBusy is consistent with zero.
+    The 5.61-6.54 MB figure carried by the slice that wrote the patch is
+    predicted here to be a FLOW counted as a POPULATION -- the same error this
+    front made two slices ago and that 1:1 in six runs refuted.
+
+P2  THE HALF OF P1 MOST LIKELY TO BE WRONG, NAMED: TRANSIENT OVERLAP.
+    During the memcpy the original and the copy are BOTH live.  If the peak
+    snapshot lands in that window, PRE can read 12-14 in the 934,576 class
+    where POS reads 6-7.  The sampler is a 5 ms poll on a 1 MiB step, so it
+    may or may not catch it.
+    PREDICTED: PRE reads 6-7, not 12-14.  If PRE reads 12-14 even once, P1 is
+    wrong and the overlap is real.
+    THE DECIDING ITEM IS THE PER-RUN HCPKSIZE 934576 COUNT, NOT ANY t.
+
+P3  FRAGMENTATION.  The alloc+free pair of 934 KB per chunk can move
+    free / uncommitted even with busy equal.
+    PREDICTED: free and uncommitted at the peak do NOT separate at n=3.
+
+P4  THE SETTLED CENSUS IS A NEGATIVE CONTROL.  The lane effect on settled
+    busy in evidence-peakvar was |t| = 0.01.  If settled does not separate
+    here either, that is COHERENCE, not a new null.
+    PREDICTED: settled busy does not separate.
+
+THE PERMUTATION FLOOR, STATED BEFORE THE RESULT
+  At 3 v 3 there are C(6,3) = 20 assignments, so the smallest attainable
+  TWO-SIDED permutation p is 2/20 = 0.10.  NO effect at this n reaches
+  p < 0.05 without leaning on normality.  EVERY "YES" REPORTED IS PARAMETRIC
+  AND WILL BE LABELLED SO IN THE TABLE.
+
+WHAT A NULL WOULD MEAN, SAID BEFORE SEEING IT
+  A null here is a RESULT, not a failure: it kills the 5.61-6.54 MB figure.
+  It will be reported as "zero" with the 95% CI and the computed power, and
+  the minimum detectable effect will be printed so the reader can see what
+  size of saving this design could NOT have seen.

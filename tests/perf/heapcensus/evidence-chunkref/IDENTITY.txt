@@ -1,0 +1,42 @@
+IDENTITY.txt -- WHICH CODE IS IN WHICH BINARY, checked BEFORE run q1.
+
+1. THE SOURCE TREES
+   7c7897307:packages/runtime/src  6a19e80ea8f4558d720b78ddb3faf4c9cb3ce78a
+   16d91996f:packages/runtime/src  7c16666601d98462ea9d229ba2cf65dfa34e681c
+   git diff --stat 7c7897307 16d91996f:
+      packages/runtime/src/scr_stream.c | 86 ++++++++++++++++++++++++++++++++++-----
+      1 file changed, 76 insertions(+), 10 deletions(-)
+   The PRE binary's own build-env records rt-src-sha
+     rt-src-sha     6a19e80ea8f4558d720b78ddb3faf4c9cb3ce78a
+   == 7c7897307:packages/runtime/src.  That is WHY it is reusable as PRE.
+
+2. THE SYMBOL CONTROL, ON THE COMPILED OBJECT -- rg -a, BINARY-SAFE.
+   rg WITHOUT -a SKIPS BINARIES AND READS ZERO ON BOTH ARMS: a dead
+   detector, not an absent fact.  Only the shared-positive arm denounces it.
+   PRE object  /g/blocks/v3-zig-local-SL/o/d5c2760bb2fa443501088ff1881833df/scr_stream.obj (400931 B)
+   POS object  /g/blocks/f2-zig-local-POS/o/ef91f07cacb0157f71f1fc58c35db7c8/scr_stream.obj (402197 B)
+
+   symbol                           PRE     POS  role
+   scr_stream_rbuf_push               3       3  SHARED POSITIVE -- present in both versions; nonzero here proves the detector is alive
+   scr_stream_rbuf_take_f             0       3  THE DISCRIMINATOR -- the function the patch introduces
+   scr_dyn_new_bytes_ref              0       1  THE SHARING CONSTRUCTOR -- referenced only once the patch calls it
+   scr_stream_ZZNOTREAL               0       0  NEGATIVE -- a fabricated name; must read 0
+
+3. THE .ll IS THE WRONG ARTIFACT FOR THIS CONTROL, AND IT FOOLED ME FIRST.
+   zapo-rest.ll is the LOWERED USER PROGRAM; the runtime C units are
+   compiled separately into objects.  scr_stream_rbuf_push reads 0 in BOTH
+   .ll files.  I ran it, got 0/0, and only the shared-positive arm told me
+   the artifact was wrong rather than the fact absent.
+
+4. THE TWO .ll DIFFER BY 21 BYTES AND NONE OF IT IS THE PATCH.
+   PRE  242844788 B    POS  242844809 B
+   First difference, line 3141, is a STRING LITERAL carrying the
+   PROVENANCE CACHE PATH: 'G:/blocks/v3-prov-SL/...' against
+   'G:/blocks/f2-prov-POS/...', one character longer.  The per-arm
+   SCRIPTC_PROVENANCE_CACHE leaks its own path into .data literals.  It is
+   a RIG artifact, it is in .data and not on the heap, and it does not
+   touch any size class measured here -- but it means these two binaries
+   are NOT byte-comparable and no claim here rests on their being so.
+
+5. LANE.  Both arms built with SCRIPTC_STACKLESS ABSENT (stackless).
+   EMITTED-LL-N 1 / EMITTED-C-N 0 on both: the LLVM lane, not the C lane.

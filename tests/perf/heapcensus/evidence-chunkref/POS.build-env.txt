@@ -1,0 +1,28 @@
+ARM            POS (STACKLESS, knob ABSENT)
+KNOB           SCRIPTC_STACKLESS=<ABSENT>
+head           16d91996f0853a5c54e4a5b5c079efd9ce5f669b
+branch         main
+dirty          M pnpm-lock.yaml;
+hdr-tree       5cd3e347542c738c6eba7ff7998a6d7fa189a850
+hdr-sha        f1a3b12c9a0bd505
+prof-sha       55f5b22d397e3513
+rt-src-sha     7c16666601d98462ea9d229ba2cf65dfa34e681c
+cli-dist-sha   33d1e9e49e5c4111
+zig            0.16.0 at /g/tools/zig/zig
+node           v22.18.0 at /c/nvm4w/nodejs/node
+target         x86_64-windows-gnu
+PROF_CFLAGS    -include G:/scriptc/tests/perf/prof/scr_prof.h -DSCR_PROF_ALLOC -DSCR_PROF_SIZEHIST -DSCR_PROF_STACKS -DSCR_PROF_STACK_SIZE_MIN=1296 -DSCR_PROF_STACK_SIZE_MAX=1352 -DSCR_PROF_STACK_SIZE_MIN2=4376 -DSCR_PROF_STACK_SIZE_MAX2=4376 -include G:/blocks/v3-wt/tests/perf/heapcensus/scr_heap_census.h -DSCR_HEAPCEN_PEAK
+SCRIPTC_NO_CACHE 1
+TMP            G:\blocks\f2-tmp-POS
+START          2026-10-11T12:06:14Z
+free-before-GB 22G
+END            2026-10-11T12:14:50Z
+BUILD-EXIT     0
+elapsed-s      516
+free-after-GB  30G
+EMITTED-LL     zapo-rest.ll=242844809
+EMITTED-LL-N   1
+EMITTED-C-N    0
+EARLY-CACHE    0
+head-after     16d91996f0853a5c54e4a5b5c079efd9ce5f669b
+rt-src-after   7c16666601d98462ea9d229ba2cf65dfa34e681c

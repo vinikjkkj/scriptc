@@ -1,0 +1,19 @@
+tag          q3
+arm          POS
+runtime      16d91996f (share)
+exe          /g/blocks/f2-out182-POS/zapo-rest-182.exe
+exe-bytes    33873920
+exe-sha      1fac451723713715
+ll-bytes     242844809
+knobs        CHUNKS=8 CONVS=400 MSGS=6 TEXTLEN=300 ROUNDS=1 IDLE_S=60 SETTLE_MS=45000 PRESYNC_MS=20000 SCR_SQLITE_IDLE_RELEASE_MS=1000 SCR_SQLITE_IDLE_STAT=1
+peak-trigger DEFAULT (no SCR_HEAPCEN_PEAK_* set; 5 ms poll, 1024 KB step)
+node         v22.18.0 at /c/nvm4w/nodejs/node
+launch-dir   /g/blocks/m3-zaposrc
+SCR_STRING_ARENA  <unset>
+SCRIPTC_STACKLESS <unset>  (run time; the lane is in the BINARY)
+started      2026-10-11T12:19:38Z
+free-G-KB    31119288
+loader       file:///g:/scriptc/node_modules/tsx/dist/loader.mjs
+ended        2026-10-11T12:21:58Z
+rc           0
+free-G-KB    31078524

@@ -1,0 +1,215 @@
+=== CHUNKREF RESULTS -- DOES THE for-await SHARE MOVE THE PEAK? ===
+PRE = 7c7897307  /g/blocks/v3-out182-SL/zapo-rest-182.exe   (reused READ-ONLY)
+POS = 16d91996f  /g/blocks/f2-out182-POS/zapo-rest-182.exe  (built for this slice)
+Both STACKLESS (knob ABSENT at build), both -DSCR_HEAPCEN_PEAK, PROF string
+byte-identical to evidence-peakvar/v3-build.sh:24.  The ONLY delta between the
+two source trees is packages/runtime/src/scr_stream.c (git diff --stat: 1 file).
+knobs     CHUNKS=8 CONVS=400 MSGS=6 TEXTLEN=300 ROUNDS=1 IDLE_S=60 SETTLE_MS=45000
+          PRESYNC_MS=20000 SCR_SQLITE_IDLE_RELEASE_MS=1000 SCR_SQLITE_IDLE_STAT=1
+peak      DEFAULT trigger: 5 ms poll, 1024 KB step, no SCR_HEAPCEN_PEAK_* set.
+order     PRE POS POS PRE PRE POS, declared in PREREG.txt before run q1 existed.
+
+=== >>> 1. COVERAGE FIRST.  THIS GATES EVERYTHING BELOW. <<< ===
+  HCPKCOVER prints the snapshot own PrivateUsage against the kernel
+  PeakPagefileUsage.  A snapshot with LOW coverage reads a TROUGH NEAR the
+  peak, not the peak.  The committed standard in evidence-peakvar is
+  99.15-99.97%.  The pre-registered bar is 99.0% on all six.
+
+pos tag arm   snapPrivate    kernelPeak    polledHigh   coverage   walks  polls    stepB
+  1 q1  PRE     100012032     100577280     100569088    99.438%      29   9112  1048576
+  2 q2  POS      99860480     100683776     100671488    99.182%      33   9037  1048576
+  3 q3  POS     107323392     108163072     108146688    99.224%      32   9102  1048576
+  4 q4  PRE     108212224     108253184     108220416    99.962%      35   9105  1048576
+  5 q5  PRE     100372480     100646912     100634624    99.727%      32   9036  1048576
+  6 q6  POS      99926016     100466688     100454400    99.462%      32   9038  1048576
+
+  PRE coverage mean 99.709%  sd 0.2626 pp   range 0.5242 pp
+  POS coverage mean 99.289%  sd 0.1509 pp   range 0.2795 pp
+  DOES COVERAGE DIFFER BY ARM?  delta (POS-PRE) = -0.4199 pp, |t| = 2.40,
+  Welch df = 3.19, t_crit = 3.182  =>  no -- comparable relative instants
+
+  THE PRE-REGISTERED BAR WAS "at or above 99% on all six".  Runs below it: NONE
+  RUNS ENTERING THE STATISTICS: 6 of 6.
+  AND A SECOND READING THE BAR DOES NOT COVER: kernelPeak-polledHigh is the
+  part of the climb the POLLER never saw; polledHigh-snapPrivate is what the
+  1 MiB STEP skipped.
+  tag   kernelPeak-polledHigh   polledHigh-snapPrivate   (bytes)
+  q1                     8192                   557056
+  q2                    12288                   811008
+  q3                    16384                   823296
+  q4                    32768                     8192
+  q5                    12288                   262144
+  q6                    12288                   528384
+
+=== >>> 2. THE DECIDING ITEM: THE 934,576 CLASS LIVE AT THE PEAK <<< ===
+  This is a POPULATION, not a flow: HCPKSIZE counts blocks LIVE at the
+  snapshot instant.  PROF* counts the whole run and answers a different
+  question.  The prediction in PREREG.txt P1 was 6-7 on BOTH arms; P2 named
+  the transient-overlap alternative, 12-14 on PRE.
+
+  tag arm   934576 n   934576 bytes | 1048576 n  1:1? | 65536 n (POS ctrl) | 1048575 n (NEG ctrl) | 934576 n AT REST
+  q1  PRE          6        5607552 |         6   YES |               306 |                    0 |                0
+  q2  POS          6        5607552 |         6   YES |               307 |                    0 |                0
+  q3  POS          7        6542144 |         7   YES |               336 |                    0 |                0
+  q4  PRE          7        6542144 |         7   YES |               331 |                    0 |                0
+  q5  PRE          6        5607552 |         6   YES |               306 |                    0 |                0
+  q6  POS          6        5607552 |         6   YES |               305 |                    0 |                0
+
+  PRE: 6, 7, 6        POS: 6, 7, 6
+  P1 (6-7 on both arms): HELD
+  P2 (PRE reads 12-14, transient overlap caught): REFUTED -- no PRE run reads 12 or more
+  IF BOTH ARMS READ THE SAME COUNT, THE RESIDENT POPULATION PER CHUNK IS
+  UNCHANGED AND THE PATCH REMOVED TURNOVER, NOT BYTES AT THE PEAK.
+  CONTROLS: 65,536 must run in the hundreds (two orders above CHUNKS=8) or
+  the size parse is dead; 1,048,575 must be absent or the parse is matching
+  neighbours.  A control that cannot fail is not a control.
+
+=== >>> 2b. DID THE SHARE PATH ACTUALLY FIRE?  A FLOW USED AS A FLOW. <<< ===
+  A null on the peak means nothing if the guard never fired.  THIS IS THE
+  ONLY PLACE A PROF NUMBER IS ALLOWED IN THIS SLICE, AND IT ANSWERS
+  REACHABILITY, NOT RETENTION: how many times the COPY ran over the whole
+  run, at the copying site scr_bytes.c:52, in band 19 = floor(log2 n) for
+  n in [512 KiB, 1 MiB) -- the band that holds 934,576.
+  The rows are extracted per run into profrows.txt; the 38 KB-per-run
+  .prof.txt are not committed, exactly as evidence-peakvar does with
+  chunkrows.txt and for the same reason.
+
+  tag arm   band19 copies   band20   site-52 count      site-52 bytes | site-529 count (REFERENCE)
+  q1  PRE            48       40           26522           92221447 |                      79099
+  q2  POS            40       40           26505           84723520 |                      79092
+  q3  POS            40       40           26504           84728507 |                      79092
+  q4  PRE            48       40           26521           92195514 |                      79099
+  q5  PRE            48       40           26522           92214968 |                      79099
+  q6  POS            40       40           26514           84754818 |                      79099
+
+  band19 copies  PRE 48, 48, 48      POS 40, 40, 40      delta -8 per run
+  CHUNKS = 8.  A drop of exactly 8, in EVERY run, with ZERO overlap between
+  the arms, is the share firing ONCE PER CHUNK.  band20 is unchanged at
+  40 on both arms: the 1,048,576 partner is not touched.
+  bytes at the copying site  PRE mean 92210643   POS mean 84735615
+  delta -7475028 B against 8 x 934,576 = 7476608 B exactly;
+  the residual 1580 B is other traffic through the same site.
+  REFERENCE SITE scr_bytes.c:529 is flat across the arms, so the instrument
+  is not drifting globally.  A control that cannot fail is not a control.
+
+  >>> SO THE PATCH WORKS, AND WHAT IT REMOVES IS TURNOVER. <<<  It deletes
+  one alloc + one free + one 934,576 B memcpy per chunk -- about 7.48 MB of
+  allocation FLOW per run -- while the POPULATION resident at the peak is
+  the SAME 6 or 7 buffers.  FLOW IS NOT RETENTION; this slice exists to
+  keep the two apart, and here they point opposite ways.
+
+=== 3. CONTROLS (internal consistency of each census) ===
+  q1  HCTOTAL==heap-0 busy, blocks match, settled lost==0, peak lost==0 : OK
+  q2  HCTOTAL==heap-0 busy, blocks match, settled lost==0, peak lost==0 : OK
+  q3  HCTOTAL==heap-0 busy, blocks match, settled lost==0, peak lost==0 : OK
+  q4  HCTOTAL==heap-0 busy, blocks match, settled lost==0, peak lost==0 : OK
+  q5  HCTOTAL==heap-0 busy, blocks match, settled lost==0, peak lost==0 : OK
+  q6  HCTOTAL==heap-0 busy, blocks match, settled lost==0, peak lost==0 : OK
+
+=== 4. EVERY RUN, in the declared PRE POS POS PRE PRE POS order ===
+pos tag arm       pkCrtBusy  pkCrtBlocks     pkAllBusy    pkAllFree  pkAllUnc   pk busy%  settled busy  settled busy%
+  1 q1  PRE      48525248        87107      48544640      7564784  16220160    86.518%      15847824        46.533%
+  2 q2  POS      48533136        84892      48552528      7371632  16326656    86.819%      15848048        45.947%
+  3 q3  POS      54642432        98859      54661824      8587376  10063872    86.423%      16203280        43.067%
+  4 q4  PRE      53921664        83364      53941056     10216816   9150464    84.076%      16270384        42.227%
+  5 q5  PRE      48286384        78204      48305776      8260800  15728640    85.396%      16026112        47.579%
+  6 q6  POS      48252880        80413      48272272      7730688  16297984    86.196%      16025088        49.002%
+
+=== >>> 5. EACH ARM SPREAD, BEFORE ANY t. <<< ===
+column            PRE range     PRE sd     POS range     POS sd   PRE sd / POS sd
+pkCrtBusy            5635280    3186815      6389552    3610827               0.9
+pkCrtBlocks             8903       4470        18446       9621               0.5
+pkAllBusy            5635280    3186815      6389552    3610827               0.9
+pkAllFree            2652032    1374998      1215744     624616               2.2
+pkAllUnc             7069696    3947459      6262784    3607572               1.1
+pkAllCommitted       8048448    4520588      7325040    4206551               1.1
+snapPrivate          8200192    4633837      7462912    4289921               1.1
+kernelPeak           7675904    4411722      7696384    4382186               1.0
+busy                  422560     212137       355232     177616               1.2
+free                 4603328    2513490      4742560    2382786               1.1
+unc                  4816896    2612482      4935680    2497581               1.0
+committed            4847600    2697260      4920752    2490709               1.1
+
+=== 6. ALL SIX RUNS.  Welch t, CRITICAL VALUE TAKEN AT THE WELCH df ===
+column          PRE mean    PRE sd     POS mean    POS sd      delta POS-PRE     |t|    df   t_crit          95% CI on the delta   sig?
+pkCrtBusy          50244432   3186815     50476149   3610827           231717     0.08   3.94   3.182           [-8615894, 9079329]    no
+pkCrtBlocks           82892      4470        88055      9621             5163     0.84   2.83   4.303               [-21193, 31519]    no
+pkAllBusy          50263824   3186815     50495541   3610827           231717     0.08   3.94   3.182           [-8615894, 9079329]    no
+pkAllFree           8680800   1374998      7896565    624616          -784235     0.90   2.79   4.303           [-4536131, 2967662]    no
+pkAllUnc           13699755   3947459     14229504   3607572           529749     0.17   3.97   3.182          [-9294510, 10354009]    no
+pkAllCommitted     58944624   4520588     58392107   4206551          -552517     0.15   3.98   3.182         [-11896810, 10791775]    no
+snapPrivate       102865579   4633837    102369963   4289921          -495616     0.14   3.98   3.182         [-12096594, 11105362]    no
+kernelPeak        103159125   4411722    103104512   4382186           -54613     0.02   4.00   3.182         [-11478369, 11369142]    no
+busy               16048107    212137     16025472    177616           -22635     0.14   3.88   3.182             [-530924, 485655]    no
+free               19375840   2513490     18914011   2382786          -461829     0.23   3.99   3.182           [-6824583, 5900924]    no
+unc                30755499   2612482     31074987   2497581           319488     0.15   3.99   3.182           [-6320396, 6959372]    no
+committed          35423947   2697260     34939483   2490709          -484464     0.23   3.97   3.182           [-7229214, 6260286]    no
+  SIGN CONVENTION: delta = POS - PRE.  A SAVING IS NEGATIVE.
+  The Welch df collapses toward 2 when the variances are unequal, and the
+  two-sided 95% bar there is 4.303, NOT the 2.776 of df=4.
+
+  >>> THE PERMUTATION FLOOR APPLIES TO EVERY "YES" IN THAT TABLE. <<<
+  At 3 v 3 there are C(6,3) = 20 arm assignments, so the smallest attainable
+  TWO-SIDED permutation p is 2/20 = 0.10.  No effect, however large, reaches
+  p < 0.05 at this n without leaning on normality.  EVERY YES ABOVE IS
+  PARAMETRIC, AND THAT IS SAID IN THE TABLE, NOT IN A FOOTNOTE.
+
+=== 7. LEAVE-ONE-OUT: position 1 (q1) dropped, as PREREG.txt promised ===
+column          PRE mean    PRE sd     POS mean    POS sd      delta POS-PRE     |t|    df   t_crit          95% CI on the delta   sig?
+pkCrtBusy          51104024   3984745     50476149   3610827          -627875     0.18   2.08   4.303         [-15709947, 14454198]    no
+pkCrtBlocks           80784      3649        88055      9621             7271     1.19   2.70   4.303               [-19084, 33625]    no
+pkAllBusy          51123416   3984745     50495541   3610827          -627875     0.18   2.08   4.303         [-15709947, 14454198]    no
+pkAllFree           9238808   1383112      7896565    624616         -1342243     1.29   1.28  12.706         [-14586673, 11902188]    no
+pkAllUnc           12439552   4651473     14229504   3607572          1789952     0.46   1.82  12.706         [-47675880, 51255784]    no
+pkAllCommitted     60362224   5367857     58392107   4206551         -1970117     0.44   1.83  12.706         [-59225136, 55284901]    no
+snapPrivate       104292352   5543536    102369963   4289921         -1922389     0.41   1.81  12.706         [-60837509, 56992731]    no
+kernelPeak        104450048   5378447    103104512   4382186         -1345536     0.29   1.90  12.706         [-59384324, 56693252]    no
+busy               16148248    172726     16025472    177616          -122776     0.77   2.33   4.303             [-809007, 563455]    no
+free               19958928   3255044     18914011   2382786         -1044917     0.39   1.73  12.706         [-35115513, 33025679]    no
+unc                30171136   3406060     31074987   2497581           903851     0.32   1.73  12.706         [-34763421, 36571122]    no
+committed          36107176   3427771     34939483   2490709         -1167693     0.41   1.72  12.706         [-36976717, 34641330]    no
+  Promised before run q1 and reported whether or not it helps.  Peak is
+  bimodal by POSITION on this rig -- the first run peaks ~28.7 MiB above the
+  rest in 5 of 6 recorded cases -- and q1 is a PRE run, so dropping it moves
+  the delta AGAINST the patch showing a saving.  PRE falls to n=2, so the df
+  falls and the bar rises.
+
+=== 8. THE CLAIM UNDER TEST: 5.61-6.54 MB OF PEAK SAVING ===
+  The slice that wrote the patch predicted 6 or 7 x 934,576 B off the peak.
+  predicted saving   -6542032 .. -5607456 B  (-6.239 .. -5.348 MiB)
+  MEASURED delta on pkCrtBusy (POS-PRE)   231717 B  (0.221 MiB)
+  |t| = 0.08, Welch df = 3.94, t_crit = 3.182  =>  NOT SEPARABLE
+  95% CI [-8615894, 9079329] B = [-8.217, 8.659] MiB
+  CI contains 0:                       YES
+  CI contains the predicted -6x934576: YES
+  CI contains the predicted -7x934576: YES
+  AND THE SAME THREE LINES ON snapPrivate, the figure the 5.61-6.54 MB was
+  quoted as a percentage OF:
+  MEASURED delta on snapPrivate (POS-PRE) -495616 B (-0.473 MiB), |t| = 0.14 vs 3.182 => NOT SEPARABLE
+  95% CI [-11.536, 10.591] MiB; contains 0: YES
+
+=== 9. POWER, n=3 per arm, on the headline peak column ===
+  pkCrtBusy: pooled sd = 3405427 B;  se of the difference = 2780519 B;  t_crit(df=3.94) = 3.182
+  power to detect a TRUE peak CRT-busy shift of    934576 B (0.89 MiB)  =  0.2%
+  power to detect a TRUE peak CRT-busy shift of   1869152 B (1.78 MiB)  =  0.6%
+  power to detect a TRUE peak CRT-busy shift of   5607456 B (5.35 MiB)  =  12.2%
+  power to detect a TRUE peak CRT-busy shift of   6542032 B (6.24 MiB)  =  20.3%
+  power to detect a TRUE peak CRT-busy shift of  10485760 B (10.00 MiB)  =  72.2%
+  MINIMUM DETECTABLE EFFECT at 80% power = 11188809 B = 10.67 MiB
+  >>> READ THE MDE AGAINST THE CLAIM.  If the MDE is BELOW 6x934,576 B the
+  design COULD have seen the predicted saving and did not; if it is ABOVE,
+  the null is weak and says so. <<<
+
+=== 10. THE PRE-REGISTERED PREDICTIONS, SCORED ===
+  P1 "934,576 reads 6-7 on BOTH arms; peak delta consistent with zero"
+     counts PRE 6,7,6 / POS 6,7,6; delta 231717 B, CI contains 0: YES
+     => CONFIRMED
+  P2 "PRE reads 12-14 (transient overlap)" -- the half named as most likely to
+     break P1  =>  REFUTED
+  P3 "free and uncommitted at the peak do NOT separate"
+     settled free |t| = 0.23 vs 3.182 => HELD;  settled uncommitted |t| = 0.15 vs 3.182 => HELD
+     peak free |t| = 0.90 vs 4.303 => HELD;  peak uncommitted |t| = 0.17 vs 3.182 => HELD
+  P4 "settled busy does not separate" (negative control; the lane effect on
+     settled in evidence-peakvar was |t| = 0.01)
+     |t| = 0.14 vs 3.182 => HELD -- coherence, not a new null
+  LEAVE-ONE-OUT on q1, pkCrtBusy: delta -627875 B, |t| = 0.18 vs 4.303 => NOT separable
