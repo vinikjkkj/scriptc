@@ -71,6 +71,16 @@ returned, and the knob that is supposed to cap it does not"* — goes to zero
 when the knob is armed.** Not smaller: gone. The 12,906,128 B that were 40.4%
 of all busy CRT heap bytes are returned in full, on both armed arms, at rest.
 
+> ***FOLLOWED 2026-10-10 — `DECOMP-ON.md`.*** With the row gone, the heap was
+> re-walked on this same `on` arm and the decomposition renamed. The largest
+> busy row is now `HCSIZE 65536` at **40.91%**, of which **114 of 118 blocks**
+> are cycle-collector arena chunks; the second is `HCSIZE 131079` at
+> **31.89%**, and **no document had ever named it**. See `DECOMP-ON.md` §1,
+> *"114 is invariant under half the workload"*, and `DECOMP-ON.md` §4,
+> *"6.03 MiB that no document has ever named"*. **This banner names those two
+> sections of that file only. Nothing else in this file, or in that one, is
+> thereby in force — only unaudited.**
+
 The instrument is the same weight in all four arms: `armCount=137
 armSize=5113` = **700,481 B**, self-reported, loaded identically.
 
@@ -120,6 +130,14 @@ The predicted drop in busy CRT bytes was ≥ 13,080,880. Measured:
 **672 bytes.** Two separately-registered misses are one named cause: the
 retained slab, and nothing else. A reader who takes them as two independent
 defects has two problems where there is one.
+
+> ***CONFIRMED 2026-10-10 by a second derivation.*** `DECOMP-ON.md` §2 reaches
+> the same **+672** from the other side — a full row-by-row diff of the two
+> censuses, in which *"The whole `off` -> `on` difference is TWO rows"*. The
+> figure above is a prediction-minus-measurement gap; that one is a census
+> residue. They are not the same arithmetic and they land on the same number.
+> **This banner names that section only; it audits nothing else in either
+> file.**
 
 ## 3. The validity condition fell, and its inference is false
 
