@@ -1,0 +1,44 @@
+prog: MAP USABLE  module=G:\blocks\mb-zig-local\o\0fbf49cb6e2aa35f19c1d2bcc31e769f\zapo-rest.obj | .text rva=0x242bc0..0x1a356ee size=25111342 | object .text sections=1 (size match 1) | function symbols=18895 | publics inside range=1 | publics AGREEING=1
+scr_bytes: MAP USABLE  module=G:\blocks\mb-zig-local\o\74170598a6a22c21a1f6f4fd4b05097b\scr_bytes.obj | .text rva=0x10c680..0x114879 size=33273 | object .text sections=1 (size match 1) | function symbols=80 | publics inside range=59 | publics AGREEING=59
+scr_stream: MAP USABLE  module=G:\blocks\mb-zig-local\o\7f42c989035739da46c18c611be2bfc7\scr_stream.obj | .text rva=0x1f6e90..0x205cd3 size=60995 | object .text sections=1 (size match 1) | function symbols=177 | publics inside range=92 | publics AGREEING=92
+scr_async: MAP USABLE  module=G:\blocks\mb-zig-local\o\c151f7317d21e84ffd5304c08042b625\scr_async.obj | .text rva=0x168530..0x1739c0 size=46224 | object .text sections=1 (size match 1) | function symbols=229 | publics inside range=180 | publics AGREEING=180
+scr_json: MAP USABLE  module=G:\blocks\mb-zig-local\o\5fa85ef476fceb96a4d8a025a43b5bb6\scr_json.obj | .text rva=0x146d30..0x16852c size=137212 | object .text sections=1 (size match 1) | function symbols=338 | publics inside range=238 | publics AGREEING=238
+crt2: MAP USABLE  module=G:\blocks\mb-zig-global\o\98723314f43d36b8d2319808f366d381\crt2.obj | .text rva=0x1a356f0..0x1a35ae6 size=1014 | object .text sections=1 (size match 1) | function symbols=7 | publics inside range=3 | publics AGREEING=3
+
+A 8x934576 (m1:661)
+       1fee16  scr_stream_rbuf_take+550  [scr_stream]
+       1fe85e  scr_stream_settle_next+302  [scr_stream]
+       2035a9  scr_stream_run_tick+1385  [scr_stream]
+       202f5b  scr_stream_dispatch_one+75  [scr_stream]
+       16e1a2  scr_loop_run+418  [scr_async]
+      1a30bc9  main+1001  [prog]
+      1a35a4d  __tmainCRTStartup+461  [crt2]
+      1a35abc  mainCRTStartup+28  [crt2]
+
+B 8x1048576 (m1:662)
+       65a5e8  sc_tr__x25__x25_m41_ProtoStreamReader_ensure+2024  [prog]
+       173390  scr_trampoline+144  [scr_async]
+    310923110  <unmapped>+0  [-]
+    3136ccaa9  <unmapped>+0  [-]
+
+C 8x934576 (m1:663)
+       10d6cb  scr_bytes_copy+27  [scr_bytes]
+       14c4d3  scr_dyn_new_buffer_copy+131  [scr_json]
+       201f76  scr_stream_next_fulfill+198  [scr_stream]
+       1fe8e8  scr_stream_settle_next+440  [scr_stream]
+       2035a9  scr_stream_run_tick+1385  [scr_stream]
+       202f5b  scr_stream_dispatch_one+75  [scr_stream]
+       16e1a2  scr_loop_run+418  [scr_async]
+      1a30bc9  main+1001  [prog]
+
+D 1x1048576 (m1:660)
+       214402  <unmapped>+0  [-]
+       20c1d9  <unmapped>+0  [-]
+       214f0e  <unmapped>+0  [-]
+       21081e  <unmapped>+0  [-]
+       9fff9b  sc_f_wsSendText+267  [prog]
+       a00fee  sc_f_wsOffer+2126  [prog]
+       a0167c  sc_f_wsCatchUp+1564  [prog]
+       a03198  sc_f_wsAttach+6024  [prog]
+      1a0c48b  sc_f__x25_fn4458+91  [prog]
+       221871  <unmapped>+0  [-]
