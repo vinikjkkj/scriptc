@@ -206,3 +206,55 @@ observation, it was not measured here, and it is not claimed as retention.
   with 92/92 and 180/180 publics agreeing. Nothing refused.
 * The briefing framed the slack as possibly "a policy other than doubling".
   It is the doubling, verifiable in four lines of the dependency's source.
+
+---
+
+> ## MEASURED AND DEAD, 2026-10-11 (later the same day) - THE PEAK SAVING IS ZERO
+>
+> **The sentences this band answers.** In section *"3. Is the copy semantically
+> necessary? NO -- and the ownership says so in one line."*:
+>
+> > "At 6-7 chunks resident at the peak that is **5.6-6.5 MB of the peak**"
+>
+> > "i.e. **5.62%, 6.04% and 5.64% of private bytes at the peak** of those
+> > three stackless runs."
+>
+> and in section *"What this slice did NOT do"*:
+>
+> > "The 5.6-6.5 MB figure is what the census says is resident, not a measured
+> > saving."
+>
+> **The change was made and the figure was measured. It is zero.** The patch is
+> `16d91996f` (`scr_stream.c`, the share on the one `scr_stream_rbuf_take_f`
+> path that owns its buffer); the measurement is `58bb43ffc`,
+> `tests/perf/heapcensus/evidence-chunkref/`, 3 runs per arm alternated.
+>
+> **The refutation, by section and sentence.**
+> `evidence-chunkref/VERDICT.md`, section *"The deciding item, and it is a
+> COUNT, not a t"*:
+>
+> > "**PRE reads 6, 7, 6. POS reads 6, 7, 6.**"
+>
+> The 934,576 class reads 6, 7, 6 blocks live at the peak on the PRE arm and
+> 6, 7, 6 on the POS arm, run for run, 1:1 with its 1,048,576 partner in all
+> six. **This file counted the copy as an EXTRA resident buffer. It never was
+> one** - the original dies one instruction after the copy, so the live
+> population per chunk was already one in both arms.
+>
+> **What killed it is the count, not a t test.** `VERDICT.md` section *"The
+> peak aggregate, and an honest statement of its weakness"* records that the
+> aggregate null has 12.2% power against this very figure and an MDE of
+> 10.67 MiB, so the t columns prove nothing here. The per-class count, which
+> has no spread, is what settles it.
+>
+> **What survives, and it is not nothing.** The copy is still removable and the
+> patch still removes real work: `VERDICT.md` section *"The patch does work. It
+> removes 7.48 MB of FLOW per run"* measures 48 -> 40 copies at
+> `scr_bytes.c:52` (exactly `CHUNKS=8` fewer) and 7,475,028 B less turnover per
+> run. **Sections 1, 2 and 4 of this file, the producer naming, the 1:1
+> ownership argument and the 114,000 B doubling, are untouched.** The
+> distinction this band enforces is FLOW against RETENTION: the patch removes
+> flow and moves resident peak bytes by nothing.
+>
+> **Sections of this file not named above are NOT thereby in force; they are
+> merely UNAUDITED by this band.**

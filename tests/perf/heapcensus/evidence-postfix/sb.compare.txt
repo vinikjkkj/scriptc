@@ -142,3 +142,51 @@ AUDITED: THE -340,480 B LINE IS NOT SEPARABLE AT n=3
   stands, and it does not touch any PEAK figure, including the -21.117 MiB of
   pagecensus/evidence-fr2/DECOMP.txt, which is a different quantity.
 
+
+================================================================================
+AUDITED 2026-10-11 (later the same day) -- THE 47-CHUNK NUMERATOR IS A DRAW
+================================================================================
+
+  APPENDED BY HAND 2026-10-11, second hand-appended band in this file.
+  Nothing above this line is edited and nothing was regenerated.
+
+  THE LINES THIS BAND ANSWERS, in the section "=== ROUTE A and ROUTE B, both
+  with their denominators named ===":
+
+      "live string-arena chunks in sb = 47 alloc - 0 freed = 47"
+      "realized release               = 47 x 65536 = 3080192 B"
+      "ROUTE A  this run against ITS OWN counterfactual pre-fix heap
+                3080192 / (15902592 + 3080192 = 18982784) = 16.226%"
+      "ROUTE B  this run against the STACKLESS baseline evidence-idle/on
+                3080192 / 18907440 = 16.291%"
+
+  THE COUNT 47 IS A PER-RUN DRAW; 46 IS MODAL. evidence-variance/VARIANCE.md,
+  section "5. The correction that falls out: the chunk count is not 47":
+
+      "So the realized release is not a constant 47 x 65,536 = 3,080,192 B.
+       At the modal 46 it is 3,014,656 B"
+      "The record raised this headline from 15.940% to 16.226% on the strength
+       of sb's 47 chunks. At the modal 46 it reads 15.94% again."
+
+  Shown inside ONE binary by evidence-lane/LANE-VARIANCE.md, section "The
+  chunk count is a per-run draw, now shown inside one binary":
+
+      "Fiber read 46, 47, 46."
+      "Tally 46 in 12 of 15, 47 in 3 of 15."
+
+  SO BOTH ROUTES ABOVE CARRY A ONE-DRAW NUMERATOR. The headline returns to
+  15.940%. The ROUTE A / ROUTE B construction itself -- numerator and
+  denominator on one lane -- is upheld and is not what moved.
+
+  WHY THIS FILE IS BANDED BY HAND RATHER THAN REGENERATED. It is produced by
+  `sb-compare.sh` and cannot be regenerated without re-running `sb`;
+  evidence-variance/VARIANCE.md section "8. What this slice did NOT do, and
+  why" gave exactly that reason for routing its amendment to
+  POSTFIX-CENSUS.md instead. The consequence was that the file carrying the
+  figure never got the pointer. The practice settled on later in the same day
+  -- see the `AUDITED: THE -340,480 B LINE IS NOT SEPARABLE AT n=3` band above,
+  appended by hand by evidence-lane/_append-bands.py -- is append-only hand
+  bands below the generated text, and this band follows it.
+
+  SECTIONS OF THIS FILE NOT NAMED ABOVE ARE NOT THEREBY IN FORCE -- they are
+  merely UNAUDITED by this band.

@@ -99,3 +99,43 @@ THE STRING-ARENA FIX, 3,080,192 B = 2.9375 MiB, against every denominator it has
   `tests/perf/heapcensus/evidence-postfix/LANE.txt`.
   Lines of this file above "THE STRING-ARENA FIX" are UNAUDITED by this
   note, not thereby endorsed.
+
+  LATER BAND ON THE `LANE MARKER` ABOVE, 2026-10-11 -- ITS "WHAT SURVIVES"
+  CLAUSE SURVIVES ONE TERM TOO MANY. Nothing above is edited or re-run.
+
+  THE LINE THIS BAND ANSWERS, in the LANE MARKER attached to the block
+  "THE STRING-ARENA FIX, 3,080,192 B = 2.9375 MiB, against every denominator
+  it has:":
+
+      "WHAT SURVIVES: 3,080,192 B itself (47 x 65,536, one binary, source
+       arithmetic)"
+
+  THE COUNT 47 IS A PER-RUN DRAW, AND "one binary" DOES NOT RESCUE IT.
+  evidence-lane/LANE-VARIANCE.md (heapcensus), section "The chunk count is a
+  per-run draw, now shown inside one binary":
+
+      "Fiber read 46, 47, 46."
+      "Tally 46 in 12 of 15, 47 in 3 of 15."
+
+  and heapcensus evidence-variance/VARIANCE.md, section "5. The correction
+  that falls out: the chunk count is not 47":
+
+      "So the realized release is not a constant 47 x 65,536 = 3,080,192 B.
+       At the modal 46 it is 3,014,656 B"
+
+  The marker scoped the numerator to ONE BINARY because the defect it was
+  marking was a CROSS-LANE mismatch. The count varies run to run WITHIN one
+  binary at fixed knobs, so the one-binary scope was the wrong fence for this
+  term. The term that is genuinely source arithmetic is the PER-CHUNK
+  65,536 B, not the product.
+
+  WHAT SURVIVES, RESTATED. The repair's realized release is measured at
+  -3,020,443 B of settled `busy` over six runs (heapcensus
+  evidence-variance/VARIANCE.md, section "4. Where the bytes actually go"),
+  i.e. the modal 46 x 65,536 = 3,014,656 B plus a +5,787 B residual -- about
+  2.0% below the 3,080,192 B used in the four percentage pairs above, which
+  the LANE MARKER had already marked for a different reason. The v1-v3 / f1
+  decompositions of this file remain this file's own and are untouched.
+
+  LINES OF THIS FILE NOT NAMED ABOVE ARE NOT THEREBY IN FORCE -- they are
+  merely UNAUDITED by this band.

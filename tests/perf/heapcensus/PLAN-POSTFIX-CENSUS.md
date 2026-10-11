@@ -434,3 +434,38 @@ Write a manifest in the shape of `evidence-idle/*.manifest.txt` — tag, exe,
 exe-bytes, knobs, started/ended, rc, free-G-GB — and commit the three
 artefacts under `evidence-postfix/`. **The manifest is the source; the prose
 is not.**
+
+---
+
+> ## AUDITED, 2026-10-11 (later the same day) - "47 chunks" IS A DRAW, AND THE `RESOLVED` BLOCK TREATS IT AS A CONSTANT
+>
+> **The sentence this band answers**, in the block headed
+> *"### RESOLVED, 2026-10-11"*, under *"What the plan registered and
+> lane-independence predicted, held"*:
+>
+> > "The chunk size, the P5 assertions and the +/-16-per-chunk residue
+> > reproduce to the byte across both lanes: 47 chunks, 3,080,192 B, zero
+> > frees."
+>
+> **Three of the four items in that sentence hold. `47 chunks` does not, and
+> `3,080,192 B` is `47 x 65,536` and falls with it.**
+> `evidence-variance/VARIANCE.md`, section *"5. The correction that falls out:
+> the chunk count is not 47"*:
+>
+> > "So the realized release is **not** a constant `47 x 65,536 = 3,080,192 B`.
+> > At the modal 46 it is `3,014,656 B`".
+>
+> and `evidence-lane/LANE-VARIANCE.md`, section *"The chunk count is a per-run
+> draw, now shown inside one binary"*:
+>
+> > "Tally **46 in 12 of 15, 47 in 3 of 15**."
+>
+> The fiber binary read **46, 47, 46** across three runs at fixed knobs, so the
+> `sa`/`sb` agreement at 47 is two draws, not a reproduced constant. **What
+> reproduces is the per-chunk 65,536 B and the zero frees, which is what
+> lane-independence actually predicted; the COUNT is a per-run population and
+> the plan was never entitled to predict it to the block** - the same error
+> this block already diagnoses one paragraph later for `P2`'s row total.
+>
+> **Sections of this file not named above are NOT thereby in force; they are
+> merely UNAUDITED by this band.**

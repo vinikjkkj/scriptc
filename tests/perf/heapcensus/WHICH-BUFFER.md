@@ -378,3 +378,41 @@ h2-rig.sh half    CONVS=200
 reports 64 refusals inside zapo-js that are the fallback's and not the lane's.
 That failure cost 8 seconds here because it is loud; it is in the recipe so it
 costs nobody else more.
+
+---
+
+> ## SCOPED, 2026-10-11 - SECTION 1 IS A STATEMENT ABOUT THE SETTLED INSTANT
+>
+> **The claim this band scopes**, the title and finding of section
+> *"1. (a) WHICH buffer"*: that the 1,328-byte class **is not a buffer, it is
+> SQLite**, supported by `HCSIZE 1328` live at rest reading **1**.
+>
+> **That reading is right, and it is a reading AT REST.** At the PEAK instant
+> the same class is the parked-coroutine population on the fiber lane.
+> `evidence-peakvar/PEAK-VARIANCE.md`, section *"4. What fell out for free: the
+> 1,328 class at the peak is a lane population"*:
+>
+> > "**A ratio of means of 1,554x, and it vanishes by shutdown on both lanes**
+> > - which is exactly why no settled census in this repository could ever have
+> > seen it."
+>
+> The six peak runs read 13 / 20,203 / 20,203 / 15 / 13 / 24,242 blocks live at
+> the peak against 1 / 14 / 13 / 1 / 1 / 14 at shutdown.
+>
+> **This does NOT refute section 1.** The section reads the class at rest and
+> is correct there, and the stackless arm - the arm this frontend ships - reads
+> 13-15 blocks even at the peak. What the band adds is the scope: **section 1's
+> finding is about the settled instant and must not be carried to the peak**,
+> where on the fiber lane the class is 87.4% of the lane's peak delta and is
+> stacks, not SQLite. The two instruments do not disagree; they answer at
+> different times.
+>
+> **Also recorded here because it bears on section 1's SQLite identification
+> and is a confirmation, not a correction:** the 4,376-byte class is named at
+> `file:line` as SQLite's page cache in `evidence-peaksite/SITE.md`, section
+> *"2. 4,376"*, titled "NAMED, three independent strands", which derives
+> `4096 + 216 + 56 + 8` from `sqlite3MemMalloc`'s size prefix at
+> `vendor/sqlite/sqlite3.c:28035`.
+>
+> **Sections of this file not named above are NOT thereby in force; they are
+> merely UNAUDITED by this band.**
