@@ -57,7 +57,30 @@
  *
  * NOT EXECUTED. Written while a gate was in flight; nothing here has been
  * compiled or run, and the runtime entry points it names are declarations
- * without definitions. */
+ * without definitions.
+ *
+ * THAT "NOT EXECUTED" PARAGRAPH IS RETRACTED (2026-10-11); it is kept
+ * verbatim above so the claim it made stays legible. Both of its halves
+ * are false, and each was checked here rather than assumed:
+ *
+ *   - THIS FILE IS DISPATCHED, not dead. emitGenCoroSpawn is called from
+ *     emit-async.ts, genCoroUnwind from emitter.ts, emitCoroYield from
+ *     emit-exprs.ts and genCoroFinish from emit-stmts.ts.
+ *   - THE ENTRY POINTS ARE DEFINITIONS, not declarations. All fourteen
+ *     generator entry points named in this file have bodies in
+ *     runtime/src/scr_async.c: the three yield arms, the three take_in
+ *     arms, the five finish arms (void/f64/bool/ref/throw),
+ *     scr_gen_coro_alloc, scr_gen_of_coro and scr_gen_resume_return.
+ *   - IT IS EXERCISED. tests/harness/generator-lane-parity.test.ts builds
+ *     real `function*` programs knob-absent and knob-on and compares
+ *     stdout byte-for-byte across the lanes; its part 2 reads the
+ *     conversion count out of the EMITTED C, so a vacuous pass (nothing
+ *     converted, the lane compared against itself) is distinguishable
+ *     from a real one.
+ *
+ * No line anchors are given above on purpose: the figures in this front's
+ * comments have drifted before, and a symbol name relocates where a line
+ * number rots. */
 import type { IrFunction, IrType } from "../../ir/nodes.js";
 import type { StacklessPlan } from "../../ir/liveness.js";
 import type { CEmitter, Temp } from "./emitter.js";

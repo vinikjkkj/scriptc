@@ -1076,34 +1076,40 @@ export function stacklessPlan(fn: IrFunction): StacklessPlan | null {
    *
    * THE REAL MECHANISM IS THAT THE FRAME-BACKED GENERATOR PROTOCOL HAS NO
    * ASYNC HALF. Four pieces are missing, each in the runtime and none of
-   * them a label (`packages/runtime/src/scr_async.c`, read 2026-10-10):
+   * them a label (`packages/runtime/src/scr_async.c`, RE-READ 2026-10-11).
+   * EVERY LINE ANCHOR BELOW WAS RELOCATED BY SYMBOL NAME, not carried
+   * forward. The previous set had drifted by a uniform +44, and one
+   * pointer was 3,494 lines out: `scr_gen_is_async` was cited at :1601,
+   * which is a line of the FORWARD DECLARATION's comment, not the
+   * definition. Cite the SYMBOL; treat the number as perishable and
+   * re-derive it:
    *
    *   1. NO SETTLE THUNK ON A FRAME-BACKED HANDLE. `scr_gen_of_coro(base,
-   *      drop)` (:5488, declared scr_coro.h:355) takes no `settle`, so
+   *      drop)` (:5560, declared scr_coro.h:364) takes no `settle`, so
    *      `g->settle` stays NULL -- and `scr_gen_is_async` IS "settle is
-   *      non-NULL" (:1601). A converted async generator would be classified
+   *      non-NULL" (:5123). A converted async generator would be classified
    *      SYNCHRONOUS by the runtime's own discriminator.
    *   2. NO CONSUMER DRIVER. `scr_gen_resume` / `_return` / `_throw` each
-   *      branch on `backing == SCR_GEN_BACKED_FRAME` (:5687, :5711, :5732, :5761, :5781).
-   *      `scr_agen_next` (:5283), `scr_agen_return` (:5290),
-   *      `scr_agen_throw` (:5316) and the three `_native` variants
-   *      (:5215, :5227, :5253) have NO such branch: all reach
-   *      `scr_agen_switch_in` (:5114), whose first statement is
+   *      branch on `backing == SCR_GEN_BACKED_FRAME` (:5776, :5800, :5821, :5850, :5870).
+   *      `scr_agen_next` (:5355), `scr_agen_return` (:5362),
+   *      `scr_agen_throw` (:5388) and the three `_native` variants
+   *      (:5287, :5299, :5325) have NO such branch: all reach
+   *      `scr_agen_switch_in` (:5186), whose first statement is
    *      `ScrFiber *f = g->fiber` and whose fourth writes `f->return_to`.
-   *      `g->fiber` is NULL on every frame-backed handle (:5495). A null
+   *      `g->fiber` is NULL on every frame-backed handle (:5567). A null
    *      store, not a diagnostic.
    *   3. THE STEP ANSWERS THREE OUTCOMES AND AN ASYNC GENERATOR NEEDS FOUR.
-   *      `scr_gen_coro_step` (:5595) reads the flags after `base->resume`
-   *      and branches YIELDED / else-DONE (:5658). An async body can PARK ON
+   *      `scr_gen_coro_step` (:5667) reads the flags after `base->resume`
+   *      and branches YIELDED / else-DONE (:5747). An async body can PARK ON
    *      AN AWAIT between yields and return with neither flag set -- which
    *      that code reads as "completed, no exception" and would report
    *      `{done:true}` while the body is still parked. The fiber twin has
-   *      the fourth arm explicitly (:5134..5139). A synchronous generator cannot
+   *      the fourth arm explicitly (:5206..5211). A synchronous generator cannot
    *      await, which is why the three arms are correct for the shape that
    *      ships and wrong for this one.
    *   4. THE YIELD ARMS SETTLE NOTHING AND TAKE NO HOP. `scr_gen_coro_yield_*`
-   *      (:5528..5538) write OUT and set SCR_CORO_YIELDED. The async
-   *      semantics live in `scr_agen_yield_settle` (:5363): `scr_await_hop()`
+   *      (:5600..5611) write OUT and set SCR_CORO_YIELDED. The async
+   *      semantics live in `scr_agen_yield_settle` (:5435): `scr_await_hop()`
    *      and then `g->settle(g, p)` on the in-flight request promise, or
    *      `scr_agen_sink_schedule` for a native consumer. The HOP IS NOT
    *      DECORATION -- it is one microtask turn that JS's AsyncGeneratorYield

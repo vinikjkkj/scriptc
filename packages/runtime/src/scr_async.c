@@ -2479,7 +2479,16 @@ static void scr_fiber_pool_teardown(void) {
  * ran" are distinguishable readings -- the property that let the fiber
  * pool's diagnostic be trusted. SCR_HEAP_TRIM_CENSUS=1 adds a HeapWalk
  * per window: busy bytes are the floor no trim can go below, and free
- * bytes are the most any trim could ever return. */
+ * bytes are the most any trim could ever return.
+ *
+ * THE SECOND HALF OF THAT SENTENCE IS RETRACTED (2026-10-11), kept
+ * verbatim above: free bytes are NOT the most a trim could return, they
+ * OVERSTATE it, because the NT heap decommits inside a free run without
+ * emitting PROCESS_HEAP_UNCOMMITTED_RANGE. The census is also Win32-only
+ * -- its body sits inside `#ifdef _WIN32` and no other target keeps
+ * allocator accounting -- which this sentence did not say. See the
+ * retraction at the census body itself for the measurement and its
+ * negative control. */
 #ifndef SCR_HEAP_TRIM_MS
 #define SCR_HEAP_TRIM_MS 0
 #endif
@@ -2927,7 +2936,26 @@ static void scr_heap_trim(double now) {
 #ifdef _WIN32
   /* THE FLOOR, not the delta. busy is what is genuinely allocated and
    * therefore the number no trim can go below; free is the whole of what
-   * any trim could ever return. A retained working set that is nearly all
+   * any trim could ever return.
+   *
+   * "free is the whole of what any trim could ever return" IS RETRACTED
+   * (2026-10-11), and is kept verbatim above as the record of the claim.
+   * free OVERSTATES the trim ceiling: the NT heap decommits pages INSIDE
+   * a free run WITHOUT reporting them as PROCESS_HEAP_UNCOMMITTED_RANGE,
+   * so bytes this census counts as free have in fact already gone back to
+   * the OS and no trim can return them twice. MEASURED with a negative
+   * control: in the arm that frees nothing, the large free blocks are 100%
+   * MEM_COMMIT; in the three arms that do free, 74.6 / 93.7 / 92.7% of
+   * them are MEM_RESERVE. This is the same error `busy+free` made about
+   * commit, for the same reason -- a HeapWalk flag set is being read as a
+   * statement about PAGE STATE, which it is not.
+   *
+   * SCOPE: this holds for the Win32 census path, which is all this
+   * `#ifdef _WIN32` block is; outside it the product keeps no allocator
+   * accounting at all, so there is no other lane for the claim to be
+   * right on. The counters below are still the right instrument -- only
+   * the reading that freeKiB BOUNDS the trim was wrong.
+   * A retained working set that is nearly all
    * busy is not a trim problem at all -- it is a peak problem. Off by
    * default because HeapWalk is O(blocks) and a 100 MiB heap has upwards
    * of a million of them. */
@@ -5657,7 +5685,24 @@ static void scr_gen_coro_step(ScrGen *g, ScrGenInject inject) {
    * admission blocker so no converted generator has one. That is exactly
    * the shape this front keeps paying for -- a fence argument held in
    * another file, which the next widening voids without visiting this
-   * line. The guard costs one comparison and removes the dependence. */
+   * line. The guard costs one comparison and removes the dependence.
+   *
+   * THAT IMPOSSIBILITY ARGUMENT IS NOW VOID, AND THE WIDENING IT
+   * PREDICTED IS THE ONE THAT ARRIVED (2026-10-11). `finally` is NOT a
+   * point-level admission blocker any more: ir/liveness.ts records under
+   * D4 that `finallyBodyDepth` is GONE from admission and calls it "the
+   * last point blocker retiring", so a suspension inside a finally body
+   * converts and a converted generator CAN hold a yielding finally. The
+   * sentence above that reads "so no converted generator has one" is
+   * false as of that change; it is kept verbatim because it is the
+   * record of what the fence once bought.
+   *
+   * NO DEFECT FOLLOWS, and that is the whole point of the paragraph
+   * above: the guard below was written NOT to depend on the fence, so
+   * the revocation costs nothing and the code needs no edit. What was
+   * wrong is the PROSE asserting an impossibility, not the guard. This
+   * note therefore no longer claims the dirty cell is unreachable -- only
+   * that the one comparison below makes the question moot. */
   if (inject == SCR_GEN_INJECT_RET) {
     ScrExcCell *sc_cell = scr_exc_current_cell();
     if (sc_cell->kind == SCR_EXC_NONE) sc_cell->kind = SCR_EXC_GENRET;
