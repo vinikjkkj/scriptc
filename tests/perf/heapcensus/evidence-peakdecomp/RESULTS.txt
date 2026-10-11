@@ -1,0 +1,317 @@
+=== peak-decomp.mjs -- the PEAK CRT heap, by size class ===
+    source: G:\blocks\v4-wt\tests\perf\heapcensus\evidence-peakvar
+    runs:   SL (stackless, the target) = p1, p4, p5
+            FB (fiber, contrast only)  = p2, p3, p6
+    NOTHING WAS BUILT AND NOTHING WAS RUN. Committed *.heapcen.txt only.
+
+=== 0. THE DENOMINATORS, PER RUN, BEFORE ANY SHARE ===
+    pkCrtBusy = HCPKTOTAL bytes | stCrtBusy = HCTOTAL bytes | transient = pk - st
+    both are the CRT HEAP ONLY (heap 0), of the INSTRUMENTED binary.
+
+    run   lane         pkCrtBusy      stCrtBusy      transient    pk/st   lost
+    p1    STACKLESS    48,281,280     15,913,168     32,368,112    3.034      0
+    p4    STACKLESS    52,558,208     16,269,072     36,289,136    3.231      0
+    p5    STACKLESS    48,498,880     15,894,496     32,604,384    3.051      0
+    p2    FIBER        79,182,560     15,867,008     63,315,552    4.990      0
+    p3    FIBER        78,773,632     15,915,296     62,858,336    4.950      0
+    p6    FIBER        91,949,168     16,289,872     75,659,296    5.645      0
+
+    STACKLESS  transient: mean 33,753,877 B = 32.190 MiB, sd 2,198,774 B, range 3,921,024 B
+    FIBER      transient: mean 67,277,728 B = 64.161 MiB, sd 7,262,250 B, range 12,800,960 B
+
+    THE INSTANT ITSELF, CONTROLLED. The 137-block 5,113 B arm is planted AFTER
+    the peak table is emitted (scr_heap_census.h:703-713), so it must appear at
+    shutdown and never at the peak. Both halves read, in all six runs:
+      p1   HCPKSIZE 5113: absent (expected)           HCSIZE 5113: 137 blocks (expected)
+      p4   HCPKSIZE 5113: absent (expected)           HCSIZE 5113: 137 blocks (expected)
+      p5   HCPKSIZE 5113: absent (expected)           HCSIZE 5113: 137 blocks (expected)
+      p2   HCPKSIZE 5113: absent (expected)           HCSIZE 5113: 137 blocks (expected)
+      p3   HCPKSIZE 5113: absent (expected)           HCSIZE 5113: 137 blocks (expected)
+      p6   HCPKSIZE 5113: absent (expected)           HCSIZE 5113: 137 blocks (expected)
+    This control DISCRIMINATES: one side is non-zero by construction and the
+    other is zero by construction, so a dead reader could not produce both.
+
+=== 1. THE STACKLESS ARM -- THE TARGET. p1, p4, p5 ===
+    DENOMINATOR for every "% of peak" in this section: THAT RUN'S OWN pkCrtBusy
+    (p1 = 48,281,280   p4 = 52,558,208   p5 = 48,498,880).
+
+    (a) THE 12 LARGEST PEAK CLASSES, BY MEAN BYTES OVER THE THREE RUNS
+      size           p1 blk     p1 bytes     p4 blk     p4 bytes     p5 blk     p5 bytes  mean %pk  in 3?
+      65,536            305   19,994,080        326   21,370,880        306   20,059,744    41.14%  yes
+      4,376           1,570    7,259,680      1,845    8,531,280      1,470    6,797,280    15.09%  yes
+      1,048,576           6    6,291,456          7    7,340,032          6    6,291,456    13.32%  yes
+      934,576             6    5,607,552          7    6,542,144          6    5,607,552    11.87%  yes
+      152             6,946    1,111,408      6,508    1,041,296      9,196    1,471,360     2.44%  yes
+      8,192             168    1,378,944         93      763,344        168    1,378,944     2.38%  yes
+      128             6,389      920,016      7,417    1,068,048      6,388      919,872     1.94%  yes
+      32             13,009      624,464     12,573      603,536     15,258      732,416     1.32%  yes
+      96              4,505      504,608      4,506      504,704      4,504      504,480     1.02%  yes
+      64              5,810      464,800      5,657      452,560      6,554      524,320     0.97%  yes
+      262,144             2      524,320          1      262,160          2      524,320     0.89%  yes
+      40              8,004      384,192      6,039      289,872      8,004      384,192     0.71%  yes
+
+    (b) CONCORDANCE -- a class large in ONE run is a draw, not an occupant.
+        rel.range = (max - min) / mean of the three PEAK byte figures.
+      size        mean bytes   rel.range   mean blocks   blk rel.range   verdict
+      65,536       20,474,901        6.7%         312.3            6.7%   concordant
+      4,376         7,529,413       23.0%        1628.3           23.0%   concordant
+      1,048,576     6,640,981       15.8%           6.3           15.8%   concordant
+      934,576       5,919,083       15.8%           6.3           15.8%   concordant
+      152           1,208,021       35.6%        7550.0           35.6%   loose
+      8,192         1,173,744       52.4%         143.0           52.4%   loose
+      128             969,312       15.3%        6731.3           15.3%   concordant
+      32              653,472       19.7%       13613.3           19.7%   concordant
+      96              504,597        0.0%        4505.0            0.0%   concordant
+      64              480,560       14.9%        6007.0           14.9%   concordant
+      262,144         436,933       60.0%           1.7           60.0%   loose
+      40              352,752       26.7%        7349.0           26.7%   loose
+
+    (c) THE SAME CLASSES AT SHUTDOWN. This is the column that answers the question.
+        "ROW ABSENT" = no HCSIZE row at all, in any of the three runs.
+        % of transient divides by THAT RUN'S OWN transient, then averages.
+      size        mean peak B   mean settled B   survives   mean transient B   % of transient
+      65,536       20,474,901       10,772,635       52.6%         9,702,267          28.73%
+      4,376         7,529,413                0  ROW ABSENT         7,529,413          22.26%
+      1,048,576     6,640,981                0  ROW ABSENT         6,640,981          19.65%
+      934,576       5,919,083                0  ROW ABSENT         5,919,083          17.52%
+      152           1,208,021           13,941        1.2%         1,194,080           3.56%
+      8,192         1,173,744           24,624        2.1%         1,149,120           3.46%
+      128             969,312           36,000        3.7%           933,312           2.76%
+      32              653,472          306,176       46.9%           347,296           1.04%
+      96              504,597          503,776       99.8%               821           0.00%
+      64              480,560          273,707       57.0%           206,853           0.62%
+      262,144         436,933          436,933      100.0%                 0           0.00%
+      40              352,752          176,928       50.2%           175,824           0.53%
+
+    (d) THE TRANSIENT ITSELF, RANKED. peak bytes MINUS settled bytes, per class.
+      rank  size                   p1           p4           p5          mean   survives at shutdown?
+      1     65,536         9,243,296   10,554,592    9,308,912     9,702,267   3/3 runs keep a row
+      2     4,376          7,259,680    8,531,280    6,797,280     7,529,413   NO ROW AT ALL
+      3     1,048,576      6,291,456    7,340,032    6,291,456     6,640,981   NO ROW AT ALL
+      4     934,576        5,607,552    6,542,144    5,607,552     5,919,083   NO ROW AT ALL
+      5     152            1,097,440    1,027,360    1,457,440     1,194,080   3/3 runs keep a row
+      6     8,192          1,354,320      738,720    1,354,320     1,149,120   3/3 runs keep a row
+      7     128              883,872    1,032,192      883,872       933,312   3/3 runs keep a row
+      8     32               318,240      297,408      426,240       347,296   3/3 runs keep a row
+
+    (e) CUMULATIVE COVERAGE OF THE TRANSIENT, each cell over THAT RUN'S OWN transient
+        (p1 = 32,368,112   p4 = 36,289,136   p5 = 32,604,384).
+      N   classes folded in                                   p1       p4       p5     mean
+      1   65,536                                           28.6%    29.1%    28.6%    28.7%
+      2   65,536 4,376                                     51.0%    52.6%    49.4%    51.0%
+      3   65,536 4,376 1,048,576                           70.4%    72.8%    68.7%    70.6%
+      4   65,536 4,376 1,048,576 934,576                   87.7%    90.8%    85.9%    88.2%
+      5   65,536 4,376 1,048,576 934,576 152               91.1%    93.7%    90.4%    91.7%
+      6   65,536 4,376 1,048,576 934,576 152 8,192         95.3%    95.7%    94.5%    95.2%
+      7   65,536 4,376 1,048,576 934,576 152 8,192 128     98.1%    98.6%    97.2%    97.9%
+      8   65,536 4,376 1,048,576 934,576 152 8,192 ...     99.0%    99.4%    98.5%    99.0%
+
+=== 2. THE FIBER ARM -- CONTRAST ONLY, NOT THE TARGET. p2, p3, p6 ===
+    DENOMINATOR for every "% of peak" in this section: THAT RUN'S OWN pkCrtBusy
+    (p2 = 79,182,560   p3 = 78,773,632   p6 = 91,949,168).
+
+    (a) THE 12 LARGEST PEAK CLASSES, BY MEAN BYTES OVER THE THREE RUNS
+      size           p2 blk     p2 bytes     p3 blk     p3 bytes     p6 blk     p6 bytes  mean %pk  in 3?
+      1,328          20,203   27,476,064     20,203   27,476,064     24,242   32,969,104    35.15%  yes
+      65,536            314   20,584,304        315   20,650,048        356   23,337,504    25.86%  yes
+      1,048,576           6    6,291,456          6    6,291,456          7    7,340,032     7.97%  yes
+      934,576             6    5,607,552          6    5,607,552          7    6,542,144     7.11%  yes
+      4,376           1,157    5,349,968      1,197    5,534,928      1,293    5,978,832     6.76%  yes
+      152            19,940    3,190,432     17,658    2,825,296     23,780    3,804,816     3.92%  yes
+      40             49,598    2,380,704     49,424    2,372,352     58,393    2,802,864     3.02%  yes
+      8,192             215    1,764,720        208    1,707,264        243    1,994,544     2.19%  yes
+      32             27,864    1,337,488     25,000    1,200,032     33,366    1,601,600     1.65%  yes
+      128             6,390      920,160      6,388      919,872      7,416    1,067,904     1.16%  yes
+      262,144             2      524,320          2      524,320          2      524,320     0.63%  yes
+      96              4,505      504,592      4,504      504,480      4,506      504,704     0.61%  yes
+
+    (b) CONCORDANCE -- a class large in ONE run is a draw, not an occupant.
+        rel.range = (max - min) / mean of the three PEAK byte figures.
+      size        mean bytes   rel.range   mean blocks   blk rel.range   verdict
+      1,328        29,307,077       18.7%       21549.3           18.7%   concordant
+      65,536       21,523,952       12.8%         328.3           12.8%   concordant
+      1,048,576     6,640,981       15.8%           6.3           15.8%   concordant
+      934,576       5,919,083       15.8%           6.3           15.8%   concordant
+      4,376         5,621,243       11.2%        1215.7           11.2%   concordant
+      152           3,273,515       29.9%       20459.3           29.9%   loose
+      40            2,518,640       17.1%       52471.7           17.1%   concordant
+      8,192         1,822,176       15.8%         222.0           15.8%   concordant
+      32            1,379,707       29.1%       28743.3           29.1%   loose
+      128             969,312       15.3%        6731.3           15.3%   concordant
+      262,144         524,320        0.0%           2.0            0.0%   concordant
+      96              504,592        0.0%        4505.0            0.0%   concordant
+
+    (c) THE SAME CLASSES AT SHUTDOWN. This is the column that answers the question.
+        "ROW ABSENT" = no HCSIZE row at all, in any of the three runs.
+        % of transient divides by THAT RUN'S OWN transient, then averages.
+      size        mean peak B   mean settled B   survives   mean transient B   % of transient
+      1,328        29,307,077           19,024        0.1%        29,288,053          43.53%
+      65,536       21,523,952       10,750,773       49.9%        10,773,179          15.98%
+      1,048,576     6,640,981                0  ROW ABSENT         6,640,981           9.88%
+      934,576       5,919,083                0  ROW ABSENT         5,919,083           8.81%
+      4,376         5,621,243                0  ROW ABSENT         5,621,243           8.39%
+      152           3,273,515           13,941        0.4%         3,259,573           4.83%
+      40            2,518,640          178,176        7.1%         2,340,464           3.48%
+      8,192         1,822,176           24,624        1.4%         1,797,552           2.68%
+      32            1,379,707          306,171       22.2%         1,073,536           1.59%
+      128             969,312           36,000        3.7%           933,312           1.39%
+      262,144         524,320          436,933       83.3%            87,387           0.12%
+      96              504,592          503,771       99.8%               821           0.00%
+
+    (d) THE TRANSIENT ITSELF, RANKED. peak bytes MINUS settled bytes, per class.
+      rank  size                   p2           p3           p6          mean   survives at shutdown?
+      1     1,328         27,457,040   27,457,040   32,950,080    29,288,053   3/3 runs keep a row
+      2     65,536         9,899,104    9,899,168   12,521,264    10,773,179   3/3 runs keep a row
+      3     1,048,576      6,291,456    6,291,456    7,340,032     6,640,981   NO ROW AT ALL
+      4     934,576        5,607,552    5,607,552    6,542,144     5,919,083   NO ROW AT ALL
+      5     4,376          5,349,968    5,534,928    5,978,832     5,621,243   NO ROW AT ALL
+      6     152            3,176,480    2,811,360    3,790,880     3,259,573   3/3 runs keep a row
+      7     40             2,202,528    2,194,176    2,624,688     2,340,464   3/3 runs keep a row
+      8     8,192          1,740,096    1,682,640    1,969,920     1,797,552   3/3 runs keep a row
+
+    (e) CUMULATIVE COVERAGE OF THE TRANSIENT, each cell over THAT RUN'S OWN transient
+        (p2 = 63,315,552   p3 = 62,858,336   p6 = 75,659,296).
+      N   classes folded in                                   p2       p3       p6     mean
+      1   1,328                                            43.4%    43.7%    43.6%    43.5%
+      2   1,328 65,536                                     59.0%    59.4%    60.1%    59.5%
+      3   1,328 65,536 1,048,576                           68.9%    69.4%    69.8%    69.4%
+      4   1,328 65,536 1,048,576 934,576                   77.8%    78.4%    78.4%    78.2%
+      5   1,328 65,536 1,048,576 934,576 4,376             86.2%    87.2%    86.4%    86.6%
+      6   1,328 65,536 1,048,576 934,576 4,376 152         91.3%    91.6%    91.4%    91.4%
+      7   1,328 65,536 1,048,576 934,576 4,376 152 40      94.7%    95.1%    94.8%    94.9%
+      8   1,328 65,536 1,048,576 934,576 4,376 152 ...     97.5%    97.8%    97.4%    97.6%
+
+=== 3. THE BURST MODE, READ OFF THE DATA, BECAUSE SECTION 4 NEEDS IT ===
+    PEAK-OCCUPANT.md section 4 established that this workload peaks in two modes,
+    and that the mode is the number of history-sync chunks held and decoded
+    CONCURRENTLY -- six or seven -- read directly off the 1,048,576 and 934,576
+    rows. That reproduces here on six fresh runs across BOTH lanes:
+      run   lane        1,048,576 blk   934,576 blk   mode   pkCrtBusy    transient
+      p1    STACKLESS             6             6    LOW  48,281,280   32,368,112
+      p4    STACKLESS             7             7   HIGH  52,558,208   36,289,136
+      p5    STACKLESS             6             6    LOW  48,498,880   32,604,384
+      p2    FIBER                 6             6    LOW  79,182,560   63,315,552
+      p3    FIBER                 6             6    LOW  78,773,632   62,858,336
+      p6    FIBER                 7             7   HIGH  91,949,168   75,659,296
+    The two rows agree on the mode in all six runs, and in BOTH arms the HIGH-mode
+    run is the run with the largest transient. The mode is not a lane property.
+
+=== 4. THE 1,328 CLASS -- the hypothesis on the record, scored ===
+    blocks and bytes, peak then shutdown, all six runs:
+      run   lane      mode    peak blocks     peak bytes   settled blocks   settled bytes
+      p1    STACKLESS LOW               13         17,472                1           1,344
+      p4    STACKLESS HIGH              15         20,160                1           1,344
+      p5    STACKLESS LOW               13         17,472                1           1,344
+      p2    FIBER     LOW           20,203     27,476,064               14          19,024
+      p3    FIBER     LOW           20,203     27,476,064               14          19,024
+      p6    FIBER     HIGH          24,242     32,969,104               14          19,024
+
+    bytes per block on the fiber peak rows: 1360.00   1360.00   1360.00   (= size 1,328 + cbOverhead)
+    share of each fiber run's OWN pkCrtBusy: 34.70%   34.88%   35.86%
+    share of each fiber run's OWN transient: 43.40%   43.71%   43.58%
+
+    THE 1,371 B/task FIGURE IS NOT A MEASUREMENT OF THIS CLASS.
+    tests/perf/pagecensus/evidence-fr2/PERTASK.txt, lines 2-3 and 10, verbatim:
+      "Denominator: 20207 stacks on f1 minus 17 on v3 = 20190 tasks, both LOW mode."
+      "This is a DIFFERENCE per task, not a measurement of one task in isolation:"
+      "  CRT heap                     26.390         1371     6.8%"
+    So 1371 = 26.39 MiB / 20,190 = 1371 B -- a DIVISION over the WHOLE CRT
+    heap lane delta, every size class folded together, taken on a DIFFERENT
+    instrument (the pagecensus VirtualQuery walk), a DIFFERENT pair of binaries
+    and a DIFFERENT tree. Category (b)+(c) of the three asked for: DERIVED BY
+    DIVISION, and an AVERAGE THAT INCLUDES OTHER CLASSES.
+
+    AND THAT IS WHY THE BYTE MATCH CANNOT CONFIRM ANYTHING. On the fiber arm
+    measured here the 1,328 class alone is 29,307,077 B mean = 27.949 MiB,
+    which is 105.9% of the 27,671,921 B that PERTASK.txt divides -- it OVERSHOOTS
+    that total, which is itself the proof that the two are not the same
+    measurement (different tree, different binaries, different instrument).
+    What survives the mismatch is the only thing needed: ON ANY OF THESE
+    DENOMINATORS THE 1,328 CLASS IS ESSENTIALLY THE WHOLE CRT-HEAP LANE TERM.
+    And if one class is essentially the whole sum, the sum over a count MUST
+    land near that class's block size. 1,328 against 1,371 is arithmetically
+    forced, not independent. CIRCULAR -- the byte half cannot be affirmed.
+
+    THE NON-CIRCULAR HALF IS THE BLOCK COUNT, AND IT IS MATCHED BY MODE.
+    pagecensus/evidence-fr2/manifest.txt line 37 reads
+      "f1   fiber      low      446.844          446.164    99.85%    61403   20207"
+    -- 20,207 STACK REGIONS, fiber, LOW mode, counted by a VirtualQuery walk that
+    never touches the heap. The two LOW-mode fiber runs here read 20,203 blocks of
+    1,328 at the heap peak. That is 4 apart, 0.020%, from a DIFFERENT
+    instrument on a DIFFERENT tree. This is a genuine independent corroboration,
+    and it is a COUNT -- it borrows no byte figure from anywhere.
+      f1   fiber LOW   stacks (VirtualQuery)   20,207
+      p2   fiber LOW   1,328 blocks (HeapWalk) 20,203
+      p3   fiber LOW   1,328 blocks (HeapWalk) 20,203
+      p6   fiber HIGH  1,328 blocks (HeapWalk) 24,242   -- no HIGH-mode fiber stack count exists
+    I RETRACT, BEFORE WRITING IT DOWN, THE READING THAT p6 REFUTES THE LAW. The
+    population that matters is tasks SUSPENDED AT THE PEAK INSTANT, which is not
+    the dial: p6 is the HIGH-mode run (section 3), and in the HIGH mode one more
+    history-sync chunk is in flight. 4,039 extra blocks for one extra chunk.
+    manifest.txt commits no HIGH-mode FIBER row (v1 is high-mode STACKLESS), so
+    there is nothing to check p6 against. UNTESTED, not refuted.
+
+    VERDICT ON THE HYPOTHESIS, IN TWO HALVES:
+      (i)  "one 1,328 B block per parked task": SUPPORTED, by a count, in LOW
+           mode, to 0.020% against an independent instrument. n = 2 LOW-mode runs,
+           and both read the IDENTICAL 20,203 -- which is itself worth noting as
+           a suspiciously exact repeat and is reported, not explained.
+      (ii) "1,328 and 1,371 are the same number by another route": CIRCULAR, and
+           it is not a second route. 1,371 is a whole-heap lane delta that THIS
+           class accounts for in full, divided by a count that is THIS class's
+           block count to 0.02%. It is this class's block size recomputed the
+           long way. The true per-block size is 1360 B MEASURED (1,328 request
+           + 32 overhead), and 1,371 is DERIVED, so the 11 B between them is a
+           property of the two denominators, not a finding about the program.
+
+=== 5. WHAT THE 1,328 CLASS IS WORTH, WITH THE DENOMINATORS SIDE BY SIDE ===
+    N of D, with D named each time:
+      29,288,709 of 33,522,331 = 87.37%
+        N = the 1,328 class, fiber peak mean minus stackless peak mean, THESE six runs
+        D = pkCrtBusy, fiber mean minus stackless mean, THESE six runs (= the
+            -33,522,331 B of 5cd3e3475, to the sign)
+      29,288,709 of 27,671,921 = 105.84%
+        D = the "CRT heap 26.390 MiB" row of PERTASK.txt -- ANOTHER TREE, ANOTHER
+            PAIR OF BINARIES, ANOTHER INSTRUMENT. Printed to show that the class
+            is most of what that row lumps, NOT as a comparison of two measurements.
+    The second ratio is why (ii) above is circular, stated as a number.
+
+=== 6. WHAT THE 1,328 ROW IS ON THE ARM THAT SHIPS ===
+      p1     13 blocks,   17,472 B = 0.0362% of that run's own pkCrtBusy
+      p4     15 blocks,   20,160 B = 0.0384% of that run's own pkCrtBusy
+      p5     13 blocks,   17,472 B = 0.0360% of that run's own pkCrtBusy
+    On the stackless arm this class is noise by four orders of magnitude. It is
+    archaeology of a lane that stopped being the default at 8f4100d7a.
+
+=== 7. AGAINST PEAK-OCCUPANT.md, WHICH TRIED THIS ONCE AT n=1 ===
+    ../PEAK-OCCUPANT.md section 2 ranks the peak of ONE stackless binary, built
+    from a DIFFERENT tree (5fa7a24f8) with SCR_CYCSTAT_ON as well, denominator
+    "abba1A -- 46,433,872 B of CRT busy". Its four largest, verbatim from that
+    table, against the three-run means here (each share over its OWN denominator):
+      size         PEAK-OCCUPANT abba1A   blocks       here, SL mean   blocks (p1/p4/p5)
+      65,536                  41.51%         294              41.14%   305/326/306
+      4,376                   16.95%       1,702              15.09%   1570/1845/1470
+      1,048,576               13.55%           6              13.32%   6/7/6
+      934,576                 12.08%           6              11.87%   6/7/6
+    SAME FOUR CLASSES, SAME ORDER, every share within 1.9 points.
+    PEAK-OCCUPANT.md WAS RIGHT, and this says so: its n=1 ranking reproduces on
+    three runs of a different binary from a different tree in a different session.
+    Its "three of the four largest are GONE by shutdown" reproduces exactly --
+    4,376 / 1,048,576 / 934,576 have NO HCSIZE ROW AT ALL in all three runs here.
+    Its 65,536 shutdown count of 164 reproduces too: 164 / 165 / 164 blocks here.
+    WHAT IS NEW AND IS NOT IN IT: the transient column with a named denominator,
+    the concordance across runs, and the fiber contrast -- it had no fiber arm.
+    WHAT IS NOT INHERITED FROM IT: no figure above is copied from that file. The
+    four numbers in this section's left column are quoted ONLY to be compared.
+
+=== 8. WHAT THIS CANNOT SAY ===
+    * The ALLOCATION SITE of the 1,048,576 / 934,576 pair is still unnamed.
+      PEAK-OCCUPANT.md section 4 says so and nothing here changes it: a size, a
+      count and a mode is what a HeapWalk can be asked for.
+    * FLOW vs RETENTION is not separated. The 1,048,576 / 934,576 pair is a
+      decode burst caught in the air; the 4,376 class is a cache that is held
+      and then released on an idle timer. Both read as "transient" in column (c)
+      and the column cannot tell them apart.
+    * n = 3 per arm. Nothing here is a t-test and nothing here claims separation;
+      the concordance column is a RANGE over three runs, not an inference.
+
