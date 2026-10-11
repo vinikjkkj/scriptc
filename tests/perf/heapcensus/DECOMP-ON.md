@@ -53,7 +53,20 @@ row**, because 65,536 is also the string arena's chunk size.
 
 So on a post-change census this row reads about **164 blocks** rather than
 118 -- 118 + the 46 live string chunks, a figure that is coupled to the
-workload and was 33 on `half-on`. And the owner sentence in the table above,
+workload and was 33 on `half-on`.
+
+> **MEASURED, 2026-10-11.** `POSTFIX-CENSUS.md` builds the repaired tree at
+> `ddc1e373a` and runs this arm's knobs: the row reads **164 blocks /
+> 10,750,688 B**, the predicted count to the block. **The split is not the one
+> predicted here.** By the PROF method this section prescribes, the owners are
+> **113** cycle-collector chunks (`scr_cycle.c:1546` 675 − `:1589` 562),
+> **47** string-arena chunks (`scr_string.c:820` 47 − `:822` 0, the free side
+> never called), and the same **4** other occupants of the 65,536 class. The
+> cycle arena lost one chunk and the string arena gained one, and the two
+> cancel -- so 164 is right and `118 + 46` is not. A reader who takes the
+> count as confirmation of the split is wrong by one block on each side.
+
+And the owner sentence in the table above,
 
 *"114 of the 118 blocks are cycle-collector arena chunks"*
 

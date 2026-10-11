@@ -1,0 +1,16 @@
+PASS N1  census armed (the -include reached the link)
+PASS N2  the census allocated its own arm (HCSIZE 5113 present)
+PASS N3a  HCSIZE rows=247 (on reads 247)
+PASS N3b  last line is a complete record
+PASS N4  prof report terminated (the _Exit chain carried both halves)
+PASS P1  HCSIZE 131079 is gone (was 46 blocks / 6030160 B)
+PASS P2a  HCSIZE 65536 reads 164 blocks (= 118 cycle + 46 string)
+FAIL P2b  HCSIZE 65536 bytes=10750688 outside [10750528,10750624]
+PASS P5a  PROF row at scr_string.c:820 exists: count=47 bytes=3080192
+PASS P5b  every chunk request is exactly 65536 (47 x 65536 = 3080192)
+FAIL P5c  no PROF row at scr_string.c:822 - the free side is not interposed
+SAVED 3014656 B over 46 chunks (2.875 MiB), band +-736 B
+NOTE  OWNER-131079.md:217 prints 3,014,768 for c=46; this reads 3014656.
+NOTE  The 112 B gap is that line subtracting a MODELLED new overhead
+NOTE  (46x16=736) from an OBSERVED old one (526). Both are inside the band.
+---- 2 failed

@@ -1,0 +1,26 @@
+=== /g/blocks/sa2-out182-prof/zapo-rest-182.exe  (32679424 B) ===
+  scr_string.c:820  = 1
+  scr_string.c:822  = 1
+  scr_string.c:753  = 0
+  any scr_string.c site strings, first 8:
+    G:\scriptc\packages\runtime\src\scr_string.c:1091
+    G:\scriptc\packages\runtime\src\scr_string.c:1217
+    G:\scriptc\packages\runtime\src\scr_string.c:1266
+    G:\scriptc\packages\runtime\src\scr_string.c:1823
+    G:\scriptc\packages\runtime\src\scr_string.c:1834
+    G:\scriptc\packages\runtime\src\scr_string.c:2118
+    G:\scriptc\packages\runtime\src\scr_string.c:2133
+    G:\scriptc\packages\runtime\src\scr_string.c:2154
+=== /g/blocks/h2-out182-prof/zapo-rest-182.exe  (33360896 B) ===
+  scr_string.c:820  = 0
+  scr_string.c:822  = 0
+  scr_string.c:753  = 0
+  any scr_string.c site strings, first 8:
+    G:\blocks\h2-wt\packages\runtime\src\scr_string.c:1036
+    G:\blocks\h2-wt\packages\runtime\src\scr_string.c:1162
+    G:\blocks\h2-wt\packages\runtime\src\scr_string.c:1211
+    G:\blocks\h2-wt\packages\runtime\src\scr_string.c:1768
+    G:\blocks\h2-wt\packages\runtime\src\scr_string.c:1779
+    G:\blocks\h2-wt\packages\runtime\src\scr_string.c:2063
+    G:\blocks\h2-wt\packages\runtime\src\scr_string.c:2078
+    G:\blocks\h2-wt\packages\runtime\src\scr_string.c:2099

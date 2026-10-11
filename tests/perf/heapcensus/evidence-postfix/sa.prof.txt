@@ -1,0 +1,667 @@
+PROF-KIND alloc
+PROF 0 0 137 0 0 1ab782a 0 G:/scriptc/tests/perf/heapcensus/scr_heap_census.h:432
+PROF 4 116 0 0 0 1aba515 0 G:\scriptc\packages\runtime\src\scr_url.c:352
+PROF 0 0 89 0 0 1ad0417 0 G:\scriptc\packages\runtime\src\scr_cipher_value.c:121
+PROF 2 304 0 0 0 1ae9981 0 G:\scriptc\packages\runtime\src\scr_websocket.c:359
+PROF 8 1216 0 0 0 1ac1141 0 G:\scriptc\packages\runtime\src\scr_async.c:4818
+PROF 0 0 31578 0 0 1aad546 0 G:\scriptc\packages\runtime\src\scr_array.c:485
+PROF 7755 496320 0 0 0 1ad2ddd 0 G:\scriptc\packages\runtime\src\scr_inspect.c:276
+PROF 38 1216 0 0 0 1ac0f27 0 G:\scriptc\packages\runtime\src\scr_async.c:1499
+PROF 1 1096 0 0 0 1ab75fe 0 G:/scriptc/tests/perf/heapcensus/scr_heap_census.h:289
+PROF 0 0 12 0 0 1ae5066 0 G:\scriptc\packages\runtime\src\scr_net.c:300
+PROF 0 0 8 0 0 1ae256f 0 G:\scriptc\packages\runtime\src\scr_stream.c:2792
+PROF 0 0 4 0 0 1abb1db 0 G:\scriptc\packages\runtime\src\scr_url.c:244
+PROF 41 486 0 0 0 1ae8b4d 0 G:\scriptc\packages\runtime\src\scr_http.c:1518
+PROF 0 0 1097 0 0 1ac9150 0 G:\scriptc\packages\runtime\src\scr_bigint.c:538
+PROF 0 0 28 0 0 1ab7341 0 G:\scriptc\packages\runtime\src\scr_lib.c:3944
+PROF 0 0 9 0 0 1ab891f 0 G:\scriptc\packages\runtime\src\scr_lib.c:3997
+PROF 137 700481 0 0 0 1ab7635 0 G:/scriptc/tests/perf/heapcensus/scr_heap_census.h:293
+PROF 0 0 2 0 0 1adae98 0 G:\scriptc\packages\runtime\src\scr_weak.c:200
+PROF 8 128 0 0 0 1ae0fa2 0 G:\scriptc\packages\runtime\src\scr_stream.c:3226
+PROF 0 0 16 0 0 1ae1798 0 G:\scriptc\packages\runtime\src\scr_stream.c:367
+PROF 26525 92219735 0 0 0 1aaea3a 0 G:\scriptc\packages\runtime\src\scr_bytes.c:52
+PROF 9 380333 0 0 0 1ab88f0 0 G:\scriptc\packages\runtime\src\scr_lib.c:3989
+PROF 5 360 0 0 0 1ada4c8 0 G:\scriptc\packages\runtime\src\scr_weak.c:146
+PROF 0 0 3 0 0 1ab3713 0 G:\scriptc\packages\runtime\src\scr_exception.c:118
+PROF 1097 22596 0 0 0 1ac911f 0 G:\scriptc\packages\runtime\src\scr_bigint.c:530
+PROF 0 0 4 0 0 1aba4e8 0 G:\scriptc\packages\runtime\src\scr_url.c:52
+PROF 0 0 1 0 0 1ab7898 0 G:/scriptc/tests/perf/heapcensus/scr_heap_census.h:435
+PROF 5966514 384744595296 0 0 0 1aab57c 0 G:\scriptc\packages\runtime\src\scr_string.c:1091
+PROF 0 0 1 0 0 1ab7861 0 G:/scriptc/tests/perf/heapcensus/scr_heap_census.h:433
+PROF 1 64 0 0 0 1abc4eb 0 G:\scriptc\packages\runtime\src\scr_json.c:434
+PROF 8 128 0 0 0 1ae0efb 0 G:\scriptc\packages\runtime\src\scr_stream.c:2841
+PROF 0 0 1 0 0 1ae9a1d 0 G:\scriptc\packages\runtime\src\scr_websocket.c:378
+PROF 0 0 1 0 0 1ac1fde 0 G:\scriptc\packages\runtime\src\scr_async.c:3638
+PROF 16 256 0 0 0 1ae235d 0 G:\scriptc\packages\runtime\src\scr_stream.c:2682
+PROF 0 0 11591 0 0 1ab0d64 0 G:\scriptc\packages\runtime\src\scr_map.c:588
+PROF 0 0 38 0 0 1ac1739 0 G:\scriptc\packages\runtime\src\scr_async.c:298
+PROF 4 128 0 0 0 1acd57a 0 G:\scriptc\packages\runtime\src\scr_asym.c:81
+PROF 22441 2872448 0 0 0 1ac0f58 0 G:\scriptc\packages\runtime\src\scr_async.c:1512
+PROF 0 0 3283 0 0 1acca0c 0 G:\scriptc\packages\runtime\src\scr_asym.c:60
+PROF 4 100 0 0 0 1ac9674 0 G:\scriptc\packages\runtime\src\scr_sqlite.c:1237
+PROF 90 5418 0 0 0 1ac6cd7 0 G:\scriptc\packages\runtime\src\scr_regex.c:74
+PROF 15 720 0 0 0 1ae5038 0 G:\scriptc\packages\runtime\src\scr_net.c:289
+PROF 6 240 0 0 0 1ab4792 0 G:\scriptc\packages\runtime\src\scr_error.c:170
+PROF 1 96 0 0 0 1ae747d 0 G:\scriptc\packages\runtime\src\scr_http.c:2087
+PROF 0 0 8 0 0 1ae1736 0 G:\scriptc\packages\runtime\src\scr_stream.c:361
+PROF 4 256 0 0 0 1abb0f5 0 G:\scriptc\packages\runtime\src\scr_url.c:181
+PROF 16 8320 0 0 0 1ae1e71 0 G:\scriptc\packages\runtime\src\scr_stream.c:1873
+PROF 0 0 8 0 0 1ae25a1 0 G:\scriptc\packages\runtime\src\scr_stream.c:2795
+PROF 4 256 0 0 0 1acd54c 0 G:\scriptc\packages\runtime\src\scr_asym.c:72
+PROF 1 192 0 0 0 1abf88d 0 G:\scriptc\packages\runtime\src\scr_json.c:3116
+PROF 0 0 1 0 0 1aebfd5 0 G:\scriptc\packages\runtime\src\scr_ws_global.c:545
+PROF 1 128 0 0 0 1ae86e6 0 G:\scriptc\packages\runtime\src\scr_http.c:1210
+PROF 675 44236800 0 0 0 1ac4a7f 0 G:\scriptc\packages\runtime\src\scr_cycle.c:1546
+PROF 1 232 0 0 0 1ae6072 0 G:\scriptc\packages\runtime\src\scr_net.c:1486
+PROF 0 0 7755 0 0 1ad2e7a 0 G:\scriptc\packages\runtime\src\scr_inspect.c:541
+PROF 1 32 0 0 0 1ae3df8 0 G:\scriptc\packages\runtime\src\scr_loop_wsapoll.c:116
+PROF 1 34 0 0 0 1ac94af 0 G:\scriptc\packages\runtime\src\scr_sqlite.c:529
+PROF 8 4096 0 0 0 1ab17b4 0 G:\scriptc\packages\runtime\src\scr_map.c:311
+PROF 2 192 0 0 0 1aea68d 0 G:\scriptc\packages\runtime\src\scr_ws_client.c:240
+PROF 89 105376 0 0 0 1ad03c9 0 G:\scriptc\packages\runtime\src\scr_cipher_value.c:90
+PROF 4883 270218 0 0 0 1aaf054 0 G:\scriptc\packages\runtime\src\scr_bytes.c:732
+PROF 64 1536 0 0 0 1ac0dc0 0 G:\scriptc\packages\runtime\src\scr_async.c:533
+PROF 0 0 2 0 0 1ae8a5d 0 G:\scriptc\packages\runtime\src\scr_http.c:2052
+PROF 0 0 2 0 0 1ae89cd 0 G:\scriptc\packages\runtime\src\scr_http.c:1768
+PROF 36 2304 0 0 0 1aaca80 0 G:\scriptc\packages\runtime\src\scr_array.c:1006
+PROF 0 0 1697 0 0 1ac6dc1 0 G:\scriptc\packages\runtime\src\scr_regex.c:366
+PROF 0 0 1242504 0 0 1aac9f0 0 G:\scriptc\packages\runtime\src\scr_array.c:553
+PROF 38816 2485568 0 0 0 1ad3bf9 0 G:\scriptc\packages\runtime\src\scr_inspect.c:49
+PROF 0 0 3 0 0 1ab41c8 0 G:\scriptc\packages\runtime\src\scr_error.c:411
+PROF 8 228480 0 0 0 1ac000c 0 G:\scriptc\packages\runtime\src\scr_json.c:1208
+PROF 0 0 4 0 0 1aba5f4 0 G:\scriptc\packages\runtime\src\scr_url.c:520
+PROF 0 0 2 0 0 1ae72f7 0 G:\scriptc\packages\runtime\src\scr_http.c:653
+PROF 0 0 44 0 0 1aea495 0 G:\scriptc\packages\runtime\src\scr_websocket.c:396
+PROF 0 0 1097 0 0 1ac9181 0 G:\scriptc\packages\runtime\src\scr_bigint.c:539
+PROF 3260 146700 0 0 0 1aaf241 0 G:\scriptc\packages\runtime\src\scr_bytes.c:1019
+PROF 23093 75687661 0 0 0 1a94e78 0 G:\scriptc\packages\runtime\vendor\sqlite\sqlite3.c:28035
+PROF 1097 22596 0 0 0 1ac90ee 0 G:\scriptc\packages\runtime\src\scr_bigint.c:529
+PROF 2 1536 0 0 0 1abf7c6 0 G:\scriptc\packages\runtime\src\scr_json.c:2002
+PROF 1 256 0 0 0 1ad2dab 0 G:\scriptc\packages\runtime\src\scr_inspect.c:257
+PROF 10 130944 0 0 0 1ac1f65 0 G:\scriptc\packages\runtime\src\scr_async.c:862
+PROF 0 0 6520 0 0 1ac7e33 0 G:\scriptc\packages\runtime\src\scr_regex.c:613
+PROF 1 32 0 0 0 1ad9ae8 0 G:\scriptc\packages\runtime\src\scr_symbol.c:45
+PROF 8 256 0 0 0 1ab17e2 0 G:\scriptc\packages\runtime\src\scr_map.c:314
+PROF 0 0 28 0 0 1ab739f 0 G:\scriptc\packages\runtime\src\scr_lib.c:3947
+PROF 109953 3518496 0 0 0 1ac1ead 0 G:\scriptc\packages\runtime\src\scr_async.c:3042
+PROF 0 0 1 0 0 1ae99e9 0 G:\scriptc\packages\runtime\src\scr_websocket.c:377
+PROF 0 0 2 0 0 1aea7f0 0 G:\scriptc\packages\runtime\src\scr_ws_client.c:299
+PROF 18838 578600 0 0 0 1abc74f 0 G:\scriptc\packages\runtime\src\scr_json.c:1406
+PROF 1474 378616 0 0 0 1a94f12 0 G:\scriptc\packages\runtime\vendor\sqlite\sqlite3.c:28108
+PROF 0 0 1423 0 0 1abc549 0 G:\scriptc\packages\runtime\src\scr_json.c:907
+PROF 47 3080192 0 0 0 1aab5ae 0 G:\scriptc\packages\runtime\src\scr_string.c:820
+PROF 0 0 11591 0 0 1ab0d92 0 G:\scriptc\packages\runtime\src\scr_map.c:589
+PROF 104 2496 0 0 0 1ac0e63 0 G:\scriptc\packages\runtime\src\scr_async.c:1158
+PROF 3441 137640 0 0 0 1aae29b 0 G:\scriptc\packages\runtime\src\scr_bytes.c:593
+PROF 8 195840 0 0 0 1ac1d32 0 G:\scriptc\packages\runtime\src\scr_async.c:909
+PROF 6 129024 0 0 0 1ac4bcf 0 G:\scriptc\packages\runtime\src\scr_cycle.c:2193
+PROF 8 448 0 0 0 1ae0ec9 0 G:\scriptc\packages\runtime\src\scr_stream.c:2837
+PROF 6822 1036944 0 0 0 1ab0d08 0 G:\scriptc\packages\runtime\src\scr_map.c:554
+PROF 0 0 270 0 0 1abc51a 0 G:\scriptc\packages\runtime\src\scr_json.c:906
+PROF 0 0 2 0 0 1ae8a2d 0 G:\scriptc\packages\runtime\src\scr_http.c:1815
+PROF 99 42880 0 0 0 1aad6af 0 G:\scriptc\packages\runtime\src\scr_array.c:906
+PROF 0 0 3 0 0 1ae51a8 0 G:\scriptc\packages\runtime\src\scr_net.c:741
+PROF 0 0 8 0 0 1ae1610 0 G:\scriptc\packages\runtime\src\scr_stream.c:326
+PROF 20040 314016 0 0 0 1abf8bd 0 G:\scriptc\packages\runtime\src\scr_json.c:94
+PROF 26034 1666176 0 0 0 1aac990 0 G:\scriptc\packages\runtime\src\scr_array.c:499
+PROF 0 0 4 0 0 1ac940d 0 G:\scriptc\packages\runtime\src\scr_sqlite.c:476
+PROF 0 0 3260 0 0 1aaf272 0 G:\scriptc\packages\runtime\src\scr_bytes.c:1034
+PROF 28 1568 0 0 0 1ab72e3 0 G:\scriptc\packages\runtime\src\scr_lib.c:3915
+PROF 0 0 24 0 0 1abb263 0 G:\scriptc\packages\runtime\src\scr_url.c:93
+PROF 10 523776 0 0 0 1ac3dd3 0 G:\scriptc\packages\runtime\src\scr_cycle.c:2108
+PROF 28 896 0 0 0 1ab7312 0 G:\scriptc\packages\runtime\src\scr_lib.c:3926
+PROF 8217 131472 0 0 0 1ac7cf8 0 G:\scriptc\packages\runtime\src\scr_regex.c:333
+PROF 8 2048 0 0 0 1ac1110 0 G:\scriptc\packages\runtime\src\scr_async.c:4811
+PROF 0 0 16 0 0 1ae24e0 0 G:\scriptc\packages\runtime\src\scr_stream.c:2720
+PROF 44 84471 0 0 0 1aea461 0 G:\scriptc\packages\runtime\src\scr_websocket.c:392
+PROF 104 4160 0 0 0 1ae23c1 0 G:\scriptc\packages\runtime\src\scr_stream.c:475
+PROF 0 0 1 0 0 1abf7f6 0 G:\scriptc\packages\runtime\src\scr_json.c:2010
+PROF 26525 1061000 0 0 0 1aaea0b 0 G:\scriptc\packages\runtime\src\scr_bytes.c:43
+PROF 0 0 6520 0 0 1ac7e03 0 G:\scriptc\packages\runtime\src\scr_regex.c:612
+PROF 28 1792 0 0 0 1abb209 0 G:\scriptc\packages\runtime\src\scr_url.c:70
+PROF 3 192 0 0 0 1ab36c8 0 G:\scriptc\packages\runtime\src\scr_exception.c:83
+PROF 0 0 239 0 0 1ab183e 0 G:\scriptc\packages\runtime\src\scr_map.c:262
+PROF 16 1024 0 0 0 1ae1852 0 G:\scriptc\packages\runtime\src\scr_stream.c:1211
+PROF 0 0 104 0 0 1ad8051 0 G:\scriptc\packages\runtime\src\scr_events_emitter.c:198
+PROF 0 0 2 0 0 1ae6311 0 G:\scriptc\packages\runtime\src\scr_net.c:375
+PROF 2 432 0 0 0 1ae89fd 0 G:\scriptc\packages\runtime\src\scr_http.c:1774
+PROF 79099 3163960 0 0 0 1aae1f1 0 G:\scriptc\packages\runtime\src\scr_bytes.c:529
+PROF 0 0 103272 0 0 1ac0d60 0 G:\scriptc\packages\runtime\src\scr_async.c:472
+PROF 2 128 0 0 0 1ae73b3 0 G:\scriptc\packages\runtime\src\scr_http.c:793
+PROF 0 0 41 0 0 1ae8c0d 0 G:\scriptc\packages\runtime\src\scr_http.c:1529
+PROF 2 128 0 0 0 1ae7384 0 G:\scriptc\packages\runtime\src\scr_http.c:792
+PROF 0 0 4 0 0 1ac96d3 0 G:\scriptc\packages\runtime\src\scr_sqlite.c:1246
+PROF 0 0 21920 0 0 1a94ed8 0 G:\scriptc\packages\runtime\vendor\sqlite\sqlite3.c:28062
+PROF 16 319360 0 0 0 1aa6d96 0 G:\scriptc\packages\runtime\vendor\zlib\zutil.c:288
+PROF 2 20 0 0 0 1aea659 0 G:\scriptc\packages\runtime\src\scr_ws_client.c:213
+PROF 0 0 1131612 0 0 1aac9c0 0 G:\scriptc\packages\runtime\src\scr_array.c:549
+PROF 0 0 378 0 0 1ac9642 0 G:\scriptc\packages\runtime\src\scr_sqlite.c:1219
+PROF 1097 22596 0 0 0 1ac90bd 0 G:\scriptc\packages\runtime\src\scr_bigint.c:528
+PROF 0 0 4 0 0 1ab4762 0 G:\scriptc\packages\runtime\src\scr_error.c:101
+PROF 0 0 5 0 0 1ae50c2 0 G:\scriptc\packages\runtime\src\scr_net.c:349
+PROF 0 0 4883 0 0 1aaf088 0 G:\scriptc\packages\runtime\src\scr_bytes.c:796
+PROF 1 32768 0 0 0 1ab1a80 0 G:\scriptc\packages\runtime\src\scr_closure.c:521
+PROF 0 0 8 0 0 1ad7eee 0 G:\scriptc\packages\runtime\src\scr_zlib_stream.c:99
+PROF 8 768 0 0 0 1ad74a8 0 G:\scriptc\packages\runtime\src\scr_zlib_stream.c:250
+PROF 39 1248 0 0 0 1ad8c5e 0 G:\scriptc\packages\runtime\src\scr_events_emitter.c:339
+PROF 0 0 64 0 0 1ac1769 0 G:\scriptc\packages\runtime\src\scr_async.c:497
+PROF 4 1216 0 0 0 1ae8952 0 G:\scriptc\packages\runtime\src\scr_http.c:1635
+PROF 0 0 2 0 0 1aea7bc 0 G:\scriptc\packages\runtime\src\scr_ws_client.c:296
+PROF 0 0 31057 0 0 1ad3c2a 0 G:\scriptc\packages\runtime\src\scr_inspect.c:73
+PROF 0 0 615 0 0 1abf768 0 G:\scriptc\packages\runtime\src\scr_json.c:737
+PROF 378 10765 0 0 0 1ac95ed 0 G:\scriptc\packages\runtime\src\scr_sqlite.c:1197
+PROF 0 0 16 0 0 1ae1884 0 G:\scriptc\packages\runtime\src\scr_stream.c:1156
+PROF 2 1496 0 0 0 1abc865 0 G:\scriptc\packages\runtime\src\scr_json.c:1757
+PROF 0 0 7742 0 0 1ad2ec9 0 G:\scriptc\packages\runtime\src\scr_inspect.c:628
+PROF 2 768 0 0 0 1aab5df 0 G:\scriptc\packages\runtime\src\scr_string.c:768
+PROF 0 0 1097 0 0 1ac91b2 0 G:\scriptc\packages\runtime\src\scr_bigint.c:540
+PROF 20 861 0 0 0 1ab000d 0 G:\scriptc\packages\runtime\src\scr_bytes_io.c:887
+PROF 173 1472 0 0 0 1ad8eb6 0 G:\scriptc\packages\runtime\src\scr_events_emitter.c:587
+PROF 0 0 8 0 0 1ae1705 0 G:\scriptc\packages\runtime\src\scr_stream.c:360
+PROF 21 504 0 0 0 1ae5094 0 G:\scriptc\packages\runtime\src\scr_net.c:315
+PROF 0 0 36 0 0 1aacaed 0 G:\scriptc\packages\runtime\src\scr_array.c:1043
+PROF 0 0 8 0 0 1ac11a3 0 G:\scriptc\packages\runtime\src\scr_async.c:4933
+PROF 0 0 20 0 0 1ab0040 0 G:\scriptc\packages\runtime\src\scr_bytes_io.c:901
+PROF 2 144 0 0 0 1aeb460 0 G:\scriptc\packages\runtime\src\scr_ws_global.c:384
+PROF 60829 43756648 0 0 0 1ac4a3e 0 G:\scriptc\packages\runtime\src\scr_cycle.c:1727
+PROF 1238 39616 0 0 0 1abc318 0 G:\scriptc\packages\runtime\src\scr_json.c:143
+PROF 1 56 0 0 0 1ac956d 0 G:\scriptc\packages\runtime\src\scr_sqlite.c:555
+PROF 1 384 0 0 0 1ac0ec5 0 G:\scriptc\packages\runtime\src\scr_async.c:1229
+PROF 0 0 6742 0 0 1ab0dc0 0 G:\scriptc\packages\runtime\src\scr_map.c:594
+PROF 0 0 6669 0 0 1ac16d9 0 G:\scriptc\packages\runtime\src\scr_async.c:343
+PROF 0 0 28 0 0 1ab7370 0 G:\scriptc\packages\runtime\src\scr_lib.c:3946
+PROF 6 1024 0 0 0 1adae69 0 G:\scriptc\packages\runtime\src\scr_weak.c:187
+PROF 0 0 7 0 0 1ac003c 0 G:\scriptc\packages\runtime\src\scr_json.c:1215
+PROF 32 4864 0 0 0 1ac1001 0 G:\scriptc\packages\runtime\src\scr_async.c:3462
+PROF 6 3936 0 0 0 1ae614e 0 G:\scriptc\packages\runtime\src\scr_net.c:917
+PROF 0 0 26320 0 0 1aae01b 0 G:\scriptc\packages\runtime\src\scr_bytes.c:192
+PROF 5 14688256 0 0 0 1ae624d 0 G:\scriptc\packages\runtime\src\scr_net.c:1102
+PROF 0 0 5966500 0 0 1aab012 0 G:\scriptc\packages\runtime\src\scr_string.c:1266
+PROF 0 0 16 0 0 1ae2512 0 G:\scriptc\packages\runtime\src\scr_stream.c:2721
+PROF 8217 574390 0 0 0 1ac7cc8 0 G:\scriptc\packages\runtime\src\scr_regex.c:239
+PROF 0 0 4 0 0 1ae726a 0 G:\scriptc\packages\runtime\src\scr_http.c:277
+PROF 53092 2123680 0 0 0 1ac1d62 0 G:\scriptc\packages\runtime\src\scr_async.c:2154
+PROF 0 0 9221 0 0 1ac83d0 0 G:\scriptc\packages\runtime\src\scr_bigint.c:66
+PROF 19 760 0 0 0 1ab7256 0 G:\scriptc\packages\runtime\src\scr_lib.c:3838
+PROF 78 532864 0 0 0 1ab88c1 0 G:\scriptc\packages\runtime\src\scr_lib.c:3805
+PROF 0 0 60806 0 0 1ac3da2 0 G:\scriptc\packages\runtime\src\scr_cycle.c:1959
+PROF 11915 1504128 0 0 0 1ab1810 0 G:\scriptc\packages\runtime\src\scr_map.c:259
+PROF 11 330240 0 0 0 1aea4c9 0 G:\scriptc\packages\runtime\src\scr_websocket.c:338
+PROF 41 1968 0 0 0 1ae8b7d 0 G:\scriptc\packages\runtime\src\scr_http.c:1521
+PROF 0 0 562 0 0 1ac4aef 0 G:\scriptc\packages\runtime\src\scr_cycle.c:1589
+PROF 0 0 15450 0 0 1aad4d9 0 G:\scriptc\packages\runtime\src\scr_array.c:430
+PROF 0 0 2 0 0 1acc9de 0 G:\scriptc\packages\runtime\src\scr_asym.c:57
+PROF 0 0 10 0 0 1ae62b3 0 G:\scriptc\packages\runtime\src\scr_net.c:1229
+PROF 0 0 104 0 0 1ae23f2 0 G:\scriptc\packages\runtime\src\scr_stream.c:4451
+PROF 1216755 77872320 0 0 0 1aac960 0 G:\scriptc\packages\runtime\src\scr_array.c:453
+PROF 0 0 10 0 0 1ab6410 0 G:\scriptc\packages\runtime\src\scr_lib.c:285
+PROF 1 152 0 0 0 1ac0fd0 0 G:\scriptc\packages\runtime\src\scr_async.c:3452
+PROF 0 0 1697 0 0 1ac6df1 0 G:\scriptc\packages\runtime\src\scr_regex.c:367
+PROF 9224 479472 0 0 0 1ac8ae3 0 G:\scriptc\packages\runtime\src\scr_bigint.c:39
+PROF 4 352 0 0 0 1ae87e9 0 G:\scriptc\packages\runtime\src\scr_http.c:2059
+PROF 0 0 32 0 0 1ac1fad 0 G:\scriptc\packages\runtime\src\scr_async.c:3627
+PROF 0 0 19 0 0 1ab7285 0 G:\scriptc\packages\runtime\src\scr_lib.c:3858
+PROF 11 1048064 0 0 0 1ac4c00 0 G:\scriptc\packages\runtime\src\scr_cycle.c:2292
+PROF 0 0 53079 0 0 1ac1e1c 0 G:\scriptc\packages\runtime\src\scr_async.c:2135
+PROF 4 320 0 0 0 1aba622 0 G:\scriptc\packages\runtime\src\scr_url.c:522
+PROF 11781 131440 0 0 0 1ab193c 0 G:\scriptc\packages\runtime\src\scr_map.c:475
+PROF 0 0 16 0 0 1ad808a 0 G:\scriptc\packages\runtime\src\scr_events_emitter.c:201
+PROF 0 0 1079760 0 0 1ab8b3c 0 G:\scriptc\packages\runtime\src\scr_lib.c:4314
+PROF 0 0 166412 0 0 1ac1ddc 0 G:\scriptc\packages\runtime\src\scr_async.c:2989
+PROF 45 1800 0 0 0 1acafc8 0 G:\scriptc\packages\runtime\src\scr_sqlite.c:681
+PROF 0 0 102 0 0 1abf797 0 G:\scriptc\packages\runtime\src\scr_json.c:738
+PROF 1079760 21925440 0 0 0 1ab8b0d 0 G:\scriptc\packages\runtime\src\scr_lib.c:4279
+PROF 0 0 1 0 0 1aeb277 0 G:\scriptc\packages\runtime\src\scr_ws_client.c:403
+PROF 26007 1697064 0 0 0 1abf8eb 0 G:\scriptc\packages\runtime\src\scr_json.c:1636
+PROF 0 0 20 0 0 1ac6ca8 0 G:\scriptc\packages\runtime\src\scr_regex.c:71
+PROF 0 0 4 0 0 1ae71ae 0 G:\scriptc\packages\runtime\src\scr_http.c:250
+PROF 10 185 0 0 0 1ab63ca 0 G:\scriptc\packages\runtime\src\scr_lib.c:279
+PROF 0 0 11591 0 0 1ab0d36 0 G:\scriptc\packages\runtime\src\scr_map.c:587
+PROF 3 73 0 0 0 1ab4180 0 G:\scriptc\packages\runtime\src\scr_error.c:404
+PROF 0 0 4 0 0 1ae720c 0 G:\scriptc\packages\runtime\src\scr_http.c:252
+PROF 41 1968 0 0 0 1ae8bad 0 G:\scriptc\packages\runtime\src\scr_http.c:1522
+PROF 0 0 16 0 0 1ae15df 0 G:\scriptc\packages\runtime\src\scr_stream.c:322
+PROF 11781 2103040 0 0 0 1ab190e 0 G:\scriptc\packages\runtime\src\scr_map.c:468
+PROF 0 0 2 0 0 1ae85f5 0 G:\scriptc\packages\runtime\src\scr_http.c:891
+PROF 1 128 0 0 0 1abd1e3 0 G:\scriptc\packages\runtime\src\scr_json.c:4081
+PROF 0 0 1 0 0 1ac953c 0 G:\scriptc\packages\runtime\src\scr_sqlite.c:547
+PROF 166404 25293408 0 0 0 1ac0f89 0 G:\scriptc\packages\runtime\src\scr_async.c:2995
+PROF 37 608 0 0 0 1ad8c97 0 G:\scriptc\packages\runtime\src\scr_events_emitter.c:348
+PROF 4 32768 0 0 0 1ae8819 0 G:\scriptc\packages\runtime\src\scr_http.c:1992
+PROF 1328140 222994144 0 0 0 1aad509 0 G:\scriptc\packages\runtime\src\scr_array.c:444
+PROF 16 256 0 0 0 1ae238f 0 G:\scriptc\packages\runtime\src\scr_stream.c:2683
+PROF 0 0 2 0 0 1ae72c8 0 G:\scriptc\packages\runtime\src\scr_http.c:652
+PROF 0 0 22441 0 0 1ac0d90 0 G:\scriptc\packages\runtime\src\scr_async.c:477
+PROF 0 0 104 0 0 1ac1087 0 G:\scriptc\packages\runtime\src\scr_async.c:3967
+PROF 18 432 0 0 0 1ad8b8f 0 G:\scriptc\packages\runtime\src\scr_events_emitter.c:126
+PROF 0 0 2 0 0 1ae8a8d 0 G:\scriptc\packages\runtime\src\scr_http.c:2053
+PROF 0 0 2 0 0 1ae514c 0 G:\scriptc\packages\runtime\src\scr_net.c:732
+PROF 0 0 108828 0 0 1aae04b 0 G:\scriptc\packages\runtime\src\scr_bytes.c:197
+PROF 2 1070 0 0 0 1aea788 0 G:\scriptc\packages\runtime\src\scr_ws_client.c:290
+PROF 48 8192 0 0 0 1ae2655 0 G:\scriptc\packages\runtime\src\scr_stream.c:565
+PROF 3284 210176 0 0 0 1acc998 0 G:\scriptc\packages\runtime\src\scr_asym.c:34
+PROF 0 0 1 0 0 1ae99b5 0 G:\scriptc\packages\runtime\src\scr_websocket.c:376
+PROF 1 24 0 0 0 1ab75a0 0 G:/scriptc/tests/perf/heapcensus/scr_heap_census.h:283
+PROF 41 1968 0 0 0 1ae8bdd 0 G:\scriptc\packages\runtime\src\scr_http.c:1523
+PROF 0 0 173 0 0 1ad8eef 0 G:\scriptc\packages\runtime\src\scr_events_emitter.c:628
+PROF 8 16 0 0 0 1ae0fd4 0 G:\scriptc\packages\runtime\src\scr_stream.c:3227
+PROF 0 0 19 0 0 1ab72b4 0 G:\scriptc\packages\runtime\src\scr_lib.c:3859
+PROF 2 1024 0 0 0 1ae8624 0 G:\scriptc\packages\runtime\src\scr_http.c:811
+PROF 1 768 0 0 0 1ae47aa 0 G:\scriptc\packages\runtime\src\scr_loop_wsapoll.c:104
+PROF 150 96316024 0 0 0 1aaafe0 0 G:\scriptc\packages\runtime\src\scr_string.c:1217
+PROF 0 0 16 0 0 1aa6dca 0 G:\scriptc\packages\runtime\vendor\zlib\zutil.c:294
+PROF 0 0 2 0 0 1ae7355 0 G:\scriptc\packages\runtime\src\scr_http.c:665
+PROF 1 64 0 0 0 1ac7c69 0 G:\scriptc\packages\runtime\src\scr_regex.c:101
+PROF 140 6720 0 0 0 1ad8be0 0 G:\scriptc\packages\runtime\src\scr_events_emitter.c:144
+PROF 0 0 4 0 0 1ae71dd 0 G:\scriptc\packages\runtime\src\scr_http.c:251
+PROF 0 0 4 0 0 1abb1ad 0 G:\scriptc\packages\runtime\src\scr_url.c:243
+PROF 8 64 0 0 0 1ae0e68 0 G:\scriptc\packages\runtime\src\scr_stream.c:1697
+PROF-TOTAL rows=257 count=10388791 bytes=385494778041 freed=10170645 lost=0 cycles=533448794000 framesLost=0 resyncs=0
+PROF-SIZEHIST ARMED buckets=40 exactGranule=8 exactMax=8192
+PROFHIST 1aba515 4:4 G:\scriptc\packages\runtime\src\scr_url.c:352
+PROFHIST 1ae9981 7:2 G:\scriptc\packages\runtime\src\scr_websocket.c:359
+PROFHIST 1ac1141 7:8 G:\scriptc\packages\runtime\src\scr_async.c:4818
+PROFHIST 1ad2ddd 6:7755 G:\scriptc\packages\runtime\src\scr_inspect.c:276
+PROFHIST 1ac0f27 5:38 G:\scriptc\packages\runtime\src\scr_async.c:1499
+PROFHIST 1ab75fe 10:1 G:/scriptc/tests/perf/heapcensus/scr_heap_census.h:289
+PROFHIST 1ae8b4d 2:12 3:23 4:6 G:\scriptc\packages\runtime\src\scr_http.c:1518
+PROFHIST 1ab7635 12:137 G:/scriptc/tests/perf/heapcensus/scr_heap_census.h:293
+PROFHIST 1ae0fa2 4:8 G:\scriptc\packages\runtime\src\scr_stream.c:3226
+PROFHIST 1aaea3a 0:143 1:4856 2:53 3:3275 4:3324 5:13196 6:74 7:153 8:53 9:13 10:3 11:2 12:8 13:774 14:460 15:40 16:10 19:48 20:40 G:\scriptc\packages\runtime\src\scr_bytes.c:52
+PROFHIST 1ab88f0 9:1 15:8 G:\scriptc\packages\runtime\src\scr_lib.c:3989
+PROFHIST 1ada4c8 6:5 G:\scriptc\packages\runtime\src\scr_weak.c:146
+PROFHIST 1ac911f 3:349 4:509 5:239 G:\scriptc\packages\runtime\src\scr_bigint.c:530
+PROFHIST 1aab57c 8:96002 9:1653 10:10 12:9 13:4 16:5868836 G:\scriptc\packages\runtime\src\scr_string.c:1091
+PROFHIST 1abc4eb 6:1 G:\scriptc\packages\runtime\src\scr_json.c:434
+PROFHIST 1ae0efb 4:8 G:\scriptc\packages\runtime\src\scr_stream.c:2841
+PROFHIST 1ae235d 4:16 G:\scriptc\packages\runtime\src\scr_stream.c:2682
+PROFHIST 1acd57a 5:4 G:\scriptc\packages\runtime\src\scr_asym.c:81
+PROFHIST 1ac0f58 7:22441 G:\scriptc\packages\runtime\src\scr_async.c:1512
+PROFHIST 1ac9674 4:4 G:\scriptc\packages\runtime\src\scr_sqlite.c:1237
+PROFHIST 1ac6cd7 1:10 2:14 3:25 4:20 5:10 8:11 G:\scriptc\packages\runtime\src\scr_regex.c:74
+PROFHIST 1ae5038 5:15 G:\scriptc\packages\runtime\src\scr_net.c:289
+PROFHIST 1ab4792 5:6 G:\scriptc\packages\runtime\src\scr_error.c:170
+PROFHIST 1ae747d 6:1 G:\scriptc\packages\runtime\src\scr_http.c:2087
+PROFHIST 1abb0f5 6:4 G:\scriptc\packages\runtime\src\scr_url.c:181
+PROFHIST 1ae1e71 9:16 G:\scriptc\packages\runtime\src\scr_stream.c:1873
+PROFHIST 1acd54c 6:4 G:\scriptc\packages\runtime\src\scr_asym.c:72
+PROFHIST 1abf88d 7:1 G:\scriptc\packages\runtime\src\scr_json.c:3116
+PROFHIST 1ae86e6 7:1 G:\scriptc\packages\runtime\src\scr_http.c:1210
+PROFHIST 1ac4a7f 16:675 G:\scriptc\packages\runtime\src\scr_cycle.c:1546
+PROFHIST 1ae6072 7:1 G:\scriptc\packages\runtime\src\scr_net.c:1486
+PROFHIST 1ae3df8 5:1 G:\scriptc\packages\runtime\src\scr_loop_wsapoll.c:116
+PROFHIST 1ac94af 5:1 G:\scriptc\packages\runtime\src\scr_sqlite.c:529
+PROFHIST 1ab17b4 9:8 G:\scriptc\packages\runtime\src\scr_map.c:311
+PROFHIST 1aea68d 6:2 G:\scriptc\packages\runtime\src\scr_ws_client.c:240
+PROFHIST 1ad03c9 10:89 G:\scriptc\packages\runtime\src\scr_cipher_value.c:90
+PROFHIST 1aaf054 2:61 3:1599 4:13 5:3 6:3207 G:\scriptc\packages\runtime\src\scr_bytes.c:732
+PROFHIST 1ac0dc0 4:64 G:\scriptc\packages\runtime\src\scr_async.c:533
+PROFHIST 1aaca80 6:36 G:\scriptc\packages\runtime\src\scr_array.c:1006
+PROFHIST 1ad3bf9 6:38799 7:15 8:2 G:\scriptc\packages\runtime\src\scr_inspect.c:49
+PROFHIST 1ac000c 9:1 10:1 11:1 12:1 13:1 14:1 15:1 16:1 G:\scriptc\packages\runtime\src\scr_json.c:1208
+PROFHIST 1aaf241 5:3260 G:\scriptc\packages\runtime\src\scr_bytes.c:1019
+PROFHIST 1a94e78 3:956 4:2151 5:2403 6:2535 7:1072 8:362 9:293 10:225 11:35 12:12932 13:48 14:18 15:18 16:45 G:\scriptc\packages\runtime\vendor\sqlite\sqlite3.c:28035
+PROFHIST 1ac90ee 3:349 4:509 5:239 G:\scriptc\packages\runtime\src\scr_bigint.c:529
+PROFHIST 1abf7c6 9:1 10:1 G:\scriptc\packages\runtime\src\scr_json.c:2002
+PROFHIST 1ad2dab 8:1 G:\scriptc\packages\runtime\src\scr_inspect.c:257
+PROFHIST 1ac1f65 7:1 8:1 9:1 10:1 11:1 12:1 13:1 14:1 15:1 16:1 G:\scriptc\packages\runtime\src\scr_async.c:862
+PROFHIST 1ad9ae8 5:1 G:\scriptc\packages\runtime\src\scr_symbol.c:45
+PROFHIST 1ab17e2 5:8 G:\scriptc\packages\runtime\src\scr_map.c:314
+PROFHIST 1ac1ead 5:109953 G:\scriptc\packages\runtime\src\scr_async.c:3042
+PROFHIST 1abc74f 3:7207 4:4287 5:3640 6:3636 7:26 8:16 9:5 10:5 11:5 12:5 13:5 14:1 G:\scriptc\packages\runtime\src\scr_json.c:1406
+PROFHIST 1a94f12 5:283 6:374 7:378 8:246 9:161 10:23 11:5 12:2 13:2 G:\scriptc\packages\runtime\vendor\sqlite\sqlite3.c:28108
+PROFHIST 1aab5ae 16:47 G:\scriptc\packages\runtime\src\scr_string.c:820
+PROFHIST 1ac0e63 4:104 G:\scriptc\packages\runtime\src\scr_async.c:1158
+PROFHIST 1aae29b 5:3441 G:\scriptc\packages\runtime\src\scr_bytes.c:593
+PROFHIST 1ac1d32 9:1 10:1 11:1 12:1 13:1 14:1 15:1 16:1 G:\scriptc\packages\runtime\src\scr_async.c:909
+PROFHIST 1ac4bcf 11:1 12:1 13:1 14:1 15:1 16:1 G:\scriptc\packages\runtime\src\scr_cycle.c:2193
+PROFHIST 1ae0ec9 5:8 G:\scriptc\packages\runtime\src\scr_stream.c:2837
+PROFHIST 1ab0d08 7:6822 G:\scriptc\packages\runtime\src\scr_map.c:554
+PROFHIST 1aad6af 7:33 8:23 9:22 10:21 G:\scriptc\packages\runtime\src\scr_array.c:906
+PROFHIST 1abf8bd 3:6806 4:11866 5:1363 6:5 G:\scriptc\packages\runtime\src\scr_json.c:94
+PROFHIST 1aac990 6:26034 G:\scriptc\packages\runtime\src\scr_array.c:499
+PROFHIST 1ab72e3 5:28 G:\scriptc\packages\runtime\src\scr_lib.c:3915
+PROFHIST 1ac3dd3 9:1 10:1 11:1 12:1 13:1 14:1 15:1 16:1 17:1 18:1 G:\scriptc\packages\runtime\src\scr_cycle.c:2108
+PROFHIST 1ab7312 5:28 G:\scriptc\packages\runtime\src\scr_lib.c:3926
+PROFHIST 1ac7cf8 4:8217 G:\scriptc\packages\runtime\src\scr_regex.c:333
+PROFHIST 1ac1110 8:8 G:\scriptc\packages\runtime\src\scr_async.c:4811
+PROFHIST 1aea461 4:2 5:36 6:1 7:2 8:1 15:2 G:\scriptc\packages\runtime\src\scr_websocket.c:392
+PROFHIST 1ae23c1 5:104 G:\scriptc\packages\runtime\src\scr_stream.c:475
+PROFHIST 1aaea0b 5:26525 G:\scriptc\packages\runtime\src\scr_bytes.c:43
+PROFHIST 1abb209 6:28 G:\scriptc\packages\runtime\src\scr_url.c:70
+PROFHIST 1ab36c8 6:3 G:\scriptc\packages\runtime\src\scr_exception.c:83
+PROFHIST 1ae1852 6:16 G:\scriptc\packages\runtime\src\scr_stream.c:1211
+PROFHIST 1ae89fd 7:2 G:\scriptc\packages\runtime\src\scr_http.c:1774
+PROFHIST 1aae1f1 5:79099 G:\scriptc\packages\runtime\src\scr_bytes.c:529
+PROFHIST 1ae73b3 6:2 G:\scriptc\packages\runtime\src\scr_http.c:793
+PROFHIST 1ae7384 6:2 G:\scriptc\packages\runtime\src\scr_http.c:792
+PROFHIST 1aa6d96 12:8 15:8 G:\scriptc\packages\runtime\vendor\zlib\zutil.c:288
+PROFHIST 1aea659 3:2 G:\scriptc\packages\runtime\src\scr_ws_client.c:213
+PROFHIST 1ac90bd 3:349 4:509 5:239 G:\scriptc\packages\runtime\src\scr_bigint.c:528
+PROFHIST 1ab1a80 15:1 G:\scriptc\packages\runtime\src\scr_closure.c:521
+PROFHIST 1ad74a8 6:8 G:\scriptc\packages\runtime\src\scr_zlib_stream.c:250
+PROFHIST 1ad8c5e 5:39 G:\scriptc\packages\runtime\src\scr_events_emitter.c:339
+PROFHIST 1ae8952 8:4 G:\scriptc\packages\runtime\src\scr_http.c:1635
+PROFHIST 1ac95ed 2:358 6:3 7:12 8:1 10:4 G:\scriptc\packages\runtime\src\scr_sqlite.c:1197
+PROFHIST 1abc865 9:2 G:\scriptc\packages\runtime\src\scr_json.c:1757
+PROFHIST 1aab5df 8:1 9:1 G:\scriptc\packages\runtime\src\scr_string.c:768
+PROFHIST 1ab000d 5:20 G:\scriptc\packages\runtime\src\scr_bytes_io.c:887
+PROFHIST 1ad8eb6 3:163 4:10 G:\scriptc\packages\runtime\src\scr_events_emitter.c:587
+PROFHIST 1ae5094 4:21 G:\scriptc\packages\runtime\src\scr_net.c:315
+PROFHIST 1aeb460 6:2 G:\scriptc\packages\runtime\src\scr_ws_global.c:384
+PROFHIST 1ac4a3e 8:19 9:60809 14:1 G:\scriptc\packages\runtime\src\scr_cycle.c:1727
+PROFHIST 1abc318 5:1238 G:\scriptc\packages\runtime\src\scr_json.c:143
+PROFHIST 1ac956d 5:1 G:\scriptc\packages\runtime\src\scr_sqlite.c:555
+PROFHIST 1ac0ec5 8:1 G:\scriptc\packages\runtime\src\scr_async.c:1229
+PROFHIST 1adae69 7:4 8:2 G:\scriptc\packages\runtime\src\scr_weak.c:187
+PROFHIST 1ac1001 7:32 G:\scriptc\packages\runtime\src\scr_async.c:3462
+PROFHIST 1ae614e 9:6 G:\scriptc\packages\runtime\src\scr_net.c:917
+PROFHIST 1ae624d 12:2 21:1 22:1 23:1 G:\scriptc\packages\runtime\src\scr_net.c:1102
+PROFHIST 1ac7cc8 1:9 2:12 3:1665 4:11 6:6520 G:\scriptc\packages\runtime\src\scr_regex.c:239
+PROFHIST 1ac1d62 5:53092 G:\scriptc\packages\runtime\src\scr_async.c:2154
+PROFHIST 1ab7256 5:19 G:\scriptc\packages\runtime\src\scr_lib.c:3838
+PROFHIST 1ab88c1 6:46 7:16 8:4 9:3 10:1 16:8 G:\scriptc\packages\runtime\src\scr_lib.c:3805
+PROFHIST 1ab1810 6:11684 7:31 8:23 9:32 10:15 11:99 12:11 13:11 14:3 15:2 16:4 G:\scriptc\packages\runtime\src\scr_map.c:259
+PROFHIST 1aea4c9 8:2 9:4 15:2 16:2 17:1 G:\scriptc\packages\runtime\src\scr_websocket.c:338
+PROFHIST 1ae8b7d 3:4 4:8 5:16 6:13 G:\scriptc\packages\runtime\src\scr_http.c:1521
+PROFHIST 1aac960 6:1216755 G:\scriptc\packages\runtime\src\scr_array.c:453
+PROFHIST 1ac0fd0 7:1 G:\scriptc\packages\runtime\src\scr_async.c:3452
+PROFHIST 1ac8ae3 5:7035 6:2189 G:\scriptc\packages\runtime\src\scr_bigint.c:39
+PROFHIST 1ae87e9 6:4 G:\scriptc\packages\runtime\src\scr_http.c:2059
+PROFHIST 1ac4c00 9:1 10:1 11:1 12:1 13:1 14:1 15:1 16:1 17:1 18:1 19:1 G:\scriptc\packages\runtime\src\scr_cycle.c:2292
+PROFHIST 1aba622 6:4 G:\scriptc\packages\runtime\src\scr_url.c:522
+PROFHIST 1ab193c 3:11676 4:27 5:15 6:18 7:15 8:13 9:6 10:5 11:3 12:2 13:1 G:\scriptc\packages\runtime\src\scr_map.c:475
+PROFHIST 1acafc8 5:45 G:\scriptc\packages\runtime\src\scr_sqlite.c:681
+PROFHIST 1ab8b0d 2:241360 4:838400 G:\scriptc\packages\runtime\src\scr_lib.c:4279
+PROFHIST 1abf8eb 4:10767 5:7502 6:6605 7:711 8:282 9:82 10:39 11:15 12:3 13:1 G:\scriptc\packages\runtime\src\scr_json.c:1636
+PROFHIST 1ab63ca 1:3 2:2 3:1 4:2 5:1 6:1 G:\scriptc\packages\runtime\src\scr_lib.c:279
+PROFHIST 1ab4180 4:3 G:\scriptc\packages\runtime\src\scr_error.c:404
+PROFHIST 1ae8bad 3:4 4:8 5:16 6:13 G:\scriptc\packages\runtime\src\scr_http.c:1522
+PROFHIST 1ab190e 7:11676 8:27 9:15 10:18 11:15 12:13 13:6 14:5 15:3 16:2 17:1 G:\scriptc\packages\runtime\src\scr_map.c:468
+PROFHIST 1abd1e3 7:1 G:\scriptc\packages\runtime\src\scr_json.c:4081
+PROFHIST 1ac0f89 7:166404 G:\scriptc\packages\runtime\src\scr_async.c:2995
+PROFHIST 1ad8c97 4:36 5:1 G:\scriptc\packages\runtime\src\scr_events_emitter.c:348
+PROFHIST 1ae8819 13:4 G:\scriptc\packages\runtime\src\scr_http.c:1992
+PROFHIST 1aad509 5:316387 6:882222 7:25938 8:22390 9:21866 10:21335 11:20187 12:17815 G:\scriptc\packages\runtime\src\scr_array.c:444
+PROFHIST 1ae238f 4:16 G:\scriptc\packages\runtime\src\scr_stream.c:2683
+PROFHIST 1ad8b8f 4:18 G:\scriptc\packages\runtime\src\scr_events_emitter.c:126
+PROFHIST 1aea788 9:2 G:\scriptc\packages\runtime\src\scr_ws_client.c:290
+PROFHIST 1ae2655 5:16 6:8 7:8 8:8 9:8 G:\scriptc\packages\runtime\src\scr_stream.c:565
+PROFHIST 1acc998 6:3284 G:\scriptc\packages\runtime\src\scr_asym.c:34
+PROFHIST 1ab75a0 4:1 G:/scriptc/tests/perf/heapcensus/scr_heap_census.h:283
+PROFHIST 1ae8bdd 3:4 4:8 5:16 6:13 G:\scriptc\packages\runtime\src\scr_http.c:1523
+PROFHIST 1ae0fd4 1:8 G:\scriptc\packages\runtime\src\scr_stream.c:3227
+PROFHIST 1ae8624 9:2 G:\scriptc\packages\runtime\src\scr_http.c:811
+PROFHIST 1ae47aa 9:1 G:\scriptc\packages\runtime\src\scr_loop_wsapoll.c:104
+PROFHIST 1aaafe0 10:1 11:1 12:1 13:1 14:1 15:1 16:1 17:32 18:32 19:32 20:31 21:16 G:\scriptc\packages\runtime\src\scr_string.c:1217
+PROFHIST 1ac7c69 6:1 G:\scriptc\packages\runtime\src\scr_regex.c:101
+PROFHIST 1ad8be0 5:140 G:\scriptc\packages\runtime\src\scr_events_emitter.c:144
+PROFHIST 1ae0e68 3:8 G:\scriptc\packages\runtime\src\scr_stream.c:1697
+PROFEXACT 0 246901
+PROFEXACT 8 34465
+PROFEXACT 16 24013
+PROFEXACT 24 856944
+PROFEXACT 32 444294
+PROFEXACT 40 171420
+PROFEXACT 48 13025
+PROFEXACT 56 1031
+PROFEXACT 64 2192468
+PROFEXACT 72 3394
+PROFEXACT 80 7819
+PROFEXACT 88 732
+PROFEXACT 96 7153
+PROFEXACT 104 261
+PROFEXACT 112 27
+PROFEXACT 120 63
+PROFEXACT 128 60797
+PROFEXACT 136 27
+PROFEXACT 144 490
+PROFEXACT 152 173362
+PROFEXACT 160 11
+PROFEXACT 168 7
+PROFEXACT 176 75
+PROFEXACT 184 8
+PROFEXACT 192 715
+PROFEXACT 200 52
+PROFEXACT 208 4
+PROFEXACT 216 6
+PROFEXACT 224 56
+PROFEXACT 232 71
+PROFEXACT 240 19
+PROFEXACT 248 107
+PROFEXACT 256 22575
+PROFEXACT 264 113
+PROFEXACT 272 19209
+PROFEXACT 280 117
+PROFEXACT 288 19119
+PROFEXACT 296 130
+PROFEXACT 304 19103
+PROFEXACT 312 294
+PROFEXACT 320 19112
+PROFEXACT 328 19204
+PROFEXACT 336 13
+PROFEXACT 344 34
+PROFEXACT 352 24
+PROFEXACT 360 5
+PROFEXACT 368 25
+PROFEXACT 376 3
+PROFEXACT 384 299
+PROFEXACT 392 20
+PROFEXACT 400 9
+PROFEXACT 408 1
+PROFEXACT 416 20
+PROFEXACT 432 1
+PROFEXACT 440 18
+PROFEXACT 448 1
+PROFEXACT 456 1
+PROFEXACT 464 18
+PROFEXACT 472 3
+PROFEXACT 480 1
+PROFEXACT 488 25
+PROFEXACT 496 2
+PROFEXACT 504 4
+PROFEXACT 512 21996
+PROFEXACT 520 45
+PROFEXACT 528 9
+PROFEXACT 536 17
+PROFEXACT 544 6
+PROFEXACT 560 3217
+PROFEXACT 568 22
+PROFEXACT 576 1
+PROFEXACT 584 18
+PROFEXACT 592 1
+PROFEXACT 600 2
+PROFEXACT 608 17
+PROFEXACT 616 1
+PROFEXACT 624 5
+PROFEXACT 632 38418
+PROFEXACT 656 22
+PROFEXACT 672 3
+PROFEXACT 680 19
+PROFEXACT 688 8
+PROFEXACT 704 13
+PROFEXACT 712 19
+PROFEXACT 736 1
+PROFEXACT 768 85
+PROFEXACT 776 5
+PROFEXACT 792 1
+PROFEXACT 808 2
+PROFEXACT 816 1
+PROFEXACT 824 2
+PROFEXACT 840 3
+PROFEXACT 848 2
+PROFEXACT 856 2
+PROFEXACT 872 1
+PROFEXACT 896 1
+PROFEXACT 904 1653
+PROFEXACT 920 19209
+PROFEXACT 960 2
+PROFEXACT 984 3
+PROFEXACT 992 1
+PROFEXACT 1016 184
+PROFEXACT 1024 21406
+PROFEXACT 1040 4
+PROFEXACT 1064 1
+PROFEXACT 1072 1
+PROFEXACT 1088 1
+PROFEXACT 1096 68
+PROFEXACT 1128 10
+PROFEXACT 1184 89
+PROFEXACT 1232 8
+PROFEXACT 1240 1
+PROFEXACT 1248 10
+PROFEXACT 1256 1
+PROFEXACT 1264 8
+PROFEXACT 1272 3
+PROFEXACT 1288 8
+PROFEXACT 1296 2
+PROFEXACT 1304 23
+PROFEXACT 1312 1
+PROFEXACT 1320 6
+PROFEXACT 1328 16
+PROFEXACT 1352 12
+PROFEXACT 1408 34
+PROFEXACT 1472 1
+PROFEXACT 1528 10
+PROFEXACT 1536 40
+PROFEXACT 1552 2
+PROFEXACT 1560 2
+PROFEXACT 1600 1
+PROFEXACT 1648 1
+PROFEXACT 1712 3
+PROFEXACT 1768 1
+PROFEXACT 1784 1
+PROFEXACT 1792 1
+PROFEXACT 1800 1
+PROFEXACT 1984 2
+PROFEXACT 2008 2
+PROFEXACT 2016 2
+PROFEXACT 2024 18
+PROFEXACT 2048 20315
+PROFEXACT 2056 19
+PROFEXACT 2064 2
+PROFEXACT 2088 1
+PROFEXACT 2296 2
+PROFEXACT 2408 2
+PROFEXACT 2416 1
+PROFEXACT 2464 1
+PROFEXACT 2504 2
+PROFEXACT 2536 1
+PROFEXACT 2576 1
+PROFEXACT 2752 1
+PROFEXACT 2808 2
+PROFEXACT 2928 1
+PROFEXACT 3008 1
+PROFEXACT 3072 16
+PROFEXACT 3136 1
+PROFEXACT 3560 1
+PROFEXACT 3584 1
+PROFEXACT 4040 1
+PROFEXACT 4048 1
+PROFEXACT 4096 17856
+PROFEXACT 4104 5104
+PROFEXACT 4112 19
+PROFEXACT 4152 1
+PROFEXACT 4248 1
+PROFEXACT 4272 2
+PROFEXACT 4296 1
+PROFEXACT 4344 2
+PROFEXACT 4376 2781
+PROFEXACT 4424 1
+PROFEXACT 4504 2
+PROFEXACT 4808 2
+PROFEXACT 4944 1
+PROFEXACT 5024 1
+PROFEXACT 5112 137
+PROFEXACT 5184 1
+PROFEXACT 5264 1
+PROFEXACT 5464 1
+PROFEXACT 5504 2
+PROFEXACT 5552 1
+PROFEXACT 5568 4
+PROFEXACT 5704 1
+PROFEXACT 5744 2
+PROFEXACT 5784 2
+PROFEXACT 5864 1
+PROFEXACT 5904 1
+PROFEXACT 5944 2
+PROFEXACT 6024 1
+PROFEXACT 6104 1
+PROFEXACT 6144 5
+PROFEXACT 6184 3
+PROFEXACT 6224 5
+PROFEXACT 6264 86
+PROFEXACT 6304 1
+PROFEXACT 6344 79
+PROFEXACT 6384 7
+PROFEXACT 6424 85
+PROFEXACT 6464 77
+PROFEXACT 6504 147
+PROFEXACT 6544 139
+PROFEXACT 6584 118
+PROFEXACT 6624 165
+PROFEXACT 6664 190
+PROFEXACT 6672 1
+PROFEXACT 6704 194
+PROFEXACT 6728 1
+PROFEXACT 6744 335
+PROFEXACT 6784 441
+PROFEXACT 6824 496
+PROFEXACT 6864 5
+PROFEXACT 6904 17
+PROFEXACT 6944 6
+PROFEXACT 6984 4
+PROFEXACT 7024 16
+PROFEXACT 7064 12
+PROFEXACT 7096 10
+PROFEXACT 7104 17
+PROFEXACT 7144 20
+PROFEXACT 7152 8
+PROFEXACT 7168 1
+PROFEXACT 7184 35
+PROFEXACT 7224 98
+PROFEXACT 7264 94
+PROFEXACT 7304 79
+PROFEXACT 7344 10
+PROFEXACT 7384 23
+PROFEXACT 7424 69
+PROFEXACT 7464 29
+PROFEXACT 7504 51
+PROFEXACT 7544 38
+PROFEXACT 7584 87
+PROFEXACT 7624 56
+PROFEXACT 7664 45
+PROFEXACT 7704 87
+PROFEXACT 7744 72
+PROFEXACT 7784 105
+PROFEXACT 7800 2
+PROFEXACT 7824 109
+PROFEXACT 7848 1
+PROFEXACT 7864 127
+PROFEXACT 7904 167
+PROFEXACT 7944 225
+PROFEXACT 7984 390
+PROFEXACT 8024 167
+PROFEXACT 8064 128
+PROFEXACT 8104 28
+PROFEXACT 8144 8
+PROFEXACT 8184 1
+PROF-SIZEHIST-TOTAL rows=139 noted=10388791 over8k=5871326
+PROF-STACKS ARMED depth=10 slots=131072
+PROFSTACK 1 1296 1f7fc ac134 20019 2fae2 2f99b 2fde0 2fbb0 a04c2 3175e 12088
+PROFSTACK 14 61264 1f7fc 1f5cd ac046 2840b ac811 25cda 23835 2bf92 2bb76 3b883
+PROFSTACK 77 336952 1f7fc 1f5cd ac046 2840b ac811 25cda 23835 2bf92 2bb76 3cb44
+PROFSTACK 2 2617 1f7fc 1f5cd ac046 20045 2f9c9 37d10 12088 190829 193388 5774ff
+PROFSTACK 24 32088 1f7fc 1f5cd ac046 20045 17f5c 53dd9 513e2 1a1f1 47044 18d82
+PROFSTACK 1 4376 1f7fc 1f5cd ac046 2840b ac860 25cda 40562 40315 3be71 31d1a
+PROFSTACK 1 4376 1f7fc 1f5cd ac046 2840b ac860 25cda 40562 40315 415f7 3659c
+PROFSTACK 6 7854 1f7fc 1f5cd ac046 20045 2f9c9 39127 12088 12cd6 3e570 36a82
+PROFSTACK 12 15708 1f7fc 1f5cd ac046 20045 2f9c9 39127 12088 190829 193388 5774ff
+PROFSTACK 1 1309 1f7fc 1f5cd ac046 20045 55543 52a9d 1a1f1 71745 54aff 51da2
+PROFSTACK 6 7999 1f7fc 1f5cd ac046 20045 2f9c9 35c2b 12088 190829 193388 5774ff
+PROFSTACK 2215 9692840 1f7fc 1f5cd ac046 2840b ac811 25cda 23835 2bf92 2bb76 4213e
+PROFSTACK 10 43760 1f7fc 1f5cd ac046 2840b ac811 25cda 23835 2bf92 2bb76 4222b
+PROFSTACK 6 7926 1f7fc 1f5cd ac046 20045 fbf6 fe19 f99a 22aaf 17bd1 54ab3
+PROFSTACK 463 2026088 1f7fc 1f5cd ac046 2840b ac811 25cda 23835 2bf92 2bb76 431ea
+PROFSTACK 2 2616 1f7fc 1f5cd ac046 20045 2f9c9 3037a 14e18 a582b a454b 3175e
+PROF-STACKS-TOTAL rows=16 count=2841 bytes=12249069 lost=0 tablefull=0 skipped=10385950 site="" sizeband=1296..1352 sizeband2=4376..4376

@@ -1,0 +1,15 @@
+tag          sa
+arm          post-fix reproduction of evidence-idle/on
+exe          /g/blocks/sa2-out182-prof/zapo-rest-182.exe
+exe-bytes    32679424
+built-from   /g/scriptc @ ddc1e373aab0cd610133a7cc38317203e8e55a47
+knobs        CHUNKS=8 CONVS=400 MSGS=6 TEXTLEN=300 ROUNDS=1 IDLE_S=60 SETTLE_MS=45000 PRESYNC_MS=20000 SCR_SQLITE_IDLE_RELEASE_MS=1000 SCR_SQLITE_IDLE_STAT=1
+node         v22.18.0 at /c/nvm4w/nodejs/node
+pmon         /g/scriptc/tests/perf/zapo-rest/harness/pmon.exe (192512 B)
+fake-server  /g/blocks/m3-zaposrc/packages/fake-server
+SCR_STRING_ARENA  <unset>
+started      2026-10-11T03:06:47Z
+free-G-GB    36G
+ended        2026-10-11T03:09:18Z
+rc           0
+free-G-GB    36G

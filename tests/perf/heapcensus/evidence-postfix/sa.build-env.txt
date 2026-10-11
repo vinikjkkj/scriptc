@@ -1,0 +1,21 @@
+ARM            prof+heapcensus (post-fix, arm sa)
+head           ddc1e373aab0cd610133a7cc38317203e8e55a47
+branch         main
+dirty          1
+worktree       /g/scriptc   (node_modules is a REAL directory, not a symlink)
+zig            0.16.0 at /g/tools/zig/zig
+tar            /c/Program Files/Git/usr/bin/tar
+node           v22.18.0 at /c/nvm4w/nodejs/node
+target         x86_64-windows-gnu
+cli-dist-sha   33d1e9e49e5c4111
+PROF_CFLAGS    -include G:/scriptc/tests/perf/prof/scr_prof.h -DSCR_PROF_ALLOC -DSCR_PROF_SIZEHIST -DSCR_PROF_STACKS -DSCR_PROF_STACK_SIZE_MIN=1296 -DSCR_PROF_STACK_SIZE_MAX=1352 -DSCR_PROF_STACK_SIZE_MIN2=4376 -DSCR_PROF_STACK_SIZE_MAX2=4376 -include G:/scriptc/tests/perf/heapcensus/scr_heap_census.h
+SCRIPTC_NO_CACHE 1
+START          2026-10-11T02:50:03Z
+free-before-GB 37G
+END            2026-10-11T03:06:20Z
+BUILD-EXIT     0
+elapsed-s      977
+free-after-GB  36G
+EXE            32679424
+EMITTED        zapo-rest.ll=229342743
+EARLY-CACHE    0

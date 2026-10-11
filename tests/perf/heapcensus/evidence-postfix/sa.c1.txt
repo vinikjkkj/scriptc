@@ -1,0 +1,81 @@
+C1 tree=/g/scriptc  head=ddc1e373a  zig=0.16.0
+  cc-rc=0 out-bytes=4358155
+  TU-wide  _aligned_malloc = 3
+  TU-wide  _aligned_free = 3
+  TU-wide  posix_memalign = 0
+  TU-wide  scr_prof_malloc = 10
+  --- the two chunk functions, as the compiler sees them ---
+    static void *scr_str_chunk_alloc(void) { return scr_prof_malloc((((size_t)64 << 10)), ("packages/runtime/src/scr_string.c" ":" "820")); }
+    static void scr_str_chunk_free(void *p) { scr_prof_free((p), ("packages/runtime/src/scr_string.c" ":" "822")); }
+  --- the control, scoped to those bodies ---
+  body _aligned_malloc = 0
+  body _aligned_free   = 0
+  body posix_memalign  = 0
+  body scr_prof_malloc = 1
+  body scr_prof_free   = 1
+  body 64<<10 literal  = 1
+############ NEGATIVE DIRECTION: the pre-fix tree on disk ############
+C1 tree=/g/blocks/h2-wt  head=73d88e2ea  zig=0.16.0
+  cc-rc=0 out-bytes=4357886
+  TU-wide  _aligned_malloc = 4
+  TU-wide  _aligned_free = 4
+  TU-wide  posix_memalign = 0
+  TU-wide  scr_prof_malloc = 9
+  --- the two chunk functions, as the compiler sees them ---
+    static void *scr_str_chunk_alloc(void) {
+    static void scr_str_chunk_free(void *p) {
+  --- the control, scoped to those bodies ---
+  body _aligned_malloc = 0
+  body _aligned_free   = 0
+  body posix_memalign  = 0
+  body scr_prof_malloc = 0
+  body scr_prof_free   = 0
+  body 64<<10 literal  = 0
+=== the chunk functions in the PRE-FIX preprocessed TU (multi-line, so the one-line grep above only catches the signature) ===
+static void *scr_str_chunk_alloc(void) {
+
+  return _aligned_malloc(((size_t)64 << 10), ((size_t)64 << 10));
+
+
+
+
+
+}
+
+static void scr_str_chunk_free(void *p) {
+
+  _aligned_free(p);
+
+
+
+}
+=== every _aligned_malloc / _aligned_free line, PRE-FIX TU ===
+1846:  __attribute__ ((__dllimport__)) void __attribute__((__cdecl__)) _aligned_free(void *_Memory);
+1847:  __attribute__ ((__dllimport__)) void *__attribute__((__cdecl__)) _aligned_malloc(size_t _Size,size_t _Alignment);
+2079:void * __mingw_aligned_malloc (size_t _Size, size_t _Alignment);
+2080:void __mingw_aligned_free (void *_Memory);
+2110:  __mallocedMemory = __mingw_aligned_malloc(__size, __align);
+2125:  __mingw_aligned_free(__p);
+103005:  return _aligned_malloc(((size_t)64 << 10), ((size_t)64 << 10));
+103015:  _aligned_free(p);
+=== every _aligned_malloc / _aligned_free line, FIXED TU (the 3 mingw header lines are the floor) ===
+1846:  __attribute__ ((__dllimport__)) void __attribute__((__cdecl__)) _aligned_free(void *_Memory);
+1847:  __attribute__ ((__dllimport__)) void *__attribute__((__cdecl__)) _aligned_malloc(size_t _Size,size_t _Alignment);
+2079:void * __mingw_aligned_malloc (size_t _Size, size_t _Alignment);
+2080:void __mingw_aligned_free (void *_Memory);
+2110:  __mallocedMemory = __mingw_aligned_malloc(__size, __align);
+2125:  __mingw_aligned_free(__p);
+=== scr_prof_malloc sites in scr_string.c: PRE-FIX (<) vs FIXED (>) ===
+1,5c1,6
+< scr_prof_malloc((cap * sizeof(uint32_t)), ("packages/runtime/src/scr_string.c" ":" "2063"
+< scr_prof_malloc((n + 1), ("packages/runtime/src/scr_string.c" ":" "2291"
+< scr_prof_malloc((r), ("packages/runtime/src/scr_string.c" ":" "1036"
+< scr_prof_malloc((span + 1), ("packages/runtime/src/scr_string.c" ":" "2200"
+< scr_prof_malloc((total), ("packages/runtime/src/scr_string.c" ":" "1768"
+---
+> scr_prof_malloc((((size_t)64 << 10)), ("packages/runtime/src/scr_string.c" ":" "820"
+> scr_prof_malloc((cap * sizeof(uint32_t)), ("packages/runtime/src/scr_string.c" ":" "2118"
+> scr_prof_malloc((n + 1), ("packages/runtime/src/scr_string.c" ":" "2346"
+> scr_prof_malloc((r), ("packages/runtime/src/scr_string.c" ":" "1091"
+> scr_prof_malloc((span + 1), ("packages/runtime/src/scr_string.c" ":" "2255"
+> scr_prof_malloc((total), ("packages/runtime/src/scr_string.c" ":" "1823"
