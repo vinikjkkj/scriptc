@@ -276,6 +276,11 @@ living inside the two bulk blocks (`87,368 = 4,368·20 + 8`, `nInitPage = 20`,
 > one 87,368-byte bulk slab per cache, held by a single pinned page —
 > `IDLE-RELEASE.md` §2, *"all-or-nothing: 19 of 20 pages unpinned returns
 > ZERO bytes."*
+>
+> ***AND THE ROW THAT REPLACED IT*** is `HCSIZE 65536` — `DECOMP-ON.md` §1,
+> *"The new largest row: the cycle collector's arena"* — at **40.91%** of the
+> `on` arm's busy heap, with 114 of its 118 blocks owned by `scr_cycle.c:1546`.
+> **This banner names that section only.**
 
 ## 3. The instrument map that made the stacks readable
 
@@ -317,6 +322,14 @@ fails its check.
   1304, 1312, 1320, 1328, 1336, 1344, 1352, 1353, 4368, 4376, 4384 give
   **thirteen distinct `HCSIZE` rows of exactly 100.** The busy table is exact.
   HOLEMAP's reading of it stands.
+
+  ***SCOPE, 2026-10-10 — see `DECOMP-ON.md` §4***, heading *"A control
+  limitation that has to be written down"*. Every size planted here lies in
+  [1,288, 4,384], which is **entirely inside the LFH**. The two rows that
+  dominate the settled heap once the idle release is armed — 65,536 and
+  131,079 — are backend blocks and **were never covered by this control**.
+  What supports reading 131,079 as an exact request is stated there, and it is
+  indirect. **This banner names that section only.**
 * **Can the prof lane see what the heap sees?** For every busy size below
   8 KiB, folded to `PROFEXACT`'s 8-byte key, *live must not exceed
   ever-allocated*. 115 buckets, 15 violations, largest excess 14 blocks at
