@@ -139,11 +139,56 @@ including the rejecting one — which is why 3.3's example checks
 `scr_exc_pending()` after a take and bails to a cleanup path.
 
 *Known parity gap, not a regression:* a frame still parked when the loop exits
-is abandoned and its payload is not released — exactly what happens to an
-abandoned fiber today (`scr_fibers_abandoned`). If the codegen cannot
-discharge 3.5 on all paths, the right fix is a per-function `drop` hook in
-`ScrCoroBase`; that costs 8 bytes on every frame, so it is deliberately not
-there yet. Ask for it rather than leaking.
+is abandoned and its payload is not released.
+
+**THE `drop` HOOK IS NOT OWED, AND THAT IS NOW MEASURED RATHER THAN ASSUMED**
+(2026-10-11). This paragraph used to continue "— exactly what happens to an
+abandoned fiber today (`scr_fibers_abandoned`)", and then to offer: "If the
+codegen cannot discharge 3.5 on all paths, the right fix is a per-function
+`drop` hook in `ScrCoroBase`; that costs 8 bytes on every frame, so it is
+deliberately not there yet. Ask for it rather than leaking." That was a
+CONDITIONAL offer whose condition nobody ever measured, and section 7 then
+carried it for months as though it were an outstanding obligation. It is not
+one. `tests/harness/coro-abandon-parity.test.ts` drives a frame carrying a
+heap string, an array and an object ACROSS the suspension — all three read
+after the resume, so the emitter must put them in the frame — out through
+every exit path a frame can actually take, and asks the RC audit:
+
+| exit path | stackless lane, SCR_RC_AUDIT=1 | frame payload leaked |
+| --- | --- | --- |
+| the await REJECTS, caught, normal return | exit 0, audit silent | none |
+| ordinary fulfilment | exit 0, audit silent | none |
+| the consumer drops the result promise | exit 0, audit silent | none |
+| the frame's own promise rejects, unattached | exit 1 (unhandled rejection), audit silent | none |
+| throws before its first await | exit 0, audit silent | none |
+| **parked when the loop exits** | **exit 99, `RC AUDIT FAILED`** | the whole payload, by design |
+
+**The codegen discharges 3.5 on every path a frame LEAVES by.** The hook's
+condition is false, so the 8 bytes are not owed — and 8 bytes was never the
+whole price. `scr_coro_release` (`packages/runtime/src/scr_coro.c:57`) has
+EXACTLY ONE caller, `scr_coro_resume_entry` (`:308`), and a frame only
+reaches it after its body has run and released its own slots, so a hook
+invoked there DOUBLE-releases. The only site that wants one is loop exit, and
+loop exit holds no list of live frames to walk: `ScrCoroBase` is six fields
+with no links and no cycle header (`scr_coro.h:102`), and `scr_async.c:4456`
+sets a COUNTER. A usable hook therefore needs an intrusive registry with
+insert and unlink on the `scr_coro_alloc` hot path, which is two more
+pointers per frame on top of the hook — not a pointer in the header.
+
+**AND THE PARITY CLAIM WAS FALSE IN THE REASSURING DIRECTION.** The residue
+is *not* "exactly what happens to an abandoned fiber". On the SAME source the
+stackless lane prints its coroutine line, FALLS THROUGH to the leak check
+(`scr_console.c:61-64` prints and does not return), finds the deliberately
+retained payload and dies `_Exit(99)`; the fiber lane prints its skip notice,
+RETURNS (`:67-71`), and exits 0. Both halves are deliberate where they were
+written — the coroutine line exists precisely so the failure is EXPLAINED
+rather than silent — so the divergence is pinned by the test rather than
+erased. What could not stand is the sentence claiming the two lanes agree,
+because that sentence was the stated reason for leaving the residue open.
+SCR_RC_AUDIT BUILDS ONLY: `coro-abandoned-count.test.ts` PROOF 3b pins the
+literal out of a shipping image, so none of this reaches a shipped binary,
+and the column this whole clause moves is diagnostic fidelity — zero bytes,
+zero blocks. It is completeness, not a gain.
 
 ### 3.6 Pick lean or fat correctly
 `has_exc` is `false` for census classes **D1–D3** and `true` for **D4**.
@@ -564,8 +609,10 @@ one per request. Its concurrency tracks inbound history-sync blobs and can
 never enter a per-CONCURRENT-REQUEST marginal slope.
 
 **`destroyIfSupported` is parked 11 at once, and only on teardown.** Zero on
-both load routes; on one `/sessions/remove` it is spawned 16 times, parks 16
-times, and reaches a high-water of **11** -- which is exactly
+both load routes — and zero on the history-sync load too, which the park
+table's `c09` cell did not establish until the symbol attribution was paid on
+2026-10-11 (see that section). On one `/sessions/remove` it is spawned 16
+times, parks 16 times, and reaches a high-water of **11** -- which is exactly
 `destroyPersistentStores`' `Promise.allSettled` of 11 (`createStore.ts:587`),
 the larger of its two batches, the other being `teardownCaches`' 5
 (`createStore.ts:525`). `yieldIn` is 0: every one of those awaits was on a
@@ -687,6 +734,40 @@ by symbol**: the artifact holds two `scr_async_spawn` entries
 entries (`zipChunks`, a stream async-iterator), and resolving an entry POINTER
 to one of them needs `tests/perf/obj-symbols.mjs` against the cached objects,
 which was not done. The headline does not rest on which: it rests on 14.
+
+**THE SYMBOL DEBT IS PAID, AND THE SPLIT ABOVE WAS HALF WRONG (2026-10-11).**
+`obj-symbols.mjs` was run against the cached objects, and the hedge in the
+paragraph above was CORRECT where it stood — "by SCALING, not by symbol" is
+exactly what had been established, and it is not what is being corrected here.
+**What collapsed was the reading downstream of it**, which took the
+parenthetical list of four CANDIDATES as if it named the two entries `c09`
+actually holds. Resolved:
+
+| `c09` entry | symbol | source | parks in `c09` |
+| --- | --- | --- | ---: |
+| async | `sc_as__x25__x25_m41_ProtoStreamReader_ensure` | `src/util/proto-stream.ts:93` (class at `:63`) | **7** |
+| gen | the generator-family entry (`scr_agen_new` as this section spells it) | — | **7** |
+| — | `sc_as__x25_m320_destroyIfSupported` | `src/store/createStore.ts:108` | **0** |
+
+So the 14 are **7 `scr_async_spawn` (`ensure`) + 7 from the generator family**
+— a DIFFERENT lowering family — and `destroyIfSupported` **parks zero here**.
+That zero is a MEASURED ABSENCE, not an unexamined one: the symbol is in the
+map at `rva=0x5e3d60` and does not appear in the two-entry table. This does
+NOT contradict 6a.5's "`destroyIfSupported` is parked 11 at once" — that is a
+different cell (`session create+remove`, teardown); on the history-sync load
+`c09` measures, it is zero.
+
+ONE SPELLING IS UNRESOLVED AND IS FLAGGED RATHER THAN PICKED: this section
+writes the generator-family entry `scr_agen_new`; the attribution result that
+paid this debt wrote `scr_gen_new`. The 7 does not depend on which, but the
+two spellings are different runtime entry points and the next slice that
+touches this row should settle it against the artifact rather than inherit
+either.
+
+**The headline is unchanged and was never at risk**: it rests on 14, and 14 is
+what was measured. What changes is that a reader can no longer carry
+"`ensure` and `destroyIfSupported` park 14 between them" out of this section,
+because half of that sentence is now measured false.
 
 **Three positive controls, and all three could have come out the other way.**
 
@@ -834,6 +915,16 @@ three times: **533 (35.8%)** here, **990 (66.5%)** at 2026-10-06, and
 
 ## 7. Not covered yet
 
+> **SCOPE OF THE 2026-10-11 REPAIRS.** Two corrections landed that day: clause
+> 3.5's `drop` hook (this section's bullet, and 3.5 itself) and the symbol
+> attribution of the 14 simultaneous parks (the park-table section). Both were
+> found by sweeping the WHOLE document for their figures — "not done", "by
+> scaling", "two remaining", the number 14 — not only for the sentences that
+> were quoted when the repairs were commissioned. **Every OTHER section of
+> this document is UNAUDITED, not thereby in force.** Marking two claims does
+> not certify the rest, and nothing here should be read as a clean bill for
+> figures nobody looked at.
+
 Two bullets here were true when written and are **no longer true**; they are
 corrected in place rather than deleted, because each was cited as a reason
 not to look.
@@ -858,12 +949,43 @@ not to look.
   clause on app182 is ZERO and that is measured, not unknown:** all three of
   its remaining generator-family functions are async, so the adjudicator is
   generator-lane parity, never an app182 coverage delta.
-- **A `drop` hook** for abandoned-frame payload release (3.5) — still open
-  **in `ScrCoroBase`**, which is where 3.5 needs it. A `drop` does now exist
-  one level up for generators (`scr_gen_of_coro(base, drop)`), for the
-  different reason that an UNSTARTED generator can be released before its
-  body ever runs; it is a handle parameter, not a frame field, and it costs
-  the 40-byte base nothing.
+- ~~**A `drop` hook** for abandoned-frame payload release (3.5) — still open
+  **in `ScrCoroBase`**, which is where 3.5 needs it.~~ **NOT OWED, AND THAT IS
+  MEASURED (2026-10-11).** This bullet read as an outstanding obligation; 3.5
+  only ever made a CONDITIONAL offer ("if the codegen cannot discharge 3.5 on
+  all paths") and nobody had measured the condition. It is false:
+  `tests/harness/coro-abandon-parity.test.ts` carries a string, an array and
+  an object across a suspension and out through all five paths a frame
+  LEAVES by — reject-and-catch, fulfil, dropped consumer, unattached
+  rejection, throw-before-first-await — and the RC audit is silent on every
+  one. See 3.5 for the table, for why the 8 bytes understates the price (the
+  hook would have no caller without a new frame registry), and for the parity
+  sentence that was FALSE: an abandoned frame exits 99 where an abandoned
+  fiber exits 0, in SCR_RC_AUDIT builds, on identical source.
+
+  **WHY IT LEAVES THE FRONT'S QUEUE, stated so it cannot be misread as
+  "done":** 3.5 is off the queue because its CONDITION WAS MEASURED FALSE, not
+  because a hook was implemented. Nothing was built. The evidence is the exit-
+  path table in 3.5: five paths a frame LEAVES by, each driven with a heap
+  string, an array and an object live across the suspension, each silent under
+  `SCRIPTC_RC_AUDIT=1`, each agreeing with the fiber lane on stdout and exit
+  code. A sixth row — parked when the loop exits — retains its payload by
+  design and is the known parity gap, not an undischarged obligation.
+
+  **AND IT REOPENS ON ONE NAMED CONDITION.** Today `scr_coro_release`
+  (`scr_coro.c:57`) is reachable only from `scr_coro_resume_entry` (`:308`),
+  where the body has already run, so there is no site at which a hook could
+  fire without double-releasing. If a CANCELLATION path is ever added — any
+  path that drops a frame's last reference with `SCR_CORO_DONE` clear — then
+  `scr_coro_release` becomes reachable on a frame whose slots are still live,
+  the measurement above stops covering the whole space, and this question is
+  owed again. `tests/harness/coro-abandon-parity.test.ts` does not cover that
+  path because that path does not exist; it would need a sixth shape.
+
+  **What survives as open is nothing from 3.5.** A `drop` does exist one level up for
+  generators (`scr_gen_of_coro(base, drop)`), for the different reason that an
+  UNSTARTED generator can be released before its body ever runs; it is a
+  handle parameter, not a frame field, and it costs the 40-byte base nothing.
 - ~~**D4 lowering.** The fat frame exists and is sized, but no test drives a
   suspension inside a `finally`.~~ **Two files drive exactly that now.**
   `tests/harness/stackless-finally-body.test.ts` is shape (1), an `await`
