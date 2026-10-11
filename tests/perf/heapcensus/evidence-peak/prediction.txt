@@ -1,0 +1,57 @@
+FR2 -- registered BEFORE the run, so the reading cannot be a story told afterwards
+=================================================================================
+written 2026-10-11, after the build was launched and before any census existed
+
+THE QUESTION
+  What is the largest occupant of the CRT heap AT THE PEAK, on the STACKLESS
+  lane, on CHUNKS=8 CONVS=400 MSGS=6 TEXTLEN=300 ROUNDS=1 IDLE_S=60.
+  The uninstrumented subject's peak CRT heap is 53.438 MiB (vmcensus v3).
+  THIS BINARY'S number will be larger and is NOT that number; see DENOMINATOR.
+
+WHAT I EXPECT, in order, and why
+  1. HCPKSIZE 65536 -- the 64 KiB arena chunks (cycle arena scr_cycle.c, and
+     the string arena scr_string.c, which has chunks of the same shape).
+     At SETTLED on the FIBER lane the committed census read 164 blocks /
+     10.75 MB. cycstat on app182 read peakheld=276 chunks for the CYCLE
+     arena alone, which would be 18.1 MB at its own peak. So I expect this
+     row to be the largest single row, somewhere in 150-350 blocks.
+     CROSS-CHECK AVAILABLE: cycstat's peakheld is an INDEPENDENT counter of
+     part of this row and the two must be consistent.
+  2. A handful of ~1,048,576 B blocks. vmcensus v3 saw SIX one-region bases
+     of 1.004 MiB at the peak, and big.census.txt proves that shape is what
+     8 mallocs of 1,048,000 B build. So ~6 blocks of about a megabyte,
+     ~6.3 MB in total.
+  3. SQLite. WHICH-BUFFER established the 1,296-1,352 band is SQLite's and
+     that the 4,376 class "is the whole database". Its page cache is one
+     large allocation and may BE item 2.
+  4. The small-block population (16/24/32/40/48/64/96) in the thousands,
+     each row a few hundred KB -- large in COUNT and small in BYTES.
+
+WHAT WOULD MAKE THIS A NULL, and a null is the result if it happens
+  * If the largest occupant is LIVE DATA, that is a null and it is the
+    answer. The cycle arena already closed that way today at 62.93% live.
+    OCCUPIED IS NOT A DEFECT and I will not promote a survivor to a leak.
+  * If the peak heap is mostly BUSY rather than mostly free, there is no
+    fragmentation story at the peak, whatever the settled heap looks like.
+    At settled the fiber arm read busy 15.49 MiB against free 29.69 MiB.
+    If the peak inverts that, the settled fragmentation is a CONSEQUENCE of
+    the decline, not a cause of the peak.
+
+THE DENOMINATOR, stated in advance because it is the thing most likely to be
+misquoted afterwards
+  * The ranking's denominator is HCPKTOTAL bytes -- the CRT heap's BUSY
+    bytes in THIS INSTRUMENTED BINARY at the snapshot instant.
+  * It is NOT 53.438 MiB. WHICH-BUFFER.md ss.5 forbids quoting a commit or
+    RSS figure from an instrumented binary and that prohibition is kept.
+  * COVERAGE (snapshot PrivateUsage / kernel PeakPagefileUsage) is what
+    licenses calling this instant "the peak". Below ~99% it is a trough.
+
+COSTS DECLARED IN ADVANCE
+  * two 16,384-row tables, 786,432 B of .data, measured off the PE against
+    fr1-out/S-plain -- which is the SAME compiler and runtime source tree
+    (231efb466 / 6a19e80ea) and differs ONLY by SCRIPTC_PROF_CFLAGS.
+  * one poller thread, 64 KiB reserved stack.
+  * the walks: HCPKCOST prints count, total ms and max ms.
+  * ABBA, four runs of ONE binary, trigger ARMED vs SCR_HEAPCEN_PEAK_OFF=1,
+    comparing the kernel's own peakPagefile, answers whether the instrument
+    moved the peak it measures.

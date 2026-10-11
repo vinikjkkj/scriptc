@@ -1,0 +1,25 @@
+BASE         G:/blocks/fr1-out/S-plain/zapo-rest-182.exe
+INSTRUMENTED G:/blocks/fr2-out/pk/zapo-rest-182.exe
+
+section        base vsize    instr vsize        delta B    delta MiB
+.text            27566726       28489190        +922464       +0.880
+.rdata            3327096        3859676        +532580       +0.508
+.buildid               98             98             +0       +0.000
+.data             1476416        2262016        +785600       +0.749
+.pdata             290640         304788         +14148       +0.013
+.tls                   16             16             +0       +0.000
+.reloc              14824          15988          +1164       +0.001
+SizeOfImage       32698368       34955264       +2256896       +2.152
+
+sum of section VirtualSize deltas: +2255956 B = +2.151 MiB
+
+PREDICTED, from the header's own declarations:
+  scr_hc_tbl   16384 rows x 24 B =    393216 B
+  scr_hc_ftbl  16384 rows x 24 B =    393216 B
+  scr_hc_pkheaps  64 x 8 B       =       512 B
+  ------------------------------------------
+  two tables + heap array        =    786944 B = 0.750 MiB
+
+  NONE of it is a CRT heap block, which is why the census tables
+  are unaffected by the census. vmcensus charges .data to the
+  IMAGE cow-taken term, not to the CRT HEAP term being ranked.

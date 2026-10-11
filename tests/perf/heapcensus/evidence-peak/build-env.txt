@@ -1,0 +1,25 @@
+ARM            pk  (heapcensus + peak trigger + cycstat)
+KNOB           SCRIPTC_STACKLESS=ABSENT
+PROF_CFLAGS    -include G:/blocks/fr2-wt/tests/perf/cycstat/scr_cyc_stat.h -DSCR_CYCSTAT_ON -include G:/blocks/fr2-wt/tests/perf/heapcensus/scr_heap_census.h -DSCR_HEAPCEN_PEAK
+worktree       /g/blocks/fr2-wt
+head           5fa7a24f8c0967a6be21e2de2504397f10705df1
+branch         fr2-peak-occupant
+dirty          3
+src-tree-comp  231efb4665fca9c63282598f424e0854457d8220
+src-tree-rt    6a19e80ea8f4558d720b78ddb3faf4c9cb3ce78a
+dist-has-lane  8 files
+node           v22.18.0 at /c/Users/vinicius/AppData/Local/nvm/v22.18.0/node
+zig            0.16.0 at /g/tools/zig/zig
+tar            /c/Program Files/Git/usr/bin/tar
+target         x86_64-windows-gnu
+SCRIPTC_NO_CACHE 1
+free-before-GB 38.25
+START          2026-10-11T06:36:07Z
+END            2026-10-11T06:44:57Z
+BUILD-EXIT     0
+elapsed-s      530
+free-after-GB  37.92
+EXE            33504768
+LL             242844763
+EARLY-CACHE    0
+ARTIFACTS      build.log env.txt zapo-rest-182.exe zapo-rest-182.pdb zapo-rest.ll 

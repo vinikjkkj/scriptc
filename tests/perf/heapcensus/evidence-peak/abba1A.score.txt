@@ -1,0 +1,115 @@
+================ IDENTITY ================
+zapo-rest.ll bytes = 242844763
+  fiber arm reference    229,342,757 (fr1 F-plain) / 229,342,743 (sa)
+  stackless reference    242,844,763 (fr1 S-plain)
+PASS L1 lane is STACKLESS by .ll size
+PASS L2 the peak block reached the binary (HCPKCOVER string present)
+================ CONTROLS ================
+PASS N1 census armed
+PASS N2 the shutdown arm planted 137 blocks
+PASS N3 the arm is absent from the peak table (the peak walk allocated nothing)
+PASS N4 no table overflow (lost=0)
+PASS N5 last line is a whole record (not truncated)
+PASS N6 a peak snapshot exists
+================ COVERAGE -- is this the PEAK or a trough? ================
+[heapcen] HCPKCOVER snapPrivate=61259776 kernelPeakPagefile=61538304 polledHigh=61526016
+[heapcen] HCPKCOST walks=50 polls=9036 walkMsTotal=110.029 walkMsMax=4.383 pollMs=5 stepBytes=524288 minBytes=0 threads=1 threadStackReserve=65536
+  snapshot PrivateUsage         58.422 MiB
+  kernel PeakPagefile           58.688 MiB
+  COVERAGE of the peak          99.55%   (vmcensus's committed runs: 99.85-99.96%)
+================ THE TWO HEAPS ================
+[heapcen] HCPKHEAPS heaps=3 busy=46453472 busyBlocks=69151 free=10267584 freeBlocks=57981 uncommitted=15507456
+[heapcen] HCPKTOTAL distinctSizes=250 blocks=69140 bytes=46433872 lost=0 freeRows=106 freeLost=0 wholePages=1779 pageBytes=7286784 runs=6055 runBytes=10155776
+[heapcen] heap 0 00000166B8960000 CRT busy=15913984 busyBlocks=47683 free=18546848 freeBlocks=16030 uncommitted=31813632 regions=9
+[heapcen] ALLHEAPS busy=15933584 busyBlocks=47694 free=18559056 freeBlocks=16033 uncommitted=31895552
+[heapcen] HCTOTAL distinctSizes=246 blocks=47683 bytes=15913984 lost=0 armCount=137 armSize=5113
+================ RANKING ================
+
+AT THE PEAK.  CRT committed (busy+free, all heaps) = 54.093 MiB
+
+  PEAK BUSY blocks by size -- DENOMINATOR: HCPKTOTAL bytes (CRT busy) = 46433872 B = 44.283 MiB
+          size     blocks          bytes     share
+         65536        294       19273136    41.51%
+          4376       1702        7870048    16.95%
+       1048576          6        6291456    13.55%
+        934576          6        5607552    12.08%
+           128       6389         920016     1.98%
+          8192         79         648432     1.40%
+           152       3946         631376     1.36%
+        262144          2         524320     1.13%
+            96       4505         504576     1.09%
+            32      10008         480384     1.03%
+            64       4805         384400     0.83%
+            16       9643         308576     0.66%
+            40       5665         271920     0.59%
+        131072          2         262176     0.56%
+         TOTAL      69140       46433872   100.00%
+  busy share of committed heap: 81.90%   free share: 18.10%
+
+  PEAK FREE holes by size -- DENOMINATOR: peak free bytes (CRT) = 9325408 B = 8.893 MiB
+          size     blocks          bytes     share
+           144      17763        2557872    27.43%
+          8192        129        1056768    11.33%
+            32      17709         566688     6.08%
+         65520          7         458640     4.92%
+            80       5075         406000     4.35%
+            64       5344         342016     3.67%
+         65536          4         262144     2.81%
+        131072          2         262144     2.81%
+         16384         14         229376     2.46%
+            48       4370         209760     2.25%
+          4608         44         202752     2.17%
+        196624          1         196624     2.11%
+        131136          1         131136     1.41%
+        131056          1         131056     1.41%
+         TOTAL      57978        9325408   100.00%
+
+AT SHUTDOWN. CRT committed (busy+free, all heaps) = 32.895 MiB
+
+  SETTLED BUSY blocks by size -- DENOMINATOR: HCTOTAL bytes (CRT busy) = 15913984 B = 15.177 MiB
+          size     blocks          bytes     share
+         65536        164       10750784    67.56%
+          5113        137         703632     4.42%
+        262144          2         524320     3.29%
+            96       4498         503792     3.17%
+            16       9616         307712     1.93%
+            32       6378         306144     1.92%
+            64       3423         273840     1.72%
+            24       6438         206032     1.29%
+         47264          4         189120     1.19%
+            40       3687         176976     1.11%
+             8       9792         156832     0.99%
+        131072          1         131088     0.82%
+        114688          1         114704     0.72%
+         32768          3          98352     0.62%
+         TOTAL      47683       15913984   100.00%
+
+  PEAK minus SETTLED, by size (top 14 peak occupants)
+          size   peakBlocks   settBlocks     deltaBytes
+         65536          294          164        8522352
+          4376         1702            0        7870048
+       1048576            6            0        6291456
+        934576            6            0        5607552
+           128         6389          251         883872
+          8192           79            4         615600
+           152         3946           87         617440
+        262144            2            2              0
+            96         4505         4498            784
+            32        10008         6378         174240
+            64         4805         3423         110560
+            16         9643         9616            864
+            40         5665         3687          94944
+        131072            2            1         131088
+================ CROSS-CHECK: cycstat vs HCSIZE 65536 ================
+[cycstat] ARMED tests/perf/cycstat/scr_cyc_stat.h
+[cycstat] passes=43 roots=171746 freed=67076
+[cycstat] Mcycles total=503.4 mark=268.8 scan=204.5 white=4.5 teardown=24.2
+[cycstat] arena chunks=612 freed=498 held=114 peakheld=274 carved=471115 listhit=35834139 listgive=36233945 callocfallback=60829
+[cycstat] strarena chunks=46 carved=69764 listhit=0 listgive=0 mallocfallback=0
+[cycstat] strarena reclaim taken=46 freed=0 charged=0 foreign=0 held=46
+[cycstat] strarena NO CHUNK EVER FREED and NOTHING WAS EVER CHARGED TO A CHUNK - the reclamation path did not run. Inert code, not a measurement of placement.
+[cycstat] strintern hit=342605 miss=103992 put=103860 evict=41375 refuse=132 hitRate=0.7671 evictPerPut=0.3984
+  HCSIZE 65536 (settled):   HCSIZE 65536 164 10750784
+  HCPKSIZE 65536 (peak):    HCPKSIZE 65536 294 19273136
+
+---- 0 failed
