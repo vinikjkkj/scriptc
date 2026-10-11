@@ -68,7 +68,30 @@ including the one that halves the conversation count:
 The four remaining blocks (two on `half-on`) have no owner; no instrumented
 site has a count that can explain them.
 
-### This is object storage, and its occupancy is NOT measured
+### This is object storage, and its occupancy IS measured — corrected 2026-10-10 22:55
+
+> **CORRECTION. The heading below used to read "its occupancy is NOT measured",
+> and the summary table in §5, heading *"The ceiling, declared"*, carried the
+> cell `internal occupancy unmeasured (§1)`.**
+> The body of this section was always correctly scoped — it says *"not measured
+> **in this evidence**"* — but the heading and the table cell dropped the
+> qualifier and read as a global unknown. **They were wrong by the time they
+> were written.**
+>
+> **MEASURED, same dial set, same chunk count (114):**
+> `tests/perf/pagecensus/README.md`, the block under *"slots carved=97501"* —
+> **`occupancy 0.6293`**, `livebytes=4701520`, `held=7.12 MiB`, and
+> `CEILING aligned freepages=564 = 2.20 MiB of 7.12 MiB held (30.9%)`.
+> Independently in `tests/perf/lifecensus/README.md`, the block headed
+> *"arena, at exit"* — *"73,113 live blocks = 4,701,520 B = 62.9% occupancy"*.
+>
+> **This file was written at 21:37; those two were written at 15:39 and 17:04
+> the same day.** The newest document in the tree declared unknown a number two
+> sibling documents had measured six hours earlier. **That is the defect worth
+> recording here — not the arena.**
+>
+> **Sections of this file not named in this banner are NOT thereby current.
+> They are unaudited.**
 
 Both halves have to be said, because each alone is misleading:
 
@@ -76,8 +99,16 @@ Both halves have to be said, because each alone is misleading:
   is 100% occupied is not slack, and nothing here says these are not.
 * **The internal occupancy of those chunks is not measured in this evidence.**
   These arms carry no `cycstat`, so the free-list-inside-the-arena share is
-  unknown. **Without that number A1 can be called neither a lever nor a
-  non-lever.**
+  unknown *here*. ~~**Without that number A1 can be called neither a lever nor
+  a non-lever.**~~ **It is measured elsewhere, and A1 is a NON-LEVER.**
+  `pagecensus` reads **62.93% live** (4,701,520 B of 7,472,928 B) and
+  `lifecensus` reaches 62.9% independently. The residue decomposes:
+  **2.20 MiB of whole free pages already returned to the OS** by
+  `SCR_CYCLE_PAGERETURN`, which is **ON by default** (`scr_cycle.c:596-598`),
+  leaving **0.44 MiB** of resident slack that is header pages plus free-list
+  blocks sharing pages with live ones — unrecoverable without moving an
+  object, and moving is out (`placement/SEGREGATION.md` §2, *"There is no
+  handle indirection anywhere"*).
 
 > A knob exists, and it is spelled out here because the wrong spelling has
 > already cost a positive control. The real one is
@@ -317,7 +348,7 @@ unwritten, it becomes a verdict in three weeks.
 
 | candidate lever | ceiling | state |
 |---|---:|---|
-| cycle arena (A1, 114 chunks) | **39.52%** — 7,472,928 B | **not actionable on this evidence** — object storage; internal occupancy unmeasured (§1) |
+| cycle arena (A1, 114 chunks) | **39.52%** — 7,472,928 B = **7.13 MiB** | **NOT A LEVER — settled 2026-10-10.** Occupancy **62.93%** measured (`pagecensus`, `lifecensus`); of the rest, 2.20 MiB is already returned to the OS and 0.44 MiB is unrecoverable without moving. Ceiling ≤ **0.59%** of settled privateCommit (§1) |
 | row 131,079 (A2) | **31.89%** — 6,030,160 B | **no owner** — no lever until attributed (§4) |
 | retained pcache bulk slab | **0.46%** — 87,376 B | mechanism known, fix known, value small (§3) |
 | largest row after those: `HCSIZE 262144 2` | **2.77%** — 524,320 B | 2 blocks |
