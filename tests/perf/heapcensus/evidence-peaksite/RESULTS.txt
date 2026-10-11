@@ -1,0 +1,361 @@
+================================================================
+ SITE ATTRIBUTION FOR THE PEAK-ONLY CLASSES
+ 1,048,576 / 934,576 / 4,376 -- no build, no run
+================================================================
+
+Census : evidence-peakvar/p1..p6.heapcen.txt   (6 runs, stackless+fiber)
+PROF   : evidence-postfix/sb.prof.txt, sa.prof.txt  (DIFFERENT build/run)
+
+CROSS-RUN: a request SIZE crosses between these; a COUNT does not.
+Nothing below uses a PROF count to describe a census population.
+
+--- 1. THE CENSUS CLASS IS THE REQUEST, NOT THE BLOCK ------------------
+
+scr_heap_census.h:317   scr_hc_note((size_t)e.cbData, (size_t)e.cbOverhead)
+scr_heap_census.h:161   if (tbl[j].n != 0 && tbl[j].size != size) continue;
+scr_heap_census.h:167   tbl[j].bytes += size + overhead;
+
+=> the class label is cbData, matched EXACTLY (no octave, no band), and
+   the overhead rides in the bytes column only. So (bytes/n - size) is
+   the measured mean overhead -- it is DERIVED here, not assumed.
+
+  run  class        n    bytes       mean overhead/block
+  p1     1048576     6     6291456  0.00
+  p1      934576     6     5607552  16.00
+  p1        4376  1570     7259680  248.00
+  p1       65536   305    19994080  18.36
+  p2     1048576     6     6291456  0.00
+  p2      934576     6     5607552  16.00
+  p2        4376  1157     5349968  248.00
+  p2       65536   314    20584304  19.11
+  p3     1048576     6     6291456  0.00
+  p3      934576     6     5607552  16.00
+  p3        4376  1197     5534928  248.00
+  p3       65536   315    20650048  19.71
+  p4     1048576     7     7340032  0.00
+  p4      934576     7     6542144  16.00
+  p4        4376  1845     8531280  248.00
+  p4       65536   326    21370880  18.85
+  p5     1048576     6     6291456  0.00
+  p5      934576     6     5607552  16.00
+  p5        4376  1470     6797280  248.00
+  p5       65536   306    20059744  18.72
+  p6     1048576     7     7340032  0.00
+  p6      934576     7     6542144  16.00
+  p6        4376  1293     5978832  248.00
+  p6       65536   356    23337504  18.79
+
+THE OVERHEAD IS NOT A CONSTANT, so it could not have been guessed and it
+cannot be calibrated from one known class. Measured, per class, same run:
+    1,048,576 -> 0        934,576 -> 16        4,376 -> 248
+       65,536 -> 18.4-19.7 (NON-INTEGRAL: that class mixes blocks whose
+                            overheads differ, so it is not one geometry)
+The briefing asked me to derive the overhead rather than guess it. The
+derivation's actual result is that the question does not arise: see below.
+
+That 1,048,576 alone reads 0.00, in all six runs, is an observation about
+block geometry and not an explanation. This slice does not know why the
+Windows heap accounts a 1 MiB block with no overhead and a 934,576 B
+block with 16, and does not guess.
+
+THE CALIBRATION QUESTION IS MOOT, and that is the useful part. The
+briefing's "class 1,328 measures 1,360 = 1,328 + 32" is the BYTES COLUMN,
+not the class label: the label 1,328 already IS the request. A PROF
+request size and a census class label are therefore the SAME QUANTITY and
+compare directly, with no overhead term to derive, calibrate or guess.
+Check on the 1,328 class itself -- and note it reads 16 in some runs and
+32 in others, i.e. the overhead moves with POPULATION (the low-count runs
+are the stackless arm, the 20k-count runs the fiber arm). A single
+calibration constant taken from one class would have been wrong:
+  p1  class 1328  n=    13  bytes=17472  overhead/block=16.00
+  p2  class 1328  n= 20203  bytes=27476064  overhead/block=32.00
+  p3  class 1328  n= 20203  bytes=27476064  overhead/block=32.00
+  p4  class 1328  n=    15  bytes=20160  overhead/block=16.00
+  p5  class 1328  n=    13  bytes=17472  overhead/block=16.00
+  p6  class 1328  n= 24242  bytes=32969104  overhead/block=32.00
+
+--- 2. THE PROFHIST OCTAVE DECODE, VERIFIED -----------------------------
+
+scr_prof.h:823-825 says bucket b holds [2^b, 2^(b+1)). Verified against
+sites whose PROF row gives an exact mean size (bytes/count), so the
+decode is CHECKED rather than taken from the comment:
+
+  G:\scriptc\packages\runtime\src\scr_net.c:289                   mean=     48  bucket=5  floor(log2)=5  OK
+  G:\scriptc\packages\runtime\src\scr_ws_client.c:240             mean=     96  bucket=6  floor(log2)=6  OK
+  G:\scriptc\packages\runtime\src\scr_stream.c:2841               mean=     16  bucket=4  floor(log2)=4  OK
+  G:\scriptc\packages\runtime\src\scr_stream.c:2682               mean=     16  bucket=4  floor(log2)=4  OK
+  G:\scriptc\packages\runtime\src\scr_json.c:4081                 mean=    128  bucket=7  floor(log2)=7  OK
+  G:\scriptc\packages\runtime\src\scr_async.c:4818                mean=    152  bucket=7  floor(log2)=7  OK
+  ... 92 of 92 single-bucket sites with an integral mean agree.
+
+  => 1,048,576 -> bucket 20 (it is the bottom edge, 2^20 exactly)
+  =>   934,576 -> bucket 19 (inside [2^19, 2^20))
+  =>     4,376 -> bucket 12 (inside [2^12, 2^13))
+
+--- 3. EVERY SITE THAT ALLOCATES IN THE TARGET OCTAVES -----------------
+
+  class 1,048,576  ->  octave 20  [1048576, 2097152)
+    sb:     40  G:\scriptc\packages\runtime\src\scr_bytes.c:52
+    sb:     31  G:\scriptc\packages\runtime\src\scr_string.c:1217
+    sa:     40  G:\scriptc\packages\runtime\src\scr_bytes.c:52
+    sa:     31  G:\scriptc\packages\runtime\src\scr_string.c:1217
+
+  class 934,576  ->  octave 19  [524288, 1048576)
+    sb:     48  G:\scriptc\packages\runtime\src\scr_bytes.c:52
+    sb:     32  G:\scriptc\packages\runtime\src\scr_string.c:1217
+    sa:     48  G:\scriptc\packages\runtime\src\scr_bytes.c:52
+    sa:     32  G:\scriptc\packages\runtime\src\scr_string.c:1217
+    sa:      1  G:\scriptc\packages\runtime\src\scr_cycle.c:2292
+
+  class 4,376  ->  octave 12  [4096, 8192)
+    sb:  17815  G:\scriptc\packages\runtime\src\scr_array.c:444
+    sb:  12937  G:\scriptc\packages\runtime\vendor\sqlite\sqlite3.c:28035
+    sb:    137  G:/scriptc/tests/perf/heapcensus/scr_heap_census.h:707
+    sb:     13  G:\scriptc\packages\runtime\src\scr_map.c:468
+    sb:     11  G:\scriptc\packages\runtime\src\scr_map.c:259
+    sb:      9  G:\scriptc\packages\runtime\src\scr_string.c:1091
+    sb:      8  G:\scriptc\packages\runtime\src\scr_bytes.c:52
+    sb:      8  G:\scriptc\packages\runtime\vendor\zlib\zutil.c:288
+    sa:  17815  G:\scriptc\packages\runtime\src\scr_array.c:444
+    sa:  12932  G:\scriptc\packages\runtime\vendor\sqlite\sqlite3.c:28035
+    sa:    137  G:/scriptc/tests/perf/heapcensus/scr_heap_census.h:293
+    sa:     13  G:\scriptc\packages\runtime\src\scr_map.c:468
+    sa:     11  G:\scriptc\packages\runtime\src\scr_map.c:259
+    sa:      9  G:\scriptc\packages\runtime\src\scr_string.c:1091
+    sa:      8  G:\scriptc\packages\runtime\src\scr_bytes.c:52
+    sa:      8  G:\scriptc\packages\runtime\vendor\zlib\zutil.c:288
+
+--- 4. ELIMINATING scr_string.c:1217 BY THE SHAPE OF ITS REQUEST -------
+
+Two sites carry octaves 19 AND 20. They are separated by ARITHMETIC, not
+by plausibility:
+
+  scr_bytes.c:52   b->data = calloc(len ? len : 1, scr_bytes_elem_size(elem));
+     request = len * elemsize, EXACT. A Buffer of 1,048,576 bytes asks
+     for exactly 1,048,576. Any class value is reachable.
+
+  scr_string.c:1217  realloc(s, scr_pool_bytes(sizeof(ScrStr) + newcap + 1))
+     sizeof(ScrStr) = 12 (three uint32_t + char data[], scr_runtime.h:754)
+     SCR_POOL_GRAIN = 8          (scr_runtime.h:359)
+     scr_pool_bytes(n) = (n+7) & ~7   (scr_runtime.h:433)
+     => request = roundup8(newcap + 13).
+     Its only caller is scr_jb_grow, whose buffer DOUBLES from 64
+     (scr_string.c:1194-1196, in the comment on the carve predicate), so
+     newcap = 2^k and the request is 2^k + 16 for every k >= 4.
+
+  So scr_string.c:1217 CANNOT produce a 1,048,576 request. It produces
+  1,048,592. Prediction: classes of the form 2^k + 16 must exist in the
+  census (the builder is real and does grow), but must stop below the
+  megabytes if its big buffers are not live at a census instant.
+
+  Every class of the form 2^k+16 present in ANY of the twelve census
+  instants (6 runs x {peak, shutdown}):
+          32  seen 12x  (e.g. p1/peak:n=13009, p1/shutdown:n=6379, p2/peak:n=27864)
+          48  seen 12x  (e.g. p1/peak:n=1318, p1/shutdown:n=1239, p2/peak:n=1318)
+          80  seen 12x  (e.g. p1/peak:n=2133, p1/shutdown:n=25, p2/peak:n=26)
+         144  seen 12x  (e.g. p1/peak:n=6, p1/shutdown:n=6, p2/peak:n=6)
+         272  seen 12x  (e.g. p1/peak:n=1, p1/shutdown:n=1, p2/peak:n=1)
+        1040  seen 12x  (e.g. p1/peak:n=3, p1/shutdown:n=3, p2/peak:n=3)
+        4112  seen 12x  (e.g. p1/peak:n=2, p1/shutdown:n=2, p2/peak:n=2)
+       65552  seen 12x  (e.g. p1/peak:n=1, p1/shutdown:n=1, p2/peak:n=1)
+
+  Largest 2^k+16 class anywhere: 65552. The builder is visible and
+  it stops at 64 KiB live. 1,048,592 and 524,304 are ABSENT from all
+  twelve instants, while PROF shows the builder DID allocate 31 blocks in
+  octave 20 over the run -- i.e. those blocks exist but are never live at
+  a census instant. scr_string.c:1217 is eliminated for both megabytes.
+
+  REMAINING CANDIDATE FOR BOTH: scr_bytes.c:52, the ScrBytes backing
+  store -- the typed-array / Buffer payload allocator.
+
+--- 5. THE 4,376 CLASS HAS STACKS, NOT JUST A SIZE ---------------------
+
+This is the one class the PROF build was ARMED on by size band:
+  ARMED depth=10 slots=131072
+  PROF-STACKS-TOTAL rows=16 count=2840 bytes=12244693 lost=0 tablefull=0 skipped=10535945 site="" sizeband=1296..1352 sizeband2=4376..4376
+
+sizeband2 = 4376..4376 is the target class exactly. The captured frames:
+  PROFSTACK rows whose mean size is exactly 4376: 2780 allocations,
+  12165280 bytes. (4376 * 2780 = 12165280; exact => a pure class.)
+
+  The site, from PROFHIST octave 12, dominated by:
+     17815  G:\scriptc\packages\runtime\src\scr_array.c:444
+     12937  G:\scriptc\packages\runtime\vendor\sqlite\sqlite3.c:28035
+       137  G:/scriptc/tests/perf/heapcensus/scr_heap_census.h:707
+
+  The top row is NOT the answer, and the two above sqlite are eliminated
+  by arithmetic, not by ranking:
+
+  scr_array.c:444 -- ELIMINATED. scr_arr_grow (scr_array.c:391-399):
+      size_t cap = a->cap ? a->cap : 4;
+      while (cap < need) { ...; cap *= 2; }
+      size_t want = cap * sizeof(uint64_t);
+    cap starts at 4 and DOUBLES, so cap = 2^k and want = 2^(k+3) is
+    ALWAYS a power of two. 4,376 is not. Its 17,815 octave-12
+    allocations are all want = 4096 (the next step, 8192, is >=
+    SCR_ARR_VM_MIN and leaves the CRT heap entirely, scr_array.c:237).
+    The same fact removes it from octaves 19 and 20 a priori.
+
+  scr_heap_census.h:707 -- ELIMINATED, and it is the INSTRUMENT:
+      arm[i] = malloc(SCR_HEAPCEN_ARM_SIZE);   /* 5113, line 289 */
+    5113 is in octave 12 but is not 4,376, and both census files
+    corroborate it by name: HCTOTAL ... armCount=137 armSize=5113,
+    against exactly 137 octave-12 allocations at that site.
+
+  SURVIVING: vendor/sqlite/sqlite3.c:28035, sqlite3MemMalloc:
+      p = SQLITE_MALLOC( nByte+8 );   /* then p[0]=nByte; p++ */
+  which is the "+8" of WHICH-BUFFER.md's 4096 + 216 + 56 + 8 = 4376.
+  The class is SQLite's page cache, one buffer per database page, via
+  pcache1Alloc -> sqlite3Malloc -> sqlite3MemMalloc.
+
+  The captured stacks corroborate SHAPE independently of the size: every
+  PROFSTACK row in the 4376 band shares a 9-frame common prefix and
+  differs only at frame 10. A single deep allocator funnel reached from
+  many callers is what a library malloc shim looks like; a runtime array
+  or map store called from the emitted program would vary much higher up.
+  The frames are unsymbolised RVAs, so this is a shape argument, not an
+  identification -- it is listed as corroboration, not as proof.
+
+--- 6. PROF COVERAGE, MEASURED ----------------------------------------
+
+POSITIVE CONTROL -- does PROF see VENDORED libraries at all? The briefing
+named this as the likeliest way the whole search returns a false null.
+Site families in sb.prof.txt:
+     136 sites  runtime/src
+       3 sites  other
+       2 sites  vendor/sqlite
+       1 sites  vendor/zlib
+
+  => vendored sqlite AND zlib both register sites. The feared blind spot
+     does NOT exist for them, and the single most load-bearing
+     attribution in this file (4,376 = sqlite page cache) rests on a
+     VENDOR site. The positive control discriminates and it passes.
+
+NEGATIVE CONTROL -- is there a live census class with NO site in its
+octave? If PROF were blind to a path, a class it owns would show up here.
+Every peak class of p1 with n >= 4, against the sb site table:
+    (none)
+    orphan classes: 0, 0 bytes;
+    covered classes bytes: 46205984
+    => 100.00% of peak bytes in classes with n>=4 sit in an octave PROF registers.
+
+  THIS CONTROL IS WEAK AND SAYS SO. An octave is 1 doubling wide, so
+  "some site allocates in this octave" is a low bar and a pass here is
+  NOT proof the class's own site is registered. It can only FALSIFY.
+  It did not falsify. That is all it is worth.
+
+A CONTROL THAT DID NOT DISCRIMINATE, stated rather than buried: PROF
+outstanding (count - freed) vs the census busy-block count.
+    sb PROF: count=10538785 freed=10319997 => outstanding=218788
+    sb census at shutdown: blocks=47940  (sb.heapcen.txt, HCTOTAL)
+    ratio 4.56x
+  PROF reports 4.6x MORE outstanding than the heap holds blocks, which is
+  the wrong direction for a blind spot and so cannot measure one. The
+  cause is that PROF counts logical allocations the string arena and the
+  pool serve by carving and recycling, which never become distinct CRT
+  blocks. This control is reported because it was run, and it discriminates
+  NOTHING about coverage.
+
+--- 7. THE COUNT: 6 AND 7, AGAINST CHUNKS=8 ----------------------------
+
+  run   1,048,576   934,576   mode
+  p1            6         6   low
+  p2            6         6   low
+  p3            6         6   low
+  p4            7         7   HIGH
+  p5            6         6   low
+  p6            7         7   HIGH
+
+  The two classes agree on the mode in all six runs, and neither ever
+  reads 8. The explanation is NOT from this slice -- it is the phase
+  trace quoted in PEAK-OCCUPANT.md section 4, from the evidence-peak runs:
+
+     abba1A  chunk-decoded-1 20.995 | 2..7 all within 6 ms at 27.68 | 8 at 28.408
+     abba3B  chunk-decoded-1 20.972 | 2..8 all within 5 ms at 29.27
+
+  All eight chunks are SENT inside 191 ms; the client holds and decodes
+  them in one burst ~7 s later. Chunk 1 always decodes alone at ~21.0 s
+  and is released long before the burst. The burst is then chunks 2..7
+  (six) or 2..8 (seven). The peak census samples inside that window.
+  So 8 chunks = 1 early + (6 or 7) concurrent: the census never sees 8
+  because chunk 1 is never concurrent with the rest.
+
+  CROSS-RUN: that trace is from evidence-peak (a different build and a
+  different set of runs). It explains the SHAPE 6/7-not-8 that p1..p6
+  show; no number is carried across.
+
+--- 8. WHAT IS AND IS NOT ESTABLISHED ----------------------------------
+
+ESTABLISHED
+  * 4,376 = SQLite page cache, vendor/sqlite/sqlite3.c:28035
+    (sqlite3MemMalloc, the nByte+8 path). Evidence is THREE-fold and the
+    strands are independent: the octave-12 site table, a stack-capture
+    band armed on exactly 4376..4376, and the source arithmetic
+    4096+216+56+8. This one is not a size coincidence. The two sites that
+    OUTRANK it in the octave are both eliminated by arithmetic:
+    scr_array.c:444 can only request powers of two (cap doubles from 4,
+    want = cap*8), and scr_heap_census.h:707 is the instrument's own
+    5113-byte arm, corroborated by HCTOTAL armSize=5113 armCount=137.
+  * scr_string.c:1217 is ELIMINATED for both megabyte classes, by the
+    arithmetic of its own request expression plus the absence of every
+    2^k+16 class above 65,552 from all twelve census instants.
+  * The census class label is the REQUEST (cbData), exactly; no overhead
+    term stands between a PROF size and a census class.
+
+NOT ESTABLISHED
+  * That scr_bytes.c:52 IS the site of 1,048,576 and 934,576. It is the
+    ONLY SURVIVING CANDIDATE among registered sites, which is stronger
+    than a size match, but it is still an elimination over the set PROF
+    registers -- and the octave is a doubling wide, so "scr_bytes.c:52
+    allocates somewhere in [512K,1M)" is not "scr_bytes.c:52 allocates
+    exactly 934,576". NO stack band was armed on these sizes, so there is
+    no second strand. Call it a leading candidate, not a naming.
+  * WHY the 1,048,576 class carries overhead 0 and 934,576 carries 16.
+  * Whether the pair is one logical object or two. The counts move
+    together in all six runs and the mode agrees, which is consistent
+    with a pair, but co-movement under a shared driver (the chunk burst)
+    is exactly what two INDEPENDENT per-chunk buffers would also show.
+    This cannot separate those.
+
+WHAT WOULD CLOSE IT, and it is cheap
+  sb-build.sh:16 already carries the mechanism:
+    -DSCR_PROF_STACK_SIZE_MIN2=4376 -DSCR_PROF_STACK_SIZE_MAX2=4376
+  One rebuild with
+    -DSCR_PROF_STACK_SIZE_MIN=934576  -DSCR_PROF_STACK_SIZE_MAX=934576
+    -DSCR_PROF_STACK_SIZE_MIN2=1048576 -DSCR_PROF_STACK_SIZE_MAX2=1048576
+  captures full 10-frame stacks for both classes and turns this
+  elimination into a naming. That is a build and a run, which this slice
+  was explicitly forbidden to do.
+
+--- 9. VERDICT ON THE PREREGISTERED PREDICTION -------------------------
+
+Predicted, before this slice ran: "1,048,576 and 934,576 are a PAIR --
+a decode/stream buffer allocated per in-flight history-sync chunk, one
+sized by a CONSTANT and the other DERIVED from it."
+
+  (a) PAIR, in the sense of co-moving: SUPPORTED. Same count and same
+      mode in all six runs (section 7), and PEAK-OCCUPANT.md section 4
+      reports the same agreement on its own four runs.
+  (b) PER IN-FLIGHT CHUNK: SUPPORTED but not by this slice. The count
+      equals the burst width from the phase trace, which is another
+      slice's measurement. Here it is consistency, not evidence.
+  (c) A DECODE BUFFER: the surviving candidate scr_bytes.c:52 is the
+      Buffer / typed-array payload store, which is the right KIND of
+      object. Still an elimination, not a naming -- see section 8.
+  (d) "ONE SIZED BY A CONSTANT, THE OTHER DERIVED FROM IT":
+      NOT SUPPORTED, and this is the half that fails.
+      1048576 = 2^20 exactly -- constant-shaped. Fine.
+      934576 = 2 * 2 * 2 * 2 * 58411  -- its odd part is 58411, prime.
+      a - b = 114000;  b/a = 0.891281128;  a/b = 1.121980449
+      No power-of-two ratio, no round difference, no shift-and-add of
+      the 1 MiB figure lands on it. 934,576 looks like a DATUM (a
+      payload length that is what it is), not a size derived from a
+      cap. The pair co-moves because one driver produces both, which
+      is a weaker claim than "derived from".
+
+  AND THE CO-MOVEMENT CANNOT BE PUSHED FURTHER. Two independent
+  per-chunk buffers driven by the same burst produce exactly the same
+  lockstep as one object holding two allocations. This slice has no
+  column that separates those, and the overhead reading (0 vs 16) is a
+  hint in the OTHER direction that was not followed up.
+
