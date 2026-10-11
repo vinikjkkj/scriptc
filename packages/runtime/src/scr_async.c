@@ -2523,18 +2523,35 @@ static void scr_fiber_pool_teardown(void) {
  * the window passes while the loop sleeps it simply runs on the next turn.
  * There is deliberately no scr_sqlite_idle_due().
  *
- * DEFAULT OFF, following SCR_HEAP_TRIM_MS. The case here is much stronger
- * than that one's 1.5% of retained bytes, but a new runtime default does not
- * ship with a feature's debut; it ships afterwards, with use behind it.
- * SCR_SQLITE_IDLE_RELEASE_MS=0 is the default and the negative control, and
- * the seam then costs one integer compare.
+ * DEFAULT ON since 2026-10-10, at the 1000 ms window every measurement in
+ * this feature's history was taken at. The paragraph this replaces said the
+ * default does not ship with a feature's debut, it ships afterwards with use
+ * behind it -- so this is that paragraph's own condition being met, not a
+ * reversal of it. The debut was 2026-10-03 (merge 040d22982, gated 6/6):
+ * -17.19 MiB private commit and -17.91 MiB working set on a 129.6 MB
+ * database, ranges non-overlapping, with the armed arm's median 0.33 ms
+ * BELOW the control -- no sustained cost to pay for it.
+ *
+ * WHAT FLIPPING THIS COSTS, stated because it is not nothing. Off, no binary
+ * diverged from Node unless someone set the variable. On, EVERY binary
+ * holding a SQLite handle diverges on process memory -- Node running
+ * better-sqlite3 never releases page cache on an idle loop. It remains a
+ * MEMORY divergence only: sqlite3_db_release_memory frees unpinned pages and
+ * changes no query result, no error, no row order, no value and no pragma
+ * readback. docs/SEMANTICS.md carries the entry and now says ON.
+ *
+ * SCR_SQLITE_IDLE_RELEASE_MS=0 REMAINS THE NEGATIVE CONTROL -- the env read
+ * below clamps any value <= 0 to 0, so setting it to 0 restores the old
+ * default exactly and the seam costs one integer compare again. Every A/B in
+ * this feature's history still runs unchanged; only which arm you have to
+ * ask for has swapped.
  *
  * SCR_SQLITE_IDLE_STAT=1 prints one line per window INCLUDING windows that
  * released nothing, so "ran and found no open connection" stays
  * distinguishable from "never ran" -- the property that made the fiber pool's
  * and the page return's zeros readable rather than ambiguous. */
 #ifndef SCR_SQLITE_IDLE_RELEASE_MS
-#define SCR_SQLITE_IDLE_RELEASE_MS 0
+#define SCR_SQLITE_IDLE_RELEASE_MS 1000
 #endif
 
 /* Set by scr_sqlite.c on the first open, and NULL in every binary that holds
@@ -2579,7 +2596,7 @@ static size_t scr_sqlite_idle_ms(void) {
 static void scr_sqlite_idle_release(double now) {
   size_t win = scr_sqlite_idle_ms();
   int n, inuse;
-  if (win == 0) return;                           /* the default: one compare */
+  if (win == 0) return;                           /* opted out: one compare */
   if (scr_sqlite_idle_release_fn == NULL) return; /* no SQLite in this binary */
   if (scr_sqlite_idle_next_ms == 0) {
     scr_sqlite_idle_next_ms = now + (double)win;
